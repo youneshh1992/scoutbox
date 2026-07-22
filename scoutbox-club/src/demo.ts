@@ -1,0 +1,326 @@
+// Self-contained in-browser demo client (used when VITE_DEMO=1, e.g. static
+// demo builds where no server is reachable). It SIMULATES the server's rules
+// so the demo behaves honestly — but it is a demo aid only. The product's
+// guarantees live in scoutbox-server, which refuses at the API, not the UI.
+
+import type {
+  ScoutboxApi, Org, Session, Player, PlayerDetail, OrgRequest, Trial,
+  LedgerEntry, ProofPack, PlanInfo, Reputation, SearchFilters,
+} from './api';
+import { ApiError } from './api';
+
+const ORGS: Org[] = [
+  { id: 'org-eastport', name: 'Eastport FC', type: 'club', plan: 'Pro', trustedPartner: true },
+  { id: 'org-harbour', name: 'Harbour City FC', type: 'club', plan: 'Academy', trustedPartner: false },
+  { id: 'org-northstar', name: 'North Star Sports Agency', type: 'agency', plan: 'Agency', trustedPartner: false },
+];
+
+const PLANS: Record<string, PlanInfo['plan']> = {
+  Academy: { name: 'Academy', pricePerMonthGBP: 99, seats: 3, attributionWindowMonths: 18, antiCircumvention: 'Any signing of a ScoutBox-discovered player within the attribution window, however contact was concluded, owes the discovery fee. Off-platform approaches to circumvent the ledger are a terms breach and forfeit Trusted Partner eligibility.' },
+  Pro: { name: 'Pro', pricePerMonthGBP: 349, seats: 15, attributionWindowMonths: 24, antiCircumvention: 'Any signing of a ScoutBox-discovered player within the attribution window, however contact was concluded, owes the discovery fee. Off-platform approaches to circumvent the ledger are a terms breach and forfeit Trusted Partner eligibility.' },
+  Agency: { name: 'Agency', pricePerMonthGBP: 499, seats: 10, attributionWindowMonths: 24, antiCircumvention: 'Agencies additionally warrant that no representation approach is made to any player who has not accepted a contact request, and never to a minor under any circumstances.' },
+};
+
+const DAY = 24 * 3600 * 1000;
+const NOW = Date.now();
+
+function mkPlayer(p: Partial<Player> & { id: string; name: string }): Player {
+  return {
+    age: 21, dob: '2004-01-01', country: 'GB', city: '', position: 'CM', foot: 'right',
+    heightCm: 180, weightKg: 75, stats: { appearances: 25, goals: 5, assists: 5 },
+    academyPlus: false, badges: [], availability: 'available_now', contractStatus: 'free_agent',
+    identityVerified: true, trustScore: 50, attendance: [], timeline: [], media: [],
+    trialReports: [], medical: { shared: false, records: [], conditionStatus: 'not_shared', note: 'Medical data is player-controlled and has not been shared.' },
+    ...p,
+  } as Player;
+}
+
+const PLAYERS: Player[] = [
+  mkPlayer({
+    id: 'pl-adeyemi', name: 'Kola Adeyemi', age: 22, dob: '2004-03-14', country: 'GB', city: 'Manchester',
+    position: 'ST', foot: 'right', heightCm: 184, weightKg: 79,
+    stats: { appearances: 31, goals: 22, assists: 6, paceKmh: 34.1, passCompletionPct: 78, duelSuccessPct: 61 },
+    academyPlus: true, badges: ['Finisher', 'Pressing Forward'], availability: 'available_now', contractStatus: 'expiring_summer', trustScore: 59,
+    attendance: [
+      { id: 'att-1', fixture: 'Sunday League Cup Final', venue: 'Hough End Playing Fields', date: iso(NOW - 20 * DAY), gps: { lat: 53.43, lng: -2.26 }, verified: true },
+      { id: 'att-2', fixture: 'County Trial Day', venue: 'Platt Lane Complex', date: iso(NOW - 60 * DAY), gps: { lat: 53.45, lng: -2.23 }, verified: true },
+    ],
+    timeline: [
+      { year: '2019', event: 'Joined local academy U15s' },
+      { year: '2022', event: 'Released at 18 — continued in county football' },
+      { year: '2025', event: 'Top scorer, county premier division' },
+    ],
+    media: [
+      { id: 'm1', title: 'Match highlights vs Riverside', kind: 'video', uploadedAt: iso(NOW - 25 * DAY) },
+      { id: 'm2', title: 'Sprint & finishing session', kind: 'video', uploadedAt: iso(NOW - 80 * DAY) },
+    ],
+  }),
+  mkPlayer({
+    id: 'pl-carvalho', name: 'Mateus Carvalho', age: 23, dob: '2002-07-30', country: 'PT', city: 'Porto',
+    position: 'CM', foot: 'left', heightCm: 176, weightKg: 71,
+    stats: { appearances: 28, goals: 4, assists: 11, paceKmh: 31.2, passCompletionPct: 89, duelSuccessPct: 55 },
+    academyPlus: true, badges: ['Deep Playmaker'], availability: 'end_of_season', contractStatus: 'under_contract', trustScore: 52,
+    medical: { shared: true, conditionStatus: 'fully_fit', records: [{ id: 'md-3', type: 'clearance', title: 'Annual medical — clear', date: '2026-02-01', layoffWeeks: null, cleared: true }] },
+    timeline: [{ year: '2020', event: 'Senior debut, district league' }, { year: '2024', event: 'Captain at 22' }],
+    attendance: [{ id: 'att-3', fixture: 'District league round 18', venue: 'Campo do Bessa Anexo', date: iso(NOW - 12 * DAY), gps: { lat: 41.16, lng: -8.64 }, verified: true }],
+    media: [{ id: 'm3', title: 'Passing range compilation', kind: 'video', uploadedAt: iso(NOW - 40 * DAY) }],
+  }),
+  mkPlayer({
+    id: 'pl-okafor', name: 'Chinedu Okafor', age: 22, dob: '2003-11-08', country: 'NG', city: 'Lagos',
+    position: 'CB', foot: 'right', heightCm: 191, weightKg: 85,
+    stats: { appearances: 24, goals: 2, assists: 1, paceKmh: 32.8, passCompletionPct: 82, duelSuccessPct: 72 },
+    availability: 'overseas_open', contractStatus: 'free_agent', trustScore: 50,
+    timeline: [{ year: '2021', event: 'Nationwide League One debut' }],
+    attendance: [{ id: 'att-4', fixture: 'NLO fixture, matchday 9', venue: 'Agege Stadium', date: iso(NOW - 30 * DAY), gps: { lat: 6.62, lng: 3.32 }, verified: true }],
+    media: [{ id: 'm4', title: 'Defensive duels reel', kind: 'video', uploadedAt: iso(NOW - 55 * DAY) }],
+  }),
+  mkPlayer({
+    id: 'pl-svensson', name: 'Elias Svensson', age: 21, dob: '2005-01-22', country: 'SE', city: 'Göteborg',
+    position: 'RW', foot: 'left', heightCm: 178, weightKg: 72,
+    stats: { appearances: 26, goals: 9, assists: 12, paceKmh: 35.0, passCompletionPct: 81, duelSuccessPct: 49 },
+    academyPlus: true, badges: ['Direct Winger', 'Fresh Start'], contractStatus: 'scholarship_ending', identityVerified: false, trustScore: 44,
+    timeline: [{ year: '2023', event: 'Div 2 debut at 18' }, { year: '2025', event: 'Released from academy — Academy+ member' }],
+    media: [{ id: 'm5', title: '1v1 and crossing clips', kind: 'video', uploadedAt: iso(NOW - 10 * DAY) }],
+  }),
+  mkPlayer({
+    id: 'pl-martin', name: 'Théo Martin', age: 25, dob: '2001-05-03', country: 'FR', city: 'Lyon',
+    position: 'GK', foot: 'right', heightCm: 193, weightKg: 88,
+    stats: { appearances: 33, goals: 0, assists: 0, paceKmh: 29.5, passCompletionPct: 74, duelSuccessPct: 0, cleanSheets: 14 },
+    availability: 'loan_open', contractStatus: 'under_contract', trustScore: 55,
+    timeline: [{ year: '2019', event: 'Youth international (U18, 2 caps)' }, { year: '2023', event: 'N3 first choice' }],
+    attendance: [{ id: 'att-5', fixture: 'National 3, round 21', venue: 'Stade de Balmont', date: iso(NOW - 8 * DAY), gps: { lat: 45.79, lng: 4.79 }, verified: true }],
+  }),
+  mkPlayer({
+    id: 'pl-tanaka', name: 'Riku Tanaka', age: 21, dob: '2004-09-17', country: 'JP', city: 'Osaka',
+    position: 'CAM', foot: 'right', heightCm: 172, weightKg: 66,
+    stats: { appearances: 29, goals: 11, assists: 9, paceKmh: 32.4, passCompletionPct: 86, duelSuccessPct: 51 },
+    availability: 'not_seeking', contractStatus: 'under_contract', trustScore: 55,
+    timeline: [{ year: '2022', event: 'JFL debut' }],
+    attendance: [{ id: 'att-6', fixture: 'JFL matchday 4', venue: 'Nagai Aid Stadium', date: iso(NOW - 45 * DAY), gps: { lat: 34.61, lng: 135.51 }, verified: true }],
+    media: [{ id: 'm6', title: 'Set-piece deliveries', kind: 'video', uploadedAt: iso(NOW - 90 * DAY) }],
+  }),
+  mkPlayer({
+    id: 'pl-alvarez', name: 'Santiago Álvarez', age: 23, dob: '2003-02-11', country: 'AR', city: 'Rosario',
+    position: 'LB', foot: 'left', heightCm: 175, weightKg: 70,
+    stats: { appearances: 27, goals: 1, assists: 7, paceKmh: 33.6, passCompletionPct: 84, duelSuccessPct: 63 },
+    academyPlus: true, badges: ['Overlapping Full-back'], availability: 'overseas_open', contractStatus: 'expiring_summer', trustScore: 52,
+    timeline: [{ year: '2021', event: 'Regional league debut' }, { year: '2024', event: 'Team of the season' }],
+    attendance: [{ id: 'att-7', fixture: 'Torneo Regional, fecha 12', venue: 'Estadio Gabino Sosa', date: iso(NOW - 15 * DAY), gps: { lat: -32.96, lng: -60.66 }, verified: true }],
+    media: [{ id: 'm7', title: 'Crossing under pressure', kind: 'video', uploadedAt: iso(NOW - 33 * DAY) }],
+  }),
+  mkPlayer({
+    id: 'pl-nowak', name: 'Filip Nowak', age: 25, dob: '2000-12-05', country: 'PL', city: 'Kraków',
+    position: 'CDM', foot: 'right', heightCm: 183, weightKg: 78,
+    stats: { appearances: 30, goals: 3, assists: 4, paceKmh: 31.8, passCompletionPct: 88, duelSuccessPct: 68 },
+    availability: 'end_of_season', contractStatus: 'release_approaching', trustScore: 57,
+    medical: { shared: true, conditionStatus: 'fully_fit', records: [{ id: 'md-5', type: 'injury', title: 'Ankle syndesmosis sprain', date: '2025-04-10', layoffWeeks: 8, cleared: true }] },
+    timeline: [{ year: '2019', event: 'Senior debut' }, { year: '2025', event: '100th appearance' }],
+    attendance: [{ id: 'att-8', fixture: 'III liga, round 24', venue: 'Stadion Miejski Wieczysta', date: iso(NOW - 5 * DAY), gps: { lat: 50.08, lng: 19.98 }, verified: true }],
+    media: [{ id: 'm8', title: 'Screening & interceptions', kind: 'video', uploadedAt: iso(NOW - 70 * DAY) }],
+  }),
+  mkPlayer({
+    id: 'pl-mensah', name: 'Kwame Mensah', age: 21, dob: '2005-06-28', country: 'GH', city: 'Kumasi',
+    position: 'LW', foot: 'right', heightCm: 174, weightKg: 68,
+    stats: { appearances: 22, goals: 8, assists: 5, paceKmh: 34.7, passCompletionPct: 76, duelSuccessPct: 47 },
+    academyPlus: true, badges: ['Fresh Start'], identityVerified: false, trustScore: 42,
+    timeline: [{ year: '2023', event: 'Division One League debut' }],
+    media: [{ id: 'm9', title: 'Dribbling sequences', kind: 'video', uploadedAt: iso(NOW - 18 * DAY) }],
+  }),
+  mkPlayer({
+    id: 'pl-kim', name: 'Kim Min-jae', age: 20, dob: '2006-04-02', country: 'KR', city: 'Busan',
+    position: 'CF', foot: 'right', heightCm: 186, weightKg: 80,
+    stats: { appearances: 19, goals: 13, assists: 2, paceKmh: 33.9, passCompletionPct: 72, duelSuccessPct: 58 },
+    trustScore: 55,
+    timeline: [{ year: '2024', event: 'K4 debut at 18' }],
+    attendance: [{ id: 'att-9', fixture: 'K4 League round 7', venue: 'Gudeok Stadium', date: iso(NOW - 22 * DAY), gps: { lat: 35.16, lng: 129.02 }, verified: true }],
+    media: [{ id: 'm10', title: 'Hold-up play & finishing', kind: 'video', uploadedAt: iso(NOW - 12 * DAY) }],
+  }),
+];
+
+function iso(ts: number) {
+  return new Date(ts).toISOString().slice(0, 10);
+}
+
+// Mutable demo state
+let idc = 5000;
+const nid = (p: string) => `${p}-${++idc}`;
+const requests: OrgRequest[] = [];
+const trials: Trial[] = [];
+const ledger: (LedgerEntry & { playerName?: string })[] = [];
+const listeners = new Set<(e: string) => void>();
+const emit = (e: string) => listeners.forEach((l) => l(e));
+
+function log(s: Session, type: string, playerId: string): LedgerEntry {
+  const row: LedgerEntry = { id: nid('led'), ts: Date.now(), type, playerId, orgId: s.org.id, orgName: s.org.name, userId: s.userId, scoutName: s.scoutName };
+  ledger.push(row);
+  emit('ledger');
+  return row;
+}
+
+const delay = <T,>(v: T): Promise<T> => new Promise((r) => setTimeout(() => r(v), 120));
+
+function similarity(a: Player, b: Player): number {
+  let score = 0;
+  if (a.position === b.position) score += 35;
+  if (a.foot === b.foot) score += 10;
+  score += Math.max(0, 15 - Math.abs(a.age - b.age) * 3);
+  const out = (p: Player) => ((p.stats?.goals ?? 0) + (p.stats?.assists ?? 0)) / (p.stats?.appearances || 1);
+  score += Math.max(0, 25 - Math.abs(out(a) - out(b)) * 25);
+  score += Math.max(0, 15 - (Math.abs(a.heightCm - b.heightCm) / 2 + Math.abs(a.weightKg - b.weightKg) / 3));
+  return Math.round(Math.min(score, 100));
+}
+
+export const demoApi: ScoutboxApi = {
+  listOrgs: () => delay(ORGS),
+
+  login: (orgId, scoutName) => {
+    const org = ORGS.find((o) => o.id === orgId);
+    if (!org) throw new ApiError(404, 'ORG_NOT_FOUND', 'Unknown org');
+    if (!scoutName.trim()) throw new ApiError(400, 'SCOUT_NAME_REQUIRED', 'Every session is attributed to a named individual.');
+    return delay({ org, userId: nid('usr'), scoutName: scoutName.trim() });
+  },
+
+  searchPlayers: (s, f: SearchFilters) => {
+    // Mirrors the server: under-18 wall would filter minors for agencies —
+    // the adults-only seed contains none, so all pass.
+    let list = PLAYERS.slice();
+    if (f.q) {
+      const n = f.q.toLowerCase();
+      list = list.filter((p) => p.name.toLowerCase().includes(n) || p.city.toLowerCase().includes(n) || p.country.toLowerCase().includes(n));
+    }
+    if (f.position) list = list.filter((p) => p.position === f.position);
+    if (f.availability) list = list.filter((p) => p.availability === f.availability);
+    if (f.academyPlus) list = list.filter((p) => p.academyPlus);
+    list.sort((a, b) => (b.academyPlus ? 1 : 0) - (a.academyPlus ? 1 : 0) || b.trustScore - a.trustScore);
+    return delay(list);
+  },
+
+  getPlayer: (s, id) => {
+    const p = PLAYERS.find((x) => x.id === id);
+    if (!p) throw new ApiError(404, 'PLAYER_NOT_FOUND', 'No such player');
+    log(s, 'view', id);
+    const similar = PLAYERS.filter((c) => c.id !== id)
+      .map((c) => ({ playerId: c.id, name: c.name, position: c.position, score: similarity(p, c) }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3);
+    const detail: PlayerDetail = {
+      ...p,
+      similarPlayers: {
+        note: 'Statistical similarity — a lead, not a verdict.',
+        players: similar,
+        archetypes: [
+          { archetypeId: 'arch', label: p.position === 'GK' ? 'Sweeper keeper' : p.position === 'CB' ? 'Ball-playing centre-back' : ['ST', 'CF'].includes(p.position) ? 'Pressing forward' : ['RW', 'LW'].includes(p.position) ? 'Direct winger' : 'Deep-lying playmaker', score: 70 + (p.trustScore % 20) },
+        ],
+      },
+    };
+    return delay(detail);
+  },
+
+  act: (s, playerId, action) => {
+    log(s, action, playerId);
+    return delay(undefined);
+  },
+
+  getShortlist: (s) => {
+    const ids = new Set(ledger.filter((l) => l.orgId === s.org.id && l.type === 'shortlist').map((l) => l.playerId));
+    return delay(PLAYERS.filter((p) => ids.has(p.id)));
+  },
+
+  sendRequest: (s, playerId, type, message) => {
+    if (type === 'trial' && trials.some((t) => t.status === 'awaiting_report')) {
+      throw new ApiError(409, 'REPORTS_OUTSTANDING', 'You have trials awaiting a mandatory performance report. File them before requesting new trials.');
+    }
+    const req: OrgRequest = { id: nid('req'), playerId, type, message, status: 'pending', scoutName: s.scoutName, createdAt: Date.now(), contactChannel: null };
+    requests.push(req);
+    log(s, `${type}_request`, playerId);
+    // Demo liveliness: the player accepts after a few seconds.
+    setTimeout(() => {
+      req.status = 'accepted';
+      req.contactChannel = nid('chan');
+      log(s, `${type}_accepted`, playerId);
+      if (type === 'trial') {
+        const p = PLAYERS.find((x) => x.id === playerId)!;
+        trials.push({ id: nid('trial'), playerId, playerName: p.name, scoutName: s.scoutName, acceptedAt: Date.now(), status: 'awaiting_report' });
+      }
+      emit('requests');
+    }, 4000);
+    return delay(undefined);
+  },
+
+  getRequests: (s) => delay(requests.slice()),
+  getTrials: (s) => delay(trials.slice()),
+
+  fileTrialReport: (s, trialId, report) => {
+    const required = ['acceleration', 'sprintSpeedKmh', 'distanceKm', 'passCompletionPct', 'duelSuccessPct', 'coachRating'];
+    const missing = required.filter((f) => report[f] === undefined || report[f] === null || report[f] === '' || Number.isNaN(report[f]));
+    if (missing.length) {
+      throw new ApiError(400, 'REPORT_INCOMPLETE', `Trial performance reports are mandatory and must be complete. Missing: ${missing.join(', ')}`);
+    }
+    const trial = trials.find((t) => t.id === trialId);
+    if (!trial) throw new ApiError(404, 'TRIAL_NOT_FOUND', 'No such trial');
+    if (trial.status === 'reported') throw new ApiError(409, 'ALREADY_REPORTED', 'Report already filed');
+    trial.status = 'reported';
+    const p = PLAYERS.find((x) => x.id === trial.playerId)!;
+    const filed = { id: nid('rep'), trialId, orgName: s.org.name, scoutName: s.scoutName, filedAt: Date.now(), ...(report as Record<string, number>) } as unknown as Player['trialReports'][number];
+    trial.report = filed;
+    p.trialReports.push(filed);
+    p.trustScore = Math.min(99, p.trustScore + 8);
+    log(s, 'trial_report', p.id);
+    emit('players');
+    return delay(undefined);
+  },
+
+  getLedger: (s) => delay(ledger.filter((l) => l.orgId === s.org.id).slice().reverse()),
+
+  getProofPack: (s, playerId) => {
+    const p = PLAYERS.find((x) => x.id === playerId)!;
+    const events = ledger.filter((l) => l.playerId === playerId && l.orgId === s.org.id);
+    const first = events[0] ?? null;
+    const months = PLANS[s.org.plan].attributionWindowMonths;
+    return delay({
+      playerId, playerName: p.name,
+      org: { id: s.org.id, name: s.org.name, plan: s.org.plan },
+      firstQualifyingInteraction: first,
+      attributionWindowMonths: months,
+      attributionWindowEnds: first ? new Date(first.ts + months * 30.44 * 24 * 3600 * 1000).toISOString() : null,
+      eventLog: events,
+      generatedAt: new Date().toISOString(),
+    });
+  },
+
+  getPlan: (s) =>
+    delay({
+      org: s.org,
+      plan: PLANS[s.org.plan],
+      compliance: {
+        attributionWindowMonths: PLANS[s.org.plan].attributionWindowMonths,
+        antiCircumvention: PLANS[s.org.plan].antiCircumvention,
+        feeProtection: 'Discovery attribution is evidenced by the append-only ledger and Proof Packs. Fees attach to the first qualifying interaction inside the window.',
+      },
+    }),
+
+  getReputation: (s) => {
+    const live: Record<string, Reputation['live'][number]> = {};
+    for (const l of ledger) {
+      const k = `${l.scoutName}|${l.orgName}`;
+      live[k] ??= { scoutName: l.scoutName, orgName: l.orgName, views: 0, contacts: 0, trials: 0, signings: 0 };
+      if (l.type === 'view') live[k].views++;
+      if (l.type === 'contact_request') live[k].contacts++;
+      if (l.type.startsWith('trial')) live[k].trials++;
+      if (l.type === 'signing') live[k].signings++;
+    }
+    return delay({
+      seeded: [
+        { scoutName: 'Maria Keane', orgName: 'Eastport FC', discoveries: 14, successRatePct: 64, avgResaleMultiple: 3.1, seeded: true },
+        { scoutName: 'Coach D. Ansah', orgName: 'Harbour City FC', discoveries: 9, successRatePct: 55, avgResaleMultiple: 2.2, seeded: true },
+        { scoutName: 'Tomás Rivera', orgName: 'North Star Sports Agency', discoveries: 21, successRatePct: 48, avgResaleMultiple: 2.8, seeded: true },
+      ],
+      live: Object.values(live),
+    });
+  },
+
+  onChange: (cb) => {
+    listeners.add(cb);
+    return () => listeners.delete(cb);
+  },
+};

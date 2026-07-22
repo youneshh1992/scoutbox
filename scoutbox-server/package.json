@@ -1,0 +1,15 @@
+{
+  "name": "scoutbox-server",
+  "version": "2.0.0",
+  "description": "ScoutBox sync backend — enforces all deck rules server-side.",
+  "type": "module",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node scripts/testTrust.mjs"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  }
+}

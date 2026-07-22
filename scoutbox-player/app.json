@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "ScoutBox Player",
+    "slug": "scoutbox-player",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "scoutbox",
+    "userInterfaceStyle": "automatic",
+    "android": {
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0b1220"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": false,
+      "reactCompiler": false
+    },
+    "splash": {
+      "backgroundColor": "#0b1220"
+    }
+  }
+}
