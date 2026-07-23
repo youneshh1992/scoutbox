@@ -1,14 +1,31 @@
-import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput } from 'react-native';
+import { useEffect, useState } from 'react';
+import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { client } from '../../data/client';
+import type { Drill } from '../../domain/types';
 import { useSession } from '../../state';
 import { colors } from '../../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from '../../components/ui';
+import { ReportButton } from '../../components/ReportSheet';
+
+const STAT_FIELDS = [
+  { key: 'appearances', label: 'Apps' },
+  { key: 'goals', label: 'Goals' },
+  { key: 'assists', label: 'Assists' },
+  { key: 'paceKmh', label: 'Top speed' },
+  { key: 'passCompletionPct', label: 'Pass %' },
+  { key: 'duelSuccessPct', label: 'Duel %' },
+] as const;
 
 export default function Upload() {
-  const { playerId, me, refresh } = useSession();
+  const { playerId, me, isMinor, refresh } = useSession();
   const [mediaTitle, setMediaTitle] = useState('');
+  const [drills, setDrills] = useState<Drill[]>([]);
+  const [statDraft, setStatDraft] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (playerId) client.getDrills(playerId).then(setDrills).catch(() => {});
+  }, [playerId, me]);
   const [fixture, setFixture] = useState('');
   const [venue, setVenue] = useState('');
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
@@ -56,8 +73,14 @@ export default function Upload() {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.h1}>Upload</Text>
-        <Muted>Footage and verified appearances — the evidence that moves your Trust Score.</Muted>
+        <Row style={{ justifyContent: 'space-between' }}>
+          <Text style={styles.h1}>Upload</Text>
+          <ReportButton />
+        </Row>
+        <Muted>
+          Footage, stats, drills and verified appearances — the evidence that moves your Trust Score.
+          {isMinor ? ' All yours to manage — clubs talk to your guardian, but the football is you.' : ''}
+        </Muted>
 
         {notice && (
           <Card style={{ borderColor: notice.error ? colors.danger : colors.accent }}>
@@ -75,7 +98,65 @@ export default function Upload() {
             onChangeText={setMediaTitle}
           />
           <Button primary label="Upload clip" onPress={uploadMedia} />
-          {me && <Muted size={12.5}>{me.media.length} clip{me.media.length === 1 ? '' : 's'} on your profile.</Muted>}
+          {me && <Muted size={12.5}>{me.media.length} clip{me.media.length === 1 ? '' : 's'} on your profile. Titles are screened — no contact details.</Muted>}
+        </Card>
+
+        <Card>
+          <SectionTitle>Edit season stats</SectionTitle>
+          <Row>
+            {STAT_FIELDS.map((f) => (
+              <View key={f.key} style={{ gap: 4, minWidth: 92, flexGrow: 1 }}>
+                <Muted size={11.5}>{f.label}</Muted>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="numeric"
+                  placeholder={String((me?.stats as Record<string, number> | null)?.[f.key] ?? 0)}
+                  placeholderTextColor={colors.muted}
+                  value={statDraft[f.key] ?? ''}
+                  onChangeText={(v) => setStatDraft({ ...statDraft, [f.key]: v })}
+                />
+              </View>
+            ))}
+          </Row>
+          <Button
+            primary
+            label="Save stats"
+            onPress={async () => {
+              const updates: Record<string, number> = {};
+              for (const f of STAT_FIELDS) {
+                if (statDraft[f.key] !== undefined && statDraft[f.key] !== '') updates[f.key] = Number(statDraft[f.key]);
+              }
+              if (!Object.keys(updates).length) return say('Change at least one stat first.', true);
+              try {
+                await client.updateStats(playerId, updates);
+                setStatDraft({});
+                await refresh();
+                say('Stats saved to your profile.');
+              } catch (e) {
+                say(e instanceof Error ? e.message : 'Could not save stats', true);
+              }
+            }}
+          />
+        </Card>
+
+        <Card>
+          <SectionTitle>Training drills</SectionTitle>
+          <Muted size={12.5}>Complete drills to keep your profile active between matches.</Muted>
+          {drills.map((d) => (
+            <Row key={d.id} style={{ justifyContent: 'space-between' }}>
+              <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>{d.name}</Text>
+              {d.completed ? (
+                <Pill label="Completed ✓" tone="green" />
+              ) : (
+                <Button small label="Mark done" onPress={async () => {
+                  try {
+                    await client.completeDrill(playerId, d.id);
+                    setDrills(await client.getDrills(playerId));
+                  } catch { /* leave as-is */ }
+                }} />
+              )}
+            </Row>
+          ))}
         </Card>
 
         <Card>

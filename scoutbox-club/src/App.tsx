@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, DEMO_MODE, type Org, type Session } from './api';
 import {
   SearchScreen, ShortlistScreen, RequestsScreen, TrialsScreen,
-  LedgerScreen, ReputationScreen, PlanScreen, PlayerDrawer, Toast,
+  LedgerScreen, ReputationScreen, PlanScreen, PlayerDrawer, Toast, SafetyModal,
 } from './screens';
+
+const ROLES = ['Head of Recruitment', 'First-Team Scout', 'Academy Coach', 'Agent'];
 
 export type ScreenId = 'search' | 'shortlist' | 'requests' | 'trials' | 'ledger' | 'reputation' | 'plan';
 
@@ -26,6 +28,7 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [scoutName, setScoutName] = useState('');
+  const [role, setRole] = useState(ROLES[0]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -36,7 +39,7 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
     if (!selected) return setError('Pick an organisation.');
     if (!scoutName.trim()) return setError('Enter your name — every session is attributed to a named individual.');
     try {
-      onLogin(await api.login(selected, scoutName));
+      onLogin(await api.login(selected, scoutName, role));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Login failed');
     }
@@ -56,7 +59,10 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
             <span>
               <span className={`pill ${o.type === 'agency' ? 'red' : 'blue'}`}>{o.type}</span>{' '}
               <span className="pill">{o.plan}</span>{' '}
-              {o.trustedPartner && <span className="pill gold">Trusted Partner</span>}
+              {o.trustedPartner && <span className="pill gold">Trusted Partner</span>}{' '}
+              {o.type === 'club' && (o.verified
+                ? <span className="pill green">Verified</span>
+                : <span className="pill">verification pending</span>)}
             </span>
           </button>
         ))}
@@ -68,6 +74,9 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
           onChange={(e) => setScoutName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && enter()}
         />
+        <select value={role} onChange={(e) => setRole(e.target.value)}>
+          {ROLES.map((r) => <option key={r}>{r}</option>)}
+        </select>
         <button className="primary" onClick={enter}>Enter workspace</button>
       </div>
       {error && <div className="notice block">{error}</div>}
@@ -80,6 +89,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   const [openPlayerId, setOpenPlayerId] = useState<string | null>(null);
   const [tick, setTick] = useState(0); // bumped by live sync to refetch screens
   const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(null);
+  const [safetyOpen, setSafetyOpen] = useState(false);
 
   useEffect(() => api.onChange(() => setTick((t) => t + 1)), []);
 
@@ -102,7 +112,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
         <div className="spacer" />
         <div className="whoami">
           <b>{session.scoutName}</b>
-          {session.org.name} · {session.org.plan}
+          {session.role} · {session.org.name} · {session.org.plan}
           <div style={{ marginTop: 8 }}>
             <button onClick={onLogout} style={{ padding: 0, color: 'var(--accent-2)' }}>Switch org</button>
           </div>
@@ -112,8 +122,12 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
         <div className="topbar">
           <h2>{NAV.find((n) => n.id === screen)?.label}</h2>
           {session.org.trustedPartner && <span className="pill gold">Trusted Partner</span>}
+          {session.org.type === 'club' && (session.org.verified
+            ? <span className="pill green">Verified club</span>
+            : <span className="pill">verification pending — U18 hidden</span>)}
           <span className={`pill ${session.org.type === 'agency' ? 'red' : 'blue'}`}>{session.org.type}</span>
           <span className="pill outline-green">● live sync</span>
+          <button onClick={() => setSafetyOpen(true)} title="One-click reporting — available on every screen">⚑ Report / Block</button>
         </div>
         <div className="content">
           {screen === 'search' && <SearchScreen {...props} />}
@@ -128,6 +142,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
       {openPlayerId && (
         <PlayerDrawer session={session} playerId={openPlayerId} notify={notify} onClose={() => setOpenPlayerId(null)} />
       )}
+      {safetyOpen && <SafetyModal session={session} notify={notify} onClose={() => setSafetyOpen(false)} />}
       {toast && <Toast text={toast.text} error={toast.error} />}
     </div>
   );

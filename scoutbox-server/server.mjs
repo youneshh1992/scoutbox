@@ -18,6 +18,7 @@ import {
   validateTrialReport,
   TRIAL_REPORT_FIELDS,
   similarityScore,
+  moderateText,
 } from './domain.mjs';
 
 const PORT = process.env.PORT || 4000;
@@ -60,19 +61,50 @@ function ledgerAppend(entry) {
   return row;
 }
 
-// Public view of a player for a given org. Applies the under-18 wall and
-// player-controlled medical sharing.
+function isBlocked(playerId, orgId) {
+  return db.blocks.some((b) => b.playerId === playerId && b.orgId === orgId);
+}
+
+// Screen text through moderation; throws a structured refusal on a hit.
+// Children cannot share personal contact details, and club messages to
+// guardians are screened the same way. Every hit is logged.
+function moderateOrRefuse(res, text, context) {
+  const check = moderateText(text);
+  if (!check.ok) {
+    db.moderationLog.push({ id: nextId('mod'), ts: Date.now(), context, flags: check.flags });
+    res.status(400).json({
+      error: 'MODERATION_BLOCKED',
+      message: 'This text was blocked by moderation: personal contact details and off-platform contact are not allowed.',
+      flags: check.flags,
+    });
+    return false;
+  }
+  return true;
+}
+
+// Public view of a player for a given org. Applies minor-visibility rules,
+// guardian-managed contact, and player/guardian-controlled medical sharing.
 function playerViewForOrg(player, org) {
   if (!visibleToOrg(player, org)) return null;
-  const { medical, ...rest } = player;
-  return {
+  if (isBlocked(player.id, org.id)) return null;
+  const { medical, guardianId, ...rest } = player;
+  const minor = !isAdult(player);
+  const view = {
     ...rest,
     age: ageOn(player.dob),
     trustScore: computeTrustScore(player),
+    guardianManaged: minor,
     medical: medical.shared
       ? medical
       : { shared: false, records: [], conditionStatus: 'not_shared', note: 'Medical data is player-controlled and has not been shared.' },
   };
+  if (minor) {
+    // Privacy for minors: no city, no exact date of birth, no direct channel.
+    view.city = '';
+    view.dob = null;
+    view.contactPolicy = 'guardian_only';
+  }
+  return view;
 }
 
 // -------------------------------------------------------------------- meta
@@ -90,15 +122,17 @@ app.get('/meta', (_req, res) => {
 // Prototype auth: the player app sends x-player-id. Production swaps this
 // for real sessions without changing the API surface.
 
-// Adults-only launch: the API itself rejects under-age sign-ups.
+// Self sign-up is adults only. Under-18 accounts are OWNED by a verified
+// guardian and can only be created through the guardian flow below — the API
+// itself refuses a minor self-signup.
 app.post('/auth/player/signup', (req, res) => {
   const { name, dob, country = 'GB', position, foot } = req.body || {};
   if (!name || !dob) return res.status(400).json({ error: 'NAME_AND_DOB_REQUIRED' });
   const required = adultAgeFor(country);
   if (ageOn(dob) < required) {
     return res.status(403).json({
-      error: 'ADULTS_ONLY',
-      message: `ScoutBox is launching adults-only. You must be ${required}+ in your country to create a profile.`,
+      error: 'GUARDIAN_REQUIRED',
+      message: `Under-${required} profiles are owned by a parent or guardian. A guardian must verify their ID, accept the safeguarding disclaimer, and create the profile from their own account.`,
     });
   }
   const p = {
@@ -138,16 +172,256 @@ function playerAuth(req, res, next) {
   const p = findPlayer(req.headers['x-player-id']);
   if (!p) return res.status(401).json({ error: 'PLAYER_AUTH_REQUIRED' });
   req.player = p;
+  req.playerIsMinor = !isAdult(p);
   next();
+}
+
+// Refuses guardian-managed actions on a child account. Parents manage all
+// messages, notifications and club interactions; the child keeps football
+// activities (uploads, stats, drills, attendance).
+function guardianManagedOnly(req, res) {
+  if (req.playerIsMinor) {
+    res.status(403).json({
+      error: 'GUARDIAN_MANAGED',
+      message: 'This setting is managed by your parent or guardian.',
+    });
+    return true;
+  }
+  return false;
+}
+
+// -------------------------------------------------------------- guardians
+// Parents own every under-18 account. ID verification and the safeguarding
+// disclaimer are hard gates BEFORE any child profile can exist.
+
+app.post('/auth/guardian/signup', (req, res) => {
+  const { name, email } = req.body || {};
+  if (!name || !email) return res.status(400).json({ error: 'NAME_AND_EMAIL_REQUIRED' });
+  const g = {
+    id: nextId('gd'),
+    name,
+    email,
+    idVerified: false,
+    disclaimerAccepted: false,
+    childIds: [],
+  };
+  db.guardians.push(g);
+  res.status(201).json({ guardianId: g.id, guardian: g });
+});
+
+app.post('/auth/guardian/login', (req, res) => {
+  const g = db.guardians.find((x) => x.id === req.body?.guardianId || x.email === req.body?.email);
+  if (!g) return res.status(404).json({ error: 'GUARDIAN_NOT_FOUND' });
+  res.json({ guardianId: g.id, guardian: g });
+});
+
+function guardianAuth(req, res, next) {
+  const g = db.guardians.find((x) => x.id === req.headers['x-guardian-id']);
+  if (!g) return res.status(401).json({ error: 'GUARDIAN_AUTH_REQUIRED' });
+  req.guardian = g;
+  next();
+}
+
+const guardianRouter = express.Router();
+app.use('/guardian', guardianAuth, guardianRouter);
+
+// Prototype ID verification: an attestation endpoint. Production integrates a
+// document + liveness IDV provider behind this same call.
+guardianRouter.post('/verify-id', (req, res) => {
+  const { documentType, documentRef } = req.body || {};
+  if (!documentType || !documentRef) {
+    return res.status(400).json({ error: 'DOCUMENT_REQUIRED', message: 'ID verification needs a document type and reference.' });
+  }
+  req.guardian.idVerified = true;
+  res.json({ idVerified: true });
+});
+
+guardianRouter.post('/disclaimer', (req, res) => {
+  if (req.body?.accepted !== true) {
+    return res.status(400).json({ error: 'DISCLAIMER_NOT_ACCEPTED' });
+  }
+  req.guardian.disclaimerAccepted = true;
+  res.json({ disclaimerAccepted: true });
+});
+
+guardianRouter.get('/me', (req, res) => res.json(req.guardian));
+
+guardianRouter.get('/children', (req, res) => {
+  res.json(
+    req.guardian.childIds
+      .map((id) => findPlayer(id))
+      .filter(Boolean)
+      .map((p) => ({ ...p, age: ageOn(p.dob), trustScore: computeTrustScore(p), trust: trustBreakdown(p) }))
+  );
+});
+
+// Creating a child profile requires BOTH gates: verified ID + accepted disclaimer.
+guardianRouter.post('/children', (req, res) => {
+  if (!req.guardian.idVerified) {
+    return res.status(403).json({ error: 'GUARDIAN_ID_UNVERIFIED', message: 'Verify your identity before onboarding a child.' });
+  }
+  if (!req.guardian.disclaimerAccepted) {
+    return res.status(403).json({ error: 'DISCLAIMER_REQUIRED', message: 'Accept the safeguarding disclaimer before onboarding a child.' });
+  }
+  const { name, dob, country = 'GB', position, foot, heightCm, weightKg } = req.body || {};
+  if (!name || !dob) return res.status(400).json({ error: 'NAME_AND_DOB_REQUIRED' });
+  if (ageOn(dob) >= adultAgeFor(country)) {
+    return res.status(400).json({ error: 'NOT_A_MINOR', message: 'Adults create their own account with player sign-up.' });
+  }
+  const p = {
+    id: nextId('pl'),
+    name,
+    dob,
+    country,
+    city: '',
+    guardianId: req.guardian.id,
+    position: position || null,
+    foot: foot || null,
+    heightCm: heightCm || null,
+    weightKg: weightKg || null,
+    stats: null,
+    academyPlus: false,
+    badges: [],
+    availability: 'not_seeking',
+    contractStatus: 'unknown',
+    identityVerified: false,
+    attendance: [],
+    timeline: [],
+    media: [],
+    trialReports: [],
+    drills: [],
+    squadNumber: null,
+    contractUntil: null,
+    marketValueRange: null,
+    agentName: null,
+    medical: { shared: false, records: [], conditionStatus: 'unknown' },
+  };
+  db.players.push(p);
+  req.guardian.childIds.push(p.id);
+  broadcast('players');
+  res.status(201).json({ playerId: p.id, player: p });
+});
+
+// Scout Inbox for minors lives with the GUARDIAN. Club-first identity:
+// the parent sees the verified club and the sender's verified role.
+guardianRouter.get('/inbox', (req, res) => {
+  res.json(
+    db.requests
+      .filter((r) => r.routedTo === 'guardian' && req.guardian.childIds.includes(r.playerId))
+      .map(({ orgId, userId, ...visible }) => visible)
+      .slice()
+      .reverse()
+  );
+});
+
+guardianRouter.post('/requests/:id/respond', (req, res) => {
+  const request = db.requests.find(
+    (r) => r.id === req.params.id && r.routedTo === 'guardian' && req.guardian.childIds.includes(r.playerId)
+  );
+  if (!request) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
+  if (request.status !== 'pending') return res.status(409).json({ error: 'ALREADY_RESPONDED' });
+  const child = findPlayer(request.playerId);
+  const { accept } = req.body || {};
+  request.status = accept ? 'accepted' : 'declined';
+  request.respondedAt = Date.now();
+  request.respondedBy = 'guardian';
+
+  if (accept) {
+    // The conversation that opens is between adults: club staff and guardian.
+    request.contactChannel = nextId('chan');
+    ledgerAppend({ type: `${request.type}_accepted_by_guardian`, playerId: child.id, orgId: request.orgId, orgName: request.orgName, userId: request.userId, scoutName: request.scoutName });
+    if (request.type === 'trial') {
+      db.trials.push({
+        id: nextId('trial'),
+        requestId: request.id,
+        playerId: child.id,
+        playerName: child.name,
+        orgId: request.orgId,
+        orgName: request.orgName,
+        scoutName: request.scoutName,
+        acceptedAt: Date.now(),
+        guardianApproved: true,
+        status: 'awaiting_report',
+      });
+    }
+  } else {
+    ledgerAppend({ type: `${request.type}_declined_by_guardian`, playerId: child.id, orgId: request.orgId, orgName: request.orgName, userId: request.userId, scoutName: request.scoutName });
+  }
+  broadcast('requests', { playerId: child.id });
+  const { orgId, userId, ...visible } = request;
+  res.json(visible);
+});
+
+// All communications are logged, and the parent can read the full log.
+guardianRouter.get('/log', (req, res) => {
+  res.json(db.ledger.filter((l) => req.guardian.childIds.includes(l.playerId)).slice().reverse());
+});
+
+// Guardian controls the child's medical sharing and availability.
+guardianRouter.post('/children/:id/medical/share', (req, res) => {
+  const child = findPlayer(req.params.id);
+  if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
+  child.medical.shared = !!req.body?.shared;
+  broadcast('players', { playerId: child.id });
+  res.json({ shared: child.medical.shared });
+});
+
+guardianRouter.post('/report', (req, res) => handleReport(req, res, { by: 'guardian', byId: req.guardian.id }));
+guardianRouter.post('/block', (req, res) => {
+  const { orgId, playerId, reason } = req.body || {};
+  const childId = playerId && req.guardian.childIds.includes(playerId) ? playerId : req.guardian.childIds[0];
+  if (!orgId || !childId) return res.status(400).json({ error: 'ORG_AND_CHILD_REQUIRED' });
+  db.blocks.push({ id: nextId('blk'), playerId: childId, orgId, by: 'guardian', reason: reason || '', ts: Date.now() });
+  ledgerAppend({ type: 'org_blocked_by_guardian', playerId: childId, orgId, orgName: db.orgs.find((o) => o.id === orgId)?.name ?? orgId, userId: null, scoutName: 'guardian' });
+  broadcast('players');
+  res.status(201).json({ blocked: true });
+});
+
+// One-click reporting, shared by guardian / player / org callers.
+// An urgent report immediately suspends communication pending review.
+function handleReport(req, res, actor) {
+  const { targetKind, targetOrgId, targetScoutName, targetPlayerId, reason, urgent } = req.body || {};
+  if (!['club', 'scout', 'player'].includes(targetKind)) {
+    return res.status(400).json({ error: 'TARGET_KIND_REQUIRED', allowed: ['club', 'scout', 'player'] });
+  }
+  if (!reason || !String(reason).trim()) return res.status(400).json({ error: 'REASON_REQUIRED' });
+  const report = {
+    id: nextId('rep'),
+    ts: Date.now(),
+    ...actor,
+    targetKind,
+    targetOrgId: targetOrgId || null,
+    targetScoutName: targetScoutName || null,
+    targetPlayerId: targetPlayerId || null,
+    reason: String(reason).trim(),
+    urgent: !!urgent,
+    status: 'pending_review',
+  };
+  db.reports.push(report);
+  if (report.urgent && targetOrgId) {
+    // Immediate suspension pending review: the org loses access to the
+    // reporter's players and its pending requests to them freeze.
+    const playerIds = actor.by === 'guardian'
+      ? db.guardians.find((g) => g.id === actor.byId)?.childIds ?? []
+      : actor.by === 'player' ? [actor.byId] : [];
+    for (const pid of playerIds) {
+      db.blocks.push({ id: nextId('blk'), playerId: pid, orgId: targetOrgId, by: actor.by, reason: 'suspended_pending_review', ts: Date.now() });
+      for (const r of db.requests) {
+        if (r.playerId === pid && r.orgId === targetOrgId && r.status === 'pending') r.status = 'suspended';
+      }
+    }
+    broadcast('players');
+  }
+  res.status(201).json({ reportId: report.id, status: report.status, suspended: !!(report.urgent && targetOrgId) });
 }
 
 // ---------------------------------------------------------------- org auth
 app.get('/orgs', (_req, res) => {
-  res.json(db.orgs.map(({ id, name, type, plan, trustedPartner }) => ({ id, name, type, plan, trustedPartner })));
+  res.json(db.orgs.map(({ id, name, type, plan, trustedPartner, verified }) => ({ id, name, type, plan, trustedPartner, verified })));
 });
 
 app.post('/auth/org/login', (req, res) => {
-  const { orgId, scoutName } = req.body || {};
+  const { orgId, scoutName, role } = req.body || {};
   const org = db.orgs.find((o) => o.id === orgId);
   if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
   if (!scoutName || !scoutName.trim()) {
@@ -156,10 +430,12 @@ app.post('/auth/org/login', (req, res) => {
   }
   let user = db.users.find((u) => u.orgId === orgId && u.name.toLowerCase() === scoutName.trim().toLowerCase());
   if (!user) {
-    user = { id: nextId('usr'), orgId, name: scoutName.trim(), createdAt: Date.now() };
+    user = { id: nextId('usr'), orgId, name: scoutName.trim(), role: (role || 'Scout').trim(), createdAt: Date.now() };
     db.users.push(user);
+  } else if (role) {
+    user.role = role.trim();
   }
-  res.json({ userId: user.id, org });
+  res.json({ userId: user.id, role: user.role, org });
 });
 
 // Accountability by user: every org request must carry an individual user id.
@@ -188,8 +464,8 @@ app.use('/org', orgAuth, orgRouter);
 orgRouter.get('/players', (req, res) => {
   const { q, position, academyPlus, availability } = req.query;
   let list = db.players
-    .filter((p) => visibleToOrg(p, req.org)) // the under-18 wall, at the source
-    .map((p) => playerViewForOrg(p, req.org));
+    .map((p) => playerViewForOrg(p, req.org)) // wall + verification + blocks, at the source
+    .filter(Boolean);
 
   if (q) {
     const needle = String(q).toLowerCase();
@@ -210,13 +486,20 @@ orgRouter.get('/players/:id', (req, res) => {
   const p = findPlayer(req.params.id);
   if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
   if (!visibleToOrg(p, req.org)) {
-    // The under-18 wall: for an agency, a minor does not exist on any endpoint.
-    return res.status(403).json({ error: 'UNDER_18_WALL', message: 'Agency accounts cannot view minors.' });
+    // Agencies never see minors; unverified clubs don't either.
+    const code = req.org.type === 'agency' ? 'UNDER_18_WALL' : 'VERIFIED_CLUBS_ONLY';
+    return res.status(403).json({
+      error: code,
+      message: code === 'UNDER_18_WALL'
+        ? 'Agency accounts cannot view minors.'
+        : 'Under-18 profiles are visible to verified clubs only. Complete club verification to continue.',
+    });
   }
+  if (isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
   ledgerAppend({ type: 'view', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
   const view = playerViewForOrg(p, req.org);
   const similar = db.players
-    .filter((c) => c.id !== p.id && visibleToOrg(c, req.org))
+    .filter((c) => c.id !== p.id && visibleToOrg(c, req.org) && !isBlocked(c.id, req.org.id))
     .map((c) => ({ playerId: c.id, name: c.name, position: c.position, score: similarityScore(p, c) }))
     .sort((a, b) => b.score - a.score)
     .slice(0, 3);
@@ -244,13 +527,24 @@ orgRouter.get('/shortlist', (req, res) => {
 
 // ------------------------------------------------------- contact & trials
 // Scout Inbox: there is no direct message channel anywhere in this API.
-// An org can only file a request; contact unlocks when the player accepts.
+// An org can only file a request; contact unlocks on acceptance. For minors
+// the request NEVER reaches the child — it routes to the guardian, and any
+// conversation that opens is between adults.
 orgRouter.post('/players/:id/request', (req, res) => {
   const p = findPlayer(req.params.id);
   if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
-  if (!visibleToOrg(p, req.org)) return res.status(403).json({ error: 'UNDER_18_WALL', message: 'Agency accounts cannot contact minors.' });
+  if (!visibleToOrg(p, req.org)) {
+    return res.status(403).json({
+      error: req.org.type === 'agency' ? 'UNDER_18_WALL' : 'VERIFIED_CLUBS_ONLY',
+      message: req.org.type === 'agency' ? 'Agency accounts cannot contact minors.' : 'Only verified clubs can contact under-18 players (via their guardian).',
+    });
+  }
+  if (isBlocked(p.id, req.org.id)) {
+    return res.status(403).json({ error: 'BLOCKED', message: 'This player (or their guardian) has blocked your organisation.' });
+  }
   const { type, message } = req.body || {};
   if (!['contact', 'trial'].includes(type)) return res.status(400).json({ error: 'TYPE_MUST_BE_CONTACT_OR_TRIAL' });
+  if (!moderateOrRefuse(res, message, { kind: 'org_request_message', orgId: req.org.id, userId: req.orgUser.id })) return;
 
   if (type === 'trial') {
     // Trial reports are mandatory: an org with an unfiled report for a past
@@ -265,26 +559,36 @@ orgRouter.post('/players/:id/request', (req, res) => {
     }
   }
 
+  const minor = !isAdult(p);
   const request = {
     id: nextId('req'),
     playerId: p.id,
+    playerName: p.name,
     orgId: req.org.id,
     orgName: req.org.name,
     orgType: req.org.type,
+    orgVerified: !!req.org.verified,
     trustedPartner: req.org.trustedPartner,
     userId: req.orgUser.id,
     scoutName: req.orgUser.name,
+    scoutRole: req.orgUser.role || 'Scout',
     type,
     message: message || '',
     status: 'pending',
     createdAt: Date.now(),
-    contactChannel: null, // stays null until the player accepts
+    // Scout → Parent, never Scout → Child.
+    routedTo: minor ? 'guardian' : 'player',
+    guardianId: minor ? p.guardianId : null,
+    contactChannel: null, // stays null until the player/guardian accepts
   };
   db.requests.push(request);
-  ledgerAppend({ type: `${type}_request`, playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
+  ledgerAppend({ type: `${type}_request${minor ? '_to_guardian' : ''}`, playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
   broadcast('inbox', { playerId: p.id });
-  res.status(201).json({ ok: true, requestId: request.id, status: 'pending' });
+  res.status(201).json({ ok: true, requestId: request.id, status: 'pending', routedTo: request.routedTo });
 });
+
+// One-click reporting for org users too (report a player, scout or club).
+orgRouter.post('/report', (req, res) => handleReport(req, res, { by: 'org_user', byId: req.orgUser.id, byOrgId: req.org.id }));
 
 orgRouter.get('/requests', (req, res) => {
   res.json(db.requests.filter((r) => r.orgId === req.org.id));
@@ -406,18 +710,37 @@ playerRouter.get('/me', (req, res) => {
 
 // Scout Inbox — org identity is summarised, org ids are stripped; the player
 // sees who wants them and decides. No message thread exists until acceptance.
+// A CHILD's inbox never carries a message or a contact channel: they see only
+// guardian-managed status updates. No direct messages to children. Ever.
 playerRouter.get('/inbox', (req, res) => {
-  res.json(
-    db.requests
-      .filter((r) => r.playerId === req.player.id)
-      .map(({ orgId, userId, ...visible }) => visible)
-      .slice()
-      .reverse()
-  );
+  const rows = db.requests.filter((r) => r.playerId === req.player.id);
+  if (req.playerIsMinor) {
+    return res.json(
+      rows
+        .map((r) => ({
+          id: r.id,
+          type: r.type,
+          orgName: r.orgName,
+          orgVerified: r.orgVerified,
+          status: r.status,
+          guardianManaged: true,
+          note:
+            r.status === 'pending'
+              ? `${r.orgName} contacted your parent/guardian about a ${r.type === 'trial' ? 'trial' : 'conversation'}. They will decide together with you.`
+              : r.status === 'accepted'
+                ? `Your parent/guardian accepted the ${r.type} with ${r.orgName}.`
+                : `Your parent/guardian declined the ${r.type} with ${r.orgName}.`,
+        }))
+        .slice()
+        .reverse()
+    );
+  }
+  res.json(rows.map(({ orgId, userId, ...visible }) => visible).slice().reverse());
 });
 
 playerRouter.post('/requests/:id/respond', (req, res) => {
-  const request = db.requests.find((r) => r.id === req.params.id && r.playerId === req.player.id);
+  if (guardianManagedOnly(req, res)) return; // minors never respond — guardians do
+  const request = db.requests.find((r) => r.id === req.params.id && r.playerId === req.player.id && r.routedTo === 'player');
   if (!request) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
   if (request.status !== 'pending') return res.status(409).json({ error: 'ALREADY_RESPONDED' });
   const { accept } = req.body || {};
@@ -449,8 +772,9 @@ playerRouter.post('/requests/:id/respond', (req, res) => {
   res.json(visible);
 });
 
-// Academy+ is opt-in only and player-controlled.
+// Academy+ is opt-in only and player-controlled (guardian-managed for minors).
 playerRouter.post('/academyplus', (req, res) => {
+  if (guardianManagedOnly(req, res)) return;
   req.player.academyPlus = !!req.body?.enabled;
   if (req.player.academyPlus && !req.player.badges.includes('Fresh Start')) req.player.badges.push('Fresh Start');
   if (!req.player.academyPlus) req.player.badges = req.player.badges.filter((b) => b !== 'Fresh Start');
@@ -469,6 +793,7 @@ playerRouter.post('/badges', (req, res) => {
 playerRouter.post('/media', (req, res) => {
   const { title, kind = 'video' } = req.body || {};
   if (!title) return res.status(400).json({ error: 'TITLE_REQUIRED' });
+  if (!moderateOrRefuse(res, title, { kind: 'media_title', playerId: req.player.id })) return;
   const item = { id: nextId('media'), title, kind, uploadedAt: new Date().toISOString() };
   req.player.media.push(item);
   broadcast('players', { playerId: req.player.id });
@@ -476,7 +801,9 @@ playerRouter.post('/media', (req, res) => {
 });
 
 // Medical data is player-controlled per data-protection law.
+// For a minor, that control sits with the guardian.
 playerRouter.post('/medical/share', (req, res) => {
+  if (guardianManagedOnly(req, res)) return;
   req.player.medical.shared = !!req.body?.shared;
   broadcast('players', { playerId: req.player.id });
   res.json({ shared: req.player.medical.shared });
@@ -493,6 +820,7 @@ playerRouter.post('/medical/records', (req, res) => {
 });
 
 playerRouter.post('/availability', (req, res) => {
+  if (guardianManagedOnly(req, res)) return;
   const { availability, contractStatus } = req.body || {};
   const AV = ['available_now', 'end_of_season', 'loan_open', 'overseas_open', 'not_seeking'];
   const CS = ['under_contract', 'expiring_summer', 'scholarship_ending', 'release_approaching', 'free_agent', 'unknown'];
@@ -524,9 +852,56 @@ playerRouter.post('/attendance', (req, res) => {
 playerRouter.post('/timeline', (req, res) => {
   const { year, event } = req.body || {};
   if (!year || !event) return res.status(400).json({ error: 'YEAR_AND_EVENT_REQUIRED' });
+  if (!moderateOrRefuse(res, event, { kind: 'timeline_event', playerId: req.player.id })) return;
   req.player.timeline.push({ year: String(year), event: String(event) });
   broadcast('players', { playerId: req.player.id });
   res.status(201).json({ timeline: req.player.timeline });
+});
+
+// Children keep their football life: stats edits and drills stay open.
+playerRouter.post('/stats', (req, res) => {
+  const FIELDS = ['appearances', 'goals', 'assists', 'paceKmh', 'passCompletionPct', 'duelSuccessPct', 'cleanSheets'];
+  const updates = {};
+  for (const f of FIELDS) {
+    if (req.body?.[f] !== undefined) {
+      const v = Number(req.body[f]);
+      if (Number.isNaN(v) || v < 0) return res.status(400).json({ error: 'BAD_STAT', field: f });
+      updates[f] = v;
+    }
+  }
+  req.player.stats = { appearances: 0, goals: 0, assists: 0, ...req.player.stats, ...updates };
+  broadcast('players', { playerId: req.player.id });
+  res.json({ stats: req.player.stats });
+});
+
+export const DRILLS = [
+  { id: 'drill-sprint-ladder', name: 'Sprint ladder — 6×30m' },
+  { id: 'drill-passing-gates', name: 'Passing gates — both feet' },
+  { id: 'drill-shooting-arc', name: 'Shooting arc — 20 finishes' },
+  { id: 'drill-first-touch', name: 'First touch — wall rebounds' },
+];
+
+playerRouter.get('/drills', (req, res) => {
+  res.json(DRILLS.map((d) => ({ ...d, completed: req.player.drills.includes(d.id) })));
+});
+
+playerRouter.post('/drills/:id/complete', (req, res) => {
+  if (!DRILLS.some((d) => d.id === req.params.id)) return res.status(404).json({ error: 'DRILL_NOT_FOUND' });
+  if (!req.player.drills.includes(req.params.id)) req.player.drills.push(req.params.id);
+  broadcast('players', { playerId: req.player.id });
+  res.json({ drills: req.player.drills });
+});
+
+// One-click reporting + blocking, available to every player.
+playerRouter.post('/report', (req, res) => handleReport(req, res, { by: 'player', byId: req.player.id }));
+
+playerRouter.post('/block', (req, res) => {
+  const { orgId, reason } = req.body || {};
+  if (!orgId) return res.status(400).json({ error: 'ORG_REQUIRED' });
+  db.blocks.push({ id: nextId('blk'), playerId: req.player.id, orgId, by: 'player', reason: reason || '', ts: Date.now() });
+  ledgerAppend({ type: 'org_blocked_by_player', playerId: req.player.id, orgId, orgName: db.orgs.find((o) => o.id === orgId)?.name ?? orgId, userId: null, scoutName: 'player' });
+  broadcast('players');
+  res.status(201).json({ blocked: true });
 });
 
 // ------------------------------------------------------------------- start

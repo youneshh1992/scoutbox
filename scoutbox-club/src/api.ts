@@ -15,12 +15,17 @@ export interface Org {
   type: OrgType;
   plan: 'Academy' | 'Pro' | 'Agency';
   trustedPartner: boolean;
+  /** Club verification (company email domain + safeguarding contract).
+   *  Unverified clubs never see under-18 profiles. */
+  verified: boolean;
 }
 
 export interface Session {
   org: Org;
   userId: string;
   scoutName: string;
+  /** Verified role shown to players and guardians (e.g. "Head of Recruitment"). */
+  role: string;
 }
 
 export interface MedicalRecord {
@@ -67,7 +72,15 @@ export interface Player {
   id: string;
   name: string;
   age: number;
-  dob: string;
+  /** Null for minors — exact DOB is never exposed to orgs. */
+  dob: string | null;
+  /** True for under-18 players: all contact routes to the guardian. */
+  guardianManaged?: boolean;
+  contactPolicy?: 'guardian_only';
+  squadNumber?: number | null;
+  contractUntil?: string | null;
+  marketValueRange?: string | null;
+  agentName?: string | null;
   country: string;
   city: string;
   position: string;
@@ -107,12 +120,25 @@ export interface PlayerDetail extends Player {
 export interface OrgRequest {
   id: string;
   playerId: string;
+  playerName?: string;
   type: 'contact' | 'trial';
   message: string;
-  status: 'pending' | 'accepted' | 'declined';
+  status: 'pending' | 'accepted' | 'declined' | 'suspended';
   scoutName: string;
+  scoutRole?: string;
   createdAt: number;
+  /** 'guardian' for minors — Scout → Parent, never Scout → Child. */
+  routedTo?: 'player' | 'guardian';
   contactChannel: string | null;
+}
+
+export interface ReportInput {
+  targetKind: 'club' | 'scout' | 'player';
+  targetOrgId?: string;
+  targetScoutName?: string;
+  targetPlayerId?: string;
+  reason: string;
+  urgent?: boolean;
 }
 
 export interface Trial {
@@ -173,7 +199,8 @@ export interface SearchFilters {
 
 export interface ScoutboxApi {
   listOrgs(): Promise<Org[]>;
-  login(orgId: string, scoutName: string): Promise<Session>;
+  login(orgId: string, scoutName: string, role: string): Promise<Session>;
+  report(s: Session, input: ReportInput): Promise<void>;
   searchPlayers(s: Session, f: SearchFilters): Promise<Player[]>;
   getPlayer(s: Session, id: string): Promise<PlayerDetail>;
   act(s: Session, playerId: string, action: 'save' | 'shortlist' | 'signing'): Promise<void>;
@@ -206,14 +233,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const httpApi: ScoutboxApi = {
   listOrgs: () => request<Org[]>('/orgs'),
 
-  async login(orgId, scoutName) {
-    const r = await request<{ userId: string; org: Org }>('/auth/org/login', {
+  async login(orgId, scoutName, role) {
+    const r = await request<{ userId: string; role: string; org: Org }>('/auth/org/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ orgId, scoutName }),
+      body: JSON.stringify({ orgId, scoutName, role }),
     });
-    return { org: r.org, userId: r.userId, scoutName };
+    return { org: r.org, userId: r.userId, scoutName, role: r.role };
   },
+
+  report: (s, input) =>
+    request<void>('/org/report', { method: 'POST', headers: headers(s), body: JSON.stringify(input) }),
 
   searchPlayers(s, f) {
     const params = new URLSearchParams();

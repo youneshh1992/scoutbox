@@ -2,7 +2,7 @@
 // Run with: npm test  (from scoutbox-server/)
 
 import assert from 'node:assert/strict';
-import { computeTrustScore, trustBreakdown, isAdult, visibleToOrg, validateTrialReport, TRUST } from '../domain.mjs';
+import { computeTrustScore, trustBreakdown, isAdult, visibleToOrg, validateTrialReport, moderateText, TRUST } from '../domain.mjs';
 import { buildSeed } from '../seed.mjs';
 
 let passed = 0;
@@ -73,14 +73,42 @@ test('adult age respects country of majority (KR = 19)', () => {
   assert.equal(isAdult({ ...eighteenInKr, country: 'GB' }), true, '18-year-old is an adult in GB');
 });
 
-test('under-18 wall blocks agencies but not clubs', () => {
+test('minor visibility: agencies never, unverified clubs never, verified clubs yes', () => {
   const minor = { dob: new Date(Date.now() - 16 * 365.25 * 24 * 3600 * 1000).toISOString().slice(0, 10), country: 'GB' };
-  assert.equal(visibleToOrg(minor, { type: 'agency' }), false);
-  assert.equal(visibleToOrg(minor, { type: 'club' }), true);
+  assert.equal(visibleToOrg(minor, { type: 'agency', verified: true }), false, 'agency blocked even if verified');
+  assert.equal(visibleToOrg(minor, { type: 'club', verified: false }), false, 'unverified club blocked');
+  assert.equal(visibleToOrg(minor, { type: 'club', verified: true }), true, 'verified club allowed');
 });
 
-test('all seeded players are adults (adults-only launch)', () => {
-  for (const p of buildSeed().players) assert.ok(isAdult(p), `${p.name} must be an adult`);
+test('adults are visible to every org type', () => {
+  const adult = { dob: '1998-01-01', country: 'GB' };
+  for (const org of [{ type: 'agency' }, { type: 'club', verified: false }, { type: 'club', verified: true }]) {
+    assert.equal(visibleToOrg(adult, org), true);
+  }
+});
+
+test('seed: every minor has a verified guardian who accepted the disclaimer', () => {
+  const seed = buildSeed();
+  for (const p of seed.players.filter((x) => !isAdult(x))) {
+    const g = seed.guardians.find((x) => x.id === p.guardianId);
+    assert.ok(g, `${p.name} must have a guardian`);
+    assert.ok(g.idVerified && g.disclaimerAccepted, `${g.name} must be ID-verified with disclaimer accepted`);
+    assert.ok(g.childIds.includes(p.id), 'guardian must list the child');
+  }
+});
+
+test('moderation blocks contact details and off-platform moves', () => {
+  for (const bad of [
+    'email me at kid@example.com',
+    'call 07911 123456 tonight',
+    'add me on whatsapp',
+    'my insta is @striker_2012',
+    'watch https://some.site/clip',
+  ]) {
+    assert.equal(moderateText(bad).ok, false, `should block: ${bad}`);
+  }
+  assert.equal(moderateText('Great cup final highlights vs Riverside').ok, true);
+  assert.equal(moderateText('U15 highlights — wing play').ok, true);
 });
 
 test('partial trial reports are rejected, complete ones pass', () => {

@@ -3,7 +3,7 @@ import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { client, ClientError, type DemoIdentity } from '../data/client';
-import { adultAgeFor, ageOn, SAFEGUARDING_PROMISES } from '../domain/safeguarding';
+import { adultAgeFor, ageOn, SAFEGUARDING_PROMISES, U18_PROMISES } from '../domain/safeguarding';
 import { POSITIONS } from '../domain/types';
 import { useSession } from '../state';
 import { colors } from '../theme';
@@ -11,15 +11,19 @@ import { Button, Card, Muted, Pill, Row, SectionTitle } from '../components/ui';
 
 const COUNTRIES = ['GB', 'PT', 'FR', 'SE', 'PL', 'NG', 'GH', 'AR', 'JP', 'KR', 'TH', 'SG', 'US'];
 
-type Step = 'welcome' | 'details' | 'football' | 'blocked';
+type Step =
+  | 'welcome'
+  | 'details' | 'football' | 'needs-guardian'
+  | 'g-account' | 'g-verify' | 'g-disclaimer' | 'g-child';
 
 export default function Onboarding() {
   const router = useRouter();
-  const { login, mode } = useSession();
+  const { loginPlayer, loginGuardian, mode } = useSession();
   const [step, setStep] = useState<Step>('welcome');
   const [identities, setIdentities] = useState<DemoIdentity[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  // player self-signup (adults)
   const [name, setName] = useState('');
   const [dob, setDob] = useState('');
   const [country, setCountry] = useState('GB');
@@ -27,12 +31,23 @@ export default function Onboarding() {
   const [position, setPosition] = useState<string | null>(null);
   const [foot, setFoot] = useState<string | null>(null);
 
+  // guardian flow
+  const [gName, setGName] = useState('');
+  const [gEmail, setGEmail] = useState('');
+  const [gId, setGId] = useState<string | null>(null);
+  const [docType, setDocType] = useState<'passport' | 'driving_licence' | null>(null);
+  const [docRef, setDocRef] = useState('');
+  const [childName, setChildName] = useState('');
+  const [childDob, setChildDob] = useState('');
+  const [childCountry, setChildCountry] = useState('GB');
+  const [childPosition, setChildPosition] = useState<string | null>(null);
+
   useEffect(() => {
     client.listDemoIdentities().then(setIdentities).catch(() => {});
   }, []);
 
-  const enterAs = (playerId: string) => {
-    login(playerId);
+  const enterAsPlayer = (playerId: string) => {
+    loginPlayer(playerId);
     router.replace('/(tabs)/discover');
   };
 
@@ -42,9 +57,10 @@ export default function Onboarding() {
       setError('Enter your name and date of birth (YYYY-MM-DD).');
       return;
     }
-    // The age gate — mirrored locally, ENFORCED by the server (403 ADULTS_ONLY).
+    // Under-18s: the account belongs to a guardian — mirrored locally,
+    // ENFORCED by the server (403 GUARDIAN_REQUIRED).
     if (ageOn(dob) < adultAgeFor(country)) {
-      setStep('blocked');
+      setStep('needs-guardian');
       return;
     }
     setStep('football');
@@ -61,10 +77,83 @@ export default function Onboarding() {
         position: position ?? undefined,
         foot: foot ?? undefined,
       });
-      enterAs(playerId);
+      enterAsPlayer(playerId);
     } catch (e) {
-      if (e instanceof ClientError && e.code === 'ADULTS_ONLY') setStep('blocked');
+      if (e instanceof ClientError && e.code === 'GUARDIAN_REQUIRED') setStep('needs-guardian');
       else setError(e instanceof Error ? e.message : 'Could not create your profile.');
+    }
+  };
+
+  const guardianCreate = async () => {
+    setError(null);
+    if (!gName.trim() || !gEmail.includes('@')) return setError('Enter your name and a valid email.');
+    try {
+      const { guardianId } = await client.guardianSignup(gName.trim(), gEmail.trim());
+      setGId(guardianId);
+      setStep('g-verify');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not create the guardian account.');
+    }
+  };
+
+  const guardianVerify = async () => {
+    setError(null);
+    if (!gId) return;
+    if (!docType || !docRef.trim()) return setError('Pick a document and enter its reference number.');
+    try {
+      await client.guardianVerifyId(gId, docType, docRef.trim());
+      setStep('g-disclaimer');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'ID verification failed.');
+    }
+  };
+
+  const guardianDisclaimer = async () => {
+    setError(null);
+    if (!gId) return;
+    try {
+      await client.guardianAcceptDisclaimer(gId);
+      setStep('g-child');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not record acceptance.');
+    }
+  };
+
+  const guardianAddChild = async () => {
+    setError(null);
+    if (!gId) return;
+    if (!childName.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(childDob)) {
+      return setError("Enter your child's name and date of birth (YYYY-MM-DD).");
+    }
+    try {
+      await client.guardianAddChild(gId, {
+        name: childName.trim(),
+        dob: childDob,
+        country: childCountry,
+        position: childPosition ?? undefined,
+      });
+      loginGuardian(gId);
+      router.replace('/guardian');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not create the child profile.');
+    }
+  };
+
+  const enterDemoGuardian = async () => {
+    setError(null);
+    try {
+      const { guardianId } = await client.guardianLogin('amara.adebayo@example.com');
+      loginGuardian(guardianId);
+      router.replace('/guardian');
+    } catch {
+      // live server seeds gd-amara by id
+      try {
+        const { guardianId } = await client.guardianLogin('gd-amara');
+        loginGuardian(guardianId);
+        router.replace('/guardian');
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Guardian demo login failed.');
+      }
     }
   };
 
@@ -79,16 +168,25 @@ export default function Onboarding() {
 
         {step === 'welcome' && (
           <>
-            <SectionTitle>Our promises to you</SectionTitle>
+            <Row>
+              <Button primary label="I'm a player (18+)" onPress={() => setStep('details')} />
+              <Button label="I'm a parent / guardian" onPress={() => setStep('g-account')} />
+            </Row>
+            <SectionTitle>Our promises to every player</SectionTitle>
             {SAFEGUARDING_PROMISES.map((p) => (
               <Card key={p.slice(0, 20)}>
                 <Muted size={13.5}>{p}</Muted>
               </Card>
             ))}
-            <Button primary label="Create my profile" onPress={() => setStep('details')} />
+            <SectionTitle>Under-18? The rules that protect you</SectionTitle>
+            {U18_PROMISES.slice(0, 3).map((p) => (
+              <Card key={p.slice(0, 20)}>
+                <Muted size={13.5}>{p}</Muted>
+              </Card>
+            ))}
             {identities.length > 0 && (
               <>
-                <SectionTitle>Or continue as a demo player</SectionTitle>
+                <SectionTitle>Or continue as a demo account</SectionTitle>
                 {identities.map((d) => (
                   <Card key={d.id}>
                     <Row style={{ justifyContent: 'space-between' }}>
@@ -96,10 +194,19 @@ export default function Onboarding() {
                         <Text style={styles.name}>{d.name}</Text>
                         <Muted>{d.position}</Muted>
                       </View>
-                      <Button small label="Enter" onPress={() => enterAs(d.id)} />
+                      <Button small label="Enter" onPress={() => enterAsPlayer(d.id)} />
                     </Row>
                   </Card>
                 ))}
+                <Card>
+                  <Row style={{ justifyContent: 'space-between' }}>
+                    <View>
+                      <Text style={styles.name}>Amara Adebayo</Text>
+                      <Muted>Parent / guardian of Guni (14)</Muted>
+                    </View>
+                    <Button small label="Enter" onPress={enterDemoGuardian} />
+                  </Row>
+                </Card>
               </>
             )}
           </>
@@ -118,8 +225,8 @@ export default function Onboarding() {
               ))}
             </Row>
             <Muted>
-              ScoutBox is launching adults-only: you must be {adultAgeFor(country)}+ in your country. The API
-              itself refuses under-age sign-ups — it is not just a form check.
+              Self sign-up is {adultAgeFor(country)}+ in your country. Younger players join through a
+              parent or guardian — the API itself refuses a minor self-signup.
             </Muted>
             <Button primary label="Continue" onPress={checkDetails} />
             <Button label="Back" onPress={() => setStep('welcome')} />
@@ -145,16 +252,84 @@ export default function Onboarding() {
           </>
         )}
 
-        {step === 'blocked' && (
-          <Card style={{ borderColor: colors.danger }}>
-            <Text style={[styles.name, { color: colors.danger }]}>ScoutBox is adults-only right now</Text>
+        {step === 'needs-guardian' && (
+          <Card style={{ borderColor: colors.accent2 }}>
+            <Text style={styles.name}>Under-18s join with a parent or guardian</Text>
             <Muted size={14}>
-              You need to be {adultAgeFor(country)} or older in your country to create a profile. This is a
-              safeguarding decision for launch: it means no minor can appear in any search, and agencies are
-              structurally walled off from under-18s. We&apos;d love to see you back on your birthday.
+              Your account will be owned and managed by your parent or guardian — that&apos;s how ScoutBox
+              keeps you safe. You still upload your videos, edit your stats and complete drills; scouts can
+              only ever talk to your parent, never to you.
             </Muted>
+            <Button primary label="Set up the guardian account" onPress={() => setStep('g-account')} />
             <Button label="Back to start" onPress={() => setStep('welcome')} />
           </Card>
+        )}
+
+        {step === 'g-account' && (
+          <>
+            <SectionTitle>Guardian account — step 1 of 4</SectionTitle>
+            <Muted size={13.5}>
+              Parents own every under-18 account. You manage all messages, notifications and club
+              interactions; your child keeps the football.
+            </Muted>
+            <TextInput style={styles.input} placeholder="Your full name" placeholderTextColor={colors.muted} value={gName} onChangeText={setGName} />
+            <TextInput style={styles.input} placeholder="Your email" placeholderTextColor={colors.muted} value={gEmail} onChangeText={setGEmail} autoCapitalize="none" />
+            <Button primary label="Continue to ID verification" onPress={guardianCreate} />
+            <Button label="Back" onPress={() => setStep('welcome')} />
+          </>
+        )}
+
+        {step === 'g-verify' && (
+          <>
+            <SectionTitle>ID verification — step 2 of 4</SectionTitle>
+            <Muted size={13.5}>
+              We verify every guardian before any child profile can exist. Pick a document — production
+              runs a document + liveness check; this prototype records the attestation.
+            </Muted>
+            <Row>
+              <Button small primary={docType === 'passport'} label="Passport" onPress={() => setDocType('passport')} />
+              <Button small primary={docType === 'driving_licence'} label="Driving licence" onPress={() => setDocType('driving_licence')} />
+            </Row>
+            <TextInput style={styles.input} placeholder="Document reference number" placeholderTextColor={colors.muted} value={docRef} onChangeText={setDocRef} />
+            <Button primary label="Verify my identity" onPress={guardianVerify} />
+          </>
+        )}
+
+        {step === 'g-disclaimer' && (
+          <>
+            <SectionTitle>Safeguarding disclaimer — step 3 of 4</SectionTitle>
+            {U18_PROMISES.map((p) => (
+              <Card key={p.slice(0, 20)}>
+                <Muted size={13}>{p}</Muted>
+              </Card>
+            ))}
+            <Muted size={13}>
+              By continuing you confirm you are this child&apos;s parent or legal guardian, you will manage
+              all club contact on their behalf, and you accept the rules above.
+            </Muted>
+            <Button primary label="I agree — continue" onPress={guardianDisclaimer} />
+          </>
+        )}
+
+        {step === 'g-child' && (
+          <>
+            <SectionTitle>Your child — step 4 of 4</SectionTitle>
+            <TextInput style={styles.input} placeholder="Child's full name" placeholderTextColor={colors.muted} value={childName} onChangeText={setChildName} />
+            <TextInput style={styles.input} placeholder="Child's date of birth (YYYY-MM-DD)" placeholderTextColor={colors.muted} value={childDob} onChangeText={setChildDob} />
+            <SectionTitle>Country</SectionTitle>
+            <Row>
+              {COUNTRIES.map((c) => (
+                <Button key={c} small label={c} primary={childCountry === c} onPress={() => setChildCountry(c)} />
+              ))}
+            </Row>
+            <SectionTitle>Position (optional)</SectionTitle>
+            <Row>
+              {POSITIONS.map((p) => (
+                <Button key={p} small label={p} primary={childPosition === p} onPress={() => setChildPosition(p)} />
+              ))}
+            </Row>
+            <Button primary label="Create child profile" onPress={guardianAddChild} />
+          </>
         )}
 
         {error && (

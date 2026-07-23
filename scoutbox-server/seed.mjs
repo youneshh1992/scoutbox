@@ -1,7 +1,7 @@
 // Seed dataset. In-memory only — a server restart resets to this.
-// Adults-only launch: every seeded player is over the age of majority for
-// their country, so there are no minors for an agency to be blocked from
-// (the under-18 wall code path lives in domain.mjs / visibleToOrg).
+// Milestone 3: under-18 players exist, each owned by a verified guardian.
+// Agencies never see them; unverified clubs never see them; verified clubs
+// contact the guardian, never the child (domain.mjs / visibleToOrg).
 
 export function buildSeed() {
   const now = Date.now();
@@ -15,6 +15,10 @@ export function buildSeed() {
       plan: 'Pro',
       trustedPartner: true,
       country: 'GB',
+      // Club verification: company-email domain + signed safeguarding contract.
+      verified: true,
+      verifiedDomain: 'eastportfc.com',
+      safeguardingContractSigned: true,
     },
     {
       id: 'org-harbour',
@@ -23,6 +27,10 @@ export function buildSeed() {
       plan: 'Academy',
       trustedPartner: false,
       country: 'GB',
+      // Verification pending: adults only until the domain check + contract clear.
+      verified: false,
+      verifiedDomain: null,
+      safeguardingContractSigned: false,
     },
     {
       id: 'org-northstar',
@@ -31,6 +39,30 @@ export function buildSeed() {
       plan: 'Agency',
       trustedPartner: false,
       country: 'GB',
+      verified: false,
+      verifiedDomain: null,
+      safeguardingContractSigned: false,
+    },
+  ];
+
+  // Guardians own every under-18 account. Both seeded guardians have already
+  // passed ID verification and accepted the safeguarding disclaimer.
+  const guardians = [
+    {
+      id: 'gd-amara',
+      name: 'Amara Adebayo',
+      email: 'amara.adebayo@example.com',
+      idVerified: true,
+      disclaimerAccepted: true,
+      childIds: ['pl-guni'],
+    },
+    {
+      id: 'gd-marek',
+      name: 'Marek Kowalski',
+      email: 'marek.kowalski@example.com',
+      idVerified: true,
+      disclaimerAccepted: true,
+      childIds: ['pl-tomasz'],
     },
   ];
 
@@ -45,6 +77,10 @@ export function buildSeed() {
       foot: 'right',
       heightCm: 184,
       weightKg: 79,
+      squadNumber: 22,
+      contractUntil: '2026-06-30',
+      marketValueRange: '€250K – €450K',
+      agentName: 'Team Elevate',
       stats: { appearances: 31, goals: 22, assists: 6, paceKmh: 34.1, passCompletionPct: 78, duelSuccessPct: 61 },
       academyPlus: true,
       badges: ['Finisher', 'Pressing Forward'],
@@ -274,6 +310,44 @@ export function buildSeed() {
       media: [med('Hold-up play & finishing', 'video', now - 12 * day)],
       medical: { shared: false, records: [], conditionStatus: 'fully_fit' },
     }),
+    // ---- Under-18 players: guardian-owned. Invisible to agencies and to
+    // unverified clubs; all contact routes to the guardian.
+    player({
+      id: 'pl-guni',
+      name: 'Guni Adebayo',
+      dob: '2012-02-10', // 14
+      country: 'GB',
+      city: 'London', // stripped from every org view for minors
+      guardianId: 'gd-amara',
+      position: 'RW',
+      foot: 'left',
+      heightCm: 165,
+      weightKg: 54,
+      stats: { appearances: 18, goals: 12, assists: 7, paceKmh: 30.2, passCompletionPct: 74, duelSuccessPct: 44 },
+      identityVerified: true,
+      attendance: [att('U15 Academy League, week 12', 'Hackney Marshes', now - 9 * day)],
+      timeline: [tl('2024', 'Joined grassroots academy U13s'), tl('2026', 'U15 league top scorer at 14')],
+      media: [med('U15 highlights — wing play', 'video', now - 14 * day)],
+      medical: { shared: false, records: [], conditionStatus: 'fully_fit' },
+    }),
+    player({
+      id: 'pl-tomasz',
+      name: 'Tomasz Kowalski',
+      dob: '2009-08-21', // 16
+      country: 'PL',
+      city: 'Gdańsk',
+      guardianId: 'gd-marek',
+      position: 'CM',
+      foot: 'right',
+      heightCm: 175,
+      weightKg: 64,
+      stats: { appearances: 21, goals: 5, assists: 9, paceKmh: 31.0, passCompletionPct: 85, duelSuccessPct: 52 },
+      identityVerified: true,
+      attendance: [att('CLJ U17, round 15', 'Stadion Traugutta', now - 6 * day)],
+      timeline: [tl('2023', 'Youth academy midfielder'), tl('2026', 'U17 central league debut at 16')],
+      media: [med('U17 passing & pressing reel', 'video', now - 20 * day)],
+      medical: { shared: false, records: [], conditionStatus: 'fully_fit' },
+    }),
   ];
 
   // Reference archetypes for the Similar Players engine.
@@ -321,14 +395,18 @@ export function buildSeed() {
 
   return {
     orgs,
+    guardians,
     players,
     archetypes,
     reputationSeed,
     plans,
-    users: [],      // org scout users, created at org login
-    requests: [],   // contact/trial requests
-    trials: [],     // accepted trials awaiting/holding reports
-    ledger: [],     // append-only Discovery Ledger
+    users: [],       // org scout users, created at org login (with verified role)
+    requests: [],    // contact/trial requests (minors: routed to guardian)
+    trials: [],      // accepted trials awaiting/holding reports
+    ledger: [],      // append-only Discovery Ledger
+    reports: [],     // report-user/scout/club submissions
+    blocks: [],      // {playerId, orgId, by, reason} — org loses all access
+    moderationLog: [],
   };
 }
 
@@ -342,6 +420,14 @@ function player(p) {
     medical: { shared: false, records: [], conditionStatus: 'unknown' },
     identityVerified: false,
     academyPlus: false,
+    guardianId: null,
+    squadNumber: null,
+    contractUntil: null,
+    marketValueRange: null,
+    agentName: null,
+    availability: 'not_seeking',
+    contractStatus: 'unknown',
+    drills: [],
     ...p,
   };
 }

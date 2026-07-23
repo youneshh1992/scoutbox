@@ -1,19 +1,23 @@
 import { ScrollView, StyleSheet, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { SAFEGUARDING_PROMISES } from '../../domain/safeguarding';
+import { SAFEGUARDING_PROMISES, U18_PROMISES } from '../../domain/safeguarding';
 import { useSession } from '../../state';
 import { colors } from '../../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from '../../components/ui';
+import { ReportButton } from '../../components/ReportSheet';
 
 export default function You() {
   const router = useRouter();
-  const { me, mode, logout } = useSession();
+  const { me, mode, isMinor, logout } = useSession();
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.h1}>You</Text>
+        <Row style={{ justifyContent: 'space-between' }}>
+          <Text style={styles.h1}>You</Text>
+          <ReportButton />
+        </Row>
 
         <Card>
           <Text style={styles.cardTitle}>{me?.name ?? '—'}</Text>
@@ -34,8 +38,19 @@ export default function You() {
           </Muted>
         </Card>
 
+        {isMinor && (
+          <Card style={{ borderColor: colors.accent2 }}>
+            <SectionTitle>Your guardian-managed account</SectionTitle>
+            <Muted size={13}>
+              Your parent or guardian owns this account and handles everything club-related. If anything
+              on ScoutBox ever makes you uncomfortable, use the ⚑ Report button — it&apos;s on every
+              screen — or tell your guardian.
+            </Muted>
+          </Card>
+        )}
+
         <SectionTitle>The rules that protect you</SectionTitle>
-        {SAFEGUARDING_PROMISES.map((p) => (
+        {(isMinor ? U18_PROMISES : SAFEGUARDING_PROMISES).map((p) => (
           <Card key={p.slice(0, 20)}>
             <Muted size={13}>{p}</Muted>
           </Card>

@@ -2,12 +2,18 @@ import { useState } from 'react';
 import { ScrollView, StyleSheet, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { client } from '../../data/client';
+import type { ChildInboxItem, InboxRequest } from '../../domain/types';
 import { useSession } from '../../state';
 import { colors } from '../../theme';
 import { Button, Card, Muted, Pill, Row } from '../../components/ui';
+import { ReportButton } from '../../components/ReportSheet';
+
+function isChildItem(r: InboxRequest | ChildInboxItem): r is ChildInboxItem {
+  return 'guardianManaged' in r && r.guardianManaged === true;
+}
 
 export default function Inbox() {
-  const { playerId, inbox, refresh } = useSession();
+  const { playerId, inbox, isMinor, refresh } = useSession();
   const [error, setError] = useState<string | null>(null);
 
   const respond = async (requestId: string, accept: boolean) => {
@@ -24,11 +30,21 @@ export default function Inbox() {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.h1}>Scout Inbox</Text>
-        <Muted>
-          Every approach lands here first. Nothing — no message, no call, no DM — reaches you unless you
-          accept. Declining is final and the organisation is told nothing more.
-        </Muted>
+        <Row style={{ justifyContent: 'space-between' }}>
+          <Text style={styles.h1}>{isMinor ? 'Updates' : 'Scout Inbox'}</Text>
+          <ReportButton />
+        </Row>
+        {isMinor ? (
+          <Muted>
+            Scouts can&apos;t message you — that&apos;s a promise, not a setting. Clubs talk to your parent
+            or guardian, and you see the outcome here. No messages, no likes, no followers.
+          </Muted>
+        ) : (
+          <Muted>
+            Every approach lands here first. Nothing — no message, no call, no DM — reaches you unless you
+            accept. Declining is final and the organisation is told nothing more.
+          </Muted>
+        )}
 
         {error && (
           <Card style={{ borderColor: colors.danger }}>
@@ -39,41 +55,62 @@ export default function Inbox() {
         {inbox.length === 0 && (
           <Card>
             <Muted size={14}>
-              No requests yet. When a scout wants to reach you, it shows up here — attributed to a named
-              person at a named organisation.
+              {isMinor
+                ? 'Nothing yet. When a verified club is interested, they contact your parent/guardian and the update shows here.'
+                : 'No requests yet. When a scout wants to reach you, it shows up here — attributed to a named person at a named organisation.'}
             </Muted>
           </Card>
         )}
 
-        {inbox.map((r) => (
-          <Card key={r.id} style={r.status === 'pending' ? { borderColor: colors.accent2 } : undefined}>
-            <Row style={{ justifyContent: 'space-between' }}>
-              <Text style={styles.org}>{r.orgName}</Text>
-              <Row>
-                <Pill label={r.type === 'trial' ? 'trial request' : 'contact request'} tone={r.type === 'trial' ? 'gold' : 'blue'} />
-                {r.trustedPartner && <Pill label="Trusted Partner" tone="gold" />}
+        {inbox.map((r) =>
+          isChildItem(r) ? (
+            <Card key={r.id} style={r.status === 'pending' ? { borderColor: colors.accent2 } : undefined}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Text style={styles.org}>{r.orgName}</Text>
+                <Row>
+                  {r.orgVerified && <Pill label="Verified club" tone="green" />}
+                  <Pill label="guardian-managed" />
+                </Row>
               </Row>
-            </Row>
-            <Muted size={13}>
-              From {r.scoutName} · {new Date(r.createdAt).toLocaleString()}
-            </Muted>
-            {r.message ? <Text style={styles.msg}>“{r.message}”</Text> : null}
-            {r.status === 'pending' ? (
+              <Muted size={13.5}>{r.note}</Muted>
               <Row>
-                <Button small primary label={r.type === 'trial' ? 'Accept trial' : 'Accept contact'} onPress={() => respond(r.id, true)} />
-                <Button small danger label="Decline" onPress={() => respond(r.id, false)} />
+                <Pill
+                  label={r.status === 'pending' ? 'with your guardian' : r.status}
+                  tone={r.status === 'accepted' ? 'green' : r.status === 'declined' || r.status === 'suspended' ? 'red' : 'blue'}
+                />
               </Row>
-            ) : (
-              <Row>
-                <Pill label={r.status} tone={r.status === 'accepted' ? 'green' : 'red'} />
-                {r.status === 'accepted' && r.contactChannel && <Pill label={`channel open: ${r.contactChannel}`} />}
-                {r.status === 'accepted' && r.type === 'trial' && (
-                  <Muted size={12.5}>The club must file a full performance report after your trial — it goes on your profile.</Muted>
-                )}
+            </Card>
+          ) : (
+            <Card key={r.id} style={r.status === 'pending' ? { borderColor: colors.accent2 } : undefined}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Text style={styles.org}>{r.orgName}</Text>
+                <Row>
+                  {r.orgVerified && <Pill label="Verified" tone="green" />}
+                  <Pill label={r.type === 'trial' ? 'trial request' : 'contact request'} tone={r.type === 'trial' ? 'gold' : 'blue'} />
+                  {r.trustedPartner && <Pill label="Trusted Partner" tone="gold" />}
+                </Row>
               </Row>
-            )}
-          </Card>
-        ))}
+              <Muted size={13}>
+                From {r.scoutName}{r.scoutRole ? ` (${r.scoutRole})` : ''} · {new Date(r.createdAt).toLocaleString()}
+              </Muted>
+              {r.message ? <Text style={styles.msg}>“{r.message}”</Text> : null}
+              {r.status === 'pending' ? (
+                <Row>
+                  <Button small primary label={r.type === 'trial' ? 'Accept trial' : 'Accept contact'} onPress={() => respond(r.id, true)} />
+                  <Button small danger label="Decline" onPress={() => respond(r.id, false)} />
+                </Row>
+              ) : (
+                <Row>
+                  <Pill label={r.status} tone={r.status === 'accepted' ? 'green' : 'red'} />
+                  {r.status === 'accepted' && r.contactChannel && <Pill label={`channel open: ${r.contactChannel}`} />}
+                  {r.status === 'accepted' && r.type === 'trial' && (
+                    <Muted size={12.5}>The club must file a full performance report after your trial — it goes on your profile.</Muted>
+                  )}
+                </Row>
+              )}
+            </Card>
+          )
+        )}
       </ScrollView>
     </SafeAreaView>
   );

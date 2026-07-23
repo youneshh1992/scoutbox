@@ -49,16 +49,105 @@ function TrustBar({ score }: { score: number }) {
 }
 
 function AgencyWall({ session }: { session: Session }) {
-  if (session.org.type !== 'agency') return null;
+  if (session.org.type === 'agency') {
+    return (
+      <div className="wall">
+        <b>The under-18 wall is active for this account.</b>
+        <p>
+          Under-18 players are on ScoutBox now — and agency accounts can never list, view or contact
+          any of them. The API refuses on every endpoint, regardless of what this interface asks for.
+          Under-18 representation rules apply: no agent access, no exceptions.
+        </p>
+      </div>
+    );
+  }
+  if (session.org.type === 'club' && !session.org.verified) {
+    return (
+      <div className="wall">
+        <b>Club verification pending — under-18 profiles are hidden.</b>
+        <p>
+          Only verified clubs can search or view under-18 players. Verification requires a company
+          email domain and a signed safeguarding contract; until it clears, this workspace sees the
+          adult pool only.
+        </p>
+      </div>
+    );
+  }
+  return null;
+}
+
+/* ------------------------------------------------------- one-click safety */
+
+// One-click reporting, reachable from every screen (topbar) and from
+// profiles. Urgent reports immediately suspend communication pending review.
+export function SafetyModal({ session, notify, onClose, presetPlayerId }: {
+  session: Session;
+  notify: (text: string, error?: boolean) => void;
+  onClose: () => void;
+  presetPlayerId?: string;
+}) {
+  const [targetKind, setTargetKind] = useState<'player' | 'scout' | 'club'>(presetPlayerId ? 'player' : 'scout');
+  const [target, setTarget] = useState(presetPlayerId ?? '');
+  const [reason, setReason] = useState('');
+  const [urgent, setUrgent] = useState(false);
+
+  const submit = async () => {
+    if (!reason.trim()) return notify('Describe what happened — reports need a reason.', true);
+    try {
+      await api.report(session, {
+        targetKind,
+        targetPlayerId: targetKind === 'player' ? target : undefined,
+        targetScoutName: targetKind === 'scout' ? target : undefined,
+        targetOrgId: targetKind === 'club' ? target : undefined,
+        reason,
+        urgent,
+      });
+      notify(urgent ? 'Report filed — communication suspended pending review.' : 'Report filed for review. Thank you.');
+      onClose();
+    } catch (e) {
+      notify(errMsg(e), true);
+    }
+  };
+
   return (
-    <div className="wall">
-      <b>The under-18 wall is active for this account.</b>
-      <p>
-        Agency accounts can never list, view or contact a minor — the API refuses, on every endpoint,
-        regardless of what this interface asks for. ScoutBox is launching adults-only, so today's pool
-        is all-adult; the wall stays on permanently for when younger age groups arrive.
-      </p>
-    </div>
+    <>
+      <div className="drawer-veil" onClick={onClose} />
+      <div className="drawer" style={{ width: 'min(520px, 92vw)' }}>
+        <div className="head">
+          <div>
+            <h3>Report &amp; block</h3>
+            <div className="sub">All reports are reviewed. Urgent reports suspend communication immediately.</div>
+          </div>
+          <button className="close" onClick={onClose}>Close</button>
+        </div>
+        <div className="section">
+          <h4>What are you reporting?</h4>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {(['player', 'scout', 'club'] as const).map((k) => (
+              <button key={k} className={targetKind === k ? 'primary' : ''} onClick={() => setTargetKind(k)}>
+                Report {k === 'player' ? 'User' : k === 'scout' ? 'Scout' : 'Club'}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="section">
+          <h4>{targetKind === 'player' ? 'Player id' : targetKind === 'scout' ? 'Scout name' : 'Club / org id'}</h4>
+          <input style={{ width: '100%' }} value={target} onChange={(e) => setTarget(e.target.value)}
+            placeholder={targetKind === 'player' ? 'e.g. pl-adeyemi' : targetKind === 'scout' ? 'e.g. the name shown on the request' : 'e.g. org-northstar'} />
+        </div>
+        <div className="section">
+          <h4>What happened?</h4>
+          <input style={{ width: '100%' }} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Describe the behaviour" />
+        </div>
+        <div className="section">
+          <label className="chk" style={{ display: 'flex', gap: 8, color: 'var(--muted)' }}>
+            <input type="checkbox" checked={urgent} onChange={(e) => setUrgent(e.target.checked)} />
+            Urgent — suspend communication immediately pending review
+          </label>
+        </div>
+        <button className="primary" onClick={submit}>Submit report</button>
+      </div>
+    </>
   );
 }
 
@@ -109,6 +198,7 @@ export function SearchScreen({ session, tick, openPlayer }: ScreenProps) {
               {p.age} · {p.foot} foot · {p.city ? `${p.city}, ` : ''}{p.country} · {p.heightCm} cm
             </div>
             <div className="badges">
+              {p.guardianManaged && <span className="pill red">U18 · guardian-managed</span>}
               {p.academyPlus && <span className="pill green">Academy+</span>}
               {p.identityVerified && <span className="pill outline-green">ID ✓</span>}
               <span className="pill">{AVAILABILITY_LABELS[p.availability] ?? p.availability}</span>
@@ -149,8 +239,9 @@ export function RequestsScreen({ session, tick, openPlayer }: ScreenProps) {
   return (
     <>
       <div className="notice" style={{ marginBottom: 16 }}>
-        There is no direct message channel on ScoutBox. You file a request; it lands in the player's Scout
-        Inbox; contact unlocks only if they accept. Declines are final and logged.
+        There is no direct message channel on ScoutBox. You file a request; contact unlocks only on
+        acceptance. For under-18 players the request goes to the <b>parent or guardian</b> — never the
+        child — and any conversation that opens is between your named staff and the guardian.
       </div>
       <div className="list-rows">
         {requests.length === 0 && <div className="notice">No requests sent yet.</div>}
@@ -158,11 +249,14 @@ export function RequestsScreen({ session, tick, openPlayer }: ScreenProps) {
           <div key={r.id} className="list-row">
             <span className={`pill ${r.type === 'trial' ? 'gold' : 'blue'}`}>{r.type}</span>
             <span className="grow">
-              <a style={{ color: 'var(--accent-2)', cursor: 'pointer' }} onClick={() => openPlayer(r.playerId)}>{r.playerId}</a>
+              <a style={{ color: 'var(--accent-2)', cursor: 'pointer' }} onClick={() => openPlayer(r.playerId)}>{r.playerName ?? r.playerId}</a>
+              {r.routedTo === 'guardian' && <span className="pill red" style={{ marginLeft: 8 }}>→ guardian</span>}
               {r.message && <span className="dim"> — “{r.message}”</span>}
             </span>
-            <span className="dim">by {r.scoutName}</span>
-            <span className={`pill ${r.status === 'accepted' ? 'green' : r.status === 'declined' ? 'red' : ''}`}>{r.status}</span>
+            <span className="dim">by {r.scoutName}{r.scoutRole ? ` (${r.scoutRole})` : ''}</span>
+            <span className={`pill ${r.status === 'accepted' ? 'green' : r.status === 'declined' || r.status === 'suspended' ? 'red' : ''}`}>
+              {r.status === 'pending' && r.routedTo === 'guardian' ? 'awaiting guardian' : r.status}
+            </span>
             {r.status === 'accepted' && r.contactChannel && <span className="pill outline-green">channel open: {r.contactChannel}</span>}
           </div>
         ))}
@@ -387,13 +481,17 @@ export function PlayerDrawer({ session, playerId, notify, onClose }: {
   const [error, setError] = useState<string | null>(null);
   const [requestType, setRequestType] = useState<'contact' | 'trial' | null>(null);
   const [message, setMessage] = useState('');
+  const [reporting, setReporting] = useState(false);
 
   useEffect(() => {
     setPlayer(null); setProof(null); setError(null);
     api.getPlayer(session, playerId).then(setPlayer).catch((e) => {
-      setError(e instanceof ApiError && e.code === 'UNDER_18_WALL'
-        ? 'The under-18 wall: agency accounts cannot view minors. This profile does not exist for your organisation.'
-        : errMsg(e));
+      setError(
+        e instanceof ApiError && e.code === 'UNDER_18_WALL'
+          ? 'The under-18 wall: agency accounts cannot view minors. This profile does not exist for your organisation.'
+          : e instanceof ApiError && e.code === 'VERIFIED_CLUBS_ONLY'
+            ? 'Under-18 profiles are visible to verified clubs only. Complete club verification to view this player.'
+            : errMsg(e));
     });
   }, [session, playerId]);
 
@@ -406,9 +504,12 @@ export function PlayerDrawer({ session, playerId, notify, onClose }: {
 
   const send = async () => {
     if (!requestType) return;
+    const minor = player?.guardianManaged;
     try {
       await api.sendRequest(session, playerId, requestType, message);
-      notify(`${requestType === 'trial' ? 'Trial' : 'Contact'} request sent to the player's Scout Inbox. Contact unlocks only if they accept.`);
+      notify(minor
+        ? `Sent to the parent/guardian. ${session.org.name} (${session.role}) has requested to discuss a ${requestType === 'trial' ? 'trial' : 'conversation'} — the guardian decides.`
+        : `${requestType === 'trial' ? 'Trial' : 'Contact'} request sent to the player's Scout Inbox. Contact unlocks only if they accept.`);
       setRequestType(null); setMessage('');
     } catch (e) { notify(errMsg(e), true); }
   };
@@ -429,6 +530,7 @@ export function PlayerDrawer({ session, playerId, notify, onClose }: {
                   {player.position} · {player.age} · {player.foot} foot · {player.city ? `${player.city}, ` : ''}{player.country} · {player.heightCm} cm / {player.weightKg} kg
                 </div>
                 <div className="badges" style={{ marginTop: 8 }}>
+                  {player.guardianManaged && <span className="pill red">U18 · guardian-managed</span>}
                   {player.academyPlus && <span className="pill green">Academy+ — fresh start cohort</span>}
                   {player.identityVerified && <span className="pill outline-green">Identity verified</span>}
                   <span className="pill">{AVAILABILITY_LABELS[player.availability] ?? player.availability}</span>
@@ -441,26 +543,53 @@ export function PlayerDrawer({ session, playerId, notify, onClose }: {
 
             <TrustBar score={player.trustScore} />
 
+            {player.guardianManaged && (
+              <div className="notice warn" style={{ marginTop: 12 }}>
+                This player is under 18. Their account is owned by a parent/guardian: you cannot message
+                the child, ever. Requests below go to the guardian, who sees your club, your name and
+                your verified role ({session.role}).
+              </div>
+            )}
+
             <div className="actions">
               <button onClick={() => act('save')}>Save</button>
               <button onClick={() => act('shortlist')}>Shortlist</button>
-              <button className="primary" onClick={() => setRequestType('contact')}>Request contact</button>
-              <button className="primary" onClick={() => setRequestType('trial')}>Request trial</button>
+              {player.guardianManaged ? (
+                <>
+                  <button className="primary" onClick={() => setRequestType('contact')}>Contact Guardian</button>
+                  <button className="primary" onClick={() => setRequestType('trial')}>Invite to trial (via guardian)</button>
+                </>
+              ) : (
+                <>
+                  <button className="primary" onClick={() => setRequestType('contact')}>Request contact</button>
+                  <button className="primary" onClick={() => setRequestType('trial')}>Request trial</button>
+                </>
+              )}
               <button onClick={loadProof}>Proof Pack</button>
+              <button onClick={() => setReporting(true)}>⚑ Report</button>
             </div>
 
             {requestType && (
               <div className="section">
-                <h4>{requestType} request — goes to the player's Scout Inbox</h4>
+                <h4>
+                  {player.guardianManaged
+                    ? `${requestType === 'trial' ? 'Trial invitation' : 'Conversation request'} — goes to the parent/guardian`
+                    : `${requestType} request — goes to the player's Scout Inbox`}
+                </h4>
                 <div style={{ display: 'flex', gap: 10 }}>
                   <input
                     style={{ flex: 1 }}
-                    placeholder="Message to the player (they see your club and your name)"
+                    placeholder={player.guardianManaged
+                      ? `Message to the guardian (they see ${session.org.name}, ${session.role}, ${session.scoutName})`
+                      : 'Message to the player (they see your club and your name)'}
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
                   />
                   <button className="primary" onClick={send}>Send</button>
                   <button onClick={() => setRequestType(null)}>Cancel</button>
+                </div>
+                <div className="dim" style={{ marginTop: 6, fontSize: 12.5 }}>
+                  Messages are screened: personal contact details and off-platform contact are blocked by moderation.
                 </div>
               </div>
             )}
@@ -500,6 +629,17 @@ export function PlayerDrawer({ session, playerId, notify, onClose }: {
                   {player.stats.paceKmh != null && <Stat v={`${player.stats.paceKmh}`} k="Top speed km/h" />}
                   {player.stats.passCompletionPct != null && <Stat v={`${player.stats.passCompletionPct}%`} k="Pass completion" />}
                   {player.stats.duelSuccessPct != null && player.position !== 'GK' && <Stat v={`${player.stats.duelSuccessPct}%`} k="Duel success" />}
+                </div>
+              </div>
+            )}
+
+            {(player.contractUntil || player.marketValueRange || player.agentName) && (
+              <div className="section">
+                <h4>Contract</h4>
+                <div className="stat-grid">
+                  {player.contractUntil && <Stat v={player.contractUntil} k="Contracted until" />}
+                  {player.marketValueRange && <Stat v={player.marketValueRange} k="Market value" />}
+                  {player.agentName && <Stat v={player.agentName} k="Agent" />}
                 </div>
               </div>
             )}
@@ -600,6 +740,9 @@ export function PlayerDrawer({ session, playerId, notify, onClose }: {
           </>
         )}
       </div>
+      {reporting && (
+        <SafetyModal session={session} notify={notify} onClose={() => setReporting(false)} presetPlayerId={playerId} />
+      )}
     </>
   );
 }

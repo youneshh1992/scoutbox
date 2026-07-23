@@ -2,6 +2,8 @@ import { Redirect } from 'expo-router';
 import { useSession } from '../state';
 
 export default function Index() {
-  const { playerId } = useSession();
-  return <Redirect href={playerId ? '/(tabs)/discover' : '/onboarding'} />;
+  const { kind } = useSession();
+  if (kind === 'guardian') return <Redirect href="/guardian" />;
+  if (kind === 'player') return <Redirect href="/(tabs)/discover" />;
+  return <Redirect href="/onboarding" />;
 }

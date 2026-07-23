@@ -29,8 +29,17 @@ export function isAdult(dob: string, country: string): boolean {
 
 export const SAFEGUARDING_PROMISES = [
   'You never pay to be seen. Discovery is free for every player, forever.',
-  'No unsolicited contact. Clubs and agencies can only file a request into your Scout Inbox — nothing reaches you unless you accept.',
+  'No unsolicited contact. Clubs can only file a request — nothing reaches you unless it is accepted.',
   'Every scouting action on your profile is attributed to a named scout at a named organisation, on an append-only ledger.',
-  'Agencies are structurally walled off from minors. The API refuses — it is not a setting.',
-  'Your medical data is yours. No organisation sees any of it unless you switch sharing on.',
+  'Your medical data is yours. No organisation sees any of it unless sharing is switched on.',
+] as const;
+
+// The under-18 rules, shown to children and parents in plain language.
+export const U18_PROMISES = [
+  'Parents own every under-18 account. A guardian verifies their ID and accepts the safeguarding disclaimer before a child profile can exist.',
+  'No child receives direct messages. Ever. Scouts contact the parent — the conversation happens between adults.',
+  'No comments, no likes, no followers, no public messaging. Profiles are app-only, hidden from public browsing and search engines.',
+  'Only verified clubs can see under-18 profiles. Agencies cannot — the API refuses on every endpoint.',
+  'Trial invitations replace open chat. The parent receives the invite and accepts or declines.',
+  'All communications are logged and visible to the parent. AI moderation blocks personal contact details, with one-click reporting and blocking on every screen.',
 ] as const;

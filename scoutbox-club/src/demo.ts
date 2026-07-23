@@ -10,9 +10,22 @@ import type {
 import { ApiError } from './api';
 
 const ORGS: Org[] = [
-  { id: 'org-eastport', name: 'Eastport FC', type: 'club', plan: 'Pro', trustedPartner: true },
-  { id: 'org-harbour', name: 'Harbour City FC', type: 'club', plan: 'Academy', trustedPartner: false },
-  { id: 'org-northstar', name: 'North Star Sports Agency', type: 'agency', plan: 'Agency', trustedPartner: false },
+  { id: 'org-eastport', name: 'Eastport FC', type: 'club', plan: 'Pro', trustedPartner: true, verified: true },
+  { id: 'org-harbour', name: 'Harbour City FC', type: 'club', plan: 'Academy', trustedPartner: false, verified: false },
+  { id: 'org-northstar', name: 'North Star Sports Agency', type: 'agency', plan: 'Agency', trustedPartner: false, verified: false },
+];
+
+// Mirrors the server's visibility rule: agencies never see minors; only
+// verified clubs do. (Demo simulation — the real gate is scoutbox-server.)
+const canSee = (p: Player, org: Org) => !p.guardianManaged || (org.type === 'club' && org.verified);
+
+// Mirrors the server's moderation screen.
+const MOD_RES = [
+  /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i,
+  /(\+?\d[\d\s().-]{7,}\d)/,
+  /(^|\s)@[a-z0-9_.]{3,}/i,
+  /\b(whatsapp|snapchat|instagram|telegram|discord|tiktok|dm me|dms)\b/i,
+  /\bhttps?:\/\/|www\.[a-z0-9-]+\.[a-z]{2,}/i,
 ];
 
 const PLANS: Record<string, PlanInfo['plan']> = {
@@ -39,6 +52,7 @@ const PLAYERS: Player[] = [
   mkPlayer({
     id: 'pl-adeyemi', name: 'Kola Adeyemi', age: 22, dob: '2004-03-14', country: 'GB', city: 'Manchester',
     position: 'ST', foot: 'right', heightCm: 184, weightKg: 79,
+    squadNumber: 22, contractUntil: '2026-06-30', marketValueRange: '€250K – €450K', agentName: 'Team Elevate',
     stats: { appearances: 31, goals: 22, assists: 6, paceKmh: 34.1, passCompletionPct: 78, duelSuccessPct: 61 },
     academyPlus: true, badges: ['Finisher', 'Pressing Forward'], availability: 'available_now', contractStatus: 'expiring_summer', trustScore: 59,
     attendance: [
@@ -127,6 +141,26 @@ const PLAYERS: Player[] = [
     media: [{ id: 'm9', title: 'Dribbling sequences', kind: 'video', uploadedAt: iso(NOW - 18 * DAY) }],
   }),
   mkPlayer({
+    id: 'pl-guni', name: 'Guni Adebayo', age: 14, dob: null, country: 'GB', city: '',
+    position: 'RW', foot: 'left', heightCm: 165, weightKg: 54,
+    guardianManaged: true, contactPolicy: 'guardian_only',
+    stats: { appearances: 18, goals: 12, assists: 7, paceKmh: 30.2, passCompletionPct: 74, duelSuccessPct: 44 },
+    availability: 'not_seeking', contractStatus: 'unknown', trustScore: 52,
+    timeline: [{ year: '2024', event: 'Joined grassroots academy U13s' }, { year: '2026', event: 'U15 league top scorer at 14' }],
+    attendance: [{ id: 'att-g1', fixture: 'U15 Academy League, week 12', venue: 'Hackney Marshes', date: iso(NOW - 9 * DAY), gps: { lat: 51.55, lng: -0.02 }, verified: true }],
+    media: [{ id: 'mg1', title: 'U15 highlights — wing play', kind: 'video', uploadedAt: iso(NOW - 14 * DAY) }],
+  }),
+  mkPlayer({
+    id: 'pl-tomasz', name: 'Tomasz Kowalski', age: 16, dob: null, country: 'PL', city: '',
+    position: 'CM', foot: 'right', heightCm: 175, weightKg: 64,
+    guardianManaged: true, contactPolicy: 'guardian_only',
+    stats: { appearances: 21, goals: 5, assists: 9, paceKmh: 31.0, passCompletionPct: 85, duelSuccessPct: 52 },
+    availability: 'not_seeking', contractStatus: 'unknown', trustScore: 52,
+    timeline: [{ year: '2023', event: 'Youth academy midfielder' }, { year: '2026', event: 'U17 central league debut at 16' }],
+    attendance: [{ id: 'att-t1', fixture: 'CLJ U17, round 15', venue: 'Stadion Traugutta', date: iso(NOW - 6 * DAY), gps: { lat: 54.38, lng: 18.62 }, verified: true }],
+    media: [{ id: 'mt1', title: 'U17 passing & pressing reel', kind: 'video', uploadedAt: iso(NOW - 20 * DAY) }],
+  }),
+  mkPlayer({
     id: 'pl-kim', name: 'Kim Min-jae', age: 20, dob: '2006-04-02', country: 'KR', city: 'Busan',
     position: 'CF', foot: 'right', heightCm: 186, weightKg: 80,
     stats: { appearances: 19, goals: 13, assists: 2, paceKmh: 33.9, passCompletionPct: 72, duelSuccessPct: 58 },
@@ -173,17 +207,21 @@ function similarity(a: Player, b: Player): number {
 export const demoApi: ScoutboxApi = {
   listOrgs: () => delay(ORGS),
 
-  login: (orgId, scoutName) => {
+  login: (orgId, scoutName, role) => {
     const org = ORGS.find((o) => o.id === orgId);
     if (!org) throw new ApiError(404, 'ORG_NOT_FOUND', 'Unknown org');
     if (!scoutName.trim()) throw new ApiError(400, 'SCOUT_NAME_REQUIRED', 'Every session is attributed to a named individual.');
-    return delay({ org, userId: nid('usr'), scoutName: scoutName.trim() });
+    return delay({ org, userId: nid('usr'), scoutName: scoutName.trim(), role: role || 'Scout' });
+  },
+
+  report: (s, input) => {
+    log(s, `report_${input.targetKind}`, input.targetPlayerId ?? 'n/a');
+    return delay(undefined);
   },
 
   searchPlayers: (s, f: SearchFilters) => {
-    // Mirrors the server: under-18 wall would filter minors for agencies —
-    // the adults-only seed contains none, so all pass.
-    let list = PLAYERS.slice();
+    // Mirrors the server: agencies and unverified clubs never see minors.
+    let list = PLAYERS.filter((p) => canSee(p, s.org));
     if (f.q) {
       const n = f.q.toLowerCase();
       list = list.filter((p) => p.name.toLowerCase().includes(n) || p.city.toLowerCase().includes(n) || p.country.toLowerCase().includes(n));
@@ -198,8 +236,13 @@ export const demoApi: ScoutboxApi = {
   getPlayer: (s, id) => {
     const p = PLAYERS.find((x) => x.id === id);
     if (!p) throw new ApiError(404, 'PLAYER_NOT_FOUND', 'No such player');
+    if (!canSee(p, s.org)) {
+      throw s.org.type === 'agency'
+        ? new ApiError(403, 'UNDER_18_WALL', 'Agency accounts cannot view minors.')
+        : new ApiError(403, 'VERIFIED_CLUBS_ONLY', 'Under-18 profiles are visible to verified clubs only.');
+    }
     log(s, 'view', id);
-    const similar = PLAYERS.filter((c) => c.id !== id)
+    const similar = PLAYERS.filter((c) => c.id !== id && canSee(c, s.org))
       .map((c) => ({ playerId: c.id, name: c.name, position: c.position, score: similarity(p, c) }))
       .sort((a, b) => b.score - a.score)
       .slice(0, 3);
@@ -230,10 +273,18 @@ export const demoApi: ScoutboxApi = {
     if (type === 'trial' && trials.some((t) => t.status === 'awaiting_report')) {
       throw new ApiError(409, 'REPORTS_OUTSTANDING', 'You have trials awaiting a mandatory performance report. File them before requesting new trials.');
     }
-    const req: OrgRequest = { id: nid('req'), playerId, type, message, status: 'pending', scoutName: s.scoutName, createdAt: Date.now(), contactChannel: null };
+    if (MOD_RES.some((re) => re.test(message))) {
+      throw new ApiError(400, 'MODERATION_BLOCKED', 'This text was blocked by moderation: personal contact details and off-platform contact are not allowed.');
+    }
+    const target = PLAYERS.find((x) => x.id === playerId);
+    const req: OrgRequest = {
+      id: nid('req'), playerId, playerName: target?.name, type, message, status: 'pending',
+      scoutName: s.scoutName, scoutRole: s.role, createdAt: Date.now(),
+      routedTo: target?.guardianManaged ? 'guardian' : 'player', contactChannel: null,
+    };
     requests.push(req);
-    log(s, `${type}_request`, playerId);
-    // Demo liveliness: the player accepts after a few seconds.
+    log(s, `${type}_request${target?.guardianManaged ? '_to_guardian' : ''}`, playerId);
+    // Demo liveliness: the player (or guardian) accepts after a few seconds.
     setTimeout(() => {
       req.status = 'accepted';
       req.contactChannel = nid('chan');

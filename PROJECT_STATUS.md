@@ -3,9 +3,54 @@
 > Purpose of this file: let any Claude Code session (cloud or local) pick up this
 > project with zero prior context. Keep it updated at the end of each working session.
 
-**Last updated:** 2026-07-22 · **Milestone: 2 complete (rebuilt on Claude Code web)** ·
-Now developed in this GitHub repo (`youneshh1992/scoutbox`), branch history starts from
-the cloud migration.
+**Last updated:** 2026-07-23 · **Milestone: 3 complete — under-18 players with parental
+safeguarding** · Developed in this GitHub repo (`youneshh1992/scoutbox`), Claude Code web.
+
+## Milestone 3 (2026-07-23): U18 + guardians
+
+Adults-only launch is over: under-18 players now exist, protected by a guardian system
+enforced server-side. Summary of the new rules (all in `scoutbox-server`):
+
+- **Guardian accounts own every U18 profile.** `POST /auth/guardian/signup` →
+  `/guardian/verify-id` (prototype IDV attestation) → `/guardian/disclaimer` →
+  `/guardian/children`. Both gates are hard 403s. Minor self-signup → `403 GUARDIAN_REQUIRED`.
+- **Scout → Parent, never Scout → Child.** Requests to minors get `routedTo: 'guardian'`;
+  the guardian inbox (`/guardian/inbox`) shows club-first identity (org, Verified badge,
+  sender's verified role); `/guardian/requests/:id/respond` opens an adult-to-adult
+  channel on accept and creates the trial. The child's `/player/inbox` returns sanitized
+  status notes only — no message content, no channel; child responds → `403 GUARDIAN_MANAGED`.
+- **Verified clubs only** see minors (`verified` flag on org: company email domain +
+  safeguarding contract). Unverified club → `403 VERIFIED_CLUBS_ONLY`; agency →
+  `403 UNDER_18_WALL` (unchanged, now demoable — seed has Guni Adebayo 14 & Tomasz
+  Kowalski 16 with verified guardians gd-amara / gd-marek).
+- **Privacy for minors:** city + exact DOB stripped from every org view; profiles
+  app-only; no comments/likes/followers anywhere in the API.
+- **Moderation** (`domain.mjs moderateText`, prototype for an AI model): emails, phone
+  numbers, social handles/platforms, URLs, off-platform meeting language →
+  `400 MODERATION_BLOCKED` on request messages, media titles, timeline events.
+- **Report & block:** `/player/report`, `/player/block`, `/guardian/report`,
+  `/guardian/block`, `/org/report`. Urgent reports immediately suspend communication
+  (blocks + freezes pending requests). One-click ⚑ Report/Block UI on every screen of
+  both apps. All communications logged; guardians read the full ledger via `/guardian/log`.
+- **Children keep the football:** media upload (moderated), verified attendance,
+  timeline, stats editing (`POST /player/stats`) and drills (`/player/drills`) stay
+  child-controlled; availability, Academy+, medical sharing and all club interaction are
+  guardian-managed (medical via `/guardian/children/:id/medical/share`).
+- **Player app:** guardian onboarding flow (4 steps), guardian dashboard route
+  (`src/app/guardian.tsx`), child-aware tabs, and the Profile tab rebuilt to the
+  approved design mock (avatar card + squad number, trust 59/100 card with breakdown
+  bar, season-output tiles, availability chips, Academy+ card, contract status card
+  with market value + agent).
+- **Club app:** role picker at login (shown to parents), verified badges, U18
+  guardian-managed profiles with "Contact Guardian" / "Invite to trial (via guardian)"
+  actions, safety modal on every screen, unverified-club banner.
+
+Verified end-to-end 2026-07-23 (Playwright, live server): club trial invite for the
+14-year-old routes to the guardian; guardian sees "Eastport FC · Verified · Head of
+Recruitment — Maria Keane" and accepts; child inbox shows only the sanitized update
+with no accept button and no message text; child profile shows guardian-managed state;
+moderation blocks a message containing a phone number; urgent guardian report suspends
+the org's access. 13 domain tests pass (`npm test`).
 
 ## Migration note (2026-07-22)
 

@@ -1,9 +1,10 @@
 import { ScrollView, StyleSheet, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { SAFEGUARDING_PROMISES } from '../../domain/safeguarding';
+import { SAFEGUARDING_PROMISES, U18_PROMISES } from '../../domain/safeguarding';
 import { useSession } from '../../state';
 import { colors } from '../../theme';
 import { Card, Muted, Pill, Row, SectionTitle } from '../../components/ui';
+import { ReportButton } from '../../components/ReportSheet';
 
 // Organisations scouting on ScoutBox. Presentation data only — what an org can
 // actually do about you is decided by the server, not this list.
@@ -14,25 +15,42 @@ const ORGS = [
 ] as const;
 
 export default function Discover() {
-  const { me } = useSession();
+  const { me, isMinor } = useSession();
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.h1}>Discover</Text>
+        <Row style={{ justifyContent: 'space-between' }}>
+          <Text style={styles.h1}>Discover</Text>
+          <ReportButton />
+        </Row>
         <Muted>Who&apos;s scouting, and exactly what they can — and can&apos;t — do.</Muted>
 
         {me && (
           <Card style={{ borderColor: colors.accent }}>
             <Text style={styles.cardTitle}>Your visibility right now</Text>
-            <Muted size={13.5}>
-              {me.academyPlus
-                ? 'Academy+ is ON: you surface in the boosted fresh-start cohort at the top of club searches.'
-                : 'Academy+ is off. Turn it on in Profile to join the boosted fresh-start cohort.'}
-            </Muted>
-            <Muted size={13.5}>
-              Your medical data is {me.medical.shared ? 'shared — organisations can see your records.' : 'private — no organisation can see any of it.'}
-            </Muted>
+            {isMinor ? (
+              <>
+                <Muted size={13.5}>
+                  Only verified clubs inside ScoutBox can see your profile. It is hidden from public
+                  browsing, search engines and every agency — and clubs can only talk to your guardian.
+                </Muted>
+                <Muted size={13.5}>
+                  Your medical data is {me.medical.shared ? 'shared by your guardian.' : 'private — no organisation can see any of it.'}
+                </Muted>
+              </>
+            ) : (
+              <>
+                <Muted size={13.5}>
+                  {me.academyPlus
+                    ? 'Academy+ is ON: you surface in the boosted fresh-start cohort at the top of club searches.'
+                    : 'Academy+ is off. Turn it on in Profile to join the boosted fresh-start cohort.'}
+                </Muted>
+                <Muted size={13.5}>
+                  Your medical data is {me.medical.shared ? 'shared — organisations can see your records.' : 'private — no organisation can see any of it.'}
+                </Muted>
+              </>
+            )}
           </Card>
         )}
 
@@ -51,7 +69,7 @@ export default function Discover() {
         ))}
 
         <SectionTitle>How discovery works</SectionTitle>
-        {SAFEGUARDING_PROMISES.map((p) => (
+        {(isMinor ? U18_PROMISES : SAFEGUARDING_PROMISES).map((p) => (
           <Card key={p.slice(0, 20)}>
             <Muted size={13.5}>{p}</Muted>
           </Card>

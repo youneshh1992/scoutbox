@@ -1,59 +1,100 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { client, type Me } from './data/client';
-import type { InboxRequest } from './domain/types';
+import type { ChildInboxItem, Guardian, GuardianInboxRequest, InboxRequest } from './domain/types';
+import { isAdult } from './domain/safeguarding';
 
 interface SessionState {
+  kind: 'player' | 'guardian' | null;
   playerId: string | null;
+  guardianId: string | null;
   me: Me | null;
-  inbox: InboxRequest[];
+  /** True when the logged-in player is under 18 (guardian-managed account). */
+  isMinor: boolean;
+  inbox: (InboxRequest | ChildInboxItem)[];
+  guardian: Guardian | null;
+  guardianInbox: GuardianInboxRequest[];
+  children: Me[];
   mode: 'live' | 'demo';
-  login: (playerId: string) => void;
+  loginPlayer: (playerId: string) => void;
+  loginGuardian: (guardianId: string) => void;
   logout: () => void;
   refresh: () => Promise<void>;
 }
 
 const SessionContext = createContext<SessionState | null>(null);
 
-export function SessionProvider({ children }: { children: ReactNode }) {
+export function SessionProvider({ children: kids }: { children: ReactNode }) {
   const [playerId, setPlayerId] = useState<string | null>(null);
+  const [guardianId, setGuardianId] = useState<string | null>(null);
   const [me, setMe] = useState<Me | null>(null);
-  const [inbox, setInbox] = useState<InboxRequest[]>([]);
+  const [inbox, setInbox] = useState<(InboxRequest | ChildInboxItem)[]>([]);
+  const [guardian, setGuardian] = useState<Guardian | null>(null);
+  const [guardianInbox, setGuardianInbox] = useState<GuardianInboxRequest[]>([]);
+  const [childProfiles, setChildProfiles] = useState<Me[]>([]);
 
   const refresh = useCallback(async () => {
-    if (!playerId) return;
     try {
-      const [meData, inboxData] = await Promise.all([client.getMe(playerId), client.getInbox(playerId)]);
-      setMe(meData);
-      setInbox(inboxData);
+      if (playerId) {
+        const [meData, inboxData] = await Promise.all([client.getMe(playerId), client.getInbox(playerId)]);
+        setMe(meData);
+        setInbox(inboxData);
+      }
+      if (guardianId) {
+        const [g, gi, ch] = await Promise.all([
+          client.guardianMe(guardianId),
+          client.guardianInbox(guardianId),
+          client.guardianChildren(guardianId),
+        ]);
+        setGuardian(g);
+        setGuardianInbox(gi);
+        setChildProfiles(ch);
+      }
     } catch {
       // transient — keep last good state
     }
-  }, [playerId]);
+  }, [playerId, guardianId]);
 
   useEffect(() => {
-    if (!playerId) return;
+    if (!playerId && !guardianId) return;
     void refresh();
     return client.onChange(() => void refresh());
-  }, [playerId, refresh]);
+  }, [playerId, guardianId, refresh]);
 
   const value = useMemo<SessionState>(
     () => ({
+      kind: guardianId ? 'guardian' : playerId ? 'player' : null,
       playerId,
+      guardianId,
       me,
+      isMinor: !!me && !isAdult(me.dob, me.country),
       inbox,
+      guardian,
+      guardianInbox,
+      children: childProfiles,
       mode: client.mode,
-      login: setPlayerId,
+      loginPlayer: (id) => {
+        setGuardianId(null);
+        setPlayerId(id);
+      },
+      loginGuardian: (id) => {
+        setPlayerId(null);
+        setGuardianId(id);
+      },
       logout: () => {
         setPlayerId(null);
+        setGuardianId(null);
         setMe(null);
         setInbox([]);
+        setGuardian(null);
+        setGuardianInbox([]);
+        setChildProfiles([]);
       },
       refresh,
     }),
-    [playerId, me, inbox, refresh]
+    [playerId, guardianId, me, inbox, guardian, guardianInbox, childProfiles, refresh]
   );
 
-  return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
+  return <SessionContext.Provider value={value}>{kids}</SessionContext.Provider>;
 }
 
 export function useSession(): SessionState {

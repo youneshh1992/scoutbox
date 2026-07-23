@@ -48,6 +48,13 @@ export interface PlayerProfile {
   dob: string;
   country: string;
   city: string;
+  /** Set on under-18 profiles: the guardian owns the account. */
+  guardianId?: string | null;
+  squadNumber?: number | null;
+  contractUntil?: string | null;
+  marketValueRange?: string | null;
+  agentName?: string | null;
+  drills?: string[];
   position: string | null;
   foot: string | null;
   heightCm: number | null;
@@ -105,19 +112,54 @@ export const CONTRACT_LABELS: Record<ContractStatus, string> = {
   unknown: 'Not set',
 };
 
-// A scouting request as the PLAYER sees it: org identity summarised,
-// internal org/user ids stripped by the server.
+// A scouting request as an ADULT player sees it: org identity summarised,
+// internal org/user ids stripped by the server. A CHILD never sees requests —
+// they get sanitized status notes (ChildInboxItem); the guardian gets the
+// full club-first view (GuardianInboxRequest).
 export interface InboxRequest {
   id: string;
   type: 'contact' | 'trial';
   orgName: string;
   orgType: 'club' | 'agency';
+  orgVerified?: boolean;
   trustedPartner: boolean;
   scoutName: string;
+  scoutRole?: string;
   message: string;
-  status: 'pending' | 'accepted' | 'declined';
+  status: 'pending' | 'accepted' | 'declined' | 'suspended';
   createdAt: number;
   contactChannel: string | null;
+}
+
+export interface ChildInboxItem {
+  id: string;
+  type: 'contact' | 'trial';
+  orgName: string;
+  orgVerified?: boolean;
+  status: 'pending' | 'accepted' | 'declined' | 'suspended';
+  guardianManaged: true;
+  note: string;
+}
+
+export interface GuardianInboxRequest extends InboxRequest {
+  playerId: string;
+  playerName?: string;
+  routedTo: 'guardian';
+}
+
+export interface Guardian {
+  id: string;
+  name: string;
+  email: string;
+  idVerified: boolean;
+  disclaimerAccepted: boolean;
+  childIds: string[];
+}
+
+export interface Drill {
+  id: string;
+  name: string;
+  completed: boolean;
 }
 
 export const POSITIONS = ['GK', 'CB', 'RB', 'LB', 'CDM', 'CM', 'CAM', 'RW', 'LW', 'ST', 'CF'] as const;

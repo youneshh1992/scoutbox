@@ -12,8 +12,9 @@ const TABS = [
 ] as const;
 
 export default function TabsLayout() {
-  const { playerId } = useSession();
+  const { playerId, inbox } = useSession();
   if (!playerId) return <Redirect href="/onboarding" />;
+  const pending = inbox.filter((r) => r.status === 'pending').length;
 
   return (
     <Tabs
@@ -32,6 +33,9 @@ export default function TabsLayout() {
           options={{
             title: t.title,
             tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 17 }}>{t.icon}</Text>,
+            ...(t.name === 'inbox' && pending > 0
+              ? { tabBarBadge: pending, tabBarBadgeStyle: { backgroundColor: colors.accent, color: '#04240f' } }
+              : {}),
           }}
         />
       ))}

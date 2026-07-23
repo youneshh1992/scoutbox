@@ -27,10 +27,32 @@ export function isAdult(player, onDate = new Date()) {
   return ageOn(player.dob, onDate) >= adultAgeFor(player.country);
 }
 
-// The under-18 wall: agencies can never see a minor, on any endpoint.
+// Minor visibility rules, applied at the source on every endpoint:
+// - The under-18 wall: agencies can NEVER see a minor. Not a setting.
+// - Verified clubs only: an unverified club cannot see a minor either.
+// - Adults are visible to every org type.
 export function visibleToOrg(player, org) {
-  if (org.type === 'agency' && !isAdult(player)) return false;
-  return true;
+  if (isAdult(player)) return true;
+  if (org.type === 'agency') return false;
+  return org.type === 'club' && org.verified === true;
+}
+
+// -------------------------------------------------------------- moderation
+// Prototype AI moderation: children cannot share personal contact details
+// through the platform, and club messages to guardians are screened too.
+// Production swaps this for a real moderation model behind the same call.
+const MODERATION_PATTERNS = [
+  { flag: 'email', re: /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i },
+  { flag: 'phone_number', re: /(\+?\d[\d\s().-]{7,}\d)/ },
+  { flag: 'social_handle', re: /(^|\s)@[a-z0-9_.]{3,}/i },
+  { flag: 'social_platform', re: /\b(whatsapp|snapchat|instagram|telegram|discord|tiktok|dm me|dms)\b/i },
+  { flag: 'url', re: /\bhttps?:\/\/|www\.[a-z0-9-]+\.[a-z]{2,}/i },
+  { flag: 'meet_off_platform', re: /\b(meet (me|us) (at|outside)|come alone|don'?t tell)\b/i },
+];
+
+export function moderateText(text) {
+  const flags = MODERATION_PATTERNS.filter((p) => p.re.test(String(text ?? ''))).map((p) => p.flag);
+  return { ok: flags.length === 0, flags };
 }
 
 // Trust Score — 0..99. Institutional corroboration (filed trial reports,
