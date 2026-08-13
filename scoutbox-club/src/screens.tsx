@@ -1,8 +1,9 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   api, ApiError,
   type Session, type Player, type PlayerDetail, type OrgRequest, type Trial,
   type LedgerEntry, type ProofPack, type PlanInfo, type Reputation, type SearchFilters,
+  type Channel, type FiledReport, type TrialDetails,
 } from './api';
 
 interface ScreenProps {
@@ -90,6 +91,9 @@ export function SafetyModal({ session, notify, onClose, presetPlayerId }: {
   const [target, setTarget] = useState(presetPlayerId ?? '');
   const [reason, setReason] = useState('');
   const [urgent, setUrgent] = useState(false);
+  const [myReports, setMyReports] = useState<FiledReport[]>([]);
+
+  useEffect(() => { api.getMyReports(session).then(setMyReports).catch(() => {}); }, [session]);
 
   const submit = async () => {
     if (!reason.trim()) return notify('Describe what happened — reports need a reason.', true);
@@ -146,6 +150,23 @@ export function SafetyModal({ session, notify, onClose, presetPlayerId }: {
           </label>
         </div>
         <button className="primary" onClick={submit}>Submit report</button>
+        {myReports.length > 0 && (
+          <div className="section" style={{ marginTop: 22 }}>
+            <h4>Your reports — you always hear back</h4>
+            <div className="list-rows">
+              {myReports.map((r) => (
+                <div key={r.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                    <span className="pill">{r.targetKind}</span>
+                    <span className="grow" style={{ fontSize: 13 }}>{r.reason}</span>
+                    <span className={`pill ${r.status === 'resolved' ? 'green' : 'gold'}`}>{r.status === 'resolved' ? 'reviewed' : 'in review'}</span>
+                  </div>
+                  {r.outcome && <span className="dim" style={{ fontSize: 12.5 }}>{r.outcome}</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </>
   );
@@ -180,9 +201,24 @@ export function SearchScreen({ session, tick, openPlayer }: ScreenProps) {
           <option value="">Any availability</option>
           {Object.entries(AVAILABILITY_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
+        <select value={filters.ageGroup ?? ''} onChange={(e) => setFilters({ ...filters, ageGroup: (e.target.value || undefined) as SearchFilters['ageGroup'] })}>
+          <option value="">Any age group</option>
+          <option value="u16">U16</option>
+          <option value="u18">U18</option>
+          <option value="18-21">18–21</option>
+          <option value="senior">22+</option>
+        </select>
+        <select value={filters.country ?? ''} onChange={(e) => setFilters({ ...filters, country: e.target.value || undefined })}>
+          <option value="">Any country</option>
+          {['GB', 'PT', 'FR', 'SE', 'PL', 'NG', 'GH', 'AR', 'JP', 'KR'].map((c) => <option key={c}>{c}</option>)}
+        </select>
         <label className="chk">
           <input type="checkbox" checked={!!filters.academyPlus} onChange={(e) => setFilters({ ...filters, academyPlus: e.target.checked || undefined })} />
           Academy+ only
+        </label>
+        <label className="chk">
+          <input type="checkbox" checked={!!filters.newDays} onChange={(e) => setFilters({ ...filters, newDays: e.target.checked ? 7 : undefined })} />
+          New this week
         </label>
         <span className="pill">{players.length} players</span>
       </div>
@@ -265,6 +301,92 @@ export function RequestsScreen({ session, tick, openPlayer }: ScreenProps) {
   );
 }
 
+/* ----------------------------------------------------------- Messages */
+
+// Threads only exist where a request was accepted. For minors the thread is
+// with the guardian; the header says so. Every message is moderated + logged.
+export function MessagesScreen({ session, tick, notify }: ScreenProps) {
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+  const threadRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { api.getChannels(session).then(setChannels).catch(() => {}); }, [session, tick]);
+  useEffect(() => { threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight }); }, [channels, openId]);
+
+  const open = channels.find((c) => c.id === openId) ?? null;
+
+  const send = async () => {
+    if (!open || !draft.trim()) return;
+    try {
+      await api.sendMessage(session, open.id, draft.trim());
+      setDraft('');
+      setChannels(await api.getChannels(session));
+    } catch (e) {
+      notify(errMsg(e), true);
+    }
+  };
+
+  return (
+    <>
+      <div className="notice" style={{ marginBottom: 16 }}>
+        Threads open only when a request is accepted, stay on-platform, and are moderated and logged.
+        For under-18 players you are talking to the <b>parent or guardian</b> — never the child.
+      </div>
+      {channels.length === 0 && <div className="notice">No open threads. Send a request; a thread opens when it's accepted.</div>}
+      <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 14 }}>
+        <div className="list-rows">
+          {channels.map((c) => (
+            <div
+              key={c.id}
+              className="list-row"
+              style={{ cursor: 'pointer', borderColor: openId === c.id ? 'var(--accent-2)' : undefined }}
+              onClick={() => setOpenId(c.id)}
+            >
+              <span className="grow">
+                <b>{c.playerName}</b>
+                <div className="dim">{c.counterparty === 'guardian' ? 'via guardian' : 'direct'} · {c.messages.length} msg</div>
+              </span>
+            </div>
+          ))}
+        </div>
+        {open ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="list-row">
+              <span className="grow">
+                <b>{open.playerName}</b>{' '}
+                {open.counterparty === 'guardian' && <span className="pill red">thread is with the guardian</span>}
+              </span>
+              <span className="dim">opened {new Date(open.createdAt).toLocaleDateString()}</span>
+            </div>
+            <div className="thread" ref={threadRef}>
+              {open.messages.length === 0 && <div className="notice">Say hello — they accepted your request.</div>}
+              {open.messages.map((m) => (
+                <div key={m.id} className={`bubble ${m.sender.kind === 'org_user' ? 'mine' : 'theirs'}`}>
+                  <div className="who">{m.sender.name} · {new Date(m.ts).toLocaleTimeString()}</div>
+                  {m.text}
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <input
+                style={{ flex: 1 }}
+                placeholder="Write a message (moderated — no personal contact details)"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && send()}
+              />
+              <button className="primary" onClick={send}>Send</button>
+            </div>
+          </div>
+        ) : (
+          channels.length > 0 && <div className="notice">Pick a thread.</div>
+        )}
+      </div>
+    </>
+  );
+}
+
 /* ------------------------------------------------------------- Trials */
 
 const REPORT_FIELDS: { key: string; label: string; step?: string }[] = [
@@ -313,7 +435,14 @@ export function TrialsScreen({ session, tick, notify }: ScreenProps) {
         {trials.map((t) => (
           <div key={t.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-              <span className="grow"><b>{t.playerName}</b> <span className="dim">requested by {t.scoutName}</span></span>
+              <span className="grow">
+                <b>{t.playerName}</b> <span className="dim">requested by {t.scoutName}</span>
+                {t.guardianApproved && <span className="pill red" style={{ marginLeft: 8 }}>guardian approved</span>}
+                <div className="dim">
+                  {t.proposedDate ? `${t.proposedDate}` : 'date TBC'}{t.venue ? ` · ${t.venue}` : ''}{t.notes ? ` · ${t.notes}` : ''}
+                  {t.status === 'awaiting_report' && t.reportDueAt ? ` · report due ${new Date(t.reportDueAt).toLocaleDateString()}` : ''}
+                </div>
+              </span>
               <span className={`pill ${t.status === 'reported' ? 'green' : 'gold'}`}>{t.status === 'reported' ? 'report filed' : 'awaiting report'}</span>
               {t.status === 'awaiting_report' && (
                 <button onClick={() => { setFiling(filing === t.id ? null : t.id); setForm({}); }}>
@@ -481,6 +610,7 @@ export function PlayerDrawer({ session, playerId, notify, onClose }: {
   const [error, setError] = useState<string | null>(null);
   const [requestType, setRequestType] = useState<'contact' | 'trial' | null>(null);
   const [message, setMessage] = useState('');
+  const [trialDetails, setTrialDetails] = useState<TrialDetails>({});
   const [reporting, setReporting] = useState(false);
 
   useEffect(() => {
@@ -506,11 +636,11 @@ export function PlayerDrawer({ session, playerId, notify, onClose }: {
     if (!requestType) return;
     const minor = player?.guardianManaged;
     try {
-      await api.sendRequest(session, playerId, requestType, message);
+      await api.sendRequest(session, playerId, requestType, message, requestType === 'trial' ? trialDetails : undefined);
       notify(minor
         ? `Sent to the parent/guardian. ${session.org.name} (${session.role}) has requested to discuss a ${requestType === 'trial' ? 'trial' : 'conversation'} — the guardian decides.`
         : `${requestType === 'trial' ? 'Trial' : 'Contact'} request sent to the player's Scout Inbox. Contact unlocks only if they accept.`);
-      setRequestType(null); setMessage('');
+      setRequestType(null); setMessage(''); setTrialDetails({});
     } catch (e) { notify(errMsg(e), true); }
   };
 
@@ -576,6 +706,13 @@ export function PlayerDrawer({ session, playerId, notify, onClose }: {
                     ? `${requestType === 'trial' ? 'Trial invitation' : 'Conversation request'} — goes to the parent/guardian`
                     : `${requestType} request — goes to the player's Scout Inbox`}
                 </h4>
+                {requestType === 'trial' && (
+                  <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
+                    <input type="date" value={trialDetails.proposedDate ?? ''} onChange={(e) => setTrialDetails({ ...trialDetails, proposedDate: e.target.value || undefined })} />
+                    <input style={{ flex: 1 }} placeholder="Venue (e.g. Eastport Training Centre)" value={trialDetails.venue ?? ''} onChange={(e) => setTrialDetails({ ...trialDetails, venue: e.target.value || undefined })} />
+                    <input style={{ flex: 1 }} placeholder="What to bring / notes" value={trialDetails.notes ?? ''} onChange={(e) => setTrialDetails({ ...trialDetails, notes: e.target.value || undefined })} />
+                  </div>
+                )}
                 <div style={{ display: 'flex', gap: 10 }}>
                   <input
                     style={{ flex: 1 }}
@@ -709,10 +846,13 @@ export function PlayerDrawer({ session, playerId, notify, onClose }: {
               {player.media.length === 0 && <div className="notice">No uploads yet.</div>}
               <div className="list-rows">
                 {player.media.map((m) => (
-                  <div key={m.id} className="list-row">
-                    <span className="pill blue">{m.kind}</span>
-                    <span className="grow">{m.title}</span>
-                    <span className="dim">{new Date(m.uploadedAt).toLocaleDateString()}</span>
+                  <div key={m.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                    <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                      <span className="pill blue">{m.kind}</span>
+                      <span className="grow">{m.title}</span>
+                      <span className="dim">{new Date(m.uploadedAt).toLocaleDateString()}</span>
+                    </div>
+                    {api.mediaUrl(m.url) && <video className="clip" controls preload="metadata" src={api.mediaUrl(m.url)!} />}
                   </div>
                 ))}
               </div>

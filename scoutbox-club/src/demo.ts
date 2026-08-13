@@ -6,6 +6,7 @@
 import type {
   ScoutboxApi, Org, Session, Player, PlayerDetail, OrgRequest, Trial,
   LedgerEntry, ProofPack, PlanInfo, Reputation, SearchFilters,
+  Channel, FiledReport, Notification, TrialDetails,
 } from './api';
 import { ApiError } from './api';
 
@@ -39,6 +40,7 @@ const NOW = Date.now();
 
 function mkPlayer(p: Partial<Player> & { id: string; name: string }): Player {
   return {
+    createdAt: NOW - 30 * DAY,
     age: 21, dob: '2004-01-01', country: 'GB', city: '', position: 'CM', foot: 'right',
     heightCm: 180, weightKg: 75, stats: { appearances: 25, goals: 5, assists: 5 },
     academyPlus: false, badges: [], availability: 'available_now', contractStatus: 'free_agent',
@@ -142,6 +144,7 @@ const PLAYERS: Player[] = [
   }),
   mkPlayer({
     id: 'pl-guni', name: 'Guni Adebayo', age: 14, dob: null, country: 'GB', city: '',
+    createdAt: NOW - 3 * DAY,
     position: 'RW', foot: 'left', heightCm: 165, weightKg: 54,
     guardianManaged: true, contactPolicy: 'guardian_only',
     stats: { appearances: 18, goals: 12, assists: 7, paceKmh: 30.2, passCompletionPct: 74, duelSuccessPct: 44 },
@@ -180,9 +183,31 @@ let idc = 5000;
 const nid = (p: string) => `${p}-${++idc}`;
 const requests: OrgRequest[] = [];
 const trials: Trial[] = [];
+const channels: Channel[] = [];
+const notifications: Notification[] = [];
+const myReports: FiledReport[] = [];
 const ledger: (LedgerEntry & { playerName?: string })[] = [];
 const listeners = new Set<(e: string) => void>();
 const emit = (e: string) => listeners.forEach((l) => l(e));
+
+function pushNotification(text: string, type = 'update') {
+  notifications.unshift({ id: nid('ntf'), ts: Date.now(), type, text, refId: null, read: false });
+  emit('notify');
+}
+
+// Simulated counterparty replies keep demo threads alive.
+const CANNED_REPLIES: Record<'player' | 'guardian', string[]> = {
+  player: [
+    'Thanks — really pleased you got in touch. What does the next step look like?',
+    'That works for me. Anything I should prepare?',
+    'Sounds good. My current club knows I am talking to you.',
+  ],
+  guardian: [
+    'Thank you for going through ScoutBox. Could you tell me who will be present at the session?',
+    'That date works for us. Guni is excited — what should we bring?',
+    'Before we confirm: will a full performance report be filed afterwards?',
+  ],
+};
 
 function log(s: Session, type: string, playerId: string): LedgerEntry {
   const row: LedgerEntry = { id: nid('led'), ts: Date.now(), type, playerId, orgId: s.org.id, orgName: s.org.name, userId: s.userId, scoutName: s.scoutName };
@@ -216,6 +241,14 @@ export const demoApi: ScoutboxApi = {
 
   report: (s, input) => {
     log(s, `report_${input.targetKind}`, input.targetPlayerId ?? 'n/a');
+    const filed: FiledReport = { ...input, id: nid('rep'), ts: Date.now(), status: 'pending_review', outcome: null, resolvedAt: null };
+    myReports.unshift(filed);
+    setTimeout(() => {
+      filed.status = 'resolved';
+      filed.resolvedAt = Date.now();
+      filed.outcome = 'Reviewed by the safety team. Logged against the record; we\'ll act on any pattern.';
+      pushNotification('Your report was reviewed — see Report / Block for the outcome.', 'report_resolved');
+    }, 20000);
     return delay(undefined);
   },
 
@@ -229,6 +262,15 @@ export const demoApi: ScoutboxApi = {
     if (f.position) list = list.filter((p) => p.position === f.position);
     if (f.availability) list = list.filter((p) => p.availability === f.availability);
     if (f.academyPlus) list = list.filter((p) => p.academyPlus);
+    if (f.country) list = list.filter((p) => p.country === f.country);
+    if (f.ageGroup === 'u16') list = list.filter((p) => p.age < 16);
+    if (f.ageGroup === 'u18') list = list.filter((p) => p.age < 18);
+    if (f.ageGroup === '18-21') list = list.filter((p) => p.age >= 18 && p.age <= 21);
+    if (f.ageGroup === 'senior') list = list.filter((p) => p.age >= 22);
+    if (f.newDays) {
+      const cutoff = Date.now() - f.newDays * 24 * 3600 * 1000;
+      list = list.filter((p) => p.createdAt && p.createdAt >= cutoff);
+    }
     list.sort((a, b) => (b.academyPlus ? 1 : 0) - (a.academyPlus ? 1 : 0) || b.trustScore - a.trustScore);
     return delay(list);
   },
@@ -269,7 +311,7 @@ export const demoApi: ScoutboxApi = {
     return delay(PLAYERS.filter((p) => ids.has(p.id)));
   },
 
-  sendRequest: (s, playerId, type, message) => {
+  sendRequest: (s, playerId, type, message, details?: TrialDetails) => {
     if (type === 'trial' && trials.some((t) => t.status === 'awaiting_report')) {
       throw new ApiError(409, 'REPORTS_OUTSTANDING', 'You have trials awaiting a mandatory performance report. File them before requesting new trials.');
     }
@@ -284,19 +326,79 @@ export const demoApi: ScoutboxApi = {
     };
     requests.push(req);
     log(s, `${type}_request${target?.guardianManaged ? '_to_guardian' : ''}`, playerId);
-    // Demo liveliness: the player (or guardian) accepts after a few seconds.
+    // Demo liveliness: the player (or guardian) accepts after a few seconds,
+    // which opens the moderated thread.
     setTimeout(() => {
       req.status = 'accepted';
-      req.contactChannel = nid('chan');
+      const counterparty = target?.guardianManaged ? 'guardian' as const : 'player' as const;
+      const channel: Channel = {
+        id: nid('chan'), requestId: req.id, playerId, playerName: target?.name ?? playerId,
+        orgName: s.org.name, scoutName: s.scoutName, scoutRole: s.role,
+        counterparty, createdAt: Date.now(), messages: [],
+      };
+      channels.push(channel);
+      req.contactChannel = channel.id;
       log(s, `${type}_accepted`, playerId);
+      pushNotification(
+        counterparty === 'guardian'
+          ? `The guardian of ${target?.name} accepted your ${type} request — thread open.`
+          : `${target?.name} accepted your ${type} request — thread open.`,
+        'accepted'
+      );
       if (type === 'trial') {
         const p = PLAYERS.find((x) => x.id === playerId)!;
-        trials.push({ id: nid('trial'), playerId, playerName: p.name, scoutName: s.scoutName, acceptedAt: Date.now(), status: 'awaiting_report' });
+        trials.push({
+          id: nid('trial'), playerId, playerName: p.name, scoutName: s.scoutName, acceptedAt: Date.now(),
+          proposedDate: details?.proposedDate ?? null, venue: details?.venue ?? null, notes: details?.notes ?? '',
+          reportDueAt: (details?.proposedDate ? new Date(details.proposedDate).getTime() : Date.now()) + 7 * 24 * 3600 * 1000,
+          guardianApproved: counterparty === 'guardian',
+          status: 'awaiting_report',
+        });
       }
       emit('requests');
     }, 4000);
     return delay(undefined);
   },
+
+  getChannels: (s) => delay(channels.slice()),
+
+  sendMessage: (s, channelId, text) => {
+    if (MOD_RES.some((re) => re.test(text))) {
+      throw new ApiError(400, 'MODERATION_BLOCKED', 'Blocked by moderation: personal contact details and off-platform contact are not allowed.');
+    }
+    const channel = channels.find((c) => c.id === channelId);
+    if (!channel) throw new ApiError(404, 'CHANNEL_NOT_FOUND', 'No such thread');
+    channel.messages.push({ id: nid('msg'), ts: Date.now(), sender: { kind: 'org_user', id: s.userId, name: `${s.scoutName} · ${s.role} · ${s.org.name}` }, text });
+    log(s, 'message', channel.playerId);
+    // Simulated reply keeps the demo conversational.
+    const replies = CANNED_REPLIES[channel.counterparty];
+    const reply = replies[channel.messages.length % replies.length];
+    setTimeout(() => {
+      channel.messages.push({
+        id: nid('msg'), ts: Date.now(),
+        sender: {
+          kind: channel.counterparty === 'guardian' ? 'guardian' : 'player',
+          id: 'demo',
+          name: channel.counterparty === 'guardian' ? `Guardian of ${channel.playerName}` : channel.playerName,
+        },
+        text: reply,
+      });
+      pushNotification(`${channel.counterparty === 'guardian' ? `The guardian of ${channel.playerName}` : channel.playerName} replied in your thread.`, 'message');
+      emit('messages');
+    }, 3500);
+    return delay(undefined);
+  },
+
+  getNotifications: (s) => delay(notifications.slice()),
+
+  markNotificationsRead: (s) => {
+    notifications.forEach((n) => { n.read = true; });
+    return delay(undefined);
+  },
+
+  getMyReports: (s) => delay(myReports.slice()),
+
+  mediaUrl: (path) => path ?? null,
 
   getRequests: (s) => delay(requests.slice()),
   getTrials: (s) => delay(trials.slice()),

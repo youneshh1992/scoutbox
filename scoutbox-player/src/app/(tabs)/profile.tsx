@@ -16,6 +16,7 @@ import { useSession } from '../../state';
 import { colors } from '../../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle, TrustBar } from '../../components/ui';
 import { ReportSheet } from '../../components/ReportSheet';
+import { WebVideo } from '../../components/WebVideo';
 
 function flagEmoji(country: string): string {
   if (!/^[A-Z]{2}$/i.test(country)) return '';
@@ -290,6 +291,24 @@ export default function Profile() {
               <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>{t.event}</Text>
             </Row>
           ))}
+        </Card>
+
+        <Card>
+          <SectionTitle>Match footage</SectionTitle>
+          {me.media.length === 0 && <Muted size={13}>No clips yet — upload from the Upload tab.</Muted>}
+          {me.media.map((m) => {
+            const src = client.mediaUrl(m.url);
+            return (
+              <View key={m.id} style={{ gap: 6 }}>
+                <Row>
+                  <Pill label={m.kind} tone="blue" />
+                  <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>{m.title}</Text>
+                  <Muted size={12}>{new Date(m.uploadedAt).toLocaleDateString()}</Muted>
+                </Row>
+                {src && <WebVideo src={src} />}
+              </View>
+            );
+          })}
         </Card>
 
         <Card>

@@ -1,18 +1,30 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, DEMO_MODE, type Org, type Session } from './api';
+import { api, DEMO_MODE, type Notification, type Org, type Session } from './api';
 import {
-  SearchScreen, ShortlistScreen, RequestsScreen, TrialsScreen,
+  SearchScreen, ShortlistScreen, RequestsScreen, MessagesScreen, TrialsScreen,
   LedgerScreen, ReputationScreen, PlanScreen, PlayerDrawer, Toast, SafetyModal,
 } from './screens';
 
 const ROLES = ['Head of Recruitment', 'First-Team Scout', 'Academy Coach', 'Agent'];
 
-export type ScreenId = 'search' | 'shortlist' | 'requests' | 'trials' | 'ledger' | 'reputation' | 'plan';
+const SESSION_KEY = 'scoutbox-club-session';
+
+function loadSession(): Session | null {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    return raw ? (JSON.parse(raw) as Session) : null;
+  } catch {
+    return null;
+  }
+}
+
+export type ScreenId = 'search' | 'shortlist' | 'requests' | 'messages' | 'trials' | 'ledger' | 'reputation' | 'plan';
 
 const NAV: { id: ScreenId; label: string }[] = [
   { id: 'search', label: 'Search' },
   { id: 'shortlist', label: 'Shortlist' },
   { id: 'requests', label: 'Requests' },
+  { id: 'messages', label: 'Messages' },
   { id: 'trials', label: 'Trials & Reports' },
   { id: 'ledger', label: 'Discovery Ledger' },
   { id: 'reputation', label: 'Reputation' },
@@ -20,8 +32,30 @@ const NAV: { id: ScreenId; label: string }[] = [
 ];
 
 export default function App() {
-  const [session, setSession] = useState<Session | null>(null);
-  return session ? <Workspace session={session} onLogout={() => setSession(null)} /> : <Login onLogin={setSession} />;
+  // Sessions persist across refreshes (cleared by "Switch org").
+  const [session, setSession] = useState<Session | null>(loadSession);
+
+  const login = (s: Session) => {
+    try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch { /* private mode */ }
+    setSession(s);
+  };
+  const logout = () => {
+    try { localStorage.removeItem(SESSION_KEY); } catch { /* private mode */ }
+    setSession(null);
+  };
+
+  // A restored session's user id may be stale (in-memory server restarts);
+  // re-login once with the stored identity to mint a fresh one.
+  useEffect(() => {
+    const restored = loadSession();
+    if (!restored) return;
+    api.login(restored.org.id, restored.scoutName, restored.role)
+      .then(login)
+      .catch(logout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return session ? <Workspace session={session} onLogout={logout} /> : <Login onLogin={login} />;
 }
 
 function Login({ onLogin }: { onLogin: (s: Session) => void }) {
@@ -90,8 +124,26 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   const [tick, setTick] = useState(0); // bumped by live sync to refetch screens
   const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(null);
   const [safetyOpen, setSafetyOpen] = useState(false);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [bellOpen, setBellOpen] = useState(false);
 
   useEffect(() => api.onChange(() => setTick((t) => t + 1)), []);
+
+  useEffect(() => {
+    api.getNotifications(session).then(setNotifications).catch(() => {});
+  }, [session, tick]);
+
+  const unread = notifications.filter((n) => !n.read).length;
+
+  const openBell = async () => {
+    setBellOpen(!bellOpen);
+    if (!bellOpen && unread > 0) {
+      try {
+        await api.markNotificationsRead(session);
+        setNotifications(await api.getNotifications(session));
+      } catch { /* stays unread */ }
+    }
+  };
 
   const notify = useCallback((text: string, error = false) => {
     setToast({ text, error });
@@ -127,12 +179,27 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
             : <span className="pill">verification pending — U18 hidden</span>)}
           <span className={`pill ${session.org.type === 'agency' ? 'red' : 'blue'}`}>{session.org.type}</span>
           <span className="pill outline-green">● live sync</span>
+          <button onClick={openBell} title="Notifications" style={{ position: 'relative' }}>
+            🔔{unread > 0 && <span className="bell-badge">{unread}</span>}
+          </button>
           <button onClick={() => setSafetyOpen(true)} title="One-click reporting — available on every screen">⚑ Report / Block</button>
         </div>
+        {bellOpen && (
+          <div className="bell-panel">
+            {notifications.length === 0 && <div className="notice">Nothing yet — you'll hear the moment a player or guardian responds.</div>}
+            {notifications.slice(0, 20).map((n) => (
+              <div key={n.id} className="list-row" style={{ opacity: n.read ? 0.7 : 1 }}>
+                <span className="grow" style={{ fontSize: 13 }}>{n.text}</span>
+                <span className="dim">{new Date(n.ts).toLocaleTimeString()}</span>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="content">
           {screen === 'search' && <SearchScreen {...props} />}
           {screen === 'shortlist' && <ShortlistScreen {...props} />}
           {screen === 'requests' && <RequestsScreen {...props} />}
+          {screen === 'messages' && <MessagesScreen {...props} />}
           {screen === 'trials' && <TrialsScreen {...props} />}
           {screen === 'ledger' && <LedgerScreen {...props} />}
           {screen === 'reputation' && <ReputationScreen {...props} />}

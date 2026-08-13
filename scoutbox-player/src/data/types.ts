@@ -5,6 +5,7 @@ import type {
 import type { TrustBreakdown } from '../domain/trustScore';
 
 export interface SignupInput {
+  password?: string;
   name: string;
   dob: string;
   country: string;
@@ -49,6 +50,51 @@ export interface ReportInput {
   urgent?: boolean;
 }
 
+export interface FiledReport extends ReportInput {
+  id: string;
+  ts: number;
+  status: 'pending_review' | 'resolved';
+  outcome: string | null;
+  resolvedAt: number | null;
+}
+
+export interface Message {
+  id: string;
+  ts: number;
+  sender: { kind: 'org_user' | 'player' | 'guardian'; id: string; name: string };
+  text: string;
+}
+
+export interface Channel {
+  id: string;
+  requestId: string;
+  playerId: string;
+  playerName: string;
+  orgName: string;
+  orgVerified?: boolean;
+  scoutName: string;
+  scoutRole: string;
+  counterparty: 'player' | 'guardian';
+  createdAt: number;
+  messages: Message[];
+}
+
+export interface AppNotification {
+  id: string;
+  ts: number;
+  type: string;
+  text: string;
+  refId: string | null;
+  read: boolean;
+}
+
+export interface Insights {
+  thisWeek: { views: number; saves: number; shortlists: number };
+  thisMonth: { views: number; saves: number; shortlists: number };
+  byOrg: { orgName: string; views: number; saves: number; shortlists: number; requests: number; lastSeen: number }[];
+  recent: { type: string; orgName: string; scoutName: string; ts: number }[];
+}
+
 export interface ChildInput {
   name: string;
   dob: string;
@@ -68,7 +114,16 @@ export interface PlayerClient {
   getInbox(playerId: string): Promise<(InboxRequest | ChildInboxItem)[]>;
   respond(playerId: string, requestId: string, accept: boolean): Promise<void>;
   setAcademyPlus(playerId: string, enabled: boolean): Promise<void>;
-  addMedia(playerId: string, title: string): Promise<void>;
+  /** dataUrl carries the actual video file when provided (web picker). */
+  addMedia(playerId: string, title: string, dataUrl?: string): Promise<void>;
+  /** Resolve a media path to a playable URL (absolute in live mode). */
+  mediaUrl(path: string | null | undefined): string | null;
+  getChannels(playerId: string): Promise<Channel[]>;
+  sendMessage(playerId: string, channelId: string, text: string): Promise<void>;
+  getNotifications(playerId: string): Promise<AppNotification[]>;
+  markNotificationsRead(playerId: string): Promise<void>;
+  getInsights(playerId: string): Promise<Insights>;
+  getMyReports(playerId: string): Promise<FiledReport[]>;
   setMedicalShared(playerId: string, shared: boolean): Promise<void>;
   setAvailability(playerId: string, availability?: Availability, contractStatus?: ContractStatus): Promise<void>;
   addAttendance(playerId: string, input: AttendanceInput): Promise<void>;
@@ -93,6 +148,14 @@ export interface PlayerClient {
   guardianSetMedicalShared(guardianId: string, childId: string, shared: boolean): Promise<void>;
   guardianReport(guardianId: string, input: ReportInput): Promise<void>;
   guardianBlock(guardianId: string, orgId: string, childId?: string, reason?: string): Promise<void>;
+  guardianChannels(guardianId: string): Promise<Channel[]>;
+  guardianSendMessage(guardianId: string, channelId: string, text: string): Promise<void>;
+  guardianNotifications(guardianId: string): Promise<AppNotification[]>;
+  guardianMarkNotificationsRead(guardianId: string): Promise<void>;
+  guardianChildInsights(guardianId: string, childId: string): Promise<Insights>;
+  guardianSetChildAvailability(guardianId: string, childId: string, availability: 'available_now' | 'end_of_season' | 'not_seeking'): Promise<void>;
+  guardianAddCoGuardian(guardianId: string, name: string, email: string): Promise<void>;
+  guardianReports(guardianId: string): Promise<FiledReport[]>;
 
   onChange(cb: () => void): () => void;
 }

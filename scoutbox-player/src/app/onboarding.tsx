@@ -28,8 +28,20 @@ export default function Onboarding() {
   const [dob, setDob] = useState('');
   const [country, setCountry] = useState('GB');
   const [city, setCity] = useState('');
+  const [password, setPassword] = useState('');
   const [position, setPosition] = useState<string | null>(null);
   const [foot, setFoot] = useState<string | null>(null);
+
+  // Live age feedback: format as they type and show what the date means.
+  const formatDob = (raw: string) => {
+    const digits = raw.replace(/\D/g, '').slice(0, 8);
+    let out = digits;
+    if (digits.length > 4) out = `${digits.slice(0, 4)}-${digits.slice(4, 6)}`;
+    if (digits.length > 6) out = `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
+    return out;
+  };
+  const dobValid = /^\d{4}-\d{2}-\d{2}$/.test(dob) && !Number.isNaN(new Date(dob).getTime());
+  const dobAge = dobValid ? ageOn(dob) : null;
 
   // guardian flow
   const [gName, setGName] = useState('');
@@ -76,6 +88,7 @@ export default function Onboarding() {
         city: city.trim() || undefined,
         position: position ?? undefined,
         foot: foot ?? undefined,
+        password: password || undefined,
       });
       enterAsPlayer(playerId);
     } catch (e) {
@@ -216,8 +229,23 @@ export default function Onboarding() {
           <>
             <SectionTitle>About you</SectionTitle>
             <TextInput style={styles.input} placeholder="Full name" placeholderTextColor={colors.muted} value={name} onChangeText={setName} />
-            <TextInput style={styles.input} placeholder="Date of birth (YYYY-MM-DD)" placeholderTextColor={colors.muted} value={dob} onChangeText={setDob} />
+            <TextInput
+              style={styles.input}
+              placeholder="Date of birth — just type the digits (YYYYMMDD)"
+              placeholderTextColor={colors.muted}
+              value={dob}
+              onChangeText={(v) => setDob(formatDob(v))}
+              keyboardType="numeric"
+            />
+            {dobAge !== null && (
+              <Muted size={12.5}>
+                {dobAge >= adultAgeFor(country)
+                  ? `You're ${dobAge} — you can create your own account.`
+                  : `You're ${dobAge} — under ${adultAgeFor(country)}, so a parent or guardian sets up the account (next step will guide you).`}
+              </Muted>
+            )}
             <TextInput style={styles.input} placeholder="City (optional)" placeholderTextColor={colors.muted} value={city} onChangeText={setCity} />
+            <TextInput style={styles.input} placeholder="Password (optional — protects your profile login)" placeholderTextColor={colors.muted} value={password} onChangeText={setPassword} secureTextEntry />
             <SectionTitle>Country</SectionTitle>
             <Row>
               {COUNTRIES.map((c) => (

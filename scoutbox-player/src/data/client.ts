@@ -9,4 +9,7 @@ import type { PlayerClient } from './types';
 
 export const client: PlayerClient = process.env.EXPO_PUBLIC_API_URL ? httpClient : mockClient;
 export { ClientError } from './types';
-export type { Me, SignupInput, AttendanceInput, DemoIdentity, PlayerClient, ReportInput, ChildInput } from './types';
+export type {
+  Me, SignupInput, AttendanceInput, DemoIdentity, PlayerClient, ReportInput, ChildInput,
+  Channel, Message, AppNotification, Insights, FiledReport,
+} from './types';

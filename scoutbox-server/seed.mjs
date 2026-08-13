@@ -350,6 +350,13 @@ export function buildSeed() {
     }),
   ];
 
+  // Joined-at timestamps drive the "new this week" search filter.
+  players.forEach((p, i) => {
+    p.createdAt = now - (((i * 11) % 40) + 2) * day;
+  });
+  players.find((p) => p.id === 'pl-guni').createdAt = now - 3 * day;      // new this week
+  players.find((p) => p.id === 'pl-mensah').createdAt = now - 5 * day;    // new this week
+
   // Reference archetypes for the Similar Players engine.
   const archetypes = [
     { id: 'arch-pressing-forward', label: 'Pressing forward', position: 'ST', foot: 'right', dob: '2002-01-01', heightCm: 185, weightKg: 80, stats: { appearances: 30, goals: 18, assists: 5 } },
@@ -404,9 +411,12 @@ export function buildSeed() {
     requests: [],    // contact/trial requests (minors: routed to guardian)
     trials: [],      // accepted trials awaiting/holding reports
     ledger: [],      // append-only Discovery Ledger
-    reports: [],     // report-user/scout/club submissions
+    reports: [],     // report-user/scout/club submissions (status → resolved)
     blocks: [],      // {playerId, orgId, by, reason} — org loses all access
     moderationLog: [],
+    channels: [],       // moderated message threads, opened on acceptance
+    notifications: [],  // in-app notification feed per audience
+    mediaBlobs: {},     // mediaId → { dataUrl } for uploaded video (prototype store)
   };
 }
 
@@ -428,6 +438,8 @@ function player(p) {
     availability: 'not_seeking',
     contractStatus: 'unknown',
     drills: [],
+    createdAt: null,
+    password: null, // optional; when set, login requires it
     ...p,
   };
 }

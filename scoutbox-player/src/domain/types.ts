@@ -27,6 +27,8 @@ export interface MediaItem {
   title: string;
   kind: string;
   uploadedAt: string;
+  /** Playable source when a real file was uploaded (path in live mode, data URL in demo). */
+  url?: string | null;
 }
 
 export interface TrialReportOnProfile {

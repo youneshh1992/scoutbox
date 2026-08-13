@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { client } from '../../data/client';
 import type { Drill } from '../../domain/types';
@@ -7,6 +7,31 @@ import { useSession } from '../../state';
 import { colors } from '../../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from '../../components/ui';
 import { ReportButton } from '../../components/ReportSheet';
+import { NotificationBell } from '../../components/NotificationBell';
+
+// Web file picker → data URL (capped ~12MB). Native uses the camera roll in
+// production; this prototype records title-only entries off-web.
+function pickVideoFile(): Promise<{ dataUrl: string; name: string } | null> {
+  if (Platform.OS !== 'web' || typeof document === 'undefined') return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'video/*';
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return resolve(null);
+      if (file.size > 12 * 1024 * 1024) {
+        resolve({ dataUrl: '', name: `TOO_LARGE:${file.name}` });
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => resolve({ dataUrl: String(reader.result), name: file.name });
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  });
+}
 
 const STAT_FIELDS = [
   { key: 'appearances', label: 'Apps' },
@@ -20,6 +45,7 @@ const STAT_FIELDS = [
 export default function Upload() {
   const { playerId, me, isMinor, refresh } = useSession();
   const [mediaTitle, setMediaTitle] = useState('');
+  const [pickedFile, setPickedFile] = useState<{ dataUrl: string; name: string } | null>(null);
   const [drills, setDrills] = useState<Drill[]>([]);
   const [statDraft, setStatDraft] = useState<Record<string, string>>({});
 
@@ -39,13 +65,23 @@ export default function Upload() {
     setTimeout(() => setNotice(null), 4000);
   };
 
+  const chooseFile = async () => {
+    const picked = await pickVideoFile();
+    if (!picked) return say(Platform.OS === 'web' ? 'No file chosen.' : 'File picking is web-only in this prototype — native uses the camera roll in production.', true);
+    if (picked.name.startsWith('TOO_LARGE:')) return say('That file is over the 12MB prototype cap — trim the clip and retry.', true);
+    setPickedFile(picked);
+    if (!mediaTitle.trim()) setMediaTitle(picked.name.replace(/\.[^.]+$/, ''));
+    say(`Selected ${picked.name} — add a title and upload.`);
+  };
+
   const uploadMedia = async () => {
     if (!mediaTitle.trim()) return say('Give the clip a title.', true);
     try {
-      await client.addMedia(playerId, mediaTitle.trim());
+      await client.addMedia(playerId, mediaTitle.trim(), pickedFile?.dataUrl || undefined);
       setMediaTitle('');
+      setPickedFile(null);
       await refresh();
-      say('Uploaded — clubs can see it now, and it nudges your Trust Score.');
+      say(pickedFile ? 'Video uploaded — clubs can watch it now, and it nudges your Trust Score.' : 'Added — attach a video file next time so clubs can watch it.');
     } catch (e) {
       say(e instanceof Error ? e.message : 'Upload failed', true);
     }
@@ -75,7 +111,10 @@ export default function Upload() {
       <ScrollView contentContainerStyle={styles.scroll}>
         <Row style={{ justifyContent: 'space-between' }}>
           <Text style={styles.h1}>Upload</Text>
-          <ReportButton />
+          <Row>
+            <NotificationBell />
+            <ReportButton />
+          </Row>
         </Row>
         <Muted>
           Footage, stats, drills and verified appearances — the evidence that moves your Trust Score.
@@ -90,6 +129,10 @@ export default function Upload() {
 
         <Card>
           <SectionTitle>Add match footage</SectionTitle>
+          <Row>
+            <Button small label={pickedFile ? `🎬 ${pickedFile.name.slice(0, 28)}` : '🎬 Choose video file'} onPress={chooseFile} />
+            {pickedFile && <Pill label="ready" tone="green" />}
+          </Row>
           <TextInput
             style={styles.input}
             placeholder="Clip title (e.g. Highlights vs Riverside)"

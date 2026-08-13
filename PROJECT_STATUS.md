@@ -3,8 +3,54 @@
 > Purpose of this file: let any Claude Code session (cloud or local) pick up this
 > project with zero prior context. Keep it updated at the end of each working session.
 
-**Last updated:** 2026-07-23 · **Milestone: 3 complete — under-18 players with parental
-safeguarding** · Developed in this GitHub repo (`youneshh1992/scoutbox`), Claude Code web.
+**Last updated:** 2026-07-23 · **Milestone: 4 complete — the user-facing loop closed
+(messaging, notifications, video, insights)** · Developed in this GitHub repo
+(`youneshh1992/scoutbox`), Claude Code web.
+
+## Milestone 4 (2026-07-23): closing the user-experience gaps
+
+Everything below is server-enforced first, mirrored in both demo clients.
+
+- **Message threads** — the payoff of the request flow now exists. A channel opens ONLY
+  when a request is accepted (`openChannel`); org side `/org/channels`, adult players
+  `/player/channels`, guardians `/guardian/channels`. Children have no threads, ever.
+  Every message is moderated (contact details blocked) and lands on the ledger.
+  Club app: Messages screen with thread view; player app: threads in Inbox (adults) and
+  the guardian dashboard (minors' threads).
+- **In-app notifications** — `db.notifications` per audience, `/…/notifications` (+ mark
+  read) for org users, players and guardians; fired on request received, accepted,
+  declined, message received, trial report filed, report resolved. Bell with unread badge
+  in both apps. (Push/email delivery is production infra behind the same records.)
+- **Real video upload & playback** — `POST /player/media` accepts a data URL (~12MB cap,
+  in-memory store; production = object storage behind the same endpoint), served at
+  `GET /media/:id`. Web file picker in Upload; playback in the club profile drawer and
+  the player profile (`WebVideo`, native playback ships with expo-av).
+- **"Who's watching you" insights** — `/player/insights` + `/guardian/children/:id/insights`:
+  weekly/monthly view counts, per-org breakdown, recent attributed events. Card on the
+  player Discover tab; per-child line in the guardian dashboard.
+- **Trial logistics** — trial requests carry proposedDate/venue/notes (moderated); trials
+  gain `reportDueAt` (+7 days); shown on both sides before accepting and on the Trials screen.
+- **Guardian-initiated availability** — `/guardian/children/:id/availability`
+  (open to trials / from end of season / not seeking) with dashboard controls.
+- **Co-guardian** — `/guardian/coguardian` adds a second parent sharing the children;
+  must still pass ID verification + disclaimer before acting.
+- **Report outcomes** — reports resolve with an outcome (prototype 45s review timer;
+  production = human T&S queue behind the same status fields) and notify the reporter;
+  "safety centre" lists in both apps.
+- **Search filters** — age group (U16/U18/18–21/senior), country, "new this week"
+  (players now carry `createdAt`).
+- **Persisted sessions** — both apps store the session in localStorage and restore on
+  refresh (club re-mints its user id on restore since the server is in-memory).
+- **Optional passwords** — signup accepts a password; login then requires it (plain-text
+  prototype store, stripped from every API response; production = hashing + sessions).
+- **Onboarding polish** — DOB auto-formats with live age feedback ("You're 14 — a parent
+  or guardian sets up the account").
+
+Verified 2026-07-23 (Playwright + API, live server): insights card and inbox badge render;
+adult accepts trial → thread opens → messages flow both ways with org identity shown as
+"Maria Keane · Head of Recruitment · Eastport FC"; org gets notified of replies; guardian
+accepts → adult-to-adult thread works; moderation blocks a phone number inside a thread;
+trial carries venue/date and a report deadline; demo builds replay all of it offline.
 
 ## Milestone 3 (2026-07-23): U18 + guardians
 

@@ -1,6 +1,9 @@
 // Live data client — talks to scoutbox-server (EXPO_PUBLIC_API_URL).
 
-import type { PlayerClient, SignupInput, Me, AttendanceInput, DemoIdentity, ReportInput, ChildInput } from './types';
+import type {
+  PlayerClient, SignupInput, Me, AttendanceInput, DemoIdentity, ReportInput, ChildInput,
+  Channel, AppNotification, Insights, FiledReport,
+} from './types';
 import { ClientError } from './types';
 import type { Availability, ContractStatus, InboxRequest, ChildInboxItem, Guardian, GuardianInboxRequest, Drill } from '../domain/types';
 
@@ -58,8 +61,24 @@ export const httpClient: PlayerClient = {
   setAcademyPlus: (playerId, enabled) =>
     request<void>('/player/academyplus', playerId, { method: 'POST', body: JSON.stringify({ enabled }) }),
 
-  addMedia: (playerId, title) =>
-    request<void>('/player/media', playerId, { method: 'POST', body: JSON.stringify({ title, kind: 'video' }) }),
+  addMedia: (playerId, title, dataUrl) =>
+    request<void>('/player/media', playerId, { method: 'POST', body: JSON.stringify({ title, kind: 'video', dataUrl }) }),
+
+  mediaUrl: (path) => (path ? `${API_URL}${path}` : null),
+
+  getChannels: (playerId) => request<Channel[]>('/player/channels', playerId),
+
+  sendMessage: (playerId, channelId, text) =>
+    request<void>(`/player/channels/${channelId}/messages`, playerId, { method: 'POST', body: JSON.stringify({ text }) }),
+
+  getNotifications: (playerId) => request<AppNotification[]>('/player/notifications', playerId),
+
+  markNotificationsRead: (playerId) =>
+    request<void>('/player/notifications/read', playerId, { method: 'POST' }),
+
+  getInsights: (playerId) => request<Insights>('/player/insights', playerId),
+
+  getMyReports: (playerId) => request<FiledReport[]>('/player/reports', playerId),
 
   setMedicalShared: (playerId, shared) =>
     request<void>('/player/medical/share', playerId, { method: 'POST', body: JSON.stringify({ shared }) }),
@@ -127,6 +146,27 @@ export const httpClient: PlayerClient = {
 
   guardianBlock: (guardianId, orgId, childId, reason) =>
     guardianRequest<void>('/guardian/block', guardianId, { method: 'POST', body: JSON.stringify({ orgId, playerId: childId, reason }) }),
+
+  guardianChannels: (guardianId) => guardianRequest<Channel[]>('/guardian/channels', guardianId),
+
+  guardianSendMessage: (guardianId, channelId, text) =>
+    guardianRequest<void>(`/guardian/channels/${channelId}/messages`, guardianId, { method: 'POST', body: JSON.stringify({ text }) }),
+
+  guardianNotifications: (guardianId) => guardianRequest<AppNotification[]>('/guardian/notifications', guardianId),
+
+  guardianMarkNotificationsRead: (guardianId) =>
+    guardianRequest<void>('/guardian/notifications/read', guardianId, { method: 'POST' }),
+
+  guardianChildInsights: (guardianId, childId) =>
+    guardianRequest<Insights>(`/guardian/children/${childId}/insights`, guardianId),
+
+  guardianSetChildAvailability: (guardianId, childId, availability) =>
+    guardianRequest<void>(`/guardian/children/${childId}/availability`, guardianId, { method: 'POST', body: JSON.stringify({ availability }) }),
+
+  guardianAddCoGuardian: (guardianId, name, email) =>
+    guardianRequest<void>('/guardian/coguardian', guardianId, { method: 'POST', body: JSON.stringify({ name, email }) }),
+
+  guardianReports: (guardianId) => guardianRequest<FiledReport[]>('/guardian/reports', guardianId),
 
   onChange: (cb) => {
     // SSE on web; polling elsewhere (native has no EventSource).

@@ -104,9 +104,10 @@ export interface Player {
   trustScore: number;
   attendance: Attendance[];
   timeline: { year: string; event: string }[];
-  media: { id: string; title: string; kind: string; uploadedAt: string }[];
+  media: { id: string; title: string; kind: string; uploadedAt: string; url?: string | null }[];
   trialReports: TrialReport[];
   medical: Medical;
+  createdAt?: number | null;
 }
 
 export interface PlayerDetail extends Player {
@@ -141,12 +142,62 @@ export interface ReportInput {
   urgent?: boolean;
 }
 
+export interface FiledReport extends ReportInput {
+  id: string;
+  ts: number;
+  status: 'pending_review' | 'resolved';
+  outcome: string | null;
+  resolvedAt: number | null;
+}
+
+export interface Message {
+  id: string;
+  ts: number;
+  sender: { kind: 'org_user' | 'player' | 'guardian'; id: string; name: string };
+  text: string;
+}
+
+export interface Channel {
+  id: string;
+  requestId: string;
+  playerId: string;
+  playerName: string;
+  orgName: string;
+  scoutName: string;
+  scoutRole: string;
+  /** 'guardian' means the thread is with the parent — never the child. */
+  counterparty: 'player' | 'guardian';
+  createdAt: number;
+  messages: Message[];
+}
+
+export interface Notification {
+  id: string;
+  ts: number;
+  type: string;
+  text: string;
+  refId: string | null;
+  read: boolean;
+}
+
+export interface TrialDetails {
+  proposedDate?: string;
+  venue?: string;
+  notes?: string;
+}
+
 export interface Trial {
   id: string;
   playerId: string;
   playerName: string;
   scoutName: string;
   acceptedAt: number;
+  proposedDate?: string | null;
+  venue?: string | null;
+  notes?: string;
+  /** The mandatory performance report deadline. */
+  reportDueAt?: number;
+  guardianApproved?: boolean;
   status: 'awaiting_report' | 'reported';
   report?: TrialReport;
 }
@@ -195,6 +246,10 @@ export interface SearchFilters {
   position?: string;
   academyPlus?: boolean;
   availability?: string;
+  country?: string;
+  ageGroup?: 'u16' | 'u18' | '18-21' | 'senior';
+  /** Only players who joined in the last N days. */
+  newDays?: number;
 }
 
 export interface ScoutboxApi {
@@ -205,7 +260,14 @@ export interface ScoutboxApi {
   getPlayer(s: Session, id: string): Promise<PlayerDetail>;
   act(s: Session, playerId: string, action: 'save' | 'shortlist' | 'signing'): Promise<void>;
   getShortlist(s: Session): Promise<Player[]>;
-  sendRequest(s: Session, playerId: string, type: 'contact' | 'trial', message: string): Promise<void>;
+  sendRequest(s: Session, playerId: string, type: 'contact' | 'trial', message: string, details?: TrialDetails): Promise<void>;
+  getChannels(s: Session): Promise<Channel[]>;
+  sendMessage(s: Session, channelId: string, text: string): Promise<void>;
+  getNotifications(s: Session): Promise<Notification[]>;
+  markNotificationsRead(s: Session): Promise<void>;
+  getMyReports(s: Session): Promise<FiledReport[]>;
+  /** Absolute URL for an uploaded media file, or null when no file exists. */
+  mediaUrl(path: string | null | undefined): string | null;
   getRequests(s: Session): Promise<OrgRequest[]>;
   getTrials(s: Session): Promise<Trial[]>;
   fileTrialReport(s: Session, trialId: string, report: Record<string, number | string>): Promise<void>;
@@ -251,6 +313,9 @@ export const httpApi: ScoutboxApi = {
     if (f.position) params.set('position', f.position);
     if (f.availability) params.set('availability', f.availability);
     if (f.academyPlus) params.set('academyPlus', 'true');
+    if (f.country) params.set('country', f.country);
+    if (f.ageGroup) params.set('ageGroup', f.ageGroup);
+    if (f.newDays) params.set('newDays', String(f.newDays));
     return request<Player[]>(`/org/players?${params}`, { headers: headers(s) });
   },
 
@@ -261,12 +326,26 @@ export const httpApi: ScoutboxApi = {
 
   getShortlist: (s) => request<Player[]>('/org/shortlist', { headers: headers(s) }),
 
-  sendRequest: (s, playerId, type, message) =>
+  sendRequest: (s, playerId, type, message, details) =>
     request<void>(`/org/players/${playerId}/request`, {
       method: 'POST',
       headers: headers(s),
-      body: JSON.stringify({ type, message }),
+      body: JSON.stringify({ type, message, ...details }),
     }),
+
+  getChannels: (s) => request<Channel[]>('/org/channels', { headers: headers(s) }),
+
+  sendMessage: (s, channelId, text) =>
+    request<void>(`/org/channels/${channelId}/messages`, { method: 'POST', headers: headers(s), body: JSON.stringify({ text }) }),
+
+  getNotifications: (s) => request<Notification[]>('/org/notifications', { headers: headers(s) }),
+
+  markNotificationsRead: (s) =>
+    request<void>('/org/notifications/read', { method: 'POST', headers: headers(s) }),
+
+  getMyReports: (s) => request<FiledReport[]>('/org/reports', { headers: headers(s) }),
+
+  mediaUrl: (path) => (path ? `${API_URL}${path}` : null),
 
   getRequests: (s) => request<OrgRequest[]>('/org/requests', { headers: headers(s) }),
   getTrials: (s) => request<Trial[]>('/org/trials', { headers: headers(s) }),

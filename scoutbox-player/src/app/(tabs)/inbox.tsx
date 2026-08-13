@@ -1,20 +1,28 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { client } from '../../data/client';
+import type { Channel } from '../../data/types';
 import type { ChildInboxItem, InboxRequest } from '../../domain/types';
 import { useSession } from '../../state';
 import { colors } from '../../theme';
-import { Button, Card, Muted, Pill, Row } from '../../components/ui';
+import { Button, Card, Muted, Pill, Row, SectionTitle } from '../../components/ui';
 import { ReportButton } from '../../components/ReportSheet';
+import { NotificationBell } from '../../components/NotificationBell';
+import { Threads } from '../../components/Threads';
 
 function isChildItem(r: InboxRequest | ChildInboxItem): r is ChildInboxItem {
   return 'guardianManaged' in r && r.guardianManaged === true;
 }
 
 export default function Inbox() {
-  const { playerId, inbox, isMinor, refresh } = useSession();
+  const { playerId, inbox, isMinor, refresh, notifications } = useSession();
   const [error, setError] = useState<string | null>(null);
+  const [channels, setChannels] = useState<Channel[]>([]);
+
+  useEffect(() => {
+    if (playerId && !isMinor) client.getChannels(playerId).then(setChannels).catch(() => {});
+  }, [playerId, isMinor, inbox, notifications]);
 
   const respond = async (requestId: string, accept: boolean) => {
     if (!playerId) return;
@@ -22,6 +30,7 @@ export default function Inbox() {
     try {
       await client.respond(playerId, requestId, accept);
       await refresh();
+      if (playerId) setChannels(await client.getChannels(playerId));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not respond');
     }
@@ -32,7 +41,10 @@ export default function Inbox() {
       <ScrollView contentContainerStyle={styles.scroll}>
         <Row style={{ justifyContent: 'space-between' }}>
           <Text style={styles.h1}>{isMinor ? 'Updates' : 'Scout Inbox'}</Text>
-          <ReportButton />
+          <Row>
+            <NotificationBell />
+            <ReportButton />
+          </Row>
         </Row>
         {isMinor ? (
           <Muted>
@@ -110,6 +122,17 @@ export default function Inbox() {
               )}
             </Card>
           )
+        )}
+
+        {!isMinor && playerId && (
+          <>
+            <SectionTitle>Messages — open after acceptance, on-platform only</SectionTitle>
+            <Threads
+              channels={channels}
+              onSend={(channelId, text) => client.sendMessage(playerId, channelId, text)}
+              emptyText="No threads yet. Accept a request above and the conversation opens here — moderated, logged, and never off-platform."
+            />
+          </>
         )}
       </ScrollView>
     </SafeAreaView>

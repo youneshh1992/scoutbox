@@ -3,7 +3,10 @@
 // app demos without any backend. The real rules are enforced by
 // scoutbox-server; this is a faithful imitation for demo mode only.
 
-import type { PlayerClient, SignupInput, Me, AttendanceInput, DemoIdentity, ReportInput, ChildInput } from './types';
+import type {
+  PlayerClient, SignupInput, Me, AttendanceInput, DemoIdentity, ReportInput, ChildInput,
+  Channel, AppNotification, Insights, FiledReport,
+} from './types';
 import { ClientError } from './types';
 import type {
   Availability, ContractStatus, InboxRequest, ChildInboxItem, Guardian,
@@ -16,6 +19,10 @@ const players = new Map<string, PlayerProfile>();
 const inboxes = new Map<string, InboxRequest[]>();
 const guardians = new Map<string, Guardian>();
 const guardianRequests: GuardianInboxRequest[] = [];
+const channels: Channel[] = [];
+const notificationsByAudience = new Map<string, AppNotification[]>(); // key: kind:id
+const reportsByAudience = new Map<string, FiledReport[]>();
+const scoutingEvents: { type: string; orgName: string; scoutName: string; playerId: string; ts: number }[] = [];
 const commsLog: { id: string; ts: number; type: string; orgName: string; scoutName: string; playerId: string }[] = [];
 const listeners = new Set<() => void>();
 let idc = 100;
@@ -48,6 +55,78 @@ const DRILL_DEFS = [
 
 function isMinorProfile(p: PlayerProfile) {
   return !isAdult(p.dob, p.country);
+}
+
+function pushNotification(kind: 'player' | 'guardian', id: string, type: string, text: string) {
+  const key = `${kind}:${id}`;
+  const list = notificationsByAudience.get(key) ?? [];
+  list.unshift({ id: nid('ntf'), ts: Date.now(), type, text, refId: null, read: false });
+  notificationsByAudience.set(key, list);
+  emit();
+}
+
+function notifications(kind: 'player' | 'guardian', id: string) {
+  return notificationsByAudience.get(`${kind}:${id}`) ?? [];
+}
+
+function fileReport(kind: 'player' | 'guardian', id: string, input: ReportInput) {
+  const key = `${kind}:${id}`;
+  const list = reportsByAudience.get(key) ?? [];
+  const filed: FiledReport = { ...input, id: nid('rep'), ts: Date.now(), status: 'pending_review', outcome: null, resolvedAt: null };
+  list.unshift(filed);
+  reportsByAudience.set(key, list);
+  setTimeout(() => {
+    filed.status = 'resolved';
+    filed.resolvedAt = Date.now();
+    filed.outcome = input.urgent
+      ? 'Reviewed by the safety team. The suspension stands while we work with the organisation.'
+      : 'Reviewed by the safety team. Logged against the record; we\'ll act on any pattern.';
+    pushNotification(kind, id, 'report_resolved', 'Your report was reviewed — see the safety section for the outcome.');
+  }, 20000);
+  return filed;
+}
+
+function insightsFor(playerId: string): Insights {
+  const events = scoutingEvents.filter((e) => e.playerId === playerId);
+  const week = Date.now() - 7 * 86400000;
+  const month = Date.now() - 30 * 86400000;
+  const count = (list: typeof events, type: string) => list.filter((l) => l.type.startsWith(type)).length;
+  const weekly = events.filter((l) => l.ts >= week);
+  const monthly = events.filter((l) => l.ts >= month);
+  const byOrg: Record<string, Insights['byOrg'][number]> = {};
+  for (const l of events) {
+    byOrg[l.orgName] ??= { orgName: l.orgName, views: 0, saves: 0, shortlists: 0, requests: 0, lastSeen: 0 };
+    if (l.type === 'view') byOrg[l.orgName].views++;
+    if (l.type === 'save') byOrg[l.orgName].saves++;
+    if (l.type === 'shortlist') byOrg[l.orgName].shortlists++;
+    if (l.type.includes('request')) byOrg[l.orgName].requests++;
+    byOrg[l.orgName].lastSeen = Math.max(byOrg[l.orgName].lastSeen, l.ts);
+  }
+  return {
+    thisWeek: { views: count(weekly, 'view'), saves: count(weekly, 'save'), shortlists: count(weekly, 'shortlist') },
+    thisMonth: { views: count(monthly, 'view'), saves: count(monthly, 'save'), shortlists: count(monthly, 'shortlist') },
+    byOrg: Object.values(byOrg).sort((a, b) => b.lastSeen - a.lastSeen),
+    recent: events.slice(-12).reverse().map((l) => ({ type: l.type, orgName: l.orgName, scoutName: l.scoutName, ts: l.ts })),
+  };
+}
+
+const ORG_REPLIES = [
+  'Thanks for the quick reply — our recruitment desk will follow up with the details here.',
+  'Perfect. We\'ll confirm the schedule in this thread; everything stays on ScoutBox.',
+  'Noted. And yes — a full performance report is mandatory and will land on the profile.',
+];
+
+function scheduleOrgReply(channel: Channel, audienceKind: 'player' | 'guardian', audienceId: string) {
+  const reply = ORG_REPLIES[channel.messages.length % ORG_REPLIES.length];
+  setTimeout(() => {
+    channel.messages.push({
+      id: nid('msg'), ts: Date.now(),
+      sender: { kind: 'org_user', id: 'demo-scout', name: `${channel.scoutName} · ${channel.scoutRole} · ${channel.orgName}` },
+      text: reply,
+    });
+    pushNotification(audienceKind, audienceId, 'message', `${channel.orgName} (${channel.scoutRole}) sent a message.`);
+    emit();
+  }, 3500);
 }
 
 function seedDemoPlayer(): PlayerProfile {
@@ -158,6 +237,17 @@ function ensureSeed() {
       routedTo: 'guardian',
     });
     commsLog.push({ id: nid('log'), ts: Date.now() - 2 * 3600_000, type: 'trial_request_to_guardian', orgName: 'Eastport FC', scoutName: 'Maria Keane', playerId: 'demo-guni' });
+    // Seeded scouting activity so "Who's watching you" has a story to tell.
+    const D = 86400000;
+    scoutingEvents.push(
+      { type: 'view', orgName: 'Eastport FC', scoutName: 'Maria Keane', playerId: 'demo-adeyemi', ts: Date.now() - 2 * D },
+      { type: 'view', orgName: 'Eastport FC', scoutName: 'Maria Keane', playerId: 'demo-adeyemi', ts: Date.now() - 1 * D },
+      { type: 'shortlist', orgName: 'Eastport FC', scoutName: 'Maria Keane', playerId: 'demo-adeyemi', ts: Date.now() - 1 * D },
+      { type: 'view', orgName: 'Harbour City FC', scoutName: 'Coach D. Ansah', playerId: 'demo-adeyemi', ts: Date.now() - 5 * D },
+      { type: 'save', orgName: 'Harbour City FC', scoutName: 'Coach D. Ansah', playerId: 'demo-adeyemi', ts: Date.now() - 5 * D },
+      { type: 'view', orgName: 'Eastport FC', scoutName: 'Maria Keane', playerId: 'demo-guni', ts: Date.now() - 3 * D },
+      { type: 'trial_request_to_guardian', orgName: 'Eastport FC', scoutName: 'Maria Keane', playerId: 'demo-guni', ts: Date.now() - 2 * 3600_000 },
+    );
   }
   if (!players.has('demo-adeyemi')) {
     players.set('demo-adeyemi', seedDemoPlayer());
@@ -285,7 +375,15 @@ export const mockClient: PlayerClient = {
     if (!req) throw new ClientError('REQUEST_NOT_FOUND', 'No such request');
     if (req.status !== 'pending') throw new ClientError('ALREADY_RESPONDED', 'Already responded');
     req.status = accept ? 'accepted' : 'declined';
-    if (accept) req.contactChannel = nid('chan');
+    if (accept) {
+      const channel: Channel = {
+        id: nid('chan'), requestId: req.id, playerId, playerName: p.name,
+        orgName: req.orgName, orgVerified: req.orgVerified, scoutName: req.scoutName, scoutRole: req.scoutRole ?? 'Scout',
+        counterparty: 'player', createdAt: Date.now(), messages: [],
+      };
+      channels.push(channel);
+      req.contactChannel = channel.id;
+    }
     emit();
     return delay(undefined);
   },
@@ -300,13 +398,49 @@ export const mockClient: PlayerClient = {
     return delay(undefined);
   },
 
-  addMedia: (playerId, title) => {
+  addMedia: (playerId, title, dataUrl) => {
     const p = getPlayer(playerId);
     moderate(title);
-    p.media.push({ id: nid('m'), title, kind: 'video', uploadedAt: new Date().toISOString() });
+    // Demo mode keeps the data URL itself as the playable source.
+    p.media.push({ id: nid('m'), title, kind: 'video', uploadedAt: new Date().toISOString(), ...(dataUrl ? { url: dataUrl } : {}) });
     emit();
     return delay(undefined);
   },
+
+  mediaUrl: (path) => path ?? null,
+
+  getChannels: (playerId) => {
+    const p = getPlayer(playerId);
+    if (isMinorProfile(p)) return delay([]); // threads live with the guardian
+    return delay(channels.filter((c) => c.playerId === playerId && c.counterparty === 'player'));
+  },
+
+  sendMessage: (playerId, channelId, text) => {
+    const p = getPlayer(playerId);
+    if (isMinorProfile(p)) throw new ClientError('GUARDIAN_MANAGED', 'This is managed by your parent or guardian.');
+    moderate(text);
+    const channel = channels.find((c) => c.id === channelId && c.playerId === playerId);
+    if (!channel) throw new ClientError('CHANNEL_NOT_FOUND', 'No such thread');
+    channel.messages.push({ id: nid('msg'), ts: Date.now(), sender: { kind: 'player', id: playerId, name: p.name }, text });
+    scheduleOrgReply(channel, 'player', playerId);
+    emit();
+    return delay(undefined);
+  },
+
+  getNotifications: (playerId) => delay(notifications('player', playerId).slice()),
+
+  markNotificationsRead: (playerId) => {
+    notifications('player', playerId).forEach((n) => { n.read = true; });
+    emit();
+    return delay(undefined);
+  },
+
+  getInsights: (playerId) => {
+    getPlayer(playerId);
+    return delay(insightsFor(playerId));
+  },
+
+  getMyReports: (playerId) => delay((reportsByAudience.get(`player:${playerId}`) ?? []).slice()),
 
   setMedicalShared: (playerId, shared) => {
     const p = getPlayer(playerId);
@@ -366,6 +500,7 @@ export const mockClient: PlayerClient = {
   report: (playerId, input: ReportInput) => {
     getPlayer(playerId);
     commsLog.push({ id: nid('log'), ts: Date.now(), type: `report_${input.targetKind}`, orgName: input.targetOrgId ?? '', scoutName: input.targetScoutName ?? '', playerId });
+    fileReport('player', playerId, input);
     emit();
     return delay(undefined);
   },
@@ -474,11 +609,77 @@ export const mockClient: PlayerClient = {
     if (!r) throw new ClientError('REQUEST_NOT_FOUND', 'No such request');
     if (r.status !== 'pending') throw new ClientError('ALREADY_RESPONDED', 'Already responded');
     r.status = accept ? 'accepted' : 'declined';
-    if (accept) r.contactChannel = nid('chan');
+    if (accept) {
+      const channel: Channel = {
+        id: nid('chan'), requestId: r.id, playerId: r.playerId, playerName: r.playerName ?? r.playerId,
+        orgName: r.orgName, orgVerified: r.orgVerified, scoutName: r.scoutName, scoutRole: r.scoutRole ?? 'Scout',
+        counterparty: 'guardian', createdAt: Date.now(), messages: [],
+      };
+      channels.push(channel);
+      r.contactChannel = channel.id;
+      pushNotification('player', r.playerId, 'update', `Your parent/guardian accepted the ${r.type} with ${r.orgName}.`);
+    } else {
+      pushNotification('player', r.playerId, 'update', `Your parent/guardian declined the ${r.type} with ${r.orgName}.`);
+    }
     commsLog.push({ id: nid('log'), ts: Date.now(), type: `${r.type}_${accept ? 'accepted' : 'declined'}_by_guardian`, orgName: r.orgName, scoutName: r.scoutName, playerId: r.playerId });
     emit();
     return delay(undefined);
   },
+
+  guardianChannels: (guardianId) => {
+    const g = guardians.get(guardianId);
+    if (!g) throw new ClientError('GUARDIAN_NOT_FOUND', 'No guardian account found.');
+    return delay(channels.filter((c) => c.counterparty === 'guardian' && g.childIds.includes(c.playerId)));
+  },
+
+  guardianSendMessage: (guardianId, channelId, text) => {
+    const g = guardians.get(guardianId);
+    if (!g) throw new ClientError('GUARDIAN_NOT_FOUND', 'No guardian account found.');
+    moderate(text);
+    const channel = channels.find((c) => c.id === channelId && g.childIds.includes(c.playerId));
+    if (!channel) throw new ClientError('CHANNEL_NOT_FOUND', 'No such thread');
+    channel.messages.push({ id: nid('msg'), ts: Date.now(), sender: { kind: 'guardian', id: guardianId, name: g.name }, text });
+    scheduleOrgReply(channel, 'guardian', guardianId);
+    emit();
+    return delay(undefined);
+  },
+
+  guardianNotifications: (guardianId) => delay(notifications('guardian', guardianId).slice()),
+
+  guardianMarkNotificationsRead: (guardianId) => {
+    notifications('guardian', guardianId).forEach((n) => { n.read = true; });
+    emit();
+    return delay(undefined);
+  },
+
+  guardianChildInsights: (guardianId, childId) => {
+    const g = guardians.get(guardianId);
+    if (!g || !g.childIds.includes(childId)) throw new ClientError('CHILD_NOT_FOUND', 'No such child.');
+    return delay(insightsFor(childId));
+  },
+
+  guardianSetChildAvailability: (guardianId, childId, availability) => {
+    const g = guardians.get(guardianId);
+    if (!g || !g.childIds.includes(childId)) throw new ClientError('CHILD_NOT_FOUND', 'No such child.');
+    players.get(childId)!.availability = availability;
+    emit();
+    return delay(undefined);
+  },
+
+  guardianAddCoGuardian: (guardianId, name, email) => {
+    const g = guardians.get(guardianId);
+    if (!g) throw new ClientError('GUARDIAN_NOT_FOUND', 'No guardian account found.');
+    const co: Guardian = { id: nid('gd'), name, email, idVerified: false, disclaimerAccepted: false, childIds: [...g.childIds] };
+    guardians.set(co.id, co);
+    (g as Guardian & { coGuardians?: { id: string; name: string; email: string }[] }).coGuardians = [
+      ...((g as Guardian & { coGuardians?: { id: string; name: string; email: string }[] }).coGuardians ?? []),
+      { id: co.id, name, email },
+    ];
+    emit();
+    return delay(undefined);
+  },
+
+  guardianReports: (guardianId) => delay((reportsByAudience.get(`guardian:${guardianId}`) ?? []).slice()),
 
   guardianLog: (guardianId) => {
     const g = guardians.get(guardianId);
@@ -498,6 +699,7 @@ export const mockClient: PlayerClient = {
     const g = guardians.get(guardianId);
     if (!g) throw new ClientError('GUARDIAN_NOT_FOUND', 'No guardian account found.');
     commsLog.push({ id: nid('log'), ts: Date.now(), type: `report_${input.targetKind}${input.urgent ? '_urgent' : ''}`, orgName: input.targetOrgId ?? '', scoutName: input.targetScoutName ?? '', playerId: g.childIds[0] ?? '' });
+    fileReport('guardian', guardianId, input);
     if (input.urgent) {
       for (const r of guardianRequests) {
         if (g.childIds.includes(r.playerId) && r.status === 'pending') r.status = 'suspended';

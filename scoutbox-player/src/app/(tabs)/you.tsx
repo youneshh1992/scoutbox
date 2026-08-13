@@ -1,22 +1,33 @@
+import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { client, type FiledReport } from '../../data/client';
 import { SAFEGUARDING_PROMISES, U18_PROMISES } from '../../domain/safeguarding';
 import { useSession } from '../../state';
 import { colors } from '../../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from '../../components/ui';
 import { ReportButton } from '../../components/ReportSheet';
+import { NotificationBell } from '../../components/NotificationBell';
 
 export default function You() {
   const router = useRouter();
-  const { me, mode, isMinor, logout } = useSession();
+  const { me, mode, isMinor, logout, playerId, notifications } = useSession();
+  const [myReports, setMyReports] = useState<FiledReport[]>([]);
+
+  useEffect(() => {
+    if (playerId) client.getMyReports(playerId).then(setMyReports).catch(() => {});
+  }, [playerId, notifications]);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Row style={{ justifyContent: 'space-between' }}>
           <Text style={styles.h1}>You</Text>
-          <ReportButton />
+          <Row>
+            <NotificationBell />
+            <ReportButton />
+          </Row>
         </Row>
 
         <Card>
@@ -47,6 +58,21 @@ export default function You() {
               screen — or tell your guardian.
             </Muted>
           </Card>
+        )}
+
+        {myReports.length > 0 && (
+          <>
+            <SectionTitle>Safety centre — your reports</SectionTitle>
+            {myReports.map((r) => (
+              <Card key={r.id}>
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>{r.reason}</Text>
+                  <Pill label={r.status === 'resolved' ? 'reviewed' : 'in review'} tone={r.status === 'resolved' ? 'green' : 'gold'} />
+                </Row>
+                {r.outcome && <Muted size={12.5}>{r.outcome}</Muted>}
+              </Card>
+            ))}
+          </>
         )}
 
         <SectionTitle>The rules that protect you</SectionTitle>
