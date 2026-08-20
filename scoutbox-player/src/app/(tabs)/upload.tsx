@@ -51,6 +51,7 @@ export default function Upload() {
   const [drillValues, setDrillValues] = useState<Record<string, string>>({});
   const [drillVideos, setDrillVideos] = useState<Record<string, string>>({});
   const [statDraft, setStatDraft] = useState<Record<string, string>>({});
+  const [seasonDraft, setSeasonDraft] = useState('');
 
   useEffect(() => {
     if (playerId) client.getDrills(playerId).then(setDrills).catch(() => {});
@@ -171,6 +172,20 @@ export default function Upload() {
 
         <Card>
           <SectionTitle>Edit season stats</SectionTitle>
+          <Muted size={12.5}>
+            Leave the season blank to update this season, or name a past one (e.g. 2024/25) to build
+            your season-by-season record.
+          </Muted>
+          <View style={{ gap: 4, maxWidth: 160 }}>
+            <Muted size={11.5}>Season (optional)</Muted>
+            <TextInput
+              style={styles.input}
+              placeholder="This season"
+              placeholderTextColor={colors.muted}
+              value={seasonDraft}
+              onChangeText={setSeasonDraft}
+            />
+          </View>
           <Row>
             {STAT_FIELDS.map((f) => (
               <View key={f.key} style={{ gap: 4, minWidth: 92, flexGrow: 1 }}>
@@ -196,10 +211,11 @@ export default function Upload() {
               }
               if (!Object.keys(updates).length) return say('Change at least one stat first.', true);
               try {
-                await client.updateStats(playerId, updates);
+                await client.updateStats(playerId, updates, seasonDraft.trim() || undefined);
                 setStatDraft({});
+                setSeasonDraft('');
                 await refresh();
-                say('Stats saved to your profile.');
+                say(seasonDraft.trim() ? `Filed under ${seasonDraft.trim()} in your season history.` : 'Stats saved to your profile.');
               } catch (e) {
                 say(e instanceof Error ? e.message : 'Could not save stats', true);
               }

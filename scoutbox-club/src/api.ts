@@ -57,6 +57,8 @@ export interface Attendance {
 
 export interface TrialReport {
   id: string;
+  strengthNote?: string | null;
+  focusNote?: string | null;
   trialId: string;
   orgName: string;
   scoutName: string;
@@ -111,6 +113,7 @@ export interface Player {
   medical: Medical;
   createdAt?: number | null;
   drillResults?: CombineResult[];
+  seasonHistory?: { season: string; appearances: number; goals: number; assists: number }[];
 }
 
 export interface MediaItem {
@@ -165,6 +168,8 @@ export interface FixtureGroup {
 }
 
 export interface PlayerDetail extends Player {
+  /** Internal notes shared inside YOUR org only. */
+  orgNotes?: OrgNote[];
   similarPlayers: {
     note: string;
     players: { playerId: string; name: string; position: string; score: number }[];
@@ -250,8 +255,36 @@ export interface Notification {
 
 export interface TrialDetails {
   proposedDate?: string;
+  /** Up to two alternative dates the player/guardian can pick instead. */
+  altSlots?: string[];
   venue?: string;
   notes?: string;
+}
+
+export interface SavedSearch {
+  id: string;
+  name: string;
+  scoutName: string;
+  filters: SearchFilters & { foot?: string };
+  createdAt: number;
+}
+
+export interface OrgNote {
+  id: string;
+  playerId: string;
+  scoutName: string;
+  text: string;
+  ts: number;
+}
+
+export interface SigningRecord {
+  id: string;
+  playerId: string;
+  playerName: string;
+  scoutName: string;
+  ts: number;
+  attributionWindowMonths: number;
+  insideAttributionWindow: boolean;
 }
 
 export interface Trial {
@@ -339,6 +372,13 @@ export interface ScoutboxApi {
   tagClip(s: Session, playerId: string, mediaId: string, tags: string[]): Promise<void>;
   getScoutTags(s: Session): Promise<string[]>;
   getFixtures(s: Session): Promise<FixtureGroup[]>;
+  getSavedSearches(s: Session): Promise<SavedSearch[]>;
+  saveSearch(s: Session, name: string, filters: SearchFilters): Promise<void>;
+  deleteSavedSearch(s: Session, id: string): Promise<void>;
+  addNote(s: Session, playerId: string, text: string): Promise<void>;
+  moreLikeThis(s: Session, playerId: string): Promise<{ base: { name: string }; players: (Player & { similarity: number })[] }>;
+  recordSigning(s: Session, playerId: string): Promise<SigningRecord>;
+  trialIcsUrl(s: Session, trialId: string): string | null;
   getNotifications(s: Session): Promise<Notification[]>;
   markNotificationsRead(s: Session): Promise<void>;
   getMyReports(s: Session): Promise<FiledReport[]>;
@@ -433,6 +473,27 @@ export const httpApi: ScoutboxApi = {
   getScoutTags: (s) => request<string[]>('/org/tags', { headers: headers(s) }),
 
   getFixtures: (s) => request<FixtureGroup[]>('/org/fixtures', { headers: headers(s) }),
+
+  getSavedSearches: (s) => request<SavedSearch[]>('/org/searches', { headers: headers(s) }),
+
+  saveSearch: (s, name, filters) =>
+    request<void>('/org/searches', { method: 'POST', headers: headers(s), body: JSON.stringify({ name, filters }) }),
+
+  deleteSavedSearch: (s, id) =>
+    request<void>(`/org/searches/${id}`, { method: 'DELETE', headers: headers(s) }),
+
+  addNote: (s, playerId, text) =>
+    request<void>(`/org/players/${playerId}/notes`, { method: 'POST', headers: headers(s), body: JSON.stringify({ text }) }),
+
+  moreLikeThis: (s, playerId) =>
+    request<{ base: { name: string }; players: (Player & { similarity: number })[] }>(`/org/players/${playerId}/morelike`, { headers: headers(s) }),
+
+  recordSigning: async (s, playerId) => {
+    const r = await request<{ signing: SigningRecord }>(`/org/players/${playerId}/signing`, { method: 'POST', headers: headers(s) });
+    return r.signing;
+  },
+
+  trialIcsUrl: (s, trialId) => `${API_URL}/org/trials/${trialId}/ics`,
 
   getNotifications: (s) => request<Notification[]>('/org/notifications', { headers: headers(s) }),
 

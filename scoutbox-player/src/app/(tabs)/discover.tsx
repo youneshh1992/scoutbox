@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { client, type Insights, type PlayerFeedItem } from '../../data/client';
+import type { DirectoryClub } from '../../data/types';
 import { SAFEGUARDING_PROMISES, U18_PROMISES } from '../../domain/safeguarding';
 import { useSession } from '../../state';
 import { colors } from '../../theme';
@@ -37,12 +38,14 @@ export default function Discover() {
   const { me, isMinor, playerId, notifications, refresh } = useSession();
   const [insights, setInsights] = useState<Insights | null>(null);
   const [feed, setFeed] = useState<PlayerFeedItem[]>([]);
+  const [directory, setDirectory] = useState<DirectoryClub[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(() => {
     if (!playerId) return;
     client.getInsights(playerId).then(setInsights).catch(() => {});
     client.getFeed(playerId).then(setFeed).catch(() => {});
+    client.getDirectory().then(setDirectory).catch(() => {});
   }, [playerId]);
 
   useEffect(load, [load, notifications]);
@@ -183,19 +186,44 @@ export default function Discover() {
           </Card>
         )}
 
-        <SectionTitle>Scouting on ScoutBox</SectionTitle>
-        {ORGS.map((o) => (
-          <Card key={o.name}>
-            <Row style={{ justifyContent: 'space-between' }}>
-              <Text style={styles.cardTitle}>{o.name}</Text>
-              <Row>
-                <Pill label={o.type} tone={o.type === 'agency' ? 'red' : 'blue'} />
-                {o.trustedPartner && <Pill label="Trusted Partner" tone="gold" />}
+        <SectionTitle>Club directory — how clubs actually behave</SectionTitle>
+        {directory.length > 0 ? (
+          <>
+            <Muted size={12.5}>
+              Not a follower count: trials run, reports filed and how fast. Clubs earn their standing by
+              how they treat players.
+            </Muted>
+            {directory.map((d) => (
+              <Card key={d.id}>
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <Text style={styles.cardTitle}>{d.name}</Text>
+                  <Row>
+                    {d.verified ? <Pill label="Verified" tone="green" /> : <Pill label="unverified" tone="red" />}
+                    {d.trustedPartner && <Pill label="Trusted Partner" tone="gold" />}
+                    {d.safeguardingCertified && <Pill label="🛡 Safeguarding certified" tone="green" />}
+                  </Row>
+                </Row>
+                <Muted size={12.5}>
+                  {d.trialsRun} trial{d.trialsRun === 1 ? '' : 's'} run · {d.reportsFiled} report{d.reportsFiled === 1 ? '' : 's'} filed
+                  {d.avgReportDays != null ? ` · avg ${d.avgReportDays} day${d.avgReportDays === 1 ? '' : 's'} to file` : ''}
+                </Muted>
+              </Card>
+            ))}
+          </>
+        ) : (
+          ORGS.map((o) => (
+            <Card key={o.name}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Text style={styles.cardTitle}>{o.name}</Text>
+                <Row>
+                  <Pill label={o.type} tone={o.type === 'agency' ? 'red' : 'blue'} />
+                  {o.trustedPartner && <Pill label="Trusted Partner" tone="gold" />}
+                </Row>
               </Row>
-            </Row>
-            <Muted size={13.5}>{o.blurb}</Muted>
-          </Card>
-        ))}
+              <Muted size={13.5}>{o.blurb}</Muted>
+            </Card>
+          ))
+        )}
 
         <SectionTitle>How discovery works</SectionTitle>
         {(isMinor ? U18_PROMISES : SAFEGUARDING_PROMISES).map((p) => (

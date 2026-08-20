@@ -31,6 +31,62 @@ import {
 const PORT = process.env.PORT || 4000;
 const db = buildSeed();
 
+// ------------------------------------------------------------- persistence
+// JSON snapshot: the append-only ledger, guardian records and communications
+// now survive restarts. Load replaces the seed wholesale; saves are debounced
+// and flushed on shutdown. (The API surface is unchanged — swapping this for
+// Postgres later touches nothing above it.)
+const DATA_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
+const DATA_FILE = path.join(DATA_DIR, 'db.json');
+let snapshotLoaded = false;
+let snapshotIdCounter = 0; // applied when the id counter initialises below
+
+function loadSnapshot() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    if (!raw || typeof raw !== 'object' || !Array.isArray(raw.db?.players)) return;
+    for (const key of Object.keys(db)) delete db[key];
+    Object.assign(db, raw.db);
+    snapshotIdCounter = Number(raw.idCounter) || 0;
+    snapshotLoaded = true;
+    console.log(`snapshot loaded: ${db.players.length} players, ${db.ledger.length} ledger rows (${DATA_FILE})`);
+  } catch {
+    // no snapshot yet — first boot runs from seed
+  }
+}
+
+let saveTimer = null;
+function persist() {
+  if (saveTimer) return;
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    try {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+      const tmp = `${DATA_FILE}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify({ savedAt: Date.now(), idCounter: currentIdCounter(), db }));
+      fs.renameSync(tmp, DATA_FILE);
+    } catch (err) {
+      console.error('snapshot save failed:', err.message);
+    }
+  }, 2000);
+}
+
+function persistNow() {
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(DATA_FILE, JSON.stringify({ savedAt: Date.now(), idCounter: currentIdCounter(), db }));
+  } catch (err) {
+    console.error('snapshot save failed:', err.message);
+  }
+}
+
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, () => { persistNow(); process.exit(0); });
+}
+
+loadSnapshot();
+
 // Normalise media items (older shapes) + load the seeded sample clips.
 for (const p of db.players) {
   for (const m of p.media) {
@@ -39,25 +95,32 @@ for (const p of db.players) {
     m.verifiedClip ??= null; // attendance id when footage is provably from a confirmed fixture
     m.url ??= null;
   }
+  p.notificationPrefs ??= null;
+  p.seasonHistory ??= [];
 }
+db.savedSearches ??= [];
+db.signings ??= [];
+db.pairingCodes ??= [];
 
-const ASSETS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets');
-const SAMPLE_CLIPS = [
-  { file: 'clip-sprint.webm', playerId: 'pl-adeyemi', title: 'Sprint & finishing session', verify: true },
-  { file: 'clip-passing.webm', playerId: 'pl-carvalho', title: 'Passing range compilation', verify: true },
-  { file: 'clip-wingplay.webm', playerId: 'pl-guni', title: 'U15 highlights — wing play', verify: true },
-];
-for (const sample of SAMPLE_CLIPS) {
-  try {
-    const data = fs.readFileSync(path.join(ASSETS_DIR, sample.file));
-    const player = db.players.find((p) => p.id === sample.playerId);
-    const media = player?.media.find((m) => m.title === sample.title);
-    if (!media) continue;
-    db.mediaBlobs[media.id] = { dataUrl: `data:video/webm;base64,${data.toString('base64')}` };
-    media.url = `/media/${media.id}`;
-    if (sample.verify && player.attendance[0]) media.verifiedClip = player.attendance[0].id;
-  } catch {
-    // assets optional — Film Room just starts empty without them
+if (!snapshotLoaded) {
+  const ASSETS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets');
+  const SAMPLE_CLIPS = [
+    { file: 'clip-sprint.webm', playerId: 'pl-adeyemi', title: 'Sprint & finishing session', verify: true },
+    { file: 'clip-passing.webm', playerId: 'pl-carvalho', title: 'Passing range compilation', verify: true },
+    { file: 'clip-wingplay.webm', playerId: 'pl-guni', title: 'U15 highlights — wing play', verify: true },
+  ];
+  for (const sample of SAMPLE_CLIPS) {
+    try {
+      const data = fs.readFileSync(path.join(ASSETS_DIR, sample.file));
+      const player = db.players.find((p) => p.id === sample.playerId);
+      const media = player?.media.find((m) => m.title === sample.title);
+      if (!media) continue;
+      db.mediaBlobs[media.id] = { dataUrl: `data:video/webm;base64,${data.toString('base64')}` };
+      media.url = `/media/${media.id}`;
+      if (sample.verify && player.attendance[0]) media.verifiedClip = player.attendance[0].id;
+    } catch {
+      // assets optional — Film Room just starts empty without them
+    }
   }
 }
 
@@ -69,6 +132,7 @@ app.use(express.json({ limit: '20mb' })); // media uploads travel as data URLs
 const sseClients = new Set();
 
 function broadcast(event, payload = {}) {
+  if (event !== 'typing') persist(); // every broadcast (bar ephemeral typing) follows a state change
   const msg = `data: ${JSON.stringify({ event, ...payload, ts: Date.now() })}\n\n`;
   for (const res of sseClients) res.write(msg);
 }
@@ -82,8 +146,12 @@ app.get('/events', (req, res) => {
 });
 
 // ------------------------------------------------------------------ helpers
-let idCounter = 1000;
-const nextId = (prefix) => `${prefix}-${++idCounter}`;
+let idCounter = Math.max(1000, snapshotIdCounter);
+const nextId = (prefix) => {
+  persist(); // any id mint means state changed somewhere
+  return `${prefix}-${++idCounter}`;
+};
+function currentIdCounter() { return idCounter; }
 
 function findPlayer(id) {
   return db.players.find((p) => p.id === id);
@@ -105,8 +173,36 @@ function isBlocked(playerId, orgId) {
 // ------------------------------------------------------------ notifications
 // In-app notification feed. audience = {kind: 'player'|'guardian'|'org_user', id}.
 // (Push / email delivery is a production integration behind this same record.)
+// Quiet hours + the minors' school-hours mute apply to PUSH delivery: the
+// in-app feed always receives the record, but `deferredPush` marks anything
+// that production push infra must hold back.
+function pushDeferred(audience, now = new Date()) {
+  let prefs = null;
+  let minor = false;
+  if (audience.kind === 'player') {
+    const p = findPlayer(audience.id);
+    prefs = p?.notificationPrefs;
+    minor = p ? !isAdult(p) : false;
+  } else if (audience.kind === 'guardian') {
+    prefs = db.guardians.find((g) => g.id === audience.id)?.notificationPrefs;
+  }
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  const schoolMute = prefs?.schoolHoursMute ?? minor; // minors muted in school hours by default
+  const day = now.getDay();
+  if (schoolMute && day >= 1 && day <= 5 && minutes >= 8 * 60 + 30 && minutes <= 15 * 60 + 30) return true;
+  if (prefs?.quietStart && prefs?.quietEnd) {
+    const [qsH, qsM] = prefs.quietStart.split(':').map(Number);
+    const [qeH, qeM] = prefs.quietEnd.split(':').map(Number);
+    const qs = qsH * 60 + (qsM || 0);
+    const qe = qeH * 60 + (qeM || 0);
+    const inQuiet = qs <= qe ? minutes >= qs && minutes < qe : minutes >= qs || minutes < qe;
+    if (inQuiet) return true;
+  }
+  return false;
+}
+
 function notify(audience, type, text, refId = null) {
-  const n = { id: nextId('ntf'), ts: Date.now(), audience, type, text, refId, read: false };
+  const n = { id: nextId('ntf'), ts: Date.now(), audience, type, text, refId, read: false, deferredPush: pushDeferred(audience) };
   db.notifications.push(n);
   broadcast('notify', { audienceKind: audience.kind, audienceId: audience.id });
   return n;
@@ -354,6 +450,7 @@ app.post('/auth/player/signup', (req, res) => {
     medical: { shared: false, records: [], conditionStatus: 'unknown' },
   };
   db.players.push(p);
+  checkSavedSearches(p);
   broadcast('players');
   res.status(201).json({ playerId: p.id, player: p });
 });
@@ -434,6 +531,10 @@ guardianRouter.post('/verify-id', (req, res) => {
     return res.status(400).json({ error: 'DOCUMENT_REQUIRED', message: 'ID verification needs a document type and reference.' });
   }
   req.guardian.idVerified = true;
+  // Every attestation lands in the admin IDV queue for audit — and can be
+  // revoked there (prototype auto-approval; production = document + liveness).
+  db.idvQueue ??= [];
+  db.idvQueue.push({ id: nextId('idv'), guardianId: req.guardian.id, guardianName: req.guardian.name, documentType, documentRef, ts: Date.now(), status: 'auto_approved' });
   res.json({ idVerified: true });
 });
 
@@ -501,6 +602,7 @@ guardianRouter.post('/children', (req, res) => {
   };
   db.players.push(p);
   req.guardian.childIds.push(p.id);
+  checkSavedSearches(p);
   broadcast('players');
   res.status(201).json({ playerId: p.id, player: p });
 });
@@ -524,7 +626,7 @@ guardianRouter.post('/requests/:id/respond', (req, res) => {
   if (!request) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
   if (request.status !== 'pending') return res.status(409).json({ error: 'ALREADY_RESPONDED' });
   const child = findPlayer(request.playerId);
-  const { accept } = req.body || {};
+  const { accept, chosenSlot } = req.body || {};
   request.status = accept ? 'accepted' : 'declined';
   request.respondedAt = Date.now();
   request.respondedBy = 'guardian';
@@ -536,6 +638,8 @@ guardianRouter.post('/requests/:id/respond', (req, res) => {
     ledgerAppend({ type: `${request.type}_accepted_by_guardian`, playerId: child.id, orgId: request.orgId, orgName: request.orgName, userId: request.userId, scoutName: request.scoutName });
     if (request.type === 'trial') {
       const details = request.trialDetails ?? {};
+      const slotOk = chosenSlot && (chosenSlot === details.proposedDate || (details.altSlots ?? []).includes(chosenSlot));
+      const trialDate = slotOk ? chosenSlot : details.proposedDate ?? null;
       db.trials.push({
         id: nextId('trial'),
         requestId: request.id,
@@ -546,11 +650,11 @@ guardianRouter.post('/requests/:id/respond', (req, res) => {
         scoutName: request.scoutName,
         acceptedAt: Date.now(),
         guardianApproved: true,
-        proposedDate: details.proposedDate ?? null,
+        proposedDate: trialDate,
         venue: details.venue ?? null,
         notes: details.notes ?? '',
         // The mandatory report is due 7 days after the trial (or acceptance).
-        reportDueAt: (details.proposedDate ? new Date(details.proposedDate).getTime() : Date.now()) + 7 * 24 * 3600 * 1000,
+        reportDueAt: (trialDate ? new Date(trialDate).getTime() : Date.now()) + 7 * 24 * 3600 * 1000,
         status: 'awaiting_report',
       });
     }
@@ -715,18 +819,9 @@ function handleReport(req, res, actor) {
     resolvedAt: null,
   };
   db.reports.push(report);
-  // Reporters hear back. Prototype review resolves on a timer; production is
-  // a human trust-and-safety queue behind the same status fields.
-  setTimeout(() => {
-    if (report.status !== 'pending_review') return;
-    report.status = 'resolved';
-    report.resolvedAt = Date.now();
-    report.outcome = report.urgent
-      ? 'Reviewed by the safety team. The suspension stands while we work with the organisation.'
-      : 'Reviewed by the safety team. Logged against the organisation\'s record; we\'ll act on any pattern.';
-    const audienceKind = actor.by === 'org_user' ? 'org_user' : actor.by;
-    notify({ kind: audienceKind, id: actor.byId }, 'report_resolved', `Your report was reviewed: ${report.outcome}`, report.id);
-  }, 45_000);
+  // Reports now land in the REAL review queue: the trust-and-safety admin
+  // console resolves them (POST /admin/reports/:id/resolve) and the reporter
+  // is notified with the outcome. No more auto-resolve timer.
   if (report.urgent && targetOrgId) {
     // Immediate suspension pending review: the org loses access to the
     // reporter's players and its pending requests to them freeze.
@@ -784,6 +879,9 @@ function orgAuth(req, res, next) {
   }
   const user = db.users.find((u) => u.id === userId && u.orgId === orgId);
   if (!user) return res.status(401).json({ error: 'USER_UNKNOWN' });
+  if (org.suspended) {
+    return res.status(403).json({ error: 'ORG_SUSPENDED', message: 'This organisation is suspended pending a safety review.' });
+  }
   req.org = org;
   req.orgUser = user;
   next();
@@ -848,7 +946,34 @@ orgRouter.get('/players/:id', (req, res) => {
     .map((a) => ({ archetypeId: a.id, label: a.label, score: similarityScore(p, a) }))
     .sort((a, b) => b.score - a.score)
     .slice(0, 2);
-  res.json({ ...view, similarPlayers: { note: 'Statistical similarity — a lead, not a verdict.', players: similar, archetypes } });
+  const orgNotes = (db.orgNotes ?? []).filter((n) => n.orgId === req.org.id && n.playerId === p.id).slice().reverse();
+  res.json({ ...view, orgNotes, similarPlayers: { note: 'Statistical similarity — a lead, not a verdict.', players: similar, archetypes } });
+});
+
+// Internal scouting notes — shared inside the org, never visible to the
+// player or any other organisation.
+orgRouter.post('/players/:id/notes', (req, res) => {
+  const p = findPlayer(req.params.id);
+  if (!p || !visibleToOrg(p, req.org)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
+  const { text } = req.body || {};
+  if (!text || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
+  db.orgNotes ??= [];
+  const note = { id: nextId('note'), orgId: req.org.id, playerId: p.id, userId: req.orgUser.id, scoutName: req.orgUser.name, text: text.trim(), ts: Date.now() };
+  db.orgNotes.push(note);
+  broadcast('players', { playerId: p.id });
+  res.status(201).json(note);
+});
+
+// "More like this" — the similarity engine as a search entry point.
+orgRouter.get('/players/:id/morelike', (req, res) => {
+  const p = findPlayer(req.params.id);
+  if (!p || !visibleToOrg(p, req.org)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
+  const ranked = db.players
+    .filter((c) => c.id !== p.id && visibleToOrg(c, req.org) && !isBlocked(c.id, req.org.id))
+    .map((c) => ({ ...playerViewForOrg(c, req.org), similarity: similarityScore(p, c) }))
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, 10);
+  res.json({ base: { id: p.id, name: p.name, position: p.position }, players: ranked });
 });
 
 for (const action of ['save', 'shortlist']) {
@@ -901,7 +1026,7 @@ orgRouter.post('/players/:id/request', (req, res) => {
   }
 
   const minor = !isAdult(p);
-  const { proposedDate, venue, notes } = req.body || {};
+  const { proposedDate, venue, notes, altSlots } = req.body || {};
   if (notes && !moderateOrRefuse(res, notes, { kind: 'trial_notes', orgId: req.org.id })) return;
   const request = {
     id: nextId('req'),
@@ -919,7 +1044,10 @@ orgRouter.post('/players/:id/request', (req, res) => {
     type,
     message: message || '',
     // Trial logistics: what the player/guardian is actually agreeing to.
-    trialDetails: type === 'trial' ? { proposedDate: proposedDate || null, venue: venue || null, notes: notes || '' } : null,
+    // altSlots lets the other side pick a date that works (counter-proposal).
+    trialDetails: type === 'trial'
+      ? { proposedDate: proposedDate || null, altSlots: Array.isArray(altSlots) ? altSlots.slice(0, 2) : [], venue: venue || null, notes: notes || '' }
+      : null,
     status: 'pending',
     createdAt: Date.now(),
     // Scout → Parent, never Scout → Child.
@@ -1063,9 +1191,82 @@ orgRouter.get('/feed', (req, res) => {
   }
   for (const t of db.trials.filter((x) => x.orgId === req.org.id && x.status === 'awaiting_report')) {
     items.push({ type: 'report_due', ts: t.reportDueAt ?? Date.now(), playerId: t.playerId, playerName: t.playerName, trialId: t.id, dueAt: t.reportDueAt });
+    // one-shot reminder when the mandatory report is due within 48h
+    if (!t.reminderSent && t.reportDueAt && t.reportDueAt - Date.now() < 48 * 3600 * 1000) {
+      t.reminderSent = true;
+      const request = db.requests.find((r) => r.id === t.requestId);
+      if (request?.userId) notify({ kind: 'org_user', id: request.userId }, 'report_due', `Mandatory trial report for ${t.playerName} is due ${new Date(t.reportDueAt).toLocaleDateString()}.`, t.id);
+    }
   }
   items.sort((a, b) => b.ts - a.ts);
   res.json(items.slice(0, 40));
+});
+
+// --------------------------------------------------------- saved searches
+// "Tell me when a left-footed U16 winger joins" — the club feed made personal.
+function matchesSearch(view, f) {
+  if (f.q) {
+    const n = String(f.q).toLowerCase();
+    if (!view.name.toLowerCase().includes(n) && !(view.city || '').toLowerCase().includes(n) && !(view.country || '').toLowerCase().includes(n)) return false;
+  }
+  if (f.position && view.position !== f.position) return false;
+  if (f.availability && view.availability !== f.availability) return false;
+  if (f.academyPlus && !view.academyPlus) return false;
+  if (f.country && view.country !== f.country) return false;
+  if (f.foot && view.foot !== f.foot) return false;
+  if (f.ageGroup === 'u16' && view.age >= 16) return false;
+  if (f.ageGroup === 'u18' && view.age >= 18) return false;
+  if (f.ageGroup === '18-21' && (view.age < 18 || view.age > 21)) return false;
+  if (f.ageGroup === 'senior' && view.age < 22) return false;
+  return true;
+}
+
+// Called whenever a player joins: alert every saved search that matches.
+function checkSavedSearches(player) {
+  for (const ss of db.savedSearches) {
+    const org = db.orgs.find((o) => o.id === ss.orgId);
+    if (!org) continue;
+    const view = playerViewForOrg(player, org);
+    if (view && matchesSearch(view, ss.filters ?? {})) {
+      notify({ kind: 'org_user', id: ss.userId }, 'saved_search', `New match for your saved search “${ss.name}”: ${player.name} (${player.position ?? '—'}) just joined.`, player.id);
+    }
+  }
+}
+
+orgRouter.get('/searches', (req, res) => {
+  res.json(db.savedSearches.filter((s) => s.orgId === req.org.id));
+});
+
+orgRouter.post('/searches', (req, res) => {
+  const { name, filters } = req.body || {};
+  if (!name || !name.trim()) return res.status(400).json({ error: 'NAME_REQUIRED' });
+  const ss = { id: nextId('ss'), orgId: req.org.id, userId: req.orgUser.id, scoutName: req.orgUser.name, name: name.trim(), filters: filters ?? {}, createdAt: Date.now() };
+  db.savedSearches.push(ss);
+  res.status(201).json(ss);
+});
+
+orgRouter.delete('/searches/:id', (req, res) => {
+  const idx = db.savedSearches.findIndex((s) => s.id === req.params.id && s.orgId === req.org.id);
+  if (idx === -1) return res.status(404).json({ error: 'SEARCH_NOT_FOUND' });
+  db.savedSearches.splice(idx, 1);
+  persist();
+  res.json({ ok: true });
+});
+
+// Calendar export for an accepted trial.
+orgRouter.get('/trials/:id/ics', (req, res) => {
+  const t = db.trials.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+  if (!t) return res.status(404).json({ error: 'TRIAL_NOT_FOUND' });
+  const start = t.proposedDate ? t.proposedDate.replace(/-/g, '') : new Date(t.acceptedAt).toISOString().slice(0, 10).replace(/-/g, '');
+  const ics = [
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//ScoutBox//Trials//EN', 'BEGIN:VEVENT',
+    `UID:${t.id}@scoutbox`, `DTSTART;VALUE=DATE:${start}`,
+    `SUMMARY:ScoutBox trial — ${t.playerName}`,
+    `DESCRIPTION:${(t.notes || 'Assessment trial').replace(/\n/g, ' ')}. Mandatory performance report due ${new Date(t.reportDueAt ?? Date.now()).toISOString().slice(0, 10)}.`,
+    t.venue ? `LOCATION:${t.venue}` : null,
+    'END:VEVENT', 'END:VCALENDAR',
+  ].filter(Boolean).join('\r\n');
+  res.set('Content-Type', 'text/calendar').send(ics);
 });
 
 // Fixture-graph scouting: verified attendances form a map of real fixtures.
@@ -1107,6 +1308,13 @@ orgRouter.post('/trials/:trialId/report', (req, res) => {
     });
   }
 
+  // Optional development feedback for the player — one strength, one focus
+  // area. Moderated like everything else, and delivered even when the trial
+  // doesn't lead anywhere: the player always gets something back.
+  const { strengthNote, focusNote } = req.body || {};
+  if (strengthNote && !moderateOrRefuse(res, strengthNote, { kind: 'trial_feedback', orgId: req.org.id })) return;
+  if (focusNote && !moderateOrRefuse(res, focusNote, { kind: 'trial_feedback', orgId: req.org.id })) return;
+
   const report = {
     id: nextId('rep'),
     trialId: trial.id,
@@ -1118,6 +1326,8 @@ orgRouter.post('/trials/:trialId/report', (req, res) => {
     filedAt: Date.now(),
     ...Object.fromEntries(TRIAL_REPORT_FIELDS.map((f) => [f, req.body[f]])),
     notes: req.body.notes || '',
+    strengthNote: strengthNote || null,
+    focusNote: focusNote || null,
   };
   trial.status = 'reported';
   trial.report = report;
@@ -1127,16 +1337,50 @@ orgRouter.post('/trials/:trialId/report', (req, res) => {
   const p = findPlayer(trial.playerId);
   p.trialReports.push(report);
   ledgerAppend({ type: 'trial_report', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
+  notify({ kind: 'player', id: p.id }, 'trial_report', `${req.org.name} filed your trial report${report.strengthNote ? ' — with development feedback' : ''}. It's on your profile.`, report.id);
+  if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'trial_report', `${req.org.name} filed the trial report for ${p.name}.`, report.id);
   broadcast('players', { playerId: p.id });
   res.status(201).json({ ok: true, report, playerTrustScore: computeTrustScore(p) });
 });
 
+// The revenue event, completed: recording a signing updates the player's
+// timeline + contract, freezes the attribution evidence from the Proof Pack,
+// and notifies the player (and guardian for minors).
 orgRouter.post('/players/:id/signing', (req, res) => {
   const p = findPlayer(req.params.id);
   if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
   if (!visibleToOrg(p, req.org)) return res.status(403).json({ error: 'UNDER_18_WALL' });
+  if (isBlocked(p.id, req.org.id)) return res.status(403).json({ error: 'BLOCKED' });
+  const events = db.ledger.filter((l) => l.playerId === p.id && l.orgId === req.org.id);
+  const first = events[0] ?? null;
+  const windowMonths = db.plans[req.org.plan]?.attributionWindowMonths ?? 18;
+  const windowEnds = first ? first.ts + windowMonths * 30.44 * 24 * 3600 * 1000 : null;
   const row = ledgerAppend({ type: 'signing', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
-  res.status(201).json({ ok: true, ledgerId: row.id });
+  const signing = {
+    id: nextId('sign'),
+    playerId: p.id,
+    playerName: p.name,
+    orgId: req.org.id,
+    orgName: req.org.name,
+    userId: req.orgUser.id,
+    scoutName: req.orgUser.name,
+    ts: row.ts,
+    firstQualifyingInteraction: first,
+    attributionWindowMonths: windowMonths,
+    insideAttributionWindow: first ? row.ts <= windowEnds : false,
+  };
+  db.signings.push(signing);
+  p.contractStatus = 'under_contract';
+  p.availability = 'not_seeking';
+  p.timeline.push({ year: String(new Date().getFullYear()), event: `Signed by ${req.org.name} — discovered on ScoutBox` });
+  notify({ kind: 'player', id: p.id }, 'signing', `🎉 ${req.org.name} recorded your signing. Congratulations — it's on your timeline.`, signing.id);
+  if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'signing', `${req.org.name} recorded ${p.name}'s signing.`, signing.id);
+  broadcast('players', { playerId: p.id });
+  res.status(201).json({ ok: true, signing });
+});
+
+orgRouter.get('/signings', (req, res) => {
+  res.json(db.signings.filter((s) => s.orgId === req.org.id).slice().reverse());
 });
 
 // ------------------------------------------------- ledger, proof, plan etc
@@ -1208,7 +1452,27 @@ playerRouter.get('/me', (req, res) => {
     streak: computeStreak(req.player.activityLog),
     weeklyGoal: weeklyGoal(req.player.activityLog),
     nextActions: nextActions(req.player),
+    // Aging-up: an adult still linked to a guardian is offered ownership.
+    agingUp: isAdult(req.player) && req.player.guardianId ? { eligible: true } : null,
   });
+});
+
+// Aging-up transition: the day a guardian-owned player is an adult, ownership
+// moves to them — explicit consent, guardian notified, ledger records it.
+playerRouter.post('/aging-up/complete', (req, res) => {
+  if (!isAdult(req.player)) return res.status(403).json({ error: 'STILL_A_MINOR', message: 'The transition unlocks on your 18th birthday (age of majority in your country).' });
+  if (!req.player.guardianId) return res.status(400).json({ error: 'ALREADY_OWNED', message: 'You already own this account.' });
+  const guardian = db.guardians.find((g) => g.id === req.player.guardianId);
+  if (guardian) {
+    guardian.childIds = guardian.childIds.filter((id) => id !== req.player.id);
+    notify({ kind: 'guardian', id: guardian.id }, 'aging_up', `${req.player.name} is 18 — their account is now their own. Their history stays intact, and thank you for keeping it safe.`, req.player.id);
+  }
+  req.player.guardianId = null;
+  req.player.timeline.push({ year: String(new Date().getFullYear()), event: 'Turned 18 — took ownership of this ScoutBox account' });
+  ledgerAppend({ type: 'account_transitioned', playerId: req.player.id, orgId: null, orgName: 'ScoutBox', userId: null, scoutName: 'system' });
+  notify({ kind: 'player', id: req.player.id }, 'aging_up', 'Your account is now fully yours. Availability, medical sharing and club contact are your calls from here.', req.player.id);
+  broadcast('players', { playerId: req.player.id });
+  res.json({ ok: true, owned: true });
 });
 
 // The player-side home feed: weekly scout report first, then activity.
@@ -1300,7 +1564,7 @@ playerRouter.post('/requests/:id/respond', (req, res) => {
   const request = db.requests.find((r) => r.id === req.params.id && r.playerId === req.player.id && r.routedTo === 'player');
   if (!request) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
   if (request.status !== 'pending') return res.status(409).json({ error: 'ALREADY_RESPONDED' });
-  const { accept } = req.body || {};
+  const { accept, chosenSlot } = req.body || {};
   request.status = accept ? 'accepted' : 'declined';
   request.respondedAt = Date.now();
 
@@ -1311,6 +1575,8 @@ playerRouter.post('/requests/:id/respond', (req, res) => {
     ledgerAppend({ type: `${request.type}_accepted`, playerId: req.player.id, orgId: request.orgId, orgName: request.orgName, userId: request.userId, scoutName: request.scoutName });
     if (request.type === 'trial') {
       const details = request.trialDetails ?? {};
+      const slotOk = chosenSlot && (chosenSlot === details.proposedDate || (details.altSlots ?? []).includes(chosenSlot));
+      const trialDate = slotOk ? chosenSlot : details.proposedDate ?? null;
       db.trials.push({
         id: nextId('trial'),
         requestId: request.id,
@@ -1320,10 +1586,10 @@ playerRouter.post('/requests/:id/respond', (req, res) => {
         orgName: request.orgName,
         scoutName: request.scoutName,
         acceptedAt: Date.now(),
-        proposedDate: details.proposedDate ?? null,
+        proposedDate: trialDate,
         venue: details.venue ?? null,
         notes: details.notes ?? '',
-        reportDueAt: (details.proposedDate ? new Date(details.proposedDate).getTime() : Date.now()) + 7 * 24 * 3600 * 1000,
+        reportDueAt: (trialDate ? new Date(trialDate).getTime() : Date.now()) + 7 * 24 * 3600 * 1000,
         status: 'awaiting_report', // mandatory report gate
       });
     }
@@ -1493,6 +1759,8 @@ playerRouter.post('/timeline', (req, res) => {
 });
 
 // Children keep their football life: stats edits and drills stay open.
+// Passing `season` (e.g. "2024/25") files the numbers into season history
+// instead of the current season.
 playerRouter.post('/stats', (req, res) => {
   const FIELDS = ['appearances', 'goals', 'assists', 'paceKmh', 'passCompletionPct', 'duelSuccessPct', 'cleanSheets'];
   const updates = {};
@@ -1503,10 +1771,19 @@ playerRouter.post('/stats', (req, res) => {
       updates[f] = v;
     }
   }
-  req.player.stats = { appearances: 0, goals: 0, assists: 0, ...req.player.stats, ...updates };
+  const season = typeof req.body?.season === 'string' && req.body.season.trim() ? req.body.season.trim() : null;
+  if (season) {
+    req.player.seasonHistory ??= [];
+    const existing = req.player.seasonHistory.find((s) => s.season === season);
+    if (existing) Object.assign(existing, updates);
+    else req.player.seasonHistory.push({ season, appearances: 0, goals: 0, assists: 0, ...updates });
+    req.player.seasonHistory.sort((a, b) => (a.season < b.season ? 1 : -1));
+  } else {
+    req.player.stats = { appearances: 0, goals: 0, assists: 0, ...req.player.stats, ...updates };
+  }
   recordActivity(req.player);
   broadcast('players', { playerId: req.player.id });
-  res.json({ stats: req.player.stats });
+  res.json({ stats: req.player.stats, seasonHistory: req.player.seasonHistory ?? [] });
 });
 
 // The at-home verified combine: standardised drills with a measurable metric.
@@ -1566,6 +1843,216 @@ playerRouter.post('/block', (req, res) => {
   broadcast('players');
   res.status(201).json({ blocked: true });
 });
+
+// ------------------------------------------------- pairing, prefs, export
+// Child device pairing: the guardian mints a short-lived code; the child's
+// device exchanges it for their limited login.
+guardianRouter.post('/children/:id/pairing-code', (req, res) => {
+  const child = findPlayer(req.params.id);
+  if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
+  // Random, not id-derived: pairing codes must never be guessable.
+  const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const code = Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => ALPHABET[b % ALPHABET.length]).join('');
+  db.pairingCodes = db.pairingCodes.filter((c) => c.playerId !== child.id); // one live code per child
+  db.pairingCodes.push({ code, playerId: child.id, expiresAt: Date.now() + 15 * 60 * 1000 });
+  res.status(201).json({ code, expiresAt: Date.now() + 15 * 60 * 1000 });
+});
+
+app.post('/auth/player/pair', (req, res) => {
+  const { code } = req.body || {};
+  const entry = db.pairingCodes.find((c) => c.code === String(code ?? '').toUpperCase());
+  if (!entry || entry.expiresAt < Date.now()) return res.status(404).json({ error: 'CODE_INVALID', message: 'That pairing code is wrong or expired — ask your parent/guardian for a fresh one.' });
+  db.pairingCodes = db.pairingCodes.filter((c) => c !== entry);
+  const p = findPlayer(entry.playerId);
+  res.json({ playerId: p.id, name: p.name });
+});
+
+// Notification preferences — quiet hours + the minors' school-hours mute.
+function prefsHandler(getTarget) {
+  return (req, res) => {
+    const target = getTarget(req);
+    if (req.method === 'POST') {
+      const { quietStart, quietEnd, schoolHoursMute } = req.body || {};
+      target.notificationPrefs = {
+        quietStart: quietStart ?? target.notificationPrefs?.quietStart ?? null,
+        quietEnd: quietEnd ?? target.notificationPrefs?.quietEnd ?? null,
+        schoolHoursMute: schoolHoursMute ?? target.notificationPrefs?.schoolHoursMute ?? null,
+      };
+      persist();
+    }
+    res.json({ prefs: target.notificationPrefs ?? null, note: 'Quiet hours and the school-hours mute apply to push delivery; the in-app feed always keeps the record.' });
+  };
+}
+playerRouter.get('/prefs', prefsHandler((req) => req.player));
+playerRouter.post('/prefs', prefsHandler((req) => req.player));
+guardianRouter.get('/prefs', prefsHandler((req) => req.guardian));
+guardianRouter.post('/prefs', prefsHandler((req) => req.guardian));
+
+// Data rights: full export, and deletion that keeps the append-only ledger
+// (audit/attribution basis) but removes the person's content.
+function exportPlayer(p) {
+  const { password, ...profile } = p;
+  return {
+    exportedAt: new Date().toISOString(),
+    profile,
+    requests: db.requests.filter((r) => r.playerId === p.id).map(({ orgId, userId, ...r }) => r),
+    threads: db.channels.filter((c) => c.playerId === p.id).map((c) => channelViewFor(c, 'player')),
+    notifications: notificationsFor('player', p.id),
+    insights: insightsFor(p.id),
+    ledgerEvents: db.ledger.filter((l) => l.playerId === p.id),
+  };
+}
+
+function deletePlayerData(playerId) {
+  const p = findPlayer(playerId);
+  if (!p) return false;
+  for (const m of p.media) delete db.mediaBlobs[m.id];
+  db.players = db.players.filter((x) => x.id !== playerId);
+  db.requests = db.requests.filter((r) => r.playerId !== playerId);
+  db.channels = db.channels.filter((c) => c.playerId !== playerId);
+  db.trials = db.trials.filter((t) => t.playerId !== playerId);
+  db.notifications = db.notifications.filter((n) => !(n.audience.kind === 'player' && n.audience.id === playerId));
+  db.pairingCodes = db.pairingCodes.filter((c) => c.playerId !== playerId);
+  db.savedSearches = db.savedSearches; // org data unaffected
+  for (const g of db.guardians) g.childIds = g.childIds.filter((id) => id !== playerId);
+  // Ledger rows stay (append-only audit + attribution) but carry only ids.
+  broadcast('players');
+  persist();
+  return true;
+}
+
+playerRouter.get('/export', (req, res) => res.json(exportPlayer(req.player)));
+
+playerRouter.delete('/account', (req, res) => {
+  if (req.playerIsMinor) return res.status(403).json({ error: 'GUARDIAN_MANAGED', message: 'Ask your parent/guardian to delete this profile.' });
+  deletePlayerData(req.player.id);
+  res.json({ deleted: true });
+});
+
+guardianRouter.get('/export', (req, res) => {
+  res.json({
+    exportedAt: new Date().toISOString(),
+    guardian: req.guardian,
+    children: req.guardian.childIds.map((id) => findPlayer(id)).filter(Boolean).map(exportPlayer),
+  });
+});
+
+guardianRouter.delete('/children/:id', (req, res) => {
+  if (!req.guardian.childIds.includes(req.params.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
+  deletePlayerData(req.params.id);
+  res.json({ deleted: true });
+});
+
+// ------------------------------------------------------------- directory
+// The club directory players browse: verified identity + how clubs actually
+// behave (trials run, report turnaround) — accountability as marketing.
+app.get('/orgs/directory', (_req, res) => {
+  res.json(
+    db.orgs.filter((o) => o.type === 'club').map((o) => {
+      const trials = db.trials.filter((t) => t.orgId === o.id);
+      const reported = trials.filter((t) => t.status === 'reported' && t.report);
+      const avgReportDays = reported.length
+        ? Math.round(reported.reduce((sum, t) => sum + (t.report.filedAt - t.acceptedAt), 0) / reported.length / (24 * 3600 * 1000) * 10) / 10
+        : null;
+      return {
+        id: o.id, name: o.name, plan: o.plan, verified: o.verified,
+        trustedPartner: o.trustedPartner, safeguardingCertified: safeguardingCertified(o),
+        trialsRun: trials.length, reportsFiled: reported.length, avgReportDays,
+      };
+    })
+  );
+});
+
+// ------------------------------------------------------ admin (T&S) console
+// ScoutBox staff only. Prototype auth: x-admin-key (ADMIN_KEY env).
+const ADMIN_KEY = process.env.ADMIN_KEY || 'scoutbox-admin';
+const adminRouter = express.Router();
+app.use('/admin', (req, res, next) => {
+  if (req.headers['x-admin-key'] !== ADMIN_KEY) return res.status(401).json({ error: 'ADMIN_KEY_REQUIRED' });
+  next();
+}, adminRouter);
+
+adminRouter.get('/overview', (_req, res) => {
+  res.json({
+    players: db.players.length,
+    guardians: db.guardians.length,
+    orgs: db.orgs.length,
+    openReports: db.reports.filter((r) => r.status === 'pending_review').length,
+    blocks: db.blocks.length,
+    moderationHits: db.moderationLog.length,
+    channels: db.channels.length,
+    signings: db.signings.length,
+    persisted: snapshotLoaded,
+  });
+});
+
+adminRouter.get('/reports', (_req, res) => res.json(db.reports.slice().reverse()));
+
+adminRouter.post('/reports/:id/resolve', (req, res) => {
+  const report = db.reports.find((r) => r.id === req.params.id);
+  if (!report) return res.status(404).json({ error: 'REPORT_NOT_FOUND' });
+  if (report.status !== 'pending_review') return res.status(409).json({ error: 'ALREADY_RESOLVED' });
+  const { outcome, action } = req.body || {};
+  if (!outcome || !String(outcome).trim()) return res.status(400).json({ error: 'OUTCOME_REQUIRED' });
+  report.status = action === 'dismiss' ? 'resolved' : 'resolved';
+  report.resolvedAt = Date.now();
+  report.outcome = String(outcome).trim();
+  if (action === 'suspend_org' && report.targetOrgId) {
+    const org = db.orgs.find((o) => o.id === report.targetOrgId);
+    if (org) org.suspended = true;
+  }
+  const audienceKind = report.by === 'org_user' ? 'org_user' : report.by;
+  notify({ kind: audienceKind, id: report.byId }, 'report_resolved', `Your report was reviewed: ${report.outcome}`, report.id);
+  persist();
+  res.json(report);
+});
+
+adminRouter.get('/clubs', (_req, res) => {
+  res.json(db.orgs.map((o) => ({ ...o, safeguardingCertified: safeguardingCertified(o) })));
+});
+
+adminRouter.post('/clubs/:id/verification', (req, res) => {
+  const org = db.orgs.find((o) => o.id === req.params.id);
+  if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
+  const { verified, safeguardingContractSigned, verifiedDomain, suspended } = req.body || {};
+  if (verified !== undefined) org.verified = !!verified;
+  if (safeguardingContractSigned !== undefined) org.safeguardingContractSigned = !!safeguardingContractSigned;
+  if (verifiedDomain !== undefined) org.verifiedDomain = verifiedDomain || null;
+  if (suspended !== undefined) org.suspended = !!suspended;
+  persist();
+  broadcast('players'); // visibility rules may have changed
+  res.json({ ...org, safeguardingCertified: safeguardingCertified(org) });
+});
+
+adminRouter.get('/guardians', (_req, res) => {
+  res.json({ guardians: db.guardians, idvQueue: db.idvQueue ?? [] });
+});
+
+adminRouter.post('/guardians/:id/idv', (req, res) => {
+  const g = db.guardians.find((x) => x.id === req.params.id);
+  if (!g) return res.status(404).json({ error: 'GUARDIAN_NOT_FOUND' });
+  g.idVerified = !!req.body?.approved;
+  const entry = (db.idvQueue ?? []).find((q) => q.guardianId === g.id);
+  if (entry) entry.status = g.idVerified ? 'approved' : 'revoked';
+  persist();
+  res.json(g);
+});
+
+adminRouter.get('/blocks', (_req, res) => res.json(db.blocks.slice().reverse()));
+
+adminRouter.post('/blocks/:id/lift', (req, res) => {
+  const idx = db.blocks.findIndex((b) => b.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'BLOCK_NOT_FOUND' });
+  const [lifted] = db.blocks.splice(idx, 1);
+  persist();
+  broadcast('players');
+  res.json({ lifted });
+});
+
+adminRouter.get('/moderation', (_req, res) => res.json(db.moderationLog.slice().reverse()));
+
+// Thread audit — the "all communications logged" promise, made inspectable.
+adminRouter.get('/channels', (_req, res) => res.json(db.channels.map((c) => ({ ...c }))));
 
 // Serve uploaded media (any authenticated party with profile access could
 // reach this in production; prototype serves by id).

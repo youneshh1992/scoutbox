@@ -4,7 +4,7 @@ import {
   type Session, type Player, type PlayerDetail, type OrgRequest, type Trial,
   type LedgerEntry, type ProofPack, type PlanInfo, type Reputation, type SearchFilters,
   type Channel, type FiledReport, type TrialDetails,
-  type FeedItem, type FilmRoomItem, type FixtureGroup,
+  type FeedItem, type FilmRoomItem, type FixtureGroup, type SavedSearch, type OrgNote,
 } from './api';
 
 const TAG_LABELS: Record<string, string> = {
@@ -362,16 +362,95 @@ export function FixturesScreen({ session, tick, openPlayer }: ScreenProps) {
   );
 }
 
+/* ------------------------------------------------------------ Compare */
+
+// Side-by-side comparison — the spreadsheet scouts keep, built in.
+export function CompareModal({ session, playerIds, onClose }: {
+  session: Session;
+  playerIds: string[];
+  onClose: () => void;
+}) {
+  const [players, setPlayers] = useState<PlayerDetail[]>([]);
+  useEffect(() => {
+    Promise.all(playerIds.map((id) => api.getPlayer(session, id).catch(() => null)))
+      .then((list) => setPlayers(list.filter((p): p is PlayerDetail => !!p)));
+  }, [session, playerIds]);
+
+  const rows: { label: string; get: (p: PlayerDetail) => ReactNode }[] = [
+    { label: 'Position · age', get: (p) => `${p.position} · ${p.age}` },
+    { label: 'Trust', get: (p) => p.trustScore },
+    { label: 'Apps', get: (p) => p.stats?.appearances ?? '—' },
+    { label: 'Goals', get: (p) => p.stats?.goals ?? '—' },
+    { label: 'Assists', get: (p) => p.stats?.assists ?? '—' },
+    { label: 'Top speed', get: (p) => p.stats?.paceKmh ? `${p.stats.paceKmh} km/h` : '—' },
+    { label: 'Pass %', get: (p) => p.stats?.passCompletionPct ? `${p.stats.passCompletionPct}%` : '—' },
+    { label: 'Duels %', get: (p) => p.stats?.duelSuccessPct ? `${p.stats.duelSuccessPct}%` : '—' },
+    { label: 'Verified attendance', get: (p) => p.attendance.length },
+    { label: 'Verified clips', get: (p) => p.media.filter((m) => m.verifiedClip).length },
+    { label: 'Trial reports', get: (p) => p.trialReports.length },
+    { label: 'Combine (verified)', get: (p) => (p.drillResults ?? []).filter((r) => r.verified).map((r) => `${r.metric} ${r.value}${r.unit}`).join(', ') || '—' },
+    { label: 'Availability', get: (p) => AVAILABILITY_LABELS[p.availability] ?? p.availability },
+    { label: 'Status', get: (p) => p.guardianManaged ? 'U18 · guardian-managed' : CONTRACT_LABELS[p.contractStatus] ?? p.contractStatus },
+  ];
+
+  return (
+    <>
+      <div className="drawer-veil" onClick={onClose} />
+      <div className="drawer" style={{ width: 'min(980px, 94vw)' }}>
+        <div className="head">
+          <div><h3>Compare</h3><div className="sub">Side by side — verified data only.</div></div>
+          <button className="close" onClick={onClose}>Close</button>
+        </div>
+        <table className="data">
+          <thead>
+            <tr><th></th>{players.map((p) => <th key={p.id}>{p.name}</th>)}</tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.label}>
+                <td style={{ color: 'var(--muted)' }}>{r.label}</td>
+                {players.map((p) => <td key={p.id}>{r.get(p)}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
 /* ------------------------------------------------------------- Search */
 
-export function SearchScreen({ session, tick, openPlayer }: ScreenProps) {
+export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps) {
   const [filters, setFilters] = useState<SearchFilters>({});
   const [players, setPlayers] = useState<Player[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState<SavedSearch[]>([]);
+  const [saveName, setSaveName] = useState('');
+  const [compareIds, setCompareIds] = useState<string[]>([]);
+  const [comparing, setComparing] = useState(false);
 
   useEffect(() => {
     api.searchPlayers(session, filters).then((p) => { setPlayers(p); setError(null); }).catch((e) => setError(errMsg(e)));
   }, [session, filters, tick]);
+
+  useEffect(() => {
+    api.getSavedSearches(session).then(setSaved).catch(() => {});
+  }, [session, tick]);
+
+  const saveCurrent = async () => {
+    if (!saveName.trim()) return notify('Name the search first (e.g. "U16 left-footed wingers").', true);
+    try {
+      await api.saveSearch(session, saveName.trim(), filters);
+      setSaveName('');
+      setSaved(await api.getSavedSearches(session));
+      notify('Saved — you\'ll be notified the moment a new player matches.');
+    } catch (e) { notify(errMsg(e), true); }
+  };
+
+  const toggleCompare = (id: string) => {
+    setCompareIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : prev.length >= 3 ? prev : [...prev, id]);
+  };
 
   return (
     <>
@@ -412,13 +491,32 @@ export function SearchScreen({ session, tick, openPlayer }: ScreenProps) {
         </label>
         <span className="pill">{players.length} players</span>
       </div>
+      <div className="filters" style={{ marginTop: -8 }}>
+        <input type="text" placeholder="Save this search as… (alerts on new matches)" value={saveName} onChange={(e) => setSaveName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && saveCurrent()} />
+        <button onClick={saveCurrent}>💾 Save search</button>
+        {saved.map((s) => (
+          <span key={s.id} className="pill blue" style={{ cursor: 'pointer' }} title={`by ${s.scoutName}`}>
+            <span onClick={() => setFilters(s.filters)}>🔔 {s.name}</span>{' '}
+            <span onClick={() => api.deleteSavedSearch(session, s.id).then(() => api.getSavedSearches(session).then(setSaved))} title="Delete">✕</span>
+          </span>
+        ))}
+        {compareIds.length >= 2 && (
+          <button className="primary" onClick={() => setComparing(true)}>⚖ Compare {compareIds.length}</button>
+        )}
+      </div>
       {error && <div className="notice block">{error}</div>}
+      {comparing && <CompareModal session={session} playerIds={compareIds} onClose={() => setComparing(false)} />}
       <div className="player-grid">
         {players.map((p) => (
           <div key={p.id} className="player-card" onClick={() => openPlayer(p.id)}>
             <div className="row1">
               <span className="name">{p.name}</span>
-              <span className="pill blue">{p.position}</span>
+              <span style={{ display: 'flex', gap: 6, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
+                <label className="chk" title="Select to compare">
+                  <input type="checkbox" checked={compareIds.includes(p.id)} onChange={() => toggleCompare(p.id)} /> ⚖
+                </label>
+                <span className="pill blue">{p.position}</span>
+              </span>
             </div>
             <div className="meta">
               {p.age} · {p.foot} foot · {p.city ? `${p.city}, ` : ''}{p.country} · {p.heightCm} cm
@@ -660,8 +758,10 @@ export function TrialsScreen({ session, tick, notify }: ScreenProps) {
   useEffect(() => { api.getTrials(session).then(setTrials).catch(() => {}); }, [session, tick, localTick]);
 
   const file = async (trialId: string) => {
-    const report: Record<string, number> = {};
+    const report: Record<string, number | string> = {};
     for (const f of REPORT_FIELDS) if (form[f.key] !== undefined && form[f.key] !== '') report[f.key] = Number(form[f.key]);
+    if (form.strengthNote) report.strengthNote = form.strengthNote;
+    if (form.focusNote) report.focusNote = form.focusNote;
     try {
       await api.fileTrialReport(session, trialId, report);
       notify('Trial report filed — synced to the player profile, Trust Score raised.');
@@ -696,6 +796,9 @@ export function TrialsScreen({ session, tick, notify }: ScreenProps) {
                   {t.status === 'awaiting_report' && t.reportDueAt ? ` · report due ${new Date(t.reportDueAt).toLocaleDateString()}` : ''}
                 </div>
               </span>
+              {api.trialIcsUrl(session, t.id) && (
+                <a className="pill blue" style={{ textDecoration: 'none' }} href={api.trialIcsUrl(session, t.id)!} download={`scoutbox-trial-${t.id}.ics`}>📅 .ics</a>
+              )}
               <span className={`pill ${t.status === 'reported' ? 'green' : 'gold'}`}>{t.status === 'reported' ? 'report filed' : 'awaiting report'}</span>
               {t.status === 'awaiting_report' && (
                 <button onClick={() => { setFiling(filing === t.id ? null : t.id); setForm({}); }}>
@@ -724,8 +827,12 @@ export function TrialsScreen({ session, tick, notify }: ScreenProps) {
                     </label>
                   ))}
                 </div>
+                <div style={{ display: 'flex', gap: 10, margin: '8px 0' }}>
+                  <input style={{ flex: 1 }} placeholder="One strength (goes to the player — optional)" value={form.strengthNote ?? ''} onChange={(e) => setForm({ ...form, strengthNote: e.target.value })} />
+                  <input style={{ flex: 1 }} placeholder="One focus area (goes to the player — optional)" value={form.focusNote ?? ''} onChange={(e) => setForm({ ...form, focusNote: e.target.value })} />
+                </div>
                 <button className="primary" onClick={() => file(t.id)}>Submit full report</button>
-                <span className="dim" style={{ marginLeft: 10 }}>All six metrics are mandatory.</span>
+                <span className="dim" style={{ marginLeft: 10 }}>All six metrics are mandatory; the feedback notes reach the player even if it goes no further.</span>
               </div>
             )}
           </div>
@@ -865,6 +972,8 @@ export function PlayerDrawer({ session, playerId, notify, onClose }: {
   const [message, setMessage] = useState('');
   const [trialDetails, setTrialDetails] = useState<TrialDetails>({});
   const [reporting, setReporting] = useState(false);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [moreLike, setMoreLike] = useState<(Player & { similarity: number })[] | null>(null);
 
   useEffect(() => {
     setPlayer(null); setProof(null); setError(null);
@@ -949,7 +1058,55 @@ export function PlayerDrawer({ session, playerId, notify, onClose }: {
                 </>
               )}
               <button onClick={loadProof}>Proof Pack</button>
+              <button onClick={() => api.moreLikeThis(session, playerId).then((r) => setMoreLike(r.players)).catch((e) => notify(errMsg(e), true))}>≈ More like this</button>
+              {!player.guardianManaged && (
+                <button onClick={async () => {
+                  if (!window.confirm(`Record the signing of ${player.name} by ${session.org.name}? This freezes the attribution evidence and notifies the player.`)) return;
+                  try {
+                    const s = await api.recordSigning(session, playerId);
+                    notify(`🎉 Signing recorded${s.insideAttributionWindow ? ' — inside the attribution window' : ''}. Timeline updated.`);
+                  } catch (e) { notify(errMsg(e), true); }
+                }}>✍ Record signing</button>
+              )}
               <button onClick={() => setReporting(true)}>⚑ Report</button>
+            </div>
+
+            {moreLike && (
+              <div className="section">
+                <h4>More like {player.name}</h4>
+                <div className="list-rows">
+                  {moreLike.slice(0, 6).map((m) => (
+                    <div key={m.id} className="list-row" style={{ cursor: 'pointer' }}>
+                      <span className="pill blue">{m.position}</span>
+                      <span className="grow">{m.name}</span>
+                      <span className="dim">{m.similarity}% similar · trust {m.trustScore}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="section">
+              <h4>Internal notes — your org only, never visible to the player</h4>
+              <div style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
+                <input style={{ flex: 1 }} placeholder='e.g. "Watched live 12/8 — second viewing needed"' value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} />
+                <button onClick={async () => {
+                  if (!noteDraft.trim()) return;
+                  try {
+                    await api.addNote(session, playerId, noteDraft.trim());
+                    setNoteDraft('');
+                    setPlayer(await api.getPlayer(session, playerId));
+                  } catch (e) { notify(errMsg(e), true); }
+                }}>Add note</button>
+              </div>
+              <div className="list-rows">
+                {(player.orgNotes ?? []).map((n: OrgNote) => (
+                  <div key={n.id} className="list-row">
+                    <span className="grow" style={{ fontSize: 13 }}>{n.text}</span>
+                    <span className="dim">{n.scoutName} · {new Date(n.ts).toLocaleDateString()}</span>
+                  </div>
+                ))}
+              </div>
             </div>
 
             {requestType && (
@@ -960,8 +1117,10 @@ export function PlayerDrawer({ session, playerId, notify, onClose }: {
                     : `${requestType} request — goes to the player's Scout Inbox`}
                 </h4>
                 {requestType === 'trial' && (
-                  <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
-                    <input type="date" value={trialDetails.proposedDate ?? ''} onChange={(e) => setTrialDetails({ ...trialDetails, proposedDate: e.target.value || undefined })} />
+                  <div style={{ display: 'flex', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+                    <input type="date" title="Proposed date" value={trialDetails.proposedDate ?? ''} onChange={(e) => setTrialDetails({ ...trialDetails, proposedDate: e.target.value || undefined })} />
+                    <input type="date" title="Alternative slot 1" value={trialDetails.altSlots?.[0] ?? ''} onChange={(e) => setTrialDetails({ ...trialDetails, altSlots: [e.target.value, trialDetails.altSlots?.[1] ?? ''].filter(Boolean) })} />
+                    <input type="date" title="Alternative slot 2" value={trialDetails.altSlots?.[1] ?? ''} onChange={(e) => setTrialDetails({ ...trialDetails, altSlots: [trialDetails.altSlots?.[0] ?? '', e.target.value].filter(Boolean) })} />
                     <input style={{ flex: 1 }} placeholder="Venue (e.g. Eastport Training Centre)" value={trialDetails.venue ?? ''} onChange={(e) => setTrialDetails({ ...trialDetails, venue: e.target.value || undefined })} />
                     <input style={{ flex: 1 }} placeholder="What to bring / notes" value={trialDetails.notes ?? ''} onChange={(e) => setTrialDetails({ ...trialDetails, notes: e.target.value || undefined })} />
                   </div>

@@ -12,7 +12,7 @@ import { Button, Card, Muted, Pill, Row, SectionTitle } from '../components/ui';
 const COUNTRIES = ['GB', 'PT', 'FR', 'SE', 'PL', 'NG', 'GH', 'AR', 'JP', 'KR', 'TH', 'SG', 'US'];
 
 type Step =
-  | 'welcome'
+  | 'welcome' | 'pair'
   | 'details' | 'football' | 'needs-guardian'
   | 'g-account' | 'g-verify' | 'g-disclaimer' | 'g-child';
 
@@ -53,6 +53,9 @@ export default function Onboarding() {
   const [childDob, setChildDob] = useState('');
   const [childCountry, setChildCountry] = useState('GB');
   const [childPosition, setChildPosition] = useState<string | null>(null);
+
+  // child device pairing
+  const [pairCode, setPairCode] = useState('');
 
   useEffect(() => {
     client.listDemoIdentities().then(setIdentities).catch(() => {});
@@ -185,6 +188,9 @@ export default function Onboarding() {
               <Button primary label="I'm a player (18+)" onPress={() => setStep('details')} />
               <Button label="I'm a parent / guardian" onPress={() => setStep('g-account')} />
             </Row>
+            <Row>
+              <Button small label="I have a code from my parent/guardian" onPress={() => setStep('pair')} />
+            </Row>
             <SectionTitle>Our promises to every player</SectionTitle>
             {SAFEGUARDING_PROMISES.map((p) => (
               <Card key={p.slice(0, 20)}>
@@ -222,6 +228,39 @@ export default function Onboarding() {
                 </Card>
               </>
             )}
+          </>
+        )}
+
+        {step === 'pair' && (
+          <>
+            <SectionTitle>Pair this device</SectionTitle>
+            <Muted size={13.5}>
+              Your parent or guardian generates a 6-character code from their dashboard. It works once
+              and expires after 15 minutes. Pairing gives you your limited player login — uploads,
+              stats and drills — while all club contact stays with them.
+            </Muted>
+            <TextInput
+              style={[styles.input, { letterSpacing: 6, textAlign: 'center', fontSize: 20, fontWeight: '700' }]}
+              placeholder="XXXXXX"
+              placeholderTextColor={colors.muted}
+              value={pairCode}
+              onChangeText={(v) => setPairCode(v.toUpperCase().slice(0, 6))}
+              autoCapitalize="characters"
+            />
+            <Button
+              primary
+              label="Pair and enter"
+              onPress={async () => {
+                setError(null);
+                try {
+                  const { playerId } = await client.pair(pairCode.trim());
+                  enterAsPlayer(playerId);
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : 'Pairing failed.');
+                }
+              }}
+            />
+            <Button label="Back" onPress={() => setStep('welcome')} />
           </>
         )}
 

@@ -6,6 +6,7 @@
 import type {
   PlayerClient, SignupInput, Me, AttendanceInput, DemoIdentity, ReportInput, ChildInput,
   Channel, AppNotification, Insights, FiledReport, PlayerFeedItem, PlayerCV, GuardianDigest,
+  NotificationPrefs, DirectoryClub,
 } from './types';
 import { ClientError } from './types';
 import type {
@@ -59,6 +60,28 @@ const notificationsByAudience = new Map<string, AppNotification[]>(); // key: ki
 const reportsByAudience = new Map<string, FiledReport[]>();
 const scoutingEvents: { type: string; orgName: string; scoutName: string; playerId: string; ts: number }[] = [];
 const commsLog: { id: string; ts: number; type: string; orgName: string; scoutName: string; playerId: string }[] = [];
+// Pairing codes live in localStorage so a code minted in the guardian's tab
+// redeems in the child's tab (same browser). Memory-only fallback elsewhere.
+const PAIRING_KEY = 'scoutbox-demo-pairing-v1';
+const pairingMem = new Map<string, { playerId: string; expiresAt: number }>();
+const pairingStore = {
+  read(): Record<string, { playerId: string; expiresAt: number }> {
+    try {
+      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(PAIRING_KEY) : null;
+      return raw ? JSON.parse(raw) : Object.fromEntries(pairingMem);
+    } catch {
+      return Object.fromEntries(pairingMem);
+    }
+  },
+  write(all: Record<string, { playerId: string; expiresAt: number }>) {
+    pairingMem.clear();
+    for (const [k, v] of Object.entries(all)) pairingMem.set(k, v);
+    try {
+      if (typeof localStorage !== 'undefined') localStorage.setItem(PAIRING_KEY, JSON.stringify(all));
+    } catch { /* memory fallback holds */ }
+  },
+};
+const guardianPrefsStore = new Map<string, NotificationPrefs>();
 const listeners = new Set<(event?: string, payload?: Record<string, unknown>) => void>();
 let idc = 100;
 const nid = (p: string) => `${p}-${++idc}`;
@@ -152,6 +175,8 @@ const ORG_REPLIES = [
 ];
 
 function scheduleOrgReply(channel: Channel, audienceKind: 'player' | 'guardian', audienceId: string) {
+  // A real club tab replies for itself over the sync bus.
+  if (bus.peerActive()) return;
   const reply = ORG_REPLIES[channel.messages.length % ORG_REPLIES.length];
   setTimeout(() => emit('typing', { channelId: channel.id, side: 'org' }), 1500);
   setTimeout(() => {
@@ -166,9 +191,100 @@ function scheduleOrgReply(channel: Channel, audienceKind: 'player' | 'guardian',
   }, 3500);
 }
 
+// Cross-tab sync: when the club demo runs in another tab of the same browser,
+// its requests and messages arrive here for real (and our responses reach it).
+import { createDemoBus, type BusEvent } from './demoSync';
+
+function ensureChannelFromBus(p: Record<string, unknown>): Channel {
+  let channel = channels.find((c) => c.id === p.channelId);
+  if (!channel) {
+    channel = {
+      id: String(p.channelId),
+      requestId: String(p.requestId ?? ''),
+      playerId: String(p.playerId ?? ''),
+      playerName: String(p.playerName ?? ''),
+      orgName: String(p.orgName ?? 'Eastport FC'),
+      orgVerified: p.orgVerified !== false,
+      scoutName: String(p.scoutName ?? ''),
+      scoutRole: String(p.scoutRole ?? 'Scout'),
+      counterparty: p.counterparty === 'guardian' ? 'guardian' : 'player',
+      createdAt: Date.now(),
+      messages: [],
+      readBy: { org: null, counterparty: null },
+    };
+    channels.push(channel);
+  }
+  return channel;
+}
+
+const bus = createDemoBus('player', (e: BusEvent) => {
+  ensureSeed();
+  const p = e.payload;
+  if (e.kind === 'request') {
+    const playerId = String(p.playerId);
+    const target = players.get(playerId);
+    if (!target) return; // club requested a player this demo doesn't model
+    if (guardianRequests.some((r) => r.id === p.id) ||
+        [...inboxes.values()].some((list) => list.some((r) => r.id === p.id))) return;
+    const base = {
+      id: String(p.id),
+      type: (p.type === 'trial' ? 'trial' : 'contact') as 'trial' | 'contact',
+      orgName: String(p.orgName ?? 'Eastport FC'),
+      orgType: 'club' as const,
+      orgVerified: p.orgVerified !== false,
+      trustedPartner: !!p.trustedPartner,
+      scoutName: String(p.scoutName ?? ''),
+      scoutRole: String(p.scoutRole ?? 'Scout'),
+      message: String(p.message ?? ''),
+      status: 'pending' as const,
+      createdAt: Number(p.createdAt) || Date.now(),
+      contactChannel: null,
+      trialDetails: (p.trialDetails as InboxRequest['trialDetails']) ?? null,
+    };
+    if (isMinorProfile(target)) {
+      guardianRequests.unshift({ ...base, playerId, playerName: target.name, routedTo: 'guardian' });
+      pushNotification('guardian', target.guardianId ?? 'gd-amara', 'request', `${base.orgName} has requested to discuss a ${base.type === 'trial' ? 'trial' : 'conversation'} for ${target.name}.`);
+      pushNotification('player', playerId, 'request', `${base.orgName} contacted your parent/guardian about a ${base.type === 'trial' ? 'trial' : 'conversation'}.`);
+    } else {
+      const list = inboxes.get(playerId) ?? [];
+      list.unshift(base);
+      inboxes.set(playerId, list);
+      pushNotification('player', playerId, 'request', `${base.orgName} sent you a ${base.type} request.`);
+    }
+    emit();
+  }
+  if (e.kind === 'message') {
+    const channel = ensureChannelFromBus(p);
+    const msg = p.message as Channel['messages'][number];
+    if (msg && !channel.messages.some((m) => m.id === msg.id)) {
+      channel.messages.push(msg);
+      const audienceKind = channel.counterparty === 'guardian' ? 'guardian' : 'player';
+      const audienceId = channel.counterparty === 'guardian'
+        ? (players.get(channel.playerId)?.guardianId ?? 'gd-amara')
+        : channel.playerId;
+      pushNotification(audienceKind, audienceId, 'message', `${channel.orgName} (${channel.scoutRole}) sent a message.`);
+      emit('messages', { channelId: channel.id });
+    }
+  }
+  if (e.kind === 'read') {
+    const channel = channels.find((c) => c.id === p.channelId);
+    if (channel && p.side === 'org') {
+      channel.readBy = { ...(channel.readBy ?? { org: null, counterparty: null }), org: Number(p.ts) || Date.now() };
+      emit('messages', { channelId: channel.id });
+    }
+  }
+  if (e.kind === 'typing' && p.side === 'org') {
+    emit('typing', { channelId: p.channelId, side: 'org' });
+  }
+});
+
+function publishRespond(request: { id: string; type: string; playerId: string }, accept: boolean, channelId: string | null, counterparty: 'player' | 'guardian') {
+  bus.publish('respond', { requestId: request.id, accept, channelId, counterparty, playerId: request.playerId });
+}
+
 function seedDemoPlayer(): PlayerProfile {
   return {
-    id: 'demo-adeyemi',
+    id: 'pl-adeyemi',
     name: 'Kola Adeyemi',
     dob: '2004-03-14',
     country: 'GB',
@@ -183,6 +299,10 @@ function seedDemoPlayer(): PlayerProfile {
     agentName: 'Team Elevate',
     drills: [],
     stats: { appearances: 31, goals: 22, assists: 6, paceKmh: 34.1, passCompletionPct: 78, duelSuccessPct: 61 },
+    seasonHistory: [
+      { season: '2024/25', appearances: 28, goals: 17, assists: 5 },
+      { season: '2023/24', appearances: 24, goals: 11, assists: 4 },
+    ],
     academyPlus: true,
     badges: ['Finisher', 'Pressing Forward', 'Fresh Start'],
     availability: 'available_now',
@@ -219,12 +339,12 @@ function seedDemoPlayer(): PlayerProfile {
 
 function seedDemoChild(): PlayerProfile {
   return {
-    id: 'demo-guni',
+    id: 'pl-guni',
     name: 'Guni Adebayo',
     dob: '2012-02-10',
     country: 'GB',
     city: 'London',
-    guardianId: 'demo-guardian',
+    guardianId: 'gd-amara',
     position: 'RW',
     foot: 'left',
     heightCm: 165,
@@ -249,21 +369,21 @@ function seedDemoChild(): PlayerProfile {
 }
 
 function ensureSeed() {
-  if (!guardians.has('demo-guardian')) {
-    guardians.set('demo-guardian', {
-      id: 'demo-guardian',
+  if (!guardians.has('gd-amara')) {
+    guardians.set('gd-amara', {
+      id: 'gd-amara',
       name: 'Amara Adebayo',
       email: 'amara.adebayo@example.com',
       idVerified: true,
       disclaimerAccepted: true,
-      childIds: ['demo-guni'],
+      childIds: ['pl-guni'],
     });
-    players.set('demo-guni', seedDemoChild());
-    inboxes.set('demo-guni', []);
+    players.set('pl-guni', seedDemoChild());
+    inboxes.set('pl-guni', []);
     // A verified club has already asked the guardian about a trial.
     guardianRequests.push({
       id: nid('req'),
-      playerId: 'demo-guni',
+      playerId: 'pl-guni',
       playerName: 'Guni Adebayo',
       type: 'trial',
       orgName: 'Eastport FC',
@@ -277,23 +397,32 @@ function ensureSeed() {
       createdAt: Date.now() - 2 * 3600_000,
       contactChannel: null,
       routedTo: 'guardian',
+      trialDetails: {
+        proposedDate: new Date(Date.now() + 9 * 86400000).toISOString().slice(0, 10),
+        altSlots: [
+          new Date(Date.now() + 12 * 86400000).toISOString().slice(0, 10),
+          new Date(Date.now() + 16 * 86400000).toISOString().slice(0, 10),
+        ],
+        venue: 'Eastport Academy Dome',
+        notes: 'U15 assessment day. Bring boots for grass and turf.',
+      },
     });
-    commsLog.push({ id: nid('log'), ts: Date.now() - 2 * 3600_000, type: 'trial_request_to_guardian', orgName: 'Eastport FC', scoutName: 'Maria Keane', playerId: 'demo-guni' });
+    commsLog.push({ id: nid('log'), ts: Date.now() - 2 * 3600_000, type: 'trial_request_to_guardian', orgName: 'Eastport FC', scoutName: 'Maria Keane', playerId: 'pl-guni' });
     // Seeded scouting activity so "Who's watching you" has a story to tell.
     const D = 86400000;
     scoutingEvents.push(
-      { type: 'view', orgName: 'Eastport FC', scoutName: 'Maria Keane', playerId: 'demo-adeyemi', ts: Date.now() - 2 * D },
-      { type: 'view', orgName: 'Eastport FC', scoutName: 'Maria Keane', playerId: 'demo-adeyemi', ts: Date.now() - 1 * D },
-      { type: 'shortlist', orgName: 'Eastport FC', scoutName: 'Maria Keane', playerId: 'demo-adeyemi', ts: Date.now() - 1 * D },
-      { type: 'view', orgName: 'Harbour City FC', scoutName: 'Coach D. Ansah', playerId: 'demo-adeyemi', ts: Date.now() - 5 * D },
-      { type: 'save', orgName: 'Harbour City FC', scoutName: 'Coach D. Ansah', playerId: 'demo-adeyemi', ts: Date.now() - 5 * D },
-      { type: 'view', orgName: 'Eastport FC', scoutName: 'Maria Keane', playerId: 'demo-guni', ts: Date.now() - 3 * D },
-      { type: 'trial_request_to_guardian', orgName: 'Eastport FC', scoutName: 'Maria Keane', playerId: 'demo-guni', ts: Date.now() - 2 * 3600_000 },
+      { type: 'view', orgName: 'Eastport FC', scoutName: 'Maria Keane', playerId: 'pl-adeyemi', ts: Date.now() - 2 * D },
+      { type: 'view', orgName: 'Eastport FC', scoutName: 'Maria Keane', playerId: 'pl-adeyemi', ts: Date.now() - 1 * D },
+      { type: 'shortlist', orgName: 'Eastport FC', scoutName: 'Maria Keane', playerId: 'pl-adeyemi', ts: Date.now() - 1 * D },
+      { type: 'view', orgName: 'Harbour City FC', scoutName: 'Coach D. Ansah', playerId: 'pl-adeyemi', ts: Date.now() - 5 * D },
+      { type: 'save', orgName: 'Harbour City FC', scoutName: 'Coach D. Ansah', playerId: 'pl-adeyemi', ts: Date.now() - 5 * D },
+      { type: 'view', orgName: 'Eastport FC', scoutName: 'Maria Keane', playerId: 'pl-guni', ts: Date.now() - 3 * D },
+      { type: 'trial_request_to_guardian', orgName: 'Eastport FC', scoutName: 'Maria Keane', playerId: 'pl-guni', ts: Date.now() - 2 * 3600_000 },
     );
   }
-  if (!players.has('demo-adeyemi')) {
-    players.set('demo-adeyemi', seedDemoPlayer());
-    inboxes.set('demo-adeyemi', [
+  if (!players.has('pl-adeyemi')) {
+    players.set('pl-adeyemi', seedDemoPlayer());
+    inboxes.set('pl-adeyemi', [
       {
         id: nid('req'),
         type: 'contact',
@@ -309,7 +438,7 @@ function ensureSeed() {
     ]);
     // Demo liveliness: a trial request lands shortly after login.
     setTimeout(() => {
-      const inbox = inboxes.get('demo-adeyemi');
+      const inbox = inboxes.get('pl-adeyemi');
       if (inbox && !inbox.some((r) => r.type === 'trial')) {
         inbox.unshift({
           id: nid('req'),
@@ -322,6 +451,12 @@ function ensureSeed() {
           status: 'pending',
           createdAt: Date.now(),
           contactChannel: null,
+          trialDetails: {
+            proposedDate: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
+            altSlots: [new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10)],
+            venue: 'Eastport Academy Dome',
+            notes: 'Monthly assessment trial — arrive 30 minutes early for registration.',
+          },
         });
         emit();
       }
@@ -342,8 +477,8 @@ export const mockClient: PlayerClient = {
   listDemoIdentities: async (): Promise<DemoIdentity[]> => {
     ensureSeed();
     return [
-      { id: 'demo-adeyemi', name: 'Kola Adeyemi', position: 'ST' },
-      { id: 'demo-guni', name: 'Guni Adebayo (14, child account)', position: 'RW' },
+      { id: 'pl-adeyemi', name: 'Kola Adeyemi', position: 'ST' },
+      { id: 'pl-guni', name: 'Guni Adebayo (14, child account)', position: 'RW' },
     ];
   },
 
@@ -380,6 +515,20 @@ export const mockClient: PlayerClient = {
     return delay({ playerId: p.id });
   },
 
+  pair: (code) => {
+    ensureSeed();
+    const key = String(code ?? '').trim().toUpperCase();
+    const all = pairingStore.read();
+    const entry = all[key];
+    if (!entry || entry.expiresAt < Date.now()) {
+      throw new ClientError('CODE_INVALID', 'That pairing code is wrong or expired — ask your parent/guardian for a fresh one.');
+    }
+    delete all[key];
+    pairingStore.write(all);
+    const p = getPlayer(entry.playerId);
+    return delay({ playerId: p.id, name: p.name });
+  },
+
   getMe: (playerId) => {
     const p = getPlayer(playerId);
     const score = computeTrustScore(p);
@@ -392,6 +541,7 @@ export const mockClient: PlayerClient = {
       streak: computeStreak(p.activityLog),
       weeklyGoal: weeklyGoalOf(p.activityLog),
       nextActions: nextActionsOf(p),
+      agingUp: isAdult(p.dob, p.country) && p.guardianId ? { eligible: true } : null,
     });
   },
 
@@ -469,22 +619,28 @@ export const mockClient: PlayerClient = {
     return delay((inboxes.get(playerId) ?? []).slice());
   },
 
-  respond: (playerId, requestId, accept) => {
+  respond: (playerId, requestId, accept, chosenSlot) => {
     const p = getPlayer(playerId);
     if (isMinorProfile(p)) throw new ClientError('GUARDIAN_MANAGED', 'This is managed by your parent or guardian.');
     const req = (inboxes.get(playerId) ?? []).find((r) => r.id === requestId);
     if (!req) throw new ClientError('REQUEST_NOT_FOUND', 'No such request');
     if (req.status !== 'pending') throw new ClientError('ALREADY_RESPONDED', 'Already responded');
     req.status = accept ? 'accepted' : 'declined';
+    if (accept && req.type === 'trial' && chosenSlot && req.trialDetails) {
+      const ok = chosenSlot === req.trialDetails.proposedDate || (req.trialDetails.altSlots ?? []).includes(chosenSlot);
+      if (ok) req.trialDetails = { ...req.trialDetails, proposedDate: chosenSlot };
+    }
     if (accept) {
       const channel: Channel = {
         id: nid('chan'), requestId: req.id, playerId, playerName: p.name,
         orgName: req.orgName, orgVerified: req.orgVerified, scoutName: req.scoutName, scoutRole: req.scoutRole ?? 'Scout',
         counterparty: 'player', createdAt: Date.now(), messages: [],
+        readBy: { org: null, counterparty: null },
       };
       channels.push(channel);
       req.contactChannel = channel.id;
     }
+    publishRespond({ id: req.id, type: req.type, playerId }, accept, req.contactChannel, 'player');
     emit();
     return delay(undefined);
   },
@@ -533,7 +689,13 @@ export const mockClient: PlayerClient = {
     if (!channel) throw new ClientError('CHANNEL_NOT_FOUND', 'No such thread');
     const m = attachMediaId ? p.media.find((x) => x.id === attachMediaId) : null;
     const attachment = m ? { kind: 'clip' as const, mediaId: m.id, title: m.title, url: m.url ?? null, verifiedClip: !!m.verifiedClip } : null;
-    channel.messages.push({ id: nid('msg'), ts: Date.now(), sender: { kind: 'player', id: playerId, name: p.name }, text, attachment });
+    const outgoing = { id: nid('msg'), ts: Date.now(), sender: { kind: 'player' as const, id: playerId, name: p.name }, text, attachment };
+    channel.messages.push(outgoing);
+    bus.publish('message', {
+      channelId: channel.id, requestId: channel.requestId, playerId: channel.playerId,
+      playerName: channel.playerName, orgName: channel.orgName, scoutName: channel.scoutName,
+      scoutRole: channel.scoutRole, counterparty: channel.counterparty, message: outgoing,
+    });
     scheduleOrgReply(channel, 'player', playerId);
     emit();
     return delay(undefined);
@@ -541,11 +703,18 @@ export const mockClient: PlayerClient = {
 
   markChannelRead: (playerId, channelId) => {
     const channel = channels.find((c) => c.id === channelId && c.playerId === playerId);
-    if (channel) channel.readBy = { ...(channel.readBy ?? { org: null, counterparty: null }), counterparty: Date.now() };
+    if (channel) {
+      const ts = Date.now();
+      channel.readBy = { ...(channel.readBy ?? { org: null, counterparty: null }), counterparty: ts };
+      bus.publish('read', { channelId, side: 'counterparty', ts });
+    }
     return delay(undefined);
   },
 
-  sendTyping: () => delay(undefined),
+  sendTyping: (playerId, channelId) => {
+    bus.publish('typing', { channelId, side: 'counterparty' });
+    return delay(undefined);
+  },
 
   getNotifications: (playerId) => delay(notifications('player', playerId).slice()),
 
@@ -597,9 +766,19 @@ export const mockClient: PlayerClient = {
     return delay(undefined);
   },
 
-  updateStats: (playerId, stats) => {
+  updateStats: (playerId, stats, season) => {
     const p = getPlayer(playerId);
-    p.stats = { appearances: 0, goals: 0, assists: 0, ...p.stats, ...stats };
+    if (season && season.trim()) {
+      // Past seasons file into history, not the current numbers.
+      p.seasonHistory = p.seasonHistory ?? [];
+      const existing = p.seasonHistory.find((s) => s.season === season.trim());
+      if (existing) Object.assign(existing, stats);
+      else p.seasonHistory.push({ season: season.trim(), appearances: 0, goals: 0, assists: 0, ...stats });
+      p.seasonHistory.sort((a, b) => (a.season < b.season ? 1 : -1));
+    } else {
+      p.stats = { appearances: 0, goals: 0, assists: 0, ...p.stats, ...stats };
+    }
+    recordActivity(p);
     emit();
     return delay(undefined);
   },
@@ -633,6 +812,63 @@ export const mockClient: PlayerClient = {
     recordActivity(p);
     emit();
     return delay(undefined);
+  },
+
+  agingUpComplete: (playerId) => {
+    const p = getPlayer(playerId);
+    if (!isAdult(p.dob, p.country) || !p.guardianId) throw new ClientError('NOT_ELIGIBLE', 'Aging-up applies once you reach adulthood on a guardian-owned account.');
+    const g = guardians.get(p.guardianId);
+    if (g) g.childIds = g.childIds.filter((id) => id !== playerId);
+    p.guardianId = null;
+    pushNotification('player', playerId, 'aging_up', 'Your account is now fully yours. Availability, medical sharing and club contact are your calls from here.');
+    emit();
+    return delay(undefined);
+  },
+
+  getPrefs: (playerId) => delay(getPlayer(playerId).notificationPrefs ?? null),
+
+  setPrefs: (playerId, prefs) => {
+    const p = getPlayer(playerId);
+    p.notificationPrefs = {
+      quietStart: prefs.quietStart ?? p.notificationPrefs?.quietStart ?? null,
+      quietEnd: prefs.quietEnd ?? p.notificationPrefs?.quietEnd ?? null,
+      schoolHoursMute: prefs.schoolHoursMute ?? p.notificationPrefs?.schoolHoursMute ?? null,
+    };
+    emit();
+    return delay(undefined);
+  },
+
+  getExport: (playerId) => {
+    const p = getPlayer(playerId);
+    return delay<Record<string, unknown>>({
+      exportedAt: new Date().toISOString(),
+      profile: p,
+      requests: (inboxes.get(playerId) ?? []).slice(),
+      threads: channels.filter((c) => c.playerId === playerId),
+      notifications: notifications('player', playerId).slice(),
+      insights: insightsFor(playerId),
+      note: 'Demo export — the live server assembles the same bundle from its ledger.',
+    });
+  },
+
+  deleteAccount: (playerId) => {
+    const p = getPlayer(playerId);
+    if (isMinorProfile(p)) throw new ClientError('GUARDIAN_MANAGED', 'Ask your parent/guardian to delete this profile.');
+    players.delete(playerId);
+    inboxes.delete(playerId);
+    for (let i = channels.length - 1; i >= 0; i--) if (channels[i].playerId === playerId) channels.splice(i, 1);
+    notificationsByAudience.delete(`player:${playerId}`);
+    emit();
+    return delay(undefined);
+  },
+
+  getDirectory: () => {
+    // Mirrors /orgs/directory: verified clubs plus their accountability record.
+    ensureSeed();
+    return delay<DirectoryClub[]>([
+      { id: 'org-eastport', name: 'Eastport FC', plan: 'club_pro', verified: true, trustedPartner: true, safeguardingCertified: true, trialsRun: 14, reportsFiled: 13, avgReportDays: 3.5 },
+      { id: 'org-harbour', name: 'Harbour City FC', plan: 'club_basic', verified: false, trustedPartner: false, safeguardingCertified: false, trialsRun: 4, reportsFiled: 2, avgReportDays: 9.0 },
+    ]);
   },
 
   report: (playerId, input: ReportInput) => {
@@ -740,18 +976,23 @@ export const mockClient: PlayerClient = {
     return delay(guardianRequests.filter((r) => g.childIds.includes(r.playerId)).slice().reverse());
   },
 
-  guardianRespond: (guardianId, requestId, accept) => {
+  guardianRespond: (guardianId, requestId, accept, chosenSlot) => {
     const g = guardians.get(guardianId);
     if (!g) throw new ClientError('GUARDIAN_NOT_FOUND', 'No guardian account found.');
     const r = guardianRequests.find((x) => x.id === requestId && g.childIds.includes(x.playerId));
     if (!r) throw new ClientError('REQUEST_NOT_FOUND', 'No such request');
     if (r.status !== 'pending') throw new ClientError('ALREADY_RESPONDED', 'Already responded');
     r.status = accept ? 'accepted' : 'declined';
+    if (accept && r.type === 'trial' && chosenSlot && r.trialDetails) {
+      const ok = chosenSlot === r.trialDetails.proposedDate || (r.trialDetails.altSlots ?? []).includes(chosenSlot);
+      if (ok) r.trialDetails = { ...r.trialDetails, proposedDate: chosenSlot };
+    }
     if (accept) {
       const channel: Channel = {
         id: nid('chan'), requestId: r.id, playerId: r.playerId, playerName: r.playerName ?? r.playerId,
         orgName: r.orgName, orgVerified: r.orgVerified, scoutName: r.scoutName, scoutRole: r.scoutRole ?? 'Scout',
         counterparty: 'guardian', createdAt: Date.now(), messages: [],
+        readBy: { org: null, counterparty: null },
       };
       channels.push(channel);
       r.contactChannel = channel.id;
@@ -759,6 +1000,7 @@ export const mockClient: PlayerClient = {
     } else {
       pushNotification('player', r.playerId, 'update', `Your parent/guardian declined the ${r.type} with ${r.orgName}.`);
     }
+    publishRespond({ id: r.id, type: r.type, playerId: r.playerId }, accept, r.contactChannel, 'guardian');
     commsLog.push({ id: nid('log'), ts: Date.now(), type: `${r.type}_${accept ? 'accepted' : 'declined'}_by_guardian`, orgName: r.orgName, scoutName: r.scoutName, playerId: r.playerId });
     emit();
     return delay(undefined);
@@ -779,7 +1021,13 @@ export const mockClient: PlayerClient = {
     const child = players.get(channel.playerId);
     const m = attachMediaId ? child?.media.find((x) => x.id === attachMediaId) : null;
     const attachment = m ? { kind: 'clip' as const, mediaId: m.id, title: m.title, url: m.url ?? null, verifiedClip: !!m.verifiedClip } : null;
-    channel.messages.push({ id: nid('msg'), ts: Date.now(), sender: { kind: 'guardian', id: guardianId, name: g.name }, text, attachment });
+    const outgoing = { id: nid('msg'), ts: Date.now(), sender: { kind: 'guardian' as const, id: guardianId, name: g.name }, text, attachment };
+    channel.messages.push(outgoing);
+    bus.publish('message', {
+      channelId: channel.id, requestId: channel.requestId, playerId: channel.playerId,
+      playerName: channel.playerName, orgName: channel.orgName, scoutName: channel.scoutName,
+      scoutRole: channel.scoutRole, counterparty: channel.counterparty, message: outgoing,
+    });
     scheduleOrgReply(channel, 'guardian', guardianId);
     emit();
     return delay(undefined);
@@ -788,11 +1036,18 @@ export const mockClient: PlayerClient = {
   guardianMarkChannelRead: (guardianId, channelId) => {
     const g = guardians.get(guardianId);
     const channel = channels.find((c) => c.id === channelId && g?.childIds.includes(c.playerId));
-    if (channel) channel.readBy = { ...(channel.readBy ?? { org: null, counterparty: null }), counterparty: Date.now() };
+    if (channel) {
+      const ts = Date.now();
+      channel.readBy = { ...(channel.readBy ?? { org: null, counterparty: null }), counterparty: ts };
+      bus.publish('read', { channelId, side: 'counterparty', ts });
+    }
     return delay(undefined);
   },
 
-  guardianSendTyping: () => delay(undefined),
+  guardianSendTyping: (guardianId, channelId) => {
+    bus.publish('typing', { channelId, side: 'counterparty' });
+    return delay(undefined);
+  },
 
   guardianDigest: (guardianId) => {
     const g = guardians.get(guardianId);
@@ -855,6 +1110,63 @@ export const mockClient: PlayerClient = {
   },
 
   guardianReports: (guardianId) => delay((reportsByAudience.get(`guardian:${guardianId}`) ?? []).slice()),
+
+  guardianPairingCode: (guardianId, childId) => {
+    const g = guardians.get(guardianId);
+    if (!g || !g.childIds.includes(childId)) throw new ClientError('CHILD_NOT_FOUND', 'No such child.');
+    // One live code per child, 15-minute expiry — same as the server.
+    const all = pairingStore.read();
+    for (const [code, entry] of Object.entries(all)) if (entry.playerId === childId) delete all[code];
+    const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    const code = Array.from({ length: 6 }, () => ALPHABET[Math.floor(Math.random() * ALPHABET.length)]).join('');
+    const expiresAt = Date.now() + 15 * 60 * 1000;
+    all[code] = { playerId: childId, expiresAt };
+    pairingStore.write(all);
+    return delay({ code, expiresAt });
+  },
+
+  guardianPrefs: (guardianId) => delay(guardianPrefsStore.get(guardianId) ?? null),
+
+  guardianSetPrefs: (guardianId, prefs) => {
+    const prev = guardianPrefsStore.get(guardianId);
+    guardianPrefsStore.set(guardianId, {
+      quietStart: prefs.quietStart ?? prev?.quietStart ?? null,
+      quietEnd: prefs.quietEnd ?? prev?.quietEnd ?? null,
+      schoolHoursMute: prefs.schoolHoursMute ?? prev?.schoolHoursMute ?? null,
+    });
+    emit();
+    return delay(undefined);
+  },
+
+  guardianExport: (guardianId) => {
+    const g = guardians.get(guardianId);
+    if (!g) throw new ClientError('GUARDIAN_NOT_FOUND', 'No guardian account found.');
+    return delay<Record<string, unknown>>({
+      exportedAt: new Date().toISOString(),
+      guardian: g,
+      children: g.childIds.map((id) => players.get(id)).filter(Boolean),
+      requests: guardianRequests.filter((r) => g.childIds.includes(r.playerId)),
+      threads: channels.filter((c) => c.counterparty === 'guardian' && g.childIds.includes(c.playerId)),
+      communicationsLog: commsLog.filter((l) => g.childIds.includes(l.playerId)),
+      note: 'Demo export — the live server assembles the same bundle from its ledger.',
+    });
+  },
+
+  guardianDeleteChild: (guardianId, childId) => {
+    const g = guardians.get(guardianId);
+    if (!g || !g.childIds.includes(childId)) throw new ClientError('CHILD_NOT_FOUND', 'No such child.');
+    g.childIds = g.childIds.filter((id) => id !== childId);
+    players.delete(childId);
+    inboxes.delete(childId);
+    for (let i = guardianRequests.length - 1; i >= 0; i--) if (guardianRequests[i].playerId === childId) guardianRequests.splice(i, 1);
+    for (let i = channels.length - 1; i >= 0; i--) if (channels[i].playerId === childId) channels.splice(i, 1);
+    const codes = pairingStore.read();
+    for (const [code, entry] of Object.entries(codes)) if (entry.playerId === childId) delete codes[code];
+    pairingStore.write(codes);
+    notificationsByAudience.delete(`player:${childId}`);
+    emit();
+    return delay(undefined);
+  },
 
   guardianLog: (guardianId) => {
     const g = guardians.get(guardianId);

@@ -50,6 +50,8 @@ export interface CombineResult {
 
 export interface TrialReportOnProfile {
   id: string;
+  strengthNote?: string | null;
+  focusNote?: string | null;
   orgName: string;
   scoutName: string;
   filedAt: number;
@@ -76,6 +78,8 @@ export interface PlayerProfile {
   drills?: string[];
   drillResults?: CombineResult[];
   activityLog?: number[];
+  seasonHistory?: { season: string; appearances: number; goals: number; assists: number }[];
+  notificationPrefs?: { quietStart: string | null; quietEnd: string | null; schoolHoursMute: boolean | null } | null;
   position: string | null;
   foot: string | null;
   heightCm: number | null;
@@ -137,8 +141,16 @@ export const CONTRACT_LABELS: Record<ContractStatus, string> = {
 // internal org/user ids stripped by the server. A CHILD never sees requests —
 // they get sanitized status notes (ChildInboxItem); the guardian gets the
 // full club-first view (GuardianInboxRequest).
+export interface TrialSlotDetails {
+  proposedDate: string | null;
+  altSlots?: string[];
+  venue: string | null;
+  notes: string;
+}
+
 export interface InboxRequest {
   id: string;
+  trialDetails?: TrialSlotDetails | null;
   type: 'contact' | 'trial';
   orgName: string;
   orgType: 'club' | 'agency';

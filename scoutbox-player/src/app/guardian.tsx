@@ -3,10 +3,11 @@
 // declines, and the full communications log is always visible.
 
 import { useCallback, useEffect, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, useRouter } from 'expo-router';
 import { client, type Channel, type FiledReport, type GuardianDigest, type Insights } from '../data/client';
+import type { NotificationPrefs } from '../data/types';
 import { U18_PROMISES } from '../domain/safeguarding';
 import { useSession } from '../state';
 import { colors } from '../theme';
@@ -14,6 +15,7 @@ import { Button, Card, Muted, Pill, Row, SectionTitle, TrustBar } from '../compo
 import { ReportButton } from '../components/ReportSheet';
 import { NotificationBell } from '../components/NotificationBell';
 import { Threads } from '../components/Threads';
+import { PopupBanner } from '../components/PopupBanner';
 
 const CHILD_AVAILABILITY = [
   { value: 'available_now', label: 'Open to trials' },
@@ -34,6 +36,28 @@ export default function GuardianDashboard() {
   const [coEmail, setCoEmail] = useState('');
   const [digest, setDigest] = useState<GuardianDigest | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [chosenSlots, setChosenSlots] = useState<Record<string, string>>({});
+  const [pairCodes, setPairCodes] = useState<Record<string, { code: string; expiresAt: number }>>({});
+  const [prefs, setPrefs] = useState<NotificationPrefs>({ quietStart: null, quietEnd: null, schoolHoursMute: null });
+  const [prefsNote, setPrefsNote] = useState<string | null>(null);
+  const [exportPreview, setExportPreview] = useState<string | null>(null);
+  const [confirmDeleteChild, setConfirmDeleteChild] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (guardianId) client.guardianPrefs(guardianId).then((p) => p && setPrefs(p)).catch(() => {});
+  }, [guardianId]);
+
+  const savePrefs = async (next: Partial<NotificationPrefs>) => {
+    if (!guardianId) return;
+    const merged = { ...prefs, ...next };
+    setPrefs(merged);
+    try {
+      await client.guardianSetPrefs(guardianId, merged);
+      setPrefsNote('Saved. Quiet hours apply to push delivery — the in-app record is always complete.');
+    } catch {
+      setPrefsNote('Could not save — try again.');
+    }
+  };
 
   useEffect(() => {
     if (showLog && guardianId) client.guardianLog(guardianId).then(setLog).catch(() => {});
@@ -64,7 +88,7 @@ export default function GuardianDashboard() {
     if (!guardianId) return;
     setError(null);
     try {
-      await client.guardianRespond(guardianId, requestId, accept);
+      await client.guardianRespond(guardianId, requestId, accept, accept ? chosenSlots[requestId] : undefined);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not respond');
@@ -81,8 +105,14 @@ export default function GuardianDashboard() {
     }
   };
 
+  const unreadMsgs = channels.reduce(
+    (sum, c) => sum + c.messages.filter((m) => m.sender.kind === 'org_user' && m.ts > (c.readBy?.counterparty ?? 0)).length,
+    0
+  );
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+      <PopupBanner />
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
@@ -145,6 +175,27 @@ export default function GuardianDashboard() {
               {r.scoutRole ?? 'Scout'} — {r.scoutName} · about {r.playerName ?? r.playerId} · {new Date(r.createdAt).toLocaleString()}
             </Muted>
             {r.message ? <Text style={styles.msg}>“{r.message}”</Text> : null}
+            {r.type === 'trial' && r.trialDetails && (
+              <Muted size={12.5}>
+                {r.trialDetails.venue ? `Venue: ${r.trialDetails.venue}. ` : ''}
+                {r.trialDetails.notes}
+              </Muted>
+            )}
+            {r.status === 'pending' && r.type === 'trial' && r.trialDetails?.proposedDate && (
+              <>
+                <Muted size={12.5}>Pick the date that works for your family — accepting confirms it:</Muted>
+                <Row style={{ flexWrap: 'wrap' }}>
+                  {[r.trialDetails.proposedDate, ...(r.trialDetails.altSlots ?? [])].map((slot) => {
+                    const active = (chosenSlots[r.id] ?? r.trialDetails?.proposedDate) === slot;
+                    return (
+                      <Pressable key={slot} onPress={() => setChosenSlots((s) => ({ ...s, [r.id]: slot }))}>
+                        <Pill label={slot} tone={active ? 'green' : undefined} />
+                      </Pressable>
+                    );
+                  })}
+                </Row>
+              </>
+            )}
             {r.status === 'pending' ? (
               <Row>
                 <Button small primary label={r.type === 'trial' ? 'Accept trial' : 'Accept conversation'} onPress={() => respond(r.id, true)} />
@@ -159,7 +210,10 @@ export default function GuardianDashboard() {
           </Card>
         ))}
 
-        <SectionTitle>Messages with clubs — adult to adult</SectionTitle>
+        <Row>
+          <SectionTitle>Messages with clubs — adult to adult</SectionTitle>
+          {unreadMsgs > 0 && <Pill label={`${unreadMsgs} new`} tone="red" />}
+        </Row>
         <Threads
           channels={channels}
           onSend={(channelId, text, attachMediaId) => client.guardianSendMessage(guardianId!, channelId, text, attachMediaId)}
@@ -215,6 +269,51 @@ export default function GuardianDashboard() {
                 </View>
                 <Switch value={c.medical.shared} onValueChange={(v) => setMedical(c.id, v)} trackColor={{ true: colors.gold, false: colors.line }} thumbColor="#fff" />
               </Row>
+              <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8, gap: 6 }}>
+                <Muted size={12.5}>
+                  Pair {c.name.split(' ')[0]}&apos;s device: generate a one-time code (15-minute expiry) and
+                  they enter it on their phone. Their login stays limited — uploads, stats and drills only.
+                </Muted>
+                <Row>
+                  <Button
+                    small
+                    label="Generate pairing code"
+                    onPress={async () => {
+                      try {
+                        const pc = await client.guardianPairingCode(guardianId!, c.id);
+                        setPairCodes((prev) => ({ ...prev, [c.id]: pc }));
+                      } catch (e) {
+                        setError(e instanceof Error ? e.message : 'Could not generate a code');
+                      }
+                    }}
+                  />
+                  {pairCodes[c.id] && pairCodes[c.id].expiresAt > Date.now() && (
+                    <Pill label={`Code: ${pairCodes[c.id].code}`} tone="gold" />
+                  )}
+                </Row>
+                {confirmDeleteChild === c.id ? (
+                  <Row>
+                    <Muted size={12.5}>Delete {c.name}&apos;s profile and all their content?</Muted>
+                    <Button
+                      small danger label="Yes, delete"
+                      onPress={async () => {
+                        try {
+                          await client.guardianDeleteChild(guardianId!, c.id);
+                          setConfirmDeleteChild(null);
+                          await refresh();
+                        } catch (e) {
+                          setError(e instanceof Error ? e.message : 'Could not delete');
+                        }
+                      }}
+                    />
+                    <Button small label="Keep" onPress={() => setConfirmDeleteChild(null)} />
+                  </Row>
+                ) : (
+                  <Row>
+                    <Button small danger label="Delete this profile" onPress={() => setConfirmDeleteChild(c.id)} />
+                  </Row>
+                )}
+              </View>
             </Card>
           );
         })}
@@ -261,6 +360,58 @@ export default function GuardianDashboard() {
             ))}
           </>
         )}
+
+        <SectionTitle>Notifications</SectionTitle>
+        <Card>
+          <Muted size={13}>
+            Quiet hours pause push notifications overnight. Everything still lands in your in-app feed —
+            no club contact ever slips past you.
+          </Muted>
+          <Row>
+            <Muted size={13}>Quiet from</Muted>
+            <TextInput
+              style={[styles.input, { minWidth: 72 }]}
+              placeholder="22:00"
+              placeholderTextColor={colors.muted}
+              value={prefs.quietStart ?? ''}
+              onChangeText={(v) => setPrefs((p) => ({ ...p, quietStart: v || null }))}
+              onBlur={() => savePrefs({})}
+            />
+            <Muted size={13}>until</Muted>
+            <TextInput
+              style={[styles.input, { minWidth: 72 }]}
+              placeholder="07:00"
+              placeholderTextColor={colors.muted}
+              value={prefs.quietEnd ?? ''}
+              onChangeText={(v) => setPrefs((p) => ({ ...p, quietEnd: v || null }))}
+              onBlur={() => savePrefs({})}
+            />
+          </Row>
+          {prefsNote && <Muted size={12.5}>{prefsNote}</Muted>}
+        </Card>
+
+        <SectionTitle>Your family&apos;s data</SectionTitle>
+        <Card>
+          <Muted size={13}>
+            One bundle with everything: your account, your children&apos;s profiles, every request and
+            every thread. Yours to take, any time.
+          </Muted>
+          <Row>
+            <Button
+              small label="Preview data export"
+              onPress={async () => {
+                try {
+                  const data = await client.guardianExport(guardianId!);
+                  setExportPreview(JSON.stringify(data, null, 2).slice(0, 1500));
+                } catch {
+                  setExportPreview('Export failed — try again.');
+                }
+              }}
+            />
+            {exportPreview && <Button small label="Hide preview" onPress={() => setExportPreview(null)} />}
+          </Row>
+          {exportPreview && <Text style={styles.exportPreview} numberOfLines={30}>{exportPreview}…</Text>}
+        </Card>
 
         <SectionTitle>Communications log</SectionTitle>
         <Card>
@@ -311,5 +462,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     fontSize: 14,
+  },
+  exportPreview: {
+    color: colors.muted, fontSize: 11, fontFamily: 'monospace', lineHeight: 15,
+    borderWidth: 1, borderColor: colors.line, borderRadius: 8, padding: 8, marginTop: 6,
   },
 });

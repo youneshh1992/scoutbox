@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { client } from '../../data/client';
 import type { Channel } from '../../data/types';
@@ -20,6 +20,7 @@ export default function Inbox() {
   const [error, setError] = useState<string | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [chosenSlots, setChosenSlots] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (playerId && !isMinor) client.getChannels(playerId).then(setChannels).catch(() => {});
@@ -36,7 +37,7 @@ export default function Inbox() {
     if (!playerId) return;
     setError(null);
     try {
-      await client.respond(playerId, requestId, accept);
+      await client.respond(playerId, requestId, accept, accept ? chosenSlots[requestId] : undefined);
       await refresh();
       if (playerId) setChannels(await client.getChannels(playerId));
     } catch (e) {
@@ -117,6 +118,27 @@ export default function Inbox() {
                 From {r.scoutName}{r.scoutRole ? ` (${r.scoutRole})` : ''} · {new Date(r.createdAt).toLocaleString()}
               </Muted>
               {r.message ? <Text style={styles.msg}>“{r.message}”</Text> : null}
+              {r.type === 'trial' && r.trialDetails && (
+                <Muted size={12.5}>
+                  {r.trialDetails.venue ? `Venue: ${r.trialDetails.venue}. ` : ''}
+                  {r.trialDetails.notes}
+                </Muted>
+              )}
+              {r.status === 'pending' && r.type === 'trial' && r.trialDetails?.proposedDate && (
+                <>
+                  <Muted size={12.5}>Pick the date that works — accepting confirms it:</Muted>
+                  <Row style={{ flexWrap: 'wrap' }}>
+                    {[r.trialDetails.proposedDate, ...(r.trialDetails.altSlots ?? [])].map((slot) => {
+                      const active = (chosenSlots[r.id] ?? r.trialDetails?.proposedDate) === slot;
+                      return (
+                        <Pressable key={slot} onPress={() => setChosenSlots((s) => ({ ...s, [r.id]: slot }))}>
+                          <Pill label={slot} tone={active ? 'green' : undefined} />
+                        </Pressable>
+                      );
+                    })}
+                  </Row>
+                </>
+              )}
               {r.status === 'pending' ? (
                 <Row>
                   <Button small primary label={r.type === 'trial' ? 'Accept trial' : 'Accept contact'} onPress={() => respond(r.id, true)} />

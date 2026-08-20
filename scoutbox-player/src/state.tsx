@@ -1,6 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { client, type Me } from './data/client';
-import type { AppNotification } from './data/types';
+import type { AppNotification, Channel } from './data/types';
 import type { ChildInboxItem, Guardian, GuardianInboxRequest, InboxRequest } from './domain/types';
 import { isAdult } from './domain/safeguarding';
 
@@ -39,6 +39,12 @@ interface SessionState {
   children: Me[];
   notifications: AppNotification[];
   unread: number;
+  /** Messages from clubs newer than the last thread-open, across channels. */
+  unreadMessages: number;
+  channels: Channel[];
+  /** Transient popup for a freshly arrived notification. */
+  popup: string | null;
+  dismissPopup: () => void;
   markNotificationsRead: () => Promise<void>;
   mode: 'live' | 'demo';
   loginPlayer: (playerId: string) => void;
@@ -59,35 +65,60 @@ export function SessionProvider({ children: kids }: { children: ReactNode }) {
   const [guardianInbox, setGuardianInbox] = useState<GuardianInboxRequest[]>([]);
   const [childProfiles, setChildProfiles] = useState<Me[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [popup, setPopup] = useState<string | null>(null);
+  const seenNotifIds = useRef<Set<string> | null>(null);
+  const popupTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Pop-up banner whenever a new unread notification arrives.
+  const surfaceFresh = useCallback((notifs: AppNotification[]) => {
+    if (seenNotifIds.current === null) {
+      seenNotifIds.current = new Set(notifs.map((n) => n.id));
+      return;
+    }
+    const fresh = notifs.filter((n) => !n.read && !seenNotifIds.current!.has(n.id));
+    for (const n of notifs) seenNotifIds.current.add(n.id);
+    if (fresh.length > 0) {
+      setPopup(`🔔 ${fresh[0].text}${fresh.length > 1 ? ` (+${fresh.length - 1} more)` : ''}`);
+      if (popupTimer.current) clearTimeout(popupTimer.current);
+      popupTimer.current = setTimeout(() => setPopup(null), 5000);
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
       if (playerId) {
-        const [meData, inboxData, notifs] = await Promise.all([
+        const [meData, inboxData, notifs, chans] = await Promise.all([
           client.getMe(playerId),
           client.getInbox(playerId),
           client.getNotifications(playerId),
+          client.getChannels(playerId).catch(() => [] as Channel[]),
         ]);
         setMe(meData);
         setInbox(inboxData);
         setNotifications(notifs);
+        setChannels(chans);
+        surfaceFresh(notifs);
       }
       if (guardianId) {
-        const [g, gi, ch, notifs] = await Promise.all([
+        const [g, gi, ch, notifs, chans] = await Promise.all([
           client.guardianMe(guardianId),
           client.guardianInbox(guardianId),
           client.guardianChildren(guardianId),
           client.guardianNotifications(guardianId),
+          client.guardianChannels(guardianId).catch(() => [] as Channel[]),
         ]);
         setGuardian(g);
         setGuardianInbox(gi);
         setChildProfiles(ch);
         setNotifications(notifs);
+        setChannels(chans);
+        surfaceFresh(notifs);
       }
     } catch {
       // transient — keep last good state
     }
-  }, [playerId, guardianId]);
+  }, [playerId, guardianId, surfaceFresh]);
 
   const markNotificationsRead = useCallback(async () => {
     try {
@@ -121,6 +152,13 @@ export function SessionProvider({ children: kids }: { children: ReactNode }) {
       children: childProfiles,
       notifications,
       unread: notifications.filter((n) => !n.read).length,
+      unreadMessages: channels.reduce(
+        (sum, c) => sum + c.messages.filter((m) => m.sender.kind === 'org_user' && m.ts > (c.readBy?.counterparty ?? 0)).length,
+        0
+      ),
+      channels,
+      popup,
+      dismissPopup: () => setPopup(null),
       markNotificationsRead,
       mode: client.mode,
       loginPlayer: (id) => {
@@ -146,7 +184,7 @@ export function SessionProvider({ children: kids }: { children: ReactNode }) {
       },
       refresh,
     }),
-    [playerId, guardianId, me, inbox, guardian, guardianInbox, childProfiles, notifications, markNotificationsRead, refresh]
+    [playerId, guardianId, me, inbox, guardian, guardianInbox, childProfiles, notifications, channels, popup, markNotificationsRead, refresh]
   );
 
   return <SessionContext.Provider value={value}>{kids}</SessionContext.Provider>;

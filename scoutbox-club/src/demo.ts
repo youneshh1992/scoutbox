@@ -7,7 +7,7 @@ import type {
   ScoutboxApi, Org, Session, Player, PlayerDetail, OrgRequest, Trial,
   LedgerEntry, ProofPack, PlanInfo, Reputation, SearchFilters,
   Channel, FiledReport, Notification, TrialDetails,
-  FeedItem, FilmRoomItem, FixtureGroup,
+  FeedItem, FilmRoomItem, FixtureGroup, SavedSearch, OrgNote, SigningRecord,
 } from './api';
 import { ApiError } from './api';
 // Sample footage baked into the demo bundle so the Film Room plays offline.
@@ -200,9 +200,83 @@ const trials: Trial[] = [];
 const channels: Channel[] = [];
 const notifications: Notification[] = [];
 const myReports: FiledReport[] = [];
+const savedSearches: SavedSearch[] = [];
+const orgNotes: OrgNote[] = [];
 const ledger: (LedgerEntry & { playerName?: string })[] = [];
 const listeners = new Set<(e: string, payload?: Record<string, unknown>) => void>();
 const emit = (e: string, payload?: Record<string, unknown>) => listeners.forEach((l) => l(e, payload));
+
+// Cross-tab sync: when the player demo runs in another tab of the same
+// browser, requests/responses/messages flow for real; the simulated
+// counterparty only steps in when no player tab is present.
+import { createDemoBus, type BusEvent } from './demoSync';
+
+function ensureChannelFromMeta(meta: Record<string, unknown>): Channel {
+  let channel = channels.find((c) => c.id === meta.channelId);
+  if (!channel) {
+    channel = {
+      id: String(meta.channelId),
+      requestId: String(meta.requestId ?? ''),
+      playerId: String(meta.playerId ?? ''),
+      playerName: String(meta.playerName ?? meta.playerId ?? ''),
+      orgName: String(meta.orgName ?? 'Eastport FC'),
+      scoutName: String(meta.scoutName ?? ''),
+      scoutRole: String(meta.scoutRole ?? 'Scout'),
+      counterparty: (meta.counterparty === 'guardian' ? 'guardian' : 'player'),
+      createdAt: Date.now(),
+      messages: [],
+      readBy: { org: null, counterparty: null },
+    };
+    channels.push(channel);
+  }
+  return channel;
+}
+
+const bus = createDemoBus('club', (e: BusEvent) => {
+  const p = e.payload;
+  if (e.kind === 'respond') {
+    const req = requests.find((r) => r.id === p.requestId);
+    if (!req || req.status !== 'pending') return;
+    req.status = p.accept ? 'accepted' : 'declined';
+    if (p.accept) {
+      const channel = ensureChannelFromMeta({ ...p, requestId: req.id, playerId: req.playerId, playerName: req.playerName, scoutName: req.scoutName, scoutRole: req.scoutRole, counterparty: req.routedTo });
+      req.contactChannel = channel.id;
+      if (req.type === 'trial') {
+        const target = PLAYERS.find((x) => x.id === req.playerId);
+        trials.push({
+          id: `trial-${req.id}`, playerId: req.playerId, playerName: target?.name ?? req.playerName ?? req.playerId,
+          scoutName: req.scoutName, acceptedAt: Date.now(),
+          proposedDate: (p.chosenSlot as string) ?? null, venue: null, notes: '',
+          reportDueAt: Date.now() + 7 * DAY, guardianApproved: req.routedTo === 'guardian',
+          status: 'awaiting_report',
+        });
+      }
+      pushNotification(`${req.routedTo === 'guardian' ? `The guardian of ${req.playerName}` : req.playerName} accepted your ${req.type} request — thread open.`, 'accepted');
+    } else {
+      pushNotification(`${req.routedTo === 'guardian' ? `The guardian of ${req.playerName}` : req.playerName} declined your ${req.type} request.`, 'declined');
+    }
+    emit('requests');
+  }
+  if (e.kind === 'message') {
+    const channel = ensureChannelFromMeta(p);
+    const msg = p.message as Channel['messages'][number];
+    if (msg && !channel.messages.some((m) => m.id === msg.id)) {
+      channel.messages.push(msg);
+      pushNotification(`${msg.sender.name} replied in the ${channel.playerName} thread.`, 'message');
+      emit('messages', { channelId: channel.id });
+    }
+  }
+  if (e.kind === 'read') {
+    const channel = channels.find((c) => c.id === p.channelId);
+    if (channel && p.side !== 'org') {
+      channel.readBy = { ...(channel.readBy ?? { org: null, counterparty: null }), counterparty: Number(p.ts) || Date.now() };
+      emit('messages', { channelId: channel.id });
+    }
+  }
+  if (e.kind === 'typing' && p.side !== 'org') {
+    emit('typing', { channelId: p.channelId, side: 'counterparty' });
+  }
+});
 
 function pushNotification(text: string, type = 'update') {
   notifications.unshift({ id: nid('ntf'), ts: Date.now(), type, text, refId: null, read: false });
@@ -298,12 +372,14 @@ export const demoApi: ScoutboxApi = {
         : new ApiError(403, 'VERIFIED_CLUBS_ONLY', 'Under-18 profiles are visible to verified clubs only.');
     }
     log(s, 'view', id);
+    const notes = orgNotes.filter((n) => n.playerId === id);
     const similar = PLAYERS.filter((c) => c.id !== id && canSee(c, s.org))
       .map((c) => ({ playerId: c.id, name: c.name, position: c.position, score: similarity(p, c) }))
       .sort((a, b) => b.score - a.score)
       .slice(0, 3);
     const detail: PlayerDetail = {
       ...p,
+      orgNotes: notes,
       similarPlayers: {
         note: 'Statistical similarity — a lead, not a verdict.',
         players: similar,
@@ -340,9 +416,18 @@ export const demoApi: ScoutboxApi = {
     };
     requests.push(req);
     log(s, `${type}_request${target?.guardianManaged ? '_to_guardian' : ''}`, playerId);
-    // Demo liveliness: the player (or guardian) accepts after a few seconds,
-    // which opens the moderated thread.
+    bus.publish('request', {
+      id: req.id, playerId, playerName: target?.name, type, message,
+      trialDetails: details ?? null,
+      orgName: s.org.name, orgVerified: s.org.verified, orgSafeguardingCertified: s.org.safeguardingCertified,
+      trustedPartner: s.org.trustedPartner, scoutName: s.scoutName, scoutRole: s.role,
+      routedTo: req.routedTo, createdAt: req.createdAt,
+    });
+    // A real player/guardian tab answers for itself; the simulated
+    // counterparty only steps in when nobody is there.
+    if (bus.peerActive()) return delay(undefined);
     setTimeout(() => {
+      if (req.status !== 'pending') return;
       req.status = 'accepted';
       const counterparty = target?.guardianManaged ? 'guardian' as const : 'player' as const;
       const channel: Channel = {
@@ -393,8 +478,15 @@ export const demoApi: ScoutboxApi = {
         };
       }
     }
-    channel.messages.push({ id: nid('msg'), ts: Date.now(), sender: { kind: 'org_user', id: s.userId, name: `${s.scoutName} · ${s.role} · ${s.org.name}` }, text, attachment });
+    const outgoing = { id: nid('msg'), ts: Date.now(), sender: { kind: 'org_user' as const, id: s.userId, name: `${s.scoutName} · ${s.role} · ${s.org.name}` }, text, attachment };
+    channel.messages.push(outgoing);
     log(s, 'message', channel.playerId);
+    bus.publish('message', {
+      channelId: channel.id, requestId: channel.requestId, playerId: channel.playerId,
+      playerName: channel.playerName, orgName: channel.orgName, scoutName: channel.scoutName,
+      scoutRole: channel.scoutRole, counterparty: channel.counterparty, message: outgoing,
+    });
+    if (bus.peerActive()) return delay(undefined);
     // Simulated counterparty: typing ping, then a reply, then a read receipt.
     setTimeout(() => emit('typing', { channelId: channel.id, side: 'counterparty' }), 1500);
     const replies = CANNED_REPLIES[channel.counterparty];
@@ -418,11 +510,18 @@ export const demoApi: ScoutboxApi = {
 
   markChannelRead: (s, channelId) => {
     const channel = channels.find((c) => c.id === channelId);
-    if (channel) channel.readBy = { ...(channel.readBy ?? { org: null, counterparty: null }), org: Date.now() };
+    if (channel) {
+      const ts = Date.now();
+      channel.readBy = { ...(channel.readBy ?? { org: null, counterparty: null }), org: ts };
+      bus.publish('read', { channelId, side: 'org', ts });
+    }
     return delay(undefined);
   },
 
-  sendTyping: () => delay(undefined),
+  sendTyping: (s, channelId) => {
+    bus.publish('typing', { channelId, side: 'org' });
+    return delay(undefined);
+  },
 
   getFeed: (s) => {
     const FOURTEEN_DAYS = Date.now() - 14 * DAY;
@@ -481,6 +580,51 @@ export const demoApi: ScoutboxApi = {
   },
 
   getScoutTags: () => delay(SCOUT_TAGS),
+
+  getSavedSearches: (s) => delay(savedSearches.slice()),
+
+  saveSearch: (s, name, filters) => {
+    savedSearches.push({ id: nid('ss'), name, scoutName: s.scoutName, filters, createdAt: Date.now() });
+    return delay(undefined);
+  },
+
+  deleteSavedSearch: (s, id) => {
+    const i = savedSearches.findIndex((x) => x.id === id);
+    if (i >= 0) savedSearches.splice(i, 1);
+    return delay(undefined);
+  },
+
+  addNote: (s, playerId, text) => {
+    orgNotes.push({ id: nid('note'), playerId, scoutName: s.scoutName, text, ts: Date.now() });
+    return delay(undefined);
+  },
+
+  moreLikeThis: (s, playerId) => {
+    const base = PLAYERS.find((p) => p.id === playerId);
+    if (!base) throw new ApiError(404, 'PLAYER_NOT_FOUND', 'No such player');
+    const players = PLAYERS.filter((c) => c.id !== playerId && canSee(c, s.org))
+      .map((c) => ({ ...c, similarity: similarity(base, c) }))
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, 10);
+    return delay({ base: { name: base.name }, players });
+  },
+
+  recordSigning: (s, playerId) => {
+    const p = PLAYERS.find((x) => x.id === playerId);
+    if (!p) throw new ApiError(404, 'PLAYER_NOT_FOUND', 'No such player');
+    p.contractStatus = 'under_contract';
+    p.availability = 'not_seeking';
+    p.timeline.push({ year: '2026', event: `Signed by ${s.org.name} — discovered on ScoutBox` });
+    log(s, 'signing', playerId);
+    const signing: SigningRecord = {
+      id: nid('sign'), playerId, playerName: p.name, scoutName: s.scoutName,
+      ts: Date.now(), attributionWindowMonths: 24, insideAttributionWindow: true,
+    };
+    pushNotification(`Signing of ${p.name} recorded — attribution evidence frozen.`, 'signing');
+    return delay(signing);
+  },
+
+  trialIcsUrl: () => null, // downloads need the live server
 
   getFixtures: (s) => {
     const groups: Record<string, FixtureGroup> = {};

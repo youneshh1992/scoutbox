@@ -62,7 +62,7 @@ export function buildSeed() {
       email: 'marek.kowalski@example.com',
       idVerified: true,
       disclaimerAccepted: true,
-      childIds: ['pl-tomasz'],
+      childIds: ['pl-tomasz', 'pl-imani'],
     },
   ];
 
@@ -81,6 +81,10 @@ export function buildSeed() {
       contractUntil: '2026-06-30',
       marketValueRange: '€250K – €450K',
       agentName: 'Team Elevate',
+      seasonHistory: [
+        { season: '2024/25', appearances: 27, goals: 14, assists: 4 },
+        { season: '2023/24', appearances: 24, goals: 9, assists: 3 },
+      ],
       stats: { appearances: 31, goals: 22, assists: 6, paceKmh: 34.1, passCompletionPct: 78, duelSuccessPct: 61 },
       academyPlus: true,
       badges: ['Finisher', 'Pressing Forward'],
@@ -328,6 +332,26 @@ export function buildSeed() {
       attendance: [att('U15 Academy League, week 12', 'Hackney Marshes', now - 9 * day)],
       timeline: [tl('2024', 'Joined grassroots academy U13s'), tl('2026', 'U15 league top scorer at 14')],
       media: [med('U15 highlights — wing play', 'video', now - 14 * day)],
+      medical: { shared: false, records: [], conditionStatus: 'fully_fit' },
+    }),
+    // Turned 18 recently but the account is still guardian-linked — the
+    // aging-up transition flow hands ownership to the player.
+    player({
+      id: 'pl-imani',
+      name: 'Imani Kowalska',
+      dob: '2008-07-15', // just turned 18
+      country: 'PL',
+      city: 'Gdańsk',
+      guardianId: 'gd-marek',
+      position: 'ST',
+      foot: 'right',
+      heightCm: 172,
+      weightKg: 65,
+      stats: { appearances: 19, goals: 11, assists: 3, paceKmh: 32.1, passCompletionPct: 77, duelSuccessPct: 54 },
+      identityVerified: true,
+      attendance: [att('Central Junior League final', 'Stadion GOSiR', now - 40 * day)],
+      timeline: [tl('2024', 'Youth academy striker'), tl('2026', 'Turned 18 — account transition pending')],
+      media: [med('Finishing compilation (U18)', 'video', now - 30 * day)],
       medical: { shared: false, records: [], conditionStatus: 'fully_fit' },
     }),
     player({

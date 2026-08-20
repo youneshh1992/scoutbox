@@ -3,6 +3,7 @@
 import type {
   PlayerClient, SignupInput, Me, AttendanceInput, DemoIdentity, ReportInput, ChildInput,
   Channel, AppNotification, Insights, FiledReport, PlayerFeedItem, PlayerCV, GuardianDigest,
+  NotificationPrefs, DirectoryClub,
 } from './types';
 import { ClientError } from './types';
 import type { Availability, ContractStatus, InboxRequest, ChildInboxItem, Guardian, GuardianInboxRequest, Drill } from '../domain/types';
@@ -52,10 +53,16 @@ export const httpClient: PlayerClient = {
 
   getInbox: (playerId) => request<(InboxRequest | ChildInboxItem)[]>('/player/inbox', playerId),
 
-  respond: (playerId, requestId, accept) =>
+  pair: (code) =>
+    request<{ playerId: string; name: string }>('/auth/player/pair', undefined, {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+
+  respond: (playerId, requestId, accept, chosenSlot) =>
     request<void>(`/player/requests/${requestId}/respond`, playerId, {
       method: 'POST',
-      body: JSON.stringify({ accept }),
+      body: JSON.stringify({ accept, chosenSlot }),
     }),
 
   setAcademyPlus: (playerId, enabled) =>
@@ -105,13 +112,29 @@ export const httpClient: PlayerClient = {
   addTimeline: (playerId, year, event) =>
     request<void>('/player/timeline', playerId, { method: 'POST', body: JSON.stringify({ year, event }) }),
 
-  updateStats: (playerId, stats) =>
-    request<void>('/player/stats', playerId, { method: 'POST', body: JSON.stringify(stats) }),
+  updateStats: (playerId, stats, season) =>
+    request<void>('/player/stats', playerId, { method: 'POST', body: JSON.stringify({ ...stats, season }) }),
 
   getDrills: (playerId) => request<Drill[]>('/player/drills', playerId),
 
   completeDrill: (playerId, drillId, value, videoDataUrl) =>
     request<void>(`/player/drills/${drillId}/complete`, playerId, { method: 'POST', body: JSON.stringify({ value, videoDataUrl }) }),
+
+  agingUpComplete: (playerId) =>
+    request<void>('/player/aging-up/complete', playerId, { method: 'POST' }),
+
+  getPrefs: (playerId) =>
+    request<{ prefs: NotificationPrefs | null }>('/player/prefs', playerId).then((r) => r.prefs),
+
+  setPrefs: (playerId, prefs) =>
+    request<void>('/player/prefs', playerId, { method: 'POST', body: JSON.stringify(prefs) }),
+
+  getExport: (playerId) => request<Record<string, unknown>>('/player/export', playerId),
+
+  deleteAccount: (playerId) =>
+    request<void>('/player/account', playerId, { method: 'DELETE' }),
+
+  getDirectory: () => request<DirectoryClub[]>('/orgs/directory'),
 
   report: (playerId, input: ReportInput) =>
     request<void>('/player/report', playerId, { method: 'POST', body: JSON.stringify(input) }),
@@ -143,8 +166,8 @@ export const httpClient: PlayerClient = {
 
   guardianInbox: (guardianId) => guardianRequest<GuardianInboxRequest[]>('/guardian/inbox', guardianId),
 
-  guardianRespond: (guardianId, requestId, accept) =>
-    guardianRequest<void>(`/guardian/requests/${requestId}/respond`, guardianId, { method: 'POST', body: JSON.stringify({ accept }) }),
+  guardianRespond: (guardianId, requestId, accept, chosenSlot) =>
+    guardianRequest<void>(`/guardian/requests/${requestId}/respond`, guardianId, { method: 'POST', body: JSON.stringify({ accept, chosenSlot }) }),
 
   guardianLog: (guardianId) => guardianRequest<{ id: string; ts: number; type: string; orgName: string; scoutName: string; playerId: string }[]>('/guardian/log', guardianId),
 
@@ -185,6 +208,20 @@ export const httpClient: PlayerClient = {
     guardianRequest<void>('/guardian/coguardian', guardianId, { method: 'POST', body: JSON.stringify({ name, email }) }),
 
   guardianReports: (guardianId) => guardianRequest<FiledReport[]>('/guardian/reports', guardianId),
+
+  guardianPairingCode: (guardianId, childId) =>
+    guardianRequest<{ code: string; expiresAt: number }>(`/guardian/children/${childId}/pairing-code`, guardianId, { method: 'POST' }),
+
+  guardianPrefs: (guardianId) =>
+    guardianRequest<{ prefs: NotificationPrefs | null }>('/guardian/prefs', guardianId).then((r) => r.prefs),
+
+  guardianSetPrefs: (guardianId, prefs) =>
+    guardianRequest<void>('/guardian/prefs', guardianId, { method: 'POST', body: JSON.stringify(prefs) }),
+
+  guardianExport: (guardianId) => guardianRequest<Record<string, unknown>>('/guardian/export', guardianId),
+
+  guardianDeleteChild: (guardianId, childId) =>
+    guardianRequest<void>(`/guardian/children/${childId}`, guardianId, { method: 'DELETE' }),
 
   onChange: (cb) => {
     // SSE on web; polling elsewhere (native has no EventSource).

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { api, DEMO_MODE, type Notification, type Org, type Session } from './api';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { api, DEMO_MODE, type Channel, type Notification, type Org, type Session } from './api';
 import {
   FeedScreen, FilmRoomScreen, SearchScreen, ShortlistScreen, RequestsScreen, MessagesScreen,
   TrialsScreen, FixturesScreen, LedgerScreen, ReputationScreen, PlanScreen,
@@ -130,14 +130,36 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   const [safetyOpen, setSafetyOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [bellOpen, setBellOpen] = useState(false);
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const seenNotifIds = useRef<Set<string> | null>(null);
 
   useEffect(() => api.onChange(() => setTick((t) => t + 1)), []);
 
   useEffect(() => {
     api.getNotifications(session).then(setNotifications).catch(() => {});
+    api.getChannels(session).then(setChannels).catch(() => {});
   }, [session, tick]);
 
   const unread = notifications.filter((n) => !n.read).length;
+
+  // Unread messages: anything from the player/guardian side newer than the
+  // last time we opened that thread.
+  const unreadMessages = channels.reduce(
+    (sum, c) => sum + c.messages.filter((m) => m.sender.kind !== 'org_user' && m.ts > (c.readBy?.org ?? 0)).length,
+    0
+  );
+
+  // Pop up a toast the moment something new lands (messages, acceptances…).
+  useEffect(() => {
+    if (seenNotifIds.current === null) {
+      seenNotifIds.current = new Set(notifications.map((n) => n.id));
+      return;
+    }
+    const fresh = notifications.filter((n) => !n.read && !seenNotifIds.current!.has(n.id));
+    for (const n of notifications) seenNotifIds.current.add(n.id);
+    if (fresh.length > 0) notify(`🔔 ${fresh[0].text}${fresh.length > 1 ? ` (+${fresh.length - 1} more)` : ''}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notifications]);
 
   const openBell = async () => {
     setBellOpen(!bellOpen);
@@ -161,8 +183,9 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
       <nav className="sidebar">
         <div className="brand">Scout<span>Box</span></div>
         {NAV.map((n) => (
-          <button key={n.id} className={screen === n.id ? 'active' : ''} onClick={() => setScreen(n.id)}>
+          <button key={n.id} className={screen === n.id ? 'active' : ''} onClick={() => setScreen(n.id)} style={{ position: 'relative' }}>
             {n.label}
+            {n.id === 'messages' && unreadMessages > 0 && <span className="nav-badge">{unreadMessages}</span>}
           </button>
         ))}
         <div className="spacer" />

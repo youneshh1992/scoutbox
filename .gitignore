@@ -5,3 +5,4 @@ dist/
 *.tsbuildinfo
 .DS_Store
 dist-demo/
+scoutbox-server/data/

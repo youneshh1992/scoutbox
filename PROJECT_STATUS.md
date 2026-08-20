@@ -3,9 +3,69 @@
 > Purpose of this file: let any Claude Code session (cloud or local) pick up this
 > project with zero prior context. Keep it updated at the end of each working session.
 
-**Last updated:** 2026-08-20 · **Milestone: 5 complete — social-platform patterns +
-the USP set (Verified Clips, Film Room, feeds, streaks, combine, CV, fixture graph)** ·
+**Last updated:** 2026-08-20 · **Milestone: 6 complete — messaging fix + platform
+completeness (persistence, admin console, saved searches, trial slots, signings,
+season history, pairing, aging-up, prefs, data rights, club directory)** ·
 Developed in this GitHub repo (`youneshh1992/scoutbox`), Claude Code web.
+
+## Milestone 6 (2026-08-20): the messaging fix + the completeness pass
+
+The reported bug — "player sends a message, club side sees nothing" — was demo-tab
+isolation: two static artifact tabs each ran their own in-memory dataset (live server
+mode always worked). Fixed with a cross-tab sync bus, plus notification pop-ups and
+red unread-count badges on both sides:
+
+- **Cross-tab demo sync** (`scoutbox-club/src/demoSync.ts` = `scoutbox-player/src/data/demoSync.ts`):
+  BroadcastChannel `scoutbox-demo-bus` + localStorage journal (catch-up for late tabs)
+  + presence heartbeats. Requests, accept/decline, messages, read receipts and typing
+  flow between tabs; each demo suppresses its simulated counterparty while a real
+  peer tab is present. Same-origin tabs only; live mode uses SSE as before.
+- **Red unread badges** — club sidebar: `.nav-badge` count on Messages; player: count
+  on the Inbox tab (pending requests + unread org messages, danger-red).
+- **Pop-ups** — club: toast on fresh notifications; player/guardian: `PopupBanner`.
+
+Platform-completeness features (all server-enforced, mirrored in both demo clients):
+
+- **JSON snapshot persistence** — `scoutbox-server/data/db.json`, debounced writes +
+  save-on-SIGINT; restart restores everything (gitignored).
+- **Admin / Trust & Safety console** (`scoutbox-admin/`, Vite, port 5174, `x-admin-key`,
+  default `scoutbox-admin`): overview, report queue (resolve with outcome + optional
+  org suspension — resolution notifies the reporter), club verification, guardian IDV
+  queue, suspensions, moderation log, thread audit.
+- **Saved searches with alerts** — club saves filter sets; a matching new signup
+  notifies the org (`saved_search` notification).
+- **Trial logistics** — requests carry proposed date + up to 2 alt slots + venue;
+  the player/guardian picks the slot when accepting; `.ics` calendar export per trial.
+- **Trial report feedback** — `strengthNote` / `focusNote` on the mandatory report,
+  shown on the player profile ("💪 Strength / 🎯 Work on").
+- **Record signing** — attribution-window check writes `db.signings`; proof for the
+  success-fee model.
+- **Season history** — stats posted with a `season` label file into
+  `seasonHistory` (career season-by-season table on the profile) instead of the
+  current season.
+- **Child device pairing** — guardian mints a single-use 6-char code (15-min expiry,
+  crypto-random); the child's device exchanges it for the limited player login.
+  Demo mode shares codes across tabs via localStorage.
+- **Aging-up** — at 18 a guardian-linked player sees the handover card; completing it
+  transfers ownership (history intact, both sides notified). Seeded: `pl-imani`.
+- **Notification prefs** — quiet hours + school-hours mute (default-on for minors);
+  muted pushes defer but the in-app feed always records.
+- **Data rights** — full JSON export (player + guardian incl. children); account
+  deletion (minors must go via the guardian; append-only ledger keeps ids only).
+- **Club directory** (`/orgs/directory`) — the player-facing accountability view:
+  verified badge, safeguarding-certified, trials run, reports filed, avg days to file.
+  Clubs only — agencies never appear.
+- **Org notes + "More like this"** — private per-org notes on profiles; similar-player
+  jump-off from any profile drawer.
+
+Verified 2026-08-20: 17 domain tests + **36 live API checks** (`m6-api-e2e`: pairing
+single-use, slot choice → trial date → ICS, season filing, prefs, saved-search alert,
+directory, mandatory report w/ feedback, guardian slot choice, exports, delete rules,
+aging-up, signing, admin resolve → reporter notified, snapshot persistence + restart
+restore). Cross-tab Playwright E2E: request → popup → accept → message → red badge
+"1" on the club tab → reply back; offline single-file demo E2E for both artifacts;
+M6 UI spotcheck (directory card, slot picker, seasons, prefs/export/delete, guardian
+pairing → cross-tab pair → child lands on Home).
 
 ## Milestone 5 (2026-08-20): social-layout patterns + unique features
 

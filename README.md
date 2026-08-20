@@ -1,12 +1,13 @@
-# ScoutBox — Full System (Milestone 3: Under-18 Safeguarding)
+# ScoutBox — Full System (Milestone 6: messaging fix + platform completeness)
 
-Three pieces, one live dataset:
+Four pieces, one live dataset:
 
 | Folder | What it is | Run |
 |---|---|---|
-| `scoutbox-server/` | The sync backend both apps share. Enforces the deck's rules server-side. | `npm install && npm start` (port 4000) |
+| `scoutbox-server/` | The sync backend all apps share. Enforces the deck's rules server-side. Persists to `data/db.json` (restart-safe). | `npm install && npm start` (port 4000) |
 | `scoutbox-player/` | The player mobile app (Expo/React Native). | `npm install && npx expo start --web` |
 | `scoutbox-club/`   | The club & agent desktop application (React, landscape). | `npm install && npm run dev` (port 5173) |
+| `scoutbox-admin/`  | The internal Trust & Safety console (reports, verification, IDV, suspensions, audit). | `npm install && npm run dev` (port 5174, key: `scoutbox-admin`) |
 
 ## Live sync
 Start the server first. The club app connects to it automatically (localhost:4000).
@@ -15,6 +16,32 @@ To connect the player app to the same live data, start it with:
 (without the variable it runs in self-contained demo mode).
 Then: a club's contact/trial request appears in the player's Inbox instantly; a
 player's Academy+ toggle or upload appears in club search instantly.
+
+Messaging is symmetric and observable: messages flow both ways with read receipts
+(✓✓) and typing indicators; new messages pop a notification and put a red unread
+count next to Messages (club sidebar) and on the Inbox tab (player app). The static
+demo builds sync across same-browser tabs too (BroadcastChannel bus), so the club
+tab and player tab hold one real conversation.
+
+## Milestone 6 additions
+- Trial invitations carry proposed date + alternate slots + venue; the accepting
+  side picks the slot, and every booked trial exports as an `.ics` calendar file.
+- Mandatory trial reports now include written feedback (strength / work-on) that
+  lands on the player profile.
+- Saved searches alert clubs when a matching player joins. Signings are recorded
+  against the attribution window (`db.signings`).
+- Players build a season-by-season history; profiles show past seasons.
+- Guardians pair a child's device with a single-use 6-character code (15-minute
+  expiry). At 18, a guardian-linked account hands over to the player (aging-up).
+- Notification preferences: quiet hours for everyone, school-hours mute default-on
+  for minors (pushes defer; the in-app feed always keeps the record).
+- Data rights: full JSON export and account deletion for players and guardians
+  (minors delete via the guardian; the append-only ledger keeps ids only).
+- Player-facing club directory: verified + safeguarding-certified badges, trials
+  run, reports filed and average days-to-file. Clubs only — agencies never listed.
+- Internal Trust & Safety console (`scoutbox-admin/`): report queue with outcomes
+  (reporter is notified), club verification, guardian IDV, suspensions, moderation
+  log, thread audit.
 
 ## Deck rules enforced in code (server-side, not just UI)
 - Under-18 players with parental safeguarding (Milestone 3):

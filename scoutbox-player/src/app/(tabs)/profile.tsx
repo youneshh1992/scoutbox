@@ -99,6 +99,24 @@ export default function Profile() {
           </View>
         </View>
 
+        {/* aging up: an 18th birthday hands the account to the player */}
+        {me.agingUp?.eligible && (
+          <Card style={{ borderColor: colors.gold }}>
+            <SectionTitle>🎂 You&apos;re 18 — this account can become fully yours</SectionTitle>
+            <Muted size={13}>
+              Your parent/guardian has kept this account safe until now. Completing the handover moves
+              availability, medical sharing and club contact to you. Your history — clips, reports,
+              trust — stays exactly as it is.
+            </Muted>
+            <Row>
+              <Button
+                small primary label="Complete the handover"
+                onPress={() => set(() => client.agingUpComplete(playerId))}
+              />
+            </Row>
+          </Card>
+        )}
+
         {/* trust score */}
         <Card>
           <Row style={{ justifyContent: 'space-between' }}>
@@ -149,6 +167,17 @@ export default function Profile() {
               {me.stats.paceKmh != null && <StatTile icon="⚡" v={`${me.stats.paceKmh}`} k="km/h Top Speed" />}
               {me.stats.passCompletionPct != null && <StatTile icon="🎯" v={`${me.stats.passCompletionPct}%`} k="Pass Accuracy" />}
             </Row>
+            {(me.seasonHistory?.length ?? 0) > 0 && (
+              <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8, gap: 4 }}>
+                <Muted size={12}>Past seasons — your career, season by season</Muted>
+                {me.seasonHistory!.map((s) => (
+                  <Row key={s.season} style={{ justifyContent: 'space-between' }}>
+                    <Pill label={s.season} />
+                    <Muted size={12.5}>{s.appearances} apps · {s.goals} goals · {s.assists} assists</Muted>
+                  </Row>
+                ))}
+              </View>
+            )}
           </Card>
         )}
 
@@ -287,6 +316,8 @@ export default function Profile() {
                   accel {r.acceleration}/10 · {r.sprintSpeedKmh} km/h · {r.distanceKm} km · pass {r.passCompletionPct}% ·
                   duels {r.duelSuccessPct}% · coach {r.coachRating}/10
                 </Muted>
+                {r.strengthNote ? <Muted size={12.5}>💪 Strength: {r.strengthNote}</Muted> : null}
+                {r.focusNote ? <Muted size={12.5}>🎯 Work on: {r.focusNote}</Muted> : null}
               </View>
             ))}
             <Muted size={12.5}>Filed by clubs after your trials — mandatory, and they raise your Trust Score.</Muted>

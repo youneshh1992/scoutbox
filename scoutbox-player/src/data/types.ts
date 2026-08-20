@@ -2,6 +2,24 @@ import type {
   Availability, ContractStatus, InboxRequest, ChildInboxItem, GuardianInboxRequest,
   Guardian, Drill, PlayerProfile,
 } from '../domain/types';
+
+export interface NotificationPrefs {
+  quietStart: string | null;
+  quietEnd: string | null;
+  schoolHoursMute: boolean | null;
+}
+
+export interface DirectoryClub {
+  id: string;
+  name: string;
+  plan: string;
+  verified: boolean;
+  trustedPartner: boolean;
+  safeguardingCertified: boolean;
+  trialsRun: number;
+  reportsFiled: number;
+  avgReportDays: number | null;
+}
 import type { TrustBreakdown } from '../domain/trustScore';
 
 export interface SignupInput {
@@ -24,6 +42,7 @@ export interface Me extends PlayerProfile {
   streak?: number;
   weeklyGoal?: { done: number; target: number; met: boolean };
   nextActions?: { id: string; label: string; gain: number }[];
+  agingUp?: { eligible: boolean } | null;
 }
 
 export class ClientError extends Error {
@@ -173,9 +192,11 @@ export interface PlayerClient {
   mode: 'live' | 'demo';
   listDemoIdentities(): Promise<DemoIdentity[]>;
   signup(input: SignupInput): Promise<{ playerId: string }>;
+  /** Child device pairing: exchange the guardian's code for the child login. */
+  pair(code: string): Promise<{ playerId: string; name: string }>;
   getMe(playerId: string): Promise<Me>;
   getInbox(playerId: string): Promise<(InboxRequest | ChildInboxItem)[]>;
-  respond(playerId: string, requestId: string, accept: boolean): Promise<void>;
+  respond(playerId: string, requestId: string, accept: boolean, chosenSlot?: string): Promise<void>;
   setAcademyPlus(playerId: string, enabled: boolean): Promise<void>;
   /** dataUrl carries the actual video file when provided (web picker);
    *  attendanceId links footage to a verified attendance → Verified Clip seal. */
@@ -196,10 +217,16 @@ export interface PlayerClient {
   setAvailability(playerId: string, availability?: Availability, contractStatus?: ContractStatus): Promise<void>;
   addAttendance(playerId: string, input: AttendanceInput): Promise<void>;
   addTimeline(playerId: string, year: string, event: string): Promise<void>;
-  updateStats(playerId: string, stats: Record<string, number>): Promise<void>;
+  updateStats(playerId: string, stats: Record<string, number>, season?: string): Promise<void>;
   getDrills(playerId: string): Promise<Drill[]>;
   /** value = the drill's measured metric; videoDataUrl marks it combine-VERIFIED. */
   completeDrill(playerId: string, drillId: string, value?: number, videoDataUrl?: string): Promise<void>;
+  agingUpComplete(playerId: string): Promise<void>;
+  getPrefs(playerId: string): Promise<NotificationPrefs | null>;
+  setPrefs(playerId: string, prefs: Partial<NotificationPrefs>): Promise<void>;
+  getExport(playerId: string): Promise<Record<string, unknown>>;
+  deleteAccount(playerId: string): Promise<void>;
+  getDirectory(): Promise<DirectoryClub[]>;
   report(playerId: string, input: ReportInput): Promise<void>;
   block(playerId: string, orgId: string, reason?: string): Promise<void>;
 
@@ -212,7 +239,7 @@ export interface PlayerClient {
   guardianChildren(guardianId: string): Promise<Me[]>;
   guardianAddChild(guardianId: string, input: ChildInput): Promise<{ playerId: string }>;
   guardianInbox(guardianId: string): Promise<GuardianInboxRequest[]>;
-  guardianRespond(guardianId: string, requestId: string, accept: boolean): Promise<void>;
+  guardianRespond(guardianId: string, requestId: string, accept: boolean, chosenSlot?: string): Promise<void>;
   guardianLog(guardianId: string): Promise<{ id: string; ts: number; type: string; orgName: string; scoutName: string; playerId: string }[]>;
   guardianSetMedicalShared(guardianId: string, childId: string, shared: boolean): Promise<void>;
   guardianReport(guardianId: string, input: ReportInput): Promise<void>;
@@ -228,6 +255,11 @@ export interface PlayerClient {
   guardianSetChildAvailability(guardianId: string, childId: string, availability: 'available_now' | 'end_of_season' | 'not_seeking'): Promise<void>;
   guardianAddCoGuardian(guardianId: string, name: string, email: string): Promise<void>;
   guardianReports(guardianId: string): Promise<FiledReport[]>;
+  guardianPairingCode(guardianId: string, childId: string): Promise<{ code: string; expiresAt: number }>;
+  guardianPrefs(guardianId: string): Promise<NotificationPrefs | null>;
+  guardianSetPrefs(guardianId: string, prefs: Partial<NotificationPrefs>): Promise<void>;
+  guardianExport(guardianId: string): Promise<Record<string, unknown>>;
+  guardianDeleteChild(guardianId: string, childId: string): Promise<void>;
 
   onChange(cb: (event?: string, payload?: Record<string, unknown>) => void): () => void;
 }
