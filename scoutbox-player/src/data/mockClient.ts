@@ -5,7 +5,7 @@
 
 import type {
   PlayerClient, SignupInput, Me, AttendanceInput, DemoIdentity, ReportInput, ChildInput,
-  Channel, AppNotification, Insights, FiledReport,
+  Channel, AppNotification, Insights, FiledReport, PlayerFeedItem, PlayerCV, GuardianDigest,
 } from './types';
 import { ClientError } from './types';
 import type {
@@ -13,7 +13,42 @@ import type {
   GuardianInboxRequest, Drill, PlayerProfile,
 } from '../domain/types';
 import { adultAgeFor, ageOn, isAdult } from '../domain/safeguarding';
-import { computeTrustScore, trustBreakdown } from '../domain/trustScore';
+import { computeTrustScore, trustBreakdown, TRUST } from '../domain/trustScore';
+
+// Mirrors the server's habit-loop + tier logic (domain.mjs is authoritative).
+const DAY = 24 * 3600 * 1000;
+function trustTier(score: number): string {
+  if (score >= 80) return 'Elite';
+  if (score >= 60) return 'Established';
+  if (score >= 40) return 'Rising';
+  return 'Prospect';
+}
+function computeStreak(log: number[] | undefined, now = Date.now()): number {
+  const days = new Set((log ?? []).map((ts) => Math.floor(ts / DAY)));
+  let start = Math.floor(now / DAY);
+  if (!days.has(start)) start -= 1;
+  let streak = 0;
+  while (days.has(start - streak)) streak++;
+  return streak;
+}
+function weeklyGoalOf(log: number[] | undefined, now = Date.now()) {
+  const done = (log ?? []).filter((ts) => ts >= now - 7 * DAY).length;
+  return { done: Math.min(done, 15), target: 3, met: done >= 3 };
+}
+function nextActionsOf(p: PlayerProfile) {
+  const actions: { id: string; label: string; gain: number }[] = [];
+  const complete = p.position && p.foot && p.heightCm && p.weightKg && p.stats;
+  if (!complete) actions.push({ id: 'complete_profile', label: 'Complete your profile (position, foot, height, weight, stats)', gain: TRUST.PROFILE_COMPLETE });
+  if ((p.media?.length ?? 0) === 0) actions.push({ id: 'first_clip', label: 'Upload your first clip', gain: TRUST.PER_MEDIA });
+  else if ((p.media?.length ?? 0) * TRUST.PER_MEDIA < TRUST.MEDIA_CAP) actions.push({ id: 'more_clips', label: 'Add another clip', gain: TRUST.PER_MEDIA });
+  if ((p.attendance?.length ?? 0) * TRUST.PER_ATTENDANCE < TRUST.ATTENDANCE_CAP) actions.push({ id: 'attendance', label: 'Log a verified match attendance', gain: TRUST.PER_ATTENDANCE });
+  if (!p.media?.some((m) => m.verifiedClip)) actions.push({ id: 'verified_clip', label: 'Link a clip to a verified attendance for the Verified Clip seal', gain: 0 });
+  return actions.slice(0, 3);
+}
+function recordActivity(p: PlayerProfile) {
+  p.activityLog = p.activityLog ?? [];
+  p.activityLog.push(Date.now());
+}
 
 const players = new Map<string, PlayerProfile>();
 const inboxes = new Map<string, InboxRequest[]>();
@@ -24,10 +59,10 @@ const notificationsByAudience = new Map<string, AppNotification[]>(); // key: ki
 const reportsByAudience = new Map<string, FiledReport[]>();
 const scoutingEvents: { type: string; orgName: string; scoutName: string; playerId: string; ts: number }[] = [];
 const commsLog: { id: string; ts: number; type: string; orgName: string; scoutName: string; playerId: string }[] = [];
-const listeners = new Set<() => void>();
+const listeners = new Set<(event?: string, payload?: Record<string, unknown>) => void>();
 let idc = 100;
 const nid = (p: string) => `${p}-${++idc}`;
-const emit = () => listeners.forEach((l) => l());
+const emit = (event?: string, payload?: Record<string, unknown>) => listeners.forEach((l) => l(event, payload));
 const delay = <T,>(v: T): Promise<T> => new Promise((r) => setTimeout(() => r(v), 100));
 
 // Mirrors the server's moderation screen: no personal contact details,
@@ -47,10 +82,10 @@ function moderate(text: string) {
 }
 
 const DRILL_DEFS = [
-  { id: 'drill-sprint-ladder', name: 'Sprint ladder — 6×30m' },
-  { id: 'drill-passing-gates', name: 'Passing gates — both feet' },
-  { id: 'drill-shooting-arc', name: 'Shooting arc — 20 finishes' },
-  { id: 'drill-first-touch', name: 'First touch — wall rebounds' },
+  { id: 'drill-sprint-ladder', name: 'Sprint ladder — 6×30m', metric: 'best 30m time', unit: 's', benchmark: 4.2, lowerIsBetter: true },
+  { id: 'drill-passing-gates', name: 'Passing gates — both feet', metric: 'gates hit of 20', unit: '/20', benchmark: 14, lowerIsBetter: false },
+  { id: 'drill-shooting-arc', name: 'Shooting arc — 20 finishes', metric: 'on-target finishes', unit: '/20', benchmark: 12, lowerIsBetter: false },
+  { id: 'drill-first-touch', name: 'First touch — wall rebounds', metric: 'touches in 60s', unit: '', benchmark: 45, lowerIsBetter: false },
 ];
 
 function isMinorProfile(p: PlayerProfile) {
@@ -118,12 +153,14 @@ const ORG_REPLIES = [
 
 function scheduleOrgReply(channel: Channel, audienceKind: 'player' | 'guardian', audienceId: string) {
   const reply = ORG_REPLIES[channel.messages.length % ORG_REPLIES.length];
+  setTimeout(() => emit('typing', { channelId: channel.id, side: 'org' }), 1500);
   setTimeout(() => {
     channel.messages.push({
       id: nid('msg'), ts: Date.now(),
       sender: { kind: 'org_user', id: 'demo-scout', name: `${channel.scoutName} · ${channel.scoutRole} · ${channel.orgName}` },
       text: reply,
     });
+    channel.readBy = { ...(channel.readBy ?? { org: null, counterparty: null }), org: Date.now() };
     pushNotification(audienceKind, audienceId, 'message', `${channel.orgName} (${channel.scoutRole}) sent a message.`);
     emit();
   }, 3500);
@@ -161,9 +198,13 @@ function seedDemoPlayer(): PlayerProfile {
       { year: '2025', event: 'Top scorer, county premier division' },
     ],
     media: [
-      { id: 'm1', title: 'Match highlights vs Riverside', kind: 'video', uploadedAt: new Date(Date.now() - 25 * 86400000).toISOString() },
-      { id: 'm2', title: 'Sprint & finishing session', kind: 'video', uploadedAt: new Date(Date.now() - 80 * 86400000).toISOString() },
+      { id: 'm1', title: 'Match highlights vs Riverside', kind: 'video', uploadedAt: new Date(Date.now() - 25 * 86400000).toISOString(), views: 3, tags: { finishing: 2, pace: 1 } },
+      { id: 'm2', title: 'Sprint & finishing session', kind: 'video', uploadedAt: new Date(Date.now() - 2 * 86400000).toISOString(), views: 8, tags: { pace: 2 }, verifiedClip: 'att-2' },
     ],
+    drillResults: [
+      { id: 'cb1', drillId: 'drill-sprint-ladder', drillName: 'Sprint ladder — 6×30m', metric: 'best 30m time', unit: 's', value: 4.05, verified: true, ts: Date.now() - 6 * 86400000 },
+    ],
+    activityLog: [Date.now() - 2 * 86400000, Date.now() - 86400000, Date.now() - 3600000],
     trialReports: [],
     medical: {
       shared: false,
@@ -200,8 +241,9 @@ function seedDemoChild(): PlayerProfile {
       { year: '2024', event: 'Joined grassroots academy U13s' },
       { year: '2026', event: 'U15 league top scorer at 14' },
     ],
-    media: [{ id: 'mg1', title: 'U15 highlights — wing play', kind: 'video', uploadedAt: new Date(Date.now() - 14 * 86400000).toISOString() }],
+    media: [{ id: 'mg1', title: 'U15 highlights — wing play', kind: 'video', uploadedAt: new Date(Date.now() - 2 * 86400000).toISOString(), views: 2, tags: { pace: 1 }, verifiedClip: 'att-g1' }],
     trialReports: [],
+    activityLog: [Date.now() - 4 * 86400000, Date.now() - 3 * 86400000, Date.now() - 2 * 86400000, Date.now() - 86400000, Date.now() - 7200000],
     medical: { shared: false, records: [], conditionStatus: 'fully_fit' },
   };
 }
@@ -340,7 +382,66 @@ export const mockClient: PlayerClient = {
 
   getMe: (playerId) => {
     const p = getPlayer(playerId);
-    return delay<Me>({ ...p, age: ageOn(p.dob), trustScore: computeTrustScore(p), trust: trustBreakdown(p) });
+    const score = computeTrustScore(p);
+    return delay<Me>({
+      ...p,
+      age: ageOn(p.dob),
+      trustScore: score,
+      trust: trustBreakdown(p),
+      tier: trustTier(score),
+      streak: computeStreak(p.activityLog),
+      weeklyGoal: weeklyGoalOf(p.activityLog),
+      nextActions: nextActionsOf(p),
+    });
+  },
+
+  getFeed: (playerId) => {
+    const p = getPlayer(playerId);
+    const ins = insightsFor(playerId);
+    const topClip = (p.media ?? []).slice().sort((a, b) => (b.views ?? 0) - (a.views ?? 0))[0] ?? null;
+    const items: PlayerFeedItem[] = [
+      {
+        type: 'weekly_report',
+        ts: Date.now(),
+        report: {
+          views: ins.thisWeek.views,
+          shortlists: ins.thisWeek.shortlists,
+          streak: computeStreak(p.activityLog),
+          weeklyGoal: weeklyGoalOf(p.activityLog),
+          topClip: topClip ? { title: topClip.title, views: topClip.views ?? 0, verified: !!topClip.verifiedClip } : null,
+          suggestion: nextActionsOf(p)[0] ?? null,
+        },
+      },
+      ...ins.recent.slice(0, 8).map((e) => ({ type: 'scouting_event' as const, ts: e.ts, orgName: e.orgName, eventType: e.type })),
+    ];
+    const noticed: Record<string, number> = {};
+    for (const m of p.media ?? []) for (const [tag, n] of Object.entries(m.tags ?? {})) noticed[tag] = (noticed[tag] ?? 0) + n;
+    if (Object.keys(noticed).length) items.push({ type: 'scouts_noticed', ts: Date.now() - 1, tags: noticed });
+    return delay(items);
+  },
+
+  getCv: (playerId) => {
+    const p = getPlayer(playerId);
+    const score = computeTrustScore(p);
+    return delay<PlayerCV>({
+      generatedAt: new Date().toISOString(),
+      player: {
+        name: p.name, age: ageOn(p.dob), country: p.country, position: p.position, foot: p.foot,
+        heightCm: p.heightCm, weightKg: p.weightKg, identityVerified: p.identityVerified,
+      },
+      trust: { score, tier: trustTier(score), breakdown: trustBreakdown(p) },
+      seasonStats: p.stats,
+      verifiedAttendance: p.attendance.map((a) => ({ fixture: a.fixture, venue: a.venue, date: a.date })),
+      verifiedClips: (p.media ?? []).filter((m) => m.verifiedClip).map((m) => ({ title: m.title, uploadedAt: m.uploadedAt })),
+      trialReports: p.trialReports.map((r) => ({
+        orgName: r.orgName, filedAt: r.filedAt,
+        acceleration: r.acceleration, sprintSpeedKmh: r.sprintSpeedKmh, distanceKm: r.distanceKm,
+        passCompletionPct: r.passCompletionPct, duelSuccessPct: r.duelSuccessPct, coachRating: r.coachRating,
+      })),
+      combine: p.drillResults ?? [],
+      timeline: p.timeline,
+      note: 'Generated by ScoutBox. Attendance is GPS+device verified; trial reports are filed by clubs; trust is never purchasable.',
+    });
   },
 
   getInbox: (playerId) => {
@@ -398,11 +499,20 @@ export const mockClient: PlayerClient = {
     return delay(undefined);
   },
 
-  addMedia: (playerId, title, dataUrl) => {
+  addMedia: (playerId, title, dataUrl, attendanceId) => {
     const p = getPlayer(playerId);
     moderate(title);
+    if (attendanceId) {
+      if (!p.attendance.some((a) => a.id === attendanceId)) throw new ClientError('ATTENDANCE_NOT_FOUND', 'A verified clip must link one of YOUR verified attendances.');
+      if (!dataUrl) throw new ClientError('FILE_REQUIRED_FOR_VERIFIED_CLIP', 'Attach the actual footage to claim the Verified Clip seal.');
+    }
     // Demo mode keeps the data URL itself as the playable source.
-    p.media.push({ id: nid('m'), title, kind: 'video', uploadedAt: new Date().toISOString(), ...(dataUrl ? { url: dataUrl } : {}) });
+    p.media.push({
+      id: nid('m'), title, kind: 'video', uploadedAt: new Date().toISOString(),
+      views: 0, tags: {}, verifiedClip: attendanceId ?? null,
+      ...(dataUrl ? { url: dataUrl } : {}),
+    });
+    recordActivity(p);
     emit();
     return delay(undefined);
   },
@@ -415,17 +525,27 @@ export const mockClient: PlayerClient = {
     return delay(channels.filter((c) => c.playerId === playerId && c.counterparty === 'player'));
   },
 
-  sendMessage: (playerId, channelId, text) => {
+  sendMessage: (playerId, channelId, text, attachMediaId) => {
     const p = getPlayer(playerId);
     if (isMinorProfile(p)) throw new ClientError('GUARDIAN_MANAGED', 'This is managed by your parent or guardian.');
     moderate(text);
     const channel = channels.find((c) => c.id === channelId && c.playerId === playerId);
     if (!channel) throw new ClientError('CHANNEL_NOT_FOUND', 'No such thread');
-    channel.messages.push({ id: nid('msg'), ts: Date.now(), sender: { kind: 'player', id: playerId, name: p.name }, text });
+    const m = attachMediaId ? p.media.find((x) => x.id === attachMediaId) : null;
+    const attachment = m ? { kind: 'clip' as const, mediaId: m.id, title: m.title, url: m.url ?? null, verifiedClip: !!m.verifiedClip } : null;
+    channel.messages.push({ id: nid('msg'), ts: Date.now(), sender: { kind: 'player', id: playerId, name: p.name }, text, attachment });
     scheduleOrgReply(channel, 'player', playerId);
     emit();
     return delay(undefined);
   },
+
+  markChannelRead: (playerId, channelId) => {
+    const channel = channels.find((c) => c.id === channelId && c.playerId === playerId);
+    if (channel) channel.readBy = { ...(channel.readBy ?? { org: null, counterparty: null }), counterparty: Date.now() };
+    return delay(undefined);
+  },
+
+  sendTyping: () => delay(undefined),
 
   getNotifications: (playerId) => delay(notifications('player', playerId).slice()),
 
@@ -486,13 +606,31 @@ export const mockClient: PlayerClient = {
 
   getDrills: (playerId) => {
     const p = getPlayer(playerId);
-    return delay(DRILL_DEFS.map((d) => ({ ...d, completed: (p.drills ?? []).includes(d.id) })) as Drill[]);
+    return delay(
+      DRILL_DEFS.map((d) => ({
+        ...d,
+        completed: (p.drills ?? []).includes(d.id),
+        best: (p.drillResults ?? [])
+          .filter((r) => r.drillId === d.id)
+          .sort((a, b) => (d.lowerIsBetter ? a.value - b.value : b.value - a.value))[0] ?? null,
+      })) as Drill[]
+    );
   },
 
-  completeDrill: (playerId, drillId) => {
+  completeDrill: (playerId, drillId, value, videoDataUrl) => {
     const p = getPlayer(playerId);
+    const d = DRILL_DEFS.find((x) => x.id === drillId);
+    if (!d) throw new ClientError('DRILL_NOT_FOUND', 'No such drill');
     p.drills = p.drills ?? [];
     if (!p.drills.includes(drillId)) p.drills.push(drillId);
+    if (value !== undefined && value !== null && !Number.isNaN(value)) {
+      p.drillResults = p.drillResults ?? [];
+      p.drillResults.push({
+        id: nid('combine'), drillId: d.id, drillName: d.name, metric: d.metric, unit: d.unit,
+        value, verified: !!videoDataUrl, ts: Date.now(),
+      });
+    }
+    recordActivity(p);
     emit();
     return delay(undefined);
   },
@@ -632,16 +770,53 @@ export const mockClient: PlayerClient = {
     return delay(channels.filter((c) => c.counterparty === 'guardian' && g.childIds.includes(c.playerId)));
   },
 
-  guardianSendMessage: (guardianId, channelId, text) => {
+  guardianSendMessage: (guardianId, channelId, text, attachMediaId) => {
     const g = guardians.get(guardianId);
     if (!g) throw new ClientError('GUARDIAN_NOT_FOUND', 'No guardian account found.');
     moderate(text);
     const channel = channels.find((c) => c.id === channelId && g.childIds.includes(c.playerId));
     if (!channel) throw new ClientError('CHANNEL_NOT_FOUND', 'No such thread');
-    channel.messages.push({ id: nid('msg'), ts: Date.now(), sender: { kind: 'guardian', id: guardianId, name: g.name }, text });
+    const child = players.get(channel.playerId);
+    const m = attachMediaId ? child?.media.find((x) => x.id === attachMediaId) : null;
+    const attachment = m ? { kind: 'clip' as const, mediaId: m.id, title: m.title, url: m.url ?? null, verifiedClip: !!m.verifiedClip } : null;
+    channel.messages.push({ id: nid('msg'), ts: Date.now(), sender: { kind: 'guardian', id: guardianId, name: g.name }, text, attachment });
     scheduleOrgReply(channel, 'guardian', guardianId);
     emit();
     return delay(undefined);
+  },
+
+  guardianMarkChannelRead: (guardianId, channelId) => {
+    const g = guardians.get(guardianId);
+    const channel = channels.find((c) => c.id === channelId && g?.childIds.includes(c.playerId));
+    if (channel) channel.readBy = { ...(channel.readBy ?? { org: null, counterparty: null }), counterparty: Date.now() };
+    return delay(undefined);
+  },
+
+  guardianSendTyping: () => delay(undefined),
+
+  guardianDigest: (guardianId) => {
+    const g = guardians.get(guardianId);
+    if (!g) throw new ClientError('GUARDIAN_NOT_FOUND', 'No guardian account found.');
+    const week = Date.now() - 7 * DAY;
+    return delay<GuardianDigest>({
+      generatedAt: new Date().toISOString(),
+      children: g.childIds
+        .map((id) => players.get(id))
+        .filter((c): c is PlayerProfile => !!c)
+        .map((c) => {
+          const ins = insightsFor(c.id);
+          return {
+            id: c.id, name: c.name,
+            views: ins.thisWeek.views,
+            shortlists: ins.thisWeek.shortlists,
+            streak: computeStreak(c.activityLog),
+            weeklyGoal: weeklyGoalOf(c.activityLog),
+            newRequests: guardianRequests.filter((r) => r.playerId === c.id && r.createdAt >= week).length,
+            activityThisWeek: (c.activityLog ?? []).filter((ts) => ts >= week).length,
+          };
+        }),
+      note: 'Only verified clubs can see your children, and every action above is on the ledger.',
+    });
   },
 
   guardianNotifications: (guardianId) => delay(notifications('guardian', guardianId).slice()),

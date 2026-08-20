@@ -46,7 +46,10 @@ export default function Upload() {
   const { playerId, me, isMinor, refresh } = useSession();
   const [mediaTitle, setMediaTitle] = useState('');
   const [pickedFile, setPickedFile] = useState<{ dataUrl: string; name: string } | null>(null);
+  const [linkAttendanceId, setLinkAttendanceId] = useState<string | null>(null);
   const [drills, setDrills] = useState<Drill[]>([]);
+  const [drillValues, setDrillValues] = useState<Record<string, string>>({});
+  const [drillVideos, setDrillVideos] = useState<Record<string, string>>({});
   const [statDraft, setStatDraft] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -77,11 +80,15 @@ export default function Upload() {
   const uploadMedia = async () => {
     if (!mediaTitle.trim()) return say('Give the clip a title.', true);
     try {
-      await client.addMedia(playerId, mediaTitle.trim(), pickedFile?.dataUrl || undefined);
+      await client.addMedia(playerId, mediaTitle.trim(), pickedFile?.dataUrl || undefined, linkAttendanceId ?? undefined);
+      const verified = !!linkAttendanceId && !!pickedFile;
       setMediaTitle('');
       setPickedFile(null);
+      setLinkAttendanceId(null);
       await refresh();
-      say(pickedFile ? 'Video uploaded — clubs can watch it now, and it nudges your Trust Score.' : 'Added — attach a video file next time so clubs can watch it.');
+      say(verified
+        ? '✅ Verified Clip uploaded — provably filmed at a confirmed fixture. Clubs see the seal.'
+        : pickedFile ? 'Video uploaded — clubs can watch it now, and it nudges your Trust Score.' : 'Added — attach a video file next time so clubs can watch it.');
     } catch (e) {
       say(e instanceof Error ? e.message : 'Upload failed', true);
     }
@@ -140,7 +147,25 @@ export default function Upload() {
             value={mediaTitle}
             onChangeText={setMediaTitle}
           />
-          <Button primary label="Upload clip" onPress={uploadMedia} />
+          {pickedFile && (me?.attendance.length ?? 0) > 0 && (
+            <>
+              <Muted size={12.5}>
+                ✅ Claim the Verified Clip seal: link this footage to the confirmed fixture it was filmed at.
+              </Muted>
+              <Row>
+                {me!.attendance.map((a) => (
+                  <Button
+                    key={a.id}
+                    small
+                    primary={linkAttendanceId === a.id}
+                    label={`${a.fixture.slice(0, 24)} (${a.date})`}
+                    onPress={() => setLinkAttendanceId(linkAttendanceId === a.id ? null : a.id)}
+                  />
+                ))}
+              </Row>
+            </>
+          )}
+          <Button primary label={linkAttendanceId ? 'Upload as ✅ Verified Clip' : 'Upload clip'} onPress={uploadMedia} />
           {me && <Muted size={12.5}>{me.media.length} clip{me.media.length === 1 ? '' : 's'} on your profile. Titles are screened — no contact details.</Muted>}
         </Card>
 
@@ -183,22 +208,55 @@ export default function Upload() {
         </Card>
 
         <Card>
-          <SectionTitle>Training drills</SectionTitle>
-          <Muted size={12.5}>Complete drills to keep your profile active between matches.</Muted>
+          <SectionTitle>🏟 At-home combine</SectionTitle>
+          <Muted size={12.5}>
+            Standardised drills with a measurable number. Record it on video and the result is
+            <Text style={{ color: colors.accent }}> combine-verified</Text> — real numbers clubs can trust,
+            from anywhere.
+          </Muted>
           {drills.map((d) => (
-            <Row key={d.id} style={{ justifyContent: 'space-between' }}>
-              <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>{d.name}</Text>
-              {d.completed ? (
-                <Pill label="Completed ✓" tone="green" />
-              ) : (
-                <Button small label="Mark done" onPress={async () => {
-                  try {
-                    await client.completeDrill(playerId, d.id);
-                    setDrills(await client.getDrills(playerId));
-                  } catch { /* leave as-is */ }
+            <View key={d.id} style={{ gap: 6, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Text style={{ color: colors.text, fontSize: 13.5, fontWeight: '600', flex: 1 }}>{d.name}</Text>
+                {d.best
+                  ? <Pill label={`best ${d.best.value}${d.unit}${d.best.verified ? ' 🎥' : ''}`} tone="green" />
+                  : d.completed ? <Pill label="done ✓" tone="blue" /> : null}
+              </Row>
+              <Muted size={11.5}>{d.metric} · benchmark {d.benchmark}{d.unit}</Muted>
+              <Row>
+                <TextInput
+                  style={[styles.input, { flex: 1, paddingVertical: 6 }]}
+                  keyboardType="numeric"
+                  placeholder={`your ${d.metric}`}
+                  placeholderTextColor={colors.muted}
+                  value={drillValues[d.id] ?? ''}
+                  onChangeText={(v) => setDrillValues({ ...drillValues, [d.id]: v })}
+                />
+                <Button small label={drillVideos[d.id] ? '🎥 ✓' : '🎥 attach'} onPress={async () => {
+                  const picked = await pickVideoFile();
+                  if (picked && !picked.name.startsWith('TOO_LARGE:')) {
+                    setDrillVideos({ ...drillVideos, [d.id]: picked.dataUrl });
+                    say('Drill video attached — result will be combine-verified.');
+                  } else if (picked) {
+                    say('That file is over the 12MB cap.', true);
+                  }
                 }} />
-              )}
-            </Row>
+                <Button small primary label="Log" onPress={async () => {
+                  const raw = drillValues[d.id];
+                  if (!raw) return say('Enter your number first.', true);
+                  try {
+                    await client.completeDrill(playerId, d.id, Number(raw), drillVideos[d.id]);
+                    setDrillValues({ ...drillValues, [d.id]: '' });
+                    setDrillVideos({ ...drillVideos, [d.id]: '' });
+                    setDrills(await client.getDrills(playerId));
+                    await refresh();
+                    say(drillVideos[d.id] ? '🎥 Combine-verified result logged.' : 'Result logged (attach video next time to verify it).');
+                  } catch (e) {
+                    say(e instanceof Error ? e.message : 'Could not log drill', true);
+                  }
+                }} />
+              </Row>
+            </View>
           ))}
         </Card>
 

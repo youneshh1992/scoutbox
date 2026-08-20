@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { RefreshControl, ScrollView, StyleSheet, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { client } from '../../data/client';
 import type { Channel } from '../../data/types';
@@ -16,13 +16,21 @@ function isChildItem(r: InboxRequest | ChildInboxItem): r is ChildInboxItem {
 }
 
 export default function Inbox() {
-  const { playerId, inbox, isMinor, refresh, notifications } = useSession();
+  const { playerId, inbox, isMinor, me, refresh, notifications } = useSession();
   const [error, setError] = useState<string | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     if (playerId && !isMinor) client.getChannels(playerId).then(setChannels).catch(() => {});
   }, [playerId, isMinor, inbox, notifications]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await refresh();
+    if (playerId && !isMinor) await client.getChannels(playerId).then(setChannels).catch(() => {});
+    setRefreshing(false);
+  }, [refresh, playerId, isMinor]);
 
   const respond = async (requestId: string, accept: boolean) => {
     if (!playerId) return;
@@ -38,7 +46,10 @@ export default function Inbox() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
+      >
         <Row style={{ justifyContent: 'space-between' }}>
           <Text style={styles.h1}>{isMinor ? 'Updates' : 'Scout Inbox'}</Text>
           <Row>
@@ -129,7 +140,10 @@ export default function Inbox() {
             <SectionTitle>Messages — open after acceptance, on-platform only</SectionTitle>
             <Threads
               channels={channels}
-              onSend={(channelId, text) => client.sendMessage(playerId, channelId, text)}
+              onSend={(channelId, text, attachMediaId) => client.sendMessage(playerId, channelId, text, attachMediaId)}
+              onOpen={(channelId) => void client.markChannelRead(playerId, channelId).catch(() => {})}
+              onTyping={(channelId) => void client.sendTyping(playerId, channelId).catch(() => {})}
+              attachableClips={me?.media ?? []}
               emptyText="No threads yet. Accept a request above and the conversation opens here — moderated, logged, and never off-platform."
             />
           </>

@@ -18,6 +18,8 @@ export interface Org {
   /** Club verification (company email domain + safeguarding contract).
    *  Unverified clubs never see under-18 profiles. */
   verified: boolean;
+  /** Earned and losable: verified + contract + no unresolved urgent report. */
+  safeguardingCertified?: boolean;
 }
 
 export interface Session {
@@ -104,10 +106,62 @@ export interface Player {
   trustScore: number;
   attendance: Attendance[];
   timeline: { year: string; event: string }[];
-  media: { id: string; title: string; kind: string; uploadedAt: string; url?: string | null }[];
+  media: MediaItem[];
   trialReports: TrialReport[];
   medical: Medical;
   createdAt?: number | null;
+  drillResults?: CombineResult[];
+}
+
+export interface MediaItem {
+  id: string;
+  title: string;
+  kind: string;
+  uploadedAt: string;
+  url?: string | null;
+  views?: number;
+  tags?: Record<string, number>;
+  /** Attendance id when the footage is provably from a confirmed fixture. */
+  verifiedClip?: string | null;
+}
+
+export interface CombineResult {
+  id: string;
+  drillId: string;
+  drillName: string;
+  metric: string;
+  unit: string;
+  value: number;
+  verified: boolean;
+  ts: number;
+}
+
+export interface FilmRoomItem {
+  media: { id: string; title: string; url: string; views: number; verifiedClip: string | null; tags: Record<string, number> };
+  player: { id: string; name: string; position: string; age: number; trustScore: number; academyPlus: boolean; guardianManaged: boolean };
+}
+
+export interface FeedItem {
+  type: 'new_player' | 'new_clip' | 'shortlist_new_clip' | 'report_due';
+  ts: number;
+  playerId: string;
+  playerName: string;
+  position?: string;
+  age?: number;
+  guardianManaged?: boolean;
+  mediaId?: string;
+  title?: string;
+  hasVideo?: boolean;
+  verifiedClip?: boolean;
+  trialId?: string;
+  dueAt?: number;
+}
+
+export interface FixtureGroup {
+  fixture: string;
+  venue: string;
+  date: string;
+  players: { id: string; name: string; position: string; age: number; trustScore: number }[];
 }
 
 export interface PlayerDetail extends Player {
@@ -150,11 +204,23 @@ export interface FiledReport extends ReportInput {
   resolvedAt: number | null;
 }
 
+export interface MessageAttachment {
+  kind: 'clip' | 'trial_report';
+  mediaId?: string;
+  title?: string;
+  url?: string | null;
+  verifiedClip?: boolean;
+  reportId?: string;
+  orgName?: string;
+  summary?: string;
+}
+
 export interface Message {
   id: string;
   ts: number;
   sender: { kind: 'org_user' | 'player' | 'guardian'; id: string; name: string };
   text: string;
+  attachment?: MessageAttachment | null;
 }
 
 export interface Channel {
@@ -169,6 +235,8 @@ export interface Channel {
   counterparty: 'player' | 'guardian';
   createdAt: number;
   messages: Message[];
+  /** Read receipts: when each side last opened the thread. */
+  readBy?: { org: number | null; counterparty: number | null };
 }
 
 export interface Notification {
@@ -262,7 +330,15 @@ export interface ScoutboxApi {
   getShortlist(s: Session): Promise<Player[]>;
   sendRequest(s: Session, playerId: string, type: 'contact' | 'trial', message: string, details?: TrialDetails): Promise<void>;
   getChannels(s: Session): Promise<Channel[]>;
-  sendMessage(s: Session, channelId: string, text: string): Promise<void>;
+  sendMessage(s: Session, channelId: string, text: string, attachTrialReportId?: string): Promise<void>;
+  markChannelRead(s: Session, channelId: string): Promise<void>;
+  sendTyping(s: Session, channelId: string): Promise<void>;
+  getFeed(s: Session): Promise<FeedItem[]>;
+  getFilmRoom(s: Session): Promise<FilmRoomItem[]>;
+  recordClipView(s: Session, playerId: string, mediaId: string): Promise<void>;
+  tagClip(s: Session, playerId: string, mediaId: string, tags: string[]): Promise<void>;
+  getScoutTags(s: Session): Promise<string[]>;
+  getFixtures(s: Session): Promise<FixtureGroup[]>;
   getNotifications(s: Session): Promise<Notification[]>;
   markNotificationsRead(s: Session): Promise<void>;
   getMyReports(s: Session): Promise<FiledReport[]>;
@@ -276,7 +352,7 @@ export interface ScoutboxApi {
   getPlan(s: Session): Promise<PlanInfo>;
   getReputation(s: Session): Promise<Reputation>;
   /** Subscribe to live changes; returns an unsubscribe fn. */
-  onChange(cb: (event: string) => void): () => void;
+  onChange(cb: (event: string, payload?: Record<string, unknown>) => void): () => void;
 }
 
 // ------------------------------------------------------------- http client
@@ -335,8 +411,28 @@ export const httpApi: ScoutboxApi = {
 
   getChannels: (s) => request<Channel[]>('/org/channels', { headers: headers(s) }),
 
-  sendMessage: (s, channelId, text) =>
-    request<void>(`/org/channels/${channelId}/messages`, { method: 'POST', headers: headers(s), body: JSON.stringify({ text }) }),
+  sendMessage: (s, channelId, text, attachTrialReportId) =>
+    request<void>(`/org/channels/${channelId}/messages`, { method: 'POST', headers: headers(s), body: JSON.stringify({ text, attachTrialReportId }) }),
+
+  markChannelRead: (s, channelId) =>
+    request<void>(`/org/channels/${channelId}/read`, { method: 'POST', headers: headers(s) }),
+
+  sendTyping: (s, channelId) =>
+    request<void>(`/org/channels/${channelId}/typing`, { method: 'POST', headers: headers(s) }),
+
+  getFeed: (s) => request<FeedItem[]>('/org/feed', { headers: headers(s) }),
+
+  getFilmRoom: (s) => request<FilmRoomItem[]>('/org/filmroom', { headers: headers(s) }),
+
+  recordClipView: (s, playerId, mediaId) =>
+    request<void>(`/org/players/${playerId}/media/${mediaId}/view`, { method: 'POST', headers: headers(s) }),
+
+  tagClip: (s, playerId, mediaId, tags) =>
+    request<void>(`/org/players/${playerId}/media/${mediaId}/tags`, { method: 'POST', headers: headers(s), body: JSON.stringify({ tags }) }),
+
+  getScoutTags: (s) => request<string[]>('/org/tags', { headers: headers(s) }),
+
+  getFixtures: (s) => request<FixtureGroup[]>('/org/fixtures', { headers: headers(s) }),
 
   getNotifications: (s) => request<Notification[]>('/org/notifications', { headers: headers(s) }),
 
@@ -366,7 +462,8 @@ export const httpApi: ScoutboxApi = {
     const source = new EventSource(`${API_URL}/events`);
     source.onmessage = (e) => {
       try {
-        cb(JSON.parse(e.data).event);
+        const data = JSON.parse(e.data);
+        cb(data.event, data);
       } catch {
         /* ignore malformed frames */
       }

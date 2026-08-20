@@ -3,11 +3,11 @@
 // output tiles, availability chips, Academy+ card, contract status card.
 // All functionality from Milestone 2 is preserved below the fold.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { client } from '../../data/client';
+import { client, type PlayerCV } from '../../data/client';
 import {
   AVAILABILITY_LABELS, CONTRACT_LABELS,
   type Availability, type ContractStatus,
@@ -33,6 +33,13 @@ export default function Profile() {
   const router = useRouter();
   const { playerId, me, isMinor, refresh } = useSession();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [cvOpen, setCvOpen] = useState(false);
+  const [cv, setCv] = useState<PlayerCV | null>(null);
+
+  useEffect(() => {
+    if (cvOpen && playerId) client.getCv(playerId).then(setCv).catch(() => {});
+  }, [cvOpen, playerId, me]);
+
   if (!playerId || !me) return null;
 
   const set = async (fn: () => Promise<unknown>) => {
@@ -108,7 +115,11 @@ export default function Profile() {
               </View>
             </View>
           </Row>
-          <Text style={styles.standing}>{standing(me.trustScore)}</Text>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <Text style={styles.standing}>{standing(me.trustScore)}</Text>
+            {me.tier && <Pill label={`Tier: ${me.tier}`} tone="green" />}
+            {typeof me.streak === 'number' && me.streak > 0 && <Pill label={`🔥 ${me.streak}-day streak`} tone="gold" />}
+          </Row>
           <Muted size={12.5}>
             Base {me.trust.base}  ·  Identity +{me.trust.identityVerified}  ·  Attendance +{me.trust.verifiedAttendance}  ·  Trial Reports +{me.trust.trialReports}  ·  Media +{me.trust.media}  ·  Profile +{me.trust.profileComplete}
           </Muted>
@@ -301,14 +312,66 @@ export default function Profile() {
             return (
               <View key={m.id} style={{ gap: 6 }}>
                 <Row>
-                  <Pill label={m.kind} tone="blue" />
+                  {m.verifiedClip ? <Pill label="✅ Verified Clip" tone="green" /> : <Pill label={m.kind} tone="blue" />}
                   <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>{m.title}</Text>
-                  <Muted size={12}>{new Date(m.uploadedAt).toLocaleDateString()}</Muted>
+                  <Muted size={12}>{m.views ?? 0} view{(m.views ?? 0) === 1 ? '' : 's'}</Muted>
                 </Row>
+                {Object.keys(m.tags ?? {}).length > 0 && (
+                  <Row>
+                    {Object.entries(m.tags!).map(([t, n]) => <Pill key={t} label={`${t.replace(/_/g, ' ')} ×${n}`} tone="gold" />)}
+                  </Row>
+                )}
                 {src && <WebVideo src={src} />}
               </View>
             );
           })}
+        </Card>
+
+        {(me.drillResults?.length ?? 0) > 0 && (
+          <Card>
+            <SectionTitle>🏟 At-home combine</SectionTitle>
+            {me.drillResults!.map((r) => (
+              <Row key={r.id}>
+                <Pill label={r.verified ? '🎥 verified' : 'self-reported'} tone={r.verified ? 'green' : 'blue'} />
+                <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>{r.drillName}</Text>
+                <Muted size={12}>{r.metric}: {r.value}{r.unit}</Muted>
+              </Row>
+            ))}
+            <Muted size={12.5}>Video-backed results are combine-verified and visible to clubs.</Muted>
+          </Card>
+        )}
+
+        <Card>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <View style={{ flex: 1, paddingRight: 10 }}>
+              <SectionTitle>📄 Your verified sports CV</SectionTitle>
+              <Muted size={12.5}>
+                Your whole verified record — attendance, trial reports, combine numbers, trust — as a
+                portable CV you own. ScoutBox never locks your history in.
+              </Muted>
+            </View>
+            <Button small primary label={cvOpen ? 'Hide' : 'View CV'} onPress={() => setCvOpen(!cvOpen)} />
+          </Row>
+          {cvOpen && cv && (
+            <View style={{ gap: 6, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 10 }}>
+              <Text style={{ color: colors.text, fontSize: 17, fontWeight: '800' }}>{cv.player.name} — Verified Sports CV</Text>
+              <Muted size={12.5}>
+                {cv.player.position ?? '—'} · {cv.player.age} · {cv.player.foot ?? '—'} foot · {cv.player.country}
+                {cv.player.identityVerified ? ' · identity verified' : ''}
+              </Muted>
+              <Muted size={12.5}>Trust {cv.trust.score}/100 ({cv.trust.tier})</Muted>
+              {cv.seasonStats && <Muted size={12.5}>Season: {cv.seasonStats.appearances} apps · {cv.seasonStats.goals} goals · {cv.seasonStats.assists} assists</Muted>}
+              <Muted size={12.5}>Verified attendance ({cv.verifiedAttendance.length}): {cv.verifiedAttendance.map((a) => `${a.fixture} (${a.date})`).join(' · ') || '—'}</Muted>
+              <Muted size={12.5}>Verified clips: {cv.verifiedClips.map((c) => c.title).join(' · ') || '—'}</Muted>
+              <Muted size={12.5}>
+                Trial reports ({cv.trialReports.length}): {cv.trialReports.map((r) => `${r.orgName} — coach ${r.coachRating}/10`).join(' · ') || '—'}
+              </Muted>
+              {cv.combine.length > 0 && (
+                <Muted size={12.5}>Combine: {cv.combine.map((r) => `${r.metric} ${r.value}${r.unit}${r.verified ? ' ✓' : ''}`).join(' · ')}</Muted>
+              )}
+              <Muted size={11.5}>{cv.note}</Muted>
+            </View>
+          )}
         </Card>
 
         <Card>

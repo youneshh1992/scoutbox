@@ -7,6 +7,9 @@
 
 import express from 'express';
 import cors from 'cors';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { buildSeed } from './seed.mjs';
 import {
   adultAgeFor,
@@ -19,10 +22,44 @@ import {
   TRIAL_REPORT_FIELDS,
   similarityScore,
   moderateText,
+  trustTier,
+  computeStreak,
+  weeklyGoal,
+  nextActions,
 } from './domain.mjs';
 
 const PORT = process.env.PORT || 4000;
 const db = buildSeed();
+
+// Normalise media items (older shapes) + load the seeded sample clips.
+for (const p of db.players) {
+  for (const m of p.media) {
+    m.views ??= 0;
+    m.tags ??= {};       // tag → count (from scouts, aggregated anonymously)
+    m.verifiedClip ??= null; // attendance id when footage is provably from a confirmed fixture
+    m.url ??= null;
+  }
+}
+
+const ASSETS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets');
+const SAMPLE_CLIPS = [
+  { file: 'clip-sprint.webm', playerId: 'pl-adeyemi', title: 'Sprint & finishing session', verify: true },
+  { file: 'clip-passing.webm', playerId: 'pl-carvalho', title: 'Passing range compilation', verify: true },
+  { file: 'clip-wingplay.webm', playerId: 'pl-guni', title: 'U15 highlights — wing play', verify: true },
+];
+for (const sample of SAMPLE_CLIPS) {
+  try {
+    const data = fs.readFileSync(path.join(ASSETS_DIR, sample.file));
+    const player = db.players.find((p) => p.id === sample.playerId);
+    const media = player?.media.find((m) => m.title === sample.title);
+    if (!media) continue;
+    db.mediaBlobs[media.id] = { dataUrl: `data:video/webm;base64,${data.toString('base64')}` };
+    media.url = `/media/${media.id}`;
+    if (sample.verify && player.attendance[0]) media.verifiedClip = player.attendance[0].id;
+  } catch {
+    // assets optional — Film Room just starts empty without them
+  }
+}
 
 const app = express();
 app.use(cors());
@@ -104,13 +141,36 @@ function openChannel(request) {
     guardianId: request.guardianId,
     createdAt: Date.now(),
     messages: [],
+    // Read receipts: last time each side opened the thread.
+    readBy: { org: null, counterparty: null },
   };
   db.channels.push(channel);
   return channel;
 }
 
-function postMessage(channel, sender, text) {
-  const msg = { id: nextId('msg'), ts: Date.now(), sender, text };
+// Resolve a message attachment reference into a safe, shareable summary.
+function buildAttachment(channel, body, senderSide) {
+  const { attachMediaId, attachTrialReportId } = body || {};
+  if (!attachMediaId && !attachTrialReportId) return { ok: true, attachment: null };
+  const player = findPlayer(channel.playerId);
+  if (attachMediaId) {
+    const m = player?.media.find((x) => x.id === attachMediaId);
+    if (!m) return { ok: false, error: 'MEDIA_NOT_FOUND' };
+    return { ok: true, attachment: { kind: 'clip', mediaId: m.id, title: m.title, url: m.url, verifiedClip: !!m.verifiedClip } };
+  }
+  const r = player?.trialReports.find((x) => x.id === attachTrialReportId && (senderSide !== 'org' || x.orgId === channel.orgId));
+  if (!r) return { ok: false, error: 'TRIAL_REPORT_NOT_FOUND' };
+  return {
+    ok: true,
+    attachment: {
+      kind: 'trial_report', reportId: r.id, orgName: r.orgName,
+      summary: `accel ${r.acceleration}/10 · ${r.sprintSpeedKmh} km/h · ${r.distanceKm} km · pass ${r.passCompletionPct}% · duels ${r.duelSuccessPct}% · coach ${r.coachRating}/10`,
+    },
+  };
+}
+
+function postMessage(channel, sender, text, attachment = null) {
+  const msg = { id: nextId('msg'), ts: Date.now(), sender, text, attachment };
   channel.messages.push(msg);
   ledgerAppend({ type: 'message', playerId: channel.playerId, orgId: channel.orgId, orgName: channel.orgName, userId: sender.kind === 'org_user' ? sender.id : null, scoutName: sender.name });
   const recipient = sender.kind === 'org_user'
@@ -139,6 +199,25 @@ function channelViewFor(channel, viewer) {
   return { ...rest, ...(viewer === 'org' ? { orgId } : {}) };
 }
 
+// Football activity feeds the streak/weekly-goal habit loop.
+function recordActivity(player) {
+  player.activityLog ??= [];
+  player.activityLog.push(Date.now());
+}
+
+// Safeguarding certification is EARNED and losable: verification + signed
+// contract + no unresolved urgent report against the org.
+function safeguardingCertified(org) {
+  if (!org.verified || !org.safeguardingContractSigned) return false;
+  return !db.reports.some((r) => r.targetOrgId === org.id && r.urgent && r.status === 'pending_review');
+}
+
+// Scout tag vocabulary — structured, professional, no free text.
+const SCOUT_TAGS = [
+  'first_touch', 'pace', 'positioning', 'work_rate', 'left_foot', 'right_foot',
+  'aerial', 'composure', 'vision', 'pressing', 'finishing', 'distribution',
+];
+
 // ---------------------------------------------------------------- insights
 // "Who's watching you": the player's side of the Discovery Ledger.
 const INSIGHT_TYPES = ['view', 'save', 'shortlist', 'contact_request', 'trial_request', 'contact_request_to_guardian', 'trial_request_to_guardian'];
@@ -159,9 +238,16 @@ function insightsFor(playerId) {
     if (l.type.includes('request')) byOrg[l.orgName].requests++;
     byOrg[l.orgName].lastSeen = Math.max(byOrg[l.orgName].lastSeen, l.ts);
   }
+  // 8-week trend series (creator-analytics style), oldest first.
+  const weeklySeries = Array.from({ length: 8 }, (_, i) => {
+    const end = Date.now() - i * 7 * 24 * 3600 * 1000;
+    const start = end - 7 * 24 * 3600 * 1000;
+    return events.filter((l) => l.type === 'view' && l.ts >= start && l.ts < end).length;
+  }).reverse();
   return {
     thisWeek: { views: count(weekly, 'view'), saves: count(weekly, 'save'), shortlists: count(weekly, 'shortlist') },
     thisMonth: { views: count(monthly, 'view'), saves: count(monthly, 'save'), shortlists: count(monthly, 'shortlist') },
+    weeklySeries,
     byOrg: Object.values(byOrg).sort((a, b) => b.lastSeen - a.lastSeen),
     recent: events.slice(-12).reverse().map((l) => ({ type: l.type, orgName: l.orgName, scoutName: l.scoutName, ts: l.ts })),
   };
@@ -189,7 +275,7 @@ function moderateOrRefuse(res, text, context) {
 function playerViewForOrg(player, org) {
   if (!visibleToOrg(player, org)) return null;
   if (isBlocked(player.id, org.id)) return null;
-  const { medical, guardianId, password, ...rest } = player;
+  const { medical, guardianId, password, activityLog, ...rest } = player;
   const minor = !isAdult(player);
   const view = {
     ...rest,
@@ -491,7 +577,47 @@ guardianRouter.post('/channels/:id/messages', (req, res) => {
   const { text } = req.body || {};
   if (!text || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
   if (!moderateOrRefuse(res, text, { kind: 'guardian_message', channelId: channel.id })) return;
-  res.status(201).json(postMessage(channel, { kind: 'guardian', id: req.guardian.id, name: req.guardian.name }, text.trim()));
+  const att = buildAttachment(channel, req.body, 'guardian');
+  if (!att.ok) return res.status(400).json({ error: att.error });
+  res.status(201).json(postMessage(channel, { kind: 'guardian', id: req.guardian.id, name: req.guardian.name }, text.trim(), att.attachment));
+});
+
+guardianRouter.post('/channels/:id/read', (req, res) => {
+  const channel = db.channels.find((c) => c.id === req.params.id && c.guardianId === req.guardian.id);
+  if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
+  channel.readBy.counterparty = Date.now();
+  broadcast('messages', { channelId: channel.id });
+  res.json({ readBy: channel.readBy });
+});
+
+guardianRouter.post('/channels/:id/typing', (req, res) => {
+  const channel = db.channels.find((c) => c.id === req.params.id && c.guardianId === req.guardian.id);
+  if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
+  broadcast('typing', { channelId: channel.id, side: 'counterparty' });
+  res.json({ ok: true });
+});
+
+// The weekly parent digest: everything that happened around your children.
+guardianRouter.get('/digest', (req, res) => {
+  const week = Date.now() - 7 * 24 * 3600 * 1000;
+  const children = req.guardian.childIds.map((id) => findPlayer(id)).filter(Boolean);
+  res.json({
+    generatedAt: new Date().toISOString(),
+    children: children.map((c) => {
+      const ins = insightsFor(c.id);
+      return {
+        id: c.id,
+        name: c.name,
+        views: ins.thisWeek.views,
+        shortlists: ins.thisWeek.shortlists,
+        streak: computeStreak(c.activityLog),
+        weeklyGoal: weeklyGoal(c.activityLog),
+        newRequests: db.requests.filter((r) => r.playerId === c.id && r.createdAt >= week).length,
+        activityThisWeek: (c.activityLog ?? []).filter((ts) => ts >= week).length,
+      };
+    }),
+    note: 'Only verified clubs can see your children, and every action above is on the ledger.',
+  });
 });
 
 // Guardian sets the child's availability ("open to trials" etc.) —
@@ -620,7 +746,10 @@ function handleReport(req, res, actor) {
 
 // ---------------------------------------------------------------- org auth
 app.get('/orgs', (_req, res) => {
-  res.json(db.orgs.map(({ id, name, type, plan, trustedPartner, verified }) => ({ id, name, type, plan, trustedPartner, verified })));
+  res.json(db.orgs.map((o) => ({
+    id: o.id, name: o.name, type: o.type, plan: o.plan, trustedPartner: o.trustedPartner,
+    verified: o.verified, safeguardingCertified: safeguardingCertified(o),
+  })));
 });
 
 app.post('/auth/org/login', (req, res) => {
@@ -638,7 +767,7 @@ app.post('/auth/org/login', (req, res) => {
   } else if (role) {
     user.role = role.trim();
   }
-  res.json({ userId: user.id, role: user.role, org });
+  res.json({ userId: user.id, role: user.role, org: { ...org, safeguardingCertified: safeguardingCertified(org) } });
 });
 
 // Accountability by user: every org request must carry an individual user id.
@@ -782,6 +911,7 @@ orgRouter.post('/players/:id/request', (req, res) => {
     orgName: req.org.name,
     orgType: req.org.type,
     orgVerified: !!req.org.verified,
+    orgSafeguardingCertified: safeguardingCertified(req.org),
     trustedPartner: req.org.trustedPartner,
     userId: req.orgUser.id,
     scoutName: req.orgUser.name,
@@ -827,15 +957,129 @@ orgRouter.post('/channels/:id/messages', (req, res) => {
   const { text } = req.body || {};
   if (!text || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
   if (!moderateOrRefuse(res, text, { kind: 'org_message', channelId: channel.id })) return;
+  const att = buildAttachment(channel, req.body, 'org');
+  if (!att.ok) return res.status(400).json({ error: att.error });
   // postMessage notifies the counterparty (guardian or adult player).
-  const msg = postMessage(channel, { kind: 'org_user', id: req.orgUser.id, name: `${req.orgUser.name} · ${req.orgUser.role || 'Scout'} · ${req.org.name}` }, text.trim());
+  const msg = postMessage(channel, { kind: 'org_user', id: req.orgUser.id, name: `${req.orgUser.name} · ${req.orgUser.role || 'Scout'} · ${req.org.name}` }, text.trim(), att.attachment);
   res.status(201).json(msg);
+});
+
+orgRouter.post('/channels/:id/read', (req, res) => {
+  const channel = db.channels.find((c) => c.id === req.params.id && c.orgId === req.org.id);
+  if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
+  channel.readBy.org = Date.now();
+  broadcast('messages', { channelId: channel.id });
+  res.json({ readBy: channel.readBy });
+});
+
+orgRouter.post('/channels/:id/typing', (req, res) => {
+  const channel = db.channels.find((c) => c.id === req.params.id && c.orgId === req.org.id);
+  if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
+  broadcast('typing', { channelId: channel.id, side: 'org' });
+  res.json({ ok: true });
 });
 
 orgRouter.get('/notifications', (req, res) => res.json(notificationsFor('org_user', req.orgUser.id)));
 orgRouter.post('/notifications/read', (req, res) => {
   markNotificationsRead('org_user', req.orgUser.id);
   res.json({ ok: true });
+});
+
+// ------------------------------------------------------- film room & feed
+
+// The Film Room: full-screen swipe deck of playable clips from players this
+// org is allowed to see. Verified Clips surface first.
+orgRouter.get('/filmroom', (req, res) => {
+  const deck = [];
+  for (const p of db.players) {
+    const view = playerViewForOrg(p, req.org);
+    if (!view) continue;
+    for (const m of p.media) {
+      if (!m.url) continue;
+      deck.push({
+        media: { id: m.id, title: m.title, url: m.url, views: m.views ?? 0, verifiedClip: m.verifiedClip, tags: m.tags ?? {} },
+        player: {
+          id: view.id, name: view.name, position: view.position, age: view.age,
+          trustScore: view.trustScore, academyPlus: view.academyPlus, guardianManaged: !!view.guardianManaged,
+        },
+      });
+    }
+  }
+  deck.sort((a, b) => (b.media.verifiedClip ? 1 : 0) - (a.media.verifiedClip ? 1 : 0) || b.media.views - a.media.views);
+  res.json(deck);
+});
+
+// Per-clip view tracking — honest scouting signal back to the player.
+orgRouter.post('/players/:pid/media/:mid/view', (req, res) => {
+  const p = findPlayer(req.params.pid);
+  if (!p || !visibleToOrg(p, req.org) || isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'NOT_FOUND' });
+  const m = p.media.find((x) => x.id === req.params.mid);
+  if (!m) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });
+  m.views = (m.views ?? 0) + 1;
+  broadcast('players', { playerId: p.id });
+  res.json({ views: m.views });
+});
+
+// "What scouts noticed": structured tags, aggregated anonymously for the player.
+orgRouter.post('/players/:pid/media/:mid/tags', (req, res) => {
+  const p = findPlayer(req.params.pid);
+  if (!p || !visibleToOrg(p, req.org) || isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'NOT_FOUND' });
+  const m = p.media.find((x) => x.id === req.params.mid);
+  if (!m) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });
+  const { tags } = req.body || {};
+  if (!Array.isArray(tags) || tags.length === 0) return res.status(400).json({ error: 'TAGS_REQUIRED', allowed: SCOUT_TAGS });
+  const invalid = tags.filter((t) => !SCOUT_TAGS.includes(t));
+  if (invalid.length) return res.status(400).json({ error: 'UNKNOWN_TAGS', invalid, allowed: SCOUT_TAGS });
+  m.tags ??= {};
+  for (const t of tags) m.tags[t] = (m.tags[t] ?? 0) + 1;
+  ledgerAppend({ type: 'clip_tagged', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
+  broadcast('players', { playerId: p.id });
+  res.json({ tags: m.tags });
+});
+
+orgRouter.get('/tags', (_req, res) => res.json(SCOUT_TAGS));
+
+// The club home feed: what changed since you last looked.
+orgRouter.get('/feed', (req, res) => {
+  const FOURTEEN_DAYS = Date.now() - 14 * 24 * 3600 * 1000;
+  const items = [];
+  const shortlisted = new Set(db.ledger.filter((l) => l.orgId === req.org.id && (l.type === 'shortlist' || l.type === 'save')).map((l) => l.playerId));
+  for (const p of db.players) {
+    const view = playerViewForOrg(p, req.org);
+    if (!view) continue;
+    if (p.createdAt && p.createdAt >= FOURTEEN_DAYS) {
+      items.push({ type: 'new_player', ts: p.createdAt, playerId: p.id, playerName: p.name, position: p.position, age: view.age, guardianManaged: !!view.guardianManaged });
+    }
+    for (const m of p.media) {
+      const uploadedTs = new Date(m.uploadedAt).getTime();
+      if (uploadedTs >= FOURTEEN_DAYS) {
+        items.push({
+          type: shortlisted.has(p.id) ? 'shortlist_new_clip' : 'new_clip',
+          ts: uploadedTs, playerId: p.id, playerName: p.name,
+          mediaId: m.id, title: m.title, hasVideo: !!m.url, verifiedClip: !!m.verifiedClip,
+        });
+      }
+    }
+  }
+  for (const t of db.trials.filter((x) => x.orgId === req.org.id && x.status === 'awaiting_report')) {
+    items.push({ type: 'report_due', ts: t.reportDueAt ?? Date.now(), playerId: t.playerId, playerName: t.playerName, trialId: t.id, dueAt: t.reportDueAt });
+  }
+  items.sort((a, b) => b.ts - a.ts);
+  res.json(items.slice(0, 40));
+});
+
+// Fixture-graph scouting: verified attendances form a map of real fixtures.
+orgRouter.get('/fixtures', (req, res) => {
+  const groups = {};
+  for (const p of db.players) {
+    if (!playerViewForOrg(p, req.org)) continue;
+    for (const a of p.attendance) {
+      const key = `${a.fixture}|${a.date}`;
+      groups[key] ??= { fixture: a.fixture, venue: a.venue, date: a.date, players: [] };
+      groups[key].players.push({ id: p.id, name: p.name, position: p.position, age: ageOn(p.dob), trustScore: computeTrustScore(p) });
+    }
+  }
+  res.json(Object.values(groups).sort((a, b) => (a.date < b.date ? 1 : -1)));
 });
 
 orgRouter.get('/requests', (req, res) => {
@@ -954,7 +1198,71 @@ app.use('/player', playerAuth, playerRouter);
 
 playerRouter.get('/me', (req, res) => {
   const { password, ...safe } = req.player;
-  res.json({ ...safe, age: ageOn(req.player.dob), trustScore: computeTrustScore(req.player), trust: trustBreakdown(req.player) });
+  const score = computeTrustScore(req.player);
+  res.json({
+    ...safe,
+    age: ageOn(req.player.dob),
+    trustScore: score,
+    trust: trustBreakdown(req.player),
+    tier: trustTier(score),
+    streak: computeStreak(req.player.activityLog),
+    weeklyGoal: weeklyGoal(req.player.activityLog),
+    nextActions: nextActions(req.player),
+  });
+});
+
+// The player-side home feed: weekly scout report first, then activity.
+playerRouter.get('/feed', (req, res) => {
+  const p = req.player;
+  const ins = insightsFor(p.id);
+  const topClip = p.media.slice().sort((a, b) => (b.views ?? 0) - (a.views ?? 0))[0] ?? null;
+  const items = [];
+  items.push({
+    type: 'weekly_report',
+    ts: Date.now(),
+    report: {
+      views: ins.thisWeek.views,
+      shortlists: ins.thisWeek.shortlists,
+      streak: computeStreak(p.activityLog),
+      weeklyGoal: weeklyGoal(p.activityLog),
+      topClip: topClip ? { title: topClip.title, views: topClip.views ?? 0, verified: !!topClip.verifiedClip } : null,
+      suggestion: nextActions(p)[0] ?? null,
+    },
+  });
+  for (const e of ins.recent.slice(0, 8)) {
+    items.push({ type: 'scouting_event', ts: e.ts, orgName: e.orgName, eventType: e.type });
+  }
+  const noticed = {};
+  for (const m of p.media) for (const [tag, n] of Object.entries(m.tags ?? {})) noticed[tag] = (noticed[tag] ?? 0) + n;
+  if (Object.keys(noticed).length) {
+    items.push({ type: 'scouts_noticed', ts: Date.now() - 1, tags: noticed });
+  }
+  res.json(items);
+});
+
+// Portable Verified Sports CV — the player owns their record.
+playerRouter.get('/cv', (req, res) => {
+  const p = req.player;
+  const score = computeTrustScore(p);
+  res.json({
+    generatedAt: new Date().toISOString(),
+    player: {
+      name: p.name, age: ageOn(p.dob), country: p.country, position: p.position, foot: p.foot,
+      heightCm: p.heightCm, weightKg: p.weightKg, identityVerified: p.identityVerified,
+    },
+    trust: { score, tier: trustTier(score), breakdown: trustBreakdown(p) },
+    seasonStats: p.stats,
+    verifiedAttendance: p.attendance.map((a) => ({ fixture: a.fixture, venue: a.venue, date: a.date })),
+    verifiedClips: p.media.filter((m) => m.verifiedClip).map((m) => ({ title: m.title, uploadedAt: m.uploadedAt })),
+    trialReports: p.trialReports.map((r) => ({
+      orgName: r.orgName, filedAt: r.filedAt,
+      acceleration: r.acceleration, sprintSpeedKmh: r.sprintSpeedKmh, distanceKm: r.distanceKm,
+      passCompletionPct: r.passCompletionPct, duelSuccessPct: r.duelSuccessPct, coachRating: r.coachRating,
+    })),
+    combine: p.drillResults,
+    timeline: p.timeline,
+    note: 'Generated by ScoutBox. Attendance is GPS+device verified; trial reports are filed by clubs; trust is never purchasable.',
+  });
 });
 
 // Scout Inbox — org identity is summarised, org ids are stripped; the player
@@ -1042,7 +1350,26 @@ playerRouter.post('/channels/:id/messages', (req, res) => {
   const { text } = req.body || {};
   if (!text || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
   if (!moderateOrRefuse(res, text, { kind: 'player_message', channelId: channel.id })) return;
-  res.status(201).json(postMessage(channel, { kind: 'player', id: req.player.id, name: req.player.name }, text.trim()));
+  const att = buildAttachment(channel, req.body, 'player');
+  if (!att.ok) return res.status(400).json({ error: att.error });
+  res.status(201).json(postMessage(channel, { kind: 'player', id: req.player.id, name: req.player.name }, text.trim(), att.attachment));
+});
+
+playerRouter.post('/channels/:id/read', (req, res) => {
+  if (guardianManagedOnly(req, res)) return;
+  const channel = db.channels.find((c) => c.id === req.params.id && c.playerId === req.player.id && c.counterparty === 'player');
+  if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
+  channel.readBy.counterparty = Date.now();
+  broadcast('messages', { channelId: channel.id });
+  res.json({ readBy: channel.readBy });
+});
+
+playerRouter.post('/channels/:id/typing', (req, res) => {
+  if (guardianManagedOnly(req, res)) return;
+  const channel = db.channels.find((c) => c.id === req.params.id && c.playerId === req.player.id && c.counterparty === 'player');
+  if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
+  broadcast('typing', { channelId: channel.id, side: 'counterparty' });
+  res.json({ ok: true });
 });
 
 playerRouter.get('/notifications', (req, res) => res.json(notificationsFor('player', req.player.id)));
@@ -1079,10 +1406,10 @@ playerRouter.post('/badges', (req, res) => {
 // Media upload. `dataUrl` carries the actual video (prototype in-memory
 // store, ~12MB cap; production = object storage behind the same endpoint).
 playerRouter.post('/media', (req, res) => {
-  const { title, kind = 'video', dataUrl } = req.body || {};
+  const { title, kind = 'video', dataUrl, attendanceId } = req.body || {};
   if (!title) return res.status(400).json({ error: 'TITLE_REQUIRED' });
   if (!moderateOrRefuse(res, title, { kind: 'media_title', playerId: req.player.id })) return;
-  const item = { id: nextId('media'), title, kind, uploadedAt: new Date().toISOString(), url: null };
+  const item = { id: nextId('media'), title, kind, uploadedAt: new Date().toISOString(), url: null, views: 0, tags: {}, verifiedClip: null };
   if (dataUrl) {
     if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) {
       return res.status(400).json({ error: 'BAD_DATA_URL' });
@@ -1093,7 +1420,15 @@ playerRouter.post('/media', (req, res) => {
     db.mediaBlobs[item.id] = { dataUrl };
     item.url = `/media/${item.id}`;
   }
+  // The Verified Clip seal: footage linked to a GPS+device-confirmed fixture.
+  if (attendanceId) {
+    const att = req.player.attendance.find((a) => a.id === attendanceId);
+    if (!att) return res.status(400).json({ error: 'ATTENDANCE_NOT_FOUND', message: 'A verified clip must link one of YOUR verified attendances.' });
+    if (!item.url) return res.status(400).json({ error: 'FILE_REQUIRED_FOR_VERIFIED_CLIP', message: 'Attach the actual footage to claim the Verified Clip seal.' });
+    item.verifiedClip = att.id;
+  }
   req.player.media.push(item);
+  recordActivity(req.player);
   broadcast('players', { playerId: req.player.id });
   res.status(201).json({ media: item, trustScore: computeTrustScore(req.player) });
 });
@@ -1142,6 +1477,7 @@ playerRouter.post('/attendance', (req, res) => {
   }
   const item = { id: nextId('att'), fixture, venue, date, gps, deviceConfirmed: true, verified: true };
   req.player.attendance.push(item);
+  recordActivity(req.player);
   ledgerAppend({ type: 'attendance_verified', playerId: req.player.id, orgId: null, orgName: 'ScoutBox', userId: null, scoutName: 'system' });
   broadcast('players', { playerId: req.player.id });
   res.status(201).json({ attendance: item, trustScore: computeTrustScore(req.player) });
@@ -1168,26 +1504,55 @@ playerRouter.post('/stats', (req, res) => {
     }
   }
   req.player.stats = { appearances: 0, goals: 0, assists: 0, ...req.player.stats, ...updates };
+  recordActivity(req.player);
   broadcast('players', { playerId: req.player.id });
   res.json({ stats: req.player.stats });
 });
 
+// The at-home verified combine: standardised drills with a measurable metric.
+// Recording the drill on video marks the result VERIFIED (prototype: video
+// presence; production runs computer-vision analysis behind the same call).
 export const DRILLS = [
-  { id: 'drill-sprint-ladder', name: 'Sprint ladder — 6×30m' },
-  { id: 'drill-passing-gates', name: 'Passing gates — both feet' },
-  { id: 'drill-shooting-arc', name: 'Shooting arc — 20 finishes' },
-  { id: 'drill-first-touch', name: 'First touch — wall rebounds' },
+  { id: 'drill-sprint-ladder', name: 'Sprint ladder — 6×30m', metric: 'best 30m time', unit: 's', benchmark: 4.2, lowerIsBetter: true },
+  { id: 'drill-passing-gates', name: 'Passing gates — both feet', metric: 'gates hit of 20', unit: '/20', benchmark: 14, lowerIsBetter: false },
+  { id: 'drill-shooting-arc', name: 'Shooting arc — 20 finishes', metric: 'on-target finishes', unit: '/20', benchmark: 12, lowerIsBetter: false },
+  { id: 'drill-first-touch', name: 'First touch — wall rebounds', metric: 'touches in 60s', unit: '', benchmark: 45, lowerIsBetter: false },
 ];
 
 playerRouter.get('/drills', (req, res) => {
-  res.json(DRILLS.map((d) => ({ ...d, completed: req.player.drills.includes(d.id) })));
+  res.json(
+    DRILLS.map((d) => ({
+      ...d,
+      completed: req.player.drills.includes(d.id),
+      best: req.player.drillResults
+        .filter((r) => r.drillId === d.id)
+        .sort((a, b) => (d.lowerIsBetter ? a.value - b.value : b.value - a.value))[0] ?? null,
+    }))
+  );
 });
 
 playerRouter.post('/drills/:id/complete', (req, res) => {
-  if (!DRILLS.some((d) => d.id === req.params.id)) return res.status(404).json({ error: 'DRILL_NOT_FOUND' });
-  if (!req.player.drills.includes(req.params.id)) req.player.drills.push(req.params.id);
+  const drill = DRILLS.find((d) => d.id === req.params.id);
+  if (!drill) return res.status(404).json({ error: 'DRILL_NOT_FOUND' });
+  const { value, videoDataUrl } = req.body || {};
+  const numeric = value !== undefined && value !== null && value !== '' ? Number(value) : null;
+  if (numeric !== null && (Number.isNaN(numeric) || numeric < 0)) return res.status(400).json({ error: 'BAD_VALUE' });
+  if (!req.player.drills.includes(drill.id)) req.player.drills.push(drill.id);
+  if (numeric !== null) {
+    req.player.drillResults.push({
+      id: nextId('combine'),
+      drillId: drill.id,
+      drillName: drill.name,
+      metric: drill.metric,
+      unit: drill.unit,
+      value: numeric,
+      verified: !!videoDataUrl, // video-backed = combine-verified
+      ts: Date.now(),
+    });
+  }
+  recordActivity(req.player);
   broadcast('players', { playerId: req.player.id });
-  res.json({ drills: req.player.drills });
+  res.json({ drills: req.player.drills, drillResults: req.player.drillResults });
 });
 
 // One-click reporting + blocking, available to every player.

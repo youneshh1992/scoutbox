@@ -11,5 +11,6 @@ export const client: PlayerClient = process.env.EXPO_PUBLIC_API_URL ? httpClient
 export { ClientError } from './types';
 export type {
   Me, SignupInput, AttendanceInput, DemoIdentity, PlayerClient, ReportInput, ChildInput,
-  Channel, Message, AppNotification, Insights, FiledReport,
+  Channel, Message, MessageAttachment, AppNotification, Insights, FiledReport,
+  PlayerFeedItem, PlayerCV, GuardianDigest,
 } from './types';

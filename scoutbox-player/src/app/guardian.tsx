@@ -2,11 +2,11 @@
 // lands here (club-first identity, verified role), the parent accepts or
 // declines, and the full communications log is always visible.
 
-import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, useRouter } from 'expo-router';
-import { client, type Channel, type FiledReport, type Insights } from '../data/client';
+import { client, type Channel, type FiledReport, type GuardianDigest, type Insights } from '../data/client';
 import { U18_PROMISES } from '../domain/safeguarding';
 import { useSession } from '../state';
 import { colors } from '../theme';
@@ -32,19 +32,31 @@ export default function GuardianDashboard() {
   const [myReports, setMyReports] = useState<FiledReport[]>([]);
   const [coName, setCoName] = useState('');
   const [coEmail, setCoEmail] = useState('');
+  const [digest, setDigest] = useState<GuardianDigest | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     if (showLog && guardianId) client.guardianLog(guardianId).then(setLog).catch(() => {});
   }, [showLog, guardianId, guardianInbox]);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (!guardianId) return;
     client.guardianChannels(guardianId).then(setChannels).catch(() => {});
     client.guardianReports(guardianId).then(setMyReports).catch(() => {});
+    client.guardianDigest(guardianId).then(setDigest).catch(() => {});
     for (const c of children) {
       client.guardianChildInsights(guardianId, c.id).then((i) => setInsights((prev) => ({ ...prev, [c.id]: i }))).catch(() => {});
     }
-  }, [guardianId, children, guardianInbox, notifications]);
+  }, [guardianId, children]);
+
+  useEffect(load, [load, guardianInbox, notifications]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await refresh();
+    load();
+    setRefreshing(false);
+  }, [refresh, load]);
 
   if (kind !== 'guardian') return <Redirect href="/onboarding" />;
 
@@ -71,7 +83,10 @@ export default function GuardianDashboard() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
+      >
         <Row style={{ justifyContent: 'space-between' }}>
           <Text style={styles.h1}>Guardian</Text>
           <Row>
@@ -79,6 +94,20 @@ export default function GuardianDashboard() {
             <ReportButton />
           </Row>
         </Row>
+
+        {digest && digest.children.length > 0 && (
+          <Card style={{ borderColor: colors.accent }}>
+            <SectionTitle>📬 This week&apos;s digest</SectionTitle>
+            {digest.children.map((c) => (
+              <Muted key={c.id} size={13}>
+                <Text style={{ color: colors.text, fontWeight: '700' }}>{c.name}:</Text> {c.views} club view{c.views === 1 ? '' : 's'},{' '}
+                {c.newRequests} new request{c.newRequests === 1 ? '' : 's'}, {c.activityThisWeek} training activit{c.activityThisWeek === 1 ? 'y' : 'ies'}
+                {c.streak > 0 ? ` · 🔥 ${c.streak}-day streak` : ''}{c.weeklyGoal.met ? ' · weekly goal met ✓' : ''}
+              </Muted>
+            ))}
+            <Muted size={11.5}>{digest.note}</Muted>
+          </Card>
+        )}
         <Muted>
           {guardian?.name} · {guardian?.email}
         </Muted>
@@ -133,7 +162,10 @@ export default function GuardianDashboard() {
         <SectionTitle>Messages with clubs — adult to adult</SectionTitle>
         <Threads
           channels={channels}
-          onSend={(channelId, text) => client.guardianSendMessage(guardianId!, channelId, text)}
+          onSend={(channelId, text, attachMediaId) => client.guardianSendMessage(guardianId!, channelId, text, attachMediaId)}
+          onOpen={(channelId) => void client.guardianMarkChannelRead(guardianId!, channelId).catch(() => {})}
+          onTyping={(channelId) => void client.guardianSendTyping(guardianId!, channelId).catch(() => {})}
+          attachableClips={children.flatMap((c) => c.media)}
           emptyText="No threads yet. Accept a club request above and the conversation opens here — always with you, never with your child."
         />
 

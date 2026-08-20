@@ -1,10 +1,17 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   api, ApiError,
   type Session, type Player, type PlayerDetail, type OrgRequest, type Trial,
   type LedgerEntry, type ProofPack, type PlanInfo, type Reputation, type SearchFilters,
   type Channel, type FiledReport, type TrialDetails,
+  type FeedItem, type FilmRoomItem, type FixtureGroup,
 } from './api';
+
+const TAG_LABELS: Record<string, string> = {
+  first_touch: 'First touch', pace: 'Pace', positioning: 'Positioning', work_rate: 'Work rate',
+  left_foot: 'Left foot', right_foot: 'Right foot', aerial: 'Aerial', composure: 'Composure',
+  vision: 'Vision', pressing: 'Pressing', finishing: 'Finishing', distribution: 'Distribution',
+};
 
 interface ScreenProps {
   session: Session;
@@ -172,6 +179,189 @@ export function SafetyModal({ session, notify, onClose, presetPlayerId }: {
   );
 }
 
+/* ----------------------------------------------------------- Home feed */
+
+const FEED_LABELS: Record<FeedItem['type'], string> = {
+  new_player: 'New on ScoutBox',
+  new_clip: 'New footage',
+  shortlist_new_clip: 'Your shortlist posted',
+  report_due: 'Report due',
+};
+
+export function FeedScreen({ session, tick, openPlayer }: ScreenProps) {
+  const [items, setItems] = useState<FeedItem[] | null>(null);
+  useEffect(() => { api.getFeed(session).then(setItems).catch(() => setItems([])); }, [session, tick]);
+
+  if (items === null) {
+    return <div className="player-grid">{[1, 2, 3, 4, 5, 6].map((i) => <div key={i} className="player-card skeleton" style={{ height: 90 }} />)}</div>;
+  }
+
+  return (
+    <>
+      <AgencyWall session={session} />
+      <div className="notice" style={{ marginBottom: 16 }}>
+        What changed since you last looked: new players, fresh footage (your shortlist first), and
+        reports coming due. Every open from here is logged like any other view.
+      </div>
+      {items.length === 0 && <div className="notice">Quiet fortnight — nothing new yet.</div>}
+      <div className="list-rows">
+        {items.map((it, i) => (
+          <div key={i} className="list-row" style={{ cursor: 'pointer' }} onClick={() => openPlayer(it.playerId)}>
+            <span className={`pill ${it.type === 'report_due' ? 'red' : it.type === 'shortlist_new_clip' ? 'gold' : it.type === 'new_player' ? 'green' : 'blue'}`}>
+              {FEED_LABELS[it.type]}
+            </span>
+            <span className="grow">
+              <b>{it.playerName}</b>
+              {it.type === 'new_player' && <span className="dim"> — {it.position}, {it.age}{it.guardianManaged ? ' · U18 (guardian-managed)' : ''}</span>}
+              {(it.type === 'new_clip' || it.type === 'shortlist_new_clip') && (
+                <span className="dim"> — “{it.title}”{it.verifiedClip ? ' · ✅ Verified Clip' : ''}{it.hasVideo ? ' · playable' : ''}</span>
+              )}
+              {it.type === 'report_due' && <span className="dim"> — mandatory trial report due {it.dueAt ? new Date(it.dueAt).toLocaleDateString() : 'soon'}</span>}
+            </span>
+            <span className="dim">{new Date(it.ts).toLocaleDateString()}</span>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------ Film Room */
+
+export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
+  const [deck, setDeck] = useState<FilmRoomItem[]>([]);
+  const [index, setIndex] = useState(0);
+  const [tagOptions, setTagOptions] = useState<string[]>([]);
+  const [pendingTags, setPendingTags] = useState<string[]>([]);
+  const viewed = useRef(new Set<string>());
+
+  useEffect(() => {
+    api.getFilmRoom(session).then(setDeck).catch(() => {});
+    api.getScoutTags(session).then(setTagOptions).catch(() => {});
+  }, [session]);
+
+  const current = deck[index] ?? null;
+
+  useEffect(() => {
+    // A play in the Film Room is a view — honest signal back to the player.
+    if (current && !viewed.current.has(current.media.id)) {
+      viewed.current.add(current.media.id);
+      api.recordClipView(session, current.player.id, current.media.id).catch(() => {});
+    }
+    setPendingTags([]);
+  }, [current, session]);
+
+  const step = useCallback((dir: number) => {
+    setIndex((i) => Math.min(Math.max(i + dir, 0), Math.max(deck.length - 1, 0)));
+  }, [deck.length]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowRight') step(1);
+      if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') step(-1);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [step]);
+
+  const submitTags = async () => {
+    if (!current || pendingTags.length === 0) return;
+    try {
+      await api.tagClip(session, current.player.id, current.media.id, pendingTags);
+      notify('Tagged — aggregated anonymously into the player\'s "what scouts noticed".');
+      setPendingTags([]);
+    } catch (e) { notify(errMsg(e), true); }
+  };
+
+  if (deck.length === 0) {
+    return <div className="notice">No playable footage yet. Clips appear here the moment players upload them — Verified Clips first.</div>;
+  }
+
+  return (
+    <div className="filmroom">
+      <div className="filmroom-stage">
+        {current && (
+          <>
+            <video key={current.media.id} className="filmroom-video" src={api.mediaUrl(current.media.url)!} controls autoPlay muted loop />
+            <div className="filmroom-overlay">
+              <div className="row1">
+                <a style={{ color: 'var(--text)', fontWeight: 700, fontSize: 18, cursor: 'pointer' }} onClick={() => openPlayer(current.player.id)}>
+                  {current.player.name}
+                </a>
+                <span className="pill blue">{current.player.position}</span>
+                <span className="pill">{current.player.age}</span>
+                {current.player.guardianManaged && <span className="pill red">U18</span>}
+                {current.media.verifiedClip && <span className="pill green">✅ Verified Clip — filmed at a confirmed fixture</span>}
+              </div>
+              <div className="dim">“{current.media.title}” · {current.media.views} view{current.media.views === 1 ? '' : 's'} · trust {current.player.trustScore}</div>
+              <div className="filmroom-tags">
+                {tagOptions.map((t) => (
+                  <button
+                    key={t}
+                    className={pendingTags.includes(t) ? 'primary' : ''}
+                    style={{ padding: '4px 10px', fontSize: 12 }}
+                    onClick={() => setPendingTags((p) => (p.includes(t) ? p.filter((x) => x !== t) : [...p, t]))}
+                  >
+                    {TAG_LABELS[t] ?? t}
+                  </button>
+                ))}
+                {pendingTags.length > 0 && <button className="primary" style={{ padding: '4px 12px', fontSize: 12 }} onClick={submitTags}>Save tags</button>}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+      <div className="filmroom-controls">
+        <button onClick={() => step(-1)} disabled={index === 0}>↑ Previous</button>
+        <span className="pill">{index + 1} / {deck.length}</span>
+        <button className="primary" onClick={() => step(1)} disabled={index >= deck.length - 1}>↓ Next clip</button>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------- Fixtures */
+
+export function FixturesScreen({ session, tick, openPlayer }: ScreenProps) {
+  const [fixtures, setFixtures] = useState<FixtureGroup[]>([]);
+  const [openKey, setOpenKey] = useState<string | null>(null);
+  useEffect(() => { api.getFixtures(session).then(setFixtures).catch(() => {}); }, [session, tick]);
+  return (
+    <>
+      <div className="notice" style={{ marginBottom: 16 }}>
+        Scout by match. Every fixture below is built from GPS+device-verified attendance — ScoutBox
+        ground truth, not self-reported CVs. Open one to see who provably played.
+      </div>
+      <div className="list-rows">
+        {fixtures.map((f) => {
+          const key = `${f.fixture}|${f.date}`;
+          return (
+            <div key={key} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', cursor: 'pointer' }} onClick={() => setOpenKey(openKey === key ? null : key)}>
+                <span className="pill green">GPS ✓</span>
+                <span className="grow"><b>{f.fixture}</b> <span className="dim">— {f.venue}</span></span>
+                <span className="dim">{f.date}</span>
+                <span className="pill">{f.players.length} player{f.players.length === 1 ? '' : 's'}</span>
+              </div>
+              {openKey === key && (
+                <div className="list-rows" style={{ marginTop: 8 }}>
+                  {f.players.map((p) => (
+                    <div key={p.id} className="list-row" style={{ cursor: 'pointer' }} onClick={() => openPlayer(p.id)}>
+                      <span className="pill blue">{p.position}</span>
+                      <span className="grow">{p.name}</span>
+                      <span className="dim">{p.age} · trust {p.trustScore}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 /* ------------------------------------------------------------- Search */
 
 export function SearchScreen({ session, tick, openPlayer }: ScreenProps) {
@@ -309,18 +499,54 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  const [attachReportId, setAttachReportId] = useState('');
+  const [trials, setTrials] = useState<Trial[]>([]);
+  const [typing, setTyping] = useState(false);
   const threadRef = useRef<HTMLDivElement>(null);
+  const lastTyped = useRef(0);
+  const typingTimer = useRef<number | null>(null);
 
   useEffect(() => { api.getChannels(session).then(setChannels).catch(() => {}); }, [session, tick]);
+  useEffect(() => { api.getTrials(session).then(setTrials).catch(() => {}); }, [session, tick]);
   useEffect(() => { threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight }); }, [channels, openId]);
 
   const open = channels.find((c) => c.id === openId) ?? null;
 
+  // Read receipts: opening a thread marks it read for our side.
+  useEffect(() => {
+    if (openId) api.markChannelRead(session, openId).catch(() => {});
+  }, [openId, session]);
+
+  // Typing indicator: listen for the counterparty's typing pings.
+  useEffect(() => {
+    return api.onChange((event, payload) => {
+      if (event === 'typing' && payload?.channelId === openId && payload?.side !== 'org') {
+        setTyping(true);
+        if (typingTimer.current) window.clearTimeout(typingTimer.current);
+        typingTimer.current = window.setTimeout(() => setTyping(false), 3000);
+      }
+    });
+  }, [openId]);
+
+  const onDraftChange = (v: string) => {
+    setDraft(v);
+    // throttle our own typing pings
+    if (open && Date.now() - lastTyped.current > 2000) {
+      lastTyped.current = Date.now();
+      api.sendTyping(session, open.id).catch(() => {});
+    }
+  };
+
+  const openPlayerReports = open
+    ? trials.filter((t) => t.playerId === open.playerId && t.status === 'reported' && t.report).map((t) => t.report!)
+    : [];
+
   const send = async () => {
     if (!open || !draft.trim()) return;
     try {
-      await api.sendMessage(session, open.id, draft.trim());
+      await api.sendMessage(session, open.id, draft.trim(), attachReportId || undefined);
       setDraft('');
+      setAttachReportId('');
       setChannels(await api.getChannels(session));
     } catch (e) {
       notify(errMsg(e), true);
@@ -361,19 +587,46 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
             </div>
             <div className="thread" ref={threadRef}>
               {open.messages.length === 0 && <div className="notice">Say hello — they accepted your request.</div>}
-              {open.messages.map((m) => (
-                <div key={m.id} className={`bubble ${m.sender.kind === 'org_user' ? 'mine' : 'theirs'}`}>
-                  <div className="who">{m.sender.name} · {new Date(m.ts).toLocaleTimeString()}</div>
-                  {m.text}
-                </div>
-              ))}
+              {open.messages.map((m) => {
+                const mine = m.sender.kind === 'org_user';
+                const read = mine && open.readBy?.counterparty != null && open.readBy.counterparty >= m.ts;
+                return (
+                  <div key={m.id} className={`bubble ${mine ? 'mine' : 'theirs'}`}>
+                    <div className="who">{m.sender.name} · {new Date(m.ts).toLocaleTimeString()}</div>
+                    {m.text}
+                    {m.attachment?.kind === 'clip' && (
+                      <div style={{ marginTop: 6 }}>
+                        <span className="pill blue">🎬 {m.attachment.title}</span>{' '}
+                        {m.attachment.verifiedClip && <span className="pill green">✅ Verified Clip</span>}
+                        {api.mediaUrl(m.attachment.url) && <video className="clip" style={{ marginTop: 6 }} controls preload="metadata" src={api.mediaUrl(m.attachment.url)!} />}
+                      </div>
+                    )}
+                    {m.attachment?.kind === 'trial_report' && (
+                      <div style={{ marginTop: 6 }}>
+                        <span className="pill gold">📊 Trial report — {m.attachment.orgName}</span>
+                        <div className="dim" style={{ fontSize: 12 }}>{m.attachment.summary}</div>
+                      </div>
+                    )}
+                    {mine && <div className="who" style={{ textAlign: 'right', marginTop: 2 }}>{read ? '✓✓ read' : '✓ sent'}</div>}
+                  </div>
+                );
+              })}
+              {typing && <div className="dim" style={{ fontSize: 12.5 }}>… {open.counterparty === 'guardian' ? 'the guardian is' : `${open.playerName} is`} typing</div>}
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
+              {openPlayerReports.length > 0 && (
+                <select value={attachReportId} onChange={(e) => setAttachReportId(e.target.value)} title="Attach a filed trial report">
+                  <option value="">📎 no attachment</option>
+                  {openPlayerReports.map((r) => (
+                    <option key={r.id} value={r.id}>📊 trial report ({new Date(r.filedAt).toLocaleDateString()})</option>
+                  ))}
+                </select>
+              )}
               <input
                 style={{ flex: 1 }}
                 placeholder="Write a message (moderated — no personal contact details)"
                 value={draft}
-                onChange={(e) => setDraft(e.target.value)}
+                onChange={(e) => onDraftChange(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && send()}
               />
               <button className="primary" onClick={send}>Send</button>
@@ -832,6 +1085,21 @@ export function PlayerDrawer({ session, playerId, notify, onClose }: {
               )}
             </div>
 
+            {(player.drillResults?.length ?? 0) > 0 && (
+              <div className="section">
+                <h4>At-home combine (video-verified drills)</h4>
+                <div className="list-rows">
+                  {player.drillResults!.map((r) => (
+                    <div key={r.id} className="list-row">
+                      {r.verified ? <span className="pill green">🎥 verified</span> : <span className="pill">self-reported</span>}
+                      <span className="grow">{r.drillName}</span>
+                      <span className="dim">{r.metric}: <b style={{ color: 'var(--text)' }}>{r.value}{r.unit}</b> · {new Date(r.ts).toLocaleDateString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="section">
               <h4>Transfer timeline</h4>
               <div className="list-rows">
@@ -847,11 +1115,17 @@ export function PlayerDrawer({ session, playerId, notify, onClose }: {
               <div className="list-rows">
                 {player.media.map((m) => (
                   <div key={m.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-                    <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                    <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                       <span className="pill blue">{m.kind}</span>
+                      {m.verifiedClip && <span className="pill green">✅ Verified Clip — confirmed fixture</span>}
                       <span className="grow">{m.title}</span>
-                      <span className="dim">{new Date(m.uploadedAt).toLocaleDateString()}</span>
+                      <span className="dim">{m.views ?? 0} view{(m.views ?? 0) === 1 ? '' : 's'} · {new Date(m.uploadedAt).toLocaleDateString()}</span>
                     </div>
+                    {Object.keys(m.tags ?? {}).length > 0 && (
+                      <div className="badges">
+                        {Object.entries(m.tags!).map(([t, n]) => <span key={t} className="pill gold">{TAG_LABELS[t] ?? t} ×{n}</span>)}
+                      </div>
+                    )}
                     {api.mediaUrl(m.url) && <video className="clip" controls preload="metadata" src={api.mediaUrl(m.url)!} />}
                   </div>
                 ))}

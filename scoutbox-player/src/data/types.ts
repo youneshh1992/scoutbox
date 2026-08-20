@@ -20,6 +20,10 @@ export interface Me extends PlayerProfile {
   age: number;
   trustScore: number;
   trust: TrustBreakdown;
+  tier?: string;
+  streak?: number;
+  weeklyGoal?: { done: number; target: number; met: boolean };
+  nextActions?: { id: string; label: string; gain: number }[];
 }
 
 export class ClientError extends Error {
@@ -58,11 +62,23 @@ export interface FiledReport extends ReportInput {
   resolvedAt: number | null;
 }
 
+export interface MessageAttachment {
+  kind: 'clip' | 'trial_report';
+  mediaId?: string;
+  title?: string;
+  url?: string | null;
+  verifiedClip?: boolean;
+  reportId?: string;
+  orgName?: string;
+  summary?: string;
+}
+
 export interface Message {
   id: string;
   ts: number;
   sender: { kind: 'org_user' | 'player' | 'guardian'; id: string; name: string };
   text: string;
+  attachment?: MessageAttachment | null;
 }
 
 export interface Channel {
@@ -77,6 +93,51 @@ export interface Channel {
   counterparty: 'player' | 'guardian';
   createdAt: number;
   messages: Message[];
+  readBy?: { org: number | null; counterparty: number | null };
+}
+
+export type PlayerFeedItem =
+  | {
+      type: 'weekly_report';
+      ts: number;
+      report: {
+        views: number;
+        shortlists: number;
+        streak: number;
+        weeklyGoal: { done: number; target: number; met: boolean };
+        topClip: { title: string; views: number; verified: boolean } | null;
+        suggestion: { id: string; label: string; gain: number } | null;
+      };
+    }
+  | { type: 'scouting_event'; ts: number; orgName: string; eventType: string }
+  | { type: 'scouts_noticed'; ts: number; tags: Record<string, number> };
+
+export interface PlayerCV {
+  generatedAt: string;
+  player: { name: string; age: number; country: string; position: string | null; foot: string | null; heightCm: number | null; weightKg: number | null; identityVerified: boolean };
+  trust: { score: number; tier: string; breakdown: TrustBreakdown };
+  seasonStats: PlayerProfile['stats'];
+  verifiedAttendance: { fixture: string; venue: string; date: string }[];
+  verifiedClips: { title: string; uploadedAt: string }[];
+  trialReports: { orgName: string; filedAt: number; acceleration: number; sprintSpeedKmh: number; distanceKm: number; passCompletionPct: number; duelSuccessPct: number; coachRating: number }[];
+  combine: import('../domain/types').CombineResult[];
+  timeline: { year: string; event: string }[];
+  note: string;
+}
+
+export interface GuardianDigest {
+  generatedAt: string;
+  children: {
+    id: string;
+    name: string;
+    views: number;
+    shortlists: number;
+    streak: number;
+    weeklyGoal: { done: number; target: number; met: boolean };
+    newRequests: number;
+    activityThisWeek: number;
+  }[];
+  note: string;
 }
 
 export interface AppNotification {
@@ -91,6 +152,8 @@ export interface AppNotification {
 export interface Insights {
   thisWeek: { views: number; saves: number; shortlists: number };
   thisMonth: { views: number; saves: number; shortlists: number };
+  /** 8-week view trend, oldest first. */
+  weeklySeries?: number[];
   byOrg: { orgName: string; views: number; saves: number; shortlists: number; requests: number; lastSeen: number }[];
   recent: { type: string; orgName: string; scoutName: string; ts: number }[];
 }
@@ -114,12 +177,17 @@ export interface PlayerClient {
   getInbox(playerId: string): Promise<(InboxRequest | ChildInboxItem)[]>;
   respond(playerId: string, requestId: string, accept: boolean): Promise<void>;
   setAcademyPlus(playerId: string, enabled: boolean): Promise<void>;
-  /** dataUrl carries the actual video file when provided (web picker). */
-  addMedia(playerId: string, title: string, dataUrl?: string): Promise<void>;
+  /** dataUrl carries the actual video file when provided (web picker);
+   *  attendanceId links footage to a verified attendance → Verified Clip seal. */
+  addMedia(playerId: string, title: string, dataUrl?: string, attendanceId?: string): Promise<void>;
   /** Resolve a media path to a playable URL (absolute in live mode). */
   mediaUrl(path: string | null | undefined): string | null;
   getChannels(playerId: string): Promise<Channel[]>;
-  sendMessage(playerId: string, channelId: string, text: string): Promise<void>;
+  sendMessage(playerId: string, channelId: string, text: string, attachMediaId?: string): Promise<void>;
+  markChannelRead(playerId: string, channelId: string): Promise<void>;
+  sendTyping(playerId: string, channelId: string): Promise<void>;
+  getFeed(playerId: string): Promise<PlayerFeedItem[]>;
+  getCv(playerId: string): Promise<PlayerCV>;
   getNotifications(playerId: string): Promise<AppNotification[]>;
   markNotificationsRead(playerId: string): Promise<void>;
   getInsights(playerId: string): Promise<Insights>;
@@ -130,7 +198,8 @@ export interface PlayerClient {
   addTimeline(playerId: string, year: string, event: string): Promise<void>;
   updateStats(playerId: string, stats: Record<string, number>): Promise<void>;
   getDrills(playerId: string): Promise<Drill[]>;
-  completeDrill(playerId: string, drillId: string): Promise<void>;
+  /** value = the drill's measured metric; videoDataUrl marks it combine-VERIFIED. */
+  completeDrill(playerId: string, drillId: string, value?: number, videoDataUrl?: string): Promise<void>;
   report(playerId: string, input: ReportInput): Promise<void>;
   block(playerId: string, orgId: string, reason?: string): Promise<void>;
 
@@ -149,7 +218,10 @@ export interface PlayerClient {
   guardianReport(guardianId: string, input: ReportInput): Promise<void>;
   guardianBlock(guardianId: string, orgId: string, childId?: string, reason?: string): Promise<void>;
   guardianChannels(guardianId: string): Promise<Channel[]>;
-  guardianSendMessage(guardianId: string, channelId: string, text: string): Promise<void>;
+  guardianSendMessage(guardianId: string, channelId: string, text: string, attachMediaId?: string): Promise<void>;
+  guardianMarkChannelRead(guardianId: string, channelId: string): Promise<void>;
+  guardianSendTyping(guardianId: string, channelId: string): Promise<void>;
+  guardianDigest(guardianId: string): Promise<GuardianDigest>;
   guardianNotifications(guardianId: string): Promise<AppNotification[]>;
   guardianMarkNotificationsRead(guardianId: string): Promise<void>;
   guardianChildInsights(guardianId: string, childId: string): Promise<Insights>;
@@ -157,5 +229,5 @@ export interface PlayerClient {
   guardianAddCoGuardian(guardianId: string, name: string, email: string): Promise<void>;
   guardianReports(guardianId: string): Promise<FiledReport[]>;
 
-  onChange(cb: () => void): () => void;
+  onChange(cb: (event?: string, payload?: Record<string, unknown>) => void): () => void;
 }

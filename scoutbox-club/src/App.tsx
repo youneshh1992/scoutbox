@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, DEMO_MODE, type Notification, type Org, type Session } from './api';
 import {
-  SearchScreen, ShortlistScreen, RequestsScreen, MessagesScreen, TrialsScreen,
-  LedgerScreen, ReputationScreen, PlanScreen, PlayerDrawer, Toast, SafetyModal,
+  FeedScreen, FilmRoomScreen, SearchScreen, ShortlistScreen, RequestsScreen, MessagesScreen,
+  TrialsScreen, FixturesScreen, LedgerScreen, ReputationScreen, PlanScreen,
+  PlayerDrawer, Toast, SafetyModal,
 } from './screens';
 
 const ROLES = ['Head of Recruitment', 'First-Team Scout', 'Academy Coach', 'Agent'];
@@ -18,14 +19,17 @@ function loadSession(): Session | null {
   }
 }
 
-export type ScreenId = 'search' | 'shortlist' | 'requests' | 'messages' | 'trials' | 'ledger' | 'reputation' | 'plan';
+export type ScreenId = 'feed' | 'filmroom' | 'search' | 'shortlist' | 'requests' | 'messages' | 'trials' | 'fixtures' | 'ledger' | 'reputation' | 'plan';
 
 const NAV: { id: ScreenId; label: string }[] = [
+  { id: 'feed', label: 'Home' },
+  { id: 'filmroom', label: 'Film Room' },
   { id: 'search', label: 'Search' },
   { id: 'shortlist', label: 'Shortlist' },
   { id: 'requests', label: 'Requests' },
   { id: 'messages', label: 'Messages' },
   { id: 'trials', label: 'Trials & Reports' },
+  { id: 'fixtures', label: 'Fixtures' },
   { id: 'ledger', label: 'Discovery Ledger' },
   { id: 'reputation', label: 'Reputation' },
   { id: 'plan', label: 'Plan & Compliance' },
@@ -119,7 +123,7 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
 }
 
 function Workspace({ session, onLogout }: { session: Session; onLogout: () => void }) {
-  const [screen, setScreen] = useState<ScreenId>('search');
+  const [screen, setScreen] = useState<ScreenId>('feed');
   const [openPlayerId, setOpenPlayerId] = useState<string | null>(null);
   const [tick, setTick] = useState(0); // bumped by live sync to refetch screens
   const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(null);
@@ -174,8 +178,9 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
         <div className="topbar">
           <h2>{NAV.find((n) => n.id === screen)?.label}</h2>
           {session.org.trustedPartner && <span className="pill gold">Trusted Partner</span>}
+          {session.org.safeguardingCertified && <span className="pill green">🛡 Safeguarding Certified</span>}
           {session.org.type === 'club' && (session.org.verified
-            ? <span className="pill green">Verified club</span>
+            ? <span className="pill outline-green">Verified club</span>
             : <span className="pill">verification pending — U18 hidden</span>)}
           <span className={`pill ${session.org.type === 'agency' ? 'red' : 'blue'}`}>{session.org.type}</span>
           <span className="pill outline-green">● live sync</span>
@@ -196,6 +201,9 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
           </div>
         )}
         <div className="content">
+          {screen === 'feed' && <FeedScreen {...props} />}
+          {screen === 'filmroom' && <FilmRoomScreen {...props} />}
+          {screen === 'fixtures' && <FixturesScreen {...props} />}
           {screen === 'search' && <SearchScreen {...props} />}
           {screen === 'shortlist' && <ShortlistScreen {...props} />}
           {screen === 'requests' && <RequestsScreen {...props} />}

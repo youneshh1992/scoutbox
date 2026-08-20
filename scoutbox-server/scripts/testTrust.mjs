@@ -2,7 +2,10 @@
 // Run with: npm test  (from scoutbox-server/)
 
 import assert from 'node:assert/strict';
-import { computeTrustScore, trustBreakdown, isAdult, visibleToOrg, validateTrialReport, moderateText, TRUST } from '../domain.mjs';
+import {
+  computeTrustScore, trustBreakdown, isAdult, visibleToOrg, validateTrialReport,
+  moderateText, computeStreak, weeklyGoal, trustTier, nextActions, TRUST,
+} from '../domain.mjs';
 import { buildSeed } from '../seed.mjs';
 
 let passed = 0;
@@ -120,6 +123,40 @@ test('partial trial reports are rejected, complete ones pass', () => {
     passCompletionPct: 82, duelSuccessPct: 58, coachRating: 8,
   });
   assert.equal(full.ok, true);
+});
+
+test('streak counts consecutive active days, tolerating "yesterday"', () => {
+  const now = Date.now();
+  const day = 24 * 3600 * 1000;
+  assert.equal(computeStreak([], now), 0);
+  assert.equal(computeStreak([now - 1000], now), 1);
+  assert.equal(computeStreak([now - 2 * day, now - day, now - 1000], now), 3);
+  assert.equal(computeStreak([now - 2 * day, now - day], now), 2, 'yesterday keeps the streak alive');
+  assert.equal(computeStreak([now - 3 * day], now), 0, 'a gap breaks the streak');
+});
+
+test('weekly goal counts activity in the last 7 days', () => {
+  const now = Date.now();
+  const day = 24 * 3600 * 1000;
+  assert.equal(weeklyGoal([now - day, now - 2 * day, now - 3 * day], now).met, true);
+  assert.equal(weeklyGoal([now - 10 * day], now).met, false);
+});
+
+test('trust tiers map score bands to names', () => {
+  assert.equal(trustTier(30), 'Prospect');
+  assert.equal(trustTier(45), 'Rising');
+  assert.equal(trustTier(65), 'Established');
+  assert.equal(trustTier(85), 'Elite');
+});
+
+test('next actions guide the biggest gaps first', () => {
+  const bare = {
+    position: null, foot: null, heightCm: null, weightKg: null, stats: null,
+    media: [], attendance: [],
+  };
+  const actions = nextActions(bare);
+  assert.ok(actions.length > 0 && actions.length <= 3);
+  assert.equal(actions[0].id, 'complete_profile');
 });
 
 console.log(`\n${passed} trust/safeguarding tests passed`);

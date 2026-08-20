@@ -357,6 +357,10 @@ export function buildSeed() {
   players.find((p) => p.id === 'pl-guni').createdAt = now - 3 * day;      // new this week
   players.find((p) => p.id === 'pl-mensah').createdAt = now - 5 * day;    // new this week
 
+  // Seeded activity streaks (self-competition only — never leaderboards).
+  players.find((p) => p.id === 'pl-adeyemi').activityLog = [now - 2 * day, now - day, now - 3600_000];
+  players.find((p) => p.id === 'pl-guni').activityLog = [now - 4 * day, now - 3 * day, now - 2 * day, now - day, now - 7200_000];
+
   // Reference archetypes for the Similar Players engine.
   const archetypes = [
     { id: 'arch-pressing-forward', label: 'Pressing forward', position: 'ST', foot: 'right', dob: '2002-01-01', heightCm: 185, weightKg: 80, stats: { appearances: 30, goals: 18, assists: 5 } },
@@ -438,6 +442,8 @@ function player(p) {
     availability: 'not_seeking',
     contractStatus: 'unknown',
     drills: [],
+    drillResults: [],  // at-home combine: {drillId, value, verified, ts}
+    activityLog: [],   // timestamps of football activity (streaks/goals)
     createdAt: null,
     password: null, // optional; when set, login requires it
     ...p,

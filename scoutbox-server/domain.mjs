@@ -148,3 +148,53 @@ export function outputPer90(p) {
   const apps = p.stats?.appearances || 1;
   return ((p.stats?.goals ?? 0) + (p.stats?.assists ?? 0)) / apps;
 }
+
+// ------------------------------------------------------------ habit loops
+// Streaks compare a player to THEMSELVES — deliberately no leaderboards and
+// no comparisons to other players (kid-safe gamification).
+
+export const TRUST_TIERS = [
+  { min: 80, name: 'Elite' },
+  { min: 60, name: 'Established' },
+  { min: 40, name: 'Rising' },
+  { min: 0, name: 'Prospect' },
+];
+
+export function trustTier(score) {
+  return TRUST_TIERS.find((t) => score >= t.min).name;
+}
+
+const DAY_MS = 24 * 3600 * 1000;
+const dayKey = (ts) => Math.floor(ts / DAY_MS);
+
+// Streak = consecutive days (ending today or yesterday) with any football
+// activity: upload, drill, attendance, stats edit.
+export function computeStreak(activityLog, now = Date.now()) {
+  const days = new Set((activityLog ?? []).map(dayKey));
+  let start = dayKey(now);
+  if (!days.has(start)) start -= 1; // yesterday keeps the streak alive
+  let streak = 0;
+  while (days.has(start - streak)) streak++;
+  return streak;
+}
+
+export const WEEKLY_GOAL_TARGET = 3; // activities per week
+
+export function weeklyGoal(activityLog, now = Date.now()) {
+  const weekStart = now - 7 * DAY_MS;
+  const done = (activityLog ?? []).filter((ts) => ts >= weekStart).length;
+  return { done: Math.min(done, WEEKLY_GOAL_TARGET * 5), target: WEEKLY_GOAL_TARGET, met: done >= WEEKLY_GOAL_TARGET };
+}
+
+// Profile strength: the next best actions, derived from the trust breakdown.
+export function nextActions(player) {
+  const t = TRUST;
+  const actions = [];
+  const complete = player.position && player.foot && player.heightCm && player.weightKg && player.stats;
+  if (!complete) actions.push({ id: 'complete_profile', label: 'Complete your profile (position, foot, height, weight, stats)', gain: t.PROFILE_COMPLETE });
+  if ((player.media?.length ?? 0) === 0) actions.push({ id: 'first_clip', label: 'Upload your first clip', gain: t.PER_MEDIA });
+  else if ((player.media?.length ?? 0) * t.PER_MEDIA < t.MEDIA_CAP) actions.push({ id: 'more_clips', label: 'Add another clip', gain: t.PER_MEDIA });
+  if ((player.attendance?.length ?? 0) * t.PER_ATTENDANCE < t.ATTENDANCE_CAP) actions.push({ id: 'attendance', label: 'Log a verified match attendance', gain: t.PER_ATTENDANCE });
+  if (!player.media?.some((m) => m.verifiedClip)) actions.push({ id: 'verified_clip', label: 'Link a clip to a verified attendance for the Verified Clip seal', gain: 0 });
+  return actions.slice(0, 3);
+}

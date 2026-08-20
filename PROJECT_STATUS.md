@@ -3,9 +3,59 @@
 > Purpose of this file: let any Claude Code session (cloud or local) pick up this
 > project with zero prior context. Keep it updated at the end of each working session.
 
-**Last updated:** 2026-07-23 · **Milestone: 4 complete — the user-facing loop closed
-(messaging, notifications, video, insights)** · Developed in this GitHub repo
-(`youneshh1992/scoutbox`), Claude Code web.
+**Last updated:** 2026-08-20 · **Milestone: 5 complete — social-platform patterns +
+the USP set (Verified Clips, Film Room, feeds, streaks, combine, CV, fixture graph)** ·
+Developed in this GitHub repo (`youneshh1992/scoutbox`), Claude Code web.
+
+## Milestone 5 (2026-08-20): social-layout patterns + unique features
+
+Adopted from the cross-platform analysis (everything except the club directory), all
+server-enforced first and mirrored in both demo clients:
+
+- **Home feeds both sides.** Club app now lands on a feed (`/org/feed`: new players,
+  fresh footage with shortlist priority, reports coming due). Player Discover tab became
+  a Home feed (`/player/feed`): weekly scout report card, streak, goal progress,
+  scouting events, "what scouts noticed".
+- **Film Room** (`/org/filmroom`) — full-screen vertical clip deck (arrow keys/buttons),
+  Verified Clips surface first, overlay actions + structured scout tagging; every play
+  is recorded as a clip view.
+- **Verified Clip™** — `POST /player/media` with `attendanceId` links footage to a
+  GPS+device-confirmed fixture (must include the actual file). Seal shows everywhere:
+  Film Room, feeds, profiles, thread attachments. Seeded sample webm clips live in
+  `scoutbox-server/assets/` (loaded at startup) and are inlined into the club demo.
+- **Streaks / weekly goals / trust tiers / next-best-actions** — `domain.mjs`
+  (`computeStreak`, `weeklyGoal`, `trustTier`, `nextActions`; kid-safe: self-competition
+  only, no leaderboards). Activity recorded on uploads, attendance, stats, drills.
+- **Richer messaging** — read receipts (`readBy`, `/channels/:id/read`), typing
+  indicators (SSE `typing` events, `/channels/:id/typing`), attachments (player/guardian
+  attach clips, orgs attach filed trial reports — validated server-side).
+- **Per-clip analytics** — clip views + tag aggregation on media; 8-week view trend
+  (`weeklySeries` in insights) drawn as bars on the player home.
+- **"What scouts noticed"** — structured tag vocabulary (`SCOUT_TAGS`), aggregated
+  anonymously to the player; ledger records `clip_tagged`.
+- **At-home verified combine** — drills carry metrics/benchmarks; results logged with a
+  value; attaching video marks them combine-verified (prototype: video presence;
+  production = CV analysis). Visible to clubs on profiles.
+- **Fixture-graph scouting** (`/org/fixtures`) — verified attendances grouped into real
+  fixtures; club Fixtures screen opens each match to who provably played.
+- **Portable Verified Sports CV** (`/player/cv`) — the player-owned record (identity,
+  trust + tier, attendance, verified clips, trial reports, combine, timeline); CV
+  preview card on the profile.
+- **Weekly parent digest** (`/guardian/digest`) — per-child views, requests, streaks,
+  activity; card at the top of the guardian dashboard.
+- **Safeguarding Certified** — computed (`verified + contract + no unresolved urgent
+  report`), shown in the club topbar, org listings and on requests to guardians.
+- **Polish** — pull-to-refresh on player screens, skeleton loaders on the club feed.
+
+Deliberately NOT adopted (the absence is the USP): public likes/comments/followers,
+open DMs, algorithmic virality for minors, contact syncing.
+
+Verified 2026-08-20 (Playwright + API, live server + offline demos): feed lands first
+with certified badge; Film Room plays the seeded Verified Clip first and tags flow into
+the player's "what scouts noticed"; fixtures list from attendance; player home shows
+weekly report/streak/goal/next actions; profile shows tier + verified seal + CV; thread
+carries a verified-clip attachment with read receipts; guardian digest renders. 17
+domain tests pass.
 
 ## Milestone 4 (2026-07-23): closing the user-experience gaps
 

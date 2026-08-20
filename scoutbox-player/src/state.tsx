@@ -102,7 +102,10 @@ export function SessionProvider({ children: kids }: { children: ReactNode }) {
   useEffect(() => {
     if (!playerId && !guardianId) return;
     void refresh();
-    return client.onChange(() => void refresh());
+    return client.onChange((event) => {
+      if (event === 'typing') return; // ephemeral — screens listen for it directly
+      void refresh();
+    });
   }, [playerId, guardianId, refresh]);
 
   const value = useMemo<SessionState>(

@@ -1,13 +1,19 @@
-import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { client, type Insights } from '../../data/client';
+import { client, type Insights, type PlayerFeedItem } from '../../data/client';
 import { SAFEGUARDING_PROMISES, U18_PROMISES } from '../../domain/safeguarding';
 import { useSession } from '../../state';
 import { colors } from '../../theme';
 import { Card, Muted, Pill, Row, SectionTitle } from '../../components/ui';
 import { ReportButton } from '../../components/ReportSheet';
 import { NotificationBell } from '../../components/NotificationBell';
+
+const NOTICED_LABELS: Record<string, string> = {
+  first_touch: 'First touch', pace: 'Pace', positioning: 'Positioning', work_rate: 'Work rate',
+  left_foot: 'Left foot', right_foot: 'Right foot', aerial: 'Aerial', composure: 'Composure',
+  vision: 'Vision', pressing: 'Pressing', finishing: 'Finishing', distribution: 'Distribution',
+};
 
 const EVENT_LABELS: Record<string, string> = {
   view: 'viewed your profile',
@@ -28,28 +34,103 @@ const ORGS = [
 ] as const;
 
 export default function Discover() {
-  const { me, isMinor, playerId, notifications } = useSession();
+  const { me, isMinor, playerId, notifications, refresh } = useSession();
   const [insights, setInsights] = useState<Insights | null>(null);
+  const [feed, setFeed] = useState<PlayerFeedItem[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    if (playerId) client.getInsights(playerId).then(setInsights).catch(() => {});
-  }, [playerId, notifications]);
+  const load = useCallback(() => {
+    if (!playerId) return;
+    client.getInsights(playerId).then(setInsights).catch(() => {});
+    client.getFeed(playerId).then(setFeed).catch(() => {});
+  }, [playerId]);
+
+  useEffect(load, [load, notifications]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await refresh();
+    load();
+    setRefreshing(false);
+  }, [refresh, load]);
+
+  const weekly = feed.find((i): i is Extract<PlayerFeedItem, { type: 'weekly_report' }> => i.type === 'weekly_report');
+  const noticed = feed.find((i): i is Extract<PlayerFeedItem, { type: 'scouts_noticed' }> => i.type === 'scouts_noticed');
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
+      >
         <Row style={{ justifyContent: 'space-between' }}>
-          <Text style={styles.h1}>Discover</Text>
+          <Text style={styles.h1}>Home</Text>
           <Row>
             <NotificationBell />
             <ReportButton />
           </Row>
         </Row>
-        <Muted>Who&apos;s scouting, and exactly what they can — and can&apos;t — do.</Muted>
+
+        {weekly && (
+          <Card style={{ borderColor: colors.accent }}>
+            <Row style={{ justifyContent: 'space-between' }}>
+              <SectionTitle>📬 Your weekly scout report</SectionTitle>
+              {weekly.report.streak > 0 && <Pill label={`🔥 ${weekly.report.streak}-day streak`} tone="gold" />}
+            </Row>
+            <Muted size={13.5}>
+              {weekly.report.views} profile view{weekly.report.views === 1 ? '' : 's'} and {weekly.report.shortlists} shortlist{weekly.report.shortlists === 1 ? '' : 's'} this week.
+              {weekly.report.topClip ? ` Your top clip: “${weekly.report.topClip.title}” (${weekly.report.topClip.views} views${weekly.report.topClip.verified ? ', ✅ verified' : ''}).` : ''}
+            </Muted>
+            <Row style={{ justifyContent: 'space-between' }}>
+              <Muted size={12.5}>Weekly goal: {Math.min(weekly.report.weeklyGoal.done, weekly.report.weeklyGoal.target)}/{weekly.report.weeklyGoal.target} activities</Muted>
+              <Pill label={weekly.report.weeklyGoal.met ? 'goal met ✓' : 'keep going'} tone={weekly.report.weeklyGoal.met ? 'green' : 'blue'} />
+            </Row>
+            <View style={styles.goalTrack}>
+              <View style={[styles.goalFill, { width: `${Math.min(100, (weekly.report.weeklyGoal.done / weekly.report.weeklyGoal.target) * 100)}%` }]} />
+            </View>
+            {weekly.report.suggestion && (
+              <Muted size={12.5}>▶ Next best action: {weekly.report.suggestion.label}{weekly.report.suggestion.gain ? ` (+${weekly.report.suggestion.gain} trust)` : ''}</Muted>
+            )}
+          </Card>
+        )}
+
+        {noticed && (
+          <Card style={{ borderColor: colors.gold }}>
+            <SectionTitle>👀 What scouts noticed</SectionTitle>
+            <Row>
+              {Object.entries(noticed.tags).sort((a, b) => b[1] - a[1]).map(([t, n]) => (
+                <Pill key={t} label={`${NOTICED_LABELS[t] ?? t} ×${n}`} tone="gold" />
+              ))}
+            </Row>
+            <Muted size={12.5}>
+              Aggregated anonymously from scouts tagging your clips — professional feedback, not vanity metrics.
+            </Muted>
+          </Card>
+        )}
+
+        {me?.nextActions && me.nextActions.length > 0 && (
+          <Card>
+            <SectionTitle>💪 Build your profile strength</SectionTitle>
+            {me.nextActions.map((a) => (
+              <Row key={a.id}>
+                <Pill label={a.gain ? `+${a.gain}` : '✅'} tone={a.gain ? 'green' : 'gold'} />
+                <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>{a.label}</Text>
+              </Row>
+            ))}
+          </Card>
+        )}
 
         {insights && (
           <Card style={{ borderColor: colors.accent2 }}>
             <SectionTitle>👁 Who&apos;s watching you</SectionTitle>
+            {insights.weeklySeries && insights.weeklySeries.some((v) => v > 0) && (
+              <Row style={{ alignItems: 'flex-end', height: 44, gap: 4 }}>
+                {insights.weeklySeries.map((v, i) => {
+                  const max = Math.max(...insights.weeklySeries!, 1);
+                  return <View key={i} style={{ flex: 1, height: Math.max(4, (v / max) * 40), backgroundColor: i === insights.weeklySeries!.length - 1 ? colors.accent : colors.panel2, borderRadius: 3 }} />;
+                })}
+              </Row>
+            )}
             <Row>
               <View style={styles.insightTile}>
                 <Text style={styles.insightV}>{insights.thisWeek.views}</Text>
@@ -142,4 +223,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   insightV: { color: colors.accent, fontSize: 22, fontWeight: '800' },
+  goalTrack: { height: 6, borderRadius: 3, backgroundColor: colors.bg2, overflow: 'hidden' },
+  goalFill: { height: '100%', backgroundColor: colors.accent },
 });

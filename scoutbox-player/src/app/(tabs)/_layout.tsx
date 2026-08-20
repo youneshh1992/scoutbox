@@ -4,7 +4,7 @@ import { useSession } from '../../state';
 import { colors } from '../../theme';
 
 const TABS = [
-  { name: 'discover', title: 'Discover', icon: '◎' },
+  { name: 'discover', title: 'Home', icon: '◎' },
   { name: 'inbox', title: 'Inbox', icon: '▤' },
   { name: 'profile', title: 'Profile', icon: '♟' },
   { name: 'upload', title: 'Upload', icon: '⬆' },

@@ -7,13 +7,23 @@ import type {
   ScoutboxApi, Org, Session, Player, PlayerDetail, OrgRequest, Trial,
   LedgerEntry, ProofPack, PlanInfo, Reputation, SearchFilters,
   Channel, FiledReport, Notification, TrialDetails,
+  FeedItem, FilmRoomItem, FixtureGroup,
 } from './api';
 import { ApiError } from './api';
+// Sample footage baked into the demo bundle so the Film Room plays offline.
+import clipSprint from './assets/clip-sprint.webm?inline';
+import clipPassing from './assets/clip-passing.webm?inline';
+import clipWingplay from './assets/clip-wingplay.webm?inline';
+
+const SCOUT_TAGS = [
+  'first_touch', 'pace', 'positioning', 'work_rate', 'left_foot', 'right_foot',
+  'aerial', 'composure', 'vision', 'pressing', 'finishing', 'distribution',
+];
 
 const ORGS: Org[] = [
-  { id: 'org-eastport', name: 'Eastport FC', type: 'club', plan: 'Pro', trustedPartner: true, verified: true },
-  { id: 'org-harbour', name: 'Harbour City FC', type: 'club', plan: 'Academy', trustedPartner: false, verified: false },
-  { id: 'org-northstar', name: 'North Star Sports Agency', type: 'agency', plan: 'Agency', trustedPartner: false, verified: false },
+  { id: 'org-eastport', name: 'Eastport FC', type: 'club', plan: 'Pro', trustedPartner: true, verified: true, safeguardingCertified: true },
+  { id: 'org-harbour', name: 'Harbour City FC', type: 'club', plan: 'Academy', trustedPartner: false, verified: false, safeguardingCertified: false },
+  { id: 'org-northstar', name: 'North Star Sports Agency', type: 'agency', plan: 'Agency', trustedPartner: false, verified: false, safeguardingCertified: false },
 ];
 
 // Mirrors the server's visibility rule: agencies never see minors; only
@@ -67,8 +77,12 @@ const PLAYERS: Player[] = [
       { year: '2025', event: 'Top scorer, county premier division' },
     ],
     media: [
-      { id: 'm1', title: 'Match highlights vs Riverside', kind: 'video', uploadedAt: iso(NOW - 25 * DAY) },
-      { id: 'm2', title: 'Sprint & finishing session', kind: 'video', uploadedAt: iso(NOW - 80 * DAY) },
+      { id: 'm1', title: 'Match highlights vs Riverside', kind: 'video', uploadedAt: iso(NOW - 25 * DAY), views: 3, tags: { finishing: 2, pace: 1 } },
+      { id: 'm2', title: 'Sprint & finishing session', kind: 'video', uploadedAt: iso(NOW - 2 * DAY), url: clipSprint, views: 8, tags: { pace: 2 }, verifiedClip: 'att-1' },
+    ],
+    drillResults: [
+      { id: 'cb1', drillId: 'drill-sprint-ladder', drillName: 'Sprint ladder — 6×30m', metric: 'best 30m time', unit: 's', value: 4.05, verified: true, ts: NOW - 6 * DAY },
+      { id: 'cb2', drillId: 'drill-shooting-arc', drillName: 'Shooting arc — 20 finishes', metric: 'on-target finishes', unit: '/20', value: 15, verified: true, ts: NOW - 3 * DAY },
     ],
   }),
   mkPlayer({
@@ -79,7 +93,7 @@ const PLAYERS: Player[] = [
     medical: { shared: true, conditionStatus: 'fully_fit', records: [{ id: 'md-3', type: 'clearance', title: 'Annual medical — clear', date: '2026-02-01', layoffWeeks: null, cleared: true }] },
     timeline: [{ year: '2020', event: 'Senior debut, district league' }, { year: '2024', event: 'Captain at 22' }],
     attendance: [{ id: 'att-3', fixture: 'District league round 18', venue: 'Campo do Bessa Anexo', date: iso(NOW - 12 * DAY), gps: { lat: 41.16, lng: -8.64 }, verified: true }],
-    media: [{ id: 'm3', title: 'Passing range compilation', kind: 'video', uploadedAt: iso(NOW - 40 * DAY) }],
+    media: [{ id: 'm3', title: 'Passing range compilation', kind: 'video', uploadedAt: iso(NOW - 4 * DAY), url: clipPassing, views: 5, tags: { distribution: 1, vision: 1 }, verifiedClip: 'att-3' }],
   }),
   mkPlayer({
     id: 'pl-okafor', name: 'Chinedu Okafor', age: 22, dob: '2003-11-08', country: 'NG', city: 'Lagos',
@@ -151,7 +165,7 @@ const PLAYERS: Player[] = [
     availability: 'not_seeking', contractStatus: 'unknown', trustScore: 52,
     timeline: [{ year: '2024', event: 'Joined grassroots academy U13s' }, { year: '2026', event: 'U15 league top scorer at 14' }],
     attendance: [{ id: 'att-g1', fixture: 'U15 Academy League, week 12', venue: 'Hackney Marshes', date: iso(NOW - 9 * DAY), gps: { lat: 51.55, lng: -0.02 }, verified: true }],
-    media: [{ id: 'mg1', title: 'U15 highlights — wing play', kind: 'video', uploadedAt: iso(NOW - 14 * DAY) }],
+    media: [{ id: 'mg1', title: 'U15 highlights — wing play', kind: 'video', uploadedAt: iso(NOW - 2 * DAY), url: clipWingplay, views: 2, tags: {}, verifiedClip: 'att-g1' }],
   }),
   mkPlayer({
     id: 'pl-tomasz', name: 'Tomasz Kowalski', age: 16, dob: null, country: 'PL', city: '',
@@ -187,8 +201,8 @@ const channels: Channel[] = [];
 const notifications: Notification[] = [];
 const myReports: FiledReport[] = [];
 const ledger: (LedgerEntry & { playerName?: string })[] = [];
-const listeners = new Set<(e: string) => void>();
-const emit = (e: string) => listeners.forEach((l) => l(e));
+const listeners = new Set<(e: string, payload?: Record<string, unknown>) => void>();
+const emit = (e: string, payload?: Record<string, unknown>) => listeners.forEach((l) => l(e, payload));
 
 function pushNotification(text: string, type = 'update') {
   notifications.unshift({ id: nid('ntf'), ts: Date.now(), type, text, refId: null, read: false });
@@ -362,15 +376,27 @@ export const demoApi: ScoutboxApi = {
 
   getChannels: (s) => delay(channels.slice()),
 
-  sendMessage: (s, channelId, text) => {
+  sendMessage: (s, channelId, text, attachTrialReportId) => {
     if (MOD_RES.some((re) => re.test(text))) {
       throw new ApiError(400, 'MODERATION_BLOCKED', 'Blocked by moderation: personal contact details and off-platform contact are not allowed.');
     }
     const channel = channels.find((c) => c.id === channelId);
     if (!channel) throw new ApiError(404, 'CHANNEL_NOT_FOUND', 'No such thread');
-    channel.messages.push({ id: nid('msg'), ts: Date.now(), sender: { kind: 'org_user', id: s.userId, name: `${s.scoutName} · ${s.role} · ${s.org.name}` }, text });
+    let attachment = null;
+    if (attachTrialReportId) {
+      const trial = trials.find((t) => t.report?.id === attachTrialReportId);
+      const r = trial?.report;
+      if (r) {
+        attachment = {
+          kind: 'trial_report' as const, reportId: r.id, orgName: s.org.name,
+          summary: `accel ${r.acceleration}/10 · ${r.sprintSpeedKmh} km/h · ${r.distanceKm} km · pass ${r.passCompletionPct}% · duels ${r.duelSuccessPct}% · coach ${r.coachRating}/10`,
+        };
+      }
+    }
+    channel.messages.push({ id: nid('msg'), ts: Date.now(), sender: { kind: 'org_user', id: s.userId, name: `${s.scoutName} · ${s.role} · ${s.org.name}` }, text, attachment });
     log(s, 'message', channel.playerId);
-    // Simulated reply keeps the demo conversational.
+    // Simulated counterparty: typing ping, then a reply, then a read receipt.
+    setTimeout(() => emit('typing', { channelId: channel.id, side: 'counterparty' }), 1500);
     const replies = CANNED_REPLIES[channel.counterparty];
     const reply = replies[channel.messages.length % replies.length];
     setTimeout(() => {
@@ -383,10 +409,89 @@ export const demoApi: ScoutboxApi = {
         },
         text: reply,
       });
+      channel.readBy = { ...(channel.readBy ?? { org: null, counterparty: null }), counterparty: Date.now() };
       pushNotification(`${channel.counterparty === 'guardian' ? `The guardian of ${channel.playerName}` : channel.playerName} replied in your thread.`, 'message');
       emit('messages');
     }, 3500);
     return delay(undefined);
+  },
+
+  markChannelRead: (s, channelId) => {
+    const channel = channels.find((c) => c.id === channelId);
+    if (channel) channel.readBy = { ...(channel.readBy ?? { org: null, counterparty: null }), org: Date.now() };
+    return delay(undefined);
+  },
+
+  sendTyping: () => delay(undefined),
+
+  getFeed: (s) => {
+    const FOURTEEN_DAYS = Date.now() - 14 * DAY;
+    const shortlisted = new Set(ledger.filter((l) => l.orgId === s.org.id && (l.type === 'shortlist' || l.type === 'save')).map((l) => l.playerId));
+    const items: FeedItem[] = [];
+    for (const p of PLAYERS.filter((x) => canSee(x, s.org))) {
+      if (p.createdAt && p.createdAt >= FOURTEEN_DAYS) {
+        items.push({ type: 'new_player', ts: p.createdAt, playerId: p.id, playerName: p.name, position: p.position, age: p.age, guardianManaged: p.guardianManaged });
+      }
+      for (const m of p.media) {
+        const ts = new Date(m.uploadedAt).getTime();
+        if (ts >= FOURTEEN_DAYS) {
+          items.push({
+            type: shortlisted.has(p.id) ? 'shortlist_new_clip' : 'new_clip',
+            ts, playerId: p.id, playerName: p.name, mediaId: m.id, title: m.title,
+            hasVideo: !!m.url, verifiedClip: !!m.verifiedClip,
+          });
+        }
+      }
+    }
+    for (const t of trials.filter((x) => x.status === 'awaiting_report')) {
+      items.push({ type: 'report_due', ts: t.reportDueAt ?? Date.now(), playerId: t.playerId, playerName: t.playerName, trialId: t.id, dueAt: t.reportDueAt });
+    }
+    items.sort((a, b) => b.ts - a.ts);
+    return delay(items);
+  },
+
+  getFilmRoom: (s) => {
+    const deck: FilmRoomItem[] = [];
+    for (const p of PLAYERS.filter((x) => canSee(x, s.org))) {
+      for (const m of p.media) {
+        if (!m.url) continue;
+        deck.push({
+          media: { id: m.id, title: m.title, url: m.url, views: m.views ?? 0, verifiedClip: m.verifiedClip ?? null, tags: m.tags ?? {} },
+          player: { id: p.id, name: p.name, position: p.position, age: p.age, trustScore: p.trustScore, academyPlus: p.academyPlus, guardianManaged: !!p.guardianManaged },
+        });
+      }
+    }
+    deck.sort((a, b) => (b.media.verifiedClip ? 1 : 0) - (a.media.verifiedClip ? 1 : 0) || b.media.views - a.media.views);
+    return delay(deck);
+  },
+
+  recordClipView: (s, playerId, mediaId) => {
+    const m = PLAYERS.find((p) => p.id === playerId)?.media.find((x) => x.id === mediaId);
+    if (m) m.views = (m.views ?? 0) + 1;
+    return delay(undefined);
+  },
+
+  tagClip: (s, playerId, mediaId, tags) => {
+    const m = PLAYERS.find((p) => p.id === playerId)?.media.find((x) => x.id === mediaId);
+    if (!m) throw new ApiError(404, 'MEDIA_NOT_FOUND', 'No such clip');
+    m.tags ??= {};
+    for (const t of tags) m.tags[t] = (m.tags[t] ?? 0) + 1;
+    log(s, 'clip_tagged', playerId);
+    return delay(undefined);
+  },
+
+  getScoutTags: () => delay(SCOUT_TAGS),
+
+  getFixtures: (s) => {
+    const groups: Record<string, FixtureGroup> = {};
+    for (const p of PLAYERS.filter((x) => canSee(x, s.org))) {
+      for (const a of p.attendance) {
+        const key = `${a.fixture}|${a.date}`;
+        groups[key] ??= { fixture: a.fixture, venue: a.venue, date: a.date, players: [] };
+        groups[key].players.push({ id: p.id, name: p.name, position: p.position, age: p.age, trustScore: p.trustScore });
+      }
+    }
+    return delay(Object.values(groups).sort((a, b) => (a.date < b.date ? 1 : -1)));
   },
 
   getNotifications: (s) => delay(notifications.slice()),

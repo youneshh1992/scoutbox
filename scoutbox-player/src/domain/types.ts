@@ -29,6 +29,23 @@ export interface MediaItem {
   uploadedAt: string;
   /** Playable source when a real file was uploaded (path in live mode, data URL in demo). */
   url?: string | null;
+  /** Club view count — honest scouting signal back to the player. */
+  views?: number;
+  /** "What scouts noticed": tag → count, aggregated anonymously. */
+  tags?: Record<string, number>;
+  /** Attendance id when footage is provably from a confirmed fixture. */
+  verifiedClip?: string | null;
+}
+
+export interface CombineResult {
+  id: string;
+  drillId: string;
+  drillName: string;
+  metric: string;
+  unit: string;
+  value: number;
+  verified: boolean;
+  ts: number;
 }
 
 export interface TrialReportOnProfile {
@@ -57,6 +74,8 @@ export interface PlayerProfile {
   marketValueRange?: string | null;
   agentName?: string | null;
   drills?: string[];
+  drillResults?: CombineResult[];
+  activityLog?: number[];
   position: string | null;
   foot: string | null;
   heightCm: number | null;
@@ -162,6 +181,11 @@ export interface Drill {
   id: string;
   name: string;
   completed: boolean;
+  metric: string;
+  unit: string;
+  benchmark: number;
+  lowerIsBetter: boolean;
+  best: CombineResult | null;
 }
 
 export const POSITIONS = ['GK', 'CB', 'RB', 'LB', 'CDM', 'CM', 'CAM', 'RW', 'LW', 'ST', 'CF'] as const;

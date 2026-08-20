@@ -2,7 +2,7 @@
 
 import type {
   PlayerClient, SignupInput, Me, AttendanceInput, DemoIdentity, ReportInput, ChildInput,
-  Channel, AppNotification, Insights, FiledReport,
+  Channel, AppNotification, Insights, FiledReport, PlayerFeedItem, PlayerCV, GuardianDigest,
 } from './types';
 import { ClientError } from './types';
 import type { Availability, ContractStatus, InboxRequest, ChildInboxItem, Guardian, GuardianInboxRequest, Drill } from '../domain/types';
@@ -61,15 +61,25 @@ export const httpClient: PlayerClient = {
   setAcademyPlus: (playerId, enabled) =>
     request<void>('/player/academyplus', playerId, { method: 'POST', body: JSON.stringify({ enabled }) }),
 
-  addMedia: (playerId, title, dataUrl) =>
-    request<void>('/player/media', playerId, { method: 'POST', body: JSON.stringify({ title, kind: 'video', dataUrl }) }),
+  addMedia: (playerId, title, dataUrl, attendanceId) =>
+    request<void>('/player/media', playerId, { method: 'POST', body: JSON.stringify({ title, kind: 'video', dataUrl, attendanceId }) }),
 
-  mediaUrl: (path) => (path ? `${API_URL}${path}` : null),
+  mediaUrl: (path) => (path ? (path.startsWith('data:') ? path : `${API_URL}${path}`) : null),
 
   getChannels: (playerId) => request<Channel[]>('/player/channels', playerId),
 
-  sendMessage: (playerId, channelId, text) =>
-    request<void>(`/player/channels/${channelId}/messages`, playerId, { method: 'POST', body: JSON.stringify({ text }) }),
+  sendMessage: (playerId, channelId, text, attachMediaId) =>
+    request<void>(`/player/channels/${channelId}/messages`, playerId, { method: 'POST', body: JSON.stringify({ text, attachMediaId }) }),
+
+  markChannelRead: (playerId, channelId) =>
+    request<void>(`/player/channels/${channelId}/read`, playerId, { method: 'POST' }),
+
+  sendTyping: (playerId, channelId) =>
+    request<void>(`/player/channels/${channelId}/typing`, playerId, { method: 'POST' }),
+
+  getFeed: (playerId) => request<PlayerFeedItem[]>('/player/feed', playerId),
+
+  getCv: (playerId) => request<PlayerCV>('/player/cv', playerId),
 
   getNotifications: (playerId) => request<AppNotification[]>('/player/notifications', playerId),
 
@@ -100,8 +110,8 @@ export const httpClient: PlayerClient = {
 
   getDrills: (playerId) => request<Drill[]>('/player/drills', playerId),
 
-  completeDrill: (playerId, drillId) =>
-    request<void>(`/player/drills/${drillId}/complete`, playerId, { method: 'POST' }),
+  completeDrill: (playerId, drillId, value, videoDataUrl) =>
+    request<void>(`/player/drills/${drillId}/complete`, playerId, { method: 'POST', body: JSON.stringify({ value, videoDataUrl }) }),
 
   report: (playerId, input: ReportInput) =>
     request<void>('/player/report', playerId, { method: 'POST', body: JSON.stringify(input) }),
@@ -149,8 +159,16 @@ export const httpClient: PlayerClient = {
 
   guardianChannels: (guardianId) => guardianRequest<Channel[]>('/guardian/channels', guardianId),
 
-  guardianSendMessage: (guardianId, channelId, text) =>
-    guardianRequest<void>(`/guardian/channels/${channelId}/messages`, guardianId, { method: 'POST', body: JSON.stringify({ text }) }),
+  guardianSendMessage: (guardianId, channelId, text, attachMediaId) =>
+    guardianRequest<void>(`/guardian/channels/${channelId}/messages`, guardianId, { method: 'POST', body: JSON.stringify({ text, attachMediaId }) }),
+
+  guardianMarkChannelRead: (guardianId, channelId) =>
+    guardianRequest<void>(`/guardian/channels/${channelId}/read`, guardianId, { method: 'POST' }),
+
+  guardianSendTyping: (guardianId, channelId) =>
+    guardianRequest<void>(`/guardian/channels/${channelId}/typing`, guardianId, { method: 'POST' }),
+
+  guardianDigest: (guardianId) => guardianRequest<GuardianDigest>('/guardian/digest', guardianId),
 
   guardianNotifications: (guardianId) => guardianRequest<AppNotification[]>('/guardian/notifications', guardianId),
 
@@ -172,10 +190,17 @@ export const httpClient: PlayerClient = {
     // SSE on web; polling elsewhere (native has no EventSource).
     if (typeof EventSource !== 'undefined') {
       const source = new EventSource(`${API_URL}/events`);
-      source.onmessage = () => cb();
+      source.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          cb(data.event, data);
+        } catch {
+          cb();
+        }
+      };
       return () => source.close();
     }
-    const timer = setInterval(cb, 3000);
+    const timer = setInterval(() => cb(), 3000);
     return () => clearInterval(timer);
   },
 };
