@@ -52,6 +52,8 @@ export function buildSeed() {
       id: 'gd-amara',
       name: 'Amara Adebayo',
       email: 'amara.adebayo@example.com',
+      password: null, // demo seed — open login; production seeds always set one
+      emailVerified: true,
       idVerified: true,
       disclaimerAccepted: true,
       childIds: ['pl-guni'],
@@ -60,6 +62,8 @@ export function buildSeed() {
       id: 'gd-marek',
       name: 'Marek Kowalski',
       email: 'marek.kowalski@example.com',
+      password: null, // demo seed — open login
+      emailVerified: true,
       idVerified: true,
       disclaimerAccepted: true,
       childIds: ['pl-tomasz', 'pl-imani'],
@@ -442,6 +446,12 @@ export function buildSeed() {
     reports: [],     // report-user/scout/club submissions (status → resolved)
     blocks: [],      // {playerId, orgId, by, reason} — org loses all access
     moderationLog: [],
+    sessions: [],
+    outbox: [],
+    pushLog: [],
+    pushTokens: [],
+    invoices: [],
+    emailChallenges: [],
     channels: [],       // moderated message threads, opened on acceptance
     notifications: [],  // in-app notification feed per audience
     mediaBlobs: {},     // mediaId → { dataUrl } for uploaded video (prototype store)

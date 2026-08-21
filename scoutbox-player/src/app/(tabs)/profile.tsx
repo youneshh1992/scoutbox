@@ -167,17 +167,38 @@ export default function Profile() {
               {me.stats.paceKmh != null && <StatTile icon="⚡" v={`${me.stats.paceKmh}`} k="km/h Top Speed" />}
               {me.stats.passCompletionPct != null && <StatTile icon="🎯" v={`${me.stats.passCompletionPct}%`} k="Pass Accuracy" />}
             </Row>
-            {(me.seasonHistory?.length ?? 0) > 0 && (
-              <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8, gap: 4 }}>
-                <Muted size={12}>Past seasons — your career, season by season</Muted>
-                {me.seasonHistory!.map((s) => (
-                  <Row key={s.season} style={{ justifyContent: 'space-between' }}>
-                    <Pill label={s.season} />
-                    <Muted size={12.5}>{s.appearances} apps · {s.goals} goals · {s.assists} assists</Muted>
+            {(me.seasonHistory?.length ?? 0) > 0 && (() => {
+              // Progress over time: history (oldest → newest) plus this season.
+              const series = [...me.seasonHistory!].reverse().concat([
+                { season: 'Now', appearances: me.stats?.appearances ?? 0, goals: me.stats?.goals ?? 0, assists: me.stats?.assists ?? 0 },
+              ]);
+              const maxGoals = Math.max(...series.map((s) => s.goals), 1);
+              return (
+                <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8, gap: 6 }}>
+                  <Muted size={12}>Your career, season by season — goals trend</Muted>
+                  <Row style={{ alignItems: 'flex-end', height: 56, gap: 8 }}>
+                    {series.map((s) => (
+                      <View key={s.season} style={{ flex: 1, alignItems: 'center', gap: 2 }}>
+                        <Text style={{ color: colors.text, fontSize: 11, fontWeight: '700' }}>{s.goals}</Text>
+                        <View style={{
+                          alignSelf: 'stretch',
+                          height: Math.max(4, (s.goals / maxGoals) * 34),
+                          borderRadius: 3,
+                          backgroundColor: s.season === 'Now' ? colors.accent : colors.panel2,
+                        }} />
+                        <Muted size={9.5}>{s.season}</Muted>
+                      </View>
+                    ))}
                   </Row>
-                ))}
-              </View>
-            )}
+                  {me.seasonHistory!.map((s) => (
+                    <Row key={s.season} style={{ justifyContent: 'space-between' }}>
+                      <Pill label={s.season} />
+                      <Muted size={12.5}>{s.appearances} apps · {s.goals} goals · {s.assists} assists</Muted>
+                    </Row>
+                  ))}
+                </View>
+              );
+            })()}
           </Card>
         )}
 

@@ -1,0 +1,20 @@
+# Render.com blueprint for the single-container ScoutBox build.
+# Connect the repo in the Render dashboard and it picks this up.
+services:
+  - type: web
+    name: scoutbox
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /orgs/directory
+    disk:
+      name: scoutbox-data
+      mountPath: /srv/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ADMIN_KEY
+        sync: false # set in the dashboard
+      # Optional live providers — set in the dashboard to switch the adapters:
+      # SENDGRID_API_KEY, STRIPE_SECRET_KEY, EXPO_ACCESS_TOKEN, ONFIDO_API_TOKEN

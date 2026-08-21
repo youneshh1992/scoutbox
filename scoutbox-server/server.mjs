@@ -11,6 +11,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildSeed } from './seed.mjs';
+import { openStore } from './store.mjs';
+import {
+  hashPassword, verifyPassword, newToken, randomCode, makeRateLimiter,
+  createMailer, createPushSender, createIdvProvider, createBilling, createStorage,
+} from './adapters.mjs';
 import {
   adultAgeFor,
   ageOn,
@@ -32,26 +37,26 @@ const PORT = process.env.PORT || 4000;
 const db = buildSeed();
 
 // ------------------------------------------------------------- persistence
-// JSON snapshot: the append-only ledger, guardian records and communications
-// now survive restarts. Load replaces the seed wholesale; saves are debounced
-// and flushed on shutdown. (The API surface is unchanged — swapping this for
-// Postgres later touches nothing above it.)
+// SQLite-backed snapshot store (store.mjs): the working set stays in memory,
+// every save is an atomic transaction into data/scoutbox.db, and a legacy
+// data/db.json is imported once on first boot. Saves are debounced and
+// flushed on shutdown.
 const DATA_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
-const DATA_FILE = path.join(DATA_DIR, 'db.json');
+const store = openStore(DATA_DIR);
 let snapshotLoaded = false;
 let snapshotIdCounter = 0; // applied when the id counter initialises below
 
 function loadSnapshot() {
   try {
-    const raw = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-    if (!raw || typeof raw !== 'object' || !Array.isArray(raw.db?.players)) return;
+    const raw = store.load();
+    if (!raw || !Array.isArray(raw.db?.players)) return;
     for (const key of Object.keys(db)) delete db[key];
     Object.assign(db, raw.db);
     snapshotIdCounter = Number(raw.idCounter) || 0;
     snapshotLoaded = true;
-    console.log(`snapshot loaded: ${db.players.length} players, ${db.ledger.length} ledger rows (${DATA_FILE})`);
-  } catch {
-    // no snapshot yet — first boot runs from seed
+    console.log(`snapshot loaded (${store.engine}): ${db.players.length} players, ${db.ledger.length} ledger rows`);
+  } catch (err) {
+    console.error('snapshot load failed — running from seed:', err.message);
   }
 }
 
@@ -61,10 +66,7 @@ function persist() {
   saveTimer = setTimeout(() => {
     saveTimer = null;
     try {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-      const tmp = `${DATA_FILE}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify({ savedAt: Date.now(), idCounter: currentIdCounter(), db }));
-      fs.renameSync(tmp, DATA_FILE);
+      store.save({ savedAt: Date.now(), idCounter: currentIdCounter(), db });
     } catch (err) {
       console.error('snapshot save failed:', err.message);
     }
@@ -74,8 +76,7 @@ function persist() {
 function persistNow() {
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
   try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(DATA_FILE, JSON.stringify({ savedAt: Date.now(), idCounter: currentIdCounter(), db }));
+    store.save({ savedAt: Date.now(), idCounter: currentIdCounter(), db });
   } catch (err) {
     console.error('snapshot save failed:', err.message);
   }
@@ -101,6 +102,27 @@ for (const p of db.players) {
 db.savedSearches ??= [];
 db.signings ??= [];
 db.pairingCodes ??= [];
+db.sessions ??= [];        // bearer-token sessions (all roles)
+db.outbox ??= [];          // mailer dev transport (+ delivery audit when live)
+db.pushLog ??= [];         // push dev transport (+ delivery audit when live)
+db.pushTokens ??= [];      // device push tokens, registered per user
+db.invoices ??= [];        // billing records (success fees)
+db.emailChallenges ??= []; // club email-domain verification codes
+db.mediaBlobs ??= {};
+
+// ---------------------------------------------------- production adapters
+const mailer = createMailer(db, (p) => nextId(p));
+const pushSender = createPushSender(db, (p) => nextId(p));
+const idv = createIdvProvider();
+const billing = createBilling(db, (p) => nextId(p));
+const storage = createStorage(DATA_DIR);
+
+// Media blobs migrate out of the database onto object storage (local disk in
+// dev). The db keeps only ids; /media/:id streams from storage.
+for (const [id, blob] of Object.entries(db.mediaBlobs)) {
+  if (blob?.dataUrl) storage.saveDataUrl(id, blob.dataUrl);
+}
+db.mediaBlobs = {};
 
 if (!snapshotLoaded) {
   const ASSETS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets');
@@ -115,7 +137,7 @@ if (!snapshotLoaded) {
       const player = db.players.find((p) => p.id === sample.playerId);
       const media = player?.media.find((m) => m.title === sample.title);
       if (!media) continue;
-      db.mediaBlobs[media.id] = { dataUrl: `data:video/webm;base64,${data.toString('base64')}` };
+      storage.saveDataUrl(media.id, `data:video/webm;base64,${data.toString('base64')}`);
       media.url = `/media/${media.id}`;
       if (sample.verify && player.attendance[0]) media.verifiedClip = player.attendance[0].id;
     } catch {
@@ -170,6 +192,35 @@ function isBlocked(playerId, orgId) {
   return db.blocks.some((b) => b.playerId === playerId && b.orgId === orgId);
 }
 
+// -------------------------------------------------------------- sessions
+// Real sessions: logins mint a bearer token; every authenticated route
+// resolves the caller from the token. Nothing trusts a client-sent id.
+function createSession(kind, refId, extra = {}) {
+  const token = newToken();
+  db.sessions.push({ token, kind, refId, ...extra, createdAt: Date.now() });
+  persist();
+  return token;
+}
+
+function sessionFor(req) {
+  const header = req.headers.authorization ?? '';
+  if (!header.startsWith('Bearer ')) return null;
+  return db.sessions.find((s) => s.token === header.slice(7)) ?? null;
+}
+
+app.post('/auth/logout', (req, res) => {
+  const session = sessionFor(req);
+  if (session) {
+    db.sessions = db.sessions.filter((s) => s !== session);
+    persist();
+  }
+  res.json({ ok: true });
+});
+
+// Brute-force protection on every credential-shaped endpoint.
+const authLimiter = makeRateLimiter({ windowMs: 60_000, max: 40, bucket: 'auth' });
+app.use('/auth', authLimiter);
+
 // ------------------------------------------------------------ notifications
 // In-app notification feed. audience = {kind: 'player'|'guardian'|'org_user', id}.
 // (Push / email delivery is a production integration behind this same record.)
@@ -204,6 +255,9 @@ function pushDeferred(audience, now = new Date()) {
 function notify(audience, type, text, refId = null) {
   const n = { id: nextId('ntf'), ts: Date.now(), audience, type, text, refId, read: false, deferredPush: pushDeferred(audience) };
   db.notifications.push(n);
+  // Push delivery honours quiet hours / school-hours mute; the in-app feed
+  // above always keeps the record either way.
+  if (!n.deferredPush) void pushSender.send(audience, 'ScoutBox', text);
   broadcast('notify', { audienceKind: audience.kind, audienceId: audience.id });
   return n;
 }
@@ -355,7 +409,18 @@ function insightsFor(playerId) {
 function moderateOrRefuse(res, text, context) {
   const check = moderateText(text);
   if (!check.ok) {
-    db.moderationLog.push({ id: nextId('mod'), ts: Date.now(), context, flags: check.flags });
+    db.moderationLog.push({ id: nextId('mod'), ts: Date.now(), context, flags: check.flags, severity: check.severity, excerpt: String(text).slice(0, 140) });
+    // Grooming-pattern hits don't just block — they escalate to a human
+    // immediately as an urgent auto-report against the sender.
+    if (check.severity === 'grooming') {
+      db.reports.push({
+        id: nextId('rep'), ts: Date.now(), by: 'system', byId: 'moderation',
+        targetKind: context.orgId ? 'club' : 'player', targetOrgId: context.orgId ?? null,
+        reason: `Automatic escalation: grooming-pattern language blocked (${check.flags.join(', ')}) in ${context.kind}.`,
+        urgent: true, status: 'pending_review', outcome: null, resolvedAt: null,
+      });
+    }
+    persist();
     res.status(400).json({
       error: 'MODERATION_BLOCKED',
       message: 'This text was blocked by moderation: personal contact details and off-platform contact are not allowed.',
@@ -403,8 +468,9 @@ app.get('/meta', (_req, res) => {
 });
 
 // ------------------------------------------------------------- player auth
-// Prototype auth: the player app sends x-player-id. Production swaps this
-// for real sessions without changing the API surface.
+// Real sessions: signup/login/pair mint a bearer token. New accounts require
+// a password (scrypt-hashed); pre-M7 seed identities carry no password and
+// stay open as demo logins — production seeds always set one.
 
 // Self sign-up is adults only. Under-18 accounts are OWNED by a verified
 // guardian and can only be created through the guardian flow below — the API
@@ -412,6 +478,9 @@ app.get('/meta', (_req, res) => {
 app.post('/auth/player/signup', (req, res) => {
   const { name, dob, country = 'GB', position, foot, password } = req.body || {};
   if (!name || !dob) return res.status(400).json({ error: 'NAME_AND_DOB_REQUIRED' });
+  if (!password || String(password).length < 8) {
+    return res.status(400).json({ error: 'PASSWORD_REQUIRED', message: 'Pick a password of at least 8 characters — your profile is yours alone.' });
+  }
   const required = adultAgeFor(country);
   if (ageOn(dob) < required) {
     return res.status(403).json({
@@ -446,29 +515,31 @@ app.post('/auth/player/signup', (req, res) => {
     marketValueRange: null,
     agentName: null,
     createdAt: Date.now(),
-    password: password || null,
+    password: hashPassword(password),
     medical: { shared: false, records: [], conditionStatus: 'unknown' },
   };
   db.players.push(p);
   checkSavedSearches(p);
   broadcast('players');
-  res.status(201).json({ playerId: p.id, player: p });
+  const { password: _pw, ...safe } = p;
+  res.status(201).json({ playerId: p.id, player: safe, token: createSession('player', p.id) });
 });
 
-// Prototype credential support: a profile created with a password requires it
-// at login (plain-text store — production swaps in real hashing + sessions).
 app.post('/auth/player/login', (req, res) => {
   const p = findPlayer(req.body?.playerId);
   if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
-  if (p.password && p.password !== req.body?.password) {
-    return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This profile is password-protected.' });
+  if (p.password) {
+    const check = verifyPassword(req.body?.password ?? '', p.password);
+    if (!check) return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This profile is password-protected.' });
+    if (check === 'upgrade') p.password = hashPassword(req.body.password); // migrate legacy plain-text
   }
-  res.json({ playerId: p.id, name: p.name });
+  res.json({ playerId: p.id, name: p.name, token: createSession('player', p.id) });
 });
 
 function playerAuth(req, res, next) {
-  const p = findPlayer(req.headers['x-player-id']);
-  if (!p) return res.status(401).json({ error: 'PLAYER_AUTH_REQUIRED' });
+  const session = sessionFor(req);
+  const p = session?.kind === 'player' ? findPlayer(session.refId) : null;
+  if (!p) return res.status(401).json({ error: 'PLAYER_AUTH_REQUIRED', message: 'Log in again — this session is no longer valid.' });
   req.player = p;
   req.playerIsMinor = !isAdult(p);
   next();
@@ -492,30 +563,71 @@ function guardianManagedOnly(req, res) {
 // Parents own every under-18 account. ID verification and the safeguarding
 // disclaimer are hard gates BEFORE any child profile can exist.
 
-app.post('/auth/guardian/signup', (req, res) => {
-  const { name, email } = req.body || {};
-  if (!name || !email) return res.status(400).json({ error: 'NAME_AND_EMAIL_REQUIRED' });
+app.post('/auth/guardian/signup', async (req, res) => {
+  const { name, email, password } = req.body || {};
+  if (!name || !email || !email.includes('@')) return res.status(400).json({ error: 'NAME_AND_EMAIL_REQUIRED' });
+  if (!password || String(password).length < 8) {
+    return res.status(400).json({ error: 'PASSWORD_REQUIRED', message: 'Pick a password of at least 8 characters.' });
+  }
+  if (db.guardians.some((x) => x.email.toLowerCase() === email.toLowerCase())) {
+    return res.status(409).json({ error: 'EMAIL_IN_USE', message: 'A guardian account with this email already exists — log in instead.' });
+  }
   const g = {
     id: nextId('gd'),
     name,
     email,
+    password: hashPassword(password),
+    emailVerified: false,
+    emailCode: randomCode(6),
     idVerified: false,
     disclaimerAccepted: false,
     childIds: [],
   };
   db.guardians.push(g);
-  res.status(201).json({ guardianId: g.id, guardian: g });
+  await mailer.send({
+    to: email,
+    subject: 'Verify your ScoutBox guardian account',
+    text: `Hi ${name},\n\nYour ScoutBox verification code is ${g.emailCode}.\n\nGuardian accounts own every under-18 profile on ScoutBox — verifying your email is the first of the safeguarding gates (email → ID → disclaimer) before any child profile can exist.`,
+  });
+  const { password: _pw, emailCode: _c, ...safe } = g;
+  res.status(201).json({
+    guardianId: g.id, guardian: safe, token: createSession('guardian', g.id), emailVerificationSent: true,
+    // Dev transport has no real inbox — surface the code so the flow can
+    // complete. Never present when a live mail provider is configured.
+    ...(mailer.transport === 'dev-outbox' ? { devEmailCode: g.emailCode } : {}),
+  });
+});
+
+app.post('/auth/guardian/verify-email', (req, res) => {
+  const { guardianId, code } = req.body || {};
+  const g = db.guardians.find((x) => x.id === guardianId);
+  if (!g) return res.status(404).json({ error: 'GUARDIAN_NOT_FOUND' });
+  if (g.emailVerified) return res.json({ emailVerified: true });
+  if (!code || String(code).trim().toUpperCase() !== g.emailCode) {
+    return res.status(400).json({ error: 'CODE_INVALID', message: 'That code doesn\'t match — check the email we sent you.' });
+  }
+  g.emailVerified = true;
+  g.emailCode = null;
+  persist();
+  res.json({ emailVerified: true });
 });
 
 app.post('/auth/guardian/login', (req, res) => {
   const g = db.guardians.find((x) => x.id === req.body?.guardianId || x.email === req.body?.email);
   if (!g) return res.status(404).json({ error: 'GUARDIAN_NOT_FOUND' });
-  res.json({ guardianId: g.id, guardian: g });
+  if (g.password) {
+    const check = verifyPassword(req.body?.password ?? '', g.password);
+    if (!check) return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This account is password-protected.' });
+    if (check === 'upgrade') g.password = hashPassword(req.body.password);
+  }
+  const { password: _pw, emailCode: _c, ...safe } = g;
+  res.json({ guardianId: g.id, guardian: safe, token: createSession('guardian', g.id) });
 });
 
 function guardianAuth(req, res, next) {
-  const g = db.guardians.find((x) => x.id === req.headers['x-guardian-id']);
-  if (!g) return res.status(401).json({ error: 'GUARDIAN_AUTH_REQUIRED' });
+  const session = sessionFor(req);
+  const g = session?.kind === 'guardian' ? db.guardians.find((x) => x.id === session.refId) : null;
+  if (!g) return res.status(401).json({ error: 'GUARDIAN_AUTH_REQUIRED', message: 'Log in again — this session is no longer valid.' });
   req.guardian = g;
   next();
 }
@@ -525,17 +637,27 @@ app.use('/guardian', guardianAuth, guardianRouter);
 
 // Prototype ID verification: an attestation endpoint. Production integrates a
 // document + liveness IDV provider behind this same call.
-guardianRouter.post('/verify-id', (req, res) => {
+guardianRouter.post('/verify-id', async (req, res) => {
   const { documentType, documentRef } = req.body || {};
   if (!documentType || !documentRef) {
     return res.status(400).json({ error: 'DOCUMENT_REQUIRED', message: 'ID verification needs a document type and reference.' });
   }
+  // Runs through the IDV adapter: instant attestation in dev, a document +
+  // liveness provider (ONFIDO_API_TOKEN) in production — same call either way.
+  const result = await idv.verify({ name: req.guardian.name, documentType, documentRef });
+  if (!result.approved) {
+    return res.status(422).json({ error: 'IDV_REJECTED', message: 'Identity verification did not pass — check the document details.' });
+  }
   req.guardian.idVerified = true;
-  // Every attestation lands in the admin IDV queue for audit — and can be
-  // revoked there (prototype auto-approval; production = document + liveness).
+  req.guardian.idvReference = result.reference;
+  // Every check lands in the admin IDV queue for audit — and can be revoked there.
   db.idvQueue ??= [];
-  db.idvQueue.push({ id: nextId('idv'), guardianId: req.guardian.id, guardianName: req.guardian.name, documentType, documentRef, ts: Date.now(), status: 'auto_approved' });
-  res.json({ idVerified: true });
+  db.idvQueue.push({
+    id: nextId('idv'), guardianId: req.guardian.id, guardianName: req.guardian.name,
+    documentType, documentRef: result.document.refLast4, provider: result.provider,
+    reference: result.reference, ts: Date.now(), status: 'approved',
+  });
+  res.json({ idVerified: true, reference: result.reference });
 });
 
 guardianRouter.post('/disclaimer', (req, res) => {
@@ -546,7 +668,12 @@ guardianRouter.post('/disclaimer', (req, res) => {
   res.json({ disclaimerAccepted: true });
 });
 
-guardianRouter.get('/me', (req, res) => res.json(req.guardian));
+function guardianView(g) {
+  const { password, emailCode, ...safe } = g;
+  return safe;
+}
+
+guardianRouter.get('/me', (req, res) => res.json(guardianView(req.guardian)));
 
 guardianRouter.get('/children', (req, res) => {
   res.json(
@@ -559,6 +686,9 @@ guardianRouter.get('/children', (req, res) => {
 
 // Creating a child profile requires BOTH gates: verified ID + accepted disclaimer.
 guardianRouter.post('/children', (req, res) => {
+  if (req.guardian.emailVerified === false) {
+    return res.status(403).json({ error: 'EMAIL_UNVERIFIED', message: 'Verify your email address first — the code is in your inbox.' });
+  }
   if (!req.guardian.idVerified) {
     return res.status(403).json({ error: 'GUARDIAN_ID_UNVERIFIED', message: 'Verify your identity before onboarding a child.' });
   }
@@ -862,22 +992,22 @@ app.post('/auth/org/login', (req, res) => {
   } else if (role) {
     user.role = role.trim();
   }
-  res.json({ userId: user.id, role: user.role, org: { ...org, safeguardingCertified: safeguardingCertified(org) } });
+  res.json({
+    userId: user.id, role: user.role,
+    org: { ...org, safeguardingCertified: safeguardingCertified(org) },
+    token: createSession('org', org.id, { userId: user.id }),
+  });
 });
 
-// Accountability by user: every org request must carry an individual user id.
+// Accountability by user: sessions are minted per INDIVIDUAL scout at login —
+// the token resolves to both the org and the named user, so shared/anonymous
+// workspace access is structurally impossible.
 function orgAuth(req, res, next) {
-  const orgId = req.headers['x-org-id'];
-  const userId = req.headers['x-user-id'];
-  const org = db.orgs.find((o) => o.id === orgId);
+  const session = sessionFor(req);
+  if (session?.kind !== 'org') return res.status(401).json({ error: 'ORG_AUTH_REQUIRED', message: 'Log in again — this session is no longer valid.' });
+  const org = db.orgs.find((o) => o.id === session.refId);
   if (!org) return res.status(401).json({ error: 'ORG_AUTH_REQUIRED' });
-  if (!userId) {
-    return res.status(401).json({
-      error: 'USER_REQUIRED',
-      message: 'Requests must be attributed to an individual user. Shared org accounts are refused.',
-    });
-  }
-  const user = db.users.find((u) => u.id === userId && u.orgId === orgId);
+  const user = db.users.find((u) => u.id === session.userId && u.orgId === org.id);
   if (!user) return res.status(401).json({ error: 'USER_UNKNOWN' });
   if (org.suspended) {
     return res.status(403).json({ error: 'ORG_SUSPENDED', message: 'This organisation is suspended pending a safety review.' });
@@ -1370,6 +1500,9 @@ orgRouter.post('/players/:id/signing', (req, res) => {
     insideAttributionWindow: first ? row.ts <= windowEnds : false,
   };
   db.signings.push(signing);
+  // The revenue event: a signing inside the attribution window issues the
+  // success-fee invoice through the billing adapter (Stripe when live).
+  if (signing.insideAttributionWindow) void billing.invoiceForSigning(signing, req.org);
   p.contractStatus = 'under_contract';
   p.availability = 'not_seeking';
   p.timeline.push({ year: String(new Date().getFullYear()), event: `Signed by ${req.org.name} — discovered on ScoutBox` });
@@ -1381,6 +1514,77 @@ orgRouter.post('/players/:id/signing', (req, res) => {
 
 orgRouter.get('/signings', (req, res) => {
   res.json(db.signings.filter((s) => s.orgId === req.org.id).slice().reverse());
+});
+
+orgRouter.get('/invoices', (req, res) => {
+  res.json(db.invoices.filter((i) => i.orgId === req.org.id).slice().reverse());
+});
+
+// ------------------------------------------------------ recruitment funnel
+// The club's whole pipeline computed from the ledger — every stage is a real
+// recorded event, so the numbers are the numbers.
+orgRouter.get('/funnel', (req, res) => {
+  const mine = db.ledger.filter((l) => l.orgId === req.org.id);
+  const count = (type) => mine.filter((l) => l.type.startsWith(type)).length;
+  const requests = db.requests.filter((r) => r.orgId === req.org.id);
+  res.json({
+    stages: [
+      { key: 'views', label: 'Profile views', count: count('view') },
+      { key: 'saves', label: 'Saves', count: count('save') },
+      { key: 'shortlists', label: 'Shortlists', count: count('shortlist') },
+      { key: 'requests', label: 'Requests sent', count: requests.length },
+      { key: 'accepted', label: 'Requests accepted', count: requests.filter((r) => r.status === 'accepted').length },
+      { key: 'trials', label: 'Trials booked', count: db.trials.filter((t) => t.orgId === req.org.id).length },
+      { key: 'reports', label: 'Reports filed', count: db.trials.filter((t) => t.orgId === req.org.id && t.status === 'reported').length },
+      { key: 'signings', label: 'Signings', count: db.signings.filter((s) => s.orgId === req.org.id).length },
+    ],
+    byScout: Object.values(mine.reduce((acc, l) => {
+      if (!l.scoutName) return acc;
+      acc[l.scoutName] ??= { scoutName: l.scoutName, events: 0 };
+      acc[l.scoutName].events += 1;
+      return acc;
+    }, {})).sort((a, b) => b.events - a.events).slice(0, 8),
+  });
+});
+
+// -------------------------------------------- club email-domain verification
+// Verification stops being an attestation: the club proves control of a
+// company mailbox. Free-mail domains are refused outright.
+const FREE_MAIL = /@(gmail|googlemail|hotmail|outlook|yahoo|icloud|aol|proton|protonmail|gmx|live|msn)\./i;
+
+orgRouter.post('/verification/email', async (req, res) => {
+  const { email } = req.body || {};
+  if (!email || !email.includes('@')) return res.status(400).json({ error: 'EMAIL_REQUIRED' });
+  if (FREE_MAIL.test(email)) {
+    return res.status(422).json({ error: 'COMPANY_EMAIL_REQUIRED', message: 'Verification needs a company mailbox — free email providers don\'t prove the club connection.' });
+  }
+  const code = randomCode(6);
+  db.emailChallenges = db.emailChallenges.filter((c) => c.orgId !== req.org.id);
+  db.emailChallenges.push({ orgId: req.org.id, email, code, expiresAt: Date.now() + 30 * 60 * 1000 });
+  await mailer.send({
+    to: email,
+    subject: `Verify ${req.org.name} on ScoutBox`,
+    text: `Your ScoutBox club verification code is ${code}.\n\nEntering it confirms ${req.org.name} controls this company mailbox — one of the safeguarding requirements before a club can see under-18 players.`,
+  });
+  persist();
+  res.status(201).json({ sent: true, note: 'Enter the code from the mailbox to confirm domain control.' });
+});
+
+orgRouter.post('/verification/email/confirm', (req, res) => {
+  const { code } = req.body || {};
+  const challenge = db.emailChallenges.find((c) => c.orgId === req.org.id);
+  if (!challenge || challenge.expiresAt < Date.now()) {
+    return res.status(404).json({ error: 'CHALLENGE_NOT_FOUND', message: 'Request a fresh code — none is active for this club.' });
+  }
+  if (String(code ?? '').trim().toUpperCase() !== challenge.code) {
+    return res.status(400).json({ error: 'CODE_INVALID', message: 'That code doesn\'t match — check the email.' });
+  }
+  db.emailChallenges = db.emailChallenges.filter((c) => c !== challenge);
+  req.org.emailDomain = challenge.email.split('@')[1];
+  req.org.emailDomainVerified = true;
+  persist();
+  broadcast('orgs');
+  res.json({ emailDomainVerified: true, emailDomain: req.org.emailDomain });
 });
 
 // ------------------------------------------------- ledger, proof, plan etc
@@ -1683,7 +1887,7 @@ playerRouter.post('/media', (req, res) => {
     if (dataUrl.length > 16_000_000) {
       return res.status(413).json({ error: 'FILE_TOO_LARGE', message: 'Uploads are capped at ~12MB in this prototype.' });
     }
-    db.mediaBlobs[item.id] = { dataUrl };
+    if (!storage.saveDataUrl(item.id, dataUrl)) return res.status(400).json({ error: 'BAD_DATA_URL' });
     item.url = `/media/${item.id}`;
   }
   // The Verified Clip seal: footage linked to a GPS+device-confirmed fixture.
@@ -1864,7 +2068,20 @@ app.post('/auth/player/pair', (req, res) => {
   if (!entry || entry.expiresAt < Date.now()) return res.status(404).json({ error: 'CODE_INVALID', message: 'That pairing code is wrong or expired — ask your parent/guardian for a fresh one.' });
   db.pairingCodes = db.pairingCodes.filter((c) => c !== entry);
   const p = findPlayer(entry.playerId);
-  res.json({ playerId: p.id, name: p.name });
+  res.json({ playerId: p.id, name: p.name, token: createSession('player', p.id) });
+});
+
+// Device push-token registration (used when EXPO_ACCESS_TOKEN switches the
+// push adapter live; harmless no-op storage in dev).
+app.post('/push/register', (req, res) => {
+  const session = sessionFor(req);
+  if (!session) return res.status(401).json({ error: 'AUTH_REQUIRED' });
+  const { token } = req.body || {};
+  if (!token) return res.status(400).json({ error: 'TOKEN_REQUIRED' });
+  db.pushTokens = db.pushTokens.filter((t) => !(t.kind === session.kind && t.refId === session.refId && t.token === token));
+  db.pushTokens.push({ kind: session.kind, refId: session.refId, token, ts: Date.now() });
+  persist();
+  res.status(201).json({ registered: true });
 });
 
 // Notification preferences — quiet hours + the minors' school-hours mute.
@@ -1906,7 +2123,8 @@ function exportPlayer(p) {
 function deletePlayerData(playerId) {
   const p = findPlayer(playerId);
   if (!p) return false;
-  for (const m of p.media) delete db.mediaBlobs[m.id];
+  for (const m of p.media) storage.delete(m.id);
+  db.sessions = db.sessions.filter((s) => !(s.kind === 'player' && s.refId === playerId));
   db.players = db.players.filter((x) => x.id !== playerId);
   db.requests = db.requests.filter((r) => r.playerId !== playerId);
   db.channels = db.channels.filter((c) => c.playerId !== playerId);
@@ -1932,7 +2150,7 @@ playerRouter.delete('/account', (req, res) => {
 guardianRouter.get('/export', (req, res) => {
   res.json({
     exportedAt: new Date().toISOString(),
-    guardian: req.guardian,
+    guardian: guardianView(req.guardian),
     children: req.guardian.childIds.map((id) => findPlayer(id)).filter(Boolean).map(exportPlayer),
   });
 });
@@ -1982,11 +2200,25 @@ adminRouter.get('/overview', (_req, res) => {
     moderationHits: db.moderationLog.length,
     channels: db.channels.length,
     signings: db.signings.length,
+    invoices: db.invoices.length,
+    emailsSent: db.outbox.length,
+    pushesSent: db.pushLog.length,
+    sessions: db.sessions.length,
+    storageEngine: store.engine,
+    groomingEscalations: db.moderationLog.filter((m) => m.severity === 'grooming').length,
     persisted: snapshotLoaded,
   });
 });
 
-adminRouter.get('/reports', (_req, res) => res.json(db.reports.slice().reverse()));
+// Triage order: urgent first, then oldest-pending first, then resolved.
+adminRouter.get('/reports', (_req, res) => {
+  const rank = (r) => (r.status === 'pending_review' ? (r.urgent ? 0 : 1) : 2);
+  res.json(db.reports.slice().sort((a, b) => rank(a) - rank(b) || (rank(a) < 2 ? a.ts - b.ts : b.ts - a.ts)));
+});
+
+adminRouter.get('/outbox', (_req, res) => res.json(db.outbox.slice().reverse()));
+adminRouter.get('/push-log', (_req, res) => res.json(db.pushLog.slice(-200).reverse()));
+adminRouter.get('/invoices', (_req, res) => res.json(db.invoices.slice().reverse()));
 
 adminRouter.post('/reports/:id/resolve', (req, res) => {
   const report = db.reports.find((r) => r.id === req.params.id);
@@ -2057,14 +2289,25 @@ adminRouter.get('/channels', (_req, res) => res.json(db.channels.map((c) => ({ .
 // Serve uploaded media (any authenticated party with profile access could
 // reach this in production; prototype serves by id).
 app.get('/media/:id', (req, res) => {
-  const blob = db.mediaBlobs[req.params.id];
+  if (!/^[a-z0-9-]+$/i.test(req.params.id)) return res.status(400).json({ error: 'BAD_MEDIA_ID' });
+  const blob = storage.read(req.params.id);
   if (!blob) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });
-  const match = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(blob.dataUrl);
-  if (!match) return res.status(500).json({ error: 'BAD_STORED_MEDIA' });
-  const mime = match[1] || 'application/octet-stream';
-  const body = match[2] ? Buffer.from(match[3], 'base64') : Buffer.from(decodeURIComponent(match[3]));
-  res.set('Content-Type', mime).send(body);
+  res.set('Content-Type', blob.contentType).send(blob.buffer);
 });
+
+// ---------------------------------------------------- static app hosting
+// Single-container deploys: the Docker build drops the built club app into
+// public/club and the T&S console into public/admin, and this serves them
+// alongside the API. Local dev keeps using the Vite/Expo dev servers.
+const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
+for (const [route, dir] of [['/app', 'club'], ['/console', 'admin']]) {
+  const full = path.join(PUBLIC_DIR, dir);
+  if (fs.existsSync(path.join(full, 'index.html'))) {
+    app.use(route, express.static(full));
+    app.get(`${route}/*`, (_req, res) => res.sendFile(path.join(full, 'index.html')));
+    console.log(`serving ${dir} app at ${route}`);
+  }
+}
 
 // ------------------------------------------------------------------- start
 app.use((err, _req, res, _next) => {

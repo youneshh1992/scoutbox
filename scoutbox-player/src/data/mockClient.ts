@@ -374,6 +374,7 @@ function ensureSeed() {
       id: 'gd-amara',
       name: 'Amara Adebayo',
       email: 'amara.adebayo@example.com',
+      emailVerified: true,
       idVerified: true,
       disclaimerAccepted: true,
       childIds: ['pl-guni'],
@@ -483,6 +484,10 @@ export const mockClient: PlayerClient = {
   },
 
   signup: (input: SignupInput) => {
+    // Mirrors the live API: a real password is part of owning your profile.
+    if (!input.password || input.password.length < 8) {
+      throw new ClientError('PASSWORD_REQUIRED', 'Pick a password of at least 8 characters — your profile is yours alone.');
+    }
     // Mirrors the server's 403 GUARDIAN_REQUIRED for minors.
     const required = adultAgeFor(input.country);
     if (ageOn(input.dob) < required) {
@@ -513,6 +518,11 @@ export const mockClient: PlayerClient = {
     players.set(p.id, p);
     inboxes.set(p.id, []);
     return delay({ playerId: p.id });
+  },
+
+  login: (playerId) => {
+    const p = getPlayer(playerId);
+    return delay({ playerId: p.id, name: p.name });
   },
 
   pair: (code) => {
@@ -887,10 +897,23 @@ export const mockClient: PlayerClient = {
   },
 
   // ---- guardian surface ----
-  guardianSignup: (name, email) => {
-    const g: Guardian = { id: nid('gd'), name, email, idVerified: false, disclaimerAccepted: false, childIds: [] };
+  guardianSignup: (name, email, password) => {
+    if (!password || password.length < 8) {
+      throw new ClientError('PASSWORD_REQUIRED', 'Pick a password of at least 8 characters.');
+    }
+    const g: Guardian = { id: nid('gd'), name, email, emailVerified: false, idVerified: false, disclaimerAccepted: false, childIds: [] };
     guardians.set(g.id, g);
-    return delay({ guardianId: g.id });
+    // Demo mail transport: the "email" arrives instantly with a fixed code.
+    return delay({ guardianId: g.id, devEmailCode: 'DEMO42' });
+  },
+
+  guardianVerifyEmail: (guardianId, code) => {
+    const g = guardians.get(guardianId);
+    if (!g) throw new ClientError('GUARDIAN_NOT_FOUND', 'No guardian account found.');
+    if (code.trim().toUpperCase() !== 'DEMO42') throw new ClientError('CODE_INVALID', "That code doesn't match — check the email we sent you.");
+    g.emailVerified = true;
+    emit();
+    return delay(undefined);
   },
 
   guardianLogin: (idOrEmail) => {
@@ -937,6 +960,7 @@ export const mockClient: PlayerClient = {
   guardianAddChild: (guardianId, input: ChildInput) => {
     const g = guardians.get(guardianId);
     if (!g) throw new ClientError('GUARDIAN_NOT_FOUND', 'No guardian account found.');
+    if (g.emailVerified === false) throw new ClientError('EMAIL_UNVERIFIED', 'Verify your email address first — the code is in your inbox.');
     if (!g.idVerified) throw new ClientError('GUARDIAN_ID_UNVERIFIED', 'Verify your identity before onboarding a child.');
     if (!g.disclaimerAccepted) throw new ClientError('DISCLAIMER_REQUIRED', 'Accept the safeguarding disclaimer before onboarding a child.');
     if (ageOn(input.dob) >= adultAgeFor(input.country)) throw new ClientError('NOT_A_MINOR', 'Adults create their own account with player sign-up.');

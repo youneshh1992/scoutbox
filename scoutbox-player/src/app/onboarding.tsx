@@ -14,7 +14,7 @@ const COUNTRIES = ['GB', 'PT', 'FR', 'SE', 'PL', 'NG', 'GH', 'AR', 'JP', 'KR', '
 type Step =
   | 'welcome' | 'pair'
   | 'details' | 'football' | 'needs-guardian'
-  | 'g-account' | 'g-verify' | 'g-disclaimer' | 'g-child';
+  | 'g-account' | 'g-email' | 'g-verify' | 'g-disclaimer' | 'g-child';
 
 export default function Onboarding() {
   const router = useRouter();
@@ -46,6 +46,9 @@ export default function Onboarding() {
   // guardian flow
   const [gName, setGName] = useState('');
   const [gEmail, setGEmail] = useState('');
+  const [gPassword, setGPassword] = useState('');
+  const [gEmailCode, setGEmailCode] = useState('');
+  const [gEmailHint, setGEmailHint] = useState<string | null>(null);
   const [gId, setGId] = useState<string | null>(null);
   const [docType, setDocType] = useState<'passport' | 'driving_licence' | null>(null);
   const [docRef, setDocRef] = useState('');
@@ -61,15 +64,24 @@ export default function Onboarding() {
     client.listDemoIdentities().then(setIdentities).catch(() => {});
   }, []);
 
-  const enterAsPlayer = (playerId: string) => {
-    loginPlayer(playerId);
-    router.replace('/(tabs)/discover');
+  const enterAsPlayer = async (playerId: string, skipLogin = false) => {
+    try {
+      if (!skipLogin) await client.login(playerId); // mints the bearer session
+      loginPlayer(playerId);
+      router.replace('/(tabs)/discover');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Login failed.');
+    }
   };
 
   const checkDetails = () => {
     setError(null);
     if (!name.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(dob)) {
       setError('Enter your name and date of birth (YYYY-MM-DD).');
+      return;
+    }
+    if (password.length < 8) {
+      setError('Pick a password of at least 8 characters — your profile is yours alone.');
       return;
     }
     // Under-18s: the account belongs to a guardian — mirrored locally,
@@ -91,9 +103,9 @@ export default function Onboarding() {
         city: city.trim() || undefined,
         position: position ?? undefined,
         foot: foot ?? undefined,
-        password: password || undefined,
+        password,
       });
-      enterAsPlayer(playerId);
+      await enterAsPlayer(playerId, true); // signup already minted the session
     } catch (e) {
       if (e instanceof ClientError && e.code === 'GUARDIAN_REQUIRED') setStep('needs-guardian');
       else setError(e instanceof Error ? e.message : 'Could not create your profile.');
@@ -103,12 +115,25 @@ export default function Onboarding() {
   const guardianCreate = async () => {
     setError(null);
     if (!gName.trim() || !gEmail.includes('@')) return setError('Enter your name and a valid email.');
+    if (gPassword.length < 8) return setError('Pick a password of at least 8 characters.');
     try {
-      const { guardianId } = await client.guardianSignup(gName.trim(), gEmail.trim());
-      setGId(guardianId);
-      setStep('g-verify');
+      const r = await client.guardianSignup(gName.trim(), gEmail.trim(), gPassword);
+      setGId(r.guardianId);
+      setGEmailHint(r.devEmailCode ?? null);
+      setStep('g-email');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not create the guardian account.');
+    }
+  };
+
+  const guardianVerifyEmail = async () => {
+    setError(null);
+    if (!gId) return;
+    try {
+      await client.guardianVerifyEmail(gId, gEmailCode.trim());
+      setStep('g-verify');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Email verification failed.');
     }
   };
 
@@ -254,7 +279,7 @@ export default function Onboarding() {
                 setError(null);
                 try {
                   const { playerId } = await client.pair(pairCode.trim());
-                  enterAsPlayer(playerId);
+                  await enterAsPlayer(playerId, true); // pairing already minted the session
                 } catch (e) {
                   setError(e instanceof Error ? e.message : 'Pairing failed.');
                 }
@@ -284,7 +309,7 @@ export default function Onboarding() {
               </Muted>
             )}
             <TextInput style={styles.input} placeholder="City (optional)" placeholderTextColor={colors.muted} value={city} onChangeText={setCity} />
-            <TextInput style={styles.input} placeholder="Password (optional — protects your profile login)" placeholderTextColor={colors.muted} value={password} onChangeText={setPassword} secureTextEntry />
+            <TextInput style={styles.input} placeholder="Password (required, 8+ characters)" placeholderTextColor={colors.muted} value={password} onChangeText={setPassword} secureTextEntry />
             <SectionTitle>Country</SectionTitle>
             <Row>
               {COUNTRIES.map((c) => (
@@ -334,21 +359,46 @@ export default function Onboarding() {
 
         {step === 'g-account' && (
           <>
-            <SectionTitle>Guardian account — step 1 of 4</SectionTitle>
+            <SectionTitle>Guardian account — step 1 of 5</SectionTitle>
             <Muted size={13.5}>
               Parents own every under-18 account. You manage all messages, notifications and club
               interactions; your child keeps the football.
             </Muted>
             <TextInput style={styles.input} placeholder="Your full name" placeholderTextColor={colors.muted} value={gName} onChangeText={setGName} />
             <TextInput style={styles.input} placeholder="Your email" placeholderTextColor={colors.muted} value={gEmail} onChangeText={setGEmail} autoCapitalize="none" />
-            <Button primary label="Continue to ID verification" onPress={guardianCreate} />
+            <TextInput style={styles.input} placeholder="Password (required, 8+ characters)" placeholderTextColor={colors.muted} value={gPassword} onChangeText={setGPassword} secureTextEntry />
+            <Button primary label="Continue to email verification" onPress={guardianCreate} />
             <Button label="Back" onPress={() => setStep('welcome')} />
+          </>
+        )}
+
+        {step === 'g-email' && (
+          <>
+            <SectionTitle>Email verification — step 2 of 5</SectionTitle>
+            <Muted size={13.5}>
+              We sent a 6-character code to {gEmail}. Entering it proves the mailbox is yours — the
+              first of three gates (email, ID, disclaimer) before any child profile can exist.
+            </Muted>
+            {gEmailHint && (
+              <Card style={{ borderColor: colors.accent2 }}>
+                <Muted size={12.5}>Prototype mail transport — your code is: {gEmailHint}</Muted>
+              </Card>
+            )}
+            <TextInput
+              style={[styles.input, { letterSpacing: 6, textAlign: 'center', fontSize: 20, fontWeight: '700' }]}
+              placeholder="XXXXXX"
+              placeholderTextColor={colors.muted}
+              value={gEmailCode}
+              onChangeText={(v) => setGEmailCode(v.toUpperCase().slice(0, 6))}
+              autoCapitalize="characters"
+            />
+            <Button primary label="Verify email" onPress={guardianVerifyEmail} />
           </>
         )}
 
         {step === 'g-verify' && (
           <>
-            <SectionTitle>ID verification — step 2 of 4</SectionTitle>
+            <SectionTitle>ID verification — step 3 of 5</SectionTitle>
             <Muted size={13.5}>
               We verify every guardian before any child profile can exist. Pick a document — production
               runs a document + liveness check; this prototype records the attestation.
@@ -364,7 +414,7 @@ export default function Onboarding() {
 
         {step === 'g-disclaimer' && (
           <>
-            <SectionTitle>Safeguarding disclaimer — step 3 of 4</SectionTitle>
+            <SectionTitle>Safeguarding disclaimer — step 4 of 5</SectionTitle>
             {U18_PROMISES.map((p) => (
               <Card key={p.slice(0, 20)}>
                 <Muted size={13}>{p}</Muted>
@@ -380,7 +430,7 @@ export default function Onboarding() {
 
         {step === 'g-child' && (
           <>
-            <SectionTitle>Your child — step 4 of 4</SectionTitle>
+            <SectionTitle>Your child — step 5 of 5</SectionTitle>
             <TextInput style={styles.input} placeholder="Child's full name" placeholderTextColor={colors.muted} value={childName} onChangeText={setChildName} />
             <TextInput style={styles.input} placeholder="Child's date of birth (YYYY-MM-DD)" placeholderTextColor={colors.muted} value={childDob} onChangeText={setChildDob} />
             <SectionTitle>Country</SectionTitle>

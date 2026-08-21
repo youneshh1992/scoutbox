@@ -6,7 +6,8 @@
   "main": "server.mjs",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node scripts/testTrust.mjs"
+    "test": "node scripts/testTrust.mjs",
+    "e2e": "node scripts/apiE2E.mjs"
   },
   "dependencies": {
     "cors": "^2.8.5",

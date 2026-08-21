@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, DEMO_MODE, type Channel, type Notification, type Org, type Session } from './api';
 import {
   FeedScreen, FilmRoomScreen, SearchScreen, ShortlistScreen, RequestsScreen, MessagesScreen,
-  TrialsScreen, FixturesScreen, LedgerScreen, ReputationScreen, PlanScreen,
+  TrialsScreen, FixturesScreen, LedgerScreen, FunnelScreen, ReputationScreen, PlanScreen,
   PlayerDrawer, Toast, SafetyModal,
 } from './screens';
 
@@ -19,7 +19,7 @@ function loadSession(): Session | null {
   }
 }
 
-export type ScreenId = 'feed' | 'filmroom' | 'search' | 'shortlist' | 'requests' | 'messages' | 'trials' | 'fixtures' | 'ledger' | 'reputation' | 'plan';
+export type ScreenId = 'feed' | 'filmroom' | 'search' | 'shortlist' | 'requests' | 'messages' | 'trials' | 'fixtures' | 'ledger' | 'funnel' | 'reputation' | 'plan';
 
 const NAV: { id: ScreenId; label: string }[] = [
   { id: 'feed', label: 'Home' },
@@ -31,6 +31,7 @@ const NAV: { id: ScreenId; label: string }[] = [
   { id: 'trials', label: 'Trials & Reports' },
   { id: 'fixtures', label: 'Fixtures' },
   { id: 'ledger', label: 'Discovery Ledger' },
+  { id: 'funnel', label: 'Funnel' },
   { id: 'reputation', label: 'Reputation' },
   { id: 'plan', label: 'Plan & Compliance' },
 ];
@@ -233,6 +234,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
           {screen === 'messages' && <MessagesScreen {...props} />}
           {screen === 'trials' && <TrialsScreen {...props} />}
           {screen === 'ledger' && <LedgerScreen {...props} />}
+          {screen === 'funnel' && <FunnelScreen {...props} />}
           {screen === 'reputation' && <ReputationScreen {...props} />}
           {screen === 'plan' && <PlanScreen {...props} />}
         </div>

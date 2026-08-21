@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  server:
+    name: Server — unit tests + API end-to-end
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scoutbox-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: scoutbox-server/package-lock.json
+      - run: npm ci
+      - name: Domain unit tests
+        run: npm test
+      - name: API end-to-end (fresh seed)
+        run: |
+          rm -rf data
+          node server.mjs &
+          SERVER_PID=$!
+          for i in $(seq 1 30); do curl -sf http://localhost:4000/orgs/directory >/dev/null && break; sleep 1; done
+          npm run e2e
+          kill $SERVER_PID
+
+  club:
+    name: Club app — typecheck + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scoutbox-club
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: scoutbox-club/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npx vite build
+      - name: Demo build (artifact mode)
+        run: VITE_DEMO=1 npx vite build
+
+  player:
+    name: Player app — typecheck + web export
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scoutbox-player
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: scoutbox-player/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npx expo export --platform web --output-dir dist-ci
+
+  admin:
+    name: T&S console — typecheck + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scoutbox-admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: scoutbox-admin/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npx vite build

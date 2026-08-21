@@ -20,6 +20,9 @@ export interface Org {
   verified: boolean;
   /** Earned and losable: verified + contract + no unresolved urgent report. */
   safeguardingCertified?: boolean;
+  /** Proven control of a company mailbox (email-domain challenge). */
+  emailDomainVerified?: boolean;
+  emailDomain?: string;
 }
 
 export interface Session {
@@ -28,6 +31,8 @@ export interface Session {
   scoutName: string;
   /** Verified role shown to players and guardians (e.g. "Head of Recruitment"). */
   role: string;
+  /** Bearer session token minted at login — the server trusts nothing else. */
+  token: string;
 }
 
 export interface MedicalRecord {
@@ -287,6 +292,29 @@ export interface SigningRecord {
   insideAttributionWindow: boolean;
 }
 
+export interface FunnelStage {
+  key: string;
+  label: string;
+  count: number;
+}
+
+export interface Funnel {
+  stages: FunnelStage[];
+  byScout: { scoutName: string; events: number }[];
+}
+
+export interface Invoice {
+  id: string;
+  ts: number;
+  signingId: string;
+  playerName: string;
+  description: string;
+  amount: number;
+  currency: string;
+  status: string;
+  provider: string;
+}
+
 export interface Trial {
   id: string;
   playerId: string;
@@ -379,6 +407,10 @@ export interface ScoutboxApi {
   moreLikeThis(s: Session, playerId: string): Promise<{ base: { name: string }; players: (Player & { similarity: number })[] }>;
   recordSigning(s: Session, playerId: string): Promise<SigningRecord>;
   trialIcsUrl(s: Session, trialId: string): string | null;
+  getFunnel(s: Session): Promise<Funnel>;
+  getInvoices(s: Session): Promise<Invoice[]>;
+  requestEmailVerification(s: Session, email: string): Promise<void>;
+  confirmEmailVerification(s: Session, code: string): Promise<{ emailDomain: string }>;
   getNotifications(s: Session): Promise<Notification[]>;
   markNotificationsRead(s: Session): Promise<void>;
   getMyReports(s: Session): Promise<FiledReport[]>;
@@ -398,7 +430,7 @@ export interface ScoutboxApi {
 // ------------------------------------------------------------- http client
 
 function headers(s: Session): Record<string, string> {
-  return { 'content-type': 'application/json', 'x-org-id': s.org.id, 'x-user-id': s.userId };
+  return { 'content-type': 'application/json', authorization: `Bearer ${s.token}` };
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -412,12 +444,12 @@ export const httpApi: ScoutboxApi = {
   listOrgs: () => request<Org[]>('/orgs'),
 
   async login(orgId, scoutName, role) {
-    const r = await request<{ userId: string; role: string; org: Org }>('/auth/org/login', {
+    const r = await request<{ userId: string; role: string; org: Org; token: string }>('/auth/org/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ orgId, scoutName, role }),
     });
-    return { org: r.org, userId: r.userId, scoutName, role: r.role };
+    return { org: r.org, userId: r.userId, scoutName, role: r.role, token: r.token };
   },
 
   report: (s, input) =>
@@ -494,6 +526,16 @@ export const httpApi: ScoutboxApi = {
   },
 
   trialIcsUrl: (s, trialId) => `${API_URL}/org/trials/${trialId}/ics`,
+
+  getFunnel: (s) => request<Funnel>('/org/funnel', { headers: headers(s) }),
+
+  getInvoices: (s) => request<Invoice[]>('/org/invoices', { headers: headers(s) }),
+
+  requestEmailVerification: (s, email) =>
+    request<void>('/org/verification/email', { method: 'POST', headers: headers(s), body: JSON.stringify({ email }) }),
+
+  confirmEmailVerification: (s, code) =>
+    request<{ emailDomain: string }>('/org/verification/email/confirm', { method: 'POST', headers: headers(s), body: JSON.stringify({ code }) }),
 
   getNotifications: (s) => request<Notification[]>('/org/notifications', { headers: headers(s) }),
 

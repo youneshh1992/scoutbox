@@ -5,6 +5,7 @@ import {
   type LedgerEntry, type ProofPack, type PlanInfo, type Reputation, type SearchFilters,
   type Channel, type FiledReport, type TrialDetails,
   type FeedItem, type FilmRoomItem, type FixtureGroup, type SavedSearch, type OrgNote,
+  type Funnel, type Invoice,
 } from './api';
 
 const TAG_LABELS: Record<string, string> = {
@@ -926,9 +927,61 @@ export function ReputationScreen({ session, tick }: ScreenProps) {
 
 /* --------------------------------------------------------------- Plan */
 
-export function PlanScreen({ session, tick }: ScreenProps) {
+export function FunnelScreen({ session, tick }: ScreenProps) {
+  const [funnel, setFunnel] = useState<Funnel | null>(null);
+  useEffect(() => { api.getFunnel(session).then(setFunnel).catch(() => {}); }, [session, tick]);
+  if (!funnel) return <div className="notice">Loading your recruitment funnel…</div>;
+  const max = Math.max(...funnel.stages.map((s) => s.count), 1);
+  const pct = (i: number) => {
+    const prev = funnel.stages[i - 1]?.count ?? 0;
+    if (i === 0 || prev === 0) return null;
+    return Math.round((funnel.stages[i].count / prev) * 100);
+  };
+  return (
+    <>
+      <div className="notice" style={{ marginBottom: 18 }}>
+        Every stage below is a real recorded event on the Discovery Ledger — views through to signings.
+        The numbers are the numbers.
+      </div>
+      <div className="section">
+        {funnel.stages.map((s, i) => (
+          <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+            <div style={{ width: 150, color: 'var(--muted)', fontSize: 13 }}>{s.label}</div>
+            <div style={{ flex: 1, background: 'var(--panel-2)', borderRadius: 6, overflow: 'hidden', height: 22 }}>
+              <div style={{ width: `${Math.max(2, (s.count / max) * 100)}%`, height: '100%', background: 'var(--accent)', opacity: 0.35 + 0.65 * (1 - i / funnel.stages.length) }} />
+            </div>
+            <div style={{ width: 46, fontWeight: 700, textAlign: 'right' }}>{s.count}</div>
+            <div style={{ width: 70, color: 'var(--muted)', fontSize: 12, textAlign: 'right' }}>
+              {pct(i) !== null ? `${pct(i)}% conv.` : ''}
+            </div>
+          </div>
+        ))}
+      </div>
+      {funnel.byScout.length > 0 && (
+        <div className="section">
+          <h4>Activity by scout</h4>
+          {funnel.byScout.map((s) => (
+            <div key={s.scoutName} className="list-row">
+              <span>{s.scoutName}</span>
+              <span className="pill blue">{s.events} ledger events</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+export function PlanScreen({ session, tick, notify }: ScreenProps) {
   const [info, setInfo] = useState<PlanInfo | null>(null);
-  useEffect(() => { api.getPlan(session).then(setInfo).catch(() => {}); }, [session, tick]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [verifyEmail, setVerifyEmail] = useState('');
+  const [verifyCode, setVerifyCode] = useState('');
+  const [codeSent, setCodeSent] = useState(false);
+  useEffect(() => {
+    api.getPlan(session).then(setInfo).catch(() => {});
+    api.getInvoices(session).then(setInvoices).catch(() => {});
+  }, [session, tick]);
   if (!info) return null;
   return (
     <>
@@ -937,6 +990,61 @@ export function PlanScreen({ session, tick }: ScreenProps) {
         <div className="stat"><div className="v">£{info.plan.pricePerMonthGBP}</div><div className="k">per month</div></div>
         <div className="stat"><div className="v">{info.plan.seats}</div><div className="k">named seats</div></div>
         <div className="stat"><div className="v">{info.plan.attributionWindowMonths} mo</div><div className="k">attribution window</div></div>
+      </div>
+      <div className="section">
+        <h4>Company email verification {session.org.emailDomainVerified ? '— ✓ verified' : ''}</h4>
+        {session.org.emailDomainVerified ? (
+          <div className="notice">
+            Domain control confirmed{session.org.emailDomain ? ` for @${session.org.emailDomain}` : ''}. This is one of the
+            safeguarding requirements for access to under-18 players.
+          </div>
+        ) : (
+          <>
+            <div className="notice" style={{ marginBottom: 10 }}>
+              Prove control of a company mailbox — free email providers are refused. A code lands in the
+              mailbox; entering it here confirms the domain.
+            </div>
+            <div className="filters">
+              <input type="text" placeholder="recruitment@yourclub.com" value={verifyEmail} onChange={(e) => setVerifyEmail(e.target.value)} />
+              <button onClick={async () => {
+                try {
+                  await api.requestEmailVerification(session, verifyEmail.trim());
+                  setCodeSent(true);
+                  notify('Verification code sent — check the mailbox.');
+                } catch (e) {
+                  notify(e instanceof Error ? e.message : 'Could not send the code', true);
+                }
+              }}>Send code</button>
+              {codeSent && (
+                <>
+                  <input type="text" placeholder="6-char code" value={verifyCode} onChange={(e) => setVerifyCode(e.target.value)} style={{ maxWidth: 140 }} />
+                  <button className="primary" onClick={async () => {
+                    try {
+                      const r = await api.confirmEmailVerification(session, verifyCode.trim());
+                      session.org.emailDomainVerified = true;
+                      session.org.emailDomain = r.emailDomain;
+                      notify(`Domain @${r.emailDomain} verified.`);
+                    } catch (e) {
+                      notify(e instanceof Error ? e.message : 'Code rejected', true);
+                    }
+                  }}>Confirm</button>
+                </>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+      <div className="section">
+        <h4>Invoices — success fees</h4>
+        {invoices.length === 0 && <div className="notice">No invoices yet. A signing recorded inside the attribution window issues one automatically.</div>}
+        {invoices.map((inv) => (
+          <div key={inv.id} className="list-row">
+            <span>{inv.description}</span>
+            <span className="pill gold">€{inv.amount}</span>
+            <span className="pill">{inv.status}</span>
+            <span className="pill blue">{new Date(inv.ts).toLocaleDateString()}</span>
+          </div>
+        ))}
       </div>
       <div className="section">
         <h4>Fee protection</h4>

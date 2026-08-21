@@ -7,7 +7,7 @@ import type {
   ScoutboxApi, Org, Session, Player, PlayerDetail, OrgRequest, Trial,
   LedgerEntry, ProofPack, PlanInfo, Reputation, SearchFilters,
   Channel, FiledReport, Notification, TrialDetails,
-  FeedItem, FilmRoomItem, FixtureGroup, SavedSearch, OrgNote, SigningRecord,
+  FeedItem, FilmRoomItem, FixtureGroup, SavedSearch, OrgNote, SigningRecord, Invoice,
 } from './api';
 import { ApiError } from './api';
 // Sample footage baked into the demo bundle so the Film Room plays offline.
@@ -33,10 +33,12 @@ const canSee = (p: Player, org: Org) => !p.guardianManaged || (org.type === 'clu
 // Mirrors the server's moderation screen.
 const MOD_RES = [
   /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i,
+  /\b[a-z0-9._%+-]{2,}\s*(\(|\[)?\s*at\s*(\)|\])?\s*[a-z0-9-]{2,}\s*(\(|\[)?\s*dot\s*(\)|\])?\s*[a-z]{2,}\b/i,
   /(\+?\d[\d\s().-]{7,}\d)/,
   /(^|\s)@[a-z0-9_.]{3,}/i,
-  /\b(whatsapp|snapchat|instagram|telegram|discord|tiktok|dm me|dms)\b/i,
+  /\b(whatsapp|snapchat|instagram|telegram|discord|tiktok|signal|wickr|kik|viber|dm me|dms)\b/i,
   /\bhttps?:\/\/|www\.[a-z0-9-]+\.[a-z]{2,}/i,
+  /\b(don'?t tell (your|ur|any)|keep (this|it) (between us|a? ?secret|quiet)|(our|a) little secret|come alone)\b/i,
 ];
 
 const PLANS: Record<string, PlanInfo['plan']> = {
@@ -200,6 +202,8 @@ const trials: Trial[] = [];
 const channels: Channel[] = [];
 const notifications: Notification[] = [];
 const myReports: FiledReport[] = [];
+const demoInvoices: Invoice[] = [];
+let demoEmailChallenge: { email: string; code: string } | null = null;
 const savedSearches: SavedSearch[] = [];
 const orgNotes: OrgNote[] = [];
 const ledger: (LedgerEntry & { playerName?: string })[] = [];
@@ -324,7 +328,7 @@ export const demoApi: ScoutboxApi = {
     const org = ORGS.find((o) => o.id === orgId);
     if (!org) throw new ApiError(404, 'ORG_NOT_FOUND', 'Unknown org');
     if (!scoutName.trim()) throw new ApiError(400, 'SCOUT_NAME_REQUIRED', 'Every session is attributed to a named individual.');
-    return delay({ org, userId: nid('usr'), scoutName: scoutName.trim(), role: role || 'Scout' });
+    return delay({ org, userId: nid('usr'), scoutName: scoutName.trim(), role: role || 'Scout', token: `demo-${nid('tok')}` });
   },
 
   report: (s, input) => {
@@ -621,10 +625,55 @@ export const demoApi: ScoutboxApi = {
       ts: Date.now(), attributionWindowMonths: 24, insideAttributionWindow: true,
     };
     pushNotification(`Signing of ${p.name} recorded — attribution evidence frozen.`, 'signing');
+    demoInvoices.unshift({
+      id: nid('inv'), ts: Date.now(), signingId: signing.id, playerName: p.name,
+      description: `Success fee — ${p.name} signed inside the attribution window`,
+      amount: 1500, currency: 'EUR', status: 'issued', provider: 'dev-ledger',
+    });
     return delay(signing);
   },
 
   trialIcsUrl: () => null, // downloads need the live server
+
+  getFunnel: (s) => {
+    // Mirrors /org/funnel: stage counts from this demo session's activity log.
+    const mine = ledger.filter((l) => l.orgId === s.org.id);
+    const count = (type: string) => mine.filter((l) => l.type.startsWith(type)).length;
+    return delay({
+      stages: [
+        { key: 'views', label: 'Profile views', count: count('view') },
+        { key: 'saves', label: 'Saves', count: count('save') },
+        { key: 'shortlists', label: 'Shortlists', count: count('shortlist') },
+        { key: 'requests', label: 'Requests sent', count: requests.length },
+        { key: 'accepted', label: 'Requests accepted', count: requests.filter((r) => r.status === 'accepted').length },
+        { key: 'trials', label: 'Trials booked', count: trials.length },
+        { key: 'reports', label: 'Reports filed', count: trials.filter((t) => t.status === 'reported').length },
+        { key: 'signings', label: 'Signings', count: mine.filter((l) => l.type === 'signing').length },
+      ],
+      byScout: [{ scoutName: s.scoutName, events: mine.length }],
+    });
+  },
+
+  getInvoices: () => delay(demoInvoices.slice()),
+
+  requestEmailVerification: (_s, email) => {
+    if (/@(gmail|googlemail|hotmail|outlook|yahoo|icloud|aol|proton|protonmail|gmx|live|msn)\./i.test(email)) {
+      throw new ApiError(422, 'COMPANY_EMAIL_REQUIRED', 'Verification needs a company mailbox — free email providers don\'t prove the club connection.');
+    }
+    demoEmailChallenge = { email, code: 'DEMO42' };
+    pushNotification(`Verification code sent to ${email} (demo code: DEMO42).`, 'verification');
+    return delay(undefined);
+  },
+
+  confirmEmailVerification: (s, code) => {
+    if (!demoEmailChallenge || code.trim().toUpperCase() !== demoEmailChallenge.code) {
+      throw new ApiError(400, 'CODE_INVALID', 'That code doesn\'t match — check the email.');
+    }
+    const domain = demoEmailChallenge.email.split('@')[1];
+    demoEmailChallenge = null;
+    s.org.emailDomainVerified = true;
+    return delay({ emailDomain: domain });
+  },
 
   getFixtures: (s) => {
     const groups: Record<string, FixtureGroup> = {};

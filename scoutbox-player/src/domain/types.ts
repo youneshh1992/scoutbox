@@ -184,6 +184,7 @@ export interface Guardian {
   id: string;
   name: string;
   email: string;
+  emailVerified?: boolean;
   idVerified: boolean;
   disclaimerAccepted: boolean;
   childIds: string[];

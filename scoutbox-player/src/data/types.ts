@@ -192,6 +192,9 @@ export interface PlayerClient {
   mode: 'live' | 'demo';
   listDemoIdentities(): Promise<DemoIdentity[]>;
   signup(input: SignupInput): Promise<{ playerId: string }>;
+  /** Real sessions: login mints a bearer token the client holds internally.
+   *  Passwordless demo seeds log in without one; new accounts require theirs. */
+  login(playerId: string, password?: string): Promise<{ playerId: string; name: string }>;
   /** Child device pairing: exchange the guardian's code for the child login. */
   pair(code: string): Promise<{ playerId: string; name: string }>;
   getMe(playerId: string): Promise<Me>;
@@ -231,8 +234,9 @@ export interface PlayerClient {
   block(playerId: string, orgId: string, reason?: string): Promise<void>;
 
   // Guardian surface — parents own every under-18 account.
-  guardianSignup(name: string, email: string): Promise<{ guardianId: string }>;
-  guardianLogin(idOrEmail: string): Promise<{ guardianId: string; guardian: Guardian }>;
+  guardianSignup(name: string, email: string, password: string): Promise<{ guardianId: string; devEmailCode?: string }>;
+  guardianVerifyEmail(guardianId: string, code: string): Promise<void>;
+  guardianLogin(idOrEmail: string, password?: string): Promise<{ guardianId: string; guardian: Guardian }>;
   guardianMe(guardianId: string): Promise<Guardian>;
   guardianVerifyId(guardianId: string, documentType: string, documentRef: string): Promise<void>;
   guardianAcceptDisclaimer(guardianId: string): Promise<void>;

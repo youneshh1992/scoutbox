@@ -1,0 +1,23 @@
+# Fly.io deployment for the single-container ScoutBox build.
+# One-time setup (your machine): flyctl launch --no-deploy && flyctl volumes create scoutbox_data --size 1
+# Deploy: flyctl deploy
+app = "scoutbox"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 4000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[mounts]]
+  source = "scoutbox_data"
+  destination = "/srv/data"
+
+[env]
+  NODE_ENV = "production"
+  # Set secrets with: flyctl secrets set ADMIN_KEY=... SENDGRID_API_KEY=... STRIPE_SECRET_KEY=...

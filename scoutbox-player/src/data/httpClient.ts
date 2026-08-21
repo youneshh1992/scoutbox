@@ -10,12 +10,32 @@ import type { Availability, ContractStatus, InboxRequest, ChildInboxItem, Guardi
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000';
 
-async function request<T>(path: string, playerId?: string, init?: RequestInit): Promise<T> {
+// Bearer-token session store, keyed by the account id the UI works with.
+// Persisted so a reloaded tab keeps its sessions; the server can revoke any
+// token at will (logout, deletion) — this is just the client's copy.
+const TOKENS_KEY = 'scoutbox-player-tokens-v1';
+const tokens = new Map<string, string>();
+try {
+  if (typeof localStorage !== 'undefined') {
+    for (const [k, v] of Object.entries(JSON.parse(localStorage.getItem(TOKENS_KEY) ?? '{}'))) tokens.set(k, String(v));
+  }
+} catch { /* fresh start */ }
+function rememberToken(id: string, token: string | undefined) {
+  if (!token) return;
+  tokens.set(id, token);
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(TOKENS_KEY, JSON.stringify(Object.fromEntries(tokens)));
+  } catch { /* memory copy still works */ }
+}
+const authHeader = (id?: string): Record<string, string> =>
+  id && tokens.has(id) ? { authorization: `Bearer ${tokens.get(id)}` } : {};
+
+async function request<T>(path: string, accountId?: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
     headers: {
       'content-type': 'application/json',
-      ...(playerId ? { 'x-player-id': playerId } : {}),
+      ...authHeader(accountId),
       ...init?.headers,
     },
   });
@@ -25,7 +45,7 @@ async function request<T>(path: string, playerId?: string, init?: RequestInit): 
 }
 
 function guardianRequest<T>(path: string, guardianId: string, init?: RequestInit): Promise<T> {
-  return request<T>(path, undefined, { ...init, headers: { 'x-guardian-id': guardianId, ...init?.headers } });
+  return request<T>(path, guardianId, init);
 }
 
 // The server's seed identities, offered as demo logins. Child identities are
@@ -43,21 +63,36 @@ export const httpClient: PlayerClient = {
 
   listDemoIdentities: async () => SEED_IDENTITIES,
 
-  signup: (input: SignupInput) =>
-    request<{ playerId: string }>('/auth/player/signup', undefined, {
+  signup: async (input: SignupInput) => {
+    const r = await request<{ playerId: string; token?: string }>('/auth/player/signup', undefined, {
       method: 'POST',
       body: JSON.stringify(input),
-    }),
+    });
+    rememberToken(r.playerId, r.token);
+    return r;
+  },
+
+  login: async (playerId, password) => {
+    const r = await request<{ playerId: string; name: string; token?: string }>('/auth/player/login', undefined, {
+      method: 'POST',
+      body: JSON.stringify({ playerId, password }),
+    });
+    rememberToken(r.playerId, r.token);
+    return r;
+  },
 
   getMe: (playerId) => request<Me>('/player/me', playerId),
 
   getInbox: (playerId) => request<(InboxRequest | ChildInboxItem)[]>('/player/inbox', playerId),
 
-  pair: (code) =>
-    request<{ playerId: string; name: string }>('/auth/player/pair', undefined, {
+  pair: async (code) => {
+    const r = await request<{ playerId: string; name: string; token?: string }>('/auth/player/pair', undefined, {
       method: 'POST',
       body: JSON.stringify({ code }),
-    }),
+    });
+    rememberToken(r.playerId, r.token);
+    return r;
+  },
 
   respond: (playerId, requestId, accept, chosenSlot) =>
     request<void>(`/player/requests/${requestId}/respond`, playerId, {
@@ -143,12 +178,22 @@ export const httpClient: PlayerClient = {
     request<void>('/player/block', playerId, { method: 'POST', body: JSON.stringify({ orgId, reason }) }),
 
   // ---- guardian surface ----
-  guardianSignup: (name, email) =>
-    request<{ guardianId: string }>('/auth/guardian/signup', undefined, { method: 'POST', body: JSON.stringify({ name, email }) }),
+  guardianSignup: async (name, email, password) => {
+    const r = await request<{ guardianId: string; token?: string; devEmailCode?: string }>('/auth/guardian/signup', undefined, {
+      method: 'POST', body: JSON.stringify({ name, email, password }),
+    });
+    rememberToken(r.guardianId, r.token);
+    return r;
+  },
 
-  guardianLogin: async (idOrEmail) => {
-    const body = idOrEmail.includes('@') ? { email: idOrEmail } : { guardianId: idOrEmail };
-    return request<{ guardianId: string; guardian: Guardian }>('/auth/guardian/login', undefined, { method: 'POST', body: JSON.stringify(body) });
+  guardianVerifyEmail: (guardianId, code) =>
+    request<void>('/auth/guardian/verify-email', undefined, { method: 'POST', body: JSON.stringify({ guardianId, code }) }),
+
+  guardianLogin: async (idOrEmail, password) => {
+    const body = idOrEmail.includes('@') ? { email: idOrEmail, password } : { guardianId: idOrEmail, password };
+    const r = await request<{ guardianId: string; guardian: Guardian; token?: string }>('/auth/guardian/login', undefined, { method: 'POST', body: JSON.stringify(body) });
+    rememberToken(r.guardianId, r.token);
+    return r;
   },
 
   guardianMe: (guardianId) => guardianRequest<Guardian>('/guardian/me', guardianId),

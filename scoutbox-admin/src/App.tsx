@@ -22,18 +22,27 @@ interface Club {
 interface GuardianRow { id: string; name: string; email: string; idVerified: boolean; disclaimerAccepted: boolean; childIds: string[] }
 interface IdvRow { id: string; guardianId: string; guardianName: string; documentType: string; documentRef: string; ts: number; status: string }
 interface BlockRow { id: string; playerId: string; orgId: string; by: string; reason: string; ts: number }
-interface ModRow { id: string; ts: number; context: { kind?: string }; flags: string[] }
+interface ModRow { id: string; ts: number; context: { kind?: string }; flags: string[]; severity?: string | null }
 interface ThreadRow { id: string; playerName: string; orgName: string; scoutName: string; scoutRole: string; counterparty: string; messages: { id: string; ts: number; sender: { name: string }; text: string }[] }
-interface Overview { players: number; guardians: number; orgs: number; openReports: number; blocks: number; moderationHits: number; channels: number; signings: number; persisted: boolean }
+interface Overview { players: number; guardians: number; orgs: number; openReports: number; blocks: number; moderationHits: number; channels: number; signings: number; persisted: boolean; invoices?: number; emailsSent?: number; pushesSent?: number; sessions?: number; storageEngine?: string; groomingEscalations?: number }
+interface MailRow { id: string; ts: number; to: string; subject: string; text: string; transport: string; delivered: boolean }
+interface InvoiceRow { id: string; ts: number; orgName: string; description: string; amount: number; currency: string; status: string; provider: string }
 
 // ------------------------------------------------------------- demo state
 const demo = {
-  overview: { players: 13, guardians: 2, orgs: 3, openReports: 2, blocks: 1, moderationHits: 4, channels: 3, signings: 1, persisted: true } as Overview,
+  overview: { players: 13, guardians: 2, orgs: 3, openReports: 2, blocks: 1, moderationHits: 4, channels: 3, signings: 1, persisted: true, invoices: 1, emailsSent: 2, pushesSent: 9, sessions: 6, storageEngine: 'sqlite', groomingEscalations: 1 } as Overview,
   reports: [
     { id: 'rep-9001', ts: Date.now() - 3600e3, by: 'guardian', byId: 'gd-amara', targetKind: 'scout', targetOrgId: 'org-northstar', targetScoutName: 'T. Rivera', targetPlayerId: null, reason: 'Asked to move the conversation to WhatsApp.', urgent: true, status: 'pending_review', outcome: null, resolvedAt: null },
     { id: 'rep-9002', ts: Date.now() - 7200e3, by: 'player', byId: 'pl-adeyemi', targetKind: 'club', targetOrgId: 'org-harbour', targetScoutName: null, targetPlayerId: null, reason: 'Trial report still not filed after three weeks.', urgent: false, status: 'pending_review', outcome: null, resolvedAt: null },
     { id: 'rep-9000', ts: Date.now() - 86400e3, by: 'org_user', byId: 'usr-1', targetKind: 'player', targetOrgId: null, targetScoutName: null, targetPlayerId: 'pl-x', reason: 'Suspected duplicate profile.', urgent: false, status: 'resolved', outcome: 'Duplicate merged.', resolvedAt: Date.now() - 80000e3 },
   ] as Report[],
+  outbox: [
+    { id: 'mail-1', ts: Date.now() - 1800e3, to: 'nadia@testfamily.co.uk', subject: 'Verify your ScoutBox guardian account', text: 'Your ScoutBox verification code is QK7M2X.', transport: 'dev-outbox', delivered: false },
+    { id: 'mail-2', ts: Date.now() - 3600e3, to: 'recruitment@eastportfc.co.uk', subject: 'Verify Eastport FC on ScoutBox', text: 'Your ScoutBox club verification code is B4TR9N.', transport: 'dev-outbox', delivered: false },
+  ] as MailRow[],
+  invoices: [
+    { id: 'inv-1', ts: Date.now() - 86400e3, orgName: 'Eastport FC', description: 'Success fee — Elias Svensson signed inside the attribution window', amount: 1500, currency: 'EUR', status: 'issued', provider: 'dev-ledger' },
+  ] as InvoiceRow[],
   clubs: [
     { id: 'org-eastport', name: 'Eastport FC', type: 'club', plan: 'Pro', verified: true, verifiedDomain: 'eastportfc.com', safeguardingContractSigned: true, safeguardingCertified: true },
     { id: 'org-harbour', name: 'Harbour City FC', type: 'club', plan: 'Academy', verified: false, verifiedDomain: null, safeguardingContractSigned: false, safeguardingCertified: false },
@@ -53,6 +62,7 @@ const demo = {
     { id: 'mod-2', ts: Date.now() - 9000e3, context: { kind: 'player_message' }, flags: ['phone_number'] },
     { id: 'mod-3', ts: Date.now() - 86400e3, context: { kind: 'media_title' }, flags: ['social_handle'] },
     { id: 'mod-4', ts: Date.now() - 2 * 86400e3, context: { kind: 'guardian_message' }, flags: ['email'] },
+    { id: 'mod-5', ts: Date.now() - 1000e3, context: { kind: 'org_message' }, flags: ['secrecy'], severity: 'grooming' },
   ] as ModRow[],
   threads: [
     {
@@ -76,7 +86,7 @@ async function call<T>(key: string, path: string, init?: RequestInit): Promise<T
   return body as T;
 }
 
-type Tab = 'overview' | 'reports' | 'clubs' | 'guardians' | 'blocks' | 'moderation' | 'threads';
+type Tab = 'overview' | 'reports' | 'clubs' | 'guardians' | 'blocks' | 'moderation' | 'threads' | 'outbox' | 'billing';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'reports', label: 'Report queue' },
@@ -85,6 +95,8 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'blocks', label: 'Suspensions' },
   { id: 'moderation', label: 'Moderation log' },
   { id: 'threads', label: 'Thread audit' },
+  { id: 'outbox', label: 'Mail outbox' },
+  { id: 'billing', label: 'Billing' },
 ];
 
 export default function App() {
@@ -102,6 +114,8 @@ export default function App() {
   const [blocks, setBlocks] = useState<BlockRow[]>([]);
   const [moderation, setModeration] = useState<ModRow[]>([]);
   const [threads, setThreads] = useState<ThreadRow[]>([]);
+  const [outbox, setOutbox] = useState<MailRow[]>([]);
+  const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [openThread, setOpenThread] = useState<string | null>(null);
   const [outcomeDrafts, setOutcomeDrafts] = useState<Record<string, string>>({});
 
@@ -113,6 +127,7 @@ export default function App() {
       setOverview(demo.overview); setReports(demo.reports); setClubs(demo.clubs);
       setGuardians(demo.guardians); setIdvQueue(demo.idvQueue); setBlocks(demo.blocks);
       setModeration(demo.moderation); setThreads(demo.threads);
+      setOutbox(demo.outbox); setInvoices(demo.invoices);
       return;
     }
     try {
@@ -124,6 +139,8 @@ export default function App() {
       setBlocks(await call<BlockRow[]>(key, '/admin/blocks'));
       setModeration(await call<ModRow[]>(key, '/admin/moderation'));
       setThreads(await call<ThreadRow[]>(key, '/admin/channels'));
+      setOutbox(await call<MailRow[]>(key, '/admin/outbox'));
+      setInvoices(await call<InvoiceRow[]>(key, '/admin/invoices'));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Cannot reach scoutbox-server — is it running with your ADMIN_KEY?');
       setEntered(false);
@@ -228,6 +245,11 @@ export default function App() {
               <Stat v={overview.moderationHits} k="Moderation hits" />
               <Stat v={overview.channels} k="Threads" />
               <Stat v={overview.signings} k="Signings" />
+              <Stat v={overview.invoices ?? 0} k="Invoices" />
+              <Stat v={overview.emailsSent ?? 0} k="Emails sent" />
+              <Stat v={overview.sessions ?? 0} k="Live sessions" />
+              <Stat v={overview.groomingEscalations ?? 0} k="Grooming escalations" />
+              <Stat v={overview.storageEngine ?? 'memory'} k="Storage" />
               <Stat v={overview.persisted ? 'yes' : 'seed'} k="Snapshot loaded" />
             </div>
           )}
@@ -325,17 +347,52 @@ export default function App() {
 
           {tab === 'moderation' && (
             <table className="data">
-              <thead><tr><th>When</th><th>Where</th><th>Flags</th></tr></thead>
+              <thead><tr><th>When</th><th>Where</th><th>Severity</th><th>Flags</th></tr></thead>
               <tbody>
                 {moderation.map((m) => (
                   <tr key={m.id}>
                     <td>{new Date(m.ts).toLocaleString()}</td>
                     <td>{m.context?.kind ?? '—'}</td>
+                    <td>{m.severity === 'grooming' ? <span className="pill red">GROOMING — escalated</span> : <span className="pill">{m.severity ?? 'contact'}</span>}</td>
                     <td>{m.flags.map((f) => <span key={f} className="pill red" style={{ marginRight: 4 }}>{f.replace(/_/g, ' ')}</span>)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          )}
+
+          {tab === 'outbox' && (
+            <div className="list-rows">
+              <div className="notice">Dev mail transport: everything the platform "sends" lands here. Set SENDGRID_API_KEY on the server to deliver for real — this view then becomes the delivery audit.</div>
+              {outbox.length === 0 && <div className="notice">No mail yet.</div>}
+              {outbox.map((m) => (
+                <div key={m.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                    <span className="grow"><b>{m.subject}</b></span>
+                    <span className="dim">to {m.to}</span>
+                    <span className={`pill ${m.delivered ? 'green' : 'gold'}`}>{m.delivered ? 'delivered' : m.transport}</span>
+                    <span className="dim">{new Date(m.ts).toLocaleString()}</span>
+                  </div>
+                  <div className="dim" style={{ whiteSpace: 'pre-wrap' }}>{m.text}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {tab === 'billing' && (
+            <div className="list-rows">
+              <div className="notice">Success fees issued by the billing adapter (dev ledger; Stripe when STRIPE_SECRET_KEY is set). A signing inside the attribution window invoices automatically.</div>
+              {invoices.length === 0 && <div className="notice">No invoices yet.</div>}
+              {invoices.map((i) => (
+                <div key={i.id} className="list-row">
+                  <span className="grow"><b>{i.orgName ?? ''}</b> <span className="dim">{i.description}</span></span>
+                  <span className="pill gold">€{i.amount}</span>
+                  <span className="pill">{i.status}</span>
+                  <span className="pill blue">{i.provider}</span>
+                  <span className="dim">{new Date(i.ts).toLocaleDateString()}</span>
+                </div>
+              ))}
+            </div>
           )}
 
           {tab === 'threads' && (

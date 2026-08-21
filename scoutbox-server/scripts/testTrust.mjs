@@ -114,6 +114,22 @@ test('moderation blocks contact details and off-platform moves', () => {
   assert.equal(moderateText('U15 highlights — wing play').ok, true);
 });
 
+test('moderation v2 catches obfuscation and flags grooming with severity', () => {
+  for (const [text, severity] of [
+    ['reach me at coach (at) talentscout (dot) com', 'contact'],
+    ['ping me on signal instead', 'contact'],
+    ["don't tell your parents about this", 'grooming'],
+    ['keep this between us, ok?', 'grooming'],
+    ['are you home alone after training?', 'grooming'],
+  ]) {
+    const check = moderateText(text);
+    assert.equal(check.ok, false, `should block: ${text}`);
+    assert.equal(check.severity, severity, `severity of: ${text}`);
+  }
+  assert.equal(moderateText('Full performance report will be filed this week.').ok, true);
+  assert.equal(moderateText('The keeper kept a clean sheet at home.').ok, true);
+});
+
 test('partial trial reports are rejected, complete ones pass', () => {
   const partial = validateTrialReport({ acceleration: 7, sprintSpeedKmh: 33 });
   assert.equal(partial.ok, false);

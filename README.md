@@ -1,10 +1,10 @@
-# ScoutBox — Full System (Milestone 6: messaging fix + platform completeness)
+# ScoutBox — Full System (Milestone 7: production hardening)
 
 Four pieces, one live dataset:
 
 | Folder | What it is | Run |
 |---|---|---|
-| `scoutbox-server/` | The sync backend all apps share. Enforces the deck's rules server-side. Persists to `data/db.json` (restart-safe). | `npm install && npm start` (port 4000) |
+| `scoutbox-server/` | The sync backend all apps share. Enforces the deck's rules server-side. SQLite persistence (`data/scoutbox.db`), bearer-token sessions, adapter seams for mail/push/IDV/billing/storage. | `npm install && npm start` (port 4000) |
 | `scoutbox-player/` | The player mobile app (Expo/React Native). | `npm install && npx expo start --web` |
 | `scoutbox-club/`   | The club & agent desktop application (React, landscape). | `npm install && npm run dev` (port 5173) |
 | `scoutbox-admin/`  | The internal Trust & Safety console (reports, verification, IDV, suspensions, audit). | `npm install && npm run dev` (port 5174, key: `scoutbox-admin`) |
@@ -22,6 +22,36 @@ Messaging is symmetric and observable: messages flow both ways with read receipt
 count next to Messages (club sidebar) and on the Inbox tab (player app). The static
 demo builds sync across same-browser tabs too (BroadcastChannel bus), so the club
 tab and player tab hold one real conversation.
+
+## Milestone 7 additions (production hardening)
+- **Real authentication** — signups require a password (scrypt-hashed, never stored
+  or echoed in plain text); every login mints a bearer session token and the API
+  trusts nothing else (the old trusted-id headers are refused). Rate limiting
+  blunts credential stuffing on all `/auth` routes. Pre-M7 seed identities stay
+  passwordless for the demo logins.
+- **Guardian email verification** — a mailed code is the first of three gates
+  (email → ID → disclaimer) before any child profile can exist.
+- **SQLite persistence** — atomic transactional snapshots in `data/scoutbox.db`
+  (node:sqlite, zero native deps); a legacy `db.json` is imported once. Media
+  files live on object storage (local disk in dev), outside the database.
+- **Adapter seams with working dev transports** — email (`SENDGRID_API_KEY`),
+  push (`EXPO_ACCESS_TOKEN`), IDV (`ONFIDO_API_TOKEN`), billing
+  (`STRIPE_SECRET_KEY`), object storage (`S3_BUCKET`). Until a key is set, mail
+  lands in the admin outbox, pushes in the push log, invoices on the dev ledger —
+  everything works and is auditable. See `DEPLOY.md`.
+- **Recruitment funnel** — the club's pipeline (views → saves → shortlists →
+  requests → accepted → trials → reports → signings) computed from the ledger.
+- **Success-fee billing** — a signing inside the attribution window issues an
+  invoice automatically; clubs see them under Plan, staff under Billing.
+- **Club email-domain verification** — clubs prove control of a company mailbox
+  (free-mail refused) via a mailed challenge code.
+- **Moderation v2** — obfuscated contact details ("name (at) domain (dot) com"),
+  more platforms, and grooming-pattern language which not only blocks but
+  auto-escalates as an urgent report to the T&S queue (triage: urgent first).
+- **CI + deployment** — GitHub Actions runs unit tests, the 51-check API
+  end-to-end and all app builds on every push; a single-container `Dockerfile`
+  serves the API + club app (`/app`) + T&S console (`/console`), with `fly.toml`
+  and `render.yaml` ready to go.
 
 ## Milestone 6 additions
 - Trial invitations carry proposed date + alternate slots + venue; the accepting

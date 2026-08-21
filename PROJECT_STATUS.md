@@ -3,10 +3,70 @@
 > Purpose of this file: let any Claude Code session (cloud or local) pick up this
 > project with zero prior context. Keep it updated at the end of each working session.
 
-**Last updated:** 2026-08-20 · **Milestone: 6 complete — messaging fix + platform
-completeness (persistence, admin console, saved searches, trial slots, signings,
-season history, pairing, aging-up, prefs, data rights, club directory)** ·
+**Last updated:** 2026-08-21 · **Milestone: 7 complete — production hardening
+(real auth + sessions, SQLite, adapter seams for mail/push/IDV/billing/storage,
+funnel analytics, moderation v2 with grooming escalation, CI + Docker deploy)** ·
 Developed in this GitHub repo (`youneshh1992/scoutbox`), Claude Code web.
+
+## Milestone 7 (2026-08-21): production hardening
+
+Everything implementable of the "what next" review, in one pass. The principle:
+real code paths with working dev transports; a single env var switches each
+external integration live (see `DEPLOY.md`).
+
+- **Auth** (`adapters.mjs` + server): scrypt password hashing (`scrypt$salt$hash`,
+  constant-time verify, transparent upgrade of legacy plain-text), bearer-token
+  sessions in `db.sessions` minted by every login/signup/pair (`createSession`/
+  `sessionFor`), all four middlewares (player/guardian/org/admin-key) resolve the
+  caller from the token — legacy `x-player-id`/`x-org-id` headers now 401.
+  Passwords REQUIRED (8+) on new player + guardian signups; seed identities stay
+  passwordless demo logins. `/auth/logout`. Fixed-window rate limiter on `/auth`
+  (40/min/IP). Org sessions carry the individual user id — accountability now
+  structural.
+- **Guardian email verification**: signup mails a 6-char code (dev transport →
+  `db.outbox`, response carries `devEmailCode` so the flow completes in-app),
+  `/auth/guardian/verify-email`; child onboarding 403 `EMAIL_UNVERIFIED` until
+  done. Player app onboarding is now 5 steps (account → email → IDV → disclaimer
+  → child).
+- **SQLite** (`store.mjs`): node:sqlite `DatabaseSync`, WAL, one row per
+  collection written in a transaction; `db.json` imported once → `.migrated`;
+  JSON fallback for old Node. Media blobs moved OUT of the snapshot to
+  `data/media/*` via the storage adapter (`/media/:id` streams from disk).
+- **Adapters** (`adapters.mjs`): mailer (SendGrid), push (Expo, with
+  `/push/register` for device tokens + `db.pushLog` audit), IDV (Onfido seam,
+  dev attestation with audit ref feeding the idvQueue), billing (Stripe seam;
+  success fee by plan — signing inside the attribution window auto-issues into
+  `db.invoices`), object storage (S3 seam, local disk in dev).
+- **Funnel** `/org/funnel` from ledger + requests + trials + signings, with
+  per-scout activity; club app "Funnel" nav renders bars + stage conversion %.
+- **Club email-domain verification** `/org/verification/email(+/confirm)`:
+  free-mail regex refused (422), challenge code mailed, confirm sets
+  `org.emailDomain(Verified)`. UI in Plan & Compliance; invoices listed there too.
+- **Moderation v2** (`domain.mjs`): obfuscated emails, spelled-out phone digits,
+  more platforms (signal/wickr/kik/viber), and grooming patterns (secrecy,
+  personal probing) with `severity: 'grooming'` — `moderateOrRefuse` logs an
+  excerpt and auto-files an URGENT system report. Admin reports triage: urgent
+  first, oldest first; moderation table shows severity; overview counts
+  grooming escalations.
+- **Admin console**: new Mail outbox + Billing tabs, overview stats (invoices,
+  emails, sessions, storage engine).
+- **CI** `.github/workflows/ci.yml`: 4 jobs — server (18 unit tests + 51-check
+  `scripts/apiE2E.mjs` against a fresh seed), club/player/admin typecheck+build.
+- **Deploy**: multi-stage `Dockerfile` — server serves built club at `/app` and
+  console at `/console` (vite `--base`), volume at `/srv/data`; `fly.toml`,
+  `render.yaml`, `DEPLOY.md` (adapter env-var table).
+- **E2E suite moved into the repo** (`e2e/`): `buildDemos.mjs` (single-file
+  bundles + player deep-path shim), `serve.mjs` (:8099), `demoOffline.test.mjs`,
+  `crosstab.test.mjs`, `uiSpotcheck.test.mjs` (incl. guardian email gate +
+  cross-tab pairing). Player demo pairing codes share via localStorage.
+- **Not done (needs accounts/scope)**: real provider calls verified end-to-end
+  (Stripe/SendGrid/Onfido/S3 need keys), native store builds, production CV for
+  combine verification, i18n.
+
+Verified 2026-08-21: 18 unit + 51 API checks (clean seed), SQLite restart
+restore, offline demo E2E ×3 bundles, cross-tab messaging E2E, UI spotcheck
+(email gate, pairing, funnel), live smoke through the Docker-style hosted club
+app (`/app`) with token auth. All four apps `tsc` clean.
 
 ## Milestone 6 (2026-08-20): the messaging fix + the completeness pass
 

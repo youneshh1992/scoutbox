@@ -41,18 +41,31 @@ export function visibleToOrg(player, org) {
 // Prototype AI moderation: children cannot share personal contact details
 // through the platform, and club messages to guardians are screened too.
 // Production swaps this for a real moderation model behind the same call.
+// Severity: 'contact' = trying to move off-platform or share contact details;
+// 'grooming' = steering language that must land in front of a human reviewer
+// immediately, not just be blocked.
 const MODERATION_PATTERNS = [
-  { flag: 'email', re: /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i },
-  { flag: 'phone_number', re: /(\+?\d[\d\s().-]{7,}\d)/ },
-  { flag: 'social_handle', re: /(^|\s)@[a-z0-9_.]{3,}/i },
-  { flag: 'social_platform', re: /\b(whatsapp|snapchat|instagram|telegram|discord|tiktok|dm me|dms)\b/i },
-  { flag: 'url', re: /\bhttps?:\/\/|www\.[a-z0-9-]+\.[a-z]{2,}/i },
-  { flag: 'meet_off_platform', re: /\b(meet (me|us) (at|outside)|come alone|don'?t tell)\b/i },
+  { flag: 'email', severity: 'contact', re: /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i },
+  { flag: 'email_obfuscated', severity: 'contact', re: /\b[a-z0-9._%+-]{2,}\s*(\(|\[)?\s*at\s*(\)|\])?\s*[a-z0-9-]{2,}\s*(\(|\[)?\s*dot\s*(\)|\])?\s*[a-z]{2,}\b/i },
+  { flag: 'phone_number', severity: 'contact', re: /(\+?\d[\d\s().-]{7,}\d)/ },
+  { flag: 'phone_spelled', severity: 'contact', re: /\b(zero|one|two|three|four|five|six|seven|eight|nine)([\s-]+(zero|one|two|three|four|five|six|seven|eight|nine)){6,}\b/i },
+  { flag: 'social_handle', severity: 'contact', re: /(^|\s)@[a-z0-9_.]{3,}/i },
+  { flag: 'social_platform', severity: 'contact', re: /\b(whatsapp|snapchat|instagram|telegram|discord|tiktok|signal|wickr|kik|viber|dm me|dms)\b/i },
+  { flag: 'url', severity: 'contact', re: /\bhttps?:\/\/|www\.[a-z0-9-]+\.[a-z]{2,}/i },
+  { flag: 'meet_off_platform', severity: 'contact', re: /\b(meet (me|us) (at|outside)|off the app|off[- ]platform)\b/i },
+  // Steering / grooming red flags. False positives are acceptable here —
+  // a human reviews everything this catches, nothing is auto-punished.
+  { flag: 'secrecy', severity: 'grooming', re: /\b(don'?t tell (your|ur|any)|keep (this|it) (between us|a? ?secret|quiet)|(our|a) little secret|come alone)\b/i },
+  { flag: 'personal_probing', severity: 'grooming', re: /\b(what school (do|does)|home alone|are you alone|where do you live|send (me )?(more )?(photos|pictures|pics) of (you|yourself))\b/i },
 ];
 
 export function moderateText(text) {
-  const flags = MODERATION_PATTERNS.filter((p) => p.re.test(String(text ?? ''))).map((p) => p.flag);
-  return { ok: flags.length === 0, flags };
+  const hits = MODERATION_PATTERNS.filter((p) => p.re.test(String(text ?? '')));
+  return {
+    ok: hits.length === 0,
+    flags: hits.map((p) => p.flag),
+    severity: hits.some((p) => p.severity === 'grooming') ? 'grooming' : hits.length ? 'contact' : null,
+  };
 }
 
 // Trust Score — 0..99. Institutional corroboration (filed trial reports,
