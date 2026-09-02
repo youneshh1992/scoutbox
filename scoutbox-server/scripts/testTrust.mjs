@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {
   computeTrustScore, trustBreakdown, isAdult, visibleToOrg, validateTrialReport,
   moderateText, computeStreak, weeklyGoal, trustTier, nextActions, TRUST,
+  haversineKm, playerLevelAfterSigning,
 } from '../domain.mjs';
 import { buildSeed } from '../seed.mjs';
 
@@ -128,6 +129,31 @@ test('moderation v2 catches obfuscation and flags grooming with severity', () =>
   }
   assert.equal(moderateText('Full performance report will be filed this week.').ok, true);
   assert.equal(moderateText('The keeper kept a clean sheet at home.').ok, true);
+});
+
+test('grassroots walls: 50km radius, level ceiling, fail-closed locations', () => {
+  const grassroots = { type: 'club', level: 'grassroots', verified: true, location: { lat: 51.552, lng: -0.022 } };
+  const mainClub = { type: 'club', level: 'pro', verified: true };
+  const adult = (over) => ({ dob: '2000-01-01', country: 'GB', level: 'amateur', ...over });
+
+  const london = { lat: 51.507, lng: -0.128 };
+  const manchester = { lat: 53.483, lng: -2.244 };
+  assert.ok(haversineKm(grassroots.location, london) < 50, 'London is inside the radius');
+  assert.ok(haversineKm(grassroots.location, manchester) > 50, 'Manchester is outside the radius');
+
+  assert.equal(visibleToOrg(adult({ location: london }), grassroots), true, 'local amateur visible');
+  assert.equal(visibleToOrg(adult({ location: manchester }), grassroots), false, 'distant player invisible');
+  assert.equal(visibleToOrg(adult({ location: london, level: 'pro' }), grassroots), false, 'pro players never on Grassroots');
+  assert.equal(visibleToOrg(adult({ location: null }), grassroots), false, 'missing player location fails closed');
+  assert.equal(visibleToOrg(adult({ location: london }), { ...grassroots, location: null }), false, 'missing org location fails closed');
+  assert.equal(visibleToOrg(adult({ location: manchester, level: 'pro' }), mainClub), true, 'main platform unaffected by radius/level');
+
+  const minor = { dob: '2012-02-10', country: 'GB', level: 'amateur', location: london };
+  assert.equal(visibleToOrg(minor, grassroots), true, 'verified grassroots club sees local minors');
+  assert.equal(visibleToOrg(minor, { ...grassroots, verified: false }), false, 'unverified grassroots club never sees minors');
+
+  assert.equal(playerLevelAfterSigning('grassroots'), 'semi_pro');
+  assert.equal(playerLevelAfterSigning('pro'), 'pro');
 });
 
 test('partial trial reports are rejected, complete ones pass', () => {

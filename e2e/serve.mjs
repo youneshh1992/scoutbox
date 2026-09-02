@@ -15,6 +15,7 @@ const FILES = {
   '/player/': 'scoutbox-player-demo.html',
   '/admin/': 'scoutbox-admin-demo.html',
   '/deep/nested/': 'scoutbox-player-demo.html',
+  '/grassroots/': 'scoutbox-grassroots-demo.html',
 };
 
 http.createServer((req, res) => {

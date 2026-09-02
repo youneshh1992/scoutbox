@@ -11,6 +11,13 @@ COPY scoutbox-club/ ./
 # Same-origin deploy: the club app calls the API it is served from.
 RUN VITE_API_URL="" npx vite build --base=/app/
 
+FROM node:22-slim AS build-grassroots
+WORKDIR /build
+COPY scoutbox-grassroots/package*.json ./
+RUN npm ci
+COPY scoutbox-grassroots/ ./
+RUN VITE_API_URL="" npx vite build --base=/grassroots/
+
 FROM node:22-slim AS build-admin
 WORKDIR /build
 COPY scoutbox-admin/package*.json ./
@@ -26,6 +33,7 @@ RUN npm ci --omit=dev
 COPY scoutbox-server/ ./
 COPY --from=build-club /build/dist ./public/club
 COPY --from=build-admin /build/dist ./public/admin
+COPY --from=build-grassroots /build/dist ./public/grassroots
 # Persistence lives in /srv/data — mount a volume there.
 VOLUME /srv/data
 EXPOSE 4000

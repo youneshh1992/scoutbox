@@ -83,3 +83,22 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit
       - run: npx vite build
+
+  grassroots:
+    name: Grassroots app — typecheck + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scoutbox-grassroots
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: scoutbox-grassroots/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npx vite build
+      - name: Demo build (artifact mode)
+        run: VITE_DEMO=1 npx vite build

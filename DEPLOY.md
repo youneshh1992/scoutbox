@@ -4,6 +4,7 @@ The `Dockerfile` builds one container that runs everything a pilot needs:
 
 - the API server on port 4000 (SQLite persistence in `/srv/data`)
 - the club app at **`/app`**
+- ScoutBox Grassroots at **`/grassroots`**
 - the Trust & Safety console at **`/console`** (gated by `ADMIN_KEY`)
 
 The player app is an Expo project: export it for web

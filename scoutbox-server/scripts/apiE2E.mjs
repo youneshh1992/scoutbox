@@ -186,7 +186,62 @@ ok(myReports.body.some((x) => x.id === rep.id && /Warning issued/.test(x.outcome
 const pushLog = await j('/admin/push-log', {}, admin);
 ok(pushLog.body.length > 0, 'push adapter records deliveries (dev transport)');
 
-// ---- 12. storage + SQLite persistence on disk
+// ---- 12. platform separation: ScoutBox Grassroots
+r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane', platform: 'grassroots' }) });
+ok(r.status === 403 && r.body.error === 'PLATFORM_MISMATCH', 'pro club cannot log into ScoutBox Grassroots');
+r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-hackneymarsh', scoutName: 'Dee Mensah', role: 'Manager' }) });
+ok(r.status === 403 && r.body.error === 'GRASSROOTS_PLATFORM_ONLY', 'grassroots club cannot log into the main platform');
+r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-hackneymarsh', scoutName: 'Dee Mensah', role: 'Manager', platform: 'grassroots' }) });
+ok(r.status === 200 && r.body.token, 'grassroots club logs in on its own platform');
+const HACKNEY = r.body.token;
+const MOSS = (await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-mossside', scoutName: 'Pat Doyle', platform: 'grassroots' }) })).body.token;
+
+let orgList = await j('/orgs?platform=grassroots');
+ok(orgList.body.length >= 2 && orgList.body.every((o) => o.level === 'grassroots'), 'grassroots login screen lists only grassroots clubs');
+orgList = await j('/orgs?platform=main');
+ok(orgList.body.every((o) => o.level !== 'grassroots'), 'main login screen never lists grassroots clubs');
+
+// Hackney (London, verified): sees local minor Guni, not Manchester's Kola,
+// and never a pro-level player.
+let gsearch = await j('/org/players', {}, bearer(HACKNEY));
+const names = gsearch.body.map((p) => p.name);
+ok(names.includes('Guni Adebayo'), 'verified grassroots club sees a LOCAL minor (safeguarding bar identical)');
+ok(!names.includes('Kola Adeyemi'), 'players beyond 50km are invisible to grassroots clubs');
+ok(!names.includes('Elias Svensson'), 'pro-level players never appear on Grassroots');
+ok(gsearch.body.every((p) => typeof p.distanceKm === 'number' && p.distanceKm <= 50), 'grassroots views carry distance, all within radius');
+ok(gsearch.body.every((p) => !('academyPlus' in p) && !('marketValueRange' in p) && !('agentName' in p)), 'pro-market surface (Academy+, value, agent) stripped on Grassroots');
+r = await j('/org/players/pl-adeyemi', {}, bearer(HACKNEY));
+ok(r.status === 403 || r.status === 404, 'direct profile fetch beyond the radius refused');
+
+// Moss Side (Manchester, unverified): adults-only, local-only.
+gsearch = await j('/org/players', {}, bearer(MOSS));
+ok(gsearch.body.some((p) => p.name === 'Kola Adeyemi'), 'Manchester grassroots club sees Manchester amateur');
+ok(!gsearch.body.some((p) => p.guardianManaged), 'unverified grassroots club sees no minors — same rule as everywhere');
+
+// Grassroots signing sets the player semi-pro (still on the platform).
+await j('/org/players/pl-adeyemi/request', { method: 'POST', body: JSON.stringify({ type: 'contact', message: 'First-team spot this season.' }) }, bearer(MOSS));
+r = await j('/org/players/pl-adeyemi/signing', { method: 'POST' }, bearer(MOSS));
+ok(r.status === 201, 'grassroots club records a signing');
+gsearch = await j('/org/players', {}, bearer(MOSS));
+ok(gsearch.body.find((p) => p.id === 'pl-adeyemi')?.level === 'semi_pro', 'grassroots signing makes the player semi-pro, still visible locally');
+
+// A pro signing removes the player from Grassroots entirely (Svensson,
+// signed by Eastport in section 8, is now level pro).
+const svView = await j('/org/players/pl-svensson', {}, bearer(EASTPORT));
+ok(svView.body.level === 'pro', 'academy/pro signing marks the player pro');
+
+// Registration requires federation details + a ground location.
+r = await j('/auth/org/register-grassroots', { method: 'POST', body: JSON.stringify({ name: 'No Fed FC', scoutName: 'A' }) });
+ok(r.status === 400 && r.body.error === 'FEDERATION_REQUIRED', 'registration without federation record refused');
+r = await j('/auth/org/register-grassroots', {
+  method: 'POST',
+  body: JSON.stringify({ name: 'Leyton Sunday Stars', country: 'GB', city: 'London', lat: 51.56, lng: -0.005, federation: 'The FA (England)', registrationId: 'FA-GR-3344', scoutName: 'Sam Cole', role: 'Manager' }),
+});
+ok(r.status === 201 && r.body.token && r.body.org.level === 'grassroots' && r.body.org.verified === false, 'grassroots registration opens unverified (adults-only) with a token');
+gsearch = await j('/org/players', {}, bearer(r.body.token));
+ok(gsearch.body.every((p) => !p.guardianManaged && p.distanceKm <= 50), 'freshly registered club: local adults only until verification');
+
+// ---- 13. storage + SQLite persistence on disk
 let stored = false;
 for (let i = 0; i < 20 && !stored; i++) {
   stored = fs.existsSync(path.join(SERVER_DIR, 'data', 'scoutbox.db')) || fs.existsSync(path.join(SERVER_DIR, 'data', 'db.json'));

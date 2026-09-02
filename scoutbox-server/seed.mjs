@@ -12,6 +12,8 @@ export function buildSeed() {
       id: 'org-eastport',
       name: 'Eastport FC',
       type: 'club',
+      level: 'pro',
+      location: { lat: 51.889, lng: 1.02, city: 'Eastport' },
       plan: 'Pro',
       trustedPartner: true,
       country: 'GB',
@@ -24,6 +26,8 @@ export function buildSeed() {
       id: 'org-harbour',
       name: 'Harbour City FC',
       type: 'club',
+      level: 'academy',
+      location: { lat: 53.408, lng: -2.983, city: 'Harbour City' },
       plan: 'Academy',
       trustedPartner: false,
       country: 'GB',
@@ -36,9 +40,42 @@ export function buildSeed() {
       id: 'org-northstar',
       name: 'North Star Sports Agency',
       type: 'agency',
+      level: 'agency',
+      location: null,
       plan: 'Agency',
       trustedPartner: false,
       country: 'GB',
+      verified: false,
+      verifiedDomain: null,
+      safeguardingContractSigned: false,
+    },
+    {
+      // ScoutBox Grassroots: federation-registered semi-pro clubs and below.
+      id: 'org-hackneymarsh',
+      name: 'Hackney Marsh Rovers',
+      type: 'club',
+      level: 'grassroots',
+      location: { lat: 51.552, lng: -0.022, city: 'London' },
+      federationRef: { federation: 'The FA (England)', registrationId: 'FA-GR-2201' },
+      plan: 'Grassroots',
+      trustedPartner: false,
+      country: 'GB',
+      // Verified + contract → may see local minors, same bar as any club.
+      verified: true,
+      verifiedDomain: 'hackneymarshrovers.org.uk',
+      safeguardingContractSigned: true,
+    },
+    {
+      id: 'org-mossside',
+      name: 'Moss Side Athletic',
+      type: 'club',
+      level: 'grassroots',
+      location: { lat: 53.451, lng: -2.24, city: 'Manchester' },
+      federationRef: { federation: 'The FA (England)', registrationId: 'FA-GR-1877' },
+      plan: 'Grassroots',
+      trustedPartner: false,
+      country: 'GB',
+      // Unverified: adults only until the checks clear — identical rule.
       verified: false,
       verifiedDomain: null,
       safeguardingContractSigned: false,
@@ -406,6 +443,14 @@ export function buildSeed() {
   ];
 
   const plans = {
+    Grassroots: {
+      name: 'Grassroots',
+      pricePerMonthGBP: 0,
+      seats: 1,
+      attributionWindowMonths: 12,
+      antiCircumvention:
+        'Signing a ScoutBox-discovered player inside the attribution window owes the signing fee and discovery sell-on regardless of how contact concluded. Radius and level walls are platform rules, not preferences.',
+    },
     Academy: {
       name: 'Academy',
       pricePerMonthGBP: 99,
@@ -431,6 +476,30 @@ export function buildSeed() {
         'Agencies additionally warrant that no representation approach is made to any player who has not accepted a contact request, and never to a minor under any circumstances.',
     },
   };
+
+  players.push(player({
+    id: 'pl-osei',
+    name: 'Daniel Osei',
+    dob: '2001-09-12',
+    country: 'GB',
+    city: 'London',
+    position: 'CDM',
+    foot: 'right',
+    heightCm: 181,
+    weightKg: 77,
+    stats: { appearances: 26, goals: 3, assists: 4, passCompletionPct: 84, duelSuccessPct: 66 },
+    availability: 'available_now',
+    contractStatus: 'free_agent',
+    identityVerified: true,
+    timeline: [{ year: '2023', event: 'Captain, Hackney & Leyton Sunday League' }],
+    createdAt: now - 40 * day,
+  }));
+
+  // Player locations from their city (grassroots-radius visibility) and the
+  // one seeded semi-pro. Missing coords leave location null — which fails
+  // closed for grassroots orgs by design.
+  for (const p of players) p.location = CITY_COORDS[p.city] ?? null;
+  players.find((p) => p.id === 'pl-carvalho').level = 'semi_pro';
 
   return {
     orgs,
@@ -480,9 +549,27 @@ function player(p) {
     activityLog: [],   // timestamps of football activity (streaks/goals)
     createdAt: null,
     password: null, // optional; when set, login requires it
+    level: 'amateur',  // amateur | semi_pro | pro — set by signings, walls Grassroots
+    location: null,    // {lat, lng} — required for grassroots-radius visibility
     ...p,
   };
 }
+
+// Approximate coordinates per seeded city (grassroots visibility radius).
+const CITY_COORDS = {
+  Manchester: { lat: 53.483, lng: -2.244 },
+  Porto: { lat: 41.158, lng: -8.629 },
+  Lagos: { lat: 6.524, lng: 3.379 },
+  'Göteborg': { lat: 57.709, lng: 11.975 },
+  Lyon: { lat: 45.764, lng: 4.836 },
+  Osaka: { lat: 34.694, lng: 135.502 },
+  Rosario: { lat: -32.944, lng: -60.65 },
+  'Kraków': { lat: 50.065, lng: 19.945 },
+  Kumasi: { lat: 6.688, lng: -1.624 },
+  Busan: { lat: 35.18, lng: 129.075 },
+  London: { lat: 51.507, lng: -0.128 },
+  'Gdańsk': { lat: 54.352, lng: 18.646 },
+};
 
 function att(fixture, venue, ts) {
   return {

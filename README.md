@@ -1,6 +1,6 @@
-# ScoutBox — Full System (Milestone 7: production hardening)
+# ScoutBox — Full System (Milestone 8: ScoutBox Grassroots)
 
-Four pieces, one live dataset:
+Five pieces, one live dataset:
 
 | Folder | What it is | Run |
 |---|---|---|
@@ -8,6 +8,7 @@ Four pieces, one live dataset:
 | `scoutbox-player/` | The player mobile app (Expo/React Native). | `npm install && npx expo start --web` |
 | `scoutbox-club/`   | The club & agent desktop application (React, landscape). | `npm install && npm run dev` (port 5173) |
 | `scoutbox-admin/`  | The internal Trust & Safety console (reports, verification, IDV, suspensions, audit). | `npm install && npm run dev` (port 5174, key: `scoutbox-admin`) |
+| `scoutbox-grassroots/` | **ScoutBox Grassroots** — the separate club platform for federation-registered semi-pro & amateur clubs. | `npm install && npm run dev` (port 5175) |
 
 ## Live sync
 Start the server first. The club app connects to it automatically (localhost:4000).
@@ -22,6 +23,34 @@ Messaging is symmetric and observable: messages flow both ways with read receipt
 count next to Messages (club sidebar) and on the Inbox tab (player app). The static
 demo builds sync across same-browser tabs too (BroadcastChannel bus), so the club
 tab and player tab hold one real conversation.
+
+## Milestone 8: ScoutBox Grassroots — a separate platform for the local game
+The club side is now two platforms with a hard, server-enforced wall between
+them. **ScoutBox** serves academies and above; **ScoutBox Grassroots** serves
+federation-registered semi-pro and amateur clubs only. The player app is
+unchanged — one player pool, two windows onto it.
+
+- **Platform separation at login**: a grassroots club can only log into
+  Grassroots (`GRASSROOTS_PLATFORM_ONLY`), every other org only into ScoutBox
+  (`PLATFORM_MISMATCH`); each login screen lists only its own platform's clubs.
+- **The 50km rule**: grassroots clubs see only players within 50km of their
+  registered ground (haversine, server-side, in the same `visibleToOrg` choke
+  point as the under-18 wall; missing coordinates fail closed). Search ranks
+  nearest first and every card shows the distance. Coordinates never leave the
+  server — only the computed distance does.
+- **The level ceiling**: players are `amateur`, `semi_pro` or `pro`. Pro-level
+  players never appear on Grassroots. A grassroots signing makes a player
+  semi-pro (still local); an academy/pro signing makes them pro — and they
+  leave the Grassroots pool automatically.
+- **No pro-market surface**: Academy+ cohort, market value and agent details
+  don't exist on Grassroots — stripped by the server, not hidden by the UI.
+- **Federation registration**: grassroots clubs register with their
+  federation's registration id and their ground location; they start
+  unverified (adults only) until Trust & Safety clears them — under-18
+  visibility takes exactly the same verification + safeguarding contract as
+  any club on any platform.
+- Deployed alongside the rest: the single container serves it at
+  `/grassroots` (club app at `/app`, console at `/console`).
 
 ## Milestone 7 additions (production hardening)
 - **Real authentication** — signups require a password (scrypt-hashed, never stored

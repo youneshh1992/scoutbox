@@ -27,14 +27,46 @@ export function isAdult(player, onDate = new Date()) {
   return ageOn(player.dob, onDate) >= adultAgeFor(player.country);
 }
 
-// Minor visibility rules, applied at the source on every endpoint:
+// ---------------------------------------------------- platform separation
+// ScoutBox Grassroots is a separate club platform for federation-registered
+// semi-pro clubs and below. Its walls are enforced here, at the same choke
+// point as the under-18 rules — never in a frontend.
+export const GRASSROOTS_RADIUS_KM = 50;
+
+/** Great-circle distance between two {lat, lng} points, in km. */
+export function haversineKm(a, b) {
+  const R = 6371;
+  const rad = (d) => (d * Math.PI) / 180;
+  const dLat = rad(b.lat - a.lat);
+  const dLng = rad(b.lng - a.lng);
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+/** A signing sets the player's level from the signing club's level. */
+export function playerLevelAfterSigning(orgLevel) {
+  return orgLevel === 'grassroots' ? 'semi_pro' : 'pro';
+}
+
+// Visibility rules, applied at the source on every endpoint:
 // - The under-18 wall: agencies can NEVER see a minor. Not a setting.
 // - Verified clubs only: an unverified club cannot see a minor either.
-// - Adults are visible to every org type.
+// - Adults are visible to every org type on the main platform.
+// - Grassroots clubs additionally see ONLY semi-pro-and-below players within
+//   50km of their registered ground. Missing location data fails closed.
 export function visibleToOrg(player, org) {
-  if (isAdult(player)) return true;
-  if (org.type === 'agency') return false;
-  return org.type === 'club' && org.verified === true;
+  if (!isAdult(player)) {
+    if (org.type === 'agency') return false;
+    if (!(org.type === 'club' && org.verified === true)) return false;
+  }
+  if ((org.level ?? null) === 'grassroots') {
+    if (player.level === 'pro') return false; // pro players live on ScoutBox, not Grassroots
+    if (!org.location || !player.location) return false; // fail closed, never open
+    if (haversineKm(org.location, player.location) > GRASSROOTS_RADIUS_KM) return false;
+  }
+  return true;
 }
 
 // -------------------------------------------------------------- moderation

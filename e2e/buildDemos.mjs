@@ -20,6 +20,9 @@ inline(path.join(ROOT, 'scoutbox-club', 'dist'), path.join(OUT, 'scoutbox-club-d
 run('VITE_DEMO=1 npx vite build', path.join(ROOT, 'scoutbox-admin'));
 inline(path.join(ROOT, 'scoutbox-admin', 'dist'), path.join(OUT, 'scoutbox-admin-demo.html'));
 
+run('VITE_DEMO=1 npx vite build', path.join(ROOT, 'scoutbox-grassroots'));
+inline(path.join(ROOT, 'scoutbox-grassroots', 'dist'), path.join(OUT, 'scoutbox-grassroots-demo.html'));
+
 run('npx expo export --platform web --output-dir dist-demo', path.join(ROOT, 'scoutbox-player'));
 inline(path.join(ROOT, 'scoutbox-player', 'dist-demo'), path.join(OUT, 'scoutbox-player-demo.html'));
 

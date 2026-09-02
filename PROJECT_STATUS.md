@@ -3,10 +3,50 @@
 > Purpose of this file: let any Claude Code session (cloud or local) pick up this
 > project with zero prior context. Keep it updated at the end of each working session.
 
-**Last updated:** 2026-08-21 · **Milestone: 7 complete — production hardening
+**Last updated:** 2026-09-02 · **Milestone: 8 complete — ScoutBox Grassroots,
+a separate club platform (org levels, 50km radius, platform-scoped logins,
+federation registration, level ceiling)**; previously: **7 — production hardening
 (real auth + sessions, SQLite, adapter seams for mail/push/IDV/billing/storage,
 funnel analytics, moderation v2 with grooming escalation, CI + Docker deploy)** ·
 Developed in this GitHub repo (`youneshh1992/scoutbox`), Claude Code web.
+
+## Milestone 8 (2026-09-02): ScoutBox Grassroots
+
+A fourth client app (`scoutbox-grassroots/`, Vite, port 5175, park-green +
+kit-orange identity) and a hard platform split, all server-enforced:
+
+- `org.level` ('grassroots'|'academy'|'pro'|'agency'), `org.location`,
+  `org.federationRef`; `player.level` ('amateur'|'semi_pro'|'pro') +
+  `player.location` (seeded from CITY_COORDS; optional lat/lng at signup;
+  `POST /player/location`). New seed: Hackney Marsh Rovers (verified) + Moss
+  Side Athletic (unverified) + London amateur pl-osei; pl-carvalho semi_pro.
+- domain.mjs: `haversineKm`, `GRASSROOTS_RADIUS_KM=50`,
+  `playerLevelAfterSigning`; `visibleToOrg` now also enforces (for grassroots
+  orgs) the level ceiling and the 50km radius, failing closed on missing
+  coordinates — every org endpoint inherits it via playerViewForOrg.
+- Platform-scoped login (`platform:'grassroots'` in the login body;
+  GRASSROOTS_PLATFORM_ONLY / PLATFORM_MISMATCH), `/orgs?platform=` filtered
+  listings (main club app now requests platform=main),
+  `POST /auth/org/register-grassroots` (federation + ground location required,
+  starts unverified/adults-only, Grassroots plan £0).
+- Grassroots views: `distanceKm` added; academyPlus/marketValueRange/agentName/
+  contractUntil stripped server-side; search ranks nearest-first (no Academy+
+  boost); signing sets player.level (grassroots→semi_pro, academy/pro→pro, the
+  latter removing the player from Grassroots).
+- The player app is UNCHANGED (per requirement).
+- Client: fork of the club app; grassroots branding, pruned nav (no
+  Reputation), radius banner + distance pills, club registration form on the
+  login screen, standalone demo mode (no cross-tab bus) with a London cluster,
+  a Manchester club, and a pro-level local proving the ceiling.
+- Hosting/CI: served at `/grassroots` in the single container (Dockerfile
+  stage added), CI job added, e2e suite extended (buildDemos/serve/offline).
+
+Verified 2026-09-02: 19 unit tests, **70 API checks** (platform login gating,
+filtered listings, radius visibility + 403 on direct fetch, minor rules
+identical on Grassroots, pro-surface stripping, level transitions via
+signings, federation-gated registration), grassroots live browser smoke
+through `/grassroots`, offline demo E2E ×4 bundles, cross-tab + UI spotchecks
+still green.
 
 ## Milestone 7 (2026-08-21): production hardening
 

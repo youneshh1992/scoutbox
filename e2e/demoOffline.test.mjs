@@ -41,6 +41,27 @@ const browser = await chromium.launch({ executablePath: EXE });
   await page.close();
 }
 
+// ---- grassroots demo, file://, all network aborted
+{
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await page.route(/^https?:\/\//, (r) => r.abort());
+  page.on('pageerror', (e) => console.log('GRASSROOTS PAGE ERROR:', e.message));
+  await page.goto(`file://${DIST}/scoutbox-grassroots-demo.html`);
+  await page.click('.org-card:has-text("Hackney Marsh Rovers")');
+  await page.fill('.enter-row input', 'Dee Mensah');
+  await page.click('button:has-text("Enter workspace")');
+  await page.click('nav.sidebar button:has-text("Search")');
+  await page.waitForSelector('text=within 50 km');
+  await page.waitForSelector('.player-card:not(.skeleton) .name');
+  const names = await page.locator('.player-card:not(.skeleton) .name').allInnerTexts();
+  if (names.includes('Elias Svensson')) throw new Error('grassroots demo: Manchester player visible from London');
+  if (names.includes('Marcus Reid')) throw new Error('grassroots demo: pro player visible');
+  const cards = await page.locator('.player-card:not(.skeleton)').allInnerTexts();
+  if (!cards.some((t) => /km away/.test(t))) throw new Error('grassroots demo: no distance pills');
+  console.log('grassroots demo: radius + level walls hold offline —', names.join(', '));
+  await page.close();
+}
+
 // ---- player demo, deep path, only that origin allowed
 {
   const page = await browser.newPage({ viewport: { width: 420, height: 880 } });

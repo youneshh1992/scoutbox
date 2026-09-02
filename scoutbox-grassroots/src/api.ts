@@ -13,7 +13,7 @@ export interface Org {
   id: string;
   name: string;
   type: OrgType;
-  plan: 'Academy' | 'Pro' | 'Agency';
+  plan: 'Grassroots' | 'Academy' | 'Pro' | 'Agency';
   trustedPartner: boolean;
   /** Club verification (company email domain + safeguarding contract).
    *  Unverified clubs never see under-18 profiles. */
@@ -25,6 +25,8 @@ export interface Org {
   emailDomain?: string;
 }
 
+// Grassroots views carry distance from the club's ground; pro-market fields
+// (academyPlus, marketValueRange, agentName) are absent by server rule.
 export interface Session {
   org: Org;
   userId: string;
@@ -111,6 +113,8 @@ export interface Player {
   contractStatus: string;
   identityVerified: boolean;
   trustScore: number;
+  distanceKm?: number;
+  level?: string;
   attendance: Attendance[];
   timeline: { year: string; event: string }[];
   media: MediaItem[];
@@ -384,6 +388,10 @@ export interface SearchFilters {
 export interface ScoutboxApi {
   listOrgs(): Promise<Org[]>;
   login(orgId: string, scoutName: string, role: string): Promise<Session>;
+  registerGrassroots(input: {
+    name: string; federation: string; registrationId: string; city: string;
+    lat: number; lng: number; scoutName: string; role: string;
+  }): Promise<Session>;
   report(s: Session, input: ReportInput): Promise<void>;
   searchPlayers(s: Session, f: SearchFilters): Promise<Player[]>;
   getPlayer(s: Session, id: string): Promise<PlayerDetail>;
@@ -441,15 +449,24 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const httpApi: ScoutboxApi = {
-  listOrgs: () => request<Org[]>('/orgs?platform=main'),
+  listOrgs: () => request<Org[]>('/orgs?platform=grassroots'),
 
   async login(orgId, scoutName, role) {
     const r = await request<{ userId: string; role: string; org: Org; token: string }>('/auth/org/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ orgId, scoutName, role }),
+      body: JSON.stringify({ orgId, scoutName, role, platform: 'grassroots' }),
     });
     return { org: r.org, userId: r.userId, scoutName, role: r.role, token: r.token };
+  },
+
+  async registerGrassroots(input) {
+    const r = await request<{ userId: string; role: string; org: Org; token: string }>('/auth/org/register-grassroots', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    return { org: r.org, userId: r.userId, scoutName: input.scoutName, role: r.role, token: r.token };
   },
 
   report: (s, input) =>

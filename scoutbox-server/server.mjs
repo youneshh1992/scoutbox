@@ -27,6 +27,9 @@ import {
   TRIAL_REPORT_FIELDS,
   similarityScore,
   moderateText,
+  haversineKm,
+  GRASSROOTS_RADIUS_KM,
+  playerLevelAfterSigning,
   trustTier,
   computeStreak,
   weeklyGoal,
@@ -453,6 +456,16 @@ function playerViewForOrg(player, org) {
     view.dob = null;
     view.contactPolicy = 'guardian_only';
   }
+  if ((org.level ?? null) === 'grassroots') {
+    // Grassroots is semi-pro and below: the pro-market surface (Academy+
+    // cohort, market value, agents) does not exist on this platform.
+    delete view.academyPlus;
+    delete view.marketValueRange;
+    delete view.agentName;
+    delete view.contractUntil;
+    view.distanceKm = Math.round(haversineKm(org.location, player.location) * 10) / 10;
+  }
+  delete view.location; // coordinates never leave the server
   return view;
 }
 
@@ -516,6 +529,11 @@ app.post('/auth/player/signup', (req, res) => {
     agentName: null,
     createdAt: Date.now(),
     password: hashPassword(password),
+    level: 'amateur',
+    // Optional coordinates: without them the player simply is not visible to
+    // grassroots clubs (the radius rule fails closed, never open).
+    location: typeof req.body.lat === 'number' && typeof req.body.lng === 'number'
+      ? { lat: req.body.lat, lng: req.body.lng } : null,
     medical: { shared: false, records: [], conditionStatus: 'unknown' },
   };
   db.players.push(p);
@@ -728,6 +746,9 @@ guardianRouter.post('/children', (req, res) => {
     agentName: null,
     createdAt: Date.now(),
     password: null,
+    level: 'amateur',
+    location: typeof req.body.lat === 'number' && typeof req.body.lng === 'number'
+      ? { lat: req.body.lat, lng: req.body.lng } : null,
     medical: { shared: false, records: [], conditionStatus: 'unknown' },
   };
   db.players.push(p);
@@ -970,17 +991,72 @@ function handleReport(req, res, actor) {
 }
 
 // ---------------------------------------------------------------- org auth
-app.get('/orgs', (_req, res) => {
-  res.json(db.orgs.map((o) => ({
-    id: o.id, name: o.name, type: o.type, plan: o.plan, trustedPartner: o.trustedPartner,
+app.get('/orgs', (req, res) => {
+  let list = db.orgs;
+  // Platform separation starts at the login screen: the Grassroots app lists
+  // only grassroots clubs, the main app never lists them.
+  if (req.query.platform === 'grassroots') list = list.filter((o) => o.level === 'grassroots');
+  else if (req.query.platform === 'main') list = list.filter((o) => o.level !== 'grassroots');
+  res.json(list.map((o) => ({
+    id: o.id, name: o.name, type: o.type, level: o.level ?? null, plan: o.plan, trustedPartner: o.trustedPartner,
     verified: o.verified, safeguardingCertified: safeguardingCertified(o),
+    ...(o.level === 'grassroots' ? { city: o.location?.city ?? null, federation: o.federationRef?.federation ?? null } : {}),
   })));
 });
 
+// ScoutBox Grassroots club registration: federation-registered semi-pro
+// clubs and below. Registration is open; verification (federation record,
+// email domain, safeguarding contract) is checked by T&S before the club can
+// see any minor — the same bar every club faces.
+app.post('/auth/org/register-grassroots', (req, res) => {
+  const { name, country = 'GB', city, lat, lng, federation, registrationId, scoutName, role } = req.body || {};
+  if (!name || !name.trim()) return res.status(400).json({ error: 'NAME_REQUIRED' });
+  if (!federation || !registrationId) {
+    return res.status(400).json({ error: 'FEDERATION_REQUIRED', message: 'Grassroots clubs must hold a federation registration — name the federation and your registration id.' });
+  }
+  if (typeof lat !== 'number' || typeof lng !== 'number') {
+    return res.status(400).json({ error: 'LOCATION_REQUIRED', message: 'The 50km scouting radius is measured from your ground — a location is required.' });
+  }
+  if (!scoutName || !scoutName.trim()) return res.status(400).json({ error: 'SCOUT_NAME_REQUIRED' });
+  const org = {
+    id: nextId('org'),
+    name: name.trim(),
+    type: 'club',
+    level: 'grassroots',
+    location: { lat, lng, city: city || '' },
+    federationRef: { federation: String(federation), registrationId: String(registrationId) },
+    plan: 'Grassroots',
+    trustedPartner: false,
+    country,
+    verified: false,
+    verifiedDomain: null,
+    safeguardingContractSigned: false,
+  };
+  db.orgs.push(org);
+  const user = { id: nextId('usr'), orgId: org.id, name: scoutName.trim(), role: (role || 'Manager').trim(), createdAt: Date.now() };
+  db.users.push(user);
+  persist();
+  broadcast('orgs');
+  res.status(201).json({
+    userId: user.id, role: user.role, org: { ...org, safeguardingCertified: safeguardingCertified(org) },
+    token: createSession('org', org.id, { userId: user.id }),
+    note: 'Registered. Adults within 50km are visible now; under-18 visibility needs verification + the safeguarding contract, reviewed by Trust & Safety.',
+  });
+});
+
 app.post('/auth/org/login', (req, res) => {
-  const { orgId, scoutName, role } = req.body || {};
+  const { orgId, scoutName, role, platform } = req.body || {};
   const org = db.orgs.find((o) => o.id === orgId);
   if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
+  // Hard platform separation: a grassroots club exists only on ScoutBox
+  // Grassroots; every other org exists only on ScoutBox. No crossover.
+  const wantsGrassroots = platform === 'grassroots';
+  if (org.level === 'grassroots' && !wantsGrassroots) {
+    return res.status(403).json({ error: 'GRASSROOTS_PLATFORM_ONLY', message: 'This club is registered on ScoutBox Grassroots — log in there.' });
+  }
+  if (org.level !== 'grassroots' && wantsGrassroots) {
+    return res.status(403).json({ error: 'PLATFORM_MISMATCH', message: 'ScoutBox Grassroots is for federation-registered grassroots clubs only.' });
+  }
   if (!scoutName || !scoutName.trim()) {
     // Accountability by user: no anonymous / shared workspace access.
     return res.status(400).json({ error: 'SCOUT_NAME_REQUIRED', message: 'Every session is attributed to a named individual.' });
@@ -1046,8 +1122,13 @@ orgRouter.get('/players', (req, res) => {
     list = list.filter((p) => p.createdAt && p.createdAt >= cutoff);
   }
 
-  // Academy+ is a boosted cohort: opted-in players surface first.
-  list.sort((a, b) => (b.academyPlus ? 1 : 0) - (a.academyPlus ? 1 : 0) || b.trustScore - a.trustScore);
+  if (req.org.level === 'grassroots') {
+    // Local game first: nearest ground wins ties on trust.
+    list.sort((a, b) => (a.distanceKm ?? 999) - (b.distanceKm ?? 999) || b.trustScore - a.trustScore);
+  } else {
+    // Academy+ is a boosted cohort: opted-in players surface first.
+    list.sort((a, b) => (b.academyPlus ? 1 : 0) - (a.academyPlus ? 1 : 0) || b.trustScore - a.trustScore);
+  }
   res.json(list);
 });
 
@@ -1503,6 +1584,9 @@ orgRouter.post('/players/:id/signing', (req, res) => {
   // The revenue event: a signing inside the attribution window issues the
   // success-fee invoice through the billing adapter (Stripe when live).
   if (signing.insideAttributionWindow) void billing.invoiceForSigning(signing, req.org);
+  // A signing moves the player's level: grassroots signings make semi-pros,
+  // academy/pro signings make pros — who then leave the Grassroots platform.
+  p.level = playerLevelAfterSigning(req.org.level);
   p.contractStatus = 'under_contract';
   p.availability = 'not_seeking';
   p.timeline.push({ year: String(new Date().getFullYear()), event: `Signed by ${req.org.name} — discovered on ScoutBox` });
@@ -1922,6 +2006,19 @@ playerRouter.post('/medical/records', (req, res) => {
   res.status(201).json(req.player.medical);
 });
 
+// Location powers the Grassroots 50km radius. Coordinates never appear in
+// any org view — only the computed distance does.
+playerRouter.post('/location', (req, res) => {
+  const { lat, lng } = req.body || {};
+  if (typeof lat !== 'number' || typeof lng !== 'number' || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    return res.status(400).json({ error: 'BAD_COORDINATES' });
+  }
+  req.player.location = { lat, lng };
+  persist();
+  broadcast('players', { playerId: req.player.id });
+  res.json({ ok: true });
+});
+
 playerRouter.post('/availability', (req, res) => {
   if (guardianManagedOnly(req, res)) return;
   const { availability, contractStatus } = req.body || {};
@@ -2300,7 +2397,7 @@ app.get('/media/:id', (req, res) => {
 // public/club and the T&S console into public/admin, and this serves them
 // alongside the API. Local dev keeps using the Vite/Expo dev servers.
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
-for (const [route, dir] of [['/app', 'club'], ['/console', 'admin']]) {
+for (const [route, dir] of [['/app', 'club'], ['/console', 'admin'], ['/grassroots', 'grassroots']]) {
   const full = path.join(PUBLIC_DIR, dir);
   if (fs.existsSync(path.join(full, 'index.html'))) {
     app.use(route, express.static(full));
