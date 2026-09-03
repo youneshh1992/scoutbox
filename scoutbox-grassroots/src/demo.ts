@@ -7,7 +7,7 @@ import type {
   ScoutboxApi, Org, Session, Player, PlayerDetail, OrgRequest, Trial,
   LedgerEntry, ProofPack, PlanInfo, Reputation, SearchFilters,
   Channel, FiledReport, Notification, TrialDetails,
-  FeedItem, FilmRoomItem, FixtureGroup, SavedSearch, OrgNote, SigningRecord, Invoice,
+  FeedItem, FilmRoomItem, FixtureGroup, SavedSearch, OrgNote, SigningRecord, Invoice, OpenTrial,
 } from './api';
 import { ApiError } from './api';
 // Sample footage baked into the demo bundle so the Film Room plays offline.
@@ -76,6 +76,8 @@ function gView<T extends Player>(p: T, org: Org): T {
   delete clone.contractUntil;
   clone.distanceKm = distanceFor(p, org) ?? undefined;
   clone.level = PLAYER_LEVEL[p.id];
+  clone.firstTeamSeeker = SEEKERS.has(p.id);
+  clone.vouches = DEMO_VOUCHES[p.id] ?? [];
   return clone as unknown as T;
 }
 
@@ -257,6 +259,18 @@ const channels: Channel[] = [];
 const notifications: Notification[] = [];
 const myReports: FiledReport[] = [];
 const demoInvoices: Invoice[] = [];
+const demoOpenTrials: OpenTrial[] = [{
+  id: 'open-1', title: 'U15 open morning', date: new Date(Date.now() + 16 * 86400000).toISOString().slice(0, 10),
+  venue: 'Hackney Marshes pitch 4', ageGroup: 'u16', positions: [], notes: 'Bring boots and a water bottle.',
+  createdAt: Date.now() - 86400000,
+  registrations: [
+    { id: 'otr-1', playerId: 'pl-guni', playerName: 'Guni Adebayo', byGuardian: true, ts: Date.now() - 3600000, age: 14, position: 'RW', trustScore: 55, guardianManaged: true },
+  ],
+}];
+const SEEKERS = new Set(['pl-okafor']);
+const DEMO_VOUCHES: Record<string, { id: string; coachName: string; role: string; seasons: string | null; text: string | null; status: string; ts: number }[]> = {
+  'pl-adeyemi': [{ id: 'vch-1', coachName: 'Ade Falana', role: 'Manager, Leyton Sunday League', seasons: '2024–2026', text: 'Two seasons with me — never missed a session, leads the line brilliantly.', status: 'published', ts: Date.now() - 5 * 86400000 }],
+};
 let demoEmailChallenge: { email: string; code: string } | null = null;
 const savedSearches: SavedSearch[] = [];
 const orgNotes: OrgNote[] = [];
@@ -367,7 +381,9 @@ export const demoApi: ScoutboxApi = {
     }
     // Local game first: nearest ground wins ties on trust.
     const views = list.map((p) => gView(p, s.org));
-    views.sort((a, b) => (a.distanceKm ?? 999) - (b.distanceKm ?? 999) || b.trustScore - a.trustScore);
+    views.sort((a, b) =>
+      (b.firstTeamSeeker ? 1 : 0) - (a.firstTeamSeeker ? 1 : 0) ||
+      (a.distanceKm ?? 999) - (b.distanceKm ?? 999) || b.trustScore - a.trustScore);
     return delay(views);
   },
 
@@ -659,6 +675,28 @@ export const demoApi: ScoutboxApi = {
   },
 
   getInvoices: () => delay(demoInvoices.slice()),
+
+  getOpenTrials: () => delay(demoOpenTrials.slice().reverse()),
+
+  postOpenTrial: (s, input) => {
+    if (!input.title || !input.date || !input.venue) throw new ApiError(400, 'TITLE_DATE_VENUE_REQUIRED', 'Title, date and venue are required.');
+    if (input.notes && MOD_RES.some((re) => re.test(input.notes!))) throw new ApiError(400, 'MODERATION_BLOCKED', 'Notes were blocked by moderation — no contact details.');
+    demoOpenTrials.push({ id: nid('open'), ...input, notes: input.notes ?? '', createdAt: Date.now(), registrations: [] });
+    pushNotification('Open day posted — local players can register now.', 'open_trial');
+    return delay(undefined);
+  },
+
+  deleteOpenTrial: (_s, id) => {
+    const i = demoOpenTrials.findIndex((t) => t.id === id);
+    if (i === -1) throw new ApiError(404, 'OPEN_TRIAL_NOT_FOUND', 'No such open day');
+    demoOpenTrials.splice(i, 1);
+    return delay(undefined);
+  },
+
+  setLookingFor: (s, positions) => {
+    s.org.lookingFor = positions;
+    return delay(undefined);
+  },
 
   requestEmailVerification: (_s, email) => {
     if (/@(gmail|googlemail|hotmail|outlook|yahoo|icloud|aol|proton|protonmail|gmx|live|msn)\./i.test(email)) {

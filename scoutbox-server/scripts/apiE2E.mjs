@@ -241,7 +241,85 @@ ok(r.status === 201 && r.body.token && r.body.org.level === 'grassroots' && r.bo
 gsearch = await j('/org/players', {}, bearer(r.body.token));
 ok(gsearch.body.every((p) => !p.guardianManaged && p.distanceKm <= 50), 'freshly registered club: local adults only until verification');
 
-// ---- 13. storage + SQLite persistence on disk
+// ---- 13. the Grassroots player journey (M9)
+// Kola became semi-pro via the Moss Side signing above — the level-up moment
+// should have fired: badge, pathway, timeline.
+me = await j('/player/me', {}, bearer(KOLA));
+ok(me.body.pathway?.level === 'semi_pro' && me.body.pathway.steps.find((s) => s.key === 'semi_pro').reached, 'pathway shows the level-up');
+ok(me.body.badges.includes('First Club'), 'level-up awarded the First Club badge');
+ok(me.body.timeline.some((t) => /Levelled up: amateur → semi-pro/.test(t.event)), 'level-up recorded on the timeline');
+
+// Training programme: suggested by position, weekly progress, feeds streaks.
+r = await j('/player/programme', {}, bearer(KOLA));
+ok(r.status === 200 && r.body.suggested === 'attack', 'programme suggests the attacking track for a striker');
+r = await j('/player/programme', { method: 'POST', body: JSON.stringify({ track: 'attack' }) }, bearer(KOLA));
+ok(r.status === 201 && r.body.current.doneThisWeek === 0, 'programme selected');
+r = await j('/player/programme/sessions/atk-sprint/complete', { method: 'POST' }, bearer(KOLA));
+ok(r.body.current.doneThisWeek === 1 && r.body.current.sessions.find((x) => x.id === 'atk-sprint').done, 'session completion tracked weekly');
+r = await j('/player/programme', {}, bearer(SVEN));
+ok(r.status === 403 && r.body.error === 'GRASSROOTS_ONLY', 'pro players have no grassroots programme');
+
+// Benchmarks: cohort percentiles, explicitly not a leaderboard.
+r = await j('/player/benchmarks', {}, bearer(KOLA));
+ok(r.status === 200 && /not competition/.test(r.body.note) && Array.isArray(r.body.stats), 'benchmarks return cohort percentiles, framed as context');
+
+// Opportunity radar: Moss Side (Manchester) is in Kola's radius.
+await j('/org/looking-for', { method: 'POST', body: JSON.stringify({ positions: ['ST', 'CDM'] }) }, bearer(MOSS));
+r = await j('/org/open-trials', {
+  method: 'POST',
+  body: JSON.stringify({ title: 'Open training session', date: '2099-05-01', venue: 'Moss Side Rec', ageGroup: 'open', positions: ['ST'] }),
+}, bearer(MOSS));
+ok(r.status === 201, 'grassroots club posts an open trial day');
+const mossTrialId = r.body.openTrial.id;
+r = await j('/org/open-trials', { method: 'POST', body: JSON.stringify({ title: 'x', date: '2099-05-01', venue: 'y' }) }, bearer(EASTPORT));
+ok(r.status === 403 && r.body.error === 'GRASSROOTS_ORGS_ONLY', 'open days are grassroots-only');
+r = await j('/player/opportunities', {}, bearer(KOLA));
+ok(r.body.clubs.some((c) => c.name === 'Moss Side Athletic' && c.lookingFor.includes('ST')), 'radar shows the local club looking for his position');
+ok(r.body.lookingForYou >= 1, 'radar counts clubs looking for the player');
+r = await j(`/player/open-trials/${mossTrialId}/register`, { method: 'POST' }, bearer(KOLA));
+ok(r.status === 201, 'adult registers for a local open day');
+r = await j(`/player/open-trials/${mossTrialId}/register`, { method: 'POST' }, bearer(KOLA));
+ok(r.status === 409, 'double registration refused');
+
+// First Team Seekers: surfaced first to grassroots clubs, never purchasable.
+await j('/player/first-team-seeker', { method: 'POST', body: JSON.stringify({ enabled: true }) }, bearer(KOLA));
+gsearch = await j('/org/players', {}, bearer(MOSS));
+ok(gsearch.body.find((p) => p.id === 'pl-adeyemi')?.firstTeamSeeker === true, 'seeker flag visible to grassroots clubs');
+
+// Coach vouches: email-code verified, moderated, coach email never exposed.
+r = await j('/player/vouches/request', { method: 'POST', body: JSON.stringify({ coachName: 'Ade Falana', coachEmail: 'ade@sundayleague.org.uk', role: 'Manager' }) }, bearer(KOLA));
+ok(r.status === 201, 'vouch request sent to the coach');
+const vMailBox = await j('/admin/outbox', {}, admin);
+const vouchMail = vMailBox.body.find((m) => m.to === 'ade@sundayleague.org.uk');
+const vouchCode = /reference code is ([A-Z0-9]{8})/.exec(vouchMail?.text ?? '')?.[1];
+ok(!!vouchCode, 'vouch code delivered via the mailer');
+r = await j('/vouch/submit', { method: 'POST', body: JSON.stringify({ code: vouchCode, text: "Don't tell your parents but call me on 07911 123456" }) });
+ok(r.status === 400 && r.body.error === 'MODERATION_BLOCKED', 'vouch text passes through the same moderation screen');
+r = await j('/vouch/submit', { method: 'POST', body: JSON.stringify({ code: vouchCode, text: 'Two seasons with me — never missed a session, leads the line brilliantly.', seasons: '2024–2026' }) });
+ok(r.status === 201, 'clean vouch publishes');
+gsearch = await j(`/org/players/pl-adeyemi`, {}, bearer(MOSS));
+ok(gsearch.body.vouches?.some((v) => /leads the line/.test(v.text)) && !('coachEmail' in (gsearch.body.vouches?.[0] ?? {})), 'published vouch visible to clubs, coach email never exposed');
+
+// Guardian route: open days for a child list only clubs allowed to see them.
+r = await j('/org/open-trials', {
+  method: 'POST',
+  body: JSON.stringify({ title: 'U15 open morning', date: '2099-06-01', venue: 'Hackney Marshes pitch 4', ageGroup: 'u16' }),
+}, bearer(HACKNEY));
+const hackneyTrialId = r.body.openTrial.id;
+r = await j('/guardian/children/pl-guni/open-trials', {}, bearer(AMARA));
+ok(r.body.openTrials.some((t) => t.id === hackneyTrialId) && !r.body.openTrials.some((t) => t.id === mossTrialId), 'guardian sees local verified open days only');
+r = await j(`/guardian/open-trials/${mossTrialId}/register`, { method: 'POST', body: JSON.stringify({ childId: 'pl-guni' }) }, bearer(AMARA));
+ok(r.status === 403, 'minor registration to a club that may not see them is refused');
+r = await j(`/guardian/open-trials/${hackneyTrialId}/register`, { method: 'POST', body: JSON.stringify({ childId: 'pl-guni' }) }, bearer(AMARA));
+ok(r.status === 201, 'guardian registers the child for a verified local open day');
+r = await j('/org/open-trials', {}, bearer(HACKNEY));
+ok(r.body.find((t) => t.id === hackneyTrialId)?.registrations.some((x) => x.playerName === 'Guni Adebayo' && x.byGuardian), 'club sees the guardian-made registration');
+
+// Season wrap.
+r = await j('/player/season-wrap', {}, bearer(KOLA));
+ok(r.status === 200 && r.body.badges.includes('First Club') && /ledger/.test(r.body.note), 'season wrap assembles the verified year');
+
+// ---- 14. storage + SQLite persistence on disk
 let stored = false;
 for (let i = 0; i < 20 && !stored; i++) {
   stored = fs.existsSync(path.join(SERVER_DIR, 'data', 'scoutbox.db')) || fs.existsSync(path.join(SERVER_DIR, 'data', 'db.json'));

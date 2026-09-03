@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, DEMO_MODE, type Channel, type Notification, type Org, type Session } from './api';
 import {
   FeedScreen, FilmRoomScreen, SearchScreen, ShortlistScreen, RequestsScreen, MessagesScreen,
-  TrialsScreen, FixturesScreen, LedgerScreen, FunnelScreen, PlanScreen,
+  TrialsScreen, OpenDaysScreen, FixturesScreen, LedgerScreen, FunnelScreen, PlanScreen,
   PlayerDrawer, Toast, SafetyModal,
 } from './screens';
 
@@ -19,7 +19,7 @@ function loadSession(): Session | null {
   }
 }
 
-export type ScreenId = 'feed' | 'filmroom' | 'search' | 'shortlist' | 'requests' | 'messages' | 'trials' | 'fixtures' | 'ledger' | 'funnel' | 'plan';
+export type ScreenId = 'feed' | 'filmroom' | 'search' | 'shortlist' | 'requests' | 'messages' | 'trials' | 'opendays' | 'fixtures' | 'ledger' | 'funnel' | 'plan';
 
 const NAV: { id: ScreenId; label: string }[] = [
   { id: 'feed', label: 'Home' },
@@ -29,6 +29,7 @@ const NAV: { id: ScreenId; label: string }[] = [
   { id: 'requests', label: 'Requests' },
   { id: 'messages', label: 'Messages' },
   { id: 'trials', label: 'Trials & Reports' },
+  { id: 'opendays', label: 'Open Days' },
   { id: 'fixtures', label: 'Fixtures' },
   { id: 'ledger', label: 'Discovery Ledger' },
   { id: 'funnel', label: 'Funnel' },
@@ -258,6 +259,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
         <div className="content">
           {screen === 'feed' && <FeedScreen {...props} />}
           {screen === 'filmroom' && <FilmRoomScreen {...props} />}
+          {screen === 'opendays' && <OpenDaysScreen {...props} />}
           {screen === 'fixtures' && <FixturesScreen {...props} />}
           {screen === 'search' && <SearchScreen {...props} />}
           {screen === 'shortlist' && <ShortlistScreen {...props} />}

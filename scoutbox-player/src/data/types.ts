@@ -9,6 +9,67 @@ export interface NotificationPrefs {
   schoolHoursMute: boolean | null;
 }
 
+// ---- The Grassroots journey (exclusive to amateur/semi-pro players) ----
+export interface PathwayStep { key: string; label: string; reached: boolean; note: string }
+export interface Pathway {
+  level: string;
+  steps: PathwayStep[];
+  signals: { verifiedAttendances: number; verifiedClips: number; combineVerified: number; coachVouches: number };
+  nextStep: string;
+}
+
+export interface ProgrammeSession { id: string; day: string; title: string; drillId: string | null; done: boolean }
+export interface ProgrammeProgress {
+  track: string; label: string; startedAt: number;
+  sessions: ProgrammeSession[]; doneThisWeek: number; totalPerWeek: number;
+}
+export interface ProgrammeInfo {
+  current: ProgrammeProgress | null;
+  tracks: { key: string; label: string; positions: string[]; sessionsPerWeek: number }[];
+  suggested: string;
+}
+
+export interface Benchmarks {
+  cohortSize: number;
+  note: string;
+  drills: { drillId: string; name: string; metric: string; unit: string; value: number; percentile: number | null }[];
+  stats: { stat: string; value: number; percentile: number | null }[];
+}
+
+export interface OpportunityOpenTrial {
+  id: string; title: string; date: string; venue: string; ageGroup: string;
+  positions: string[]; registered: boolean; orgName?: string;
+}
+export interface OpportunityClub {
+  id: string; name: string; city: string; distanceKm: number; verified: boolean;
+  safeguardingCertified: boolean; lookingFor: string[]; openTrials: OpportunityOpenTrial[];
+}
+export interface Opportunities { radiusKm?: number; clubs: OpportunityClub[]; lookingForYou?: number; note?: string }
+
+export interface GuardianOpenTrial {
+  id: string; title: string; date: string; venue: string; ageGroup: string; positions: string[];
+  orgName: string; verified: boolean; safeguardingCertified: boolean; distanceKm: number; registered: boolean;
+}
+
+export interface Vouch {
+  id: string; coachName: string; role: string; seasons: string | null;
+  text: string | null; status: 'pending' | 'published' | 'revoked'; ts: number;
+}
+
+export interface SeasonWrap {
+  generatedAt: string;
+  player: { name: string; position: string | null; level: string };
+  season: PlayerProfile['stats'];
+  verifiedAttendances: number;
+  verifiedClips: number;
+  bestStreak: number;
+  combineBests: { drillName: string; metric: string; value: number; unit: string }[];
+  badges: string[];
+  coachVouches: number;
+  scoutViews: number;
+  note: string;
+}
+
 export interface DirectoryClub {
   id: string;
   name: string;
@@ -43,6 +104,10 @@ export interface Me extends PlayerProfile {
   weeklyGoal?: { done: number; target: number; met: boolean };
   nextActions?: { id: string; label: string; gain: number }[];
   agingUp?: { eligible: boolean } | null;
+  pathway?: Pathway | null;
+  programme?: ProgrammeProgress | null;
+  vouches?: Vouch[];
+  firstTeamSeeker?: boolean;
 }
 
 export class ClientError extends Error {
@@ -230,6 +295,16 @@ export interface PlayerClient {
   getExport(playerId: string): Promise<Record<string, unknown>>;
   deleteAccount(playerId: string): Promise<void>;
   getDirectory(): Promise<DirectoryClub[]>;
+  // The Grassroots journey (amateur/semi-pro only — the server refuses pros).
+  getProgramme(playerId: string): Promise<ProgrammeInfo>;
+  selectProgramme(playerId: string, track: string): Promise<void>;
+  completeProgrammeSession(playerId: string, sessionId: string): Promise<void>;
+  getBenchmarks(playerId: string): Promise<Benchmarks>;
+  getOpportunities(playerId: string): Promise<Opportunities>;
+  registerOpenTrial(playerId: string, openTrialId: string): Promise<void>;
+  setFirstTeamSeeker(playerId: string, enabled: boolean): Promise<void>;
+  requestVouch(playerId: string, coachName: string, coachEmail: string, role: string): Promise<void>;
+  getSeasonWrap(playerId: string): Promise<SeasonWrap>;
   report(playerId: string, input: ReportInput): Promise<void>;
   block(playerId: string, orgId: string, reason?: string): Promise<void>;
 
@@ -264,6 +339,10 @@ export interface PlayerClient {
   guardianSetPrefs(guardianId: string, prefs: Partial<NotificationPrefs>): Promise<void>;
   guardianExport(guardianId: string): Promise<Record<string, unknown>>;
   guardianDeleteChild(guardianId: string, childId: string): Promise<void>;
+  guardianChildOpenTrials(guardianId: string, childId: string): Promise<GuardianOpenTrial[]>;
+  guardianRegisterOpenTrial(guardianId: string, openTrialId: string, childId: string): Promise<void>;
+  guardianSetFirstTeamSeeker(guardianId: string, childId: string, enabled: boolean): Promise<void>;
+  guardianRequestVouch(guardianId: string, childId: string, coachName: string, coachEmail: string, role: string): Promise<void>;
 
   onChange(cb: (event?: string, payload?: Record<string, unknown>) => void): () => void;
 }

@@ -2,11 +2,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { client, type Insights, type PlayerFeedItem } from '../../data/client';
-import type { DirectoryClub } from '../../data/types';
+import type { DirectoryClub, Opportunities } from '../../data/types';
 import { SAFEGUARDING_PROMISES, U18_PROMISES } from '../../domain/safeguarding';
 import { useSession } from '../../state';
 import { colors } from '../../theme';
-import { Card, Muted, Pill, Row, SectionTitle } from '../../components/ui';
+import { Button, Card, Muted, Pill, Row, SectionTitle } from '../../components/ui';
 import { ReportButton } from '../../components/ReportSheet';
 import { NotificationBell } from '../../components/NotificationBell';
 
@@ -39,6 +39,7 @@ export default function Discover() {
   const [insights, setInsights] = useState<Insights | null>(null);
   const [feed, setFeed] = useState<PlayerFeedItem[]>([]);
   const [directory, setDirectory] = useState<DirectoryClub[]>([]);
+  const [opportunities, setOpportunities] = useState<Opportunities | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(() => {
@@ -46,6 +47,7 @@ export default function Discover() {
     client.getInsights(playerId).then(setInsights).catch(() => {});
     client.getFeed(playerId).then(setFeed).catch(() => {});
     client.getDirectory().then(setDirectory).catch(() => {});
+    client.getOpportunities(playerId).then(setOpportunities).catch(() => setOpportunities(null));
   }, [playerId]);
 
   useEffect(load, [load, notifications]);
@@ -94,6 +96,77 @@ export default function Discover() {
             {weekly.report.suggestion && (
               <Muted size={12.5}>▶ Next best action: {weekly.report.suggestion.label}{weekly.report.suggestion.gain ? ` (+${weekly.report.suggestion.gain} trust)` : ''}</Muted>
             )}
+          </Card>
+        )}
+
+        {me?.pathway && (
+          <Card style={{ borderColor: colors.accent2 }}>
+            <SectionTitle>🛤 Your pathway</SectionTitle>
+            <Row style={{ gap: 6 }}>
+              {me.pathway.steps.map((s, i) => (
+                <View key={s.key} style={{ flex: 1, alignItems: 'center', gap: 4 }}>
+                  <View style={{
+                    width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center',
+                    backgroundColor: s.reached || s.key === me.pathway!.level ? colors.accent : colors.bg2,
+                    borderWidth: 1, borderColor: s.reached ? colors.accent : colors.line,
+                  }}>
+                    <Text style={{ color: s.reached ? '#04240f' : colors.muted, fontWeight: '800', fontSize: 12 }}>{i + 1}</Text>
+                  </View>
+                  <Text style={{ color: s.reached ? colors.text : colors.muted, fontSize: 11.5, fontWeight: s.reached ? '700' : '400', textAlign: 'center' }}>{s.label}</Text>
+                </View>
+              ))}
+            </Row>
+            <Muted size={12.5}>{me.pathway.nextStep}</Muted>
+            <Row>
+              <Pill label={`${me.pathway.signals.verifiedAttendances} attendances`} />
+              <Pill label={`${me.pathway.signals.verifiedClips} verified clips`} />
+              <Pill label={`${me.pathway.signals.combineVerified} combine ✓`} />
+              <Pill label={`${me.pathway.signals.coachVouches} coach vouches`} tone={me.pathway.signals.coachVouches > 0 ? 'gold' : undefined} />
+            </Row>
+          </Card>
+        )}
+
+        {opportunities && opportunities.clubs.length > 0 && (
+          <Card style={{ borderColor: colors.accent }}>
+            <SectionTitle>📡 Clubs within reach</SectionTitle>
+            <Muted size={12.5}>
+              The 50 km rule works both ways: every club below can actually sign you.
+              {opportunities.lookingForYou ? ` ${opportunities.lookingForYou} of them are looking for your position.` : ''}
+            </Muted>
+            {opportunities.clubs.map((c) => (
+              <View key={c.id} style={{ gap: 4, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }}>
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <Text style={{ color: colors.text, fontSize: 14.5, fontWeight: '700' }}>{c.name}</Text>
+                  <Row>
+                    <Pill label={`${c.distanceKm} km`} tone="blue" />
+                    {c.verified && <Pill label="Verified" tone="green" />}
+                  </Row>
+                </Row>
+                {c.lookingFor.length > 0 && (
+                  <Row>
+                    <Muted size={12}>Looking for:</Muted>
+                    {c.lookingFor.map((pos) => <Pill key={pos} label={pos} tone={pos === me?.position ? 'gold' : undefined} />)}
+                  </Row>
+                )}
+                {c.openTrials.map((t) => (
+                  <Row key={t.id} style={{ justifyContent: 'space-between' }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: colors.text, fontSize: 13 }}>📅 {t.title} · {t.date}</Text>
+                      <Muted size={11.5}>{t.venue}</Muted>
+                    </View>
+                    {t.registered ? (
+                      <Pill label="registered ✓" tone="green" />
+                    ) : isMinor ? (
+                      <Pill label="via your guardian" tone="blue" />
+                    ) : (
+                      <Button small primary label="Register" onPress={async () => {
+                        try { await client.registerOpenTrial(playerId!, t.id); load(); } catch { /* refresh shows truth */ }
+                      }} />
+                    )}
+                  </Row>
+                ))}
+              </View>
+            ))}
           </Card>
         )}
 

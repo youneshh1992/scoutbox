@@ -5,7 +5,7 @@ import {
   type LedgerEntry, type ProofPack, type PlanInfo, type Reputation, type SearchFilters,
   type Channel, type FiledReport, type TrialDetails,
   type FeedItem, type FilmRoomItem, type FixtureGroup, type SavedSearch, type OrgNote,
-  type Funnel, type Invoice,
+  type Funnel, type Invoice, type OpenTrial,
 } from './api';
 
 const TAG_LABELS: Record<string, string> = {
@@ -525,6 +525,7 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
             </div>
             <div className="badges">
               {p.guardianManaged && <span className="pill red">U18 · guardian-managed</span>}
+              {p.firstTeamSeeker && <span className="pill gold">🔎 First Team Seeker</span>}
               {typeof p.distanceKm === 'number' && <span className="pill blue">{p.distanceKm} km away</span>}
               {p.level === 'semi_pro' && <span className="pill gold">semi-pro</span>}
               {p.identityVerified && <span className="pill outline-green">ID ✓</span>}
@@ -974,6 +975,88 @@ export function FunnelScreen({ session, tick }: ScreenProps) {
   );
 }
 
+export function OpenDaysScreen({ session, tick, notify }: ScreenProps) {
+  const [trials, setTrials] = useState<OpenTrial[]>([]);
+  const [form, setForm] = useState({ title: '', date: '', venue: '', ageGroup: 'open', positions: '' as string, notes: '' });
+  const [lookingFor, setLookingFor] = useState<string>((session.org.lookingFor ?? []).join(', '));
+  const load = useCallback(() => { api.getOpenTrials(session).then(setTrials).catch(() => {}); }, [session]);
+  useEffect(load, [load, tick]);
+  return (
+    <>
+      <div className="notice" style={{ marginBottom: 16 }}>
+        Open days are how kids find their first team: local players (and guardians of under-18s) see
+        these on their app and register — no messages, no chasing. Under-18 registrations only reach you
+        once your club is verified.
+      </div>
+      <div className="section">
+        <h4>What are you looking for? (shows on local players' radar)</h4>
+        <div className="filters">
+          <input style={{ flex: 1 }} placeholder="Positions, comma-separated (e.g. ST, CDM)" value={lookingFor} onChange={(e) => setLookingFor(e.target.value)} />
+          <button onClick={async () => {
+            try {
+              await api.setLookingFor(session, lookingFor.split(',').map((x) => x.trim().toUpperCase()).filter(Boolean));
+              notify('Saved — local players in those positions see your club highlighted.');
+            } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
+          }}>Save</button>
+        </div>
+      </div>
+      <div className="section">
+        <h4>Post an open day</h4>
+        <div className="filters" style={{ flexWrap: 'wrap' }}>
+          <input placeholder="Title (e.g. U15 open morning)" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+          <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+          <input placeholder="Venue" value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} />
+          <select value={form.ageGroup} onChange={(e) => setForm({ ...form, ageGroup: e.target.value })}>
+            <option value="open">Open age</option>
+            <option value="u16">Under 16</option>
+            <option value="u18">Under 18</option>
+            <option value="senior">Senior</option>
+          </select>
+          <input placeholder="Positions (optional, comma-separated)" value={form.positions} onChange={(e) => setForm({ ...form, positions: e.target.value })} />
+          <input style={{ flex: 1 }} placeholder="Notes (screened — no contact details)" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          <button className="primary" onClick={async () => {
+            try {
+              await api.postOpenTrial(session, {
+                title: form.title.trim(), date: form.date, venue: form.venue.trim(), ageGroup: form.ageGroup,
+                positions: form.positions.split(',').map((x) => x.trim().toUpperCase()).filter(Boolean),
+                notes: form.notes.trim() || undefined,
+              });
+              setForm({ title: '', date: '', venue: '', ageGroup: 'open', positions: '', notes: '' });
+              notify('Open day posted — local players can register now.');
+              load();
+            } catch (e) { notify(e instanceof Error ? e.message : 'Could not post', true); }
+          }}>Post open day</button>
+        </div>
+      </div>
+      {trials.length === 0 && <div className="notice">No open days yet — post one above.</div>}
+      {trials.map((t) => (
+        <div key={t.id} className="section">
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <h4 style={{ margin: 0, flex: 1 }}>{t.title} — {t.date} · {t.venue}</h4>
+            <span className="pill blue">{t.ageGroup}</span>
+            {t.positions.map((p) => <span key={p} className="pill">{p}</span>)}
+            <span className="pill gold">{t.registrations.length} registered</span>
+            <button onClick={async () => { try { await api.deleteOpenTrial(session, t.id); load(); } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); } }}>Remove</button>
+          </div>
+          {t.registrations.length > 0 && (
+            <div className="list-rows" style={{ marginTop: 8 }}>
+              {t.registrations.map((r) => (
+                <div key={r.id} className="list-row">
+                  <span className="grow"><b>{r.playerName}</b> <span className="dim">{r.position ?? ''}{r.age ? ` · ${r.age}` : ''}</span></span>
+                  {r.guardianManaged && <span className="pill red">U18 · guardian-managed</span>}
+                  {r.byGuardian && <span className="pill blue">registered by guardian</span>}
+                  {typeof r.trustScore === 'number' && <span className="pill">trust {r.trustScore}</span>}
+                  <span className="dim">{new Date(r.ts).toLocaleDateString()}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
+
 export function PlanScreen({ session, tick, notify }: ScreenProps) {
   const [info, setInfo] = useState<PlanInfo | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -1144,6 +1227,23 @@ export function PlayerDrawer({ session, playerId, notify, onClose }: {
             </div>
 
             <TrustBar score={player.trustScore} />
+
+            {(player.vouches?.length ?? 0) > 0 && (
+              <div className="section">
+                <h4>⭐ Coach references — named, email-verified</h4>
+                <div className="list-rows">
+                  {player.vouches!.map((v) => (
+                    <div key={v.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                      <div style={{ display: 'flex', gap: 10 }}>
+                        <span className="grow"><b>{v.coachName}</b> <span className="dim">{v.role}{v.seasons ? ` · ${v.seasons}` : ''}</span></span>
+                        <span className="pill green">verified</span>
+                      </div>
+                      {v.text && <div className="dim">“{v.text}”</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {player.guardianManaged && (
               <div className="notice warn" style={{ marginTop: 12 }}>

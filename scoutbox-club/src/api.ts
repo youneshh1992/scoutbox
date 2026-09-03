@@ -77,6 +77,16 @@ export interface TrialReport {
   notes?: string;
 }
 
+export interface Vouch {
+  id: string;
+  coachName: string;
+  role: string;
+  seasons: string | null;
+  text: string | null;
+  status: string;
+  ts: number;
+}
+
 export interface Player {
   id: string;
   name: string;
@@ -117,6 +127,8 @@ export interface Player {
   trialReports: TrialReport[];
   medical: Medical;
   createdAt?: number | null;
+  /** Coach references (grassroots-journey players) — named, email-verified. */
+  vouches?: Vouch[];
   drillResults?: CombineResult[];
   seasonHistory?: { season: string; appearances: number; goals: number; assists: number }[];
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { client } from '../../data/client';
+import { client, type ProgrammeInfo } from '../../data/client';
 import type { Drill } from '../../domain/types';
 import { useSession } from '../../state';
 import { colors } from '../../theme';
@@ -52,9 +52,11 @@ export default function Upload() {
   const [drillVideos, setDrillVideos] = useState<Record<string, string>>({});
   const [statDraft, setStatDraft] = useState<Record<string, string>>({});
   const [seasonDraft, setSeasonDraft] = useState('');
+  const [programme, setProgramme] = useState<ProgrammeInfo | null>(null);
 
   useEffect(() => {
     if (playerId) client.getDrills(playerId).then(setDrills).catch(() => {});
+    if (playerId && me?.pathway) client.getProgramme(playerId).then(setProgramme).catch(() => setProgramme(null));
   }, [playerId, me]);
   const [fixture, setFixture] = useState('');
   const [venue, setVenue] = useState('');
@@ -222,6 +224,67 @@ export default function Upload() {
             }}
           />
         </Card>
+
+        {programme && (
+          <Card style={{ borderColor: colors.accent2 }}>
+            <SectionTitle>🎓 Your training programme</SectionTitle>
+            {!programme.current ? (
+              <>
+                <Muted size={12.5}>
+                  Academy players get coaches — you get this. Free, position-specific, and every session
+                  feeds your streak and weekly goal. Pick your track:
+                </Muted>
+                <Row>
+                  {programme.tracks.map((t) => (
+                    <Button
+                      key={t.key}
+                      small
+                      primary={t.key === programme.suggested}
+                      label={`${t.label}${t.key === programme.suggested ? ' ★' : ''}`}
+                      onPress={async () => {
+                        try {
+                          await client.selectProgramme(playerId, t.key);
+                          setProgramme(await client.getProgramme(playerId));
+                          say('Track selected — first session is waiting below.');
+                        } catch (e) { say(e instanceof Error ? e.message : 'Could not start', true); }
+                      }}
+                    />
+                  ))}
+                </Row>
+              </>
+            ) : (
+              <>
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <Muted size={12.5}>{programme.current.label}</Muted>
+                  <Pill
+                    label={`${programme.current.doneThisWeek}/${programme.current.totalPerWeek} this week`}
+                    tone={programme.current.doneThisWeek >= programme.current.totalPerWeek ? 'green' : 'blue'}
+                  />
+                </Row>
+                {programme.current.sessions.map((sesh) => (
+                  <Row key={sesh.id} style={{ justifyContent: 'space-between' }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: sesh.done ? colors.muted : colors.text, fontSize: 13.5 }}>
+                        {sesh.done ? '✅ ' : ''}{sesh.day} — {sesh.title}
+                      </Text>
+                    </View>
+                    {!sesh.done && (
+                      <Button small label="Done" onPress={async () => {
+                        try {
+                          await client.completeProgrammeSession(playerId, sesh.id);
+                          setProgramme(await client.getProgramme(playerId));
+                          await refresh();
+                          say('Session logged — it counts toward your streak and weekly goal.');
+                        } catch (e) { say(e instanceof Error ? e.message : 'Could not log', true); }
+                      }} />
+                    )}
+                  </Row>
+                ))}
+                <Muted size={11.5}>Sessions with a matching drill count double when you record the drill below with video.</Muted>
+              </>
+            )}
+          </Card>
+        )}
 
         <Card>
           <SectionTitle>🏟 At-home combine</SectionTitle>

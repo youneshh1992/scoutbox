@@ -3,12 +3,56 @@
 > Purpose of this file: let any Claude Code session (cloud or local) pick up this
 > project with zero prior context. Keep it updated at the end of each working session.
 
-**Last updated:** 2026-09-02 · **Milestone: 8 complete — ScoutBox Grassroots,
+**Last updated:** 2026-09-03 · **Milestone: 9 complete — the Grassroots player
+journey (pathway + level-up moments, badges, training programmes, cohort
+benchmarks, opportunity radar, open trial days, First Team Seekers, coach
+vouches, season wrap)**; previously: **8 — ScoutBox Grassroots,
 a separate club platform (org levels, 50km radius, platform-scoped logins,
 federation registration, level ceiling)**; previously: **7 — production hardening
 (real auth + sessions, SQLite, adapter seams for mail/push/IDV/billing/storage,
 funnel analytics, moderation v2 with grooming escalation, CI + Docker deploy)** ·
 Developed in this GitHub repo (`youneshh1992/scoutbox`), Claude Code web.
+
+## Milestone 9 (2026-09-03): the Grassroots player journey
+
+Everything from the "grassroots players shouldn't feel undervalued" review
+except local leaderboards (deliberately excluded). All exclusive to
+amateur/semi-pro (`grassrootsOnly` 403 for pros; `pathway: null`).
+
+- **grassrootsJourney.mjs**: PROGRAMME_TRACKS (4 position tracks × 4 weekly
+  sessions built on combine drills), trackForPosition, weekKey (Monday-anchored)
+  + programmeProgress, pathwayFor (steps + signals + nextStep),
+  earnedGrassrootsBadges (Turnstile/Ever-Present/Season Regular/Iron Streak/
+  Combine Proven/First Club), percentileAmong (null under cohort of 3), inCohort.
+- **Server**: /player/me gains pathway/programme/vouches/firstTeamSeeker;
+  refreshJourneyBadges hooked into recordActivity + signings; level-up moment on
+  signing (notify player+guardian, timeline entry); programme endpoints
+  (GET/POST /player/programme, POST .../sessions/:id/complete → recordActivity);
+  /player/benchmarks (cohort percentiles, "context, not competition");
+  /player/opportunities (grassroots clubs ≤50km + lookingFor + open days);
+  open trial days (org POST/GET/DELETE /org/open-trials grassroots-only w/
+  moderated notes; player register adult-only + radius; guardian
+  /guardian/children/:id/open-trials filtered by visibleToOrg + register);
+  /org/looking-for; firstTeamSeeker endpoints (player adult / guardian child) +
+  grassroots search sorts seekers first + view flag; coach vouches
+  (db.vouches: request → mailer code "reference code is XXXXXXXX" → public
+  POST /vouch/submit, moderated, single-use, coachEmail/code never in views;
+  published vouches on all views of non-pro players; admin GET /admin/vouches +
+  revoke); /player/season-wrap (best streak from activityLog, ledger view count).
+- **Player app**: Home pathway card (3-step ladder + signal pills) + opportunity
+  radar (register buttons, guardian-routed for minors); Upload training
+  programme card (track picker ★ suggested, weekly checklist feeding streaks);
+  Profile: First Team Seeker toggle (in availability card), cohort benchmark
+  rows ("top N%"), Coach references section (list + adult request form);
+  You: Season wrap card; Guardian: per-child open days + register, seeker
+  toggle, vouch request. mockClient mirrors all (DEMO vouch auto-publishes 8s,
+  canned benchmarks/opportunities, localStorage-free in-memory stores).
+- **Grassroots app**: Open Days screen (post/manage/registrations w/
+  U18-guardian pills), lookingFor editor, 🔎 First Team Seeker pill + sort
+  boost, vouches in drawer; demo mirrors (Okafor seeded seeker, Kola vouch).
+- **Club app**: coach references render in the player drawer when present.
+- Tests: 23 unit (+4 journey), **95 API checks** (+25 M9), uiSpotcheck +
+  offline suites extended and green; artifacts republished.
 
 ## Milestone 8 (2026-09-02): ScoutBox Grassroots
 

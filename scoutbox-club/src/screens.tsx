@@ -1143,6 +1143,23 @@ export function PlayerDrawer({ session, playerId, notify, onClose }: {
 
             <TrustBar score={player.trustScore} />
 
+            {(player.vouches?.length ?? 0) > 0 && (
+              <div className="section">
+                <h4>⭐ Coach references — named, email-verified</h4>
+                <div className="list-rows">
+                  {player.vouches!.map((v) => (
+                    <div key={v.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                      <div style={{ display: 'flex', gap: 10 }}>
+                        <span className="grow"><b>{v.coachName}</b> <span className="dim">{v.role}{v.seasons ? ` · ${v.seasons}` : ''}</span></span>
+                        <span className="pill green">verified</span>
+                      </div>
+                      {v.text && <div className="dim">“{v.text}”</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {player.guardianManaged && (
               <div className="notice warn" style={{ marginTop: 12 }}>
                 This player is under 18. Their account is owned by a parent/guardian: you cannot message

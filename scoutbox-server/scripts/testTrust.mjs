@@ -8,6 +8,10 @@ import {
   haversineKm, playerLevelAfterSigning,
 } from '../domain.mjs';
 import { buildSeed } from '../seed.mjs';
+import {
+  PROGRAMME_TRACKS, trackForPosition, programmeProgress, pathwayFor,
+  earnedGrassrootsBadges, percentileAmong, weekKey,
+} from '../grassrootsJourney.mjs';
 
 let passed = 0;
 function test(name, fn) {
@@ -199,6 +203,49 @@ test('next actions guide the biggest gaps first', () => {
   const actions = nextActions(bare);
   assert.ok(actions.length > 0 && actions.length <= 3);
   assert.equal(actions[0].id, 'complete_profile');
+});
+
+test('grassroots journey: pathway is for the journey, not for pros', () => {
+  const amateur = { level: 'amateur', media: [], drillResults: [], attendance: [{}] };
+  const path = pathwayFor(amateur, { vouchCount: 2 });
+  assert.equal(path.level, 'amateur');
+  assert.equal(path.steps.find((s) => s.key === 'semi_pro').reached, false);
+  assert.equal(path.signals.coachVouches, 2);
+  assert.equal(pathwayFor({ level: 'pro' }), null, 'pro players have no pathway view');
+  const semi = pathwayFor({ level: 'semi_pro', media: [], drillResults: [], attendance: [] });
+  assert.equal(semi.steps.find((s) => s.key === 'semi_pro').reached, true);
+});
+
+test('grassroots journey: badges are earned from the record', () => {
+  const p = { level: 'amateur', badges: [], stats: { appearances: 22 }, attendance: [{}], drillResults: [], media: [] };
+  const earned = earnedGrassrootsBadges(p, { streak: 15 });
+  assert.ok(earned.includes('Turnstile'));
+  assert.ok(earned.includes('Season Regular'));
+  assert.ok(earned.includes('Iron Streak'));
+  assert.ok(!earned.includes('First Club'), 'First Club needs the semi-pro level-up');
+  assert.ok(earnedGrassrootsBadges({ ...p, level: 'semi_pro' }, {}).includes('First Club'));
+});
+
+test('grassroots journey: programmes track positions and weekly progress', () => {
+  assert.equal(trackForPosition('ST'), 'attack');
+  assert.equal(trackForPosition('GK'), 'keeper');
+  assert.equal(trackForPosition('CB'), 'defence');
+  const now = Date.now();
+  const player = { programme: { track: 'attack', startedAt: now, completed: [
+    { sessionId: 'atk-sprint', ts: now },
+    { sessionId: 'atk-finish', ts: now - 10 * 24 * 3600 * 1000 }, // last week — must not count
+  ] } };
+  const prog = programmeProgress(player, now);
+  assert.equal(prog.doneThisWeek, 1);
+  assert.equal(prog.totalPerWeek, PROGRAMME_TRACKS.attack.sessions.length);
+  assert.equal(prog.sessions.find((x) => x.id === 'atk-sprint').done, true);
+  assert.ok(weekKey(now) !== weekKey(now - 10 * 24 * 3600 * 1000));
+});
+
+test('grassroots journey: percentiles need a real cohort and honour direction', () => {
+  assert.equal(percentileAmong(10, [1, 2], false), null, 'cohort of 2 is too small');
+  assert.equal(percentileAmong(10, [1, 5, 9, 12], false), 75, 'higher is better');
+  assert.equal(percentileAmong(4.0, [4.5, 4.2, 4.8, 3.9], true), 75, 'lower is better (sprint times)');
 });
 
 console.log(`\n${passed} trust/safeguarding tests passed`);

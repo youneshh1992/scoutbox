@@ -7,7 +7,7 @@ import { Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextIn
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, useRouter } from 'expo-router';
 import { client, type Channel, type FiledReport, type GuardianDigest, type Insights } from '../data/client';
-import type { NotificationPrefs } from '../data/types';
+import type { NotificationPrefs, GuardianOpenTrial } from '../data/types';
 import { U18_PROMISES } from '../domain/safeguarding';
 import { useSession } from '../state';
 import { colors } from '../theme';
@@ -42,6 +42,17 @@ export default function GuardianDashboard() {
   const [prefsNote, setPrefsNote] = useState<string | null>(null);
   const [exportPreview, setExportPreview] = useState<string | null>(null);
   const [confirmDeleteChild, setConfirmDeleteChild] = useState<string | null>(null);
+  const [openDays, setOpenDays] = useState<Record<string, GuardianOpenTrial[]>>({});
+  const [vouchDrafts, setVouchDrafts] = useState<Record<string, { name: string; email: string }>>({});
+
+  useEffect(() => {
+    if (!guardianId) return;
+    for (const c of children) {
+      client.guardianChildOpenTrials(guardianId, c.id)
+        .then((list) => setOpenDays((prev) => ({ ...prev, [c.id]: list })))
+        .catch(() => {});
+    }
+  }, [guardianId, children, guardianInbox]);
 
   useEffect(() => {
     if (guardianId) client.guardianPrefs(guardianId).then((p) => p && setPrefs(p)).catch(() => {});
@@ -291,6 +302,74 @@ export default function GuardianDashboard() {
                     <Pill label={`Code: ${pairCodes[c.id].code}`} tone="gold" />
                   )}
                 </Row>
+                {(openDays[c.id]?.length ?? 0) > 0 && (
+                  <View style={{ gap: 6 }}>
+                    <Muted size={12.5}>📅 Open days near {c.name.split(' ')[0]} — verified local clubs only. You register; they play.</Muted>
+                    {openDays[c.id]!.map((t) => (
+                      <Row key={t.id} style={{ justifyContent: 'space-between' }}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ color: colors.text, fontSize: 13 }}>{t.orgName}: {t.title} · {t.date}</Text>
+                          <Muted size={11.5}>{t.venue} · {t.distanceKm} km away</Muted>
+                        </View>
+                        {t.registered ? <Pill label="registered ✓" tone="green" /> : (
+                          <Button small primary label="Register" onPress={async () => {
+                            try {
+                              await client.guardianRegisterOpenTrial(guardianId!, t.id, c.id);
+                              const list = await client.guardianChildOpenTrials(guardianId!, c.id);
+                              setOpenDays((prev) => ({ ...prev, [c.id]: list }));
+                            } catch (e) { setError(e instanceof Error ? e.message : 'Could not register'); }
+                          }} />
+                        )}
+                      </Row>
+                    ))}
+                  </View>
+                )}
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <View style={{ flex: 1, paddingRight: 10 }}>
+                    <Muted size={12.5}>
+                      🔎 First Team Seeker {c.firstTeamSeeker ? 'ON' : 'OFF'} — surfaces {c.name.split(' ')[0]} first to
+                      local verified clubs looking for new players. Your call, free, reversible.
+                    </Muted>
+                  </View>
+                  <Switch
+                    value={!!c.firstTeamSeeker}
+                    onValueChange={async (v) => {
+                      try { await client.guardianSetFirstTeamSeeker(guardianId!, c.id, v); await refresh(); }
+                      catch { /* refresh shows truth */ }
+                    }}
+                    trackColor={{ true: colors.accent, false: colors.line }}
+                    thumbColor="#fff"
+                  />
+                </Row>
+                <View style={{ gap: 6 }}>
+                  <Muted size={12.5}>⭐ Request a coach reference for {c.name.split(' ')[0]} — the coach confirms by email.</Muted>
+                  <Row>
+                    <TextInput
+                      style={[styles.input, { flex: 1 }]}
+                      placeholder="Coach name"
+                      placeholderTextColor={colors.muted}
+                      value={vouchDrafts[c.id]?.name ?? ''}
+                      onChangeText={(v) => setVouchDrafts((prev) => ({ ...prev, [c.id]: { name: v, email: prev[c.id]?.email ?? '' } }))}
+                    />
+                    <TextInput
+                      style={[styles.input, { flex: 1.3 }]}
+                      placeholder="Coach email"
+                      placeholderTextColor={colors.muted}
+                      autoCapitalize="none"
+                      value={vouchDrafts[c.id]?.email ?? ''}
+                      onChangeText={(v) => setVouchDrafts((prev) => ({ ...prev, [c.id]: { name: prev[c.id]?.name ?? '', email: v } }))}
+                    />
+                    <Button small label="Ask" onPress={async () => {
+                      const d = vouchDrafts[c.id];
+                      if (!d?.name.trim() || !d?.email.includes('@')) { setError('Coach name and a valid email are needed.'); return; }
+                      try {
+                        await client.guardianRequestVouch(guardianId!, c.id, d.name.trim(), d.email.trim(), 'Coach');
+                        setVouchDrafts((prev) => ({ ...prev, [c.id]: { name: '', email: '' } }));
+                        setError(null);
+                      } catch (e) { setError(e instanceof Error ? e.message : 'Could not send'); }
+                    }} />
+                  </Row>
+                </View>
                 {confirmDeleteChild === c.id ? (
                   <Row>
                     <Muted size={12.5}>Delete {c.name}&apos;s profile and all their content?</Muted>

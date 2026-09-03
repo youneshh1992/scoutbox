@@ -1,4 +1,4 @@
-# ScoutBox — Full System (Milestone 8: ScoutBox Grassroots)
+# ScoutBox — Full System (Milestone 9: the Grassroots player journey)
 
 Five pieces, one live dataset:
 
@@ -23,6 +23,39 @@ Messaging is symmetric and observable: messages flow both ways with read receipt
 count next to Messages (club sidebar) and on the Inbox tab (player app). The static
 demo builds sync across same-browser tabs too (BroadcastChannel bus), so the club
 tab and player tab hold one real conversation.
+
+## Milestone 9: the Grassroots player journey
+Features exclusive to amateur and semi-pro players — the academy experience,
+without the academy. Pro-level players never see any of it; every safeguarding
+rule holds unchanged.
+
+- **The pathway** — the amateur → semi-pro → academy/pro ladder, visible on the
+  player's Home with the signals clubs actually check (verified attendance,
+  verified clips, combine results, coach references). Levels move on real
+  signings; the **level-up moment** is celebrated: notification, timeline
+  entry, First Club badge, guardian informed.
+- **Grassroots badges** — Turnstile, Ever-Present, Season Regular, Iron Streak,
+  Combine Proven, First Club. Earned automatically from the record, never
+  purchasable.
+- **Free training programmes** — position-specific weekly tracks built from the
+  verified combine drills; completed sessions feed streaks and the weekly goal.
+- **Cohort benchmarks** — percentiles vs amateur/semi-pro players in the same
+  position group ("top 9% for goals"). Context, never a leaderboard, and never
+  measured against pros.
+- **The opportunity radar** — the 50km rule pointed the player's way: local
+  grassroots clubs with distance, what positions they're looking for, and
+  their open days.
+- **Open trial days** — grassroots clubs post open sessions; local adults
+  register in-app, guardians register their children (only to clubs allowed to
+  see them — verified + local, enforced server-side).
+- **First Team Seekers** — players (or guardians, for children) flag "looking
+  for my first club" and surface first to local grassroots clubs. Need-based,
+  free, never purchasable — Grassroots' own answer to Academy+.
+- **Coach references** — a named coach confirms by emailed one-time code; the
+  reference is moderated like every message and shows on the profile for every
+  club (coach email never exposed; admin can revoke).
+- **Season wrap** — the verified year in one card: goals, streak record,
+  combine bests, badges, scout views.
 
 ## Milestone 8: ScoutBox Grassroots — a separate platform for the local game
 The club side is now two platforms with a hard, server-enforced wall between

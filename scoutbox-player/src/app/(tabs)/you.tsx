@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { client, type FiledReport } from '../../data/client';
+import { client, type FiledReport, type SeasonWrap } from '../../data/client';
 import type { NotificationPrefs } from '../../data/types';
 import { SAFEGUARDING_PROMISES, U18_PROMISES } from '../../domain/safeguarding';
 import { useSession } from '../../state';
@@ -20,6 +20,7 @@ export default function You() {
   const [exportPreview, setExportPreview] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [wrap, setWrap] = useState<SeasonWrap | null>(null);
 
   useEffect(() => {
     if (playerId) client.getMyReports(playerId).then(setMyReports).catch(() => {});
@@ -117,6 +118,38 @@ export default function You() {
               </Card>
             ))}
           </>
+        )}
+
+        {me?.pathway && (
+          <Card style={{ borderColor: colors.accent }}>
+            <Row style={{ justifyContent: 'space-between' }}>
+              <SectionTitle>🎉 Your season wrap</SectionTitle>
+              <Button small primary label={wrap ? 'Refresh' : 'Show my season'} onPress={async () => {
+                try { setWrap(await client.getSeasonWrap(playerId!)); } catch { /* stays hidden */ }
+              }} />
+            </Row>
+            {wrap && (
+              <View style={{ gap: 6 }}>
+                <Text style={{ color: colors.text, fontSize: 17, fontWeight: '800' }}>
+                  {wrap.player.name} — {wrap.player.level === 'semi_pro' ? 'Semi-pro' : 'Amateur'} {wrap.player.position ?? ''}
+                </Text>
+                <Row>
+                  {wrap.season && <Pill label={`⚽ ${wrap.season.goals} goals`} tone="gold" />}
+                  {wrap.season && <Pill label={`👕 ${wrap.season.appearances} apps`} />}
+                  <Pill label={`📍 ${wrap.verifiedAttendances} verified matches`} tone="green" />
+                  <Pill label={`🎬 ${wrap.verifiedClips} verified clips`} />
+                  <Pill label={`🔥 best streak ${wrap.bestStreak}`} />
+                  <Pill label={`👁 ${wrap.scoutViews} scout views`} tone="blue" />
+                  {wrap.coachVouches > 0 && <Pill label={`⭐ ${wrap.coachVouches} coach reference${wrap.coachVouches === 1 ? '' : 's'}`} tone="gold" />}
+                </Row>
+                {wrap.combineBests.length > 0 && (
+                  <Muted size={12.5}>Combine bests: {wrap.combineBests.map((b) => `${b.metric} ${b.value}${b.unit}`).join(' · ')}</Muted>
+                )}
+                {wrap.badges.length > 0 && <Row>{wrap.badges.map((b) => <Pill key={b} label={`🏅 ${b}`} tone="gold" />)}</Row>}
+                <Muted size={11.5}>{wrap.note}</Muted>
+              </View>
+            )}
+          </Card>
         )}
 
         <SectionTitle>Notifications</SectionTitle>

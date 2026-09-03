@@ -13,4 +13,6 @@ export type {
   Me, SignupInput, AttendanceInput, DemoIdentity, PlayerClient, ReportInput, ChildInput,
   Channel, Message, MessageAttachment, AppNotification, Insights, FiledReport,
   PlayerFeedItem, PlayerCV, GuardianDigest,
+  Pathway, ProgrammeInfo, ProgrammeProgress, Benchmarks, Opportunities,
+  GuardianOpenTrial, Vouch, SeasonWrap,
 } from './types';

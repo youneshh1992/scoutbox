@@ -3,7 +3,7 @@
 import type {
   PlayerClient, SignupInput, Me, AttendanceInput, DemoIdentity, ReportInput, ChildInput,
   Channel, AppNotification, Insights, FiledReport, PlayerFeedItem, PlayerCV, GuardianDigest,
-  NotificationPrefs, DirectoryClub,
+  NotificationPrefs, DirectoryClub, ProgrammeInfo, Benchmarks, Opportunities, GuardianOpenTrial, SeasonWrap,
 } from './types';
 import { ClientError } from './types';
 import type { Availability, ContractStatus, InboxRequest, ChildInboxItem, Guardian, GuardianInboxRequest, Drill } from '../domain/types';
@@ -171,6 +171,30 @@ export const httpClient: PlayerClient = {
 
   getDirectory: () => request<DirectoryClub[]>('/orgs/directory'),
 
+  // ---- the Grassroots journey ----
+  getProgramme: (playerId) => request<ProgrammeInfo>('/player/programme', playerId),
+
+  selectProgramme: (playerId, track) =>
+    request<void>('/player/programme', playerId, { method: 'POST', body: JSON.stringify({ track }) }),
+
+  completeProgrammeSession: (playerId, sessionId) =>
+    request<void>(`/player/programme/sessions/${sessionId}/complete`, playerId, { method: 'POST' }),
+
+  getBenchmarks: (playerId) => request<Benchmarks>('/player/benchmarks', playerId),
+
+  getOpportunities: (playerId) => request<Opportunities>('/player/opportunities', playerId),
+
+  registerOpenTrial: (playerId, openTrialId) =>
+    request<void>(`/player/open-trials/${openTrialId}/register`, playerId, { method: 'POST' }),
+
+  setFirstTeamSeeker: (playerId, enabled) =>
+    request<void>('/player/first-team-seeker', playerId, { method: 'POST', body: JSON.stringify({ enabled }) }),
+
+  requestVouch: (playerId, coachName, coachEmail, role) =>
+    request<void>('/player/vouches/request', playerId, { method: 'POST', body: JSON.stringify({ coachName, coachEmail, role }) }),
+
+  getSeasonWrap: (playerId) => request<SeasonWrap>('/player/season-wrap', playerId),
+
   report: (playerId, input: ReportInput) =>
     request<void>('/player/report', playerId, { method: 'POST', body: JSON.stringify(input) }),
 
@@ -267,6 +291,18 @@ export const httpClient: PlayerClient = {
 
   guardianDeleteChild: (guardianId, childId) =>
     guardianRequest<void>(`/guardian/children/${childId}`, guardianId, { method: 'DELETE' }),
+
+  guardianChildOpenTrials: (guardianId, childId) =>
+    guardianRequest<{ openTrials: GuardianOpenTrial[] }>(`/guardian/children/${childId}/open-trials`, guardianId).then((r) => r.openTrials),
+
+  guardianRegisterOpenTrial: (guardianId, openTrialId, childId) =>
+    guardianRequest<void>(`/guardian/open-trials/${openTrialId}/register`, guardianId, { method: 'POST', body: JSON.stringify({ childId }) }),
+
+  guardianSetFirstTeamSeeker: (guardianId, childId, enabled) =>
+    guardianRequest<void>(`/guardian/children/${childId}/first-team-seeker`, guardianId, { method: 'POST', body: JSON.stringify({ enabled }) }),
+
+  guardianRequestVouch: (guardianId, childId, coachName, coachEmail, role) =>
+    guardianRequest<void>(`/guardian/children/${childId}/vouches/request`, guardianId, { method: 'POST', body: JSON.stringify({ coachName, coachEmail, role }) }),
 
   onChange: (cb) => {
     // SSE on web; polling elsewhere (native has no EventSource).

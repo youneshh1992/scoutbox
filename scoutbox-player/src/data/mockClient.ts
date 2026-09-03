@@ -6,7 +6,8 @@
 import type {
   PlayerClient, SignupInput, Me, AttendanceInput, DemoIdentity, ReportInput, ChildInput,
   Channel, AppNotification, Insights, FiledReport, PlayerFeedItem, PlayerCV, GuardianDigest,
-  NotificationPrefs, DirectoryClub,
+  NotificationPrefs, DirectoryClub, ProgrammeInfo, ProgrammeProgress, Benchmarks,
+  Opportunities, GuardianOpenTrial, SeasonWrap, Vouch,
 } from './types';
 import { ClientError } from './types';
 import type {
@@ -82,6 +83,83 @@ const pairingStore = {
   },
 };
 const guardianPrefsStore = new Map<string, NotificationPrefs>();
+
+// ---- Grassroots journey demo state ----
+const DEMO_TRACKS = [
+  { key: 'attack', label: 'Attacking track', positions: ['ST', 'CF', 'RW', 'LW', 'CAM'], sessionsPerWeek: 4 },
+  { key: 'midfield', label: 'Midfield track', positions: ['CM', 'CDM', 'RB', 'LB'], sessionsPerWeek: 4 },
+  { key: 'defence', label: 'Defensive track', positions: ['CB'], sessionsPerWeek: 4 },
+  { key: 'keeper', label: 'Goalkeeper track', positions: ['GK'], sessionsPerWeek: 4 },
+];
+const DEMO_SESSIONS: Record<string, { id: string; day: string; title: string; drillId: string | null }[]> = {
+  attack: [
+    { id: 'atk-sprint', day: 'Mon', title: 'Sprint ladder — top-end pace', drillId: 'drill-sprint-ladder' },
+    { id: 'atk-finish', day: 'Wed', title: 'Shooting arc — 20 finishes', drillId: 'drill-shooting-arc' },
+    { id: 'atk-touch', day: 'Fri', title: 'First touch under fatigue', drillId: 'drill-first-touch' },
+    { id: 'atk-match', day: 'Sat', title: 'Match or small-sided game (log attendance)', drillId: null },
+  ],
+  midfield: [
+    { id: 'mid-pass', day: 'Mon', title: 'Passing gates — both feet', drillId: 'drill-passing-gates' },
+    { id: 'mid-touch', day: 'Wed', title: 'First touch — wall rebounds', drillId: 'drill-first-touch' },
+    { id: 'mid-sprint', day: 'Fri', title: 'Repeat sprints — recovery runs', drillId: 'drill-sprint-ladder' },
+    { id: 'mid-match', day: 'Sat', title: 'Match or small-sided game (log attendance)', drillId: null },
+  ],
+  defence: [
+    { id: 'def-sprint', day: 'Mon', title: 'Recovery sprints', drillId: 'drill-sprint-ladder' },
+    { id: 'def-pass', day: 'Wed', title: 'Passing gates — building out', drillId: 'drill-passing-gates' },
+    { id: 'def-touch', day: 'Fri', title: 'First touch under pressure', drillId: 'drill-first-touch' },
+    { id: 'def-match', day: 'Sat', title: 'Match or small-sided game (log attendance)', drillId: null },
+  ],
+  keeper: [
+    { id: 'gk-feet', day: 'Mon', title: 'Distribution — passing gates', drillId: 'drill-passing-gates' },
+    { id: 'gk-hands', day: 'Wed', title: 'Handling — wall rebounds', drillId: 'drill-first-touch' },
+    { id: 'gk-power', day: 'Fri', title: 'Explosive steps — sprint ladder', drillId: 'drill-sprint-ladder' },
+    { id: 'gk-match', day: 'Sat', title: 'Match or shot-stopping session (log attendance)', drillId: null },
+  ],
+};
+const programmes = new Map<string, { track: string; startedAt: number; completed: { sessionId: string; ts: number }[] }>();
+const seekerFlags = new Map<string, boolean>();
+const vouchesByPlayer = new Map<string, Vouch[]>();
+const openTrialRegs = new Set<string>(); // `${playerId}:${openTrialId}`
+const DEMO_OPEN_TRIALS = [
+  { id: 'open-moss-1', title: 'Open training session', date: new Date(Date.now() + 12 * 86400000).toISOString().slice(0, 10), venue: 'Moss Side Rec', ageGroup: 'open', positions: ['ST', 'CM'], orgName: 'Moss Side Athletic' },
+  { id: 'open-hack-1', title: 'U15 open morning', date: new Date(Date.now() + 16 * 86400000).toISOString().slice(0, 10), venue: 'Hackney Marshes pitch 4', ageGroup: 'u16', positions: [], orgName: 'Hackney Marsh Rovers' },
+];
+
+function trackFor(position: string | null): string {
+  return DEMO_TRACKS.find((t) => t.positions.includes(position ?? ''))?.key ?? 'midfield';
+}
+function programmeView(playerId: string): ProgrammeProgress | null {
+  const prog = programmes.get(playerId);
+  if (!prog) return null;
+  const track = DEMO_TRACKS.find((t) => t.key === prog.track)!;
+  const week = 7 * 86400000;
+  const thisWeek = Math.floor((Date.now() - 4 * 86400000) / week);
+  const done = prog.completed.filter((c) => Math.floor((c.ts - 4 * 86400000) / week) === thisWeek).map((c) => c.sessionId);
+  const sessions = DEMO_SESSIONS[prog.track].map((x) => ({ ...x, done: done.includes(x.id) }));
+  return { track: prog.track, label: track.label, startedAt: prog.startedAt, sessions, doneThisWeek: done.length, totalPerWeek: sessions.length };
+}
+function pathwayView(p: PlayerProfile) {
+  const level = p.level ?? 'amateur';
+  if (level === 'pro') return null;
+  return {
+    level,
+    steps: [
+      { key: 'amateur', label: 'Amateur', reached: true, note: 'Where every journey starts.' },
+      { key: 'semi_pro', label: 'Semi-pro', reached: level === 'semi_pro', note: 'A grassroots club signing takes you here.' },
+      { key: 'pro', label: 'Academy / Pro', reached: false, note: 'An academy or pro club signing takes you here — and onto ScoutBox.' },
+    ],
+    signals: {
+      verifiedAttendances: (p.attendance ?? []).length,
+      verifiedClips: (p.media ?? []).filter((m) => m.verifiedClip).length,
+      combineVerified: (p.drillResults ?? []).filter((r) => r.verified).length,
+      coachVouches: (vouchesByPlayer.get(p.id) ?? []).filter((v) => v.status === 'published').length,
+    },
+    nextStep: level === 'amateur'
+      ? 'Get seen locally: verified attendance, a verified clip, and a coach vouch are what nearby clubs check first.'
+      : 'Keep the record growing — academy scouts on ScoutBox see your trust, combine numbers and trial reports.',
+  };
+}
 const listeners = new Set<(event?: string, payload?: Record<string, unknown>) => void>();
 let idc = 100;
 const nid = (p: string) => `${p}-${++idc}`;
@@ -552,6 +630,10 @@ export const mockClient: PlayerClient = {
       weeklyGoal: weeklyGoalOf(p.activityLog),
       nextActions: nextActionsOf(p),
       agingUp: isAdult(p.dob, p.country) && p.guardianId ? { eligible: true } : null,
+      pathway: pathwayView(p),
+      programme: programmeView(p.id),
+      vouches: (vouchesByPlayer.get(p.id) ?? []).slice(),
+      firstTeamSeeker: seekerFlags.get(p.id) ?? false,
     });
   },
 
@@ -881,6 +963,114 @@ export const mockClient: PlayerClient = {
     ]);
   },
 
+  // ---- the Grassroots journey (demo mirrors) ----
+  getProgramme: (playerId) => {
+    const p = getPlayer(playerId);
+    return delay<ProgrammeInfo>({ current: programmeView(playerId), tracks: DEMO_TRACKS, suggested: trackFor(p.position) });
+  },
+
+  selectProgramme: (playerId, track) => {
+    getPlayer(playerId);
+    if (!DEMO_SESSIONS[track]) throw new ClientError('TRACK_NOT_FOUND', 'No such track');
+    programmes.set(playerId, { track, startedAt: Date.now(), completed: [] });
+    emit();
+    return delay(undefined);
+  },
+
+  completeProgrammeSession: (playerId, sessionId) => {
+    const p = getPlayer(playerId);
+    const prog = programmes.get(playerId);
+    if (!prog) throw new ClientError('NO_PROGRAMME', 'Pick a training track first.');
+    prog.completed.push({ sessionId, ts: Date.now() });
+    recordActivity(p); // programme work feeds streaks + the weekly goal
+    emit();
+    return delay(undefined);
+  },
+
+  getBenchmarks: (playerId) => {
+    const p = getPlayer(playerId);
+    return delay<Benchmarks>({
+      cohortSize: 41,
+      note: 'Percentiles vs amateur & semi-pro players in your position group — context, not competition.',
+      drills: (p.drillResults ?? []).slice(0, 3).map((r, i) => ({
+        drillId: r.drillId, name: r.drillName, metric: r.metric, unit: r.unit, value: r.value,
+        percentile: [88, 74, 61][i] ?? 70,
+      })),
+      stats: [
+        { stat: 'goals', value: p.stats?.goals ?? 0, percentile: 91 },
+        { stat: 'appearances', value: p.stats?.appearances ?? 0, percentile: 77 },
+        { stat: 'passCompletionPct', value: p.stats?.passCompletionPct ?? 0, percentile: 58 },
+      ],
+    });
+  },
+
+  getOpportunities: (playerId) => {
+    const p = getPlayer(playerId);
+    const clubs = p.city.includes('London')
+      ? [] // demo Kola is Manchester-based; keep the radar city-consistent
+      : [{
+          id: 'org-mossside', name: 'Moss Side Athletic', city: 'Manchester', distanceKm: 2.4,
+          verified: false, safeguardingCertified: false, lookingFor: ['ST', 'CM'],
+          openTrials: DEMO_OPEN_TRIALS.filter((t) => t.id === 'open-moss-1').map((t) => ({ ...t, registered: openTrialRegs.has(`${playerId}:${t.id}`) })),
+        }];
+    return delay<Opportunities>({ radiusKm: 50, clubs, lookingForYou: clubs.filter((c) => c.lookingFor.includes(p.position ?? '')).length });
+  },
+
+  registerOpenTrial: (playerId, openTrialId) => {
+    const p = getPlayer(playerId);
+    if (isMinorProfile(p)) throw new ClientError('GUARDIAN_MANAGED', 'Your parent/guardian registers you for open days.');
+    const key = `${playerId}:${openTrialId}`;
+    if (openTrialRegs.has(key)) throw new ClientError('ALREADY_REGISTERED', 'Already registered.');
+    openTrialRegs.add(key);
+    pushNotification('player', playerId, 'open_trial', 'You are registered — details are in the open day listing.');
+    emit();
+    return delay(undefined);
+  },
+
+  setFirstTeamSeeker: (playerId, enabled) => {
+    const p = getPlayer(playerId);
+    if (isMinorProfile(p)) throw new ClientError('GUARDIAN_MANAGED', 'This is managed by your parent or guardian.');
+    seekerFlags.set(playerId, enabled);
+    emit();
+    return delay(undefined);
+  },
+
+  requestVouch: (playerId, coachName, coachEmail, role) => {
+    const p = getPlayer(playerId);
+    if (!coachName || !coachEmail.includes('@')) throw new ClientError('COACH_DETAILS_REQUIRED', 'Name the coach and their email address.');
+    const list = vouchesByPlayer.get(playerId) ?? [];
+    const vouch: Vouch = { id: nid('vch'), coachName, role: role || 'Coach', seasons: null, text: null, status: 'pending', ts: Date.now() };
+    list.unshift(vouch);
+    vouchesByPlayer.set(playerId, list);
+    // Demo mail transport: the coach "replies" moments later.
+    setTimeout(() => {
+      vouch.status = 'published';
+      vouch.text = `${p.name.split(' ')[0]} trained with me — reliable, coachable, and improving every month.`;
+      vouch.seasons = '2024–2026';
+      pushNotification('player', playerId, 'vouch', `⭐ ${coachName} published a coach reference on your profile.`);
+      emit();
+    }, 8000);
+    emit();
+    return delay(undefined);
+  },
+
+  getSeasonWrap: (playerId) => {
+    const p = getPlayer(playerId);
+    return delay<SeasonWrap>({
+      generatedAt: new Date().toISOString(),
+      player: { name: p.name, position: p.position, level: p.level ?? 'amateur' },
+      season: p.stats,
+      verifiedAttendances: (p.attendance ?? []).length,
+      verifiedClips: (p.media ?? []).filter((m) => m.verifiedClip).length,
+      bestStreak: 9,
+      combineBests: (p.drillResults ?? []).filter((r) => r.verified).map((r) => ({ drillName: r.drillName, metric: r.metric, value: r.value, unit: r.unit })),
+      badges: p.badges,
+      coachVouches: (vouchesByPlayer.get(playerId) ?? []).filter((v) => v.status === 'published').length,
+      scoutViews: 14,
+      note: 'Your season, verified. Every number above is backed by the ledger — no vanity metrics.',
+    });
+  },
+
   report: (playerId, input: ReportInput) => {
     getPlayer(playerId);
     commsLog.push({ id: nid('log'), ts: Date.now(), type: `report_${input.targetKind}`, orgName: input.targetOrgId ?? '', scoutName: input.targetScoutName ?? '', playerId });
@@ -953,7 +1143,7 @@ export const mockClient: PlayerClient = {
       g.childIds
         .map((id) => players.get(id))
         .filter((p): p is PlayerProfile => !!p)
-        .map((p) => ({ ...p, age: ageOn(p.dob), trustScore: computeTrustScore(p), trust: trustBreakdown(p) }))
+        .map((p) => ({ ...p, age: ageOn(p.dob), trustScore: computeTrustScore(p), trust: trustBreakdown(p), firstTeamSeeker: seekerFlags.get(p.id) ?? false, vouches: (vouchesByPlayer.get(p.id) ?? []).slice() }))
     );
   },
 
@@ -1226,6 +1416,40 @@ export const mockClient: PlayerClient = {
     commsLog.push({ id: nid('log'), ts: Date.now(), type: 'org_blocked_by_guardian', orgName: orgId, scoutName: '', playerId: childId ?? g.childIds[0] ?? '' });
     emit();
     return delay(undefined);
+  },
+
+  guardianChildOpenTrials: (guardianId, childId) => {
+    const g = guardians.get(guardianId);
+    if (!g || !g.childIds.includes(childId)) throw new ClientError('CHILD_NOT_FOUND', 'No such child.');
+    return delay<GuardianOpenTrial[]>(DEMO_OPEN_TRIALS.filter((t) => t.id === 'open-hack-1').map((t) => ({
+      ...t, orgName: 'Hackney Marsh Rovers', verified: true, safeguardingCertified: true,
+      distanceKm: 3.1, registered: openTrialRegs.has(`${childId}:${t.id}`),
+    })));
+  },
+
+  guardianRegisterOpenTrial: (guardianId, openTrialId, childId) => {
+    const g = guardians.get(guardianId);
+    if (!g || !g.childIds.includes(childId)) throw new ClientError('CHILD_NOT_FOUND', 'No such child.');
+    const key = `${childId}:${openTrialId}`;
+    if (openTrialRegs.has(key)) throw new ClientError('ALREADY_REGISTERED', 'Already registered.');
+    openTrialRegs.add(key);
+    pushNotification('player', childId, 'open_trial', 'Your parent/guardian registered you for an open day — good luck!');
+    emit();
+    return delay(undefined);
+  },
+
+  guardianSetFirstTeamSeeker: (guardianId, childId, enabled) => {
+    const g = guardians.get(guardianId);
+    if (!g || !g.childIds.includes(childId)) throw new ClientError('CHILD_NOT_FOUND', 'No such child.');
+    seekerFlags.set(childId, enabled);
+    emit();
+    return delay(undefined);
+  },
+
+  guardianRequestVouch: (guardianId, childId, coachName, coachEmail, role) => {
+    const g = guardians.get(guardianId);
+    if (!g || !g.childIds.includes(childId)) throw new ClientError('CHILD_NOT_FOUND', 'No such child.');
+    return (mockClient.requestVouch as (p: string, n: string, e: string, r: string) => Promise<void>)(childId, coachName, coachEmail, role);
   },
 
   onChange: (cb) => {

@@ -23,10 +23,46 @@ export interface Org {
   /** Proven control of a company mailbox (email-domain challenge). */
   emailDomainVerified?: boolean;
   emailDomain?: string;
+  /** Positions this club is recruiting — powers players' opportunity radar. */
+  lookingFor?: string[];
 }
 
 // Grassroots views carry distance from the club's ground; pro-market fields
 // (academyPlus, marketValueRange, agentName) are absent by server rule.
+export interface Vouch {
+  id: string;
+  coachName: string;
+  role: string;
+  seasons: string | null;
+  text: string | null;
+  status: string;
+  ts: number;
+}
+
+export interface OpenTrialRegistration {
+  id: string;
+  playerId: string;
+  playerName: string;
+  byGuardian: boolean;
+  ts: number;
+  age?: number | null;
+  position?: string | null;
+  trustScore?: number | null;
+  guardianManaged?: boolean;
+}
+
+export interface OpenTrial {
+  id: string;
+  title: string;
+  date: string;
+  venue: string;
+  ageGroup: string;
+  positions: string[];
+  notes: string;
+  createdAt: number;
+  registrations: OpenTrialRegistration[];
+}
+
 export interface Session {
   org: Org;
   userId: string;
@@ -115,6 +151,9 @@ export interface Player {
   trustScore: number;
   distanceKm?: number;
   level?: string;
+  /** Grassroots' own cohort: surfaced first, need-based, never purchasable. */
+  firstTeamSeeker?: boolean;
+  vouches?: Vouch[];
   attendance: Attendance[];
   timeline: { year: string; event: string }[];
   media: MediaItem[];
@@ -416,6 +455,10 @@ export interface ScoutboxApi {
   recordSigning(s: Session, playerId: string): Promise<SigningRecord>;
   trialIcsUrl(s: Session, trialId: string): string | null;
   getFunnel(s: Session): Promise<Funnel>;
+  getOpenTrials(s: Session): Promise<OpenTrial[]>;
+  postOpenTrial(s: Session, input: { title: string; date: string; venue: string; ageGroup: string; positions: string[]; notes?: string }): Promise<void>;
+  deleteOpenTrial(s: Session, id: string): Promise<void>;
+  setLookingFor(s: Session, positions: string[]): Promise<void>;
   getInvoices(s: Session): Promise<Invoice[]>;
   requestEmailVerification(s: Session, email: string): Promise<void>;
   confirmEmailVerification(s: Session, code: string): Promise<{ emailDomain: string }>;
@@ -545,6 +588,17 @@ export const httpApi: ScoutboxApi = {
   trialIcsUrl: (s, trialId) => `${API_URL}/org/trials/${trialId}/ics`,
 
   getFunnel: (s) => request<Funnel>('/org/funnel', { headers: headers(s) }),
+
+  getOpenTrials: (s) => request<OpenTrial[]>('/org/open-trials', { headers: headers(s) }),
+
+  postOpenTrial: (s, input) =>
+    request<void>('/org/open-trials', { method: 'POST', headers: headers(s), body: JSON.stringify(input) }),
+
+  deleteOpenTrial: (s, id) =>
+    request<void>(`/org/open-trials/${id}`, { method: 'DELETE', headers: headers(s) }),
+
+  setLookingFor: (s, positions) =>
+    request<void>('/org/looking-for', { method: 'POST', headers: headers(s), body: JSON.stringify({ positions }) }),
 
   getInvoices: (s) => request<Invoice[]>('/org/invoices', { headers: headers(s) }),
 

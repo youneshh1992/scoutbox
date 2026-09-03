@@ -71,6 +71,8 @@ export interface PlayerProfile {
   city: string;
   /** Set on under-18 profiles: the guardian owns the account. */
   guardianId?: string | null;
+  /** amateur | semi_pro | pro — moves on real signings; walls the platforms. */
+  level?: string;
   squadNumber?: number | null;
   contractUntil?: string | null;
   marketValueRange?: string | null;

@@ -26,14 +26,30 @@ const freshPage = async () => {
   await page.waitForSelector('text=Club directory', { timeout: 10000 });
   say(`directory card renders: ${await page.locator('text=Eastport FC').first().isVisible()}`);
 
+  // M9: pathway + opportunity radar on Home
+  await page.waitForSelector('text=Your pathway', { timeout: 10000 });
+  await page.waitForSelector('text=Clubs within reach', { timeout: 10000 });
+  await page.waitForSelector('text=Moss Side Athletic', { timeout: 5000 });
+  say('pathway + opportunity radar render on Home');
+
   await page.waitForTimeout(9000); // delayed demo trial request arrives with slots
   await page.click('a[href="/inbox"]');
   await page.waitForSelector('text=Pick the date that works', { timeout: 15000 });
   say('trial slot picker renders in inbox');
 
+  // M9: training programme on Upload
+  await page.click('a[href="/upload"]');
+  await page.waitForSelector('text=Your training programme', { timeout: 15000 });
+  await page.getByText('Attacking track ★', { exact: true }).click();
+  await page.waitForSelector('text=this week', { timeout: 10000 });
+  say('training programme: track selected, weekly sessions render');
+
   await page.click('a[href="/profile"]');
   await page.waitForSelector('text=season by season', { timeout: 15000 });
   say('season history + goals trend renders on profile');
+  await page.waitForSelector('text=Coach references', { timeout: 10000 });
+  await page.waitForSelector('text=your cohort, not the pros', { timeout: 10000 });
+  say('coach references + cohort benchmarks render on profile');
 
   await page.click('a[href="/you"]');
   await page.waitForSelector('text=School-hours mute', { timeout: 15000 });

@@ -13,6 +13,10 @@ import { fileURLToPath } from 'node:url';
 import { buildSeed } from './seed.mjs';
 import { openStore } from './store.mjs';
 import {
+  PROGRAMME_TRACKS, trackForPosition, programmeProgress, pathwayFor,
+  earnedGrassrootsBadges, percentileAmong, inCohort,
+} from './grassrootsJourney.mjs';
+import {
   hashPassword, verifyPassword, newToken, randomCode, makeRateLimiter,
   createMailer, createPushSender, createIdvProvider, createBilling, createStorage,
 } from './adapters.mjs';
@@ -111,7 +115,13 @@ db.pushLog ??= [];         // push dev transport (+ delivery audit when live)
 db.pushTokens ??= [];      // device push tokens, registered per user
 db.invoices ??= [];        // billing records (success fees)
 db.emailChallenges ??= []; // club email-domain verification codes
+db.openTrials ??= [];      // grassroots open trial days + registrations
+db.vouches ??= [];         // coach references (email-code verified)
 db.mediaBlobs ??= {};
+for (const p of db.players) {
+  p.firstTeamSeeker ??= false;
+  p.programme ??= null;
+}
 
 // ---------------------------------------------------- production adapters
 const mailer = createMailer(db, (p) => nextId(p));
@@ -356,6 +366,26 @@ function channelViewFor(channel, viewer) {
 function recordActivity(player) {
   player.activityLog ??= [];
   player.activityLog.push(Date.now());
+  refreshJourneyBadges(player);
+}
+
+// Grassroots journey badges: awarded automatically as the record grows.
+// Level-up moments are handled at the signing itself.
+function refreshJourneyBadges(player) {
+  if (player.level === 'pro') return;
+  const earned = earnedGrassrootsBadges(player, { streak: computeStreak(player.activityLog) });
+  for (const badge of earned) {
+    if (!player.badges.includes(badge)) {
+      player.badges.push(badge);
+      notify({ kind: 'player', id: player.id }, 'badge', `🏅 Badge earned: ${badge}. It's on your profile — recognition that never depends on being scouted.`, player.id);
+    }
+  }
+}
+
+function publishedVouchesFor(playerId) {
+  return db.vouches
+    .filter((v) => v.playerId === playerId && v.status === 'published')
+    .map(({ coachEmail, code, ...visible }) => visible);
 }
 
 // Safeguarding certification is EARNED and losable: verification + signed
@@ -464,7 +494,11 @@ function playerViewForOrg(player, org) {
     delete view.agentName;
     delete view.contractUntil;
     view.distanceKm = Math.round(haversineKm(org.location, player.location) * 10) / 10;
+    view.firstTeamSeeker = !!player.firstTeamSeeker; // Grassroots' own cohort
   }
+  // Coach references travel with grassroots-journey players everywhere.
+  if (player.level !== 'pro') view.vouches = publishedVouchesFor(player.id);
+  delete view.programme;
   delete view.location; // coordinates never leave the server
   return view;
 }
@@ -1123,8 +1157,12 @@ orgRouter.get('/players', (req, res) => {
   }
 
   if (req.org.level === 'grassroots') {
-    // Local game first: nearest ground wins ties on trust.
-    list.sort((a, b) => (a.distanceKm ?? 999) - (b.distanceKm ?? 999) || b.trustScore - a.trustScore);
+    // First Team Seekers surface first (need-based, never purchasable),
+    // then nearest ground, then trust.
+    list.sort((a, b) =>
+      (b.firstTeamSeeker ? 1 : 0) - (a.firstTeamSeeker ? 1 : 0) ||
+      (a.distanceKm ?? 999) - (b.distanceKm ?? 999) ||
+      b.trustScore - a.trustScore);
   } else {
     // Academy+ is a boosted cohort: opted-in players surface first.
     list.sort((a, b) => (b.academyPlus ? 1 : 0) - (a.academyPlus ? 1 : 0) || b.trustScore - a.trustScore);
@@ -1586,7 +1624,19 @@ orgRouter.post('/players/:id/signing', (req, res) => {
   if (signing.insideAttributionWindow) void billing.invoiceForSigning(signing, req.org);
   // A signing moves the player's level: grassroots signings make semi-pros,
   // academy/pro signings make pros — who then leave the Grassroots platform.
+  const levelBefore = p.level ?? 'amateur';
   p.level = playerLevelAfterSigning(req.org.level);
+  if (levelBefore === 'amateur' && p.level === 'semi_pro') {
+    // The level-up moment: a life event, celebrated and recorded.
+    p.timeline.push({ year: String(new Date().getFullYear()), event: `Levelled up: amateur → semi-pro with ${req.org.name}` });
+    notify({ kind: 'player', id: p.id }, 'level_up', `⬆️ You're semi-pro. ${req.org.name} signed you — one step up the ladder, recorded forever on your pathway.`, p.id);
+    if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'level_up', `${p.name} levelled up: amateur → semi-pro with ${req.org.name}.`, p.id);
+  } else if (levelBefore !== 'pro' && p.level === 'pro') {
+    p.timeline.push({ year: String(new Date().getFullYear()), event: `Levelled up: ${levelBefore.replace('_', '-')} → pro with ${req.org.name}` });
+    notify({ kind: 'player', id: p.id }, 'level_up', `⬆️ Academy/pro level reached with ${req.org.name}. Your grassroots journey got you here.`, p.id);
+    if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'level_up', `${p.name} reached academy/pro level with ${req.org.name}.`, p.id);
+  }
+  refreshJourneyBadges(p);
   p.contractStatus = 'under_contract';
   p.availability = 'not_seeking';
   p.timeline.push({ year: String(new Date().getFullYear()), event: `Signed by ${req.org.name} — discovered on ScoutBox` });
@@ -1602,6 +1652,67 @@ orgRouter.get('/signings', (req, res) => {
 
 orgRouter.get('/invoices', (req, res) => {
   res.json(db.invoices.filter((i) => i.orgId === req.org.id).slice().reverse());
+});
+
+// ------------------------------------------- open trial days (grassroots)
+function grassrootsOrgOnly(req, res) {
+  if (req.org.level !== 'grassroots') {
+    res.status(403).json({ error: 'GRASSROOTS_ORGS_ONLY', message: 'Open days are a ScoutBox Grassroots feature.' });
+    return true;
+  }
+  return false;
+}
+
+orgRouter.post('/open-trials', (req, res) => {
+  if (grassrootsOrgOnly(req, res)) return;
+  const { title, date, venue, ageGroup, positions, notes } = req.body || {};
+  if (!title || !date || !venue) return res.status(400).json({ error: 'TITLE_DATE_VENUE_REQUIRED' });
+  if (notes && !moderateOrRefuse(res, notes, { kind: 'open_trial_notes', orgId: req.org.id })) return;
+  const trial = {
+    id: nextId('open'), orgId: req.org.id, orgName: req.org.name,
+    title: String(title).trim(), date: String(date), venue: String(venue).trim(),
+    ageGroup: ageGroup || 'open', positions: Array.isArray(positions) ? positions : [],
+    notes: notes || '', createdByUserId: req.orgUser.id, createdAt: Date.now(), registrations: [],
+  };
+  db.openTrials.push(trial);
+  ledgerAppend({ type: 'open_trial_posted', playerId: null, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
+  persist();
+  broadcast('openTrials');
+  res.status(201).json({ openTrial: trial });
+});
+
+orgRouter.get('/open-trials', (req, res) => {
+  if (grassrootsOrgOnly(req, res)) return;
+  // Registration lists respect visibility: a club that cannot see a minor
+  // never received their registration in the first place.
+  res.json(db.openTrials.filter((t) => t.orgId === req.org.id).map((t) => ({
+    ...t,
+    registrations: (t.registrations ?? []).map((r) => {
+      const p = findPlayer(r.playerId);
+      const view = p ? playerViewForOrg(p, req.org) : null;
+      return { ...r, age: view?.age ?? null, position: view?.position ?? null, trustScore: view?.trustScore ?? null, guardianManaged: !!view?.guardianManaged };
+    }),
+  })).reverse());
+});
+
+orgRouter.delete('/open-trials/:id', (req, res) => {
+  if (grassrootsOrgOnly(req, res)) return;
+  const before = db.openTrials.length;
+  db.openTrials = db.openTrials.filter((t) => !(t.id === req.params.id && t.orgId === req.org.id));
+  if (db.openTrials.length === before) return res.status(404).json({ error: 'OPEN_TRIAL_NOT_FOUND' });
+  persist();
+  broadcast('openTrials');
+  res.json({ deleted: true });
+});
+
+// What the club is looking for — powers the players' opportunity radar.
+orgRouter.post('/looking-for', (req, res) => {
+  if (grassrootsOrgOnly(req, res)) return;
+  const positions = Array.isArray(req.body?.positions) ? req.body.positions.slice(0, 5) : [];
+  req.org.lookingFor = positions;
+  persist();
+  broadcast('orgs');
+  res.json({ lookingFor: req.org.lookingFor });
 });
 
 // ------------------------------------------------------ recruitment funnel
@@ -1742,6 +1853,10 @@ playerRouter.get('/me', (req, res) => {
     nextActions: nextActions(req.player),
     // Aging-up: an adult still linked to a guardian is offered ownership.
     agingUp: isAdult(req.player) && req.player.guardianId ? { eligible: true } : null,
+    // The Grassroots journey (null for pro-level players).
+    pathway: pathwayFor(req.player, { vouchCount: publishedVouchesFor(req.player.id).length }),
+    programme: programmeProgress(req.player),
+    vouches: db.vouches.filter((v) => v.playerId === req.player.id).map(({ coachEmail, code, ...v }) => v),
   });
 });
 
@@ -2133,6 +2248,188 @@ playerRouter.post('/drills/:id/complete', (req, res) => {
   res.json({ drills: req.player.drills, drillResults: req.player.drillResults });
 });
 
+// ---------------------------------------------- the Grassroots journey
+// Everything in this block is exclusive to amateur/semi-pro players.
+function grassrootsOnly(req, res) {
+  if (req.player.level === 'pro') {
+    res.status(403).json({ error: 'GRASSROOTS_ONLY', message: 'This is part of the Grassroots journey — pro-level players have moved past it.' });
+    return true;
+  }
+  return false;
+}
+
+// Free structured training programmes, built from the verified combine.
+playerRouter.get('/programme', (req, res) => {
+  if (grassrootsOnly(req, res)) return;
+  res.json({
+    current: programmeProgress(req.player),
+    tracks: Object.values(PROGRAMME_TRACKS).map(({ key, label, positions, sessions }) => ({ key, label, positions, sessionsPerWeek: sessions.length })),
+    suggested: trackForPosition(req.player.position),
+  });
+});
+
+playerRouter.post('/programme', (req, res) => {
+  if (grassrootsOnly(req, res)) return;
+  const track = PROGRAMME_TRACKS[req.body?.track];
+  if (!track) return res.status(400).json({ error: 'TRACK_NOT_FOUND' });
+  req.player.programme = { track: track.key, startedAt: Date.now(), completed: [] };
+  persist();
+  broadcast('players', { playerId: req.player.id });
+  res.status(201).json({ current: programmeProgress(req.player) });
+});
+
+playerRouter.post('/programme/sessions/:id/complete', (req, res) => {
+  if (grassrootsOnly(req, res)) return;
+  if (!req.player.programme) return res.status(409).json({ error: 'NO_PROGRAMME', message: 'Pick a training track first.' });
+  const track = PROGRAMME_TRACKS[req.player.programme.track];
+  const session = track?.sessions.find((x) => x.id === req.params.id);
+  if (!session) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
+  req.player.programme.completed.push({ sessionId: session.id, ts: Date.now() });
+  recordActivity(req.player); // programme work feeds streaks + the weekly goal
+  broadcast('players', { playerId: req.player.id });
+  res.json({ current: programmeProgress(req.player) });
+});
+
+// Honest context, never a leaderboard: percentiles vs the amateur/semi-pro
+// cohort in the same position group. Small cohorts return null.
+playerRouter.get('/benchmarks', (req, res) => {
+  if (grassrootsOnly(req, res)) return;
+  const cohort = db.players.filter((c) => c.id !== req.player.id && inCohort(req.player, c));
+  const drillBests = (playerX, drillId, lowerIsBetter) => {
+    const results = (playerX.drillResults ?? []).filter((r) => r.drillId === drillId);
+    if (!results.length) return null;
+    const values = results.map((r) => r.value);
+    return lowerIsBetter ? Math.min(...values) : Math.max(...values);
+  };
+  const drills = DRILLS.map((d) => {
+    const mine = drillBests(req.player, d.id, d.lowerIsBetter);
+    if (mine === null) return null;
+    const cohortValues = cohort.map((c) => drillBests(c, d.id, d.lowerIsBetter)).filter((v) => v !== null);
+    return { drillId: d.id, name: d.name, metric: d.metric, unit: d.unit, value: mine, percentile: percentileAmong(mine, cohortValues, d.lowerIsBetter) };
+  }).filter(Boolean);
+  const statKeys = ['goals', 'assists', 'appearances', 'passCompletionPct', 'duelSuccessPct'];
+  const stats = statKeys.map((k) => {
+    const mine = req.player.stats?.[k];
+    if (typeof mine !== 'number') return null;
+    const cohortValues = cohort.map((c) => c.stats?.[k]).filter((v) => typeof v === 'number');
+    return { stat: k, value: mine, percentile: percentileAmong(mine, cohortValues, false) };
+  }).filter(Boolean);
+  res.json({ cohortSize: cohort.length, note: 'Percentiles vs amateur & semi-pro players in your position group — context, not competition.', drills, stats });
+});
+
+// The opportunity radar: the 50km rule, pointed the player's way.
+playerRouter.get('/opportunities', (req, res) => {
+  if (grassrootsOnly(req, res)) return;
+  if (!req.player.location) return res.json({ clubs: [], note: 'Set your location to see clubs within reach.' });
+  const clubs = db.orgs
+    .filter((o) => o.level === 'grassroots' && o.location)
+    .map((o) => ({ org: o, distanceKm: Math.round(haversineKm(o.location, req.player.location) * 10) / 10 }))
+    .filter((x) => x.distanceKm <= GRASSROOTS_RADIUS_KM)
+    .sort((a, b) => a.distanceKm - b.distanceKm)
+    .map(({ org, distanceKm }) => ({
+      id: org.id, name: org.name, city: org.location.city ?? '', distanceKm,
+      verified: org.verified, safeguardingCertified: safeguardingCertified(org),
+      lookingFor: org.lookingFor ?? [],
+      openTrials: db.openTrials.filter((t) => t.orgId === org.id && t.date >= new Date().toISOString().slice(0, 10))
+        .map(({ registrations, ...t }) => ({ ...t, registered: (registrations ?? []).some((r) => r.playerId === req.player.id) })),
+    }));
+  res.json({ radiusKm: GRASSROOTS_RADIUS_KM, clubs, lookingForYou: clubs.filter((c) => c.lookingFor.includes(req.player.position)).length });
+});
+
+// Open trial days near the player. Adults register directly; minors see them
+// but registration belongs to the guardian — Scout → Parent, always.
+playerRouter.post('/open-trials/:id/register', (req, res) => {
+  if (grassrootsOnly(req, res)) return;
+  if (guardianManagedOnly(req, res)) return;
+  const trial = db.openTrials.find((t) => t.id === req.params.id);
+  if (!trial) return res.status(404).json({ error: 'OPEN_TRIAL_NOT_FOUND' });
+  const org = db.orgs.find((o) => o.id === trial.orgId);
+  if (!org || !req.player.location || !org.location || haversineKm(org.location, req.player.location) > GRASSROOTS_RADIUS_KM) {
+    return res.status(403).json({ error: 'OUT_OF_RADIUS', message: 'Open days are local — this one is beyond 50km of you.' });
+  }
+  trial.registrations ??= [];
+  if (trial.registrations.some((r) => r.playerId === req.player.id)) return res.status(409).json({ error: 'ALREADY_REGISTERED' });
+  trial.registrations.push({ id: nextId('otr'), playerId: req.player.id, playerName: req.player.name, byGuardian: false, ts: Date.now() });
+  ledgerAppend({ type: 'open_trial_registration', playerId: req.player.id, orgId: org.id, orgName: org.name, userId: trial.createdByUserId ?? null, scoutName: 'open day' });
+  notify({ kind: 'org_user', id: trial.createdByUserId }, 'open_trial', `${req.player.name} registered for "${trial.title}".`, trial.id);
+  persist();
+  res.status(201).json({ registered: true });
+});
+
+// First Team Seekers: Grassroots' own cohort — need-based, free, never
+// purchasable. Adults set it themselves; guardians set it for children.
+playerRouter.post('/first-team-seeker', (req, res) => {
+  if (grassrootsOnly(req, res)) return;
+  if (guardianManagedOnly(req, res)) return;
+  req.player.firstTeamSeeker = !!req.body?.enabled;
+  persist();
+  broadcast('players', { playerId: req.player.id });
+  res.json({ firstTeamSeeker: req.player.firstTeamSeeker });
+});
+
+// Coach vouches: a named, verified local coach is the most valuable
+// credential an amateur can hold. The coach proves mailbox control with a
+// one-time code; the text is moderated like every other message.
+function createVouchRequest(player, { coachName, coachEmail, role }, res) {
+  if (!coachName || !coachEmail || !coachEmail.includes('@')) {
+    return res.status(400).json({ error: 'COACH_DETAILS_REQUIRED', message: 'Name the coach and their email address.' });
+  }
+  const vouch = {
+    id: nextId('vch'), playerId: player.id, playerName: player.name,
+    coachName: String(coachName).trim(), coachEmail: String(coachEmail).trim(), role: String(role ?? 'Coach').trim(),
+    status: 'pending', code: randomCode(8), text: null, seasons: null, ts: Date.now(), publishedAt: null,
+  };
+  db.vouches.push(vouch);
+  void mailer.send({
+    to: vouch.coachEmail,
+    subject: `Reference request for ${player.name} on ScoutBox`,
+    text: `Hi ${vouch.coachName},
+
+${player.name} has asked you for a coach reference on ScoutBox Grassroots.
+
+Your one-time reference code is ${vouch.code}. Submitting with it confirms this mailbox is yours; your name and role will appear with the reference on ${player.name}'s profile.
+
+References are screened by moderation and reviewed by Trust & Safety.`,
+  });
+  persist();
+  res.status(201).json({ requested: true, vouchId: vouch.id });
+}
+
+// The season wrap: everything the year added up to, in one card.
+playerRouter.get('/season-wrap', (req, res) => {
+  if (grassrootsOnly(req, res)) return;
+  const p = req.player;
+  // Longest streak ever, from the activity log.
+  const DAY_MS = 24 * 3600 * 1000;
+  const days = [...new Set((p.activityLog ?? []).map((ts) => Math.floor(ts / DAY_MS)))].sort((a, b) => a - b);
+  let bestStreak = 0;
+  let run = 0;
+  for (let i = 0; i < days.length; i++) {
+    run = i > 0 && days[i] === days[i - 1] + 1 ? run + 1 : 1;
+    bestStreak = Math.max(bestStreak, run);
+  }
+  const verifiedBests = (p.drillResults ?? []).filter((r) => r.verified);
+  res.json({
+    generatedAt: new Date().toISOString(),
+    player: { name: p.name, position: p.position, level: p.level ?? 'amateur' },
+    season: p.stats ?? null,
+    verifiedAttendances: (p.attendance ?? []).length,
+    verifiedClips: (p.media ?? []).filter((m) => m.verifiedClip).length,
+    bestStreak,
+    combineBests: verifiedBests.slice(-4).map((r) => ({ drillName: r.drillName, metric: r.metric, value: r.value, unit: r.unit })),
+    badges: p.badges,
+    coachVouches: publishedVouchesFor(p.id).length,
+    scoutViews: db.ledger.filter((l) => l.playerId === p.id && l.type === 'view').length,
+    note: 'Your season, verified. Every number above is backed by the ledger — no vanity metrics.',
+  });
+});
+
+playerRouter.post('/vouches/request', (req, res) => {
+  if (grassrootsOnly(req, res)) return;
+  if (guardianManagedOnly(req, res)) return;
+  createVouchRequest(req.player, req.body ?? {}, res);
+});
+
 // One-click reporting + blocking, available to every player.
 playerRouter.post('/report', (req, res) => handleReport(req, res, { by: 'player', byId: req.player.id }));
 
@@ -2179,6 +2476,63 @@ app.post('/push/register', (req, res) => {
   db.pushTokens.push({ kind: session.kind, refId: session.refId, token, ts: Date.now() });
   persist();
   res.status(201).json({ registered: true });
+});
+
+// Guardian view of open trial days near a child, and registration — the
+// guardian decides, the child never talks to anyone. Minor registrations
+// only reach clubs allowed to see the child (verified + local).
+guardianRouter.get('/children/:id/open-trials', (req, res) => {
+  const child = findPlayer(req.params.id);
+  if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
+  if (!child.location) return res.json({ openTrials: [], note: 'Set a location on the profile to see local open days.' });
+  const list = db.openTrials
+    .map((t) => ({ t, org: db.orgs.find((o) => o.id === t.orgId) }))
+    .filter(({ org }) => org?.level === 'grassroots' && org.location && haversineKm(org.location, child.location) <= GRASSROOTS_RADIUS_KM)
+    .filter(({ org }) => visibleToOrg(child, org)) // only clubs that may see the child at all
+    .map(({ t, org }) => ({
+      id: t.id, title: t.title, date: t.date, venue: t.venue, ageGroup: t.ageGroup, positions: t.positions,
+      orgName: t.orgName, verified: org.verified, safeguardingCertified: safeguardingCertified(org),
+      distanceKm: Math.round(haversineKm(org.location, child.location) * 10) / 10,
+      registered: (t.registrations ?? []).some((r) => r.playerId === child.id),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  res.json({ openTrials: list });
+});
+
+guardianRouter.post('/open-trials/:id/register', (req, res) => {
+  const child = findPlayer(req.body?.childId);
+  if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
+  const trial = db.openTrials.find((t) => t.id === req.params.id);
+  if (!trial) return res.status(404).json({ error: 'OPEN_TRIAL_NOT_FOUND' });
+  const org = db.orgs.find((o) => o.id === trial.orgId);
+  if (!org || !visibleToOrg(child, org)) {
+    return res.status(403).json({ error: 'VERIFIED_CLUBS_ONLY', message: 'Only verified, local clubs can receive an under-18 registration.' });
+  }
+  trial.registrations ??= [];
+  if (trial.registrations.some((r) => r.playerId === child.id)) return res.status(409).json({ error: 'ALREADY_REGISTERED' });
+  trial.registrations.push({ id: nextId('otr'), playerId: child.id, playerName: child.name, byGuardian: true, guardianId: req.guardian.id, ts: Date.now() });
+  ledgerAppend({ type: 'open_trial_registration_by_guardian', playerId: child.id, orgId: org.id, orgName: org.name, userId: trial.createdByUserId ?? null, scoutName: 'open day' });
+  notify({ kind: 'org_user', id: trial.createdByUserId }, 'open_trial', `${child.name} (via guardian) registered for "${trial.title}".`, trial.id);
+  notify({ kind: 'player', id: child.id }, 'open_trial', `Your parent/guardian registered you for ${org.name}'s open day "${trial.title}" — good luck!`, trial.id);
+  persist();
+  res.status(201).json({ registered: true });
+});
+
+guardianRouter.post('/children/:id/first-team-seeker', (req, res) => {
+  const child = findPlayer(req.params.id);
+  if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
+  if (child.level === 'pro') return res.status(403).json({ error: 'GRASSROOTS_ONLY' });
+  child.firstTeamSeeker = !!req.body?.enabled;
+  persist();
+  broadcast('players', { playerId: child.id });
+  res.json({ firstTeamSeeker: child.firstTeamSeeker });
+});
+
+guardianRouter.post('/children/:id/vouches/request', (req, res) => {
+  const child = findPlayer(req.params.id);
+  if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
+  if (child.level === 'pro') return res.status(403).json({ error: 'GRASSROOTS_ONLY' });
+  createVouchRequest(child, req.body ?? {}, res);
 });
 
 // Notification preferences — quiet hours + the minors' school-hours mute.
@@ -2278,6 +2632,27 @@ app.get('/orgs/directory', (_req, res) => {
   );
 });
 
+// Coach reference submission: the code from the emailed request proves the
+// mailbox; the text passes the same moderation screen as every message.
+app.post('/vouch/submit', (req, res) => {
+  const { code, text, seasons } = req.body || {};
+  const vouch = db.vouches.find((v) => v.code === String(code ?? '').trim().toUpperCase() && v.status === 'pending');
+  if (!vouch) return res.status(404).json({ error: 'CODE_INVALID', message: 'That reference code is wrong or already used.' });
+  if (!text || !String(text).trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
+  if (!moderateOrRefuse(res, text, { kind: 'coach_vouch', playerId: vouch.playerId })) return;
+  vouch.text = String(text).trim().slice(0, 400);
+  vouch.seasons = seasons ? String(seasons).trim().slice(0, 40) : null;
+  vouch.status = 'published';
+  vouch.publishedAt = Date.now();
+  vouch.code = null; // single use
+  const player = findPlayer(vouch.playerId);
+  notify({ kind: 'player', id: vouch.playerId }, 'vouch', `⭐ ${vouch.coachName} published a coach reference on your profile.`, vouch.id);
+  if (player?.guardianId) notify({ kind: 'guardian', id: player.guardianId }, 'vouch', `${vouch.coachName} published a coach reference on ${player.name}'s profile.`, vouch.id);
+  persist();
+  broadcast('players', { playerId: vouch.playerId });
+  res.status(201).json({ published: true });
+});
+
 // ------------------------------------------------------ admin (T&S) console
 // ScoutBox staff only. Prototype auth: x-admin-key (ADMIN_KEY env).
 const ADMIN_KEY = process.env.ADMIN_KEY || 'scoutbox-admin';
@@ -2316,6 +2691,15 @@ adminRouter.get('/reports', (_req, res) => {
 adminRouter.get('/outbox', (_req, res) => res.json(db.outbox.slice().reverse()));
 adminRouter.get('/push-log', (_req, res) => res.json(db.pushLog.slice(-200).reverse()));
 adminRouter.get('/invoices', (_req, res) => res.json(db.invoices.slice().reverse()));
+adminRouter.get('/vouches', (_req, res) => res.json(db.vouches.map(({ code, ...v }) => v).reverse()));
+adminRouter.post('/vouches/:id/revoke', (req, res) => {
+  const vouch = db.vouches.find((v) => v.id === req.params.id);
+  if (!vouch) return res.status(404).json({ error: 'VOUCH_NOT_FOUND' });
+  vouch.status = 'revoked';
+  persist();
+  broadcast('players', { playerId: vouch.playerId });
+  res.json({ revoked: true });
+});
 
 adminRouter.post('/reports/:id/resolve', (req, res) => {
   const report = db.reports.find((r) => r.id === req.params.id);

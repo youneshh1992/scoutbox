@@ -4,10 +4,10 @@
 // All functionality from Milestone 2 is preserved below the fold.
 
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { client, type PlayerCV } from '../../data/client';
+import { client, type PlayerCV, type Benchmarks } from '../../data/client';
 import {
   AVAILABILITY_LABELS, CONTRACT_LABELS,
   type Availability, type ContractStatus,
@@ -35,6 +35,14 @@ export default function Profile() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [cvOpen, setCvOpen] = useState(false);
   const [cv, setCv] = useState<PlayerCV | null>(null);
+  const [benchmarks, setBenchmarks] = useState<Benchmarks | null>(null);
+  const [vouchCoach, setVouchCoach] = useState('');
+  const [vouchEmail, setVouchEmail] = useState('');
+  const [vouchNote, setVouchNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (playerId && me?.pathway) client.getBenchmarks(playerId).then(setBenchmarks).catch(() => setBenchmarks(null));
+  }, [playerId, me?.pathway]);
 
   useEffect(() => {
     if (cvOpen && playerId) client.getCv(playerId).then(setCv).catch(() => {});
@@ -212,6 +220,25 @@ export default function Profile() {
                   onPress={() => set(() => client.setAvailability(playerId, a, undefined))} />
               ))}
             </Row>
+            {me.pathway && (
+              <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 10, marginTop: 4 }}>
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <View style={{ flex: 1, paddingRight: 10 }}>
+                    <Text style={{ color: colors.text, fontSize: 14, fontWeight: '700' }}>🔎 Looking for my first team</Text>
+                    <Muted size={12}>
+                      First Team Seekers surface first to local grassroots clubs. Need-based, free, never
+                      purchasable — switch it off any time.
+                    </Muted>
+                  </View>
+                  <Switch
+                    value={!!me.firstTeamSeeker}
+                    onValueChange={(v) => set(() => client.setFirstTeamSeeker(playerId, v))}
+                    trackColor={{ true: colors.accent, false: colors.line }}
+                    thumbColor="#fff"
+                  />
+                </Row>
+              </View>
+            )}
             <SectionTitle>Contract status</SectionTitle>
             <Row>
               {(Object.keys(CONTRACT_LABELS) as ContractStatus[]).filter((c) => c !== 'unknown').map((c) => (
@@ -295,6 +322,77 @@ export default function Profile() {
         )}
 
         {/* ---- everything below keeps Milestone 2 functionality ---- */}
+
+        {benchmarks && (benchmarks.drills.length > 0 || benchmarks.stats.length > 0) && (
+          <Card>
+            <SectionTitle>📊 Where you stand — your cohort, not the pros</SectionTitle>
+            <Muted size={12}>{benchmarks.note}</Muted>
+            {benchmarks.stats.map((b) => (
+              <Row key={b.stat} style={{ justifyContent: 'space-between' }}>
+                <Text style={{ color: colors.text, fontSize: 13.5 }}>{b.stat.replace(/Pct$/, ' %').replace(/([A-Z])/g, ' $1').toLowerCase()}</Text>
+                <Row>
+                  <Muted size={12.5}>{b.value}</Muted>
+                  {b.percentile !== null
+                    ? <Pill label={`top ${Math.max(1, 100 - b.percentile)}%`} tone={b.percentile >= 75 ? 'gold' : 'blue'} />
+                    : <Pill label="cohort too small" />}
+                </Row>
+              </Row>
+            ))}
+            {benchmarks.drills.map((b) => (
+              <Row key={b.drillId} style={{ justifyContent: 'space-between' }}>
+                <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>{b.name}</Text>
+                <Row>
+                  <Muted size={12.5}>{b.value}{b.unit}</Muted>
+                  {b.percentile !== null
+                    ? <Pill label={`top ${Math.max(1, 100 - b.percentile)}%`} tone={b.percentile >= 75 ? 'gold' : 'blue'} />
+                    : <Pill label="cohort too small" />}
+                </Row>
+              </Row>
+            ))}
+          </Card>
+        )}
+
+        {me.pathway && (
+          <Card>
+            <SectionTitle>⭐ Coach references</SectionTitle>
+            {(me.vouches ?? []).length === 0 && (
+              <Muted size={12.5}>
+                A named coach vouching for you is the strongest credential an amateur can hold. Ask yours —
+                they confirm by email, and the reference appears here for every club to see.
+              </Muted>
+            )}
+            {(me.vouches ?? []).map((v) => (
+              <View key={v.id} style={{ gap: 2 }}>
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <Text style={{ color: colors.text, fontSize: 13.5, fontWeight: '700' }}>{v.coachName} · {v.role}</Text>
+                  <Pill label={v.status === 'published' ? 'verified ✓' : v.status} tone={v.status === 'published' ? 'green' : 'blue'} />
+                </Row>
+                {v.text && <Muted size={12.5}>“{v.text}”{v.seasons ? ` — ${v.seasons}` : ''}</Muted>}
+              </View>
+            ))}
+            {!isMinor && (
+              <View style={{ gap: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 10 }}>
+                <TextInput style={styles.vouchInput} placeholder="Coach name" placeholderTextColor={colors.muted} value={vouchCoach} onChangeText={setVouchCoach} />
+                <TextInput style={styles.vouchInput} placeholder="Coach email" placeholderTextColor={colors.muted} value={vouchEmail} onChangeText={setVouchEmail} autoCapitalize="none" />
+                <Button
+                  small primary label="Request reference"
+                  onPress={async () => {
+                    try {
+                      await client.requestVouch(playerId, vouchCoach.trim(), vouchEmail.trim(), 'Coach');
+                      setVouchCoach(''); setVouchEmail('');
+                      setVouchNote('Sent — your coach gets an email with a one-time code.');
+                      await refresh();
+                    } catch (e) {
+                      setVouchNote(e instanceof Error ? e.message : 'Could not send');
+                    }
+                  }}
+                />
+                {vouchNote && <Muted size={12}>{vouchNote}</Muted>}
+              </View>
+            )}
+            {isMinor && <Muted size={12}>Your parent/guardian requests references for you.</Muted>}
+          </Card>
+        )}
 
         <Card style={me.medical.shared ? { borderColor: colors.gold } : undefined}>
           <Row style={{ justifyContent: 'space-between' }}>
@@ -545,6 +643,10 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   contractV: { color: colors.text, fontSize: 17, fontWeight: '800' },
+  vouchInput: {
+    backgroundColor: colors.bg2, borderColor: colors.line, borderWidth: 1, borderRadius: 10,
+    color: colors.text, paddingHorizontal: 12, paddingVertical: 8, fontSize: 14,
+  },
   jersey: {
     width: 96,
     alignItems: 'center',
