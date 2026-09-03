@@ -25,6 +25,71 @@ export interface Org {
   emailDomain?: string;
   /** Positions this club is recruiting — powers players' opportunity radar. */
   lookingFor?: string[];
+  /** Federation-route verification filed with Trust & Safety. */
+  federationCheck?: { federation: string; registrationId: string; contactEmail: string | null; status: string; ts: number } | null;
+}
+
+// ---- M10: the grassroots club toolkit
+
+export interface SquadEntry {
+  id: string;
+  name: string;
+  position: string | null;
+  /** Null for players managed off-platform (name-only roster rows). */
+  playerId: string | null;
+  source: 'signing' | 'manual' | string;
+  addedAt: number;
+  onPlatform: boolean;
+  trustScore: number | null;
+}
+
+export interface Squad {
+  entries: SquadEntry[];
+  /** Players per position group (GK / DEF / MID / ATT). */
+  coverage: Record<string, number>;
+  /** Groups with fewer than two players — where the squad is thin. */
+  gaps: string[];
+  suggestedLookingFor: string[];
+}
+
+export interface Matchday {
+  id: string;
+  fixture: string;
+  venue: string;
+  date: string;
+  result: string | null;
+  playerIds: string[];
+  ts: number;
+}
+
+export interface PathwayRecord {
+  progressed: number;
+  pathwayClub: boolean;
+  openDaysRun: number;
+  matchdaysLogged: number;
+  note: string;
+}
+
+export interface FriendlyResponse {
+  orgId: string;
+  orgName: string;
+  message: string;
+  ts: number;
+}
+
+export interface Friendly {
+  id: string;
+  orgId: string;
+  orgName: string;
+  ageGroup: string;
+  date: string;
+  venue: string;
+  notes: string;
+  status: string;
+  mine?: boolean;
+  distanceKm?: number;
+  responses: FriendlyResponse[];
+  createdAt: number;
 }
 
 // Grassroots views carry distance from the club's ground; pro-market fields
@@ -49,6 +114,10 @@ export interface OpenTrialRegistration {
   position?: string | null;
   trustScore?: number | null;
   guardianManaged?: boolean;
+  /** The no-ghosting rule: every registrant gets an answer. */
+  outcome?: 'invite_trial' | 'declined' | null;
+  outcomeNote?: string | null;
+  outcomeAt?: number | null;
 }
 
 export interface OpenTrial {
@@ -459,6 +528,17 @@ export interface ScoutboxApi {
   postOpenTrial(s: Session, input: { title: string; date: string; venue: string; ageGroup: string; positions: string[]; notes?: string }): Promise<void>;
   deleteOpenTrial(s: Session, id: string): Promise<void>;
   setLookingFor(s: Session, positions: string[]): Promise<void>;
+  resolveOpenTrialOutcome(s: Session, trialId: string, regId: string, outcome: 'invite_trial' | 'declined', note?: string): Promise<void>;
+  getSquad(s: Session): Promise<Squad>;
+  addSquadEntry(s: Session, input: { name: string; position?: string; playerId?: string }): Promise<Squad>;
+  releaseSquadEntry(s: Session, entryId: string, referenceText?: string): Promise<Squad>;
+  logMatchday(s: Session, input: { fixture: string; venue?: string; date: string; result?: string; playerIds: string[] }): Promise<{ credited: number }>;
+  getMatchdays(s: Session): Promise<Matchday[]>;
+  getPathwayRecord(s: Session): Promise<PathwayRecord>;
+  submitFederationVerification(s: Session, input: { federation: string; registrationId: string; contactEmail?: string }): Promise<{ note: string }>;
+  getFriendlies(s: Session): Promise<Friendly[]>;
+  postFriendly(s: Session, input: { ageGroup?: string; date: string; venue?: string; notes?: string }): Promise<void>;
+  respondFriendly(s: Session, id: string, message: string): Promise<void>;
   getInvoices(s: Session): Promise<Invoice[]>;
   requestEmailVerification(s: Session, email: string): Promise<void>;
   confirmEmailVerification(s: Session, code: string): Promise<{ emailDomain: string }>;
@@ -599,6 +679,37 @@ export const httpApi: ScoutboxApi = {
 
   setLookingFor: (s, positions) =>
     request<void>('/org/looking-for', { method: 'POST', headers: headers(s), body: JSON.stringify({ positions }) }),
+
+  resolveOpenTrialOutcome: (s, trialId, regId, outcome, note) =>
+    request<void>(`/org/open-trials/${trialId}/registrations/${regId}/outcome`, {
+      method: 'POST', headers: headers(s), body: JSON.stringify({ outcome, note }),
+    }),
+
+  getSquad: (s) => request<Squad>('/org/squad', { headers: headers(s) }),
+
+  addSquadEntry: (s, input) =>
+    request<Squad>('/org/squad', { method: 'POST', headers: headers(s), body: JSON.stringify(input) }),
+
+  releaseSquadEntry: (s, entryId, referenceText) =>
+    request<Squad>(`/org/squad/${entryId}/release`, { method: 'POST', headers: headers(s), body: JSON.stringify({ referenceText }) }),
+
+  logMatchday: (s, input) =>
+    request<{ credited: number }>('/org/matchday', { method: 'POST', headers: headers(s), body: JSON.stringify(input) }),
+
+  getMatchdays: (s) => request<Matchday[]>('/org/matchdays', { headers: headers(s) }),
+
+  getPathwayRecord: (s) => request<PathwayRecord>('/org/pathway-record', { headers: headers(s) }),
+
+  submitFederationVerification: (s, input) =>
+    request<{ note: string }>('/org/verification/federation', { method: 'POST', headers: headers(s), body: JSON.stringify(input) }),
+
+  getFriendlies: (s) => request<Friendly[]>('/org/friendlies', { headers: headers(s) }),
+
+  postFriendly: (s, input) =>
+    request<void>('/org/friendlies', { method: 'POST', headers: headers(s), body: JSON.stringify(input) }),
+
+  respondFriendly: (s, id, message) =>
+    request<void>(`/org/friendlies/${id}/respond`, { method: 'POST', headers: headers(s), body: JSON.stringify({ message }) }),
 
   getInvoices: (s) => request<Invoice[]>('/org/invoices', { headers: headers(s) }),
 

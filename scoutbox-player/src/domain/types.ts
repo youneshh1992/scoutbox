@@ -18,8 +18,10 @@ export interface Attendance {
   fixture: string;
   venue: string;
   date: string;
-  gps: { lat: number; lng: number };
+  gps: { lat: number; lng: number } | null;
   verified: boolean;
+  /** Club name when a coach counter-signed the appearance (match-day log). */
+  corroboratedBy?: string;
 }
 
 export interface MediaItem {

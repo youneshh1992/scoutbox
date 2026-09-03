@@ -8,6 +8,7 @@ import type {
   LedgerEntry, ProofPack, PlanInfo, Reputation, SearchFilters,
   Channel, FiledReport, Notification, TrialDetails,
   FeedItem, FilmRoomItem, FixtureGroup, SavedSearch, OrgNote, SigningRecord, Invoice, OpenTrial,
+  Squad, SquadEntry, Matchday, PathwayRecord, Friendly,
 } from './api';
 import { ApiError } from './api';
 // Sample footage baked into the demo bundle so the Film Room plays offline.
@@ -30,6 +31,7 @@ const ORGS: Org[] = [
 const ORG_LOC: Record<string, { lat: number; lng: number }> = {
   'org-hackneymarsh': { lat: 51.552, lng: -0.022 },
   'org-mossside': { lat: 53.451, lng: -2.24 },
+  'org-other-local': { lat: 51.567, lng: -0.013 }, // Leyton — Hackney's neighbours
 };
 const PLAYER_LOC: Record<string, { lat: number; lng: number }> = {
   'pl-adeyemi': { lat: 51.561, lng: -0.01 },   // Leyton, London
@@ -93,6 +95,7 @@ const MOD_RES = [
 ];
 
 const PLANS: Record<string, PlanInfo['plan']> = {
+  Grassroots: { name: 'Grassroots', pricePerMonthGBP: 0, seats: 1, attributionWindowMonths: 12, antiCircumvention: 'Signing a ScoutBox-discovered player inside the attribution window owes the signing fee and discovery sell-on regardless of how contact concluded. Radius and level walls are platform rules, not preferences.' },
   Academy: { name: 'Academy', pricePerMonthGBP: 99, seats: 3, attributionWindowMonths: 18, antiCircumvention: 'Any signing of a ScoutBox-discovered player within the attribution window, however contact was concluded, owes the discovery fee. Off-platform approaches to circumvent the ledger are a terms breach and forfeit Trusted Partner eligibility.' },
   Pro: { name: 'Pro', pricePerMonthGBP: 349, seats: 15, attributionWindowMonths: 24, antiCircumvention: 'Any signing of a ScoutBox-discovered player within the attribution window, however contact was concluded, owes the discovery fee. Off-platform approaches to circumvent the ledger are a terms breach and forfeit Trusted Partner eligibility.' },
   Agency: { name: 'Agency', pricePerMonthGBP: 499, seats: 10, attributionWindowMonths: 24, antiCircumvention: 'Agencies additionally warrant that no representation approach is made to any player who has not accepted a contact request, and never to a minor under any circumstances.' },
@@ -267,6 +270,34 @@ const demoOpenTrials: OpenTrial[] = [{
     { id: 'otr-1', playerId: 'pl-guni', playerName: 'Guni Adebayo', byGuardian: true, ts: Date.now() - 3600000, age: 14, position: 'RW', trustScore: 55, guardianManaged: true },
   ],
 }];
+// A past open day with unresolved registrants demonstrates the no-ghosting
+// rule: the next posting is blocked until everyone has an answer.
+demoOpenTrials.unshift({
+  id: 'open-0', title: 'Trial match & taster session', date: new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10),
+  venue: 'Hackney Marshes pitch 2', ageGroup: 'open', positions: ['ST', 'CB'], notes: '',
+  createdAt: Date.now() - 12 * 86400000,
+  registrations: [
+    { id: 'otr-2', playerId: 'pl-adeyemi', playerName: 'Kola Adeyemi', byGuardian: false, ts: Date.now() - 6 * 86400000, age: 22, position: 'ST', trustScore: 59, guardianManaged: false },
+    { id: 'otr-3', playerId: 'pl-okafor', playerName: 'Chinedu Okafor', byGuardian: false, ts: Date.now() - 6 * 86400000, age: 22, position: 'CB', trustScore: 50, guardianManaged: false },
+  ],
+});
+
+// M10 club-toolkit state: squad, match days, friendlies.
+const demoSquad: Omit<SquadEntry, 'onPlatform' | 'trustScore'>[] = [
+  { id: 'sq-1', name: 'Mateus Carvalho', position: 'CM', playerId: 'pl-carvalho', source: 'signing', addedAt: NOW - 200 * DAY },
+  { id: 'sq-2', name: 'Danny Whitworth', position: 'CB', playerId: null, source: 'manual', addedAt: NOW - 100 * DAY },
+  { id: 'sq-3', name: 'Ravi Chauhan', position: 'RB', playerId: null, source: 'manual', addedAt: NOW - 90 * DAY },
+];
+const demoMatchdays: Matchday[] = [
+  { id: 'md-1', fixture: 'League round 3 vs Clapton Community', venue: 'Hackney Marshes', date: iso(NOW - 7 * DAY), result: '2-2', playerIds: ['pl-carvalho'], ts: NOW - 7 * DAY },
+];
+const demoFriendlies: Friendly[] = [
+  {
+    id: 'fr-1', orgId: 'org-other-local', orgName: 'Leyton Sunday Stars', ageGroup: 'open',
+    date: new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10), venue: 'Leyton Jubilee Park',
+    notes: 'Decent standard, referee arranged.', status: 'open', responses: [], createdAt: Date.now() - 2 * 86400000,
+  },
+];
 const SEEKERS = new Set(['pl-okafor']);
 const DEMO_VOUCHES: Record<string, { id: string; coachName: string; role: string; seasons: string | null; text: string | null; status: string; ts: number }[]> = {
   'pl-adeyemi': [{ id: 'vch-1', coachName: 'Ade Falana', role: 'Manager, Leyton Sunday League', seasons: '2024–2026', text: 'Two seasons with me — never missed a session, leads the line brilliantly.', status: 'published', ts: Date.now() - 5 * 86400000 }],
@@ -310,6 +341,20 @@ function log(s: Session, type: string, playerId: string): LedgerEntry {
 }
 
 const delay = <T,>(v: T): Promise<T> => new Promise((r) => setTimeout(() => r(v), 120));
+
+// Mirrors the server's squad view: coverage per position group, gaps where
+// the squad is thin, and what the club should tell the radar it needs.
+const POSITION_GROUPS: Record<string, string[]> = { GK: ['GK'], DEF: ['CB', 'RB', 'LB', 'RWB', 'LWB'], MID: ['CDM', 'CM', 'CAM'], ATT: ['ST', 'CF', 'RW', 'LW'] };
+function demoSquadView(): Squad {
+  const entries: SquadEntry[] = demoSquad.map((e) => {
+    const p = e.playerId ? PLAYERS.find((x) => x.id === e.playerId) : null;
+    return { ...e, onPlatform: !!p, trustScore: p?.trustScore ?? null };
+  });
+  const coverage = Object.fromEntries(Object.entries(POSITION_GROUPS).map(([g, positions]) => [g, entries.filter((e) => e.position && positions.includes(e.position)).length]));
+  const gaps = Object.entries(coverage).filter(([, n]) => n < 2).map(([g]) => g);
+  const suggestedLookingFor = gaps.flatMap((g) => POSITION_GROUPS[g].slice(0, 2)).slice(0, 5);
+  return { entries, coverage, gaps, suggestedLookingFor };
+}
 
 function similarity(a: Player, b: Player): number {
   let score = 0;
@@ -679,10 +724,143 @@ export const demoApi: ScoutboxApi = {
   getOpenTrials: () => delay(demoOpenTrials.slice().reverse()),
 
   postOpenTrial: (s, input) => {
+    // The no-ghosting rule, mirrored: unresolved past registrants block the
+    // next posting (server-enforced in live mode).
+    const today = new Date().toISOString().slice(0, 10);
+    const unresolved = demoOpenTrials.filter((t) => t.date < today).flatMap((t) => t.registrations.filter((r) => !r.outcome));
+    if (unresolved.length > 0) {
+      throw new ApiError(409, 'OUTCOMES_OUTSTANDING', `${unresolved.length} player(s) from your past open day(s) are still waiting for an answer. Resolve them (invite or a kind no) before posting the next one.`);
+    }
     if (!input.title || !input.date || !input.venue) throw new ApiError(400, 'TITLE_DATE_VENUE_REQUIRED', 'Title, date and venue are required.');
     if (input.notes && MOD_RES.some((re) => re.test(input.notes!))) throw new ApiError(400, 'MODERATION_BLOCKED', 'Notes were blocked by moderation — no contact details.');
     demoOpenTrials.push({ id: nid('open'), ...input, notes: input.notes ?? '', createdAt: Date.now(), registrations: [] });
     pushNotification('Open day posted — local players can register now.', 'open_trial');
+    return delay(undefined);
+  },
+
+  resolveOpenTrialOutcome: (s, trialId, regId, outcome, note) => {
+    const reg = demoOpenTrials.find((t) => t.id === trialId)?.registrations.find((r) => r.id === regId);
+    if (!reg) throw new ApiError(404, 'REGISTRATION_NOT_FOUND', 'No such registration');
+    if (reg.outcome) throw new ApiError(409, 'ALREADY_RESOLVED', 'This registrant already has an answer — outcomes are final.');
+    if (note && MOD_RES.some((re) => re.test(note))) throw new ApiError(400, 'MODERATION_BLOCKED', 'Outcome notes are moderated — no contact details.');
+    reg.outcome = outcome;
+    reg.outcomeNote = note ?? null;
+    reg.outcomeAt = Date.now();
+    pushNotification(outcome === 'invite_trial'
+      ? `Trial invitation sent to ${reg.playerName} — it lands as a properly-routed request${reg.guardianManaged ? ' with their guardian' : ''}.`
+      : `Your answer reached ${reg.playerName}${reg.guardianManaged ? ' via their guardian' : ''}.`, 'open_trial');
+    emit('openTrials');
+    return delay(undefined);
+  },
+
+  getSquad: () => delay(demoSquadView()),
+
+  addSquadEntry: (s, input) => {
+    if (!input.name?.trim()) throw new ApiError(400, 'NAME_REQUIRED', 'A name is required.');
+    if (input.playerId) {
+      const p = PLAYERS.find((x) => x.id === input.playerId);
+      if (!p || !canSee(p, s.org)) throw new ApiError(403, 'PLAYER_NOT_VISIBLE', 'You can only roster players your club can see.');
+      if (demoSquad.some((e) => e.playerId === input.playerId)) throw new ApiError(409, 'ALREADY_ON_SQUAD', 'Already on your squad list.');
+    }
+    demoSquad.push({ id: nid('sq'), name: input.name.trim(), position: input.position ?? null, playerId: input.playerId ?? null, source: 'manual', addedAt: Date.now() });
+    return delay(demoSquadView());
+  },
+
+  releaseSquadEntry: (s, entryId, referenceText) => {
+    const i = demoSquad.findIndex((e) => e.id === entryId);
+    if (i === -1) throw new ApiError(404, 'SQUAD_ENTRY_NOT_FOUND', 'No such squad entry');
+    if (referenceText && MOD_RES.some((re) => re.test(referenceText))) throw new ApiError(400, 'MODERATION_BLOCKED', 'References are moderated — no contact details.');
+    const [entry] = demoSquad.splice(i, 1);
+    const p = entry.playerId ? PLAYERS.find((x) => x.id === entry.playerId) : null;
+    if (p) {
+      p.availability = 'available_now';
+      p.contractStatus = 'free_agent';
+      if (referenceText) {
+        (DEMO_VOUCHES[p.id] ??= []).unshift({
+          id: nid('vch'), coachName: s.scoutName, role: `${s.role}, ${s.org.name}`,
+          seasons: null, text: referenceText.trim(), status: 'published', ts: Date.now(),
+        });
+      }
+      pushNotification(`${p.name} released${referenceText ? ' with a reference on their profile' : ''} — marked available to every local club.`, 'released');
+      emit('players');
+    }
+    return delay(demoSquadView());
+  },
+
+  logMatchday: (s, input) => {
+    if (!input.fixture || !input.date) throw new ApiError(400, 'FIXTURE_AND_DATE_REQUIRED', 'Fixture and date are required.');
+    const onSquad = new Set(demoSquad.map((e) => e.playerId).filter(Boolean));
+    const credited: string[] = [];
+    for (const pid of input.playerIds) {
+      if (!onSquad.has(pid)) continue;
+      const p = PLAYERS.find((x) => x.id === pid);
+      if (!p || !canSee(p, s.org)) continue;
+      p.attendance.push({
+        id: nid('att'), fixture: input.fixture, venue: input.venue || '', date: input.date,
+        gps: ORG_LOC[s.org.id] ?? { lat: 0, lng: 0 }, verified: true,
+      });
+      credited.push(pid);
+    }
+    demoMatchdays.unshift({ id: nid('md'), fixture: input.fixture, venue: input.venue ?? '', date: input.date, result: input.result ?? null, playerIds: credited, ts: Date.now() });
+    pushNotification(`Match day logged — ${credited.length} player(s) credited with verified, coach-signed attendance.`, 'matchday');
+    emit('players');
+    return delay({ credited: credited.length });
+  },
+
+  getMatchdays: () => delay(demoMatchdays.slice()),
+
+  getPathwayRecord: (s) => {
+    const progressed = ledger.filter((l) => l.orgId === s.org.id && l.type === 'signing').length > 0 ? 2 : 1;
+    return delay({
+      progressed, pathwayClub: true,
+      openDaysRun: demoOpenTrials.length, matchdaysLogged: demoMatchdays.length,
+      note: 'Progressed = players your club signed or hosted who later signed for an academy or pro club. Development is the reputation that matters here.',
+    } as PathwayRecord);
+  },
+
+  submitFederationVerification: (s, input) => {
+    if (!input.federation || !input.registrationId) throw new ApiError(400, 'FEDERATION_REQUIRED', 'Federation and registration id are required.');
+    s.org.federationCheck = { federation: input.federation, registrationId: input.registrationId, contactEmail: input.contactEmail ?? null, status: 'pending', ts: Date.now() };
+    pushNotification('Federation verification filed — Trust & Safety will cross-check the registration.', 'verification');
+    return delay({ note: 'Trust & Safety cross-checks the registration with your federation. Verification (and with the safeguarding contract, U18 visibility) follows their approval.' });
+  },
+
+  getFriendlies: (s) => {
+    const here = ORG_LOC[s.org.id];
+    const list = demoFriendlies
+      .filter((f) => f.orgId === s.org.id || (here && ORG_LOC[f.orgId] && kmBetween(here, ORG_LOC[f.orgId]) <= RADIUS_KM))
+      .map((f) => ({
+        ...f,
+        mine: f.orgId === s.org.id,
+        distanceKm: f.orgId === s.org.id || !here || !ORG_LOC[f.orgId] ? 0 : Math.round(kmBetween(here, ORG_LOC[f.orgId]) * 10) / 10,
+        responses: f.orgId === s.org.id ? f.responses : f.responses.map((r) => ({ ...r, message: '' })),
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    return delay(list);
+  },
+
+  postFriendly: (s, input) => {
+    if (!input.date) throw new ApiError(400, 'DATE_REQUIRED', 'A date is required.');
+    if (input.notes && MOD_RES.some((re) => re.test(input.notes!))) throw new ApiError(400, 'MODERATION_BLOCKED', 'Notes are moderated — no contact details.');
+    demoFriendlies.push({
+      id: nid('fr'), orgId: s.org.id, orgName: s.org.name, ageGroup: input.ageGroup ?? 'open',
+      date: input.date, venue: input.venue ?? '', notes: input.notes ?? '', status: 'open', responses: [], createdAt: Date.now(),
+    });
+    pushNotification('Friendly posted — clubs within 50km can respond.', 'friendly');
+    emit('friendlies');
+    return delay(undefined);
+  },
+
+  respondFriendly: (s, id, message) => {
+    const f = demoFriendlies.find((x) => x.id === id);
+    if (!f) throw new ApiError(404, 'FRIENDLY_NOT_FOUND', 'No such friendly');
+    if (f.orgId === s.org.id) throw new ApiError(400, 'OWN_POST', 'That is your own post.');
+    if (f.responses.some((r) => r.orgId === s.org.id)) throw new ApiError(409, 'ALREADY_RESPONDED', 'You already responded to this friendly.');
+    if (message && MOD_RES.some((re) => re.test(message))) throw new ApiError(400, 'MODERATION_BLOCKED', 'Responses are moderated — no contact details.');
+    f.responses.push({ orgId: s.org.id, orgName: s.org.name, message: message?.trim() ?? '', ts: Date.now() });
+    // Demo: the posting club replies with enthusiasm shortly after.
+    setTimeout(() => pushNotification(`${f.orgName} saw your response to their friendly on ${f.date} — expect a message.`, 'friendly'), 4000);
+    emit('friendlies');
     return delay(undefined);
   },
 

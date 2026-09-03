@@ -6,6 +6,7 @@ import {
   type Channel, type FiledReport, type TrialDetails,
   type FeedItem, type FilmRoomItem, type FixtureGroup, type SavedSearch, type OrgNote,
   type Funnel, type Invoice, type OpenTrial,
+  type Squad, type Matchday, type PathwayRecord, type Friendly,
 } from './api';
 
 const TAG_LABELS: Record<string, string> = {
@@ -979,8 +980,18 @@ export function OpenDaysScreen({ session, tick, notify }: ScreenProps) {
   const [trials, setTrials] = useState<OpenTrial[]>([]);
   const [form, setForm] = useState({ title: '', date: '', venue: '', ageGroup: 'open', positions: '' as string, notes: '' });
   const [lookingFor, setLookingFor] = useState<string>((session.org.lookingFor ?? []).join(', '));
+  const [outcomeNotes, setOutcomeNotes] = useState<Record<string, string>>({});
   const load = useCallback(() => { api.getOpenTrials(session).then(setTrials).catch(() => {}); }, [session]);
   useEffect(load, [load, tick]);
+  const today = new Date().toISOString().slice(0, 10);
+  const outstanding = trials.filter((t) => t.date < today).flatMap((t) => t.registrations.filter((r) => !r.outcome)).length;
+  const resolve = async (trialId: string, regId: string, outcome: 'invite_trial' | 'declined') => {
+    try {
+      await api.resolveOpenTrialOutcome(session, trialId, regId, outcome, outcomeNotes[regId]?.trim() || undefined);
+      notify(outcome === 'invite_trial' ? 'Trial invitation sent — a routed request, guardian-first for minors.' : 'Your answer is on its way — a kind no beats silence.');
+      load();
+    } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
+  };
   return (
     <>
       <div className="notice" style={{ marginBottom: 16 }}>
@@ -988,6 +999,12 @@ export function OpenDaysScreen({ session, tick, notify }: ScreenProps) {
         these on their app and register — no messages, no chasing. Under-18 registrations only reach you
         once your club is verified.
       </div>
+      {outstanding > 0 && (
+        <div className="notice block" style={{ marginBottom: 16 }}>
+          <b>The no-ghosting rule:</b> {outstanding} player(s) from your past open day(s) are still waiting
+          for an answer. Every registrant gets an invite or a kind no before you can post the next one.
+        </div>
+      )}
       <div className="section">
         <h4>What are you looking for? (shows on local players' radar)</h4>
         <div className="filters">
@@ -1041,12 +1058,28 @@ export function OpenDaysScreen({ session, tick, notify }: ScreenProps) {
           {t.registrations.length > 0 && (
             <div className="list-rows" style={{ marginTop: 8 }}>
               {t.registrations.map((r) => (
-                <div key={r.id} className="list-row">
+                <div key={r.id} className="list-row" style={{ flexWrap: 'wrap' }}>
                   <span className="grow"><b>{r.playerName}</b> <span className="dim">{r.position ?? ''}{r.age ? ` · ${r.age}` : ''}</span></span>
                   {r.guardianManaged && <span className="pill red">U18 · guardian-managed</span>}
                   {r.byGuardian && <span className="pill blue">registered by guardian</span>}
                   {typeof r.trustScore === 'number' && <span className="pill">trust {r.trustScore}</span>}
                   <span className="dim">{new Date(r.ts).toLocaleDateString()}</span>
+                  {r.outcome ? (
+                    <span className={`pill ${r.outcome === 'invite_trial' ? 'green' : ''}`}>
+                      {r.outcome === 'invite_trial' ? '✓ invited to trial' : 'answered — kind no'}
+                    </span>
+                  ) : (
+                    <span style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <input
+                        placeholder="Optional note (screened)"
+                        value={outcomeNotes[r.id] ?? ''}
+                        onChange={(e) => setOutcomeNotes({ ...outcomeNotes, [r.id]: e.target.value })}
+                        style={{ maxWidth: 220 }}
+                      />
+                      <button className="primary" onClick={() => resolve(t.id, r.id, 'invite_trial')}>Invite to trial</button>
+                      <button onClick={() => resolve(t.id, r.id, 'declined')}>Kind no</button>
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
@@ -1057,15 +1090,269 @@ export function OpenDaysScreen({ session, tick, notify }: ScreenProps) {
   );
 }
 
+export function SquadScreen({ session, tick, notify, openPlayer }: ScreenProps) {
+  const [squad, setSquad] = useState<Squad | null>(null);
+  const [matchdays, setMatchdays] = useState<Matchday[]>([]);
+  const [visible, setVisible] = useState<Player[]>([]);
+  const [add, setAdd] = useState({ name: '', position: '', playerId: '' });
+  const [releasing, setReleasing] = useState<string | null>(null);
+  const [refText, setRefText] = useState('');
+  const [md, setMd] = useState({ fixture: '', date: '', venue: '', result: '' });
+  const [mdPlayers, setMdPlayers] = useState<Set<string>>(new Set());
+  const load = useCallback(() => {
+    api.getSquad(session).then(setSquad).catch(() => {});
+    api.getMatchdays(session).then(setMatchdays).catch(() => {});
+    api.searchPlayers(session, {}).then(setVisible).catch(() => {});
+  }, [session]);
+  useEffect(load, [load, tick]);
+  if (!squad) return null;
+  const platformEntries = squad.entries.filter((e) => e.playerId && e.onPlatform);
+  return (
+    <>
+      <div className="notice" style={{ marginBottom: 16 }}>
+        Your squad in one place: who you have, where you're thin, and one Saturday action — the match-day
+        log — that gives every rostered ScoutBox player verified, coach-signed attendance on their profile.
+      </div>
+      <div className="stat-grid" style={{ marginBottom: 18 }}>
+        {Object.entries(squad.coverage).map(([group, n]) => (
+          <div key={group} className={`stat ${squad.gaps.includes(group) ? 'warn' : ''}`}>
+            <div className="v">{n}</div>
+            <div className="k">{group}{squad.gaps.includes(group) ? ' — thin' : ''}</div>
+          </div>
+        ))}
+      </div>
+      {squad.gaps.length > 0 && (
+        <div className="notice" style={{ marginBottom: 16 }}>
+          Gap analysis: you have fewer than two players covering <b>{squad.gaps.join(', ')}</b>.{' '}
+          <button
+            style={{ color: 'var(--accent-2)', padding: 0 }}
+            onClick={async () => {
+              try {
+                await api.setLookingFor(session, squad.suggestedLookingFor);
+                notify(`Radar updated — local ${squad.suggestedLookingFor.join('/')} players now see your club highlighted.`);
+              } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
+            }}
+          >Tell the local radar you're looking for {squad.suggestedLookingFor.join(', ')}</button>
+        </div>
+      )}
+      <div className="section">
+        <h4>Squad list — {squad.entries.length} players</h4>
+        {squad.entries.length === 0 && <div className="notice">Nobody rostered yet. Signings land here automatically; add the rest of your Sunday squad below.</div>}
+        <div className="list-rows">
+          {squad.entries.map((e) => (
+            <div key={e.id} className="list-row" style={{ flexWrap: 'wrap' }}>
+              <span className="grow">
+                {e.onPlatform && e.playerId
+                  ? <button style={{ padding: 0, color: 'var(--accent-2)', fontWeight: 600 }} onClick={() => openPlayer(e.playerId!)}>{e.name}</button>
+                  : <b>{e.name}</b>}{' '}
+                <span className="dim">{e.position ?? '—'}</span>
+              </span>
+              {e.source === 'signing' && <span className="pill green">signed via ScoutBox</span>}
+              {e.onPlatform ? <span className="pill blue">on platform{typeof e.trustScore === 'number' ? ` · trust ${e.trustScore}` : ''}</span> : <span className="pill">off-platform</span>}
+              {releasing === e.id ? (
+                <span style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                  {e.onPlatform && (
+                    <input
+                      placeholder="Optional reference — published on their profile"
+                      value={refText}
+                      onChange={(ev) => setRefText(ev.target.value)}
+                      style={{ minWidth: 260 }}
+                    />
+                  )}
+                  <button className="primary" onClick={async () => {
+                    try {
+                      setSquad(await api.releaseSquadEntry(session, e.id, refText.trim() || undefined));
+                      setReleasing(null); setRefText('');
+                      notify(e.onPlatform
+                        ? `${e.name} released${refText.trim() ? ' with a reference' : ''} — marked available to every local club.`
+                        : `${e.name} removed from the squad list.`);
+                    } catch (err) { notify(err instanceof Error ? err.message : 'Failed', true); }
+                  }}>Confirm release</button>
+                  <button onClick={() => { setReleasing(null); setRefText(''); }}>Cancel</button>
+                </span>
+              ) : (
+                <button onClick={() => { setReleasing(e.id); setRefText(''); }}>Release</button>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="filters" style={{ marginTop: 12, flexWrap: 'wrap' }}>
+          <input placeholder="Player name" value={add.name} onChange={(e) => setAdd({ ...add, name: e.target.value })} />
+          <select value={add.position} onChange={(e) => setAdd({ ...add, position: e.target.value })}>
+            <option value="">Position…</option>
+            {POSITIONS.map((p) => <option key={p}>{p}</option>)}
+          </select>
+          <select
+            value={add.playerId}
+            onChange={(e) => {
+              const p = visible.find((x) => x.id === e.target.value);
+              setAdd({ playerId: e.target.value, name: p ? p.name : add.name, position: p ? p.position : add.position });
+            }}
+          >
+            <option value="">Off-platform (name only)</option>
+            {visible.map((p) => <option key={p.id} value={p.id}>{p.name} — {p.position}</option>)}
+          </select>
+          <button className="primary" onClick={async () => {
+            try {
+              setSquad(await api.addSquadEntry(session, { name: add.name.trim(), position: add.position || undefined, playerId: add.playerId || undefined }));
+              setAdd({ name: '', position: '', playerId: '' });
+              notify('Added to the squad list.');
+            } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
+          }}>Add to squad</button>
+        </div>
+      </div>
+      <div className="section">
+        <h4>Log a match day</h4>
+        <div className="notice" style={{ marginBottom: 10 }}>
+          Tick who played and every rostered ScoutBox player gets <b>verified attendance, corroborated by
+          your club</b> — the strongest trust signal a grassroots player can carry.
+        </div>
+        <div className="filters" style={{ flexWrap: 'wrap' }}>
+          <input placeholder="Fixture (e.g. vs Clapton Community)" value={md.fixture} onChange={(e) => setMd({ ...md, fixture: e.target.value })} />
+          <input type="date" value={md.date} onChange={(e) => setMd({ ...md, date: e.target.value })} />
+          <input placeholder="Venue" value={md.venue} onChange={(e) => setMd({ ...md, venue: e.target.value })} />
+          <input placeholder="Result (e.g. 2-1)" value={md.result} onChange={(e) => setMd({ ...md, result: e.target.value })} style={{ maxWidth: 120 }} />
+        </div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', margin: '10px 0' }}>
+          {platformEntries.length === 0 && <span className="dim">No platform players on the squad yet — sign or roster them first.</span>}
+          {platformEntries.map((e) => (
+            <label key={e.id} className="pill" style={{ cursor: 'pointer', userSelect: 'none' }}>
+              <input
+                type="checkbox"
+                checked={mdPlayers.has(e.playerId!)}
+                onChange={(ev) => {
+                  const next = new Set(mdPlayers);
+                  if (ev.target.checked) next.add(e.playerId!); else next.delete(e.playerId!);
+                  setMdPlayers(next);
+                }}
+                style={{ marginRight: 6 }}
+              />
+              {e.name}
+            </label>
+          ))}
+        </div>
+        <button className="primary" onClick={async () => {
+          try {
+            const r = await api.logMatchday(session, { fixture: md.fixture.trim(), date: md.date, venue: md.venue.trim() || undefined, result: md.result.trim() || undefined, playerIds: [...mdPlayers] });
+            setMd({ fixture: '', date: '', venue: '', result: '' });
+            setMdPlayers(new Set());
+            notify(`Match day logged — ${r.credited} player(s) credited with coach-signed attendance.`);
+            load();
+          } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
+        }}>Log match day</button>
+      </div>
+      {matchdays.length > 0 && (
+        <div className="section">
+          <h4>Match-day history</h4>
+          {matchdays.map((m) => (
+            <div key={m.id} className="list-row">
+              <span className="grow"><b>{m.fixture}</b> <span className="dim">{m.venue}</span></span>
+              {m.result && <span className="pill gold">{m.result}</span>}
+              <span className="pill blue">{m.playerIds.length} credited</span>
+              <span className="dim">{m.date}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+export function FriendliesScreen({ session, tick, notify }: ScreenProps) {
+  const [friendlies, setFriendlies] = useState<Friendly[]>([]);
+  const [form, setForm] = useState({ ageGroup: 'open', date: '', venue: '', notes: '' });
+  const [replies, setReplies] = useState<Record<string, string>>({});
+  const load = useCallback(() => { api.getFriendlies(session).then(setFriendlies).catch(() => {}); }, [session]);
+  useEffect(load, [load, tick]);
+  return (
+    <>
+      <div className="notice" style={{ marginBottom: 16 }}>
+        Trial matches are how grassroots scouting actually happens. Post a friendly and every club within
+        50km sees it; respond to theirs and the manager is notified. Messages are screened like everything
+        else — no phone numbers, the game gets arranged here.
+      </div>
+      <div className="section">
+        <h4>Post a friendly</h4>
+        <div className="filters" style={{ flexWrap: 'wrap' }}>
+          <select value={form.ageGroup} onChange={(e) => setForm({ ...form, ageGroup: e.target.value })}>
+            <option value="open">Open age</option>
+            <option value="u16">Under 16</option>
+            <option value="u18">Under 18</option>
+            <option value="senior">Senior</option>
+          </select>
+          <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+          <input placeholder="Venue" value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} />
+          <input style={{ flex: 1 }} placeholder="Notes (standard, referee, screened — no contact details)" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          <button className="primary" onClick={async () => {
+            try {
+              await api.postFriendly(session, { ageGroup: form.ageGroup, date: form.date, venue: form.venue.trim() || undefined, notes: form.notes.trim() || undefined });
+              setForm({ ageGroup: 'open', date: '', venue: '', notes: '' });
+              notify('Friendly posted — clubs within 50km can respond.');
+              load();
+            } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
+          }}>Post friendly</button>
+        </div>
+      </div>
+      {friendlies.length === 0 && <div className="notice">No friendlies on the local board yet — post the first one.</div>}
+      {friendlies.map((f) => (
+        <div key={f.id} className="section">
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <h4 style={{ margin: 0, flex: 1 }}>{f.orgName} — {f.date}{f.venue ? ` · ${f.venue}` : ''}</h4>
+            <span className="pill blue">{f.ageGroup}</span>
+            {f.mine ? <span className="pill gold">your post</span> : <span className="pill">{f.distanceKm} km away</span>}
+            <span className="pill">{f.responses.length} response{f.responses.length === 1 ? '' : 's'}</span>
+          </div>
+          {f.notes && <div className="dim" style={{ marginTop: 6, fontSize: 13 }}>{f.notes}</div>}
+          {f.mine && f.responses.length > 0 && (
+            <div className="list-rows" style={{ marginTop: 8 }}>
+              {f.responses.map((r) => (
+                <div key={`${r.orgId}-${r.ts}`} className="list-row">
+                  <span className="grow"><b>{r.orgName}</b>{r.message ? ` — ${r.message}` : ''}</span>
+                  <span className="dim">{new Date(r.ts).toLocaleDateString()}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {!f.mine && (
+            f.responses.some((r) => r.orgId === session.org.id) ? (
+              <div className="notice" style={{ marginTop: 8 }}>You responded — {f.orgName} has been notified.</div>
+            ) : (
+              <div className="filters" style={{ marginTop: 8 }}>
+                <input
+                  style={{ flex: 1 }}
+                  placeholder="We're up for it — availability, standard… (screened)"
+                  value={replies[f.id] ?? ''}
+                  onChange={(e) => setReplies({ ...replies, [f.id]: e.target.value })}
+                />
+                <button className="primary" onClick={async () => {
+                  try {
+                    await api.respondFriendly(session, f.id, (replies[f.id] ?? '').trim());
+                    notify(`Response sent — ${f.orgName}'s manager is notified.`);
+                    load();
+                  } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
+                }}>We're up for it</button>
+              </div>
+            )
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
+
 export function PlanScreen({ session, tick, notify }: ScreenProps) {
   const [info, setInfo] = useState<PlanInfo | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [record, setRecord] = useState<PathwayRecord | null>(null);
   const [verifyEmail, setVerifyEmail] = useState('');
   const [verifyCode, setVerifyCode] = useState('');
   const [codeSent, setCodeSent] = useState(false);
+  const [fed, setFed] = useState({ federation: '', registrationId: '', contactEmail: '' });
+  const [fedFiled, setFedFiled] = useState(!!session.org.federationCheck);
   useEffect(() => {
     api.getPlan(session).then(setInfo).catch(() => {});
     api.getInvoices(session).then(setInvoices).catch(() => {});
+    api.getPathwayRecord(session).then(setRecord).catch(() => {});
   }, [session, tick]);
   if (!info) return null;
   return (
@@ -1076,6 +1363,48 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
         <div className="stat"><div className="v">{info.plan.seats}</div><div className="k">named seats</div></div>
         <div className="stat"><div className="v">{info.plan.attributionWindowMonths} mo</div><div className="k">attribution window</div></div>
       </div>
+      {record && (
+        <div className="section">
+          <h4>Pathway Club record {record.pathwayClub && <span className="pill green">🌱 Pathway Club</span>}</h4>
+          <div className="stat-grid" style={{ marginBottom: 10 }}>
+            <div className="stat"><div className="v">{record.progressed}</div><div className="k">players progressed upward</div></div>
+            <div className="stat"><div className="v">{record.openDaysRun}</div><div className="k">open days run</div></div>
+            <div className="stat"><div className="v">{record.matchdaysLogged}</div><div className="k">match days logged</div></div>
+          </div>
+          <div className="notice">{record.note}</div>
+        </div>
+      )}
+      {!session.org.verified && (
+        <div className="section">
+          <h4>Federation-route verification {fedFiled ? '— ⏳ with Trust & Safety' : ''}</h4>
+          {fedFiled ? (
+            <div className="notice">
+              Filed. Trust & Safety cross-checks the registration with your federation; verification (and,
+              with the safeguarding contract, under-18 visibility) follows their approval.
+            </div>
+          ) : (
+            <>
+              <div className="notice" style={{ marginBottom: 10 }}>
+                Sunday-league clubs run on free email — that's fine here. Verify through your federation
+                registration instead: Trust & Safety checks the record, and a free-mail contact address is
+                accepted on this route.
+              </div>
+              <div className="filters" style={{ flexWrap: 'wrap' }}>
+                <input placeholder="Federation (e.g. Manchester FA)" value={fed.federation} onChange={(e) => setFed({ ...fed, federation: e.target.value })} />
+                <input placeholder="Registration id" value={fed.registrationId} onChange={(e) => setFed({ ...fed, registrationId: e.target.value })} />
+                <input placeholder="Contact email (free mail OK)" value={fed.contactEmail} onChange={(e) => setFed({ ...fed, contactEmail: e.target.value })} />
+                <button className="primary" onClick={async () => {
+                  try {
+                    await api.submitFederationVerification(session, { federation: fed.federation.trim(), registrationId: fed.registrationId.trim(), contactEmail: fed.contactEmail.trim() || undefined });
+                    setFedFiled(true);
+                    notify('Federation verification filed — Trust & Safety will cross-check the registration.');
+                  } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
+                }}>File for verification</button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
       <div className="section">
         <h4>Company email verification {session.org.emailDomainVerified ? '— ✓ verified' : ''}</h4>
         {session.org.emailDomainVerified ? (

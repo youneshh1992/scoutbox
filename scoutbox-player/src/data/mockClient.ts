@@ -387,7 +387,7 @@ function seedDemoPlayer(): PlayerProfile {
     contractStatus: 'expiring_summer',
     identityVerified: true,
     attendance: [
-      { id: 'att-1', fixture: 'Sunday League Cup Final', venue: 'Hough End Playing Fields', date: '2026-07-02', gps: { lat: 53.43, lng: -2.26 }, verified: true },
+      { id: 'att-1', fixture: 'Sunday League Cup Final', venue: 'Hough End Playing Fields', date: '2026-07-02', gps: { lat: 53.43, lng: -2.26 }, verified: true, corroboratedBy: 'Moss Side Athletic' },
       { id: 'att-2', fixture: 'County Trial Day', venue: 'Platt Lane Complex', date: '2026-05-23', gps: { lat: 53.45, lng: -2.23 }, verified: true },
     ],
     timeline: [
@@ -1011,6 +1011,7 @@ export const mockClient: PlayerClient = {
       : [{
           id: 'org-mossside', name: 'Moss Side Athletic', city: 'Manchester', distanceKm: 2.4,
           verified: false, safeguardingCertified: false, lookingFor: ['ST', 'CM'],
+          progressed: 2, pathwayClub: true,
           openTrials: DEMO_OPEN_TRIALS.filter((t) => t.id === 'open-moss-1').map((t) => ({ ...t, registered: openTrialRegs.has(`${playerId}:${t.id}`) })),
         }];
     return delay<Opportunities>({ radiusKm: 50, clubs, lookingForYou: clubs.filter((c) => c.lookingFor.includes(p.position ?? '')).length });

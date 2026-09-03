@@ -43,6 +43,8 @@ export interface OpportunityOpenTrial {
 export interface OpportunityClub {
   id: string; name: string; city: string; distanceKm: number; verified: boolean;
   safeguardingCertified: boolean; lookingFor: string[]; openTrials: OpportunityOpenTrial[];
+  /** Development record: players this club signed or hosted who moved up. */
+  progressed?: number; pathwayClub?: boolean;
 }
 export interface Opportunities { radiusKm?: number; clubs: OpportunityClub[]; lookingForYou?: number; note?: string }
 
@@ -80,6 +82,9 @@ export interface DirectoryClub {
   trialsRun: number;
   reportsFiled: number;
   avgReportDays: number | null;
+  /** Grassroots clubs only: their development record. */
+  progressed?: number;
+  pathwayClub?: boolean;
 }
 import type { TrustBreakdown } from '../domain/trustScore';
 

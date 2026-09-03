@@ -140,6 +140,7 @@ export default function Discover() {
                   <Row>
                     <Pill label={`${c.distanceKm} km`} tone="blue" />
                     {c.verified && <Pill label="Verified" tone="green" />}
+                    {c.pathwayClub && <Pill label={`🌱 Pathway Club · ${c.progressed} moved up`} tone="gold" />}
                   </Row>
                 </Row>
                 {c.lookingFor.length > 0 && (
@@ -274,6 +275,7 @@ export default function Discover() {
                     {d.verified ? <Pill label="Verified" tone="green" /> : <Pill label="unverified" tone="red" />}
                     {d.trustedPartner && <Pill label="Trusted Partner" tone="gold" />}
                     {d.safeguardingCertified && <Pill label="🛡 Safeguarding certified" tone="green" />}
+                    {d.pathwayClub && <Pill label="🌱 Pathway Club" tone="gold" />}
                   </Row>
                 </Row>
                 <Muted size={12.5}>

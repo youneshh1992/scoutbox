@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, DEMO_MODE, type Channel, type Notification, type Org, type Session } from './api';
 import {
   FeedScreen, FilmRoomScreen, SearchScreen, ShortlistScreen, RequestsScreen, MessagesScreen,
-  TrialsScreen, OpenDaysScreen, FixturesScreen, LedgerScreen, FunnelScreen, PlanScreen,
+  TrialsScreen, OpenDaysScreen, SquadScreen, FriendliesScreen, FixturesScreen, LedgerScreen, FunnelScreen, PlanScreen,
   PlayerDrawer, Toast, SafetyModal,
 } from './screens';
 
@@ -19,7 +19,7 @@ function loadSession(): Session | null {
   }
 }
 
-export type ScreenId = 'feed' | 'filmroom' | 'search' | 'shortlist' | 'requests' | 'messages' | 'trials' | 'opendays' | 'fixtures' | 'ledger' | 'funnel' | 'plan';
+export type ScreenId = 'feed' | 'filmroom' | 'search' | 'shortlist' | 'requests' | 'messages' | 'trials' | 'opendays' | 'squad' | 'friendlies' | 'fixtures' | 'ledger' | 'funnel' | 'plan';
 
 const NAV: { id: ScreenId; label: string }[] = [
   { id: 'feed', label: 'Home' },
@@ -30,6 +30,8 @@ const NAV: { id: ScreenId; label: string }[] = [
   { id: 'messages', label: 'Messages' },
   { id: 'trials', label: 'Trials & Reports' },
   { id: 'opendays', label: 'Open Days' },
+  { id: 'squad', label: 'Squad & Match Days' },
+  { id: 'friendlies', label: 'Friendlies' },
   { id: 'fixtures', label: 'Fixtures' },
   { id: 'ledger', label: 'Discovery Ledger' },
   { id: 'funnel', label: 'Funnel' },
@@ -260,6 +262,8 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
           {screen === 'feed' && <FeedScreen {...props} />}
           {screen === 'filmroom' && <FilmRoomScreen {...props} />}
           {screen === 'opendays' && <OpenDaysScreen {...props} />}
+          {screen === 'squad' && <SquadScreen {...props} />}
+          {screen === 'friendlies' && <FriendliesScreen {...props} />}
           {screen === 'fixtures' && <FixturesScreen {...props} />}
           {screen === 'search' && <SearchScreen {...props} />}
           {screen === 'shortlist' && <ShortlistScreen {...props} />}

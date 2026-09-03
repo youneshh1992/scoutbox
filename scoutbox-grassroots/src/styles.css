@@ -352,3 +352,53 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 }
 .register-box h3 { margin: 0; font-size: 15px; }
 .reg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
+
+/* Squad gap analysis: thin position groups glow amber. */
+.stat.warn { border-color: var(--gold); }
+.stat.warn .k { color: var(--gold); }
+
+/* ------------------------------------------------ mobile / small screens
+   Grassroots managers run their club from a phone on a touchline — the
+   whole workspace has to work one-handed at 390px. */
+@media (max-width: 860px) {
+  body { overflow: auto; }
+  #root { height: auto; min-height: 100vh; }
+  .shell { display: flex; flex-direction: column; height: auto; min-height: 100vh; }
+  .sidebar {
+    flex-direction: row;
+    align-items: center;
+    overflow-x: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+    padding: 10px 12px;
+    gap: 2px;
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    -webkit-overflow-scrolling: touch;
+  }
+  .sidebar .brand { padding: 0 10px 0 0; font-size: 16px; white-space: nowrap; }
+  .sidebar button { white-space: nowrap; padding: 8px 10px; font-size: 13px; }
+  .sidebar .spacer, .sidebar .whoami { display: none; }
+  .nav-badge { position: static; transform: none; margin-left: 6px; }
+  .main { overflow: visible; }
+  .topbar { flex-wrap: wrap; padding: 10px 14px; gap: 8px; }
+  .content { padding: 14px; overflow-y: visible; }
+  .filters input[type='text'], .filters input:not([type]) { width: 100%; flex: 1 1 100%; }
+  .filters select, .filters input[type='date'] { flex: 1 1 45%; }
+  .player-grid { grid-template-columns: 1fr; }
+  .stat-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
+  .form-grid { grid-template-columns: 1fr 1fr; }
+  .list-row { flex-wrap: wrap; }
+  .drawer { width: 100vw; padding: 18px 16px; }
+  .bell-panel { right: 8px; left: 8px; width: auto; }
+  .login { height: auto; min-height: 100vh; padding: 28px 16px; gap: 20px; }
+  .login h1 { font-size: 30px; }
+  .org-grid { flex-wrap: wrap; justify-content: center; }
+  .org-card { width: 100%; max-width: 340px; }
+  .login .enter-row { flex-wrap: wrap; justify-content: center; }
+  .login input { width: 100%; max-width: 340px; }
+  .register-box { padding: 14px; }
+  .bubble { max-width: 88%; }
+  table.data { display: block; overflow-x: auto; }
+}

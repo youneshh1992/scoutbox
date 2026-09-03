@@ -3,15 +3,78 @@
 > Purpose of this file: let any Claude Code session (cloud or local) pick up this
 > project with zero prior context. Keep it updated at the end of each working session.
 
-**Last updated:** 2026-09-03 · **Milestone: 9 complete — the Grassroots player
-journey (pathway + level-up moments, badges, training programmes, cohort
-benchmarks, opportunity radar, open trial days, First Team Seekers, coach
-vouches, season wrap)**; previously: **8 — ScoutBox Grassroots,
-a separate club platform (org levels, 50km radius, platform-scoped logins,
-federation registration, level ceiling)**; previously: **7 — production hardening
-(real auth + sessions, SQLite, adapter seams for mail/push/IDV/billing/storage,
-funnel analytics, moderation v2 with grooming escalation, CI + Docker deploy)** ·
+**Last updated:** 2026-09-03 · **Milestone: 10 complete — the grassroots club
+toolkit (squad + gap analysis, coach-signed match-day attendance, open-day
+outcomes + the no-ghosting rule, release-with-reference, Pathway Club record,
+friendlies board, federation-route verification, mobile pass) + player
+onboarding visual redesign**; previously: **9 — the Grassroots player journey
+(pathway + level-up moments, badges, training programmes, cohort benchmarks,
+opportunity radar, open trial days, First Team Seekers, coach vouches, season
+wrap)**; **8 — ScoutBox Grassroots, a separate club platform (org levels, 50km
+radius, platform-scoped logins, federation registration, level ceiling)**;
+**7 — production hardening (real auth + sessions, SQLite, adapter seams,
+funnel analytics, moderation v2, CI + Docker deploy)** ·
 Developed in this GitHub repo (`youneshh1992/scoutbox`), Claude Code web.
+
+## Milestone 10 (2026-09-03): the grassroots club toolkit + onboarding redesign
+
+Server (`scoutbox-server/server.mjs`, all grassroots endpoints behind
+`grassrootsOrgOnly` 403):
+- **Squad**: `org.squad` (signings push onto it automatically with
+  `source:'signing'`; manual adds validate `visibleToOrg`, off-platform rows
+  are name-only). `squadView()` computes coverage per `POSITION_GROUPS`
+  (GK/DEF/MID/ATT), `gaps` (<2 players) and `suggestedLookingFor`.
+  GET/POST `/org/squad`, POST `/org/squad/:entryId/release` (availability →
+  `available_now`, contract → `free_agent`, optional club-authored PUBLISHED
+  vouch — no email code, org identity is authenticated; moderated; ledger
+  `released_by_club`; player + guardian notified).
+- **Match days**: POST `/org/matchday` credits only rostered, visible platform
+  players with `{verified:true, corroboratedBy: org.name}` attendance +
+  `recordActivity`; `db.matchdays` keeps the club log (GET `/org/matchdays`).
+- **No-ghosting**: POST `/org/open-trials` refuses `409 OUTCOMES_OUTSTANDING`
+  while past open days hold registrations without an outcome. POST
+  `/org/open-trials/:id/registrations/:regId/outcome` (`invite_trial` builds a
+  full routed trial request inline — guardian routing, ledger, notifications;
+  `declined` sends the kind no to player + guardian; note moderated; outcomes
+  final `409 ALREADY_RESOLVED`).
+- **Pathway Club record**: `pathwayRecord(org)` — involved ids from signings +
+  squad + open-day registrations; `progressed` = later non-grassroots signing
+  after first involvement; `pathwayClub` at ≥1. GET `/org/pathway-record`;
+  exposed on `/orgs/directory` (grassroots rows) and `/player/opportunities`.
+- **Federation verification**: POST `/org/verification/federation` files
+  `org.federationCheck` (status `pending`, free-mail contact allowed) for the
+  T&S console (`/admin/clubs`).
+- **Friendlies**: `db.friendlies` — POST/GET `/org/friendlies` (own + within
+  50km, responder messages visible to the poster only), POST
+  `/org/friendlies/:id/respond` (moderated, one per club, poster's user
+  notified via `postedByUserId`).
+
+Grassroots app: Squad & Match Days screen (coverage stats with amber gaps,
+one-tap "tell the radar", roster with release + reference flow, match-day
+form with player checkboxes, history), Friendlies screen, outcome buttons +
+no-ghosting banner on Open Days, Pathway Club record card + federation
+verification form on Plan, and a **mobile pass** (≤860px: sticky scrollable
+top nav, reflowed forms/cards, no horizontal scroll at 390px). Demo client
+mirrors all of it (incl. a seeded past open day with unresolved registrants,
+and the previously missing `Grassroots` plan in the demo `PLANS` map — the
+demo Plan screen crashed without it).
+
+Player app: **onboarding visual redesign** — crest hero with pills, role
+cards, pair-code link, promises as check-lists, guardian step dots (1–5),
+labelled fields, demo accounts with avatars. Every copy string, placeholder
+and Enter-button order the e2e suites rely on is unchanged. Plus:
+`corroboratedBy` on attendance (gold "coach-signed · <club>" pill on the
+profile), 🌱 Pathway Club pills on the opportunity radar and club directory;
+mock client mirrors.
+
+Verification: 23 unit tests; **129-check API E2E** (34 new M10 checks:
+squad/roster walls, match-day crediting, the outcome gate end-to-end, release
++ published reference, pathway record before/after an upward signing,
+federation filing to admin, friendlies radius/moderation/response rules);
+demoOffline + crosstab + uiSpotcheck browser suites green on rebuilt bundles;
+M10 UI spot-check (outcome pills, gate toast, squad add/log, friendlies
+respond, pathway card, 390px mobile, redesigned welcome, new player pills).
+Artifacts republished at existing URLs (player, grassroots).
 
 ## Milestone 9 (2026-09-03): the Grassroots player journey
 

@@ -238,7 +238,8 @@ r = await j('/auth/org/register-grassroots', {
   body: JSON.stringify({ name: 'Leyton Sunday Stars', country: 'GB', city: 'London', lat: 51.56, lng: -0.005, federation: 'The FA (England)', registrationId: 'FA-GR-3344', scoutName: 'Sam Cole', role: 'Manager' }),
 });
 ok(r.status === 201 && r.body.token && r.body.org.level === 'grassroots' && r.body.org.verified === false, 'grassroots registration opens unverified (adults-only) with a token');
-gsearch = await j('/org/players', {}, bearer(r.body.token));
+const LEYTON = r.body.token; // London grassroots club, ~2km from Hackney Marsh
+gsearch = await j('/org/players', {}, bearer(LEYTON));
 ok(gsearch.body.every((p) => !p.guardianManaged && p.distanceKm <= 50), 'freshly registered club: local adults only until verification');
 
 // ---- 13. the Grassroots player journey (M9)
@@ -318,6 +319,109 @@ ok(r.body.find((t) => t.id === hackneyTrialId)?.registrations.some((x) => x.play
 // Season wrap.
 r = await j('/player/season-wrap', {}, bearer(KOLA));
 ok(r.status === 200 && r.body.badges.includes('First Club') && /ledger/.test(r.body.note), 'season wrap assembles the verified year');
+
+// ---- 13b. M10: the grassroots club toolkit
+
+// Squad: the Moss Side signing (section 12) auto-rostered Kola; gap analysis
+// flags uncovered position groups and suggests what to look for.
+r = await j('/org/squad', {}, bearer(MOSS));
+ok(r.body.entries.some((e) => e.playerId === 'pl-adeyemi' && e.source === 'signing' && e.onPlatform), 'a grassroots signing lands the player on the squad list automatically');
+ok(r.body.gaps.includes('GK') && r.body.suggestedLookingFor.includes('GK'), 'gap analysis flags uncovered groups and suggests positions');
+r = await j('/org/squad', { method: 'POST', body: JSON.stringify({ name: 'Big Trev (Sunday keeper)', position: 'GK' }) }, bearer(MOSS));
+ok(r.status === 201 && r.body.entries.some((e) => e.name === 'Big Trev (Sunday keeper)' && !e.onPlatform) && r.body.coverage.GK === 1, 'off-platform players roster by name and count toward coverage');
+r = await j('/org/squad', { method: 'POST', body: JSON.stringify({ name: 'Kola', playerId: 'pl-adeyemi' }) }, bearer(MOSS));
+ok(r.status === 409 && r.body.error === 'ALREADY_ON_SQUAD', 'double rostering refused');
+r = await j('/org/squad', { method: 'POST', body: JSON.stringify({ name: 'Elias', playerId: 'pl-svensson' }) }, bearer(MOSS));
+ok(r.status === 403, 'cannot roster a player the platform walls hide');
+r = await j('/org/squad', {}, bearer(EASTPORT));
+ok(r.status === 403 && r.body.error === 'GRASSROOTS_ORGS_ONLY', 'squad tools are grassroots-only');
+
+// Match-day logging: one Saturday action = verified coach-signed attendance
+// for every rostered platform player. Non-rostered ids are never credited.
+me = await j('/player/me', {}, bearer(KOLA));
+const attBefore = me.body.attendance.length;
+r = await j('/org/matchday', { method: 'POST', body: JSON.stringify({ fixture: 'Moss Side vs Ancoats Rovers', date: '2026-08-30', result: '3-1', playerIds: ['pl-adeyemi', 'pl-svensson', 'pl-nobody'] }) }, bearer(MOSS));
+ok(r.status === 201 && r.body.credited === 1, 'match day credits only rostered, visible platform players');
+me = await j('/player/me', {}, bearer(KOLA));
+const lastAtt = me.body.attendance[me.body.attendance.length - 1];
+ok(me.body.attendance.length === attBefore + 1 && lastAtt.verified === true && lastAtt.corroboratedBy === 'Moss Side Athletic', 'player receives verified, coach-corroborated attendance');
+r = await j('/org/matchdays', {}, bearer(MOSS));
+ok(r.body.some((m) => m.fixture === 'Moss Side vs Ancoats Rovers' && m.result === '3-1'), 'match-day log kept for the club');
+
+// The no-ghosting rule: unresolved past open-day registrants block the next
+// posting — every kid who turns up gets an answer.
+r = await j('/org/open-trials', { method: 'POST', body: JSON.stringify({ title: 'Last month\'s open session', date: '2020-01-01', venue: 'Moss Side Rec' }) }, bearer(MOSS));
+const pastTrialId = r.body.openTrial.id;
+await j(`/player/open-trials/${pastTrialId}/register`, { method: 'POST' }, bearer(KOLA));
+r = await j('/org/open-trials', { method: 'POST', body: JSON.stringify({ title: 'Next open session', date: '2099-07-01', venue: 'Moss Side Rec' }) }, bearer(MOSS));
+ok(r.status === 409 && r.body.error === 'OUTCOMES_OUTSTANDING', 'posting a new open day is blocked while past registrants wait for an answer');
+trials = await j('/org/open-trials', {}, bearer(MOSS));
+const pastReg = trials.body.find((t) => t.id === pastTrialId).registrations[0];
+r = await j(`/org/open-trials/${pastTrialId}/registrations/${pastReg.id}/outcome`, { method: 'POST', body: JSON.stringify({ outcome: 'invite_trial', note: 'Great movement up front — come train with the first team.' }) }, bearer(MOSS));
+ok(r.status === 200 && r.body.registration.outcome === 'invite_trial', 'open-day outcome recorded: trial invitation');
+r = await j('/player/inbox', {}, bearer(KOLA));
+ok(r.body.some((x) => x.type === 'trial' && /open day/.test(x.trialDetails?.notes ?? '') && x.status === 'pending'), 'the invitation is a real, properly-routed trial request in the player inbox');
+r = await j(`/org/open-trials/${pastTrialId}/registrations/${pastReg.id}/outcome`, { method: 'POST', body: JSON.stringify({ outcome: 'declined' }) }, bearer(MOSS));
+ok(r.status === 409 && r.body.error === 'ALREADY_RESOLVED', 'an outcome is final — no flip-flopping on a player');
+r = await j('/org/open-trials', { method: 'POST', body: JSON.stringify({ title: 'Next open session', date: '2099-07-01', venue: 'Moss Side Rec' }) }, bearer(MOSS));
+ok(r.status === 201, 'with every registrant answered, the next open day posts');
+
+// The kind no: guardian-managed registrants get the answer via the guardian.
+trials = await j('/org/open-trials', {}, bearer(HACKNEY));
+const guniReg = trials.body.find((t) => t.id === hackneyTrialId).registrations.find((x) => x.playerName === 'Guni Adebayo');
+r = await j(`/org/open-trials/${hackneyTrialId}/registrations/${guniReg.id}/outcome`, { method: 'POST', body: JSON.stringify({ outcome: 'declined', note: 'Call me on 07911 123456 to discuss' }) }, bearer(HACKNEY));
+ok(r.status === 400 && r.body.error === 'MODERATION_BLOCKED', 'outcome notes pass the same moderation screen');
+r = await j(`/org/open-trials/${hackneyTrialId}/registrations/${guniReg.id}/outcome`, { method: 'POST', body: JSON.stringify({ outcome: 'declined', note: 'Not this time — keep playing, and come back next season.' }) }, bearer(HACKNEY));
+ok(r.status === 200 && r.body.registration.outcome === 'declined', 'kind no recorded for a guardian-managed registrant');
+r = await j('/guardian/notifications', {}, bearer(AMARA));
+ok(r.body.some((n) => n.type === 'open_trial' && /keep playing/.test(n.text)), 'the kind no reaches the guardian, never a bare child');
+
+// Release with a reference: availability restored + a club-authored reference
+// published on the way out.
+r = await j('/org/squad', {}, bearer(MOSS));
+const kolaEntry = r.body.entries.find((e) => e.playerId === 'pl-adeyemi');
+r = await j(`/org/squad/${kolaEntry.id}/release`, { method: 'POST', body: JSON.stringify({ referenceText: 'A season of graft — never late, pressed every minute. Any club within 50km should move.' }) }, bearer(MOSS));
+ok(r.status === 200 && !r.body.entries.some((e) => e.playerId === 'pl-adeyemi'), 'release removes the player from the squad');
+me = await j('/player/me', {}, bearer(KOLA));
+ok(me.body.availability === 'available_now' && me.body.contractStatus === 'free_agent', 'released player is marked available and free-agent');
+ok(me.body.vouches.some((v) => /A season of graft/.test(v.text) && v.status === 'published'), 'the club-authored reference publishes straight to the profile');
+
+// Pathway Club record: development is the grassroots reputation currency.
+r = await j('/org/pathway-record', {}, bearer(MOSS));
+ok(r.status === 200 && r.body.progressed === 0 && r.body.pathwayClub === false && r.body.matchdaysLogged >= 1, 'pathway record starts honest: nobody has progressed yet');
+r = await j('/player/opportunities', {}, bearer(KOLA));
+ok(r.body.clubs.every((c) => typeof c.progressed === 'number' && typeof c.pathwayClub === 'boolean'), 'the opportunity radar carries each club\'s development record');
+await j('/org/players/pl-adeyemi/request', { method: 'POST', body: JSON.stringify({ type: 'contact', message: 'We have watched your season.' }) }, bearer(EASTPORT));
+r = await j('/org/players/pl-adeyemi/signing', { method: 'POST' }, bearer(EASTPORT));
+ok(r.status === 201, 'a pro club signs the grassroots product');
+r = await j('/org/pathway-record', {}, bearer(MOSS));
+ok(r.body.progressed >= 1 && r.body.pathwayClub === true, 'the pro signing makes Moss Side a Pathway Club');
+r = await j('/orgs/directory');
+ok(r.body.find((o) => o.id === 'org-mossside')?.pathwayClub === true, 'the Pathway Club badge shows in the player-facing directory');
+
+// Federation-route verification: Sunday-league clubs run on free email —
+// they verify through their federation registration instead.
+r = await j('/org/verification/federation', { method: 'POST', body: JSON.stringify({ federation: 'Manchester FA', registrationId: 'MFA-2210', contactEmail: 'mosssideathletic@gmail.com' }) }, bearer(MOSS));
+ok(r.status === 201 && r.body.submitted, 'grassroots club files federation verification (free-mail contact allowed)');
+r = await j('/admin/clubs', {}, admin);
+ok(r.body.find((o) => o.id === 'org-mossside')?.federationCheck?.status === 'pending', 'the federation check lands in the Trust & Safety queue');
+
+// Friendlies board: club-to-club, same 50km radius.
+r = await j('/org/friendlies', { method: 'POST', body: JSON.stringify({ ageGroup: 'u15', date: '2099-08-15', venue: 'Hackney Marshes pitch 2', notes: 'Development XI, decent standard.' }) }, bearer(HACKNEY));
+ok(r.status === 201, 'grassroots club posts a friendly');
+const friendlyId = r.body.friendly.id;
+r = await j('/org/friendlies', {}, bearer(MOSS));
+ok(!r.body.some((f) => f.id === friendlyId), 'Manchester never sees a London friendly — the 50km rule holds club-to-club');
+r = await j('/org/friendlies', {}, bearer(LEYTON));
+ok(r.body.some((f) => f.id === friendlyId && typeof f.distanceKm === 'number' && f.distanceKm <= 50), 'a neighbouring club sees the friendly with its distance');
+r = await j(`/org/friendlies/${friendlyId}/respond`, { method: 'POST', body: JSON.stringify({ message: 'WhatsApp me on 07911 123456' }) }, bearer(LEYTON));
+ok(r.status === 400 && r.body.error === 'MODERATION_BLOCKED', 'friendly responses are moderated like everything else');
+r = await j(`/org/friendlies/${friendlyId}/respond`, { method: 'POST', body: JSON.stringify({ message: 'Our u15s are free that Saturday — happy to travel.' }) }, bearer(LEYTON));
+ok(r.status === 201, 'a local club responds to the friendly');
+r = await j(`/org/friendlies/${friendlyId}/respond`, { method: 'POST', body: JSON.stringify({ message: 'again' }) }, bearer(LEYTON));
+ok(r.status === 409 && r.body.error === 'ALREADY_RESPONDED', 'double responses refused');
+r = await j('/org/friendlies', {}, bearer(HACKNEY));
+ok(r.body.find((f) => f.id === friendlyId)?.responses.some((x) => /happy to travel/.test(x.message)), 'the poster sees who is up for it');
 
 // ---- 14. storage + SQLite persistence on disk
 let stored = false;

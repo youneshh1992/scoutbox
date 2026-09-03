@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useState, type ReactNode } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { client, ClientError, type DemoIdentity } from '../data/client';
@@ -15,6 +15,77 @@ type Step =
   | 'welcome' | 'pair'
   | 'details' | 'football' | 'needs-guardian'
   | 'g-account' | 'g-email' | 'g-verify' | 'g-disclaimer' | 'g-child';
+
+/* ---- presentation helpers (visual only — every flow string is unchanged) */
+
+function RoleCard({ icon, title, subtitle, accent, onPress }: {
+  icon: string; title: string; subtitle: string; accent?: boolean; onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.roleCard,
+        accent && { borderColor: colors.accent, backgroundColor: '#12291f' },
+        pressed && { opacity: 0.75, transform: [{ scale: 0.99 }] },
+      ]}
+    >
+      <View style={[styles.roleIcon, accent && { borderColor: colors.accent }]}>
+        <Text style={{ fontSize: 24 }}>{icon}</Text>
+      </View>
+      <View style={{ flex: 1, gap: 3 }}>
+        <Text style={styles.roleTitle}>{title}</Text>
+        <Muted size={12.5}>{subtitle}</Muted>
+      </View>
+      <Text style={{ color: accent ? colors.accent : colors.muted, fontSize: 20 }}>›</Text>
+    </Pressable>
+  );
+}
+
+function StepDots({ current }: { current: number }) {
+  return (
+    <View style={styles.dotsRow}>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <View key={n} style={[styles.dot, n <= current && { backgroundColor: colors.accent, borderColor: colors.accent }]} />
+      ))}
+    </View>
+  );
+}
+
+function CheckList({ items, mark = '✓', markColor = colors.accent }: {
+  items: readonly string[]; mark?: string; markColor?: string;
+}) {
+  return (
+    <Card style={{ gap: 12 }}>
+      {items.map((p) => (
+        <View key={p.slice(0, 20)} style={{ flexDirection: 'row', gap: 10 }}>
+          <Text style={{ color: markColor, fontSize: 14, fontWeight: '800', lineHeight: 19 }}>{mark}</Text>
+          <View style={{ flex: 1 }}>
+            <Muted size={13.5}>{p}</Muted>
+          </View>
+        </View>
+      ))}
+    </Card>
+  );
+}
+
+function Avatar({ name, tone }: { name: string; tone?: 'gold' }) {
+  const initials = name.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+  return (
+    <View style={[styles.avatar, tone === 'gold' && { borderColor: colors.gold }]}>
+      <Text style={{ color: tone === 'gold' ? colors.gold : colors.accent, fontWeight: '800', fontSize: 15 }}>{initials}</Text>
+    </View>
+  );
+}
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <View style={{ gap: 5 }}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      {children}
+    </View>
+  );
+}
 
 export default function Onboarding() {
   const router = useRouter();
@@ -198,58 +269,80 @@ export default function Onboarding() {
     }
   };
 
+  const onGuardianPath = step.startsWith('g-');
+
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.logo}>
-          Scout<Text style={{ color: colors.accent }}>Box</Text>
-        </Text>
-        <Muted>Build a verified profile. Get discovered. Never pay to be seen.</Muted>
-        {mode === 'demo' && <Pill label="Demo mode — no server connected" tone="blue" />}
+        {/* ---- hero */}
+        <View style={styles.hero}>
+          <View style={styles.crest}>
+            <Text style={{ fontSize: 30 }}>⚽</Text>
+          </View>
+          <Text style={styles.logo}>
+            Scout<Text style={{ color: colors.accent }}>Box</Text>
+          </Text>
+          <Text style={styles.tagline}>Build a verified profile. Get discovered. Never pay to be seen.</Text>
+          <Row style={{ justifyContent: 'center', marginTop: 4 }}>
+            <Pill label="Free for players — forever" tone="green" />
+            <Pill label="Safeguarding-first" tone="blue" />
+            {mode === 'demo' && <Pill label="Demo mode — no server connected" />}
+          </Row>
+        </View>
+
+        {onGuardianPath && (
+          <StepDots current={{ 'g-account': 1, 'g-email': 2, 'g-verify': 3, 'g-disclaimer': 4, 'g-child': 5 }[step as 'g-account'] ?? 1} />
+        )}
 
         {step === 'welcome' && (
           <>
-            <Row>
-              <Button primary label="I'm a player (18+)" onPress={() => setStep('details')} />
-              <Button label="I'm a parent / guardian" onPress={() => setStep('g-account')} />
-            </Row>
-            <Row>
-              <Button small label="I have a code from my parent/guardian" onPress={() => setStep('pair')} />
-            </Row>
+            <RoleCard
+              icon="🏃"
+              title="I'm a player (18+)"
+              subtitle="Your own verified profile, your own password. Clubs come to you — you never pay to be seen."
+              accent
+              onPress={() => setStep('details')}
+            />
+            <RoleCard
+              icon="🛡️"
+              title="I'm a parent / guardian"
+              subtitle="You own your child's account and hold every club conversation. They keep the football."
+              onPress={() => setStep('g-account')}
+            />
+            <Pressable onPress={() => setStep('pair')} style={({ pressed }) => [styles.pairLink, pressed && { opacity: 0.7 }]}>
+              <Text style={{ color: colors.accent2, fontSize: 13.5, fontWeight: '600' }}>
+                🔗  I have a code from my parent/guardian
+              </Text>
+            </Pressable>
+
             <SectionTitle>Our promises to every player</SectionTitle>
-            {SAFEGUARDING_PROMISES.map((p) => (
-              <Card key={p.slice(0, 20)}>
-                <Muted size={13.5}>{p}</Muted>
-              </Card>
-            ))}
+            <CheckList items={SAFEGUARDING_PROMISES} />
+
             <SectionTitle>Under-18? The rules that protect you</SectionTitle>
-            {U18_PROMISES.slice(0, 3).map((p) => (
-              <Card key={p.slice(0, 20)}>
-                <Muted size={13.5}>{p}</Muted>
-              </Card>
-            ))}
+            <CheckList items={U18_PROMISES.slice(0, 3)} mark="🛡" markColor={colors.accent2} />
+
             {identities.length > 0 && (
               <>
                 <SectionTitle>Or continue as a demo account</SectionTitle>
-                {identities.map((d) => (
-                  <Card key={d.id}>
-                    <Row style={{ justifyContent: 'space-between' }}>
-                      <View>
+                <Card style={{ gap: 0, paddingVertical: 4 }}>
+                  {identities.map((d, i) => (
+                    <View key={d.id} style={[styles.demoRow, i > 0 && styles.demoRowBorder]}>
+                      <Avatar name={d.name} />
+                      <View style={{ flex: 1 }}>
                         <Text style={styles.name}>{d.name}</Text>
-                        <Muted>{d.position}</Muted>
+                        <Muted size={12}>{d.position}</Muted>
                       </View>
                       <Button small label="Enter" onPress={() => enterAsPlayer(d.id)} />
-                    </Row>
-                  </Card>
-                ))}
-                <Card>
-                  <Row style={{ justifyContent: 'space-between' }}>
-                    <View>
+                    </View>
+                  ))}
+                  <View style={[styles.demoRow, styles.demoRowBorder]}>
+                    <Avatar name="Amara Adebayo" tone="gold" />
+                    <View style={{ flex: 1 }}>
                       <Text style={styles.name}>Amara Adebayo</Text>
-                      <Muted>Parent / guardian of Guni (14)</Muted>
+                      <Muted size={12}>Parent / guardian of Guni (14)</Muted>
                     </View>
                     <Button small label="Enter" onPress={enterDemoGuardian} />
-                  </Row>
+                  </View>
                 </Card>
               </>
             )}
@@ -259,32 +352,34 @@ export default function Onboarding() {
         {step === 'pair' && (
           <>
             <SectionTitle>Pair this device</SectionTitle>
-            <Muted size={13.5}>
-              Your parent or guardian generates a 6-character code from their dashboard. It works once
-              and expires after 15 minutes. Pairing gives you your limited player login — uploads,
-              stats and drills — while all club contact stays with them.
-            </Muted>
-            <TextInput
-              style={[styles.input, { letterSpacing: 6, textAlign: 'center', fontSize: 20, fontWeight: '700' }]}
-              placeholder="XXXXXX"
-              placeholderTextColor={colors.muted}
-              value={pairCode}
-              onChangeText={(v) => setPairCode(v.toUpperCase().slice(0, 6))}
-              autoCapitalize="characters"
-            />
-            <Button
-              primary
-              label="Pair and enter"
-              onPress={async () => {
-                setError(null);
-                try {
-                  const { playerId } = await client.pair(pairCode.trim());
-                  await enterAsPlayer(playerId, true); // pairing already minted the session
-                } catch (e) {
-                  setError(e instanceof Error ? e.message : 'Pairing failed.');
-                }
-              }}
-            />
+            <Card style={{ gap: 12 }}>
+              <Muted size={13.5}>
+                Your parent or guardian generates a 6-character code from their dashboard. It works once
+                and expires after 15 minutes. Pairing gives you your limited player login — uploads,
+                stats and drills — while all club contact stays with them.
+              </Muted>
+              <TextInput
+                style={[styles.input, styles.codeInput]}
+                placeholder="XXXXXX"
+                placeholderTextColor={colors.muted}
+                value={pairCode}
+                onChangeText={(v) => setPairCode(v.toUpperCase().slice(0, 6))}
+                autoCapitalize="characters"
+              />
+              <Button
+                primary
+                label="Pair and enter"
+                onPress={async () => {
+                  setError(null);
+                  try {
+                    const { playerId } = await client.pair(pairCode.trim());
+                    await enterAsPlayer(playerId, true); // pairing already minted the session
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : 'Pairing failed.');
+                  }
+                }}
+              />
+            </Card>
             <Button label="Back" onPress={() => setStep('welcome')} />
           </>
         )}
@@ -292,24 +387,36 @@ export default function Onboarding() {
         {step === 'details' && (
           <>
             <SectionTitle>About you</SectionTitle>
-            <TextInput style={styles.input} placeholder="Full name" placeholderTextColor={colors.muted} value={name} onChangeText={setName} />
-            <TextInput
-              style={styles.input}
-              placeholder="Date of birth — just type the digits (YYYYMMDD)"
-              placeholderTextColor={colors.muted}
-              value={dob}
-              onChangeText={(v) => setDob(formatDob(v))}
-              keyboardType="numeric"
-            />
-            {dobAge !== null && (
-              <Muted size={12.5}>
-                {dobAge >= adultAgeFor(country)
-                  ? `You're ${dobAge} — you can create your own account.`
-                  : `You're ${dobAge} — under ${adultAgeFor(country)}, so a parent or guardian sets up the account (next step will guide you).`}
-              </Muted>
-            )}
-            <TextInput style={styles.input} placeholder="City (optional)" placeholderTextColor={colors.muted} value={city} onChangeText={setCity} />
-            <TextInput style={styles.input} placeholder="Password (required, 8+ characters)" placeholderTextColor={colors.muted} value={password} onChangeText={setPassword} secureTextEntry />
+            <Card style={{ gap: 12 }}>
+              <Field label="Full name">
+                <TextInput style={styles.input} placeholder="Full name" placeholderTextColor={colors.muted} value={name} onChangeText={setName} />
+              </Field>
+              <Field label="Date of birth">
+                <TextInput
+                  style={styles.input}
+                  placeholder="Date of birth — just type the digits (YYYYMMDD)"
+                  placeholderTextColor={colors.muted}
+                  value={dob}
+                  onChangeText={(v) => setDob(formatDob(v))}
+                  keyboardType="numeric"
+                />
+              </Field>
+              {dobAge !== null && (
+                <View style={styles.ageHint}>
+                  <Muted size={12.5}>
+                    {dobAge >= adultAgeFor(country)
+                      ? `You're ${dobAge} — you can create your own account.`
+                      : `You're ${dobAge} — under ${adultAgeFor(country)}, so a parent or guardian sets up the account (next step will guide you).`}
+                  </Muted>
+                </View>
+              )}
+              <Field label="City">
+                <TextInput style={styles.input} placeholder="City (optional)" placeholderTextColor={colors.muted} value={city} onChangeText={setCity} />
+              </Field>
+              <Field label="Password">
+                <TextInput style={styles.input} placeholder="Password (required, 8+ characters)" placeholderTextColor={colors.muted} value={password} onChangeText={setPassword} secureTextEntry />
+              </Field>
+            </Card>
             <SectionTitle>Country</SectionTitle>
             <Row>
               {COUNTRIES.map((c) => (
@@ -328,17 +435,21 @@ export default function Onboarding() {
         {step === 'football' && (
           <>
             <SectionTitle>Position</SectionTitle>
-            <Row>
-              {POSITIONS.map((p) => (
-                <Button key={p} small label={p} primary={position === p} onPress={() => setPosition(p)} />
-              ))}
-            </Row>
+            <Card>
+              <Row>
+                {POSITIONS.map((p) => (
+                  <Button key={p} small label={p} primary={position === p} onPress={() => setPosition(p)} />
+                ))}
+              </Row>
+            </Card>
             <SectionTitle>Stronger foot</SectionTitle>
-            <Row>
-              {['left', 'right', 'both'].map((f) => (
-                <Button key={f} small label={f} primary={foot === f} onPress={() => setFoot(f)} />
-              ))}
-            </Row>
+            <Card>
+              <Row>
+                {['left', 'right', 'both'].map((f) => (
+                  <Button key={f} small label={f} primary={foot === f} onPress={() => setFoot(f)} />
+                ))}
+              </Row>
+            </Card>
             <Button primary label="Create profile" onPress={create} />
             <Button label="Back" onPress={() => setStep('details')} />
           </>
@@ -360,14 +471,22 @@ export default function Onboarding() {
         {step === 'g-account' && (
           <>
             <SectionTitle>Guardian account — step 1 of 5</SectionTitle>
-            <Muted size={13.5}>
-              Parents own every under-18 account. You manage all messages, notifications and club
-              interactions; your child keeps the football.
-            </Muted>
-            <TextInput style={styles.input} placeholder="Your full name" placeholderTextColor={colors.muted} value={gName} onChangeText={setGName} />
-            <TextInput style={styles.input} placeholder="Your email" placeholderTextColor={colors.muted} value={gEmail} onChangeText={setGEmail} autoCapitalize="none" />
-            <TextInput style={styles.input} placeholder="Password (required, 8+ characters)" placeholderTextColor={colors.muted} value={gPassword} onChangeText={setGPassword} secureTextEntry />
-            <Button primary label="Continue to email verification" onPress={guardianCreate} />
+            <Card style={{ gap: 12 }}>
+              <Muted size={13.5}>
+                Parents own every under-18 account. You manage all messages, notifications and club
+                interactions; your child keeps the football.
+              </Muted>
+              <Field label="Your name">
+                <TextInput style={styles.input} placeholder="Your full name" placeholderTextColor={colors.muted} value={gName} onChangeText={setGName} />
+              </Field>
+              <Field label="Email">
+                <TextInput style={styles.input} placeholder="Your email" placeholderTextColor={colors.muted} value={gEmail} onChangeText={setGEmail} autoCapitalize="none" />
+              </Field>
+              <Field label="Password">
+                <TextInput style={styles.input} placeholder="Password (required, 8+ characters)" placeholderTextColor={colors.muted} value={gPassword} onChangeText={setGPassword} secureTextEntry />
+              </Field>
+              <Button primary label="Continue to email verification" onPress={guardianCreate} />
+            </Card>
             <Button label="Back" onPress={() => setStep('welcome')} />
           </>
         )}
@@ -375,51 +494,53 @@ export default function Onboarding() {
         {step === 'g-email' && (
           <>
             <SectionTitle>Email verification — step 2 of 5</SectionTitle>
-            <Muted size={13.5}>
-              We sent a 6-character code to {gEmail}. Entering it proves the mailbox is yours — the
-              first of three gates (email, ID, disclaimer) before any child profile can exist.
-            </Muted>
-            {gEmailHint && (
-              <Card style={{ borderColor: colors.accent2 }}>
-                <Muted size={12.5}>Prototype mail transport — your code is: {gEmailHint}</Muted>
-              </Card>
-            )}
-            <TextInput
-              style={[styles.input, { letterSpacing: 6, textAlign: 'center', fontSize: 20, fontWeight: '700' }]}
-              placeholder="XXXXXX"
-              placeholderTextColor={colors.muted}
-              value={gEmailCode}
-              onChangeText={(v) => setGEmailCode(v.toUpperCase().slice(0, 6))}
-              autoCapitalize="characters"
-            />
-            <Button primary label="Verify email" onPress={guardianVerifyEmail} />
+            <Card style={{ gap: 12 }}>
+              <Muted size={13.5}>
+                We sent a 6-character code to {gEmail}. Entering it proves the mailbox is yours — the
+                first of three gates (email, ID, disclaimer) before any child profile can exist.
+              </Muted>
+              {gEmailHint && (
+                <View style={styles.ageHint}>
+                  <Muted size={12.5}>Prototype mail transport — your code is: {gEmailHint}</Muted>
+                </View>
+              )}
+              <TextInput
+                style={[styles.input, styles.codeInput]}
+                placeholder="XXXXXX"
+                placeholderTextColor={colors.muted}
+                value={gEmailCode}
+                onChangeText={(v) => setGEmailCode(v.toUpperCase().slice(0, 6))}
+                autoCapitalize="characters"
+              />
+              <Button primary label="Verify email" onPress={guardianVerifyEmail} />
+            </Card>
           </>
         )}
 
         {step === 'g-verify' && (
           <>
             <SectionTitle>ID verification — step 3 of 5</SectionTitle>
-            <Muted size={13.5}>
-              We verify every guardian before any child profile can exist. Pick a document — production
-              runs a document + liveness check; this prototype records the attestation.
-            </Muted>
-            <Row>
-              <Button small primary={docType === 'passport'} label="Passport" onPress={() => setDocType('passport')} />
-              <Button small primary={docType === 'driving_licence'} label="Driving licence" onPress={() => setDocType('driving_licence')} />
-            </Row>
-            <TextInput style={styles.input} placeholder="Document reference number" placeholderTextColor={colors.muted} value={docRef} onChangeText={setDocRef} />
-            <Button primary label="Verify my identity" onPress={guardianVerify} />
+            <Card style={{ gap: 12 }}>
+              <Muted size={13.5}>
+                We verify every guardian before any child profile can exist. Pick a document — production
+                runs a document + liveness check; this prototype records the attestation.
+              </Muted>
+              <Row>
+                <Button small primary={docType === 'passport'} label="Passport" onPress={() => setDocType('passport')} />
+                <Button small primary={docType === 'driving_licence'} label="Driving licence" onPress={() => setDocType('driving_licence')} />
+              </Row>
+              <Field label="Document reference">
+                <TextInput style={styles.input} placeholder="Document reference number" placeholderTextColor={colors.muted} value={docRef} onChangeText={setDocRef} />
+              </Field>
+              <Button primary label="Verify my identity" onPress={guardianVerify} />
+            </Card>
           </>
         )}
 
         {step === 'g-disclaimer' && (
           <>
             <SectionTitle>Safeguarding disclaimer — step 4 of 5</SectionTitle>
-            {U18_PROMISES.map((p) => (
-              <Card key={p.slice(0, 20)}>
-                <Muted size={13}>{p}</Muted>
-              </Card>
-            ))}
+            <CheckList items={U18_PROMISES} mark="🛡" markColor={colors.accent2} />
             <Muted size={13}>
               By continuing you confirm you are this child&apos;s parent or legal guardian, you will manage
               all club contact on their behalf, and you accept the rules above.
@@ -431,8 +552,14 @@ export default function Onboarding() {
         {step === 'g-child' && (
           <>
             <SectionTitle>Your child — step 5 of 5</SectionTitle>
-            <TextInput style={styles.input} placeholder="Child's full name" placeholderTextColor={colors.muted} value={childName} onChangeText={setChildName} />
-            <TextInput style={styles.input} placeholder="Child's date of birth (YYYY-MM-DD)" placeholderTextColor={colors.muted} value={childDob} onChangeText={setChildDob} />
+            <Card style={{ gap: 12 }}>
+              <Field label="Child's name">
+                <TextInput style={styles.input} placeholder="Child's full name" placeholderTextColor={colors.muted} value={childName} onChangeText={setChildName} />
+              </Field>
+              <Field label="Child's date of birth">
+                <TextInput style={styles.input} placeholder="Child's date of birth (YYYY-MM-DD)" placeholderTextColor={colors.muted} value={childDob} onChangeText={setChildDob} />
+              </Field>
+            </Card>
             <SectionTitle>Country</SectionTitle>
             <Row>
               {COUNTRIES.map((c) => (
@@ -462,8 +589,72 @@ export default function Onboarding() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: 20, gap: 12, maxWidth: 520, width: '100%', alignSelf: 'center' },
-  logo: { color: colors.text, fontSize: 34, fontWeight: '800', marginTop: 10 },
+  hero: { alignItems: 'center', gap: 6, paddingTop: 14, paddingBottom: 10 },
+  crest: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: colors.panel2,
+    borderWidth: 2,
+    borderColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
+  },
+  logo: { color: colors.text, fontSize: 34, fontWeight: '800', letterSpacing: -0.5 },
+  tagline: { color: colors.muted, fontSize: 13.5, textAlign: 'center' },
   name: { color: colors.text, fontSize: 16, fontWeight: '700' },
+  roleCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    backgroundColor: colors.panel,
+    borderColor: colors.line,
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 16,
+  },
+  roleIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: colors.bg2,
+    borderWidth: 1,
+    borderColor: colors.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  roleTitle: { color: colors.text, fontSize: 16, fontWeight: '700' },
+  pairLink: { alignItems: 'center', paddingVertical: 6 },
+  dotsRow: { flexDirection: 'row', gap: 8, justifyContent: 'center', paddingVertical: 2 },
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: colors.bg2,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  demoRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
+  demoRowBorder: { borderTopWidth: 1, borderTopColor: colors.line },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.bg2,
+    borderWidth: 1.5,
+    borderColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ageHint: {
+    backgroundColor: colors.bg2,
+    borderRadius: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.accent2,
+    padding: 10,
+  },
+  fieldLabel: { color: colors.muted, fontSize: 11.5, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8 },
   input: {
     backgroundColor: colors.bg2,
     borderColor: colors.line,
@@ -474,4 +665,5 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 15,
   },
+  codeInput: { letterSpacing: 6, textAlign: 'center', fontSize: 20, fontWeight: '700' },
 });

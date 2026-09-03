@@ -117,10 +117,15 @@ db.invoices ??= [];        // billing records (success fees)
 db.emailChallenges ??= []; // club email-domain verification codes
 db.openTrials ??= [];      // grassroots open trial days + registrations
 db.vouches ??= [];         // coach references (email-code verified)
+db.matchdays ??= [];       // grassroots match-day logs (squad-wide attendance)
+db.friendlies ??= [];      // club-to-club friendly-match board (local)
 db.mediaBlobs ??= {};
 for (const p of db.players) {
   p.firstTeamSeeker ??= false;
   p.programme ??= null;
+}
+for (const o of db.orgs) {
+  if (o.level === 'grassroots') o.squad ??= [];
 }
 
 // ---------------------------------------------------- production adapters
@@ -1637,6 +1642,14 @@ orgRouter.post('/players/:id/signing', (req, res) => {
     if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'level_up', `${p.name} reached academy/pro level with ${req.org.name}.`, p.id);
   }
   refreshJourneyBadges(p);
+  // A grassroots signing puts the player straight onto the club's squad list,
+  // so match-day logging and gap analysis start from the real roster.
+  if (req.org.level === 'grassroots') {
+    req.org.squad ??= [];
+    if (!req.org.squad.some((e) => e.playerId === p.id)) {
+      req.org.squad.push({ id: nextId('sq'), playerId: p.id, name: p.name, position: p.position ?? '', source: 'signing', addedAt: row.ts });
+    }
+  }
   p.contractStatus = 'under_contract';
   p.availability = 'not_seeking';
   p.timeline.push({ year: String(new Date().getFullYear()), event: `Signed by ${req.org.name} — discovered on ScoutBox` });
@@ -1665,6 +1678,19 @@ function grassrootsOrgOnly(req, res) {
 
 orgRouter.post('/open-trials', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
+  // The no-ghosting rule: nobody — least of all a kid at their first session —
+  // leaves an open day without an answer. Unresolved past registrants block
+  // the next posting, the same way unfiled trial reports block new trials.
+  const today = new Date().toISOString().slice(0, 10);
+  const unresolved = db.openTrials
+    .filter((t) => t.orgId === req.org.id && t.date < today)
+    .flatMap((t) => (t.registrations ?? []).filter((r) => !r.outcome));
+  if (unresolved.length > 0) {
+    return res.status(409).json({
+      error: 'OUTCOMES_OUTSTANDING',
+      message: `${unresolved.length} player(s) from your past open day(s) are still waiting for an answer. Resolve them (invite or a kind no) before posting the next one.`,
+    });
+  }
   const { title, date, venue, ageGroup, positions, notes } = req.body || {};
   if (!title || !date || !venue) return res.status(400).json({ error: 'TITLE_DATE_VENUE_REQUIRED' });
   if (notes && !moderateOrRefuse(res, notes, { kind: 'open_trial_notes', orgId: req.org.id })) return;
@@ -1715,6 +1741,267 @@ orgRouter.post('/looking-for', (req, res) => {
   res.json({ lookingFor: req.org.lookingFor });
 });
 
+// Every open-day registrant gets an answer: an invitation (which creates a
+// real, properly-routed trial request) or a kind no.
+orgRouter.post('/open-trials/:id/registrations/:regId/outcome', (req, res) => {
+  if (grassrootsOrgOnly(req, res)) return;
+  const trial = db.openTrials.find((t) => t.id === req.params.id && t.orgId === req.org.id);
+  const reg = trial?.registrations?.find((r) => r.id === req.params.regId);
+  if (!trial || !reg) return res.status(404).json({ error: 'REGISTRATION_NOT_FOUND' });
+  if (reg.outcome) return res.status(409).json({ error: 'ALREADY_RESOLVED' });
+  const { outcome, note } = req.body || {};
+  if (!['invite_trial', 'declined'].includes(outcome)) return res.status(400).json({ error: 'OUTCOME_INVALID' });
+  if (note && !moderateOrRefuse(res, note, { kind: 'open_day_outcome', orgId: req.org.id })) return;
+  const p = findPlayer(reg.playerId);
+  reg.outcome = outcome;
+  reg.outcomeNote = note ? String(note).trim().slice(0, 200) : null;
+  reg.outcomeAt = Date.now();
+  if (p && visibleToOrg(p, req.org)) {
+    if (outcome === 'invite_trial') {
+      const minor = !isAdult(p);
+      const request = {
+        id: nextId('req'), playerId: p.id, playerName: p.name,
+        orgId: req.org.id, orgName: req.org.name, orgType: req.org.type,
+        orgVerified: !!req.org.verified, orgSafeguardingCertified: safeguardingCertified(req.org),
+        trustedPartner: req.org.trustedPartner, userId: req.orgUser.id,
+        scoutName: req.orgUser.name, scoutRole: req.orgUser.role || 'Manager',
+        type: 'trial',
+        message: reg.outcomeNote || `We liked what we saw at "${trial.title}" — come for a proper trial.`,
+        trialDetails: { proposedDate: null, altSlots: [], venue: trial.venue, notes: `Follow-up from open day "${trial.title}".` },
+        status: 'pending', createdAt: Date.now(),
+        routedTo: minor ? 'guardian' : 'player', guardianId: minor ? p.guardianId : null,
+        contactChannel: null,
+      };
+      db.requests.push(request);
+      ledgerAppend({ type: `trial_request${minor ? '_to_guardian' : ''}`, playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
+      if (minor) {
+        notify({ kind: 'guardian', id: p.guardianId }, 'open_trial', `Good news: ${req.org.name} would like to invite ${p.name} for a trial after the open day.`, request.id);
+        notify({ kind: 'player', id: p.id }, 'open_trial', `${req.org.name} liked what they saw at the open day — they've contacted your parent/guardian about a trial.`, request.id);
+      } else {
+        notify({ kind: 'player', id: p.id }, 'open_trial', `⚽ ${req.org.name} liked what they saw at "${trial.title}" — trial invitation in your inbox.`, request.id);
+      }
+    } else {
+      const kindNo = reg.outcomeNote || 'Thanks for coming — not this time, but keep playing and keep logging your football.';
+      if (!isAdult(p) && p.guardianId) {
+        notify({ kind: 'guardian', id: p.guardianId }, 'open_trial', `${req.org.name} on ${p.name}'s open day: ${kindNo}`, trial.id);
+      }
+      notify({ kind: 'player', id: p.id }, 'open_trial', `${req.org.name}: ${kindNo}`, trial.id);
+    }
+  }
+  persist();
+  broadcast('openTrials');
+  res.json({ registration: reg });
+});
+
+// ----------------------------------------------- squad + match-day logging
+// The club's own players in one place — and one Saturday action that gives
+// the whole squad verified, coach-signed attendance.
+const POSITION_GROUPS = { GK: ['GK'], DEF: ['CB', 'RB', 'LB', 'RWB', 'LWB'], MID: ['CDM', 'CM', 'CAM'], ATT: ['ST', 'CF', 'RW', 'LW'] };
+
+function squadView(org) {
+  const entries = (org.squad ?? []).map((e) => {
+    const p = e.playerId ? findPlayer(e.playerId) : null;
+    return { ...e, onPlatform: !!p, trustScore: p ? computeTrustScore(p) : null };
+  });
+  const coverage = Object.fromEntries(Object.entries(POSITION_GROUPS).map(([group, positions]) => [
+    group, entries.filter((e) => positions.includes(e.position)).length,
+  ]));
+  const gaps = Object.entries(coverage).filter(([, n]) => n < 2).map(([g]) => g);
+  const suggestedLookingFor = gaps.flatMap((g) => POSITION_GROUPS[g].slice(0, 2)).slice(0, 5);
+  return { entries, coverage, gaps, suggestedLookingFor };
+}
+
+orgRouter.get('/squad', (req, res) => {
+  if (grassrootsOrgOnly(req, res)) return;
+  res.json(squadView(req.org));
+});
+
+orgRouter.post('/squad', (req, res) => {
+  if (grassrootsOrgOnly(req, res)) return;
+  const { name, position, playerId } = req.body || {};
+  if (!name || !name.trim()) return res.status(400).json({ error: 'NAME_REQUIRED' });
+  if (playerId) {
+    const p = findPlayer(playerId);
+    if (!p || !visibleToOrg(p, req.org)) return res.status(403).json({ error: 'PLAYER_NOT_VISIBLE' });
+    if ((req.org.squad ?? []).some((e) => e.playerId === playerId)) return res.status(409).json({ error: 'ALREADY_ON_SQUAD' });
+  }
+  req.org.squad ??= [];
+  req.org.squad.push({ id: nextId('sq'), name: String(name).trim(), position: position || null, playerId: playerId || null, source: 'manual', addedAt: Date.now() });
+  persist();
+  res.status(201).json(squadView(req.org));
+});
+
+// Release with a reference: the worst moment in grassroots football, done
+// properly — availability restored, and optionally a club-authored reference
+// published on the way out (club identity is already authenticated).
+orgRouter.post('/squad/:entryId/release', (req, res) => {
+  if (grassrootsOrgOnly(req, res)) return;
+  const entry = (req.org.squad ?? []).find((e) => e.id === req.params.entryId);
+  if (!entry) return res.status(404).json({ error: 'SQUAD_ENTRY_NOT_FOUND' });
+  const { referenceText } = req.body || {};
+  if (referenceText && !moderateOrRefuse(res, referenceText, { kind: 'release_reference', orgId: req.org.id })) return;
+  req.org.squad = req.org.squad.filter((e) => e !== entry);
+  const p = entry.playerId ? findPlayer(entry.playerId) : null;
+  if (p) {
+    p.availability = 'available_now';
+    p.contractStatus = 'free_agent';
+    if (referenceText) {
+      db.vouches.push({
+        id: nextId('vch'), playerId: p.id, playerName: p.name,
+        coachName: req.orgUser.name, coachEmail: null, role: `${req.orgUser.role || 'Manager'}, ${req.org.name}`,
+        status: 'published', code: null, text: String(referenceText).trim().slice(0, 400),
+        seasons: null, ts: Date.now(), publishedAt: Date.now(),
+      });
+    }
+    ledgerAppend({ type: 'released_by_club', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
+    notify({ kind: 'player', id: p.id }, 'released',
+      `${req.org.name} has released you${referenceText ? ' — with a reference now on your profile' : ''}. You're marked available to every local club; the First Team Seeker flag is yours to switch on.`, p.id);
+    if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'released', `${req.org.name} released ${p.name}${referenceText ? ' with a reference' : ''}. Their profile is marked available again.`, p.id);
+    broadcast('players', { playerId: p.id });
+  }
+  persist();
+  res.json(squadView(req.org));
+});
+
+orgRouter.post('/matchday', (req, res) => {
+  if (grassrootsOrgOnly(req, res)) return;
+  const { fixture, venue, date, result, playerIds } = req.body || {};
+  if (!fixture || !date) return res.status(400).json({ error: 'FIXTURE_AND_DATE_REQUIRED' });
+  const ids = Array.isArray(playerIds) ? playerIds : [];
+  const onSquad = new Set((req.org.squad ?? []).map((e) => e.playerId).filter(Boolean));
+  const credited = [];
+  for (const pid of ids) {
+    if (!onSquad.has(pid)) continue; // only your own rostered players
+    const p = findPlayer(pid);
+    if (!p || !visibleToOrg(p, req.org)) continue;
+    p.attendance.push({
+      id: nextId('att'), fixture: String(fixture), venue: String(venue || req.org.location?.city || ''),
+      date: String(date), gps: req.org.location ? { lat: req.org.location.lat, lng: req.org.location.lng } : null,
+      verified: true, corroboratedBy: req.org.name, // coach counter-signature
+    });
+    recordActivity(p);
+    notify({ kind: 'player', id: p.id }, 'matchday', `📍 ${req.org.name} logged your appearance in "${fixture}" — verified, coach-signed attendance on your profile.`, p.id);
+    credited.push(p.id);
+    broadcast('players', { playerId: p.id });
+  }
+  db.matchdays.push({
+    id: nextId('md'), orgId: req.org.id, fixture: String(fixture), venue: String(venue || ''),
+    date: String(date), result: result ? String(result).slice(0, 20) : null,
+    playerIds: credited, loggedByUserId: req.orgUser.id, ts: Date.now(),
+  });
+  ledgerAppend({ type: 'matchday_logged', playerId: null, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
+  persist();
+  res.status(201).json({ credited: credited.length, matchdays: db.matchdays.filter((m) => m.orgId === req.org.id).length });
+});
+
+orgRouter.get('/matchdays', (req, res) => {
+  if (grassrootsOrgOnly(req, res)) return;
+  res.json(db.matchdays.filter((m) => m.orgId === req.org.id).slice().reverse());
+});
+
+// --------------------------------------------------- pathway club record
+// Grassroots reputation currency: not resale multiples — players developed.
+function pathwayRecord(org) {
+  const involvedIds = new Set([
+    ...db.signings.filter((sg) => sg.orgId === org.id).map((sg) => sg.playerId),
+    ...(org.squad ?? []).map((e) => e.playerId).filter(Boolean),
+    ...db.openTrials.filter((t) => t.orgId === org.id).flatMap((t) => (t.registrations ?? []).map((r) => r.playerId)),
+  ]);
+  const firstInvolvement = (pid) => Math.min(
+    ...db.signings.filter((sg) => sg.orgId === org.id && sg.playerId === pid).map((sg) => sg.ts),
+    ...db.openTrials.filter((t) => t.orgId === org.id).flatMap((t) => (t.registrations ?? []).filter((r) => r.playerId === pid).map((r) => r.ts)),
+  );
+  const progressed = [...involvedIds].filter((pid) => {
+    const upward = db.signings.find((sg) => sg.playerId === pid && sg.orgId !== org.id && (db.orgs.find((o) => o.id === sg.orgId)?.level ?? '') !== 'grassroots');
+    return upward && upward.ts > firstInvolvement(pid);
+  });
+  return { progressed: progressed.length, pathwayClub: progressed.length >= 1 };
+}
+
+orgRouter.get('/pathway-record', (req, res) => {
+  if (grassrootsOrgOnly(req, res)) return;
+  res.json({
+    ...pathwayRecord(req.org),
+    openDaysRun: db.openTrials.filter((t) => t.orgId === req.org.id).length,
+    matchdaysLogged: db.matchdays.filter((m) => m.orgId === req.org.id).length,
+    note: 'Progressed = players your club signed or hosted who later signed for an academy or pro club. Development is the reputation that matters here.',
+  });
+});
+
+// Federation-route verification: real Sunday-league clubs run on free email —
+// they prove themselves through their federation registration instead, and
+// Trust & Safety checks the record.
+orgRouter.post('/verification/federation', (req, res) => {
+  if (grassrootsOrgOnly(req, res)) return;
+  const { federation, registrationId, contactEmail } = req.body || {};
+  if (!federation || !registrationId) return res.status(400).json({ error: 'FEDERATION_REQUIRED' });
+  req.org.federationCheck = {
+    federation: String(federation).trim(), registrationId: String(registrationId).trim(),
+    contactEmail: contactEmail ? String(contactEmail).trim() : null,
+    status: 'pending', ts: Date.now(),
+  };
+  persist();
+  broadcast('orgs');
+  res.status(201).json({
+    submitted: true,
+    note: 'Trust & Safety cross-checks the registration with your federation. Verification (and with the safeguarding contract, U18 visibility) follows their approval.',
+  });
+});
+
+// ---------------------------------------------------- friendlies board
+// Club-to-club, same 50km radius: trial matches are how grassroots scouting
+// actually happens — and a reason to open the app between transfer windows.
+orgRouter.post('/friendlies', (req, res) => {
+  if (grassrootsOrgOnly(req, res)) return;
+  const { ageGroup, date, venue, notes } = req.body || {};
+  if (!date) return res.status(400).json({ error: 'DATE_REQUIRED' });
+  if (notes && !moderateOrRefuse(res, notes, { kind: 'friendly_notes', orgId: req.org.id })) return;
+  const friendly = {
+    id: nextId('fr'), orgId: req.org.id, orgName: req.org.name, postedByUserId: req.orgUser.id,
+    ageGroup: ageGroup || 'open', date: String(date), venue: venue ? String(venue).trim() : (req.org.location?.city ?? ''),
+    notes: notes || '', status: 'open', responses: [], createdAt: Date.now(),
+  };
+  db.friendlies.push(friendly);
+  persist();
+  broadcast('friendlies');
+  res.status(201).json({ friendly });
+});
+
+orgRouter.get('/friendlies', (req, res) => {
+  if (grassrootsOrgOnly(req, res)) return;
+  const nearby = db.friendlies.filter((f) => {
+    if (f.orgId === req.org.id) return true;
+    const other = db.orgs.find((o) => o.id === f.orgId);
+    return other?.location && req.org.location && haversineKm(other.location, req.org.location) <= GRASSROOTS_RADIUS_KM;
+  }).map((f) => {
+    const other = db.orgs.find((o) => o.id === f.orgId);
+    return {
+      ...f,
+      mine: f.orgId === req.org.id,
+      distanceKm: f.orgId === req.org.id || !other?.location || !req.org.location
+        ? 0 : Math.round(haversineKm(other.location, req.org.location) * 10) / 10,
+      // responder details only for the poster
+      responses: f.orgId === req.org.id ? f.responses : f.responses.map(({ message, ...r }) => ({ ...r, message: '' })),
+    };
+  }).sort((a, b) => a.date.localeCompare(b.date));
+  res.json(nearby);
+});
+
+orgRouter.post('/friendlies/:id/respond', (req, res) => {
+  if (grassrootsOrgOnly(req, res)) return;
+  const friendly = db.friendlies.find((f) => f.id === req.params.id);
+  if (!friendly) return res.status(404).json({ error: 'FRIENDLY_NOT_FOUND' });
+  if (friendly.orgId === req.org.id) return res.status(400).json({ error: 'OWN_POST' });
+  const { message } = req.body || {};
+  if (message && !moderateOrRefuse(res, message, { kind: 'friendly_response', orgId: req.org.id })) return;
+  if (friendly.responses.some((r) => r.orgId === req.org.id)) return res.status(409).json({ error: 'ALREADY_RESPONDED' });
+  friendly.responses.push({ orgId: req.org.id, orgName: req.org.name, message: message ? String(message).trim().slice(0, 200) : '', respondedByUserId: req.orgUser.id, ts: Date.now() });
+  if (friendly.postedByUserId) notify({ kind: 'org_user', id: friendly.postedByUserId }, 'friendly', `${req.org.name} is up for your friendly on ${friendly.date}.`, friendly.id);
+  persist();
+  broadcast('friendlies');
+  res.status(201).json({ responded: true });
+});
+
 // ------------------------------------------------------ recruitment funnel
 // The club's whole pipeline computed from the ledger — every stage is a real
 // recorded event, so the numbers are the numbers.
@@ -1751,7 +2038,10 @@ orgRouter.post('/verification/email', async (req, res) => {
   const { email } = req.body || {};
   if (!email || !email.includes('@')) return res.status(400).json({ error: 'EMAIL_REQUIRED' });
   if (FREE_MAIL.test(email)) {
-    return res.status(422).json({ error: 'COMPANY_EMAIL_REQUIRED', message: 'Verification needs a company mailbox — free email providers don\'t prove the club connection.' });
+    return res.status(422).json({
+      error: 'COMPANY_EMAIL_REQUIRED',
+      message: 'Free email providers don\'t prove domain control. No club domain? Use federation verification instead — your federation registration is checked by Trust & Safety.',
+    });
   }
   const code = randomCode(6);
   db.emailChallenges = db.emailChallenges.filter((c) => c.orgId !== req.org.id);
@@ -2329,6 +2619,7 @@ playerRouter.get('/opportunities', (req, res) => {
     .map(({ org, distanceKm }) => ({
       id: org.id, name: org.name, city: org.location.city ?? '', distanceKm,
       verified: org.verified, safeguardingCertified: safeguardingCertified(org),
+      ...pathwayRecord(org),
       lookingFor: org.lookingFor ?? [],
       openTrials: db.openTrials.filter((t) => t.orgId === org.id && t.date >= new Date().toISOString().slice(0, 10))
         .map(({ registrations, ...t }) => ({ ...t, registered: (registrations ?? []).some((r) => r.playerId === req.player.id) })),
@@ -2627,6 +2918,8 @@ app.get('/orgs/directory', (_req, res) => {
         id: o.id, name: o.name, plan: o.plan, verified: o.verified,
         trustedPartner: o.trustedPartner, safeguardingCertified: safeguardingCertified(o),
         trialsRun: trials.length, reportsFiled: reported.length, avgReportDays,
+        // Grassroots clubs wear their development record, not resale multiples.
+        ...(o.level === 'grassroots' ? pathwayRecord(o) : {}),
       };
     })
   );

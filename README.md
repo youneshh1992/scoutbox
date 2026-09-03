@@ -1,4 +1,4 @@
-# ScoutBox — Full System (Milestone 9: the Grassroots player journey)
+# ScoutBox — Full System (Milestone 10: the grassroots club toolkit)
 
 Five pieces, one live dataset:
 
@@ -23,6 +23,40 @@ Messaging is symmetric and observable: messages flow both ways with read receipt
 count next to Messages (club sidebar) and on the Inbox tab (player app). The static
 demo builds sync across same-browser tabs too (BroadcastChannel bus), so the club
 tab and player tab hold one real conversation.
+
+## Milestone 10: the grassroots club toolkit
+The club side of Grassroots grows the tools a real Sunday-league club runs on —
+every rule server-enforced, and the player onboarding gets a proper visual
+redesign (role cards, guided steps, labelled fields; every flow unchanged).
+
+- **Squad & match days** — the club's own roster (signings land on it
+  automatically; off-platform players roster by name), position-group gap
+  analysis ("you're thin at GK/DEF") that can point the players' opportunity
+  radar at the gaps, and one match-day log that gives every rostered platform
+  player **verified, coach-signed attendance** (`corroboratedBy` the club) on
+  their profile.
+- **The no-ghosting rule** — every open-day registrant gets an answer. An
+  invitation creates a real, properly-routed trial request (guardian-first for
+  minors); a "kind no" notifies the player — and the guardian for children.
+  Unresolved past registrants **block the next open-day posting**
+  (`409 OUTCOMES_OUTSTANDING`), the same ethic as mandatory trial reports.
+  Outcomes are final and outcome notes are moderated.
+- **Release with a reference** — the worst moment in grassroots football done
+  properly: released players are marked available/free-agent to every local
+  club, and the club can publish a reference on the way out (club identity is
+  authenticated, so no email code; text is moderated).
+- **Pathway Club record** — Grassroots reputation is development, not resale
+  multiples: clubs whose players later signed for an academy or pro club carry
+  a 🌱 Pathway Club badge — on the player-facing directory and the opportunity
+  radar.
+- **Friendlies board** — club-to-club trial matches inside the same 50km
+  radius: post a fixture, neighbouring clubs respond (moderated, one response
+  per club), the poster is notified. Manchester never sees a London friendly.
+- **Federation-route verification** — Sunday-league clubs run on free email;
+  they file their federation registration for Trust & Safety to cross-check
+  instead (free-mail contact allowed on this route).
+- **Mobile pass** — the whole Grassroots workspace works one-handed at 390px:
+  the sidebar becomes a sticky scrollable nav, forms and cards reflow.
 
 ## Milestone 9: the Grassroots player journey
 Features exclusive to amateur and semi-pro players — the academy experience,

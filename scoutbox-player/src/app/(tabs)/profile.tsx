@@ -529,7 +529,9 @@ export default function Profile() {
           {me.attendance.length === 0 && <Muted size={13}>None yet — log one from the Upload tab.</Muted>}
           {me.attendance.map((a) => (
             <Row key={a.id}>
-              <Pill label="GPS ✓" tone="green" />
+              {a.corroboratedBy
+                ? <Pill label={`coach-signed · ${a.corroboratedBy}`} tone="gold" />
+                : <Pill label="GPS ✓" tone="green" />}
               <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>{a.fixture}</Text>
               <Muted size={12}>{a.venue} · {a.date}</Muted>
             </Row>
