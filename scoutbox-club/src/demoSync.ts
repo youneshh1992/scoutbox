@@ -37,9 +37,19 @@ function safeParse<T>(raw: string | null, fallback: T): T {
 }
 
 export function createDemoBus(role: BusRole, onEvent: (e: BusEvent) => void): DemoBus {
+  // Sandboxed hosts make the localStorage GETTER throw — `typeof` included —
+  // so the probe itself must sit inside try/catch.
+  const storageOk = (() => {
+    try {
+      localStorage.getItem('__probe__');
+      return true;
+    } catch {
+      return false;
+    }
+  })();
   const supported =
     typeof BroadcastChannel !== 'undefined' &&
-    typeof localStorage !== 'undefined' &&
+    storageOk &&
     typeof window !== 'undefined';
   if (!supported) {
     return { publish: () => {}, peerActive: () => false, close: () => {} };
@@ -52,7 +62,9 @@ export function createDemoBus(role: BusRole, onEvent: (e: BusEvent) => void): De
 
   // Catch up on everything that happened before this tab opened. Deferred a
   // tick so module-level state finishes initialising before replay runs.
-  const journal = safeParse<BusEvent[]>(localStorage.getItem(JOURNAL_KEY), []);
+  let journalRaw: string | null = null;
+  try { journalRaw = localStorage.getItem(JOURNAL_KEY); } catch { /* blocked — no catch-up */ }
+  const journal = safeParse<BusEvent[]>(journalRaw, []);
   setTimeout(() => {
     for (const e of journal.sort((a, b) => a.ts - b.ts)) {
       if (seen.has(e.id)) continue;

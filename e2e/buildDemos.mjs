@@ -36,4 +36,19 @@ if (!html.includes(shim)) {
   html = html.replace(/(<div id="root"[^>]*>)/, `$1${shim}`);
   fs.writeFileSync(playerFile, html);
 }
+
+// Sandboxed hosts (e.g. artifact viewers without allow-same-origin) make the
+// localStorage/sessionStorage GETTERS throw — `typeof localStorage` included —
+// which crashes app bundles at boot into a white screen. Replace throwing
+// storage with an in-memory shim before any bundle code runs, in every demo.
+const storageShim = '<script data-storage-shim>(function(){function mem(){var m=new Map;return{getItem:function(k){k=String(k);return m.has(k)?m.get(k):null},setItem:function(k,v){m.set(String(k),String(v))},removeItem:function(k){m.delete(String(k))},clear:function(){m.clear()},key:function(i){return Array.from(m.keys())[i]!==undefined?Array.from(m.keys())[i]:null},get length(){return m.size}}}function guard(n){try{window[n].getItem("__probe__")}catch(e){try{Object.defineProperty(window,n,{value:mem(),configurable:true})}catch(e2){}}}guard("localStorage");guard("sessionStorage")})();</script>';
+for (const f of ['scoutbox-club-demo.html', 'scoutbox-admin-demo.html', 'scoutbox-grassroots-demo.html', 'scoutbox-player-demo.html']) {
+  const p = path.join(OUT, f);
+  let doc = fs.readFileSync(p, 'utf8');
+  if (!doc.includes('data-storage-shim')) {
+    doc = doc.replace(/<head>/i, `<head>${storageShim}`);
+    if (!doc.includes('data-storage-shim')) doc = storageShim + doc; // no <head> tag — prepend
+    fs.writeFileSync(p, doc);
+  }
+}
 console.log('demo bundles ready in e2e/dist/');
