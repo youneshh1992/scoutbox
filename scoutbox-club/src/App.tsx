@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, DEMO_MODE, type Channel, type Notification, type Org, type Session } from './api';
+import { api, ApiError, DEMO_MODE, type Channel, type Notification, type Org, type Session } from './api';
 import {
   FeedScreen, FilmRoomScreen, SearchScreen, ShortlistScreen, RequestsScreen, MessagesScreen,
   TrialsScreen, FixturesScreen, LedgerScreen, FunnelScreen, ReputationScreen, PlanScreen,
@@ -49,14 +49,16 @@ export default function App() {
     setSession(null);
   };
 
-  // A restored session's user id may be stale (in-memory server restarts);
-  // re-login once with the stored identity to mint a fresh one.
+  // Session restore validates the stored bearer token instead of silently
+  // re-logging in (which cannot supply a provisioned club password). A 401/403
+  // means the session expired — back to login; transient network failures keep
+  // the session and the workspace shows its reconnecting state.
   useEffect(() => {
     const restored = loadSession();
     if (!restored) return;
-    api.login(restored.org.id, restored.scoutName, restored.role)
-      .then(login)
-      .catch(logout);
+    api.getNotifications(restored).catch((e) => {
+      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) logout();
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -67,6 +69,7 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [scoutName, setScoutName] = useState('');
+  const [password, setPassword] = useState('');
   const [role, setRole] = useState(ROLES[0]);
   const [error, setError] = useState<string | null>(null);
 
@@ -78,7 +81,7 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
     if (!selected) return setError('Pick an organisation.');
     if (!scoutName.trim()) return setError('Enter your name — every session is attributed to a named individual.');
     try {
-      onLogin(await api.login(selected, scoutName, role));
+      onLogin(await api.login(selected, scoutName, role, password || undefined));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Login failed');
     }
@@ -112,6 +115,14 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
           value={scoutName}
           onChange={(e) => setScoutName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && enter()}
+        />
+        <input
+          type="password"
+          placeholder="Club password (if provisioned)"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && enter()}
+          style={{ width: 200 }}
         />
         <select value={role} onChange={(e) => setRole(e.target.value)}>
           {ROLES.map((r) => <option key={r}>{r}</option>)}

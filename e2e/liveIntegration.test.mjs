@@ -193,6 +193,22 @@ await club.waitForSelector("text=Guni's mum", { timeout: 15000 });
 await club.waitForSelector('text=thread is with the guardian', { timeout: 5000 });
 say('C: guardian ↔ club conversation live; the thread is explicitly with the guardian');
 
+// ===== C2. Grassroots club ↔ guardian of a LOCAL minor (own context) =====
+const grass2 = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+await loginPortal(grass2, 'http://localhost:8283/', 'Hackney Marsh Rovers', 'Dee Mensah');
+await portalRequestContact(grass2, 'Guni Adebayo', 'Our U15s train five minutes from you.', true);
+say('C2: verified local grassroots club sent a guardian-routed request for the minor');
+await guardian.getByText('Back', { exact: true }).first().click().catch(() => {});
+await guardian.waitForSelector('text=Hackney Marsh Rovers', { timeout: 15000 });
+await guardian.getByText('Accept conversation', { exact: true }).first().click();
+await guardian.getByText('Open', { exact: true }).nth(1).click(); // Hackney thread (Eastport's came first)
+await guardian.fill('input[placeholder="Write a message (no personal contact details)"]', 'Guni would love that — which pitch?');
+await guardian.keyboard.press('Enter');
+await portalOpenThread(grass2, 'Guni Adebayo');
+await grass2.waitForSelector('text=which pitch?', { timeout: 15000 });
+await grass2.waitForSelector('text=thread is with the guardian', { timeout: 5000 });
+say('C2: grassroots ↔ guardian conversation live — the child is never a party');
+
 // ================= D. refresh persistence + outage UI =================
 await player.goto('http://localhost:8281/');
 await player.waitForSelector('text=Your visibility right now', { timeout: 30000 }); // session restored

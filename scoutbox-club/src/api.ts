@@ -397,7 +397,7 @@ export interface SearchFilters {
 
 export interface ScoutboxApi {
   listOrgs(): Promise<Org[]>;
-  login(orgId: string, scoutName: string, role: string): Promise<Session>;
+  login(orgId: string, scoutName: string, role: string, password?: string): Promise<Session>;
   report(s: Session, input: ReportInput): Promise<void>;
   searchPlayers(s: Session, f: SearchFilters): Promise<Player[]>;
   getPlayer(s: Session, id: string): Promise<PlayerDetail>;
@@ -457,11 +457,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const httpApi: ScoutboxApi = {
   listOrgs: () => request<Org[]>('/orgs?platform=main'),
 
-  async login(orgId, scoutName, role) {
+  async login(orgId, scoutName, role, password) {
     const r = await request<{ userId: string; role: string; org: Org; token: string }>('/auth/org/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ orgId, scoutName, role }),
+      body: JSON.stringify({ orgId, scoutName, role, password }),
     });
     return { org: r.org, userId: r.userId, scoutName, role: r.role, token: r.token };
   },

@@ -19,14 +19,20 @@ Demo mode is explicit and labelled (`VITE_DEMO=1` / `EXPO_PUBLIC_DEMO=1`); a
 missing variable never silently selects mock data, and a backend outage shows
 an actionable connection error instead of fabricated success.
 
-```bash
-# 1. install (matches the lockfiles)
-for d in scoutbox-server scoutbox-player scoutbox-club scoutbox-admin e2e; do (cd $d && npm ci); done
-# scoutbox-grassroots/node_modules is a symlink to scoutbox-club's — nothing to install there
+**Run this on the machine whose browser you will use.** The URLs below are
+local to the machine running the stack — a `localhost` URL from a cloud or
+remote session is not reachable from your computer, and this repository's
+Claude cloud sessions cannot expose ports to your browser at all.
 
-# 2. start everything (backend + Player + Pro + Grassroots; add --with-admin for the T&S console)
-node scripts/dev-all.mjs
+```bash
+# from the repository root, on YOUR machine:
+npm run setup    # 1. once after cloning — installs every app from its lockfile, checks Node ≥ 22
+npm run dev      # 2. every time — backend + Player + Pro + Grassroots (npm run dev:all adds the T&S console)
 ```
+
+The launcher validates prerequisites, refuses to double-start if the ports are
+taken (and tells you who owns them — it never kills other processes), waits
+until each app actually serves its own content, then prints the URL sheet.
 
 URLs (printed by the launcher once the backend is healthy):
 - ScoutBox Player (web): http://localhost:8081
@@ -39,13 +45,16 @@ first boot (a legacy `db.json` is imported once — that is the only migration).
 Messages, requests and read state are persisted synchronously; the rest is
 snapshotted with a short debounce.
 
-**Fresh demo seed** (explicitly destructive — never run against data you
-want to keep): stop the backend, `rm -rf scoutbox-server/data`, start it
-again. The seed identities (Kola, Amara, Eastport FC, Hackney Marsh Rovers…)
-are passwordless *development logins*; they are refused when
-`NODE_ENV=production` unless `ALLOW_DEV_LOGINS=1` is set. For isolated test
-accounts, sign up through the apps (player/guardian signup, grassroots club
-registration — all accept a password) instead of touching the seed.
+**Fresh demo seed**: stop the backend and run `npm run reseed` — it archives
+the current database + media to `scoutbox-server/data.bak-<timestamp>/`
+(nothing is deleted) and the next start seeds cleanly. The seed identities
+(Kola, Amara, Eastport FC, Hackney Marsh Rovers…) are passwordless
+*development logins*; they are refused when `NODE_ENV=production` unless
+`ALLOW_DEV_LOGINS=1` is set explicitly (the server logs a loud warning for
+that combination). Real organisations sign in with a password: grassroots
+clubs set one at registration, and Trust & Safety provisions Pro club
+credentials (`POST /admin/clubs/:id/credentials`). For isolated test
+accounts, sign up through the apps instead of touching the seed.
 
 **Phone on the same Wi-Fi**: the phone cannot reach your machine's
 `localhost`. Find your LAN address (`hostname -I` / `ipconfig getifaddr en0`)
@@ -56,8 +65,12 @@ QR code with Expo Go. The backend listens on all interfaces already.
 Then: a club's contact/trial request appears in the player's Inbox instantly;
 a player's upload appears in club search instantly. Live sync is an
 authenticated, per-account SSE stream (short-lived connect tickets — no bearer
-tokens in URLs) with replay on reconnect; sends are idempotent with visible
-pending/failed/retry states.
+tokens in URLs) with replay on reconnect and an explicit `resync` signal when
+the replay buffer can't cover the gap; delivery is re-authorised per event, so
+a block or suspension silences even an already-open stream. Media links are
+short-lived and bound to the minting session — possession of a URL is never
+authority, and revocation follows live entitlement. Sends are idempotent with
+visible pending/failed/retry states.
 
 Messaging is symmetric and observable: messages flow both ways with read receipts
 (✓✓) and typing indicators; new messages pop a notification and put a red unread

@@ -3,7 +3,21 @@
 > Purpose of this file: let any Claude Code session (cloud or local) pick up this
 > project with zero prior context. Keep it updated at the end of each working session.
 
-**Last updated:** 2026-09-05 · **Milestone: 11 complete — one connected
+**Last updated:** 2026-09-05 · **M11.1 access repair**: evidenced that
+Claude cloud sessions CANNOT expose ports — localhost URLs from a cloud
+container were never user-reachable; the delivery path is the local-run kit
+(`npm run setup` + `npm run dev`, content-verified readiness, cloud-container
+warning). Hardened M11: media URLs now bound to the minting SESSION and
+re-authorised on every fetch (15-min TTL; blocks/suspension/logout revoke
+already-issued links; lifting a block restores them); SSE delivery
+re-authorises per event from live records (suspension silences open streams;
+stale replay cursors get an explicit `resync`); credentialed org login path
+(T&S provisions Pro club passwords via POST /admin/clubs/:id/credentials;
+password fields in both portal logins; token-validating session restore);
+`npm run reseed` archives data instead of deleting; connectedE2E 32→43
+checks; liveIntegration adds Grassroots↔guardian-of-minor (4 scenarios).
+Work committed locally, NOT pushed (per instruction). ·
+**Milestone: 11 complete — one connected
 system: connected mode is the real application (explicit demo flags, live
 default), authenticated + scoped SSE with reconnect replay, HMAC-signed media
 URLs, crash-durable messages/requests/read-state, idempotent sends with

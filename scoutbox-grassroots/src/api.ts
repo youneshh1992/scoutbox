@@ -497,7 +497,7 @@ export interface SearchFilters {
 
 export interface ScoutboxApi {
   listOrgs(): Promise<Org[]>;
-  login(orgId: string, scoutName: string, role: string): Promise<Session>;
+  login(orgId: string, scoutName: string, role: string, password?: string): Promise<Session>;
   registerGrassroots(input: {
     name: string; federation: string; registrationId: string; city: string;
     lat: number; lng: number; scoutName: string; role: string;
@@ -576,11 +576,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const httpApi: ScoutboxApi = {
   listOrgs: () => request<Org[]>('/orgs?platform=grassroots'),
 
-  async login(orgId, scoutName, role) {
+  async login(orgId, scoutName, role, password) {
     const r = await request<{ userId: string; role: string; org: Org; token: string }>('/auth/org/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ orgId, scoutName, role, platform: 'grassroots' }),
+      body: JSON.stringify({ orgId, scoutName, role, platform: 'grassroots', password }),
     });
     return { org: r.org, userId: r.userId, scoutName, role: r.role, token: r.token };
   },

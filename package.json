@@ -1,0 +1,12 @@
+{
+  "name": "scoutbox-dev",
+  "private": true,
+  "description": "Root convenience scripts for running the connected ScoutBox system locally. Each app keeps its own package.json + lockfile.",
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "dev": "node scripts/dev-all.mjs",
+    "dev:all": "node scripts/dev-all.mjs --with-admin",
+    "reseed": "node scripts/reseed.mjs",
+    "test:server": "cd scoutbox-server && npm test && node scripts/connectedE2E.mjs"
+  }
+}

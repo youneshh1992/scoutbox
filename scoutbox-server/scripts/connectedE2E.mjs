@@ -133,19 +133,28 @@ const { events: replayed } = await collectEvents(t2, 1200, lastSeen);
 ok(replayed.some((e) => e.event === 'messages' && e.channelId === chan.id), 'reconnect with lastEventId replays the missed message event');
 ok(replayed.some((e) => e.event === 'caught_up'), 'stream signals when catch-up is complete');
 
-// ---- 4. media is authorised, not public
+// ---- 4. media is authorised, not public — and a URL is never authority
 const profile = await j('/org/players/pl-adeyemi', {}, bearer(EASTPORT));
 const signedUrl = profile.body.media.find((m) => m.url)?.url;
-ok(!!signedUrl && /\/media\/[a-z0-9-]+\?e=\d+&s=/i.test(signedUrl), 'media URLs leave the API signed with an expiry');
+ok(!!signedUrl && /\/media\/[a-z0-9-]+\?e=\d+&s=[\w-]+&v=[\w-]+/i.test(signedUrl), 'media URLs leave the API signed, expiring, and bound to the minting session');
 const mediaId = /\/media\/([a-z0-9-]+)\?/i.exec(signedUrl)[1];
 let mres = await fetch(`${API}${signedUrl}`);
-ok(mres.ok, 'a signed media URL serves without further auth (the URL is the capability)');
+ok(mres.ok, 'a signed URL serves for as long as the minting session stays entitled');
 mres = await fetch(`${API}/media/${mediaId}`);
 ok(mres.status === 401, 'a bare media id without signature or session is refused');
 mres = await fetch(`${API}/media/${mediaId}`, { headers: bearer(KOLA) });
 ok(mres.ok, "the owning player's bearer session may fetch their own media directly");
-mres = await fetch(`${API}/media/${mediaId}?e=1&s=stale`, {});
+mres = await fetch(`${API}/media/${mediaId}?e=1&s=stale&v=nope`, {});
 ok(mres.status === 401, 'an expired or forged signature is refused');
+// logout revokes every URL that session minted
+const KOLA_TMP = (await j('/auth/player/login', { method: 'POST', body: JSON.stringify({ playerId: 'pl-adeyemi' }) })).body.token;
+const tmpUrl = (await j('/player/me', {}, bearer(KOLA_TMP))).body.media.find((m) => m.url)?.url;
+ok(!!tmpUrl && (await fetch(`${API}${tmpUrl}`)).ok, 'a fresh session mints working media links');
+await j('/auth/logout', { method: 'POST' }, bearer(KOLA_TMP));
+ok((await fetch(`${API}${tmpUrl}`)).status === 401, "logout kills that session's media links immediately");
+// expiry is recoverable: a refetch re-mints fresh links, no broken footage
+const refetched = (await j('/org/players/pl-adeyemi', {}, bearer(EASTPORT))).body.media.find((m) => m.url)?.url;
+ok(!!refetched && (await fetch(`${API}${refetched}`)).ok, 'refetching re-mints a fresh working link (expiry never strands footage)');
 
 // ---- 5. idempotent sends: a retry with the same client id never duplicates
 const before = (await j('/player/channels', {}, bearer(KOLA))).body[0].messages.length;
@@ -153,6 +162,11 @@ await j(`/player/channels/${chan.id}/messages`, { method: 'POST', body: JSON.str
 await j(`/player/channels/${chan.id}/messages`, { method: 'POST', body: JSON.stringify({ text: 'One shot only.', clientMsgId: 'retry-123' }) }, bearer(KOLA));
 const after = (await j('/player/channels', {}, bearer(KOLA))).body[0].messages.length;
 ok(after === before + 1, 'a retried send with the same clientMsgId lands exactly once');
+// dedupe is scoped to sender AND channel — no cross-user or cross-channel collisions
+r = await j(`/org/channels/${chan.id}/messages`, { method: 'POST', body: JSON.stringify({ text: 'Same id, different sender.', clientMsgId: 'retry-123' }) }, bearer(EASTPORT));
+ok(r.status === 201 && r.body.text === 'Same id, different sender.', "another sender's identical clientMsgId is a different message");
+r = await j(`/org/channels/${svenChan.id}/messages`, { method: 'POST', body: JSON.stringify({ text: 'Same id, different channel.', clientMsgId: 'retry-123' }) }, bearer(EASTPORT));
+ok(r.status === 201 && r.body.text === 'Same id, different channel.', 'the same clientMsgId in another channel never retrieves the original message');
 
 // ---- 5b. wrong-organisation access to channels and media is refused
 const HARBOUR = (await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-harbour', scoutName: 'D. Ansah' }) })).body.token;
@@ -175,9 +189,11 @@ r = await j(`/player/channels/${chan.id}/messages`, { method: 'POST', body: JSON
 ok(r.status === 403 && r.body.error === 'BLOCKED', 'the blocking side cannot message through its own block either');
 let chView = await j('/org/channels', {}, bearer(EASTPORT));
 ok(chView.body.find((c) => c.id === chan.id)?.closed === true, 'the org sees the thread marked closed (history retained)');
+ok((await fetch(`${API}${signedUrl}`)).status === 401, "the block also kills the org's previously-issued media links — possession is not authority");
 // lift the block via admin so suspension can be tested on a live channel
 const blockRow = (await j('/admin/blocks', {}, admin)).body.find((b) => b.orgId === 'org-eastport' && b.playerId === 'pl-adeyemi');
 await j(`/admin/blocks/${blockRow.id}/lift`, { method: 'POST' }, admin);
+ok((await fetch(`${API}${signedUrl}`)).ok, 'lifting the block restores the link — revocation tracks live entitlement, not reissue');
 await j('/admin/clubs/org-eastport/verification', { method: 'POST', body: JSON.stringify({ suspended: true }) }, admin);
 r = await j(`/player/channels/${chan.id}/messages`, { method: 'POST', body: JSON.stringify({ text: 'hello?' }) }, bearer(KOLA));
 ok(r.status === 403 && r.body.error === 'ORG_SUSPENDED', 'a suspension pauses the thread for the counterparty too');
@@ -186,6 +202,24 @@ ok(r.status === 403 && r.body.error === 'ORG_SUSPENDED', 'a suspended org loses 
 r = await j('/events/ticket', { method: 'POST' }, bearer(EASTPORT));
 ok(r.status === 401, 'a suspended org cannot open an event stream');
 await j('/admin/clubs/org-eastport/verification', { method: 'POST', body: JSON.stringify({ suspended: false }) }, admin);
+
+// ---- 6b. revocation reaches ALREADY-OPEN streams (delivery-time authorisation)
+const eTicket = (await j('/events/ticket', { method: 'POST' }, bearer(EASTPORT))).body.ticket;
+const eCollect = collectEvents(eTicket, 2600);
+await new Promise((res) => setTimeout(res, 500)); // stream attached, org in good standing
+await j('/admin/clubs/org-eastport/verification', { method: 'POST', body: JSON.stringify({ suspended: true }) }, admin);
+await new Promise((res) => setTimeout(res, 200));
+await j(`/player/channels/${svenChan.id}/read`, { method: 'POST' }, bearer(SVEN)); // triggers channel + catalogue events
+const { events: postSuspend } = await eCollect;
+const afterSuspension = postSuspend.filter((e) => e.event !== 'connected' && e.ts > 0 && e.event !== 'orgs');
+ok(!postSuspend.some((e) => e.event === 'messages'), 'a suspension silences an ALREADY-OPEN org stream at delivery time');
+void afterSuspension;
+await j('/admin/clubs/org-eastport/verification', { method: 'POST', body: JSON.stringify({ suspended: false }) }, admin);
+
+// ---- 6c. stale replay cursors trigger an explicit resync, never silent loss
+const rTicket = (await j('/events/ticket', { method: 'POST' }, bearer(KOLA))).body.ticket;
+const { events: resyncEvents } = await collectEvents(rTicket, 900, 9_999_999);
+ok(resyncEvents.some((e) => e.event === 'resync'), 'a cursor beyond the buffer (restart / eviction) yields a resync signal for an authoritative refetch');
 
 // ---- 7. durability: a SIGKILL right after a send loses nothing
 await j(`/player/channels/${chan.id}/messages`, { method: 'POST', body: JSON.stringify({ text: 'This message must survive a crash.' }) }, bearer(KOLA));
@@ -217,6 +251,12 @@ r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: p
 ok(r.status === 200 && r.body.token, 'a credentialed org logs in fine in production');
 r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: provisionedId, scoutName: 'Sam', platform: 'grassroots', password: 'wrong' }) });
 ok(r.status === 401, 'a wrong org password is refused');
+// Pro clubs get credentials via Trust & Safety provisioning — the production
+// login path that never depends on ALLOW_DEV_LOGINS.
+r = await j('/admin/clubs/org-eastport/credentials', { method: 'POST', body: JSON.stringify({ password: 'eastport-secret-1' }) }, admin);
+ok(r.status === 200, 'T&S provisions credentials for a Pro club');
+r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane', password: 'eastport-secret-1' }) });
+ok(r.status === 200 && r.body.token && !('password' in r.body.org), 'the provisioned Pro club logs in with its password in production (hash never echoed)');
 
 child.kill('SIGKILL');
 child = null;

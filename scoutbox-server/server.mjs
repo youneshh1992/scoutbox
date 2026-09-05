@@ -98,6 +98,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 }
 
 loadSnapshot();
+for (const sess of db.sessions) sess.sid ??= crypto.randomBytes(6).toString('hex');
 
 // Normalise media items (older shapes) + load the seeded sample clips.
 for (const p of db.players) {
@@ -182,26 +183,32 @@ app.use(express.json({ limit: '20mb' })); // media uploads travel as data URLs
 db.secrets ??= {};
 db.secrets.mediaSign ??= crypto.randomBytes(24).toString('base64url');
 const MEDIA_SIGN_SECRET = process.env.MEDIA_SECRET || db.secrets.mediaSign;
-const MEDIA_URL_TTL_MS = 6 * 3600 * 1000;
+// Short-lived on purpose: clients refetch constantly (SSE ticks), so links are
+// re-minted long before expiry. Possession of a URL is NOT authority — the
+// signature binds the URL to the minting session, and the serve route
+// re-checks that session's CURRENT entitlement (blocks, suspension, radius,
+// level, guardianship) on every fetch. An HMAC alone never stands in for the
+// viewer's live permissions.
+const MEDIA_URL_TTL_MS = 15 * 60 * 1000;
 
-function mediaSig(id, exp) {
-  return crypto.createHmac('sha256', MEDIA_SIGN_SECRET).update(`${id}.${exp}`).digest('base64url').slice(0, 24);
+function mediaSig(id, exp, sid) {
+  return crypto.createHmac('sha256', MEDIA_SIGN_SECRET).update(`${id}.${exp}.${sid}`).digest('base64url').slice(0, 24);
 }
 
-function signMediaPath(pathStr) {
+function signMediaPath(pathStr, sid) {
   const m = /^\/media\/([A-Za-z0-9-]+)$/.exec(pathStr);
-  if (!m) return pathStr;
+  if (!m || !sid) return pathStr; // unauthenticated response: path stays bare
   const exp = Date.now() + MEDIA_URL_TTL_MS;
-  return `/media/${m[1]}?e=${exp}&s=${mediaSig(m[1], exp)}`;
+  return `/media/${m[1]}?e=${exp}&s=${mediaSig(m[1], exp, sid)}&v=${sid}`;
 }
 
 // Copy-on-write deep walk: never mutates the db objects behind a response.
-function signMediaDeep(value) {
-  if (typeof value === 'string') return value.startsWith('/media/') ? signMediaPath(value) : value;
+function signMediaDeep(value, sid) {
+  if (typeof value === 'string') return value.startsWith('/media/') ? signMediaPath(value, sid) : value;
   if (Array.isArray(value)) {
     let out = null;
     for (let i = 0; i < value.length; i++) {
-      const signed = signMediaDeep(value[i]);
+      const signed = signMediaDeep(value[i], sid);
       if (signed !== value[i]) { out ??= value.slice(); out[i] = signed; }
     }
     return out ?? value;
@@ -209,7 +216,7 @@ function signMediaDeep(value) {
   if (value && typeof value === 'object') {
     let out = null;
     for (const key of Object.keys(value)) {
-      const signed = signMediaDeep(value[key]);
+      const signed = signMediaDeep(value[key], sid);
       if (signed !== value[key]) { out ??= { ...value }; out[key] = signed; }
     }
     return out ?? value;
@@ -217,9 +224,9 @@ function signMediaDeep(value) {
   return value;
 }
 
-app.use((_req, res, next) => {
+app.use((req, res, next) => {
   const json = res.json.bind(res);
-  res.json = (body) => json(signMediaDeep(body));
+  res.json = (body) => json(signMediaDeep(body, sessionFor(req)?.sid ?? null));
   next();
 });
 
@@ -241,7 +248,7 @@ function sseIdentityFor(session) {
   if (!session) return null;
   if (session.kind === 'org') {
     const org = db.orgs.find((o) => o.id === session.refId);
-    return org && !org.suspended ? { kind: 'org', org } : null;
+    return org && !org.suspended ? { kind: 'org', orgId: org.id } : null;
   }
   if (session.kind === 'player') {
     const p = findPlayer(session.refId);
@@ -254,21 +261,33 @@ function sseIdentityFor(session) {
   return null;
 }
 
+// Authorisation happens at DELIVERY time, from live records — an identity
+// captured at connect never grandfathers a suspended org or a lifted
+// entitlement into continuing to receive events.
+function liveOrg(identity) {
+  const org = db.orgs.find((o) => o.id === identity.orgId);
+  return org && !org.suspended ? org : null;
+}
+
 // Scoped delivery: channel and player events reach only the parties entitled
 // to them. Catalogue events without a payload (orgs, open days, friendlies,
 // bare refresh pings) carry no data and go to every authenticated stream —
 // the refetch they trigger is itself authorisation-checked.
 function shouldDeliver(identity, event, payload) {
+  // Live standing check first: a suspended or deleted org's open stream goes
+  // silent immediately, catalogue pings included.
+  const org = identity.kind === 'org' ? liveOrg(identity) : null;
+  if (identity.kind === 'org' && !org) return false;
   if (event === 'typing' || event === 'messages') {
     const channel = db.channels.find((c) => c.id === payload.channelId);
     if (!channel) return false;
-    if (identity.kind === 'org') return channel.orgId === identity.org.id;
+    if (identity.kind === 'org') return channel.orgId === org.id;
     if (identity.kind === 'player') return channel.playerId === identity.playerId && channel.counterparty === 'player';
     if (identity.kind === 'guardian') return channel.guardianId === identity.guardianId;
     return false;
   }
   if (event === 'notify') {
-    if (identity.kind === 'org') return db.users.some((u) => u.id === payload.audienceId && u.orgId === identity.org.id) && payload.audienceKind === 'org_user';
+    if (identity.kind === 'org') return db.users.some((u) => u.id === payload.audienceId && u.orgId === org.id) && payload.audienceKind === 'org_user';
     if (identity.kind === 'player') return payload.audienceKind === 'player' && payload.audienceId === identity.playerId;
     if (identity.kind === 'guardian') return payload.audienceKind === 'guardian' && payload.audienceId === identity.guardianId;
     return false;
@@ -278,7 +297,7 @@ function shouldDeliver(identity, event, payload) {
     if (!p) return false;
     if (identity.kind === 'player') return p.id === identity.playerId;
     if (identity.kind === 'guardian') return p.guardianId === identity.guardianId;
-    return visibleToOrg(p, identity.org) && !isBlocked(p.id, identity.org.id);
+    return visibleToOrg(p, org) && !isBlocked(p.id, org.id);
   }
   return true;
 }
@@ -326,10 +345,17 @@ app.get('/events', (req, res) => {
   // Catch-up: replay buffered events the client missed while disconnected.
   const lastId = Number(req.headers['last-event-id'] ?? req.query.lastEventId ?? 0);
   if (lastId > 0) {
-    for (const row of eventLog) {
-      if (row.id > lastId && shouldDeliver(identity, row.event, row.payload)) res.write(sseFrame(row));
+    const bufferStart = eventLog.length > 0 ? eventLog[0].id : eventSeq + 1;
+    if (lastId > eventSeq || lastId < bufferStart - 1) {
+      // Server restarted (ids reset) or the buffer evicted what was missed —
+      // never silently drop updates: tell the client to refetch everything.
+      res.write(`data: ${JSON.stringify({ event: 'resync', ts: Date.now() })}\n\n`);
+    } else {
+      for (const row of eventLog) {
+        if (row.id > lastId && shouldDeliver(identity, row.event, row.payload)) res.write(sseFrame(row));
+      }
+      res.write(`data: ${JSON.stringify({ event: 'caught_up', ts: Date.now() })}\n\n`);
     }
-    res.write(`data: ${JSON.stringify({ event: 'caught_up', ts: Date.now() })}\n\n`);
   }
   const client = { res, identity };
   sseClients.add(client);
@@ -372,7 +398,10 @@ function isBlocked(playerId, orgId) {
 // resolves the caller from the token. Nothing trusts a client-sent id.
 function createSession(kind, refId, extra = {}) {
   const token = newToken();
-  db.sessions.push({ token, kind, refId, ...extra, createdAt: Date.now() });
+  // sid: a non-secret session identifier that media URLs are bound to — the
+  // URL dies with the session (logout) and is re-checked against the
+  // session's CURRENT entitlement on every fetch.
+  db.sessions.push({ token, sid: crypto.randomBytes(6).toString('hex'), kind, refId, ...extra, createdAt: Date.now() });
   persist();
   return token;
 }
@@ -400,6 +429,9 @@ app.use('/auth', authLimiter);
 // logins) exist for local work and tests only. Outside development they are
 // refused — set ALLOW_DEV_LOGINS=1 to re-enable them explicitly.
 const DEV_LOGINS = process.env.ALLOW_DEV_LOGINS === '1' || (process.env.NODE_ENV ?? 'development') !== 'production';
+if (process.env.ALLOW_DEV_LOGINS === '1' && (process.env.NODE_ENV ?? '') === 'production') {
+  console.warn('⚠️  ALLOW_DEV_LOGINS=1 with NODE_ENV=production: seeded passwordless logins are ENABLED. Never run this configuration on anything reachable from the internet.');
+}
 function devLoginRefused(res) {
   res.status(403).json({
     error: 'DEV_LOGIN_DISABLED',
@@ -3259,6 +3291,21 @@ adminRouter.get('/clubs', (_req, res) => {
   res.json(db.orgs.map((o) => ({ ...orgSafe(o), safeguardingCertified: safeguardingCertified(o) })));
 });
 
+// Credentialed login for organisations: Trust & Safety provisions (or
+// rotates) the club password. This — not ALLOW_DEV_LOGINS — is how real Pro
+// and Grassroots users sign in when dev shortcuts are off.
+adminRouter.post('/clubs/:id/credentials', (req, res) => {
+  const org = db.orgs.find((o) => o.id === req.params.id);
+  if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
+  const { password } = req.body || {};
+  if (!password || String(password).length < 8) {
+    return res.status(400).json({ error: 'PASSWORD_TOO_SHORT', message: 'Club passwords need at least 8 characters.' });
+  }
+  org.password = hashPassword(String(password));
+  persistNow();
+  res.json({ ok: true, note: 'Credentials provisioned — the organisation signs in with this password from now on.' });
+});
+
 adminRouter.post('/clubs/:id/verification', (req, res) => {
   const org = db.orgs.find((o) => o.id === req.params.id);
   if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
@@ -3305,26 +3352,37 @@ adminRouter.get('/channels', (_req, res) => res.json(db.channels.map((c) => ({ .
 // Serve uploaded media. Access is authorised, not public: either a valid
 // short-lived signature (minted only inside authorisation-checked API
 // responses) or a bearer session that is entitled to the owning player.
+// The one media entitlement rule, evaluated against the session's CURRENT
+// standing — used for both signed-URL and bearer fetches. A revoked block,
+// a suspension, or a radius/level change takes effect on the next byte.
+function sessionMayAccessMedia(session, mediaId) {
+  if (!session) return false;
+  const owner = db.players.find((p) => p.media.some((m) => m.id === mediaId));
+  if (!owner) return false;
+  if (session.kind === 'player') return owner.id === session.refId;
+  if (session.kind === 'guardian') return owner.guardianId === session.refId;
+  if (session.kind === 'org') {
+    const org = db.orgs.find((o) => o.id === session.refId);
+    return !!org && !org.suspended && visibleToOrg(owner, org) && !isBlocked(owner.id, org.id);
+  }
+  return false;
+}
+
 app.get('/media/:id', (req, res) => {
   const id = req.params.id;
   if (!/^[a-z0-9-]+$/i.test(id)) return res.status(400).json({ error: 'BAD_MEDIA_ID' });
+  // Path 1: a signed URL. The signature binds media id + expiry + the minting
+  // session; the session must still exist AND still be entitled right now.
   const exp = Number(req.query.e ?? 0);
-  const signedOk = exp > Date.now() && String(req.query.s ?? '') === mediaSig(id, exp);
-  if (!signedOk) {
-    const session = sessionFor(req);
-    const owner = db.players.find((p) => p.media.some((m) => m.id === id));
-    let allowed = false;
-    if (session && owner) {
-      if (session.kind === 'player') allowed = owner.id === session.refId;
-      else if (session.kind === 'guardian') allowed = owner.guardianId === session.refId;
-      else if (session.kind === 'org') {
-        const org = db.orgs.find((o) => o.id === session.refId);
-        allowed = !!org && !org.suspended && visibleToOrg(owner, org) && !isBlocked(owner.id, org.id);
-      }
-    }
-    if (!allowed) {
-      return res.status(401).json({ error: 'MEDIA_AUTH_REQUIRED', message: 'Media links are signed per response — refetch the profile for a fresh link.' });
-    }
+  const sid = String(req.query.v ?? '');
+  let session = null;
+  if (sid && exp > Date.now() && String(req.query.s ?? '') === mediaSig(id, exp, sid)) {
+    session = db.sessions.find((x) => x.sid === sid) ?? null;
+  }
+  // Path 2: a direct bearer fetch (native clients, tests).
+  session ??= sessionFor(req);
+  if (!sessionMayAccessMedia(session, id)) {
+    return res.status(401).json({ error: 'MEDIA_AUTH_REQUIRED', message: 'Media links are short-lived and tied to your login — refetch the profile for a fresh link.' });
   }
   const blob = storage.read(id);
   if (!blob) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });
