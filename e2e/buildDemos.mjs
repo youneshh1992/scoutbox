@@ -53,4 +53,18 @@ for (const f of ['scoutbox-club-demo.html', 'scoutbox-admin-demo.html', 'scoutbo
     fs.writeFileSync(p, doc);
   }
 }
-console.log('demo bundles ready in e2e/dist/');
+// Honesty chrome, demo builds only: a small fixed "Interactive demo" badge
+// with the source build id, so every artifact declares what it is and which
+// commit it was built from. Never injected into connected/live builds.
+const sha = execSync('git rev-parse --short HEAD', { cwd: ROOT }).toString().trim();
+const built = new Date().toISOString().slice(0, 10);
+const badge = `<div data-demo-badge style="position:fixed;left:8px;bottom:8px;z-index:2147483000;background:rgba(11,18,32,.85);border:1px solid #263a5e;color:#8fa3c8;font:10.5px/1.4 system-ui,sans-serif;border-radius:8px;padding:3px 8px;pointer-events:none">Interactive demo — sample data · build ${sha} · ${built}</div>`;
+for (const f of ['scoutbox-club-demo.html', 'scoutbox-admin-demo.html', 'scoutbox-grassroots-demo.html', 'scoutbox-player-demo.html']) {
+  const p = path.join(OUT, f);
+  let doc = fs.readFileSync(p, 'utf8');
+  doc = doc.replace(/<div data-demo-badge[^>]*>[^<]*<\/div>/, ''); // idempotent
+  doc = doc.replace(/<\/body>/i, `${badge}</body>`);
+  if (!doc.includes('data-demo-badge')) doc += badge; // no </body> — append
+  fs.writeFileSync(p, doc);
+}
+console.log(`demo bundles ready in e2e/dist/ (build ${sha})`);

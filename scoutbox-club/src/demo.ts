@@ -262,6 +262,7 @@ const bus = createDemoBus('club', (e: BusEvent) => {
     emit('requests');
   }
   if (e.kind === 'message') {
+    if (!ORGS.some((o) => o.name === String(p.orgName ?? ''))) return; // a Grassroots thread — not ours
     const channel = ensureChannelFromMeta(p);
     const msg = p.message as Channel['messages'][number];
     if (msg && !channel.messages.some((m) => m.id === msg.id)) {

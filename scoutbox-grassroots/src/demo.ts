@@ -11,6 +11,7 @@ import type {
   Squad, SquadEntry, Matchday, PathwayRecord, Friendly,
 } from './api';
 import { ApiError } from './api';
+import { createDemoBus, type BusEvent } from './demoSync';
 // Sample footage baked into the demo bundle so the Film Room plays offline.
 import clipSprint from './assets/clip-sprint.webm?inline';
 import clipPassing from './assets/clip-passing.webm?inline';
@@ -255,7 +256,9 @@ function iso(ts: number) {
 
 // Mutable demo state
 let idc = 5000;
-const nid = (p: string) => `${p}-${++idc}`;
+// 'g' namespace: grassroots demo ids can never collide with the Pro demo's
+// on the shared bus (both forks count from the same seed otherwise).
+const nid = (p: string) => `${p}-g${++idc}`;
 const requests: OrgRequest[] = [];
 const trials: Trial[] = [];
 const channels: Channel[] = [];
@@ -309,10 +312,79 @@ const ledger: (LedgerEntry & { playerName?: string })[] = [];
 const listeners = new Set<(e: string, payload?: Record<string, unknown>) => void>();
 const emit = (e: string, payload?: Record<string, unknown>) => listeners.forEach((l) => l(e, payload));
 
-// The Grassroots demo is standalone: no cross-tab bus (that pairing belongs
-// to the main club + player demos). The simulated counterparty always replies.
-const bus = { publish: (_k: string, _p: Record<string, unknown>) => {}, peerActive: () => false, close: () => {} };
-void bus.close;
+function ensureChannelFromMeta(meta: Record<string, unknown>): Channel {
+  let channel = channels.find((c) => c.id === meta.channelId);
+  if (!channel) {
+    channel = {
+      id: String(meta.channelId),
+      requestId: String(meta.requestId ?? ''),
+      playerId: String(meta.playerId ?? ''),
+      playerName: String(meta.playerName ?? meta.playerId ?? ''),
+      orgName: String(meta.orgName ?? 'Hackney Marsh Rovers'),
+      scoutName: String(meta.scoutName ?? ''),
+      scoutRole: String(meta.scoutRole ?? 'Manager'),
+      counterparty: (meta.counterparty === 'guardian' ? 'guardian' : 'player'),
+      createdAt: Date.now(),
+      messages: [],
+      readBy: { org: null, counterparty: null },
+    };
+    channels.push(channel);
+  }
+  return channel;
+}
+
+// The Grassroots demo joins the same shared demo bus as the Pro demo (both
+// are 'club'-side roles; club-side frames ignore each other's events, and a
+// player/guardian counterpart suppresses the simulated replies). Events for
+// organisations that are not ours are ignored — the Pro demo does the same.
+const bus = createDemoBus('club', (e: BusEvent) => {
+  const p = e.payload;
+  if (e.kind === 'respond') {
+    const req = requests.find((r) => r.id === p.requestId);
+    if (!req || req.status !== 'pending') return;
+    req.status = p.accept ? 'accepted' : 'declined';
+    if (p.accept) {
+      const channel = ensureChannelFromMeta({ ...p, requestId: req.id, playerId: req.playerId, playerName: req.playerName, scoutName: req.scoutName, scoutRole: req.scoutRole, counterparty: req.routedTo });
+      req.contactChannel = channel.id;
+      if (req.type === 'trial') {
+        const target = PLAYERS.find((x) => x.id === req.playerId);
+        trials.push({
+          id: `trial-${req.id}`, playerId: req.playerId, playerName: target?.name ?? req.playerName ?? req.playerId,
+          scoutName: req.scoutName, acceptedAt: Date.now(),
+          proposedDate: (p.chosenSlot as string) ?? null, venue: null, notes: '',
+          reportDueAt: Date.now() + 7 * DAY, guardianApproved: req.routedTo === 'guardian',
+          status: 'awaiting_report',
+        });
+      }
+      pushNotification(`${req.routedTo === 'guardian' ? `The guardian of ${req.playerName}` : req.playerName} accepted your ${req.type} request — thread open.`, 'accepted');
+    } else {
+      pushNotification(`${req.routedTo === 'guardian' ? `The guardian of ${req.playerName}` : req.playerName} declined your ${req.type} request.`, 'declined');
+    }
+    emit('requests');
+  }
+  if (e.kind === 'message') {
+    if (!ORGS.some((o) => o.name === String(p.orgName ?? ''))) return; // not our platform's thread
+    const channel = ensureChannelFromMeta(p);
+    const msg = p.message as Channel['messages'][number];
+    if (msg && !channel.messages.some((m) => m.id === msg.id)) {
+      channel.messages.push(msg);
+      pushNotification(`${msg.sender.name} replied in the ${channel.playerName} thread.`, 'message');
+      emit('messages', { channelId: channel.id });
+    }
+  }
+  if (e.kind === 'read') {
+    const channel = channels.find((c) => c.id === p.channelId);
+    if (channel && p.side !== 'org') {
+      channel.readBy = { ...(channel.readBy ?? { org: null, counterparty: null }), counterparty: Number(p.ts) || Date.now() };
+      emit('messages', { channelId: channel.id });
+    }
+  }
+  if (e.kind === 'typing') {
+    if (p.side !== 'org' && channels.some((c) => c.id === p.channelId)) {
+      emit('typing', { channelId: p.channelId, side: p.side });
+    }
+  }
+});
 
 function pushNotification(text: string, type = 'update') {
   notifications.unshift({ id: nid('ntf'), ts: Date.now(), type, text, refId: null, read: false });
