@@ -359,6 +359,8 @@ export interface Channel {
   messages: Message[];
   /** Read receipts: when each side last opened the thread. */
   readBy?: { org: number | null; counterparty: number | null };
+  /** Server recheck: block / suspension / platform change closed this thread. */
+  closed?: boolean;
 }
 
 export interface Notification {
@@ -507,7 +509,7 @@ export interface ScoutboxApi {
   getShortlist(s: Session): Promise<Player[]>;
   sendRequest(s: Session, playerId: string, type: 'contact' | 'trial', message: string, details?: TrialDetails): Promise<void>;
   getChannels(s: Session): Promise<Channel[]>;
-  sendMessage(s: Session, channelId: string, text: string, attachTrialReportId?: string): Promise<void>;
+  sendMessage(s: Session, channelId: string, text: string, attachTrialReportId?: string, clientMsgId?: string): Promise<void>;
   markChannelRead(s: Session, channelId: string): Promise<void>;
   sendTyping(s: Session, channelId: string): Promise<void>;
   getFeed(s: Session): Promise<FeedItem[]>;
@@ -555,7 +557,7 @@ export interface ScoutboxApi {
   getPlan(s: Session): Promise<PlanInfo>;
   getReputation(s: Session): Promise<Reputation>;
   /** Subscribe to live changes; returns an unsubscribe fn. */
-  onChange(cb: (event: string, payload?: Record<string, unknown>) => void): () => void;
+  onChange(s: Session | null, cb: (event: string, payload?: Record<string, unknown>) => void): () => void;
 }
 
 // ------------------------------------------------------------- http client
@@ -623,8 +625,8 @@ export const httpApi: ScoutboxApi = {
 
   getChannels: (s) => request<Channel[]>('/org/channels', { headers: headers(s) }),
 
-  sendMessage: (s, channelId, text, attachTrialReportId) =>
-    request<void>(`/org/channels/${channelId}/messages`, { method: 'POST', headers: headers(s), body: JSON.stringify({ text, attachTrialReportId }) }),
+  sendMessage: (s, channelId, text, attachTrialReportId, clientMsgId) =>
+    request<void>(`/org/channels/${channelId}/messages`, { method: 'POST', headers: headers(s), body: JSON.stringify({ text, attachTrialReportId, clientMsgId }) }),
 
   markChannelRead: (s, channelId) =>
     request<void>(`/org/channels/${channelId}/read`, { method: 'POST', headers: headers(s) }),
@@ -743,17 +745,53 @@ export const httpApi: ScoutboxApi = {
   getPlan: (s) => request<PlanInfo>('/org/plan', { headers: headers(s) }),
   getReputation: (s) => request<Reputation>('/org/reputation', { headers: headers(s) }),
 
-  onChange(cb) {
-    const source = new EventSource(`${API_URL}/events`);
-    source.onmessage = (e) => {
+  // Live sync is authenticated and scoped: mint a short-lived connect ticket
+  // over the bearer session, then stream. On drops we reconnect with the last
+  // seen event id so missed events replay; 'reconnected' additionally tells
+  // the app to do an authoritative refetch.
+  onChange(s, cb) {
+    if (!s) return () => {};
+    let source: EventSource | null = null;
+    let closed = false;
+    let dropped = false;
+    let retry = 0;
+    let lastEventId = 0;
+    const connect = async () => {
+      if (closed) return;
       try {
-        const data = JSON.parse(e.data);
-        cb(data.event, data);
+        const { ticket } = await request<{ ticket: string }>('/events/ticket', { method: 'POST', headers: headers(s) });
+        if (closed) return;
+        source = new EventSource(`${API_URL}/events?ticket=${encodeURIComponent(ticket)}${lastEventId ? `&lastEventId=${lastEventId}` : ''}`);
+        source.onopen = () => {
+          retry = 0;
+          if (dropped) { dropped = false; cb('reconnected', {}); }
+          cb('sse_status', { connected: true });
+        };
+        source.onmessage = (e) => {
+          if (e.lastEventId) lastEventId = Number(e.lastEventId) || lastEventId;
+          try {
+            const data = JSON.parse(e.data);
+            cb(data.event, data);
+          } catch {
+            /* ignore malformed frames */
+          }
+        };
+        source.onerror = () => {
+          source?.close();
+          if (closed) return;
+          dropped = true;
+          cb('sse_status', { connected: false });
+          window.setTimeout(connect, Math.min(15_000, 1000 * 2 ** Math.min(retry++, 4)));
+        };
       } catch {
-        /* ignore malformed frames */
+        if (closed) return;
+        dropped = true;
+        cb('sse_status', { connected: false });
+        window.setTimeout(connect, Math.min(15_000, 1000 * 2 ** Math.min(retry++, 4)));
       }
     };
-    return () => source.close();
+    void connect();
+    return () => { closed = true; source?.close(); };
   },
 };
 

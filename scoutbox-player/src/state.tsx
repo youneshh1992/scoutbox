@@ -47,6 +47,8 @@ interface SessionState {
   dismissPopup: () => void;
   markNotificationsRead: () => Promise<void>;
   mode: 'live' | 'demo';
+  /** Live-sync stream health (always true in demo mode). */
+  liveConnected: boolean;
   loginPlayer: (playerId: string) => void;
   loginGuardian: (guardianId: string) => void;
   logout: () => void;
@@ -83,6 +85,20 @@ export function SessionProvider({ children: kids }: { children: ReactNode }) {
       if (popupTimer.current) clearTimeout(popupTimer.current);
       popupTimer.current = setTimeout(() => setPopup(null), 5000);
     }
+  }, []);
+
+  // Everything fetched for one identity is dropped before another takes over
+  // (or on logout) — no cross-account leakage through client state.
+  const clearIdentityState = useCallback(() => {
+    setMe(null);
+    setInbox([]);
+    setGuardian(null);
+    setGuardianInbox([]);
+    setChildProfiles([]);
+    setNotifications([]);
+    setChannels([]);
+    setPopup(null);
+    seenNotifIds.current = null;
   }, []);
 
   const refresh = useCallback(async () => {
@@ -130,13 +146,21 @@ export function SessionProvider({ children: kids }: { children: ReactNode }) {
     }
   }, [playerId, guardianId, refresh]);
 
+  const [liveConnected, setLiveConnected] = useState(true);
   useEffect(() => {
     if (!playerId && !guardianId) return;
     void refresh();
-    return client.onChange((event) => {
+    const auth = guardianId
+      ? ({ kind: 'guardian', id: guardianId } as const)
+      : ({ kind: 'player', id: playerId! } as const);
+    return client.onChange((event, payload) => {
       if (event === 'typing') return; // ephemeral — screens listen for it directly
-      void refresh();
-    });
+      if (event === 'sse_status') {
+        setLiveConnected((payload as { connected?: boolean } | undefined)?.connected !== false);
+        return;
+      }
+      void refresh(); // includes 'reconnected' — the authoritative catch-up refetch
+    }, auth);
   }, [playerId, guardianId, refresh]);
 
   const value = useMemo<SessionState>(
@@ -161,30 +185,28 @@ export function SessionProvider({ children: kids }: { children: ReactNode }) {
       dismissPopup: () => setPopup(null),
       markNotificationsRead,
       mode: client.mode,
+      liveConnected,
       loginPlayer: (id) => {
+        clearIdentityState();
         setGuardianId(null);
         setPlayerId(id);
         storeSession({ kind: 'player', id });
       },
       loginGuardian: (id) => {
+        clearIdentityState();
         setPlayerId(null);
         setGuardianId(id);
         storeSession({ kind: 'guardian', id });
       },
       logout: () => {
+        clearIdentityState();
         setPlayerId(null);
         setGuardianId(null);
-        setMe(null);
-        setInbox([]);
-        setGuardian(null);
-        setGuardianInbox([]);
-        setChildProfiles([]);
-        setNotifications([]);
         storeSession(null);
       },
       refresh,
     }),
-    [playerId, guardianId, me, inbox, guardian, guardianInbox, childProfiles, notifications, channels, popup, markNotificationsRead, refresh]
+    [playerId, guardianId, me, inbox, guardian, guardianInbox, childProfiles, notifications, channels, popup, liveConnected, markNotificationsRead, refresh, clearIdentityState]
   );
 
   return <SessionContext.Provider value={value}>{kids}</SessionContext.Provider>;

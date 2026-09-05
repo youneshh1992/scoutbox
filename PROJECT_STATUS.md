@@ -3,7 +3,15 @@
 > Purpose of this file: let any Claude Code session (cloud or local) pick up this
 > project with zero prior context. Keep it updated at the end of each working session.
 
-**Last updated:** 2026-09-03 · **Milestone: 10 complete — the grassroots club
+**Last updated:** 2026-09-05 · **Milestone: 11 complete — one connected
+system: connected mode is the real application (explicit demo flags, live
+default), authenticated + scoped SSE with reconnect replay, HMAC-signed media
+URLs, crash-durable messages/requests/read-state, idempotent sends with
+pending/failed/retry UI, channel eligibility rechecks (blocks/suspensions/
+platform changes close threads), production gate on seeded dev logins + org
+credentials, ScoutBox Pro branding, root launcher (`scripts/dev-all.mjs`),
+.env examples, 32-check connectedE2E + 4-scenario separate-context live
+browser suite**; previously: **10 complete — the grassroots club
 toolkit (squad + gap analysis, coach-signed match-day attendance, open-day
 outcomes + the no-ghosting rule, release-with-reference, Pathway Club record,
 friendlies board, federation-route verification, mobile pass) + player
@@ -15,6 +23,66 @@ radius, platform-scoped logins, federation registration, level ceiling)**;
 **7 — production hardening (real auth + sessions, SQLite, adapter seams,
 funnel analytics, moderation v2, CI + Docker deploy)** ·
 Developed in this GitHub repo (`youneshh1992/scoutbox`), Claude Code web.
+
+## Milestone 11 (2026-09-05): one connected system
+
+Connected mode is the product; demo is an explicit, labelled aside.
+
+Server (`scoutbox-server/server.mjs`):
+- **SSE**: `POST /events/ticket` (bearer) mints a 10-min connect ticket;
+  `GET /events?ticket=` resolves identity from the live session at connect
+  time. Every event carries an `id:`; a 500-event ring buffer replays missed
+  events on reconnect (`lastEventId` query / Last-Event-ID header), ending
+  with `caught_up`. `shouldDeliver()` scopes: channel events only to channel
+  members (a minor's channel never reaches the child — counterparty is the
+  guardian), playerId events only to the player/their guardian/orgs that pass
+  `visibleToOrg` + block checks, notify events only to their audience.
+  Suspended orgs cannot mint tickets. Typing is never buffered.
+- **Media**: every `/media/...` path is HMAC-signed (6 h expiry) at response
+  serialisation via one `res.json` choke point (copy-on-write deep walk).
+  `/media/:id` accepts a valid signature OR a bearer session entitled to the
+  owning player; everything else is 401. Secret persisted in `db.secrets`
+  (`MEDIA_SECRET` env override).
+- **Durability**: `persistNow()` on message post, read-state, request
+  create/respond — SIGKILL loses nothing (proved in connectedE2E §7).
+  `DATA_DIR` env isolates test databases.
+- **Idempotency**: `clientMsgId` deduped per sender in `postMessage` across
+  all three send endpoints.
+- **Channel rechecks**: `channelClosedForOrg` / `channelClosedForCounterparty`
+  run on every send/typing — blocks, suspensions and platform/level/radius
+  changes close the thread (403 BLOCKED / ORG_SUSPENDED / CHANNEL_CLOSED);
+  history retained, org channel lists carry `closed: true`.
+- **Auth**: dev logins (passwordless seeds, credential-less orgs) refused when
+  `NODE_ENV=production` unless `ALLOW_DEV_LOGINS=1`; orgs can provision a
+  password at grassroots registration (hash stripped from every response via
+  `orgSafe`); org login accepts `password`. Richer `/health`.
+
+Clients:
+- **Player**: demo only via `EXPO_PUBLIC_DEMO=1` (live default
+  `EXPO_PUBLIC_API_URL` → localhost:4000 — a missing var never selects mock);
+  `client.ping()`; onboarding shows an actionable backend-outage card; root
+  error boundary in `_layout`; ticketed SSE with reconnect + status
+  ('reconnecting' banner in tabs); Threads outbox (pending/failed/retry,
+  clientMsgId); identity switches/logout clear all fetched state.
+- **Pro (scoutbox-club)**: user-facing "ScoutBox Pro" branding; ticketed
+  SSE (`onChange(session, cb)`), live/reconnecting pill, Messages outbox with
+  retry + closed-thread notice/composer lock, root error boundary.
+- **Grassroots**: same M11 treatment (unbranded).
+- Demo builds explicitly flagged; expo exports use `--clear` (Metro caches
+  inlined env — a poisoned cache shipped a live bundle as "demo" once).
+
+Ops: `scripts/dev-all.mjs` (port checks, whole stack, URL sheet,
+`--with-admin`), `.env.example` × 4, README local-dev section (install,
+seeding, LAN phone, test accounts). CI runs connectedE2E.
+
+Verification: 23 unit · 129 apiE2E · **32 connectedE2E** (SSE auth/scoping/
+replay, signed media incl. wrong-org refusals, idempotency, block/suspension
+mid-channel, SIGKILL durability, prod login gate) · demoOffline + crosstab +
+uiSpotcheck (rebuilt bundles) · **liveIntegration** (separate browser
+contexts, isolated backend: Pro↔adult with numeric badges/read receipts,
+Grassroots↔local adult, Pro↔guardian of a minor, reload persistence, outage
+UI) · dev-stack smoke via the launcher · tsc + production builds × 4.
+Native-device (iOS/Android) testing NOT performed — web only.
 
 ## Milestone 10 (2026-09-03): the grassroots club toolkit + onboarding redesign
 

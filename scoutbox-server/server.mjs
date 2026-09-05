@@ -7,6 +7,7 @@
 
 import express from 'express';
 import cors from 'cors';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,7 +49,10 @@ const db = buildSeed();
 // every save is an atomic transaction into data/scoutbox.db, and a legacy
 // data/db.json is imported once on first boot. Saves are debounced and
 // flushed on shutdown.
-const DATA_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
+// DATA_DIR override keeps destructive tests on isolated throwaway databases.
+const DATA_DIR = process.env.DATA_DIR
+  ? path.resolve(process.env.DATA_DIR)
+  : path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
 const store = openStore(DATA_DIR);
 let snapshotLoaded = false;
 let snapshotIdCounter = 0; // applied when the id counter initialises below
@@ -168,21 +172,169 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '20mb' })); // media uploads travel as data URLs
 
+// ------------------------------------------------------------ signed media
+// Media is not public: every /media path that leaves the API is rewritten to
+// a short-lived HMAC-signed URL at the moment the (already authorisation-
+// checked) response is serialised. The URL itself is the capability — a
+// caller only ever holds links to media it was allowed to see. Direct
+// bearer-authenticated fetches are also accepted, re-checked against the
+// owning player's visibility.
+db.secrets ??= {};
+db.secrets.mediaSign ??= crypto.randomBytes(24).toString('base64url');
+const MEDIA_SIGN_SECRET = process.env.MEDIA_SECRET || db.secrets.mediaSign;
+const MEDIA_URL_TTL_MS = 6 * 3600 * 1000;
+
+function mediaSig(id, exp) {
+  return crypto.createHmac('sha256', MEDIA_SIGN_SECRET).update(`${id}.${exp}`).digest('base64url').slice(0, 24);
+}
+
+function signMediaPath(pathStr) {
+  const m = /^\/media\/([A-Za-z0-9-]+)$/.exec(pathStr);
+  if (!m) return pathStr;
+  const exp = Date.now() + MEDIA_URL_TTL_MS;
+  return `/media/${m[1]}?e=${exp}&s=${mediaSig(m[1], exp)}`;
+}
+
+// Copy-on-write deep walk: never mutates the db objects behind a response.
+function signMediaDeep(value) {
+  if (typeof value === 'string') return value.startsWith('/media/') ? signMediaPath(value) : value;
+  if (Array.isArray(value)) {
+    let out = null;
+    for (let i = 0; i < value.length; i++) {
+      const signed = signMediaDeep(value[i]);
+      if (signed !== value[i]) { out ??= value.slice(); out[i] = signed; }
+    }
+    return out ?? value;
+  }
+  if (value && typeof value === 'object') {
+    let out = null;
+    for (const key of Object.keys(value)) {
+      const signed = signMediaDeep(value[key]);
+      if (signed !== value[key]) { out ??= { ...value }; out[key] = signed; }
+    }
+    return out ?? value;
+  }
+  return value;
+}
+
+app.use((_req, res, next) => {
+  const json = res.json.bind(res);
+  res.json = (body) => json(signMediaDeep(body));
+  next();
+});
+
 // ---------------------------------------------------------------- live sync
-const sseClients = new Set();
+// Authenticated, scoped SSE. EventSource cannot send headers and long-lived
+// bearer tokens never belong in URLs, so a client first mints a short-lived
+// connect ticket over its bearer session (POST /events/ticket), then opens
+// GET /events?ticket=…. Every event carries an id; on reconnect the client
+// passes the last id it saw and missed events replay from a ring buffer, so
+// a dropped connection catches up instead of going quiet.
+const sseClients = new Set(); // { res, identity }
+const sseTickets = new Map(); // ticket -> { token, expiresAt }
+const SSE_TICKET_TTL_MS = 10 * 60 * 1000;
+let eventSeq = 0;
+const eventLog = []; // ring buffer of { id, event, payload, ts }
+const EVENT_LOG_CAP = 500;
+
+function sseIdentityFor(session) {
+  if (!session) return null;
+  if (session.kind === 'org') {
+    const org = db.orgs.find((o) => o.id === session.refId);
+    return org && !org.suspended ? { kind: 'org', org } : null;
+  }
+  if (session.kind === 'player') {
+    const p = findPlayer(session.refId);
+    return p ? { kind: 'player', playerId: p.id } : null;
+  }
+  if (session.kind === 'guardian') {
+    const g = db.guardians.find((x) => x.id === session.refId);
+    return g ? { kind: 'guardian', guardianId: g.id } : null;
+  }
+  return null;
+}
+
+// Scoped delivery: channel and player events reach only the parties entitled
+// to them. Catalogue events without a payload (orgs, open days, friendlies,
+// bare refresh pings) carry no data and go to every authenticated stream —
+// the refetch they trigger is itself authorisation-checked.
+function shouldDeliver(identity, event, payload) {
+  if (event === 'typing' || event === 'messages') {
+    const channel = db.channels.find((c) => c.id === payload.channelId);
+    if (!channel) return false;
+    if (identity.kind === 'org') return channel.orgId === identity.org.id;
+    if (identity.kind === 'player') return channel.playerId === identity.playerId && channel.counterparty === 'player';
+    if (identity.kind === 'guardian') return channel.guardianId === identity.guardianId;
+    return false;
+  }
+  if (event === 'notify') {
+    if (identity.kind === 'org') return db.users.some((u) => u.id === payload.audienceId && u.orgId === identity.org.id) && payload.audienceKind === 'org_user';
+    if (identity.kind === 'player') return payload.audienceKind === 'player' && payload.audienceId === identity.playerId;
+    if (identity.kind === 'guardian') return payload.audienceKind === 'guardian' && payload.audienceId === identity.guardianId;
+    return false;
+  }
+  if (payload.playerId) {
+    const p = findPlayer(payload.playerId);
+    if (!p) return false;
+    if (identity.kind === 'player') return p.id === identity.playerId;
+    if (identity.kind === 'guardian') return p.guardianId === identity.guardianId;
+    return visibleToOrg(p, identity.org) && !isBlocked(p.id, identity.org.id);
+  }
+  return true;
+}
+
+function sseFrame(row) {
+  return `id: ${row.id}\ndata: ${JSON.stringify({ event: row.event, ...row.payload, ts: row.ts })}\n\n`;
+}
 
 function broadcast(event, payload = {}) {
   if (event !== 'typing') persist(); // every broadcast (bar ephemeral typing) follows a state change
-  const msg = `data: ${JSON.stringify({ event, ...payload, ts: Date.now() })}\n\n`;
-  for (const res of sseClients) res.write(msg);
+  const row = { id: ++eventSeq, event, payload, ts: Date.now() };
+  if (event !== 'typing') {
+    // typing is transient by design — never buffered, never replayed
+    eventLog.push(row);
+    if (eventLog.length > EVENT_LOG_CAP) eventLog.splice(0, eventLog.length - EVENT_LOG_CAP);
+  }
+  for (const client of sseClients) {
+    if (!shouldDeliver(client.identity, event, payload)) continue;
+    client.res.write(sseFrame(row));
+  }
 }
 
+app.post('/events/ticket', (req, res) => {
+  const session = sessionFor(req);
+  if (!sseIdentityFor(session)) return res.status(401).json({ error: 'AUTH_REQUIRED', message: 'Log in first — live sync is scoped to your account.' });
+  for (const [t, v] of sseTickets) if (v.expiresAt < Date.now()) sseTickets.delete(t);
+  const ticket = newToken();
+  sseTickets.set(ticket, { token: session.token, expiresAt: Date.now() + SSE_TICKET_TTL_MS });
+  res.json({ ticket, expiresInMs: SSE_TICKET_TTL_MS });
+});
+
 app.get('/events', (req, res) => {
+  const t = sseTickets.get(String(req.query.ticket ?? ''));
+  if (!t || t.expiresAt < Date.now()) {
+    return res.status(401).json({ error: 'TICKET_INVALID', message: 'Mint a fresh connect ticket (POST /events/ticket) and reconnect.' });
+  }
+  // Identity resolves at connect time from the live session, so logout or
+  // suspension invalidates streams even inside a ticket's lifetime.
+  const session = db.sessions.find((s) => s.token === t.token);
+  const identity = sseIdentityFor(session);
+  if (!identity) return res.status(401).json({ error: 'SESSION_INVALID', message: 'Log in again — this session is no longer valid.' });
   res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
   res.flushHeaders();
   res.write(`data: ${JSON.stringify({ event: 'connected', ts: Date.now() })}\n\n`);
-  sseClients.add(res);
-  req.on('close', () => sseClients.delete(res));
+  // Catch-up: replay buffered events the client missed while disconnected.
+  const lastId = Number(req.headers['last-event-id'] ?? req.query.lastEventId ?? 0);
+  if (lastId > 0) {
+    for (const row of eventLog) {
+      if (row.id > lastId && shouldDeliver(identity, row.event, row.payload)) res.write(sseFrame(row));
+    }
+    res.write(`data: ${JSON.stringify({ event: 'caught_up', ts: Date.now() })}\n\n`);
+  }
+  const client = { res, identity };
+  sseClients.add(client);
+  const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* closing */ } }, 25_000);
+  req.on('close', () => { clearInterval(ping); sseClients.delete(client); });
 });
 
 // ------------------------------------------------------------------ helpers
@@ -192,6 +344,11 @@ const nextId = (prefix) => {
   return `${prefix}-${++idCounter}`;
 };
 function currentIdCounter() { return idCounter; }
+
+function orgSafe(o) {
+  const { password: _pw, ...safe } = o;
+  return safe;
+}
 
 function findPlayer(id) {
   return db.players.find((p) => p.id === id);
@@ -238,6 +395,18 @@ app.post('/auth/logout', (req, res) => {
 // Brute-force protection on every credential-shaped endpoint.
 const authLimiter = makeRateLimiter({ windowMs: 60_000, max: 40, bucket: 'auth' });
 app.use('/auth', authLimiter);
+
+// Development shortcuts (seeded passwordless identities, credential-less org
+// logins) exist for local work and tests only. Outside development they are
+// refused — set ALLOW_DEV_LOGINS=1 to re-enable them explicitly.
+const DEV_LOGINS = process.env.ALLOW_DEV_LOGINS === '1' || (process.env.NODE_ENV ?? 'development') !== 'production';
+function devLoginRefused(res) {
+  res.status(403).json({
+    error: 'DEV_LOGIN_DISABLED',
+    message: 'Passwordless demo logins are disabled outside development. Use a credentialed account.',
+  });
+  return true;
+}
 
 // ------------------------------------------------------------ notifications
 // In-app notification feed. audience = {kind: 'player'|'guardian'|'org_user', id}.
@@ -337,8 +506,14 @@ function buildAttachment(channel, body, senderSide) {
   };
 }
 
-function postMessage(channel, sender, text, attachment = null) {
-  const msg = { id: nextId('msg'), ts: Date.now(), sender, text, attachment };
+function postMessage(channel, sender, text, attachment = null, clientMsgId = null) {
+  // Idempotency: a retried send with the same client id returns the message
+  // that already landed instead of duplicating it.
+  if (clientMsgId) {
+    const dup = channel.messages.find((m) => m.clientMsgId === clientMsgId && m.sender.kind === sender.kind && m.sender.id === sender.id);
+    if (dup) return dup;
+  }
+  const msg = { id: nextId('msg'), ts: Date.now(), sender, text, attachment, ...(clientMsgId ? { clientMsgId } : {}) };
   channel.messages.push(msg);
   ledgerAppend({ type: 'message', playerId: channel.playerId, orgId: channel.orgId, orgName: channel.orgName, userId: sender.kind === 'org_user' ? sender.id : null, scoutName: sender.name });
   const recipient = sender.kind === 'org_user'
@@ -357,8 +532,30 @@ function postMessage(channel, sender, text, attachment = null) {
   } else if (recipient.id) {
     notify(recipient, 'message', `${channel.orgName} (${channel.scoutRole}) sent a message.`, channel.id);
   }
+  // A message is durable before the sender hears "delivered" — no debounce
+  // window in which a hard crash could lose it.
+  persistNow();
   broadcast('messages', { channelId: channel.id });
   return msg;
+}
+
+// Re-check a channel's standing on every use. A block, a suspension, or a
+// player leaving the org's platform (level or radius change) closes the
+// communication path; the history stays as audit but nothing new moves.
+function channelClosedForOrg(channel, org) {
+  const p = findPlayer(channel.playerId);
+  if (!p) return { error: 'CHANNEL_CLOSED', message: 'This player account no longer exists.' };
+  if (isBlocked(p.id, org.id)) return { error: 'BLOCKED', message: 'This player (or their guardian) has blocked your organisation.' };
+  if (!visibleToOrg(p, org)) return { error: 'CHANNEL_CLOSED', message: 'This player is no longer available to your organisation — the thread is closed (history retained for audit).' };
+  return null;
+}
+
+function channelClosedForCounterparty(channel, playerId) {
+  const org = db.orgs.find((o) => o.id === channel.orgId);
+  if (!org) return { error: 'CHANNEL_CLOSED', message: 'This organisation no longer exists.' };
+  if (org.suspended) return { error: 'ORG_SUSPENDED', message: 'This organisation is suspended pending a safety review — the thread is paused.' };
+  if (isBlocked(playerId, org.id)) return { error: 'BLOCKED', message: 'You have blocked this organisation. Lift the block to continue the conversation.' };
+  return null;
 }
 
 // Channel view without internal ids the caller shouldn't hold.
@@ -509,7 +706,15 @@ function playerViewForOrg(player, org) {
 }
 
 // -------------------------------------------------------------------- meta
-app.get('/health', (_req, res) => res.json({ ok: true, service: 'scoutbox-server', milestone: 2 }));
+app.get('/health', (_req, res) => res.json({
+  ok: true,
+  service: 'scoutbox-server',
+  engine: store.engine,
+  devLogins: DEV_LOGINS,
+  uptimeSec: Math.round(process.uptime()),
+  players: db.players.length,
+  orgs: db.orgs.length,
+}));
 
 app.get('/meta', (_req, res) => {
   res.json({
@@ -589,6 +794,8 @@ app.post('/auth/player/login', (req, res) => {
     const check = verifyPassword(req.body?.password ?? '', p.password);
     if (!check) return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This profile is password-protected.' });
     if (check === 'upgrade') p.password = hashPassword(req.body.password); // migrate legacy plain-text
+  } else if (!DEV_LOGINS) {
+    return devLoginRefused(res);
   }
   res.json({ playerId: p.id, name: p.name, token: createSession('player', p.id) });
 });
@@ -676,6 +883,8 @@ app.post('/auth/guardian/login', (req, res) => {
     const check = verifyPassword(req.body?.password ?? '', g.password);
     if (!check) return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This account is password-protected.' });
     if (check === 'upgrade') g.password = hashPassword(req.body.password);
+  } else if (!DEV_LOGINS) {
+    return devLoginRefused(res);
   }
   const { password: _pw, emailCode: _c, ...safe } = g;
   res.json({ guardianId: g.id, guardian: safe, token: createSession('guardian', g.id) });
@@ -818,6 +1027,7 @@ guardianRouter.post('/requests/:id/respond', (req, res) => {
   const child = findPlayer(request.playerId);
   const { accept, chosenSlot } = req.body || {};
   request.status = accept ? 'accepted' : 'declined';
+  persistNow();
   request.respondedAt = Date.now();
   request.respondedBy = 'guardian';
 
@@ -868,18 +1078,22 @@ guardianRouter.get('/channels', (req, res) => {
 guardianRouter.post('/channels/:id/messages', (req, res) => {
   const channel = db.channels.find((c) => c.id === req.params.id && c.guardianId === req.guardian.id);
   if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
+  const closed = channelClosedForCounterparty(channel, channel.playerId);
+  if (closed) return res.status(403).json(closed);
   const { text } = req.body || {};
   if (!text || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
   if (!moderateOrRefuse(res, text, { kind: 'guardian_message', channelId: channel.id })) return;
   const att = buildAttachment(channel, req.body, 'guardian');
   if (!att.ok) return res.status(400).json({ error: att.error });
-  res.status(201).json(postMessage(channel, { kind: 'guardian', id: req.guardian.id, name: req.guardian.name }, text.trim(), att.attachment));
+  const clientMsgId = req.body?.clientMsgId ? String(req.body.clientMsgId).slice(0, 64) : null;
+  res.status(201).json(postMessage(channel, { kind: 'guardian', id: req.guardian.id, name: req.guardian.name }, text.trim(), att.attachment, clientMsgId));
 });
 
 guardianRouter.post('/channels/:id/read', (req, res) => {
   const channel = db.channels.find((c) => c.id === req.params.id && c.guardianId === req.guardian.id);
   if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
   channel.readBy.counterparty = Date.now();
+  persistNow();
   broadcast('messages', { channelId: channel.id });
   res.json({ readBy: channel.readBy });
 });
@@ -1048,7 +1262,10 @@ app.get('/orgs', (req, res) => {
 // email domain, safeguarding contract) is checked by T&S before the club can
 // see any minor — the same bar every club faces.
 app.post('/auth/org/register-grassroots', (req, res) => {
-  const { name, country = 'GB', city, lat, lng, federation, registrationId, scoutName, role } = req.body || {};
+  const { name, country = 'GB', city, lat, lng, federation, registrationId, scoutName, role, password } = req.body || {};
+  if (password !== undefined && String(password).length < 8) {
+    return res.status(400).json({ error: 'PASSWORD_TOO_SHORT', message: 'Club passwords need at least 8 characters.' });
+  }
   if (!name || !name.trim()) return res.status(400).json({ error: 'NAME_REQUIRED' });
   if (!federation || !registrationId) {
     return res.status(400).json({ error: 'FEDERATION_REQUIRED', message: 'Grassroots clubs must hold a federation registration — name the federation and your registration id.' });
@@ -1070,6 +1287,7 @@ app.post('/auth/org/register-grassroots', (req, res) => {
     verified: false,
     verifiedDomain: null,
     safeguardingContractSigned: false,
+    ...(password ? { password: hashPassword(String(password)) } : {}),
   };
   db.orgs.push(org);
   const user = { id: nextId('usr'), orgId: org.id, name: scoutName.trim(), role: (role || 'Manager').trim(), createdAt: Date.now() };
@@ -1077,7 +1295,7 @@ app.post('/auth/org/register-grassroots', (req, res) => {
   persist();
   broadcast('orgs');
   res.status(201).json({
-    userId: user.id, role: user.role, org: { ...org, safeguardingCertified: safeguardingCertified(org) },
+    userId: user.id, role: user.role, org: { ...orgSafe(org), safeguardingCertified: safeguardingCertified(org) },
     token: createSession('org', org.id, { userId: user.id }),
     note: 'Registered. Adults within 50km are visible now; under-18 visibility needs verification + the safeguarding contract, reviewed by Trust & Safety.',
   });
@@ -1100,6 +1318,15 @@ app.post('/auth/org/login', (req, res) => {
     // Accountability by user: no anonymous / shared workspace access.
     return res.status(400).json({ error: 'SCOUT_NAME_REQUIRED', message: 'Every session is attributed to a named individual.' });
   }
+  // Org credentials: provisioned orgs require their password; unprovisioned
+  // (seeded demo) orgs are a development shortcut only.
+  if (org.password) {
+    const check = verifyPassword(req.body?.password ?? '', org.password);
+    if (!check) return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This organisation is password-protected.' });
+    if (check === 'upgrade') org.password = hashPassword(req.body.password);
+  } else if (!DEV_LOGINS) {
+    return devLoginRefused(res);
+  }
   let user = db.users.find((u) => u.orgId === orgId && u.name.toLowerCase() === scoutName.trim().toLowerCase());
   if (!user) {
     user = { id: nextId('usr'), orgId, name: scoutName.trim(), role: (role || 'Scout').trim(), createdAt: Date.now() };
@@ -1109,7 +1336,7 @@ app.post('/auth/org/login', (req, res) => {
   }
   res.json({
     userId: user.id, role: user.role,
-    org: { ...org, safeguardingCertified: safeguardingCertified(org) },
+    org: { ...orgSafe(org), safeguardingCertified: safeguardingCertified(org) },
     token: createSession('org', org.id, { userId: user.id }),
   });
 });
@@ -1310,6 +1537,7 @@ orgRouter.post('/players/:id/request', (req, res) => {
     contactChannel: null, // stays null until the player/guardian accepts
   };
   db.requests.push(request);
+  persistNow();
   ledgerAppend({ type: `${type}_request${minor ? '_to_guardian' : ''}`, playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
   if (minor) {
     notify({ kind: 'guardian', id: p.guardianId }, 'request', `${req.org.name} has requested to discuss a ${type === 'trial' ? 'trial' : 'conversation'} for ${p.name}.`, request.id);
@@ -1330,19 +1558,26 @@ orgRouter.get('/reports', (req, res) => {
 
 // Message threads for this org — only exist where a request was accepted.
 orgRouter.get('/channels', (req, res) => {
-  res.json(db.channels.filter((c) => c.orgId === req.org.id).map((c) => channelViewFor(c, 'org')));
+  res.json(db.channels.filter((c) => c.orgId === req.org.id).map((c) => ({
+    ...channelViewFor(c, 'org'),
+    closed: !!channelClosedForOrg(c, req.org),
+  })));
 });
 
 orgRouter.post('/channels/:id/messages', (req, res) => {
   const channel = db.channels.find((c) => c.id === req.params.id && c.orgId === req.org.id);
   if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
+  // Eligibility is rechecked on every send, not just when the channel opened.
+  const closed = channelClosedForOrg(channel, req.org);
+  if (closed) return res.status(403).json(closed);
   const { text } = req.body || {};
   if (!text || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
   if (!moderateOrRefuse(res, text, { kind: 'org_message', channelId: channel.id })) return;
   const att = buildAttachment(channel, req.body, 'org');
   if (!att.ok) return res.status(400).json({ error: att.error });
   // postMessage notifies the counterparty (guardian or adult player).
-  const msg = postMessage(channel, { kind: 'org_user', id: req.orgUser.id, name: `${req.orgUser.name} · ${req.orgUser.role || 'Scout'} · ${req.org.name}` }, text.trim(), att.attachment);
+  const clientMsgId = req.body?.clientMsgId ? String(req.body.clientMsgId).slice(0, 64) : null;
+  const msg = postMessage(channel, { kind: 'org_user', id: req.orgUser.id, name: `${req.orgUser.name} · ${req.orgUser.role || 'Scout'} · ${req.org.name}` }, text.trim(), att.attachment, clientMsgId);
   res.status(201).json(msg);
 });
 
@@ -1350,6 +1585,7 @@ orgRouter.post('/channels/:id/read', (req, res) => {
   const channel = db.channels.find((c) => c.id === req.params.id && c.orgId === req.org.id);
   if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
   channel.readBy.org = Date.now();
+  persistNow();
   broadcast('messages', { channelId: channel.id });
   res.json({ readBy: channel.readBy });
 });
@@ -1357,6 +1593,7 @@ orgRouter.post('/channels/:id/read', (req, res) => {
 orgRouter.post('/channels/:id/typing', (req, res) => {
   const channel = db.channels.find((c) => c.id === req.params.id && c.orgId === req.org.id);
   if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
+  if (channelClosedForOrg(channel, req.org)) return res.status(403).json({ error: 'CHANNEL_CLOSED' });
   broadcast('typing', { channelId: channel.id, side: 'org' });
   res.json({ ok: true });
 });
@@ -2259,6 +2496,7 @@ playerRouter.post('/requests/:id/respond', (req, res) => {
   if (request.status !== 'pending') return res.status(409).json({ error: 'ALREADY_RESPONDED' });
   const { accept, chosenSlot } = req.body || {};
   request.status = accept ? 'accepted' : 'declined';
+  persistNow();
   request.respondedAt = Date.now();
 
   if (accept) {
@@ -2306,12 +2544,15 @@ playerRouter.post('/channels/:id/messages', (req, res) => {
   if (guardianManagedOnly(req, res)) return;
   const channel = db.channels.find((c) => c.id === req.params.id && c.playerId === req.player.id && c.counterparty === 'player');
   if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
+  const closed = channelClosedForCounterparty(channel, req.player.id);
+  if (closed) return res.status(403).json(closed);
   const { text } = req.body || {};
   if (!text || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
   if (!moderateOrRefuse(res, text, { kind: 'player_message', channelId: channel.id })) return;
   const att = buildAttachment(channel, req.body, 'player');
   if (!att.ok) return res.status(400).json({ error: att.error });
-  res.status(201).json(postMessage(channel, { kind: 'player', id: req.player.id, name: req.player.name }, text.trim(), att.attachment));
+  const clientMsgId = req.body?.clientMsgId ? String(req.body.clientMsgId).slice(0, 64) : null;
+  res.status(201).json(postMessage(channel, { kind: 'player', id: req.player.id, name: req.player.name }, text.trim(), att.attachment, clientMsgId));
 });
 
 playerRouter.post('/channels/:id/read', (req, res) => {
@@ -2319,6 +2560,7 @@ playerRouter.post('/channels/:id/read', (req, res) => {
   const channel = db.channels.find((c) => c.id === req.params.id && c.playerId === req.player.id && c.counterparty === 'player');
   if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
   channel.readBy.counterparty = Date.now();
+  persistNow();
   broadcast('messages', { channelId: channel.id });
   res.json({ readBy: channel.readBy });
 });
@@ -3014,7 +3256,7 @@ adminRouter.post('/reports/:id/resolve', (req, res) => {
 });
 
 adminRouter.get('/clubs', (_req, res) => {
-  res.json(db.orgs.map((o) => ({ ...o, safeguardingCertified: safeguardingCertified(o) })));
+  res.json(db.orgs.map((o) => ({ ...orgSafe(o), safeguardingCertified: safeguardingCertified(o) })));
 });
 
 adminRouter.post('/clubs/:id/verification', (req, res) => {
@@ -3027,7 +3269,7 @@ adminRouter.post('/clubs/:id/verification', (req, res) => {
   if (suspended !== undefined) org.suspended = !!suspended;
   persist();
   broadcast('players'); // visibility rules may have changed
-  res.json({ ...org, safeguardingCertified: safeguardingCertified(org) });
+  res.json({ ...orgSafe(org), safeguardingCertified: safeguardingCertified(org) });
 });
 
 adminRouter.get('/guardians', (_req, res) => {
@@ -3060,11 +3302,31 @@ adminRouter.get('/moderation', (_req, res) => res.json(db.moderationLog.slice().
 // Thread audit — the "all communications logged" promise, made inspectable.
 adminRouter.get('/channels', (_req, res) => res.json(db.channels.map((c) => ({ ...c }))));
 
-// Serve uploaded media (any authenticated party with profile access could
-// reach this in production; prototype serves by id).
+// Serve uploaded media. Access is authorised, not public: either a valid
+// short-lived signature (minted only inside authorisation-checked API
+// responses) or a bearer session that is entitled to the owning player.
 app.get('/media/:id', (req, res) => {
-  if (!/^[a-z0-9-]+$/i.test(req.params.id)) return res.status(400).json({ error: 'BAD_MEDIA_ID' });
-  const blob = storage.read(req.params.id);
+  const id = req.params.id;
+  if (!/^[a-z0-9-]+$/i.test(id)) return res.status(400).json({ error: 'BAD_MEDIA_ID' });
+  const exp = Number(req.query.e ?? 0);
+  const signedOk = exp > Date.now() && String(req.query.s ?? '') === mediaSig(id, exp);
+  if (!signedOk) {
+    const session = sessionFor(req);
+    const owner = db.players.find((p) => p.media.some((m) => m.id === id));
+    let allowed = false;
+    if (session && owner) {
+      if (session.kind === 'player') allowed = owner.id === session.refId;
+      else if (session.kind === 'guardian') allowed = owner.guardianId === session.refId;
+      else if (session.kind === 'org') {
+        const org = db.orgs.find((o) => o.id === session.refId);
+        allowed = !!org && !org.suspended && visibleToOrg(owner, org) && !isBlocked(owner.id, org.id);
+      }
+    }
+    if (!allowed) {
+      return res.status(401).json({ error: 'MEDIA_AUTH_REQUIRED', message: 'Media links are signed per response — refetch the profile for a fresh link.' });
+    }
+  }
+  const blob = storage.read(id);
   if (!blob) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });
   res.set('Content-Type', blob.contentType).send(blob.buffer);
 });

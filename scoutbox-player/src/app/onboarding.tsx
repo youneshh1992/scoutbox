@@ -131,8 +131,16 @@ export default function Onboarding() {
   // child device pairing
   const [pairCode, setPairCode] = useState('');
 
+  // Live mode: an unreachable backend is an actionable error, never a silent
+  // fall-back to fabricated data.
+  const [serverDown, setServerDown] = useState(false);
+  const checkServer = () => {
+    client.ping().then(() => setServerDown(false)).catch(() => setServerDown(true));
+  };
   useEffect(() => {
     client.listDemoIdentities().then(setIdentities).catch(() => {});
+    checkServer();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const enterAsPlayer = async (playerId: string, skipLogin = false) => {
@@ -289,6 +297,17 @@ export default function Onboarding() {
             {mode === 'demo' && <Pill label="Demo mode — no server connected" />}
           </Row>
         </View>
+
+        {serverDown && (
+          <Card style={{ borderColor: colors.danger, gap: 8 }}>
+            <Text style={styles.name}>Can't reach the ScoutBox backend</Text>
+            <Muted size={13}>
+              The app is in live mode and the API isn't responding. Start scoutbox-server (port 4000),
+              or check EXPO_PUBLIC_API_URL if it runs somewhere else. Nothing is faked while it's down.
+            </Muted>
+            <Button small label="Try again" onPress={checkServer} />
+          </Card>
+        )}
 
         {onGuardianPath && (
           <StepDots current={{ 'g-account': 1, 'g-email': 2, 'g-verify': 3, 'g-disclaimer': 4, 'g-child': 5 }[step as 'g-account'] ?? 1} />

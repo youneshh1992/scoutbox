@@ -168,7 +168,12 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   const [channels, setChannels] = useState<Channel[]>([]);
   const seenNotifIds = useRef<Set<string> | null>(null);
 
-  useEffect(() => api.onChange(() => setTick((t) => t + 1)), []);
+  const [live, setLive] = useState(true);
+  useEffect(() => api.onChange(session, (event, payload) => {
+    if (event === 'sse_status') { setLive((payload as { connected?: boolean } | undefined)?.connected !== false); return; }
+    if (event === 'typing') return; // transient — handled inside Messages
+    setTick((t) => t + 1);
+  }), [session]);
 
   useEffect(() => {
     api.getNotifications(session).then(setNotifications).catch(() => {});
@@ -241,7 +246,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
             ? <span className="pill outline-green">Verified club</span>
             : <span className="pill">verification pending — U18 hidden</span>)}
           <span className={`pill ${session.org.type === 'agency' ? 'red' : 'blue'}`}>{session.org.type}</span>
-          <span className="pill outline-green">● live sync</span>
+          {live ? <span className="pill outline-green">● live sync</span> : <span className="pill red">○ reconnecting — updates resume automatically</span>}
           <button onClick={openBell} title="Notifications" style={{ position: 'relative' }}>
             🔔{unread > 0 && <span className="bell-badge">{unread}</span>}
           </button>

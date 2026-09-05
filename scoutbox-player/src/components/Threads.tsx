@@ -11,9 +11,9 @@ import { colors } from '../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
 import { WebVideo } from './WebVideo';
 
-export function Threads({ channels, onSend, onOpen, onTyping, attachableClips, emptyText }: {
+export function Threads({ channels, onSend, onOpen, onTyping, attachableClips, emptyText, auth }: {
   channels: Channel[];
-  onSend: (channelId: string, text: string, attachMediaId?: string) => Promise<void>;
+  onSend: (channelId: string, text: string, attachMediaId?: string, clientMsgId?: string) => Promise<void>;
   /** Called when a thread is opened — mark it read. */
   onOpen?: (channelId: string) => void;
   /** Called (throttled) while the user types. */
@@ -21,6 +21,8 @@ export function Threads({ channels, onSend, onOpen, onTyping, attachableClips, e
   /** Clips this side may attach into the thread. */
   attachableClips?: MediaItem[];
   emptyText: string;
+  /** Identity for the scoped live stream (typing pings). */
+  auth?: { kind: 'player' | 'guardian'; id: string };
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -46,8 +48,9 @@ export function Threads({ channels, onSend, onOpen, onTyping, attachableClips, e
         if (typingTimer.current) clearTimeout(typingTimer.current);
         typingTimer.current = setTimeout(() => setTyping(false), 3000);
       }
-    });
-  }, [openId]);
+    }, auth);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openId, auth?.kind, auth?.id]);
 
   const handleDraft = (v: string) => {
     setDraft(v);
@@ -57,15 +60,31 @@ export function Threads({ channels, onSend, onOpen, onTyping, attachableClips, e
     }
   };
 
-  const send = async () => {
-    if (!open || !draft.trim()) return;
+  // Outbox: pending until the server confirms the message durable, failed
+  // (with retry) on error. Retries reuse the client message id, so the server
+  // never stores a duplicate.
+  const [outbox, setOutbox] = useState<{ id: string; channelId: string; text: string; attach?: string; status: 'pending' | 'failed' }[]>([]);
+  const send = async (retryId?: string) => {
+    const entry = retryId ? outbox.find((o) => o.id === retryId) : null;
+    const text = entry ? entry.text : draft.trim();
+    const channelId = entry ? entry.channelId : open?.id;
+    if (!channelId || !text) return;
+    const cid = entry ? entry.id : `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const attach = entry ? entry.attach : (attachId ?? undefined);
     setError(null);
-    try {
-      await onSend(open.id, draft.trim(), attachId ?? undefined);
+    if (entry) {
+      setOutbox((o) => o.map((x) => (x.id === cid ? { ...x, status: 'pending' } : x)));
+    } else {
+      setOutbox((o) => [...o, { id: cid, channelId, text, attach, status: 'pending' }]);
       setDraft('');
       setAttachId(null);
+    }
+    try {
+      await onSend(channelId, text, attach, cid);
+      setOutbox((o) => o.filter((x) => x.id !== cid));
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 250);
     } catch (e) {
+      setOutbox((o) => o.map((x) => (x.id === cid ? { ...x, status: 'failed' } : x)));
       setError(e instanceof Error ? e.message : 'Could not send');
     }
   };
@@ -119,6 +138,14 @@ export function Threads({ channels, onSend, onOpen, onTyping, attachableClips, e
                 </View>
               );
             })}
+            {outbox.filter((o) => o.channelId === open.id).map((o) => (
+              <View key={o.id} style={[styles.bubble, styles.mine, o.status === 'failed' ? styles.failed : styles.pending]}>
+                <Text style={{ color: colors.text, fontSize: 13.5, lineHeight: 19 }}>{o.text}</Text>
+                {o.status === 'failed'
+                  ? <Row><Muted size={10}>not delivered</Muted><Button small label="Retry" onPress={() => send(o.id)} /></Row>
+                  : <Muted size={10}>… sending</Muted>}
+              </View>
+            ))}
             {typing && <Muted size={12}>… {open.orgName} is typing</Muted>}
           </ScrollView>
           {error && <Text style={{ color: colors.danger, fontSize: 12.5 }}>{error}</Text>}
@@ -143,9 +170,9 @@ export function Threads({ channels, onSend, onOpen, onTyping, attachableClips, e
               placeholderTextColor={colors.muted}
               value={draft}
               onChangeText={handleDraft}
-              onSubmitEditing={send}
+              onSubmitEditing={() => send()}
             />
-            <Button small primary label="Send" onPress={send} />
+            <Button small primary label="Send" onPress={() => send()} />
           </Row>
         </Card>
       )}
@@ -180,6 +207,8 @@ export function ThreadsHeader() {
 }
 
 const styles = StyleSheet.create({
+  pending: { opacity: 0.65 },
+  failed: { borderWidth: 1, borderColor: colors.danger },
   org: { color: colors.text, fontSize: 15.5, fontWeight: '700' },
   thread: {
     maxHeight: 320,

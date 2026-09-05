@@ -1453,6 +1453,8 @@ export const mockClient: PlayerClient = {
     return (mockClient.requestVouch as (p: string, n: string, e: string, r: string) => Promise<void>)(childId, coachName, coachEmail, role);
   },
 
+  ping: async () => { /* demo is self-contained — always reachable */ },
+
   onChange: (cb) => {
     listeners.add(cb);
     return () => listeners.delete(cb);

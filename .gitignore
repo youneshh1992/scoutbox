@@ -9,3 +9,6 @@ dist-demo/
 scoutbox-server/data/
 scoutbox-server/public/
 e2e/dist/
+.env
+.env.local
+dist-live/

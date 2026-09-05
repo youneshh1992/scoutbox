@@ -622,14 +622,14 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
 
   // Typing indicator: listen for the counterparty's typing pings.
   useEffect(() => {
-    return api.onChange((event, payload) => {
+    return api.onChange(session, (event, payload) => {
       if (event === 'typing' && payload?.channelId === openId && payload?.side !== 'org') {
         setTyping(true);
         if (typingTimer.current) window.clearTimeout(typingTimer.current);
         typingTimer.current = window.setTimeout(() => setTyping(false), 3000);
       }
     });
-  }, [openId]);
+  }, [openId, session]);
 
   const onDraftChange = (v: string) => {
     setDraft(v);
@@ -644,14 +644,30 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
     ? trials.filter((t) => t.playerId === open.playerId && t.status === 'reported' && t.report).map((t) => t.report!)
     : [];
 
-  const send = async () => {
-    if (!open || !draft.trim()) return;
-    try {
-      await api.sendMessage(session, open.id, draft.trim(), attachReportId || undefined);
+  // Outbox: a send is 'pending' until the server confirms it durable, and
+  // 'failed' (with retry) if the request errors. Retries reuse the same
+  // client message id, so the server never stores a duplicate.
+  const [outbox, setOutbox] = useState<{ id: string; channelId: string; text: string; attach?: string; status: 'pending' | 'failed' }[]>([]);
+  const send = async (retryId?: string) => {
+    const entry = retryId ? outbox.find((o) => o.id === retryId) : null;
+    const text = entry ? entry.text : draft.trim();
+    const channelId = entry ? entry.channelId : open?.id;
+    if (!channelId || !text) return;
+    const cid = entry ? entry.id : `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const attach = entry ? entry.attach : (attachReportId || undefined);
+    if (entry) {
+      setOutbox((o) => o.map((x) => (x.id === cid ? { ...x, status: 'pending' } : x)));
+    } else {
+      setOutbox((o) => [...o, { id: cid, channelId, text, attach, status: 'pending' }]);
       setDraft('');
       setAttachReportId('');
+    }
+    try {
+      await api.sendMessage(session, channelId, text, attach, cid);
+      setOutbox((o) => o.filter((x) => x.id !== cid));
       setChannels(await api.getChannels(session));
     } catch (e) {
+      setOutbox((o) => o.map((x) => (x.id === cid ? { ...x, status: 'failed' } : x)));
       notify(errMsg(e), true);
     }
   };
@@ -673,7 +689,7 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
               onClick={() => setOpenId(c.id)}
             >
               <span className="grow">
-                <b>{c.playerName}</b>
+                <b>{c.playerName}</b>{c.closed && <span className="pill red" style={{ marginLeft: 6 }}>closed</span>}
                 <div className="dim">{c.counterparty === 'guardian' ? 'via guardian' : 'direct'} · {c.messages.length} msg</div>
               </span>
             </div>
@@ -714,9 +730,25 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
                   </div>
                 );
               })}
+              {outbox.filter((o) => o.channelId === open.id).map((o) => (
+                <div key={o.id} className={`bubble mine ${o.status === 'failed' ? 'failed' : 'pending'}`}>
+                  {o.text}
+                  <div className="who" style={{ textAlign: 'right', marginTop: 2 }}>
+                    {o.status === 'failed'
+                      ? <>not delivered — <button style={{ padding: 0, color: 'var(--danger)' }} onClick={() => send(o.id)}>retry</button></>
+                      : '… sending'}
+                  </div>
+                </div>
+              ))}
               {typing && <div className="dim" style={{ fontSize: 12.5 }}>… {open.counterparty === 'guardian' ? 'the guardian is' : `${open.playerName} is`} typing</div>}
             </div>
-            <div style={{ display: 'flex', gap: 10 }}>
+            {open.closed && (
+              <div className="notice block">
+                This thread is closed — the player is no longer available to your club (block, suspension,
+                or they moved beyond the platform's reach). The history stays for audit; nothing new can be sent.
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 10, opacity: open.closed ? 0.5 : 1, pointerEvents: open.closed ? 'none' : 'auto' }}>
               {openPlayerReports.length > 0 && (
                 <select value={attachReportId} onChange={(e) => setAttachReportId(e.target.value)} title="Attach a filed trial report">
                   <option value="">📎 no attachment</option>
@@ -732,7 +764,7 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
                 onChange={(e) => onDraftChange(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && send()}
               />
-              <button className="primary" onClick={send}>Send</button>
+              <button className="primary" onClick={() => send()}>Send</button>
             </div>
           </div>
         ) : (
@@ -1673,7 +1705,7 @@ export function PlayerDrawer({ session, playerId, notify, onClose }: {
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
                   />
-                  <button className="primary" onClick={send}>Send</button>
+                  <button className="primary" onClick={() => send()}>Send</button>
                   <button onClick={() => setRequestType(null)}>Cancel</button>
                 </div>
                 <div className="dim" style={{ marginTop: 6, fontSize: 12.5 }}>

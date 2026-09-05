@@ -162,7 +162,8 @@ export default function Inbox() {
             <SectionTitle>Messages — open after acceptance, on-platform only</SectionTitle>
             <Threads
               channels={channels}
-              onSend={(channelId, text, attachMediaId) => client.sendMessage(playerId, channelId, text, attachMediaId)}
+              onSend={(channelId, text, attachMediaId, clientMsgId) => client.sendMessage(playerId, channelId, text, attachMediaId, clientMsgId)}
+              auth={{ kind: 'player', id: playerId }}
               onOpen={(channelId) => void client.markChannelRead(playerId, channelId).catch(() => {})}
               onTyping={(channelId) => void client.sendTyping(playerId, channelId).catch(() => {})}
               attachableClips={me?.media ?? []}

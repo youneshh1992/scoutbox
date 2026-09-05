@@ -30,6 +30,8 @@ jobs:
           for i in $(seq 1 30); do curl -sf http://localhost:4000/orgs/directory >/dev/null && break; sleep 1; done
           npm run e2e
           kill $SERVER_PID
+      - name: Connected-mode end-to-end (isolated servers, SIGKILL durability, prod gate)
+        run: node scripts/connectedE2E.mjs
 
   club:
     name: Club app — typecheck + build

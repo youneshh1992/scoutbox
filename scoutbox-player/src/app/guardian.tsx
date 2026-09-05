@@ -227,7 +227,8 @@ export default function GuardianDashboard() {
         </Row>
         <Threads
           channels={channels}
-          onSend={(channelId, text, attachMediaId) => client.guardianSendMessage(guardianId!, channelId, text, attachMediaId)}
+          onSend={(channelId, text, attachMediaId, clientMsgId) => client.guardianSendMessage(guardianId!, channelId, text, attachMediaId, clientMsgId)}
+          auth={{ kind: 'guardian', id: guardianId! }}
           onOpen={(channelId) => void client.guardianMarkChannelRead(guardianId!, channelId).catch(() => {})}
           onTyping={(channelId) => void client.guardianSendTyping(guardianId!, channelId).catch(() => {})}
           attachableClips={children.flatMap((c) => c.media)}

@@ -13,7 +13,7 @@ const TABS = [
 ] as const;
 
 export default function TabsLayout() {
-  const { playerId, inbox, unreadMessages } = useSession();
+  const { playerId, inbox, unreadMessages, liveConnected, mode } = useSession();
   if (!playerId) return <Redirect href="/onboarding" />;
   const pending = inbox.filter((r) => r.status === 'pending').length;
   // Red indicator: pending requests + unread club messages.
@@ -22,6 +22,11 @@ export default function TabsLayout() {
   return (
     <View style={{ flex: 1 }}>
       <PopupBanner />
+      {mode === 'live' && !liveConnected && (
+        <View style={{ backgroundColor: '#3a1f27', paddingVertical: 4, alignItems: 'center' }}>
+          <Text style={{ color: colors.danger, fontSize: 12 }}>○ reconnecting — updates resume automatically</Text>
+        </View>
+      )}
       <Tabs
         screenOptions={{
           headerShown: false,

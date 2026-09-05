@@ -110,8 +110,8 @@ export const httpClient: PlayerClient = {
 
   getChannels: (playerId) => request<Channel[]>('/player/channels', playerId),
 
-  sendMessage: (playerId, channelId, text, attachMediaId) =>
-    request<void>(`/player/channels/${channelId}/messages`, playerId, { method: 'POST', body: JSON.stringify({ text, attachMediaId }) }),
+  sendMessage: (playerId, channelId, text, attachMediaId, clientMsgId) =>
+    request<void>(`/player/channels/${channelId}/messages`, playerId, { method: 'POST', body: JSON.stringify({ text, attachMediaId, clientMsgId }) }),
 
   markChannelRead: (playerId, channelId) =>
     request<void>(`/player/channels/${channelId}/read`, playerId, { method: 'POST' }),
@@ -251,8 +251,8 @@ export const httpClient: PlayerClient = {
 
   guardianChannels: (guardianId) => guardianRequest<Channel[]>('/guardian/channels', guardianId),
 
-  guardianSendMessage: (guardianId, channelId, text, attachMediaId) =>
-    guardianRequest<void>(`/guardian/channels/${channelId}/messages`, guardianId, { method: 'POST', body: JSON.stringify({ text, attachMediaId }) }),
+  guardianSendMessage: (guardianId, channelId, text, attachMediaId, clientMsgId) =>
+    guardianRequest<void>(`/guardian/channels/${channelId}/messages`, guardianId, { method: 'POST', body: JSON.stringify({ text, attachMediaId, clientMsgId }) }),
 
   guardianMarkChannelRead: (guardianId, channelId) =>
     guardianRequest<void>(`/guardian/channels/${channelId}/read`, guardianId, { method: 'POST' }),
@@ -304,21 +304,62 @@ export const httpClient: PlayerClient = {
   guardianRequestVouch: (guardianId, childId, coachName, coachEmail, role) =>
     guardianRequest<void>(`/guardian/children/${childId}/vouches/request`, guardianId, { method: 'POST', body: JSON.stringify({ coachName, coachEmail, role }) }),
 
-  onChange: (cb) => {
-    // SSE on web; polling elsewhere (native has no EventSource).
-    if (typeof EventSource !== 'undefined') {
-      const source = new EventSource(`${API_URL}/events`);
-      source.onmessage = (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          cb(data.event, data);
-        } catch {
-          cb();
-        }
-      };
-      return () => source.close();
+  // Live sync is authenticated and scoped: a short-lived connect ticket is
+  // minted over the bearer session, then streamed. On drops we reconnect with
+  // the last seen event id so missed events replay; 'reconnected' tells the
+  // app to refetch authoritatively. Native (no EventSource) polls instead.
+  onChange: (cb, auth) => {
+    if (typeof EventSource === 'undefined' || !auth) {
+      const timer = setInterval(() => cb(), 3000);
+      return () => clearInterval(timer);
     }
-    const timer = setInterval(() => cb(), 3000);
-    return () => clearInterval(timer);
+    let source: EventSource | null = null;
+    let stopped = false;
+    let dropped = false;
+    let retry = 0;
+    let lastEventId = 0;
+    const connect = async () => {
+      if (stopped) return;
+      try {
+        const res = await fetch(`${API_URL}/events/ticket`, { method: 'POST', headers: { ...authHeader(auth.id) } });
+        if (!res.ok) throw new Error('ticket refused');
+        const { ticket } = (await res.json()) as { ticket: string };
+        if (stopped) return;
+        source = new EventSource(`${API_URL}/events?ticket=${encodeURIComponent(ticket)}${lastEventId ? `&lastEventId=${lastEventId}` : ''}`);
+        source.onopen = () => {
+          retry = 0;
+          if (dropped) { dropped = false; cb('reconnected', {}); }
+          cb('sse_status', { connected: true });
+        };
+        source.onmessage = (e) => {
+          if (e.lastEventId) lastEventId = Number(e.lastEventId) || lastEventId;
+          try {
+            const data = JSON.parse(e.data);
+            cb(data.event, data);
+          } catch {
+            cb();
+          }
+        };
+        source.onerror = () => {
+          source?.close();
+          if (stopped) return;
+          dropped = true;
+          cb('sse_status', { connected: false });
+          setTimeout(connect, Math.min(15_000, 1000 * 2 ** Math.min(retry++, 4)));
+        };
+      } catch {
+        if (stopped) return;
+        dropped = true;
+        cb('sse_status', { connected: false });
+        setTimeout(connect, Math.min(15_000, 1000 * 2 ** Math.min(retry++, 4)));
+      }
+    };
+    void connect();
+    return () => { stopped = true; source?.close(); };
+  },
+
+  ping: async () => {
+    const res = await fetch(`${API_URL}/health`);
+    if (!res.ok) throw new ClientError('SERVER_DOWN', 'The ScoutBox backend is not responding.');
   },
 };

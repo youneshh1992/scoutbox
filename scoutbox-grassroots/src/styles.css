@@ -402,3 +402,8 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
   .bubble { max-width: 88%; }
   table.data { display: block; overflow-x: auto; }
 }
+
+
+/* ---------------------------------------------- M11: send states */
+.bubble.pending { opacity: 0.65; }
+.bubble.failed { border: 1px solid var(--danger); }

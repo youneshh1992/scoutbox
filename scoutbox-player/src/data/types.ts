@@ -277,7 +277,7 @@ export interface PlayerClient {
   /** Resolve a media path to a playable URL (absolute in live mode). */
   mediaUrl(path: string | null | undefined): string | null;
   getChannels(playerId: string): Promise<Channel[]>;
-  sendMessage(playerId: string, channelId: string, text: string, attachMediaId?: string): Promise<void>;
+  sendMessage(playerId: string, channelId: string, text: string, attachMediaId?: string, clientMsgId?: string): Promise<void>;
   markChannelRead(playerId: string, channelId: string): Promise<void>;
   sendTyping(playerId: string, channelId: string): Promise<void>;
   getFeed(playerId: string): Promise<PlayerFeedItem[]>;
@@ -329,7 +329,7 @@ export interface PlayerClient {
   guardianReport(guardianId: string, input: ReportInput): Promise<void>;
   guardianBlock(guardianId: string, orgId: string, childId?: string, reason?: string): Promise<void>;
   guardianChannels(guardianId: string): Promise<Channel[]>;
-  guardianSendMessage(guardianId: string, channelId: string, text: string, attachMediaId?: string): Promise<void>;
+  guardianSendMessage(guardianId: string, channelId: string, text: string, attachMediaId?: string, clientMsgId?: string): Promise<void>;
   guardianMarkChannelRead(guardianId: string, channelId: string): Promise<void>;
   guardianSendTyping(guardianId: string, channelId: string): Promise<void>;
   guardianDigest(guardianId: string): Promise<GuardianDigest>;
@@ -349,5 +349,7 @@ export interface PlayerClient {
   guardianSetFirstTeamSeeker(guardianId: string, childId: string, enabled: boolean): Promise<void>;
   guardianRequestVouch(guardianId: string, childId: string, coachName: string, coachEmail: string, role: string): Promise<void>;
 
-  onChange(cb: (event?: string, payload?: Record<string, unknown>) => void): () => void;
+  onChange(cb: (event?: string, payload?: Record<string, unknown>) => void, auth?: { kind: 'player' | 'guardian'; id: string }): () => void;
+  /** Reachability probe — rejects when the backend is down (live mode). */
+  ping(): Promise<void>;
 }

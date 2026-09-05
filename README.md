@@ -1,4 +1,4 @@
-# ScoutBox — Full System (Milestone 10: the grassroots club toolkit)
+# ScoutBox — Full System (Milestone 11: one connected system)
 
 Five pieces, one live dataset:
 
@@ -6,17 +6,58 @@ Five pieces, one live dataset:
 |---|---|---|
 | `scoutbox-server/` | The sync backend all apps share. Enforces the deck's rules server-side. SQLite persistence (`data/scoutbox.db`), bearer-token sessions, adapter seams for mail/push/IDV/billing/storage. | `npm install && npm start` (port 4000) |
 | `scoutbox-player/` | The player mobile app (Expo/React Native). | `npm install && npx expo start --web` |
-| `scoutbox-club/`   | The club & agent desktop application (React, landscape). | `npm install && npm run dev` (port 5173) |
+| `scoutbox-club/`   | **ScoutBox Pro** — the club & agent recruitment portal (React, landscape). | `npm install && npm run dev` (port 5173) |
 | `scoutbox-admin/`  | The internal Trust & Safety console (reports, verification, IDV, suspensions, audit). | `npm install && npm run dev` (port 5174, key: `scoutbox-admin`) |
 | `scoutbox-grassroots/` | **ScoutBox Grassroots** — the separate club platform for federation-registered semi-pro & amateur clubs. | `npm install && npm run dev` (port 5175) |
 
-## Live sync
-Start the server first. The club app connects to it automatically (localhost:4000).
-To connect the player app to the same live data, start it with:
-`EXPO_PUBLIC_API_URL=http://localhost:4000 npx expo start --web`
-(without the variable it runs in self-contained demo mode).
-Then: a club's contact/trial request appears in the player's Inbox instantly; a
-player's Academy+ toggle or upload appears in club search instantly.
+## Local development — the connected system (Milestone 11)
+
+**Connected mode is the real application.** All three apps default to the one
+shared backend (`http://localhost:4000`, override per app via
+`VITE_API_URL` / `EXPO_PUBLIC_API_URL` — see each app's `.env.example`).
+Demo mode is explicit and labelled (`VITE_DEMO=1` / `EXPO_PUBLIC_DEMO=1`); a
+missing variable never silently selects mock data, and a backend outage shows
+an actionable connection error instead of fabricated success.
+
+```bash
+# 1. install (matches the lockfiles)
+for d in scoutbox-server scoutbox-player scoutbox-club scoutbox-admin e2e; do (cd $d && npm ci); done
+# scoutbox-grassroots/node_modules is a symlink to scoutbox-club's — nothing to install there
+
+# 2. start everything (backend + Player + Pro + Grassroots; add --with-admin for the T&S console)
+node scripts/dev-all.mjs
+```
+
+URLs (printed by the launcher once the backend is healthy):
+- ScoutBox Player (web): http://localhost:8081
+- ScoutBox Pro: http://localhost:5173
+- ScoutBox Grassroots: http://localhost:5175
+- API: http://localhost:4000 (`/health`), T&S console (optional): http://localhost:5174
+
+**Database**: created automatically at `scoutbox-server/data/scoutbox.db` on
+first boot (a legacy `db.json` is imported once — that is the only migration).
+Messages, requests and read state are persisted synchronously; the rest is
+snapshotted with a short debounce.
+
+**Fresh demo seed** (explicitly destructive — never run against data you
+want to keep): stop the backend, `rm -rf scoutbox-server/data`, start it
+again. The seed identities (Kola, Amara, Eastport FC, Hackney Marsh Rovers…)
+are passwordless *development logins*; they are refused when
+`NODE_ENV=production` unless `ALLOW_DEV_LOGINS=1` is set. For isolated test
+accounts, sign up through the apps (player/guardian signup, grassroots club
+registration — all accept a password) instead of touching the seed.
+
+**Phone on the same Wi-Fi**: the phone cannot reach your machine's
+`localhost`. Find your LAN address (`hostname -I` / `ipconfig getifaddr en0`)
+and start the player app with
+`EXPO_PUBLIC_API_URL=http://<your-LAN-IP>:4000 npx expo start` — then scan the
+QR code with Expo Go. The backend listens on all interfaces already.
+
+Then: a club's contact/trial request appears in the player's Inbox instantly;
+a player's upload appears in club search instantly. Live sync is an
+authenticated, per-account SSE stream (short-lived connect tickets — no bearer
+tokens in URLs) with replay on reconnect; sends are idempotent with visible
+pending/failed/retry states.
 
 Messaging is symmetric and observable: messages flow both ways with read receipts
 (✓✓) and typing indicators; new messages pop a notification and put a red unread

@@ -990,7 +990,7 @@ export const demoApi: ScoutboxApi = {
     });
   },
 
-  onChange: (cb) => {
+  onChange: (_s, cb) => {
     listeners.add(cb);
     return () => listeners.delete(cb);
   },

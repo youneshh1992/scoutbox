@@ -23,7 +23,9 @@ inline(path.join(ROOT, 'scoutbox-admin', 'dist'), path.join(OUT, 'scoutbox-admin
 run('VITE_DEMO=1 npx vite build', path.join(ROOT, 'scoutbox-grassroots'));
 inline(path.join(ROOT, 'scoutbox-grassroots', 'dist'), path.join(OUT, 'scoutbox-grassroots-demo.html'));
 
-run('npx expo export --platform web --output-dir dist-demo', path.join(ROOT, 'scoutbox-player'));
+// Demo is explicit now: without EXPO_PUBLIC_DEMO=1 the player app builds in
+// LIVE mode against the real backend.
+run('EXPO_PUBLIC_DEMO=1 npx expo export --clear --platform web --output-dir dist-demo', path.join(ROOT, 'scoutbox-player'));
 inline(path.join(ROOT, 'scoutbox-player', 'dist-demo'), path.join(OUT, 'scoutbox-player-demo.html'));
 
 // expo-router matches on pathname; hosted at any deep path the demo must
