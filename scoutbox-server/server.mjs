@@ -13,6 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildSeed } from './seed.mjs';
 import { openStore } from './store.mjs';
+import { registerM12 } from './m12/index.mjs';
 import {
   PROGRAMME_TRACKS, trackForPosition, programmeProgress, pathwayFor,
   earnedGrassrootsBadges, percentileAmong, inCohort,
@@ -248,7 +249,7 @@ function sseIdentityFor(session) {
   if (!session) return null;
   if (session.kind === 'org') {
     const org = db.orgs.find((o) => o.id === session.refId);
-    return org && !org.suspended ? { kind: 'org', orgId: org.id } : null;
+    return org && !org.suspended ? { kind: 'org', orgId: org.id, userId: session.userId } : null;
   }
   if (session.kind === 'player') {
     const p = findPlayer(session.refId);
@@ -278,6 +279,11 @@ function shouldDeliver(identity, event, payload) {
   // silent immediately, catalogue pings included.
   const org = identity.kind === 'org' ? liveOrg(identity) : null;
   if (identity.kind === 'org' && !org) return false;
+  if (identity.kind === 'org' && identity.userId) {
+    // Staff removal takes effect on open streams too, not just reconnects.
+    const u = db.users.find((x) => x.id === identity.userId);
+    if (!u || u.removedAt) return false;
+  }
   if (event === 'typing' || event === 'messages') {
     const channel = db.channels.find((c) => c.id === payload.channelId);
     if (!channel) return false;
@@ -618,8 +624,14 @@ function refreshJourneyBadges(player) {
 
 function publishedVouchesFor(playerId) {
   return db.vouches
-    .filter((v) => v.playerId === playerId && v.status === 'published')
-    .map(({ coachEmail, code, ...visible }) => visible);
+    .filter((v) => v.playerId === playerId && v.status === 'published' && !v.withdrawn)
+    .map(({ coachEmail, code, ...visible }) => ({
+      ...visible,
+      // Honesty audit (M12 F1/F10): an email-code reference proves mailbox
+      // control, NOT coach identity — say so wherever the reference travels.
+      verificationMethod: visible.verificationMethod ?? 'email_code',
+      identityVerified: visible.identityVerified ?? false,
+    }));
 }
 
 // Safeguarding certification is EARNED and losable: verification + signed
@@ -1360,6 +1372,10 @@ app.post('/auth/org/login', (req, res) => {
     return devLoginRefused(res);
   }
   let user = db.users.find((u) => u.orgId === orgId && u.name.toLowerCase() === scoutName.trim().toLowerCase());
+  if (user?.removedAt) {
+    // Departed staff don't come back by typing their old name.
+    return res.status(403).json({ error: 'USER_REMOVED', message: 'This staff member\'s access was removed by the organisation.' });
+  }
   if (!user) {
     user = { id: nextId('usr'), orgId, name: scoutName.trim(), role: (role || 'Scout').trim(), createdAt: Date.now() };
     db.users.push(user);
@@ -1383,6 +1399,7 @@ function orgAuth(req, res, next) {
   if (!org) return res.status(401).json({ error: 'ORG_AUTH_REQUIRED' });
   const user = db.users.find((u) => u.id === session.userId && u.orgId === org.id);
   if (!user) return res.status(401).json({ error: 'USER_UNKNOWN' });
+  if (user.removedAt) return res.status(401).json({ error: 'USER_REMOVED', message: 'Your access to this organisation has been removed.' });
   if (org.suspended) {
     return res.status(403).json({ error: 'ORG_SUSPENDED', message: 'This organisation is suspended pending a safety review.' });
   }
@@ -2869,16 +2886,25 @@ playerRouter.get('/benchmarks', (req, res) => {
     const mine = drillBests(req.player, d.id, d.lowerIsBetter);
     if (mine === null) return null;
     const cohortValues = cohort.map((c) => drillBests(c, d.id, d.lowerIsBetter)).filter((v) => v !== null);
-    return { drillId: d.id, name: d.name, metric: d.metric, unit: d.unit, value: mine, percentile: percentileAmong(mine, cohortValues, d.lowerIsBetter) };
+    const percentile = percentileAmong(mine, cohortValues, d.lowerIsBetter);
+    // M12 F12F: sample size and method travel with every comparison; a
+    // too-small cohort says "not enough evidence" instead of a number.
+    return { drillId: d.id, name: d.name, metric: d.metric, unit: d.unit, value: mine, percentile, sampleSize: cohortValues.length, insufficient: percentile === null };
   }).filter(Boolean);
   const statKeys = ['goals', 'assists', 'appearances', 'passCompletionPct', 'duelSuccessPct'];
   const stats = statKeys.map((k) => {
     const mine = req.player.stats?.[k];
     if (typeof mine !== 'number') return null;
     const cohortValues = cohort.map((c) => c.stats?.[k]).filter((v) => typeof v === 'number');
-    return { stat: k, value: mine, percentile: percentileAmong(mine, cohortValues, false) };
+    const percentile = percentileAmong(mine, cohortValues, false);
+    return { stat: k, value: mine, percentile, sampleSize: cohortValues.length, insufficient: percentile === null };
   }).filter(Boolean);
-  res.json({ cohortSize: cohort.length, note: 'Percentiles vs amateur & semi-pro players in your position group — context, not competition.', drills, stats });
+  res.json({
+    cohortSize: cohort.length,
+    method: 'Percentile of your best result among amateur & semi-pro players in your position group with the same measurement recorded. Cohorts under 3 comparable records show "not enough evidence" instead of a percentile. Incompatible records (other positions, pro level, missing values) are excluded.',
+    note: 'Percentiles vs amateur & semi-pro players in your position group — context, not competition.',
+    drills, stats,
+  });
 });
 
 // The opportunity radar: the 50km rule, pointed the player's way.
@@ -3209,6 +3235,9 @@ app.post('/vouch/submit', (req, res) => {
   if (!moderateOrRefuse(res, text, { kind: 'coach_vouch', playerId: vouch.playerId })) return;
   vouch.text = String(text).trim().slice(0, 400);
   vouch.seasons = seasons ? String(seasons).trim().slice(0, 40) : null;
+  // M12 F10: a reference carries its declared relationship to the player —
+  // "my son", "I run their agency" etc. must be visible, not discoverable.
+  vouch.conflictOfInterest = req.body?.conflictOfInterest ? String(req.body.conflictOfInterest).trim().slice(0, 200) : null;
   vouch.status = 'published';
   vouch.publishedAt = Date.now();
   vouch.code = null; // single use
@@ -3387,6 +3416,34 @@ app.get('/media/:id', (req, res) => {
   const blob = storage.read(id);
   if (!blob) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });
   res.set('Content-Type', blob.contentType).send(blob.buffer);
+});
+
+// ------------------------------------------------------------ Milestone 12
+// The M12 feature areas live in focused modules under m12/ — they receive the
+// shared context (db, routers, helpers) and register their own routes and
+// migrations. Nothing here weakens an existing rule; every module re-uses
+// visibleToOrg / blocks / guardian routing at the API layer.
+function revokeOrgUserAccess(userId) {
+  // Immediate, structural: sessions die (API + media on the next byte) and
+  // any open SSE stream for that user goes silent via shouldDeliver's live
+  // user check. The user ROW is kept (removedAt) so history stays attributed.
+  db.sessions = db.sessions.filter((s) => !(s.kind === 'org' && s.userId === userId));
+  for (const client of [...sseClients]) {
+    if (client.identity?.kind === 'org' && client.identity.userId === userId) {
+      try { client.res.end(); } catch { /* already gone */ }
+      sseClients.delete(client);
+    }
+  }
+  persistNow();
+}
+
+registerM12({
+  db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast,
+  findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
+  storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
+  grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
+  publishedVouchesFor, pathwayRecord, DRILLS, DATA_DIR,
 });
 
 // ---------------------------------------------------- static app hosting
