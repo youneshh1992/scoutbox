@@ -348,3 +348,10 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .bubble.pending { opacity: 0.65; }
 .bubble.failed { border: 1px solid var(--danger); }
 .brand-sub { color: var(--gold); font-size: 13px; font-weight: 700; letter-spacing: 0.5px; }
+
+/* M12 accessibility: visible keyboard focus everywhere, honoured
+   reduced-motion preference (F12E). */
+:focus-visible { outline: 2px solid var(--accent, #6ea8fe); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

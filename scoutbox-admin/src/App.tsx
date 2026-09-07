@@ -5,6 +5,7 @@
 // scoutbox-server with the x-admin-key header.
 
 import { useCallback, useEffect, useState } from 'react';
+import { M12Panel, M12_TABS, type M12Tab } from './m12tabs';
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000';
 const DEMO = import.meta.env.VITE_DEMO === '1';
@@ -86,7 +87,7 @@ async function call<T>(key: string, path: string, init?: RequestInit): Promise<T
   return body as T;
 }
 
-type Tab = 'overview' | 'reports' | 'clubs' | 'guardians' | 'blocks' | 'moderation' | 'threads' | 'outbox' | 'billing';
+type Tab = 'overview' | 'reports' | 'clubs' | 'guardians' | 'blocks' | 'moderation' | 'threads' | 'outbox' | 'billing' | M12Tab;
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'reports', label: 'Report queue' },
@@ -97,6 +98,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'threads', label: 'Thread audit' },
   { id: 'outbox', label: 'Mail outbox' },
   { id: 'billing', label: 'Billing' },
+  ...M12_TABS,
 ];
 
 export default function App() {
@@ -254,6 +256,9 @@ export default function App() {
             </div>
           )}
 
+          {(['disputes', 'coaches', 'staffchecks', 'outcomes', 'drillguide'] as Tab[]).includes(tab) && (
+            <M12Panel tab={tab as M12Tab} adminKey={key} say={say} />
+          )}
           {tab === 'reports' && (
             <div className="list-rows">
               {reports.length === 0 && <div className="notice">No reports.</div>}

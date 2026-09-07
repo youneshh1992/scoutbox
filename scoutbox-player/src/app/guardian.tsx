@@ -10,6 +10,7 @@ import { client, type Channel, type FiledReport, type GuardianDigest, type Insig
 import type { NotificationPrefs, GuardianOpenTrial } from '../data/types';
 import { U18_PROMISES } from '../domain/safeguarding';
 import { useSession } from '../state';
+import { BoardSection, CampaignsSection, FeedbackDevSection, FollowUpsSection, PassportSection, SquadInvitesSection, TrialSafetySection } from '../components/M12Sections';
 import { colors } from '../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle, TrustBar } from '../components/ui';
 import { ReportButton } from '../components/ReportSheet';
@@ -522,6 +523,23 @@ export default function GuardianDashboard() {
             router.replace('/onboarding');
           }}
         />
+
+        {guardianId ? (
+          <>
+            {children.map((c) => (
+              <View key={c.id}>
+                <Text style={{ color: colors.gold, fontWeight: '700', fontSize: 14, marginTop: 8 }}>{c.name} — development loop</Text>
+                <PassportSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />
+                <BoardSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />
+                <CampaignsSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} mediaOptions={(c.media ?? []).map((m) => ({ id: m.id, title: m.title }))} />
+                <FeedbackDevSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />
+              </View>
+            ))}
+            <SquadInvitesSection actor={{ kind: 'guardian', id: guardianId, childId: children[0]?.id ?? '' }} />
+            <TrialSafetySection actor={{ kind: 'guardian', id: guardianId, childId: children[0]?.id ?? '' }} />
+            <FollowUpsSection actor={{ kind: 'guardian', id: guardianId, childId: children[0]?.id ?? '' }} />
+          </>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );

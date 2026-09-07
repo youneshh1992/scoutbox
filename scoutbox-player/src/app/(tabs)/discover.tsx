@@ -9,6 +9,7 @@ import { colors } from '../../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from '../../components/ui';
 import { ReportButton } from '../../components/ReportSheet';
 import { NotificationBell } from '../../components/NotificationBell';
+import { BoardSection } from '../../components/M12Sections';
 
 const NOTICED_LABELS: Record<string, string> = {
   first_touch: 'First touch', pace: 'Pace', positioning: 'Positioning', work_rate: 'Work rate',
@@ -306,6 +307,8 @@ export default function Discover() {
             <Muted size={13.5}>{p}</Muted>
           </Card>
         ))}
+        {playerId ? <BoardSection actor={{ kind: 'player', id: playerId }} /> : null}
+
       </ScrollView>
     </SafeAreaView>
   );

@@ -8,6 +8,7 @@ import { colors } from '../../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from '../../components/ui';
 import { ReportButton } from '../../components/ReportSheet';
 import { NotificationBell } from '../../components/NotificationBell';
+import { CampaignsSection, ResumableUploadCard } from '../../components/M12Sections';
 
 // Web file picker → data URL (capped ~12MB). Native uses the camera roll in
 // production; this prototype records title-only entries off-web.
@@ -354,6 +355,9 @@ export default function Upload() {
           </Row>
           <Button primary label="Log attendance" onPress={logAttendance} />
         </Card>
+        {playerId ? <CampaignsSection actor={{ kind: 'player', id: playerId }} mediaOptions={(me?.media ?? []).map((m) => ({ id: m.id, title: m.title }))} /> : null}
+        {playerId ? <ResumableUploadCard playerId={playerId} onDone={refresh} /> : null}
+
       </ScrollView>
     </SafeAreaView>
   );

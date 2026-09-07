@@ -238,6 +238,8 @@ export function registerJourneys(ctx) {
     res.json({ items: db.drillGuidance, note: 'Coach review status is shown honestly — "unreviewed" guidance has not been validated by a professional.' });
   });
 
+  adminRouter.get('/drill-guidance', (_req, res) => res.json({ items: db.drillGuidance }));
+
   adminRouter.post('/drill-guidance/:drillId/review', (req, res) => {
     const g = db.drillGuidance.find((x) => x.drillId === req.params.drillId);
     if (!g) return res.status(404).json({ error: 'DRILL_NOT_FOUND' });
@@ -729,6 +731,16 @@ export function registerJourneys(ctx) {
       },
     };
   }
+
+  // The family's list of their own trials (safety pack entry point).
+  const familyTrials = (playerIds) => db.trials
+    .filter((t) => playerIds.includes(t.playerId))
+    .map((t) => {
+      t.day ??= { staff: [], consents: [], arrival: null, emergency: null, checkins: [], collection: null, statusEvents: [] };
+      return trialDayView(t, 'family');
+    });
+  playerRouter.get('/trials', (req, res) => res.json(familyTrials([req.player.id])));
+  guardianRouter.get('/trials', (req, res) => res.json(familyTrials(req.guardian.childIds)));
 
   playerRouter.get('/trials/:id/safety-pack', (req, res) => {
     const t = playerTrial(req, res, [req.player.id]);

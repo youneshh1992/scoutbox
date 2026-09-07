@@ -17,6 +17,7 @@ import { colors } from '../../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle, TrustBar } from '../../components/ui';
 import { ReportSheet } from '../../components/ReportSheet';
 import { WebVideo } from '../../components/WebVideo';
+import { PassportSection } from '../../components/M12Sections';
 
 function flagEmoji(country: string): string {
   if (!/^[A-Z]{2}$/i.test(country)) return '';
@@ -537,6 +538,8 @@ export default function Profile() {
             </Row>
           ))}
         </Card>
+        {playerId ? <PassportSection actor={{ kind: 'player', id: playerId }} /> : null}
+
       </ScrollView>
     </SafeAreaView>
   );

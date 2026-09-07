@@ -5,6 +5,11 @@ import {
   TrialsScreen, FixturesScreen, LedgerScreen, FunnelScreen, ReputationScreen, PlanScreen,
   PlayerDrawer, Toast, SafetyModal,
 } from './screens';
+import {
+  AssessmentsScreen, RecruitmentScreen, SquadPlannerScreen, OpportunitiesScreen,
+  CampaignsScreen, VideoScreen, OutcomesScreen, TrialDaysScreen,
+} from './m12screens';
+import { getLang, setLang, t } from './i18n';
 
 const ROLES = ['Head of Recruitment', 'First-Team Scout', 'Academy Coach', 'Agent'];
 
@@ -19,21 +24,17 @@ function loadSession(): Session | null {
   }
 }
 
-export type ScreenId = 'feed' | 'filmroom' | 'search' | 'shortlist' | 'requests' | 'messages' | 'trials' | 'fixtures' | 'ledger' | 'funnel' | 'reputation' | 'plan';
+export type ScreenId =
+  | 'feed' | 'filmroom' | 'search' | 'shortlist' | 'requests' | 'messages' | 'trials' | 'fixtures'
+  | 'ledger' | 'funnel' | 'reputation' | 'plan'
+  | 'assessments' | 'recruitment' | 'planner' | 'opportunities' | 'campaigns' | 'video' | 'outcomes' | 'trialdays';
 
-const NAV: { id: ScreenId; label: string }[] = [
-  { id: 'feed', label: 'Home' },
-  { id: 'filmroom', label: 'Film Room' },
-  { id: 'search', label: 'Search' },
-  { id: 'shortlist', label: 'Shortlist' },
-  { id: 'requests', label: 'Requests' },
-  { id: 'messages', label: 'Messages' },
-  { id: 'trials', label: 'Trials & Reports' },
-  { id: 'fixtures', label: 'Fixtures' },
-  { id: 'ledger', label: 'Discovery Ledger' },
-  { id: 'funnel', label: 'Funnel' },
-  { id: 'reputation', label: 'Reputation' },
-  { id: 'plan', label: 'Plan & Compliance' },
+// Labels resolve through the i18n catalogue at render time (EN/FR).
+const NAV: ScreenId[] = [
+  'feed', 'filmroom', 'search', 'shortlist', 'requests', 'messages',
+  'assessments', 'recruitment', 'planner', 'video',
+  'opportunities', 'campaigns', 'trialdays', 'outcomes',
+  'trials', 'fixtures', 'ledger', 'funnel', 'reputation', 'plan',
 ];
 
 export default function App() {
@@ -45,7 +46,13 @@ export default function App() {
     setSession(s);
   };
   const logout = () => {
-    try { localStorage.removeItem(SESSION_KEY); } catch { /* private mode */ }
+    try {
+      localStorage.removeItem(SESSION_KEY);
+      // Offline drafts are identity-scoped and cleared on logout — nothing
+      // sensitive lingers on a shared device (F12C).
+      const stale = session ? Object.keys(localStorage).filter((k) => k.startsWith(`sbdraft:${session.org.id}:${session.userId}:`)) : [];
+      for (const k of stale) localStorage.removeItem(k);
+    } catch { /* private mode */ }
     setSession(null);
   };
 
@@ -146,6 +153,13 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   const seenNotifIds = useRef<Set<string> | null>(null);
 
   const [live, setLive] = useState(true);
+  const [lang, setLangState] = useState(getLang());
+  const [, setLangTick] = useState(0);
+  useEffect(() => {
+    const onLang = () => setLangState(getLang());
+    window.addEventListener('sb-lang', onLang);
+    return () => window.removeEventListener('sb-lang', onLang);
+  }, []);
   useEffect(() => api.onChange(session, (event, payload) => {
     if (event === 'sse_status') { setLive((payload as { connected?: boolean } | undefined)?.connected !== false); return; }
     if (event === 'typing') return; // transient — handled inside Messages
@@ -197,12 +211,12 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
 
   return (
     <div className="shell">
-      <nav className="sidebar">
+      <nav className="sidebar" aria-label="Main navigation">
         <div className="brand">Scout<span>Box</span> <span className="brand-sub">Pro</span></div>
-        {NAV.map((n) => (
-          <button key={n.id} className={screen === n.id ? 'active' : ''} onClick={() => setScreen(n.id)} style={{ position: 'relative' }}>
-            {n.label}
-            {n.id === 'messages' && unreadMessages > 0 && <span className="nav-badge">{unreadMessages}</span>}
+        {NAV.map((id) => (
+          <button key={id} className={screen === id ? 'active' : ''} onClick={() => setScreen(id)} style={{ position: 'relative' }} aria-current={screen === id ? 'page' : undefined}>
+            {t(`nav.${id}` as Parameters<typeof t>[0])}
+            {id === 'messages' && unreadMessages > 0 && <span className="nav-badge">{unreadMessages}</span>}
           </button>
         ))}
         <div className="spacer" />
@@ -210,13 +224,22 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
           <b>{session.scoutName}</b>
           {session.role} · {session.org.name} · {session.org.plan}
           <div style={{ marginTop: 8 }}>
+            <label style={{ fontSize: 12 }} title={t('common.machineTranslated')}>
+              {t('common.language')}:{' '}
+              <select aria-label={t('common.language')} value={lang} onChange={(e) => { setLang(e.target.value as 'en' | 'fr'); setLangTick((x) => x + 1); }}>
+                <option value="en">English</option>
+                <option value="fr">Français (trad. automatique)</option>
+              </select>
+            </label>
+          </div>
+          <div style={{ marginTop: 8 }}>
             <button onClick={onLogout} style={{ padding: 0, color: 'var(--accent-2)' }}>Switch org</button>
           </div>
         </div>
       </nav>
       <div className="main">
         <div className="topbar">
-          <h2>{NAV.find((n) => n.id === screen)?.label}</h2>
+          <h2>{t(`nav.${screen}` as Parameters<typeof t>[0])}</h2>
           {session.org.trustedPartner && <span className="pill gold">Trusted Partner</span>}
           {session.org.safeguardingCertified && <span className="pill green">🛡 Safeguarding Certified</span>}
           {session.org.type === 'club' && (session.org.verified
@@ -253,6 +276,14 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
           {screen === 'funnel' && <FunnelScreen {...props} />}
           {screen === 'reputation' && <ReputationScreen {...props} />}
           {screen === 'plan' && <PlanScreen {...props} />}
+          {screen === 'assessments' && <AssessmentsScreen {...props} />}
+          {screen === 'recruitment' && <RecruitmentScreen {...props} />}
+          {screen === 'planner' && <SquadPlannerScreen {...props} />}
+          {screen === 'opportunities' && <OpportunitiesScreen {...props} />}
+          {screen === 'campaigns' && <CampaignsScreen {...props} />}
+          {screen === 'video' && <VideoScreen {...props} />}
+          {screen === 'outcomes' && <OutcomesScreen {...props} />}
+          {screen === 'trialdays' && <TrialDaysScreen {...props} />}
         </div>
       </div>
       {openPlayerId && (

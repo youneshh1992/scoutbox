@@ -10,6 +10,7 @@ import { colors } from '../../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from '../../components/ui';
 import { ReportButton } from '../../components/ReportSheet';
 import { NotificationBell } from '../../components/NotificationBell';
+import { AccessSection, FeedbackDevSection, FollowUpsSection } from '../../components/M12Sections';
 
 export default function You() {
   const router = useRouter();
@@ -234,6 +235,10 @@ export default function You() {
             router.replace('/onboarding');
           }}
         />
+        {playerId ? <FeedbackDevSection actor={{ kind: 'player', id: playerId }} /> : null}
+        {playerId ? <FollowUpsSection actor={{ kind: 'player', id: playerId }} /> : null}
+        {playerId ? <AccessSection playerId={playerId} isMinor={isMinor} mediaOptions={(me?.media ?? []).map((m) => ({ id: m.id, title: m.title }))} /> : null}
+
       </ScrollView>
     </SafeAreaView>
   );

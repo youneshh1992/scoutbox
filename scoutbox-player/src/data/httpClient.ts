@@ -363,3 +363,9 @@ export const httpClient: PlayerClient = {
     if (!res.ok) throw new ClientError('SERVER_DOWN', 'The ScoutBox backend is not responding.');
   },
 };
+
+// M12: the request helper + auth header are shared with the m12client module
+// so the new feature surface uses the exact same session tokens.
+export { request as m12Request };
+export const m12AuthHeader = authHeader;
+export const M12_API_URL = API_URL;
