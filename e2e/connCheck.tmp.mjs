@@ -1,0 +1,17 @@
+import { chromium } from 'playwright-core';
+const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const p = await (await b.newContext({ viewport: { width: 1280, height: 850 } })).newPage();
+const errs = [];
+p.on('pageerror', (e) => errs.push(String(e).slice(0, 200)));
+await p.setContent(`<iframe id="f" src="http://localhost:8099/connected/" sandbox="allow-scripts" style="width:1260px;height:820px"></iframe>`);
+const f = p.frameLocator('#f');
+await f.locator('#sb-bar').waitFor({ timeout: 30000 });
+await f.locator('text=Shared simulation — no live backend').waitFor({ timeout: 10000 });
+await f.locator('text=Our promises to every player').waitFor({ timeout: 30000 });
+console.log('connected demo boots inside a scripts-only sandbox');
+await f.locator('#sb-b-pro').click();
+await p.waitForTimeout(2500);
+console.log('pro portal frame toggles');
+console.log('page errors:', errs.length ? errs : 'none');
+await b.close();
+process.exit(0);

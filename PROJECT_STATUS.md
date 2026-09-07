@@ -3,7 +3,7 @@
 > Purpose of this file: let any Claude Code session (cloud or local) pick up this
 > project with zero prior context. Keep it updated at the end of each working session.
 
-**Last updated:** 2026-09-05 · **M11.1 access repair**: evidenced that
+**Last updated:** 2026-09-07 · **Milestone 12 complete** (see below + M12_MATRIX.md) · · **M11.1 access repair**: evidenced that
 Claude cloud sessions CANNOT expose ports — localhost URLs from a cloud
 container were never user-reachable; the delivery path is the local-run kit
 (`npm run setup` + `npm run dev`, content-verified readiness, cloud-container
@@ -37,6 +37,54 @@ radius, platform-scoped logins, federation registration, level ceiling)**;
 **7 — production hardening (real auth + sessions, SQLite, adapter seams,
 funnel analytics, moderation v2, CI + Docker deploy)** ·
 Developed in this GitHub repo (`youneshh1992/scoutbox`), Claude Code web.
+
+## Milestone 12 (2026-09-07): the 12 feature areas — evidence, workflow, honesty
+
+All 12 feature areas of the M12 brief implemented across the five apps; see
+M12_MATRIX.md for the requirement-by-requirement map. Highlights:
+
+- Server modules `scoutbox-server/m12/` (passport/scouting/journeys/operations)
+  registered with the shared context — every route inherits bearer sessions,
+  guardian ownership, visibleToOrg, blocks, moderation. 143-check
+  `scripts/m12E2E.mjs` incl. negative permissions + SIGKILL restart.
+- F1 evidence passport (tiers self_reported/coach_confirmed/club_assessed;
+  'independent' modelled but unreachable — no provider), corrections that
+  supersede, disputes → T&S; legacy "verified" surfaces relabelled honestly.
+- F2 versioned anchored templates, server-enforced blind second opinions,
+  not-observed excluded from averages, publish-feedback as the only
+  club→player door. F7 org-private video segments/playlists + deep links.
+- F3 cases w/ lead approvals + restricted cases + staff removal killing
+  sessions/SSE/media instantly (attribution retained). F4 explainable
+  rule-based tactical matching (met/not-met/unknown + sources, NO invented
+  percentages), vacancies, shadow squad.
+- F5 opportunity board (server-side eligibility, fail-closed locations,
+  guardian-only applications for minors, dedupe, no-ghosting closure).
+  F6 campaigns: automated FILE checks ≠ human review; returns carry
+  resubmission instructions; drill guidance labelled unreviewed until a
+  named reviewer. F8 objectives only from PUBLISHED feedback, player/
+  guardian-controlled sharing, evidenced reassessments. F9 trial-day staff
+  checks (pending/reviewed/expired/rejected — a filed ref is NOT a check),
+  consent + check gates before check-in, restricted emergency contact,
+  dedup attendance, safety packs, honest cancellation.
+- F11 persisted 3/6/12-month follow-ups, idempotent boot+interval sweep
+  (restart-proof, no duplicate reminders), confirmed/disputed/unknown, n<3
+  aggregate suppression. F12 resumable chunked uploads (integrity, explicit
+  finalisation, cleanup), Pro offline assessment drafts (identity-scoped,
+  conflict-aware, cleared on logout), EN/FR machine-translated + labelled
+  catalogues on chrome + new screens, accessibility pass (labels, focus,
+  reduced motion, live regions), captions endpoint + UI, benchmark sample
+  size/method disclosure, category fields, distance bands.
+- Clients: Pro + Grassroots M12 screens (+ Coaches on Grassroots), Player/
+  Guardian sections across all tabs, T&S console tabs (disputes, staff
+  checks, coaches, outcomes, drill guidance). Demo mirrors populated.
+- Verification: 23 unit · 129 apiE2E · 43 connectedE2E · **143 m12E2E** ·
+  liveIntegration (4 scenarios) + **m12Live** (opportunity board journey,
+  published-feedback privacy, passport flow — separate browser contexts,
+  real backend) · demoOffline/crosstab/uiSpotcheck/**m12DemoSpotcheck** on
+  rebuilt bundles · connected-demo sandbox boot · tsc + production builds ×4.
+  Native-device testing NOT performed — web only. No independent-measurement,
+  background-check, CV-scoring or translation-review providers exist; every
+  such state is explicitly pending/unreviewed in product.
 
 ## Milestone 11 (2026-09-05): one connected system
 
