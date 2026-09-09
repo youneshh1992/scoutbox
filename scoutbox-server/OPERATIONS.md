@@ -10,8 +10,11 @@ Webhook endpoint secrets and API-key hashes are tenant data and DO live in the
 database; API keys themselves are stored as SHA-256 hashes and shown once.
 
 Flags: `ALLOW_LOCAL_WEBHOOKS=1` (loopback webhook destinations, tests only),
-`M13_FAST_RETRY=1` (compressed retry ladders, tests only), `M13_QUIET_LOGS=1`
-(suppresses per-request log lines), `ALLOW_DEV_LOGINS` / `NODE_ENV` (see M11).
+`M13_FAST_RETRY=1` (compressed retry ladders + fast verification sweep, tests
+only), `M13_QUIET_LOGS=1` (suppresses per-request log lines),
+`TEST_LICENCE_REGISTRY=1|down` (enables the LOCAL licence-register test
+fixture / simulates its outage — test environments only; production registers
+are `not_configured`), `ALLOW_DEV_LOGINS` / `NODE_ENV` (see M11).
 
 ## Structured logs & correlation
 Every request logs one JSON line `{t,id,m,p,s,ms}` — correlation id (accepts

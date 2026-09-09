@@ -15,6 +15,7 @@ import { buildSeed } from './seed.mjs';
 import { openStore } from './store.mjs';
 import { registerM12 } from './m12/index.mjs';
 import { registerM13 } from './m13/index.mjs';
+import { registerM14 } from './m14/index.mjs';
 import { requestInstrumentation } from './m13/enterprise.mjs';
 import { totpValid } from './m13/shared.mjs';
 import {
@@ -3375,6 +3376,9 @@ adminRouter.post('/clubs/:id/verification', (req, res) => {
   if (safeguardingContractSigned !== undefined) org.safeguardingContractSigned = !!safeguardingContractSigned;
   if (verifiedDomain !== undefined) org.verifiedDomain = verifiedDomain || null;
   if (suspended !== undefined) org.suspended = !!suspended;
+  // M14: the legacy toggle stays functional, but its changes now carry
+  // claim-level provenance so the boolean and the claim engine never drift.
+  m14Ctx?.syncLegacyOrgVerification?.(org, req.body);
   persist();
   broadcast('players'); // visibility rules may have changed
   res.json({ ...orgSafe(org), safeguardingCertified: safeguardingCertified(org) });
@@ -3482,6 +3486,20 @@ registerM12({
 // Same module pattern under m13/. registerM13 returns the enriched context so
 // the login path above can reach the MFA rate-limit guards.
 const m13Ctx = registerM13({
+  db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast,
+  findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
+  storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
+  grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
+  createSession, currentIdCounter, DATA_DIR,
+});
+
+// ------------------------------------------------------------ Milestone 14
+// Verification & Trust: independent claims, org-administered attestation,
+// Trust & Safety review, licences, disputes, references. Same module pattern
+// under m14/. Returns its context so the legacy admin verification route can
+// keep claim provenance in sync.
+const m14Ctx = registerM14({
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
