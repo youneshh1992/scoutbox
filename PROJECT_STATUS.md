@@ -3,7 +3,26 @@
 > Purpose of this file: let any Claude Code session (cloud or local) pick up this
 > project with zero prior context. Keep it updated at the end of each working session.
 
-**Last updated:** 2026-09-09 · **Milestone 13 complete** (see M13_MATRIX.md; build b36c524) ·
+**Last updated:** 2026-09-09 · **Milestone 14 complete** (see M14_MATRIX.md +
+M14_VERIFICATION.md) · M14 adds the Verification & Trust system in
+`scoutbox-server/m14/` (same register(ctx) pattern): independent verification
+CLAIMS (11 types, never a bare boolean), a server-validated state machine, a
+read-time effective-claim engine, org-administered staff attestation
+(work-email token proof + authorised-admin confirmation; self-verification
+impossible), root-organisation bootstrap that ALWAYS stops at a prepared
+human-review case, a scoped verification-authority hierarchy
+(viewer/reviewer/admin/root + MFA + dual-control root transfers), official
+domains, licences with an honest registry adapter (document ≠ verified; only
+a local env-gated test register exists), disputes, historical affiliations,
+authority-cascade tooling, provenance-snapshotted coach references, squad
+invitations (guardian-only for minors), conflict declarations, honest
+migration of legacy `org.verified`/F10 credentials, F11 notifications, F12
+audit + metrics, and Verification surfaces in Pro, Grassroots, Player and the
+T&S console (EN/FR). Safeguarding/age rules unchanged — verification proves
+facts, authorization decides access. Suites: 193-check m14E2E (V1–V18 + 18
+security cases, ≥⅓ negative) + m14Live L1–L7 in separate browser contexts.
+
+**Milestone 13** (see M13_MATRIX.md; build b36c524) ·
 M13 adds twelve enterprise/inclusion areas in `scoutbox-server/m13/` (same
 register(ctx) pattern as m12/): F1 CSV imports with dry-run/commit/reverse,
 provider+externalId identity (ambiguity → human review queue), scoped API
