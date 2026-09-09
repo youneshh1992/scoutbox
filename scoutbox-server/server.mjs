@@ -14,6 +14,9 @@ import { fileURLToPath } from 'node:url';
 import { buildSeed } from './seed.mjs';
 import { openStore } from './store.mjs';
 import { registerM12 } from './m12/index.mjs';
+import { registerM13 } from './m13/index.mjs';
+import { requestInstrumentation } from './m13/enterprise.mjs';
+import { totpValid } from './m13/shared.mjs';
 import {
   PROGRAMME_TRACKS, trackForPosition, programmeProgress, pathwayFor,
   earnedGrassrootsBadges, percentileAmong, inCohort,
@@ -173,6 +176,9 @@ if (!snapshotLoaded) {
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '20mb' })); // media uploads travel as data URLs
+// M13: correlation ids, structured request logs (redacted), request metrics,
+// and the exposure-capture hook. Installed before every route on purpose.
+app.use(requestInstrumentation());
 
 // ------------------------------------------------------------ signed media
 // Media is not public: every /media path that leaves the API is rewritten to
@@ -1376,6 +1382,29 @@ app.post('/auth/org/login', (req, res) => {
     // Departed staff don't come back by typing their old name.
     return res.status(403).json({ error: 'USER_REMOVED', message: 'This staff member\'s access was removed by the organisation.' });
   }
+  // M13: second factor. A user who enabled MFA never gets a session from the
+  // password alone; recovery codes are one-time; wrong codes rate-limit.
+  if (user?.mfa?.enabledAt) {
+    if (m13Ctx?.mfaGuards?.mfaLocked(user.id)) {
+      return res.status(429).json({ error: 'MFA_LOCKED', message: 'Too many wrong codes — try again in a few minutes.' });
+    }
+    const { mfaCode, recoveryCode } = req.body ?? {};
+    let second = false;
+    if (mfaCode) second = totpValid(user.mfa.secretB32, mfaCode);
+    else if (recoveryCode) {
+      const hash = crypto.createHash('sha256').update(String(recoveryCode)).digest('hex');
+      const idx = user.mfa.recoveryHashes.indexOf(hash);
+      if (idx >= 0) { user.mfa.recoveryHashes.splice(idx, 1); second = true; } // each code works exactly once
+    }
+    if (!second) {
+      if (mfaCode || recoveryCode) m13Ctx?.mfaGuards?.mfaFail(user.id);
+      return res.status(401).json({
+        error: mfaCode || recoveryCode ? 'MFA_CODE_WRONG' : 'MFA_REQUIRED',
+        message: mfaCode || recoveryCode ? 'That code is not valid.' : 'This account uses two-factor authentication — send mfaCode (authenticator) or recoveryCode.',
+      });
+    }
+    m13Ctx?.mfaGuards?.clear(user.id);
+  }
   if (!user) {
     user = { id: nextId('usr'), orgId, name: scoutName.trim(), role: (role || 'Scout').trim(), createdAt: Date.now() };
     db.users.push(user);
@@ -1386,6 +1415,9 @@ app.post('/auth/org/login', (req, res) => {
     userId: user.id, role: user.role,
     org: { ...orgSafe(org), safeguardingCertified: safeguardingCertified(org) },
     token: createSession('org', org.id, { userId: user.id }),
+    // Organisation policy nudge, never a lockout: existing users keep access
+    // and are steered through MFA setup.
+    mfaSetupRequired: !!(org.mfaRequiredForLeads && user && /head|director|lead|manager|owner|chief/i.test(user.role ?? '') && !user.mfa?.enabledAt) || undefined,
   });
 });
 
@@ -3444,6 +3476,18 @@ registerM12({
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
   publishedVouchesFor, pathwayRecord, DRILLS, DATA_DIR,
+});
+
+// ------------------------------------------------------------ Milestone 13
+// Same module pattern under m13/. registerM13 returns the enriched context so
+// the login path above can reach the MFA rate-limit guards.
+const m13Ctx = registerM13({
+  db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast,
+  findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
+  storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
+  grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
+  createSession, currentIdCounter, DATA_DIR,
 });
 
 // ---------------------------------------------------- static app hosting
