@@ -1,16 +1,29 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { client, type Me } from './data/client';
-import type { AppNotification, Channel } from './data/types';
+import { ClientError, type AppNotification, type Channel } from './data/types';
 import type { ChildInboxItem, Guardian, GuardianInboxRequest, InboxRequest } from './domain/types';
 import { isAdult } from './domain/safeguarding';
 
 const SESSION_KEY = 'scoutbox-player-session';
+// Bump whenever the demo dataset or stored-session shape changes in a way
+// that can leave old persisted identities unresolvable in the new build.
+const SESSION_VERSION = 2;
 
-function loadStoredSession(): { kind: 'player' | 'guardian'; id: string } | null {
+type StoredSession = { v: number; kind: 'player' | 'guardian'; id: string };
+
+function loadStoredSession(): StoredSession | null {
   try {
     if (typeof localStorage === 'undefined') return null;
     const raw = localStorage.getItem(SESSION_KEY);
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    const s = JSON.parse(raw) as Partial<StoredSession> | null;
+    if (!s || (s.kind !== 'player' && s.kind !== 'guardian') || typeof s.id !== 'string' || s.v !== SESSION_VERSION) {
+      // Pre-versioned or mismatched sessions may point at identities that no
+      // longer exist in this build's dataset — reset instead of crashing later.
+      localStorage.removeItem(SESSION_KEY);
+      return null;
+    }
+    return s as StoredSession;
   } catch {
     return null;
   }
@@ -19,7 +32,7 @@ function loadStoredSession(): { kind: 'player' | 'guardian'; id: string } | null
 function storeSession(value: { kind: 'player' | 'guardian'; id: string } | null) {
   try {
     if (typeof localStorage === 'undefined') return;
-    if (value) localStorage.setItem(SESSION_KEY, JSON.stringify(value));
+    if (value) localStorage.setItem(SESSION_KEY, JSON.stringify({ v: SESSION_VERSION, ...value }));
     else localStorage.removeItem(SESSION_KEY);
   } catch {
     /* private mode */
@@ -58,9 +71,13 @@ interface SessionState {
 const SessionContext = createContext<SessionState | null>(null);
 
 export function SessionProvider({ children: kids }: { children: ReactNode }) {
-  const stored = loadStoredSession();
-  const [playerId, setPlayerId] = useState<string | null>(stored?.kind === 'player' ? stored.id : null);
-  const [guardianId, setGuardianId] = useState<string | null>(stored?.kind === 'guardian' ? stored.id : null);
+  const stored = useRef(loadStoredSession()).current;
+  // A stored identity is applied only once it resolves against the current
+  // dataset; until then screens don't mount, so a stale id can never reach
+  // them and surface as an error screen.
+  const [booting, setBooting] = useState(stored !== null);
+  const [playerId, setPlayerId] = useState<string | null>(null);
+  const [guardianId, setGuardianId] = useState<string | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const [inbox, setInbox] = useState<(InboxRequest | ChildInboxItem)[]>([]);
   const [guardian, setGuardian] = useState<Guardian | null>(null);
@@ -146,6 +163,39 @@ export function SessionProvider({ children: kids }: { children: ReactNode }) {
     }
   }, [playerId, guardianId, refresh]);
 
+  // Boot: resolve the stored identity before letting it drive the app. A
+  // "not found" answer means the persisted session predates the current
+  // dataset — clear it and fall back to onboarding, never the error screen.
+  useEffect(() => {
+    if (!stored) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        if (stored.kind === 'player') await client.getMe(stored.id);
+        else await client.guardianMe(stored.id);
+        if (!cancelled) {
+          if (stored.kind === 'player') setPlayerId(stored.id);
+          else setGuardianId(stored.id);
+        }
+      } catch (err) {
+        const code = err instanceof ClientError ? err.code : '';
+        if (code.includes('NOT_FOUND')) {
+          storeSession(null); // stale identity — handled, not a crash
+        } else if (!cancelled) {
+          // Transient failure (e.g. live-mode network blip): keep the session;
+          // refresh() already tolerates temporary errors.
+          if (stored.kind === 'player') setPlayerId(stored.id);
+          else setGuardianId(stored.id);
+        }
+      } finally {
+        if (!cancelled) setBooting(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [stored]);
+
   const [liveConnected, setLiveConnected] = useState(true);
   useEffect(() => {
     if (!playerId && !guardianId) return;
@@ -209,6 +259,7 @@ export function SessionProvider({ children: kids }: { children: ReactNode }) {
     [playerId, guardianId, me, inbox, guardian, guardianInbox, childProfiles, notifications, channels, popup, liveConnected, markNotificationsRead, refresh, clearIdentityState]
   );
 
+  if (booting) return null; // resolves in one tick in demo mode; screens mount with a valid (or no) identity
   return <SessionContext.Provider value={value}>{kids}</SessionContext.Provider>;
 }
 
