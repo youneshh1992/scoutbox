@@ -9,6 +9,10 @@ import {
   AssessmentsScreen, RecruitmentScreen, OpportunitiesScreen,
   CampaignsScreen, VideoScreen, OutcomesScreen, TrialDaysScreen, CoachesScreen,
 } from './m12screens';
+import {
+  ImportsScreen, CoverageScreen, CalibrationScreen, InsightScreen,
+  NetworkScreen, OrganisationScreen,
+} from './m13screens';
 import { getLang, setLang, t } from './i18n';
 
 const ROLES = ['Manager', 'Coach', 'Volunteer Scout', 'Club Secretary'];
@@ -27,13 +31,15 @@ function loadSession(): Session | null {
 export type ScreenId =
   | 'feed' | 'filmroom' | 'search' | 'shortlist' | 'requests' | 'messages' | 'trials' | 'opendays'
   | 'squad' | 'friendlies' | 'fixtures' | 'ledger' | 'funnel' | 'plan'
-  | 'assessments' | 'recruitment' | 'coaches' | 'opportunities' | 'campaigns' | 'video' | 'outcomes' | 'trialdays';
+  | 'assessments' | 'recruitment' | 'coaches' | 'opportunities' | 'campaigns' | 'video' | 'outcomes' | 'trialdays'
+  | 'insight' | 'coverage' | 'calibration' | 'imports' | 'network' | 'organisation';
 
 // Labels resolve through the i18n catalogue at render time (EN/FR).
 const NAV: ScreenId[] = [
   'feed', 'filmroom', 'search', 'shortlist', 'requests', 'messages',
   'assessments', 'recruitment', 'coaches', 'video',
   'opportunities', 'campaigns', 'trialdays', 'outcomes',
+  'insight', 'coverage', 'calibration', 'imports', 'network', 'organisation',
   'trials', 'opendays', 'squad', 'friendlies', 'fixtures', 'ledger', 'funnel', 'plan',
 ];
 
@@ -317,6 +323,12 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
           {screen === 'video' && <VideoScreen {...props} />}
           {screen === 'outcomes' && <OutcomesScreen {...props} />}
           {screen === 'trialdays' && <TrialDaysScreen {...props} />}
+          {screen === 'imports' && <ImportsScreen {...props} />}
+          {screen === 'coverage' && <CoverageScreen {...props} />}
+          {screen === 'calibration' && <CalibrationScreen {...props} />}
+          {screen === 'insight' && <InsightScreen {...props} />}
+          {screen === 'network' && <NetworkScreen {...props} />}
+          {screen === 'organisation' && <OrganisationScreen {...props} />}
         </div>
       </div>
       {openPlayerId && (

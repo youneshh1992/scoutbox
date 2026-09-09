@@ -10,6 +10,7 @@ import { Button, Card, Muted, Pill, Row, SectionTitle } from '../../components/u
 import { ReportButton } from '../../components/ReportSheet';
 import { NotificationBell } from '../../components/NotificationBell';
 import { BoardSection } from '../../components/M12Sections';
+import { OpportunityFitSection } from '../../components/M13Sections';
 
 const NOTICED_LABELS: Record<string, string> = {
   first_touch: 'First touch', pace: 'Pace', positioning: 'Positioning', work_rate: 'Work rate',
@@ -308,6 +309,7 @@ export default function Discover() {
           </Card>
         ))}
         {playerId ? <BoardSection actor={{ kind: 'player', id: playerId }} /> : null}
+        {playerId ? <OpportunityFitSection actor={{ kind: 'player', id: playerId }} /> : null}
 
       </ScrollView>
     </SafeAreaView>

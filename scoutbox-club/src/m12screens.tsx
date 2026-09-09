@@ -489,6 +489,17 @@ export function OpportunitiesScreen({ session, tick, notify }: ScreenProps) {
                   {a.outcome && <div className="dim">{a.outcome.decision} — {a.outcome.byName}{a.outcome.note ? `: ${a.outcome.note}` : ''}</div>}
                 </span>
                 <span className={`pill ${a.status === 'accepted' ? 'green' : a.status === 'declined' ? 'red' : ''}`}>{a.status}</span>
+                <button onClick={async () => {
+                  // M13 (F3): the club sees only a player/guardian-APPROVED
+                  // verdict summary — never raw preferences or reasons.
+                  const { m13 } = await import('./m13api');
+                  try {
+                    const r = await m13.applicationSuitability(session, a.id);
+                    notify(r.summary
+                      ? `🧭 Suitability (player-approved): ${r.summary.verdicts.map((v) => `${v.dimension} ${v.verdict === 'compatible' ? '✓' : v.verdict === 'conflict' ? '✗' : '?'}`).join(' · ')}`
+                      : 'No suitability summary shared for this application.');
+                  } catch (e) { notify(e instanceof Error ? e.message : 'failed', true); }
+                }}>Suitability</button>
                 {a.status === 'submitted' && <>
                   <button onClick={() => act(() => m12.resolveApplication(session, a.id, 'accepted', 'See you there.'), 'Accepted.')}>{t('opp.accept')}</button>
                   <button onClick={() => {

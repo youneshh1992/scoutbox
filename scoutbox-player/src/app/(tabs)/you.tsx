@@ -11,6 +11,7 @@ import { Button, Card, Muted, Pill, Row, SectionTitle } from '../../components/u
 import { ReportButton } from '../../components/ReportSheet';
 import { NotificationBell } from '../../components/NotificationBell';
 import { AccessSection, FeedbackDevSection, FollowUpsSection } from '../../components/M12Sections';
+import { ExposureSection, PreferencesSection, RepresentationSection, TransitionsSection } from '../../components/M13Sections';
 
 export default function You() {
   const router = useRouter();
@@ -237,6 +238,10 @@ export default function You() {
         />
         {playerId ? <FeedbackDevSection actor={{ kind: 'player', id: playerId }} /> : null}
         {playerId ? <FollowUpsSection actor={{ kind: 'player', id: playerId }} /> : null}
+        {playerId ? <PreferencesSection actor={{ kind: 'player', id: playerId }} isMinor={isMinor} /> : null}
+        {playerId ? <TransitionsSection actor={{ kind: 'player', id: playerId }} isMinor={isMinor} mediaOptions={(me?.media ?? []).map((m) => ({ id: m.id, title: m.title }))} /> : null}
+        {playerId ? <RepresentationSection playerId={playerId} isMinor={isMinor} /> : null}
+        {playerId ? <ExposureSection playerId={playerId} /> : null}
         {playerId ? <AccessSection playerId={playerId} isMinor={isMinor} mediaOptions={(me?.media ?? []).map((m) => ({ id: m.id, title: m.title }))} /> : null}
 
       </ScrollView>

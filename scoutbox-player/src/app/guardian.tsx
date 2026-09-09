@@ -11,6 +11,7 @@ import type { NotificationPrefs, GuardianOpenTrial } from '../data/types';
 import { U18_PROMISES } from '../domain/safeguarding';
 import { useSession } from '../state';
 import { BoardSection, CampaignsSection, FeedbackDevSection, FollowUpsSection, PassportSection, SquadInvitesSection, TrialSafetySection } from '../components/M12Sections';
+import { AckSection, OpportunityFitSection, PreferencesSection, TransitionsSection } from '../components/M13Sections';
 import { colors } from '../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle, TrustBar } from '../components/ui';
 import { ReportButton } from '../components/ReportSheet';
@@ -533,8 +534,12 @@ export default function GuardianDashboard() {
                 <BoardSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />
                 <CampaignsSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} mediaOptions={(c.media ?? []).map((m) => ({ id: m.id, title: m.title }))} />
                 <FeedbackDevSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />
+                <PreferencesSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} isMinor />
+                <OpportunityFitSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />
+                <TransitionsSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} isMinor={false} mediaOptions={(c.media ?? []).map((m) => ({ id: m.id, title: m.title }))} />
               </View>
             ))}
+            <AckSection actor={{ kind: 'guardian', id: guardianId, childId: children[0]?.id ?? '' }} />
             <SquadInvitesSection actor={{ kind: 'guardian', id: guardianId, childId: children[0]?.id ?? '' }} />
             <TrialSafetySection actor={{ kind: 'guardian', id: guardianId, childId: children[0]?.id ?? '' }} />
             <FollowUpsSection actor={{ kind: 'guardian', id: guardianId, childId: children[0]?.id ?? '' }} />

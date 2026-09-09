@@ -12,3 +12,4 @@ e2e/dist/
 .env
 .env.local
 dist-live/
+dist-live13/

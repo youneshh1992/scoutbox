@@ -11,6 +11,7 @@ import { ReportButton } from '../../components/ReportSheet';
 import { NotificationBell } from '../../components/NotificationBell';
 import { Threads } from '../../components/Threads';
 import { SquadInvitesSection, TrialSafetySection } from '../../components/M12Sections';
+import { AckSection } from '../../components/M13Sections';
 
 function isChildItem(r: InboxRequest | ChildInboxItem): r is ChildInboxItem {
   return 'guardianManaged' in r && r.guardianManaged === true;
@@ -172,6 +173,7 @@ export default function Inbox() {
             />
           </>
         )}
+        {playerId ? <AckSection actor={{ kind: 'player', id: playerId }} /> : null}
         {playerId ? <SquadInvitesSection actor={{ kind: 'player', id: playerId }} /> : null}
         {playerId ? <TrialSafetySection actor={{ kind: 'player', id: playerId }} /> : null}
 
