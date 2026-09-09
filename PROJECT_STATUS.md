@@ -3,7 +3,37 @@
 > Purpose of this file: let any Claude Code session (cloud or local) pick up this
 > project with zero prior context. Keep it updated at the end of each working session.
 
-**Last updated:** 2026-09-07 · **Milestone 12 complete** (see below + M12_MATRIX.md) · · **M11.1 access repair**: evidenced that
+**Last updated:** 2026-09-09 · **Milestone 13 complete** (see M13_MATRIX.md; build b36c524) ·
+M13 adds twelve enterprise/inclusion areas in `scoutbox-server/m13/` (same
+register(ctx) pattern as m12/): F1 CSV imports with dry-run/commit/reverse,
+provider+externalId identity (ambiguity → human review queue), scoped API
+keys, SSRF-guarded signed webhooks with bounded retries + rotation, honest
+not-configured connectors · F2 consent-based transition cases (player/guardian
+owned, per-club expiring grants, revocation honest about downloaded copies,
+audited level review only) · F3 private suitability preferences + tz-aware
+fit verdicts; clubs see only player-approved verdict summaries · F4 deduped
+exposure funnel with declared windows/denominators, review queue, weekly
+rotation from the eligible pool only, birth-quarter lens suppressed <3 · F5
+blind calibration sessions (pinned rubric, fixture-tested disagreement math,
+no scout rankings) · F6 deterministic missing-evidence rules (versioned,
+guardian-routed, anti-pestering) · F7 coverage plans/fixtures/assignments
+(duplicate+clash warnings, user-entered budgets, "travel time unavailable") ·
+F8 federation workspaces (intersection permissions, preview, revocation live
+on next read, n<3 aggregates, safe departure) · F9 integer-minor-unit deal
+scenarios (conditionals excluded, manual labelled FX only, version-specific
+approval, finance-role gate) · F10 adult representation (DOB live on every
+route incl. 16/17 boundaries; credentials = document review, no register
+integration) · F11 outbox delivery centre (dispatch ≠ business action,
+forward-only ladder, signed idempotent callbacks, quiet hours, guardian
+routing, SIGKILL-safe) · F12 onboarding/invites, TOTP MFA (RFC-vector
+tested) + one-time recovery codes, local-test-IdP SSO (state/nonce/replay
+negatives, group claims ignored), tenant-scoped audit export, logged
+time-limited support access, checksummed backups + isolated restore,
+correlation-id logs, metrics + failure injection, bounded load test
+(OPERATIONS.md). Clients: 8 new Pro screens, 6 Grassroots, player/guardian
+sections + T&S tabs, EN/FR extended. Tests: m13E2E (212), m13Live (4
+contexts), m13DemoSpotcheck, all prior suites green. Committed locally, NOT
+pushed (per instruction). Previously: **Milestone 12 complete** (see below + M12_MATRIX.md) · · **M11.1 access repair**: evidenced that
 Claude cloud sessions CANNOT expose ports — localhost URLs from a cloud
 container were never user-reachable; the delivery path is the local-run kit
 (`npm run setup` + `npm run dev`, content-verified readiness, cloud-container
