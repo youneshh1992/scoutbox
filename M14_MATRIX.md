@@ -86,3 +86,17 @@ DOB/country `isAdult` (NO new age system).
 | 71 | Quality bar checklist | final verification | all suites | ✅ | — |
 | 72 | Live browser journeys L1–L7 in separate contexts | `e2e/m14Live.test.mjs` | L1–L7 | ✅ | — |
 | 73 | ≥⅓ negative tests with exact status codes | m14E2E composition | counted in suite | ✅ | — |
+
+## M14.1 hardening pass (independent architectural review findings)
+
+| # | Finding | Fix location | Proof | Status | Honest notes |
+|---|---------|--------------|-------|--------|--------------|
+| H-P0-1 | Root admins must never link by name | `m14/review.mjs` root-request approve: verified-email link / candidates / explicit `linkUserId` / `provisionNewUser` / `AMBIGUOUS_APPLICANT_IDENTITY` | m141E2E H1 (5 negative cases) | ✅ | Name equality only ever produces review candidates |
+| H-P0-2 | Licence assurance must be provenance-sensitive | `m14/shared.mjs` `assuranceForClaim` + `badgeLabel` + `claimProvenanceLabel` | m141E2E U2 + H2; m14E2E V7/V8 unchanged | ✅ | Fixed 3-level assurance, NOT a trust score; state machine untouched |
+| H-P1-3 | Removed accounts lose current public verification | `m14/index.mjs` `publicProfileForUser` wires `removedAt` → `effectiveStatus` | m141E2E U4 + H4 | ✅ | Closed historical periods stay per §15; restore = explicit act only |
+| H-P1-4 | Invite tokens recipient-bound | `m14/organisations.mjs` invite creation (`playerId` binding) + peek-validate-consume acceptance | m141E2E H5 (8 cases) | ✅ | Adults have no account email: address-confirmation + code is the honest limit there |
+| H-P1-5 | Evidence content signatures | `m14/shared.mjs` `sniffFileSignature` + `evidenceFileProblem(buffer)`; `m14/index.mjs` upload path | m141E2E U1 + H3 | ✅ | Format identification only — malwareScan stays `not_configured` |
+| H-P1-6 | Identity provenance public | `m14/shared.mjs` projector `identity` object (assurance/label/provenance) | m141E2E U3 | ✅ | `identityVerified` kept as compatibility metadata |
+| H-P1-7 | T&S reviewer attribution | `m14/review.mjs` `reviewerOf` + attributed events (`x-admin-reviewer-*`, `x-request-id`) | m141E2E H1/H2 attribution checks | ✅ | Shared admin key remains: reviewer is DECLARED, not independently authenticated — documented |
+| H-P2-8 | Authority-revocation docs corrected | `M14_VERIFICATION.md` §11 + §17 | m141E2E H6 (revoked admin approves nothing new; provenance intact) | ✅ | Report overstatement corrected; org-level revocation stays stricter |
+| H-P2-9 | Dashboard counts effective | `m14/organisations.mjs` dashboard `effCurrent` | m141E2E H7 (expiry, removal, suspension) | ✅ | — |

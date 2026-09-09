@@ -238,12 +238,34 @@ export const EVIDENCE_TYPES = ['official_email', 'document', 'registry_result', 
 export const EVIDENCE_VISIBILITY = ['trust_and_safety', 'organisation_internal', 'subject_only'];
 export const EVIDENCE_MIME_ALLOW = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/webp']);
 export const EVIDENCE_MAX_BYTES = 8 * 1024 * 1024;
-export function evidenceFileProblem({ mime, bytes, filename }) {
+/** Content-signature sniffing (M14.1). The claimed MIME and extension are
+ *  attacker-controlled; the leading bytes are not. This is FORMAT
+ *  identification only — it is NOT malware scanning and is never reported
+ *  as such (checks.malwareScan stays 'not_configured'). */
+export function sniffFileSignature(buf) {
+  if (!Buffer.isBuffer(buf) || buf.length < 12) return null;
+  if (buf.slice(0, 5).toString('latin1') === '%PDF-') return 'application/pdf';
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47
+    && buf[4] === 0x0d && buf[5] === 0x0a && buf[6] === 0x1a && buf[7] === 0x0a) return 'image/png';
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  if (buf.slice(0, 4).toString('latin1') === 'RIFF' && buf.slice(8, 12).toString('latin1') === 'WEBP') return 'image/webp';
+  return null;
+}
+export function evidenceFileProblem({ mime, bytes, filename, buffer = null }) {
   if (!EVIDENCE_MIME_ALLOW.has(String(mime))) return 'FILE_TYPE_NOT_ALLOWED';
   if (!Number.isInteger(bytes) || bytes <= 0 || bytes > EVIDENCE_MAX_BYTES) return 'FILE_TOO_LARGE';
   const name = String(filename ?? '');
   if (/[\\/]|\.\./.test(name)) return 'FILENAME_INVALID'; // no traversal, ever
   if (/\.(exe|js|sh|bat|cmd|com|scr|msi|dll|svg|html?)$/i.test(name)) return 'FILE_TYPE_NOT_ALLOWED';
+  if (buffer !== null) {
+    // The bytes must actually BE the format they claim to be. A mismatch —
+    // executable bytes labelled image/png, HTML labelled application/pdf,
+    // renamed SVG/script content, or a payload too small to carry any valid
+    // signature — is rejected outright.
+    const detected = sniffFileSignature(buffer);
+    if (!detected) return 'FILE_CONTENT_UNRECOGNISED';
+    if (detected !== String(mime)) return 'FILE_SIGNATURE_MISMATCH';
+  }
   return null;
 }
 export function evidenceCompleteness(claimType, evidenceTypes) {
@@ -278,8 +300,11 @@ export function mintToken(db, nextId, { purpose, email = null, subjectKind = nul
   });
   return secret;
 }
-/** Single-use consumption with exact failure codes. Marks used on SUCCESS only. */
-export function consumeToken(db, { purpose, secret, email = null, subjectId = null }) {
+/** Validate a token WITHOUT consuming it. Callers with their own extra
+ *  binding checks (e.g. invite recipient binding) peek first, run every
+ *  check, and only then mark the token used — so a failed binding attempt
+ *  never burns the rightful recipient's single-use secret. */
+export function peekToken(db, { purpose, secret, email = null, subjectId = null }) {
   const t = db.verTokens.find((x) => x.hash === sha256(secret ?? ''));
   if (!t) return { error: 'TOKEN_UNKNOWN' };
   if (t.purpose !== purpose) return { error: 'TOKEN_WRONG_PURPOSE' };
@@ -287,8 +312,14 @@ export function consumeToken(db, { purpose, secret, email = null, subjectId = nu
   if (t.expiresAt < Date.now()) return { error: 'TOKEN_EXPIRED' };
   if (t.email && email && t.email !== String(email).toLowerCase()) return { error: 'TOKEN_WRONG_ADDRESS' };
   if (t.subjectId && subjectId && t.subjectId !== subjectId) return { error: 'TOKEN_WRONG_ACCOUNT' };
-  t.usedAt = Date.now();
   return { token: t };
+}
+/** Single-use consumption with exact failure codes. Marks used on SUCCESS only. */
+export function consumeToken(db, { purpose, secret, email = null, subjectId = null }) {
+  const out = peekToken(db, { purpose, secret, email, subjectId });
+  if (out.error) return out;
+  out.token.usedAt = Date.now();
+  return out;
 }
 
 // ------------------------------------------- verification admin hierarchy
@@ -323,7 +354,36 @@ export function orgCanAttest(org, db) {
 // THE one safe projector (§50). Everything any client shows publicly about
 // verification flows through here. It never returns evidence, emails,
 // reviewer notes, risk flags, or internal review state.
+// ---- assurance levels (M14.1). NOT a trust score: a fixed, three-value
+// statement of WHO stands behind a verified claim. It changes only wording
+// and projection — the state machine is untouched.
+//   authoritative            → an external authoritative source confirmed it
+//   organisation_attested    → an authorised org administrator confirmed it
+//   scoutbox_document_review → ScoutBox reviewed documents; NOT independently
+//                              confirmed with any issuing authority
+export function assuranceForClaim(claim) {
+  switch (claim.verificationMethod) {
+    case 'authoritative_registry':
+    case 'federation_confirmation':
+      return 'authoritative';
+    case 'official_domain_email':
+      return 'authoritative'; // authoritative for what it proves: domain control only
+    case 'organisation_admin_confirmation':
+    case 'existing_verified_org_admin':
+      return 'organisation_attested';
+    case 'scoutbox_manual_review':
+    case 'migration': // carried-forward facts trace back to a ScoutBox review
+      return 'scoutbox_document_review';
+    default:
+      return null;
+  }
+}
 export function claimProvenanceLabel(claim, orgName) {
+  // Licence-specific honesty: a manual review of a licence document must
+  // never read like an issuing-authority confirmation.
+  if (claim.claimType === 'LICENCE' && claim.verificationMethod === 'scoutbox_manual_review') {
+    return 'Document reviewed by ScoutBox Trust & Safety — not independently confirmed with the issuing authority.';
+  }
   switch (claim.verificationMethod) {
     case 'organisation_admin_confirmation':
       return `Confirmed by an authorised ${orgName ?? 'organisation'} administrator`;
@@ -344,15 +404,33 @@ const CLAIM_BADGE_KIND = {
   AGENCY_AFFILIATION: 'affiliation', AGENCY_ROLE: 'role',
   GRASSROOTS_AFFILIATION: 'affiliation', FEDERATION_AFFILIATION: 'affiliation',
 };
-export function toPublicVerificationProfile({ subjectType, subjectId, claims, orgsById = new Map(), db = null, now = Date.now() }) {
+export function toPublicVerificationProfile({ subjectType, subjectId, claims, orgsById = new Map(), db = null, subjectRemoved = false, now = Date.now() }) {
   const badges = [];
-  let identityVerified = false;
+  let identity = null;
   for (const claim of claims) {
     const org = claim.organisationId ? orgsById.get(claim.organisationId) ?? null : null;
-    const eff = effectiveStatus(claim, { org, now });
+    const eff = effectiveStatus(claim, { org, subjectRemoved, now });
     if (!eff.displayable) continue;
     const y = (ms) => (ms ? new Date(ms).getFullYear() : null);
-    if (claim.claimType === 'PERSON_IDENTITY') { identityVerified = true; continue; }
+    if (claim.claimType === 'PERSON_IDENTITY') {
+      // Structured identity assurance (M14.1): the public projection carries
+      // WHAT kind of confirmation stands behind the identity — a manual
+      // document review must be distinguishable from a future authoritative
+      // identity provider. It never carries evidence.
+      const assurance = assuranceForClaim(claim);
+      identity = {
+        confirmed: true,
+        assurance,
+        label: assurance === 'authoritative'
+          ? 'Identity confirmed by an authoritative provider'
+          : 'Identity confirmed by ScoutBox review',
+        verifiedAt: claim.verifiedAt ?? null,
+        provenance: assurance === 'authoritative'
+          ? claimProvenanceLabel(claim, org?.name)
+          : 'Reviewed and confirmed by ScoutBox Trust & Safety — a document review, not an authoritative identity check',
+      };
+      continue;
+    }
     badges.push({
       kind: CLAIM_BADGE_KIND[claim.claimType] ?? 'claim',
       claimType: claim.claimType,
@@ -361,12 +439,15 @@ export function toPublicVerificationProfile({ subjectType, subjectId, claims, or
       role: claim.role ?? null,
       current: eff.current,
       historical: eff.historical,
+      assurance: assuranceForClaim(claim),
       period: claim.validFrom ? { from: y(claim.validFrom), to: claim.validUntil ? y(claim.validUntil) : null } : null,
       verifiedAt: claim.verifiedAt ?? null,
       provenance: claimProvenanceLabel(claim, org?.name),
     });
   }
-  return { subjectType, subjectId, identityVerified, badges };
+  // identityVerified stays as COMPATIBILITY metadata for existing clients;
+  // `identity` is the canonical public identity representation.
+  return { subjectType, subjectId, identityVerified: identity?.confirmed === true, identity, badges };
 }
 export function badgeLabel(claim, org, eff) {
   const orgName = org?.name ?? 'organisation';
@@ -382,7 +463,14 @@ export function badgeLabel(claim, org, eff) {
       return eff.historical
         ? `Former ${orgName} ${claim.role ?? 'staff'} · Verified history`
         : `Role verified: ${claim.role ?? 'staff'}`;
-    case 'LICENCE': return `Licence verified: ${claim.metadata?.licenceType ?? 'credential'}`;
+    case 'LICENCE':
+      // Provenance-sensitive wording (M14.1): only an authoritative source
+      // may put "verified" next to a licence. A ScoutBox document review (or
+      // migrated record) renders as a REVIEWED credential, never as an
+      // authoritative licence verification.
+      return assuranceForClaim(claim) === 'authoritative'
+        ? `Licence verified: ${claim.metadata?.licenceType ?? 'credential'}`
+        : `Credential reviewed: ${claim.metadata?.licenceType ?? 'credential'}`;
     default: return 'Verified claim';
   }
 }

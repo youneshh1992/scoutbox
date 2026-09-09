@@ -54,8 +54,26 @@ export function registerVerificationReview(ctx) {
 
   const orgOf = (id) => db.orgs.find((o) => o.id === id) ?? null;
   const claimById = (id) => db.verClaims.find((c) => c.id === id);
-  const adminTransition = (claim, to, req, opts = {}) =>
-    transition(claim, to, { actorKind: 'trust_safety', actorId: 'admin', actorName: 'Trust & Safety', ...opts }, req);
+  // M14.1 attribution: the admin surface authenticates with one SHARED key
+  // (prototype F12 architecture) — individual Trust & Safety accounts do not
+  // exist yet, so a reviewer's identity cannot be independently
+  // authenticated here. The cleanest compatible boundary: each request may
+  // DECLARE its reviewer (x-admin-reviewer-id / x-admin-reviewer-name);
+  // every consequential decision then records that declared identity, the
+  // correlation id and the attribution mode. When no reviewer is declared,
+  // events honestly say `shared_admin_key` instead of inventing a person.
+  // This limitation is documented in M14_VERIFICATION.md.
+  const reviewerOf = (req) => {
+    const id = String(req?.headers?.['x-admin-reviewer-id'] ?? '').trim().slice(0, 60);
+    const name = String(req?.headers?.['x-admin-reviewer-name'] ?? '').trim().slice(0, 80);
+    return id
+      ? { id, name: name || id, attribution: 'declared_reviewer' }
+      : { id: 'admin', name: 'Trust & Safety', attribution: 'shared_admin_key' };
+  };
+  const adminTransition = (claim, to, req, opts = {}) => {
+    const rev = reviewerOf(req);
+    return transition(claim, to, { actorKind: 'trust_safety', actorId: rev.id, actorName: rev.name, attribution: rev.attribution, ...opts }, req);
+  };
 
   // ============================================================ licences
   orgRouter.get('/verification/licence-providers', (_req, res) => {
@@ -331,6 +349,7 @@ export function registerVerificationReview(ctx) {
     if (!r) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
     if (!reasonRequired(req, res)) return;
     if (r.status !== 'requires_human_review') return res.status(409).json({ error: 'REQUEST_NOT_DECIDABLE', message: `Request is ${r.status}.` });
+    const rev = reviewerOf(req);
     // Organisation: attach to the matched existing org, or create a new one.
     let org = r.existingOrgId ? orgOf(r.existingOrgId) : null;
     if (!org) {
@@ -345,18 +364,53 @@ export function registerVerificationReview(ctx) {
       db.orgs.push(org);
     }
     org.verification ??= { domains: [], revokedAt: null, orgType: r.orgType };
-    // Applicant becomes (or maps to) an org user…
-    let user = db.users.find((u) => u.orgId === org.id && !u.removedAt && (u.email?.toLowerCase() === r.workEmail || u.name.toLowerCase() === r.applicantName.toLowerCase()));
+    // Applicant → account linking (M14.1 P0). Identity is NEVER established
+    // by a name: two different people can share one. The rules:
+    //  * exact match on the VERIFIED work email (mailbox control proven via
+    //    the single-use token challenge) may link authoritatively;
+    //  * name equality only surfaces review CANDIDATES — never a link;
+    //  * where candidates exist without an email match, Trust & Safety must
+    //    explicitly choose the account (linkUserId) or explicitly provision
+    //    a new one (provisionNewUser: true);
+    //  * with no candidates at all, the applicant is provisioned as a new
+    //    user per the existing workflow — no guessing.
+    const norm = (s) => String(s ?? '').trim().toLowerCase();
+    const activeUsers = db.users.filter((u) => u.orgId === org.id && !u.removedAt);
+    const emailMatches = r.emailProved ? activeUsers.filter((u) => u.email && u.email.toLowerCase() === r.workEmail) : [];
+    const nameCandidates = activeUsers.filter((u) => norm(u.name) === norm(r.applicantName) && !emailMatches.includes(u));
+    let user = null;
+    let identityLink = null;
+    if (req.body?.linkUserId) {
+      user = activeUsers.find((u) => u.id === req.body.linkUserId) ?? null;
+      if (!user) return res.status(404).json({ error: 'LINK_USER_NOT_FOUND', message: 'linkUserId must be an active user of the target organisation.' });
+      identityLink = 'trust_safety_selection';
+    } else if (req.body?.provisionNewUser === true) {
+      identityLink = 'provisioned_new_user'; // explicit human choice to NOT link
+    } else if (emailMatches.length === 1) {
+      user = emailMatches[0];
+      identityLink = 'verified_work_email';
+    } else if (emailMatches.length > 1 || nameCandidates.length > 0) {
+      return res.status(409).json({
+        error: 'AMBIGUOUS_APPLICANT_IDENTITY',
+        message: 'Existing accounts could be the applicant. A name match never links identity automatically — choose the intended account explicitly (linkUserId) or provision a new one (provisionNewUser: true).',
+        candidates: [...emailMatches, ...nameCandidates].map((u) => ({
+          id: u.id, name: u.name,
+          matched: emailMatches.includes(u) ? 'verified_work_email' : 'name_similarity_only',
+        })),
+      });
+    }
     if (!user) {
       user = { id: nextId('usr'), orgId: org.id, name: r.applicantName, role: r.applicantRole, email: r.workEmail, createdAt: Date.now() };
       db.users.push(user);
+      identityLink ??= 'provisioned_new_user';
     }
     user.email ??= r.workEmail;
+    r.identityLink = identityLink;
     // …organisation identity claim: established by Trust & Safety review.
     createClaim({
       subjectType: 'org', subjectId: org.id, claimType: 'ORGANISATION_IDENTITY', organisationId: org.id,
       status: 'verified', verificationMethod: 'scoutbox_manual_review', verifiedAt: Date.now(),
-      verifiedBy: { kind: 'trust_safety', id: 'admin' }, evidenceIds: [...r.evidenceIds],
+      verifiedBy: { kind: 'trust_safety', id: rev.id }, evidenceIds: [...r.evidenceIds],
       metadata: { rootRequest: r.id, orgType: r.orgType, website: r.website },
     });
     // Keep the LEGACY effective flag in sync — same standing meaning: minors
@@ -368,23 +422,23 @@ export function registerVerificationReview(ctx) {
       createClaim({
         subjectType: 'org', subjectId: org.id, claimType: 'ORGANISATION_DOMAIN', organisationId: org.id,
         status: 'verified', verificationMethod: 'official_domain_email', verifiedAt: Date.now(),
-        verifiedBy: { kind: 'trust_safety', id: 'admin' }, metadata: { domain: r.domain, rootRequest: r.id },
+        verifiedBy: { kind: 'trust_safety', id: rev.id }, metadata: { domain: r.domain, rootRequest: r.id },
       });
     }
     // Root administrator authority + its claim.
     createClaim({
       subjectType: 'user', subjectId: user.id, claimType: 'ORGANISATION_ADMIN', organisationId: org.id,
       status: 'verified', verificationMethod: 'scoutbox_manual_review', verifiedAt: Date.now(),
-      verifiedBy: { kind: 'trust_safety', id: 'admin' }, metadata: { rootRequest: r.id, level: 'verification_root_admin' },
+      verifiedBy: { kind: 'trust_safety', id: rev.id }, metadata: { rootRequest: r.id, level: 'verification_root_admin', identityLink },
     });
     db.verAdmins.push({ id: nextId('vadm'), orgId: org.id, userId: user.id, level: 'verification_root_admin', status: 'active', invitedBy: 'trust_safety', createdAt: Date.now(), acceptedAt: Date.now(), revokedAt: null, revokedBy: null });
-    r.status = 'approved'; r.decidedAt = Date.now(); r.decidedBy = 'Trust & Safety'; r.decisionReason = String(req.body.reason).slice(0, 400);
+    r.status = 'approved'; r.decidedAt = Date.now(); r.decidedBy = rev.name; r.decidedById = rev.id; r.decisionAttribution = rev.attribution; r.decisionReason = String(req.body.reason).slice(0, 400);
     r.resultOrgId = org.id; r.resultUserId = user.id;
-    verEvent('review.approved', { orgId: org.id, subjectId: user.id, after: { rootRequest: r.id, org: org.id, rootAdmin: user.id }, reason: r.decisionReason, actorKind: 'trust_safety', actorName: 'Trust & Safety' });
+    verEvent('review.approved', { orgId: org.id, subjectId: user.id, after: { rootRequest: r.id, org: org.id, rootAdmin: user.id, identityLink }, reason: r.decisionReason, actorKind: 'trust_safety', actorId: rev.id, actorName: rev.name, attribution: rev.attribution }, req);
     ctx.ledgerAppend?.({ type: 'verification_root_approved', orgId: org.id, playerId: null, detail: { request: r.id } });
     persistNow();
     res.json({
-      request: { ...r, applicantSecretHash: undefined }, orgId: org.id, rootAdminUserId: user.id,
+      request: { ...r, applicantSecretHash: undefined }, orgId: org.id, rootAdminUserId: user.id, identityLink,
       note: 'The organisation is verified and its first root administrator is established. Staff verification is now self-service through the club. Sign-in credentials are provisioned separately (POST /admin/clubs/:id/credentials).',
     });
   });
@@ -394,8 +448,9 @@ export function registerVerificationReview(ctx) {
     if (!r) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
     if (!reasonRequired(req, res)) return;
     if (!['requires_human_review', 'collecting_evidence'].includes(r.status)) return res.status(409).json({ error: 'REQUEST_NOT_DECIDABLE' });
-    r.status = 'rejected'; r.decidedAt = Date.now(); r.decidedBy = 'Trust & Safety'; r.decisionReason = String(req.body.reason).slice(0, 400);
-    verEvent('review.rejected', { after: { rootRequest: r.id }, reason: r.decisionReason, actorKind: 'trust_safety' });
+    const rev = reviewerOf(req);
+    r.status = 'rejected'; r.decidedAt = Date.now(); r.decidedBy = rev.name; r.decidedById = rev.id; r.decisionAttribution = rev.attribution; r.decisionReason = String(req.body.reason).slice(0, 400);
+    verEvent('review.rejected', { after: { rootRequest: r.id }, reason: r.decisionReason, actorKind: 'trust_safety', actorId: rev.id, actorName: rev.name, attribution: rev.attribution }, req);
     persistNow();
     res.json({ request: { ...r, applicantSecretHash: undefined } });
   });
@@ -416,7 +471,7 @@ export function registerVerificationReview(ctx) {
     createClaim({
       subjectType: 'user', subjectId: user.id, claimType: 'ORGANISATION_ADMIN', organisationId: org.id,
       status: 'verified', verificationMethod: 'scoutbox_manual_review', verifiedAt: Date.now(),
-      verifiedBy: { kind: 'trust_safety', id: 'admin' }, metadata: { appointedReason: String(req.body.reason).slice(0, 300) },
+      verifiedBy: { kind: 'trust_safety', id: reviewerOf(req).id }, metadata: { appointedReason: String(req.body.reason).slice(0, 300) },
     });
     notify({ kind: 'org_user', id: user.id }, 'verification', `Trust & Safety appointed you root verification administrator for ${org.name}.`, org.id);
     persistNow();
@@ -439,14 +494,14 @@ export function registerVerificationReview(ctx) {
       createClaim({
         subjectType: 'org', subjectId: org.id, claimType: 'ORGANISATION_DOMAIN', organisationId: org.id,
         status: 'verified', verificationMethod: 'scoutbox_manual_review', verifiedAt: Date.now(),
-        verifiedBy: { kind: 'trust_safety', id: 'admin' }, metadata: { domain: r.domain },
+        verifiedBy: { kind: 'trust_safety', id: reviewerOf(req).id }, metadata: { domain: r.domain },
       });
-      verEvent('organisation.domain_verified', { orgId: org.id, after: { domain: r.domain, via: 'trust_safety' }, reason: req.body.reason });
+      verEvent('organisation.domain_verified', { orgId: org.id, after: { domain: r.domain, via: 'trust_safety' }, reason: req.body.reason, actorKind: 'trust_safety', actorId: reviewerOf(req).id, actorName: reviewerOf(req).name, attribution: reviewerOf(req).attribution }, req);
     } else {
       r.status = 'rejected';
       verEvent('review.rejected', { orgId: r.orgId, after: { domainRequest: r.id }, reason: req.body.reason });
     }
-    r.decidedAt = Date.now(); r.decidedBy = 'Trust & Safety';
+    r.decidedAt = Date.now(); r.decidedBy = reviewerOf(req).name; r.decidedById = reviewerOf(req).id;
     persistNow();
     res.json({ request: r });
   });
@@ -478,7 +533,8 @@ export function registerVerificationReview(ctx) {
       if (req.body.current !== undefined) c.current = !!req.body.current;
       verEvent('claim.corrected', { claimId: c.id, subjectId: c.subjectId, orgId: c.organisationId, reason: req.body.reason, actorKind: 'trust_safety' });
     }
-    d.status = 'resolved'; d.resolvedAt = Date.now(); d.resolvedBy = 'Trust & Safety';
+    const rev2 = reviewerOf(req);
+    d.status = 'resolved'; d.resolvedAt = Date.now(); d.resolvedBy = rev2.name; d.resolvedById = rev2.id; d.resolutionAttribution = rev2.attribution;
     d.resolution = `${action}: ${String(req.body.reason).slice(0, 300)}`;
     if (d.byKind === 'org_user') notify({ kind: 'org_user', id: d.byId }, 'verification', `Your verification dispute was resolved: ${d.resolution.slice(0, 140)}`, d.claimId);
     persistNow();

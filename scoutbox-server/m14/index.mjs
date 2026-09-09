@@ -11,7 +11,7 @@ import crypto from 'node:crypto';
 import {
   migrateM14, buildClaimIndex, applyTransition, effectiveStatus,
   toPublicVerificationProfile, hasVerLevel, verLevelFor, orgCanAttest,
-  orgVerificationStatus, mintToken, consumeToken, sha256,
+  orgVerificationStatus, mintToken, consumeToken, peekToken, sha256,
   evidenceFileProblem, claimProvenanceLabel,
 } from './shared.mjs';
 import { metrics } from '../m13/enterprise.mjs';
@@ -39,7 +39,11 @@ export function registerM14(ctx) {
       actorId: fields.actorId ?? req?.orgUser?.id ?? null,
       actorName: fields.actorName ?? req?.orgUser?.name ?? null,
       actorOrgId: fields.actorOrgId ?? req?.org?.id ?? null,
-      requestId: req?.correlationId ?? null,
+      requestId: req?.correlationId ?? req?.headers?.['x-request-id'] ?? null,
+      // M14.1: how the actor identity was established — 'declared_reviewer'
+      // (a named T&S reviewer declared on the request) vs 'shared_admin_key'
+      // (the shared prototype admin credential; no individual identity).
+      attribution: fields.attribution ?? null,
       claimId: fields.claimId ?? null, subjectId: fields.subjectId ?? null,
       orgId: fields.orgId ?? null, before: fields.before ?? null,
       after: fields.after ?? null, reason: fields.reason ?? null,
@@ -77,6 +81,7 @@ export function registerM14(ctx) {
     verEvent(opts.eventType ?? `claim.${to}`, {
       claimId: claim.id, subjectId: claim.subjectId, orgId: claim.organisationId,
       actorKind: opts.actorKind, actorId: opts.actorId, actorName: opts.actorName,
+      attribution: opts.attribution ?? null,
       before: { status: before }, after: { status: to, method: claim.verificationMethod }, reason: opts.reason ?? null,
     }, req);
     if (to === 'verified') vmetric('approvals');
@@ -109,12 +114,17 @@ export function registerM14(ctx) {
     if (!m) return { error: 'BAD_DATA_URL' };
     const mime = m[1];
     const buf = Buffer.from(m[2], 'base64');
-    const problem = evidenceFileProblem({ mime, bytes: buf.length, filename: filename ?? 'evidence' });
+    const problem = evidenceFileProblem({ mime, bytes: buf.length, filename: filename ?? 'evidence', buffer: buf });
     if (problem) return { error: problem };
     const id = nextId('vfil');
     // sanitized server name = our own id; the original name is metadata only
     ctx.storage.saveDataUrl(id, `data:${mime};base64,${buf.toString('base64')}`);
-    return { mediaId: id, sha256: sha256(buf), mime, bytes: buf.length, filename: String(filename ?? '').slice(0, 120) };
+    return {
+      mediaId: id, sha256: sha256(buf), mime, bytes: buf.length, filename: String(filename ?? '').slice(0, 120),
+      // contentSignature is format identification (magic bytes), NOT malware
+      // scanning — malwareScan stays not_configured and is never conflated.
+      checks: { malwareScan: 'not_configured', contentSignature: 'matched_claimed_type' },
+    };
   }
 
   // -------- verification-permission guard (§9). Server-enforced; a disabled
@@ -135,10 +145,15 @@ export function registerM14(ctx) {
   const orgsById = () => new Map(db.orgs.map((o) => [o.id, o]));
 
   function publicProfileForUser(userId, now = Date.now()) {
+    // Removed/deactivated accounts lose CURRENT public verification at once:
+    // the removed state feeds the read-time engine on every projection — no
+    // cached boolean can bypass it. Closed historical periods stay visible
+    // as history per §15 (truth is not erased).
     const user = db.users.find((u) => u.id === userId);
     return toPublicVerificationProfile({
       subjectType: 'user', subjectId: userId,
-      claims: idx.claimsFor('user', userId), orgsById: orgsById(), now,
+      claims: idx.claimsFor('user', userId), orgsById: orgsById(),
+      subjectRemoved: !user || !!user.removedAt, now,
     });
   }
   function publicProfileForOrg(orgId, now = Date.now()) {
@@ -155,6 +170,7 @@ export function registerM14(ctx) {
     requireVer, vmetric, publicProfileForUser, publicProfileForOrg,
     mintToken: (o) => mintToken(db, nextId, o),
     consumeToken: (o) => consumeToken(db, o),
+    peekToken: (o) => peekToken(db, o),
     effectiveStatus, orgCanAttest: (org) => orgCanAttest(org, db),
     orgVerificationStatus: (org) => orgVerificationStatus(org, db),
     verLevelFor: (orgId, userId) => verLevelFor(db, orgId, userId),

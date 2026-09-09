@@ -326,10 +326,17 @@ export function registerOrganisationVerification(ctx) {
     if (!requireVer(req, res, 'verification_viewer')) return;
     const mine = db.verClaims.filter((c) => c.organisationId === req.org.id && c.subjectType === 'user');
     const now = Date.now();
+    // "Currently verified" derives from the EFFECTIVE engine (M14.1): a raw
+    // status of 'verified' does not count when org standing, account removal
+    // or expiry suppresses it at read time.
+    const effCurrent = (c) => {
+      const u = db.users.find((x) => x.id === c.subjectId);
+      return effectiveStatus(c, { org: req.org, subjectRemoved: !u || !!u.removedAt, now }).current;
+    };
     res.json({
       organisationStatus: ctx.orgVerificationStatus(req.org),
       counts: {
-        verifiedStaff: new Set(mine.filter((c) => c.status === 'verified' && c.current !== false).map((c) => c.subjectId)).size,
+        verifiedStaff: new Set(mine.filter(effCurrent).map((c) => c.subjectId)).size,
         pending: mine.filter((c) => ['pending', 'automated_checks_passed'].includes(c.status)).length,
         humanReview: mine.filter((c) => c.status === 'requires_human_review').length,
         expiringSoon: mine.filter((c) => c.status === 'verified' && c.validUntil && c.validUntil > now && c.validUntil < now + 30 * 86_400_000).length,
@@ -670,17 +677,33 @@ export function registerOrganisationVerification(ctx) {
     if (!orgCanAttest(req.org)) return res.status(403).json({ error: 'ORG_NOT_ELIGIBLE', message: 'Only a verified organisation can send squad invitations.' });
     const today = db.verPlayerInvites.filter((i) => i.orgId === req.org.id && i.createdAt > Date.now() - 86_400_000).length;
     if (today >= INVITES_PER_DAY) return res.status(429).json({ error: 'INVITE_RATE_LIMIT', message: `Deterministic limit: ${INVITES_PER_DAY} invitations per organisation per day.` });
-    const { name, email, squad } = req.body ?? {};
+    const { name, email, squad, playerId } = req.body ?? {};
     if (!name?.trim()) return res.status(400).json({ error: 'NAME_REQUIRED' });
     if (email && emailProblem(email)) return res.status(400).json({ error: 'EMAIL_SYNTAX' });
+    // M14.1 recipient binding: when the invite targets an EXISTING ScoutBox
+    // player, the token is bound to that identity and nobody else can attach
+    // it. (Player targeting uses the standing visibility rules — an invite
+    // is not a discovery bypass.)
+    let targetPlayer = null;
+    if (playerId) {
+      targetPlayer = findPlayer(playerId);
+      if (!targetPlayer) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
+      if (!visibleToOrg(targetPlayer, req.org) || isBlocked(targetPlayer.id, req.org.id)) {
+        return res.status(404).json({ error: 'PLAYER_NOT_FOUND' }); // concealment — no probing hidden players
+      }
+    }
     const inv = {
       id: nextId('vpin'), orgId: req.org.id, byUserId: req.orgUser.id, byName: req.orgUser.name,
       name: String(name).trim().slice(0, 80), squad: String(squad ?? '').slice(0, 60),
-      status: 'pending', playerId: null, guardianApproved: null,
+      status: 'pending', playerId: null, targetPlayerId: targetPlayer?.id ?? null, guardianApproved: null,
       createdAt: Date.now(), expiresAt: Date.now() + 14 * 86_400_000, acceptedAt: null,
     };
     db.verPlayerInvites.push(inv);
-    const secret = mintToken({ purpose: 'player_invite', email: email ?? null, orgId: req.org.id, refId: inv.id, ttlMs: 14 * 86_400_000 });
+    const secret = mintToken({
+      purpose: 'player_invite', email: email ?? null, orgId: req.org.id, refId: inv.id,
+      subjectKind: targetPlayer ? 'player' : null, subjectId: targetPlayer?.id ?? null,
+      ttlMs: 14 * 86_400_000,
+    });
     if (email) await mailer.send({ to: email, subject: `${req.org.name} invited you to ScoutBox`, text: `Hi ${inv.name},\n\n${req.orgUser.name} at ${req.org.name} invites you to join ScoutBox${inv.squad ? ` (${inv.squad})` : ''}.\n\nInvitation code: ${secret}\n\nJoining is your choice — an invitation gives the club no control over your profile. Under-18s join through a parent or guardian.` });
     persistNow();
     res.status(201).json({ invite: inv, ...(email ? {} : { code: secret, note: 'No email supplied — hand the single-use code to the player (or their guardian) directly.' }) });
@@ -696,20 +719,43 @@ export function registerOrganisationVerification(ctx) {
     if (!isAdult(req.player)) {
       return res.status(403).json({ error: 'GUARDIAN_MANAGED', message: 'Your guardian accepts club invitations for you.' });
     }
-    return acceptInvite(res, req.body?.code, req.player, null);
+    return acceptInvite(res, req.body?.code, req.player, null, req.body?.email ?? null);
   });
   guardianRouter.post('/invites/accept', (req, res) => {
     const child = db.players.find((p) => p.id === req.body?.childId && req.guardian.childIds.includes(p.id));
     if (!child) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
     return acceptInvite(res, req.body?.code, child, req.guardian);
   });
-  function acceptInvite(res, code, player, guardian) {
-    const out = consumeToken({ purpose: 'player_invite', secret: code });
+  function acceptInvite(res, code, player, guardian, claimedEmail = null) {
+    // M14.1 recipient binding: peek first, run EVERY binding check, and only
+    // then consume — a wrong-recipient attempt must never burn the rightful
+    // recipient's single-use secret.
+    const out = ctx.peekToken({ purpose: 'player_invite', secret: code });
     if (out.error) return res.status(out.error === 'TOKEN_EXPIRED' ? 410 : 404).json({ error: out.error });
     const inv = db.verPlayerInvites.find((i) => i.id === out.token.refId && i.status === 'pending' && !i.playerId);
     if (!inv) return res.status(404).json({ error: 'INVITE_NOT_FOUND' });
     const org = orgOf(inv.orgId);
     if (!org || org.suspended) return res.status(403).json({ error: 'ORG_UNAVAILABLE' });
+    // 1. Identity-targeted invite: only the named player (adult flow) or that
+    //    exact child through their EXISTING guardian relationship may accept.
+    if (out.token.subjectId && out.token.subjectId !== player.id) {
+      verEvent('security.self_verification_blocked', { orgId: inv.orgId, subjectId: player.id, reason: 'invite recipient mismatch (identity-bound)', after: { invite: inv.id } });
+      persist();
+      return res.status(403).json({ error: 'INVITE_RECIPIENT_MISMATCH', message: 'This invitation names a different recipient. Codes cannot be transferred.' });
+    }
+    // 2. Address-targeted invite: the accepting side must be associated with
+    //    the recipient mailbox. Guardians have verified account emails — the
+    //    guardian's own address must match. Player accounts carry no email,
+    //    so an accepting adult confirms the recipient address; possession of
+    //    the code alone is not enough. (Documented limitation: for adults
+    //    this is address knowledge + code possession, not mailbox re-proof.)
+    if (out.token.email) {
+      const supplied = guardian ? String(guardian.email ?? '').toLowerCase() : String(claimedEmail ?? '').toLowerCase();
+      if (supplied !== out.token.email) {
+        return res.status(403).json({ error: 'INVITE_RECIPIENT_MISMATCH', message: guardian ? 'This invitation was addressed to a different guardian email.' : 'Confirm the email address the invitation was sent to.' });
+      }
+    }
+    out.token.usedAt = Date.now(); // all binding checks passed — consume now
     inv.status = 'accepted'; inv.playerId = player.id; inv.acceptedAt = Date.now();
     inv.guardianApproved = guardian ? { guardianId: guardian.id, at: Date.now() } : null;
     verEvent('claim.created', { orgId: inv.orgId, subjectId: player.id, after: { invite: inv.id, guardianApproved: !!guardian } });
