@@ -12,6 +12,7 @@ import { U18_PROMISES } from '../domain/safeguarding';
 import { useSession } from '../state';
 import { BoardSection, CampaignsSection, FeedbackDevSection, FollowUpsSection, PassportSection, SquadInvitesSection, TrialSafetySection } from '../components/M12Sections';
 import { AckSection, OpportunityFitSection, PreferencesSection, TransitionsSection } from '../components/M13Sections';
+import { ChildReferencesSection, InviteCodeSection } from '../components/M14Sections';
 import { colors } from '../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle, TrustBar } from '../components/ui';
 import { ReportButton } from '../components/ReportSheet';
@@ -537,6 +538,8 @@ export default function GuardianDashboard() {
                 <PreferencesSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} isMinor />
                 <OpportunityFitSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />
                 <TransitionsSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} isMinor={false} mediaOptions={(c.media ?? []).map((m) => ({ id: m.id, title: m.title }))} />
+                <ChildReferencesSection guardianId={guardianId} childId={c.id} childName={c.name} />
+                <InviteCodeSection actor={{ kind: 'guardian', id: guardianId, childId: c.id, childName: c.name }} />
               </View>
             ))}
             <AckSection actor={{ kind: 'guardian', id: guardianId, childId: children[0]?.id ?? '' }} />

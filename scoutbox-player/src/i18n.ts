@@ -37,6 +37,12 @@ const en = {
   m13repDispute: 'Dispute', m13repDisputed: 'Disputed — Trust & Safety will review.', m13repNone: 'No agency has proposed representation.',
   m13exposure: 'Profile exposure', m13expSearches: 'Search appearances', m13expProfiles: 'Profile views', m13expClubs: 'Clubs',
   m13ack: 'Needs your acknowledgement', m13ackBtn: 'Acknowledge',
+  m14refTitle: 'Coach references', m14refNote: 'Structured references from verified coaches. Each shows exactly how the coach\u2019s affiliation was verified at the time.',
+  m14refGuardianNote: 'References route to you as the guardian; the child never receives adult contact through them.',
+  m14refCoach: 'Coach', m14refWithdrawn: 'withdrawn', m14refStrengths: 'Strengths', m14refDevelopment: 'To develop',
+  m14invTitle: 'Join a club squad', m14invNote: 'Enter a single-use invitation code from a verified club. Joining is your choice and gives the club no control over your profile.',
+  m14invGuardianNote: 'Club invitations for under-18s are accepted by you, the guardian \u2014 never by the child.',
+  m14invPlaceholder: 'Invitation code', m14invAccept: 'Accept',
 };
 const fr: typeof en = {
   passport: 'Passeport de preuves', addClaim: 'Consigner une donnée', insufficient: 'Preuves encore insuffisantes — c’est affiché tel quel, jamais maquillé.',
@@ -73,6 +79,12 @@ const fr: typeof en = {
   m13repDispute: 'Contester', m13repDisputed: 'Contesté — Trust & Safety examinera.', m13repNone: 'Aucune agence n’a proposé de représentation.',
   m13exposure: 'Exposition du profil', m13expSearches: 'Apparitions en recherche', m13expProfiles: 'Vues du profil', m13expClubs: 'Clubs',
   m13ack: 'Accusé de réception requis', m13ackBtn: 'Accuser réception',
+  m14refTitle: 'R\u00e9f\u00e9rences d\u2019entra\u00eeneurs', m14refNote: 'R\u00e9f\u00e9rences structur\u00e9es d\u2019entra\u00eeneurs v\u00e9rifi\u00e9s. Chacune indique comment l\u2019affiliation \u00e9tait v\u00e9rifi\u00e9e au moment de la soumission.',
+  m14refGuardianNote: 'Les r\u00e9f\u00e9rences vous parviennent en tant que tuteur ; l\u2019enfant ne re\u00e7oit jamais de contact adulte.',
+  m14refCoach: 'Entra\u00eeneur', m14refWithdrawn: 'retir\u00e9e', m14refStrengths: 'Points forts', m14refDevelopment: '\u00c0 d\u00e9velopper',
+  m14invTitle: 'Rejoindre un effectif', m14invNote: 'Saisissez un code d\u2019invitation \u00e0 usage unique d\u2019un club v\u00e9rifi\u00e9. Adh\u00e9rer reste votre choix et ne donne aucun contr\u00f4le au club.',
+  m14invGuardianNote: 'Les invitations pour les moins de 18 ans sont accept\u00e9es par vous, le tuteur \u2014 jamais par l\u2019enfant.',
+  m14invPlaceholder: 'Code d\u2019invitation', m14invAccept: 'Accepter',
 };
 
 export type PLang = 'en' | 'fr';

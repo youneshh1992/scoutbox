@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { M12Panel, M12_TABS, type M12Tab } from './m12tabs';
 import { M13Panel, M13_TABS, type M13Tab } from './m13tabs';
+import { M14Panel, M14_TABS, type M14Tab } from './m14tabs';
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000';
 const DEMO = import.meta.env.VITE_DEMO === '1';
@@ -88,7 +89,7 @@ async function call<T>(key: string, path: string, init?: RequestInit): Promise<T
   return body as T;
 }
 
-type Tab = 'overview' | 'reports' | 'clubs' | 'guardians' | 'blocks' | 'moderation' | 'threads' | 'outbox' | 'billing' | M12Tab | M13Tab;
+type Tab = 'overview' | 'reports' | 'clubs' | 'guardians' | 'blocks' | 'moderation' | 'threads' | 'outbox' | 'billing' | M12Tab | M13Tab | M14Tab;
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'reports', label: 'Report queue' },
@@ -101,6 +102,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'billing', label: 'Billing' },
   ...M12_TABS,
   ...M13_TABS,
+  ...M14_TABS,
 ];
 
 export default function App() {
@@ -263,6 +265,9 @@ export default function App() {
           )}
           {(['representation', 'groups', 'supportdesk', 'deliverycentre', 'servicehealth', 'backups'] as Tab[]).includes(tab) && (
             <M13Panel tab={tab as M13Tab} adminKey={key} say={say} />
+          )}
+          {M14_TABS.some((x) => x.id === tab) && (
+            <M14Panel tab={tab as M14Tab} adminKey={key} say={say} />
           )}
           {tab === 'reports' && (
             <div className="list-rows">

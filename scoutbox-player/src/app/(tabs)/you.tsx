@@ -12,6 +12,7 @@ import { ReportButton } from '../../components/ReportSheet';
 import { NotificationBell } from '../../components/NotificationBell';
 import { AccessSection, FeedbackDevSection, FollowUpsSection } from '../../components/M12Sections';
 import { ExposureSection, PreferencesSection, RepresentationSection, TransitionsSection } from '../../components/M13Sections';
+import { InviteCodeSection, ReferencesSection } from '../../components/M14Sections';
 
 export default function You() {
   const router = useRouter();
@@ -243,6 +244,8 @@ export default function You() {
         {playerId ? <RepresentationSection playerId={playerId} isMinor={isMinor} /> : null}
         {playerId ? <ExposureSection playerId={playerId} /> : null}
         {playerId ? <AccessSection playerId={playerId} isMinor={isMinor} mediaOptions={(me?.media ?? []).map((m) => ({ id: m.id, title: m.title }))} /> : null}
+        {playerId ? <ReferencesSection playerId={playerId} /> : null}
+        {playerId && !isMinor ? <InviteCodeSection actor={{ kind: 'player', id: playerId }} /> : null}
 
       </ScrollView>
     </SafeAreaView>

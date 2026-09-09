@@ -13,6 +13,7 @@ import {
   ImportsScreen, CoverageScreen, CalibrationScreen, InsightScreen,
   NetworkScreen, BudgetsScreen, RepresentationScreen, OrganisationScreen,
 } from './m13screens';
+import { VerificationScreen } from './m14screens';
 import { getLang, setLang, t } from './i18n';
 
 const ROLES = ['Head of Recruitment', 'First-Team Scout', 'Academy Coach', 'Agent'];
@@ -32,7 +33,8 @@ export type ScreenId =
   | 'feed' | 'filmroom' | 'search' | 'shortlist' | 'requests' | 'messages' | 'trials' | 'fixtures'
   | 'ledger' | 'funnel' | 'reputation' | 'plan'
   | 'assessments' | 'recruitment' | 'planner' | 'opportunities' | 'campaigns' | 'video' | 'outcomes' | 'trialdays'
-  | 'imports' | 'coverage' | 'calibration' | 'insight' | 'network' | 'budgets' | 'representation' | 'organisation';
+  | 'imports' | 'coverage' | 'calibration' | 'insight' | 'network' | 'budgets' | 'representation' | 'organisation'
+  | 'verification';
 
 // Labels resolve through the i18n catalogue at render time (EN/FR).
 const NAV: ScreenId[] = [
@@ -40,7 +42,7 @@ const NAV: ScreenId[] = [
   'assessments', 'recruitment', 'planner', 'video',
   'opportunities', 'campaigns', 'trialdays', 'outcomes',
   'insight', 'coverage', 'calibration', 'budgets',
-  'imports', 'network', 'representation', 'organisation',
+  'imports', 'network', 'representation', 'verification', 'organisation',
   'trials', 'fixtures', 'ledger', 'funnel', 'reputation', 'plan',
 ];
 
@@ -299,6 +301,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
           {screen === 'budgets' && <BudgetsScreen {...props} />}
           {screen === 'representation' && <RepresentationScreen {...props} />}
           {screen === 'organisation' && <OrganisationScreen {...props} />}
+          {screen === 'verification' && <VerificationScreen {...props} />}
         </div>
       </div>
       {openPlayerId && (
