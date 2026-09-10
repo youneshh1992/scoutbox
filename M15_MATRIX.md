@@ -5,6 +5,12 @@ apiE2E 129 · m12E2E 143 · m13E2E 212 · m14E2E 193 · m141E2E 94 ·
 connectedE2E 43 · navConfig 111 · navLive 30 · m12/m13/m14 live suites ·
 liveIntegration · spotchecks · staleSessionProbe 14 · tsc ×4 · builds ×4.
 
+**M15 verification results**: `m15E2E` 184 checks / 71 negative-abuse
+(39 %, all 26 §79 cases covered, batch measured 3 ms for 15 ids) ·
+`m15Live` 21 checks (P1–P8 + T&S journey, five browser contexts) · full
+regression battery green at the M15 tip · tsc ×4 · builds ×4. Docs:
+`M15_FOOTBALL_PASSPORT.md`.
+
 ## Source systems reused (never duplicated)
 
 | Passport concern | Canonical source | Notes |
