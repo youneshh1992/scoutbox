@@ -189,6 +189,19 @@ const en = {
   'fp.shareOpen': 'Open a shared passport', 'fp.open': 'Open', 'fp.close': 'Close',
   'fp.shareOpenNote': 'Paste a recruitment share link a player (or guardian) sent your club. The link locates the passport — every standing visibility rule still applies.',
   'fp.sharePlaceholder': 'Share link or token',
+  // ---- M16 Box Training (coach)
+  'bt.title': 'Box Training', 'bt.show': 'Show', 'bt.hide': 'Hide', 'bt.none': 'No Box Training assigned yet.',
+  'bt.boxCam': 'Box Cam', 'bt.summary': 'This player', 'bt.partial': 'partial', 'bt.notStarted': 'not started',
+  'bt.assign': 'Assign Box Training', 'bt.drill': 'Drill', 'bt.target': 'Target', 'bt.minutes': 'Minutes', 'bt.reps': 'Reps',
+  'bt.perWeek': '×/week', 'bt.instructions': 'Optional instructions', 'bt.cancel': 'Cancel',
+  'bt.assigned': 'Box Training assigned.',
+  'bt.assignNote': 'Only supported Box Cam drills can be assigned. You receive session results — never raw home footage.',
+  'bt.state.assigned': 'Assigned', 'bt.state.accepted': 'Accepted', 'bt.state.in_progress': 'In progress', 'bt.state.completed': 'Completed', 'bt.state.partially_completed': 'Partial', 'bt.state.cancelled': 'Cancelled', 'bt.state.superseded': 'Updated', 'bt.state.missed': 'Not done yet',
+  'bt.wallAgency': 'Agencies cannot assign Box Training.',
+  'bt.wallUnverified': 'Only a verified organisation can assign Box Training.',
+  'bt.wallSuspended': 'This organisation is suspended and cannot assign Box Training.',
+  'bt.wallMinor': 'The under-18 wall applies — this player is not assignable by your organisation.',
+  'bt.wallNotVisible': 'This player is not visible to your organisation under the standing rules (distance, verification or a block).',
 };
 
 const fr: typeof en = {
@@ -376,6 +389,19 @@ const fr: typeof en = {
   'fp.shareOpen': 'Ouvrir un passeport partagé', 'fp.open': 'Ouvrir', 'fp.close': 'Fermer',
   'fp.shareOpenNote': 'Collez un lien de partage recrutement envoyé à votre club par un joueur (ou tuteur). Le lien localise le passeport — toutes les règles de visibilité s’appliquent toujours.',
   'fp.sharePlaceholder': 'Lien ou jeton de partage',
+  // ---- M16 Box Training (entraîneur)
+  'bt.title': 'Box Training', 'bt.show': 'Afficher', 'bt.hide': 'Masquer', 'bt.none': 'Aucun Box Training assigné.',
+  'bt.boxCam': 'Box Cam', 'bt.summary': 'Ce joueur', 'bt.partial': 'partiel', 'bt.notStarted': 'non commencé',
+  'bt.assign': 'Assigner un Box Training', 'bt.drill': 'Exercice', 'bt.target': 'Objectif', 'bt.minutes': 'Minutes', 'bt.reps': 'Répétitions',
+  'bt.perWeek': '×/semaine', 'bt.instructions': 'Consignes (facultatif)', 'bt.cancel': 'Annuler',
+  'bt.assigned': 'Box Training assigné.',
+  'bt.assignNote': 'Seuls les exercices Box Cam pris en charge peuvent être assignés. Vous recevez des résultats de session — jamais de vidéo brute de la maison.',
+  'bt.state.assigned': 'Assigné', 'bt.state.accepted': 'Accepté', 'bt.state.in_progress': 'En cours', 'bt.state.completed': 'Terminé', 'bt.state.partially_completed': 'Partiel', 'bt.state.cancelled': 'Annulé', 'bt.state.superseded': 'Mis à jour', 'bt.state.missed': 'Pas encore fait',
+  'bt.wallAgency': 'Les agences ne peuvent pas assigner de Box Training.',
+  'bt.wallUnverified': 'Seule une organisation vérifiée peut assigner un Box Training.',
+  'bt.wallSuspended': 'Cette organisation est suspendue et ne peut pas assigner de Box Training.',
+  'bt.wallMinor': 'Le mur des moins de 18 ans s’applique — ce joueur n’est pas assignable par votre organisation.',
+  'bt.wallNotVisible': 'Ce joueur n’est pas visible pour votre organisation selon les règles en vigueur (distance, vérification ou blocage).',
 };
 
 export type Lang = 'en' | 'fr';

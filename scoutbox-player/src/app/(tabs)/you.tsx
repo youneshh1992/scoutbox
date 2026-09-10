@@ -14,6 +14,7 @@ import { AccessSection, FeedbackDevSection, FollowUpsSection } from '../../compo
 import { ExposureSection, PreferencesSection, RepresentationSection, TransitionsSection } from '../../components/M13Sections';
 import { InviteCodeSection, ReferencesSection } from '../../components/M14Sections';
 import { FootballPassportSection } from '../../components/M15Sections';
+import { BoxTrainingSection } from '../../components/M16Sections';
 
 export default function You() {
   const router = useRouter();
@@ -246,6 +247,7 @@ export default function You() {
         {playerId ? <ExposureSection playerId={playerId} /> : null}
         {playerId ? <AccessSection playerId={playerId} isMinor={isMinor} mediaOptions={(me?.media ?? []).map((m) => ({ id: m.id, title: m.title }))} /> : null}
         {playerId ? <ReferencesSection playerId={playerId} /> : null}
+        {playerId ? <BoxTrainingSection actor={{ kind: 'player', id: playerId }} isMinor={isMinor} /> : null}
         {playerId ? <FootballPassportSection actor={{ kind: 'player', id: playerId }} isMinor={isMinor} /> : null}
         {playerId && !isMinor ? <InviteCodeSection actor={{ kind: 'player', id: playerId }} /> : null}
 

@@ -9,6 +9,7 @@ import {
   type Squad, type Matchday, type PathwayRecord, type Friendly,
 } from './api';
 import { FootballPassportPanel, SharedPassportOpener, SummaryChips, usePassportSummaries } from './m15screens';
+import { BoxTrainingPanel } from './m16screens';
 
 const TAG_LABELS: Record<string, string> = {
   first_touch: 'First touch', pace: 'Pace', positioning: 'Positioning', work_rate: 'Work rate',
@@ -1687,6 +1688,7 @@ export function PlayerDrawer({ session, playerId, notify, onClose }: {
             </div>
 
             <FootballPassportPanel session={session} playerId={playerId} notify={notify} />
+            <BoxTrainingPanel session={session} playerId={playerId} notify={notify} />
 
             {requestType && (
               <div className="section">
