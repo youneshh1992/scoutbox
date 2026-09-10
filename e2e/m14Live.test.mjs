@@ -115,7 +115,7 @@ async function clubLogin(ctx, orgText, name, port = 8392) {
 
 // ================================================================ L1
 const scout = await clubLogin(ctxScout, 'Eastport FC', 'Tom Field');
-await scout.click('nav.sidebar button:has-text("Verification")');
+await scout.evaluate(() => { location.hash = '#/verification'; }); // M15-Nav deep link (Verification)
 await scout.waitForSelector('text=Verify your football role', { timeout: 15000 });
 await scout.fill('input[aria-label="Professional role (e.g. Academy Scout)"]', 'Academy Scout');
 await scout.click('button:has-text("Request affiliation")');
@@ -131,7 +131,7 @@ await scout.waitForSelector('text=automated checks passed', { timeout: 15000 });
 say('L1: scout requested affiliation and proved the work mailbox in his own context');
 
 const club = await clubLogin(ctxClub, 'Eastport FC', 'Maria Keane');
-await club.click('nav.sidebar button:has-text("Verification")');
+await club.evaluate(() => { location.hash = '#/verification'; }); // M15-Nav deep link (Verification)
 await club.click('button[role="tab"]:has-text("Requests")');
 await club.waitForSelector('.list-row:has-text("Tom Field")', { timeout: 15000 });
 const reqRowText = await club.locator('.list-row', { hasText: 'Tom Field' }).first().innerText();
@@ -143,7 +143,7 @@ await club.waitForSelector('.list-row:has-text("Tom Field")', { timeout: 15000 }
 say('L1: club admin confirmed the request from a PREPARED case in her own context');
 
 await scout.reload();
-await scout.click('nav.sidebar button:has-text("Verification")');
+await scout.evaluate(() => { location.hash = '#/verification'; }); // M15-Nav deep link (Verification)
 await scout.waitForSelector('text=Role verified: Academy Scout', { timeout: 20000 });
 const prov = await scout.locator('body').innerText();
 if (!prov.includes('Organisation confirmation')) fail('verification steps missing');
@@ -155,7 +155,7 @@ await scout.fill('input[aria-label="Issuing body"]', 'UEFA');
 await scout.click('button:has-text("Submit credential")');
 await scout.waitForSelector('text=Credential submitted', { timeout: 15000 });
 await scout.reload();
-await scout.click('nav.sidebar button:has-text("Verification")');
+await scout.evaluate(() => { location.hash = '#/verification'; }); // M15-Nav deep link (Verification)
 await scout.waitForSelector('text=Verify your football role', { timeout: 15000 });
 // Assert on badges + claim rows, not the explanatory copy (which legitimately
 // SAYS "Licence verified" while explaining when that label may appear).
@@ -171,7 +171,7 @@ await club.waitForSelector('.list-row:has-text("Tom Field"):has-text("Former")',
 say('L2: staff registry shows the closed period');
 
 await scout.reload();
-await scout.click('nav.sidebar button:has-text("Verification")');
+await scout.evaluate(() => { location.hash = '#/verification'; }); // M15-Nav deep link (Verification)
 await scout.waitForSelector('text=Verified history', { timeout: 20000 });
 const histText = await scout.locator('body').innerText();
 if (!histText.includes('Former Eastport')) fail('historical badge missing');
@@ -216,7 +216,8 @@ say('L3: Trust & Safety approved the prepared case — organisation + first root
 await scout.locator('input[aria-label="Dispute reason"]').first().fill('My departure date is wrong — I worked through July.');
 await scout.locator('button:has-text("Dispute")').first().click();
 await scout.waitForSelector('text=Trust & Safety reviews the dispute', { timeout: 15000 });
-await admin.click('button:has-text("Ver. disputes")');
+await admin.click('nav.sidebar button:has-text("Cases")');
+await admin.click('nav.subnav button:has-text("Ver. disputes")');
 await admin.waitForSelector('text=worked through July', { timeout: 15000 });
 await admin.locator('.list-row', { hasText: 'worked through July' }).locator('button:has-text("Uphold + correct")').click();
 await admin.waitForSelector('text=Dispute resolved with a correction.', { timeout: 15000 });
@@ -251,7 +252,7 @@ say('L6: agency representation of a minor still 403s — verification bypasses n
 const dee = (await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-hackneymarsh', scoutName: 'Dee Coach', role: 'Manager', platform: 'grassroots' }) })).body;
 await j('/admin/verification/orgs/org-hackneymarsh/appoint-root', { method: 'POST', body: JSON.stringify({ userId: dee.userId, reason: 'live test: grassroots committee chair' }) }, A);
 const grass = await clubLogin(ctxGrass, 'Hackney Marsh', 'Dee Coach', 8393);
-await grass.click('nav.sidebar button:has-text("Verification")');
+await grass.evaluate(() => { location.hash = '#/verification'; }); // M15-Nav deep link (Verification)
 await grass.waitForSelector('text=Verify your football role', { timeout: 15000 });
 await grass.click('button[role="tab"]:has-text("Requests")');
 await grass.waitForSelector('text=No pending requests.', { timeout: 15000 });

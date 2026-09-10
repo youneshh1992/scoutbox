@@ -89,7 +89,7 @@ await club.click('.org-card:has-text("Eastport FC")');
 await club.fill('.enter-row input', 'Maria Keane');
 await club.click('button:has-text("Enter workspace")');
 await club.waitForSelector('.topbar', { timeout: 20000 });
-await club.click('nav.sidebar button:has-text("Opportunities")');
+await club.evaluate(() => { location.hash = '#/opportunities'; }); // M15-Nav deep link (Opportunities)
 const deadline = new Date(Date.now() + 21 * 86400e3).toISOString().slice(0, 10);
 await club.fill('input[aria-label="Opportunity title"]', 'U23 look — pressing forwards');
 await club.fill('input[aria-label="Deadline"]', deadline);
@@ -111,7 +111,7 @@ await player.waitForSelector('text=Application submitted', { timeout: 10000 });
 say('E1: player applied from the board');
 
 // ---- Pro sees the application and answers it
-await club.click('nav.sidebar button:has-text("Opportunities")');
+await club.evaluate(() => { location.hash = '#/opportunities'; }); // M15-Nav deep link (Opportunities)
 await club.locator('.list-row', { hasText: 'U23 look' }).locator('button:has-text("Applications")').click();
 await club.waitForSelector('text=Kola Adeyemi', { timeout: 15000 });
 await club.locator('.list-row', { hasText: 'Kola Adeyemi' }).locator('button:has-text("Accept")').click();

@@ -90,6 +90,20 @@ async function call<T>(key: string, path: string, init?: RequestInit): Promise<T
 }
 
 type Tab = 'overview' | 'reports' | 'clubs' | 'guardians' | 'blocks' | 'moderation' | 'threads' | 'outbox' | 'billing' | M12Tab | M13Tab | M14Tab;
+// M15-Nav: the flat 22-tab sidebar becomes six grouped destinations with a
+// page-level tab row. Every legacy tab id stays a live destination — the
+// groups are presentation only; the admin key + server rules still gate all
+// data.
+const NAV_GROUPS: { id: string; label: string; tabs: Tab[] }[] = [
+  { id: 'home', label: 'Home', tabs: ['overview'] },
+  { id: 'cases', label: 'Cases', tabs: ['reports', 'disputes', 'verdisputes', 'supportdesk'] },
+  { id: 'verification', label: 'Verification', tabs: ['verification', 'clubs', 'guardians', 'staffchecks', 'coaches'] },
+  { id: 'safety', label: 'Safety', tabs: ['blocks', 'moderation', 'threads', 'drillguide'] },
+  { id: 'operations', label: 'Operations', tabs: ['outcomes', 'representation', 'groups', 'deliverycentre', 'outbox', 'billing'] },
+  { id: 'system', label: 'System', tabs: ['servicehealth', 'backups'] },
+];
+const groupOfTab = (tab: Tab) => NAV_GROUPS.find((g) => g.tabs.includes(tab)) ?? NAV_GROUPS[0];
+
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'reports', label: 'Report queue' },
@@ -222,25 +236,39 @@ export default function App() {
 
   return (
     <div className="shell">
-      <nav className="sidebar">
+      <nav className="sidebar" aria-label="Main navigation">
         <div className="brand">Scout<span>Box</span> T&amp;S</div>
-        {TABS.map((t) => (
-          <button key={t.id} className={tab === t.id ? 'active' : ''} onClick={() => setTab(t.id)} style={{ position: 'relative' }}>
-            {t.label}
-            {t.id === 'reports' && reports.filter((r) => r.status === 'pending_review').length > 0 && (
-              <span className="nav-badge">{reports.filter((r) => r.status === 'pending_review').length}</span>
-            )}
-          </button>
-        ))}
+        {NAV_GROUPS.map((g) => {
+          const active = groupOfTab(tab).id === g.id;
+          const pending = g.id === 'cases' ? reports.filter((r) => r.status === 'pending_review').length : 0;
+          return (
+            <button key={g.id} className={active ? 'active' : ''} onClick={() => setTab(g.tabs[0])} style={{ position: 'relative' }} aria-current={active ? 'page' : undefined}>
+              {g.label}
+              {pending > 0 && <span className="nav-badge">{pending}</span>}
+            </button>
+          );
+        })}
         <div className="spacer" />
         <div className="whoami"><b>Safety staff</b>{DEMO ? 'Demo mode' : 'Live'}</div>
       </nav>
       <div className="main">
         <div className="topbar">
-          <h2>{TABS.find((t) => t.id === tab)?.label}</h2>
+          <h2>
+            {groupOfTab(tab).tabs.length > 1 && <><span className="crumb">{groupOfTab(tab).label}</span><span className="crumb-sep"> / </span></>}
+            {TABS.find((t) => t.id === tab)?.label}
+          </h2>
           {DEMO && <span className="pill blue">demo data</span>}
           <button onClick={() => void load()}>↻ Refresh</button>
         </div>
+        {groupOfTab(tab).tabs.length > 1 && (
+          <nav className="subnav" aria-label={groupOfTab(tab).label}>
+            {groupOfTab(tab).tabs.map((id) => (
+              <button key={id} className={tab === id ? 'active' : ''} aria-current={tab === id ? 'page' : undefined} onClick={() => setTab(id)}>
+                {TABS.find((t) => t.id === id)?.label}
+              </button>
+            ))}
+          </nav>
+        )}
         <div className="content">
           {tab === 'overview' && overview && (
             <div className="stat-grid">

@@ -14,6 +14,13 @@ import {
   NetworkScreen, BudgetsScreen, RepresentationScreen, OrganisationScreen,
 } from './m13screens';
 import { VerificationScreen } from './m14screens';
+import { m14 } from './m14api';
+import {
+  hashForScreen, loadCollapsed, loadShortcuts, resolveNavigationLocation,
+  saveCollapsed, saveShortcuts, screenFromHash, NAV_SECTIONS, type NavContext,
+} from './nav';
+import { CommandPalette, NeedsAttention, Sidebar, SecondaryNav, useNavSections, usePaletteHotkey } from './navui';
+import { Icon } from './icons';
 import { getLang, setLang, t } from './i18n';
 
 const ROLES = ['Head of Recruitment', 'First-Team Scout', 'Academy Coach', 'Agent'];
@@ -36,15 +43,11 @@ export type ScreenId =
   | 'imports' | 'coverage' | 'calibration' | 'insight' | 'network' | 'budgets' | 'representation' | 'organisation'
   | 'verification';
 
-// Labels resolve through the i18n catalogue at render time (EN/FR).
-const NAV: ScreenId[] = [
-  'feed', 'filmroom', 'search', 'shortlist', 'requests', 'messages',
-  'assessments', 'recruitment', 'planner', 'video',
-  'opportunities', 'campaigns', 'trialdays', 'outcomes',
-  'insight', 'coverage', 'calibration', 'budgets',
-  'imports', 'network', 'representation', 'verification', 'organisation',
-  'trials', 'fixtures', 'ledger', 'funnel', 'reputation', 'plan',
-];
+// M15-Nav: the sidebar no longer renders a flat list of every screen. The
+// full information architecture lives in src/nav.ts (sections → child tabs),
+// which also drives the command palette, active-route resolution and pinned
+// shortcuts. Every ScreenId above remains a live, deep-linkable destination
+// ("#/<screenId>") — nothing was removed or renamed.
 
 export default function App() {
   // Sessions persist across refreshes (cleared by "Switch org").
@@ -151,7 +154,50 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
 }
 
 function Workspace({ session, onLogout }: { session: Session; onLogout: () => void }) {
-  const [screen, setScreen] = useState<ScreenId>('feed');
+  // Deep links: the hash IS the screen id ("#/verification"). Unknown or
+  // absent hashes land on Home without highlighting a wrong section.
+  const [screen, setScreenState] = useState<ScreenId>(() => screenFromHash(window.location.hash) ?? 'feed');
+  const setScreen = useCallback((id: ScreenId) => {
+    setScreenState(id);
+    try { if (window.location.hash !== hashForScreen(id)) window.history.replaceState(null, '', hashForScreen(id)); } catch { /* sandboxed */ }
+  }, []);
+  useEffect(() => {
+    const onHash = () => { const id = screenFromHash(window.location.hash); if (id) setScreenState(id); };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  // Verification authority — fetched ONCE per session and reused by the nav
+  // filter (no per-render round-trips). Purely convenience: the server keeps
+  // enforcing verification permissions on every request.
+  const [verLevel, setVerLevel] = useState<string | null>(null);
+  useEffect(() => {
+    let gone = false;
+    m14.me(session).then((me) => { if (!gone) setVerLevel(me.verificationLevel ?? null); }).catch(() => { if (!gone) setVerLevel(null); });
+    return () => { gone = true; };
+  }, [session]);
+  const navCtx: NavContext = { role: session.role, verLevel };
+  const sections = useNavSections(navCtx);
+  const loc = resolveNavigationLocation(screen);
+  const activeSection = sections.find((s) => s.id === loc.sectionId) ?? null;
+
+  // Pinned shortcuts (by item id, identity-scoped, permission-rechecked).
+  const [shortcuts, setShortcuts] = useState<ScreenId[]>([]);
+  useEffect(() => { setShortcuts(loadShortcuts(session.org.id, session.userId, navCtx)); }, [session, verLevel]); // eslint-disable-line react-hooks/exhaustive-deps
+  const togglePin = useCallback((id: ScreenId) => {
+    setShortcuts((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+      saveShortcuts(session.org.id, session.userId, next);
+      return next;
+    });
+  }, [session]);
+
+  const [collapsed, setCollapsed] = useState(loadCollapsed);
+  const toggleCollapsed = useCallback(() => setCollapsed((c) => { saveCollapsed(!c); return !c; }), []);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  usePaletteHotkey(useCallback(() => setPaletteOpen(true), []));
+
   const [openPlayerId, setOpenPlayerId] = useState<string | null>(null);
   const [tick, setTick] = useState(0); // bumped by live sync to refetch screens
   const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(null);
@@ -218,37 +264,54 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
 
   const props = { session, tick, notify, openPlayer: setOpenPlayerId };
 
+  const breadcrumbSection = NAV_SECTIONS.find((s) => s.id === loc.sectionId) ?? null;
+  const screenLabel = t((loc.itemId ? (NAV_SECTIONS.flatMap((s) => s.children).find((c) => c.id === screen)?.labelKey ?? `nav.${screen}`) : `nav.${screen}`) as Parameters<typeof t>[0]);
+
   return (
-    <div className="shell">
-      <nav className="sidebar" aria-label="Main navigation">
-        <div className="brand">Scout<span>Box</span> <span className="brand-sub">Pro</span></div>
-        {NAV.map((id) => (
-          <button key={id} className={screen === id ? 'active' : ''} onClick={() => setScreen(id)} style={{ position: 'relative' }} aria-current={screen === id ? 'page' : undefined}>
-            {t(`nav.${id}` as Parameters<typeof t>[0])}
-            {id === 'messages' && unreadMessages > 0 && <span className="nav-badge">{unreadMessages}</span>}
-          </button>
-        ))}
-        <div className="spacer" />
-        <div className="whoami">
-          <b>{session.scoutName}</b>
-          {session.role} · {session.org.name} · {session.org.plan}
-          <div style={{ marginTop: 8 }}>
-            <label style={{ fontSize: 12 }} title={t('common.machineTranslated')}>
-              {t('common.language')}:{' '}
-              <select aria-label={t('common.language')} value={lang} onChange={(e) => { setLang(e.target.value as 'en' | 'fr'); setLangTick((x) => x + 1); }}>
-                <option value="en">English</option>
-                <option value="fr">Français (trad. automatique)</option>
-              </select>
-            </label>
+    <div className={`shell ${collapsed ? 'nav-collapsed' : ''}`}>
+      <Sidebar
+        sections={sections}
+        location={loc}
+        onNavigate={setScreen}
+        collapsed={collapsed}
+        onToggleCollapsed={toggleCollapsed}
+        shortcuts={shortcuts}
+        onTogglePin={togglePin}
+        unreadMessages={unreadMessages}
+        onOpenPalette={() => setPaletteOpen(true)}
+        drawerOpen={drawerOpen}
+        onCloseDrawer={() => setDrawerOpen(false)}
+        footer={
+          <div className="whoami">
+            <b>{session.scoutName}</b>
+            {session.role} · {session.org.name} · {session.org.plan}
+            <div style={{ marginTop: 6 }}>
+              <button onClick={() => setScreen('verification')} style={{ padding: 0, color: 'var(--muted)', fontSize: 12 }}>{t('navsec.myVerification')}</button>
+            </div>
+            <div style={{ marginTop: 6 }}>
+              <label style={{ fontSize: 12 }} title={t('common.machineTranslated')}>
+                {t('common.language')}:{' '}
+                <select aria-label={t('common.language')} value={lang} onChange={(e) => { setLang(e.target.value as 'en' | 'fr'); setLangTick((x) => x + 1); }}>
+                  <option value="en">English</option>
+                  <option value="fr">Français (trad. automatique)</option>
+                </select>
+              </label>
+            </div>
+            <div style={{ marginTop: 6 }}>
+              <button onClick={onLogout} style={{ padding: 0, color: 'var(--accent-2)' }}>Switch org</button>
+            </div>
           </div>
-          <div style={{ marginTop: 8 }}>
-            <button onClick={onLogout} style={{ padding: 0, color: 'var(--accent-2)' }}>Switch org</button>
-          </div>
-        </div>
-      </nav>
+        }
+      />
       <div className="main">
         <div className="topbar">
-          <h2>{t(`nav.${screen}` as Parameters<typeof t>[0])}</h2>
+          <button className="nav-hamburger" aria-label={t('navsec.openMenu')} onClick={() => setDrawerOpen(true)}><Icon name="menu" /></button>
+          <h2>
+            {breadcrumbSection && breadcrumbSection.children.length > 1 && (
+              <><span className="crumb">{t(breadcrumbSection.labelKey as Parameters<typeof t>[0])}</span><span className="crumb-sep"> / </span></>
+            )}
+            {screenLabel}
+          </h2>
           {session.org.trustedPartner && <span className="pill gold">Trusted Partner</span>}
           {session.org.safeguardingCertified && <span className="pill green">🛡 Safeguarding Certified</span>}
           {session.org.type === 'club' && (session.org.verified
@@ -272,7 +335,11 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
             ))}
           </div>
         )}
+        {activeSection && <SecondaryNav section={activeSection} activeItemId={loc.itemId} onNavigate={setScreen} />}
         <div className="content">
+          {screen === 'feed' && (
+            <NeedsAttention session={session} tick={tick} unreadMessages={unreadMessages} verLevel={verLevel} onNavigate={setScreen} />
+          )}
           {screen === 'feed' && <FeedScreen {...props} />}
           {screen === 'filmroom' && <FilmRoomScreen {...props} />}
           {screen === 'fixtures' && <FixturesScreen {...props} />}
@@ -308,6 +375,14 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
         <PlayerDrawer session={session} playerId={openPlayerId} notify={notify} onClose={() => setOpenPlayerId(null)} />
       )}
       {safetyOpen && <SafetyModal session={session} notify={notify} onClose={() => setSafetyOpen(false)} />}
+      <CommandPalette
+        ctx={navCtx}
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onNavigate={setScreen}
+        shortcuts={shortcuts}
+        onTogglePin={togglePin}
+      />
       {toast && <Toast text={toast.text} error={toast.error} />}
     </div>
   );

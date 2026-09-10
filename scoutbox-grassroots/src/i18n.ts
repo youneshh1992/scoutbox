@@ -95,6 +95,21 @@ const en = {
 
   // ---- M14 Verification & Trust
   'nav.verification': 'Verification',
+  // M15-Nav: sections, secondary labels, palette, shortcuts (EN)
+  'navsec.home': 'Home', 'navsec.discover': 'Discover', 'navsec.recruitment': 'Recruitment',
+  'navsec.planning': 'Squad & Planning', 'navsec.network': 'Network', 'navsec.organisation': 'Organisation',
+  'navsec.search': 'Search ScoutBox', 'navsec.searchAria': 'Search ScoutBox (Ctrl+K / \u2318K)',
+  'navsec.searchPlaceholder': 'Jump to\u2026 (e.g. verification, trials, coverage)',
+  'navsec.searchResults': 'Destinations', 'navsec.searchEmpty': 'No destination matches \u2014 check the spelling, or you may not have access.',
+  'navsec.shortcuts': 'Shortcuts', 'navsec.pin': 'Pin to Shortcuts', 'navsec.unpin': 'Remove shortcut',
+  'navsec.collapse': 'Collapse sidebar', 'navsec.expand': 'Expand sidebar', 'navsec.openMenu': 'Open navigation',
+  'navsec.myVerification': 'My verification',
+  'nav2.search': 'Players', 'nav2.recruitment': 'Pipeline', 'nav2.video': 'Evidence & Video',
+  'nav2.requests': 'Player Requests', 'nav2.outcomes': 'Signings & Outcomes', 'nav2.planner': 'Squad Planner',
+  'nav2.network': 'Clubs & Groups', 'nav2.organisation': 'Staff & Security', 'nav2.imports': 'Integrations',
+  'nav2.budgets': 'Finance',
+  'navsec.attnTitle': 'Needs your attention', 'navsec.attnMessages': 'Unread player & guardian messages', 'navsec.attnVerification': 'Verification requests awaiting a decision',
+  'navsec.team': 'Team',
   'm14.intro': 'Verification records exactly WHAT ScoutBox established, who established it and on what evidence — never a bare “verified”. Verification proves facts; access rules are unchanged by it.',
   'm14.badge.present': 'present', 'm14.badge.verifiedOn': 'verified', 'm14.badge.identity': 'Identity verified',
   'm14.badge.none': 'No verified claims to display.',
@@ -240,6 +255,21 @@ const fr: typeof en = {
 
   // ---- M14 Vérification et confiance
   'nav.verification': 'Vérification',
+  // M15-Nav (FR)
+  'navsec.home': 'Accueil', 'navsec.discover': 'D\u00e9couvrir', 'navsec.recruitment': 'Recrutement',
+  'navsec.planning': 'Effectif et planification', 'navsec.network': 'R\u00e9seau', 'navsec.organisation': 'Organisation',
+  'navsec.search': 'Rechercher ScoutBox', 'navsec.searchAria': 'Rechercher dans ScoutBox (Ctrl+K / \u2318K)',
+  'navsec.searchPlaceholder': 'Aller \u00e0\u2026 (ex. v\u00e9rification, essais, couverture)',
+  'navsec.searchResults': 'Destinations', 'navsec.searchEmpty': 'Aucune destination \u2014 v\u00e9rifiez l\u2019orthographe, ou vous n\u2019y avez peut-\u00eatre pas acc\u00e8s.',
+  'navsec.shortcuts': 'Raccourcis', 'navsec.pin': '\u00c9pingler aux raccourcis', 'navsec.unpin': 'Retirer le raccourci',
+  'navsec.collapse': 'R\u00e9duire le menu', 'navsec.expand': 'D\u00e9ployer le menu', 'navsec.openMenu': 'Ouvrir la navigation',
+  'navsec.myVerification': 'Ma v\u00e9rification',
+  'nav2.search': 'Joueurs', 'nav2.recruitment': 'Pipeline', 'nav2.video': 'Preuves et vid\u00e9o',
+  'nav2.requests': 'Demandes joueurs', 'nav2.outcomes': 'Signatures et suivi', 'nav2.planner': 'Planificateur d\u2019effectif',
+  'nav2.network': 'Clubs et groupes', 'nav2.organisation': 'Personnel et s\u00e9curit\u00e9', 'nav2.imports': 'Int\u00e9grations',
+  'nav2.budgets': 'Finances',
+  'navsec.attnTitle': 'Requiert votre attention', 'navsec.attnMessages': 'Messages joueurs et tuteurs non lus', 'navsec.attnVerification': 'Demandes de v\u00e9rification en attente de d\u00e9cision',
+  'navsec.team': '\u00c9quipe',
   'm14.intro': 'La vérification enregistre exactement CE QUE ScoutBox a établi, par qui et sur quelles preuves — jamais un simple « vérifié ». La vérification prouve des faits ; les règles d’accès restent inchangées.',
   'm14.badge.present': 'présent', 'm14.badge.verifiedOn': 'vérifié le', 'm14.badge.identity': 'Identité vérifiée',
   'm14.badge.none': 'Aucune vérification à afficher.',

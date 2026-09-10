@@ -19,7 +19,7 @@ await club.goto(`${HOST}/club/`);
 await club.click('.org-card:has-text("Eastport FC")');
 await club.fill('.enter-row input', 'Maria Keane');
 await club.click('button:has-text("Enter workspace")');
-await club.click('nav.sidebar button:has-text("Search")');
+await club.evaluate(() => { location.hash = '#/search'; }); // M15-Nav deep link (Search)
 await club.waitForSelector('.player-card:not(.skeleton)');
 
 // ---- player tab joins (same origin → bus connects, presence marks peer)
@@ -63,7 +63,7 @@ await club.waitForSelector('.nav-badge', { timeout: 15000 });
 const badge = await club.locator('.nav-badge').first().innerText();
 if (!/^\d+$/.test(badge.trim()) || Number(badge) < 1) fail(`club badge not a count: "${badge}"`);
 say(`club: red Messages badge shows ${badge.trim()}`);
-await club.click('nav.sidebar button:has-text("Messages")');
+await club.evaluate(() => { location.hash = '#/messages'; }); // M15-Nav deep link (Messages)
 await club.click('.list-row:has-text("Kola Adeyemi")');
 await club.waitForSelector('text=happy to talk this week', { timeout: 10000 });
 say('club: player message visible in thread');

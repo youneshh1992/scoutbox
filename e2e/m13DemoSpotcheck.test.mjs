@@ -22,18 +22,18 @@ await club.click('.org-card:has-text("Eastport FC")');
 await club.fill('.enter-row input', 'Maria Keane');
 await club.click('button:has-text("Enter workspace")');
 await club.waitForSelector('.topbar', { timeout: 20000 });
-await club.click('nav.sidebar button:has-text("Scouting Insight")');
+await club.evaluate(() => { location.hash = '#/insight'; }); // M15-Nav deep link (Scouting Insight)
 await club.waitForSelector('text=Exposure funnel', { timeout: 15000 });
 await club.waitForSelector('text=Danny Osei', { timeout: 10000 });
 say('pro demo: Scouting Insight renders the exposure funnel + review queue');
-await club.click('nav.sidebar button:has-text("Imports & Integrations")');
+await club.evaluate(() => { location.hash = '#/imports'; }); // M15-Nav deep link (Imports & Integrations)
 await club.waitForSelector('text=Identity reviews', { timeout: 10000 });
 await club.waitForSelector('text=not configured', { timeout: 10000 });
 say('pro demo: imports + honest not-configured connectors');
-await club.click('nav.sidebar button:has-text("Deal Budgets")');
+await club.evaluate(() => { location.hash = '#/budgets'; }); // M15-Nav deep link (Deal Budgets)
 await club.waitForSelector('text=no market values, no resale projections', { timeout: 10000 });
 say('pro demo: budgets screen carries the no-invented-values note');
-await club.click('nav.sidebar button:has-text("Club Network")');
+await club.evaluate(() => { location.hash = '#/network'; }); // M15-Nav deep link (Club Network)
 await club.waitForSelector('text=North West Development Group', { timeout: 10000 });
 await club.waitForSelector('text=Leo Marchetti', { timeout: 10000 });
 say('pro demo: groups + transition pack fixtures render');
@@ -49,9 +49,9 @@ await grass.click('.org-card:has-text("Hackney Marsh")');
 await grass.fill('.enter-row input', 'Dee Coach');
 await grass.click('button:has-text("Enter workspace")');
 await grass.waitForSelector('.topbar', { timeout: 20000 });
-await grass.click('nav.sidebar button:has-text("Coverage")');
+await grass.evaluate(() => { location.hash = '#/coverage'; }); // M15-Nav deep link (Coverage)
 await grass.waitForSelector('text=Travel time/route estimates unavailable', { timeout: 15000 });
-await grass.click('nav.sidebar button:has-text("Organisation")');
+await grass.evaluate(() => { location.hash = '#/organisation'; }); // M15-Nav deep link (Organisation)
 await grass.waitForSelector('text=Onboarding checklist', { timeout: 10000 });
 say('grassroots demo: coverage (honest travel note) + onboarding render');
 await grass.close();
@@ -73,11 +73,14 @@ await player.close();
 // ---- Trust & Safety demo: M13 tabs
 const admin = await page('http://localhost:8099/admin/');
 await admin.waitForSelector('text=Report queue', { timeout: 20000 });
-await admin.click('button:has-text("Delivery centre")');
+await admin.click('nav.sidebar button:has-text("Operations")');
+await admin.click('nav.subnav button:has-text("Delivery centre")');
 await admin.waitForSelector('text=no message leaves this machine', { timeout: 10000 });
-await admin.click('button:has-text("Support desk")');
+await admin.click('nav.sidebar button:has-text("Cases")');
+await admin.click('nav.subnav button:has-text("Support desk")');
 await admin.waitForSelector('text=no silent impersonation path', { timeout: 10000 });
-await admin.click('button:has-text("Backups")');
+await admin.click('nav.sidebar button:has-text("System")');
+await admin.click('nav.subnav button:has-text("Backups")');
 await admin.waitForSelector('text=never over the live database', { timeout: 10000 });
 say('admin demo: delivery centre, support desk and backups tabs render honestly');
 await admin.close();

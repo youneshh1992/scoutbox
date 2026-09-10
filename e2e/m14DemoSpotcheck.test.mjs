@@ -25,7 +25,7 @@ await club.click('.org-card:has-text("Eastport FC")');
 await club.fill('.enter-row input', 'Maria Keane');
 await club.click('button:has-text("Enter workspace")');
 await club.waitForSelector('.topbar', { timeout: 20000 });
-await club.click('nav.sidebar button:has-text("Verification")');
+await club.evaluate(() => { location.hash = '#/verification'; }); // M15-Nav deep link (Verification)
 await club.waitForSelector('text=Verify your football role', { timeout: 15000 });
 await club.waitForSelector('text=Role verified: Head of Recruitment', { timeout: 10000 });
 // licence honesty: submitted credential must NOT read as verified
@@ -49,7 +49,7 @@ await club.waitForSelector('text=verification root admin', { timeout: 10000 });
 say('pro demo: domains + root admin persona render');
 // FR switch on the verification screen
 await club.selectOption('select[aria-label="Language"]', 'fr');
-await club.waitForSelector('nav.sidebar button:has-text("Vérification")', { timeout: 10000 });
+await club.waitForSelector('nav.subnav button:has-text("Vérification")', { timeout: 10000 });
 await club.getByRole('tab', { name: 'Ma vérification' }).click();
 await club.waitForSelector('text=Vérifiez votre rôle dans le football', { timeout: 10000 });
 say('pro demo: FR switch translates the Verification screen');
@@ -61,7 +61,7 @@ await grass.click('.org-card:has-text("Hackney Marsh")');
 await grass.fill('.enter-row input', 'Dee Coach');
 await grass.click('button:has-text("Enter workspace")');
 await grass.waitForSelector('.topbar', { timeout: 20000 });
-await grass.click('nav.sidebar button:has-text("Verification")');
+await grass.evaluate(() => { location.hash = '#/verification'; }); // M15-Nav deep link (Verification)
 await grass.waitForSelector('text=Verify your football role', { timeout: 15000 });
 const gText = await grass.locator('body').innerText();
 if (!gText.includes('Hackney Marsh Rovers')) fail('grassroots verification screen missing its own club identity');
@@ -90,7 +90,8 @@ await admin.waitForSelector('text=Marsh Lane Juniors', { timeout: 10000 });
 await admin.waitForSelector('text=dnsOwnership=not_configured', { timeout: 10000 });
 await admin.waitForSelector('text=signals, not fraud', { timeout: 10000 }).catch(() => {});
 say('T&S demo: root request (pro) + grassroots request awaiting review, honest check labels');
-await admin.click('button:has-text("Ver. disputes")');
+await admin.click('nav.sidebar button:has-text("Cases")');
+await admin.click('nav.subnav button:has-text("Ver. disputes")');
 await admin.waitForSelector('text=worked through July', { timeout: 10000 });
 say('T&S demo: dispute case renders with preserved reason');
 await admin.close();

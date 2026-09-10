@@ -125,7 +125,7 @@ await club.click('.org-card:has-text("Eastport FC")');
 await club.fill('.enter-row input', 'Maria Keane');
 await club.click('button:has-text("Enter workspace")');
 await club.waitForSelector('.topbar', { timeout: 20000 });
-await club.click('nav.sidebar button:has-text("Opportunities")');
+await club.evaluate(() => { location.hash = '#/opportunities'; }); // M15-Nav deep link (Opportunities)
 await club.locator('.list-row', { hasText: 'First-team look' }).locator('button:has-text("Applications")').click();
 await club.waitForSelector('text=Kola Adeyemi', { timeout: 15000 });
 await club.locator('.list-row', { hasText: 'Kola Adeyemi' }).locator('button:has-text("Suitability")').click();
@@ -135,7 +135,7 @@ if (clubText.includes('BTEC') || clubText.includes('40 km') || clubText.includes
 say('L1: Pro sees the approved verdict summary — and none of the private reasons');
 
 // ====================================================== L2 coverage+insight
-await club.click('nav.sidebar button:has-text("Coverage")');
+await club.evaluate(() => { location.hash = '#/coverage'; }); // M15-Nav deep link (Coverage)
 await club.waitForSelector('text=Coverage plans', { timeout: 15000 });
 await club.fill('input[aria-label="Home"]', 'Eastport U21');
 await club.fill('input[aria-label="Away"]', 'Harbour Rovers U21');
@@ -152,7 +152,7 @@ await club.locator('button:has-text("Mark observed")').first().click();
 await club.waitForSelector('text=observed', { timeout: 10000 });
 say('L2: fixture + assignment created through the real Coverage screen (honest travel note shown)');
 
-await club.click('nav.sidebar button:has-text("Scouting Insight")');
+await club.evaluate(() => { location.hash = '#/insight'; }); // M15-Nav deep link (Scouting Insight)
 await club.waitForSelector('text=Exposure funnel', { timeout: 15000 });
 await club.waitForSelector('text=Not yet assessed', { timeout: 10000 });
 say('L2: exposure funnel + not-yet-assessed review queue render for the lead');
@@ -181,7 +181,7 @@ await player.locator('text=Share with club').click();
 await player.waitForSelector('text=Shared — expiring and revocable', { timeout: 10000 });
 say('L4: adult player opened a transition case and granted one specific club');
 
-await club.click('nav.sidebar button:has-text("Club Network")');
+await club.evaluate(() => { location.hash = '#/network'; }); // M15-Nav deep link (Club Network)
 await club.waitForSelector('text=Transition packs shared with you', { timeout: 15000 });
 await club.waitForSelector('text=Kola Adeyemi', { timeout: 10000 });
 await club.locator('button:has-text("Open pack")').first().click();
@@ -213,11 +213,11 @@ await grass.click('.org-card:has-text("Hackney Marsh")');
 await grass.fill('.enter-row input', 'Dee Coach');
 await grass.click('button:has-text("Enter workspace")');
 await grass.waitForSelector('.topbar', { timeout: 20000 });
-await grass.click('nav.sidebar button:has-text("Scouting Insight")');
+await grass.evaluate(() => { location.hash = '#/insight'; }); // M15-Nav deep link (Scouting Insight)
 await grass.waitForSelector('text=Not yet assessed', { timeout: 15000 });
-await grass.click('nav.sidebar button:has-text("Club Network")');
+await grass.evaluate(() => { location.hash = '#/network'; }); // M15-Nav deep link (Club Network)
 await grass.waitForSelector('text=No group memberships', { timeout: 15000 });
-await grass.click('nav.sidebar button:has-text("Organisation")');
+await grass.evaluate(() => { location.hash = '#/organisation'; }); // M15-Nav deep link (Organisation)
 await grass.waitForSelector('text=Onboarding checklist', { timeout: 15000 });
 say('L4b: grassroots context renders its M13 screens — isolated by default, no shares, own onboarding');
 

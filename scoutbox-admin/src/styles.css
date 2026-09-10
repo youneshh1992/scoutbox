@@ -342,3 +342,11 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 }
 .wall b { color: #ff9ec4; }
 .wall p { color: var(--muted); font-size: 13.5px; margin-top: 6px; }
+
+/* ---------- M15-Nav: grouped T&S navigation ---------- */
+.subnav { display: flex; gap: 4px; padding: 8px 22px 0; border-bottom: 1px solid var(--line); background: var(--bg-2); overflow-x: auto; flex-shrink: 0; }
+.subnav button { background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 12px 10px; color: var(--muted); white-space: nowrap; font-size: 13.5px; }
+.subnav button.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+.subnav button:focus-visible, .sidebar button:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 1px; }
+.crumb, .crumb-sep { color: var(--muted); font-weight: 500; }
+.sidebar { min-height: 0; overflow-y: auto; }

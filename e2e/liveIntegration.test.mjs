@@ -88,7 +88,7 @@ async function loginPortal(page, host, orgName, userName) {
   await page.waitForSelector('.topbar', { timeout: 20000 });
 }
 async function portalRequestContact(page, playerName, message, minor = false) {
-  await page.click('nav.sidebar button:has-text("Search")');
+  await page.evaluate(() => { location.hash = '#/search'; }); // M15-Nav deep link (Search)
   await page.waitForSelector('.player-card:not(.skeleton)', { timeout: 20000 });
   await page.click(`.player-card:has-text("${playerName}")`);
   await page.waitForSelector('.drawer h3', { timeout: 10000 });
@@ -98,7 +98,7 @@ async function portalRequestContact(page, playerName, message, minor = false) {
   await page.click('.drawer button:has-text("Close")');
 }
 async function portalOpenThread(page, playerName) {
-  await page.click('nav.sidebar button:has-text("Messages")');
+  await page.evaluate(() => { location.hash = '#/messages'; }); // M15-Nav deep link (Messages)
   await page.click(`.list-row:has-text("${playerName}")`);
 }
 async function portalSend(page, text) {
@@ -138,7 +138,7 @@ await club.waitForSelector('text=Works for me — see you there.', { timeout: 15
 say('A: player → club reply delivered live');
 
 // a second thread's unread badge: send another player message while club is elsewhere
-await club.click('nav.sidebar button:has-text("Search")'); // navigate away
+await club.evaluate(() => { location.hash = '#/search'; }); // M15-Nav deep link (Search) // navigate away
 await player.fill('input[placeholder="Write a message (no personal contact details)"]', 'One more thing — boots or trainers?');
 await player.keyboard.press('Enter');
 await club.waitForSelector('nav.sidebar .nav-badge', { timeout: 15000 });

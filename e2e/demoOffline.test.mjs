@@ -20,7 +20,7 @@ const browser = await chromium.launch({ executablePath: EXE });
   await page.click('.org-card:has-text("Eastport FC")');
   await page.fill('.enter-row input', 'Maria Keane');
   await page.click('button:has-text("Enter workspace")');
-  await page.click('nav.sidebar button:has-text("Search")');
+  await page.evaluate(() => { location.hash = '#/search'; }); // M15-Nav deep link (Search)
   await page.waitForSelector('.player-card:not(.skeleton) .name');
   console.log('club demo: search shows', await page.locator('.player-card:not(.skeleton)').count(), 'players');
   await page.click('.player-card:not(.skeleton) >> nth=0');
@@ -50,7 +50,7 @@ const browser = await chromium.launch({ executablePath: EXE });
   await page.click('.org-card:has-text("Hackney Marsh Rovers")');
   await page.fill('.enter-row input', 'Dee Mensah');
   await page.click('button:has-text("Enter workspace")');
-  await page.click('nav.sidebar button:has-text("Search")');
+  await page.evaluate(() => { location.hash = '#/search'; }); // M15-Nav deep link (Search)
   await page.waitForSelector('text=within 50 km');
   await page.waitForSelector('.player-card:not(.skeleton) .name');
   const names = await page.locator('.player-card:not(.skeleton) .name').allInnerTexts();
