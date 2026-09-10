@@ -201,6 +201,22 @@ const en = {
   'bt.wallSuspended': 'This organisation is suspended and cannot assign Box Training.',
   'bt.wallMinor': 'The under-18 wall applies — this player is not assignable by your organisation.',
   'bt.wallNotVisible': 'This player is not visible to your organisation under the standing rules (distance, verification or a block).',
+  // M16.1 — At-Home Combine (club)
+  'cmb.title': 'At-Home Combine', 'cmb.show': 'Show', 'cmb.hide': 'Hide',
+  'cmb.tagline': 'Real numbers. Real evidence. From anywhere.', 'cmb.poweredBy': 'Powered by Box Cam.',
+  'cmb.results': 'Combine Verified results', 'cmb.verified': 'Combine Verified', 'cmb.noResults': 'No verified Combine result yet.',
+  'cmb.notShared': 'This player has not shared Combine results with your organisation. Request an At-Home Combine or ask them to share development activity.',
+  'cmb.compare': 'Results comparison', 'cmb.player': 'Player',
+  'cmb.requests': 'Club Combine requests', 'cmb.noRequests': 'No Club Combine requested yet.', 'cmb.deadline': 'by', 'cmb.cancel': 'Cancel',
+  'cmb.requestTitle': 'Request a Club Combine', 'cmb.requestBtn': 'Request Combine', 'cmb.requested': 'Club Combine requested.',
+  'cmb.titlePlaceholder': 'Title (optional)', 'cmb.instructions': 'Optional instructions', 'cmb.needProtocols': 'Select at least one standardized protocol.',
+  'cmb.notCreated': 'No request created — this player is not currently visible to your organisation.',
+  'cmb.notSupported': 'ⓘ Some tests are not yet measurable on the player’s device — those results are shown honestly as unsupported, never estimated. Box Control 60 is Combine Verified on web capture today.',
+  'cmb.requestNote': 'You select standardized tests only — you cannot change their rules. You receive Combine Verified results, never raw home footage.',
+  'cmb.wallAgency': 'Agencies cannot request At-Home Combines.',
+  'cmb.wallUnverified': 'Only a verified organisation can create a Club Combine.',
+  'cmb.wallSuspended': 'This organisation is suspended and cannot create a Club Combine.',
+  'cmb.wallNotVisible': 'This player is not visible to your organisation under the standing rules (distance, verification or a block).',
 };
 
 const fr: typeof en = {
@@ -400,6 +416,22 @@ const fr: typeof en = {
   'bt.wallSuspended': 'Cette organisation est suspendue et ne peut pas assigner de Box Training.',
   'bt.wallMinor': 'Le mur des moins de 18 ans s’applique — ce joueur n’est pas assignable par votre organisation.',
   'bt.wallNotVisible': 'Ce joueur n’est pas visible pour votre organisation selon les règles en vigueur (distance, vérification ou blocage).',
+  // M16.1 — At-Home Combine (club)
+  'cmb.title': 'At-Home Combine', 'cmb.show': 'Afficher', 'cmb.hide': 'Masquer',
+  'cmb.tagline': 'Des chiffres réels. Des preuves réelles. De partout.', 'cmb.poweredBy': 'Propulsé par Box Cam.',
+  'cmb.results': 'Résultats Combine Verified', 'cmb.verified': 'Combine Verified', 'cmb.noResults': 'Aucun résultat Combine vérifié pour l’instant.',
+  'cmb.notShared': 'Ce joueur n’a pas partagé de résultats Combine avec votre organisation. Demandez un At-Home Combine ou invitez-le à partager son activité de développement.',
+  'cmb.compare': 'Comparaison des résultats', 'cmb.player': 'Joueur',
+  'cmb.requests': 'Demandes de Club Combine', 'cmb.noRequests': 'Aucun Club Combine demandé pour l’instant.', 'cmb.deadline': 'avant le', 'cmb.cancel': 'Annuler',
+  'cmb.requestTitle': 'Demander un Club Combine', 'cmb.requestBtn': 'Demander un Combine', 'cmb.requested': 'Club Combine demandé.',
+  'cmb.titlePlaceholder': 'Titre (facultatif)', 'cmb.instructions': 'Consignes (facultatif)', 'cmb.needProtocols': 'Sélectionnez au moins un protocole standardisé.',
+  'cmb.notCreated': 'Aucune demande créée — ce joueur n’est pas actuellement visible pour votre organisation.',
+  'cmb.notSupported': 'ⓘ Certains tests ne sont pas encore mesurables sur l’appareil du joueur — ces résultats sont indiqués honnêtement comme non pris en charge, jamais estimés. Box Control 60 est Combine Verified sur la capture web aujourd’hui.',
+  'cmb.requestNote': 'Vous ne sélectionnez que des tests standardisés — vous ne pouvez pas en changer les règles. Vous recevez des résultats Combine Verified, jamais de vidéo brute de la maison.',
+  'cmb.wallAgency': 'Les agences ne peuvent pas demander d’At-Home Combine.',
+  'cmb.wallUnverified': 'Seule une organisation vérifiée peut créer un Club Combine.',
+  'cmb.wallSuspended': 'Cette organisation est suspendue et ne peut pas créer de Club Combine.',
+  'cmb.wallNotVisible': 'Ce joueur n’est pas visible pour votre organisation selon les règles en vigueur (distance, vérification ou blocage).',
 };
 
 export type Lang = 'en' | 'fr';

@@ -55,7 +55,9 @@ export function M16Panel({ adminKey, say }: { tab: M16Tab; adminKey: string; say
       <div className="notice">
         Box Cam results are server-derived from observed activity. Trust &amp; Safety can invalidate a result (or let it stand)
         with a written, audited reason, and restore an invalidated one — but never fabricates verified duration, repetition
-        counts or completion. Simulated (demo) sessions are always labelled.
+        counts or completion. Simulated (demo) sessions are always labelled. At-Home Combine results are derived from the
+        bound Box Cam session: invalidating a session immediately drops its Combine Verified status everywhere, and a restore
+        brings it back — Trust &amp; Safety never types a replacement Combine number.
       </div>
       <h3>Box Cam disputes ({disputes.filter((d) => d.status === 'open').length} open)
         {' '}<button onClick={() => setShowResolved((x) => !x)}>{showResolved ? 'Open only' : 'Include resolved'}</button>
