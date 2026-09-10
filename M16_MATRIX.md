@@ -116,5 +116,26 @@ static + versioned in code (`m16/drills.mjs`), not persisted.
 | 79 | Rate limits (109) | session/event/challenge/dispute limits | limit tests LAST | ✅ | — |
 | 80 | Performance measured (107) | batching; measured result/history/dashboard timings | perf checks | ✅ | measurements, not SLAs |
 | 81 | Error recovery, no fake success (108) | interruption → paused verified clock; unrecoverable → unable_to_verify | tests | ✅ | — |
-| 82 | Docs M16_BOX_CAM.md (110) | 25 sections | review | ✅ | — |
+| 82 | Docs M16_BOX_CAM.md (110) | 25 sections + mermaid | review | ✅ | — |
 | 83 | Quality bar checklist (116) | each item asserted by a test or review note | m16E2E | ✅ | — |
+
+## Verification results (measured, not asserted)
+
+New M16 suites:
+
+- `scoutbox-server/scripts/m16E2E.mjs` — **115 checks, 55 negative/abuse
+  (48% ≥ the 40% floor)**: §102 active-time ms-accuracy, §103 rep dedupe,
+  state/streak/challenge engine units, journeys B1–B12, the §99 abuse
+  catalogue, the §104 privacy matrix (8 viewer contexts), metrics and the
+  rate-limit sweep (run last).
+- `e2e/m16Live.test.mjs` — **10 browser checks** across player/coach/T&S with
+  a fake camera device: live capture with separated verified/session clocks,
+  coach assign → result flow-back, T&S Box Cam case tab.
+
+Full regression battery after M16 (every pre-existing suite, none removed or
+weakened): unit/trust 23 · apiE2E 129 · m12E2E 143 · m13E2E 212 · m14E2E 193
+· m141E2E 94 · **m15E2E 185** (was 184 — the provenance check now asserts
+"8 M15 values + `box_cam_observed`, correctly ranked": an extension) ·
+m16E2E 115 · connectedE2E 43 · navConfig 111 · navLive 30 · m12/m13/m14/m15/
+**m16** live suites · liveIntegration · staleSessionProbe 14 · crosstab ·
+demoOffline · spotchecks · tsc ×4 · builds ×4 — all green.

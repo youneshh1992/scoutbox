@@ -52,6 +52,9 @@ export function registerBoxTraining(ctx) {
   };
   ctx.boxAssignmentView = assignmentView;
 
+  // Org-side drill registry (same versioned catalogue players see).
+  orgRouter.get('/box-cam/drills', (_req, res) => res.json({ drills: ctx.drillList() }));
+
   orgRouter.post('/box-cam/assignments', (req, res) => {
     if (req.org.type === 'agency') return res.status(403).json({ error: 'AGENCY_NOT_ELIGIBLE', message: 'Agencies cannot assign Box Training.' });
     if (req.org.suspended) return res.status(403).json({ error: 'ORG_SUSPENDED' });
