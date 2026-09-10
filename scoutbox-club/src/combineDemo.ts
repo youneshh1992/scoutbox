@@ -7,8 +7,18 @@ import { STANDARD_PROTOCOLS } from './combineApi';
 const now = Date.now();
 const day = 86_400_000;
 const fmt = (id: string, v: number) => id === 'combine-box-control-60' ? v.toFixed(1) : `${Math.round(v)}`;
-const title = (id: string) => STANDARD_PROTOCOLS.find((p) => p.id === id)?.title ?? id;
-const unit = (id: string) => STANDARD_PROTOCOLS.find((p) => p.id === id)?.metricUnit ?? '';
+// Local metadata map — deliberately does NOT read STANDARD_PROTOCOLS, because
+// combineApi imports this module before that export is initialized (circular
+// import); touching it at module-load time would be undefined.
+const META: Record<string, { title: string; unit: string }> = {
+  'combine-box-control-60': { title: 'Box Control 60', unit: 'seconds' },
+  'combine-box-touch-60': { title: 'Box Touch 60', unit: 'touches' },
+  'combine-box-juggle': { title: 'Box Juggle', unit: 'juggles' },
+  'combine-box-footwork': { title: 'Box Footwork', unit: 'intervals' },
+  'combine-box-strength-60': { title: 'Box Strength 60', unit: 'reps' },
+};
+const title = (id: string) => META[id]?.title ?? id;
+const unit = (id: string) => META[id]?.unit ?? '';
 
 const result = (id: string, value: number, ageDays: number): CombineResult => ({
   protocolId: id, protocolVersion: 1, protocolTitle: title(id), metricUnit: unit(id),
