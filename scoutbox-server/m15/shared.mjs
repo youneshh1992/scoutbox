@@ -17,7 +17,12 @@ import crypto from 'node:crypto';
 // never rendered as a score.
 export const PROVENANCE = [
   'player_submitted', 'guardian_submitted', 'system_recorded',
-  'historical_migration', 'scoutbox_reviewed', 'verified_coach_confirmed',
+  'historical_migration',
+  // M16: first-party observed training evidence — stronger than a player's
+  // own submission, deliberately weaker than a ScoutBox review or any
+  // organisation confirmation. Never an authoritative current-club source.
+  'box_cam_observed',
+  'scoutbox_reviewed', 'verified_coach_confirmed',
   'verified_club_confirmed', 'authoritative_registry',
 ];
 export const provRank = (p) => PROVENANCE.indexOf(p);
@@ -46,6 +51,7 @@ export const PROVENANCE_COPY = {
   verified_coach_confirmed: 'Confirmed by a coach whose club affiliation was verified when they confirmed it.',
   verified_club_confirmed: 'Confirmed by an authorised administrator of the named organisation.',
   authoritative_registry: 'Confirmed against an authoritative registry.',
+  box_cam_observed: 'Recorded live through ScoutBox Box Cam. ScoutBox observed activity consistent with the selected supported drill — this describes observed training, not football ability.',
 };
 
 // ------------------------------------------------------------- visibility
@@ -320,6 +326,28 @@ export function buildTimeline(src) {
     });
   }
 
+  // M16 Box Cam: meaningful sessions only (the caller pre-filters — the
+  // career timeline is never flooded with every minor session; detailed
+  // history lives in Box Training).
+  for (const b of src.boxSessions ?? []) {
+    push({
+      id: evId('box_session', b.id, 'box_session_completed'), type: 'box_session_completed',
+      when: normWhen(b.endedAt), title: { drill: b.drillTitle, verifiedActive: b.verifiedActive, reps: b.verifiedReps ?? null, targetCompleted: b.targetCompleted === true },
+      org: b.assignedByOrg ? { id: b.assignedByOrg.id, name: b.assignedByOrg.name } : null,
+      provenance: 'box_cam_observed', visibility: 'private',
+      source: { type: 'box_session', id: b.id },
+    });
+  }
+  for (const c of src.boxChallenges ?? []) {
+    push({
+      id: evId('box_challenge', c.entryId, 'box_challenge_completed'), type: 'box_challenge_completed',
+      when: normWhen(c.completedAt), title: { label: c.title, publisher: c.publisherName ?? 'ScoutBox' },
+      org: c.publisherOrg ? { id: c.publisherOrg.id, name: c.publisherOrg.name } : null,
+      provenance: 'box_cam_observed', visibility: 'recruitment', publicEligible: true,
+      source: { type: 'box_challenge_entry', id: c.entryId },
+    });
+  }
+
   // Position changes (self-declared history).
   for (const p of src.positionHistory ?? []) {
     push({
@@ -443,9 +471,11 @@ export function temporalConflicts({ events = [], history = [], dob = null }) {
 // Deterministic, versioned, non-shaming. Each rule: stable id, version,
 // condition over facts, explanation code (clients translate), suggested
 // action, auto-resolution = condition turning false. NO AI, NO scores.
-export const GAP_RULES_VERSION = 1;
+export const GAP_RULES_VERSION = 2;
 export const GAP_RULES = [
   { id: 'gap.full_match_recent', v: 1, category: 'match_evidence', test: (f) => !f.hasRecentFullMatch },
+  // v2 (M16): contextual and optional — never daily-training pressure.
+  { id: 'gap.training_evidence', v: 2, category: 'training', test: (f) => !f.hasRecentTrainingEvidence },
   { id: 'gap.coach_reference', v: 1, category: 'references', test: (f) => f.referenceCount === 0 },
   { id: 'gap.current_club_confirmed', v: 1, category: 'club_history', test: (f) => !f.hasConfirmedCurrentClub },
   { id: 'gap.assessment_recent', v: 1, category: 'assessments', test: (f) => !f.hasRecentAssessment },
@@ -565,6 +595,7 @@ export function projectPassport(full, viewer, opts = {}) {
         development: full.developmentSummary,
         trials: full.trialsSummary,
         completeness: full.completeness,
+        developmentActivity: full.developmentActivity ?? null,
         sharing: full.sharingSummary,
         prefs: full.prefs ? { bio: full.prefs.bio ?? null, positions: full.prefs.positions ?? null, availability: full.prefs.availability ?? null, availableFrom: full.prefs.availableFrom ?? null, publicSelections: full.prefs.publicSelections ?? [] } : null,
       };
@@ -595,6 +626,10 @@ export function projectPassport(full, viewer, opts = {}) {
         trials: (full.trialsForOrg ?? []).map((t) => ({ id: t.id, org: t.orgName, date: t.proposedDate ?? null, hasReport: !!t.report })),
         availability: full.status.availability,
         representation: viewer === 'agency' || full.player.age >= 18 ? full.status.representation : null,
+        // Development activity is an aggregate the player (or guardian)
+        // explicitly opted into sharing for recruitment — never raw home
+        // sessions, never automatic.
+        developmentActivity: full.boxShareRecruitment ? full.developmentActivity ?? null : null,
         shareMode,
       };
     }

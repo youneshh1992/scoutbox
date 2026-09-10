@@ -17,6 +17,7 @@ import { registerM12 } from './m12/index.mjs';
 import { registerM13 } from './m13/index.mjs';
 import { registerM14 } from './m14/index.mjs';
 import { registerM15 } from './m15/index.mjs';
+import { registerM16 } from './m16/index.mjs';
 import { requestInstrumentation } from './m13/enterprise.mjs';
 import { totpValid } from './m13/shared.mjs';
 import {
@@ -3517,6 +3518,11 @@ registerM15({
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, m14: m14Ctx,
+});
+registerM16({
+  db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast,
+  findPlayer, isBlocked, moderateOrRefuse,
 });
 
 // ---------------------------------------------------- static app hosting

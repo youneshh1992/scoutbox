@@ -10,6 +10,11 @@ import {
   buildTimeline, clubHistory, currentStatus, temporalConflicts, completeness,
   projectPassport, normWhen, whenDisplay, evId, PROVENANCE_COPY,
 } from './shared.mjs';
+// M16: the Passport PROJECTS Box Cam data — it never copies it.
+import { developmentActivity as boxDevelopmentActivity, fmtMs as boxFmtMs } from '../m16/shared.mjs';
+import { DRILLS as BOX_DRILLS, latestDrill as boxLatestDrill } from '../m16/drills.mjs';
+
+const BOX_DRILLS_BY_ID = new Map(BOX_DRILLS.map((d) => [d.id, d]));
 
 export function registerPassportCore(ctx) {
   const {
@@ -95,6 +100,37 @@ export function registerPassportCore(ctx) {
     const achievements = db.passportAchievements.filter((a) => a.playerId === pid);
     const vouches = (db.vouches ?? []).filter((v) => v.playerId === pid && v.status === 'published' && !v.withdrawn);
 
+    // M16 Box Cam — displayable (verified/partially verified, never
+    // invalidated) sessions, challenge completions and the aggregate
+    // development-activity summary.
+    const boxSessionsAll = (db.boxSessions ?? []).filter((s) => s.playerId === pid && s.finalizedAt && !['cancelled', 'invalidated'].includes(s.verificationState));
+    const boxDisplayable = boxSessionsAll.filter((s) => ['verified', 'partially_verified'].includes(s.verificationState));
+    const boxAssignmentsAll = (db.boxAssignments ?? []).filter((a) => a.playerId === pid && !['cancelled', 'superseded'].includes(a.state));
+    const boxPrefs = (db.boxCamPrefs ?? []).find((x) => x.playerId === pid) ?? null;
+    // Meaningful milestones only — the career timeline is never flooded.
+    const boxTimelineSessions = boxDisplayable
+      .filter((s) => s.targetCompleted === true || (s.verifiedActiveMs ?? 0) >= 15 * 60_000)
+      .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0)).slice(0, 10)
+      .map((s) => {
+        const a = s.assignmentId ? (db.boxAssignments ?? []).find((x) => x.id === s.assignmentId) : null;
+        return {
+          id: s.id, endedAt: s.endedAt, drillTitle: boxLatestDrill(s.drillId)?.title ?? s.drillId,
+          verifiedActive: boxFmtMs(s.verifiedActiveMs ?? 0), verifiedReps: s.verifiedReps ?? null,
+          targetCompleted: s.targetCompleted, assignedByOrg: a ? { id: a.orgId, name: a.orgName } : null,
+        };
+      });
+    const boxChallengeCompletions = (db.boxChallengeEntries ?? [])
+      .filter((e) => e.playerId === pid && e.status === 'completed')
+      .map((e) => {
+        const c = (db.boxChallenges ?? []).find((x) => x.id === e.challengeId);
+        return c ? {
+          entryId: e.id, completedAt: e.completedAt, title: c.title,
+          publisherName: c.publisher.kind === 'org' ? c.publisher.orgName : 'ScoutBox',
+          publisherOrg: c.publisher.kind === 'org' ? { id: c.publisher.orgId, name: c.publisher.orgName } : null,
+        } : null;
+      })
+      .filter(Boolean);
+
     // Identity: the PLAYER identity surface is the existing IDV outcome —
     // honestly a ScoutBox review, never an authoritative provider.
     const identity = player.identityVerified
@@ -123,6 +159,7 @@ export function registerPassportCore(ctx) {
       hasAvailability: !!prefs.availability,
       identityConfirmed: !!identity,
       historyRows: history.rows.length,
+      hasRecentTrainingEvidence: boxDisplayable.some((s) => (s.endedAt ?? 0) > now - 45 * 86_400_000),
     };
 
     const full = {
@@ -147,6 +184,8 @@ export function registerPassportCore(ctx) {
       },
       trialsSummary: { total: trials.length, withReport: trials.filter((t) => t.report).length },
       completeness: completeness(facts),
+      developmentActivity: boxDevelopmentActivity({ sessions: boxSessionsAll, assignments: boxAssignmentsAll, drillsById: BOX_DRILLS_BY_ID, days: 30 }),
+      boxShareRecruitment: boxPrefs?.shareDevelopmentActivity === 'recruitment',
       sharingSummary: {
         active: db.passportShares.filter((s) => s.playerId === pid && !s.revokedAt && (!s.expiresAt || s.expiresAt > now)).length,
       },
@@ -158,6 +197,7 @@ export function registerPassportCore(ctx) {
         affiliations: [], careerEntries, squads, trials, assessments, references,
         evidence, objectives, applications, transitions, signings, outcomes,
         representations, achievements, positionHistory: prefs.positionHistory,
+        boxSessions: boxTimelineSessions, boxChallenges: boxChallengeCompletions,
       });
       full.temporalConflicts = temporalConflicts({ events: full.timeline, history: history.rows, dob: player.dob });
     } else {

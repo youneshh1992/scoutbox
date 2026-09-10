@@ -116,7 +116,11 @@ section('U2 — provenance & precedence (§8/§9/§57/§58)');
   ok(provRank('player_submitted') < provRank('scoutbox_reviewed')
     && provRank('scoutbox_reviewed') < provRank('verified_club_confirmed')
     && provRank('verified_club_confirmed') < provRank('authoritative_registry'), 'provenance vocabulary is rank-ordered for precedence only');
-  ok(PROVENANCE.length === 8, 'exactly the eight mandated provenance values');
+  ok(PROVENANCE.length === 9 && ['player_submitted', 'guardian_submitted', 'system_recorded', 'historical_migration', 'scoutbox_reviewed', 'verified_coach_confirmed', 'verified_club_confirmed', 'authoritative_registry'].every((p) => PROVENANCE.includes(p)), 'the eight M15 provenance values plus M16 box_cam_observed');
+  ok(provRank('box_cam_observed') > provRank('player_submitted')
+    && provRank('box_cam_observed') > provRank('guardian_submitted')
+    && provRank('box_cam_observed') < provRank('scoutbox_reviewed')
+    && provRank('box_cam_observed') < provRank('verified_club_confirmed'), 'box_cam_observed outranks self-submission but NEVER organisation confirmation or review');
   ok(provenanceFromMethod('organisation_admin_confirmation') === 'verified_club_confirmed'
     && provenanceFromMethod('scoutbox_manual_review') === 'scoutbox_reviewed'
     && provenanceFromMethod('authoritative_registry') === 'authoritative_registry'
@@ -169,7 +173,7 @@ section('U3 — visibility, gaps and share primitives (§16/§14/§18)');
   neg(!viewerSees('guardian', 'trust_and_safety') && viewerSees('trust_safety', 'trust_and_safety'), 'trust_and_safety layer is T&S-only');
 
   const bad = { hasRecentFullMatch: false, fullMatchCount: 0, clipCount: 0, referenceCount: 0, hasConfirmedCurrentClub: false, hasRecentAssessment: false, hasPosition: false, hasAvailability: false, identityConfirmed: false, historyRows: 0 };
-  const good = { hasRecentFullMatch: true, fullMatchCount: 2, clipCount: 3, referenceCount: 1, hasConfirmedCurrentClub: true, hasRecentAssessment: true, hasPosition: true, hasAvailability: true, identityConfirmed: true, historyRows: 3 };
+  const good = { hasRecentFullMatch: true, fullMatchCount: 2, clipCount: 3, referenceCount: 1, hasConfirmedCurrentClub: true, hasRecentAssessment: true, hasPosition: true, hasAvailability: true, identityConfirmed: true, historyRows: 3, hasRecentTrainingEvidence: true };
   const cBad = completeness(bad); const cGood = completeness(good);
   ok(cBad.evidenceCoverage === 'limited' && cGood.evidenceCoverage === 'strong', 'coverage descriptors are words about evidence, never ability');
   ok(cBad.eligibility.total === GAP_RULES.length && cBad.eligibility.rulesVersion === GAP_RULES_VERSION && cBad.eligibility.satisfied === 0, 'eligibility preview counts EXACTLY the versioned generic rules — never club criteria (§15/§55)');
