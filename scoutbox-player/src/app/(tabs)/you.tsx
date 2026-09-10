@@ -16,6 +16,7 @@ import { InviteCodeSection, ReferencesSection } from '../../components/M14Sectio
 import { FootballPassportSection } from '../../components/M15Sections';
 import { BoxTrainingSection } from '../../components/M16Sections';
 import { CombineSection } from '../../components/CombineSection';
+import { TrustProfileSection } from '../../components/TrustProfileSection';
 
 export default function You() {
   const router = useRouter();
@@ -250,6 +251,10 @@ export default function You() {
         {playerId ? <ReferencesSection playerId={playerId} /> : null}
         {playerId ? <BoxTrainingSection actor={{ kind: 'player', id: playerId }} isMinor={isMinor} /> : null}
         {playerId ? <CombineSection actor={{ kind: 'player', id: playerId }} /> : null}
+        {/* M16.2 — the Football Passport payload deliberately carries no numeric
+            score, so the Trust Profile is fetched from its own endpoint and
+            composed here, at the head of the Passport. */}
+        {playerId ? <TrustProfileSection actor={{ kind: 'player', id: playerId }} /> : null}
         {playerId ? <FootballPassportSection actor={{ kind: 'player', id: playerId }} isMinor={isMinor} /> : null}
         {playerId && !isMinor ? <InviteCodeSection actor={{ kind: 'player', id: playerId }} /> : null}
 

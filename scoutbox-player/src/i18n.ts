@@ -120,6 +120,23 @@ const en = {
   cmbClose: 'Close', cmbRetry: 'Retry', cmbLimitReached: 'You’ve used your verified attempts for this Combine. Practice attempts remain available.',
   cmbNoCamera: 'A Combine Attempt needs a camera. This device or browser cannot provide a live capture.', cmbCameraDenied: 'Camera permission is needed for a Combine Verified attempt.',
   cmbDone: 'Done',
+  // M16.2 — ScoutBox Trust Score. Evidence confidence only: never ability,
+  // talent, character or recruitment suitability. A low score means limited
+  // evidence, and every missing item is phrased as an evidence gap.
+  trsTitle: 'ScoutBox Trust Score', trsProfile: 'Trust Profile',
+  trsDisclaimer: 'ScoutBox Trust Score reflects verification and evidence confidence — not football ability or recruitment suitability.',
+  trsWhy: 'Why this score?', trsHide: 'Hide', trsLoading: 'Loading your Trust Profile…',
+  trsEvidenceConfidence: 'Evidence Confidence', trsWeight: 'weight', trsPolicy: 'Policy version',
+  trsStrengths: 'What strengthens your Trust Profile', trsNoStrengths: 'No supporting evidence is on record yet.',
+  trsGaps: 'What could strengthen it further', trsNoGaps: 'No evidence gaps are outstanding right now.',
+  trsBuild: 'Build your Trust Profile.', trsVerifiedStrengthens: 'Verified evidence strengthens your Trust Profile.',
+  trsDemoShort: 'demo', trsDemoSim: 'Demo — simulated Trust Score impact.',
+  trsAdultOnly: 'Categories that cannot apply to an under-18 account are left out of the calculation entirely — they are never counted as missing.',
+  trsCompIdentity: 'Identity', trsCompFootballHistory: 'Football history', trsCompRelationships: 'Relationships',
+  trsCompEvidence: 'Evidence', trsCompCombine: 'Combine', trsCompReferences: 'References',
+  trsCombineBlock: 'ScoutBox Trust Score — separate from your Combine results',
+  trsCombineSeparate: 'This is evidence confidence across your whole football record. It is not a Combine measurement and it is not a result on this card.',
+  trsCombineVerifiedLine: 'This verified result can strengthen your Trust Profile because ScoutBox measured it using a standardized protocol.',
 };
 const fr: typeof en = {
   passport: 'Passeport de preuves', addClaim: 'Consigner une donnée', insufficient: 'Preuves encore insuffisantes — c’est affiché tel quel, jamais maquillé.',
@@ -239,6 +256,21 @@ const fr: typeof en = {
   cmbClose: 'Fermer', cmbRetry: 'R\u00e9essayer', cmbLimitReached: 'Vous avez utilis\u00e9 vos tentatives v\u00e9rifi\u00e9es pour ce Combine. Les tentatives d\u2019entra\u00eenement restent disponibles.',
   cmbNoCamera: 'Un Combine Attempt n\u00e9cessite une cam\u00e9ra. Cet appareil ou navigateur ne permet pas de capture live.', cmbCameraDenied: 'L\u2019autorisation cam\u00e9ra est n\u00e9cessaire pour un Combine Verified.',
   cmbDone: 'Termin\u00e9',
+  // M16.2 \u2014 ScoutBox Trust Score
+  trsTitle: 'ScoutBox Trust Score', trsProfile: 'Profil de confiance',
+  trsDisclaimer: 'Le ScoutBox Trust Score refl\u00e8te la v\u00e9rification et la confiance dans les preuves \u2014 pas les qualit\u00e9s footballistiques ni l\u2019int\u00e9r\u00eat pour un recrutement.',
+  trsWhy: 'Pourquoi ce score\u00a0?', trsHide: 'Masquer', trsLoading: 'Chargement de votre Trust Profile\u2026',
+  trsEvidenceConfidence: 'Confiance dans les preuves', trsWeight: 'poids', trsPolicy: 'Version de la politique',
+  trsStrengths: 'Ce qui renforce votre Trust Profile', trsNoStrengths: 'Aucune preuve \u00e0 l\u2019appui n\u2019est encore enregistr\u00e9e.',
+  trsGaps: 'Ce qui pourrait le renforcer davantage', trsNoGaps: 'Aucune lacune de preuve en attente pour le moment.',
+  trsBuild: 'Construisez votre Trust Profile.', trsVerifiedStrengthens: 'Les preuves v\u00e9rifi\u00e9es renforcent votre Trust Profile.',
+  trsDemoShort: 'd\u00e9mo', trsDemoSim: 'D\u00e9mo \u2014 impact simul\u00e9 sur le Trust Score.',
+  trsAdultOnly: 'Les cat\u00e9gories qui ne peuvent pas s\u2019appliquer \u00e0 un compte de moins de 18 ans sont exclues du calcul \u2014 elles ne sont jamais compt\u00e9es comme manquantes.',
+  trsCompIdentity: 'Identit\u00e9', trsCompFootballHistory: 'Parcours football', trsCompRelationships: 'Relations',
+  trsCompEvidence: 'Preuves', trsCompCombine: 'Combine', trsCompReferences: 'R\u00e9f\u00e9rences',
+  trsCombineBlock: 'ScoutBox Trust Score \u2014 distinct de vos r\u00e9sultats Combine',
+  trsCombineSeparate: 'Il s\u2019agit de la confiance dans les preuves de tout votre dossier football. Ce n\u2019est pas une mesure Combine ni un r\u00e9sultat de cette carte.',
+  trsCombineVerifiedLine: 'Ce r\u00e9sultat v\u00e9rifi\u00e9 peut renforcer votre Trust Profile parce que ScoutBox l\u2019a mesur\u00e9 avec un protocole standardis\u00e9.',
 };
 
 export type PLang = 'en' | 'fr';

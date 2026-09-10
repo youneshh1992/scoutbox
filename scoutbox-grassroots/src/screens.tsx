@@ -11,6 +11,7 @@ import {
 import { FootballPassportPanel, SharedPassportOpener, SummaryChips, usePassportSummaries } from './m15screens';
 import { BoxTrainingPanel } from './m16screens';
 import { CombinePanel } from './combineScreens';
+import { TrustPanel } from './trustScreens';
 
 const TAG_LABELS: Record<string, string> = {
   first_touch: 'First touch', pace: 'Pace', positioning: 'Positioning', work_rate: 'Work rate',
@@ -1691,6 +1692,7 @@ export function PlayerDrawer({ session, playerId, notify, onClose }: {
             <FootballPassportPanel session={session} playerId={playerId} notify={notify} />
             <BoxTrainingPanel session={session} playerId={playerId} notify={notify} />
             <CombinePanel session={session} playerId={playerId} notify={notify} />
+            <TrustPanel session={session} playerId={playerId} />
 
             {requestType && (
               <div className="section">

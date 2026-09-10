@@ -217,6 +217,18 @@ const en = {
   'cmb.wallUnverified': 'Only a verified organisation can create a Club Combine.',
   'cmb.wallSuspended': 'This organisation is suspended and cannot create a Club Combine.',
   'cmb.wallNotVisible': 'This player is not visible to your organisation under the standing rules (distance, verification or a block).',
+  // M16.2 — ScoutBox Trust Score. Evidence confidence only: never football
+  // ability, potential, character or recruitment suitability. A low score means
+  // limited evidence, and the club projection never exposes evidence gaps.
+  'trs.title': 'ScoutBox Trust Score', 'trs.show': 'Show', 'trs.hide': 'Hide', 'trs.loading': 'Loading Trust Profile…',
+  'trs.disclaimer': 'ScoutBox Trust Score reflects verification and evidence confidence — not football ability or recruitment suitability.',
+  'trs.note': 'Evidence confidence — not football ability.',
+  'trs.evidenceConfidence': 'Evidence Confidence', 'trs.weight': 'weight', 'trs.signals': 'Evidence signals',
+  'trs.noSignals': 'No evidence signals are shared for this player yet.',
+  'trs.policy': 'Policy version', 'trs.noRanking': 'ScoutBox never ranks players by Trust Score.',
+  'trs.demo': 'demo', 'trs.wallNotVisible': 'This player is not visible to your organisation under the standing rules (distance, verification or a block).',
+  'trs.compIdentity': 'Identity', 'trs.compFootballHistory': 'Football history', 'trs.compRelationships': 'Relationships',
+  'trs.compEvidence': 'Evidence', 'trs.compCombine': 'Combine', 'trs.compReferences': 'References',
 };
 
 const fr: typeof en = {
@@ -432,6 +444,16 @@ const fr: typeof en = {
   'cmb.wallUnverified': 'Seule une organisation vérifiée peut créer un Club Combine.',
   'cmb.wallSuspended': 'Cette organisation est suspendue et ne peut pas créer de Club Combine.',
   'cmb.wallNotVisible': 'Ce joueur n’est pas visible pour votre organisation selon les règles en vigueur (distance, vérification ou blocage).',
+  // M16.2 — ScoutBox Trust Score
+  'trs.title': 'ScoutBox Trust Score', 'trs.show': 'Afficher', 'trs.hide': 'Masquer', 'trs.loading': 'Chargement du Trust Profile…',
+  'trs.disclaimer': 'Le ScoutBox Trust Score reflète la vérification et la confiance dans les preuves — pas les qualités footballistiques ni l’intérêt pour un recrutement.',
+  'trs.note': 'Confiance dans les preuves — pas les qualités footballistiques.',
+  'trs.evidenceConfidence': 'Confiance dans les preuves', 'trs.weight': 'poids', 'trs.signals': 'Signaux de preuve',
+  'trs.noSignals': 'Aucun signal de preuve n’est encore partagé pour ce joueur.',
+  'trs.policy': 'Version de la politique', 'trs.noRanking': 'ScoutBox ne classe jamais les joueurs selon le Trust Score.',
+  'trs.demo': 'démo', 'trs.wallNotVisible': 'Ce joueur n’est pas visible pour votre organisation selon les règles en vigueur (distance, vérification ou blocage).',
+  'trs.compIdentity': 'Identité', 'trs.compFootballHistory': 'Parcours football', 'trs.compRelationships': 'Relations',
+  'trs.compEvidence': 'Preuves', 'trs.compCombine': 'Combine', 'trs.compReferences': 'Références',
 };
 
 export type Lang = 'en' | 'fr';

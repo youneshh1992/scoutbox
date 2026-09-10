@@ -10,6 +10,7 @@ import { M13Panel, M13_TABS, type M13Tab } from './m13tabs';
 import { M14Panel, M14_TABS, type M14Tab } from './m14tabs';
 import { M15Panel, M15_TABS, type M15Tab } from './m15tabs';
 import { M16Panel, M16_TABS, type M16Tab } from './m16tabs';
+import { M162Panel, M162_TABS, type M162Tab } from './m162tabs';
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000';
 const DEMO = import.meta.env.VITE_DEMO === '1';
@@ -91,14 +92,14 @@ async function call<T>(key: string, path: string, init?: RequestInit): Promise<T
   return body as T;
 }
 
-type Tab = 'overview' | 'reports' | 'clubs' | 'guardians' | 'blocks' | 'moderation' | 'threads' | 'outbox' | 'billing' | M12Tab | M13Tab | M14Tab | M15Tab | M16Tab;
+type Tab = 'overview' | 'reports' | 'clubs' | 'guardians' | 'blocks' | 'moderation' | 'threads' | 'outbox' | 'billing' | M12Tab | M13Tab | M14Tab | M15Tab | M16Tab | M162Tab;
 // M15-Nav: the flat 22-tab sidebar becomes six grouped destinations with a
 // page-level tab row. Every legacy tab id stays a live destination — the
 // groups are presentation only; the admin key + server rules still gate all
 // data.
 const NAV_GROUPS: { id: string; label: string; tabs: Tab[] }[] = [
   { id: 'home', label: 'Home', tabs: ['overview'] },
-  { id: 'cases', label: 'Cases', tabs: ['reports', 'disputes', 'verdisputes', 'passport', 'boxcam', 'supportdesk'] },
+  { id: 'cases', label: 'Cases', tabs: ['reports', 'disputes', 'verdisputes', 'passport', 'boxcam', 'trust', 'supportdesk'] },
   { id: 'verification', label: 'Verification', tabs: ['verification', 'clubs', 'guardians', 'staffchecks', 'coaches'] },
   { id: 'safety', label: 'Safety', tabs: ['blocks', 'moderation', 'threads', 'drillguide'] },
   { id: 'operations', label: 'Operations', tabs: ['outcomes', 'representation', 'groups', 'deliverycentre', 'outbox', 'billing'] },
@@ -121,6 +122,7 @@ const TABS: { id: Tab; label: string }[] = [
   ...M14_TABS,
   ...M15_TABS,
   ...M16_TABS,
+  ...M162_TABS,
 ];
 
 export default function App() {
@@ -306,6 +308,9 @@ export default function App() {
           )}
           {tab === 'boxcam' && (
             <M16Panel tab={tab as M16Tab} adminKey={key} say={say} />
+          )}
+          {tab === 'trust' && (
+            <M162Panel tab={tab as M162Tab} adminKey={key} say={say} />
           )}
           {tab === 'reports' && (
             <div className="list-rows">

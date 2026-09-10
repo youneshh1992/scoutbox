@@ -18,6 +18,8 @@ import {
   type CombineOverview, type CombineProtocol, type CombineRequest,
 } from '../data/combineClient';
 import type { BoxEvent } from '../data/m16client';
+import { trust, type TrustSelf } from '../data/trustClient';
+import { TrustScoreHeader } from './TrustProfileSection';
 import { pt } from '../i18n';
 
 const DEMO = process.env.EXPO_PUBLIC_DEMO === '1';
@@ -252,6 +254,10 @@ export function CombineSection({ actor, childName }: { actor: CombineActor; chil
   const [protoData] = useLoad(() => isPlayer ? combine.protocols(actor.id) : Promise.resolve(null), [actor.id]);
   const [card, setCard] = useState<CombineCard | null>(null);
   const [showCard, setShowCard] = useState(false);
+  // M16.2 — the Trust Score shown on the Combine Card comes from its own
+  // endpoint and is rendered in a visually separate block, so a Trust Score of
+  // 92 can never be misread as a Combine measurement.
+  const [trustProfile, setTrustProfile] = useState<TrustSelf | null>(null);
   const [capture, setCapture] = useState<{ protocol: CombineProtocol; requestId?: string } | null>(null);
   const [result, setResult] = useState<CombineAttempt | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -263,6 +269,9 @@ export function CombineSection({ actor, childName }: { actor: CombineActor; chil
   async function toggleCard() {
     if (showCard) { setShowCard(false); return; }
     if (!card && isPlayer) { try { setCard(await combine.card(actor.id)); } catch (e) { setMsg(e instanceof Error ? e.message : 'failed'); } }
+    // The Trust Profile is optional context on this card — if it cannot be
+    // read, the Combine results stand entirely on their own.
+    if (!trustProfile) { try { setTrustProfile(await trust.profile(actor)); } catch { /* card still valid */ } }
     setShowCard(true);
   }
 
@@ -304,7 +313,22 @@ export function CombineSection({ actor, childName }: { actor: CombineActor; chil
                   {r.combineVerified ? <VerifiedBadge /> : null}
                 </Row>
               )) : <Muted size={12}>{pt('cmbNoResults')}</Muted>}
+              {card.results.some((r) => r.combineVerified) ? (
+                <Muted size={11.5}>{pt('trsCombineVerifiedLine')}</Muted>
+              ) : null}
               <Muted size={11}>{card.note}</Muted>
+            </View>
+          ) : null}
+
+          {/* M16.2 — Trust Score, in its OWN block outside the Combine Card.
+              It is deliberately separated by its own container, heading and
+              spacing so the number is never read as a Combine result, and it
+              never implies that a higher measured value earns more trust. */}
+          {showCard && trustProfile ? (
+            <View style={{ marginTop: 12, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 10, backgroundColor: colors.bg2 }}>
+              <Text style={{ color: colors.text, fontWeight: '800', fontSize: 13.5 }}>{pt('trsCombineBlock')}</Text>
+              <TrustScoreHeader t={trustProfile} compact />
+              <Muted size={11.5}>{pt('trsCombineSeparate')}</Muted>
             </View>
           ) : null}
 
