@@ -3,7 +3,35 @@
 > Purpose of this file: let any Claude Code session (cloud or local) pick up this
 > project with zero prior context. Keep it updated at the end of each working session.
 
-**Last updated:** 2026-09-09 · **Milestone 14 complete** (see M14_MATRIX.md +
+**Last updated:** 2026-09-10 · **Milestone 16.2 complete — ScoutBox Trust
+Score** (see M16_2_TRUST_SCORE.md + M16_2_MATRIX.md) · `scoutbox-server/m162/`
+derives a 0–100 **evidence-confidence** score at read time from M14/M14.1
+claims, the M15 Passport, M12 evidence, M16 Box Cam and M16.1 Combine —
+consuming them, replacing none, persisting nothing. One versioned `POLICY`
+(`TRUST_SCORE_POLICY_VERSION = 1`) holds every weight (Identity 15 · Football
+history 20 · Relationships 20 · Evidence 20 · Combine 15 · References 10),
+cap, curve and band (Limited/Developing/Established/Strong/Very strong); the
+server refuses to boot if they do not total 100. The mandatory disclaimer
+*"ScoutBox Trust Score reflects verification and evidence confidence — not
+football ability or recruitment suitability"* travels with the score on every
+surface. Core invariants, each test-locked: **measured performance is not an
+input at all** (identical integrity ⇒ identical contribution), grinding is
+worthless (500 sessions + 100 attempts with no identity/history/references
+stays under 40), no prestige/popularity/recruitment-outcome/payment weight,
+fact-specific authority (Box Cam is absent from the history table), adult-only
+categories leave a minor's denominator, simulated Combine evidence never
+reaches a production score, and **a score of 100 grants zero permissions** —
+there is no write route, and every route sits on the existing authenticated
+routers so the standing gates run first. The Passport stays deliberately
+score-free; clients compose the Trust Score into its header. Suites: m162E2E
+(124 checks, 59 negative), m162Live (11), m162DemoSpotcheck (21).
+Previously **16.1** — At-Home Combine (standardised protocols, server-derived
+Combine Verified results, honest not-configured capability); **16** — Box Cam
+observed-training evidence; **15** — Football Passport + the navigation
+redesign; **14.1/14** — Verification & Trust. Committed locally on
+`claude/desktop-project-migration-wyk3ec`, NOT pushed (per instruction).
+
+Previously: **Milestone 14 complete** (see M14_MATRIX.md +
 M14_VERIFICATION.md) · M14 adds the Verification & Trust system in
 `scoutbox-server/m14/` (same register(ctx) pattern): independent verification
 CLAIMS (11 types, never a bare boolean), a server-validated state machine, a
