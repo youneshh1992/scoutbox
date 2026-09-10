@@ -112,14 +112,25 @@ No new storage: the score is derived on every read.
 | 78 | Privacy-safe metrics (78) | aggregate counters only | metrics check | ✅ | — |
 | 79 | No manipulative gamification (79) | no streaks/leaderboards | client | ✅ | — |
 | 80 | Approved UI language (80) | disclaimer + neutral bands | U1 label sweep | ✅ | — |
+| 90 | Demo story across all four apps (90) | Trust fixtures: 79 Strong / 46 Developing / 31 Limited, always labelled simulated | m162DemoSpotcheck (21) | ✅ | fixtures are synthetic; production Combine still absent |
 | 91 | Passport integration (91) | **Passport stays score-free**; Trust served separately and composed in the header | Passport-separation block | ✅ | deliberate: M15 forbids a numeric score in the projection |
 | 98/99 | Docs + matrix (98,99) | this file + M16_2_TRUST_SCORE.md | review | ✅ | — |
 
 ## Verification results (measured, not asserted)
 
-- `scoutbox-server/scripts/m162E2E.mjs` — **111 checks, 54 negative/abuse
-  (49% ≥ the 40% floor)**, including the mandatory adversarial grinding test
+- `scoutbox-server/scripts/m162E2E.mjs` — **124 checks, 59 negative/abuse
+  (48% ≥ the 40% floor)**, including the mandatory adversarial grinding test
   (§85), the performance-independence test (§86), the prestige-independence
   test (§87) and the authorization block (§88).
-- Full regression battery after M16.2 — see the final report; every
-  pre-existing suite is unchanged and green.
+- `e2e/m162Live.test.mjs` — **11 checks**, T1 + T8 through the real browser
+  against a live backend.
+- `e2e/m162DemoSpotcheck.test.mjs` — **21 checks, zero page errors** over the
+  four published demo bundles.
+- Full regression battery after M16.2, every suite re-run and green:
+  trust 23 · apiE2E 129 · connectedE2E 43 · m12E2E 143 · m13E2E 212 ·
+  m14E2E 193 · m141E2E 94 · m15E2E 185 · m16E2E 115 · m161E2E 79 ·
+  m162E2E 124 · navConfig 111 · navLive 30 · liveIntegration · m12Live ·
+  m13Live · m14Live · m15Live 21 · m16Live 10 · m162Live 11 · uiSpotcheck ·
+  m12/m13/m14 demo spotchecks · m162DemoSpotcheck 21 · crosstab ·
+  demoOffline · staleSessionProbe · tsc ×4 · builds ×4. **No existing test
+  was removed, skipped or weakened.**

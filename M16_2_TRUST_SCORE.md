@@ -173,7 +173,7 @@ default sort by Trust Score.
 
 ## 22. Tests
 
-`scoutbox-server/scripts/m162E2E.mjs` — **111 checks, 54 negative (49%)**:
+`scoutbox-server/scripts/m162E2E.mjs` — **124 checks, 59 negative (48%)**:
 determinism, band boundaries, weights, dedupe, provenance honesty, caps,
 diminishing returns, the adversarial grinding attack, performance
 independence, Combine coverage/partial/invalidation/restoration, demo-provider
@@ -181,6 +181,17 @@ isolation, minor/grassroots/prestige/popularity/payment fairness, assessment
 content independence, empty profiles, monotonicity, transparency, snapshots,
 safe projection, HTTP journeys, the Passport separation and the full
 authorization boundary.
+
+Two browser suites drive the real UI:
+
+- `e2e/m162Live.test.mjs` — **11 checks** against a live backend: T1 (the
+  player opens the Trust Profile and expands *"Why this score?"*) and T8 (a
+  club sees the score and the safe explanation, and neither the player's
+  evidence gaps nor any source identifier).
+- `e2e/m162DemoSpotcheck.test.mjs` — **21 checks, zero page errors** over the
+  published demo bundles: the player, Pro, Grassroots and T&S surfaces, the
+  simulated-evidence label, the neutral framing of a thinner record, and the
+  T&S inspector's inability to type a score.
 
 ## 23. Known limitations
 
