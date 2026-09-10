@@ -378,6 +378,21 @@ ok([maria, alex, dee, kola, guni, amara].every((x) => x?.token), 'HTTP actors lo
   neg(forged.body.trust.score === self.body.trust.score && forged.body.trust.policyVersion === TRUST_SCORE_POLICY_VERSION, 'forged query parameters cannot change the score, band or policy version');
 }
 
+// ============================== Passport separation (M15 invariant intact)
+section('Passport separation — the Passport itself stays score-free');
+{
+  const pp = await j('GET', '/player/football-passport', undefined, kola.token);
+  ok(pp.status === 200, 'the Football Passport still builds');
+  // M15 guarantees there is no numeric score anywhere in the Passport
+  // projection (a number in a Passport has always meant a talent rating).
+  // The Trust Score is therefore a SEPARATE derived summary that consumes
+  // the Passport — clients compose it into the Passport header.
+  neg(pp.body.trust === undefined, 'the Passport projection carries NO trust score — the M15 no-score guarantee is intact');
+  const trust = await j('GET', '/player/trust-profile', undefined, kola.token);
+  ok(trust.status === 200 && typeof trust.body.trust.score === 'number', 'the Trust Score lives on its own endpoint instead');
+  neg(!JSON.stringify(pp.body).match(/"score"\s*:\s*\d/), 'no numeric "score" field appears anywhere in the Passport payload');
+}
+
 // ================================== §41/§88 the score authorizes NOTHING
 section('§41 — a Trust Score grants no permission whatsoever');
 {

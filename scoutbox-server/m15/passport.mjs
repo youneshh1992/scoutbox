@@ -243,6 +243,14 @@ export function registerPassportCore(ctx) {
       full.assessmentsForOrg = full.assessments.filter((a) => a.orgId === opts.orgId);
       full.trialsForOrg = full.trials.filter((t) => t.orgId === opts.orgId);
     }
+    // NOTE (M16.2): the Trust Score is deliberately NOT embedded here. The
+    // Passport projection carries no numeric score of any kind — that is a
+    // standing M15 guarantee, because a number inside a Football Passport
+    // has always meant a talent rating. The Trust Score is a SEPARATE derived
+    // evidence-confidence summary (GET /player/trust-profile and the org
+    // equivalent) that consumes the Passport; clients compose it into the
+    // Passport header. Keeping it out of this payload preserves both the M15
+    // invariant and the M14/M15/M16.2 separation of concerns.
     return projectPassport(full, viewerKind, opts);
   }
   ctx.buildFootballPassport = buildFor;
