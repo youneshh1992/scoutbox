@@ -8,6 +8,7 @@ import {
   type Funnel, type Invoice, type OpenTrial,
   type Squad, type Matchday, type PathwayRecord, type Friendly,
 } from './api';
+import { FootballPassportPanel, SharedPassportOpener, SummaryChips, usePassportSummaries } from './m15screens';
 
 const TAG_LABELS: Record<string, string> = {
   first_touch: 'First touch', pace: 'Pace', positioning: 'Positioning', work_rate: 'Work rate',
@@ -454,6 +455,9 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
     setCompareIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : prev.length >= 3 ? prev : [...prev, id]);
   };
 
+  // M15: one batch call decorates every visible card — never N+1 passports.
+  const fpSummaries = usePassportSummaries(session, players.map((p) => p.id));
+
   return (
     <>
       <AgencyWall session={session} />
@@ -533,11 +537,13 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
               <span className="pill">{AVAILABILITY_LABELS[p.availability] ?? p.availability}</span>
               <span className="pill">{CONTRACT_LABELS[p.contractStatus] ?? p.contractStatus}</span>
               {p.badges.map((b) => <span key={b} className="pill gold">{b}</span>)}
+              <SummaryChips s={fpSummaries.get(p.id)} />
             </div>
             <TrustBar score={p.trustScore} />
           </div>
         ))}
       </div>
+      <SharedPassportOpener session={session} notify={notify} />
     </>
   );
 }
@@ -1679,6 +1685,8 @@ export function PlayerDrawer({ session, playerId, notify, onClose }: {
                 ))}
               </div>
             </div>
+
+            <FootballPassportPanel session={session} playerId={playerId} notify={notify} />
 
             {requestType && (
               <div className="section">
