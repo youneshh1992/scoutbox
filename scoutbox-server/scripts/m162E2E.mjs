@@ -378,6 +378,56 @@ ok([maria, alex, dee, kola, guni, amara].every((x) => x?.token), 'HTTP actors lo
   neg(forged.body.trust.score === self.body.trust.score && forged.body.trust.policyVersion === TRUST_SCORE_POLICY_VERSION, 'forged query parameters cannot change the score, band or policy version');
 }
 
+// ============ T2/T4 — the real chain: Combine → Box Cam → Trust recompute
+section('T2/T4 — a real Combine Verified result strengthens Trust, and invalidation removes it');
+{
+  const trustOf = async (tok) => (await j('GET', '/player/trust-profile', undefined, tok)).body.trust;
+  const before = await trustOf(kola.token);
+  ok(before.components.combine.coverageBp === 0, 'T2: Combine Confidence starts at zero');
+
+  // Run a genuine standardized attempt end-to-end through the M16.1 routes.
+  const created = await j('POST', '/player/combine/attempts', { protocolId: 'combine-box-touch-60', provider: 'local_test' }, kola.token);
+  ok(created.status === 201, 'T2: Combine Attempt created');
+  const { attempt, boxSession, nonce, livenessChallenge } = created.body;
+  await j('POST', `/player/box-cam/sessions/${boxSession.id}/start`, { nonce, liveness: livenessChallenge }, kola.token);
+  const evts = [
+    { seq: 1, type: 'presence_interval', fromMs: 0, toMs: 60_000, quality: 'good' },
+    { seq: 2, type: 'ball_interval', fromMs: 0, toMs: 60_000 },
+    { seq: 3, type: 'active_interval', fromMs: 0, toMs: 60_000, quality: 'good' },
+  ];
+  for (let i = 0; i < 184; i++) evts.push({ seq: 4 + i, type: 'rep', atMs: 200 + i * 320, confidence: 0.92 });
+  for (let i = 0; i < evts.length; i += 180) {
+    await j('POST', `/player/box-cam/sessions/${boxSession.id}/events`, { nonce, batch: evts.slice(i, i + 180) }, kola.token);
+  }
+  const done = await j('POST', `/player/combine/attempts/${attempt.id}/complete`, { nonce }, kola.token);
+  ok(done.body.attempt.combineState === 'combine_verified', 'T2: the attempt is Combine Verified');
+
+  const after = await trustOf(kola.token);
+  ok(after.components.combine.coverageBp > before.components.combine.coverageBp, 'T2: Combine Confidence strengthened');
+  ok(after.score > before.score, `T2: Trust Score recalculated upward (${before.score} → ${after.score})`);
+  ok(after.components.evidence.coverageBp > before.components.evidence.coverageBp, 'T2: the underlying Box Cam session also strengthened Evidence Confidence');
+  // This environment has no production Combine capability, so the profile must
+  // say the contribution came from simulated evidence.
+  neg(after.simulatedEvidenceIncluded === true, 'T2: the profile declares that simulated evidence was included (demo/test environment)');
+  ok(after.strengths.some((s) => s.code === 'COMBINE_VERIFIED'), 'T2: a Combine strength signal is explained to the player');
+
+  // T4 — Trust & Safety invalidates the bound Box Cam session.
+  await j('POST', `/player/box-cam/sessions/${boxSession.id}/dispute`, { reason: 'Camera fogged up.' }, kola.token);
+  const disputes = await j('GET', '/admin/box-cam/disputes', undefined, undefined, A);
+  const d = disputes.body.items.find((x) => x.sessionId === boxSession.id);
+  await j('POST', `/admin/box-cam/disputes/${d.id}/resolve`, { outcome: 'invalidated', reason: 'Provider miscount confirmed.' }, undefined, A);
+  const invalidated = await trustOf(kola.token);
+  neg(invalidated.components.combine.coverageBp === 0, 'T4: an invalidated result stops contributing immediately');
+  neg(invalidated.score <= after.score, 'T4: the score falls only because evidence was removed');
+  neg(invalidated.score >= before.score - 1, 'T4: removal is not a punitive penalty — the score returns toward the pre-evidence level, never below it');
+  neg(!invalidated.gaps.some((g) => /fraud|cheat|dishonest|suspicious/i.test(g.text)), 'T4: no gap accuses the player after invalidation');
+
+  // Restore returns the contribution deterministically.
+  await j('POST', `/admin/box-cam/sessions/${boxSession.id}/restore`, { reason: 'Re-review overturned.' }, undefined, A);
+  const restored = await trustOf(kola.token);
+  ok(restored.score === after.score && restored.components.combine.coverageBp === after.components.combine.coverageBp, 'T4: restoration returns the exact previous contribution');
+}
+
 // ============================== Passport separation (M15 invariant intact)
 section('Passport separation — the Passport itself stays score-free');
 {
