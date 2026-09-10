@@ -18,6 +18,7 @@ import { registerM13 } from './m13/index.mjs';
 import { registerM14 } from './m14/index.mjs';
 import { registerM15 } from './m15/index.mjs';
 import { registerM16 } from './m16/index.mjs';
+import { registerM162 } from './m162/index.mjs';
 import { requestInstrumentation } from './m13/enterprise.mjs';
 import { totpValid } from './m13/shared.mjs';
 import {
@@ -3513,7 +3514,7 @@ const m14Ctx = registerM14({
 // M15 — Football Passport: a provenance-aware projection over existing
 // records. Registered after M14 so it can read verification stores; it
 // receives the same context and adds no new authorization surface.
-registerM15({
+const m15Ctx = registerM15({
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
@@ -3523,6 +3524,18 @@ registerM16({
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
   findPlayer, isBlocked, moderateOrRefuse,
+});
+
+// M16.2 — ScoutBox Trust Score: a DERIVED evidence-confidence summary over
+// M14 claims, the M15 Passport assembly, M16 Box Cam and M16.1 Combine.
+// Registered last because it consumes all of them; it adds no storage and no
+// authorization surface (a Trust Score grants nothing).
+registerM162({
+  db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast,
+  findPlayer, isBlocked, moderateOrRefuse,
+  assemblePassport: m15Ctx.assemblePassport,
+  testProviderEnabled: process.env.BOX_CAM_TEST_PROVIDER === '1',
 });
 
 // ---------------------------------------------------- static app hosting
