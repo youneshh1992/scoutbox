@@ -85,6 +85,35 @@ export function registerBoxCamSessions(ctx) {
     return db.boxSessions.find((s) => s.id === id && s.playerId === playerId) ?? null;
   }
 
+  // Server-owned session minting, shared with the At-Home Combine layer
+  // (M16.1) so a Combine Attempt binds to a REAL Box Cam session and inherits
+  // every integrity property here — the client never mints a session. `meta`
+  // carries the combine binding (combineAttemptId, captureContext); it can
+  // never carry verified metrics.
+  ctx.boxMintSession = ({ player, drill, target, provider, meta = {} }) => {
+    const session = {
+      id: nextId('boxs'), playerId: player.id,
+      drillId: drill.id, drillVersion: drill.version,
+      assignmentId: null, challengeEntryIds: [],
+      target,
+      nonce: crypto.randomBytes(18).toString('base64url'),
+      livenessChallenge: LIVENESS_CHALLENGES[crypto.randomInt(LIVENESS_CHALLENGES.length)],
+      provider: provider.id, providerVersion: provider.version,
+      status: 'setup_required',
+      createdAt: Date.now(), expiresAt: Date.now() + SESSION_TTL_MS,
+      startedAt: null, endedAt: null, livenessPassedAt: null,
+      lastSeq: 0, batches: 0,
+      obs: { active: [], presence: [], ball: [], reps: [], sets: [], pauses: [], interruptions: [], multiPerson: [] },
+      captureMode: 'live',
+      integrity: { minted: 'server', drift: DRIFT_MS },
+      ...meta,
+    };
+    db.boxSessions.push(session);
+    vmetric('box_sessions_started');
+    persistNow();
+    return session;
+  };
+
   // ------------------------------------------------------------- discovery
   playerRouter.get('/box-cam/drills', (_req, res) => {
     res.json({
@@ -311,12 +340,11 @@ export function registerBoxCamSessions(ctx) {
     s.finalizedAt = now;
   }
 
-  playerRouter.post('/box-cam/sessions/:id/complete', (req, res) => {
-    const s = findOwnSession(req.player.id, req.params.id);
-    if (!s) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
-    if ((req.body ?? {}).nonce !== s.nonce) return res.status(403).json({ error: 'NONCE_INVALID' });
-    if (TERMINAL_STATES.has(s.status)) return res.status(409).json({ error: 'ALREADY_FINALIZED', message: 'A completed Box Session cannot be submitted again.' });
-    if (s.status !== 'recording') return res.status(409).json({ error: 'SESSION_NOT_RECORDING', status: s.status });
+  // Shared completion: finalize + metrics + notifications + the
+  // onSessionFinalized hook (which drives assignment/challenge AND — from
+  // M16.1 — Combine measurement). Both the Box Cam complete route and the
+  // At-Home Combine complete route call this, so there is one code path.
+  function completeSession(s, p) {
     s.status = 'processing';
     finalize(s);
     vmetric('box_sessions_completed');
@@ -324,7 +352,6 @@ export function registerBoxCamSessions(ctx) {
     if (s.verificationState === 'partially_verified') vmetric('box_sessions_partial');
     if (s.verificationState === 'unable_to_verify') vmetric('box_sessions_unverifiable');
     vmetric('box_session_active_seconds', Math.floor(s.verifiedActiveMs / 1000));
-    const p = req.player;
     if (['verified', 'partially_verified'].includes(s.verificationState)) {
       notify({ kind: 'player', id: p.id }, 'box_cam', `Your work counts. ${fmtMs(s.verifiedActiveMs)} of ${latestDrill(s.drillId)?.title ?? s.drillId} was recorded in your training history.`, s.id);
       if (!isAdult(p) && p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'box_cam', `${p.name} completed a Box Session (${fmtMs(s.verifiedActiveMs)} Box Cam verified).`, s.id);
@@ -334,6 +361,17 @@ export function registerBoxCamSessions(ctx) {
     ctx.onSessionFinalized?.(s, p);
     broadcast('player_development_evidence_changed', { playerId: p.id });
     persistNow();
+    return s;
+  }
+  ctx.boxCompleteSession = completeSession;
+
+  playerRouter.post('/box-cam/sessions/:id/complete', (req, res) => {
+    const s = findOwnSession(req.player.id, req.params.id);
+    if (!s) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
+    if ((req.body ?? {}).nonce !== s.nonce) return res.status(403).json({ error: 'NONCE_INVALID' });
+    if (TERMINAL_STATES.has(s.status)) return res.status(409).json({ error: 'ALREADY_FINALIZED', message: 'A completed Box Session cannot be submitted again.' });
+    if (s.status !== 'recording') return res.status(409).json({ error: 'SESSION_NOT_RECORDING', status: s.status });
+    completeSession(s, req.player);
     res.json({ session: sessionView(s) });
   });
 

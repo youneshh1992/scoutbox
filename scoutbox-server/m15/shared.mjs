@@ -596,6 +596,7 @@ export function projectPassport(full, viewer, opts = {}) {
         trials: full.trialsSummary,
         completeness: full.completeness,
         developmentActivity: full.developmentActivity ?? null,
+        combine: full.combine ?? null,
         sharing: full.sharingSummary,
         prefs: full.prefs ? { bio: full.prefs.bio ?? null, positions: full.prefs.positions ?? null, availability: full.prefs.availability ?? null, availableFrom: full.prefs.availableFrom ?? null, publicSelections: full.prefs.publicSelections ?? [] } : null,
       };
@@ -630,6 +631,11 @@ export function projectPassport(full, viewer, opts = {}) {
         // explicitly opted into sharing for recruitment — never raw home
         // sessions, never automatic.
         developmentActivity: full.boxShareRecruitment ? full.developmentActivity ?? null : null,
+        // At-Home Combine verified results, aggregate and recruitment-safe —
+        // shown to a recruiting org only on the player's/guardian's explicit
+        // recruitment opt-in. A club's own Combine request reads results
+        // through the dedicated Combine endpoint instead.
+        combine: full.boxShareRecruitment ? full.combine ?? null : null,
         shareMode,
       };
     }

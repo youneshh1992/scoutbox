@@ -13,6 +13,10 @@ import {
 // M16: the Passport PROJECTS Box Cam data — it never copies it.
 import { developmentActivity as boxDevelopmentActivity, fmtMs as boxFmtMs } from '../m16/shared.mjs';
 import { DRILLS as BOX_DRILLS, latestDrill as boxLatestDrill } from '../m16/drills.mjs';
+// M16.1 At-Home Combine — the Passport PROJECTS verified Combine results, it
+// never copies them. Computed with the pure engine so this stays independent
+// of module registration order.
+import { combineProtocol as combineProtocolDef, personalBest as combinePersonalBest, formatCombineValue } from '../m16/combineShared.mjs';
 
 const BOX_DRILLS_BY_ID = new Map(BOX_DRILLS.map((d) => [d.id, d]));
 
@@ -36,6 +40,30 @@ export function registerPassportCore(ctx) {
   };
   ctx.passportPrefsFor = prefsFor;
   ctx.orgCanSee = orgCanSee;
+
+  // Verified At-Home Combine results projected for the Passport: best
+  // verified attempt per protocol@version, dropping any whose bound Box Cam
+  // session has been invalidated (T&S). Recruitment-safe — no raw video, DOB,
+  // notes or integrity internals.
+  function combineProjectionFor(pid) {
+    const attempts = (db.combineAttempts ?? []).filter((a) => a.playerId === pid && a.combineState === 'combine_verified' && a.measuredValue != null);
+    const live = attempts.filter((a) => {
+      const s = (db.boxSessions ?? []).find((x) => x.id === a.boxSessionId);
+      return !(s && s.verificationState === 'invalidated');
+    }).map((a) => ({ ...a, effectiveState: 'combine_verified' }));
+    const byKey = new Map();
+    for (const a of live) { const k = `${a.protocolId}@${a.protocolVersion}`; (byKey.get(k) ?? byKey.set(k, []).get(k)).push(a); }
+    const results = [...byKey.values()].map((list) => combinePersonalBest(list)).filter(Boolean).map((a) => {
+      const proto = combineProtocolDef(a.protocolId, a.protocolVersion);
+      return {
+        protocolId: a.protocolId, protocolVersion: a.protocolVersion,
+        protocolTitle: proto?.title ?? a.protocolId, metricUnit: a.metricUnit,
+        measuredValue: a.measuredValue, display: proto ? formatCombineValue(proto, a.measuredValue) : `${a.measuredValue}`,
+        combineVerified: true, capturedBy: 'box_cam', completedAt: a.completedAt,
+      };
+    }).sort((x, y) => (y.completedAt ?? 0) - (x.completedAt ?? 0));
+    return { results, hasCombineVerifiedResults: results.length > 0, note: 'Combine Verified — standardized ScoutBox protocol, live Box Cam capture. Powered by Box Cam. Real numbers, not a talent score.' };
+  }
 
   // ------------------------------------------------------ source assembly
   // Reads existing collections; writes nothing. `light` skips the timeline
@@ -185,6 +213,7 @@ export function registerPassportCore(ctx) {
       trialsSummary: { total: trials.length, withReport: trials.filter((t) => t.report).length },
       completeness: completeness(facts),
       developmentActivity: boxDevelopmentActivity({ sessions: boxSessionsAll, assignments: boxAssignmentsAll, drillsById: BOX_DRILLS_BY_ID, days: 30 }),
+      combine: combineProjectionFor(pid),
       boxShareRecruitment: boxPrefs?.shareDevelopmentActivity === 'recruitment',
       sharingSummary: {
         active: db.passportShares.filter((s) => s.playerId === pid && !s.revokedAt && (!s.expiresAt || s.expiresAt > now)).length,
