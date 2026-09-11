@@ -614,6 +614,66 @@ section('R7 — decision memory, archive and reopen');
 }
 
 // -------------------------------------------------- R6 trials, R11 signing
+// Two defects found while building M18 on top of this milestone, both fixed
+// and locked in here so they cannot come back.
+section('Regressions — the evidence tab, and the archive event stays private');
+{
+  // 1. The club Passport projection returns `evidence` as a SUMMARY object, so
+  //    reading `passport.evidence.records` silently produced an empty list and
+  //    made "recent full match" permanently false in every room.
+  const before = (await j('GET', `/org/rooms/${ROOM}`, undefined, maria.token)).body.room;
+  ok(Array.isArray(before.evidence), 'the room evidence tab returns a list');
+  // The seeded fixture holds no db.evidence rows — evidence is created through
+  // the canonical M12 routes — so prove the fix end to end by adding one.
+  ok(before.readiness.items.find((i) => i.key === 'recent_full_match').value === 'Not available',
+    'with no footage on record, recent full-match readiness reads as unavailable');
+  const added = await j('POST', `/org/players/${ADULT.id}/evidence`, {
+    claimType: 'footage', label: 'Full match vs Riverton', observedAt: Date.now() - 3 * 86_400_000,
+  }, maria.token);
+  ok([200, 201].includes(added.status), 'a club records a full-match evidence item through the canonical route');
+  const room = (await j('GET', `/org/rooms/${ROOM}`, undefined, maria.token)).body.room;
+  ok(room.evidence.length > 0, 'the room evidence tab is populated from the canonical evidence records');
+  ok(room.evidence.every((e) => e.provenance), 'every evidence row carries its provenance tier, never a bare tick');
+  neg(room.evidence.every((e) => !('disputes' in e) && !('history' in e)), 'dispute reasons and audit history never reach a recruiting club');
+  neg(room.evidence.every((e) => typeof e.openDisputes === 'number'), 'an open dispute is a count, not a readable reason');
+  ok(room.readiness.items.find((i) => i.key === 'recent_full_match').value === 'Available',
+    'recent full-match readiness now reflects real footage evidence — it was permanently false before this fix');
+  ok(room.evidence.every((e) => e.review && e.review.state), 'each evidence row still carries the room’s private review state');
+
+  // 2. `recruitment_room_archived` carried a playerId and no org scope, so the
+  //    SSE fallthrough delivered the archiving club's id, the status and the
+  //    reason codes to the SUBJECT PLAYER's own stream.
+  const ticket = await j('POST', '/events/ticket', {}, kola.token);
+  ok(ticket.body?.ticket, 'the player can open an authenticated event stream');
+  const ac = new AbortController();
+  const frames = [];
+  const streamed = (async () => {
+    try {
+      const res = await fetch(`${BASE}/events?ticket=${encodeURIComponent(ticket.body.ticket)}`, { signal: ac.signal });
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        frames.push(dec.decode(value, { stream: true }));
+      }
+    } catch { /* aborted */ }
+  })();
+  await sleep(300);
+  // Archive a room for THIS player at an organisation the player can see.
+  const bait = await j('POST', '/org/rooms', { playerId: ADULT.id }, harbour.token);
+  const baitId = bait.body.room?.roomId ?? RIVAL;
+  await j('POST', `/org/rooms/${baitId}/status`, { status: 'under_review' }, harbour.token);
+  await j('POST', `/org/rooms/${baitId}/status`, { status: 'archived', reasonCodes: ['budget'] }, harbour.token);
+  await sleep(600);
+  ac.abort();
+  await streamed;
+  const seen = frames.join('');
+  neg(!seen.includes('recruitment_room_archived'), 'the archive event never reaches the player it names');
+  neg(!seen.includes('org-harbour'), 'the archiving organisation is never disclosed to the player');
+  neg(!seen.includes('budget'), 'the club’s private archive reason never reaches the player');
+}
+
 section('R6/R11 — trials and signings are linked, never duplicated');
 {
   const trialsBefore = (await j('GET', '/org/trials', undefined, maria.token)).body;

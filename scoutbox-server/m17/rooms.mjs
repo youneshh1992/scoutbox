@@ -227,11 +227,36 @@ export function registerRooms(ctx) {
     return mine.length - visible;
   };
 
-  /** The org-visible evidence list, plus the Room's own private review state. */
+  /**
+   * The org-visible evidence list, plus the Room's own private review state.
+   *
+   * The Passport's club projection deliberately returns `evidence` as a SUMMARY
+   * object (`{fullMatches, clips, references, lastEvidenceDays, …}`), not a row
+   * list — so the Room reads the canonical `db.evidence` rows itself and keeps
+   * the summary for the header. Access is already settled: `sources()` returned
+   * `visible: true`, which means `orgCanSee` passed on this read.
+   */
   function evidenceFor(req, room, srcs) {
     const state = db.roomEvidenceState.filter((e) => e.roomId === room.id);
-    const rows = (srcs.passport?.evidence?.records ?? srcs.passport?.evidence ?? []);
-    const list = Array.isArray(rows) ? rows : [];
+    const list = db.evidence
+      .filter((e) => e.playerId === room.playerId && !e.supersededBy)
+      .sort((a, b) => (b.recordedAt ?? 0) - (a.recordedAt ?? 0))
+      .map((e) => ({
+        id: e.id,
+        claimType: e.claimType,
+        label: e.label,
+        value: e.value ?? null,
+        units: e.units ?? null,
+        season: e.season ?? null,
+        // Provenance travels with every item — never flattened to a tick.
+        provenance: e.verification?.status ?? 'self_reported',
+        source: { kind: e.source?.kind ?? null, name: e.source?.name ?? null },
+        recordedAt: e.recordedAt ?? null,
+        observedAt: e.observedAt ?? null,
+        // Counts only: the dispute reason is a conversation between the player
+        // and Trust & Safety, and never reaches a recruiting club.
+        openDisputes: (e.disputes ?? []).filter((d) => d.status === 'open').length,
+      }));
     return list.map((e) => {
       const s = state.find((x) => x.evidenceId === e.id);
       return {
@@ -273,7 +298,7 @@ export function registerRooms(ctx) {
     const assessments = extra.assessments;
     const evidence = extra.evidence;
     const recentFullMatch = evidence.some((e) => e.claimType === 'footage' && e.recordedAt && e.recordedAt > now() - 180 * 86_400_000);
-    const coachReference = evidence.some((e) => e.verification?.status === 'coach_confirmed')
+    const coachReference = evidence.some((e) => e.provenance === 'coach_confirmed')
       || (srcs.passport?.references ?? []).some((r) => r.provenance && String(r.provenance).includes('coach'));
     return decisionReadiness({
       assessmentsAssigned: (room.assignments ?? []).filter((a) => /assess/i.test(a.task ?? '')).length || assessments.length,

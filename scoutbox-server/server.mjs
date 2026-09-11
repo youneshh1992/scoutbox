@@ -309,6 +309,14 @@ function shouldDeliver(identity, event, payload) {
     if (identity.kind === 'guardian') return payload.audienceKind === 'guardian' && payload.audienceId === identity.guardianId;
     return false;
   }
+  // An event carrying an orgId is ORGANISATION-PRIVATE: it describes something
+  // inside one club's workspace. It goes to that club's own streams and to
+  // nobody else — not the player it names, not their guardian, not a rival
+  // club that happens to be able to see the player. This is checked BEFORE the
+  // playerId rule below, which would otherwise deliver it to the subject.
+  if (payload.orgId) {
+    return identity.kind === 'org' && org.id === payload.orgId;
+  }
   if (payload.playerId) {
     const p = findPlayer(payload.playerId);
     if (!p) return false;
