@@ -172,6 +172,16 @@ export function registerCombine(ctx) {
     return { hasCombineVerifiedResults: proj.hasCombineVerifiedResults, combineProtocolResults: map };
   };
 
+  // The same standardized registry, readable by a club so a Club Combine (and
+  // a Recruitment Room) SELECTS from it rather than hard-coding protocol ids.
+  // Read-only definitions: no player data of any kind.
+  orgRouter.get('/combine/protocols', (_req, res) => {
+    res.json({
+      protocols: COMBINE_PROTOCOLS.map(protocolPublic),
+      note: 'Standardized protocols. A club selects from this registry and can never alter a protocol’s rules.',
+    });
+  });
+
   // ================================================================ PLAYER
   playerRouter.get('/combine/protocols', (_req, res) => {
     res.json({

@@ -54,9 +54,9 @@ export const ROOM_STATUS_LABELS = {
 // later decision (§83), which the append-only decision memory already models.
 // A room that is no longer being pursued is `archived`, `withdrawn` or `closed`.
 
-export const OPEN_ROOM_STATUSES = ROOM_STATUSES.filter(
-  (s) => !['signed', 'withdrawn', 'archived', 'closed'].includes(s),
-);
+export const TERMINAL_ROOM_STATUSES = ['signed', 'withdrawn', 'archived', 'closed'];
+
+export const OPEN_ROOM_STATUSES = ROOM_STATUSES.filter((s) => !TERMINAL_ROOM_STATUSES.includes(s));
 
 // M12 stage vocabularies, mirrored here so the mapping is declarative. These
 // MUST stay equal to m12/scouting.mjs PRO_STAGES / GRASSROOTS_STAGES; a boot
@@ -410,8 +410,16 @@ export function roomRole({ room, user, isLead }) {
   if (!room || !user) return null;
   if (isLead) return 'recruitment_admin';
   if (room.ownerUserId === user.id || room.room?.leadScoutUserId === user.id) return 'room_lead';
-  if ((room.assignments ?? []).some((a) => a.userId === user.id)) return 'contributor';
-  return room.restricted ? null : 'viewer';
+  const assigned = (room.assignments ?? []).some((a) => a.userId === user.id);
+  // A restricted room admits only its lead, its assignees and recruitment leads.
+  if (room.restricted && !assigned) return null;
+  // Once a room is filed away its discussion is institutional memory: everyone
+  // still reads it, but only a room lead or a recruitment admin can add to it.
+  if (TERMINAL_ROOM_STATUSES.includes(room.room?.status)) return 'viewer';
+  // Everyone else at a recruitment organisation is recruitment staff. ScoutBox
+  // has no read-only staff tier today, so an unrestricted, open room makes a
+  // colleague a contributor rather than a spectator.
+  return 'contributor';
 }
 
 const ROOM_ROLE_RANK = { viewer: 0, contributor: 1, room_lead: 2, recruitment_admin: 3 };

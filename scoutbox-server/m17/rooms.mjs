@@ -55,6 +55,23 @@ export function registerRooms(ctx) {
 
   const isRoom = (c) => !!c?.room;
 
+  /**
+   * The player header inside a Room.
+   *
+   * `playerViewForOrg` carries a LEGACY `trustScore` from the original
+   * safeguarding heuristic, which predates the M16.2 Trust Score. Two different
+   * numbers both called "trust" in one header is exactly how an
+   * evidence-confidence score gets read as a player rating, so the Room shows
+   * one: the M16.2 score, with its disclaimer attached. The legacy field is
+   * untouched everywhere else — this is a presentation decision local to M17.
+   */
+  function roomPlayerView(player, org) {
+    const view = playerViewForOrg(player, org);
+    if (!view) return null;
+    const { trustScore, trust, ...rest } = view;
+    return rest;
+  }
+
   /** The single writer of room status. `case.stage` is derived here and only here. */
   function applyStatus(room, status, org) {
     room.room.status = status;
@@ -343,7 +360,7 @@ export function registerRooms(ctx) {
       ...base,
       playerAvailable: true,
       playerName: srcs.player.name,
-      player: playerViewForOrg(srcs.player, org),
+      player: roomPlayerView(srcs.player, org),
       trust: srcs.trust ? { ...srcs.trust, note: ROOM_TRUST_NOTE } : null,
       passport: srcs.passport,
       evidence,
