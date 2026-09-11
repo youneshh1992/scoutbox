@@ -466,16 +466,21 @@ export function registerInsight(ctx) {
     });
   });
 
-  orgRouter.post('/evidence-gaps/:id/request', (req, res) => {
-    const s = db.evidenceSuggestions.find((x) => x.id === req.params.id && x.orgId === req.org.id);
-    if (!s) return res.status(404).json({ error: 'SUGGESTION_NOT_FOUND' });
-    if (s.status !== 'suggested') return res.status(409).json({ error: 'NOT_OPEN', status: s.status });
+  // The one path that turns a deterministic gap into a player-facing ask.
+  // Extracted from the route so a Recruitment Room (M17) raises an evidence
+  // request through exactly this code — same anti-pestering window, same
+  // guardian routing, same whitelisted player-safe wording. Returns a result
+  // object rather than writing a response, so both callers share the rules.
+  function requestEvidenceGap({ org, suggestionId }) {
+    const s = db.evidenceSuggestions.find((x) => x.id === suggestionId && x.orgId === org.id);
+    if (!s) return { ok: false, status: 404, error: 'SUGGESTION_NOT_FOUND' };
+    if (s.status !== 'suggested') return { ok: false, status: 409, error: 'NOT_OPEN', detail: { status: s.status } };
     const p = findPlayer(s.playerId);
-    if (!p || !orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE' });
+    if (!p || !orgCanSee(org, p)) return { ok: false, status: 403, error: 'NOT_VISIBLE' };
     // Anti-pestering: one open request per player+rule; a fresh request within
     // 14 days of the last one is refused.
-    const recent = db.evidenceSuggestions.find((x) => x.orgId === req.org.id && x.playerId === s.playerId && x.ruleId === s.ruleId && x.requestedAt && x.requestedAt > Date.now() - 14 * 86_400_000 && x.id !== s.id);
-    if (recent) return res.status(429).json({ error: 'RECENTLY_REQUESTED', message: 'You asked for this within the last 14 days — give them time.' });
+    const recent = db.evidenceSuggestions.find((x) => x.orgId === org.id && x.playerId === s.playerId && x.ruleId === s.ruleId && x.requestedAt && x.requestedAt > Date.now() - 14 * 86_400_000 && x.id !== s.id);
+    if (recent) return { ok: false, status: 429, error: 'RECENTLY_REQUESTED', message: 'You asked for this within the last 14 days — give them time.' };
     s.status = 'requested';
     s.requestedAt = Date.now();
     s.updatedAt = Date.now();
@@ -483,9 +488,17 @@ export function registerInsight(ctx) {
     // observations never travel in the explanation.
     const audience = !isAdult(p) && p.guardianId ? { kind: 'guardian', id: p.guardianId } : { kind: 'player', id: p.id };
     const who = audience.kind === 'guardian' ? `${p.name}'s profile` : 'your profile';
-    notify(audience, 'evidence_request', `📎 ${req.org.name} would find ${who} easier to assess with more evidence: ${playerSafeText(s)} You choose what (and whether) to add.`, s.id);
+    notify(audience, 'evidence_request', `📎 ${org.name} would find ${who} easier to assess with more evidence: ${playerSafeText(s)} You choose what (and whether) to add.`, s.id);
     persistNow();
-    res.json({ suggestion: s });
+    return { ok: true, suggestion: s, routedTo: audience.kind };
+  }
+  ctx.requestEvidenceGap = requestEvidenceGap;
+  ctx.computeEvidenceGaps = computeGaps;
+
+  orgRouter.post('/evidence-gaps/:id/request', (req, res) => {
+    const out = requestEvidenceGap({ org: req.org, suggestionId: req.params.id });
+    if (!out.ok) return res.status(out.status).json({ error: out.error, ...(out.message ? { message: out.message } : {}), ...(out.detail ?? {}) });
+    res.json({ suggestion: out.suggestion });
   });
 
   function playerSafeText(s) {

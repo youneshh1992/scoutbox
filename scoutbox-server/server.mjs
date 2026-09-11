@@ -19,6 +19,7 @@ import { registerM14 } from './m14/index.mjs';
 import { registerM15 } from './m15/index.mjs';
 import { registerM16 } from './m16/index.mjs';
 import { registerM162 } from './m162/index.mjs';
+import { registerM17 } from './m17/index.mjs';
 import { requestInstrumentation } from './m13/enterprise.mjs';
 import { totpValid } from './m13/shared.mjs';
 import {
@@ -3520,7 +3521,7 @@ const m15Ctx = registerM15({
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, m14: m14Ctx,
 });
-registerM16({
+const m16Ctx = registerM16({
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
   findPlayer, isBlocked, moderateOrRefuse,
@@ -3530,12 +3531,41 @@ registerM16({
 // M14 claims, the M15 Passport assembly, M16 Box Cam and M16.1 Combine.
 // Registered last because it consumes all of them; it adds no storage and no
 // authorization surface (a Trust Score grants nothing).
-registerM162({
+const m162Ctx = registerM162({
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
   findPlayer, isBlocked, moderateOrRefuse,
   assemblePassport: m15Ctx.assemblePassport,
   testProviderEnabled: process.env.BOX_CAM_TEST_PROVIDER === '1',
+});
+
+// M17 — Recruitment Rooms: the CLUB's private decision layer over one player.
+// Registered last of all because it composes every layer beneath it. It owns
+// no player truth: the Passport, Trust Score, Combine, Box Cam and evidence it
+// shows are the canonical projections, fetched through their own gates on
+// every read. A Room grants no access to anything.
+registerM17({
+  db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast,
+  findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
+  storage, publishedVouchesFor, pathwayRecord, DRILLS, DATA_DIR,
+  grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
+  sessionFor, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
+  // Canonical source projections, each keeping its own gate.
+  assemblePassport: m15Ctx.assemblePassport,
+  buildFootballPassport: m15Ctx.buildFootballPassport,
+  buildTrustProfile: m162Ctx.buildTrustProfile,
+  safeTrustProjection: m162Ctx.safeTrustProjection,
+  trustSnapshotOf: m162Ctx.trustSnapshotOf,
+  combineProjection: m16Ctx.combineProjection,
+  combineFacts: m16Ctx.combineFacts,
+  combineRequestView: m16Ctx.combineRequestView,
+  combineProtocolActive: m16Ctx.combineProtocolActive,
+  combineOrgMaySeeResults: m16Ctx.combineOrgMaySeeResults,
+  createCombineRequests: m16Ctx.createCombineRequests,
+  boxPrefsFor: m16Ctx.boxPrefsFor,
+  requestEvidenceGap: m13Ctx.requestEvidenceGap,
+  computeEvidenceGaps: m13Ctx.computeEvidenceGaps,
 });
 
 // ---------------------------------------------------- static app hosting

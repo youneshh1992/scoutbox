@@ -442,6 +442,40 @@ export function registerCombine(ctx) {
   });
 
   // ================================================================== CLUB
+  // The one creator for Club Combine requests. Extracted from the route so a
+  // Recruitment Room (M17) can raise a request through exactly this code path
+  // instead of growing a second copy of it. Callers do their own eligibility,
+  // rate-limit and moderation checks first — this only creates.
+  function createRequests({ org, orgUser, playerIds, protocolIds, title, deadline, instructions }) {
+    const created = [];
+    const skipped = [];
+    for (const pid of playerIds) {
+      const p = findPlayer(pid);
+      // Standing gates hold exactly as elsewhere — a request never widens access.
+      if (!p || !orgCanSee(org, p)) { skipped.push({ playerId: pid, reason: p ? 'NOT_VISIBLE' : 'PLAYER_NOT_FOUND' }); continue; }
+      const r = {
+        id: nextId('creq'), orgId: org.id, orgName: org.name,
+        requestedBy: { userId: orgUser.id, name: orgUser.name, role: orgUser.role ?? null, at: Date.now() },
+        playerId: p.id, title: String(title ?? '').slice(0, 120) || null,
+        protocolIds, deadline: deadline ? String(deadline).slice(0, 10) : null,
+        instructions: instructions ? String(instructions).slice(0, 300) : null,
+        state: 'requested', createdAt: Date.now(), completedAt: null,
+      };
+      db.combineRequests.push(r);
+      created.push(r);
+      ledgerAppend?.({ type: 'combine_request_created', playerId: p.id, orgId: org.id, orgName: org.name, userId: orgUser.id, scoutName: orgUser.name, detail: { requestId: r.id, protocols: protocolIds } });
+      const msg = `${org.name} requested an At-Home Combine${r.title ? `: ${r.title}` : ''} (${protocolIds.length} test${protocolIds.length > 1 ? 's' : ''}). Powered by Box Cam.`;
+      if (!isAdult(p) && p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'combine', `${p.name}: ${msg}`, r.id);
+      else notify({ kind: 'player', id: p.id }, 'combine', msg, r.id);
+    }
+    vmetric('combine_request_created', created.length);
+    persistNow();
+    return { created, skipped };
+  }
+  ctx.createCombineRequests = createRequests;
+  ctx.combineRequestView = requestView;
+  ctx.combineProtocolActive = (pid) => { const proto = latestCombineProtocol(pid); return !!proto && proto.status === 'active'; };
+
   // Create a Combine request / Club Combine: a verified, non-agency,
   // non-suspended org selects STANDARDIZED protocols (it cannot alter their
   // rules) for eligible players it can already see. No new access is granted.
@@ -461,30 +495,8 @@ export function registerCombine(ctx) {
     if (playerIds.length === 0) return res.status(400).json({ error: 'PLAYERS_REQUIRED' });
     if (instructions && !moderateOrRefuse(res, String(instructions), { kind: 'combine_request', orgId: req.org.id })) return;
 
-    const created = [];
-    const skipped = [];
-    for (const pid of playerIds) {
-      const p = findPlayer(pid);
-      // Standing gates hold exactly as elsewhere — a request never widens access.
-      if (!p || !orgCanSee(req.org, p)) { skipped.push({ playerId: pid, reason: p ? 'NOT_VISIBLE' : 'PLAYER_NOT_FOUND' }); continue; }
-      const r = {
-        id: nextId('creq'), orgId: req.org.id, orgName: req.org.name,
-        requestedBy: { userId: req.orgUser.id, name: req.orgUser.name, role: req.orgUser.role ?? null, at: Date.now() },
-        playerId: p.id, title: String(title ?? '').slice(0, 120) || null,
-        protocolIds: ids, deadline: deadline ? String(deadline).slice(0, 10) : null,
-        instructions: instructions ? String(instructions).slice(0, 300) : null,
-        state: 'requested', createdAt: Date.now(), completedAt: null,
-      };
-      db.combineRequests.push(r);
-      created.push(r);
-      ledgerAppend?.({ type: 'combine_request_created', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name, detail: { requestId: r.id, protocols: ids } });
-      const msg = `${req.org.name} requested an At-Home Combine${r.title ? `: ${r.title}` : ''} (${ids.length} test${ids.length > 1 ? 's' : ''}). Powered by Box Cam.`;
-      if (!isAdult(p) && p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'combine', `${p.name}: ${msg}`, r.id);
-      else notify({ kind: 'player', id: p.id }, 'combine', msg, r.id);
-    }
-    vmetric('combine_request_created', created.length);
+    const { created, skipped } = createRequests({ org: req.org, orgUser: req.orgUser, playerIds, protocolIds: ids, title, deadline, instructions });
     if (created.length > 1 || playerIds.length > 1) vmetric('club_combine_created');
-    persistNow();
     res.status(created.length ? 201 : 409).json({ requests: created.map(requestView), skipped });
   });
 
@@ -514,6 +526,9 @@ export function registerCombine(ctx) {
     if (prefs.shareDevelopmentActivity === 'recruitment') return true;
     return db.combineRequests.some((r) => r.orgId === org.id && r.playerId === p.id && r.state !== 'cancelled');
   }
+  // Shared with M17 so a Recruitment Room applies the identical consent rule
+  // rather than inventing a laxer one. A room is not consent.
+  ctx.combineOrgMaySeeResults = orgMaySeeResults;
   orgRouter.get('/combine/players/:id', (req, res) => {
     const p = findPlayer(req.params.id);
     if (!p || !orgCanSee(req.org, p)) return res.status(p ? 403 : 404).json({ error: p ? 'NOT_VISIBLE' : 'PLAYER_NOT_FOUND' });

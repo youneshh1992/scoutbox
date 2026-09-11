@@ -171,6 +171,10 @@ export function registerTrust(ctx) {
   ctx.buildTrustProfile = buildFor;
   ctx.trustSummaryFor = (player, opts) => trustSummary(buildFor(player, opts));
   ctx.trustSnapshotFor = (player) => trustSnapshot(buildFor(player));
+  // Snapshot an ALREADY-built profile, so a caller that has one (a Recruitment
+  // Room capturing decision context) does not rebuild it just to snapshot it.
+  ctx.trustSnapshotOf = (profile) => trustSnapshot(profile);
+  ctx.safeTrustProjection = safeTrustProjection;
 
   const band = (p) => p.band;
   const countBand = (p) => { vmetric?.(`trust_band_${band(p)}`); };
