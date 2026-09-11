@@ -692,6 +692,31 @@ section('Staff removal keeps attribution');
   }
 }
 
+// ------------------------ one player, one item, however many rooms there were
+section('A second archived room for the same player does not double the alert');
+{
+  // A club that evaluated a player years ago, archived, and evaluated them
+  // again later has TWO ended rooms. "Since we last decided" still has exactly
+  // one answer, so one new full match must raise one item, not one per room.
+  const THIRD = players.find((p) => p.id !== ADULT.id && p.id !== OTHER.id && p.name);
+  const older = (await j('POST', '/org/rooms', { playerId: THIRD.id }, maria.token)).body.room;
+  await j('POST', `/org/rooms/${older.roomId}/status`, { status: 'under_review' }, maria.token);
+  await j('POST', `/org/rooms/${older.roomId}/status`, { status: 'archived', reasonCodes: ['insufficient_recent_evidence'] }, maria.token);
+  await sleep(5);
+  const newer = (await j('POST', '/org/rooms', { playerId: THIRD.id }, maria.token)).body.room;
+  await j('POST', `/org/rooms/${newer.roomId}/status`, { status: 'under_review' }, maria.token);
+  await j('POST', `/org/rooms/${newer.roomId}/status`, { status: 'archived', reasonCodes: ['combine_missing'] }, maria.token);
+  await sleep(5);
+  await j('POST', `/org/players/${THIRD.id}/evidence`, { claimType: 'footage', label: 'Full match after both archives' }, maria.token);
+
+  const list = await j('GET', '/org/second-look?status=all&limit=100', undefined, maria.token);
+  const forPlayer = (list.body.items ?? []).filter((i) => i.playerId === THIRD.id);
+  neg(forPlayer.length === 1, `[13] two archived rooms for one player still raise ONE item (got ${forPlayer.length})`);
+  ok(forPlayer[0]?.roomId === newer.roomId, 'the item belongs to the most recent ended room, not the older one');
+  ok((forPlayer[0]?.archiveReasonCodes ?? []).includes('combine_missing'), 'it carries the reason from the club’s LAST decision');
+  neg(!(forPlayer[0]?.archiveReasonCodes ?? []).includes('insufficient_recent_evidence'), 'the superseded room’s reason is not mixed into it');
+}
+
 // ---------------------------------------------------------------- summary
 const total = passed;
 const pct = Math.round((negatives / total) * 100);

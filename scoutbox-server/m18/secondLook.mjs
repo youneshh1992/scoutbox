@@ -169,10 +169,26 @@ export function registerSecondLook(ctx) {
     const rooms = db.recruitmentCases.filter((c) => c.orgId === org.id && c.room
       && ['archived', 'closed', 'withdrawn'].includes(c.room.status)
       && (!playerId || c.playerId === playerId));
-    const out = [];
+    // A club may have opened, archived and later opened a SECOND room for the
+    // same player. "Since we last decided" has exactly one answer, so only the
+    // most recent ended room per player projects a candidate — otherwise one
+    // new full match raises one alert per historical room, which is the
+    // duplicate-alert failure this milestone exists to prevent. Ties on the
+    // decision clock (same-millisecond writes) fall back to the decision id so
+    // the choice is stable across reads.
+    const newest = new Map();
     for (const room of rooms) {
       const decision = latestDecision(room.id);
       if (!decision) continue;
+      const prev = newest.get(room.playerId);
+      const fresher = !prev
+        || decision.createdAt > prev.decision.createdAt
+        || (decision.createdAt === prev.decision.createdAt && String(decision.id) > String(prev.decision.id));
+      if (fresher) newest.set(room.playerId, { room, decision });
+    }
+
+    const out = [];
+    for (const { room, decision } of newest.values()) {
       const player = findPlayer(room.playerId);
       // Gates run BEFORE anything is computed about the player.
       const visible = !!player && orgCanSee(org, player);
