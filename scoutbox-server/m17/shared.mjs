@@ -449,7 +449,14 @@ export const roomCan = (role, action) => {
 // ----------------------------------------------------------- source context
 
 /** Where a room came from. Workflow provenance only — never a player score. */
-export const SOURCE_CONTEXTS = ['search', 'watchlist', 'shortlist', 'opportunity', 'recommendation', 'campaign', 'passport', 'direct'];
+export const SOURCE_CONTEXTS = [
+  'search', 'watchlist', 'shortlist', 'opportunity', 'recommendation', 'campaign', 'passport',
+  // M18 origins: a room opened from a Nobody Missed brief, or reopened from a
+  // Second Look. Recorded so the funnel can later tell a reactivation from an
+  // organic discovery — never exposed to the player.
+  'nobody_missed', 'second_look',
+  'direct',
+];
 
 export const normaliseSourceContext = (v) => (SOURCE_CONTEXTS.includes(v) ? v : 'direct');
 

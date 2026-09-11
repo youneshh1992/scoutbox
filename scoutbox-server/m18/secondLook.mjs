@@ -193,7 +193,14 @@ export function registerSecondLook(ctx) {
 
   // ---------------------------------------------------------- persistence
 
-  const itemFor = (orgId, roomId) => (db.secondLookItems ?? []).find((i) => i.orgId === orgId && i.roomId === roomId) ?? null;
+  /**
+   * An item belongs to ONE decision cycle. A club that reopens a room, reviews
+   * again and archives again has made a NEW decision — so the next material
+   * change surfaces a fresh item against that newest cycle, rather than
+   * colliding with the terminal item from the previous one (§89).
+   */
+  const itemFor = (orgId, roomId, decisionId) => (db.secondLookItems ?? [])
+    .find((i) => i.orgId === orgId && i.roomId === roomId && i.decisionId === decisionId) ?? null;
 
   /**
    * Reconcile persisted workflow state with what the world now looks like.
@@ -206,7 +213,7 @@ export function registerSecondLook(ctx) {
     const projected = projectCandidates(req, { playerId });
     const live = [];
     for (const { candidate, room } of projected) {
-      const existing = itemFor(org.id, room.id);
+      const existing = itemFor(org.id, room.id, candidate.decisionId);
       const verdict = secondLookStatus({ existing, candidate });
       // A handled item still exists: it belongs in the Reviewed and Dismissed
       // tabs. Suppression means "do not resurface as open", not "forget".
