@@ -15,10 +15,12 @@ import {
 } from './m13screens';
 import { VerificationScreen } from './m14screens';
 import { RoomsScreen } from './roomsScreens';
+import { BriefsScreen, NobodyMissedScreen, SecondLookScreen } from './m18Screens';
 import { m14 } from './m14api';
 import {
-  hashForRoom, hashForScreen, loadCollapsed, loadShortcuts, resolveNavigationLocation,
-  roomFromHash, saveCollapsed, saveShortcuts, screenFromHash, NAV_SECTIONS, type NavContext,
+  briefFromHash, hashForBrief, hashForRoom, hashForScreen, loadCollapsed, loadShortcuts,
+  resolveNavigationLocation, roomFromHash, saveCollapsed, saveShortcuts, screenFromHash,
+  NAV_SECTIONS, type NavContext,
 } from './nav';
 import { CommandPalette, NeedsAttention, Sidebar, SecondaryNav, useNavSections, usePaletteHotkey } from './navui';
 import { Icon } from './icons';
@@ -42,7 +44,8 @@ export type ScreenId =
   | 'squad' | 'friendlies' | 'fixtures' | 'ledger' | 'funnel' | 'plan'
   | 'assessments' | 'recruitment' | 'coaches' | 'opportunities' | 'campaigns' | 'video' | 'outcomes' | 'trialdays'
   | 'insight' | 'coverage' | 'calibration' | 'imports' | 'network' | 'organisation' | 'verification'
-  | 'rooms';
+  | 'rooms'
+  | 'secondlook' | 'nobodymissed' | 'briefs';
 
 // M15-Nav: the flat sidebar list is gone — the information architecture
 // lives in src/nav.ts (sections → child tabs) and also drives the command
@@ -191,14 +194,18 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   // M17: the first parameterised route. The room id lives beside the screen id
   // so back/forward/refresh/deep-entry all land on exactly the same place.
   const [roomId, setRoomId] = useState<string | null>(() => roomFromHash(window.location.hash));
+  // M18 reuses that same mechanism for "#/recruitment/briefs/:briefId".
+  const [briefId, setBriefId] = useState<string | null>(() => briefFromHash(window.location.hash));
   const setScreen = useCallback((id: ScreenId) => {
     setScreenState(id);
     setRoomId(null);
+    setBriefId(null);
     try { if (window.location.hash !== hashForScreen(id)) window.history.replaceState(null, '', hashForScreen(id)); } catch { /* sandboxed */ }
   }, []);
   /** Opening a room PUSHES, so the browser Back button closes it again. */
   const openRoom = useCallback((id: string) => {
     setScreenState('rooms');
+    setBriefId(null);
     setRoomId(id);
     try { if (window.location.hash !== hashForRoom(id)) window.history.pushState(null, '', hashForRoom(id)); } catch { /* sandboxed */ }
   }, []);
@@ -207,11 +214,24 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     setRoomId(null);
     try { if (window.location.hash !== hashForScreen('rooms')) window.history.pushState(null, '', hashForScreen('rooms')); } catch { /* sandboxed */ }
   }, []);
+  /** Opening a brief PUSHES, so the browser Back button closes it again. */
+  const openBrief = useCallback((id: string) => {
+    setScreenState('briefs');
+    setRoomId(null);
+    setBriefId(id);
+    try { if (window.location.hash !== hashForBrief(id)) window.history.pushState(null, '', hashForBrief(id)); } catch { /* sandboxed */ }
+  }, []);
+  const closeBrief = useCallback(() => {
+    setScreenState('briefs');
+    setBriefId(null);
+    try { if (window.location.hash !== hashForScreen('briefs')) window.history.pushState(null, '', hashForScreen('briefs')); } catch { /* sandboxed */ }
+  }, []);
   useEffect(() => {
     const onHash = () => {
       const id = screenFromHash(window.location.hash);
       if (id) setScreenState(id);
       setRoomId(roomFromHash(window.location.hash));
+      setBriefId(briefFromHash(window.location.hash));
     };
     window.addEventListener('hashchange', onHash);
     window.addEventListener('popstate', onHash);
@@ -406,6 +426,9 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
           {screen === 'assessments' && <AssessmentsScreen {...props} />}
           {screen === 'recruitment' && <RecruitmentScreen {...props} />}
           {screen === 'rooms' && <RoomsScreen {...props} roomId={roomId} onOpenRoom={openRoom} onCloseRoom={closeRoom} />}
+          {screen === 'secondlook' && <SecondLookScreen {...props} />}
+          {screen === 'nobodymissed' && <NobodyMissedScreen {...props} onOpenRoom={openRoom} />}
+          {screen === 'briefs' && <BriefsScreen {...props} briefId={briefId} onOpenBrief={openBrief} onCloseBrief={closeBrief} />}
           {screen === 'coaches' && <CoachesScreen {...props} />}
           {screen === 'opportunities' && <OpportunitiesScreen {...props} />}
           {screen === 'campaigns' && <CampaignsScreen {...props} />}

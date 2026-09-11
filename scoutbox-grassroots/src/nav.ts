@@ -67,6 +67,13 @@ export const NAV_SECTIONS: NavSection[] = [
       // M17: the club's private decision layer over a player. It lives inside
       // Recruitment as ONE destination — no seventh sidebar section.
       { id: 'rooms', labelKey: 'nav2.rooms', aliases: ['recruitment rooms', 'room', 'rooms', 'workspace', 'salles'] },
+      // M18: three more destinations INSIDE Recruitment — never a seventh
+      // sidebar section. Second Look reports what changed since a decision;
+      // Nobody Missed is evaluation coverage over a written brief; Briefs is
+      // the club's own explicit demand.
+      { id: 'secondlook', labelKey: 'nav2.secondlook', aliases: ['second look', 'worth another look', 'evidence changed', 'reconsider', 'second regard', 'nouveau regard'] },
+      { id: 'nobodymissed', labelKey: 'nav2.nobodymissed', aliases: ['nobody missed', 'evaluation coverage', 'coverage gaps', 'not yet evaluated', 'couverture d’évaluation'] },
+      { id: 'briefs', labelKey: 'nav2.briefs', aliases: ['recruitment briefs', 'brief', 'briefs', 'criteria', 'cahier des charges', 'briefs de recrutement'] },
       { id: 'assessments', labelKey: 'nav.assessments', aliases: ['reports', 'scouting reports', 'évaluations', 'rapports'] },
       { id: 'video', labelKey: 'nav2.video', aliases: ['evidence', 'video workspace', 'preuves'] },
       { id: 'trials', labelKey: 'nav.trials', aliases: ['trial', 'trial reports', 'essais'] },
@@ -182,16 +189,43 @@ export function roomFromHash(hash: string): string | null {
 }
 export const hashForRoom = (roomId: string) => `#/recruitment/rooms/${roomId}`;
 
+// M18 extends the SAME mechanism rather than inventing a second one:
+//   "#/recruitment/second-look"      → the Second Look queue
+//   "#/recruitment/nobody-missed"    → Evaluation Coverage for a brief
+//   "#/recruitment/briefs/:briefId"  → one Recruitment Brief
+// Each is parsed by its own strict pattern, so the flat "#/<screenId>"
+// contract is unchanged and every malformed hash still rejects exactly as
+// before.
+export const SECOND_LOOK_HASH = '#/recruitment/second-look';
+export const NOBODY_MISSED_HASH = '#/recruitment/nobody-missed';
+const BRIEF_HASH = /^#\/recruitment\/briefs\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})$/;
+
+/** The brief id inside a deep link, or null for any other (or malformed) hash. */
+export function briefFromHash(hash: string): string | null {
+  const m = BRIEF_HASH.exec(hash ?? '');
+  return m ? m[1] : null;
+}
+export const hashForBrief = (briefId: string) => `#/recruitment/briefs/${briefId}`;
+
+/** Canonical hashes for the two unparameterised M18 destinations. */
+const PRETTY_HASH: Partial<Record<ScreenId, string>> = {
+  secondlook: SECOND_LOOK_HASH,
+  nobodymissed: NOBODY_MISSED_HASH,
+};
+
 export function screenFromHash(hash: string): ScreenId | null {
   // A room deep link resolves to the Rooms destination (which then opens it).
   if (roomFromHash(hash)) return 'rooms';
+  if (briefFromHash(hash)) return 'briefs';
+  if (hash === SECOND_LOOK_HASH) return 'secondlook';
+  if (hash === NOBODY_MISSED_HASH) return 'nobodymissed';
   const m = /^#\/([a-z]+)$/.exec(hash ?? '');
   if (!m) return null;
   const id = m[1];
   if (id === INBOX_ITEM.id) return 'messages';
   return allItems().some(({ item }) => item.id === id) ? (id as ScreenId) : null;
 }
-export const hashForScreen = (id: ScreenId) => `#/${id}`;
+export const hashForScreen = (id: ScreenId) => PRETTY_HASH[id] ?? `#/${id}`;
 
 // -------------------------------------------------------------- shortcuts
 // Pinned by ITEM ID (rename-safe). Stored locally per identity — honest

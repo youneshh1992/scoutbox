@@ -38,11 +38,13 @@ async function loadNav(app) {
 const PRO_IDS = ['feed', 'filmroom', 'search', 'shortlist', 'requests', 'messages', 'trials', 'fixtures',
   'ledger', 'funnel', 'reputation', 'plan', 'assessments', 'recruitment', 'planner', 'opportunities',
   'campaigns', 'video', 'outcomes', 'trialdays', 'imports', 'coverage', 'calibration', 'insight',
-  'network', 'budgets', 'representation', 'organisation', 'verification', 'rooms'];
+  'network', 'budgets', 'representation', 'organisation', 'verification', 'rooms',
+  'secondlook', 'nobodymissed', 'briefs'];
 const GRASS_IDS = ['feed', 'filmroom', 'search', 'shortlist', 'requests', 'messages', 'trials', 'opendays',
   'squad', 'friendlies', 'fixtures', 'ledger', 'funnel', 'plan', 'assessments', 'recruitment', 'coaches',
   'opportunities', 'campaigns', 'video', 'outcomes', 'trialdays', 'insight', 'coverage', 'calibration',
-  'imports', 'network', 'organisation', 'verification', 'rooms'];
+  'imports', 'network', 'organisation', 'verification', 'rooms',
+  'secondlook', 'nobodymissed', 'briefs'];
 
 const LABELS = {
   'navsec.home': 'Home', 'navsec.discover': 'Discover', 'navsec.recruitment': 'Recruitment',
@@ -115,6 +117,25 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 6], ['scout
     && nav.roomFromHash('') === null, 'malformed room deep links rejected');
   ok(nav.hashForRoom('case-7') === '#/recruitment/rooms/case-7', 'room hash round-trip');
   ok(nav.resolveNavigationLocation('rooms').sectionId === 'recruitment', 'Rooms highlights Recruitment');
+  // M18 — three more destinations inside Recruitment (still six sections), two
+  // named deep links and a second parameterised route, all on the SAME strict
+  // mechanism M17 introduced.
+  ok(nav.screenFromHash('#/recruitment/second-look') === 'secondlook', 'Second Look deep link resolves');
+  ok(nav.screenFromHash('#/recruitment/nobody-missed') === 'nobodymissed', 'Nobody Missed deep link resolves');
+  ok(nav.screenFromHash('#/secondlook') === 'secondlook' && nav.screenFromHash('#/briefs') === 'briefs', 'M18 destinations keep a flat hash too');
+  ok(nav.hashForScreen('secondlook') === '#/recruitment/second-look'
+    && nav.hashForScreen('nobodymissed') === '#/recruitment/nobody-missed', 'M18 named hashes round-trip');
+  ok(nav.screenFromHash('#/recruitment/briefs/brf-7') === 'briefs', 'brief deep link resolves to the Briefs destination');
+  ok(nav.briefFromHash('#/recruitment/briefs/brf-7') === 'brf-7', 'brief deep link yields the brief id');
+  ok(nav.briefFromHash('#/briefs') === null && nav.briefFromHash('#/recruitment/briefs/') === null
+    && nav.briefFromHash('#/recruitment/briefs/a/b') === null && nav.briefFromHash('#/recruitment/briefs/../x') === null
+    && nav.briefFromHash('') === null, 'malformed brief deep links rejected');
+  ok(nav.hashForBrief('brf-7') === '#/recruitment/briefs/brf-7', 'brief hash round-trip');
+  ok(nav.briefFromHash('#/recruitment/second-look') === null && nav.roomFromHash('#/recruitment/second-look') === null,
+    'a named M18 hash is not mistaken for a parameterised one');
+  for (const id of ['secondlook', 'nobodymissed', 'briefs']) {
+    ok(nav.resolveNavigationLocation(id).sectionId === 'recruitment', `${id} highlights Recruitment`);
+  }
 
   section(`${app} — shortcuts persistence (graceful)`);
   store.clear();
