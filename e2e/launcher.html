@@ -1,0 +1,291 @@
+<title>ScoutBox — App Launcher</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&display=swap">
+<style>
+  :root {
+    --ground: #0b1220;
+    --panel: #121d33;
+    --panel-2: #16233c;
+    --line: #263a5e;
+    --ink: #e8eefc;
+    --dim: #8fa3c8;
+    --green: #35d07f;
+    --leaf: #8bc34a;
+    --orange: #ff9d42;
+    --gold: #f2c14e;
+    --display: 'Sora', system-ui, -apple-system, sans-serif;
+  }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font: 15px/1.6 system-ui, -apple-system, 'Segoe UI', sans-serif;
+    padding: 0 20px 56px;
+  }
+  .wrap { max-width: 780px; margin: 0 auto; }
+
+  header { padding: 44px 0 8px; }
+  .mark {
+    font-family: var(--display); font-weight: 800; font-size: 34px; letter-spacing: -0.5px;
+    text-wrap: balance;
+  }
+  .mark .box { color: var(--green); }
+  .sub { color: var(--dim); margin: 6px 0 0; max-width: 62ch; }
+  .buildchip {
+    display: inline-flex; align-items: center; gap: 7px; margin-top: 14px;
+    border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px;
+    font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums;
+  }
+  .buildchip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+  .buildchip code { color: var(--ink); font-size: 12px; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 26px; }
+  @media (max-width: 620px) { .grid { grid-template-columns: 1fr; } }
+
+  a.app {
+    display: flex; flex-direction: column; gap: 6px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 18px 18px 16px; text-decoration: none; color: var(--ink);
+    border-top: 3px solid var(--accent, var(--line));
+    transition: background .15s ease, transform .15s ease;
+  }
+  a.app:hover { background: var(--panel-2); transform: translateY(-2px); }
+  a.app:focus-visible { outline: 2px solid var(--accent, var(--green)); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { a.app { transition: none; } a.app:hover { transform: none; } }
+  .app .top { display: flex; align-items: center; gap: 10px; }
+  .app .emoji { font-size: 22px; }
+  .app h2 { font-family: var(--display); font-weight: 700; font-size: 17px; margin: 0; }
+  .app p { margin: 0; color: var(--dim); font-size: 13.5px; }
+  .app .go { margin-top: auto; padding-top: 8px; font-size: 13px; font-weight: 600; color: var(--accent, var(--green)); }
+  .app.player { --accent: var(--green); }
+  .app.pro { --accent: var(--orange); }
+  .app.grass { --accent: var(--leaf); }
+  .app.connected { --accent: var(--gold); }
+  .badge {
+    margin-left: auto; font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--dim); border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; white-space: nowrap;
+  }
+
+  section.notes { margin-top: 34px; }
+  section.notes h3 {
+    font-family: var(--display); font-size: 13px; font-weight: 700; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--dim); margin: 0 0 10px;
+  }
+  section.notes.feature h3 { color: var(--green); }
+  section.notes ul { margin: 0; padding-left: 20px; color: var(--ink); max-width: 66ch; }
+  section.notes li { margin-bottom: 8px; }
+  section.notes li::marker { color: var(--green); }
+  .hosted {
+    margin-top: 26px; background: var(--panel); border: 1px solid var(--line);
+    border-left: 3px solid var(--gold); border-radius: 10px; padding: 14px 16px;
+    color: var(--ink); font-size: 14px; max-width: 66ch; box-sizing: border-box;
+  }
+  .hosted b { color: var(--gold); }
+  .honest {
+    margin-top: 14px; background: var(--panel-2); border: 1px solid var(--line);
+    border-left: 3px solid var(--green); border-radius: 10px; padding: 12px 16px;
+    color: var(--ink); font-size: 13px; max-width: 66ch; box-sizing: border-box;
+  }
+  .honest b { color: var(--green); }
+  footer { margin-top: 30px; color: var(--dim); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="mark">Scout<span class="box">Box</span> — App Launcher</div>
+    <p class="sub">One bookmark for every ScoutBox app. Each tile opens an interactive demo of the actual current interface, running entirely in your browser on synthetic sample data.</p>
+    <span class="buildchip"><span class="dot"></span>Source version <code>b924334</code> · built 2026-09-11 · Milestone 18 — Second Look + Nobody Missed</span>
+  </header>
+
+  <div class="grid">
+    <a class="app player" href="https://claude.ai/code/artifact/b91499f1-5c88-4f4b-aca1-6094bef11106">
+      <div class="top"><span class="emoji">⚽</span><h2>ScoutBox Player</h2></div>
+      <p>The mobile app for players and guardians — profile, Football Passport, Box Training, At-Home Combine, and the <b>ScoutBox Trust Score</b>: how strongly your record is backed by evidence, explained component by component. Nothing a club decides about you appears here.</p>
+      <span class="go">Open Player →</span>
+    </a>
+    <a class="app pro" href="https://claude.ai/code/artifact/34c738e4-7660-471c-9fbe-b34a162c8e1e">
+      <div class="top"><span class="emoji">🔭</span><h2>ScoutBox Pro</h2></div>
+      <p>The recruitment desk for professional clubs — Recruitment Rooms, and now <b>Second Look</b> and <b>Nobody Missed</b>: what changed since your club decided, and who matched your own written brief but never entered your workflow.</p>
+      <span class="go">Open Pro →</span>
+    </a>
+    <a class="app grass" href="https://claude.ai/code/artifact/d2b059f1-ebfd-44ce-b98f-b685f5f2e856">
+      <div class="top"><span class="emoji">🌱</span><h2>ScoutBox Grassroots</h2></div>
+      <p>The free toolkit for grassroots clubs — local discovery, squad board, sessions, club messaging, Box Training, a simpler Recruitment Room, and the same Second Look and Nobody Missed within the local radius.</p>
+      <span class="go">Open Grassroots →</span>
+    </a>
+    <a class="app pro" style="--accent: #a688ff" href="https://claude.ai/code/artifact/4172504f-ecf4-4c25-ac9f-a5d59ac22e58">
+      <div class="top"><span class="emoji">🛡️</span><h2>Trust &amp; Safety</h2></div>
+      <p>The ScoutBox back office — report queue, evidence disputes, staff-check review, coach affiliations, outcome aggregates, the Box Cam case desk and the Trust Score derivation inspector.</p>
+      <span class="go" style="color:#a688ff">Open Trust &amp; Safety →</span>
+    </a>
+    <a class="app connected" href="https://claude.ai/code/artifact/f86846c4-6616-4883-8b89-eda1c7f40c2f">
+      <div class="top"><span class="emoji">🔗</span><h2>Connected Demo</h2><span class="badge">Shared simulation</span></div>
+      <p>All three apps in one page sharing one synthetic dataset — send a contact request in Pro, accept and reply as the player, watch it land back. No live backend.</p>
+      <span class="go">Open Connected Demo →</span>
+    </a>
+  </div>
+
+
+  <section class="notes feature">
+    <h3>Explore the new features (Milestone 18 — Second Look + Nobody Missed)</h3>
+    <p class="sub" style="font-size:13px;margin:-4px 0 12px">Clubs lose players two ways: they archive someone for a reason that later stops being true and never find out, and they never look at someone who matched what they said they wanted. <b>Second Look</b> asks <i>has something materially changed since we decided?</i> <b>Nobody Missed</b> asks <i>who matches our own written brief and never entered our workflow?</i> Neither decides who is talented, who deserves a contract, or who was wrongly rejected.</p>
+    <ul>
+      <li><b>1 · The queue</b> — Pro (as <i>Maria Keane</i>) → Recruitment → <b>Second Look</b>. Four tabs on one page — <i>Worth Another Look · Evidence Changed · Reviewed · Dismissed</i> — inside the Recruitment area that already exists.</li>
+      <li><b>2 · Reason-aware, not score-aware</b> — <i>Diego Alonso</i> was archived for <b>not enough recent evidence</b>. A full match and a verified coach reference have since landed, and the card says so and names the reason recorded <i>at the time</i>. It never says the decision was wrong — a copy sweep in the suite enforces that.</li>
+      <li><b>3 · The honest half</b> — the same card prints <b>Reasons that still stand: Squad space</b>. Squad space, budget, timing, registration, travel and eligibility are facts about the <i>club</i>. No amount of new footage resolves them, and nothing here pretends otherwise.</li>
+      <li><b>4 · One change, one item</b> — a single Combine result reaches M18 through the Combine projection, the Passport and the Trust components. The fingerprint is <code>type:source:id</code> without the timestamp, so that is <b>one change, not three alerts</b> — and a club that archived the same player twice still gets one item, against its most recent decision.</li>
+      <li><b>5 · Review changes</b> — <i>At your previous review vs now</i>, built from the snapshot captured when the decision was made. Only rows that moved are shown, and a field the snapshot never recorded reads <b>“Previous detail unavailable”</b> — never a fabricated value, never a misleading zero.</li>
+      <li><b>6 · Reopen is a click</b> — press <b>Reopen room</b>, pick a reason, and the reopen goes through the Room’s own rules: same transition table, same snapshot capture, same activity trail, and the archived decision stays in history. <b>ScoutBox never reopens a room for you.</b></li>
+      <li><b>7 · Dismissal is private and final for that evidence</b> — dismissing is organisation-private, changes nothing about the player, and the same evidence can never regenerate the item however many times the queue is re-read. Genuinely new evidence can, immediately.</li>
+      <li><b>8 · Recruitment Briefs</b> — Pro → <b>Recruitment Briefs</b> → <i>2027 Defensive Midfielder</i>: positions, ages, radius, level, evidence requirements, an optional evidence-confidence band. <b>Every criterion is one the club typed.</b> There are no hidden criteria, no weights and no ranking.</li>
+      <li><b>9 · Protected characteristics are refused, not dropped</b> — race, ethnicity, religion, disability, family income, school type, postcode deprivation, physical maturity and national origin are each rejected by their own error code, so the refusal is unambiguous in an audit.</li>
+      <li><b>10 · Nobody Missed</b> — <b>Evaluation Coverage</b> over that brief: 8 eligible · 5 evaluated · 3 not yet · 63%. It is workflow coverage — <i>never</i> Scout Quality, Recruitment Quality, a Scouting Score or a Fairness Score — and the panel says so itself.</li>
+      <li><b>11 · “Why is this player here?”</b> — every candidate lists the club’s own criteria, met and not met. Boolean rules only: unknown age and unknown distance <b>fail closed</b>, exactly like the standing gates, and visibility, blocks, minors and the grassroots radius run <i>before</i> matching, never after.</li>
+      <li><b>12 · Looking is not evaluating</b> — nine signals count as a real evaluation (a room, a case, a submitted assessment, a trial, a signing, a shortlist, a deferral, a squad entry); a profile view, a search impression and a Passport view explicitly do not. Add a candidate to a Room and coverage really moves to 6 of 8.</li>
+      <li><b>13 · The two queues never claim the same player</b> — archive that room and they do <b>not</b> fall back into Nobody Missed: they were evaluated. Later relevant evidence reaches you through Second Look instead. And the <b>player app contains neither system</b> — no Second Look, no brief, no coverage, no archive reason, ever.</li>
+    </ul>
+    <div class="honest"><b>Honest scope.</b> Two change types are declared but not yet emitted, because the underlying stores expose no reliable per-change clock — documented rather than faked. <i>Player unavailable</i> can never be resolved: ScoutBox emits no availability-changed event, and inventing one would be worse than the gap. Analytics are organisation-private counters with <b>no scout ranking of any kind</b> — M18 measures workflow coverage, not employee performance — and Trust &amp; Safety has no M18 surface at all.</div>
+  </section>
+
+  <section class="notes feature">
+    <h3>Explore the new features (Milestone 17 — Recruitment Rooms)</h3>
+    <p class="sub" style="font-size:13px;margin:-4px 0 12px"><b>Football Passport = the player’s truth layer. Recruitment Room = the club’s decision layer.</b> A Room is the private internal workspace where recruitment staff evaluate one player together: what we reviewed, what we’re waiting on, who is doing it next, and what we decided — and why. The player owns the Passport; the club owns its Room, and never the other way round.</p>
+    <ul>
+      <li><b>1 · Open a Room</b> — Pro (as <i>Maria Keane</i>) → Discover → <i>Kola Adeyemi</i> → <b>Add to Recruitment Room</b>. The Room opens on its own deep link inside <b>Recruitment</b> — not a new sidebar item, because Recruitment already exists.</li>
+      <li><b>2 · Everything authorised, in one place</b> — nine tabs: Overview, Passport, Evidence, Assessments, Combine, Development, Discussion, Activity, Decision. The Room <i>composes</i> the canonical Passport, Trust Score, Combine and Box Cam projections; it re-derives nothing and stores no copy of the player’s record.</li>
+      <li><b>3 · Adding a player widens nothing</b> — every standing rule re-runs on <i>every</i> read: the agency/minor wall, verified-club requirement, grassroots 50 km radius, blocks and suspension. A Room can never be used to bookmark a player the club is forbidden to see.</li>
+      <li><b>4 · Trust Score, still evidence confidence</b> — shown with <i>“Evidence confidence — not football ability”</i> every single time. The Room deliberately hides the older safeguarding score so there is never a second number called “trust” in the same header.</li>
+      <li><b>5 · Decision readiness is counts, not a score</b> — “Assessments 2/2 · Recent full match: available · Coach reference: none · Combine: no verified result · Open tasks: 1”, with room health as a <i>word</i> (Ready for review · Waiting on evidence · Trial pending). There is no Decision Score and no Signing Probability anywhere in M17.</li>
+      <li><b>6 · Private discussion, tasks and assignments</b> — threaded comments with @mentions of colleagues, tombstoned deletion that keeps the author attributable, and staff tasks that are <b>never</b> sent to the player. A player-facing ask must go through the evidence-request or Combine workflow instead.</li>
+      <li><b>7 · Asking the player for something is still the player’s rules</b> — <b>Request evidence</b> goes through the standing engine: deterministic rules, a 14-day anti-pestering window, guardian routing for under-18s and whitelisted wording. A scout has <b>no free-text field</b> to a player from inside a private room.</li>
+      <li><b>8 · Decision memory</b> — the Decision tab records a recommendation with a <b>structured reason</b> from a fixed taxonomy (football · evidence · process · outcome). Decisions are <b>append-only</b>: a revision supersedes its predecessor and never rewrites it.</li>
+      <li><b>9 · No protected characteristic, ever</b> — race, nationality, religion, disability, socioeconomic background and the rest are refused by their own error code, not silently dropped. Internal tags are checked the same way. A club may decline a player; it may not record a protected trait as the reason.</li>
+      <li><b>10 · What the club saw when it decided</b> — shortlisting, a trial decision, an offer, a signing or an archive captures an immutable snapshot. Later the Room shows <b>“Trust at decision: 78”</b> beside <b>“Current: 86”</b> — and the first number never changes.</li>
+      <li><b>11 · Archive, and the foundation for Second Look</b> — archiving <i>requires</i> a reason; try it without one and it is refused. The archive reason is machine-readable, so <i>Second Look</i> (Milestone 18, above) can ask “has the reason this player was archived stopped applying?” without reading anyone’s private notes. Reopening is a first-class move and both events stay on the timeline.</li>
+      <li><b>12 · Two clubs, two sealed rooms</b> — Eastport and Harbour City can both evaluate the same player and neither knows the other’s room exists. A deep link to another club’s room returns exactly what a room that never existed returns. And the <b>player app has no Recruitment Room at all</b> — no status, no discussion, no reasoning, ever.</li>
+    </ul>
+    <div class="honest"><b>Honest scope.</b> Trials and contact requests are <i>linked</i> from a Room rather than raised inside it: asking for a trial is a contact with a player or guardian and must pass its own consent path — a private room must not shortcut it. There is no AI recruiter, no signing probability and no player score; assessments remain evaluator opinion, Combine results remain measurements, the Trust Score remains evidence confidence, and ScoutBox never fuses them into a rating. Trust &amp; Safety has no routine read access to any club’s room.</div>
+  </section>
+
+  <section class="notes feature">
+    <h3>Explore the new features (Milestone 16.2 — ScoutBox Trust Score)</h3>
+    <p class="sub" style="font-size:13px;margin:-4px 0 12px"><b>ScoutBox Trust Score reflects verification and evidence confidence — not football ability or recruitment suitability.</b> It answers exactly one question: <i>how strongly is this player’s football record supported by trustworthy, current and attributable evidence?</i> It is derived at read time from what already exists — it stores nothing, decides nothing, and unlocks nothing.</p>
+    <ul>
+      <li><b>1 · Your Trust Profile</b> — Player (as <i>Kola Adeyemi</i>) → You → <b>ScoutBox Trust Score</b>: a 0–100 score with a neutral evidence band (Limited · Developing · Established · Strong · Very strong) and the disclaimer travelling with it wherever it is shown.</li>
+      <li><b>2 · “Why this score?”</b> — expand it and every one of the six components is explained: Identity 15 · Football history 20 · Relationships 20 · Evidence 20 · Combine 15 · References 10, each with its coverage, what strengthened it (✓) and what could strengthen it further (○).</li>
+      <li><b>3 · A low score is limited evidence, never bad character</b> — the words <i>untrustworthy, suspicious, risky</i> and <i>poor player</i> exist nowhere in the product. A gap reads “1 club entry is provided by the player and not independently confirmed”, never an accusation.</li>
+      <li><b>4 · Performance can never buy trust</b> — this is the invariant the whole engine is built around. 80 touches and 220 touches with the same integrity contribute <b>exactly the same</b>. Not one measured value is an input; only whether a standardised protocol was genuinely measured.</li>
+      <li><b>5 · Grinding does not work</b> — 500 Box Cam sessions and 100 Combine attempts with no identity, no confirmed history and no references stays <b>under 40</b>, proven by an adversarial test. Component caps, per-source sub-caps and diminishing-return curves make volume worthless.</li>
+      <li><b>6 · Coverage, not repetition</b> — Combine counts <i>distinct</i> protocols, so repeating one test ten times is one test’s worth; a partially-measured attempt earns no Combine Verified contribution at all.</li>
+      <li><b>7 · Fact-specific authority</b> — there is no universal “who is most trustworthy” rank. A club is strong authority for its own affiliation; a coach for the coach–player relationship; Box Cam for the activity it observed and <b>not</b> for club history, from which it is absent entirely.</li>
+      <li><b>8 · Prestige, popularity and payment are not inputs</b> — a famous club and a park-side club give identical relationship confidence; the engine never sees a club name at all. Followers, trials, signings and money change nothing. A verified grassroots record can reach a <b>strong</b> band with no professional affiliation whatsoever.</li>
+      <li><b>9 · Fair to minors and to newcomers</b> — a category that cannot exist for a minor (agency representation) leaves the denominator rather than scoring zero, and a new player with an empty record is never buried: the score is informational, never a discovery gate and never a sort order.</li>
+      <li><b>10 · What a club sees</b> — Pro (as <i>Maria Keane</i>) → open a player → <b>Trust Profile</b>: the score, the band, component <i>levels</i> and safe evidence signals, with the tooltip “Evidence confidence — not football ability.” The player’s own gaps, source records and guardian details never cross over.</li>
+      <li><b>11 · Removal is not punishment</b> — an invalidated Combine result or Box Cam session stops contributing immediately, and the score becomes exactly that of a player who never had it. A legitimate restoration returns the same contribution. Nobody is blamed for a provider bug.</li>
+      <li><b>12 · A score is not authorization, and cannot be typed</b> — a Trust Score of 100 grants <b>zero</b> additional permissions: every safeguarding rule, block, radius and suspension refuses exactly as before. T&amp;S → Cases → <b>Trust</b> inspects the full derivation but has <b>no write route</b> — a wrong score is fixed by correcting the evidence or the policy, then recalculating.</li>
+    </ul>
+    <div class="honest"><b>Honest scope.</b> Because no production Combine capability exists here (see Milestone 16.1), Combine Confidence is honestly <b>0</b> in a real production profile, and the demo runs on the clearly-labelled simulated provider — simulated evidence never contributes to a production score. Identity assurance is likewise capped by reality: with no authoritative identity provider configured, the strongest real identity today is a ScoutBox document review, deliberately scored below <i>authoritative</i>. The Trust Score is not a talent score, not a recommendation and not a permission.</div>
+  </section>
+
+  <section class="notes feature">
+    <h3>Explore the new features (Milestone 16.1 — At-Home Combine, powered by Box Cam)</h3>
+    <p class="sub" style="font-size:13px;margin:-4px 0 12px"><b>Standardised drills. Real measurable numbers. Recorded live with Box Cam.</b> — <i>Record it. Prove it. Put a number on it.</i> At-Home Combine turns Box Cam into standardised tests and produces a number a club can trust — <b>Combine Verified</b> — only when ScoutBox can genuinely measure it.</p>
+    <ul>
+      <li><b>1 · My Combine</b> — Player (as <i>Kola Adeyemi</i>) → You → <b>At-Home Combine</b>: verified results, personal bests, the standardised drill library, and any Club Combine a club has requested.</li>
+      <li><b>2 · A standardised protocol</b> — open <b>Box Touch 60</b>: one fixed protocol (60-second window, defined setup, camera, space, scoring), pinned to a version so a historical result is never rewritten by a later change.</li>
+      <li><b>3 · Ready Check &amp; calibration</b> — <b>Start My Combine</b> runs the Box Cam Ready Check and standardised geometry calibration, then a live capture — the same integrity flow as Box Cam.</li>
+      <li><b>4 · The verified number, server-derived</b> — the counter runs, you finish, and the result — e.g. <b>184 touches</b> — is calculated by ScoutBox from what it observed. You cannot type, edit or upload a number. <i>Your work counts.</i></li>
+      <li><b>5 · Combine Verified, explained</b> — a verified result carries a <b>“Why is this verified?”</b> checklist: standardised protocol ✓, live Box Cam capture ✓, liveness ✓, calibration ✓, server-calculated ✓, detector supported the metric ✓, integrity ✓ — far more than a blue tick.</li>
+      <li><b>6 · Combine Card</b> — a collection of your standardised measurements captured with Box Cam. It is <b>not</b> an overall rating — no athletic score, no averaging; clubs decide what matters.</li>
+      <li><b>7 · Honest capability</b> — most tests show <b>“Measurement not yet supported on this device”</b> and are never estimated. In this demo they run on a clearly-labelled <i>simulated</i> observer; athletic tests (sprints, jumps) need a detector no environment here has, so they are architected but never faked.</li>
+      <li><b>8 · Partial, never projected</b> — if the standardised window is not fully observed, the attempt is <b>measured, not Combine Verified</b>, and records exactly what was seen — no extrapolation to a full-window figure.</li>
+      <li><b>9 · Football Passport</b> — verified Combine results project onto the Passport (best per protocol version, “Captured by Box Cam”), shared with a club only on the player’s/guardian’s recruitment opt-in.</li>
+      <li><b>10 · Club Combine</b> — Pro (as <i>Maria Keane</i>) → open a player → <b>At-Home Combine</b>: request standardised tests (the club selects, it can never change a protocol’s rules) with a deadline. The club sees <b>results only, never home footage</b>.</li>
+      <li><b>11 · Compare, without ranking</b> — the club comparison shows verified numbers with blank cells for missing results (never 0) and produces <b>no overall ranking</b>.</li>
+      <li><b>12 · Completion ≠ selection</b> — completing a Club Combine means the standardised tests were done and Combine Verified — never that the club has scouted, selected or endorsed the player. Trust &amp; Safety can invalidate a result through its bound Box Cam session (never type a replacement number).</li>
+    </ul>
+    <div class="honest"><b>Honest scope.</b> No production computer-vision model, automated timing gate or physical-scale detector exists here, and web capture observes presence + active duration only — so no first-library Combine is production-verified today; all are exercised through the clearly-labelled simulated provider. At-Home Combine records standardised measurements, not a talent score, and implies no ScoutBox endorsement.</div>
+  </section>
+
+  <section class="notes feature">
+    <h3>Explore the new features (Milestone 16 — Box Cam + Development Intelligence)</h3>
+    <p class="sub" style="font-size:13px;margin:-4px 0 12px">Box Cam is ScoutBox’s first-party observed-training evidence system. <i>Train. Record. Prove.</i> — don’t just say you trained, box it. It records <b>what ScoutBox could reliably observe</b> during a live drill, and nothing more.</p>
+    <ul>
+      <li><b>1 · Start Box Cam</b> — Player (as <i>Kola Adeyemi</i>) → You → <b>Box Training</b> → “Train in the Box”. A <b>Box Cam Ready Check</b> checks what it can measure (camera, live stream, orientation) and honestly says “unable to check automatically” for lighting, framing and space. Then you record a supported drill, live.</li>
+      <li><b>2 · Observation ≠ evaluation</b> — the result states only <i>“Box Cam observed activity consistent with this supported drill for X active minutes/repetitions during a live capture session.”</i> Never “performed perfectly”, never a talent score, never an ability judgement.</li>
+      <li><b>3 · Active time is not session time</b> — the result shows <b>verified active time</b> separately from total session duration. Standing still, leaving frame and water breaks do not count as active — elapsed time never substitutes for observed work.</li>
+      <li><b>4 · Partial credit, never “Failed”</b> — a target reached part-way (say 13:41 of 20:00) records as <b>“Target not yet completed”</b> and keeps the work. Completion comes strictly from verified values — 149 of 150 is not “completed”, and nothing is rounded up.</li>
+      <li><b>5 · Honest about capability</b> — <b>Box Wall</b> ships rep-counting as <i>not configured</i>: it records active duration and says so, rather than inventing a rep count. There is no production computer-vision model in these demos — it is stated as <b>not configured</b>, and the demo uses a clearly-labelled <i>simulated</i> observer, never presented as real.</li>
+      <li><b>6 · Box Cam Verified provenance</b> — a completed live session earns <b>“Captured by Box Cam”</b>, ranked above player-submitted but deliberately below coach- and club-confirmed. An uploaded video can never earn it — only the live capture flow can.</li>
+      <li><b>7 · Coach-assigned Box Training</b> — Pro (as <i>Maria Keane</i>) → open <i>Kola Adeyemi</i> → <b>Box Training</b>: assign a supported drill with a target. Coaches receive <b>results only, never raw home footage</b>, and every state stays non-punitive.</li>
+      <li><b>8 · Streaks that respect rest</b> — <b>Box Streak</b> counts consecutive training <i>weeks</i> with at least one verified session — rest days never break it. <b>Box Best</b> compares only within the same drill version. There is <b>no global leaderboard</b>.</li>
+      <li><b>9 · Box Challenge, no endorsement</b> — ScoutBox and verified-club challenges each carry the disclaimer that completing one does <i>not</i> mean a club has scouted, selected or endorsed you. Club challenges never bypass the standing visibility rules.</li>
+      <li><b>10 · Development Activity on the Passport</b> — meaningful sessions surface on the Football Passport as an aggregate summary that repeats <i>“evidence of recorded training activity … not proof of player ability.”</i> The career timeline is not flooded; detail stays in Box Training.</li>
+      <li><b>11 · Trust &amp; Safety back office</b> — T&amp;S → Cases → <b>Box Cam</b>: invalidate a result (or let it stand) with a written, audited reason, and restore an invalidated one — but T&amp;S can <b>never fabricate</b> verified duration, repetition counts or completion.</li>
+      <li><b>12 · Privacy by construction</b> — no raw session video is retained by default, there is no audio, no scene recognition and <b>no facial recognition</b>; liveness proves live-session presence, not identity. For under-18s the guardian controls sharing, clips, challenges and assignment acceptance, and clubs get results, never footage.</li>
+    </ul>
+    <div class="honest"><b>Honest scope.</b> Box Cam’s web capture verifies player presence and active duration only; production computer vision, native iOS/Android capture and real biometric identity are not implemented. Box Cam proves observed training activity — not ability — and implies no ScoutBox endorsement.</div>
+  </section>
+
+  <section class="notes">
+    <h3>Explore the new features (Milestone 15 — Football Passport)</h3>
+    <ul>
+      <li><b>1 · One football history</b> — Player (as <i>Kola Adeyemi</i>) → You → <b>Football Passport</b>: current status, club history, timeline, evidence, references and achievements in one place — and every important fact shows <i>where it came from</i>.</li>
+      <li><b>2 · Honest provenance everywhere</b> — chips like “Provided by player”, “Coach confirmed ✓”, “Club confirmed ✓”; tap an item’s “Where is this from?” line for the plain-language copy (e.g. “ScoutBox has not independently confirmed this item”). Never a bare “Verified”.</li>
+      <li><b>3 · A year is enough</b> — add club history with just a year. The Passport keeps the precision you give it (2018 stays “2018”) and never invents dates.</li>
+      <li><b>4 · The conflict engine</b> — the demo passport shows a confirmed current club <i>and</i> a differing self entry: the confirmed record displays, the self view <i>explains</i> the conflict, and a correction path is offered. Nothing is silently overwritten — and nobody is accused.</li>
+      <li><b>5 · Coverage, not scores</b> — evidence coverage is a word (strong/moderate/limited), gaps are non-shaming suggestions, and the search-eligibility preview counts only generic checks — never a club’s private criteria. There is no player rating anywhere.</li>
+      <li><b>6 · Revocable sharing</b> — create a public link (safe public view: age, never date of birth) or a club link that only opens inside a verified club session and re-runs every safeguarding rule. For under-18s, sharing is guardian-controlled — the child’s app says so.</li>
+      <li><b>7 · Recruitment view</b> — Pro (as <i>Maria Keane</i>) → Players: search cards carry passport chips from one batch call; open a player and expand <b>Football Passport</b> for the club-side projection — your organisation’s assessments and trials only, never another club’s.</li>
+      <li><b>8 · Club confirmations</b> — a verified club can confirm a player’s achievement, upgrading its provenance to “Club confirmed ✓” without rewriting the player’s entry. Unverified organisations can’t.</li>
+      <li><b>9 · History is never rewritten</b> — coach references keep their submission-time snapshot: after a coach departs, the copy reads “Coach affiliation was verified when this reference was submitted”.</li>
+      <li><b>10 · Trust &amp; Safety back office</b> — T&amp;S → Cases → <b>Passport</b>: the correction queue (every resolution needs a written reason), the share registry with an instant kill-switch, and the source-graph inspector tracing every passport item to its source record.</li>
+    </ul>
+    <p class="sub" style="font-size:13px">Also in this release: the navigation redesign — six grouped destinations per app, a ⌘K/Ctrl+K command palette, pinned shortcuts and deep links.</p>
+  </section>
+
+  <section class="notes">
+    <h3>Explore the new features (Milestone 14 — Verification &amp; Trust)</h3>
+    <ul>
+      <li><b>Your verification, claim by claim</b> — Pro (as <i>Maria Keane</i>) → Verification → My verification: identity, affiliation, role and licence are INDEPENDENT claims, each showing exactly how it was established. A submitted licence honestly reads “Credential submitted — verification pending”.</li>
+      <li><b>Club-side attestation</b> — Verification → Requests: the pending coach arrives as a PREPARED case (work-email status, identity state, risk signals). Confirm, correct the role, mark former, ask for more, or reject — you can never decide your own request.</li>
+      <li><b>Staff registry &amp; honest history</b> — Verification → Staff: current verified people next to <i>Priya Nair, Academy Coach 2019–2023 · Verified history</i>. “Mark as left organisation” closes the period without erasing the past.</li>
+      <li><b>Domains &amp; administrators</b> — verified official domains (root changes go to Trust &amp; Safety) and the scoped authority ladder: viewer → reviewer → admin → root, with dual-control root transfers and MFA.</li>
+      <li><b>References with provenance</b> — Player (as <i>Kola Adeyemi</i>) → You → Coach references: each reference snapshots the coach’s verification at submission; if the coach later leaves, it says so instead of rewriting history.</li>
+      <li><b>Guardian-only invitations</b> — the guardian view accepts squad invitations for under-18s; the child never can, and joining gives the club no control.</li>
+      <li><b>Trust &amp; Safety review centre</b> — T&amp;S → Verification: the human-review queue with exact reason codes, root-club applications (with honest “dnsOwnership=not_configured” checks), domain requests and disputes — every decision needs a written reason.</li>
+      <li><b>Badges that mean something</b> — every badge names the verified FACT (“Role verified: Academy Scout”, “Verified at …”), and tapping it explains who established it. Never a bare “Verified”, never an endorsement.</li>
+    </ul>
+    <p class="sub" style="font-size:13px">Everything from Milestones 12–13 (evidence passport, blind assessments, recruitment cases, imports, coverage, calibration, budgets, delivery centre, MFA/SSO, EN/FR) is still in place — same tabs as before.</p>
+  </section>
+
+  <section class="notes">
+    <h3>Explore the new features (Milestone 13)</h3>
+    <ul>
+      <li><b>Imports &amp; portable identity</b> — Pro (as <i>Maria Keane, Head of Recruitment</i>) → Imports &amp; Integrations: CSV dry-run → commit → reverse, the identity review queue (name similarity never auto-merges), one-shot API keys, signed webhooks, and connectors that honestly say “not configured”.</li>
+      <li><b>Suitability, player-controlled</b> — Player (as <i>Kola Adeyemi</i>) → You → Suitability preferences, then Discover → Opportunity fit: verdicts with reasons and “travel time unavailable” — and clubs see only the summary you approve (Pro → Opportunities → Applications → Suitability).</li>
+      <li><b>Consent-based transitions</b> — Player → You → Club transition: pick your own evidence, grant one club at a time, withdraw any time; the receiving club reads it under Pro → Club Network.</li>
+      <li><b>Overlooked players</b> — Pro → Scouting Insight: the exposure funnel with declared denominators, the not-yet-assessed queue, weekly discovery rotation, and the suppressed birth-quarter lens.</li>
+      <li><b>Calibration &amp; evidence gaps</b> — Pro → Calibration (blind submissions, disagreement ranges, no scout rankings) and Scouting Insight → Missing-evidence assistant (versioned rules, guardian-routed requests).</li>
+      <li><b>Coverage planning</b> — Pro/Grassroots (as a <i>Manager/Head</i> role) → Coverage: fixtures, plans, assignments with duplicate-visit warnings and user-entered budgets only.</li>
+      <li><b>Federation workspaces</b> — Pro → Club Network: membership shares nothing; grants are previewed, expiring, revocable, and never override under-18 or grassroots rules.</li>
+      <li><b>Deal budgets</b> — Pro → Deal Budgets (lead/finance roles): integer-minor-unit scenarios, conditionals excluded from totals, labelled manual FX, version-specific approval.</li>
+      <li><b>Representation (adults only)</b> — Pro as <i>North Star Sports Agency</i> → Representation; the adult player confirms/withdraws on You. Credentials read “review pending — NOT an independently verified licence”.</li>
+      <li><b>Delivery &amp; operations</b> — Trust &amp; Safety → Delivery centre (accepted ≠ delivered ≠ read), Support desk (approved, logged, time-limited access), Service health and Backups; Pro → Organisation for onboarding, MFA and the local-test SSO.</li>
+    </ul>
+    <p class="sub" style="font-size:13px">Everything from Milestone 12 (evidence passport, blind assessments, recruitment cases, opportunities, campaigns, trial-day packs, coach affiliations, outcomes, EN/FR) is still in place — same tabs as before.</p>
+  </section>
+  <section class="notes">
+    <h3>How the demos behave</h3>
+    <ul>
+      <li>Everything runs on <b>synthetic sample data</b> — no real players, clubs, credentials or media. Each app shows an “Interactive demo — sample data” badge with its build identifier.</li>
+      <li>Demo state lives <b>inside the page you have open</b> and resets when you reload. Nothing you type is stored anywhere or reaches a real person.</li>
+      <li>The three standalone apps <b>do not share accounts or messages with each other</b> — each simulates its counterparties. To see the apps genuinely talking to one another, use the <b>Connected Demo</b>, where all three run in one page over one shared simulation.</li>
+      <li>Safeguarding flows are live in the demos: contacting an under-18 routes to their guardian, and the child’s view never contains the adult conversation. Box Cam runs on a clearly-labelled simulated observer — no real camera analysis takes place. The Trust Scores shown are fixtures computed by the real policy arithmetic over synthetic evidence, and are labelled as simulated.</li>
+    </ul>
+  </section>
+
+  <div class="hosted">
+    <b>Live cross-device usage requires a hosted backend.</b> These artifacts are self-contained demos. Real accounts, real-time messaging between different people’s devices, and persistent data need the ScoutBox server (Milestone 11) deployed to a host — it is built and tested in the repository, but not deployed as part of this demo.
+  </div>
+
+  <footer>ScoutBox · source commit <b>b924334</b> (branch claude/desktop-project-migration-wyk3ec, local — not pushed per instruction) · demos built 2026-09-11 · Milestone 18 — Second Look + Nobody Missed</footer>
+</div>
