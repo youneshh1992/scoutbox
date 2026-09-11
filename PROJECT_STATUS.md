@@ -3,28 +3,52 @@
 > Purpose of this file: let any Claude Code session (cloud or local) pick up this
 > project with zero prior context. Keep it updated at the end of each working session.
 
-**Last updated:** 2026-09-10 · **Milestone 16.2 complete — ScoutBox Trust
-Score** (see M16_2_TRUST_SCORE.md + M16_2_MATRIX.md) · `scoutbox-server/m162/`
-derives a 0–100 **evidence-confidence** score at read time from M14/M14.1
-claims, the M15 Passport, M12 evidence, M16 Box Cam and M16.1 Combine —
-consuming them, replacing none, persisting nothing. One versioned `POLICY`
-(`TRUST_SCORE_POLICY_VERSION = 1`) holds every weight (Identity 15 · Football
-history 20 · Relationships 20 · Evidence 20 · Combine 15 · References 10),
-cap, curve and band (Limited/Developing/Established/Strong/Very strong); the
-server refuses to boot if they do not total 100. The mandatory disclaimer
+**Last updated:** 2026-09-11 · **Milestone 18 complete — Second Look +
+Nobody Missed** (see M18_SECOND_LOOK_NOBODY_MISSED.md + M18_MATRIX.md) ·
+`scoutbox-server/m18/` adds two deterministic workflow systems on top of M17
+Recruitment Rooms. **Second Look** answers *has something materially changed
+about this player since OUR club decided?* — reason-aware against the M17
+archive taxonomy (`SECOND_LOOK_POLICY_VERSION = 1`), 16 normalized change
+types collected from their canonical stores, deduplicated by a
+`type:source:id` fingerprint so one fact reaching M18 through three
+projections is one change, compared against the decision-time snapshot with
+**"Previous detail unavailable"** where the snapshot recorded nothing. It
+never says the decision was wrong, and it **never reopens a room** — the
+recruiter clicks, and the reopen goes through M17's own `reopenRoom`. Six
+club-side reasons (squad space, budget, timing, registration, travel,
+eligibility) can never be resolved by player evidence and are reported as
+`unresolvedReasonCodes`. **Nobody Missed** answers *who matches our own
+written brief and never entered our evaluation workflow?* — explicit
+`db.recruitmentBriefs` (validated, versioned, protected characteristics
+refused by their own error code), boolean matching with a per-criterion
+explanation for every candidate, nine signals that count as a real evaluation
+and three that explicitly do not, and **Evaluation Coverage** = evaluated ÷
+eligible, never a scouting or quality score. Gates (visibility, blocks,
+minors, grassroots radius, org standing) run **before** matching, always. A
+player who was evaluated never falls back into Nobody Missed; later evidence
+reaches the club through Second Look instead. **No player, guardian or public
+route exists at all.** Suites: m18E2E (286 checks, 172 negative — 60%),
+m18Live (60, journeys M1–M10), m18DemoSpotcheck (55), navConfig 125 → 155.
+One defect found during verification and fixed: two archived rooms for the
+same player produced two cards from one change; only the most recent ended
+room per player now projects.
+
+Previously **17** — Recruitment Rooms (`scoutbox-server/m17/`): the club's
+private decision layer as a facet of the existing M12 case, with one canonical
+`room.status`, append-only decisions, a structured reason taxonomy that
+refuses every protected characteristic, decision-time snapshots and complete
+tenant isolation. **Football Passport = player truth layer; Recruitment Room =
+club decision layer**, and the player app has no Room at all. Suites: m17E2E
+(406, 165 negative), m17Live (25), m17DemoSpotcheck (47).
+
+Previously **16.2** — ScoutBox Trust Score: a 0–100 **evidence-confidence**
+score derived at read time from M14/M14.1 claims, the M15 Passport, M12
+evidence, M16 Box Cam and M16.1 Combine — consuming them, replacing none,
+persisting nothing. Measured performance is not an input at all, grinding is
+worthless, and a score of 100 grants zero permissions. The disclaimer
 *"ScoutBox Trust Score reflects verification and evidence confidence — not
-football ability or recruitment suitability"* travels with the score on every
-surface. Core invariants, each test-locked: **measured performance is not an
-input at all** (identical integrity ⇒ identical contribution), grinding is
-worthless (500 sessions + 100 attempts with no identity/history/references
-stays under 40), no prestige/popularity/recruitment-outcome/payment weight,
-fact-specific authority (Box Cam is absent from the history table), adult-only
-categories leave a minor's denominator, simulated Combine evidence never
-reaches a production score, and **a score of 100 grants zero permissions** —
-there is no write route, and every route sits on the existing authenticated
-routers so the standing gates run first. The Passport stays deliberately
-score-free; clients compose the Trust Score into its header. Suites: m162E2E
-(124 checks, 59 negative), m162Live (11), m162DemoSpotcheck (21).
+football ability or recruitment suitability"* travels with it everywhere.
+Suites: m162E2E (124, 59 negative), m162Live (11), m162DemoSpotcheck (21).
 Previously **16.1** — At-Home Combine (standardised protocols, server-derived
 Combine Verified results, honest not-configured capability); **16** — Box Cam
 observed-training evidence; **15** — Football Passport + the navigation
