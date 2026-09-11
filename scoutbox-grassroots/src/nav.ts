@@ -64,6 +64,9 @@ export const NAV_SECTIONS: NavSection[] = [
     id: 'recruitment', labelKey: 'navsec.recruitment', icon: 'target',
     children: [
       { id: 'recruitment', labelKey: 'nav2.recruitment', aliases: ['pipeline', 'applications', 'recrutement'] },
+      // M17: the club's private decision layer over a player. It lives inside
+      // Recruitment as ONE destination — no seventh sidebar section.
+      { id: 'rooms', labelKey: 'nav2.rooms', aliases: ['recruitment rooms', 'room', 'rooms', 'workspace', 'salles'] },
       { id: 'assessments', labelKey: 'nav.assessments', aliases: ['reports', 'scouting reports', 'évaluations', 'rapports'] },
       { id: 'video', labelKey: 'nav2.video', aliases: ['evidence', 'video workspace', 'preuves'] },
       { id: 'trials', labelKey: 'nav.trials', aliases: ['trial', 'trial reports', 'essais'] },
@@ -165,7 +168,23 @@ export function searchNav(query: string, ctx: NavContext, translate: (key: strin
 // The workspace historically had no URLs at all; screens now sync to
 // location.hash ("#/verification") so bookmarks and direct links work. Every
 // legacy screen id IS the route — nothing was renamed or broken.
+//
+// M17 adds the FIRST parameterised route: "#/recruitment/rooms/:roomId". It is
+// parsed by its own strict pattern and resolved separately from the screen id,
+// so the flat "#/<screenId>" contract above is unchanged and every malformed
+// hash still rejects exactly as before.
+const ROOM_HASH = /^#\/recruitment\/rooms\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})$/;
+
+/** The room id inside a deep link, or null for any other (or malformed) hash. */
+export function roomFromHash(hash: string): string | null {
+  const m = ROOM_HASH.exec(hash ?? '');
+  return m ? m[1] : null;
+}
+export const hashForRoom = (roomId: string) => `#/recruitment/rooms/${roomId}`;
+
 export function screenFromHash(hash: string): ScreenId | null {
+  // A room deep link resolves to the Rooms destination (which then opens it).
+  if (roomFromHash(hash)) return 'rooms';
   const m = /^#\/([a-z]+)$/.exec(hash ?? '');
   if (!m) return null;
   const id = m[1];

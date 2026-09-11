@@ -14,10 +14,11 @@ import {
   NetworkScreen, BudgetsScreen, RepresentationScreen, OrganisationScreen,
 } from './m13screens';
 import { VerificationScreen } from './m14screens';
+import { RoomsScreen } from './roomsScreens';
 import { m14 } from './m14api';
 import {
-  hashForScreen, loadCollapsed, loadShortcuts, resolveNavigationLocation,
-  saveCollapsed, saveShortcuts, screenFromHash, NAV_SECTIONS, type NavContext,
+  hashForRoom, hashForScreen, loadCollapsed, loadShortcuts, resolveNavigationLocation,
+  roomFromHash, saveCollapsed, saveShortcuts, screenFromHash, NAV_SECTIONS, type NavContext,
 } from './nav';
 import { CommandPalette, NeedsAttention, Sidebar, SecondaryNav, useNavSections, usePaletteHotkey } from './navui';
 import { Icon } from './icons';
@@ -41,7 +42,7 @@ export type ScreenId =
   | 'ledger' | 'funnel' | 'reputation' | 'plan'
   | 'assessments' | 'recruitment' | 'planner' | 'opportunities' | 'campaigns' | 'video' | 'outcomes' | 'trialdays'
   | 'imports' | 'coverage' | 'calibration' | 'insight' | 'network' | 'budgets' | 'representation' | 'organisation'
-  | 'verification';
+  | 'verification' | 'rooms';
 
 // M15-Nav: the sidebar no longer renders a flat list of every screen. The
 // full information architecture lives in src/nav.ts (sections → child tabs),
@@ -157,14 +158,34 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   // Deep links: the hash IS the screen id ("#/verification"). Unknown or
   // absent hashes land on Home without highlighting a wrong section.
   const [screen, setScreenState] = useState<ScreenId>(() => screenFromHash(window.location.hash) ?? 'feed');
+  // M17: the first parameterised route. The room id lives beside the screen id
+  // so back/forward/refresh/deep-entry all land on exactly the same place.
+  const [roomId, setRoomId] = useState<string | null>(() => roomFromHash(window.location.hash));
   const setScreen = useCallback((id: ScreenId) => {
     setScreenState(id);
+    setRoomId(null);
     try { if (window.location.hash !== hashForScreen(id)) window.history.replaceState(null, '', hashForScreen(id)); } catch { /* sandboxed */ }
   }, []);
+  /** Opening a room PUSHES, so the browser Back button closes it again. */
+  const openRoom = useCallback((id: string) => {
+    setScreenState('rooms');
+    setRoomId(id);
+    try { if (window.location.hash !== hashForRoom(id)) window.history.pushState(null, '', hashForRoom(id)); } catch { /* sandboxed */ }
+  }, []);
+  const closeRoom = useCallback(() => {
+    setScreenState('rooms');
+    setRoomId(null);
+    try { if (window.location.hash !== hashForScreen('rooms')) window.history.pushState(null, '', hashForScreen('rooms')); } catch { /* sandboxed */ }
+  }, []);
   useEffect(() => {
-    const onHash = () => { const id = screenFromHash(window.location.hash); if (id) setScreenState(id); };
+    const onHash = () => {
+      const id = screenFromHash(window.location.hash);
+      if (id) setScreenState(id);
+      setRoomId(roomFromHash(window.location.hash));
+    };
     window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
+    window.addEventListener('popstate', onHash);
+    return () => { window.removeEventListener('hashchange', onHash); window.removeEventListener('popstate', onHash); };
   }, []);
 
   // Verification authority — fetched ONCE per session and reused by the nav
@@ -354,6 +375,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
           {screen === 'plan' && <PlanScreen {...props} />}
           {screen === 'assessments' && <AssessmentsScreen {...props} />}
           {screen === 'recruitment' && <RecruitmentScreen {...props} />}
+          {screen === 'rooms' && <RoomsScreen {...props} roomId={roomId} onOpenRoom={openRoom} onCloseRoom={closeRoom} />}
           {screen === 'planner' && <SquadPlannerScreen {...props} />}
           {screen === 'opportunities' && <OpportunitiesScreen {...props} />}
           {screen === 'campaigns' && <CampaignsScreen {...props} />}
@@ -372,7 +394,13 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
         </div>
       </div>
       {openPlayerId && (
-        <PlayerDrawer session={session} playerId={openPlayerId} notify={notify} onClose={() => setOpenPlayerId(null)} />
+        <PlayerDrawer
+          session={session}
+          playerId={openPlayerId}
+          notify={notify}
+          onClose={() => setOpenPlayerId(null)}
+          onOpenRoom={(id) => { setOpenPlayerId(null); openRoom(id); }}
+        />
       )}
       {safetyOpen && <SafetyModal session={session} notify={notify} onClose={() => setSafetyOpen(false)} />}
       <CommandPalette

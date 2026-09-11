@@ -11,6 +11,8 @@ import { FootballPassportPanel, SharedPassportOpener, SummaryChips, usePassportS
 import { BoxTrainingPanel } from './m16screens';
 import { CombinePanel } from './combineScreens';
 import { TrustPanel } from './trustScreens';
+import { rooms } from './roomsApi';
+import { t } from './i18n';
 
 const TAG_LABELS: Record<string, string> = {
   first_touch: 'First touch', pace: 'Pace', positioning: 'Positioning', work_rate: 'Work rate',
@@ -1108,11 +1110,14 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
 
 /* ------------------------------------------------------ Player drawer */
 
-export function PlayerDrawer({ session, playerId, notify, onClose }: {
+export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }: {
   session: Session;
   playerId: string;
   notify: (text: string, error?: boolean) => void;
   onClose: () => void;
+  /** M17: navigate to the player's Recruitment Room (the club's private
+   *  decision layer). Absent in surfaces that cannot navigate. */
+  onOpenRoom?: (roomId: string) => void;
 }) {
   const [player, setPlayer] = useState<PlayerDetail | null>(null);
   const [proof, setProof] = useState<ProofPack | null>(null);
@@ -1156,6 +1161,32 @@ export function PlayerDrawer({ session, playerId, notify, onClose }: {
   };
 
   const loadProof = () => api.getProofPack(session, playerId).then(setProof).catch((e) => notify(errMsg(e), true));
+
+  // M17 — open (or re-open) this player's Recruitment Room. A room is private
+  // to this organisation: the player, their guardian and every other club can
+  // never see it, and creating one grants no new access to anything.
+  // One active room per org per player, so 409 ROOM_EXISTS is a routing answer,
+  // not an error: we navigate to the room the club already has.
+  const [openingRoom, setOpeningRoom] = useState(false);
+  const addToRoom = async () => {
+    if (openingRoom) return;
+    setOpeningRoom(true);
+    try {
+      const r = await rooms.create(session, { playerId, sourceContext: 'search' });
+      if (r.ok) {
+        notify(t('rm.created'));
+        onOpenRoom?.(r.room.roomId);
+      } else {
+        notify(t('rm.roomExists'));
+        onOpenRoom?.(r.existingRoomId);
+      }
+      onClose();
+    } catch (e) {
+      notify(e instanceof ApiError && e.code === 'NOT_VISIBLE' ? t('rm.errNotVisible') : errMsg(e), true);
+    } finally {
+      setOpeningRoom(false);
+    }
+  };
 
   return (
     <>
@@ -1212,6 +1243,11 @@ export function PlayerDrawer({ session, playerId, notify, onClose }: {
             <div className="actions">
               <button onClick={() => act('save')}>Save</button>
               <button onClick={() => act('shortlist')}>Shortlist</button>
+              {onOpenRoom && (
+                <button className="primary" disabled={openingRoom} onClick={addToRoom} title={t('rm.privacy')}>
+                  🗂 {t('rm.addRoom')}
+                </button>
+              )}
               {player.guardianManaged ? (
                 <>
                   <button className="primary" onClick={() => setRequestType('contact')}>Contact Guardian</button>

@@ -38,11 +38,11 @@ async function loadNav(app) {
 const PRO_IDS = ['feed', 'filmroom', 'search', 'shortlist', 'requests', 'messages', 'trials', 'fixtures',
   'ledger', 'funnel', 'reputation', 'plan', 'assessments', 'recruitment', 'planner', 'opportunities',
   'campaigns', 'video', 'outcomes', 'trialdays', 'imports', 'coverage', 'calibration', 'insight',
-  'network', 'budgets', 'representation', 'organisation', 'verification'];
+  'network', 'budgets', 'representation', 'organisation', 'verification', 'rooms'];
 const GRASS_IDS = ['feed', 'filmroom', 'search', 'shortlist', 'requests', 'messages', 'trials', 'opendays',
   'squad', 'friendlies', 'fixtures', 'ledger', 'funnel', 'plan', 'assessments', 'recruitment', 'coaches',
   'opportunities', 'campaigns', 'video', 'outcomes', 'trialdays', 'insight', 'coverage', 'calibration',
-  'imports', 'network', 'organisation', 'verification'];
+  'imports', 'network', 'organisation', 'verification', 'rooms'];
 
 const LABELS = {
   'navsec.home': 'Home', 'navsec.discover': 'Discover', 'navsec.recruitment': 'Recruitment',
@@ -105,6 +105,16 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 6], ['scout
   ok(nav.screenFromHash('#/verification') === 'verification', 'valid hash parses');
   ok(nav.screenFromHash('#/nope') === null && nav.screenFromHash('#foo') === null && nav.screenFromHash('') === null, 'unknown/malformed hashes rejected');
   ok(nav.hashForScreen('coverage') === '#/coverage', 'hash round-trip');
+  // M17 — the first parameterised route. It resolves to the Rooms destination
+  // and carries the room id; every malformed variant must still reject.
+  ok(nav.screenFromHash('#/rooms') === 'rooms', 'Rooms destination has a flat hash');
+  ok(nav.screenFromHash('#/recruitment/rooms/case-7') === 'rooms', 'room deep link resolves to the Rooms destination');
+  ok(nav.roomFromHash('#/recruitment/rooms/case-7') === 'case-7', 'room deep link yields the room id');
+  ok(nav.roomFromHash('#/rooms') === null && nav.roomFromHash('#/recruitment/rooms/') === null
+    && nav.roomFromHash('#/recruitment/rooms/a/b') === null && nav.roomFromHash('#/recruitment/rooms/../x') === null
+    && nav.roomFromHash('') === null, 'malformed room deep links rejected');
+  ok(nav.hashForRoom('case-7') === '#/recruitment/rooms/case-7', 'room hash round-trip');
+  ok(nav.resolveNavigationLocation('rooms').sectionId === 'recruitment', 'Rooms highlights Recruitment');
 
   section(`${app} — shortcuts persistence (graceful)`);
   store.clear();
