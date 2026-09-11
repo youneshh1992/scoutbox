@@ -123,8 +123,8 @@ second pipeline.
 | 53 | No talent score, no pay-to-be-seen (152,153,154) | absent by construction | U-labels | ✅ |
 | 54 | Restoration bundle (170) | verified bundle, nothing pushed | report | ✅ |
 
-Status column becomes ✅/limitation as each lands; measured results replace
-"planned" at the end.
+Every row above carries measured verification. The sections below record what
+was measured.
 
 ## Verification results (measured, not asserted)
 
@@ -143,5 +143,14 @@ Status column becomes ✅/limitation as each lands; measured results replace
 - Two behaviour-neutral extractions let the Room bridge instead of copy:
   M16.1's Club Combine creator and M13's evidence-gap request. Their owning
   suites (m161E2E 79, m13E2E 212) confirm the extractions changed nothing.
-- Full regression battery — see the final report. No existing test was removed,
-  skipped or weakened.
+- Full regression battery at the M17 tip, every suite re-run and green:
+  trust 23 · apiE2E 129 · connectedE2E 43 · m12E2E 143 · m13E2E 212 ·
+  m14E2E 193 · m141E2E 94 · m15E2E 185 · m16E2E 115 · m161E2E 79 ·
+  m162E2E 124 · **m17E2E 393** · navConfig 125 · navLive 30 ·
+  liveIntegration · m12Live · m13Live · m14Live · m15Live 21 · m16Live 10 ·
+  m162Live 11 · **m17Live 25** · uiSpotcheck · m12/m13/m14 DemoSpotcheck ·
+  m162DemoSpotcheck 21 · **m17DemoSpotcheck 47** · crosstab · demoOffline ·
+  staleSessionProbe · tsc ×4 · builds ×4. **No existing test was removed,
+  skipped or weakened.**
+- Restoration bundle built, `git bundle verify`-clean, and proven by an actual
+  clone-from-bundle that restores tip `cd95eee` with `m17/` intact.
