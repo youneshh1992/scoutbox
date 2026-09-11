@@ -93,6 +93,15 @@ review → archive again means the next change compares against the **second**
 archive. Items are keyed per **(org, room, decision)**, so a new cycle gets a
 fresh item rather than colliding with the terminal one from the previous cycle.
 
+A club may also have opened a **second room** for the same player years later.
+"Since we last decided" still has exactly one answer, so only the **most recent
+ended room per player** projects a candidate; the superseded cycle stops
+projecting entirely, and the surviving item carries the reason from the club's
+last decision rather than a mixture of both. Without that rule one new full
+match raised one alert per historical room — the duplicate-alert failure this
+milestone exists to prevent. It was found by the live browser journeys, not by
+the engine tests, and both suites now guard it.
+
 ## 7. Snapshot comparison
 
 The M17 decision-time snapshot is used rather than reconstructing the past from
