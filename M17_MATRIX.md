@@ -68,60 +68,80 @@ second pipeline.
 
 | # | Requirement (§) | Implementation | Test | Status |
 |---|---|---|---|---|
-| 1 | Room = club decision layer, Passport = player truth (1,2) | Room projector composes, never re-derives | R-compose | planned |
-| 2 | Core flow discover → room → assess → decide (3) | `POST /org/rooms` from the player drawer | R1 | planned |
-| 3 | Explicit state machine, mapped not duplicated (4,5) | `ROOM_STATUSES` + `stageForRoomStatus` single writer | U-transitions | planned |
-| 4 | Exactly one canonical status; append-only history (5) | `room.status` canonical, `case.stage` derived | U-transitions | planned |
-| 5 | Room record without duplicated player truth (6) | references only | U-shape | planned |
-| 6 | Access via existing org permissions (7) | `caseAccess` + `isLead` | A1–A3 | planned |
-| 7 | Tenant isolation, 404 concealment (8) | org-scoped lookup → 404 | A1–A3 | planned |
-| 8 | Room never widens access (9,51,52) | `orgCanSee` on every read | A7–A12 | planned |
-| 9 | Header; Trust not an ability score (10) | disclaimer travels | R1 | planned |
+| 1 | Room = club decision layer, Passport = player truth (1,2) | Room projector composes, never re-derives | R-compose | ✅ |
+| 2 | Core flow discover → room → assess → decide (3) | `POST /org/rooms` from the player drawer | R1 | ✅ |
+| 3 | Explicit state machine, mapped not duplicated (4,5) | `ROOM_STATUSES` + `stageForRoomStatus` single writer | U-transitions | ✅ |
+| 4 | Exactly one canonical status; append-only history (5) | `room.status` canonical, `case.stage` derived | U-transitions | ✅ |
+| 5 | Room record without duplicated player truth (6) | references only | U-shape | ✅ |
+| 6 | Access via existing org permissions (7) | `caseAccess` + `isLead` | A1–A3 | ✅ |
+| 7 | Tenant isolation, 404 concealment (8) | org-scoped lookup → 404 | A1–A3 | ✅ |
+| 8 | Room never widens access (9,51,52) | `orgCanSee` on every read | A7–A12 | ✅ |
+| 9 | Header; Trust not an ability score (10) | disclaimer travels | R1 | ✅ |
 | 10 | 9 room tabs inside Recruitment (11) | page tabs, no new sidebar item | navConfig | planned |
-| 11 | Overview summary (12) | `roomSummary` | R1 | planned |
-| 12 | Passport tab = M15 projection (13) | `buildFootballPassport` | R-compose | planned |
-| 13 | Trust tab = safe org projection (14) | `safeTrustProjection` | R-compose | planned |
-| 14 | Decision-time Trust snapshot (15,55) | `db.roomSnapshots` | R5 | planned |
-| 15 | Minimal source refs, not giant JSON (16) | `sourceVersionRefs` | U-snapshot | planned |
-| 16 | Evidence tab with provenance (17) | existing tiers | R-compose | planned |
-| 17 | Internal evidence review state (18,19) | `db.roomEvidenceState` | A23 | planned |
-| 18 | Assessments reused, blind rule intact (20,21,22) | `assessmentAccessList` | R2, A25 | planned |
-| 19 | Combine tab, no overall rating (23,24) | `combineFacts` | R4 | planned |
-| 20 | Request Combine reuses M16.1 (25) | bridge | R4 | planned |
-| 21 | Development tab + disclaimer (26,27) | `developmentActivity` | R-compose | planned |
-| 22 | Private internal discussion (28,29,30) | `db.roomComments` | A31, A44 | planned |
-| 23 | Room tasks, not player requirements (31,32) | `case.tasks[]` extended | A33, A34 | planned |
-| 24 | Request evidence via M13 engine (33,34) | bridge, guardian routed | R3, A26, A27 | planned |
-| 25 | Trials surfaced, not duplicated (35,36) | `links.trialIds` | R6, A29 | planned |
-| 26 | Structured decision, no AI (37,38,91,151) | `db.roomDecisions` | U-decision | planned |
-| 27 | Reason taxonomy; protected traits rejected (39,40,108) | `REASON_CODES` + `PROHIBITED_REASON_CODES` | A39 | planned |
-| 28 | Decision memory, append-only (41,83,84) | supersede, never rewrite | R7, A48 | planned |
-| 29 | Second Look foundation (42,156) | machine-readable archive reasons | R7 | planned |
-| 30 | Nobody Missed / funnel foundation (43,99,159) | typed events | metrics | planned |
-| 31 | Source context (44) | `sourceContext` | U-shape | planned |
-| 32 | Activity timeline + attribution (45,46,47) | `case.history` | R10, A35 | planned |
-| 33 | Room owner, reassignable (48,49) | `ownerUserId` + lead fallback | A15 | planned |
-| 34 | One active room per org+player (50) | 409 + `existingRoomId` | A18 | planned |
-| 35 | Block / removal / suspension (52,53,54) | live gates, no stale cache | R8, A9–A12 | planned |
-| 36 | Score never drives status (56,57) | no automatic transition | A37, A38 | planned |
-| 37 | Internal priority + tags, never exposed (58,59) | org-private | A44 | planned |
+| 11 | Overview summary (12) | `roomSummary` | R1 | ✅ |
+| 12 | Passport tab = M15 projection (13) | `buildFootballPassport` | R-compose | ✅ |
+| 13 | Trust tab = safe org projection (14) | `safeTrustProjection` | R-compose | ✅ |
+| 14 | Decision-time Trust snapshot (15,55) | `db.roomSnapshots` | R5 | ✅ |
+| 15 | Minimal source refs, not giant JSON (16) | `sourceVersionRefs` | U-snapshot | ✅ |
+| 16 | Evidence tab with provenance (17) | existing tiers | R-compose | ✅ |
+| 17 | Internal evidence review state (18,19) | `db.roomEvidenceState` | A23 | ✅ |
+| 18 | Assessments reused, blind rule intact (20,21,22) | `assessmentAccessList` | R2, A25 | ✅ |
+| 19 | Combine tab, no overall rating (23,24) | `combineFacts` | R4 | ✅ |
+| 20 | Request Combine reuses M16.1 (25) | bridge | R4 | ✅ |
+| 21 | Development tab + disclaimer (26,27) | `developmentActivity` | R-compose | ✅ |
+| 22 | Private internal discussion (28,29,30) | `db.roomComments` | A31, A44 | ✅ |
+| 23 | Room tasks, not player requirements (31,32) | `case.tasks[]` extended | A33, A34 | ✅ |
+| 24 | Request evidence via M13 engine (33,34) | bridge, guardian routed | R3, A26, A27 | ✅ |
+| 25 | Trials surfaced, not duplicated (35,36) | `links.trialIds` | R6, A29 | ✅ |
+| 26 | Structured decision, no AI (37,38,91,151) | `db.roomDecisions` | U-decision | ✅ |
+| 27 | Reason taxonomy; protected traits rejected (39,40,108) | `REASON_CODES` + `PROHIBITED_REASON_CODES` | A39 | ✅ |
+| 28 | Decision memory, append-only (41,83,84) | supersede, never rewrite | R7, A48 | ✅ |
+| 29 | Second Look foundation (42,156) | machine-readable archive reasons | R7 | ✅ |
+| 30 | Nobody Missed / funnel foundation (43,99,159) | typed events | metrics | ✅ |
+| 31 | Source context (44) | `sourceContext` | U-shape | ✅ |
+| 32 | Activity timeline + attribution (45,46,47) | `case.history` | R10, A35 | ✅ |
+| 33 | Room owner, reassignable (48,49) | `ownerUserId` + lead fallback | A15 | ✅ |
+| 34 | One active room per org+player (50) | 409 + `existingRoomId` | A18 | ✅ |
+| 35 | Block / removal / suspension (52,53,54) | live gates, no stale cache | R8, A9–A12 | ✅ |
+| 36 | Score never drives status (56,57) | no automatic transition | A37, A38 | ✅ |
+| 37 | Internal priority + tags, never exposed (58,59) | org-private | A44 | ✅ |
 | 38 | Saved views + overview + table (60,61,62,63) | filters on one page | R1 | planned |
-| 39 | Notifications + mentions (64,65,66) | `notify` org_user | R2 | planned |
-| 40 | Room search, no cross-tenant (67,68) | org-scoped | A42 | planned |
+| 39 | Notifications + mentions (64,65,66) | `notify` org_user | R2 | ✅ |
+| 40 | Room search, no cross-tenant (67,68) | org-scoped | A42 | ✅ |
 | 41 | Navigation + deep links (69,142,143,144,145,146) | `#/recruitment/rooms/:id` | navConfig, R1 | planned |
 | 42 | Mobile / a11y / i18n (70,71,72) | scrolling tab strip, EN+FR | spotcheck | planned |
-| 43 | Nothing in player or guardian apps (73,74,136) | no client change | A4, A5 | planned |
-| 44 | Grassroots simpler, rules intact (75,128) | same gates | A8 | planned |
-| 45 | Agency excluded (76) | agency wall | A6 | planned |
-| 46 | T&S not omniscient (77,139) | no default access | A-ts | planned |
-| 47 | Batch list, no N+1 (102) | one light passport per player | perf | planned |
-| 48 | Room projector server-side (103,104) | `buildRecruitmentRoom` | R-compose | planned |
-| 49 | Cache safety (105) | read-time gates only | A46 | planned |
-| 50 | ≥40% negative tests (106,107) | 48 enumerated abuse cases | m17E2E | planned |
-| 51 | Pagination + rate limits (130,131,132,133) | cursor + cooldowns | A-limits | planned |
-| 52 | Idempotency + concurrency + ordering (160,161,162,163) | keys, guards, stable sort | A48 | planned |
-| 53 | No talent score, no pay-to-be-seen (152,153,154) | absent by construction | U-labels | planned |
+| 43 | Nothing in player or guardian apps (73,74,136) | no client change | A4, A5 | ✅ |
+| 44 | Grassroots simpler, rules intact (75,128) | same gates | A8 | ✅ |
+| 45 | Agency excluded (76) | agency wall | A6 | ✅ |
+| 46 | T&S not omniscient (77,139) | no default access | A-ts | ✅ |
+| 47 | Batch list, no N+1 (102) | one light passport per player | perf | ✅ |
+| 48 | Room projector server-side (103,104) | `buildRecruitmentRoom` | R-compose | ✅ |
+| 49 | Cache safety (105) | read-time gates only | A46 | ✅ |
+| 50 | ≥40% negative tests (106,107) | 48 enumerated abuse cases | m17E2E | ✅ |
+| 51 | Pagination + rate limits (130,131,132,133) | cursor + cooldowns | A-limits | ✅ |
+| 52 | Idempotency + concurrency + ordering (160,161,162,163) | keys, guards, stable sort | A48 | ✅ |
+| 53 | No talent score, no pay-to-be-seen (152,153,154) | absent by construction | U-labels | ✅ |
 | 54 | Restoration bundle (170) | verified bundle, nothing pushed | report | planned |
 
 Status column becomes ✅/limitation as each lands; measured results replace
 "planned" at the end.
+
+## Verification results (measured, not asserted)
+
+- `scoutbox-server/scripts/m17E2E.mjs` — **393 checks, 160 negative/abuse
+  (41%, above the 40% preference and well above the ⅓ floor)**, covering all 48
+  enumerated abuse cases and journeys R1–R11.
+- `scoutbox-server/scripts/m17Perf.mjs` — per-room cost in a list **0.18 ms**,
+  full single-room projection **2.0 ms**, every other surface ≤ 2.5 ms median.
+  *Honest limitation:* the seeded fixture holds 14 players, so "list 50" and
+  "list 100" cover the same 14 rooms and the ratio between them measures
+  nothing; the per-room figure is the meaningful one.
+- Two defects found by the suite and fixed: the room header carried the legacy
+  safeguarding `trustScore` beside the M16.2 Trust Score (two numbers called
+  "trust" in one header), and the default room role denied commenting to
+  ordinary club scouts.
+- Two behaviour-neutral extractions let the Room bridge instead of copy:
+  M16.1's Club Combine creator and M13's evidence-gap request. Their owning
+  suites (m161E2E 79, m13E2E 212) confirm the extractions changed nothing.
+- Full regression battery — see the final report. No existing test was removed,
+  skipped or weakened.
