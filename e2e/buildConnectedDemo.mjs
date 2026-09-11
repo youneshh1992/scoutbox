@@ -97,6 +97,10 @@ const SHELL = `
     <li><b>Grassroots</b> → Moss Side Athletic → same flow with Kola.</li>
     <li><b>Pro</b> → Guni Adebayo (14) → Contact Guardian. <b>Player</b> → You → Log out → Enter as Amara (guardian, last row) → accept + reply.</li>
     <li>Log out → Enter as Guni: the child sees only sanitised status — never the conversation.</li>
+    <li><b>Pro</b> → Search → Kola Adeyemi → <b>Add to Recruitment Room</b>: the club's own private decision layer opens on the player.</li>
+    <li>In the Room: <b>Overview</b> (Trust Score with "evidence confidence — not football ability", decision readiness as counts) → <b>Passport</b> → <b>Combine</b> → <b>Discussion</b> (internal only) → change status to <b>Shortlisted</b> (the evidence confidence at that moment is captured).</li>
+    <li><b>Decision</b> → record a recommendation with a <i>structured</i> reason. Try archiving with no reason — it is refused. There is no protected characteristic to pick.</li>
+    <li><b>Player</b> → Enter as Kola → You: no Room, no status, no discussion, no decision. The club's thinking never crosses the line.</li>
   </ol>
   <div class="dim" style="margin-top:6px">State lives in this page only and resets on reload.</div>
 </div>

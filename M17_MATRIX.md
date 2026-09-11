@@ -77,7 +77,7 @@ second pipeline.
 | 7 | Tenant isolation, 404 concealment (8) | org-scoped lookup → 404 | A1–A3 | ✅ |
 | 8 | Room never widens access (9,51,52) | `orgCanSee` on every read | A7–A12 | ✅ |
 | 9 | Header; Trust not an ability score (10) | disclaimer travels | R1 | ✅ |
-| 10 | 9 room tabs inside Recruitment (11) | page tabs, no new sidebar item | navConfig | planned |
+| 10 | 9 room tabs inside Recruitment (11) | page tabs, no new sidebar item | navConfig | ✅ |
 | 11 | Overview summary (12) | `roomSummary` | R1 | ✅ |
 | 12 | Passport tab = M15 projection (13) | `buildFootballPassport` | R-compose | ✅ |
 | 13 | Trust tab = safe org projection (14) | `safeTrustProjection` | R-compose | ✅ |
@@ -105,11 +105,11 @@ second pipeline.
 | 35 | Block / removal / suspension (52,53,54) | live gates, no stale cache | R8, A9–A12 | ✅ |
 | 36 | Score never drives status (56,57) | no automatic transition | A37, A38 | ✅ |
 | 37 | Internal priority + tags, never exposed (58,59) | org-private | A44 | ✅ |
-| 38 | Saved views + overview + table (60,61,62,63) | filters on one page | R1 | planned |
+| 38 | Saved views + overview + table (60,61,62,63) | filters on one page | R1 | ✅ |
 | 39 | Notifications + mentions (64,65,66) | `notify` org_user | R2 | ✅ |
 | 40 | Room search, no cross-tenant (67,68) | org-scoped | A42 | ✅ |
-| 41 | Navigation + deep links (69,142,143,144,145,146) | `#/recruitment/rooms/:id` | navConfig, R1 | planned |
-| 42 | Mobile / a11y / i18n (70,71,72) | scrolling tab strip, EN+FR | spotcheck | planned |
+| 41 | Navigation + deep links (69,142,143,144,145,146) | `#/recruitment/rooms/:id` | navConfig, R1 | ✅ |
+| 42 | Mobile / a11y / i18n (70,71,72) | scrolling tab strip, EN+FR | spotcheck | ✅ |
 | 43 | Nothing in player or guardian apps (73,74,136) | no client change | A4, A5 | ✅ |
 | 44 | Grassroots simpler, rules intact (75,128) | same gates | A8 | ✅ |
 | 45 | Agency excluded (76) | agency wall | A6 | ✅ |
@@ -121,7 +121,7 @@ second pipeline.
 | 51 | Pagination + rate limits (130,131,132,133) | cursor + cooldowns | A-limits | ✅ |
 | 52 | Idempotency + concurrency + ordering (160,161,162,163) | keys, guards, stable sort | A48 | ✅ |
 | 53 | No talent score, no pay-to-be-seen (152,153,154) | absent by construction | U-labels | ✅ |
-| 54 | Restoration bundle (170) | verified bundle, nothing pushed | report | planned |
+| 54 | Restoration bundle (170) | verified bundle, nothing pushed | report | ✅ |
 
 Status column becomes ✅/limitation as each lands; measured results replace
 "planned" at the end.
