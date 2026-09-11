@@ -20,6 +20,7 @@ import { registerM15 } from './m15/index.mjs';
 import { registerM16 } from './m16/index.mjs';
 import { registerM162 } from './m162/index.mjs';
 import { registerM17 } from './m17/index.mjs';
+import { registerM18 } from './m18/index.mjs';
 import { requestInstrumentation } from './m13/enterprise.mjs';
 import { totpValid } from './m13/shared.mjs';
 import {
@@ -3552,7 +3553,7 @@ const m162Ctx = registerM162({
 // no player truth: the Passport, Trust Score, Combine, Box Cam and evidence it
 // shows are the canonical projections, fetched through their own gates on
 // every read. A Room grants no access to anything.
-registerM17({
+const m17Ctx = registerM17({
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
@@ -3574,6 +3575,31 @@ registerM17({
   boxPrefsFor: m16Ctx.boxPrefsFor,
   requestEvidenceGap: m13Ctx.requestEvidenceGap,
   computeEvidenceGaps: m13Ctx.computeEvidenceGaps,
+});
+
+// M18 — Second Look + Nobody Missed: two deterministic workflow systems over
+// everything beneath them. Second Look asks whether something materially
+// changed since THIS club last decided; Nobody Missed asks whether eligible
+// players match the club's own stated criteria without ever entering its
+// workflow. Neither judges talent, neither ranks, and neither is player-facing:
+// M18 registers no player, guardian or public route at all.
+registerM18({
+  db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast,
+  findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
+  storage, sessionFor, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
+  grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
+  publishedVouchesFor, pathwayRecord, DRILLS, DATA_DIR,
+  // Canonical projections and the M17 bridges — M18 never mutates the
+  // pipeline itself.
+  assemblePassport: m15Ctx.assemblePassport,
+  buildFootballPassport: m15Ctx.buildFootballPassport,
+  buildTrustProfile: m162Ctx.buildTrustProfile,
+  safeTrustProjection: m162Ctx.safeTrustProjection,
+  trustSummaryFor: m162Ctx.trustSummaryFor,
+  combineProjection: m16Ctx.combineProjection,
+  reopenRoom: m17Ctx.reopenRoom,
+  createRoomForPlayer: m17Ctx.createRoomForPlayer,
 });
 
 // ---------------------------------------------------- static app hosting

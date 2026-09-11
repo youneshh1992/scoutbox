@@ -429,8 +429,10 @@ export function buildSecondLookCandidate({
 
 function secondLookSummary({ kind, direct, material }) {
   if (kind === 'direct_reason_resolved') {
-    const first = direct[0];
-    return `${CHANGE_COPY[first.change.type]} This relates to the reason recorded when the room was closed.`;
+    // Lead with the most substantial change, not merely the most recent: a new
+    // full match is the headline, a tier upgrade on the same day is not.
+    const headline = direct.find((d) => POLICY.generalThreshold.substantialTypes.includes(d.change.type)) ?? direct[0];
+    return `${CHANGE_COPY[headline.change.type]} This relates to the reason recorded when the room was closed.`;
   }
   if (kind === 'evidence_removed') {
     return `${material.length === 1 ? 'One source' : `${material.length} sources`} used in the previous review ${material.length === 1 ? 'is' : 'are'} no longer current.`;

@@ -679,6 +679,81 @@ export function registerRooms(ctx) {
     res.json({ room: buildRecruitmentRoom(room, req), snapshot });
   });
 
+  /**
+   * The ONE reopen path, shared with M18 Second Look.
+   *
+   * A Second Look never reopens a room by itself — a recruiter does, and when
+   * they do, the move runs through exactly this code: the same transition
+   * table, the same reason requirement, the same snapshot capture, the same
+   * append-only decision memory and the same activity trail. M18 supplies only
+   * the source context so the reopen is attributable later.
+   */
+  ctx.reopenRoom = ({ req, room, to = 'under_review', reasonCodes = [], sourceContext = null, sourceRef = null }) => {
+    const role = roleFor(req, room);
+    if (!roomCan(role, 'reopen')) return { ok: false, status: 403, error: 'ROOM_PERMISSION_REQUIRED' };
+    const reasons = validateReasonCodes(reasonCodes);
+    if (!reasons.ok) return { ok: false, status: 400, ...reasons };
+    const check = validateTransition(room.room.status, to, { reasonCodes: reasons.codes });
+    if (!check.ok) return { ok: false, status: check.error === 'ROOM_TRANSITION_INVALID' ? 409 : 400, ...check };
+
+    const from = room.room.status;
+    applyStatus(room, to, req.org);
+    if (check.snapshot) captureSnapshot(room, req, `status:${to}`);
+    room.room.reopened = {
+      by: { userId: req.orgUser.id, name: req.orgUser.name }, at: now(), from,
+      reasonCodes: reasons.codes, sourceContext, sourceRef,
+    };
+    if (sourceContext) room.room.sourceContext = sourceContext;
+    activity(room, req, 'room_reopened', { from, to, reasonCodes: reasons.codes, sourceContext, sourceRef });
+    vmetric('recruitment_room_reopened');
+    persistNow();
+    return { ok: true, room: buildRecruitmentRoom(room, req), from, to };
+  };
+  ctx.findRoomForRequest = findRoom;
+  ctx.roomIsRoom = isRoom;
+
+  /**
+   * The ONE room creator reachable from another milestone, shared with M18
+   * Nobody Missed. A candidate added from a brief gets a room through exactly
+   * the same path as one added from Discover: the same visibility check, the
+   * same uniqueness rule, the same adoption of an existing case. M18 supplies
+   * only the source context, so the funnel can later distinguish a room opened
+   * from a brief from one opened organically.
+   */
+  ctx.createRoomForPlayer = ({ req, player, sourceContext = 'direct', sourceRef = null }) => {
+    if (!orgCanSee(req.org, player)) return { ok: false, status: 403, error: 'NOT_VISIBLE' };
+    const existing = db.recruitmentCases.find((c) => c.orgId === req.org.id && c.playerId === player.id
+      && isRoom(c) && OPEN_ROOM_STATUSES.includes(c.room.status));
+    if (existing) return { ok: true, roomId: existing.id, existed: true, room: buildRecruitmentRoom(existing, req) };
+
+    let room = db.recruitmentCases.find((c) => c.orgId === req.org.id && c.playerId === player.id && c.stage !== 'closed' && !isRoom(c));
+    const adopted = !!room;
+    if (!room) {
+      room = {
+        id: nextId('case'), orgId: req.org.id, playerId: player.id, playerName: player.name,
+        vacancyId: null, ownerUserId: req.orgUser.id, ownerName: req.orgUser.name,
+        stage: null, priority: 'medium', deadline: null, restricted: false,
+        assignments: [], tasks: [], approvals: [], decision: null,
+        links: { requestIds: [], trialIds: [], signingId: null },
+        createdAt: now(), history: [],
+      };
+      db.recruitmentCases.push(room);
+    }
+    room.room = {
+      status: 'watching', priority: 'normal', tags: [], leadScoutUserId: req.orgUser.id,
+      sourceContext: normaliseSourceContext(sourceContext), sourceRef,
+      openedBy: { userId: req.orgUser.id, name: req.orgUser.name },
+      updatedAt: now(), archivedAt: null, closedAt: null,
+    };
+    if (adopted && room.stage) room.room.status = roomStatusForStage(room.stage, req.org.level) ?? 'watching';
+    applyStatus(room, room.room.status, req.org);
+    activity(room, req, 'room_created', { status: room.room.status, sourceContext: room.room.sourceContext, sourceRef, adoptedExistingCase: adopted });
+    vmetric('recruitment_room_created');
+    ledgerAppend?.({ type: 'recruitment_room_created', playerId: player.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
+    persistNow();
+    return { ok: true, roomId: room.id, existed: false, room: buildRecruitmentRoom(room, req) };
+  };
+
   // ------------------------------------------------------------- snapshots
 
   function captureSnapshot(room, req, trigger) {
