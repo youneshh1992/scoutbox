@@ -101,6 +101,14 @@ const SHELL = `
     <li>In the Room: <b>Overview</b> (Trust Score with "evidence confidence — not football ability", decision readiness as counts) → <b>Passport</b> → <b>Combine</b> → <b>Discussion</b> (internal only) → change status to <b>Shortlisted</b> (the evidence confidence at that moment is captured).</li>
     <li><b>Decision</b> → record a recommendation with a <i>structured</i> reason. Try archiving with no reason — it is refused. There is no protected characteristic to pick.</li>
     <li><b>Player</b> → Enter as Kola → You: no Room, no status, no discussion, no decision. The club's thinking never crosses the line.</li>
+    <li><b>Pro</b> → Recruitment → <b>Second Look</b> → Diego Alonso, archived for <i>not enough recent evidence</i>. A full match and a verified coach reference have since landed. The card names the reason this club recorded and never says the decision was wrong.</li>
+    <li>Same card → <b>Reasons that still stand: Squad space</b>. That is a fact about the club, not the player — no amount of new footage resolves it, and nothing here pretends otherwise.</li>
+    <li><b>Review changes</b> → <i>At your previous review vs now</i>. Only rows that moved are shown, and anything the decision-time snapshot never recorded reads <b>Previous detail unavailable</b> — never a fabricated number or a misleading zero.</li>
+    <li><b>Reopen room</b> → pick a reason → the room reopens through the same M17 rules, with the archived decision still in its history. A Second Look never reopens anything by itself.</li>
+    <li><b>Recruitment Briefs</b> → <i>2027 Defensive Midfielder</i>: every criterion is one the club typed. No weights, no hidden criteria, no ranking.</li>
+    <li><b>Nobody Missed</b> → <b>Evaluation Coverage</b> 8 eligible · 5 evaluated · 3 not yet · 63% — workflow coverage, never scouting quality, player talent or freedom from bias. Each candidate answers <b>Why shown</b> with those same criteria, met and not met.</li>
+    <li><b>Add to room</b> on one candidate → they leave the queue and coverage really moves to 6 of 8. Archive that room later and they do <i>not</i> fall back in: they were evaluated, so later evidence reaches you through Second Look instead.</li>
+    <li><b>Player</b> → Enter as Kola → nothing again: no Second Look, no brief, no coverage, no archive reason. Neither system has a player-facing surface at all.</li>
   </ol>
   <div class="dim" style="margin-top:6px">State lives in this page only and resets on reload.</div>
 </div>
