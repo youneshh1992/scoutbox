@@ -408,6 +408,27 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
   .nav-hamburger { display: inline-flex; }
 }
 
+/* M18.1 — phone width.
+   The shell already collapses the sidebar at 900px, but several fixed-width
+   pieces still pushed a ~360px viewport sideways: the top bar could not wrap,
+   so its status pills and buttons overflowed and dragged the whole page with
+   them; the notification panel was a fixed 380px pinned 24px from the right,
+   i.e. wider than the screen and partly off it; and the login and filter
+   inputs were wider than the content column. Nothing here changes the desktop
+   layout — every rule is inside the query. */
+@media (max-width: 640px) {
+  .topbar { flex-wrap: wrap; row-gap: 8px; padding: 10px 14px; }
+  .topbar h2 { flex: 1 1 100%; font-size: 16px; }
+  .content { padding: 14px; }
+  .bell-panel { left: 8px; right: 8px; width: auto; max-height: 60vh; }
+  .drawer { width: 100vw; }
+  .drawer .head h3 { font-size: 21px; }
+  .login input, .filters input[type='text'] { width: 100%; max-width: 100%; }
+  table.data { font-size: 12px; }
+  /* Touch targets: a 24px pill-sized button is not reliably tappable. */
+  button { min-height: 34px; }
+}
+
 .attn-card { background: var(--panel); border: 1px solid var(--gold); border-radius: 12px; padding: 12px 14px; margin-bottom: 16px; }
 .attn-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--gold); margin-bottom: 6px; }
 .attn-row { display: flex; align-items: center; gap: 10px; width: 100%; background: none; border: none; text-align: left; padding: 7px 4px; color: var(--text); border-radius: 8px; }

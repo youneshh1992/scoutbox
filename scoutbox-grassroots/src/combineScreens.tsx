@@ -88,17 +88,19 @@ export function CombinePanel({ session, playerId, notify }: { session: Session; 
           {compare && compare.rows.length > 0 && (
             <div style={{ marginTop: 10, overflowX: 'auto' }}>
               <h4 style={{ margin: '0 0 6px' }}>{t('cmb.compare')}</h4>
-              <table className="data">
-                <thead><tr><th>{t('cmb.player')}</th>{compare.protocols.map((p) => <th key={p.id}>{p.title} <span className="dim">({p.metricUnit})</span></th>)}</tr></thead>
-                <tbody>
-                  {compare.rows.map((row) => (
-                    <tr key={row.playerId}>
-                      <td>{row.playerName}</td>
-                      {row.cells.map((c, i) => <td key={i}>{c ? <>{c.display}{c.verified ? ' ✓' : ''}</> : <span className="dim">—</span>}</td>)}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div style={{ overflowX: 'auto' }}>
+                <table className="data">
+                  <thead><tr><th>{t('cmb.player')}</th>{compare.protocols.map((p) => <th key={p.id}>{p.title} <span className="dim">({p.metricUnit})</span></th>)}</tr></thead>
+                  <tbody>
+                    {compare.rows.map((row) => (
+                      <tr key={row.playerId}>
+                        <td>{row.playerName}</td>
+                        {row.cells.map((c, i) => <td key={i}>{c ? <>{c.display}{c.verified ? ' ✓' : ''}</> : <span className="dim">—</span>}</td>)}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
               <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>{compare.note}</div>
             </div>
           )}

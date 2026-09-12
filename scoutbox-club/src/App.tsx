@@ -414,10 +414,16 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
             : <span className="pill">verification pending — U18 hidden</span>)}
           <span className={`pill ${session.org.type === 'agency' ? 'red' : 'blue'}`}>{session.org.type}</span>
           {live ? <span className="pill outline-green">● live sync</span> : <span className="pill red">○ reconnecting — updates resume automatically</span>}
-          <button onClick={openBell} title="Notifications" style={{ position: 'relative' }}>
-            🔔{unread > 0 && <span className="bell-badge">{unread}</span>}
+          <button
+            onClick={openBell}
+            title="Notifications"
+            aria-label={`Notifications${unread > 0 ? ` — ${unread} unread` : ''}`}
+            aria-expanded={bellOpen}
+            style={{ position: 'relative' }}
+          >
+            🔔{unread > 0 && <span className="bell-badge" aria-hidden="true">{unread}</span>}
           </button>
-          <button onClick={() => setSafetyOpen(true)} title="One-click reporting — available on every screen">⚑ Report / Block</button>
+          <button onClick={() => setSafetyOpen(true)} title="One-click reporting — available on every screen" aria-label="Report or block — available on every screen">⚑ Report / Block</button>
         </div>
         {bellOpen && (
           <div className="bell-panel">

@@ -46,8 +46,23 @@ const CONTRACT_LABELS: Record<string, string> = {
   unknown: '—',
 };
 
+/**
+ * Every confirmation and every failure in the app arrives through this one
+ * element, and until M18.1 it was an unannounced <div>: a screen-reader user
+ * got no signal at all that their action had succeeded or failed. Errors are
+ * assertive because they interrupt what the user was about to do next;
+ * confirmations are polite because they do not.
+ */
 export function Toast({ text, error }: { text: string; error?: boolean }) {
-  return <div className={`toast ${error ? 'error' : ''}`}>{text}</div>;
+  return (
+    <div
+      className={`toast ${error ? 'error' : ''}`}
+      role={error ? 'alert' : 'status'}
+      aria-live={error ? 'assertive' : 'polite'}
+    >
+      {text}
+    </div>
+  );
 }
 
 function errMsg(e: unknown): string {
@@ -417,19 +432,21 @@ export function CompareModal({ session, playerIds, onClose }: {
           <div><h3>Compare</h3><div className="sub">Side by side — verified data only.</div></div>
           <button className="close" onClick={onClose}>Close</button>
         </div>
-        <table className="data">
-          <thead>
-            <tr><th></th>{players.map((p) => <th key={p.id}>{p.name}</th>)}</tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.label}>
-                <td style={{ color: 'var(--muted)' }}>{r.label}</td>
-                {players.map((p) => <td key={p.id}>{r.get(p)}</td>)}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div style={{ overflowX: 'auto' }}>
+          <table className="data">
+            <thead>
+              <tr><th></th>{players.map((p) => <th key={p.id}>{p.name}</th>)}</tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.label}>
+                  <td style={{ color: 'var(--muted)' }}>{r.label}</td>
+                  {players.map((p) => <td key={p.id}>{r.get(p)}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </>
   );
@@ -920,20 +937,22 @@ export function LedgerScreen({ session, tick, openPlayer }: ScreenProps) {
         Append-only. Every action your organisation takes is timestamped to a named scout. This ledger is
         the evidence base for attribution and Proof Packs — it cannot be edited or purged.
       </div>
-      <table className="data">
-        <thead><tr><th>When</th><th>Action</th><th>Player</th><th>By</th></tr></thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.id}>
-              <td>{fmtDateTime(r.ts)}</td>
-              <td>{LEDGER_LABELS[r.type] ?? r.type}</td>
-              <td><a style={{ color: 'var(--accent-2)', cursor: 'pointer' }} onClick={() => openPlayer(r.playerId)}>{r.playerId}</a></td>
-              <td>{r.scoutName}</td>
-            </tr>
-          ))}
-          {rows.length === 0 && <tr><td colSpan={4} style={{ color: 'var(--muted)' }}>No entries yet — view a profile to create the first one.</td></tr>}
-        </tbody>
-      </table>
+      <div style={{ overflowX: 'auto' }}>
+        <table className="data">
+          <thead><tr><th>When</th><th>Action</th><th>Player</th><th>By</th></tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id}>
+                <td>{fmtDateTime(r.ts)}</td>
+                <td>{LEDGER_LABELS[r.type] ?? r.type}</td>
+                <td><a style={{ color: 'var(--accent-2)', cursor: 'pointer' }} onClick={() => openPlayer(r.playerId)}>{r.playerId}</a></td>
+                <td>{r.scoutName}</td>
+              </tr>
+            ))}
+            {rows.length === 0 && <tr><td colSpan={4} style={{ color: 'var(--muted)' }}>No entries yet — view a profile to create the first one.</td></tr>}
+          </tbody>
+        </table>
+      </div>
     </>
   );
 }
@@ -948,30 +967,34 @@ export function ReputationScreen({ session, tick }: ScreenProps) {
     <>
       <div className="section">
         <h4>Track records</h4>
-        <table className="data">
-          <thead><tr><th>Scout / coach</th><th>Organisation</th><th>Discoveries</th><th>Success rate</th><th>Avg resale multiple</th></tr></thead>
-          <tbody>
-            {rep.seeded.map((r) => (
-              <tr key={r.scoutName}>
-                <td>{r.scoutName}</td><td>{r.orgName}</td><td>{r.discoveries}</td><td>{r.successRatePct}%</td><td>{r.avgResaleMultiple}×</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div style={{ overflowX: 'auto' }}>
+          <table className="data">
+            <thead><tr><th>Scout / coach</th><th>Organisation</th><th>Discoveries</th><th>Success rate</th><th>Avg resale multiple</th></tr></thead>
+            <tbody>
+              {rep.seeded.map((r) => (
+                <tr key={r.scoutName}>
+                  <td>{r.scoutName}</td><td>{r.orgName}</td><td>{r.discoveries}</td><td>{r.successRatePct}%</td><td>{r.avgResaleMultiple}×</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
       <div className="section">
         <h4>Live activity (computed from the Discovery Ledger)</h4>
-        <table className="data">
-          <thead><tr><th>Scout / coach</th><th>Organisation</th><th>Views</th><th>Contacts</th><th>Trials</th><th>Signings</th></tr></thead>
-          <tbody>
-            {rep.live.length === 0 && <tr><td colSpan={6} style={{ color: 'var(--muted)' }}>No live activity yet this session.</td></tr>}
-            {rep.live.map((r) => (
-              <tr key={`${r.scoutName}-${r.orgName}`}>
-                <td>{r.scoutName}</td><td>{r.orgName}</td><td>{r.views}</td><td>{r.contacts}</td><td>{r.trials}</td><td>{r.signings}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div style={{ overflowX: 'auto' }}>
+          <table className="data">
+            <thead><tr><th>Scout / coach</th><th>Organisation</th><th>Views</th><th>Contacts</th><th>Trials</th><th>Signings</th></tr></thead>
+            <tbody>
+              {rep.live.length === 0 && <tr><td colSpan={6} style={{ color: 'var(--muted)' }}>No live activity yet this session.</td></tr>}
+              {rep.live.map((r) => (
+                <tr key={`${r.scoutName}-${r.orgName}`}>
+                  <td>{r.scoutName}</td><td>{r.orgName}</td><td>{r.views}</td><td>{r.contacts}</td><td>{r.trials}</td><td>{r.signings}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </>
   );
