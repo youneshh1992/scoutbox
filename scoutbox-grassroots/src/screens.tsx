@@ -55,10 +55,19 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : 'Something went wrong';
 }
 
+/**
+ * M18.1 — PROFILE COMPLETENESS, not the ScoutBox Trust Score.
+ *
+ * This number is the legacy profile signal: identity flag, recorded
+ * attendance, filed trial reports, uploaded clips, profile fields. It was
+ * rendered as "Trust NN" beside M16.2's Trust Score, which measures evidence
+ * confidence and means something else entirely. One word, two meanings, in the
+ * same product — so this one says what it is.
+ */
 function TrustBar({ score }: { score: number }) {
   return (
-    <div className="trust">
-      <span>Trust {score}</span>
+    <div className="trust" title={t('term.profileSignalNote')}>
+      <span>{t('term.profileSignal')} {score}%</span>
       <span className="bar"><i style={{ width: `${score}%` }} /></span>
     </div>
   );
@@ -301,7 +310,7 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
                 {current.player.guardianManaged && <span className="pill red">U18</span>}
                 {current.media.verifiedClip && <span className="pill green">✅ Verified Clip — filmed at a confirmed fixture</span>}
               </div>
-              <div className="dim">“{current.media.title}” · {current.media.views} view{current.media.views === 1 ? '' : 's'} · trust {current.player.trustScore}</div>
+              <div className="dim">“{current.media.title}” · {current.media.views} view{current.media.views === 1 ? '' : 's'} · {t('term.profileSignal')} {current.player.trustScore}%</div>
               <div className="filmroom-tags">
                 {tagOptions.map((t) => (
                   <button
@@ -357,7 +366,7 @@ export function FixturesScreen({ session, tick, openPlayer }: ScreenProps) {
                     <div key={p.id} className="list-row" style={{ cursor: 'pointer' }} onClick={() => openPlayer(p.id)}>
                       <span className="pill blue">{p.position}</span>
                       <span className="grow">{p.name}</span>
-                      <span className="dim">{p.age} · trust {p.trustScore}</span>
+                      <span className="dim">{p.age} · {t('term.profileSignal')} {p.trustScore}%</span>
                     </div>
                   ))}
                 </div>
@@ -386,7 +395,7 @@ export function CompareModal({ session, playerIds, onClose }: {
 
   const rows: { label: string; get: (p: PlayerDetail) => ReactNode }[] = [
     { label: 'Position · age', get: (p) => `${p.position} · ${p.age}` },
-    { label: 'Trust', get: (p) => p.trustScore },
+    { label: t('term.profileSignal'), get: (p) => p.trustScore },
     { label: 'Apps', get: (p) => p.stats?.appearances ?? '—' },
     { label: 'Goals', get: (p) => p.stats?.goals ?? '—' },
     { label: 'Assists', get: (p) => p.stats?.assists ?? '—' },

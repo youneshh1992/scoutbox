@@ -235,6 +235,9 @@ const en = {
   'rm.intro': 'A Recruitment Room is your organisation’s private decision layer over a player. The Football Passport stays the player’s record of truth.',
   'rm.privacy': 'This room is private to your organisation. The player, their guardian and every other club can never see it.',
   'rm.trustNote': 'Evidence confidence — not football ability.',
+  'rm.trustUnavailableShort': 'Not available',
+  'rm.trustWithheldShort': 'Player withheld',
+  'rm.trustWithheldNote': 'This player record is not visible to your organisation, so their evidence confidence is not shown here.',
   'rm.trustDisclaimer': 'ScoutBox Trust Score reflects verification and evidence confidence — not football ability or recruitment suitability.',
   'rm.trustScore': 'Trust Score',
   'rm.noSort': 'Rooms are ordered by most recent activity. ScoutBox never sorts or ranks rooms by Trust Score.',
@@ -422,6 +425,12 @@ const en = {
   'm18.sl.tab.worth': 'Worth Another Look', 'm18.sl.tab.changed': 'Evidence Changed',
   'm18.sl.tab.reviewed': 'Reviewed', 'm18.sl.tab.dismissed': 'Dismissed',
   'm18.sl.empty': 'Nothing in this queue.',
+  'm18.sl.empty.worth': 'No player has changed enough to be worth another look right now. This queue fills itself when evidence changes — there is nothing to chase.',
+  'm18.sl.empty.changed': 'No evidence has been removed or expired on a player your organisation has already looked at.',
+  'm18.sl.empty.reviewed': 'Nothing reviewed yet. Items you mark as reviewed are kept here so a decision is never lost.',
+  'm18.sl.empty.dismissed': 'Nothing dismissed. A dismissal is recorded with its reason and can be reopened.',
+  'common.retry': 'Try again',
+  'common.loadFailed': 'That did not load.',
   'm18.sl.cardLabel': 'Second Look item',
   'm18.sl.playerWithheld': 'Player not available to your organisation',
   'm18.sl.playerUnavailable': 'Player data is currently unavailable to your organisation under the standing rules. Your internal record remains.',
@@ -550,6 +559,18 @@ const en = {
   'm18.br.err.BRIEF_TRUST_BAND_UNKNOWN': 'that is not a ScoutBox evidence-confidence band',
   'm18.br.err.BRIEF_WINDOW_INVALID': 'the start date is after the end date',
   'm18.br.err.BRIEF_CRITERION_PROHIBITED': 'a protected characteristic can never be a recruitment criterion',
+
+  // ---- M18.1 canonical terminology.
+  // Two different numbers used to be shown to scouts as "Trust". One is M16.2
+  // evidence confidence; the other is the older completeness signal the server
+  // still returns as `trustScore` and now also as `profileSignal`. They are
+  // named apart here so no surface can imply the wrong one.
+  'term.profileSignal': 'Profile completeness',
+  'term.profileSignalNote': 'How complete this player’s profile is — identity, recorded attendance, filed reports and clips. It is not the ScoutBox Trust Score, and it is not a rating of ability.',
+  'term.trustScore': 'Trust Score',
+  'term.trustScoreNote': 'Evidence confidence: how well this player’s claims are backed by independent evidence. It is not a rating of ability.',
+  'term.trustUnavailable': 'Evidence confidence temporarily unavailable',
+  'term.trustUnavailableNote': 'The Trust Score could not be read just now. That is a loading failure, not a score of zero — try again in a moment.',
 };
 
 const fr: typeof en = {
@@ -781,6 +802,9 @@ const fr: typeof en = {
   'rm.intro': 'Une Salle de recrutement est la couche de décision privée de votre organisation au sujet d’un joueur. Le Football Passport reste le registre de vérité du joueur.',
   'rm.privacy': 'Cette salle est privée à votre organisation. Le joueur, son responsable légal et tous les autres clubs ne peuvent jamais la voir.',
   'rm.trustNote': 'Confiance dans les preuves — pas les qualités footballistiques.',
+  'rm.trustUnavailableShort': 'Indisponible',
+  'rm.trustWithheldShort': 'Joueur non visible',
+  'rm.trustWithheldNote': 'Cette fiche joueur n’est pas visible par votre organisation ; sa confiance dans les preuves n’est donc pas affichée ici.',
   'rm.trustDisclaimer': 'Le ScoutBox Trust Score reflète la vérification et la confiance dans les preuves — pas les qualités footballistiques ni l’intérêt pour un recrutement.',
   'rm.trustScore': 'Trust Score',
   'rm.noSort': 'Les salles sont classées par activité la plus récente. ScoutBox ne trie ni ne classe jamais les salles selon le Trust Score.',
@@ -963,6 +987,12 @@ const fr: typeof en = {
   'm18.sl.tab.worth': 'À revoir', 'm18.sl.tab.changed': 'Preuves modifiées',
   'm18.sl.tab.reviewed': 'Examinés', 'm18.sl.tab.dismissed': 'Écartés',
   'm18.sl.empty': 'Rien dans cette file.',
+  'm18.sl.empty.worth': 'Aucun joueur n’a suffisamment évolué pour mériter un second regard pour l’instant. Cette file se remplit d’elle-même lorsque les preuves changent — rien à relancer.',
+  'm18.sl.empty.changed': 'Aucune preuve n’a été retirée ou n’a expiré chez un joueur déjà examiné par votre organisation.',
+  'm18.sl.empty.reviewed': 'Rien d’examiné pour l’instant. Les éléments que vous marquez comme examinés sont conservés ici afin qu’aucune décision ne se perde.',
+  'm18.sl.empty.dismissed': 'Rien d’écarté. Un écartement est enregistré avec son motif et peut être rouvert.',
+  'common.retry': 'Réessayer',
+  'common.loadFailed': 'Le chargement a échoué.',
   'm18.sl.cardLabel': 'Élément du Second regard',
   'm18.sl.playerWithheld': 'Joueur non disponible pour votre organisation',
   'm18.sl.playerUnavailable': 'Les données du joueur sont actuellement indisponibles pour votre organisation selon les règles en vigueur. Votre registre interne demeure.',
@@ -1089,6 +1119,14 @@ const fr: typeof en = {
   'm18.br.err.BRIEF_TRUST_BAND_UNKNOWN': 'ce n’est pas un palier de confiance dans les preuves ScoutBox',
   'm18.br.err.BRIEF_WINDOW_INVALID': 'la date de début est postérieure à la date de fin',
   'm18.br.err.BRIEF_CRITERION_PROHIBITED': 'une caractéristique protégée ne peut jamais être un critère de recrutement',
+
+  // ---- M18.1 terminologie canonique.
+  'term.profileSignal': 'Complétude du profil',
+  'term.profileSignalNote': 'À quel point le profil de ce joueur est complet — identité, présences enregistrées, rapports déposés et séquences vidéo. Ce n’est pas le Trust Score ScoutBox, et ce n’est pas une note de talent.',
+  'term.trustScore': 'Trust Score',
+  'term.trustScoreNote': 'Confiance dans les preuves : dans quelle mesure les affirmations de ce joueur sont étayées par des preuves indépendantes. Ce n’est pas une note de talent.',
+  'term.trustUnavailable': 'Confiance dans les preuves momentanément indisponible',
+  'term.trustUnavailableNote': 'Le Trust Score n’a pas pu être lu pour l’instant. Il s’agit d’un échec de chargement, pas d’un score nul — réessayez dans un instant.',
 };
 
 export type Lang = 'en' | 'fr';

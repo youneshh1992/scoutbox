@@ -30,7 +30,14 @@ export interface CombineAttempt {
   captureContext: string; requestId: string | null; attemptNumber: number;
   measuredValue: number | null; display: string; unit: string;
   measurementState: string | null;
-  combineState: 'combine_verified' | 'partially_measured' | 'measurement_unavailable' | 'protocol_invalid' | 'invalidated' | 'cancelled' | 'ready';
+  // The server's COMBINE_STATES in full. The earlier union was missing
+  // `integrity_review`, `processing`, `attempt_in_progress`, `setup_required`
+  // and `not_started`, all of which the server does send — so the client type
+  // asserted states it could actually receive were impossible.
+  combineState:
+    | 'not_started' | 'setup_required' | 'ready' | 'attempt_in_progress' | 'processing'
+    | 'combine_verified' | 'partially_measured' | 'measurement_unavailable'
+    | 'protocol_invalid' | 'integrity_review' | 'invalidated' | 'cancelled';
   stateCopy: string | null; reasons: string[];
   provider: string; providerVersion: number; simulated: boolean;
   calibration: { required: string[]; passed: boolean; checks: string[]; at: number } | null;

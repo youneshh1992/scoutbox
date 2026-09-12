@@ -54,10 +54,14 @@ export function Muted({ children, size = 13 }: { children: ReactNode; size?: num
   return <Text style={{ color: colors.muted, fontSize: size, lineHeight: size * 1.45 }}>{children}</Text>;
 }
 
+/**
+ * M18.1 — profile completeness, NOT the ScoutBox Trust Score. The name is kept
+ * so call sites do not churn; the label says what the number actually is.
+ */
 export function TrustBar({ score }: { score: number }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-      <Text style={{ color: colors.muted, fontSize: 13 }}>Trust {score}</Text>
+      <Text style={{ color: colors.muted, fontSize: 13 }}>Profile {score}%</Text>
       <View style={styles.trustTrack}>
         <View style={[styles.trustFill, { width: `${score}%` }]} />
       </View>

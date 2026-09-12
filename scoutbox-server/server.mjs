@@ -797,16 +797,25 @@ function playerViewForOrg(player, org) {
   const view = {
     ...rest,
     age: ageOn(player.dob),
+    // M18.1 — this number is PROFILE COMPLETENESS: identity flag, recorded
+    // attendance, filed trial reports, uploaded clips and a filled-in profile.
+    // It is NOT the ScoutBox Trust Score (M16.2 evidence confidence), and the
+    // two were both being rendered as "Trust" in the same product. `trustScore`
+    // stays on the wire as a deprecated alias so nothing breaks.
+    profileSignal: computeTrustScore(player),
     trustScore: computeTrustScore(player),
     guardianManaged: minor,
     medical: medical.shared
       ? medical
       : { shared: false, records: [], conditionStatus: 'not_shared', note: 'Medical data is player-controlled and has not been shared.' },
   };
+  // M18.1 — an exact date of birth is not shipped to clubs at all. Age is what
+  // every club surface displays and the only thing eligibility needs; sending
+  // the DOB as well was data a club received purely because the UI hid it.
+  delete view.dob;
   if (minor) {
-    // Privacy for minors: no city, no exact date of birth, no direct channel.
+    // Privacy for minors: no city, no direct channel (DOB already removed).
     view.city = '';
-    view.dob = null;
     view.contactPolicy = 'guardian_only';
   }
   if ((org.level ?? null) === 'grassroots') {

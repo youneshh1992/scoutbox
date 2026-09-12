@@ -19,7 +19,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError, type Session } from './api';
 import {
   rooms, ROOM_PRIORITIES, ROOM_TASK_STATES, ROOM_EVIDENCE_REVIEW_STATES, REASON_REQUIRED_STATUSES,
-  type Room, type RoomActivityItem, type RoomAttentionItem, type RoomComment,
+  type Room, type RoomActivityItem, type RoomAttentionItem, type RoomComment, type RoomTrust,
   type RoomDecision, type RoomDecisionTaxonomy, type RoomListResult, type RoomReadiness,
 } from './roomsApi';
 import { STANDARD_PROTOCOLS } from './combineApi';
@@ -84,6 +84,24 @@ function TrustNote({ inline }: { inline?: boolean }) {
   return <span className="dim" style={{ fontSize: inline ? 11.5 : 12.5, display: inline ? 'inline' : 'block' }}>{t('rm.trustNote')}</span>;
 }
 
+/**
+ * The Trust Score value. `trust` is null in two different situations and they
+ * must not read the same way: the player record is not visible to this
+ * organisation at all, or evidence confidence could not be read right now.
+ * Neither is a score. Rendering "—" or 0 for either invites a scout to read
+ * "no confidence in this player" out of what is only a missing value, which is
+ * the one thing evidence confidence must never be mistaken for.
+ */
+function TrustValue({ trust, playerAvailable, compact }: { trust: RoomTrust | null; playerAvailable: boolean; compact?: boolean }) {
+  if (trust) return <><b>{trust.score}</b> <span className="pill">{trust.bandLabel}</span></>;
+  const withheld = !playerAvailable;
+  return (
+    <span className="dim" style={{ fontSize: compact ? 12 : undefined }} title={withheld ? t('rm.trustWithheldNote') : t('term.trustUnavailableNote')}>
+      {withheld ? t('rm.trustWithheldShort') : (compact ? t('rm.trustUnavailableShort') : t('term.trustUnavailable'))}
+    </span>
+  );
+}
+
 // ================================================================== screen
 export function RoomsScreen(props: RoomsScreenProps) {
   return props.roomId
@@ -92,6 +110,17 @@ export function RoomsScreen(props: RoomsScreenProps) {
 }
 
 // =================================================================== list
+
+/** A failed load offers a retry — see the same component in m18Screens.tsx. */
+function LoadError({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <div className="notice block" role="alert">
+      <div>{message}</div>
+      {onRetry && <button style={{ marginTop: 6 }} onClick={onRetry}>{t('common.retry')}</button>}
+    </div>
+  );
+}
+
 function RoomsList({ session, tick, onOpenRoom }: RoomsScreenProps) {
   const [view, setView] = useState('all');
   const [q, setQ] = useState('');
@@ -99,6 +128,8 @@ function RoomsList({ session, tick, onOpenRoom }: RoomsScreenProps) {
   const [data, setData] = useState<RoomListResult | null>(null);
   const [attention, setAttention] = useState<RoomAttentionItem[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  const [bump, setBump] = useState(0);
+  const reload = useCallback(() => setBump((b) => b + 1), []);
 
   useEffect(() => {
     let live = true;
@@ -110,7 +141,7 @@ function RoomsList({ session, tick, onOpenRoom }: RoomsScreenProps) {
       .then((d) => { if (live) setAttention(d.items); })
       .catch(() => { /* the strip is progressive enhancement */ });
     return () => { live = false; };
-  }, [session, tick, view, query]);
+  }, [session, tick, view, query, bump]);
 
   const funnel = data?.funnel ?? null;
   const open = (id: string) => onOpenRoom?.(id);
@@ -165,7 +196,7 @@ function RoomsList({ session, tick, onOpenRoom }: RoomsScreenProps) {
         {query && <button onClick={() => { setQ(''); setQuery(''); }}>{t('common.cancel')}</button>}
       </div>
 
-      {err && <div className="notice block">{err}</div>}
+      {err && <LoadError message={err} onRetry={reload} />}
 
       {/* Needs attention — deterministic workflow signals, never a ranking. */}
       <div className="section" aria-label={t('rm.attention')}>
@@ -217,9 +248,7 @@ function RoomsList({ session, tick, onOpenRoom }: RoomsScreenProps) {
                   <td>{r.age ?? <span className="dim">—</span>}</td>
                   <td>{r.currentClub ?? <span className="dim">—</span>}</td>
                   <td title={r.trust?.note ?? t('rm.trustNote')}>
-                    {r.trust
-                      ? <><b>{r.trust.score}</b> <span className="pill">{r.trust.bandLabel}</span></>
-                      : <span className="dim">—</span>}
+                    <TrustValue trust={r.trust} playerAvailable={r.playerAvailable} compact />
                   </td>
                   <td><span className="pill">{statusLabel(r.status, r.statusLabel)}</span></td>
                   <td>{r.ownerName ?? <span className="dim">—</span>}</td>
@@ -565,7 +594,7 @@ function OverviewPanel({ session, room, notify, reload, staff }: PanelProps) {
           <div className="list-row"><span className="grow">{t('rm.roomLead')}</span><span>{room.leadScout?.name ?? t('rm.none')}</span></div>
           <div className="list-row" title={room.trust?.note ?? t('rm.trustNote')}>
             <span className="grow">{t('rm.trustScore')}</span>
-            <span>{room.trust ? <><b>{room.trust.score}</b> <span className="pill">{room.trust.bandLabel}</span></> : <span className="dim">—</span>}</span>
+            <span><TrustValue trust={room.trust} playerAvailable={room.playerAvailable} /></span>
           </div>
           <div className="list-row"><span className="grow">{t('rm.health')}</span><span className="pill">{healthLabel(room.health, room.healthLabel)}</span></div>
           <div className="list-row"><span className="grow">{t('rm.openTasks')}</span><span>{room.tasks.filter((x) => x.status === 'open' || x.status === 'in_progress').length}</span></div>

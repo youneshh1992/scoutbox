@@ -48,6 +48,32 @@ function VerifiedBadge() {
   return <Pill label={pt('cmbVerified')} tone="green" />;
 }
 
+// Every Combine state that is not "verified" says which one it is. Until M18.1
+// only `partially_measured` had words of its own, so an attempt invalidated
+// after review, one the device could not measure, one that broke the protocol
+// and one the player cancelled all rendered identically — a bare value with no
+// badge. Those mean completely different things to a player, and the one that
+// reads worst (invalidated) was the one that looked most like a normal result.
+const STATE_TONE: Record<string, 'default' | 'gold' | 'red'> = {
+  partially_measured: 'gold',
+  measurement_unavailable: 'default',
+  protocol_invalid: 'gold',
+  integrity_review: 'gold',
+  invalidated: 'red',
+  cancelled: 'default',
+};
+/** The state's own badge, or null for verified (which has its own) and for
+ *  in-flight states that the surrounding UI is already narrating. */
+function StateBadge({ state }: { state: string }) {
+  if (state === 'combine_verified') return null;
+  const label = pt(`cmbState_${state}` as Parameters<typeof pt>[0]);
+  // An unmapped state must not render its raw id at a player.
+  if (!label || label === `cmbState_${state}`) return null;
+  return <Pill label={label} tone={STATE_TONE[state] ?? 'default'} />;
+}
+/** True when the recorded number must not be shown as a standing result. */
+const valueStruck = (state: string) => state === 'invalidated' || state === 'protocol_invalid';
+
 // ------------------------------------------------------- verified result row
 function ResultRow({ a }: { a: CombineAttempt }) {
   const [why, setWhy] = useState(false);
@@ -57,11 +83,22 @@ function ResultRow({ a }: { a: CombineAttempt }) {
     <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6, marginTop: 6 }}>
       <Row>
         <Text style={{ color: colors.text, fontSize: 13, flexShrink: 1, fontWeight: '600' }}>{a.protocolTitle}</Text>
-        <Text style={{ color: verified ? colors.accent : colors.text, fontWeight: '800', fontSize: 15 }}>{a.display}<Text style={{ color: colors.muted, fontWeight: '600', fontSize: 12 }}> {a.unit}</Text></Text>
-        {verified ? <VerifiedBadge /> : null}
+        {a.measuredValue == null ? (
+          <Text style={{ color: colors.muted, fontWeight: '700', fontSize: 13 }}>{pt('cmbNoValue')}</Text>
+        ) : (
+          <Text style={{
+            color: verified ? colors.accent : colors.muted, fontWeight: '800', fontSize: 15,
+            textDecorationLine: valueStruck(a.combineState) ? 'line-through' : 'none',
+          }}>{a.display}<Text style={{ color: colors.muted, fontWeight: '600', fontSize: 12 }}> {a.unit}</Text></Text>
+        )}
+        {verified ? <VerifiedBadge /> : <StateBadge state={a.combineState} />}
         {a.simulated ? <Pill label={pt('cmbSim')} /> : null}
       </Row>
       {partial ? <Muted size={12}>{a.display} {a.unit} — {pt('cmbMeasuredNotVerified')}</Muted> : null}
+      {valueStruck(a.combineState) && a.measuredValue != null ? <Muted size={12}>{pt('cmbValueNotCounted')}</Muted> : null}
+      {/* Every non-verified state carries the server's own sentence for it, so
+          the reason is never left to the badge alone. */}
+      {!verified && !partial && a.stateCopy ? <Muted size={11.5}>{a.stateCopy}</Muted> : null}
       {verified ? (
         <View>
           <Button small label={why ? pt('cmbHideWhy') : pt('cmbWhyVerified')} onPress={() => setWhy((x) => !x)} />
@@ -226,11 +263,21 @@ function CombineResultCard({ attempt, onClose }: { attempt: CombineAttempt; onCl
   return (
     <Card style={{ borderColor: verified ? colors.accent : colors.line }}>
       <Text style={{ color: colors.text, fontWeight: '800', fontSize: 17 }}>{verified ? pt('cmbResultVerified') : pt('cmbResultRecorded')}</Text>
-      <Row><Pill label={attempt.protocolTitle} tone="blue" />{verified ? <VerifiedBadge /> : null}{attempt.simulated ? <Pill label={pt('cmbSim')} /> : null}</Row>
+      <Row><Pill label={attempt.protocolTitle} tone="blue" />{verified ? <VerifiedBadge /> : <StateBadge state={attempt.combineState} />}{attempt.simulated ? <Pill label={pt('cmbSim')} /> : null}</Row>
       <Row style={{ marginTop: 4 }}>
-        <Text style={{ color: verified ? colors.accent : colors.text, fontWeight: '800', fontSize: 26 }}>{attempt.display}</Text>
-        <Text style={{ color: colors.muted, fontWeight: '600', fontSize: 14 }}>{attempt.unit}</Text>
+        {attempt.measuredValue == null ? (
+          <Text style={{ color: colors.muted, fontWeight: '700', fontSize: 18 }}>{pt('cmbNoValue')}</Text>
+        ) : (
+          <>
+            <Text style={{
+              color: verified ? colors.accent : colors.muted, fontWeight: '800', fontSize: 26,
+              textDecorationLine: valueStruck(attempt.combineState) ? 'line-through' : 'none',
+            }}>{attempt.display}</Text>
+            <Text style={{ color: colors.muted, fontWeight: '600', fontSize: 14 }}>{attempt.unit}</Text>
+          </>
+        )}
       </Row>
+      {valueStruck(attempt.combineState) && attempt.measuredValue != null ? <Muted size={12}>{pt('cmbValueNotCounted')}</Muted> : null}
       {verified ? <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 15 }}>{pt('cmbWorkCounts')}</Text> : null}
       {verified ? <Muted size={12}>{pt('cmbRecordProve')}</Muted> : null}
       {partial ? <Muted size={12}>{pt('cmbMeasuredNotVerified')}</Muted> : null}

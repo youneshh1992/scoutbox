@@ -24,10 +24,15 @@ function flagEmoji(country: string): string {
   return String.fromCodePoint(...[...country.toUpperCase()].map((c) => 0x1f1a5 + c.charCodeAt(0)));
 }
 
-function standing(score: number): string {
-  if (score >= 75) return 'Excellent standing';
-  if (score >= 50) return 'Good standing';
-  return 'Building trust';
+/**
+ * M18.1 — this describes PROFILE COMPLETENESS, not trustworthiness. It used to
+ * read "Building trust" / "Good standing", which put a second, unrelated
+ * meaning on the word the ScoutBox Trust Score already owns on the You tab.
+ */
+function completenessLabel(score: number): string {
+  if (score >= 75) return 'Profile well filled in';
+  if (score >= 50) return 'Profile coming along';
+  return 'Profile still to fill in';
 }
 
 export default function Profile() {
@@ -129,7 +134,7 @@ export default function Profile() {
         {/* trust score */}
         <Card>
           <Row style={{ justifyContent: 'space-between' }}>
-            <SectionTitle>Trust score ⓘ</SectionTitle>
+            <SectionTitle>Profile completeness</SectionTitle>
             <Text style={{ fontSize: 22 }}>🛡</Text>
           </Row>
           <Row style={{ alignItems: 'flex-end' }}>
@@ -143,7 +148,7 @@ export default function Profile() {
             </View>
           </Row>
           <Row style={{ justifyContent: 'space-between' }}>
-            <Text style={styles.standing}>{standing(me.trustScore)}</Text>
+            <Text style={styles.standing}>{completenessLabel(me.trustScore)}</Text>
             {me.tier && <Pill label={`Tier: ${me.tier}`} tone="green" />}
             {typeof me.streak === 'number' && me.streak > 0 && <Pill label={`🔥 ${me.streak}-day streak`} tone="gold" />}
           </Row>
@@ -151,8 +156,10 @@ export default function Profile() {
             Base {me.trust.base}  ·  Identity +{me.trust.identityVerified}  ·  Attendance +{me.trust.verifiedAttendance}  ·  Trial Reports +{me.trust.trialReports}  ·  Media +{me.trust.media}  ·  Profile +{me.trust.profileComplete}
           </Muted>
           <Muted size={12.5}>
-            Trust rises through verified attendance and clubs&apos; filed trial reports. Never through
-            payments. Sharing medical data has no effect either way.
+            How complete your profile is — identity, recorded attendance, clubs&apos; filed trial
+            reports, clips and profile details. It is not the ScoutBox Trust Score (that is on
+            You), and it is not a rating of you as a player. It never moves through payments, and
+            sharing medical data has no effect either way.
           </Muted>
         </Card>
 

@@ -147,6 +147,22 @@ const SL_TABS: [SlTab, string][] = [
 /** "Evidence Changed" is the kind whose changes REDUCE the evidence available. */
 const isEvidenceChanged = (i: SecondLookItem) => i.kind === 'evidence_removed';
 
+/**
+ * A failed load has to offer a way out. Every one of these panels used to
+ * render the message and stop: the only recovery from a dropped connection was
+ * to navigate away and come back, which is not something a user has any reason
+ * to guess. `role="alert"` also gets the failure announced, which a plain
+ * <div> appearing mid-page does not.
+ */
+function LoadError({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <div className="notice block" role="alert">
+      <div>{message}</div>
+      {onRetry && <button style={{ marginTop: 6 }} onClick={onRetry}>{t('common.retry')}</button>}
+    </div>
+  );
+}
+
 export function SecondLookScreen({ session, tick, notify, openPlayer }: M18ScreenProps) {
   const [tab, setTab] = useState<SlTab>('worth');
   const [data, setData] = useState<SecondLookListResult | null>(null);
@@ -215,7 +231,7 @@ export function SecondLookScreen({ session, tick, notify, openPlayer }: M18Scree
         ))}
       </div>
 
-      {err && <div className="notice block">{err}</div>}
+      {err && <LoadError message={err} onRetry={reload} />}
 
       <div
         role="tabpanel"
@@ -224,7 +240,7 @@ export function SecondLookScreen({ session, tick, notify, openPlayer }: M18Scree
         aria-label={t('m18.sl.panelLabel')}
       >
         {!data && !err && <div className="dim">{t('m18.loading')}</div>}
-        {data && buckets[tab].length === 0 && <div className="dim">{t('m18.sl.empty')}</div>}
+        {data && buckets[tab].length === 0 && <div className="dim">{t(`m18.sl.empty.${tab}`, t('m18.sl.empty'))}</div>}
         {buckets[tab].map((item) => (
           <SecondLookCard
             key={item.id}
@@ -445,6 +461,8 @@ function SecondLookCard({
 function ReviewChangesView({ session, item, onBack }: { session: Session; item: SecondLookItem; onBack: () => void }) {
   const [data, setData] = useState<SecondLookChangesResult | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [bump, setBump] = useState(0);
+  const reload = useCallback(() => setBump((b) => b + 1), []);
 
   useEffect(() => {
     let live = true;
@@ -453,7 +471,7 @@ function ReviewChangesView({ session, item, onBack }: { session: Session; item: 
       .then((d) => { if (live) setData(d); })
       .catch((e) => { if (live) setErr(errMessage(e)); });
     return () => { live = false; };
-  }, [session, item.id]);
+  }, [session, item.id, bump]);
 
   const rows: ComparisonRow[] = (data?.comparison?.rows ?? []).filter((r) => r.changed === true || r.available === false);
 
@@ -465,7 +483,7 @@ function ReviewChangesView({ session, item, onBack }: { session: Session; item: 
         {item.playerName ?? t('m18.sl.playerWithheld')}
       </div>
 
-      {err && <div className="notice block">{err}</div>}
+      {err && <LoadError message={err} onRetry={reload} />}
       {!data && !err && <div className="dim">{t('m18.loading')}</div>}
 
       {data?.unavailableNote && <div className="notice block">{data.unavailableNote}</div>}
@@ -608,7 +626,7 @@ export function NobodyMissedScreen({
         <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{t('m18.nm.noRank')}</div>
       </div>
 
-      {err && <div className="notice block">{err}</div>}
+      {err && <LoadError message={err} onRetry={reload} />}
       {!data && !err && briefId && <div className="dim">{t('m18.loading')}</div>}
       {!briefId && briefs && <div className="dim">{t('m18.nm.noBriefs')}</div>}
 
@@ -812,6 +830,7 @@ function BriefList({ session, tick, notify, onOpenBrief }: BriefsScreenProps) {
   const [data, setData] = useState<BriefListResult | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [bump, setBump] = useState(0);
+  const reload = useCallback(() => setBump((b) => b + 1), []);
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
@@ -829,7 +848,7 @@ function BriefList({ session, tick, notify, onOpenBrief }: BriefsScreenProps) {
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 4 }}>{t('m18.br.intro')}</div>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}>{t('m18.br.noHidden')}</div>
 
-      {err && <div className="notice block">{err}</div>}
+      {err && <LoadError message={err} onRetry={reload} />}
 
       <div style={{ marginBottom: 10 }}>
         <button className="primary" onClick={() => setCreating((v) => !v)} aria-expanded={creating}>
