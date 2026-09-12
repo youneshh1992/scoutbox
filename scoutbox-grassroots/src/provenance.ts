@@ -28,7 +28,8 @@ export type ProvenanceTone = 'neutral' | 'reviewed' | 'coach' | 'confirmed' | 'd
 interface ProvenanceEntry {
   labelKey: string;
   tone: ProvenanceTone;
-  /** A text glyph so the badge is distinguishable without colour. */
+  /** A text glyph so the badge is distinguishable without colour. Labels that
+   *  already carry the M15 tick (Coach/Club confirmed ✓, Registry ✓) get none. */
   glyph: string;
 }
 
@@ -41,9 +42,9 @@ const TABLE: Record<ProvenanceType, ProvenanceEntry> = {
   // it deliberately keeps the neutral tone rather than a confirmation colour.
   box_cam_observed: { labelKey: 'prov.boxCam', tone: 'neutral', glyph: '◉' },
   scoutbox_reviewed: { labelKey: 'prov.reviewed', tone: 'reviewed', glyph: '✓' },
-  verified_coach_confirmed: { labelKey: 'prov.coach', tone: 'coach', glyph: '✓' },
-  verified_club_confirmed: { labelKey: 'prov.club', tone: 'confirmed', glyph: '✓' },
-  authoritative_registry: { labelKey: 'prov.registry', tone: 'confirmed', glyph: '✓' },
+  verified_coach_confirmed: { labelKey: 'prov.coach', tone: 'coach', glyph: '' },
+  verified_club_confirmed: { labelKey: 'prov.club', tone: 'confirmed', glyph: '' },
+  authoritative_registry: { labelKey: 'prov.registry', tone: 'confirmed', glyph: '' },
   combine_verified: { labelKey: 'prov.combineVerified', tone: 'confirmed', glyph: '✓' },
   simulated_demo: { labelKey: 'prov.simulated', tone: 'demo', glyph: '≈' },
 };
