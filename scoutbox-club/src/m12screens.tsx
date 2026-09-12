@@ -12,6 +12,7 @@ import {
   type TrialDay, type Vacancy,
 } from './m12api';
 import { fmtDate, fmtDateTime, t } from './i18n';
+import { confirmDestructive, DESTRUCTIVE_ACTIONS } from './confirmAction';
 
 type ScreenProps = { session: Session; tick: number; notify: (text: string, error?: boolean) => void; openPlayer: (id: string) => void };
 
@@ -304,7 +305,7 @@ export function RecruitmentScreen({ session, tick, notify, openPlayer }: ScreenP
             <div key={u.id} className="list-row">
               <span className="grow"><b>{u.name}</b> · {u.role} {u.lead && <span className="pill gold">lead</span>}</span>
               {u.removedAt ? <span className="pill red">access removed {fmtDate(u.removedAt)}</span> : u.id !== session.userId && (
-                <button aria-label={`${t('cases.removeStaff')}: ${u.name}`} onClick={() => window.confirm(`Remove ${u.name}'s access immediately? Their history stays attributed.`) && act(() => m12.removeStaff(session, u.id), 'Access revoked — sessions, events and media links are dead.')}>{t('cases.removeStaff')}</button>
+                <button aria-label={`${t('cases.removeStaff')}: ${u.name}`} onClick={() => confirmDestructive({ ...DESTRUCTIVE_ACTIONS.removeStaff, name: u.name }) && act(() => m12.removeStaff(session, u.id), 'Access revoked — sessions, events and media links are dead.')}>{t('cases.removeStaff')}</button>
               )}
             </div>
           ))}

@@ -12,6 +12,7 @@ import {
 } from './m13api';
 import { m12, type CaseRec } from './m12api';
 import { fmtDate, fmtDateTime, t } from './i18n';
+import { AuditLogPanel, NotificationPreferencesPanel } from './orgPanels';
 
 type ScreenProps = { session: Session; tick: number; notify: (text: string, error?: boolean) => void; openPlayer: (id: string) => void };
 
@@ -578,6 +579,8 @@ export function OrganisationScreen({ session, notify }: ScreenProps) {
   return (
     <div>
       <h2>{t('nav.organisation')}</h2>
+      <NotificationPreferencesPanel session={session} notify={notify} />
+      <AuditLogPanel session={session} />
       {awaitingAck.length > 0 && (
         <div className="section" style={{ borderColor: 'var(--red, #c33)' }}>
           <h3>⚠️ {t('m13.org.needsAck')}</h3>

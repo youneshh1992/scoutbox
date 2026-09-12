@@ -8,37 +8,22 @@ import { useEffect, useState } from 'react';
 import { ApiError, type Session } from './api';
 import { m15, shareTokenFrom, type FpEvent, type FpSummary, type RecruitmentPassport } from './m15api';
 import { t } from './i18n';
+import { provenanceOf } from './provenance';
 
-const PROV_PILL: Record<string, string> = {
-  verified_club_confirmed: 'green', authoritative_registry: 'green',
-  verified_coach_confirmed: 'blue', scoutbox_reviewed: 'gold',
-  // Box Cam is first-party observation and ranks BELOW a ScoutBox review, so
-  // it deliberately gets the neutral pill rather than a confirmation colour.
-  box_cam_observed: '',
-  player_submitted: '', guardian_submitted: '', system_recorded: '', historical_migration: '',
-};
-// Every provenance the server can emit (m15/shared.mjs PROVENANCE). This list
-// was missing `box_cam_observed`, and the fallback below used to be
-// 'fp.provPlayer' — so an item ScoutBox itself observed through Box Cam was
-// labelled "Player-provided". Mislabelling where evidence came from is the one
-// thing a provenance badge exists to prevent.
-const PROV_KEY: Record<string, string> = {
-  player_submitted: 'fp.provPlayer', guardian_submitted: 'fp.provGuardian',
-  system_recorded: 'fp.provSystem', historical_migration: 'fp.provHistoric',
-  box_cam_observed: 'fp.provBoxCam',
-  scoutbox_reviewed: 'fp.provReviewed', verified_coach_confirmed: 'fp.provCoach',
-  verified_club_confirmed: 'fp.provClub', authoritative_registry: 'fp.provRegistry',
-};
+// M18.2 — the labels come from ONE canonical mapping (provenance.ts). This
+// file used to hold its own table, and its fallback once badged Box Cam
+// evidence as "Player-provided". ProvPill stays exported so every surface
+// that imported it keeps working; it just no longer decides any words.
 export function ProvPill({ provenance, copy }: { provenance: string; copy?: string | null }) {
-  // An unrecognised provenance says so. Asserting the weakest known label
-  // would still be an assertion, and it would be wrong.
-  const known = PROV_KEY[provenance];
+  const p = provenanceOf(provenance, copy);
   return (
-    <span className={`pill ${PROV_PILL[provenance] ?? ''}`} title={copy ?? (known ? undefined : t('fp.provUnknownNote'))}>
-      {t(known ?? 'fp.provUnknown')}
+    <span className={p.pillClass} title={p.note || undefined} data-provenance={provenance} data-known={p.known ? '1' : '0'}>
+      <span aria-hidden="true">{p.glyph} </span>{p.label}
     </span>
   );
 }
+const provPillClass = (provenance: string) => provenanceOf(provenance).pillClass;
+const provTitle = (provenance: string) => provenanceOf(provenance).label;
 
 function wallMessage(e: unknown): string {
   if (e instanceof ApiError) {
@@ -80,7 +65,7 @@ export function PassportBody({ session, p, notify, reload }: { session: Session;
       <div className="badges" style={{ marginBottom: 8 }}>
         {p.identity && <span className="pill outline-green" title={t('fp.identityCopy')}>{p.identity.label}</span>}
         {p.status.currentClub
-          ? <span className={`pill ${PROV_PILL[p.status.currentClub.provenance] ?? ''}`}>{p.status.currentClub.orgName}{p.status.currentClub.since ? ` · ${t('fp.since')} ${p.status.currentClub.since}` : ''}</span>
+          ? <span className={provPillClass(p.status.currentClub.provenance)}>{p.status.currentClub.orgName}{p.status.currentClub.since ? ` · ${t('fp.since')} ${p.status.currentClub.since}` : ''}</span>
           : <span className="pill">{t('fp.noClub')}</span>}
         {p.availability && <span className="pill blue">{p.availability.replace(/_/g, ' ')}</span>}
         {p.representation && <span className="pill gold">{t('fp.represented')}: {p.representation.agencyName}</span>}
@@ -220,7 +205,7 @@ export function SummaryChips({ s }: { s: FpSummary | undefined }) {
   return (
     <>
       {s.currentClub?.name && (
-        <span className={`pill ${PROV_PILL[s.currentClub.provenance] ?? ''}`} title={t(PROV_KEY[s.currentClub.provenance] ?? 'fp.provUnknown')}>
+        <span className={provPillClass(s.currentClub.provenance)} title={provTitle(s.currentClub.provenance)}>
           {s.currentClub.name}
         </span>
       )}

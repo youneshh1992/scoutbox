@@ -23,7 +23,7 @@
 // No invented numbers anywhere: a comparison row whose previous value was never
 // recorded prints "Previous detail unavailable", never a fabricated figure and
 // never 0.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, type Session } from './api';
 import {
   m18, BRIEF_EVIDENCE_REQUIREMENTS, BRIEF_FEET, BRIEF_LEVELS, BRIEF_POSITIONS,
@@ -36,6 +36,9 @@ import {
 } from './m18Api';
 import { STANDARD_PROTOCOLS } from './combineApi';
 import { t, fmtDate, fmtDateTime } from './i18n';
+import { ConflictNotice, conflictOf, type Conflict } from './conflict';
+import { registerDirtyGuard } from './dirtyGuard';
+import { confirmDestructive, DESTRUCTIVE_ACTIONS } from './confirmAction';
 
 // Pro clubs may require a standardized Combine Verified result as a brief
 // criterion. Grassroots keeps a simpler brief and sets this to false — a
@@ -939,12 +942,19 @@ function BriefDetail({ session, tick, notify, briefId, onCloseBrief }: BriefsScr
     return () => { live = false; };
   }, [session, briefId, tick, bump]);
 
+  const [statusConflict, setStatusConflict] = useState<Conflict | null>(null);
   const setStatus = async (status: string) => {
+    const action = status === 'archived' ? DESTRUCTIVE_ACTIONS.archiveBrief : status === 'paused' ? DESTRUCTIVE_ACTIONS.pauseBrief : null;
+    if (action && !confirmDestructive({ ...action, name: brief?.title ?? null })) return;
+    setStatusConflict(null);
     try {
       const out = await m18.patchBrief(session, briefId, { status, expectedRev: brief?.rev });
       if (out.ok) { notify(t('m18.br.statusChanged')); setBump((b) => b + 1); }
       else notify(out.message, true);
-    } catch (e) { notify(errMessage(e), true); }
+    } catch (e) {
+      const c = conflictOf(e);
+      if (c) setStatusConflict(c); else notify(errMessage(e), true);
+    }
   };
 
   if (err) {
@@ -994,6 +1004,7 @@ function BriefDetail({ session, tick, notify, briefId, onCloseBrief }: BriefsScr
           </div>
         )}
 
+        {statusConflict && <ConflictNotice conflict={statusConflict} onReload={() => { setStatusConflict(null); setBump((b) => b + 1); }} />}
         <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button onClick={() => setEditing((v) => !v)} aria-expanded={editing}>
             {editing ? t('common.cancel') : t('m18.br.edit')}
@@ -1079,6 +1090,13 @@ function BriefForm({
   const [busy, setBusy] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<{ field: string; error: string }[]>([]);
   const [message, setMessage] = useState<string | null>(null);
+  // M18.2 — a conflict keeps the draft. `savedRef` is the last state the
+  // server accepted (or the initial one), so "dirty" is a real comparison and
+  // a successful save clears it without a second flag to forget.
+  const [conflict, setConflict] = useState<Conflict | null>(null);
+  const savedRef = useRef<string>(JSON.stringify(initial));
+  const isDirty = useCallback(() => JSON.stringify(form) !== savedRef.current, [form]);
+  useEffect(() => registerDirtyGuard(isDirty), [isDirty]);
 
   const positions = vocabulary?.positions ?? [...BRIEF_POSITIONS];
   const evidence = vocabulary?.evidenceRequirements ?? BRIEF_EVIDENCE_REQUIREMENTS;
@@ -1097,8 +1115,10 @@ function BriefForm({
     setBusy(true);
     setFieldErrors([]);
     setMessage(null);
+    setConflict(null);
     try {
       const out = await onSubmit(form);
+      if (out.ok) savedRef.current = JSON.stringify(form);
       if (!out.ok) {
         setMessage(out.message);
         if (out.error === 'BRIEF_INVALID') setFieldErrors(out.details);
@@ -1108,7 +1128,8 @@ function BriefForm({
         }
       }
     } catch (e) {
-      setMessage(errMessage(e));
+      const c = conflictOf(e);
+      if (c) setConflict(c); else setMessage(errMessage(e));
     } finally {
       setBusy(false);
     }
@@ -1118,6 +1139,13 @@ function BriefForm({
     <div className="section" aria-label={t('m18.br.formLabel')}>
       <h4>{t('m18.br.formTitle')}</h4>
 
+      {conflict && (
+        <ConflictNotice
+          conflict={conflict}
+          onReload={() => { setConflict(null); onCancel(); }}
+          onKeepChanges={() => setConflict(null)}
+        />
+      )}
       {message && <div className="notice block">{message}</div>}
       {fieldErrors.length > 0 && (
         <ul style={{ margin: '0 0 8px', paddingInlineStart: 20 }}>

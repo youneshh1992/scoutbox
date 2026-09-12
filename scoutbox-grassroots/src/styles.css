@@ -493,3 +493,9 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .attn-row:hover { background: var(--panel-2); }
 .attn-row .grow { flex: 1; }
 .attn-count { min-width: 24px; text-align: center; font-weight: 700; color: var(--gold); background: var(--bg-2); border-radius: 6px; padding: 2px 6px; }
+
+/* M18.2 — a button that reads like the inline glyph it replaced, but is a
+   real button: focusable, keyboard-operable, announced. */
+.linklike { background: none; border: 0; padding: 0 4px; color: inherit; cursor: pointer; font: inherit; }
+.linklike:hover { opacity: 0.8; }
+.linklike:focus-visible { outline: 2px solid var(--accent, #2563eb); outline-offset: 2px; border-radius: 4px; }

@@ -57,7 +57,7 @@ const H = (s: Session) => ({ 'content-type': 'application/json', authorization: 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, init);
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, body.error ?? 'UNKNOWN', body.message ?? body.error ?? res.statusText);
+  if (!res.ok) throw ApiError.fromResponse(res, body);
   return body as T;
 }
 

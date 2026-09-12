@@ -14,6 +14,7 @@ import { CombinePanel } from './combineScreens';
 import { TrustPanel } from './trustScreens';
 import { rooms } from './roomsApi';
 import { fmtDate, fmtDateTime, fmtStamp, t } from './i18n';
+import { confirmDestructive, DESTRUCTIVE_ACTIONS } from './confirmAction';
 
 const TAG_LABELS: Record<string, string> = {
   first_touch: 'First touch', pace: 'Pace', positioning: 'Positioning', work_rate: 'Work rate',
@@ -529,8 +530,13 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
         <button onClick={saveCurrent}>💾 Save search</button>
         {saved.map((s) => (
           <span key={s.id} className="pill blue" style={{ cursor: 'pointer' }} title={`by ${s.scoutName}`}>
-            <span onClick={() => setFilters(s.filters)}>🔔 {s.name}</span>{' '}
-            <span onClick={() => api.deleteSavedSearch(session, s.id).then(() => api.getSavedSearches(session).then(setSaved))} title="Delete">✕</span>
+            <button className="linklike" onClick={() => setFilters(s.filters)}>🔔 {s.name}</button>{' '}
+            <button
+              className="linklike"
+              aria-label={`${t('confirm.deleteSavedSearch').replace('{name}', s.name)}`}
+              title="Delete"
+              onClick={() => confirmDestructive({ ...DESTRUCTIVE_ACTIONS.deleteSavedSearch, name: s.name }) && api.deleteSavedSearch(session, s.id).then(() => api.getSavedSearches(session).then(setSaved))}
+            >✕</button>
           </span>
         ))}
         {compareIds.length >= 2 && (
@@ -544,6 +550,11 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
         on this platform.
       </div>
       {comparing && <CompareModal session={session} playerIds={compareIds} onClose={() => setComparing(false)} />}
+      {/* M18.2 — the ordering is stated, not inferred. It is deliberately not
+          a ranking, and the sentence says what the figure is not. */}
+      <div className="dim" style={{ fontSize: 12, marginBottom: 8 }} data-ordering>
+        {t('discover.orderingGrassroots')}
+      </div>
       <div className="player-grid">
         {players.map((p) => (
           <div key={p.id} className="player-card" onClick={() => openPlayer(p.id)}>
@@ -1709,7 +1720,7 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
               <button onClick={() => api.moreLikeThis(session, playerId).then((r) => setMoreLike(r.players)).catch((e) => notify(errMsg(e), true))}>≈ More like this</button>
               {!player.guardianManaged && (
                 <button onClick={async () => {
-                  if (!window.confirm(`Record the signing of ${player.name} by ${session.org.name}? This freezes the attribution evidence and notifies the player.`)) return;
+                  if (!confirmDestructive({ ...DESTRUCTIVE_ACTIONS.recordSigning, name: player.name })) return;
                   try {
                     const s = await api.recordSigning(session, playerId);
                     notify(`🎉 Signing recorded${s.insideAttributionWindow ? ' — inside the attribution window' : ''}. Timeline updated.`);

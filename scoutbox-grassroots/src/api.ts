@@ -481,8 +481,28 @@ export interface Reputation {
 }
 
 export class ApiError extends Error {
+  /**
+   * M18.2: the response body and the contract headers travel with the error.
+   * `details` is what a 409 uses to name who moved the record (currentRev,
+   * updatedBy); `retryAfterS` is the server's Retry-After on a 429;
+   * `retryable` is the server's own X-ScoutBox-Retry verdict when it spoke.
+   * Demo-mode errors construct with three arguments and get none of these.
+   */
+  details: Record<string, unknown> | null = null;
+  retryAfterS: number | null = null;
+  retryable: boolean | null = null;
   constructor(public status: number, public code: string, message: string) {
     super(message);
+  }
+  static fromResponse(res: Response, body: Record<string, unknown> | null | undefined): ApiError {
+    const b = (body ?? {}) as Record<string, unknown>;
+    const e = new ApiError(res.status, String(b.error ?? 'UNKNOWN'), String(b.message ?? b.error ?? res.statusText));
+    e.details = b;
+    const ra = res.headers.get('retry-after');
+    e.retryAfterS = ra && /^\d+$/.test(ra) ? Number(ra) : null;
+    const rv = res.headers.get('x-scoutbox-retry');
+    e.retryable = rv === 'retryable' ? true : rv === 'not-retryable' ? false : null;
+    return e;
   }
 }
 
@@ -571,7 +591,7 @@ function headers(s: Session): Record<string, string> {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, init);
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, body.error ?? 'UNKNOWN', body.message ?? body.error ?? res.statusText);
+  if (!res.ok) throw ApiError.fromResponse(res, body);
   return body as T;
 }
 

@@ -17,6 +17,8 @@
 //     is a human judgement recorded with structured reasons.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError, type Session } from './api';
+import { ConflictNotice, conflictOf, type Conflict } from './conflict';
+import { confirmDestructive, DESTRUCTIVE_ACTIONS } from './confirmAction';
 import {
   rooms, ROOM_PRIORITIES, ROOM_TASK_STATES, ROOM_EVIDENCE_REVIEW_STATES, REASON_REQUIRED_STATUSES,
   type Room, type RoomActivityItem, type RoomAttentionItem, type RoomComment, type RoomTrust,
@@ -370,7 +372,7 @@ function RoomHeader({ session, room, notify, reload, staff, openPlayer }: PanelP
   // A conflict is the one message the person must not miss, and a toast is
   // exactly where it gets missed: a routine live-sync notification arriving a
   // second later replaces it. It stays on the panel until they act on it.
-  const [conflict, setConflict] = useState(false);
+  const [conflict, setConflict] = useState<Conflict | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -380,28 +382,28 @@ function RoomHeader({ session, room, notify, reload, staff, openPlayer }: PanelP
 
   const needsReason = !!to && REASON_REQUIRED_STATUSES.includes(to);
 
-  const isConflict = (e: unknown) => e instanceof ApiError && e.code === 'ROOM_VERSION_CONFLICT';
-
   const move = async () => {
     if (!to) return;
-    setConflict(false);
+    const action = to === 'archived' ? DESTRUCTIVE_ACTIONS.archiveRoom : to === 'closed' ? DESTRUCTIVE_ACTIONS.closeRoom : null;
+    if (action && !confirmDestructive({ ...action, name: room.playerName ?? null })) return;
+    setConflict(null);
     try {
       await rooms.setStatus(session, room.roomId, { status: to, reasonCodes: codes, note: note.trim() || null, expectedRev: room.rev });
       notify(`${t('rm.statusMoved')} ${statusLabel(to)}`);
       setTo(''); setCodes([]); setNote('');
       reload();
     } catch (e) {
-      if (isConflict(e)) setConflict(true);
-      notify(errMessage(e), true);
+      const c = conflictOf(e);
+      if (c) setConflict(c); else notify(errMessage(e), true);
     }
   };
 
   const patch = async (input: Parameters<typeof rooms.patch>[2], done: string) => {
-    setConflict(false);
+    setConflict(null);
     try { await rooms.patch(session, room.roomId, { ...input, expectedRev: room.rev }); notify(done); reload(); }
     catch (e) {
-      if (isConflict(e)) setConflict(true);
-      notify(errMessage(e), true);
+      const c = conflictOf(e);
+      if (c) setConflict(c); else notify(errMessage(e), true);
     }
   };
 
@@ -420,12 +422,7 @@ function RoomHeader({ session, room, notify, reload, staff, openPlayer }: PanelP
         )}
       </div>
 
-      {conflict && (
-        <div className="notice block" role="alert" style={{ marginTop: 8 }}>
-          <div>{t('common.conflict')}</div>
-          <button style={{ marginTop: 6 }} onClick={() => { setConflict(false); reload(); }}>{t('common.reload')}</button>
-        </div>
-      )}
+      {conflict && <ConflictNotice conflict={conflict} onReload={() => { setConflict(null); reload(); }} />}
 
       {!room.playerAvailable && (
         <div className="notice block" style={{ marginTop: 8 }}>{room.unavailableNote ?? t('rm.unavailable')}</div>
@@ -948,6 +945,7 @@ function CommentRow({
     catch (e) { notify(errMessage(e), true); }
   };
   const remove = async () => {
+    if (!confirmDestructive(DESTRUCTIVE_ACTIONS.deleteComment)) return;
     try { await rooms.deleteComment(session, room.roomId, c.id); notify(t('rm.commentDeleted')); reload(); }
     catch (e) { notify(errMessage(e), true); }
   };
@@ -1141,15 +1139,20 @@ function DecisionPanel({ session, room, notify, reload }: PanelProps) {
   const history = room.decision.history.slice().sort((a, b) => b.createdAt - a.createdAt);
   const recommendations = taxonomy?.recommendations ?? [];
 
+  const [decisionConflict, setDecisionConflict] = useState<Conflict | null>(null);
   const record = async () => {
     if (!recommendation) return;
     setBusy(true);
+    setDecisionConflict(null);
     try {
-      await rooms.recordDecision(session, room.roomId, { recommendation, reasonCodes: codes, note: note.trim() || null, clientKey });
+      await rooms.recordDecision(session, room.roomId, { recommendation, reasonCodes: codes, note: note.trim() || null, clientKey, expectedRev: room.rev });
       notify(t('rm.decisionRecorded'));
       setRecommendation(''); setCodes([]); setNote('');
       reload();
-    } catch (e) { notify(errMessage(e), true); }
+    } catch (e) {
+      const c = conflictOf(e);
+      if (c) setDecisionConflict(c); else notify(errMessage(e), true);
+    }
     finally { setBusy(false); }
   };
 
@@ -1157,6 +1160,7 @@ function DecisionPanel({ session, room, notify, reload }: PanelProps) {
     <>
       <div className="section" aria-label={t('rm.currentDecision')}>
         <h4>{t('rm.currentDecision')}</h4>
+      {decisionConflict && <ConflictNotice conflict={decisionConflict} onReload={() => { setDecisionConflict(null); reload(); }} onKeepChanges={() => setDecisionConflict(null)} />}
         {current
           ? <div className="list-rows"><DecisionRow d={current} currentScore={room.trust?.score ?? null} /></div>
           : <div className="dim">{t('rm.noDecision')}</div>}

@@ -25,6 +25,7 @@ import {
 import { CommandPalette, NeedsAttention, Sidebar, SecondaryNav, useNavSections, usePaletteHotkey } from './navui';
 import { Icon } from './icons';
 import { fmtStamp, getLang, setLang, t } from './i18n';
+import { confirmLeave, installDirtyGuard, noteNavigated } from './dirtyGuard';
 
 const ROLES = ['Head of Recruitment', 'First-Team Scout', 'Academy Coach', 'Agent'];
 
@@ -220,7 +221,10 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   const [roomId, setRoomId] = useState<string | null>(() => roomFromHash(window.location.hash));
   // M18 reuses that same mechanism for "#/recruitment/briefs/:briefId".
   const [briefId, setBriefId] = useState<string | null>(() => briefFromHash(window.location.hash));
+  // M18.2 — every programmatic navigation asks the dirty-guard first. A form
+  // with nothing unsaved never triggers it.
   const setScreen = useCallback((id: ScreenId) => {
+    if (!confirmLeave(t('brief.unsaved'))) return;
     setScreenState(id);
     setRoomId(null);
     setBriefId(null);
@@ -228,6 +232,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   }, []);
   /** Opening a room PUSHES, so the browser Back button closes it again. */
   const openRoom = useCallback((id: string) => {
+    if (!confirmLeave(t('brief.unsaved'))) return;
     setScreenState('rooms');
     setBriefId(null);
     setRoomId(id);
@@ -240,18 +245,24 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   }, []);
   /** Opening a brief PUSHES, so the browser Back button closes it again. */
   const openBrief = useCallback((id: string) => {
+    if (!confirmLeave(t('brief.unsaved'))) return;
     setScreenState('briefs');
     setRoomId(null);
     setBriefId(id);
     try { if (window.location.hash !== hashForBrief(id)) window.history.pushState(null, '', hashForBrief(id)); } catch { /* sandboxed */ }
   }, []);
   const closeBrief = useCallback(() => {
+    if (!confirmLeave(t('brief.unsaved'))) return;
     setScreenState('briefs');
     setBriefId(null);
     try { if (window.location.hash !== hashForScreen('briefs')) window.history.pushState(null, '', hashForScreen('briefs')); } catch { /* sandboxed */ }
   }, []);
+  // M18.2 — the window-level guard: a declined hash/back navigation is
+  // reversed before the app's own handler sees it; close/reload prompts.
+  useEffect(() => installDirtyGuard(() => t('brief.unsaved')), []);
   useEffect(() => {
     const onHash = () => {
+      noteNavigated();
       const id = screenFromHash(window.location.hash);
       if (id) setScreenState(id);
       setRoomId(roomFromHash(window.location.hash));

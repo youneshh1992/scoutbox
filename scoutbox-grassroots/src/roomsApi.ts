@@ -359,7 +359,7 @@ export interface RoomsApi {
   createTask(s: Session, roomId: string, input: { title: string; description?: string | null; assigneeUserId?: string | null; dueAt?: string | null; linkedResourceType?: string | null; linkedResourceId?: string | null }): Promise<RoomTask>;
   updateTask(s: Session, roomId: string, taskId: string, input: { status?: string; assigneeUserId?: string | null }): Promise<RoomTask>;
   decisions(s: Session, roomId: string): Promise<RoomDecisionsResult>;
-  recordDecision(s: Session, roomId: string, input: { recommendation: string; reasonCodes?: string[]; note?: string | null; clientKey?: string }): Promise<{ decision: RoomDecision; snapshot: RoomSnapshot | null }>;
+  recordDecision(s: Session, roomId: string, input: { recommendation: string; reasonCodes?: string[]; note?: string | null; clientKey?: string; expectedRev?: number }): Promise<{ decision: RoomDecision; snapshot: RoomSnapshot | null }>;
   snapshots(s: Session, roomId: string): Promise<{ items: RoomSnapshot[] }>;
   reviewEvidence(s: Session, roomId: string, evidenceId: string, input: { state: string; note?: string | null }): Promise<{ review: { evidenceId: string; state: string; note: string | null; by: string | null; at: number }; note: string }>;
   assignAssessment(s: Session, roomId: string, input: { userId: string; kind?: string; dueAt?: string | null }): Promise<{ assignment: { id: string; userId: string; name: string; task: string; dueAt: string | null; status: string; createdAt: number } }>;
@@ -374,7 +374,7 @@ const H = (s: Session) => ({ 'content-type': 'application/json', authorization: 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, init);
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, body.error ?? 'UNKNOWN', body.message ?? body.error ?? res.statusText);
+  if (!res.ok) throw ApiError.fromResponse(res, body);
   return body as T;
 }
 
@@ -397,7 +397,7 @@ export const httpRooms: RoomsApi = {
     if (res.status === 409 && body?.error === 'ROOM_EXISTS') {
       return { ok: false, error: 'ROOM_EXISTS', existingRoomId: String(body.existingRoomId), status: String(body.status ?? '') };
     }
-    if (!res.ok) throw new ApiError(res.status, body.error ?? 'UNKNOWN', body.message ?? body.error ?? res.statusText);
+    if (!res.ok) throw ApiError.fromResponse(res, body);
     return { ok: true, room: body.room as Room, adoptedExistingCase: !!body.adoptedExistingCase };
   },
   get: async (s, roomId) => (await req<{ room: Room }>(`/org/rooms/${roomId}`, { headers: H(s) })).room,

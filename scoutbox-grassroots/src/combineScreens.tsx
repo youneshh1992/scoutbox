@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react';
 import { ApiError, type Session } from './api';
 import { combine, STANDARD_PROTOCOLS, type CombineRequestRow, type PlayerCombine, type CompareMatrix } from './combineApi';
+import { confirmDestructive, DESTRUCTIVE_ACTIONS } from './confirmAction';
 import { t } from './i18n';
 
 function wallMessage(e: unknown): string {
@@ -114,7 +115,7 @@ export function CombinePanel({ session, playerId, notify }: { session: Session; 
                 <div key={r.id} className="list-row" style={{ flexWrap: 'wrap' }}>
                   <span className="grow"><b>{r.title || t('cmb.title')}</b> <span className="dim">{r.protocols.map((p) => p.protocolTitle).join(', ')}{r.deadline ? ` · ${t('cmb.deadline')} ${r.deadline}` : ''}</span></span>
                   <span className={`pill ${r.state === 'completed' ? 'green' : r.completedCount > 0 ? 'gold' : ''}`}>{r.completedCount}/{r.requiredCount}</span>
-                  {r.state !== 'completed' && r.state !== 'cancelled' && <button aria-label={`${t('cmb.cancel')} ${r.title ?? ''}`} onClick={async () => { try { await combine.cancelRequest(session, r.id); setBump((b) => b + 1); } catch (e) { notify(wallMessage(e), true); } }}>{t('cmb.cancel')}</button>}
+                  {r.state !== 'completed' && r.state !== 'cancelled' && <button aria-label={`${t('cmb.cancel')} ${r.title ?? ''}`} onClick={async () => { if (!confirmDestructive(DESTRUCTIVE_ACTIONS.cancelCombineRequest)) return; try { await combine.cancelRequest(session, r.id); setBump((b) => b + 1); } catch (e) { notify(wallMessage(e), true); } }}>{t('cmb.cancel')}</button>}
                 </div>
               ))}
             </div>
