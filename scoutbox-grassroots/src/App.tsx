@@ -25,7 +25,7 @@ import {
 import { CommandPalette, NeedsAttention, Sidebar, SecondaryNav, useNavSections, usePaletteHotkey } from './navui';
 import { Icon } from './icons';
 import { fmtStamp, getLang, setLang, t } from './i18n';
-import { confirmLeave, installDirtyGuard, noteNavigated } from './dirtyGuard';
+import { confirmLeave, guardHashChange, installDirtyGuard, noteNavigated } from './dirtyGuard';
 
 const ROLES = ['Manager', 'Coach', 'Volunteer Scout', 'Club Secretary'];
 
@@ -125,14 +125,17 @@ export default function App() {
   };
 
   // Session restore validates the stored bearer token instead of silently
-  // re-logging in (which cannot supply a provisioned club password). A 401/403
+  // re-logging in (which cannot supply a provisioned club password). A 401
   // means the session expired — back to login; transient network failures keep
   // the session and the workspace shows its reconnecting state.
   useEffect(() => {
     const restored = loadSession();
     if (!restored) return;
     api.getNotifications(restored).catch((e) => {
-      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) logout();
+      // M18.2 — only a 401 ends the session. A 403 is a permission answer
+      // about ONE request; treating it as "signed out" threw people out of
+      // the workspace for opening a screen they were not allowed to see.
+      if (e instanceof ApiError && e.status === 401) logout();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -258,6 +261,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     setRoomId(null);
     setBriefId(null);
     try { if (window.location.hash !== hashForScreen(id)) window.history.replaceState(null, '', hashForScreen(id)); } catch { /* sandboxed */ }
+    noteNavigated();
   }, []);
   /** Opening a room PUSHES, so the browser Back button closes it again. */
   const openRoom = useCallback((id: string) => {
@@ -266,11 +270,13 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     setBriefId(null);
     setRoomId(id);
     try { if (window.location.hash !== hashForRoom(id)) window.history.pushState(null, '', hashForRoom(id)); } catch { /* sandboxed */ }
+    noteNavigated();
   }, []);
   const closeRoom = useCallback(() => {
     setScreenState('rooms');
     setRoomId(null);
     try { if (window.location.hash !== hashForScreen('rooms')) window.history.pushState(null, '', hashForScreen('rooms')); } catch { /* sandboxed */ }
+    noteNavigated();
   }, []);
   /** Opening a brief PUSHES, so the browser Back button closes it again. */
   const openBrief = useCallback((id: string) => {
@@ -279,19 +285,21 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     setRoomId(null);
     setBriefId(id);
     try { if (window.location.hash !== hashForBrief(id)) window.history.pushState(null, '', hashForBrief(id)); } catch { /* sandboxed */ }
+    noteNavigated();
   }, []);
   const closeBrief = useCallback(() => {
     if (!confirmLeave(t('brief.unsaved'))) return;
     setScreenState('briefs');
     setBriefId(null);
     try { if (window.location.hash !== hashForScreen('briefs')) window.history.pushState(null, '', hashForScreen('briefs')); } catch { /* sandboxed */ }
+    noteNavigated();
   }, []);
-  // M18.2 — the window-level guard: a declined hash/back navigation is
-  // reversed before the app's own handler sees it; close/reload prompts.
-  useEffect(() => installDirtyGuard(() => t('brief.unsaved')), []);
+  // M18.2 — close/reload prompt while a form is dirty.
+  useEffect(() => installDirtyGuard(), []);
   useEffect(() => {
     const onHash = () => {
-      noteNavigated();
+      // M18.2 — the dirty-guard decides BEFORE any state changes (see dirtyGuard.ts).
+      if (!guardHashChange(() => t('brief.unsaved'))) return;
       const id = screenFromHash(window.location.hash);
       if (id) setScreenState(id);
       setRoomId(roomFromHash(window.location.hash));

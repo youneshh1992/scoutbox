@@ -58,7 +58,7 @@ export function NotificationPreferencesPanel({ session, notify }: { session: Ses
   };
 
   return (
-    <div className="section" aria-label={t('prefs.title')}>
+    <div className="section" aria-label={t('prefs.title')} data-panel="notification-preferences">
       <h3>{t('prefs.title')}</h3>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>{t('prefs.intro')}</div>
       {err && (
@@ -144,7 +144,7 @@ export function AuditLogPanel({ session }: { session: Session }) {
   useEffect(() => { load(null); }, [load]);
 
   return (
-    <div className="section" aria-label={t('audit.title')}>
+    <div className="section" aria-label={t('audit.title')} data-panel="audit-log">
       <h3>{t('audit.title')}</h3>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>{t('audit.intro')}</div>
       {err && (

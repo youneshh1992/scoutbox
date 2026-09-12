@@ -1059,7 +1059,10 @@ function BriefDetail({ session, tick, notify, briefId, onCloseBrief }: BriefsScr
             if (out.ok) { notify(t('m18.br.saved')); setEditing(false); setBump((b) => b + 1); }
             return out;
           }}
-          onCancel={() => setEditing(false)}
+          // M18.2 — closing the editor re-reads the brief. "Reload latest" on a
+          // conflict goes through here, and a detail view that kept showing the
+          // pre-conflict title after "Reload latest" was found by m182Live J1.
+          onCancel={() => { setEditing(false); setBump((b) => b + 1); }}
         />
       )}
     </div>

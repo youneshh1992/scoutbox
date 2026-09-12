@@ -391,9 +391,10 @@ section('§17 — one conflict contract, one HTTP state mapper, one provenance v
 section('§18 — unsaved-change protection and the audit/preferences panels are wired and accessible');
 {
   const guard = read('scoutbox-club/src/dirtyGuard.ts');
-  ok(/beforeunload/.test(guard) && /hashchange/.test(guard), 'the guard covers close/reload and hash navigation');
-  neg(/if \(!anyDirty\(\)\) return true;/.test(guard), 'a clean form never prompts');
   const app = read('scoutbox-club/src/App.tsx');
+  ok(/beforeunload/.test(guard) && /guardHashChange\(\(\) => t\('brief\.unsaved'\)\)/.test(app), 'the guard covers close/reload, and the app asks it FIRST on every hash change');
+  neg((app.match(/noteNavigated\(\);/g) ?? []).length >= 5, 'every programmatic navigation keeps the guard\'s remembered hash in step');
+  neg(/if \(!anyDirty\(\)\) return true;/.test(guard), 'a clean form never prompts');
   ok((app.match(/confirmLeave\(t\('brief\.unsaved'\)\)/g) ?? []).length >= 4, 'sidebar, Room and Brief navigation all ask first');
   const m18 = read('scoutbox-club/src/m18Screens.tsx');
   ok(/registerDirtyGuard\(/.test(m18) && /ConflictNotice/.test(m18), 'the Brief form registers its dirty state and renders the shared conflict notice');

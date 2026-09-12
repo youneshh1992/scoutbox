@@ -9,12 +9,18 @@
 // The registry holds functions rather than flags so the form's own state is
 // the single source of truth: "dirty" is whatever the form says it is at the
 // moment someone tries to leave.
+//
+// Why the hash decision lives in the app's own handler (guardHashChange) and
+// not in a second window listener: React may render synchronously inside the
+// first hashchange listener, unmounting the dirty form before a later
+// listener gets to ask it anything. The M18.2 live suite (J3) caught exactly
+// that — a second listener saw zero registered forms and let a dirty form go.
+// One handler, one decision, before any state changes.
 
 type IsDirty = () => boolean;
 
 const guards = new Set<IsDirty>();
 let lastHash = typeof window !== 'undefined' ? window.location.hash : '';
-let restoring = false;
 
 export function registerDirtyGuard(isDirty: IsDirty): () => void {
   guards.add(isDirty);
@@ -34,13 +40,26 @@ export function confirmLeave(message: string): boolean {
 }
 
 /**
- * Install the window-level hooks once: `beforeunload` for close/reload, and a
- * hash watcher that reverses a navigation the person declined. The hash
- * watcher runs BEFORE the app's own hashchange handler (registration order),
- * and restores the previous hash with replaceState so the app's handler then
- * sees no change worth acting on.
+ * The app's hashchange/popstate handler calls this FIRST. Returns true when
+ * the navigation may proceed. When the person declines, the previous hash is
+ * restored with replaceState (which fires no hashchange) and false is
+ * returned, so the caller changes nothing. A second call for the same event
+ * (hashchange and popstate both fire on Back) sees no change and returns true
+ * — the caller then re-applies the state it is already in.
  */
-export function installDirtyGuard(message: () => string) {
+export function guardHashChange(message: () => string): boolean {
+  const next = window.location.hash;
+  if (next === lastHash) return true;
+  if (anyDirty() && !window.confirm(message())) {
+    try { window.history.replaceState(null, '', lastHash || '#/'); } catch { /* sandboxed */ }
+    return false;
+  }
+  lastHash = next;
+  return true;
+}
+
+/** Install the window-level hook for close and reload. Returns the uninstaller. */
+export function installDirtyGuard() {
   const onBeforeUnload = (e: BeforeUnloadEvent) => {
     if (!anyDirty()) return;
     e.preventDefault();
@@ -48,27 +67,9 @@ export function installDirtyGuard(message: () => string) {
     // actually triggers the prompt.
     e.returnValue = '';
   };
-  const onHash = () => {
-    if (restoring) { restoring = false; return; }
-    const next = window.location.hash;
-    if (next === lastHash) return;
-    if (anyDirty() && !window.confirm(message())) {
-      restoring = true;
-      try { window.history.replaceState(null, '', lastHash); } catch { /* sandboxed */ }
-      // Some hosts do not fire hashchange for replaceState; make sure the
-      // "restoring" latch cannot swallow the NEXT genuine change.
-      setTimeout(() => { restoring = false; }, 0);
-      return;
-    }
-    lastHash = next;
-  };
   window.addEventListener('beforeunload', onBeforeUnload);
-  window.addEventListener('hashchange', onHash);
-  return () => {
-    window.removeEventListener('beforeunload', onBeforeUnload);
-    window.removeEventListener('hashchange', onHash);
-  };
+  return () => { window.removeEventListener('beforeunload', onBeforeUnload); };
 }
 
-/** Keep the remembered hash in step with programmatic navigation. */
+/** Keep the remembered hash in step with programmatic (pushState/replaceState) navigation. */
 export function noteNavigated() { lastHash = window.location.hash; }

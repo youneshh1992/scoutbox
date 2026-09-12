@@ -221,6 +221,13 @@ export function screenFromHash(hash: string): ScreenId | null {
   if (briefFromHash(hash)) return 'briefs';
   if (hash === SECOND_LOOK_HASH) return 'secondlook';
   if (hash === NOBODY_MISSED_HASH) return 'nobodymissed';
+  // M18.2 — the PARENT of a deep link the app itself produces
+  // ("#/recruitment/rooms/:id", "#/recruitment/briefs/:id") is a valid way to
+  // reach the list. Before this, trimming the id off a shared link landed on
+  // Home with nothing highlighted — a hidden assumption the M18.2 live suite
+  // tripped over.
+  if (hash === '#/recruitment/rooms') return 'rooms';
+  if (hash === '#/recruitment/briefs') return 'briefs';
   const m = /^#\/([a-z]+)$/.exec(hash ?? '');
   if (!m) return null;
   const id = m[1];

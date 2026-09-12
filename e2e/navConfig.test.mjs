@@ -111,6 +111,11 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 6], ['scout
   // and carries the room id; every malformed variant must still reject.
   ok(nav.screenFromHash('#/rooms') === 'rooms', 'Rooms destination has a flat hash');
   ok(nav.screenFromHash('#/recruitment/rooms/case-7') === 'rooms', 'room deep link resolves to the Rooms destination');
+  // M18.2: the parent of a deep link the app produces is reachable too.
+  ok(nav.screenFromHash('#/recruitment/rooms') === 'rooms', 'the parent of a room deep link resolves to Rooms');
+  ok(nav.screenFromHash('#/recruitment/briefs') === 'briefs', 'the parent of a brief deep link resolves to Briefs');
+  ok(nav.screenFromHash('#/recruitment/nope') === null && nav.screenFromHash('#/recruitment/rooms/') === null, 'other two-segment hashes stay rejected');
+  ok(nav.screenFromHash(nav.hashForScreen('rooms')) === 'rooms' && nav.screenFromHash(nav.hashForScreen('briefs')) === 'briefs', 'every screen hash the app writes, it can read back');
   ok(nav.roomFromHash('#/recruitment/rooms/case-7') === 'case-7', 'room deep link yields the room id');
   ok(nav.roomFromHash('#/rooms') === null && nav.roomFromHash('#/recruitment/rooms/') === null
     && nav.roomFromHash('#/recruitment/rooms/a/b') === null && nav.roomFromHash('#/recruitment/rooms/../x') === null
