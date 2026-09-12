@@ -21,6 +21,7 @@ import { registerM16 } from './m16/index.mjs';
 import { registerM162 } from './m162/index.mjs';
 import { registerM17 } from './m17/index.mjs';
 import { registerM18 } from './m18/index.mjs';
+import { registerSourceChanges } from './m181/sourceChanges.mjs';
 import { requestInstrumentation } from './m13/enterprise.mjs';
 import { totpValid } from './m13/shared.mjs';
 import {
@@ -3521,6 +3522,13 @@ const m14Ctx = registerM14({
   createSession, currentIdCounter, DATA_DIR,
 });
 
+// M18.1 — canonical source-change events. Registered before the systems that
+// write to it (M15 preferences) and the system that reads it (M18 Second Look),
+// so a change carries the clock of the moment it happened rather than one
+// borrowed from a record describing a different event.
+const srcCtx = { db, nextId, persistNow };
+registerSourceChanges(srcCtx);
+
 // M15 — Football Passport: a provenance-aware projection over existing
 // records. Registered after M14 so it can read verification stores; it
 // receives the same context and adds no new authorization surface.
@@ -3529,6 +3537,7 @@ const m15Ctx = registerM15({
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, m14: m14Ctx,
+  recordSourceChange: srcCtx.recordSourceChange,
 });
 const m16Ctx = registerM16({
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
@@ -3563,6 +3572,8 @@ const m17Ctx = registerM17({
   // Canonical source projections, each keeping its own gate.
   assemblePassport: m15Ctx.assemblePassport,
   buildFootballPassport: m15Ctx.buildFootballPassport,
+  // M18.1 — the Passport CONTENT revision, recorded in decision snapshots.
+  passportRevisionOf: m15Ctx.passportRevisionOf,
   buildTrustProfile: m162Ctx.buildTrustProfile,
   safeTrustProjection: m162Ctx.safeTrustProjection,
   trustSnapshotOf: m162Ctx.trustSnapshotOf,
@@ -3600,6 +3611,8 @@ registerM18({
   combineProjection: m16Ctx.combineProjection,
   reopenRoom: m17Ctx.reopenRoom,
   createRoomForPlayer: m17Ctx.createRoomForPlayer,
+  // M18.1 — canonical source-change clocks (position, current club).
+  sourceChangesFor: srcCtx.sourceChangesFor,
 });
 
 // ---------------------------------------------------- static app hosting

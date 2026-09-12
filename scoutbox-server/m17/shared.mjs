@@ -555,6 +555,10 @@ export function buildRoomSnapshot({ trustSnapshot = null, sourceRefs = {}, trigg
       : null,
     sourceRefs: {
       passportVersion: sourceRefs.passportVersion ?? null,
+      // M18.1 — the Passport CONTENT revision at decision time. passportVersion
+      // is the projection schema version and never moves; this one does, so a
+      // later Second Look can say whether the Passport truth itself changed.
+      passportRevision: sourceRefs.passportRevision ?? null,
       evidenceIds: (sourceRefs.evidenceIds ?? []).slice(0, 40),
       assessmentIds: (sourceRefs.assessmentIds ?? []).slice(0, 20),
       combineResults: (sourceRefs.combineResults ?? []).slice(0, 20),

@@ -127,6 +127,56 @@ export function registerSecondLook(ctx) {
       if (s.status === 'supplied' && s.updatedAt > since) add('evidence_gap_closed', 'evidence_gap', s.id, s.updatedAt);
     }
 
+    // --- M18.1: Combine integrity ------------------------------------------
+    // Invalidation used to be visible only by ABSENCE — the result quietly
+    // stopped being collected and nothing said why. The Box Cam session now
+    // keeps an append-only integrity history, so the change is first class and
+    // fingerprinted on the SESSION: one invalidation stays one change however
+    // many projections (Combine, Passport timeline, Trust) reflect it.
+    for (const session of db.boxSessions ?? []) {
+      if (session.playerId !== player.id) continue;
+      const events = session.integrityEvents ?? [];
+      if (!events.length) continue;
+      // Only sessions that actually backed a production Combine result matter
+      // to a recruitment decision.
+      const backed = (db.combineAttempts ?? []).some((a) => a.boxSessionId === session.id
+        && a.playerId === player.id && a.combineState === 'combine_verified' && !PROVIDERS[a.provider]?.testOnly);
+      if (!backed) continue;
+      for (const ev of events) {
+        if (!(ev.at > since)) continue;
+        if (ev.type === 'invalidated') add('combine_verified_invalidated', 'combine_integrity', session.id, ev.at);
+        if (ev.type === 'restored') add('combine_verified_restored', 'combine_integrity', session.id, ev.at);
+      }
+    }
+
+    // --- M18.1: canonical source changes with their own clocks -------------
+    // Position changes and confirmed current clubs were declared change types
+    // in M18 that nothing could emit, because the only available timestamps
+    // meant something else. These read a real clock or do not fire at all.
+    for (const c of ctx.sourceChangesFor?.(player.id) ?? []) {
+      if (!(c.occurredAt > since)) continue;
+      if (c.type === 'position_changed') add('position_changed', c.sourceSystem, c.sourceId, c.occurredAt, c.detail);
+    }
+    // A confirmed current club: each of these rows carries the clock of the
+    // moment the confirmation happened, so no timestamp is invented.
+    for (const sg of db.signings ?? []) {
+      if (sg.playerId !== player.id) continue;
+      if (!sg.endedAt && sg.ts > since) add('current_club_confirmed', 'signing', sg.id, sg.ts);
+    }
+    for (const o of db.orgs ?? []) {
+      for (const row of o.squad ?? []) {
+        if (row.playerId !== player.id) continue;
+        const addedAt = row.addedAt ?? 0;
+        if (o.verified && addedAt > since) add('current_club_confirmed', 'squad_row', `${o.id}:${row.playerId}`, addedAt);
+      }
+    }
+    for (const claim of db.verClaims ?? []) {
+      if (claim.subjectKind !== 'player' || claim.subjectId !== player.id) continue;
+      if (claim.type !== 'organisation_affiliation' || claim.status !== 'verified') continue;
+      if (claim.current === false) continue;
+      if ((claim.verifiedAt ?? 0) > since) add('current_club_confirmed', 'verification_claim', claim.id, claim.verifiedAt);
+    }
+
     return changesSinceDecision(out.filter(Boolean), since);
   }
 

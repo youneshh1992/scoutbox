@@ -394,6 +394,11 @@ export function registerBoxTraining(ctx) {
       s.verificationState = 'invalidated';
       s.status = 'invalidated';
       s.invalidatedAt = Date.now();
+      // M18.1: an append-only integrity history on the session itself. The old
+      // code kept only `invalidatedAt`, and a later restore set it back to
+      // null — so the moment of invalidation, and the fact that it had ever
+      // happened, were both destroyed by the restore.
+      (s.integrityEvents ??= []).push({ type: 'invalidated', at: s.invalidatedAt, disputeId: d.id, outcome });
       ledgerAppend({ type: 'box_result_invalidated', playerId: s.playerId, orgId: null, detail: { sessionId: s.id, disputeId: d.id, outcome } });
     }
     d.status = 'resolved';
@@ -412,6 +417,7 @@ export function registerBoxTraining(ctx) {
     s.status = s.previousVerificationState;
     s.previousVerificationState = null;
     s.invalidatedAt = null;
+    (s.integrityEvents ??= []).push({ type: 'restored', at: Date.now(), to: s.verificationState });
     ledgerAppend({ type: 'box_result_restored', playerId: s.playerId, orgId: null, detail: { sessionId: s.id, reason: String(req.body.reason).slice(0, 300) } });
     persistNow();
     res.json({ session: ctx.boxSessionView(s) });

@@ -798,7 +798,11 @@ export function registerRooms(ctx) {
         trustSnapshot: trust,
         trigger,
         sourceRefs: {
+          // passportVersion is the projection schema version (always 1).
+          // passportRevision (M18.1) is the CONTENT revision, so a later
+          // Second Look can say whether the Passport truth itself moved.
           passportVersion: full?.passportVersion ?? null,
+          passportRevision: ctx.passportRevisionOf?.(room.playerId) ?? null,
           evidenceIds: (db.evidence.filter((e) => e.playerId === room.playerId && !e.supersededBy).map((e) => e.id)),
           assessmentIds: db.assessments.filter((a) => a.orgId === room.orgId && a.playerId === room.playerId && a.state !== 'draft').map((a) => a.id),
           // Protocol coverage at decision time — which standardized tests had a

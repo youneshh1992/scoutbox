@@ -54,7 +54,7 @@ const dec = (reasonCodes, agoDays = 10) => ({ id: 'd1', createdAt: NOW - agoDays
 section('U1 — the policy is total, versioned and internally consistent');
 {
   ok(SECOND_LOOK_POLICY_VERSION === 1 && EVALUATION_COVERAGE_POLICY_VERSION === 1, 'both policies are versioned');
-  ok(CHANGE_TYPES.length === 16, 'sixteen normalized change types');
+  ok(CHANGE_TYPES.length === 17, 'seventeen normalized change types (M18.1 added combine_verified_restored)');
   ok(CHANGE_TYPES.every((t) => CHANGE_COPY[t]), 'every change type has human copy');
   ok(NEGATIVE_CHANGE_TYPES.every((t) => CHANGE_TYPES.includes(t)), 'every negative type is a real type');
   for (const [reason, types] of Object.entries(REASON_CHANGE_MAP)) {

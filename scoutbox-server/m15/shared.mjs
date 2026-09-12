@@ -543,6 +543,62 @@ function eventVisibleTo(e, viewer, { orgId = null, publicSelections = new Set() 
   return false;
 }
 
+/**
+ * M18.1 — the Football Passport CONTENT revision.
+ *
+ * `passportVersion` is the projection SCHEMA version and is deliberately still
+ * the constant 1. What was missing, and what a decision snapshot actually needs,
+ * is a token that says *which Passport truth* a club was looking at when it
+ * decided. This is that token: a stable hash over the canonical inputs.
+ *
+ * Two properties matter more than the hash itself:
+ *
+ *   1. It does NOT move on a read. Everything derived from "now" — the rolling
+ *      development-activity window, `lastEvidenceDays`, the recency flags in
+ *      completeness — is excluded, because otherwise the revision would change
+ *      overnight while nothing about the player had changed.
+ *   2. It DOES move when passport truth moves: club history and its provenance,
+ *      the confirmed current club, position, identity assurance, evidence
+ *      identity and verification tier, references, achievements and their
+ *      confirmations, and verified Combine results.
+ *
+ * It is a fingerprint, not a sequence: it cannot be compared for order, only
+ * for equality, which is exactly what "is this the same Passport I saw?" needs.
+ */
+export function passportRevision(full) {
+  if (!full) return null;
+  const parts = [];
+  const push = (label, value) => parts.push(`${label}=${value ?? ''}`);
+
+  push('pos', full.player?.position);
+  push('lvl', full.player?.level);
+  push('idn', full.identity ? `${full.identity.confirmed ? 1 : 0}:${full.identity.assurance ?? ''}` : '0');
+  const cc = full.status?.currentClub;
+  push('club', cc ? `${cc.orgId ?? cc.orgName ?? ''}:${cc.provenance ?? ''}:${cc.assurance ?? ''}` : 'none');
+
+  for (const r of [...(full.history?.rows ?? [])].sort((a, b) => (a.key < b.key ? -1 : 1))) {
+    push('hist', `${r.key}:${r.provenance}:${r.current ? 1 : 0}:${r.from?.t ?? ''}:${r.to?.t ?? ''}:${r.role ?? ''}`);
+  }
+  for (const e of [...(full.revisionSources?.evidence ?? [])].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+    push('evd', `${e.id}:${e.tier}:${e.superseded ? 1 : 0}:${e.expired ? 1 : 0}`);
+  }
+  for (const r of [...(full.references ?? [])].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+    push('ref', `${r.id}:${r.status ?? ''}:${r.provenanceStillCurrent ? 1 : 0}`);
+  }
+  for (const a of [...(full.achievements ?? [])].sort((x, y) => (x.id < y.id ? -1 : 1))) {
+    push('ach', `${a.id}:${a.confirmation ? 'confirmed' : 'self'}:${a.withdrawnAt ? 'withdrawn' : 'live'}`);
+  }
+  for (const c of [...(full.combine?.results ?? [])].sort((a, b) => (String(a.protocolId) < String(b.protocolId) ? -1 : 1))) {
+    // An invalidated session drops its result from this set entirely, so the
+    // revision moves on invalidation and moves back on restoration.
+    push('cmb', `${c.protocolId}@${c.protocolVersion ?? ''}:${c.measuredValue ?? ''}:${c.combineVerified ? 1 : 0}`);
+  }
+  for (const c of [...(full.revisionSources?.careerEntries ?? [])].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+    push('car', `${c.id}:${c.withdrawnAt ? 'withdrawn' : 'live'}`);
+  }
+  return `pr_${crypto.createHash('sha1').update(parts.join('|')).digest('hex').slice(0, 16)}`;
+}
+
 export function projectPassport(full, viewer, opts = {}) {
   const { orgId = null, shareMode = null } = opts;
   const publicSelections = new Set(full.prefs?.publicSelections ?? []);
@@ -565,7 +621,10 @@ export function projectPassport(full, viewer, opts = {}) {
     }));
 
   const base = {
+    // Schema version of this projection (unchanged since M15) and, since
+    // M18.1, the CONTENT revision of the canonical facts behind it.
     passportVersion: 1,
+    passportRevision: passportRevision(full),
     player: {
       id: full.player.id, name: full.player.name,
       age: full.player.age, position: full.player.position ?? null,

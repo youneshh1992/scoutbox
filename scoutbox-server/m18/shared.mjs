@@ -41,6 +41,10 @@ export const CHANGE_TYPES = [
   // standardized measurement
   'combine_verified_added',
   'combine_verified_invalidated',
+  // M18.1: a restoration is its own change. Trust & Safety restoring a result
+  // after a provider bug is news to a club that saw it disappear, and saying
+  // nothing would leave the earlier "no longer valid" note standing forever.
+  'combine_verified_restored',
   // development activity
   'development_evidence_started',
   'development_block_completed',
@@ -69,6 +73,7 @@ export const CHANGE_COPY = {
   verified_reference_revoked: 'A coach reference used in the previous review is no longer verified.',
   combine_verified_added: 'A standardized Combine Verified result is now available.',
   combine_verified_invalidated: 'A Combine result used in the previous review is no longer valid.',
+  combine_verified_restored: 'A Combine result that had been invalidated has been restored after review.',
   development_evidence_started: 'Recorded development activity is now available for the first time since your review.',
   development_block_completed: 'A coach-assigned development block has been completed.',
   trial_completed: 'A trial has been completed and reported.',
@@ -93,7 +98,7 @@ export const REASON_CHANGE_MAP = {
   insufficient_recent_evidence: ['full_match_added', 'evidence_added', 'evidence_quality_improved', 'evidence_gap_closed'],
   insufficient_full_match: ['full_match_added', 'evidence_gap_closed'],
   reference_missing: ['verified_reference_added'],
-  combine_missing: ['combine_verified_added'],
+  combine_missing: ['combine_verified_added', 'combine_verified_restored'],
   trial_needed: ['trial_completed'],
   continue_monitoring: ['full_match_added', 'verified_reference_added', 'combine_verified_added', 'trial_completed', 'current_club_confirmed', 'evidence_gap_closed'],
   // Physical development is read as EVIDENCE becoming available, never as a

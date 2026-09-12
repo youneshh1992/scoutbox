@@ -8,7 +8,7 @@
 import { isAdult, visibleToOrg } from '../domain.mjs';
 import {
   buildTimeline, clubHistory, currentStatus, temporalConflicts, completeness,
-  projectPassport, normWhen, whenDisplay, evId, PROVENANCE_COPY,
+  projectPassport, passportRevision, normWhen, whenDisplay, evId, PROVENANCE_COPY,
 } from './shared.mjs';
 // M16: the Passport PROJECTS Box Cam data — it never copies it.
 import { developmentActivity as boxDevelopmentActivity, fmtMs as boxFmtMs } from '../m16/shared.mjs';
@@ -219,6 +219,10 @@ export function registerPassportCore(ctx) {
         active: db.passportShares.filter((s) => s.playerId === pid && !s.revokedAt && (!s.expiresAt || s.expiresAt > now)).length,
       },
       assessments, trials, objectives, // raw-ish, filtered again at projection
+      // Canonical inputs the M18.1 passport revision hashes. Kept separate from
+      // the projected fields so the revision depends on source truth rather
+      // than on anything a viewer or a clock could change.
+      revisionSources: { evidence, careerEntries: careerEntries.map((c) => ({ id: c.id, withdrawnAt: c.withdrawnAt ?? null })) },
     };
 
     if (!light) {
@@ -236,6 +240,16 @@ export function registerPassportCore(ctx) {
     return full;
   }
   ctx.assemblePassport = assemble;
+  /**
+   * The canonical Passport CONTENT revision for a player (M18.1). Exposed so a
+   * decision snapshot can record which Passport truth the club was looking at
+   * without freezing a copy of the Passport itself.
+   */
+  ctx.passportRevisionOf = (playerId) => {
+    const player = findPlayer(playerId);
+    if (!player) return null;
+    try { return passportRevision(assemble(player, { light: false })); } catch { return null; }
+  };
 
   function buildFor(player, viewerKind, opts = {}) {
     const full = assemble(player, opts);
@@ -280,16 +294,40 @@ export function registerPassportCore(ctx) {
       p.bio = bio;
     }
     if (body.positions !== undefined) {
+      const wasPrimary = p.positions?.primary ?? null;
       p.positions = body.positions ? {
         primary: String(body.positions.primary ?? '').slice(0, 8) || null,
         secondary: Array.isArray(body.positions.secondary) ? body.positions.secondary.slice(0, 3).map((x) => String(x).slice(0, 8)) : [],
       } : null;
+      // M18.1 — a canonical source-change event with its OWN clock. Before this
+      // there was no honest timestamp for "the player's position changed":
+      // positionHistory.from is the football date the player STARTED playing
+      // the position, and prefs.updatedAt is bumped by any preference edit at
+      // all. Only a genuine change of the primary position is recorded, so
+      // re-saving the same preferences emits nothing.
+      const nowPrimary = p.positions?.primary ?? null;
+      if (nowPrimary !== wasPrimary) {
+        ctx.recordSourceChange?.({
+          playerId: player.id, type: 'position_changed',
+          sourceSystem: 'passport_prefs', sourceId: `${player.id}:${nowPrimary ?? 'none'}`,
+          detail: { from: wasPrimary, to: nowPrimary, submittedBy },
+        });
+      }
     }
     if (body.positionHistoryAdd) {
       const h = body.positionHistoryAdd;
       const from = normWhen(h.from);
       if (!from) { res.status(400).json({ error: 'DATE_REQUIRED', message: 'Position history needs at least a year.' }); return null; }
-      p.positionHistory.push({ id: nextId('ppos'), from: h.from, primary: String(h.primary ?? '').slice(0, 8), secondary: Array.isArray(h.secondary) ? h.secondary.slice(0, 3).map((x) => String(x).slice(0, 8)) : [], submittedBy });
+      // `from` is the FOOTBALL date the player started playing this position;
+      // `recordedAt` (M18.1) is when the row was written. They are different
+      // events and are never used for each other.
+      const row = { id: nextId('ppos'), from: h.from, primary: String(h.primary ?? '').slice(0, 8), secondary: Array.isArray(h.secondary) ? h.secondary.slice(0, 3).map((x) => String(x).slice(0, 8)) : [], submittedBy, recordedAt: Date.now() };
+      p.positionHistory.push(row);
+      ctx.recordSourceChange?.({
+        playerId: player.id, type: 'position_changed',
+        sourceSystem: 'position_history', sourceId: row.id,
+        occurredAt: row.recordedAt, detail: { to: row.primary, submittedBy },
+      });
     }
     if (body.availability !== undefined) {
       const ALLOWED = ['open_to_trials', 'open_to_contact', 'not_looking', null];
