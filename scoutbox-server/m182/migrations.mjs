@@ -1,0 +1,107 @@
+/**
+ * M18.2 — an explicit schema version and a migration registry.
+ *
+ * ScoutBox's persistence is a snapshot store: the working set lives in memory
+ * and every save writes each collection as one JSON row. There is no
+ * relational schema to migrate, but there IS shape: which collections exist,
+ * which fields a record is expected to carry, and which defaults a module
+ * assumes. Until M18.2 all of that was `db.x ??= []` scattered across fourteen
+ * files at boot — idempotent by construction, invisible to an operator, and
+ * unversioned, so "which schema is this database on?" had no answer other
+ * than "whichever tables happen to exist".
+ *
+ * This registry does three things and deliberately no more:
+ *
+ *   1. records a schema version in the snapshot (`db.schema`), readable from
+ *      /healthz and /capabilities and on every response as X-ScoutBox-Schema;
+ *   2. runs an ordered list of idempotent steps and records which ones have
+ *      been applied, so a second boot applies none of them again;
+ *   3. aborts boot if a step throws. A half-applied snapshot is never saved
+ *      as healthy: the steps run against the in-memory db BEFORE the first
+ *      save, so a failure leaves the on-disk snapshot exactly as it was.
+ *
+ * Honest limitation: there is no rollback of a step that has already mutated
+ * memory when a later step fails — the process exits without saving, which
+ * is the same outcome. There is also no "down" migration, because the
+ * snapshot store has no concept of one and inventing it here would be theatre.
+ */
+
+export const SCHEMA_VERSION = 1820; // 18.2.0
+
+/**
+ * Every step is idempotent: running it twice is the same as running it once.
+ * A step never deletes data. `id` is stable forever — it is what the applied
+ * list records.
+ */
+export const MIGRATIONS = [
+  {
+    id: 'm182_001_schema_record',
+    note: 'Create the schema record itself.',
+    up(db) { db.schema ??= { version: 0, migrations: [] }; },
+  },
+  {
+    id: 'm182_002_collections_present',
+    note: 'Every collection a module assumes exists, exists (formerly fourteen files of `??= []`).',
+    up(db) {
+      for (const k of [
+        'notifications', 'ledger', 'sessions', 'users', 'orgs', 'players', 'guardians',
+        'recruitmentCases', 'roomComments', 'roomDecisions', 'roomSnapshots', 'roomEvidenceState',
+        'recruitmentBriefs', 'nobodyMissedReviews', 'secondLookItems', 'sourceChanges',
+        'boxSessions', 'boxSessionEvents', 'combineAttempts', 'combineRequests',
+      ]) db[k] ??= [];
+    },
+  },
+  {
+    id: 'm182_003_rev_backfill',
+    note: 'Rooms and Briefs written before M18.1 carry rev 1 explicitly rather than implicitly.',
+    up(db) {
+      for (const c of db.recruitmentCases ?? []) if (c.room && c.room.rev == null) c.room.rev = 1;
+      for (const b of db.recruitmentBriefs ?? []) if (b.rev == null) b.rev = 1;
+    },
+  },
+  {
+    id: 'm182_004_notification_prefs',
+    note: 'Per-person notification category preferences.',
+    up(db) { db.notificationPrefs ??= []; },
+  },
+  {
+    id: 'm182_005_notification_repeat_count',
+    note: 'Notifications written before M18.1 count as one occurrence.',
+    up(db) { for (const n of db.notifications ?? []) n.repeatCount ??= 1; },
+  },
+];
+
+/**
+ * Apply every migration not yet recorded. Returns what happened so the caller
+ * can log it and the suites can assert on it. Throws on the first failing
+ * step; the caller must not save the snapshot after a throw.
+ */
+export function runMigrations(db, { now = Date.now(), log = () => {} } = {}) {
+  // Step 001 creates db.schema; everything before it must tolerate its absence.
+  const applied = new Set((db.schema?.migrations ?? []).map((m) => m.id));
+  const ran = [];
+  for (const step of MIGRATIONS) {
+    if (applied.has(step.id)) continue;
+    try {
+      step.up(db);
+    } catch (err) {
+      throw new Error(`migration ${step.id} failed: ${err?.message ?? err}. Boot aborted; the on-disk snapshot was not modified.`);
+    }
+    db.schema.migrations.push({ id: step.id, at: now });
+    ran.push(step.id);
+    log(`migration applied: ${step.id} — ${step.note}`);
+  }
+  const from = db.schema.version ?? 0;
+  db.schema.version = SCHEMA_VERSION;
+  db.schema.updatedAt = now;
+  return { from, to: SCHEMA_VERSION, ran, alreadyApplied: MIGRATIONS.length - ran.length };
+}
+
+/** Operator-facing view. Ids and times only. */
+export const schemaReport = (db) => ({
+  version: db.schema?.version ?? 0,
+  expected: SCHEMA_VERSION,
+  migrationsApplied: (db.schema?.migrations ?? []).length,
+  migrationsKnown: MIGRATIONS.length,
+  upToDate: (db.schema?.version ?? 0) === SCHEMA_VERSION && (db.schema?.migrations ?? []).length === MIGRATIONS.length,
+});

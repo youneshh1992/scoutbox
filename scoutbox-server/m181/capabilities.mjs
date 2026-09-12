@@ -14,7 +14,7 @@
 
 export const CAPABILITY_STATES = ['configured', 'not_configured', 'test_only'];
 
-export function buildCapabilityReport({ env = process.env, rateLimit = null, providers = [] } = {}) {
+export function buildCapabilityReport({ env = process.env, rateLimit = null, providers = [], extra = {} } = {}) {
   const flag = (v) => !!v && String(v).trim() !== '';
 
   // "Production CV" means a provider that can genuinely OBSERVE — classify
@@ -48,8 +48,11 @@ export function buildCapabilityReport({ env = process.env, rateLimit = null, pro
         note: 'Without one, the strongest identity a player can hold is a ScoutBox document review, which is scored below authoritative.',
       },
       email_transport: {
-        state: flag(env.SCOUTBOX_SMTP_URL) || flag(env.SMTP_URL) ? 'configured' : 'not_configured',
-        note: 'Without a transport, invitations and notifications are recorded in the delivery centre but not sent.',
+        // M18.2: "not_configured" undersold what exists and "configured" would
+        // oversell it. Mail is written to a local outbox that the delivery
+        // centre can read; nothing leaves the machine.
+        state: flag(env.SCOUTBOX_SMTP_URL) || flag(env.SMTP_URL) ? 'configured' : 'local_outbox',
+        note: 'Without a transport, invitations and notifications are recorded in the local outbox and the delivery centre, and are not sent anywhere.',
       },
       object_storage: {
         state: flag(env.SCOUTBOX_STORAGE_BUCKET) ? 'configured' : 'not_configured',
@@ -64,6 +67,7 @@ export function buildCapabilityReport({ env = process.env, rateLimit = null, pro
         note: 'The clearly-labelled simulated observer. Its results never count as production evidence.',
       },
     },
+    ...extra,
     note: 'Capability states only. This report contains no keys, hostnames or connection details.',
   };
 }
@@ -102,6 +106,16 @@ export function productionConfigProblems({ env = process.env, trustWeightsTotal 
     problems.push({
       code: 'DEV_LOGIN_IN_PRODUCTION',
       message: 'SCOUTBOX_ALLOW_DEV_LOGIN=1 bypasses real credentials.',
+      fatal: true,
+    });
+  }
+  // M18.2: fault injection is a development instrument. Its middleware is
+  // already inert in production; asking for it there is still a mistake
+  // worth refusing to boot over, because it means someone copied a dev env.
+  if (production && env.SCOUTBOX_FAULTS) {
+    problems.push({
+      code: 'FAULTS_IN_PRODUCTION',
+      message: 'SCOUTBOX_FAULTS is set. Simulated failures must never be configured on a production instance.',
       fatal: true,
     });
   }

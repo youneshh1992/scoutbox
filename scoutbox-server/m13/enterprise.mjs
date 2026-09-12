@@ -474,7 +474,13 @@ export function registerEnterprise(ctx) {
   });
 
   // ================================================== E. reliability
-  app.get('/healthz', (_req, res) => res.json({ ok: true, uptimeS: Math.round((Date.now() - metrics.startedAt) / 1000) }));
+  // M18.2: the schema version is on the health check so an operator can see
+  // which snapshot shape this instance is running without reading a database.
+  app.get('/healthz', (_req, res) => res.json({
+    ok: true,
+    uptimeS: Math.round((Date.now() - metrics.startedAt) / 1000),
+    schemaVersion: db.schema?.version ?? 0,
+  }));
 
   app.get('/readyz', (_req, res) => {
     // Ready = snapshot store writable + data loaded.

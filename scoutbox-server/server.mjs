@@ -26,6 +26,11 @@ import { audienceFor, EVENT_AUDIENCE } from './m181/eventAudience.mjs';
 import { createRateLimiter, rateLimitedBody, RATE_LIMIT_POLICY } from './m181/rateLimit.mjs';
 import { buildCapabilityReport, productionConfigProblems } from './m181/capabilities.mjs';
 import { minimizePayload, assertEventRegistry, EVENT_NAMES } from './m182/eventRegistry.mjs';
+import { runMigrations, schemaReport, SCHEMA_VERSION } from './m182/migrations.mjs';
+import { registerNotificationPrefs } from './m182/notificationPrefs.mjs';
+import { registerAudit } from './m182/audit.mjs';
+import { createFaultLayer } from './m182/faults.mjs';
+import { httpContractMiddleware } from './m182/httpContract.mjs';
 import { requestInstrumentation } from './m13/enterprise.mjs';
 import { totpValid } from './m13/shared.mjs';
 import {
@@ -113,6 +118,13 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 }
 
 loadSnapshot();
+// M18.2 — versioned, idempotent, recorded migrations run against the loaded
+// snapshot BEFORE anything is saved. A failing step throws here and the
+// process exits with the on-disk snapshot untouched; it is never saved as
+// healthy. Module-level `db.x ??= []` defaults still run after this, which is
+// fine: they are the same idempotent shape this registry now records.
+const migrationResult = runMigrations(db, { log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); } });
+if (migrationResult.ran.length) console.log(`schema ${migrationResult.from} → ${migrationResult.to}: applied ${migrationResult.ran.join(', ')}`);
 for (const sess of db.sessions) sess.sid ??= crypto.randomBytes(6).toString('hex');
 
 // Normalise media items (older shapes) + load the seeded sample clips.
@@ -228,6 +240,13 @@ app.use((_req, res, next) => {
 // is stated here rather than left to the default so it is a decision, not an
 // accident.
 app.use(express.json({ limit: '20mb' }));
+// M18.2 — the HTTP contract headers (Retry-After on 429, retryability on every
+// error, the schema version on every response) and the development-only
+// fault layer. The fault layer refuses to exist in production; installing it
+// there is a no-op middleware and no /__faults route.
+app.use(httpContractMiddleware({ ratePolicy: RATE_LIMIT_POLICY, schemaVersion: () => db.schema?.version ?? 0 }));
+const faultLayer = createFaultLayer();
+faultLayer.install(app);
 // M13: correlation ids, structured request logs (redacted), request metrics,
 // and the exposure-capture hook. Installed before every route on purpose.
 app.use(requestInstrumentation());
@@ -582,7 +601,21 @@ function pushDeferred(audience, now = new Date()) {
 // M18.1 — how long an identical UNREAD notification stays coalescible.
 const NOTIFY_COALESCE_MS = 6 * 60 * 60 * 1000;
 
+// M18.2 — the preference gate. Assigned once the preference module has
+// registered (below); until then everything is allowed, which is the safe
+// direction for the few notifications seeding may create at boot.
+let notificationAllows = () => true;
+let m182Ctx = null; // assigned when the M18.2 modules register, below
+const notificationsSuppressed = { count: 0 };
+
 function notify(audience, type, text, refId = null) {
+  // M18.2: a category the person has turned off is never CREATED — not
+  // created and hidden, not created and un-pushed. The mandatory
+  // security_account category cannot be turned off, so it never lands here.
+  if (!notificationAllows(audience, type, text)) {
+    notificationsSuppressed.count += 1;
+    return null;
+  }
   // Coalesce identical unread notifications. The same sentence about the same
   // record arriving twice is not two pieces of news: it pushed the recipient's
   // phone twice and buried the twenty other rows in their bell. So an existing
@@ -603,7 +636,16 @@ function notify(audience, type, text, refId = null) {
     return c;
   }
 
-  const n = { id: nextId('ntf'), ts: Date.now(), audience, type, text, refId, read: false, repeatCount: 1, deferredPush: pushDeferred(audience) };
+  // M18.2: `groupKey` lets any reader fold several DIFFERENT updates about the
+  // same record ("status moved", "task assigned", "decision recorded" on one
+  // Room) into "3 changes in …" rather than three rows, without the server
+  // deciding presentation. `category` is what the preference gate matched.
+  const n = {
+    id: nextId('ntf'), ts: Date.now(), audience, type, text, refId, read: false, repeatCount: 1,
+    groupKey: refId ? `${type}:${refId}` : null,
+    category: m182Ctx?.notificationCategoryOf?.(type, text) ?? null,
+    deferredPush: pushDeferred(audience),
+  };
   db.notifications.push(n);
   // Push delivery honours quiet hours / school-hours mute; the in-app feed
   // above always keeps the record either way.
@@ -3657,6 +3699,23 @@ const m14Ctx = registerM14({
 const srcCtx = { db, nextId, persistNow };
 registerSourceChanges(srcCtx);
 
+// M18.2 — preferences, audit and fault injection. Registered here, after the
+// routers exist and before the milestone modules that emit notifications, so
+// the preference gate is in place for every notify() call that follows.
+m182Ctx = {
+  db, orgRouter, playerRouter, guardianRouter, persist, findPlayer,
+  // The same standing-gate composition M12's shared helpers use.
+  orgCanSee: (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id),
+  requireLead: (req, res) => {
+    if (/head|director|lead|manager|owner|chief/i.test(req.orgUser?.role ?? '')) return true;
+    res.status(403).json({ error: 'LEAD_REQUIRED', message: 'Only recruitment leads and directors can do this.' });
+    return false;
+  },
+};
+const prefsModule = registerNotificationPrefs(m182Ctx);
+notificationAllows = prefsModule.allows;
+registerAudit(m182Ctx);
+
 // M18.1 — one rate limiter for the whole server. Every limited action is named
 // in RATE_LIMIT_POLICY with its window and scope, and the capability report
 // says plainly that the memory provider counts per process.
@@ -3760,6 +3819,25 @@ app.get('/capabilities', (_req, res) => {
   res.json(buildCapabilityReport({
     rateLimit,
     providers: m16Ctx.providerStatus?.() ?? [],
+    // M18.2 — states only, as before. Counts are counts, never subjects.
+    extra: {
+      schema: schemaReport(db),
+      events: {
+        registered: EVENT_NAMES.length,
+        payloadDrops: eventPayloadDrops.count,
+        note: 'Every emitted event is registered with an audience and a payload allowlist; an unregistered name fails closed.',
+      },
+      notifications: {
+        preferencesEnforced: true,
+        suppressedByPreference: notificationsSuppressed.count,
+        unknownTypes: Object.keys(m182Ctx.notificationUnknownTypes?.() ?? {}),
+        note: 'Preferences are applied before a notification is created. security_account cannot be turned off.',
+      },
+      faultInjection: {
+        state: faultLayer.enabled ? 'available' : 'not_configured',
+        note: faultLayer.enabled ? 'Development only: SCOUTBOX_FAULTS and POST /__faults simulate slow and failing sources.' : 'Disabled in production.',
+      },
+    },
   }));
 });
 
