@@ -92,7 +92,7 @@
   <header>
     <div class="mark">Scout<span class="box">Box</span> — App Launcher</div>
     <p class="sub">One bookmark for every ScoutBox app. Each tile opens an interactive demo of the actual current interface, running entirely in your browser on synthetic sample data.</p>
-    <span class="buildchip"><span class="dot"></span>Source version <code>b924334</code> · built 2026-09-11 · Milestone 18 — Second Look + Nobody Missed</span>
+    <span class="buildchip"><span class="dot"></span>Source version <code>4ceb204</code> · built 2026-09-12 · Milestone 18.1 — Production Hardening &amp; UX Cleanup</span>
   </header>
 
   <div class="grid">
@@ -125,6 +125,25 @@
 
 
   <section class="notes feature">
+    <h3>What changed in Milestone 18.1 — Production Hardening &amp; UX Cleanup</h3>
+    <p class="sub" style="font-size:13px;margin:-4px 0 12px">No new recruitment concept. M18.1 is the milestone that goes back over what already shipped and fixes what was quietly wrong: a lost update, a number with two meanings, a badge that mislabelled where evidence came from, a failure with no way out of it, and a set of claims about this deployment that nobody outside the source code could check.</p>
+    <ul>
+      <li><b>1 · Two people, one record</b> — two scouts editing the same Recruitment Brief, or moving the same Room, used to silently overwrite each other. Every collaborative record now carries a revision; a write built on a stale read is refused, and the refusal says <i>nothing of theirs was overwritten</i> and offers Reload. Of two simultaneous decisions exactly one lands.</li>
+      <li><b>2 · A conflict you cannot miss</b> — the first version showed it as a toast, and a routine notification replaced it within a second. It now stays on the Room panel until you act on it.</li>
+      <li><b>3 · Two numbers, two names</b> — the older profile figure and the M16.2 Trust Score were both shown as “Trust”. The first is now <b>Profile completeness</b> everywhere, in three apps and both languages. <b>Trust Score</b> means evidence confidence and nothing else.</li>
+      <li><b>4 · A missing value is never a score</b> — a Room whose evidence confidence could not be read showed “—”, one glance from reading as zero confidence. It now says which of the two things happened. In the player app every Combine state has its own words: an attempt <i>invalidated after review</i> no longer looks identical to one your phone simply could not measure, and its value is struck through and labelled as no longer counting.</li>
+      <li><b>5 · Provenance that never mislabels</b> — evidence ScoutBox itself observed through Box Cam was badged <i>“Player-provided”</i> in the club apps and rendered as a raw identifier in the player app. It has its own label now, deliberately in the neutral colour: Box Cam observation ranks below a ScoutBox review and must not borrow a confirmation badge.</li>
+      <li><b>6 · Failures have a way out</b> — a dropped connection in Second Look, Nobody Missed, Briefs or Rooms used to render a message and stop. Every one now offers <b>Try again</b> and announces itself to a screen reader. The four Second Look tabs each say what <i>their</i> emptiness means instead of sharing one line.</li>
+      <li><b>7 · A Passport revision that is a fact, not a clock</b> — a decision snapshot can now name exactly which Passport truth it saw. The revision is a hash of the records themselves, so the same Passport read a year later produces the same token; if it included “days since last evidence” it would change overnight on a read and mean nothing.</li>
+      <li><b>8 · Notifications worth having</b> — an identical unread notification no longer arrives twice or pushes your phone twice, and rows that lead somewhere are now buttons that take you there. A week-old “14:32” carries its date.</li>
+      <li><b>9 · Nothing leaks by default</b> — event delivery used to infer its audience from the shape of the payload and fall through to “everyone”. Every event is classified, and an unclassified one reaches nobody. The adult date of birth, which no club surface displayed, is gone from the projection entirely.</li>
+      <li><b>10 · It works on a phone</b> — the top bar wraps, the notification panel fits the screen, wide tables scroll themselves instead of dragging the page, and four recruitment surfaces measure zero horizontal overflow at 390px in a real browser.</li>
+      <li><b>11 · Honest to whoever runs it</b> — <code>/capabilities</code> reports what this deployment can actually do: no production computer vision, no distributed rate limiting, which providers are configured. It contains no keys or hostnames, and it is deliberately hard to inflate. Asking for a shared rate-limit backend that does not exist is refused loudly rather than falling back to per-process counting behind your back.</li>
+    </ul>
+    <div class="honest"><b>Honest scope.</b> Rate limiting is now one policy table behind one provider interface, but there is still <b>no shared backend</b>: limits are counted per process, which is wrong behind a load balancer, and the capability report says exactly that instead of implying protection that does not exist. Discover still orders by profile completeness — that ordering is now stated rather than silently applied, and changing it is a product decision, not a hardening fix. There is no notification preference system yet. And Trust &amp; Safety still has <b>no</b> access to private recruitment decisions: the shape a scoped, reasoned, time-bound, audited, read-only grant would take is written down, and deliberately not built, because a blanket support role over a club’s decisions is worse than none.</div>
+  </section>
+
+  <section class="notes feature">
     <h3>Explore the new features (Milestone 18 — Second Look + Nobody Missed)</h3>
     <p class="sub" style="font-size:13px;margin:-4px 0 12px">Clubs lose players two ways: they archive someone for a reason that later stops being true and never find out, and they never look at someone who matched what they said they wanted. <b>Second Look</b> asks <i>has something materially changed since we decided?</i> <b>Nobody Missed</b> asks <i>who matches our own written brief and never entered our workflow?</i> Neither decides who is talented, who deserves a contract, or who was wrongly rejected.</p>
     <ul>
@@ -142,7 +161,7 @@
       <li><b>12 · Looking is not evaluating</b> — nine signals count as a real evaluation (a room, a case, a submitted assessment, a trial, a signing, a shortlist, a deferral, a squad entry); a profile view, a search impression and a Passport view explicitly do not. Add a candidate to a Room and coverage really moves to 6 of 8.</li>
       <li><b>13 · The two queues never claim the same player</b> — archive that room and they do <b>not</b> fall back into Nobody Missed: they were evaluated. Later relevant evidence reaches you through Second Look instead. And the <b>player app contains neither system</b> — no Second Look, no brief, no coverage, no archive reason, ever.</li>
     </ul>
-    <div class="honest"><b>Honest scope.</b> Two change types are declared but not yet emitted, because the underlying stores expose no reliable per-change clock — documented rather than faked. <i>Player unavailable</i> can never be resolved: ScoutBox emits no availability-changed event, and inventing one would be worse than the gap. Analytics are organisation-private counters with <b>no scout ranking of any kind</b> — M18 measures workflow coverage, not employee performance — and Trust &amp; Safety has no M18 surface at all.</div>
+    <div class="honest"><b>Honest scope.</b> The two change types M18 declared but could not emit — <i>position changed</i> and <i>current club confirmed</i> — are emitted as of <b>Milestone 18.1</b>, each from a clock that genuinely dates the change rather than one borrowed from a different event; records written before M18.1 have no such clock and still emit nothing. <i>Player unavailable</i> can never be resolved: ScoutBox emits no availability-changed event, and inventing one would be worse than the gap. Analytics are organisation-private counters with <b>no scout ranking of any kind</b> — M18 measures workflow coverage, not employee performance — and Trust &amp; Safety has no M18 surface at all.</div>
   </section>
 
   <section class="notes feature">
@@ -287,5 +306,5 @@
     <b>Live cross-device usage requires a hosted backend.</b> These artifacts are self-contained demos. Real accounts, real-time messaging between different people’s devices, and persistent data need the ScoutBox server (Milestone 11) deployed to a host — it is built and tested in the repository, but not deployed as part of this demo.
   </div>
 
-  <footer>ScoutBox · source commit <b>b924334</b> (branch claude/desktop-project-migration-wyk3ec, local — not pushed per instruction) · demos built 2026-09-11 · Milestone 18 — Second Look + Nobody Missed</footer>
+  <footer>ScoutBox · source commit <b>4ceb204</b> (branch claude/desktop-project-migration-wyk3ec, local — not pushed per instruction) · demos built 2026-09-12 · Milestone 18.1 — Production Hardening &amp; UX Cleanup</footer>
 </div>
