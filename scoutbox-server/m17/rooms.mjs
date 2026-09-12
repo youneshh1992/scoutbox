@@ -25,6 +25,7 @@ import {
   secondLookEvent, ROOM_TRUST_NOTE, ROOM_DEV_NOTE, ROOM_PRIVACY_NOTE,
   ROOM_UNAVAILABLE_NOTE, LIMITS, clampPage, validateTag, SNAPSHOT_STATUSES,
 } from './shared.mjs';
+import { guardRev, bumpRev, revMeta } from '../m181/concurrency.mjs';
 
 export function registerRooms(ctx) {
   const {
@@ -73,13 +74,16 @@ export function registerRooms(ctx) {
   }
 
   /** The single writer of room status. `case.stage` is derived here and only here. */
-  function applyStatus(room, status, org) {
+  function applyStatus(room, status, org, by = null) {
     room.room.status = status;
     room.stage = stageForRoomStatus(status, org.level);
     room.room.updatedAt = now();
     if (status === 'archived') room.room.archivedAt = now();
     if (status === 'closed') room.room.closedAt = now();
     if (OPEN_ROOM_STATUSES.includes(status)) { room.room.archivedAt = null; room.room.closedAt = null; }
+    // Every status move is a workflow mutation, so the concurrency token moves
+    // here — the single writer — and the shared reopen bridge gets it for free.
+    bumpRev(room.room, { by, at: room.room.updatedAt });
   }
 
   // ---------------------------------------------------------- room lookup
@@ -343,6 +347,10 @@ export function registerRooms(ctx) {
         ? { userId: room.room.leadScoutUserId, name: orgUser(org.id, room.room.leadScoutUserId)?.name ?? 'Former colleague' }
         : null,
       viewerRole: role,
+      // M18.1 concurrency token: moves on every accepted workflow mutation, so
+      // a second scout editing a stale copy is refused rather than silently
+      // overwriting the first.
+      ...revMeta(room.room),
       createdAt: room.createdAt,
       updatedAt: room.room.updatedAt,
       archivedAt: room.room.archivedAt ?? null,
@@ -546,13 +554,15 @@ export function registerRooms(ctx) {
       sourceContext: normaliseSourceContext(sourceContext),
       openedBy: { userId: req.orgUser.id, name: req.orgUser.name },
       updatedAt: now(), archivedAt: null, closedAt: null,
+      rev: 0, // applyStatus below records the creation as revision 1
+      revAt: now(), revBy: { userId: req.orgUser.id, name: req.orgUser.name },
     };
     if (adopted && room.stage) {
       // The case already had a stage — keep its meaning rather than resetting
       // the club's pipeline position to the start.
       room.room.status = roomStatusForStage(room.stage, req.org.level) ?? 'watching';
     }
-    applyStatus(room, room.room.status, req.org);
+    applyStatus(room, room.room.status, req.org, req.orgUser);
     activity(room, req, 'room_created', { status: room.room.status, sourceContext: room.room.sourceContext, adoptedExistingCase: adopted });
     vmetric('recruitment_room_created');
     ledgerAppend?.({ type: 'recruitment_room_created', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
@@ -572,6 +582,17 @@ export function registerRooms(ctx) {
     const room = findRoom(req, res);
     if (!room) return;
     const { priority, tags, leadScoutUserId, ownerUserId, restricted, deadline } = req.body ?? {};
+
+    // M18.1: guard the fields where a lost update changes who is responsible
+    // for a decision or how urgent it is. Tags and a deadline are not worth a
+    // conflict — demanding a rev for every trivial edit teaches people to send
+    // whatever number makes the error go away.
+    const workflowFields = priority !== undefined || leadScoutUserId !== undefined
+      || ownerUserId !== undefined || restricted !== undefined;
+    if (workflowFields && !guardRev(req, res, room.room, {
+      errorCode: 'ROOM_VERSION_CONFLICT',
+      current: { status: room.room.status, priority: room.room.priority, updatedAt: room.room.updatedAt },
+    })) return;
 
     if (priority !== undefined) {
       if (!ROOM_PRIORITIES.includes(priority)) return res.status(400).json({ error: 'ROOM_PRIORITY_UNKNOWN' });
@@ -614,6 +635,7 @@ export function registerRooms(ctx) {
     if (deadline !== undefined) room.deadline = deadline ?? null;
 
     room.room.updatedAt = now();
+    if (workflowFields) bumpRev(room.room, { by: req.orgUser, at: room.room.updatedAt });
     persistNow();
     res.json({ room: buildRecruitmentRoom(room, req) });
   });
@@ -624,6 +646,12 @@ export function registerRooms(ctx) {
     const room = findRoom(req, res);
     if (!room) return;
     if (!requireCan(req, res, room, 'set_status')) return;
+    // A stale transition is the dangerous one: shortlisting and archiving race,
+    // and the loser would otherwise overwrite the winner's decision context.
+    if (!guardRev(req, res, room.room, {
+      errorCode: 'ROOM_VERSION_CONFLICT',
+      current: { status: room.room.status, statusLabel: ROOM_STATUS_LABELS[room.room.status], updatedAt: room.room.updatedAt },
+    })) return;
 
     const to = String(req.body?.status ?? '');
     const reasons = validateReasonCodes(req.body?.reasonCodes ?? []);
@@ -635,7 +663,7 @@ export function registerRooms(ctx) {
     if (!check.ok) return res.status(check.error === 'ROOM_TRANSITION_INVALID' ? 409 : 400).json(check);
 
     const from = room.room.status;
-    applyStatus(room, to, req.org);
+    applyStatus(room, to, req.org, req.orgUser);
 
     // Snapshot the evidence confidence the club could see AT this moment.
     let snapshot = null;
@@ -697,7 +725,7 @@ export function registerRooms(ctx) {
     if (!check.ok) return { ok: false, status: check.error === 'ROOM_TRANSITION_INVALID' ? 409 : 400, ...check };
 
     const from = room.room.status;
-    applyStatus(room, to, req.org);
+    applyStatus(room, to, req.org, req.orgUser);
     if (check.snapshot) captureSnapshot(room, req, `status:${to}`);
     room.room.reopened = {
       by: { userId: req.orgUser.id, name: req.orgUser.name }, at: now(), from,
@@ -744,9 +772,11 @@ export function registerRooms(ctx) {
       sourceContext: normaliseSourceContext(sourceContext), sourceRef,
       openedBy: { userId: req.orgUser.id, name: req.orgUser.name },
       updatedAt: now(), archivedAt: null, closedAt: null,
+      rev: 0, // applyStatus below records the creation as revision 1
+      revAt: now(), revBy: { userId: req.orgUser.id, name: req.orgUser.name },
     };
     if (adopted && room.stage) room.room.status = roomStatusForStage(room.stage, req.org.level) ?? 'watching';
-    applyStatus(room, room.room.status, req.org);
+    applyStatus(room, room.room.status, req.org, req.orgUser);
     activity(room, req, 'room_created', { status: room.room.status, sourceContext: room.room.sourceContext, sourceRef, adoptedExistingCase: adopted });
     vmetric('recruitment_room_created');
     ledgerAppend?.({ type: 'recruitment_room_created', playerId: player.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
@@ -1000,6 +1030,14 @@ export function registerRooms(ctx) {
       // stacking a duplicate onto the decision memory.
       if (dup) return res.status(200).json({ decision: decisionView(dup), idempotent: true });
     }
+    // M18.1: a decision is pinned to the room revision it was written against.
+    // Two colleagues deciding at once therefore produce ONE accepted decision
+    // and one conflict — never two rows both claiming to be current. The
+    // history stays append-only either way: nothing here edits a past decision.
+    if (!guardRev(req, res, room.room, {
+      errorCode: 'ROOM_VERSION_CONFLICT',
+      current: { status: room.room.status, updatedAt: room.room.updatedAt },
+    })) return;
     const check = validateDecision({
       recommendation: req.body?.recommendation,
       reasonCodes: req.body?.reasonCodes ?? [],
@@ -1012,8 +1050,9 @@ export function registerRooms(ctx) {
     const snapshot = captureSnapshot(room, req, 'decision');
     const d = recordDecision(room, req, { recommendation: check.recommendation, reasonCodes: check.codes, note, snapshot, trigger: 'decision', clientKey });
     room.room.updatedAt = now();
+    bumpRev(room.room, { by: req.orgUser, at: room.room.updatedAt });
     persistNow();
-    res.status(201).json({ decision: decisionView(d), snapshot });
+    res.status(201).json({ decision: decisionView(d), snapshot, rev: room.room.rev });
   });
 
   orgRouter.get('/rooms/:id/decisions', (req, res) => {

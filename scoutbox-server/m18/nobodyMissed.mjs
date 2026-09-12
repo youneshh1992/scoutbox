@@ -22,6 +22,7 @@ import {
   NOBODY_MISSED_STATES, NM_DISMISSAL_REASONS, NM_SORTS, orderNobodyMissed,
   EVIDENCE_REQUIREMENTS, POSITIONS, TRUST_BANDS, LIMITS, clampPage,
 } from './shared.mjs';
+import { guardRev, bumpRev, revMeta } from '../m181/concurrency.mjs';
 
 export function registerNobodyMissed(ctx) {
   const {
@@ -127,6 +128,9 @@ export function registerNobodyMissed(ctx) {
 
   const briefView = (b) => ({
     id: b.id, title: b.title, status: b.status, version: b.version,
+    // `version` is the CRITERIA version historical coverage points at; `rev` is
+    // the concurrency token that moves on every accepted write (M18.1).
+    ...revMeta(b),
     criteria: b.criteria, criteriaExplained: explainBriefCriteria(b.criteria),
     activeFrom: b.activeFrom, activeUntil: b.activeUntil,
     roleId: b.roleId ?? null, vacancyId: b.vacancyId ?? null,
@@ -162,6 +166,7 @@ export function registerNobodyMissed(ctx) {
       roleId: req.body?.roleId ?? null, vacancyId: req.body?.vacancyId ?? null,
       createdBy: { userId: req.orgUser.id, name: req.orgUser.name },
       createdAt: now(), updatedAt: now(), history: [],
+      rev: 1, revAt: now(), revBy: { userId: req.orgUser.id, name: req.orgUser.name },
     };
     audit(b, 'org', req.orgUser.id, req.orgUser.name, 'recruitment_brief_created', { version: 1 });
     db.recruitmentBriefs.push(b);
@@ -182,6 +187,12 @@ export function registerNobodyMissed(ctx) {
     if (!requireLead(req, res)) return;
     if (limited(`brief:w:${req.org.id}`, LIMITS.briefWritesPerHour, 3_600_000)) return res.status(429).json({ error: 'RATE_LIMITED' });
     if (b.status === 'archived') return res.status(409).json({ error: 'BRIEF_ARCHIVED' });
+    // A brief is a collaborative record: refuse a write built on a stale read
+    // rather than quietly discarding a colleague's edit (M18.1).
+    if (!guardRev(req, res, b, {
+      errorCode: 'BRIEF_VERSION_CONFLICT',
+      current: { currentVersion: b.version, status: b.status, updatedAt: b.updatedAt, updatedBy: b.revBy?.name ?? null },
+    })) return;
 
     if (req.body?.status !== undefined) {
       const to = String(req.body.status);
@@ -213,6 +224,7 @@ export function registerNobodyMissed(ctx) {
       }
     }
     b.updatedAt = now();
+    bumpRev(b, { by: req.orgUser, at: b.updatedAt });
     persistNow();
     res.json({ brief: briefView(b) });
   });
@@ -380,7 +392,12 @@ export function registerNobodyMissed(ctx) {
       reviewedBy: { userId: req.orgUser.id, name: req.orgUser.name }, reviewedAt: now(),
     });
     vmetric('nobody_missed_player_added_to_room');
-    res.status(201).json({ review: r, roomId: out.roomId, room: out.room });
+    // M18.1: a double click adds the candidate ONCE. M17's creator already
+    // returns the existing open room rather than making a second one; the
+    // response now says so instead of reporting a creation that did not happen.
+    res.status(out.existed ? 200 : 201).json({
+      review: r, roomId: out.roomId, room: out.room, idempotent: !!out.existed,
+    });
   });
 
   /** Organisation-private coverage across every live brief. */
