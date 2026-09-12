@@ -41,7 +41,7 @@ process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); 
   const proc = spawn(process.execPath, [SERVER], { env: ENV, stdio: 'ignore' });
   children.push(proc);
   let up = false;
-  for (let i = 0; i < 60 && !up; i++) { try { const r = await fetch(`${BASE}/healthz`); up = r.ok; } catch { /* booting */ } if (!up) await sleep(250); }
+  for (let i = 0; i < 160 && !up; i++) { try { const r = await fetch(`${BASE}/healthz`); up = r.ok; } catch { /* booting */ } if (!up) await sleep(250); }
   if (!up) throw new Error('server did not come up');
 }
 async function j(method, url, body, token, extra = {}) {

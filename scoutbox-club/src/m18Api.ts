@@ -235,7 +235,12 @@ export interface RecruitmentBrief {
   id: string;
   title: string;
   status: string;
+  /** Criteria version — what historical Evaluation Coverage points at. */
   version: number;
+  /** Mutation revision — the optimistic-concurrency token (M18.1). */
+  rev?: number;
+  revAt?: number | null;
+  revBy?: string | null;
   criteria: BriefCriteria;
   /** Plain-language criteria. There are no hidden criteria. */
   criteriaExplained: { key: string; label: string; value: string }[];
@@ -266,6 +271,13 @@ export interface BriefListResult {
 }
 
 export interface BriefInput {
+  /**
+   * The `rev` this edit was composed against (M18.1). The server refuses a
+   * write built on a stale read with 409 BRIEF_VERSION_CONFLICT rather than
+   * discarding a colleague's edit. It is optional on the wire so nothing
+   * older breaks, but every ScoutBox surface sends it.
+   */
+  expectedRev?: number;
   title?: string;
   positions?: string[];
   minAge?: number | null;

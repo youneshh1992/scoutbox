@@ -80,6 +80,7 @@ function errMessage(e: unknown): string {
     if (e.code === 'NOT_VISIBLE') return t('m18.err.notVisible');
     if (e.code === 'ROOM_ENGINE_UNAVAILABLE') return t('m18.err.roomEngine');
     if (e.code === 'RATE_LIMITED') return t('m18.err.rateLimited');
+    if (e.code === 'BRIEF_VERSION_CONFLICT') return t('common.conflict');
     return e.message;
   }
   if (e instanceof Error) {
@@ -90,6 +91,7 @@ function errMessage(e: unknown): string {
       SECOND_LOOK_REASON_UNKNOWN: t('m18.err.reasonUnknown'),
       NM_REASON_UNKNOWN: t('m18.err.reasonUnknown'),
       BRIEF_NOT_FOUND: t('m18.err.briefNotFound'),
+      BRIEF_VERSION_CONFLICT: t('common.conflict'),
       BRIEF_TRANSITION_INVALID: t('m18.err.briefTransition'),
       NOT_VISIBLE: t('m18.err.notVisible'),
     };
@@ -946,7 +948,7 @@ function BriefDetail({ session, tick, notify, briefId, onCloseBrief }: BriefsScr
 
   const setStatus = async (status: string) => {
     try {
-      const out = await m18.patchBrief(session, briefId, { status });
+      const out = await m18.patchBrief(session, briefId, { status, expectedRev: brief?.rev });
       if (out.ok) { notify(t('m18.br.statusChanged')); setBump((b) => b + 1); }
       else notify(out.message, true);
     } catch (e) { notify(errMessage(e), true); }
@@ -1049,7 +1051,7 @@ function BriefDetail({ session, tick, notify, briefId, onCloseBrief }: BriefsScr
           }}
           submitLabel={t('common.save')}
           onSubmit={async (input) => {
-            const out = await m18.patchBrief(session, briefId, input);
+            const out = await m18.patchBrief(session, briefId, { ...input, expectedRev: brief.rev });
             if (out.ok) { notify(t('m18.br.saved')); setEditing(false); setBump((b) => b + 1); }
             return out;
           }}

@@ -271,6 +271,10 @@ export interface Room {
   roomId: string;
   orgId: string;
   playerId: string;
+  /** Mutation revision — the optimistic-concurrency token (M18.1). */
+  rev?: number;
+  revAt?: number | null;
+  revBy?: string | null;
   status: string;
   statusLabel: string;
   allowedTransitions: string[];
@@ -329,6 +333,8 @@ export type CreateRoomResult =
   | { ok: false; error: 'ROOM_EXISTS'; existingRoomId: string; status: string };
 
 export interface PatchRoomInput {
+  /** The room `rev` this edit was composed against (M18.1). */
+  expectedRev?: number;
   priority?: string;
   tags?: string[];
   leadScoutUserId?: string | null;
@@ -344,7 +350,7 @@ export interface RoomsApi {
   create(s: Session, input: CreateRoomInput): Promise<CreateRoomResult>;
   get(s: Session, roomId: string): Promise<Room>;
   patch(s: Session, roomId: string, input: PatchRoomInput): Promise<Room>;
-  setStatus(s: Session, roomId: string, input: { status: string; reasonCodes?: string[]; note?: string | null }): Promise<{ room: Room; snapshot: RoomSnapshot | null }>;
+  setStatus(s: Session, roomId: string, input: { status: string; reasonCodes?: string[]; note?: string | null; expectedRev?: number }): Promise<{ room: Room; snapshot: RoomSnapshot | null }>;
   activity(s: Session, roomId: string, params?: { limit?: number; cursor?: string | null }): Promise<RoomActivityResult>;
   comments(s: Session, roomId: string, params?: { limit?: number; cursor?: string | null }): Promise<RoomCommentsResult>;
   addComment(s: Session, roomId: string, input: { body: string; replyToId?: string | null; mentions?: string[] }): Promise<RoomComment>;

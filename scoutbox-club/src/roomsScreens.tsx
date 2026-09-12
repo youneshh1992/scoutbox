@@ -71,6 +71,9 @@ function errMessage(e: unknown): string {
     if (e.code === 'ROOM_REASON_REQUIRED') return t('rm.errReasonRequired');
     if (e.code === 'ROOM_REASON_PROHIBITED') return t('rm.errReasonProhibited');
     if (e.code === 'RATE_LIMITED') return t('rm.errRateLimited');
+    // A lost update is now refused rather than applied, so it has to be
+    // explainable: the person is told their work is intact and what to do.
+    if (e.code === 'ROOM_VERSION_CONFLICT') return t('common.conflict');
     return e.message;
   }
   return e instanceof Error ? e.message : 'failed';
@@ -364,6 +367,10 @@ function RoomHeader({ session, room, notify, reload, staff, openPlayer }: PanelP
   const [note, setNote] = useState('');
   const [tagDraft, setTagDraft] = useState('');
   const [taxonomy, setTaxonomy] = useState<RoomDecisionTaxonomy | null>(null);
+  // A conflict is the one message the person must not miss, and a toast is
+  // exactly where it gets missed: a routine live-sync notification arriving a
+  // second later replaces it. It stays on the panel until they act on it.
+  const [conflict, setConflict] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -373,19 +380,29 @@ function RoomHeader({ session, room, notify, reload, staff, openPlayer }: PanelP
 
   const needsReason = !!to && REASON_REQUIRED_STATUSES.includes(to);
 
+  const isConflict = (e: unknown) => e instanceof ApiError && e.code === 'ROOM_VERSION_CONFLICT';
+
   const move = async () => {
     if (!to) return;
+    setConflict(false);
     try {
-      await rooms.setStatus(session, room.roomId, { status: to, reasonCodes: codes, note: note.trim() || null });
+      await rooms.setStatus(session, room.roomId, { status: to, reasonCodes: codes, note: note.trim() || null, expectedRev: room.rev });
       notify(`${t('rm.statusMoved')} ${statusLabel(to)}`);
       setTo(''); setCodes([]); setNote('');
       reload();
-    } catch (e) { notify(errMessage(e), true); }
+    } catch (e) {
+      if (isConflict(e)) setConflict(true);
+      notify(errMessage(e), true);
+    }
   };
 
   const patch = async (input: Parameters<typeof rooms.patch>[2], done: string) => {
-    try { await rooms.patch(session, room.roomId, input); notify(done); reload(); }
-    catch (e) { notify(errMessage(e), true); }
+    setConflict(false);
+    try { await rooms.patch(session, room.roomId, { ...input, expectedRev: room.rev }); notify(done); reload(); }
+    catch (e) {
+      if (isConflict(e)) setConflict(true);
+      notify(errMessage(e), true);
+    }
   };
 
   return (
@@ -402,6 +419,13 @@ function RoomHeader({ session, room, notify, reload, staff, openPlayer }: PanelP
           <button onClick={() => openPlayer(room.playerId)}>{t('rm.openProfile')}</button>
         )}
       </div>
+
+      {conflict && (
+        <div className="notice block" role="alert" style={{ marginTop: 8 }}>
+          <div>{t('common.conflict')}</div>
+          <button style={{ marginTop: 6 }} onClick={() => { setConflict(false); reload(); }}>{t('common.reload')}</button>
+        </div>
+      )}
 
       {!room.playerAvailable && (
         <div className="notice block" style={{ marginTop: 8 }}>{room.unavailableNote ?? t('rm.unavailable')}</div>
