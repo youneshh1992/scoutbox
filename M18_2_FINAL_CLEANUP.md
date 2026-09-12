@@ -258,7 +258,12 @@ the shipped bundles.
 m12 143 · m13 212 · m14 193 · m14.1 94 · m15 185 · m16 115 · m16.1 79 ·
 m16.2 124 · m17 406 · m18 286 · m18.1 195 · **m18.2 313**.
 
-**Browser battery.** BROWSER_BATTERY
+**Browser battery (all green).** navConfig 163 · navLive · uiSpotcheck ·
+demoOffline · crosstab · liveIntegration · m12Live · m13Live · m14Live L1–L7 ·
+m15Live 21 · m16Live 10 · m16.2Live 11 · m17Live 25 · m18Live 60 · m18.1Live
+37 · **m18.2Live 37** · demo spotchecks for M12, M13, M14, M16.2 (21), M17
+(47), M18, M18.1 and **M18.2** · staleSessionProbe 14 · headless runtime load
+of every bundle with zero page errors.
 
 Typechecks and production builds clean for club, grassroots, player and admin.
 EN/FR parity: club 616/616, grassroots 618/618; no screen asks for a key that
@@ -291,7 +296,14 @@ push transport (so quiet hours stay documented, not rewritten).
 deterministic tie-break it re-reads the visible list and fails with the
 server's answer if a Room cannot be created. No assertion was removed or
 weakened. `apiE2E` still expects a server on :4000 using the default data
-directory; it was run that way. `m181Live`'s `RM` constant pointed at a hash
+directory; it was run that way. Four earlier suites were adapted to deliberate
+M18.2 changes, none weakened: `m17Live` and `m18Live` accept the archive
+confirmation dialog; `m181Live H2` accepts the shared conflict notice's
+wording beside the server's; `m17DemoSpotcheck` accepts "Trust Score at
+decision". `m181DemoSpotcheck` and `m15Live` were NOT changed — they caught
+two copy regressions (Discover naming the Trust Score without "evidence
+confidence"; provenance labels drifting from the M15 wording) and the copy
+was corrected instead. `m181Live`'s `RM` constant pointed at a hash
 that resolved nowhere; its H4 passed on the Briefs page's own table. That
 hash now resolves (the nav fix above), so H4 exercises the Rooms table as
 intended; the constant is left as it was.
