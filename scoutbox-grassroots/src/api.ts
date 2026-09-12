@@ -370,6 +370,8 @@ export interface Notification {
   text: string;
   refId: string | null;
   read: boolean;
+  /** How many times this identical notification arrived while still unread. */
+  repeatCount?: number;
 }
 
 export interface TrialDetails {

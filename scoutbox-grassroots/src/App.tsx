@@ -24,7 +24,7 @@ import {
 } from './nav';
 import { CommandPalette, NeedsAttention, Sidebar, SecondaryNav, useNavSections, usePaletteHotkey } from './navui';
 import { Icon } from './icons';
-import { getLang, setLang, t } from './i18n';
+import { fmtDate, getLang, setLang, t } from './i18n';
 
 const ROLES = ['Manager', 'Coach', 'Volunteer Scout', 'Club Secretary'];
 
@@ -51,6 +51,69 @@ export type ScreenId =
 // lives in src/nav.ts (sections → child tabs) and also drives the command
 // palette, resolver and shortcuts. Every ScreenId stays deep-linkable as
 // "#/<screenId>"; nothing was removed or renamed.
+
+
+// ---------------------------------------------------------------- M18.1 bell
+/**
+ * Where a notification leads. A notification you cannot act on is only an
+ * interruption: the bell rendered the sentence and a time and dropped both the
+ * type and the refId, so "someone assigned you a task in the Recruitment Room
+ * for X" left you to go and find it. Rows with a destination are now buttons.
+ *
+ * A type that is NOT in this table stays plain text. Sending someone to an
+ * approximately-right screen is worse than not offering the jump, and this
+ * table is deliberately incomplete rather than speculatively full.
+ */
+const NOTIFICATION_SCREEN: Record<string, ScreenId> = {
+  second_look: 'secondlook',
+  recruitment_room: 'rooms',
+  verification: 'verification',
+  case: 'recruitment',
+  application: 'opportunities',
+  accepted: 'messages',
+  declined: 'messages',
+  message: 'messages',
+  open_trial: 'trials',
+  trial_day: 'trialdays',
+  outcome: 'outcomes',
+  campaign: 'campaigns',
+  review_queue: 'campaigns',
+  coverage: 'coverage',
+  calibration: 'calibration',
+  saved_search: 'search',
+};
+
+interface BellRow { n: Notification; count: number; unread: boolean }
+
+/**
+ * Collapse repeats. The server already coalesces an identical notification the
+ * recipient has not read yet; this also folds together copies that straddle a
+ * read, so twenty rows in the bell are twenty different things. The newest
+ * occurrence is kept, the count is summed, and the row counts as unread if ANY
+ * of its occurrences is — a row must never look dealt-with while the badge
+ * still counts it.
+ */
+function bellRows(items: Notification[]): BellRow[] {
+  const rows = new Map<string, BellRow>();
+  for (const n of items) { // newest first
+    const key = `${n.type}|${n.refId ?? ''}|${n.text}`;
+    const hit = rows.get(key);
+    if (hit) { hit.count += n.repeatCount ?? 1; hit.unread = hit.unread || !n.read; continue; }
+    rows.set(key, { n, count: n.repeatCount ?? 1, unread: !n.read });
+  }
+  return [...rows.values()];
+}
+
+/**
+ * A bare clock is a lie about anything older than today: 09:14 on a
+ * three-day-old notification reads as this morning. Same day keeps the time;
+ * anything else carries its date.
+ */
+function bellTime(ts: number): string {
+  const d = new Date(ts);
+  const sameDay = new Date().toDateString() === d.toDateString();
+  return sameDay ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : `${fmtDate(ts)} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+}
 
 export default function App() {
   // Sessions persist across refreshes (cleared by "Switch org").
@@ -396,12 +459,21 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
         {bellOpen && (
           <div className="bell-panel">
             {notifications.length === 0 && <div className="notice">Nothing yet — you'll hear the moment a player or guardian responds.</div>}
-            {notifications.slice(0, 20).map((n) => (
-              <div key={n.id} className="list-row" style={{ opacity: n.read ? 0.7 : 1 }}>
-                <span className="grow" style={{ fontSize: 13 }}>{n.text}</span>
-                <span className="dim">{new Date(n.ts).toLocaleTimeString()}</span>
-              </div>
-            ))}
+            {bellRows(notifications).slice(0, 20).map(({ n, count, unread }) => {
+              const dest = NOTIFICATION_SCREEN[n.type];
+              return (
+                <div key={n.id} className="list-row" style={{ opacity: unread ? 1 : 0.7 }}>
+                  <span className="grow" style={{ fontSize: 13 }}>
+                    {n.text}
+                    {count > 1 && <span className="pill" style={{ marginLeft: 6 }}>×{count}</span>}
+                  </span>
+                  {dest && (
+                    <button onClick={() => { setScreen(dest); setBellOpen(false); }}>{t('common.open')}</button>
+                  )}
+                  <span className="dim">{bellTime(n.ts)}</span>
+                </div>
+              );
+            })}
           </div>
         )}
         {activeSection && <SecondaryNav section={activeSection} activeItemId={loc.itemId} onNavigate={setScreen} />}

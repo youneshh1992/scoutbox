@@ -53,16 +53,23 @@ const EASTPORT = orgLogin.body.token;
 ok(!!(KOLA && GUNI && AMARA && EASTPORT), 'seed identities log in (passwordless demo seeds)');
 
 // ---- 1. guardian signup: email verification is a hard gate
-r = await j('/auth/guardian/signup', { method: 'POST', body: JSON.stringify({ name: 'Nadia Test', email: 'nadia@testfamily.co.uk', password: 'longenough1' }) });
+// The address is unique per run. It used to be a constant, which made the
+// whole suite pass only against a freshly seeded database: a second run hit
+// EMAIL_IN_USE here and, had it got past that, would have read the FIRST
+// matching verification code out of the outbox rather than this run's.
+const nadiaEmail = `nadia+${Date.now().toString(36)}@testfamily.co.uk`;
+r = await j('/auth/guardian/signup', { method: 'POST', body: JSON.stringify({ name: 'Nadia Test', email: nadiaEmail, password: 'longenough1' }) });
 ok(r.status === 201 && r.body.emailVerificationSent, 'guardian signup sends the verification email');
 const nadiaId = r.body.guardianId;
 const nadiaToken = r.body.token;
+r = await j('/auth/guardian/signup', { method: 'POST', body: JSON.stringify({ name: 'Nadia Twice', email: nadiaEmail, password: 'longenough1' }) });
+ok(r.status === 409 && r.body.error === 'EMAIL_IN_USE', 'a second signup on the same email is refused');
 await j('/guardian/verify-id', { method: 'POST', body: JSON.stringify({ documentType: 'passport', documentRef: 'X1234567' }) }, bearer(nadiaToken));
 await j('/guardian/disclaimer', { method: 'POST', body: JSON.stringify({ accepted: true }) }, bearer(nadiaToken));
 r = await j('/guardian/children', { method: 'POST', body: JSON.stringify({ name: 'Test Kid', dob: '2013-01-01', country: 'GB' }) }, bearer(nadiaToken));
 ok(r.status === 403 && r.body.error === 'EMAIL_UNVERIFIED', 'unverified email blocks child onboarding even after IDV + disclaimer');
 const outbox = await j('/admin/outbox', {}, admin);
-const mail = outbox.body.find((m) => m.to === 'nadia@testfamily.co.uk');
+const mail = outbox.body.find((m) => m.to === nadiaEmail);
 const emailCode = /code is ([A-Z0-9]{6})/.exec(mail?.text ?? '')?.[1];
 ok(!!emailCode, 'verification code is in the dev outbox');
 r = await j('/auth/guardian/verify-email', { method: 'POST', body: JSON.stringify({ guardianId: nadiaId, code: emailCode }) });

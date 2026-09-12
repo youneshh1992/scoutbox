@@ -554,8 +554,31 @@ function pushDeferred(audience, now = new Date()) {
   return false;
 }
 
+// M18.1 — how long an identical UNREAD notification stays coalescible.
+const NOTIFY_COALESCE_MS = 6 * 60 * 60 * 1000;
+
 function notify(audience, type, text, refId = null) {
-  const n = { id: nextId('ntf'), ts: Date.now(), audience, type, text, refId, read: false, deferredPush: pushDeferred(audience) };
+  // Coalesce identical unread notifications. The same sentence about the same
+  // record arriving twice is not two pieces of news: it pushed the recipient's
+  // phone twice and buried the twenty other rows in their bell. So an existing
+  // unread row is refreshed and counted rather than duplicated — and crucially
+  // no second push is sent. Once the recipient has READ it, a new occurrence is
+  // genuinely new and gets its own row; coalescing a notification someone has
+  // already dealt with would hide the fact that it happened again.
+  const cutoff = Date.now() - NOTIFY_COALESCE_MS;
+  for (let i = db.notifications.length - 1; i >= 0; i--) {
+    const c = db.notifications[i];
+    if (c.ts < cutoff) break; // the array is append-ordered by time
+    if (c.read) continue;
+    if (c.audience.kind !== audience.kind || c.audience.id !== audience.id) continue;
+    if (c.type !== type || c.text !== text || (c.refId ?? null) !== (refId ?? null)) continue;
+    c.ts = Date.now();
+    c.repeatCount = (c.repeatCount ?? 1) + 1;
+    broadcast('notify', { audienceKind: audience.kind, audienceId: audience.id });
+    return c;
+  }
+
+  const n = { id: nextId('ntf'), ts: Date.now(), audience, type, text, refId, read: false, repeatCount: 1, deferredPush: pushDeferred(audience) };
   db.notifications.push(n);
   // Push delivery honours quiet hours / school-hours mute; the in-app feed
   // above always keeps the record either way.

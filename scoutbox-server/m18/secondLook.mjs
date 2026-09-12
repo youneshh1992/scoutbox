@@ -296,9 +296,13 @@ export function registerSecondLook(ctx) {
         db.secondLookItems.push(item);
         vmetric('second_look_created');
         // Internal only — an org_user audience, never the player or guardian.
+        // The player is named: this notification goes to the scout who owned
+        // the Room, visibility was already established above, and "a player you
+        // previously archived" gave the recipient nothing to act on when they
+        // have archived dozens.
         for (const u of db.users.filter((x) => x.orgId === org.id && !x.removedAt && x.id === room.ownerUserId)) {
           notify({ kind: 'org_user', id: u.id }, 'second_look',
-            'New evidence may relate to a player you previously archived.', item.id);
+            `Second Look — ${room.playerName}: new evidence since your organisation archived this Room.`, item.id);
         }
         live.push({ item, candidate });
         continue;
