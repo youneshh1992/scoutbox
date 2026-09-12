@@ -20,3 +20,5 @@ dist-live162/
 dist-verify/
 dist-live17/
 dist-live18/
+# M18.2: every live-suite build output, whatever the milestone suffix
+dist-live*/
