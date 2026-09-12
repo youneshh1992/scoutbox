@@ -37,9 +37,12 @@ const PROV_TONE: Record<string, 'green' | 'blue' | 'gold' | 'default'> = {
 };
 function ProvPill({ provenance }: { provenance: string }) {
   const key = `m15prov_${provenance}` as Parameters<typeof pt>[0];
-  let label: string;
-  try { label = pt(key); } catch { label = provenance; }
-  return <Pill label={label ?? provenance} tone={PROV_TONE[provenance] ?? 'default'} />;
+  let label: string | undefined;
+  try { label = pt(key); } catch { label = undefined; }
+  // An unrecognised provenance used to render its raw identifier at the
+  // player ("box_cam_observed"). It now says, in words, that ScoutBox cannot
+  // classify the source — never a guess at which one it is.
+  return <Pill label={label ?? pt('m15prov_unknown')} tone={PROV_TONE[provenance] ?? 'default'} />;
 }
 
 function eventLabel(e: PassportEvent): string {

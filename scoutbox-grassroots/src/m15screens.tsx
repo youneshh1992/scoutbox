@@ -12,18 +12,30 @@ import { t } from './i18n';
 const PROV_PILL: Record<string, string> = {
   verified_club_confirmed: 'green', authoritative_registry: 'green',
   verified_coach_confirmed: 'blue', scoutbox_reviewed: 'gold',
+  // Box Cam is first-party observation and ranks BELOW a ScoutBox review, so
+  // it deliberately gets the neutral pill rather than a confirmation colour.
+  box_cam_observed: '',
   player_submitted: '', guardian_submitted: '', system_recorded: '', historical_migration: '',
 };
+// Every provenance the server can emit (m15/shared.mjs PROVENANCE). This list
+// was missing `box_cam_observed`, and the fallback below used to be
+// 'fp.provPlayer' — so an item ScoutBox itself observed through Box Cam was
+// labelled "Player-provided". Mislabelling where evidence came from is the one
+// thing a provenance badge exists to prevent.
 const PROV_KEY: Record<string, string> = {
   player_submitted: 'fp.provPlayer', guardian_submitted: 'fp.provGuardian',
   system_recorded: 'fp.provSystem', historical_migration: 'fp.provHistoric',
+  box_cam_observed: 'fp.provBoxCam',
   scoutbox_reviewed: 'fp.provReviewed', verified_coach_confirmed: 'fp.provCoach',
   verified_club_confirmed: 'fp.provClub', authoritative_registry: 'fp.provRegistry',
 };
 export function ProvPill({ provenance, copy }: { provenance: string; copy?: string | null }) {
+  // An unrecognised provenance says so. Asserting the weakest known label
+  // would still be an assertion, and it would be wrong.
+  const known = PROV_KEY[provenance];
   return (
-    <span className={`pill ${PROV_PILL[provenance] ?? ''}`} title={copy ?? undefined}>
-      {t(PROV_KEY[provenance] ?? 'fp.provPlayer')}
+    <span className={`pill ${PROV_PILL[provenance] ?? ''}`} title={copy ?? (known ? undefined : t('fp.provUnknownNote'))}>
+      {t(known ?? 'fp.provUnknown')}
     </span>
   );
 }
@@ -208,7 +220,7 @@ export function SummaryChips({ s }: { s: FpSummary | undefined }) {
   return (
     <>
       {s.currentClub?.name && (
-        <span className={`pill ${PROV_PILL[s.currentClub.provenance] ?? ''}`} title={t(PROV_KEY[s.currentClub.provenance] ?? 'fp.provPlayer')}>
+        <span className={`pill ${PROV_PILL[s.currentClub.provenance] ?? ''}`} title={t(PROV_KEY[s.currentClub.provenance] ?? 'fp.provUnknown')}>
           {s.currentClub.name}
         </span>
       )}

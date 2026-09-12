@@ -178,6 +178,9 @@ const en = {
   'fp.provPlayer': 'Player-provided', 'fp.provGuardian': 'Guardian-provided', 'fp.provSystem': 'ScoutBox activity',
   'fp.provHistoric': 'Historical', 'fp.provReviewed': 'ScoutBox reviewed', 'fp.provCoach': 'Coach confirmed ✓',
   'fp.provClub': 'Club confirmed ✓', 'fp.provRegistry': 'Registry ✓',
+  'fp.provBoxCam': 'Box Cam observed',
+  'fp.provUnknown': 'Source not classified',
+  'fp.provUnknownNote': 'ScoutBox cannot describe where this item came from. It is not being treated as confirmed by anyone.',
   'fp.evJoined': 'Joined', 'fp.evLeft': 'Left', 'fp.evAffVerified': 'Affiliation verified', 'fp.evTrial': 'Trial',
   'fp.evTrialOutcome': 'Trial report', 'fp.evAssessment': 'Assessment', 'fp.evReference': 'Reference received',
   'fp.evEvidence': 'Evidence added', 'fp.evSigned': 'Signed by', 'fp.evRole': 'Squad/role update',
@@ -748,6 +751,9 @@ const fr: typeof en = {
   'fp.provPlayer': 'Fourni par le joueur', 'fp.provGuardian': 'Fourni par le tuteur', 'fp.provSystem': 'Activité ScoutBox',
   'fp.provHistoric': 'Historique', 'fp.provReviewed': 'Examiné par ScoutBox', 'fp.provCoach': 'Confirmé entraîneur ✓',
   'fp.provClub': 'Confirmé club ✓', 'fp.provRegistry': 'Registre ✓',
+  'fp.provBoxCam': 'Observé par Box Cam',
+  'fp.provUnknown': 'Source non classée',
+  'fp.provUnknownNote': 'ScoutBox ne peut pas décrire l’origine de cet élément. Il n’est considéré comme confirmé par personne.',
   'fp.evJoined': 'A rejoint', 'fp.evLeft': 'A quitté', 'fp.evAffVerified': 'Affiliation vérifiée', 'fp.evTrial': 'Essai',
   'fp.evTrialOutcome': 'Rapport d’essai', 'fp.evAssessment': 'Évaluation', 'fp.evReference': 'Référence reçue',
   'fp.evEvidence': 'Preuve ajoutée', 'fp.evSigned': 'Signé par', 'fp.evRole': 'Mise à jour effectif/rôle',
@@ -1150,3 +1156,17 @@ export const fmtDate = (ts: number | string) =>
   new Date(ts).toLocaleDateString(getLang() === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 export const fmtDateTime = (ts: number) =>
   new Date(ts).toLocaleString(getLang() === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+/** Time of day only. Use it ONLY where the surrounding context already fixes
+ *  the day — otherwise a bare clock reads as "today" for a week-old record. */
+export const fmtTime = (ts: number | string) =>
+  new Date(ts).toLocaleTimeString(getLang() === 'fr' ? 'fr-FR' : 'en-GB', { hour: '2-digit', minute: '2-digit' });
+/**
+ * A stamp that cannot mislead: the time alone while it is still today, the
+ * date as well once it is not. "14:32" on a week-old message or notification
+ * reads as this afternoon, which is the single most common way a timestamp
+ * lies in a feed.
+ */
+export const fmtStamp = (ts: number | string) => {
+  const d = new Date(ts);
+  return new Date().toDateString() === d.toDateString() ? fmtTime(ts) : `${fmtDate(ts)} ${fmtTime(ts)}`;
+};

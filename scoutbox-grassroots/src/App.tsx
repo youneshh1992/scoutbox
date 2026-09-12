@@ -24,7 +24,7 @@ import {
 } from './nav';
 import { CommandPalette, NeedsAttention, Sidebar, SecondaryNav, useNavSections, usePaletteHotkey } from './navui';
 import { Icon } from './icons';
-import { fmtDate, getLang, setLang, t } from './i18n';
+import { fmtStamp, getLang, setLang, t } from './i18n';
 
 const ROLES = ['Manager', 'Coach', 'Volunteer Scout', 'Club Secretary'];
 
@@ -104,16 +104,6 @@ function bellRows(items: Notification[]): BellRow[] {
   return [...rows.values()];
 }
 
-/**
- * A bare clock is a lie about anything older than today: 09:14 on a
- * three-day-old notification reads as this morning. Same day keeps the time;
- * anything else carries its date.
- */
-function bellTime(ts: number): string {
-  const d = new Date(ts);
-  const sameDay = new Date().toDateString() === d.toDateString();
-  return sameDay ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : `${fmtDate(ts)} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-}
 
 export default function App() {
   // Sessions persist across refreshes (cleared by "Switch org").
@@ -470,7 +460,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
                   {dest && (
                     <button onClick={() => { setScreen(dest); setBellOpen(false); }}>{t('common.open')}</button>
                   )}
-                  <span className="dim">{bellTime(n.ts)}</span>
+                  <span className="dim">{fmtStamp(n.ts)}</span>
                 </div>
               );
             })}

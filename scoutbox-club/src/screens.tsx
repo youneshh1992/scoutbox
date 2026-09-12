@@ -12,7 +12,7 @@ import { BoxTrainingPanel } from './m16screens';
 import { CombinePanel } from './combineScreens';
 import { TrustPanel } from './trustScreens';
 import { rooms } from './roomsApi';
-import { t } from './i18n';
+import { fmtDate, fmtDateTime, fmtStamp, t } from './i18n';
 
 const TAG_LABELS: Record<string, string> = {
   first_touch: 'First touch', pace: 'Pace', positioning: 'Positioning', work_rate: 'Work rate',
@@ -232,9 +232,9 @@ export function FeedScreen({ session, tick, openPlayer }: ScreenProps) {
               {(it.type === 'new_clip' || it.type === 'shortlist_new_clip') && (
                 <span className="dim"> — “{it.title}”{it.verifiedClip ? ' · ✅ Verified Clip' : ''}{it.hasVideo ? ' · playable' : ''}</span>
               )}
-              {it.type === 'report_due' && <span className="dim"> — mandatory trial report due {it.dueAt ? new Date(it.dueAt).toLocaleDateString() : 'soon'}</span>}
+              {it.type === 'report_due' && <span className="dim"> — mandatory trial report due {it.dueAt ? fmtDate(it.dueAt) : 'soon'}</span>}
             </span>
-            <span className="dim">{new Date(it.ts).toLocaleDateString()}</span>
+            <span className="dim">{fmtDate(it.ts)}</span>
           </div>
         ))}
       </div>
@@ -718,7 +718,7 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
                 <b>{open.playerName}</b>{' '}
                 {open.counterparty === 'guardian' && <span className="pill red">thread is with the guardian</span>}
               </span>
-              <span className="dim">opened {new Date(open.createdAt).toLocaleDateString()}</span>
+              <span className="dim">opened {fmtDate(open.createdAt)}</span>
             </div>
             <div className="thread" ref={threadRef}>
               {open.messages.length === 0 && <div className="notice">Say hello — they accepted your request.</div>}
@@ -727,7 +727,7 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
                 const read = mine && open.readBy?.counterparty != null && open.readBy.counterparty >= m.ts;
                 return (
                   <div key={m.id} className={`bubble ${mine ? 'mine' : 'theirs'}`}>
-                    <div className="who">{m.sender.name} · {new Date(m.ts).toLocaleTimeString()}</div>
+                    <div className="who">{m.sender.name} · {fmtStamp(m.ts)}</div>
                     {m.text}
                     {m.attachment?.kind === 'clip' && (
                       <div style={{ marginTop: 6 }}>
@@ -769,7 +769,7 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
                 <select value={attachReportId} onChange={(e) => setAttachReportId(e.target.value)} title="Attach a filed trial report">
                   <option value="">📎 no attachment</option>
                   {openPlayerReports.map((r) => (
-                    <option key={r.id} value={r.id}>📊 trial report ({new Date(r.filedAt).toLocaleDateString()})</option>
+                    <option key={r.id} value={r.id}>📊 trial report ({fmtDate(r.filedAt)})</option>
                   ))}
                 </select>
               )}
@@ -846,7 +846,7 @@ export function TrialsScreen({ session, tick, notify }: ScreenProps) {
                 {t.guardianApproved && <span className="pill red" style={{ marginLeft: 8 }}>guardian approved</span>}
                 <div className="dim">
                   {t.proposedDate ? `${t.proposedDate}` : 'date TBC'}{t.venue ? ` · ${t.venue}` : ''}{t.notes ? ` · ${t.notes}` : ''}
-                  {t.status === 'awaiting_report' && t.reportDueAt ? ` · report due ${new Date(t.reportDueAt).toLocaleDateString()}` : ''}
+                  {t.status === 'awaiting_report' && t.reportDueAt ? ` · report due ${fmtDate(t.reportDueAt)}` : ''}
                 </div>
               </span>
               {api.trialIcsUrl(session, t.id) && (
@@ -925,7 +925,7 @@ export function LedgerScreen({ session, tick, openPlayer }: ScreenProps) {
         <tbody>
           {rows.map((r) => (
             <tr key={r.id}>
-              <td>{new Date(r.ts).toLocaleString()}</td>
+              <td>{fmtDateTime(r.ts)}</td>
               <td>{LEDGER_LABELS[r.type] ?? r.type}</td>
               <td><a style={{ color: 'var(--accent-2)', cursor: 'pointer' }} onClick={() => openPlayer(r.playerId)}>{r.playerId}</a></td>
               <td>{r.scoutName}</td>
@@ -1094,7 +1094,7 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
             <span>{inv.description}</span>
             <span className="pill gold">€{inv.amount}</span>
             <span className="pill">{inv.status}</span>
-            <span className="pill blue">{new Date(inv.ts).toLocaleDateString()}</span>
+            <span className="pill blue">{fmtDate(inv.ts)}</span>
           </div>
         ))}
       </div>
@@ -1314,7 +1314,7 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                 {(player.orgNotes ?? []).map((n: OrgNote) => (
                   <div key={n.id} className="list-row">
                     <span className="grow" style={{ fontSize: 13 }}>{n.text}</span>
-                    <span className="dim">{n.scoutName} · {new Date(n.ts).toLocaleDateString()}</span>
+                    <span className="dim">{n.scoutName} · {fmtDate(n.ts)}</span>
                   </div>
                 ))}
               </div>
@@ -1367,13 +1367,13 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                     <span className="grow">First qualifying interaction</span>
                     <span className="dim">
                       {proof.firstQualifyingInteraction
-                        ? `${LEDGER_LABELS[proof.firstQualifyingInteraction.type] ?? proof.firstQualifyingInteraction.type} · ${new Date(proof.firstQualifyingInteraction.ts).toLocaleString()} · ${proof.firstQualifyingInteraction.scoutName}`
+                        ? `${LEDGER_LABELS[proof.firstQualifyingInteraction.type] ?? proof.firstQualifyingInteraction.type} · ${fmtDateTime(proof.firstQualifyingInteraction.ts)} · ${proof.firstQualifyingInteraction.scoutName}`
                         : 'none yet'}
                     </span>
                   </div>
                   <div className="list-row">
                     <span className="grow">Attribution window</span>
-                    <span className="dim">{proof.attributionWindowMonths} months{proof.attributionWindowEnds ? ` — ends ${new Date(proof.attributionWindowEnds).toLocaleDateString()}` : ''}</span>
+                    <span className="dim">{proof.attributionWindowMonths} months{proof.attributionWindowEnds ? ` — ends ${fmtDate(proof.attributionWindowEnds)}` : ''}</span>
                   </div>
                   <div className="list-row">
                     <span className="grow">Logged events for {proof.org.name}</span>
@@ -1468,7 +1468,7 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                     <div key={r.id} className="list-row">
                       {r.verified ? <span className="pill green">🎥 verified</span> : <span className="pill">self-reported</span>}
                       <span className="grow">{r.drillName}</span>
-                      <span className="dim">{r.metric}: <b style={{ color: 'var(--text)' }}>{r.value}{r.unit}</b> · {new Date(r.ts).toLocaleDateString()}</span>
+                      <span className="dim">{r.metric}: <b style={{ color: 'var(--text)' }}>{r.value}{r.unit}</b> · {fmtDate(r.ts)}</span>
                     </div>
                   ))}
                 </div>
@@ -1494,7 +1494,7 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                       <span className="pill blue">{m.kind}</span>
                       {m.verifiedClip && <span className="pill green">✅ Verified Clip — confirmed fixture</span>}
                       <span className="grow">{m.title}</span>
-                      <span className="dim">{m.views ?? 0} view{(m.views ?? 0) === 1 ? '' : 's'} · {new Date(m.uploadedAt).toLocaleDateString()}</span>
+                      <span className="dim">{m.views ?? 0} view{(m.views ?? 0) === 1 ? '' : 's'} · {fmtDate(m.uploadedAt)}</span>
                     </div>
                     {Object.keys(m.tags ?? {}).length > 0 && (
                       <div className="badges">
