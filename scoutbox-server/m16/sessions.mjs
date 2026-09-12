@@ -18,6 +18,7 @@ import {
   mergeIntervals, normIntervals, sumIntervals, fmtMs, STATE_COPY, TERMINAL_STATES,
 } from './shared.mjs';
 import { drillByIdVersion, latestDrill, providerFor, LIVENESS_CHALLENGES, PROVIDERS } from './drills.mjs';
+import { rateLimitedBody } from '../m181/rateLimit.mjs';
 
 const DRIFT_MS = 7_000;            // allowed client/server clock drift
 const SESSION_TTL_MS = 2 * 3_600_000;
@@ -39,14 +40,8 @@ export function registerBoxCamSessions(ctx) {
   const guardianOwnsChild = (g, id) => g.childIds.includes(id);
 
   // ----------------------------------------------------------- rate limits
-  const windows = new Map();
-  function limited(key, max, windowMs) {
-    const now = Date.now();
-    const row = windows.get(key);
-    if (!row || row.resetAt < now) { windows.set(key, { count: 1, resetAt: now + windowMs }); return false; }
-    row.count += 1;
-    return row.count > max;
-  }
+  // M18.1: the shared limiter and its named policy (see m181/rateLimit.mjs).
+  const limited = (action, keyPart) => !!ctx.rateLimit?.limited(action, keyPart);
 
   const caps = (session) => {
     const drill = drillByIdVersion(session.drillId, session.drillVersion);
@@ -127,7 +122,7 @@ export function registerBoxCamSessions(ctx) {
 
   // --------------------------------------------------------------- create
   playerRouter.post('/box-cam/sessions', (req, res) => {
-    if (limited(`create:${req.player.id}`, 30, 3_600_000)) return res.status(429).json({ error: 'RATE_LIMITED' });
+    if (limited('box_session_create', req.player.id)) return res.status(429).json(rateLimitedBody('box_session_create'));
     const { drillId, target, provider: providerId, assignmentId, challengeEntryId } = req.body ?? {};
     const drill = latestDrill(String(drillId ?? ''));
     if (!drill) return res.status(404).json({ error: 'DRILL_UNKNOWN' });

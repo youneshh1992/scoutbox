@@ -13,6 +13,9 @@ export function registerM162(ctx) {
   // Fail fast rather than ship a silently mis-weighted policy.
   const total = policyWeightsTotal(POLICY);
   if (total !== 100) throw new Error(`M16.2 trust policy weights must total 100, got ${total}`);
+  // Exposed so the M18.1 boot assertions can report it alongside the other
+  // configuration checks instead of duplicating the arithmetic.
+  ctx.trustWeightsTotal = total;
 
   // Privacy-safe, aggregate-only metrics — never a player id or name.
   metrics.trust = {

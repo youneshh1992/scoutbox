@@ -22,6 +22,7 @@ import {
   NOBODY_MISSED_STATES, NM_DISMISSAL_REASONS, NM_SORTS, orderNobodyMissed,
   EVIDENCE_REQUIREMENTS, POSITIONS, TRUST_BANDS, LIMITS, clampPage,
 } from './shared.mjs';
+import { rateLimitedBody } from '../m181/rateLimit.mjs';
 import { guardRev, bumpRev, revMeta } from '../m181/concurrency.mjs';
 
 export function registerNobodyMissed(ctx) {
@@ -31,14 +32,8 @@ export function registerNobodyMissed(ctx) {
   } = ctx;
 
   const now = () => Date.now();
-  const buckets = new Map();
-  function limited(key, max, windowMs) {
-    const t = now();
-    const b = buckets.get(key);
-    if (!b || t - b.start > windowMs) { buckets.set(key, { start: t, n: 1 }); return false; }
-    b.n += 1;
-    return b.n > max;
-  }
+  // M18.1: the shared limiter and its named policy (see m181/rateLimit.mjs).
+  const limited = (action, keyPart) => !!ctx.rateLimit?.limited(action, keyPart);
   const SUPPRESS_MIN = 3;
 
   // ------------------------------------------------------------ match facts
@@ -153,7 +148,7 @@ export function registerNobodyMissed(ctx) {
 
   orgRouter.post('/recruitment-briefs', (req, res) => {
     if (!requireLead(req, res)) return;
-    if (limited(`brief:w:${req.org.id}`, LIMITS.briefWritesPerHour, 3_600_000)) return res.status(429).json({ error: 'RATE_LIMITED' });
+    if (limited('brief_write', req.org.id)) return res.status(429).json(rateLimitedBody('brief_write'));
     if (briefsFor(req.org.id).length >= LIMITS.briefsPerOrg) return res.status(409).json({ error: 'BRIEFS_FULL' });
     const v = validateRecruitmentBrief(req.body ?? {}, { orgLevel: req.org.level });
     // An invalid brief is refused, never silently repaired.
@@ -185,7 +180,7 @@ export function registerNobodyMissed(ctx) {
     const b = findBrief(req, res);
     if (!b) return;
     if (!requireLead(req, res)) return;
-    if (limited(`brief:w:${req.org.id}`, LIMITS.briefWritesPerHour, 3_600_000)) return res.status(429).json({ error: 'RATE_LIMITED' });
+    if (limited('brief_write', req.org.id)) return res.status(429).json(rateLimitedBody('brief_write'));
     if (b.status === 'archived') return res.status(409).json({ error: 'BRIEF_ARCHIVED' });
     // A brief is a collaborative record: refuse a write built on a stale read
     // rather than quietly discarding a colleague's edit (M18.1).
@@ -348,7 +343,7 @@ export function registerNobodyMissed(ctx) {
   orgRouter.post('/nobody-missed/review', (req, res) => {
     const ctxp = briefAndPlayer(req, res);
     if (!ctxp) return;
-    if (limited(`nm:act:${req.org.id}`, LIMITS.reviewActionsPerHour, 3_600_000)) return res.status(429).json({ error: 'RATE_LIMITED' });
+    if (limited('nobody_missed_action', req.org.id)) return res.status(429).json(rateLimitedBody('nobody_missed_action'));
     const r = setReview(req, ctxp.brief, ctxp.player.id, {
       state: 'reviewed', reviewedBy: { userId: req.orgUser.id, name: req.orgUser.name }, reviewedAt: now(),
     });
@@ -359,7 +354,7 @@ export function registerNobodyMissed(ctx) {
   orgRouter.post('/nobody-missed/dismiss', (req, res) => {
     const ctxp = briefAndPlayer(req, res);
     if (!ctxp) return;
-    if (limited(`nm:act:${req.org.id}`, LIMITS.reviewActionsPerHour, 3_600_000)) return res.status(429).json({ error: 'RATE_LIMITED' });
+    if (limited('nobody_missed_action', req.org.id)) return res.status(429).json(rateLimitedBody('nobody_missed_action'));
     const reason = req.body?.reason ?? null;
     if (reason != null && !NM_DISMISSAL_REASONS.includes(reason)) {
       return res.status(400).json({ error: 'NM_REASON_UNKNOWN', allowed: NM_DISMISSAL_REASONS });
@@ -380,7 +375,7 @@ export function registerNobodyMissed(ctx) {
   orgRouter.post('/nobody-missed/add-to-room', (req, res) => {
     const ctxp = briefAndPlayer(req, res);
     if (!ctxp) return;
-    if (limited(`nm:act:${req.org.id}`, LIMITS.reviewActionsPerHour, 3_600_000)) return res.status(429).json({ error: 'RATE_LIMITED' });
+    if (limited('nobody_missed_action', req.org.id)) return res.status(429).json(rateLimitedBody('nobody_missed_action'));
     if (!ctx.createRoomForPlayer) return res.status(503).json({ error: 'ROOM_ENGINE_UNAVAILABLE' });
     const out = ctx.createRoomForPlayer({
       req, player: ctxp.player, sourceContext: 'nobody_missed',

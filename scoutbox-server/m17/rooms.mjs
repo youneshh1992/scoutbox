@@ -26,6 +26,7 @@ import {
   ROOM_UNAVAILABLE_NOTE, LIMITS, clampPage, validateTag, SNAPSHOT_STATUSES,
 } from './shared.mjs';
 import { guardRev, bumpRev, revMeta } from '../m181/concurrency.mjs';
+import { rateLimitedBody } from '../m181/rateLimit.mjs';
 
 export function registerRooms(ctx) {
   const {
@@ -41,14 +42,9 @@ export function registerRooms(ctx) {
 
   // Fixed-window counters for the abuse surfaces. Same shape as the in-memory
   // guards M13 already uses; nothing here is security-critical state.
-  const buckets = new Map();
-  function limited(key, max, windowMs) {
-    const t = now();
-    const b = buckets.get(key);
-    if (!b || t - b.start > windowMs) { buckets.set(key, { start: t, n: 1 }); return false; }
-    b.n += 1;
-    return b.n > max;
-  }
+  // M18.1: one shared limiter, one named policy per action. The local Map that
+  // used to live here counted separately from five other copies of itself.
+  const limited = (action, keyPart) => !!ctx.rateLimit?.limited(action, keyPart);
 
   // Comment bodies are stored inert: markup is removed on write, so no renderer
   // anywhere — ours or a future one — can be talked into executing it.
@@ -512,9 +508,7 @@ export function registerRooms(ctx) {
   // ----------------------------------------------------------- create room
 
   orgRouter.post('/rooms', (req, res) => {
-    if (limited(`room:create:${req.org.id}`, LIMITS.roomsPerOrgPerHour, 3_600_000)) {
-      return res.status(429).json({ error: 'RATE_LIMITED', message: 'Too many rooms created in the last hour.' });
-    }
+    if (limited('room_create', req.org.id)) return res.status(429).json(rateLimitedBody('room_create'));
     const { playerId, sourceContext, priority, restricted, vacancyId } = req.body ?? {};
     const p = findPlayer(playerId);
     if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
@@ -852,8 +846,8 @@ export function registerRooms(ctx) {
     const room = findRoom(req, res);
     if (!room) return;
     if (!requireCan(req, res, room, 'comment')) return;
-    if (limited(`room:comment:${room.id}:${req.orgUser.id}`, LIMITS.commentsPerRoomPerMinute, 60_000)) {
-      return res.status(429).json({ error: 'RATE_LIMITED', message: 'Slow down a moment.' });
+    if (limited('room_comment', `${room.id}:${req.orgUser.id}`)) {
+      return res.status(429).json(rateLimitedBody('room_comment'));
     }
     const body = plainText(req.body?.body, LIMITS.commentBody);
     if (!body) return res.status(400).json({ error: 'ROOM_COMMENT_EMPTY' });
@@ -1147,7 +1141,7 @@ export function registerRooms(ctx) {
     if (!ctx.createCombineRequests) return res.status(503).json({ error: 'COMBINE_UNAVAILABLE' });
     if (req.org.type === 'agency') return res.status(403).json({ error: 'AGENCY_NOT_ELIGIBLE' });
     if (!req.org.verified) return res.status(403).json({ error: 'ORG_NOT_ELIGIBLE', message: 'Only a verified organisation can create a Club Combine.' });
-    if (limited(`room:combine:${req.org.id}`, 60, 3_600_000)) return res.status(429).json({ error: 'RATE_LIMITED' });
+    if (limited('room_combine_request', req.org.id)) return res.status(429).json(rateLimitedBody('room_combine_request'));
 
     const ids = Array.isArray(req.body?.protocolIds) ? [...new Set(req.body.protocolIds.map(String))] : [];
     if (!ids.length) return res.status(400).json({ error: 'PROTOCOLS_REQUIRED' });

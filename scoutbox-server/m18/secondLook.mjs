@@ -21,6 +21,7 @@ import {
   trustLevelChanges, POLICY, LIMITS, clampPage, safeM18Projection,
   CLUB_SIDE_REASONS, REASON_CHANGE_MAP,
 } from './shared.mjs';
+import { rateLimitedBody } from '../m181/rateLimit.mjs';
 
 export function registerSecondLook(ctx) {
   const {
@@ -29,14 +30,8 @@ export function registerSecondLook(ctx) {
   } = ctx;
 
   const now = () => Date.now();
-  const buckets = new Map();
-  function limited(key, max, windowMs) {
-    const t = now();
-    const b = buckets.get(key);
-    if (!b || t - b.start > windowMs) { buckets.set(key, { start: t, n: 1 }); return false; }
-    b.n += 1;
-    return b.n > max;
-  }
+  // M18.1: the shared limiter and its named policy (see m181/rateLimit.mjs).
+  const limited = (action, keyPart) => !!ctx.rateLimit?.limited(action, keyPart);
 
   // ------------------------------------------------------ change collection
 
@@ -481,7 +476,7 @@ export function registerSecondLook(ctx) {
   orgRouter.post('/second-look/:id/review', (req, res) => {
     const item = findItem(req, res);
     if (!item) return;
-    if (limited(`slk:act:${req.org.id}`, LIMITS.reviewActionsPerHour, 3_600_000)) return res.status(429).json({ error: 'RATE_LIMITED' });
+    if (limited('second_look_action', req.org.id)) return res.status(429).json(rateLimitedBody('second_look_action'));
     if (!transition(req, res, item, 'reviewed')) return;
     item.status = 'reviewed';
     item.reviewedAt = now();
@@ -496,7 +491,7 @@ export function registerSecondLook(ctx) {
   orgRouter.post('/second-look/:id/dismiss', (req, res) => {
     const item = findItem(req, res);
     if (!item) return;
-    if (limited(`slk:act:${req.org.id}`, LIMITS.reviewActionsPerHour, 3_600_000)) return res.status(429).json({ error: 'RATE_LIMITED' });
+    if (limited('second_look_action', req.org.id)) return res.status(429).json(rateLimitedBody('second_look_action'));
     const reason = req.body?.reason ?? null;
     if (reason != null && !DISMISSAL_REASONS.includes(reason)) {
       return res.status(400).json({ error: 'SECOND_LOOK_REASON_UNKNOWN', allowed: DISMISSAL_REASONS });
@@ -523,7 +518,7 @@ export function registerSecondLook(ctx) {
   orgRouter.post('/second-look/:id/reopen-room', (req, res) => {
     const item = findItem(req, res);
     if (!item) return;
-    if (limited(`slk:act:${req.org.id}`, LIMITS.reviewActionsPerHour, 3_600_000)) return res.status(429).json({ error: 'RATE_LIMITED' });
+    if (limited('second_look_action', req.org.id)) return res.status(429).json(rateLimitedBody('second_look_action'));
     const room = db.recruitmentCases.find((c) => c.id === item.roomId && c.orgId === req.org.id && c.room);
     if (!room) return res.status(404).json({ error: 'ROOM_NOT_FOUND' });
     const player = findPlayer(item.playerId);

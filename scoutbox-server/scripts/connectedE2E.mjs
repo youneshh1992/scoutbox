@@ -236,7 +236,10 @@ ok(revived?.readBy?.org != null, 'read state survives the crash too');
 // ---- 8. production gate: seeded shortcuts refuse outside development
 child.kill('SIGKILL');
 await new Promise((res) => setTimeout(res, 300));
-await startServer({ NODE_ENV: 'production' });
+// M18.1 boot assertions refuse production mode without a per-deployment media
+// signing secret, so this production-mode section supplies one — a real
+// deployment would. The assertion itself is exercised directly in m181E2E.
+await startServer({ NODE_ENV: 'production', SCOUTBOX_MEDIA_SECRET: 'connected-e2e-media-secret' });
 r = await j('/auth/player/login', { method: 'POST', body: JSON.stringify({ playerId: 'pl-adeyemi' }) });
 ok(r.status === 403 && r.body.error === 'DEV_LOGIN_DISABLED', 'passwordless seed player login refused in production');
 r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane' }) });

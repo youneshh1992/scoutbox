@@ -23,6 +23,7 @@ import {
   measurementCapability, measureAttempt, formatCombineValue, personalBest,
   combineResultHash, comparisonMatrix, COMBINE_TERMINAL, COMBINE_STATE_COPY,
 } from './combineShared.mjs';
+import { rateLimitedBody } from '../m181/rateLimit.mjs';
 
 const PROD_PROVIDER_ID = 'web_client'; // the best honest production provider here
 
@@ -42,14 +43,8 @@ export function registerCombine(ctx) {
   const prodProvider = PROVIDERS[PROD_PROVIDER_ID];
 
   // Rate limits (per §109 / §76): attempt creation and request creation.
-  const windows = new Map();
-  const limited = (key, max, windowMs) => {
-    const now = Date.now();
-    const row = windows.get(key);
-    if (!row || row.resetAt < now) { windows.set(key, { count: 1, resetAt: now + windowMs }); return false; }
-    row.count += 1;
-    return row.count > max;
-  };
+  // M18.1: the shared limiter and its named policy (see m181/rateLimit.mjs).
+  const limited = (action, keyPart) => !!ctx.rateLimit?.limited(action, keyPart);
 
   // ------------------------------------------------------------- views
   const protocolPublic = (p) => ({
@@ -237,7 +232,7 @@ export function registerCombine(ctx) {
 
   // ------------------------------------------------------ create attempt
   playerRouter.post('/combine/attempts', (req, res) => {
-    if (limited(`combine:create:${req.player.id}`, 40, 3_600_000)) return res.status(429).json({ error: 'RATE_LIMITED' });
+    if (limited('combine_attempt', req.player.id)) return res.status(429).json(rateLimitedBody('combine_attempt'));
     const { protocolId, mode = 'verified', provider: providerId, captureContext = 'at_home', requestId } = req.body ?? {};
     const proto = latestCombineProtocol(String(protocolId ?? ''));
     if (!proto || proto.status !== 'active') return res.status(404).json({ error: 'PROTOCOL_UNKNOWN' });
@@ -490,7 +485,7 @@ export function registerCombine(ctx) {
   // non-suspended org selects STANDARDIZED protocols (it cannot alter their
   // rules) for eligible players it can already see. No new access is granted.
   orgRouter.post('/combine/requests', (req, res) => {
-    if (limited(`combine:req:${req.org.id}`, 60, 3_600_000)) return res.status(429).json({ error: 'RATE_LIMITED' });
+    if (limited('room_combine_request', req.org.id)) return res.status(429).json(rateLimitedBody('room_combine_request'));
     if (req.org.type === 'agency') return res.status(403).json({ error: 'AGENCY_NOT_ELIGIBLE', message: 'Agencies cannot request At-Home Combines.' });
     if (req.org.suspended) return res.status(403).json({ error: 'ORG_SUSPENDED' });
     if (!req.org.verified) return res.status(403).json({ error: 'ORG_NOT_ELIGIBLE', message: 'Only a verified organisation can create a Club Combine.' });

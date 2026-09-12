@@ -22,6 +22,9 @@ import { registerM162 } from './m162/index.mjs';
 import { registerM17 } from './m17/index.mjs';
 import { registerM18 } from './m18/index.mjs';
 import { registerSourceChanges } from './m181/sourceChanges.mjs';
+import { audienceFor, EVENT_AUDIENCE } from './m181/eventAudience.mjs';
+import { createRateLimiter, rateLimitedBody, RATE_LIMIT_POLICY } from './m181/rateLimit.mjs';
+import { buildCapabilityReport, productionConfigProblems } from './m181/capabilities.mjs';
 import { requestInstrumentation } from './m13/enterprise.mjs';
 import { totpValid } from './m13/shared.mjs';
 import {
@@ -181,8 +184,43 @@ if (!snapshotLoaded) {
 }
 
 const app = express();
-app.use(cors());
-app.use(express.json({ limit: '20mb' })); // media uploads travel as data URLs
+
+// M18.1 — CORS is an allowlist, not a wildcard.
+//
+// `cors()` with no options answered every origin. ScoutBox authenticates with
+// bearer tokens rather than cookies, so this was not an open door on its own,
+// but "no origin policy at all" is not something a deployment should have to
+// discover by reading the source. SCOUTBOX_ALLOWED_ORIGINS is a comma-separated
+// list; with nothing set, development keeps its old permissive behaviour and
+// says so in the capability report rather than silently locking a developer out
+// of their own machine.
+const ALLOWED_ORIGINS = String(process.env.SCOUTBOX_ALLOWED_ORIGINS ?? '')
+  .split(',').map((o) => o.trim()).filter(Boolean);
+app.use(cors(ALLOWED_ORIGINS.length
+  ? {
+      origin: (origin, cb) => {
+        // A same-origin or non-browser caller sends no Origin header at all.
+        if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+        return cb(null, false);
+      },
+    }
+  : {}));
+
+// Baseline response headers. Nothing here replaces the authorization checks —
+// these only stop a browser from doing something helpful with our responses.
+app.use((_req, res, next) => {
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('Referrer-Policy', 'no-referrer');
+  res.set('X-Frame-Options', 'DENY');
+  res.set('Cross-Origin-Resource-Policy', 'same-site');
+  res.set('Permissions-Policy', 'geolocation=(), microphone=(), payment=()');
+  next();
+});
+
+// 20 MB because media still travels as data URLs on the upload path. The limit
+// is stated here rather than left to the default so it is a decision, not an
+// accident.
+app.use(express.json({ limit: '20mb' }));
 // M13: correlation ids, structured request logs (redacted), request metrics,
 // and the exposure-capture hook. Installed before every route on purpose.
 app.use(requestInstrumentation());
@@ -326,7 +364,25 @@ function shouldDeliver(identity, event, payload) {
     if (identity.kind === 'guardian') return p.guardianId === identity.guardianId;
     return visibleToOrg(p, org) && !isBlocked(p.id, org.id);
   }
-  return true;
+  // M18.1 — nothing falls through to "deliver to everyone" any more. An event
+  // that carried neither an orgId nor a playerId used to return true here,
+  // which meant the NEXT event with a new payload shape would inherit
+  // broadcast-to-all as its default. The audience is now declared per event
+  // name, and an unclassified name fails closed to org_private.
+  switch (audienceFor(event)) {
+    // Catalogue pings: no personal data in the payload, and the refetch on the
+    // other side re-applies every gate.
+    case 'public_safe': return true;
+    case 'trust_safety_only': return identity.kind === 'admin';
+    case 'player_private': return identity.kind === 'player' || identity.kind === 'guardian';
+    case 'guardian_private': return identity.kind === 'guardian';
+    case 'org_member': return identity.kind === 'org';
+    case 'org_private':
+    default:
+      // An organisation-private event that did not name its organisation is a
+      // classification bug, not a licence to deliver it. Nobody gets it.
+      return false;
+  }
 }
 
 function sseFrame(row) {
@@ -3529,6 +3585,11 @@ const m14Ctx = registerM14({
 const srcCtx = { db, nextId, persistNow };
 registerSourceChanges(srcCtx);
 
+// M18.1 — one rate limiter for the whole server. Every limited action is named
+// in RATE_LIMIT_POLICY with its window and scope, and the capability report
+// says plainly that the memory provider counts per process.
+const rateLimit = createRateLimiter();
+
 // M15 — Football Passport: a provenance-aware projection over existing
 // records. Registered after M14 so it can read verification stores; it
 // receives the same context and adds no new authorization surface.
@@ -3540,6 +3601,7 @@ const m15Ctx = registerM15({
   recordSourceChange: srcCtx.recordSourceChange,
 });
 const m16Ctx = registerM16({
+  rateLimit,
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
   findPlayer, isBlocked, moderateOrRefuse,
@@ -3563,6 +3625,7 @@ const m162Ctx = registerM162({
 // shows are the canonical projections, fetched through their own gates on
 // every read. A Room grants no access to anything.
 const m17Ctx = registerM17({
+  rateLimit,
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
@@ -3595,6 +3658,7 @@ const m17Ctx = registerM17({
 // workflow. Neither judges talent, neither ranks, and neither is player-facing:
 // M18 registers no player, guardian or public route at all.
 registerM18({
+  rateLimit,
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
@@ -3615,6 +3679,30 @@ registerM18({
   sourceChangesFor: srcCtx.sourceChangesFor,
 });
 
+// ------------------------------------------------- M18.1 operator surface
+// What this deployment can and cannot actually do. ScoutBox is careful to be
+// honest about missing capability inside the product; this is the same honesty
+// pointed at whoever runs it. States only — no keys, hosts or connection
+// strings ever appear here.
+app.get('/capabilities', (_req, res) => {
+  res.json(buildCapabilityReport({
+    rateLimit,
+    providers: m16Ctx.providerStatus?.() ?? [],
+  }));
+});
+
+// Boot assertions: refuse configuration that would be actively unsafe in
+// production, and leave development untouched.
+{
+  const problems = productionConfigProblems({
+    trustWeightsTotal: m162Ctx.trustWeightsTotal ?? null,
+  });
+  for (const p of problems) console.error(`CONFIG ${p.code}: ${p.message}`);
+  if (problems.some((p) => p.fatal) && process.env.NODE_ENV === 'production') {
+    throw new Error(`Refusing to start: ${problems.filter((p) => p.fatal).map((p) => p.code).join(', ')}`);
+  }
+}
+
 // ---------------------------------------------------- static app hosting
 // Single-container deploys: the Docker build drops the built club app into
 // public/club and the T&S console into public/admin, and this serves them
@@ -3630,9 +3718,36 @@ for (const [route, dir] of [['/app', 'club'], ['/console', 'admin'], ['/grassroo
 }
 
 // ------------------------------------------------------------------- start
-app.use((err, _req, res, _next) => {
+// M18.1 — the error contract.
+//
+// Everything used to arrive as 500 INTERNAL with the raw message attached, so a
+// 25 MB body and a genuine crash were indistinguishable to a client, and the
+// message could carry internal detail. Known request faults now answer with
+// their own machine-readable code, and anything genuinely unexpected stays a
+// 500 whose message is fixed text — the detail goes to the log, not the caller.
+app.use((err, req, res, _next) => {
+  const known = (() => {
+    if (err?.type === 'entity.too.large' || err?.status === 413) {
+      return [413, 'REQUEST_TOO_LARGE', 'That request body is larger than this endpoint accepts.'];
+    }
+    if (err?.type === 'entity.parse.failed' || err instanceof SyntaxError) {
+      return [400, 'MALFORMED_JSON', 'The request body is not valid JSON.'];
+    }
+    if (err?.type === 'encoding.unsupported') {
+      return [415, 'UNSUPPORTED_ENCODING', 'That content encoding is not supported.'];
+    }
+    return null;
+  })();
+  if (known) {
+    const [status, error, message] = known;
+    return res.status(status).json({ error, message, requestId: req.correlationId ?? null });
+  }
   console.error(err);
-  res.status(500).json({ error: 'INTERNAL', message: err.message });
+  res.status(500).json({
+    error: 'INTERNAL',
+    message: 'Something went wrong handling that request.',
+    requestId: req.correlationId ?? null,
+  });
 });
 
 app.listen(PORT, () => {
