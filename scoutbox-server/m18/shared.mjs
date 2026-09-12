@@ -843,3 +843,20 @@ export function safeM18Projection(item) {
   const { orgId, ...rest } = item;
   return rest;
 }
+
+/**
+ * M18.2 — is a Recruitment Brief live on a given calendar day?
+ *
+ * `activeFrom` / `activeUntil` are calendar days ('YYYY-MM-DD'), inclusive at
+ * both ends, compared as UTC calendar-day strings. There is no time-of-day and
+ * no time zone on a brief: a brief that runs "until the 30th" is live for the
+ * whole of the 30th everywhere, and stops being live at the first UTC instant
+ * of the 31st. Extracted from the Nobody Missed router so the boundary can be
+ * tested without a clock.
+ */
+export function briefIsLiveOn(b, today = new Date().toISOString().slice(0, 10)) {
+  if (!b || b.status !== 'active') return false;
+  if (b.activeFrom && today < String(b.activeFrom)) return false;
+  if (b.activeUntil && today > String(b.activeUntil)) return false;
+  return true;
+}

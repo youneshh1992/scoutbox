@@ -63,6 +63,11 @@ export function guardRev(req, res, record, { errorCode, current }) {
     error: errorCode,
     expectedRev: expected,
     currentRev: now,
+    // M18.2: who moved it and when — a display name, never a user id — so the
+    // shared conflict notice can say "Tom Field changed this" instead of
+    // "someone".
+    updatedBy: record?.revBy?.name ?? null,
+    updatedAt: record?.revAt ?? null,
     ...current,
     message: 'Someone else changed this while you were working on it. Reload to see their change, then apply yours.',
   });

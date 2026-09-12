@@ -20,7 +20,7 @@ import {
   BRIEF_STATUSES, canBriefTransition, EVALUATION_COVERAGE_POLICY_VERSION,
   COVERAGE_POLICY, EVALUATION_SIGNALS, NON_EVALUATION_SIGNALS,
   NOBODY_MISSED_STATES, NM_DISMISSAL_REASONS, NM_SORTS, orderNobodyMissed,
-  EVIDENCE_REQUIREMENTS, POSITIONS, TRUST_BANDS, LIMITS, clampPage,
+  EVIDENCE_REQUIREMENTS, POSITIONS, TRUST_BANDS, LIMITS, clampPage, briefIsLiveOn,
 } from './shared.mjs';
 import { rateLimitedBody } from '../m181/rateLimit.mjs';
 import { guardRev, bumpRev, revMeta } from '../m181/concurrency.mjs';
@@ -226,13 +226,8 @@ export function registerNobodyMissed(ctx) {
 
   // --------------------------------------------------------- nobody missed
 
-  const briefIsLive = (b) => {
-    if (b.status !== 'active') return false;
-    const today = new Date().toISOString().slice(0, 10);
-    if (b.activeFrom && today < String(b.activeFrom)) return false;
-    if (b.activeUntil && today > String(b.activeUntil)) return false;
-    return true;
-  };
+  // M18.2: the window rule lives in shared.mjs so its boundaries are testable.
+  const briefIsLive = (b) => briefIsLiveOn(b);
 
   const reviewFor = (orgId, briefId, playerId) => (db.nobodyMissedReviews ?? [])
     .find((r) => r.orgId === orgId && r.briefId === briefId && r.playerId === playerId) ?? null;

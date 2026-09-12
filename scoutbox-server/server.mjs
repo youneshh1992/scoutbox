@@ -31,6 +31,7 @@ import { registerNotificationPrefs } from './m182/notificationPrefs.mjs';
 import { registerAudit } from './m182/audit.mjs';
 import { createFaultLayer } from './m182/faults.mjs';
 import { httpContractMiddleware } from './m182/httpContract.mjs';
+import { integrityReport, integritySummary } from './m182/integrity.mjs';
 import { requestInstrumentation } from './m13/enterprise.mjs';
 import { totpValid } from './m13/shared.mjs';
 import {
@@ -125,6 +126,13 @@ loadSnapshot();
 // fine: they are the same idempotent shape this registry now records.
 const migrationResult = runMigrations(db, { log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); } });
 if (migrationResult.ran.length) console.log(`schema ${migrationResult.from} → ${migrationResult.to}: applied ${migrationResult.ran.join(', ')}`);
+// M18.2 — integrity is reported at boot, never repaired. A violation is
+// logged as codes and ids (no names) and counted on /capabilities; the
+// process still starts, because a running server that says "two open Rooms
+// for one player" is more useful than a dead one that says nothing.
+const integrity = integrityReport(db);
+for (const v of integrity.violations) console.error(`INTEGRITY ${v.code} key=${v.key} ids=${v.ids.join(',')}`);
+if (integrity.violations.length) console.error(`INTEGRITY ${integrity.violations.length} violation(s) in the loaded snapshot — nothing was repaired.`);
 for (const sess of db.sessions) sess.sid ??= crypto.randomBytes(6).toString('hex');
 
 // Normalise media items (older shapes) + load the seeded sample clips.
@@ -239,12 +247,14 @@ app.use((_req, res, next) => {
 // 20 MB because media still travels as data URLs on the upload path. The limit
 // is stated here rather than left to the default so it is a decision, not an
 // accident.
+// M18.2 — the HTTP contract wraps res.json BEFORE the body parser, so a
+// malformed-body 400 carries the same retry/schema headers as every other error.
+app.use(httpContractMiddleware({ ratePolicy: RATE_LIMIT_POLICY, schemaVersion: () => db.schema?.version ?? 0 }));
 app.use(express.json({ limit: '20mb' }));
 // M18.2 — the HTTP contract headers (Retry-After on 429, retryability on every
 // error, the schema version on every response) and the development-only
 // fault layer. The fault layer refuses to exist in production; installing it
 // there is a no-op middleware and no /__faults route.
-app.use(httpContractMiddleware({ ratePolicy: RATE_LIMIT_POLICY, schemaVersion: () => db.schema?.version ?? 0 }));
 const faultLayer = createFaultLayer();
 faultLayer.install(app);
 // M13: correlation ids, structured request logs (redacted), request metrics,
@@ -3822,6 +3832,7 @@ app.get('/capabilities', (_req, res) => {
     // M18.2 — states only, as before. Counts are counts, never subjects.
     extra: {
       schema: schemaReport(db),
+      integrity: { ...integritySummary(integrity), note: 'Checked once at boot; violations are reported, never repaired.' },
       events: {
         registered: EVENT_NAMES.length,
         payloadDrops: eventPayloadDrops.count,
