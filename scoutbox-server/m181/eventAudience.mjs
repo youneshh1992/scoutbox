@@ -1,19 +1,12 @@
 /**
  * M18.1 — explicit event audiences.
  *
- * Delivery used to be inferred entirely from the shape of the payload: an event
- * carrying `orgId` was organisation-private, one carrying `playerId` went to
- * that player and to clubs that could see them, and anything with neither fell
- * through to `return true` — delivered to every connected identity, player and
- * rival club included.
- *
- * Today's unclassified events are harmless cache pings, so nothing has leaked.
- * But "safe because of what we happen to put in the payload" is not a privacy
- * model: the next event with a new shape inherits broadcast-to-everyone as its
- * default. M17 already shipped one leak of exactly this kind (the archive event
- * reached the subject player's stream), which is why this file exists.
- *
- * So every event name is classified here, and anything unknown FAILS CLOSED.
+ * Since M18.2 the audience table is a VIEW over the canonical event registry
+ * (`m182/eventRegistry.mjs`), which also carries payload allowlists, dedupe
+ * and replay semantics. This module keeps the M18.1 names so nothing that
+ * imported them changes, and so the M18.1 suite keeps asserting the rule it
+ * was written for: every event name is classified, and anything unknown
+ * FAILS CLOSED to org_private.
  *
  *   player_private      only the subject player (and their guardian)
  *   guardian_private    only the guardian
@@ -22,57 +15,17 @@
  *   public_safe         any authenticated identity; carries no personal data
  *   trust_safety_only   Trust & Safety only
  */
+import { EVENT_REGISTRY, AUDIENCES as REGISTRY_AUDIENCES, audienceFor as registryAudienceFor } from '../m182/eventRegistry.mjs';
 
-export const AUDIENCES = [
-  'player_private', 'guardian_private', 'org_private',
-  'org_member', 'public_safe', 'trust_safety_only',
-];
+export const AUDIENCES = REGISTRY_AUDIENCES;
 
-/**
- * The classification table. The value is the audience; the comment is why.
- *
- * A "catalogue ping" is an event whose payload is a bare signal to refetch
- * something the receiver is already authorised to read. It carries no personal
- * data at all, and the authorised read on the other side re-applies every gate.
- */
-export const EVENT_AUDIENCE = {
-  // Catalogue pings — no personal data in the payload; the refetch is gated.
-  players: 'public_safe',
-  orgs: 'public_safe',
-  opportunities: 'public_safe',
-  openTrials: 'public_safe',
-  campaigns: 'public_safe',
-  friendlies: 'public_safe',
-  ledger: 'public_safe',
+/** event name → audience, derived from the registry. */
+export const EVENT_AUDIENCE = Object.freeze(
+  Object.fromEntries(Object.entries(EVENT_REGISTRY).map(([name, def]) => [name, def.audience])),
+);
 
-  // Channel traffic — resolved against the channel's own membership.
-  messages: 'org_private',
-  typing: 'org_private',
-  inbox: 'player_private',
-
-  // Directed notifications — the payload names its own audience.
-  notify: 'player_private',
-
-  // Organisation workspaces.
-  requests: 'org_private',
-  applications: 'org_private',
-  feedback: 'org_private',
-  evidence: 'org_private',
-  recruitment_room_archived: 'org_private',
-
-  // Player-owned records.
-  player_development_evidence_changed: 'player_private',
-};
-
-/**
- * Classify an event. Unknown names are org_private — the most restrictive
- * useful default — rather than "everyone". A new event is therefore invisible
- * until someone classifies it, which is the failure we want: something not
- * appearing is a bug report, something leaking is an incident.
- */
-export function audienceFor(event) {
-  return EVENT_AUDIENCE[event] ?? 'org_private';
-}
+/** Unknown names are org_private — the most restrictive useful default. */
+export const audienceFor = registryAudienceFor;
 
 /** Names an event carrying no classification, for the boot assertion. */
-export const unclassifiedEvents = (names) => names.filter((n) => !(n in EVENT_AUDIENCE));
+export const unclassifiedEvents = (names) => names.filter((n) => !(n in EVENT_REGISTRY));

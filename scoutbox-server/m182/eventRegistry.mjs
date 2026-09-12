@@ -1,0 +1,211 @@
+/**
+ * M18.2 — the canonical event registry.
+ *
+ * M18.1 classified every live event's AUDIENCE. That closed the leak, but an
+ * audience is one fact about an event, and the rest were still implicit in
+ * whichever call site happened to emit it: what the payload may carry, whether
+ * two emissions of the same fact should collapse, whether the event is
+ * replayed to a reconnecting client, whether it may become a notification.
+ * Before M19 adds more events, every one of those facts lives here, once.
+ *
+ * Every field is a decision, not a description:
+ *
+ *   domain               which product area owns the event
+ *   sourceSystem         the canonical store the event is about
+ *   audience             who may receive it (M18.1 vocabulary; fails closed)
+ *   privacyClass         none | subject_reference | org_internal — what the
+ *                        payload could reveal, not what it happens to contain
+ *   payload              the ONLY keys a payload may carry. Anything else is
+ *                        stripped at broadcast time — and in development it
+ *                        throws, because a new key is a new privacy decision
+ *   dedupeStrategy       none | coalesce_by_subject | fingerprint — how two
+ *                        emissions of the same fact are treated by consumers
+ *   replayPolicy         replay | never — whether the SSE reconnect log
+ *                        replays it (typing never; catalogue pings do)
+ *   notificationEligible whether this event may become a person-facing
+ *                        notification (most may not: they are cache pings)
+ *   analyticsEligible    whether it may be counted; never with a subject id
+ *
+ * "public_safe" means the payload carries no personal data at all and the
+ * receiver's refetch re-applies every gate. A payload that names a player is
+ * routed by the subject rules in shouldDeliver BEFORE the audience default
+ * applies, which is why `players` can be public_safe and still carry a
+ * playerId: the id narrows delivery, it never widens it.
+ */
+
+export const AUDIENCES = [
+  'player_private', 'guardian_private', 'org_private',
+  'org_member', 'public_safe', 'trust_safety_only',
+];
+export const PRIVACY_CLASSES = ['none', 'subject_reference', 'org_internal'];
+export const DEDUPE = ['none', 'coalesce_by_subject', 'fingerprint'];
+export const REPLAY = ['replay', 'never'];
+
+const ping = (domain, sourceSystem, payload = []) => ({
+  domain, sourceSystem, audience: 'public_safe',
+  privacyClass: payload.length ? 'subject_reference' : 'none',
+  payload, dedupeStrategy: payload.length ? 'coalesce_by_subject' : 'none',
+  replayPolicy: 'replay', notificationEligible: false, analyticsEligible: false,
+});
+
+export const EVENT_REGISTRY = {
+  // ---- catalogue pings: "refetch this", nothing more
+  players: ping('players', 'players', ['playerId']),
+  orgs: ping('organisations', 'orgs'),
+  opportunities: ping('recruitment', 'opportunities'),
+  openTrials: ping('trials', 'openTrials'),
+  campaigns: ping('campaigns', 'campaigns'),
+  friendlies: ping('grassroots', 'friendlies'),
+  ledger: { ...ping('discovery', 'ledger', ['playerId']), payload: ['type', 'playerId'] },
+
+  // ---- channel traffic, resolved against the channel's own membership
+  messages: {
+    domain: 'messaging', sourceSystem: 'channels', audience: 'org_private',
+    privacyClass: 'subject_reference', payload: ['channelId'],
+    dedupeStrategy: 'none', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: false,
+  },
+  typing: {
+    domain: 'messaging', sourceSystem: 'channels', audience: 'org_private',
+    privacyClass: 'subject_reference', payload: ['channelId', 'side'],
+    dedupeStrategy: 'coalesce_by_subject', replayPolicy: 'never', notificationEligible: false, analyticsEligible: false,
+  },
+  inbox: {
+    domain: 'messaging', sourceSystem: 'requests', audience: 'player_private',
+    privacyClass: 'subject_reference', payload: ['playerId'],
+    dedupeStrategy: 'coalesce_by_subject', replayPolicy: 'replay', notificationEligible: false, analyticsEligible: false,
+  },
+
+  // ---- directed notification ping: the payload names its own audience
+  notify: {
+    domain: 'notifications', sourceSystem: 'notifications', audience: 'player_private',
+    privacyClass: 'subject_reference', payload: ['audienceKind', 'audienceId'],
+    dedupeStrategy: 'coalesce_by_subject', replayPolicy: 'replay', notificationEligible: false, analyticsEligible: false,
+  },
+
+  // ---- organisation workspaces
+  requests: {
+    domain: 'recruitment', sourceSystem: 'requests', audience: 'org_private',
+    privacyClass: 'subject_reference', payload: ['playerId'],
+    dedupeStrategy: 'coalesce_by_subject', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: true,
+  },
+  applications: {
+    domain: 'recruitment', sourceSystem: 'applications', audience: 'org_private',
+    privacyClass: 'subject_reference', payload: ['playerId'],
+    dedupeStrategy: 'coalesce_by_subject', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: true,
+  },
+  feedback: {
+    domain: 'assessments', sourceSystem: 'assessments', audience: 'org_private',
+    privacyClass: 'subject_reference', payload: ['playerId'],
+    dedupeStrategy: 'coalesce_by_subject', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: false,
+  },
+  evidence: {
+    domain: 'evidence', sourceSystem: 'evidence', audience: 'org_private',
+    privacyClass: 'subject_reference', payload: ['playerId'],
+    dedupeStrategy: 'coalesce_by_subject', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: true,
+  },
+  recruitment_room_archived: {
+    domain: 'recruitment_rooms', sourceSystem: 'cases', audience: 'org_private',
+    // Reduced in M18.2: the live payload used to carry status, reasonCodes,
+    // revisitable, decisionAt and the snapshot's sourceRefs. No consumer of
+    // the STREAM reads any of them — the client refetches, and Second Look
+    // reconciles server-side from the canonical decision row. Ids only.
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId'],
+    dedupeStrategy: 'fingerprint', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: true,
+  },
+  recruitment_room_reopened_from_second_look: {
+    // Emitted since M18, never classified until M18.2. It carried an orgId, so
+    // the subject rules kept it inside the organisation — but only by luck of
+    // payload shape, which is exactly what the registry exists to replace.
+    domain: 'second_look', sourceSystem: 'cases', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'itemId'],
+    dedupeStrategy: 'fingerprint', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: true,
+  },
+
+  // ---- player-owned records
+  player_development_evidence_changed: {
+    domain: 'box_cam', sourceSystem: 'boxSessions', audience: 'player_private',
+    privacyClass: 'subject_reference', payload: ['playerId'],
+    dedupeStrategy: 'coalesce_by_subject', replayPolicy: 'replay', notificationEligible: false, analyticsEligible: false,
+  },
+};
+
+export const EVENT_NAMES = Object.freeze(Object.keys(EVENT_REGISTRY));
+
+/** Audience for an event. Unknown names fail closed — the M18.1 rule, unchanged. */
+export function audienceFor(event) {
+  return EVENT_REGISTRY[event]?.audience ?? 'org_private';
+}
+
+export const isRegistered = (event) => Object.prototype.hasOwnProperty.call(EVENT_REGISTRY, event);
+
+/**
+ * Reduce a payload to what the registry allows. Returns the reduced payload
+ * and the keys that were dropped, so the caller can decide how loudly to
+ * complain: development throws (a new key is a new privacy decision that
+ * someone has to make), production strips and counts.
+ */
+export function minimizePayload(event, payload = {}) {
+  const def = EVENT_REGISTRY[event];
+  if (!def) return { payload: {}, dropped: Object.keys(payload ?? {}), unregistered: true };
+  const allowed = new Set(def.payload);
+  const out = {};
+  const dropped = [];
+  for (const [k, v] of Object.entries(payload ?? {})) {
+    if (allowed.has(k)) out[k] = v; else dropped.push(k);
+  }
+  return { payload: out, dropped, unregistered: false };
+}
+
+/**
+ * One fingerprint rule for every consumer that dedupes. The same canonical
+ * fact reaching notifications, Second Look and analytics through different
+ * projectors must fingerprint identically, or it becomes four events.
+ *
+ *   fingerprint          type:sourceSystem:sourceId — the M18 rule
+ *   coalesce_by_subject  event:subjectId — repeated pings collapse
+ *   none                 every emission distinct
+ */
+export function eventFingerprint(event, payload = {}) {
+  const def = EVENT_REGISTRY[event];
+  if (!def) return null;
+  switch (def.dedupeStrategy) {
+    case 'fingerprint': {
+      const id = payload.roomId ?? payload.itemId ?? payload.sourceId ?? payload.playerId ?? '';
+      return `${event}:${def.sourceSystem}:${id}`;
+    }
+    case 'coalesce_by_subject': {
+      const subject = payload.playerId ?? payload.channelId ?? payload.audienceId ?? payload.orgId ?? '*';
+      return `${event}:${subject}`;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * Boot assertion. Every registered event must be internally consistent, and
+ * every name the server is known to emit must be registered. `emitted` is the
+ * list of names the caller actually broadcasts (server.mjs passes its own).
+ * Development and test throw; production returns the problems so the caller
+ * can log them and keep the fail-closed default doing its job.
+ */
+export function assertEventRegistry({ emitted = [], mode = process.env.NODE_ENV ?? 'development' } = {}) {
+  const problems = [];
+  for (const [name, def] of Object.entries(EVENT_REGISTRY)) {
+    if (!AUDIENCES.includes(def.audience)) problems.push(`${name}: audience "${def.audience}" is not a known audience`);
+    if (!PRIVACY_CLASSES.includes(def.privacyClass)) problems.push(`${name}: privacyClass "${def.privacyClass}" unknown`);
+    if (!DEDUPE.includes(def.dedupeStrategy)) problems.push(`${name}: dedupeStrategy "${def.dedupeStrategy}" unknown`);
+    if (!REPLAY.includes(def.replayPolicy)) problems.push(`${name}: replayPolicy "${def.replayPolicy}" unknown`);
+    if (!Array.isArray(def.payload)) problems.push(`${name}: payload allowlist missing`);
+    if (def.audience === 'public_safe' && def.privacyClass === 'org_internal') problems.push(`${name}: org_internal content cannot be public_safe`);
+    // A payload that names a person is never "no privacy class".
+    if ((def.payload ?? []).some((k) => /playerId|guardianId|audienceId/.test(k)) && def.privacyClass === 'none') {
+      problems.push(`${name}: names a subject but claims privacyClass none`);
+    }
+  }
+  for (const name of emitted) if (!isRegistered(name)) problems.push(`emitted event "${name}" is not registered`);
+  if (problems.length && mode !== 'production') {
+    throw new Error(`Event registry invalid:\n  ${problems.join('\n  ')}`);
+  }
+  return problems;
+}

@@ -25,6 +25,7 @@ import { registerSourceChanges } from './m181/sourceChanges.mjs';
 import { audienceFor, EVENT_AUDIENCE } from './m181/eventAudience.mjs';
 import { createRateLimiter, rateLimitedBody, RATE_LIMIT_POLICY } from './m181/rateLimit.mjs';
 import { buildCapabilityReport, productionConfigProblems } from './m181/capabilities.mjs';
+import { minimizePayload, assertEventRegistry, EVENT_NAMES } from './m182/eventRegistry.mjs';
 import { requestInstrumentation } from './m13/enterprise.mjs';
 import { totpValid } from './m13/shared.mjs';
 import {
@@ -196,15 +197,21 @@ const app = express();
 // of their own machine.
 const ALLOWED_ORIGINS = String(process.env.SCOUTBOX_ALLOWED_ORIGINS ?? '')
   .split(',').map((o) => o.trim()).filter(Boolean);
+// M18.2: headers a browser client is allowed to READ. Retry-After lets the
+// client honour a 429 instead of guessing; the request id lets a person quote
+// one when something goes wrong; the ordering header states how a list was
+// sorted. None of them is readable cross-origin unless exposed here.
+const EXPOSED_HEADERS = ['Retry-After', 'X-Request-Id', 'X-ScoutBox-Ordering', 'X-ScoutBox-Schema'];
 app.use(cors(ALLOWED_ORIGINS.length
   ? {
+      exposedHeaders: EXPOSED_HEADERS,
       origin: (origin, cb) => {
         // A same-origin or non-browser caller sends no Origin header at all.
         if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
         return cb(null, false);
       },
     }
-  : {}));
+  : { exposedHeaders: EXPOSED_HEADERS }));
 
 // Baseline response headers. Nothing here replaces the authorization checks —
 // these only stop a browser from doing something helpful with our responses.
@@ -389,7 +396,25 @@ function sseFrame(row) {
   return `id: ${row.id}\ndata: ${JSON.stringify({ event: row.event, ...row.payload, ts: row.ts })}\n\n`;
 }
 
-function broadcast(event, payload = {}) {
+// M18.2 — payloads that the registry did not allow, counted for /capabilities.
+const eventPayloadDrops = { count: 0, lastEvent: null };
+
+function broadcast(event, rawPayload = {}) {
+  // M18.2: the registry is the only authority on what an event may carry. A
+  // key it does not list is stripped before anything is written to a stream
+  // or the replay log — and in development it throws, because a new key on a
+  // live event is a privacy decision somebody has to make on purpose, not one
+  // that ships because a call site happened to spread an object.
+  const { payload, dropped, unregistered } = minimizePayload(event, rawPayload);
+  if (unregistered || dropped.length) {
+    eventPayloadDrops.count += 1;
+    eventPayloadDrops.lastEvent = event;
+    const msg = unregistered
+      ? `broadcast('${event}') is not in the event registry`
+      : `broadcast('${event}') carried unregistered payload keys: ${dropped.join(', ')}`;
+    if ((process.env.NODE_ENV ?? 'development') !== 'production') throw new Error(msg);
+    console.error(`EVENT ${msg} — stripped`);
+  }
   if (event !== 'typing') persist(); // every broadcast (bar ephemeral typing) follows a state change
   const row = { id: ++eventSeq, event, payload, ts: Date.now() };
   if (event !== 'typing') {
@@ -1575,14 +1600,29 @@ orgRouter.get('/players', (req, res) => {
   if (req.org.level === 'grassroots') {
     // First Team Seekers surface first (need-based, never purchasable),
     // then nearest ground, then trust.
+    // M18.2: the final key is the player id. Without it two players with the
+    // same completeness figure could swap places between two reads of the
+    // same list, which reads as movement where there is none. The ordering
+    // itself is unchanged and is stated to the user in the client — see
+    // M18_2_SORTING_AUDIT.md for why it was kept rather than replaced.
     list.sort((a, b) =>
       (b.firstTeamSeeker ? 1 : 0) - (a.firstTeamSeeker ? 1 : 0) ||
       (a.distanceKm ?? 999) - (b.distanceKm ?? 999) ||
-      b.trustScore - a.trustScore);
+      b.profileSignal - a.profileSignal ||
+      String(a.id).localeCompare(String(b.id)));
   } else {
-    // Academy+ is a boosted cohort: opted-in players surface first.
-    list.sort((a, b) => (b.academyPlus ? 1 : 0) - (a.academyPlus ? 1 : 0) || b.trustScore - a.trustScore);
+    // Academy+ is a boosted cohort: opted-in players surface first. Then
+    // PROFILE COMPLETENESS (never ability), then the id as a stable tie-break.
+    list.sort((a, b) =>
+      (b.academyPlus ? 1 : 0) - (a.academyPlus ? 1 : 0) ||
+      b.profileSignal - a.profileSignal ||
+      String(a.id).localeCompare(String(b.id)));
   }
+  // The ordering is declared, not inferred. The header (rather than a body
+  // change) keeps the array contract every client already consumes.
+  res.set('X-ScoutBox-Ordering', req.org.level === 'grassroots'
+    ? 'first_team_seeker,distance,profile_completeness,player_id'
+    : 'academy_plus,profile_completeness,player_id');
   res.json(list);
 });
 
@@ -3733,6 +3773,26 @@ app.get('/capabilities', (_req, res) => {
   if (problems.some((p) => p.fatal) && process.env.NODE_ENV === 'production') {
     throw new Error(`Refusing to start: ${problems.filter((p) => p.fatal).map((p) => p.code).join(', ')}`);
   }
+}
+
+// M18.2 — the event registry must be internally consistent, and every event
+// this process emits must be in it. Development and test throw here; in
+// production the problems are logged and the fail-closed audience default
+// keeps an unregistered event from reaching anyone. EMITTED_EVENTS is the
+// list of names broadcast() is called with anywhere in the server; the M18.2
+// suite greps the source and fails if this list and the call sites disagree.
+export const EMITTED_EVENTS = Object.freeze([
+  'players', 'orgs', 'opportunities', 'openTrials', 'campaigns', 'friendlies', 'ledger',
+  'messages', 'typing', 'inbox', 'notify',
+  'requests', 'applications', 'feedback', 'evidence',
+  'recruitment_room_archived', 'recruitment_room_reopened_from_second_look',
+  'player_development_evidence_changed',
+]);
+{
+  const problems = assertEventRegistry({ emitted: EMITTED_EVENTS });
+  for (const p of problems) console.error(`EVENT REGISTRY ${p}`);
+  const unemitted = EVENT_NAMES.filter((n) => !EMITTED_EVENTS.includes(n));
+  if (unemitted.length) console.warn(`event registry lists names the server never emits: ${unemitted.join(', ')}`);
 }
 
 // ---------------------------------------------------- static app hosting

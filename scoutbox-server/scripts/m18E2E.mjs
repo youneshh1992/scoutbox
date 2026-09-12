@@ -698,8 +698,16 @@ section('A second archived room for the same player does not double the alert');
   // A club that evaluated a player years ago, archived, and evaluated them
   // again later has TWO ended rooms. "Since we last decided" still has exactly
   // one answer, so one new full match must raise one item, not one per room.
-  const THIRD = players.find((p) => p.id !== ADULT.id && p.id !== OTHER.id && p.name);
-  const older = (await j('POST', '/org/rooms', { playerId: THIRD.id }, maria.token)).body.room;
+  // Re-read the list here rather than reusing the one from the top of the
+  // suite: sections above have blocked and hidden players, and the position a
+  // given player lands in the list is a Discover ordering detail this test has
+  // no business depending on (it did, until M18.2 added a stable tie-break and
+  // the "third" player became one an earlier section had made invisible).
+  const visibleNow = (await j('GET', '/org/players', undefined, maria.token)).body;
+  const THIRD = visibleNow.find((p) => p.id !== ADULT.id && p.id !== OTHER.id && p.name);
+  const olderRes = await j('POST', '/org/rooms', { playerId: THIRD.id }, maria.token);
+  if (!olderRes.body?.room) fail(`could not open a room for ${THIRD.id}: ${olderRes.status} ${JSON.stringify(olderRes.body).slice(0, 200)}`);
+  const older = olderRes.body.room;
   await j('POST', `/org/rooms/${older.roomId}/status`, { status: 'under_review' }, maria.token);
   await j('POST', `/org/rooms/${older.roomId}/status`, { status: 'archived', reasonCodes: ['insufficient_recent_evidence'] }, maria.token);
   await sleep(5);

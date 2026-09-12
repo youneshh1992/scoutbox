@@ -1011,7 +1011,11 @@ export function registerRooms(ctx) {
     if (['archived', 'closed', 'withdrawn'].includes(room.room.status)) {
       // The Second Look contract: a typed, machine-readable domain event with
       // reason CODES and no private free text.
-      broadcast?.('recruitment_room_archived', secondLookEvent(room, d));
+      // M18.2: the STREAM carries ids only. secondLookEvent() remains the
+      // internal shape (reason codes, revisitability, source refs) for the
+      // Second Look engine and its tests; none of that belongs on a live
+      // channel whose only consumer refetches through an authorised read.
+      broadcast?.('recruitment_room_archived', { orgId: room.orgId, roomId: room.id });
     }
     return d;
   }

@@ -15,11 +15,23 @@ export function adultAgeFor(country) {
   return ADULT_AGE[country] ?? ADULT_AGE.DEFAULT;
 }
 
+/**
+ * Age in completed years on a given instant.
+ *
+ * M18.2: computed in UTC throughout. A date of birth is stored as a calendar
+ * day ('YYYY-MM-DD'), which `new Date()` parses as UTC midnight; the previous
+ * implementation then read it back through LOCAL getters, so in any
+ * negative-offset timezone `getDate()` returned the day BEFORE the birthday
+ * and every player was a day older or younger than they are around their
+ * birthday. The container that runs the suites is UTC, which is why nothing
+ * caught it. Birthday semantics: the player turns N at 00:00 UTC on the
+ * birthday; a 29 February birthday counts on 1 March in a non-leap year.
+ */
 export function ageOn(dob, onDate = new Date()) {
   const birth = new Date(dob);
-  let age = onDate.getFullYear() - birth.getFullYear();
-  const m = onDate.getMonth() - birth.getMonth();
-  if (m < 0 || (m === 0 && onDate.getDate() < birth.getDate())) age--;
+  let age = onDate.getUTCFullYear() - birth.getUTCFullYear();
+  const m = onDate.getUTCMonth() - birth.getUTCMonth();
+  if (m < 0 || (m === 0 && onDate.getUTCDate() < birth.getUTCDate())) age--;
   return age;
 }
 
