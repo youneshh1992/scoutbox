@@ -121,7 +121,7 @@ async function driveClub(url, label, { enterprise }) {
   await app.click('[aria-label="Room sections"] button[role="tab"]:has-text("Decision")');
   {
     const panel = await app.locator('[role="tabpanel"][aria-label="Decision"]').innerText();
-    if (!/Trust at decision/i.test(panel)) fail(`${label}: the decision-time Trust snapshot is not shown`);
+    if (!/Trust( Score)? at decision/i.test(panel)) fail(`${label}: the decision-time Trust snapshot is not shown`);
     say(`${label}: an archived room shows the Trust Score at decision time beside the current one`);
     if (!/insufficient|recent evidence/i.test(panel)) fail(`${label}: the structured archive reason is not shown`);
     say(`${label}: the archive reason is shown as a structured, machine-readable reason`);

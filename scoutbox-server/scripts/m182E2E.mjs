@@ -486,6 +486,7 @@ section('§21 — every error says whether to retry; every response says its sch
   neg(malformed.status === 400 && malformed.headers.get('x-scoutbox-retry') === 'not-retryable', 'malformed JSON is 400, not retryable');
   const huge = await fetch(`${BASE}/org/rooms`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${maria.token}` }, body: JSON.stringify({ playerId: 'x'.repeat(21 * 1024 * 1024) }) });
   neg(huge.status === 413 && huge.headers.get('x-scoutbox-retry') === 'not-retryable', 'an oversized body is 413, not retryable');
+  ok(!!notFound.headers.get('x-request-id'), 'an error response carries a correlation id header');
   const nowhere = await j('GET', '/no/such/route', undefined, maria.token);
   neg(nowhere.status === 404 && nowhere.headers.get('x-scoutbox-schema') === String(SCHEMA_VERSION), 'an unknown route still carries the schema header');
 }
@@ -622,7 +623,7 @@ section('§26 — simulated latency and failure: isolated, retryable, idempotent
   const down = await j('GET', '/org/players', undefined, maria.token);
   neg(down.status === 503 && down.body.error === 'SOURCE_UNAVAILABLE' && down.body.retryable === true && down.headers.get('x-scoutbox-retry') === 'retryable',
     'an unavailable source is a 503 marked retryable');
-  ok(down.body.simulated === true, 'and says it is simulated');
+  ok(down.body.simulated === true && down.body.requestId === down.headers.get('x-request-id'), 'and says it is simulated, with the same correlation id in body and header');
   neg((await j('GET', '/org/rooms', undefined, maria.token)).status === 200, 'the Room list is unaffected by the player source being down');
   await setFaults('retryable:/org/players:1');
   const first = await j('GET', '/org/players', undefined, maria.token);
