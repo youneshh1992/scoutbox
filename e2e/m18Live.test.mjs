@@ -157,6 +157,8 @@ say('M1: the scout opens a Recruitment Room from Discover');
 await scout.selectOption('[aria-label="Move to"]', 'under_review');
 await scout.click('button:has-text("Apply")');
 await scout.waitForTimeout(700);
+// M18.2: archiving asks for confirmation with its consequence stated; accept it.
+scout.on('dialog', (d) => d.accept());
 await scout.selectOption('[aria-label="Move to"]', 'archived');
 await scout.waitForTimeout(400);
 await scout.check('input[type="checkbox"][aria-label="Not enough recent evidence"]');

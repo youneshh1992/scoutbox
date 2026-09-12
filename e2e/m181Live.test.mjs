@@ -242,7 +242,8 @@ await scout.route(/\/org\/rooms\/[^/]+\/status$/, async (route) => {
   say('H2: a colleague moved the room while this page’s own request was in flight');
   if (server.status !== 'under_review') fail('H2: the stale transition was applied — the colleague’s move was overwritten');
   say('H2: the stale transition is refused — the colleague’s move stands');
-  if (!/Someone else changed this while you were working on it/i.test(body)) {
+  // M18.2: the shared ConflictNotice leads with its own sentence and names the colleague.
+  if (!/Someone else changed this while you were working on it|This changed while you were editing/i.test(body)) {
     const toast = await scout.locator('.toast').innerText().catch(() => '(no toast on screen)');
     console.error(`  toast said: ${toast}`);
     fail('H2: the refusal was not explained to the person who made it');

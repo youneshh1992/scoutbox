@@ -192,6 +192,8 @@ await scoutA.waitForSelector('[role="tabpanel"][aria-label="Decision"]', { timeo
 {
   const before = await scoutA.locator('body').innerText();
   await scoutA.click('[aria-label="Room sections"] button[role="tab"]:has-text("Overview")');
+  // M18.2: archiving asks for confirmation with its consequence stated; accept it.
+  scoutA.on('dialog', (d) => d.accept());
   await scoutA.selectOption('[aria-label="Move to"]', 'archived');
   // Archiving without a reason must be refused by the UI or the server.
   await scoutA.click('button:has-text("Apply")');

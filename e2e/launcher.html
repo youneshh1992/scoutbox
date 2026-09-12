@@ -92,7 +92,7 @@
   <header>
     <div class="mark">Scout<span class="box">Box</span> — App Launcher</div>
     <p class="sub">One bookmark for every ScoutBox app. Each tile opens an interactive demo of the actual current interface, running entirely in your browser on synthetic sample data.</p>
-    <span class="buildchip"><span class="dot"></span>Source version <code>4ceb204</code> · built 2026-09-12 · Milestone 18.1 — Production Hardening &amp; UX Cleanup</span>
+    <span class="buildchip"><span class="dot"></span>Source version <code>09a0706</code> · built 2026-09-12 · Milestone 18.2 — Final Pre-M19 Cleanup</span>
   </header>
 
   <div class="grid">
@@ -123,6 +123,24 @@
     </a>
   </div>
 
+
+  <section class="notes feature">
+    <h3>What changed in Milestone 18.2 — Final Pre-M19 Cleanup</h3>
+    <p class="sub" style="font-size:13px;margin:-4px 0 12px">No new recruitment concept, and deliberately no M19: no Explainable Matching, no Dynamic Watchlists, no player score. M18.2 removes ambiguity — a notification nobody could mute, a conflict told two different ways, an ordering nobody had declared, a schema nobody had versioned, an age computed in whatever time zone the server happened to be in — so that M19 is built on decisions that are written down.</p>
+    <ul>
+      <li><b>1 · Choose what reaches you</b> — Organisation → <b>Notification preferences</b>. Twelve categories; mentions, assignments, Room changes, evidence, Combine, trials, Second Look, Briefs, messages and outcomes are on; discovery nudges are off; <b>Security and account</b> is always on and says why. A muted category produces nothing — not a hidden row, nothing. Email is described as what it is in this build: a local outbox, never delivery.</li>
+      <li><b>2 · One conflict, one experience</b> — when a colleague changes the Room or Brief you are editing, the same notice appears on both, names <i>who</i> changed it, keeps every word you typed, and offers <b>Reload latest</b> or <b>Keep my changes</b>. The live suite found the first version showed the stale Brief after Reload; it re-reads now.</li>
+      <li><b>3 · You will not lose a form by accident</b> — leaving a Brief with unsaved changes asks first, whether you use the sidebar, the address bar, Back, reload or close. A clean form never asks. The first implementation could let a dirty form go on a hash change; the live suite caught it and the decision now happens before anything changes.</li>
+      <li><b>4 · Discover says how it is ordered</b> — “Ordered by Academy+ opt-in, then profile completeness, then player id … not ability, and not the Trust Score.” The order itself was deliberately kept; it is now deterministic (two reads, same order), declared on the wire, and stated on the screen. <code>M18_2_SORTING_AUDIT.md</code> lists every ordered surface and says which could be misread as a ranking.</li>
+      <li><b>5 · The organisation’s own record</b> — Organisation → <b>Organisation activity</b>: what happened and who did it, across Rooms, Briefs and staff changes, for leads only. It says <i>that</i> a note was written and never shows the note, a comment or a decision’s text. A scout sees a permission message — and stays signed in; a 403 is about one request, not the session.</li>
+      <li><b>6 · Destructive actions say what they do</b> — archive, close, delete, cancel, remove and record signing each state their consequence (“Decision history, comments and tasks are preserved”) and never ask “are you sure?”. Pausing a Brief or dismissing a Second Look item needs no confirmation, because undoing them is one click away.</li>
+      <li><b>7 · Every event is registered</b> — the server’s 18 events sit in one registry with an audience, a privacy class and a payload allowlist; a key that is not allowlisted does not ship, and development refuses to boot if a broadcast is not in the registry. A Room archival now carries two ids and nothing else.</li>
+      <li><b>8 · Provenance has one vocabulary</b> — the Passport, the Room and the Second Look changes all read from one table. An unknown source says <b>“Source unavailable”</b> and credits nobody; it is never guessed as “Player-provided”.</li>
+      <li><b>9 · Dates that mean the same everywhere</b> — a person is 18 from the first UTC instant of their birthday in every time zone the server runs in; a leap-day birth is 18 on 1 March; a Korean 18-year-old is not an adult and a British one is. A Brief window is inclusive calendar days at both ends. Second Look’s 30-day cooldown and 120-day expiry are tested at the exact millisecond.</li>
+      <li><b>10 · Honest to whoever runs it</b> — a schema version on <code>/healthz</code>, on <code>/capabilities</code> and on every response; versioned, idempotent, recorded migrations that upgrade a pre-M18.2 snapshot in place; a boot-time integrity report (one open Room per club and player, unique ids, valid revisions) that reports and never repairs; every error says whether retrying could help, and a 429 says when. Slow and failing sources can be simulated in development and are refused outright in production.</li>
+    </ul>
+    <div class="honest"><b>Honest scope.</b> Discover’s ordering was <b>not</b> replaced — it is declared and made deterministic; changing it is an M19 decision. Email is an intent recorded for when a transport exists. Push quiet hours are still evaluated in server-local time, because they gate a push transport this build does not have. A player-id index was measured and deliberately not added (a scan costs under a microsecond at this scale; the threshold is written down). The notification bell collapses identical repeats but does not yet fold different updates about one object into one row. No Explainable Matching, no Dynamic Watchlists, no AI recommendation, no player ranking or match score, no new sidebar item — M19 starts from here, not inside here.</div>
+  </section>
 
   <section class="notes feature">
     <h3>What changed in Milestone 18.1 — Production Hardening &amp; UX Cleanup</h3>
@@ -306,5 +324,5 @@
     <b>Live cross-device usage requires a hosted backend.</b> These artifacts are self-contained demos. Real accounts, real-time messaging between different people’s devices, and persistent data need the ScoutBox server (Milestone 11) deployed to a host — it is built and tested in the repository, but not deployed as part of this demo.
   </div>
 
-  <footer>ScoutBox · source commit <b>4ceb204</b> (branch claude/desktop-project-migration-wyk3ec, local — not pushed per instruction) · demos built 2026-09-12 · Milestone 18.1 — Production Hardening &amp; UX Cleanup</footer>
+  <footer>ScoutBox · source commit <b>09a0706</b> (branch claude/desktop-project-migration-wyk3ec, local — not pushed per instruction) · demos built 2026-09-12 · Milestone 18.2 — Final Pre-M19 Cleanup</footer>
 </div>

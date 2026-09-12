@@ -89,7 +89,7 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
   await p.evaluate(() => { window.location.hash = '#/recruitment/rooms'; });
   await p.waitForTimeout(1200);
   const pills = await p.locator('[data-provenance]').evaluateAll((els) => els.map((e) => ({ type: e.getAttribute('data-provenance'), known: e.getAttribute('data-known'), text: e.textContent })));
-  ok(!pills.some((x) => x.known === 'false' && /Player-provided/i.test(x.text ?? '')), `${name} no unknown provenance is labelled Player-provided (${pills.length} pills seen)`);
+  ok(!pills.some((x) => x.known === '0' && /Player-provided/i.test(x.text ?? '')), `${name} no unknown provenance is labelled Player-provided (${pills.length} pills seen)`);
 
   // Destructive confirm: a consequence, and declining does nothing
   {

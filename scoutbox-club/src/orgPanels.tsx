@@ -11,14 +11,51 @@
 // Both use the shared HTTP state so a 403 here reads the same as a 403
 // anywhere, and offer "Try again" only when retrying could help.
 import { useCallback, useEffect, useState } from 'react';
-import { API_URL, ApiError, type Session } from './api';
+import { API_URL, DEMO_MODE, ApiError, type Session } from './api';
 import { fmtStamp, t } from './i18n';
 import { httpState } from './httpState';
 
 interface PrefCategory { id: string; label: string; enabled: boolean; mandatory: boolean }
 interface Prefs { categories: PrefCategory[]; emailIntent: boolean; channels: { inApp: string; email: string; note: string } }
 
+// The self-contained demo has no server: preferences live in the page and the
+// audit log shows synthetic operational rows. Both mirror the server's shapes.
+const demoPrefs: Prefs = {
+  categories: [
+    ['mentions', 'Mentions', true], ['assignments', 'Assignments and tasks', true], ['room_changes', 'Recruitment Room changes', true],
+    ['evidence_requests', 'Evidence requests and evidence', true], ['combine', 'Combine requests and results', true],
+    ['trial_updates', 'Trials and trial days', true], ['second_look', 'Second Look', true], ['brief_updates', 'Recruitment Briefs and coverage', true],
+    ['messages', 'Messages and requests', true], ['activity', 'Recruitment outcomes and activity', true],
+    ['discovery_nudges', 'Discovery nudges and badges', false], ['security_account', 'Security and account', true],
+  ].map(([id, label, enabled]) => ({ id: id as string, label: label as string, enabled: enabled as boolean, mandatory: id === 'security_account' })),
+  emailIntent: false,
+  channels: { inApp: 'always', email: 'local_outbox', note: 'In-app delivery always keeps the record. There is no external email transport in this build; the email preference records what you would want when one exists.' },
+};
+const demoAudit = {
+  items: [
+    { id: 'h-3', at: Date.now() - 3600_000, action: 'room_status_changed', domain: 'recruitment_room', actor: { userId: 'u-demo-2', name: 'Tom Field' }, target: { type: 'room', id: 'case-demo-1', playerName: 'Kola Adeyemi' }, detail: { from: 'under_review', to: 'shortlisted', hadNote: true } },
+    { id: 'h-2', at: Date.now() - 26 * 3600_000, action: 'recruitment_brief_activated', domain: 'recruitment_brief', actor: { userId: 'u-demo-1', name: 'Maria Keane' }, target: { type: 'brief', id: 'brief-demo-1', title: '2027 Defensive Midfielder' }, detail: { from: 'draft', to: 'active' } },
+    { id: 'h-1', at: Date.now() - 4 * 86_400_000, action: 'room_created', domain: 'recruitment_room', actor: { userId: 'u-demo-1', name: 'Maria Keane' }, target: { type: 'room', id: 'case-demo-1', playerName: 'Kola Adeyemi' }, detail: null },
+  ],
+  nextCursor: null as string | null,
+  total: 3,
+};
+
 async function call<T>(s: Session, path: string, init: RequestInit = {}): Promise<T> {
+  if (DEMO_MODE) {
+    await new Promise((r) => setTimeout(r, 120));
+    if (path.startsWith('/org/notification-preferences')) {
+      if (init.method === 'PUT') {
+        const body = JSON.parse(String(init.body ?? '{}')) as { categories?: Record<string, boolean> };
+        for (const [k, v] of Object.entries(body.categories ?? {})) {
+          const c = demoPrefs.categories.find((x) => x.id === k);
+          if (c && !c.mandatory) c.enabled = !!v;
+        }
+      }
+      return { preferences: demoPrefs } as T;
+    }
+    if (path.startsWith('/org/audit')) return demoAudit as T;
+  }
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
     headers: { 'content-type': 'application/json', authorization: `Bearer ${s.token}`, ...(init.headers ?? {}) },
