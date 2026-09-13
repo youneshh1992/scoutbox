@@ -44,6 +44,12 @@ export const CATEGORIES = Object.freeze({
   // watchlist is something the club deliberately asked ScoutBox to maintain —
   // it is a requested alert, not an unsolicited nudge.
   watchlist_changes: { label: 'Dynamic Watchlist changes', default: true, mandatory: false },
+  // M21: ONE category for the whole Development Hub, not three. §81 asks for a
+  // reasonable count, and the honest trade is stated rather than hidden: a
+  // person who mutes this mutes shared goals, due actions and shared reviews
+  // together. Splitting it would have produced three switches that are almost
+  // always set the same way, which is how a preferences screen stops being read.
+  development_updates: { label: 'Development plans, goals and reviews', default: true, mandatory: false },
   security_account: { label: 'Security and account', default: true, mandatory: true },
 });
 export const CATEGORY_NAMES = Object.freeze(Object.keys(CATEGORIES));
@@ -62,6 +68,8 @@ export const TYPE_CATEGORY = Object.freeze({
   saved_search: 'activity',
   // M19 watchlist membership changes.
   watchlist: 'watchlist_changes',
+  // M21 Development Hub: one type, one category.
+  development: 'development_updates',
   // evidence and combine
   evidence: 'evidence_requests',
   passport: 'evidence_requests',

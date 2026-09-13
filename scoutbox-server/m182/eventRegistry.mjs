@@ -157,6 +157,71 @@ export const EVENT_REGISTRY = {
     dedupeStrategy: 'fingerprint', replayPolicy: 'replay',
     notificationEligible: false, analyticsEligible: true,
   },
+  // ------------------------------------------------------------------ M21
+  // Development Hub. Every one of these is ORGANISATION-PRIVATE and carries
+  // ids only, and that is a design decision rather than an accident of shape.
+  //
+  // An event carrying a bare playerId is delivered by shouldDeliver to every
+  // organisation that can currently see that player — correct for a catalogue
+  // ping, wrong for a private development plan, where it would announce to
+  // every club within the wall that something happened. So M21 emits nothing
+  // player-directed on the stream at all: a change the player should hear
+  // about reaches them as a NOTIFICATION, which is addressed to one person and
+  // passes through their preferences on the way (§44).
+  //
+  // A player-owned plan shared with two clubs emits one event per club. A
+  // private plan emits none, because there is nobody it would be right to tell.
+  development_plan_created: {
+    domain: 'development', sourceSystem: 'developmentPlans', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'planId'],
+    dedupeStrategy: 'fingerprint', replayPolicy: 'replay',
+    notificationEligible: true, analyticsEligible: false,
+  },
+  development_plan_updated: {
+    domain: 'development', sourceSystem: 'developmentPlans', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'planId'],
+    dedupeStrategy: 'coalesce_by_subject', replayPolicy: 'replay',
+    notificationEligible: false, analyticsEligible: false,
+  },
+  development_plan_completed: {
+    domain: 'development', sourceSystem: 'developmentPlans', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'planId'],
+    dedupeStrategy: 'fingerprint', replayPolicy: 'replay',
+    notificationEligible: true, analyticsEligible: false,
+  },
+  development_goal_created: {
+    domain: 'development', sourceSystem: 'developmentGoals', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'planId', 'goalId'],
+    dedupeStrategy: 'fingerprint', replayPolicy: 'replay',
+    notificationEligible: true, analyticsEligible: false,
+  },
+  development_goal_updated: {
+    domain: 'development', sourceSystem: 'developmentGoals', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'planId', 'goalId'],
+    dedupeStrategy: 'coalesce_by_subject', replayPolicy: 'replay',
+    notificationEligible: true, analyticsEligible: false,
+  },
+  development_action_completed: {
+    domain: 'development', sourceSystem: 'developmentActions', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'planId', 'actionId'],
+    dedupeStrategy: 'fingerprint', replayPolicy: 'replay',
+    notificationEligible: true, analyticsEligible: false,
+  },
+  development_evidence_linked: {
+    domain: 'development', sourceSystem: 'developmentEvidenceLinks', audience: 'org_private',
+    // Ids of the goal or action, never of the evidence: which Combine result
+    // or assessment was cited is read back through the authorised projection.
+    privacyClass: 'org_internal', payload: ['orgId', 'planId', 'goalId', 'actionId'],
+    dedupeStrategy: 'coalesce_by_subject', replayPolicy: 'replay',
+    notificationEligible: false, analyticsEligible: false,
+  },
+  development_review_submitted: {
+    domain: 'development', sourceSystem: 'developmentReviews', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'planId', 'reviewId'],
+    dedupeStrategy: 'fingerprint', replayPolicy: 'replay',
+    notificationEligible: true, analyticsEligible: false,
+  },
+
   player_development_evidence_changed: {
     domain: 'box_cam', sourceSystem: 'boxSessions', audience: 'player_private',
     privacyClass: 'subject_reference', payload: ['playerId'],

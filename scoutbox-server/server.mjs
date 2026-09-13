@@ -23,6 +23,7 @@ import { registerM17 } from './m17/index.mjs';
 import { registerM18 } from './m18/index.mjs';
 import { registerMatching } from './m19/index.mjs';
 import { registerAnalytics } from './m20/index.mjs';
+import { registerDevelopment } from './m21/index.mjs';
 import { COMBINE_PROTOCOLS } from './m16/combineShared.mjs';
 import { registerSourceChanges } from './m181/sourceChanges.mjs';
 import { audienceFor, EVENT_AUDIENCE } from './m181/eventAudience.mjs';
@@ -3843,6 +3844,19 @@ registerMatching(m19Ctx);
 const m20Ctx = registerAnalytics(m19Ctx);
 void m20Ctx;
 
+// ------------------------------------------------ M21 Development Hub 2.0
+// Workflow, not truth. Plans, goals, actions, reviews and REFERENCES to
+// evidence M12-M16.1 already own — resolved live, never copied, so an
+// invalidated Combine result or a withdrawn assessment reads as unavailable
+// here the moment it changes there. Nothing in M21 writes into the Passport,
+// Trust, Matching or the Director Dashboard, and no figure anywhere in it
+// combines counts into a score.
+const m21Ctx = registerDevelopment({
+  ...m19Ctx,
+  isAdult,
+});
+void m21Ctx;
+
 // ------------------------------------------------- M18.1 operator surface
 // What this deployment can and cannot actually do. ScoutBox is careful to be
 // honest about missing capability inside the product; this is the same honesty
@@ -3901,6 +3915,9 @@ export const EMITTED_EVENTS = Object.freeze([
   'player_development_evidence_changed',
   'watchlist_created', 'watchlist_updated', 'watchlist_membership_changed',
   'watchlist_archived', 'matching_room_created',
+  'development_plan_created', 'development_plan_updated', 'development_plan_completed',
+  'development_goal_created', 'development_goal_updated', 'development_action_completed',
+  'development_evidence_linked', 'development_review_submitted',
 ]);
 {
   const problems = assertEventRegistry({ emitted: EMITTED_EVENTS });

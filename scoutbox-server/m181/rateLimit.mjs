@@ -48,6 +48,16 @@ export const RATE_LIMIT_POLICY = {
   // full scan of the organisation's recruitment records.
   analytics_read: { max: 600, windowMs: 3_600_000, scope: 'org', note: 'Recruitment analytics dashboard reads.' },
 
+  // M21 Development Hub. Scoped to the ACTOR rather than the organisation,
+  // because a plan has three possible authors — a player, a guardian and club
+  // staff — and an org-scoped limit would let a busy club exhaust a quota a
+  // player then hits. Deliberately generous on items: ticking off a session's
+  // worth of actions must never be mistaken for abuse, and being told to slow
+  // down for doing the work is the wrong message from a development tool.
+  development_plan_write: { max: 120, windowMs: 3_600_000, scope: 'actor', note: 'Development Plan creates, edits and sharing changes.' },
+  development_item_write: { max: 600, windowMs: 3_600_000, scope: 'actor', note: 'Development goal, action and evidence-link writes.' },
+  development_review_write: { max: 60, windowMs: 3_600_000, scope: 'actor', note: 'Development Review submissions.' },
+
   // player-side capture (player-scoped: these protect the player's own device
   // and our storage, and must never read as punishment for training a lot)
   combine_attempt: { max: 40, windowMs: 3_600_000, scope: 'player', note: 'At-Home Combine attempts.' },

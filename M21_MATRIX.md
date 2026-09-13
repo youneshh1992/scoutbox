@@ -223,4 +223,5 @@ Recorded as they are found, in the M20 style. Empty until the first.
 
 | # | Defect | Where | Fix | Proven by |
 |---|---|---|---|---|
-| — | — | — | — | — |
+| D1 | `m20E2E` pinned `SCHEMA_VERSION === 2000`, so it failed the moment M21 added a migration step — for an M21 reason with no M20 meaning. Exactly the defect M20 itself found in `m19E2E`'s pin at 1900, repeated one milestone later. | `scripts/m20E2E.mjs:465` | Changed to `>= 2000`, keeping the assertion that M20's own step `m200_001_analytics_sources_present` is registered. Sharper, not weaker: it now checks what M20 actually depends on. | m20E2E back to 259 checks, green |
+| D2 | The M18.2 event check greps the server tree for literal `broadcast('name')` call sites. M21's first cut dispatched every event through a variable, which would have made eight registered names read as "declared but never broadcast" — and made them invisible to anyone grepping for where an event is sent. | `m21/index.mjs` | An `EMITTERS` table with one literal `broadcast('…')` per event name; `emit()` throws on an unregistered name rather than dropping it. | m182E2E 330 green with the eight new names in `EMITTED_EVENTS` |

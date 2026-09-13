@@ -36,6 +36,15 @@ const BRIEF_ACTIONS = new Set([
 ]);
 const WATCHLIST_ACTIONS = new Set(['watchlist_created', 'watchlist_updated', 'watchlist_archived']);
 const LEDGER_ACTIONS = new Set(['staff_removed', 'signing', 'released_by_club']);
+/**
+ * M21 §88: a plan's LIFECYCLE, and nothing else. Every action checkbox and
+ * every goal edit belongs in that plan's own history, which is richer and is
+ * read by the people working the plan (§89). Flooding an administrator's feed
+ * with them would bury the four events an administrator actually needs.
+ */
+const DEVELOPMENT_ACTIONS = new Set([
+  'plan_created', 'plan_archived', 'plan_visibility_changed', 'review_submitted',
+]);
 
 /** The structured, content-free summary of one history detail. */
 function safeDetail(action, detail) {
@@ -92,6 +101,37 @@ export function registerAudit(ctx) {
           id: h.id, at: h.at, action: h.action, domain: 'dynamic_watchlist',
           actor: h.byKind === 'org' ? { userId: h.byId, name: h.byName } : null,
           target: { type: 'watchlist', id: w.id, title: w.name },
+          detail: safeDetail(h.action, h.detail),
+        });
+      }
+    }
+    // M21: development plans this organisation OWNS. A plan a player shared
+    // with the club is the player's record, not the club's administrative
+    // history, so it is read in the Hub and never mirrored into this feed.
+    for (const plan of db.developmentPlans ?? []) {
+      if (plan.owner?.kind !== 'org' || plan.owner.orgId !== org.id) continue;
+      const p = findPlayer(plan.playerId);
+      const subject = p && orgCanSee(org, p) ? { playerId: p.id, playerName: p.name } : { playerId: null, playerName: null };
+      for (const h of plan.history ?? []) {
+        if (!DEVELOPMENT_ACTIONS.has(h.action)) continue;
+        rows.push({
+          id: h.id, at: h.at, action: h.action, domain: 'development',
+          actor: h.byKind === 'org' ? { userId: h.byId, name: h.byName } : null,
+          target: { type: 'development_plan', id: plan.id, title: plan.title, ...subject },
+          detail: safeDetail(h.action, h.detail),
+        });
+      }
+    }
+    // Review SUBMISSIONS, from the reviews themselves. What the review says —
+    // shared summary or internal note — never reaches this feed (§118#44).
+    for (const r of db.developmentReviews ?? []) {
+      if (r.orgId !== org.id) continue;
+      for (const h of r.history ?? []) {
+        if (!DEVELOPMENT_ACTIONS.has(h.action)) continue;
+        rows.push({
+          id: h.id, at: h.at, action: h.action, domain: 'development',
+          actor: h.byKind === 'org' ? { userId: h.byId, name: h.byName } : null,
+          target: { type: 'development_review', id: r.id },
           detail: safeDetail(h.action, h.detail),
         });
       }

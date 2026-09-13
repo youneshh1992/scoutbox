@@ -26,7 +26,7 @@
  * snapshot store has no concept of one and inventing it here would be theatre.
  */
 
-export const SCHEMA_VERSION = 2000; // 20.0.0
+export const SCHEMA_VERSION = 2100; // 21.0.0
 
 /**
  * Every step is idempotent: running it twice is the same as running it once.
@@ -85,6 +85,26 @@ export const MIGRATIONS = [
     note: 'Collections the recruitment analytics projection reads. No analytics store is created.',
     up(db) {
       for (const k of ['trials', 'signings', 'requests', 'dynamicWatchlists', 'watchlistHistory']) db[k] ??= [];
+    },
+  },
+  {
+    id: 'm210_001_development_stores',
+    // The five M21 workflow stores. This step, and nothing else, is what
+    // creates them: the lesson of the M20 `db.trials` defect is that a
+    // collection which exists only because the demo seed made it will throw
+    // on the first read of a restored snapshot. The M21 suite proves this by
+    // booting with an empty data directory and reading each store before any
+    // write happens.
+    //
+    // Not one of them holds a fact about a player that another store already
+    // holds. Evidence links carry `{sourceType, sourceId}` and no content, so
+    // there is nothing here that could ever disagree with the Passport.
+    note: 'Development Hub workflow stores: plans, goals, actions, evidence references and reviews.',
+    up(db) {
+      for (const k of [
+        'developmentPlans', 'developmentGoals', 'developmentActions',
+        'developmentEvidenceLinks', 'developmentReviews',
+      ]) db[k] ??= [];
     },
   },
 ];

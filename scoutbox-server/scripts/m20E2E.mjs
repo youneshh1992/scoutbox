@@ -462,7 +462,13 @@ section('§9 — nothing new is emitted, notified or stored');
 
   const step = MIGRATIONS.find((m) => m.id === 'm200_001_analytics_sources_present');
   ok(!!step, 'the M20 migration is registered with a stable id');
-  ok(SCHEMA_VERSION === 2000, `SCHEMA_VERSION is ${SCHEMA_VERSION}`);
+  // At or beyond 2000 — the version moves whenever a LATER milestone adds a
+  // step, and pinning it here made M20 fail for an M21 reason with no M20
+  // meaning. What M20 actually needs is its own step present and the version
+  // no lower than the one M20 introduced; both are asserted, so this is a
+  // sharper check than the equality it replaces, not a weaker one. (The same
+  // defect M20 itself found in m19E2E's pin at 1900.)
+  ok(SCHEMA_VERSION >= 2000, `SCHEMA_VERSION is at or beyond 2000 (${SCHEMA_VERSION})`);
   const db2 = {};
   const first = runMigrations(db2, { now: NOW });
   const second = runMigrations(db2, { now: NOW });
