@@ -92,7 +92,7 @@
   <header>
     <div class="mark">Scout<span class="box">Box</span> — App Launcher</div>
     <p class="sub">One bookmark for every ScoutBox app. Each tile opens an interactive demo of the actual current interface, running entirely in your browser on synthetic sample data.</p>
-    <span class="buildchip"><span class="dot"></span>Source version <code>M19HEAD</code> · built 2026-09-13 · Milestone 19 — Explainable Matching + Dynamic Watchlists</span>
+    <span class="buildchip"><span class="dot"></span>Source version <code>5466de1</code> · built 2026-09-13 · Milestone 19 — Explainable Matching + Dynamic Watchlists</span>
   </header>
 
   <div class="grid">
@@ -339,7 +339,7 @@
       <li>Everything runs on <b>synthetic sample data</b> — no real players, clubs, credentials or media. Each app shows an “Interactive demo — sample data” badge with its build identifier.</li>
       <li>Demo state lives <b>inside the page you have open</b> and resets when you reload. Nothing you type is stored anywhere or reaches a real person.</li>
       <li>The three standalone apps <b>do not share accounts or messages with each other</b> — each simulates its counterparties. To see the apps genuinely talking to one another, use the <b>Connected Demo</b>, where all three run in one page over one shared simulation.</li>
-      <li>Safeguarding flows are live in the demos: contacting an under-18 routes to their guardian, and the child’s view never contains the adult conversation. Box Cam runs on a clearly-labelled simulated observer — no real camera analysis takes place. The Trust Scores shown are fixtures computed by the real policy arithmetic over synthetic evidence, and are labelled as simulated.</li>
+      <li>Safeguarding flows are live in the demos: contacting an under-18 routes to their guardian, and the child’s view never contains the adult conversation. Box Cam runs on a clearly-labelled simulated observer — no real camera analysis takes place. Player Matching and Dynamic Watchlists run entirely in the page against the synthetic dataset, and produce no score or ranking of any kind. The Trust Scores shown are fixtures computed by the real policy arithmetic over synthetic evidence, and are labelled as simulated.</li>
     </ul>
   </section>
 
@@ -347,5 +347,5 @@
     <b>Live cross-device usage requires a hosted backend.</b> These artifacts are self-contained demos. Real accounts, real-time messaging between different people’s devices, and persistent data need the ScoutBox server (Milestone 11) deployed to a host — it is built and tested in the repository, but not deployed as part of this demo.
   </div>
 
-  <footer>ScoutBox · source commit <b>6da4780</b> (branch claude/desktop-project-migration-wyk3ec, local — not pushed per instruction) · demos built 2026-09-12 · Milestone 18.2 — Final Pre-M19 Cleanup</footer>
+  <footer>ScoutBox · source commit <b>5466de1</b> (branch claude/desktop-project-migration-wyk3ec, local — not pushed per instruction) · demos built 2026-09-13 · Milestone 19 — Explainable Matching + Dynamic Watchlists</footer>
 </div>
