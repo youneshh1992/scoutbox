@@ -82,7 +82,7 @@ boundary, and no metric names a player the organisation may not currently see.
 - **Numerator / denominator** — count; no denominator.
 - **Time semantics** — point-in-time.
 - **Small-n** — none; counts are never suppressed.
-- **Limitation** — a status is where a room *is*, not how far it has *travelled*. A room can sit in `watching` for a year and look identical to one opened this morning; F1 does not distinguish them (A1 does).
+- **Limitation** — A status is where a room is, not how far it has travelled. A room that has sat in Watching for a year looks identical here to one opened this morning.
 
 #### F2 · `funnel_progression`
 - **Definition** — of the rooms **opened** in the window, how many ever reached each subsequent stage, at any later time.
@@ -91,7 +91,7 @@ boundary, and no metric names a player the organisation may not currently see.
 - **Numerator** — rooms whose history contains a transition *to* stage S. **Denominator** — rooms opened in the window.
 - **Time semantics** — window-entry for the cohort; the reaching event may fall outside the window, which is stated.
 - **Small-n** — rates withheld below 5 rooms in the cohort.
-- **Limitation** — the funnel is not monotonic, because reopening is first-class in M17. A room that was archived and reopened counts once at each stage it reached, not once per visit. A recent cohort is necessarily incomplete: rooms opened last week have not had time to reach a signing, and the panel says so rather than showing a collapsing conversion rate.
+- **Limitation** — Rooms can be reopened, so this is not a one-way funnel: a room counts once for each stage it ever reached, not once per visit. A recent window is incomplete by construction — rooms opened last week have not had time to reach a signing.
 
 #### F3 · `exit_reason_mix`
 - **Definition** — for rooms that reached a terminal status in the window, the distribution of recorded reason codes by the four M17 categories (`football`, `evidence`, `process`, `outcome`).
@@ -100,7 +100,7 @@ boundary, and no metric names a player the organisation may not currently see.
 - **Numerator** — decisions carrying ≥1 code in category C. **Denominator** — terminal-in-window decisions. A decision with codes in two categories counts in both, so shares sum to ≥100%; the payload says so.
 - **Time semantics** — window-completion.
 - **Small-n** — shares withheld below 5.
-- **Limitation** — this is the reason the club **recorded**, not the reason that operated. It is a measure of what the organisation writes down.
+- **Limitation** — This is the reason the club recorded, not the reason that operated. A decision carrying codes in two categories counts in both, so the shares add up to more than 100%.
 
 ### Family T — how long the process takes
 
@@ -114,7 +114,7 @@ eighteen-month room would move a mean and tell a director nothing.
 - **Denominator** — rooms with at least one decision, completing in the window.
 - **Time semantics** — window-completion.
 - **Small-n** — withheld below 5 observations.
-- **Limitation** — rooms never decided are excluded entirely, so this measures *the rooms that got there*. The count of rooms with no decision is shown beside it precisely so the exclusion cannot hide.
+- **Limitation** — Rooms that never reached a decision are excluded, so this measures the rooms that got there. The number excluded is shown beside it.
 
 #### T2 · `time_in_stage`
 - **Definition** — for each status, the median time a room spent in it before leaving.
@@ -123,23 +123,23 @@ eighteen-month room would move a mean and tell a director nothing.
 - **Denominator** — completed stage visits.
 - **Time semantics** — window-completion (the *exit* falls in the window).
 - **Small-n** — per-status suppression below 5 visits.
-- **Limitation** — the current, unfinished visit is not counted. A stage where everything is stuck therefore looks *fast*, because only the rooms that escaped are measured. A1 is the metric that catches that, and the panel links to it.
+- **Limitation** — Only completed visits count. A stage where everything is stuck therefore looks fast, because only the rooms that escaped it are measured — Stalled rooms is the figure that catches that.
 
-#### T3 · `time_watching_to_trial_requested`
+#### T3 · `time_to_trial_requested`
 - **Definition** — from room creation to the first transition to `trial_requested`.
 - **Unit** — days. **Denominator** — rooms that reached `trial_requested`.
 - **Time semantics** — window-completion. **Small-n** — 5.
-- **Limitation** — a club that opens rooms late in its own process will look fast here. This measures the ScoutBox record, not the club's thinking.
+- **Limitation** — A club that opens rooms late in its own process looks fast here. This measures the ScoutBox record, not the club’s thinking.
 
 #### T4 · `time_trial_requested_to_completed`
 - **Definition** — from the transition to `trial_requested` to the transition to `trial_completed`.
 - **Unit** — days. **Denominator** — rooms reaching `trial_completed`. **Small-n** — 5.
-- **Limitation** — guardian response time, pitch availability and school holidays all live inside this number and are not separable.
+- **Limitation** — Guardian response, pitch availability and school holidays all live inside this number and cannot be separated from it.
 
 #### T5 · `open_room_age`
 - **Definition** — the age distribution of rooms currently open.
 - **Unit** — days. **Time semantics** — point-in-time. **Small-n** — 5.
-- **Limitation** — age is not neglect. A long-running room on a fourteen-year-old being tracked to sixteen is the product working.
+- **Limitation** — Age is not neglect. A long-running room on a fourteen-year-old being tracked to sixteen is the product working as intended.
 
 ### Family A — work that has stopped moving
 
@@ -148,17 +148,17 @@ eighteen-month room would move a mean and tell a director nothing.
 - **Unit** — count, and the list of rooms.
 - **Source** — `max(history[].at)` vs now, filtered to `OPEN_ROOM_STATUSES`.
 - **Time semantics** — point-in-time. **Small-n** — none (a count).
-- **Limitation** — "no activity in ScoutBox" is not "no activity". A scout who watched a player on Saturday and did not write it down produces a stalled room. This is a prompt to look, not a finding.
+- **Limitation** — No activity in ScoutBox is not no activity. A scout who watched a player on Saturday and did not write it down produces a stalled room. This is a prompt to look, not a finding.
 
 #### A2 · `overdue_trial_reports`
 - **Definition** — trials in `awaiting_report` past `reportDueAt`.
 - **Source** — `db.trials`. **Time semantics** — point-in-time.
-- **Limitation** — the safeguarding obligation this tracks already blocks new trial requests (server.mjs). M20 only surfaces the same fact to a director.
+- **Limitation** — This surfaces an obligation the server already enforces — unfiled reports block new trial requests. It adds no new judgement.
 
 #### A3 · `decision_outstanding`
 - **Definition** — rooms in `offer_consideration` or `offer_made` with no recorded decision. This is M17's existing `DECISION_OUTSTANDING` readiness reason, counted.
 - **Time semantics** — point-in-time.
-- **Limitation** — reuses M17's rule exactly. If that rule is wrong, this is wrong in the same way, deliberately: one definition, not two.
+- **Limitation** — This reuses the Recruitment Room’s own readiness rule. If that rule is wrong, this is wrong in exactly the same way — deliberately, so there is one definition rather than two.
 
 ### Family D — decision record hygiene
 
@@ -168,73 +168,74 @@ measures whether what it did was right.
 #### D1 · `terminal_with_recorded_decision`
 - **Numerator** — rooms reaching a terminal status in the window that have ≥1 decision. **Denominator** — all rooms reaching a terminal status in the window.
 - **Time semantics** — window-completion. **Small-n** — 5.
-- **Limitation** — M17 auto-records a decision on the reason-required terminal statuses, so this rate is high by construction and its value is in spotting the exceptions.
+- **Limitation** — Ending a room for a reason-required status records a decision automatically, so this rate is high by construction. Its value is in the exceptions.
 
 #### D2 · `superseded_decision_rate`
 - **Definition** — share of decisions in the window that were later superseded by a revision on the same room.
 - **Time semantics** — window-entry. **Small-n** — 5.
-- **Limitation** — revising a decision is healthy. A high rate is not a fault and the panel refuses to colour it as one.
+- **Limitation** — Revising a decision is healthy. A high figure here is not a fault and is never coloured as one.
 
 #### D3 · `evidence_limited_exits`
 - **Definition** — share of terminal exits whose reason codes fall in the `evidence` category (`insufficient_full_match`, `insufficient_recent_evidence`, `reference_missing`, `combine_missing`).
 - **Why it exists** — this is the one number in M20 that points at something a director can actually fix: if a third of passes are for missing evidence rather than football, the club's evidence pipeline is the constraint, not its judgement.
 - **Time semantics** — window-completion. **Small-n** — 5.
-- **Limitation** — association only. It does not follow that collecting the evidence would have changed any decision.
+- **Limitation** — Association only. It does not follow that collecting the missing evidence would have changed any of these decisions.
 
 #### D4 · `reopen_rate`
 - **Definition** — share of rooms that entered a terminal status and later left it (`room_reopened`, or a transition out of a terminal status).
 - **Time semantics** — window-entry on the terminal event. **Small-n** — 5.
-- **Limitation** — the denominator is rooms that *could* reopen, and reopening is intended behaviour (M18 Second Look exists to cause it). High is not bad.
+- **Limitation** — Reopening is intended behaviour — Second Look exists to cause it. High is not bad.
 
 ### Family C — coverage of the club's own stated demand
 
 #### C1 · `briefs_live`
 - **Definition** — briefs currently `active` and inside their date window.
 - **Source** — `db.recruitmentBriefs` + `briefIsLiveOn(today)`. **Time semantics** — point-in-time.
-- **Limitation** — a brief being live says nothing about whether anyone is working it.
+- **Limitation** — A brief being live says nothing about whether anyone is working it.
 
 #### C2 · `nobody_missed_backlog`
 - **Definition** — open Nobody Missed reviews, per live brief.
 - **Time semantics** — point-in-time. **Small-n** — none (count).
-- **Limitation** — the backlog is a function of how wide the brief is. A club that widens a brief creates backlog without anyone doing anything wrong.
+- **Limitation** — The backlog is a function of how wide the brief is. Widening a brief creates backlog without anyone having done anything wrong.
 
 #### C3 · `nobody_missed_review_rate`
 - **Numerator** — reviews not in `open`. **Denominator** — all reviews for live briefs.
 - **Time semantics** — point-in-time. **Small-n** — 5.
-- **Limitation** — dismissing a candidate counts as reviewing them. This measures that the club looked, not what it concluded.
+- **Limitation** — Dismissing a candidate counts as reviewing them. This measures that the club looked, not what it concluded.
 
 #### C4 · `second_look_backlog`
 - **Definition** — Second Look items currently `open`, and their age distribution.
 - **Time semantics** — point-in-time.
-- **Limitation** — an expired item is not a backlog item; expiry is a designed outcome and is counted separately.
+- **Limitation** — An expired item is not backlog — expiry is a designed outcome and is counted separately.
 
 #### C5 · `second_look_response_time`
 - **Definition** — median days from a Second Look item being created to its first status change.
 - **Denominator** — items that changed status. **Small-n** — 5.
-- **Limitation** — same exclusion bias as T1: items never touched are absent, and their count is shown beside the median.
+- **Limitation** — Items never touched are absent from this figure. Their count is shown beside it.
 
 ### Family S — where work comes from
 
 #### S1 · `room_source_mix`
 - **Definition** — rooms opened in the window, by `room.sourceContext` (the 12 M17 contexts).
 - **Time semantics** — window-entry. **Small-n** — shares withheld below 5.
-- **Limitation** — `direct` is the fallback `normaliseSourceContext` assigns to anything unrecognised, so it is a residual bucket, not a channel. The panel labels it as such.
+- **Limitation** — Direct is the fallback ScoutBox assigns to anything it does not recognise, so it is a residual bucket rather than a surface people used.
 
 #### S2 · `source_stage_reach` *(association only)*
 - **Definition** — for each source context, of the rooms opened from it in the window, how many later reached `trial_requested` or beyond.
 - **Time semantics** — window-entry cohort. **Small-n** — 5, strictly enforced; most contexts will be suppressed in a real club and that is the correct outcome.
 - **Required label, rendered with the panel and carried in the payload** — *"ScoutBox observes that these rooms came from this surface and later reached this stage. It does not show that the surface caused it: scouts choose where to look, and the players they find there differ in ways ScoutBox does not measure."*
-- **Limitation** — confounded by construction and never presented as a ranking of surfaces. Sources are listed alphabetically, not by rate.
+- **Limitation** — Confounded by construction, and never a ranking of surfaces: sources are listed alphabetically. Most will be withheld for too few rooms, which is the correct outcome rather than a gap.
 
 ### Family W — dynamic watchlists as a work surface
 
 #### W1 · `active_watchlists`
 - **Definition** — count of `active` dynamic watchlists. **Time semantics** — point-in-time.
+- **Limitation** — A big list is a wide set of criteria, nothing more.
 
 #### W2 · `watchlist_membership_churn`
 - **Definition** — entries and exits recorded in `db.watchlistHistory` in the window.
 - **Time semantics** — window-entry.
-- **Limitation** — M19 has no scheduler: membership is reconciled **on read**. Churn therefore measures *reconciliations that happened because someone opened the list*, not the moment a player's facts changed. A club that never opens a watchlist records no churn. This is stated on the panel; without it the number is actively misleading.
+- **Limitation** — ScoutBox does not recompute watchlists in the background: membership is worked out when someone opens a list. This counts those recalculations, not the moment a player’s facts changed — a list nobody opens records no change at all.
 
 ---
 
