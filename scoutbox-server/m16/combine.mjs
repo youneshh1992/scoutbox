@@ -22,6 +22,7 @@ import {
   COMBINE_PROTOCOLS, combineProtocol, latestCombineProtocol, measurementSupported,
   measurementCapability, measureAttempt, formatCombineValue, personalBest,
   combineResultHash, comparisonMatrix, COMBINE_TERMINAL, COMBINE_STATE_COPY,
+  liveCombineState,
 } from './combineShared.mjs';
 import { rateLimitedBody } from '../m181/rateLimit.mjs';
 
@@ -72,11 +73,9 @@ export function registerCombine(ctx) {
   // Cam session is later invalidated by Trust & Safety immediately stops
   // counting; a restore brings it back. Computed at read time so invalidation
   // is reflected everywhere without rewriting the stored attempt.
-  function effectiveState(a) {
-    const s = boundSession(a);
-    if (s && s.verificationState === 'invalidated' && ['combine_verified', 'partially_measured'].includes(a.combineState)) return 'invalidated';
-    return a.combineState;
-  }
+  // The rule itself lives in combineShared.mjs as `liveCombineState` so M21's
+  // objective targets ask the same question and cannot get a different answer.
+  const effectiveState = (a) => liveCombineState(a, boundSession(a));
 
   function verificationChecklist(a, proto) {
     return [

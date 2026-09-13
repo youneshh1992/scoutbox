@@ -195,6 +195,45 @@ export const COMBINE_PROTOCOLS = [
   }),
 ];
 
+/**
+ * The LIVE Combine state of a stored attempt.
+ *
+ * A stored attempt keeps the state it finished in. That is not always the
+ * state it is in now: if Trust & Safety later invalidates the Box Cam session
+ * the attempt was bound to, the measurement stops counting immediately, and a
+ * restore brings it back. Computed at read time so invalidation is reflected
+ * everywhere without ever rewriting the attempt.
+ *
+ * Extracted in M21 so there is exactly ONE definition of this rule. It was
+ * M16.1's `effectiveState`, which still calls it; M21's objective targets need
+ * the same answer, and a second copy would eventually give a different one.
+ */
+export function liveCombineState(attempt, boundSession) {
+  if (!attempt) return null;
+  if (boundSession && boundSession.verificationState === 'invalidated'
+    && ['combine_verified', 'partially_measured'].includes(attempt.combineState)) return 'invalidated';
+  return attempt.combineState;
+}
+
+/**
+ * Is this attempt evidence a PRODUCTION measurement condition may rely on?
+ *
+ * Three things must all hold, and each has bitten something before:
+ *   • the attempt is Combine Verified *right now* (not as it was stored);
+ *   • it carries a measured value, never an estimate or a null;
+ *   • it was not produced by a test-only provider. A deterministic fixture is
+ *     labelled simulated everywhere it appears, and a demo number must never
+ *     satisfy a real target.
+ *
+ * `provider` is the PROVIDERS entry for `attempt.provider`; the caller passes
+ * it so this stays a pure function.
+ */
+export function isProductionValidCombine(attempt, boundSession, provider) {
+  if (!attempt || attempt.measuredValue == null) return false;
+  if (provider?.testOnly) return false;
+  return liveCombineState(attempt, boundSession) === 'combine_verified';
+}
+
 export const combineProtocol = (id, version) => COMBINE_PROTOCOLS.find((p) => p.id === id && p.version === Number(version)) ?? null;
 export const latestCombineProtocol = (id) => COMBINE_PROTOCOLS.filter((p) => p.id === id).sort((a, b) => b.version - a.version)[0] ?? null;
 
