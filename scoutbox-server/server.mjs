@@ -22,6 +22,7 @@ import { registerM162 } from './m162/index.mjs';
 import { registerM17 } from './m17/index.mjs';
 import { registerM18 } from './m18/index.mjs';
 import { registerMatching } from './m19/index.mjs';
+import { registerAnalytics } from './m20/index.mjs';
 import { COMBINE_PROTOCOLS } from './m16/combineShared.mjs';
 import { registerSourceChanges } from './m181/sourceChanges.mjs';
 import { audienceFor, EVENT_AUDIENCE } from './m181/eventAudience.mjs';
@@ -3826,11 +3827,21 @@ const m18Ctx = registerM18({
 // Registered AFTER M18 so it reuses the very same lightweight facts
 // projection (`m18MatchFacts`) and the canonical M17 Room bridge. There is
 // deliberately no second matching engine and no second Room-creation path.
-const m19Ctx = registerMatching({
+const m19Ctx = {
   ...m18Ctx,
   combineProtocolIds: () => COMBINE_PROTOCOLS.map((p) => p.id),
-});
-void m19Ctx;
+};
+registerMatching(m19Ctx);
+
+// ------------------------------------------ M20 Recruitment Analytics
+// Registered LAST, because it reads everything and owns nothing. There is no
+// analytics store: every figure is a projection over the Rooms, decisions,
+// briefs, reviews, watchlists and trials that M12-M19 already hold, so a
+// number on the Director Dashboard cannot disagree with the record it came
+// from. It measures the recruitment PROCESS -- never a player, never a
+// colleague.
+const m20Ctx = registerAnalytics(m19Ctx);
+void m20Ctx;
 
 // ------------------------------------------------- M18.1 operator surface
 // What this deployment can and cannot actually do. ScoutBox is careful to be

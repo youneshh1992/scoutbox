@@ -42,6 +42,11 @@ export const RATE_LIMIT_POLICY = {
   watchlist_write: { max: 120, windowMs: 3_600_000, scope: 'org', note: 'Dynamic Watchlist creates and edits.' },
   second_look_action: { max: 200, windowMs: 3_600_000, scope: 'org', note: 'Second Look review, dismiss and reopen.' },
   nobody_missed_action: { max: 200, windowMs: 3_600_000, scope: 'org', note: 'Candidate review, dismiss and add-to-room.' },
+  // Generous: a dashboard read is a read, and a director flipping between
+  // windows and filters must never be told to slow down for using the page.
+  // The limit exists only to bound a runaway client, since each read is a
+  // full scan of the organisation's recruitment records.
+  analytics_read: { max: 600, windowMs: 3_600_000, scope: 'org', note: 'Recruitment analytics dashboard reads.' },
 
   // player-side capture (player-scoped: these protect the player's own device
   // and our storage, and must never read as punishment for training a lot)

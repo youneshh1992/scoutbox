@@ -26,7 +26,7 @@
  * snapshot store has no concept of one and inventing it here would be theatre.
  */
 
-export const SCHEMA_VERSION = 1900; // 19.0.0
+export const SCHEMA_VERSION = 2000; // 20.0.0
 
 /**
  * Every step is idempotent: running it twice is the same as running it once.
@@ -73,6 +73,19 @@ export const MIGRATIONS = [
     id: 'm182_005_notification_repeat_count',
     note: 'Notifications written before M18.1 count as one occurrence.',
     up(db) { for (const n of db.notifications ?? []) n.repeatCount ??= 1; },
+  },
+  {
+    id: 'm200_001_analytics_sources_present',
+    // M20 creates NO analytics store: every figure is projected from records
+    // M12-M19 already own, so there is nothing here that could ever disagree
+    // with a Recruitment Room. All this step does is guarantee the collections
+    // the projection READS exist. `trials` in particular has only ever been
+    // created by the seed, so a snapshot restored without it would have thrown
+    // on the first trial read — with or without M20.
+    note: 'Collections the recruitment analytics projection reads. No analytics store is created.',
+    up(db) {
+      for (const k of ['trials', 'signings', 'requests', 'dynamicWatchlists', 'watchlistHistory']) db[k] ??= [];
+    },
   },
 ];
 

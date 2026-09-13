@@ -413,7 +413,11 @@ section('§9 — the M19 events, notifications, limits and schema are all declar
   ok(!!RATE_LIMIT_POLICY.matching_query && !!RATE_LIMIT_POLICY.watchlist_write, 'matching and watchlist writes are both rate-limited');
   neg(RATE_LIMIT_POLICY.matching_query.scope === 'org' && RATE_LIMIT_POLICY.watchlist_write.scope === 'org',
     'both limits are per ORGANISATION, so one member cannot spend a colleague’s budget or evade their own');
-  ok(SCHEMA_VERSION === 1900 && MIGRATIONS.some((m) => m.id === 'm190_001_dynamic_watchlists'), 'the watchlist stores arrive through a numbered migration');
+  // The schema version moves with every milestone, so pinning it here would
+  // make M19's suite fail on M20's arrival for no M19 reason. What M19 must
+  // keep proving is that its own stores arrive through a numbered, recorded
+  // step — and that the schema has not been rolled back behind M19.
+  ok(SCHEMA_VERSION >= 1900 && MIGRATIONS.some((m) => m.id === 'm190_001_dynamic_watchlists'), 'the watchlist stores arrive through a numbered migration');
   ok(SOURCE_CONTEXTS.includes('dynamic_watchlist') && SOURCE_CONTEXTS.includes('matching'), 'a Room can record that it came from matching or a watchlist');
   ok(LIMITS.watchlistsPerOrg > 0 && LIMITS.maxCriteria > 0, 'the pathological-input bounds exist');
   ok(TYPE_CATEGORY.watchlist === 'watchlist_changes' && TRUST_BANDS.length === 5 && EVIDENCE_REQUIREMENTS.length > 0, 'the shared vocabularies M19 borrows are intact');
