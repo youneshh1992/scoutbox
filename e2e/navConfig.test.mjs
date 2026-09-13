@@ -39,12 +39,15 @@ const PRO_IDS = ['feed', 'filmroom', 'search', 'shortlist', 'requests', 'message
   'ledger', 'funnel', 'reputation', 'plan', 'assessments', 'recruitment', 'planner', 'opportunities',
   'campaigns', 'video', 'outcomes', 'trialdays', 'imports', 'coverage', 'calibration', 'insight',
   'network', 'budgets', 'representation', 'organisation', 'verification', 'rooms',
-  'secondlook', 'nobodymissed', 'briefs', 'matching', 'watchlists'];
+  'secondlook', 'nobodymissed', 'briefs', 'matching', 'watchlists',
+  // M20 — the Director Dashboard, inside Recruitment rather than a new section.
+  'dashboard'];
 const GRASS_IDS = ['feed', 'filmroom', 'search', 'shortlist', 'requests', 'messages', 'trials', 'opendays',
   'squad', 'friendlies', 'fixtures', 'ledger', 'funnel', 'plan', 'assessments', 'recruitment', 'coaches',
   'opportunities', 'campaigns', 'video', 'outcomes', 'trialdays', 'insight', 'coverage', 'calibration',
   'imports', 'network', 'organisation', 'verification', 'rooms',
-  'secondlook', 'nobodymissed', 'briefs', 'matching', 'watchlists'];
+  'secondlook', 'nobodymissed', 'briefs', 'matching', 'watchlists',
+  'dashboard'];
 
 const LABELS = {
   'navsec.home': 'Home', 'navsec.discover': 'Discover', 'navsec.recruitment': 'Recruitment',

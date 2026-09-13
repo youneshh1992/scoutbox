@@ -80,6 +80,10 @@ export const NAV_SECTIONS: NavSection[] = [
       // current. Neither is a ranking, and neither earns a sidebar section.
       { id: 'matching', labelKey: 'nav2.matching', aliases: ['player matching', 'explainable matching', 'match criteria', 'who matches', 'why this player matches', 'correspondance', 'critères de correspondance'] },
       { id: 'watchlists', labelKey: 'nav2.watchlists', aliases: ['dynamic watchlists', 'dynamic watchlist', 'saved criteria', 'listes dynamiques', 'critères enregistrés'] },
+      // M20: the Director Dashboard is recruitment ANALYTICS, so it belongs
+      // beside the work it measures rather than in a section of its own. It
+      // measures the process — never a player, never a colleague.
+      { id: 'dashboard', labelKey: 'nav2.dashboard', aliases: ['director dashboard', 'recruitment analytics', 'analytics', 'pipeline health', 'how long does it take', 'stalled rooms', 'tableau de bord', 'analyse du recrutement'] },
       { id: 'assessments', labelKey: 'nav.assessments', aliases: ['reports', 'scouting reports', 'assessment', 'évaluations', 'rapports'] },
       { id: 'video', labelKey: 'nav2.video', aliases: ['evidence', 'video workspace', 'evidence requests', 'preuves'] },
       { id: 'trials', labelKey: 'nav.trials', aliases: ['trial', 'trial reports', 'essais'] },
@@ -245,12 +249,49 @@ export function watchlistFromHash(hash: string): string | null {
 }
 export const hashForWatchlist = (id: string) => `${WATCHLISTS_HASH}/${id}`;
 
+// M20 extends the SAME mechanism a fourth time:
+//   "#/recruitment/dashboard"          → the Director Dashboard
+//   "#/recruitment/dashboard?<filters>" → …with the window and filters applied
+//
+// The filters ride in the hash so a director can send a colleague the exact
+// view they are looking at. Every value is validated again server-side and an
+// unrecognised one is refused, so a hand-edited link can widen nothing — and
+// there is deliberately no filter here that names a person.
+export const DASHBOARD_HASH = '#/recruitment/dashboard';
+const DASHBOARD_RE = /^#\/recruitment\/dashboard(?:\?([A-Za-z0-9%._~=&-]{1,600}))?$/;
+
+/** Filters a Director Dashboard link may carry. No person appears here. */
+export const DASHBOARD_FILTER_KEYS = ['window', 'from', 'to', 'source', 'priority', 'brief', 'stallDays'] as const;
+export type DashboardFilterKey = (typeof DASHBOARD_FILTER_KEYS)[number];
+
+/** The filters inside a dashboard deep link. Unknown keys are dropped. */
+export function dashboardFromHash(hash: string): Record<string, string> | null {
+  const m = DASHBOARD_RE.exec(hash ?? '');
+  if (!m) return null;
+  const out: Record<string, string> = {};
+  if (!m[1]) return out;
+  for (const [k, v] of new URLSearchParams(m[1])) {
+    if ((DASHBOARD_FILTER_KEYS as readonly string[]).includes(k) && v) out[k] = v;
+  }
+  return out;
+}
+export function hashForDashboard(filters: Record<string, string | number | undefined | null> = {}): string {
+  const q = new URLSearchParams();
+  for (const k of DASHBOARD_FILTER_KEYS) {
+    const v = filters[k];
+    if (v !== undefined && v !== null && v !== '') q.set(k, String(v));
+  }
+  const s = q.toString();
+  return s ? `${DASHBOARD_HASH}?${s}` : DASHBOARD_HASH;
+}
+
 /** Canonical hashes for the unparameterised M18/M19 destinations. */
 const PRETTY_HASH: Partial<Record<ScreenId, string>> = {
   secondlook: SECOND_LOOK_HASH,
   nobodymissed: NOBODY_MISSED_HASH,
   matching: MATCHING_HASH,
   watchlists: WATCHLISTS_HASH,
+  dashboard: DASHBOARD_HASH,
 };
 
 export function screenFromHash(hash: string): ScreenId | null {
@@ -270,6 +311,8 @@ export function screenFromHash(hash: string): ScreenId | null {
   if (MATCHING_RE.test(hash ?? '')) return 'matching';
   if (watchlistFromHash(hash)) return 'watchlists';
   if (hash === WATCHLISTS_HASH) return 'watchlists';
+  // M20 — a dashboard link carries its window and filters.
+  if (DASHBOARD_RE.test(hash ?? '')) return 'dashboard';
   const m = /^#\/([a-z]+)$/.exec(hash ?? '');
   if (!m) return null;
   const id = m[1];

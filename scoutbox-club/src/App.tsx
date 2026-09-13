@@ -17,9 +17,12 @@ import { VerificationScreen } from './m14screens';
 import { RoomsScreen } from './roomsScreens';
 import { BriefsScreen, NobodyMissedScreen, SecondLookScreen } from './m18Screens';
 import { MatchingScreen, WatchlistsScreen } from './m19Screens';
+import { DirectorDashboardScreen } from './m20Screens';
+import type { DashboardFilters } from './m20Api';
 import { m14 } from './m14api';
 import {
   briefFromHash, criteriaFromHash, hashForBrief, hashForMatching, hashForRoom, hashForScreen,
+  dashboardFromHash, hashForDashboard,
   hashForWatchlist, loadCollapsed, loadShortcuts, resolveNavigationLocation, roomFromHash,
   saveCollapsed, saveShortcuts, screenFromHash, watchlistFromHash,
   NAV_SECTIONS, type NavContext,
@@ -49,7 +52,8 @@ export type ScreenId =
   | 'imports' | 'coverage' | 'calibration' | 'insight' | 'network' | 'budgets' | 'representation' | 'organisation'
   | 'verification' | 'rooms'
   | 'secondlook' | 'nobodymissed' | 'briefs'
-  | 'matching' | 'watchlists';
+  | 'matching' | 'watchlists'
+  | 'dashboard';
 
 // M15-Nav: the sidebar no longer renders a flat list of every screen. The
 // full information architecture lives in src/nav.ts (sections → child tabs),
@@ -231,6 +235,10 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   // state a matching link carries.
   const [watchlistId, setWatchlistId] = useState<string | null>(() => watchlistFromHash(window.location.hash));
   const [matchState, setMatchState] = useState<string | null>(() => criteriaFromHash(window.location.hash));
+  // M20 reuses it a fourth time: the Director Dashboard's window and filters
+  // live in the hash so a director can send a colleague the exact view they
+  // are reading. None of these filters names a person.
+  const [dashFilters, setDashFilters] = useState<DashboardFilters>(() => (dashboardFromHash(window.location.hash) ?? {}) as DashboardFilters);
   // M18.2 — every programmatic navigation asks the dirty-guard first. A form
   // with nothing unsaved never triggers it.
   const setScreen = useCallback((id: ScreenId) => {
@@ -240,6 +248,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     setBriefId(null);
     setWatchlistId(null);
     if (id !== 'matching') setMatchState(null);
+    if (id !== 'dashboard') setDashFilters({});
     try { if (window.location.hash !== hashForScreen(id)) window.history.replaceState(null, '', hashForScreen(id)); } catch { /* sandboxed */ }
     noteNavigated();
   }, []);
@@ -305,6 +314,19 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     } catch { /* sandboxed */ }
     noteNavigated();
   }, []);
+  /**
+   * Changing a dashboard filter REPLACES rather than pushes: adjusting a
+   * window is reading, not navigating, and nobody wants six Back presses to
+   * leave a dashboard.
+   */
+  const publishDashFilters = useCallback((f: DashboardFilters) => {
+    setDashFilters(f);
+    try {
+      const next = hashForDashboard(f as Record<string, string | number | undefined | null>);
+      if (window.location.hash !== next) window.history.replaceState(null, '', next);
+    } catch { /* sandboxed */ }
+    noteNavigated();
+  }, []);
   // M18.2 — close/reload prompt while a form is dirty.
   useEffect(() => installDirtyGuard(), []);
   useEffect(() => {
@@ -317,6 +339,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
       setBriefId(briefFromHash(window.location.hash));
       setWatchlistId(watchlistFromHash(window.location.hash));
       setMatchState(criteriaFromHash(window.location.hash));
+      setDashFilters((dashboardFromHash(window.location.hash) ?? {}) as DashboardFilters);
     };
     window.addEventListener('hashchange', onHash);
     window.addEventListener('popstate', onHash);
@@ -546,6 +569,9 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
               onOpenRoom={openRoom}
               onNewWatchlist={() => setScreen('matching')}
             />
+          )}
+          {screen === 'dashboard' && (
+            <DirectorDashboardScreen {...props} filters={dashFilters} onFilters={publishDashFilters} />
           )}
           {screen === 'planner' && <SquadPlannerScreen {...props} />}
           {screen === 'opportunities' && <OpportunitiesScreen {...props} />}
