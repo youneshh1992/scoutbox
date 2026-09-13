@@ -15,6 +15,7 @@
 import {
   validateCriteria, criteriaVersion, describeCriteria, CRITERION_TYPES,
   OPERATORS, LIMITS as M19_LIMITS, MATCH_POLICY_VERSION, CRITERIA_SCHEMA_VERSION,
+  AVAILABILITY_VALUES,
 } from './criteria.mjs';
 import { matchPlayerToCriteria, briefCriteriaToCanonical } from './match.mjs';
 import {
@@ -149,6 +150,9 @@ export function registerMatching(ctx) {
       policyVersion: MATCH_POLICY_VERSION,
       schemaVersion: CRITERIA_SCHEMA_VERSION,
       combineProtocols: combineProtocolIds() ?? [],
+      // Suggestions, not a whitelist: the availability criterion still accepts
+      // any value, and this only stops a club guessing a spelling.
+      availabilityValues: AVAILABILITY_VALUES,
       note: 'Every criterion is a fact test your club writes. There is no hidden criterion, no weighting and no overall match score.',
     });
   });

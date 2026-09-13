@@ -349,6 +349,7 @@ export const demoM19: M19Api = {
     policyVersion: 1,
     schemaVersion: 1,
     combineProtocols: ['combine-box-touch-60'],
+    availabilityValues: ['available_now', 'end_of_season', 'loan_open', 'overseas_open', 'not_seeking'],
     note: 'Every criterion is a fact test your club writes. There is no hidden criterion, no weighting and no overall match score.',
   }),
 

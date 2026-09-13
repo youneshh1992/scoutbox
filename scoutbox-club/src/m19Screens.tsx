@@ -235,7 +235,20 @@ function CriterionRow({
         )}
 
         {criterion.type === 'availability' && (
-          <input style={{ width: '100%', maxWidth: 220 }} aria-label={t('m19.cr.value')} value={String(criterion.value ?? '')} onChange={(e) => set({ value: e.target.value })} />
+          <span>
+            {/* A datalist, not a select: ScoutBox suggests the values it
+                records without refusing one a deployment legitimately has. */}
+            <input
+              style={{ width: '100%', maxWidth: 220 }}
+              aria-label={t('m19.cr.value')}
+              list="m19-availability"
+              value={String(criterion.value ?? '')}
+              onChange={(e) => set({ value: e.target.value })}
+            />
+            <datalist id="m19-availability">
+              {(vocab?.availabilityValues ?? []).map((v) => <option key={v} value={v}>{t(`m19.av.${v}`, v.replace(/_/g, ' '))}</option>)}
+            </datalist>
+          </span>
         )}
 
         {criterion.type === 'evidence' && (

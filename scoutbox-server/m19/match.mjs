@@ -79,8 +79,14 @@ function evaluate(c, facts, { now = Date.now() } = {}) {
     }
     case 'foot': {
       if (!facts.foot) return { key: 'foot', met: false, text: 'Preferred foot is not on record' };
+      // Case-insensitive on purpose. The vocabulary is written "Right" and the
+      // stored fact has always been "right"; comparing them literally made the
+      // foot criterion unsatisfiable for every real player while still passing
+      // every synthetic test, which is the worst shape a bug can take.
+      const want = c.values.map((v) => String(v).toLowerCase());
+      const have = String(facts.foot).toLowerCase();
       // "Both" satisfies a criterion for either foot.
-      return c.values.includes(facts.foot) || facts.foot === 'Both'
+      return want.includes(have) || have === 'both'
         ? { key: 'foot', met: true, text: `Matches foot criteria (${facts.foot})` }
         : { key: 'foot', met: false, text: 'Does not match the foot criteria' };
     }

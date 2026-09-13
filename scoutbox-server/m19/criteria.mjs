@@ -54,6 +54,15 @@ const LEVELS = ['amateur', 'semi_pro', 'pro'];
 const FEET = ['Left', 'Right', 'Both'];
 
 /**
+ * The availability values ScoutBox records today, published in the vocabulary
+ * so a club picks one instead of guessing a spelling that would silently match
+ * nobody. Deliberately NOT enforced: a deployment may legitimately carry a
+ * value this list has not caught up with, and refusing it would be ScoutBox
+ * overruling a fact it holds.
+ */
+export const AVAILABILITY_VALUES = ['available_now', 'end_of_season', 'loan_open', 'overseas_open', 'not_seeking'];
+
+/**
  * The v1 criterion vocabulary. Only facts ScoutBox can evaluate honestly from
  * data it already holds — nothing inferred from video, nothing speculative,
  * and no training-volume proxy for ability (§15).
@@ -276,9 +285,26 @@ export function criterionId(type, operator, body = {}) {
  * changed" from "the criteria were re-saved".
  */
 export function criteriaVersion(criteria = {}) {
+  const hit = VERSION_MEMO.get(criteria);
+  if (hit) return hit;
   const line = (list = []) => list.map((c) => c.id).sort().join(';');
-  return `cv1:${hash32(`${line(criteria.required)}#${line(criteria.preferred)}`)}`;
+  const v = `cv1:${hash32(`${line(criteria.required)}#${line(criteria.preferred)}`)}`;
+  VERSION_MEMO.set(criteria, v);
+  return v;
 }
+
+/**
+ * The version of a criteria SET is a property of the set, and a matching run
+ * asks for it once per candidate. The M19 performance probe measured that
+ * recomputing it dominated the cost of a match: 3.3 µs of a 5.1 µs
+ * eight-criterion evaluation was this hash, run again for every player.
+ *
+ * A WeakMap keyed on the set itself is safe because a validated criteria set
+ * is never mutated in place — validateCriteria builds a fresh object, and the
+ * routes replace rather than edit. If that ever stops being true, the memo is
+ * wrong and this comment is where to look.
+ */
+const VERSION_MEMO = new WeakMap();
 
 function hash32(s) {
   let h = 0x811c9dc5;

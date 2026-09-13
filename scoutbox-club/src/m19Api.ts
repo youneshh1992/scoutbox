@@ -100,6 +100,8 @@ export interface MatchVocabulary {
   policyVersion: number;
   schemaVersion: number;
   combineProtocols: string[];
+  /** Suggestions for the availability criterion, not a whitelist. */
+  availabilityValues?: string[];
   note: string;
 }
 
