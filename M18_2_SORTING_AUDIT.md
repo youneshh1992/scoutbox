@@ -100,3 +100,53 @@ completeness" (M18.1). No demo sort claims to be a quality rank.
   declared rule exactly; the Pro and Grassroots headers differ as declared.
 - `m182Live J9` — the statement is on screen and says "not ability"; the order
   is identical across a reload.
+
+---
+
+# Appendix — M19 surfaces (Explainable Matching and Dynamic Watchlists)
+
+M19 adds player-presenting surfaces, so this audit extends rather than being
+replaced. The rule is unchanged: **declared, deterministic, ending on a stable
+tie-break, and no default ordering is a ranking of player quality.**
+
+M18.2 closed by saying that a change to the *Discover* order itself "is a
+product decision for M19 with Explainable Matching, not a cleanup". That
+decision was made, and it was to leave Discover alone. M19 does not re-order
+Discover; it adds a **separate** surface where the club writes the criteria and
+so owns the ordering question outright. Discover keeps its documented order
+(S1, S2) exactly as M18.2 left it.
+
+## Server surfaces
+
+| # | Surface (route) | Default sort | Secondary / tie-break | User-selectable | Numeric? | Quality implication | Auth changes set? | M19 note |
+|---|---|---|---|---|---|---|---|---|
+| S23 | Player Matching (`POST /org/matching`) | `recent_evidence` — most recent evidence first | **player id** | `recent_evidence`, `name`, `age`, `evidence_confidence`, `distance` | evidence timestamp, age, band index, km | **No.** Every member of the list satisfies every required criterion equally; the order is a reading convenience. The default is the least suggestive useful one. No option is called best, relevance or fit. The **preferred count is never a sort key** — asserted from the source and from the returned order. | yes — `orgCanSee` → `playerViewForOrg` runs before any criterion | new, deterministic and declared by design (`X-ScoutBox-Ordering: <sort>,player_id`) |
+| S24 | Dynamic Watchlist membership (`GET /org/watchlists/:id`) | `recent_evidence` | **player id** | same five | same | As S23. Membership is derived from the same engine, so the same argument applies. | yes — derived through the same guarded scan | new, deterministic and declared |
+| S25 | Watchlist list (`GET /org/watchlists`) | last activity desc | **watchlist id** | `status` filter | time | none — watchlists, not players | yes (own organisation only) | new, deterministic |
+| S26 | Watchlist history (`GET /org/watchlists/:id/history`) | newest first | **entry id (desc)** | cursor paging | time | none — transitions, and each names the criterion or the criteria change that caused it | yes; a player who has since become invisible keeps the row without their name | new, deterministic |
+
+## The distance ordering is an authorisation boundary, not a preference
+
+`distance` is offered only where the organisation is authorised to **see**
+distance. A Pro club asking for it receives `400 SORT_NOT_AVAILABLE`. An
+ordering must not become a channel for a field the projection withholds: a Pro
+club could otherwise binary-search a child's location by re-ordering.
+
+The geography *explanation* carries no number for anyone, in any app.
+
+## What M19 verified
+
+- `m19E2E §7` — the sort vocabulary is closed; no option name contains best,
+  match, relevance, score, rank, recommend or fit; the default is
+  `recent_evidence`; every comparator ends on the player id; the preferred
+  count is reported but never used as a sort key.
+- `m19E2E §15` — two identical reads return the same order for every ordering;
+  `name` really orders by name; `best_match` gets the declared default; paging
+  is stable and no player appears on two pages; a negative offset clamps to 0
+  and an enormous page size clamps to the platform limit.
+- `m19E2E §13` — distance is absent for a Pro club, present for a grassroots
+  one, and the distance ordering is refused for the former.
+- `m19Live M19-4` — the ordering control on screen declares itself, offers no
+  forbidden option, and the `name` ordering visibly orders by name.
+- `m19Live M19-3` — adding a preferred criterion changes neither the membership
+  nor the order.

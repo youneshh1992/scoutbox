@@ -92,7 +92,7 @@
   <header>
     <div class="mark">Scout<span class="box">Box</span> — App Launcher</div>
     <p class="sub">One bookmark for every ScoutBox app. Each tile opens an interactive demo of the actual current interface, running entirely in your browser on synthetic sample data.</p>
-    <span class="buildchip"><span class="dot"></span>Source version <code>6da4780</code> · built 2026-09-12 · Milestone 18.2 — Final Pre-M19 Cleanup</span>
+    <span class="buildchip"><span class="dot"></span>Source version <code>M19HEAD</code> · built 2026-09-13 · Milestone 19 — Explainable Matching + Dynamic Watchlists</span>
   </header>
 
   <div class="grid">
@@ -103,12 +103,12 @@
     </a>
     <a class="app pro" href="https://claude.ai/code/artifact/34c738e4-7660-471c-9fbe-b34a162c8e1e">
       <div class="top"><span class="emoji">🔭</span><h2>ScoutBox Pro</h2></div>
-      <p>The recruitment desk for professional clubs — Recruitment Rooms, and now <b>Second Look</b> and <b>Nobody Missed</b>: what changed since your club decided, and who matched your own written brief but never entered your workflow.</p>
+      <p>The recruitment desk for professional clubs — Recruitment Rooms, Second Look, Nobody Missed, and now <b>Player Matching</b> and <b>Dynamic Watchlists</b>: which players you can already see satisfy the criteria <i>you</i> wrote, criterion by criterion, and a saved set of criteria that stays current. No match score, no ranking, no recommendation.</p>
       <span class="go">Open Pro →</span>
     </a>
     <a class="app grass" href="https://claude.ai/code/artifact/d2b059f1-ebfd-44ce-b98f-b685f5f2e856">
       <div class="top"><span class="emoji">🌱</span><h2>ScoutBox Grassroots</h2></div>
-      <p>The free toolkit for grassroots clubs — local discovery, squad board, sessions, club messaging, Box Training, a simpler Recruitment Room, and the same Second Look and Nobody Missed within the local radius.</p>
+      <p>The free toolkit for grassroots clubs — local discovery, squad board, sessions, club messaging, Box Training, a simpler Recruitment Room, Second Look and Nobody Missed, and the same Player Matching and Dynamic Watchlists within the local radius.</p>
       <span class="go">Open Grassroots →</span>
     </a>
     <a class="app pro" style="--accent: #a688ff" href="https://claude.ai/code/artifact/4172504f-ecf4-4c25-ac9f-a5d59ac22e58">
@@ -123,6 +123,29 @@
     </a>
   </div>
 
+
+  <section class="notes feature">
+    <h3>Explore the new features (Milestone 19 — Explainable Matching + Dynamic Watchlists)</h3>
+    <p class="sub" style="font-size:13px;margin:-4px 0 12px">Two questions, and one refusal. <b>Explainable Matching</b> answers <i>which players we can already see satisfy the criteria our club wrote, and exactly why</i>. <b>Dynamic Watchlists</b> answer <i>keep that current as the facts change, and tell us what changed</i>. Neither answers <i>who is best</i>. There is no match score, no talent or potential score, no ranking, no “recommended player” — and the words themselves are swept out of the source and the screens by the test suite, allowed only inside a sentence that denies them.</p>
+    <ul>
+      <li><b>1 · Where it lives</b> — Pro (as <i>Maria Keane</i>) → Recruitment → <b>Player Matching</b> and <b>Dynamic Watchlists</b>. Two more destinations inside the Recruitment area that already exists. No seventh sidebar section, the same discipline M17 and M18 kept.</li>
+      <li><b>2 · You write the criteria</b> — eleven typed facts (position, age, area, level, foot, availability, evidence, evidence recency, evidence confidence, Combine result, Combine measurement) and eight operators, in two tables, in one file. Typed controls, never a free-text JSON box: a criteria set nobody can read back six weeks later is not a criteria set.</li>
+      <li><b>3 · Required decides, preferred explains</b> — a player must satisfy <i>every</i> required criterion to appear at all. Preferred criteria add context and are <b>counted</b> — “2 of 3 met” — never divided, normalised, or compared between players. Adding a preferred criterion changes the explanation and never the membership; the live suite asserts the list and its order are identical before and after.</li>
+      <li><b>4 · Why this player matches</b> — every card names every required criterion and whether it was met, in words: <i>“Matches position criteria (CDM)”</i>, <i>“Evidence within the last 90 days”</i>. Nothing on the screen matched for a reason ScoutBox will not print. The unit of the feature is the line, not the list.</li>
+      <li><b>5 · A refusal is an answer</b> — write an age range that starts after it ends and the editor keeps everything you typed and says <i>“the range starts after it ends”</i>, pointing at that row. An unknown criterion, operator or value is refused with its own code; nothing is ever silently dropped and evaluated as if it were fine.</li>
+      <li><b>6 · Protected characteristics are not matchable</b> — ethnicity, religion, disability, family income, school type and the rest are refused before any other validation runs, in whatever spelling they arrive, in either class. The editor never offers them; the wire refuses them anyway, because the interface is not the security boundary.</li>
+      <li><b>7 · Authorization runs first, always</b> — standing → authorization → visibility → blocks → minors and guardians → the grassroots radius → facts → <i>then</i> matching. Three organisations over the same data match over 14, 12 and 2 players. A player one club may see and another may not is simply <b>absent</b> from the second club’s answer, and there is no “considered” count that would reveal them.</li>
+      <li><b>8 · Distance is an authorisation, not a column</b> — the grassroots app shows distance because it is allowed to; the Pro app does not, and asking Pro to <i>order by</i> distance is refused, because an ordering must not leak what the field withholds. The geography explanation carries no number for anyone: it says “within the club’s permitted search area”. Explaining a match must never become a way to locate a child.</li>
+      <li><b>9 · An ordering, not a ranking</b> — five orderings, each naming what it orders by, every one ending on the player id so two reads give the same order, declared in the body and on the wire. None is called best, relevance or fit; ask for <code>best_match</code> and you get the declared default, because no such ordering exists. The preferred count is never a sort key.</li>
+      <li><b>10 · Save it as a Dynamic Watchlist</b> — a watchlist saves <b>criteria</b>, not a list of names. A stored list of players goes stale in exactly the ways that matter: someone is blocked, ages out, their evidence expires, and nobody wrote to the list to say so. Try <i>2027 Defensive Midfielders</i> in the demo.</li>
+      <li><b>11 · The mode is chosen, never guessed</b> — <b>Follow the Recruitment Brief</b> (edit the brief, the list follows) or <b>Keep these saved criteria</b> (later brief edits do not touch it). Saving without choosing is refused, and editing the criteria of a brief-following list is refused with the two honest options named.</li>
+      <li><b>12 · What changed, and why</b> — “2 newly matched · 1 no longer matches”, with a history that names the criterion that flipped, or says plainly that the <i>criteria</i> changed. Nothing says a player got better or worse — that is asserted by the suite, not merely intended. Twenty-five players moving after a brief edit is <b>one</b> notification, in a category you can switch off.</li>
+      <li><b>13 · Leaving is never explained away</b> — a player who leaves because they blocked the club, or because a safeguarding rule changed, or because their account went, gets one reason: <i>“no longer available in this watchlist”</i>. Naming which one would leak exactly what the rule exists to protect.</li>
+      <li><b>14 · Into a Room, and still on the list</b> — <b>Add to Recruitment Room</b> calls the ordinary M17 Room creator, so every standing gate and the one-open-room rule behave as they do anywhere else; doing it twice opens the same Room, not a second one. The player <b>stays on the watchlist</b> while they still match: being evaluated is not a reason to stop tracking whether they meet your criteria.</li>
+      <li><b>15 · A shared link, a shared conflict</b> — a search you ran lives in the address bar, so refresh, Back and a link to a colleague all reproduce it (the server re-validates every criterion, so an edited link widens nothing). And if a colleague renames the watchlist while you are renaming it, you get the same conflict notice every other surface uses, with their name on it and every word you typed still there.</li>
+    </ul>
+    <div class="honest"><b>Honest scope.</b> <b>There is no scheduler in this build.</b> Nothing recomputes while the application is closed: membership is derived when a watchlist is read, it is correct as of that read, and the page says when that was. That is why it is a Dynamic Watchlist and not a live one, and it is stated in the payload, on the screen and in the documentation rather than papered over. The candidate scan is linear in the number of players and capped — there is no index over positions or ages, because the snapshot store has no query planner to give one to; when the cap truncates a scan the response says so instead of presenting a partial answer as complete. Preferred criteria are counted and will never be scored. Discover’s own ordering was <b>not</b> changed: M19 adds a separate surface where the club owns the ordering question outright. Nothing here is player-facing — no player is told that a club is matching on them, which criteria they met, or that they entered or left a list — and Trust &amp; Safety has no routine access to any of it. Six defects were found by the suites during this milestone and fixed rather than documented around; two of them, a foot criterion that could never match a real player and a live refetch that would have silently overwritten a colleague’s rename, are written up in <code>M19_MATRIX.md</code>.</div>
+  </section>
 
   <section class="notes feature">
     <h3>What changed in Milestone 18.2 — Final Pre-M19 Cleanup</h3>

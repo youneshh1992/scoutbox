@@ -41,6 +41,7 @@ import { CATEGORIES, TYPE_CATEGORY, categoryOf } from '../m182/notificationPrefs
 import { MIGRATIONS, SCHEMA_VERSION } from '../m182/migrations.mjs';
 import { RATE_LIMIT_POLICY } from '../m181/rateLimit.mjs';
 import { SOURCE_CONTEXTS } from '../m17/shared.mjs';
+import { ageOn } from '../domain.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = path.join(HERE, '..');
@@ -419,6 +420,66 @@ section('§9 — the M19 events, notifications, limits and schema are all declar
   const { payload, dropped } = minimizePayload('watchlist_membership_changed', { orgId: 'o', watchlistId: 'w', playerId: 'p', playerName: 'K', entered: 4 });
   abuse(58, !('playerId' in payload) && !('playerName' in payload) && !('entered' in payload) && dropped.length === 3,
     'a membership-change event never ships who moved or how many — the recipient re-reads under their own authorization');
+}
+
+// ========== §9b the boundaries the mandate names that nothing else covers
+section('§9b — age boundaries, time-driven change, and the things M19 must NOT be');
+{
+  // Age comes from `ageOn` (M18.2, UTC calendar days). A birthday that lands
+  // exactly on the boundary must flip on the day, not the day after.
+  const dob = '2008-06-01';
+  const dayBefore = ageOn(dob, new Date(Date.UTC(2026, 4, 31)));
+  const onTheDay = ageOn(dob, new Date(Date.UTC(2026, 5, 1)));
+  ok(dayBefore === 17 && onTheDay === 18, `age flips on the birthday itself, in UTC (${dayBefore} → ${onTheDay})`);
+  const ageCrit = crit({ required: [{ type: 'age', operator: 'lte', value: 17 }] });
+  const before = matchPlayerToCriteria({ ...EMPTY_FACTS, age: dayBefore }, ageCrit, { now: NOW });
+  const after = matchPlayerToCriteria({ ...EMPTY_FACTS, age: onTheDay }, ageCrit, { now: NOW });
+  abuse(25, before.matchesRequired === true && after.matchesRequired === false,
+    'a player ages out of a criteria set with no write to any record — the fact changed, not the player');
+
+  // Recency expires the same way: the same facts, a later clock, no writes.
+  const rec = crit({ required: [{ type: 'evidence_recency', operator: 'within_days', value: 30 }] });
+  const fresh = matchPlayerToCriteria(FACTS, rec, { now: NOW });
+  const stale = matchPlayerToCriteria(FACTS, rec, { now: NOW + 60 * DAY });
+  abuse(25, fresh.matchesRequired === true && stale.matchesRequired === false,
+    'evidence expires out of a criteria set as the clock moves, with no player write');
+
+  // Training volume is not a criterion, and cannot become one by spelling.
+  for (const t of ['training_volume', 'sessions_per_week', 'box_cam_minutes', 'streak', 'effort']) {
+    abuse(11, !CRITERION_TYPE_NAMES.includes(t) && !validateCriteria({ required: [{ type: t, operator: 'gte', value: 1 }] }).ok,
+      `"${t}" is not a criterion — training volume is not a proxy for ability`);
+  }
+
+  // Matching, Nobody Missed and Second Look answer different questions and
+  // must not quietly filter one another.
+  const idxSrc = read('scoutbox-server/m19/index.mjs');
+  const idxCode = idxSrc.replace(/^\s*(\/\/|\*).*$/gm, '');
+  abuse(41, !/db\.secondLookItems|db\.nobodyMissed|nmDismissals|slDismissals|\bdismissed\b/i.test(idxCode),
+    'matching reads no Second Look or Nobody Missed store — nobody is excluded for having been evaluated, dismissed or surfaced elsewhere');
+  abuse(42, !/assessments|db\.assessments|hasEvaluation/i.test(idxCode),
+    'and none for having been assessed: matching, Second Look and Nobody Missed answer different questions over the same players');
+
+  // Analytics: counters only, never a player label and never a quality metric.
+  const metrics = [...idxSrc.matchAll(/vmetric\?\.\(([^)]*)\)/g)].map((m) => m[1]);
+  ok(metrics.length >= 5, `${metrics.length} metric counters in the M19 routes`);
+  abuse(47, metrics.every((m) => /^'[a-z_]+'$/.test(m.trim()) || /transition === 'entered'/.test(m)),
+    'every metric is a constant counter name — no player id, no criteria, no score is ever counted');
+
+  // The org audit log carries watchlist LIFECYCLE only. Membership churn
+  // belongs in the watchlist history, or the audit log becomes unreadable.
+  const auditSrc = read('scoutbox-server/m182/audit.mjs');
+  abuse(45, /WATCHLIST_ACTIONS = new Set\(\['watchlist_created', 'watchlist_updated', 'watchlist_archived'\]\)/.test(auditSrc),
+    'the audit log projects watchlist lifecycle only — membership changes never flood it');
+  abuse(45, !/watchlist_membership_changed/.test(auditSrc),
+    'and the membership event is deliberately absent from the audit projection');
+
+  // Trust & Safety has no routine watchlist access.
+  const tsFiles = ['scoutbox-server/m14/index.mjs', 'scoutbox-server/m16/index.mjs'];
+  for (const f of tsFiles) {
+    let src = '';
+    try { src = read(f); } catch { continue; }
+    abuse(34, !/dynamicWatchlists|watchlistHistory/.test(src), `${f}: the T&S surface holds no watchlist access`);
+  }
 }
 
 // ============================================================ HTTP boot
