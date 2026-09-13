@@ -536,7 +536,7 @@ export function registerDevelopment(ctx) {
       if (!requireCap(res, access, 'manage', 'You cannot change this plan.')) return undefined;
       if (plan.status === 'archived') return res.status(409).json({ error: 'PLAN_ARCHIVED', detail: 'An archived plan is a historical record and cannot be changed. Its history is preserved.' });
       if (limited('development_plan_write', rateKeyFor(req))) return res.status(429).json(rateLimitedBody('development_plan_write'));
-      if (!guardRev(req, res, plan, { errorCode: 'DEVELOPMENT_PLAN_CONFLICT', current: { planId: plan.id, status: plan.status } })) return undefined;
+      if (!guardRev(req, res, plan, { errorCode: 'DEVELOPMENT_PLAN_VERSION_CONFLICT', current: { planId: plan.id, status: plan.status } })) return undefined;
 
       const parsed = validatePlanBody(req.body, { ownerKind: plan.owner.kind, existing: plan });
       if (parsed.error) return res.status(400).json(parsed);
@@ -582,7 +582,7 @@ export function registerDevelopment(ctx) {
       if (to === 'active' && !goals.length) {
         return res.status(400).json({ error: 'ACTIVE_PLAN_NEEDS_A_GOAL', detail: 'An active plan needs at least one goal.' });
       }
-      if (!guardRev(req, res, plan, { errorCode: 'DEVELOPMENT_PLAN_CONFLICT', current: { planId: plan.id, status: plan.status } })) return undefined;
+      if (!guardRev(req, res, plan, { errorCode: 'DEVELOPMENT_PLAN_VERSION_CONFLICT', current: { planId: plan.id, status: plan.status } })) return undefined;
 
       const actor = actorOf(viewer, req);
       const from = plan.status;
@@ -700,7 +700,7 @@ export function registerDevelopment(ctx) {
       }
       if (limited('development_item_write', rateKeyFor(req))) return res.status(429).json(rateLimitedBody('development_item_write'));
       // Two coaches editing one goal is the case §70 exists for.
-      if (!guardRev(req, res, goal, { errorCode: 'DEVELOPMENT_GOAL_CONFLICT', current: { goalId: goal.id, status: goal.status, title: goal.title } })) return undefined;
+      if (!guardRev(req, res, goal, { errorCode: 'DEVELOPMENT_GOAL_VERSION_CONFLICT', current: { goalId: goal.id, status: goal.status, title: goal.title } })) return undefined;
 
       const actor = actorOf(viewer, req);
       const at = now();

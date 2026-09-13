@@ -15,6 +15,7 @@ import { ExposureSection, PreferencesSection, RepresentationSection, Transitions
 import { InviteCodeSection, ReferencesSection } from '../../components/M14Sections';
 import { FootballPassportSection } from '../../components/M15Sections';
 import { BoxTrainingSection } from '../../components/M16Sections';
+import { DevelopmentHubSection } from '../../components/M21Sections';
 import { CombineSection } from '../../components/CombineSection';
 import { TrustProfileSection } from '../../components/TrustProfileSection';
 
@@ -249,6 +250,10 @@ export default function You() {
         {playerId ? <ExposureSection playerId={playerId} /> : null}
         {playerId ? <AccessSection playerId={playerId} isMinor={isMinor} mediaOptions={(me?.media ?? []).map((m) => ({ id: m.id, title: m.title }))} /> : null}
         {playerId ? <ReferencesSection playerId={playerId} /> : null}
+        {/* M21 — the Development Hub sits above Box Training and Combine, which
+            are two of the things it links AS evidence. It comes after the
+            recruitment surfaces because a plan is about the work, not the wall. */}
+        {playerId ? <DevelopmentHubSection actor={{ kind: 'player', id: playerId }} /> : null}
         {playerId ? <BoxTrainingSection actor={{ kind: 'player', id: playerId }} isMinor={isMinor} /> : null}
         {playerId ? <CombineSection actor={{ kind: 'player', id: playerId }} /> : null}
         {/* M16.2 — the Football Passport payload deliberately carries no numeric

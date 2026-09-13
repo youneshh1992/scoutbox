@@ -10,6 +10,7 @@ import {
 } from './api';
 import { FootballPassportPanel, SharedPassportOpener, SummaryChips, usePassportSummaries } from './m15screens';
 import { BoxTrainingPanel } from './m16screens';
+import { DevelopmentPanel } from './m21Screens';
 import { CombinePanel } from './combineScreens';
 import { TrustPanel } from './trustScreens';
 import { rooms } from './roomsApi';
@@ -1768,6 +1769,9 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
               </div>
             </div>
 
+            {/* M21 — Development sits inside the player, which is where a
+                development plan belongs. It adds no top-level destination. */}
+            <DevelopmentPanel session={session} playerId={playerId} notify={notify} />
             <FootballPassportPanel session={session} playerId={playerId} notify={notify} />
             <BoxTrainingPanel session={session} playerId={playerId} notify={notify} />
             <CombinePanel session={session} playerId={playerId} notify={notify} />

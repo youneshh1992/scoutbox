@@ -15,6 +15,7 @@ import { AckSection, OpportunityFitSection, PreferencesSection, TransitionsSecti
 import { ChildReferencesSection, InviteCodeSection } from '../components/M14Sections';
 import { FootballPassportSection } from '../components/M15Sections';
 import { BoxTrainingSection } from '../components/M16Sections';
+import { DevelopmentHubSection } from '../components/M21Sections';
 import { colors } from '../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle, TrustBar } from '../components/ui';
 import { ReportButton } from '../components/ReportSheet';
@@ -541,6 +542,9 @@ export default function GuardianDashboard() {
                 <OpportunityFitSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />
                 <TransitionsSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} isMinor={false} mediaOptions={(c.media ?? []).map((m) => ({ id: m.id, title: m.title }))} />
                 <ChildReferencesSection guardianId={guardianId} childId={c.id} childName={c.name} />
+                {/* M21 — a minor's plan is guardian-managed. The safeguarding model is
+                    unchanged: the child reads it on their own device, the guardian writes it. */}
+                <DevelopmentHubSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />
                 <BoxTrainingSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} isMinor childName={c.name} />
                 <FootballPassportSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} childName={c.name} />
                 <InviteCodeSection actor={{ kind: 'guardian', id: guardianId, childId: c.id, childName: c.name }} />
