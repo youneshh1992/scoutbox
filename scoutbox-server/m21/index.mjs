@@ -700,7 +700,10 @@ export function registerDevelopment(ctx) {
       }
       if (limited('development_item_write', rateKeyFor(req))) return res.status(429).json(rateLimitedBody('development_item_write'));
       // Two coaches editing one goal is the case §70 exists for.
-      if (!guardRev(req, res, goal, { errorCode: 'DEVELOPMENT_GOAL_VERSION_CONFLICT', current: { goalId: goal.id, status: goal.status, title: goal.title } })) return undefined;
+      // The conflict body carries the goal's id and status and NOT its title:
+      // the other person's edit is content, and the caller reloads through its
+      // own authorised read rather than learning it from a 409.
+      if (!guardRev(req, res, goal, { errorCode: 'DEVELOPMENT_GOAL_VERSION_CONFLICT', current: { goalId: goal.id, status: goal.status } })) return undefined;
 
       const actor = actorOf(viewer, req);
       const at = now();

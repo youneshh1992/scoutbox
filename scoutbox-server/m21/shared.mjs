@@ -417,21 +417,36 @@ export function completionPhrase(counts) {
  * Development and test throw. Production returns the problems, because a
  * running recruitment platform that refuses to start is its own outage.
  */
-export function assertDevelopmentVocabulary({ mode = process.env.NODE_ENV ?? 'development' } = {}) {
+/**
+ * Scan `[where, text]` pairs for a forbidden product name.
+ *
+ * A separate exported function rather than a closure inside the assertion,
+ * because the vocabulary tables are frozen — which is the right thing for them
+ * to be, and which makes "prove the assertion actually bites" impossible to
+ * test by mutating them. The scanner is the biting mechanism, so the suite
+ * tests it directly with a poisoned pair and separately asserts the real
+ * tables pass.
+ */
+export function scanCopyForForbiddenNames(pairs) {
   const problems = [];
   const forbidden = FORBIDDEN_DEVELOPMENT_NAMES.map((n) => n.toLowerCase());
-
-  const scan = (where, text) => {
+  for (const [where, text] of pairs) {
     const t = String(text).toLowerCase();
     for (const f of forbidden) if (t.includes(f)) problems.push(`${where}: contains forbidden name "${f}"`);
-  };
-  for (const [k, v] of Object.entries(GOAL_CATEGORY_LABELS)) scan(`GOAL_CATEGORY_LABELS.${k}`, v);
-  for (const [k, v] of Object.entries(EVIDENCE_SOURCE_LABELS)) scan(`EVIDENCE_SOURCE_LABELS.${k}`, v);
-  for (const [k, v] of Object.entries(REVIEWER_KIND_LABELS)) scan(`REVIEWER_KIND_LABELS.${k}`, v);
-  for (const g of GOAL_LIBRARY) scan(`GOAL_LIBRARY.${g.id}`, g.title);
-  for (const t of PLAN_TEMPLATES) scan(`PLAN_TEMPLATES.${t.id}`, t.title);
-  scan('DEVELOPMENT_PRINCIPLE', DEVELOPMENT_PRINCIPLE);
-  scan('ACHIEVED_MEANING', ACHIEVED_MEANING);
+  }
+  return problems;
+}
+
+export function assertDevelopmentVocabulary({ mode = process.env.NODE_ENV ?? 'development' } = {}) {
+  const problems = scanCopyForForbiddenNames([
+    ...Object.entries(GOAL_CATEGORY_LABELS).map(([k, v]) => [`GOAL_CATEGORY_LABELS.${k}`, v]),
+    ...Object.entries(EVIDENCE_SOURCE_LABELS).map(([k, v]) => [`EVIDENCE_SOURCE_LABELS.${k}`, v]),
+    ...Object.entries(REVIEWER_KIND_LABELS).map(([k, v]) => [`REVIEWER_KIND_LABELS.${k}`, v]),
+    ...GOAL_LIBRARY.map((g) => [`GOAL_LIBRARY.${g.id}`, g.title]),
+    ...PLAN_TEMPLATES.map((t) => [`PLAN_TEMPLATES.${t.id}`, t.title]),
+    ['DEVELOPMENT_PRINCIPLE', DEVELOPMENT_PRINCIPLE],
+    ['ACHIEVED_MEANING', ACHIEVED_MEANING],
+  ]);
 
   const checkTable = (name, statuses, table) => {
     for (const s of statuses) {
