@@ -33,7 +33,7 @@ import { demoM20 } from './m20Demo';
 export const FAMILY_IDS = ['pipeline', 'duration', 'aging', 'decision_record', 'coverage', 'source', 'watchlist'] as const;
 export type FamilyId = (typeof FAMILY_IDS)[number];
 
-export const WINDOW_PRESETS = ['last_30_days', 'last_90_days', 'last_180_days', 'last_365_days'] as const;
+export const WINDOW_PRESETS = ['last_7_days', 'last_30_days', 'last_90_days', 'last_180_days', 'last_365_days'] as const;
 export type WindowPreset = (typeof WINDOW_PRESETS)[number];
 export const DEFAULT_WINDOW: WindowPreset = 'last_90_days';
 export const STALL_THRESHOLDS = [14, 30, 90] as const;
@@ -106,9 +106,37 @@ export interface Window {
   days: number;
 }
 
+/**
+ * A period-over-period comparison of one count.
+ *
+ * `percentChange` is null when the previous period was zero: a rise from
+ * nothing has no percentage, and rendering one produces Infinity or a
+ * meaningless 100%. `upFromZero` is what the client renders instead.
+ */
+export interface Comparison {
+  current: number;
+  previous: number;
+  change: number;
+  percentChange: number | null;
+  upFromZero: boolean;
+  unchangedAtZero: boolean;
+}
+
+export interface Trend {
+  previousWindow: Window;
+  note: string;
+  rooms_opened: Comparison;
+  rooms_ended: Comparison;
+  decisions_recorded: Comparison;
+}
+
 export interface Dashboard {
   policyVersion: number;
   generatedAt: number;
+  /** When these figures were worked out. Read-time, not a live stream. */
+  calculatedAt: number;
+  liveStream: boolean;
+  trend: Trend;
   window: Window;
   filters: { filter: string; value: string }[];
   smallNMinimum: number;
@@ -252,6 +280,20 @@ export function figureText(
   if (f.empty) return words.empty;
   if (f.suppressed) return words.suppressed(f.n, f.numerator ?? 0, f.minimum ?? 5);
   return words.percent(Math.round((f.value ?? 0) * 100), f.n);
+}
+
+/**
+ * A period-over-period change in words. The zero case is the reason this
+ * exists: "up 2, from none last period" is true, and "+100%" is not.
+ */
+export function comparisonText(
+  c: Comparison | undefined,
+  words: { flat: string; upFromZero: (change: number) => string; changed: (change: number, pct: number) => string },
+): string {
+  if (!c) return words.flat;
+  if (c.unchangedAtZero || c.change === 0) return words.flat;
+  if (c.percentChange === null) return words.upFromZero(c.change);
+  return words.changed(c.change, Math.round(c.percentChange * 100));
 }
 
 /** Round a day count for display without ever rounding a real duration to zero. */

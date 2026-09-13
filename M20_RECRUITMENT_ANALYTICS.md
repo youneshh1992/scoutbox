@@ -230,10 +230,34 @@ second to be at least the first.
 Inclusive UTC calendar days, the same rule M18.2 established for brief date
 boundaries. A club in UTC+13 and one in UTC−7 see the same boundary instant.
 
-Presets: 30 / 90 / 180 / 365 days, default 90. A custom range is accepted as two
-well-formed days in order; anything else is refused rather than silently
+Presets: 7 / 30 / 90 / 180 / 365 days, default 90. A custom range is accepted as
+two well-formed days in order; anything else is refused rather than silently
 repaired, because a quietly widened window changes every number on the page
 without saying so.
+
+### Period-over-period, and the zero
+
+Three period-activity counts — rooms opened, rooms ended, decisions recorded —
+are compared with the immediately preceding window of the **same length**.
+Comparing seven days against thirty would make every figure look like a
+collapse, so the comparison period always matches, is contiguous, and does not
+overlap.
+
+Only counts, and only period activity. A trend on a current-state figure is
+meaningless because the window does not apply to it; a trend on a rate compounds
+two small samples into one confident-looking number.
+
+When the previous period was zero there is **no percentage**. `percentChange` is
+null, `upFromZero` is true, and the screen reads "up 3, from none last period" —
+because +100% from nothing is a number the data cannot support, and Infinity is
+worse. Nothing compared with nothing is not a 0% change either.
+
+### Freshness
+
+Every payload carries `calculatedAt` and `liveStream: false`, and the screen
+renders "Calculated at …". These are read-time projections: the figure was true
+when the request was served and does not refresh behind the reader. Saying so is
+cheaper than implying a live feed the build does not have.
 
 ## 18. Time semantics
 
@@ -321,6 +345,15 @@ first move, and the probe is how you would know it worked.
 
 The store is a snapshot store — collections of JSON held in memory — so there is
 no index to add and none was added: a scan **is** the access path.
+
+### Age buckets
+
+Open rooms are also bucketed — 0–7, 8–14, 15–30, 31–60, over 60 days — beside
+the median. Either alone misleads: a median of twenty days hides the four rooms
+sitting at two hundred, and a bucket table alone hides the shape. The buckets
+tile the whole range with no gap and no overlap (asserted), the last is
+open-ended so no room falls out of the table, and they are counts, so they are
+never suppressed.
 
 ## 26. Honest limitations
 

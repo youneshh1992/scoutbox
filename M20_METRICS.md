@@ -45,10 +45,32 @@ Every metric declares one of three time semantics, and the payload names it:
 - **window-entry** — the record is counted in the window in which the *entry* event happened (a room opened, a decision recorded).
 - **window-completion** — the record is counted in the window in which the *completing* event happened (a room reached a terminal status, a trial completed). Durations use this: a room still open contributes nothing to a time-to-X median, which is stated on screen because it biases early windows downward.
 
+Presets are **7 / 30 / 90 / 180 / 365 days**, default 90, plus a custom range.
 Windows are inclusive UTC calendar-day ranges, evaluated by the same helper as
-M18.2's `briefIsLiveOn`. There is one clock: `history[].at`, the timestamp the
-M12 `audit()` helper wrote. M20 never invents a timestamp and never infers one
-from record order.
+M18.2's `briefIsLiveOn`.
+
+### Period-over-period
+
+Three period-activity counts — rooms opened, rooms ended, decisions recorded —
+are compared with the **immediately preceding window of the same length**.
+Equal length matters: comparing seven days against thirty would make every
+figure look like a collapse. The two periods are contiguous and non-overlapping.
+
+Only counts are compared, and only period-activity ones. A trend on a
+point-in-time figure ("active rooms, up 12%") is meaningless because the window
+does not apply to it, and a trend on a rate compounds two small samples into one
+confident-looking number.
+
+**The zero rule:** when the previous period was zero, `percentChange` is `null`
+and `upFromZero` is true. A rise from nothing has no percentage; rendering one
+produces `Infinity` or a meaningless 100%. The screen says "up 3, from none last
+period". Nothing compared with nothing is *not* a 0% change either — it is
+`unchangedAtZero`.
+
+### One clock
+
+There is one clock: `history[].at`, the timestamp the M12 `audit()` helper
+wrote. M20 never invents a timestamp and never infers one from record order.
 
 ## Source records
 

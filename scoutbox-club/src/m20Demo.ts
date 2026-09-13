@@ -10,8 +10,8 @@
 // acceptance suite reads both and fails if they drift apart: a caveat that
 // says something different in the demo is worse than no caveat.
 import type {
-  M20Api, Dashboard, Catalogue, Drilldown, Metric, Family, FamilyId, Figure, Distribution,
-  DashboardFilters, DashboardOutcome,
+  M20Api, Dashboard, Catalogue, Comparison, Drilldown, Metric, Family, FamilyId, Figure,
+  Distribution, DashboardFilters, DashboardOutcome,
 } from './m20Api';
 
 const DAY = 86_400_000;
@@ -35,6 +35,15 @@ const dist = (values: number[], excluded = 0): Distribution => {
   };
   return { n: v.length, median: q(0.5), p25: q(0.25), p75: q(0.75), min: v[0], max: v[v.length - 1], empty: false, suppressed: false, excluded };
 };
+
+/** The same zero rule the server applies: a rise from nothing has no percentage. */
+const compare = (current: number, previous: number): Comparison => ({
+  current, previous,
+  change: current - previous,
+  percentChange: previous === 0 ? null : (current - previous) / previous,
+  upFromZero: previous === 0 && current > 0,
+  unchangedAtZero: previous === 0 && current === 0,
+});
 
 /** Metric metadata, mirroring the server registry entry for entry. */
 const meta = (
@@ -142,7 +151,7 @@ const STALLED = [
 
 function buildDashboard(filters: DashboardFilters): Dashboard {
   const to = new Date(NOW).toISOString().slice(0, 10);
-  const spanDays = filters.window === 'last_30_days' ? 30 : filters.window === 'last_365_days' ? 365 : filters.window === 'last_180_days' ? 180 : 90;
+  const spanDays = filters.window === 'last_7_days' ? 7 : filters.window === 'last_30_days' ? 30 : filters.window === 'last_365_days' ? 365 : filters.window === 'last_180_days' ? 180 : 90;
   const from = new Date(NOW - (spanDays - 1) * DAY).toISOString().slice(0, 10);
   const stallDays = filters.stallDays ?? 30;
   const applied = (['source', 'priority', 'brief'] as const)
@@ -216,7 +225,16 @@ function buildDashboard(filters: DashboardFilters): Dashboard {
         ...M.time_trial_requested_to_completed, ...dist([], 1),
         excludedMeans: 'Trials requested but not yet recorded as completed.',
       } as Metric,
-      open_room_age: { ...M.open_room_age, ...dist([9, 17, 24, 33, 41, 58, 74]), openRooms: count(7) } as Metric,
+      open_room_age: {
+        ...M.open_room_age, ...dist([9, 17, 24, 33, 41, 58, 74]), openRooms: count(7),
+        buckets: [
+          { id: '0_7', label: '0–7 days', ...count(0) },
+          { id: '8_14', label: '8–14 days', ...count(1) },
+          { id: '15_30', label: '15–30 days', ...count(2) },
+          { id: '31_60', label: '31–60 days', ...count(3) },
+          { id: '60_plus', label: 'Over 60 days', ...count(1) },
+        ],
+      } as Metric,
     }, ['sourceContext', 'priority']),
 
     aging: fam('aging', {
@@ -315,9 +333,21 @@ function buildDashboard(filters: DashboardFilters): Dashboard {
   const kept: Record<string, Family> = {};
   for (const f of wanted) if (data[f]) kept[f] = data[f];
 
+  const prevFrom = new Date(NOW - (spanDays * 2 - 1) * DAY).toISOString().slice(0, 10);
+  const prevTo = new Date(NOW - spanDays * DAY).toISOString().slice(0, 10);
+
   return {
     policyVersion: 1,
     generatedAt: NOW,
+    calculatedAt: NOW,
+    liveStream: false,
+    trend: {
+      previousWindow: { preset: 'previous', from: prevFrom, to: prevTo, days: spanDays },
+      note: 'Compared with the previous period of the same length. Only period activity is compared — a trend on a current-state figure would be meaningless, because the period does not apply to it.',
+      rooms_opened: compare(9, 6),
+      rooms_ended: compare(2, 0),
+      decisions_recorded: compare(6, 4),
+    },
     window: { preset: filters.from || filters.to ? 'custom' : (filters.window ?? 'last_90_days'), from: filters.from ?? from, to: filters.to ?? to, days: spanDays },
     filters: applied,
     smallNMinimum: SMALL_N_MIN,
@@ -334,8 +364,9 @@ function buildDashboard(filters: DashboardFilters): Dashboard {
 /** The demo refuses exactly what the server refuses, in the server's words. */
 function refuse(filters: DashboardFilters): DashboardOutcome | null {
   const w = filters.window;
-  if (w && !['last_30_days', 'last_90_days', 'last_180_days', 'last_365_days'].includes(w)) {
-    return { ok: false, error: 'WINDOW_UNKNOWN', detail: `Unknown window "${w}".`, allowed: ['last_30_days', 'last_90_days', 'last_180_days', 'last_365_days'] };
+  const WINDOWS = ['last_7_days', 'last_30_days', 'last_90_days', 'last_180_days', 'last_365_days'];
+  if (w && !WINDOWS.includes(w)) {
+    return { ok: false, error: 'WINDOW_UNKNOWN', detail: `Unknown window "${w}".`, allowed: WINDOWS };
   }
   if (filters.from && filters.to && filters.from > filters.to) {
     return { ok: false, error: 'WINDOW_INVALID', detail: 'from must not be after to.' };
@@ -354,7 +385,7 @@ const CATALOGUE: Catalogue = {
   smallNMinimum: SMALL_N_MIN,
   smallNNote: 'A rate or a median over fewer than 5 records is withheld and shown as raw counts instead. Counts themselves are never hidden.',
   groupDimensions: ['status', 'source_context', 'priority', 'reason_category', 'brief'],
-  windows: ['last_30_days', 'last_90_days', 'last_180_days', 'last_365_days'],
+  windows: ['last_7_days', 'last_30_days', 'last_90_days', 'last_180_days', 'last_365_days'],
   defaultWindow: 'last_90_days',
   sourceContexts: ['search', 'watchlist', 'shortlist', 'opportunity', 'recommendation', 'campaign', 'passport', 'nobody_missed', 'second_look', 'matching', 'dynamic_watchlist', 'direct'],
   priorities: ['low', 'normal', 'high', 'urgent'],

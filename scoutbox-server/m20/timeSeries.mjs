@@ -120,12 +120,34 @@ export function timeTrialRequestedToCompleted(ctx) {
 
 // ------------------------------------------------------- T5 · age of the open
 
+/**
+ * Age buckets for open rooms. A distribution says what the middle looks like;
+ * buckets say where the work is piling up, which is the question a director
+ * actually has. Both are shown, because either alone misleads: a median of 20
+ * days hides the four rooms sitting at 200.
+ */
+export const AGE_BUCKETS = [
+  { id: '0_7', label: '0–7 days', min: 0, max: 7 },
+  { id: '8_14', label: '8–14 days', min: 8, max: 14 },
+  { id: '15_30', label: '15–30 days', min: 15, max: 30 },
+  { id: '31_60', label: '31–60 days', min: 31, max: 60 },
+  { id: '60_plus', label: 'Over 60 days', min: 61, max: Infinity },
+];
+
 export function openRoomAge(ctx) {
   const open = ctx.rooms.filter((r) => OPEN_ROOM_STATUSES.includes(r.status));
+  const ages = open.map((r) => days(r.createdAt, ctx.now));
   return {
     ...wire(METRICS.open_room_age),
-    ...distribution(open.map((r) => days(r.createdAt, ctx.now))),
+    ...distribution(ages),
     openRooms: count(open.length),
+    // Counts, so never suppressed: a club with three old rooms must be able
+    // to see all three.
+    buckets: AGE_BUCKETS.map((b) => ({
+      id: b.id,
+      label: b.label,
+      ...count(ages.filter((a) => Math.floor(a) >= b.min && Math.floor(a) <= b.max).length),
+    })),
   };
 }
 

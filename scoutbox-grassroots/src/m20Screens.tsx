@@ -25,11 +25,11 @@
 import { useCallback, useEffect, useState, type ReactElement, type ReactNode } from 'react';
 import { type Session } from './api';
 import {
-  m20, dayText, figureText, DRILLDOWN_METRICS, DEFAULT_WINDOW, WINDOW_PRESETS, STALL_THRESHOLDS,
-  type Catalogue, type Dashboard, type DashboardFilters, type Distribution, type Drilldown,
-  type Family, type Figure, type Metric,
+  m20, dayText, figureText, comparisonText, DRILLDOWN_METRICS, DEFAULT_WINDOW, WINDOW_PRESETS, STALL_THRESHOLDS,
+  type Catalogue, type Comparison, type Dashboard, type DashboardFilters, type Distribution,
+  type Drilldown, type Family, type Figure, type Metric,
 } from './m20Api';
-import { t, fmtDate } from './i18n';
+import { t, fmtDate, fmtDateTime } from './i18n';
 import { httpState } from './httpState';
 
 export interface M20ScreenProps {
@@ -76,6 +76,28 @@ function DistributionValue({ d, unit }: { d: Distribution | undefined; unit: str
         {t('m20.fig.iqr').replace('{p25}', dayText(d.p25)).replace('{p75}', dayText(d.p75)).replace('{n}', String(d.n))}
       </span>
     </span>
+  );
+}
+
+/**
+ * One period-over-period comparison. The zero case is why this is a component
+ * and not a template string: "+100%" from a previous period of nothing is a
+ * number the data cannot support, so it is never rendered.
+ */
+function TrendCell({ label, c }: { label: string; c: Comparison | undefined }) {
+  const words = comparisonText(c, {
+    flat: t('m20.trend.flat'),
+    upFromZero: (change) => t('m20.trend.upFromZero').replace('{change}', String(change)),
+    changed: (change, pct) => t('m20.trend.changed')
+      .replace('{change}', change > 0 ? `+${change}` : String(change))
+      .replace('{pct}', pct > 0 ? `+${pct}` : String(pct)),
+  });
+  return (
+    <div className="trend-cell" data-trend={label}>
+      <span className="muted small">{label}</span>{' '}
+      <b data-trend-current={String(c?.current ?? 0)}>{c?.current ?? 0}</b>{' '}
+      <span className="muted small" data-trend-words="true">{words}</span>
+    </div>
   );
 }
 
@@ -188,9 +210,24 @@ function DurationPanels({ f }: { f: Family }) {
       {simple.map((id) => {
         const metric = m[id];
         if (!metric) return null;
+        const buckets = (metric.buckets ?? []) as { id: string; label: string; value: number }[];
         return (
           <Panel key={id} metric={metric}>
             <p><DistributionValue d={metric as unknown as Distribution} unit={t('m20.unit.days')} /></p>
+            {/* A median says what the middle looks like; buckets say where the
+                work is piling up, which is the question a director has. */}
+            {buckets.length > 0 && (
+              <div className="table-scroll">
+                <table className="data" data-age-buckets="true">
+                  <thead><tr><th>{t('m20.col.age')}</th><th>{t('m20.col.rooms')}</th></tr></thead>
+                  <tbody>
+                    {buckets.map((b) => (
+                      <tr key={b.id}><td>{t(`m20.bucket.${b.id}`, b.label)}</td><td data-bucket={b.id}>{b.value}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             {(metric.excluded as number) > 0 && (
               <p className="muted small" data-excluded={String(metric.excluded)}>
                 {t('m20.fig.excluded').replace('{n}', String(metric.excluded))} {String(metric.excludedMeans ?? '')}
@@ -515,7 +552,29 @@ export function DirectorDashboardScreen({ session, tick, notify, filters, onFilt
             {t('m20.windowLabel').replace('{from}', fmtDate(Date.parse(`${dash.window.from}T00:00:00Z`))).replace('{to}', fmtDate(Date.parse(`${dash.window.to}T00:00:00Z`)))}
             {' · '}
             {t('m20.smallN').replace('{min}', String(dash.smallNMinimum))}
+            {' · '}
+            {/* Read-time projection: say when, rather than imply a live feed. */}
+            <span data-calculated-at={String(dash.calculatedAt)}>
+              {t('m20.calculatedAt').replace('{when}', fmtDateTime(dash.calculatedAt))}
+            </span>
           </p>
+
+          {dash.trend && (
+            <section className="card" data-trend-strip="true">
+              <h3>{t('m20.trend.title')}</h3>
+              <p className="muted small">
+                {t('m20.trend.against')
+                  .replace('{from}', fmtDate(Date.parse(`${dash.trend.previousWindow.from}T00:00:00Z`)))
+                  .replace('{to}', fmtDate(Date.parse(`${dash.trend.previousWindow.to}T00:00:00Z`)))}
+              </p>
+              <div className="row wrap">
+                <TrendCell label={t('m20.trend.opened')} c={dash.trend.rooms_opened} />
+                <TrendCell label={t('m20.trend.ended')} c={dash.trend.rooms_ended} />
+                <TrendCell label={t('m20.trend.decided')} c={dash.trend.decisions_recorded} />
+              </div>
+              <p className="muted small">{dash.trend.note}</p>
+            </section>
+          )}
 
           {dash.partial && (
             <p className="warn" role="status" data-partial="true">

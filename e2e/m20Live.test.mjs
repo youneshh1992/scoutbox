@@ -241,6 +241,38 @@ await goto(maria, DASH, '[data-screen="director-dashboard"]');
   await maria.waitForTimeout(900);
 }
 
+// ---------------------------------------------- D3b: trend, buckets, freshness
+{
+  await goto(maria, `${DASH}?window=last_30_days`, '[data-screen="director-dashboard"]');
+  await maria.waitForTimeout(900);
+  const strip = maria.locator('[data-trend-strip]');
+  ok(await strip.count() === 1, 'D3 the period-over-period strip renders');
+  const trendText = await strip.innerText();
+  ok(/Compared with the previous period/i.test(trendText), 'D3 …and says what it is comparing against');
+  const cells = await maria.locator('[data-trend]').count();
+  ok(cells === 3, `D3 three period-activity counts are compared (${cells}) — and no current-state figure is`);
+  // The zero rule: never a percentage from a previous period of nothing.
+  const words = (await maria.locator('[data-trend-words]').allInnerTexts()).join(' | ');
+  ok(!/Infinity|NaN/.test(words), `D3 no comparison renders Infinity or NaN (${words})`);
+  ok(!/\+?100%/.test(words) || !/from none/.test(words), 'D3 a rise from nothing is never dressed as a percentage');
+
+  ok(await maria.locator('[data-calculated-at]').count() === 1,
+    'D3 the page says when it was calculated rather than implying a live feed');
+
+  const buckets = maria.locator('[data-age-buckets]').first();
+  ok(await buckets.count() === 1, 'D3 open rooms are bucketed by age as well as summarised');
+  const bucketIds = await maria.locator('[data-bucket]').evaluateAll((els) => els.map((e) => e.getAttribute('data-bucket')));
+  ok(bucketIds.length >= 5 && bucketIds.includes('60_plus'),
+    `D3 the buckets tile the whole range including an open-ended last one (${bucketIds.join(', ')})`);
+
+  // The mandate's shortest window is offered and works.
+  await maria.selectOption('select[aria-label="Period"]', 'last_7_days').catch(() => {});
+  await maria.waitForTimeout(900);
+  ok(/window=last_7_days/.test(await maria.evaluate(() => location.hash)), 'D3 a seven-day period is offered and reaches the URL');
+  await maria.selectOption('select[aria-label="Period"]', 'last_365_days').catch(() => {});
+  await maria.waitForTimeout(900);
+}
+
 // ------------------------------------------------------------------ D4
 {
   const funnel = maria.locator('[data-metric="funnel_progression"]');

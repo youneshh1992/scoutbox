@@ -27,13 +27,13 @@ import {
   SMALL_N_MIN, TIME_SEMANTICS, GROUP_DIMENSIONS, PERSON_DIMENSIONS, FORBIDDEN_METRIC_NAMES,
   ASSOCIATION_NOTE, WINDOW_PRESETS, DEFAULT_WINDOW,
   assertMetricRegistry, ratio, distribution, count, wire, utcDay, resolveWindow, inWindow,
-  cohortIncomplete, days, DAY_MS,
+  cohortIncomplete, previousWindow, compare, days, DAY_MS,
 } from '../m20/metrics.mjs';
 import {
   FUNNEL_STAGES, REASON_CATEGORIES, transitions, openedStatus, stagesReached,
   firstReachedAt, firstTerminalAt, REACH_STAGES,
 } from '../m20/funnels.mjs';
-import { stageVisits, lastActivityAt, STALL_THRESHOLDS, DECISION_OWED_STATUSES } from '../m20/timeSeries.mjs';
+import { stageVisits, lastActivityAt, STALL_THRESHOLDS, DECISION_OWED_STATUSES, AGE_BUCKETS } from '../m20/timeSeries.mjs';
 import { EVIDENCE_REASON_CODES } from '../m20/cohorts.mjs';
 import { buildReportingContext, buildDashboard } from '../m20/dashboard.mjs';
 import { migrateM20, DRILLDOWN_METRICS } from '../m20/index.mjs';
@@ -251,6 +251,36 @@ section('§5 — windows are inclusive UTC calendar days');
   ok(cohortIncomplete(young, 120, NOW) === true, 'a 30-day window is flagged incomplete against a 120-day typical journey');
   ok(cohortIncomplete(young, 5, NOW) === false, '…and is not flagged when the journey is short');
   ok(cohortIncomplete(young, null, NOW) === false, 'with no typical journey known, nothing is claimed');
+
+  // The mandate's shortest window must exist, and every preset must resolve.
+  ok(Object.keys(WINDOW_PRESETS).includes('last_7_days'), 'a seven-day window is offered');
+  for (const preset of Object.keys(WINDOW_PRESETS)) {
+    const r = resolveWindow({ preset }, NOW);
+    ok(!r.error && r.days === WINDOW_PRESETS[preset], `${preset} resolves to ${WINDOW_PRESETS[preset]} days`);
+  }
+}
+
+// ---------------------------------------- period-over-period, and the zero
+{
+  const w = resolveWindow({ preset: 'last_30_days' }, NOW);
+  const prev = previousWindow(w);
+  ok(prev.days === w.days, 'the comparison period is the same LENGTH as the window');
+  ok(prev.to < w.from, 'and it ends the day before the window starts, with no overlap');
+  ok(Date.parse(`${w.from}T00:00:00Z`) - Date.parse(`${prev.to}T00:00:00Z`) === DAY_MS,
+    'the two periods are contiguous — no day falls between them or into both');
+
+  // The zero case is the whole reason this helper exists.
+  const fromNothing = compare(3, 0);
+  N(25, fromNothing.percentChange === null && fromNothing.upFromZero === true && fromNothing.change === 3,
+    'a rise from a previous period of zero has NO percentage — it reports the absolute change and says "from none"');
+  N(24, Number.isFinite(compare(3, 0).change) && !Object.values(compare(3, 0)).some((v) => v === Infinity || Number.isNaN(v)),
+    'no comparison ever produces Infinity or NaN');
+  const flatZero = compare(0, 0);
+  ok(flatZero.unchangedAtZero === true && flatZero.percentChange === null, 'nothing, compared with nothing, is not a 0% change');
+  const real = compare(6, 4);
+  ok(real.change === 2 && Math.round(real.percentChange * 100) === 50, 'an ordinary comparison is a plain fraction');
+  const fell = compare(2, 8);
+  ok(fell.change === -6 && fell.percentChange === -0.75, 'a fall is reported as a fall, not an absolute value');
 }
 
 // =========================================================================
@@ -326,6 +356,15 @@ section('§7 — stage visits exclude the visit that has not finished');
   ok(lastActivityAt(r) === NOW - 10 * DAY, 'last activity is the newest history entry, whatever wrote it');
   ok(DECISION_OWED_STATUSES.every((s) => ROOM_STATUSES.includes(s)), 'the decision-owed statuses are real statuses');
   ok(STALL_THRESHOLDS.length === 3 && STALL_THRESHOLDS.includes(30), 'the stall thresholds are a closed list');
+
+  // Age buckets must tile the whole range with no gap and no overlap: a room
+  // aged exactly 8 days, or exactly 61, must land in exactly one bucket.
+  ok(AGE_BUCKETS.length === 5 && AGE_BUCKETS[0].min === 0, 'five age buckets, starting at zero');
+  for (let i = 1; i < AGE_BUCKETS.length; i++) {
+    ok(AGE_BUCKETS[i].min === AGE_BUCKETS[i - 1].max + 1,
+      `bucket ${AGE_BUCKETS[i].id} starts exactly where ${AGE_BUCKETS[i - 1].id} ends — no gap, no overlap`);
+  }
+  ok(AGE_BUCKETS[AGE_BUCKETS.length - 1].max === Infinity, 'the last bucket is open-ended, so no room falls out of the table');
 }
 
 // =========================================================================

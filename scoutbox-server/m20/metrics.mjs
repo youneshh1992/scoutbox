@@ -443,6 +443,7 @@ export const days = (from, to) => (Number(to) - Number(from)) / DAY_MS;
 export const utcDay = (ms) => new Date(Number(ms)).toISOString().slice(0, 10);
 
 export const WINDOW_PRESETS = {
+  last_7_days: 7,
   last_30_days: 30,
   last_90_days: 90,
   last_180_days: 180,
@@ -486,6 +487,39 @@ export const inWindow = (ms, w) => {
  * This is a caution, not a correction: nothing is adjusted, and the flag is
  * rendered as a sentence rather than applied as a factor.
  */
+/**
+ * The window of equal length immediately before this one, for a
+ * period-over-period comparison. Equal length matters: comparing a 7-day
+ * window against a 30-day one would make every figure look like a collapse.
+ */
+export function previousWindow(w) {
+  const from = Date.parse(`${w.from}T00:00:00Z`);
+  const to = Date.parse(`${w.to}T00:00:00Z`);
+  const span = to - from + DAY_MS;
+  return { preset: 'previous', from: utcDay(from - span), to: utcDay(from - DAY_MS), days: Math.round(span / DAY_MS) };
+}
+
+/**
+ * Compare two counts across equal windows.
+ *
+ * The rule that matters is the zero case: a rise from nothing has no
+ * percentage, and rendering one produces Infinity or a meaningless 100%. So
+ * `percentChange` is null and `upFromZero` says what actually happened —
+ * the client renders the absolute change and the words "up from 0".
+ */
+export function compare(current, previous) {
+  const c = Number(current) || 0;
+  const p = Number(previous) || 0;
+  return {
+    current: c,
+    previous: p,
+    change: c - p,
+    percentChange: p === 0 ? null : (c - p) / p,
+    upFromZero: p === 0 && c > 0,
+    unchangedAtZero: p === 0 && c === 0,
+  };
+}
+
 export function cohortIncomplete(w, typicalDays, nowMs = Date.now()) {
   if (!Number.isFinite(typicalDays) || typicalDays <= 0) return false;
   const end = Date.parse(`${w.to}T23:59:59Z`);

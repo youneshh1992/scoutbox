@@ -92,7 +92,7 @@
   <header>
     <div class="mark">Scout<span class="box">Box</span> — App Launcher</div>
     <p class="sub">One bookmark for every ScoutBox app. Each tile opens an interactive demo of the actual current interface, running entirely in your browser on synthetic sample data.</p>
-    <span class="buildchip"><span class="dot"></span>Source version <code>6a4d9af</code> · built 2026-09-13 · Milestone 20 — Recruitment Analytics + Director Dashboard</span>
+    <span class="buildchip"><span class="dot"></span>Source version <code>52cd5ee</code> · built 2026-09-13 · Milestone 20 — Recruitment Analytics + Director Dashboard</span>
   </header>
 
   <div class="grid">
@@ -132,6 +132,8 @@
       <li><b>2 · Nothing new is stored</b> — every figure is projected on read from Rooms, decisions, briefs, Nobody Missed reviews, Second Look items, watchlists and trials. There is no analytics table, no rollup and no cache, so a number on this page <i>cannot</i> disagree with the record it came from: it <b>is</b> that record, read differently. The suite proves it by comparing every source collection byte-for-byte across a full dashboard read.</li>
       <li><b>3 · One clock</b> — every duration, funnel step and aging figure comes from <code>history[].at</code>, the timestamp M12’s audit helper has written since Milestone 12. No timestamp is invented and none is inferred from the order records happen to sit in.</li>
       <li><b>4 · The funnel is not a conversion funnel</b> — M17 makes reopening first-class, so a room is counted once for <i>every stage it ever reached</i>, the payload carries <code>monotonic: false</code>, and reopenings are counted and shown. A club whose rooms cycle is not a club whose funnel is broken. A reopening the Room writes twice at the same instant is one transition, not two.</li>
+      <li><b>4b · Compared with the period before</b> — three period-activity counts (rooms opened, ended, decided) sit against the <i>same length</i> of time immediately before, because comparing seven days with thirty would make every figure look like a collapse. And when the previous period was zero there is no percentage: “up 3, from none last period”, never “+100%” and never Infinity. Current-state figures get no trend at all — the period does not apply to them.</li>
+      <li><b>4c · Bucketed as well as summarised</b> — open rooms appear both as a typical age and as 0–7 / 8–14 / 15–30 / 31–60 / over-60 buckets. Either alone misleads: a median of twenty days hides the four rooms sitting at two hundred. The page also says <i>when</i> it was calculated, because these are read-time projections and not a live feed.</li>
       <li><b>5 · Three answers, never collapsed into one</b> — <i>“Nothing in this period”</i>, <i>“0% of 12”</i> and <i>“1 of 4 — too few to express as a rate”</i> are three different facts and render as three different sentences. A dashboard that shows all three as 0% is lying twice.</li>
       <li><b>6 · Withheld rather than misleading</b> — any rate or median over fewer than five records is withheld and its raw counts shown instead. Counts themselves are never hidden: a director must be able to see their own three rooms. Try the demo’s <b>Where the room came from → Matching</b> filter to watch a rate refuse to be a rate.</li>
       <li><b>7 · Medians, never means</b> — every duration shows a typical figure with its middle half and the number of records behind it. One eighteen-month room would move a mean and tell you nothing true about the other forty.</li>
@@ -371,5 +373,5 @@
     <b>Live cross-device usage requires a hosted backend.</b> These artifacts are self-contained demos. Real accounts, real-time messaging between different people’s devices, and persistent data need the ScoutBox server (Milestone 11) deployed to a host — it is built and tested in the repository, but not deployed as part of this demo.
   </div>
 
-  <footer>ScoutBox · source commit <b>6a4d9af</b> (branch claude/desktop-project-migration-wyk3ec, local — not pushed per instruction) · demos built 2026-09-13 · Milestone 20 — Recruitment Analytics + Director Dashboard</footer>
+  <footer>ScoutBox · source commit <b>52cd5ee</b> (branch claude/desktop-project-migration-wyk3ec, local — not pushed per instruction) · demos built 2026-09-13 · Milestone 20 — Recruitment Analytics + Director Dashboard</footer>
 </div>

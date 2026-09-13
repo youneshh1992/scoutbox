@@ -23,7 +23,7 @@
  */
 import {
   RECRUITMENT_ANALYTICS_POLICY_VERSION, METRIC_FAMILIES, FAMILY_IDS, SMALL_N_MIN,
-  TIME_SEMANTICS, GROUP_DIMENSIONS, utcDay, resolveWindow, DAY_MS,
+  TIME_SEMANTICS, GROUP_DIMENSIONS, utcDay, resolveWindow, previousWindow, compare, inWindow, DAY_MS,
 } from './metrics.mjs';
 import {
   pipelineStageCounts, funnelProgression, exitReasonMix, roomSourceMix, sourceStageReach,
@@ -235,6 +235,47 @@ const FAMILY_BUILDERS = {
 };
 
 /**
+ * Period-over-period, on the three headline PERIOD-ACTIVITY counts.
+ *
+ * Deliberately only those three, and deliberately only counts. A trend on a
+ * point-in-time figure ("active rooms, up 12%") is meaningless — the window
+ * does not apply to it — and a trend on a rate compounds two small samples
+ * into one confident-looking number.
+ *
+ * The previous window is the same LENGTH, immediately before: comparing seven
+ * days against thirty would make every figure look like a collapse.
+ */
+function buildTrend(ctx) {
+  const prev = previousWindow(ctx.window);
+  const inPrev = (at) => inWindow(at, prev);
+  const inNow = (at) => inWindow(at, ctx.window);
+
+  const opened = { now: 0, then: 0 };
+  const ended = { now: 0, then: 0 };
+  for (const r of ctx.rooms) {
+    if (inNow(r.createdAt)) opened.now += 1;
+    else if (inPrev(r.createdAt)) opened.then += 1;
+    const at = firstTerminalAt(r);
+    if (at == null) continue;
+    if (inNow(at)) ended.now += 1;
+    else if (inPrev(at)) ended.then += 1;
+  }
+  const decided = { now: 0, then: 0 };
+  for (const d of ctx.decisions) {
+    if (inNow(d.createdAt)) decided.now += 1;
+    else if (inPrev(d.createdAt)) decided.then += 1;
+  }
+
+  return {
+    previousWindow: prev,
+    note: 'Compared with the previous period of the same length. Only period activity is compared — a trend on a current-state figure would be meaningless, because the period does not apply to it.',
+    rooms_opened: compare(opened.now, opened.then),
+    rooms_ended: compare(ended.now, ended.then),
+    decisions_recorded: compare(decided.now, decided.then),
+  };
+}
+
+/**
  * Build the dashboard. Every family is computed inside its own boundary: one
  * family throwing leaves the others intact and produces a named failure rather
  * than a silently shorter page.
@@ -276,6 +317,12 @@ export function buildDashboard(ctx, { families = FAMILY_IDS, stallDays = DEFAULT
     window: ctx.window,
     filters: ctx.filters,
     smallNMinimum: SMALL_N_MIN,
+    // Read-time projection: this figure was true when the request was served
+    // and is not refreshed behind the reader. The client renders it as
+    // "calculated at ..." rather than implying a live stream.
+    calculatedAt: ctx.now,
+    liveStream: false,
+    trend: buildTrend(ctx),
     timeSemantics: TIME_SEMANTICS,
     groupDimensions: GROUP_DIMENSIONS,
     families: wanted,

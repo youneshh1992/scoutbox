@@ -106,6 +106,18 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
   ok(/does not recompute watchlists in the background/i.test(churn),
     `${name} watchlist churn admits it counts recalculations, not changes in a player`);
 
+  // ---- period-over-period, freshness, and the zero rule
+  ok(await p.locator('[data-trend-strip]').count() === 1, `${name} the period-over-period strip is in the bundle`);
+  const trendWords = (await p.locator('[data-trend-words]').allInnerTexts()).join(' | ');
+  ok(!/Infinity|NaN|undefined/.test(trendWords), `${name} no comparison renders Infinity, NaN or undefined (${trendWords})`);
+  ok(/from none last period/i.test(trendWords) || /no change/i.test(trendWords) || /%/.test(trendWords),
+    `${name} every comparison says something a reader can act on`);
+  ok(await p.locator('[data-calculated-at]').count() === 1,
+    `${name} the page says when it was calculated rather than implying a live feed`);
+  const bucketIds = await p.locator('[data-bucket]').evaluateAll((els) => els.map((e) => e.getAttribute('data-bucket')));
+  ok(bucketIds.includes('0_7') && bucketIds.includes('60_plus'),
+    `${name} open rooms are bucketed by age, with an open-ended last bucket`);
+
   // ---- there is no person here, and the screen says so
   ok(await p.locator('[data-no-person-filter]').count() === 1, `${name} the screen states there is no filter by colleague`);
   const filterSelects = await p.locator('section:has([data-no-person-filter]) select').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')));
@@ -125,6 +137,8 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
   await goHash(p, DASH);
 
   // ---- a filter that changes the view reaches the URL
+  const periods = await p.locator('select[aria-label="Period"] option').evaluateAll((els) => els.map((e) => e.getAttribute('value')));
+  ok(periods.includes('last_7_days'), `${name} a seven-day period is offered (${periods.join(', ')})`);
   await p.selectOption('select[aria-label="Period"]', 'last_30_days').catch(() => {});
   await p.waitForTimeout(900);
   const hash = await p.evaluate(() => location.hash);
