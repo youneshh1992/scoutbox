@@ -432,6 +432,32 @@ export function registerMatching(ctx) {
     };
   }
 
+  /**
+   * The "what changed" summary, taken from the recorded history rather than
+   * from THIS read's diff.
+   *
+   * The difference matters. A diff is consumed by whoever reads first: the
+   * client refetches when a colleague's edit arrives over SSE, the second read
+   * legitimately finds nothing new, and the person who opened the page is told
+   * nothing changed when in fact two players had just left. Reading it back
+   * from the history makes the answer stable — every reader sees the same last
+   * change, with the time it happened — and the history is the durable record
+   * anyway, so there is no second source of truth here.
+   */
+  function lastChangeSummary(w, currentCount) {
+    const mine = db.watchlistHistory.filter((h) => h.watchlistId === w.id);
+    const at = mine.reduce((m, h) => Math.max(m, h.at ?? 0), 0);
+    const batch = at ? mine.filter((h) => h.at === at) : [];
+    const entered = batch.filter((h) => h.transition === 'entered').map((h) => h.playerId);
+    const left = batch.filter((h) => h.transition === 'left').map((h) => h.playerId);
+    return {
+      ...membershipSummary({ entered, left, unchanged: [] }),
+      // `current` is the membership derived just now, not a count from history.
+      current: currentCount,
+      changedAt: at || null,
+    };
+  }
+
   orgRouter.get('/watchlists/:id', (req, res) => {
     const w = findWatchlist(req, res);
     if (!w) return;
@@ -457,7 +483,7 @@ export function registerMatching(ctx) {
       offset,
       limit,
       sort,
-      summary: r.summary,
+      summary: lastChangeSummary(w, ordered.length),
       evaluatedAt: r.evaluatedAt ?? null,
       refreshNote: 'Membership is derived when this page is read. ScoutBox does not recompute watchlists in the background in this build.',
     });

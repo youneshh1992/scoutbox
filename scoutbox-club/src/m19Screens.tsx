@@ -820,28 +820,40 @@ function WatchlistDetailView({
   const [roomBusy, setRoomBusy] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState('');
+  // The revision the RENAME will be written against, frozen when the edit
+  // began. Live sync keeps the rest of the page current, but a draft must not
+  // silently adopt a colleague's newer revision: that would turn a conflict
+  // into a last-write-wins overwrite of their change without anyone seeing it.
+  const editRevRef = useRef<number | null>(null);
 
   useEffect(() => {
     let live = true;
     setErr(null);
     m19.watchlist(session, watchlistId, { sort })
-      .then((d) => { if (live) { setData(d); setName(d.watchlist.name); } })
+      // A refetch never overwrites a name the person is in the middle of typing.
+      .then((d) => { if (live) { setData(d); if (!renaming) setName(d.watchlist.name); } })
       .catch((e) => { if (live) setErr(errMessage(e)); });
     return () => { live = false; };
+    // `renaming` is deliberately not a dependency: it only guards the name.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, watchlistId, tick, bump, sort]);
 
   const w = data?.watchlist ?? null;
 
-  const patch = async (input: Record<string, unknown>, okText: string) => {
-    if (!w) return;
+  /** Returns true when the write landed. `atRev` lets a draft pin the revision
+   *  it was started from; everything else writes against what is on screen. */
+  const patch = async (input: Record<string, unknown>, okText: string, atRev?: number): Promise<boolean> => {
+    if (!w) return false;
     setConflict(null);
     try {
-      const out = await m19.patchWatchlist(session, w.id, { ...input, expectedRev: w.rev });
-      if (out.ok) { notify(okText); setBump((b) => b + 1); }
-      else notify(out.message, true);
+      const out = await m19.patchWatchlist(session, w.id, { ...input, expectedRev: atRev ?? w.rev });
+      if (out.ok) { notify(okText); setBump((b) => b + 1); return true; }
+      notify(out.message, true);
+      return false;
     } catch (e) {
       const c = conflictOf(e);
       if (c) setConflict(c); else notify(errMessage(e), true);
+      return false;
     }
   };
 
@@ -886,7 +898,7 @@ function WatchlistDetailView({
       {conflict && (
         <ConflictNotice
           conflict={conflict}
-          onReload={() => { setConflict(null); setBump((b) => b + 1); }}
+          onReload={() => { setConflict(null); setRenaming(false); editRevRef.current = null; setBump((b) => b + 1); }}
           onKeepChanges={() => setConflict(null)}
         />
       )}
@@ -912,7 +924,7 @@ function WatchlistDetailView({
         )}
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
-          {!renaming && <button onClick={() => setRenaming(true)}>{t('m19.wl.rename')}</button>}
+          {!renaming && <button onClick={() => { editRevRef.current = w.rev; setName(w.name); setRenaming(true); }}>{t('m19.wl.rename')}</button>}
           {w.status === 'active' && <button onClick={() => setStatus('paused')}>{t('m19.wl.pause')}</button>}
           {w.status === 'paused' && <button onClick={() => setStatus('active')}>{t('m19.wl.resume')}</button>}
           {w.status !== 'archived' && <button onClick={() => setStatus('archived')}>{t('m19.wl.archive')}</button>}
@@ -926,18 +938,28 @@ function WatchlistDetailView({
         {renaming && (
           <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <input aria-label={t('m19.wl.name')} value={name} onChange={(e) => setName(e.target.value)} style={{ width: 260 }} />
-            <button className="primary" disabled={!name.trim()} onClick={async () => { await patch({ name: name.trim() }, t('m19.wl.renamed')); setRenaming(false); }}>{t('common.save')}</button>
-            <button onClick={() => { setRenaming(false); setName(w.name); }}>{t('common.cancel')}</button>
+            <button
+              className="primary"
+              disabled={!name.trim()}
+              onClick={async () => {
+                const ok = await patch({ name: name.trim() }, t('m19.wl.renamed'), editRevRef.current ?? w.rev);
+                if (ok) { setRenaming(false); editRevRef.current = null; }
+              }}
+            >{t('common.save')}</button>
+            <button onClick={() => { setRenaming(false); editRevRef.current = null; setName(w.name); }}>{t('common.cancel')}</button>
           </div>
         )}
       </div>
 
       <div className="section" aria-label={t('m19.wl.summaryLabel')}>
         <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-          <span><b>{data.summary.current}</b> {t('m19.wl.currentlyMatching')}</span>
-          <span><b>{data.summary.newlyMatched}</b> {t('m19.wl.newlyMatched')}</span>
-          <span><b>{data.summary.noLongerMatches}</b> {t('m19.wl.noLongerMatches')}</span>
+          <span data-wl-count="current"><b>{data.summary.current}</b> {t('m19.wl.currentlyMatching')}</span>
+          <span data-wl-count="newly-matched"><b>{data.summary.newlyMatched}</b> {t('m19.wl.newlyMatched')}</span>
+          <span data-wl-count="no-longer-matches"><b>{data.summary.noLongerMatches}</b> {t('m19.wl.noLongerMatches')}</span>
         </div>
+        {data.summary.changedAt
+          ? <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>{t('m19.wl.changedAt')}: {fmtDateTime(data.summary.changedAt)}</div>
+          : <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>{t('m19.wl.noChangeYet')}</div>}
         <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>{data.summary.note}</div>
       </div>
 

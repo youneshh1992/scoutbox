@@ -651,12 +651,17 @@ section('§17 — membership is derived on read, with the transitions explained'
   ok(typeof first.body.evaluatedAt === 'number', 'the derivation is timestamped, so the UI can say when');
 
   const second = await j('GET', `/org/watchlists/${WL.id}`, undefined, maria.token);
-  abuse(44, second.body.summary.newlyMatched === 0 && second.body.summary.noLongerMatches === 0,
-    'reading the same watchlist twice produces no phantom transitions');
   const h1 = await j('GET', `/org/watchlists/${WL.id}/history`, undefined, maria.token);
   const h2 = await j('GET', `/org/watchlists/${WL.id}/history`, undefined, maria.token);
   abuse(44, h1.body.total === h2.body.total && h1.body.total === first.body.items.length,
     'the same transition is recorded exactly once however many times it is observed');
+  // The summary is the last RECORDED change, not this read's diff. A diff
+  // would be consumed by whoever read first — a background refetch would tell
+  // the person at the screen that nothing changed when two players had left.
+  abuse(44, JSON.stringify(second.body.summary) === JSON.stringify(first.body.summary),
+    'two reads of the same watchlist tell the same story, so a refetch cannot swallow the change');
+  ok(second.body.summary.changedAt === first.body.evaluatedAt || typeof second.body.summary.changedAt === 'number',
+    'the summary says WHEN the change it reports happened');
   expect(11, h1.body.items.every((x) => x.reason && x.text && x.criteriaVersion && x.transition),
     'the history says WHY each player entered or left, in the club’s own criteria');
   abuse(49, !/better|worse|improved|declined|talent|potential|score/i.test(JSON.stringify(h1.body)),
@@ -794,7 +799,7 @@ section('§23 — a restart changes nothing about what a watchlist means');
   const afterDetail = (await j('GET', `/org/watchlists/${beforeDetail.watchlist.id}`, undefined, maria2.token)).body;
   ok(JSON.stringify(afterDetail.items.map((i) => i.playerId)) === JSON.stringify(beforeDetail.items.map((i) => i.playerId)),
     'membership derives to exactly the same set after a restart');
-  abuse(44, afterDetail.summary.newlyMatched === 0 && afterDetail.summary.noLongerMatches === 0,
+  abuse(44, JSON.stringify(afterDetail.summary) === JSON.stringify(beforeDetail.summary),
     'a restart does not invent a wave of transitions — membership is derived, not replayed');
   const h = await j('GET', `/org/watchlists/${beforeDetail.watchlist.id}/history`, undefined, maria2.token);
   neg(h.body.total >= 1, 'the history that existed before the restart is still there');

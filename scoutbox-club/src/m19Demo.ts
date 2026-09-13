@@ -212,8 +212,24 @@ function validate(criteria: CriteriaInput): CriteriaSaveOutcome<CriteriaInput> {
   const all = [...(criteria.required ?? []).map((c) => ({ c, cls: 'required' })), ...(criteria.preferred ?? []).map((c) => ({ c, cls: 'preferred' }))];
   const bad = all.find(({ c }) => PROHIBITED.some((p) => String(c.type).toLowerCase().includes(p)));
   if (bad) return { ok: false, error: 'CRITERION_PROHIBITED', prohibited: [String(bad.c.type)], message: 'Players can never be matched on a protected characteristic.' };
+  // The same refusals the server makes, in the same shape. A demo that
+  // quietly matches everyone on a half-written criterion teaches the wrong
+  // thing about the product.
+  const problem = ({ c }: { c: Crit }): string | null => {
+    if (!KNOWN_TYPES.includes(c.type)) return 'CRITERION_TYPE_UNKNOWN';
+    if (c.operator === 'in' && !(c.values ?? []).length) return 'CRITERION_VALUES_REQUIRED';
+    if (c.operator === 'between') {
+      const [lo, hi] = (c.values ?? []) as (number | string)[];
+      if (lo === undefined || hi === undefined || lo === '' || hi === '') return 'CRITERION_VALUES_REQUIRED';
+      if (Number(lo) > Number(hi)) return 'CRITERION_RANGE_INVALID';
+    }
+    if (['equals', 'gte', 'lte', 'exists', 'within_radius', 'within_days'].includes(c.operator)
+      && (c.value === null || c.value === undefined || c.value === '')) return 'CRITERION_VALUES_REQUIRED';
+    if (c.type === 'combine_measurement' && !c.protocol) return 'CRITERION_VALUES_REQUIRED';
+    return null;
+  };
   const details = all
-    .map(({ c, cls }, index) => (KNOWN_TYPES.includes(c.type) ? null : { index, class: cls, type: c.type ?? null, error: 'CRITERION_TYPE_UNKNOWN' }))
+    .map(({ c, cls }, index) => { const e = problem({ c }); return e ? { index, class: cls, type: c.type ?? null, error: e } : null; })
     .filter(Boolean) as { index: number; class: string; type: string | null; error: string }[];
   if (details.length) return { ok: false, error: 'CRITERIA_INVALID', details, message: 'These criteria cannot be saved as written.' };
   return { ok: true, value: criteria };
@@ -291,6 +307,8 @@ const matchesFor = (criteria: CriteriaInput): MatchCard[] =>
       return (fb - fa) || a.playerId.localeCompare(b.playerId);
     });
 
+const lastChangeAt = (id: string) => history.filter((h) => h.watchlistId === id).reduce((m, h) => Math.max(m, h.at), 0);
+
 const detailFor = (w: (typeof store)[number], sort = 'recent_evidence'): WatchlistDetail => {
   const items = matchesFor(w.criteriaInput);
   const ordered = items.slice().sort((a, b) => {
@@ -307,10 +325,13 @@ const detailFor = (w: (typeof store)[number], sort = 'recent_evidence'): Watchli
     limit: 25,
     sort,
     summary: {
-      newlyMatched: 0,
-      noLongerMatches: 0,
+      // Mirrors the server: the summary is the last RECORDED change, not this
+      // read's diff, so two reads in a row tell the same story.
+      newlyMatched: history.filter((h) => h.watchlistId === w.id && h.at === lastChangeAt(w.id) && h.transition === 'entered').length,
+      noLongerMatches: history.filter((h) => h.watchlistId === w.id && h.at === lastChangeAt(w.id) && h.transition === 'left').length,
       unchanged: ordered.length,
       current: ordered.length,
+      changedAt: lastChangeAt(w.id) || null,
       note: 'Counts of players against criteria your organisation wrote. Entering a watchlist is not an improvement in a player, and leaving one is not a decline.',
     },
     evaluatedAt: now(),

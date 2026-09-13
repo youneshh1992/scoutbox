@@ -138,6 +138,8 @@ export interface WatchlistDetail {
     noLongerMatches: number;
     unchanged: number;
     current: number;
+    /** When that change was recorded, or null if nothing has changed yet. */
+    changedAt?: number | null;
     note: string;
   };
   evaluatedAt: number | null;
