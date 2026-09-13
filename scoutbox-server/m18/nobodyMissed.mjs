@@ -49,6 +49,11 @@ export function registerNobodyMissed(ctx) {
     const prefs = (db.passportPrefs ?? []).find((p) => p.playerId === player.id) ?? null;
     const evidence = db.evidence.filter((e) => e.playerId === player.id && !e.supersededBy);
     const recentFullMatch = evidence.some((e) => e.claimType === 'footage' && e.recordedAt > now() - 180 * 86_400_000);
+    // M19 needs the DATE, not only the 180-day boolean, so a club can write
+    // its own recency criterion ("within 90 days") instead of inheriting ours.
+    const lastFootageAt = evidence
+      .filter((e) => e.claimType === 'footage')
+      .reduce((m, e) => Math.max(m, e.recordedAt ?? 0), 0) || null;
     const coachReference = (db.verReferences ?? []).some((r) => r.playerId === player.id && r.status === 'active')
       || evidence.some((e) => e.verification?.status === 'coach_confirmed');
     // Production-valid Combine only: a simulated result never becomes
@@ -57,6 +62,18 @@ export function registerNobodyMissed(ctx) {
       .filter((a) => a.playerId === player.id && a.combineState === 'combine_verified' && !PROVIDERS[a.provider]?.testOnly)
       .filter((a) => (db.boxSessions ?? []).find((s) => s.id === a.boxSessionId)?.verificationState !== 'invalidated')
       .map((a) => a.protocolId);
+    // M19 combine thresholds read the best production-valid measurement per
+    // protocol. Simulated and invalidated results are already excluded above,
+    // so a demo result can never satisfy a production threshold.
+    const combineMeasurements = {};
+    for (const a of (db.combineAttempts ?? [])) {
+      if (a.playerId !== player.id || a.combineState !== 'combine_verified') continue;
+      if (PROVIDERS[a.provider]?.testOnly) continue;
+      if ((db.boxSessions ?? []).find((s) => s.id === a.boxSessionId)?.verificationState === 'invalidated') continue;
+      const v = Number(a.measuredValue);
+      if (!Number.isFinite(v)) continue;
+      combineMeasurements[a.protocolId] = combineMeasurements[a.protocolId] == null ? v : Math.max(combineMeasurements[a.protocolId], v);
+    }
     const trust = ctx.trustSummaryFor?.(player) ?? null;
     const clubConfirmed = (db.squads ?? []).length >= 0 && !!(db.signings ?? []).find((s) => s.playerId === player.id);
 
@@ -79,6 +96,8 @@ export function registerNobodyMissed(ctx) {
         combine_verified: combineProtocols.length > 0,
       },
       lastEvidenceAt: evidence.reduce((m, e) => Math.max(m, e.recordedAt ?? 0), 0) || null,
+      lastFootageAt,
+      combineMeasurements,
     };
   }
 

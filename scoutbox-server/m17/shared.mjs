@@ -455,6 +455,10 @@ export const SOURCE_CONTEXTS = [
   // Second Look. Recorded so the funnel can later tell a reactivation from an
   // organic discovery — never exposed to the player.
   'nobody_missed', 'second_look',
+  // M19 origins: an explainable-matching result, or a Dynamic Watchlist. Kept
+  // distinct so the funnel can later tell a saved-criteria origin from a
+  // one-off query — never exposed to the player.
+  'matching', 'dynamic_watchlist',
   'direct',
 ];
 

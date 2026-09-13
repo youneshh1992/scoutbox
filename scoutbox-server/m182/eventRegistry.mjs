@@ -122,6 +122,41 @@ export const EVENT_REGISTRY = {
   },
 
   // ---- player-owned records
+  // ------------------------------------------------------------------ M19
+  // A watchlist is organisation-private by construction: the player is never
+  // told a club is watching them, so none of these may reach a player channel.
+  watchlist_created: {
+    domain: 'recruitment', sourceSystem: 'matching', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'watchlistId'],
+    dedupeStrategy: 'none', replayPolicy: 'replay',
+    notificationEligible: false, analyticsEligible: true,
+  },
+  watchlist_updated: {
+    domain: 'recruitment', sourceSystem: 'matching', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'watchlistId'],
+    dedupeStrategy: 'coalesce_by_subject', replayPolicy: 'replay',
+    notificationEligible: false, analyticsEligible: true,
+  },
+  watchlist_membership_changed: {
+    domain: 'recruitment', sourceSystem: 'matching', audience: 'org_private',
+    // Ids only: which players entered or left is read from the watchlist,
+    // never carried on an event that fans out to every org connection.
+    privacyClass: 'org_internal', payload: ['orgId', 'watchlistId'],
+    dedupeStrategy: 'coalesce_by_subject', replayPolicy: 'replay',
+    notificationEligible: true, analyticsEligible: true,
+  },
+  watchlist_archived: {
+    domain: 'recruitment', sourceSystem: 'matching', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'watchlistId'],
+    dedupeStrategy: 'none', replayPolicy: 'replay',
+    notificationEligible: false, analyticsEligible: true,
+  },
+  matching_room_created: {
+    domain: 'recruitment', sourceSystem: 'matching', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId'],
+    dedupeStrategy: 'fingerprint', replayPolicy: 'replay',
+    notificationEligible: false, analyticsEligible: true,
+  },
   player_development_evidence_changed: {
     domain: 'box_cam', sourceSystem: 'boxSessions', audience: 'player_private',
     privacyClass: 'subject_reference', payload: ['playerId'],

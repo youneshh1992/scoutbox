@@ -26,7 +26,7 @@
  * snapshot store has no concept of one and inventing it here would be theatre.
  */
 
-export const SCHEMA_VERSION = 1820; // 18.2.0
+export const SCHEMA_VERSION = 1900; // 19.0.0
 
 /**
  * Every step is idempotent: running it twice is the same as running it once.
@@ -63,6 +63,11 @@ export const MIGRATIONS = [
     id: 'm182_004_notification_prefs',
     note: 'Per-person notification category preferences.',
     up(db) { db.notificationPrefs ??= []; },
+  },
+  {
+    id: 'm190_001_dynamic_watchlists',
+    note: 'M19 Dynamic Watchlists and their membership history.',
+    up(db) { db.dynamicWatchlists ??= []; db.watchlistHistory ??= []; },
   },
   {
     id: 'm182_005_notification_repeat_count',

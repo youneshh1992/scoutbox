@@ -38,6 +38,8 @@ export const RATE_LIMIT_POLICY = {
   room_comment: { max: 20, windowMs: 60_000, scope: 'room_user', note: 'Room discussion messages.' },
   room_combine_request: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Combine requests raised from a Room.' },
   brief_write: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Recruitment Brief creates and edits.' },
+  matching_query: { max: 240, windowMs: 3_600_000, scope: 'org', note: 'Explainable Matching queries.' },
+  watchlist_write: { max: 120, windowMs: 3_600_000, scope: 'org', note: 'Dynamic Watchlist creates and edits.' },
   second_look_action: { max: 200, windowMs: 3_600_000, scope: 'org', note: 'Second Look review, dismiss and reopen.' },
   nobody_missed_action: { max: 200, windowMs: 3_600_000, scope: 'org', note: 'Candidate review, dismiss and add-to-room.' },
 

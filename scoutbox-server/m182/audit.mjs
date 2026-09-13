@@ -34,6 +34,7 @@ const ROOM_ACTIONS = new Set([
 const BRIEF_ACTIONS = new Set([
   'recruitment_brief_created', 'recruitment_brief_updated', 'recruitment_brief_activated',
 ]);
+const WATCHLIST_ACTIONS = new Set(['watchlist_created', 'watchlist_updated', 'watchlist_archived']);
 const LEDGER_ACTIONS = new Set(['staff_removed', 'signing', 'released_by_club']);
 
 /** The structured, content-free summary of one history detail. */
@@ -77,6 +78,20 @@ export function registerAudit(ctx) {
           id: h.id, at: h.at, action: h.action, domain: 'recruitment_brief',
           actor: h.byKind === 'org' ? { userId: h.byId, name: h.byName } : null,
           target: { type: 'brief', id: b.id, title: b.title },
+          detail: safeDetail(h.action, h.detail),
+        });
+      }
+    }
+    // M19: watchlist LIFECYCLE only. Which players entered or left belongs in
+    // the watchlist's own history, not in an administrator's audit feed.
+    for (const w of db.dynamicWatchlists ?? []) {
+      if (w.orgId !== org.id) continue;
+      for (const h of w.history ?? []) {
+        if (!WATCHLIST_ACTIONS.has(h.action)) continue;
+        rows.push({
+          id: h.id, at: h.at, action: h.action, domain: 'dynamic_watchlist',
+          actor: h.byKind === 'org' ? { userId: h.byId, name: h.byName } : null,
+          target: { type: 'watchlist', id: w.id, title: w.name },
           detail: safeDetail(h.action, h.detail),
         });
       }

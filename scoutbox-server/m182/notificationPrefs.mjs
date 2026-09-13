@@ -40,6 +40,10 @@ export const CATEGORIES = Object.freeze({
   // outcome, a signing or a report deadline is not in here — those are
   // obligations, and "conservative default" must not mean "muted by surprise".
   discovery_nudges: { label: 'Discovery nudges and badges', default: false, mandatory: false },
+  // M19: membership changes on a Dynamic Watchlist. On by default because a
+  // watchlist is something the club deliberately asked ScoutBox to maintain —
+  // it is a requested alert, not an unsolicited nudge.
+  watchlist_changes: { label: 'Dynamic Watchlist changes', default: true, mandatory: false },
   security_account: { label: 'Security and account', default: true, mandatory: true },
 });
 export const CATEGORY_NAMES = Object.freeze(Object.keys(CATEGORIES));
@@ -56,6 +60,8 @@ export const TYPE_CATEGORY = Object.freeze({
   // A saved-search alert is something the scout ASKED for by saving the
   // search; it is not an unrequested nudge, so it stays on by default.
   saved_search: 'activity',
+  // M19 watchlist membership changes.
+  watchlist: 'watchlist_changes',
   // evidence and combine
   evidence: 'evidence_requests',
   passport: 'evidence_requests',

@@ -21,6 +21,8 @@ import { registerM16 } from './m16/index.mjs';
 import { registerM162 } from './m162/index.mjs';
 import { registerM17 } from './m17/index.mjs';
 import { registerM18 } from './m18/index.mjs';
+import { registerMatching } from './m19/index.mjs';
+import { COMBINE_PROTOCOLS } from './m16/combineShared.mjs';
 import { registerSourceChanges } from './m181/sourceChanges.mjs';
 import { audienceFor, EVENT_AUDIENCE } from './m181/eventAudience.mjs';
 import { createRateLimiter, rateLimitedBody, RATE_LIMIT_POLICY } from './m181/rateLimit.mjs';
@@ -3798,7 +3800,7 @@ const m17Ctx = registerM17({
 // players match the club's own stated criteria without ever entering its
 // workflow. Neither judges talent, neither ranks, and neither is player-facing:
 // M18 registers no player, guardian or public route at all.
-registerM18({
+const m18Ctx = registerM18({
   rateLimit,
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
@@ -3819,6 +3821,16 @@ registerM18({
   // M18.1 — canonical source-change clocks (position, current club).
   sourceChangesFor: srcCtx.sourceChangesFor,
 });
+
+// ------------------------------------------- M19 Explainable Matching
+// Registered AFTER M18 so it reuses the very same lightweight facts
+// projection (`m18MatchFacts`) and the canonical M17 Room bridge. There is
+// deliberately no second matching engine and no second Room-creation path.
+const m19Ctx = registerMatching({
+  ...m18Ctx,
+  combineProtocolIds: () => COMBINE_PROTOCOLS.map((p) => p.id),
+});
+void m19Ctx;
 
 // ------------------------------------------------- M18.1 operator surface
 // What this deployment can and cannot actually do. ScoutBox is careful to be
@@ -3876,6 +3888,8 @@ export const EMITTED_EVENTS = Object.freeze([
   'requests', 'applications', 'feedback', 'evidence',
   'recruitment_room_archived', 'recruitment_room_reopened_from_second_look',
   'player_development_evidence_changed',
+  'watchlist_created', 'watchlist_updated', 'watchlist_membership_changed',
+  'watchlist_archived', 'matching_room_created',
 ]);
 {
   const problems = assertEventRegistry({ emitted: EMITTED_EVENTS });

@@ -17,6 +17,13 @@
 // a list of plain facts.
 //
 // Everything here is pure: no Express, no database handle, no session.
+//
+// M19: the one exception to "no imports" is the explainable match engine.
+// `playerMatchesBrief` delegates to it so that Nobody Missed and Matching
+// cannot drift apart. The import is circular (the engine reads this file's
+// vocabulary), which is safe because the engine touches that vocabulary only
+// inside function bodies — see the lazy band rank in m19/match.mjs.
+import { matchBrief } from '../m19/match.mjs';
 
 // =====================================================================
 // SECOND LOOK POLICY
@@ -668,7 +675,6 @@ export function explainBriefCriteria(criteria = {}) {
 
 // --------------------------------------------------------------- matching
 
-const BAND_RANK = Object.fromEntries(TRUST_BANDS.map((b, i) => [b, i]));
 
 /**
  * Does this player match this brief? Boolean rules only — no weights, no
@@ -677,61 +683,13 @@ const BAND_RANK = Object.fromEntries(TRUST_BANDS.map((b, i) => [b, i]));
  *
  * `facts` is the lightweight match projection, never a full Passport.
  */
-export function playerMatchesBrief(facts, criteria = {}) {
-  const reasons = [];
-  const fail = (key, text) => { reasons.push({ key, met: false, text }); };
-  const pass = (key, text) => { reasons.push({ key, met: true, text }); };
-
-  if (criteria.positions?.length) {
-    const has = [facts.position, ...(facts.secondaryPositions ?? [])].filter(Boolean);
-    if (has.some((p) => criteria.positions.includes(p))) pass('position', `Matches position criteria (${has.filter((p) => criteria.positions.includes(p)).join(', ')})`);
-    else fail('position', 'Does not match the position criteria');
-  }
-  if (criteria.minAge != null || criteria.maxAge != null) {
-    // Fail closed: an unknown age cannot satisfy an age criterion.
-    if (facts.age == null) fail('age', 'Age is not on record');
-    else if (criteria.minAge != null && facts.age < criteria.minAge) fail('age', `Age ${facts.age} is below the criteria`);
-    else if (criteria.maxAge != null && facts.age > criteria.maxAge) fail('age', `Age ${facts.age} is above the criteria`);
-    else pass('age', `Matches age criteria (${facts.age})`);
-  }
-  if (criteria.maxLevel === 'semi_pro' && facts.level === 'pro') fail('level', 'Plays at a level above the criteria');
-  else if (criteria.maxLevel) pass('level', 'Within the level criteria');
-
-  if (criteria.radiusKm != null) {
-    // Fail closed on a missing distance, exactly as the standing gates do.
-    if (facts.distanceKm == null) fail('location', 'Distance could not be established');
-    else if (facts.distanceKm > criteria.radiusKm) fail('location', 'Outside the permitted search area');
-    else pass('location', 'Within the club’s permitted search area');
-  }
-  if (criteria.foot) {
-    if (!facts.foot) fail('foot', 'Preferred foot is not on record');
-    else if (facts.foot === criteria.foot || facts.foot === 'Both') pass('foot', `Matches foot criteria (${facts.foot})`);
-    else fail('foot', 'Does not match the foot criteria');
-  }
-  if (criteria.availability) {
-    if (!facts.availability) fail('availability', 'Availability is not on record');
-    else if (facts.availability === criteria.availability) pass('availability', 'Matches the availability criteria');
-    else fail('availability', 'Does not match the availability criteria');
-  }
-  for (const key of criteria.evidenceRequirements ?? []) {
-    const label = EVIDENCE_REQUIREMENTS.find((r) => r.key === key)?.label ?? key;
-    if (facts.evidenceFlags?.[key]) pass(`evidence:${key}`, label);
-    else fail(`evidence:${key}`, `${label} — not on record`);
-  }
-  if (criteria.minTrustBand) {
-    const have = BAND_RANK[facts.trustBand];
-    const need = BAND_RANK[criteria.minTrustBand];
-    // Evidence confidence, never an ability filter — and never a global wall.
-    if (have == null) fail('minTrustBand', 'Evidence confidence is not available');
-    else if (have >= need) pass('minTrustBand', `Evidence confidence meets the criteria (${facts.trustBand})`);
-    else fail('minTrustBand', `Evidence confidence is below the criteria (${facts.trustBand})`);
-  }
-  for (const p of criteria.combineProtocols ?? []) {
-    if (facts.combineProtocols?.includes(p)) pass(`combine:${p}`, `${p} Combine Verified result available`);
-    else fail(`combine:${p}`, `No ${p} Combine Verified result`);
-  }
-
-  return { matched: reasons.every((r) => r.met), reasons };
+export function playerMatchesBrief(facts, criteria = {}, opts = {}) {
+  // M19: a thin adapter over the ONE explainable match engine (m19/match.mjs).
+  // Everything a brief carries is REQUIRED, which is what a brief has always
+  // meant, so the output is unchanged: the same keys, the same `met` flags,
+  // the same words, in the same order. There is deliberately no second
+  // matching implementation for this one to drift from.
+  return matchBrief(facts, criteria, opts);
 }
 
 /**
