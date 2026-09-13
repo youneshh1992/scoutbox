@@ -16,10 +16,12 @@ import {
 import { VerificationScreen } from './m14screens';
 import { RoomsScreen } from './roomsScreens';
 import { BriefsScreen, NobodyMissedScreen, SecondLookScreen } from './m18Screens';
+import { MatchingScreen, WatchlistsScreen } from './m19Screens';
 import { m14 } from './m14api';
 import {
-  briefFromHash, hashForBrief, hashForRoom, hashForScreen, loadCollapsed, loadShortcuts,
-  resolveNavigationLocation, roomFromHash, saveCollapsed, saveShortcuts, screenFromHash,
+  briefFromHash, criteriaFromHash, hashForBrief, hashForMatching, hashForRoom, hashForScreen,
+  hashForWatchlist, loadCollapsed, loadShortcuts, resolveNavigationLocation, roomFromHash,
+  saveCollapsed, saveShortcuts, screenFromHash, watchlistFromHash,
   NAV_SECTIONS, type NavContext,
 } from './nav';
 import { CommandPalette, NeedsAttention, Sidebar, SecondaryNav, useNavSections, usePaletteHotkey } from './navui';
@@ -46,7 +48,8 @@ export type ScreenId =
   | 'assessments' | 'recruitment' | 'planner' | 'opportunities' | 'campaigns' | 'video' | 'outcomes' | 'trialdays'
   | 'imports' | 'coverage' | 'calibration' | 'insight' | 'network' | 'budgets' | 'representation' | 'organisation'
   | 'verification' | 'rooms'
-  | 'secondlook' | 'nobodymissed' | 'briefs';
+  | 'secondlook' | 'nobodymissed' | 'briefs'
+  | 'matching' | 'watchlists';
 
 // M15-Nav: the sidebar no longer renders a flat list of every screen. The
 // full information architecture lives in src/nav.ts (sections → child tabs),
@@ -224,6 +227,10 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   const [roomId, setRoomId] = useState<string | null>(() => roomFromHash(window.location.hash));
   // M18 reuses that same mechanism for "#/recruitment/briefs/:briefId".
   const [briefId, setBriefId] = useState<string | null>(() => briefFromHash(window.location.hash));
+  // M19 reuses it a third time: one watchlist id, and the opaque criteria
+  // state a matching link carries.
+  const [watchlistId, setWatchlistId] = useState<string | null>(() => watchlistFromHash(window.location.hash));
+  const [matchState, setMatchState] = useState<string | null>(() => criteriaFromHash(window.location.hash));
   // M18.2 — every programmatic navigation asks the dirty-guard first. A form
   // with nothing unsaved never triggers it.
   const setScreen = useCallback((id: ScreenId) => {
@@ -231,6 +238,8 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     setScreenState(id);
     setRoomId(null);
     setBriefId(null);
+    setWatchlistId(null);
+    if (id !== 'matching') setMatchState(null);
     try { if (window.location.hash !== hashForScreen(id)) window.history.replaceState(null, '', hashForScreen(id)); } catch { /* sandboxed */ }
     noteNavigated();
   }, []);
@@ -265,6 +274,37 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     try { if (window.location.hash !== hashForScreen('briefs')) window.history.pushState(null, '', hashForScreen('briefs')); } catch { /* sandboxed */ }
     noteNavigated();
   }, []);
+  /** Opening a Dynamic Watchlist PUSHES, so Back closes it again. */
+  const openWatchlist = useCallback((id: string) => {
+    if (!confirmLeave(t('brief.unsaved'))) return;
+    setScreenState('watchlists');
+    setRoomId(null);
+    setBriefId(null);
+    setWatchlistId(id);
+    try { if (window.location.hash !== hashForWatchlist(id)) window.history.pushState(null, '', hashForWatchlist(id)); } catch { /* sandboxed */ }
+    noteNavigated();
+  }, []);
+  const closeWatchlist = useCallback(() => {
+    if (!confirmLeave(t('brief.unsaved'))) return;
+    setScreenState('watchlists');
+    setWatchlistId(null);
+    try { if (window.location.hash !== hashForScreen('watchlists')) window.history.pushState(null, '', hashForScreen('watchlists')); } catch { /* sandboxed */ }
+    noteNavigated();
+  }, []);
+  /**
+   * A criteria set that was actually run becomes the URL, so refresh, Back and
+   * a link pasted to a colleague all reproduce the same search. It REPLACES
+   * rather than pushes: editing a row is not a navigation, and nobody wants
+   * thirty Back presses to leave the editor.
+   */
+  const publishMatchState = useCallback((encoded: string | null) => {
+    setMatchState(encoded);
+    try {
+      const next = hashForMatching(encoded);
+      if (window.location.hash !== next) window.history.replaceState(null, '', next);
+    } catch { /* sandboxed */ }
+    noteNavigated();
+  }, []);
   // M18.2 — close/reload prompt while a form is dirty.
   useEffect(() => installDirtyGuard(), []);
   useEffect(() => {
@@ -275,6 +315,8 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
       if (id) setScreenState(id);
       setRoomId(roomFromHash(window.location.hash));
       setBriefId(briefFromHash(window.location.hash));
+      setWatchlistId(watchlistFromHash(window.location.hash));
+      setMatchState(criteriaFromHash(window.location.hash));
     };
     window.addEventListener('hashchange', onHash);
     window.addEventListener('popstate', onHash);
@@ -487,6 +529,24 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
           {screen === 'secondlook' && <SecondLookScreen {...props} />}
           {screen === 'nobodymissed' && <NobodyMissedScreen {...props} onOpenRoom={openRoom} />}
           {screen === 'briefs' && <BriefsScreen {...props} briefId={briefId} onOpenBrief={openBrief} onCloseBrief={closeBrief} />}
+          {screen === 'matching' && (
+            <MatchingScreen
+              {...props}
+              encodedCriteria={matchState}
+              onCriteriaState={publishMatchState}
+              onOpenWatchlist={openWatchlist}
+            />
+          )}
+          {screen === 'watchlists' && (
+            <WatchlistsScreen
+              {...props}
+              watchlistId={watchlistId}
+              onOpenWatchlist={openWatchlist}
+              onCloseWatchlist={closeWatchlist}
+              onOpenRoom={openRoom}
+              onNewWatchlist={() => setScreen('matching')}
+            />
+          )}
           {screen === 'planner' && <SquadPlannerScreen {...props} />}
           {screen === 'opportunities' && <OpportunitiesScreen {...props} />}
           {screen === 'campaigns' && <CampaignsScreen {...props} />}

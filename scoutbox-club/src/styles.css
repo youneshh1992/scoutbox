@@ -113,6 +113,19 @@ input:focus, select:focus { outline: none; border-color: var(--accent-2); }
 .topbar h2 { font-size: 18px; flex: 1; }
 .content { flex: 1; overflow-y: auto; padding: 22px; }
 
+/* M19 — text that exists only for assistive technology. A criterion's outcome
+   is carried visually by a ✓ / ○ glyph; this is the same fact in words, so a
+   screen reader never has to interpret a symbol. */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
 .pill {
   display: inline-block;
   font-size: 11.5px;

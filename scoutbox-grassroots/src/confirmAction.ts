@@ -51,4 +51,8 @@ export const DESTRUCTIVE_ACTIONS: Record<string, DestructiveAction> = {
   removeStaff: { titleKey: 'confirm.removeStaff', bodyKey: 'confirm.removeStaffBody', cls: 'irreversible' },
   recordSigning: { titleKey: 'confirm.recordSigning', bodyKey: 'confirm.recordSigningBody', cls: 'irreversible' },
   dismissSecondLook: { titleKey: 'confirm.dismissSecondLook', bodyKey: 'confirm.dismissSecondLookBody', cls: 'reversible' },
+  // M19 — archiving a Dynamic Watchlist stops membership being maintained and
+  // is not reopened; pausing only stops the change notifications.
+  archiveWatchlist: { titleKey: 'confirm.archiveWatchlist', bodyKey: 'confirm.archiveWatchlistBody', cls: 'archive' },
+  pauseWatchlist: { titleKey: 'confirm.pauseWatchlist', bodyKey: 'confirm.pauseWatchlistBody', cls: 'reversible' },
 };

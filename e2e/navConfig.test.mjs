@@ -39,12 +39,12 @@ const PRO_IDS = ['feed', 'filmroom', 'search', 'shortlist', 'requests', 'message
   'ledger', 'funnel', 'reputation', 'plan', 'assessments', 'recruitment', 'planner', 'opportunities',
   'campaigns', 'video', 'outcomes', 'trialdays', 'imports', 'coverage', 'calibration', 'insight',
   'network', 'budgets', 'representation', 'organisation', 'verification', 'rooms',
-  'secondlook', 'nobodymissed', 'briefs'];
+  'secondlook', 'nobodymissed', 'briefs', 'matching', 'watchlists'];
 const GRASS_IDS = ['feed', 'filmroom', 'search', 'shortlist', 'requests', 'messages', 'trials', 'opendays',
   'squad', 'friendlies', 'fixtures', 'ledger', 'funnel', 'plan', 'assessments', 'recruitment', 'coaches',
   'opportunities', 'campaigns', 'video', 'outcomes', 'trialdays', 'insight', 'coverage', 'calibration',
   'imports', 'network', 'organisation', 'verification', 'rooms',
-  'secondlook', 'nobodymissed', 'briefs'];
+  'secondlook', 'nobodymissed', 'briefs', 'matching', 'watchlists'];
 
 const LABELS = {
   'navsec.home': 'Home', 'navsec.discover': 'Discover', 'navsec.recruitment': 'Recruitment',
@@ -131,6 +131,28 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 6], ['scout
   ok(nav.hashForScreen('secondlook') === '#/recruitment/second-look'
     && nav.hashForScreen('nobodymissed') === '#/recruitment/nobody-missed', 'M18 named hashes round-trip');
   ok(nav.screenFromHash('#/recruitment/briefs/brf-7') === 'briefs', 'brief deep link resolves to the Briefs destination');
+
+  section(`${app} — M19 deep links`);
+  ok(nav.screenFromHash('#/recruitment/matching') === 'matching', 'Player Matching deep link resolves');
+  ok(nav.screenFromHash('#/recruitment/watchlists') === 'watchlists', 'the parent of a watchlist deep link resolves to Dynamic Watchlists');
+  ok(nav.screenFromHash('#/recruitment/watchlists/wl-7') === 'watchlists', 'watchlist deep link resolves to the Dynamic Watchlists destination');
+  ok(nav.watchlistFromHash('#/recruitment/watchlists/wl-7') === 'wl-7', 'the watchlist id is read back out of the hash');
+  ok(nav.watchlistFromHash('#/recruitment/watchlists') === null && nav.watchlistFromHash('#/recruitment/watchlists/') === null,
+    'a watchlist hash without an id carries no id');
+  ok(nav.screenFromHash('#/recruitment/watchlists/') === null && nav.screenFromHash('#/recruitment/matching/') === null,
+    'trailing-slash M19 hashes stay rejected');
+  ok(nav.screenFromHash('#/matching') === 'matching' && nav.screenFromHash('#/watchlists') === 'watchlists', 'M19 destinations keep a flat hash too');
+  ok(nav.hashForScreen('matching') === '#/recruitment/matching' && nav.hashForScreen('watchlists') === '#/recruitment/watchlists', 'M19 named hashes round-trip');
+  ok(nav.hashForWatchlist('wl-7') === '#/recruitment/watchlists/wl-7', 'the app writes the watchlist hash it can read back');
+  // The criteria payload rides in the hash and is opaque: the client only has
+  // to be able to read back what it wrote. The SERVER re-validates every
+  // criterion, so a hand-edited link can never widen the candidate set.
+  ok(nav.criteriaFromHash('#/recruitment/matching?c=abc123') === 'abc123', 'the criteria state is read back out of a matching link');
+  ok(nav.criteriaFromHash('#/recruitment/matching') === null, 'a bare matching link carries no criteria state');
+  ok(nav.screenFromHash('#/recruitment/matching?c=abc123') === 'matching', 'a matching link WITH criteria still resolves to the destination');
+  ok(nav.screenFromHash('#/recruitment/matching?x=1') === null, 'an unknown query key on a matching link is rejected');
+  ok(nav.hashForMatching('abc123') === '#/recruitment/matching?c=abc123' && nav.hashForMatching(null) === '#/recruitment/matching',
+    'matching hashes round-trip with and without criteria');
   ok(nav.briefFromHash('#/recruitment/briefs/brf-7') === 'brf-7', 'brief deep link yields the brief id');
   ok(nav.briefFromHash('#/briefs') === null && nav.briefFromHash('#/recruitment/briefs/') === null
     && nav.briefFromHash('#/recruitment/briefs/a/b') === null && nav.briefFromHash('#/recruitment/briefs/../x') === null

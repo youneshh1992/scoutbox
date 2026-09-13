@@ -74,6 +74,12 @@ export const NAV_SECTIONS: NavSection[] = [
       { id: 'secondlook', labelKey: 'nav2.secondlook', aliases: ['second look', 'worth another look', 'evidence changed', 'reconsider', 'second regard', 'nouveau regard'] },
       { id: 'nobodymissed', labelKey: 'nav2.nobodymissed', aliases: ['nobody missed', 'evaluation coverage', 'coverage gaps', 'not yet evaluated', 'couverture d’évaluation'] },
       { id: 'briefs', labelKey: 'nav2.briefs', aliases: ['recruitment briefs', 'brief', 'briefs', 'criteria', 'cahier des charges', 'briefs de recrutement'] },
+      // M19: two more destinations INSIDE Recruitment, for the same reason —
+      // Player Matching answers "who satisfies the criteria we wrote, and
+      // why"; a Dynamic Watchlist saves those criteria and keeps the answer
+      // current. Neither is a ranking, and neither earns a sidebar section.
+      { id: 'matching', labelKey: 'nav2.matching', aliases: ['player matching', 'explainable matching', 'match criteria', 'who matches', 'why this player matches', 'correspondance', 'critères de correspondance'] },
+      { id: 'watchlists', labelKey: 'nav2.watchlists', aliases: ['dynamic watchlists', 'dynamic watchlist', 'saved criteria', 'listes dynamiques', 'critères enregistrés'] },
       { id: 'assessments', labelKey: 'nav.assessments', aliases: ['reports', 'scouting reports', 'évaluations', 'rapports'] },
       { id: 'video', labelKey: 'nav2.video', aliases: ['evidence', 'video workspace', 'preuves'] },
       { id: 'trials', labelKey: 'nav.trials', aliases: ['trial', 'trial reports', 'essais'] },
@@ -207,10 +213,42 @@ export function briefFromHash(hash: string): string | null {
 }
 export const hashForBrief = (briefId: string) => `#/recruitment/briefs/${briefId}`;
 
-/** Canonical hashes for the two unparameterised M18 destinations. */
+// M19 extends the SAME mechanism a third time rather than inventing another:
+//   "#/recruitment/matching"            → the Player Matching workspace
+//   "#/recruitment/matching?c=<state>"  → …with the criteria that were run
+//   "#/recruitment/watchlists"          → the Dynamic Watchlist list
+//   "#/recruitment/watchlists/:id"      → one Dynamic Watchlist
+//
+// The criteria payload rides in the hash so a search survives refresh, Back,
+// Forward and a link shared with a colleague. It is opaque and UNTRUSTED: the
+// server validates every criterion again and refuses anything it does not
+// recognise, so a hand-edited link can widen nothing.
+export const MATCHING_HASH = '#/recruitment/matching';
+export const WATCHLISTS_HASH = '#/recruitment/watchlists';
+const MATCHING_RE = /^#\/recruitment\/matching(?:\?c=([A-Za-z0-9%._~-]{1,8000}))?$/;
+const WATCHLIST_HASH = /^#\/recruitment\/watchlists\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})$/;
+
+/** The encoded criteria state inside a matching deep link, or null. */
+export function criteriaFromHash(hash: string): string | null {
+  const m = MATCHING_RE.exec(hash ?? '');
+  return m?.[1] ?? null;
+}
+export const hashForMatching = (encoded?: string | null) =>
+  (encoded ? `${MATCHING_HASH}?c=${encoded}` : MATCHING_HASH);
+
+/** The watchlist id inside a deep link, or null for any other (or malformed) hash. */
+export function watchlistFromHash(hash: string): string | null {
+  const m = WATCHLIST_HASH.exec(hash ?? '');
+  return m ? m[1] : null;
+}
+export const hashForWatchlist = (id: string) => `${WATCHLISTS_HASH}/${id}`;
+
+/** Canonical hashes for the unparameterised M18/M19 destinations. */
 const PRETTY_HASH: Partial<Record<ScreenId, string>> = {
   secondlook: SECOND_LOOK_HASH,
   nobodymissed: NOBODY_MISSED_HASH,
+  matching: MATCHING_HASH,
+  watchlists: WATCHLISTS_HASH,
 };
 
 export function screenFromHash(hash: string): ScreenId | null {
@@ -226,6 +264,10 @@ export function screenFromHash(hash: string): ScreenId | null {
   // tripped over.
   if (hash === '#/recruitment/rooms') return 'rooms';
   if (hash === '#/recruitment/briefs') return 'briefs';
+  // M19 — a matching link carries its criteria; a watchlist link carries an id.
+  if (MATCHING_RE.test(hash ?? '')) return 'matching';
+  if (watchlistFromHash(hash)) return 'watchlists';
+  if (hash === WATCHLISTS_HASH) return 'watchlists';
   const m = /^#\/([a-z]+)$/.exec(hash ?? '');
   if (!m) return null;
   const id = m[1];
