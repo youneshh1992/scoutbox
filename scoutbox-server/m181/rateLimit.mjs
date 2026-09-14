@@ -64,6 +64,26 @@ export const RATE_LIMIT_POLICY = {
   box_session_create: { max: 30, windowMs: 3_600_000, scope: 'player', note: 'Box Cam capture sessions.' },
   box_dispute: { max: 5, windowMs: 3_600_000, scope: 'player', note: 'Box Cam result disputes.' },
 
+  // M22 production CV (§40). THREE separate policies, because the three
+  // actions cost wildly different things and one shared limit would be tuned
+  // for the wrong one.
+  //
+  //   session create  cheap, but each one reserves a concurrency slot
+  //   frame ingest    the expensive endpoint — this is where pixels are
+  //                   decoded and the engine runs, so it gets a deliberate
+  //                   limit rather than inheriting a generous one
+  //   finalize        once per attempt by construction; the limit exists only
+  //                   to bound a retry loop
+  //
+  // Ingest is per-BATCH, not per-frame: a batch carries up to
+  // FRAME_LIMITS.maxFramesPerBatch frames, so 600 batches an hour is roughly
+  // 7,200 frames — comfortably more than a session of honest attempts and far
+  // below what a runaway client would send.
+  box_cv_session_create: { max: 40, windowMs: 3_600_000, scope: 'player', note: 'Production CV provider sessions.' },
+  box_cv_frames: { max: 600, windowMs: 3_600_000, scope: 'player', note: 'Production CV frame batches.' },
+  box_cv_finalize: { max: 80, windowMs: 3_600_000, scope: 'player', note: 'Production CV finalization.' },
+  box_cv_ready_check: { max: 120, windowMs: 3_600_000, scope: 'player', note: 'Box Cam CV Ready Check runs.' },
+
   // outbound to people
   evidence_request: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Evidence requests to players and guardians.' },
   org_invite: { max: 25, windowMs: 86_400_000, scope: 'org', note: 'Staff invitations.' },

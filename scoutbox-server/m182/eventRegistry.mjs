@@ -227,6 +227,40 @@ export const EVENT_REGISTRY = {
     privacyClass: 'subject_reference', payload: ['playerId'],
     dedupeStrategy: 'coalesce_by_subject', replayPolicy: 'replay', notificationEligible: false, analyticsEligible: false,
   },
+
+  // ------------------------------------------------- M22 production CV
+  //
+  // Three events, all `player_private` (§72). An observation is something a
+  // player did in their own home; there is no cross-organisation broadcast of
+  // it, and none of these is analytics-eligible, because counting how often
+  // players are observed is one step from ranking them (§137).
+  //
+  // §41 is enforced here as much as in the route: there is deliberately NO
+  // per-frame event in this table, so a future caller cannot emit one without
+  // first adding it and answering the privacy question.
+  box_cam_cv_session_started: {
+    domain: 'box_cam', sourceSystem: 'boxCamCv', audience: 'player_private',
+    privacyClass: 'subject_reference', payload: ['playerId', 'sessionId'],
+    dedupeStrategy: 'fingerprint', replayPolicy: 'replay',
+    notificationEligible: false, analyticsEligible: false,
+  },
+  box_cam_cv_refused: {
+    domain: 'box_cam', sourceSystem: 'boxCamCv', audience: 'player_private',
+    // The refusal REASON travels, because the player needs to know why and a
+    // reason code carries no observation content.
+    privacyClass: 'subject_reference', payload: ['playerId', 'sessionId', 'reason'],
+    dedupeStrategy: 'fingerprint', replayPolicy: 'replay',
+    notificationEligible: false, analyticsEligible: false,
+  },
+  box_cam_observed: {
+    domain: 'box_cam', sourceSystem: 'boxCamCv', audience: 'player_private',
+    // Deliberately carries NO count. The event says an activity was observed;
+    // it is not a channel for a measurement, and a count in a payload is a
+    // count that ends up somewhere it was never gated for.
+    privacyClass: 'subject_reference', payload: ['playerId', 'sessionId'],
+    dedupeStrategy: 'coalesce_by_subject', replayPolicy: 'replay',
+    notificationEligible: false, analyticsEligible: false,
+  },
 };
 
 export const EVENT_NAMES = Object.freeze(Object.keys(EVENT_REGISTRY));
