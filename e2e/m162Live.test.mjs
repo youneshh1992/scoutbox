@@ -78,6 +78,12 @@ await player.click('a[href="/you"]');
 await player.waitForSelector('text=ScoutBox Trust Score', { timeout: 20000 });
 say('T1: the player You tab shows the ScoutBox Trust Score');
 {
+  // The section title paints before the profile fetch resolves; the score, the
+  // band and the disclaimer arrive with it. Wait for the projection to land so
+  // the assertions below judge the loaded surface, never a half-painted one.
+  // A timeout here is not the verdict — the assertions still are.
+  await player.locator('text=reflects verification and evidence confidence')
+    .first().waitFor({ timeout: 20000 }).catch(() => {});
   const body = await player.locator('body').innerText();
   if (!/reflects verification and evidence confidence/.test(body)) fail('T1: the mandatory disclaimer is missing');
   say('T1: the disclaimer states this is evidence confidence, not football ability');

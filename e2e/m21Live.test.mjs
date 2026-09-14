@@ -564,4 +564,5 @@ let clubPlanId = null; let clubGoalId = null;
 
 ok(errors.length === 0, `no page errors across the journeys${errors.length ? `: ${errors.slice(0, 3).join(' | ')}` : ''}`);
 await browser.close();
+cleanup();
 console.log(`\nM21 live journeys: ${passed} checks passed`);
