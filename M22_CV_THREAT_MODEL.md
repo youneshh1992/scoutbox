@@ -132,3 +132,54 @@ These are the reasons the production bar is a *measured* gate and not a badge.
 3. Every accepted observation carries `providerId`, `providerVersion`, `modelVersion`, `policyVersion`.
 4. Refusal is a first-class result with a specific reason, never a zero.
 5. The virtual-camera residual risk (T5) is surfaced to the reader of the result, not buried in a document.
+
+---
+
+## 6. Runtime and methodology threats (T31–T40)
+
+Added after the robustness and holdout passes. T1–T30 are about the *content*
+of an attempt — what is in front of the camera. These are about the *machinery*:
+the session that observes it, the resources it holds, and the evidence used to
+justify trusting any of it. Several were found by measurement rather than
+reasoning, and those are marked.
+
+| # | Threat | Why it matters | Position |
+|---|---|---|---|
+| **T31** | **Session-id reuse.** A new attempt lands on runtime state belonging to a previous one — same object, unreset fields — and inherits its detections, duplicate hashes or staleness counters. | An attempt could be credited with observations it did not make. The worst shape is silent: counts that are plausible but assembled from two attempts. | **Mitigated.** `resetRun()` is a single-entry reset contract restoring every field in `MUTABLE_RUN_KEYS`. A regression compares a RESET instance against a FRESH one field by field, so adding a mutable field without adding it to the contract fails the suite. |
+| **T32** | **Tracker-pool state leakage.** A runtime that recycles run objects for efficiency defeats "make a new object" without anyone noticing. | This is the version of T31 that survives the obvious defence, and it is invisible in code review because pooling looks like an optimisation. | **Mitigated, and deliberately exercised.** `ObservationSessions` takes a `pool` option whose only purpose is to make the hazard testable rather than assumed away. Pooled reuse runs through the same reset contract and is checked against a fresh instance. |
+| **T33** | **Stale session id submits frames.** A cancelled, expired or finalized session's id continues to be accepted. | Late or replayed frames attach to a completed measurement, or resurrect a refused one. | **Mitigated.** `get()` returns null for a disposed runtime; there is no path that resurrects one. Ingest on a non-active session returns `SESSION_NOT_FOUND` or `SESSION_NOT_ACTIVE`. Past TTL, the session is expired and released and the frame is rejected. |
+| **T34** | **Cross-session contamination under concurrency.** Two attempts open at once share state through a module-level variable or a coarse key. | One player's touches counted into another's attempt. Keying by player or protocol rather than session id merges two legitimate concurrent attempts. | **Mitigated structurally.** All four layers are pure functions with no module-level state, and runtime is keyed by session id **only**. Perf measurement across 1/2/5/10 interleaved sessions shows per-session cost within ±10% of running one alone — there is nothing to contend on. |
+| **T35** | **Cleanup failure / resource exhaustion.** Abandoned sessions accumulate queues, detections and timers until the process degrades. | A denial of service that needs no attacker — just users closing tabs. The abandoned path is the one nobody watches. | **Mitigated and measured.** A 500-session soak in which a quarter are cancelled rather than finished leaves 0 retained sessions, queued frames, detections and timers, with heap flat at 5.30→5.32 MB. Disposal is idempotent by construction. |
+| **T36** | **Unbounded frame queue.** A client submits faster than the server drains. | Memory growth proportional to a client's enthusiasm. | **Mitigated.** `FrameQueue` is capped at `FRAME_LIMITS.maxQueuedFrames`, drops oldest, and **records the drops** so backpressure is visible in the observation record rather than silent. Measured: 240 pushed, 24 held, 216 dropped and reported. |
+| **T37** | **Frame-gap contact ambiguity.** Frames are lost around a contact, and the engine interpolates across the gap or counts the same contact on both sides of it. | Either fabricates a touch or double-counts a real one. Dropped frames are ordinary on real devices, so this is a common case, not an edge case. | **Mitigated.** Per-triple `gapBeforeMs`/`gapAfterMs` let the protocol layer distinguish a genuine adjacency from one spanning a gap; gaps beyond `maxBallGapFrames`/`maxBallGapMs` mark the track's occlusion as broken. The engine does not extrapolate through lost contact frames, and the refractory interval is in milliseconds so it means the same thing across a gap. |
+| **T38** | **Global image transforms fabricating motion.** *(Found by measurement, twice.)* A camera zoom, a player walking toward the lens, or the player region clipping against a frame edge moves the frame of reference, and player-relative motion reads it as the ball moving. | Produced four P0 false touches across two holdout generations, on scenes where the ball and player were in a **completely fixed** relationship. The original guard was set at 1.4× because it was asking an identity question — "is this a different person?" — where the question that matters for counting is thirty times smaller. | **Mitigated.** `EVENT_RULES.maxFrameScaleStepPerSample` (4%), derived from the impulse threshold, the working range of `\|rel\|/d` and the maximum supported cadence, sitting between a 1.1% detector noise floor and a 4.3% danger point. Holdout generation 3 attacks the fix itself — a ramp compounding just under the bound, a permanently clipped region, a walk toward the camera, a single-frame doubling — and all read zero. |
+| **T39** | **Synthetic overconfidence.** Strong scores on rendered geometry are read as evidence about football. | The most dangerous threat in this document, because it needs no attacker and produces a confident, wrong claim. Everything else fails loudly; this one fails by being believed. | **Mitigated procedurally, not technically.** Provenance travels with the numbers in every artefact. `gate.mjs` reads `validation.mjs` **independently of the evaluation artefact**, so a synthetic result cannot assert its own real-world validity. The gate is closed and will remain closed until `M22_REAL_WORLD_VALIDATION_PLAN.md` is executed and passes. |
+| **T40** | **Platform-generalization risk.** Support is claimed for devices, browsers or capture paths absent from the validating data. | An untested combination that silently mis-counts is exactly the case nobody is looking at. "Expected to work" is not a measurement. | **Mitigated by declaration.** §5 of the validation plan: claims follow the data and nothing else. A platform absent from the passing holdout is unsupported, however unlikely that feels, and the capture client refuses to begin a production attempt outside the validated envelope. |
+
+### A methodology threat worth naming on its own
+
+**T41 — The holdout that stops being one.** A holdout run repeatedly, or run
+after a threshold moved, is a development fixture with a better name. Nobody
+decides to do this; it happens one reasonable step at a time.
+
+Position: **mitigated by construction.**
+
+- `m22/freeze.mjs` hashes the constants **and** the comment-stripped source of
+  all four observation layers; `scripts/m22Holdout.mjs` refuses to run against
+  a drifted freeze. The source group exists because the first fix changed code
+  rather than constants and the freeze would otherwise have stayed silent.
+- A generation that diagnoses a defect is **consumed** and moves into the
+  development harness as a permanent regression. It can never return.
+- Count errors are reported, never failed, so no incentive exists to tune
+  against them.
+
+### One more, from the test harness rather than the engine
+
+**T42 — Stale test infrastructure.** A test passes against a server left running
+from an earlier session, serving a build nobody in this run produced.
+
+This one was real: `crosstab` and `demoOffline` had been green for a long time
+against whatever had been left on :8099. Position: **mitigated.** The demo host
+publishes a content-derived build marker, and a caller that finds an existing
+host and does not recognise its marker fails hard with the port and the remedy
+named. See `e2e/demoHost.mjs` and the 15-check regression beside it.

@@ -1,6 +1,6 @@
 {
   "kind": "m22_perf",
-  "generatedAt": "2026-09-14T20:19:43.576Z",
+  "generatedAt": "2026-09-14T20:28:57.801Z",
   "engineVersion": 2,
   "node": "v22.22.2",
   "gcExposed": true,
@@ -12,17 +12,17 @@
       "frames": 116,
       "detectPerFrameMs": {
         "n": 116,
-        "mean": 0.332,
-        "p50": 0.258,
-        "p95": 0.945,
-        "max": 3.083
+        "mean": 0.342,
+        "p50": 0.252,
+        "p95": 0.992,
+        "max": 3.274
       },
-      "trackMs": 0.215,
-      "protocolMs": 0.003,
-      "qualityMs": 0.01,
-      "finalizeMs": 0.413,
+      "trackMs": 0.114,
+      "protocolMs": 0.002,
+      "qualityMs": 0.007,
+      "finalizeMs": 0.368,
       "timingNote": "per-finish layers are medians of 9 repeats; detection is per frame over the whole capture",
-      "detectPerMegapixelMs": 17.29
+      "detectPerMegapixelMs": 17.81
     },
     {
       "size": "240x180",
@@ -30,17 +30,17 @@
       "frames": 116,
       "detectPerFrameMs": {
         "n": 116,
-        "mean": 0.524,
-        "p50": 0.523,
-        "p95": 0.568,
-        "max": 0.66
+        "mean": 0.567,
+        "p50": 0.54,
+        "p95": 0.769,
+        "max": 0.992
       },
-      "trackMs": 0.165,
+      "trackMs": 0.177,
       "protocolMs": 0,
       "qualityMs": 0.001,
-      "finalizeMs": 0.339,
+      "finalizeMs": 0.306,
       "timingNote": "per-finish layers are medians of 9 repeats; detection is per frame over the whole capture",
-      "detectPerMegapixelMs": 12.13
+      "detectPerMegapixelMs": 13.12
     },
     {
       "size": "320x240",
@@ -48,48 +48,48 @@
       "frames": 116,
       "detectPerFrameMs": {
         "n": 116,
-        "mean": 0.932,
-        "p50": 0.866,
-        "p95": 1.071,
-        "max": 4.793
+        "mean": 0.898,
+        "p50": 0.852,
+        "p95": 0.915,
+        "max": 3.79
       },
-      "trackMs": 0.14,
+      "trackMs": 0.138,
       "protocolMs": 0,
       "qualityMs": 0.001,
-      "finalizeMs": 0.217,
+      "finalizeMs": 0.226,
       "timingNote": "per-finish layers are medians of 9 repeats; detection is per frame over the whole capture",
-      "detectPerMegapixelMs": 12.14
+      "detectPerMegapixelMs": 11.69
     }
   ],
   "detectionCostPerMegapixelMs": [
-    17.29,
-    12.13,
-    12.14
+    17.81,
+    13.12,
+    11.69
   ],
-  "detectionLinearityRatio": 1.43,
+  "detectionLinearityRatio": 1.52,
   "detectionAtWorstLinear": true,
   "byRate": [
     {
       "fps": 12,
       "frames": 58,
-      "ingestMs": 33.065,
-      "finalizeMs": 0.114,
-      "msPerFrame": 0.57,
+      "ingestMs": 36.473,
+      "finalizeMs": 0.106,
+      "msPerFrame": 0.629,
       "realtimeFactor": 0.01
     },
     {
       "fps": 24,
       "frames": 116,
-      "ingestMs": 68.481,
-      "finalizeMs": 0.158,
-      "msPerFrame": 0.59,
+      "ingestMs": 67.252,
+      "finalizeMs": 0.195,
+      "msPerFrame": 0.58,
       "realtimeFactor": 0.01
     },
     {
       "fps": 30,
       "frames": 144,
-      "ingestMs": 82.198,
-      "finalizeMs": 0.158,
+      "ingestMs": 82.172,
+      "finalizeMs": 0.141,
       "msPerFrame": 0.571,
       "realtimeFactor": 0.02
     }
@@ -97,57 +97,57 @@
   "concurrency": [
     {
       "sessions": 1,
-      "totalMs": 68,
-      "perSessionMs": 68,
+      "totalMs": 67.35,
+      "perSessionMs": 67.35,
       "overheadPct": 0
     },
     {
       "sessions": 2,
-      "totalMs": 148.48,
-      "perSessionMs": 74.24,
-      "overheadPct": 9.18
+      "totalMs": 142.91,
+      "perSessionMs": 71.45,
+      "overheadPct": 6.09
     },
     {
       "sessions": 5,
-      "totalMs": 359.68,
-      "perSessionMs": 71.94,
-      "overheadPct": 5.79
+      "totalMs": 347.2,
+      "perSessionMs": 69.44,
+      "overheadPct": 3.1
     },
     {
       "sessions": 10,
-      "totalMs": 724.95,
-      "perSessionMs": 72.49,
-      "overheadPct": 6.61
+      "totalMs": 692.24,
+      "perSessionMs": 69.22,
+      "overheadPct": 2.78
     }
   ],
   "eventLoop": {
     "idle": {
       "n": 81,
-      "mean": 0.027,
+      "mean": 0.036,
       "p50": 0,
-      "p95": 0.08,
-      "max": 0.829
+      "p95": 0.077,
+      "max": 1.112
     },
     "ingesting": {
-      "n": 80,
-      "mean": 0.126,
-      "p50": 0.07,
-      "p95": 0.583,
-      "max": 1.016
+      "n": 79,
+      "mean": 0.181,
+      "p50": 0.069,
+      "p95": 0.727,
+      "max": 1.646
     }
   },
   "soak": {
     "sessions": 500,
     "framesPerSession": 29,
-    "totalMs": 8721.7,
-    "msPerSession": 17.44,
-    "heapBeforeMB": 5.3,
-    "heapAfterMB": 5.32,
+    "totalMs": 8680.35,
+    "msPerSession": 17.36,
+    "heapBeforeMB": 5.21,
+    "heapAfterMB": 5.23,
     "heapDeltaMB": 0.02,
     "heapSamples": [
       {
         "after": 100,
-        "heapMB": 5.28,
+        "heapMB": 5.19,
         "footprint": {
           "activeSessions": 0,
           "queuedFrames": 0,
@@ -166,7 +166,7 @@
       },
       {
         "after": 200,
-        "heapMB": 5.29,
+        "heapMB": 5.2,
         "footprint": {
           "activeSessions": 0,
           "queuedFrames": 0,
@@ -185,7 +185,7 @@
       },
       {
         "after": 300,
-        "heapMB": 5.32,
+        "heapMB": 5.23,
         "footprint": {
           "activeSessions": 0,
           "queuedFrames": 0,
@@ -204,7 +204,7 @@
       },
       {
         "after": 400,
-        "heapMB": 5.32,
+        "heapMB": 5.23,
         "footprint": {
           "activeSessions": 0,
           "queuedFrames": 0,
@@ -223,7 +223,7 @@
       },
       {
         "after": 500,
-        "heapMB": 5.32,
+        "heapMB": 5.23,
         "footprint": {
           "activeSessions": 0,
           "queuedFrames": 0,
