@@ -20,6 +20,7 @@
 // to a ground-truth constant rather than invisible as a threshold nudge.
 
 import { FRAME_LIMITS } from './policy.mjs';
+import { sequence, touchPath } from './scenes.mjs';
 
 // Deterministic PRNG — fixtures must be byte-identical on every run (§76 of
 // the negative list: "count differs nondeterministically for same fixture").
@@ -110,30 +111,19 @@ function juggleFrames({ bounces = 8, fps = 12, seed = 11, apexFrac = 0.30 }) {
 }
 
 /**
- * Ground touches: the ball sits low and receives a lateral impulse next to
- * the player at a fixed cadence. Velocity reverses at each touch, which is
- * exactly the structure the §21 impulse rule looks for.
+ * Ground touches — delegated to the shared physics model in scenes.mjs.
+ *
+ * This file previously carried its OWN touch generator, a triangle wave at a
+ * fixed size. Two descriptions of what a touch is, in one repository, is one
+ * too many: when the shared model was corrected the local copy silently kept
+ * asserting the old physics, and the fixture failed for a reason that had
+ * nothing to do with the engine.
  */
-function touchFrames({ touches = 10, fps = 12, seed = 23, amplitude = 16 }) {
-  const rng = mulberry32(seed);
-  const frames = [];
-  const periodMs = 500;
-  const dtMs = Math.round(1000 / fps);
-  const totalMs = touches * periodMs;
-  let seq = 0;
-  for (let t = 0; t <= totalMs; t += dtMs) {
-    const k = Math.floor(t / periodMs);
-    const phase = (t % periodMs) / periodMs;
-    // Triangle wave: constant velocity out, reversed velocity back. The
-    // reversal at each period boundary is the impulse.
-    const off = phase < 0.5 ? amplitude * (phase * 2) : amplitude * (2 - phase * 2);
-    const dir = k % 2 === 0 ? 1 : -1;
-    const x = 136 + dir * off;
-    const y = 150 + Math.sin(t / 700) * 2;
-    frames.push(envelope(render({ ball: { x, y, r: 6 }, people: [PERSON], rng }), seq, t));
-    seq += 1;
-  }
-  return frames;
+function touchFrames({ touches = 10, fps = 12, seed = 23 }) {
+  return sequence({
+    w: W, h: H, fps, durationMs: 500 * touches,
+    path: touchPath({ touches, periodMs: 500 }), seed,
+  });
 }
 
 function plainFrames({ n = 40, dtMs = 83, seed = 5, ...scene }) {

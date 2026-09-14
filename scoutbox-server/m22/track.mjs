@@ -15,7 +15,7 @@
 // the frame rate has quarter-length intervals, so the per-second numbers are
 // identical too.
 
-import { EVENT_RULES } from './policy.mjs';
+import { EVENT_RULES, CAPTURE_REQUIREMENTS } from './policy.mjs';
 
 /**
  * Build tracks from a detection stream.
@@ -27,6 +27,7 @@ import { EVENT_RULES } from './policy.mjs';
 export function buildTracks(detections) {
   const samples = [];
   let lastDiameter = null;
+  let lastPerson = null;
   let gapFrames = 0, maxGapFrames = 0;
   let gapStartMs = null, maxGapMs = 0;
   let resets = 0;
@@ -53,6 +54,23 @@ export function buildTracks(detections) {
 
     const person = d.person ?? null;
     const ball = d.ball ?? null;
+    // A person region that jumps in size or position between frames is not
+    // the same observation continued — it is a new one. Because motion is
+    // measured in the player's frame, an unflagged jump shifts that frame and
+    // reads as the BALL moving. Flag it so the protocol layer can drop the
+    // affected samples rather than interpret them as a contact.
+    let personJump = false;
+    if (person && lastPerson) {
+      const wPrev = lastPerson.x1 - lastPerson.x0, hPrev = lastPerson.y1 - lastPerson.y0;
+      const wNow = person.x1 - person.x0, hNow = person.y1 - person.y0;
+      const cPrev = { x: (lastPerson.x0 + lastPerson.x1) / 2, y: (lastPerson.y0 + lastPerson.y1) / 2 };
+      const cNow = { x: (person.x0 + person.x1) / 2, y: (person.y0 + person.y1) / 2 };
+      const scaleJump = wNow > wPrev * 1.4 || wNow < wPrev / 1.4 || hNow > hPrev * 1.4 || hNow < hPrev / 1.4;
+      const shiftJump = Math.hypot(cNow.x - cPrev.x, cNow.y - cPrev.y) > Math.max(wPrev, 1) * 0.5;
+      personJump = scaleJump || shiftJump;
+      if (personJump) resets += 1;
+    }
+    if (person) lastPerson = person;
     // Player-relative position: cancels rigid camera motion, because the
     // ball and the player move together when the camera does.
     const rel = (ball && person)
@@ -63,6 +81,7 @@ export function buildTracks(detections) {
       seq: d.seq, atMs: d.atMs, w: d.w, h: d.h,
       ball, person, rel,
       rivals: d.rivals ?? 0,
+      personJump,
       usable: d.visibility.usable,
       visibilityReason: d.visibility.reason,
       interFrameDiff: d.interFrameDiff,
@@ -84,7 +103,11 @@ export function buildTracks(detections) {
   for (let i = 1; i < samples.length; i += 1) intervals.push(samples[i].atMs - samples[i - 1].atMs);
   const medianIntervalMs = median(intervals);
   const effectiveFps = medianIntervalMs > 0 ? 1000 / medianIntervalMs : 0;
-  const lowFpsIntervals = intervals.filter((iv) => iv > 0 && 1000 / iv < 12).length;
+  // An interval is "low" only if it exceeds the nominal minimum-cadence
+  // interval by more than the documented jitter band (see policy).
+  const lowIntervalMs = (1000 / CAPTURE_REQUIREMENTS.minSustainedFps)
+    * CAPTURE_REQUIREMENTS.lowFpsIntervalTolerance;
+  const lowFpsIntervals = intervals.filter((iv) => iv > lowIntervalMs).length;
 
   // Active duration counts only spans where BOTH were visible at both ends.
   let activeMs = 0;
@@ -169,6 +192,9 @@ export function relativeMotion(tracks) {
       // adjacency from one that spans a dropped-frame gap.
       gapBeforeMs: b.atMs - a.atMs,
       gapAfterMs: c.atMs - b.atMs,
+      // True when the player frame of reference moved discontinuously across
+      // this triple, which makes its relative velocities meaningless.
+      frameJump: !!(a.personJump || b.personJump || c.personJump),
     });
   }
   return out;

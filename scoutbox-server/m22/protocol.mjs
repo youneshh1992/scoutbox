@@ -60,9 +60,14 @@ export function interpretTouches(motion, {
   maxContact = EVENT_RULES.touchMaxContactDiameters,
   minSeparation = EVENT_RULES.touchMinSeparationDiameters,
   maxGapMs = EVENT_RULES.maxBallGapMs,
+  minApproachMs = EVENT_RULES.touchMinApproachMs,
 } = {}) {
   const events = [];
   const transitions = [];
+  // When the ball most recently entered contact range, so that a contact can
+  // require a continuous approach rather than a sudden appearance.
+  let inRangeSinceMs = null;
+  let prevInRange = false;
   let state = 'READY';
   let lastEmitMs = -Infinity;
   let ambiguousIntervals = 0;
@@ -98,8 +103,23 @@ export function interpretTouches(motion, {
       go('READY', m.atMs, 'ball_at_frame_edge');
       continue;
     }
+    // The player frame of reference moved discontinuously here, so the
+    // relative velocities across this triple describe the detector changing
+    // its mind about the silhouette, not the ball being struck.
+    if (m.frameJump) {
+      ambiguousIntervals += 1;
+      go('READY', m.atMs, 'player_region_discontinuity');
+      continue;
+    }
 
     const inRange = m.distDiameters <= maxContact;
+    // Dwell clock: starts when the ball ENTERS contact range and runs until
+    // it leaves. It is deliberately independent of the machine's state — a
+    // ball resting at the foot through several taps never leaves range, so
+    // its approach is never in question and the clock must not restart.
+    if (inRange && !prevInRange) inRangeSinceMs = m.atMs;
+    if (!inRange) inRangeSinceMs = null;
+    prevInRange = inRange;
     const impulsive = m.impulseDiametersPerSec >= minImpulse;
     // Displacement from the last struck position, in ball diameters — OR
     // leaving contact range altogether, which is separation by any measure.
@@ -115,46 +135,52 @@ export function interpretTouches(motion, {
 
       case 'APPROACHING':
         if (!inRange) { go('READY', m.atMs, 'left_range_without_contact'); break; }
-        if (impulsive) {
-          // Remember THIS sample. The machine confirms on the next
-          // iteration, so without capturing the impulsive sample here the
-          // event would be stamped — and scored — from the sample after the
-          // contact, where the impulse has already decayed. That understated
-          // every genuine touch's confidence and put the event a frame late.
-          candidate = m;
-          go('CONTACT_CANDIDATE', m.atMs, 'impulse_detected');
-        }
-        break;
-
-      case 'CONTACT_CANDIDATE':
-        if (!inRange) { go('READY', m.atMs, 'candidate_left_range'); break; }
-        // Confirm only if the refractory window has genuinely elapsed. This
-        // is the TEMPORAL half of the debounce; the spatial half is the
-        // SEPARATING transition below. Both are required.
+        if (!impulsive) break;
+        // A continuous approach is required. Without it, a ball that is
+        // distant and then adjacent for a frame or two registers a contact on
+        // the apparent velocity of its own arrival.
+        if (inRangeSinceMs == null || m.atMs - inRangeSinceMs < minApproachMs) break;
+        // The contact IS this sample: an impulse delivered while the ball is
+        // within contact range. Candidate and confirmation therefore resolve
+        // in the same iteration, and the event is stamped and scored here.
+        //
+        // An earlier cut waited one more sample before confirming AND
+        // required the ball still to be adjacent then. That is backwards — a
+        // struck ball is leaving. It dropped nearly every genuine touch, and
+        // the counts fell as pace rose, because a faster touch clears contact
+        // range sooner. The confidence fix that preceded this one (carrying
+        // the impulsive sample forward) treated the symptom; the wait itself
+        // was the defect.
+        go('CONTACT_CANDIDATE', m.atMs, 'impulse_detected');
         if (m.atMs - lastEmitMs < refractoryMs) {
+          // Temporal half of the debounce: too soon after the last contact to
+          // be a separate one. Occupy CONFIRMED so it cannot re-trigger, and
+          // emit nothing.
           go('CONTACT_CONFIRMED', m.atMs, 'suppressed_within_refractory');
           break;
         }
-        {
-          const k = candidate ?? m;          // the contact, not its successor
-          go('CONTACT_CONFIRMED', m.atMs, 'contact_confirmed');
-          contactAt = { x: k.relX, y: k.relY };
-          events.push({
-            atMs: k.atMs,
-            confidence: Math.min(1,
-              k.confidence * 0.7
-              + Math.min(1, k.impulseDiametersPerSec / (minImpulse * 3)) * 0.2
-              + (1 - Math.min(1, k.distDiameters / maxContact)) * 0.1),
-          });
-          lastEmitMs = k.atMs;
-          candidate = null;
-        }
+        go('CONTACT_CONFIRMED', m.atMs, 'contact_confirmed');
+        contactAt = { x: m.relX, y: m.relY };
+        events.push({
+          atMs: m.atMs,
+          confidence: Math.min(1,
+            m.confidence * 0.7
+            + Math.min(1, m.impulseDiametersPerSec / (minImpulse * 3)) * 0.2
+            + (1 - Math.min(1, m.distDiameters / maxContact)) * 0.1),
+        });
+        lastEmitMs = m.atMs;
+        break;
+
+      case 'CONTACT_CANDIDATE':
+        // Retained for trace completeness; the machine passes straight
+        // through it within a single iteration.
+        go('CONTACT_CONFIRMED', m.atMs, 'contact_confirmed');
         break;
 
       case 'CONTACT_CONFIRMED':
         // Sustained contact stays here. It cannot emit again: the only way
         // out is an observed displacement from the struck position.
-        if (separated) go('SEPARATING', m.atMs, 'ball_separated');
+        if (separated || !inRange) go('SEPARATING', m.atMs, 'ball_separated');
         break;
 
       case 'SEPARATING':
@@ -194,6 +220,7 @@ export function interpretJuggles(motion, {
   for (let i = 1; i < motion.length - 1; i += 1) {
     const a = motion[i - 1], b = motion[i], c = motion[i + 1];
     if (b.gapBeforeMs > maxGapMs || b.gapAfterMs > maxGapMs) { ambiguousIntervals += 1; continue; }
+    if (b.frameJump) { ambiguousIntervals += 1; continue; }
     // y grows downward: falling in, rising out.
     const fallingIn = b.relHeightDiameters > a.relHeightDiameters;
     const risingOut = c.relHeightDiameters < b.relHeightDiameters;

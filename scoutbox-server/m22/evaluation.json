@@ -1,7 +1,7 @@
 {
-  "engineVersion": 1,
+  "engineVersion": 2,
   "policyVersion": 1,
-  "generatedAt": "2026-09-14T19:18:33.128Z",
+  "generatedAt": "2026-09-14T19:32:48.565Z",
   "fixtureCount": 14,
   "fixtureProvenance": "synthetic_generated",
   "realWorldValidation": false,
@@ -12,6 +12,547 @@
   "falseVerifications": 0,
   "nondeterministic": 0,
   "refusalRate": 0.571,
+  "familyCount": 13,
+  "familyVariants": 39,
+  "familyFailures": 0,
+  "invarianceBreaks": 0,
+  "stressCases": 20,
+  "falseTouches": 0,
+  "stressAccepted": 17,
+  "familyRows": [
+    {
+      "family": "juggle_valid_resolution",
+      "id": "juggle_res_160x120",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "juggle_valid_resolution",
+      "id": "juggle_res_240x180",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "juggle_valid_resolution",
+      "id": "juggle_res_320x240",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "touch_valid_resolution",
+      "id": "touch_res_160x120",
+      "expectedState": "accepted",
+      "expectedCount": 10,
+      "gotState": "accepted",
+      "gotCount": 9,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "touch_valid_resolution",
+      "id": "touch_res_240x180",
+      "expectedState": "accepted",
+      "expectedCount": 10,
+      "gotState": "accepted",
+      "gotCount": 9,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "touch_valid_resolution",
+      "id": "touch_res_320x240",
+      "expectedState": "accepted",
+      "expectedCount": 10,
+      "gotState": "accepted",
+      "gotCount": 9,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "juggle_valid_fps",
+      "id": "juggle_fps_15",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "juggle_valid_fps",
+      "id": "juggle_fps_24",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "juggle_valid_fps",
+      "id": "juggle_fps_30",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "touch_valid_fps",
+      "id": "touch_fps_15",
+      "expectedState": "accepted",
+      "expectedCount": 10,
+      "gotState": "accepted",
+      "gotCount": 9,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "touch_valid_fps",
+      "id": "touch_fps_24",
+      "expectedState": "accepted",
+      "expectedCount": 10,
+      "gotState": "accepted",
+      "gotCount": 9,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "touch_valid_fps",
+      "id": "touch_fps_30",
+      "expectedState": "accepted",
+      "expectedCount": 10,
+      "gotState": "accepted",
+      "gotCount": 9,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "ball_scale",
+      "id": "ball_scale_0",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "ball_scale",
+      "id": "ball_scale_1",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "ball_scale",
+      "id": "ball_scale_2",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "ball_contrast",
+      "id": "ball_luma_250",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "ball_contrast",
+      "id": "ball_luma_225",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "ball_contrast",
+      "id": "ball_luma_205",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "background_luma",
+      "id": "bg_luma_95",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "background_luma",
+      "id": "bg_luma_130",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "background_luma",
+      "id": "bg_luma_165",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "player_silhouette",
+      "id": "silhouette_narrow",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "player_silhouette",
+      "id": "silhouette_wide",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "player_silhouette",
+      "id": "silhouette_mid_contrast",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "player_silhouette",
+      "id": "silhouette_shifted_left",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "camera_motion_valid",
+      "id": "cam_still",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "camera_motion_valid",
+      "id": "cam_translation",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "camera_motion_valid",
+      "id": "cam_shake",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "camera_motion_valid",
+      "id": "cam_scale",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "touch_pace",
+      "id": "pace_slow",
+      "expectedState": "accepted",
+      "expectedCount": 6,
+      "gotState": "accepted",
+      "gotCount": 5,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "touch_pace",
+      "id": "pace_normal",
+      "expectedState": "accepted",
+      "expectedCount": 10,
+      "gotState": "accepted",
+      "gotCount": 9,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "touch_pace",
+      "id": "pace_fast",
+      "expectedState": "accepted",
+      "expectedCount": 12,
+      "gotState": "accepted",
+      "gotCount": 11,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "touch_pace_above_supported",
+      "id": "pace_above_supported_260ms",
+      "expectedState": "accepted_count_not_asserted",
+      "expectedCount": null,
+      "gotState": "accepted",
+      "gotCount": 10,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "background_structure",
+      "id": "bg_bands_0",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "background_structure",
+      "id": "bg_bands_3",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "background_structure",
+      "id": "bg_bands_6",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "cadence_jitter",
+      "id": "jitter_0",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "cadence_jitter",
+      "id": "jitter_6",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    },
+    {
+      "family": "cadence_jitter",
+      "id": "jitter_14",
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7,
+      "verdict": "correct",
+      "falseVerification": false
+    }
+  ],
+  "stressRows": [
+    {
+      "id": "FT01_body_moves_near_still_ball",
+      "description": "Player shifts body beside a stationary ball without touching it.",
+      "gotState": "accepted",
+      "gotCount": 0,
+      "falseTouch": false
+    },
+    {
+      "id": "FT02_still_ball_body_shift",
+      "description": "Stationary ball, player sways slowly.",
+      "gotState": "accepted",
+      "gotCount": 0,
+      "falseTouch": false
+    },
+    {
+      "id": "FT03_ball_rolls_near_no_contact",
+      "description": "Ball rolls steadily past the player without contact.",
+      "gotState": "accepted",
+      "gotCount": 0,
+      "falseTouch": false
+    },
+    {
+      "id": "FT04_ball_rolls_behind",
+      "description": "Ball rolls behind the player, higher in frame.",
+      "gotState": "accepted",
+      "gotCount": 0,
+      "falseTouch": false
+    },
+    {
+      "id": "FT05_ball_passes_in_front",
+      "description": "Ball passes in front of the player, low in frame.",
+      "gotState": "accepted",
+      "gotCount": 0,
+      "falseTouch": false
+    },
+    {
+      "id": "FT06_independent_bounce",
+      "description": "Ball bounces on its own, away from the player.",
+      "gotState": "accepted",
+      "gotCount": 0,
+      "falseTouch": false
+    },
+    {
+      "id": "FT07_whole_camera_moves",
+      "description": "Ball and player both stationary; the entire camera translates.",
+      "gotState": "accepted",
+      "gotCount": 0,
+      "falseTouch": false
+    },
+    {
+      "id": "FT08_camera_pan_fixed_relation",
+      "description": "Camera pans steadily; player and ball keep a fixed relationship.",
+      "gotState": "accepted",
+      "gotCount": 0,
+      "falseTouch": false
+    },
+    {
+      "id": "FT09_person_walks_past_still_ball",
+      "description": "A person walks across frame past a stationary ball.",
+      "gotState": "accepted",
+      "gotCount": 0,
+      "falseTouch": false
+    },
+    {
+      "id": "FT10_ball_starts_in_contact_range",
+      "description": "Ball is already resting against the player when the protocol begins.",
+      "gotState": "accepted",
+      "gotCount": 0,
+      "falseTouch": false
+    },
+    {
+      "id": "FT11_prolonged_proximity",
+      "description": "Ball rests against the foot for the entire attempt.",
+      "gotState": "accepted",
+      "gotCount": 0,
+      "falseTouch": false
+    },
+    {
+      "id": "FT12_oscillates_near_threshold",
+      "description": "Ball oscillates just outside contact range, never arriving.",
+      "gotState": "accepted",
+      "gotCount": 0,
+      "falseTouch": false
+    },
+    {
+      "id": "FT13_relative_motion_noise",
+      "description": "Small random player-relative jitter with no real contact.",
+      "gotState": "accepted",
+      "gotCount": 0,
+      "falseTouch": false
+    },
+    {
+      "id": "FT14_tracking_jitter",
+      "description": "Detector-scale jitter on both ball and player.",
+      "gotState": "accepted",
+      "gotCount": 0,
+      "falseTouch": false
+    },
+    {
+      "id": "FT15_centroid_noise_high_freq",
+      "description": "High-frequency centroid noise at the detector floor.",
+      "gotState": "accepted",
+      "gotCount": 0,
+      "falseTouch": false
+    },
+    {
+      "id": "FT16_one_frame_false_proximity",
+      "description": "Ball is distant except for a single frame adjacent to the player.",
+      "gotState": "accepted",
+      "gotCount": 0,
+      "falseTouch": false
+    },
+    {
+      "id": "FT17_two_frame_false_proximity",
+      "description": "Ball is distant except for two adjacent frames near the player.",
+      "gotState": "accepted",
+      "gotCount": 0,
+      "falseTouch": false
+    },
+    {
+      "id": "FT18_sudden_bbox_size_change",
+      "description": "Player region changes size abruptly mid-attempt.",
+      "gotState": "observation_discontinuity",
+      "gotCount": 0,
+      "falseTouch": false
+    },
+    {
+      "id": "FT19_ball_crosses_behind_silhouette",
+      "description": "Ball passes behind the player and is briefly occluded.",
+      "gotState": "observation_discontinuity",
+      "gotCount": 0,
+      "falseTouch": false
+    },
+    {
+      "id": "FT20_lost_then_reacquired_near_player",
+      "description": "Ball is lost for a few frames and reappears beside the player.",
+      "gotState": "observation_discontinuity",
+      "gotCount": 0,
+      "falseTouch": false
+    }
+  ],
   "meanAbsCountError": 1,
   "maxAbsCountError": 1,
   "rows": [
@@ -40,7 +581,7 @@
       "countError": 1,
       "verdict": "correct",
       "falseVerification": false,
-      "confidence": 0.745,
+      "confidence": 0.693,
       "coverage": 1,
       "decodeErrors": 0,
       "detail": null

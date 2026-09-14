@@ -13,10 +13,16 @@
 
 export const BOX_CAM_CV_POLICY_VERSION = 1;
 
-// The engine's own version. Bumped whenever a rule changes in a way that
+// The engine's own version. v2 = the robustness fix pack: three-layer split,
+// contact state machine, normalised units, quality gate, refusal precedence.
+// Event semantics changed materially, so the version moves (§55) rather than
+// pretending one version produced two behaviours. BOX_CAM_CV_POLICY_VERSION
+// stays at 1: version 1 encompasses pre-release development of this policy,
+// and no released result exists under it.
+// Bumped whenever a rule changes in a way that
 // could change a count. A stored result keeps the version that produced it —
 // history is never re-derived under a new engine (§46).
-export const CV_ENGINE_VERSION = 1;
+export const CV_ENGINE_VERSION = 2;
 
 // The provider that this engine backs. `production_cv` keeps its id: §6
 // forbids renaming a test implementation into a production one.
@@ -62,6 +68,13 @@ export const CAPTURE_REQUIREMENTS = Object.freeze({
   // unit — fraction of the attempt that may sit below minSustainedFps before
   // exact measurement is refused.
   maxLowFpsFrac: 0.2,
+  // unit — jitter band on the per-interval cadence test. An interval counts
+  // as "low" only if it is more than 15% longer than the nominal minimum.
+  // Without this band a capture held at exactly minSustainedFps is condemned
+  // by millisecond timestamp rounding alone: 12 fps is an 83.33 ms interval,
+  // integer timestamps alternate 83/84 ms, and every 84 reads as 11.9 fps.
+  // Real cadence loss is a sustained gap, not a rounding artefact.
+  lowFpsIntervalTolerance: 1.15,
   // Only orientations actually exercised by the evaluation fixtures (§37).
   supportedOrientations: Object.freeze(['landscape', 'portrait']),
   // Web only (§39/§40). No native device tests exist, so no native claim.
@@ -131,15 +144,43 @@ export const EVENT_RULES = Object.freeze({
   // player's frame of reference, must change by at least this much.
   touchMinImpulseDiametersPerSec: 4.5,
 
-  // unit d — contact range between ball centroid and the nearest edge of the
-  // player region. Beyond this the ball moved without anyone touching it.
-  touchMaxContactDiameters: 5.5,
+  // unit d — contact range: distance from the ball centroid to the NEAREST
+  // EDGE of the player region. Contact means touching, so this is about one
+  // ball width, allowing for the silhouette's imprecision.
+  //
+  // An earlier cut used 5.5, inherited from an arbitrary frame-diagonal
+  // fraction and never justified physically. At five ball-widths a ball
+  // bouncing on its own across the room counts as "in contact with the
+  // player", and the false-touch suite duly scored nine touches on a ball
+  // nobody went near. Contact range is not "somewhere in the same scene".
+  touchMaxContactDiameters: 1.2,
 
-  // unit d — the ball must actually MOVE this far away from the player after
-  // a contact before another contact can be counted. This is the spatial
-  // half of the debounce (§6): the refractory timer alone cannot stop a ball
+  // unit d — the ball must be DISPLACED this far from where it was last
+  // struck before another contact can be counted. This is the spatial half
+  // of the debounce (§6): the refractory timer alone cannot stop a ball
   // resting against a foot from re-triggering, because time keeps passing.
-  touchMinSeparationDiameters: 1.2,
+  //
+  // The value is a fraction of a ball width because that is what a ball
+  // mastery touch physically does — a toe-tap nudges the ball a little, it
+  // does not send it a ball-and-a-bit away. An earlier cut used 1.2, chosen
+  // with no physical justification, and it silently suppressed genuine
+  // touches at anything above a slow pace: the ball never travelled far
+  // enough to "separate", so the state machine latched after the first
+  // contact and a 14-touch attempt counted 1.
+  //
+  // Lowering a debounce is exactly the move §56 warns about, so it is
+  // justified against measurement rather than convenience: with this value
+  // the 20-case false-touch stress suite must remain at ZERO false touches.
+  // If it ever does not, this number is wrong again and the answer is to
+  // narrow supported pace, not to raise it back and lose real touches.
+  touchMinSeparationDiameters: 0.35,
+
+  // unit ms — the ball must have been continuously within contact range for
+  // at least this long before an impulse can be read as a contact. A real
+  // approach is continuous: the ball arrives, it does not materialise. A ball
+  // that is far away and then adjacent for two frames has jumped, and the
+  // apparent velocity change on arrival is a detector artefact, not a strike.
+  touchMinApproachMs: 120,
 
   // unit frames — the ball may be undetected for this many consecutive
   // frames and the track survives. Frame-based because it describes the
