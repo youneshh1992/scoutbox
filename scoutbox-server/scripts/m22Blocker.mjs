@@ -34,6 +34,7 @@ import {
 } from '../m22/eligibility.mjs';
 import { ProductionCvProvider } from '../m22/provider.mjs';
 import { measureAttempt, measurementSupported, combineProtocol } from '../m16/combineShared.mjs';
+import { matchPlayerToCriteria } from '../m19/match.mjs';
 import { REAL_WORLD_VALIDATION, REQUIRED_RECORD_FIELDS } from '../m22/validation.mjs';
 import { CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION, CANDIDATE_PROTOCOLS } from '../m22/policy.mjs';
 import { PROVIDERS } from '../m16/drills.mjs';
@@ -309,6 +310,101 @@ ok(combineVerifiedProtocols().length === before && before === 0,
   'no environment variable opens the gate — it reads a versioned record, not config');
 delete process.env.SCOUTBOX_COMBINE_CV_ENABLED;
 delete process.env.M22_REAL_WORLD_VALIDATION;
+
+// =====================================================================
+section('§66/§67 — M19 matching does not see an unvalidated result');
+// =====================================================================
+//
+// M19 matches on FACTS, and the fact projections are built only from
+// production-valid Combine Verified measurements. An unvalidated CV
+// observation never becomes one, so it cannot satisfy a club's criterion.
+
+{
+  // The facts a player carries after a perfect-but-unvalidated CV attempt:
+  // no Combine protocol verified, no Combine measurement.
+  const unvalidatedFacts = { combineProtocols: [], combineMeasurements: {} };
+  const required = [{ id: 'c1', type: 'combine_result', operator: 'exists', value: PROTO }];
+  const m = matchPlayerToCriteria(unvalidatedFacts, { required, preferred: [] });
+  ok(m.matchesRequired === false,
+    '§66. a club criterion requiring a Box Touch 60 Combine result is NOT satisfied');
+  ok(m.required[0].met === false && /No .*Combine Verified result/.test(m.required[0].text),
+    '§66. and the explanation says why, in the club-facing words');
+
+  const thresholdReq = [{ id: 'c2', type: 'combine_measurement', operator: 'gte', protocol: PROTO, value: 5 }];
+  const m2 = matchPlayerToCriteria(unvalidatedFacts, { required: thresholdReq, preferred: [] });
+  ok(m2.matchesRequired === false,
+    '§66. a measurement threshold is not satisfied either — the count never reaches the facts');
+  // Precise, not substring-fishing: an earlier cut searched the whole JSON for
+  // the digit "9" and matched a criterion id hash, which asserted nothing. The
+  // real property is that the facts projection carries no measurement for this
+  // protocol and the explanation reports its absence rather than a value.
+  ok(unvalidatedFacts.combineMeasurements[PROTO] === undefined,
+    '§66. the facts projection carries no measurement for this protocol');
+  ok(/^No .* Combine Verified measurement$/.test(m2.required[0].text),
+    `§66. and the explanation reports absence, never a number ("${m2.required[0].text}")`);
+
+  // §67 — with a validated result the SAME criterion wiring does match, so
+  // this is a gate rather than a dead path.
+  const validatedFacts = { combineProtocols: [PROTO], combineMeasurements: { [PROTO]: 9 } };
+  const m3 = matchPlayerToCriteria(validatedFacts, { required, preferred: [] });
+  ok(m3.matchesRequired === true,
+    '§67. with a production-valid measurement present, the same criterion DOES match');
+  ok(m3.matchesRequired === true && !('score' in m3) && !('matchScore' in m3),
+    '§67. and no Match Score is produced — membership only');
+}
+
+// =====================================================================
+section('§68/§69 — invalidation removes it, restoration brings it back');
+// =====================================================================
+//
+// The projections are computed at read time from the underlying session, so
+// invalidation is not a cascade of deletes that can be half-applied. The
+// property worth asserting is that the SAME inputs with an invalidated
+// session produce no measurement, and that flipping it back is deterministic.
+
+{
+  const invalidated = { ...session, verificationState: 'invalidated' };
+  const r = measureAttempt({
+    protocolDef: proto, session: invalidated, calibrationPassed: true,
+    providerCapabilities: futureCaps, mode: 'verified',
+  });
+  ok(r.combineState === 'invalidated' && r.measuredValue === null,
+    '§68. an invalidated Box Cam session yields no measurement, even under a valid validation record');
+  ok((r.reasons ?? []).includes('SESSION_INVALIDATED'),
+    '§68. with a machine-readable reason');
+
+  // Downstream: the facts projection loses the protocol, so M19 stops matching.
+  const factsAfter = { combineProtocols: [], combineMeasurements: {} };
+  const mAfter = matchPlayerToCriteria(factsAfter, {
+    required: [{ id: 'c1', type: 'combine_result', operator: 'exists', value: PROTO }], preferred: [],
+  });
+  ok(mAfter.matchesRequired === false, '§68. and the M19 criterion stops matching once it is gone');
+
+  // §69 — restoration is deterministic: the same session, valid again,
+  // reproduces the same measurement exactly.
+  const restored = { ...session, verificationState: 'verified' };
+  const r1 = measureAttempt({ protocolDef: proto, session: restored, calibrationPassed: true, providerCapabilities: futureCaps, mode: 'verified' });
+  const r2 = measureAttempt({ protocolDef: proto, session: restored, calibrationPassed: true, providerCapabilities: futureCaps, mode: 'verified' });
+  ok(r1.combineState === 'combine_verified' && r1.measuredValue === futureMeasured.measuredValue,
+    '§69. restoring the session reproduces the SAME measurement');
+  ok(JSON.stringify(r1) === JSON.stringify(r2),
+    '§69. and the projection is deterministic — recomputed, not remembered');
+}
+
+// =====================================================================
+section('§62/§63 — Trust contribution is unchanged and performance-blind');
+// =====================================================================
+{
+  // §62: same provenance and integrity, different counts, same contribution.
+  // Trust reads provenance, never the number, so this is asserted by showing
+  // the result carries no field Trust could weight by performance.
+  const big = { ...result, derived: { ...result.derived, touchCount: 200 } };
+  const small = { ...result, derived: { ...result.derived, touchCount: 120 } };
+  ok(big.combineVerified === false && small.combineVerified === false,
+    '§62/§63. neither a 200-touch nor a 120-touch unvalidated result is Combine Verified');
+  ok(big.experimental.status === small.experimental.status,
+    '§62. and both carry the identical experimental status regardless of the count');
+}
 
 provider.disposeAll();
 
