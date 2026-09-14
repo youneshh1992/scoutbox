@@ -38,7 +38,7 @@ import {
   boundedText, parseDate, transitionAllowed, dueState, reviewDueState,
 } from './shared.mjs';
 import { TARGET_SOURCES, TARGET_OPERATORS, TARGET_STATES, TARGET_LIMITATION, validateTarget } from './targets.mjs';
-import { validateEvidenceLink, EVIDENCE_LINK_FIELDS } from './evidence.mjs';
+import { validateEvidenceLink, resolveEvidenceLink, EVIDENCE_LINK_FIELDS } from './evidence.mjs';
 import { viewerFor, planAccess, canAssign, VIEWER_KINDS, CAPABILITIES } from './permissions.mjs';
 import { collectPlan, buildDevelopmentPlan, planListItem, buildTimeline, TIMELINE_ACTIONS, PLAN_LIMITATION } from './plan.mjs';
 import { buildGoalSnapshots, validateReview, validateSupersession, pageReviews } from './reviews.mjs';
@@ -375,6 +375,56 @@ export function registerDevelopment(ctx) {
     const V = (req) => viewerOf(req);
 
     router.get('/development/catalogue', (_req, res) => res.json(catalogue()));
+
+    /**
+     * What this viewer could cite for this player, as ids and labels.
+     *
+     * Without this a "link evidence" control has nothing to offer, and every
+     * client would end up assembling its own list from four different reads —
+     * each applying its own idea of what is visible. The list is built by the
+     * same resolver the links themselves use, so an item that would resolve to
+     * unavailable is never offered in the first place.
+     */
+    router.get('/development/linkable-evidence', (req, res) => {
+      const viewer = V(req);
+      const player = findPlayer(String(req.query.playerId ?? (viewer.kind === 'player_self' ? viewer.playerId : '')));
+      if (!player) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
+      const subject = { ...player, isMinor: !isAdult(player) };
+
+      // The same authorisation the plan itself gets: a viewer who could not
+      // read a plan for this player is told the player does not exist here.
+      const canSee = viewer.kind === 'player_self' ? viewer.playerId === player.id
+        : viewer.kind === 'guardian' ? (viewer.childIds ?? []).includes(player.id)
+          : !!viewer.org && orgCanSee(viewer.org, player);
+      if (!canSee) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
+
+      const candidates = [
+        ...(db.evidence ?? []).filter((e) => e.playerId === player.id).map((e) => ({ sourceType: 'passport_evidence', sourceId: e.id })),
+        ...(db.assessments ?? []).filter((a) => a.playerId === player.id).map((a) => ({ sourceType: 'assessment', sourceId: a.id })),
+        ...(db.boxSessions ?? []).filter((s) => s.playerId === player.id).map((s) => ({ sourceType: 'box_cam_session', sourceId: s.id })),
+        ...(db.combineAttempts ?? []).filter((a) => a.playerId === player.id).map((a) => ({ sourceType: 'combine_attempt', sourceId: a.id })),
+        ...(db.trials ?? []).filter((t) => t.playerId === player.id).map((t) => ({ sourceType: 'trial_report', sourceId: t.id })),
+      ];
+      const items = candidates
+        .map((c) => ({ ...c, ...validateEvidenceLink({ ...c, db, player: subject, viewer, orgCanSee, now: now() }) }))
+        .filter((c) => !c.error)
+        .map((c) => {
+          const r = resolveEvidenceLink(c, { db, player: subject, viewer, orgCanSee, now: now() });
+          return {
+            sourceType: c.sourceType, sourceId: c.sourceId,
+            sourceLabel: r.sourceLabel, title: r.title ?? r.sourceLabel,
+            provenance: r.provenance, occurredAt: r.occurredAt, simulated: r.simulated,
+          };
+        })
+        .sort((a, b) => (b.occurredAt ?? 0) - (a.occurredAt ?? 0) || String(a.sourceId).localeCompare(String(b.sourceId)))
+        .slice(0, M21_LIMITS.listPageMax);
+
+      res.set('X-ScoutBox-Ordering', 'newest_first_then_id');
+      res.json({
+        items,
+        note: 'Canonical records you can cite. Linking one stores a reference — the evidence itself stays where it lives, and is read live every time.',
+      });
+    });
 
     // ---- list
     router.get('/development/plans', (req, res) => {

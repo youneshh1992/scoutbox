@@ -20,7 +20,7 @@ import type { Session } from './api';
 import {
   m21, type DevelopmentPlanView, type DevelopmentCatalogue, type GoalView,
   type ActionView, type EvidenceView, type ReviewView, type TargetView,
-  type Result, type PlanStatus,
+  type Result, type PlanStatus, type LinkableEvidence,
 } from './m21Api';
 import { conflictOf, ConflictNotice, type Conflict } from './conflict';
 import { provenanceOf } from './provenance';
@@ -124,7 +124,11 @@ function GoalCard({ g, view, session, act, busy }: {
   const [actionTitle, setActionTitle] = useState('');
   const [actionType, setActionType] = useState('training');
   const [blockReason, setBlockReason] = useState('waiting_for_assessment');
+  const [linkable, setLinkable] = useState<LinkableEvidence[] | null>(null);
   const canWrite = !!view.access.writeGoals;
+  const canLink = !!view.access.linkEvidence;
+  const already = new Set(g.evidence.map((e) => `${e.sourceType}:${e.sourceId}`));
+  const offer = (linkable ?? []).filter((i) => !already.has(`${i.sourceType}:${i.sourceId}`));
 
   return (
     <div className="card block" data-goal={g.id}>
@@ -184,6 +188,28 @@ function GoalCard({ g, view, session, act, busy }: {
           <div className="dim" style={{ fontSize: 11.5, marginTop: 3 }}>{g.evidenceSummary.note}</div>
         </div>
       ) : <div className="dim" style={{ fontSize: 12.5, marginTop: 6 }}>{t('m21.noEvidence')}</div>}
+
+      {/* Linking stores a reference. What it points at is resolved live, so an
+          item that would read as unavailable is never offered here at all. */}
+      {canLink && (linkable === null
+        ? <button style={{ marginTop: 6 }} data-link-evidence onClick={() => { void m21.linkable(session, view.plan.playerId).then((r) => setLinkable(r.items)); }}>{t('m21.linkEvidence')}</button>
+        : (
+          <div className="section" data-evidence-picker>
+            <h4>{t('m21.linkEvidence')}</h4>
+            {offer.length === 0 && <div className="dim" style={{ fontSize: 12.5 }}>{t('m21.nothingToLink')}</div>}
+            <div className="list-rows">
+              {offer.slice(0, 10).map((i) => (
+                <div key={`${i.sourceType}:${i.sourceId}`} className="list-row">
+                  <span className="grow">{i.title}</span>
+                  <Pill>{i.sourceLabel}</Pill>
+                  {i.simulated && <Pill tone="gold">{t('m21.simulated')}</Pill>}
+                  <button disabled={busy} onClick={() => { act(() => m21.linkEvidence(session, g.id, { sourceType: i.sourceType, sourceId: i.sourceId })); setLinkable(null); }}>{t('m21.link')}</button>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => setLinkable(null)}>{t('m21.cancel')}</button>
+          </div>
+        ))}
 
       {canWrite && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>

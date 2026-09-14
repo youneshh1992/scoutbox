@@ -154,12 +154,18 @@ export interface DevelopmentCatalogue {
   neverBuilt: { names: string[]; note: string };
 }
 
+export interface LinkableEvidence {
+  sourceType: string; sourceId: string; sourceLabel: string; title: string;
+  provenance: string | null; occurredAt: number | null; simulated: boolean;
+}
+
 /** A refusal a coach can actually cause, kept as an answer rather than thrown. */
 export type Refusal = { ok: false; error: string; detail: string; allowed?: unknown };
 export type Result<T> = { ok: true; value: T } | Refusal;
 
 export interface M21Api {
   catalogue(s: Session): Promise<DevelopmentCatalogue>;
+  linkable(s: Session, playerId: string): Promise<{ items: LinkableEvidence[]; note: string }>;
   plans(s: Session, playerId?: string): Promise<{ items: PlanListItem[]; total: number; note: string }>;
   plan(s: Session, id: string): Promise<DevelopmentPlanView>;
   createPlan(s: Session, body: Record<string, unknown>): Promise<Result<DevelopmentPlanView>>;
@@ -235,6 +241,7 @@ const qs = (params: Record<string, string | undefined>) => {
 
 export const httpM21: M21Api = {
   catalogue: (s) => req('/org/development/catalogue', { headers: H(s) }),
+  linkable: (s, playerId) => req(`/org/development/linkable-evidence${qs({ playerId })}`, { headers: H(s) }),
   plans: (s, playerId) => req(`/org/development/plans${qs({ playerId })}`, { headers: H(s) }),
   plan: (s, id) => req(`/org/development/plans/${id}`, { headers: H(s) }),
   createPlan: (s, body) => write('/org/development/plans', s, 'POST', body),

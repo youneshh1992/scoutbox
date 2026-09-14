@@ -21,6 +21,7 @@ import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
 import {
   m21, type DevActor, type DevelopmentPlanView, type GoalView, type ActionView,
   type EvidenceView, type ReviewView, type TargetView, type DevelopmentCatalogue,
+  type LinkableEvidence,
 } from '../data/m21client';
 import { pt, pFmtDate } from '../i18n';
 
@@ -137,7 +138,10 @@ function GoalCard({ g, view, actor, reload }: { g: GoalView; view: DevelopmentPl
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState('');
+  const [linkable, setLinkable] = useState<LinkableEvidence[] | null>(null);
   const canWrite = !!view.access.writeGoals;
+  const canLink = !!view.access.linkEvidence;
+  const alreadyLinked = new Set(g.evidence.map((e) => `${e.sourceType}:${e.sourceId}`));
 
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -207,6 +211,32 @@ function GoalCard({ g, view, actor, reload }: { g: GoalView; view: DevelopmentPl
           <Muted size={11}>{g.evidenceSummary.note}</Muted>
         </View>
       ) : <Muted size={12}>{pt('m21noEvidence')}</Muted>}
+
+      {/* Linking stores a reference. What it points at is read live, every
+          time, so nothing is copied into the plan. */}
+      {canLink ? (
+        linkable === null
+          ? <Row><Button small label={pt('m21linkEvidence')} disabled={busy} onPress={() => { void m21.linkable(actor).then((r) => setLinkable(r.items)); }} /></Row>
+          : (
+            <View style={{ gap: 4 }} accessibilityLabel={pt('m21linkEvidence')}>
+              <SectionTitle>{pt('m21linkEvidence')}</SectionTitle>
+              {linkable.filter((i) => !alreadyLinked.has(`${i.sourceType}:${i.sourceId}`)).length === 0
+                ? <Muted size={12}>{pt('m21nothingToLink')}</Muted>
+                : linkable.filter((i) => !alreadyLinked.has(`${i.sourceType}:${i.sourceId}`)).slice(0, 8).map((i) => (
+                  <Row key={`${i.sourceType}:${i.sourceId}`}>
+                    <Text style={{ color: colors.text, fontSize: 12.5, flexShrink: 1 }}>{i.title}</Text>
+                    <Pill label={i.sourceLabel} />
+                    {i.simulated ? <Pill label={pt('m21simulated')} tone="gold" /> : null}
+                    <Button small label={pt('m21link')} disabled={busy} onPress={() => run(async () => {
+                      await m21.linkEvidence(actor, g.id, { sourceType: i.sourceType, sourceId: i.sourceId });
+                      setLinkable(null);
+                    })} />
+                  </Row>
+                ))}
+              <Row><Button small label={pt('m21cancel')} onPress={() => setLinkable(null)} /></Row>
+            </View>
+          )
+      ) : null}
 
       {canWrite && g.status !== 'achieved' ? (
         <Row>

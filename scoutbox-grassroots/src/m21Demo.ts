@@ -304,6 +304,14 @@ const okv = (playerId?: string): Result<DevelopmentPlanView> => ({ ok: true, val
 
 export const demoM21: M21Api = {
   catalogue: async () => catalogue,
+  linkable: async () => ({
+    items: [
+      { sourceType: 'box_cam_session', sourceId: 'boxs-d2', sourceLabel: 'Box Cam session', title: 'box-touches', provenance: 'box_cam_observed', occurredAt: now - 5 * day, simulated: true },
+      { sourceType: 'combine_attempt', sourceId: 'catt-d1', sourceLabel: 'Combine result', title: 'Box Touch 60', provenance: 'simulated_demo', occurredAt: now - 9 * day, simulated: true },
+      { sourceType: 'assessment', sourceId: 'ass-d1', sourceLabel: 'Assessment', title: 'Assessment — Eastport United 2–1 Harbour', provenance: 'verified_club_confirmed', occurredAt: now - 20 * day, simulated: false },
+    ],
+    note: 'Canonical records you can cite. Linking one stores a reference — the evidence itself stays where it lives, and is read live every time.',
+  }),
   plans: async (_s, playerId) => ({
     items: [listItem(playerId ?? 'pl-mbuguni')], total: 1,
     note: 'Plans you can see. ScoutBox does not report how many other plans exist.',

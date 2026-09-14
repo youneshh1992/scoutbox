@@ -33,6 +33,11 @@ export function Button({ label, onPress, primary, danger, disabled, small }: {
     <Pressable
       onPress={onPress}
       disabled={disabled}
+      // M21 §115: the control announces itself as a button and carries its
+      // label, so it is reachable by keyboard and by a screen reader — and,
+      // incidentally, by a test that drives the real interface.
+      accessibilityRole="button"
+      accessibilityLabel={label}
       style={({ pressed }) => [
         styles.btn,
         small && { paddingVertical: 6, paddingHorizontal: 12 },

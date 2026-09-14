@@ -149,7 +149,7 @@ const en = {
   // Development Hub. Note what is missing: there is no key for a progress
   // percentage, an overall figure or a rating, because no screen renders one.
   m21title: 'Development', m21goals: 'My goals', m21reviews: 'Reviews',
-  m21evidence: 'Linked evidence', m21loading: 'Loading your development plan…',
+  m21evidence: 'Linked evidence', m21linkEvidence: 'Link evidence', m21link: 'Link', m21nothingToLink: 'Nothing available to link yet.', m21loading: 'Loading your development plan…',
   m21loadError: 'Your development plan could not be loaded.', m21retry: 'Try again',
   m21emptyTitle: 'No development plan yet',
   m21emptyBody: 'A plan is a few things you have agreed to work on, with the evidence that shows the work. It is not a score, and nothing here rates you.',
@@ -334,7 +334,7 @@ const fr: typeof en = {
 
   // ---------------------------------------------------------------- M21
   m21title: 'D\u00e9veloppement', m21goals: 'Mes objectifs', m21reviews: 'Bilans',
-  m21evidence: 'Preuves li\u00e9es', m21loading: 'Chargement de votre plan de d\u00e9veloppement\u2026',
+  m21evidence: 'Preuves li\u00e9es', m21linkEvidence: 'Lier une preuve', m21link: 'Lier', m21nothingToLink: 'Rien \u00e0 lier pour l\u2019instant.', m21loading: 'Chargement de votre plan de d\u00e9veloppement\u2026',
   m21loadError: 'Votre plan de d\u00e9veloppement n\u2019a pas pu \u00eatre charg\u00e9.', m21retry: 'R\u00e9essayer',
   m21emptyTitle: 'Aucun plan de d\u00e9veloppement',
   m21emptyBody: 'Un plan, ce sont quelques points convenus sur lesquels travailler, avec les preuves du travail accompli. Ce n\u2019est pas une note, et rien ici ne vous \u00e9value.',

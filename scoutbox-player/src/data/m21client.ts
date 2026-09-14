@@ -166,6 +166,11 @@ export interface DevelopmentCatalogue {
   neverBuilt: { names: string[]; note: string };
 }
 
+export interface LinkableEvidence {
+  sourceType: string; sourceId: string; sourceLabel: string; title: string;
+  provenance: string | null; occurredAt: number | null; simulated: boolean;
+}
+
 export type DevActor = { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string };
 const base = (a: DevActor) => (a.kind === 'player' ? '/player/development' : '/guardian/development');
 const withChild = (a: DevActor, body: Record<string, unknown>) =>
@@ -173,6 +178,7 @@ const withChild = (a: DevActor, body: Record<string, unknown>) =>
 
 export interface PlayerM21 {
   catalogue(a: DevActor): Promise<DevelopmentCatalogue>;
+  linkable(a: DevActor): Promise<{ items: LinkableEvidence[]; note: string }>;
   plans(a: DevActor): Promise<{ items: PlanListItem[]; total: number; note: string }>;
   plan(a: DevActor, id: string): Promise<DevelopmentPlanView>;
   createPlan(a: DevActor, body: Record<string, unknown>): Promise<DevelopmentPlanView>;
@@ -195,6 +201,7 @@ const patch = (a: DevActor, path: string, body: unknown) =>
 
 const live: PlayerM21 = {
   catalogue: (a) => req(`${base(a)}/catalogue`, a.id),
+  linkable: (a) => req(`${base(a)}/linkable-evidence${a.kind === 'guardian' ? `?playerId=${a.childId}` : ''}`, a.id),
   plans: (a) => req(`${base(a)}/plans`, a.id),
   plan: (a, id) => req(`${base(a)}/plans/${id}`, a.id),
   createPlan: (a, body) => post(a, '/plans', withChild(a, body)),
