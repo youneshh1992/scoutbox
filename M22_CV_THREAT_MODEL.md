@@ -183,3 +183,42 @@ against whatever had been left on :8099. Position: **mitigated.** The demo host
 publishes a content-derived build marker, and a caller that finds an existing
 host and does not recognise its marker fails hard with the port and the remedy
 named. See `e2e/demoHost.mjs` and the 15-check regression beside it.
+
+---
+
+## 7. Transport threats (T43–T52)
+
+Added with the provider wiring. T1–T30 are about what is in front of the
+camera; T31–T42 about the machinery around a session. These are about the
+**wire**: a pixel endpoint is a new front door, and it is the first one in
+ScoutBox that accepts bulk binary from a client.
+
+| # | Threat | Why it matters | Position |
+|---|---|---|---|
+| **T43** | **Frame injection.** An attacker submits frames to a session that is not theirs, or fabricates a session and streams into it. | The whole integrity model rests on "this observation came from this player's live attempt". | **Mitigated.** Four-part binding checked on every frame: authenticated actor, Box Cam session, provider session, server-minted nonce. `m22E2E` cases 1–6, 19, 20 cover anonymous, foreign-user, foreign-session, wrong-provider-session, old-nonce and forged-nonce submission over real HTTP. |
+| **T44** | **Origin spoofing / CSRF.** A third-party page posts frames using the victim's credentials. | A pixel endpoint that accepts cross-origin writes is a camera the victim did not point. | **Mitigated by reuse, deliberately.** The endpoint lives on the existing authenticated player router, so the standing CORS and origin policy applies unchanged. §124: the CSP was NOT loosened to make the camera work — `getUserMedia` needs a secure context, not a relaxed policy, and Ready Check reports `insecure_context` rather than the product degrading its own headers. |
+| **T45** | **Session hijack via a stale provider session id.** A leaked or guessed `providerSessionId` is used after the attempt ends. | A hijacked session could append frames to someone's finished measurement. | **Mitigated.** Ids are 96 bits of CSPRNG, released at finalize/cancel/expire, and a released id is simply not found — there is no resurrection path. The id alone is insufficient anyway: the nonce and the Box Cam session must match too. |
+| **T46** | **Queue exhaustion.** A client floods frames to grow server memory. | Denial of service that needs no exploit, only enthusiasm. | **Mitigated at three levels.** Batch capped at 12 frames; the per-session queue is bounded and drops oldest while **reporting** the drops; a separate rate-limit policy governs the ingest endpoint because it is the expensive one. Measured: 240 pushed, 24 held, 216 dropped and accounted. |
+| **T47** | **Malformed frame as a parser attack.** Hostile bytes aimed at a decoder. | Image parsers are a classic memory-safety surface. | **Mitigated by having no parser.** `gray8` is a raw luminance plane; the only validation is an exact `w*h` length check. There is no format detection, no sniffing and no image library. A JPEG is refused by name as `unsupported_frame_format`, and a multipart body never reaches frame handling at all. |
+| **T48** | **Provider crash / engine exception.** Hostile or unlucky input throws inside the engine. | An unhandled throw in a route can take the process down, or leak a stack trace with file paths. | **Mitigated.** The engine call is wrapped; an exception fails that session with a typed `engine_failure`, mints no result, releases resources, and returns nothing about the server's internals. `m22E2E` asserts a thrown message containing a file path does not reach the caller. |
+| **T49** | **Stale nonce / transport replay.** A captured request body is resubmitted. | Replay is the cheapest attack on any streaming protocol. | **Mitigated.** Per-session monotonic sequence with a `seenSeqs` set, so an *old* sequence is caught and not merely a repeat of the newest. Duplicates are refused before the engine is reached, so they can never double-process, create a touch or alter quality twice. The reorder window is a named constant at **zero** — there is no unlimited reorder buffer to exploit. |
+| **T50** | **Clock tampering.** A client lies about capture timestamps to stretch or compress the protocol window. | Duration is a measurement; a client that owns the clock owns the measurement. | **Mitigated structurally.** The server timeline is authoritative for everything. Client timestamps are recorded for diagnosis and **counted** when implausible (`clientClockAnomalies`), never used. There is no code path in which a client timestamp contributes to duration. |
+| **T51** | **Load-shedding as silent data loss.** Under pressure the server accepts a session it cannot serve, then drops the frames that mattered. | The player believes they are being observed. That is worse than a refusal. | **Mitigated.** Refusal happens at the door: over the concurrency ceiling, `beginSession` returns `provider_busy` and no session exists. §98 governs the wording — "Box Cam is temporarily busy", never "could not verify your performance". A capacity problem is not a player failure. |
+| **T52** | **Transport success read as measurement authority.** Frames arrived, the engine ran, a number came back — therefore the number is a verified measurement. | This is the phase's governing risk, restated at the wire. Everything worked, so the conclusion feels earned. | **Mitigated by the capability separation.** The transport feeds `observationCapabilities`; only a validation record feeds `combineCapabilities`. Stated on the begin response, on every result, in `/capabilities`, and on every player-facing outcome including refusals. *The transport may deliver evidence to the engine. It may never grant the engine permission to claim more than the evidence justifies.* |
+
+### One near-miss worth recording
+
+The first implementation of `combineCapabilities()` read
+`realWorldValidationPass()` — which returns an **object** — as a boolean. The
+object is always truthy, so every protocol came back Combine-eligible: the
+gate this entire threat model protects, wide open, from a line that reviews
+well.
+
+It was caught by the test written to prove the gate closed, not by reading the
+code. The check is now `verdict?.pass !== true`, so any unexpected return shape
+denies rather than permits.
+
+A second instance of the same class followed immediately: `PROD_PROVIDER_ID` is
+a historical misnomer equal to `'web_client'`, and comparing against it handed
+`production_cv` its observation list. Both are recorded in `M22_MATRIX.md` as
+defects F6 and F7.

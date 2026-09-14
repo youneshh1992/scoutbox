@@ -465,6 +465,37 @@ and passes.**
 
 ---
 
+## 17a. What provider integration taught this plan (§127)
+
+The status below is unchanged and the collection rules are unchanged. What the
+live wiring did change is how precisely §5 can be written, because "platform
+support follows the data" is only enforceable if the envelope is known:
+
+- **The capture representation is settled.** `gray8`, 160×120 to 320×240, at
+  least 12 fps sustained, batched at most 12 frames. Validation footage must be
+  capturable within that envelope, and a device that cannot sustain 12 fps at
+  160×120 is outside it.
+- **Browser support is narrower than assumed.** The live journeys run on
+  Chromium only. Firefox and WebKit are untested, so §5's rule already bites:
+  they are unsupported today, and validation sessions on them would evidence
+  nothing until the journeys run there too.
+- **Native is not a platform yet.** No native implementation exists, so the
+  §5 device-diversity requirement is currently a requirement about *browsers*
+  on those devices, not about apps.
+- **Server-side timing is authoritative**, so annotation does not need to
+  reconcile client clocks — one less source of disagreement between two blind
+  annotators.
+- **The refusal vocabulary is fixed.** Annotators marking a clip "ambiguous"
+  can now be compared against the engine's own canonical refusal codes, which
+  makes the §6 ambiguity ceiling measurable rather than impressionistic.
+- **A practical constraint discovered by the live suite:** a downscaled
+  synthetic ball leaves the visible area and is refused. Real capture guidance
+  must therefore be explicit about framing distance, and the validation
+  dataset must record it per session — otherwise a legitimate refusal rate
+  will be mistaken for a detector weakness.
+
+**No footage has been collected. None is authorised by this section.**
+
 ## 18. Current status
 
 | Item | State |

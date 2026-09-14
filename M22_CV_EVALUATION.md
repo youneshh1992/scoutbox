@@ -286,3 +286,122 @@ validity. Even with a perfect provider and flawless synthetic scores, the gate
 stays closed on a criterion declared before any of these numbers existed.
 
 **Production eligibility: NOT ELIGIBLE — real-world validation not completed.**
+
+---
+
+# Part B — End-to-end provider evidence
+
+**Kept separate from Part A on purpose.**
+
+Part A measures whether the *algorithm* counts correctly. This part measures
+whether the *system around it* delivers frames honestly and refuses what it
+should. They are different questions with different failure modes, and
+averaging them would let a strong result in one hide a weak one in the other —
+the same reason development and holdout numbers are never merged.
+
+Nothing in Part B is evidence about counting accuracy. Nothing in Part A is
+evidence about transport correctness.
+
+## B1. What was exercised
+
+| Suite | Scope | Result |
+|---|---|---|
+| `scripts/m22Blocker.mjs` | The production Combine blocker, in-process, through the real provider and engine | **60 checks passed** |
+| `scripts/m22E2E.mjs` | Transport security, adversarial CV through the provider, crash handling, persistence scan, migration | **112 checks, 82 negative/integrity (73%)** |
+| `e2e/m22Live.test.mjs` | Twelve browser journeys against a real camera stream | **41 checks, 30 negative (73%)** |
+| `scripts/m22Perf.mjs` | Transport cost, concurrency, load shedding, event loop | recorded, not asserted |
+
+## B2. Transport security (§85)
+
+Twenty routes in, all closed, over real HTTP: anonymous frame, foreign user,
+foreign Box Cam session, wrong provider session, old nonce, forged nonce,
+duplicate sequence, out-of-order, oversized, unsupported dimensions, malformed
+payload, a JPEG, a multipart upload, batch overflow, expired session, finalized
+session, cancelled session, released session id, cross-player and cross-org.
+
+Plus: an unsupported protocol is named rather than approximated; liveness is
+required before a provider session opens; and a second `finalize()` returns the
+stored result rather than minting a second one.
+
+## B3. The provider does not weaken the engine (§86)
+
+Thirteen adversarial scenes driven through `beginSession → ingestFrame →
+finalize` — including both camera-scale cases the holdout found — produced
+**zero false touches**. The provider layer reports what the engine decided and
+changes none of it.
+
+## B4. Failure handling (§87–§90)
+
+An engine that throws fails the session with a typed error, leaks no file path
+or stack, mints no result and releases its resources. Invalid state
+transitions fail closed. Every ingest reports server-side drops so backpressure
+feeds observation quality rather than being hidden.
+
+## B5. The raw-frame assertion (§37, §92)
+
+A full attempt runs over HTTP, then the persistence directory is walked and
+scanned for the frame payload and for base64-shaped blobs. **Clean.** The
+canonical result carries no frame field and is bounded. There is no frame
+store in the schema, and a migration-level assertion proves no migration
+anywhere creates one.
+
+## B6. The live path (§103–§115)
+
+The browser suite drives a Y4M rendered from `m22/scenes.mjs` into Chromium as
+a fake capture device, so `getUserMedia` returns a real `MediaStream`. The
+journey is camera → the app's own capture code → gray8 encode → HTTP → engine
+→ result → UI.
+
+**This is a replay spoof, used deliberately, and §43 stands unchanged.** The
+live suite therefore asserts transport and UI behaviour and never counting
+accuracy — which is exactly the Part A / Part B separation this section exists
+to maintain.
+
+The recorded live outcome was a **refusal** (`ball_not_detected` — the
+downscaled synthetic ball leaves the visible area). That is a legitimate
+result and it is reported rather than tuned away; §106 only promises that Box
+Cam observed *may* succeed if its own gate permits.
+
+### What the live run found
+
+The refusal branch of the player UI did not render the Combine notice — it
+appeared only on the success path. That reads as "try harder and you will get
+Combine Verified", which is false right now for every attempt however good.
+Fixed: the two facts travel together on every outcome. Only a live journey
+finds this, because each branch looked reasonable in isolation.
+
+## B7. Cost (§94–§97)
+
+Recorded, never asserted — this is not the production machine.
+
+| | |
+|---|---|
+| Frame decode + validation | 0.141 ms (~24% of a full ingest) |
+| Provider finalization | 0.381 ms including the canonical result build |
+| Transport overhead by subtraction | **not resolvable** (−0.043 ms against a ±0.063 ms noise band) |
+| Concurrent live sessions 1/2/5/10 | 0.639 / 0.617 / 0.609 / 0.612 ms per frame |
+| Event-loop p95 with CV active | 0.234 ms (idle baseline 0.065 ms) |
+| Load shedding | refuses at the door with `provider_busy` |
+
+The overhead row is reported as unresolvable rather than clamped to a
+flattering zero. §24 asked for a measurement before assuming a worker boundary
+is needed; measured, it is not, and the injection seam remains in the provider
+if a future measurement disagrees.
+
+## B8. What Part B does and does not authorise
+
+**Supports:** that frames reach the engine only from an authenticated, live,
+nonce-bound session; that the transport refuses twenty named attacks; that the
+provider weakens nothing the engine decided; that a provider failure cannot
+crash ScoutBox; that no raw frame is persisted anywhere; that the live path
+works in a real browser against a real camera stream.
+
+**Does not support:** any claim about counting accuracy on real football video.
+That is Part A's domain, and Part A's answer is that the evidence is synthetic.
+
+**Production status is unchanged by everything in this part:**
+
+```
+realWorldValidation.status = "not_completed"
+combineVerifiedProtocols   = []
+```

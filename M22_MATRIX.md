@@ -249,6 +249,10 @@ Recorded as they are found, in the M20/M21 style. Empty until the first.
 | F4 | **Stale test infrastructure passing as a green battery.** `crosstab` and `demoOffline` assumed a demo host on :8099. Usually one was there, left from an earlier session, so both passed against bundles this run never produced. It surfaced only when the battery ran in an order where nothing had started one first. | `e2e/crosstab.test.mjs`, `e2e/demoOffline.test.mjs` | Tests own their host (`ensureDemoHost()`), **and** the host publishes a content-derived build marker so an existing host serving anything else is refused with the port and remedy named. Ownership alone would have degraded into "start one unless something is already there" — the original bug with an extra branch. | `e2e/demoHostOrdering.test.mjs`, 15 checks; both tests verified from a genuinely empty :8099 |
 | F5 | **Perf measurement artefacts.** Without a JIT warmup the first frame size measured carried every layer's compilation cost and read as the smallest frame being the most expensive; single-shot readings of sub-millisecond layers were mostly scheduler noise (one sample put tracking at 2.55 ms against a true ~0.17 ms). A first attempt to fix the finalization column by subtracting an estimate of ingest cost was a bad estimator and produced obvious nonsense. | `scripts/m22Perf.mjs` | Warmup before measuring; per-finish layers reported as medians of nine repeats; finalization timed directly by ingesting the repeats first and timing only the `finish()` calls. | `m22/perf.json` |
 
+| F6 | **The Combine gate read a truthy object as a boolean.** `realWorldValidationPass()` returns `{pass, status, problems}` — never falsy — so `if (!pass) return []` never fired and EVERY protocol came back Combine-eligible. The single most important gate in ScoutBox, wide open, from a line that reviews well. | `m22/eligibility.mjs` | The test is now `verdict?.pass !== true`, so an object, a string, `undefined` or a future change to the return shape all DENY. The closed direction is the default rather than the exception. | `m22Blocker` (60 checks); caught by the test written to prove the gate closed, not by reading the code |
+| F7 | **An inverted comparison against a misnamed constant.** `PROD_PROVIDER_ID` is historical and equals `'web_client'`, not `'production_cv'`. Comparing against it handed `production_cv` its OBSERVATION capability list, reopening the gate immediately after F6 was fixed. | `m16/combine.mjs` | Compared against the literal `CV_PROVIDER_ID`, with a comment recording that the constant does not mean what its name suggests. | `m22Blocker`, `m21E2E` §64 assertion, `m22E2E` §58 |
+| F8 | **Ambient test infrastructure, at twelve times the scale first thought.** Completing the D7 fix — making `crosstab`/`demoOffline` release :8099 — broke all twelve demo spotchecks, which had never started a demo host and were inheriting one. A first repair added the `ensureDemoHost` import to four files that build URLs inline, so the import landed and was never called: a change that looks like a fix and is not one. | `e2e/*DemoSpotcheck.test.mjs`, `e2e/uiSpotcheck.test.mjs` | Every suite owns its host. Two systemic hardenings in `demoHost.mjs`: the child is killed from a process exit hook so ownership does not depend on each suite remembering `stop()`, and the child and its stdio pipes are unref'd so a suite that forgets still EXITS rather than hanging (uiSpotcheck printed OK and then timed out). | 14/14 demo and E2E suites; `demoHostOrdering` 15 checks |
+
 ---
 
 ## K. Robustness, holdout and measurement (the completion pass)
@@ -270,3 +274,34 @@ Recorded as they are found, in the M20/M21 style. Empty until the first.
 | K13 | Threat model extended | T31–T42 in `M22_CV_THREAT_MODEL.md` | — | **done** | T39 (synthetic overconfidence) is mitigated procedurally, not technically |
 | K14 | Harness ordering | `e2e/demoHost.mjs` + build marker endpoint | `e2e/demoHostOrdering.test.mjs`, 15 checks | **done** | — |
 | K15 | Over-cadence detection | Recorded as **PARTIAL**, with the reason | `m22Robustness` asserts the limitation and that an under-counted attempt still cannot reach production Combine Verified | **done** | Friction decay after a legitimate strike is indistinguishable from a new strike at video sample rates. The engine under-counts rather than pretending |
+
+
+---
+
+## L. Provider wiring (M22 phase 2)
+
+| # | Requirement | Implementation | Test | Status | Limitation |
+|---|---|---|---|---|---|
+| L1 | §3/§4 real provider, orchestration only | `m22/provider.mjs` — no detection, tracking, touch/juggle logic, quality thresholds or refusal precedence | `m22Blocker`, `m22E2E` §86 | **done** | — |
+| L2 | §5/§6 isolated session state, explicit state machine | Per-session object; enumerated transition table; illegal transitions fail closed | `m22E2E` §6 | **done** | — |
+| L3 | §7 single-shot finalize | Second call returns the stored result, mints nothing | `m22E2E` 7b | **done** | — |
+| L4 | §8–§11 transport | Bounded sampled-frame HTTP on the existing authenticated router; one documented `gray8` representation; hard bounds | `m22E2E` §85 | **done** | Chromium only (§53) |
+| L5 | §12–§18 auth, binding, nonce, sequence, duplicates | Four-part binding; server-minted nonce; monotonic sequence with `seenSeqs`; reorder window zero | `m22E2E` cases 1–20 | **done** | — |
+| L6 | §19/§20 server timeline authoritative | Client timestamps recorded and counted, never used | `m22E2E`, `m22Blocker` | **done** | — |
+| L7 | §21–§23 bounded queue, backpressure accounting | Drops oldest and reports; feeds observation quality | `m22Perf`, `m22E2E` §89 | **done** | — |
+| L8 | §24/§25 worker boundary | Measured, not assumed: p95 lag 0.234 ms. Not needed; seam retained | `m22Perf` §95 | **done** | Re-measure if frame cost rises |
+| L9 | §26–§29 health and capabilities, not collapsed | Two capability lists; `/capabilities` carries four separate fields | `m22E2E` §2, `m181E2E` | **done** | — |
+| L10 | §30/§31 Box Cam observed, independent gate | `boxCamObservedEligible()`, nine requirements, no exact count required | `m22Blocker` | **done** | — |
+| L11 | §32/§33 exact count is experimental | Labelled on the result; behind a disclosure in the UI | `m22E2E`, `m22Live` | **done** | — |
+| L12 | §34–§38 canonical result, bounded trace, no raw frames | Derived metadata only; trace capped at 256 | `m22E2E` §37/§92 | **done** | — |
+| L13 | §39/§40 typed errors, central rate limits | Ten canonical codes; three separate policies | `m22E2E` §93 | **done** | — |
+| L14 | §41/§71/§72 events | Three registered, player_private, no analytics, no per-frame event | `m182E2E` | **done** | — |
+| L15 | §47–§50 Ready Check | Structured checks; observation and Combine reported separately | `m22E2E` §47/§48, `m22Live` C1 | **done** | — |
+| L16 | §51/§52 client capture and memory | One reused canvas; released on every exit path; `audio:false` | typecheck + build; `m22Live` | **done** | — |
+| L17 | §58–§60 Combine integration and the blocker | Validation-filtered capability list; future-validated fixture proves the wiring | `m22Blocker` 60 checks, `m22Live` C6 | **done** | — |
+| L18 | §61–§67 Trust, M21, M19 | Unchanged policy; unvalidated result satisfies nothing | `m162E2E`, `m21E2E`, `m19E2E`, `m22Blocker` | **done** | — |
+| L19 | §68/§69 invalidation and restoration | Read-time projection; deterministic recovery | `m22Blocker` | **done** | — |
+| L20 | §74/§75 T&S diagnostics | Structured projection; no frame viewer; no write route for the count | `m22/routes.mjs` | **done** | — |
+| L21 | §76–§84 Player UI, a11y, mobile, EN/FR | Two-fact rendering on every outcome; 78 keys each language | `m22Live` C1/C2/C11/C12 | **done** | — |
+| L22 | §116–§122 migration and boot | Schema 2200; one store; reuse audit enforced | `m22E2E` §116–§122 | **done** | — |
+| L23 | §103–§115 live journeys | Y4M camera fixture from the scene generator | `m22Live` 41 checks | **done** | Live outcome was a refusal; recorded, not tuned |
