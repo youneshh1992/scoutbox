@@ -1,7 +1,7 @@
 {
   "engineVersion": 2,
   "policyVersion": 1,
-  "generatedAt": "2026-09-14T19:54:45.108Z",
+  "generatedAt": "2026-09-14T20:15:46.338Z",
   "fixtureCount": 14,
   "fixtureProvenance": "synthetic_generated",
   "realWorldValidation": false,
@@ -346,7 +346,7 @@
       "expectedState": "accepted_count_not_asserted",
       "expectedCount": null,
       "gotState": "accepted",
-      "gotCount": 10,
+      "gotCount": 13,
       "verdict": "correct",
       "falseVerification": false
     },
@@ -551,6 +551,767 @@
       "gotState": "observation_discontinuity",
       "gotCount": 0,
       "falseTouch": false
+    }
+  ],
+  "consumedHoldoutCases": 84,
+  "consumedHoldoutFalseTouches": 0,
+  "consumedHoldoutOffTruth": 1,
+  "consumedRows": [
+    {
+      "id": "g1_ho_juggle_res_176x144",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 11,
+      "gotState": "accepted",
+      "gotCount": 10
+    },
+    {
+      "id": "g1_ho_juggle_res_208x160",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 11,
+      "gotState": "accepted",
+      "gotCount": 10
+    },
+    {
+      "id": "g1_ho_juggle_res_288x216",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 11,
+      "gotState": "accepted",
+      "gotCount": 10
+    },
+    {
+      "id": "g1_ho_touch_res_176x144",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 13,
+      "gotState": "accepted",
+      "gotCount": 12
+    },
+    {
+      "id": "g1_ho_touch_res_208x160",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 13,
+      "gotState": "accepted",
+      "gotCount": 12
+    },
+    {
+      "id": "g1_ho_touch_res_288x216",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 13,
+      "gotState": "accepted",
+      "gotCount": 12
+    },
+    {
+      "id": "g1_ho_juggle_fps_14",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 7,
+      "gotState": "accepted",
+      "gotCount": 6
+    },
+    {
+      "id": "g1_ho_juggle_fps_20",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 7,
+      "gotState": "accepted",
+      "gotCount": 6
+    },
+    {
+      "id": "g1_ho_juggle_fps_27",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 7,
+      "gotState": "accepted",
+      "gotCount": 6
+    },
+    {
+      "id": "g1_ho_touch_fps_14",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 9,
+      "gotState": "accepted",
+      "gotCount": 7
+    },
+    {
+      "id": "g1_ho_touch_fps_20",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 9,
+      "gotState": "accepted",
+      "gotCount": 8
+    },
+    {
+      "id": "g1_ho_touch_fps_27",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 9,
+      "gotState": "accepted",
+      "gotCount": 8
+    },
+    {
+      "id": "g1_ho_ball_scale_0",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 7,
+      "gotState": "accepted",
+      "gotCount": 6
+    },
+    {
+      "id": "g1_ho_ball_scale_1",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 7,
+      "gotState": "accepted",
+      "gotCount": 6
+    },
+    {
+      "id": "g1_ho_photo_bright_on_dark",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 7,
+      "gotState": "accepted",
+      "gotCount": 6
+    },
+    {
+      "id": "g1_ho_photo_dim_on_light",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 7,
+      "gotState": "accepted",
+      "gotCount": 6
+    },
+    {
+      "id": "g1_ho_silhouette_tall_narrow",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 7,
+      "gotState": "accepted",
+      "gotCount": 6
+    },
+    {
+      "id": "g1_ho_silhouette_short_wide",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 7,
+      "gotState": "accepted",
+      "gotCount": 6
+    },
+    {
+      "id": "g1_ho_silhouette_right_of_centre",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 7,
+      "gotState": "accepted",
+      "gotCount": 6
+    },
+    {
+      "id": "g1_ho_cam_still",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 7,
+      "gotState": "accepted",
+      "gotCount": 6
+    },
+    {
+      "id": "g1_ho_cam_drift",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 7,
+      "gotState": "accepted",
+      "gotCount": 6
+    },
+    {
+      "id": "g1_ho_cam_shake",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 7,
+      "gotState": "accepted",
+      "gotCount": 6
+    },
+    {
+      "id": "g1_ho_cam_zoom",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 7,
+      "gotState": "accepted",
+      "gotCount": 6
+    },
+    {
+      "id": "g1_ho_pace_760ms",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 9,
+      "gotState": "accepted",
+      "gotCount": 8
+    },
+    {
+      "id": "g1_ho_pace_620ms",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 11,
+      "gotState": "accepted",
+      "gotCount": 10
+    },
+    {
+      "id": "g1_ho_pace_420ms",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 13,
+      "gotState": "accepted",
+      "gotCount": 12
+    },
+    {
+      "id": "g1_ho_jitter4_bands2",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 7,
+      "gotState": "accepted",
+      "gotCount": 6
+    },
+    {
+      "id": "g1_ho_jitter10_bands5",
+      "group": "counting",
+      "consumedFrom": 1,
+      "expectedState": "accepted",
+      "expectedCount": 7,
+      "gotState": "accepted",
+      "gotCount": 6
+    },
+    {
+      "id": "g1_HT01_ball_approaches_and_stops_short",
+      "group": "adversarial",
+      "consumedFrom": 1,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "accepted",
+      "gotCount": 0
+    },
+    {
+      "id": "g1_HT02_player_leans_over_still_ball",
+      "group": "adversarial",
+      "consumedFrom": 1,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "accepted",
+      "gotCount": 0
+    },
+    {
+      "id": "g1_HT03_second_ball_passes_close",
+      "group": "adversarial",
+      "consumedFrom": 1,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "protocol_violation",
+      "gotCount": null
+    },
+    {
+      "id": "g1_HT04_player_walks_into_resting_ball_frame",
+      "group": "adversarial",
+      "consumedFrom": 1,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "accepted",
+      "gotCount": 0
+    },
+    {
+      "id": "g1_HT05_zoom_pulse_near_ball",
+      "group": "adversarial",
+      "consumedFrom": 1,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "observation_discontinuity",
+      "gotCount": null
+    },
+    {
+      "id": "g1_HT06_ball_rolls_into_frame_and_out",
+      "group": "adversarial",
+      "consumedFrom": 1,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "observation_discontinuity",
+      "gotCount": null
+    },
+    {
+      "id": "g1_HT07_periodic_occlusion_no_contact",
+      "group": "adversarial",
+      "consumedFrom": 1,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "ball_not_detected",
+      "gotCount": null
+    },
+    {
+      "id": "g1_HT08_independent_bounce_close_behind",
+      "group": "adversarial",
+      "consumedFrom": 1,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "accepted",
+      "gotCount": 0
+    },
+    {
+      "id": "g1_HT09_near_miss_larger_amplitude",
+      "group": "adversarial",
+      "consumedFrom": 1,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "accepted",
+      "gotCount": 0
+    },
+    {
+      "id": "g1_HT10_low_contrast_ball_at_rest",
+      "group": "adversarial",
+      "consumedFrom": 1,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "accepted",
+      "gotCount": 0
+    },
+    {
+      "id": "g1_HT11_two_people_one_still_ball",
+      "group": "adversarial",
+      "consumedFrom": 1,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "observation_discontinuity",
+      "gotCount": null
+    },
+    {
+      "id": "g1_HT12_shake_and_drift_together",
+      "group": "adversarial",
+      "consumedFrom": 1,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "accepted",
+      "gotCount": 0
+    },
+    {
+      "id": "g2_ho_juggle_res_192x144",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 9,
+      "gotState": "accepted",
+      "gotCount": 8
+    },
+    {
+      "id": "g2_ho_juggle_res_256x192",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 9,
+      "gotState": "accepted",
+      "gotCount": 8
+    },
+    {
+      "id": "g2_ho_juggle_res_304x228",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 9,
+      "gotState": "accepted",
+      "gotCount": 8
+    },
+    {
+      "id": "g2_ho_touch_res_192x144",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 11,
+      "gotState": "accepted",
+      "gotCount": 10
+    },
+    {
+      "id": "g2_ho_touch_res_256x192",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 11,
+      "gotState": "accepted",
+      "gotCount": 10
+    },
+    {
+      "id": "g2_ho_touch_res_304x228",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 11,
+      "gotState": "accepted",
+      "gotCount": 10
+    },
+    {
+      "id": "g2_ho_juggle_fps_13",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 6,
+      "gotState": "accepted",
+      "gotCount": 5
+    },
+    {
+      "id": "g2_ho_juggle_fps_18",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 6,
+      "gotState": "accepted",
+      "gotCount": 5
+    },
+    {
+      "id": "g2_ho_juggle_fps_25",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 6,
+      "gotState": "accepted",
+      "gotCount": 5
+    },
+    {
+      "id": "g2_ho_touch_fps_13",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "insufficient_confidence",
+      "gotCount": null
+    },
+    {
+      "id": "g2_ho_touch_fps_18",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7
+    },
+    {
+      "id": "g2_ho_touch_fps_25",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7
+    },
+    {
+      "id": "g2_ho_ball_scale_0",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 6,
+      "gotState": "accepted",
+      "gotCount": 5
+    },
+    {
+      "id": "g2_ho_ball_scale_1",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 6,
+      "gotState": "accepted",
+      "gotCount": 5
+    },
+    {
+      "id": "g2_ho_photo_bright_on_dark",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 6,
+      "gotState": "accepted",
+      "gotCount": 5
+    },
+    {
+      "id": "g2_ho_photo_dim_on_light",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 6,
+      "gotState": "accepted",
+      "gotCount": 5
+    },
+    {
+      "id": "g2_ho_silhouette_very_tall",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 6,
+      "gotState": "accepted",
+      "gotCount": 5
+    },
+    {
+      "id": "g2_ho_silhouette_squat_left",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 6,
+      "gotState": "accepted",
+      "gotCount": 5
+    },
+    {
+      "id": "g2_ho_silhouette_mid_bright",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 6,
+      "gotState": "accepted",
+      "gotCount": 5
+    },
+    {
+      "id": "g2_ho_cam_still",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 6,
+      "gotState": "accepted",
+      "gotCount": 5
+    },
+    {
+      "id": "g2_ho_cam_drift",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 6,
+      "gotState": "accepted",
+      "gotCount": 5
+    },
+    {
+      "id": "g2_ho_cam_shake",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 6,
+      "gotState": "accepted",
+      "gotCount": 5
+    },
+    {
+      "id": "g2_ho_cam_zoom",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 6,
+      "gotState": "accepted",
+      "gotCount": 5
+    },
+    {
+      "id": "g2_ho_pace_840ms",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 8,
+      "gotState": "accepted",
+      "gotCount": 7
+    },
+    {
+      "id": "g2_ho_pace_570ms",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 10,
+      "gotState": "accepted",
+      "gotCount": 9
+    },
+    {
+      "id": "g2_ho_pace_380ms",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 11,
+      "gotState": "accepted",
+      "gotCount": 10
+    },
+    {
+      "id": "g2_ho_jitter3_bands1",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 6,
+      "gotState": "accepted",
+      "gotCount": 5
+    },
+    {
+      "id": "g2_ho_jitter12_bands4",
+      "group": "counting",
+      "consumedFrom": 2,
+      "expectedState": "accepted",
+      "expectedCount": 6,
+      "gotState": "accepted",
+      "gotCount": 5
+    },
+    {
+      "id": "g2_HT01_ball_approaches_and_stops_short",
+      "group": "adversarial",
+      "consumedFrom": 2,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "accepted",
+      "gotCount": 0
+    },
+    {
+      "id": "g2_HT02_player_leans_over_still_ball",
+      "group": "adversarial",
+      "consumedFrom": 2,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "accepted",
+      "gotCount": 0
+    },
+    {
+      "id": "g2_HT03_second_ball_passes_close",
+      "group": "adversarial",
+      "consumedFrom": 2,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "protocol_violation",
+      "gotCount": null
+    },
+    {
+      "id": "g2_HT04_player_walks_into_resting_ball_frame",
+      "group": "adversarial",
+      "consumedFrom": 2,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "accepted",
+      "gotCount": 0
+    },
+    {
+      "id": "g2_HT05_zoom_pulse_near_ball",
+      "group": "adversarial",
+      "consumedFrom": 2,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "observation_discontinuity",
+      "gotCount": null
+    },
+    {
+      "id": "g2_HT06_ball_rolls_into_frame_and_out",
+      "group": "adversarial",
+      "consumedFrom": 2,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "observation_discontinuity",
+      "gotCount": null
+    },
+    {
+      "id": "g2_HT07_periodic_occlusion_no_contact",
+      "group": "adversarial",
+      "consumedFrom": 2,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "ball_not_detected",
+      "gotCount": null
+    },
+    {
+      "id": "g2_HT08_independent_bounce_close_behind",
+      "group": "adversarial",
+      "consumedFrom": 2,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "accepted",
+      "gotCount": 0
+    },
+    {
+      "id": "g2_HT09_near_miss_larger_amplitude",
+      "group": "adversarial",
+      "consumedFrom": 2,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "accepted",
+      "gotCount": 0
+    },
+    {
+      "id": "g2_HT10_low_contrast_ball_at_rest",
+      "group": "adversarial",
+      "consumedFrom": 2,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "accepted",
+      "gotCount": 0
+    },
+    {
+      "id": "g2_HT11_two_people_one_still_ball",
+      "group": "adversarial",
+      "consumedFrom": 2,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "observation_discontinuity",
+      "gotCount": null
+    },
+    {
+      "id": "g2_HT12_shake_and_drift_together",
+      "group": "adversarial",
+      "consumedFrom": 2,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "accepted",
+      "gotCount": 0
+    },
+    {
+      "id": "g2_HT13_step_zoom_in_and_hold",
+      "group": "adversarial",
+      "consumedFrom": 2,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "observation_discontinuity",
+      "gotCount": null
+    },
+    {
+      "id": "g2_HT14_step_zoom_out_and_hold",
+      "group": "adversarial",
+      "consumedFrom": 2,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "observation_discontinuity",
+      "gotCount": null
+    },
+    {
+      "id": "g2_HT15_repeated_zoom_pulses",
+      "group": "adversarial",
+      "consumedFrom": 2,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "observation_discontinuity",
+      "gotCount": null
+    },
+    {
+      "id": "g2_HT16_zoom_while_ball_rests_at_foot",
+      "group": "adversarial",
+      "consumedFrom": 2,
+      "expectedState": "zero_touches",
+      "expectedCount": 0,
+      "gotState": "observation_discontinuity",
+      "gotCount": null
     }
   ],
   "meanAbsCountError": 1,

@@ -19,6 +19,7 @@ import { ObservationRun } from '../m22/engine.mjs';
 import { decodeFrame } from '../m22/frames.mjs';
 import { goldenFixtures } from '../m22/fixtures.mjs';
 import { variationFamilies, falseTouchStress } from '../m22/families.mjs';
+import { consumedHoldoutCases, HOLDOUT_GENERATIONS } from '../m22/holdout.mjs';
 import { CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION } from '../m22/policy.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -223,6 +224,52 @@ for (const st of stress) {
   stressRows.push({ id: st.id, description: st.description, gotState: result.state, gotCount: n, falseTouch: n > 0 });
 }
 
+// ============================ consumed holdout material, as regressions
+//
+// Every case here was once a holdout, and each consumed generation is here
+// because it CAUGHT SOMETHING. That makes these the most valuable cases in the
+// suite — they are the only ones with a demonstrated record of finding a
+// defect — and it also means they can never go back to holdout duty, because
+// the fixes were designed while looking at them.
+//
+// The adversarial ones are hard failures: they are the specific scenes that
+// produced false touches, so a recurrence is a straightforward regression.
+// The counting ones are reported rather than failed, because their declared
+// truths were set for a holdout run and a count error on them is a
+// measurement, not a broken contract.
+
+const consumed = consumedHoldoutCases();
+const consumedRows = [];
+let consumedFalseTouches = 0;
+let consumedOffTruth = 0;
+
+console.log(`\n--- consumed holdout material, run as permanent regressions -------`);
+for (const g of HOLDOUT_GENERATIONS.filter((x) => x.status === 'consumed')) {
+  console.log(`generation ${g.generation}: ${g.result.falseTouches} false touch(es) found when it was a holdout`);
+}
+for (const cs of consumed) {
+  const { result } = evaluate(cs);
+  const n = result.count ?? 0;
+  if (cs.group === 'adversarial') {
+    if (n > 0) {
+      consumedFalseTouches += n;
+      console.log(`${pad(cs.id, 42)} ${pad(result.state, 26)} count ${n}  *** FALSE TOUCH (REGRESSION) ***`);
+    }
+  } else if (cs.expected.count != null) {
+    const err = Math.abs(n - cs.expected.count);
+    if (result.state !== 'accepted' || err > (cs.expected.tolerance ?? 0)) consumedOffTruth += 1;
+  }
+  consumedRows.push({
+    id: cs.id, group: cs.group, consumedFrom: cs.consumedFrom,
+    expectedState: cs.expected.state, expectedCount: cs.expected.count ?? null,
+    gotState: result.state, gotCount: result.count,
+  });
+}
+console.log(
+  `${consumed.length} consumed cases: ${consumedFalseTouches} false touch(es), ` +
+  `${consumedOffTruth} counting case(s) off their holdout-era truth`,
+);
+
 // -------------------------------------------------------- determinism
 //
 // §76 of the negative list, and the property the whole gate rests on: the
@@ -269,6 +316,10 @@ const report = {
   stressAccepted,
   familyRows,
   stressRows,
+  consumedHoldoutCases: consumed.length,
+  consumedHoldoutFalseTouches: consumedFalseTouches,
+  consumedHoldoutOffTruth: consumedOffTruth,
+  consumedRows,
   meanAbsCountError: meanAbsErr == null ? null : round3(meanAbsErr),
   maxAbsCountError: maxAbsErr,
   rows,
@@ -288,10 +339,15 @@ console.log(`refusal rate             ${(report.refusalRate * 100).toFixed(1)}%`
 console.log(`families / variants      ${families.length} / ${familyVariants}  (off-truth ${familyFailures})`);
 console.log(`invariance breaks        ${invarianceBreaks}   (resolution + frame-rate + scale)`);
 console.log(`false-touch stress cases ${stress.length}`);
+console.log(`consumed holdout cases   ${consumed.length}  (off-truth ${consumedOffTruth})`);
 console.log(`FALSE TOUCHES            ${falseTouches}   (§4: any is a P0)`);
 console.log(`real-world validation    NO — synthetic fixtures only`);
 console.log(`written to               m22/evaluation.json`);
 
+if (consumedFalseTouches > 0) {
+  console.error(`\nm22CvEval: FAILED — ${consumedFalseTouches} false touch(es) on consumed holdout material. These are the scenes that already caught a defect once; §4 makes a recurrence a P0.`);
+  process.exit(1);
+}
 if (falseTouches > 0) {
   console.error(`\nm22CvEval: FAILED — ${falseTouches} false touch(es) in the stress suite. §4 makes this a P0.`);
   process.exit(1);

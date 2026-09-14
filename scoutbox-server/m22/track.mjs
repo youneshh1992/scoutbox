@@ -65,7 +65,21 @@ export function buildTracks(detections) {
       const wNow = person.x1 - person.x0, hNow = person.y1 - person.y0;
       const cPrev = { x: (lastPerson.x0 + lastPerson.x1) / 2, y: (lastPerson.y0 + lastPerson.y1) / 2 };
       const cNow = { x: (person.x0 + person.x1) / 2, y: (person.y0 + person.y1) / 2 };
-      const scaleJump = wNow > wPrev * 1.4 || wNow < wPrev / 1.4 || hNow > hPrev * 1.4 || hNow < hPrev / 1.4;
+      // SCALE. The player region is the frame of reference and also, being
+      // large, the least noisy measurement available of how the whole image is
+      // scaling. A change beyond the derived per-sample budget means the frame
+      // of reference is zooming — whether because the camera zoomed, because
+      // the player moved toward the lens, or because the region has started to
+      // clip against a frame edge and its centre is no longer where the player
+      // is. All three make the relative velocities across that sample
+      // meaningless, and all three are caught by the same test.
+      const tol = EVENT_RULES.maxFrameScaleStepPerSample;
+      const scaleJump = wPrev > 0 && hPrev > 0
+        && (Math.abs(wNow / wPrev - 1) > tol || Math.abs(hNow / hPrev - 1) > tol);
+      // POSITION. A separate question with a separate answer: the player
+      // genuinely moves, and moving is not a discontinuity. This stays at the
+      // identity scale — half a body width in one sample is a different
+      // observation, not the same one continued.
       const shiftJump = Math.hypot(cNow.x - cPrev.x, cNow.y - cPrev.y) > Math.max(wPrev, 1) * 0.5;
       personJump = scaleJump || shiftJump;
       if (personJump) resets += 1;

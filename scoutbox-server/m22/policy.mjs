@@ -215,6 +215,39 @@ export const EVENT_RULES = Object.freeze({
 
   // unit — a rival blob this close in size to the primary is a second ball.
   secondBallMinAreaRatio: 0.6,
+
+  // unit — the largest per-sample change in the apparent size of the player
+  // region that can be treated as the SAME frame of reference continuing.
+  //
+  // This value is derived, not chosen. Motion is measured in the player's
+  // frame, so when the whole image scales by a factor s between two samples,
+  // the player-relative position of a completely stationary ball appears to
+  // change by (s-1) * |rel|. Expressed in the units the protocol layer
+  // actually thresholds, that is a fabricated velocity of
+  //
+  //     (s - 1) * (|rel| / d) / dt      diameters per second
+  //
+  // The budget: it must stay below `touchMinImpulseDiametersPerSec` (4.5) at
+  // the worst case, which is the highest supported cadence (30 fps, dt = 1/30)
+  // and a ball at the far side of its working range from the player centre.
+  // Measured across the fixture set, |rel| / d runs to about 3.5 diameters
+  // there. So
+  //
+  //     (s - 1) * 3.5 * 30 < 4.5   =>   s - 1 < 0.043
+  //
+  // and 0.04 is that bound rounded down. The floor underneath it is detector
+  // noise: the player region is hundreds of pixels tall even in the smallest
+  // supported frame, so a one-pixel edge wobble is about 1.1%. The threshold
+  // therefore sits between a 1% noise floor and a 4.3% danger point, which is
+  // why it is stable rather than lucky.
+  //
+  // This replaced a 1.4x test, and the replacement is the whole point. 1.4x
+  // asked "is this a different person?" — an identity question. The question
+  // that matters for counting is "did the frame of reference move enough to
+  // fabricate an impulse?", and the answer to that is thirty times smaller.
+  // A holdout case found the gap: an 18% zoom sailed under the identity test
+  // and manufactured a touch.
+  maxFrameScaleStepPerSample: 0.04,
 });
 // ---------------------------------------------------------- confidence
 //
