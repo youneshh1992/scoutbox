@@ -51,6 +51,25 @@ process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); 
 async function boot() {
   const proc = spawn(process.execPath, [SERVER], { env: ENV, stdio: 'ignore' });
   children.push(proc);
+
+  // Do not let the spawned server hold this process open.
+  //
+  // THE DEFECT THIS FIXES. The exit hook above is the only thing that stops
+  // the server, and it runs when the event loop drains — but a ref'd child
+  // handle IS something on the loop, so the loop could never drain and the
+  // hook could never fire. The suite therefore printed its full summary, all
+  // 112 checks green, and then hung forever.
+  //
+  // That is worse than a failure, because it looks like a pass to a human
+  // reading the tail of the log and like a timeout to any harness running the
+  // battery unattended — two different wrong conclusions from one bug. M22's
+  // own `e2e/demoHost.mjs` hit the identical trap and fixed it the same way;
+  // this file was written before that lesson and never got it.
+  //
+  // unref() detaches the handle from the loop without detaching the process:
+  // the child still dies in the exit hook, which can now actually run.
+  proc.unref();
+
   for (let i = 0; i < 160; i++) {
     try { const r = await fetch(`${BASE}/healthz`); if (r.ok) return proc; } catch { /* booting */ }
     await sleep(250);
