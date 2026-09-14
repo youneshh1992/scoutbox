@@ -119,6 +119,7 @@ export const REFUSAL_PRECEDENCE = Object.freeze([
   'session_invalid',             // the session was not usable
   'liveness_failed',             // live-session check did not pass
   'unsupported_device',          // resolution/orientation outside support
+  'unsupported_event_cadence',   // the activity is faster than we can resolve
   'insufficient_frame_rate',     // cadence too low to see contacts
   'insufficient_visibility',     // too dark to read the scene
   'protocol_violation',          // static image, duplicates, second ball/person

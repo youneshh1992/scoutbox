@@ -182,13 +182,33 @@ export const EVENT_RULES = Object.freeze({
   // apparent velocity change on arrival is a detector artefact, not a strike.
   touchMinApproachMs: 120,
 
-  // unit frames — the ball may be undetected for this many consecutive
-  // frames and the track survives. Frame-based because it describes the
-  // TRACKER's tolerance for missing observations, not a physical duration;
-  // the physical limit is maxBallGapMs below and both apply.
+  // --- gap policy (§23) -------------------------------------------------
+  // A SHORT gap may be bridged: the track survives and the count stays exact.
+  // A LONG gap may not: continuity is broken, and an exact measurement is
+  // refused rather than interpolated across the missing evidence.
+  //
+  // Both limits apply, because they describe different things. The frame
+  // count is the TRACKER's tolerance for consecutive missing observations;
+  // the millisecond limit is the physical one and is cadence-independent, so
+  // four dropped frames at 30 fps (133 ms) and four at 8 fps (500 ms) are not
+  // treated as the same event.
+  maxRecoverableMissingFrames: 4,
+  maxRecoverableFrameGapMs: 400,
+  // Retained names, same values — read by existing call sites.
   maxBallGapFrames: 4,
-  // unit ms — the physical occlusion limit, cadence-independent.
   maxBallGapMs: 400,
+
+  // --- supported cadence envelope (§29) ---------------------------------
+  // Measured, not aspired to: the engine counts within tolerance down to
+  // 340 ms between touches and under-counts at 260 ms. Anything faster is
+  // outside the validated envelope and must not be certified as exact.
+  minimumSupportedTouchIntervalMs: 340,
+  // unit — fraction of contact-range impulses that may be suppressed by the
+  // refractory window before the attempt is judged to be running faster than
+  // the engine can resolve. Derived from OBSERVATION (impulses the tracker
+  // saw and the protocol layer had to discard), never from a player-reported
+  // count and never from the number of touches finally emitted.
+  maxRefractorySuppressedFrac: 0.25,
 
   // unit — fraction of the attempt the ball may be missing in total.
   maxBallMissingFrac: 0.25,
@@ -225,6 +245,7 @@ export const OBSERVATION_STATES = Object.freeze([
   'liveness_failed',
   'provider_unavailable',
   'unsupported_protocol',
+  'unsupported_event_cadence',
 ]);
 
 // Reader-facing sentences. §94/§95: a refusal describes the OBSERVATION,
@@ -239,6 +260,7 @@ export const STATE_COPY = Object.freeze({
   liveness_failed: 'Could not verify this attempt — the live-session check did not pass.',
   provider_unavailable: 'Production observation is not available right now, so this attempt was not verified.',
   unsupported_protocol: 'Production observation is not available for this test on this device.',
+  unsupported_event_cadence: 'Could not verify this attempt — the touches came faster than ScoutBox can reliably count, so no exact result was produced.',
 });
 
 // §67 provider health.

@@ -71,8 +71,12 @@ export function interpretTouches(motion, {
   let state = 'READY';
   let lastEmitMs = -Infinity;
   let ambiguousIntervals = 0;
-  // The sample that actually carried the contact impulse.
-  let candidate = null;
+  // Contact-range impulses the refractory window had to discard. This is the
+  // honest signal for §30: if the engine keeps seeing strikes it is not
+  // allowed to count, the activity is running faster than it can resolve.
+  // Derived from what the tracker OBSERVED, never from a player-reported
+  // number and never from the count finally emitted.
+  let suppressedByRefractory = 0;
   // Where the ball was, in the player's frame, at the moment of the last
   // confirmed contact. Separation is measured from HERE, not from the
   // player: in Box Touch the ball stays at the foot for the whole attempt,
@@ -128,6 +132,24 @@ export function interpretTouches(motion, {
       : false;
     const separated = movedAway || m.distDiameters > maxContact + minSeparation;
 
+    // The machine may need to traverse SEVERAL states within one sample:
+    // after a contact it passes CONFIRMED → SEPARATING → REFRACTORY → READY →
+    // APPROACHING, and if each of those consumed a sample, the effective
+    // refractory would be the declared one PLUS four frame intervals — a
+    // latency that varies with cadence and silently lengthens the debounce at
+    // low frame rates. That is exactly the frame-rate dependence the
+    // normalised units exist to eliminate, so transitions are allowed to
+    // settle within the sample, bounded so a cycle cannot spin.
+    let steps = 0;
+    let settled = false;
+    while (!settled && steps < CONTACT_STATES.length + 1) {
+      steps += 1;
+      const before = state;
+      step();
+      if (state === before) settled = true;
+    }
+    // eslint-disable-next-line no-inner-declarations
+    function step() {
     switch (state) {
       case 'READY':
         if (inRange) go('APPROACHING', m.atMs, 'entered_contact_range');
@@ -156,6 +178,7 @@ export function interpretTouches(motion, {
           // Temporal half of the debounce: too soon after the last contact to
           // be a separate one. Occupy CONFIRMED so it cannot re-trigger, and
           // emit nothing.
+          suppressedByRefractory += 1;
           go('CONTACT_CONFIRMED', m.atMs, 'suppressed_within_refractory');
           break;
         }
@@ -180,24 +203,44 @@ export function interpretTouches(motion, {
       case 'CONTACT_CONFIRMED':
         // Sustained contact stays here. It cannot emit again: the only way
         // out is an observed displacement from the struck position.
+        //
         if (separated || !inRange) go('SEPARATING', m.atMs, 'ball_separated');
         break;
 
       case 'SEPARATING':
+        // NOT counted here, and the reason is a real limitation rather than
+        // an oversight (§31).
+        //
+        // `impulsive` is a velocity CHANGE threshold, and friction
+        // deceleration immediately after a legitimate strike produces a
+        // change of the same magnitude when sampled at video rates. Counting
+        // impulses in this state therefore counts the decaying tail of every
+        // genuine touch, and a perfectly valid attempt condemns itself as
+        // running too fast — which is exactly what happened when it was
+        // tried. There is no reliable way to separate "a new strike arriving
+        // too soon" from "the previous strike still decaying" with this
+        // detector, so the engine does not pretend to.
+        //
+        // Consequence, stated plainly: over-cadence detection is PARTIAL. It
+        // fires when the machine has re-armed and a blocked strike reaches
+        // APPROACHING, and it misses over-cadence activity that arrives while
+        // the machine is still separating. That limitation is recorded in
+        // M22_CV_EVALUATION.md and is one more reason the production gate
+        // stays closed for exact Box Touch measurement.
         if (m.atMs - lastEmitMs >= refractoryMs) go('REFRACTORY', m.atMs, 'refractory_elapsed');
         break;
 
       case 'REFRACTORY':
         go('READY', m.atMs, 'ready_again');
-        if (m.distDiameters <= maxContact) go('APPROACHING', m.atMs, 'entered_contact_range');
         break;
 
       default:
         go('READY', m.atMs, 'unknown_state');
     }
+    }
   }
 
-  return { events, transitions, finalState: state, ambiguousIntervals };
+  return { events, transitions, finalState: state, ambiguousIntervals, suppressedByRefractory };
 }
 
 /**
@@ -240,12 +283,12 @@ export function interpretJuggles(motion, {
       confidence: Math.min(1, b.confidence * 0.75 + Math.min(1, flight / (minFlight * 3)) * 0.25),
     });
   }
-  return { events, transitions: [], finalState: 'READY', ambiguousIntervals };
+  return { events, transitions: [], finalState: 'READY', ambiguousIntervals, suppressedByRefractory: 0 };
 }
 
 /** Dispatch by event kind. The ONLY place protocol identity is consulted. */
 export function interpret(eventKind, motion, opts = {}) {
   if (eventKind === 'touch') return interpretTouches(motion, opts);
   if (eventKind === 'juggle') return interpretJuggles(motion, opts);
-  return { events: [], transitions: [], finalState: 'READY', ambiguousIntervals: 0 };
+  return { events: [], transitions: [], finalState: 'READY', ambiguousIntervals: 0, suppressedByRefractory: 0 };
 }

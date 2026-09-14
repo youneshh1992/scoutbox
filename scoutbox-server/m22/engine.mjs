@@ -169,6 +169,18 @@ export class ObservationRun {
     });
     if (quality.state !== 'sufficient') conditions.push(...qualityToRefusalConditions(quality));
 
+    // §30 — never knowingly mint an exact measurement with a known recall
+    // limitation. If a large share of the strikes the tracker actually saw
+    // had to be discarded by the refractory window, the attempt is running
+    // faster than the validated envelope and the honest answer is a refusal,
+    // not an under-count presented as a measurement.
+    const suppressed = interpreted.suppressedByRefractory ?? 0;
+    const strikesSeen = usable.length + suppressed;
+    if (this.eventKind !== 'duration' && strikesSeen > 0
+      && suppressed / strikesSeen > EVENT_RULES.maxRefractorySuppressedFrac) {
+      conditions.push('unsupported_event_cadence');
+    }
+
     if (aggregate < CONFIDENCE.minAcceptable) conditions.push('insufficient_confidence');
     if (this.eventKind !== 'duration' && c.ballCoverage < CONFIDENCE.minDetectionCoverage) {
       conditions.push('insufficient_confidence');
