@@ -195,6 +195,7 @@ const en = {
   // Box Cam CV. Two facts must land together: observation is available, and
   // Combine verification is not yet. The second is a neutral, explained state
   // and never an error.
+  m22startObservation: 'Box Cam observation (live)',
   m22title: 'Box Cam observation',
   m22whatThisIs: 'Box Cam uses server-side computer vision to observe supported activity.',
   m22videoLabel: 'Camera preview. Nothing is recorded or saved.',
@@ -437,6 +438,7 @@ const fr: typeof en = {
   m21rev_coach_review: 'Bilan d\u2019entra\u00eeneur',
 
   // ---------------------------------------------------------------- M22
+  m22startObservation: 'Observation Box Cam (en direct)',
   m22title: 'Observation Box Cam',
   m22whatThisIs: 'Box Cam utilise la vision par ordinateur c\u00f4t\u00e9 serveur pour observer les activit\u00e9s prises en charge.',
   m22videoLabel: 'Aper\u00e7u de la cam\u00e9ra. Rien n\u2019est enregistr\u00e9 ni conserv\u00e9.',

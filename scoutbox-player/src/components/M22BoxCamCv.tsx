@@ -244,7 +244,7 @@ export function M22BoxCamCv({
   );
 
   return (
-    <Card style={{ borderColor: colors.accent }}>
+    <Card style={{ borderColor: colors.accent }} testID="m22-cv">
       <Row>
         <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16 }}>{pt('m22title')}</Text>
         <Pill label={protocolId} tone="blue" />
@@ -382,6 +382,14 @@ export function M22BoxCamCv({
           </Row>
           <Muted size={12}>{reasonLabel(outcome.result.refusalReason)}</Muted>
           <Muted size={11.5}>{pt('m22refusalReassure')}</Muted>
+
+          {/* The Combine notice belongs here too, and a live journey found
+              that it was missing. Without it a refused attempt reads as "try
+              harder and you'll get Combine Verified" — which is false right
+              now, for every attempt, however good. The two facts travel
+              together on EVERY outcome, not only the happy one. */}
+          {combineNotice(false, outcome.combineDisabledReason)}
+
           <Row style={{ marginTop: 10 }}>
             <Button primary label={pt('m22retry')} onPress={() => void runReadyCheck()} />
             <Button small label={pt('m22close')} onPress={onClose} />

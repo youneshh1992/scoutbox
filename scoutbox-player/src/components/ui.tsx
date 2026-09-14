@@ -2,8 +2,8 @@ import { Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native'
 import type { ReactNode } from 'react';
 import { colors } from '../theme';
 
-export function Card({ children, style }: { children: ReactNode; style?: ViewStyle }) {
-  return <View style={[styles.card, style]}>{children}</View>;
+export function Card({ children, style, testID }: { children: ReactNode; style?: ViewStyle; testID?: string }) {
+  return <View style={[styles.card, style]} testID={testID}>{children}</View>;
 }
 
 export function Pill({ label, tone = 'default' }: { label: string; tone?: 'default' | 'green' | 'blue' | 'gold' | 'red' }) {

@@ -13,6 +13,7 @@ import { colors } from '../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
 import { m16, type BoxActor, type BoxAssignment, type BoxChallenge, type BoxDashboard, type BoxDrill, type BoxSession, type BoxTarget, type DevelopmentPlan, type BoxPrefs } from '../data/m16client';
 import { pt } from '../i18n';
+import { M22BoxCamCv } from './M22BoxCamCv';
 
 const DEMO = process.env.EXPO_PUBLIC_DEMO === '1';
 const WEB = Platform.OS === 'web';
@@ -205,6 +206,10 @@ function ResultCard({ actor, session, onClose, reload }: { actor: BoxActor; sess
 
 // ------------------------------------------------------------ main section
 export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxActor; isMinor?: boolean; childName?: string }) {
+  // M22 §55 — the live server-side CV path, alongside the existing M16
+  // aggregate-event path. Only players run it: the provider session binds to
+  // the nonce of a session the ACTOR owns, and a guardian's session is not
+  // theirs to stream frames from.
   const key = actor.kind === 'guardian' ? actor.childId : actor.id;
   const [plan, reloadPlan] = useLoad<DevelopmentPlan>(() => m16.developmentPlan(actor), [key]);
   const [dash, reloadDash] = useLoad<BoxDashboard>(() => m16.dashboard(actor), [key]);
@@ -215,8 +220,35 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
   const [result, setResult] = useState<BoxSession | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [cv, setCv] = useState<{ sessionId: string; nonce: string; protocolId: string } | null>(null);
+  const [cvStarting, setCvStarting] = useState(false);
 
   const reloadAll = () => { reloadPlan(); reloadDash(); reloadChallenges(); };
+
+  /**
+   * Open a live CV attempt: mint a Box Cam session bound to production_cv,
+   * pass the server's liveness challenge, then hand the session and its nonce
+   * to the CV surface. The nonce never leaves this flow and is never minted
+   * here — the server owns it (§14).
+   */
+  async function startCv() {
+    if (actor.kind !== 'player') return;
+    setCvStarting(true); setMsg(null);
+    try {
+      const created = await m16.createSession(actor.id, {
+        drillId: 'box-touches',
+        target: { type: 'repetitions', value: 60 },
+        provider: 'production_cv',
+      });
+      await m16.startSession(actor.id, created.session.id, created.nonce, created.livenessChallenge);
+      setResult(null); setCapture(null);
+      setCv({ sessionId: created.session.id, nonce: created.nonce, protocolId: 'combine-box-touch-60' });
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'failed');
+    } finally {
+      setCvStarting(false);
+    }
+  }
   const canManageSharing = actor.kind === 'guardian' || !isMinor;
   const drills = drillData?.drills ?? [];
   const startDrill = (drill: BoxDrill, assignmentId?: string, challengeEntryId?: string) => {
@@ -232,7 +264,15 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
       <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }}>{pt('m16trainInBox')}</Text>
       <Muted size={12}>{pt('m16tagline')}</Muted>
 
-      {capture ? (
+      {cv ? (
+        <M22BoxCamCv
+          playerId={actor.id}
+          sessionId={cv.sessionId}
+          nonce={cv.nonce}
+          protocolId={cv.protocolId}
+          onClose={() => { setCv(null); reloadAll(); }}
+        />
+      ) : capture ? (
         <CapturePanel actor={actor} drill={capture.drill} target={capture.target} assignmentId={capture.assignmentId} challengeEntryId={capture.challengeEntryId}
           onDone={(s) => { setCapture(null); setResult(s); reloadAll(); }} onClose={() => setCapture(null)} />
       ) : result ? (
@@ -240,6 +280,13 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
       ) : (
         <Row style={{ marginTop: 6 }}>
           <Button primary label={pt('m16startBoxCam')} onPress={() => drills[0] && startDrill(drills[0])} />
+          {actor.kind === 'player' ? (
+            <Button
+              label={cvStarting ? pt('m22checking') : pt('m22startObservation')}
+              disabled={cvStarting}
+              onPress={() => void startCv()}
+            />
+          ) : null}
           {dash ? <Pill label={`${pt('m16streak')}: ${dash.streakWeeks}`} tone="gold" /> : null}
         </Row>
       )}
