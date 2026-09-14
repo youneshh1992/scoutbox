@@ -2,8 +2,14 @@
 // browser hold one real conversation over the sync bus. Requires
 // buildDemos.mjs output + serve.mjs running on :8099.
 import { chromium } from 'playwright-core';
+import { ensureDemoHost } from './demoHost.mjs';
 
-const HOST = process.env.DEMO_HOST || 'http://localhost:8099';
+// §74: this test OWNS its demo host. It starts one if none is running, and
+// refuses to run against one serving bundles other than the ones on disk —
+// see demoHost.mjs for why that second half is the part that matters.
+const demo = await ensureDemoHost();
+const HOST = process.env.DEMO_HOST || demo.host;
+console.log(`demo host: ${demo.host} build ${demo.marker} (${demo.started ? 'started by this test' : 'already running, marker matches'})`);
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
 const say = (m) => console.log(m);
 const fail = (m) => { console.error(`✗ ${m}`); process.exit(1); };
@@ -82,4 +88,5 @@ await player.waitForSelector('text=Thursday 6pm in this thread', { timeout: 1500
 say('player: club reply arrived in open thread');
 
 await browser.close();
+await demo.stop();
 console.log('CROSS-TAB E2E OK');

@@ -5,9 +5,15 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { ensureDemoHost } from './demoHost.mjs';
 
 const DIST = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dist');
-const HOST = process.env.DEMO_HOST || 'http://localhost:8099';
+// §74: owns its demo host. The club and admin halves of this test load from
+// file:// and need no host at all; the player half needs http because its
+// deep-path history shim is a SecurityError under file://.
+const demo = await ensureDemoHost();
+const HOST = process.env.DEMO_HOST || demo.host;
+console.log(`demo host: ${demo.host} build ${demo.marker} (${demo.started ? 'started by this test' : 'already running, marker matches'})`);
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
 const browser = await chromium.launch({ executablePath: EXE });
 
@@ -83,4 +89,5 @@ const browser = await chromium.launch({ executablePath: EXE });
 }
 
 await browser.close();
+await demo.stop();
 console.log('DEMO BUILDS OK');
