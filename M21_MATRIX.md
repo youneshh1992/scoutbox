@@ -197,10 +197,10 @@ The rule the whole table serves:
 | M10 | §148/§149/§150 demo story, demo honesty, `m21DemoSpotcheck` | Demo modules + `e2e/m21DemoSpotcheck.test.mjs` | demo spotcheck | closed | Demo Combine is labelled simulated and **does not** satisfy a production target; the demo says what production would require. |
 | M11 | §151 launcher M21 tour, 17 steps | `e2e/launcher.html` | manual + republish | closed | — |
 | M12 | §158 `M21_DEVELOPMENT_HUB.md`, 32 sections | doc | doc↔code cross-check in m21E2E | closed | — |
-| M13 | §168 republish artifacts to existing URLs; T&S gains nothing | Artifact update | manual verification | in progress | — |
-| M14 | §169 restore bundle at the clean tip: secret scan, `git bundle verify`, fresh clone, m21E2E from the clone | bundle procedure | bundle report | in progress | The bundle lives in the container filesystem and dies with it — the standing "do not push" makes that an accepted risk, restated each time. |
-| M15 | §170 final audit, 12 explicit answers | final report | — | in progress | — |
-| M16 | §171 final report, 50 sections; nothing pushed, no PR | final report | — | in progress | — |
+| M13 | §168 republish artifacts to existing URLs; T&S gains nothing | Artifact update | manual verification | closed | All six existing URLs republished at this build — Launcher v15, Player v23, Pro v23, Grassroots v21, T&S v18, Connected Demo v14. No new artifact was created. **T&S gains nothing**: it was republished only so its build matches the others; it carries no M21 surface, and the suite asserts no development route answers a T&S caller. |
+| M14 | §169 restore bundle at the clean tip: secret scan, `git bundle verify`, fresh clone, m21E2E from the clone | bundle procedure | bundle report | closed | Built at `1a7379b`; verify reports a complete history; a fresh clone's tree is byte-identical to the working copy and runs m21E2E 511 green. **The bundle lives in the container filesystem and dies with it** — the standing "do not push" makes that an accepted risk, restated here rather than quietly carried. |
+| M15 | §170 final audit, 12 explicit answers | final report | — | closed | Twelve explicit NOs, each pointing at the check that proves it. |
+| M16 | §171 final report, 50 sections; nothing pushed, no PR | final report | — | closed | Nothing pushed. No PR opened. |
 
 ---
 
