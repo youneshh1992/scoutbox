@@ -4,6 +4,13 @@
 // Grassroots and does NOT exist in the player app.
 // Requires `node serve.mjs` on :8099.
 import { chromium } from 'playwright-core';
+import { ensureDemoHost } from './demoHost.mjs';
+
+// D7 (M22 §74-§76): own the demo host instead of assuming one is up.
+// These files hard-coded the URL inline, so the earlier pass imported the
+// helper without ever calling it — the import looked like the fix and was
+// not one.
+const demo = await ensureDemoHost();
 
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
 // Language that would turn a workspace into a talent judgement.
@@ -148,12 +155,12 @@ async function driveClub(url, label, { enterprise }) {
   await app.close();
 }
 
-await driveClub('http://localhost:8099/club/', 'pro demo', { enterprise: true });
-await driveClub('http://localhost:8099/grassroots/', 'grassroots demo', { enterprise: false });
+await driveClub(`${demo.host}/club/`, 'pro demo', { enterprise: true });
+await driveClub(`${demo.host}/grassroots/`, 'grassroots demo', { enterprise: false });
 
 // ================================= the player app must not know rooms exist
 {
-  const player = await page('http://localhost:8099/player/', { width: 480, height: 1200 });
+  const player = await page(`${demo.host}/player/`, { width: 480, height: 1200 });
   await player.waitForSelector('text=Our promises to every player', { timeout: 30000 });
   await player.locator('text=Enter').nth(0).click();
   await player.waitForSelector('text=Your visibility right now', { timeout: 20000 });
@@ -179,7 +186,7 @@ await driveClub('http://localhost:8099/grassroots/', 'grassroots demo', { enterp
 
 // ============================= T&S sees counts, never a room's contents
 {
-  const admin = await page('http://localhost:8099/admin/');
+  const admin = await page(`${demo.host}/admin/`);
   await admin.waitForSelector('text=Report queue', { timeout: 20000 });
   const body = await admin.locator('body').innerText();
   if (/Recruitment Room — |room discussion|decision reason/i.test(body)) fail('T&S demo: room contents are exposed in the back office');

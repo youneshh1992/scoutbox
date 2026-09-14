@@ -2,6 +2,13 @@
 // artifact HTML) through the new M13 surfaces and fails on any page error.
 // Requires `node serve.mjs` on :8099.
 import { chromium } from 'playwright-core';
+import { ensureDemoHost } from './demoHost.mjs';
+
+// D7 (M22 §74-§76): own the demo host instead of assuming one is up.
+// These files hard-coded the URL inline, so the earlier pass imported the
+// helper without ever calling it — the import looked like the fix and was
+// not one.
+const demo = await ensureDemoHost();
 
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
 const say = (m) => console.log(m);
@@ -17,7 +24,7 @@ async function page(url) {
 }
 
 // ---- Pro demo: M13 screens on demo fixtures
-const club = await page('http://localhost:8099/club/');
+const club = await page(`${demo.host}/club/`);
 await club.click('.org-card:has-text("Eastport FC")');
 await club.fill('.enter-row input', 'Maria Keane');
 await club.click('button:has-text("Enter workspace")');
@@ -44,7 +51,7 @@ say('pro demo: FR switch translates the M13 navigation (labelled machine transla
 await club.close();
 
 // ---- Grassroots demo
-const grass = await page('http://localhost:8099/grassroots/');
+const grass = await page(`${demo.host}/grassroots/`);
 await grass.click('.org-card:has-text("Hackney Marsh")');
 await grass.fill('.enter-row input', 'Dee Coach');
 await grass.click('button:has-text("Enter workspace")');
@@ -57,7 +64,7 @@ say('grassroots demo: coverage (honest travel note) + onboarding render');
 await grass.close();
 
 // ---- Player demo: preferences + fit + representation honesty
-const player = await page('http://localhost:8099/player/');
+const player = await page(`${demo.host}/player/`);
 await player.waitForSelector('text=Our promises to every player', { timeout: 30000 });
 await player.locator('text=Enter').nth(0).click();
 await player.waitForSelector('text=Your visibility right now', { timeout: 20000 });
@@ -71,7 +78,7 @@ say('player demo: opportunity fit section renders on Discover');
 await player.close();
 
 // ---- Trust & Safety demo: M13 tabs
-const admin = await page('http://localhost:8099/admin/');
+const admin = await page(`${demo.host}/admin/`);
 await admin.waitForSelector('text=Report queue', { timeout: 20000 });
 await admin.click('nav.sidebar button:has-text("Operations")');
 await admin.click('nav.subnav button:has-text("Delivery centre")');
@@ -88,4 +95,5 @@ await admin.close();
 if (errors.length) fail(`page errors:\n${errors.join('\n')}`);
 console.log('\nM13 DEMO SPOTCHECK OK — zero page errors');
 await browser.close();
+await demo.stop();
 process.exit(0);

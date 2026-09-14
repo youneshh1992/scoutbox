@@ -15,8 +15,15 @@
 //
 // Requires `node serve.mjs` on :8099.
 import { chromium } from 'playwright-core';
+import { ensureDemoHost } from './demoHost.mjs';
 
-const BASE = 'http://127.0.0.1:8099';
+// D7 (M22 §74-§76): this test OWNS its demo host rather than assuming one
+// is already listening. The old comment above said "Requires node
+// serve.mjs on :8099" — an instruction nobody followed, because
+// crosstab and demoOffline happened to leave a host behind. They no
+// longer do.
+const demo = await ensureDemoHost();
+const BASE = demo.host.replace('localhost', '127.0.0.1');
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
 const browser = await chromium.launch({ executablePath: EXE });
 const allErrors = [];

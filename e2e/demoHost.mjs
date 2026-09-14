@@ -139,6 +139,17 @@ export async function ensureDemoHost({ port = DEFAULT_PORT, dist = DIST, timeout
   let childErr = '';
   child.stderr.on('data', (c) => { childErr += c; });
 
+  // Ownership must not depend on the caller remembering to call stop().
+  //
+  // A dozen suites each have a slightly different exit shape — early
+  // process.exit(1) on a page error, a bare exit(0) at the end, an uncaught
+  // rejection. Patching every one of those is how a host gets left behind
+  // again, which is the exact bug this module exists to kill. So the child is
+  // killed from an exit hook here, synchronously, for every caller.
+  const killOnExit = () => { try { if (child.exitCode == null) child.kill('SIGKILL'); } catch { /* gone */ } };
+  process.once('exit', killOnExit);
+  for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => { killOnExit(); process.exit(130); });
+
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (child.exitCode != null) {
@@ -146,9 +157,21 @@ export async function ensureDemoHost({ port = DEFAULT_PORT, dist = DIST, timeout
     }
     const r = await get(`${host}/__buildmarker`);
     if (r.ok && r.status === 200 && r.body.trim() === marker) {
+      // Do not hold the caller's event loop open.
+      //
+      // A spawned child with piped stdio keeps Node alive, so a suite that
+      // ends without calling stop() HANGS rather than finishing — which read
+      // as a timeout failure on a suite that had actually printed OK. Unref
+      // the child and its pipes: the process can now exit whenever its own
+      // work is done, and the exit hook above still kills the host.
+      child.unref();
+      child.stdout?.unref?.();
+      child.stderr?.unref?.();
+
       return {
         host, started: true, marker,
         stop: async () => {
+          process.removeListener('exit', killOnExit);
           if (child.exitCode == null) {
             child.kill('SIGTERM');
             // Give it a moment, then insist.

@@ -2,8 +2,15 @@
 // slots, season history, prefs/export) plus the M7 flows — guardian signup
 // with password + email verification, and cross-tab device pairing.
 import { chromium } from 'playwright-core';
+import { ensureDemoHost } from './demoHost.mjs';
 
-const HOST = process.env.DEMO_HOST || 'http://localhost:8099';
+// D7 (M22 §74-§76): this test OWNS its demo host. It used to assume one
+// was already listening on :8099 — which was true only because crosstab
+// and demoOffline left one behind. Once those correctly released the
+// port, every spotcheck failed, which is the ambient-state dependency
+// becoming visible rather than a new break.
+const demo = await ensureDemoHost();
+const HOST = process.env.DEMO_HOST || demo.host;
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
 const say = (m) => console.log(m);
 const browser = await chromium.launch({ executablePath: EXE });
@@ -99,4 +106,5 @@ const freshPage = async () => {
 }
 
 await browser.close();
+await demo.stop();
 console.log('UI SPOTCHECK OK');

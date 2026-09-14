@@ -2,8 +2,15 @@
 // examples of the new features and the interactive demo actions work.
 // Serve dist first: node serve.mjs &
 import { chromium } from 'playwright-core';
+import { ensureDemoHost } from './demoHost.mjs';
 
-const HOST = process.env.DEMO_HOST || 'http://localhost:8099';
+// D7 (M22 §74-§76): this test OWNS its demo host. It used to assume one
+// was already listening on :8099 — which was true only because crosstab
+// and demoOffline left one behind. Once those correctly released the
+// port, every spotcheck failed, which is the ambient-state dependency
+// becoming visible rather than a new break.
+const demo = await ensureDemoHost();
+const HOST = process.env.DEMO_HOST || demo.host;
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
 const say = (m) => console.log(m);
 const browser = await chromium.launch({ executablePath: EXE });
@@ -102,7 +109,8 @@ await page.click('nav.subnav button:has-text("Outcome tracking")');
 await page.waitForSelector('text=suppressed', { timeout: 10000 });
 say('Admin demo: disputes, staff checks, outcome suppression all populated');
 
-if (errors.length) { console.error('page errors:', errors); process.exit(1); }
+if (errors.length) { console.error('page errors:', errors); await demo.stop(); process.exit(1); }
 console.log('\nM12 DEMO SPOTCHECK OK — zero page errors');
 await browser.close();
+await demo.stop();
 process.exit(0);

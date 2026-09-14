@@ -5,6 +5,13 @@
 // present that as LIMITED EVIDENCE, never as a lesser or riskier player.
 // Requires `node serve.mjs` on :8099.
 import { chromium } from 'playwright-core';
+import { ensureDemoHost } from './demoHost.mjs';
+
+// D7 (M22 §74-§76): own the demo host instead of assuming one is up.
+// These files hard-coded the URL inline, so the earlier pass imported the
+// helper without ever calling it — the import looked like the fix and was
+// not one.
+const demo = await ensureDemoHost();
 
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
 const DISCLAIMER = /reflects verification and evidence confidence — not football ability or recruitment suitability/;
@@ -25,7 +32,7 @@ async function page(url, viewport = { width: 1440, height: 900 }) {
 }
 
 // ============================================== player demo: Trust Profile
-const player = await page('http://localhost:8099/player/', { width: 480, height: 1200 });
+const player = await page(`${demo.host}/player/`, { width: 480, height: 1200 });
 await player.waitForSelector('text=Our promises to every player', { timeout: 30000 });
 await player.locator('text=Enter').nth(0).click();
 await player.waitForSelector('text=Your visibility right now', { timeout: 20000 });
@@ -59,7 +66,7 @@ await player.waitForSelector('text=ScoutBox Trust Score', { timeout: 20000 });
 await player.close();
 
 // ============================================== Pro demo: safe club view
-const club = await page('http://localhost:8099/club/');
+const club = await page(`${demo.host}/club/`);
 await club.click('.org-card:has-text("Eastport FC")');
 await club.fill('.enter-row input', 'Maria Keane');
 await club.click('button:has-text("Enter workspace")');
@@ -102,7 +109,7 @@ await club.waitForSelector('[aria-label="Trust Profile"]', { timeout: 15000 });
 await club.close();
 
 // ============================================== Grassroots demo
-const grass = await page('http://localhost:8099/grassroots/');
+const grass = await page(`${demo.host}/grassroots/`);
 await grass.click('.org-card:has-text("Hackney Marsh")');
 await grass.fill('.enter-row input', 'Dee Coach');
 await grass.click('button:has-text("Enter workspace")');
@@ -123,7 +130,7 @@ await grass.waitForSelector('[aria-label="Trust Profile"]', { timeout: 15000 });
 await grass.close();
 
 // ============================================== T&S demo: derivation only
-const admin = await page('http://localhost:8099/admin/');
+const admin = await page(`${demo.host}/admin/`);
 await admin.waitForSelector('text=Report queue', { timeout: 20000 });
 await admin.click('nav.sidebar button:has-text("Cases")');
 await admin.click('nav.subnav button:has-text("Trust")');
