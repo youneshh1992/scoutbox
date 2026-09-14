@@ -3918,6 +3918,10 @@ export const EMITTED_EVENTS = Object.freeze([
   'development_plan_created', 'development_plan_updated', 'development_plan_completed',
   'development_goal_created', 'development_goal_updated', 'development_action_completed',
   'development_evidence_linked', 'development_review_submitted',
+  // M22 production CV. All player_private, none analytics-eligible, and
+  // deliberately no per-frame event (§41) — adding one would have to pass
+  // through here and through the registry, which is the point.
+  'box_cam_cv_session_started', 'box_cam_cv_refused', 'box_cam_observed',
 ]);
 {
   const problems = assertEventRegistry({ emitted: EMITTED_EVENTS });
