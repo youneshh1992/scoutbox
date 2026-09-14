@@ -390,8 +390,182 @@ report.bounds = {
   detectionsRetained: histRun.detections.length, retainsPixelBuffers: retainsPixels,
 };
 
+// =====================================================================
+// §94–§97 — the transport path, concurrent live providers, load shedding
+// =====================================================================
+//
+// Everything above measures the ENGINE. This measures what the provider adds
+// on top of it: envelope validation, base64 decode, sequence and duplicate
+// bookkeeping, queueing, and the canonical result build. That overhead is the
+// honest cost of the transport, and it is reported separately so it cannot
+// hide inside an engine number.
+
+console.log('\n--- §94: transport overhead, per frame (240x180) ----------------');
+
+const { ProductionCvProvider, MAX_CONCURRENT_SESSIONS } = await import('../m22/provider.mjs');
+const { sequence: seq2, touchPath: touch2 } = await import('../m22/scenes.mjs');
+
+const envelopes = seq2({ w: 240, h: 180, fps: 24, durationMs: 4800, path: touch2({ touches: 10 }), seed: 23 });
+
+// Validation + decode, timed apart from the engine.
+const decodeMs = [];
+for (const e of envelopes) {
+  const t = performance.now();
+  decodeFrame(e);
+  decodeMs.push(performance.now() - t);
+}
+const dec = stats(decodeMs);
+
+// The full provider ingest path, decoded frames in.
+const decoded = envelopes.map((e) => decodeFrame(e)).filter((d) => d.ok).map((d) => d.frame);
+const provWarm = new ProductionCvProvider();
+{
+  const b = provWarm.beginSession({ boxCamSessionId: 'warm', playerId: 'p', protocolId: 'combine-box-touch-60', nonce: 'n' });
+  decoded.forEach((f, i) => provWarm.ingestFrame({ providerSessionId: b.providerSessionId, boxCamSessionId: 'warm', nonce: 'n', seq: i + 1, frame: f }));
+  provWarm.finalize({ providerSessionId: b.providerSessionId });
+}
+
+const ingestMs = [];
+let finalizeProvMs = 0;
+{
+  const prov = new ProductionCvProvider();
+  const b = prov.beginSession({ boxCamSessionId: 'perf', playerId: 'p', protocolId: 'combine-box-touch-60', nonce: 'n' });
+  decoded.forEach((f, i) => {
+    const t = performance.now();
+    prov.ingestFrame({ providerSessionId: b.providerSessionId, boxCamSessionId: 'perf', nonce: 'n', seq: i + 1, frame: f });
+    ingestMs.push(performance.now() - t);
+  });
+  const t = performance.now();
+  prov.finalize({ providerSessionId: b.providerSessionId });
+  finalizeProvMs = performance.now() - t;
+  prov.disposeAll();
+}
+const ing = stats(ingestMs);
+// Engine-only ingest for the same frames, so the DIFFERENCE is the transport.
+const engineOnly = [];
+{
+  const run = new ObservationRun({ eventKind: 'touch' });
+  for (const f of decoded) { const t = performance.now(); run.processFrame(f); engineOnly.push(performance.now() - t); }
+  run.finish({});
+}
+const eng = stats(engineOnly);
+// Subtracting two nearly-equal means measured in separate loops is a weak
+// estimator: run-to-run JIT and GC state moves each by more than the quantity
+// being estimated, and it can easily come out NEGATIVE — which would print a
+// flattering "0ms overhead" that means nothing. So the difference is reported
+// only when it clears a noise band derived from the spread of the two
+// measurements themselves; otherwise it is reported as unresolvable, and the
+// directly-measured decode cost is given as the honest floor.
+const diff = ing.mean - eng.mean;
+const noiseBand = r3(Math.max(ing.p95 - ing.mean, eng.p95 - eng.mean));
+const resolved = Math.abs(diff) > noiseBand;
+
+console.log(`decode + validate        mean ${dec.mean}ms  p95 ${dec.p95}ms   (measured directly)`);
+console.log(`provider ingest (total)  mean ${ing.mean}ms  p95 ${ing.p95}ms`);
+console.log(`engine alone             mean ${eng.mean}ms  p95 ${eng.p95}ms`);
+console.log(
+  resolved
+    ? `transport overhead       ${r3(diff)}ms per frame (${Math.round((diff / eng.mean) * 100)}% on top of the engine)`
+    : `transport overhead       below the noise band (difference ${r3(diff)}ms, band ±${noiseBand}ms) — not resolvable by subtraction`,
+);
+console.log(`  the honest floor is the directly-measured decode: ${dec.mean}ms per frame, about ${Math.round((dec.mean / ing.mean) * 100)}% of ingest.`);
+console.log(`provider finalization    ${r3(finalizeProvMs)}ms (canonical result build included)`);
+
+report.transport = {
+  decode: dec, providerIngest: ing, engineOnly: eng,
+  subtractionDiffMs: r3(diff), noiseBandMs: noiseBand, overheadResolved: resolved,
+  transportOverheadMsPerFrame: resolved ? r3(diff) : null,
+  providerFinalizeMs: r3(finalizeProvMs),
+  note: resolved
+    ? 'Provider ingest minus engine-only ingest on identical frames.'
+    : 'Provider ingest and engine-only ingest are indistinguishable at this sample size; the decode measurement is the reliable figure.',
+};
+
+// ------------------------------------------- §96: concurrent live providers
+console.log('\n--- §96: concurrent live provider sessions ---------------------');
+console.log(`${pad('sessions', 10)}${rpad('total ms', 11)}  ${rpad('per session', 13)}  ${rpad('per frame', 11)}  refused`);
+
+const liveConcurrency = [];
+for (const n of [1, 2, 5, 10]) {
+  const prov = new ProductionCvProvider();
+  const ids = [];
+  let refused = 0;
+  for (let i = 0; i < n; i += 1) {
+    const b = prov.beginSession({ boxCamSessionId: `c${n}-${i}`, playerId: `p${i}`, protocolId: 'combine-box-touch-60', nonce: 'n' });
+    if (b.ok) ids.push(b.providerSessionId); else refused += 1;
+  }
+  const t0 = performance.now();
+  // Interleaved arrival, the realistic order.
+  for (let k = 0; k < decoded.length; k += 1) {
+    for (let i = 0; i < ids.length; i += 1) {
+      prov.ingestFrame({ providerSessionId: ids[i], boxCamSessionId: `c${n}-${i}`, nonce: 'n', seq: k + 1, frame: decoded[k] });
+    }
+  }
+  for (let i = 0; i < ids.length; i += 1) prov.finalize({ providerSessionId: ids[i] });
+  const totalMs = performance.now() - t0;
+  const frames = decoded.length * Math.max(1, ids.length);
+  liveConcurrency.push({ sessions: n, totalMs: r2(totalMs), perSessionMs: r2(totalMs / Math.max(1, ids.length)), msPerFrame: r3(totalMs / frames), refused });
+  console.log(`${pad(n, 10)}${rpad(r2(totalMs), 11)}  ${rpad(`${r2(totalMs / Math.max(1, ids.length))}ms`, 13)}  ${rpad(`${r3(totalMs / frames)}ms`, 11)}  ${refused}`);
+  prov.disposeAll();
+}
+report.liveConcurrency = liveConcurrency;
+
+// ------------------------------------------------------ §97: load shedding
+console.log('\n--- §97: load shedding at the concurrency ceiling ---------------');
+{
+  const prov = new ProductionCvProvider({ maxConcurrent: 4 });
+  const opened = [];
+  let busy = 0, busyError = null;
+  for (let i = 0; i < 8; i += 1) {
+    const b = prov.beginSession({ boxCamSessionId: `shed-${i}`, playerId: 'p', protocolId: 'combine-box-touch-60', nonce: 'n' });
+    if (b.ok) opened.push(b.providerSessionId);
+    else { busy += 1; busyError = b.error; }
+  }
+  console.log(`ceiling 4: opened ${opened.length}, refused ${busy} with "${busyError}"`);
+  // The property: refusal happens at the DOOR, not by accepting and dropping
+  // frames from an attempt the player believes is being observed.
+  const shedOk = opened.length === 4 && busy === 4 && busyError === 'provider_busy';
+  console.log(shedOk
+    ? 'a session over the ceiling is refused up front — never accepted and quietly starved'
+    : '*** load shedding did not behave as declared ***');
+  report.loadShedding = { ceiling: 4, opened: opened.length, refused: busy, error: busyError, correct: shedOk };
+  report.maxConcurrentSessions = MAX_CONCURRENT_SESSIONS;
+  if (!shedOk) failures.push('load shedding did not refuse at the concurrency ceiling');
+  prov.disposeAll();
+}
+
+// ------------------------------------------ §95: event loop with CV active
+console.log('\n--- §95: API responsiveness while CV sessions are active --------');
+{
+  const prov = new ProductionCvProvider();
+  const b = prov.beginSession({ boxCamSessionId: 'loop', playerId: 'p', protocolId: 'combine-box-touch-60', nonce: 'n' });
+  let i = 0;
+  const lag = await measureLoopLag({
+    durationMs: 400,
+    work: () => {
+      if (i >= decoded.length) i = 0;
+      prov.ingestFrame({ providerSessionId: b.providerSessionId, boxCamSessionId: 'loop', nonce: 'n', seq: 100000 + i, frame: decoded[i] });
+      i += 1;
+    },
+  });
+  console.log(`with an active CV session: mean ${lag.mean}ms  p95 ${lag.p95}ms  max ${lag.max}ms`);
+  console.log(`idle baseline (above):     mean ${idleLag.mean}ms  p95 ${idleLag.p95}ms`);
+  // §24/§95 — the measurement that decides whether a worker boundary is
+  // needed. A frame costs well under a millisecond and the loop is yielded
+  // between frames, so the answer here is no. The seam exists in the provider
+  // (`processFrame`) if a future measurement says otherwise.
+  const workerNeeded = lag.p95 > 50;
+  console.log(workerNeeded
+    ? '*** p95 lag above 50ms — §24 makes worker isolation mandatory ***'
+    : 'p95 lag is well inside budget: §24 is satisfied without a worker boundary, measured rather than assumed.');
+  report.eventLoopWithCv = { ...lag, workerIsolationRequired: workerNeeded };
+  prov.disposeAll();
+}
+
 fs.writeFileSync(OUT, `${JSON.stringify(report, null, 2)}\n`);
 console.log(`\nwritten to              m22/perf.json`);
+
+const failures = [];
 
 // -------------------------------------------------------------- verdict
 //
@@ -400,7 +574,6 @@ console.log(`\nwritten to              m22/perf.json`);
 // that fails on a wall-clock threshold fails for reasons that have nothing to
 // do with the code.
 
-const failures = [];
 if (leaked) failures.push('the session registry retained objects after every session ended');
 if (!bounded) failures.push('the frame queue is not bounded');
 if (afterTtl !== null) failures.push('an expired session was not released');

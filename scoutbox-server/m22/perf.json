@@ -1,6 +1,6 @@
 {
   "kind": "m22_perf",
-  "generatedAt": "2026-09-14T20:28:57.801Z",
+  "generatedAt": "2026-09-14T21:16:48.452Z",
   "engineVersion": 2,
   "node": "v22.22.2",
   "gcExposed": true,
@@ -12,17 +12,17 @@
       "frames": 116,
       "detectPerFrameMs": {
         "n": 116,
-        "mean": 0.342,
-        "p50": 0.252,
-        "p95": 0.992,
-        "max": 3.274
+        "mean": 0.305,
+        "p50": 0.233,
+        "p95": 0.933,
+        "max": 2.961
       },
-      "trackMs": 0.114,
-      "protocolMs": 0.002,
+      "trackMs": 0.167,
+      "protocolMs": 0.003,
       "qualityMs": 0.007,
-      "finalizeMs": 0.368,
+      "finalizeMs": 0.388,
       "timingNote": "per-finish layers are medians of 9 repeats; detection is per frame over the whole capture",
-      "detectPerMegapixelMs": 17.81
+      "detectPerMegapixelMs": 15.89
     },
     {
       "size": "240x180",
@@ -30,17 +30,17 @@
       "frames": 116,
       "detectPerFrameMs": {
         "n": 116,
-        "mean": 0.567,
-        "p50": 0.54,
-        "p95": 0.769,
-        "max": 0.992
+        "mean": 0.531,
+        "p50": 0.526,
+        "p95": 0.629,
+        "max": 0.755
       },
-      "trackMs": 0.177,
+      "trackMs": 0.163,
       "protocolMs": 0,
       "qualityMs": 0.001,
-      "finalizeMs": 0.306,
+      "finalizeMs": 0.341,
       "timingNote": "per-finish layers are medians of 9 repeats; detection is per frame over the whole capture",
-      "detectPerMegapixelMs": 13.12
+      "detectPerMegapixelMs": 12.29
     },
     {
       "size": "320x240",
@@ -48,106 +48,106 @@
       "frames": 116,
       "detectPerFrameMs": {
         "n": 116,
-        "mean": 0.898,
-        "p50": 0.852,
-        "p95": 0.915,
-        "max": 3.79
+        "mean": 0.978,
+        "p50": 0.875,
+        "p95": 1.612,
+        "max": 4.957
       },
-      "trackMs": 0.138,
+      "trackMs": 0.14,
       "protocolMs": 0,
       "qualityMs": 0.001,
-      "finalizeMs": 0.226,
+      "finalizeMs": 0.21,
       "timingNote": "per-finish layers are medians of 9 repeats; detection is per frame over the whole capture",
-      "detectPerMegapixelMs": 11.69
+      "detectPerMegapixelMs": 12.73
     }
   ],
   "detectionCostPerMegapixelMs": [
-    17.81,
-    13.12,
-    11.69
+    15.89,
+    12.29,
+    12.73
   ],
-  "detectionLinearityRatio": 1.52,
+  "detectionLinearityRatio": 1.29,
   "detectionAtWorstLinear": true,
   "byRate": [
     {
       "fps": 12,
       "frames": 58,
-      "ingestMs": 36.473,
-      "finalizeMs": 0.106,
-      "msPerFrame": 0.629,
+      "ingestMs": 34.353,
+      "finalizeMs": 0.098,
+      "msPerFrame": 0.592,
       "realtimeFactor": 0.01
     },
     {
       "fps": 24,
       "frames": 116,
-      "ingestMs": 67.252,
-      "finalizeMs": 0.195,
-      "msPerFrame": 0.58,
+      "ingestMs": 68.561,
+      "finalizeMs": 0.144,
+      "msPerFrame": 0.591,
       "realtimeFactor": 0.01
     },
     {
       "fps": 30,
       "frames": 144,
-      "ingestMs": 82.172,
-      "finalizeMs": 0.141,
-      "msPerFrame": 0.571,
+      "ingestMs": 79.8,
+      "finalizeMs": 0.157,
+      "msPerFrame": 0.554,
       "realtimeFactor": 0.02
     }
   ],
   "concurrency": [
     {
       "sessions": 1,
-      "totalMs": 67.35,
-      "perSessionMs": 67.35,
+      "totalMs": 67.28,
+      "perSessionMs": 67.28,
       "overheadPct": 0
     },
     {
       "sessions": 2,
-      "totalMs": 142.91,
-      "perSessionMs": 71.45,
-      "overheadPct": 6.09
+      "totalMs": 138,
+      "perSessionMs": 69,
+      "overheadPct": 2.56
     },
     {
       "sessions": 5,
-      "totalMs": 347.2,
-      "perSessionMs": 69.44,
-      "overheadPct": 3.1
+      "totalMs": 354.29,
+      "perSessionMs": 70.86,
+      "overheadPct": 5.32
     },
     {
       "sessions": 10,
-      "totalMs": 692.24,
-      "perSessionMs": 69.22,
-      "overheadPct": 2.78
+      "totalMs": 678.56,
+      "perSessionMs": 67.86,
+      "overheadPct": 0.86
     }
   ],
   "eventLoop": {
     "idle": {
-      "n": 81,
-      "mean": 0.036,
+      "n": 80,
+      "mean": 0.05,
       "p50": 0,
-      "p95": 0.077,
-      "max": 1.112
+      "p95": 0.054,
+      "max": 2.185
     },
     "ingesting": {
-      "n": 79,
-      "mean": 0.181,
-      "p50": 0.069,
-      "p95": 0.727,
-      "max": 1.646
+      "n": 80,
+      "mean": 0.216,
+      "p50": 0.17,
+      "p95": 0.629,
+      "max": 0.823
     }
   },
   "soak": {
     "sessions": 500,
     "framesPerSession": 29,
-    "totalMs": 8680.35,
-    "msPerSession": 17.36,
-    "heapBeforeMB": 5.21,
-    "heapAfterMB": 5.23,
+    "totalMs": 8523.57,
+    "msPerSession": 17.05,
+    "heapBeforeMB": 5.36,
+    "heapAfterMB": 5.38,
     "heapDeltaMB": 0.02,
     "heapSamples": [
       {
         "after": 100,
-        "heapMB": 5.19,
+        "heapMB": 5.35,
         "footprint": {
           "activeSessions": 0,
           "queuedFrames": 0,
@@ -166,7 +166,7 @@
       },
       {
         "after": 200,
-        "heapMB": 5.2,
+        "heapMB": 5.35,
         "footprint": {
           "activeSessions": 0,
           "queuedFrames": 0,
@@ -185,7 +185,7 @@
       },
       {
         "after": 300,
-        "heapMB": 5.23,
+        "heapMB": 5.38,
         "footprint": {
           "activeSessions": 0,
           "queuedFrames": 0,
@@ -204,7 +204,7 @@
       },
       {
         "after": 400,
-        "heapMB": 5.23,
+        "heapMB": 5.38,
         "footprint": {
           "activeSessions": 0,
           "queuedFrames": 0,
@@ -223,7 +223,7 @@
       },
       {
         "after": 500,
-        "heapMB": 5.23,
+        "heapMB": 5.38,
         "footprint": {
           "activeSessions": 0,
           "queuedFrames": 0,
@@ -268,5 +268,80 @@
     "runtimeReleasedAfterTtl": true,
     "detectionsRetained": 29,
     "retainsPixelBuffers": false
+  },
+  "transport": {
+    "decode": {
+      "n": 116,
+      "mean": 0.141,
+      "p50": 0.128,
+      "p95": 0.169,
+      "max": 0.459
+    },
+    "providerIngest": {
+      "n": 116,
+      "mean": 0.59,
+      "p50": 0.586,
+      "p95": 0.653,
+      "max": 0.748
+    },
+    "engineOnly": {
+      "n": 116,
+      "mean": 0.633,
+      "p50": 0.58,
+      "p95": 0.693,
+      "max": 3.584
+    },
+    "subtractionDiffMs": -0.043,
+    "noiseBandMs": 0.063,
+    "overheadResolved": false,
+    "transportOverheadMsPerFrame": null,
+    "providerFinalizeMs": 0.381,
+    "note": "Provider ingest and engine-only ingest are indistinguishable at this sample size; the decode measurement is the reliable figure."
+  },
+  "liveConcurrency": [
+    {
+      "sessions": 1,
+      "totalMs": 69.18,
+      "perSessionMs": 69.18,
+      "msPerFrame": 0.596,
+      "refused": 0
+    },
+    {
+      "sessions": 2,
+      "totalMs": 146.12,
+      "perSessionMs": 73.06,
+      "msPerFrame": 0.63,
+      "refused": 0
+    },
+    {
+      "sessions": 5,
+      "totalMs": 357,
+      "perSessionMs": 71.4,
+      "msPerFrame": 0.616,
+      "refused": 0
+    },
+    {
+      "sessions": 10,
+      "totalMs": 718.12,
+      "perSessionMs": 71.81,
+      "msPerFrame": 0.619,
+      "refused": 0
+    }
+  ],
+  "loadShedding": {
+    "ceiling": 4,
+    "opened": 4,
+    "refused": 4,
+    "error": "provider_busy",
+    "correct": true
+  },
+  "maxConcurrentSessions": 16,
+  "eventLoopWithCv": {
+    "n": 81,
+    "mean": 0.037,
+    "p50": 0,
+    "p95": 0.209,
+    "max": 0.8,
+    "workerIsolationRequired": false
   }
 }
