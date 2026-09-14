@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CANDIDATE_PROTOCOLS, CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION } from './policy.mjs';
+import { realWorldValidationPass, validationSummary } from './validation.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const EVAL_PATH = path.join(HERE, 'evaluation.json');
@@ -84,13 +85,12 @@ export function evaluateGate(report) {
   if (rate < ACCEPTANCE_CRITERIA.minCorrectVerdictRate) {
     failures.push(`correct-verdict rate ${(rate * 100).toFixed(1)}% is below ${(ACCEPTANCE_CRITERIA.minCorrectVerdictRate * 100).toFixed(0)}%`);
   }
-  // The criterion this build cannot satisfy, stated as a criterion rather
-  // than discovered as a surprise.
-  if (ACCEPTANCE_CRITERIA.requiresRealWorldValidation && report.realWorldValidation !== true) {
-    failures.push(
-      'no real-world validation: the evaluation set is synthetic, so counting accuracy on real football video is unevidenced',
-    );
-  }
+  // NOTE: the real-world validation criterion is deliberately NOT checked
+  // here. A synthetic evaluation artefact must never be able to assert its
+  // own real-world validity — that is exactly the bypass §38 exists to
+  // prevent. It is checked in `protocolProductionEnabled()` against the
+  // server-side versioned record in validation.mjs, which no evaluation
+  // run, client or request can write.
   return { open: failures.length === 0, failures };
 }
 
@@ -106,6 +106,7 @@ export function protocolProductionEnabled(protocolId, {
   providerCapabilities = [],
   environmentAllows = true,
   evaluation = null,
+  providerVersion = null,
 } = {}) {
   const reasons = [];
   const candidate = CANDIDATE_PROTOCOLS[protocolId] ?? null;
@@ -130,7 +131,33 @@ export function protocolProductionEnabled(protocolId, {
   const evalRes = evaluateGate(evaluation);
   if (!evalRes.open) reasons.push(...evalRes.failures);
 
-  return { enabled: reasons.length === 0, reasons };
+  // §38/§39 — THE HARD BLOCKER, applied last and independently.
+  //
+  // Everything above can be perfect: provider healthy, every capability
+  // present, every synthetic fixture passing, zero false verifications. None
+  // of it is evidence that this engine counts real football correctly, and
+  // production verification requires that evidence.
+  //
+  // The record is read from server-side release configuration. It cannot be
+  // set by a client, a request body, a provider payload, or an environment
+  // variable alone (§40, §41).
+  const rw = realWorldValidationPass(protocolId, {
+    engineVersion: CV_ENGINE_VERSION,
+    policyVersion: BOX_CAM_CV_POLICY_VERSION,
+    providerVersion,
+  });
+  if (!rw.pass) {
+    reasons.push(
+      `real-world validation is "${rw.status}" for this protocol — synthetic evaluation alone cannot authorise production measurement`,
+      ...rw.problems.filter((p) => !p.startsWith('real-world validation for this protocol is')),
+    );
+  }
+
+  return {
+    enabled: reasons.length === 0,
+    reasons,
+    realWorldValidation: { status: rw.status, pass: rw.pass },
+  };
 }
 
 /** A whole-matrix view for `/capabilities` and the documentation (§49, §68). */
@@ -143,7 +170,10 @@ export function productionMatrix(opts = {}) {
       enabled: r.enabled,
       state: r.enabled ? 'verified_capable' : 'not_verified_capable',
       reasons: r.reasons,
+      realWorldValidation: r.realWorldValidation ?? null,
     };
   }
   return out;
 }
+
+export { validationSummary };

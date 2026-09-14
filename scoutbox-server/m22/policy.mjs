@@ -56,6 +56,12 @@ export const CAPTURE_REQUIREMENTS = Object.freeze({
   maxFps: 30,
   minWidth: FRAME_LIMITS.minWidth,
   minHeight: FRAME_LIMITS.minHeight,
+  // §21 of the fix pack: below this sustained cadence an exact count cannot
+  // be established, because contacts fall between observations.
+  minSustainedFps: 12,
+  // unit — fraction of the attempt that may sit below minSustainedFps before
+  // exact measurement is refused.
+  maxLowFpsFrac: 0.2,
   // Only orientations actually exercised by the evaluation fixtures (§37).
   supportedOrientations: Object.freeze(['landscape', 'portrait']),
   // Web only (§39/§40). No native device tests exist, so no native claim.
@@ -97,37 +103,58 @@ export const DETECTION = Object.freeze({
 
 // ------------------------------------------------------------ event rules
 //
-// §21 (touch) and §23 (juggle). Both are stated as physical structure, not
-// as peak counting, because peak counting is exactly the mistake §23 warns
-// against.
+// §21 (touch) and §23 (juggle), and §17 (normalized geometry).
+//
+// EVERY spatial threshold here is expressed in BALL DIAMETERS, and every
+// velocity in ball diameters per second. That is the whole resolution- and
+// frame-rate-invariance story in one sentence: the same physical scene shot
+// at 240x180 or 960x720, at 15 fps or 60 fps, yields the same numbers,
+// because the ball is the ruler and seconds are the clock. Pixel-space and
+// per-frame constants are what make a detector silently resolution- and
+// cadence-dependent, so there are none left in the event rules.
+//
+// Unit key:  d  = ball diameters        d/s = ball diameters per second
+//            ms = milliseconds          —   = dimensionless ratio
 export const EVENT_RULES = Object.freeze({
-  // §21 refractory interval: two contacts closer than this are one contact
-  // observed twice, not two touches. Derived from the M16 drill thresholds
-  // already in the repository (box-touches repMinGapMs = 180).
+  // unit ms — §21 refractory. Two contacts closer together in TIME than this
+  // are one contact observed twice. Milliseconds, never frames (§6), so the
+  // rule means the same thing at every cadence.
   touchRefractoryMs: 180,
   juggleRefractoryMs: 300,
-  // A juggle contact is a REVERSAL: the ball is falling, then rising. To
-  // count, the flight that follows must clear this fraction of frame height,
-  // so a ball rolling along the ground with pixel jitter produces nothing.
-  juggleMinFlightFrac: 0.06,
-  // A touch is an IMPULSE: the ball's velocity vector changes by at least
-  // this many pixels per second, within contact range of the person region.
-  touchMinImpulsePxPerSec: 55,
-  // Contact range, as a fraction of the frame diagonal, between the ball
-  // centroid and the nearest edge of the person region. Beyond this the ball
-  // moved without anyone touching it.
-  touchMaxContactDistFrac: 0.22,
-  // §32: occlusion tolerance. The ball may be undetected for this many
-  // consecutive frames and the track survives; beyond it the track is broken.
+
+  // unit d — a juggle contact must be followed by a flight clearing this
+  // many ball diameters, measured relative to the player. Stops a ball
+  // resting on the ground with detector jitter producing counts.
+  juggleMinFlightDiameters: 0.9,
+
+  // unit d/s — a touch is an impulse: the ball's velocity vector, in the
+  // player's frame of reference, must change by at least this much.
+  touchMinImpulseDiametersPerSec: 4.5,
+
+  // unit d — contact range between ball centroid and the nearest edge of the
+  // player region. Beyond this the ball moved without anyone touching it.
+  touchMaxContactDiameters: 5.5,
+
+  // unit d — the ball must actually MOVE this far away from the player after
+  // a contact before another contact can be counted. This is the spatial
+  // half of the debounce (§6): the refractory timer alone cannot stop a ball
+  // resting against a foot from re-triggering, because time keeps passing.
+  touchMinSeparationDiameters: 1.2,
+
+  // unit frames — the ball may be undetected for this many consecutive
+  // frames and the track survives. Frame-based because it describes the
+  // TRACKER's tolerance for missing observations, not a physical duration;
+  // the physical limit is maxBallGapMs below and both apply.
   maxBallGapFrames: 4,
-  // Total fraction of the protocol window the ball may be missing before the
-  // attempt cannot be production verified at all.
+  // unit ms — the physical occlusion limit, cadence-independent.
+  maxBallGapMs: 400,
+
+  // unit — fraction of the attempt the ball may be missing in total.
   maxBallMissingFrac: 0.25,
-  // §34: more than one ball candidate of comparable size is a protocol
-  // violation. The engine does not choose which ball is the player's.
+
+  // unit — a rival blob this close in size to the primary is a second ball.
   secondBallMinAreaRatio: 0.6,
 });
-
 // ---------------------------------------------------------- confidence
 //
 // §19: this is MODEL CERTAINTY about an observation. It is never rendered as

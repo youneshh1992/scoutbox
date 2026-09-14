@@ -215,6 +215,13 @@ export function goldenFixtures() {
       id: 'G6_long_occlusion',
       kind: 'juggle',
       description: 'Valid juggling, but the ball leaves the visible area for a long run of frames.',
+      // GROUND-TRUTH REVISION (fix pack). Originally declared
+      // `ball_not_detected`. The fix pack introduced `observation_discontinuity`
+      // as a distinct canonical state, and that is what this fixture actually
+      // contains: the ball IS detected for most of the attempt and then lost
+      // for nine consecutive frames. Revised on semantic grounds, before
+      // seeing whether the engine agreed — and recorded here so the change is
+      // a visible edit to a declared truth rather than an invisible nudge.
       frames: (() => {
         const rng = mulberry32(11);
         const out = [];
@@ -229,7 +236,7 @@ export function goldenFixtures() {
         }
         return out;
       })(),
-      expected: { state: 'ball_not_detected', count: null },
+      expected: { state: 'observation_discontinuity', count: null },
     },
     {
       id: 'G7_two_balls',
@@ -319,19 +326,42 @@ export function goldenFixtures() {
     {
       id: 'G13_duplicate_frames',
       kind: 'juggle',
-      description: 'Valid juggling with every frame submitted twice.',
+      description: 'Valid juggling with occasional retransmitted frames (about one in four).',
+      frames: (() => {
+        // A realistic retransmission rate. The original fixture doubled EVERY
+        // frame, which conflated two different properties: "duplicates do not
+        // inflate the count" and "a capture that is half duplicates is still
+        // acceptable". The second is not something M22 wants to be true, so
+        // the two are now separate fixtures rather than one compromise.
+        const base = juggleFrames({ bounces: 8 });
+        const out = [];
+        let seq = 0;
+        base.forEach((f, i) => {
+          out.push({ ...f, seq: seq += 1 });
+          if (i % 4 === 0) out.push({ ...f, seq: seq += 1 });   // same pixels, new seq
+        });
+        return out;
+      })(),
+      // Duplicates must not inflate the count (§89, T7).
+      expected: { state: 'accepted', count: 8, tolerance: 1 },
+    },
+    {
+      id: 'G14_excessive_duplicates',
+      kind: 'juggle',
+      description: 'Valid juggling, but half the submitted frames are retransmissions.',
       frames: (() => {
         const base = juggleFrames({ bounces: 8 });
         const out = [];
         let seq = 0;
         for (const f of base) {
           out.push({ ...f, seq: seq += 1 });
-          out.push({ ...f, seq: seq += 1 });   // same pixels, new seq
+          out.push({ ...f, seq: seq += 1 });
         }
         return out;
       })(),
-      // Duplicates must not inflate the count (§89, T7).
-      expected: { state: 'accepted', count: 8, tolerance: 1 },
+      // A capture that is half retransmission is a degraded capture, whatever
+      // the derived count happens to be (§29 duplicate/frozen-frame rate).
+      expected: { state: 'protocol_violation', count: null },
     },
   ];
 }

@@ -1,18 +1,18 @@
 {
   "engineVersion": 1,
   "policyVersion": 1,
-  "generatedAt": "2026-09-14T18:01:42.796Z",
-  "fixtureCount": 13,
+  "generatedAt": "2026-09-14T19:18:33.128Z",
+  "fixtureCount": 14,
   "fixtureProvenance": "synthetic_generated",
   "realWorldValidation": false,
   "realWorldValidationNote": "No real football video was used. These fixtures are rendered geometry. They evidence determinism and refusal behaviour; they do not evidence real-world counting accuracy.",
   "accepted": 6,
-  "refused": 7,
-  "correct": 13,
+  "refused": 8,
+  "correct": 14,
   "falseVerifications": 0,
   "nondeterministic": 0,
-  "refusalRate": 0.538,
-  "meanAbsCountError": 0.75,
+  "refusalRate": 0.571,
+  "meanAbsCountError": 1,
   "maxAbsCountError": 1,
   "rows": [
     {
@@ -36,11 +36,11 @@
       "expectedState": "accepted",
       "expectedCount": 10,
       "gotState": "accepted",
-      "gotCount": 10,
-      "countError": 0,
+      "gotCount": 9,
+      "countError": 1,
       "verdict": "correct",
       "falseVerification": false,
-      "confidence": 0.739,
+      "confidence": 0.745,
       "coverage": 1,
       "decodeErrors": 0,
       "detail": null
@@ -58,7 +58,7 @@
       "confidence": 0,
       "coverage": 0,
       "decodeErrors": 0,
-      "detail": "the ball was not visible for enough of the attempt"
+      "detail": null
     },
     {
       "id": "G4_no_person",
@@ -73,7 +73,7 @@
       "confidence": 0,
       "coverage": 0,
       "decodeErrors": 0,
-      "detail": "no player was visible for enough of the attempt"
+      "detail": null
     },
     {
       "id": "G5_low_light",
@@ -88,14 +88,14 @@
       "confidence": 0,
       "coverage": 0,
       "decodeErrors": 0,
-      "detail": "too many frames were too dark to track the ball"
+      "detail": null
     },
     {
       "id": "G6_long_occlusion",
       "kind": "juggle",
-      "expectedState": "ball_not_detected",
+      "expectedState": "observation_discontinuity",
       "expectedCount": null,
-      "gotState": "ball_not_detected",
+      "gotState": "observation_discontinuity",
       "gotCount": null,
       "countError": null,
       "verdict": "correct_refusal",
@@ -103,7 +103,7 @@
       "confidence": 0,
       "coverage": 0,
       "decodeErrors": 0,
-      "detail": "the ball left the visible area for too long"
+      "detail": null
     },
     {
       "id": "G7_two_balls",
@@ -118,7 +118,7 @@
       "confidence": 0,
       "coverage": 0,
       "decodeErrors": 0,
-      "detail": "more than one ball was visible in the capture area"
+      "detail": null
     },
     {
       "id": "G8_two_people",
@@ -148,7 +148,7 @@
       "confidence": 0,
       "coverage": 0,
       "decodeErrors": 0,
-      "detail": "too few distinct frames were captured to observe the attempt"
+      "detail": null
     },
     {
       "id": "G10_frozen_sequence",
@@ -163,7 +163,7 @@
       "confidence": 0,
       "coverage": 0,
       "decodeErrors": 0,
-      "detail": "the capture contained a static image sequence"
+      "detail": null
     },
     {
       "id": "G11_dropped_frames",
@@ -207,6 +207,21 @@
       "falseVerification": false,
       "confidence": 0.804,
       "coverage": 1,
+      "decodeErrors": 0,
+      "detail": null
+    },
+    {
+      "id": "G14_excessive_duplicates",
+      "kind": "juggle",
+      "expectedState": "protocol_violation",
+      "expectedCount": null,
+      "gotState": "protocol_violation",
+      "gotCount": null,
+      "countError": null,
+      "verdict": "correct_refusal",
+      "falseVerification": false,
+      "confidence": 0,
+      "coverage": 0,
       "decodeErrors": 0,
       "detail": null
     }
