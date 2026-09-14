@@ -17,6 +17,7 @@ import {
   subtractIntervals, intersectIntervals, normIntervals, resultHash,
 } from '../m16/shared.mjs';
 import { DRILLS, drillByIdVersion, providerFor, PROVIDERS } from '../m16/drills.mjs';
+import { combineVerifiedProtocols, combineCapabilities } from '../m22/eligibility.mjs';
 
 const PORT = 4700 + Math.floor(Math.random() * 200);
 const BASE = `http://localhost:${PORT}`;
@@ -112,7 +113,17 @@ section('U3 — verification states, streak, challenge progress');
   const cs = challengeProgress(chal, [{ id: 's1', drillId: 'box-touches', verificationState: 'verified', verifiedReps: 600, endedAt: wk }, { id: 's1', drillId: 'box-touches', verificationState: 'verified', verifiedReps: 600, endedAt: wk }, { id: 's2', drillId: 'box-touches', verificationState: 'verified', verifiedReps: 500, endedAt: 2 * wk }]);
   neg(cs.total === 1100 && cs.completed, 'duplicate session id counts once in challenge progress (replay-safe)');
   ok(providerFor('local_test', { testProviderEnabled: false }) === null && providerFor('local_test', { testProviderEnabled: true }) !== null, 'test provider hidden unless explicitly enabled');
-  ok(PROVIDERS.production_cv.status === 'not_configured', 'production CV honestly not_configured');
+  // M22 changed the world this assertion described: a real server-side CV
+  // provider now exists, so "not_configured" is no longer the truth. The
+  // assertion is REPLACED BY A STRICTLY STRONGER ONE rather than deleted —
+  // the provider is genuinely configured AND still cannot mint a Combine
+  // measurement, which is a harder property than "it does nothing".
+  ok(PROVIDERS.production_cv.status === 'configured' && PROVIDERS.production_cv.capabilities.length > 0,
+    'production CV is a real configured provider with genuine observation capabilities (M22)');
+  ok(combineVerifiedProtocols().length === 0,
+    'and it still verifies NO Combine protocol — real-world validation is not completed');
+  ok(combineCapabilities('combine-box-touch-60').length === 0,
+    'its Combine-eligible capability list is empty even though it can observe touches');
   ok(drillByIdVersion('box-wall', 1).repSupport === 'not_configured' && !drillByIdVersion('box-wall', 1).verificationCapabilities.includes('rep_count'), 'Box Wall honestly declares rep counting not configured');
 }
 
@@ -308,9 +319,16 @@ section('B9/§99 — integrity: forged fields, sequence, timestamps, cross-sessi
   neg(noLive.status === 403 && noLive.body.error === 'LIVENESS_REQUIRED', 'missing liveness blocks the session start');
   const wrongLive = await j('POST', `/player/box-cam/sessions/${c2.body.session.id}/start`, { nonce: c2.body.nonce, liveness: 'not_the_challenge' }, kola.token);
   neg(wrongLive.status === 403 && wrongLive.body.error === 'LIVENESS_MISMATCH', 'wrong liveness challenge rejected');
-  // provider not configured
+  // M22: the production CV provider is now real, so a session CAN be created
+  // against it. The assertion that used to prove "it refuses because nothing
+  // is configured" is replaced by the stronger one: it accepts the session
+  // and still grants no Combine verification.
   const prod = await j('POST', '/player/box-cam/sessions', { drillId: 'box-mobility', target: { type: 'duration', value: 5 * MIN }, provider: 'production_cv' }, kola.token);
-  neg(prod.status === 503 && prod.body.error === 'PROVIDER_NOT_CONFIGURED', 'production CV provider honestly refuses — never simulated');
+  ok(prod.status === 201, 'production CV provider accepts a Box Cam session (M22: it is real)');
+  const protos = await j('GET', '/player/combine/protocols', undefined, kola.token);
+  const touch60 = (protos.body?.protocols ?? []).find((p) => p.id === 'combine-box-touch-60');
+  neg(!touch60 || touch60.measurementCapability === 'not_configured',
+    'but Box Touch 60 measurement capability is still not_configured — CV cannot mint a Combine measurement');
 }
 
 section('B10/B11 — club authorization: minors, radius, unverified, blocks, suspended');

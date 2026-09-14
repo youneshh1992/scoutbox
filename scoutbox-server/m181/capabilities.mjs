@@ -12,8 +12,11 @@
  * and one sentence on what its absence means.
  */
 
+import { combineVerifiedProtocols } from '../m22/eligibility.mjs';
 export const CAPABILITY_STATES = ['configured', 'not_configured', 'test_only'];
 
+// M22: the Combine gate is read here, not restated. If eligibility ever
+// changes it changes in one place and every surface follows.
 export function buildCapabilityReport({ env = process.env, rateLimit = null, providers = [], extra = {} } = {}) {
   const flag = (v) => !!v && String(v).trim() !== '';
 
@@ -37,8 +40,24 @@ export function buildCapabilityReport({ env = process.env, rateLimit = null, pro
       production_cv: {
         state: productionCv.length ? 'configured' : (testOnlyAvailable ? 'test_only' : 'not_configured'),
         note: productionCv.length
-          ? 'A production observation provider is available.'
+          ? 'Box Cam uses server-side computer vision to observe supported activity. Combine verification for these CV protocols remains disabled pending real-world validation.'
           : `No production computer-vision provider is configured.${limitedOnly ? ' Web capture observes player presence and active duration only — it cannot count repetitions or classify technique.' : ''} Combine metrics that need a real detector are reported as unsupported, never estimated.`,
+        // §29 — the four facts that must never collapse into one word. A
+        // reader who sees only `state: configured` would reasonably conclude
+        // that CV measurements are available; these say otherwise, in the
+        // same object, without needing a second request.
+        serverSideObservation: productionCv.length > 0,
+        syntheticEvaluation: productionCv.length ? 'passed' : 'not_run',
+        realWorldValidation: 'not_completed',
+        combineVerifiedProtocols: combineVerifiedProtocols(),
+        combineVerificationAvailable: combineVerifiedProtocols().length > 0,
+        // Deliberately no machine code here. `realWorldValidation` above
+        // already carries the reason, and the canonical code
+        // (REAL_WORLD_VALIDATION_NOT_COMPLETED) is 35 characters of
+        // underscore-separated capitals — which is exactly the shape the
+        // §36 secret-scan heuristic looks for on this unauthenticated
+        // endpoint. Repeating it here bought nothing and tripped a real
+        // guard, so the guard wins.
       },
       distributed_rate_limit: rateLimit
         ? { state: rateLimit.capability().state, note: rateLimit.capability().note }

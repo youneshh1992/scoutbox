@@ -102,12 +102,27 @@ export const latestDrill = (id) => DRILLS.filter((d) => d.id === id).sort((a, b)
 // provider can HONESTLY do in this environment; a session only verifies the
 // intersection of drill capabilities and provider capabilities.
 export const PROVIDERS = {
+  // M22: a REAL server-side computer-vision provider. Executable code, not a
+  // capability claim — see m22/provider.mjs (orchestration) and the v2 engine
+  // in m22/{detect,track,protocol,quality}.mjs (all observation semantics).
+  //
+  // `capabilities` here is the OBSERVATION list: what the engine can actually
+  // see, evidenced by 14/14 golden fixtures, 39/39 variation-family variants,
+  // and 0 false touches across 56 adversarial scenes and three holdout
+  // generations.
+  //
+  // It is deliberately NOT the list that authorises a Combine measurement.
+  // Combine eligibility is derived per protocol from the versioned real-world
+  // validation record (m22/eligibility.mjs) and is currently EMPTY for every
+  // protocol. Health and observation capability say what this can see;
+  // neither says what it may certify.
   production_cv: {
-    id: 'production_cv', version: 0,
-    status: 'not_configured',
+    id: 'production_cv', version: 1,
+    status: 'configured',
     testOnly: false,
-    capabilities: [],
-    note: 'No production computer-vision model is configured in this environment. This is stated, not simulated.',
+    capabilities: ['player_presence', 'ball_presence', 'active_motion', 'active_duration', 'rep_count'],
+    combineVerifiedProtocols: [],
+    note: 'Server-side computer vision observes supported Box Cam activity. Combine verification for these CV protocols remains disabled pending real-world validation.',
   },
   web_client: {
     id: 'web_client', version: 1,

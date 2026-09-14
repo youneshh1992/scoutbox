@@ -13,6 +13,7 @@ import { DRILLS, PROVIDERS } from './drills.mjs';
 import { registerBoxCamSessions } from './sessions.mjs';
 import { registerBoxTraining } from './training.mjs';
 import { registerCombine } from './combine.mjs';
+import { registerM22Routes } from '../m22/routes.mjs';
 
 export function registerM16(ctx) {
   const { db } = ctx;
@@ -25,6 +26,11 @@ export function registerM16(ctx) {
   db.boxCamPrefs ??= [];
   db.combineAttempts ??= [];    // M16.1 At-Home Combine (measurement layer over Box Cam)
   db.combineRequests ??= [];
+  // M22: canonical provider observation results. Derived metadata only —
+  // counts, presence, durations, integrity counters and bounded event
+  // timestamps. There is deliberately no frame store, and §117 records why:
+  // frames are ephemeral by design, so nothing about them needs representing.
+  db.boxCamCvResults ??= [];
 
   // Privacy-safe operational metrics — counters only, never player labels.
   metrics.boxCam = {
@@ -37,6 +43,8 @@ export function registerM16(ctx) {
     combine_attempt_incomplete: 0, combine_attempt_invalidated: 0, combine_practice_started: 0,
     combine_request_created: 0, combine_request_completed: 0, club_combine_created: 0,
     combine_measurement_provider_error: 0,
+    // M22 production CV provider
+    box_cam_cv_sessions_started: 0, box_cam_cv_accepted: 0, box_cam_cv_refused: 0,
   };
   const vmetric = (k, n = 1) => { metrics.boxCam[k] = (metrics.boxCam[k] ?? 0) + n; };
 
@@ -56,5 +64,6 @@ export function registerM16(ctx) {
   registerBoxTraining(shared);   // sets onSessionFinalized/prefs/views on ctx
   registerBoxCamSessions(shared); // sets boxMintSession/boxCompleteSession/boxSessionView
   registerCombine(shared);        // At-Home Combine — chains onSessionFinalized, reuses Box Cam
+  registerM22Routes(shared);      // M22 production CV: frame transport, Ready Check, diagnostics
   return shared;
 }

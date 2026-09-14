@@ -1095,8 +1095,22 @@ section('§17 — G1–G15, the mandate’s positive journeys');
   const cvState = caps?.computerVision?.state ?? caps?.capabilities?.computer_vision?.state ?? JSON.stringify(caps).match(/"state":"(test_only|not_configured|configured)"/)?.[1];
   G(6, web.status === 422 && web.body.error === 'MEASUREMENT_NOT_SUPPORTED',
     'a production target can only be met by a production measurement — and this build refuses to produce one it cannot make');
-  ok(cvState !== 'configured',
-    `the capability report agrees that no production detector is configured (${cvState}) — the target stays honest rather than green`);
+  // M22: the detector now EXISTS. The honest outcome is unchanged and the
+  // reason is better — the target stays un-met not because nothing can see
+  // the activity, but because seeing it is not the same as being permitted to
+  // publish a standardised measurement of it. §64: an unvalidated
+  // production_cv result must not satisfy a production Combine target.
+  const prodCv = caps?.capabilities?.production_cv ?? {};
+  ok(prodCv.state === 'configured' && prodCv.realWorldValidation === 'not_completed',
+    `the capability report says the detector is configured but not real-world validated (${prodCv.state}/${prodCv.realWorldValidation})`);
+  const prodAttempt = await j('POST', '/player/combine/attempts', { protocolId: 'combine-box-control-60', provider: 'production_cv' }, kola.token);
+  G(6, prodAttempt.status === 422 && prodAttempt.body.reason === 'REAL_WORLD_VALIDATION_NOT_COMPLETED',
+    `a production_cv Combine attempt is refused as unvalidated — the target stays honest rather than green (got ${prodAttempt.status} ${JSON.stringify(prodAttempt.body?.error ?? prodAttempt.body)?.slice(0, 120)})`);
+  ok(prodAttempt.body.observationSupported === true,
+    'and the refusal distinguishes "cannot observe" from "observes but may not certify"');
+  const afterProd = (await j('GET', `/org/development/plans/${c3Plan}`, undefined, maria.token)).body.goals.find((x) => x.id === c3Goal).targetState;
+  ok(afterProd.state === 'no_current_valid_measurement',
+    'and the M21 development target is still not met after that attempt');
   ok(evaluateTarget({
     target: validateTarget({ sourceType: 'combine_attempt', protocolId: 'combine-box-control-60', operator: 'gte', value: 30 }).value,
     attempts: [{ id: 'a', playerId: 'p', protocolId: 'combine-box-control-60', protocolVersion: 1, provider: 'web_client', combineState: 'combine_verified', measuredValue: 41, boxSessionId: 's', completedAt: NOW }],

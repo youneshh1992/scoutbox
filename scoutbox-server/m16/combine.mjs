@@ -25,6 +25,8 @@ import {
   liveCombineState,
 } from './combineShared.mjs';
 import { rateLimitedBody } from '../m181/rateLimit.mjs';
+import { combineCapabilities } from '../m22/eligibility.mjs';
+import { CV_PROVIDER_ID } from '../m22/policy.mjs';
 
 const PROD_PROVIDER_ID = 'web_client'; // the best honest production provider here
 
@@ -43,6 +45,35 @@ export function registerCombine(ctx) {
   const ageOf = (p) => { try { return Math.floor((Date.now() - new Date(p.dob).getTime()) / (365.25 * 86_400_000)); } catch { return null; } };
   const prodProvider = PROVIDERS[PROD_PROVIDER_ID];
 
+  // ------------------------------------------------- M22: the Combine gate
+  //
+  // THE distinction M22 turns on. A provider's `capabilities` list is what it
+  // can OBSERVE. That is the right input for Box Cam, and the wrong input for
+  // Combine, because a Combine measurement is a standardised, comparable
+  // NUMBER and comparability is a claim about the real world.
+  //
+  // `production_cv` genuinely observes touches, so handing its observation
+  // list to `measurementSupported()` would mint Combine Verified off synthetic
+  // evidence alone. Instead its Combine list is derived per protocol from the
+  // versioned real-world validation record, and is currently empty for every
+  // protocol. No argument to this function can change that — see
+  // m22/eligibility.mjs.
+  //
+  // Other providers are unaffected: `web_client` is honestly limited and
+  // `local_test` is test-only and already cannot reach production.
+  // NOTE ON THE CONSTANT ABOVE. `PROD_PROVIDER_ID` is a historical misnomer:
+  // it is 'web_client', and it meant "the best honest provider available here"
+  // back when no real CV existed. It does NOT mean production_cv. An earlier
+  // cut of this function compared against it and therefore handed
+  // production_cv its OBSERVATION list — opening the gate completely. The
+  // comparison is against the literal CV provider id for that reason.
+  const combineCapsFor = (providerId, protocolId) => {
+    const prov = PROVIDERS[providerId];
+    if (!prov) return [];
+    if (providerId !== CV_PROVIDER_ID) return prov.capabilities ?? [];
+    return combineCapabilities(protocolId, { providerCapabilities: prov.capabilities ?? [] });
+  };
+
   // Rate limits (per §109 / §76): attempt creation and request creation.
   // M18.1: the shared limiter and its named policy (see m181/rateLimit.mjs).
   const limited = (action, keyPart) => !!ctx.rateLimit?.limited(action, keyPart);
@@ -55,7 +86,20 @@ export function registerCombine(ctx) {
     requiredCapabilities: p.requiredCapabilities,
     // Honest, device-aware capability: is this measurable on the production
     // provider here? The test/demo provider can simulate the rest.
-    measurementCapability: measurementCapability(p, prodProvider.capabilities),
+    // Combine capability, not observation capability (M22). A protocol the
+    // engine can observe but has not been real-world validated for reports
+    // `not_configured` here, which is the truth about MEASUREMENT.
+    // MEASUREMENT capability across the providers a player can actually use,
+    // with production_cv gated by real-world validation. Currently this is
+    // web_client's honest list plus an empty CV list, so ball protocols stay
+    // not_configured — which is the truth about MEASUREMENT.
+    measurementCapability: measurementCapability(p, [
+      ...combineCapsFor(PROD_PROVIDER_ID, p.id),
+      ...combineCapsFor(CV_PROVIDER_ID, p.id),
+    ]),
+    // OBSERVATION capability, reported separately and never collapsed into the
+    // line above: the CV engine can genuinely see these activities.
+    observationCapability: measurementCapability(p, PROVIDERS[CV_PROVIDER_ID]?.capabilities ?? []),
     demoSupported: testProviderEnabled && measurementSupported(p, PROVIDERS.local_test.capabilities),
     setupRequirements: p.setupRequirements, cameraRequirements: p.cameraRequirements,
     spaceRequirements: p.spaceRequirements, equipmentRequirements: p.equipmentRequirements,
@@ -250,12 +294,21 @@ export function registerCombine(ctx) {
     // the count/duration/interval library is supported; future athletic
     // protocols need capabilities no provider has, so they stay unsupported
     // everywhere.)
-    if (!measurementSupported(proto, provider.capabilities)) {
+    const combineCaps = combineCapsFor(provider.id, proto.id);
+    if (!measurementSupported(proto, combineCaps)) {
       vmetric('combine_measurement_provider_error');
+      const observationOnly = measurementSupported(proto, provider.capabilities ?? []);
       return res.status(422).json({
         error: 'MEASUREMENT_NOT_SUPPORTED',
-        message: 'This Combine measurement is not yet supported on this device. ScoutBox does not estimate or fabricate a result.',
-        missingCapabilities: proto.requiredCapabilities.filter((c) => !provider.capabilities.includes(c)),
+        message: observationOnly
+          ? 'Box Cam can observe this activity, but Combine verification is not available yet for this protocol. Real-world validation has not been completed.'
+          : 'This Combine measurement is not yet supported on this device. ScoutBox does not estimate or fabricate a result.',
+        // Distinguishes "the engine cannot see this" from "the engine sees it
+        // but is not permitted to certify it" — different facts, different
+        // remedies, and collapsing them is how a blocker gets argued away.
+        reason: observationOnly ? 'REAL_WORLD_VALIDATION_NOT_COMPLETED' : 'MEASUREMENT_NOT_SUPPORTED',
+        observationSupported: observationOnly,
+        missingCapabilities: proto.requiredCapabilities.filter((c) => !combineCaps.includes(c)),
       });
     }
 
@@ -365,7 +418,8 @@ export function registerCombine(ctx) {
     const r = measureAttempt({
       protocolDef: proto, session,
       calibrationPassed,
-      providerCapabilities: provider?.capabilities ?? [],
+      // M22: the Combine-eligible list, never the observation list.
+      providerCapabilities: combineCapsFor(session.provider, a.protocolId),
       mode: a.mode,
     });
     a.measuredValue = r.measuredValue;

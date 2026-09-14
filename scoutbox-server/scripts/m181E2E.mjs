@@ -613,7 +613,18 @@ section('§35 — /capabilities is reachable and honest about this deployment');
   ok(r.status === 200, 'the report is served');
   ok(r.body.mode === 'development', 'it names the mode it is running in');
   ok(r.body.capabilities.distributed_rate_limit.state === 'not_configured', 'and does not claim a distributed rate limiter');
-  ok(r.body.capabilities.production_cv.state === 'test_only', 'with the simulator enabled it says test_only, not configured');
+  // M22 replaced the fact this asserted. A genuine production CV provider now
+  // exists, so `configured` is the truth and `test_only` would be a lie. The
+  // assertion becomes stronger, not weaker: the report must say the provider
+  // is configured AND that Combine verification is still unavailable, which
+  // is the distinction §29 exists to protect.
+  ok(r.body.capabilities.production_cv.state === 'configured',
+    'a real production CV provider is reported as configured (M22)');
+  ok(r.body.capabilities.production_cv.realWorldValidation === 'not_completed'
+    && r.body.capabilities.production_cv.combineVerificationAvailable === false
+    && Array.isArray(r.body.capabilities.production_cv.combineVerifiedProtocols)
+    && r.body.capabilities.production_cv.combineVerifiedProtocols.length === 0,
+    'and the same report says real-world validation is not completed and no Combine protocol is verified');
   const capsRaw = JSON.stringify(r.body);
   neg(!/smtp:\/\/|postgres:\/\/|redis:\/\/|Bearer |[A-Za-z0-9_-]{32,}/.test(capsRaw),
     'no connection string, bearer token or key-shaped value appears anywhere in it');
