@@ -176,8 +176,29 @@ Synthetic evidence only. Holdout held out from development, not reality. Over-ca
 ## 46. Full regression
 23/23 server suites · 4/4 client typechecks · 14/14 demo and E2E suites · `m22Live` 41 checks · `apiE2E` 130 checks against a live server. No prior assertion weakened; three **strengthened** (m16E2E, m181E2E, m21E2E) where they encoded "no production CV exists", which is now false.
 
+Then the historical **live browser battery**, run end to end after the report was written, because a milestone that changed a shared client is not regressed until the older journeys have driven that client in a real browser:
+
+| | |
+|---|---|
+| m12 · m13 · m14 · m15 | PASS |
+| m16 · m16.2 · m17 · m18 | PASS |
+| m18.1 · m18.2 · m19 · m20 · m21 | PASS |
+| navLive · liveIntegration | PASS |
+
+15 of 15, 7m16s of wall clock, no retries and no quarantined case.
+
 ## 47. Artifacts
-Launcher rebuilt with the 16-step M22 tour, build chip and footer at commit `af19d1f`. One stale M21 claim ("production_cv is not configured") corrected in place rather than left describing the current build.
+Launcher rebuilt with the 16-step M22 tour, build chip and footer. One stale M21 claim ("production_cv is not configured") corrected in place rather than left describing the current build.
+
+Republished at their existing URLs — the same links, so nothing anyone has bookmarked breaks:
+
+| Artifact | Why |
+|---|---|
+| App Launcher | the M22 tour, and the corrected M21 claim |
+| ScoutBox Player | the Box Cam CV surface: Ready Check, live attempt, observed result, refusal, and the Combine notice on all three |
+| Connected Demo | it embeds the player app, so it carries the same surface |
+
+**Pro, Grassroots and Trust & Safety were deliberately not republished.** No source file in any of the three changed during M22 (`git diff 31d48b1..HEAD` over their `src/` trees is empty), so a republish would have pushed an identical build and only made the version history harder to read. Not republishing them is the accurate action, not a skipped one.
 
 ## 48. Changed files
 46 files, +4,831 / −122 across the provider wiring phase.
@@ -199,7 +220,9 @@ Source `af19d1f` · branch `claude/desktop-project-migration-wyk3ec` · engine v
 Scans: secret scan clean (one hit, a deliberately fake SMTP fixture used to assert the capability report does not leak it); raw-frame scan clean (every `cvFrames` hit is the absence being documented or asserted); model/weights scan clean — no `.onnx`, `.pt`, `.tflite`, `.pb`, `.h5` or `.weights` file exists.
 
 ## 51. Git state
-Branch `claude/desktop-project-migration-wyk3ec`, 133 commits ahead of origin once this report is committed (132 at the point the restore bundle above was cut), clean working tree.
+Branch `claude/desktop-project-migration-wyk3ec`, 135 commits ahead of origin once this report is committed (132 at the point the restore bundle above was cut; the three since are this report, the launcher build chip, and this revision of the report).
+
+The restore bundle in §50 is therefore a snapshot of the code, not of the documentation: every executable change it contains is the change that shipped, and the three commits after it touch only `M22_PROVIDER_REPORT.md` and the launcher's build chip.
 
 **Nothing pushed. No PR opened.**
 
