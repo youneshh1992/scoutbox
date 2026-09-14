@@ -505,6 +505,80 @@ section('§2 — the release state, restated at the end');
   }
 }
 
+// =====================================================================
+section('§116–§122 — migration, clean boot, upgrade and restart');
+// =====================================================================
+{
+  const { MIGRATIONS, SCHEMA_VERSION, runMigrations: migrate, schemaReport } = await import('../m182/migrations.mjs');
+
+  const step = MIGRATIONS.find((m) => m.id === 'm220_001_box_cam_cv_results');
+  ok(!!step, '§116. an M22 migration step exists');
+  ok(SCHEMA_VERSION === 2200, `§116. the schema version moved to ${SCHEMA_VERSION}`);
+
+  // §117 — the reuse audit, enforced rather than only written down.
+  neg(!MIGRATIONS.some((m) => JSON.stringify(m.up.toString()).includes('cvFrames')),
+    '§117. no migration creates a cvFrames store');
+  const allUp = MIGRATIONS.map((m) => m.up.toString()).join('\n');
+  neg(!/frame|pixel|video|blob/i.test(allUp.replace(/boxCamCvResults/g, '')),
+    '§117. and no migration creates any frame, pixel, video or blob store');
+
+  // §118 — a clean database gets the store from the MIGRATION, not the seed.
+  {
+    const fresh = {};
+    migrate(fresh);
+    ok(Array.isArray(fresh.boxCamCvResults),
+      '§118. a clean database initialises boxCamCvResults independently of any demo seed');
+    ok(fresh.schema.version === SCHEMA_VERSION, '§118. and lands on the current schema version');
+    neg(fresh.cvFrames === undefined, '§118. and no frame store is created');
+  }
+
+  // §119 — an M21-era database upgrades without losing anything.
+  {
+    const m21db = {
+      schema: { version: 2100, migrations: MIGRATIONS.filter((m) => m.id !== 'm220_001_box_cam_cv_results').map((m) => m.id) },
+      boxSessions: [{ id: 'boxs-legacy', playerId: 'p' }],
+      developmentPlans: [{ id: 'dp-legacy' }],
+      combineAttempts: [{ id: 'catt-legacy' }],
+    };
+    const r = migrate(m21db);
+    ok(m21db.schema.version === SCHEMA_VERSION, `§119. an M21 database upgrades 2100 → ${SCHEMA_VERSION}`);
+    ok(r.ran.includes('m220_001_box_cam_cv_results'), '§119. running exactly the new step');
+    ok(Array.isArray(m21db.boxCamCvResults) && m21db.boxCamCvResults.length === 0,
+      '§119. the new store appears empty');
+    ok(m21db.boxSessions.length === 1 && m21db.developmentPlans.length === 1 && m21db.combineAttempts.length === 1,
+      '§119. and every prior record survives untouched');
+  }
+
+  // §120 — restart idempotency.
+  {
+    const db2 = {};
+    migrate(db2);
+    db2.boxCamCvResults.push({ providerSessionId: 'pcv_x', outcome: 'accepted' });
+    const again = migrate(db2);
+    neg(again.ran.length === 0, '§120. a second boot runs no migration step');
+    ok(db2.boxCamCvResults.length === 1, '§120. and does not disturb the stored result');
+    ok(schemaReport(db2).upToDate === true, '§120. the schema reports itself up to date');
+  }
+}
+
+// =====================================================================
+section('§121/§122 — boot mode is honest about what is built in');
+// =====================================================================
+{
+  // The CV engine has no model file, no download and no configuration, so the
+  // honest report is `configured` rather than a pretence that setup is
+  // pending. §122: because it is built in, its absence cannot fail boot —
+  // there is nothing to be absent. Core ScoutBox is up, which this whole
+  // suite has been proving for ninety-odd checks.
+  const caps = (await j('GET', '/capabilities')).body;
+  ok(caps.capabilities.production_cv.state === 'configured',
+    '§121. a built-in provider with no external dependency reports configured, not pending setup');
+  const health = (await j('GET', '/healthz')).status;
+  ok(health === 200, '§122. and the server is serving — a built-in provider cannot fail boot by being absent');
+  neg(caps.capabilities.production_cv.combineVerificationAvailable === false,
+    '§121. and being configured still does not make Combine verification available');
+}
+
 // ---------------------------------------------------------------- report
 const total = passed;
 const ratio = total ? Math.round((negatives / total) * 100) : 0;

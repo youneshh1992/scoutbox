@@ -26,7 +26,7 @@
  * snapshot store has no concept of one and inventing it here would be theatre.
  */
 
-export const SCHEMA_VERSION = 2100; // 21.0.0
+export const SCHEMA_VERSION = 2200; // 22.0.0
 
 /**
  * Every step is idempotent: running it twice is the same as running it once.
@@ -105,6 +105,44 @@ export const MIGRATIONS = [
         'developmentPlans', 'developmentGoals', 'developmentActions',
         'developmentEvidenceLinks', 'developmentReviews',
       ]) db[k] ??= [];
+    },
+  },
+  {
+    id: 'm220_001_box_cam_cv_results',
+    // ONE store, and the §117 reuse audit that justifies it.
+    //
+    // What was considered first, and why each was rejected:
+    //
+    //   db.boxSessions (M16) — holds the Box Cam session: target, liveness,
+    //     aggregated observation intervals, verification state. A provider
+    //     observation result is a DIFFERENT record with a different lifecycle:
+    //     one Box Cam session can open, cancel and re-open provider sessions,
+    //     and a provider result carries engine/policy/provider versions that
+    //     the session does not and must not inherit. Widening boxSessions to
+    //     hold it would make those versions look like session properties,
+    //     which is exactly the confusion the M16 drill-version pinning exists
+    //     to avoid.
+    //
+    //   db.combineAttempts (M16.1) — is the MEASUREMENT layer. Putting an
+    //     observation result there would imply every observation is a
+    //     candidate measurement, which is the precise claim M22 refuses to
+    //     make. A Box Cam observed result exists whether or not any Combine
+    //     protocol is eligible, and most are not.
+    //
+    //   db.boxSessionEvents — reserved and unused since M16; it was designed
+    //     for per-event aggregate rows, and reviving it for provider results
+    //     would give one collection two unrelated meanings across milestones.
+    //
+    // So: one new collection, holding derived metadata only.
+    //
+    // WHAT IS NOT HERE, DELIBERATELY (§116, §117): there is no `cvFrames`
+    // table, no frame column, no blob store and no video reference. Frames are
+    // ephemeral by construction — validated, decoded, handed to the engine and
+    // dropped — so there is nothing about them for a schema to represent. A
+    // store would be the first place a "just for debugging" frame could land.
+    note: 'Box Cam CV provider observation results (derived metadata only). No frame store exists, by design.',
+    up(db) {
+      db.boxCamCvResults ??= [];
     },
   },
 ];
