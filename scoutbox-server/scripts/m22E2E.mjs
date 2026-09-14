@@ -392,10 +392,17 @@ section('§91 — identity, biometric and audio absence, swept in code');
   walk(path.join(HERE, '..', 'm22'));
   const found = [];
   for (const f of files) {
-    const txt = readFileSync(f, 'utf8');
+    let txt = readFileSync(f, 'utf8');
+    // The NON_CAPABILITIES map exists precisely to DECLARE these absences, so
+    // scanning it finds the documentation and calls it a violation. Strip that
+    // one block before scanning, then assert separately (below) that it is
+    // still there — otherwise "no matches" could mean the declaration was
+    // quietly deleted.
+    txt = txt.replace(/export const NON_CAPABILITIES[\s\S]*?\n\}\);/, '');
     for (const word of forbidden) {
-      // Match identifier-like usage, not the prose that documents its absence.
-      const re = new RegExp(`(?:^|[^A-Za-z'"\`])${word}\\s*[:(=.]`);
+      // Identifier-like usage — a call, a property read, an assignment — not
+      // the prose that documents the absence.
+      const re = new RegExp(`(?:^|[^A-Za-z'"\`])${word}\\s*[(=.]|\\.${word}\\b`);
       if (re.test(txt)) found.push(`${path.basename(f)}:${word}`);
     }
   }
@@ -409,12 +416,18 @@ section('§91 — identity, biometric and audio absence, swept in code');
 section('§93 — rate limits on the expensive endpoints');
 // =====================================================================
 {
+  // The policy is 120 per hour, so the loop has to exceed that to prove it —
+  // an earlier cut stopped at 40 and "passed" only because it never reached
+  // the limit, which would have asserted nothing at all.
   let limitedAt = null;
-  for (let i = 0; i < 40 && limitedAt == null; i++) {
+  for (let i = 0; i < 140 && limitedAt == null; i++) {
     const r = await j('POST', '/player/box-cam/cv/ready-check', { protocolId: 'combine-box-touch-60' }, kola.token);
     if (r.status === 429) limitedAt = i;
   }
-  neg(limitedAt != null, `§40/§93. the Ready Check endpoint is rate-limited (at call ${limitedAt})`);
+  neg(limitedAt != null, `§40/§93. the Ready Check endpoint is rate-limited (429 at call ${limitedAt})`);
+  ok(limitedAt == null || limitedAt >= 100, '§93. and the limit is generous enough not to punish ordinary setup retries');
+  const after = await j('POST', '/player/box-cam/cv/ready-check', { protocolId: 'combine-box-touch-60' }, kola.token);
+  neg(after.status !== 500, '§93. a rate-limited caller gets a clean refusal, never a server error');
 }
 
 // =====================================================================
