@@ -14,7 +14,7 @@
 //   3. Nothing the player, their guardian, another club or (by default) Trust
 //      & Safety can read is ever written here.
 import {
-  ROOM_STATUSES, ROOM_STATUS_LABELS, OPEN_ROOM_STATUSES, ROOM_TRANSITIONS,
+  ROOM_STATUSES, ROOM_STATUS_LABELS, OPEN_ROOM_STATUSES, ROOM_TRANSITIONS, REOPENED_FROM,
   PRO_STAGES, GRASSROOTS_STAGES, stageForRoomStatus, roomStatusForStage,
   validateTransition, validateReasonCodes, validateDecision, REASON_CODES,
   ALL_REASON_CODES, PROHIBITED_REASON_CODES, RECOMMENDATIONS,

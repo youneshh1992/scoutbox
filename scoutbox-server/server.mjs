@@ -3872,7 +3872,18 @@ void m21Ctx;
 // through M17's single writer (ctx.applyLifecycleTransition), so `case.stage`
 // and `room.status` still cannot disagree, and it stores nothing of its own.
 migrateM23(db);
-registerM23({ ...m19Ctx, isAdult });
+registerM23({
+  ...m19Ctx,
+  isAdult,
+  // M17's room seams live on the object registerM17 returned; registerM18
+  // returns a fresh object, so they do not arrive via m19Ctx. Passed
+  // explicitly rather than re-derived: findRoom is the 404-concealing lookup
+  // and applyLifecycleTransition is the single status writer, and M23 must use
+  // exactly those two rather than its own copies.
+  findRoomForRequest: m17Ctx.findRoomForRequest,
+  applyLifecycleTransition: m17Ctx.applyLifecycleTransition,
+  roomIsRoom: m17Ctx.roomIsRoom,
+});
 
 // ------------------------------------------------- M18.1 operator surface
 // What this deployment can and cannot actually do. ScoutBox is careful to be
