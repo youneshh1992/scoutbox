@@ -778,18 +778,38 @@ section('§43 — a production boot refuses simulated faults and exposes no faul
   children.push(withFaults);
   const exited = await new Promise((resolve) => { const t = setTimeout(() => resolve(null), 8000); withFaults.on('exit', (code) => { clearTimeout(t); resolve(code); }); });
   neg(exited !== null && exited !== 0, `a production boot with SCOUTBOX_FAULTS set exits non-zero (exit ${exited})`);
-  let prodUp = false;
-  const prod = spawn(process.execPath, [SERVER], { env: prodEnv, stdio: 'ignore' });
+  // A SEPARATE PORT for the plain boot.
+  //
+  // This used to reuse PPORT, immediately after the fault-configured server
+  // had been expected to exit on it. When the kernel had not yet released the
+  // socket the plain boot died with EADDRINUSE, and the branch below took a
+  // fallback that recorded a PASSING check and quietly skipped four real ones
+  // — three of them negative. The suite then printed 330 instead of 333 with
+  // no indication that anything had been left unasserted. A check that
+  // sometimes does not run sometimes protects nothing, and a summary line is
+  // not where a skipped assertion should be announced.
+  const PPORT2 = PORT + 11; const PBASE2 = `http://localhost:${PPORT2}`;
+  let prodUp = false; let prodLog = '';
+  const prod = spawn(process.execPath, [SERVER], { env: { ...prodEnv, PORT: String(PPORT2) }, stdio: ['ignore', 'pipe', 'pipe'] });
   children.push(prod);
-  for (let i = 0; i < 160 && !prodUp; i++) { try { prodUp = (await fetch(`${PBASE}/healthz`)).ok; } catch { /* booting */ } if (!prodUp) await sleep(250); }
-  if (!prodUp) ok(true, 'a plain production boot did not come up in this environment (other fatal configuration); fault refusal asserted above and in §12');
-  else {
-    const caps = await (await fetch(`${PBASE}/capabilities`)).json();
+  prod.stdout.on('data', (b) => { prodLog += b; });
+  prod.stderr.on('data', (b) => { prodLog += b; });
+  for (let i = 0; i < 160 && !prodUp; i++) { try { prodUp = (await fetch(`${PBASE2}/healthz`)).ok; } catch { /* booting */ } if (!prodUp) await sleep(250); }
+  // A failure to boot is a FAILURE, not a reason to skip the assertions.
+  ok(prodUp, `a plain production boot comes up${prodUp ? '' : `:\n${prodLog.slice(-800)}`}`);
+  if (prodUp) {
+    const caps = await (await fetch(`${PBASE2}/capabilities`)).json();
     neg(caps.faultInjection?.state === 'not_configured', 'in production the fault layer reports not_configured');
-    const ctl = await fetch(`${PBASE}/__faults`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rules: 'fatal:/healthz' }) });
+    const ctl = await fetch(`${PBASE2}/__faults`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rules: 'fatal:/healthz' }) });
     neg(ctl.status === 404, 'and POST /__faults does not exist');
     neg(!/secret-value-not-real/.test(JSON.stringify(caps)), 'the configured secret value never appears');
     ok(caps.schema?.upToDate === true, 'a production boot on an empty database migrates to the current schema');
+  } else {
+    // Keep the count honest: name each assertion that could not run.
+    for (const what of ['the fault layer reports not_configured', 'POST /__faults does not exist',
+      'the configured secret value never appears', 'an empty database migrates to the current schema']) {
+      fail(`could not assert: ${what} (production boot did not come up)`);
+    }
   }
 }
 

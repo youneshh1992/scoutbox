@@ -1298,6 +1298,143 @@ section('W — write-site audit: every path that can move a case, and the ones t
   }
 }
 
+section('E — every error body, swept for private text at once');
+{
+  // Individual "this response leaks nothing" checks test the responses somebody
+  // thought of. This collects EVERY refusal the two M23 routes can produce and
+  // sweeps them all against the same forbidden set, so a new error code added
+  // later is covered by construction rather than by remembering.
+  const SECRET = 'SECRETNOTEPHRASE';
+  let EROOM = null;
+  for (const p of players) {
+    const r = await j('POST', '/org/rooms', { playerId: p.id, sourceContext: 'search' }, maria.token);
+    if (r.status === 201) { EROOM = r.body.room.roomId; break; }
+  }
+  ok(!!EROOM, 'E0 a case for the error sweep');
+
+  // Put genuinely private text into the room: a comment, and a decision note.
+  const rev0 = (await j('GET', `/org/rooms/${EROOM}/journey`, undefined, maria.token)).body.case.rev;
+  await j('POST', `/org/rooms/${EROOM}/comments`, { body: `${SECRET} in a comment` }, maria.token);
+  await j('POST', `/org/rooms/${EROOM}/decisions`, {
+    recommendation: 'monitor', reasonCodes: ['needs_more_evidence'],
+    note: `${SECRET} in a decision note`, expectedRev: rev0,
+  }, maria.token);
+
+  // The control. Without it the sweep below could pass because the secret was
+  // never stored, which would make every "leaks nothing" check vacuous.
+  const roomView = await j('GET', `/org/rooms/${EROOM}`, undefined, maria.token);
+  const comments = await j('GET', `/org/rooms/${EROOM}/comments`, undefined, maria.token);
+  ok(JSON.stringify(roomView.body).includes(SECRET) || JSON.stringify(comments.body).includes(SECRET),
+    'E0b the private text really is stored and really is visible to the club that wrote it');
+
+  const errorBodies = [];
+  const collect = async (label, res) => { if (res.status >= 400) errorBodies.push({ label, status: res.status, body: res.body }); };
+
+  const cur = (await j('GET', `/org/rooms/${EROOM}/journey`, undefined, maria.token)).body;
+  await collect('unknown action', await j('POST', `/org/rooms/${EROOM}/lifecycle`, { action: 'teleport' }, maria.token));
+  await collect('stage smuggled', await j('POST', `/org/rooms/${EROOM}/lifecycle`, { action: 'holdCase', stage: 'signed' }, maria.token));
+  await collect('bad reasons', await j('POST', `/org/rooms/${EROOM}/lifecycle`, { action: 'closeCase', reasonCodes: ['nope'] }, maria.token));
+  await collect('prohibited reason', await j('POST', `/org/rooms/${EROOM}/lifecycle`, { action: 'closeCase', reasonCodes: ['nationality'] }, maria.token));
+  await collect('impossible jump', await j('POST', `/org/rooms/${EROOM}/lifecycle`, { action: 'recordOfferAccepted', expectedRev: cur.case.rev }, maria.token));
+  await collect('not applicable', await j('POST', `/org/rooms/${EROOM}/lifecycle`, { action: 'resumeCase', expectedRev: cur.case.rev }, maria.token));
+  await collect('no change', await j('POST', `/org/rooms/${EROOM}/lifecycle`, { action: 'startReview', expectedRev: cur.case.rev }, maria.token));
+  await collect('stale rev', await j('POST', `/org/rooms/${EROOM}/lifecycle`, { action: 'holdCase', expectedRev: 1 }, maria.token));
+  await collect('reason required', await j('POST', `/org/rooms/${EROOM}/lifecycle`, { action: 'closeCase', expectedRev: cur.case.rev }, maria.token));
+  await collect('foreign org journey', await j('GET', `/org/rooms/${EROOM}/journey`, undefined, harbour.token));
+  await collect('foreign org write', await j('POST', `/org/rooms/${EROOM}/lifecycle`, { action: 'holdCase' }, harbour.token));
+  await collect('player journey', await j('GET', `/org/rooms/${EROOM}/journey`, undefined, kola.token));
+  await collect('no auth journey', await j('GET', `/org/rooms/${EROOM}/journey`, undefined, undefined));
+  await collect('no auth write', await j('POST', `/org/rooms/${EROOM}/lifecycle`, { action: 'holdCase' }, undefined));
+  await collect('ghost case', await j('GET', '/org/rooms/case-nope/journey', undefined, maria.token));
+
+  ok(errorBodies.length >= 12, `E1 collected ${errorBodies.length} distinct refusals to sweep`);
+
+  const FORBIDDEN = [
+    [SECRET, 'a private note or comment body'],
+    ['Rita Vale', 'a person at another organisation'],
+    ['Harbour', 'another organisation\'s name'],
+  ];
+  const offenders = [];
+  for (const { label, body } of errorBodies) {
+    const text = JSON.stringify(body ?? {});
+    for (const [needle, what] of FORBIDDEN) if (text.includes(needle)) offenders.push(`${label}: ${what}`);
+  }
+  for (const o of offenders) console.error(`   ${o}`);
+  neg(offenders.length === 0, 'E2 no refusal carries a private note, a colleague at another club, or another club\'s name');
+
+  // A stack trace in a response body is both a leak and an invitation.
+  const stacky = errorBodies.filter(({ body }) => /\bat [\w$.]+ \(|\.mjs:\d+|node_modules|TypeError:|ReferenceError:/.test(JSON.stringify(body ?? {})));
+  neg(stacky.length === 0, 'E3 and none carries a stack trace, a file path or an internal exception name');
+
+  // Every refusal names itself. An error a log cannot group is an error nobody
+  // can count, and a client cannot branch on prose.
+  const unnamed = errorBodies.filter(({ body }) => typeof body?.error !== 'string' || !/^[A-Z][A-Z0-9_]+$/.test(body.error));
+  for (const u of unnamed) console.error(`   unnamed: ${u.label} -> ${JSON.stringify(u.body).slice(0, 120)}`);
+  neg(unnamed.length === 0, 'E4 every refusal carries a machine-readable error code');
+
+  // 5xx means OUR fault. None of the above is our fault.
+  neg(errorBodies.every((e) => e.status < 500), 'E5 and not one of them is a 5xx — every one is the caller\'s to fix');
+}
+
+section('S — the subsystems M23 must not have touched');
+{
+  // "Do NOT add Match Score. Do NOT alter Trust. Do NOT alter M22 Combine
+  // eligibility." Asserted by taking a reading, moving the lifecycle, and
+  // taking the reading again — rather than by reading the source and trusting
+  // that nothing calls anything.
+  let SROOM = null; let SPLAYER = null;
+  for (const p of players) {
+    const r = await j('POST', '/org/rooms', { playerId: p.id, sourceContext: 'search' }, maria.token);
+    if (r.status === 201) { SROOM = r.body.room.roomId; SPLAYER = p; break; }
+  }
+  ok(!!SROOM, 'S0 a case for the non-interference checks');
+
+  const readAll = async () => ({
+    trust: (await j('GET', `/org/players/${SPLAYER.id}/trust`, undefined, maria.token)).body,
+    passport: (await j('GET', `/org/players/${SPLAYER.id}/passport`, undefined, maria.token)).body,
+    plans: (await j('GET', `/org/development/plans?playerId=${SPLAYER.id}`, undefined, maria.token)).body,
+    secondLook: (await j('GET', '/org/second-look', undefined, maria.token)).body,
+    combine: (await j('GET', `/org/players/${SPLAYER.id}/combine`, undefined, maria.token)).body,
+    funnel: (await j('GET', '/org/rooms-funnel', undefined, maria.token)).body,
+  });
+  const stable = (o) => JSON.stringify(o, (k, v) => (/at$|At$|generatedAt|updatedAt|ts$/.test(k) ? undefined : v));
+
+  const before = await readAll();
+  // Move the lifecycle through several transitions, including a hold, a
+  // reopen and an ending.
+  let rev = (await j('GET', `/org/rooms/${SROOM}/journey`, undefined, maria.token)).body.case.rev;
+  for (const action of ['startReview', 'holdCase', 'resumeCase', 'shortlist', 'prioritise']) {
+    const r = await j('POST', `/org/rooms/${SROOM}/lifecycle`, { action, expectedRev: rev }, maria.token);
+    if (r.status === 200) rev = r.body.currentRev ?? rev + 1;
+  }
+  const after = await readAll();
+
+  neg(stable(before.trust) === stable(after.trust),
+    'S1 five lifecycle transitions move the Trust Score not at all — Trust is evidence confidence, not progress');
+  neg(stable(before.passport) === stable(after.passport),
+    'S2 and put nothing in the Passport — a club\'s pipeline position is not player truth');
+  neg(stable(before.plans) === stable(after.plans),
+    'S3 and create no Development Plan');
+  neg(stable(before.combine) === stable(after.combine),
+    'S4 and change no Combine eligibility — M22 is untouched by recruitment workflow');
+  neg(stable(before.secondLook) === stable(after.secondLook),
+    'S5 and raise no Second Look item — a transition is not canonical material evidence');
+
+  // The funnel SHOULD move: it is the one subsystem that reads the lifecycle.
+  ok(stable(before.funnel) !== stable(after.funnel),
+    'S6 the recruitment funnel DOES move — it is the one subsystem that reads the lifecycle, and a silent funnel would be the real bug');
+
+  // No score, of any name, anywhere in the projection.
+  const proj = JSON.stringify((await j('GET', `/org/rooms/${SROOM}/journey`, undefined, maria.token)).body);
+  neg(!/matchScore|match_score|journeyScore|readiness|signingProbability|progressPercent|candidateQuality|likelihood/i.test(proj),
+    'S7 and the journey carries no score, readiness, probability or percentage of any kind');
+
+  // Matching is criteria-based and must not learn from the lifecycle.
+  const watch = await j('GET', '/org/watchlists', undefined, maria.token);
+  neg(watch.status !== 200 || !JSON.stringify(watch.body).includes(SROOM),
+    'S8 and no watchlist acquired the case as a criterion');
+}
+
 section('R — restart: what survived the process going away');
 {
   // Idempotency that lives in process memory is idempotency that stops working
