@@ -70,6 +70,34 @@ r = await post(`/org/evidence/${ev1}/corroborate`, {}, bearer(MARIA));
 ok(r.status === 200 && r.body.evidence.verification.status === 'club_assessed' && r.body.evidence.verification.reviewerName === 'Maria Keane', 'an authorised club corroborates the claim (named reviewer)');
 r = await post(`/org/evidence/${ev1}/corroborate`, {}, bearer(MARIA));
 ok(r.status === 409, 'double corroboration refused');
+
+// ---- one event, one instant -------------------------------------------------
+//
+// Creating a record is ONE event, so every timestamp it stamps is ONE instant.
+// `newEvidence` used to call `Date.now()` three times, which made
+// `recordedAt` and `verification.reviewedAt` usually equal and occasionally
+// 1ms apart — whenever a millisecond boundary fell between two statements.
+//
+// M18's Second Look reads `reviewedAt > recordedAt` to tell a LATER upgrade
+// from a tier the record was born with, so that 1ms made a brand-new upload
+// look like a later upgrade of itself: one record, two material changes, and a
+// club told its evidence had improved when nothing had been reviewed. Same
+// action, different output, depending on where a clock tick fell.
+//
+// Asserted here, at the writer that owns the invariant, deterministically.
+{
+  const born = await post('/org/players/pl-adeyemi/evidence', {
+    claimType: 'assessment_result', label: 'Club assessment — one-instant check', value: 7, units: 'score',
+  }, bearer(MARIA));
+  ok(born.status === 201, 'a club files evidence that is born with a tier and a reviewer');
+  const v = born.body.evidence.verification;
+  ok(v.reviewedAt != null && v.reviewerName,
+    'the record carries a reviewer, so it has both timestamps to compare');
+  ok(v.reviewedAt === born.body.evidence.recordedAt,
+    `reviewedAt === recordedAt for evidence born with a tier (${v.reviewedAt} vs ${born.body.evidence.recordedAt})`);
+  ok(!(v.reviewedAt > born.body.evidence.recordedAt),
+    'so "reviewed after it was recorded" is false by construction — creation is never an upgrade of itself');
+}
 r = await post(`/player/evidence/${ev1}/correct`, { value: 12, reason: 'double-counted two cup goals' }, bearer(KOLA));
 ok(r.status === 201 && r.body.superseded === ev1 && r.body.evidence.correctionOf === ev1, 'correction supersedes with traceable lineage');
 const ev2 = r.body.evidence.id;

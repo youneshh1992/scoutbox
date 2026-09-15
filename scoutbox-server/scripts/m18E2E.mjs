@@ -364,16 +364,44 @@ await j('POST', `/org/rooms/${room.roomId}/status`, { status: 'archived', reason
   ok(/relates to the reason recorded/i.test(item.summary), 'S1: it explains the relationship');
   neg(!FORBIDDEN_COPY.some((f) => JSON.stringify(after.body).toLowerCase().includes(f)), 'S1: nothing in the response says the decision was wrong');
   neg(/never judges that decision/i.test(after.body.note), 'S1: the queue states it does not judge the decision');
-  // Self-diagnosing. This assertion was seen to fail twice in roughly thirty
-  // runs during the M23 correction battery — always under full-battery load,
-  // never in 10 consecutive isolated runs at either the pre-correction
-  // baseline or the current tip. Rather than loosen it, the failure now names
-  // the second change so the next occurrence identifies itself instead of
-  // costing another thirty runs.
+  // THE FLAKE THAT WAS, AND WHAT IT ACTUALLY WAS.
+  //
+  // This failed intermittently — about 1 run in 30 — and the diagnostic named
+  // the cause exactly: ONE evidence record produced TWO material changes,
+  //
+  //   full_match_added:evidence:evd-1016          at +11ms
+  //   evidence_quality_improved:evidence:evd-1016 at +12ms
+  //
+  // `newEvidence` read the clock three times for one creation, so `recordedAt`
+  // and `verification.reviewedAt` were usually equal and occasionally 1ms
+  // apart. M18 tests `reviewedAt > recordedAt` to tell a LATER upgrade from a
+  // tier the record was born with, so a 1ms drift made a brand-new upload look
+  // like a later upgrade of itself — and a club was told its evidence had
+  // improved when nothing had been reviewed.
+  //
+  // A product defect, not a test defect: same action, different output,
+  // depending on where a clock tick fell. Fixed at the writer (one event, one
+  // clock read), not here.
   if (item.changeCount !== 1) {
-    console.error(`   changeCount=${item.changeCount}; changes: ${JSON.stringify((item.changes ?? []).map((c) => ({ type: c.type, source: c.sourceSystem, at: c.occurredAt })))}`);
+    console.error(`   changeCount=${item.changeCount} decisionAt=${item.decisionAt}`);
+    for (const c of item.changes ?? []) console.error(`   change: ${c.fingerprint} at=${c.occurredAt} (+${c.occurredAt - item.decisionAt}ms)`);
   }
   ok(item.changeCount === 1, 'S1: one underlying change, one item');
+  // The invariant the count rests on, asserted directly rather than inferred
+  // from the total: one evidence record is one material change, whatever the
+  // clock did between two statements inside the write.
+  {
+    const perRecord = new Map();
+    for (const c of item.changes ?? []) {
+      const [, system, sourceId] = c.fingerprint.split(':');
+      const key = `${system}:${sourceId}`;
+      perRecord.set(key, (perRecord.get(key) ?? 0) + 1);
+    }
+    const doubled = [...perRecord.entries()].filter(([, n]) => n > 1);
+    for (const [k, n] of doubled) console.error(`   ${k} produced ${n} material changes from one record`);
+    neg(doubled.length === 0,
+      'S1: no single source record produces two material changes — creation is not also an upgrade of itself');
+  }
   global.__item = item;
 }
 const ITEM = global.__item;

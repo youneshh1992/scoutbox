@@ -17,6 +17,27 @@ export function registerPassport(ctx) {
 
   // ------------------------------------------------------------ evidence core
   function newEvidence({ player, claimType, label, value, units, season, source, mediaIds, observedAt, note, tier, method, reviewer, correctionOf }) {
+    // ONE EVENT, ONE CLOCK READ.
+    //
+    // This used to call `Date.now()` three times — for `recordedAt`, for
+    // `verification.reviewedAt` and for `expiresAt`. Creating a record is one
+    // event, so those are one instant; reading the clock three times made them
+    // *usually* equal and occasionally 1ms apart, whenever a millisecond
+    // boundary fell between two statements.
+    //
+    // That 1ms was not cosmetic. M18's Second Look asks "was this evidence
+    // UPGRADED after it was recorded?" by testing `reviewedAt > recordedAt` —
+    // the honest way to tell a later confirmation from a tier the record was
+    // born with. A one-millisecond drift made a brand-new upload look like a
+    // later upgrade of itself, so the same record produced two material
+    // changes (`full_match_added` AND `evidence_quality_improved`) and a club
+    // was told its evidence had improved when nothing had been reviewed.
+    //
+    // Nondeterministically: same action, different product output, depending
+    // on where a clock tick fell. Taking the instant once makes
+    // `reviewedAt === recordedAt` true by construction for evidence created
+    // with a tier, so `>` means exactly what M18 reads it to mean.
+    const at = Date.now();
     const rec = {
       id: nextId('evd'),
       playerId: player.id,
@@ -27,7 +48,7 @@ export function registerPassport(ctx) {
       season: season ? String(season).slice(0, 20) : null,
       source, // { kind: 'player'|'guardian'|'org'|'coach', id, name }
       observedAt: observedAt ? new Date(observedAt).getTime() : null,
-      recordedAt: Date.now(),
+      recordedAt: at,
       mediaIds: Array.isArray(mediaIds) ? mediaIds.filter((m) => player.media.some((x) => x.id === m)) : [],
       verification: {
         // Honest ladder: self_reported | coach_confirmed | club_assessed.
@@ -37,9 +58,9 @@ export function registerPassport(ctx) {
         method: method ?? null,
         reviewerId: reviewer?.id ?? null,
         reviewerName: reviewer?.name ?? null,
-        reviewedAt: reviewer ? Date.now() : null,
+        reviewedAt: reviewer ? at : null,
       },
-      expiresAt: claimType === 'availability' ? Date.now() + 90 * 86_400_000 : null,
+      expiresAt: claimType === 'availability' ? at + 90 * 86_400_000 : null,
       correctionOf: correctionOf ?? null,
       supersededBy: null,
       disputes: [],
