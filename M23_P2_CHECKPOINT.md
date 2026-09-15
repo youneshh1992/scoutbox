@@ -11,10 +11,10 @@ This is the replacement, taken at the frozen P2 correction tip.
 |---|---|
 | Path | `/home/user/scoutbox-m23-p2.bundle` |
 | Source branch | `claude/desktop-project-migration-wyk3ec` |
-| Source tip | `3e4c8a00844685f73c441203192cc58a9d09e2d3` |
-| Commits ahead of origin | **153** |
-| Size | **3,360,262 bytes** (3.3 MB) |
-| SHA-256 | `409eea20fccf65e86518105e1c0ef994c6cfd9b5f7da79b51a27a46ee75807f7` |
+| Source tip | `95572fa66608b60d2a432046010a5db2cc44e62e` |
+| Commits ahead of origin | **154** |
+| Size | **3,364,496 bytes** (3.3 MB) |
+| SHA-256 | `4f844636c1e6c9cdba30034af6eb4e676fee2fce6a517acce4b1ebf6e66416d8` |
 | Contents | `--all` — every ref, including `main` and both origin remotes |
 
 ## `git bundle verify`
@@ -23,7 +23,7 @@ This is the replacement, taken at the frozen P2 correction tip.
 b2eca8e9993d34ab67a89d16e7823a093dacf303 refs/heads/main
 c1758a2b17ea90aecd8f51f7cf5f79c3ef2fce6f refs/remotes/origin/claude/desktop-project-migration-wyk3ec
 b2eca8e9993d34ab67a89d16e7823a093dacf303 refs/remotes/origin/main
-3e4c8a00844685f73c441203192cc58a9d09e2d3 HEAD
+95572fa66608b60d2a432046010a5db2cc44e62e HEAD
 The bundle records a complete history.
 ```
 
@@ -36,10 +36,24 @@ Cloned into `/home/user/restore-check` — a genuinely separate directory, never
 the working tree.
 
 ```
-restored HEAD : 3e4c8a00844685f73c441203192cc58a9d09e2d3
-source tip    : 3e4c8a00844685f73c441203192cc58a9d09e2d3
+restored HEAD : 95572fa66608b60d2a432046010a5db2cc44e62e
+source tip    : 95572fa66608b60d2a432046010a5db2cc44e62e
                 HEAD MATCHES SOURCE TIP
 ```
+
+**The one commit this bundle does not contain is the commit that records its
+own hash** — this line, and the table above it. A file cannot contain its own
+checksum, so the bundle is taken at the last *content* commit and the values
+here describe that artefact exactly. Verify with:
+
+```
+sha256sum /home/user/scoutbox-m23-p2.bundle
+git bundle verify /home/user/scoutbox-m23-p2.bundle
+```
+
+If the bundle is ever rebuilt at a later tip, these three values change
+together and the ones above become a record of a previous checkpoint, not of
+the file on disk.
 
 ## Tests run from the restored clone
 
@@ -132,6 +146,6 @@ session ends, and the bundle goes with it. What has been proven is that *this
 file*, right now, restores to a clone whose HEAD equals the source tip and
 whose full test battery passes — not that the work survives the machine.
 
-The only durable protection for 153 unpushed commits is a push to a remote,
+The only durable protection for 154 unpushed commits is a push to a remote,
 which this task explicitly does not authorise. Until then the bundle protects
 against a working-tree accident, not against losing the container.
