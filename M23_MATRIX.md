@@ -240,6 +240,11 @@ Every P2 requirement, with no "mostly done".
 | M20 funnel semantics | **implemented + tested** | H17; `FUNNEL_NON_PROGRESS_STATUSES` |
 | Trust / Passport / Matching / Development / Second Look | **unchanged + tested** | #19, #20, #22, #35 |
 | Perf + scan audit | **measured** | `m23Perf`; 1.27x, ≤2 reads/collection |
+| Production store boot contract | **implemented + proven** | `m23BootContract` (61 checks, 70% negative); 123 stores, 0 missing after a real boot |
+| Store ownership machine-readable | **implemented + tested** | `storeContract.mjs`; `PRODUCTION_REQUIRED_STORES` derived, not hand-kept; drift guard proved by injection |
+| Browser / live regression | **implemented + passing** | `e2e/m23Live.test.mjs`, 37 checks, real login; found B4 |
+| m18E2E `changeCount` flake | **closed at the writer** | B6; 100 targeted + 20 full runs clean; `M23-P2-FLAKE-CLOSED` |
+| Dead code + stale comments | **swept** | 7 unused exports classified, 1 rewired, 1 un-exported; no TODO/FIXME/HACK marker in any M23-touched file |
 | Docs | **complete** | workflow (24 sections), terminology (16 terms) |
 | Atomicity failure injection | **deferred** | see D9 |
 | Events / notifications for transitions | **deferred, deliberately** | nothing to notify until a share boundary exists (§64, §45) |
@@ -266,6 +271,11 @@ Every P2 requirement, with no "mostly done".
 | **D10** | low | Dead `now()` helper in `m23/index.mjs`. | dead-code sweep | removed | **fixed** `ded233e` |
 | **D11** | low | m23E2E compared M23/M17 terminal sets by length. | — | compares by content | **fixed** `ded233e` |
 | **T1** | test | m23E2E assumed `under_review → closed` was an edge. It is not, in M17 or M23. | — | fixture holds the case first | **fixed** `cb8c730` |
+| **B4** | high | The lifecycle route validated reason codes against M17's **decision** taxonomy, so it refused all 16 lifecycle codes and accepted judgements about a player as the reason a case moved. | `m23Live` L3, first attempt to hold a case | `validateLifecycleReasons` in `m23/lifecycle.mjs`; new group V | **fixed** `a4bb7af` |
+| **B5** | medium | `m23Live` printed `37 checks passed` and never exited — ref'd backend and static servers. D1 reproduced in new code by the same author; held ports 4023/8723 and broke the next run. | the second unattended run | `process.exit(0)` after closing statics and stopping the backend | **fixed** `a4bb7af` |
+| **B6** | **high** | `newEvidence` read `Date.now()` three times for one record, so `reviewedAt` could land 1ms after `recordedAt` and a brand-new upload was reported as an *upgrade of itself*. The long-standing m18E2E `changeCount` flake was this, not a test flake. | 50-run stress probe (`m18FlakeProbe`), reproduced on run 30 | one clock read per event; regressions at the owner (m12E2E) and as an invariant (m18E2E) | **fixed** `8e8d0a3` |
+| **C1** | low | The first store contract counted `db.schema` — the migration registry's own record — as a store, reading the guarantee one store broader than it is. | writing the contract in a checkable form | moved to `NOT_A_STORE`; 123 stores, 42 migration | **fixed** `213b980` |
+| **C2** | low | `LIFECYCLE_INITIAL` had no caller, and `'watching'` was spelled at both room-creation sites. Not stale — disconnected. | dead-code sweep | `INITIAL_ROOM_STATUS` in `m17/shared.mjs`, read at both sites; M23 keeps an alias | **fixed** `7605e75` |
 
 ### Deferred, with reasons
 

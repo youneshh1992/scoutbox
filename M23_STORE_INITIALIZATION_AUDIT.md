@@ -279,7 +279,7 @@ one of four labels, and the label is evidence rather than inspection:
 
 | Class | Count | What it means | How it is proven |
 |---|---:|---|---|
-| **MIGRATION GUARANTEED** | 43 | created by a numbered step in `m182/migrations.mjs` | survives `loadSnapshot()` wiping the object; the only class that survives an arbitrary restore |
+| **MIGRATION GUARANTEED** | 42 | created by a numbered step in `m182/migrations.mjs` | survives `loadSnapshot()` wiping the object; the only class that survives an arbitrary restore |
 | **MODULE-BOOT GUARANTEED** | 80 | created by an owning module during synchronous registration | **read back from a real booted server** on a bare migrated database — a `??=` line is not accepted as evidence |
 | **OPTIONAL** | 1 | `recruitmentOffers`; absence has product meaning (P4 has not shipped, and the journey reports `available:false` rather than an empty list) | asserted to be genuinely absent after boot, so the classification is not decorative |
 | **DEFECT — FIXED** | 3 | see below | each reproduced, fixed, and covered by a regression |
@@ -314,7 +314,7 @@ note. Read-time repair is not a lifecycle; it is the absence of one.
 
 ## 11. What is guaranteed today, stated plainly
 
-> Every production-read store either survives an arbitrary restore (43, by
+> Every production-read store either survives an arbitrary restore (42, by
 > migration) or is created by its owning module before the socket opens (80,
 > proven by booting). One is optional by design. **Zero are missing after a
 > full production boot.**
@@ -324,5 +324,12 @@ note. Read-time repair is not a lifecycle; it is the absence of one.
 or explicitly optional with a written reason, or the suite names it and fails.
 There is one inventory, not two that can disagree.
 
-Full detail, including the 124-row classification table and the cross-module
+The classification is no longer only in prose. `scoutbox-server/storeContract.mjs`
+holds all 123 entries as `{ guarantee, owner, reason }`, the migration
+registry's `PRODUCTION_REQUIRED_STORES` is derived from it rather than kept by
+hand, and all 61 checks in `m23BootContract` verify the file against a really
+booted server — claimed guarantee against proved guarantee, declared owner
+against the file that actually initialises the store.
+
+Full detail, including the 123-row classification table and the cross-module
 read list, is in `M23_PRODUCTION_BOOT_CONTRACT.md`.

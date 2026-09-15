@@ -20,8 +20,8 @@ anything.
 ## 1. Result
 
 ```
-production-read stores: 124
-migration/bootstrap guaranteed: 43
+production-read stores: 123
+migration/bootstrap guaranteed: 42
 module guaranteed: 80
 optional by design: 1
 missing after production boot: 0
@@ -29,6 +29,15 @@ missing after production boot: 0
 
 **Three defects were found and fixed** (§5). Before them the same run reported
 `missing after production boot: 4`.
+
+> **Revised from 124 / 43 by the freeze pass.** The first run of this document
+> counted `db.schema` as a store. It is not one — it is the migration
+> registry's own record of which steps have run, an object keyed by step id
+> rather than a collection of domain records. It now sits in `NOT_A_STORE` in
+> `storeContract.mjs`, alongside `json`, which only ever appeared because the
+> filename `data/db.json` occurs in string literals. Neither is a collection;
+> counting them made the guarantee look one store broader than it is. The
+> remaining 123 are unchanged in class and in evidence.
 
 ## 2. Why module-owned initialisation is a real guarantee here
 
@@ -39,7 +48,7 @@ suite asserts that property rather than assuming it:
 server.mjs  (one synchronous module body)
   const db = buildSeed()
   loadSnapshot()                  ← replaces db wholesale from the snapshot
-  runMigrations(db)               ← 43 stores guaranteed here
+  runMigrations(db)               ← 42 stores guaranteed here
   integrityReport(db)             ← STORE_MISSING reported, never repaired
   …
   registerM12(…) … registerM23(…) ← 15 registrations, lines 3680–3882
@@ -179,9 +188,52 @@ or explicitly listed as optional with a written reason.
 A future `db.newStore.some(...)` therefore cannot land quietly. It will either
 be guaranteed, or the suite will name it.
 
-There is **one** inventory: the scan in that script. `PRODUCTION_REQUIRED_STORES`
-is the migration registry's own list and is checked for containment against the
-M23 journey's declared requirements, not duplicated.
+### The contract is machine-readable
+
+This document is prose, and prose drifts. The contract it describes lives in
+`scoutbox-server/storeContract.mjs`:
+
+```js
+export const PRODUCTION_STORE_CONTRACT = {
+  blocks: {
+    guarantee: 'migration',
+    owner:     'm182/migrations.mjs',
+    reason:    'read by isBlocked() in every visibility check',
+  },
+  …
+};
+```
+
+123 entries, each naming its guarantee, its owner and why. Three derived lists
+come out of it — `MIGRATION_GUARANTEED` (42), `MODULE_GUARANTEED` (80),
+`OPTIONAL_STORES` (1) — and `NOT_A_STORE` records the two names that look like
+stores and are not.
+
+The migration registry no longer keeps its own copy.
+`PRODUCTION_REQUIRED_STORES` in `m182/migrations.mjs` is now **derived**:
+
+```js
+export const PRODUCTION_REQUIRED_STORES =
+  MIGRATION_GUARANTEED.filter((s) => s !== 'reputationSeed');
+```
+
+One list, one place to change, and `reputationSeed` excluded for the stated
+reason that it is guaranteed to exist and guaranteed to be empty.
+
+**The file is a claim, and the suite treats it as one.** `m23BootContract` now
+runs 61 checks (43 negative, 70%) and none of them trusts a line of metadata by
+itself:
+
+| Claim in the contract | What proves it |
+|---|---|
+| the entry set is the real set | scanned stores ⊆ contract **and** contract ⊆ scanned stores — a store declared but never read fails too |
+| `guarantee: 'migration'` | the store exists after `runMigrations` **alone**, on a database that never saw a module |
+| `guarantee: 'module'` | it does **not** exist after migrations alone — a module store that quietly became migration-guaranteed is an over-claim, and over-claims are how a list stops describing anything |
+| `owner: 'm14'` | a file under `m14/` actually initialises it |
+| `guarantee: 'optional'` | it is genuinely **absent** after a full boot, so the label is not decorative |
+
+The guard was proved by breaking it: an undeclared store injected into the scan
+turned four assertions red, in both directions.
 
 ## 9. §13/§14 — the named stores
 
@@ -213,8 +265,9 @@ merely by starting makes every restore non-deterministic.
 
 ## 11. The classification table
 
-124 rows. `readers` counts distinct production files that read the store;
-`unguarded` counts reads not protected by `??`, `?.` or `Array.isArray`.
+123 rows, one per entry in `PRODUCTION_STORE_CONTRACT`. `readers` counts
+distinct production files that read the store; `unguarded` counts reads not
+protected by `??`, `?.` or `Array.isArray`.
 
 | store | class | owner | reader files | unguarded reads |
 |---|---|---|---:|---:|
@@ -308,7 +361,6 @@ merely by starting makes every restore non-deterministic.
 | `roomEvidenceState` | MIGRATION | m17/index.mjs | 1 | 3 |
 | `roomSnapshots` | MIGRATION | m17/index.mjs | 2 | 3 |
 | `savedSearches` | MODULE_BOOT | server.mjs | 1 | 6 |
-| `schema` | MIGRATION | m182/migrations.mjs | 3 | 4 |
 | `secondLookItems` | MIGRATION | m18/index.mjs | 3 | 1 |
 | `secrets` | MODULE_BOOT | server.mjs | 1 | 2 |
 | `sessions` | MIGRATION | server.mjs | 2 | 13 |

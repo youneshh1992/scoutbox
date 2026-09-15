@@ -22,6 +22,11 @@ more than the fix.
 | m23E2E | 161 → **331** checks, 54% → **69%** negative |
 | m23Persistence | 55 → **67** checks |
 
+> These are the sweep's own numbers and are left as the sweep recorded them.
+> Defects found by the passes that followed it are in the **addendum** at the
+> end of this file, not merged into the table above — a register that
+> back-dates later findings stops being a record of what was known when.
+
 **Not one was found by reading the code.** Every one came from a property
 stated over a whole product — every state × action × role, every stage in both
 vocabularies, every required store, every error body — or from changing the
@@ -348,3 +353,127 @@ change's type, source system and timestamp when it trips, so the next
 occurrence identifies itself instead of costing another thirty runs.
 
 Recorded as open, low severity, in a pre-existing suite.
+
+---
+
+# Addendum — defects found after the sweep
+
+The sections above are the total sweep's record and are unchanged. Everything
+below was found later, by the correction pass and the freeze pass, and is
+recorded in the order it was found.
+
+| ID | Severity | Found by | Status |
+|---|---|---|---|
+| **B4** | high | the new browser/live suite, on its first attempt to hold a case | **fixed** `a4bb7af` |
+| **B5** | medium | my own new live suite, hanging after success | **fixed** `a4bb7af` |
+| **B6** | **high** | 50-run stress reproduction of the m18E2E flake | **fixed** `8e8d0a3` |
+| **C1** | low | the store-contract pass | **fixed** `213b980` |
+| **C2** | low | the dead-code sweep | **fixed** `7605e75` |
+
+## B6 — one event, three clock reads
+
+*This supersedes "Observed but not reproduced — m18E2E `changeCount`" above.
+That section recorded, accurately, what was known at the time: two failures in
+roughly thirty runs and 29 clean attempts at reproducing them. It was not a
+test flake. It was a product defect, and it is now closed.*
+
+**The assertion.** `S1: one underlying change, one item` — one underlying
+change to a player's record must produce exactly one Second Look item, with
+`changeCount === 1`. It failed intermittently with `changeCount === 2`.
+
+**Semantics first, before any run.** `changeCount` is `material.length` where
+material is `dedupeMaterialChanges(changesSinceDecision(changes, decisionAt))`,
+and a change's identity is `changeFingerprint = type:sourceSystem:sourceId`
+with **no timestamp in it**. That single fact eliminated most of the candidate
+explanations before a test was run: SSE replay, a duplicated broadcast and
+listener-registration order all produce the *same* fingerprint and collapse
+under dedupe. A count of 2 could therefore only mean a second genuinely
+distinct canonical identity — which narrowed the question to "what else emits a
+change with a different `type`?"
+
+**Reproduction.** `scripts/m18FlakeProbe.mjs`: fresh database and fresh process
+per run, `M18_FLAKE_LOAD=1` for CPU pressure, and a diagnostic that dumps every
+fingerprint on mismatch. It reproduced on run 30 of 50 and named the defect
+outright:
+
+```
+changeCount=2  decisionAt=1789513602502
+  change: evidence_quality_improved:evidence:evd-1016  at=…514  (+12ms)
+  change: full_match_added:evidence:evd-1016           at=…513  (+11ms)
+```
+
+Two different types, one source record, eleven and twelve milliseconds apart.
+A brand-new piece of evidence had been reported as *an upgrade of itself*.
+
+**Root cause.** `newEvidence` in `m12/passport.mjs` called `Date.now()` three
+separate times while building one record — once for `recordedAt`, once for
+`verification.reviewedAt`, once for the availability `expiresAt`. When the
+millisecond ticked between the first two reads, `reviewedAt` landed 1ms after
+`recordedAt`, and M18's `reviewedAt > recordedAt` test — a correct test for
+"this evidence was reviewed later than it was filed" — read it as a later
+review of an older upload.
+
+**Why it survived.** It needed a millisecond boundary to fall inside a few
+lines of object construction, so it appeared in roughly one run in twenty-five,
+and only under the scheduling pressure of a full sequential battery. Nothing in
+the product crashed. A club was simply told its evidence had improved when
+nothing had been reviewed.
+
+**Fix, at the writer.** One clock read for one event:
+
+```js
+const at = Date.now();
+const rec = {
+  …
+  recordedAt: at,
+  verification: { …, reviewedAt: reviewer ? at : null },
+  expiresAt: claimType === 'availability' ? at + 90 * 86_400_000 : null,
+};
+```
+
+Per §4, no retry, no sleep, no raised timeout, no widened expectation, no
+"either count is fine". The forbidden fixes would each have hidden a real wrong
+answer that a club would eventually have read.
+
+**Regressions, two of them, at two levels:**
+
+- `m12E2E`, at the owner — `reviewedAt === recordedAt` for evidence born with a
+  tier. Deterministic; it does not depend on the clock ticking.
+- `m18E2E`, as an invariant rather than a count — no single source record may
+  produce two material changes. Stated over the fingerprints, so it catches any
+  future writer that makes a creation look like an upgrade of itself, not just
+  this one.
+
+**Exit gate (§8).** Root cause identified and named. Regressions added at both
+levels. **100 consecutive targeted runs** and **20 consecutive full m18E2E
+runs**, zero failures. No retry, no quarantine, no sleep, no weakened
+assertion anywhere in the fix.
+
+**`M23-P2-FLAKE-CLOSED`.**
+
+## C1 — `schema` counted as a store
+
+The first production-store contract listed `db.schema` as migration-guaranteed.
+It is the migration registry's own record of which steps have run — an object
+keyed by step id, not a collection of domain records. Counting it made the
+guarantee read one store broader than it is (124/43 rather than 123/42). It now
+sits in `NOT_A_STORE` with `json`, which only ever appeared in the scan because
+the filename `data/db.json` occurs in string literals.
+
+Found by writing the contract down in a form something could check.
+
+## C2 — a constant that was never read
+
+`LIFECYCLE_INITIAL` was exported from `m23/lifecycle.mjs` with no caller
+anywhere. Deleting it would have been the wrong repair: the value `'watching'`
+existed in three places — that constant and both room-creation sites in
+`m17/rooms.mjs` — and was *read* at none of them. The constant was not stale,
+it was disconnected. It now lives in `m17/shared.mjs` as `INITIAL_ROOM_STATUS`,
+beside the status set that owns it, both creation sites read it, and
+`LIFECYCLE_INITIAL` remains as an alias so M23 can name it in its own
+vocabulary without holding a second copy.
+
+`LIFECYCLE_PRECONDITIONS`, in the same sweep, was kept but un-exported. It is
+an alias of the one real table, and an *exported* alias reads like a second
+precondition table to the next person — which is precisely D3, the defect this
+milestone has already had to fix once.
