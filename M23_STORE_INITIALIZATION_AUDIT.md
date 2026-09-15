@@ -232,3 +232,68 @@ Recorded rather than changed: widening a persistence fix into every remaining
 module default would be the over-broad refactor §22 forbids, and the
 `STORE_MISSING` integrity check now makes any future regression visible at boot
 rather than at the first request.
+
+---
+
+## 9. The residual limitation caught one — `db.assessments` (M23 sweep)
+
+§8 above said the remaining module-default stores were "safe today by that
+default rather than by the registry, which is a weaker guarantee." The M23
+sweep's restore matrix then walked into exactly that gap.
+
+**What happened.** A pre-M23 snapshot upgraded cleanly, kept all thirteen
+original statuses, invented no history — and the journey route answered **500**.
+`db.assessments` did not exist.
+
+**Why it escaped the D2 pass.** `m12/shared.mjs` runs `db.assessments ??= []`
+when the module registers, so a *running* server always has it. No test that
+goes through HTTP can see the gap. That is precisely the "registration order
+decides whether a core collection exists" failure this suite asserts against
+everywhere else — and `buildRecruitmentJourney` is a pure function over a
+database, with no module registration to lean on.
+
+**Why it mattered more than the other module-default stores.** M23's own
+projection **declares** `assessments` required. Two lists in two files stated
+the same contract and disagreed:
+
+```
+m23/journey.mjs      JOURNEY_REQUIRED_STORES    includes 'assessments'
+m182/migrations.mjs  PRODUCTION_REQUIRED_STORES did not
+```
+
+**Fixed** by `m230_002_assessments_present` (schema 2301) and by a drift guard
+in the suite stated as containment rather than as a list of names:
+`JOURNEY_REQUIRED_STORES ⊆ PRODUCTION_REQUIRED_STORES`, with the converse for
+the optional stores — "absent because the phase has not shipped" must stay
+distinguishable from "present and empty".
+
+## 10. The scale of what remains
+
+Measured rather than estimated. A scan for `db.<name> ??=` across every
+non-test module finds **116** collections created that way, of which **84** do
+not exist after `runMigrations` alone:
+
+```
+apiKeys, applications, assessmentTemplates, boxAssignments, boxCamDisputes,
+boxCamPrefs, boxChallenges, boxChallengeEntries, calibrationSessions,
+campaigns, campaignSubmissions, coachAffiliations, coverageAssignments,
+coveragePlans, ... 84 in total
+```
+
+Each is safe today because its module's default runs after `loadSnapshot()`.
+Two things make that weaker than it looks: a pure function called with a
+restored database has no module to rely on (which is how `assessments` was
+found), and the order in which modules register decides the answer.
+
+**Not fixed here, deliberately.** Guaranteeing all 84 is a platform-wide
+bootstrap change, well outside a sweep scoped to M23's own paths, and D2's own
+mandate forbade broadening a persistence fix into unrelated refactoring. It is
+recorded as the next persistence pass's work, with the honest statement of what
+is guaranteed today:
+
+> Every store the **recruitment, safeguarding and M23 journey** paths read is
+> guaranteed by a migration step. The other 84 are guaranteed by module
+> registration order.
+
+The boot-time `STORE_MISSING` integrity check covers the guaranteed set, so a
+regression inside it is visible at boot rather than at the first request.

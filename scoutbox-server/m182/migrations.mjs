@@ -33,7 +33,11 @@ import { planCatalogue, archetypeCatalogue } from '../catalogue.mjs';
 // present only by luck of the seed. That is a real change to the bootstrap
 // contract, which is what this number is for. It is not bumped for
 // documentation.
-export const SCHEMA_VERSION = 2300;
+//
+// 23.0.1 — the M23 sweep found an eighth: `db.assessments`, declared REQUIRED
+// by the journey projection and guaranteed by nothing but a module's `??=` at
+// registration time. Same class of bug, one store further out.
+export const SCHEMA_VERSION = 2301;
 
 /**
  * Every step is idempotent: running it twice is the same as running it once.
@@ -211,6 +215,31 @@ export const MIGRATIONS = [
       db.archetypes ??= archetypeCatalogue();
     },
   },
+  {
+    version: 2301,
+    id: 'm230_002_assessments_present',
+    // THE SAME DEFECT, ONE STORE FURTHER OUT. Found by the M23 sweep's
+    // restore matrix, not by inspection: a pre-M23 snapshot upgraded cleanly,
+    // kept all thirteen statuses — and then the journey route answered 500,
+    // because `db.assessments` did not exist.
+    //
+    // It escaped the D2 pass because `m12/shared.mjs` does
+    // `db.assessments ??= []` when the module registers, so a RUNNING server
+    // always has it and no test that goes through HTTP can see the gap. That
+    // is precisely the "registration order decides whether a core collection
+    // exists" failure the D2 suite asserts against everywhere else — and
+    // `buildRecruitmentJourney` is a pure function over a database, so it has
+    // no module registration to rely on.
+    //
+    // `db.assessments` is read by the M23 journey (which DECLARES it
+    // required), by M15's Passport projection, by M16.2's Trust evidence
+    // source, by M13's group analytics and by M12's own routes. Empty is the
+    // truthful default: no rows means no assessment was ever filed.
+    note: 'M23 sweep: db.assessments is a journey-required store and must survive a restore.',
+    up(db) {
+      db.assessments ??= [];
+    },
+  },
 ];
 
 /**
@@ -235,7 +264,7 @@ export const PRODUCTION_REQUIRED_STORES = Object.freeze([
   // Recruitment
   'recruitmentCases', 'roomComments', 'roomDecisions', 'roomSnapshots', 'roomEvidenceState',
   'recruitmentBriefs', 'nobodyMissedReviews', 'secondLookItems', 'sourceChanges',
-  'requests', 'trials', 'signings',
+  'requests', 'trials', 'signings', 'assessments',
   // Box Cam / Combine
   'boxSessions', 'boxSessionEvents', 'combineAttempts', 'combineRequests', 'boxCamCvResults',
   // Matching, development, preferences

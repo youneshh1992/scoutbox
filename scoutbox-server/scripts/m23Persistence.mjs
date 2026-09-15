@@ -39,6 +39,9 @@ import {
 import { integrityReport } from '../m182/integrity.mjs';
 import { PLANS } from '../catalogue.mjs';
 import { openStore } from '../store.mjs';
+import { ROOM_STATUSES, ROOM_STATUS_LABELS, TERMINAL_ROOM_STATUSES, stageForRoomStatus } from '../m17/shared.mjs';
+import { buildRecruitmentJourney, JOURNEY_REQUIRED_STORES, JOURNEY_OPTIONAL_STORES } from '../m23/journey.mjs';
+import { NULL_EVIDENCE_PROVIDER } from '../m23/lifecycle.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', 'server.mjs');
@@ -117,6 +120,20 @@ console.log('\n— §4/§5 — the inventory is derived, not hand-kept —');
   if (missing.length) console.error(`   missing: ${missing.join(', ')}`);
   neg(PRODUCTION_REQUIRED_STORES.includes('squads') === false,
     'db.squads is NOT in the list — it never existed; squad membership is org.squad');
+
+  // THE DRIFT GUARD. Two lists declared the same thing in two files and
+  // disagreed: `db.assessments` was REQUIRED by the journey projection and
+  // absent from the migration's guarantee, so a restored snapshot upgraded
+  // cleanly and then answered 500 on the journey route. It escaped the D2 pass
+  // because `m12/shared.mjs` creates it with `??=` at registration, so a
+  // running server always has it — and no test that goes through HTTP can see
+  // the gap. Stated as containment, not as a list of names.
+  const declaredNotGuaranteed = JOURNEY_REQUIRED_STORES.filter((k) => !PRODUCTION_REQUIRED_STORES.includes(k));
+  if (declaredNotGuaranteed.length) console.error(`   declared required but not guaranteed: ${declaredNotGuaranteed.join(', ')}`);
+  neg(declaredNotGuaranteed.length === 0,
+    'every store the M23 journey DECLARES required is guaranteed by a migration step');
+  neg(JOURNEY_OPTIONAL_STORES.every((k) => !PRODUCTION_REQUIRED_STORES.includes(k)),
+    'and the optional ones are NOT guaranteed — "absent because the phase has not shipped" must stay distinguishable from "present and empty"');
 }
 
 console.log('\n— §8 — clean boot: empty database, no seed —');
@@ -335,6 +352,106 @@ console.log('\n— §33/§34 — a real server on a real restored snapshot —')
   ok(caps2.schema?.migrationsApplied === MIGRATIONS.length,
     'and every step is recorded exactly once — no churn');
   proc2.kill('SIGTERM');
+}
+
+console.log('\n— §44/§45 — every one of the eighteen states survives a restore —');
+{
+  // A state that cannot be read back is a state a club can be trapped in. The
+  // point is not that `watching` works; it is that ALL EIGHTEEN do, including
+  // the five M23 added and the four terminal ones — and that the check is
+  // driven off ROOM_STATUSES, so a nineteenth is covered the day it is added.
+  const db = {
+    recruitmentCases: ROOM_STATUSES.map((st, i) => ({
+      id: `case-${st}`, orgId: 'org-legacy', playerId: 'pl-legacy',
+      stage: stageForRoomStatus(st, 'academy'), createdAt: 1000 + i,
+      room: { status: st, rev: 1, priority: 'normal' },
+      history: [{ action: 'room_created', at: 1000 + i, detail: { status: st } }],
+    })),
+    roomDecisions: [], requests: [], trials: [], assessments: [], signings: [],
+  };
+  runMigrations(db);
+
+  const VIEWER = { kind: 'org_staff', orgId: 'org-legacy', role: 'recruitment_admin' };
+  const OPTS = { now: 2000, evidence: NULL_EVIDENCE_PROVIDER };
+  let projected = 0; const problems = [];
+  for (const st of ROOM_STATUSES) {
+    let out;
+    try { out = buildRecruitmentJourney(db, `case-${st}`, VIEWER, OPTS); }
+    catch (e) { problems.push(`${st}: threw ${e.message}`); continue; }
+    if (!out.ok) { problems.push(`${st}: refused ${out.error}`); continue; }
+    if (out.lifecycle.currentStage !== st) { problems.push(`${st}: read back as ${out.lifecycle.currentStage}`); continue; }
+    if (out.lifecycle.label !== ROOM_STATUS_LABELS[st]) { problems.push(`${st}: label drifted`); continue; }
+    if (out.lifecycle.terminal !== TERMINAL_ROOM_STATUSES.includes(st)) { problems.push(`${st}: terminality drifted`); continue; }
+    projected += 1;
+  }
+  for (const p of problems) console.error(`   ${p}`);
+  ok(projected === ROOM_STATUSES.length,
+    `all ${ROOM_STATUSES.length} lifecycle states restore and project with their own status, label and terminality`);
+  neg(problems.length === 0, 'and none of them is silently rewritten to a neighbouring state');
+
+  // Migration must not touch a case it has no business touching.
+  const before = JSON.stringify(db.recruitmentCases);
+  runMigrations(db);
+  neg(JSON.stringify(db.recruitmentCases) === before,
+    '§46 re-running every migration step changes not one case');
+}
+
+console.log('\n— §47 — a PRE-M23 snapshot keeps all thirteen original statuses —');
+{
+  // The thirteen that existed before M23 extended the set. Each must come back
+  // as itself: a status quietly remapped during an upgrade is a club's
+  // recruitment position silently rewritten.
+  const PRE_M23 = [
+    'watching', 'under_review', 'shortlisted', 'priority', 'trial_requested',
+    'trial_scheduled', 'trial_completed', 'offer_consideration', 'offer_made',
+    'signed', 'withdrawn', 'archived', 'closed',
+  ];
+  // Built HONESTLY rather than hand-declared: run every pre-M23 step for real,
+  // then wind the schema record back to 2200. A fixture that merely CLAIMS the
+  // earlier steps without reflecting them is not an old database — it is the
+  // damaged one from §44 above, and it would be testing a different thing
+  // entirely. The D2 guarantee is "every upgrade path from a database that
+  // honestly ran its steps"; a snapshot that lies about its own history is
+  // reported to a person, not repaired.
+  const db = { players: [], orgs: [], guardians: [], users: [], sessions: [], ledger: [], notifications: [] };
+  for (const step of MIGRATIONS.filter((m) => !m.id.startsWith('m230_'))) step.up(db);
+  db.schema = {
+    version: 2200,
+    migrations: MIGRATIONS.filter((m) => !m.id.startsWith('m230_')).map((m) => ({ id: m.id, at: '2026-01-01T00:00:00.000Z' })),
+  };
+  // Deliberately PRE-D2: the seven stores that pass added are absent, which is
+  // the real shape of a database last written before D2 landed.
+  for (const store of ['blocks', 'channels', 'reports', 'moderationLog', 'plans', 'archetypes', 'reputationSeed']) delete db[store];
+  db.recruitmentCases = PRE_M23.map((st, i) => ({
+    id: `old-${st}`, orgId: 'org-legacy', playerId: 'pl-legacy', stage: 'review', createdAt: 1000 + i,
+    room: { status: st, rev: 2 },
+    history: [
+      { action: 'room_created', at: 1000 + i, detail: { status: 'watching' } },
+      { action: 'room_status_changed', at: 1100 + i, detail: { from: 'watching', to: st } },
+    ],
+  }));
+  const historyBefore = db.recruitmentCases.map((c) => c.history.length);
+  const statusBefore = db.recruitmentCases.map((c) => c.room.status);
+
+  const r = runMigrations(db);
+  ok(r.to === SCHEMA_VERSION, `a pre-M23 snapshot upgrades 2200 → ${SCHEMA_VERSION}`);
+  neg(db.recruitmentCases.every((c, i) => c.room.status === statusBefore[i]),
+    'every one of the thirteen original statuses is still exactly itself');
+  neg(db.recruitmentCases.every((c, i) => c.history.length === historyBefore[i]),
+    '§49 and NO migration invented a transition to fill a gap — history lengths are unchanged');
+  neg(missingRequiredStores(db).length === 0,
+    '§50 while the D2 stores it never had are now present');
+
+  // And it reads. A migrated-but-unreadable database is not migrated.
+  const out = buildRecruitmentJourney(db, 'old-signed', { kind: 'org_staff', orgId: 'org-legacy', role: 'room_lead' },
+    { now: 3000, evidence: NULL_EVIDENCE_PROVIDER });
+  if (!out.ok) console.error(`   journey refused: ${JSON.stringify(out)}`);
+  ok(out.ok === true && out.lifecycle?.currentStage === 'signed',
+    'and a pre-M23 signed case projects through the M23 journey as signed');
+  neg(out.outcome?.signing === null,
+    'with no signing invented to justify the status it was already in');
+  ok(out.history?.entries.length === 2,
+    'and its two real history entries, neither more nor fewer');
 }
 
 // ---------------------------------------------------------------- report
