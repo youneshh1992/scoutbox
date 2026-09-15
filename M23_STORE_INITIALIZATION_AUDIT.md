@@ -193,7 +193,34 @@ broken once by a literal pin.
 
 ---
 
-## 7. Residual limitation
+## 7. Verification
+
+| | |
+|---|---|
+| `scripts/m23Persistence.mjs` | **55 checks**, 12 negative. Zero seed execution (§29). |
+| Owner suites (§39) | **24 / 24 green** — testTrust, m12, m13, m14, m14.1, m15, m16, m16.1, m16.2, m17, m18, m18.1, m18.2, m19, m20, m21, m22, m22CvEval, m22Holdout, m22Robustness, m22Blocker, m23Persistence, connectedE2E, apiE2E (130 checks against a live server) |
+| M23 baseline (§40) | green |
+| Clean boot | no `STORE_MISSING` in the boot log |
+| M22 artefacts (§49/§50) | regenerated twice, **0 non-timestamp lines changed** both times; reverted |
+
+What the persistence suite proves, specifically:
+
+- the defect **reproduced** before migration (`isBlocked()` throws) and
+  **answered** after it (returns `false`, a real verdict);
+- existing `blocks`, `requests` and `channels` rows preserved **byte for byte**,
+  and a preserved block is still effective;
+- a **customised** 99-month plan table survives — the migration restores
+  configuration only when it is absent;
+- three consecutive migration runs apply nothing and change no data;
+- a real server boots on a restored snapshot that lacked `requests`, and both
+  the safeguarding path and the recruitment request path return 200;
+- a restart leaves the schema unchanged with each step recorded exactly once;
+- a **damaged** snapshot (claiming steps it does not reflect) is reported and
+  **not** repaired.
+
+---
+
+## 8. Residual limitation
 
 Four stores outside the recruitment and safeguarding paths remain seed-created
 with no migration: they did not appear in the scan's "not guaranteed" set
