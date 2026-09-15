@@ -17,6 +17,20 @@
 
 // ---------------------------------------------------------------- statuses
 
+/**
+ * A lookup table indexed by data we did not write.
+ *
+ * A plain object literal inherits from `Object.prototype`, so
+ * `TABLE['constructor']` and `TABLE['toString']` are truthy — which means a
+ * client posting `{ action: "constructor" }`, or a stored status of
+ * `"__proto__"`, walks past every `if (!TABLE[key])` guard in the codebase and
+ * then crashes on a property the inherited value does not have. Every table
+ * below that is indexed by a client value or a stored value has a NULL
+ * prototype, so a key we did not define answers `undefined` and the guards
+ * that were already written start working.
+ */
+const table = (o) => Object.freeze(Object.assign(Object.create(null), o));
+
 // The canonical room status set. Every status maps onto exactly one M12 stage.
 // M23 extends this set by five, and does NOT create a second one. The case is
 // canonical, the room is a facet of it, and this table is the single lifecycle
@@ -43,7 +57,7 @@ export const ROOM_STATUSES = [
   'closed',
 ];
 
-export const ROOM_STATUS_LABELS = {
+export const ROOM_STATUS_LABELS = table({
   watching: 'Watching',
   under_review: 'Under review',
   contact_planned: 'Contact planned',
@@ -65,7 +79,7 @@ export const ROOM_STATUS_LABELS = {
   withdrawn: 'Withdrawn',
   archived: 'Archived',
   closed: 'Closed',
-};
+});
 
 // `superseded` is deliberately NOT a room status: a decision is superseded by a
 // later decision (§83), which the append-only decision memory already models.
@@ -81,8 +95,8 @@ export const OPEN_ROOM_STATUSES = ROOM_STATUSES.filter((s) => !TERMINAL_ROOM_STA
 export const PRO_STAGES = ['identified', 'review', 'observation', 'trial', 'decision', 'closed'];
 export const GRASSROOTS_STAGES = ['review', 'invited', 'awaiting_response', 'decision', 'closed'];
 
-const STAGE_MAP = {
-  pro: {
+const STAGE_MAP = table({
+  pro: table({
     watching: 'identified',
     under_review: 'review',
     // M23 — a planned approach and a delivered one are both part of reviewing
@@ -105,8 +119,8 @@ const STAGE_MAP = {
     withdrawn: 'closed',
     archived: 'closed',
     closed: 'closed',
-  },
-  grassroots: {
+  }),
+  grassroots: table({
     watching: 'review',
     under_review: 'review',
     contact_planned: 'review',
@@ -126,8 +140,8 @@ const STAGE_MAP = {
     withdrawn: 'closed',
     archived: 'closed',
     closed: 'closed',
-  },
-};
+  }),
+});
 
 export const orgStageKind = (orgLevel) => (orgLevel === 'grassroots' ? 'grassroots' : 'pro');
 
@@ -148,19 +162,21 @@ export function stageForRoomStatus(status, orgLevel) {
  * refuses a Room outright rather than round-tripping a client's stage through
  * a mapping that cannot tell those four statuses apart.
  */
+const CANONICAL_STATUS_FOR_STAGE = table({
+  identified: 'watching',
+  review: 'under_review',
+  observation: 'shortlisted',
+  trial: 'trial_requested',
+  invited: 'trial_requested',
+  awaiting_response: 'trial_completed',
+  decision: 'offer_consideration',
+  closed: 'archived',
+});
+
 export function roomStatusForStage(stage, orgLevel) {
-  const table = STAGE_MAP[orgStageKind(orgLevel)];
-  const canonical = {
-    identified: 'watching',
-    review: 'under_review',
-    observation: 'shortlisted',
-    trial: 'trial_requested',
-    invited: 'trial_requested',
-    awaiting_response: 'trial_completed',
-    decision: 'offer_consideration',
-    closed: 'archived',
-  }[stage];
-  return canonical && table[canonical] === stage ? canonical : null;
+  const stages = STAGE_MAP[orgStageKind(orgLevel)];
+  const canonical = CANONICAL_STATUS_FOR_STAGE[stage];
+  return canonical && stages[canonical] === stage ? canonical : null;
 }
 
 // ------------------------------------------------------------- transitions
@@ -168,7 +184,7 @@ export function roomStatusForStage(stage, orgLevel) {
 // The full transition table. Anything not listed is refused — there is no
 // "any status to any status" escape hatch, and nothing here is inferred from a
 // Trust Score, a Combine result or an assessment rating.
-export const ROOM_TRANSITIONS = {
+export const ROOM_TRANSITIONS = table({
   watching: ['under_review', 'shortlisted', 'contact_planned', 'on_hold', 'withdrawn', 'archived'],
   under_review: ['watching', 'shortlisted', 'priority', 'contact_planned', 'trial_requested', 'on_hold', 'withdrawn', 'archived'],
   // M23 — the two contact states. A club that has AGREED to approach a player
@@ -212,7 +228,7 @@ export const ROOM_TRANSITIONS = {
   withdrawn: ['under_review', 'archived', 'closed'],
   archived: ['under_review', 'closed'],
   closed: ['under_review'],
-};
+});
 
 /**
  * Statuses that assert a DURABLE FACT and therefore require a record proving it.
@@ -236,7 +252,7 @@ export const ROOM_TRANSITIONS = {
  * Kinds are resolved by an injected provider. A caller with no provider must
  * FAIL CLOSED: an unresolvable requirement is an unmet one.
  */
-export const STATUS_EVIDENCE_REQUIRED = Object.freeze({
+export const STATUS_EVIDENCE_REQUIRED = table({
   contacted: { kind: 'contact_delivered', note: 'a contact must have been delivered or recorded' },
   trial_scheduled: { kind: 'trial_confirmed', note: 'the player or guardian must have accepted a trial' },
   trial_completed: { kind: 'trial_completed', note: 'a trial must have been completed' },
@@ -385,7 +401,15 @@ export function validateReasonCodes(codes) {
   if (!Array.isArray(codes)) {
     return { ok: false, error: 'ROOM_REASONS_INVALID', message: 'Reasons must be a list of reason codes.' };
   }
-  const clean = [...new Set(codes.map((c) => String(c ?? '').trim().toLowerCase()).filter(Boolean))];
+  // Coerce only what is already a string. `String(value)` invokes the value's
+  // own `toString`, so `[{ toString: 1 }]` in a request body threw
+  // "Cannot convert object to primitive value" out of the route and became a
+  // 500 — a crash from one element of a list. A reason code that is not a
+  // string is not a reason code, and saying so is the whole check.
+  if (codes.some((c) => c != null && typeof c !== 'string')) {
+    return { ok: false, error: 'ROOM_REASONS_INVALID', message: 'Each reason must be a reason code, given as text.' };
+  }
+  const clean = [...new Set(codes.map((c) => (c ?? '').trim().toLowerCase()).filter(Boolean))];
   if (clean.length > 6) {
     return { ok: false, error: 'ROOM_REASONS_TOO_MANY', message: 'Record up to six reasons.' };
   }

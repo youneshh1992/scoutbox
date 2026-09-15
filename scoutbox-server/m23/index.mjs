@@ -60,8 +60,11 @@ export function registerM23(rawCtx) {
     }, { evidence: evidenceProvider(), historyLimit: req.query.limit, historyCursor: req.query.cursor });
 
     if (!out.ok) {
-      // A missing store is infrastructure, not "no history" — 500, loudly.
-      const code = out.error === 'JOURNEY_STORE_MISSING' ? 500 : 404;
+      // A missing store, and a record this build cannot read, are both
+      // infrastructure — not "no history". 500, loudly. Everything else here
+      // is the deliberately indistinguishable 404.
+      const BROKEN = ['JOURNEY_STORE_MISSING', 'CASE_HISTORY_CORRUPT'];
+      const code = BROKEN.includes(out.error) ? 500 : 404;
       return res.status(code).json(out);
     }
     return res.json(out);

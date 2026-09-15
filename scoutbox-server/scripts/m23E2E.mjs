@@ -878,6 +878,190 @@ section('Legacy compatibility — an old case still reads');
   }
 }
 
+section('T — hostile input: no shape of request body becomes a 500');
+{
+  let TROOM = null;
+  for (const p of players) {
+    const r = await j('POST', '/org/rooms', { playerId: p.id, sourceContext: 'search' }, maria.token);
+    if (r.status === 201) { TROOM = r.body.room.roomId; break; }
+  }
+  ok(!!TROOM, 'T0 a case for the input checks');
+
+  // T1 — the one that was actually broken. `LIFECYCLE_ACTIONS` was a plain
+  // object literal, so `LIFECYCLE_ACTIONS['constructor']` was truthy: the
+  // route's `!LIFECYCLE_ACTIONS[action]` guard passed it through, the
+  // validator read `.roles` off Object's constructor, and one word of request
+  // body became a 500.
+  const PROTO_KEYS = ['constructor', 'toString', 'valueOf', 'hasOwnProperty', '__proto__', 'prototype', 'isPrototypeOf'];
+  for (const k of PROTO_KEYS) {
+    const r = await j('POST', `/org/rooms/${TROOM}/lifecycle`, { action: k }, maria.token);
+    neg(r.status === 400 && r.body?.error === 'LIFECYCLE_ACTION_UNKNOWN',
+      `T1 action "${k}" is an unknown action, not a crash`);
+  }
+
+  // T2 — the same hazard on the read side, where the key comes from STORED
+  // data rather than from the request.
+  neg(PROTO_KEYS.every((k) => ROOM_TRANSITIONS[k] === undefined && STATUS_EVIDENCE_REQUIRED[k] === undefined),
+    'T2 the status tables answer undefined for a key nobody defined');
+  neg(PROTO_KEYS.every((k) => roomStatusForStage(k, 'pro') === null && roomStatusForStage(k, 'grassroots') === null),
+    'T3 and so does the stage map, in both vocabularies');
+
+  // T4 — everything else a client can put in the body. The property is that
+  // NOTHING produces a 5xx: a bad request is the caller's problem and must be
+  // reported as such.
+  const HOSTILE_ACTIONS = [null, 0, 1, true, false, {}, [], ['holdCase'], { action: 'holdCase' }, 'x'.repeat(5000), '', ' holdCase ', 'HOLDCASE'];
+  const HOSTILE_REVS = ['3', 3.5, -1, 0, NaN, Infinity, -Infinity, {}, [], '1e309', Number.MAX_SAFE_INTEGER + 2, null, 'abc'];
+  const HOSTILE_KEYS = [{}, [], 0, true, 'k'.repeat(10000), '__proto__', null];
+  const HOSTILE_REASONS = ['club_decision', {}, 0, [{}], [null], [['club_decision']], Array(200).fill('club_decision'), ['x'.repeat(5000)], [{ toString: 1 }]];
+  const BODIES = [];
+  for (const a of HOSTILE_ACTIONS) BODIES.push({ action: a });
+  for (const v of HOSTILE_REVS) BODIES.push({ action: 'holdCase', expectedRev: v });
+  for (const v of HOSTILE_KEYS) BODIES.push({ action: 'holdCase', clientKey: v });
+  for (const v of HOSTILE_REASONS) BODIES.push({ action: 'closeCase', reasonCodes: v });
+  BODIES.push({}, { action: 'holdCase', extra: { __proto__: { polluted: true } } });
+
+  let crashes = 0; let statuses = new Set();
+  for (const b of BODIES) {
+    const r = await j('POST', `/org/rooms/${TROOM}/lifecycle`, b, maria.token);
+    statuses.add(r.status);
+    if (r.status >= 500) { crashes += 1; console.error(`   500 on ${JSON.stringify(b).slice(0, 120)}`); }
+  }
+  neg(crashes === 0, `T4 none of ${BODIES.length} hostile bodies produced a 5xx (saw ${[...statuses].sort().join(', ')})`);
+  neg(({}).polluted === undefined, 'T5 and nothing in that set polluted Object.prototype');
+
+  // T6 — raw non-JSON and non-object bodies, which never reach the route's
+  // destructuring in the shape it expects.
+  for (const raw of ['not json', '[]', '"string"', '123', 'null', '{"action":']) {
+    const r = await fetch(`${BASE}/org/rooms/${TROOM}/lifecycle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${maria.token}` },
+      body: raw,
+    });
+    neg(r.status < 500, `T6 a raw body of ${JSON.stringify(raw.slice(0, 20))} is a 4xx, not a crash`);
+  }
+
+  // T7 — pagination numbers on the read side.
+  for (const q of ['limit=-1', 'limit=0', 'limit=abc', 'limit=1e9', 'limit=Infinity', 'limit=999999999999',
+    'cursor=-1', 'cursor=abc', 'cursor=1e12', 'limit=50&cursor=1e12', 'limit[]=5', 'limit=__proto__']) {
+    const r = await j('GET', `/org/rooms/${TROOM}/journey?${q}`, undefined, maria.token);
+    neg(r.status === 200 && Array.isArray(r.body?.history?.entries) && r.body.history.entries.length <= 200,
+      `T7 ?${q} returns a clamped page rather than a crash or an unbounded response`);
+  }
+
+  // T8 — the case id itself.
+  for (const id of ['..%2f..%2fetc%2fpasswd', 'x'.repeat(2000), '%00', 'case-1%20or%201=1', '__proto__']) {
+    const r = await j('GET', `/org/rooms/${id}/journey`, undefined, maria.token);
+    neg(r.status === 404 || r.status === 400,
+      `T8 a case id of ${JSON.stringify(id.slice(0, 24))} is not found, and is not a crash`);
+  }
+}
+
+section('X — stored corruption: a broken record is reported, never rendered as fact');
+{
+  // These go straight at the projector with databases that could not have been
+  // written by this build. The rule from M23-D2 carries forward: a broken
+  // record is infrastructure failure or corruption, and neither is "no data".
+  const VIEWER = { kind: 'org_staff', orgId: 'org-X', role: 'room_lead' };
+  const OPTS = { now: 1767225600000, evidence: NULL_EVIDENCE_PROVIDER };
+  const base = (over = {}) => ({
+    recruitmentCases: [{ id: 'case-X', orgId: 'org-X', playerId: 'pl-X', stage: 'review', createdAt: 1, history: [], room: { status: 'under_review', rev: 1 }, ...over }],
+    roomDecisions: [], requests: [], trials: [], assessments: [], signings: [],
+  });
+  const build = (db) => { try { return buildRecruitmentJourney(db, 'case-X', VIEWER, OPTS); } catch (e) { return { threw: e }; } };
+
+  // A required store missing is NOT an empty history.
+  for (const store of JOURNEY_REQUIRED_STORES) {
+    const db = base(); delete db[store];
+    const out = build(db);
+    neg(out.ok === false && out.error === 'JOURNEY_STORE_MISSING' && out.missing?.includes(store),
+      `X1 a missing \`${store}\` is reported as broken infrastructure, not as empty history`);
+  }
+
+  // A store present but of the wrong TYPE. `null` is not "absent", and an
+  // object is not a list.
+  for (const bad of [null, 0, '', 'nope', {}, true]) {
+    const db = base(); db.roomDecisions = bad;
+    const out = build(db);
+    neg(out.threw === undefined, `X2 roomDecisions = ${JSON.stringify(bad)} does not throw out of the projector`);
+  }
+
+  // The refusal names WHICH failure happened. "Absent" and "present but not a
+  // list" are different operational problems and a log that conflates them
+  // sends someone looking in the wrong place.
+  {
+    const db = base(); db.trials = null; delete db.assessments;
+    const out = build(db);
+    neg(out.malformed?.includes('trials') && out.missing?.includes('assessments'),
+      'X2b and names which store was absent and which was the wrong type');
+  }
+
+  // A corrupt case must not become a disclosure oracle. A player who receives
+  // "this case is corrupt" where a stranger receives "no such case" has just
+  // been told the case exists.
+  {
+    const db = base({ history: { 0: 'x' } });
+    const asPlayer = buildRecruitmentJourney(db, 'case-X', { kind: 'player_self', playerId: 'pl-X' }, OPTS);
+    const asStranger = buildRecruitmentJourney(db, 'case-X', { kind: 'player_self', playerId: 'pl-nobody' }, OPTS);
+    neg(asPlayer.error === 'CASE_NOT_FOUND' && JSON.stringify(asPlayer) === JSON.stringify(asStranger),
+      'X2c a player asking about a corrupt case gets the same answer as for a case that never existed');
+    const asClub = buildRecruitmentJourney(db, 'case-X', VIEWER, OPTS);
+    neg(asClub.error === 'CASE_HISTORY_CORRUPT',
+      'X2d while the club that owns it is told plainly that the record is unreadable');
+  }
+
+  // Corrupt values ON the case.
+  const CORRUPTIONS = [
+    ['room missing', { room: undefined }],
+    ['room null', { room: null }],
+    ['room not an object', { room: 'under_review' }],
+    ['status unknown', { room: { status: 'identified', rev: 1 } }],
+    ['status a prototype key', { room: { status: '__proto__', rev: 1 } }],
+    ['status null', { room: { status: null, rev: 1 } }],
+    ['rev missing', { room: { status: 'under_review' } }],
+    ['rev a string', { room: { status: 'under_review', rev: '4' } }],
+    ['rev negative', { room: { status: 'under_review', rev: -3 } }],
+    ['history missing', { history: undefined }],
+    ['history not an array', { history: { 0: 'x' } }],
+    ['history holding nulls', { history: [null, undefined, 0] }],
+    ['history entries without an action', { history: [{ at: 1 }, { action: null }] }],
+    ['history entry with an unknown action', { history: [{ action: 'teleported', at: 1, detail: { from: 'a', to: 'b' } }] }],
+    ['history timestamps unsortable', { history: [{ action: 'room_status_changed', at: 'yesterday', detail: { from: 'watching', to: 'under_review' } }] }],
+    ['stage disagreeing with status', { stage: 'closed' }],
+  ];
+  for (const [name, over] of CORRUPTIONS) {
+    const out = build(base(over));
+    neg(out.threw === undefined, `X3 ${name}: the projector answers instead of throwing`);
+  }
+
+  // The two that must answer with a NAMED refusal rather than a rendered page.
+  neg(build(base({ room: null })).error === 'CASE_NOT_A_ROOM',
+    'X4 a case with no room facet is refused by name, not projected as an empty workspace');
+
+  // An unknown stored action is OMITTED from the timeline rather than rendered
+  // as a fabricated event. Inventing a label for it would put a sentence in
+  // front of a user that describes something that never happened.
+  const invented = build(base({ history: [
+    { action: 'room_status_changed', at: 2, detail: { from: 'watching', to: 'under_review' } },
+    { action: 'teleported', at: 3, detail: { from: 'under_review', to: 'signed' } },
+  ] }));
+  neg(!JSON.stringify(invented.history?.entries ?? []).includes('teleported'),
+    'X5 an unknown history action is omitted, never rendered as a timeline event');
+  neg(!JSON.stringify(invented.history?.entries ?? []).includes('signed'),
+    'X6 and its invented destination does not leak into the timeline either');
+
+  // A corrupt stored status must not become a plausible one. Guessing is how a
+  // broken record turns into a confident wrong answer.
+  const unknownStatus = build(base({ room: { status: 'identified', rev: 1 } }));
+  if (unknownStatus.ok) {
+    neg(unknownStatus.lifecycle.currentStage === 'identified',
+      'X7 a stored status this build does not know is reported verbatim, never coerced to a known one');
+    neg(Array.isArray(unknownStatus.nextActions) && unknownStatus.nextActions.length === 0,
+      'X8 and no action is offered on a case whose state cannot be interpreted');
+  } else {
+    neg(true, 'X7 a stored status this build does not know is refused by name');
+  }
+}
+
 section('C — concurrency and idempotency: one request, one effect, one entry');
 {
   const spare = players.find((p) => p.id !== ADULT.id);

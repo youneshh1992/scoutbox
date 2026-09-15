@@ -94,13 +94,23 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   } = opts;
 
   // ---- §26 — infrastructure before data.
+  //
+  // A required collection that is ABSENT and one that is present but is not a
+  // list are the same class of problem: the database is not in a shape this
+  // build can read. Checking only for `undefined` let `null` — the shape a
+  // half-finished migration leaves behind — through the gate to throw a
+  // TypeError deeper in, where it reads as a bug in the projector rather than
+  // as the broken infrastructure it is. Both are reported, named separately so
+  // the log says which happened.
   const missing = JOURNEY_REQUIRED_STORES.filter((k) => db?.[k] === undefined);
-  if (missing.length) {
+  const malformed = JOURNEY_REQUIRED_STORES.filter((k) => db?.[k] !== undefined && !Array.isArray(db[k]));
+  if (missing.length || malformed.length) {
     return {
       ok: false,
       error: 'JOURNEY_STORE_MISSING',
-      message: 'The recruitment journey cannot be built: a required collection is absent.',
+      message: 'The recruitment journey cannot be built: a required collection is absent or is not a list.',
       missing,
+      malformed,
     };
   }
 
@@ -150,6 +160,24 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   // ---- §38 — Trust & Safety is not a master key.
   if (viewer.kind === 'trust_safety' && viewer.authorized !== true) {
     return { ok: false, error: 'CASE_NOT_FOUND', message: 'No such recruitment case.' };
+  }
+
+  // A history that is not a list cannot be read, and must not be reported as
+  // an empty one. `history: { entries: [], total: 0 }` asserts that nothing
+  // ever happened to this case — a confident wrong answer, which is worse than
+  // no answer. The current status would still be true, but a page that shows a
+  // state and silently drops how it was reached is the fabrication the
+  // governing rule forbids.
+  //
+  // DELIBERATELY BELOW the concealment branches. Answering a player
+  // "this case is corrupt" where a stranger gets "no such case" confirms the
+  // case exists — corruption reporting must not become a disclosure oracle.
+  if (kase.history !== undefined && !Array.isArray(kase.history)) {
+    return {
+      ok: false,
+      error: 'CASE_HISTORY_CORRUPT',
+      message: 'This recruitment case has a history that cannot be read. It is not reported as empty.',
+    };
   }
 
   // ---- Club projection.

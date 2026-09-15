@@ -110,7 +110,14 @@ export const LIFECYCLE_PRECONDITIONS = STATUS_EVIDENCE_REQUIRED;
  * name. The transition table is unchanged; only the action that may describe
  * a given edge narrows, so the recorded reason matches the event.
  */
-export const LIFECYCLE_ACTIONS = Object.freeze({
+// NULL PROTOTYPE, deliberately. A plain object literal answers truthy for
+// `constructor`, `toString`, `valueOf`, `hasOwnProperty` and `__proto__`, so a
+// client posting `{ action: "constructor" }` walked past the
+// `!LIFECYCLE_ACTIONS[action]` guard in the route, reached the validator, and
+// crashed reading `.roles` off Object's constructor — a 500 from one word of
+// request body. With no prototype, a key we did not define is `undefined` and
+// the guards that were already written do their job.
+export const LIFECYCLE_ACTIONS = Object.freeze(Object.assign(Object.create(null), {
   startReview:        { to: 'under_review',        reason: 'club_decision',              roles: ['contributor', 'room_lead', 'recruitment_admin'], applicableFrom: (f) => !TERMINAL_ROOM_STATUSES.includes(f) && f !== 'on_hold' },
   planContact:        { to: 'contact_planned',     reason: 'contact_planned',            roles: ['room_lead', 'recruitment_admin'] },
   recordContact:      { to: 'contacted',           reason: 'contact_made',               roles: ['room_lead', 'recruitment_admin'] },
@@ -130,7 +137,7 @@ export const LIFECYCLE_ACTIONS = Object.freeze({
   withdrawCase:       { to: 'withdrawn',           reason: 'withdrawn',                  roles: ['room_lead', 'recruitment_admin'], reasonCodesRequired: true },
   closeCase:          { to: 'closed',              reason: 'case_closed',                roles: ['room_lead', 'recruitment_admin'], reasonCodesRequired: true },
   reopenCase:         { to: 'under_review',        reason: 'case_reopened',              roles: ['room_lead', 'recruitment_admin'], applicableFrom: (f) => REOPENABLE.includes(f) },
-});
+}));
 
 export const LIFECYCLE_ACTION_NAMES = Object.freeze(Object.keys(LIFECYCLE_ACTIONS));
 

@@ -258,9 +258,29 @@ All thirteen pre-M23 statuses keep their identity, their transition rows, their
 labels and their funnel position. Nothing was renamed, removed or repositioned.
 
 An **unknown** stored status is refused as corruption
-(`LIFECYCLE_STATE_UNKNOWN`) and never coerced to `under_review`, `closed` or
-`watching`. An unknown history action is omitted rather than rendered as a
+(`LIFECYCLE_STATE_UNKNOWN`, 500) and never coerced to `under_review`, `closed`
+or `watching`. An unknown history action is omitted rather than rendered as a
 fabricated timeline event.
+
+A `case.history` that is not a list is refused as `CASE_HISTORY_CORRUPT` (500)
+rather than reported as an empty one. `history: { entries: [], total: 0 }`
+asserts that nothing ever happened to the case — a confident wrong answer,
+which is worse than no answer.
+
+A required store that is **present but not a list** is the same class of
+failure as an absent one, and is reported alongside it as `malformed` rather
+than `missing`, so a log says which problem to go and look for.
+
+Corruption reporting is **below** the concealment branches. A player who
+received "this case is corrupt" where a stranger receives "no such case" has
+just been told the case exists; a corrupt record must not become a disclosure
+oracle.
+
+**Lookup tables indexed by data we did not write have null prototypes.** A
+plain object literal answers truthy for `constructor`, `toString` and
+`__proto__`, so every `if (!TABLE[key])` guard in the codebase silently let
+those through — `{ action: "constructor" }` became a 500 from one word of
+request body.
 
 Old cases with partial history project honestly: the current state is shown, and
 no timestamps are invented to fill the gaps. **No migration backfills fictional
