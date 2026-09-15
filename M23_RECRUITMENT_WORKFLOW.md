@@ -160,6 +160,19 @@ Deliberately not to the stage pair. `closed → reopened → closed` is three
 legitimate transitions and the third must land. The same key with a *different*
 action is not a replay.
 
+The record lives in the case's own history, so two things follow for free: a
+key that means something in one case means nothing in another — cross-case and
+cross-tenant collision is impossible by construction, not by a uniqueness check
+— and a replay **survives a restart**, because the history is persisted.
+Idempotency held in process memory stops working exactly when it is needed:
+after the crash that made the client retry.
+
+**A replay is still an action.** Permission is checked before the replay is
+answered. Returning 200 to a caller whose role could never have performed the
+action tells them their request succeeded, which is a wrong answer rather than
+a generous one — and full validation cannot stand in for the check, because by
+then the case has moved and every replay would be refused for the wrong reason.
+
 ## 9. Projection architecture
 
 `buildRecruitmentJourney(db, caseId, viewer, opts)` reads canonical stores and

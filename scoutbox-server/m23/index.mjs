@@ -15,7 +15,7 @@
 
 import {
   LIFECYCLE_ACTIONS, LIFECYCLE_ACTION_NAMES, RECRUITMENT_LIFECYCLE_POLICY_VERSION,
-  canTransitionRecruitmentCase, NULL_EVIDENCE_PROVIDER,
+  canTransitionRecruitmentCase, actionPermittedForRole, NULL_EVIDENCE_PROVIDER,
 } from './lifecycle.mjs';
 import { buildRecruitmentJourney } from './journey.mjs';
 import { roomRole, validateReasonCodes } from '../m17/shared.mjs';
@@ -97,7 +97,19 @@ export function registerM23(rawCtx) {
     const role = roomRole({ room, user: req.orgUser, isLead: isLead(req.orgUser) });
 
     // Idempotent replay: same org, same case, same action, same client key.
+    //
+    // Permission is checked FIRST. A replay is still an action, and answering
+    // 200 to someone whose role could never have performed it tells them their
+    // request succeeded — a wrong answer, not merely a generous one. Full
+    // validation cannot stand in for this: the case has already moved, so the
+    // transition is no longer legal and every replay would be refused.
     const prior = idempotentHit(room, action, clientKey);
+    if (prior && !actionPermittedForRole(action, role)) {
+      return res.status(403).json({
+        error: 'LIFECYCLE_NOT_PERMITTED',
+        message: 'Your role cannot take this recruitment action.',
+      });
+    }
     if (prior) {
       return res.json({
         idempotent: true,

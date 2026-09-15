@@ -542,7 +542,9 @@ section('P — the transition graph as a property, over every state × action ×
 section('HTTP — booting a real server');
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
-{
+
+/** Start a server on the shared PORT and DATA_DIR, and wait for it to answer. */
+async function boot() {
   const proc = spawn(process.execPath, [SERVER], {
     env: { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1' }, stdio: 'ignore',
   });
@@ -551,7 +553,12 @@ process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); 
   let up = false;
   for (let i = 0; i < 160 && !up; i++) { try { const r = await fetch(`${BASE}/healthz`); up = r.ok; } catch { /* booting */ } if (!up) await sleep(250); }
   if (!up) throw new Error('server did not come up');
+  return proc;
 }
+let server = await boot();
+
+// Filled in by group C, read by group R after the process is restarted.
+const IDEMPOTENCY_PROBE = { room: null, key: null, from: null, to: null };
 async function j(method, url, body, token, extra = {}) {
   const r = await fetch(`${BASE}${url}`, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...extra }, body: body === undefined ? undefined : JSON.stringify(body) });
   let data = null; try { data = await r.json(); } catch { /* non-json */ }
@@ -871,6 +878,90 @@ section('Legacy compatibility — an old case still reads');
   }
 }
 
+section('C — concurrency and idempotency: one request, one effect, one entry');
+{
+  const spare = players.find((p) => p.id !== ADULT.id);
+  let CROOM = null;
+  for (const p of players) {
+    const r = await j('POST', '/org/rooms', { playerId: p.id, sourceContext: 'search' }, maria.token);
+    if (r.status === 201) { CROOM = r.body.room.roomId; break; }
+  }
+  ok(!!CROOM && !!spare, 'C0 a fresh case for the concurrency checks');
+
+  const state = async () => (await j('GET', `/org/rooms/${CROOM}/journey`, undefined, maria.token)).body;
+  const historyLen = async () => (await state()).history.total;
+
+  // C1 — the lost update. Two callers read the same rev and both act. One must
+  // win; the other must be told, not silently overwritten.
+  const base = await state();
+  const [a, b] = await Promise.all([
+    j('POST', `/org/rooms/${CROOM}/lifecycle`, { action: 'startReview', expectedRev: base.case.rev }, maria.token),
+    j('POST', `/org/rooms/${CROOM}/lifecycle`, { action: 'shortlist', expectedRev: base.case.rev }, maria.token),
+  ]);
+  const winners = [a, b].filter((r) => r.status === 200);
+  const losers = [a, b].filter((r) => r.status !== 200);
+  ok(winners.length === 1, 'C1 exactly one of two racing writers on the same rev succeeds');
+  neg(losers.length === 1 && losers[0].status === 409 && losers[0].body?.error === 'ROOM_VERSION_CONFLICT',
+    'C2 and the loser is told its read was stale, not silently discarded');
+  neg(losers[0].body?.currentRev != null, 'C3 with the rev it needs to resync');
+
+  // C4 — one accepted request writes exactly one history entry and moves the
+  // rev by exactly one. A double-append is invisible until someone counts.
+  const beforeLen = await historyLen();
+  const beforeRev = (await state()).case.rev;
+  const single = await j('POST', `/org/rooms/${CROOM}/lifecycle`, { action: 'prioritise', expectedRev: beforeRev }, maria.token);
+  ok(single.status === 200, 'C4 a clean write succeeds');
+  const afterLen = await historyLen();
+  const afterRev = (await state()).case.rev;
+  neg(afterLen === beforeLen + 1, 'C5 and appends exactly one history entry, not two');
+  neg(afterRev === beforeRev + 1, 'C6 and moves the rev by exactly one');
+
+  // C7-C9 — idempotent replay. The key is the caller's, so a repeat is the
+  // SAME request, not a second one.
+  const key = `ckey-${Date.now()}`;
+  const first = await j('POST', `/org/rooms/${CROOM}/lifecycle`, { action: 'holdCase', expectedRev: afterRev, clientKey: key }, maria.token);
+  ok(first.status === 200 && !first.body.idempotent, 'C7 the first call with a client key performs the action');
+  const lenAfterFirst = await historyLen();
+  const replay = await j('POST', `/org/rooms/${CROOM}/lifecycle`, { action: 'holdCase', clientKey: key }, maria.token);
+  ok(replay.status === 200 && replay.body.idempotent === true, 'C8 the identical call replays instead of acting again');
+  neg(await historyLen() === lenAfterFirst, 'C9 and writes no second history entry');
+  ok(replay.body.from === first.body.from && replay.body.to === first.body.to,
+    'C10 the replay reports the original endpoints, not the current state');
+
+  // C11 — the key is bound to the ACTION, not just to the case. Reusing a key
+  // for something else is a different request and must not be swallowed.
+  const different = await j('POST', `/org/rooms/${CROOM}/lifecycle`, { action: 'resumeCase', expectedRev: replay.body.currentRev ?? (await state()).case.rev, clientKey: key }, maria.token);
+  neg(different.body?.idempotent !== true,
+    'C11 the same key with a DIFFERENT action is not a replay — it is a different request');
+
+  // C12 — a replay is still an action. Someone whose role could never have
+  // performed it must not be told it succeeded. Full validation cannot stand
+  // in for this check: the case has moved, so the transition is no longer
+  // legal and every replay would be refused for the wrong reason.
+  const junior = await login('org-eastport', 'Replay Prober', 'First-Team Scout');
+  const stolen = await j('POST', `/org/rooms/${CROOM}/lifecycle`, { action: 'holdCase', clientKey: key }, junior.token);
+  neg(stolen.status === 403 && stolen.body?.error === 'LIFECYCLE_NOT_PERMITTED',
+    'C12 replaying another role\'s key is refused on permission, not answered 200');
+  neg(!('from' in (stolen.body ?? {})) && !('to' in (stolen.body ?? {})),
+    'C13 and the refusal echoes none of the original transition back');
+
+  // C14 — the key lives in the CASE\'s history, so a key that means something
+  // in one case means nothing in another. Cross-case and cross-org collision
+  // is impossible by construction rather than by a uniqueness check.
+  const otherState = await j('GET', `/org/rooms/${ROOM}/journey`, undefined, maria.token);
+  const collide = await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'holdCase', expectedRev: otherState.body.case.rev, clientKey: key }, maria.token);
+  neg(collide.body?.idempotent !== true,
+    'C14 the same key on a different case is not a replay — idempotency is scoped to the case');
+
+  // The restart half of this — a replay after the process dies — is checked
+  // for real at the end of the suite (group R), because it needs the server
+  // killed and brought back.
+  IDEMPOTENCY_PROBE.room = CROOM;
+  IDEMPOTENCY_PROBE.key = key;
+  IDEMPOTENCY_PROBE.from = first.body.from;
+  IDEMPOTENCY_PROBE.to = first.body.to;
+}
+
 section('A — authorization drift: the role is decided now, from the database, not from the token');
 {
   // The whole group exists because a role resolved once and carried is a role
@@ -1021,6 +1112,34 @@ section('W — write-site audit: every path that can move a case, and the ones t
   } else {
     ok(false, 'could not create the plain-case fixture');
   }
+}
+
+section('R — restart: what survived the process going away');
+{
+  // Idempotency that lives in process memory is idempotency that stops working
+  // exactly when it is needed — after the crash that made the client retry.
+  // This kills the server and brings it back on the same data directory.
+  server.kill('SIGKILL');
+  for (let i = 0; i < 40; i += 1) {
+    try { await fetch(`${BASE}/healthz`); await sleep(100); } catch { break; }
+  }
+  server = await boot();
+  const reAuth = await login('org-eastport', 'Maria Keane', 'Head of Recruitment');
+  ok(!!reAuth?.token, 'R1 the server came back and accepts a login');
+
+  const { room, key, from, to } = IDEMPOTENCY_PROBE;
+  const beforeState = (await j('GET', `/org/rooms/${room}/journey`, undefined, reAuth.token)).body;
+  const replayAfterRestart = await j('POST', `/org/rooms/${room}/lifecycle`, { action: 'holdCase', clientKey: key }, reAuth.token);
+  neg(replayAfterRestart.status === 200 && replayAfterRestart.body?.idempotent === true,
+    'R2 a replay after the process died is still recognised as a replay');
+  ok(replayAfterRestart.body?.from === from && replayAfterRestart.body?.to === to,
+    'R3 and reports the original endpoints, recovered from the persisted history');
+  const afterState = (await j('GET', `/org/rooms/${room}/journey`, undefined, reAuth.token)).body;
+  neg(afterState.history.total === beforeState.history.total,
+    'R4 and the restart plus replay wrote no new history entry');
+  neg(afterState.case.rev === beforeState.case.rev, 'R5 and moved no rev');
+  ok(afterState.lifecycle.currentStage === beforeState.lifecycle.currentStage,
+    'R6 the case is exactly where it was before the crash');
 }
 
 // ---------------------------------------------------------------- report

@@ -275,6 +275,20 @@ export function availableActions(kase, context = {}) {
 export const isLifecycleReason = (code) => REASON_SET.has(code);
 
 /**
+ * May this role perform this action AT ALL, ignoring where the case is?
+ *
+ * Exported for one caller: the idempotent-replay path, which answers before
+ * the case is re-validated (the case has already moved, so full validation
+ * would refuse the replay of a transition that genuinely happened). A replay
+ * is still an action, and someone who could never have performed it must not
+ * be told it succeeded.
+ */
+export function actionPermittedForRole(action, role) {
+  const def = LIFECYCLE_ACTIONS[action];
+  return !!def && roleAllows(role, def.roles);
+}
+
+/**
  * Analytics compatibility (§50).
  *
  * M20 reads `room.history` for `room_status_changed` entries and counts the
