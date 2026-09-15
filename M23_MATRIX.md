@@ -212,73 +212,72 @@ now stands between acceptance and any claim of signing.
 
 ---
 
-## Defects found
+## P2 status (§129)
 
-### D1 — `m22E2E` never exited (fixed, committed `98b8e7d`)
+Every P2 requirement, with no "mostly done".
 
-Found by the M23 baseline, the first unattended timed run of that suite. It
-spawns a server and kills it from a `process.on('exit')` hook, but a ref'd
-`ChildProcess` handle keeps the event loop alive, so the loop never drained and
-the hook never fired. The suite printed **112 checks passed, 73% negative** and
-then hung indefinitely — 2 seconds of work followed by an unbounded wait.
+| Area | Status | Evidence |
+|---|---|---|
+| One authoritative lifecycle | **implemented + tested** | 18 states, one table (`m17/shared.mjs`); m23E2E U1 |
+| Case canonical, Room a facet | **implemented + tested** | no new store; `migrateM23` empty |
+| No competing stage store | **implemented + tested** | H23; repo sweep for `db.recruitmentJourneys` etc. |
+| Single status writer | **implemented + tested** | `applyStatus` only; `ctx.applyLifecycleTransition` seam |
+| No generic stage mutation | **implemented + tested** | `LIFECYCLE_STAGE_NOT_SETTABLE`; #5/#25 |
+| Semantic actions | **implemented + tested** | 19 actions; H11 |
+| Transition validator | **implemented + tested** | `canTransitionRecruitmentCase` |
+| Evidence preconditions | **implemented + tested** | H1-H6; keyed by target |
+| `offer_accepted ≠ signed` | **implemented + tested** | H1, H5; every inbound edge enumerated |
+| Append-only history | **implemented + tested** | J4, #28, #37 |
+| rev / expectedRev | **implemented + tested** | #7, H4 |
+| Idempotency | **implemented + tested** | J6, #9, #10, #24 |
+| Journey projection | **implemented + tested** | U3, H7, H18-H20 |
+| Determinism | **implemented + tested** | H7, H8; injected clock |
+| nextActions permission-aware | **implemented + tested** | H11 (role matrix, re-validated) |
+| Hidden interest | **implemented + tested** | #13, #36 byte-identical |
+| Legacy compatibility | **implemented + tested** | J12, H13 |
+| Unknown legacy state | **implemented + tested** | H14, H14c |
+| Hold / reopen cycling | **implemented + tested** | H15, H16 |
+| M20 funnel semantics | **implemented + tested** | H17; `FUNNEL_NON_PROGRESS_STATUSES` |
+| Trust / Passport / Matching / Development / Second Look | **unchanged + tested** | #19, #20, #22, #35 |
+| Perf + scan audit | **measured** | `m23Perf`; 1.27x, ≤2 reads/collection |
+| Docs | **complete** | workflow (24 sections), terminology (16 terms) |
+| Atomicity failure injection | **deferred** | see D9 |
+| Events / notifications for transitions | **deferred, deliberately** | nothing to notify until a share boundary exists (§64, §45) |
+| Client UI | **not applicable to P2** | two org routes, no client surface |
 
-Worse than a red test: a human reading the log tail sees success, a harness sees
-exit 124 and sees failure. One defect, two opposite wrong conclusions.
+---
 
-Fixed with `proc.unref()` — the same fix `e2e/demoHost.mjs` already carries from
-M22 §74-§76. Verified: exit 0 in 2s, 112 checks, no lingering process.
+## Defect register (§130)
 
-### D2 — production-read stores were seed-dependent (CLOSED)
+| ID | Severity | Root cause | Regression | Fix | Status |
+|---|---|---|---|---|---|
+| **D1** | medium | `m22E2E` spawned a server and killed it from an exit hook that could never run, because a ref'd child keeps the event loop alive. 112 checks green, then an unbounded hang. | the M23 baseline, first unattended timed run | `proc.unref()` | **fixed** `98b8e7d` |
+| **D2** | high | 7 production-read stores existed only because `buildSeed()` ran; `loadSnapshot()` deletes every seeded key. `db.blocks` is read by `isBlocked()` in every visibility check, so a restored snapshot crashed the safeguarding path. | `m23Persistence` (55 checks, no seed) | migration `m230_001`, schema 2300, `catalogue.mjs` | **fixed** `07e9017` |
+| **D2a** | low | `db.squads` never existed; one read inside a tautological conjunct. | store inventory | conjunct removed, behaviour identical | **fixed** `07e9017` |
+| **D2b** | medium | `m22E2E` pinned `SCHEMA_VERSION === 2200`. Third recurrence: M20 found it in M19's suite, M21 in M20's. | schema-pin sweep | asserts `>= 2200`, its own contribution | **fixed** `07e9017` |
+| **D2c** | medium | My first D2 fix pushed `STORE_MISSING` into `integrityReport`'s violations, breaking M18.2's correct "an empty database is not a violation". | m182E2E | separate `stores` field; prior invariant unweakened | **fixed** `07e9017` |
+| **D3** | **high** | The legacy `POST /org/rooms/:id/status` route took a client status and applied it with no evidence check, so `offer_made` + `{status:'signed'}` reached `signed` with no signing in the database. Two precondition tables meant two answers; the one that mattered was never asked. | m23E2E H2c (route), H1/H5 (validator) | one table in `m17/shared.mjs`, keyed by target, returned by `validateTransition`; both M17 paths fail closed | **fixed** `4c38b9b` |
+| **D4** | medium | M17 status-census assertions (`length === 13`, `=== 9`) — a census of the set, not an invariant. | m17E2E | assert labelled / mapped / partitioned instead | **fixed** `1969be1` |
+| **D5** | low | Extending the lifecycle diluted M17's 40% negative floor to 35%. | m17E2E coverage gate | 46 new negatives for the 5 new states; 515 checks, 41% | **fixed** `1969be1` |
+| **D6** | medium | `registerM18` returns a fresh object, so M17's room seams never reached `m19Ctx`; every journey read was a 500. | m23E2E J1 | seams passed explicitly | **fixed** `cb8c730` |
+| **D7** | medium | `roomRole()` destructures one object; called with three positional args, so every role resolved `null` and every action was refused. Failed closed, but wrong. | m23E2E J3 | call-shape corrected | **fixed** `cb8c730` |
+| **D8** | low | `applyLifecycleTransition` used `REOPENED_FROM` without importing it. | m23E2E J3 | import added | **fixed** `cb8c730` |
+| **D9** | low | `journey.mjs` passed a literal `reasonCodes: ['placeholder']` to make reason-requiring actions appear in `nextActions` — passing for the wrong reason, and one echo from a response body. | — | explicit `forAvailability` flag | **fixed** `ded233e` |
+| **D10** | low | Dead `now()` helper in `m23/index.mjs`. | dead-code sweep | removed | **fixed** `ded233e` |
+| **D11** | low | m23E2E compared M23/M17 terminal sets by length. | — | compares by content | **fixed** `ded233e` |
+| **T1** | test | m23E2E assumed `under_review → closed` was an edge. It is not, in M17 or M23. | — | fixture holds the case first | **fixed** `cb8c730` |
 
-**Pre-existing core persistence defect, discovered during M23 preflight. Not
-caused by M23.**
+### Deferred, with reasons
 
-A mechanical inventory of all **123** `db.*` collections found **7** that
-production code reads and that nothing guaranteed but `buildSeed()`:
+**D-atomicity (§29).** Status mutation, history append and rev bump happen
+synchronously in one function against an in-memory object, then `persistNow()`
+writes the whole snapshot in a single SQLite transaction. There is no window in
+which a status is durable without its history — they are the same write. A
+failure-injection harness would therefore be testing `store.save`'s
+transactionality, which `m182E2E` already covers. Recorded rather than built,
+because a test that cannot fail teaches nothing.
 
-```
-blocks · reports · moderationLog · channels · reputationSeed · plans · archetypes
-```
-
-The mechanism is `loadSnapshot()`, which deletes every seeded key and replaces
-the object with exactly what the snapshot holds — so a snapshot predating a
-collection *removes* it, and the next read is a `TypeError`. For `db.blocks`,
-read by `isBlocked()` inside every visibility check, a restored older snapshot
-crashed the safeguarding path instead of answering it. A missing container is
-infrastructure corruption, not an authorization decision.
-
-Fixed by migration step `m230_001_core_stores_present`, schema **2200 → 2300**.
-Containers of user data default to empty; the plan and archetype catalogues are
-restored from `catalogue.mjs`, because an empty `plans` would have silently
-moved a Grassroots attribution window from 12 months to 18 — a billing change
-caused by a persistence bug, which is worse than the crash it replaced.
-
-Full write-up, root cause per store, and the residual limitation:
-`M23_STORE_INITIALIZATION_AUDIT.md`. Regression: `scripts/m23Persistence.mjs`,
-55 checks, no seed execution anywhere in it.
-
-Two further defects surfaced while fixing it:
-
-**D2a — `db.squads` never existed.** One reference, inside
-`(db.squads ?? []).length >= 0 && …` — true for every possible value, so it
-could never change a result. Squad membership is `org.squad`, per organisation.
-The tautological conjunct is removed; behaviour is identical.
-
-**D2b — `m22E2E` pinned `SCHEMA_VERSION === 2200` as a literal** and broke on
-the bump for a reason with no M22 meaning. This is the **third** recurrence of
-one defect: M20 found it in M19's suite, M21 found it in M20's suite, M23 found
-it here. The assertion now checks M22's own contribution
-(`SCHEMA_VERSION >= 2200`) rather than pinning a shared constant.
-
-A correction to something I asserted while making the bump: I said every suite
-read `SCHEMA_VERSION` symbolically. That was true of `m182E2E`, which I had
-checked, and false of `m22E2E`, which I had not. The bump was safe, but the
-reasoning offered for it was not.
-
-**A design point worth recording.** The first version of this fix pushed
-`STORE_MISSING` into `integrityReport`'s `violations` array, which broke two
-correct M18.2 assertions — including "an empty database is not a violation".
-That assertion is right: an empty database has no *conflicting records*. Two
-records disagreeing and a database never built are different problems needing
-different responses, so the store check reports through a separate `stores`
-field and the prior invariant stands unweakened.
+**D-events (§30, §84).** No lifecycle event is emitted yet, so there is nothing
+for the registry sweep to catch. Adding one before a share boundary exists
+would mean broadcasting internal stage changes with no audience entitled to
+them. It belongs with the Contact phase.
