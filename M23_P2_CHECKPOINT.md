@@ -1,5 +1,13 @@
 # M23 P2 — Verified Recovery Checkpoint
 
+> **SUPERSEDED by `M23_P2_FREEZE_MANIFEST.md`.** This checkpoint describes the
+> bundle taken at `95572fa` (154 commits, 45 `m23BootContract` checks, 286
+> `m18E2E` checks). The freeze pass that followed it rebuilt the bundle at
+> `e80d36e` and re-verified the whole battery from it. The values below are
+> left exactly as they were measured — as the document itself says, "if the
+> bundle is ever rebuilt at a later tip, these values become a record of a
+> previous checkpoint, not of the file on disk." That is what they now are.
+
 The last verified recovery bundle was M22-era and predated every line of M23.
 This is the replacement, taken at the frozen P2 correction tip.
 
