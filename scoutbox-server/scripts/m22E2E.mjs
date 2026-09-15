@@ -532,7 +532,17 @@ section('§116–§122 — migration, clean boot, upgrade and restart');
 
   const step = MIGRATIONS.find((m) => m.id === 'm220_001_box_cam_cv_results');
   ok(!!step, '§116. an M22 migration step exists');
-  ok(SCHEMA_VERSION === 2200, `§116. the schema version moved to ${SCHEMA_VERSION}`);
+  // M22 raised the schema to 2200. It asserts its OWN contribution — that the
+  // version is at least the one it introduced — rather than pinning the global
+  // constant to a literal.
+  //
+  // The literal pin was `SCHEMA_VERSION === 2200`, and it broke the moment
+  // M23-D2 raised the version for a reason with no M22 meaning. That is the
+  // THIRD time this exact defect has landed: M20 found it in M19's suite, M21
+  // found it in M20's suite, and M23 has now found it here. Each time the
+  // failing assertion was true about its own milestone and false about the
+  // repository, which is the signature of pinning a shared constant.
+  ok(SCHEMA_VERSION >= 2200, `§116. the schema is at or beyond M22's 2200 (now ${SCHEMA_VERSION})`);
 
   // §117 — the reuse audit, enforced rather than only written down.
   neg(!MIGRATIONS.some((m) => JSON.stringify(m.up.toString()).includes('cvFrames')),

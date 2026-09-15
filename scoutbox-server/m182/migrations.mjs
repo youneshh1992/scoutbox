@@ -26,7 +26,14 @@
  * snapshot store has no concept of one and inventing it here would be theatre.
  */
 
-export const SCHEMA_VERSION = 2200; // 22.0.0
+import { planCatalogue, archetypeCatalogue } from '../catalogue.mjs';
+
+// 23.0.0 — bumped because M23-D2 changes what a migrated database GUARANTEES:
+// seven more collections are present after an upgrade that were previously
+// present only by luck of the seed. That is a real change to the bootstrap
+// contract, which is what this number is for. It is not bumped for
+// documentation.
+export const SCHEMA_VERSION = 2300;
 
 /**
  * Every step is idempotent: running it twice is the same as running it once.
@@ -145,7 +152,108 @@ export const MIGRATIONS = [
       db.boxCamCvResults ??= [];
     },
   },
+  {
+    id: 'm230_001_core_stores_present',
+    // M23-D2 — a PRE-EXISTING core persistence defect, found during M23
+    // preflight. Not caused by M23.
+    //
+    // THE MECHANISM. The server starts from `buildSeed()`, so a first boot has
+    // every collection. Then `loadSnapshot()` runs:
+    //
+    //     for (const key of Object.keys(db)) delete db[key];
+    //     Object.assign(db, raw.db);
+    //
+    // It DELETES the seeded object wholesale and replaces it with exactly what
+    // the snapshot holds. A snapshot written before a collection existed
+    // therefore *removes* that collection, and the next production read is a
+    // TypeError — an HTTP 500, not a 404.
+    //
+    // Seven collections were reachable by production code and guaranteed by
+    // nothing but the demo-data builder. The worst is `db.blocks`, read by
+    // `isBlocked()` inside every visibility check: a restored older snapshot
+    // would have crashed the safeguarding path rather than answering it. A
+    // missing container is infrastructure corruption, NOT an authorization
+    // decision — "fail closed" is a verdict, and a TypeError is not a verdict.
+    //
+    // TWO KINDS OF DEFAULT, AND THEY ARE NOT INTERCHANGEABLE.
+    //
+    //   Containers of user data default to empty, because empty is TRUE: no
+    //   rows means nothing happened. An empty `blocks` means no block
+    //   relation exists, which is exactly what it means today.
+    //
+    //   Product configuration does NOT default to empty, because empty is a
+    //   lie with consequences. An empty `plans` makes every
+    //   `db.plans[org.plan]?.attributionWindowMonths ?? 18` fall through, and
+    //   a Grassroots organisation's attribution window would silently move
+    //   from 12 months to 18 — a billing change caused by a persistence bug.
+    //   So the catalogue is restored from catalogue.mjs, the one definition
+    //   the seed now also uses.
+    //
+    // `reputationSeed` is the third case: it is demo data, its rows are
+    // literally marked `seeded: true`, and it is served beside figures
+    // computed from the live ledger. Empty is the correct production value —
+    // fabricating scout track records to fill it would be worse than the bug.
+    //
+    // Nothing here overwrites: every assignment is `??=`, so a snapshot that
+    // already carries blocks, channels or a customised plan table keeps
+    // exactly what it has.
+    note: 'M23-D2: core production-read collections exist after restore, not only after seed.',
+    up(db) {
+      // User-data containers — empty is the truthful default.
+      db.blocks ??= [];         // {playerId, orgId, by, reason} — read by isBlocked() on every visibility check
+      db.reports ??= [];        // report-user/scout/club submissions
+      db.moderationLog ??= [];  // moderation hits, counted on the T&S dashboard
+      db.channels ??= [];       // moderated message threads, opened on acceptance
+      db.reputationSeed ??= []; // demo track records; empty is correct in production
+
+      // Product configuration — empty would change behaviour, so restore the catalogue.
+      db.plans ??= planCatalogue();
+      db.archetypes ??= archetypeCatalogue();
+    },
+  },
 ];
+
+/**
+ * Collections production code may read without guarding.
+ *
+ * This list exists so the same defect cannot be rediscovered at M24. It is
+ * asserted by `scripts/m23Persistence.mjs` against a snapshot that has been
+ * through `runMigrations` and nothing else — no seed, no fixtures, no demo.
+ *
+ * It is deliberately derived from the migration steps rather than hand-kept:
+ * `missingRequiredStores()` below walks what the steps actually guarantee, so
+ * adding a store to a step adds it here, and adding a name here without a step
+ * fails loudly instead of drifting.
+ */
+export const PRODUCTION_REQUIRED_STORES = Object.freeze([
+  // Identity and core records
+  'players', 'orgs', 'guardians', 'users', 'sessions', 'ledger', 'notifications',
+  // Safeguarding and moderation — the reason this list exists
+  'blocks', 'reports', 'moderationLog', 'channels',
+  // Product configuration
+  'plans', 'archetypes',
+  // Recruitment
+  'recruitmentCases', 'roomComments', 'roomDecisions', 'roomSnapshots', 'roomEvidenceState',
+  'recruitmentBriefs', 'nobodyMissedReviews', 'secondLookItems', 'sourceChanges',
+  'requests', 'trials', 'signings',
+  // Box Cam / Combine
+  'boxSessions', 'boxSessionEvents', 'combineAttempts', 'combineRequests', 'boxCamCvResults',
+  // Matching, development, preferences
+  'dynamicWatchlists', 'watchlistHistory', 'notificationPrefs',
+  'developmentPlans', 'developmentGoals', 'developmentActions',
+  'developmentEvidenceLinks', 'developmentReviews',
+]);
+
+/**
+ * Which required stores are absent from this snapshot.
+ *
+ * Reports, never repairs (§45): a read-time `??=` scattered through handlers
+ * is how the original defect hid for eleven milestones. The fix is that the
+ * collection exists; this function only says whether it does.
+ */
+export function missingRequiredStores(db) {
+  return PRODUCTION_REQUIRED_STORES.filter((k) => db?.[k] === undefined);
+}
 
 /**
  * Apply every migration not yet recorded. Returns what happened so the caller

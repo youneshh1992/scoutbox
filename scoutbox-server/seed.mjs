@@ -2,6 +2,11 @@
 // Milestone 3: under-18 players exist, each owned by a verified guardian.
 // Agencies never see them; unverified clubs never see them; verified clubs
 // contact the guardian, never the child (domain.mjs / visibleToOrg).
+//
+// M23-D2: the billing plans and positional archetypes are product constants,
+// not demo data, so they now live in catalogue.mjs where the migration can
+// reach the same definition. The values are unchanged.
+import { planCatalogue, archetypeCatalogue } from './catalogue.mjs';
 
 export function buildSeed() {
   const now = Date.now();
@@ -427,13 +432,7 @@ export function buildSeed() {
   players.find((p) => p.id === 'pl-guni').activityLog = [now - 4 * day, now - 3 * day, now - 2 * day, now - day, now - 7200_000];
 
   // Reference archetypes for the Similar Players engine.
-  const archetypes = [
-    { id: 'arch-pressing-forward', label: 'Pressing forward', position: 'ST', foot: 'right', dob: '2002-01-01', heightCm: 185, weightKg: 80, stats: { appearances: 30, goals: 18, assists: 5 } },
-    { id: 'arch-deep-playmaker', label: 'Deep-lying playmaker', position: 'CM', foot: 'left', dob: '2001-01-01', heightCm: 177, weightKg: 72, stats: { appearances: 30, goals: 3, assists: 10 } },
-    { id: 'arch-ball-playing-cb', label: 'Ball-playing centre-back', position: 'CB', foot: 'right', dob: '2001-01-01', heightCm: 190, weightKg: 84, stats: { appearances: 30, goals: 2, assists: 1 } },
-    { id: 'arch-direct-winger', label: 'Direct winger', position: 'RW', foot: 'left', dob: '2003-01-01', heightCm: 177, weightKg: 71, stats: { appearances: 30, goals: 10, assists: 11 } },
-    { id: 'arch-sweeper-keeper', label: 'Sweeper keeper', position: 'GK', foot: 'right', dob: '2000-01-01', heightCm: 192, weightKg: 87, stats: { appearances: 30, goals: 0, assists: 0 } },
-  ];
+  const archetypes = archetypeCatalogue();
 
   // Seeded scout & coach track records; live rows are computed from the ledger.
   const reputationSeed = [
@@ -442,40 +441,7 @@ export function buildSeed() {
     { scoutName: 'Tomás Rivera', orgName: 'North Star Sports Agency', discoveries: 21, successRatePct: 48, avgResaleMultiple: 2.8, seeded: true },
   ];
 
-  const plans = {
-    Grassroots: {
-      name: 'Grassroots',
-      pricePerMonthGBP: 0,
-      seats: 1,
-      attributionWindowMonths: 12,
-      antiCircumvention:
-        'Signing a ScoutBox-discovered player inside the attribution window owes the signing fee and discovery sell-on regardless of how contact concluded. Radius and level walls are platform rules, not preferences.',
-    },
-    Academy: {
-      name: 'Academy',
-      pricePerMonthGBP: 99,
-      seats: 3,
-      attributionWindowMonths: 18,
-      antiCircumvention:
-        'Any signing of a ScoutBox-discovered player within the attribution window, however contact was concluded, owes the discovery fee. Off-platform approaches to circumvent the ledger are a terms breach and forfeit Trusted Partner eligibility.',
-    },
-    Pro: {
-      name: 'Pro',
-      pricePerMonthGBP: 349,
-      seats: 15,
-      attributionWindowMonths: 24,
-      antiCircumvention:
-        'Any signing of a ScoutBox-discovered player within the attribution window, however contact was concluded, owes the discovery fee. Off-platform approaches to circumvent the ledger are a terms breach and forfeit Trusted Partner eligibility.',
-    },
-    Agency: {
-      name: 'Agency',
-      pricePerMonthGBP: 499,
-      seats: 10,
-      attributionWindowMonths: 24,
-      antiCircumvention:
-        'Agencies additionally warrant that no representation approach is made to any player who has not accepted a contact request, and never to a minor under any circumstances.',
-    },
-  };
+  const plans = planCatalogue();
 
   players.push(player({
     id: 'pl-osei',

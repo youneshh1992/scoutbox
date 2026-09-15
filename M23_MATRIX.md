@@ -228,17 +228,57 @@ exit 124 and sees failure. One defect, two opposite wrong conclusions.
 Fixed with `proc.unref()` — the same fix `e2e/demoHost.mjs` already carries from
 M22 §74-§76. Verified: exit 0 in 2s, 112 checks, no lingering process.
 
-### D2 — the seed-only store defect is wider than M20 recorded (open)
+### D2 — production-read stores were seed-dependent (CLOSED)
 
-M20 found `db.trials` was created only by `seed.mjs`. The M23 re-audit (§115)
-finds **`db.requests` has the identical defect and was never called out**, and
-that `db.channels`, `db.blocks`, `db.reports` and `db.plans` have **no
-initializer and no migration at all**.
+**Pre-existing core persistence defect, discovered during M23 preflight. Not
+caused by M23.**
 
-`db.blocks` is the serious one: `isBlocked()` reads it inside every visibility
-check, so a snapshot restored without it would throw in the safeguarding path.
+A mechanical inventory of all **123** `db.*` collections found **7** that
+production code reads and that nothing guaranteed but `buildSeed()`:
 
-Recorded in `M23_REUSE_AUDIT.md` Part D. M23's migration covers the
-recruitment-relevant stores; the rest are documented rather than silently fixed,
-because widening the blast radius of a recruitment milestone into core
-safeguarding stores deserves its own decision.
+```
+blocks · reports · moderationLog · channels · reputationSeed · plans · archetypes
+```
+
+The mechanism is `loadSnapshot()`, which deletes every seeded key and replaces
+the object with exactly what the snapshot holds — so a snapshot predating a
+collection *removes* it, and the next read is a `TypeError`. For `db.blocks`,
+read by `isBlocked()` inside every visibility check, a restored older snapshot
+crashed the safeguarding path instead of answering it. A missing container is
+infrastructure corruption, not an authorization decision.
+
+Fixed by migration step `m230_001_core_stores_present`, schema **2200 → 2300**.
+Containers of user data default to empty; the plan and archetype catalogues are
+restored from `catalogue.mjs`, because an empty `plans` would have silently
+moved a Grassroots attribution window from 12 months to 18 — a billing change
+caused by a persistence bug, which is worse than the crash it replaced.
+
+Full write-up, root cause per store, and the residual limitation:
+`M23_STORE_INITIALIZATION_AUDIT.md`. Regression: `scripts/m23Persistence.mjs`,
+55 checks, no seed execution anywhere in it.
+
+Two further defects surfaced while fixing it:
+
+**D2a — `db.squads` never existed.** One reference, inside
+`(db.squads ?? []).length >= 0 && …` — true for every possible value, so it
+could never change a result. Squad membership is `org.squad`, per organisation.
+The tautological conjunct is removed; behaviour is identical.
+
+**D2b — `m22E2E` pinned `SCHEMA_VERSION === 2200` as a literal** and broke on
+the bump for a reason with no M22 meaning. This is the **third** recurrence of
+one defect: M20 found it in M19's suite, M21 found it in M20's suite, M23 found
+it here. The assertion now checks M22's own contribution
+(`SCHEMA_VERSION >= 2200`) rather than pinning a shared constant.
+
+A correction to something I asserted while making the bump: I said every suite
+read `SCHEMA_VERSION` symbolically. That was true of `m182E2E`, which I had
+checked, and false of `m22E2E`, which I had not. The bump was safe, but the
+reasoning offered for it was not.
+
+**A design point worth recording.** The first version of this fix pushed
+`STORE_MISSING` into `integrityReport`'s `violations` array, which broke two
+correct M18.2 assertions — including "an empty database is not a violation".
+That assertion is right: an empty database has no *conflicting records*. Two
+records disagreeing and a database never built are different problems needing
+different responses, so the store check reports through a separate `stores`
+field and the prior invariant stands unweakened.

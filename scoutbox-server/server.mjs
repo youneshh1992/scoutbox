@@ -137,6 +137,12 @@ if (migrationResult.ran.length) console.log(`schema ${migrationResult.from} → 
 const integrity = integrityReport(db);
 for (const v of integrity.violations) console.error(`INTEGRITY ${v.code} key=${v.key} ids=${v.ids.join(',')}`);
 if (integrity.violations.length) console.error(`INTEGRITY ${integrity.violations.length} violation(s) in the loaded snapshot — nothing was repaired.`);
+// M23-D2 — a required collection absent AFTER migrations means the registry
+// did not run or a step was removed. Reported loudly and never repaired here:
+// creating it at this point would mask which of those two happened.
+if (!integrity.stores.ok) {
+  console.error(`INTEGRITY STORE_MISSING ${integrity.stores.missing.join(', ')} — required collection(s) absent after migration; nothing was repaired.`);
+}
 for (const sess of db.sessions) sess.sid ??= crypto.randomBytes(6).toString('hex');
 
 // Normalise media items (older shapes) + load the seeded sample clips.

@@ -15,6 +15,7 @@
  * function is exported so a suite can hand it a broken snapshot directly.
  */
 import { OPEN_ROOM_STATUSES } from '../m17/shared.mjs';
+import { missingRequiredStores, PRODUCTION_REQUIRED_STORES } from './migrations.mjs';
 
 const dupes = (items, keyOf) => {
   const seen = new Map();
@@ -71,7 +72,27 @@ export function integrityReport(db) {
 
   const checked = cases.length + (db.recruitmentBriefs ?? []).length + (db.players ?? []).length
     + (db.orgs ?? []).length + (db.secondLookItems ?? []).length;
-  return { ok: violations.length === 0, checked, violations };
+
+  // M23-D2 — required collections that are absent.
+  //
+  // Reported SEPARATELY from `violations`, deliberately. A violation here means
+  // two records disagree; a missing store means the database was never built.
+  // They need different responses from a person, and folding them together
+  // would have redefined a prior invariant: M18.2 asserts that an empty
+  // database has no violations, and that assertion is correct — an empty
+  // database has no conflicting records. It should not become false because a
+  // later milestone taught this function a second subject.
+  //
+  // Reported, never repaired (§45): a boot script that quietly creates a
+  // container hides why it was missing.
+  const missingStores = missingRequiredStores(db);
+
+  return {
+    ok: violations.length === 0,
+    checked,
+    violations,
+    stores: { required: PRODUCTION_REQUIRED_STORES.length, missing: missingStores, ok: missingStores.length === 0 },
+  };
 }
 
 /** Counts by code — what /capabilities shows. Never the keys. */
@@ -80,4 +101,6 @@ export const integritySummary = (report) => ({
   checked: report.checked,
   violations: report.violations.length,
   byCode: report.violations.reduce((acc, v) => { acc[v.code] = (acc[v.code] ?? 0) + 1; return acc; }, {}),
+  // M23-D2 — collection names are not sensitive: they are schema, not data.
+  stores: report.stores ?? { required: 0, missing: [], ok: true },
 });

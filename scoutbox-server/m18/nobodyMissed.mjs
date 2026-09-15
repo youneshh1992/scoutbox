@@ -75,7 +75,13 @@ export function registerNobodyMissed(ctx) {
       combineMeasurements[a.protocolId] = combineMeasurements[a.protocolId] == null ? v : Math.max(combineMeasurements[a.protocolId], v);
     }
     const trust = ctx.trustSummaryFor?.(player) ?? null;
-    const clubConfirmed = (db.squads ?? []).length >= 0 && !!(db.signings ?? []).find((s) => s.playerId === player.id);
+    // M23-D2: this read `(db.squads ?? []).length >= 0 && …`. There is no
+    // `db.squads` anywhere in the product — squad membership is `org.squad`,
+    // per organisation — and `[].length >= 0` is true for every possible
+    // value, so the conjunct could never change the result. Removing it is
+    // behaviour-preserving and removes a production read of a store that does
+    // not exist, which is exactly the drift the store inventory now catches.
+    const clubConfirmed = !!(db.signings ?? []).find((s) => s.playerId === player.id);
 
     return {
       playerId: player.id,
