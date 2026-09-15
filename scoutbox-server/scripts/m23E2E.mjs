@@ -23,7 +23,8 @@ import {
   NULL_EVIDENCE_PROVIDER,
 } from '../m23/lifecycle.mjs';
 import { buildRecruitmentJourney, JOURNEY_REQUIRED_STORES } from '../m23/journey.mjs';
-import { ROOM_STATUSES, ROOM_TRANSITIONS, TERMINAL_ROOM_STATUSES } from '../m17/shared.mjs';
+import { ROOM_STATUSES, ROOM_TRANSITIONS, TERMINAL_ROOM_STATUSES, roomStatusForStage, STATUS_EVIDENCE_REQUIRED } from '../m17/shared.mjs';
+import { createEvidenceProvider } from '../m23/evidence.mjs';
 import { FUNNEL_STAGES } from '../m20/funnels.mjs';
 
 const PORT = 5700 + Math.floor(Math.random() * 200);
@@ -227,6 +228,7 @@ async function j(method, url, body, token, extra = {}) {
   let data = null; try { data = await r.json(); } catch { /* non-json */ }
   return { status: r.status, body: data };
 }
+const realEvidence = createEvidenceProvider({ signings: [] });
 const login = async (orgId, scoutName, role, platform) => (await j('POST', '/auth/org/login', { orgId, scoutName, role, ...(platform ? { platform } : {}) })).body;
 
 const maria = await login('org-eastport', 'Maria Keane', 'Head of Recruitment');
@@ -403,6 +405,105 @@ section('Negatives — isolation, authority, concurrency, privacy');
   const pj = JSON.stringify(passport ?? {});
   neg(!/under_review|on_hold|offer_consideration|contact_planned|recruitment_case/i.test(pj),
     '#35 the Passport gains no hidden recruitment interest from the lifecycle');
+}
+
+section('H1-H6 — the signed boundary, attacked from every write path');
+{
+  // Drive a case all the way to offer_made using a provider-satisfied path is
+  // not possible in P2 (offer evidence is not implemented), so this group
+  // works against the pure validator for state coverage and against real HTTP
+  // for the routes that exist. Both matter: the validator is the rule, the
+  // routes are where the rule is actually reachable.
+
+  // ---- H1: the normal semantic action, no evidence.
+  const atAccepted = { id: 'c-h', orgId: 'org-eastport', playerId: ADULT.id, room: { status: 'offer_accepted', rev: 1 } };
+  const h1 = canTransitionRecruitmentCase(atAccepted, 'confirmSignedOutcome', { role: 'recruitment_admin', evidence: realEvidence });
+  neg(h1.ok === false && h1.error === 'LIFECYCLE_EVIDENCE_REQUIRED',
+    'H1 offer_accepted -> signed is refused: no confirmed joining record exists for this player');
+  neg(h1.evidenceReason === 'no_confirmed_join', 'H1b and the reason names what is missing, not a generic failure');
+
+  // ---- H5: offer_made carries the IDENTICAL burden.
+  const atMade = { ...atAccepted, room: { status: 'offer_made', rev: 1 } };
+  const h5 = canTransitionRecruitmentCase(atMade, 'confirmSignedOutcome', { role: 'recruitment_admin', evidence: realEvidence });
+  neg(h5.ok === false && h5.error === 'LIFECYCLE_EVIDENCE_REQUIRED',
+    'H5 offer_made -> signed requires exactly the same evidence — the retained legacy edge is not a weaker path');
+  neg(h5.requires === h1.requires, 'H5b and it is literally the same requirement, because the table is keyed by target');
+
+  // ---- H6: foreign signing evidence does not count.
+  const foreignSigning = { id: 'sign-foreign', orgId: 'org-harbour', playerId: ADULT.id, ts: Date.now() };
+  const otherPlayer = { id: 'sign-other', orgId: 'org-eastport', playerId: 'pl-someone-else', ts: Date.now() };
+  const cancelled = { id: 'sign-cancelled', orgId: 'org-eastport', playerId: ADULT.id, ts: Date.now(), cancelledAt: Date.now() };
+  const probe = (rows) => createEvidenceProvider({ signings: rows }).check('confirmed_join', { kase: atAccepted });
+  neg(probe([foreignSigning]).satisfied === false, 'H6 another club\'s signing does not prove this club signed the player');
+  neg(probe([otherPlayer]).satisfied === false, 'H6b another player\'s signing proves nothing about this one');
+  neg(probe([cancelled]).satisfied === false, 'H6c a cancelled signing is not a signing');
+  ok(probe([{ id: 'sign-ok', orgId: 'org-eastport', playerId: ADULT.id, ts: Date.now() }]).satisfied === true,
+    'H6d a signing for this club AND this player does prove it');
+  neg(probe(undefined).satisfied === false && probe(undefined).reason === 'signings_store_unavailable',
+    'H6e a MISSING signings store is reported as unavailable, never as "no signing" — the D2 lesson again');
+
+  // ---- H2/H3: the legacy status route is not a side door.
+  //
+  // THIS IS THE DEFECT THIS HARDENING PASS EXISTS TO CATCH. Before the fix a
+  // club at offer_made could POST {status:'signed'} here and land on signed
+  // with nothing in db.signings at all.
+  const lr = await j('POST', '/org/rooms', { playerId: ADULT.id, sourceContext: 'search' }, harbour.token);
+  const HR = lr.body?.room?.roomId;
+  if (HR) {
+    const direct = await j('POST', `/org/rooms/${HR}/status`, { status: 'signed' }, harbour.token);
+    neg(direct.status !== 200, 'H2 the legacy status route cannot reach signed from watching');
+    const st = (await j('GET', `/org/rooms/${HR}`, undefined, harbour.token)).body;
+    neg(st.room?.status !== 'signed', 'H2b and the case did not move');
+  } else {
+    ok(false, 'could not create the harbour fixture room');
+  }
+
+  // H2c — the legacy route enforces the gate for a status it CAN reach.
+  //
+  // `signed` is unreachable over HTTP in P2 (every route into it needs
+  // evidence no phase can supply), so proving the route gate needs a status
+  // that is both reachable and evidence-bearing: `contacted`, one step from
+  // `contact_planned`. Before the fix this returned 200 and moved the case.
+  // Use the harbour room: a DIFFERENT org, so it is a genuinely new case at
+  // `watching` rather than the adopted Eastport one (there is one open room
+  // per org and player, so re-creating returns the existing case).
+  const GR = HR;
+  const gateBefore = (await j('GET', `/org/rooms/${GR}/journey`, undefined, harbour.token)).body;
+  const planned = await j('POST', `/org/rooms/${GR}/lifecycle`, { action: 'planContact', expectedRev: gateBefore.case?.rev }, harbour.token);
+  if (planned.status === 200) {
+    const sneak = await j('POST', `/org/rooms/${GR}/status`, { status: 'contacted' }, harbour.token);
+    neg(sneak.status === 422 && sneak.body.error === 'ROOM_EVIDENCE_REQUIRED',
+      'H2c the LEGACY status route refuses an evidence-bearing status — the side door is closed');
+    neg(sneak.body.requires === 'contact_delivered', 'H2d and names the record it wanted');
+    const after = (await j('GET', `/org/rooms/${GR}`, undefined, harbour.token)).body;
+    neg(after.room?.status === 'contact_planned', 'H2e the case did not move');
+  } else {
+    ok(false, 'could not reach contact_planned for the legacy-route gate test');
+  }
+
+  // H3 — the M12 legacy stage route cannot express `signed` at all.
+  const stageNames = ['identified', 'review', 'observation', 'trial', 'invited', 'awaiting_response', 'decision', 'closed'];
+  neg(stageNames.every((st) => roomStatusForStage(st, 'academy') !== 'signed'),
+    'H3 no legacy M12 stage maps to `signed` — the compatibility path cannot express it');
+  neg(stageNames.every((st) => roomStatusForStage(st, 'grassroots') !== 'signed'),
+    'H3b in either vocabulary');
+
+  // ---- H4: concurrency. A stale actor cannot win by racing.
+  const cur = (await j('GET', `/org/rooms/${ROOM}/journey`, undefined, maria.token)).body;
+  const staleRev = cur.case.rev;
+  await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'holdCase', expectedRev: staleRev }, maria.token);
+  const raced = await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'confirmSignedOutcome', expectedRev: staleRev }, maria.token);
+  neg(raced.status !== 200, 'H4 a racing confirm-signing loses — on the transition table, the evidence rule, or the rev');
+
+  // ---- The evidence table is keyed by target, so every inbound edge is covered.
+  const inboundToSigned = Object.entries(ROOM_TRANSITIONS).filter(([, tos]) => tos.includes('signed')).map(([from]) => from);
+  ok(inboundToSigned.length >= 2, `there is more than one inbound edge to signed (${inboundToSigned.join(', ')})`);
+  for (const from of inboundToSigned) {
+    const k = { ...atAccepted, room: { status: from, rev: 1 } };
+    const v = canTransitionRecruitmentCase(k, 'confirmSignedOutcome', { role: 'recruitment_admin', evidence: realEvidence });
+    if (v.ok !== false || v.error !== 'LIFECYCLE_EVIDENCE_REQUIRED') fail(`${from} -> signed skipped the evidence requirement`);
+  }
+  neg(true, 'every inbound edge to signed carries the evidence requirement — no weaker path exists');
 }
 
 section('Legacy compatibility — an old case still reads');

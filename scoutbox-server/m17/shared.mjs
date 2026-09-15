@@ -207,6 +207,38 @@ export const ROOM_TRANSITIONS = {
   closed: ['under_review'],
 };
 
+/**
+ * Statuses that assert a DURABLE FACT and therefore require a record proving it.
+ *
+ * M23 §14 — THE DEFECT THIS TABLE CLOSES.
+ *
+ * M23 first put these preconditions in its own module and checked them in its
+ * own route. That left the legacy `POST /org/rooms/:id/status` route — which
+ * takes a client-supplied status string — as an open side door: a club sitting
+ * at `offer_made` could post `{ status: 'signed' }` and land on `signed` with
+ * no signing anywhere in the database. The lifecycle would then be asserting a
+ * football-business fact that no record supported, which is precisely what the
+ * governing rule forbids.
+ *
+ * So the requirement lives HERE, keyed by TARGET status, and is returned by
+ * `validateTransition` — the one function every status path already calls.
+ * Keying by target and not by (from, to) is deliberate: it means
+ * `offer_made -> signed` and `offer_accepted -> signed` carry the IDENTICAL
+ * requirement, and no future edge can be added that quietly skips it.
+ *
+ * Kinds are resolved by an injected provider. A caller with no provider must
+ * FAIL CLOSED: an unresolvable requirement is an unmet one.
+ */
+export const STATUS_EVIDENCE_REQUIRED = Object.freeze({
+  contacted: { kind: 'contact_delivered', note: 'a contact must have been delivered or recorded' },
+  trial_scheduled: { kind: 'trial_confirmed', note: 'the player or guardian must have accepted a trial' },
+  trial_completed: { kind: 'trial_completed', note: 'a trial must have been completed' },
+  offer_made: { kind: 'offer_sent', note: 'an offer must have been sent' },
+  offer_accepted: { kind: 'offer_accepted_by_recipient', note: 'the recipient must have accepted their own offer' },
+  offer_declined: { kind: 'offer_declined_by_recipient', note: 'the recipient must have declined their own offer' },
+  signed: { kind: 'confirmed_join', note: 'a confirmed joining or registration record must exist' },
+});
+
 /** Statuses that end active pursuit and therefore demand a recorded reason. */
 export const REASON_REQUIRED_STATUSES = ['withdrawn', 'archived', 'closed'];
 
@@ -257,6 +289,11 @@ export function validateTransition(from, to, { reasonCodes = [] } = {}) {
     reopen: REOPENED_FROM.includes(from) && !REOPENED_FROM.includes(to),
     needsReason,
     snapshot: SNAPSHOT_STATUSES.includes(to),
+    // M23 — statuses that assert a durable fact must name the record that
+    // proves it. Returned here, on the ONE validator every status route
+    // already calls, so no caller can reach an evidence-bearing status
+    // without being told that evidence is required.
+    requiresEvidence: STATUS_EVIDENCE_REQUIRED[to]?.kind ?? null,
   };
 }
 

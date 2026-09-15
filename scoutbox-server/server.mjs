@@ -25,6 +25,7 @@ import { registerMatching } from './m19/index.mjs';
 import { registerAnalytics } from './m20/index.mjs';
 import { registerDevelopment } from './m21/index.mjs';
 import { registerM23, migrateM23 } from './m23/index.mjs';
+import { createEvidenceProvider } from './m23/evidence.mjs';
 import { COMBINE_PROTOCOLS } from './m16/combineShared.mjs';
 import { registerSourceChanges } from './m181/sourceChanges.mjs';
 import { audienceFor, EVENT_AUDIENCE } from './m181/eventAudience.mjs';
@@ -3872,7 +3873,16 @@ void m21Ctx;
 // through M17's single writer (ctx.applyLifecycleTransition), so `case.stage`
 // and `room.status` still cannot disagree, and it stores nothing of its own.
 migrateM23(db);
+
+// The evidence provider is attached to the M17 context as well as handed to
+// M23, because M17's own status route can name an evidence-bearing status. One
+// provider, reachable from every status path; a path with no provider fails
+// closed rather than assuming the requirement is met.
+const recruitmentEvidence = createEvidenceProvider(db);
+m17Ctx.recruitmentEvidence = recruitmentEvidence;
+
 registerM23({
+  recruitmentEvidenceProvider: recruitmentEvidence,
   ...m19Ctx,
   isAdult,
   // M17's room seams live on the object registerM17 returned; registerM18

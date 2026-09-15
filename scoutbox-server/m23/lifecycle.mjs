@@ -30,7 +30,7 @@
  * honest answer, and is why P2 creates no placeholder trials or offers.
  */
 
-import { ROOM_TRANSITIONS, ROOM_STATUSES, TERMINAL_ROOM_STATUSES } from '../m17/shared.mjs';
+import { ROOM_TRANSITIONS, ROOM_STATUSES, TERMINAL_ROOM_STATUSES, STATUS_EVIDENCE_REQUIRED } from '../m17/shared.mjs';
 
 export const RECRUITMENT_LIFECYCLE_POLICY_VERSION = 1;
 
@@ -81,21 +81,16 @@ const REASON_SET = new Set(LIFECYCLE_REASON_CODES);
  * kind must answer `{ satisfied: false, reason: 'not_implemented' }` — never
  * `true`, and never by inventing a row.
  */
-export const LIFECYCLE_PRECONDITIONS = Object.freeze({
-  contacted: { kind: 'contact_delivered', note: 'a contact must have been delivered or recorded' },
-  trial_scheduled: { kind: 'trial_confirmed', note: 'the player or guardian must have accepted a trial' },
-  trial_completed: { kind: 'trial_completed', note: 'a trial must have been completed' },
-  offer_made: { kind: 'offer_sent', note: 'an offer must have been sent' },
-  offer_accepted: { kind: 'offer_accepted_by_recipient', note: 'the recipient must have accepted their own offer' },
-  offer_declined: { kind: 'offer_declined_by_recipient', note: 'the recipient must have declined their own offer' },
-  // THE ONE THAT MATTERS MOST.
-  //
-  // `signed` is never reachable from an offer acceptance. It requires a
-  // separate confirmed joining record, which is a different fact established
-  // by a different act. An acceptance in ScoutBox is a player saying yes to a
-  // proposal; a signing is a club recording that the player actually joined.
-  signed: { kind: 'confirmed_join', note: 'a confirmed joining or registration record must exist' },
-});
+/**
+ * Preconditions, re-exported from the ONE table in m17/shared.mjs.
+ *
+ * This used to be a second copy living here, and that copy was the defect: the
+ * legacy status route consulted m17 and never saw it, so `offer_made` +
+ * `{status:'signed'}` walked straight past the requirement. Two tables meant
+ * two answers to one question. Now there is one table, returned by the one
+ * validator every status path calls.
+ */
+export const LIFECYCLE_PRECONDITIONS = STATUS_EVIDENCE_REQUIRED;
 
 /**
  * Semantic actions. Each names one real event and maps to exactly one state.

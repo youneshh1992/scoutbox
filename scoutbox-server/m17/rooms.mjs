@@ -656,6 +656,29 @@ export function registerRooms(ctx) {
     const check = validateTransition(room.room.status, to, { reasonCodes: reasons.codes });
     if (!check.ok) return res.status(check.error === 'ROOM_TRANSITION_INVALID' ? 409 : 400).json(check);
 
+    // M23 §14 — a status that asserts a durable fact needs the record proving it.
+    //
+    // This route takes a status string from the client, so without this gate it
+    // is a side door around the M23 lifecycle: `offer_made` + `{status:'signed'}`
+    // would have landed on `signed` with no signing in the database. The
+    // requirement is keyed by TARGET status in m17/shared.mjs, so every path to
+    // `signed` carries the identical burden and no future edge can skip it.
+    //
+    // FAILS CLOSED. No provider attached means the requirement cannot be
+    // resolved, and an unresolvable requirement is an unmet one.
+    if (check.requiresEvidence) {
+      const verdict = ctx.recruitmentEvidence?.check(check.requiresEvidence, { kase: room })
+        ?? { satisfied: false, reason: 'no_evidence_provider' };
+      if (verdict.satisfied !== true) {
+        return res.status(422).json({
+          error: 'ROOM_EVIDENCE_REQUIRED',
+          message: `"${to}" records something that must actually have happened; no supporting record was found.`,
+          requires: check.requiresEvidence,
+          evidenceReason: verdict.reason ?? 'unsatisfied',
+        });
+      }
+    }
+
     const from = room.room.status;
     applyStatus(room, to, req.org, req.orgUser);
 
@@ -717,6 +740,18 @@ export function registerRooms(ctx) {
     if (!reasons.ok) return { ok: false, status: 400, ...reasons };
     const check = validateTransition(room.room.status, to, { reasonCodes: reasons.codes });
     if (!check.ok) return { ok: false, status: check.error === 'ROOM_TRANSITION_INVALID' ? 409 : 400, ...check };
+
+    // Same gate as the status route. `to` is a parameter here, and M18's
+    // Second Look bridge supplies it, so an evidence-bearing target must be
+    // refused on this path too rather than trusted because the caller is
+    // internal. Fails closed for the same reason.
+    if (check.requiresEvidence) {
+      const verdict = ctx.recruitmentEvidence?.check(check.requiresEvidence, { kase: room })
+        ?? { satisfied: false, reason: 'no_evidence_provider' };
+      if (verdict.satisfied !== true) {
+        return { ok: false, status: 422, error: 'ROOM_EVIDENCE_REQUIRED', requires: check.requiresEvidence, evidenceReason: verdict.reason ?? 'unsatisfied' };
+      }
+    }
 
     const from = room.room.status;
     applyStatus(room, to, req.org, req.orgUser);
