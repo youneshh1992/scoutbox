@@ -137,9 +137,16 @@ export function stageForRoomStatus(status, orgLevel) {
 }
 
 /**
- * The room status a legacy M12 stage write means. Used only so the existing
- * `POST /org/cases/:id/stage` route keeps working and lands on a real room
- * status instead of leaving the two representations disagreeing.
+ * The room status a legacy M12 stage MEANS — the inverse of a lossy
+ * projection, and therefore never an authoritative write.
+ *
+ * Eighteen statuses collapse onto six stages, so `decision` alone means any of
+ * `offer_consideration`, `offer_made`, `offer_accepted` or `offer_declined`.
+ * Its single legitimate use is room CREATION: a Room adopting an existing M12
+ * case reads the stage to decide where the new workspace starts. It is
+ * deliberately NOT used to move an existing room — `POST /org/cases/:id/stage`
+ * refuses a Room outright rather than round-tripping a client's stage through
+ * a mapping that cannot tell those four statuses apart.
  */
 export function roomStatusForStage(stage, orgLevel) {
   const table = STAGE_MAP[orgStageKind(orgLevel)];
@@ -238,6 +245,31 @@ export const STATUS_EVIDENCE_REQUIRED = Object.freeze({
   offer_declined: { kind: 'offer_declined_by_recipient', note: 'the recipient must have declined their own offer' },
   signed: { kind: 'confirmed_join', note: 'a confirmed joining or registration record must exist' },
 });
+
+/**
+ * The status a NEW Room starts at when it adopts an existing M12 case.
+ *
+ * Opening a workspace is not a claim about the world. Room creation is an
+ * inbound edge to whatever status it lands on, and it runs no transition
+ * table and no evidence gate — so if the case's legacy stage mapped onto an
+ * evidence-bearing status, creation would be the one inbound edge that carries
+ * none of the burden every other inbound edge carries. Grassroots
+ * `awaiting_response` maps to `trial_completed`, and no trial need ever have
+ * happened.
+ *
+ * Those adoptions start at `under_review` instead: open, honest, and the state
+ * the club is actually in. The original stage is recorded in the creation
+ * activity, so the club's own record of where it had got to is not lost.
+ *
+ * Stated as a property rather than as a special case for `awaiting_response`:
+ * no stage in any vocabulary, present or future, can start a room at a status
+ * that asserts something the records do not prove.
+ */
+export function adoptionStatusForStage(stage, orgLevel) {
+  const mapped = roomStatusForStage(stage, orgLevel);
+  if (!mapped) return 'watching';
+  return STATUS_EVIDENCE_REQUIRED[mapped] ? 'under_review' : mapped;
+}
 
 /** Statuses that end active pursuit and therefore demand a recorded reason. */
 export const REASON_REQUIRED_STATUSES = ['withdrawn', 'archived', 'closed'];

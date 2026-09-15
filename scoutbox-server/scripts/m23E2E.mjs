@@ -23,7 +23,10 @@ import {
   NULL_EVIDENCE_PROVIDER,
 } from '../m23/lifecycle.mjs';
 import { buildRecruitmentJourney, JOURNEY_REQUIRED_STORES } from '../m23/journey.mjs';
-import { ROOM_STATUSES, ROOM_TRANSITIONS, TERMINAL_ROOM_STATUSES, roomStatusForStage, STATUS_EVIDENCE_REQUIRED } from '../m17/shared.mjs';
+import {
+  ROOM_STATUSES, ROOM_TRANSITIONS, TERMINAL_ROOM_STATUSES, roomStatusForStage,
+  STATUS_EVIDENCE_REQUIRED, adoptionStatusForStage, PRO_STAGES, GRASSROOTS_STAGES,
+} from '../m17/shared.mjs';
 import { createEvidenceProvider } from '../m23/evidence.mjs';
 import { FUNNEL_STAGES, stagesReached } from '../m20/funnels.mjs';
 
@@ -688,6 +691,62 @@ section('Legacy compatibility — an old case still reads');
       'J12c its history, written by the old route, is read by the new projector');
   } else {
     ok(false, 'could not create the legacy fixture case');
+  }
+}
+
+section('W — write-site audit: every path that can move a case, and the ones that must not');
+{
+  // W1-W4 (pure) — room CREATION is an inbound edge like any other, and it
+  // runs no transition table and no evidence gate. Stated as a property over
+  // both vocabularies rather than as a special case, so a stage added later
+  // cannot reintroduce the hole.
+  ok(roomStatusForStage('awaiting_response', 'grassroots') === 'trial_completed',
+    'W1 the honest inverse of the grassroots stage map does reach an evidence-bearing status');
+  neg(adoptionStatusForStage('awaiting_response', 'grassroots') === 'under_review',
+    'W2 but a Room adopting that case does NOT start at `trial_completed` — no trial is proven');
+  const proStarts = PRO_STAGES.map((s) => adoptionStatusForStage(s, 'pro'));
+  const grStarts = GRASSROOTS_STAGES.map((s) => adoptionStatusForStage(s, 'grassroots'));
+  neg([...proStarts, ...grStarts].every((s) => !STATUS_EVIDENCE_REQUIRED[s]),
+    'W3 no stage in either vocabulary starts a room at a status the records cannot prove');
+  ok([...proStarts, ...grStarts].every((s) => ROOM_STATUSES.includes(s)),
+    'W4 and every adoption start is a real status, never null or invented');
+
+  // W5-W10 (live) — the legacy M12 stage route is the oldest writer of
+  // `case.stage`, which M23 made a pure derivation of `room.status`. It had no
+  // bridge to the lifecycle at all, so it could move one representation of a
+  // case and leave the other behind.
+  const before = await j('GET', `/org/rooms/${ROOM}/journey`, undefined, maria.token);
+  const stageBefore = before.body?.lifecycle?.currentStage;
+  const legacyStage = await j('POST', `/org/cases/${ROOM}/stage`, { stage: 'trial', reason: 'legacy client' }, maria.token);
+  neg(legacyStage.status === 409 && legacyStage.body?.error === 'STAGE_NOT_SETTABLE_ON_ROOM',
+    'W5 the legacy stage route refuses a case that has a Room');
+  ok(typeof legacyStage.body?.use === 'string' && legacyStage.body.use.includes('/lifecycle'),
+    'W6 and names the lifecycle route rather than failing blankly');
+  const after = await j('GET', `/org/rooms/${ROOM}/journey`, undefined, maria.token);
+  neg(after.body?.lifecycle?.currentStage === stageBefore,
+    'W7 the refusal left the lifecycle exactly where it was');
+
+  const room = await j('GET', `/org/rooms/${ROOM}`, undefined, maria.token);
+  const revBefore = room.body?.room?.rev;
+  const legacyDecision = await j('POST', `/org/cases/${ROOM}/decision`, { outcome: 'monitor', reasons: 'keep watching through the spring' }, maria.token);
+  ok(legacyDecision.status === 200 && legacyDecision.body?.case?.decision?.outcome === 'monitor',
+    'W8 an M12 decision on a Room is still recorded — the route is not broken, only disarmed');
+  neg(legacyDecision.body?.case?.stage !== 'decision',
+    'W9 but it does not write the derived stage behind the lifecycle\'s back');
+  const roomAfter = await j('GET', `/org/rooms/${ROOM}`, undefined, maria.token);
+  neg(roomAfter.body?.room?.rev === revBefore,
+    'W10 and it moves no concurrency token, because it moved no lifecycle state');
+
+  // W11 — the same route on a plain M12 case is untouched. Refusing a Room is
+  // not an excuse to break the cases that have no lifecycle to protect.
+  const spare = players.find((p) => p.id !== ADULT.id && p.dateOfBirth && (new Date().getFullYear() - new Date(p.dateOfBirth).getFullYear()) >= 18);
+  const plain = await j('POST', '/org/cases', { playerId: spare?.id ?? ADULT.id, priority: 'low' }, tom.token);
+  if (plain.status === 201 && !plain.body.case.room) {
+    const moved = await j('POST', `/org/cases/${plain.body.case.id}/stage`, { stage: 'observation' }, tom.token);
+    ok(moved.status === 200 && moved.body.case.stage === 'observation',
+      'W11 a plain case with no Room still moves through the legacy route exactly as before');
+  } else {
+    ok(false, 'could not create the plain-case fixture');
   }
 }
 

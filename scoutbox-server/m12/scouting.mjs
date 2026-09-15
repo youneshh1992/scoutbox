@@ -441,6 +441,29 @@ export function registerScouting(ctx) {
   orgRouter.post('/cases/:id/stage', (req, res) => {
     const c = findCase(req, res);
     if (!c) return;
+    // M23 — `case.stage` is a DERIVATION of `case.room.status` once the case has
+    // a Room facet, and a derivation is not writable. Accepting a stage here
+    // would be a side door around the lifecycle: no transition table, no
+    // evidence requirement, no history entry and no rev bump, leaving the two
+    // representations of one case disagreeing.
+    //
+    // Translating the stage back into a status is NOT a safe alternative. The
+    // mapping is lossy — eighteen statuses collapse onto six stages — so
+    // `decision` alone means any of `offer_consideration`, `offer_made`,
+    // `offer_accepted` or `offer_declined`, and its inverse would move a room
+    // at `offer_made` BACKWARDS. A lossy inverse cannot be an authoritative
+    // write, which is exactly why authority runs status → stage and not back.
+    //
+    // A plain M12 case (no Room) has no lifecycle, so it is untouched.
+    if (c.room) {
+      return res.status(409).json({
+        error: 'STAGE_NOT_SETTABLE_ON_ROOM',
+        message: 'This case has a Recruitment Room. Its stage is derived from the room status — move the case through a lifecycle action instead.',
+        roomStatus: c.room.status,
+        stage: c.stage,
+        use: `POST /org/rooms/${c.id}/lifecycle`,
+      });
+    }
     const stages = stagesFor(req.org);
     const { stage, reason } = req.body ?? {};
     if (!stages.includes(stage)) return res.status(400).json({ error: 'STAGE_INVALID', allowed: stages });
@@ -469,7 +492,10 @@ export function registerScouting(ctx) {
       return res.status(202).json({ approval: appr, note: 'A sign decision needs a recruitment lead’s approval.' });
     }
     c.decision = { outcome, reasons: String(reasons).slice(0, 500), byUserId: req.orgUser.id, byName: req.orgUser.name, at: Date.now() };
-    c.stage = 'decision';
+    // M23 — recording the decision is the point of this route; moving the case
+    // is not. On a Room the stage is derived from the lifecycle status, so
+    // writing it here would desync the two. The decision stands either way.
+    if (!c.room) c.stage = 'decision';
     audit(c, 'org', req.orgUser.id, req.orgUser.name, 'decision', outcome);
     persistNow();
     res.json({ case: caseView(c) });
@@ -486,7 +512,7 @@ export function registerScouting(ctx) {
     appr.resolvedBy = { userId: req.orgUser.id, name: req.orgUser.name, at: Date.now() };
     if (approve) {
       c.decision = { ...appr.decision, byUserId: appr.requestedBy.userId, byName: appr.requestedBy.name, approvedBy: req.orgUser.name, at: Date.now() };
-      c.stage = 'decision';
+      if (!c.room) c.stage = 'decision'; // derived on a Room — see the decision route
     }
     audit(c, 'org', req.orgUser.id, req.orgUser.name, approve ? 'approved' : 'rejected', appr.decision.outcome);
     notify({ kind: 'org_user', id: appr.requestedBy.userId }, 'case', `${approve ? '✅ approved' : '❌ rejected'}: your ${appr.decision.outcome} decision on ${c.playerName}.`, c.id);

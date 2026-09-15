@@ -34,8 +34,13 @@ The M12 vocabulary — `identified`, `review`, `observation`, `trial`,
 `decision`, `closed` for professional clubs; a shorter grassroots set.
 
 **A pure derivation of the lifecycle status.** Authority runs one way:
-`status → stage`, never the reverse. A legacy route that writes a stage is
-translated into the status it means, so the two cannot disagree.
+`status → stage`, never the reverse. On a case that has a Room, the stage is
+therefore not writable at all: M12's legacy stage route refuses it and the M12
+decision routes skip it. Translating a stage back into a status is not the
+safer option — the mapping is lossy in that direction, and a lossy inverse
+cannot be authoritative.
+
+A plain M12 case has no lifecycle, so its stage is still its own.
 
 ### Recruitment Journey
 

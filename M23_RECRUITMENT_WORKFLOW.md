@@ -21,11 +21,23 @@ One object, one status, one writer, one direction.
 | Append-only record | `case.history` — the same array M20's funnel reads |
 | Stored journey | **none** |
 
-Authority runs `status → stage`. Never the reverse. Two legacy paths accept a
-*stage* from a client (`POST /org/cases/:id/stage`, and a metadata PATCH); both
-translate it into the status it means via `roomStatusForStage` and then go
-through the single writer, so the two representations cannot disagree. Neither
-can express `signed`.
+Authority runs `status → stage`. Never the reverse, and never around the side:
+a derived field is not writable. `POST /org/cases/:id/stage` — M12's legacy
+route — **refuses** a case that has a Room (`STAGE_NOT_SETTABLE_ON_ROOM`) and
+names the lifecycle route instead. Translating the stage back would not be
+safer: eighteen statuses collapse onto six stages, so `decision` alone means
+four different statuses and the inverse would move a room at `offer_made`
+backwards. A lossy inverse cannot be an authoritative write. A plain M12 case
+has no lifecycle and keeps the old behaviour untouched.
+
+`PATCH /org/rooms/:id` accepts an explicit allowlist that contains neither
+`status` nor `stage`.
+
+Room **creation** is the one inbound edge that runs no transition table — there
+is no state to transition from. It is constrained instead: a Room adopting an
+existing case may not start at an evidence-bearing status
+(`adoptionStatusForStage`), so opening a workspace can never assert that a
+trial happened.
 
 M23 added **no** store. `migrateM23` is deliberately empty.
 

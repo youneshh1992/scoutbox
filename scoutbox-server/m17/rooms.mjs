@@ -24,6 +24,7 @@ import {
   ROOM_PRIORITY_NOTE, roomActivity, buildRoomSnapshot, roomSummary, roomFunnel,
   secondLookEvent, ROOM_TRUST_NOTE, ROOM_DEV_NOTE, ROOM_PRIVACY_NOTE,
   ROOM_UNAVAILABLE_NOTE, LIMITS, clampPage, validateTag, SNAPSHOT_STATUSES,
+  adoptionStatusForStage,
 } from './shared.mjs';
 import { guardRev, bumpRev, revMeta } from '../m181/concurrency.mjs';
 import { rateLimitedBody } from '../m181/rateLimit.mjs';
@@ -551,13 +552,15 @@ export function registerRooms(ctx) {
       rev: 0, // applyStatus below records the creation as revision 1
       revAt: now(), revBy: { userId: req.orgUser.id, name: req.orgUser.name },
     };
-    if (adopted && room.stage) {
+    const inheritedStage = adopted ? (room.stage ?? null) : null;
+    if (inheritedStage) {
       // The case already had a stage — keep its meaning rather than resetting
-      // the club's pipeline position to the start.
-      room.room.status = roomStatusForStage(room.stage, req.org.level) ?? 'watching';
+      // the club's pipeline position to the start, without asserting a fact
+      // the records cannot prove (see `adoptionStatus`).
+      room.room.status = adoptionStatusForStage(inheritedStage, req.org.level);
     }
     applyStatus(room, room.room.status, req.org, req.orgUser);
-    activity(room, req, 'room_created', { status: room.room.status, sourceContext: room.room.sourceContext, adoptedExistingCase: adopted });
+    activity(room, req, 'room_created', { status: room.room.status, sourceContext: room.room.sourceContext, adoptedExistingCase: adopted, inheritedStage });
     vmetric('recruitment_room_created');
     ledgerAppend?.({ type: 'recruitment_room_created', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
     persistNow();
@@ -831,9 +834,10 @@ export function registerRooms(ctx) {
       rev: 0, // applyStatus below records the creation as revision 1
       revAt: now(), revBy: { userId: req.orgUser.id, name: req.orgUser.name },
     };
-    if (adopted && room.stage) room.room.status = roomStatusForStage(room.stage, req.org.level) ?? 'watching';
+    const inheritedStage = adopted ? (room.stage ?? null) : null;
+    if (inheritedStage) room.room.status = adoptionStatusForStage(inheritedStage, req.org.level);
     applyStatus(room, room.room.status, req.org, req.orgUser);
-    activity(room, req, 'room_created', { status: room.room.status, sourceContext: room.room.sourceContext, sourceRef, adoptedExistingCase: adopted });
+    activity(room, req, 'room_created', { status: room.room.status, sourceContext: room.room.sourceContext, sourceRef, adoptedExistingCase: adopted, inheritedStage });
     vmetric('recruitment_room_created');
     ledgerAppend?.({ type: 'recruitment_room_created', playerId: player.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
     persistNow();
@@ -1289,15 +1293,18 @@ export function registerRooms(ctx) {
 
   // ------------------------------------------- legacy stage route alignment
   //
-  // M12's `POST /org/cases/:id/stage` still works. When the case happens to be
-  // a Room, the same write lands on the room status through the SAME mapping,
-  // so the two representations can never drift apart.
-  ctx.syncRoomStatusFromStage = (record, org) => {
-    if (!isRoom(record)) return;
-    const mapped = roomStatusForStage(record.stage, org.level);
-    if (mapped && mapped !== record.room.status) {
-      record.room.status = mapped;
-      record.room.updatedAt = now();
-    }
-  };
+  // There is deliberately no stage → status bridge here.
+  //
+  // One existed: `ctx.syncRoomStatusFromStage`, which mapped a legacy stage
+  // write back onto the room status. It was never called by anything, so
+  // M12's `POST /org/cases/:id/stage` wrote `case.stage` on a Room while
+  // `room.status` stayed where it was — the two representations of one case
+  // disagreeing, which is the thing the single-writer rule exists to prevent.
+  //
+  // It is not repaired by wiring it up. `roomStatusForStage` is the inverse of
+  // a lossy projection (eighteen statuses onto six stages), so `decision`
+  // alone means any of four statuses and the inverse would move a room at
+  // `offer_made` backwards — past the transition table, the evidence gate, the
+  // history append and the rev bump. The legacy route now refuses a Room and
+  // names the lifecycle route instead; `applyStatus` stays the only writer.
 }
