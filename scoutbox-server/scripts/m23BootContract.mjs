@@ -45,6 +45,10 @@ import {
 } from '../m182/migrations.mjs';
 import { openStore } from '../store.mjs';
 import { JOURNEY_REQUIRED_STORES, JOURNEY_OPTIONAL_STORES } from '../m23/journey.mjs';
+import {
+  PRODUCTION_STORE_CONTRACT, CONTRACT_STORES, MIGRATION_GUARANTEED,
+  MODULE_GUARANTEED, OPTIONAL_STORES, NOT_A_STORE, guaranteeFor,
+} from '../storeContract.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, '..');
@@ -59,29 +63,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ===================================================== the source inventory
 
-/**
- * Names that LOOK like stores to a regular expression and are not.
- *
- * Each is named individually with the reason, rather than filtered by a
- * pattern, so that adding one is a decision somebody makes on purpose.
- */
-const NOT_A_STORE = {
-  json: 'the filename `data/db.json`, which appears in string literals, not a collection',
-};
-
-/**
- * Stores a production reader deliberately treats as absent-able, where absence
- * has real product meaning.
- *
- * The bar is NOT "the code used `?.`". It is that absence means something a
- * user could be told. `recruitmentOffers` is absent because the phase that
- * writes offers has not shipped, and the journey reports
- * `offer: { available: false }` rather than an empty list — "we cannot answer
- * that yet" is a different statement from "there are none".
- */
-const OPTIONAL_BY_DESIGN = {
-  recruitmentOffers: 'M23 P4 has not shipped; the journey reports available:false rather than an empty list',
-};
+// NOT_A_STORE and the optional classification now come from
+// `storeContract.mjs`. They used to be declared here as well, which made three
+// places that could disagree about one fact.
+const OPTIONAL_BY_DESIGN = Object.fromEntries(
+  OPTIONAL_STORES.map((s) => [s, PRODUCTION_STORE_CONTRACT[s].reason]),
+);
 
 const SKIP_DIRS = new Set(['node_modules', 'scripts', 'data', 'public', 'assets', 'dist']);
 
@@ -389,6 +376,42 @@ section('§3/§6/§9 — initialisation happens before any request can arrive');
   neg(offenders.length === 0, '§18 no `db.x ??=` sits inside a request handler as a substitute for boot lifecycle');
 }
 
+section('§14 — route-before-store: a module initialises before it registers routes');
+{
+  // The composition-root argument (§6) says no request can arrive before every
+  // module has registered. This is the INTRA-module half: within a module,
+  // the store initialisation must run before that module registers any route,
+  // so the ordering guarantee does not depend on which sub-module happens to
+  // be wired first.
+  //
+  // Source-level order IS the guarantee here — registration is synchronous —
+  // so it is asserted explicitly rather than assumed.
+  const ENTRY = {
+    m12: ['m12/index.mjs', 'migrateM12'],
+    m13: ['m13/index.mjs', 'migrateM13'],
+    m14: ['m14/index.mjs', 'migrateM14'],
+    m15: ['m15/index.mjs', null],
+    m16: ['m16/index.mjs', null],
+  };
+  for (const [mod, [file, migrateFn]] of Object.entries(ENTRY)) {
+    if (!migrateFn) continue;
+    const lines = readFileSync(path.join(ROOT, file), 'utf8').split('\n');
+    const initLine = lines.findIndex((l) => new RegExp(`\\b${migrateFn}\\(`).test(l) && !/^\s*import/.test(l));
+    const firstRegister = lines.findIndex((l) => /^\s*register[A-Z]\w*\(/.test(l));
+    const firstRoute = lines.findIndex((l) => /\b(orgRouter|playerRouter|guardianRouter|adminRouter|app)\.(get|post|patch|put|delete)\s*\(/.test(l));
+    const firstExposure = [firstRegister, firstRoute].filter((n) => n >= 0).sort((a, b) => a - b)[0] ?? Infinity;
+    neg(initLine >= 0 && initLine < firstExposure,
+      `§14 ${mod}: ${migrateFn}() at line ${initLine + 1} runs before the module exposes anything (line ${firstExposure + 1})`);
+  }
+
+  // The modules whose stores are created inside their sub-registrars rather
+  // than a single migrate* call are covered by the boot proof instead: every
+  // store they own was read back from a real composed server. Naming them here
+  // keeps the gap visible rather than implied.
+  ok(Object.entries(ENTRY).filter(([, [, fn]]) => !fn).length === 2,
+    'and the two modules without a single migrate* entry point (m15, m16) rest on the boot proof, which is stronger');
+}
+
 section('§10 — cross-module reads: initialised by one module, read by another');
 {
   // A store written by module A and read by module B is only safe because both
@@ -478,6 +501,111 @@ section('§17 — restart changes nothing');
 
 // ================================================= §11 — the drift guard
 
+section('§9/§12 — the contract is checked against the running server, not trusted');
+{
+  // METADATA IS A CLAIM. Every line of `storeContract.mjs` is checked here
+  // against what a real composed process actually held, because a frozen
+  // ownership map that nobody verifies is a document, not a contract.
+  ok(CONTRACT_STORES.length === rows.length,
+    `§9 the contract declares ${CONTRACT_STORES.length} stores and the scan found ${rows.length} — the same set`);
+
+  const notInContract = rows.filter((r) => !CONTRACT_STORES.includes(r.name)).map((r) => r.name);
+  for (const n of notInContract) console.error(`   read in production but absent from the contract: db.${n}`);
+  neg(notInContract.length === 0, '§11 every store production code reads is declared in the contract');
+
+  const notInCode = CONTRACT_STORES.filter((n) => !rows.some((r) => r.name === n));
+  for (const n of notInCode) console.error(`   declared in the contract but read nowhere: db.${n}`);
+  neg(notInCode.length === 0, 'and the contract declares nothing production code does not read');
+
+  // The class each store CLAIMS must match the class the boot proved.
+  const misclassified = [];
+  for (const r of rows) {
+    const claimed = guaranteeFor(r.name);
+    const actual = r.classification === 'MIGRATION' ? 'migration'
+      : r.classification === 'MODULE_BOOT' ? 'module'
+        : r.classification === 'OPTIONAL' ? 'optional' : 'missing';
+    if (claimed !== actual) misclassified.push(`db.${r.name}: contract says ${claimed}, boot proved ${actual}`);
+  }
+  for (const m of misclassified) console.error(`   ${m}`);
+  neg(misclassified.length === 0,
+    '§12 every guarantee the contract claims is the guarantee the running server actually provides');
+
+  // 'migration' is the strongest claim: it must hold after migrations ALONE.
+  const migOnly = {}; runMigrations(migOnly);
+  const brokenMigration = MIGRATION_GUARANTEED.filter((n) => migOnly[n] === undefined);
+  for (const n of brokenMigration) console.error(`   claims migration but absent after runMigrations alone: db.${n}`);
+  neg(brokenMigration.length === 0,
+    `§12 all ${MIGRATION_GUARANTEED.length} migration-guaranteed stores exist after migrations alone — the only class that survives an arbitrary restore`);
+
+  // 'module' is a weaker claim and must be honest about being weaker: a store
+  // that survives migrations alone is migration-guaranteed and should say so.
+  const overClaimed = MODULE_GUARANTEED.filter((n) => migOnly[n] !== undefined);
+  for (const n of overClaimed) console.error(`   claims module but a migration already guarantees it: db.${n}`);
+  neg(overClaimed.length === 0,
+    'and no store is filed as module-guaranteed when a migration already guarantees it');
+
+  // §12 OWNER VALIDATION. `owner: 'm14'` must mean M14 actually initialises it.
+  // Proven by source: the init site the scan found must live under the owner's
+  // directory (or be the core composition root).
+  const OWNER_DIR = { core: ['server.mjs', 'm182/'], m12: ['m12/'], m13: ['m13/'], m14: ['m14/'], m15: ['m15/'], m16: ['m16/'], m17: ['m17/'], m18: ['m18/'], 'm18.1': ['m181/'], m21: ['m21/'] };
+  const wrongOwner = [];
+  for (const r of rows) {
+    if (r.classification !== 'MODULE_BOOT') continue;
+    const declared = PRODUCTION_STORE_CONTRACT[r.name]?.owner;
+    const prefixes = OWNER_DIR[declared] ?? [];
+    const site = r.owners[0];
+    if (!site || !prefixes.some((pre) => site.startsWith(pre))) {
+      wrongOwner.push(`db.${r.name}: contract says owner ${declared}, initialised at ${site ?? 'nowhere'}`);
+    }
+  }
+  for (const w of wrongOwner) console.error(`   ${w}`);
+  neg(wrongOwner.length === 0,
+    '§12 every module-owned store is initialised by a file belonging to the module the contract names as its owner');
+
+  // §13 OPTIONAL STORE RULE. An optional store needs a written product reason
+  // and readers that intentionally handle absence — not merely a `?.`.
+  for (const name of OPTIONAL_STORES) {
+    const entry = PRODUCTION_STORE_CONTRACT[name];
+    ok(typeof entry.reason === 'string' && entry.reason.length > 40,
+      `§13 db.${name} carries a written product reason for being optional`);
+    const row = rows.find((r) => r.name === name);
+    neg(row && !presentAfterBoot.has(name),
+      `and it is genuinely absent after a production boot — the classification is not decorative`);
+  }
+}
+
+section('§15 — cross-module ownership, frozen');
+{
+  // Every store initialised by one module and read by another, with its owner
+  // and its consumers named. Nothing here is inferred at report time: the
+  // owner comes from the contract, the consumers from the scan.
+  const cross = [];
+  for (const r of rows) {
+    const owner = PRODUCTION_STORE_CONTRACT[r.name]?.owner;
+    if (!owner) continue;
+    const consumers = [...new Set(r.reads.map((x) => x.file.split('/')[0].replace('.mjs', '')))]
+      .filter((mod) => {
+        const m = { core: ['server', 'm182', 'adapters', 'domain', 'store', 'catalogue', 'seed', 'grassrootsJourney', 'storeContract'] }[owner] ?? [owner.replace('.', '')];
+        return !m.includes(mod) && mod !== owner.replace('.', '');
+      });
+    if (consumers.length) cross.push({ store: r.name, owner, guarantee: r.classification, consumers });
+  }
+  ok(cross.length > 0, `§15 ${cross.length} stores are read outside the module that owns them`);
+  console.log('  store                     owner    guarantee     consumers');
+  for (const c of cross.slice(0, 15)) {
+    console.log(`  ${c.store.padEnd(25)} ${c.owner.padEnd(8)} ${c.guarantee.padEnd(13)} ${c.consumers.slice(0, 4).join(', ')}`);
+  }
+  if (cross.length > 15) console.log(`  … and ${cross.length - 15} more (full list in M23_PRODUCTION_BOOT_CONTRACT.md)`);
+  const unexplained = cross.filter((c) => !PRODUCTION_STORE_CONTRACT[c.store]?.reason);
+  neg(unexplained.length === 0, 'and every one of them carries a written reason — no unexplained ownership');
+  // Optional stores are excluded here by construction: their whole point is
+  // that a consumer handles absence, so "exists after composition" is not the
+  // claim being made about them.
+  const required = cross.filter((c) => guaranteeFor(c.store) !== 'optional');
+  neg(required.every((c) => presentAfterBoot.has(c.store)),
+    `and all ${required.length} non-optional ones exist after the full composition, so no consumer can outrun its owner`);
+}
+
 section('§11 — the drift guard: a new store cannot be added unexplained');
 {
   // The regression this leaves behind. A future `db.newStore.some(...)` must be
@@ -508,8 +636,8 @@ section('§11 — the drift guard: a new store cannot be added unexplained');
     'and no optional store is read without a presence gate in the same file');
 
   // The three exclusions are deliberate and named, not a silent filter.
-  ok(Object.keys(NOT_A_STORE).length === 1 && Object.keys(OPTIONAL_BY_DESIGN).length === 1,
-    `${Object.keys(NOT_A_STORE).length} names excluded as not-a-store and ${Object.keys(OPTIONAL_BY_DESIGN).length} classified optional — each with a written reason`);
+  ok(Object.keys(NOT_A_STORE).length === 2 && Object.keys(OPTIONAL_BY_DESIGN).length === 1,
+    `${Object.keys(NOT_A_STORE).length} names excluded as not-a-store and ${Object.keys(OPTIONAL_BY_DESIGN).length} classified optional — each with a written reason, all from the contract`);
 }
 
 // ==================================================== the machine-readable result

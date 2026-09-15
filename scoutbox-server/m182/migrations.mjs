@@ -27,6 +27,7 @@
  */
 
 import { planCatalogue, archetypeCatalogue } from '../catalogue.mjs';
+import { MIGRATION_GUARANTEED } from '../storeContract.mjs';
 
 // 23.0.0 — bumped because M23-D2 changes what a migrated database GUARANTEES:
 // seven more collections are present after an upgrade that were previously
@@ -279,35 +280,21 @@ export const MIGRATIONS = [
 /**
  * Collections production code may read without guarding.
  *
- * This list exists so the same defect cannot be rediscovered at M24. It is
- * asserted by `scripts/m23Persistence.mjs` against a snapshot that has been
- * through `runMigrations` and nothing else — no seed, no fixtures, no demo.
+ * DERIVED from `storeContract.mjs`, which is the one place ownership and
+ * guarantee are declared. This used to be a second hand-kept list beside that
+ * one, and the two disagreed by two entries — `db.schema` (the registry's own
+ * record, not a collection) and `db.reputationSeed`.
  *
- * It is deliberately derived from the migration steps rather than hand-kept:
- * `missingRequiredStores()` below walks what the steps actually guarantee, so
- * adding a store to a step adds it here, and adding a name here without a step
- * fails loudly instead of drifting.
+ * `reputationSeed` is created by a migration step but is deliberately NOT
+ * required: its rows are demo track records marked `seeded: true`, and empty is
+ * the correct production value. "Guaranteed to exist" and "must be non-empty
+ * for production to be healthy" are different claims, and only the first one is
+ * what this list makes.
+ *
+ * Asserted by `scripts/m23Persistence.mjs` against a snapshot that has been
+ * through `runMigrations` and nothing else — no seed, no fixtures, no demo.
  */
-export const PRODUCTION_REQUIRED_STORES = Object.freeze([
-  // Identity and core records
-  'players', 'orgs', 'guardians', 'users', 'sessions', 'ledger', 'notifications',
-  // Safeguarding and moderation — the reason this list exists
-  'blocks', 'reports', 'moderationLog', 'channels',
-  // Product configuration
-  'plans', 'archetypes',
-  // Recruitment
-  'recruitmentCases', 'roomComments', 'roomDecisions', 'roomSnapshots', 'roomEvidenceState',
-  'recruitmentBriefs', 'nobodyMissedReviews', 'secondLookItems', 'sourceChanges',
-  'requests', 'trials', 'signings', 'assessments',
-  // Core, owned by server.mjs, which has no register() of its own
-  'idvQueue', 'orgNotes',
-  // Box Cam / Combine
-  'boxSessions', 'boxSessionEvents', 'combineAttempts', 'combineRequests', 'boxCamCvResults',
-  // Matching, development, preferences
-  'dynamicWatchlists', 'watchlistHistory', 'notificationPrefs',
-  'developmentPlans', 'developmentGoals', 'developmentActions',
-  'developmentEvidenceLinks', 'developmentReviews',
-]);
+export const PRODUCTION_REQUIRED_STORES = MIGRATION_GUARANTEED.filter((s) => s !== 'reputationSeed');
 
 /**
  * Which required stores are absent from this snapshot.
