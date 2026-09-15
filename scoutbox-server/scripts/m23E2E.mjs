@@ -833,7 +833,13 @@ section('H1-H6 — the signed boundary, attacked from every write path');
   const staleRev = cur.case.rev;
   await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'holdCase', expectedRev: staleRev }, maria.token);
   const raced = await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'confirmSignedOutcome', expectedRev: staleRev }, maria.token);
-  neg(raced.status !== 200, 'H4 a racing confirm-signing loses — on the transition table, the evidence rule, or the rev');
+  // Named, not merely "not 200". A bare `!== 200` also passes when the caller
+  // is refused for PERMISSION — which is how a silently demoted lead looks,
+  // and would hide the real gate behind an accidental one.
+  neg(raced.status === 409 && raced.body?.error === 'LIFECYCLE_TRANSITION_INVALID',
+    'H4 a racing confirm-signing loses on the transition table — the case is not at an offer');
+  neg(raced.body?.error !== 'LIFECYCLE_NOT_PERMITTED',
+    'H4b and it loses on the RULE, not because the actor was refused permission');
 
   // ---- The evidence table is keyed by target, so every inbound edge is covered.
   const inboundToSigned = Object.entries(ROOM_TRANSITIONS).filter(([, tos]) => tos.includes('signed')).map(([from]) => from);
@@ -863,6 +869,102 @@ section('Legacy compatibility — an old case still reads');
   } else {
     ok(false, 'could not create the legacy fixture case');
   }
+}
+
+section('A — authorization drift: the role is decided now, from the database, not from the token');
+{
+  // The whole group exists because a role resolved once and carried is a role
+  // that can be wrong later. Every check here changes the world AFTER a token
+  // was minted and then uses the OLD token.
+  const drifter = await login('org-eastport', 'Drift Tester', 'First-Team Scout');
+  const DRIFT_TOKEN = drifter.token;
+
+  // A room this person did not open and is not assigned to.
+  // Seeded data already holds rooms for some players; take the first one that
+  // is free rather than assuming.
+  let target = null; let opened = null;
+  for (const p of players) {
+    if (p.id === ADULT.id) continue;
+    const r = await j('POST', '/org/rooms', { playerId: p.id, sourceContext: 'search' }, tom.token);
+    if (r.status === 201) { target = p; opened = r; break; }
+  }
+  const AROOM = opened?.body?.room?.roomId;
+  ok(!!AROOM, 'A0 a room exists that the drift tester neither opened nor was assigned to');
+
+  const roleOf = async (token) => (await j('GET', `/org/rooms/${AROOM}/journey`, undefined, token)).body?.nextActions ?? [];
+
+  // The discriminator for "what role did the server resolve?" is the REFUSAL
+  // ORDER. `confirmSignedOutcome` is admin-only, and role is checked before
+  // the transition table, so from `watching`:
+  //
+  //   below recruitment_admin -> 403 LIFECYCLE_NOT_PERMITTED
+  //   recruitment_admin       -> 409 LIFECYCLE_TRANSITION_INVALID
+  //
+  // Neither reaches `signed`, which is the point: this reads the role without
+  // needing a transition that P2 cannot legally perform.
+  const confirmAs = async (token) => {
+    const r = await j('POST', `/org/rooms/${AROOM}/lifecycle`, { action: 'confirmSignedOutcome' }, token);
+    return r.status === 403 ? 'below_admin' : r.status === 409 ? 'admin' : `unexpected:${r.status}`;
+  };
+
+  // A1-A2 — a recruitment lead is a recruitment_admin ANYWHERE in the
+  // organisation, including in a room they have never touched. This is the
+  // check that catches a lead being silently demoted.
+  ok(await confirmAs(maria.token) === 'admin',
+    'A1 a recruitment lead resolves as recruitment_admin in a room they never opened');
+  // A3 — and the tier below really is refused, so A1 is not passing because
+  // everyone is an admin.
+  neg(await confirmAs(DRIFT_TOKEN) === 'below_admin',
+    'A3 a first-team scout is refused the admin-only action');
+
+  // A4 — PROMOTION drift. The role changes in the database; the old token is
+  // unchanged. If authorization came from the token, this would not move.
+  await login('org-eastport', 'Drift Tester', 'Head of Recruitment');
+  ok(await confirmAs(DRIFT_TOKEN) === 'admin',
+    'A4 promoting them in the database promotes the OLD token too — the role is read per request');
+
+  // A5 — DEMOTION drift, which is the direction that matters for safety.
+  await login('org-eastport', 'Drift Tester', 'First-Team Scout');
+  neg(await confirmAs(DRIFT_TOKEN) === 'below_admin',
+    'A5 and demoting them demotes the old token immediately — no stale capability survives');
+
+  // A6 — the offered-action list drifts with the role as well. A list computed
+  // from a stale role is a UI that offers a 403.
+  const beforeList = await roleOf(DRIFT_TOKEN);
+  await login('org-eastport', 'Drift Tester', 'Head of Recruitment');
+  const afterList = await roleOf(DRIFT_TOKEN);
+  ok(afterList.length > beforeList.length,
+    'A6 the offered-action list is recomputed from the live role, not cached with the session');
+  await login('org-eastport', 'Drift Tester', 'First-Team Scout');
+
+  // A7 — removal. The row survives so history stays attributed; the access
+  // does not.
+  const removed = await j('POST', `/org/staff/${drifter.userId}/remove`, {}, maria.token);
+  ok(removed.status === 200, 'A7 a lead removes the drift tester');
+  const afterRemoval = await j('GET', `/org/rooms/${AROOM}/journey`, undefined, DRIFT_TOKEN);
+  neg(afterRemoval.status === 401,
+    'A8 and their still-valid-looking token is refused on the journey — removal is not a UI state');
+  const writeAfterRemoval = await j('POST', `/org/rooms/${AROOM}/lifecycle`, { action: 'shortlist' }, DRIFT_TOKEN);
+  neg(writeAfterRemoval.status === 401, 'A9 and on the lifecycle write, for the same reason');
+
+  // A10-A11 — cross-tenant. A foreign case must be indistinguishable from one
+  // that never existed: same code, same body, byte for byte.
+  const foreign = await j('GET', `/org/rooms/${AROOM}/journey`, undefined, harbour.token);
+  const ghost = await j('GET', '/org/rooms/case-does-not-exist/journey', undefined, harbour.token);
+  neg(foreign.status === 404 && foreign.status === ghost.status,
+    'A10 another club\'s case answers 404, exactly as a case that never existed does');
+  neg(JSON.stringify(foreign.body) === JSON.stringify(ghost.body),
+    'A11 and byte-identically, so the id cannot be confirmed by comparing answers');
+
+  // A12 — the journey carries the club's own record, and no player identity.
+  // A block stops a player's DATA flowing; it does not erase a club's notes
+  // about its own process. There is nothing here for a block to stop.
+  const proj = await j('GET', `/org/rooms/${AROOM}/journey`, undefined, maria.token);
+  const body = JSON.stringify(proj.body);
+  neg(!body.includes(target.name),
+    'A12 the journey names no player — it reports the club\'s own record, keyed by id');
+  neg(!/dateOfBirth|\bdob\b|email|phone|guardianName/i.test(body),
+    'A13 and carries no personal detail a block or a removal would need to stop');
 }
 
 section('W — write-site audit: every path that can move a case, and the ones that must not');

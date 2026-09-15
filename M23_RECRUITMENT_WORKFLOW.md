@@ -209,12 +209,25 @@ existed. Same status, same error code, same body.
 Interest is not inferable from a difference in an answer, because there is no
 difference.
 
-## 13. Blocks and removal
+## 13. Blocks, removal and role drift
 
 Unchanged from the platform's existing behaviour. `orgCanSee` re-runs blocks on
-every read; a blocked or removed player's data stops flowing immediately while
-the club's internal record remains. M23 adds no new access path and no
-exception.
+every read of a surface that carries player identity — M17's room header does,
+and M23 adds no new one. A blocked or removed player's data stops flowing
+immediately while the club's internal record remains.
+
+**The journey carries no player identity at all** — no name, no date of birth,
+no contact detail, only the `playerId` the club already holds. There is no
+personal data in it for a block to stop, which is why it takes no visibility
+callback rather than taking one and ignoring it.
+
+**Authorization is decided per request, from the database.** The session
+resolves to an org and a named user on every call; the room role is computed
+from the live user, the live room and the live lead flag. Promoting someone
+promotes their existing token on the next request; demoting them demotes it on
+the next request; removing them refuses it outright (401), while the user row
+survives so history stays attributed. Nothing about a role is carried in a
+token or cached with a session.
 
 ## 14–16. Minors, agency, grassroots
 

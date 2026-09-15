@@ -75,7 +75,15 @@ const TIMELINE_ACTIONS = new Set([
  * @param {object} db
  * @param {string} caseId
  * @param {object} viewer  { kind, orgId?, userId?, role?, playerId?, guardianId?, authorized? }
- * @param {object} opts    { now?, evidence?, historyLimit?, historyCursor?, orgCanSee?, player? }
+ * @param {object} opts    { now?, evidence?, historyLimit?, historyCursor? }
+ *
+ * No visibility callback is taken, and none is needed. This projection carries
+ * the club's own record of its own process — decisions it wrote, statuses it
+ * set, ids of records it already owns — and NO player identity: no name, no
+ * date of birth, no contact detail. A block or a removal stops a player's data
+ * flowing; there is no player data here for it to stop. The surfaces that do
+ * carry player identity (M17's room header) re-run `orgCanSee` on every read,
+ * which is where that check belongs.
  */
 export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   const {

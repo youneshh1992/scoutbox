@@ -56,7 +56,7 @@ export function registerM23(rawCtx) {
       kind: req.org.level === 'grassroots' ? 'grassroots_staff' : 'org_staff',
       orgId: req.org.id,
       userId: req.orgUser.id,
-      role: roomRole({ room, user: req.orgUser, isLead: isLead(req) }),
+      role: roomRole({ room, user: req.orgUser, isLead: isLead(req.orgUser) }),
     }, { evidence: evidenceProvider(), historyLimit: req.query.limit, historyCursor: req.query.cursor });
 
     if (!out.ok) {
@@ -94,7 +94,7 @@ export function registerM23(rawCtx) {
     const reasons = validateReasonCodes(reasonCodes);
     if (!reasons.ok) return res.status(400).json(reasons);
 
-    const role = roomRole({ room, user: req.orgUser, isLead: isLead(req) });
+    const role = roomRole({ room, user: req.orgUser, isLead: isLead(req.orgUser) });
 
     // Idempotent replay: same org, same case, same action, same client key.
     const prior = idempotentHit(room, action, clientKey);
