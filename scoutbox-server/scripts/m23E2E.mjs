@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  LIFECYCLE_ACTIONS, LIFECYCLE_TERMINAL, LIFECYCLE_REASON_CODES,
+  LIFECYCLE_ACTIONS, LIFECYCLE_TERMINAL, LIFECYCLE_REOPENABLE, LIFECYCLE_REASON_CODES,
   RECRUITMENT_LIFECYCLE_POLICY_VERSION, canTransitionRecruitmentCase,
   derivedConditions, availableActions, toAnalyticsRecruitmentStage,
   NULL_EVIDENCE_PROVIDER,
@@ -379,6 +379,166 @@ section('H15-H17 — hold cycling, reopen cycling and what the funnel counts');
 }
 
 // ================================================================== HTTP
+section('P — the transition graph as a property, over every state × action × role');
+{
+  // 18 states x 19 actions x 4 roles = 1,368 combinations. Enumerating them as
+  // individual checks would be a wall of output that nobody reads and that
+  // still misses the combination added next week. These are stated as
+  // properties over the whole product instead, so a nineteenth state or a
+  // twentieth action is covered the day it is added.
+  const ROLES = ['viewer', 'contributor', 'room_lead', 'recruitment_admin'];
+  const ACTIONS = Object.keys(LIFECYCLE_ACTIONS);
+  const ERRORS = new Set([
+    'LIFECYCLE_ACTION_UNKNOWN', 'LIFECYCLE_CASE_NOT_A_ROOM', 'LIFECYCLE_STATE_UNKNOWN',
+    'LIFECYCLE_NOT_PERMITTED', 'LIFECYCLE_NO_CHANGE', 'LIFECYCLE_TRANSITION_INVALID',
+    'LIFECYCLE_REASON_REQUIRED', 'LIFECYCLE_EVIDENCE_REQUIRED', 'LIFECYCLE_ACTION_NOT_APPLICABLE',
+  ]);
+  const caseAt = (status) => ({
+    id: 'case-P', orgId: 'org-P', playerId: 'pl-P',
+    room: { status, rev: 1 }, history: [],
+  });
+  const reasons = ['club_decision'];
+
+  const cells = [];
+  for (const from of ROOM_STATUSES) {
+    for (const action of ACTIONS) {
+      for (const role of ROLES) {
+        const v = canTransitionRecruitmentCase(caseAt(from), action, { role, reasonCodes: reasons });
+        cells.push({ from, action, role, to: LIFECYCLE_ACTIONS[action].to, v });
+      }
+    }
+  }
+  ok(cells.length === ROOM_STATUSES.length * ACTIONS.length * ROLES.length && cells.length === 1368,
+    `P1 the matrix is complete: ${cells.length} state x action x role combinations evaluated`);
+
+  // Totality — every cell answers, and answers in the declared shape.
+  neg(cells.every((c) => c.v && (c.v.ok === true || (c.v.ok === false && ERRORS.has(c.v.error)))),
+    'P2 every combination returns a verdict, and every refusal carries a declared error code');
+
+  // Purity — the validator is asked the same question twice, about a frozen
+  // case, and must give the same answer without touching it.
+  const frozen = Object.freeze({ ...caseAt('under_review'), room: Object.freeze({ status: 'under_review', rev: 1 }) });
+  const twice = ACTIONS.map((a) => [
+    JSON.stringify(canTransitionRecruitmentCase(frozen, a, { role: 'recruitment_admin', reasonCodes: reasons })),
+    JSON.stringify(canTransitionRecruitmentCase(frozen, a, { role: 'recruitment_admin', reasonCodes: reasons })),
+  ]);
+  ok(twice.every(([a, b]) => a === b), 'P3 the validator is deterministic and mutates nothing it is given');
+
+  // Refusal ORDER is a privacy property, not a style choice. Role is checked
+  // before the transition table, so a viewer cannot map the graph by probing:
+  // every answer they get is the same answer, and it carries no `allowed` list.
+  const viewerCells = cells.filter((c) => c.role === 'viewer');
+  neg(viewerCells.every((c) => c.v.ok === false && c.v.error === 'LIFECYCLE_NOT_PERMITTED'),
+    'P4 a viewer is refused identically everywhere — the graph is not probeable by role');
+  neg(viewerCells.every((c) => c.v.allowed === undefined),
+    'P5 and no refusal to a viewer leaks the set of states the case could move to');
+
+  // The role ladder must be monotone. A privilege inversion — where a lower
+  // role may do something a higher role may not — would be invisible in any
+  // single test and catastrophic in the one case that hit it.
+  const rank = (r) => ROLES.indexOf(r);
+  let inversions = 0;
+  for (const from of ROOM_STATUSES) {
+    for (const action of ACTIONS) {
+      const okAt = ROLES.map((r) => cells.find((c) => c.from === from && c.action === action && c.role === r).v.ok);
+      for (let i = 0; i < ROLES.length; i += 1) {
+        for (let k = i + 1; k < ROLES.length; k += 1) if (okAt[i] && !okAt[k] && rank(ROLES[k]) > rank(ROLES[i])) inversions += 1;
+      }
+    }
+  }
+  neg(inversions === 0, 'P6 the role ladder is monotone: no lower role may do what a higher role may not');
+
+  // §16 — the self-transition decision, stated once and enforced everywhere.
+  //
+  // A self-transition is REFUSED, and refused DISTINCTLY: `LIFECYCLE_NO_CHANGE`
+  // rather than `LIFECYCLE_TRANSITION_INVALID`. "You are already there" and
+  // "you cannot get there" are different facts. A client retrying after a lost
+  // response is in the first case, and telling it the move was impossible
+  // would send it to reload state that is in fact correct.
+  const selfCells = cells.filter((c) => c.from === c.to && c.role === 'recruitment_admin');
+  ok(selfCells.length > 0, 'P7 the matrix does contain self-transitions to rule on');
+  neg(selfCells.every((c) => c.v.ok === false && c.v.error === 'LIFECYCLE_NO_CHANGE'),
+    'P8 every self-transition is refused as NO_CHANGE, never as INVALID — the two are different facts');
+  neg(ROOM_STATUSES.every((s) => !availableActions(caseAt(s), { role: 'recruitment_admin' })
+    .some((a) => LIFECYCLE_ACTIONS[a].to === s)),
+    'P9 and a self-transition is never offered as an available action');
+
+  // Evidence is keyed by TARGET, so it must bind on every inbound edge — for
+  // every source state and every action that aims there, with no exception.
+  const evidenceCells = cells.filter((c) => STATUS_EVIDENCE_REQUIRED[c.to] && c.role === 'recruitment_admin'
+    && ROOM_TRANSITIONS[c.from].includes(c.to) && c.from !== c.to);
+  ok(evidenceCells.length > 0, 'P10 there are inbound edges to evidence-bearing states to check');
+  neg(evidenceCells.every((c) => c.v.ok === false && c.v.error === 'LIFECYCLE_EVIDENCE_REQUIRED'),
+    `P11 all ${evidenceCells.length} otherwise-legal inbound edges to an evidence-bearing state are refused for evidence`);
+  neg(evidenceCells.every((c) => c.v.requires === STATUS_EVIDENCE_REQUIRED[c.to].kind),
+    'P12 and each names the kind its TARGET requires, not a kind chosen per edge');
+
+  // Terminal closure. A terminal case may be FILED (closed / archived), but
+  // nothing may revive it except an explicit reopen from a reopenable state.
+  // `signed` is terminal and NOT reopenable, so no route back to pursuit
+  // exists from it at all — the only thing left to do with a signed case is
+  // file it.
+  const ACTIVE = ROOM_STATUSES.filter((s) => !LIFECYCLE_TERMINAL.includes(s) && s !== 'under_review');
+  for (const t of LIFECYCLE_TERMINAL) {
+    const offered = availableActions(caseAt(t), { role: 'recruitment_admin' });
+    neg(!offered.some((a) => ACTIVE.includes(LIFECYCLE_ACTIONS[a].to)),
+      `P13 a ${t} case cannot be moved back into active pursuit`);
+    const revivers = offered.filter((a) => LIFECYCLE_ACTIONS[a].to === 'under_review');
+    if (LIFECYCLE_REOPENABLE.includes(t)) {
+      neg(revivers.length === 1 && revivers[0] === 'reopenCase',
+        `P14 a ${t} case is revived by exactly one action, and it is named reopenCase`);
+    } else {
+      neg(revivers.length === 0, `P14 a ${t} case offers no revival at all — it is not reopenable`);
+    }
+  }
+
+  // The general form of the defect P13/P14 found: three actions reach
+  // `under_review`, and from a withdrawn case all three were offered at once.
+  // Each writes a different reason code into a history nothing ever rewrites,
+  // so "resumed from hold" could be recorded for a case that was never held.
+  let ambiguous = 0;
+  for (const from of ROOM_STATUSES) {
+    for (const role of ROLES) {
+      const targets = availableActions(caseAt(from), { role }).map((a) => LIFECYCLE_ACTIONS[a].to);
+      if (new Set(targets).size !== targets.length) ambiguous += 1;
+    }
+  }
+  neg(ambiguous === 0,
+    'P15 no state ever offers two actions for the same move — one event, one name, one reason code');
+
+  // availableActions and the validator must agree in BOTH directions. A list
+  // that is merely a subset of what is permitted still hides capability; one
+  // that is a superset offers what will then be refused.
+  let disagreements = 0;
+  for (const from of ROOM_STATUSES) {
+    for (const role of ROLES) {
+      const offered = new Set(availableActions(caseAt(from), { role }));
+      for (const a of ACTIONS) {
+        const v = canTransitionRecruitmentCase(caseAt(from), a, { role, forAvailability: true });
+        if (offered.has(a) !== v.ok) disagreements += 1;
+      }
+    }
+  }
+  neg(disagreements === 0,
+    'P16 the offered-action list and the validator agree in both directions, for every state and role');
+
+  // An unknown role is not a weak role. Anything the ranking does not know
+  // fails closed rather than falling through to the lowest tier.
+  for (const role of [null, undefined, '', 'admin', 'owner', 'ROOM_LEAD', 'recruitment_admin ']) {
+    const v = canTransitionRecruitmentCase(caseAt('watching'), 'startReview', { role });
+    neg(v.ok === false && v.error === 'LIFECYCLE_NOT_PERMITTED',
+      `P17 an unrecognised role (${JSON.stringify(role)}) is refused, not treated as the lowest tier`);
+  }
+
+  // A corrupt stored state is corruption, not a workflow position — and it is
+  // never coerced to a plausible-looking one.
+  for (const bogus of ['identified', 'IN_PROGRESS', 'trial_in_progress', '', null, 42]) {
+    const v = canTransitionRecruitmentCase({ ...caseAt('watching'), room: { status: bogus, rev: 1 } }, 'startReview', { role: 'recruitment_admin' });
+    neg(v.ok === false && v.error === 'LIFECYCLE_STATE_UNKNOWN',
+      `P18 a case stored at ${JSON.stringify(bogus)} is reported as unrecognised, never coerced`);
+  }
+}
+
 section('HTTP — booting a real server');
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
@@ -520,6 +680,17 @@ section('Negatives — isolation, authority, concurrency, privacy');
   const jump = await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'recordOfferAccepted', expectedRev: cur.case.rev }, maria.token);
   neg(jump.status === 409 && jump.body.error === 'LIFECYCLE_TRANSITION_INVALID', '#6 an impossible jump is 409');
   neg(Array.isArray(jump.body.allowed), 'and the refusal says what IS allowed');
+
+  // An action that CAN traverse the edge but does not describe it. The case is
+  // here in a terminal state, and `startReview` would land on the same
+  // `under_review` that `reopenCase` does — writing `club_decision` into the
+  // history for what is, in fact, a reopen.
+  const misnamed = await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'startReview', expectedRev: cur.case.rev }, maria.token);
+  neg(misnamed.status === 409 && misnamed.body.error === 'LIFECYCLE_ACTION_NOT_APPLICABLE',
+    'an action that does not describe the move is refused, even though the edge exists');
+  const wrongResume = await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'resumeCase', expectedRev: cur.case.rev }, maria.token);
+  neg(wrongResume.status === 409 && wrongResume.body.error === 'LIFECYCLE_ACTION_NOT_APPLICABLE',
+    'and a case that was never on hold cannot be "resumed from hold"');
 
   // #7/#8 — rev.
   const reopenNow = await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'reopenCase', expectedRev: cur.case.rev }, maria.token);

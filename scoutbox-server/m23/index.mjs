@@ -113,10 +113,19 @@ export function registerM23(rawCtx) {
       reasonCodes: reasons.codes,
     });
     if (!verdict.ok) {
+      // 409 for "the case is not in a position for this": the request was
+      // well-formed and permitted, the case simply is not where the caller
+      // thought. 400 would tell them to fix their request; there is nothing
+      // in the request to fix.
+      const CONFLICT = ['LIFECYCLE_TRANSITION_INVALID', 'LIFECYCLE_NO_CHANGE', 'LIFECYCLE_ACTION_NOT_APPLICABLE'];
       const code = verdict.error === 'LIFECYCLE_NOT_PERMITTED' ? 403
-        : verdict.error === 'LIFECYCLE_TRANSITION_INVALID' || verdict.error === 'LIFECYCLE_NO_CHANGE' ? 409
+        : CONFLICT.includes(verdict.error) ? 409
           : verdict.error === 'LIFECYCLE_EVIDENCE_REQUIRED' ? 422
-            : 400;
+            // A stored state this build does not recognise is OUR problem, not
+            // the caller's. 409 would invite a reload-and-retry that cannot
+            // succeed; this is corruption and should read as corruption.
+            : verdict.error === 'LIFECYCLE_STATE_UNKNOWN' ? 500
+              : 400;
       return res.status(code).json(verdict);
     }
 

@@ -106,6 +106,19 @@ withdrawCase · closeCase · reopenCase`
 Posting a `stage` or `status` key is refused **by name**
 (`LIFECYCLE_STAGE_NOT_SETTABLE`) so the refusal is unambiguous in a log.
 
+**One event, one name.** Three actions land on `under_review` —
+`startReview`, `resumeCase`, `reopenCase` — and each writes a different reason
+code into a history that is never rewritten. So each action declares which
+states it may describe (`applicableFrom`): `resumeCase` only from `on_hold`,
+`reopenCase` only from a reopenable terminal state, `startReview` from neither.
+An action that could traverse the edge but does not describe it is refused with
+`LIFECYCLE_ACTION_NOT_APPLICABLE` (409). The transition table is unchanged;
+only which action may name a given edge narrows.
+
+Without this, a withdrawn case offered all three at once, and "resumed from
+hold" could be recorded for a case that was never held — undercounting every
+reopen taken under another name.
+
 No action is performable by a player or guardian. A player responds to *their
 own* contact, trial or offer, and the case moves because that response exists —
 through the precondition, never by addressing the case.

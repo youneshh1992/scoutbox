@@ -41,6 +41,7 @@ export const RECRUITMENT_LIFECYCLE_POLICY_VERSION = 1;
  */
 export const LIFECYCLE_TERMINAL = Object.freeze([...TERMINAL_ROOM_STATUSES]);
 export const LIFECYCLE_REOPENABLE = Object.freeze(['withdrawn', 'archived', 'closed']);
+const REOPENABLE = LIFECYCLE_REOPENABLE;
 
 /** The initial state of a newly opened case. */
 export const LIFECYCLE_INITIAL = 'watching';
@@ -99,9 +100,18 @@ export const LIFECYCLE_PRECONDITIONS = STATUS_EVIDENCE_REQUIRED;
  * no action here performable by a player or a guardian: a player responds to
  * their own contact, trial or offer, and the case moves BECAUSE that response
  * exists — through the precondition, never by the player addressing the case.
+ *
+ * `applicableFrom` narrows WHICH of the transition table's edges an action may
+ * traverse. Three actions land on `under_review`, and without this they were
+ * all offered from a withdrawn case at once — three names for one move, each
+ * writing a different reason code into the history. "Resumed from hold" on a
+ * case that was never on hold is a false record, and an analytics consumer
+ * counting `case_reopened` would undercount every reopen taken under another
+ * name. The transition table is unchanged; only the action that may describe
+ * a given edge narrows, so the recorded reason matches the event.
  */
 export const LIFECYCLE_ACTIONS = Object.freeze({
-  startReview:        { to: 'under_review',        reason: 'club_decision',              roles: ['contributor', 'room_lead', 'recruitment_admin'] },
+  startReview:        { to: 'under_review',        reason: 'club_decision',              roles: ['contributor', 'room_lead', 'recruitment_admin'], applicableFrom: (f) => !TERMINAL_ROOM_STATUSES.includes(f) && f !== 'on_hold' },
   planContact:        { to: 'contact_planned',     reason: 'contact_planned',            roles: ['room_lead', 'recruitment_admin'] },
   recordContact:      { to: 'contacted',           reason: 'contact_made',               roles: ['room_lead', 'recruitment_admin'] },
   shortlist:          { to: 'shortlisted',         reason: 'club_decision',              roles: ['contributor', 'room_lead', 'recruitment_admin'] },
@@ -115,11 +125,11 @@ export const LIFECYCLE_ACTIONS = Object.freeze({
   recordOfferDeclined:{ to: 'offer_declined',      reason: 'player_declined',            roles: ['room_lead', 'recruitment_admin'] },
   confirmSignedOutcome:{ to: 'signed',             reason: 'signed_outcome',             roles: ['recruitment_admin'] },
   holdCase:           { to: 'on_hold',             reason: 'on_hold',                    roles: ['room_lead', 'recruitment_admin'] },
-  resumeCase:         { to: 'under_review',        reason: 'hold_resumed',               roles: ['room_lead', 'recruitment_admin'] },
+  resumeCase:         { to: 'under_review',        reason: 'hold_resumed',               roles: ['room_lead', 'recruitment_admin'], applicableFrom: (f) => f === 'on_hold' },
   rejectCase:         { to: 'archived',            reason: 'rejected',                   roles: ['room_lead', 'recruitment_admin'], reasonCodesRequired: true },
   withdrawCase:       { to: 'withdrawn',           reason: 'withdrawn',                  roles: ['room_lead', 'recruitment_admin'], reasonCodesRequired: true },
   closeCase:          { to: 'closed',              reason: 'case_closed',                roles: ['room_lead', 'recruitment_admin'], reasonCodesRequired: true },
-  reopenCase:         { to: 'under_review',        reason: 'case_reopened',              roles: ['room_lead', 'recruitment_admin'] },
+  reopenCase:         { to: 'under_review',        reason: 'case_reopened',              roles: ['room_lead', 'recruitment_admin'], applicableFrom: (f) => REOPENABLE.includes(f) },
 });
 
 export const LIFECYCLE_ACTION_NAMES = Object.freeze(Object.keys(LIFECYCLE_ACTIONS));
@@ -216,6 +226,19 @@ export function canTransitionRecruitmentCase(kase, action, context = {}) {
       ok: false,
       error: 'LIFECYCLE_TRANSITION_INVALID',
       message: `A case at "${from}" cannot move to "${def.to}".`,
+      allowed,
+    };
+  }
+
+  // The edge exists, but this action is not the one that describes it. Three
+  // actions reach `under_review`; only one of them is truthful from any given
+  // state, and the untruthful ones would write the wrong reason code into a
+  // history that nothing ever rewrites.
+  if (def.applicableFrom && !def.applicableFrom(from)) {
+    return {
+      ok: false,
+      error: 'LIFECYCLE_ACTION_NOT_APPLICABLE',
+      message: `"${action}" does not describe what happens to a case at "${from}".`,
       allowed,
     };
   }
