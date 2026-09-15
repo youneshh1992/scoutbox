@@ -37,7 +37,12 @@ import { planCatalogue, archetypeCatalogue } from '../catalogue.mjs';
 // 23.0.1 — the M23 sweep found an eighth: `db.assessments`, declared REQUIRED
 // by the journey projection and guaranteed by nothing but a module's `??=` at
 // registration time. Same class of bug, one store further out.
-export const SCHEMA_VERSION = 2301;
+//
+// 23.0.2 — the boot-contract pass found two more, and a different mechanism:
+// `db.idvQueue` and `db.orgNotes` were created by `??=` inside a request
+// handler, so they existed only after the first write. A store that appears on
+// first write is invisible to every boot-time check.
+export const SCHEMA_VERSION = 2302;
 
 /**
  * Every step is idempotent: running it twice is the same as running it once.
@@ -240,6 +245,35 @@ export const MIGRATIONS = [
       db.assessments ??= [];
     },
   },
+  {
+    version: 2302,
+    id: 'm230_003_core_server_stores_present',
+    // THE BOOT-CONTRACT PASS. Two collections owned by `server.mjs` itself
+    // were created by `db.x ??= []` INSIDE a request handler — so they came
+    // into existence on whichever request happened to arrive first, and not
+    // before. Every read of them is guarded today, so nothing crashed; what
+    // was wrong is subtler and worse.
+    //
+    // A store that appears on first write is invisible to every boot-time
+    // check. `missingRequiredStores()` cannot report it, the STORE_MISSING log
+    // cannot name it, and a restore that drops it looks healthy right up until
+    // someone files the first note. Read-time repair is not a lifecycle; it is
+    // the absence of one.
+    //
+    // `server.mjs` has no `register()` of its own to hold an init block, so
+    // the core registry is the right home — and it means both survive
+    // `loadSnapshot()` wiping the object, which is the whole point of D2.
+    //
+    //   idvQueue  guardian identity-verification queue (safeguarding-adjacent)
+    //   orgNotes  a club's private notes on a player
+    //
+    // Both are containers of user data, so empty is the truthful default.
+    note: 'M23 boot contract: core server-owned collections exist at boot, not on first write.',
+    up(db) {
+      db.idvQueue ??= [];
+      db.orgNotes ??= [];
+    },
+  },
 ];
 
 /**
@@ -265,6 +299,8 @@ export const PRODUCTION_REQUIRED_STORES = Object.freeze([
   'recruitmentCases', 'roomComments', 'roomDecisions', 'roomSnapshots', 'roomEvidenceState',
   'recruitmentBriefs', 'nobodyMissedReviews', 'secondLookItems', 'sourceChanges',
   'requests', 'trials', 'signings', 'assessments',
+  // Core, owned by server.mjs, which has no register() of its own
+  'idvQueue', 'orgNotes',
   // Box Cam / Combine
   'boxSessions', 'boxSessionEvents', 'combineAttempts', 'combineRequests', 'boxCamCvResults',
   // Matching, development, preferences

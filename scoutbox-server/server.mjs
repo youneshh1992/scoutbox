@@ -1159,7 +1159,6 @@ guardianRouter.post('/verify-id', async (req, res) => {
   req.guardian.idVerified = true;
   req.guardian.idvReference = result.reference;
   // Every check lands in the admin IDV queue for audit — and can be revoked there.
-  db.idvQueue ??= [];
   db.idvQueue.push({
     id: nextId('idv'), guardianId: req.guardian.id, guardianName: req.guardian.name,
     documentType, documentRef: result.document.refLast4, provider: result.provider,
@@ -1726,7 +1725,6 @@ orgRouter.post('/players/:id/notes', (req, res) => {
   if (!p || !visibleToOrg(p, req.org)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
   const { text } = req.body || {};
   if (!text || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
-  db.orgNotes ??= [];
   const note = { id: nextId('note'), orgId: req.org.id, playerId: p.id, userId: req.orgUser.id, scoutName: req.orgUser.name, text: text.trim(), ts: Date.now() };
   db.orgNotes.push(note);
   broadcast('players', { playerId: p.id });

@@ -121,7 +121,6 @@ export function registerInsight(ctx) {
   }
 
   orgRouter.get('/review-queue', (req, res) => {
-    db.reviewLater ??= [];
     const later = new Map(db.reviewLater.filter((r) => r.orgId === req.org.id && r.dueAt > Date.now()).map((r) => [r.playerId, r.dueAt]));
     const items = reviewQueueFor(req.org).map(({ player, firstSeenDay }) => ({
       player: playerViewForOrg ? playerViewForOrg(player, req.org) : { id: player.id, name: player.name, position: player.position, age: null },
@@ -142,7 +141,6 @@ export function registerInsight(ctx) {
   });
 
   orgRouter.post('/review-queue/:playerId/later', (req, res) => {
-    db.reviewLater ??= [];
     const days = Math.min(Math.max(Number(req.body?.days) || 7, 1), 60);
     db.reviewLater = db.reviewLater.filter((r) => !(r.orgId === req.org.id && r.playerId === req.params.playerId));
     db.reviewLater.push({ id: nextId('rvl'), orgId: req.org.id, playerId: req.params.playerId, byUserId: req.orgUser.id, dueAt: Date.now() + days * 86_400_000, remindedAt: null });
@@ -183,7 +181,6 @@ export function registerInsight(ctx) {
   });
 
   function insightSweep() {
-    db.reviewLater ??= [];
     let changed = 0;
     for (const r of db.reviewLater) {
       if (r.dueAt < Date.now() && !r.remindedAt) {

@@ -31,6 +31,12 @@ export function migrateM13(db) {
   db.supportTickets ??= [];       // F12 — support tickets referencing records by id
   db.supportAccessGrants ??= [];  // F12 — explicit, time-limited support access
   db.opsEvents ??= [];            // F12 — persisted operational failures/alerts
+  // M23 boot contract: F4 — deferred review reminders. This existed only
+  // because `insightSweep()` happens to run once synchronously at
+  // registration and created it on the way past. A store whose existence
+  // depends on a sweep having been scheduled is a store that moves if the
+  // sweep is ever made lazy.
+  db.reviewLater ??= [];
   for (const c of db.recruitmentCases ?? []) c.budget ??= null; // F9 — deal scenarios live on the case
   for (const u of db.users ?? []) {
     u.mfa ??= null;               // F12 — { secretB32, enabledAt, recoveryHashes: [] }

@@ -267,33 +267,62 @@ in the suite stated as containment rather than as a list of names:
 the optional stores — "absent because the phase has not shipped" must stay
 distinguishable from "present and empty".
 
-## 10. The scale of what remains
+## 10. The scale of what remains — SETTLED by the boot-contract pass
 
-Measured rather than estimated. A scan for `db.<name> ??=` across every
-non-test module finds **116** collections created that way, of which **84** do
-not exist after `runMigrations` alone:
+This section previously reported "84 of 116 `db.x ??=` collections are absent
+after `runMigrations` alone" and left it as an open limitation. That framing
+was incomplete: it measured migrations and called the remainder unguaranteed,
+without asking whether the production composition guarantees them.
 
-```
-apiKeys, applications, assessmentTemplates, boxAssignments, boxCamDisputes,
-boxCamPrefs, boxChallenges, boxChallengeEntries, calibrationSessions,
-campaigns, campaignSubmissions, coachAffiliations, coverageAssignments,
-coveragePlans, ... 84 in total
-```
+`scripts/m23BootContract.mjs` asked. Every production-read store now carries
+one of four labels, and the label is evidence rather than inspection:
 
-Each is safe today because its module's default runs after `loadSnapshot()`.
-Two things make that weaker than it looks: a pure function called with a
-restored database has no module to rely on (which is how `assessments` was
-found), and the order in which modules register decides the answer.
+| Class | Count | What it means | How it is proven |
+|---|---:|---|---|
+| **MIGRATION GUARANTEED** | 43 | created by a numbered step in `m182/migrations.mjs` | survives `loadSnapshot()` wiping the object; the only class that survives an arbitrary restore |
+| **MODULE-BOOT GUARANTEED** | 80 | created by an owning module during synchronous registration | **read back from a real booted server** on a bare migrated database — a `??=` line is not accepted as evidence |
+| **OPTIONAL** | 1 | `recruitmentOffers`; absence has product meaning (P4 has not shipped, and the journey reports `available:false` rather than an empty list) | asserted to be genuinely absent after boot, so the classification is not decorative |
+| **DEFECT — FIXED** | 3 | see below | each reproduced, fixed, and covered by a regression |
 
-**Not fixed here, deliberately.** Guaranteeing all 84 is a platform-wide
-bootstrap change, well outside a sweep scoped to M23's own paths, and D2's own
-mandate forbade broadening a persistence fix into unrelated refactoring. It is
-recorded as the next persistence pass's work, with the honest statement of what
-is guaranteed today:
+Why module-boot counts as a guarantee here: `server.mjs` is one synchronous
+module body, all 15 registrations run during evaluation, and `app.listen` is
+its last statement. The socket does not open until every module has registered.
+That is asserted three ways — line order in the composition root, absence of
+any top-level `await` between them, and a runtime probe whose **first** request
+asks the **last**-registered module for its vocabulary and receives all 19
+lifecycle actions.
 
-> Every store the **recruitment, safeguarding and M23 journey** paths read is
-> guaranteed by a migration step. The other 84 are guaranteed by module
-> registration order.
+### DEFECT — FIXED (3)
 
-The boot-time `STORE_MISSING` integrity check covers the guaranteed set, so a
-regression inside it is visible at boot rather than at the first request.
+| Store | Was | Now |
+|---|---|---|
+| `idvQueue` | `??=` inside a request handler (`server.mjs:1162`) — created on first write | migration `m230_003_core_server_stores_present`, schema **2302** |
+| `orgNotes` | `??=` inside a request handler (`server.mjs:1729`) | same step |
+| `verRootTransfers` | `??=` inside the transfer route (`m14/organisations.mjs:593`) | `m14/shared.mjs`, beside its twelve siblings |
+
+A fourth, `reviewLater`, was present after boot only because `m13/index.mjs`
+calls `tick()` once synchronously and `insightSweep()` happened to open with
+`db.reviewLater ??= []`. That worked, but a store whose existence depends on a
+sweep having been scheduled moves the day the sweep is made lazy. Its init now
+sits in `m13/shared.mjs` with the other twenty-five.
+
+**The common thread, and why guarded reads did not make any of them harmless:**
+a store that appears on first write is invisible to every boot-time check.
+`missingRequiredStores()` cannot report it, the `STORE_MISSING` log cannot name
+it, and a restore that dropped it looks healthy until someone files the first
+note. Read-time repair is not a lifecycle; it is the absence of one.
+
+## 11. What is guaranteed today, stated plainly
+
+> Every production-read store either survives an arbitrary restore (43, by
+> migration) or is created by its owning module before the socket opens (80,
+> proven by booting). One is optional by design. **Zero are missing after a
+> full production boot.**
+
+`scripts/m23BootContract.mjs` is the drift guard: a future
+`db.newStore.some(...)` must be migration-guaranteed, module-boot-guaranteed,
+or explicitly optional with a written reason, or the suite names it and fails.
+There is one inventory, not two that can disagree.
+
+Full detail, including the 124-row classification table and the cross-module
+read list, is in `M23_PRODUCTION_BOOT_CONTRACT.md`.

@@ -590,7 +590,6 @@ export function registerOrganisationVerification(ctx) {
     if (!target) return res.status(404).json({ error: 'USER_NOT_FOUND' });
     if (level === 'verification_root_admin') {
       // §28 dual control: a second root admin (or Trust & Safety) must approve.
-      db.verRootTransfers ??= [];
       if (db.verRootTransfers.some((t) => t.orgId === req.org.id && t.status === 'pending')) {
         return res.status(409).json({ error: 'TRANSFER_ALREADY_PENDING' });
       }

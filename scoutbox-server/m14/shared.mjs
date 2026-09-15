@@ -483,6 +483,10 @@ export function migrateM14(db) {
   db.verTokens ??= [];        // hashed secrets only
   db.verAdmins ??= [];
   db.verRootRequests ??= [];
+  // M23 boot contract: this used to be created by `??=` inside the transfer
+  // route, so it existed only once somebody had already asked for a transfer.
+  // Its siblings live here; so does it.
+  db.verRootTransfers ??= [];
   db.verDisputes ??= [];
   db.verReferences ??= [];
   db.verPlayerInvites ??= [];
