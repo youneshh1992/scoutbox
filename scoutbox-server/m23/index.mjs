@@ -28,8 +28,6 @@ export function registerM23(rawCtx) {
   const ctx = { ...rawCtx, ...buildShared(rawCtx) };
   const { db, orgRouter, persistNow, isLead } = ctx;
 
-  const now = () => new Date().toISOString();
-
   /**
    * Idempotency for lifecycle actions.
    *

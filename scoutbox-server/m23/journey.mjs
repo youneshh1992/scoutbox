@@ -201,7 +201,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   // §31/§42 — next actions are deterministic AND permission-aware. An action
   // this person cannot perform is not a suggestion, it is a dead end with a
   // 403 at the end of it.
-  const actions = availableActions(kase, { role, evidence, now, reasonCodes: ['placeholder'] });
+  const actions = availableActions(kase, { role, evidence, now });
 
   return {
     ok: true,

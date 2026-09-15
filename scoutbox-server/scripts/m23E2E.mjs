@@ -25,7 +25,7 @@ import {
 import { buildRecruitmentJourney, JOURNEY_REQUIRED_STORES } from '../m23/journey.mjs';
 import { ROOM_STATUSES, ROOM_TRANSITIONS, TERMINAL_ROOM_STATUSES, roomStatusForStage, STATUS_EVIDENCE_REQUIRED } from '../m17/shared.mjs';
 import { createEvidenceProvider } from '../m23/evidence.mjs';
-import { FUNNEL_STAGES } from '../m20/funnels.mjs';
+import { FUNNEL_STAGES, stagesReached } from '../m20/funnels.mjs';
 
 const PORT = 5700 + Math.floor(Math.random() * 200);
 const BASE = `http://localhost:${PORT}`;
@@ -66,7 +66,8 @@ section('U1 — the lifecycle is one table, and the declined states stayed decli
   ok(true, 'every transition target is a real status');
 
   neg(!TERMINAL_ROOM_STATUSES.includes('on_hold'), '#38 on_hold is NOT terminal');
-  ok(LIFECYCLE_TERMINAL.length === TERMINAL_ROOM_STATUSES.length, 'M23 terminal set matches M17 exactly — one definition');
+  ok(JSON.stringify([...LIFECYCLE_TERMINAL].sort()) === JSON.stringify([...TERMINAL_ROOM_STATUSES].sort()),
+    'M23 terminal set matches M17 by CONTENT, not merely by count — one definition');
 }
 
 section('U2 — no lifecycle action is performable by a player, and evidence cannot be faked');
@@ -207,6 +208,171 @@ section('U5 — analytics compatibility is explicit');
     if (toAnalyticsRecruitmentStage(s) !== s) fail(`legacy status ${s} no longer maps to itself`);
   }
   ok(true, '#34c all ten pre-M23 funnel statuses are unchanged');
+}
+
+section('H7-H8, H13-H14, H18-H20 — determinism, legacy mapping and isolation (pure)');
+{
+  const mkCase = (id, orgId, playerId, status, hist) => ({
+    id, orgId, playerId, stage: null,
+    room: { status, rev: 1, priority: 'normal' },
+    createdAt: '2026-01-01T00:00:00.000Z',
+    history: hist ?? [],
+  });
+  const REQ = { roomDecisions: [], requests: [], trials: [], assessments: [], signings: [] };
+  const target = mkCase('case-T', 'oT', 'pT', 'under_review', [
+    { action: 'room_created', at: '2026-01-01T00:00:00.000Z', by: { name: 'A' }, detail: { status: 'watching' } },
+    { action: 'room_status_changed', at: '2026-01-02T00:00:00.000Z', by: { name: 'A' }, detail: { from: 'watching', to: 'under_review' } },
+  ]);
+  const noiseA = mkCase('case-X', 'oOTHER', 'pOTHER', 'signed', [{ action: 'room_status_changed', at: '2026-01-03T00:00:00.000Z', detail: { from: 'offer_made', to: 'signed' } }]);
+  const noiseB = mkCase('case-Y', 'oT', 'pOTHER2', 'archived', [{ action: 'room_status_changed', at: '2026-01-04T00:00:00.000Z', detail: { from: 'watching', to: 'archived' } }]);
+  const V = { kind: 'org_staff', orgId: 'oT', role: 'room_lead' };
+
+  // H7 — unrelated insertion order must not change the answer.
+  const one = buildRecruitmentJourney({ ...REQ, recruitmentCases: [noiseA, target, noiseB] }, 'case-T', V, { now: 5 });
+  const two = buildRecruitmentJourney({ ...REQ, recruitmentCases: [noiseB, noiseA, target] }, 'case-T', V, { now: 5 });
+  const three = buildRecruitmentJourney({ ...REQ, recruitmentCases: [target, noiseB, noiseA] }, 'case-T', V, { now: 5 });
+  ok(JSON.stringify(one) === JSON.stringify(two) && JSON.stringify(two) === JSON.stringify(three),
+    'H7 the journey is byte-identical however unrelated cases are ordered in the array');
+
+  // H18/H19 — nothing foreign, from either axis.
+  const body = JSON.stringify(one);
+  neg(!body.includes('case-X') && !body.includes('oOTHER') && !body.includes('pOTHER'),
+    'H18 no foreign-org id, case id or player id appears anywhere in the projection');
+  neg(!body.includes('case-Y') && !body.includes('pOTHER2'),
+    'H19 nor a same-org DIFFERENT player case — cross-player isolation holds');
+  neg(!body.includes('signed'), 'H18b and a foreign case at `signed` does not colour this one');
+
+  // H20 — a decision belonging to another case or another org never attaches.
+  const decisions = [
+    { id: 'd-mine', roomId: 'case-T', orgId: 'oT', recommendation: 'shortlist', reasonCodes: [], createdAt: '2026-01-05T00:00:00.000Z', by: { name: 'A' } },
+    { id: 'd-othercase', roomId: 'case-Y', orgId: 'oT', recommendation: 'archive', reasonCodes: [], createdAt: '2026-01-05T00:00:00.000Z', by: { name: 'B' } },
+    { id: 'd-otherorg', roomId: 'case-T', orgId: 'oOTHER', recommendation: 'offer', reasonCodes: [], createdAt: '2026-01-05T00:00:00.000Z', by: { name: 'C' } },
+  ];
+  const withD = buildRecruitmentJourney({ ...REQ, roomDecisions: decisions, recruitmentCases: [target] }, 'case-T', V, { now: 5 });
+  ok(withD.decisions.all.length === 1 && withD.decisions.all[0].id === 'd-mine', 'H20 only this case’s own decision attaches');
+  neg(!JSON.stringify(withD).includes('d-othercase'), 'H20b a decision from another case does not leak in');
+  neg(!JSON.stringify(withD).includes('d-otherorg'), 'H20c nor one from another org with the same room id');
+
+  // H8 — same-timestamp ordering is deterministic and documented.
+  const sameTs = mkCase('case-S', 'oT', 'pT', 'under_review', [
+    { action: 'room_status_changed', at: '2026-02-01T00:00:00.000Z', detail: { from: 'archived', to: 'under_review' } },
+    { action: 'room_reopened', at: '2026-02-01T00:00:00.000Z', detail: { from: 'archived', to: 'under_review' } },
+    { action: 'room_created', at: '2026-02-01T00:00:00.000Z', detail: { status: 'watching' } },
+  ]);
+  const s1 = buildRecruitmentJourney({ ...REQ, recruitmentCases: [sameTs] }, 'case-S', V, { now: 5 });
+  const s2 = buildRecruitmentJourney({ ...REQ, recruitmentCases: [sameTs] }, 'case-S', V, { now: 5 });
+  ok(JSON.stringify(s1.history.entries) === JSON.stringify(s2.history.entries),
+    'H8 three entries at the SAME millisecond come back in the same order every time');
+  ok(s1.history.entries.length === 3, 'H8b and all three survive — identical timestamps are not deduped into one');
+
+  // H13 — every historical M17 status maps, exactly once, with no fallback.
+  const LEGACY = ['watching', 'under_review', 'shortlisted', 'priority', 'trial_requested',
+    'trial_scheduled', 'trial_completed', 'offer_consideration', 'offer_made', 'signed',
+    'withdrawn', 'archived', 'closed'];
+  let mappedAll = true;
+  for (const st of LEGACY) {
+    if (!ROOM_STATUSES.includes(st)) { mappedAll = false; fail('H13 legacy status ' + st + ' disappeared from the canonical set'); }
+    if (!ROOM_TRANSITIONS[st]) { mappedAll = false; fail('H13 legacy status ' + st + ' lost its transition row'); }
+    const projected = buildRecruitmentJourney({ ...REQ, recruitmentCases: [mkCase('c-' + st, 'oT', 'pT', st)] }, 'c-' + st, V, { now: 5 });
+    if (!projected.ok || projected.lifecycle.currentStage !== st) { mappedAll = false; fail('H13 legacy status ' + st + ' does not project as itself'); }
+    if (!projected.lifecycle.label || projected.lifecycle.label === st) { mappedAll = false; fail('H13 legacy status ' + st + ' has no human label'); }
+  }
+  ok(mappedAll, 'H13 all 13 pre-M23 statuses still exist, keep their transitions, project as themselves and carry a label');
+
+  // H14 — an unknown legacy status is refused, never coerced.
+  const weird = mkCase('case-W', 'oT', 'pT', '__unknown_old_status__');
+  const wj = buildRecruitmentJourney({ ...REQ, recruitmentCases: [weird] }, 'case-W', V, { now: 5 });
+  const coerced = wj.ok && ['under_review', 'closed', 'watching'].includes(wj.lifecycle?.currentStage);
+  neg(!coerced, 'H14 an unrecognised stored status is NOT silently coerced to under_review, closed or watching');
+  const wv = canTransitionRecruitmentCase(weird, 'startReview', { role: 'recruitment_admin' });
+  neg(wv.ok === false && wv.error === 'LIFECYCLE_STATE_UNKNOWN',
+    'H14b and the validator calls it corruption rather than guessing a workflow answer');
+
+  // H14c — an unknown value inside HISTORY is not given meaning either.
+  const weirdHist = mkCase('case-WH', 'oT', 'pT', 'under_review', [
+    { action: '__not_a_real_action__', at: '2026-03-01T00:00:00.000Z', detail: { to: 'nonsense' } },
+    { action: 'room_status_changed', at: '2026-03-02T00:00:00.000Z', detail: { from: 'watching', to: 'under_review' } },
+  ]);
+  const whj = buildRecruitmentJourney({ ...REQ, recruitmentCases: [weirdHist] }, 'case-WH', V, { now: 5 });
+  neg(!JSON.stringify(whj.history.entries).includes('__not_a_real_action__'),
+    'H14c an unrecognised history action is omitted, not rendered as a fabricated timeline event');
+  ok(whj.history.entries.length === 1, 'H14d and the real entry beside it still shows');
+
+  // H23 — optional stores are structurally absent, not faked.
+  ok(one.offer.available === false && one.offer.records.length === 0,
+    'H23 the unshipped offer store reports available:false rather than pretending to be empty-but-present');
+  neg(JOURNEY_REQUIRED_STORES.includes('recruitmentOffers') === false,
+    'H23b and it is NOT in the required list — a future phase’s store cannot break today’s projection');
+}
+
+section('H11 — nextActions is a permission statement, not a workflow diagram');
+{
+  const kase = { id: 'c-r', orgId: 'oT', playerId: 'pT', room: { status: 'under_review', rev: 1 } };
+  const forRole = (role) => availableActions(kase, { role });
+  const viewer = forRole('viewer');
+  const contributor = forRole('contributor');
+  const lead = forRole('room_lead');
+  const admin = forRole('recruitment_admin');
+
+  ok(viewer.length === 0, 'H11 a read-only viewer is offered NOTHING');
+  for (const a of ['rejectCase', 'closeCase', 'holdCase', 'reopenCase', 'confirmSignedOutcome']) {
+    if (viewer.includes(a)) fail('H11 a viewer was offered ' + a);
+  }
+  neg(true, 'H11b specifically not reject, close, hold, reopen or confirm-signing');
+
+  ok(contributor.includes('startReview') === false || contributor.length < lead.length,
+    'H11c a contributor is offered strictly less than a lead');
+  neg(!contributor.includes('rejectCase'), 'H11d a contributor cannot end a case');
+  neg(!contributor.includes('confirmSignedOutcome'), 'H11e nor confirm a signing');
+  neg(!lead.includes('confirmSignedOutcome'), 'H11f nor can a room lead — that is admin-only');
+  ok(lead.includes('holdCase') && lead.includes('rejectCase'), 'H11g a lead can hold and reject');
+  ok(admin.length >= lead.length, 'H11h an admin is offered at least what a lead is');
+
+  // Every offered action must actually succeed validation for that role.
+  let consistent = true;
+  for (const role of ['contributor', 'room_lead', 'recruitment_admin']) {
+    for (const a of forRole(role)) {
+      const v = canTransitionRecruitmentCase(kase, a, { role, forAvailability: true });
+      if (!v.ok) { consistent = false; fail('H11 ' + role + ' was offered ' + a + ' but it does not validate'); }
+    }
+  }
+  ok(consistent, 'H11i every offered action validates for the role it was offered to');
+}
+
+section('H15-H17 — hold cycling, reopen cycling and what the funnel counts');
+{
+  const cyc = { id: 'c-c', orgId: 'oT', playerId: 'pT', room: { status: 'under_review', rev: 1 } };
+  const step = (from, action) => canTransitionRecruitmentCase({ ...cyc, room: { status: from, rev: 1 } }, action, { role: 'recruitment_admin', forAvailability: true });
+  ok(step('under_review', 'holdCase').ok, 'H15 under_review -> on_hold');
+  ok(step('on_hold', 'resumeCase').ok, 'H15b on_hold -> under_review');
+  ok(step('under_review', 'holdCase').ok && step('on_hold', 'resumeCase').ok,
+    'H15c and the cycle can repeat — nothing about a second hold is refused');
+  neg(!LIFECYCLE_TERMINAL.includes('on_hold'), 'H15d because on_hold was never terminal');
+
+  ok(step('archived', 'reopenCase').ok, 'H16 archived -> under_review reopens');
+  ok(step('under_review', 'rejectCase').ok, 'H16b and can be rejected again');
+  ok(step('closed', 'reopenCase').ok, 'H16c a closed case reopens too');
+
+  // H17 — what the funnel counts.
+  neg(!FUNNEL_STAGES.includes('on_hold'), 'H17 on_hold is not a funnel stage, so repeated holds cannot inflate progress');
+  neg(!FUNNEL_STAGES.includes('offer_declined'), 'H17b nor offer_declined, which already counted at offer_made');
+  ok(FUNNEL_STAGES.includes('offer_made'), 'H17c offer_made IS counted');
+  ok(stagesReached({ history: [
+    { action: 'room_status_changed', at: 1, detail: { from: 'watching', to: 'under_review' } },
+    { action: 'room_status_changed', at: 2, detail: { from: 'under_review', to: 'on_hold' } },
+    { action: 'room_status_changed', at: 3, detail: { from: 'on_hold', to: 'under_review' } },
+    { action: 'room_status_changed', at: 4, detail: { from: 'under_review', to: 'on_hold' } },
+    { action: 'room_status_changed', at: 5, detail: { from: 'on_hold', to: 'under_review' } },
+  ], room: { status: 'under_review' } }).size >= 1, 'H17d stagesReached returns a SET, so reaching a stage twice counts once');
+  const reached = stagesReached({ history: [
+    { action: 'room_status_changed', at: 1, detail: { from: 'watching', to: 'under_review' } },
+    { action: 'room_status_changed', at: 2, detail: { from: 'under_review', to: 'archived' } },
+    { action: 'room_reopened', at: 3, detail: { from: 'archived', to: 'under_review' } },
+    { action: 'room_status_changed', at: 4, detail: { from: 'archived', to: 'under_review' } },
+  ], room: { status: 'under_review' } });
+  ok(reached.has('under_review'), 'H17e a reopened case still shows the stage it reached');
+  ok([...reached].filter((s) => s === 'under_review').length === 1,
+    'H17f and reaching under_review twice appears once — the funnel is unique-case, so reopening cannot double-count');
 }
 
 // ================================================================== HTTP

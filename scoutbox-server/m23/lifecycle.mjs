@@ -179,6 +179,14 @@ export function canTransitionRecruitmentCase(kase, action, context = {}) {
     evidence = NULL_EVIDENCE_PROVIDER,
     reasonCodes = [],
     now = Date.now(),
+    // Availability probe: "could this action be taken, given a reason?" as
+    // opposed to "is this exact request valid?". `availableActions` asks the
+    // first question, because a reason is supplied when the action is
+    // performed, not when it is offered. The first version of this passed a
+    // literal fake reason code instead, which made the check pass for the
+    // wrong reason and put the string 'placeholder' one careless echo away
+    // from a response body.
+    forAvailability = false,
   } = context;
 
   const def = LIFECYCLE_ACTIONS[action];
@@ -212,7 +220,7 @@ export function canTransitionRecruitmentCase(kase, action, context = {}) {
     };
   }
 
-  if (def.reasonCodesRequired && (!Array.isArray(reasonCodes) || reasonCodes.length === 0)) {
+  if (def.reasonCodesRequired && !forAvailability && (!Array.isArray(reasonCodes) || reasonCodes.length === 0)) {
     return { ok: false, error: 'LIFECYCLE_REASON_REQUIRED', message: 'Ending a recruitment case requires a recorded reason.' };
   }
 
@@ -235,7 +243,9 @@ export function canTransitionRecruitmentCase(kase, action, context = {}) {
 
 /** Which semantic actions are available right now, for this role. */
 export function availableActions(kase, context = {}) {
-  return LIFECYCLE_ACTION_NAMES.filter((a) => canTransitionRecruitmentCase(kase, a, context).ok);
+  return LIFECYCLE_ACTION_NAMES.filter(
+    (a) => canTransitionRecruitmentCase(kase, a, { ...context, forAvailability: true }).ok,
+  );
 }
 
 /** Validate a lifecycle reason code. */
