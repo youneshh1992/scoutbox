@@ -24,7 +24,7 @@ import {
   ROOM_PRIORITY_NOTE, roomActivity, buildRoomSnapshot, roomSummary, roomFunnel,
   secondLookEvent, ROOM_TRUST_NOTE, ROOM_DEV_NOTE, ROOM_PRIVACY_NOTE,
   ROOM_UNAVAILABLE_NOTE, LIMITS, clampPage, validateTag, SNAPSHOT_STATUSES,
-  adoptionStatusForStage,
+  adoptionStatusForStage, INITIAL_ROOM_STATUS,
 } from './shared.mjs';
 import { guardRev, bumpRev, revMeta } from '../m181/concurrency.mjs';
 import { rateLimitedBody } from '../m181/rateLimit.mjs';
@@ -542,7 +542,7 @@ export function registerRooms(ctx) {
       db.recruitmentCases.push(room);
     }
     room.room = {
-      status: 'watching',
+      status: INITIAL_ROOM_STATUS,
       priority: ROOM_PRIORITIES.includes(priority) ? priority : 'normal',
       tags: [],
       leadScoutUserId: req.orgUser.id,
@@ -827,7 +827,7 @@ export function registerRooms(ctx) {
       db.recruitmentCases.push(room);
     }
     room.room = {
-      status: 'watching', priority: 'normal', tags: [], leadScoutUserId: req.orgUser.id,
+      status: INITIAL_ROOM_STATUS, priority: 'normal', tags: [], leadScoutUserId: req.orgUser.id,
       sourceContext: normaliseSourceContext(sourceContext), sourceRef,
       openedBy: { userId: req.orgUser.id, name: req.orgUser.name },
       updatedAt: now(), archivedAt: null, closedAt: null,

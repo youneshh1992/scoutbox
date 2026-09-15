@@ -32,7 +32,7 @@
 
 import {
   ROOM_TRANSITIONS, ROOM_STATUSES, TERMINAL_ROOM_STATUSES, STATUS_EVIDENCE_REQUIRED,
-  PROHIBITED_REASON_CODES,
+  PROHIBITED_REASON_CODES, INITIAL_ROOM_STATUS,
 } from '../m17/shared.mjs';
 
 export const RECRUITMENT_LIFECYCLE_POLICY_VERSION = 1;
@@ -46,8 +46,15 @@ export const LIFECYCLE_TERMINAL = Object.freeze([...TERMINAL_ROOM_STATUSES]);
 export const LIFECYCLE_REOPENABLE = Object.freeze(['withdrawn', 'archived', 'closed']);
 const REOPENABLE = LIFECYCLE_REOPENABLE;
 
-/** The initial state of a newly opened case. */
-export const LIFECYCLE_INITIAL = 'watching';
+/**
+ * The initial state of a newly opened case.
+ *
+ * An ALIAS, not a second declaration. M17 owns the status set, so it owns
+ * where a room starts; this names it in M23's vocabulary. It used to be its
+ * own literal `'watching'`, which meant the value existed in three places —
+ * here and at both room-creation sites — and was read at none of them.
+ */
+export const LIFECYCLE_INITIAL = INITIAL_ROOM_STATUS;
 
 /**
  * Structured reason codes for lifecycle movement.
@@ -81,20 +88,23 @@ const REASON_SET = new Set(LIFECYCLE_REASON_CODES);
 /**
  * Preconditions a target state requires from a DURABLE RECORD elsewhere.
  *
+ * ONE TABLE, and this is a local name for it — not a copy and not an export.
+ *
+ * There used to be a second copy here, and that copy was the defect: the
+ * legacy status route consulted m17's table and never saw this one, so
+ * `offer_made` + `{status:'signed'}` walked straight past the requirement. Two
+ * tables meant two answers to one question and the one that mattered was never
+ * asked.
+ *
+ * It is deliberately NOT exported. An exported alias reads like a second
+ * precondition table to the next person, which is how this started; callers
+ * import `STATUS_EVIDENCE_REQUIRED` by its real name.
+ *
  * `kind` is resolved by the evidence provider. A provider that does not know a
  * kind must answer `{ satisfied: false, reason: 'not_implemented' }` — never
  * `true`, and never by inventing a row.
  */
-/**
- * Preconditions, re-exported from the ONE table in m17/shared.mjs.
- *
- * This used to be a second copy living here, and that copy was the defect: the
- * legacy status route consulted m17 and never saw it, so `offer_made` +
- * `{status:'signed'}` walked straight past the requirement. Two tables meant
- * two answers to one question. Now there is one table, returned by the one
- * validator every status path calls.
- */
-export const LIFECYCLE_PRECONDITIONS = STATUS_EVIDENCE_REQUIRED;
+const LIFECYCLE_PRECONDITIONS = STATUS_EVIDENCE_REQUIRED;
 
 /**
  * Semantic actions. Each names one real event and maps to exactly one state.

@@ -87,6 +87,16 @@ export const ROOM_STATUS_LABELS = table({
 
 export const TERMINAL_ROOM_STATUSES = ['signed', 'withdrawn', 'archived', 'closed'];
 
+/**
+ * Where a newly opened Room starts.
+ *
+ * Declared here, with the status set it belongs to, rather than spelled
+ * `'watching'` at each creation site. M23 re-exports it as `LIFECYCLE_INITIAL`
+ * so the lifecycle can name it in its own vocabulary without owning a second
+ * copy of the value.
+ */
+export const INITIAL_ROOM_STATUS = 'watching';
+
 export const OPEN_ROOM_STATUSES = ROOM_STATUSES.filter((s) => !TERMINAL_ROOM_STATUSES.includes(s));
 
 // M12 stage vocabularies, mirrored here so the mapping is declarative. These
