@@ -18,6 +18,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   LIFECYCLE_ACTIONS, LIFECYCLE_TERMINAL, LIFECYCLE_REOPENABLE, LIFECYCLE_REASON_CODES,
+  validateLifecycleReasons, isLifecycleReason,
   RECRUITMENT_LIFECYCLE_POLICY_VERSION, canTransitionRecruitmentCase,
   derivedConditions, availableActions, toAnalyticsRecruitmentStage,
   NULL_EVIDENCE_PROVIDER,
@@ -26,6 +27,7 @@ import { buildRecruitmentJourney, JOURNEY_REQUIRED_STORES } from '../m23/journey
 import {
   ROOM_STATUSES, ROOM_TRANSITIONS, TERMINAL_ROOM_STATUSES, roomStatusForStage,
   STATUS_EVIDENCE_REQUIRED, adoptionStatusForStage, PRO_STAGES, GRASSROOTS_STAGES,
+  ALL_REASON_CODES,
 } from '../m17/shared.mjs';
 import { createEvidenceProvider } from '../m23/evidence.mjs';
 import { FUNNEL_STAGES, stagesReached } from '../m20/funnels.mjs';
@@ -625,7 +627,7 @@ section('J — the positive journeys');
 
   // J9/J11 — reject, preserving everything.
   const beforeReject = (await j('GET', `/org/rooms/${ROOM}/journey`, undefined, maria.token)).body;
-  const rej = await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'rejectCase', expectedRev: beforeReject.case.rev, reasonCodes: ['squad_space'] }, maria.token);
+  const rej = await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'rejectCase', expectedRev: beforeReject.case.rev, reasonCodes: ['rejected'] }, maria.token);
   ok(rej.status === 200 && rej.body.to === 'archived', 'J9 the case can be rejected with a structured reason');
   const rejected = (await j('GET', `/org/rooms/${ROOM}/journey`, undefined, maria.token)).body;
   ok(rejected.history.total >= beforeReject.history.total, '#28/#36 rejecting destroyed no prior history');
@@ -651,14 +653,14 @@ section('J — the positive journeys');
   const h1 = await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'holdCase', expectedRev: reopened.case.rev }, maria.token);
   ok(h1.status === 200, 'a case is held before it can be filed away');
   const preC1 = (await j('GET', `/org/rooms/${ROOM}/journey`, undefined, maria.token)).body;
-  const c1 = await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'closeCase', expectedRev: preC1.case.rev, reasonCodes: ['timing'], clientKey: 'close-a' }, maria.token);
+  const c1 = await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'closeCase', expectedRev: preC1.case.rev, reasonCodes: ['case_closed'], clientKey: 'close-a' }, maria.token);
   ok(c1.status === 200, 'a case closes');
   const afterC1 = (await j('GET', `/org/rooms/${ROOM}/journey`, undefined, maria.token)).body;
   const r2 = await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'reopenCase', expectedRev: afterC1.case.rev }, maria.token);
   const midR2 = (await j('GET', `/org/rooms/${ROOM}/journey`, undefined, maria.token)).body;
   await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'holdCase', expectedRev: midR2.case.rev }, maria.token);
   const afterR2 = (await j('GET', `/org/rooms/${ROOM}/journey`, undefined, maria.token)).body;
-  const c2 = await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'closeCase', expectedRev: afterR2.case.rev, reasonCodes: ['timing'], clientKey: 'close-b' }, maria.token);
+  const c2 = await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'closeCase', expectedRev: afterR2.case.rev, reasonCodes: ['case_closed'], clientKey: 'close-b' }, maria.token);
   ok(r2.status === 200 && c2.status === 200,
     '#24 closed -> reopened -> closed all land: idempotency binds to request identity, not to an all-time stage pair');
   const afterC2 = (await j('GET', `/org/rooms/${ROOM}/journey`, undefined, maria.token)).body;
@@ -714,7 +716,7 @@ section('Negatives — isolation, authority, concurrency, privacy');
   const k = 'shared-key';
   const first = await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'holdCase', expectedRev: live.case.rev, clientKey: k }, maria.token);
   ok(first.status === 200 && first.body.to === 'on_hold', '#9 an action with a key lands');
-  const different = await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'closeCase', expectedRev: 999, clientKey: k, reasonCodes: ['timing'] }, maria.token);
+  const different = await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'closeCase', expectedRev: 999, clientKey: k, reasonCodes: ['case_closed'] }, maria.token);
   neg(different.body?.idempotent !== true,
     '#10 the SAME key with a DIFFERENT action is not treated as a replay — identity is key AND action');
 
@@ -876,6 +878,48 @@ section('Legacy compatibility — an old case still reads');
   } else {
     ok(false, 'could not create the legacy fixture case');
   }
+}
+
+section('V — two reason taxonomies, and the route must use the right one');
+{
+  // M17's 20 codes say why a club DECIDED something — an opinion about a
+  // player. M23's 16 say why a case MOVED — an event in a process. The route
+  // used to validate transitions against the DECISION taxonomy, which accepted
+  // a judgement about a player as the reason a case closed and refused every
+  // one of the sixteen reasons it publishes.
+  neg(LIFECYCLE_REASON_CODES.every((c) => !ALL_REASON_CODES.includes(c)),
+    'V1 the two taxonomies share no code at all — they are not interchangeable');
+  ok(LIFECYCLE_REASON_CODES.every((c) => isLifecycleReason(c)),
+    'V2 and every published lifecycle code passes the lifecycle predicate');
+
+  neg(validateLifecycleReasons(['squad_space']).error === 'LIFECYCLE_REASON_UNKNOWN',
+    'V3 a DECISION reason is refused on a lifecycle transition');
+  ok(validateLifecycleReasons(['case_closed']).ok === true,
+    'V4 while a lifecycle reason is accepted');
+  neg(Array.isArray(validateLifecycleReasons(['squad_space']).allowed),
+    'V5 and the refusal publishes the taxonomy that WOULD work, so the caller can correct it');
+
+  // Safeguarding is shared deliberately: one rule, one implementation, one
+  // error code. A protected characteristic is never a reason for anything.
+  for (const c of ['nationality', 'religion', 'disability', 'postcode']) {
+    const v = validateLifecycleReasons([c]);
+    neg(v.ok === false && v.error === 'ROOM_REASON_PROHIBITED',
+      `V6 "${c}" is refused as a prohibited characteristic, with M17's own error code`);
+  }
+  neg(validateLifecycleReasons(Array.from({ length: 7 }, () => 'case_closed').map((c, i) => (i ? `${c}` : c))).ok === true,
+    'V7 duplicates collapse rather than tripping the ceiling');
+  neg(validateLifecycleReasons(LIFECYCLE_REASON_CODES.slice(0, 7)).error === 'LIFECYCLE_REASONS_TOO_MANY',
+    'V8 but seven distinct reasons on one transition is refused');
+  for (const bad of ['case_closed', 0, {}, null, [['case_closed']]]) {
+    const v = validateLifecycleReasons(bad);
+    neg(v.ok === false, `V9 ${JSON.stringify(bad)} is not a valid reason list`);
+  }
+
+  // Every action that REQUIRES a reason must have one it can actually be given.
+  const needsReason = Object.entries(LIFECYCLE_ACTIONS).filter(([, d]) => d.reasonCodesRequired);
+  ok(needsReason.length === 3, `V10 ${needsReason.length} actions require a recorded reason`);
+  neg(needsReason.every(([, d]) => isLifecycleReason(d.reason)),
+    'V11 and each one\'s own default reason is a valid LIFECYCLE code — a required reason nobody can supply is a dead action');
 }
 
 section('T — hostile input: no shape of request body becomes a 500');

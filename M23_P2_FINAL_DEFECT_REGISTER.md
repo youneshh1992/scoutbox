@@ -239,3 +239,112 @@ reload-and-retry that cannot succeed.
   club's name, a stack trace, a file path or an internal exception name.
 - No score, readiness, probability or percentage appears anywhere in the
   projection.
+
+---
+
+# Appendix — the final corrections round
+
+Three correction items (production boot contract, live/browser regression,
+recovery bundle) found **five more defects**. Appended, not merged into the
+list above: the original eleven were what the sweep found, and these are what
+the corrections found.
+
+## B1 — `db.idvQueue` and `db.orgNotes` were created on first write
+
+Both initialised by `db.x ??= []` **inside a request handler**
+(`server.mjs:1162`, `server.mjs:1729`), so they came into existence on
+whichever request arrived first.
+
+**Why it survived.** Every read of them is guarded, so nothing crashed — and a
+guarded read is exactly what makes this invisible. A store that appears on
+first write cannot be reported by `missingRequiredStores()`, cannot be named by
+the `STORE_MISSING` boot log, and a restore that dropped it looks healthy until
+someone files the first note. **Read-time repair is not a lifecycle; it is the
+absence of one.**
+
+**Fix.** `m230_003_core_server_stores_present`, schema 2301 → 2302. `server.mjs`
+has no `register()` of its own, so the core registry is the right home.
+
+## B2 — `db.verRootTransfers` was created inside the transfer route
+
+`m14/organisations.mjs:593`. It existed only once somebody had already
+requested a root transfer. Moved to `m14/shared.mjs` with its twelve siblings.
+
+## B3 — `db.reviewLater` existed by accident
+
+Nothing initialised it at registration. It was present after boot only because
+`m13/index.mjs` calls `tick()` once synchronously, `tick()` calls
+`insightSweep()`, and that opened with `db.reviewLater ??= []`.
+
+A real execution that really worked — but a store whose existence depends on a
+sweep having been scheduled moves the day the sweep is made lazy, deferred or
+put behind a flag. Init moved to `m13/shared.mjs`.
+
+## B4 — the lifecycle route validated against the WRONG reason taxonomy
+
+**Found by the live suite**, on the first attempt to hold a case with a
+lifecycle reason code.
+
+`m23/index.mjs` called `validateReasonCodes` from `m17/shared.mjs`. That
+validates against M17's 20 **decision** reason codes — why a club *concluded*
+something about a player. M23 publishes 16 **lifecycle** reason codes — why a
+case *moved*. The two sets overlap in **zero** codes.
+
+So the route accepted a judgement about a player as the reason a case closed,
+and refused every one of the sixteen reasons the milestone defines.
+`rejectCase`, `withdrawCase` and `closeCase` *require* a reason, which meant
+the only reasons they would take were from the wrong vocabulary — written into
+an append-only history that nothing ever rewrites. `isLifecycleReason` was
+exported and never called.
+
+**Why it survived.** Every prior test that supplied a reason code through the
+route supplied an M17 decision code, because that is what the route accepted;
+and every test that exercised the M23 taxonomy called the pure validator, which
+only checks that the list is non-empty. Neither half ever met the other.
+
+This is D3's shape one level up: two tables answering one question, and the one
+that mattered was never asked.
+
+**Fix.** `validateLifecycleReasons` in `m23/lifecycle.mjs`, refusing a decision
+code with `LIFECYCLE_REASON_UNKNOWN` and publishing the taxonomy that would
+work. `/org/recruitment/lifecycle` now publishes the codes and marks which
+actions require one. The **prohibited** set is shared deliberately and keeps
+M17's `ROOM_REASON_PROHIBITED`: a protected characteristic can never be a
+reason for anything, and that rule must not have two implementations.
+
+Four existing m23E2E assertions passed M17 decision codes to the lifecycle
+route. Per §51 they were not weakened — they encoded the wrong vocabulary and
+now use the right one. New group V (18 checks) asserts the separation as a
+property, including that every action requiring a reason has a valid default in
+its own taxonomy.
+
+## B5 — the new live suite hung after printing success
+
+`e2e/m23Live.test.mjs`, first version: the spawned backend and two static
+servers are ref'd handles, so the process printed `37 checks passed` and then
+never exited. Success to a human reading the tail; a timeout to a harness — and
+it held ports 4023 and 8723, which broke the next run with `EADDRINUSE`.
+
+This is **D1 exactly** (m22E2E, found by the M22 pass) reproduced in new code
+by the same author. Every other Live suite ends with `process.exit(0)`; this one
+now does too, after closing the statics and stopping the backend.
+
+---
+
+## Observed but not reproduced — m18E2E `changeCount`
+
+`S1: one underlying change, one item` failed **twice in roughly thirty runs**,
+both times during a full sequential battery, never in isolation.
+
+Measured deliberately rather than assumed: **10 consecutive clean runs at the
+pre-correction baseline** (`74a0aef`, in a separate worktree) and **10
+consecutive clean runs at the current tip**, plus 9 further runs under
+deliberate CPU load from three concurrent suites. Not reproduced in 29
+attempts.
+
+It is therefore **not** a regression from this work — it predates it and is
+rare. Per §51 the assertion was **not weakened**: it now prints the second
+change's type, source system and timestamp when it trips, so the next
+occurrence identifies itself instead of costing another thirty runs.
+
+Recorded as open, low severity, in a pre-existing suite.

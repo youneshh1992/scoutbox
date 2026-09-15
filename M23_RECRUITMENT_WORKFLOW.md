@@ -130,6 +130,24 @@ discussion, tasks, evidence review and decisions around it. M23 writes status
 only through `ctx.applyLifecycleTransition`, which calls M17's `applyStatus` —
 the single writer that also derives the stage and bumps the rev.
 
+## 5a. Reason codes — two taxonomies, and they do not mix
+
+M17's 20 **decision** reason codes say why a club *concluded* something about a
+player. M23's 16 **lifecycle** reason codes say why a case *moved*. The two
+sets share no code, because they describe different kinds of thing: an opinion
+and an event.
+
+The lifecycle route validates against `LIFECYCLE_REASON_CODES`
+(`validateLifecycleReasons`), and refuses a decision code with
+`LIFECYCLE_REASON_UNKNOWN` — publishing the taxonomy that would work, so the
+caller can correct it. `/org/recruitment/lifecycle` publishes the codes and
+marks which actions require one.
+
+The **prohibited** set is shared deliberately, and keeps M17's own error code
+(`ROOM_REASON_PROHIBITED`). A protected characteristic can never be recorded as
+a reason for anything, and that rule must not have two implementations that can
+drift apart.
+
 ## 6. History
 
 Every transition appends one `room_status_changed` entry to `case.history`,

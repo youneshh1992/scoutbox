@@ -364,6 +364,15 @@ await j('POST', `/org/rooms/${room.roomId}/status`, { status: 'archived', reason
   ok(/relates to the reason recorded/i.test(item.summary), 'S1: it explains the relationship');
   neg(!FORBIDDEN_COPY.some((f) => JSON.stringify(after.body).toLowerCase().includes(f)), 'S1: nothing in the response says the decision was wrong');
   neg(/never judges that decision/i.test(after.body.note), 'S1: the queue states it does not judge the decision');
+  // Self-diagnosing. This assertion was seen to fail twice in roughly thirty
+  // runs during the M23 correction battery — always under full-battery load,
+  // never in 10 consecutive isolated runs at either the pre-correction
+  // baseline or the current tip. Rather than loosen it, the failure now names
+  // the second change so the next occurrence identifies itself instead of
+  // costing another thirty runs.
+  if (item.changeCount !== 1) {
+    console.error(`   changeCount=${item.changeCount}; changes: ${JSON.stringify((item.changes ?? []).map((c) => ({ type: c.type, source: c.sourceSystem, at: c.occurredAt })))}`);
+  }
   ok(item.changeCount === 1, 'S1: one underlying change, one item');
   global.__item = item;
 }

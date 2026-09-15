@@ -16,9 +16,10 @@
 import {
   LIFECYCLE_ACTIONS, LIFECYCLE_ACTION_NAMES, RECRUITMENT_LIFECYCLE_POLICY_VERSION,
   canTransitionRecruitmentCase, actionPermittedForRole, NULL_EVIDENCE_PROVIDER,
+  validateLifecycleReasons, LIFECYCLE_REASON_CODES,
 } from './lifecycle.mjs';
 import { buildRecruitmentJourney } from './journey.mjs';
-import { roomRole, validateReasonCodes } from '../m17/shared.mjs';
+import { roomRole } from '../m17/shared.mjs';
 import { guardRev, revMeta } from '../m181/concurrency.mjs';
 import { buildShared } from '../m12/shared.mjs';
 
@@ -94,7 +95,11 @@ export function registerM23(rawCtx) {
       });
     }
 
-    const reasons = validateReasonCodes(reasonCodes);
+    // The LIFECYCLE taxonomy, not M17's decision taxonomy. The two describe
+    // different things and share no code; validating a transition against the
+    // decision vocabulary wrote a judgement about a player into a record of
+    // what happened to a case.
+    const reasons = validateLifecycleReasons(reasonCodes);
     if (!reasons.ok) return res.status(400).json(reasons);
 
     const role = roomRole({ room, user: req.orgUser, isLead: isLead(req.orgUser) });
@@ -169,7 +174,16 @@ export function registerM23(rawCtx) {
   orgRouter.get('/recruitment/lifecycle', (req, res) => {
     res.json({
       policyVersion: RECRUITMENT_LIFECYCLE_POLICY_VERSION,
-      actions: LIFECYCLE_ACTION_NAMES.map((a) => ({ action: a, to: LIFECYCLE_ACTIONS[a].to, roles: LIFECYCLE_ACTIONS[a].roles })),
+      actions: LIFECYCLE_ACTION_NAMES.map((a) => ({
+        action: a,
+        to: LIFECYCLE_ACTIONS[a].to,
+        roles: LIFECYCLE_ACTIONS[a].roles,
+        reasonCodesRequired: !!LIFECYCLE_ACTIONS[a].reasonCodesRequired,
+      })),
+      // Published, because a client that must supply a reason code needs to be
+      // able to discover which ones exist. They were unreachable before: the
+      // route validated against a different taxonomy entirely.
+      reasonCodes: LIFECYCLE_REASON_CODES,
     });
   });
 }

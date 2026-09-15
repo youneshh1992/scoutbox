@@ -175,3 +175,22 @@ a signing, or an M12 outcome report (`registered`, `released`, `left`,
 
 The journey derives **one** terminal outcome from these. It does not store a
 sixth field called "outcome" beside the five the product already has.
+
+### Lifecycle reason code vs decision reason code
+
+Two vocabularies, no overlap, and the difference is not cosmetic.
+
+A **decision** reason code (M17, 20 of them) says why a club *concluded*
+something about a player — `squad_space`, `needs_more_evidence`,
+`timing`. It is an opinion, attached to a recorded decision.
+
+A **lifecycle** reason code (M23, 16 of them) says why a case *moved* —
+`case_closed`, `rejected`, `hold_resumed`, `case_reopened`. It is an event,
+attached to a transition.
+
+Supplying a decision code on a transition writes a judgement about a person
+into a record of what happened to a case. The lifecycle route refuses it by
+name.
+
+The prohibited list — protected characteristics — is shared by both, with one
+implementation and one error code. That rule is not allowed two versions.

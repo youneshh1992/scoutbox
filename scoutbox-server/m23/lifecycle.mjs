@@ -30,7 +30,10 @@
  * honest answer, and is why P2 creates no placeholder trials or offers.
  */
 
-import { ROOM_TRANSITIONS, ROOM_STATUSES, TERMINAL_ROOM_STATUSES, STATUS_EVIDENCE_REQUIRED } from '../m17/shared.mjs';
+import {
+  ROOM_TRANSITIONS, ROOM_STATUSES, TERMINAL_ROOM_STATUSES, STATUS_EVIDENCE_REQUIRED,
+  PROHIBITED_REASON_CODES,
+} from '../m17/shared.mjs';
 
 export const RECRUITMENT_LIFECYCLE_POLICY_VERSION = 1;
 
@@ -280,6 +283,64 @@ export function availableActions(kase, context = {}) {
 
 /** Validate a lifecycle reason code. */
 export const isLifecycleReason = (code) => REASON_SET.has(code);
+
+/** At most this many reasons on one transition — the same ceiling M17 uses. */
+const MAX_LIFECYCLE_REASONS = 6;
+
+/**
+ * Validate the reason codes on a lifecycle transition.
+ *
+ * WHY THIS EXISTS RATHER THAN REUSING M17's VALIDATOR
+ *
+ * There are two reason taxonomies and they describe different things. M17's 20
+ * codes say why a club DECIDED something — an opinion about a player.
+ * `LIFECYCLE_REASON_CODES` say why a case MOVED — an event in a process. The
+ * two sets do not overlap by a single code.
+ *
+ * The M23 route used to call `validateReasonCodes` from m17/shared.mjs, so it
+ * accepted decision reasons on a transition and refused every one of the
+ * sixteen lifecycle reasons it publishes. `closeCase` requires a reason, and
+ * the only reasons it would take described a judgement about the player rather
+ * than what happened to the case — a category error written into an
+ * append-only history that nothing ever rewrites. `isLifecycleReason` was
+ * exported and never called.
+ *
+ * The PROHIBITED set is shared deliberately and keeps M17's error code. A
+ * protected characteristic can never be recorded as a reason for anything, and
+ * that rule must not have two implementations that can drift.
+ */
+export function validateLifecycleReasons(codes) {
+  if (!Array.isArray(codes)) {
+    return { ok: false, error: 'LIFECYCLE_REASONS_INVALID', message: 'Reasons must be a list of lifecycle reason codes.' };
+  }
+  if (codes.some((c) => c != null && typeof c !== 'string')) {
+    return { ok: false, error: 'LIFECYCLE_REASONS_INVALID', message: 'Each reason must be a reason code, given as text.' };
+  }
+  const clean = [...new Set(codes.map((c) => (c ?? '').trim().toLowerCase()).filter(Boolean))];
+  if (clean.length > MAX_LIFECYCLE_REASONS) {
+    return { ok: false, error: 'LIFECYCLE_REASONS_TOO_MANY', message: `Record up to ${MAX_LIFECYCLE_REASONS} reasons.` };
+  }
+  const prohibited = clean.filter((c) => PROHIBITED_REASON_CODES.includes(c));
+  if (prohibited.length) {
+    return {
+      ok: false,
+      error: 'ROOM_REASON_PROHIBITED',
+      message: 'A protected characteristic can never be recorded as a recruitment reason.',
+      prohibited,
+    };
+  }
+  const unknown = clean.filter((c) => !REASON_SET.has(c));
+  if (unknown.length) {
+    return {
+      ok: false,
+      error: 'LIFECYCLE_REASON_UNKNOWN',
+      message: 'Reasons must come from the recruitment LIFECYCLE taxonomy, which describes why a case moved — not from the decision taxonomy, which describes what a club concluded about a player.',
+      unknown,
+      allowed: LIFECYCLE_REASON_CODES,
+    };
+  }
+  return { ok: true, codes: clean };
+}
 
 /**
  * May this role perform this action AT ALL, ignoring where the case is?
