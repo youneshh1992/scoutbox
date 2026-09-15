@@ -735,6 +735,33 @@ export function registerRooms(ctx) {
   ctx.roomIsRoom = isRoom;
 
   /**
+   * The lifecycle write seam, shared with M23.
+   *
+   * M23 owns which semantic actions exist and what each one requires; it does
+   * NOT own how a status is written. That stays here, in `applyStatus` — the
+   * single writer that also derives `case.stage` and bumps the rev — so there
+   * is exactly one place where the two representations can be made to agree.
+   *
+   * The caller has already validated the transition. This performs it and
+   * appends the history entry M20's funnel reads, in that order, so a status
+   * that moved is always a status with a recorded reason for moving.
+   */
+  ctx.applyLifecycleTransition = ({ req, room, to, reasonCodes = [], trigger = 'lifecycle' }) => {
+    const from = room.room.status;
+    applyStatus(room, to, req.org, req.orgUser);
+    if (REOPENED_FROM.includes(from) && OPEN_ROOM_STATUSES.includes(to)) {
+      room.room.reopened = { by: { userId: req.orgUser.id, name: req.orgUser.name }, at: now(), from, reasonCodes };
+      activity(room, req, 'room_reopened', { from, to, reasonCodes });
+      vmetric('recruitment_room_reopened');
+    }
+    // The same action name M20's funnel already reads. A second name would
+    // mean a second funnel, silently disagreeing with the first.
+    activity(room, req, 'room_status_changed', { from, to, reasonCodes, trigger });
+    vmetric('recruitment_room_status_changed');
+    return { from, to };
+  };
+
+  /**
    * The ONE room creator reachable from another milestone, shared with M18
    * Nobody Missed. A candidate added from a brief gets a room through exactly
    * the same path as one added from Discover: the same visibility check, the

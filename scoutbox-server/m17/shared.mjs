@@ -18,9 +18,15 @@
 // ---------------------------------------------------------------- statuses
 
 // The canonical room status set. Every status maps onto exactly one M12 stage.
+// M23 extends this set by five, and does NOT create a second one. The case is
+// canonical, the room is a facet of it, and this table is the single lifecycle
+// authority for both — so a competing M23 vocabulary would be exactly the
+// "M17 stages plus M23 stages fighting each other" that M23 §7 forbids.
 export const ROOM_STATUSES = [
   'watching',
   'under_review',
+  'contact_planned',   // M23: agreed to approach; nobody has yet
+  'contacted',         // M23: approach delivered; awaiting a response
   'shortlisted',
   'priority',
   'trial_requested',
@@ -28,7 +34,10 @@ export const ROOM_STATUSES = [
   'trial_completed',
   'offer_consideration',
   'offer_made',
+  'offer_accepted',    // M23: accepted IN SCOUTBOX — not a signing (see below)
+  'offer_declined',    // M23: the player declined; distinct from the club withdrawing
   'signed',
+  'on_hold',           // M23: paused deliberately, still live
   'withdrawn',
   'archived',
   'closed',
@@ -37,6 +46,8 @@ export const ROOM_STATUSES = [
 export const ROOM_STATUS_LABELS = {
   watching: 'Watching',
   under_review: 'Under review',
+  contact_planned: 'Contact planned',
+  contacted: 'Contacted',
   shortlisted: 'Shortlisted',
   priority: 'Priority',
   trial_requested: 'Trial requested',
@@ -44,7 +55,13 @@ export const ROOM_STATUS_LABELS = {
   trial_completed: 'Trial completed',
   offer_consideration: 'Offer consideration',
   offer_made: 'Offer made',
+  // Deliberate wording. This label is what a person reads, and it must not
+  // imply a playing contract, a registration or a completed transfer — the
+  // player has accepted a ScoutBox proposal and nothing more.
+  offer_accepted: 'Accepted in ScoutBox',
+  offer_declined: 'Offer declined by player',
   signed: 'Signed',
+  on_hold: 'On hold',
   withdrawn: 'Withdrawn',
   archived: 'Archived',
   closed: 'Closed',
@@ -68,6 +85,10 @@ const STAGE_MAP = {
   pro: {
     watching: 'identified',
     under_review: 'review',
+    // M23 — a planned approach and a delivered one are both part of reviewing
+    // the player; neither is an observation or a trial.
+    contact_planned: 'review',
+    contacted: 'review',
     shortlisted: 'observation',
     priority: 'observation',
     trial_requested: 'trial',
@@ -75,7 +96,12 @@ const STAGE_MAP = {
     trial_completed: 'trial',
     offer_consideration: 'decision',
     offer_made: 'decision',
+    offer_accepted: 'decision',
+    offer_declined: 'decision',
     signed: 'closed',
+    // M23 — a hold is a live case awaiting a person, not a closed one. It maps
+    // to review because that is what resuming it means.
+    on_hold: 'review',
     withdrawn: 'closed',
     archived: 'closed',
     closed: 'closed',
@@ -83,6 +109,9 @@ const STAGE_MAP = {
   grassroots: {
     watching: 'review',
     under_review: 'review',
+    contact_planned: 'review',
+    // The grassroots vocabulary already has the right word for this.
+    contacted: 'awaiting_response',
     shortlisted: 'review',
     priority: 'review',
     trial_requested: 'invited',
@@ -90,7 +119,10 @@ const STAGE_MAP = {
     trial_completed: 'awaiting_response',
     offer_consideration: 'decision',
     offer_made: 'decision',
+    offer_accepted: 'decision',
+    offer_declined: 'decision',
     signed: 'closed',
+    on_hold: 'review',
     withdrawn: 'closed',
     archived: 'closed',
     closed: 'closed',
@@ -130,17 +162,45 @@ export function roomStatusForStage(stage, orgLevel) {
 // "any status to any status" escape hatch, and nothing here is inferred from a
 // Trust Score, a Combine result or an assessment rating.
 export const ROOM_TRANSITIONS = {
-  watching: ['under_review', 'shortlisted', 'withdrawn', 'archived'],
-  under_review: ['watching', 'shortlisted', 'priority', 'trial_requested', 'withdrawn', 'archived'],
-  shortlisted: ['under_review', 'priority', 'trial_requested', 'offer_consideration', 'withdrawn', 'archived'],
-  priority: ['shortlisted', 'trial_requested', 'offer_consideration', 'withdrawn', 'archived'],
-  trial_requested: ['trial_scheduled', 'shortlisted', 'priority', 'withdrawn', 'archived'],
-  trial_scheduled: ['trial_completed', 'trial_requested', 'withdrawn', 'archived'],
-  trial_completed: ['offer_consideration', 'shortlisted', 'priority', 'withdrawn', 'archived'],
-  offer_consideration: ['offer_made', 'shortlisted', 'priority', 'withdrawn', 'archived'],
-  offer_made: ['signed', 'offer_consideration', 'withdrawn', 'archived'],
+  watching: ['under_review', 'shortlisted', 'contact_planned', 'on_hold', 'withdrawn', 'archived'],
+  under_review: ['watching', 'shortlisted', 'priority', 'contact_planned', 'trial_requested', 'on_hold', 'withdrawn', 'archived'],
+  // M23 — the two contact states. A club that has AGREED to approach a player
+  // and one that has not are otherwise indistinguishable, and a club awaiting a
+  // reply has nowhere to sit. Neither is a trial and neither is an observation.
+  contact_planned: ['contacted', 'under_review', 'shortlisted', 'priority', 'on_hold', 'withdrawn', 'archived'],
+  contacted: ['shortlisted', 'priority', 'trial_requested', 'offer_consideration', 'under_review', 'on_hold', 'withdrawn', 'archived'],
+  shortlisted: ['under_review', 'priority', 'contact_planned', 'trial_requested', 'offer_consideration', 'on_hold', 'withdrawn', 'archived'],
+  priority: ['shortlisted', 'contact_planned', 'trial_requested', 'offer_consideration', 'on_hold', 'withdrawn', 'archived'],
+  trial_requested: ['trial_scheduled', 'shortlisted', 'priority', 'on_hold', 'withdrawn', 'archived'],
+  trial_scheduled: ['trial_completed', 'trial_requested', 'on_hold', 'withdrawn', 'archived'],
+  trial_completed: ['offer_consideration', 'shortlisted', 'priority', 'on_hold', 'withdrawn', 'archived'],
+  offer_consideration: ['offer_made', 'shortlisted', 'priority', 'on_hold', 'withdrawn', 'archived'],
+  // M23 — THE LEGAL BOUNDARY, EXPRESSED AS STATES RATHER THAN AS COPY.
+  //
+  // `offer_made → offer_accepted` is the player saying yes in ScoutBox.
+  // `offer_accepted → signed` is a separate, separately-authorised act that
+  // requires confirmed joining evidence. Nothing derives the second from the
+  // first: see m23/lifecycle.mjs, where `signed` carries a precondition that
+  // an acceptance can never satisfy.
+  //
+  // `offer_made → signed` is KEPT. Removing it would not add safety — the
+  // precondition on `signed` is what does that — and it would delete a real
+  // situation: a club that concluded a signing outside ScoutBox and is
+  // recording the outcome. The M17 suite's negative assertions about `signed`
+  // (no jump from watching, archived or closed) are untouched.
+  offer_made: ['offer_accepted', 'offer_declined', 'signed', 'offer_consideration', 'on_hold', 'withdrawn', 'archived'],
+  // Accepted in ScoutBox. Still not a signing, and reachable only by the
+  // recipient's own act.
+  offer_accepted: ['signed', 'on_hold', 'withdrawn', 'archived', 'closed'],
+  // The player said no. Deliberately NOT the same as the club withdrawing:
+  // collapsing the two would misattribute whose decision it was.
+  offer_declined: ['under_review', 'shortlisted', 'priority', 'on_hold', 'withdrawn', 'archived', 'closed'],
   // Signed is where recruitment ends; the room may only be filed away after it.
   signed: ['closed'],
+  // M23 — a hold is LIVE, not terminal. It is a case with a reason and
+  // (optionally) a date to look again, and every ordinary route out of it
+  // stays open.
+  on_hold: ['under_review', 'shortlisted', 'priority', 'contact_planned', 'trial_requested', 'offer_consideration', 'withdrawn', 'archived', 'closed'],
   // Reopening is a first-class move, not a delete-and-recreate.
   withdrawn: ['under_review', 'archived', 'closed'],
   archived: ['under_review', 'closed'],

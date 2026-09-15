@@ -25,7 +25,31 @@ import {
  * a further stage, it stopped. `signed` stays because it is the end of the
  * ladder rather than a departure from it.
  */
-export const FUNNEL_STAGES = ROOM_STATUSES.filter((s) => !['withdrawn', 'archived', 'closed'].includes(s));
+/**
+ * M23 added five statuses, and only three of them are progress.
+ *
+ *   contact_planned, contacted   ARE rungs on the ladder — they are the step
+ *                                between reviewing a player and asking them
+ *                                for a trial, and M23's own funnel names them.
+ *   offer_accepted               IS a rung: it is further than offer_made.
+ *
+ *   on_hold                      is NOT. A paused case has not advanced; it is
+ *                                the same case, waiting. Counting it as a stage
+ *                                reached would report pausing as progress.
+ *   offer_declined               is NOT. A case that reached offer_declined
+ *                                already counted at offer_made, and adding a
+ *                                second row would count one piece of progress
+ *                                twice — while reading, on a page of
+ *                                progression rows, as though declining were a
+ *                                further step forward.
+ *
+ * This is the explicit compatibility mapping M23 §50 asks for rather than a
+ * silent change in what the funnel means. Every historical room keeps counting
+ * exactly as it did: no existing status changed name, position or inclusion.
+ */
+export const FUNNEL_NON_PROGRESS_STATUSES = ['withdrawn', 'archived', 'closed', 'on_hold', 'offer_declined'];
+
+export const FUNNEL_STAGES = ROOM_STATUSES.filter((s) => !FUNNEL_NON_PROGRESS_STATUSES.includes(s));
 
 /** Reason-code categories, in a fixed order so two reads never disagree. */
 export const REASON_CATEGORIES = Object.keys(REASON_CODES);

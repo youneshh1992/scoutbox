@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  ROOM_STATUSES, ROOM_STATUS_LABELS, ROOM_TRANSITIONS, OPEN_ROOM_STATUSES,
+  ROOM_STATUSES, ROOM_STATUS_LABELS, ROOM_TRANSITIONS, OPEN_ROOM_STATUSES, TERMINAL_ROOM_STATUSES,
   PRO_STAGES, GRASSROOTS_STAGES, stageForRoomStatus, roomStatusForStage,
   canTransition, validateTransition, validateReasonCodes, validateDecision,
   REASON_CODES, ALL_REASON_CODES, PROHIBITED_REASON_CODES, REVISITABLE_REASON_CODES,
@@ -40,7 +40,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ======================================================= U1 state machine
 section('U1 — the room state machine is explicit, total and mapped onto M12');
 {
-  ok(ROOM_STATUSES.length === 13, 'thirteen room statuses are defined');
+  // M23 note: this asserted `length === 13`, which was a census of the set on
+  // the day it was written rather than an invariant about it. The invariant —
+  // the one that makes the room a facet and not a second pipeline — is that
+  // EVERY status is labelled and maps into both M12 vocabularies, which the
+  // loop below checks exhaustively. A count additionally breaks every time the
+  // lifecycle legitimately grows, for a reason that has nothing to do with M17.
+  ok(ROOM_STATUSES.length >= 13, `the room state machine is defined (${ROOM_STATUSES.length} statuses)`);
+  ok(new Set(ROOM_STATUSES).size === ROOM_STATUSES.length, 'no status is declared twice');
   ok(ROOM_STATUSES.every((s) => ROOM_STATUS_LABELS[s]), 'every status has a human label');
 
   // Every status maps onto a stage the M12 case vocabulary actually has —
@@ -51,7 +58,7 @@ section('U1 — the room state machine is explicit, total and mapped onto M12');
     ok(GRASSROOTS_STAGES.includes(stageForRoomStatus(s, 'grassroots')), `${s} maps to a real grassroots stage`);
     mapped++;
   }
-  ok(mapped === 13, 'all thirteen statuses map in both vocabularies');
+  ok(mapped === ROOM_STATUSES.length, `all ${ROOM_STATUSES.length} statuses map in both vocabularies`);
 
   // The inverse mapping is consistent: a legacy stage write lands on a status
   // that maps back to the same stage.
@@ -106,7 +113,65 @@ section('U1 — the room state machine is explicit, total and mapped onto M12');
   ok(validateTransition('archived', 'under_review', { reasonCodes: ['continue_monitoring'] }).reopen === true, 'reopening is flagged as a reopen');
   ok(SNAPSHOT_STATUSES.every((s) => ROOM_STATUSES.includes(s)), 'every snapshot trigger is a real status');
   ok(validateTransition('under_review', 'shortlisted').snapshot === true, 'shortlisting captures a snapshot');
-  ok(OPEN_ROOM_STATUSES.length === 9 && !OPEN_ROOM_STATUSES.includes('archived'), 'archived is not an open status');
+  ok(!OPEN_ROOM_STATUSES.includes('archived'), 'archived is not an open status');
+  ok(OPEN_ROOM_STATUSES.length === ROOM_STATUSES.length - TERMINAL_ROOM_STATUSES.length
+    && TERMINAL_ROOM_STATUSES.every((s) => !OPEN_ROOM_STATUSES.includes(s)),
+    'open and terminal statuses partition the set exactly');
+
+  // ---- U1b — the five states M23 added get the same scrutiny as the first
+  // thirteen. The whole value of this table is that it has no escape hatch, and
+  // a new state is exactly where one would appear.
+  //
+  // These are here rather than in the M23 suite because the table is here: a
+  // negative assertion about a transition belongs beside the transition.
+  neg(!canTransition('watching', 'contacted'), 'a club cannot have contacted a player it never planned to contact');
+  neg(!canTransition('watching', 'offer_accepted'), 'no jump from watching to an accepted offer');
+  neg(!canTransition('watching', 'offer_declined'), 'no jump from watching to a declined offer');
+  neg(!canTransition('watching', 'trial_scheduled'), 'no jump from watching to a scheduled trial');
+  neg(!canTransition('under_review', 'contacted'), 'contact must be planned before it can be recorded');
+  neg(!canTransition('under_review', 'offer_accepted'), 'no jump from review to an accepted offer');
+  neg(!canTransition('under_review', 'signed'), 'no jump from review to signed');
+  neg(!canTransition('contact_planned', 'signed'), 'a planned contact is not a signing');
+  neg(!canTransition('contact_planned', 'offer_made'), 'an offer cannot precede the approach being made');
+  neg(!canTransition('contact_planned', 'offer_accepted'), 'nor an acceptance');
+  neg(!canTransition('contact_planned', 'trial_scheduled'), 'a trial cannot be scheduled before it is requested');
+  neg(!canTransition('contact_planned', 'trial_completed'), 'nor completed');
+  neg(!canTransition('contacted', 'signed'), 'being contacted is not being signed');
+  neg(!canTransition('contacted', 'offer_made'), 'an offer is considered before it is made');
+  neg(!canTransition('contacted', 'offer_accepted'), 'and cannot be accepted before it is made');
+  neg(!canTransition('contacted', 'trial_scheduled'), 'a trial is requested before it is scheduled');
+  neg(!canTransition('contacted', 'contact_planned'), 'contact cannot be un-made back into a plan');
+  neg(!canTransition('trial_requested', 'trial_completed'), 'a trial cannot complete without being scheduled');
+  neg(!canTransition('trial_requested', 'offer_made'), 'no offer straight from a trial request');
+  neg(!canTransition('trial_scheduled', 'offer_made'), 'no offer straight from a scheduled trial');
+  neg(!canTransition('trial_scheduled', 'signed'), 'no signing straight from a scheduled trial');
+  neg(!canTransition('trial_completed', 'offer_made'), 'an offer is considered before it is made, even after a trial');
+  neg(!canTransition('trial_completed', 'signed'), 'a completed trial is not a signing');
+  neg(!canTransition('offer_consideration', 'offer_accepted'), 'an offer must be MADE before it can be accepted');
+  neg(!canTransition('offer_consideration', 'offer_declined'), 'and before it can be declined');
+  neg(!canTransition('offer_consideration', 'signed'), 'considering an offer is not signing');
+  neg(!canTransition('offer_accepted', 'offer_made'), 'an accepted offer cannot be un-accepted back into a live offer');
+  neg(!canTransition('offer_accepted', 'offer_declined'), 'nor flipped to declined');
+  neg(!canTransition('offer_accepted', 'under_review'), 'an accepted offer does not drop back into review');
+  neg(!canTransition('offer_accepted', 'trial_requested'), 'nor back into the trial path');
+  neg(!canTransition('offer_declined', 'offer_accepted'), 'a declined offer cannot become an accepted one');
+  neg(!canTransition('offer_declined', 'offer_made'), 'a declined offer is not re-made in place');
+  neg(!canTransition('offer_declined', 'signed'), 'a player who declined has not signed');
+  neg(!canTransition('signed', 'offer_accepted'), 'a signing does not revert to an acceptance');
+  neg(!canTransition('signed', 'on_hold'), 'a signing cannot be put on hold');
+  neg(!canTransition('on_hold', 'signed'), 'a held case is not signed without going back through the work');
+  neg(!canTransition('on_hold', 'offer_made'), 'nor straight to an offer');
+  neg(!canTransition('on_hold', 'offer_accepted'), 'nor to an acceptance');
+  neg(!canTransition('on_hold', 'contacted'), 'nor to contact having happened');
+  neg(!canTransition('on_hold', 'trial_scheduled'), 'nor to a scheduled trial');
+  neg(!canTransition('archived', 'offer_accepted'), 'an archived case cannot acquire an accepted offer');
+  neg(!canTransition('withdrawn', 'signed'), 'a withdrawn case cannot be signed without being reopened');
+  neg(!canTransition('closed', 'offer_accepted'), 'a closed case cannot acquire an accepted offer');
+  // on_hold is LIVE, not an ending — the single most important property of the
+  // state, and the one a later refactor is most likely to get wrong.
+  neg(!TERMINAL_ROOM_STATUSES.includes('on_hold'), 'on_hold is NOT terminal — a paused case is still a live case');
+  neg(!TERMINAL_ROOM_STATUSES.includes('offer_declined'), 'offer_declined is not terminal either — the club may still act');
+  ok(OPEN_ROOM_STATUSES.includes('on_hold'), 'and on_hold is therefore an open status');
 }
 
 // ==================================================== U2 reason taxonomy

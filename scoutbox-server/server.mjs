@@ -24,6 +24,7 @@ import { registerM18 } from './m18/index.mjs';
 import { registerMatching } from './m19/index.mjs';
 import { registerAnalytics } from './m20/index.mjs';
 import { registerDevelopment } from './m21/index.mjs';
+import { registerM23, migrateM23 } from './m23/index.mjs';
 import { COMBINE_PROTOCOLS } from './m16/combineShared.mjs';
 import { registerSourceChanges } from './m181/sourceChanges.mjs';
 import { audienceFor, EVENT_AUDIENCE } from './m181/eventAudience.mjs';
@@ -3862,6 +3863,16 @@ const m21Ctx = registerDevelopment({
   isAdult,
 });
 void m21Ctx;
+
+// ------------------------------------------------ M23 recruitment lifecycle
+// M23 adds no recruitment pipeline: `db.recruitmentCases` stays canonical and
+// the Room stays a facet of it. What M23 adds is the OPERATING layer — named
+// semantic actions with server-validated transitions, and one viewer-aware
+// projection over the records that already exist. It writes status only
+// through M17's single writer (ctx.applyLifecycleTransition), so `case.stage`
+// and `room.status` still cannot disagree, and it stores nothing of its own.
+migrateM23(db);
+registerM23({ ...m19Ctx, isAdult });
 
 // ------------------------------------------------- M18.1 operator surface
 // What this deployment can and cannot actually do. ScoutBox is careful to be
