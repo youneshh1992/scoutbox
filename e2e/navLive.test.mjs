@@ -291,11 +291,18 @@ const lead = await clubLogin(leadCtx, 'Maria Keane', 'Head of Recruitment');
   const drawer = await scout.evaluate(() => { const s = document.querySelector('nav.sidebar'); const cs = getComputedStyle(s); return { dir: cs.flexDirection, w: Math.round(s.getBoundingClientRect().width) }; });
   if (drawer.dir !== 'column' || drawer.w < 200) fail(`N5: the drawer must be a column (${JSON.stringify(drawer)})`);
   say('N5: the drawer is a vertical list, not a row');
-  await scout.click('nav.sidebar button.nav-section:has-text("Recruitment")');
+  // P2.5 closure: in the drawer a section tap EXPANDS the section (its pages
+  // are why the drawer was opened); a page tap navigates and closes it.
+  const recBtn = scout.locator('nav.sidebar button.nav-section:has-text("Recruitment")');
+  if ((await recBtn.getAttribute('aria-expanded')) !== 'true') await recBtn.click(); // this context opened Recruitment earlier; a tap toggles
   await scout.waitForTimeout(300);
-  if ((await scout.locator('nav.sidebar.drawer-open').count()) !== 0) fail('N5: drawer closes after navigation');
+  if ((await scout.locator('nav.sidebar.drawer-open').count()) !== 1) fail('N5: a section tap in the drawer expands rather than leaves');
+  if ((await scout.locator('nav.sidebar .nav-sec.open .nav-child').count()) < 20) fail('N5: the expanded section lists its pages in the drawer');
+  await scout.click('nav.sidebar .nav-sec.open .nav-child:text-is("Players")');
+  await scout.waitForTimeout(300);
+  if ((await scout.locator('nav.sidebar.drawer-open').count()) !== 0) fail('N5: drawer closes after choosing a page');
   if (!(await title(scout)).includes('Players')) fail('N5: drawer navigation');
-  say('N5: narrow-width drawer opens, navigates, closes — active state obvious');
+  say('N5: narrow-width drawer opens, a section tap expands its pages, a page tap navigates and closes — active state obvious');
   const strip = await scout.locator('nav.subnav button').allInnerTexts();
   if (!strip.length || strip.length > 7 || !strip.includes('Players') || strip.includes('Recruitment Rooms')) fail(`N5: the phone strip lists the active GROUP only (${strip.join('|')})`);
   say(`N5: the phone strip lists the Discover group only (${strip.join(' · ')}), never the whole section`);
@@ -311,8 +318,8 @@ const lead = await clubLogin(leadCtx, 'Maria Keane', 'Head of Recruitment');
   // N9: a deep link on a phone lands on the right group strip.
   await goHash(scout, 'rooms');
   const pipe = await scout.locator('nav.subnav button').allInnerTexts();
-  if (!pipe.includes('Recruitment Rooms') || !pipe.includes('Player Requests') || pipe.includes('Players')) fail(`N9: phone deep link → Pipeline strip (${pipe.join('|')})`);
-  if (!(await scout.locator('nav.subnav button.active').innerText()).includes('Recruitment Rooms')) fail('N9: active page marked in the strip');
+  if (!pipe.includes('Rooms') || !pipe.includes('Requests') || pipe.includes('Players')) fail(`N9: phone deep link → Pipeline strip (${pipe.join('|')})`);
+  if ((await scout.locator('nav.subnav button.active').innerText()).trim() !== 'Rooms') fail('N9: active page marked in the strip');
   say('N9: a phone deep link to Rooms shows the Pipeline strip with Rooms active');
   await scout.setViewportSize({ width: 1280, height: 800 });
 }
@@ -453,6 +460,227 @@ const grassCtx = await browser.newContext({ viewport: { width: 1280, height: 800
   say(`N8: all ${toured + 1} legacy T&S destinations remain reachable through the grouped navigation`);
 }
 
+// ===================== N13 — Pipeline on a phone: primaries + More (closure)
+{
+  await scout.setViewportSize({ width: 390, height: 844 });
+  await goHash(scout, 'recruitment');
+  await scout.waitForTimeout(300);
+  const strip = async () => scout.evaluate(() => {
+    const n = document.querySelector('nav.subnav');
+    const tabs = [...n.querySelectorAll(':scope > button:not(.subnav-more)')].map((b) => ({ t: b.textContent.trim(), active: b.classList.contains('active'), right: Math.round(b.getBoundingClientRect().right), h: Math.round(b.getBoundingClientRect().height) }));
+    const more = n.querySelector('.subnav-more');
+    return { tabs, more: more ? { t: more.textContent.replace(/\s+/g, ' ').trim(), expanded: more.getAttribute('aria-expanded'), active: more.classList.contains('active'), label: more.getAttribute('aria-label') } : null,
+      clip: n.scrollWidth > n.clientWidth, h: Math.round(n.getBoundingClientRect().height), docOverflow: document.documentElement.scrollWidth > innerWidth, font: getComputedStyle(n.querySelector('button')).fontSize };
+  });
+  let m = await strip();
+  if (m.tabs.map((x) => x.t).join('|') !== 'Cases|Rooms|Requests') fail(`N13: Pipeline primaries (${m.tabs.map((x) => x.t).join('|')})`);
+  if (!m.more || !/More/.test(m.more.t) || !/3/.test(m.more.t)) fail(`N13: an explicit More control announces the remaining pages (${JSON.stringify(m.more)})`);
+  if (m.clip || m.docOverflow) fail(`N13: the strip must not clip or overflow (${JSON.stringify(m)})`);
+  if (m.tabs.some((x) => x.right > 390) || m.h > 48) fail(`N13: every tab fully on screen and the strip compact (${JSON.stringify(m)})`);
+  if (parseFloat(m.font) < 13 || m.tabs.some((x) => x.h < 40)) fail(`N13: readable labels and 40px targets (${m.font}, ${m.tabs.map((x) => x.h)})`);
+  if (!m.tabs[0].active) fail('N13: Cases active on arrival');
+  say(`N13: Pipeline at 390px — Cases · Rooms · Requests visible, "More 3" for the rest; ${m.h}px strip, no clipping, no document overflow`);
+  await scout.click('nav.subnav button:text-is("Rooms")');
+  await scout.waitForTimeout(300);
+  if ((await title(scout)) !== 'Recruitment / Recruitment Rooms') fail(`N13: Rooms tab (${await title(scout)})`);
+  say('N13: a primary tab is one tap — Rooms');
+  await scout.click('nav.subnav .subnav-more');
+  await scout.waitForTimeout(150);
+  const menu = await scout.evaluate(() => { const mn = document.querySelector('nav.subnav [role="menu"]'); return mn ? { items: [...mn.querySelectorAll('[role="menuitem"]')].map((b) => b.textContent.trim()), focused: document.activeElement?.getAttribute('role'), expanded: document.querySelector('.subnav-more').getAttribute('aria-expanded') } : null; });
+  if (!menu || menu.expanded !== 'true' || menu.items.join('|') !== 'Opportunities|Campaigns|Signings & Outcomes') fail(`N13: More menu (${JSON.stringify(menu)})`);
+  if (menu.focused !== 'menuitem') fail('N13: focus moves into the menu when it opens');
+  say('N13: More opens a real menu (aria-expanded, role=menu) listing Opportunities · Campaigns · Signings & Outcomes, focus inside');
+  await scout.keyboard.press('Escape');
+  await scout.waitForTimeout(100);
+  if ((await scout.locator('nav.subnav [role="menu"]').count()) !== 0) fail('N13: Escape closes the menu');
+  if (!(await scout.evaluate(() => document.activeElement?.classList.contains('subnav-more')))) fail('N13: Escape returns focus to More');
+  say('N13: Escape closes the menu and returns focus to More');
+  await scout.click('nav.subnav .subnav-more');
+  await scout.keyboard.press('ArrowDown');
+  await scout.keyboard.press('Enter'); // Campaigns
+  await scout.waitForTimeout(400);
+  if ((await title(scout)) !== 'Recruitment / Campaigns') fail(`N13: keyboard selection from More (${await title(scout)})`);
+  m = await strip();
+  if (!m.more.active || !/Campaigns/.test(m.more.t) || !/More/.test(m.more.label) || m.tabs.some((x) => x.active)) fail(`N13: active state when the page is inside More (${JSON.stringify(m)})`);
+  if ((await scout.locator('nav.subnav [role="menu"]').count()) !== 0) fail('N13: the menu closes on selection');
+  if (!(await scout.evaluate(() => document.activeElement?.classList.contains('subnav-more')))) fail('N13: focus is not stranded after selection');
+  say('N13: selecting Campaigns closes the menu, the More control reads "Campaigns ▾" with the active state (its accessible name still says More), focus stays on More');
+  await scout.reload();
+  await scout.waitForSelector('nav.subnav', { timeout: 15000 });
+  await scout.waitForTimeout(400);
+  if ((await title(scout)) !== 'Recruitment / Campaigns' || !(await strip()).more.active) fail('N13: refresh keeps the More-held page active');
+  say('N13: direct refresh on a More-held page keeps the page and the active state');
+  // Browser history: in-app clicks replace the hash (M15-Nav: Back leaves the
+  // workspace, it does not replay every tab), so the history walk uses the
+  // three deep links — Cases, Rooms, Campaigns — and checks the strip follows.
+  await goHash(scout, 'recruitment'); await goHash(scout, 'rooms'); await goHash(scout, 'campaigns');
+  if (!(await strip()).more.active) fail('N13: deep link to a More-held page marks More active');
+  await scout.goBack(); await scout.waitForTimeout(400);
+  if ((await title(scout)) !== 'Recruitment / Recruitment Rooms' || !(await strip()).tabs[1].active || (await strip()).more.active) fail(`N13: back → Rooms (${await title(scout)})`);
+  await scout.goBack(); await scout.waitForTimeout(400);
+  if ((await title(scout)) !== 'Recruitment / Cases' || !(await strip()).tabs[0].active) fail(`N13: back → Cases (${await title(scout)})`);
+  await scout.goForward(); await scout.waitForTimeout(400);
+  if ((await title(scout)) !== 'Recruitment / Recruitment Rooms' || !(await strip()).tabs[1].active) fail('N13: forward → Rooms with the tab active');
+  await scout.goForward(); await scout.waitForTimeout(400);
+  if ((await title(scout)) !== 'Recruitment / Campaigns' || !(await strip()).more.active) fail('N13: forward → Campaigns with More active');
+  say('N13: back / forward across Cases, Rooms and Campaigns keep the strip, the tab and the More active state right');
+  // Outside click closes the menu.
+  await scout.click('nav.subnav .subnav-more');
+  await scout.click('h1.page-title');
+  await scout.waitForTimeout(150);
+  if ((await scout.locator('nav.subnav [role="menu"]').count()) !== 0) fail('N13: outside click closes the menu');
+  say('N13: an outside click closes the menu');
+  // The More menu goes through the same unsaved-change guard as every exit.
+  await goHash(scout, 'briefs');
+  await scout.click('button:has-text("New brief")');
+  await scout.waitForSelector('[aria-label="Recruitment brief criteria"]', { timeout: 15000 });
+  await scout.fill('[aria-label="Recruitment brief criteria"] input', 'Unsaved phone brief');
+  const dialogs = [];
+  const onDialog = async (d) => { dialogs.push(d.message()); await d.dismiss(); };
+  scout.on('dialog', onDialog);
+  await scout.click('nav.subnav .subnav-more');
+  await scout.click('nav.subnav [role="menuitem"]:has-text("Second Look")');
+  await scout.waitForTimeout(600);
+  scout.off('dialog', onDialog);
+  if (dialogs.length !== 1 || !/unsaved/i.test(dialogs[0])) fail(`N13: More navigation must ask about unsaved changes (${dialogs.length})`);
+  if (!(await scout.locator('[aria-label="Recruitment brief criteria"]').count())) fail('N13: declining kept the form');
+  say('N13: navigating from the More menu goes through the unsaved-change guard — declining keeps the form');
+  scout.once('dialog', (d) => d.accept());
+  await goHash(scout, 'search');
+}
+
+// ============================ N14 — 360px: every group fits, nothing clipped
+{
+  await lead.setViewportSize({ width: 360, height: 740 });
+  const groupsSeen = [];
+  const ALL_IDS = ['feed', 'search', 'shortlist', 'filmroom', 'insight', 'recruitment', 'rooms', 'requests', 'opportunities', 'campaigns', 'outcomes',
+    'assessments', 'video', 'trials', 'trialdays', 'briefs', 'matching', 'watchlists', 'secondlook', 'nobodymissed', 'dashboard', 'funnel', 'ledger',
+    'planner', 'coverage', 'calibration', 'fixtures', 'network', 'representation', 'organisation', 'verification', 'imports', 'budgets', 'plan', 'reputation', 'messages'];
+  for (const id of ALL_IDS) {
+    await goHash(lead, id);
+    const r = await lead.evaluate(() => {
+      const n = document.querySelector('nav.subnav');
+      if (!n) return null;
+      const btns = [...n.querySelectorAll(':scope > button')];
+      return { n: btns.length, clip: n.scrollWidth > n.clientWidth, off: btns.filter((b) => b.getBoundingClientRect().right > innerWidth + 0.5 || b.getBoundingClientRect().left < -0.5).map((b) => b.textContent.trim()), doc: document.documentElement.scrollWidth > innerWidth, more: !!n.querySelector('.subnav-more'), h: Math.round(n.getBoundingClientRect().height), labels: btns.map((b) => b.textContent.replace(/\s+/g, ' ').trim()) };
+    });
+    if (r && (r.clip || r.off.length || r.doc || r.h > 48)) fail(`N14: ${id} at 360px (${JSON.stringify(r)})`);
+    if (r) groupsSeen.push(r.labels.join(' · '));
+  }
+  say(`N14: at 360px, every one of ${ALL_IDS.length} pages (lead persona, every section): no strip clips, no tab is off screen, no document overflow — ${[...new Set(groupsSeen)].join(' | ')}`);
+  // Breakpoint: 900px shows the phone shell, 901px the desktop shell — no in-between state.
+  await goHash(lead, 'recruitment');
+  await lead.setViewportSize({ width: 900, height: 800 }); await lead.waitForTimeout(300);
+  const at900 = await lead.evaluate(() => ({ strip: getComputedStyle(document.querySelector('nav.subnav')).display, burger: getComputedStyle(document.querySelector('.nav-hamburger')).display, fixed: getComputedStyle(document.querySelector('nav.sidebar')).position }));
+  await lead.setViewportSize({ width: 901, height: 800 }); await lead.waitForTimeout(300);
+  const at901 = await lead.evaluate(() => ({ strip: document.querySelector('nav.subnav') ? getComputedStyle(document.querySelector('nav.subnav')).display : 'none', burger: getComputedStyle(document.querySelector('.nav-hamburger')).display, fixed: getComputedStyle(document.querySelector('nav.sidebar')).position, accordion: document.querySelectorAll('nav.sidebar .nav-sec.open .nav-child').length }));
+  if (at900.strip === 'none' || at900.burger === 'none' || at900.fixed !== 'fixed') fail(`N14: 900px is the phone shell (${JSON.stringify(at900)})`);
+  if (at901.strip !== 'none' || at901.burger !== 'none' || at901.fixed === 'fixed' || at901.accordion < 20) fail(`N14: 901px is the desktop shell with the accordion (${JSON.stringify(at901)})`);
+  say('N14: one breakpoint — 900px is the phone shell (drawer + strip), 901px the desktop shell (accordion, no strip)');
+  await lead.setViewportSize({ width: 1280, height: 800 });
+  await scout.setViewportSize({ width: 1280, height: 800 });
+}
+
+// ====================== N15 — task-finding proof: seven core destinations
+// From a FRESH login, with nothing pre-expanded, can a new user reach each
+// destination through visible controls? Desktop accordion, collapsed rail,
+// and the 390px drawer. No hash entry; interactions counted.
+const TASKS = [
+  ['Discover', 'Recruitment', 'Players', 'Recruitment / Players'],
+  ['Watchlists', 'Recruitment', 'Dynamic Watchlists', 'Recruitment / Dynamic Watchlists'],
+  ['Recruitment Cases', 'Recruitment', 'Cases', 'Recruitment / Cases'],
+  ['Recruitment Rooms', 'Recruitment', 'Recruitment Rooms', 'Recruitment / Recruitment Rooms'],
+  ['Second Look', 'Recruitment', 'Second Look', 'Recruitment / Second Look'],
+  ['Trials', 'Recruitment', 'Trials & Reports', 'Recruitment / Trials & Reports'],
+  ['Analytics', 'Recruitment', 'Director Dashboard', 'Recruitment / Director Dashboard'],
+];
+const matrix = {};
+// Fresh state for every task: reload on Home. Accordion state is not persisted,
+// so nothing a previous task expanded survives; the session and the collapse
+// preference do.
+const fresh = async (p) => { await goHash(p, 'feed'); await p.reload(); await p.waitForSelector('nav.sidebar', { timeout: 15000 }); await p.waitForTimeout(500); };
+{
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const p = await clubLogin(ctx, 'Noa Winter', 'First-Team Scout');
+  for (const [task, section, page, expect] of TASKS) {
+    await fresh(p); // Home, fresh state: the accordion has nothing but Home open
+    if ((await p.locator('nav.sidebar .nav-sec.open .nav-child').count()) !== 0) fail(`N15: ${task}: Recruitment is pre-expanded on Home`);
+    let n = 0;
+    await p.click(`nav.sidebar button.nav-section:has-text("${section}")`); n++;
+    await p.waitForTimeout(250);
+    if ((await title(p)) !== expect) {
+      const child = p.locator(`nav.sidebar .nav-sec.open .nav-child:text-is("${page}")`);
+      if (!(await child.isVisible())) fail(`N15 desktop: ${task}: "${page}" is not visible under Recruitment after opening it`);
+      await child.click(); n++;
+      await p.waitForTimeout(250);
+    }
+    if ((await title(p)) !== expect) fail(`N15 desktop: ${task}: landed on "${await title(p)}"`);
+    if (!(await p.locator('nav.sidebar button.nav-section.active').innerText()).includes(section)) fail(`N15 desktop: ${task}: parent not active`);
+    matrix[task] = { desktop: n };
+  }
+  say(`N15 desktop: all seven destinations found from a fresh login — ${TASKS.map(([t]) => `${t} ${matrix[t].desktop}`).join(', ')} interactions`);
+  await ctx.close();
+}
+{
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const p = await clubLogin(ctx, 'Noa Winter', 'First-Team Scout');
+  await p.click('button.nav-collapse'); await p.waitForTimeout(200);
+  for (const [task, section, page, expect] of TASKS) {
+    await fresh(p);
+    let n = 0;
+    await p.click(`nav.sidebar button[aria-label="${section}"]`); n++;
+    await p.waitForTimeout(200);
+    const item = p.locator(`nav.sidebar .nav-flyout [role="menuitem"]:text-is("${page}")`);
+    if (!(await item.isVisible())) fail(`N15 collapsed: ${task}: "${page}" not in the flyout`);
+    await item.click(); n++;
+    await p.waitForTimeout(250);
+    if ((await title(p)) !== expect) fail(`N15 collapsed: ${task}: landed on "${await title(p)}"`);
+    matrix[task].collapsed = n;
+  }
+  say(`N15 collapsed rail: all seven found through the flyout — ${TASKS.map(([t]) => `${t} ${matrix[t].collapsed}`).join(', ')} interactions`);
+  await ctx.close();
+}
+{
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const p = await clubLogin(ctx, 'Noa Winter', 'First-Team Scout');
+  for (const [task, section, page, expect] of TASKS) {
+    await fresh(p);
+    let n = 0;
+    await p.click('button.nav-hamburger'); n++;
+    await p.waitForTimeout(250);
+    const sec = p.locator(`nav.sidebar button.nav-section:has-text("${section}")`);
+    await sec.click(); n++;
+    await p.waitForTimeout(250);
+    if ((await p.locator('nav.sidebar.drawer-open').count()) !== 1) fail(`N15 mobile: ${task}: tapping a section in the drawer must expand it, not leave the drawer`);
+    if ((await sec.getAttribute('aria-expanded')) !== 'true') fail(`N15 mobile: ${task}: section button announces expansion`);
+    const child = p.locator(`nav.sidebar .nav-sec.open .nav-child:text-is("${page}")`);
+    if (!(await child.isVisible())) fail(`N15 mobile: ${task}: "${page}" not visible in the expanded drawer`);
+    const box = await child.boundingBox();
+    if (!box || box.height < 32) fail(`N15 mobile: ${task}: tap target ${box?.height}px`);
+    await child.click(); n++;
+    await p.waitForTimeout(300);
+    if ((await p.locator('nav.sidebar.drawer-open').count()) !== 0) fail(`N15 mobile: ${task}: drawer closes after choosing a page`);
+    if ((await title(p)) !== expect) fail(`N15 mobile: ${task}: landed on "${await title(p)}"`);
+    if (await p.evaluate(() => document.documentElement.scrollWidth > innerWidth)) fail(`N15 mobile: ${task}: horizontal overflow`);
+    matrix[task].mobile = n;
+  }
+  say(`N15 mobile (390px): all seven found through the drawer with no blind swipe — ${TASKS.map(([t]) => `${t} ${matrix[t].mobile}`).join(', ')} interactions`);
+  console.log('   task-finding matrix: ' + JSON.stringify(matrix));
+  await ctx.close();
+}
+
+// ======================= N16 — accessibility tree: groups are not links
+{
+  const tree = await scout.evaluate(() => {
+    const groups = [...document.querySelectorAll('nav.sidebar .nav-sec.open .nav-group')].map((g) => ({ role: g.getAttribute('role'), label: g.getAttribute('aria-label'), heading: g.querySelector('.nav-group-label')?.tagName, headingRole: g.querySelector('.nav-group-label')?.getAttribute('role'), headingInteractive: !!g.querySelector('.nav-group-label')?.closest('button, a, [role="button"], [role="link"]') }));
+    const clickableDiscover = [...document.querySelectorAll('nav.sidebar button, nav.sidebar a')].filter((b) => b.textContent.trim() === 'Discover').length;
+    return { groups, clickableDiscover };
+  });
+  if (tree.groups.length < 5 || tree.groups.some((g) => g.role !== 'group' || !g.label || g.heading !== 'DIV' || g.headingRole || g.headingInteractive)) fail(`N16: group semantics (${JSON.stringify(tree.groups)})`);
+  if (tree.clickableDiscover !== 0) fail('N16: "Discover" must not be rendered as a button or link');
+  say('N16: groups are role="group" containers with names; group headings are plain text, never buttons or links');
+}
+
 // ============================== N12 — server authorization unaffected
 {
   const r1 = await fetch(`${API}/admin/verification/queue`);
@@ -485,5 +713,5 @@ const grassCtx = await browser.newContext({ viewport: { width: 1280, height: 800
 }
 
 await browser.close();
-console.log(`\nnavLive: ${passed} checks passed — N1–N12 complete`);
+console.log(`\nnavLive: ${passed} checks passed — N1–N16 complete`);
 process.exit(0);

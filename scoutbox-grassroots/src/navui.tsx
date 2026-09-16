@@ -18,7 +18,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type Reac
 import type { ScreenId } from './App';
 import {
   INBOX_ITEM, MAX_SHORTCUTS, type NavContext, type NavItem, type NavLocation, type NavSection,
-  allItems, filterSections, groupSiblings, groupedChildren, searchNav,
+  allItems, filterSections, groupedChildren, searchNav, stripLayout,
 } from './nav';
 import { Icon } from './icons';
 import { t } from './i18n';
@@ -27,6 +27,20 @@ type TKey = Parameters<typeof t>[0];
 const tr = (key: string) => t(key as TKey);
 
 export interface Brand { short: string; long: string }
+
+/** ≤ 900px: the sidebar is a drawer. Tapping a multi-page section there
+ *  expands it (the pages are the point of opening a drawer) rather than
+ *  navigating away and closing it. Desktop behaviour is unchanged. */
+function useIsPhoneShell(): boolean {
+  const [phone, setPhone] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 900px)');
+    const on = () => setPhone(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  return phone;
+}
 
 // ------------------------------------------------------------------ Sidebar
 export function Sidebar({
@@ -78,6 +92,7 @@ export function Sidebar({
   useEffect(() => { if (!collapsed) setFlyout(null); }, [collapsed]);
 
   const go = useCallback((id: ScreenId) => { onNavigate(id); onCloseDrawer(); setFlyout(null); }, [onNavigate, onCloseDrawer]);
+  const phone = useIsPhoneShell();
 
   return (
     <>
@@ -103,6 +118,7 @@ export function Sidebar({
             onFlyout={(want) => setFlyout(want ? s.id : null)}
             count={badges[s.id]}
             onNavigate={go}
+            expandOnSelect={phone && drawerOpen}
           />
         ))}
 
@@ -150,9 +166,10 @@ export function Sidebar({
 
 /** One section: its button, its chevron, and — when expanded or flown out —
  *  its grouped children. */
-function SectionRow({ section: s, active, activeItemId, expanded, onToggle, collapsed, flyoutOpen, onFlyout, count, onNavigate }: {
+function SectionRow({ section: s, active, activeItemId, expanded, onToggle, collapsed, flyoutOpen, onFlyout, count, onNavigate, expandOnSelect }: {
   section: NavSection; active: boolean; activeItemId: ScreenId | null; expanded: boolean; onToggle: () => void;
   collapsed: boolean; flyoutOpen: boolean; onFlyout: (open: boolean) => void; count?: number; onNavigate: (id: ScreenId) => void;
+  expandOnSelect?: boolean;
 }) {
   const label = tr(s.labelKey);
   const multi = s.children.length > 1;
@@ -173,9 +190,11 @@ function SectionRow({ section: s, active, activeItemId, expanded, onToggle, coll
     if (flyoutOpen) flyRef.current?.querySelector<HTMLButtonElement>('button[role="menuitem"]')?.focus();
   }, [flyoutOpen]);
 
+  // A group is a labelled container, not a destination: role="group" with its
+  // name, and a plain (non-interactive) heading — never a button or a link.
   const children = (role: 'menuitem' | undefined) => groups.map((g) => (
-    <div key={g.id ?? 'all'} className="nav-group">
-      {g.labelKey && <div className="nav-group-label">{tr(g.labelKey)}</div>}
+    <div key={g.id ?? 'all'} className="nav-group" role={g.labelKey ? 'group' : undefined} aria-label={g.labelKey ? tr(g.labelKey) : undefined}>
+      {g.labelKey && <div className="nav-group-label" aria-hidden="true">{tr(g.labelKey)}</div>}
       {g.children.map((c) => (
         <button
           key={c.id}
@@ -226,7 +245,8 @@ function SectionRow({ section: s, active, activeItemId, expanded, onToggle, coll
           className={`nav-section ${active ? 'active' : ''}`}
           aria-current={active ? 'page' : undefined}
           aria-label={label}
-          onClick={() => onNavigate(s.children[0].id)}
+          aria-expanded={expandOnSelect && multi ? expanded : undefined}
+          onClick={() => (expandOnSelect && multi ? onToggle() : onNavigate(s.children[0].id))}
         >
           <Icon name={s.icon} />
           <span className="grow">{label}</span>
@@ -258,35 +278,102 @@ function SectionRow({ section: s, active, activeItemId, expanded, onToggle, coll
 // ------------------------------------------------------------- SecondaryNav
 // P2.5: phone width only (CSS hides it above 900px, where the sidebar lists
 // the same pages). It shows the active GROUP's siblings — never the whole
-// section — so it fits in one row. Keyboard: roving arrows.
+// section. P2.5 closure: a group longer than one row shows its primary pages
+// and puts the rest behind an explicit "More" menu (`stripLayout`), so no
+// page is discoverable only by scrolling a clipped strip. When the current
+// page sits in the menu, the More control carries its name and the active
+// state. Keyboard: roving arrows across the tabs; the menu is a real menu.
 export function SecondaryNav({ section, activeItemId, onNavigate }: {
   section: NavSection;
   activeItemId: ScreenId | null;
   onNavigate: (id: ScreenId) => void;
 }) {
   const ref = useRef<HTMLElement>(null);
-  const items: NavItem[] = groupSiblings(section, activeItemId);
-  if (items.length <= 1) return null;
+  const moreRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const { visible, overflow, activeInOverflow } = stripLayout(section, activeItemId);
+  const label = (c: NavItem) => tr(c.shortKey ?? c.labelKey);
+
+  useEffect(() => { setOpen(false); }, [activeItemId, section.id]);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    menuRef.current?.querySelector<HTMLButtonElement>('button[role="menuitem"]')?.focus();
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+
+  if (visible.length + overflow.length <= 1) return null;
+
   const onKey = (e: KeyboardEvent) => {
     if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
-    const btns = Array.from(ref.current?.querySelectorAll<HTMLButtonElement>('button') ?? []);
+    const btns = Array.from(ref.current?.querySelectorAll<HTMLButtonElement>(':scope > button') ?? []);
     const i = btns.findIndex((b) => b === document.activeElement);
     if (i === -1) return;
     e.preventDefault();
     btns[(i + (e.key === 'ArrowRight' ? 1 : btns.length - 1)) % btns.length]?.focus();
   };
+  const onMenuKey = (e: KeyboardEvent) => {
+    const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]') ?? []);
+    const i = items.findIndex((b) => b === document.activeElement);
+    if (e.key === 'Escape') { e.preventDefault(); setOpen(false); moreRef.current?.focus(); return; }
+    if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length]?.focus(); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length]?.focus(); }
+  };
+  const pick = (id: ScreenId) => {
+    setOpen(false);
+    onNavigate(id);
+    // Focus must not be stranded on a removed menu: the More control if it is
+    // still there, otherwise the page title.
+    requestAnimationFrame(() => (moreRef.current ?? document.querySelector<HTMLElement>('h1.page-title'))?.focus());
+  };
+
   return (
     <nav className="subnav" aria-label={t('navsec.inThisArea')} ref={ref} onKeyDown={onKey}>
-      {items.map((c) => (
+      {visible.map((c) => (
         <button
           key={c.id}
           className={activeItemId === c.id ? 'active' : ''}
           aria-current={activeItemId === c.id ? 'page' : undefined}
           onClick={() => onNavigate(c.id)}
         >
-          {tr(c.labelKey)}
+          {label(c)}
         </button>
       ))}
+      {overflow.length > 0 && (
+        <button
+          ref={moreRef}
+          className={`subnav-more ${activeInOverflow ? 'active' : ''}`}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-controls={`subnav-more-${section.id}`}
+          aria-label={activeInOverflow ? `${t('navsec.moreAria')} — ${tr(activeInOverflow.labelKey)}` : `${t('navsec.moreAria')} (${overflow.length})`}
+          onClick={() => setOpen((o) => !o)}
+          onKeyDown={(e) => { if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); } }}
+        >
+          {/* Current page inside the menu: the control shows THAT page's name
+              with the active state and the menu caret; its accessible name
+              still says it is the More menu. Otherwise "More" + a count. */}
+          {activeInOverflow ? <b>{label(activeInOverflow)}</b> : <>{t('navsec.more')} <span className="subnav-more-count">{overflow.length}</span></>}
+          <span className="subnav-caret" aria-hidden="true">▾</span>
+        </button>
+      )}
+      {open && (
+        <div id={`subnav-more-${section.id}`} ref={menuRef} className="subnav-menu" role="menu" aria-label={t('navsec.moreMenu')} onKeyDown={onMenuKey}>
+          {overflow.map((c) => (
+            <button
+              key={c.id}
+              role="menuitem"
+              className={`subnav-menu-item ${activeItemId === c.id ? 'active' : ''}`}
+              aria-current={activeItemId === c.id ? 'page' : undefined}
+              onClick={() => pick(c.id)}
+            >
+              {tr(c.labelKey)}
+            </button>
+          ))}
+        </div>
+      )}
     </nav>
   );
 }
@@ -306,7 +393,7 @@ export function TopBar({ title, crumb, live, unread, bellOpen, onToggleBell, onR
   return (
     <header className="topbar">
       <button className="nav-hamburger" aria-label={t('navsec.openMenu')} onClick={onOpenDrawer}><Icon name="menu" /></button>
-      <h1 className="page-title">
+      <h1 className="page-title" tabIndex={-1}>
         {crumb && <><span className="crumb">{crumb}</span><span className="crumb-sep"> / </span></>}
         {title}
       </h1>

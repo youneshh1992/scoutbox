@@ -48,7 +48,7 @@ shortcuts. The T&S console keeps a smaller local `NAV_GROUPS` table in its
 |---|---|---|
 | Home | — | Home `feed` |
 | Recruitment | Discover | Players `search` · Shortlist `shortlist` · Film Room `filmroom` · Scouting Insight `insight` |
-| | Pipeline | Pipeline `recruitment` · Recruitment Rooms `rooms` · Player Requests `requests` · Opportunities `opportunities` · Campaigns `campaigns` · Signings & Outcomes `outcomes` |
+| | Pipeline | Cases `recruitment` (labelled "Pipeline" until the P2.5 closure) · Recruitment Rooms `rooms` · Player Requests `requests` · Opportunities `opportunities` · Campaigns `campaigns` · Signings & Outcomes `outcomes` |
 | | Evidence | Assessments `assessments` · Evidence & Video `video` · Trials & Reports `trials` · Trial Days `trialdays` |
 | | Intelligence | Recruitment Briefs `briefs` · Player Matching `matching` · Dynamic Watchlists `watchlists` · Second Look `secondlook` · Nobody Missed `nobodymissed` |
 | | Analytics | Director Dashboard `dashboard` · Funnel `funnel` · Discovery Ledger `ledger` |
@@ -175,11 +175,42 @@ navigation into a section re-opens it. Collapsed icon rail (64px, persisted
 in `sb-nav-collapsed`): a multi-page section opens a **flyout menu**
 (`role="menu"`, arrow keys, Escape returns focus). No tab strip: the
 sidebar carries the pages. ≤ 900px: the sidebar is an off-canvas drawer
-(a column — the Grassroots row-drawer defect is closed), and the **phone
-strip** lists only the active group's siblings (≤ 7) so it fits in one row.
+(a column — the Grassroots row-drawer defect is closed); a section tap in
+the drawer expands the section, a page tap navigates and closes it. The
+**phone strip** lists only the active group's pages: a group of up to four
+whole, a longer group as its primary pages plus an explicit **More** menu
+(see §11a).
 The top bar is one row at every width (54px on a phone, 58px on a
 desktop); Report / Block shrinks to its glyph under 640px with the same
 accessible name. The 640px-height regression guard remains.
+
+## 11a. Pipeline (and every long group) on a phone — the discoverability invariant
+
+Desktop: the sidebar accordion lists every page of the section, grouped;
+there is no strip. Phone (≤ 900px): `stripLayout(section, itemId)` in
+`nav.ts` derives the strip from the same configuration as the accordion:
+
+- a group of up to `STRIP_MAX_VISIBLE` (4) pages is shown whole;
+- a longer group shows the pages flagged `primary` (Pipeline: Cases · Rooms
+  · Requests; Intelligence: Briefs · Matching; Organisation: Staff · Verification) — or, with no
+  flag, its first three — and puts the rest behind **More**;
+- More is a button with `aria-haspopup="menu"`, `aria-expanded`, a count,
+  and a `role="menu"` of `menuitem`s (ArrowUp/Down, Escape returns focus,
+  outside click closes, closes on selection, focus returned to More);
+- when the current page is inside More, the control reads
+  the current page's name with the menu caret and the active state (its accessible name still says More), so a selection is never
+  invisible;
+- short strip labels come from `shortKey` (`navshort.*`, EN/FR); the full
+  label is used everywhere else;
+- navigation from the strip and from More goes through the same guarded
+  `setScreen` as the sidebar (unsaved-change guard included).
+
+**Invariant (asserted).** For every role and every group the strip's pages
+(visible ∪ More) are exactly the accordion's pages, in order, with the
+active page marked in exactly one place (navConfig). At 390px and 360px no
+strip clips, no tab is off screen, no document scrolls sideways, and the
+strip is ≤ 48px tall (navLive N13/N14). 900px is the phone shell, 901px the
+desktop shell — one breakpoint, no intermediate state.
 
 ## 12. Accessibility
 
@@ -240,6 +271,20 @@ plus one disclosure.
 - The demo builds report a root verification level for every persona, so
   role-hiding is only observable against the live backend (covered by
   navLive); demo spotchecks exercise mechanics, not role filtering.
-- The phone strip for the Pipeline group (6–7 pages) still scrolls
-  horizontally by 2–3 tabs at 390px; the whole-section strip it replaced
-  hid 12–13.
+- (closed) The Pipeline strip no longer scrolls: primaries + More (§11a).
+
+## 17. Demo / review artifacts
+
+| artifact | built by | output | tracked | stamp | consumers |
+|---|---|---|---|---|---|
+| `scoutbox-club-demo.html`, `scoutbox-grassroots-demo.html`, `scoutbox-admin-demo.html`, `scoutbox-player-demo.html` | `node e2e/buildDemos.mjs` (vite `VITE_DEMO=1` / expo `EXPO_PUBLIC_DEMO=1` + `e2e/inline.mjs`) | `e2e/dist/` | no (untracked; nothing becomes dirty by building or testing) | badge "Interactive demo · build <sha> · <date>", `<meta name="sb-source-fingerprint">`, `<meta name="sb-build-sha">` | the demo spotchecks (`*DemoSpotcheck`, `uiSpotcheck`, `crosstab`, `demoOffline`, `demoHostOrdering`) via `demoHost.mjs`; the published review pages |
+| `scoutbox-connected-demo.html` | `node e2e/buildConnectedDemo.mjs` (after buildDemos) | `e2e/dist/` | no | as above | the connected review page |
+| Live bundles `dist-live*` | each live suite builds its own with the API URL baked in | per app | no | — | the live suites |
+
+**Stale-artifact prevention.** `e2e/demoFreshness.test.mjs` recomputes each
+client's source fingerprint (sha256 over `src/**` + package files + the two
+build scripts — content, never timestamps) and fails when a bundle's stamp
+differs or a bundle is missing. It is part of the browser battery, so a
+navigation rebuild that forgets `buildDemos.mjs` is caught before review.
+Published review pages are updated from `e2e/dist` after the battery is
+green; their build chip names the source commit.

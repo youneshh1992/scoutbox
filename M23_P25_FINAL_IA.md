@@ -11,7 +11,7 @@ are unchanged from the P2 tip; only the arrangement changed.
 Home                                              #/feed
 Recruitment
   Discover      Players · Shortlist · Film Room · Scouting Insight
-  Pipeline      Pipeline · Recruitment Rooms · Player Requests · Opportunities · Campaigns · Signings & Outcomes
+  Pipeline      Cases · Recruitment Rooms · Player Requests · Opportunities · Campaigns · Signings & Outcomes
   Evidence      Assessments · Evidence & Video · Trials & Reports · Trial Days
   Intelligence  Recruitment Briefs · Player Matching · Dynamic Watchlists · Second Look · Nobody Missed
   Analytics     Director Dashboard · Funnel · Discovery Ledger
@@ -39,7 +39,7 @@ Home                                              #/feed
 Players            Squad & Match Days · Coaches · Friendlies · Fixtures
 Recruitment
   Discover      Players · Shortlist · Film Room · Scouting Insight
-  Pipeline      Pipeline · Recruitment Rooms · Player Requests · Opportunities · Campaigns · Open Days · Signings & Outcomes
+  Pipeline      Cases · Recruitment Rooms · Player Requests · Opportunities · Campaigns · Open Days · Signings & Outcomes
   Evidence      Assessments · Evidence & Video · Trials & Reports · Trial Days
   Intelligence  Recruitment Briefs · Player Matching · Dynamic Watchlists · Second Look · Nobody Missed
   Analytics     Director Dashboard · Funnel · Discovery Ledger
@@ -128,3 +128,57 @@ map to screen ids via `NOTIFICATION_SCREEN`. Player: `/football?tab=boxcam`,
 | Grassroots sections | 6 | 4 |
 | Player "You" sections | 14 | 3 page tabs |
 | In-content duplicate h2 | 17 per app | 0 |
+
+## 8. Closure — the phone strip and the drawer (P2.5 closure)
+
+**Invariant.** On a phone every page of the active group is discoverable
+without scrolling a clipped row. A group of up to four pages is shown
+whole. A longer group shows its **primary** pages and an explicit **More**
+menu for the rest; the strip never clips, and the document never scrolls
+sideways (asserted at 390px and 360px).
+
+| group | visible at ≤ 900px | in More |
+|---|---|---|
+| Discover (4) | Players · Shortlist · Film Room · Insight | — |
+| Pipeline (Pro, 6) | **Cases · Rooms · Requests** | Opportunities · Campaigns · Signings & Outcomes |
+| Pipeline (Grassroots, 7) | **Cases · Rooms · Requests** | Opportunities · Campaigns · Open Days · Signings & Outcomes |
+| Evidence (4) | Assessments · Video · Trials · Trial Days | — |
+| Intelligence (5) | **Briefs · Matching** | Watchlists · Second Look · Nobody Missed |
+| Squad & Planning (Pro, 4) | Planner · Coverage · Calibration · Fixtures | — |
+| Players (Grassroots, 4) | Squad · Coaches · Friendlies · Fixtures | — |
+| Organisation (Pro, 6) | **Staff · Verification** | Integrations · Finance · Plan · Reputation |
+| Club (Grassroots, up to 5) | **Clubs · Staff** | Verification · Integrations · Plan |
+| Analytics (3) | Dashboard · Funnel · Ledger | — |
+| Planning (Grassroots, 2) | Coverage · Calibration | — |
+
+Classification of the Pipeline pages (frequency, not count):
+
+| page | route | class | why |
+|---|---|---|---|
+| Cases (`nav2.recruitment`, was "Pipeline") | `#/recruitment` | PRIMARY | the case list every recruiter works from |
+| Recruitment Rooms | `#/rooms`, `#/recruitment/rooms/:id` | PRIMARY | where a case moves |
+| Player Requests | `#/requests` | PRIMARY | the only outbound contact path; guardian-routed |
+| Opportunities | `#/opportunities` | SECONDARY | the club's published demand; edited occasionally |
+| Campaigns | `#/campaigns` | SECONDARY | assessment campaigns; periodic |
+| Open Days (Grassroots) | `#/opendays` | SECONDARY | seasonal |
+| Signings & Outcomes | `#/outcomes` | SECONDARY | post-signing; read after the fact |
+
+Nothing was reclassified as CONTEXTUAL: each page is a legitimate
+aggregate over many cases; a Room's own tabs already hold the per-case
+functions. Short strip labels (Rooms, Requests, Insight, Video, Trials,
+Briefs, Matching, Watchlists, Dashboard, Ledger, Signings, Open Days) are
+`navshort.*` keys with EN and FR; the full label is used in the sidebar,
+the palette, the title and the More menu. Routes: **removed 0 · renamed 0
+· redirected 0 · broken 0**.
+
+**Drawer.** At ≤ 900px a section tap expands the section (its pages, by
+group); a page tap navigates and closes the drawer. Desktop semantics are
+unchanged.
+
+**Task-finding (fresh login, no URL entry).** Players 1 / 2 / 3, Dynamic
+Watchlists 2 / 2 / 3, Cases 2 / 2 / 3, Recruitment Rooms 2 / 2 / 3, Second
+Look 2 / 2 / 3, Trials & Reports 2 / 2 / 3, Director Dashboard 2 / 2 / 3
+interactions on desktop / collapsed rail / 390px drawer (navLive N15).
+
+**Measured (390px, demo bundles).** Top bar 54px · strip 45px · content at
+99px · Room header 357px · no document overflow at 390px or 360px.

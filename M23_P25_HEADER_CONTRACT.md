@@ -31,6 +31,7 @@ sidebar account block (`OrgChips`), not here.
 | a **status warning** | yes, `.notice.warn` | e.g. "3 trials awaiting a mandatory report" — it is state, and it disappears when resolved |
 | an error | yes, `.notice.block` | unchanged |
 | a page-level tab row | yes, `role="tablist"` | functions of this destination (Room sections, Player Football/You); never destinations |
+| the phone strip (≤ 900px) | yes, one row, ≤ 48px | the active **group's** pages only; a long group shows its primary pages and an explicit **More** menu — never a clipped or scrolled row (P2.5 closure) |
 | filters / primary actions | yes | on the first content row, not in a header block |
 
 ## 3. Entity headers (the Recruitment Room)

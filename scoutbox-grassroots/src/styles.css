@@ -549,3 +549,16 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .room-head .room-details { margin-top: 8px; }
 .room-head .room-details > summary { cursor: pointer; font-size: 12.5px; color: var(--muted); list-style: revert; }
 .room-head .badges-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+
+/* P2.5 closure — phone strip: primaries + an explicit More menu, no clipped row. */
+.subnav { position: relative; flex-wrap: nowrap; overflow: visible; }
+.subnav > button { white-space: nowrap; flex: 0 0 auto; min-height: 40px; }
+.subnav-more { display: inline-flex; align-items: center; gap: 5px; }
+.subnav-more.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+.subnav-more b { font-weight: 700; }
+.subnav-more-count { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--bg-3, var(--panel-2)); border: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+.subnav-caret { font-size: 11px; opacity: .8; }
+.subnav-menu { position: absolute; left: 10px; right: 10px; top: calc(100% + 2px); z-index: 60; display: flex; flex-direction: column; gap: 2px; padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-2); box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+.subnav-menu-item { text-align: left; background: none; border: none; border-radius: 8px; padding: 10px 12px; color: var(--muted); font-size: 14px; min-height: 40px; }
+.subnav-menu-item:hover, .subnav-menu-item:focus-visible { background: var(--panel); color: var(--text); }
+.subnav-menu-item.active { color: var(--text); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }

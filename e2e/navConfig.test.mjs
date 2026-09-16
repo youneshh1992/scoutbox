@@ -55,7 +55,7 @@ const LABELS = {
   'navsec.organisation': 'Organisation', 'navsec.club': 'Club', 'nav.verification': 'Verification', 'nav.trials': 'Trials & Reports',
   'nav.coverage': 'Coverage', 'nav.assessments': 'Assessments', 'nav.messages': 'Inbox',
 };
-const tr = (k) => LABELS[k] ?? k.replace(/^nav2?\./, '').replace(/^navsec\./, '').replace(/^navgrp\./, '');
+const tr = (k) => LABELS[k] ?? k.replace(/^nav2?\./, '').replace(/^navsec\./, '').replace(/^navgrp\./, '').replace(/^navshort\./, '');
 
 const SCOUT = { role: 'First-Team Scout', verLevel: null };
 const LEAD = { role: 'Head of Recruitment', verLevel: null };
@@ -67,7 +67,7 @@ const REVIEWER = { role: 'Analyst', verLevel: 'verification_reviewer' };
 function dictionaries(app) {
   const src = readFileSync(path.join(ROOT, app, 'src', 'i18n.ts'), 'utf8');
   const frAt = src.indexOf('\nconst fr');
-  const keys = (s) => new Set([...s.matchAll(/'((?:nav|navsec|nav2|navgrp)\.[A-Za-z0-9_]+)':/g)].map((m) => m[1]));
+  const keys = (s) => new Set([...s.matchAll(/'((?:nav|navsec|nav2|navgrp|navshort)\.[A-Za-z0-9_]+)':/g)].map((m) => m[1]));
   return { en: keys(src.slice(0, frAt)), fr: keys(src.slice(frAt)) };
 }
 
@@ -114,17 +114,73 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   const broken3 = [{ ...rec, groups: [...rec.groups, { id: 'ghost', labelKey: 'x', items: ['not-a-page'] }] }];
   ok(nav.validateNavConfig(broken3).some((p) => /not a child/.test(p)), 'a group item that is not a child is reported');
 
+  section(`${app} — P2.5 closure: phone strip = same pages as the desktop accordion`);
+  // The strip is presentation. For every role and every group, the pages it
+  // shows (visible + More) must be exactly the pages the desktop accordion
+  // shows, in the same order, and no page may be both visible and in More.
+  for (const [who, ctx] of [['scout', SCOUT], ['lead', LEAD], ['reviewer', REVIEWER]]) {
+    for (const sec of nav.filterSections(ctx)) {
+      for (const g of nav.groupedChildren(sec)) {
+        for (const child of g.children) {
+          const lay = nav.stripLayout(sec, child.id);
+          const stripIds = [...lay.visible, ...lay.overflow].map((c) => c.id);
+          const deskIds = g.children.map((c) => c.id);
+          if (stripIds.slice().sort().join() !== deskIds.slice().sort().join()) fail(`${who} ${sec.id}/${g.id}: strip set ≠ desktop set (${stripIds} vs ${deskIds})`);
+          if (lay.visible.some((c) => lay.overflow.includes(c))) fail(`${who} ${sec.id}/${g.id}: a page is both visible and in More`);
+          const inVisible = lay.visible.some((c) => c.id === child.id);
+          const inMore = !!lay.activeInOverflow && lay.activeInOverflow.id === child.id;
+          if (inVisible === inMore) fail(`${who} ${sec.id}/${g.id}/${child.id}: the active page must be marked in exactly one place (visible=${inVisible}, more=${inMore})`);
+          if (lay.visible.length > nav.STRIP_MAX_VISIBLE) fail(`${who} ${sec.id}/${g.id}: ${lay.visible.length} visible tabs`);
+        }
+      }
+    }
+  }
+  ok(true, 'every role, every group: strip pages ≡ accordion pages, active page marked once, ≤ 4 visible tabs');
+  // Static width budget: a 360px strip fits about 34 characters of 13px
+  // label text plus padding. The live suite measures the real thing (N14);
+  // this catches a new long label before a browser does.
+  {
+    const enDict = readFileSync(path.join(ROOT, app, 'src', 'i18n.ts'), 'utf8');
+    const en = (k) => { const m = enDict.match(new RegExp(`'${k.replace('.', '\\.')}': '([^']*)'`)); return m ? m[1] : k; };
+    const over = [];
+    for (const sec of nav.filterSections(LEAD)) for (const g of nav.groupedChildren(sec)) {
+      const lay = nav.stripLayout(sec, g.children[0].id);
+      if (lay.visible.length + lay.overflow.length <= 1) continue;
+      const base = lay.visible.reduce((n, c) => n + en(c.shortKey ?? c.labelKey).length, 0);
+      const chars = base + (lay.overflow.length ? 6 : 0);
+      if (chars > 34) over.push(`${sec.id}/${g.id ?? '-'}: ${chars} chars (${lay.visible.map((c) => en(c.shortKey ?? c.labelKey)).join(' · ')}${lay.overflow.length ? ' · More' : ''})`);
+      // When a page inside More is current, the control shows that page's name.
+      for (const c of lay.overflow) {
+        const w = base + en(c.shortKey ?? c.labelKey).length + 1;
+        if (w > 34) over.push(`${sec.id}/${g.id ?? '-'} with ${c.id} current: ${w} chars`);
+      }
+    }
+    ok(over.length === 0, `every phone strip fits a 360px row by label budget (${over.join('; ') || 'all ≤ 34 chars'})`);
+  }
+  const pipe = nav.stripLayout(rec, 'rooms');
+  ok(pipe.visible.map((c) => c.id).join() === 'recruitment,rooms,requests', `Pipeline primaries are Cases, Rooms, Requests (${pipe.visible.map((c) => c.id)})`);
+  ok(pipe.overflow.length >= 3 && pipe.overflow.every((c) => !c.primary), `Pipeline secondaries sit behind More (${pipe.overflow.map((c) => c.id)})`);
+  ok(pipe.activeInOverflow === null && nav.stripLayout(rec, 'campaigns').activeInOverflow?.id === 'campaigns', 'active-state mapping: Rooms is a visible tab, Campaigns is marked on More');
+  ok(nav.stripLayout(rec, 'search').overflow.length === 0 && nav.stripLayout(rec, 'search').visible.length === 4, 'a group of four shows whole — no More for Discover');
+  ok(nav.stripLayout(rec, 'secondlook').activeInOverflow?.id === 'secondlook' && nav.stripLayout(rec, 'secondlook').visible.map((c) => c.id).join() === 'briefs,matching', 'Intelligence: Briefs and Matching visible; Watchlists, Second Look and Nobody Missed through More (the longer names fit 360px only there)');
+  // A scout and a lead see the same Pipeline strip (no role-dependent pages in it).
+  const scoutRec = nav.filterSections(SCOUT).find((s) => s.id === 'recruitment');
+  ok(JSON.stringify(nav.stripLayout(scoutRec, 'rooms').visible.map((c) => c.id)) === JSON.stringify(pipe.visible.map((c) => c.id)), 'role visibility: the scout strip matches the lead strip for Pipeline');
+  ok(tr(rec.children.find((c) => c.id === 'recruitment').labelKey) === 'Cases' || dictionaries(app).en.has('nav2.recruitment'), 'the Cases page no longer shares its name with the Pipeline group');
+  for (const c of rec.children) if (c.shortKey && !c.shortKey.startsWith('navshort.')) fail(`${c.id}: short label key must be a navshort.* key`);
+  ok(true, 'short strip labels are i18n keys (checked against both dictionaries below)');
+
   section(`${app} — every navigation label exists in EN and FR`);
   const dict = dictionaries(app);
-  const used = new Set(nav.NAV_SECTIONS.flatMap((s) => [s.labelKey, ...s.children.map((c) => c.labelKey), ...(s.groups ?? []).map((g) => g.labelKey)]).concat([nav.INBOX_ITEM.labelKey]));
+  const used = new Set(nav.NAV_SECTIONS.flatMap((s) => [s.labelKey, ...s.children.map((c) => c.labelKey), ...s.children.filter((c) => c.shortKey).map((c) => c.shortKey), ...(s.groups ?? []).map((g) => g.labelKey)]).concat([nav.INBOX_ITEM.labelKey]));
   const missEn = [...used].filter((k) => !dict.en.has(k));
   const missFr = [...used].filter((k) => !dict.fr.has(k));
   ok(missEn.length === 0, `EN has every label the configuration names (${used.size} keys; missing: ${missEn.join(',') || '—'})`);
   ok(missFr.length === 0, `FR has every label the configuration names (missing: ${missFr.join(',') || '—'})`);
-  for (const k of ['navsec.toggle', 'navsec.pagesIn', 'navsec.inThisArea', 'navsec.liveOk', 'navsec.liveOff', 'navsec.report', 'navsec.reportAria', 'navsec.orgStatus']) {
+  for (const k of ['navsec.more', 'navsec.moreAria', 'navsec.moreMenu', 'navsec.toggle', 'navsec.pagesIn', 'navsec.inThisArea', 'navsec.liveOk', 'navsec.liveOff', 'navsec.report', 'navsec.reportAria', 'navsec.orgStatus']) {
     if (!dict.en.has(k) || !dict.fr.has(k)) fail(`shell label ${k} missing in ${dict.en.has(k) ? 'FR' : 'EN'}`); else passed++;
   }
-  console.log('✓ the shell\'s own labels (toggle, live state, Report / Block) exist in EN and FR (8 folded)');
+  console.log('✓ the shell\'s own labels (toggle, live state, Report / Block) exist in EN and FR (11 folded)');
 
   section(`${app} — deterministic resolver`);
   for (const id of IDS) {

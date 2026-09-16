@@ -7,6 +7,7 @@ import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DEMO_APPS, sourceFingerprint } from './sourceFingerprint.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, 'e2e', 'dist');
@@ -65,6 +66,18 @@ for (const f of ['scoutbox-club-demo.html', 'scoutbox-admin-demo.html', 'scoutbo
   doc = doc.replace(/<div data-demo-badge[^>]*>[^<]*<\/div>/, ''); // idempotent
   doc = doc.replace(/<\/body>/i, `${badge}</body>`);
   if (!doc.includes('data-demo-badge')) doc += badge; // no </body> — append
+  fs.writeFileSync(p, doc);
+}
+// P2.5 closure — stamp each bundle with a fingerprint of the source it was
+// built from (content hash, not a timestamp) and the build commit.
+// `demoFreshness.test.mjs` recomputes the fingerprint from the working tree
+// and fails when a bundle is stale.
+for (const [f, { app, extra }] of Object.entries(DEMO_APPS)) {
+  const p = path.join(OUT, f);
+  let doc = fs.readFileSync(p, 'utf8');
+  doc = doc.replace(/<meta name="sb-source-fingerprint" content="[^"]*">/g, '').replace(/<meta name="sb-build-sha" content="[^"]*">/g, '');
+  const stamp = `<meta name="sb-source-fingerprint" content="${sourceFingerprint(app, extra)}"><meta name="sb-build-sha" content="${sha}">`;
+  doc = doc.includes('<head>') ? doc.replace('<head>', `<head>${stamp}`) : stamp + doc;
   fs.writeFileSync(p, doc);
 }
 console.log(`demo bundles ready in e2e/dist/ (build ${sha})`);

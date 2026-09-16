@@ -18,6 +18,14 @@ export interface NavItem {
   aliases?: string[];
   /** Client-side convenience filter; server authorization stays authoritative. */
   visible?: (ctx: NavContext) => boolean;
+  /**
+   * P2.5 closure — phone strip presentation only. In a group with more pages
+   * than fit in one row, the `primary` pages stay visible and the rest sit
+   * behind an explicit "More" menu. Never affects visibility or routing.
+   */
+  primary?: boolean;
+  /** Shorter label for the phone strip (e.g. "Rooms" for "Recruitment Rooms"); the full label everywhere else. */
+  shortKey?: string;
 }
 
 /**
@@ -82,33 +90,33 @@ export const NAV_SECTIONS: NavSection[] = [
       { id: 'search', labelKey: 'nav2.search', aliases: ['players', 'player search', 'find players', 'discover', 'joueurs', 'recherche'] },
       { id: 'shortlist', labelKey: 'nav.shortlist', aliases: ['watchlist', 'saved players', 'présélection'] },
       { id: 'filmroom', labelKey: 'nav.filmroom', aliases: ['film', 'clips', 'footage', 'vidéo'] },
-      { id: 'insight', labelKey: 'nav.insight', aliases: ['scouting insight', 'suitability', 'matches', 'analyse'] },
+      { id: 'insight', labelKey: 'nav.insight', shortKey: 'navshort.insight', aliases: ['scouting insight', 'suitability', 'matches', 'analyse'] },
       // — Pipeline: the cases themselves and the club's outbound demand.
-      { id: 'recruitment', labelKey: 'nav2.recruitment', aliases: ['pipeline', 'applications', 'cases', 'recrutement'] },
+      { id: 'recruitment', labelKey: 'nav2.recruitment', primary: true, aliases: ['pipeline', 'applications', 'cases', 'recrutement'] },
       // M17: the club's private decision layer over a player.
-      { id: 'rooms', labelKey: 'nav2.rooms', aliases: ['recruitment rooms', 'room', 'rooms', 'workspace', 'salles'] },
-      { id: 'requests', labelKey: 'nav2.requests', aliases: ['player requests', 'contact requests', 'demandes'] },
+      { id: 'rooms', labelKey: 'nav2.rooms', primary: true, shortKey: 'navshort.rooms', aliases: ['recruitment rooms', 'room', 'rooms', 'workspace', 'salles'] },
+      { id: 'requests', labelKey: 'nav2.requests', primary: true, shortKey: 'navshort.requests', aliases: ['player requests', 'contact requests', 'demandes'] },
       { id: 'opportunities', labelKey: 'nav.opportunities', aliases: ['open roles', 'positions', 'opportunités'] },
       { id: 'campaigns', labelKey: 'nav.campaigns', aliases: ['campagnes'] },
-      { id: 'outcomes', labelKey: 'nav2.outcomes', aliases: ['signings', 'post-signing', 'outcomes', 'signatures'] },
+      { id: 'outcomes', labelKey: 'nav2.outcomes', shortKey: 'navshort.outcomes', aliases: ['signings', 'post-signing', 'outcomes', 'signatures'] },
       // — Evidence: what the club has actually recorded about players.
       { id: 'assessments', labelKey: 'nav.assessments', aliases: ['reports', 'scouting reports', 'assessment', 'évaluations', 'rapports'] },
-      { id: 'video', labelKey: 'nav2.video', aliases: ['evidence', 'video workspace', 'evidence requests', 'preuves'] },
-      { id: 'trials', labelKey: 'nav.trials', aliases: ['trial', 'trial reports', 'essais'] },
+      { id: 'video', labelKey: 'nav2.video', shortKey: 'navshort.video', aliases: ['evidence', 'video workspace', 'evidence requests', 'preuves'] },
+      { id: 'trials', labelKey: 'nav.trials', shortKey: 'navshort.trials', aliases: ['trial', 'trial reports', 'essais'] },
       { id: 'trialdays', labelKey: 'nav.trialdays', aliases: ['trial days', 'journées d’essai'] },
       // — Intelligence: written demand and what it turns up. M18/M19 — none
       // of these is a ranking, and none of them earns a sidebar section.
-      { id: 'briefs', labelKey: 'nav2.briefs', aliases: ['recruitment briefs', 'brief', 'briefs', 'criteria', 'cahier des charges', 'briefs de recrutement'] },
-      { id: 'matching', labelKey: 'nav2.matching', aliases: ['player matching', 'explainable matching', 'match criteria', 'who matches', 'why this player matches', 'correspondance', 'critères de correspondance'] },
-      { id: 'watchlists', labelKey: 'nav2.watchlists', aliases: ['dynamic watchlists', 'dynamic watchlist', 'saved criteria', 'listes dynamiques', 'critères enregistrés'] },
+      { id: 'briefs', labelKey: 'nav2.briefs', primary: true, shortKey: 'navshort.briefs', aliases: ['recruitment briefs', 'brief', 'briefs', 'criteria', 'cahier des charges', 'briefs de recrutement'] },
+      { id: 'matching', labelKey: 'nav2.matching', primary: true, shortKey: 'navshort.matching', aliases: ['player matching', 'explainable matching', 'match criteria', 'who matches', 'why this player matches', 'correspondance', 'critères de correspondance'] },
+      { id: 'watchlists', labelKey: 'nav2.watchlists', shortKey: 'navshort.watchlists', aliases: ['dynamic watchlists', 'dynamic watchlist', 'saved criteria', 'listes dynamiques', 'critères enregistrés'] },
       { id: 'secondlook', labelKey: 'nav2.secondlook', aliases: ['second look', 'worth another look', 'evidence changed', 'reconsider', 'second regard', 'nouveau regard'] },
-      { id: 'nobodymissed', labelKey: 'nav2.nobodymissed', aliases: ['nobody missed', 'evaluation coverage', 'coverage gaps', 'not yet evaluated', 'couverture d’évaluation'] },
+      { id: 'nobodymissed', labelKey: 'nav2.nobodymissed', shortKey: 'navshort.nobodymissed', aliases: ['nobody missed', 'evaluation coverage', 'coverage gaps', 'not yet evaluated', 'couverture d’évaluation'] },
       // — Analytics: the process measured. M20's Director Dashboard measures
       // the process, never a player and never a colleague; the Funnel counts
       // recorded events; the Ledger is the append-only record they come from.
-      { id: 'dashboard', labelKey: 'nav2.dashboard', aliases: ['director dashboard', 'recruitment analytics', 'analytics', 'pipeline health', 'how long does it take', 'stalled rooms', 'tableau de bord', 'analyse du recrutement'] },
+      { id: 'dashboard', labelKey: 'nav2.dashboard', shortKey: 'navshort.dashboard', aliases: ['director dashboard', 'recruitment analytics', 'analytics', 'pipeline health', 'how long does it take', 'stalled rooms', 'tableau de bord', 'analyse du recrutement'] },
       { id: 'funnel', labelKey: 'nav.funnel', aliases: ['recruitment funnel', 'entonnoir'] },
-      { id: 'ledger', labelKey: 'nav.ledger', aliases: ['discovery ledger', 'audit trail', 'registre'] },
+      { id: 'ledger', labelKey: 'nav.ledger', shortKey: 'navshort.ledger', aliases: ['discovery ledger', 'audit trail', 'registre'] },
     ],
     groups: [
       { id: 'discover', labelKey: 'navgrp.discover', items: ['search', 'shortlist', 'filmroom', 'insight'] },
@@ -121,7 +129,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     id: 'planning', labelKey: 'navsec.planning', icon: 'clipboard',
     children: [
-      { id: 'planner', labelKey: 'nav2.planner', aliases: ['squad planner', 'squad', 'effectif'] },
+      { id: 'planner', labelKey: 'nav2.planner', shortKey: 'navshort.planner', aliases: ['squad planner', 'squad', 'effectif'] },
       { id: 'coverage', labelKey: 'nav.coverage', aliases: ['scout coverage', 'planning', 'couverture'] },
       { id: 'calibration', labelKey: 'nav.calibration', aliases: ['scout calibration', 'calibrage'] },
       { id: 'fixtures', labelKey: 'nav.fixtures', aliases: ['matches', 'schedule', 'rencontres'] },
@@ -130,7 +138,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     id: 'network', labelKey: 'navsec.network', icon: 'globe',
     children: [
-      { id: 'network', labelKey: 'nav2.network', aliases: ['clubs', 'groups', 'federation', 'club network', 'réseau'] },
+      { id: 'network', labelKey: 'nav2.network', shortKey: 'navshort.network', aliases: ['clubs', 'groups', 'federation', 'club network', 'réseau'] },
       { id: 'representation', labelKey: 'nav.representation', aliases: ['agents', 'agencies', 'représentation'] },
     ],
   },
@@ -140,11 +148,11 @@ export const NAV_SECTIONS: NavSection[] = [
     // Convenience only — every route stays server-enforced.
     visible: leadOrVer,
     children: [
-      { id: 'organisation', labelKey: 'nav2.organisation', aliases: ['staff', 'security', 'mfa', 'sso', 'audit', 'settings', 'general', 'organisation'] },
-      { id: 'verification', labelKey: 'nav.verification', aliases: ['verify', 'staff verification', 'club verification', 'vérification'], visible: leadOrVer },
+      { id: 'organisation', labelKey: 'nav2.organisation', primary: true, shortKey: 'navshort.organisation', aliases: ['staff', 'security', 'mfa', 'sso', 'audit', 'settings', 'general', 'organisation'] },
+      { id: 'verification', labelKey: 'nav.verification', primary: true, aliases: ['verify', 'staff verification', 'club verification', 'vérification'], visible: leadOrVer },
       { id: 'imports', labelKey: 'nav2.imports', aliases: ['integrations', 'imports', 'webhooks', 'api', 'intégrations'], visible: (c) => isLeadRole(c.role) },
       { id: 'budgets', labelKey: 'nav2.budgets', aliases: ['finance', 'deal budgets', 'budgeting', 'budgets'], visible: (c) => isLeadRole(c.role) },
-      { id: 'plan', labelKey: 'nav.plan', aliases: ['billing', 'compliance', 'subscription', 'abonnement'], visible: (c) => isLeadRole(c.role) },
+      { id: 'plan', labelKey: 'nav.plan', shortKey: 'navshort.plan', aliases: ['billing', 'compliance', 'subscription', 'abonnement'], visible: (c) => isLeadRole(c.role) },
       { id: 'reputation', labelKey: 'nav.reputation', aliases: ['standing', 'réputation'] },
     ],
   },
@@ -203,6 +211,25 @@ export function groupedChildren(section: NavSection): NavGroupView[] {
 export function groupSiblings(section: NavSection, itemId: ScreenId | null): NavItem[] {
   const hit = groupedChildren(section).find((g) => g.children.some((c) => c.id === itemId));
   return hit ? hit.children : groupedChildren(section)[0]?.children ?? [];
+}
+
+/**
+ * P2.5 closure — how the PHONE strip lays a group out. A group of up to
+ * `max` pages is shown whole. A longer group shows its `primary` pages (or,
+ * if none is flagged, its first `max - 1`) and puts the rest behind an
+ * explicit "More" control, so every page is discoverable without scrolling
+ * a clipped row. Same items, same order, same visibility as the desktop
+ * accordion — this is presentation, computed from the same configuration.
+ */
+export const STRIP_MAX_VISIBLE = 4;
+export interface StripLayout { visible: NavItem[]; overflow: NavItem[]; activeInOverflow: NavItem | null }
+export function stripLayout(section: NavSection, itemId: ScreenId | null, max: number = STRIP_MAX_VISIBLE): StripLayout {
+  const items = groupSiblings(section, itemId);
+  if (items.length <= max) return { visible: items, overflow: [], activeInOverflow: null };
+  const flagged = items.filter((c) => c.primary);
+  const visible = flagged.length > 0 ? flagged.slice(0, max - 1) : items.slice(0, max - 1);
+  const overflow = items.filter((c) => !visible.includes(c));
+  return { visible, overflow, activeInOverflow: overflow.find((c) => c.id === itemId) ?? null };
 }
 
 /** The group an item belongs to, or null in an ungrouped section. */

@@ -214,3 +214,287 @@ was visible to, or unlinked. The server is untouched, the frozen
 recruitment lifecycle is untouched, the Contact Workflow is not started,
 and every suite in the battery is green. **Stopped here (§115): not
 pushed, no PR.**
+
+---
+
+# P2.5 Closure — mobile Pipeline discoverability and current demo artifacts
+
+Two carried-forward items closed on top of `7d56e7c`, plus a structured
+task-finding proof. **Not pushed. No PR. No Contact Workflow code. Server
+unchanged.**
+
+## C1. Verified before changing anything
+
+| item | value |
+|---|---|
+| branch / tip / tree | `claude/desktop-project-migration-wyk3ec` · `7d56e7c` · clean · 168 ahead of origin |
+| Pro / Grassroots sections | 5 / 4 |
+| Player destinations | 5 visible (Home · Football · Opportunities · Inbox · You) + 2 hidden routes (`/profile`, `/upload`) |
+| Pipeline pages | Pro 6, Grassroots 7 (Open Days) |
+| demo mechanism | `e2e/buildDemos.mjs` (+ `buildConnectedDemo.mjs`) → untracked `e2e/dist/*.html`, badge "build <sha> · <date>"; consumed by 11 demo spotchecks + 4 demo suites through `demoHost.mjs`, and by the six published review pages (14 Sep build) |
+
+## C2. Pipeline audit and classification
+
+| page | route | frequency | role | desktop | mobile (390px) | deep link |
+|---|---|---|---|---|---|---|
+| Cases (was "Pipeline") | `#/recruitment` | high — the case list | all | accordion › Pipeline | **visible tab** | loads, Recruitment active, refresh ok |
+| Recruitment Rooms | `#/rooms`, `#/recruitment/rooms/:id` | high | all | accordion › Pipeline | **visible tab** | as above |
+| Player Requests | `#/requests` | high — only outbound contact path | all | accordion › Pipeline | **visible tab** | as above |
+| Opportunities | `#/opportunities` | medium | all | accordion › Pipeline | More | as above |
+| Campaigns | `#/campaigns` | low–medium | all | accordion › Pipeline | More | as above |
+| Open Days (Grassroots) | `#/opendays` | seasonal | all | accordion › Pipeline | More | as above |
+| Signings & Outcomes | `#/outcomes` | low | all | accordion › Pipeline | More | as above |
+
+PRIMARY: Cases, Rooms, Requests. SECONDARY: Opportunities, Campaigns, Open
+Days, Signings & Outcomes. CONTEXTUAL: none — each page aggregates across
+cases; the per-case functions already live in a Room's tabs. Nothing moved
+to reduce a count.
+
+## C3. What changed (client only)
+
+- **`stripLayout()`** (`nav.ts`, both apps): ≤ 4 pages → whole group; more →
+  `primary` pages + **More**. `primary` and `shortKey` are NavItem fields
+  in the same config the accordion, palette and resolver read. No separate
+  mobile list.
+- **More** (`navui.tsx`): button with `aria-haspopup="menu"`,
+  `aria-expanded`, `aria-controls`, a count; `role="menu"` + `menuitem`s;
+  ArrowUp/Down, Escape (focus back to More), outside click, closes on
+  selection; focus returned to More or the page title. When the current
+  page is inside the menu the control shows that page's name with the
+  caret and the active state; its accessible name still says More.
+  Navigation goes through the same guarded `setScreen` (unsaved-change
+  guard proven from More by navLive N13).
+- **Short strip labels** (`navshort.*`, EN + FR): Rooms, Requests, Insight,
+  Video, Trials, Briefs, Matching, Watchlists, Nobody Missed, Dashboard,
+  Ledger, Signings, Open Days, Planner, Squad, Clubs, Staff, Plan. Full
+  labels everywhere else. No abbreviation a user would not recognise.
+- **Cases**: the page inside the Pipeline group was itself labelled
+  "Pipeline"; now **Cases** / **Dossiers**. Route id, aliases and links
+  unchanged.
+- **Drawer**: at ≤ 900px a section tap expands the section
+  (`aria-expanded`), a page tap navigates and closes. Desktop unchanged.
+- **Groups** are `role="group"` containers with names; headings are plain
+  text (never a button or link).
+- **Demo artifacts**: every bundle carries `sb-source-fingerprint` (content
+  hash of `src/**` + package files + the build scripts) and `sb-build-sha`;
+  `e2e/demoFreshness.test.mjs` fails a stale or missing bundle. Timestamps
+  are never compared; `e2e/dist` stays untracked, so nothing becomes dirty
+  by building or testing.
+
+## C4. Final metrics (measured, Chromium, rebuilt demo bundles)
+
+| metric | value |
+|---|---|
+| Pro top-level sections | 5 |
+| Grassroots top-level sections | 4 |
+| Player top-level destinations | 5 (+ 2 hidden routes) |
+| Pipeline desktop destinations | 6 (Pro) / 7 (Grassroots), all in the accordion |
+| Pipeline mobile immediately visible | 3 (Cases · Rooms · Requests) |
+| Pipeline mobile in More | 3 (Pro) / 4 (Grassroots) |
+| Phone top bar (390px) | 54px |
+| Phone strip (Pipeline control) height | 45px (tabs ≥ 40px tall, 13px labels) |
+| Phone content start | 99px (was 93 with the clipped strip; the 6px is the 40px tap targets) |
+| Phone Room header | 357px at 390px (unchanged), 396px at 360px |
+| Desktop top bar / content start / Room header | 58px / 58px / 141px (unchanged) |
+| Document overflow at 390px and 360px | none, on every page of every section (navLive N13/N14) |
+
+## C5. Task-finding matrix (fresh login, no URL entry)
+
+```
+Destination          Desktop   Collapsed sidebar   Mobile (390px)   Interactions (desktop / collapsed / mobile)
+Players (Discover)   PASS      PASS                PASS             1 / 2 / 3
+Dynamic Watchlists   PASS      PASS                PASS             2 / 2 / 3
+Cases                PASS      PASS                PASS             2 / 2 / 3
+Recruitment Rooms    PASS      PASS                PASS             2 / 2 / 3
+Second Look          PASS      PASS                PASS             2 / 2 / 3
+Trials & Reports     PASS      PASS                PASS             2 / 2 / 3
+Director Dashboard   PASS      PASS                PASS             2 / 2 / 3
+```
+
+Every path is `Recruitment → destination` (desktop: section click, then the
+page in the expanded accordion; collapsed: section icon, then the flyout
+item; mobile: hamburger, section tap expands, page tap). No task uses a
+URL, a swipe, or a pre-expanded menu: each run reloads on Home first
+(navLive N15, 61 checks in total for N1–N16). No path is excessive; the
+longest is three taps on a phone.
+
+## C6. Demo artifacts
+
+```
+demo artifacts rebuilt: YES  (e2e/buildDemos.mjs + buildConnectedDemo.mjs, from the closure source; September 14 bundles not reused)
+artifact source tip:    the closure commit (badge "build <sha> · 2026-09-16"; <meta name="sb-build-sha">), fingerprint-stamped
+spotchecks:             11 demo spotchecks + uiSpotcheck, demoOffline, crosstab, demoHostOrdering, demoFreshness — all green
+live suites:            navLive (61), liveIntegration, m12–m23 Live (15) — all green against bundles built from the same source
+stale old build remains: NO  (demoFreshness fails any bundle whose source fingerprint differs from the working tree)
+published review pages: the six claude.ai review pages (launcher, Pro, Grassroots, Player, T&S, connected) updated in place from e2e/dist after the closure commit — private pages, not a deployment
+```
+
+Visual check on the rebuilt bundles (Chromium): Pro shows five sections and a 58px / 54px top bar; Grassroots four sections and a vertical 260px drawer; Player shows Home · Football · Opportunities · Inbox · You; the Room header is 141px on a desktop and 357px at 390px.
+
+## C7. Routes, permissions, accessibility
+
+```
+Pipeline routes before: #/recruitment #/rooms #/recruitment/rooms/:id #/requests #/opportunities #/campaigns #/outcomes (+ #/opendays Grassroots)
+Pipeline routes after:  identical
+removed: 0   renamed: 0   redirected: 0   broken: 0
+
+permission widening: 0
+permission narrowing unintended: 0
+mobile/desktop destination-set mismatch: 0   (navConfig: strip ≡ accordion for scout, lead and reviewer, every group)
+```
+
+Accessibility: keyboard (arrows across the strip, ArrowDown opens More,
+arrows inside, Escape closes and returns focus); screen-reader naming
+(More announces its count or the current page; groups are named
+`role="group"` containers; section buttons in the drawer announce
+expansion); active state (tab `aria-current="page"`, More carries the
+active state when its page is current); More semantics (`aria-haspopup`,
+`aria-expanded`, `aria-controls`, `role="menu"`/`menuitem`); focus (into
+the menu on open, back to More on Escape and after selection, to the page
+title if More unmounted).
+
+## C8. Regression battery (closure run)
+
+### Browser suites
+
+```
+discovered: 34   (33 pre-existing + demoFreshness)
+applicable: 34
+passed: 34
+failed: 0
+```
+
+| suite | result |
+|---|---|
+| navConfig | pass — navConfig: 282 checks passed |
+| demoFreshness | pass — demoFreshness: 13 checks passed |
+| uiSpotcheck | pass — UI SPOTCHECK OK |
+| demoOffline | pass — DEMO BUILDS OK |
+| crosstab | pass — CROSS-TAB E2E OK |
+| demoHostOrdering | pass — demoHostOrdering: all 15 checks passed |
+| m12DemoSpotcheck | pass — M12 DEMO SPOTCHECK OK — zero page errors |
+| m13DemoSpotcheck | pass — M13 DEMO SPOTCHECK OK — zero page errors |
+| m14DemoSpotcheck | pass —  |
+| m162DemoSpotcheck | pass — m162DemoSpotcheck: 21 checks passed — Trust Score demo story OK, zero page errors |
+| m17DemoSpotcheck | pass — m17DemoSpotcheck: 47 checks passed — Recruitment Rooms demo story OK, zero page errors |
+| m18DemoSpotcheck | pass — M18 headless spotcheck: ALL CHECKS PASSED — zero page errors |
+| m181DemoSpotcheck | pass — M18.1 headless spotcheck: ALL CHECKS PASSED — zero page errors |
+| m182DemoSpotcheck | pass — M18.2 headless spotcheck: ALL CHECKS PASSED — zero page errors |
+| m19DemoSpotcheck | pass — M19 headless spotcheck: ALL CHECKS PASSED — zero page errors |
+| m20DemoSpotcheck | pass — M20 headless spotcheck: ALL CHECKS PASSED — zero page errors |
+| m21DemoSpotcheck | pass — M21 headless spotcheck: ALL CHECKS PASSED — zero page errors |
+| liveIntegration | pass — LIVE INTEGRATION OK — separate contexts, one backend, no demo bus |
+| navLive | pass — navLive: 61 checks passed — N1–N16 complete |
+| m12Live | pass — M12 LIVE INTEGRATION OK — real backend, separate contexts |
+| m13Live | pass — M13 LIVE INTEGRATION OK — real backend, four separate contexts |
+| m14Live | pass — m14Live: L1–L7 all passed (separate contexts, live backend) |
+| m15Live | pass — m15Live: 21 checks passed — P1–P8 + T&S complete |
+| m16Live | pass — m16Live: 10 checks passed — Box Cam cross-app journey complete |
+| m162Live | pass — m162Live: 11 checks passed — Trust Profile journeys complete |
+| m17Live | pass — m17Live: 25 checks passed — Recruitment Room journeys complete |
+| m18Live | pass — m18Live: 60 checks passed — Second Look and Nobody Missed journeys complete |
+| m181Live | pass — M18.1 live browser journeys: 37 checks passed (H1–H10) |
+| m182Live | pass — M18.2 live browser journeys: 37 checks passed (J1–J10) |
+| m19Live | pass — M19 live journeys: 17 checks passed |
+| m20Live | pass — M20 live journeys: 59 checks passed |
+| m21Live | pass — M21 live journeys: 68 checks passed |
+| m22Live | pass — production Combine eligibility: NOT ELIGIBLE — real-world validation not completed |
+| m23Live | pass — m23Live: 39 checks passed — P2 sweep corrections verified end to end |
+
+Every suite ran from clean ports after the demo rebuild; the demo spotchecks (11) and the four demo suites read the rebuilt bundles; the 15 live suites and liveIntegration build their own live bundles from the same source. Player flows exercised: `/football` (m15/m16/m162/m17/m21/m22), `/opportunities` (m12/m13), `/you?tab=clubs` (m13), `/upload` (uiSpotcheck).
+
+### Server suites (25, plus apiE2E against an owned :4000 server)
+
+| suite | result |
+|---|---|
+| testTrust | pass — 23 trust/safeguarding tests passed |
+| apiE2E | pass — 130 API checks passed (rerun with an owned server on :4000; the battery script starts none) |
+| connectedE2E | pass — 43 connected-mode checks passed |
+| m12E2E | pass — m12E2E: all 147 checks passed |
+| m13E2E | pass — m13E2E: all 212 checks passed |
+| m14E2E | pass — m14E2E: all 193 checks passed |
+| m141E2E | pass — M14.1 adversarial suite: 94 checks passed |
+| m15E2E | pass — M15 acceptance suite: 185 checks passed, 71 negative/abuse checks (38% of all checks) |
+| m16E2E | pass — M16 acceptance suite: 118 checks passed, 55 negative/abuse checks (47% of all checks) |
+| m161E2E | pass — all M16.1 checks passed |
+| m162E2E | pass — all M16.2 checks passed |
+| m17E2E | pass — all M17 checks passed |
+| m18E2E | pass — all M18 checks passed |
+| m181E2E | pass — all M18.1 checks passed |
+| m182E2E | pass — all M18.2 checks passed |
+| m19E2E | pass — all M19 checks passed |
+| m20E2E | pass — all M20 checks passed |
+| m21E2E | pass — all M21 checks passed |
+| m22E2E | pass — M22 acceptance suite: 112 checks passed, 82 negative/integrity/security checks (73% of all checks) |
+| m23E2E | pass — all M23 P2 checks passed |
+| m23Persistence | pass — M23-D2 persistence suite: 67 checks passed, 20 negative/integrity checks (30%) |
+| m23BootContract | pass — all M23 boot-contract checks passed |
+| m17Perf | pass — Passport projection (same player, direct)  median 1.4 ms   p90 1.6 ms |
+| m18Perf | pass — matching the WHOLE brief costs 1.81× a single Passport assembly — the match runs on light facts, not assembled |
+| m181Perf | pass — noise. Worth revisiting if Passports of that size become common; today the |
+
+Frozen P2 set (m23Persistence, m23BootContract, m23E2E, m17E2E, m18E2E, m20E2E): green. `git diff bf069b1 -- scoutbox-server` remains empty.
+
+
+## C9. Final audit
+
+```
+Pipeline destinations require blind horizontal scrolling at 390px: NO
+Core Pipeline destination hidden without explicit overflow indication: NO
+Mobile and desktop Pipeline permissions differ: NO
+Pipeline deep link broken: NO
+Pipeline back/forward broken: NO
+Pipeline unsaved-change guard bypass exists: NO
+390px document overflow remains: NO
+360px navigation overflow remains: NO
+
+Discover task-find fails: NO
+Watchlists task-find fails: NO
+Cases task-find fails: NO
+Rooms task-find fails: NO
+Second Look task-find fails: NO
+Trials task-find fails: NO
+Analytics task-find fails: NO
+
+Published/demo artifacts stale: NO
+Demo artifacts rebuild from current source: YES
+Demo spotchecks green: YES
+Relevant live suites green: YES
+Stale-artifact regression exists: YES
+
+Pro condensed navigation preserved: YES
+Grassroots condensed navigation preserved: YES
+Player condensed navigation preserved: YES
+Condensed top bars preserved: YES
+Room condensed header preserved: YES
+
+Route removed unintentionally: NO
+Permission widened: NO
+Deep link broken: NO
+Notification link broken: NO
+Raw localization key visible: NO
+Keyboard accessibility defect remains: NO
+Process/port leak remains: NO
+
+All typechecks green: YES
+All required production builds green: YES
+Browser/live/demo battery green: YES
+Frozen P2 regression green: YES
+Server modified unnecessarily: NO
+Contact implementation begun: NO
+recruitmentOffers created prematurely: NO
+Tree clean: YES
+```
+
+## C10. Success condition
+
+```
+M23 P2.5 FINAL CLOSURE COMPLETE
+NAVIGATION IA FROZEN
+MOBILE PIPELINE DISCOVERABILITY FIXED
+DEMO ARTIFACTS CURRENT
+ALL CORE DESTINATIONS DISCOVERABLE ACROSS DESKTOP AND MOBILE
+READY FOR M23 CONTACT WORKFLOW
+```
+
+Stopped here. Not pushed, no PR, no merge, no deploy, no Contact code.

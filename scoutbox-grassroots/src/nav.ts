@@ -18,6 +18,14 @@ export interface NavItem {
   aliases?: string[];
   /** Client-side convenience filter; server authorization stays authoritative. */
   visible?: (ctx: NavContext) => boolean;
+  /**
+   * P2.5 closure — phone strip presentation only. In a group with more pages
+   * than fit in one row, the `primary` pages stay visible and the rest sit
+   * behind an explicit "More" menu. Never affects visibility or routing.
+   */
+  primary?: boolean;
+  /** Shorter label for the phone strip (e.g. "Rooms" for "Recruitment Rooms"); the full label everywhere else. */
+  shortKey?: string;
 }
 
 /**
@@ -75,7 +83,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     id: 'players', labelKey: 'navsec.players', icon: 'user',
     children: [
-      { id: 'squad', labelKey: 'nav.squad', aliases: ['squad', 'match days', 'team', 'effectif', 'équipe'] },
+      { id: 'squad', labelKey: 'nav.squad', shortKey: 'navshort.squad', aliases: ['squad', 'match days', 'team', 'effectif', 'équipe'] },
       { id: 'coaches', labelKey: 'nav.coaches', aliases: ['coach', 'staff coaches', 'entraîneurs'] },
       { id: 'friendlies', labelKey: 'nav.friendlies', aliases: ['friendly matches', 'amicaux'] },
       { id: 'fixtures', labelKey: 'nav.fixtures', aliases: ['matches', 'schedule', 'rencontres'] },
@@ -90,30 +98,30 @@ export const NAV_SECTIONS: NavSection[] = [
       { id: 'search', labelKey: 'nav2.search', aliases: ['players', 'player search', 'find players', 'discover', 'joueurs', 'recherche'] },
       { id: 'shortlist', labelKey: 'nav.shortlist', aliases: ['watchlist', 'saved players', 'présélection'] },
       { id: 'filmroom', labelKey: 'nav.filmroom', aliases: ['film', 'clips', 'footage', 'vidéo'] },
-      { id: 'insight', labelKey: 'nav.insight', aliases: ['scouting insight', 'analyse'] },
+      { id: 'insight', labelKey: 'nav.insight', shortKey: 'navshort.insight', aliases: ['scouting insight', 'analyse'] },
       // — Pipeline (Open Days are how grassroots recruits, so they sit here)
-      { id: 'recruitment', labelKey: 'nav2.recruitment', aliases: ['pipeline', 'applications', 'recrutement'] },
-      { id: 'rooms', labelKey: 'nav2.rooms', aliases: ['recruitment rooms', 'room', 'rooms', 'workspace', 'salles'] },
-      { id: 'requests', labelKey: 'nav2.requests', aliases: ['player requests', 'contact requests', 'demandes'] },
+      { id: 'recruitment', labelKey: 'nav2.recruitment', primary: true, aliases: ['pipeline', 'applications', 'recrutement'] },
+      { id: 'rooms', labelKey: 'nav2.rooms', primary: true, shortKey: 'navshort.rooms', aliases: ['recruitment rooms', 'room', 'rooms', 'workspace', 'salles'] },
+      { id: 'requests', labelKey: 'nav2.requests', primary: true, shortKey: 'navshort.requests', aliases: ['player requests', 'contact requests', 'demandes'] },
       { id: 'opportunities', labelKey: 'nav.opportunities', aliases: ['open roles', 'positions', 'opportunités'] },
       { id: 'campaigns', labelKey: 'nav.campaigns', aliases: ['campagnes'] },
-      { id: 'opendays', labelKey: 'nav.opendays', aliases: ['open days', 'portes ouvertes'] },
-      { id: 'outcomes', labelKey: 'nav2.outcomes', aliases: ['signings', 'post-signing', 'signatures'] },
+      { id: 'opendays', labelKey: 'nav.opendays', shortKey: 'navshort.opendays', aliases: ['open days', 'portes ouvertes'] },
+      { id: 'outcomes', labelKey: 'nav2.outcomes', shortKey: 'navshort.outcomes', aliases: ['signings', 'post-signing', 'signatures'] },
       // — Evidence
       { id: 'assessments', labelKey: 'nav.assessments', aliases: ['reports', 'scouting reports', 'évaluations', 'rapports'] },
-      { id: 'video', labelKey: 'nav2.video', aliases: ['evidence', 'video workspace', 'preuves'] },
-      { id: 'trials', labelKey: 'nav.trials', aliases: ['trial', 'trial reports', 'essais'] },
+      { id: 'video', labelKey: 'nav2.video', shortKey: 'navshort.video', aliases: ['evidence', 'video workspace', 'preuves'] },
+      { id: 'trials', labelKey: 'nav.trials', shortKey: 'navshort.trials', aliases: ['trial', 'trial reports', 'essais'] },
       { id: 'trialdays', labelKey: 'nav.trialdays', aliases: ['trial days', 'journées d’essai'] },
       // — Intelligence (M18/M19 — none is a ranking)
-      { id: 'briefs', labelKey: 'nav2.briefs', aliases: ['recruitment briefs', 'brief', 'briefs', 'criteria', 'cahier des charges', 'briefs de recrutement'] },
-      { id: 'matching', labelKey: 'nav2.matching', aliases: ['player matching', 'explainable matching', 'match criteria', 'who matches', 'why this player matches', 'correspondance', 'critères de correspondance'] },
-      { id: 'watchlists', labelKey: 'nav2.watchlists', aliases: ['dynamic watchlists', 'dynamic watchlist', 'saved criteria', 'listes dynamiques', 'critères enregistrés'] },
+      { id: 'briefs', labelKey: 'nav2.briefs', primary: true, shortKey: 'navshort.briefs', aliases: ['recruitment briefs', 'brief', 'briefs', 'criteria', 'cahier des charges', 'briefs de recrutement'] },
+      { id: 'matching', labelKey: 'nav2.matching', primary: true, shortKey: 'navshort.matching', aliases: ['player matching', 'explainable matching', 'match criteria', 'who matches', 'why this player matches', 'correspondance', 'critères de correspondance'] },
+      { id: 'watchlists', labelKey: 'nav2.watchlists', shortKey: 'navshort.watchlists', aliases: ['dynamic watchlists', 'dynamic watchlist', 'saved criteria', 'listes dynamiques', 'critères enregistrés'] },
       { id: 'secondlook', labelKey: 'nav2.secondlook', aliases: ['second look', 'worth another look', 'evidence changed', 'reconsider', 'second regard', 'nouveau regard'] },
-      { id: 'nobodymissed', labelKey: 'nav2.nobodymissed', aliases: ['nobody missed', 'evaluation coverage', 'coverage gaps', 'not yet evaluated', 'couverture d’évaluation'] },
+      { id: 'nobodymissed', labelKey: 'nav2.nobodymissed', shortKey: 'navshort.nobodymissed', aliases: ['nobody missed', 'evaluation coverage', 'coverage gaps', 'not yet evaluated', 'couverture d’évaluation'] },
       // — Analytics (M20 measures the process, never a player or a colleague)
-      { id: 'dashboard', labelKey: 'nav2.dashboard', aliases: ['director dashboard', 'recruitment analytics', 'analytics', 'pipeline health', 'how long does it take', 'stalled rooms', 'tableau de bord', 'analyse du recrutement'] },
+      { id: 'dashboard', labelKey: 'nav2.dashboard', shortKey: 'navshort.dashboard', aliases: ['director dashboard', 'recruitment analytics', 'analytics', 'pipeline health', 'how long does it take', 'stalled rooms', 'tableau de bord', 'analyse du recrutement'] },
       { id: 'funnel', labelKey: 'nav.funnel', aliases: ['recruitment funnel', 'entonnoir'] },
-      { id: 'ledger', labelKey: 'nav.ledger', aliases: ['discovery ledger', 'audit trail', 'registre'] },
+      { id: 'ledger', labelKey: 'nav.ledger', shortKey: 'navshort.ledger', aliases: ['discovery ledger', 'audit trail', 'registre'] },
       // — Planning: scout planning, not squad management
       { id: 'coverage', labelKey: 'nav.coverage', aliases: ['scout coverage', 'planning', 'couverture'] },
       { id: 'calibration', labelKey: 'nav.calibration', aliases: ['scout calibration', 'calibrage'] },
@@ -135,11 +143,11 @@ export const NAV_SECTIONS: NavSection[] = [
     // never an empty husk, because `filterSections` drops empty sections.
     id: 'organisation', labelKey: 'navsec.club', icon: 'building',
     children: [
-      { id: 'network', labelKey: 'nav2.network', aliases: ['clubs', 'groups', 'federation', 'network', 'réseau'] },
-      { id: 'organisation', labelKey: 'nav2.organisation', aliases: ['staff', 'security', 'settings', 'organisation'], visible: leadOrVer },
+      { id: 'network', labelKey: 'nav2.network', primary: true, shortKey: 'navshort.network', aliases: ['clubs', 'groups', 'federation', 'network', 'réseau'] },
+      { id: 'organisation', labelKey: 'nav2.organisation', primary: true, shortKey: 'navshort.organisation', aliases: ['staff', 'security', 'settings', 'organisation'], visible: leadOrVer },
       { id: 'verification', labelKey: 'nav.verification', aliases: ['verify', 'staff verification', 'club verification', 'vérification'], visible: leadOrVer },
       { id: 'imports', labelKey: 'nav2.imports', aliases: ['integrations', 'imports', 'webhooks', 'intégrations'], visible: (c) => isLeadRole(c.role) },
-      { id: 'plan', labelKey: 'nav.plan', aliases: ['billing', 'compliance', 'subscription', 'abonnement'], visible: (c) => isLeadRole(c.role) },
+      { id: 'plan', labelKey: 'nav.plan', shortKey: 'navshort.plan', aliases: ['billing', 'compliance', 'subscription', 'abonnement'], visible: (c) => isLeadRole(c.role) },
     ],
   },
 ];
@@ -197,6 +205,25 @@ export function groupedChildren(section: NavSection): NavGroupView[] {
 export function groupSiblings(section: NavSection, itemId: ScreenId | null): NavItem[] {
   const hit = groupedChildren(section).find((g) => g.children.some((c) => c.id === itemId));
   return hit ? hit.children : groupedChildren(section)[0]?.children ?? [];
+}
+
+/**
+ * P2.5 closure — how the PHONE strip lays a group out. A group of up to
+ * `max` pages is shown whole. A longer group shows its `primary` pages (or,
+ * if none is flagged, its first `max - 1`) and puts the rest behind an
+ * explicit "More" control, so every page is discoverable without scrolling
+ * a clipped row. Same items, same order, same visibility as the desktop
+ * accordion — this is presentation, computed from the same configuration.
+ */
+export const STRIP_MAX_VISIBLE = 4;
+export interface StripLayout { visible: NavItem[]; overflow: NavItem[]; activeInOverflow: NavItem | null }
+export function stripLayout(section: NavSection, itemId: ScreenId | null, max: number = STRIP_MAX_VISIBLE): StripLayout {
+  const items = groupSiblings(section, itemId);
+  if (items.length <= max) return { visible: items, overflow: [], activeInOverflow: null };
+  const flagged = items.filter((c) => c.primary);
+  const visible = flagged.length > 0 ? flagged.slice(0, max - 1) : items.slice(0, max - 1);
+  const overflow = items.filter((c) => !visible.includes(c));
+  return { visible, overflow, activeInOverflow: overflow.find((c) => c.id === itemId) ?? null };
 }
 
 /** The group an item belongs to, or null in an ungrouped section. */
