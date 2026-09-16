@@ -72,6 +72,7 @@ input:focus, select:focus { outline: none; border-color: var(--accent-2); }
 .org-card .org-name { font-weight: 700; font-size: 17px; }
 .login .enter-row { display: flex; gap: 12px; align-items: center; }
 .login input { width: 280px; }
+.login input.login-pw { width: 200px; }
 
 /* ---------- shell ---------- */
 .shell { display: grid; grid-template-columns: 218px 1fr; height: 100vh; }
@@ -396,7 +397,7 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
   .org-grid { flex-wrap: wrap; justify-content: center; }
   .org-card { width: 100%; max-width: 340px; }
   .login .enter-row { flex-wrap: wrap; justify-content: center; }
-  .login input { width: 100%; max-width: 340px; }
+  .login input, .login input.login-pw { width: 100%; max-width: 340px; }
   .register-box { padding: 14px; }
   .bubble { max-width: 88%; }
   table.data { display: block; overflow-x: auto; }

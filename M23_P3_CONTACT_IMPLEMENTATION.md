@@ -230,8 +230,9 @@ apps; `ct*` in the player app).
   opens on acceptance is untouched.
 - No analytics, Trust, Passport, Development or Second Look changes.
 - No index on the contacts store: measured, not needed (§165–§166).
-- No change to the login screen at 390px (defect register D4, deferred with
-  the fix recorded).
+- The login screens (Pro, Grassroots, T&S) were fixed to fit 360px in the
+  P3 closure pass (defect register D4, closed; navLive N17 guards it). That
+  is the only change outside the Contact surfaces.
 
 ## 12. Closing checks
 

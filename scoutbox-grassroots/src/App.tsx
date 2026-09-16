@@ -207,7 +207,7 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && enter()}
-          style={{ width: 200 }}
+          className="login-pw"
         />
         <select value={role} onChange={(e) => setRole(e.target.value)}>
           {ROLES.map((r) => <option key={r}>{r}</option>)}

@@ -712,6 +712,72 @@ const fresh = async (p) => { await goHash(p, 'feed'); await p.reload(); await p.
   say('N7: player app — Home / Football / Opportunities / Inbox / You; Profile and Upload stay routes (href: null); Football has page tabs and + Add evidence (browser journeys live in the player suites)');
 }
 
+// ================= N17 — the login screen fits a phone (M23 P3 closure, D4)
+//
+// D4: at 390px the club login's organisation grid (four 240px cards, no
+// wrap) and enter row (name + password + role + button, no wrap) widened the
+// document to ~571px and pushed "Enter workspace" past the viewport edge. A
+// CSS reading would not have caught it; this opens the REAL login page at
+// two phone widths and measures.
+for (const width of [390, 360]) {
+  const ctx = await browser.newContext({ viewport: { width, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => fail(`N17 page error (${width}px): ${e}`));
+  await page.goto(CLUB);
+  await page.waitForSelector('.org-card', { timeout: 20000 });
+  const fits = () => page.evaluate(() => ({ iw: window.innerWidth, sw: document.documentElement.scrollWidth, bw: document.body.scrollWidth, vv: Math.round(window.visualViewport?.width ?? 0) }));
+  const inside = (sel) => page.evaluate((s) => { const el = [...document.querySelectorAll(s)].pop(); if (!el) return null; const r = el.getBoundingClientRect(); return { left: Math.round(r.left), right: Math.round(r.right), height: Math.round(r.height), iw: window.innerWidth }; }, sel);
+  let m = await fits();
+  if (m.sw > m.iw || m.iw !== width) fail(`N17 ${width}px: the org picker widens the document (innerWidth ${m.iw}, scrollWidth ${m.sw})`);
+  // A validation error on screen must not widen it either.
+  await page.click('button:has-text("Enter workspace")');
+  await page.waitForSelector('.login .notice', { timeout: 5000 });
+  m = await fits();
+  if (m.sw > m.iw) fail(`N17 ${width}px: the validation notice widens the document (${m.sw})`);
+  // Long content in the fields.
+  await page.click('.org-card:has-text("Eastport FC")');
+  await page.fill('.enter-row input', 'averyveryverylongscoutname.example@example-organisation.football');
+  await page.selectOption('.enter-row select', 'First-Team Scout');
+  m = await fits();
+  if (m.sw > m.iw) fail(`N17 ${width}px: a long name widens the document (${m.sw})`);
+  const btn = await inside('.login button.primary');
+  if (!btn || btn.left < 0 || btn.right > btn.iw) fail(`N17 ${width}px: Enter workspace is clipped (${JSON.stringify(btn)})`);
+  if (btn.height < 34) fail(`N17 ${width}px: Enter workspace is below the 34px phone target (${btn.height})`);
+  for (const sel of ['.enter-row input', '.enter-row input.login-pw', '.enter-row select']) {
+    const box = await inside(sel);
+    if (!box || box.left < 0 || box.right > box.iw) fail(`N17 ${width}px: ${sel} is clipped (${JSON.stringify(box)})`);
+  }
+  // Keyboard: name → password → role → button, and the button shows its focus ring.
+  await page.focus('.enter-row input');
+  await page.keyboard.press('Tab'); await page.keyboard.press('Tab'); await page.keyboard.press('Tab');
+  const focus = await page.evaluate(() => { const el = document.activeElement; const cs = getComputedStyle(el); return { tag: el.tagName, text: el.textContent, outline: cs.outlineStyle, outlineWidth: cs.outlineWidth }; });
+  if (focus.tag !== 'BUTTON' || !/Enter workspace/.test(focus.text)) fail(`N17 ${width}px: three Tabs from the name field must reach Enter workspace (got ${focus.tag} ${focus.text})`);
+  if (focus.outline === 'none' || focus.outlineWidth === '0px') fail(`N17 ${width}px: the focused button has no visible focus ring`);
+  // The real login still works from the keyboard.
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('nav.sidebar, .nav-hamburger', { timeout: 20000 });
+  say(`N17 ${width}px: the login fits (innerWidth ${m.iw} = scrollWidth ${m.sw}), every field and the button are inside the viewport, keyboard login works`);
+  await ctx.close();
+}
+// Desktop: the enter row is still one line and nothing moved.
+{
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await ctx.newPage();
+  await page.goto(CLUB);
+  await page.waitForSelector('.org-card', { timeout: 20000 });
+  const row = await page.evaluate(() => {
+    // The row is align-items: center, so the children share a vertical centre
+    // (within a pixel), not a top; the cards are align-items: stretch.
+    const centres = [...document.querySelectorAll('.enter-row > *')].map((el) => { const r = el.getBoundingClientRect(); return Math.round(r.top + r.height / 2); });
+    const cards = [...document.querySelectorAll('.org-card')].map((el) => Math.round(el.getBoundingClientRect().top));
+    const rowOneLine = Math.max(...centres) - Math.min(...centres) <= 1;
+    return { rowOneLine, centres, cardsOneLine: new Set(cards).size === 1, sw: document.documentElement.scrollWidth, iw: window.innerWidth };
+  });
+  if (!row.rowOneLine || !row.cardsOneLine || row.sw > row.iw) fail(`N17 desktop: the login layout changed (${JSON.stringify(row)})`);
+  say('N17 desktop: the organisation cards and the enter row are each still one line');
+  await ctx.close();
+}
+
 await browser.close();
-console.log(`\nnavLive: ${passed} checks passed — N1–N16 complete`);
+console.log(`\nnavLive: ${passed} checks passed — N1–N17 complete`);
 process.exit(0);

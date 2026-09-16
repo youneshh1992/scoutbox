@@ -55,7 +55,12 @@ input:focus, select:focus { outline: none; border-color: var(--accent-2); }
 
 /* ---------- login ---------- */
 .login {
-  height: 100vh;
+  /* D4: min-height, not height. With a fixed 100vh a wrapped phone layout
+     was centred inside a box shorter than its content and the top of the
+     card became unreachable. Desktop is unchanged: the content is shorter
+     than the viewport, so it is centred exactly as before. */
+  min-height: 100vh;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -66,7 +71,10 @@ input:focus, select:focus { outline: none; border-color: var(--accent-2); }
 .login h1 { font-size: 42px; letter-spacing: -1px; }
 .login h1 span { color: var(--accent); }
 .login .tagline { color: var(--muted); margin-top: 6px; }
-.org-grid { display: flex; gap: 16px; }
+/* D4: the grid and the enter row may wrap. At desktop width nothing wraps
+   (four 240px cards fit above 1040px), so this changes nothing there; below
+   it the cards flow instead of widening the document. */
+.org-grid { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
 .org-card {
   width: 240px;
   text-align: left;
@@ -80,8 +88,9 @@ input:focus, select:focus { outline: none; border-color: var(--accent-2); }
 }
 .org-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .org-card .org-name { font-weight: 700; font-size: 17px; }
-.login .enter-row { display: flex; gap: 12px; align-items: center; }
+.login .enter-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; justify-content: center; }
 .login input { width: 280px; }
+.login input.login-pw { width: 200px; }
 
 /* ---------- shell ---------- */
 .shell { display: grid; grid-template-columns: var(--sidebar-w) 1fr; height: 100vh; }
@@ -478,7 +487,17 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
   .bell-panel { left: 8px; right: 8px; width: auto; max-height: 60vh; }
   .drawer { width: 100vw; }
   .drawer .head h3 { font-size: 21px; }
-  .login input, .filters input[type='text'] { width: 100%; max-width: 100%; }
+  .filters input[type='text'] { width: 100%; max-width: 100%; }
+  /* D4 (M23 P3 closure): the login must fit a 360px phone. The cards stack,
+     the fields and the button take the full width of a 340px column, and the
+     row wraps instead of pushing the document to ~571px. */
+  .login { padding: 28px 16px; gap: 20px; }
+  .login h1 { font-size: 30px; }
+  .org-card { width: 100%; max-width: 340px; }
+  .login input, .login input.login-pw, .login select { width: 100%; max-width: 340px; }
+  .login .enter-row { width: 100%; }
+  .login .enter-row button.primary { width: 100%; max-width: 340px; }
+  .login .notice { max-width: 340px; }
   table.data { font-size: 12px; }
   /* Touch targets: a 24px pill-sized button is not reliably tappable. */
   button { min-height: 34px; }
