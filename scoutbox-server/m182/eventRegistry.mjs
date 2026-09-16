@@ -229,6 +229,56 @@ export const EVENT_REGISTRY = {
   // the recipient hears through the existing `inbox` ping and `notify`, both
   // of which are addressed to one person and pass through their preferences.
   // A draft emits nothing a player could ever receive (§58, §83).
+  // ---- M23 P4B Trial. All org_private, ids only (architecture §14). The
+  // recipient side keeps the existing `inbox` / `notify` events; no Trial
+  // event ever carries a schedule, a venue, an attendance note, an assessment
+  // or a guardian id. Analytics reads none of them — counts come from the
+  // store, small-n applied.
+  trial_invited: {
+    domain: 'recruitment', sourceSystem: 'requests', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'requestId'],
+    dedupeStrategy: 'none', replayPolicy: 'never', notificationEligible: true, analyticsEligible: false,
+  },
+  trial_accepted: {
+    domain: 'recruitment', sourceSystem: 'trials', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'trialId', 'requestId'],
+    dedupeStrategy: 'none', replayPolicy: 'never', notificationEligible: true, analyticsEligible: false,
+  },
+  trial_declined: {
+    domain: 'recruitment', sourceSystem: 'requests', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'requestId'],
+    dedupeStrategy: 'none', replayPolicy: 'never', notificationEligible: true, analyticsEligible: false,
+  },
+  trial_scheduled: {
+    domain: 'recruitment', sourceSystem: 'trials', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'trialId'],
+    dedupeStrategy: 'none', replayPolicy: 'never', notificationEligible: true, analyticsEligible: false,
+  },
+  trial_rescheduled: {
+    domain: 'recruitment', sourceSystem: 'trials', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'trialId'],
+    dedupeStrategy: 'none', replayPolicy: 'never', notificationEligible: true, analyticsEligible: false,
+  },
+  trial_cancelled: {
+    domain: 'recruitment', sourceSystem: 'trials', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'trialId'],
+    dedupeStrategy: 'none', replayPolicy: 'never', notificationEligible: true, analyticsEligible: false,
+  },
+  trial_attendance_recorded: {
+    domain: 'recruitment', sourceSystem: 'trials', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'trialId', 'sessionId'],
+    dedupeStrategy: 'none', replayPolicy: 'never', notificationEligible: false, analyticsEligible: false,
+  },
+  trial_completed: {
+    domain: 'recruitment', sourceSystem: 'trials', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'trialId'],
+    dedupeStrategy: 'none', replayPolicy: 'never', notificationEligible: true, analyticsEligible: false,
+  },
+  trial_evidence_linked: {
+    domain: 'recruitment', sourceSystem: 'trials', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'trialId', 'sessionId'],
+    dedupeStrategy: 'none', replayPolicy: 'never', notificationEligible: false, analyticsEligible: false,
+  },
   contact_created: {
     domain: 'recruitment', sourceSystem: 'recruitmentContacts', audience: 'org_private',
     privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'contactId'],

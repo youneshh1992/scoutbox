@@ -264,7 +264,11 @@ export const ROOM_TRANSITIONS = table({
  */
 export const STATUS_EVIDENCE_REQUIRED = table({
   contacted: { kind: 'contact_delivered', note: 'a contact must have been delivered or recorded' },
-  trial_scheduled: { kind: 'trial_confirmed', note: 'the player or guardian must have accepted a trial' },
+  // M23 P4B (D-3): the ONE widening of this table P4B makes — not a new
+  // status, not a new edge. `trial_requested` says a trial was asked for, and
+  // the record that proves it is the invitation the recipient can see.
+  trial_requested: { kind: 'trial_invited', note: 'a trial invitation must have been sent to the player or their guardian' },
+  trial_scheduled: { kind: 'trial_confirmed', note: 'a trial schedule must have been confirmed with at least one concrete session' },
   trial_completed: { kind: 'trial_completed', note: 'a trial must have been completed' },
   offer_made: { kind: 'offer_sent', note: 'an offer must have been sent' },
   offer_accepted: { kind: 'offer_accepted_by_recipient', note: 'the recipient must have accepted their own offer' },
@@ -609,6 +613,14 @@ export const roomCan = (role, action) => {
     // a real person on the other end, and sit with the room lead (contract §6).
     contact_view: 0,
     contact_write: 2,
+    // M23 P4B — Trial (architecture §11). Shared Trial information is club
+    // memory; a scout may assess in Trial context; inviting, scheduling,
+    // cancelling, attendance, completion and evidence links are outward or
+    // operational acts and sit with the room lead. `request_trial` above is
+    // the same level and is what the invitation route checks.
+    trial_view: 0,
+    trial_assess: 1,
+    trial_write: 2,
     manage_any_room: 3,
   }[action];
   return need != null && rank >= need;

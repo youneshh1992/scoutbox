@@ -124,7 +124,7 @@ section('§100/§101 — the store is guaranteed by the registry, on every path'
   old.schema.version = 2302; old.schema.migrations = old.schema.migrations.filter((m) => m.id !== 'm230_004_recruitment_contacts'); delete old.recruitmentContacts;
   const beforeOthers = stableJson({ ...old, schema: undefined });
   const up = runMigrations(old);
-  ok(up.ran.length === 1 && up.ran[0] === 'm230_004_recruitment_contacts' && up.to === SCHEMA_VERSION, 'a P2.5-era snapshot (2302) runs exactly the one new step');
+  ok(up.ran[0] === 'm230_004_recruitment_contacts' && up.ran.every((id) => /^m230_00[4-9]/.test(id)) && up.to === SCHEMA_VERSION, `a P2.5-era snapshot (2302) runs the Contact step first, then only later M23 steps (${up.ran.join(', ')})`);
   ok(Array.isArray(old.recruitmentContacts) && old.recruitmentContacts.length === 0, 'and gains an empty store');
   const afterOthers = stableJson({ ...old, recruitmentContacts: undefined, schema: undefined });
   neg(beforeOthers === afterOthers, 'and no other collection changed');

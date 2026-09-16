@@ -46,7 +46,12 @@ import { MIGRATION_GUARANTEED } from '../storeContract.mjs';
 //
 // 23.0.3 — M23 P3 adds ONE store, `db.recruitmentContacts`, the Contact
 // workflow's own record. Justified in M23_P3_CONTACT_REUSE_AUDIT.md Part C.
-export const SCHEMA_VERSION = 2303;
+//
+// 23.0.4 — M23 P4B adds NO store. It adds neutral operational containers to
+// every existing `db.trials` row (D-20): the row keeps its M12 meaning and
+// its report-obligation `status`; the new fields say "nothing recorded" —
+// never a fabricated schedule, attendance or completion.
+export const SCHEMA_VERSION = 2304;
 
 /**
  * Every step is idempotent: running it twice is the same as running it once.
@@ -297,6 +302,38 @@ export const MIGRATIONS = [
     note: 'M23 P3: the Contact workflow store (recruitmentContacts).',
     up(db) {
       db.recruitmentContacts ??= [];
+    },
+  },
+  {
+    id: 'm230_005_trial_workflow',
+    version: 2304,
+    // M23 P4B — the Trial workflow. NO new store: `db.trials` is extended
+    // additively (M23_P4A_DECISION_REGISTER.md D-1, D-20). Every pre-P4B row
+    // gains the neutral containers below and reads as `legacy_accepted`: an
+    // accepted trial with no schedule revision, no session list, no attendance
+    // record and no completion. Nothing is backfilled from `proposedDate` —
+    // a date the club typed is not a confirmed schedule, and inventing one
+    // would let a case reach `trial_scheduled` on evidence nobody recorded.
+    //
+    // Idempotent (`??=`), never destructive, tolerant of a missing or
+    // malformed `trials` collection (the boot-contract step already
+    // guarantees the collection exists; this one only shapes its rows).
+    note: 'M23 P4B: additive Trial workflow containers on db.trials (workflowState, caseId, schedule, attendance, completion, keys, rev, history, reminders).',
+    up(db) {
+      db.trials ??= [];
+      if (!Array.isArray(db.trials)) return;
+      for (const t of db.trials) {
+        if (!t || typeof t !== 'object') continue;
+        t.workflowState ??= 'legacy_accepted';
+        t.caseId ??= null;
+        t.schedule ??= null;
+        t.attendance ??= [];
+        t.completion ??= null;
+        t.keys ??= {};
+        t.rev ??= 1;
+        t.history ??= [];
+        t.reminders ??= {};
+      }
     },
   },
 ];

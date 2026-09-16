@@ -1462,7 +1462,9 @@ section('Y — the error contract: one table, no default, nothing internal in th
   // the one legitimate exception: M18.1's rev guard raises it, not M23.
   // `CONTACT_VERSION_CONFLICT` (P3) is the same M18.1 guard, named for the Contact
   // record: raised through `errorCode:` in contactRoutes, never as `error:`.
-  const EXTERNAL = new Set(['ROOM_VERSION_CONFLICT', 'CONTACT_VERSION_CONFLICT']);
+  // `TRIAL_VERSION_CONFLICT` (P4B) is the same M18.1 guard, named for the
+  // Trial record: raised through `errorCode:` in trialRoutes, never as `error:`.
+  const EXTERNAL = new Set(['ROOM_VERSION_CONFLICT', 'CONTACT_VERSION_CONFLICT', 'TRIAL_VERSION_CONFLICT']);
   const orphaned = Object.keys(M23_ERROR_HTTP).filter((c) => !produced.has(c) && !EXTERNAL.has(c));
   for (const c of orphaned) console.error(`   orphaned: ${c}`);
   neg(orphaned.length === 0, 'Y3 and the table contains no code nothing can produce');

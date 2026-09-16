@@ -328,7 +328,7 @@ section('V — registry, limits and schema');
   neg(!EVENT_REGISTRY.contact_created.notificationEligible, 'a draft can never become a notification');
   for (const a of ['contact_draft', 'contact_send', 'contact_external_record', 'contact_response']) ok(RATE_LIMIT_POLICY[a]?.max > 0, `rate-limit policy ${a} exists (${RATE_LIMIT_POLICY[a].max}/window)`);
   ok(RATE_LIMIT_POLICY.contact_response.scope === 'actor', 'the response limit is per actor, so a club cannot exhaust a recipient\'s quota');
-  ok(SCHEMA_VERSION === 2303 && MIGRATIONS.some((m) => m.id === 'm230_004_recruitment_contacts'), 'schema 2303 with one new numbered step');
+  ok(SCHEMA_VERSION >= 2303 && MIGRATIONS.some((m) => m.id === 'm230_004_recruitment_contacts'), `schema ${SCHEMA_VERSION} (2303 introduced the Contact step; later phases may add steps, never remove this one)`);
   const fresh = {}; runMigrations(fresh);
   ok(Array.isArray(fresh.recruitmentContacts), 'a fresh database has the store after migrations alone');
   const old = { recruitmentContacts: [{ id: 'keep' }] }; runMigrations(old);

@@ -27,10 +27,12 @@
  */
 
 import { CONTACT_EVIDENCE_STATUSES, contactIntegrity } from './contact.mjs';
+import { trialIntegrity, deriveWorkflowState } from './trial.mjs';
 
 /** Every kind the lifecycle can ask about. Anything else is a programming error. */
 export const EVIDENCE_KINDS = Object.freeze([
   'contact_delivered',
+  'trial_invited',
   'trial_confirmed',
   'trial_completed',
   'offer_sent',
@@ -104,7 +106,50 @@ export function createEvidenceProvider(db) {
           : { satisfied: false, reason: 'no_contact_delivered' };
       }
 
-      // Trial and Offer evidence arrive with their own phases.
+      // ---- P4B Trial evidence. Same direction as every other kind: trial
+      // truth -> lifecycle. The provider reads `db.requests` and `db.trials`
+      // and writes nothing.
+      if (kind === 'trial_invited') {
+        // D-3: an authorised invitation that was actually delivered — a
+        // request row of type `trial` FOR THIS CASE (caseId on the request),
+        // issued through the single request writer, still pending or
+        // accepted. A declined or suspended invitation proves nothing; a
+        // draft, a room task and the `planTrial` action alone prove nothing;
+        // a legacy request with no caseId is not evidence for a case it was
+        // never tied to.
+        const requests = db?.requests;
+        if (!Array.isArray(requests)) return { satisfied: false, reason: 'requests_store_unavailable' };
+        const hit = requests.find((r) => r && r.type === 'trial' && r.caseId === kase.id && r.orgId === kase.orgId
+          && r.playerId === kase.playerId && ['pending', 'accepted'].includes(r.status) && !r.subjectRemovedAt);
+        return hit
+          ? { satisfied: true, sourceType: 'trial_request', sourceId: hit.id }
+          : { satisfied: false, reason: 'no_invitation' };
+      }
+
+      if (kind === 'trial_confirmed' || kind === 'trial_completed') {
+        // D-4 / D-5. A Trial row for THIS case, structurally sound, whose
+        // stored operational state matches what its own fields derive.
+        // `legacy_accepted` never satisfies `trial_confirmed` (no confirmed
+        // schedule exists) and `reported` never satisfies `trial_completed`
+        // (a report is not completion). A tombstoned trial still answers —
+        // history stays honest after the person left (D-26).
+        const trials = db?.trials;
+        if (!Array.isArray(trials)) return { satisfied: false, reason: 'trials_store_unavailable' };
+        const own = trials.filter((t) => t && t.caseId === kase.id && t.orgId === kase.orgId && t.playerId === kase.playerId
+          && trialIntegrity(t, { orgId: kase.orgId, caseId: kase.id }).length === 0);
+        if (kind === 'trial_confirmed') {
+          const hit = own.find((t) => deriveWorkflowState(t) === 'scheduled' && Number.isFinite(t.schedule?.confirmedAt) && (t.schedule?.sessions?.length ?? 0) > 0);
+          return hit
+            ? { satisfied: true, sourceType: 'trial', sourceId: hit.id }
+            : { satisfied: false, reason: 'no_confirmed_schedule' };
+        }
+        const hit = own.find((t) => t.completion?.state === 'completed' && deriveWorkflowState(t) === 'completed');
+        return hit
+          ? { satisfied: true, sourceType: 'trial', sourceId: hit.id }
+          : { satisfied: false, reason: 'no_completed_trial' };
+      }
+
+      // Offer evidence arrives with its own phase.
       return { satisfied: false, reason: 'not_implemented' };
     },
   };

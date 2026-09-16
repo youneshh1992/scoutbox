@@ -127,6 +127,60 @@ export const M23_ERROR_HTTP = table({
   // ---- 500: ours.
   CONTACT_STATE_UNKNOWN: 500,
   CONTACT_STORE_MISSING: 500,
+
+  // ======================================================== M23 P4B Trial
+  // Same bands, same rule: no default. Every code below is produced by
+  // m23/trial.mjs or m23/trialRoutes.mjs and swept by the drift guard.
+
+  // ---- 400: fix the request.
+  // (`TRIAL_DATE_INVALID`, `TRIAL_SLOT_INVALID` and `TRIAL_NOTES_INVALID` are
+  // the P4A-D1 date module's codes, answered by the legacy request and
+  // respond routes in server.mjs directly; they are not in this table.)
+  TRIAL_SCHEDULE_INVALID: 400,
+  TRIAL_TIMEZONE_INVALID: 400,
+  TRIAL_VENUE_INVALID: 400,
+  TRIAL_SLOTS_INVALID: 400,
+  TRIAL_CONTENT_INVALID: 400,
+  TRIAL_CLIENT_KEY_INVALID: 400,
+  TRIAL_REV_REQUIRED: 400,
+  TRIAL_ATTENDANCE_INVALID: 400,
+  TRIAL_EVIDENCE_REF_INVALID: 400,
+
+  // ---- 403: not yours to do.
+  TRIAL_NOT_PERMITTED: 403,
+  TRIAL_BLOCKED: 403,
+  EVIDENCE_CONSENT_REQUIRED: 403,
+
+  // ---- 404: concealment. A trial, a session or a Box Cam session in another
+  // organisation, for another player, or that never existed answer alike.
+  TRIAL_NOT_FOUND: 404,
+  TRIAL_SESSION_NOT_FOUND: 404,
+  TRIAL_BOXCAM_INCOMPATIBLE: 404,
+
+  // ---- 409: the trial or the case is not where the caller thought.
+  TRIAL_INVALID_STATE: 409,
+  TRIAL_CASE_STATE: 409,
+  TRIAL_VERSION_CONFLICT: 409,
+  TRIAL_IDEMPOTENCY_CONFLICT: 409,
+  TRIAL_COMPLETION_REQUIREMENTS_NOT_MET: 409,
+  TRIAL_SUBJECT_REMOVED: 409,
+  TRIAL_ALREADY_INVITED: 409,
+  EVIDENCE_NOT_FINAL: 409,
+  EVIDENCE_WITHDRAWN: 409,
+
+  // ---- 422: well-formed, permitted, possible — and the world says no.
+  TRIAL_RECIPIENT_UNAVAILABLE: 422,
+  TRIAL_GUARDIAN_REQUIRED: 422,
+
+  // ---- 429: the deterministic per-player invitation cooldown (a declined
+  // invitation cannot be followed by another within the Contact window).
+  TRIAL_INVITE_COOLDOWN: 429,
+
+  // ---- 500: ours. A refused transport (injected for tests, or a real
+  // persistence problem) writes nothing and says so.
+  TRIAL_STATE_UNKNOWN: 500,
+  TRIAL_STORE_MISSING: 500,
+  TRIAL_TRANSPORT_REFUSED: 500,
 });
 
 /** The codes that mean "this build or its data is broken", not "your request was". */
@@ -166,6 +220,10 @@ const PUBLIC_ERROR_FIELDS = [
   // P3: when a contact is refused for cooldown, the caller may know when it
   // can try again. A timestamp, not a person and not a record.
   'retryAt',
+  // P4B: a Trial refusal names the FIELD it refused, the days that WERE
+  // offered, the syntax it expected, and — for the completion gate — the
+  // requirement codes that are missing. Vocabulary, never a person.
+  'field', 'offered', 'expected', 'reasons',
 ];
 
 /**

@@ -96,6 +96,18 @@ export const RATE_LIMIT_POLICY = {
   contact_external_record: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'External contacts recorded.' },
   contact_response: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'Responses to contacts.' },
 
+  // M23 P4B Trial. Invitations reach a real person (or a guardian on a
+  // child's behalf) and are the abuse-sensitive one; scheduling, attendance
+  // and evidence links stay inside the organisation and are bounded only
+  // against a runaway client. Responses are per ACTOR, so a busy club cannot
+  // exhaust a family's quota. The per-player invitation cooldown is
+  // deterministic and separate — see m23/trialRoutes.mjs.
+  trial_invite: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Trial invitations sent to players and guardians.' },
+  trial_schedule: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Trial schedules proposed, revised or cancelled.' },
+  trial_response: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'Trial schedule confirmations, declines and cancellations by a player or guardian.' },
+  trial_evidence_link: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Box Cam sessions linked to a Trial.' },
+  trial_attendance: { max: 120, windowMs: 3_600_000, scope: 'org', note: 'Trial attendance and completion records.' },
+
   // outbound to people
   evidence_request: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Evidence requests to players and guardians.' },
   org_invite: { max: 25, windowMs: 86_400_000, scope: 'org', note: 'Staff invitations.' },

@@ -784,17 +784,27 @@ export function registerRooms(ctx) {
    * appends the history entry M20's funnel reads, in that order, so a status
    * that moved is always a status with a recorded reason for moving.
    */
-  ctx.applyLifecycleTransition = ({ req, room, to, reasonCodes = [], trigger = 'lifecycle' }) => {
+  ctx.applyLifecycleTransition = ({ req, room, to, reasonCodes = [], trigger = 'lifecycle', actor = null }) => {
     const from = room.room.status;
-    applyStatus(room, to, req.org, req.orgUser);
+    // M23 P4B: a case may move BECAUSE a recipient acted (a guardian accepted
+    // a concrete trial slot), through this same writer. The recipient never
+    // addresses the case; the caller passes who acted, and the history entry
+    // names them by kind rather than pretending a club user did it. Absent an
+    // actor, the club user on the request is the actor, exactly as before.
+    const org = actor?.org ?? req.org;
+    const by = actor ? { id: actor.id ?? null, name: actor.name ?? null } : req.orgUser;
+    const write = (type, detail) => (actor
+      ? audit(room, actor.kind ?? 'system', actor.id ?? null, actor.name ?? null, type, detail)
+      : activity(room, req, type, detail));
+    applyStatus(room, to, org, by);
     if (REOPENED_FROM.includes(from) && OPEN_ROOM_STATUSES.includes(to)) {
-      room.room.reopened = { by: { userId: req.orgUser.id, name: req.orgUser.name }, at: now(), from, reasonCodes };
-      activity(room, req, 'room_reopened', { from, to, reasonCodes });
+      room.room.reopened = { by: { userId: by.id ?? null, name: by.name ?? null }, at: now(), from, reasonCodes };
+      write('room_reopened', { from, to, reasonCodes });
       vmetric('recruitment_room_reopened');
     }
     // The same action name M20's funnel already reads. A second name would
     // mean a second funnel, silently disagreeing with the first.
-    activity(room, req, 'room_status_changed', { from, to, reasonCodes, trigger });
+    write('room_status_changed', { from, to, reasonCodes, trigger });
     vmetric('recruitment_room_status_changed');
     return { from, to };
   };
