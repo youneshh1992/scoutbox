@@ -56,3 +56,8 @@ safeguarding). It changes one read-side projection (`m12/journeys.mjs`,
 `trialDayView` for the org side) and adds five assertions to `m12E2E`. No
 route, store, status, gate or Box Cam code changed. Every other entry is
 recorded with its P4B phase and left as found.
+
+
+## Commit
+
+P4A-D9 fixed in `ca3e6c9` ("M23 P4A: Trial + Box Cam integration architecture"); regression `m12E2E` §9, 152 checks.

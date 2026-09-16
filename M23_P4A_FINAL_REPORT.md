@@ -11,7 +11,7 @@ Documents: `M23_P4A_TRIAL_BOXCAM_REUSE_AUDIT.md`,
 
 ## The 61 items (§153)
 
-1. **Current tip:** P3 freeze `61cfa75`; the P4A commit is recorded in the footer.
+1. **Current tip:** `ca3e6c9` (P4A architecture commit on top of the P3 freeze `61cfa75`; a footer commit records this hash).
 2. **Production code changed?** Yes, one read-side projection: `m12/journeys.mjs` `trialDayView` (org side) withholds the family's emergency contact while a block stands (P4A-D9, privacy/safeguarding). Plus five assertions in `scripts/m12E2E.mjs`. No route, store, status, gate, client or Box Cam code changed.
 3. **Existing Trial model:** `db.trials` = an *accepted* trial, created only on the recipient's accept (`server.mjs:1297-1313`, `:2866-2880`); fields in reuse audit C1; no schedule beyond a date string, no timezone, no sessions, no attendance state, no completion, no case id, no rev, no history.
 4. **Existing Trial statuses:** exactly two — `awaiting_report`, `reported` — a report obligation, neither a schedule, attendance nor completion state (reuse audit C2).
@@ -69,7 +69,7 @@ Documents: `M23_P4A_TRIAL_BOXCAM_REUSE_AUDIT.md`,
 56. **Regression results:** post-fix full server battery 25/25 green: testTrust 23, apiE2E 130 (owned :4000), connectedE2E 43, m12E2E **152** (147 + 5 new), m13E2E 212, m14E2E 193, m141E2E 94, m15E2E 185, m16E2E 118, m161E2E, m162E2E, m17E2E, m18E2E, m181E2E, m182E2E, m19E2E, m20E2E, m21E2E, m22E2E, m22Blocker, m23E2E 382, m23Persistence 67, m23BootContract, m23ContactE2E 418, m23ContactPersistence 61.
 57. **M22 regression:** `m22E2E`, `m22Blocker`, `m22CvEval`, `m22Holdout`, `m22Robustness`, `m22Perf` all green (pre-fix baseline run); Combine eligibility NOT ELIGIBLE — real-world validation not completed; CvEval "no false verifications, fully deterministic"; Holdout "no false touches, no false verifications, deterministic, no generalisation gap measured"; Robustness 48/48. Artifacts regenerated with `generatedAt` and timing churn only (`evaluation.json` 1 line, `holdout.json` 2 lines, `perf.json` timings + `gcExposed`) — **reverted**; tree byte-identical for `m22/`.
 58. **P2.5 regression:** navConfig 282, navLive 64 (N1–N17) green on the tip; the client tree is unchanged by P4A.
-59. **Tree status:** clean after the P4A commit (see footer).
+59. **Tree status:** clean after the P4A commits.
 60. **Push status:** not pushed (§159).
 61. **PR status:** none.
 
@@ -162,3 +162,8 @@ READY FOR M23 P4B TRIAL WORKFLOW IMPLEMENTATION
 
 Not begun: P4B, Trial, Offer. Not modified: the Box Cam CV engine. Not
 pushed. No PR. No deploy.
+
+
+---
+
+P4A commit: `ca3e6c9` — "M23 P4A: Trial + Box Cam integration architecture".
