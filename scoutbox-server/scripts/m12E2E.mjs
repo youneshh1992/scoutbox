@@ -433,6 +433,19 @@ r = await j(`/player/trials/${trial.id}/safety-pack`, {}, bearer(SVEN));
 ok(r.body.pack.staff[0].check.status === 'reviewed' && r.body.pack.checksExplained.includes('truth'), 'safety pack shows who was checked and what that means');
 r = await post(`/org/trials/${trial.id}/postpone`, { reason: 'Waterlogged pitch', newDate: future }, bearer(MARIA));
 ok(r.status === 200, 'postponement recorded + parties notified');
+// M23 P4A-D9: a block ends the club's standing to read the family's emergency contact.
+r = await j(`/org/trials/${trial.id}/day`, {}, bearer(MARIA));
+ok(r.status === 200 && r.body.trial.emergency?.phone === '+46 70 000 11 22', 'before any block, the day view carries the emergency contact');
+r = await post('/player/block', { orgId: 'org-eastport', reason: 'no further contact' }, bearer(SVEN));
+ok(r.status === 201, 'the player blocks the club after the trial was accepted');
+r = await j(`/org/trials/${trial.id}/day`, {}, bearer(MARIA));
+ok(r.status === 200 && r.body.trial.emergency === null && r.body.trial.emergencyWithheld === 'BLOCKED' && !JSON.stringify(r.body).includes('70 000 11 22'),
+  'after the block the emergency contact is withheld from the org day view (and the number appears nowhere in it)');
+const blk = (await j('/admin/blocks', {}, admin)).body.find((b) => b.playerId === 'pl-svensson' && b.orgId === 'org-eastport');
+r = await post(`/admin/blocks/${blk.id}/lift`, {}, admin);
+ok(r.status === 200, 'Trust & Safety lifts the block');
+r = await j(`/org/trials/${trial.id}/day`, {}, bearer(MARIA));
+ok(r.status === 200 && r.body.trial.emergency?.phone === '+46 70 000 11 22' && r.body.trial.emergencyWithheld === null, 'once lifted, the contact is readable again — the block is evaluated on every read, nothing was deleted');
 
 // =========================================================== §11 outcomes
 r = await post('/org/players/pl-svensson/signing', { note: 'U23 contract' }, bearer(MARIA));

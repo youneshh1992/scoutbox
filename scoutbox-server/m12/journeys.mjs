@@ -579,7 +579,18 @@ export function registerJourneys(ctx) {
       // The emergency contact is for the day's named safety staff, not for
       // scout browsing — it appears here and NOWHERE else (no profile views,
       // no analytics, no exports).
-      base.emergency = day.emergency ?? null;
+      //
+      // M23 P4A-D9: a block placed by the player or guardian ends the
+      // organisation's standing to hold the family's contact details. The
+      // block is evaluated on every read, like every other block in the
+      // product, so the number is withheld the moment the block exists and
+      // returns if Trust & Safety lifts it. The rest of the day view (the
+      // club's own staff, arrival and status history) is unchanged here;
+      // what a blocked club may still DO with a trial is a P4B policy
+      // decision (M23_P4A_DECISION_REGISTER.md D-16), not a read-side one.
+      const blocked = ctx.isBlocked(t.playerId, t.orgId);
+      base.emergency = blocked ? null : (day.emergency ?? null);
+      base.emergencyWithheld = blocked ? 'BLOCKED' : null;
     }
     return base;
   }
