@@ -326,7 +326,9 @@ artifact source tip:    the closure commit (badge "build <sha> · 2026-09-16"; <
 spotchecks:             11 demo spotchecks + uiSpotcheck, demoOffline, crosstab, demoHostOrdering, demoFreshness — all green
 live suites:            navLive (61), liveIntegration, m12–m23 Live (15) — all green against bundles built from the same source
 stale old build remains: NO  (demoFreshness fails any bundle whose source fingerprint differs from the working tree)
-published review pages: the App Launcher page is updated (version 17, build 7a94e56, with a P2.5 section). The five compiled app pages (Pro, Grassroots, Player, T&S, Connected) are NOT yet republished: the artifact service refuses an in-place publish until the live 1–4MB compiled version has been re-read in this session, which the tooling cannot do; a force overwrite needs the user's explicit confirmation. Until then those five pages still show the 14 September build.
+published review pages: all six updated in place on the user's explicit, scoped approval (force overwrite of my own 14 September versions; private claude.ai pages, not a deployment) from bundles built at 8effa92 —
+  App Launcher 2bQfzzftYdNd2ptBpFERsA v18 · Pro 7X18GH19SZMHcNfcVdhxMT v24 · Grassroots T1yP7a1noNEtQMCAt5chnm v22 · Player PrZdGhFxhwY6RWrUAgxBpH v25 · T&S 95jZZMnNPSsCkjb5sQRtMu v19 · Connected Xg7fmowsbY1B9vKmk1g3Xc v16.
+  Three older pages from 3 September (two "ScoutBox Player", one "ScoutBox — Recruitment OS") predate the launcher, are not linked from it and were not part of the approval; they were left as they are.
 ```
 
 Visual check on the rebuilt bundles (Chromium): Pro shows five sections and a 58px / 54px top bar; Grassroots four sections and a vertical 260px drawer; Player shows Home · Football · Opportunities · Inbox · You; the Room header is 141px on a desktop and 357px at 390px.
@@ -456,7 +458,7 @@ Second Look task-find fails: NO
 Trials task-find fails: NO
 Analytics task-find fails: NO
 
-Published/demo artifacts stale: NO for the repository artifacts (e2e/dist, fingerprint-guarded) and the launcher page; YES for the five compiled claude.ai review pages until a force republish is confirmed
+Published/demo artifacts stale: NO (repository bundles fingerprint-guarded; all six review pages republished from build 8effa92)
 Demo artifacts rebuild from current source: YES
 Demo spotchecks green: YES
 Relevant live suites green: YES
@@ -489,19 +491,23 @@ Tree clean: YES
 ## C10. Success condition
 
 ```
-M23 P2.5 STILL HAS OPEN ISSUES
-```
-
-Exactly one blocker, outside the repository:
-
-- The five compiled claude.ai review pages (Pro `7X18GH19SZMHcNfcVdhxMT`, Grassroots `T1yP7a1noNEtQMCAt5chnm`, Player `PrZdGhFxhwY6RWrUAgxBpH`, T&S `95jZZMnNPSsCkjb5sQRtMu`, Connected `Xg7fmowsbY1B9vKmk1g3Xc`) still carry the 14 September build. The rebuilt bundles are ready in `e2e/dist` (build 7a94e56, fingerprint-fresh, spotchecked); publishing them in place requires a force overwrite of the older version, which needs the user's explicit confirmation. On that confirmation every remaining line reads:
-
-```
+M23 P2.5 FINAL CLOSURE COMPLETE
 NAVIGATION IA FROZEN
 MOBILE PIPELINE DISCOVERABILITY FIXED
-DEMO ARTIFACTS CURRENT (repository: yes; review pages: after the confirmed republish)
+DEMO ARTIFACTS CURRENT
 ALL CORE DESTINATIONS DISCOVERABLE ACROSS DESKTOP AND MOBILE
 READY FOR M23 CONTACT WORKFLOW
 ```
+
+The single earlier blocker (five compiled review pages on the 14 September
+build) was closed on the user's explicit, scoped approval: bundles rebuilt
+at `8effa92`, all six review pages force-republished in place, and the
+full browser battery (34 suites, including the 11 demo spotchecks,
+demoFreshness, navLive, liveIntegration, m17Live and m23Live) rerun green
+against those exact bundles; 390px and 360px re-measured on them (top bar
+54px, strip 45px, Room header 357px, Grassroots drawer a 260px column, no
+overflow). Routes, permissions and deep links unchanged (navConfig 282).
+`e2e/dist` is untracked, so the republish left the tree clean apart from
+this report.
 
 Stopped here. Not pushed, no PR, no merge, no deploy, no Contact code.
