@@ -69,13 +69,23 @@ function projectRoom(c) {
   return room;
 }
 
-/** The decision fields analytics may read. `note` and `by` are not among them. */
+/**
+ * The decision fields analytics may read. `note` and `by` are not among them.
+ * P5 (D-P5-2) adds kind, state and the outcome WORD for decision_outcomes.
+ */
+/** P5 (D-P5-2): kind, state and the outcome WORD for decision_outcomes — never the note. */
+const formalFields = (d) => ({
+  kind: d.kind === 'formal' ? 'formal' : 'recommendation',
+  state: d.state === 'draft' ? 'draft' : 'final',
+  outcome: d.kind === 'formal' ? d.outcome ?? null : null,
+});
 const projectDecision = (d) => ({
   id: d.id, roomId: d.roomId, createdAt: d.createdAt,
   recommendation: d.recommendation,
   reasonCodes: Array.isArray(d.reasonCodes) ? d.reasonCodes : [],
   supersededById: d.supersededById ?? null,
   trigger: d.trigger ?? null,
+  ...formalFields(d),
 });
 
 export function buildReportingContext({

@@ -258,6 +258,12 @@ const PUBLIC_ERROR_FIELDS = [
   // offered, the syntax it expected, and — for the completion gate — the
   // requirement codes that are missing. Vocabulary, never a person.
   'field', 'offered', 'expected', 'reasons',
+  // P5: a Decision refusal may name the LIFECYCLE code underneath a
+  // DECISION_LIFECYCLE_CONFLICT, echo the reference `{ kind, id }` it refused,
+  // echo the `supersedes` id the caller named, and list the reason codes it
+  // did not know or will not accept. All of it is the caller's own input or
+  // vocabulary; none of it is a person or a record.
+  'lifecycle', 'ref', 'supersedes', 'unknown', 'prohibited',
 ];
 
 /**

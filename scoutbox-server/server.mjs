@@ -4215,6 +4215,10 @@ const m23Ctx = registerM23({
   findRoomForRequest: m17Ctx.findRoomForRequest,
   applyLifecycleTransition: m17Ctx.applyLifecycleTransition,
   roomIsRoom: m17Ctx.roomIsRoom,
+  // M23 P5 (D-P5-1) — the decision-time evidence-confidence snapshot, captured
+  // through exactly the code M17's advisory recommendation uses. Without this
+  // seam the formal decision route captured nothing and said nothing.
+  captureRoomSnapshot: m17Ctx.captureRoomSnapshot,
   // M23 P3 — the ONE writer of a recipient-visible request row, so a Contact
   // send reaches the Inbox through exactly the path the legacy route uses.
   issueRecruitmentRequest,

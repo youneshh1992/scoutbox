@@ -291,7 +291,8 @@ export const SOURCE_METRICS = { roomSourceMix, sourceStageReach };
  */
 export function decisionOutcomes(ctx) {
   const w = ctx.window;
-  const rows = (ctx.roomDecisions ?? []).filter((d) => d && typeof d === 'object' && d.kind === 'formal' && d.state !== 'draft' && inWindow(d.createdAt, w));
+  // The context's projected decisions (org-scoped, room-filtered) — not the raw store (D-P5-2).
+  const rows = (ctx.decisions ?? []).filter((d) => d && typeof d === 'object' && d.kind === 'formal' && d.state !== 'draft' && inWindow(d.createdAt, w));
   const by = { progress: 0, hold: 0, reject: 0 };
   for (const d of rows) if (Object.prototype.hasOwnProperty.call(by, d.outcome)) by[d.outcome] += 1;
   return {

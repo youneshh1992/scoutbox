@@ -141,7 +141,7 @@ export const METRICS = {
     unit: 'decisions',
     semantics: 'window_entry',
     sources: ['roomDecisions'],
-    reads: ['kind', 'outcome', 'createdAt', 'supersededById', 'roomId'],
+    reads: ['kind', 'state', 'outcome', 'createdAt', 'supersededById', 'roomId'],
     ratio: false,
     limitation: 'Counts of formal recruitment decisions finalized in the window, by outcome — progress, hold, reject — and how many were later superseded. A process count, never a verdict on anyone: a club that rejects nine players and progresses one has run ten decisions, not ranked ten people.',
   }),
