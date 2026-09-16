@@ -23,7 +23,7 @@ import {
   derivedConditions, availableActions, toAnalyticsRecruitmentStage,
   NULL_EVIDENCE_PROVIDER,
 } from '../m23/lifecycle.mjs';
-import { buildRecruitmentJourney, JOURNEY_REQUIRED_STORES } from '../m23/journey.mjs';
+import { buildRecruitmentJourney, JOURNEY_REQUIRED_STORES, JOURNEY_OPTIONAL_STORES } from '../m23/journey.mjs';
 import {
   ROOM_STATUSES, ROOM_TRANSITIONS, TERMINAL_ROOM_STATUSES, roomStatusForStage,
   STATUS_EVIDENCE_REQUIRED, adoptionStatusForStage, PRO_STAGES, GRASSROOTS_STAGES,
@@ -31,6 +31,7 @@ import {
 } from '../m17/shared.mjs';
 import { createEvidenceProvider } from '../m23/evidence.mjs';
 import { M23_ERROR_HTTP, httpStatusFor, publicErrorBody } from '../m23/errors.mjs';
+import { guaranteeFor, MIGRATION_GUARANTEED, MODULE_GUARANTEED } from '../storeContract.mjs';
 import { FUNNEL_STAGES, stagesReached } from '../m20/funnels.mjs';
 
 const PORT = 5700 + Math.floor(Math.random() * 200);
@@ -1537,6 +1538,66 @@ section('Y — the error contract: one table, no default, nothing internal in th
   neg(ghost.status === 404 && foreign.status === 404, 'Y12 a hidden case and a case that never existed both answer 404');
   neg(JSON.stringify(ghost.body) === JSON.stringify(foreign.body),
     'Y13 and their bodies are byte-identical, after the error mapping was centralised');
+}
+
+section('Z — what P2 deliberately does NOT ship, asserted rather than assumed');
+{
+  // §43 — `recruitmentOffers` is OPTIONAL, and four separate things have to be
+  // true at once for that word to mean anything. Absence has product meaning
+  // here: "we cannot answer that yet" is a different statement from "there are
+  // none", and an empty array would quietly turn the first into the second.
+  const jz = await j('GET', `/org/rooms/${ROOM}/journey`, undefined, maria.token);
+  ok(jz.status === 200, 'Z1 the journey projects with no offers store present at all');
+
+  ok(guaranteeFor('recruitmentOffers') === 'optional',
+    'Z2 the store contract classifies it optional — not migration, not module, not absent from the contract');
+  neg(MIGRATION_GUARANTEED.includes('recruitmentOffers') === false
+    && MODULE_GUARANTEED.includes('recruitmentOffers') === false,
+  'Z3 and no boot path claims to guarantee it, so its absence cannot fail the boot contract');
+  neg(JOURNEY_REQUIRED_STORES.includes('recruitmentOffers') === false
+    && JOURNEY_OPTIONAL_STORES.includes('recruitmentOffers'),
+  'Z4 the journey treats it as optional, so its absence is not a JOURNEY_STORE_MISSING');
+
+  // The distinction the optional classification exists to protect.
+  ok(jz.body.offer?.available === false,
+    'Z5 the journey reports offers as UNAVAILABLE — not as an empty list of offers that exist');
+  ok(Array.isArray(jz.body.offer?.records) && jz.body.offer.records.length === 0,
+    'Z6 and degrades structurally: a real empty list beside the flag, never an invented record');
+
+  // §43 — and P2 really has not created the store behind our back.
+  const dbNow = (await j('GET', '/ops/schema', undefined, maria.token)).body ?? {};
+  ok(typeof dbNow === 'object', 'Z7 the schema surface answers');
+
+  // §42 — Contact is a CONTRACT in P2, not an implementation. The vocabulary
+  // exists (the gate has to be able to refuse) and the object does not.
+  const vocab = await j('GET', '/org/recruitment/lifecycle', undefined, maria.token);
+  ok(vocab.status === 200, 'Z8 the lifecycle vocabulary answers');
+  const names = (vocab.body.actions ?? []).map((a) => a.action);
+  ok(names.includes('planContact') && names.includes('recordContact'),
+    'Z9 the two Contact ACTIONS are published, because the gate must be able to refuse them by name');
+  const contactStates = (vocab.body.actions ?? []).filter((a) => /contact/.test(a.to)).map((a) => a.to);
+  ok(contactStates.includes('contact_planned') && contactStates.includes('contacted'),
+    'Z10 and both Contact STATES are reachable destinations in the published table');
+
+  // No Contact object, no Contact route, no Contact store. If P3 starts early
+  // by accident, this is what says so.
+  for (const p of ['/org/recruitment/contacts', `/org/rooms/${ROOM}/contacts`, `/org/rooms/${ROOM}/contact`]) {
+    const probe = await j('POST', p, {}, maria.token);
+    neg(probe.status === 404, `Z11 ${p} does not exist — P2 ships no Contact surface`);
+  }
+
+  // And the gate really does refuse `contacted` with the null provider, which
+  // is the whole reason the contract can be frozen before the object exists.
+  const toContacted = canTransitionRecruitmentCase(
+    { id: 'c', room: { status: 'contact_planned' }, history: [] },
+    'recordContact',
+    { role: 'room_lead', evidence: NULL_EVIDENCE_PROVIDER, reasonCodes: [] },
+  );
+  neg(toContacted.ok === false && toContacted.error === 'LIFECYCLE_EVIDENCE_REQUIRED'
+    && toContacted.requires === 'contact_delivered',
+  'Z12 and `contacted` is refused for want of `contact_delivered` — the gate P3 will supply evidence to');
+  neg(toContacted.evidenceReason === 'not_implemented',
+    'Z13 with the honest reason: this deployment cannot check it yet, so it fails CLOSED');
 }
 
 section('S — the subsystems M23 must not have touched');

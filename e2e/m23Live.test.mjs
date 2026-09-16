@@ -33,6 +33,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+// The server's own status set, so the label check below cannot drift from it.
+import { ROOM_STATUSES } from '../scoutbox-server/m17/shared.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
@@ -340,6 +342,37 @@ if (/\bunder_review\b|\bon_hold\b|\bcontact_planned\b/.test(listText)) {
   fail('L7: a raw enum leaked into the UI instead of its label');
 }
 say('L7: and shows human labels, not raw lifecycle enums');
+
+// L7b — the check above cannot catch a MISSING label, and that is how one hid.
+//
+// `statusLabel` falls back to `code.replace(/_/g, ' ')`, so a status with no
+// i18n entry renders "on hold" — which contains no underscore and passes the
+// regex above exactly as well as a real label does. Five of the eighteen
+// states had no entry in either client, in either language, and
+// `offer_accepted` was rendering as "offer accepted" where the server
+// deliberately says "Accepted in ScoutBox", because a signing is a SEPARATE
+// legal event and "offer accepted" overstates what happened.
+//
+// Stated positively and over the whole set, against the server's own table,
+// so a state added later cannot quietly arrive unlabelled.
+{
+  const i18nSrc = fs.readFileSync(path.join(ROOT, 'scoutbox-club/src/i18n.ts'), 'utf8');
+  const frStart = i18nSrc.indexOf('Aucune décision');
+  if (frStart < 0) fail('L7b: could not locate the French dictionary to check it separately');
+  const dicts = { EN: i18nSrc.slice(0, frStart), FR: i18nSrc.slice(frStart) };
+  for (const [lang, dict] of Object.entries(dicts)) {
+    const missing = ROOM_STATUSES.filter((s) => !dict.includes(`'rm.st.${s}'`));
+    if (missing.length) fail(`L7b: ${lang} has no label for ${missing.join(', ')} — the UI would show the de-underscored code`);
+  }
+  say(`L7b: all ${ROOM_STATUSES.length} lifecycle states have a real label in EN and FR, not a de-underscored code`);
+
+  // And the wording that carries the legal distinction is the server's, not a
+  // paraphrase that drifted.
+  if (!dicts.EN.includes("'rm.st.offer_accepted': 'Accepted in ScoutBox'")) {
+    fail('L7b: `offer_accepted` does not use the server\'s wording — "accepted in ScoutBox" is not "signed"');
+  }
+  say('L7c: and `offer_accepted` keeps the server\'s wording, which does not claim a signing');
+}
 
 // 390px smoke on the surface that consumes the changed lifecycle contract.
 const ctxPhone = await browser.newContext({ viewport: { width: 390, height: 844 } });

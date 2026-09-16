@@ -304,6 +304,14 @@ const en = {
   'rm.st.trial_completed': 'Trial completed', 'rm.st.offer_consideration': 'Offer consideration',
   'rm.st.offer_made': 'Offer made', 'rm.st.signed': 'Signed', 'rm.st.withdrawn': 'Withdrawn',
   'rm.st.archived': 'Archived', 'rm.st.closed': 'Closed',
+  // The five states M23 added. Without these the dynamic `rm.st.${code}`
+  // lookup falls back to the de-underscored code, which is safe but wrong:
+  // `offer_accepted` renders as "offer accepted", and the server calls it
+  // "Accepted in ScoutBox" precisely because a signing is a SEPARATE legal
+  // event and "offer accepted" overstates what has happened.
+  'rm.st.contact_planned': 'Contact planned', 'rm.st.contacted': 'Contacted',
+  'rm.st.offer_accepted': 'Accepted in ScoutBox', 'rm.st.offer_declined': 'Offer declined by player',
+  'rm.st.on_hold': 'On hold',
   'rm.health': 'Room health', 'rm.health.decision_recorded': 'Decision recorded',
   'rm.health.trial_pending': 'Trial pending', 'rm.health.assessment_outstanding': 'Assessment outstanding',
   'rm.health.waiting_on_evidence': 'Waiting on evidence', 'rm.health.ready_for_review': 'Ready for review',
@@ -1370,6 +1378,11 @@ const fr: typeof en = {
   'rm.st.trial_completed': 'Essai effectué', 'rm.st.offer_consideration': 'Offre à l’étude',
   'rm.st.offer_made': 'Offre faite', 'rm.st.signed': 'Signé', 'rm.st.withdrawn': 'Retiré',
   'rm.st.archived': 'Archivé', 'rm.st.closed': 'Clôturé',
+  // Les cinq états ajoutés par M23. `offer_accepted` suit le libellé serveur :
+  // accepté DANS ScoutBox, ce qui n'est pas une signature.
+  'rm.st.contact_planned': 'Prise de contact prévue', 'rm.st.contacted': 'Contacté',
+  'rm.st.offer_accepted': 'Accepté dans ScoutBox', 'rm.st.offer_declined': 'Offre refusée par le joueur',
+  'rm.st.on_hold': 'En pause',
   'rm.health': 'État de la salle', 'rm.health.decision_recorded': 'Décision enregistrée',
   'rm.health.trial_pending': 'Essai en attente', 'rm.health.assessment_outstanding': 'Évaluation en attente',
   'rm.health.waiting_on_evidence': 'En attente de preuves', 'rm.health.ready_for_review': 'Prêt pour revue',

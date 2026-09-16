@@ -308,12 +308,46 @@ console.log('\n— §33/§34 — a real server on a real restored snapshot —')
     proc.stderr.on('data', (c) => { out += c; });
     // the m22E2E lesson: a ref'd child keeps the loop open forever
     proc.unref(); proc.stdout.unref(); proc.stderr.unref();
-    for (let i = 0; i < 160; i++) {
-      if (proc.exitCode != null) throw new Error(`server exited (${proc.exitCode}):\n${out}`);
-      try { const r = await fetch(`${BASE}/healthz`); if (r.ok) return proc; } catch { /* booting */ }
+
+    // WAIT FOR THE SERVER'S OWN SIGNAL, NOT FOR A GUESS ABOUT HOW LONG IT TAKES.
+    //
+    // This used to be 160 polls of 250ms and nothing else, and it failed about
+    // one run in twenty — always in a loaded battery, never alone. The failure
+    // message said "server did not come up" and printed a log that ended with
+    // `scoutbox-server listening on :5060`, which is the opposite of what the
+    // message claimed. What actually happened: boot took longer than the
+    // 40-second budget, the polls ran out, and the announcement landed in `out`
+    // during the final sleep — so the error message was assembled after the
+    // server was up, and blamed the server for the harness giving up.
+    //
+    // Raising the number would have been the wrong repair twice over: it keeps
+    // a guess at the centre of the check, and it leaves the message lying.
+    // The server announces its port on stdout when `app.listen` fires. That is
+    // a real readiness edge, so wait on it, and only then confirm over HTTP.
+    //
+    // Three distinct failures, three distinct messages — they were one before,
+    // and one of them was not even true.
+    const LISTEN = /listening on :(\d+)/;
+    const deadline = Date.now() + 120_000;
+    let announced = null;
+    while (Date.now() < deadline) {
+      if (proc.exitCode != null) throw new Error(`server exited (${proc.exitCode}) before it announced a port:\n${out}`);
+      const m = LISTEN.exec(out);
+      if (m) { announced = Number(m[1]); break; }
+      await sleep(100);
+    }
+    if (announced === null) throw new Error(`server never announced a listening port within 120s:\n${out}`);
+    if (announced !== PORT) throw new Error(`server bound :${announced}, not the :${PORT} it was given:\n${out}`);
+
+    // It says it is listening. If it will not answer now, that is a real
+    // defect, not a slow machine — so this budget is short and the message
+    // is specific.
+    for (let i = 0; i < 40; i++) {
+      if (proc.exitCode != null) throw new Error(`server exited (${proc.exitCode}) after announcing :${announced}:\n${out}`);
+      try { const r = await fetch(`${BASE}/healthz`); if (r.ok) return proc; } catch { /* the socket is opening */ }
       await sleep(250);
     }
-    throw new Error(`server did not come up:\n${out}`);
+    throw new Error(`server announced :${announced} but did not answer /healthz within 10s of announcing:\n${out}`);
   };
 
   const proc = await boot();
