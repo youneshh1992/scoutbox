@@ -46,7 +46,7 @@ await club.waitForSelector('text=Leo Marchetti', { timeout: 10000 });
 say('pro demo: groups + transition pack fixtures render');
 // FR switch on an M13 screen
 await club.selectOption('select[aria-label="Language"]', 'fr');
-await club.waitForSelector('text=Réseau de clubs', { timeout: 10000 });
+await club.waitForSelector('.topbar h1:has-text("Réseau")', { timeout: 10000 }); // P2.5: the h1 is the page title
 say('pro demo: FR switch translates the M13 navigation (labelled machine translation)');
 await club.close();
 
