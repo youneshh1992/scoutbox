@@ -747,6 +747,8 @@ export function registerTrial(ctx) {
     if (!t) return;
     const player = findPlayer(t.playerId);
     if (!player || t.subjectRemovedAt) return res.json({ items: [], consent: false, reason: 'TRIAL_SUBJECT_REMOVED' });
+    // A block is named as a block (the tab already says so); visibility loss is named as unavailability.
+    if (isBlocked(t.playerId, t.orgId)) return res.json({ items: [], consent: false, reason: 'TRIAL_BLOCKED' });
     if (!orgCanSee(req.org, player)) return res.json({ items: [], consent: false, reason: 'TRIAL_RECIPIENT_UNAVAILABLE' });
     if (!combineOrgMaySeeResults?.(req.org, player)) return res.json({ items: [], consent: false, reason: 'EVIDENCE_CONSENT_REQUIRED' });
     const linked = new Set((t.schedule?.sessions ?? []).flatMap((s) => (s.evidence ?? []).filter((e) => !e.removedAt && e.kind === 'box_cam_session').map((e) => e.sessionId)));

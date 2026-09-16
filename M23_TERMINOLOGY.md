@@ -92,6 +92,47 @@ A scheduled, accepted session the player attends. The lifecycle carries
 under way is a state of the *trial*; the club has not moved the player
 anywhere in recruitment by starting it.
 
+#### Trial vocabulary (P4B, decision D-30)
+
+The words below name distinct facts and are never used for one another.
+
+- **Invitation** — a `db.requests` row of type `trial`, sent by the club to
+  the routed recipient. Its states are **invited** (pending), **accepted**
+  and **declined**. An invitation is not a trial.
+- **Trial** — the `db.trials` row that exists only once an invitation is
+  accepted. Its operational states are **accepted** (no confirmed
+  schedule), **scheduled** (a confirmed revision with at least one
+  session), **completed** and **cancelled**; **rescheduled** names the act
+  of proposing a new revision, not a state. `legacy_accepted` is the
+  read-only reading of a row written before P4B.
+- **Session** — one dated, timed, placed occurrence inside a trial's
+  schedule, with a stable id across revisions and a contextual **kind**
+  (`onboarding, training, drill, small_sided, match, other`).
+- **Revision** — one proposed schedule; a **material** revision changes
+  where or when and asks the recipient again.
+- **Attendance** — what happened at a session: **attended**, **partial**,
+  **no-show**, **club cancelled**, **player withdrew**; `not recorded` is
+  derived. Attendance is never a judgement.
+- **Completion** — the club's explicit statement that the trial has taken
+  place (gated on attendance and the last session having ended). Neither a
+  report nor an assessment.
+- **Feedback report** — the legacy mandatory `trial.report`; still owed
+  after completion.
+- **Scouting assessment** — `db.assessments` written in Trial context;
+  human judgement, behind the blind rule.
+- **Recommendation** — the assessment's `recommendation`
+  (sign / monitor / pass): an opinion.
+- **Observation** — what Box Cam recorded about a linked session, as a
+  state with policy copy; a refusal is *no reliable observation*, never
+  poor performance.
+- **Citation / evidence link** — a reference from a trial session to a Box
+  Cam session the player already shares; copies nothing, proves nothing.
+- **Decision** — `db.roomDecisions`: the recruitment act.
+- **Outcome** — reserved for M12 outcome reports and signings (confirmed
+  outcome); never a Trial state. The child's device shows an **outcome
+  line** — the organisation and the trial's state — which borrows the word
+  for the family's summary only.
+
 ### Decision Pending — a derived condition only
 
 `trial_completed` with no current decision. **Computed, never stored.**

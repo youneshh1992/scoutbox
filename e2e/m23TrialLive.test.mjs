@@ -296,7 +296,7 @@ await kola.waitForSelector('text=one session to start', { timeout: 20000 });
   ok(/Eastport FC/.test(txt) && /Maria Keane/.test(txt), 'A7: the player sees the invitation attributed to a named person at a named organisation');
   ok(/Europe\/London/.test(txt) && /Eastport Dome/.test(txt), 'A7b: the slot shows its time in the organiser zone and the venue name');
   neg(!/Gate B/.test(txt) && !/Ask for Priya/.test(txt), 'A7c: not the address, not the instructions');
-  ok(/Pick the slot that works/.test(txt), 'A7d: and is asked to pick the slot — accepting it confirms the schedule');
+  ok(/Pick the date that works — accepting it confirms the trial/.test(txt), 'A7d: and is asked to pick the date — accepting it confirms the trial');
   const noScroll = await kola.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth + 1);
   ok(noScroll, 'A7e: 390px: no horizontal scroll');
   ok((await kola.locator('[data-testid^="trial-slot-"]').count()) === 1, 'A7f: exactly one slot chip');
@@ -588,6 +588,59 @@ await guni.waitForSelector('[data-testid="trial-workflow"]', { timeout: 20000 })
   await phone.waitForTimeout(400);
   ok(await phone.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth + 1), 'N13d: 360px: still no horizontal page scroll');
   await ctxPhone.close();
+}
+
+// A13 — accessibility (§206): tab semantics, keyboard, focus, live mutation feedback.
+{
+  await trialTab(lead.page, ROOM_A);
+  const sel = await lead.page.locator('[role="tablist"] button[role="tab"]:has-text("Trial")').getAttribute('aria-selected');
+  const controls = await lead.page.locator('[role="tablist"] button[role="tab"]:has-text("Trial")').getAttribute('aria-controls');
+  const panelId = await trialPanel(lead.page).getAttribute('id');
+  ok(sel === 'true' && controls && controls === panelId, 'A13: tab semantics — the Trial tab is aria-selected and aria-controls its tabpanel');
+  // Keyboard: focus the Contact tab, arrow/Tab to Trial, Enter activates it.
+  await lead.page.locator('[role="tablist"] button[role="tab"]:has-text("Contact")').focus();
+  await lead.page.keyboard.press('Tab');
+  const focusedText = await lead.page.evaluate(() => document.activeElement?.textContent?.trim() ?? '');
+  ok(focusedText === 'Trial', `A13b: keyboard — Tab from Contact lands on the Trial tab (focused: "${focusedText}")`);
+  await lead.page.keyboard.press('Enter');
+  await lead.page.waitForTimeout(300);
+  ok((await lead.page.locator('[role="tablist"] button[role="tab"]:has-text("Trial")').getAttribute('aria-selected')) === 'true', 'A13c: keyboard — Enter activates the tab');
+  // The remaining tab buttons sit between the Trial tab and its panel in DOM
+  // order; a few Tab presses reach the panel, and the first stop inside it
+  // must be a labelled control.
+  let inPanel = null;
+  for (let i = 0; i < 6 && !inPanel?.inside; i++) {
+    await lead.page.keyboard.press('Tab');
+    inPanel = await lead.page.evaluate(() => {
+      const a = document.activeElement; const p = a?.closest('[role="tabpanel"]');
+      return { inside: !!p && p.getAttribute('aria-label') === 'Trial', tag: a?.tagName, labelled: !!(a?.getAttribute('aria-label') || a?.textContent?.trim()) };
+    });
+  }
+  ok(!!inPanel?.inside && inPanel.labelled, `A13d: focus — Tab reaches the Trial panel and lands on a labelled control (${inPanel?.tag})`);
+  ok((await trialPanel(lead.page).locator('[role="status"][aria-live="polite"]').count()) >= 1, 'A13e: live mutation feedback — the panel carries a polite live region (the one every A-step read its outcome from)');
+}
+
+// A14 — FR (§207): the same tab in French, the same invitation in French on the family side.
+{
+  await lead.page.evaluate(() => localStorage.setItem('sb-lang', 'fr'));
+  await lead.page.reload();
+  await lead.page.waitForSelector('[aria-label="En-tête de la salle"]', { timeout: 25000 });
+  await lead.page.click('[role="tablist"] button[role="tab"]:has-text("Essai")');
+  const frPanel = lead.page.locator('[role="tabpanel"][aria-label="Essai"]');
+  await frPanel.waitFor({ timeout: 10000 });
+  let frTxt = '';
+  for (let i = 0; i < 40 && !/Historique/.test(frTxt); i++) { frTxt = await frPanel.innerText().catch(() => ''); if (!/Historique/.test(frTxt)) await sleep(250); }
+  ok(/Historique/.test(frTxt) && /Évaluations de cet essai/.test(frTxt) && !/\bHistory\b|Assessments in this trial|Record attendance/.test(frTxt), 'A14: FR — the Trial tab renders in French with no English fallback in its headings');
+  await lead.page.evaluate(() => localStorage.setItem('sb-lang', 'en'));
+  await lead.page.reload();
+  await kola.evaluate(() => localStorage.setItem('sb-player-lang', 'fr'));
+  await reenter(kola, 'Kola Adeyemi', 'a[href="/inbox"]');
+  await goTab(kola, '/opportunities');
+  await kola.waitForSelector('[data-testid="trial-workflow"]', { timeout: 20000 });
+  let frFam = '';
+  for (let i = 0; i < 40 && !/vos essais/i.test(frFam); i++) { frFam = await bodyText(kola); if (!/vos essais/i.test(frFam)) await sleep(250); }
+  ok(/vos essais/i.test(frFam) && /Séances/.test(frFam) && !/your trials/i.test(frFam), 'A14b: FR — the family Trial section renders in French (title, sessions, completion line)');
+  await kola.evaluate(() => localStorage.setItem('sb-player-lang', 'en'));
 }
 
 // ------------------------------------------------------------------- done

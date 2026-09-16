@@ -692,6 +692,8 @@ section('B — blocks: before, pending, scheduled — the D-16 policy');
   ]) neg(expect(collect(`blocked ${label}`, r), 403, 'TRIAL_BLOCKED'), `B6 scheduled, then blocked: the club cannot ${label} (403 TRIAL_BLOCKED)`);
   const confirmBlocked = collect('confirm while blocked', await j('POST', `/player/trials/${TID}/confirm-schedule`, {}, kim.token));
   neg(expect(confirmBlocked, 403, 'TRIAL_BLOCKED'), 'B7 the player cannot confirm with a club they blocked');
+  const candsBlocked = await j('GET', `/org/rooms/${bRoom}/trials/${TID}/evidence/candidates`, undefined, maria.token);
+  neg(candsBlocked.status === 200 && candsBlocked.body.consent === false && candsBlocked.body.reason === 'TRIAL_BLOCKED' && candsBlocked.body.items.length === 0, 'B7b the Box Cam candidates list is empty while blocked and names the block, not a vague unavailability');
   const assessBlocked = collect('assess while blocked', await j('POST', '/org/assessments', { playerId: 'pl-kim', context: { trialId: TID } }, maria.token));
   neg(assessBlocked.status === 403, 'B8 an assessment in the context of the blocked trial is refused (the player is not visible to the club while blocked)');
   const kimNotifsBefore = (await notifs('/player/notifications', kim.token)).length;

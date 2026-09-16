@@ -1,5 +1,38 @@
 # M23 P4A — Trial Test Plan (for P4B)
 
+> **P4B update — as delivered.** The suites exist under the names planned:
+> `scoutbox-server/scripts/m23TrialE2E.mjs` (535 checks, 331 negative,
+> 62 %), `scoutbox-server/scripts/m23TrialPersistence.mjs` (36 checks, 13
+> negative), `scoutbox-server/scripts/m23TrialPerf.mjs`,
+> `e2e/m23TrialLive.test.mjs` (122 checks, 53 negative). The plan's groups
+> A–O map to the delivered groups as follows; deviations from the planned
+> behaviour are listed after the table and are the contract
+> (`M23_P4B_TRIAL_CONTRACT.md` §0).
+>
+> | plan | delivered group(s) | notes |
+> |---|---|---|
+> | A adult happy path | **J** (journey), **V** (recipient view), **HTTP** boot | the trial is created `scheduled` **and confirmed** when the chosen slot is concrete — no separate club confirmation step (A3 as planned; A4's "non-concrete" branch is the legacy path, covered in S/T) |
+> | B minor guardian path | **M** (M0–M17b) | B6 aging is not a dedicated check; re-derivation is proved through guardian-route loss/restoration (M6, M7, M14, M14b) |
+> | C scheduling | **U** (pure validators), **S** (S1–S10c) | sessions ≤ 20, kinds closed, `TRIAL_SCHEDULE_INVALID`; ICS `TZID`/`SEQUENCE`/`STATUS` in **X**; legacy rows in **T** and persistence §2 |
+> | D cancellation | **A**, **B**, **M15**, **C** | D1 decided: **no** `withdrawn` request status; the club cannot withdraw a pending invitation |
+> | E attendance | **A** (A1–A10) | check-in `source: 'checkin'` via the existing trial-day route; manual states; E4's "Trust byte-equal" is not a check — no Trust, Matching or Watchlist reader of trial attendance exists |
+> | F completion | **A**, **J** | code is `TRIAL_COMPLETION_REQUIREMENTS_NOT_MET` with `reasons[]` (not `…_REQUIRES_ATTENDANCE`); `assessmentPending` marker in **N**/**Z** |
+> | G assessment | **Q** | `TRIAL_CONTEXT_INVALID`, `TRIAL_CONTEXT_IMMUTABLE`, `TRIAL_EVIDENCE_REF_INVALID` |
+> | H Box Cam link | **E** (E1–E22f) | test-only provider in production → `404 TRIAL_BOXCAM_INCOMPATIBLE` (concealed), not a distinct refusal; candidates route E22 |
+> | I CV refusal | **E11–E12b** | |
+> | J privacy | **I** (sentinels), **V**, **M** | |
+> | K authorization drift | **W**, **B** | |
+> | L concurrency / idempotency | **K**, **C**, **F** | six races as planned; `"2"`, `2.5`, `{}` refused `TRIAL_REV_REQUIRED` |
+> | M historical compatibility | **P** (migration), persistence §1–§3 | corruption shapes: seven omitted, three alien ignored |
+> | N mobile / live | `m23TrialLive` A1–A12, M2–M8, N1–N15 | the "cancellation race (two tabs)" is proved over the API in **C**, not in two browser tabs |
+> | O cross-tenant | **W**, **L** | |
+>
+> Fixture correction: the Eastport scout in the seed is **Tom Field**, not
+> Tom Reilly. Exit criteria (§ "Exit criteria for P4B") were met: every
+> group green, negative share 62 % (server) / 43 % (live), the frozen
+> suites unchanged and green, navConfig / navLive green, demo freshness
+> green, bundle + fresh clone as P3.
+
 Test groups defined before implementation, in the shape every M-suite uses:
 `✓`/`✗` lines, exact status **and** code on every refusal (never "not 200"),
 a negative share stated at the end (target ≥ 55%, as P3 achieved 57%). Two
