@@ -471,6 +471,6 @@ Legal-review items: 2 (separate)
 P4A-D9 fixed in `ca3e6c9` ("M23 P4A: Trial + Box Cam integration
 architecture"); regression `m12E2E` §9, 152 checks.
 
-P4A-D1, D2, D4, D5, D10, D12, D13, D14, D15 fixed in the P4A closure commit
-(hash recorded in `M23_P4A_CLOSURE_REPORT.md`); regression
+P4A-D1, D2, D4, D5, D10, D12, D13, D14, D15 fixed in `7683247` ("M23 P4A closure: close D1, D10, D14 (+D2, D4, D5, D12,
+D13, D15)"); regression
 `m23P4AClosureE2E`, 337 checks (210 negative).

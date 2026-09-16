@@ -311,4 +311,5 @@ READY FOR M23 P4B TRIAL WORKFLOW IMPLEMENTATION
 
 ---
 
-Closure commit: see footer (recorded by the follow-up commit).
+Closure commit: `7683247` — "M23 P4A closure: close D1, D10, D14 (+D2, D4, D5, D12, D13, D15)".
+This footer was written by the follow-up commit that records the hash; the bundle is created from that follow-up tip.
