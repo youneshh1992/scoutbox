@@ -326,7 +326,7 @@ artifact source tip:    the closure commit (badge "build <sha> · 2026-09-16"; <
 spotchecks:             11 demo spotchecks + uiSpotcheck, demoOffline, crosstab, demoHostOrdering, demoFreshness — all green
 live suites:            navLive (61), liveIntegration, m12–m23 Live (15) — all green against bundles built from the same source
 stale old build remains: NO  (demoFreshness fails any bundle whose source fingerprint differs from the working tree)
-published review pages: the six claude.ai review pages (launcher, Pro, Grassroots, Player, T&S, connected) updated in place from e2e/dist after the closure commit — private pages, not a deployment
+published review pages: the App Launcher page is updated (version 17, build 7a94e56, with a P2.5 section). The five compiled app pages (Pro, Grassroots, Player, T&S, Connected) are NOT yet republished: the artifact service refuses an in-place publish until the live 1–4MB compiled version has been re-read in this session, which the tooling cannot do; a force overwrite needs the user's explicit confirmation. Until then those five pages still show the 14 September build.
 ```
 
 Visual check on the rebuilt bundles (Chromium): Pro shows five sections and a 58px / 54px top bar; Grassroots four sections and a vertical 260px drawer; Player shows Home · Football · Opportunities · Inbox · You; the Room header is 141px on a desktop and 357px at 390px.
@@ -456,7 +456,7 @@ Second Look task-find fails: NO
 Trials task-find fails: NO
 Analytics task-find fails: NO
 
-Published/demo artifacts stale: NO
+Published/demo artifacts stale: NO for the repository artifacts (e2e/dist, fingerprint-guarded) and the launcher page; YES for the five compiled claude.ai review pages until a force republish is confirmed
 Demo artifacts rebuild from current source: YES
 Demo spotchecks green: YES
 Relevant live suites green: YES
@@ -489,10 +489,17 @@ Tree clean: YES
 ## C10. Success condition
 
 ```
-M23 P2.5 FINAL CLOSURE COMPLETE
+M23 P2.5 STILL HAS OPEN ISSUES
+```
+
+Exactly one blocker, outside the repository:
+
+- The five compiled claude.ai review pages (Pro `7X18GH19SZMHcNfcVdhxMT`, Grassroots `T1yP7a1noNEtQMCAt5chnm`, Player `PrZdGhFxhwY6RWrUAgxBpH`, T&S `95jZZMnNPSsCkjb5sQRtMu`, Connected `Xg7fmowsbY1B9vKmk1g3Xc`) still carry the 14 September build. The rebuilt bundles are ready in `e2e/dist` (build 7a94e56, fingerprint-fresh, spotchecked); publishing them in place requires a force overwrite of the older version, which needs the user's explicit confirmation. On that confirmation every remaining line reads:
+
+```
 NAVIGATION IA FROZEN
 MOBILE PIPELINE DISCOVERABILITY FIXED
-DEMO ARTIFACTS CURRENT
+DEMO ARTIFACTS CURRENT (repository: yes; review pages: after the confirmed republish)
 ALL CORE DESTINATIONS DISCOVERABLE ACROSS DESKTOP AND MOBILE
 READY FOR M23 CONTACT WORKFLOW
 ```
