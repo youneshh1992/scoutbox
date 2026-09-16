@@ -19,6 +19,7 @@ import {
   validateLifecycleReasons, LIFECYCLE_REASON_CODES,
 } from './lifecycle.mjs';
 import { buildRecruitmentJourney } from './journey.mjs';
+import { httpStatusFor, publicErrorBody } from './errors.mjs';
 import { roomRole } from '../m17/shared.mjs';
 import { guardRev, revMeta } from '../m181/concurrency.mjs';
 import { buildShared } from '../m12/shared.mjs';
@@ -48,6 +49,33 @@ export function registerM23(rawCtx) {
   /** Evidence provider. P2 ships the null provider: no phase supplies evidence yet. */
   const evidenceProvider = () => ctx.recruitmentEvidenceProvider ?? NULL_EVIDENCE_PROVIDER;
 
+  /**
+   * Answer a domain error through the ONE mapping table.
+   *
+   * Two things happen here that used to happen in two inline ternary chains:
+   *
+   *   1. The status comes from `M23_ERROR_HTTP`. There is no default branch,
+   *      so a code the table has never been told about becomes a 500 AND a log
+   *      line naming it — a loud unknown rather than a quiet 400.
+   *   2. The body is projected. The validator and the projector return rich
+   *      diagnostics — `missing` and `malformed` are lists of raw store names —
+   *      which are exactly right in a unit test and in this log, and are the
+   *      internal schema if they go out over HTTP.
+   */
+  const sendDomainError = (res, out, where) => {
+    const status = httpStatusFor(out?.error);
+    if (status === null) {
+      console.error(`M23 ${where} UNMAPPED_ERROR ${out?.error} — ${JSON.stringify(out)}`);
+      return res.status(500).json({
+        ok: false,
+        error: 'LIFECYCLE_INTERNAL',
+        message: 'The recruitment journey cannot be served for this case. This has been recorded.',
+      });
+    }
+    if (status === 500) console.error(`M23 ${where} ${out.error} — ${JSON.stringify(out)}`);
+    return res.status(status).json(publicErrorBody(out));
+  };
+
   // ------------------------------------------------------------- journey read
   orgRouter.get('/rooms/:id/journey', (req, res) => {
     const room = ctx.findRoomForRequest(req, res);
@@ -60,14 +88,7 @@ export function registerM23(rawCtx) {
       role: roomRole({ room, user: req.orgUser, isLead: isLead(req.orgUser) }),
     }, { evidence: evidenceProvider(), historyLimit: req.query.limit, historyCursor: req.query.cursor });
 
-    if (!out.ok) {
-      // A missing store, and a record this build cannot read, are both
-      // infrastructure — not "no history". 500, loudly. Everything else here
-      // is the deliberately indistinguishable 404.
-      const BROKEN = ['JOURNEY_STORE_MISSING', 'CASE_HISTORY_CORRUPT'];
-      const code = BROKEN.includes(out.error) ? 500 : 404;
-      return res.status(code).json(out);
-    }
+    if (!out.ok) return sendDomainError(res, out, 'journey');
     return res.json(out);
   });
 
@@ -81,18 +102,18 @@ export function registerM23(rawCtx) {
     // A client naming a STAGE rather than an action is refused by name, so the
     // refusal is unambiguous in a log rather than looking like a typo.
     if (req.body?.stage !== undefined || req.body?.status !== undefined) {
-      return res.status(400).json({
+      return sendDomainError(res, {
         error: 'LIFECYCLE_STAGE_NOT_SETTABLE',
         message: 'The recruitment stage is not settable directly. Name a recruitment action instead.',
         actions: LIFECYCLE_ACTION_NAMES,
-      });
+      }, 'lifecycle');
     }
     if (typeof action !== 'string' || !LIFECYCLE_ACTIONS[action]) {
-      return res.status(400).json({
+      return sendDomainError(res, {
         error: 'LIFECYCLE_ACTION_UNKNOWN',
         message: 'Unknown recruitment action.',
         actions: LIFECYCLE_ACTION_NAMES,
-      });
+      }, 'lifecycle');
     }
 
     // The LIFECYCLE taxonomy, not M17's decision taxonomy. The two describe
@@ -100,7 +121,7 @@ export function registerM23(rawCtx) {
     // decision vocabulary wrote a judgement about a player into a record of
     // what happened to a case.
     const reasons = validateLifecycleReasons(reasonCodes);
-    if (!reasons.ok) return res.status(400).json(reasons);
+    if (!reasons.ok) return sendDomainError(res, reasons, 'lifecycle');
 
     const role = roomRole({ room, user: req.orgUser, isLead: isLead(req.orgUser) });
 
@@ -113,10 +134,10 @@ export function registerM23(rawCtx) {
     // transition is no longer legal and every replay would be refused.
     const prior = idempotentHit(room, action, clientKey);
     if (prior && !actionPermittedForRole(action, role)) {
-      return res.status(403).json({
+      return sendDomainError(res, {
         error: 'LIFECYCLE_NOT_PERMITTED',
         message: 'Your role cannot take this recruitment action.',
-      });
+      }, 'lifecycle');
     }
     if (prior) {
       return res.json({
@@ -132,22 +153,10 @@ export function registerM23(rawCtx) {
       evidence: evidenceProvider(),
       reasonCodes: reasons.codes,
     });
-    if (!verdict.ok) {
-      // 409 for "the case is not in a position for this": the request was
-      // well-formed and permitted, the case simply is not where the caller
-      // thought. 400 would tell them to fix their request; there is nothing
-      // in the request to fix.
-      const CONFLICT = ['LIFECYCLE_TRANSITION_INVALID', 'LIFECYCLE_NO_CHANGE', 'LIFECYCLE_ACTION_NOT_APPLICABLE'];
-      const code = verdict.error === 'LIFECYCLE_NOT_PERMITTED' ? 403
-        : CONFLICT.includes(verdict.error) ? 409
-          : verdict.error === 'LIFECYCLE_EVIDENCE_REQUIRED' ? 422
-            // A stored state this build does not recognise is OUR problem, not
-            // the caller's. 409 would invite a reload-and-retry that cannot
-            // succeed; this is corruption and should read as corruption.
-            : verdict.error === 'LIFECYCLE_STATE_UNKNOWN' ? 500
-              : 400;
-      return res.status(code).json(verdict);
-    }
+    // The bands — 400 fix your request, 403 not yours, 409 the case is not
+    // where you thought, 422 the evidence is not there, 500 ours — and the
+    // reasoning behind each, live in `errors.mjs` next to the table.
+    if (!verdict.ok) return sendDomainError(res, verdict, 'lifecycle');
 
     // Concurrency AFTER validation, so a stale rev on an impossible action
     // reports the impossibility rather than sending the caller to reload and

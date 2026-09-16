@@ -448,21 +448,32 @@ section('§41 — a Trust Score grants no permission whatsoever');
 {
   // Kola's real score is irrelevant to every gate below; these are the exact
   // standing refusals, unchanged by M16.2.
-  neg((await j('GET', '/org/players/pl-guni/trust-profile', undefined, alex.token)).status !== 200, 'agency is refused a minor\'s Trust Profile (agency/minor wall holds)');
+  // Named, not "not 200". A refusal for the WRONG reason — a 404 from a renamed
+  // route, a 500 from a broken projector — satisfies `!== 200` exactly as well
+  // as the safeguarding rule does, and then the rule is untested.
+  const _p1 = await j('GET', '/org/players/pl-guni/trust-profile', undefined, alex.token);
+  neg(_p1.status === 403 && _p1.body?.error === 'NOT_VISIBLE', 'agency is refused a minor\'s Trust Profile (agency/minor wall holds)');
   const agencyPassport = await j('GET', '/org/players/pl-guni/football-passport', undefined, alex.token);
-  neg(agencyPassport.status !== 200, 'agency still cannot read a minor\'s Passport regardless of Trust Score');
+  // UNDER_18_WALL specifically, and not NOT_VISIBLE: the minor wall is a
+  // different rule from ordinary visibility, and only the code distinguishes
+  // them. If the wall broke and this became a generic visibility refusal, a
+  // `!== 200` assertion would stay green.
+  neg(agencyPassport.status === 403 && agencyPassport.body?.error === 'UNDER_18_WALL', 'agency still cannot read a minor\'s Passport regardless of Trust Score');
   // blocked organisation
   await j('POST', '/guardian/block', { orgId: 'org-eastport', playerId: 'pl-guni', reason: 'test' }, amara.token);
-  neg((await j('GET', '/org/players/pl-guni/trust-profile', undefined, maria.token)).status !== 200, 'a blocked organisation is refused the Trust Profile');
+  const _p3 = await j('GET', '/org/players/pl-guni/trust-profile', undefined, maria.token);
+  neg(_p3.status === 403 && _p3.body?.error === 'NOT_VISIBLE', 'a blocked organisation is refused the Trust Profile');
   // suspended organisation loses org routes entirely
   await j('POST', '/admin/clubs/org-eastport/verification', { suspended: true }, undefined, A);
   const suspBatch = await j('GET', '/org/trust-summaries?playerIds=pl-adeyemi', undefined, maria.token);
-  neg(suspBatch.status !== 200 || (suspBatch.body.items ?? []).length === 0, 'a suspended organisation gains nothing from Trust summaries');
+  neg((suspBatch.status === 403 && suspBatch.body?.error === 'ORG_SUSPENDED') || (suspBatch.body.items ?? []).length === 0, 'a suspended organisation gains nothing from Trust summaries');
   await j('POST', '/admin/clubs/org-eastport/verification', { suspended: false }, undefined, A);
   // T&S-only surface stays T&S-only
-  neg((await j('GET', '/admin/trust/pl-adeyemi', undefined, kola.token)).status !== 200, 'a player cannot reach the T&S derivation endpoint');
+  const _p5 = await j('GET', '/admin/trust/pl-adeyemi', undefined, kola.token);
+  neg(_p5.status === 401 && _p5.body?.error === 'ADMIN_KEY_REQUIRED', 'a player cannot reach the T&S derivation endpoint');
   neg((await j('GET', '/player/trust-profile', undefined, undefined)).status === 401, 'an unauthenticated caller gets no Trust Profile');
-  neg((await j('GET', '/org/players/pl-adeyemi/trust-profile', undefined, kola.token)).status !== 200, 'a player token cannot use the org Trust route');
+  const _p6 = await j('GET', '/org/players/pl-adeyemi/trust-profile', undefined, kola.token);
+  neg(_p6.status === 401 && _p6.body?.error === 'ORG_AUTH_REQUIRED', 'a player token cannot use the org Trust route');
 }
 
 // ============================================================== metrics

@@ -12,7 +12,7 @@
 // later phases; this suite proves the lifecycle refuses to pretend they exist.
 
 import { spawn } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +30,7 @@ import {
   ALL_REASON_CODES,
 } from '../m17/shared.mjs';
 import { createEvidenceProvider } from '../m23/evidence.mjs';
+import { M23_ERROR_HTTP, httpStatusFor, publicErrorBody } from '../m23/errors.mjs';
 import { FUNNEL_STAGES, stagesReached } from '../m20/funnels.mjs';
 
 const PORT = 5700 + Math.floor(Math.random() * 200);
@@ -561,6 +562,8 @@ let server = await boot();
 
 // Filled in by group C, read by group R after the process is restarted.
 const IDEMPOTENCY_PROBE = { room: null, key: null, from: null, to: null };
+/** Section E collects every refusal the two routes can produce; section Y sweeps the same set. */
+const ERROR_BODIES_FROM_E = [];
 async function j(method, url, body, token, extra = {}) {
   const r = await fetch(`${BASE}${url}`, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...extra }, body: body === undefined ? undefined : JSON.stringify(body) });
   let data = null; try { data = await r.json(); } catch { /* non-json */ }
@@ -723,9 +726,13 @@ section('Negatives — isolation, authority, concurrency, privacy');
   // #4 — unauthorised staff.
   const held2 = (await j('GET', `/org/rooms/${ROOM}/journey`, undefined, maria.token)).body;
   const byScout = await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'confirmSignedOutcome', expectedRev: held2.case.rev }, tom.token);
-  neg(byScout.status === 403 || byScout.status === 409 || byScout.status === 422,
-    '#4 a non-lead scout cannot confirm a signing');
-  neg(byScout.status !== 200, 'and certainly does not succeed');
+  // Named exactly, not "one of three refusals". A disjunction over 403/409/422
+  // is the D5 shape: it passes when the server refuses for a DIFFERENT reason
+  // than the one under test, which is how a role-resolution bug hid behind an
+  // evidence gate. Role is checked before the transition table, so a scout is
+  // refused for who they are, and that is the assertion.
+  neg(byScout.status === 403 && byScout.body?.error === 'LIFECYCLE_NOT_PERMITTED',
+    '#4 a non-lead scout is refused 403 LIFECYCLE_NOT_PERMITTED — for their role, not for missing evidence');
 
   // #13 — the player has no route into any of it.
   const playerTry = await j('GET', `/org/rooms/${ROOM}/journey`, undefined, kola.token);
@@ -800,7 +807,8 @@ section('H1-H6 — the signed boundary, attacked from every write path');
   const HR = lr.body?.room?.roomId;
   if (HR) {
     const direct = await j('POST', `/org/rooms/${HR}/status`, { status: 'signed' }, harbour.token);
-    neg(direct.status !== 200, 'H2 the legacy status route cannot reach signed from watching');
+    neg(direct.status === 409 && direct.body?.error === 'ROOM_TRANSITION_INVALID',
+      'H2 the legacy status route answers 409 ROOM_TRANSITION_INVALID for watching -> signed');
     const st = (await j('GET', `/org/rooms/${HR}`, undefined, harbour.token)).body;
     neg(st.room?.status !== 'signed', 'H2b and the case did not move');
   } else {
@@ -1371,7 +1379,7 @@ section('E — every error body, swept for private text at once');
   ok(JSON.stringify(roomView.body).includes(SECRET) || JSON.stringify(comments.body).includes(SECRET),
     'E0b the private text really is stored and really is visible to the club that wrote it');
 
-  const errorBodies = [];
+  const errorBodies = ERROR_BODIES_FROM_E;
   const collect = async (label, res) => { if (res.status >= 400) errorBodies.push({ label, status: res.status, body: res.body }); };
 
   const cur = (await j('GET', `/org/rooms/${EROOM}/journey`, undefined, maria.token)).body;
@@ -1418,6 +1426,117 @@ section('E — every error body, swept for private text at once');
 
   // 5xx means OUR fault. None of the above is our fault.
   neg(errorBodies.every((e) => e.status < 500), 'E5 and not one of them is a 5xx — every one is the caller\'s to fix');
+}
+
+section('Y — the error contract: one table, no default, nothing internal in the body');
+{
+  // The drift guard, and it is MECHANICAL rather than a list somebody keeps.
+  //
+  // Every `error: 'CODE'` literal in the M23 source is extracted from the
+  // files themselves and required to have a status. A list written by hand
+  // here would pass forever while the module grew a code nobody mapped — which
+  // is exactly what the ternary chain this replaced did, silently, by falling
+  // through to 400.
+  const M23_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'm23');
+  const sources = readdirSync(M23_DIR).filter((f) => f.endsWith('.mjs') && f !== 'errors.mjs');
+  const produced = new Set();
+  for (const f of sources) {
+    const text = readFileSync(path.join(M23_DIR, f), 'utf8');
+    for (const m of text.matchAll(/error:\s*'([A-Z][A-Z0-9_]+)'/g)) produced.add(m[1]);
+  }
+  ok(produced.size >= 15, `Y1 ${produced.size} error codes found in the M23 source, mechanically`);
+
+  const unmapped = [...produced].filter((c) => httpStatusFor(c) === null);
+  for (const c of unmapped) console.error(`   unmapped: ${c}`);
+  neg(unmapped.length === 0, 'Y2 every error code the M23 source can produce has an HTTP status in the one table');
+
+  // The converse. A table entry for a code nothing produces is dead weight that
+  // makes the table look more complete than it is. `ROOM_VERSION_CONFLICT` is
+  // the one legitimate exception: M18.1's rev guard raises it, not M23.
+  const EXTERNAL = new Set(['ROOM_VERSION_CONFLICT']);
+  const orphaned = Object.keys(M23_ERROR_HTTP).filter((c) => !produced.has(c) && !EXTERNAL.has(c));
+  for (const c of orphaned) console.error(`   orphaned: ${c}`);
+  neg(orphaned.length === 0, 'Y3 and the table contains no code nothing can produce');
+
+  // No silent default in either direction: an unknown code must NOT resolve.
+  neg(httpStatusFor('LIFECYCLE_NOT_A_REAL_CODE') === null, 'Y4 an unknown code resolves to null, not to a default status');
+  neg(httpStatusFor('constructor') === null, 'Y5 and a prototype key is absent from the table, not a function');
+
+  // Every mapped status is one this contract actually uses. A 418 or a 200 in
+  // the table would be a typo that no other assertion here would notice.
+  const BANDS = [400, 403, 404, 409, 422, 500];
+  const offBand = Object.entries(M23_ERROR_HTTP).filter(([, s]) => !BANDS.includes(s));
+  neg(offBand.length === 0, `Y6 every status in the table is one of ${BANDS.join('/')}`);
+
+  // §36 — an internal error must not hand the client the implementation.
+  //
+  // The control first: the projector's own return value DOES name the stores,
+  // because that detail is what makes it useful in a log and in the unit tests
+  // above. Without this the next assertion could pass by testing nothing.
+  const holed = {
+    recruitmentCases: [], roomDecisions: [], requests: [], signings: [],
+    assessments: undefined, trials: 'not-a-list',
+  };
+  const internal = buildRecruitmentJourney(holed, 'case-anything', { kind: 'org_staff', orgId: 'org-eastport' });
+  ok(internal.ok === false && internal.error === 'JOURNEY_STORE_MISSING'
+    && JSON.stringify(internal).includes('assessments'),
+  'Y7 the projector names the absent store internally, which is why the log is worth reading');
+
+  const publicBody = publicErrorBody(internal);
+  const leaked = JOURNEY_REQUIRED_STORES.filter((s) => JSON.stringify(publicBody).includes(s));
+  for (const s of leaked) console.error(`   leaked store name: ${s}`);
+  neg(leaked.length === 0, 'Y8 and the body a client receives names none of them — not one store, not the count');
+  neg(publicBody.missing === undefined && publicBody.malformed === undefined,
+    'Y9 the diagnostic fields are absent from the public body, not emptied');
+  ok(publicBody.error === 'JOURNEY_STORE_MISSING', 'Y10 while the code itself survives, so a client can still branch and a log can still group');
+
+  // §33 as a property over the HTTP bodies collected in E, rather than over the
+  // ones somebody remembered: no refusal may carry a key outside the allowlist.
+  //
+  // `ROOM_VERSION_CONFLICT` is excluded, and that is a decision with a reason.
+  // It is raised by M18.1's `guardRev` BEFORE this module's mapping is reached,
+  // and its body — `currentRev`, `updatedBy`, `updatedAt` — is the shared
+  // conflict contract that `conflict.tsx` renders in two clients across five
+  // milestones. `updatedBy` is deliberately a display name and never a user id,
+  // and every caller reaching it has already passed the room's visibility gate,
+  // so there is nothing here a 200 would not also have shown them. Narrowing it
+  // would break the shared conflict notice everywhere to disclose nothing.
+  const ALLOWED_KEYS = new Set(['ok', 'error', 'message', 'allowed', 'to', 'actions',
+    'requires', 'evidenceReason', 'current', 'expectedRev', 'rev']);
+  const strayKeys = [];
+  for (const { label, body } of ERROR_BODIES_FROM_E) {
+    if (body?.error === 'ROOM_VERSION_CONFLICT') continue;
+    for (const k of Object.keys(body ?? {})) if (!ALLOWED_KEYS.has(k)) strayKeys.push(`${label}.${k}`);
+  }
+  for (const s of strayKeys) console.error(`   stray key: ${s}`);
+  neg(strayKeys.length === 0, 'Y11 no refusal M23 itself produces carries a field outside the published error shape');
+
+  // §35 — and the one body that IS excluded still may not carry the thing §35
+  // actually forbids. Checked rather than assumed, because the exclusion above
+  // is only defensible if this holds.
+  {
+    const conflicts = ERROR_BODIES_FROM_E.filter(({ body }) => body?.error === 'ROOM_VERSION_CONFLICT');
+    ok(conflicts.length >= 1, 'Y11b the sweep really did provoke a version conflict');
+    const CONFLICT_KEYS = new Set(['error', 'message', 'expectedRev', 'currentRev', 'updatedBy', 'updatedAt', 'status']);
+    const widened = [];
+    for (const { label, body } of conflicts) {
+      for (const k of Object.keys(body ?? {})) if (!CONFLICT_KEYS.has(k)) widened.push(`${label}.${k}`);
+    }
+    neg(widened.length === 0, 'Y11c the 409 body is exactly M18.1\'s conflict contract, not that contract plus M23 detail');
+    const carriesNarrative = conflicts.some(({ body }) => {
+      const text = JSON.stringify(body ?? {});
+      return LIFECYCLE_REASON_CODES.some((c) => text.includes(c)) || /note|reason|narrative/i.test(Object.keys(body ?? {}).join(' '));
+    });
+    neg(carriesNarrative === false, 'Y11d and carries no lifecycle reason code and no narrative field');
+  }
+
+  // §34 — the parity, restated after the mapping moved. Not "both are 404":
+  // byte-identical, because a difference of one character is an oracle.
+  const ghost = await j('GET', '/org/rooms/case-does-not-exist/journey', undefined, maria.token);
+  const foreign = await j('GET', `/org/rooms/${ROOM}/journey`, undefined, harbour.token);
+  neg(ghost.status === 404 && foreign.status === 404, 'Y12 a hidden case and a case that never existed both answer 404');
+  neg(JSON.stringify(ghost.body) === JSON.stringify(foreign.body),
+    'Y13 and their bodies are byte-identical, after the error mapping was centralised');
 }
 
 section('S — the subsystems M23 must not have touched');
@@ -1474,9 +1593,13 @@ section('S — the subsystems M23 must not have touched');
     'S7 and the journey carries no score, readiness, probability or percentage of any kind');
 
   // Matching is criteria-based and must not learn from the lifecycle.
+  // Two assertions, not one disjunction. `status !== 200 || !includes(...)`
+  // passes when the watchlists route is BROKEN, which proves nothing about
+  // whether matching learned from the lifecycle.
   const watch = await j('GET', '/org/watchlists', undefined, maria.token);
-  neg(watch.status !== 200 || !JSON.stringify(watch.body).includes(SROOM),
-    'S8 and no watchlist acquired the case as a criterion');
+  ok(watch.status === 200, 'S8 the watchlists route answers, so the next check is not vacuous');
+  neg(!JSON.stringify(watch.body).includes(SROOM),
+    'S8b and no watchlist acquired the case as a criterion');
 }
 
 section('R — restart: what survived the process going away');
