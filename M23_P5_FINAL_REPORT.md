@@ -12,7 +12,7 @@ Documents of record: `M23_P5_DECISION_REUSE_AUDIT.md`,
 ## The 76 items (§174)
 
 1. **Starting tip** — `2889bd6` (M23 P4B closure: correct the server battery count).
-2. **Final tip** — the follow-up commit that carries this report; the closure commit is `f080bfe` (P5-4). Phase commits: `1e2c0c5` (P5-1 server), `66a14ea` (P5-2 clients), `2c55952` (P5-3 tests + D-P5-1/D-P5-2), `f080bfe` (P5-4 docs).
+2. **Final tip** — the commit that carries this filled report (its hash is in the closure message); `24b9086` carried the unfilled draft; the closure commit is `f080bfe` (P5-4), which is the bundled tip. Phase commits: `1e2c0c5` (P5-1 server), `66a14ea` (P5-2 clients), `2c55952` (P5-3 tests + D-P5-1/D-P5-2), `f080bfe` (P5-4 docs).
 3. **Schema version** — 2304, unchanged. **P5 adds no migration.**
 4. **New stores** — none. `db.roomDecisions` (M17) carries the formal rows; the draft is `kase.decisionDraft`. No `recruitmentDecisions`, `decisionDrafts` or `recruitmentOffers` (persistence §1, §5).
 5. **Existing decision system reuse** — M17's `roomDecisions` chain (`supersedes`/`supersededById`), `REASON_CODES` taxonomy, `validateReasonCodes`, `captureSnapshot`, `roomCan`, `GET /decisions` reader, Second Look reader, Nobody Missed `room_decided`, M20 decision family, journey decision projection — all reused; the reuse audit classifies R1–R30.
@@ -66,7 +66,7 @@ Documents of record: `M23_P5_DECISION_REUSE_AUDIT.md`,
 53. **Negative live paths** — N1–N16 as listed in the suite header (readiness, scout, foreign club, disabled finalize, reject without reason, second draft, stale rev, replace without reason, no offer button, sentinels, player token, lifecycle by hand, 390/360, blocked family, a11y, FR).
 54. **Decision test totals** — `m23DecisionE2E` 434 (314 negative, 72 %); `m23DecisionPersistence` 48 (17 negative); `m23DecisionPerf` measured; `m23DecisionLive` 86 (25 negative). Prototype keys (§95) and invalid types (§96) covered in U6, U11, U12, U16, U19, U22, K1, X1–X8.
 55. **Server regression totals** — 45 scripts, all exit 0 on the final tree (one owned :4000 server, sequential); the first battery run caught the Y11 shape widening, fixed in `f080bfe` and re-run green (table below).
-56. **Browser/live/demo totals** — SEE_BROWSER.
+56. **Browser/live/demo totals** — 37 browser scripts, all exit 0 on the final tree with demos rebuilt at `f080bfe`: navConfig 282, demoFreshness 13, uiSpotcheck, demoOffline, crosstab, demoHostOrdering, eleven demo spotchecks, liveIntegration, navLive 64, and seventeen live suites including `m23TrialLive` 122 (53 negative) and `m23DecisionLive` 86 (25 negative) (table below)..
 57. **Typechecks** — club, grassroots, admin, player: 0 errors.
 58. **Builds** — club, grassroots, admin (Vite) and player (Expo web export) build; demos rebuilt (`e2e/buildDemos.mjs`), freshness test green.
 59. **Navigation regression** — `navConfig` and `navLive` green; no new nav item (live A1b).
@@ -80,21 +80,105 @@ Documents of record: `M23_P5_DECISION_REUSE_AUDIT.md`,
 67. **Open Low** — 4 inherited (P4A-D6, D7, D8, D11), owner phases unchanged.
 68. **Known limitations** — no precondition on `on_hold`/`archived` (a hold or archive by hand records no `decisionId`); the assessment summary caps `assessmentIds` at 20 in the row's snapshot; the notification to owner/lead uses the existing `recruitment_room` type rather than a decision-specific one; the demo store simulates the server's rules without the blind rule.
 69. **Bundle path** — `/home/user/scoutbox-m23-p5-decision.bundle`.
-70. **Bundle SHA-256** — SEE_SHA.
-71. **Bundle verify** — SEE_VERIFY.
-72. **Fresh clone result** — SEE_CLONE.
-73. **Tree status** — SEE_TREE.
-74. **Push status** — not pushed (the branch's remote tip stays `2889bd6`; local is SEE_AHEAD commits ahead).
+70. **Bundle SHA-256** — `46d3b29b1cdfc2cd3e535049c80d6b71801bd8cfd9998207035b1fc9910c6e59` (4080115 bytes; secret scan of the tracked tree at HEAD: 0 hits)..
+71. **Bundle verify** — `git bundle verify`: "The bundle records a complete history." Fresh clone HEAD `f080bfe873d147a36bd00c25d965f983e3fabaf4` and tree `ae4e3c76110637af89da5d0f62c41f73f5f6281c` equal the workspace; control-byte sweep 0 files..
+72. **Fresh clone result** — the clone boots on a fresh data directory (`schemaVersion 2304`, `X-ScoutBox-Schema: 2304`); 26 suites run from the clone all exit 0 (apiE2E 130, m23DecisionE2E, m23DecisionPersistence, m23DecisionPerf, m23TrialE2E, m23TrialPersistence, m23TrialPerf, m23P4AClosureE2E 337, m12E2E 152, m15E2E 189, m23ContactE2E, m23ContactPersistence, m23E2E, m23BootContract, m23Persistence 67, m17E2E, m18E2E, m20E2E, m182E2E, m22E2E 112, m22Blocker 60, m22Robustness 48); the clone tree is clean after the tests; club, grassroots and admin build from the clone; **`m23DecisionLive` runs from the clone: 86 checks passed (25 negative)**..
+73. **Tree status** — clean. The bundle was cut at the closure commit `f080bfe` with only this report untracked; the report commits (`24b9086`, then the fill-in that follows it — the first commit carried unfilled placeholders because the fill script aborted, and history is not rewritten) sit above the bundled tip..
+74. **Push status** — not pushed (the branch's remote tip stays `2889bd6`; local is 6 commits ahead).
 75. **PR status** — none opened.
 76. **Deployment status** — none.
 
 ## Server battery (final tree, one owned :4000 server, sequential)
 
-SEE_SERVER_TABLE
+| script | exit | summary |
+|---|---|---|
+| `testTrust` | 0 | 23 trust/safeguarding tests passed |
+| `apiE2E` | 0 | 130 API checks passed |
+| `connectedE2E` | 0 | 43 connected-mode checks passed |
+| `m12E2E` | 0 | m12E2E: all 152 checks passed |
+| `m13E2E` | 0 | m13E2E: all 212 checks passed |
+| `m14E2E` | 0 | m14E2E: all 193 checks passed |
+| `m141E2E` | 0 | M14.1 adversarial suite: 94 checks passed |
+| `m15E2E` | 0 | M15 acceptance suite: 189 checks passed, 72 negative/abuse checks (38% of all checks) |
+| `m16E2E` | 0 | M16 acceptance suite: 118 checks passed, 55 negative/abuse checks (47% of all checks) |
+| `m161E2E` | 0 | all M16.1 checks passed |
+| `m162E2E` | 0 | all M16.2 checks passed |
+| `m17E2E` | 0 | all M17 checks passed |
+| `m18E2E` | 0 | all M18 checks passed |
+| `m181E2E` | 0 | all M18.1 checks passed |
+| `m182E2E` | 0 | all M18.2 checks passed |
+| `m19E2E` | 0 | all M19 checks passed |
+| `m20E2E` | 0 | all M20 checks passed |
+| `m21E2E` | 0 | all M21 checks passed |
+| `m22E2E` | 0 | production Combine eligibility: NOT ELIGIBLE — real-world validation not completed |
+| `m22Blocker` | 0 | production Combine eligibility: NOT ELIGIBLE — real-world validation not completed |
+| `m23E2E` | 0 | all M23 P2 checks passed |
+| `m23Persistence` | 0 | M23-D2 persistence suite: 67 checks passed, 20 negative/integrity checks (30%) |
+| `m23BootContract` | 0 | all M23 boot-contract checks passed |
+| `m23ContactE2E` | 0 | all M23 P3 Contact checks passed |
+| `m23ContactPersistence` | 0 | all M23 P3 Contact persistence checks passed |
+| `m23P4AClosureE2E` | 0 | M23 P4A closure suite: 337 checks passed, 210 negative/abuse checks (62%) |
+| `m23TrialE2E` | 0 | all M23 P4B Trial checks passed |
+| `m23TrialPersistence` | 0 | all M23 P4B Trial persistence checks passed |
+| `m23TrialPerf` | 0 |  |
+| `m23DecisionE2E` | 0 | all M23 P5 Decision checks passed |
+| `m23DecisionPersistence` | 0 | all M23 P5 Decision persistence checks passed |
+| `m23DecisionPerf` | 0 | → one sort and one integrity pass over the case's rows; the history page limit (100) bounds the payload. |
+| `m22CvEval` | 0 | FT05_ball_passes_in_front            accepted                   count 0 |
+| `m22Holdout` | 0 | HT03_second_ball_passes_close        protocol_violation         count 0 |
+| `m22Robustness` | 0 | m22Robustness: all 48 checks passed |
+| `m22Perf` | 0 |  |
+| `m23Perf` | 0 |  |
+| `m23ContactPerf` | 0 |  |
+| `m17Perf` | 0 | Passport projection (same player, direct)  median 1.4 ms   p90 2.3 ms |
+| `m18Perf` | 0 | matching the WHOLE brief costs 2.24× a single Passport assembly — the match runs on light facts, not assembled Passpo |
+| `m181Perf` | 0 | noise. Worth revisiting if Passports of that size become common; today the |
+| `m182Perf` | 0 |  |
+| `m19Perf` | 0 |  |
+| `m20Perf` | 0 | opposite of what the one-pass design was optimised for. It has been left alone rather |
+| `m21Perf` | 0 |  |
 
 ## Browser battery (final tree, demos rebuilt first)
 
-SEE_BROWSER_TABLE
+| suite | exit | summary |
+|---|---|---|
+| `navConfig` | 0 | navConfig: 282 checks passed |
+| `demoFreshness` | 0 | demoFreshness: 13 checks passed |
+| `uiSpotcheck` | 0 | UI SPOTCHECK OK |
+| `demoOffline` | 0 | DEMO BUILDS OK |
+| `crosstab` | 0 | CROSS-TAB E2E OK |
+| `demoHostOrdering` | 0 | demoHostOrdering: all 15 checks passed |
+| `m12DemoSpotcheck` | 0 | M12 DEMO SPOTCHECK OK — zero page errors |
+| `m13DemoSpotcheck` | 0 | M13 DEMO SPOTCHECK OK — zero page errors |
+| `m14DemoSpotcheck` | 0 |  |
+| `m162DemoSpotcheck` | 0 | m162DemoSpotcheck: 21 checks passed — Trust Score demo story OK, zero page errors |
+| `m17DemoSpotcheck` | 0 | m17DemoSpotcheck: 47 checks passed — Recruitment Rooms demo story OK, zero page errors |
+| `m18DemoSpotcheck` | 0 | M18 headless spotcheck: ALL CHECKS PASSED — zero page errors |
+| `m181DemoSpotcheck` | 0 | M18.1 headless spotcheck: ALL CHECKS PASSED — zero page errors |
+| `m182DemoSpotcheck` | 0 | M18.2 headless spotcheck: ALL CHECKS PASSED — zero page errors |
+| `m19DemoSpotcheck` | 0 | M19 headless spotcheck: ALL CHECKS PASSED — zero page errors |
+| `m20DemoSpotcheck` | 0 | M20 headless spotcheck: ALL CHECKS PASSED — zero page errors |
+| `m21DemoSpotcheck` | 0 | M21 headless spotcheck: ALL CHECKS PASSED — zero page errors |
+| `liveIntegration` | 0 | LIVE INTEGRATION OK — separate contexts, one backend, no demo bus |
+| `navLive` | 0 | navLive: 64 checks passed — N1–N17 complete |
+| `m12Live` | 0 | M12 LIVE INTEGRATION OK — real backend, separate contexts |
+| `m13Live` | 0 | M13 LIVE INTEGRATION OK — real backend, four separate contexts |
+| `m14Live` | 0 | m14Live: L1–L7 all passed (separate contexts, live backend) |
+| `m15Live` | 0 | m15Live: 21 checks passed — P1–P8 + T&S complete |
+| `m16Live` | 0 | m16Live: 10 checks passed — Box Cam cross-app journey complete |
+| `m162Live` | 0 | m162Live: 11 checks passed — Trust Profile journeys complete |
+| `m17Live` | 0 | m17Live: 25 checks passed — Recruitment Room journeys complete |
+| `m18Live` | 0 | m18Live: 60 checks passed — Second Look and Nobody Missed journeys complete |
+| `m181Live` | 0 | M18.1 live browser journeys: 37 checks passed (H1–H10) |
+| `m182Live` | 0 | M18.2 live browser journeys: 37 checks passed (J1–J10) |
+| `m19Live` | 0 | M19 live journeys: 17 checks passed |
+| `m20Live` | 0 | M20 live journeys: 59 checks passed |
+| `m21Live` | 0 | M21 live journeys: 68 checks passed |
+| `m22Live` | 0 | production Combine eligibility: NOT ELIGIBLE — real-world validation not completed |
+| `m23Live` | 0 | m23Live: 39 checks passed — P2 sweep corrections verified end to end |
+| `m23ContactLive` | 0 | M23 P3 CONTACT LIVE: 82 checks passed (33 negative, 40%) |
+| `m23TrialLive` | 0 | M23 P4B TRIAL LIVE: 122 checks passed (53 negative, 43%) |
+| `m23DecisionLive` | 0 | M23 P5 DECISION LIVE: 86 checks passed (25 negative, 29%) |
 
 ## Adversarial sweep (§160) and no-auto-offer search (§161)
 
@@ -140,4 +224,4 @@ Foreign org can enumerate decision: NO — W4 (404 on every route), I5, R11.
 
 ## §176
 
-SEE_SUCCESS
+**M23 P5 COMPLETE — Assessment + Recruitment Decision Integration is built, tested, documented, bundled and verified from a fresh clone. Zero Critical, zero High, zero Medium open. Nothing pushed, no PR, no deployment.**
