@@ -11,6 +11,7 @@ import type { NotificationPrefs, GuardianOpenTrial } from '../data/types';
 import { U18_PROMISES } from '../domain/safeguarding';
 import { useSession } from '../state';
 import { BoardSection, CampaignsSection, FeedbackDevSection, FollowUpsSection, PassportSection, SquadInvitesSection, TrialSafetySection } from '../components/M12Sections';
+import { TrialSlotChips, TrialWorkflowSection } from '../components/M23Trial';
 import { AckSection, OpportunityFitSection, PreferencesSection, TransitionsSection } from '../components/M13Sections';
 import { ChildReferencesSection, InviteCodeSection } from '../components/M14Sections';
 import { FootballPassportSection } from '../components/M15Sections';
@@ -212,19 +213,24 @@ export default function GuardianDashboard() {
             )}
             {r.status === 'pending' && r.type === 'trial' && r.trialDetails?.proposedDate && (
               <>
-                <Muted size={12.5}>Pick the date that works for your family — accepting confirms it:</Muted>
-                <Row style={{ flexWrap: 'wrap' }}>
-                  {[r.trialDetails.proposedDate, ...(r.trialDetails.altSlots ?? [])].map((slot) => {
-                    const active = (chosenSlots[r.id] ?? r.trialDetails?.proposedDate) === slot;
-                    return (
-                      <Pressable key={slot} onPress={() => setChosenSlots((s) => ({ ...s, [r.id]: slot }))}>
-                        <Pill label={slot} tone={active ? 'green' : undefined} />
-                      </Pressable>
-                    );
-                  })}
-                </Row>
+                <Muted size={12.5}>{pt('trialSlotPickGuardian')}</Muted>
+                {r.trialDetails.slots && r.trialDetails.slots.length > 0 ? (
+                  <TrialSlotChips slots={r.trialDetails.slots} chosenDay={chosenSlots[r.id] ?? r.trialDetails.proposedDate} onPick={(day) => setChosenSlots((s) => ({ ...s, [r.id]: day }))} />
+                ) : (
+                  <Row style={{ flexWrap: 'wrap' }}>
+                    {[r.trialDetails.proposedDate, ...(r.trialDetails.altSlots ?? [])].map((slot) => {
+                      const active = (chosenSlots[r.id] ?? r.trialDetails?.proposedDate) === slot;
+                      return (
+                        <Pressable key={slot} onPress={() => setChosenSlots((s) => ({ ...s, [r.id]: slot }))}>
+                          <Pill label={slot} tone={active ? 'green' : undefined} />
+                        </Pressable>
+                      );
+                    })}
+                  </Row>
+                )}
               </>
             )}
+            {r.status === 'accepted' && r.type === 'trial' && r.trialId && <Muted size={12.5}>{pt('trialAcceptedGuardian')}</Muted>}
             {r.status === 'pending' ? (
               <>
                 {r.type === 'contact' && (
@@ -587,6 +593,7 @@ export default function GuardianDashboard() {
             ))}
             <AckSection actor={{ kind: 'guardian', id: guardianId, childId: children[0]?.id ?? '' }} />
             <SquadInvitesSection actor={{ kind: 'guardian', id: guardianId, childId: children[0]?.id ?? '' }} />
+            <TrialWorkflowSection actor={{ kind: 'guardian', id: guardianId, childId: children[0]?.id ?? '' }} />
             <TrialSafetySection actor={{ kind: 'guardian', id: guardianId, childId: children[0]?.id ?? '' }} />
             <FollowUpsSection actor={{ kind: 'guardian', id: guardianId, childId: children[0]?.id ?? '' }} />
           </>

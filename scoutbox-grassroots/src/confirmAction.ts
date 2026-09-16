@@ -44,6 +44,7 @@ export const DESTRUCTIVE_ACTIONS: Record<string, DestructiveAction> = {
   archiveRoom: { titleKey: 'confirm.archiveRoom', bodyKey: 'confirm.archiveRoomBody', cls: 'archive' },
   closeRoom: { titleKey: 'confirm.closeRoom', bodyKey: 'confirm.closeRoomBody', cls: 'archive' },
   deleteComment: { titleKey: 'confirm.deleteComment', bodyKey: 'confirm.deleteCommentBody', cls: 'tombstone' },
+  cancelTrial: { titleKey: 'confirm.cancelTrial', bodyKey: 'confirm.cancelTrialBody', cls: 'archive' },
   archiveBrief: { titleKey: 'confirm.archiveBrief', bodyKey: 'confirm.archiveBriefBody', cls: 'archive' },
   pauseBrief: { titleKey: 'confirm.pauseBrief', bodyKey: 'confirm.pauseBriefBody', cls: 'reversible' },
   deleteSavedSearch: { titleKey: 'confirm.deleteSavedSearch', bodyKey: 'confirm.deleteSavedSearchBody', cls: 'irreversible' },

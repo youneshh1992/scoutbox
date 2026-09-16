@@ -11,6 +11,7 @@ import { pt } from '../../i18n';
 import { PageHeader } from '../../components/PageChrome';
 import { Threads } from '../../components/Threads';
 import { AckSection } from '../../components/M13Sections';
+import { TrialSlotChips } from '../../components/M23Trial';
 
 function isChildItem(r: InboxRequest | ChildInboxItem): r is ChildInboxItem {
   return 'guardianManaged' in r && r.guardianManaged === true;
@@ -130,17 +131,21 @@ export default function Inbox() {
               )}
               {r.status === 'pending' && r.type === 'trial' && r.trialDetails?.proposedDate && (
                 <>
-                  <Muted size={12.5}>Pick the date that works — accepting confirms it:</Muted>
-                  <Row style={{ flexWrap: 'wrap' }}>
-                    {[r.trialDetails.proposedDate, ...(r.trialDetails.altSlots ?? [])].map((slot) => {
-                      const active = (chosenSlots[r.id] ?? r.trialDetails?.proposedDate) === slot;
-                      return (
-                        <Pressable key={slot} onPress={() => setChosenSlots((s) => ({ ...s, [r.id]: slot }))}>
-                          <Pill label={slot} tone={active ? 'green' : undefined} />
-                        </Pressable>
-                      );
-                    })}
-                  </Row>
+                  <Muted size={12.5}>{pt('trialSlotPick')}</Muted>
+                  {r.trialDetails.slots && r.trialDetails.slots.length > 0 ? (
+                    <TrialSlotChips slots={r.trialDetails.slots} chosenDay={chosenSlots[r.id] ?? r.trialDetails.proposedDate} onPick={(day) => setChosenSlots((s) => ({ ...s, [r.id]: day }))} />
+                  ) : (
+                    <Row style={{ flexWrap: 'wrap' }}>
+                      {[r.trialDetails.proposedDate, ...(r.trialDetails.altSlots ?? [])].map((slot) => {
+                        const active = (chosenSlots[r.id] ?? r.trialDetails?.proposedDate) === slot;
+                        return (
+                          <Pressable key={slot} onPress={() => setChosenSlots((s) => ({ ...s, [r.id]: slot }))}>
+                            <Pill label={slot} tone={active ? 'green' : undefined} />
+                          </Pressable>
+                        );
+                      })}
+                    </Row>
+                  )}
                 </>
               )}
               {r.status === 'pending' ? (
@@ -176,7 +181,7 @@ export default function Inbox() {
                   )}
                   {r.status === 'accepted' && r.contactChannel && <Pill label={`channel open: ${r.contactChannel}`} />}
                   {r.status === 'accepted' && r.type === 'trial' && (
-                    <Muted size={12.5}>The club must file a full performance report after your trial — it goes on your profile.</Muted>
+                    <Muted size={12.5}>{r.trialId ? `${pt('trialAccepted')} ` : ''}The club must file a full performance report after your trial — it goes on your profile.</Muted>
                   )}
                 </Row>
               )}

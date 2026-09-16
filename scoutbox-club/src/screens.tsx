@@ -14,6 +14,9 @@ import { CombinePanel } from './combineScreens';
 import { TrustPanel } from './trustScreens';
 import { rooms } from './roomsApi';
 import { fmtDate, fmtDateTime, fmtStamp, t } from './i18n';
+import { hashForRoom } from './nav';
+// The Trials list maps over rows named `t`; the translator keeps a second name there.
+const tt = t;
 import { confirmDestructive, DESTRUCTIVE_ACTIONS } from './confirmAction';
 
 const TAG_LABELS: Record<string, string> = {
@@ -866,6 +869,10 @@ export function TrialsScreen({ session, tick, notify }: ScreenProps) {
               {api.trialIcsUrl(session, t.id) && (
                 <a className="pill blue" style={{ textDecoration: 'none' }} href={api.trialIcsUrl(session, t.id)!} download={`scoutbox-trial-${t.id}.ics`}>📅 .ics</a>
               )}
+              {t.workflowState && t.workflowState !== 'legacy_accepted' && (
+                <span className={`pill ${t.workflowState === 'scheduled' ? 'blue' : t.workflowState === 'completed' ? 'green' : t.workflowState === 'cancelled' ? 'red' : 'gold'}`} data-workflow-state={t.workflowState}>{tt(`tr.state.${t.workflowState}`, t.workflowState)}</span>
+              )}
+              {t.caseId && <a className="pill" style={{ textDecoration: 'none' }} href={hashForRoom(t.caseId)}>{tt('rm.tab.trial')} →</a>}
               <span className={`pill ${t.status === 'reported' ? 'green' : 'gold'}`}>{t.status === 'reported' ? 'report filed' : 'awaiting report'}</span>
               {t.status === 'awaiting_report' && (
                 <button onClick={() => { setFiling(filing === t.id ? null : t.id); setForm({}); }}>

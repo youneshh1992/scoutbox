@@ -445,6 +445,10 @@ export interface Trial {
   guardianApproved?: boolean;
   status: 'awaiting_report' | 'reported';
   report?: TrialReport;
+  /** M23 P4B workflow state; absent on rows written before the workflow existed. */
+  workflowState?: 'legacy_accepted' | 'accepted' | 'scheduled' | 'completed' | 'cancelled';
+  caseId?: string | null;
+  subjectRemovedAt?: number | null;
 }
 
 export interface LedgerEntry {

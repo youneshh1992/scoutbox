@@ -73,7 +73,16 @@ const TRIALS: FamilyTrial[] = [{
   ],
   arrival: { time: '09:30', address: 'Gate B, Eastport Training Ground', notes: 'Ask for Priya at reception.' },
   consents: [], checkins: [], cancelled: false, statusEvents: [],
+  workflow: {
+    id: 'trial-1', orgId: 'org-eastport', orgName: 'Eastport FC', playerId: 'pl-adeyemi', workflowState: 'scheduled', workflowLabel: 'Scheduled', legacy: false,
+    acceptedAt: NOW - 2 * DAY, proposedDate: new Date(NOW + 6 * DAY).toISOString().slice(0, 10), venue: 'Eastport Training Ground',
+    schedule: { legacy: false, timezone: 'Europe/London', revision: 1, confirmedAt: NOW - 2 * DAY, awaitingConfirmation: false, sessions: [
+      { id: 'tses-1', kind: 'training', startsAt: NOW + 6 * DAY + 9.5 * 3_600_000, endsAt: NOW + 6 * DAY + 11.5 * 3_600_000, venue: { name: 'Eastport Training Ground', town: 'Eastport', address: 'Gate B, Eastport Training Ground' }, instructions: 'Ask for Priya at reception.', attendance: { state: 'not_recorded', source: null, recordedAt: null } },
+    ] },
+    awaitingYourConfirmation: false, completion: null, reportStatus: 'awaiting_report', hasReport: false, rev: 1,
+  },
 }];
+const trialWorkflowOf = (tid: string) => { const t = TRIALS.find((x) => x.id === tid); const w = t?.workflow; if (!w || !('schedule' in w)) throw new Error('TRIAL_NOT_FOUND'); return w; };
 const INVITES: SquadInvite[] = [
   { id: 'sqi-1', orgName: 'Hackney Marsh Rovers', playerName: 'Kola Adeyemi', note: 'First-team squad list', status: 'pending_player' },
 ];
@@ -162,6 +171,9 @@ export const m12mock: PlayerM12 = {
     return delay({ status: attempt.status, issues: attempt.fileChecks.issues, note: passed ? 'File checks passed. A coach still has to review the drill itself — that is a separate, human step.' : 'Automated file checks failed — fix the issues and resubmit.' });
   },
   getTrials: () => delay(TRIALS),
+  confirmTrialSchedule: async (_pid, tid) => { const w = trialWorkflowOf(tid); if (w.schedule && !w.schedule.confirmedAt) { w.schedule.confirmedAt = Date.now(); w.schedule.awaitingConfirmation = false; w.awaitingYourConfirmation = false; w.workflowState = 'scheduled'; w.workflowLabel = 'Scheduled'; w.rev += 1; } return delay({ ...w }); },
+  declineTrialSchedule: async (_pid, tid) => { const w = trialWorkflowOf(tid); if (w.schedule) { w.schedule.declinedAt = Date.now(); w.rev += 1; } return delay({ ...w }); },
+  cancelTrial: async (_pid, tid, reason) => { const w = trialWorkflowOf(tid); if (!w.completion) { w.completion = { state: 'cancelled', at: Date.now(), byKind: 'player', reason: reason ?? null }; w.workflowState = 'cancelled'; w.workflowLabel = 'Cancelled'; w.rev += 1; const t = TRIALS.find((x) => x.id === tid); if (t) t.cancelled = true; } return delay({ ...w }); },
   giveTrialConsent: async (_pid, tid) => {
     const t = TRIALS.find((x) => x.id === tid);
     if (t && !t.consents.some((c) => c.scope === 'player_event_consent')) t.consents.push({ byKind: 'player', scope: 'player_event_consent' });
@@ -234,6 +246,9 @@ export const m12mock: PlayerM12 = {
     return { status: r.status, issues: r.issues };
   },
   gTrials: () => delay(TRIALS.map((t) => ({ ...t, playerName: 'Guni Adebayo' }))),
+  gConfirmTrialSchedule: (_gid, tid) => m12mock.confirmTrialSchedule('pl-guni', tid),
+  gDeclineTrialSchedule: (_gid, tid, reason) => m12mock.declineTrialSchedule('pl-guni', tid, reason),
+  gCancelTrial: (_gid, tid, reason) => m12mock.cancelTrial('pl-guni', tid, reason),
   gGiveTrialConsent: async (_gid, tid) => {
     const t = TRIALS.find((x) => x.id === tid);
     if (t && !t.consents.some((c) => c.scope === 'guardian_event_consent')) t.consents.push({ byKind: 'guardian', scope: 'guardian_event_consent' });

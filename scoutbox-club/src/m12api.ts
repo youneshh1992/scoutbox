@@ -25,7 +25,7 @@ export interface AssessmentRating { attrId: string; rating: number | null; notOb
 export interface Assessment {
   id: string; playerId: string; playerName: string; scoutUserId: string; scoutName: string;
   templateId: string; templateVersion: number; attributesSnapshot: AssessmentAttr[];
-  context: { fixture?: string | null; date?: string | null; minutesWatched?: number | null; viewing?: string | null; opponentLevel?: string | null };
+  context: { fixture?: string | null; date?: string | null; minutesWatched?: number | null; viewing?: string | null; opponentLevel?: string | null; trialId?: string | null; trialSessionId?: string | null };
   ratings: AssessmentRating[]; state: 'draft' | 'submitted' | 'reviewed' | 'published';
   recommendation: { verdict: string; reasons: string } | null;
   secondOpinionOf: string | null; createdAt: number; submittedAt: number | null;

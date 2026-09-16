@@ -733,6 +733,31 @@ export function registerTrial(ctx) {
     res.json({ trial: trialClubView(t), evidence: evidenceViews(t) });
   });
 
+  /**
+   * The Box Cam sessions of this player that the club COULD cite now: ids and
+   * neutral metadata only (drill, captured time, verification state, the
+   * simulated flag, whether already linked). Consent is evaluated now with the
+   * same rule as linking; without it the list is empty and says why. Never a
+   * result, a trace, a nonce or a confidence.
+   */
+  orgRouter.get('/rooms/:id/trials/:tid/evidence/candidates', (req, res) => {
+    const got = roomFor(req, res, 'trial_view');
+    if (!got) return;
+    const t = findTrial(req, res, got.room);
+    if (!t) return;
+    const player = findPlayer(t.playerId);
+    if (!player || t.subjectRemovedAt) return res.json({ items: [], consent: false, reason: 'TRIAL_SUBJECT_REMOVED' });
+    if (!orgCanSee(req.org, player)) return res.json({ items: [], consent: false, reason: 'TRIAL_RECIPIENT_UNAVAILABLE' });
+    if (!combineOrgMaySeeResults?.(req.org, player)) return res.json({ items: [], consent: false, reason: 'EVIDENCE_CONSENT_REQUIRED' });
+    const linked = new Set((t.schedule?.sessions ?? []).flatMap((s) => (s.evidence ?? []).filter((e) => !e.removedAt && e.kind === 'box_cam_session').map((e) => e.sessionId)));
+    const items = (db.boxSessions ?? [])
+      .filter((s) => s && s.playerId === t.playerId && s.finalizedAt && !['cancelled', 'invalidated'].includes(s.verificationState) && s.status !== 'cancelled' && (!PROVIDERS[s.provider]?.testOnly || testProviderEnabled))
+      .sort((a, b) => ((b.endedAt ?? b.finalizedAt ?? 0) - (a.endedAt ?? a.finalizedAt ?? 0)) || String(b.id).localeCompare(String(a.id)))
+      .slice(0, 50)
+      .map((s) => ({ id: s.id, drillId: s.drillId ?? null, protocolId: s.protocolId ?? null, capturedAt: s.endedAt ?? s.finalizedAt ?? null, verificationState: s.verificationState ?? null, simulated: !!PROVIDERS[s.provider]?.testOnly, linked: linked.has(s.id) }));
+    res.json({ items, consent: true, reason: null });
+  });
+
   orgRouter.get('/rooms/:id/trials/:tid/evidence', (req, res) => {
     const got = roomFor(req, res, 'trial_view');
     if (!got) return;

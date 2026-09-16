@@ -24,8 +24,11 @@ import type {
   RoomDevelopment, RoomEvidenceItem, RoomFunnel, RoomListItem, RoomListResult,
   RoomMissingEvidence, RoomReadiness, RoomSnapshot, RoomSummaryRow, RoomTask,
   RoomTrial, RoomTrust, RoomsApi, ContactRecord, ContactList, ContactRouting, ContactCaseMove,
+  TrialWorkflowState, TrialAttendanceState, TrialSessionView, TrialRevisionView, TrialAttendanceRecord, TrialHistoryEntry,
+  TrialClubView, TrialInvitationView, TrialList, TrialEvidenceView, TrialEvidenceCandidate,
 } from './roomsApi';
 import type { RecruitmentPassport } from './m15api';
+import { ApiError } from './api';
 
 // ------------------------------------------------------------ local notes
 const TRUST_NOTE = 'Evidence confidence — not football ability.';
@@ -651,6 +654,88 @@ function funnelOf(list: DemoRoom[]): RoomFunnel {
 const delay = <T,>(v: T): Promise<T> => new Promise((res) => setTimeout(() => res(v), 60));
 
 // ------------------------------------------------------------------- api
+
+// ------------------------------------------------------ M23 P4B — Trial
+// The demo mirrors the server's truth model: an invitation is a request, a
+// trial exists only once the (simulated) recipient accepts, attendance is
+// recorded per session after it starts, completion is an explicit act behind
+// the same gate. The simulated recipient accepts the first slot a moment
+// after the invitation — the real player app is not in the loop here.
+type DemoEvidenceLink = { id: string; kind: string; sessionId: string; linkedAt: number; removedAt: number | null };
+type DemoTrialSession = Omit<TrialSessionView, 'evidence'> & { evidence: DemoEvidenceLink[] };
+interface DemoTrial {
+  roomId: string; id: string; playerId: string; playerName: string; workflowState: TrialWorkflowState;
+  acceptedAt: number; timezone: string; revision: number; confirmedAt: number | null; sessions: DemoTrialSession[];
+  revisions: TrialRevisionView[]; attendance: TrialAttendanceRecord[];
+  completion: TrialClubView['completion']; history: TrialHistoryEntry[]; rev: number; revAt: number;
+  reportStatus: 'awaiting_report' | 'reported';
+  keys: Record<string, { key: string; fp: string }[]>;
+}
+interface DemoInvitation { roomId: string; view: TrialInvitationView; clientKey: string | null; fp: string }
+const TRIAL_CASE_STATUSES = ['under_review', 'contacted', 'shortlisted', 'priority', 'trial_requested'];
+const TRIAL_NOTE = 'An invitation is not a trial. A trial exists once the player or guardian accepts; it is scheduled once a concrete schedule is confirmed; it is completed only after recorded attendance and the last session has ended.';
+const TRIAL_LIMITS = { sessions: 20, slots: 3, instructions: 500, venueName: 120, venueTown: 80, venueAddress: 200, reason: 300, note: 300, message: 2000, clientKey: 64, evidencePerSession: 20, minSessionMs: 15 * 60_000, maxSessionMs: 12 * 3_600_000, revisions: 30 };
+const TRIAL_LABELS: Record<TrialWorkflowState, string> = { legacy_accepted: 'Accepted (before scheduling existed)', accepted: 'Accepted', scheduled: 'Scheduled', completed: 'Completed', cancelled: 'Cancelled' };
+const localDayOf = (ms: number, tz: string) => { try { return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms)); } catch { return new Date(ms).toISOString().slice(0, 10); } };
+const apiErr = (status: number, code: string, message: string, details?: Record<string, unknown>) => Object.assign(new ApiError(status, code, message), { details: details ?? null });
+const trialStore: DemoTrial[] = [];
+const invitationStore: DemoInvitation[] = [];
+const trialEvent = (tr: DemoTrial, action: string, by: { kind: string; name: string | null }, detail: Record<string, unknown> | null, at: number) => { tr.history.push({ id: nid('aud'), at, action, by, detail }); };
+const bumpTrial = (tr: DemoTrial, at: number) => { tr.rev += 1; tr.revAt = at; };
+{
+  // Seed: the room already at trial_scheduled carries a confirmed one-session trial six days out.
+  const at = NOW - 2 * DAY; const start = NOW + 6 * DAY + 10 * 3_600_000;
+  const session: DemoTrialSession = { id: 'tses-d1', kind: 'training', startsAt: start, endsAt: start + 2 * 3_600_000, venue: { name: 'Eastport Training Centre', town: 'Eastport', address: 'Gate B, Dome Road' }, instructions: 'Ask for Priya at reception.', attendance: { state: 'not_recorded', source: null, recordedAt: null }, evidence: [] };
+  trialStore.push({
+    roomId: 'room-d3', id: 'trl-d1', playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', workflowState: 'scheduled', acceptedAt: at, timezone: 'Europe/London',
+    revision: 1, confirmedAt: at, sessions: [session],
+    revisions: [{ revision: 1, proposedAt: at - 3_600_000, proposedBy: { kind: 'org', name: 'Maria Keane' }, confirmedAt: at, supersededAt: null, reason: 'invitation', material: null, sessionCount: 1 }],
+    attendance: [], completion: null, reportStatus: 'awaiting_report', rev: 1, revAt: at, keys: {},
+    history: [{ id: 'aud-t1', at, action: 'trial_accepted', by: { kind: 'player', name: 'Mateus Carvalho' }, detail: { recipientType: 'player' } }, { id: 'aud-t2', at, action: 'trial_schedule_confirmed', by: { kind: 'player', name: 'Mateus Carvalho' }, detail: { revision: 1, sessionCount: 1 } }],
+  });
+  invitationStore.push({ roomId: 'room-d3', clientKey: null, fp: '', view: { id: 'req-t1', status: 'accepted', createdAt: at - 3_600_000, respondedAt: at, respondedBy: 'player', routedTo: 'player', trialId: 'trl-d1', slots: [{ id: 'tslot-d1', day: localDayOf(start, 'Europe/London'), startsAt: start, endsAt: start + 2 * 3_600_000, timezone: 'Europe/London', kind: 'training', venue: { name: 'Eastport Training Centre', town: 'Eastport' } }], proposedDate: localDayOf(start, 'Europe/London'), altSlots: [] } });
+}
+const trialsOfRoom = (roomId: string) => trialStore.filter((x) => x.roomId === roomId);
+const currentAtt = (tr: DemoTrial) => { const m = new Map<string, TrialAttendanceRecord>(); for (const a of tr.attendance) m.set(a.sessionId, a); return m; };
+const deriveTrialState = (tr: DemoTrial): TrialWorkflowState => tr.completion ? tr.completion.state : (tr.confirmedAt && tr.sessions.length ? 'scheduled' : 'accepted');
+const trialView = (tr: DemoTrial): TrialClubView => {
+  const att = currentAtt(tr); const state = deriveTrialState(tr);
+  return {
+    id: tr.id, caseId: tr.roomId, requestId: null, playerId: tr.playerId, playerName: tr.playerName, orgId: 'org-demo',
+    workflowState: state, workflowLabel: TRIAL_LABELS[state], legacy: false, reportStatus: tr.reportStatus, reportDueAt: null, hasReport: false,
+    acceptedAt: tr.acceptedAt, acceptedBy: 'player', guardianApproved: false, proposedDate: tr.sessions[0] ? localDayOf(tr.sessions[0].startsAt, tr.timezone) : null, venue: tr.sessions[0]?.venue?.name ?? null,
+    schedule: { legacy: false, timezone: tr.timezone, revision: tr.revision, confirmedAt: tr.confirmedAt, confirmedBy: tr.confirmedAt ? { kind: 'player' } : null, proposedAt: tr.revisions[tr.revisions.length - 1]?.proposedAt ?? null, awaitingConfirmation: !tr.confirmedAt,
+      sessions: tr.sessions.slice().sort((a, b) => a.startsAt - b.startsAt).map((s) => ({ ...s, attendance: att.get(s.id) ? { state: att.get(s.id)!.state, source: att.get(s.id)!.source, recordedAt: att.get(s.id)!.recordedAt } : { state: 'not_recorded', source: null, recordedAt: null }, evidence: s.evidence.filter((e) => !e.removedAt).map(({ id, kind, sessionId, linkedAt }) => ({ id, kind, sessionId, linkedAt })) })) },
+    revisions: tr.revisions.slice(), attendanceHistory: tr.attendance.slice(), completion: tr.completion, recipient: { type: 'player', minor: false }, subjectRemovedAt: null,
+    evidenceCount: tr.sessions.reduce((n, s) => n + s.evidence.filter((e) => !e.removedAt).length, 0),
+    history: tr.history.slice(), rev: tr.rev, revAt: tr.revAt, policyVersion: 1,
+  };
+};
+const trialRevGate = (tr: DemoTrial, expectedRev: unknown) => {
+  if (!Number.isInteger(expectedRev) || (expectedRev as number) < 0) throw new ApiError(400, 'TRIAL_REV_REQUIRED', 'expectedRev must be an integer.');
+  if (expectedRev !== tr.rev) throw apiErr(409, 'TRIAL_VERSION_CONFLICT', 'Someone else changed this while you were working on it. Reload to see their change, then apply yours.', { currentRev: tr.rev, updatedBy: ME.name, updatedAt: tr.revAt });
+};
+const trialKey = (tr: DemoTrial, action: string, key: string | undefined, fp: string) => {
+  if (!key) return false;
+  const list = tr.keys[action] ??= [];
+  const prior = list.find((k) => k.key === key);
+  if (prior && prior.fp === fp) return true;
+  if (prior) throw new ApiError(409, 'TRIAL_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different request.');
+  list.push({ key, fp });
+  return false;
+};
+const openTrialOf = (roomId: string) => trialsOfRoom(roomId).find((x) => !x.completion) ?? null;
+const evidenceView = (tr: DemoTrial): TrialEvidenceView[] => tr.sessions.flatMap((s) => s.evidence.map((e) => ({
+  id: e.id, kind: e.kind, trialSessionId: s.id, linkedAt: e.linkedAt, linkedBy: { name: ME.name }, removedAt: e.removedAt, provenance: 'box_cam_observed', combineVerified: false, combineVerifiedBlockedBy: 'COMBINE_VERIFIED_DISABLED',
+  session: { id: e.sessionId, drillId: e.sessionId === 'bx-d1' ? 'box-touches' : 'wall-passes', protocolId: null, capturedAt: NOW - 3 * DAY, verificationState: 'unverified', simulated: false, invalidated: false },
+  observation: e.sessionId === 'bx-d1' ? { state: 'accepted', copy: 'This session was observed by Box Cam.', qualityState: 'usable', experimental: null } : { state: 'ball_not_detected', copy: 'No reliable observation available. We could not see the ball clearly in this session.', qualityState: null, experimental: null },
+  providerVersion: 'demo', engineVersion: null, cvPolicyVersion: null,
+})));
+const EVIDENCE_CANDIDATES: TrialEvidenceCandidate[] = [
+  { id: 'bx-d1', drillId: 'box-touches', protocolId: null, capturedAt: NOW - 3 * DAY, verificationState: 'unverified', simulated: false, linked: false },
+  { id: 'bx-d2', drillId: 'wall-passes', protocolId: null, capturedAt: NOW - 9 * DAY, verificationState: 'unverified', simulated: false, linked: false },
+];
+
 export const demoRooms: RoomsApi = {
   list: async (_s, params = {}) => {
     let list = roomStore.slice();
@@ -1079,6 +1164,195 @@ export const demoRooms: RoomsApi = {
     return delay({ contact: strip(c), case: moved });
   },
 
+  trials: async (_s, roomId) => {
+    const r = find(roomId);
+    if (!r) throw new Error('ROOM_NOT_FOUND');
+    const inv = invitationStore.filter((i) => i.roomId === roomId).sort((a, b) => b.view.createdAt - a.view.createdAt)[0] ?? null;
+    const list: TrialList = {
+      items: trialsOfRoom(roomId).map(trialView), omitted: 0, routing: contactRouting(r), invitation: inv ? inv.view : null,
+      case: { status: r.status, acceptsInvitation: TRIAL_CASE_STATUSES.includes(r.status), planAction: 'planTrial' },
+      canWrite: true, canAssess: true, blocked: false, limits: TRIAL_LIMITS,
+      vocabulary: { workflowStates: ['legacy_accepted', 'accepted', 'scheduled', 'completed', 'cancelled'], sessionKinds: ['onboarding', 'training', 'drill', 'small_sided', 'match', 'other'], attendanceStates: ['attended', 'partial', 'no_show', 'club_cancelled', 'player_withdrew'] },
+      policyVersion: 1, note: TRIAL_NOTE,
+    };
+    return delay(list);
+  },
+  trial: async (_s, roomId, trialId) => {
+    const tr = trialsOfRoom(roomId).find((x) => x.id === trialId);
+    if (!tr) throw new ApiError(404, 'TRIAL_NOT_FOUND', 'No such trial.');
+    return delay({ trial: trialView(tr), evidence: evidenceView(tr), assessments: [], canWrite: true, canAssess: true, blocked: false });
+  },
+  inviteTrial: async (_s, roomId, input) => {
+    const r = find(roomId);
+    if (!r) throw new Error('ROOM_NOT_FOUND');
+    const fp = JSON.stringify({ slots: (input.slots ?? []).map((x) => [x.startsAt, x.endsAt]), venue: input.venue?.name, message: input.message });
+    const prior = input.clientKey ? invitationStore.find((i) => i.roomId === roomId && i.clientKey === input.clientKey) : null;
+    if (prior && prior.fp === fp) return delay({ invitation: prior.view, routing: contactRouting(r), case: { unchanged: true as const, status: r.status }, idempotent: true });
+    if (prior) throw new ApiError(409, 'TRIAL_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different invitation.');
+    if (!TRIAL_CASE_STATUSES.includes(r.status)) throw apiErr(409, 'TRIAL_CASE_STATE', `A case at "${STATUS_LABELS[r.status] ?? r.status}" cannot request a trial.`, { allowed: TRIAL_CASE_STATUSES });
+    if (invitationStore.some((i) => i.roomId === roomId && i.view.status === 'pending')) throw new ApiError(409, 'TRIAL_ALREADY_INVITED', 'An invitation is already waiting for an answer.');
+    if (openTrialOf(roomId)) throw new ApiError(409, 'TRIAL_INVALID_STATE', 'This case already has an open trial. Complete or cancel it before inviting again.');
+    if (!input.timezone) throw new ApiError(400, 'TRIAL_TIMEZONE_INVALID', 'timezone must be an IANA time zone name, for example Europe/London.');
+    if (!input.venue?.name?.trim()) throw new ApiError(400, 'TRIAL_VENUE_INVALID', 'A venue needs a name.');
+    if (!input.message?.trim()) throw new ApiError(400, 'TRIAL_CONTENT_INVALID', 'Write the message the player or guardian will read.');
+    if (!Array.isArray(input.slots) || input.slots.length < 1 || input.slots.length > 3) throw new ApiError(400, 'TRIAL_SLOTS_INVALID', 'Offer one to three slots.');
+    const now = Date.now();
+    for (const sl of input.slots) { if (!(sl.endsAt > sl.startsAt) || sl.endsAt <= now) throw new ApiError(400, 'TRIAL_SCHEDULE_INVALID', 'A slot must end after it starts, in the future.'); }
+    const days = new Set(input.slots.map((sl) => localDayOf(sl.startsAt, input.timezone)));
+    if (days.size !== input.slots.length) throw new ApiError(400, 'TRIAL_SLOTS_INVALID', 'Each offered slot must fall on a different day.');
+    const slots = input.slots.slice().sort((a, b) => a.startsAt - b.startsAt).map((sl) => ({ id: nid('tslot'), day: localDayOf(sl.startsAt, input.timezone), startsAt: sl.startsAt, endsAt: sl.endsAt, timezone: input.timezone, kind: sl.kind ?? 'training', venue: { name: input.venue.name, town: input.venue.town ?? null } }));
+    const view: TrialInvitationView = { id: nid('req'), status: 'pending', createdAt: now, respondedAt: null, respondedBy: null, routedTo: 'player', trialId: null, slots, proposedDate: slots[0].day, altSlots: slots.slice(1).map((x) => x.day) };
+    invitationStore.push({ roomId, clientKey: input.clientKey ?? null, fp, view });
+    const moved = r.status !== 'trial_requested';
+    const from = r.status;
+    if (moved) { r.status = 'trial_requested'; r.updatedAt = now; }
+    // The simulated recipient accepts the first slot shortly after — a demo stand-in for the player app.
+    setTimeout(() => {
+      if (view.status !== 'pending') return;
+      const at = Date.now(); const first = slots[0];
+      view.status = 'accepted'; view.respondedAt = at; view.respondedBy = 'player';
+      const tr: DemoTrial = {
+        roomId, id: nid('trl'), playerId: r.playerId, playerName: PLAYERS[r.playerId]?.name ?? 'Demo player', workflowState: 'scheduled', acceptedAt: at, timezone: input.timezone, revision: 1, confirmedAt: at,
+        sessions: [{ id: nid('tses'), kind: first.kind ?? 'training', startsAt: first.startsAt, endsAt: first.endsAt, venue: { name: input.venue.name, town: input.venue.town ?? null, address: input.venue.address ?? null }, instructions: input.instructions ?? null, attendance: { state: 'not_recorded', source: null, recordedAt: null }, evidence: [] }],
+        revisions: [{ revision: 1, proposedAt: now, proposedBy: { kind: 'org', name: ME.name }, confirmedAt: at, supersededAt: null, reason: 'invitation', material: null, sessionCount: 1 }],
+        attendance: [], completion: null, reportStatus: 'awaiting_report', rev: 1, revAt: at, keys: {}, history: [],
+      };
+      trialEvent(tr, 'trial_accepted', { kind: 'player', name: tr.playerName }, { recipientType: 'player', day: first.day }, at);
+      trialEvent(tr, 'trial_schedule_confirmed', { kind: 'player', name: tr.playerName }, { revision: 1, sessionCount: 1 }, at);
+      view.trialId = tr.id; trialStore.push(tr);
+      r.status = 'trial_scheduled'; r.updatedAt = at;
+      log(r, 'trial_accepted', { trialId: tr.id });
+    }, 1500);
+    return delay({ invitation: view, routing: contactRouting(r), case: moved ? { from, to: 'trial_requested' } : { unchanged: true as const, status: r.status } });
+  },
+  scheduleTrial: async (_s, roomId, trialId, input) => {
+    const tr = trialsOfRoom(roomId).find((x) => x.id === trialId);
+    if (!tr) throw new ApiError(404, 'TRIAL_NOT_FOUND', 'No such trial.');
+    const fp = JSON.stringify({ tz: input.timezone, sessions: (input.sessions ?? []).map((x) => [x.id ?? null, x.startsAt, x.endsAt, x.venue?.name, x.kind ?? null, x.instructions ?? null]) });
+    if (trialKey(tr, 'schedule', input.clientKey, fp)) return delay({ trial: trialView(tr), idempotent: true });
+    if (tr.completion) throw new ApiError(409, 'TRIAL_INVALID_STATE', `A trial that is ${tr.completion.state} cannot take this action.`);
+    trialRevGate(tr, input.expectedRev);
+    if (!Array.isArray(input.sessions) || !input.sessions.length || input.sessions.length > 20) throw new ApiError(400, 'TRIAL_SCHEDULE_INVALID', 'A trial has between one and twenty sessions.');
+    const now = Date.now();
+    const att = currentAtt(tr);
+    const next: DemoTrialSession[] = [];
+    for (const s of input.sessions) {
+      if (!(s.endsAt > s.startsAt) || s.endsAt - s.startsAt < TRIAL_LIMITS.minSessionMs || s.endsAt - s.startsAt > TRIAL_LIMITS.maxSessionMs) throw new ApiError(400, 'TRIAL_SCHEDULE_INVALID', 'A session is between 15 minutes and 12 hours long and ends after it starts.');
+      const prev = s.id ? tr.sessions.find((x) => x.id === s.id) : null;
+      if (s.id && !prev) throw new ApiError(404, 'TRIAL_SESSION_NOT_FOUND', 'A session id on a revision must name a session of this trial.');
+      if (!prev && s.endsAt <= now) throw new ApiError(400, 'TRIAL_SCHEDULE_INVALID', 'A session cannot be scheduled entirely in the past.');
+      if (!s.venue?.name?.trim()) throw new ApiError(400, 'TRIAL_VENUE_INVALID', 'A venue needs a name.');
+      next.push({ id: prev?.id ?? nid('tses'), kind: s.kind ?? 'training', startsAt: s.startsAt, endsAt: s.endsAt, venue: { name: s.venue.name, town: s.venue.town ?? null, address: s.venue.address ?? null }, instructions: s.instructions ?? null, attendance: { state: 'not_recorded', source: null, recordedAt: null }, evidence: prev?.evidence ?? [] });
+    }
+    next.sort((a, b) => a.startsAt - b.startsAt);
+    for (let i = 1; i < next.length; i += 1) if (next[i].startsAt < next[i - 1].endsAt) throw new ApiError(400, 'TRIAL_SCHEDULE_INVALID', 'Sessions cannot overlap.');
+    for (const prev of tr.sessions) {
+      if (prev.endsAt > now && !att.has(prev.id)) continue;
+      const kept = next.find((x) => x.id === prev.id);
+      if (!kept || kept.startsAt !== prev.startsAt || kept.endsAt !== prev.endsAt) throw apiErr(409, 'TRIAL_INVALID_STATE', 'A session that has ended or has attendance recorded cannot be removed or moved. Cancel the trial if it will not go ahead.', { current: { sessionId: prev.id } });
+    }
+    const key = (s: DemoTrialSession) => `${s.id}|${s.startsAt}|${s.endsAt}|${s.venue?.name ?? ''}|${s.venue?.town ?? ''}`;
+    const material = tr.timezone !== input.timezone || tr.sessions.length !== next.length || tr.sessions.map(key).sort().some((k, i) => k !== next.map(key).sort()[i]);
+    const keeps = !!tr.confirmedAt && !material;
+    for (const rv of tr.revisions) if (!rv.supersededAt) rv.supersededAt = now;
+    tr.revision += 1; tr.timezone = input.timezone; tr.sessions = next; tr.confirmedAt = keeps ? tr.confirmedAt : null;
+    tr.revisions.push({ revision: tr.revision, proposedAt: now, proposedBy: { kind: 'org', name: ME.name }, confirmedAt: keeps ? tr.confirmedAt : null, supersededAt: null, reason: input.reason ?? null, material, sessionCount: next.length });
+    trialEvent(tr, 'trial_rescheduled', { kind: 'org', name: ME.name }, { revision: tr.revision, sessionCount: next.length, material, requiresConfirmation: !keeps }, now);
+    bumpTrial(tr, now);
+    if (!keeps) {
+      // The simulated recipient confirms a material change after a moment.
+      setTimeout(() => { if (tr.confirmedAt || tr.completion) return; const at = Date.now(); tr.confirmedAt = at; const rv = tr.revisions.find((x) => x.revision === tr.revision); if (rv) rv.confirmedAt = at; trialEvent(tr, 'trial_schedule_confirmed', { kind: 'player', name: tr.playerName }, { revision: tr.revision, sessionCount: tr.sessions.length }, at); bumpTrial(tr, at); { const rr = find(roomId); if (rr) log(rr, 'trial_scheduled', { trialId: tr.id, revision: tr.revision }); } }, 2500);
+    }
+    return delay({ trial: trialView(tr), requiresConfirmation: !keeps, material });
+  },
+  cancelTrial: async (_s, roomId, trialId, input) => {
+    const tr = trialsOfRoom(roomId).find((x) => x.id === trialId);
+    if (!tr) throw new ApiError(404, 'TRIAL_NOT_FOUND', 'No such trial.');
+    if (!input.reason?.trim()) throw apiErr(400, 'TRIAL_CONTENT_INVALID', 'A cancellation needs a reason the family will read.', { field: 'reason' });
+    if (trialKey(tr, 'cancel', input.clientKey, JSON.stringify({ reason: input.reason.trim() }))) return delay({ trial: trialView(tr), idempotent: true });
+    if (tr.completion) throw new ApiError(409, 'TRIAL_INVALID_STATE', `A trial that is ${tr.completion.state} cannot take this action.`);
+    trialRevGate(tr, input.expectedRev);
+    const now = Date.now(); const phase = deriveTrialState(tr);
+    tr.completion = { state: 'cancelled', at: now, by: { kind: 'org', name: ME.name }, reason: input.reason.trim(), phase, cancelledBy: 'club' };
+    trialEvent(tr, 'trial_cancelled', { kind: 'org', name: ME.name }, { phase, cancelledBy: 'club' }, now);
+    bumpTrial(tr, now);
+    return delay({ trial: trialView(tr) });
+  },
+  recordTrialAttendance: async (_s, roomId, trialId, sessionId, input) => {
+    const tr = trialsOfRoom(roomId).find((x) => x.id === trialId);
+    if (!tr) throw new ApiError(404, 'TRIAL_NOT_FOUND', 'No such trial.');
+    const states: TrialAttendanceState[] = ['attended', 'partial', 'no_show', 'club_cancelled', 'player_withdrew'];
+    if (!states.includes(input.state)) throw apiErr(400, 'TRIAL_ATTENDANCE_INVALID', 'Attendance records what happened, never how it went.', { allowed: states });
+    if (trialKey(tr, 'attendance', input.clientKey, JSON.stringify({ sessionId, state: input.state, note: input.note ?? null }))) return delay({ trial: trialView(tr), idempotent: true });
+    if (deriveTrialState(tr) !== 'scheduled') throw new ApiError(409, 'TRIAL_INVALID_STATE', `A trial that is ${deriveTrialState(tr)} cannot take this action.`);
+    const s = tr.sessions.find((x) => x.id === sessionId);
+    if (!s) throw new ApiError(404, 'TRIAL_SESSION_NOT_FOUND', 'No such session on this trial.');
+    const now = Date.now();
+    if (s.startsAt > now) throw apiErr(409, 'TRIAL_INVALID_STATE', 'Attendance is recorded once a session has started.', { current: { sessionId } });
+    trialRevGate(tr, input.expectedRev);
+    tr.attendance.push({ sessionId, state: input.state, source: 'manual', recordedAt: now, recordedBy: { name: ME.name }, note: input.note?.trim() || null });
+    trialEvent(tr, 'trial_attendance_recorded', { kind: 'org', name: ME.name }, { sessionId, state: input.state, source: 'manual' }, now);
+    bumpTrial(tr, now);
+    return delay({ trial: trialView(tr) });
+  },
+  completeTrial: async (_s, roomId, trialId, input) => {
+    const tr = trialsOfRoom(roomId).find((x) => x.id === trialId);
+    if (!tr) throw new ApiError(404, 'TRIAL_NOT_FOUND', 'No such trial.');
+    if (trialKey(tr, 'complete', input.clientKey, JSON.stringify({ complete: trialId }))) return delay({ trial: trialView(tr), case: { unchanged: true as const, status: 'trial_completed' }, idempotent: true });
+    const state = deriveTrialState(tr);
+    if (state === 'completed') throw new ApiError(409, 'TRIAL_INVALID_STATE', 'This trial is already completed.');
+    if (state === 'cancelled') throw new ApiError(409, 'TRIAL_INVALID_STATE', 'A trial that is cancelled cannot take this action.');
+    const now = Date.now(); const att = currentAtt(tr);
+    const reasons: string[] = [];
+    if (state !== 'scheduled') reasons.push('schedule_not_confirmed');
+    if (!tr.sessions.some((s) => ['attended', 'partial'].includes(att.get(s.id)?.state ?? ''))) reasons.push('no_attended_session');
+    if (!tr.sessions.length || Math.max(...tr.sessions.map((s) => s.endsAt)) > now) reasons.push('last_session_not_ended');
+    if (reasons.length) throw apiErr(409, 'TRIAL_COMPLETION_REQUIREMENTS_NOT_MET', 'A trial completes only after a confirmed schedule, recorded attendance at a session, and the last session has ended.', { reasons });
+    trialRevGate(tr, input.expectedRev);
+    tr.completion = { state: 'completed', at: now, by: { kind: 'org', name: ME.name }, reason: null, phase: 'scheduled', cancelledBy: null };
+    trialEvent(tr, 'trial_completed', { kind: 'org', name: ME.name }, { sessionCount: tr.sessions.length }, now);
+    bumpTrial(tr, now);
+    const r = find(roomId); const from = r?.status ?? 'trial_scheduled';
+    if (r) { r.status = 'trial_completed'; r.updatedAt = now; }
+    return delay({ trial: trialView(tr), case: { from, to: 'trial_completed' } });
+  },
+  trialEvidenceCandidates: async (_s, roomId, trialId) => {
+    const tr = trialsOfRoom(roomId).find((x) => x.id === trialId);
+    if (!tr) throw new ApiError(404, 'TRIAL_NOT_FOUND', 'No such trial.');
+    const linked = new Set(tr.sessions.flatMap((s) => s.evidence.filter((e) => !e.removedAt).map((e) => e.sessionId)));
+    return delay({ items: EVIDENCE_CANDIDATES.map((c) => ({ ...c, linked: linked.has(c.id) })), consent: true, reason: null });
+  },
+  linkTrialEvidence: async (_s, roomId, trialId, sessionId, input) => {
+    const tr = trialsOfRoom(roomId).find((x) => x.id === trialId);
+    if (!tr) throw new ApiError(404, 'TRIAL_NOT_FOUND', 'No such trial.');
+    if (trialKey(tr, 'link', input.clientKey, JSON.stringify({ sessionId, boxSessionId: input.boxSessionId }))) return delay({ trial: trialView(tr), evidence: evidenceView(tr), idempotent: true });
+    const state = deriveTrialState(tr);
+    if (state !== 'scheduled' && state !== 'completed') throw new ApiError(409, 'TRIAL_INVALID_STATE', `A trial that is ${state} cannot take this action.`);
+    const s = tr.sessions.find((x) => x.id === sessionId);
+    if (!s) throw new ApiError(404, 'TRIAL_SESSION_NOT_FOUND', 'No such session on this trial.');
+    if (!EVIDENCE_CANDIDATES.some((c) => c.id === input.boxSessionId)) throw new ApiError(404, 'TRIAL_BOXCAM_INCOMPATIBLE', 'No Box Cam session of this player with that id is available to your organisation.');
+    trialRevGate(tr, input.expectedRev);
+    if (s.evidence.some((e) => e.sessionId === input.boxSessionId && !e.removedAt)) return delay({ trial: trialView(tr), evidence: evidenceView(tr), idempotent: true });
+    const now = Date.now();
+    s.evidence.push({ id: nid('tev'), kind: 'box_cam_session', sessionId: input.boxSessionId, linkedAt: now, removedAt: null });
+    trialEvent(tr, 'trial_evidence_linked', { kind: 'org', name: ME.name }, { trialSessionId: s.id, kind: 'box_cam_session', sessionId: input.boxSessionId }, now);
+    bumpTrial(tr, now);
+    return delay({ trial: trialView(tr), evidence: evidenceView(tr) });
+  },
+  unlinkTrialEvidence: async (_s, roomId, trialId, evidenceId, input) => {
+    const tr = trialsOfRoom(roomId).find((x) => x.id === trialId);
+    if (!tr) throw new ApiError(404, 'TRIAL_NOT_FOUND', 'No such trial.');
+    let hit: DemoEvidenceLink | null = null; let sess: DemoTrialSession | null = null;
+    for (const s of tr.sessions) { const e = s.evidence.find((x) => x.id === evidenceId); if (e) { hit = e; sess = s; break; } }
+    if (!hit || !sess) throw new ApiError(404, 'TRIAL_SESSION_NOT_FOUND', 'No such evidence link on this trial.');
+    trialRevGate(tr, input.expectedRev);
+    if (hit.removedAt) return delay({ trial: trialView(tr), evidence: evidenceView(tr), idempotent: true });
+    const now = Date.now();
+    hit.removedAt = now;
+    trialEvent(tr, 'trial_evidence_unlinked', { kind: 'org', name: ME.name }, { trialSessionId: sess.id, sessionId: hit.sessionId }, now);
+    bumpTrial(tr, now);
+    return delay({ trial: trialView(tr), evidence: evidenceView(tr) });
+  },
   funnel: async () => delay(funnelOf(roomStore)),
 };
 

@@ -421,6 +421,75 @@ export interface ContactList {
 
 export type ContactCaseMove = { from: string; to: string } | { unchanged: true; status: string };
 
+// ------------------------------------------------------ M23 P4B — Trial
+// The Trial is the club's OPERATIONAL record of one trial: invitation (a
+// request row), acceptance, a confirmed schedule of sessions, per-session
+// attendance, explicit completion, Box Cam evidence by reference and the
+// existence of assessments. Every shape below is the club view; the family's
+// view lives in the player app. Nothing here carries the family's emergency
+// contact, an observation payload or an assessment body.
+export type TrialWorkflowState = 'legacy_accepted' | 'accepted' | 'scheduled' | 'completed' | 'cancelled';
+export type TrialAttendanceState = 'attended' | 'partial' | 'no_show' | 'club_cancelled' | 'player_withdrew';
+export interface TrialSessionView {
+  id: string; kind: string; startsAt: number; endsAt: number;
+  venue: { name: string; town: string | null; address?: string | null } | null;
+  instructions?: string | null;
+  attendance: { state: TrialAttendanceState | 'not_recorded'; source: string | null; recordedAt: number | null };
+  evidence?: { id: string; kind: string; sessionId: string; linkedAt: number }[];
+}
+export interface TrialScheduleView {
+  legacy: boolean; timezone: string | null; revision: number; confirmedAt: number | null; confirmedBy: { kind: string } | null;
+  proposedAt: number | null; awaitingConfirmation: boolean; declinedAt?: number | null; sessions: TrialSessionView[];
+  proposedDate?: string | null; venue?: string | null;
+}
+export interface TrialRevisionView { revision: number; proposedAt: number; proposedBy: { kind: string; name: string | null } | null; confirmedAt: number | null; supersededAt: number | null; reason: string | null; material: boolean | null; sessionCount: number }
+export interface TrialAttendanceRecord { sessionId: string; state: TrialAttendanceState; source: string; recordedAt: number; recordedBy: { name: string | null } | null; note: string | null }
+export interface TrialHistoryEntry { id: string; at: number; action: string; by: { kind: string | null; name: string | null } | null; detail: Record<string, unknown> | null }
+export interface TrialClubView {
+  id: string; caseId: string | null; requestId: string | null; playerId: string; playerName: string | null; orgId: string;
+  workflowState: TrialWorkflowState; workflowLabel: string; legacy: boolean;
+  reportStatus: 'awaiting_report' | 'reported'; reportDueAt: number | null; hasReport: boolean;
+  acceptedAt: number | null; acceptedBy: string | null; guardianApproved: boolean | null;
+  proposedDate: string | null; venue: string | null;
+  schedule: TrialScheduleView | null;
+  revisions: TrialRevisionView[];
+  attendanceHistory: TrialAttendanceRecord[];
+  completion: { state: 'completed' | 'cancelled'; at: number; by: { kind: string; name: string | null } | null; reason: string | null; phase: string | null; cancelledBy: string | null } | null;
+  recipient: { type: 'player' | 'guardian'; minor: boolean } | null;
+  subjectRemovedAt: number | null;
+  evidenceCount: number;
+  history: TrialHistoryEntry[];
+  rev: number; revAt: number | null; policyVersion: number;
+}
+export interface TrialInvitationView {
+  id: string; status: 'pending' | 'accepted' | 'declined' | string; createdAt: number; respondedAt: number | null; respondedBy: string | null;
+  routedTo: string | null; trialId: string | null;
+  slots: { id: string; day: string; startsAt: number; endsAt: number; timezone: string; kind: string | null; venue: { name: string; town: string | null } | null }[];
+  proposedDate: string | null; altSlots: string[];
+}
+export interface TrialList {
+  items: TrialClubView[]; omitted: number;
+  routing: ContactRouting;
+  invitation: TrialInvitationView | null;
+  case: { status: string; acceptsInvitation: boolean; planAction: string };
+  canWrite: boolean; canAssess: boolean; blocked: boolean;
+  limits: { sessions: number; slots: number; instructions: number; venueName: number; venueTown: number; venueAddress: number; reason: number; note: number; message: number; clientKey: number; evidencePerSession: number; minSessionMs: number; maxSessionMs: number; revisions: number };
+  vocabulary: { workflowStates: TrialWorkflowState[]; sessionKinds: string[]; attendanceStates: TrialAttendanceState[] };
+  policyVersion: number; note: string;
+}
+export interface TrialEvidenceView {
+  id: string; kind: string; trialSessionId: string; linkedAt: number; linkedBy: { name: string | null }; removedAt: number | null;
+  provenance: string; combineVerified: boolean; combineVerifiedBlockedBy: string;
+  session: { id: string; drillId: string | null; protocolId: string | null; capturedAt: number | null; verificationState: string | null; simulated: boolean; invalidated: boolean } | null;
+  observation: { state: string; copy: string; qualityState: string | null; experimental: { status: string } | null };
+  providerVersion: string | null; engineVersion: string | null; cvPolicyVersion: string | null;
+}
+export interface TrialEvidenceCandidate { id: string; drillId: string | null; protocolId: string | null; capturedAt: number | null; verificationState: string | null; simulated: boolean; linked: boolean }
+export interface TrialAssessmentLine { id: string; state: string; scoutName: string; scoutUserId: string; submittedAt: number | null; trialSessionId: string | null; published: boolean }
+export interface TrialDetail { trial: TrialClubView; evidence: TrialEvidenceView[]; assessments: TrialAssessmentLine[]; canWrite: boolean; canAssess: boolean; blocked: boolean }
+export interface TrialSessionInput { id?: string; kind?: string; startsAt: number; endsAt: number; venue: { name: string; town?: string | null; address?: string | null }; instructions?: string | null }
+export type TrialCaseMove = { from: string; to: string } | { unchanged: true; status: string; reason?: string | null };
+
 export interface RoomsApi {
   list(s: Session, params?: RoomListParams): Promise<RoomListResult>;
   needsAttention(s: Session): Promise<{ items: RoomAttentionItem[]; note: string }>;
@@ -452,6 +521,17 @@ export interface RoomsApi {
   sendContact(s: Session, roomId: string, contactId: string, input: { expectedRev: number; clientKey?: string }): Promise<{ contact: ContactRecord; delivered: boolean; case?: ContactCaseMove; idempotent?: boolean }>;
   cancelContact(s: Session, roomId: string, contactId: string, input: { expectedRev: number }): Promise<{ contact: ContactRecord }>;
   recordExternalContact(s: Session, roomId: string, input: { channel: string; occurredAt: number | string; summary?: string | null; recipientType: 'player' | 'guardian'; clientKey?: string }): Promise<{ contact: ContactRecord; case?: ContactCaseMove; idempotent?: boolean }>;
+  // M23 P4B — Trial. Page-local to the Room, plus the existing Trials & Reports list.
+  trials(s: Session, roomId: string): Promise<TrialList>;
+  trial(s: Session, roomId: string, trialId: string): Promise<TrialDetail>;
+  inviteTrial(s: Session, roomId: string, input: { timezone: string; venue: { name: string; town?: string | null; address?: string | null }; message: string; instructions?: string | null; slots: { startsAt: number; endsAt: number; kind?: string }[]; clientKey?: string }): Promise<{ invitation: TrialInvitationView; routing: ContactRouting; case: TrialCaseMove; idempotent?: boolean }>;
+  scheduleTrial(s: Session, roomId: string, trialId: string, input: { timezone: string; sessions: TrialSessionInput[]; reason?: string | null; expectedRev: number; clientKey?: string }): Promise<{ trial: TrialClubView; requiresConfirmation?: boolean; material?: boolean; idempotent?: boolean }>;
+  cancelTrial(s: Session, roomId: string, trialId: string, input: { reason: string; expectedRev: number; clientKey?: string }): Promise<{ trial: TrialClubView; idempotent?: boolean }>;
+  recordTrialAttendance(s: Session, roomId: string, trialId: string, sessionId: string, input: { state: TrialAttendanceState; note?: string | null; expectedRev: number; clientKey?: string }): Promise<{ trial: TrialClubView; idempotent?: boolean }>;
+  completeTrial(s: Session, roomId: string, trialId: string, input: { expectedRev: number; clientKey?: string }): Promise<{ trial: TrialClubView; case: TrialCaseMove; idempotent?: boolean }>;
+  trialEvidenceCandidates(s: Session, roomId: string, trialId: string): Promise<{ items: TrialEvidenceCandidate[]; consent: boolean; reason: string | null }>;
+  linkTrialEvidence(s: Session, roomId: string, trialId: string, sessionId: string, input: { boxSessionId: string; expectedRev: number; clientKey?: string }): Promise<{ trial: TrialClubView; evidence: TrialEvidenceView[]; idempotent?: boolean }>;
+  unlinkTrialEvidence(s: Session, roomId: string, trialId: string, evidenceId: string, input: { expectedRev: number }): Promise<{ trial: TrialClubView; evidence: TrialEvidenceView[]; idempotent?: boolean }>;
   funnel(s: Session): Promise<RoomFunnel>;
 }
 
@@ -509,6 +589,16 @@ export const httpRooms: RoomsApi = {
   sendContact: (s, roomId, contactId, input) => req(`/org/rooms/${roomId}/contacts/${contactId}/send`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   cancelContact: (s, roomId, contactId, input) => req(`/org/rooms/${roomId}/contacts/${contactId}/cancel`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   recordExternalContact: (s, roomId, input) => req(`/org/rooms/${roomId}/contacts/external`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  trials: (s, roomId) => req(`/org/rooms/${roomId}/trials`, { headers: H(s) }),
+  trial: (s, roomId, trialId) => req(`/org/rooms/${roomId}/trials/${trialId}`, { headers: H(s) }),
+  inviteTrial: (s, roomId, input) => req(`/org/rooms/${roomId}/trials`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  scheduleTrial: (s, roomId, trialId, input) => req(`/org/rooms/${roomId}/trials/${trialId}/reschedule`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  cancelTrial: (s, roomId, trialId, input) => req(`/org/rooms/${roomId}/trials/${trialId}/cancel`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  recordTrialAttendance: (s, roomId, trialId, sessionId, input) => req(`/org/rooms/${roomId}/trials/${trialId}/sessions/${sessionId}/attendance`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  completeTrial: (s, roomId, trialId, input) => req(`/org/rooms/${roomId}/trials/${trialId}/complete`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  trialEvidenceCandidates: (s, roomId, trialId) => req(`/org/rooms/${roomId}/trials/${trialId}/evidence/candidates`, { headers: H(s) }),
+  linkTrialEvidence: (s, roomId, trialId, sessionId, input) => req(`/org/rooms/${roomId}/trials/${trialId}/sessions/${sessionId}/evidence`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  unlinkTrialEvidence: (s, roomId, trialId, evidenceId, input) => req(`/org/rooms/${roomId}/trials/${trialId}/evidence/${evidenceId}/unlink`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   funnel: (s) => req('/org/rooms-funnel', { headers: H(s) }),
 };
 

@@ -145,16 +145,24 @@ export const CONTRACT_LABELS: Record<ContractStatus, string> = {
 // internal org/user ids stripped by the server. A CHILD never sees requests —
 // they get sanitized status notes (ChildInboxItem); the guardian gets the
 // full club-first view (GuardianInboxRequest).
+export interface TrialSlot {
+  id: string; day: string; kind: string | null; startsAt: number; endsAt: number; timezone: string;
+  venue: { name: string; town: string | null } | null;
+}
 export interface TrialSlotDetails {
   proposedDate: string | null;
   altSlots?: string[];
   venue: string | null;
   notes: string;
+  /** M23 P4B: concrete slots (UTC instants in the organiser's zone). The exact address and instructions are shared only after acceptance. */
+  slots?: TrialSlot[];
 }
 
 export interface InboxRequest {
   id: string;
   trialDetails?: TrialSlotDetails | null;
+  /** M23 P4B: the trial the recipient's own acceptance created. */
+  trialId?: string | null;
   type: 'contact' | 'trial';
   orgName: string;
   orgType: 'club' | 'agency';

@@ -40,12 +40,36 @@ export interface CampaignView {
   drills: { name: string; instructions: string; recording: Record<string, string> }[];
   mySubmission: { attempts: { id: string; drillName: string; status: string; fileChecks: { passed: boolean; issues: string[] }; review: { reasons: string | null; kind?: string } | null }[] } | null;
 }
+// M23 P4B — the family's view of the Trial workflow (the shared operational
+// edge): state, the confirmed sessions with the address and instructions,
+// whether a revision awaits their answer, and the completion state. Never a
+// case id, a note, an observation or an assessment. A minor's own device
+// receives the outcome line only.
+export type TrialWorkflowState = 'legacy_accepted' | 'accepted' | 'scheduled' | 'completed' | 'cancelled';
+export interface FamilyTrialSession {
+  id: string; kind: string; startsAt: number; endsAt: number;
+  venue: { name: string; town: string | null; address?: string | null } | null;
+  instructions?: string | null;
+  attendance: { state: string; source: string | null; recordedAt: number | null };
+}
+export interface FamilyTrialWorkflow {
+  id: string; orgId: string; orgName: string | null; playerId: string;
+  workflowState: TrialWorkflowState; workflowLabel: string; legacy: boolean;
+  acceptedAt: number | null; proposedDate: string | null; venue: string | null;
+  schedule: { legacy: boolean; timezone: string | null; revision: number; confirmedAt: number | null; awaitingConfirmation: boolean; declinedAt?: number | null; sessions: FamilyTrialSession[]; proposedDate?: string | null; venue?: string | null } | null;
+  awaitingYourConfirmation: boolean;
+  completion: { state: 'completed' | 'cancelled'; at: number; byKind: string | null; reason: string | null } | null;
+  reportStatus: string; hasReport: boolean; rev: number;
+}
+export interface TrialOutcomeLine { id: string; orgName: string | null; workflowState: TrialWorkflowState; workflowLabel: string; guardianManaged: true }
+export const isOutcomeLine = (w: FamilyTrialWorkflow | TrialOutcomeLine | null | undefined): w is TrialOutcomeLine => !!w && 'guardianManaged' in w && w.guardianManaged === true;
 export interface FamilyTrial {
   id: string; playerId: string; playerName: string; orgName: string; proposedDate: string | null; venue: string | null;
   staff: { name: string; role: string; check: { kind: string | null; status: string } }[];
   arrival: { time: string | null; address: string | null; notes: string | null } | null;
   consents: { byKind: string; scope: string }[]; checkins: { at: number }[];
   cancelled: boolean; statusEvents: { kind: string; reason: string; newDate: string | null }[];
+  workflow?: FamilyTrialWorkflow | TrialOutcomeLine | null;
 }
 export interface SafetyPack {
   trial: FamilyTrial;
@@ -72,6 +96,9 @@ export interface PlayerM12 {
   getCampaigns(playerId: string): Promise<CampaignView[]>;
   submitCampaignAttempt(playerId: string, campaignId: string, mediaId: string | undefined, drillName: string, note?: string): Promise<{ status: string; issues: string[]; note: string }>;
   getTrials(playerId: string): Promise<FamilyTrial[]>;
+  confirmTrialSchedule(playerId: string, trialId: string): Promise<FamilyTrialWorkflow>;
+  declineTrialSchedule(playerId: string, trialId: string, reason?: string): Promise<FamilyTrialWorkflow>;
+  cancelTrial(playerId: string, trialId: string, reason?: string): Promise<FamilyTrialWorkflow>;
   giveTrialConsent(playerId: string, trialId: string): Promise<void>;
   setEmergencyContact(playerId: string, trialId: string, name: string, phone: string): Promise<void>;
   getSafetyPack(playerId: string, trialId: string): Promise<SafetyPack>;
@@ -101,6 +128,9 @@ export interface PlayerM12 {
   gCampaigns(guardianId: string, childId: string): Promise<CampaignView[]>;
   gSubmitCampaignAttempt(guardianId: string, childId: string, campaignId: string, mediaId: string | undefined, drillName: string): Promise<{ status: string; issues: string[] }>;
   gTrials(guardianId: string): Promise<FamilyTrial[]>;
+  gConfirmTrialSchedule(guardianId: string, trialId: string): Promise<FamilyTrialWorkflow>;
+  gDeclineTrialSchedule(guardianId: string, trialId: string, reason?: string): Promise<FamilyTrialWorkflow>;
+  gCancelTrial(guardianId: string, trialId: string, reason?: string): Promise<FamilyTrialWorkflow>;
   gGiveTrialConsent(guardianId: string, trialId: string): Promise<void>;
   gSetEmergencyContact(guardianId: string, trialId: string, name: string, phone: string): Promise<void>;
   gSafetyPack(guardianId: string, trialId: string): Promise<SafetyPack>;
@@ -133,6 +163,9 @@ const live: PlayerM12 = {
     return { status: r.attempt.status, issues: r.attempt.fileChecks.issues, note: r.note };
   },
   getTrials: (pid) => req('/player/trials', pid),
+  confirmTrialSchedule: async (pid, tid) => (await post(`/player/trials/${tid}/confirm-schedule`, pid)).trial,
+  declineTrialSchedule: async (pid, tid, reason) => (await post(`/player/trials/${tid}/decline-schedule`, pid, reason ? { reason } : {})).trial,
+  cancelTrial: async (pid, tid, reason) => (await post(`/player/trials/${tid}/cancel`, pid, reason ? { reason } : {})).trial,
   giveTrialConsent: (pid, tid) => post(`/player/trials/${tid}/consent`, pid),
   setEmergencyContact: (pid, tid, name, phone) => post(`/player/trials/${tid}/emergency-contact`, pid, { name, phone }),
   getSafetyPack: (pid, tid) => req(`/player/trials/${tid}/safety-pack`, pid),
@@ -166,6 +199,9 @@ const live: PlayerM12 = {
     return { status: r.attempt.status, issues: r.attempt.fileChecks.issues };
   },
   gTrials: (gid) => req('/guardian/trials', gid),
+  gConfirmTrialSchedule: async (gid, tid) => (await post(`/guardian/trials/${tid}/confirm-schedule`, gid)).trial,
+  gDeclineTrialSchedule: async (gid, tid, reason) => (await post(`/guardian/trials/${tid}/decline-schedule`, gid, reason ? { reason } : {})).trial,
+  gCancelTrial: async (gid, tid, reason) => (await post(`/guardian/trials/${tid}/cancel`, gid, reason ? { reason } : {})).trial,
   gGiveTrialConsent: (gid, tid) => post(`/guardian/trials/${tid}/consent`, gid),
   gSetEmergencyContact: (gid, tid, name, phone) => post(`/guardian/trials/${tid}/emergency-contact`, gid, { name, phone }),
   gSafetyPack: (gid, tid) => req(`/guardian/trials/${tid}/safety-pack`, gid),

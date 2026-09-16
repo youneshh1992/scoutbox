@@ -927,6 +927,20 @@ const E = {};
   const newLinkPrivate = collect('link after private', await link(E.REFUSED.id, { expectedRev: rev }));
   neg(expect(newLinkPrivate, 403, 'EVIDENCE_CONSENT_REQUIRED'), 'E21b once consent is withdrawn even re-citing an already-linked session is refused — consent is evaluated NOW on every link, the existing rows are history');
   await j('PATCH', '/player/box-cam/prefs', { shareDevelopmentActivity: 'recruitment' }, kola.token);
+  // The candidates list the UI cites from: the same gate as the link itself.
+  const cands = (r) => j('GET', `/org/rooms/${J.RID}/trials/${J.TID}/evidence/candidates`, undefined, r);
+  const cWith = await cands(maria.token);
+  ok(cWith.status === 200 && cWith.body.consent === true && cWith.body.reason === null && cWith.body.items.some((c) => c.id === E.OPEN.id && c.linked === true) && cWith.body.items.some((c) => c.id === E.REFUSED.id && c.linked === true), 'E22 the candidates route lists the player\'s finalised sessions, flagging those already cited');
+  neg(!cWith.body.items.some((c) => c.id === E.CANCELLED.id) && !cWith.body.items.some((c) => c.id === other.id), 'E22b never a cancelled session, never another player\'s');
+  neg(cWith.body.items.every((c) => Object.keys(c).sort().join(',') === 'capturedAt,drillId,id,linked,protocolId,simulated,verificationState') && !has(cWith.body, 'trace') && !has(cWith.body, 'nonce') && !has(cWith.body, E.OPEN.nonce), 'E22c a candidate is an id and its metadata — never a nonce, a trace or an observation');
+  await j('PATCH', '/player/box-cam/prefs', { shareDevelopmentActivity: 'private' }, kola.token);
+  const cWithout = await cands(maria.token);
+  neg(cWithout.status === 200 && cWithout.body.consent === false && cWithout.body.reason === 'EVIDENCE_CONSENT_REQUIRED' && cWithout.body.items.length === 0, 'E22d without consent the list is empty and says why — it does not enumerate what the club may not cite');
+  await j('PATCH', '/player/box-cam/prefs', { shareDevelopmentActivity: 'recruitment' }, kola.token);
+  const cOther = collect('candidates other org', await cands(rita.token));
+  neg(cOther.status === 404, `E22e another organisation cannot list candidates through this room (${cOther.status})`);
+  const cGhost = collect('candidates ghost trial', await j('GET', `/org/rooms/${J.RID}/trials/trl-none/evidence/candidates`, undefined, maria.token));
+  neg(expect(cGhost, 404, 'TRIAL_NOT_FOUND'), 'E22f an unknown trial is a 404');
 }
 
 // ============================================================ Q — assessments

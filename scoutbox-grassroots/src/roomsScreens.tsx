@@ -29,6 +29,7 @@ import { STANDARD_PROTOCOLS } from './combineApi';
 import { m12, type StaffRow } from './m12api';
 import { PassportBody, ProvPill } from './m15screens';
 import { t, fmtDate, fmtDateTime } from './i18n';
+import { TrialPanel } from './trialPanel';
 
 interface RoomsScreenProps {
   session: Session;
@@ -41,12 +42,12 @@ interface RoomsScreenProps {
   onCloseRoom?: () => void;
 }
 
-type TabId = 'overview' | 'passport' | 'evidence' | 'assessments' | 'combine' | 'development' | 'discussion' | 'contact' | 'activity' | 'decision';
+type TabId = 'overview' | 'passport' | 'evidence' | 'assessments' | 'combine' | 'development' | 'discussion' | 'contact' | 'trial' | 'activity' | 'decision';
 
 const TAB_KEYS: [TabId, string][] = [
   ['overview', 'rm.tab.overview'], ['passport', 'rm.tab.passport'], ['evidence', 'rm.tab.evidence'],
   ['assessments', 'rm.tab.assessments'], ['combine', 'rm.tab.combine'], ['development', 'rm.tab.development'],
-  ['discussion', 'rm.tab.discussion'], ['contact', 'rm.tab.contact'], ['activity', 'rm.tab.activity'], ['decision', 'rm.tab.decision'],
+  ['discussion', 'rm.tab.discussion'], ['contact', 'rm.tab.contact'], ['trial', 'rm.tab.trial'], ['activity', 'rm.tab.activity'], ['decision', 'rm.tab.decision'],
 ];
 
 // Grassroots keeps the same statuses and the same gates, but has no offers or
@@ -347,6 +348,7 @@ function RoomView({ session, tick, notify, openPlayer, roomId, onCloseRoom }: Ro
         {tab === 'development' && <DevelopmentPanel {...shared} />}
         {tab === 'discussion' && <DiscussionPanel {...shared} />}
         {tab === 'contact' && <ContactPanel {...shared} />}
+        {tab === 'trial' && <TrialPanel session={session} room={room} notify={notify} reload={reload} />}
         {tab === 'activity' && <ActivityPanel {...shared} />}
         {tab === 'decision' && <DecisionPanel {...shared} />}
       </div>
