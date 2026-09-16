@@ -490,6 +490,84 @@ export interface TrialDetail { trial: TrialClubView; evidence: TrialEvidenceView
 export interface TrialSessionInput { id?: string; kind?: string; startsAt: number; endsAt: number; venue: { name: string; town?: string | null; address?: string | null }; instructions?: string | null }
 export type TrialCaseMove = { from: string; to: string } | { unchanged: true; status: string; reason?: string | null };
 
+// ---- M23 P5 — the formal recruitment decision. The same append-only decision
+// memory M17 owns, with an outcome; a draft that is visibly not a decision.
+export type DecisionOutcome = 'progress' | 'hold' | 'reject';
+export type DecisionEvidenceRefKind = 'assessment' | 'trial' | 'box_cam_session' | 'passport_evidence';
+export interface DecisionEvidenceRef { kind: DecisionEvidenceRefKind; id: string; meta?: Record<string, unknown> | null }
+export interface DecisionLifecycleEffect { action: string; from: string; to: string; applied: boolean; reason?: string | null; at: number }
+export interface FormalDecision {
+  id: string;
+  kind: 'formal' | 'recommendation';
+  state: 'draft' | 'final';
+  outcome: DecisionOutcome | null;
+  outcomeLabel: string | null;
+  recommendation: string | null;
+  reasonCodes: string[];
+  note?: string | null;
+  hasNote: boolean;
+  by: { userId: string | null; name: string | null; role: string | null } | null;
+  createdAt: number | null;
+  finalizedAt: number | null;
+  rev: number;
+  supersedes: string | null;
+  supersededById: string | null;
+  supersession: { reason: string | null; of: string | null } | null;
+  evidenceRefs: DecisionEvidenceRef[];
+  evidenceCount: number;
+  assessmentSummary: { submitted: number; withheld: number; verdicts: Record<string, number>; assessmentIds: string[] } | null;
+  lifecycle: DecisionLifecycleEffect | null;
+  trigger: string | null;
+  snapshot: { at: number | null; trust: RoomSnapshot['trust']; snapshotId: string | null; note: string } | null;
+  policyVersion: number | null;
+}
+export interface DecisionDraft {
+  id: string; state: 'draft'; outcome: DecisionOutcome | null; outcomeLabel: string | null; reasonCodes: string[]; note: string | null;
+  evidenceRefs: DecisionEvidenceRef[]; by: { userId: string | null; name: string | null } | null; createdAt: number | null; updatedAt: number | null;
+  updatedBy: { userId: string | null; name: string | null } | null; rev: number; label: string;
+}
+export interface DecisionAssessmentLine {
+  id: string; scoutName: string | null; scoutUserId: string | null; state: string; submittedAt: number | null; verdict: string | null;
+  trialId: string | null; trialSessionId: string | null; rated: number; notObserved: number; confidence: { low: number; medium: number; high: number };
+  evidenceRefs: number; published: boolean;
+}
+export interface DecisionAssessmentSummary {
+  submitted: number; drafts: number; withheld: number; verdicts: { sign: number; monitor: number; pass: number; none: number };
+  disagreement: { kind: 'verdicts_differ' | 'unanimous'; verdicts: string[] } | null; assessments: DecisionAssessmentLine[]; note: string;
+}
+export interface DecisionEvidence {
+  assessments: { id: string; scoutName: string | null; submittedAt: number | null; verdict: string | null; trialId: string | null }[];
+  trials: { id: string; workflowState: string; completedAt: number | null; sessionCount: number; legacy: boolean }[];
+  boxCam: { id: string; trialId: string; trialSessionId: string; verificationState: string | null; observation: string; observationCopy: string | null; simulated: boolean; provenance: string }[];
+  passport: { id: string; claimType: string | null; label: string | null; provenance: string; recordedAt: number | null }[];
+  note: string;
+}
+export interface DecisionOutcomeAvailability { outcome: DecisionOutcome; action: string; to: string; toLabel: string; possible: boolean; alreadyThere: boolean; reason: string | null }
+export interface DecisionRequirements {
+  canDraft: boolean; canFinalize: boolean; role: string | null; blocked: boolean; subjectRemoved: boolean; hasDraft: boolean; hasFinal: boolean;
+  inputs: { submittedAssessments: number; completedTrials: number; note: string }; outcomes: DecisionOutcomeAvailability[]; status: string | null; note: string;
+}
+export interface DecisionSurface {
+  current: FormalDecision | null;
+  advisory: FormalDecision | null;
+  draft: DecisionDraft | null;
+  history: FormalDecision[];
+  omitted: number;
+  duplicateHeads: string[];
+  assessments: DecisionAssessmentSummary;
+  evidence: DecisionEvidence;
+  requirements: DecisionRequirements;
+  blocked: boolean;
+  subjectRemoved: boolean;
+  vocabulary: { outcomes: DecisionOutcome[]; outcomeLabels: Record<string, string>; reasonCategories: Record<string, string[]>; evidenceRefKinds: DecisionEvidenceRefKind[] };
+  limits: Record<string, number>;
+  policyVersion: number;
+  note: string;
+}
+export interface DecisionDraftInput { outcome?: DecisionOutcome | null; reasonCodes?: string[]; note?: string | null; evidenceRefs?: { kind: DecisionEvidenceRefKind; id: string }[]; clientKey?: string }
+export interface DecisionFinalizeInput { expectedRev: number; clientKey?: string; supersedes?: string; supersedesRev?: number; supersessionReason?: string }
+export interface DecisionFinalizeResult { decision: FormalDecision; lifecycle: DecisionLifecycleEffect | null; case?: { from: string; to: string } | { unchanged: true; status: string }; rev?: number; idempotent?: boolean }
+
 export interface RoomsApi {
   list(s: Session, params?: RoomListParams): Promise<RoomListResult>;
   needsAttention(s: Session): Promise<{ items: RoomAttentionItem[]; note: string }>;
@@ -532,6 +610,12 @@ export interface RoomsApi {
   trialEvidenceCandidates(s: Session, roomId: string, trialId: string): Promise<{ items: TrialEvidenceCandidate[]; consent: boolean; reason: string | null }>;
   linkTrialEvidence(s: Session, roomId: string, trialId: string, sessionId: string, input: { boxSessionId: string; expectedRev: number; clientKey?: string }): Promise<{ trial: TrialClubView; evidence: TrialEvidenceView[]; idempotent?: boolean }>;
   unlinkTrialEvidence(s: Session, roomId: string, trialId: string, evidenceId: string, input: { expectedRev: number }): Promise<{ trial: TrialClubView; evidence: TrialEvidenceView[]; idempotent?: boolean }>;
+  // M23 P5 — formal decision.
+  decision(s: Session, roomId: string): Promise<DecisionSurface>;
+  createDecisionDraft(s: Session, roomId: string, input: DecisionDraftInput): Promise<{ draft: DecisionDraft | null; decision?: FormalDecision; idempotent?: boolean }>;
+  updateDecisionDraft(s: Session, roomId: string, input: DecisionDraftInput & { expectedRev: number }): Promise<{ draft: DecisionDraft }>;
+  discardDecisionDraft(s: Session, roomId: string, expectedRev: number): Promise<{ draft: null; discarded: { id: string } }>;
+  finalizeDecision(s: Session, roomId: string, input: DecisionFinalizeInput): Promise<DecisionFinalizeResult>;
   funnel(s: Session): Promise<RoomFunnel>;
 }
 
@@ -599,6 +683,11 @@ export const httpRooms: RoomsApi = {
   trialEvidenceCandidates: (s, roomId, trialId) => req(`/org/rooms/${roomId}/trials/${trialId}/evidence/candidates`, { headers: H(s) }),
   linkTrialEvidence: (s, roomId, trialId, sessionId, input) => req(`/org/rooms/${roomId}/trials/${trialId}/sessions/${sessionId}/evidence`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   unlinkTrialEvidence: (s, roomId, trialId, evidenceId, input) => req(`/org/rooms/${roomId}/trials/${trialId}/evidence/${evidenceId}/unlink`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  decision: (s, roomId) => req(`/org/rooms/${roomId}/decision`, { headers: H(s) }),
+  createDecisionDraft: (s, roomId, input) => req(`/org/rooms/${roomId}/decision/draft`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  updateDecisionDraft: (s, roomId, input) => req(`/org/rooms/${roomId}/decision/draft`, { method: 'PATCH', headers: H(s), body: JSON.stringify(input) }),
+  discardDecisionDraft: (s, roomId, expectedRev) => req(`/org/rooms/${roomId}/decision/draft`, { method: 'DELETE', headers: H(s), body: JSON.stringify({ expectedRev }) }),
+  finalizeDecision: (s, roomId, input) => req(`/org/rooms/${roomId}/decision/finalize`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   funnel: (s) => req('/org/rooms-funnel', { headers: H(s) }),
 };
 

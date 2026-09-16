@@ -26,6 +26,7 @@ import type {
   RoomTrial, RoomTrust, RoomsApi, ContactRecord, ContactList, ContactRouting, ContactCaseMove,
   TrialWorkflowState, TrialAttendanceState, TrialSessionView, TrialRevisionView, TrialAttendanceRecord, TrialHistoryEntry,
   TrialClubView, TrialInvitationView, TrialList, TrialEvidenceView, TrialEvidenceCandidate,
+  DecisionSurface, DecisionDraft, FormalDecision, DecisionOutcome, DecisionEvidenceRef, DecisionFinalizeResult,
 } from './roomsApi';
 import type { RecruitmentPassport } from './m15api';
 import { ApiError } from './api';
@@ -736,6 +737,62 @@ const EVIDENCE_CANDIDATES: TrialEvidenceCandidate[] = [
   { id: 'bx-d2', drillId: 'wall-passes', protocolId: null, capturedAt: NOW - 9 * DAY, verificationState: 'unverified', simulated: false, linked: false },
 ];
 
+
+// ---- M23 P5 — formal decision (demo). One draft per room; formal rows join
+// the same legacy decision memory (appendDecision) so History shows one chain.
+const OUTCOME_MAP: Record<DecisionOutcome, { recommendation: string; to: string; label: string }> = {
+  progress: { recommendation: 'offer', to: 'offer_consideration', label: 'Progress to offer consideration' },
+  hold: { recommendation: 'continue_watching', to: 'on_hold', label: 'Hold' },
+  reject: { recommendation: 'archive', to: 'archived', label: 'Reject' },
+};
+interface DemoDraft extends DecisionDraft { keys: { create: { key: string; fp: string } | null } }
+const decisionDraftStore = new Map<string, DemoDraft>();
+const formalStore: (FormalDecision & { roomId: string; keys: { finalize: { key: string; fp: string } | null } })[] = [];
+const formalOf = (roomId: string) => formalStore.filter((d) => d.roomId === roomId).sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+const formalHead = (roomId: string) => formalOf(roomId).filter((d) => !d.supersededById).slice(-1)[0] ?? null;
+const stripRoom = <T extends { roomId: string; keys: unknown }>(d: T): Omit<T, 'roomId' | 'keys'> => { const { roomId: _r, keys: _k, ...rest } = d; return rest; };
+const decisionEvidenceOf = (r: DemoRoom) => ({
+  assessments: r.assessments.filter((a) => a.state !== 'draft').map((a) => ({ id: a.id, scoutName: a.scoutName, submittedAt: a.submittedAt, verdict: a.recommendation, trialId: null })),
+  trials: trialStore.filter((tr) => tr.roomId === r.roomId).map((tr) => ({ id: tr.id, workflowState: deriveTrialState(tr), completedAt: tr.completion?.state === 'completed' ? tr.completion.at : null, sessionCount: tr.sessions.length, legacy: false })),
+  boxCam: trialStore.filter((tr) => tr.roomId === r.roomId).flatMap((tr) => evidenceView(tr).filter((e) => !e.removedAt && e.session).map((e) => ({ id: e.session!.id, trialId: tr.id, trialSessionId: e.trialSessionId, verificationState: e.session!.verificationState, observation: e.observation.state, observationCopy: e.observation.copy, simulated: e.session!.simulated, provenance: e.provenance }))),
+  passport: r.evidence.slice(0, 10).map((e) => ({ id: e.id, claimType: e.claimType ?? null, label: e.label ?? null, provenance: e.provenance ?? 'unknown', recordedAt: e.recordedAt ?? null })),
+  note: 'References only. A decision cites these records; it copies none of them, and none of them decides anything.',
+});
+const decisionAssessmentsOf = (r: DemoRoom) => {
+  const submitted = r.assessments.filter((a) => a.state !== 'draft');
+  const verdicts = { sign: 0, monitor: 0, pass: 0, none: 0 };
+  for (const a of submitted) verdicts[(a.recommendation as keyof typeof verdicts) in verdicts ? (a.recommendation as keyof typeof verdicts) : 'none'] += 1;
+  const distinct = (['sign', 'monitor', 'pass'] as const).filter((v) => verdicts[v] > 0);
+  return {
+    submitted: submitted.length, drafts: r.assessments.length - submitted.length, withheld: r.assessmentsWithheld, verdicts,
+    disagreement: distinct.length > 1 ? { kind: 'verdicts_differ' as const, verdicts: distinct } : submitted.length > 1 ? { kind: 'unanimous' as const, verdicts: distinct } : null,
+    assessments: submitted.map((a) => ({ id: a.id, scoutName: a.scoutName, scoutUserId: a.scoutUserId, state: a.state, submittedAt: a.submittedAt, verdict: a.recommendation, trialId: null, trialSessionId: null, rated: 6, notObserved: 2, confidence: { low: 1, medium: 3, high: 2 }, evidenceRefs: 1, published: false })),
+    note: 'Independent assessments, summarised as counts. ScoutBox does not average them and does not decide.',
+  };
+};
+const decisionRevGate = (rec: { rev: number }, expectedRev: unknown) => {
+  if (!Number.isInteger(expectedRev) || (expectedRev as number) < 0) throw apiErr(400, 'DECISION_REV_REQUIRED', 'expectedRev must be a non-negative integer.');
+  if (expectedRev !== rec.rev) throw apiErr(409, 'DECISION_VERSION_CONFLICT', 'Someone else changed this while you were working on it. Reload to see their change, then apply yours.', { currentRev: rec.rev });
+};
+const validateDecisionContent = (input: { outcome?: DecisionOutcome | null; reasonCodes?: string[]; note?: string | null; evidenceRefs?: { kind: string; id: string }[] }, r: DemoRoom, requireOutcome: boolean) => {
+  if (input.outcome != null && !(input.outcome in OUTCOME_MAP)) throw apiErr(400, 'DECISION_OUTCOME_INVALID', 'The outcome must be one of progress, hold or reject.', { allowed: Object.keys(OUTCOME_MAP) });
+  if (requireOutcome && !input.outcome) throw apiErr(400, 'DECISION_OUTCOME_INVALID', 'A decision needs an outcome: progress, hold or reject.');
+  const codes = [...new Set((input.reasonCodes ?? []).map((c) => String(c).trim().toLowerCase()).filter(Boolean))];
+  const all = Object.values(REASON_CATEGORIES).flat();
+  if (codes.some((c) => !all.includes(c))) throw apiErr(400, 'DECISION_REASON_INVALID', 'Reasons must come from the ScoutBox recruitment reason taxonomy.');
+  if (requireOutcome && input.outcome === 'reject' && codes.length === 0) throw apiErr(400, 'DECISION_REASON_INVALID', 'A rejection needs at least one reason.');
+  const note = input.note ? String(input.note).replace(/<[^>]*>/g, '').slice(0, 2000) : null;
+  const ev = decisionEvidenceOf(r);
+  const refs: DecisionEvidenceRef[] = [];
+  for (const ref of input.evidenceRefs ?? []) {
+    const ok = (ref.kind === 'assessment' && ev.assessments.some((a) => a.id === ref.id)) || (ref.kind === 'trial' && ev.trials.some((x) => x.id === ref.id))
+      || (ref.kind === 'box_cam_session' && ev.boxCam.some((x) => x.id === ref.id)) || (ref.kind === 'passport_evidence' && ev.passport.some((x) => x.id === ref.id));
+    if (!ok) throw apiErr(400, 'DECISION_CASE_MISMATCH', 'That record is not one of this case\'s.', { ref });
+    refs.push({ kind: ref.kind as DecisionEvidenceRef['kind'], id: ref.id, meta: null });
+  }
+  return { outcome: (input.outcome ?? null) as DecisionOutcome | null, codes, note, refs };
+};
+
 export const demoRooms: RoomsApi = {
   list: async (_s, params = {}) => {
     let list = roomStore.slice();
@@ -1338,6 +1395,113 @@ export const demoRooms: RoomsApi = {
     trialEvent(tr, 'trial_evidence_linked', { kind: 'org', name: ME.name }, { trialSessionId: s.id, kind: 'box_cam_session', sessionId: input.boxSessionId }, now);
     bumpTrial(tr, now);
     return delay({ trial: trialView(tr), evidence: evidenceView(tr) });
+  },
+  // ---- M23 P5 formal decision
+  decision: async (_s, roomId) => {
+    const r = find(roomId);
+    if (!r) throw new Error('ROOM_NOT_FOUND');
+    const head = formalHead(roomId);
+    const draft = decisionDraftStore.get(roomId) ?? null;
+    const summary = decisionAssessmentsOf(r);
+    const outcomes = (Object.keys(OUTCOME_MAP) as DecisionOutcome[]).map((o) => {
+      const to = OUTCOME_MAP[o].to;
+      const alreadyThere = r.status === to;
+      const possible = alreadyThere || (TRANSITIONS[r.status] ?? []).includes(to);
+      return { outcome: o, action: o === 'progress' ? 'considerOffer' : o === 'hold' ? 'holdCase' : 'rejectCase', to, toLabel: STATUS_LABELS[to] ?? to, possible, alreadyThere, reason: possible ? null : 'transition' };
+    });
+    const result: DecisionSurface = {
+      current: head ? stripRoom(head) : null,
+      advisory: !head && roomDecisions(roomId).length ? { ...(roomDecisions(roomId).slice(-1)[0] as unknown as FormalDecision), kind: 'recommendation', state: 'final', outcome: null, outcomeLabel: null, hasNote: !!roomDecisions(roomId).slice(-1)[0].note, finalizedAt: roomDecisions(roomId).slice(-1)[0].createdAt, rev: 1, supersedes: null, supersession: null, evidenceRefs: [], evidenceCount: 0, assessmentSummary: null, lifecycle: null, trigger: 'decision', policyVersion: null } : null,
+      draft: draft ? (({ keys: _k, ...d }) => d)(draft) : null,
+      history: formalOf(roomId).slice().reverse().map(stripRoom),
+      omitted: 0, duplicateHeads: [],
+      assessments: summary,
+      evidence: decisionEvidenceOf(r),
+      requirements: { canDraft: true, canFinalize: true, role: 'recruitment_admin', blocked: false, subjectRemoved: false, hasDraft: !!draft, hasFinal: !!head, inputs: { submittedAssessments: summary.submitted, completedTrials: trialStore.filter((tr) => tr.roomId === roomId && tr.completion?.state === 'completed').length, note: 'Inputs are counts of what exists. None of them is required by policy, and none of them decides anything.' }, outcomes, status: r.status, note: 'A formal decision is an explicit human act by a room lead or recruitment lead. ScoutBox never takes it.' },
+      blocked: false, subjectRemoved: false,
+      vocabulary: { outcomes: ['progress', 'hold', 'reject'], outcomeLabels: { progress: OUTCOME_MAP.progress.label, hold: OUTCOME_MAP.hold.label, reject: OUTCOME_MAP.reject.label }, reasonCategories: REASON_CATEGORIES, evidenceRefKinds: ['assessment', 'trial', 'box_cam_session', 'passport_evidence'] },
+      limits: { note: 2000, supersessionReason: 500, evidenceRefs: 50, clientKey: 64, reasonCodes: 6, historyPage: 100 },
+      policyVersion: 1,
+      note: 'A formal decision is the club\'s internal decision about this case. It is not an offer, it is not sent to the player, and nothing in ScoutBox infers it from evidence.',
+    };
+    return delay(result);
+  },
+  createDecisionDraft: async (_s, roomId, input) => {
+    const r = find(roomId);
+    if (!r) throw new Error('ROOM_NOT_FOUND');
+    const fp = JSON.stringify({ outcome: input.outcome ?? null, reasonCodes: input.reasonCodes ?? [], note: input.note ?? null, refs: (input.evidenceRefs ?? []).map((x) => `${x.kind}:${x.id}`) });
+    const existing = decisionDraftStore.get(roomId) ?? null;
+    if (input.clientKey && existing?.keys.create?.key === input.clientKey) {
+      if (existing.keys.create.fp === fp) return delay({ draft: (({ keys: _k, ...d }) => d)(existing), idempotent: true });
+      throw apiErr(409, 'DECISION_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different draft.');
+    }
+    if (existing) throw apiErr(409, 'DECISION_INVALID_STATE', 'This case already has a draft. Edit it or discard it.', { current: { draftId: existing.id, rev: existing.rev } });
+    const c = validateDecisionContent(input, r, false);
+    const at = Date.now();
+    const dr: DemoDraft = { id: nid('rdraft'), state: 'draft', outcome: c.outcome, outcomeLabel: c.outcome ? OUTCOME_MAP[c.outcome].label : null, reasonCodes: c.codes, note: c.note, evidenceRefs: c.refs, by: { userId: 'me', name: 'You' }, createdAt: at, updatedAt: at, updatedBy: { userId: 'me', name: 'You' }, rev: 1, label: 'Draft — not a formal decision', keys: { create: input.clientKey ? { key: input.clientKey, fp } : null } };
+    decisionDraftStore.set(roomId, dr);
+    return delay({ draft: (({ keys: _k, ...d }) => d)(dr) });
+  },
+  updateDecisionDraft: async (_s, roomId, input) => {
+    const r = find(roomId);
+    if (!r) throw new Error('ROOM_NOT_FOUND');
+    const dr = decisionDraftStore.get(roomId);
+    if (!dr) throw apiErr(404, 'DECISION_NOT_FOUND', 'This case has no draft decision.');
+    const c = validateDecisionContent(input, r, false);
+    decisionRevGate(dr, input.expectedRev);
+    if (input.outcome !== undefined) { dr.outcome = c.outcome; dr.outcomeLabel = c.outcome ? OUTCOME_MAP[c.outcome].label : null; }
+    if (input.reasonCodes !== undefined) dr.reasonCodes = c.codes;
+    if (input.note !== undefined) dr.note = c.note;
+    if (input.evidenceRefs !== undefined) dr.evidenceRefs = c.refs;
+    dr.rev += 1; dr.updatedAt = Date.now();
+    return delay({ draft: (({ keys: _k, ...d }) => d)(dr) });
+  },
+  discardDecisionDraft: async (_s, roomId, expectedRev) => {
+    const dr = decisionDraftStore.get(roomId);
+    if (!dr) throw apiErr(404, 'DECISION_NOT_FOUND', 'This case has no draft decision.');
+    decisionRevGate(dr, expectedRev);
+    decisionDraftStore.delete(roomId);
+    return delay({ draft: null, discarded: { id: dr.id } });
+  },
+  finalizeDecision: async (_s, roomId, input) => {
+    const r = find(roomId);
+    if (!r) throw new Error('ROOM_NOT_FOUND');
+    const prior = input.clientKey ? formalStore.find((d) => d.roomId === roomId && d.keys.finalize?.key === input.clientKey) : null;
+    if (prior) return delay({ decision: stripRoom(prior), lifecycle: prior.lifecycle, idempotent: true } as DecisionFinalizeResult);
+    const dr = decisionDraftStore.get(roomId);
+    if (!dr) throw apiErr(409, 'DECISION_INVALID_STATE', 'There is no draft to finalize. Open a draft, then finalize it.');
+    decisionRevGate(dr, input.expectedRev);
+    const c = validateDecisionContent({ outcome: dr.outcome, reasonCodes: dr.reasonCodes, note: dr.note, evidenceRefs: dr.evidenceRefs }, r, true);
+    const outcome = c.outcome as DecisionOutcome;
+    const head = formalHead(roomId);
+    let supersession: { reason: string | null; of: string | null } | null = null;
+    if (head) {
+      if (input.supersedes !== head.id) throw apiErr(409, 'DECISION_ALREADY_FINAL', 'This case already has a formal decision. To replace it, name it as `supersedes` with its current `supersedesRev` and a reason.', { current: { decisionId: head.id, rev: head.rev, outcome: head.outcome } });
+      if (!Number.isInteger(input.supersedesRev)) throw apiErr(400, 'DECISION_REV_REQUIRED', 'supersedesRev must be the current decision\'s rev, as an integer.');
+      if (input.supersedesRev !== head.rev) throw apiErr(409, 'DECISION_VERSION_CONFLICT', 'The formal decision changed while you were looking. Reload and try again.');
+      if (!input.supersessionReason?.trim()) throw apiErr(400, 'DECISION_CONTENT_INVALID', 'Replacing a formal decision needs a reason the history will keep.', { field: 'supersessionReason' });
+      supersession = { reason: input.supersessionReason.trim().slice(0, 500), of: head.id };
+    }
+    const to = OUTCOME_MAP[outcome].to;
+    const from = r.status;
+    const alreadyThere = from === to;
+    if (!alreadyThere && !(TRANSITIONS[from] ?? []).includes(to)) throw apiErr(409, 'DECISION_LIFECYCLE_CONFLICT', `The case at "${STATUS_LABELS[from] ?? from}" cannot take the step this decision asks for.`, { allowed: TRANSITIONS[from] ?? [] });
+    const at = Date.now();
+    const legacy = appendDecision(r, OUTCOME_MAP[outcome].recommendation, c.codes, c.note, r.available ? snapshot(at, trustFor(r.playerId).score, trustFor(r.playerId).band, 'decision:finalize') : null);
+    const row: typeof formalStore[number] = {
+      id: legacy.id, roomId, kind: 'formal', state: 'final', outcome, outcomeLabel: OUTCOME_MAP[outcome].label, recommendation: OUTCOME_MAP[outcome].recommendation,
+      reasonCodes: c.codes, note: c.note, hasNote: !!c.note, by: { userId: 'me', name: 'You', role: 'Head of Recruitment' }, createdAt: at, finalizedAt: at, rev: 1,
+      supersedes: head?.id ?? null, supersededById: null, supersession, evidenceRefs: c.refs, evidenceCount: c.refs.length,
+      assessmentSummary: { submitted: decisionAssessmentsOf(r).submitted, withheld: r.assessmentsWithheld, verdicts: decisionAssessmentsOf(r).verdicts, assessmentIds: decisionAssessmentsOf(r).assessments.map((a) => a.id) },
+      lifecycle: alreadyThere ? { action: 'none', from, to, applied: false, reason: 'already_there', at } : { action: outcome === 'progress' ? 'considerOffer' : outcome === 'hold' ? 'holdCase' : 'rejectCase', from, to, applied: true, at },
+      trigger: 'decision:finalize', snapshot: null, policyVersion: 1,
+      keys: { finalize: input.clientKey ? { key: input.clientKey, fp: '' } : null },
+    };
+    if (head) { head.supersededById = row.id; head.rev += 1; }
+    formalStore.push(row);
+    if (!alreadyThere) { r.status = to; r.updatedAt = at; if (to === 'archived') r.archivedAt = at; }
+    decisionDraftStore.delete(roomId);
+    return delay({ decision: stripRoom(row), lifecycle: row.lifecycle, case: alreadyThere ? { unchanged: true as const, status: r.status } : { from, to } } as DecisionFinalizeResult);
   },
   unlinkTrialEvidence: async (_s, roomId, trialId, evidenceId, input) => {
     const tr = trialsOfRoom(roomId).find((x) => x.id === trialId);

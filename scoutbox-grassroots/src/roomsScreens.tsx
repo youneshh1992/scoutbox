@@ -30,6 +30,7 @@ import { m12, type StaffRow } from './m12api';
 import { PassportBody, ProvPill } from './m15screens';
 import { t, fmtDate, fmtDateTime } from './i18n';
 import { TrialPanel } from './trialPanel';
+import { DecisionWorkflow } from './decisionPanel';
 
 interface RoomsScreenProps {
   session: Session;
@@ -1144,6 +1145,8 @@ function DecisionPanel({ session, room, notify, reload }: PanelProps) {
 
   return (
     <>
+      <DecisionWorkflow session={session} room={room} notify={notify} reload={reload} />
+
       <div className="section" aria-label={t('rm.currentDecision')}>
         <h4>{t('rm.currentDecision')}</h4>
       {decisionConflict && <ConflictNotice conflict={decisionConflict} onReload={() => { setDecisionConflict(null); reload(); }} onKeepChanges={() => setDecisionConflict(null)} />}
