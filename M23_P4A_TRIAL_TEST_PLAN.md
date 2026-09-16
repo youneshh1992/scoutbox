@@ -23,7 +23,7 @@ cannot supply; a clean server on its own port per suite.
 6. Journey (club) shows the milestones; journey (player) shows the shared records only; no `caseId` in any player payload (sentinel sweep).
 
 ## B. Minor guardian path
-1. Invitation for Guni → routed to Amara (verified); Guni's `/player/inbox` shows the guardian-managed line only; the child's notification category is `trial_updates` (fixes P4A-D10).
+1. Invitation for Guni → routed to Amara (verified); Guni's `/player/inbox` shows the guardian-managed line only; the child's outcome notification is `guardian_decision` in the `messages` category (P4A-D10, closed in the P4A closure pass; P4B re-asserts it).
 2. Amara accepts with a reply; the Trial recipient snapshot records `guardian`.
 3. Revoke Marek's IDV → invitation for Tomasz refused `422 TRIAL_GUARDIAN_REQUIRED`; a pending invitation cannot be accepted (`422`); nothing reaches Marek's inbox.
 4. Two verified guardians without a designated one → `422 TRIAL_GUARDIAN_REQUIRED`; with `player.guardianId` set → routed correctly.
@@ -32,10 +32,10 @@ cannot supply; a clean server on its own port per suite.
 7. Agency (`org-northstar`) → `403 UNDER_18_WALL` on invitation; unverified club → `403 VERIFIED_CLUBS_ONLY`; verification revoked after invitation → schedule/reschedule/link refused, cancel allowed.
 
 ## C. Scheduling / rescheduling
-1. `schedule.timezone` required (IANA), `startsAt < endsAt`, sessions ≤ 20, `kind` ∈ the closed set; malformed date → `400 TRIAL_SCHEDULE_INVALID` (closes P4A-D1); venue/notes clamped.
+1. `schedule.timezone` required (IANA), `startsAt < endsAt`, sessions ≤ 20, `kind` ∈ the closed set; malformed date → `400 TRIAL_SCHEDULE_INVALID`; the P4B schedule validator is built on the canonical `parseTrialDate` (P4A-D1, closed in the P4A closure pass — calendar-day syntax, refusal before persistence, one deadline derivation); venue/notes refused over their limits, never truncated.
 2. Reschedule after confirmation → new `schedule.revisions[]` entry, prior revision retained verbatim, `confirmedAt` cleared, recipient re-confirmation required; case stays `trial_scheduled`.
 3. Recipient re-confirms → `confirmedAt` set; declines the reschedule → Trial `accepted` with no schedule; club may propose again or cancel.
-4. Unknown `chosenSlot` → `400 TRIAL_SLOT_INVALID` (closes P4A-D12); offered slots retained on revision 1.
+4. Unknown `chosenSlot` → `400 TRIAL_SLOT_INVALID` (already the behaviour of the M12 respond routes since the P4A closure pass, P4A-D12; P4B re-asserts it on the schedule route); offered slots retained on revision 1.
 5. ICS export is timezone-aware (`DTSTART;TZID=…`), never 500 on any stored row (legacy included).
 6. Legacy rows: `workflowState: 'legacy_accepted'`, `schedule.legacy: true`, no fabricated time; the journey renders them honestly.
 

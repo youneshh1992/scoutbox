@@ -1222,9 +1222,10 @@ export const mockClient: PlayerClient = {
       };
       channels.push(channel);
       r.contactChannel = channel.id;
-      pushNotification('player', r.playerId, 'update', `Your parent/guardian accepted the ${r.type} with ${r.orgName}.`);
+      // M23 P4A-D10: mirrors the server — a guardian's decision is a request outcome, not an `update` nudge.
+      pushNotification('player', r.playerId, 'guardian_decision', `Your parent/guardian accepted the ${r.type} with ${r.orgName}.`);
     } else {
-      pushNotification('player', r.playerId, 'update', `Your parent/guardian declined the ${r.type} with ${r.orgName}.`);
+      pushNotification('player', r.playerId, 'guardian_decision', `Your parent/guardian declined the ${r.type} with ${r.orgName}.`);
     }
     publishRespond({ id: r.id, type: r.type, playerId: r.playerId }, accept, r.contactChannel, 'guardian');
     commsLog.push({ id: nid('log'), ts: Date.now(), type: `${r.type}_${accept ? 'accepted' : 'declined'}_by_guardian`, orgName: r.orgName, scoutName: r.scoutName, playerId: r.playerId });

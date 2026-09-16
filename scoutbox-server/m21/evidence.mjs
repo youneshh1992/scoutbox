@@ -31,6 +31,7 @@
 import { liveCombineState, isProductionValidCombine, combineProtocol, latestCombineProtocol } from '../m16/combineShared.mjs';
 import { PROVIDERS } from '../m16/drills.mjs';
 import { EVIDENCE_SOURCES, EVIDENCE_SOURCE_LABELS, UNAVAILABLE_REASONS } from './shared.mjs';
+import { parseTrialDate } from '../domain.mjs';
 
 /**
  * The complete set of keys an evidence-link record may carry. Asserted by the
@@ -215,7 +216,9 @@ function resolveTrialReport(link, { db, player, viewer }) {
     available: true, reason: null,
     title: 'Trial report',
     provenance: 'verified_club_confirmed',
-    occurredAt: t.proposedDate ? new Date(t.proposedDate).getTime() : (t.acceptedAt ?? null),
+    // P4A-D1: the one date validator; a stored day that is not a calendar
+    // day (legacy rows) falls back to acceptance rather than becoming NaN.
+    occurredAt: (() => { const d = parseTrialDate(t.proposedDate); return d.ok && d.t !== null ? d.t : (Number.isFinite(t.acceptedAt) ? t.acceptedAt : null); })(),
     simulated: false,
   };
 }

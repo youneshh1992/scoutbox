@@ -439,7 +439,7 @@ export function registerRooms(ctx) {
       list = list.filter((c) => {
         const p = findPlayer(c.playerId);
         const visible = p && orgCanSee(req.org, p);
-        return (visible && c.playerName.toLowerCase().includes(q))
+        return (visible && (c.playerName ?? '').toLowerCase().includes(q))
           || (c.room.tags ?? []).some((t) => t.toLowerCase().includes(q))
           || ROOM_STATUS_LABELS[c.room.status].toLowerCase().includes(q);
       });
@@ -720,7 +720,7 @@ export function registerRooms(ctx) {
     for (const u of orgUsers(req.org.id)) {
       if (u.id === req.orgUser.id) continue;
       if (u.id === room.ownerUserId || u.id === room.room.leadScoutUserId) {
-        notify({ kind: 'org_user', id: u.id }, 'recruitment_room', `Recruitment Room — ${room.playerName}: ${ROOM_STATUS_LABELS[to]}.`, room.id);
+        notify({ kind: 'org_user', id: u.id }, 'recruitment_room', `Recruitment Room — ${room.playerName ?? 'a removed player'}: ${ROOM_STATUS_LABELS[to]}.`, room.id);
       }
     }
     persistNow();
@@ -943,7 +943,7 @@ export function registerRooms(ctx) {
     // nobody else. No player, guardian, coach, other club or email.
     for (const uid of mentions) {
       if (uid === req.orgUser.id) continue;
-      notify({ kind: 'org_user', id: uid }, 'recruitment_room', `${req.orgUser.name} mentioned you in the Recruitment Room for ${room.playerName}.`, room.id);
+      notify({ kind: 'org_user', id: uid }, 'recruitment_room', `${req.orgUser.name} mentioned you in the Recruitment Room for ${room.playerName ?? 'a removed player'}.`, room.id);
     }
     persistNow();
     res.status(201).json({ comment: commentView(c, { orgId: req.org.id }) });
@@ -1019,7 +1019,7 @@ export function registerRooms(ctx) {
     // A room task is STAFF work. It is never sent to the player: a player-facing
     // ask must go through the evidence-request or Combine-request workflow.
     if (assignee && assignee.id !== req.orgUser.id) {
-      notify({ kind: 'org_user', id: assignee.id }, 'recruitment_room', `${req.orgUser.name} assigned you a task in the Recruitment Room for ${room.playerName}: ${title}`, room.id);
+      notify({ kind: 'org_user', id: assignee.id }, 'recruitment_room', `${req.orgUser.name} assigned you a task in the Recruitment Room for ${room.playerName ?? 'a removed player'}: ${title}`, room.id);
     }
     persistNow();
     res.status(201).json({ task: taskView(t) });
@@ -1179,7 +1179,7 @@ export function registerRooms(ctx) {
     activity(room, req, 'room_assessment_assigned', { assignmentId: a.id, userId: u.id, kind });
     vmetric('room_assessment_assigned');
     room.room.updatedAt = now();
-    if (u.id !== req.orgUser.id) notify({ kind: 'org_user', id: u.id }, 'recruitment_room', `${req.orgUser.name} assigned you a ${kind.toLowerCase()} assessment for ${room.playerName}.`, room.id);
+    if (u.id !== req.orgUser.id) notify({ kind: 'org_user', id: u.id }, 'recruitment_room', `${req.orgUser.name} assigned you a ${kind.toLowerCase()} assessment for ${room.playerName ?? 'a removed player'}.`, room.id);
     persistNow();
     res.status(201).json({ assignment: a });
   });

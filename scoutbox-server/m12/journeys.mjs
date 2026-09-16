@@ -4,7 +4,7 @@
 // Everything guardian-routed for minors, everything eligibility-checked
 // server-side (fail-closed on missing location), grassroots 50 km preserved.
 
-import { GRASSROOTS_RADIUS_KM } from '../domain.mjs';
+import { GRASSROOTS_RADIUS_KM, parseTrialDate, trialReportDueAt } from '../domain.mjs';
 
 export function registerJourneys(ctx) {
   const {
@@ -548,6 +548,13 @@ export function registerJourneys(ctx) {
   function trialFor(req, res) {
     const t = db.trials.find((x) => x.id === req.params.id && x.orgId === req.org.id);
     if (!t) { res.status(404).json({ error: 'TRIAL_NOT_FOUND' }); return null; }
+    // M23 P4A-D14: a tombstoned trial (its subject removed their account) can
+    // still be READ — the record of what happened is the club's — but nothing
+    // new is written about a person who left.
+    if (t.subjectRemovedAt && req.method !== 'GET') {
+      res.status(409).json({ error: 'TRIAL_SUBJECT_REMOVED', message: 'This player removed their ScoutBox account. The trial stays on record; it can no longer be changed.' });
+      return null;
+    }
     t.day ??= { staff: [], consents: [], arrival: null, emergency: null, checkins: [], collection: null, statusEvents: [] };
     return t;
   }
@@ -641,8 +648,16 @@ export function registerJourneys(ctx) {
     if (!t) return;
     const { reason, newDate } = req.body ?? {};
     if (!reason) return res.status(400).json({ error: 'REASON_REQUIRED' });
-    t.day.statusEvents.push({ kind, at: Date.now(), by: req.orgUser.name, reason: String(reason).slice(0, 200), newDate: newDate ?? null });
-    if (kind === 'postponed' && newDate) t.proposedDate = String(newDate).slice(0, 10);
+    // M23 P4A-D1: a postponement date goes through the one Trial date
+    // validator like every other trial date, and the report deadline is
+    // re-derived from the new day by the one derivation — never computed here.
+    const moved = kind === 'postponed' ? parseTrialDate(newDate) : { ok: true, value: null };
+    if (!moved.ok) return res.status(400).json({ ...moved, field: 'newDate' });
+    t.day.statusEvents.push({ kind, at: Date.now(), by: req.orgUser.name, reason: String(reason).slice(0, 200), newDate: moved.value });
+    if (kind === 'postponed' && moved.value) {
+      t.proposedDate = moved.value;
+      t.reportDueAt = trialReportDueAt(moved.value, t.acceptedAt);
+    }
     persistNow();
     notifyTrialParties(t, kind === 'cancelled'
       ? `❌ ${t.orgName} cancelled the trial: ${reason}`
@@ -738,7 +753,7 @@ export function registerJourneys(ctx) {
         collection: forGuardian ? t.day.collection : null,
         emergencySet: !!t.day.emergency,
         reportRoute: 'Anything concerning: use ⚑ Report in the app — urgent reports suspend club communication immediately.',
-        feedbackDue: t.reportDueAt ? new Date(t.reportDueAt).toISOString().slice(0, 10) : null,
+        feedbackDue: Number.isFinite(t.reportDueAt) ? new Date(t.reportDueAt).toISOString().slice(0, 10) : null,
       },
     };
   }

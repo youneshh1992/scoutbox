@@ -117,8 +117,10 @@ every step that involved the recipient.
 - Agencies never see, invite, schedule or assess minors (`visibleToOrg`).
 - Unverified clubs never do either; verification loss mid-flow → cancel only.
 - Minor invitations route to the verified guardian; the child sees the
-  guardian-managed outcome line; child-facing outcome notifications use
-  `trial_updates` (fixes P4A-D10).
+  guardian-managed outcome line; the child-facing outcome notification is the
+  `guardian_decision` type in the `messages` category ("Messages and
+  requests", on by default) — closed in the P4A closure pass (P4A-D10), not
+  left to P4B. P4B's `trial_day` notices keep using `trial_updates`.
 - Venue exact address, arrival and contact person after acceptance only; for
   minors to the guardian only (D-23).
 - Family emergency contact: day view only, withheld while blocked (P4A-D9).

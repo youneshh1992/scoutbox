@@ -184,11 +184,15 @@ export function stalledRooms(ctx, { thresholdDays = DEFAULT_STALL_DAYS } = {}) {
 // --------------------------------------------------- A2 · overdue obligations
 
 export function overdueTrialReports(ctx) {
-  const late = ctx.trials.filter((t) => t.status === 'awaiting_report' && Number(t.reportDueAt) < ctx.now);
+  // M23 P4A-D1/D14: a missing deadline is unknown, not overdue (Number(null)
+  // is 0), and a trial whose subject removed their account is no longer an
+  // obligation anyone can meet.
+  const awaiting = ctx.trials.filter((t) => t.status === 'awaiting_report' && !t.subjectRemovedAt);
+  const late = awaiting.filter((t) => Number.isFinite(t.reportDueAt) && t.reportDueAt < ctx.now);
   return {
     ...wire(METRICS.overdue_trial_reports),
     ...count(late.length),
-    awaitingReport: count(ctx.trials.filter((t) => t.status === 'awaiting_report').length),
+    awaitingReport: count(awaiting.length),
     rows: late
       .slice()
       .sort((a, b) => (a.reportDueAt - b.reportDueAt) || String(a.id).localeCompare(String(b.id)))

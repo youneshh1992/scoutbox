@@ -198,7 +198,9 @@ export function buildTimeline(src) {
     if (t.report) {
       push({
         id: evId('trial', t.id, 'trial_outcome'), type: 'trial_outcome',
-        when: normWhen(t.report.at ?? t.proposedDate ?? t.acceptedAt), title: { org: o?.name }, org: o,
+        // P4A-D2: the report writer stamps `filedAt` (server.mjs); `at` is
+        // kept for rows and fixtures that predate that name.
+        when: normWhen(t.report.filedAt ?? t.report.at ?? t.proposedDate ?? t.acceptedAt), title: { org: o?.name }, org: o,
         provenance: 'verified_club_confirmed', visibility: 'private_own_org',
         source: { type: 'trial', id: t.id },
       });

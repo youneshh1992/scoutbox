@@ -226,6 +226,11 @@ export function registerM22Routes(ctx) {
    * no base64, no buffers.
    */
   playerRouter.post('/box-cam/sessions/:id/cv/finalize', (req, res) => {
+    // M23 P4A-D5: the declared `box_cv_finalize` policy (m181/rateLimit.mjs)
+    // is now enforced like its siblings; it only bounds a retry loop.
+    if (limited('box_cv_finalize', req.player.id)) {
+      return fail(res, PROVIDER_ERRORS.RATE_LIMITED, { retryAfterSeconds: 5 });
+    }
     const s = ownSession(req.player.id, req.params.id);
     if (!s) return fail(res, PROVIDER_ERRORS.SESSION_NOT_FOUND);
     const body = req.body ?? {};

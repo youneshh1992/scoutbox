@@ -91,6 +91,10 @@ export const TYPE_CATEGORY = Object.freeze({
   request: 'messages',
   accepted: 'messages',
   declined: 'messages',
+  // M23 P4A-D10: a minor hears that their guardian accepted or declined a
+  // request for them. It is the outcome of a request, so it lives with the
+  // other request outcomes — on by default, never a discovery nudge.
+  guardian_decision: 'messages',
   application: 'messages',
   campaign: 'messages',
   review_queue: 'messages',
@@ -141,7 +145,9 @@ export function registerNotificationPrefs(ctx) {
     const stored = find(kind, id);
     const out = defaultPrefs();
     if (stored) {
-      for (const [k, v] of Object.entries(stored.categories ?? {})) if (k in CATEGORIES) out.categories[k] = !!v;
+      // Own keys only: `'constructor' in CATEGORIES` is true through the
+      // prototype, and a stored prototype name must never become a category.
+      for (const [k, v] of Object.entries(stored.categories ?? {})) if (Object.hasOwn(CATEGORIES, k)) out.categories[k] = !!v;
       out.emailIntent = !!stored.emailIntent;
     }
     for (const [k, v] of Object.entries(CATEGORIES)) if (v.mandatory) out.categories[k] = true;
@@ -183,7 +189,8 @@ export function registerNotificationPrefs(ctx) {
       return res.status(400).json({ error: 'PREFS_INVALID', message: 'categories must be an object of category → boolean.' });
     }
     for (const k of Object.keys(incoming ?? {})) {
-      if (!(k in CATEGORIES)) return res.status(400).json({ error: 'PREF_CATEGORY_UNKNOWN', category: k, message: 'That is not a notification category.' });
+      // Own keys only — `__proto__`, `constructor`, `toString` are not categories.
+      if (!Object.hasOwn(CATEGORIES, k)) return res.status(400).json({ error: 'PREF_CATEGORY_UNKNOWN', category: k, message: 'That is not a notification category.' });
       if (CATEGORIES[k].mandatory && incoming[k] === false) {
         return res.status(400).json({ error: 'PREF_CATEGORY_MANDATORY', category: k, message: 'Security and account notices cannot be turned off.' });
       }

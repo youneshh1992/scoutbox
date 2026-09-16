@@ -58,6 +58,11 @@ import {
   trustBreakdown,
   validateTrialReport,
   TRIAL_REPORT_FIELDS,
+  parseTrialDate,
+  isTrialDate,
+  trialReportDueAt,
+  validateTrialDetails,
+  chooseTrialSlot,
   similarityScore,
   moderateText,
   haversineKm,
@@ -1277,48 +1282,36 @@ guardianRouter.post('/requests/:id/respond', (req, res) => {
     return res.status(403).json({ error: 'BLOCKED', message: 'You have blocked this organisation. Lift the block before accepting.' });
   }
   if (request.contactId && rateLimit.limited('contact_response', `guardian:${req.guardian.id}`)) return res.status(429).json(rateLimitedBody('contact_response'));
+  // P4A-D12: the slot is checked BEFORE the answer is recorded, so a refused
+  // slot leaves the request pending rather than accepted-with-the-wrong-day.
+  const slot = accept && request.type === 'trial' ? chooseTrialSlot(request.trialDetails, chosenSlot) : { ok: true, date: null };
+  if (!slot.ok) return res.status(400).json(slot);
   const respondedAt = Date.now();
   request.status = accept ? 'accepted' : 'declined';
   request.respondedAt = respondedAt;
   request.respondedBy = 'guardian';
   // M23 P3: the Contact that created this request learns of the answer.
   m23Ctx?.onRequestResponded?.({ request, accept: !!accept, message: replyCheck.reply, by: 'guardian', at: respondedAt });
-  persistNow();
+  // P4A-D15: the answer, the channel and the trial row are ONE save (below),
+  // so a crash between them cannot leave an accepted request with no trial.
 
   if (accept) {
     // The conversation that opens is between adults: club staff and guardian.
     const channel = openChannel(request);
     request.contactChannel = channel.id;
     ledgerAppend({ type: `${request.type}_accepted_by_guardian`, playerId: child.id, orgId: request.orgId, orgName: request.orgName, userId: request.userId, scoutName: request.scoutName });
-    if (request.type === 'trial') {
-      const details = request.trialDetails ?? {};
-      const slotOk = chosenSlot && (chosenSlot === details.proposedDate || (details.altSlots ?? []).includes(chosenSlot));
-      const trialDate = slotOk ? chosenSlot : details.proposedDate ?? null;
-      db.trials.push({
-        id: nextId('trial'),
-        requestId: request.id,
-        playerId: child.id,
-        playerName: child.name,
-        orgId: request.orgId,
-        orgName: request.orgName,
-        scoutName: request.scoutName,
-        acceptedAt: Date.now(),
-        guardianApproved: true,
-        proposedDate: trialDate,
-        venue: details.venue ?? null,
-        notes: details.notes ?? '',
-        // The mandatory report is due 7 days after the trial (or acceptance).
-        reportDueAt: (trialDate ? new Date(trialDate).getTime() : Date.now()) + 7 * 24 * 3600 * 1000,
-        status: 'awaiting_report',
-      });
-    }
+    if (request.type === 'trial') issueAcceptedTrial({ request, player: child, trialDate: slot.date, by: 'guardian', at: respondedAt });
     notify({ kind: 'org_user', id: request.userId }, 'accepted', `The guardian of ${child.name} accepted your ${request.type} request — thread open.`, request.contactChannel);
-    notify({ kind: 'player', id: child.id }, 'update', `Your parent/guardian accepted the ${request.type} with ${request.orgName}.`, request.id);
+    // P4A-D10: the child hears the outcome as a request outcome ("Messages and
+    // requests"), the same category the club's own accepted/declined rows
+    // use — not as a discovery nudge, which is off by default.
+    notify({ kind: 'player', id: child.id }, 'guardian_decision', `Your parent/guardian accepted the ${request.type} with ${request.orgName}.`, request.id);
   } else {
     ledgerAppend({ type: `${request.type}_declined_by_guardian`, playerId: child.id, orgId: request.orgId, orgName: request.orgName, userId: request.userId, scoutName: request.scoutName });
     notify({ kind: 'org_user', id: request.userId }, 'declined', `The guardian of ${child.name} declined your ${request.type} request.`, request.id);
-    notify({ kind: 'player', id: child.id }, 'update', `Your parent/guardian declined the ${request.type} with ${request.orgName}.`, request.id);
+    notify({ kind: 'player', id: child.id }, 'guardian_decision', `Your parent/guardian declined the ${request.type} with ${request.orgName}.`, request.id);
   }
+  persistNow();
   broadcast('requests', { playerId: child.id });
   res.json(requestForRecipient(request));
 });
@@ -1794,7 +1787,9 @@ orgRouter.post('/players/:id/request', (req, res) => {
   if (type === 'trial') {
     // Trial reports are mandatory: an org with an unfiled report for a past
     // trial cannot request new trials until it files.
-    const overdue = db.trials.filter((t) => t.orgId === req.org.id && t.status === 'awaiting_report');
+    // A report can never be filed for a subject who removed their account
+    // (P4A-D14), so a tombstoned trial does not hold the organisation hostage.
+    const overdue = db.trials.filter((t) => t.orgId === req.org.id && t.status === 'awaiting_report' && !t.subjectRemovedAt);
     if (overdue.length > 0) {
       return res.status(409).json({
         error: 'REPORTS_OUTSTANDING',
@@ -1804,16 +1799,19 @@ orgRouter.post('/players/:id/request', (req, res) => {
     }
   }
 
-  const { proposedDate, venue, notes, altSlots } = req.body || {};
-  if (notes && !moderateOrRefuse(res, notes, { kind: 'trial_notes', orgId: req.org.id })) return;
-  const request = issueRecruitmentRequest({
-    org: req.org, orgUser: req.orgUser, player: p, type, message,
-    // Trial logistics: what the player/guardian is actually agreeing to.
-    // altSlots lets the other side pick a date that works (counter-proposal).
-    trialDetails: type === 'trial'
-      ? { proposedDate: proposedDate || null, altSlots: Array.isArray(altSlots) ? altSlots.slice(0, 2) : [], venue: venue || null, notes: notes || '' }
-      : null,
-  });
+  // Trial logistics: what the player/guardian is actually agreeing to.
+  // altSlots lets the other side pick a date that works (counter-proposal).
+  // M23 P4A-D1: every date is validated by the one Trial date validator and
+  // the text fields are bounded BEFORE anything is written — a malformed
+  // date used to travel into the trial row as a NaN deadline.
+  let trialDetails = null;
+  if (type === 'trial') {
+    const check = validateTrialDetails(req.body);
+    if (!check.ok) return res.status(400).json(check);
+    trialDetails = check.details;
+    if (trialDetails.notes && !moderateOrRefuse(res, trialDetails.notes, { kind: 'trial_notes', orgId: req.org.id })) return;
+  }
+  const request = issueRecruitmentRequest({ org: req.org, orgUser: req.orgUser, player: p, type, message, trialDetails });
   res.status(201).json({ ok: true, requestId: request.id, status: 'pending', routedTo: request.routedTo });
 });
 
@@ -1876,6 +1874,39 @@ function issueRecruitmentRequest({
   }
   broadcast('inbox', { playerId: player.id });
   return request;
+}
+
+/**
+ * The ONE writer of an accepted trial (M23 P4A-D1/D4/D13). Both respond
+ * routes — the adult's own and the guardian's on a minor's behalf — call this
+ * with the slot they already validated (`chooseTrialSlot`), so the two rows
+ * cannot drift apart again: same fields, same clock (`at` is the response
+ * instant the caller stamped on the request), same deadline derivation.
+ * `trialDate` is a validated `YYYY-MM-DD` or null (date to be confirmed);
+ * the deadline is never NaN because `trialReportDueAt` never returns one.
+ */
+function issueAcceptedTrial({ request, player, trialDate, by, at }) {
+  const details = request.trialDetails ?? {};
+  const trial = {
+    id: nextId('trial'),
+    requestId: request.id,
+    playerId: player.id,
+    playerName: player.name,
+    orgId: request.orgId,
+    orgName: request.orgName,
+    scoutName: request.scoutName,
+    acceptedAt: at,
+    acceptedBy: by,
+    guardianApproved: by === 'guardian',
+    proposedDate: trialDate,
+    venue: typeof details.venue === 'string' && details.venue !== '' ? details.venue : null,
+    notes: typeof details.notes === 'string' ? details.notes : '',
+    // The mandatory report is due 7 days after the trial day (or acceptance).
+    reportDueAt: trialReportDueAt(trialDate, at),
+    status: 'awaiting_report', // mandatory report gate
+  };
+  db.trials.push(trial);
+  return trial;
 }
 
 /** A request row as its RECIPIENT may see it: no org id, no user id, no internal Contact link. */
@@ -2024,10 +2055,13 @@ orgRouter.get('/feed', (req, res) => {
       }
     }
   }
-  for (const t of db.trials.filter((x) => x.orgId === req.org.id && x.status === 'awaiting_report')) {
-    items.push({ type: 'report_due', ts: t.reportDueAt ?? Date.now(), playerId: t.playerId, playerName: t.playerName, trialId: t.id, dueAt: t.reportDueAt });
+  // A trial whose subject removed their account (P4A-D14 tombstone) has no
+  // report to file, so it is neither listed as due nor reminded about.
+  for (const t of db.trials.filter((x) => x.orgId === req.org.id && x.status === 'awaiting_report' && !x.subjectRemovedAt)) {
+    const dueAt = Number.isFinite(t.reportDueAt) ? t.reportDueAt : null;
+    items.push({ type: 'report_due', ts: dueAt ?? Date.now(), playerId: t.playerId, playerName: t.playerName, trialId: t.id, dueAt });
     // one-shot reminder when the mandatory report is due within 48h
-    if (!t.reminderSent && t.reportDueAt && t.reportDueAt - Date.now() < 48 * 3600 * 1000) {
+    if (!t.reminderSent && dueAt !== null && dueAt - Date.now() < 48 * 3600 * 1000) {
       t.reminderSent = true;
       const request = db.requests.find((r) => r.id === t.requestId);
       if (request?.userId) notify({ kind: 'org_user', id: request.userId }, 'report_due', `Mandatory trial report for ${t.playerName} is due ${new Date(t.reportDueAt).toLocaleDateString()}.`, t.id);
@@ -2092,13 +2126,24 @@ orgRouter.delete('/searches/:id', (req, res) => {
 orgRouter.get('/trials/:id/ics', (req, res) => {
   const t = db.trials.find((x) => x.id === req.params.id && x.orgId === req.org.id);
   if (!t) return res.status(404).json({ error: 'TRIAL_NOT_FOUND' });
-  const start = t.proposedDate ? t.proposedDate.replace(/-/g, '') : new Date(t.acceptedAt).toISOString().slice(0, 10).replace(/-/g, '');
+  // M23 P4A-D1, read side: a stored date that is not a calendar day (a row
+  // written before the validator existed) is refused as what it is — never
+  // a 500, never a fabricated day. A missing deadline is simply not stated.
+  const day = parseTrialDate(t.proposedDate);
+  if (!day.ok) return res.status(422).json({ error: 'TRIAL_DATE_INVALID', message: 'This trial was recorded with a date that is not a calendar day; postpone it to a valid day to export it.', expected: day.expected });
+  const startAt = day.t ?? (Number.isFinite(t.acceptedAt) ? t.acceptedAt : null);
+  if (startAt === null) return res.status(422).json({ error: 'TRIAL_DATE_INVALID', message: 'This trial has no usable date to export.' });
+  const start = new Date(startAt).toISOString().slice(0, 10).replace(/-/g, '');
+  // RFC 5545 text: backslash, semicolon, comma and line breaks are escaped so
+  // no stored text can begin a new calendar line.
+  const icsText = (s) => String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+  const deadline = Number.isFinite(t.reportDueAt) ? ` Mandatory performance report due ${new Date(t.reportDueAt).toISOString().slice(0, 10)}.` : '';
   const ics = [
     'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//ScoutBox//Trials//EN', 'BEGIN:VEVENT',
     `UID:${t.id}@scoutbox`, `DTSTART;VALUE=DATE:${start}`,
-    `SUMMARY:ScoutBox trial — ${t.playerName}`,
-    `DESCRIPTION:${(t.notes || 'Assessment trial').replace(/\n/g, ' ')}. Mandatory performance report due ${new Date(t.reportDueAt ?? Date.now()).toISOString().slice(0, 10)}.`,
-    t.venue ? `LOCATION:${t.venue}` : null,
+    `SUMMARY:${icsText(`ScoutBox trial — ${t.playerName ?? 'removed player'}`)}`,
+    `DESCRIPTION:${icsText(t.notes || 'Assessment trial')}.${deadline}`,
+    t.venue ? `LOCATION:${icsText(t.venue)}` : null,
     'END:VEVENT', 'END:VCALENDAR',
   ].filter(Boolean).join('\r\n');
   res.set('Content-Type', 'text/calendar').send(ics);
@@ -2131,6 +2176,12 @@ orgRouter.post('/trials/:trialId/report', (req, res) => {
   const trial = db.trials.find((t) => t.id === req.params.trialId && t.orgId === req.org.id);
   if (!trial) return res.status(404).json({ error: 'TRIAL_NOT_FOUND' });
   if (trial.status === 'reported') return res.status(409).json({ error: 'ALREADY_REPORTED' });
+  // P4A-D14: the subject removed their account. There is no profile for the
+  // report to land on and nobody to deliver feedback to; the tombstone keeps
+  // what happened, and nothing new is written about a person who left.
+  if (trial.subjectRemovedAt || !findPlayer(trial.playerId)) {
+    return res.status(409).json({ error: 'TRIAL_SUBJECT_REMOVED', message: 'This player removed their ScoutBox account. The trial stays on record; no report can be filed for it.' });
+  }
 
   const check = validateTrialReport(req.body);
   if (!check.ok) {
@@ -2847,43 +2898,29 @@ playerRouter.post('/requests/:id/respond', (req, res) => {
     return res.status(403).json({ error: 'BLOCKED', message: 'You have blocked this organisation. Lift the block before accepting.' });
   }
   if (request.contactId && rateLimit.limited('contact_response', `player:${req.player.id}`)) return res.status(429).json(rateLimitedBody('contact_response'));
+  // P4A-D12: slot checked before the answer is recorded (see the guardian route).
+  const slot = accept && request.type === 'trial' ? chooseTrialSlot(request.trialDetails, chosenSlot) : { ok: true, date: null };
+  if (!slot.ok) return res.status(400).json(slot);
   const respondedAt = Date.now();
   request.status = accept ? 'accepted' : 'declined';
   request.respondedAt = respondedAt;
+  request.respondedBy = 'player'; // P4A-D13: both respond paths stamp who answered
   // M23 P3: the Contact that created this request learns of the answer.
   m23Ctx?.onRequestResponded?.({ request, accept: !!accept, message: replyCheck.reply, by: 'player', at: respondedAt });
-  persistNow();
+  // P4A-D15: one save for the answer, the channel and the trial (below).
 
   if (accept) {
     // Only now does a contact channel exist.
     const channel = openChannel(request);
     request.contactChannel = channel.id;
     ledgerAppend({ type: `${request.type}_accepted`, playerId: req.player.id, orgId: request.orgId, orgName: request.orgName, userId: request.userId, scoutName: request.scoutName });
-    if (request.type === 'trial') {
-      const details = request.trialDetails ?? {};
-      const slotOk = chosenSlot && (chosenSlot === details.proposedDate || (details.altSlots ?? []).includes(chosenSlot));
-      const trialDate = slotOk ? chosenSlot : details.proposedDate ?? null;
-      db.trials.push({
-        id: nextId('trial'),
-        requestId: request.id,
-        playerId: req.player.id,
-        playerName: req.player.name,
-        orgId: request.orgId,
-        orgName: request.orgName,
-        scoutName: request.scoutName,
-        acceptedAt: Date.now(),
-        proposedDate: trialDate,
-        venue: details.venue ?? null,
-        notes: details.notes ?? '',
-        reportDueAt: (trialDate ? new Date(trialDate).getTime() : Date.now()) + 7 * 24 * 3600 * 1000,
-        status: 'awaiting_report', // mandatory report gate
-      });
-    }
+    if (request.type === 'trial') issueAcceptedTrial({ request, player: req.player, trialDate: slot.date, by: 'player', at: respondedAt });
     notify({ kind: 'org_user', id: request.userId }, 'accepted', `${req.player.name} accepted your ${request.type} request — thread open.`, request.contactChannel);
   } else {
     ledgerAppend({ type: `${request.type}_declined`, playerId: req.player.id, orgId: request.orgId, orgName: request.orgName, userId: request.userId, scoutName: request.scoutName });
     notify({ kind: 'org_user', id: request.userId }, 'declined', `${req.player.name} declined your ${request.type} request.`, request.id);
   }
+  persistNow();
   broadcast('requests', { playerId: req.player.id });
   res.json(requestForRecipient(request));
 });
@@ -3467,22 +3504,96 @@ function exportPlayer(p) {
   };
 }
 
+/**
+ * M23 P4A-D14 — what an accepted trial leaves behind when its subject removes
+ * their account. The rule is the ledger's: history stays, and it carries only
+ * ids, states, times and the club's own filed numbers. Everything that
+ * describes the person — name, the club's notes about them, the family's
+ * emergency contact, arrival instructions written for them, the feedback
+ * written to them — goes. The row keeps its id so a recruitment case that
+ * references it (history, links, P4B evidence) still resolves, and
+ * `subjectRemovedAt` tells every reader why the person-shaped fields are gone.
+ */
+function tombstoneTrial(t, at) {
+  const report = t.report ? {
+    id: t.report.id, trialId: t.report.trialId, playerId: t.report.playerId, orgId: t.report.orgId, orgName: t.report.orgName,
+    userId: t.report.userId, scoutName: t.report.scoutName, filedAt: t.report.filedAt,
+    ...Object.fromEntries(TRIAL_REPORT_FIELDS.map((f) => [f, t.report[f]])),
+    notes: null, strengthNote: null, focusNote: null,
+  } : undefined;
+  const day = t.day ? {
+    staff: t.day.staff ?? [], // the club's own named staff and their checks
+    consents: (t.day.consents ?? []).map((c) => ({ id: c.id, by: { kind: c.by?.kind ?? null }, scope: c.scope, at: c.at })),
+    arrival: null, emergency: null, collection: null,
+    checkins: (t.day.checkins ?? []).map((c) => ({ playerId: c.playerId, at: c.at, byUserId: c.byUserId, byName: c.byName })),
+    statusEvents: t.day.statusEvents ?? [],
+  } : undefined;
+  return {
+    id: t.id, requestId: t.requestId, playerId: t.playerId, playerName: null,
+    orgId: t.orgId, orgName: t.orgName, scoutName: t.scoutName,
+    acceptedAt: t.acceptedAt, acceptedBy: t.acceptedBy ?? null, guardianApproved: t.guardianApproved ?? null,
+    proposedDate: t.proposedDate ?? null, venue: t.venue ?? null, notes: '',
+    reportDueAt: Number.isFinite(t.reportDueAt) ? t.reportDueAt : null,
+    status: t.status,
+    ...(t.reminderSent ? { reminderSent: true } : {}),
+    ...(t.feedbackEscalatedAt ? { feedbackEscalatedAt: t.feedbackEscalatedAt } : {}),
+    ...(report ? { report } : {}),
+    ...(day ? { day } : {}),
+    subjectRemovedAt: at,
+  };
+}
+
+/** The request row the trial (or contact) came from, reduced the same way. */
+function tombstoneRequest(r, at) {
+  const td = r.trialDetails && typeof r.trialDetails === 'object' ? r.trialDetails : null;
+  return {
+    id: r.id, playerId: r.playerId, playerName: null,
+    orgId: r.orgId, orgName: r.orgName, orgType: r.orgType, orgVerified: r.orgVerified,
+    orgSafeguardingCertified: r.orgSafeguardingCertified, trustedPartner: r.trustedPartner,
+    userId: r.userId, scoutName: r.scoutName, scoutRole: r.scoutRole,
+    type: r.type, message: null,
+    ...(r.contactId ? { contactId: r.contactId } : {}),
+    trialDetails: td ? { proposedDate: td.proposedDate ?? null, altSlots: Array.isArray(td.altSlots) ? td.altSlots : [], venue: td.venue ?? null, notes: '' } : null,
+    status: r.status, createdAt: r.createdAt,
+    respondedAt: r.respondedAt ?? null, respondedBy: r.respondedBy ?? null,
+    routedTo: r.routedTo ?? null, guardianId: null, contactChannel: null,
+    subjectRemovedAt: at,
+  };
+}
+
 function deletePlayerData(playerId) {
   const p = findPlayer(playerId);
   if (!p) return false;
+  const at = Date.now();
   for (const m of p.media) storage.delete(m.id);
   db.sessions = db.sessions.filter((s) => !(s.kind === 'player' && s.refId === playerId));
   db.players = db.players.filter((x) => x.id !== playerId);
-  db.requests = db.requests.filter((r) => r.playerId !== playerId);
+  // M23 P4A-D14: requests and trials become id-only tombstones rather than
+  // vanishing. A recruitment case that reached a trial keeps the record that
+  // the trial happened (and the numbers the club itself filed); the person
+  // is gone from it. The case's status is NOT touched here — deletion is not
+  // a lifecycle event, and no path other than the lifecycle writer moves a
+  // case (M23 P2). The case's copy of the name goes with the person.
+  db.requests = db.requests.map((r) => (r.playerId === playerId ? tombstoneRequest(r, at) : r));
+  db.trials = db.trials.map((t) => (t.playerId === playerId ? tombstoneTrial(t, at) : t));
+  for (const c of db.recruitmentCases ?? []) {
+    if (c?.playerId === playerId) { c.playerName = null; c.subjectRemovedAt = at; }
+  }
+  for (const a of db.assessments ?? []) if (a?.playerId === playerId) a.playerName = null;
+  for (const c of db.recruitmentContacts ?? []) {
+    if (c?.playerId === playerId && c.response) c.response = { ...c.response, message: null };
+  }
+  for (const ot of db.openTrials ?? []) {
+    for (const reg of ot.registrations ?? []) if (reg.playerId === playerId) reg.playerName = null;
+  }
   db.channels = db.channels.filter((c) => c.playerId !== playerId);
-  db.trials = db.trials.filter((t) => t.playerId !== playerId);
   db.notifications = db.notifications.filter((n) => !(n.audience.kind === 'player' && n.audience.id === playerId));
   db.pairingCodes = db.pairingCodes.filter((c) => c.playerId !== playerId);
   db.savedSearches = db.savedSearches; // org data unaffected
   for (const g of db.guardians) g.childIds = g.childIds.filter((id) => id !== playerId);
   // Ledger rows stay (append-only audit + attribution) but carry only ids.
   broadcast('players');
-  persist();
+  persistNow();
   return true;
 }
 

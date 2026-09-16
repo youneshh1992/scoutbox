@@ -321,7 +321,9 @@ export function registerOperations(ctx) {
     // F9: overdue trial feedback escalates once — to the club AND into the
     // existing no-ghosting culture (admin can see it in reports volume).
     for (const t of db.trials) {
-      if (t.reportDueAt && t.reportDueAt < now && !t.report && !t.feedbackEscalatedAt) {
+      // P4A-D1/D14: a null deadline is "unknown", not "now"; a tombstoned
+      // trial has nobody to file for, so it never escalates.
+      if (Number.isFinite(t.reportDueAt) && t.reportDueAt < now && !t.report && !t.feedbackEscalatedAt && !t.subjectRemovedAt) {
         t.feedbackEscalatedAt = now;
         const lead = usersOf(t.orgId)[0];
         if (lead) notify({ kind: 'org_user', id: lead.id }, 'trial_day', `🚨 Trial feedback for ${t.playerName} is overdue — the mandatory report blocks new trials until filed.`, t.id);

@@ -167,3 +167,20 @@ pushed. No PR. No deploy.
 ---
 
 P4A commit: `ca3e6c9` — "M23 P4A: Trial + Box Cam integration architecture".
+
+## Closure addendum
+
+The three Mediums this report left open (D1, D10, D14) were reproduced,
+root-caused and closed in the P4A **closure pass** that followed, together
+with D2, D4, D5, D12, D13 and one further Medium found while proving the
+fixes under a process crash (D15: an accepted request was saved before its
+trial row existed). Every architecture conclusion above stands: `db.trials`
+and `db.assessments` remain the canonical stores, no Trial session store was
+added, no schema advanced (2303), the lifecycle writer was not touched, and
+the Box Cam CV engine, gates and thresholds are unchanged. What moved from
+"P4B-1/P4B-2 will fix" to "already true": the canonical Trial date validator
+and single deadline derivation (`domain.mjs`), the single accept-time trial
+writer, slot validation before the answer is recorded, the tombstone
+cascade, and the child's `guardian_decision` notification in the `messages`
+category. P4B builds on those rather than re-creating them. The full account
+is `M23_P4A_CLOSURE_REPORT.md`; the register is `M23_P4A_DEFECT_REGISTER.md`.

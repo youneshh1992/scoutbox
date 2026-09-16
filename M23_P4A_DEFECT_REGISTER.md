@@ -1,63 +1,476 @@
 # M23 P4A — Defect Register
 
-Defects uncovered while auditing the Trial / Box Cam integration. P4A is an
-architecture milestone; its fix policy (§140) allows only clearly
-high-severity, security/privacy/safeguarding, or audit-blocking fixes. Every
-entry below was **reproduced or verified in source** before being recorded.
-One (P4A-D9) met the bar and was fixed; every other entry is assigned to the
-P4B phase that owns the code it touches. Severity: **S1** blocks a user
-journey; **S2** degrades one; **S3** cosmetic, hygiene or documentation.
+Defects uncovered while auditing the Trial / Box Cam integration (P4A) and
+during the P4A **closure pass** that followed it. The architecture milestone's
+fix policy (§140) allowed only high-severity, privacy/safeguarding or
+audit-blocking fixes, so P4A itself fixed one entry (P4A-D9) and left the rest
+recorded. The closure pass ran under a different rule — *we do not knowingly
+carry fixable Critical, High or Medium defects into P4B* — reproduced every
+open Medium on a live server before touching code, fixed every Medium and
+every Low that was cheap and safe to close alongside, and found one further
+defect (P4A-D15) while proving the fixes under a process crash.
 
-| id | sev | surface | defect (as found) | evidence | root cause | disposition |
-|---|---|---|---|---|---|---|
-| P4A-D1 | S2 | `POST /org/players/:id/request` (type `trial`) → accept → `GET /org/trials/:id/ics` | A trial request accepts an unparseable `proposedDate` and an unbounded `venue`. On acceptance the trial row is created with `reportDueAt = NaN` (serialised as `null`), the report-due reminder and the overdue metric silently skip it, and the calendar export answers **500** (`new Date(NaN).toISOString()` throws). After a restart the `null` deadline is read as "due now". | Reproduced on a fresh server: request `{ type:'trial', proposedDate:'next tuesday-ish', venue: 'x'×5000 }` → 201; player accept → 200; `/org/trials` row `{ status:'awaiting_report', proposedDate:'next tuesday-ish', reportDueAt:null, venueLen:5000 }`; `/org/trials/:id/ics` → **500**. Probe: `scratchpad/m23/p4aDefectProbe.mjs`. | `server.mjs:1807-1814` builds `trialDetails` with no date-format check and no length clamp (only `notes` is moderated); `server.mjs:1311` and `:2878` compute `new Date(trialDate).getTime()` without a validity check; `server.mjs:2100` formats `reportDueAt` without guarding `NaN`. | **Open, P4B-1** (schedule validation). Not fixed in P4A: org-authenticated input, no privacy or safeguarding exposure, no data loss. The P4B-1 schedule model validates dates as timezone-aware instants and clamps venue/notes; the ICS route is replaced by the P4B schedule export. |
-| P4A-D2 | S3 | Passport org-viewer timeline | The `trial_outcome` timeline event reads `t.report.at`, but the report object carries `filedAt` (`server.mjs:2161`); the event's date therefore always falls back to `proposedDate ?? acceptedAt`. | Source: `m15/shared.mjs:201` `normWhen(t.report.at ?? t.proposedDate ?? t.acceptedAt)` vs `server.mjs:2153-2166` (`filedAt`). Confirmed by probe: after filing a report, the report object has `filedAt` and no `at`. The event is `private_own_org`, so only the filing club's viewer is affected. | Field name drift between the M12 report writer and the M15 projector. | **Open, P4B-6** (assessment/report integration reads the canonical date). One-token fix; deferred because it is cosmetic and P4B-6 re-specifies which trial records the Passport projects. |
-| P4A-D3 | S3 | Pro + Grassroots Room demo fixtures | `roomsDemo.ts:318` (Pro) / `:314` (Grassroots) ship a trial with `status: 'scheduled'`, and `roomsDemo.ts:527` invents a `{none, requested, scheduled, awaiting_report, reported}` label set. The server's `db.trials.status` only ever holds `awaiting_report` or `reported`, and `trialStateFor()` (`m17/rooms.mjs:292-296`) can only answer `reported | awaiting_report | none`. The demo shows a state production cannot produce. | Source read; demo-mode only. | Demo vocabulary written ahead of the server. | **Open, P4B-7** (client demos mirror the P4B schedule vocabulary). §122: P4B must not rely on synthetic truth in production paths; the demo fixtures are rewritten when the real vocabulary exists. |
-| P4A-D4 | S3 | Adult-accept trial writer | `server.mjs:2866-2880` (adult accept) omits `guardianApproved`, while the guardian path (`server.mjs:1297-1313`) sets `guardianApproved: true`; the Pro `TrialsScreen` pill reads an `undefined` field for every adult trial. The two writers are hand-maintained copies. | Source read. | Duplicate object literals. | **Open, P4B-1**: one Trial writer (`issueTrial`) replaces both, exactly as `issueRecruitmentRequest` replaced the request copies in P3. |
-| P4A-D5 | S3 | `POST /player/box-cam/sessions/:id/cv/finalize` | Rate policy `box_cv_finalize` (80/h, `m181/rateLimit.mjs:84`) is declared but the finalize handler never calls `limited('box_cv_finalize', …)`; `begin`, `frames` and `ready-check` do call theirs. | Verified: `grep limited( m22/routes.mjs` → `box_cv_session_create`, `box_cv_frames`, `box_cv_ready_check` only. | Policy added with the route set, guard line omitted. | **Open, P4B-5 (optional O5)**. Exposure is bounded: finalize is nonce-bound and once per provider session; a flood is refused as `already_finalized`. Not a Trial dependency. |
-| P4A-D6 | S3 | M22 CV routes | `refusedClientFields()` (`m22/policy.mjs:317`) is exported and unit-tested but not invoked by any M22 route; the structural protection (no handler reads a forbidden name; capability intersection) holds and is asserted by `m22E2E` negatives 8/9, but the explicit 400 refusal the policy describes does not happen. (The M21 function of the same name **is** called, `m21/index.mjs:177`.) | Verified by grep across `m22/*.mjs`. | The guard was written as a contract and tested in isolation. | **Open, P4B-5 (optional O6)**: call it in `begin`/`frames`/`finalize`. Not a Trial dependency. |
-| P4A-D7 | S3 | Documentation | `M16_BOX_CAM.md:41,70,217` still describes `production_cv` as `not_configured`; the provider registry (`m16/drills.mjs:119-126`) and `M22_CAPABILITIES.md` say `configured`. `M22_MATRIX.md:79` (row B6) names `BOX_CAM_PRODUCTION_CV_REQUIRED` as the production fail switch; no such identifier exists in the tree. | Verified by grep. | Docs not updated when M22 flipped the provider. | **Open, doc-only**: correct in the P4B-5 doc pass (or earlier at the user's discretion). Recorded here so the capability report is read against `M22_CAPABILITIES.md`, which is current. |
-| P4A-D8 | S3 | Assessment state machine vs consumers | Readers accept an assessment state `'published'` (`m15/passport.mjs:104`, `m162/trust.mjs:149`) that no writer ever sets; the only setters are `submitted` and `reviewed` (`m12/scouting.mjs:189, 202`). | Verified by grep. | Vocabulary drift. | **Open, P4B-6**: the Trial assessment reuse declares the exact state set and removes the dead value. Harmless today. |
-| P4A-D9 | **S1 (privacy / safeguarding)** | `GET /org/trials/:id/day` after a block | After a player or guardian **blocked** the organisation, the organisation could still read the trial day **including the family's emergency contact** (name and phone) that the family had filed for the event. Every other block in the product is evaluated on every read (requests, channels, contact compose/send, media, signing); the trial-day org view was the one surface that did not consult it. | Reproduced: guardian accepts a minor's trial → sets the emergency contact → `POST /guardian/block` → `GET /org/trials/:id/day` still 200 with `emergency: { name, phone }`. Probe: `scratchpad/m23/p4aBlockProbe.mjs`. | `trialDayView(t, 'org')` in `m12/journeys.mjs` exposed `day.emergency` on org membership alone; the M12 trial-day feature predates the block-on-every-read convention. | **FIXED in P4A** (§140: privacy/safeguarding). The org day view withholds the contact whenever `ctx.isBlocked(t.playerId, t.orgId)` and says so (`emergency: null`, `emergencyWithheld: 'BLOCKED'`); nothing is deleted, so a lifted block restores it. Regression: `m12E2E` §9 (five assertions: contact present before the block, withheld and the number absent from the whole view after, readable again after T&S lifts it). The wider question — what a blocked club may still *do* with an accepted trial (arrival, postpone, cancel, report all still answer 200 today; check-in is already 409) — is policy (§103–§104), decided for P4B in the decision register (D-16) and not implemented here. |
-| P4A-D10 | S2 | Minor's own Updates after a guardian responds | The guardian respond route tells the child with notification type `'update'` (`server.mjs:1316, 1320`), which maps to the `discovery_nudges` category (`m182/notificationPrefs.mjs`), **off by default** — so a minor is never told that their guardian accepted or declined a trial or contact. The Inbox item itself still shows the outcome; the notification does not fire. | Source read; category table verified. | Type chosen before the M18.2 category map existed. | **Open, P4B-2** (invitation + guardian): the child-facing outcome notification uses `trial_updates` / `messages`. Also affects P3 Contact outcomes for minors; recorded here rather than silently fixed because it changes notification behaviour. |
-| P4A-D11 | S3 | Grassroots open-day invite | A second writer of `db.requests` bypasses `issueRecruitmentRequest` (`server.mjs:2343-2356`): a hand-rolled request literal with `type: 'trial'`, its own `routedTo`/`guardianId` derivation (no verified-guardian rule), notification type `open_trial` instead of `request`, and no `broadcast('inbox')`. P3's invariant "a second writer would be a second Inbox by another name" is already violated by this older path. | Source read. | Predates the extraction. | **Open, P4B-2**: route the open-day invite through the single writer with the guardian rule. |
-| P4A-D12 | S3 | Trial accept `chosenSlot` | An unrecognised `chosenSlot` is silently ignored and the accept falls back to `proposedDate` (`server.mjs:1295-1296`, `:2863-2865`) — the recipient believes they chose a slot the club never offered, and the trial is dated differently from what they pressed. | Source read. | Lenient fallback. | **Open, P4B-3** (schedule): an unknown slot is refused (`TRIAL_SLOT_INVALID`), and the offered slots are retained on the schedule revision. |
-| P4A-D13 | S3 | Respond routes | `respondedBy: 'guardian'` is written by the guardian route only; the player route writes no `respondedBy`. Downstream readers cannot distinguish "accepted by the player" from "legacy row". | Source read. | Asymmetric copies. | **Open, P4B-2**: one respond writer stamps `respondedBy` on both paths. |
-| P4A-D14 | S2 | Player deletion cascade vs lifecycle | `deletePlayerData` removes `db.trials`, `db.requests` and `db.channels` for the player but leaves `db.recruitmentCases` (with a status such as `trial_completed`), `db.roomDecisions` and `db.recruitmentContacts` standing (`server.mjs:3470-3487`). After deletion the evidence provider would answer "no trial" for a case already at `trial_completed`, and journey/audit would show a case for a player who no longer exists. Ledger rows are kept by design. | Source read. Not reproduced end to end because the case side has no trial evidence yet. | Cascade written before M17/M23 stores existed. | **Open, P4B-1** (persistence): define the cascade for Trial rows and cases (history stays, subject becomes an id-only tombstone), decision D-20. Flagged for the M14.1 removed-accounts contract as well. |
+Severity vocabulary (closure mandate §30): **Critical** major
+security/privacy/safeguarding/data-integrity compromise; **High** significant
+auth/privacy/safeguarding/integrity failure or broken core workflow;
+**Medium** real correctness/availability/privacy/lifecycle/data-quality
+defect that should reasonably be fixed before P4B; **Low** hygiene,
+cosmetic, documentation. The P4A rows were originally graded S1/S2/S3; the
+mapping is S1 → High (P4A-D9, fixed in P4A), S2 → Medium, S3 → Low, and
+nothing was relabelled downward.
 
-## Design gaps (not defects — recorded for P4B)
+Every entry records: ID · severity · area · reproduction · root cause ·
+impact · why tests missed it · fix · regression · commit · status.
 
-- **`altSlots` are destroyed on accept.** Neither trial writer records which
-  slots were offered or whether the chosen one was an alternative; only the
-  resulting `proposedDate` survives (`server.mjs:1297-1313`, `:2866-2880`).
-  P4B-3's schedule revision history starts from the invitation.
-- **The `REPORTS_OUTSTANDING` gate is org-wide** (`server.mjs:1794-1804`):
-  one unfiled report anywhere in the organisation blocks every new trial
-  request. Existing, deliberate M12 behaviour; P4B must decide whether the
-  mandatory report survives as the Trial's completion gate or as a separate
-  obligation (decision register D-17).
-- **`/orgs/directory` is unauthenticated** and derives `trialsRun`,
-  `reportsFiled`, `avgReportDays` across every club (`server.mjs:3514-3531`).
-  Aggregate counts only, by M7 design; P4B adds nothing to it.
-- **Assessments have no `caseId`/`roomId`/`trialId`**; every join is
-  `orgId + playerId`. Two concurrent Rooms on one player in one org see each
-  other's assessments. P4B-6 adds an optional `trialId` reference on the
-  assessment (decision D-9).
-- **Two live "trust" numbers**: the legacy `computeTrustScore` (weights trial
-  reports, `domain.mjs:118-154`) still drives `/player/cv` and the trial-report
-  response; M16.2 is canonical and ignores trials. P4B must not touch the
-  legacy number; the architecture doc (§10) says which one the Trial reads
-  (neither).
+Regression suites named below: `m23P4AClosureE2E` =
+`scoutbox-server/scripts/m23P4AClosureE2E.mjs` (337 checks, 210 negative,
+62 %); `m12E2E` = the M12 suite (152 checks).
 
-## Fixed in P4A
+---
 
-**P4A-D9 only** — the one finding that met the §140 bar (privacy /
-safeguarding). It changes one read-side projection (`m12/journeys.mjs`,
-`trialDayView` for the org side) and adds five assertions to `m12E2E`. No
-route, store, status, gate or Box Cam code changed. Every other entry is
-recorded with its P4B phase and left as found.
+## P4A-D1 — Medium — Trial dates (request → accept → calendar) — **CLOSED**
 
+**Reproduction** (fresh server, `scratchpad/m23/p4aDefectProbe.mjs`):
+`POST /org/players/pl-adeyemi/request { type:'trial', proposedDate:'next tuesday-ish', venue:'x'×5000 }`
+→ **201**; player `POST /player/requests/:id/respond { accept:true }` → 200;
+`GET /org/trials` row `{ status:'awaiting_report', proposedDate:'next tuesday-ish', reportDueAt:null, venue: 5000 chars }`
+(`new Date('next tuesday-ish').getTime()` is `NaN`, serialised as `null`);
+`GET /org/trials/:id/ics` → **500** (`new Date(NaN).toISOString()` throws).
+After a restart the `null` deadline read as "due now" in the feed
+(`t.reportDueAt ?? Date.now()`), as "not overdue" in the operations sweep
+(`t.reportDueAt &&`) and as "overdue since 1970" in the Director Dashboard
+(`Number(null) < now`) — three readers, three meanings for one stored value.
+
+**Route / module:** `server.mjs` request route (`/org/players/:id/request`),
+both respond routes (`/guardian/requests/:id/respond`,
+`/player/requests/:id/respond`), `/org/trials/:id/ics`, `/org/feed`, the
+`/org/trials/:trialId/report` gate; `m12/journeys.mjs` postpone; readers in
+`m12/operations.mjs`, `m20/timeSeries.mjs`, `m21/evidence.mjs`,
+`m15/shared.mjs`.
+
+**Root cause:** no Trial date validator existed. The request route stored
+`proposedDate || null` and `altSlots.slice(0,2)` unchecked; the two
+hand-copied accept writers computed `new Date(trialDate).getTime() + 7d`
+with no validity check; the postpone route did `String(newDate).slice(0,10)`;
+the calendar export formatted `reportDueAt` without guarding `NaN`. Every
+reader then interpreted `null` its own way.
+
+**Impact:** an org-authenticated club could persist a trial with no usable
+day and a `null` deadline; the mandatory-report machinery (feed reminder,
+overdue escalation, Director Dashboard) disagreed about it; the calendar
+export was a raw 500; the venue was unbounded. No privacy or safeguarding
+exposure; org-authenticated input only.
+
+**Why tests missed it:** every suite (`apiE2E`, `m12E2E`, `m15E2E`) sent
+well-formed `YYYY-MM-DD` dates shaped like the clients' `<input type="date">`;
+no suite sent a malformed date, a non-array `altSlots`, an over-long venue
+or an un-offered `chosenSlot`, and none exported the calendar for a bad row.
+
+**Fix (this closure):**
+- `domain.mjs` gains the **one** Trial date module: `parseTrialDate`
+  (accepted syntax is a calendar day `YYYY-MM-DD`, calendar-valid, year
+  2000–2100; `''`/`null`/`undefined` = "no date"; everything else refused
+  `TRIAL_DATE_INVALID` with the expected syntax — no time-of-day, no
+  timezone, no trimming, no coercion), `isTrialDate`, `trialReportDueAt`
+  (the one deadline derivation: trial day UTC midnight + 7 days, or the
+  caller's acceptance instant + 7 days; never `NaN`, `null` when nothing
+  finite exists), `validateTrialDetails` (dates, `altSlots` list of ≤ 2
+  distinct days, venue ≤ 200 one-line text, notes ≤ 500 text — refused over
+  the limit, never truncated) and `chooseTrialSlot` (absent = proposed day;
+  anything else must be an offered day — P4A-D12; a legacy stored day that
+  no longer parses yields no date rather than a fabricated one).
+- The request route validates before `issueRecruitmentRequest` (400, field
+  named). Both respond routes validate the slot **before** the answer is
+  recorded, so a refused slot leaves the request pending.
+- One accept-time writer `issueAcceptedTrial` replaces the two copies
+  (closes P4A-D4 and P4A-D13: `acceptedBy`, `guardianApproved`,
+  `respondedBy` on both paths, `acceptedAt === respondedAt` — one clock).
+- Postpone validates `newDate` through the same parser and re-derives the
+  deadline through the same derivation.
+- Read side: the calendar export answers **422 `TRIAL_DATE_INVALID`** for a
+  stored day that is not a calendar day (never 500, never an invented day),
+  omits the deadline sentence when none is finite, and RFC 5545-escapes
+  stored text so no venue or note can begin a calendar line. Feed,
+  operations sweep, Director Dashboard, safety pack and M21 evidence treat a
+  non-finite deadline as *unknown*, not "now" and not "1970".
+- No migration: legacy rows are handled on read; a postponement to a real
+  day repairs them through the validator.
+
+**Regression:** `m23P4AClosureE2E` A1–A14 (pure: the mandate's malformed
+list — `''`, `not-a-date`, `2026-13-99`, `2026-02-31`, `null`, `{}`, `[]`,
+`0`, `NaN`, whitespace, datetime, 1999/2101, leap days, prototype keys,
+year/month/DST boundaries), B1–B13 (HTTP: refusals before persistence,
+canonical details, un-offered slot 400 with the request still pending,
+deadline = day + 7 d exactly, calendar export and escaping, postpone
+validation and re-derivation, feed, guardian path through the same writer),
+F0–F3 (calendar fuzz: non-ASCII, notes at the limit, cancelled trial,
+unknown/prototype/newline ids), L3–L6 and L8e–L8f (legacy garbage/NaN/null/
+out-of-range rows: 422 not 500, no fabricated deadline, not counted overdue,
+legacy invitation still acceptable with no date, repair by postponement,
+identical after restart). `apiE2E`, `m12E2E`, `m15E2E` unchanged and green.
+
+**Commit:** the P4A closure commit (footer). **Status: CLOSED.**
+
+---
+
+## P4A-D2 — Low — Passport org-viewer timeline — **CLOSED**
+
+**Reproduction:** file a trial report; the report carries `filedAt` and no
+`at`; `m15/shared.mjs` built the `trial_outcome` event from
+`t.report.at ?? proposedDate ?? acceptedAt`, so the outcome date was never
+the filing date. **Root cause:** field-name drift between the M12 writer
+and the M15 projector. **Impact:** cosmetic; the event is `private_own_org`.
+**Why tests missed it:** `m15E2E` fixtures wrote `report: { at }` by hand.
+**Fix:** `normWhen(t.report.filedAt ?? t.report.at ?? …)` — the writer's
+name first, the fixture name kept for old rows. **Regression:** `m15E2E`
+unchanged and green. **Status: CLOSED.**
+
+---
+
+## P4A-D3 — Low — Room demo fixtures — **OPEN (P4B-7), documented**
+
+Demo fixtures (`roomsDemo.ts`) show a trial `status: 'scheduled'` and a
+five-value label set that production cannot produce. Demo mode only; no
+production path reads it. **Why left open:** P4B-7 rewrites these fixtures
+against the P4B schedule vocabulary; rewriting them now against the M12
+vocabulary is churn P4B undoes. Not a correctness, privacy or availability
+defect in any production path. **Status: OPEN, Low, P4B-7.**
+
+---
+
+## P4A-D4 — Low — adult-accept trial writer — **CLOSED**
+
+**Reproduction:** adult accept omitted `guardianApproved`; the guardian
+accept set it `true`; the Pro `TrialsScreen` pill read `undefined` for every
+adult trial. **Root cause:** two hand-maintained object literals. **Fix:**
+one writer `issueAcceptedTrial` stamps `guardianApproved: by === 'guardian'`
+and `acceptedBy` on both paths. **Regression:** `m23P4AClosureE2E` B7d,
+B13d, D8f. **Status: CLOSED.**
+
+---
+
+## P4A-D5 — Low — Box Cam CV finalize rate policy — **CLOSED**
+
+**Reproduction:** `RATE_LIMIT_POLICY.box_cv_finalize` (80/h/player) existed
+but `POST /player/box-cam/sessions/:id/cv/finalize` never called
+`limited('box_cv_finalize', …)`; 81 calls in an hour all reached the route.
+**Root cause:** the guard line was omitted when the route set was written.
+**Impact:** bounded — finalize is nonce-bound and once per provider session.
+**Why tests missed it:** `m22E2E` exercised the frames limit only.
+**Fix:** the guard runs first in the route and answers `429 rate_limited`
+like its siblings. No CV algorithm, gate, threshold or provider touched.
+**Regression:** `m23P4AClosureE2E` R1–R2b. `m22E2E`, `m22Blocker`,
+`m22CvEval`, `m22Holdout`, `m22Robustness` unchanged and green.
+**Status: CLOSED.**
+
+---
+
+## P4A-D6 — Low — `refusedClientFields()` not invoked by M22 routes — **OPEN (P4B-5 O6), documented**
+
+The structural protection holds and is asserted (`m22E2E` §107: a client
+posting `touchCount:176, combineVerified:true` "changes nothing"); the
+explicit 400 the policy describes does not fire. **Why left open:** turning
+the ignore into a 400 changes the tested M22 client contract; that is an M22
+contract decision for P4B-5, not a closure fix. No overclaim, no measurement
+trusted. **Status: OPEN, Low, P4B-5.**
+
+---
+
+## P4A-D7 — Low — documentation drift — **OPEN, doc-only**
+
+`M16_BOX_CAM.md` describes `production_cv` as `not_configured` where the
+registry says `configured`; `M22_MATRIX.md` B6 names an identifier absent
+from the tree. `M22_CAPABILITIES.md` is current and is the document of
+record. **Status: OPEN, Low, doc pass (P4B-5).**
+
+---
+
+## P4A-D8 — Low — dead assessment state `'published'` tolerated by readers — **OPEN (P4B-6), documented**
+
+No writer sets it; readers tolerate it. Harmless; P4B-6 declares the exact
+state set. **Status: OPEN, Low, P4B-6.**
+
+---
+
+## P4A-D9 — High (privacy / safeguarding) — org trial-day view after a block — **CLOSED in P4A**
+
+Reproduced and fixed in P4A (`ca3e6c9`): the org day view withholds the
+family's emergency contact whenever `ctx.isBlocked(t.playerId, t.orgId)`
+(`emergency: null`, `emergencyWithheld: 'BLOCKED'`), restored when T&S lifts
+the block. **Regression:** `m12E2E` §9 (five assertions). **Status: CLOSED
+(P4A).**
+
+---
+
+## P4A-D10 — Medium — minor's outcome notification — **CLOSED**
+
+**Reproduction** (fresh server, `scratchpad/m23/p4aReproD10D14.mjs`):
+Eastport invites Guni (14) to a trial → routed to Amara; Amara accepts →
+`GET /player/notifications` for Guni holds **one** row
+(`request`/`messages`: "Eastport FC contacted your parent/guardian about a
+trial.") and **no** row about the acceptance. With `discovery_nudges` turned
+**on** for a second minor (Tomasz), Marek's decline lands as
+`['update', 'discovery_nudges', 'Your parent/guardian declined the trial with
+Eastport FC.']` — the row exists only when the *discovery nudges* switch is
+on, and it is filed as a nudge.
+
+**Route / module:** `server.mjs` guardian respond route (two `notify(…,
+'update', …)` sites); `m182/notificationPrefs.mjs` `TYPE_CATEGORY`
+(`update → discovery_nudges`, default **off**).
+
+**Audit of the notification (mandate §11):** type `update`; category
+`discovery_nudges`; default off; recipient the child (player audience);
+guardian routing correct (the guardian decides; the child is told).
+**Classification:** *informational, optional* — the guardian is the decision
+maker and nothing is required of the child — but it is the **outcome of a
+request**, exactly what the club-side `accepted`/`declined` rows are, and
+those live in `messages` ("Messages and requests", default on). Filing it as
+a discovery nudge was a taxonomy error, not a category-default error.
+
+**Root cause:** the `update` type was chosen before the M18.2 category map
+existed; when the map arrived, `update` (used elsewhere for badges/levels)
+was mapped to `discovery_nudges` and this call site was never re-classified.
+
+**Impact:** no minor was ever told in their Updates that their guardian
+accepted or declined a trial or a contact (the Inbox item itself still showed
+the outcome). Also affected P3 Contact outcomes for minors.
+
+**Why tests missed it:** the guardian-path suites asserted the guardian's
+and the club's notifications; nobody asserted the *child's* list after a
+guardian answer, and `m182E2E` covered the category map, not this call site.
+
+**Fix (root taxonomy, no parallel system, no force-send):** a dedicated
+type `guardian_decision` → **`messages`** in `TYPE_CATEGORY`; both call
+sites use it. No new category, no new mandatory category, no migration:
+existing preference records keep their meaning (a person who muted
+"Messages and requests" mutes this too, exactly like the club-side outcome
+rows; nobody is silently opted into anything). `update` still means a
+discovery nudge for the badge/level sites that use it. Hardened alongside:
+`notificationPrefs` reads and writes own keys only (`Object.hasOwn`) —
+`'constructor' in CATEGORIES` was true through the prototype, so a
+`constructor:false` preference used to be accepted and stored. The
+player-app demo mock mirrors the new type.
+
+**Regression:** `m23P4AClosureE2E` C0a–C0e (taxonomy), C1–C1e (exactly one
+`guardian_decision`/`messages` row for the child; none for the guardian, the
+club or an adult who answered for themselves), C2–C2h (muted → not created,
+never created-and-hidden; on → created, worded for a contact), C3–C3e
+(prototype-named categories refused; mandatory still refused), C4–C5c
+(sentinel `PRIVATE_TRIAL_INTERNAL_SENTINEL_8472` in a room comment and a
+decision note absent from the child's inbox/notifications/export/Passport/
+trials, the guardian's inbox/notifications/export, the foreign club's
+trials/journey/notifications, the public directory, the T&S outbox and push
+log — with the club's own Room as the control). `m182E2E` unchanged and
+green.
+
+**Commit:** the P4A closure commit. **Status: CLOSED.**
+
+---
+
+## P4A-D11 — Low — grassroots open-day invite bypasses `issueRecruitmentRequest` — **OPEN (P4B-2), documented**
+
+A second `db.requests` writer (open-day `invite_trial` outcome) with its own
+routing derivation and notification type. Verified in the closure pass: it
+writes `proposedDate: null, altSlots: []`, so it cannot produce a malformed
+Trial date, and its acceptance goes through the single accept writer. **Why
+left open:** routing it through the writer changes its notification type and
+guardian rule — P4B-2 owns the invitation contract. **Status: OPEN, Low,
+P4B-2.**
+
+---
+
+## P4A-D12 — Low — unknown `chosenSlot` silently ignored — **CLOSED**
+
+**Reproduction:** accept with an un-offered `chosenSlot` → 200, trial dated
+on `proposedDate`; the recipient believed they had chosen a day the club
+never offered. **Fix:** `chooseTrialSlot` refuses `400 TRIAL_SLOT_INVALID`
+with the offered days listed, *before* the answer is recorded (request
+stays pending, no trial row). **Regression:** `m23P4AClosureE2E` A12–A13c,
+B6–B6c, B13–B13b. **Status: CLOSED.**
+
+---
+
+## P4A-D13 — Low — `respondedBy` written by the guardian route only — **CLOSED**
+
+**Fix:** both respond paths stamp `respondedBy` (`'player'`/`'guardian'`)
+and the trial's `acceptedAt` equals the request's `respondedAt`.
+**Regression:** `m23P4AClosureE2E` B7e, B13e. **Status: CLOSED.**
+
+---
+
+## P4A-D14 — Medium — player deletion cascade vs lifecycle — **CLOSED**
+
+**Reproduction** (fresh server, `scratchpad/m23/p4aReproD10D14.mjs`):
+Room for Kola (`watching`) → trial invited and accepted (`awaiting_report`)
+→ `DELETE /player/account` → 200 → `GET /org/trials`: the row is **gone**;
+`GET /org/rooms/:id`: the case remains (200, `watching`); after a SIGKILL
+restart: case still present, trial still gone; duplicate delete → 401. The
+inventory (mandate §21) of what the cascade touched or left: **removed** —
+`players`, player `sessions`, `requests`, `channels`, `trials`, player
+`notifications`, `pairingCodes`, guardian `childIds` entries; **kept with
+the person's name or text** — `recruitmentCases.playerName`,
+`assessments.playerName`, `recruitmentContacts.response.message`, open-day
+`registrations[].playerName`; **kept by design, ids only** — `ledger`,
+`signings`, `blocks`, `roomDecisions`.
+
+**Route / module:** `server.mjs` `deletePlayerData` (called by
+`DELETE /player/account` and `DELETE /guardian/children/:id`); readers in
+`server.mjs` (report route, feed, `REPORTS_OUTSTANDING` gate),
+`m12/journeys.mjs` (`trialFor`), `m12/operations.mjs`, `m20/timeSeries.mjs`,
+`m17/rooms.mjs` (search, notifications), `m23/contactRoutes.mjs`.
+
+**Root cause:** the cascade was written before the M17/M23 stores existed
+and filtered the trial and request rows out. A case that referenced a trial
+(history, links, P4B evidence) lost the record that the trial had happened,
+while the case itself — and its stored copy of the player's name — stayed.
+Filing a report for a trial whose player was gone would have thrown
+(`p.trialReports` on `null`) had the row survived.
+
+**Impact:** history destroyed for the club (trial happened, report numbers
+filed — gone) while names were retained on cases and assessments after the
+person asked to be deleted; a case at `trial_completed` (legacy data; no
+route can reach it today) would have carried a status with no evidence
+behind it.
+
+**Why tests missed it:** deletion suites (`apiE2E`, `m13E2E`) asserted only
+that the player, requests and channels were gone and that the ledger stayed;
+none created a trial or a Room first, and none restarted.
+
+**Fix (tombstone per the ledger's existing rule — ids, states, times, the
+club's own filed numbers; nothing person-shaped):**
+- `db.trials`: `tombstoneTrial` keeps id, requestId, playerId, orgId,
+  orgName, scoutName, acceptedAt, acceptedBy, guardianApproved,
+  proposedDate, venue, reportDueAt (finite or null), status, reminder /
+  escalation markers, the report's ids/times/six numbers, the club's own
+  staff records, the fact of each consent (kind only), check-in times and
+  status events; strips `playerName`, notes, `day.emergency`, `day.arrival`,
+  `day.collection`, consent author ids/names, report notes/strengthNote/
+  focusNote; stamps `subjectRemovedAt`.
+- `db.requests`: `tombstoneRequest` keeps ids, type, status, org and scout
+  identity, offered days and venue, timestamps, `respondedBy`, `routedTo`;
+  strips `message`, `playerName`, trial notes, `guardianId`,
+  `contactChannel`.
+- `recruitmentCases`: `playerName → null`, `subjectRemovedAt` stamped —
+  **no status write, no history entry, no rev change**; deletion is not a
+  lifecycle event and the canonical writer is not invoked. `assessments` and
+  open-day registrations lose the name; `recruitmentContacts` lose the
+  family's reply text. The cascade is one `persistNow()`.
+- Readers: report filing on a tombstone → `409 TRIAL_SUBJECT_REMOVED`; every
+  trial-day write → `409 TRIAL_SUBJECT_REMOVED` (reads still 200 with
+  nothing person-shaped); `REPORTS_OUTSTANDING`, the feed reminder, the
+  operations escalation and the Director Dashboard skip tombstones (a report
+  nobody can file is not an obligation); Room search and Room notifications
+  tolerate a missing name.
+
+**Regression:** `m23P4AClosureE2E` D1–D8i (minor cannot self-delete; two
+adults deleted — reported and awaiting; tombstone shapes; phone number and
+names absent from every club list; cases at the same status and rev; journey
+still lists the trial as evidence; Room search; feed; Dashboard count −1;
+gate skips the tombstone; report/arrival/postpone/cancel/staff/check-in →
+409 by name; day read 200 without the contact; calendar export names nobody;
+public directory aggregates intact; foreign org sees neither tombstone and
+gets the same 404; guardian deletes a child after an accepted trial — same
+tombstone, inbox/export cleared, second delete 404), F5–F8b (races: two
+concurrent deletes → exactly one 200 and one 401; delete vs report → the
+whole report tombstoned or refused by name, never half-written; delete vs
+lifecycle advance → the advance applied exactly once or not at all, the
+deletion moved nothing), L6m–L7n (the D14 matrix as legacy fixture cases at
+`trial_requested`, `trial_scheduled`, `trial_completed`,
+`offer_consideration`, `offer_made`, `offer_accepted`, `archived`,
+`withdrawn`, `closed`: status and rev unchanged after deletion, name gone;
+the `trial_completed` case still carries its trial evidence in the journey),
+L7–L7f (signed invariant: a legacy `signed` case with its signing record
+stays `signed` at the same rev; the signing survives), L8–L8m
+(byte-identical tombstones and identical case statuses after a restart; the
+409 still holds). `apiE2E`, `m13E2E`, `m141E2E` unchanged and green.
+
+**Not supported today, stated rather than tested:** organisation removal
+(no route exists); Trial-completion and assessment-submit races beyond the
+report route (those P4B routes do not exist yet).
+
+**Commit:** the P4A closure commit. **Status: CLOSED.**
+
+---
+
+## P4A-D15 — Medium — accepted request saved before its trial row existed — **CLOSED** (found in the closure pass)
+
+**Reproduction** (`m23P4AClosureE2E` L0b→L2c, first run): a player accepts
+a trial → 200; the process is `SIGKILL`ed immediately; on reboot the request
+reads `accepted` with a `contactChannel` and the trial row is **absent**.
+
+**Route / module:** both respond routes in `server.mjs`.
+
+**Root cause:** the routes called `persistNow()` right after recording the
+answer and *then* opened the channel and pushed the trial row, leaving those
+to the 2-second debounced `persist()`. A crash inside that window kept the
+answer and lost the trial (and the channel).
+
+**Impact:** an accepted trial invitation with no trial — the club would
+never see it, no report would ever be due, and the family believed a trial
+was booked. Data integrity, crash-window only.
+
+**Why tests missed it:** no suite killed the process immediately after an
+acceptance; `m23ContactPersistence` restarts after a *contact* send, which
+has no second row.
+
+**Fix:** one `persistNow()` at the end of each respond route, after the
+answer, the contact update, the channel and the trial row — the acceptance
+is one save (the store's `save()` is one SQLite transaction).
+
+**Regression:** `m23P4AClosureE2E` L2c. **Commit:** the P4A closure commit.
+**Status: CLOSED.**
+
+---
+
+## Design gaps carried into P4B (not defects)
+
+Unchanged from P4A and still accurate: `altSlots` are not recorded on the
+trial after acceptance (the request row keeps them — now on the tombstone
+too); the `REPORTS_OUTSTANDING` gate is org-wide (D-17); `/orgs/directory`
+is unauthenticated aggregate counts; assessments have no `trialId` (D-9);
+two live "trust" numbers (§10).
+
+## Legal-review items (kept separate from defects, mandate §34)
+
+1. Trial-specific footage acknowledgement for minors.
+2. Whether event-consent language should explicitly name Box Cam.
+
+Neither is resolvable from source; neither is counted as a software defect.
+
+## Final defect inventory
+
+| ID | severity | area | status |
+|---|---|---|---|
+| P4A-D1 | Medium | Trial dates / deadline / calendar | CLOSED |
+| P4A-D2 | Low | Passport `trial_outcome` date | CLOSED |
+| P4A-D3 | Low | Room demo fixtures (demo mode only) | OPEN — P4B-7 |
+| P4A-D4 | Low | adult-accept writer fields | CLOSED |
+| P4A-D5 | Low | Box Cam finalize rate policy | CLOSED |
+| P4A-D6 | Low | `refusedClientFields` not invoked (contract decision) | OPEN — P4B-5 |
+| P4A-D7 | Low | documentation drift | OPEN — doc pass |
+| P4A-D8 | Low | dead assessment state read | OPEN — P4B-6 |
+| P4A-D9 | High | blocked org read the family's emergency contact | CLOSED (P4A) |
+| P4A-D10 | Medium | minor's guardian-decision notification | CLOSED |
+| P4A-D11 | Low | open-day invite bypasses the request writer | OPEN — P4B-2 |
+| P4A-D12 | Low | un-offered `chosenSlot` accepted | CLOSED |
+| P4A-D13 | Low | `respondedBy` on one path only | CLOSED |
+| P4A-D14 | Medium | deletion cascade vs lifecycle / history / PII | CLOSED |
+| P4A-D15 | Medium | acceptance saved before the trial row | CLOSED |
+
+```
+Critical open: 0
+High open: 0
+Medium open: 0
+Low open: 5 (D3, D6, D7, D8, D11 — each with a named P4B owner and a stated reason)
+Informational: 0
+Legal-review items: 2 (separate)
+```
 
 ## Commit
 
-P4A-D9 fixed in `ca3e6c9` ("M23 P4A: Trial + Box Cam integration architecture"); regression `m12E2E` §9, 152 checks.
+P4A-D9 fixed in `ca3e6c9` ("M23 P4A: Trial + Box Cam integration
+architecture"); regression `m12E2E` §9, 152 checks.
+
+P4A-D1, D2, D4, D5, D10, D12, D13, D14, D15 fixed in the P4A closure commit
+(hash recorded in `M23_P4A_CLOSURE_REPORT.md`); regression
+`m23P4AClosureE2E`, 337 checks (210 negative).

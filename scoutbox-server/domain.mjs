@@ -173,6 +173,132 @@ export function validateTrialReport(report) {
   return { ok: missing.length === 0 && invalid.length === 0, missing, invalid };
 }
 
+// --------------------------------------------------------------- Trial dates
+//
+// M23 P4A-D1. ONE validator for every date a Trial carries — the proposed
+// date, the alternative slots, the slot a family picks, a postponement. The
+// accepted syntax is a calendar date only, `YYYY-MM-DD`: a trial is booked on
+// a day, and the day is what the club, the family and the calendar export all
+// agree on. There is no time-of-day, no timezone and no coercion: a value is
+// either exactly that syntax and a real calendar day in a sane range, or it is
+// refused before anything is written. `''`, `null` and `undefined` all mean
+// "no date given" (a trial can be accepted with the date to be confirmed) and
+// are the only inputs that are neither a date nor an error.
+//
+// The report deadline is DERIVED from the trial date here, in one place, from
+// one clock: seven days after the trial day (UTC midnight), or seven days
+// after acceptance when no day has been agreed. Nothing else computes it.
+
+export const TRIAL_DATE_SYNTAX = 'YYYY-MM-DD';
+export const TRIAL_DATE_YEAR_MIN = 2000;
+export const TRIAL_DATE_YEAR_MAX = 2100;
+export const TRIAL_REPORT_WINDOW_MS = 7 * 24 * 3600 * 1000;
+export const TRIAL_DETAIL_LIMITS = Object.freeze({ venue: 200, notes: 500, altSlots: 2 });
+
+const TRIAL_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/**
+ * @returns {{ok:true, value:string|null, t:number|null} | {ok:false, error:'TRIAL_DATE_INVALID', message:string, expected:string}}
+ *   `value` is the canonical string (or null for "no date"); `t` is the UTC
+ *   midnight instant of that day (or null).
+ */
+export function parseTrialDate(input) {
+  if (input === undefined || input === null || input === '') return { ok: true, value: null, t: null };
+  const invalid = (why) => ({ ok: false, error: 'TRIAL_DATE_INVALID', message: `A trial date must be a calendar day written ${TRIAL_DATE_SYNTAX} (${why}).`, expected: TRIAL_DATE_SYNTAX });
+  if (typeof input !== 'string') return invalid('not text');
+  const m = TRIAL_DATE_RE.exec(input);
+  if (!m) return invalid('wrong shape');
+  const y = Number(m[1]); const mo = Number(m[2]); const d = Number(m[3]);
+  if (y < TRIAL_DATE_YEAR_MIN || y > TRIAL_DATE_YEAR_MAX) return invalid(`year outside ${TRIAL_DATE_YEAR_MIN}–${TRIAL_DATE_YEAR_MAX}`);
+  if (mo < 1 || mo > 12) return invalid('no such month');
+  if (d < 1 || d > 31) return invalid('no such day');
+  const t = Date.UTC(y, mo - 1, d);
+  const back = new Date(t);
+  if (back.getUTCFullYear() !== y || back.getUTCMonth() !== mo - 1 || back.getUTCDate() !== d) return invalid('no such day in that month');
+  return { ok: true, value: input, t };
+}
+
+/** True only for a stored value that is a valid trial date (never for "no date"). */
+export const isTrialDate = (v) => { const p = parseTrialDate(v); return p.ok && p.value !== null; };
+
+/**
+ * The one report-deadline derivation. `acceptedAt` is the clock the caller
+ * already holds for the acceptance — passed in, never read here, so the trial
+ * row's `acceptedAt` and its `reportDueAt` come from the same instant.
+ * Returns null (never NaN) when neither a valid date nor a finite acceptance
+ * instant is available; readers treat null as "no deadline known".
+ */
+export function trialReportDueAt(trialDate, acceptedAt) {
+  const p = parseTrialDate(trialDate);
+  const base = p.ok && p.t !== null ? p.t : acceptedAt;
+  return Number.isFinite(base) ? base + TRIAL_REPORT_WINDOW_MS : null;
+}
+
+/**
+ * Validate the logistics a club attaches to a trial request. Returns the
+ * canonical `trialDetails` object or the first refusal, in field order. Text
+ * is refused over its limit rather than truncated (nothing the club wrote is
+ * silently changed), and the venue may not carry line breaks or control
+ * characters — it is written into a calendar file verbatim.
+ */
+export function validateTrialDetails(input) {
+  const src = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+  const bad = (error, field, message) => ({ ok: false, error, field, message });
+
+  const proposed = parseTrialDate(src.proposedDate);
+  if (!proposed.ok) return { ...proposed, field: 'proposedDate' };
+
+  const rawSlots = src.altSlots;
+  let altSlots = [];
+  if (rawSlots !== undefined && rawSlots !== null) {
+    if (!Array.isArray(rawSlots)) return bad('TRIAL_SLOTS_INVALID', 'altSlots', 'Alternative slots must be a list of dates.');
+    if (rawSlots.length > TRIAL_DETAIL_LIMITS.altSlots) return bad('TRIAL_SLOTS_INVALID', 'altSlots', `Offer at most ${TRIAL_DETAIL_LIMITS.altSlots} alternative slots.`);
+    for (const s of rawSlots) {
+      const p = parseTrialDate(s);
+      if (!p.ok) return { ...p, field: 'altSlots' };
+      if (p.value === null) return bad('TRIAL_SLOTS_INVALID', 'altSlots', 'An alternative slot cannot be empty.');
+      if (p.value === proposed.value || altSlots.includes(p.value)) return bad('TRIAL_SLOTS_INVALID', 'altSlots', 'Each offered slot must be a different day.');
+      altSlots.push(p.value);
+    }
+  }
+
+  let venue = null;
+  if (src.venue !== undefined && src.venue !== null && src.venue !== '') {
+    if (typeof src.venue !== 'string') return bad('TRIAL_VENUE_INVALID', 'venue', 'The venue must be text.');
+    if (src.venue.length > TRIAL_DETAIL_LIMITS.venue) return bad('TRIAL_VENUE_INVALID', 'venue', `Keep the venue under ${TRIAL_DETAIL_LIMITS.venue} characters.`);
+    // eslint-disable-next-line no-control-regex
+    if (/[\u0000-\u001f\u007f]/.test(src.venue)) return bad('TRIAL_VENUE_INVALID', 'venue', 'The venue is one line of text.');
+    venue = src.venue;
+  }
+
+  let notes = '';
+  if (src.notes !== undefined && src.notes !== null) {
+    if (typeof src.notes !== 'string') return bad('TRIAL_NOTES_INVALID', 'notes', 'Notes must be text.');
+    if (src.notes.length > TRIAL_DETAIL_LIMITS.notes) return bad('TRIAL_NOTES_INVALID', 'notes', `Keep the notes under ${TRIAL_DETAIL_LIMITS.notes} characters.`);
+    notes = src.notes;
+  }
+
+  return { ok: true, details: { proposedDate: proposed.value, altSlots, venue, notes } };
+}
+
+/**
+ * The slot a family picks when accepting. Absent means "the proposed date";
+ * anything else must be exactly one of the days the club offered (P4A-D12:
+ * an unknown slot is refused, never silently swapped for the proposal). A
+ * stored date that no longer parses (legacy rows written before the
+ * validator existed) yields no date rather than a fabricated one.
+ */
+export function chooseTrialSlot(details, chosenSlot) {
+  const d = details && typeof details === 'object' ? details : {};
+  const offered = [d.proposedDate, ...(Array.isArray(d.altSlots) ? d.altSlots : [])].filter((s) => typeof s === 'string' && s !== '');
+  const refuse = { ok: false, error: 'TRIAL_SLOT_INVALID', message: 'Pick one of the dates the club offered.', offered: offered.filter(isTrialDate) };
+  if (chosenSlot === undefined || chosenSlot === null || chosenSlot === '') {
+    return { ok: true, date: isTrialDate(d.proposedDate) ? d.proposedDate : null };
+  }
+  if (typeof chosenSlot !== 'string' || !offered.includes(chosenSlot)) return refuse;
+  return { ok: true, date: isTrialDate(chosenSlot) ? chosenSlot : null };
+}
+
 // AI Similar Players Engine — statistical similarity to reference playing
 // profiles. Position, foot, age, output, physique. A lead, not a verdict.
 export function similarityScore(a, b) {

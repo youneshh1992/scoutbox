@@ -505,7 +505,7 @@ export function registerContact(ctx) {
     if (room) {
       for (const uid of new Set([room.ownerUserId, room.room?.leadScoutUserId])) {
         if (!uid || uid === request.userId) continue;
-        notify({ kind: 'org_user', id: uid }, 'recruitment_room', `Recruitment Room — ${room.playerName}: the ${by} ${kind} your contact.`, room.id);
+        notify({ kind: 'org_user', id: uid }, 'recruitment_room', `Recruitment Room — ${room.playerName ?? 'a removed player'}: the ${by} ${kind} your contact.`, room.id);
       }
     }
     broadcast('contact_responded', { orgId: c.orgId, roomId: c.caseId, contactId: c.id });
