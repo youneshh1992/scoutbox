@@ -99,7 +99,7 @@ export function registerPassportCore(ctx) {
     });
     const careerEntries = db.passportCareerEntries.filter((c) => c.playerId === pid);
 
-    const trials = db.trials.filter((t) => t.playerId === pid);
+    const trials = db.trials.filter((t) => t && typeof t === 'object' && t.playerId === pid);
     const assessments = db.assessments
       .filter((a) => a.playerId === pid && ['submitted', 'reviewed', 'published'].includes(a.state ?? '') || (a.playerId === pid && a.publishedFeedback))
       .map((a) => ({ ...a, orgName: orgOf(a.orgId)?.name ?? null }));

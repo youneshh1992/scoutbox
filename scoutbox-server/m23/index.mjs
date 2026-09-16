@@ -21,6 +21,7 @@ import {
 import { buildRecruitmentJourney } from './journey.mjs';
 import { sendDomainError } from './errors.mjs';
 import { registerContact } from './contactRoutes.mjs';
+import { registerTrial } from './trialRoutes.mjs';
 import { roomRole } from '../m17/shared.mjs';
 import { guardRev, revMeta } from '../m181/concurrency.mjs';
 import { buildShared } from '../m12/shared.mjs';
@@ -177,6 +178,13 @@ export function registerM23(rawCtx) {
   // The Contact workflow registers on the same context: the same concealing
   // room lookup, the same single status writer, the same evidence provider.
   registerContact(ctx);
+
+  // ------------------------------------------------------- P4B — Trial
+  // The Trial workflow registers on the same context: the same concealing
+  // room lookup, the same single status writer, the same evidence provider
+  // (which now answers trial_invited / trial_confirmed / trial_completed),
+  // and the same single request writer for the invitation.
+  registerTrial(ctx);
 
   return ctx;
 }

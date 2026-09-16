@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { isAdult, visibleToOrg } from '../domain.mjs';
+import { deriveWorkflowState } from '../m23/trial.mjs';
 
 const MILESTONES = { '3m': 91, '6m': 182, '12m': 365 };
 
@@ -321,6 +322,9 @@ export function registerOperations(ctx) {
     // F9: overdue trial feedback escalates once — to the club AND into the
     // existing no-ghosting culture (admin can see it in reports volume).
     for (const t of db.trials) {
+      // P4B (D-P4B-3): an alien entry in the store is skipped, never fatal —
+      // the boot sweep must not take the server down over one bad row.
+      if (!t || typeof t !== 'object') continue;
       // P4A-D1/D14: a null deadline is "unknown", not "now"; a tombstoned
       // trial has nobody to file for, so it never escalates.
       if (Number.isFinite(t.reportDueAt) && t.reportDueAt < now && !t.report && !t.feedbackEscalatedAt && !t.subjectRemovedAt) {
@@ -329,6 +333,49 @@ export function registerOperations(ctx) {
         if (lead) notify({ kind: 'org_user', id: lead.id }, 'trial_day', `🚨 Trial feedback for ${t.playerName} is overdue — the mandatory report blocks new trials until filed.`, t.id);
         changed = true;
       }
+    }
+
+    // M23 P4B: Trial reminders. Every marker lives on the row (`reminders`),
+    // so a restart re-sends nothing. A confirmed session within 48 h reminds
+    // the recipient once per session per revision (guardian for a minor —
+    // the recipient who accepted); a trial whose last session ended a day
+    // ago without completion, and a completed trial without an assessment
+    // after a week, remind the club lead once each. A blocked club sends the
+    // family nothing (D-16); a tombstoned trial has nobody to remind.
+    for (const t of db.trials) {
+      if (!t || typeof t !== 'object' || t.subjectRemovedAt || !t.schedule?.confirmedAt) continue;
+      if (deriveWorkflowState(t) !== 'scheduled') continue;
+      t.reminders ??= {};
+      const p = findPlayer(t.playerId);
+      const blocked = isBlocked(t.playerId, t.orgId);
+      for (const s of t.schedule.sessions ?? []) {
+        const key = `t48:${s.id}:${t.schedule.revision}`;
+        if (t.reminders[key] || !Number.isFinite(s.startsAt)) continue;
+        if (s.startsAt <= now || s.startsAt - now > 48 * 3600_000) continue;
+        t.reminders[key] = now;
+        changed = true;
+        if (!p || blocked) continue;
+        const toGuardian = t.recipient?.type === 'guardian' || (!isAdult(p) && p.guardianId);
+        if (toGuardian && p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'trial_day', `⏰ ${p.name}'s trial session with ${t.orgName} is within 48 hours.`, t.id);
+        else notify({ kind: 'player', id: p.id }, 'trial_day', `⏰ Your trial session with ${t.orgName} is within 48 hours.`, t.id);
+      }
+      const lastEnd = (t.schedule.sessions ?? []).reduce((m, s) => (Number.isFinite(s.endsAt) ? Math.max(m, s.endsAt) : m), 0);
+      if (lastEnd && now - lastEnd > 24 * 3600_000 && !t.reminders.completionPending) {
+        t.reminders.completionPending = now;
+        const lead = usersOf(t.orgId)[0];
+        if (lead) notify({ kind: 'org_user', id: lead.id }, 'trial_day', `The trial for ${t.playerName} has ended — record attendance and complete it.`, t.id);
+        changed = true;
+      }
+    }
+    for (const t of db.trials) {
+      if (!t || typeof t !== 'object' || t.subjectRemovedAt || t.completion?.state !== 'completed' || t.reminders?.assessmentPending) continue;
+      if (!Number.isFinite(t.completion.at) || now - t.completion.at < 7 * 86_400_000) continue;
+      if ((db.assessments ?? []).some((a) => a?.context?.trialId === t.id)) continue;
+      t.reminders ??= {};
+      t.reminders.assessmentPending = now;
+      const lead = usersOf(t.orgId)[0];
+      if (lead) notify({ kind: 'org_user', id: lead.id }, 'trial_day', `No assessment has been recorded for ${t.playerName}'s completed trial yet.`, t.id);
+      changed = true;
     }
 
     // F12A: abandoned upload sessions cleaned after 24 h.

@@ -10,6 +10,7 @@
 // Everything in this file is a pure function over plain data so the engine
 // is unit-testable without a server.
 import crypto from 'node:crypto';
+import { isLegacyTrial, currentAttendance, TRIAL_ATTENDED_STATES } from '../m23/trial.mjs';
 
 // ------------------------------------------------------------- provenance
 // One vocabulary for "where did this come from". Ordered least→most
@@ -189,12 +190,33 @@ export function buildTimeline(src) {
   // visible only by explicit selection; outcomes stay private by default.
   for (const t of src.trials ?? []) {
     const o = org(t.orgId, t.orgName);
-    push({
-      id: evId('trial', t.id, 'trial_attended'), type: 'trial_attended',
-      when: normWhen(t.proposedDate ?? t.acceptedAt), title: { org: o?.name }, org: o,
-      provenance: 'verified_club_confirmed', visibility: 'recruitment_own_org',
-      publicEligible: true, source: { type: 'trial', id: t.id },
-    });
+    // M23 P4B: a row that carries the operational workflow says whether the
+    // player actually attended — the entry is keyed on a recorded attendance
+    // (attended/partial), never on acceptance, and dated by the first
+    // attended session. A legacy row (`legacy_accepted`) predates attendance
+    // records; it still stands for its accepted day and says so (`legacy`).
+    if (isLegacyTrial(t)) {
+      push({
+        id: evId('trial', t.id, 'trial_attended'), type: 'trial_attended',
+        when: normWhen(t.proposedDate ?? t.acceptedAt), title: { org: o?.name }, org: o,
+        provenance: 'verified_club_confirmed', visibility: 'recruitment_own_org',
+        publicEligible: true, source: { type: 'trial', id: t.id }, legacy: true,
+      });
+    } else {
+      const attended = [...currentAttendance(t).values()].filter((a) => TRIAL_ATTENDED_STATES.includes(a.state));
+      const first = attended
+        .map((a) => (t.schedule?.sessions ?? []).find((s) => s.id === a.sessionId))
+        .filter((s) => s && Number.isFinite(s.startsAt))
+        .sort((a, b) => a.startsAt - b.startsAt)[0] ?? null;
+      if (attended.length) {
+        push({
+          id: evId('trial', t.id, 'trial_attended'), type: 'trial_attended',
+          when: normWhen(first?.startsAt ?? attended[0].recordedAt ?? t.acceptedAt), title: { org: o?.name }, org: o,
+          provenance: 'verified_club_confirmed', visibility: 'recruitment_own_org',
+          publicEligible: true, source: { type: 'trial', id: t.id }, legacy: false, attendedSessions: attended.length,
+        });
+      }
+    }
     if (t.report) {
       push({
         id: evId('trial', t.id, 'trial_outcome'), type: 'trial_outcome',
@@ -612,6 +634,9 @@ export function projectPassport(full, viewer, opts = {}) {
       provenance: e.provenance, provenanceCopy: PROVENANCE_COPY[e.provenance] ?? null,
       assurance: e.assurance ?? null, current: e.current ?? null,
       source: viewerKind === 'trust_safety' || viewerKind === 'self' || viewerKind === 'guardian' ? e.source : { type: e.source.type },
+      // M23 P4B (D-14): a trial_attended event says whether it is keyed on a
+      // recorded attendance (P4B) or on a pre-P4B acceptance (`legacy`).
+      ...(e.type === 'trial_attended' ? { legacy: e.legacy === true, attendedSessions: e.attendedSessions ?? null } : {}),
     }));
   const historyRows = (min) => full.history.rows
     .filter((r) => min === 'public' ? provRank(r.provenance) >= 0 : true)

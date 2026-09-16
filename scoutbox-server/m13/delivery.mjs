@@ -236,7 +236,9 @@ export function registerDelivery(ctx) {
   adminRouter.post('/delivery/inject-failure', (req, res) => {
     // `contact` (M23 P3) makes the next in-app Contact sends fail at the
     // transport, so the honest `failed` state can be exercised end to end.
-    const channel = ['push', 'contact'].includes(req.body?.channel) ? req.body.channel : 'email';
+    // `trial` (M23 P4B) makes the next Trial invitation, acceptance or
+    // completion refuse at the transport with NOTHING written.
+    const channel = ['push', 'contact', 'trial'].includes(req.body?.channel) ? req.body.channel : 'email';
     const count = Math.min(Math.max(Number(req.body?.count) || 1, 1), 20);
     db.deliveryFailInject[channel] = (db.deliveryFailInject[channel] ?? 0) + count;
     persistNow();

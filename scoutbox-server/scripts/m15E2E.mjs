@@ -303,8 +303,25 @@ let eastportName;
   ok(r.status === 201 && r.body.routedTo === 'player', 'trial requested through the existing flow');
   r = await j('POST', `/player/requests/${r.body.requestId}/respond`, { accept: true, chosenSlot: '2026-10-01' }, kola.token);
   ok(r.status === 200, 'player accepts — a trial record now exists');
+  // M23 P4B (D-14): the Passport keys `trial_attended` on RECORDED attendance,
+  // never on acceptance. Accepted-but-not-attended is not shown as attended.
+  const spAccepted = (await j('GET', '/player/football-passport', undefined, kola.token)).body;
+  neg(!spAccepted.timeline.some((e) => e.type === 'trial_attended'), 'an accepted trial with no attendance recorded is NOT a trial_attended event (P4B D-14)');
+  {
+    const trialId = r.body.trialId;
+    const rm = await j('POST', '/org/rooms', { playerId: 'pl-adeyemi', sourceContext: 'search' }, maria.token);
+    const roomId = rm.body?.room?.roomId ?? rm.body?.roomId ?? rm.body?.existingRoomId;
+    const MIN = 60_000;
+    let s = await j('POST', `/org/rooms/${roomId}/trials/${trialId}/schedule`, { timezone: 'Europe/London', expectedRev: 1, sessions: [{ startsAt: Date.now() - 10 * MIN, endsAt: Date.now() + 20 * MIN, kind: 'training', venue: { name: 'Eastport Training Ground', town: 'Eastport' } }] }, maria.token);
+    ok(s.status === 200 && s.body.requiresConfirmation === true, `the club proposes a concrete session (${s.status})`);
+    const c = await j('POST', `/player/trials/${trialId}/confirm-schedule`, {}, kola.token);
+    ok(c.status === 200 && c.body.trial.workflowState === 'scheduled', 'the player confirms it — the trial is scheduled');
+    const sid = s.body.trial.schedule.sessions[0].id;
+    const a = await j('POST', `/org/rooms/${roomId}/trials/${trialId}/sessions/${sid}/attendance`, { state: 'attended', expectedRev: c.body.trial.rev }, maria.token);
+    ok(a.status === 200, `attendance is recorded once the session has started (${a.status} ${a.body?.error ?? ''})`);
+  }
   const sp = (await j('GET', '/player/football-passport', undefined, kola.token)).body;
-  ok(sp.timeline.some((e) => e.type === 'trial_attended'), 'self timeline shows the trial');
+  ok(sp.timeline.some((e) => e.type === 'trial_attended' && e.legacy === false), 'self timeline shows the trial once attendance is recorded');
   neg(!sp.clubHistory.some((x) => /eastport/i.test(x.orgName ?? '')), 'the trial creates NO club-history row — a trial is never employment (§10)');
   const mine = await j('GET', '/org/players/pl-adeyemi/football-passport', undefined, maria.token);
   eastportName = mine.body.status?.currentClub?.orgName ?? null; // still null here; org name captured later

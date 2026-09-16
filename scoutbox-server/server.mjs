@@ -39,6 +39,7 @@ import { createFaultLayer } from './m182/faults.mjs';
 import { httpContractMiddleware } from './m182/httpContract.mjs';
 import { integrityReport, integritySummary } from './m182/integrity.mjs';
 import { validateContactReply } from './m23/contact.mjs';
+import { icsLocal as trialIcsLocal, icsText as trialIcsText } from './m23/trial.mjs';
 import { requestInstrumentation } from './m13/enterprise.mjs';
 import { totpValid } from './m13/shared.mjs';
 import {
@@ -1286,6 +1287,14 @@ guardianRouter.post('/requests/:id/respond', (req, res) => {
   // slot leaves the request pending rather than accepted-with-the-wrong-day.
   const slot = accept && request.type === 'trial' ? chooseTrialSlot(request.trialDetails, chosenSlot) : { ok: true, date: null };
   if (!slot.ok) return res.status(400).json(slot);
+  // M23 P4B (D-7): a Trial invitation tied to a recruitment case re-derives
+  // its recipient NOW — the guardian must still be this child's verified
+  // route, the club must still be allowed to reach the child. Legacy M12
+  // requests (no caseId) keep their existing rule.
+  if (accept && request.type === 'trial' && request.caseId && m23Ctx?.trialAcceptGate) {
+    const gate = m23Ctx.trialAcceptGate({ request, by: 'guardian', actorId: req.guardian.id });
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error, message: gate.message });
+  }
   const respondedAt = Date.now();
   request.status = accept ? 'accepted' : 'declined';
   request.respondedAt = respondedAt;
@@ -1300,7 +1309,13 @@ guardianRouter.post('/requests/:id/respond', (req, res) => {
     const channel = openChannel(request);
     request.contactChannel = channel.id;
     ledgerAppend({ type: `${request.type}_accepted_by_guardian`, playerId: child.id, orgId: request.orgId, orgName: request.orgName, userId: request.userId, scoutName: request.scoutName });
-    if (request.type === 'trial') issueAcceptedTrial({ request, player: child, trialDate: slot.date, by: 'guardian', at: respondedAt });
+    if (request.type === 'trial') {
+      const trial = issueAcceptedTrial({ request, player: child, trialDate: slot.date, by: 'guardian', at: respondedAt, actor: { id: req.guardian.id, name: req.guardian.name } });
+      // M23 P4B: the case learns of the acceptance through the Trial hook —
+      // a concrete slot confirms the schedule and moves the case through the
+      // single lifecycle writer. Same save as the answer (P4A-D15).
+      m23Ctx?.onTrialAccepted?.({ request, trial, at: respondedAt, actor: { kind: 'guardian', id: req.guardian.id, name: req.guardian.name } });
+    }
     notify({ kind: 'org_user', id: request.userId }, 'accepted', `The guardian of ${child.name} accepted your ${request.type} request — thread open.`, request.contactChannel);
     // P4A-D10: the child hears the outcome as a request outcome ("Messages and
     // requests"), the same category the club's own accepted/declined rows
@@ -1308,6 +1323,7 @@ guardianRouter.post('/requests/:id/respond', (req, res) => {
     notify({ kind: 'player', id: child.id }, 'guardian_decision', `Your parent/guardian accepted the ${request.type} with ${request.orgName}.`, request.id);
   } else {
     ledgerAppend({ type: `${request.type}_declined_by_guardian`, playerId: child.id, orgId: request.orgId, orgName: request.orgName, userId: request.userId, scoutName: request.scoutName });
+    if (request.type === 'trial') m23Ctx?.onTrialDeclined?.({ request, at: respondedAt, actor: { kind: 'guardian', id: req.guardian.id, name: req.guardian.name }, message: replyCheck.reply });
     notify({ kind: 'org_user', id: request.userId }, 'declined', `The guardian of ${child.name} declined your ${request.type} request.`, request.id);
     notify({ kind: 'player', id: child.id }, 'guardian_decision', `Your parent/guardian declined the ${request.type} with ${request.orgName}.`, request.id);
   }
@@ -1885,11 +1901,37 @@ function issueRecruitmentRequest({
  * `trialDate` is a validated `YYYY-MM-DD` or null (date to be confirmed);
  * the deadline is never NaN because `trialReportDueAt` never returns one.
  */
-function issueAcceptedTrial({ request, player, trialDate, by, at }) {
+function issueAcceptedTrial({ request, player, trialDate, by, at, actor = null }) {
   const details = request.trialDetails ?? {};
+  // M23 P4B: a P4B invitation carries concrete slots (UTC instants + the
+  // organiser's timezone + a venue). Accepting one of them IS the schedule
+  // confirmation (D-4): the trial is born `scheduled` with revision 1
+  // confirmed by the recipient. A legacy date-only invitation, or an
+  // undated one, is born `accepted` with no schedule — a date the club typed
+  // is not a confirmed schedule, and nothing is fabricated from it.
+  const slot = Array.isArray(details.slots) ? details.slots.find((s) => s && s.day === trialDate) ?? null : null;
+  const recipient = { type: by, playerId: player.id, guardianId: by === 'guardian' ? (actor?.id ?? null) : null, minor: by === 'guardian', at };
+  const who = { kind: by, id: actor?.id ?? null, name: actor?.name ?? null };
+  // The address line and the instructions were held back from the
+  // invitation (D-23); they join the session now that the family accepted.
+  const priv = details.private && typeof details.private === 'object' ? details.private : {};
+  const session = slot ? {
+    id: nextId('tses'), kind: slot.kind ?? 'training', startsAt: slot.startsAt, endsAt: slot.endsAt,
+    venue: slot.venue ? { name: slot.venue.name, town: slot.venue.town ?? null, address: typeof priv.venueAddress === 'string' ? priv.venueAddress : null } : null,
+    instructions: typeof priv.instructions === 'string' ? priv.instructions : null,
+    evidence: [],
+  } : null;
+  const proposedBy = { kind: 'org', userId: request.userId ?? null, name: request.scoutName ?? null };
+  const schedule = session ? {
+    timezone: slot.timezone, revision: 1, proposedAt: request.createdAt ?? at, proposedBy,
+    confirmedAt: at, confirmedBy: who,
+    sessions: [session],
+    revisions: [{ revision: 1, timezone: slot.timezone, sessions: [{ ...session }], proposedAt: request.createdAt ?? at, proposedBy, confirmedAt: at, confirmedBy: who, supersededAt: null, reason: 'invitation', material: null }],
+  } : null;
   const trial = {
     id: nextId('trial'),
     requestId: request.id,
+    caseId: request.caseId ?? null,
     playerId: player.id,
     playerName: player.name,
     orgId: request.orgId,
@@ -1904,13 +1946,41 @@ function issueAcceptedTrial({ request, player, trialDate, by, at }) {
     // The mandatory report is due 7 days after the trial day (or acceptance).
     reportDueAt: trialReportDueAt(trialDate, at),
     status: 'awaiting_report', // mandatory report gate
+    // ---- P4B operational containers (D-1/D-20). One clock: `at`.
+    workflowState: schedule ? 'scheduled' : 'accepted',
+    schedule,
+    attendance: [],
+    completion: null,
+    recipient,
+    keys: { accept: { key: null, fp: JSON.stringify({ requestId: request.id, day: trialDate ?? null }) } },
+    history: [
+      { id: nextId('aud'), at, action: 'trial_accepted', by: who, detail: { recipientType: by, slotId: slot?.id ?? null, day: trialDate ?? null } },
+      ...(schedule ? [{ id: nextId('aud'), at, action: 'trial_schedule_confirmed', by: who, detail: { revision: 1, sessionCount: 1 } }] : []),
+    ],
+    reminders: {},
+    rev: 1, revAt: at, revBy: null,
   };
   db.trials.push(trial);
   return trial;
 }
 
 /** A request row as its RECIPIENT may see it: no org id, no user id, no internal Contact link. */
-const requestForRecipient = ({ orgId, userId, contactId, ...visible }) => visible;
+// M23 P4B: `caseId` and `trialId` are the club's workflow ids and never travel
+// to a recipient; the family reaches the trial through its own family view,
+// where `requestId` matches the invitation (privacy matrix, concealment §4).
+const requestForRecipient = ({ orgId, userId, contactId, caseId, recipient, keys, trialId, ...visible }) => {
+  // The trial the recipient's own acceptance created is THEIR record (it is
+  // what /player/trials and /guardian/trials list); its id travels so the
+  // Inbox can deep-link to it. The case id and the org's internals never do.
+  const out = { ...visible, trialId: trialId ?? null };
+  // The address line and the instructions of a P4B invitation are shared
+  // after acceptance only (D-23): they never appear in the Inbox view.
+  if (out.trialDetails && typeof out.trialDetails === 'object' && 'private' in out.trialDetails) {
+    const { private: _p, ...td } = out.trialDetails;
+    return { ...out, trialDetails: td };
+  }
+  return out;
+};
 
 /**
  * M23 P3: an optional short reply on a CONTACT-type request. Validated before
@@ -2126,6 +2196,38 @@ orgRouter.delete('/searches/:id', (req, res) => {
 orgRouter.get('/trials/:id/ics', (req, res) => {
   const t = db.trials.find((x) => x.id === req.params.id && x.orgId === req.org.id);
   if (!t) return res.status(404).json({ error: 'TRIAL_NOT_FOUND' });
+  const deadline = Number.isFinite(t.reportDueAt) ? ` Mandatory performance report due ${new Date(t.reportDueAt).toISOString().slice(0, 10)}.` : '';
+  // M23 P4B: a trial with a confirmed schedule exports every session as its
+  // own timed event in the organiser's zone (`DTSTART;TZID=`), from the
+  // current revision only. A cancelled trial exports its sessions as
+  // CANCELLED rather than silently vanishing from a calendar that already
+  // holds them. The exact address and instructions are the club's own.
+  if (t.schedule && Array.isArray(t.schedule.sessions) && t.schedule.sessions.length) {
+    const tz = t.schedule.timezone;
+    const cancelled = t.completion?.state === 'cancelled';
+    // An unconfirmed revision is TENTATIVE: the club can hold the slots, the
+    // calendar says the family has not yet agreed to them.
+    const status = cancelled ? 'CANCELLED' : t.schedule.confirmedAt ? 'CONFIRMED' : 'TENTATIVE';
+    const stamp = new Date(t.schedule.confirmedAt ?? t.schedule.proposedAt ?? t.acceptedAt).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+    const events = t.schedule.sessions.slice().sort((a, b) => (a.startsAt - b.startsAt) || String(a.id).localeCompare(String(b.id))).flatMap((s) => {
+      const where = s.venue ? [s.venue.name, s.venue.address, s.venue.town].filter(Boolean).join(', ') : (t.venue ?? null);
+      return [
+        'BEGIN:VEVENT', `UID:${t.id}-${s.id}@scoutbox`, `DTSTAMP:${stamp}`,
+        `DTSTART;TZID=${tz}:${trialIcsLocal(s.startsAt, tz)}`, `DTEND;TZID=${tz}:${trialIcsLocal(s.endsAt, tz)}`,
+        `SEQUENCE:${Number(t.schedule.revision) || 1}`,
+        `STATUS:${status}`,
+        `SUMMARY:${trialIcsText(`ScoutBox trial (${s.kind ?? 'session'}) — ${t.playerName ?? 'removed player'}${cancelled ? ' — CANCELLED' : ''}`)}`,
+        `DESCRIPTION:${trialIcsText(`${s.instructions || t.notes || 'Trial session'}.${deadline}`)}`,
+        where ? `LOCATION:${trialIcsText(where)}` : null,
+        'END:VEVENT',
+      ].filter(Boolean);
+    });
+    const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//ScoutBox//Trials//EN', ...events, 'END:VCALENDAR'].join('\r\n');
+    return res.set('Content-Type', 'text/calendar').send(ics);
+  }
+  // Without any schedule (a legacy row, or a P4B acceptance of an undated
+  // invitation) the export is honest: the accepted day as an all-day event,
+  // and nothing invented about a time or a venue.
   // M23 P4A-D1, read side: a stored date that is not a calendar day (a row
   // written before the validator existed) is refused as what it is — never
   // a 500, never a fabricated day. A missing deadline is simply not stated.
@@ -2137,7 +2239,6 @@ orgRouter.get('/trials/:id/ics', (req, res) => {
   // RFC 5545 text: backslash, semicolon, comma and line breaks are escaped so
   // no stored text can begin a new calendar line.
   const icsText = (s) => String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
-  const deadline = Number.isFinite(t.reportDueAt) ? ` Mandatory performance report due ${new Date(t.reportDueAt).toISOString().slice(0, 10)}.` : '';
   const ics = [
     'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//ScoutBox//Trials//EN', 'BEGIN:VEVENT',
     `UID:${t.id}@scoutbox`, `DTSTART;VALUE=DATE:${start}`,
@@ -2223,8 +2324,14 @@ orgRouter.post('/trials/:trialId/report', (req, res) => {
   const p = findPlayer(trial.playerId);
   p.trialReports.push(report);
   ledgerAppend({ type: 'trial_report', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
-  notify({ kind: 'player', id: p.id }, 'trial_report', `${req.org.name} filed your trial report${report.strengthNote ? ' — with development feedback' : ''}. It's on your profile.`, report.id);
-  if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'trial_report', `${req.org.name} filed the trial report for ${p.name}.`, report.id);
+  // P4B (D-16): the mandatory report closes the club's obligation even while
+  // the family has blocked the club, but the block stands — no notification
+  // reaches the player or guardian from a blocked club. The report is still
+  // on the profile when they look.
+  if (!isBlocked(p.id, req.org.id)) {
+    notify({ kind: 'player', id: p.id }, 'trial_report', `${req.org.name} filed your trial report${report.strengthNote ? ' — with development feedback' : ''}. It's on your profile.`, report.id);
+    if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'trial_report', `${req.org.name} filed the trial report for ${p.name}.`, report.id);
+  }
   broadcast('players', { playerId: p.id });
   res.status(201).json({ ok: true, report, playerTrustScore: computeTrustScore(p) });
 });
@@ -2901,6 +3008,11 @@ playerRouter.post('/requests/:id/respond', (req, res) => {
   // P4A-D12: slot checked before the answer is recorded (see the guardian route).
   const slot = accept && request.type === 'trial' ? chooseTrialSlot(request.trialDetails, chosenSlot) : { ok: true, date: null };
   if (!slot.ok) return res.status(400).json(slot);
+  // M23 P4B (D-7): the recipient of a case-tied Trial invitation is re-derived now.
+  if (accept && request.type === 'trial' && request.caseId && m23Ctx?.trialAcceptGate) {
+    const gate = m23Ctx.trialAcceptGate({ request, by: 'player', actorId: req.player.id });
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error, message: gate.message });
+  }
   const respondedAt = Date.now();
   request.status = accept ? 'accepted' : 'declined';
   request.respondedAt = respondedAt;
@@ -2914,10 +3026,14 @@ playerRouter.post('/requests/:id/respond', (req, res) => {
     const channel = openChannel(request);
     request.contactChannel = channel.id;
     ledgerAppend({ type: `${request.type}_accepted`, playerId: req.player.id, orgId: request.orgId, orgName: request.orgName, userId: request.userId, scoutName: request.scoutName });
-    if (request.type === 'trial') issueAcceptedTrial({ request, player: req.player, trialDate: slot.date, by: 'player', at: respondedAt });
+    if (request.type === 'trial') {
+      const trial = issueAcceptedTrial({ request, player: req.player, trialDate: slot.date, by: 'player', at: respondedAt, actor: { id: req.player.id, name: req.player.name } });
+      m23Ctx?.onTrialAccepted?.({ request, trial, at: respondedAt, actor: { kind: 'player', id: req.player.id, name: req.player.name } });
+    }
     notify({ kind: 'org_user', id: request.userId }, 'accepted', `${req.player.name} accepted your ${request.type} request — thread open.`, request.contactChannel);
   } else {
     ledgerAppend({ type: `${request.type}_declined`, playerId: req.player.id, orgId: request.orgId, orgName: request.orgName, userId: request.userId, scoutName: request.scoutName });
+    if (request.type === 'trial') m23Ctx?.onTrialDeclined?.({ request, at: respondedAt, actor: { kind: 'player', id: req.player.id, name: req.player.name }, message: replyCheck.reply });
     notify({ kind: 'org_user', id: request.userId }, 'declined', `${req.player.name} declined your ${request.type} request.`, request.id);
   }
   persistNow();
@@ -3528,8 +3644,21 @@ function tombstoneTrial(t, at) {
     checkins: (t.day.checkins ?? []).map((c) => ({ playerId: c.playerId, at: c.at, byUserId: c.byUserId, byName: c.byName })),
     statusEvents: t.day.statusEvents ?? [],
   } : undefined;
+  // M23 P4B (D-26): the operational containers keep ids, states and times —
+  // the case's evidence stays honest — and lose everything written for or
+  // about the person: instructions, venue address lines, attendance notes,
+  // Box Cam evidence links (the player's sessions are no longer the club's to
+  // cite), the guardian id in recipient snapshots, and history detail text.
+  const stripSession = (s) => ({ id: s.id, kind: s.kind, startsAt: s.startsAt, endsAt: s.endsAt, venue: s.venue ? { name: s.venue.name, town: s.venue.town ?? null, address: null } : null, instructions: null, evidence: [] });
+  const schedule = t.schedule && typeof t.schedule === 'object' ? {
+    timezone: t.schedule.timezone, revision: t.schedule.revision, proposedAt: t.schedule.proposedAt ?? null,
+    proposedBy: t.schedule.proposedBy ? { kind: t.schedule.proposedBy.kind } : null,
+    confirmedAt: t.schedule.confirmedAt ?? null, confirmedBy: t.schedule.confirmedBy ? { kind: t.schedule.confirmedBy.kind } : null,
+    sessions: (t.schedule.sessions ?? []).map(stripSession),
+    revisions: (t.schedule.revisions ?? []).map((r) => ({ revision: r.revision, timezone: r.timezone, proposedAt: r.proposedAt ?? null, proposedBy: r.proposedBy ? { kind: r.proposedBy.kind } : null, confirmedAt: r.confirmedAt ?? null, supersededAt: r.supersededAt ?? null, reason: null, material: r.material ?? null, sessions: (r.sessions ?? []).map(stripSession) })),
+  } : (t.schedule ?? null);
   return {
-    id: t.id, requestId: t.requestId, playerId: t.playerId, playerName: null,
+    id: t.id, requestId: t.requestId, caseId: t.caseId ?? null, playerId: t.playerId, playerName: null,
     orgId: t.orgId, orgName: t.orgName, scoutName: t.scoutName,
     acceptedAt: t.acceptedAt, acceptedBy: t.acceptedBy ?? null, guardianApproved: t.guardianApproved ?? null,
     proposedDate: t.proposedDate ?? null, venue: t.venue ?? null, notes: '',
@@ -3539,6 +3668,16 @@ function tombstoneTrial(t, at) {
     ...(t.feedbackEscalatedAt ? { feedbackEscalatedAt: t.feedbackEscalatedAt } : {}),
     ...(report ? { report } : {}),
     ...(day ? { day } : {}),
+    workflowState: t.workflowState ?? 'legacy_accepted',
+    schedule,
+    attendance: (t.attendance ?? []).map((a) => ({ sessionId: a.sessionId, state: a.state, source: a.source, recordedAt: a.recordedAt, recordedBy: a.recordedBy ? { kind: a.recordedBy.kind ?? 'org', userId: a.recordedBy.userId ?? null, name: a.recordedBy.name ?? null } : null, note: null })),
+    completion: t.completion ? { state: t.completion.state, at: t.completion.at, by: t.completion.by ? { kind: t.completion.by.kind } : null, reason: null, phase: t.completion.phase ?? null } : null,
+    recipient: t.recipient ? { type: t.recipient.type, minor: !!t.recipient.minor, at: t.recipient.at ?? null } : null,
+    blockedBy: t.blockedBy ?? null,
+    keys: t.keys ?? {},
+    history: (t.history ?? []).map((h) => ({ id: h.id, at: h.at, action: h.action, by: h.by ? { kind: h.by.kind ?? null } : null, detail: h.detail && typeof h.detail === 'object' ? Object.fromEntries(Object.entries(h.detail).filter(([, v]) => typeof v !== 'string' || v.length <= 40)) : null })),
+    reminders: t.reminders ?? {},
+    rev: t.rev ?? 1, revAt: t.revAt ?? null, revBy: null,
     subjectRemovedAt: at,
   };
 }
@@ -3553,7 +3692,13 @@ function tombstoneRequest(r, at) {
     userId: r.userId, scoutName: r.scoutName, scoutRole: r.scoutRole,
     type: r.type, message: null,
     ...(r.contactId ? { contactId: r.contactId } : {}),
-    trialDetails: td ? { proposedDate: td.proposedDate ?? null, altSlots: Array.isArray(td.altSlots) ? td.altSlots : [], venue: td.venue ?? null, notes: '' } : null,
+    trialDetails: td ? {
+      proposedDate: td.proposedDate ?? null, altSlots: Array.isArray(td.altSlots) ? td.altSlots : [], venue: td.venue ?? null, notes: '',
+      // P4B slots: times and venue name/town only; no instructions, no address line.
+      ...(Array.isArray(td.slots) ? { slots: td.slots.map((s) => ({ id: s.id, day: s.day, startsAt: s.startsAt, endsAt: s.endsAt, timezone: s.timezone, kind: s.kind ?? null, venue: s.venue ? { name: s.venue.name, town: s.venue.town ?? null, address: null } : null })), instructions: null } : {}),
+    } : null,
+    ...(r.caseId ? { caseId: r.caseId } : {}),
+    ...(r.trialId ? { trialId: r.trialId } : {}),
     status: r.status, createdAt: r.createdAt,
     respondedAt: r.respondedAt ?? null, respondedBy: r.respondedBy ?? null,
     routedTo: r.routedTo ?? null, guardianId: null, contactChannel: null,
@@ -4073,6 +4218,14 @@ const m23Ctx = registerM23({
   // M23 P3 — the ONE writer of a recipient-visible request row, so a Contact
   // send reaches the Inbox through exactly the path the legacy route uses.
   issueRecruitmentRequest,
+  // M23 P4B — Trial. The Combine consent rule is reused unchanged for Box
+  // Cam evidence links (a trial is not consent to a player's home footage);
+  // the test-provider gate is the same flag M16 reads; minors never act on
+  // their own trials.
+  combineOrgMaySeeResults: m16Ctx.combineOrgMaySeeResults,
+  boxPrefsFor: m16Ctx.boxPrefsFor,
+  testProviderEnabled: process.env.BOX_CAM_TEST_PROVIDER === '1',
+  guardianManagedOnly,
 });
 
 // ------------------------------------------------- M18.1 operator surface
@@ -4143,6 +4296,11 @@ export const EMITTED_EVENTS = Object.freeze([
   // M23 P3 Contact. All org_private, ids only. The recipient side reuses
   // `inbox` and `notify`; a draft reaches no player-facing stream at all.
   'contact_created', 'contact_sent', 'contact_failed', 'contact_external_recorded', 'contact_responded',
+  // M23 P4B Trial. All org_private, ids only; the recipient side reuses
+  // `inbox` and `notify`. No schedule, venue, attendance note, assessment or
+  // guardian id ever rides on one of these.
+  'trial_invited', 'trial_accepted', 'trial_declined', 'trial_scheduled', 'trial_rescheduled',
+  'trial_cancelled', 'trial_attendance_recorded', 'trial_completed', 'trial_evidence_linked',
 ]);
 {
   const problems = assertEventRegistry({ emitted: EMITTED_EVENTS });

@@ -5,6 +5,7 @@
 // server-side (fail-closed on missing location), grassroots 50 km preserved.
 
 import { GRASSROOTS_RADIUS_KM, parseTrialDate, trialReportDueAt } from '../domain.mjs';
+import { trialFamilyView, trialOutcomeLine } from '../m23/trial.mjs';
 
 export function registerJourneys(ctx) {
   const {
@@ -682,7 +683,22 @@ export function registerJourneys(ctx) {
       return res.status(409).json({ error: 'CONSENT_REQUIRED', scope: requiredScope, message: minor ? 'The guardian has not given event consent for this trial day.' : 'The player has not given event consent for this trial day.' });
     }
     if (t.day.checkins.some((c) => c.playerId === t.playerId)) return res.status(409).json({ error: 'ALREADY_CHECKED_IN' });
-    t.day.checkins.push({ playerId: t.playerId, at: Date.now(), byUserId: req.orgUser.id, byName: req.orgUser.name });
+    const checkedInAt = Date.now();
+    t.day.checkins.push({ playerId: t.playerId, at: checkedInAt, byUserId: req.orgUser.id, byName: req.orgUser.name });
+    // M23 P4B (D-8): a check-in is the strongest attendance source. If the
+    // trial carries a confirmed P4B schedule, the session whose window holds
+    // this moment (from two hours before its start) gets an `attended`
+    // record with source `checkin` — once, append-only, never a judgement.
+    // A trial without a P4B schedule records nothing new here.
+    const sessions = Array.isArray(t.schedule?.sessions) && t.schedule?.confirmedAt ? t.schedule.sessions : [];
+    const live = sessions.find((s) => s.startsAt - 2 * 3600_000 <= checkedInAt && checkedInAt <= s.endsAt) ?? null;
+    if (live && !(t.attendance ?? []).some((a) => a.sessionId === live.id && a.state === 'attended')) {
+      t.attendance ??= [];
+      t.attendance.push({ sessionId: live.id, state: 'attended', source: 'checkin', recordedBy: { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name }, recordedAt: checkedInAt, note: null });
+      t.history ??= [];
+      t.history.push({ id: nextId('aud'), at: checkedInAt, action: 'trial_attendance_recorded', by: { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name }, detail: { sessionId: live.id, state: 'attended', source: 'checkin' } });
+      t.rev = (Number(t.rev) || 1) + 1; t.revAt = checkedInAt; t.revBy = { userId: req.orgUser.id, name: req.orgUser.name };
+    }
     // Feed the existing attendance record — once, coach-signed, no duplicate.
     if (p && !(p.attendance ?? []).some((a) => a.trialId === t.id)) {
       p.attendance.push({
@@ -759,13 +775,18 @@ export function registerJourneys(ctx) {
   }
 
   // The family's list of their own trials (safety pack entry point).
-  const familyTrials = (playerIds) => db.trials
-    .filter((t) => playerIds.includes(t.playerId))
+  const familyTrials = (playerIds, { minorDevice = false } = {}) => db.trials
+    .filter((t) => t && typeof t === 'object' && playerIds.includes(t.playerId))
     .map((t) => {
       t.day ??= { staff: [], consents: [], arrival: null, emergency: null, checkins: [], collection: null, statusEvents: [] };
-      return trialDayView(t, 'family');
+      // P4B: the workflow edge (state, confirmed sessions, completion) rides
+      // beside the P2 day view. Family view only — never the club's internals.
+      // A minor's own device carries the guardian-managed OUTCOME LINE only
+      // (privacy matrix §112): never the sessions, the address, the
+      // instructions or the history the guardian holds.
+      return { ...trialDayView(t, 'family'), workflow: minorDevice ? trialOutcomeLine(t) : trialFamilyView(t) };
     });
-  playerRouter.get('/trials', (req, res) => res.json(familyTrials([req.player.id])));
+  playerRouter.get('/trials', (req, res) => res.json(familyTrials([req.player.id], { minorDevice: !!req.playerIsMinor })));
   guardianRouter.get('/trials', (req, res) => res.json(familyTrials(req.guardian.childIds)));
 
   playerRouter.get('/trials/:id/safety-pack', (req, res) => {
