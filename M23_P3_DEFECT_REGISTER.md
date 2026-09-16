@@ -18,8 +18,12 @@ is the useful part.
 
 ## D4 closure commit
 
-Recorded after the closure commit was made — see the footer line appended by
-that commit.
+`4deb602` — "M23 P3 closure: D4 — the login screens fit a 360px phone" (Pro,
+Grassroots and T&S stylesheets; the `login-pw` class in Pro and Grassroots;
+navLive N17; this register and the implementation doc). Verified before the
+commit: navLive 64 checks (N1–N17), liveIntegration, m23ContactLive 82/82,
+demoFreshness, uiSpotcheck, demoOffline, crosstab, demoHostOrdering, m17 and
+m18.2 demo spotchecks; typechecks and builds for Pro, Grassroots and T&S.
 
 ## Not defects (considered and left)
 
