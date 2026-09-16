@@ -19,11 +19,14 @@
  *
  * WHAT IS DELIBERATELY NOT ANSWERABLE YET
  *
- * Contact, Trial and Offer evidence belong to phases that have not shipped.
- * Their kinds answer `not_implemented`, which refuses the transition. That is
- * the honest state: the product cannot prove those things happened, so it does
- * not let the lifecycle claim they did.
+ * Trial and Offer evidence belong to phases that have not shipped. Their kinds
+ * answer `not_implemented`, which refuses the transition. That is the honest
+ * state: the product cannot prove those things happened, so it does not let
+ * the lifecycle claim they did. `contact_delivered` is answered from P3's
+ * Contact store, and in the same direction: contact truth -> lifecycle.
  */
+
+import { CONTACT_EVIDENCE_STATUSES, contactIntegrity } from './contact.mjs';
 
 /** Every kind the lifecycle can ask about. Anything else is a programming error. */
 export const EVIDENCE_KINDS = Object.freeze([
@@ -85,7 +88,23 @@ export function createEvidenceProvider(db) {
           : { satisfied: false, reason: 'no_confirmed_join' };
       }
 
-      // Contact, Trial and Offer evidence arrive with their own phases.
+      if (kind === 'contact_delivered') {
+        // P3. The contract (§3): a contact record exists for THIS org and
+        // THIS player, is not cancelled, and reached a state that means the
+        // recipient could have received it — delivered in-app, answered, or
+        // recorded as having happened outside ScoutBox. A draft is not
+        // evidence; a failed attempt is not evidence; a corrupt record is not
+        // evidence. A missing store is a broken database, not "no contact".
+        const contacts = db?.recruitmentContacts;
+        if (!Array.isArray(contacts)) return { satisfied: false, reason: 'contacts_store_unavailable' };
+        const hit = contacts.find((c) => c && c.orgId === kase.orgId && c.playerId === kase.playerId
+          && CONTACT_EVIDENCE_STATUSES.includes(c.status) && !c.cancelledAt && contactIntegrity(c).length === 0);
+        return hit
+          ? { satisfied: true, sourceType: 'recruitment_contact', sourceId: hit.id }
+          : { satisfied: false, reason: 'no_contact_delivered' };
+      }
+
+      // Trial and Offer evidence arrive with their own phases.
       return { satisfied: false, reason: 'not_implemented' };
     },
   };

@@ -343,6 +343,84 @@ export interface PatchRoomInput {
   deadline?: string | null;
 }
 
+
+// ------------------------------------------------------- M23 P3 — Contact
+// A Contact is the club's INTERNAL record of one communication process. A
+// draft never leaves the organisation; only a sent message or a recorded
+// external contact is a contact, and only that moves the case to Contacted.
+// Delivery truth (delivered / failed / responded / recorded) belongs to the
+// Contact, never to the case. Nothing here is ever a player-facing shape: the
+// recipient sees the request the send created, in their own Inbox.
+export const CONTACT_EXTERNAL_CHANNELS = ['phone', 'in_person', 'email_external', 'agent', 'other'] as const;
+export type ContactExternalChannel = (typeof CONTACT_EXTERNAL_CHANNELS)[number];
+
+export interface ContactHistoryEntry {
+  id: string; at: number; action: string;
+  by: { name: string | null; kind: string | null } | null;
+  detail: Record<string, unknown> | null;
+}
+
+export interface ContactRecord {
+  id: string;
+  caseId: string;
+  playerId: string;
+  status: 'draft' | 'delivered' | 'failed' | 'responded' | 'recorded' | 'cancelled' | string;
+  statusLabel: string;
+  channel: 'in_app' | ContactExternalChannel | string;
+  channelLabel: string;
+  external: boolean;
+  recipient: { type: 'player' | 'guardian'; minor: boolean } | null;
+  subject: string | null;
+  body: string | null;
+  summary: string | null;
+  createdBy: { name: string } | null;
+  createdAt: number;
+  updatedAt: number;
+  sentBy: { name: string } | null;
+  sentAt: number | null;
+  deliveredAt: number | null;
+  failedAt: number | null;
+  failureCode: string | null;
+  attempts: number;
+  occurredAt: number | null;
+  recordedBy: { name: string } | null;
+  recordedAt: number | null;
+  respondedAt: number | null;
+  response: { kind: 'accepted' | 'declined' | string; message: string | null; by: 'player' | 'guardian' | string; at: number } | null;
+  /** Courtesy email copy to a guardian — never the transport of record, never "delivered". */
+  emailCopy: { state: string; to: string; outboxId: string | null; at: number } | null;
+  lifecycle: { applied: boolean; from?: string; to?: string; reason?: string; at: number } | null;
+  cancelledAt: number | null;
+  rev: number;
+  revAt: number | null;
+  revBy: string | null;
+  history: ContactHistoryEntry[];
+  transportNote: string;
+  policyVersion: number;
+}
+
+export interface ContactRouting {
+  available: boolean;
+  type: 'player' | 'guardian' | null;
+  minor: boolean | null;
+  reason?: string;
+}
+
+export interface ContactList {
+  items: ContactRecord[];
+  omitted: number;
+  routing: ContactRouting;
+  case: { status: string; acceptsContact: boolean; planAction: string };
+  canWrite: boolean;
+  cooldown: { until: number } | null;
+  channels: { inApp: string; external: { id: string; label: string }[] };
+  limits: { subject: number; body: number; summary: number; replyMessage: number };
+  policyVersion: number;
+  note: string;
+}
+
+export type ContactCaseMove = { from: string; to: string } | { unchanged: true; status: string };
+
 export interface RoomsApi {
   list(s: Session, params?: RoomListParams): Promise<RoomListResult>;
   needsAttention(s: Session): Promise<{ items: RoomAttentionItem[]; note: string }>;
@@ -367,6 +445,13 @@ export interface RoomsApi {
   requestEvidence(s: Session, roomId: string, suggestionId: string): Promise<{ suggestion: RoomMissingEvidence; routedTo: string; note: string }>;
   requestCombine(s: Session, roomId: string, input: { protocolIds: string[]; title?: string | null; deadline?: string | null; instructions?: string | null }): Promise<{ request: RoomCombineRequest }>;
   link(s: Session, roomId: string, input: { trialId?: string; signingId?: string; requestId?: string }): Promise<{ links: Room['links'] }>;
+  // M23 P3 — Contact. Page-local to the Room; there is no top-level surface.
+  contacts(s: Session, roomId: string): Promise<ContactList>;
+  createContact(s: Session, roomId: string, input: { subject?: string | null; body: string; clientKey?: string }): Promise<{ contact: ContactRecord; routing: ContactRouting }>;
+  patchContact(s: Session, roomId: string, contactId: string, input: { subject?: string | null; body?: string; expectedRev: number }): Promise<{ contact: ContactRecord; routing: ContactRouting }>;
+  sendContact(s: Session, roomId: string, contactId: string, input: { expectedRev: number; clientKey?: string }): Promise<{ contact: ContactRecord; delivered: boolean; case?: ContactCaseMove; idempotent?: boolean }>;
+  cancelContact(s: Session, roomId: string, contactId: string, input: { expectedRev: number }): Promise<{ contact: ContactRecord }>;
+  recordExternalContact(s: Session, roomId: string, input: { channel: string; occurredAt: number | string; summary?: string | null; recipientType: 'player' | 'guardian'; clientKey?: string }): Promise<{ contact: ContactRecord; case?: ContactCaseMove; idempotent?: boolean }>;
   funnel(s: Session): Promise<RoomFunnel>;
 }
 
@@ -418,6 +503,12 @@ export const httpRooms: RoomsApi = {
   requestEvidence: (s, roomId, suggestionId) => req(`/org/rooms/${roomId}/evidence-requests`, { method: 'POST', headers: H(s), body: JSON.stringify({ suggestionId }) }),
   requestCombine: (s, roomId, input) => req(`/org/rooms/${roomId}/combine-requests`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   link: (s, roomId, input) => req(`/org/rooms/${roomId}/link`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  contacts: (s, roomId) => req(`/org/rooms/${roomId}/contacts`, { headers: H(s) }),
+  createContact: (s, roomId, input) => req(`/org/rooms/${roomId}/contacts`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  patchContact: (s, roomId, contactId, input) => req(`/org/rooms/${roomId}/contacts/${contactId}`, { method: 'PATCH', headers: H(s), body: JSON.stringify(input) }),
+  sendContact: (s, roomId, contactId, input) => req(`/org/rooms/${roomId}/contacts/${contactId}/send`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  cancelContact: (s, roomId, contactId, input) => req(`/org/rooms/${roomId}/contacts/${contactId}/cancel`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  recordExternalContact: (s, roomId, input) => req(`/org/rooms/${roomId}/contacts/external`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   funnel: (s) => req('/org/rooms-funnel', { headers: H(s) }),
 };
 

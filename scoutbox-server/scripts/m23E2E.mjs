@@ -134,7 +134,7 @@ section('U3 — the projector refuses to mistake a broken database for an empty 
 {
   const base = {
     recruitmentCases: [{ id: 'case-1', orgId: 'o1', playerId: 'p1', room: { status: 'watching', rev: 1 }, history: [] }],
-    roomDecisions: [], requests: [], trials: [], assessments: [], signings: [],
+    roomDecisions: [], requests: [], trials: [], assessments: [], signings: [], recruitmentContacts: [],
   };
   const good = buildRecruitmentJourney(base, 'case-1', { kind: 'org_staff', orgId: 'o1', role: 'room_lead' });
   ok(good.ok === true, 'a healthy database projects');
@@ -191,7 +191,7 @@ section('U4 — private text never reaches the projection');
   const db = {
     recruitmentCases: [{ id: 'c1', orgId: 'o1', playerId: 'p1', room: { status: 'under_review', rev: 1 }, history: [] }],
     roomDecisions: [{ id: 'd1', roomId: 'c1', orgId: 'o1', recommendation: 'archive', reasonCodes: ['squad_space'], note: 'HIS ATTITUDE IS THE PROBLEM', createdAt: '2026-01-01T00:00:00.000Z', by: { name: 'Maria' } }],
-    requests: [], trials: [], assessments: [], signings: [],
+    requests: [], trials: [], assessments: [], signings: [], recruitmentContacts: [],
   };
   const out = buildRecruitmentJourney(db, 'c1', { kind: 'org_staff', orgId: 'o1', role: 'room_lead' });
   const s = JSON.stringify(out);
@@ -225,7 +225,7 @@ section('H7-H8, H13-H14, H18-H20 — determinism, legacy mapping and isolation (
     createdAt: '2026-01-01T00:00:00.000Z',
     history: hist ?? [],
   });
-  const REQ = { roomDecisions: [], requests: [], trials: [], assessments: [], signings: [] };
+  const REQ = { roomDecisions: [], requests: [], trials: [], assessments: [], signings: [], recruitmentContacts: [] };
   const target = mkCase('case-T', 'oT', 'pT', 'under_review', [
     { action: 'room_created', at: '2026-01-01T00:00:00.000Z', by: { name: 'A' }, detail: { status: 'watching' } },
     { action: 'room_status_changed', at: '2026-01-02T00:00:00.000Z', by: { name: 'A' }, detail: { from: 'watching', to: 'under_review' } },
@@ -1018,7 +1018,7 @@ section('X — stored corruption: a broken record is reported, never rendered as
   const OPTS = { now: 1767225600000, evidence: NULL_EVIDENCE_PROVIDER };
   const base = (over = {}) => ({
     recruitmentCases: [{ id: 'case-X', orgId: 'org-X', playerId: 'pl-X', stage: 'review', createdAt: 1, history: [], room: { status: 'under_review', rev: 1 }, ...over }],
-    roomDecisions: [], requests: [], trials: [], assessments: [], signings: [],
+    roomDecisions: [], requests: [], trials: [], assessments: [], signings: [], recruitmentContacts: [],
   });
   const build = (db) => { try { return buildRecruitmentJourney(db, 'case-X', VIEWER, OPTS); } catch (e) { return { threw: e }; } };
 
@@ -1439,11 +1439,17 @@ section('Y — the error contract: one table, no default, nothing internal in th
   // is exactly what the ternary chain this replaced did, silently, by falling
   // through to 400.
   const M23_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'm23');
-  const sources = readdirSync(M23_DIR).filter((f) => f.endsWith('.mjs') && f !== 'errors.mjs');
+  // errors.mjs is swept too since P3 moved `sendDomainError` — the one place
+  // that PRODUCES `LIFECYCLE_INTERNAL` — into it. Its table rows are
+  // `CODE: status,` and do not match a producing shape, so the sweep still
+  // sees only what can actually be sent.
+  const sources = readdirSync(M23_DIR).filter((f) => f.endsWith('.mjs'));
   const produced = new Set();
   for (const f of sources) {
     const text = readFileSync(path.join(M23_DIR, f), 'utf8');
-    for (const m of text.matchAll(/error:\s*'([A-Z][A-Z0-9_]+)'/g)) produced.add(m[1]);
+    // Two producing shapes: a literal `error: 'CODE'` and the P3 routes'
+    // `err(res, 'CODE', …)` helper, which builds exactly that literal.
+    for (const m of text.matchAll(/(?:error:|err\(res,)\s*'([A-Z][A-Z0-9_]+)'/g)) produced.add(m[1]);
   }
   ok(produced.size >= 15, `Y1 ${produced.size} error codes found in the M23 source, mechanically`);
 
@@ -1454,7 +1460,9 @@ section('Y — the error contract: one table, no default, nothing internal in th
   // The converse. A table entry for a code nothing produces is dead weight that
   // makes the table look more complete than it is. `ROOM_VERSION_CONFLICT` is
   // the one legitimate exception: M18.1's rev guard raises it, not M23.
-  const EXTERNAL = new Set(['ROOM_VERSION_CONFLICT']);
+  // `CONTACT_VERSION_CONFLICT` (P3) is the same M18.1 guard, named for the Contact
+  // record: raised through `errorCode:` in contactRoutes, never as `error:`.
+  const EXTERNAL = new Set(['ROOM_VERSION_CONFLICT', 'CONTACT_VERSION_CONFLICT']);
   const orphaned = Object.keys(M23_ERROR_HTTP).filter((c) => !produced.has(c) && !EXTERNAL.has(c));
   for (const c of orphaned) console.error(`   orphaned: ${c}`);
   neg(orphaned.length === 0, 'Y3 and the table contains no code nothing can produce');
@@ -1465,7 +1473,9 @@ section('Y — the error contract: one table, no default, nothing internal in th
 
   // Every mapped status is one this contract actually uses. A 418 or a 200 in
   // the table would be a typo that no other assertion here would notice.
-  const BANDS = [400, 403, 404, 409, 422, 500];
+  // 429 joined in P3: the Contact cooldown is a deterministic per-recipient
+  // refusal with a retry time, and 429 is the status that means exactly that.
+  const BANDS = [400, 403, 404, 409, 422, 429, 500];
   const offBand = Object.entries(M23_ERROR_HTTP).filter(([, s]) => !BANDS.includes(s));
   neg(offBand.length === 0, `Y6 every status in the table is one of ${BANDS.join('/')}`);
 
@@ -1475,7 +1485,7 @@ section('Y — the error contract: one table, no default, nothing internal in th
   // because that detail is what makes it useful in a log and in the unit tests
   // above. Without this the next assertion could pass by testing nothing.
   const holed = {
-    recruitmentCases: [], roomDecisions: [], requests: [], signings: [],
+    recruitmentCases: [], roomDecisions: [], requests: [], signings: [], recruitmentContacts: [],
     assessments: undefined, trials: 'not-a-list',
   };
   const internal = buildRecruitmentJourney(holed, 'case-anything', { kind: 'org_staff', orgId: 'org-eastport' });
@@ -1503,7 +1513,7 @@ section('Y — the error contract: one table, no default, nothing internal in th
   // so there is nothing here a 200 would not also have shown them. Narrowing it
   // would break the shared conflict notice everywhere to disclose nothing.
   const ALLOWED_KEYS = new Set(['ok', 'error', 'message', 'allowed', 'to', 'actions',
-    'requires', 'evidenceReason', 'current', 'expectedRev', 'rev']);
+    'requires', 'evidenceReason', 'current', 'expectedRev', 'rev', 'retryAt']);
   const strayKeys = [];
   for (const { label, body } of ERROR_BODIES_FROM_E) {
     if (body?.error === 'ROOM_VERSION_CONFLICT') continue;
@@ -1579,11 +1589,17 @@ section('Z — what P2 deliberately does NOT ship, asserted rather than assumed'
   ok(contactStates.includes('contact_planned') && contactStates.includes('contacted'),
     'Z10 and both Contact STATES are reachable destinations in the published table');
 
-  // No Contact object, no Contact route, no Contact store. If P3 starts early
-  // by accident, this is what says so.
-  for (const p of ['/org/recruitment/contacts', `/org/rooms/${ROOM}/contacts`, `/org/rooms/${ROOM}/contact`]) {
+  // P3 shipped the Contact surface INSIDE the case (`/org/rooms/:id/contacts`)
+  // and nowhere else: there is no top-level contact list and no singular
+  // alias. The one real route answers a DOMAIN code, never a bare 404.
+  for (const p of ['/org/recruitment/contacts', `/org/rooms/${ROOM}/contact`]) {
     const probe = await j('POST', p, {}, maria.token);
-    neg(probe.status === 404, `Z11 ${p} does not exist — P2 ships no Contact surface`);
+    neg(probe.status === 404, `Z11 ${p} does not exist — Contact lives on the case, not at the top level`);
+  }
+  {
+    const probe = await j('POST', `/org/rooms/${ROOM}/contacts`, {}, maria.token);
+    ok(probe.status !== 404 && /^CONTACT_[A-Z_]+$/.test(probe.body?.error ?? ''),
+      `Z11b /org/rooms/:id/contacts exists in P3 and refuses an empty draft by name (${probe.status} ${probe.body?.error})`);
   }
 
   // And the gate really does refuse `contacted` with the null provider, which

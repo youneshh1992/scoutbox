@@ -39,7 +39,10 @@ existing case may not start at an evidence-bearing status
 (`adoptionStatusForStage`), so opening a workspace can never assert that a
 trial happened.
 
-M23 added **no** store. `migrateM23` is deliberately empty.
+M23 P2 added **no** store; `migrateM23` was deliberately empty. P3 added one
+— `recruitmentContacts`, the internal Contact object — created by the
+migration registry (2303) and declared in the store contract, for the reasons
+given in `M23_P3_CONTACT_REUSE_AUDIT.md` Part C. The case store is unchanged.
 
 ## 2. The frozen lifecycle — all eighteen states
 
@@ -264,8 +267,10 @@ token or cached with a session.
 
 Unchanged. `visibleToOrg` is the one wall: agencies see no minor,
 unconditionally; grassroots fails closed on missing location and enforces the
-50 km radius. Contact routing (`minor → guardian`) is the existing rule and M23
-does not touch it.
+50 km radius. Contact routing (`minor → guardian`) is the existing rule; P3
+derives the recipient from it on the server on every create, send and record
+(`resolveContactRecipient`) and fails closed when no verified guardian route
+exists.
 
 The grassroots stage vocabulary maps the new states sensibly — `contacted`
 becomes `awaiting_response`, which is the word that vocabulary already had.
@@ -345,15 +350,21 @@ ScoutBox. It is not a weaker path: the requirement is keyed by target.
 
 ## 24. Known limitations
 
-- **Contact, Trial and Offer evidence cannot be resolved.** Six of the seven
-  evidence kinds answer `not_implemented`, so six statuses are unreachable in
-  P2. Intentional.
-- **No UI.** P2 ships two org routes and no client surface.
+- **Trial and Offer evidence cannot be resolved.** Five of the seven
+  evidence kinds answer `not_implemented`, so five statuses are unreachable.
+  Intentional. (`contact_delivered` is resolved since P3 — see
+  `M23_P3_CONTACT_IMPLEMENTATION.md` §7 and `M23_P3_CONTACT_CONTRACT.md`.)
+- **UI.** P2 shipped two org routes and no client surface; P3 adds the
+  Contact tab on the Recruitment Room and the recipient's reply in the Inbox.
+  Trial and Offer still have no surface.
 - **`generatedAt` varies per request** when no clock is injected. Determinism is
   guaranteed for a fixed `now`, which is what the suite asserts.
-- **Events and notifications are not yet emitted** for lifecycle transitions.
-  Adding them is a registry change and belongs with the phase that has an
-  audience to notify.
+- **Events and notifications are not emitted for lifecycle transitions as
+  such.** P3 emits registry events for the Contact object (`contact_created`,
+  `contact_sent`, `contact_failed`, `contact_external_recorded`,
+  `contact_responded`; org-private, ids only) and notifies through the
+  existing request and room notifications. A transition-level event still
+  belongs with the phase that has an audience for it.
 - **History pagination defaults to 50, caps at 200.** A case with more than 200
   transitions needs the cursor.
 - **The snapshot store has no query planner**, so every lookup is a linear scan.

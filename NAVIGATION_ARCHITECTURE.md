@@ -240,6 +240,12 @@ either a material constraint (one line, `.pagehint`) or absent; status
 warnings stay; entity headers (the Recruitment Room) are one identity row
 plus one disclosure.
 
+**Room sections after M23 P3.** The Recruitment Room gained a **Contact**
+section tab (after Discussion, before Activity: internal talk first, shared
+communication second). It is a function of the case, not a destination — no
+sidebar item, no route, no palette entry; the deep link stays
+`#/recruitment/rooms/:id`. The strip scrolls within itself at 390px.
+
 ## 15. Tests
 
 - `e2e/navConfig.test.mjs` — config integrity (every legacy id exactly

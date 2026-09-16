@@ -234,9 +234,11 @@ export function registerDelivery(ctx) {
   });
 
   adminRouter.post('/delivery/inject-failure', (req, res) => {
-    const channel = req.body?.channel === 'push' ? 'push' : 'email';
+    // `contact` (M23 P3) makes the next in-app Contact sends fail at the
+    // transport, so the honest `failed` state can be exercised end to end.
+    const channel = ['push', 'contact'].includes(req.body?.channel) ? req.body.channel : 'email';
     const count = Math.min(Math.max(Number(req.body?.count) || 1, 1), 20);
-    db.deliveryFailInject[channel] += count;
+    db.deliveryFailInject[channel] = (db.deliveryFailInject[channel] ?? 0) + count;
     persistNow();
     res.json({ injected: { channel, count }, note: 'The next sends on this channel will fail at the provider — for monitoring/retry tests.' });
   });

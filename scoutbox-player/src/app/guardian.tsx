@@ -22,6 +22,7 @@ import { ReportButton } from '../components/ReportSheet';
 import { NotificationBell } from '../components/NotificationBell';
 import { Threads } from '../components/Threads';
 import { PopupBanner } from '../components/PopupBanner';
+import { pt } from '../i18n';
 
 const CHILD_AVAILABILITY = [
   { value: 'available_now', label: 'Open to trials' },
@@ -101,14 +102,23 @@ export default function GuardianDashboard() {
 
   if (kind !== 'guardian') return <Redirect href="/onboarding" />;
 
-  const respond = async (requestId: string, accept: boolean) => {
-    if (!guardianId) return;
+  // M23 P3: an optional short reply that travels with the answer to a contact.
+  const [replies, setReplies] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const respond = async (requestId: string, accept: boolean, isContact: boolean) => {
+    if (!guardianId || busy) return;
     setError(null);
+    setBusy(requestId);
     try {
-      await client.guardianRespond(guardianId, requestId, accept, accept ? chosenSlots[requestId] : undefined);
+      const reply = isContact ? replies[requestId]?.trim() || undefined : undefined;
+      await client.guardianRespond(guardianId, requestId, accept, accept ? chosenSlots[requestId] : undefined, reply);
+      setReplies((s) => { const n = { ...s }; delete n[requestId]; return n; });
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not respond');
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -191,7 +201,9 @@ export default function GuardianDashboard() {
             <Muted size={13}>
               {r.scoutRole ?? 'Scout'} — {r.scoutName} · about {r.playerName ?? r.playerId} · {new Date(r.createdAt).toLocaleString()}
             </Muted>
-            {r.message ? <Text style={styles.msg}>“{r.message}”</Text> : null}
+            {r.subject ? <Text style={styles.subject} testID={`req-subject-${r.id}`}>{r.subject}</Text> : null}
+            {r.message ? <Text style={styles.msg} testID={`req-message-${r.id}`}>“{r.message}”</Text> : null}
+            {r.type === 'contact' && <Muted size={12}>{pt('ctGuardianNote')}</Muted>}
             {r.type === 'trial' && r.trialDetails && (
               <Muted size={12.5}>
                 {r.trialDetails.venue ? `Venue: ${r.trialDetails.venue}. ` : ''}
@@ -214,13 +226,36 @@ export default function GuardianDashboard() {
               </>
             )}
             {r.status === 'pending' ? (
-              <Row>
-                <Button small primary label={r.type === 'trial' ? 'Accept trial' : 'Accept conversation'} onPress={() => respond(r.id, true)} />
-                <Button small danger label="Decline" onPress={() => respond(r.id, false)} />
-              </Row>
+              <>
+                {r.type === 'contact' && (
+                  <>
+                    <Text style={styles.label} nativeID={`reply-label-${r.id}`}>{pt('ctReply')}</Text>
+                    <TextInput
+                      style={styles.input}
+                      testID={`req-reply-${r.id}`}
+                      accessibilityLabel={pt('ctReply')}
+                      accessibilityLabelledBy={`reply-label-${r.id}`}
+                      placeholder={pt('ctReplyHint')}
+                      placeholderTextColor={colors.muted}
+                      value={replies[r.id] ?? ''}
+                      onChangeText={(v) => setReplies((s) => ({ ...s, [r.id]: v.slice(0, 500) }))}
+                      multiline
+                      maxLength={500}
+                    />
+                    <Muted size={12}>{pt('ctReplyNote')}</Muted>
+                  </>
+                )}
+                <Row>
+                  <Button small primary label={r.type === 'trial' ? 'Accept trial' : pt('ctAcceptGuardian')} onPress={() => respond(r.id, true, r.type === 'contact')} />
+                  <Button small danger label={pt('decline')} onPress={() => respond(r.id, false, r.type === 'contact')} />
+                </Row>
+              </>
             ) : (
               <Row>
                 <Pill label={r.status} tone={r.status === 'accepted' ? 'green' : 'red'} />
+                {r.type === 'contact' && (r.status === 'accepted' || r.status === 'declined') && (
+                  <Muted size={12.5}>{r.status === 'accepted' ? pt('ctRespondedAccepted') : pt('ctRespondedDeclined')}</Muted>
+                )}
                 {r.status === 'accepted' && r.contactChannel && <Pill label={`adult-to-adult channel: ${r.contactChannel}`} />}
               </Row>
             )}
@@ -566,7 +601,9 @@ const styles = StyleSheet.create({
   scroll: { padding: 18, gap: 10, maxWidth: 560, width: '100%', alignSelf: 'center' },
   h1: { color: colors.text, fontSize: 26, fontWeight: '800', marginTop: 6 },
   org: { color: colors.text, fontSize: 16, fontWeight: '700' },
+  subject: { color: colors.text, fontSize: 15, fontWeight: '700' },
   msg: { color: colors.text, fontSize: 14, fontStyle: 'italic', lineHeight: 20 },
+  label: { color: colors.text, fontSize: 13, fontWeight: '600' },
   input: {
     backgroundColor: colors.bg2,
     borderColor: colors.line,

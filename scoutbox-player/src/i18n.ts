@@ -261,6 +261,15 @@ const en = {
   footballHint: 'Your football record — what clubs see, and what you are working on.',
   opportunitiesHint: 'Everything you can pursue, and everything a club has offered you.',
 
+  // M23 P3 — Contact response (the answer to a club's contact belongs to that contact)
+  ctReply: 'Your reply (optional)',
+  ctReplyHint: 'A short note back to the club — up to 500 characters.',
+  ctReplyNote: 'Your reply goes with your answer and is recorded against this contact. No phone numbers, emails or links.',
+  ctAccept: 'Accept contact',
+  ctAcceptGuardian: 'Accept conversation',
+  ctRespondedAccepted: 'You accepted. The club sees your answer on the contact it sent — and can now talk to you here, on-platform.',
+  ctRespondedDeclined: 'You declined. The club sees only that, and nothing more.',
+  ctGuardianNote: 'This contact was routed to you because the player is under age. The club sees your answer, never your child’s.',
 };
 const fr: typeof en = {
   passport: 'Passeport de preuves', addClaim: 'Consigner une donnée', insufficient: 'Preuves encore insuffisantes — c’est affiché tel quel, jamais maquillé.',
@@ -512,6 +521,15 @@ const fr: typeof en = {
   footballHint: 'Votre dossier football \u2014 ce que voient les clubs, et ce sur quoi vous travaillez.',
   opportunitiesHint: 'Tout ce que vous pouvez viser, et tout ce qu\u2019un club vous a propos\u00e9.',
 
+  // M23 P3 \u2014 R\u00e9ponse \u00e0 un contact
+  ctReply: 'Votre r\u00e9ponse (facultative)',
+  ctReplyHint: 'Un court mot pour le club \u2014 500 caract\u00e8res maximum.',
+  ctReplyNote: 'Votre r\u00e9ponse accompagne votre d\u00e9cision et est consign\u00e9e sur ce contact. Pas de num\u00e9ro, d\u2019e-mail ni de lien.',
+  ctAccept: 'Accepter le contact',
+  ctAcceptGuardian: 'Accepter la conversation',
+  ctRespondedAccepted: 'Vous avez accept\u00e9. Le club voit votre r\u00e9ponse sur le contact envoy\u00e9 \u2014 et peut d\u00e9sormais vous parler ici, sur la plateforme.',
+  ctRespondedDeclined: 'Vous avez refus\u00e9. Le club ne voit que cela, rien de plus.',
+  ctGuardianNote: 'Ce contact vous a \u00e9t\u00e9 adress\u00e9 parce que le joueur est mineur. Le club voit votre r\u00e9ponse, jamais celle de votre enfant.',
 };
 
 export type PLang = 'en' | 'fr';

@@ -711,13 +711,19 @@ export const mockClient: PlayerClient = {
     return delay((inboxes.get(playerId) ?? []).slice());
   },
 
-  respond: (playerId, requestId, accept, chosenSlot) => {
+  respond: (playerId, requestId, accept, chosenSlot, message) => {
     const p = getPlayer(playerId);
     if (isMinorProfile(p)) throw new ClientError('GUARDIAN_MANAGED', 'This is managed by your parent or guardian.');
     const req = (inboxes.get(playerId) ?? []).find((r) => r.id === requestId);
     if (!req) throw new ClientError('REQUEST_NOT_FOUND', 'No such request');
     if (req.status !== 'pending') throw new ClientError('ALREADY_RESPONDED', 'Already responded');
+    // M23 P3: a reply rides with the answer; only a contact can carry one, and it is moderated like any shared text.
+    if (message) {
+      if (req.type !== 'contact' || message.length > 500) throw new ClientError('CONTACT_RESPONSE_INVALID', 'A reply must be short text on a contact request.');
+      moderate(message);
+    }
     req.status = accept ? 'accepted' : 'declined';
+    req.respondedAt = Date.now();
     if (accept && req.type === 'trial' && chosenSlot && req.trialDetails) {
       const ok = chosenSlot === req.trialDetails.proposedDate || (req.trialDetails.altSlots ?? []).includes(chosenSlot);
       if (ok) req.trialDetails = { ...req.trialDetails, proposedDate: chosenSlot };
@@ -1191,13 +1197,18 @@ export const mockClient: PlayerClient = {
     return delay(guardianRequests.filter((r) => g.childIds.includes(r.playerId)).slice().reverse());
   },
 
-  guardianRespond: (guardianId, requestId, accept, chosenSlot) => {
+  guardianRespond: (guardianId, requestId, accept, chosenSlot, message) => {
     const g = guardians.get(guardianId);
     if (!g) throw new ClientError('GUARDIAN_NOT_FOUND', 'No guardian account found.');
     const r = guardianRequests.find((x) => x.id === requestId && g.childIds.includes(x.playerId));
     if (!r) throw new ClientError('REQUEST_NOT_FOUND', 'No such request');
     if (r.status !== 'pending') throw new ClientError('ALREADY_RESPONDED', 'Already responded');
+    if (message) {
+      if (r.type !== 'contact' || message.length > 500) throw new ClientError('CONTACT_RESPONSE_INVALID', 'A reply must be short text on a contact request.');
+      moderate(message);
+    }
     r.status = accept ? 'accepted' : 'declined';
+    r.respondedAt = Date.now();
     if (accept && r.type === 'trial' && chosenSlot && r.trialDetails) {
       const ok = chosenSlot === r.trialDetails.proposedDate || (r.trialDetails.altSlots ?? []).includes(chosenSlot);
       if (ok) r.trialDetails = { ...r.trialDetails, proposedDate: chosenSlot };

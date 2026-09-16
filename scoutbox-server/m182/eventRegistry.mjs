@@ -222,6 +222,39 @@ export const EVENT_REGISTRY = {
     notificationEligible: true, analyticsEligible: false,
   },
 
+  // ------------------------------------------------------------- M23 P3
+  // The Contact workflow. Every one of these is ORGANISATION-PRIVATE and
+  // carries ids only. The RECIPIENT side deliberately adds no event: a send
+  // creates a `db.requests` row exactly as the legacy request route does, so
+  // the recipient hears through the existing `inbox` ping and `notify`, both
+  // of which are addressed to one person and pass through their preferences.
+  // A draft emits nothing a player could ever receive (§58, §83).
+  contact_created: {
+    domain: 'recruitment', sourceSystem: 'recruitmentContacts', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'contactId'],
+    dedupeStrategy: 'none', replayPolicy: 'replay', notificationEligible: false, analyticsEligible: false,
+  },
+  contact_sent: {
+    domain: 'recruitment', sourceSystem: 'recruitmentContacts', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'contactId'],
+    dedupeStrategy: 'none', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: true,
+  },
+  contact_failed: {
+    domain: 'recruitment', sourceSystem: 'recruitmentContacts', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'contactId'],
+    dedupeStrategy: 'none', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: false,
+  },
+  contact_external_recorded: {
+    domain: 'recruitment', sourceSystem: 'recruitmentContacts', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'contactId'],
+    dedupeStrategy: 'none', replayPolicy: 'replay', notificationEligible: false, analyticsEligible: true,
+  },
+  contact_responded: {
+    domain: 'recruitment', sourceSystem: 'recruitmentContacts', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'contactId'],
+    dedupeStrategy: 'none', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: true,
+  },
+
   player_development_evidence_changed: {
     domain: 'box_cam', sourceSystem: 'boxSessions', audience: 'player_private',
     privacyClass: 'subject_reference', payload: ['playerId'],

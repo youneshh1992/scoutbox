@@ -401,7 +401,7 @@ console.log('\n— §44/§45 — every one of the eighteen states survives a res
       room: { status: st, rev: 1, priority: 'normal' },
       history: [{ action: 'room_created', at: 1000 + i, detail: { status: st } }],
     })),
-    roomDecisions: [], requests: [], trials: [], assessments: [], signings: [],
+    roomDecisions: [], requests: [], trials: [], assessments: [], signings: [], recruitmentContacts: [],
   };
   runMigrations(db);
 

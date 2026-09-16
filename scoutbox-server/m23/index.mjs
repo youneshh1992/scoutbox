@@ -19,7 +19,8 @@ import {
   validateLifecycleReasons, LIFECYCLE_REASON_CODES,
 } from './lifecycle.mjs';
 import { buildRecruitmentJourney } from './journey.mjs';
-import { httpStatusFor, publicErrorBody } from './errors.mjs';
+import { sendDomainError } from './errors.mjs';
+import { registerContact } from './contactRoutes.mjs';
 import { roomRole } from '../m17/shared.mjs';
 import { guardRev, revMeta } from '../m181/concurrency.mjs';
 import { buildShared } from '../m12/shared.mjs';
@@ -49,32 +50,8 @@ export function registerM23(rawCtx) {
   /** Evidence provider. P2 ships the null provider: no phase supplies evidence yet. */
   const evidenceProvider = () => ctx.recruitmentEvidenceProvider ?? NULL_EVIDENCE_PROVIDER;
 
-  /**
-   * Answer a domain error through the ONE mapping table.
-   *
-   * Two things happen here that used to happen in two inline ternary chains:
-   *
-   *   1. The status comes from `M23_ERROR_HTTP`. There is no default branch,
-   *      so a code the table has never been told about becomes a 500 AND a log
-   *      line naming it — a loud unknown rather than a quiet 400.
-   *   2. The body is projected. The validator and the projector return rich
-   *      diagnostics — `missing` and `malformed` are lists of raw store names —
-   *      which are exactly right in a unit test and in this log, and are the
-   *      internal schema if they go out over HTTP.
-   */
-  const sendDomainError = (res, out, where) => {
-    const status = httpStatusFor(out?.error);
-    if (status === null) {
-      console.error(`M23 ${where} UNMAPPED_ERROR ${out?.error} — ${JSON.stringify(out)}`);
-      return res.status(500).json({
-        ok: false,
-        error: 'LIFECYCLE_INTERNAL',
-        message: 'The recruitment journey cannot be served for this case. This has been recorded.',
-      });
-    }
-    if (status === 500) console.error(`M23 ${where} ${out.error} — ${JSON.stringify(out)}`);
-    return res.status(status).json(publicErrorBody(out));
-  };
+  // Domain errors answer through `sendDomainError` in errors.mjs — the ONE
+  // mapping table, shared with the P3 Contact routes.
 
   // ------------------------------------------------------------- journey read
   orgRouter.get('/rooms/:id/journey', (req, res) => {
@@ -195,11 +172,19 @@ export function registerM23(rawCtx) {
       reasonCodes: LIFECYCLE_REASON_CODES,
     });
   });
+
+  // ------------------------------------------------------- P3 — Contact
+  // The Contact workflow registers on the same context: the same concealing
+  // room lookup, the same single status writer, the same evidence provider.
+  registerContact(ctx);
+
+  return ctx;
 }
 
 export function migrateM23() {
-  // P2 introduces no store. The lifecycle lives on records that already exist,
-  // and the journey is computed rather than kept. `db.recruitmentOffers`
-  // arrives with the phase that actually writes offers — creating it now would
-  // be a container for something no code can produce.
+  // P2 introduced no store. P3's `db.recruitmentContacts` is created by the
+  // migration registry (m182/migrations.mjs, `m230_004_recruitment_contacts`)
+  // so it survives an arbitrary restore — not here, where it would exist only
+  // after this module registered. `db.recruitmentOffers` still arrives with
+  // the phase that actually writes offers.
 }

@@ -23,6 +23,7 @@ import {
   rooms, ROOM_PRIORITIES, ROOM_TASK_STATES, ROOM_EVIDENCE_REVIEW_STATES, REASON_REQUIRED_STATUSES,
   type Room, type RoomActivityItem, type RoomAttentionItem, type RoomComment, type RoomTrust,
   type RoomDecision, type RoomDecisionTaxonomy, type RoomListResult, type RoomReadiness,
+  type ContactRecord, type ContactList, type ContactCaseMove,
 } from './roomsApi';
 import { STANDARD_PROTOCOLS } from './combineApi';
 import { m12, type StaffRow } from './m12api';
@@ -40,12 +41,12 @@ interface RoomsScreenProps {
   onCloseRoom?: () => void;
 }
 
-type TabId = 'overview' | 'passport' | 'evidence' | 'assessments' | 'combine' | 'development' | 'discussion' | 'activity' | 'decision';
+type TabId = 'overview' | 'passport' | 'evidence' | 'assessments' | 'combine' | 'development' | 'discussion' | 'contact' | 'activity' | 'decision';
 
 const TAB_KEYS: [TabId, string][] = [
   ['overview', 'rm.tab.overview'], ['passport', 'rm.tab.passport'], ['evidence', 'rm.tab.evidence'],
   ['assessments', 'rm.tab.assessments'], ['combine', 'rm.tab.combine'], ['development', 'rm.tab.development'],
-  ['discussion', 'rm.tab.discussion'], ['activity', 'rm.tab.activity'], ['decision', 'rm.tab.decision'],
+  ['discussion', 'rm.tab.discussion'], ['contact', 'rm.tab.contact'], ['activity', 'rm.tab.activity'], ['decision', 'rm.tab.decision'],
 ];
 
 const VIEWS: [string, string][] = [
@@ -343,6 +344,7 @@ function RoomView({ session, tick, notify, openPlayer, roomId, onCloseRoom }: Ro
         {tab === 'combine' && <RoomCombinePanel {...shared} />}
         {tab === 'development' && <DevelopmentPanel {...shared} />}
         {tab === 'discussion' && <DiscussionPanel {...shared} />}
+        {tab === 'contact' && <ContactPanel {...shared} />}
         {tab === 'activity' && <ActivityPanel {...shared} />}
         {tab === 'decision' && <DecisionPanel {...shared} />}
       </div>
@@ -1205,6 +1207,244 @@ function DecisionPanel({ session, room, notify, reload }: PanelProps) {
           {history.map((d) => <DecisionRow key={d.id} d={d} currentScore={room.trust?.score ?? null} />)}
         </div>
         <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{t('rm.decisionAppendOnly')}</div>
+      </div>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------- contact (M23 P3)
+//
+// A page-local tab inside the Room: Contact is a FUNCTION of the case, not a
+// destination. Everything the recipient will read is written here and is
+// visibly separate from Discussion, which never travels with it. A draft is
+// shown as a draft; "Delivered" means "in their ScoutBox Inbox" and the note
+// beside it says exactly that; a failed send keeps the draft; a recorded call
+// says who recorded it.
+const contactStatusLabel = (code: string, fallback?: string | null) => t(`ct.st.${code}`, fallback ?? code.replace(/_/g, ' '));
+const contactChannelLabel = (code: string, fallback?: string | null) => t(`ct.ch.${code}`, fallback ?? code.replace(/_/g, ' '));
+const contactEventLabel = (code: string) => t(`ct.ev.${code}`, code.replace(/^contact_/, '').replace(/_/g, ' '));
+
+function contactErrMessage(e: unknown): string {
+  if (e instanceof ApiError) {
+    const specific = t(`ct.err.${e.code}`, '');
+    if (specific) return specific;
+    if (/VERSION_CONFLICT$/.test(e.code)) return t('common.conflict');
+    return e.message;
+  }
+  return e instanceof Error ? e.message : 'failed';
+}
+
+function ContactRow({ c, canWrite, busy, onEdit, onSend, onCancel }: {
+  c: ContactRecord; canWrite: boolean; busy: boolean;
+  onEdit: (c: ContactRecord) => void; onSend: (c: ContactRecord) => void; onCancel: (c: ContactRecord) => void;
+}) {
+  const editable = canWrite && (c.status === 'draft' || c.status === 'failed');
+  const tone = c.status === 'delivered' || c.status === 'responded' || c.status === 'recorded' ? 'blue' : c.status === 'failed' ? 'gold' : '';
+  return (
+    <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }} data-contact-id={c.id} data-contact-status={c.status}>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span className={`pill ${tone}`.trim()}>{contactStatusLabel(c.status, c.statusLabel)}</span>
+        <span className="pill">{contactChannelLabel(c.channel, c.channelLabel)}</span>
+        {c.recipient && <span className="pill">{c.recipient.type === 'guardian' ? t('ct.toGuardian') : t('ct.toPlayer')}</span>}
+        <span className="dim grow" style={{ fontSize: 12.5 }}>{fmtDateTime(c.status === 'recorded' ? (c.occurredAt ?? c.createdAt) : c.createdAt)}</span>
+      </div>
+      {c.subject && <b style={{ marginTop: 4 }}>{c.subject}</b>}
+      {c.body && <div style={{ marginTop: 2, whiteSpace: 'pre-wrap' }}>{c.body}</div>}
+      {c.summary && <div className="dim" style={{ marginTop: 2, fontSize: 13 }}>“{c.summary}”</div>}
+      <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
+        {c.status === 'draft' && t('ct.draftNote')}
+        {c.status === 'delivered' && `${t('ct.deliveredNote')} · ${c.sentBy?.name ?? ''} · ${fmtDateTime(c.deliveredAt ?? c.createdAt)}`}
+        {c.status === 'responded' && `${t('ct.deliveredNote')} · ${c.sentBy?.name ?? ''} · ${fmtDateTime(c.deliveredAt ?? c.createdAt)}`}
+        {c.status === 'failed' && `${t('ct.failedNote')} (${c.attempts} ${t('ct.attempts')})`}
+        {c.status === 'recorded' && `${t('ct.recordedNote')} ${c.recordedBy?.name ?? ''} · ${fmtDateTime(c.recordedAt ?? c.createdAt)}`}
+        {c.status === 'cancelled' && t('ct.cancelledNote')}
+      </div>
+      {c.emailCopy && <div className="dim" style={{ fontSize: 12 }}>{t(`ct.emailCopy.${c.emailCopy.state}`, c.emailCopy.state)}</div>}
+      {c.lifecycle?.applied && <div className="dim" style={{ fontSize: 12 }}>{t('ct.caseMoved')}</div>}
+      {c.response && (
+        <div className="notice block" style={{ marginTop: 6 }} aria-label={t('ct.response')}>
+          <b>{t('ct.response')}:</b>{' '}
+          <span className={`pill ${c.response.kind === 'accepted' ? 'blue' : ''}`.trim()}>{t(`ct.resp.${c.response.kind}`, c.response.kind)}</span>{' '}
+          <span className="dim">{t(`ct.by.${c.response.by}`, c.response.by)} · {fmtDateTime(c.response.at)}</span>
+          {c.response.message && <div style={{ marginTop: 4 }}>“{c.response.message}”</div>}
+        </div>
+      )}
+      {editable && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+          <button className="primary" disabled={busy} onClick={() => onSend(c)}>{t('ct.send')}</button>
+          <button disabled={busy} onClick={() => onEdit(c)}>{t('ct.edit')}</button>
+          <button disabled={busy} onClick={() => onCancel(c)}>{t('ct.cancel')}</button>
+        </div>
+      )}
+      <details style={{ marginTop: 4 }}>
+        <summary className="dim" style={{ fontSize: 12, cursor: 'pointer' }}>{t('ct.timeline')} ({c.history.length})</summary>
+        <div className="list-rows">
+          {c.history.map((h) => (
+            <div key={h.id} className="list-row" style={{ fontSize: 12.5 }}>
+              <span className="dim" style={{ minWidth: 120 }}>{fmtDateTime(h.at)}</span>
+              <span className="grow">{contactEventLabel(h.action)}</span>
+              <span className="dim">{h.by?.name ?? ''}</span>
+            </div>
+          ))}
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function ContactPanel({ session, room, notify, reload }: PanelProps) {
+  const [data, setData] = useState<ContactList | null>(null);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [bump, setBump] = useState(0);
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [editing, setEditing] = useState<ContactRecord | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [conflict, setConflict] = useState<Conflict | null>(null);
+  const [live, setLive] = useState('');
+  const [channel, setChannel] = useState('phone');
+  const [occurredAt, setOccurredAt] = useState('');
+  const [summary, setSummary] = useState('');
+  const [confirmed, setConfirmed] = useState(false);
+  // One key per compose session, so a retried save or send is the same request.
+  const createKey = useMemo(() => `ct-${room.roomId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, [room.roomId, bump]);
+
+  const refresh = useCallback(() => setBump((b) => b + 1), []);
+  useEffect(() => {
+    let on = true;
+    setLoadErr(null);
+    rooms.contacts(session, room.roomId).then((d) => { if (on) setData(d); }).catch((e) => { if (on) setLoadErr(contactErrMessage(e)); });
+    return () => { on = false; };
+  }, [session, room.roomId, room.rev, bump]);
+
+  const run = async (fn: () => Promise<string>) => {
+    setBusy(true); setConflict(null);
+    try { const msg = await fn(); setLive(msg); notify(msg); refresh(); reload(); }
+    catch (e) { const c = conflictOf(e); if (c) setConflict(c); else { const m = contactErrMessage(e); setLive(m); notify(m, true); } }
+    finally { setBusy(false); }
+  };
+  const clearCompose = () => { setEditing(null); setSubject(''); setBody(''); };
+  const moveText = (moved: ContactCaseMove | undefined) => (moved && 'to' in moved ? ` ${t('ct.caseMoved')}` : '');
+
+  const saveDraft = () => run(async () => {
+    if (editing) { await rooms.patchContact(session, room.roomId, editing.id, { subject: subject.trim() || null, body: body.trim(), expectedRev: editing.rev }); clearCompose(); return t('ct.updated'); }
+    await rooms.createContact(session, room.roomId, { subject: subject.trim() || null, body: body.trim(), clientKey: createKey });
+    clearCompose();
+    return t('ct.drafted');
+  });
+  const sendNow = () => run(async () => {
+    const c = editing
+      ? (await rooms.patchContact(session, room.roomId, editing.id, { subject: subject.trim() || null, body: body.trim(), expectedRev: editing.rev })).contact
+      : (await rooms.createContact(session, room.roomId, { subject: subject.trim() || null, body: body.trim(), clientKey: createKey })).contact;
+    const r = await rooms.sendContact(session, room.roomId, c.id, { expectedRev: c.rev, clientKey: `${createKey}-send` });
+    clearCompose();
+    return r.delivered ? `${t('ct.sent')}${moveText(r.case)}` : t('ct.sendFailed');
+  });
+  const sendExisting = (c: ContactRecord) => run(async () => {
+    const r = await rooms.sendContact(session, room.roomId, c.id, { expectedRev: c.rev, clientKey: `ct-send-${c.id}-${c.rev}` });
+    return r.delivered ? `${t('ct.sent')}${moveText(r.case)}` : t('ct.sendFailed');
+  });
+  const cancelDraft = (c: ContactRecord) => run(async () => { await rooms.cancelContact(session, room.roomId, c.id, { expectedRev: c.rev }); if (editing?.id === c.id) clearCompose(); return t('ct.cancelled'); });
+  const startEdit = (c: ContactRecord) => { setEditing(c); setSubject(c.subject ?? ''); setBody(c.body ?? ''); };
+  const recordExternal = () => run(async () => {
+    const ts = new Date(occurredAt).getTime();
+    if (!occurredAt || !Number.isFinite(ts)) throw new ApiError(400, 'CONTACT_OCCURRED_AT_INVALID', t('ct.err.CONTACT_OCCURRED_AT_INVALID'));
+    const r = await rooms.recordExternalContact(session, room.roomId, {
+      channel, occurredAt: ts, summary: summary.trim() || null,
+      recipientType: data?.routing.type === 'guardian' ? 'guardian' : 'player',
+      clientKey: `ct-ext-${room.roomId}-${channel}-${ts}`,
+    });
+    setSummary(''); setOccurredAt(''); setConfirmed(false);
+    return `${t('ct.recorded')}${moveText(r.case)}`;
+  });
+
+  if (loadErr) return <div className="section" aria-label={t('ct.title')}><LoadError message={loadErr} onRetry={refresh} /></div>;
+  if (!data) return <div className="section" aria-label={t('ct.title')}><div className="dim">{t('rm.loading')}</div></div>;
+
+  const routing = data.routing;
+  const canCompose = data.canWrite && data.case.acceptsContact && routing.available;
+  const spokeTo = routing.type === 'guardian' ? t('ct.spokeToGuardian') : t('ct.spokeToPlayer');
+
+  return (
+    <>
+      <div className="section" aria-label={t('ct.title')}>
+        <h4>{t('ct.title')}</h4>
+        <div className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>{t('ct.intro')}</div>
+
+        {/* Routing: who this WOULD reach, decided by the server now — never by this screen. */}
+        <div className="badges" style={{ marginBottom: 8 }} aria-label={t('ct.routingLabel')}>
+          {routing.available
+            ? <span className={`pill ${routing.type === 'guardian' ? 'gold' : 'blue'}`}>{routing.type === 'guardian' ? t('ct.routeGuardian') : t('ct.routePlayer')}</span>
+            : <span className="pill">{t('ct.routeUnavailable')}{routing.reason ? ` — ${t(`ct.reason.${routing.reason}`, '')}` : ''}</span>}
+        </div>
+
+        {!data.case.acceptsContact && (
+          <div className="notice block" role="status" style={{ marginBottom: 8 }}>
+            {t('ct.caseGate')} <span className="dim">({t('rm.status')}: {statusLabel(data.case.status)})</span>
+          </div>
+        )}
+        {data.cooldown && (
+          <div className="notice block" role="status" style={{ marginBottom: 8 }}>{t('ct.cooldown')} {fmtDateTime(data.cooldown.until)}.</div>
+        )}
+        {!data.canWrite && <div className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>{t('ct.readOnly')}</div>}
+        {conflict && <ConflictNotice conflict={conflict} onReload={() => { setConflict(null); refresh(); }} onKeepChanges={() => setConflict(null)} />}
+
+        {data.canWrite && (
+          <form onSubmit={(e) => { e.preventDefault(); saveDraft(); }} aria-label={editing ? t('ct.editing') : t('ct.compose')}>
+            {editing && <div className="dim" style={{ fontSize: 12.5, marginBottom: 4 }}>{t('ct.editing')} · <button type="button" onClick={clearCompose}>{t('ct.discardEdit')}</button></div>}
+            <label style={{ display: 'block', fontSize: 13 }}>
+              {t('ct.subject')}
+              <input style={{ width: '100%', marginTop: 2 }} aria-label={t('ct.subject')} maxLength={data.limits.subject} value={subject} onChange={(e) => setSubject(e.target.value)} disabled={!canCompose && !editing} />
+            </label>
+            <label style={{ display: 'block', fontSize: 13, marginTop: 6 }}>
+              {t('ct.body')}
+              <textarea style={{ width: '100%', minHeight: 90, marginTop: 2 }} aria-label={t('ct.body')} maxLength={data.limits.body} value={body} onChange={(e) => setBody(e.target.value)} disabled={!canCompose && !editing} />
+            </label>
+            <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>{t('ct.sharedNote')}</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+              <button type="submit" disabled={busy || !body.trim() || (!canCompose && !editing)}>{editing ? t('ct.update') : t('ct.saveDraft')}</button>
+              <button type="button" className="primary" disabled={busy || !body.trim() || !canCompose} onClick={sendNow}>{t('ct.sendNow')}</button>
+            </div>
+          </form>
+        )}
+
+        {data.canWrite && (
+          <details className="room-details" style={{ marginTop: 10 }}>
+            <summary>{t('ct.external')}</summary>
+            <div className="dim" style={{ fontSize: 12.5, margin: '6px 0' }}>{t('ct.externalNote')}</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <label style={{ fontSize: 13 }}>
+                {t('ct.channel')}<br />
+                <select aria-label={t('ct.channel')} value={channel} onChange={(e) => setChannel(e.target.value)}>
+                  {data.channels.external.map((ch) => <option key={ch.id} value={ch.id}>{contactChannelLabel(ch.id, ch.label)}</option>)}
+                </select>
+              </label>
+              <label style={{ fontSize: 13 }}>
+                {t('ct.occurredAt')}<br />
+                <input type="datetime-local" aria-label={t('ct.occurredAt')} value={occurredAt} onChange={(e) => setOccurredAt(e.target.value)} />
+              </label>
+            </div>
+            <input style={{ width: '100%', marginTop: 6 }} aria-label={t('ct.summary')} placeholder={t('ct.summary')} maxLength={data.limits.summary} value={summary} onChange={(e) => setSummary(e.target.value)} />
+            <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginTop: 6 }}>
+              <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} aria-label={`${t('ct.spokeTo')} ${spokeTo}`} />
+              {t('ct.spokeTo')} <b>{spokeTo}</b> {t('ct.spokeToConfirm')}
+            </label>
+            <button style={{ marginTop: 8 }} disabled={busy || !confirmed || !occurredAt || !canCompose} onClick={recordExternal}>{t('ct.record')}</button>
+          </details>
+        )}
+        <div role="status" aria-live="polite" className="dim" style={{ fontSize: 12.5, marginTop: 8, minHeight: 16 }}>{live}</div>
+      </div>
+
+      <div className="section" aria-label={t('ct.history')}>
+        <h4>{t('ct.history')} <span className="dim" style={{ fontSize: 12.5 }}>({data.items.length})</span></h4>
+        {data.items.length === 0 && <div className="dim">{t('ct.none')}</div>}
+        <div className="list-rows">
+          {data.items.slice().reverse().map((c) => (
+            <ContactRow key={c.id} c={c} canWrite={data.canWrite} busy={busy} onEdit={startEdit} onSend={sendExisting} onCancel={cancelDraft} />
+          ))}
+        </div>
+        {data.omitted > 0 && <div className="notice block" style={{ marginTop: 6 }}>{data.omitted} {t('ct.omitted')}</div>}
+        <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{t('ct.historyNote')}</div>
       </div>
     </>
   );

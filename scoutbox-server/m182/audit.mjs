@@ -45,12 +45,21 @@ const LEDGER_ACTIONS = new Set(['staff_removed', 'signing', 'released_by_club'])
 const DEVELOPMENT_ACTIONS = new Set([
   'plan_created', 'plan_archived', 'plan_visibility_changed', 'review_submitted',
 ]);
+/**
+ * M23 P3: what happened to a Contact, never what it said. Drafting and
+ * editing are the author's business until something leaves; sending,
+ * failing, recording, cancelling and the recipient's answer are the
+ * administrator's.
+ */
+const CONTACT_ACTIONS = new Set([
+  'contact_sent', 'contact_send_failed', 'contact_external_recorded', 'contact_responded', 'contact_cancelled',
+]);
 
 /** The structured, content-free summary of one history detail. */
 function safeDetail(action, detail) {
   if (!detail || typeof detail !== 'object') return null;
   const out = {};
-  for (const k of ['from', 'to', 'status', 'priority', 'recommendation', 'version', 'criteriaChanged', 'sourceContext', 'kind']) {
+  for (const k of ['from', 'to', 'status', 'priority', 'recommendation', 'version', 'criteriaChanged', 'sourceContext', 'kind', 'channel', 'recipientType', 'code']) {
     if (detail[k] !== undefined) out[k] = detail[k];
   }
   if (Array.isArray(detail.reasonCodes)) out.reasonCodes = detail.reasonCodes.slice(0, 10);
@@ -132,6 +141,23 @@ export function registerAudit(ctx) {
           id: h.id, at: h.at, action: h.action, domain: 'development',
           actor: h.byKind === 'org' ? { userId: h.byId, name: h.byName } : null,
           target: { type: 'development_review', id: r.id },
+          detail: safeDetail(h.action, h.detail),
+        });
+      }
+    }
+    // M23 P3: Contact lifecycle. The subject is named only if the organisation
+    // may currently see the player; the body, the summary and the reply never
+    // reach this feed.
+    for (const c of db.recruitmentContacts ?? []) {
+      if (!c || c.orgId !== org.id) continue;
+      const p = findPlayer(c.playerId);
+      const subject = p && orgCanSee(org, p) ? { playerId: p.id, playerName: p.name } : { playerId: null, playerName: null };
+      for (const h of c.history ?? []) {
+        if (!CONTACT_ACTIONS.has(h?.action)) continue;
+        rows.push({
+          id: h.id, at: h.at, action: h.action, domain: 'recruitment_contact',
+          actor: h.by?.kind === 'org' ? { userId: h.by.userId ?? null, name: h.by.name ?? null } : null,
+          target: { type: 'contact', id: c.id, roomId: c.caseId, ...subject },
           detail: safeDetail(h.action, h.detail),
         });
       }

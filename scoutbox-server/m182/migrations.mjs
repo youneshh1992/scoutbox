@@ -43,7 +43,10 @@ import { MIGRATION_GUARANTEED } from '../storeContract.mjs';
 // `db.idvQueue` and `db.orgNotes` were created by `??=` inside a request
 // handler, so they existed only after the first write. A store that appears on
 // first write is invisible to every boot-time check.
-export const SCHEMA_VERSION = 2302;
+//
+// 23.0.3 — M23 P3 adds ONE store, `db.recruitmentContacts`, the Contact
+// workflow's own record. Justified in M23_P3_CONTACT_REUSE_AUDIT.md Part C.
+export const SCHEMA_VERSION = 2303;
 
 /**
  * Every step is idempotent: running it twice is the same as running it once.
@@ -273,6 +276,27 @@ export const MIGRATIONS = [
     up(db) {
       db.idvQueue ??= [];
       db.orgNotes ??= [];
+    },
+  },
+  {
+    version: 2303,
+    id: 'm230_004_recruitment_contacts',
+    // M23 P3 — the Contact workflow store. ONE collection, and the reuse
+    // audit that justifies it (M23_P3_CONTACT_REUSE_AUDIT.md, Part C):
+    //
+    //   db.requests is the recipient-visible object and every one of its
+    //   readers assumes a row is visible, so a DRAFT cannot live there;
+    //   delivery truth (delivered / failed / responded / recorded) belongs to
+    //   the communication and is forbidden from becoming a case state; and an
+    //   attested external contact creates nothing in anyone's Inbox.
+    //
+    // It is guaranteed here — by the registry — rather than by a `??=` at
+    // module registration, so a restored older snapshot has it before any
+    // request can reach the projector that declares it required.
+    // A container of user data: empty is the truthful default.
+    note: 'M23 P3: the Contact workflow store (recruitmentContacts).',
+    up(db) {
+      db.recruitmentContacts ??= [];
     },
   },
 ];

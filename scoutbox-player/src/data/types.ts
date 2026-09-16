@@ -269,7 +269,8 @@ export interface PlayerClient {
   pair(code: string): Promise<{ playerId: string; name: string }>;
   getMe(playerId: string): Promise<Me>;
   getInbox(playerId: string): Promise<(InboxRequest | ChildInboxItem)[]>;
-  respond(playerId: string, requestId: string, accept: boolean, chosenSlot?: string): Promise<void>;
+  /** M23 P3: `message` is an optional short reply carried with the answer to a contact request. */
+  respond(playerId: string, requestId: string, accept: boolean, chosenSlot?: string, message?: string): Promise<void>;
   setAcademyPlus(playerId: string, enabled: boolean): Promise<void>;
   /** dataUrl carries the actual video file when provided (web picker);
    *  attendanceId links footage to a verified attendance → Verified Clip seal. */
@@ -323,7 +324,7 @@ export interface PlayerClient {
   guardianChildren(guardianId: string): Promise<Me[]>;
   guardianAddChild(guardianId: string, input: ChildInput): Promise<{ playerId: string }>;
   guardianInbox(guardianId: string): Promise<GuardianInboxRequest[]>;
-  guardianRespond(guardianId: string, requestId: string, accept: boolean, chosenSlot?: string): Promise<void>;
+  guardianRespond(guardianId: string, requestId: string, accept: boolean, chosenSlot?: string, message?: string): Promise<void>;
   guardianLog(guardianId: string): Promise<{ id: string; ts: number; type: string; orgName: string; scoutName: string; playerId: string }[]>;
   guardianSetMedicalShared(guardianId: string, childId: string, shared: boolean): Promise<void>;
   guardianReport(guardianId: string, input: ReportInput): Promise<void>;

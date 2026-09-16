@@ -71,7 +71,7 @@ function buildDb({ targetEvents, otherCases = 0, otherOrgCases = 0, historyPerOt
   for (let i = 0; i < otherOrgCases; i += 1) cases.push(makeCase(`case-f${i}`, 'org-F', `pl-f${i}`, historyPerOther));
   return {
     recruitmentCases: cases,
-    roomDecisions: [], requests: [], trials: [], assessments: [], signings: [],
+    roomDecisions: [], requests: [], trials: [], assessments: [], signings: [], recruitmentContacts: [],
   };
 }
 

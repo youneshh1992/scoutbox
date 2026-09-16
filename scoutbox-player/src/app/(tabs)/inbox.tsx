@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { client } from '../../data/client';
 import type { Channel } from '../../data/types';
@@ -22,6 +22,9 @@ export default function Inbox() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [chosenSlots, setChosenSlots] = useState<Record<string, string>>({});
+  // M23 P3: an optional short reply that travels with the answer to a contact.
+  const [replies, setReplies] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState<string | null>(null);
 
   useEffect(() => {
     if (playerId && !isMinor) client.getChannels(playerId).then(setChannels).catch(() => {});
@@ -34,15 +37,20 @@ export default function Inbox() {
     setRefreshing(false);
   }, [refresh, playerId, isMinor]);
 
-  const respond = async (requestId: string, accept: boolean) => {
-    if (!playerId) return;
+  const respond = async (requestId: string, accept: boolean, isContact: boolean) => {
+    if (!playerId || busy) return;
     setError(null);
+    setBusy(requestId);
     try {
-      await client.respond(playerId, requestId, accept, accept ? chosenSlots[requestId] : undefined);
+      const reply = isContact ? replies[requestId]?.trim() || undefined : undefined;
+      await client.respond(playerId, requestId, accept, accept ? chosenSlots[requestId] : undefined, reply);
+      setReplies((s) => { const n = { ...s }; delete n[requestId]; return n; });
       await refresh();
       if (playerId) setChannels(await client.getChannels(playerId));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not respond');
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -112,7 +120,8 @@ export default function Inbox() {
               <Muted size={13}>
                 From {r.scoutName}{r.scoutRole ? ` (${r.scoutRole})` : ''} · {new Date(r.createdAt).toLocaleString()}
               </Muted>
-              {r.message ? <Text style={styles.msg}>“{r.message}”</Text> : null}
+              {r.subject ? <Text style={styles.subject} testID={`req-subject-${r.id}`}>{r.subject}</Text> : null}
+              {r.message ? <Text style={styles.msg} testID={`req-message-${r.id}`}>“{r.message}”</Text> : null}
               {r.type === 'trial' && r.trialDetails && (
                 <Muted size={12.5}>
                   {r.trialDetails.venue ? `Venue: ${r.trialDetails.venue}. ` : ''}
@@ -135,13 +144,36 @@ export default function Inbox() {
                 </>
               )}
               {r.status === 'pending' ? (
-                <Row>
-                  <Button small primary label={r.type === 'trial' ? 'Accept trial' : 'Accept contact'} onPress={() => respond(r.id, true)} />
-                  <Button small danger label="Decline" onPress={() => respond(r.id, false)} />
-                </Row>
+                <>
+                  {r.type === 'contact' && (
+                    <>
+                      <Text style={styles.label} nativeID={`reply-label-${r.id}`}>{pt('ctReply')}</Text>
+                      <TextInput
+                        style={styles.input}
+                        testID={`req-reply-${r.id}`}
+                        accessibilityLabel={pt('ctReply')}
+                        accessibilityLabelledBy={`reply-label-${r.id}`}
+                        placeholder={pt('ctReplyHint')}
+                        placeholderTextColor={colors.muted}
+                        value={replies[r.id] ?? ''}
+                        onChangeText={(v) => setReplies((s) => ({ ...s, [r.id]: v.slice(0, 500) }))}
+                        multiline
+                        maxLength={500}
+                      />
+                      <Muted size={12}>{pt('ctReplyNote')}</Muted>
+                    </>
+                  )}
+                  <Row>
+                    <Button small primary label={r.type === 'trial' ? 'Accept trial' : pt('ctAccept')} onPress={() => respond(r.id, true, r.type === 'contact')} />
+                    <Button small danger label={pt('decline')} onPress={() => respond(r.id, false, r.type === 'contact')} />
+                  </Row>
+                </>
               ) : (
                 <Row>
                   <Pill label={r.status} tone={r.status === 'accepted' ? 'green' : 'red'} />
+                  {r.type === 'contact' && (r.status === 'accepted' || r.status === 'declined') && (
+                    <Muted size={12.5}>{r.status === 'accepted' ? pt('ctRespondedAccepted') : pt('ctRespondedDeclined')}</Muted>
+                  )}
                   {r.status === 'accepted' && r.contactChannel && <Pill label={`channel open: ${r.contactChannel}`} />}
                   {r.status === 'accepted' && r.type === 'trial' && (
                     <Muted size={12.5}>The club must file a full performance report after your trial — it goes on your profile.</Muted>
@@ -176,5 +208,18 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: 18, gap: 10, maxWidth: 560, width: '100%', alignSelf: 'center' },
   org: { color: colors.text, fontSize: 16, fontWeight: '700' },
+  subject: { color: colors.text, fontSize: 15, fontWeight: '700' },
   msg: { color: colors.text, fontSize: 14, fontStyle: 'italic', lineHeight: 20 },
+  label: { color: colors.text, fontSize: 13, fontWeight: '600' },
+  input: {
+    backgroundColor: colors.bg2,
+    borderColor: colors.line,
+    borderWidth: 1,
+    borderRadius: 10,
+    color: colors.text,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
+    minHeight: 44,
+  },
 });

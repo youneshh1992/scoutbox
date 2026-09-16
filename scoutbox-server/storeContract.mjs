@@ -128,6 +128,7 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   pushTokens: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   recruitmentBriefs: { guarantee: 'migration', owner: 'm18', reason: 'Second Look / Nobody Missed collection, guaranteed by the migration registry' },
   recruitmentCases: { guarantee: 'migration', owner: 'm12', reason: 'the canonical recruitment object (M12); the lifecycle lives on it' },
+  recruitmentContacts: { guarantee: 'migration', owner: 'm23', reason: 'M23 P3 Contact workflow: the club-internal record of a communication process. A draft must live where no recipient route reads, and delivery truth must not become a case state' },
   recruitmentOffers: { guarantee: 'optional', owner: 'core', reason: 'M23 P4 has not shipped. The journey reports offer.available=false rather than an empty list — we cannot answer that yet is a different statement from there are none' },
   reports: { guarantee: 'migration', owner: 'core', reason: 'report-user/scout/club submissions (D2)' },
   representations: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },

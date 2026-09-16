@@ -188,3 +188,27 @@ have introduced one.
 
 A hand-written list of codes here would pass forever while the module grew one
 nobody mapped — which is precisely what the ternary chain did.
+
+## 6. M23 P3 — the Contact codes (appended)
+
+P3 extends the same table, under the same rule (no default branch), with
+twenty-two `CONTACT_*` codes and one new band:
+
+| band | codes |
+|---|---|
+| 400 | `CONTACT_CONTENT_INVALID`, `CONTACT_CONTENT_TOO_LONG`, `CONTACT_CLIENT_KEY_INVALID`, `CONTACT_REV_REQUIRED`, `CONTACT_CHANNEL_INVALID`, `CONTACT_OCCURRED_AT_INVALID`, `CONTACT_RECIPIENT_MISMATCH`, `CONTACT_ACTION_UNKNOWN`, `CONTACT_RESPONSE_INVALID` |
+| 403 | `CONTACT_NOT_PERMITTED`, `CONTACT_BLOCKED` |
+| 404 | `CONTACT_NOT_FOUND` (reached only after the room's own concealing lookup) |
+| 409 | `CONTACT_INVALID_STATE`, `CONTACT_ALREADY_SENT`, `CONTACT_CASE_STATE`, `CONTACT_VERSION_CONFLICT`, `CONTACT_IDEMPOTENCY_CONFLICT` |
+| 422 | `CONTACT_RECIPIENT_UNAVAILABLE`, `CONTACT_GUARDIAN_REQUIRED` |
+| **429** | `CONTACT_COOLDOWN` — the deterministic per-recipient cooldown; the body carries `retryAt`, which joined the public field list. The limiter's own `RATE_LIMITED` stays outside the table, as before. |
+| 500 | `CONTACT_STATE_UNKNOWN`, `CONTACT_STORE_MISSING` |
+
+The mapping function moved from `m23/index.mjs` into `m23/errors.mjs` as
+`sendDomainError`, so the lifecycle routes and the Contact routes share one
+place where a code becomes a status. The drift guard grew with it: `Y1` also
+matches the `err(res, 'CODE')` form and sweeps `errors.mjs` itself, `Y6`
+admits 429, and the `EXTERNAL` set (codes raised by another module) lists
+`CONTACT_VERSION_CONFLICT` beside `ROOM_VERSION_CONFLICT`. Hidden-case parity
+(`Y12`/`Y13`) is asserted again for the Contact list, one-by-id, write and
+send in `m23ContactE2E` R5–R5d.

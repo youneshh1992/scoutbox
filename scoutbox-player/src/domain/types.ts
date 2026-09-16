@@ -162,9 +162,12 @@ export interface InboxRequest {
   trustedPartner: boolean;
   scoutName: string;
   scoutRole?: string;
+  /** M23 P3: a Contact sent from a recruitment case carries a subject line. */
+  subject?: string | null;
   message: string;
   status: 'pending' | 'accepted' | 'declined' | 'suspended';
   createdAt: number;
+  respondedAt?: number | null;
   contactChannel: string | null;
 }
 

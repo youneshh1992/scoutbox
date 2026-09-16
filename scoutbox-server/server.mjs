@@ -38,6 +38,7 @@ import { registerAudit } from './m182/audit.mjs';
 import { createFaultLayer } from './m182/faults.mjs';
 import { httpContractMiddleware } from './m182/httpContract.mjs';
 import { integrityReport, integritySummary } from './m182/integrity.mjs';
+import { validateContactReply } from './m23/contact.mjs';
 import { requestInstrumentation } from './m13/enterprise.mjs';
 import { totpValid } from './m13/shared.mjs';
 import {
@@ -1253,7 +1254,7 @@ guardianRouter.get('/inbox', (req, res) => {
   res.json(
     db.requests
       .filter((r) => r.routedTo === 'guardian' && req.guardian.childIds.includes(r.playerId))
-      .map(({ orgId, userId, ...visible }) => visible)
+      .map(requestForRecipient)
       .slice()
       .reverse()
   );
@@ -1267,10 +1268,22 @@ guardianRouter.post('/requests/:id/respond', (req, res) => {
   if (request.status !== 'pending') return res.status(409).json({ error: 'ALREADY_RESPONDED' });
   const child = findPlayer(request.playerId);
   const { accept, chosenSlot } = req.body || {};
+  const replyCheck = contactReplyFrom(req, res, request);
+  if (!replyCheck.ok) return;
+  // A block the guardian placed AFTER the request arrived: they may still
+  // decline it, but accepting would open a thread with an organisation they
+  // blocked, so that is refused (M23 P3 §68/§69).
+  if (accept && isBlocked(request.playerId, request.orgId)) {
+    return res.status(403).json({ error: 'BLOCKED', message: 'You have blocked this organisation. Lift the block before accepting.' });
+  }
+  if (request.contactId && rateLimit.limited('contact_response', `guardian:${req.guardian.id}`)) return res.status(429).json(rateLimitedBody('contact_response'));
+  const respondedAt = Date.now();
   request.status = accept ? 'accepted' : 'declined';
-  persistNow();
-  request.respondedAt = Date.now();
+  request.respondedAt = respondedAt;
   request.respondedBy = 'guardian';
+  // M23 P3: the Contact that created this request learns of the answer.
+  m23Ctx?.onRequestResponded?.({ request, accept: !!accept, message: replyCheck.reply, by: 'guardian', at: respondedAt });
+  persistNow();
 
   if (accept) {
     // The conversation that opens is between adults: club staff and guardian.
@@ -1307,8 +1320,7 @@ guardianRouter.post('/requests/:id/respond', (req, res) => {
     notify({ kind: 'player', id: child.id }, 'update', `Your parent/guardian declined the ${request.type} with ${request.orgName}.`, request.id);
   }
   broadcast('requests', { playerId: child.id });
-  const { orgId, userId, ...visible } = request;
-  res.json(visible);
+  res.json(requestForRecipient(request));
 });
 
 // Guardian-side message threads (adult-to-adult, moderated, logged).
@@ -1792,48 +1804,94 @@ orgRouter.post('/players/:id/request', (req, res) => {
     }
   }
 
-  const minor = !isAdult(p);
   const { proposedDate, venue, notes, altSlots } = req.body || {};
   if (notes && !moderateOrRefuse(res, notes, { kind: 'trial_notes', orgId: req.org.id })) return;
-  const request = {
-    id: nextId('req'),
-    playerId: p.id,
-    playerName: p.name,
-    orgId: req.org.id,
-    orgName: req.org.name,
-    orgType: req.org.type,
-    orgVerified: !!req.org.verified,
-    orgSafeguardingCertified: safeguardingCertified(req.org),
-    trustedPartner: req.org.trustedPartner,
-    userId: req.orgUser.id,
-    scoutName: req.orgUser.name,
-    scoutRole: req.orgUser.role || 'Scout',
-    type,
-    message: message || '',
+  const request = issueRecruitmentRequest({
+    org: req.org, orgUser: req.orgUser, player: p, type, message,
     // Trial logistics: what the player/guardian is actually agreeing to.
     // altSlots lets the other side pick a date that works (counter-proposal).
     trialDetails: type === 'trial'
       ? { proposedDate: proposedDate || null, altSlots: Array.isArray(altSlots) ? altSlots.slice(0, 2) : [], venue: venue || null, notes: notes || '' }
       : null,
+  });
+  res.status(201).json({ ok: true, requestId: request.id, status: 'pending', routedTo: request.routedTo });
+});
+
+/**
+ * THE one writer of an org → player/guardian request row.
+ *
+ * Extracted in M23 P3 so the Contact workflow's send creates its recipient-
+ * visible object through exactly the same path as the legacy request route:
+ * the same routing rule (scout → parent, never scout → child), the same
+ * ledger entry, the same notifications, the same `inbox` ping. A second
+ * writer would be a second Inbox by another name.
+ *
+ * `persist: false` lets a caller that is making several mutations in one
+ * synchronous step write them all with ONE `persistNow()` afterwards.
+ * `guardianId` lets a caller that has already resolved the guardian route
+ * (M23 P3 validates the record, the child link and the verification gates)
+ * name it; the legacy route keeps the player's own link.
+ */
+function issueRecruitmentRequest({
+  org, orgUser, player, type, message = '', trialDetails = null,
+  subject = null, contactId = null, guardianId = undefined, at = Date.now(),
+}, { persist: persistAfter = true } = {}) {
+  const minor = !isAdult(player);
+  const request = {
+    id: nextId('req'),
+    playerId: player.id,
+    playerName: player.name,
+    orgId: org.id,
+    orgName: org.name,
+    orgType: org.type,
+    orgVerified: !!org.verified,
+    orgSafeguardingCertified: safeguardingCertified(org),
+    trustedPartner: org.trustedPartner,
+    userId: orgUser.id,
+    scoutName: orgUser.name,
+    scoutRole: orgUser.role || 'Scout',
+    type,
+    message: message || '',
+    // M23 P3: a Contact carries an optional subject, and the row remembers
+    // which Contact created it. `contactId` is an internal link and is
+    // stripped from every recipient-facing view (`requestForRecipient`).
+    ...(subject ? { subject } : {}),
+    ...(contactId ? { contactId } : {}),
+    trialDetails,
     status: 'pending',
-    createdAt: Date.now(),
+    createdAt: at,
     // Scout → Parent, never Scout → Child.
     routedTo: minor ? 'guardian' : 'player',
-    guardianId: minor ? p.guardianId : null,
+    guardianId: minor ? (guardianId ?? player.guardianId) : null,
     contactChannel: null, // stays null until the player/guardian accepts
   };
   db.requests.push(request);
-  persistNow();
-  ledgerAppend({ type: `${type}_request${minor ? '_to_guardian' : ''}`, playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
+  if (persistAfter) persistNow();
+  ledgerAppend({ type: `${type}_request${minor ? '_to_guardian' : ''}`, playerId: player.id, orgId: org.id, orgName: org.name, userId: orgUser.id, scoutName: orgUser.name });
   if (minor) {
-    notify({ kind: 'guardian', id: p.guardianId }, 'request', `${req.org.name} has requested to discuss a ${type === 'trial' ? 'trial' : 'conversation'} for ${p.name}.`, request.id);
-    notify({ kind: 'player', id: p.id }, 'request', `${req.org.name} contacted your parent/guardian about a ${type === 'trial' ? 'trial' : 'conversation'}.`, request.id);
+    notify({ kind: 'guardian', id: request.guardianId }, 'request', `${org.name} has requested to discuss a ${type === 'trial' ? 'trial' : 'conversation'} for ${player.name}.`, request.id);
+    notify({ kind: 'player', id: player.id }, 'request', `${org.name} contacted your parent/guardian about a ${type === 'trial' ? 'trial' : 'conversation'}.`, request.id);
   } else {
-    notify({ kind: 'player', id: p.id }, 'request', `${req.org.name} sent you a ${type} request.`, request.id);
+    notify({ kind: 'player', id: player.id }, 'request', `${org.name} sent you a ${type} request.`, request.id);
   }
-  broadcast('inbox', { playerId: p.id });
-  res.status(201).json({ ok: true, requestId: request.id, status: 'pending', routedTo: request.routedTo });
-});
+  broadcast('inbox', { playerId: player.id });
+  return request;
+}
+
+/** A request row as its RECIPIENT may see it: no org id, no user id, no internal Contact link. */
+const requestForRecipient = ({ orgId, userId, contactId, ...visible }) => visible;
+
+/**
+ * M23 P3: an optional short reply on a CONTACT-type request. Validated before
+ * anything is mutated; refused if it is not text or if moderation refuses it.
+ * Returns `{ ok, reply }` or answers the request and returns `{ ok: false }`.
+ */
+function contactReplyFrom(req, res, request) {
+  const check = validateContactReply(req.body?.message, { isContact: request.type === 'contact' });
+  if (!check.ok) { res.status(400).json({ error: check.error, message: check.message }); return { ok: false }; }
+  if (check.reply && !moderateOrRefuse(res, check.reply, { kind: 'contact_reply', requestId: request.id })) return { ok: false };
+  return { ok: true, reply: check.reply };
+}
 
 // One-click reporting for org users too (report a player, scout or club).
 orgRouter.post('/report', (req, res) => handleReport(req, res, { by: 'org_user', byId: req.orgUser.id, byOrgId: req.org.id }));
@@ -2772,7 +2830,7 @@ playerRouter.get('/inbox', (req, res) => {
         .reverse()
     );
   }
-  res.json(rows.map(({ orgId, userId, ...visible }) => visible).slice().reverse());
+  res.json(rows.map(requestForRecipient).slice().reverse());
 });
 
 playerRouter.post('/requests/:id/respond', (req, res) => {
@@ -2781,9 +2839,20 @@ playerRouter.post('/requests/:id/respond', (req, res) => {
   if (!request) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
   if (request.status !== 'pending') return res.status(409).json({ error: 'ALREADY_RESPONDED' });
   const { accept, chosenSlot } = req.body || {};
+  const replyCheck = contactReplyFrom(req, res, request);
+  if (!replyCheck.ok) return;
+  // Same rule as the guardian route: a blocked organisation can be declined,
+  // never accepted (M23 P3 §68/§69).
+  if (accept && isBlocked(req.player.id, request.orgId)) {
+    return res.status(403).json({ error: 'BLOCKED', message: 'You have blocked this organisation. Lift the block before accepting.' });
+  }
+  if (request.contactId && rateLimit.limited('contact_response', `player:${req.player.id}`)) return res.status(429).json(rateLimitedBody('contact_response'));
+  const respondedAt = Date.now();
   request.status = accept ? 'accepted' : 'declined';
+  request.respondedAt = respondedAt;
+  // M23 P3: the Contact that created this request learns of the answer.
+  m23Ctx?.onRequestResponded?.({ request, accept: !!accept, message: replyCheck.reply, by: 'player', at: respondedAt });
   persistNow();
-  request.respondedAt = Date.now();
 
   if (accept) {
     // Only now does a contact channel exist.
@@ -2816,8 +2885,7 @@ playerRouter.post('/requests/:id/respond', (req, res) => {
     notify({ kind: 'org_user', id: request.userId }, 'declined', `${req.player.name} declined your ${request.type} request.`, request.id);
   }
   broadcast('requests', { playerId: req.player.id });
-  const { orgId, userId, ...visible } = request;
-  res.json(visible);
+  res.json(requestForRecipient(request));
 });
 
 // Adult players talk in their own threads; a child never has one.
@@ -3391,7 +3459,7 @@ function exportPlayer(p) {
   return {
     exportedAt: new Date().toISOString(),
     profile,
-    requests: db.requests.filter((r) => r.playerId === p.id).map(({ orgId, userId, ...r }) => r),
+    requests: db.requests.filter((r) => r.playerId === p.id).map(requestForRecipient),
     threads: db.channels.filter((c) => c.playerId === p.id).map((c) => channelViewFor(c, 'player')),
     notifications: notificationsFor('player', p.id),
     insights: insightsFor(p.id),
@@ -3879,7 +3947,7 @@ migrateM23(db);
 const recruitmentEvidence = createEvidenceProvider(db);
 m17Ctx.recruitmentEvidence = recruitmentEvidence;
 
-registerM23({
+const m23Ctx = registerM23({
   recruitmentEvidenceProvider: recruitmentEvidence,
   ...m19Ctx,
   isAdult,
@@ -3891,6 +3959,9 @@ registerM23({
   findRoomForRequest: m17Ctx.findRoomForRequest,
   applyLifecycleTransition: m17Ctx.applyLifecycleTransition,
   roomIsRoom: m17Ctx.roomIsRoom,
+  // M23 P3 — the ONE writer of a recipient-visible request row, so a Contact
+  // send reaches the Inbox through exactly the path the legacy route uses.
+  issueRecruitmentRequest,
 });
 
 // ------------------------------------------------- M18.1 operator surface
@@ -3958,6 +4029,9 @@ export const EMITTED_EVENTS = Object.freeze([
   // deliberately no per-frame event (§41) — adding one would have to pass
   // through here and through the registry, which is the point.
   'box_cam_cv_session_started', 'box_cam_cv_refused', 'box_cam_observed',
+  // M23 P3 Contact. All org_private, ids only. The recipient side reuses
+  // `inbox` and `notify`; a draft reaches no player-facing stream at all.
+  'contact_created', 'contact_sent', 'contact_failed', 'contact_external_recorded', 'contact_responded',
 ]);
 {
   const problems = assertEventRegistry({ emitted: EMITTED_EVENTS });

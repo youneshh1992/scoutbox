@@ -84,6 +84,49 @@ export const M23_ERROR_HTTP = table({
   // produce, and the drift test does not make an exception for the code that
   // exists to report drift.
   LIFECYCLE_INTERNAL: 500,
+
+  // ======================================================== M23 P3 Contact
+  // Same bands, same rule: no default. Every code below is produced by
+  // m23/contact.mjs or m23/contactRoutes.mjs and swept by the drift guard.
+
+  // ---- 400: fix the request.
+  CONTACT_CONTENT_INVALID: 400,
+  CONTACT_CONTENT_TOO_LONG: 400,
+  CONTACT_CLIENT_KEY_INVALID: 400,
+  CONTACT_REV_REQUIRED: 400,
+  CONTACT_CHANNEL_INVALID: 400,
+  CONTACT_OCCURRED_AT_INVALID: 400,
+  CONTACT_RECIPIENT_MISMATCH: 400,
+  CONTACT_ACTION_UNKNOWN: 400,
+  CONTACT_RESPONSE_INVALID: 400,
+
+  // ---- 403: not yours to do. `CONTACT_BLOCKED` keeps the platform's
+  // existing shape (the request route answers `BLOCKED` 403 to a club).
+  CONTACT_NOT_PERMITTED: 403,
+  CONTACT_BLOCKED: 403,
+
+  // ---- 404: concealment. Reached only after the room's own concealing
+  // lookup, so it distinguishes nothing a 200 would not.
+  CONTACT_NOT_FOUND: 404,
+
+  // ---- 409: the contact or the case is not where the caller thought.
+  CONTACT_INVALID_STATE: 409,
+  CONTACT_ALREADY_SENT: 409,
+  CONTACT_CASE_STATE: 409,
+  CONTACT_VERSION_CONFLICT: 409,
+  CONTACT_IDEMPOTENCY_CONFLICT: 409,
+
+  // ---- 422: well-formed, permitted, possible — and the world says no.
+  CONTACT_RECIPIENT_UNAVAILABLE: 422,
+  CONTACT_GUARDIAN_REQUIRED: 422,
+
+  // ---- 429: deterministic per-recipient cooldown. The limiter's own
+  // `RATE_LIMITED` answers are produced by m181 and are not in this table.
+  CONTACT_COOLDOWN: 429,
+
+  // ---- 500: ours.
+  CONTACT_STATE_UNKNOWN: 500,
+  CONTACT_STORE_MISSING: 500,
 });
 
 /** The codes that mean "this build or its data is broken", not "your request was". */
@@ -120,6 +163,9 @@ const PUBLIC_ERROR_FIELDS = [
   'error', 'message', 'allowed', 'to', 'actions',
   'requires', 'evidenceReason',
   'current', 'expectedRev', 'rev',
+  // P3: when a contact is refused for cooldown, the caller may know when it
+  // can try again. A timestamp, not a person and not a record.
+  'retryAt',
 ];
 
 /**
@@ -142,4 +188,29 @@ export function publicErrorBody(out) {
     if (out?.[k] !== undefined) body[k] = out[k];
   }
   return body;
+}
+
+/**
+ * Answer a domain error through the ONE mapping table.
+ *
+ * Shared by the lifecycle routes and the Contact routes so there is exactly
+ * one place where a code becomes a status:
+ *
+ *   1. The status comes from `M23_ERROR_HTTP`. There is no default branch,
+ *      so a code the table has never been told about becomes a 500 AND a log
+ *      line naming it — a loud unknown rather than a quiet 400.
+ *   2. The body is projected through `publicErrorBody`.
+ */
+export function sendDomainError(res, out, where) {
+  const status = httpStatusFor(out?.error);
+  if (status === null) {
+    console.error(`M23 ${where} UNMAPPED_ERROR ${out?.error} — ${JSON.stringify(out)}`);
+    return res.status(500).json({
+      ok: false,
+      error: 'LIFECYCLE_INTERNAL',
+      message: 'The recruitment journey cannot be served for this case. This has been recorded.',
+    });
+  }
+  if (status === 500) console.error(`M23 ${where} ${out.error} — ${JSON.stringify(out)}`);
+  return res.status(status).json(publicErrorBody(out));
 }

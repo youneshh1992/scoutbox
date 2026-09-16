@@ -84,6 +84,18 @@ export const RATE_LIMIT_POLICY = {
   box_cv_finalize: { max: 80, windowMs: 3_600_000, scope: 'player', note: 'Production CV finalization.' },
   box_cv_ready_check: { max: 120, windowMs: 3_600_000, scope: 'player', note: 'Box Cam CV Ready Check runs.' },
 
+  // M23 P3 Contact. Sends are the abuse-sensitive one: a message reaches a
+  // real person, or a guardian on a child's behalf. Drafts and external
+  // records stay inside the organisation and are limited only to bound a
+  // runaway client. The response limit is per ACTOR (a player or guardian),
+  // so a busy club cannot exhaust a recipient's quota. The per-recipient
+  // cooldown (one delivered in-app contact per org+player per 72 h unless
+  // answered) is separate and deterministic — see m23/contact.mjs.
+  contact_draft: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Contact drafts created or edited.' },
+  contact_send: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Contacts sent to players and guardians.' },
+  contact_external_record: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'External contacts recorded.' },
+  contact_response: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'Responses to contacts.' },
+
   // outbound to people
   evidence_request: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Evidence requests to players and guardians.' },
   org_invite: { max: 25, windowMs: 86_400_000, scope: 'org', note: 'Staff invitations.' },

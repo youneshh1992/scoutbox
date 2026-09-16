@@ -604,6 +604,11 @@ export const roomCan = (role, action) => {
     reassign_owner: 2,
     archive: 2,
     reopen: 2,
+    // M23 P3 — Contact. History is club memory (anyone who can read the room);
+    // drafting, sending, recording and cancelling are outward-facing acts with
+    // a real person on the other end, and sit with the room lead (contract §6).
+    contact_view: 0,
+    contact_write: 2,
     manage_any_room: 3,
   }[action];
   return need != null && rank >= need;

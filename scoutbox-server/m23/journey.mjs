@@ -34,10 +34,12 @@ import {
   availableActions, derivedConditions, NULL_EVIDENCE_PROVIDER,
 } from './lifecycle.mjs';
 import { ROOM_STATUS_LABELS, ROOM_TRANSITIONS } from '../m17/shared.mjs';
+import { contactMilestone, contactIntegrity } from './contact.mjs';
 
-/** Stores this projection may not proceed without. */
+/** Stores this projection may not proceed without. `recruitmentContacts` joined in P3. */
 export const JOURNEY_REQUIRED_STORES = Object.freeze([
   'recruitmentCases', 'roomDecisions', 'requests', 'trials', 'assessments', 'signings',
+  'recruitmentContacts',
 ]);
 
 /** Stores that are genuinely optional right now, because their phase has not shipped. */
@@ -207,6 +209,19 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
     .filter((r) => r?.orgId === kase.orgId && r.playerId === kase.playerId)
     .map((r) => ({ id: r.id, type: r.type, status: r.status, routedTo: r.routedTo ?? null, createdAt: r.createdAt }));
 
+  // P3 — the Contact workflow, as MILESTONES (§87). Ids, states and times.
+  // Never a body, a summary or a reply: the journey is a map of the process,
+  // not a copy of the communication. A structurally corrupt record is omitted
+  // and counted rather than rendered as if it were sound (§143).
+  let contactsOmitted = 0;
+  const contactRecords = [];
+  for (const c of db.recruitmentContacts) {
+    if (!c || c.caseId !== kase.id || c.orgId !== kase.orgId) continue;
+    if (contactIntegrity(c, { orgId: kase.orgId, caseId: kase.id }).length) { contactsOmitted += 1; continue; }
+    contactRecords.push(contactMilestone(c));
+  }
+  contactRecords.sort((a, b) => String(a.id).localeCompare(String(b.id)));
+
   const assessments = db.assessments
     .filter((a) => a?.orgId === kase.orgId && a.playerId === kase.playerId)
     .map((a) => ({ id: a.id, state: a.state, at: a.submittedAt ?? a.createdAt }));
@@ -222,7 +237,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   const signing = db.signings.find((s) => s?.orgId === kase.orgId && s.playerId === kase.playerId) ?? null;
   const outcomeAvailable = Array.isArray(db.outcomeReports);
 
-  const history = timelineFor(kase, decisions);
+  const history = timelineFor(kase, decisions, contactRecords);
   const limit = Math.min(Math.max(Number(historyLimit) || HISTORY_PAGE_DEFAULT, 1), HISTORY_PAGE_MAX);
   const cursor = Math.max(Number(historyCursor) || 0, 0);
   const page = history.slice(cursor, cursor + limit);
@@ -262,7 +277,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
     },
     conditions,
     nextActions: actions,
-    contact: { records: contacts },
+    contact: { records: contacts, contacts: contactRecords, omitted: contactsOmitted },
     trials,
     assessments,
     decisions: { all: decisions, current: currentDecision },
@@ -308,8 +323,18 @@ function sharedRecordsFor(db, kase, viewer) {
  * Reads are absent by construction rather than filtered out — `audit()` only
  * ever wrote things that changed something. Note bodies never appear.
  */
-function timelineFor(kase, decisions) {
+function timelineFor(kase, decisions, contactRecords = []) {
   const out = [];
+  // P3 — two safe milestones per contact, keyed by the contact id so two in
+  // the same millisecond keep a stable order.
+  for (const c of contactRecords) {
+    if (c.initiatedAt != null) {
+      out.push({ _k: `contact:${c.id}`, kind: 'contact_initiated', at: c.initiatedAt, by: null, channel: c.channel, recipientType: c.recipientType, contactId: c.id });
+    }
+    if (c.respondedAt != null) {
+      out.push({ _k: `contact_response:${c.id}`, kind: 'contact_response_received', at: c.respondedAt, by: null, responseKind: c.responseKind, contactId: c.id });
+    }
+  }
   for (const h of kase.history ?? []) {
     if (!TIMELINE_ACTIONS.has(h?.action)) continue;
     out.push({

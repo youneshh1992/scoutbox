@@ -94,10 +94,10 @@ export const httpClient: PlayerClient = {
     return r;
   },
 
-  respond: (playerId, requestId, accept, chosenSlot) =>
+  respond: (playerId, requestId, accept, chosenSlot, message) =>
     request<void>(`/player/requests/${requestId}/respond`, playerId, {
       method: 'POST',
-      body: JSON.stringify({ accept, chosenSlot }),
+      body: JSON.stringify({ accept, chosenSlot, ...(message ? { message } : {}) }),
     }),
 
   setAcademyPlus: (playerId, enabled) =>
@@ -235,8 +235,8 @@ export const httpClient: PlayerClient = {
 
   guardianInbox: (guardianId) => guardianRequest<GuardianInboxRequest[]>('/guardian/inbox', guardianId),
 
-  guardianRespond: (guardianId, requestId, accept, chosenSlot) =>
-    guardianRequest<void>(`/guardian/requests/${requestId}/respond`, guardianId, { method: 'POST', body: JSON.stringify({ accept, chosenSlot }) }),
+  guardianRespond: (guardianId, requestId, accept, chosenSlot, message) =>
+    guardianRequest<void>(`/guardian/requests/${requestId}/respond`, guardianId, { method: 'POST', body: JSON.stringify({ accept, chosenSlot, ...(message ? { message } : {}) }) }),
 
   guardianLog: (guardianId) => guardianRequest<{ id: string; ts: number; type: string; orgName: string; scoutName: string; playerId: string }[]>('/guardian/log', guardianId),
 

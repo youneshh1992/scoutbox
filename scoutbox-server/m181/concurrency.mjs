@@ -34,6 +34,12 @@
 export function expectedRevOf(body) {
   const raw = body?.expectedRev ?? body?.expectedVersion;
   if (raw === undefined || raw === null || raw === '') return null;
+  // Only a number or a string can be a revision. `Number(value)` invokes the
+  // value's own `toString`/`valueOf`, so `{ toString: 1 }` in a request body
+  // threw "Cannot convert object to primitive value" out of the guard and
+  // became a 500 on every rev-guarded route (M23 P3 defect D1, found by the
+  // Contact suite; the guard predates it). An object is malformed, not a crash.
+  if (typeof raw !== 'number' && typeof raw !== 'string') return Number.NaN;
   const n = Number(raw);
   return Number.isInteger(n) && n >= 0 ? n : Number.NaN; // NaN = malformed
 }

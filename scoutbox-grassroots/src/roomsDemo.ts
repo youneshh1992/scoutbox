@@ -23,7 +23,7 @@ import type {
   RoomComment, RoomCommentsResult, RoomDecision, RoomDecisionsResult,
   RoomDevelopment, RoomEvidenceItem, RoomFunnel, RoomListItem, RoomListResult,
   RoomMissingEvidence, RoomReadiness, RoomSnapshot, RoomSummaryRow, RoomTask,
-  RoomTrial, RoomTrust, RoomsApi,
+  RoomTrial, RoomTrust, RoomsApi, ContactRecord, ContactList, ContactRouting, ContactCaseMove,
 } from './roomsApi';
 import type { RecruitmentPassport } from './m15api';
 
@@ -53,6 +53,8 @@ const COACH_COPY = 'Confirmed by a coach whose club affiliation was verified whe
 const STATUS_LABELS: Record<string, string> = {
   watching: 'Watching', under_review: 'Under review', shortlisted: 'Shortlisted',
   priority: 'Priority', trial_requested: 'Trial requested', trial_scheduled: 'Trial scheduled',
+  // M23 — the two contact states, mirrored from the server.
+  contact_planned: 'Contact planned', contacted: 'Contacted',
   trial_completed: 'Trial completed', offer_consideration: 'Offer consideration',
   offer_made: 'Offer made', signed: 'Signed', withdrawn: 'Withdrawn',
   archived: 'Archived', closed: 'Closed',
@@ -61,10 +63,13 @@ const ALL_STATUSES = Object.keys(STATUS_LABELS);
 const OPEN_STATUSES = ALL_STATUSES.filter((s) => !['signed', 'withdrawn', 'archived', 'closed'].includes(s));
 
 const TRANSITIONS: Record<string, string[]> = {
-  watching: ['under_review', 'shortlisted', 'withdrawn', 'archived'],
-  under_review: ['watching', 'shortlisted', 'priority', 'trial_requested', 'withdrawn', 'archived'],
-  shortlisted: ['under_review', 'priority', 'trial_requested', 'offer_consideration', 'withdrawn', 'archived'],
-  priority: ['shortlisted', 'trial_requested', 'offer_consideration', 'withdrawn', 'archived'],
+  watching: ['under_review', 'shortlisted', 'contact_planned', 'withdrawn', 'archived'],
+  under_review: ['watching', 'shortlisted', 'priority', 'contact_planned', 'trial_requested', 'withdrawn', 'archived'],
+  // M23 — the two contact states. `contacted` is reached only by a real contact (see the Contact methods), never by the status picker.
+  contact_planned: ['under_review', 'shortlisted', 'priority', 'withdrawn', 'archived'],
+  contacted: ['shortlisted', 'priority', 'trial_requested', 'offer_consideration', 'under_review', 'withdrawn', 'archived'],
+  shortlisted: ['under_review', 'priority', 'contact_planned', 'trial_requested', 'offer_consideration', 'withdrawn', 'archived'],
+  priority: ['shortlisted', 'contact_planned', 'trial_requested', 'offer_consideration', 'withdrawn', 'archived'],
   trial_requested: ['trial_scheduled', 'shortlisted', 'priority', 'withdrawn', 'archived'],
   trial_scheduled: ['trial_completed', 'trial_requested', 'withdrawn', 'archived'],
   trial_completed: ['offer_consideration', 'shortlisted', 'priority', 'withdrawn', 'archived'],
@@ -77,7 +82,7 @@ const TRANSITIONS: Record<string, string[]> = {
 };
 const REASON_REQUIRED = ['withdrawn', 'archived', 'closed'];
 const STAGE_OF: Record<string, string> = {
-  watching: 'identified', under_review: 'review', shortlisted: 'observation', priority: 'observation',
+  watching: 'identified', under_review: 'review', contact_planned: 'review', contacted: 'review', shortlisted: 'observation', priority: 'observation',
   trial_requested: 'trial', trial_scheduled: 'trial', trial_completed: 'trial',
   offer_consideration: 'decision', offer_made: 'decision',
   signed: 'closed', withdrawn: 'closed', archived: 'closed', closed: 'closed',
@@ -423,6 +428,73 @@ const activityStore: (RoomActivityItem & { roomId: string })[] = [
 
 // -------------------------------------------------------------- derivation
 const find = (roomId: string) => roomStore.find((r) => r.roomId === roomId) ?? null;
+
+// ------------------------------------------------------ M23 P3 — Contact
+// Same rules as the server: a draft is internal and moves nothing; a send is
+// delivered into the recipient's Inbox and moves the case contact_planned →
+// contacted through the same status log; a failed attempt keeps the draft; a
+// recorded external contact is attested, never observed. Every demo player is
+// an adult, so routing resolves to the player; the copy for a guardian route
+// is exercised by the live client against the real server.
+const CONTACT_STATUS_LABELS: Record<string, string> = {
+  draft: 'Draft', delivered: 'Delivered', failed: 'Send failed', responded: 'Response received', recorded: 'Recorded (external)', cancelled: 'Cancelled',
+};
+const CONTACT_CHANNEL_LABELS: Record<string, string> = {
+  in_app: 'ScoutBox message', phone: 'Telephone', in_person: 'In person', email_external: 'Email (outside ScoutBox)', agent: 'Via agent or guardian conversation', other: 'Other',
+};
+const CONTACT_COOLDOWN_MS = 72 * 3600_000;
+const CONTACT_TRANSPORT_NOTE = 'Delivered means the message is in the recipient\'s ScoutBox Inbox. ScoutBox does not track whether it was read.';
+const CONTACT_RECORDED_NOTE = 'Recorded by a named member of staff. ScoutBox did not observe this contact.';
+const CONTACT_NOTE = 'A draft is internal to your organisation. Only a sent message or a recorded external contact is a contact.';
+const plainShared = (s: string | null | undefined, max: number) => String(s ?? '').replace(/<[^>]*>/g, '').replace(/[<>]/g, '').trim().slice(0, max);
+
+type DemoContact = ContactRecord & { roomId: string };
+const contactStore: DemoContact[] = [
+  {
+    id: 'rct-d1', roomId: 'room-d1', caseId: 'room-d1', playerId: 'pl-adeyemi',
+    status: 'responded', statusLabel: 'Response received', channel: 'in_app', channelLabel: 'ScoutBox message', external: false,
+    recipient: { type: 'player', minor: false }, subject: 'Interest from Eastport', body: 'Hi Kola, we would like to talk about your plans for next season. Would a call suit you?', summary: null,
+    createdBy: { name: 'Maria Keane' }, createdAt: NOW - 12 * DAY, updatedAt: NOW - 10 * DAY,
+    sentBy: { name: 'Maria Keane' }, sentAt: NOW - 11 * DAY, deliveredAt: NOW - 11 * DAY, failedAt: null, failureCode: null, attempts: 1,
+    occurredAt: null, recordedBy: null, recordedAt: null,
+    respondedAt: NOW - 10 * DAY, response: { kind: 'accepted', message: 'Yes, happy to talk next week.', by: 'player', at: NOW - 10 * DAY },
+    emailCopy: null, lifecycle: { applied: true, from: 'contact_planned', to: 'contacted', at: NOW - 11 * DAY }, cancelledAt: null,
+    rev: 3, revAt: NOW - 10 * DAY, revBy: null,
+    history: [
+      { id: 'aud-c1', at: NOW - 12 * DAY, action: 'contact_created', by: { name: 'Maria Keane', kind: 'org' }, detail: null },
+      { id: 'aud-c2', at: NOW - 11 * DAY, action: 'contact_sent', by: { name: 'Maria Keane', kind: 'org' }, detail: { recipientType: 'player' } },
+      { id: 'aud-c3', at: NOW - 10 * DAY, action: 'contact_responded', by: { name: 'Player', kind: 'player' }, detail: { kind: 'accepted' } },
+    ],
+    transportNote: CONTACT_TRANSPORT_NOTE, policyVersion: 1,
+  },
+];
+const CONTACT_CASE_STATUSES = ['contact_planned', 'contacted'];
+const contactRouting = (r: DemoRoom): ContactRouting => (r.available ? { available: true, type: 'player', minor: false } : { available: false, type: null, minor: null, reason: 'CONTACT_RECIPIENT_UNAVAILABLE' });
+const contactsOf = (roomId: string) => contactStore.filter((c) => c.roomId === roomId).sort((a, b) => a.createdAt - b.createdAt);
+const contactCooldown = (r: DemoRoom, exceptId: string | null) => {
+  const recent = contactsOf(r.roomId).filter((c) => c.id !== exceptId && c.channel === 'in_app' && c.status === 'delivered' && c.deliveredAt != null && Date.now() - c.deliveredAt < CONTACT_COOLDOWN_MS);
+  return recent.length ? { until: Math.max(...recent.map((c) => c.deliveredAt as number)) + CONTACT_COOLDOWN_MS } : null;
+};
+const contactRev = (c: DemoContact, expectedRev: unknown) => {
+  if (expectedRev === undefined || expectedRev === null) throw new Error('expectedRev is required: send the rev you were editing.');
+  if (!Number.isInteger(expectedRev) || (expectedRev as number) < 0) throw new Error('expectedRev must be a whole number.');
+  if (expectedRev !== c.rev) throw new Error('Someone else changed this while you were working on it. Reload to see their change, then apply yours.');
+};
+const contactGate = (r: DemoRoom) => { if (!CONTACT_CASE_STATUSES.includes(r.status)) throw new Error(`A case at "${STATUS_LABELS[r.status] ?? r.status}" cannot contact the player. Plan the contact first (planContact).`); };
+const contactEvent = (c: DemoContact, action: string, by: { name: string; kind: string } | null, detail: Record<string, unknown> | null, at: number) => { c.history.push({ id: nid('aud'), at, action, by, detail }); };
+const strip = (c: DemoContact): ContactRecord => { const { roomId: _r, ...rest } = c; return { ...rest, history: rest.history.map((h) => ({ ...h })) }; };
+/** The lifecycle coupling: the same status log the Room's own moves write. */
+function contactAdvance(r: DemoRoom, c: DemoContact, at: number): ContactCaseMove {
+  if (r.status === 'contact_planned') {
+    r.status = 'contacted'; r.updatedAt = at;
+    log(r, 'room_status_changed', { from: 'contact_planned', to: 'contacted', reasonCodes: [], trigger: `contact:${c.id}` });
+    c.lifecycle = { applied: true, from: 'contact_planned', to: 'contacted', at };
+    return { from: 'contact_planned', to: 'contacted' };
+  }
+  c.lifecycle = { applied: false, reason: 'LIFECYCLE_NO_CHANGE', at };
+  return { unchanged: true, status: r.status };
+}
+
 const roomComments = (roomId: string) => commentStore.filter((c) => c.roomId === roomId).sort((a, b) => b.createdAt - a.createdAt);
 const roomDecisions = (roomId: string) => decisionStore.filter((d) => d.roomId === roomId).sort((a, b) => a.createdAt - b.createdAt);
 const currentDecision = (roomId: string) => { const all = roomDecisions(roomId); return all.length ? all[all.length - 1] : null; };
@@ -897,6 +969,114 @@ export const demoRooms: RoomsApi = {
     if (input.signingId) r.links.signingId = input.signingId;
     log(r, 'room_trial_linked', { ...input });
     return delay({ links: { ...r.links } });
+  },
+
+  // ---- M23 P3 — Contact
+  contacts: async (_s, roomId) => {
+    const r = find(roomId);
+    if (!r) throw new Error('ROOM_NOT_FOUND');
+    const result: ContactList = {
+      items: contactsOf(roomId).map(strip), omitted: 0, routing: contactRouting(r),
+      case: { status: r.status, acceptsContact: CONTACT_CASE_STATUSES.includes(r.status), planAction: 'planContact' },
+      canWrite: true, cooldown: contactCooldown(r, null),
+      channels: { inApp: 'in_app', external: ['phone', 'in_person', 'email_external', 'agent', 'other'].map((id) => ({ id, label: CONTACT_CHANNEL_LABELS[id] })) },
+      limits: { subject: 120, body: 2000, summary: 500, replyMessage: 500 }, policyVersion: 1, note: CONTACT_NOTE,
+    };
+    return delay(result);
+  },
+  createContact: async (_s, roomId, input) => {
+    const r = find(roomId);
+    if (!r) throw new Error('ROOM_NOT_FOUND');
+    const prior = input.clientKey ? contactsOf(roomId).find((c) => (c as DemoContact & { clientKey?: string }).clientKey === input.clientKey) : null;
+    if (prior) return delay({ contact: strip(prior), routing: contactRouting(r) });
+    contactGate(r);
+    const routing = contactRouting(r);
+    if (!routing.available) throw new Error('This player is not available to your organisation under the standing rules.');
+    const body = plainShared(input.body, 2000);
+    if (!body) throw new Error('Write the message the player or guardian will read.');
+    const at = Date.now();
+    const c: DemoContact & { clientKey?: string } = {
+      id: nid('rct'), roomId, caseId: roomId, playerId: r.playerId, status: 'draft', statusLabel: CONTACT_STATUS_LABELS.draft,
+      channel: 'in_app', channelLabel: CONTACT_CHANNEL_LABELS.in_app, external: false, recipient: null,
+      subject: plainShared(input.subject, 120) || null, body, summary: null,
+      createdBy: { name: ME.name }, createdAt: at, updatedAt: at, sentBy: null, sentAt: null, deliveredAt: null, failedAt: null, failureCode: null, attempts: 0,
+      occurredAt: null, recordedBy: null, recordedAt: null, respondedAt: null, response: null, emailCopy: null, lifecycle: null, cancelledAt: null,
+      rev: 1, revAt: at, revBy: ME.name, history: [], transportNote: CONTACT_TRANSPORT_NOTE, policyVersion: 1, clientKey: input.clientKey,
+    };
+    contactEvent(c, 'contact_created', { name: ME.name, kind: 'org' }, { channel: 'in_app' }, at);
+    contactStore.push(c);
+    // Nothing else: no room activity, no notification, no Inbox row.
+    return delay({ contact: strip(c), routing });
+  },
+  patchContact: async (_s, roomId, contactId, input) => {
+    const r = find(roomId);
+    const c = contactStore.find((x) => x.id === contactId && x.roomId === roomId);
+    if (!r || !c) throw new Error('CONTACT_NOT_FOUND');
+    if (!['draft', 'failed'].includes(c.status)) throw new Error(`A contact that is ${CONTACT_STATUS_LABELS[c.status].toLowerCase()} cannot be edited.`);
+    contactRev(c, input.expectedRev);
+    const at = Date.now();
+    const fields: string[] = [];
+    if (input.subject !== undefined) { const s = plainShared(input.subject, 120) || null; if (s !== c.subject) { c.subject = s; fields.push('subject'); } }
+    if (input.body !== undefined) { const b = plainShared(input.body, 2000); if (!b) throw new Error('Write the message the player or guardian will read.'); if (b !== c.body) { c.body = b; fields.push('body'); } }
+    c.updatedAt = at; c.rev += 1; c.revAt = at; c.revBy = ME.name;
+    contactEvent(c, 'contact_edited', { name: ME.name, kind: 'org' }, { fields }, at);
+    return delay({ contact: strip(c), routing: contactRouting(r) });
+  },
+  sendContact: async (_s, roomId, contactId, input) => {
+    const r = find(roomId);
+    const c = contactStore.find((x) => x.id === contactId && x.roomId === roomId);
+    if (!r || !c) throw new Error('CONTACT_NOT_FOUND');
+    if (c.status === 'delivered') throw new Error('This contact has already been delivered.');
+    if (!['draft', 'failed'].includes(c.status)) throw new Error(`A contact that is ${CONTACT_STATUS_LABELS[c.status].toLowerCase()} cannot be sent.`);
+    contactGate(r);
+    contactRev(c, input.expectedRev);
+    const routing = contactRouting(r);
+    if (!routing.available) throw new Error('This player is not available to your organisation under the standing rules.');
+    const cd = contactCooldown(r, c.id);
+    if (cd) throw new Error('A contact was delivered to this player recently and has not been answered yet. Wait before sending another.');
+    const at = Date.now();
+    c.status = 'delivered'; c.statusLabel = CONTACT_STATUS_LABELS.delivered;
+    c.recipient = { type: 'player', minor: false }; c.sentBy = { name: ME.name }; c.sentAt = at; c.deliveredAt = at; c.failedAt = null; c.failureCode = null;
+    c.attempts += 1; c.updatedAt = at; c.rev += 1; c.revAt = at; c.revBy = ME.name;
+    contactEvent(c, 'contact_sent', { name: ME.name, kind: 'org' }, { channel: 'in_app', recipientType: 'player', attempt: c.attempts }, at);
+    const moved = contactAdvance(r, c, at);
+    return delay({ contact: strip(c), delivered: true, case: moved });
+  },
+  cancelContact: async (_s, roomId, contactId, input) => {
+    const c = contactStore.find((x) => x.id === contactId && x.roomId === roomId);
+    if (!c) throw new Error('CONTACT_NOT_FOUND');
+    if (!['draft', 'failed'].includes(c.status)) throw new Error(`A contact that is ${CONTACT_STATUS_LABELS[c.status].toLowerCase()} cannot be cancelled.`);
+    contactRev(c, input.expectedRev);
+    const at = Date.now();
+    c.status = 'cancelled'; c.statusLabel = CONTACT_STATUS_LABELS.cancelled; c.cancelledAt = at; c.updatedAt = at; c.rev += 1; c.revAt = at; c.revBy = ME.name;
+    contactEvent(c, 'contact_cancelled', { name: ME.name, kind: 'org' }, null, at);
+    return delay({ contact: strip(c) });
+  },
+  recordExternalContact: async (_s, roomId, input) => {
+    const r = find(roomId);
+    if (!r) throw new Error('ROOM_NOT_FOUND');
+    contactGate(r);
+    const routing = contactRouting(r);
+    if (!routing.available) throw new Error('This player is not available to your organisation under the standing rules.');
+    if (!CONTACT_CHANNEL_LABELS[input.channel] || input.channel === 'in_app') throw new Error('Channel must be one of phone, in_person, email_external, agent, other.');
+    const ts = typeof input.occurredAt === 'number' ? input.occurredAt : Date.parse(String(input.occurredAt));
+    if (!Number.isFinite(ts)) throw new Error('occurredAt must be a date and time.');
+    if (ts > Date.now() + 15 * 60_000) throw new Error('A contact cannot be recorded before it has happened.');
+    if (ts < Date.now() - 180 * DAY) throw new Error('A contact this old cannot be recorded as recruitment evidence.');
+    if (input.recipientType !== 'player') throw new Error('This player is an adult: the recorded contact is with the player.');
+    const at = Date.now();
+    const c: DemoContact = {
+      id: nid('rct'), roomId, caseId: roomId, playerId: r.playerId, status: 'recorded', statusLabel: CONTACT_STATUS_LABELS.recorded,
+      channel: input.channel, channelLabel: CONTACT_CHANNEL_LABELS[input.channel], external: true, recipient: { type: 'player', minor: false },
+      subject: null, body: null, summary: plainShared(input.summary, 500) || null,
+      createdBy: { name: ME.name }, createdAt: at, updatedAt: at, sentBy: null, sentAt: null, deliveredAt: null, failedAt: null, failureCode: null, attempts: 0,
+      occurredAt: ts, recordedBy: { name: ME.name }, recordedAt: at, respondedAt: null, response: null, emailCopy: null, lifecycle: null, cancelledAt: null,
+      rev: 1, revAt: at, revBy: ME.name, history: [], transportNote: CONTACT_RECORDED_NOTE, policyVersion: 1,
+    };
+    contactEvent(c, 'contact_external_recorded', { name: ME.name, kind: 'org' }, { channel: input.channel, occurredAt: ts, recipientType: 'player' }, at);
+    contactStore.push(c);
+    const moved = contactAdvance(r, c, at);
+    return delay({ contact: strip(c), case: moved });
   },
 
   funnel: async () => delay(funnelOf(roomStore)),
