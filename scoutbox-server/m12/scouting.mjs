@@ -6,6 +6,8 @@
 // blind SERVER-SIDE: another scout's report is not delivered to you until
 // your own is submitted. "Not observed" is never averaged as zero.
 
+import { roomRole, roomCan } from '../m17/shared.mjs';
+
 const CONFIDENCE = ['low', 'medium', 'high'];
 const PRO_STAGES = ['identified', 'review', 'observation', 'trial', 'decision', 'closed'];
 const GRASSROOTS_STAGES = ['review', 'invited', 'awaiting_response', 'decision', 'closed'];
@@ -97,6 +99,35 @@ export function registerScouting(ctx) {
     return rest;
   }
 
+  /**
+   * M23 P4B — resolve and authorise `context.trialId` / `context.trialSessionId`.
+   * Returns `{ trialId, trialSessionId }` (both null when absent) or writes
+   * the refusal and returns null. Ids are strings; anything else is refused
+   * rather than coerced.
+   */
+  function validateTrialContext(req, res, context, p) {
+    const rawTrial = context && typeof context === 'object' ? context.trialId : undefined;
+    const rawSession = context && typeof context === 'object' ? context.trialSessionId : undefined;
+    if (rawTrial == null && rawSession == null) return { trialId: null, trialSessionId: null };
+    if (rawTrial == null) { res.status(400).json({ error: 'TRIAL_CONTEXT_INVALID', message: 'A trial session belongs to a trial; give the trialId too.', field: 'trialId' }); return null; }
+    if (typeof rawTrial !== 'string' || !rawTrial) { res.status(400).json({ error: 'TRIAL_CONTEXT_INVALID', field: 'trialId', expected: 'string' }); return null; }
+    const t = db.trials.find((x) => x?.id === rawTrial && x.orgId === req.org.id);
+    if (!t || t.playerId !== p.id) { res.status(404).json({ error: 'TRIAL_NOT_FOUND' }); return null; }
+    if (t.subjectRemovedAt) { res.status(409).json({ error: 'TRIAL_SUBJECT_REMOVED', message: 'This player removed their ScoutBox account; nothing new is written about a person who left.' }); return null; }
+    const room = t.caseId ? (db.recruitmentCases ?? []).find((k) => k?.id === t.caseId && k.orgId === req.org.id) ?? null : null;
+    if (room) {
+      const role = roomRole({ room, user: req.orgUser, isLead: isLead(req.orgUser) });
+      if (!roomCan(role, 'trial_assess')) { res.status(403).json({ error: 'TRIAL_NOT_PERMITTED', message: 'Assessing this trial needs a role in its Recruitment Room.' }); return null; }
+    }
+    let trialSessionId = null;
+    if (rawSession != null) {
+      if (typeof rawSession !== 'string' || !rawSession) { res.status(400).json({ error: 'TRIAL_CONTEXT_INVALID', field: 'trialSessionId', expected: 'string' }); return null; }
+      if (!(t.schedule?.sessions ?? []).some((s) => s?.id === rawSession)) { res.status(404).json({ error: 'TRIAL_SESSION_NOT_FOUND' }); return null; }
+      trialSessionId = rawSession;
+    }
+    return { trialId: t.id, trialSessionId };
+  }
+
   orgRouter.get('/assessments', (req, res) => {
     let list;
     if (req.query.playerId) {
@@ -105,6 +136,14 @@ export function registerScouting(ctx) {
       list = db.assessments.filter((a) => a.orgId === req.org.id);
     } else {
       list = db.assessments.filter((a) => a.orgId === req.org.id && a.scoutUserId === req.orgUser.id);
+    }
+    // M23 P4B: `?trialId=` narrows to one Trial's assessments — through the
+    // same access list (blind rule intact), never around it.
+    if (req.query.trialId != null) {
+      const tid = String(req.query.trialId);
+      const t = db.trials.find((x) => x?.id === tid && x.orgId === req.org.id);
+      if (!t) return res.status(404).json({ error: 'TRIAL_NOT_FOUND' });
+      list = (req.query.playerId ? list : assessmentAccessList(req, t.playerId)).filter((a) => a.context?.trialId === tid);
     }
     res.json(paginate(req, list.slice().sort((a, b) => b.createdAt - a.createdAt).map(assessmentView)));
   });
@@ -121,6 +160,13 @@ export function registerScouting(ctx) {
       if (!first) return res.status(404).json({ error: 'FIRST_OPINION_NOT_FOUND' });
       if (first.scoutUserId === req.orgUser.id) return res.status(400).json({ error: 'NOT_INDEPENDENT', message: 'A second opinion comes from a different scout.' });
     }
+    // M23 P4B: an assessment may be written IN THE CONTEXT of a Trial (and
+    // optionally one of its sessions). The Trial must be this org's, for
+    // this player, still with a subject, and the author must hold the
+    // room's `trial_assess` permission. The assessment stays an ordinary
+    // db.assessments row: same blind rule, same single feedback door.
+    const trialCtx = validateTrialContext(req, res, context, p);
+    if (!trialCtx) return;
     const a = {
       id: nextId('ass'), orgId: req.org.id, playerId: p.id, playerName: p.name,
       scoutUserId: req.orgUser.id, scoutName: req.orgUser.name,
@@ -132,6 +178,7 @@ export function registerScouting(ctx) {
         minutesWatched: Number(context?.minutesWatched) || null,
         viewing: ['live', 'video'].includes(context?.viewing) ? context.viewing : null,
         opponentLevel: context?.opponentLevel ? String(context.opponentLevel).slice(0, 60) : null,
+        trialId: trialCtx.trialId, trialSessionId: trialCtx.trialSessionId,
       },
       ratings: [], state: 'draft', recommendation: null,
       secondOpinionOf: secondOpinionOf ?? null,
@@ -161,16 +208,37 @@ export function registerScouting(ctx) {
             if (ref.segmentId && !db.videoSegments.some((s) => s.id === ref.segmentId && s.orgId === req.org.id && s.playerId === a.playerId)) {
               return res.status(400).json({ error: 'SEGMENT_INVALID', segmentId: ref.segmentId });
             }
+            // M23 P4B: a rating may cite a Trial session, or a Box Cam session
+            // that is LINKED (and not unlinked) to this assessment's trial —
+            // by reference only. Nothing of the observation travels here.
+            if (ref.trialSessionId !== undefined || ref.boxSessionId !== undefined) {
+              const t = a.context?.trialId ? db.trials.find((x) => x?.id === a.context.trialId && x.orgId === req.org.id) : null;
+              if (!t) return res.status(400).json({ error: 'TRIAL_EVIDENCE_REF_INVALID', message: 'Trial evidence references need an assessment written in the context of a trial.' });
+              const sessions = t.schedule?.sessions ?? [];
+              if (ref.trialSessionId !== undefined && !sessions.some((s) => s?.id === ref.trialSessionId)) return res.status(400).json({ error: 'TRIAL_EVIDENCE_REF_INVALID', field: 'trialSessionId' });
+              if (ref.boxSessionId !== undefined && !sessions.some((s) => (s?.evidence ?? []).some((e) => e?.kind === 'box_cam_session' && e.sessionId === ref.boxSessionId && !e.removedAt))) return res.status(400).json({ error: 'TRIAL_EVIDENCE_REF_INVALID', field: 'boxSessionId', message: 'Only a Box Cam session linked to this trial can be cited.' });
+            }
           }
         }
       }
       a.ratings = ratings.map((r) => ({
         attrId: r.attrId, rating: r.notObserved ? null : Number(r.rating), notObserved: !!r.notObserved,
         confidence: r.confidence ?? 'medium', note: r.note ? String(r.note).slice(0, 300) : null,
-        evidenceRefs: Array.isArray(r.evidenceRefs) ? r.evidenceRefs.slice(0, 6) : [],
+        evidenceRefs: Array.isArray(r.evidenceRefs) ? r.evidenceRefs.slice(0, 6).map((ref) => (ref && typeof ref === 'object' && !Array.isArray(ref)
+          ? Object.fromEntries(['segmentId', 'trialSessionId', 'boxSessionId', 't', 'label'].filter((k) => ref[k] !== undefined).map((k) => [k, k === 'label' ? String(ref[k]).slice(0, 80) : ref[k]]))
+          : ref)) : [],
       }));
     }
-    if (context) a.context = { ...a.context, ...context };
+    if (context) {
+      // M23 P4B: the Trial context is fixed at creation — an assessment is
+      // not re-pointed at another trial or session after the fact.
+      if (typeof context !== 'object' || Array.isArray(context)) return res.status(400).json({ error: 'CONTEXT_INVALID' });
+      const { trialId, trialSessionId, ...rest } = context;
+      if ((trialId !== undefined && trialId !== a.context?.trialId) || (trialSessionId !== undefined && trialSessionId !== a.context?.trialSessionId)) {
+        return res.status(409).json({ error: 'TRIAL_CONTEXT_IMMUTABLE', message: 'The trial an assessment belongs to is set when it is created.' });
+      }
+      a.context = { ...a.context, ...rest };
+    }
     if (recommendation) {
       if (!['sign', 'monitor', 'pass'].includes(recommendation.verdict)) return res.status(400).json({ error: 'VERDICT_INVALID' });
       a.recommendation = { verdict: recommendation.verdict, reasons: String(recommendation.reasons ?? '').slice(0, 500) };

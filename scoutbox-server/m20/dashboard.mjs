@@ -27,7 +27,7 @@ import {
 } from './metrics.mjs';
 import {
   pipelineStageCounts, funnelProgression, exitReasonMix, roomSourceMix, sourceStageReach,
-  transitions, firstTerminalAt,
+  transitions, firstTerminalAt, trialProcess,
 } from './funnels.mjs';
 import {
   timeToFirstDecision, timeInStage, timeToTrialRequested, timeTrialRequestedToCompleted,
@@ -165,7 +165,10 @@ export function buildReportingContext({
       && (!roomFiltered || (i.roomId ? keptRoomIds.has(i.roomId) : false))),
     watchlists: (db.dynamicWatchlists ?? []).filter((w2) => w2.orgId === orgId),
     watchlistHistory: (db.watchlistHistory ?? []).filter((h) => h.orgId === orgId),
-    trials: (db.trials ?? []).filter((t) => t.orgId === orgId),
+    trials: (db.trials ?? []).filter((t) => t && t.orgId === orgId),
+    // M23 P4B: trial invitations (requests of type trial tied to a case) for
+    // the process counts. Ids, states and times only reach the projection.
+    requests: (db.requests ?? []).filter((r) => r && r.orgId === orgId && r.type === 'trial'),
     typicalDaysToTerminal,
     subjectOf,
   };
@@ -194,6 +197,7 @@ const FAMILY_BUILDERS = {
     pipeline_stage_counts: pipelineStageCounts(ctx),
     funnel_progression: funnelProgression(ctx),
     exit_reason_mix: exitReasonMix(ctx),
+    trial_process: trialProcess(ctx),
   }),
   duration: (ctx) => ({
     time_to_first_decision: timeToFirstDecision(ctx),

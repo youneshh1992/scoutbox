@@ -57,6 +57,8 @@ const M = {
     'A status is where a room is, not how far it has travelled. A room that has sat in Watching for a year looks identical here to one opened this morning.'),
   funnel_progression: meta('funnel_progression', 'pipeline', 'Stages reached', 'rooms', 'window_entry', ['recruitmentCases'],
     'Rooms can be reopened, so this is not a one-way funnel: a room counts once for each stage it ever reached, not once per visit. A recent window is incomplete by construction — rooms opened last week have not had time to reach a signing.', { ratio: true }),
+  trial_process: meta('trial_process', 'pipeline', 'Trial process', 'trials', 'window_entry', ['requests', 'trials'],
+    'These are counts of process steps in the window — invitations sent, accepted, schedules confirmed, trials completed, cancelled or declined — never how a trial went. No rate is built on them: a club that invites five players and completes three has not "converted 60%", it has run three trials.'),
   exit_reason_mix: meta('exit_reason_mix', 'pipeline', 'Why rooms ended', 'decisions', 'window_completion', ['roomDecisions', 'recruitmentCases'],
     'This is the reason the club recorded, not the reason that operated. A decision carrying codes in two categories counts in both, so the shares add up to more than 100%.', { ratio: true }),
   time_to_first_decision: meta('time_to_first_decision', 'duration', 'Time to first decision', 'days', 'window_completion', ['recruitmentCases', 'roomDecisions'],
@@ -183,6 +185,12 @@ function buildDashboard(filters: DashboardFilters): Dashboard {
         rows: FUNNEL_STAGES.map((stage) => ({
           stage, ...count(EVER_REACHED[stage] ?? 0), reachedOutsideWindow: 0, share: ratio(EVER_REACHED[stage] ?? 0, 9),
         })),
+      } as Metric,
+      trial_process: {
+        ...M.trial_process,
+        ...count(1),
+        steps: { invited: count(3), declined: count(1), accepted: count(2), scheduled: count(2), completed: count(1), cancelled: count(0) },
+        note: 'Each step is counted on the day it happened, so one trial can appear under several steps in one window and under none in another. Counts are never suppressed; no rate is offered.',
       } as Metric,
       exit_reason_mix: {
         ...M.exit_reason_mix,

@@ -55,11 +55,23 @@ const CONTACT_ACTIONS = new Set([
   'contact_sent', 'contact_send_failed', 'contact_external_recorded', 'contact_responded', 'contact_cancelled',
 ]);
 
+/**
+ * M23 P4B: what happened to a Trial — accepted, scheduled, confirmed,
+ * declined, attended, cancelled, completed, evidence linked or unlinked.
+ * Never the instructions, the venue address, a note or the family's contact.
+ */
+const TRIAL_ACTIONS = new Set([
+  'trial_accepted', 'trial_schedule_proposed', 'trial_rescheduled', 'trial_schedule_confirmed', 'trial_schedule_declined',
+  'trial_attendance_recorded', 'trial_cancelled', 'trial_completed', 'trial_evidence_linked', 'trial_evidence_unlinked',
+]);
+
 /** The structured, content-free summary of one history detail. */
 function safeDetail(action, detail) {
   if (!detail || typeof detail !== 'object') return null;
   const out = {};
-  for (const k of ['from', 'to', 'status', 'priority', 'recommendation', 'version', 'criteriaChanged', 'sourceContext', 'kind', 'channel', 'recipientType', 'code']) {
+  for (const k of ['from', 'to', 'status', 'priority', 'recommendation', 'version', 'criteriaChanged', 'sourceContext', 'kind', 'channel', 'recipientType', 'code',
+    // P4B Trial detail: ids, states, counts and flags only.
+    'sessionId', 'trialSessionId', 'state', 'source', 'revision', 'sessionCount', 'material', 'requiresConfirmation', 'phase', 'cancelledBy', 'attendedSessions', 'slotId', 'day', 'hadReason']) {
     if (detail[k] !== undefined) out[k] = detail[k];
   }
   if (Array.isArray(detail.reasonCodes)) out.reasonCodes = detail.reasonCodes.slice(0, 10);
@@ -158,6 +170,22 @@ export function registerAudit(ctx) {
           id: h.id, at: h.at, action: h.action, domain: 'recruitment_contact',
           actor: h.by?.kind === 'org' ? { userId: h.by.userId ?? null, name: h.by.name ?? null } : null,
           target: { type: 'contact', id: c.id, roomId: c.caseId, ...subject },
+          detail: safeDetail(h.action, h.detail),
+        });
+      }
+    }
+    // M23 P4B: Trial history — the operational record of what happened, for
+    // the club that ran it. Subject named only where the org may see them.
+    for (const t of db.trials ?? []) {
+      if (!t || t.orgId !== org.id || !Array.isArray(t.history)) continue;
+      const p = findPlayer(t.playerId);
+      const subject = p && orgCanSee(org, p) ? { playerId: p.id, playerName: p.name } : { playerId: null, playerName: null };
+      for (const h of t.history) {
+        if (!TRIAL_ACTIONS.has(h?.action)) continue;
+        rows.push({
+          id: h.id, at: h.at, action: h.action, domain: 'recruitment_trial',
+          actor: h.by?.kind === 'org' ? { userId: h.by.userId ?? null, name: h.by.name ?? null } : null,
+          target: { type: 'trial', id: t.id, roomId: t.caseId ?? null, ...subject },
           detail: safeDetail(h.action, h.detail),
         });
       }

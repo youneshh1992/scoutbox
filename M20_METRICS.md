@@ -124,6 +124,16 @@ boundary, and no metric names a player the organisation may not currently see.
 - **Small-n** — shares withheld below 5.
 - **Limitation** — This is the reason the club recorded, not the reason that operated. A decision carrying codes in two categories counts in both, so the shares add up to more than 100%.
 
+#### F4 · `trial_process` (M23 P4B)
+- **Definition** — counts of Trial process steps that happened in the window: invitations sent, invitations declined, trials accepted, schedules confirmed by the family, trials completed, trials cancelled.
+- **Unit** — count of trials per step; the headline number is completions.
+- **Source** — `db.requests[]` (type `trial`, tied to a case: `createdAt`, `respondedAt`, `status`) and `db.trials[]` (`acceptedAt`, `schedule.confirmedAt`, `completion.state`, `completion.at`).
+- **Numerator / denominator** — counts only; **no denominator, no rate**. A completion count beside an invitation count is not a conversion rate and the panel says so.
+- **Time semantics** — window-entry per step: each step is counted on the day it happened, so one trial can appear under several steps in one window.
+- **Small-n** — none; counts are never suppressed and no rate exists to withhold.
+- **Limitation** — These are counts of process steps in the window — invitations sent, accepted, schedules confirmed, trials completed, cancelled or declined — never how a trial went. No rate is built on them: a club that invites five players and completes three has not "converted 60%", it has run three trials.
+- **What it never reads** — attendance notes, assessments, observations, the message, the venue, the reason text.
+
 ### Family T — how long the process takes
 
 All T metrics report **median and interquartile range**, never a mean: one

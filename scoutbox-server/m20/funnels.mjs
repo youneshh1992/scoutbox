@@ -273,3 +273,32 @@ export function sourceStageReach(ctx) {
 
 export const PIPELINE_METRICS = { pipelineStageCounts, funnelProgression, exitReasonMix };
 export const SOURCE_METRICS = { roomSourceMix, sourceStageReach };
+
+// ----------------------------------------------------- F4 · trial process
+
+/**
+ * M23 P4B (D-29): the Trial workflow as process COUNTS in the window — one
+ * number per step, each keyed on the moment the step happened. No rate, no
+ * ratio, no "conversion": the mandate says only process metrics, and a
+ * completion count beside an invitation count already invites the reader to
+ * divide, so the limitation sentence says why they must not.
+ */
+export function trialProcess(ctx) {
+  const w = ctx.window;
+  const invitations = (ctx.requests ?? []).filter((r) => r && r.type === 'trial' && r.caseId);
+  const trials = (ctx.trials ?? []).filter((t) => t && typeof t === 'object' && t.caseId);
+  const steps = {
+    invited: invitations.filter((r) => inWindow(r.createdAt, w)).length,
+    declined: invitations.filter((r) => r.status === 'declined' && inWindow(r.respondedAt, w)).length,
+    accepted: trials.filter((t) => inWindow(t.acceptedAt, w)).length,
+    scheduled: trials.filter((t) => inWindow(t.schedule?.confirmedAt, w)).length,
+    completed: trials.filter((t) => t.completion?.state === 'completed' && inWindow(t.completion.at, w)).length,
+    cancelled: trials.filter((t) => t.completion?.state === 'cancelled' && inWindow(t.completion.at, w)).length,
+  };
+  return {
+    ...wire(METRICS.trial_process),
+    ...count(steps.completed),
+    steps: Object.fromEntries(Object.entries(steps).map(([k, n]) => [k, count(n)])),
+    note: 'Each step is counted on the day it happened, so one trial can appear under several steps in one window and under none in another. Counts are never suppressed; no rate is offered.',
+  };
+}

@@ -35,6 +35,7 @@ import {
 } from './lifecycle.mjs';
 import { ROOM_STATUS_LABELS, ROOM_TRANSITIONS } from '../m17/shared.mjs';
 import { contactMilestone, contactIntegrity } from './contact.mjs';
+import { trialMilestone, trialIntegrity } from './trial.mjs';
 
 /** Stores this projection may not proceed without. `recruitmentContacts` joined in P3. */
 export const JOURNEY_REQUIRED_STORES = Object.freeze([
@@ -71,6 +72,12 @@ const TIMELINE_ACTIONS = new Set([
   'room_created', 'room_status_changed', 'room_reopened',
   'case_created', 'case_stage_changed',
   'room_decision_recorded',
+]);
+
+/** P4B — the Trial history actions that are milestones. Unlinking is housekeeping. */
+const TRIAL_TIMELINE_ACTIONS = new Set([
+  'trial_accepted', 'trial_schedule_proposed', 'trial_rescheduled', 'trial_schedule_confirmed', 'trial_schedule_declined',
+  'trial_attendance_recorded', 'trial_cancelled', 'trial_completed', 'trial_evidence_linked',
 ]);
 
 /**
@@ -201,9 +208,19 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
     }));
   const currentDecision = decisions.filter((d) => !d.supersededById).slice(-1)[0] ?? null;
 
-  const trials = db.trials
-    .filter((t) => t?.orgId === kase.orgId && t.playerId === kase.playerId)
-    .map((t) => ({ id: t.id, status: t.status, proposedDate: t.proposedDate ?? null, hasReport: !!t.report }));
+  // P4B — the Trial workflow, as MILESTONES: ids, states, times and counts
+  // (§87). Never instructions, an address, a note, an observation or an
+  // assessment. A structurally corrupt row is omitted and counted (§143).
+  let trialsOmitted = 0;
+  const trials = [];
+  for (const t of db.trials) {
+    if (!t || t.orgId !== kase.orgId || t.playerId !== kase.playerId) continue;
+    if (trialIntegrity(t, { orgId: kase.orgId, caseId: t.caseId ?? null }).length) { trialsOmitted += 1; continue; }
+    trials.push({ id: t.id, status: t.status, proposedDate: t.proposedDate ?? null, hasReport: !!t.report, workflow: trialMilestone(t) });
+  }
+  const trialRows = db.trials.filter((t) => t?.orgId === kase.orgId && t.playerId === kase.playerId && trials.some((x) => x.id === t.id));
+  const trialInvitations = db.requests.filter((r) => r?.type === 'trial' && r.caseId === kase.id && r.orgId === kase.orgId);
+  const trialAssessments = (db.assessments ?? []).filter((a) => a?.orgId === kase.orgId && a.playerId === kase.playerId && a.context?.trialId && trials.some((x) => x.id === a.context.trialId));
 
   const contacts = db.requests
     .filter((r) => r?.orgId === kase.orgId && r.playerId === kase.playerId)
@@ -237,7 +254,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   const signing = db.signings.find((s) => s?.orgId === kase.orgId && s.playerId === kase.playerId) ?? null;
   const outcomeAvailable = Array.isArray(db.outcomeReports);
 
-  const history = timelineFor(kase, decisions, contactRecords);
+  const history = timelineFor(kase, decisions, contactRecords, { trials: trialRows, invitations: trialInvitations, assessments: trialAssessments });
   const limit = Math.min(Math.max(Number(historyLimit) || HISTORY_PAGE_DEFAULT, 1), HISTORY_PAGE_MAX);
   const cursor = Math.max(Number(historyCursor) || 0, 0);
   const page = history.slice(cursor, cursor + limit);
@@ -279,6 +296,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
     nextActions: actions,
     contact: { records: contacts, contacts: contactRecords, omitted: contactsOmitted },
     trials,
+    trialsOmitted,
     assessments,
     decisions: { all: decisions, current: currentDecision },
     offer: { available: offersAvailable, records: offers },
@@ -308,13 +326,27 @@ function sharedRecordsFor(db, kase, viewer) {
     if (viewer.kind === 'player_self') return r.routedTo !== 'guardian' && viewer.playerId === kase.playerId;
     return r.routedTo === 'guardian' && r.guardianId === viewer.guardianId;
   };
-  return db.requests.filter(mine).map((r) => ({
+  const requests = db.requests.filter(mine).map((r) => ({
     kind: 'contact_request',
     id: r.id,
     type: r.type,
     status: r.status,
     at: r.createdAt,
   }));
+  // P4B — the family's own Trial: the operational edge they already hold
+  // through /player/trials and /guardian/trials (state, revision, times).
+  // Only the recipient who accepted sees it here; a minor's own device sees
+  // the outcome line, never the guardian's record. No case id, no history.
+  const mineTrial = (t) => {
+    if (t?.orgId !== kase.orgId || t.playerId !== kase.playerId || t.subjectRemovedAt) return false;
+    if (viewer.kind === 'player_self') return viewer.playerId === kase.playerId && (t.recipient ? t.recipient.type === 'player' : t.acceptedBy === 'player');
+    return t.recipient ? t.recipient.type === 'guardian' && t.recipient.guardianId === viewer.guardianId : t.acceptedBy === 'guardian';
+  };
+  const trials = db.trials.filter(mineTrial).map((t) => {
+    const m = trialMilestone(t);
+    return { kind: 'trial', id: t.id, workflowState: m.workflowState, at: t.acceptedAt, scheduledAt: m.scheduledAt, revision: m.revision, sessionCount: m.sessions.length, completion: m.completion };
+  });
+  return [...requests, ...trials];
 }
 
 /**
@@ -323,8 +355,35 @@ function sharedRecordsFor(db, kase, viewer) {
  * Reads are absent by construction rather than filtered out — `audit()` only
  * ever wrote things that changed something. Note bodies never appear.
  */
-function timelineFor(kase, decisions, contactRecords = []) {
+function timelineFor(kase, decisions, contactRecords = [], trial = {}) {
   const out = [];
+  // P4B — Trial milestones: ids, states and counts. The invitation and its
+  // decline come from the request row; everything after acceptance comes
+  // from the Trial's own append-only history; an assessment is recorded as
+  // existing and nothing more (D-16). Never a note, an address, an
+  // instruction, an observation or a rating.
+  for (const r of trial.invitations ?? []) {
+    if (r?.createdAt != null) out.push({ _k: `trial_invited:${r.id}`, kind: 'trial_invited', at: r.createdAt, by: r.scoutName ?? null, requestId: r.id, recipientType: r.recipient?.type ?? r.routedTo ?? null });
+    if (r?.status === 'declined' && r.respondedAt != null) out.push({ _k: `trial_declined:${r.id}`, kind: 'trial_declined', at: r.respondedAt, by: null, requestId: r.id });
+  }
+  for (const t of trial.trials ?? []) {
+    for (const h of t.history ?? []) {
+      if (!TRIAL_TIMELINE_ACTIONS.has(h?.action)) continue;
+      const d = h.detail ?? {};
+      out.push({
+        _k: `${h.action}:${t.id}:${h.id ?? ''}`, kind: h.action, at: h.at, by: h.by?.kind === 'org' ? (h.by.name ?? null) : null,
+        byKind: h.by?.kind ?? null, trialId: t.id,
+        ...(d.sessionId != null ? { sessionId: d.sessionId } : {}), ...(d.trialSessionId != null ? { sessionId: d.trialSessionId } : {}),
+        ...(d.state != null ? { state: d.state } : {}), ...(d.revision != null ? { revision: d.revision } : {}),
+        ...(d.sessionCount != null ? { sessionCount: d.sessionCount } : {}), ...(d.phase != null ? { phase: d.phase } : {}),
+        ...(d.cancelledBy != null ? { cancelledBy: d.cancelledBy } : {}), ...(d.attendedSessions != null ? { attendedSessions: d.attendedSessions } : {}),
+      });
+    }
+  }
+  for (const a of trial.assessments ?? []) {
+    const at = a.submittedAt ?? a.createdAt;
+    if (at != null) out.push({ _k: `trial_assessment_recorded:${a.id}`, kind: 'trial_assessment_recorded', at, by: null, trialId: a.context.trialId, assessmentId: a.id, state: a.state });
+  }
   // P3 — two safe milestones per contact, keyed by the contact id so two in
   // the same millisecond keep a stable order.
   for (const c of contactRecords) {

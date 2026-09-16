@@ -126,6 +126,8 @@ function PipelinePanels({ f }: { f: Family }) {
   const stages = m.pipeline_stage_counts;
   const funnel = m.funnel_progression;
   const mix = m.exit_reason_mix;
+  const trialProcess = m.trial_process;
+  const trialSteps = (trialProcess?.steps ?? {}) as Record<string, Figure>;
   const rows = (stages?.rows ?? []) as { status: string; terminal: boolean; value: number }[];
   const funnelRows = (funnel?.rows ?? []) as { stage: string; value: number; reachedOutsideWindow: number; share: Figure }[];
   const mixRows = (mix?.rows ?? []) as { category: string; value: number; share: Figure }[];
@@ -196,6 +198,23 @@ function PipelinePanels({ f }: { f: Family }) {
             {t('m20.mix.codes')}: {codes.map((c) => `${reasonLabel(c.code)} (${c.value})`).join(' · ')}
           </p>
         )}
+      </Panel>
+
+      <Panel metric={trialProcess}>
+        <p className="muted small" data-no-rate="true">{t('m20.trialProcess.noRate')}</p>
+        <div className="table-scroll">
+          <table className="data">
+            <thead><tr><th>{t('m20.col.step')}</th><th>{t('m20.col.trials')}</th></tr></thead>
+            <tbody>
+              {['invited', 'declined', 'accepted', 'scheduled', 'completed', 'cancelled'].map((step) => (
+                <tr key={step}>
+                  <td>{t(`m20.trialProcess.${step}`)}</td>
+                  <td data-count={trialSteps[step]?.value ?? 0}>{trialSteps[step]?.value ?? 0}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Panel>
     </>
   );

@@ -129,6 +129,14 @@ export const METRICS = {
     ratio: true,
     limitation: 'Rooms can be reopened, so this is not a one-way funnel: a room counts once for each stage it ever reached, not once per visit. A recent window is incomplete by construction — rooms opened last week have not had time to reach a signing.',
   }),
+  trial_process: M('trial_process', 'pipeline', 'Trial process', {
+    unit: 'trials',
+    semantics: 'window_entry',
+    sources: ['requests', 'trials'],
+    reads: ['type', 'caseId', 'status', 'createdAt', 'respondedAt', 'acceptedAt', 'schedule.confirmedAt', 'completion.state', 'completion.at', 'subjectRemovedAt'],
+    ratio: false,
+    limitation: 'These are counts of process steps in the window — invitations sent, accepted, schedules confirmed, trials completed, cancelled or declined — never how a trial went. No rate is built on them: a club that invites five players and completes three has not "converted 60%", it has run three trials.',
+  }),
   exit_reason_mix: M('exit_reason_mix', 'pipeline', 'Why rooms ended', {
     unit: 'decisions',
     semantics: 'window_completion',

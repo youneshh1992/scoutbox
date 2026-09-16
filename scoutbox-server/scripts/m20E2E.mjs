@@ -131,6 +131,11 @@ section('§1 — the metric registry is internally consistent');
   // documented definition is compared too.
   const clients = ['scoutbox-club/src/m20Demo.ts', 'scoutbox-grassroots/src/m20Demo.ts'];
   const docs = read('M20_METRICS.md');
+  // M23 P4B (D-29): the Trial process metric is counts only — no ratio, no
+  // rate, and it never declares a read of the club's notes, instructions,
+  // attendance notes or assessments.
+  neg(METRICS.trial_process.ratio === false && METRICS.trial_process.distribution !== true, 'trial_process offers no rate and no distribution — a completion count beside an invitation count is not a conversion');
+  neg(METRICS.trial_process.reads.every((f) => !/note|instruction|message|reason|assessment|rating|observation|venue/i.test(f)), 'trial_process reads no note, instruction, message, reason, assessment, rating, observation or venue field');
   for (const rel of clients) {
     const src = read(rel);
     const drifted = METRIC_IDS.filter((id) => !src.includes(METRICS[id].limitation));
@@ -608,6 +613,17 @@ const roomIds = [];
   const move = (id, status, extra = {}) => j('POST', `/org/rooms/${id}/status`, { status, ...extra }, maria.token);
   for (const id of roomIds) await move(id, 'under_review');
   for (const id of roomIds.slice(0, 5)) await move(id, 'shortlisted');
+  // M23 P4B: `trial_requested` is evidence-gated on a live Trial invitation
+  // (D-3). The invitation itself advances the case; the explicit move that
+  // follows is kept for rooms whose invitation could not be issued (the
+  // recipient may be unresolvable for a fixture minor) and is not asserted.
+  {
+    const H = 3600_000;
+    await j('POST', `/org/rooms/${roomIds[0]}/trials`, {
+      timezone: 'Europe/London', venue: { name: 'Training Ground', town: 'Eastport' }, message: 'Come and train with us.',
+      slots: [{ startsAt: Date.now() + 72 * H, endsAt: Date.now() + 74 * H, kind: 'training' }], clientKey: 'm20-inv-1',
+    }, maria.token);
+  }
   await move(roomIds[0], 'trial_requested');
   await move(roomIds[1], 'archived', { reasonCodes: ['insufficient_recent_evidence'], note: 'A PRIVATE REASON IN PROSE' });
   await move(roomIds[2], 'withdrawn', { reasonCodes: ['squad_space'] });
