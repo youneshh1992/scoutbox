@@ -245,6 +245,13 @@ Every P2 requirement, with no "mostly done".
 | Browser / live regression | **implemented + passing** | `e2e/m23Live.test.mjs`, 37 checks, real login; found B4 |
 | m18E2E `changeCount` flake | **closed at the writer** | B6; 100 targeted + 20 full runs clean; `M23-P2-FLAKE-CLOSED` |
 | Dead code + stale comments | **swept** | 7 unused exports classified, 1 rewired, 1 un-exported; no TODO/FIXME/HACK marker in any M23-touched file |
+| Error → HTTP contract | **one table, no default** | `m23/errors.mjs`, 21 codes; `m23E2E` group Y (16 checks) extracts every `error:` literal from source and requires a status |
+| Error privacy | **asserted** | every 500 is code + fixed message; Y7/Y8 prove the projector still names stores internally and the client body does not |
+| Hidden-case parity | **byte-identical** | Y12/Y13, re-asserted after the mapping was centralised |
+| Recovery through the browser | **proven** | fresh clone of the bundle → npm install → `vite build` → `m23Live` 39 checks, rc=0 |
+| Browser/live battery | **33/33 green** | mechanically discovered; zero surviving processes, zero held ports |
+| Test-order independence | **6 orderings, identical counts** | A–F, fresh process state each; the old m182 330/333 variance does not recur |
+| Typechecks + builds | **4/4, 3/3** | from the working tree and again from the final fresh clone |
 | Docs | **complete** | workflow (24 sections), terminology (16 terms) |
 | Atomicity failure injection | **deferred** | see D9 |
 | Events / notifications for transitions | **deferred, deliberately** | nothing to notify until a share boundary exists (§64, §45) |
@@ -276,6 +283,10 @@ Every P2 requirement, with no "mostly done".
 | **B6** | **high** | `newEvidence` read `Date.now()` three times for one record, so `reviewedAt` could land 1ms after `recordedAt` and a brand-new upload was reported as an *upgrade of itself*. The long-standing m18E2E `changeCount` flake was this, not a test flake. | 50-run stress probe (`m18FlakeProbe`), reproduced on run 30 | one clock read per event; regressions at the owner (m12E2E) and as an invariant (m18E2E) | **fixed** `8e8d0a3` |
 | **C1** | low | The first store contract counted `db.schema` — the migration registry's own record — as a store, reading the guarantee one store broader than it is. | writing the contract in a checkable form | moved to `NOT_A_STORE`; 123 stores, 42 migration | **fixed** `213b980` |
 | **C2** | low | `LIFECYCLE_INITIAL` had no caller, and `'watching'` was spelled at both room-creation sites. Not stale — disconnected. | dead-code sweep | `INITIAL_ROOM_STATUS` in `m17/shared.mjs`, read at both sites; M23 keeps an alias | **fixed** `7605e75` |
+| **F1** | low | `JOURNEY_VIEWER_UNKNOWN` answered 404 — "no such recruitment case" — about a case that exists and is fine. The fault is the caller's viewer kind, so it is ours. | writing the error mapping down as a table | 500, with the other codes that mean this build is wrong | **fixed** `2480a3b` |
+| **F2** | medium | The journey route returned the projector's result verbatim, so a `JOURNEY_STORE_MISSING` 500 handed the client `missing`/`malformed` — lists of raw internal store names. | the same table, asking what leaves over HTTP | `publicErrorBody`; the detail goes to the log, the code survives | **fixed** `2480a3b` |
+| **F3** | medium | Five lifecycle states had no `rm.st.*` label in either client in either language. The fallback rendered `offer_accepted` as "offer accepted", where the server says "Accepted in ScoutBox" because a signing is a separate legal event. | mechanical EN/FR coverage check against `ROOM_STATUSES` | 10 entries per client using the server's wording; m23Live L7b/L7c stated positively over the whole set | **fixed** `e75d5d6` |
+| **F4** | medium | `m23Persistence` printed "server did not come up" above a log line saying it was listening: a 40s poll budget ran out under battery load and the announcement landed during the final sleep. | the full server battery, at its most loaded | wait on the server's own `listening on :NNNN` announcement, verify the port, then confirm over HTTP; three failures now have three messages | **fixed** `e75d5d6` |
 
 ### Deferred, with reasons
 
