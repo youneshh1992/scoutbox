@@ -477,3 +477,134 @@ vocabulary without holding a second copy.
 an alias of the one real table, and an *exported* alias reads like a second
 precondition table to the next person — which is precisely D3, the defect this
 milestone has already had to fix once.
+
+---
+
+# Addendum 2 — the final closure pass
+
+Appended, not merged. The sweep's table above still reports what the sweep
+found; Addendum 1 records the correction and freeze passes; this records the
+closure pass. Chronology is the point.
+
+| ID | Severity | Category | Found by | Status |
+|---|---|---|---|---|
+| **F1** | low | error contract | writing the mapping down as a table | **fixed** `2480a3b` |
+| **F2** | medium | information disclosure | the same table, asking what leaves over HTTP | **fixed** `2480a3b` |
+| **F3** | medium | client correctness | mechanical EN/FR label coverage check | **fixed** `e75d5d6` |
+| **F4** | medium | test harness | the full server battery, at its most loaded | **fixed** `e75d5d6` |
+
+## F1 — a 404 that told the truth about nothing
+
+**Severity** low. **Category** error contract.
+
+`JOURNEY_VIEWER_UNKNOWN` answered **404** — "No such recruitment case." The
+case exists and is fine; what is wrong is that somebody handed the projector a
+viewer kind it does not know. That is our defect, and answering 404 tells the
+caller something false about their data.
+
+**Why it survived.** It is unreachable through the two routes, which always
+supply a known kind. Nothing tested it because nothing could reach it, and the
+ternary chain's `: 404` default swallowed it without anyone choosing.
+
+**Reproduction.** Not reachable over HTTP; visible by reading the mapping
+against the projector's return values, which is why the mapping had to become a
+table before it could be read.
+
+**Regression.** `m23E2E` Y2 — every error code the M23 source can produce has a
+status in the table, extracted from the source mechanically.
+
+**Fix.** 500, with the other codes that mean "this build is wrong". `2480a3b`.
+
+## F2 — the 500 body handed out the schema
+
+**Severity** medium. **Category** information disclosure.
+
+The journey route returned the projector's result verbatim. For
+`JOURNEY_STORE_MISSING` that result carries `missing` and `malformed`: lists of
+**raw internal store names**. Anyone able to provoke a 500 received a slice of
+the database schema.
+
+**Why it survived.** The detail is genuinely valuable — in a unit test and in a
+server log. Three existing tests assert on `out.missing` and `out.malformed`,
+correctly, because they call the projector directly. Nobody asked the separate
+question of what the *route* does with the same object.
+
+**Reproduction.** Call `buildRecruitmentJourney` with a store deleted; the
+result names it. Before the fix the route serialised that object unchanged.
+
+**Regression.** `m23E2E` Y7 asserts the projector still names the stores — the
+control, without which Y8 would be vacuous — and Y8 asserts the public body
+names none of them. Y11 sweeps every HTTP refusal for fields outside the
+published shape.
+
+**Fix.** `publicErrorBody` projects internal errors to the code plus a fixed
+message; the detail goes to `console.error`. `2480a3b`.
+
+## F3 — five states with no label, in either language
+
+**Severity** medium. **Category** client correctness.
+
+`contact_planned`, `contacted`, `offer_accepted`, `offer_declined` and
+`on_hold` — the five states M23 added — had no `rm.st.*` entry in
+`scoutbox-club` or `scoutbox-grassroots`, in EN or FR.
+
+The fallback is `code.replace(/_/g, ' ')`, so nothing crashed and no raw enum
+appeared. What appeared was **"offer accepted"**, where the server deliberately
+labels that state **"Accepted in ScoutBox"** — because the player accepting in
+the product is not a signing, and "offer accepted" claims more than happened.
+The one state whose wording was chosen to avoid overstating was the one the
+fallback overstated.
+
+**Why it survived.** `m23Live` L7 tests for a raw enum: it greps the rendered
+page for `\bon_hold\b`. The fallback produces "on hold", with no underscore, so
+a missing label passed that check exactly as well as a real label did. L7 is
+not wrong — it catches the defect it was written for. A missing label is a
+different defect and needed a different, positive assertion.
+
+**Reproduction.** Read `ROOM_STATUSES` from the server and check each code
+against both dictionaries in both clients. Five missing, twice over.
+
+**Regression.** `m23Live` L7b asserts every one of the 18 states has an EN and
+an FR label, over the set imported from the server so it cannot drift; L7c
+asserts `offer_accepted` keeps the server's exact wording.
+
+**Fix.** Ten entries per client, using the server's own labels. `e75d5d6`.
+
+## F4 — "server did not come up", printed beneath a log saying it had
+
+**Severity** medium. **Category** test harness (no product defect).
+
+`m23Persistence` failed about one run in twenty — always inside a loaded
+battery, never when run alone. The failure printed:
+
+```
+Error: server did not come up:
+  ...
+  scoutbox-server listening on :5060 — 1 players, 1 orgs seeded
+```
+
+The message and the evidence directly under it contradicted each other.
+
+**Root cause.** The boot wait was 160 polls of 250ms — a 40-second budget — and
+nothing else. Under battery load the server took longer than that. The polls
+ran out; the server's announcement then arrived on stdout during the final
+`sleep`, and since the error string is assembled at `throw` time it included a
+line proving the server was up. The harness gave up and blamed the server.
+
+**Why it survived.** 40 seconds is generous on an idle machine, and every
+targeted run is on an idle machine. It needed the 25th suite of a battery that
+had just run 33 browser suites.
+
+**Reproduction.** `for i in $(seq 1 15); do node scripts/m23Persistence.mjs; done`
+— failed on run 7, with the contradictory message above.
+
+**Fix — not a bigger number.** Raising the poll count keeps a guess at the
+centre of the check and leaves the message lying. The server announces its port
+on stdout when `app.listen` fires, which is a real readiness edge: the harness
+now waits for that announcement, asserts the announced port is the one it
+asked for, and only then confirms over HTTP with a short budget. Three failures
+that were previously one message — exited before announcing, never announced,
+announced but silent — now say which happened.
+
+**Verification.** 40 runs clean, 20 of them under deliberate concurrent load
+from `m17E2E` and `m21E2E`, the condition that produced it. `e75d5d6`.
