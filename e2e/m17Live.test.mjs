@@ -259,7 +259,7 @@ await player.waitForSelector('text=Your visibility right now', { timeout: 20000 
   const body = await player.locator('body').innerText();
   if (/Recruitment Room/i.test(body)) fail('R12: the player app mentions a Recruitment Room');
   say('R12: the player app never mentions a Recruitment Room');
-  await player.click('a[href="/you"]');
+  await player.click('a[href="/football"]');
   await player.waitForSelector('text=ScoutBox Trust Score', { timeout: 20000 });
   const you = await player.locator('body').innerText();
   if (/Recruitment Room|Shortlisted|room lead|internal note/i.test(you)) fail('R12: club-internal recruitment state leaked into the player app');

@@ -69,12 +69,13 @@ await player.waitForSelector('text=Our promises to every player', { timeout: 300
 await player.locator('text=Enter').nth(0).click();
 await player.waitForSelector('text=Your visibility right now', { timeout: 20000 });
 await player.click('a[href="/you"]');
+await player.getByRole('tab', { name: 'Clubs' }).click();
 await player.waitForSelector('text=Suitability preferences', { timeout: 20000 });
 await player.waitForSelector('text=NOT an independently verified licence', { timeout: 15000 });
 say('player demo: preferences + representation (honest credential label) render on You');
-await player.click('a[href="/discover"]');
+await player.click('a[href="/opportunities"]');
 await player.waitForSelector('text=Opportunity fit', { timeout: 20000 });
-say('player demo: opportunity fit section renders on Discover');
+say('player demo: opportunity fit section renders on Opportunities');
 await player.close();
 
 // ---- Trust & Safety demo: M13 tabs

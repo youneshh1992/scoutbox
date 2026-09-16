@@ -6,11 +6,9 @@ import type { DirectoryClub, Opportunities } from '../../data/types';
 import { SAFEGUARDING_PROMISES, U18_PROMISES } from '../../domain/safeguarding';
 import { useSession } from '../../state';
 import { colors } from '../../theme';
+import { pt } from '../../i18n';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from '../../components/ui';
-import { ReportButton } from '../../components/ReportSheet';
-import { NotificationBell } from '../../components/NotificationBell';
-import { BoardSection } from '../../components/M12Sections';
-import { OpportunityFitSection } from '../../components/M13Sections';
+import { PageHeader } from '../../components/PageChrome';
 
 const NOTICED_LABELS: Record<string, string> = {
   first_touch: 'First touch', pace: 'Pace', positioning: 'Positioning', work_rate: 'Work rate',
@@ -70,13 +68,7 @@ export default function Discover() {
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
       >
-        <Row style={{ justifyContent: 'space-between' }}>
-          <Text style={styles.h1}>Home</Text>
-          <Row>
-            <NotificationBell />
-            <ReportButton />
-          </Row>
-        </Row>
+        <PageHeader title={pt('tabHome')} />
 
         {weekly && (
           <Card style={{ borderColor: colors.accent }}>
@@ -308,9 +300,6 @@ export default function Discover() {
             <Muted size={13.5}>{p}</Muted>
           </Card>
         ))}
-        {playerId ? <BoardSection actor={{ kind: 'player', id: playerId }} /> : null}
-        {playerId ? <OpportunityFitSection actor={{ kind: 'player', id: playerId }} /> : null}
-
       </ScrollView>
     </SafeAreaView>
   );
@@ -319,7 +308,6 @@ export default function Discover() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: 18, gap: 10, maxWidth: 560, width: '100%', alignSelf: 'center' },
-  h1: { color: colors.text, fontSize: 26, fontWeight: '800', marginTop: 6 },
   cardTitle: { color: colors.text, fontSize: 15.5, fontWeight: '700' },
   insightTile: {
     flexGrow: 1,

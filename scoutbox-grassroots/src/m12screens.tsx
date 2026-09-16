@@ -381,7 +381,7 @@ export function SquadPlannerScreen({ session, tick, notify }: ScreenProps) {
 
   return (
     <div>
-      <div className="notice" style={{ fontSize: 12.5 }}>{t('planner.noScores')}</div>
+      <p className="pagehint">{t('planner.noScores')}</p>
       <div className="stat-grid">
         <div className="stat"><b>{planner?.formation ?? '—'}</b><span>{t('planner.formation')}</span></div>
         <div className="stat"><b>{planner?.roles.length ?? 0}</b><span>{t('planner.roles')}</span></div>
@@ -521,7 +521,7 @@ export function CampaignsScreen({ session, tick, notify }: ScreenProps) {
 
   return (
     <div>
-      <div className="notice" style={{ fontSize: 12.5 }}>{t('camp.fileVsHuman')}</div>
+      <p className="pagehint">{t('camp.fileVsHuman')}</p>
       <div className="filters">
         <input aria-label="Campaign title" placeholder="Title (e.g. Remote sprint assessment)" value={title} onChange={(e) => setTitle(e.target.value)} style={{ flex: 1 }} />
         <input aria-label={t('common.deadline')} type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
@@ -576,7 +576,7 @@ export function VideoScreen({ session, tick, notify, openPlayer }: ScreenProps) 
 
   return (
     <div>
-      <div className="notice" style={{ fontSize: 12.5 }}>Annotations are private club workflow records stored against the source footage — never public comments, never a channel to a player. Mark segments from any profile's footage (open a player → their clips).</div>
+      <p className="pagehint">Annotations are private club workflow records stored against the source footage — never public comments, never a channel to a player. Mark segments from any profile's footage (open a player → their clips).</p>
       {playing && (
         <div className="section">
           <h3>{playing.note ?? playing.labels.join(', ')} <span className="dim">{playing.startS}s → {playing.endS}s</span>
@@ -638,7 +638,7 @@ export function OutcomesScreen({ session, tick, notify }: ScreenProps) {
   const stateClass = (s: string) => s === 'confirmed' ? 'green' : s === 'disputed' ? 'red' : s === 'unknown_pending' ? 'gold' : '';
   return (
     <div>
-      <div className="notice" style={{ fontSize: 12.5 }}>Follow-ups are scheduled records that survive restarts. Reported ≠ confirmed: the player/guardian answers back, and "unknown" is counted as unknown.</div>
+      <p className="pagehint">Follow-ups are scheduled records that survive restarts. Reported ≠ confirmed: the player/guardian answers back, and "unknown" is counted as unknown.</p>
       <div className="list-rows">
         {(list ?? []).map((f) => (
           <div key={f.id} className="list-row">
@@ -719,7 +719,7 @@ export function TrialDaysScreen({ session, tick, notify }: ScreenProps) {
 
   return (
     <div>
-      <div className="notice" style={{ fontSize: 12.5 }}>{t('day.gateNote')}</div>
+      <p className="pagehint">{t('day.gateNote')}</p>
       <div className="list-rows">
         {trials.map((tr) => (
           <div key={tr.id} className="list-row">

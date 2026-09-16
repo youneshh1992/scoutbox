@@ -126,6 +126,7 @@ await j(`/org/assessments/${assId}`, { method: 'PUT', body: JSON.stringify({ rat
 await j(`/org/assessments/${assId}/submit`, { method: 'POST', body: JSON.stringify({}) }, bearer(MARIA));
 await j(`/org/assessments/${assId}/publish-feedback`, { method: 'POST', body: JSON.stringify({ text: 'Great pressing angles this month — next: recovery runs after losing it.' }) }, bearer(MARIA));
 await player.click('a[href="/you"]');
+await player.getByRole('tab', { name: 'Clubs' }).click();
 await player.waitForSelector('text=Great pressing angles this month', { timeout: 20000 });
 say('E2: published feedback reached the player’s You tab');
 const pageText = await player.locator('body').innerText();

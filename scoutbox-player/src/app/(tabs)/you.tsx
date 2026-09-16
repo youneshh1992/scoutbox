@@ -1,27 +1,38 @@
+// M23 P2.5 — You: the player's own record and their account, as three page
+// tabs. Profile (the former Profile tab's body), Account (notifications,
+// data, safety, the rules) and Clubs (what clubs have published to you and
+// what you share with them). The football record moved to the Football tab
+// and placement check-ins to Opportunities; every section is the same
+// component reading the same server projection as before.
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { client, type FiledReport, type SeasonWrap } from '../../data/client';
 import type { NotificationPrefs } from '../../data/types';
 import { SAFEGUARDING_PROMISES, U18_PROMISES } from '../../domain/safeguarding';
 import { useSession } from '../../state';
 import { colors } from '../../theme';
+import { pt } from '../../i18n';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from '../../components/ui';
-import { ReportButton } from '../../components/ReportSheet';
-import { NotificationBell } from '../../components/NotificationBell';
-import { AccessSection, FeedbackDevSection, FollowUpsSection } from '../../components/M12Sections';
+import { PageHeader, PageTabs, pickTab } from '../../components/PageChrome';
+import { AccessSection, FeedbackDevSection } from '../../components/M12Sections';
 import { ExposureSection, PreferencesSection, RepresentationSection, TransitionsSection } from '../../components/M13Sections';
 import { InviteCodeSection, ReferencesSection } from '../../components/M14Sections';
-import { FootballPassportSection } from '../../components/M15Sections';
-import { BoxTrainingSection } from '../../components/M16Sections';
-import { DevelopmentHubSection } from '../../components/M21Sections';
-import { CombineSection } from '../../components/CombineSection';
-import { TrustProfileSection } from '../../components/TrustProfileSection';
+import { ProfileBody } from './profile';
 
 export default function You() {
   const router = useRouter();
   const { me, mode, isMinor, logout, playerId, notifications } = useSession();
+  const params = useLocalSearchParams<{ tab?: string }>();
+  const TABS = [
+    { key: 'profile', label: pt('segProfile') },
+    { key: 'account', label: pt('segAccount') },
+    { key: 'clubs', label: pt('segClubs') },
+  ];
+  const [tab, setTab] = useState(() => pickTab(TABS, params.tab));
+  useEffect(() => { if (params.tab) setTab(pickTab(TABS, params.tab)); }, [params.tab]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [myReports, setMyReports] = useState<FiledReport[]>([]);
   const [prefs, setPrefs] = useState<NotificationPrefs>({ quietStart: null, quietEnd: null, schoolHoursMute: null });
   const [prefsNote, setPrefsNote] = useState<string | null>(null);
@@ -72,197 +83,195 @@ export default function You() {
     }
   };
 
+  const mediaOptions = (me?.media ?? []).map((m) => ({ id: m.id, title: m.title }));
+  const actor = playerId ? { kind: 'player' as const, id: playerId } : null;
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Row style={{ justifyContent: 'space-between' }}>
-          <Text style={styles.h1}>You</Text>
-          <Row>
-            <NotificationBell />
-            <ReportButton />
-          </Row>
-        </Row>
+        <PageHeader title={pt('tabYou')} />
+        <PageTabs tabs={TABS} value={tab} onChange={setTab} />
 
-        <Card>
-          <Text style={styles.cardTitle}>{me?.name ?? '—'}</Text>
-          <Muted size={13}>
-            {me ? `${me.country}${me.city ? ` · ${me.city}` : ''} · born ${me.dob}` : ''}
-          </Muted>
-          <Row>
-            <Pill label={mode === 'live' ? 'Live sync — connected to scoutbox-server' : 'Demo mode — self-contained'} tone={mode === 'live' ? 'green' : 'blue'} />
-          </Row>
-        </Card>
+        {tab === 'profile' && <ProfileBody />}
 
-        <Card>
-          <SectionTitle>Your account, your data</SectionTitle>
-          <Muted size={13}>
-            ScoutBox is free for players, always. Your profile, your media, your medical records and your
-            availability are player-controlled. Organisations act under named-individual accountability and
-            everything they do around your profile is on an append-only ledger you benefit from.
-          </Muted>
-        </Card>
-
-        {isMinor && (
-          <Card style={{ borderColor: colors.accent2 }}>
-            <SectionTitle>Your guardian-managed account</SectionTitle>
-            <Muted size={13}>
-              Your parent or guardian owns this account and handles everything club-related. If anything
-              on ScoutBox ever makes you uncomfortable, use the ⚑ Report button — it&apos;s on every
-              screen — or tell your guardian.
-            </Muted>
-          </Card>
-        )}
-
-        {myReports.length > 0 && (
+        {tab === 'account' && (
           <>
-            <SectionTitle>Safety centre — your reports</SectionTitle>
-            {myReports.map((r) => (
-              <Card key={r.id}>
+            <Card>
+              <Text style={styles.cardTitle}>{me?.name ?? '—'}</Text>
+              <Muted size={13}>
+                {me ? `${me.country}${me.city ? ` · ${me.city}` : ''} · born ${me.dob}` : ''}
+              </Muted>
+              <Row>
+                <Pill label={mode === 'live' ? 'Live sync — connected to scoutbox-server' : 'Demo mode — self-contained'} tone={mode === 'live' ? 'green' : 'blue'} />
+              </Row>
+            </Card>
+
+            <Card>
+              <SectionTitle>Your account, your data</SectionTitle>
+              <Muted size={13}>
+                ScoutBox is free for players, always. Your profile, your media, your medical records and your
+                availability are player-controlled. Organisations act under named-individual accountability and
+                everything they do around your profile is on an append-only ledger you benefit from.
+              </Muted>
+            </Card>
+
+            {isMinor && (
+              <Card style={{ borderColor: colors.accent2 }}>
+                <SectionTitle>Your guardian-managed account</SectionTitle>
+                <Muted size={13}>
+                  Your parent or guardian owns this account and handles everything club-related. If anything
+                  on ScoutBox ever makes you uncomfortable, use the ⚑ Report button — it&apos;s on every
+                  screen — or tell your guardian.
+                </Muted>
+              </Card>
+            )}
+
+            {myReports.length > 0 && (
+              <>
+                <SectionTitle>Safety centre — your reports</SectionTitle>
+                {myReports.map((r) => (
+                  <Card key={r.id}>
+                    <Row style={{ justifyContent: 'space-between' }}>
+                      <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>{r.reason}</Text>
+                      <Pill label={r.status === 'resolved' ? 'reviewed' : 'in review'} tone={r.status === 'resolved' ? 'green' : 'gold'} />
+                    </Row>
+                    {r.outcome && <Muted size={12.5}>{r.outcome}</Muted>}
+                  </Card>
+                ))}
+              </>
+            )}
+
+            {me?.pathway && (
+              <Card style={{ borderColor: colors.accent }}>
                 <Row style={{ justifyContent: 'space-between' }}>
-                  <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>{r.reason}</Text>
-                  <Pill label={r.status === 'resolved' ? 'reviewed' : 'in review'} tone={r.status === 'resolved' ? 'green' : 'gold'} />
+                  <SectionTitle>🎉 Your season wrap</SectionTitle>
+                  <Button small primary label={wrap ? 'Refresh' : 'Show my season'} onPress={async () => {
+                    try { setWrap(await client.getSeasonWrap(playerId!)); } catch { /* stays hidden */ }
+                  }} />
                 </Row>
-                {r.outcome && <Muted size={12.5}>{r.outcome}</Muted>}
+                {wrap && (
+                  <View style={{ gap: 6 }}>
+                    <Text style={{ color: colors.text, fontSize: 17, fontWeight: '800' }}>
+                      {wrap.player.name} — {wrap.player.level === 'semi_pro' ? 'Semi-pro' : 'Amateur'} {wrap.player.position ?? ''}
+                    </Text>
+                    <Row>
+                      {wrap.season && <Pill label={`⚽ ${wrap.season.goals} goals`} tone="gold" />}
+                      {wrap.season && <Pill label={`👕 ${wrap.season.appearances} apps`} />}
+                      <Pill label={`📍 ${wrap.verifiedAttendances} verified matches`} tone="green" />
+                      <Pill label={`🎬 ${wrap.verifiedClips} verified clips`} />
+                      <Pill label={`🔥 best streak ${wrap.bestStreak}`} />
+                      <Pill label={`👁 ${wrap.scoutViews} scout views`} tone="blue" />
+                      {wrap.coachVouches > 0 && <Pill label={`⭐ ${wrap.coachVouches} coach reference${wrap.coachVouches === 1 ? '' : 's'}`} tone="gold" />}
+                    </Row>
+                    {wrap.combineBests.length > 0 && (
+                      <Muted size={12.5}>Combine bests: {wrap.combineBests.map((b) => `${b.metric} ${b.value}${b.unit}`).join(' · ')}</Muted>
+                    )}
+                    {wrap.badges.length > 0 && <Row>{wrap.badges.map((b) => <Pill key={b} label={`🏅 ${b}`} tone="gold" />)}</Row>}
+                    <Muted size={11.5}>{wrap.note}</Muted>
+                  </View>
+                )}
+              </Card>
+            )}
+
+            <SectionTitle>Notifications</SectionTitle>
+            <Card>
+              <Muted size={13}>
+                Quiet hours pause push notifications overnight{isMinor ? '; the school-hours mute is on by default for under-18 accounts' : ''}.
+                Anything sent while muted waits in your feed — nothing is lost.
+              </Muted>
+              <Row>
+                <Muted size={13}>Quiet from</Muted>
+                <TextInput
+                  style={styles.timeInput}
+                  placeholder="22:00"
+                  placeholderTextColor={colors.muted}
+                  value={prefs.quietStart ?? ''}
+                  onChangeText={(v) => setPrefs((p) => ({ ...p, quietStart: v || null }))}
+                  onBlur={() => savePrefs({})}
+                />
+                <Muted size={13}>until</Muted>
+                <TextInput
+                  style={styles.timeInput}
+                  placeholder="07:00"
+                  placeholderTextColor={colors.muted}
+                  value={prefs.quietEnd ?? ''}
+                  onChangeText={(v) => setPrefs((p) => ({ ...p, quietEnd: v || null }))}
+                  onBlur={() => savePrefs({})}
+                />
+              </Row>
+              <Row>
+                <Button
+                  small
+                  primary={prefs.schoolHoursMute === true || (prefs.schoolHoursMute === null && isMinor)}
+                  label={`School-hours mute: ${prefs.schoolHoursMute === true || (prefs.schoolHoursMute === null && isMinor) ? 'on' : 'off'}`}
+                  onPress={() => savePrefs({ schoolHoursMute: !(prefs.schoolHoursMute === true || (prefs.schoolHoursMute === null && isMinor)) })}
+                />
+              </Row>
+              {prefsNote && <Muted size={12.5}>{prefsNote}</Muted>}
+            </Card>
+
+            {playerId ? <AccessSection playerId={playerId} isMinor={isMinor} mediaOptions={mediaOptions} /> : null}
+
+            <SectionTitle>Your data</SectionTitle>
+            <Card>
+              <Muted size={13}>
+                Take everything with you: profile, threads, requests, insights — one bundle, no questions asked.
+              </Muted>
+              <Row>
+                <Button small label="Preview my data export" onPress={doExport} />
+                {exportPreview && <Button small label="Hide preview" onPress={() => setExportPreview(null)} />}
+              </Row>
+              {exportPreview && (
+                <Text style={styles.exportPreview} numberOfLines={30}>{exportPreview}…</Text>
+              )}
+            </Card>
+            {!isMinor && (
+              <Card style={confirmDelete ? { borderColor: colors.danger } : undefined}>
+                <Muted size={13}>
+                  Deleting removes your profile, media and threads. The safety ledger keeps its append-only
+                  record (ids only) so accountability survives the account.
+                </Muted>
+                {!confirmDelete ? (
+                  <Row><Button small danger label="Delete my account" onPress={() => setConfirmDelete(true)} /></Row>
+                ) : (
+                  <Row>
+                    <Button small danger label="Yes — delete everything" onPress={doDelete} />
+                    <Button small label="Keep my account" onPress={() => setConfirmDelete(false)} />
+                  </Row>
+                )}
+                {deleteError && <Text style={{ color: colors.danger, fontSize: 13 }}>{deleteError}</Text>}
+              </Card>
+            )}
+
+            <SectionTitle>The rules that protect you</SectionTitle>
+            {(isMinor ? U18_PROMISES : SAFEGUARDING_PROMISES).map((p) => (
+              <Card key={p.slice(0, 20)}>
+                <Muted size={13}>{p}</Muted>
               </Card>
             ))}
+
+            {actor && !isMinor ? <InviteCodeSection actor={actor} /> : null}
+
+            <Button
+              label="Log out"
+              onPress={() => {
+                logout();
+                router.replace('/onboarding');
+              }}
+            />
           </>
         )}
 
-        {me?.pathway && (
-          <Card style={{ borderColor: colors.accent }}>
-            <Row style={{ justifyContent: 'space-between' }}>
-              <SectionTitle>🎉 Your season wrap</SectionTitle>
-              <Button small primary label={wrap ? 'Refresh' : 'Show my season'} onPress={async () => {
-                try { setWrap(await client.getSeasonWrap(playerId!)); } catch { /* stays hidden */ }
-              }} />
-            </Row>
-            {wrap && (
-              <View style={{ gap: 6 }}>
-                <Text style={{ color: colors.text, fontSize: 17, fontWeight: '800' }}>
-                  {wrap.player.name} — {wrap.player.level === 'semi_pro' ? 'Semi-pro' : 'Amateur'} {wrap.player.position ?? ''}
-                </Text>
-                <Row>
-                  {wrap.season && <Pill label={`⚽ ${wrap.season.goals} goals`} tone="gold" />}
-                  {wrap.season && <Pill label={`👕 ${wrap.season.appearances} apps`} />}
-                  <Pill label={`📍 ${wrap.verifiedAttendances} verified matches`} tone="green" />
-                  <Pill label={`🎬 ${wrap.verifiedClips} verified clips`} />
-                  <Pill label={`🔥 best streak ${wrap.bestStreak}`} />
-                  <Pill label={`👁 ${wrap.scoutViews} scout views`} tone="blue" />
-                  {wrap.coachVouches > 0 && <Pill label={`⭐ ${wrap.coachVouches} coach reference${wrap.coachVouches === 1 ? '' : 's'}`} tone="gold" />}
-                </Row>
-                {wrap.combineBests.length > 0 && (
-                  <Muted size={12.5}>Combine bests: {wrap.combineBests.map((b) => `${b.metric} ${b.value}${b.unit}`).join(' · ')}</Muted>
-                )}
-                {wrap.badges.length > 0 && <Row>{wrap.badges.map((b) => <Pill key={b} label={`🏅 ${b}`} tone="gold" />)}</Row>}
-                <Muted size={11.5}>{wrap.note}</Muted>
-              </View>
-            )}
-          </Card>
+        {tab === 'clubs' && actor && (
+          <>
+            <FeedbackDevSection actor={actor} />
+            <PreferencesSection actor={actor} isMinor={isMinor} />
+            <TransitionsSection actor={actor} isMinor={isMinor} mediaOptions={mediaOptions} />
+            <RepresentationSection playerId={actor.id} isMinor={isMinor} />
+            <ExposureSection playerId={actor.id} />
+            <ReferencesSection playerId={actor.id} />
+          </>
         )}
-
-        <SectionTitle>Notifications</SectionTitle>
-        <Card>
-          <Muted size={13}>
-            Quiet hours pause push notifications overnight{isMinor ? '; the school-hours mute is on by default for under-18 accounts' : ''}.
-            Anything sent while muted waits in your feed — nothing is lost.
-          </Muted>
-          <Row>
-            <Muted size={13}>Quiet from</Muted>
-            <TextInput
-              style={styles.timeInput}
-              placeholder="22:00"
-              placeholderTextColor={colors.muted}
-              value={prefs.quietStart ?? ''}
-              onChangeText={(v) => setPrefs((p) => ({ ...p, quietStart: v || null }))}
-              onBlur={() => savePrefs({})}
-            />
-            <Muted size={13}>until</Muted>
-            <TextInput
-              style={styles.timeInput}
-              placeholder="07:00"
-              placeholderTextColor={colors.muted}
-              value={prefs.quietEnd ?? ''}
-              onChangeText={(v) => setPrefs((p) => ({ ...p, quietEnd: v || null }))}
-              onBlur={() => savePrefs({})}
-            />
-          </Row>
-          <Row>
-            <Button
-              small
-              primary={prefs.schoolHoursMute === true || (prefs.schoolHoursMute === null && isMinor)}
-              label={`School-hours mute: ${prefs.schoolHoursMute === true || (prefs.schoolHoursMute === null && isMinor) ? 'on' : 'off'}`}
-              onPress={() => savePrefs({ schoolHoursMute: !(prefs.schoolHoursMute === true || (prefs.schoolHoursMute === null && isMinor)) })}
-            />
-          </Row>
-          {prefsNote && <Muted size={12.5}>{prefsNote}</Muted>}
-        </Card>
-
-        <SectionTitle>Your data</SectionTitle>
-        <Card>
-          <Muted size={13}>
-            Take everything with you: profile, threads, requests, insights — one bundle, no questions asked.
-          </Muted>
-          <Row>
-            <Button small label="Preview my data export" onPress={doExport} />
-            {exportPreview && <Button small label="Hide preview" onPress={() => setExportPreview(null)} />}
-          </Row>
-          {exportPreview && (
-            <Text style={styles.exportPreview} numberOfLines={30}>{exportPreview}…</Text>
-          )}
-        </Card>
-        {!isMinor && (
-          <Card style={confirmDelete ? { borderColor: colors.danger } : undefined}>
-            <Muted size={13}>
-              Deleting removes your profile, media and threads. The safety ledger keeps its append-only
-              record (ids only) so accountability survives the account.
-            </Muted>
-            {!confirmDelete ? (
-              <Row><Button small danger label="Delete my account" onPress={() => setConfirmDelete(true)} /></Row>
-            ) : (
-              <Row>
-                <Button small danger label="Yes — delete everything" onPress={doDelete} />
-                <Button small label="Keep my account" onPress={() => setConfirmDelete(false)} />
-              </Row>
-            )}
-            {deleteError && <Text style={{ color: colors.danger, fontSize: 13 }}>{deleteError}</Text>}
-          </Card>
-        )}
-
-        <SectionTitle>The rules that protect you</SectionTitle>
-        {(isMinor ? U18_PROMISES : SAFEGUARDING_PROMISES).map((p) => (
-          <Card key={p.slice(0, 20)}>
-            <Muted size={13}>{p}</Muted>
-          </Card>
-        ))}
-
-        <Button
-          label="Log out"
-          onPress={() => {
-            logout();
-            router.replace('/onboarding');
-          }}
-        />
-        {playerId ? <FeedbackDevSection actor={{ kind: 'player', id: playerId }} /> : null}
-        {playerId ? <FollowUpsSection actor={{ kind: 'player', id: playerId }} /> : null}
-        {playerId ? <PreferencesSection actor={{ kind: 'player', id: playerId }} isMinor={isMinor} /> : null}
-        {playerId ? <TransitionsSection actor={{ kind: 'player', id: playerId }} isMinor={isMinor} mediaOptions={(me?.media ?? []).map((m) => ({ id: m.id, title: m.title }))} /> : null}
-        {playerId ? <RepresentationSection playerId={playerId} isMinor={isMinor} /> : null}
-        {playerId ? <ExposureSection playerId={playerId} /> : null}
-        {playerId ? <AccessSection playerId={playerId} isMinor={isMinor} mediaOptions={(me?.media ?? []).map((m) => ({ id: m.id, title: m.title }))} /> : null}
-        {playerId ? <ReferencesSection playerId={playerId} /> : null}
-        {/* M21 — the Development Hub sits above Box Training and Combine, which
-            are two of the things it links AS evidence. It comes after the
-            recruitment surfaces because a plan is about the work, not the wall. */}
-        {playerId ? <DevelopmentHubSection actor={{ kind: 'player', id: playerId }} /> : null}
-        {playerId ? <BoxTrainingSection actor={{ kind: 'player', id: playerId }} isMinor={isMinor} /> : null}
-        {playerId ? <CombineSection actor={{ kind: 'player', id: playerId }} /> : null}
-        {/* M16.2 — the Football Passport payload deliberately carries no numeric
-            score, so the Trust Profile is fetched from its own endpoint and
-            composed here, at the head of the Passport. */}
-        {playerId ? <TrustProfileSection actor={{ kind: 'player', id: playerId }} /> : null}
-        {playerId ? <FootballPassportSection actor={{ kind: 'player', id: playerId }} isMinor={isMinor} /> : null}
-        {playerId && !isMinor ? <InviteCodeSection actor={{ kind: 'player', id: playerId }} /> : null}
-
       </ScrollView>
     </SafeAreaView>
   );
@@ -271,7 +280,6 @@ export default function You() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: 18, gap: 10, maxWidth: 560, width: '100%', alignSelf: 'center' },
-  h1: { color: colors.text, fontSize: 26, fontWeight: '800', marginTop: 6 },
   cardTitle: { color: colors.text, fontSize: 16, fontWeight: '700' },
   timeInput: {
     borderWidth: 1, borderColor: colors.line, borderRadius: 8, color: colors.text,

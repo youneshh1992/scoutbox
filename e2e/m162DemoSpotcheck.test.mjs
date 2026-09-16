@@ -36,7 +36,7 @@ const player = await page(`${demo.host}/player/`, { width: 480, height: 1200 });
 await player.waitForSelector('text=Our promises to every player', { timeout: 30000 });
 await player.locator('text=Enter').nth(0).click();
 await player.waitForSelector('text=Your visibility right now', { timeout: 20000 });
-await player.click('a[href="/you"]');
+await player.click('a[href="/football"]');
 await player.waitForSelector('text=ScoutBox Trust Score', { timeout: 20000 });
 {
   const body = await player.locator('body').innerText();

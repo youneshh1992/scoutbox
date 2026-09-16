@@ -1,13 +1,16 @@
-# ScoutBox Navigation & Information Architecture (M15-Nav)
+# ScoutBox Navigation & Information Architecture (M15-Nav → M23 P2.5)
 
 ## 1. Philosophy
 
 Sidebar = **major destinations**. Page-level tabs = **functions within a
-destination**. The Pro sidebar had grown to 29 permanently visible labels;
-it now presents six product destinations plus utilities, with every feature
-still exactly one secondary-tab (or one palette query) away. Reducing
+destination**. M15-Nav took the Pro sidebar from 29 permanently visible
+labels to six sections plus a secondary tab row. M23 P2.5 went further: the
+tab row is gone from the desktop (it was a second navigation bar carrying
+destinations), sections became an accordion whose pages are arranged in
+named **groups**, the top bar became one row with a single `h1`, and the
+Player app got the destination structure M15-Nav had deferred. Reducing
 visible choices removed **nothing**: every legacy screen keeps its id, its
-component and its (new) deep link.
+component and its deep link.
 
 Two hard rules:
 
@@ -15,84 +18,93 @@ Two hard rules:
    convenience computed from already-loaded state (`session.role` + one
    verification-level fetch per session). The server keeps answering
    401/403/404 by its own rules for every route, hidden or not — proven by
-   the nav suites and the unchanged 193/94-check verification suites.
+   the nav suites (navLive N12 uses a scout's own token against a route the
+   sidebar hides from them) and the unchanged verification suites. The nav
+   configuration is never a source of security truth: editing it cannot
+   widen anything.
 2. **No feature loss.** `e2e/navConfig.test.mjs` asserts every legacy
-   destination appears in the configuration exactly once, per app.
+   destination appears in the configuration exactly once, per app, and that
+   `validateNavConfig()` finds every child of a grouped section in exactly
+   one group.
 
 ## 2. One configuration drives everything
 
 `src/nav.ts` (Pro and Grassroots each carry their own copy with their own
 section map) defines typed `NavSection`/`NavItem` records with label keys,
-icons, palette aliases and optional visibility predicates. That single
-configuration drives the sidebar, the secondary tabs, the command palette,
-`resolveNavigationLocation()` and pinned shortcuts — five surfaces that can
-no longer drift apart. The T&S console keeps a smaller local `NAV_GROUPS`
-table in its `App.tsx` (same principle, single source).
+icons, palette aliases and optional visibility predicates. P2.5 added
+`NavGroup` — a **presentation overlay**: a section may list `groups`, each
+naming a label key and the ids of its children. Groups never carry
+visibility, routes or permissions; `groupedChildren()` arranges whatever
+`filterSections()` left visible, and a group with no visible child is not
+drawn. That single configuration drives the sidebar accordion, the
+collapsed-rail flyouts, the phone strip, the command palette (which shows
+section › group › page), `resolveNavigationLocation()` and pinned
+shortcuts. The T&S console keeps a smaller local `NAV_GROUPS` table in its
+`App.tsx` (same principle, single source; unchanged by P2.5).
 
-## 3. ScoutBox Pro — old → new mapping (29 destinations)
+## 3. ScoutBox Pro — five sections, Recruitment grouped
 
-| Old sidebar item | Screen id (= route `#/<id>`) | New section | New child label |
-|---|---|---|---|
-| Home | `feed` | Home | Home |
-| Search | `search` | Discover | Players |
-| Shortlist | `shortlist` | Discover | Shortlist |
-| Film Room | `filmroom` | Discover | Film Room |
-| Opportunities | `opportunities` | Discover | Opportunities |
-| Campaigns | `campaigns` | Discover | Campaigns |
-| Scouting Insight | `insight` | Discover | Scouting Insight |
-| Discovery Ledger | `ledger` | Discover | Discovery Ledger |
-| Recruitment | `recruitment` | Recruitment | Pipeline |
-| Assessments | `assessments` | Recruitment | Assessments |
-| Video Workspace | `video` | Recruitment | Evidence & Video |
-| Trials & Reports | `trials` | Recruitment | Trials & Reports |
-| Trial Days | `trialdays` | Recruitment | Trial Days |
-| Requests | `requests` | Recruitment | Player Requests |
-| Outcomes | `outcomes` | Recruitment | Signings & Outcomes |
-| Funnel | `funnel` | Recruitment | Funnel |
-| Squad Planner | `planner` | Squad & Planning | Squad Planner |
-| Coverage | `coverage` | Squad & Planning | Coverage |
-| Calibration | `calibration` | Squad & Planning | Calibration |
-| Fixtures | `fixtures` | Squad & Planning | Fixtures |
-| Club Network | `network` | Network | Clubs & Groups |
-| Representation | `representation` | Network | Representation |
-| Organisation (F12 console) | `organisation` | Organisation | Staff & Security |
-| Verification | `verification` | Organisation | Verification |
-| Imports & Integrations | `imports` | Organisation | Integrations |
-| Deal Budgets | `budgets` | Organisation | Finance |
-| Plan & Compliance | `plan` | Organisation | Plan & Compliance |
-| Reputation | `reputation` | Organisation | Reputation |
-| Messages | `messages` | — (utility) | Inbox |
+| Section | Group | Pages (screen id = route `#/<id>`) |
+|---|---|---|
+| Home | — | Home `feed` |
+| Recruitment | Discover | Players `search` · Shortlist `shortlist` · Film Room `filmroom` · Scouting Insight `insight` |
+| | Pipeline | Pipeline `recruitment` · Recruitment Rooms `rooms` · Player Requests `requests` · Opportunities `opportunities` · Campaigns `campaigns` · Signings & Outcomes `outcomes` |
+| | Evidence | Assessments `assessments` · Evidence & Video `video` · Trials & Reports `trials` · Trial Days `trialdays` |
+| | Intelligence | Recruitment Briefs `briefs` · Player Matching `matching` · Dynamic Watchlists `watchlists` · Second Look `secondlook` · Nobody Missed `nobodymissed` |
+| | Analytics | Director Dashboard `dashboard` · Funnel `funnel` · Discovery Ledger `ledger` |
+| Squad & Planning | — | Squad Planner `planner` · Coverage `coverage` · Calibration `calibration` · Fixtures `fixtures` |
+| Network | — | Clubs & Groups `network` · Representation `representation` |
+| Organisation | — | Staff & Security `organisation` · Verification `verification` · Integrations `imports` · Finance `budgets` · Plan & Compliance `plan` · Reputation `reputation` |
+| Inbox (utility) | — | Messages `messages` |
+
+The former **Discover** section folded into Recruitment as its first group,
+so the most-used page (Players) is still the first thing Recruitment opens
+on. Analytics lives inside Recruitment rather than as a sixth section: the
+Director Dashboard, the Funnel and the Ledger are analytics *of
+recruitment*, and a Recruitment lead's day starts and ends there.
 
 Utilities: **Search ScoutBox (⌘K/Ctrl+K)** at the top; **Inbox** (with its
-unread badge) below the sections; the account block (name, role, **My
-verification**, language, Switch org) in the footer. "My verification" is
-an account-menu convenience deep-linking to the same `verification` screen
-(whose *Me* tab is personal); the canonical navigation entry remains
-Organisation → Verification.
+unread badge) below the sections; the account block (name, role, the
+organisation's standing badges, **My verification**, language, Switch org)
+in the footer. The organisation badges moved out of the top bar, where
+they repeated on every page, to the account block, where the organisation
+is named.
 
-## 4. Grassroots (29 destinations, same design language)
+## 4. Grassroots — four sections
 
-Home `feed` · **Discover** (Players, Shortlist, Film Room, Opportunities,
-Campaigns, Scouting Insight, Discovery Ledger) · **Recruitment** (Pipeline,
-Assessments, Evidence & Video, Trials & Reports, Trial Days, Open Days,
-Player Requests, Signings & Outcomes, Funnel) · **Team** (Squad & Match
-Days, Coaches, Friendlies, Fixtures, Coverage, Calibration) · **Network**
-(Clubs & Groups) · **Organisation** (Staff & Security, Verification,
-Integrations, Plan & Compliance) · Inbox. Pro-only destinations (Squad
-Planner, Deal Budgets, Representation, Reputation) are absent — no
-enterprise clutter, and the palette cannot surface them.
+| Section | Group | Pages |
+|---|---|---|
+| Home | — | `feed` |
+| Players | — | Squad & Match Days `squad` · Coaches `coaches` · Friendlies `friendlies` · Fixtures `fixtures` |
+| Recruitment | Discover / Pipeline (+ Open Days `opendays`) / Evidence / Intelligence / Analytics / Planning (Coverage `coverage` · Calibration `calibration`) | as Pro, minus Pro-only pages |
+| Club | — | Clubs & Groups `network` (everyone) · Staff & Security · Verification (lead or verification authority) · Integrations · Plan & Compliance (lead) |
+| Inbox | — | `messages` |
 
-## 5. Player app — intentionally unchanged (documented follow-up)
+**Team** became **Players** (what a grassroots club actually manages), and
+the one-page **Network** section folded into **Club**. Clubs & Groups kept
+its unconditional visibility, so a coach sees Club with exactly that page
+and nothing that was hidden before (asserted by navConfig). Pro-only
+destinations (Squad Planner, Deal Budgets, Representation, Reputation) are
+absent and the palette cannot surface them.
 
-M15 Football Passport does **not** exist yet (the M12 `passport.mjs` is the
-older evidence-passport server feature). Per the mandate's own escape
-hatch, the Player app keeps its current five tabs (Home, Inbox, Profile,
-Upload, You) untouched. Follow-up when M15 Passport lands: `Profile` →
-**Passport** as a major destination, `Upload` moves out of primary
-navigation into a prominent **+ Add Evidence** action (functionality
-preserved). Asserted as-unchanged by navLive N7.
+## 5. Player app — five destinations
 
-## 6. Trust & Safety (22 tabs → 6 groups)
+| Tab | Route | Page tabs / contents |
+|---|---|---|
+| Home | `/discover` | weekly report · pathway · clubs within reach · what scouts noticed · profile strength · who's watching · visibility · club directory · promises |
+| Football | `/football` | **Passport** (Trust Score + Football Passport) · **Development** · **Box Cam** · **Combine**; primary action **+ Add evidence** → `/upload` |
+| Opportunities | `/opportunities` | opportunity board · opportunity fit · squad invitations · trial day & safety pack · placement check-ins |
+| Inbox / Updates | `/inbox` | requests · threads (adults) · acknowledgements |
+| You | `/you` | **Profile** (the former Profile screen's body) · **Account** (identity, guardian card, safety centre, season wrap, notifications, access & language, data export/delete, the rules, invite code, log out) · **Clubs** (published feedback, suitability preferences, club transition, representation, exposure, coach references) |
+
+`/profile` and `/upload` remain valid routes (`href: null` keeps them off
+the bar); Upload carries a back control. Page tabs are a real `tablist`
+(`role="tab"`, `aria-selected`) and accept `?tab=` for deep links. The tab
+set is identical for every player kind; what differs inside each tab is
+driven by `isMinor` and enforced by the server, exactly as before. Guardian
+accounts never reach the tabs (`index.tsx` redirects them first).
+
+## 6. Trust & Safety (22 tabs → 6 groups) — unchanged by P2.5
 
 | Group | Tabs |
 |---|---|
@@ -103,14 +115,16 @@ preserved). Asserted as-unchanged by navLive N7.
 | Operations | Outcome tracking · Representation · Federation groups · Delivery centre · Mail outbox · Billing |
 | System | Service health · Backups |
 
-The pending-reports badge moved onto **Cases**. All 22 legacy tabs remain
-reachable (toured by navLive N8).
+The pending-reports badge sits on **Cases**. All 22 legacy tabs remain
+reachable (toured by navLive N8). The console's 66px top bar and flat tab
+row were already compact; the mandate's "group only where it improves
+operator efficiency" argued for leaving it alone.
 
 ## 7. Role-aware visibility (convenience only)
 
 - Ordinary scout (no lead-pattern role, no verification authority): Home,
-  Discover, Recruitment, Squad & Planning, Network, Inbox. Organisation is
-  hidden entirely — never shown as an empty husk.
+  Recruitment, Squad & Planning, Network, Inbox. Organisation is hidden
+  entirely — never shown as an empty husk.
 - Lead-pattern roles (`/head|director|lead|manager|owner|chief/i` — the
   same heuristic the server's `isLead` uses): plus Organisation (all
   children).
@@ -118,6 +132,9 @@ reachable (toured by navLive N8).
   from `/org/verification/me`): Organisation appears with Verification
   (and Staff & Security, Reputation); Finance/Integrations/Plan stay
   lead-only.
+- P2.5 regrouping widened nothing: navConfig computes the set of ids each
+  role can see from the same predicates and asserts a scout sees none of
+  the four admin pages and everything a scout sees, a lead sees.
 - Permission changes apply on the next session/verification-level refresh;
   the server rejects hidden routes regardless, immediately.
 
@@ -127,10 +144,8 @@ reachable (toured by navLive N8).
 Modifier-gated — plain typing in inputs never triggers it. Searches
 navigation destinations only (label prefix > label substring > alias
 prefix > alias substring > section name), across **permitted** destinations
-only; aliases (e.g. `verify`, `reports`, `scout coverage`) can never bypass
-the visibility filter, and the backend would refuse the data anyway.
-Player search was deliberately not integrated (kept simple; Discover →
-Players is one result away).
+only; aliases can never bypass the visibility filter, and the backend would
+refuse the data anyway. Rows show the path as section › group › page.
 
 ## 9. Shortcuts
 
@@ -138,72 +153,93 @@ Up to 5 pins, stored **by item id** (rename-safe) under
 `sb-nav-shortcuts:<orgId>:<userId>` in localStorage — honest limitation: no
 server-side preference store exists yet, so pins are per-browser. Pins are
 re-validated against current visibility on load: forbidden or unknown ids
-drop silently. Pin/unpin from the palette rows; unpin also from the
-sidebar.
+drop silently.
 
 ## 10. Route compatibility & deep links
 
-The workspace previously had **no URLs at all** (pure in-memory screen
-state). Every screen id is now a hash route (`#/verification`,
-`#/assessments`, …) — so this redesign *added* deep links rather than
-breaking any. Direct entry resolves the owning section and child tab via
-`resolveNavigationLocation()` (unit-tested per destination); unknown hashes
-land on Home and highlight nothing. Section clicks open the section's
-first child (its sensible default); no route was renamed, moved or
-removed.
+Every screen id is a hash route (`#/verification`, `#/assessments`, …), and
+the pretty routes (`#/recruitment/rooms/:id`, `#/recruitment/briefs/:id`,
+`#/recruitment/second-look`, `#/recruitment/dashboard`, …) are unchanged.
+Regrouping cannot break a link: links are produced only by `hashFor*()`
+from screen ids, and `resolveNavigationLocation()` derives the section
+from the id. Section clicks open the section's first child; a direct deep
+link highlights the section and the page without a parent-first step;
+unknown hashes land on Home and highlight nothing. **Routes removed: 0.**
 
 ## 11. Responsive behaviour
 
-Desktop: expanded (218px) or collapsed icon rail (64px, tooltips +
-aria-labels, keyboard reachable, persisted in `sb-nav-collapsed`). ≤900px
-width: the sidebar becomes an off-canvas drawer behind a hamburger; tabs
-scroll horizontally in their own container. The 640px-height regression
-(the original M14 bug) is explicitly re-tested: with only ~9 sidebar rows
-it no longer overflows, and `overflow-y: auto` remains as the guard.
+Desktop (> 900px): expanded sidebar (218px) as an **accordion** — the
+active section is always expanded and lists its pages by group; other
+sections toggle with a chevron for the session (nothing persisted). Any
+navigation into a section re-opens it. Collapsed icon rail (64px, persisted
+in `sb-nav-collapsed`): a multi-page section opens a **flyout menu**
+(`role="menu"`, arrow keys, Escape returns focus). No tab strip: the
+sidebar carries the pages. ≤ 900px: the sidebar is an off-canvas drawer
+(a column — the Grassroots row-drawer defect is closed), and the **phone
+strip** lists only the active group's siblings (≤ 7) so it fits in one row.
+The top bar is one row at every width (54px on a phone, 58px on a
+desktop); Report / Block shrinks to its glyph under 640px with the same
+accessible name. The 640px-height regression guard remains.
 
 ## 12. Accessibility
 
-`aria-current="page"` on active section and tab; visible
-`:focus-visible` outlines; roving arrow-key focus in the tab row; dialog
-semantics + Esc + arrow/Enter selection in the palette; icons are
-`aria-hidden` with text or `aria-label` alongside; active state uses an
-accent bar + weight, not color alone; the drawer closes on veil click and
-after navigation.
+`aria-current="page"` on active section and page; accordion toggles are
+buttons with `aria-expanded` and `aria-controls`; flyouts are menus with
+`menuitem`s and roving arrow focus; the page title is the document's only
+`h1`; visible `:focus-visible` outlines; roving arrow-key focus in the
+phone strip; dialog semantics + Esc + arrow/Enter selection in the
+palette; icons are `aria-hidden` with text or `aria-label` alongside;
+active state uses an accent bar + weight, not colour alone; the drawer
+closes on veil click and after navigation. Player page tabs are a
+`tablist`.
 
 ## 13. Home action centre
 
 "Needs your attention" renders only counts that already exist client-side:
 unread player/guardian messages, and (for verification reviewers) the
-pending verification-request queue. Each row deep-links (`messages`,
-`verification`). No invented backend counts; the card disappears when
-empty. Top-level sections carry no number badges except Inbox unread and
-the T&S Cases pending-reports count — both genuinely actionable.
+pending verification-request queue. Each row deep-links. Top-level sections
+carry no number badges except Inbox unread and the T&S Cases
+pending-reports count.
 
-## 14. Tests
+## 14. Page header contract
 
-- `e2e/navConfig.test.mjs` — **111 checks**: config integrity (every legacy
-  id exactly once, Pro + Grassroots), deterministic resolver, role
-  filtering, empty-category suppression, palette permission filtering +
-  aliases, strict hash parsing, shortcut persistence/degradation, malformed
-  stored state.
-- `e2e/navLive.test.mjs` — **30 checks**, journeys N1–N8 against a real
-  backend (scout/lead/grassroots/T&S contexts): compact scout nav, hidden
-  Organisation, deep-link highlighting, palette permission filtering and
-  routing, typing-in-input negative, collapse + persistence, 640px height,
-  narrow-width drawer, EN/FR labels, grassroots reduction, all 22 T&S tabs
-  reachable, server-auth negatives, player-unchanged assertion.
-- All pre-existing suites re-run green after migrating their navigation to
-  the new deep links (which now exercises deep linking constantly).
+See `M23_P25_HEADER_CONTRACT.md`. In short: the top bar `h1` is the one
+page title; screens draw no `h2` that repeats it; a leading explanation is
+either a material constraint (one line, `.pagehint`) or absent; status
+warnings stay; entity headers (the Recruitment Room) are one identity row
+plus one disclosure.
 
-## 15. Known limitations
+## 15. Tests
+
+- `e2e/navConfig.test.mjs` — config integrity (every legacy id exactly
+  once, Pro + Grassroots), P2.5 group overlay (validator, ≤ 7 per group,
+  groups survive filtering, empty group vanishes, broken configs refused),
+  every label key present in EN and FR, deterministic resolver, role
+  filtering (no widening), palette permission filtering + aliases, strict
+  hash parsing, shortcut persistence/degradation, malformed stored state.
+- `e2e/navLive.test.mjs` — journeys N1–N12 against a real backend
+  (scout/lead/grassroots/T&S contexts): compact scout nav, one `h1` and no
+  duplicate `h2`, accordion groups, no desktop strip, deep-link
+  highlighting, palette path with group, collapse + flyout keyboard +
+  persistence, 640px height, phone drawer column + group strip + one-row
+  top bar + Report reachable + no overflow, phone deep link, accordion
+  toggle keyboard semantics, refresh + back/forward, EN/FR, grassroots
+  Players/Club, all 22 T&S tabs, server-auth negatives incl. a scout's own
+  token, player tab set.
+- The Player journeys live in the player suites (m12–m22 Live and demo
+  spotchecks), migrated to the new tabs and page tabs.
+
+## 16. Known limitations
 
 - Shortcut and collapse preferences are per-browser (localStorage); a
-  server-side preference store is future work.
+  server-side preference store is future work. Accordion open/closed state
+  is deliberately not persisted.
 - Verification-level visibility refreshes once per session (login/reload),
   not live mid-session; the server enforces immediately regardless.
-- The Player app redesign is deferred until M15 Football Passport exists
-  (see §5).
 - Command search covers navigation destinations only, by design.
 - The demo builds report a root verification level for every persona, so
   role-hiding is only observable against the live backend (covered by
   navLive); demo spotchecks exercise mechanics, not role filtering.
+- The phone strip for the Pipeline group (6–7 pages) still scrolls
+  horizontally by 2–3 tabs at 390px; the whole-section strip it replaced
+  hid 12–13.

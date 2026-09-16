@@ -77,9 +77,10 @@ await player.goto('http://localhost:8591/');
 await player.waitForSelector('text=Our promises to every player', { timeout: 30000 });
 await player.locator('text=Enter').nth(0).click();          // Kola (adult)
 await player.waitForSelector('text=Your visibility right now', { timeout: 20000 });
-await player.click('a[href="/you"]');
+await player.click('a[href="/football"]');
+await player.getByRole('tab', { name: 'Box Cam' }).click();
 await player.waitForSelector('text=Train in the Box', { timeout: 20000 });
-say('B-live: player You tab shows Box Training — "Train in the Box"');
+say('B-live: player Football tab shows Box Training — "Train in the Box"');
 {
   await player.getByText('Start Box Cam', { exact: true }).click();
   // Box Cam Ready Check against the fake camera, then start.

@@ -6,8 +6,8 @@ import type { Drill } from '../../domain/types';
 import { useSession } from '../../state';
 import { colors } from '../../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from '../../components/ui';
-import { ReportButton } from '../../components/ReportSheet';
-import { NotificationBell } from '../../components/NotificationBell';
+import { pt } from '../../i18n';
+import { PageHeader } from '../../components/PageChrome';
 import { CampaignsSection, ResumableUploadCard } from '../../components/M12Sections';
 
 // Web file picker → data URL (capped ~12MB). Native uses the camera roll in
@@ -120,13 +120,7 @@ export default function Upload() {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Row style={{ justifyContent: 'space-between' }}>
-          <Text style={styles.h1}>Upload</Text>
-          <Row>
-            <NotificationBell />
-            <ReportButton />
-          </Row>
-        </Row>
+        <PageHeader title={pt('tabUpload')} back />
         <Muted>
           Footage, stats, drills and verified appearances — the evidence that moves your Trust Score.
           {isMinor ? ' All yours to manage — clubs talk to your guardian, but the football is you.' : ''}
@@ -366,7 +360,6 @@ export default function Upload() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: 18, gap: 10, maxWidth: 560, width: '100%', alignSelf: 'center' },
-  h1: { color: colors.text, fontSize: 26, fontWeight: '800', marginTop: 6 },
   input: {
     backgroundColor: colors.bg2,
     borderColor: colors.line,

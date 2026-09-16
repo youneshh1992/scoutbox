@@ -111,7 +111,6 @@ export function VerificationScreen({ session, notify, tick }: ScreenProps) {
   ];
   return (
     <div>
-      <h2>{t('nav.verification')}</h2>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>{t('m14.intro')}</div>
       <div role="tablist" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
         {TABS.map(([id, label]) => (

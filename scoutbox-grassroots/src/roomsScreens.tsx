@@ -160,7 +160,6 @@ function RoomsList({ session, tick, onOpenRoom }: RoomsScreenProps) {
 
   return (
     <div>
-      <h2>{t('rm.title')}</h2>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 4 }}>{t('rm.intro')}</div>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}>🔒 {t('rm.privacy')}</div>
 
@@ -410,18 +409,39 @@ function RoomHeader({ session, room, notify, reload, staff, openPlayer }: PanelP
   };
 
   return (
-    <div className="section" aria-label={t('rm.headerLabel')}>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'baseline' }}>
-        <h3 style={{ margin: 0 }}>{room.playerAvailable ? room.playerName : t('rm.playerWithheld')}</h3>
-        {room.playerAvailable && (
-          <span className="dim">
-            {(room.passport?.player.position ?? '—')} · {room.passport?.player.age ?? '—'}
-            {room.passport?.status.currentClub?.orgName ? ` · ${room.passport.status.currentClub.orgName}` : ` · ${t('rm.noClub')}`}
-          </span>
-        )}
-        {room.playerAvailable && (
-          <button onClick={() => openPlayer(room.playerId)}>{t('rm.openProfile')}</button>
-        )}
+    <div className="section room-head" aria-label={t('rm.headerLabel')}>
+      {/* M23 P2.5 — identity row: who, where they stand, and the two things a
+          scout does from here (move the room, open the profile). Everything
+          else is one disclosure below. Nothing here is inferred from a score. */}
+      <div className="room-id">
+        <div className="room-who">
+          <h3 style={{ margin: 0 }}>{room.playerAvailable ? room.playerName : t('rm.playerWithheld')}</h3>
+          {room.playerAvailable && (
+            <span className="dim">
+              {(room.passport?.player.position ?? '—')} · {room.passport?.player.age ?? '—'}
+              {room.passport?.status.currentClub?.orgName ? ` · ${room.passport.status.currentClub.orgName}` : ` · ${t('rm.noClub')}`}
+            </span>
+          )}
+          <div className="badges">
+            <span className="pill blue">{t('rm.status')}: {statusLabel(room.status, room.statusLabel)}</span>
+            <span className="pill">{t('rm.priority')}: {priorityLabel(room.priority)}</span>
+            <span className="pill">{t('rm.health')}: {healthLabel(room.health, room.healthLabel)}</span>
+            {room.restricted && <span className="pill gold">{t('rm.restricted')}</span>}
+          </div>
+        </div>
+        <div className="room-actions">
+          <label style={{ fontSize: 13 }}>
+            {t('rm.changeStatus')}{' '}
+            <select aria-label={t('rm.changeStatus')} value={to} onChange={(e) => setTo(e.target.value)}>
+              <option value="">{t('rm.pick')}</option>
+              {room.allowedTransitions.map((s) => <option key={s} value={s}>{statusLabel(s)}</option>)}
+            </select>
+          </label>
+          <button className="primary" disabled={!to} onClick={move}>{t('rm.apply')}</button>
+          {room.playerAvailable && (
+            <button onClick={() => openPlayer(room.playerId)}>{t('rm.openProfile')}</button>
+          )}
+        </div>
       </div>
 
       {conflict && <ConflictNotice conflict={conflict} onReload={() => { setConflict(null); reload(); }} />}
@@ -430,72 +450,21 @@ function RoomHeader({ session, room, notify, reload, staff, openPlayer }: PanelP
         <div className="notice block" style={{ marginTop: 8 }}>{room.unavailableNote ?? t('rm.unavailable')}</div>
       )}
 
-      {/* Trust Score — evidence confidence, with its note and disclaimer. */}
+      {/* Trust Score — evidence confidence. The disclaimer and the no-ranking
+          statement stay visible; they are what make the number honest. */}
       {room.trust && (
-        <div style={{ marginTop: 8 }}>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }} title={room.trust.note}>
+        <div className="room-trust">
+          <div className="room-trust-row" title={room.trust.note}>
             <span className="dim">{t('rm.trustScore')}</span>
-            <span style={{ fontSize: 26, fontWeight: 800 }}>{room.trust.score}</span>
+            <span style={{ fontSize: 18, fontWeight: 800 }}>{room.trust.score}</span>
             <span className="dim">/ 100</span>
             <span className="pill blue">{room.trust.bandLabel}</span>
             {room.trust.simulatedEvidenceIncluded && <span className="pill gold">{t('rm.demo')}</span>}
+            <span className="dim" style={{ fontSize: 12 }}>{room.trust.disclaimer ?? t('rm.trustDisclaimer')}</span>
           </div>
-          <div className="dim" style={{ fontSize: 12.5 }}>{room.trust.disclaimer ?? t('rm.trustDisclaimer')}</div>
-          <TrustNote />
-          <div className="dim" style={{ fontSize: 12 }}>{t('rm.noSort')}</div>
+          <div className="dim" style={{ fontSize: 12 }}><TrustNote inline /> {t('rm.noSort')}</div>
         </div>
       )}
-
-      <div className="badges" style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        <span className="pill blue">{t('rm.status')}: {statusLabel(room.status, room.statusLabel)}</span>
-        <span className="pill">{t('rm.priority')}: {priorityLabel(room.priority)}</span>
-        <span className="pill">{t('rm.roomLead')}: {room.leadScout?.name ?? t('rm.none')}</span>
-        <span className="pill">{t('rm.owner')}: {room.owner.name ?? t('rm.none')}</span>
-        <span className="pill">{t('rm.health')}: {healthLabel(room.health, room.healthLabel)}</span>
-        {room.restricted && <span className="pill gold">{t('rm.restricted')}</span>}
-        <span className="pill">{t('rm.updated')}: {fmtDateTime(room.updatedAt)}</span>
-        <span className="pill">{t('rm.source')}: {t(`rm.src.${room.sourceContext}`, room.sourceContext)}</span>
-      </div>
-      {room.tags.length > 0 && (
-        <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {room.tags.map((tag) => (
-            <span key={tag} className="pill">
-              {tag}{' '}
-              <button aria-label={`${t('rm.removeTag')} ${tag}`} style={{ padding: 0 }} onClick={() => patch({ tags: room.tags.filter((x) => x !== tag) }, t('rm.tagsSaved'))}>×</button>
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* Actions: status move (with the structured reason picker), priority,
-          lead, tags. Nothing here is ever inferred from a score. */}
-      <div className="actions" style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <label style={{ fontSize: 13 }}>
-          {t('rm.changeStatus')}{' '}
-          <select aria-label={t('rm.changeStatus')} value={to} onChange={(e) => setTo(e.target.value)}>
-            <option value="">{t('rm.pick')}</option>
-            {room.allowedTransitions.map((s) => <option key={s} value={s}>{statusLabel(s)}</option>)}
-          </select>
-        </label>
-        <button className="primary" disabled={!to} onClick={move}>{t('rm.apply')}</button>
-
-        <label style={{ fontSize: 13 }}>
-          {t('rm.priority')}{' '}
-          <select aria-label={t('rm.priority')} value={room.priority} onChange={(e) => patch({ priority: e.target.value }, t('rm.prioritySaved'))}>
-            {ROOM_PRIORITIES.map((p) => <option key={p} value={p}>{priorityLabel(p)}</option>)}
-          </select>
-        </label>
-
-        <label style={{ fontSize: 13 }}>
-          {t('rm.roomLead')}{' '}
-          <select aria-label={t('rm.roomLead')} value={room.leadScout?.userId ?? ''} onChange={(e) => patch({ leadScoutUserId: e.target.value || null }, t('rm.leadSaved'))}>
-            <option value="">{t('rm.none')}</option>
-            {staff.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
-        </label>
-
-      </div>
-      <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>{room.priorityNote}</div>
 
       {to && (
         <div style={{ marginTop: 10, borderTop: '1px solid var(--line)', paddingTop: 8 }}>
@@ -513,17 +482,57 @@ function RoomHeader({ session, room, notify, reload, staff, openPlayer }: PanelP
         </div>
       )}
 
-      <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <input
-          aria-label={t('rm.addTag')}
-          placeholder={t('rm.addTag')}
-          value={tagDraft}
-          onChange={(e) => setTagDraft(e.target.value)}
-          style={{ minWidth: 160 }}
-        />
-        <button onClick={() => { if (tagDraft.trim()) { patch({ tags: [...room.tags, tagDraft.trim()] }, t('rm.tagsSaved')); setTagDraft(''); } }}>{t('rm.addTag')}</button>
-      </div>
-      <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>{t('rm.tagNote')}</div>
+      {/* Details: who owns and leads the room, when it moved, priority, access
+          and tags. One disclosure, not eight rows of chrome. */}
+      <details className="room-details">
+        <summary>{t('rm.details')}</summary>
+        <div className="badges-meta">
+          <span className="pill">{t('rm.roomLead')}: {room.leadScout?.name ?? t('rm.none')}</span>
+          <span className="pill">{t('rm.owner')}: {room.owner.name ?? t('rm.none')}</span>
+          <span className="pill">{t('rm.updated')}: {fmtDateTime(room.updatedAt)}</span>
+          <span className="pill">{t('rm.source')}: {t(`rm.src.${room.sourceContext}`, room.sourceContext)}</span>
+        </div>
+        <div className="actions" style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <label style={{ fontSize: 13 }}>
+            {t('rm.priority')}{' '}
+            <select aria-label={t('rm.priority')} value={room.priority} onChange={(e) => patch({ priority: e.target.value }, t('rm.prioritySaved'))}>
+              {ROOM_PRIORITIES.map((p) => <option key={p} value={p}>{priorityLabel(p)}</option>)}
+            </select>
+          </label>
+
+          <label style={{ fontSize: 13 }}>
+            {t('rm.roomLead')}{' '}
+            <select aria-label={t('rm.roomLead')} value={room.leadScout?.userId ?? ''} onChange={(e) => patch({ leadScoutUserId: e.target.value || null }, t('rm.leadSaved'))}>
+              <option value="">{t('rm.none')}</option>
+              {staff.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
+          </label>
+
+        </div>
+        <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>{room.priorityNote}</div>
+
+        {room.tags.length > 0 && (
+          <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {room.tags.map((tag) => (
+              <span key={tag} className="pill">
+                {tag}{' '}
+                <button aria-label={`${t('rm.removeTag')} ${tag}`} style={{ padding: 0 }} onClick={() => patch({ tags: room.tags.filter((x) => x !== tag) }, t('rm.tagsSaved'))}>×</button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <input
+            aria-label={t('rm.addTag')}
+            placeholder={t('rm.addTag')}
+            value={tagDraft}
+            onChange={(e) => setTagDraft(e.target.value)}
+            style={{ minWidth: 160 }}
+          />
+          <button onClick={() => { if (tagDraft.trim()) { patch({ tags: [...room.tags, tagDraft.trim()] }, t('rm.tagsSaved')); setTagDraft(''); } }}>{t('rm.addTag')}</button>
+        </div>
+        <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>{t('rm.tagNote')}</div>
+      </details>
     </div>
   );
 }

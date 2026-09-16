@@ -232,10 +232,6 @@ export function FeedScreen({ session, tick, openPlayer }: ScreenProps) {
   return (
     <>
       <AgencyWall session={session} />
-      <div className="notice" style={{ marginBottom: 16 }}>
-        What changed since you last looked: new players, fresh footage (your shortlist first), and
-        reports coming due. Every open from here is logged like any other view.
-      </div>
       {items.length === 0 && <div className="notice">Quiet fortnight — nothing new yet.</div>}
       <div className="list-rows">
         {items.map((it, i) => (
@@ -361,10 +357,6 @@ export function FixturesScreen({ session, tick, openPlayer }: ScreenProps) {
   useEffect(() => { api.getFixtures(session).then(setFixtures).catch(() => {}); }, [session, tick]);
   return (
     <>
-      <div className="notice" style={{ marginBottom: 16 }}>
-        Scout by match. Every fixture below is built from GPS+device-verified attendance — ScoutBox
-        ground truth, not self-reported CVs. Open one to see who provably played.
-      </div>
       <div className="list-rows">
         {fixtures.map((f) => {
           const key = `${f.fixture}|${f.date}`;
@@ -612,11 +604,7 @@ export function RequestsScreen({ session, tick, openPlayer }: ScreenProps) {
   useEffect(() => { api.getRequests(session).then(setRequests).catch(() => {}); }, [session, tick]);
   return (
     <>
-      <div className="notice" style={{ marginBottom: 16 }}>
-        There is no direct message channel on ScoutBox. You file a request; contact unlocks only on
-        acceptance. For under-18 players the request goes to the <b>parent or guardian</b> — never the
-        child — and any conversation that opens is between your named staff and the guardian.
-      </div>
+      <p className="pagehint">No direct message channel: you file a request and contact unlocks only on acceptance. For under-18s the request goes to the parent or guardian, never the child.</p>
       <div className="list-rows">
         {requests.length === 0 && <div className="notice">No requests sent yet.</div>}
         {requests.map((r) => (
@@ -719,10 +707,7 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
 
   return (
     <>
-      <div className="notice" style={{ marginBottom: 16 }}>
-        Threads open only when a request is accepted, stay on-platform, and are moderated and logged.
-        For under-18 players you are talking to the <b>parent or guardian</b> — never the child.
-      </div>
+      <p className="pagehint">Threads open on acceptance, stay on-platform, and are moderated and logged. For under-18s you are talking to the parent or guardian, never the child.</p>
       {channels.length === 0 && <div className="notice">No open threads. Send a request; a thread opens when it's accepted.</div>}
       <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 14 }}>
         <div className="list-rows">
@@ -945,10 +930,7 @@ export function LedgerScreen({ session, tick, openPlayer }: ScreenProps) {
   useEffect(() => { api.getLedger(session).then(setRows).catch(() => {}); }, [session, tick]);
   return (
     <>
-      <div className="notice" style={{ marginBottom: 16 }}>
-        Append-only. Every action your organisation takes is timestamped to a named scout. This ledger is
-        the evidence base for attribution and Proof Packs — it cannot be edited or purged.
-      </div>
+      <p className="pagehint">Append-only: every action is timestamped to a named scout and cannot be edited or purged.</p>
       <div style={{ overflowX: 'auto' }}>
         <table className="data">
           <thead><tr><th>When</th><th>Action</th><th>Player</th><th>By</th></tr></thead>
@@ -1026,10 +1008,6 @@ export function FunnelScreen({ session, tick }: ScreenProps) {
   };
   return (
     <>
-      <div className="notice" style={{ marginBottom: 18 }}>
-        Every stage below is a real recorded event on the Discovery Ledger — views through to signings.
-        The numbers are the numbers.
-      </div>
       <div className="section">
         {funnel.stages.map((s, i) => (
           <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>

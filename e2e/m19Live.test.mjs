@@ -158,7 +158,7 @@ const bodyText = (page) => page.locator('body').innerText();
 
 // ============================================================== M19-1, M19-2
 {
-  await goto(maria, MATCHING, 'h2:has-text("Player Matching")');
+  await goto(maria, MATCHING, '.topbar h1:has-text("Player Matching")');
   const row = await addCriterion(maria, 'required', 'position');
   await row.locator('input[type=checkbox]').nth(6).check(); // CDM
   await maria.click('button:has-text("Show matching players")');
@@ -251,7 +251,7 @@ const bodyText = (page) => page.locator('body').innerText();
   // throw away your work — so this journey starts from a reload.
   await maria.evaluate((h) => { window.location.hash = h; }, MATCHING);
   await maria.reload();
-  await maria.waitForSelector('h2:has-text("Player Matching")', { timeout: 25000 });
+  await maria.waitForSelector('.topbar h1:has-text("Player Matching")', { timeout: 25000 });
   await maria.waitForTimeout(500);
   const good = await addCriterion(maria, 'required', 'position');
   await good.locator('input[type=checkbox]').nth(6).check(); // CDM
@@ -418,7 +418,7 @@ let WL_HASH = null;
   say('M19-12b every M19 screen fits a 390px phone without sideways scrolling');
 
   await maria.setViewportSize({ width: 1440, height: 1000 });
-  await goto(maria, MATCHING, 'h2:has-text("Player Matching")');
+  await goto(maria, MATCHING, '.topbar h1:has-text("Player Matching")');
   await maria.locator('[data-criteria-class="required"] button:has-text("Add required criterion")').focus();
   await maria.keyboard.press('Enter');
   await maria.waitForTimeout(300);

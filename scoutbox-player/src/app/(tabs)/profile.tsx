@@ -4,9 +4,8 @@
 // All functionality from Milestone 2 is preserved below the fold.
 
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { client, type PlayerCV, type Benchmarks } from '../../data/client';
 import {
   AVAILABILITY_LABELS, CONTRACT_LABELS,
@@ -14,8 +13,9 @@ import {
 } from '../../domain/types';
 import { useSession } from '../../state';
 import { colors } from '../../theme';
+import { pt } from '../../i18n';
 import { Button, Card, Muted, Pill, Row, SectionTitle, TrustBar } from '../../components/ui';
-import { ReportSheet } from '../../components/ReportSheet';
+import { PageHeader } from '../../components/PageChrome';
 import { WebVideo } from '../../components/WebVideo';
 import { PassportSection } from '../../components/M12Sections';
 
@@ -35,10 +35,24 @@ function completenessLabel(score: number): string {
   return 'Profile still to fill in';
 }
 
+/**
+ * M23 P2.5 — the Profile route stays (`/profile` deep links and the back
+ * control still work); its body is also the first page tab of You, so the
+ * player's own record is one tap from the bar rather than a fifth tab.
+ */
 export default function Profile() {
-  const router = useRouter();
+  return (
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <ScrollView contentContainerStyle={styles.scroll}>
+        <PageHeader title={pt('tabProfile')} back />
+        <ProfileBody />
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+export function ProfileBody() {
   const { playerId, me, isMinor, refresh } = useSession();
-  const [menuOpen, setMenuOpen] = useState(false);
   const [cvOpen, setCvOpen] = useState(false);
   const [cv, setCv] = useState<PlayerCV | null>(null);
   const [benchmarks, setBenchmarks] = useState<Benchmarks | null>(null);
@@ -68,19 +82,7 @@ export default function Profile() {
   const initials = me.name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScrollView contentContainerStyle={styles.scroll}>
-        {/* header row: back + menu (menu = report/block, on every screen) */}
-        <Row style={{ justifyContent: 'space-between' }}>
-          <Pressable style={styles.roundBtn} onPress={() => router.back()} accessibilityLabel="Back">
-            <Text style={styles.roundBtnText}>‹</Text>
-          </Pressable>
-          <Pressable style={styles.roundBtn} onPress={() => setMenuOpen(true)} accessibilityLabel="More — report and block">
-            <Text style={styles.roundBtnText}>⋯</Text>
-          </Pressable>
-        </Row>
-        {menuOpen && <ReportSheet onClose={() => setMenuOpen(false)} />}
-
+    <>
         {/* identity block: avatar card + details */}
         <View style={styles.identityRow}>
           <View style={styles.avatarCard}>
@@ -546,9 +548,7 @@ export default function Profile() {
           ))}
         </Card>
         {playerId ? <PassportSection actor={{ kind: 'player', id: playerId }} /> : null}
-
-      </ScrollView>
-    </SafeAreaView>
+    </>
   );
 }
 
@@ -565,17 +565,6 @@ function StatTile({ icon, v, k }: { icon: string; v: string; k: string }) {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: 18, gap: 12, maxWidth: 560, width: '100%', alignSelf: 'center' },
-  roundBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.bg2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  roundBtnText: { color: colors.text, fontSize: 20, lineHeight: 22 },
   identityRow: { flexDirection: 'row', gap: 16, alignItems: 'flex-start' },
   avatarCard: {
     width: 128,

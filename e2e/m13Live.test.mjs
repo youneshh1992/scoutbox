@@ -101,13 +101,14 @@ await player.waitForSelector('text=Our promises to every player', { timeout: 300
 await player.locator('text=Enter').nth(0).click(); // Kola (adult, dev login)
 await player.waitForSelector('text=Your visibility right now', { timeout: 20000 });
 await player.click('a[href="/you"]');
+await player.getByRole('tab', { name: 'Clubs' }).click();
 await player.waitForSelector('text=Suitability preferences', { timeout: 20000 });
 await player.fill('input[aria-label="Travel limit"]', '40');
 await player.locator('text=Save travel limit').click();
 await player.waitForSelector('text=Saved — private to you', { timeout: 10000 });
 say('L1: adult player saved a private preference through his own screen');
 
-await player.click('a[href="/discover"]');
+await player.click('a[href="/opportunities"]');
 await player.waitForSelector('text=Opportunity fit', { timeout: 20000 });
 await player.locator('div', { hasText: 'First-team look — wide forwards' }).locator('text=Apply').last().click();
 await player.waitForSelector('text=Application submitted', { timeout: 10000 });
@@ -173,6 +174,7 @@ say('L3: guardian set the child’s preferences (relocation never collected for 
 
 // ============================================================ L4 transition
 await player.click('a[href="/you"]');
+await player.getByRole('tab', { name: 'Clubs' }).click();
 await player.waitForSelector('text=Club transition', { timeout: 20000 });
 await player.locator('text=Open a transition case').click();
 await player.waitForSelector('text=Open to a new club', { timeout: 10000 });

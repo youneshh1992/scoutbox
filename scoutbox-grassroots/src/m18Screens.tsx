@@ -216,7 +216,6 @@ export function SecondLookScreen({ session, tick, notify, openPlayer }: M18Scree
 
   return (
     <div>
-      <h2>{t('m18.sl.title')}</h2>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 4 }}>{t('m18.sl.intro')}</div>
       <div className="notice block" style={{ marginBottom: 10, fontSize: 12.5 }}>
         {data?.disclaimer ?? t('m18.sl.disclaimer')}
@@ -614,7 +613,6 @@ export function NobodyMissedScreen({
 
   return (
     <div>
-      <h2>{t('m18.nm.title')}</h2>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 4 }}>{t('m18.nm.intro')}</div>
       <div className="notice block" style={{ marginBottom: 10, fontSize: 12.5 }}>{t('m18.nm.notQuality')}</div>
 
@@ -856,7 +854,6 @@ function BriefList({ session, tick, notify, onOpenBrief }: BriefsScreenProps) {
 
   return (
     <div>
-      <h2>{t('m18.br.title')}</h2>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 4 }}>{t('m18.br.intro')}</div>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}>{t('m18.br.noHidden')}</div>
 

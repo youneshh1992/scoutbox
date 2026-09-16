@@ -57,9 +57,12 @@ export function Sidebar({
   // Accordion state. The active section is ALWAYS open; others can be opened
   // for the session with their chevron. Deterministic and unpersisted.
   const [open, setOpen] = useState<Set<string>>(() => new Set(location.sectionId ? [location.sectionId] : []));
+  // Any navigation re-opens the destination's section — including a page
+  // inside a section the person had folded, so the active page is never
+  // hidden in a closed accordion.
   useEffect(() => {
     if (location.sectionId) setOpen((prev) => (prev.has(location.sectionId!) ? prev : new Set(prev).add(location.sectionId!)));
-  }, [location.sectionId]);
+  }, [location.sectionId, location.itemId]);
   const toggle = (id: string) => setOpen((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   // Collapsed-rail flyout: at most one open. Closed by Escape, by clicking

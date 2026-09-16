@@ -7,10 +7,9 @@ import type { ChildInboxItem, InboxRequest } from '../../domain/types';
 import { useSession } from '../../state';
 import { colors } from '../../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from '../../components/ui';
-import { ReportButton } from '../../components/ReportSheet';
-import { NotificationBell } from '../../components/NotificationBell';
+import { pt } from '../../i18n';
+import { PageHeader } from '../../components/PageChrome';
 import { Threads } from '../../components/Threads';
-import { SquadInvitesSection, TrialSafetySection } from '../../components/M12Sections';
 import { AckSection } from '../../components/M13Sections';
 
 function isChildItem(r: InboxRequest | ChildInboxItem): r is ChildInboxItem {
@@ -53,13 +52,7 @@ export default function Inbox() {
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
       >
-        <Row style={{ justifyContent: 'space-between' }}>
-          <Text style={styles.h1}>{isMinor ? 'Updates' : 'Scout Inbox'}</Text>
-          <Row>
-            <NotificationBell />
-            <ReportButton />
-          </Row>
-        </Row>
+        <PageHeader title={isMinor ? pt('tabUpdates') : pt('tabInbox')} />
         {isMinor ? (
           <Muted>
             Scouts can&apos;t message you — that&apos;s a promise, not a setting. Clubs talk to your parent
@@ -174,9 +167,6 @@ export default function Inbox() {
           </>
         )}
         {playerId ? <AckSection actor={{ kind: 'player', id: playerId }} /> : null}
-        {playerId ? <SquadInvitesSection actor={{ kind: 'player', id: playerId }} /> : null}
-        {playerId ? <TrialSafetySection actor={{ kind: 'player', id: playerId }} /> : null}
-
       </ScrollView>
     </SafeAreaView>
   );
@@ -185,7 +175,6 @@ export default function Inbox() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: 18, gap: 10, maxWidth: 560, width: '100%', alignSelf: 'center' },
-  h1: { color: colors.text, fontSize: 26, fontWeight: '800', marginTop: 6 },
   org: { color: colors.text, fontSize: 16, fontWeight: '700' },
   msg: { color: colors.text, fontSize: 14, fontStyle: 'italic', lineHeight: 20 },
 });

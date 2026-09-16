@@ -189,8 +189,8 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
   // The demo player app opens on onboarding; enter as the first identity.
   const enter = p.locator('text=Enter').first();
   if (await enter.count()) { await enter.click(); await p.waitForTimeout(1500); }
-  const you = p.locator('a[href="/you"]');
-  if (await you.count()) { await you.click(); await p.waitForTimeout(2000); }
+  const you = p.locator('a[href="/football"]');
+  if (await you.count()) { await you.click(); await p.getByRole('tab', { name: 'Development' }).click(); await p.waitForTimeout(2000); }
   const body = await p.evaluate(() => document.body.innerText ?? '');
 
   ok(/Development/i.test(body), 'the player bundle carries a Development section');

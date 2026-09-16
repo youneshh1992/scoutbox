@@ -130,9 +130,10 @@ await player.goto(`http://localhost:${PLAYER_PORT}/`);
 await player.waitForSelector('text=Our promises to every player', { timeout: 40000 });
 await player.locator('text=Enter').nth(0).click();           // Kola Adeyemi, adult
 await player.waitForSelector('text=Your visibility right now', { timeout: 30000 });
-await player.click('a[href="/you"]');
-await player.waitForSelector('text=Development', { timeout: 30000 });
-say('the player app carries a Development section on the You tab');
+await player.click('a[href="/football"]');
+await player.getByRole('tab', { name: 'Development' }).click();
+await player.waitForSelector('[aria-label="Development"]', { timeout: 30000 });
+say('the player app carries a Development section on the Football tab');
 
 const KOLA = (await j('POST', '/auth/player/login', { playerId: 'pl-adeyemi' })).body.token;
 const seeDev = async (p) => {
@@ -150,13 +151,14 @@ const seeDev = async (p) => {
  */
 async function reopenYou(p) {
   await p.reload();
-  await p.locator('a[href="/you"]').or(p.getByText('Our promises to every player')).first().waitFor({ timeout: 40000 });
+  await p.locator('a[href="/football"]').or(p.getByText('Our promises to every player')).first().waitFor({ timeout: 40000 });
   if (await p.locator('text=Our promises to every player').count()) {
     await p.locator('text=Enter').nth(0).click();
     await p.waitForSelector('text=Your visibility right now', { timeout: 30000 });
   }
-  await p.click('a[href="/you"]');
-  await p.waitForSelector('text=Development', { timeout: 30000 });
+  await p.click('a[href="/football"]');
+  await p.getByRole('tab', { name: 'Development' }).click();
+  await p.waitForSelector('[aria-label="Development"]', { timeout: 30000 });
   await p.waitForTimeout(1200);
 }
 
@@ -472,8 +474,9 @@ let clubPlanId = null; let clubGoalId = null;
   if (await guniEntry.count()) {
     await guniEntry.click();
     await minorPage.waitForSelector('text=Your visibility right now', { timeout: 30000 });
-    await minorPage.click('a[href="/you"]');
-    await minorPage.waitForSelector('text=Development', { timeout: 30000 });
+    await minorPage.click('a[href="/football"]');
+    await minorPage.getByRole('tab', { name: 'Development' }).click();
+    await minorPage.waitForSelector('[aria-label="Development"]', { timeout: 30000 });
     const body = await minorPage.locator('body').innerText();
     ok(/Improve first touch under pressure/.test(body), 'H10: the minor sees the plan their guardian manages');
     ok(!/Add goal/.test(body), 'H10: and is offered no way to add to it');
@@ -509,8 +512,9 @@ let clubPlanId = null; let clubGoalId = null;
   await small.waitForSelector('text=Our promises to every player', { timeout: 40000 });
   await small.locator('text=Enter').nth(0).click();
   await small.waitForSelector('text=Your visibility right now', { timeout: 30000 });
-  await small.click('a[href="/you"]');
-  await small.waitForSelector('text=Development', { timeout: 30000 });
+  await small.click('a[href="/football"]');
+  await small.getByRole('tab', { name: 'Development' }).click();
+  await small.waitForSelector('[aria-label="Development"]', { timeout: 30000 });
   // Wait for the section to finish loading before judging what it shows.
   for (let i = 0; i < 40; i++) {
     const txt = await devText(small);

@@ -493,7 +493,6 @@ export function DirectorDashboardScreen({ session, tick, notify, filters, onFilt
 
   return (
     <div className="screen" data-screen="director-dashboard">
-      <h2>{t('m20.title')}</h2>
       <p className="muted">{t('m20.subtitle')}</p>
 
       {/* The governing sentence, from the server, above every number. */}

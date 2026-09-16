@@ -134,7 +134,7 @@ await player.goto('http://localhost:8491/');
 await player.waitForSelector('text=Our promises to every player', { timeout: 30000 });
 await player.locator('text=Enter').nth(0).click(); // Kola (adult, dev login)
 await player.waitForSelector('text=Your visibility right now', { timeout: 20000 });
-await player.click('a[href="/you"]');
+await player.click('a[href="/football"]');
 await player.waitForSelector('text=Football Passport', { timeout: 20000 });
 {
   const body = await player.locator('body').innerText();
@@ -162,7 +162,7 @@ await player.waitForSelector('text=Football Passport', { timeout: 20000 });
   if (acc.status !== 200) fail('P5: squad invite not accepted');
   await player.reload();
   await player.waitForSelector('text=Our promises to every player', { timeout: 30000 }).catch(() => {});
-  await player.click('a[href="/you"]').catch(() => {});
+  await player.click('a[href="/football"]').catch(() => {});
   await player.waitForSelector('text=Football Passport', { timeout: 25000 });
   await player.waitForSelector('text=confirmed as your current club', { timeout: 15000 });
   const body = await player.locator('body').innerText();
@@ -174,7 +174,7 @@ await player.waitForSelector('text=Football Passport', { timeout: 20000 });
 {
   await j(`/org/verification/staff/${sam.userId}/departed`, { method: 'POST', body: JSON.stringify({}) }, bearer(maria.token));
   await player.reload();
-  await player.click('a[href="/you"]').catch(() => {});
+  await player.click('a[href="/football"]').catch(() => {});
   await player.waitForSelector('text=Football Passport', { timeout: 25000 });
   await player.waitForSelector('text=Coach affiliation was verified when this reference was submitted.', { timeout: 15000 });
   say('P4: after the coach departs, the reference shows its SNAPSHOT provenance — historical truth never rewritten');

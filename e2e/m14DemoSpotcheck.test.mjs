@@ -56,7 +56,7 @@ await club.waitForSelector('text=verification root admin', { timeout: 10000 });
 say('pro demo: domains + root admin persona render');
 // FR switch on the verification screen
 await club.selectOption('select[aria-label="Language"]', 'fr');
-await club.waitForSelector('nav.subnav button:has-text("Vérification")', { timeout: 10000 });
+await club.waitForSelector('nav.sidebar button:has-text("Vérification")', { timeout: 10000 });
 await club.getByRole('tab', { name: 'Ma vérification' }).click();
 await club.waitForSelector('text=Vérifiez votre rôle dans le football', { timeout: 10000 });
 say('pro demo: FR switch translates the Verification screen');
@@ -81,6 +81,7 @@ await player.waitForSelector('text=Our promises to every player', { timeout: 300
 await player.locator('text=Enter').nth(0).click();
 await player.waitForSelector('text=Your visibility right now', { timeout: 20000 });
 await player.click('a[href="/you"]');
+await player.getByRole('tab', { name: 'Clubs' }).click();
 await player.waitForSelector('text=Coach references', { timeout: 20000 });
 await player.waitForSelector('text=Coach affiliation was verified when this reference was submitted.', { timeout: 10000 });
 const pText = await player.locator('body').innerText();

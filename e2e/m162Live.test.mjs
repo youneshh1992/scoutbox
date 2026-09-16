@@ -74,9 +74,9 @@ await player.goto('http://localhost:8601/');
 await player.waitForSelector('text=Our promises to every player', { timeout: 30000 });
 await player.locator('text=Enter').nth(0).click();          // Kola (adult)
 await player.waitForSelector('text=Your visibility right now', { timeout: 20000 });
-await player.click('a[href="/you"]');
+await player.click('a[href="/football"]');
 await player.waitForSelector('text=ScoutBox Trust Score', { timeout: 20000 });
-say('T1: the player You tab shows the ScoutBox Trust Score');
+say('T1: the player Football tab shows the ScoutBox Trust Score');
 {
   // The section title paints before the profile fetch resolves; the score, the
   // band and the disclaimer arrive with it. Wait for the projection to land so

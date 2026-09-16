@@ -45,13 +45,15 @@ const freshPage = async () => {
   say('trial slot picker renders in inbox');
 
   // M9: training programme on Upload
+  // P2.5: Upload is the "+ Add evidence" action on Football; its route is unchanged.
+  await page.click('a[href="/football"]');
   await page.click('a[href="/upload"]');
   await page.waitForSelector('text=Your training programme', { timeout: 15000 });
   await page.getByText('Attacking track ★', { exact: true }).click();
   await page.waitForSelector('text=this week', { timeout: 10000 });
   say('training programme: track selected, weekly sessions render');
 
-  await page.click('a[href="/profile"]');
+  await page.click('a[href="/you"]'); // P2.5: Profile is the first page tab of You
   await page.waitForSelector('text=season by season', { timeout: 15000 });
   say('season history + goals trend renders on profile');
   await page.waitForSelector('text=Coach references', { timeout: 10000 });
@@ -59,6 +61,7 @@ const freshPage = async () => {
   say('coach references + cohort benchmarks render on profile');
 
   await page.click('a[href="/you"]');
+  await page.getByRole('tab', { name: 'Account' }).click();
   await page.waitForSelector('text=School-hours mute', { timeout: 15000 });
   await page.waitForSelector('text=Preview my data export');
   await page.waitForSelector('text=Delete my account');

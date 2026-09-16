@@ -1,20 +1,30 @@
-// M15-Nav LIVE browser journeys (N1–N8) — real backend, separate contexts.
-//   N1. Ordinary scout: compact sidebar, NO Organisation, Discover → Players,
-//       deep link highlights Recruitment → Assessments; hidden route stays
-//       hidden in the palette; direct hash to a hidden route highlights no
-//       section (and the server still refuses its data).
-//   N2. Head of Recruitment: Organisation visible; Staff & Security,
-//       Verification, Recruitment → Trials all reachable; nothing lost.
-//   N3. Command palette: ⌘K/Ctrl+K, keyboard selection, permission filtering,
-//       plain typing in an input never opens it.
-//   N4. Collapse: icon rail, tooltips/labels, persists across reload.
-//   N5. 640px height + narrow-width drawer: everything reachable.
-//   N6. Grassroots persona: Team section, no Pro-only destinations.
-//   N7. Player app intentionally unchanged (documented follow-up) — asserted
-//       by inspecting the config surface, not a browser run.
-//   N8. T&S: six grouped destinations; all 22 legacy tabs reachable.
-// Plus negative cases: revoked-permission shortcut, malformed stored state,
-// unknown hash, server authorization unaffected.
+// M15-Nav / M23 P2.5 LIVE browser journeys (N1–N12) — real backend, separate
+// contexts. P2.5 regrouped the sidebar (accordion + groups, no desktop tab
+// strip, one-row top bar with an h1) and restructured the Player tabs. Every
+// journey below drives the REAL interface; nothing reads the config to
+// decide what "should" be there.
+//   N1.  Ordinary scout: compact sidebar, NO Organisation; Recruitment opens
+//        on Players; the accordion lists its pages by group; no desktop tab
+//        strip; a deep link highlights section AND page; a hidden route
+//        highlights no section (and the server still refuses its data).
+//   N2.  Head of Recruitment: Organisation visible; Staff & Security,
+//        Verification, Recruitment → Trials all reachable; nothing lost.
+//   N3.  Command palette: ⌘K/Ctrl+K, keyboard selection, permission
+//        filtering, group shown in the path, plain typing never opens it.
+//   N4.  Collapse: icon rail with accessible names; a section opens a
+//        keyboard-operable flyout menu; persists across reload.
+//   N5.  640px height + 420px drawer: everything reachable; the drawer is a
+//        column; the phone strip lists only the active GROUP; the top bar is
+//        one row; Report / Block stays reachable; no horizontal overflow.
+//   N6.  Grassroots persona: Players and Club sections, no Pro-only pages.
+//   N7.  Player app: five destinations (Home / Football / Opportunities /
+//        Inbox / You); Profile and Upload keep their routes off the bar.
+//   N8.  T&S: unchanged — six grouped destinations; all legacy tabs reachable.
+//   N9.  Phone deep link lands on the right group strip.
+//   N10. Keyboard: accordion toggles are buttons with aria-expanded.
+//   N11. Deep link + refresh + back/forward keep section, page and title.
+//   N12. Server authorization unaffected by any of it.
+// Plus negative cases: revoked-permission shortcut, malformed stored state.
 import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -89,27 +99,41 @@ async function clubLogin(ctx, name, role) {
   return page;
 }
 const goHash = async (page, id) => { await page.evaluate((h) => { location.hash = h; }, `#/${id}`); await page.waitForTimeout(300); };
-const topbar = async (page) => (await page.locator('.topbar h2').innerText()).replace(/\s+/g, ' ').trim();
+// P2.5: the page title is the top bar's h1 — the ONE title on the page.
+const title = async (page) => (await page.locator('.topbar h1.page-title').innerText()).replace(/\s+/g, ' ').trim();
+const sectionLabels = (page) => page.locator('nav.sidebar button.nav-section').allInnerTexts();
+const activeChild = async (page) => (await page.locator('nav.sidebar .nav-child.active').allInnerTexts()).join('|');
+const visible = async (page, sel) => (await page.locator(sel).count()) > 0 && page.locator(sel).first().isVisible();
 
 // ============================================================ N1 — scout
 const scoutCtx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
 const scout = await clubLogin(scoutCtx, 'Noa Winter', 'First-Team Scout');
 {
-  const sections = await scout.locator('nav.sidebar button.nav-section').allInnerTexts();
+  const sections = await sectionLabels(scout);
   if (sections.some((s) => s.includes('Organisation'))) fail('N1: scout sees Organisation');
-  if (sections.length !== 6) fail(`N1: expected 5 sections + Inbox, saw ${sections.length}`); // 5 product + Inbox
-  say('N1: ordinary scout sees the compact set — Organisation absent');
-  await scout.click('nav.sidebar button:has-text("Discover")');
-  await scout.waitForSelector('nav.subnav');
-  if (!(await topbar(scout)).includes('Players')) fail('N1: Discover default child');
-  say('N1: Discover opens on Players with the secondary tab row');
+  if (sections.some((s) => s.includes('Discover'))) fail('N1: Discover is no longer a section');
+  if (sections.length !== 5) fail(`N1: expected 4 sections + Inbox, saw ${sections.length}: ${sections.join('|')}`);
+  say('N1: ordinary scout sees the compact set — Home, Recruitment, Squad & Planning, Network, Inbox; Organisation absent');
+  if ((await scout.locator('h1').count()) !== 1) fail(`N1: exactly one h1 on the page (saw ${await scout.locator('h1').count()})`);
+  if ((await scout.locator('.content h2').count()) !== 0) fail('N1: the page repeats its own title in an h2');
+  say('N1: one page title — the top bar h1 — and no duplicate h2 below it');
+  await scout.click('nav.sidebar button.nav-section:has-text("Recruitment")');
+  await scout.waitForTimeout(300);
+  if (!(await title(scout)).includes('Players')) fail(`N1: Recruitment must open on Players (${await title(scout)})`);
+  const groups = await scout.locator('nav.sidebar .nav-sec.open .nav-group-label').allInnerTexts();
+  if (groups.length < 5 || groups[0].toLowerCase() !== 'discover') fail(`N1: Recruitment accordion groups (${groups.join('|')})`);
+  const pages = await scout.locator('nav.sidebar .nav-sec.open .nav-child').count();
+  if (pages < 20) fail(`N1: Recruitment lists its pages in the sidebar (${pages})`);
+  if (!(await activeChild(scout)).includes('Players')) fail('N1: the active page is marked in the accordion');
+  say(`N1: Recruitment opens on Players; the accordion lists ${pages} pages under ${groups.length} groups (${groups.join(' · ')})`);
+  if (await visible(scout, 'nav.subnav')) fail('N1: the desktop tab strip must be gone — the sidebar carries the pages');
+  say('N1: no second navigation bar on the desktop');
   await goHash(scout, 'assessments');
-  if ((await topbar(scout)) !== 'Recruitment / Assessments') fail(`N1: deep link breadcrumb (${await topbar(scout)})`);
+  if ((await title(scout)) !== 'Recruitment / Assessments') fail(`N1: deep link title (${await title(scout)})`);
   const active = await scout.locator('nav.sidebar button.nav-section.active').innerText();
   if (!active.includes('Recruitment')) fail('N1: deep link highlights Recruitment');
-  const activeTab = await scout.locator('nav.subnav button.active').innerText();
-  if (activeTab !== 'Assessments') fail('N1: deep link highlights the Assessments tab');
-  say('N1: direct deep link highlights section AND child tab (no parent-first navigation needed)');
+  if ((await activeChild(scout)) !== 'Assessments') fail(`N1: deep link highlights the Assessments page (${await activeChild(scout)})`);
+  say('N1: direct deep link highlights section AND page (no parent-first navigation needed)');
   await goHash(scout, 'verification');
   if ((await scout.locator('nav.sidebar button.nav-section.active').count()) !== 0) fail('N1: hidden parent must not highlight');
   say('N1: direct hash to a hidden destination highlights no section (screen renders; the server still gates its data)');
@@ -125,13 +149,17 @@ const scout = await clubLogin(scoutCtx, 'Noa Winter', 'First-Team Scout');
   const empty = await scout.locator('.palette-results .notice').count();
   if (empty !== 1) fail('N3: restricted feature leaked into scout palette');
   say('N3: command search never reveals a restricted destination to a scout');
+  await scout.fill('.palette input', 'ledger');
+  await scout.waitForTimeout(200);
+  const row = await scout.locator('.palette-row').first().innerText();
+  if (!/Recruitment/.test(row) || !/Analytics/.test(row)) fail(`N3: the palette shows the group in the path (${row})`);
+  say('N3: a palette row shows section › group › page (Recruitment › Analytics › Discovery Ledger)');
   await scout.fill('.palette input', 'coverage');
   await scout.waitForTimeout(200);
   await scout.keyboard.press('Enter');
   await scout.waitForTimeout(300);
-  if ((await topbar(scout)) !== 'Squad & Planning / Coverage') fail('N3: palette navigation');
+  if ((await title(scout)) !== 'Squad & Planning / Coverage') fail(`N3: palette navigation (${await title(scout)})`);
   say('N3: palette routes "coverage" → Squad & Planning → Coverage via keyboard');
-  // plain typing in an input must never open the palette
   await goHash(scout, 'search');
   const input = scout.locator('.content input').first();
   await input.click();
@@ -147,11 +175,27 @@ const scout = await clubLogin(scoutCtx, 'Noa Winter', 'First-Team Scout');
   if ((await scout.locator('nav.sidebar.collapsed').count()) !== 1) fail('N4: collapse');
   const label = await scout.locator('nav.sidebar button.nav-section').first().getAttribute('aria-label');
   if (!label) fail('N4: collapsed icons need accessible names');
-  say('N4: collapsed icon rail with accessible names');
-  await scout.click('nav.sidebar button[aria-label="Discover"]');
+  const w = await scout.evaluate(() => Math.round(document.querySelector('nav.sidebar').getBoundingClientRect().width));
+  if (w > 72) fail(`N4: collapsed rail width ${w}px`);
+  say(`N4: collapsed icon rail (${w}px) with accessible names`);
+  await scout.click('nav.sidebar button[aria-label="Recruitment"]');
   await scout.waitForTimeout(250);
-  if (!(await topbar(scout)).includes('Players')) fail('N4: navigate while collapsed');
-  say('N4: navigation works from the collapsed rail');
+  if (!(await visible(scout, 'nav.sidebar .nav-flyout[role="menu"]'))) fail('N4: a multi-page section opens a flyout menu from the rail');
+  const items = await scout.locator('nav.sidebar .nav-flyout button[role="menuitem"]').count();
+  if (items < 20) fail(`N4: the flyout lists the section pages (${items})`);
+  say(`N4: the rail opens a flyout menu listing all ${items} Recruitment pages, grouped`);
+  await scout.keyboard.press('ArrowDown');
+  await scout.keyboard.press('Enter');
+  await scout.waitForTimeout(300);
+  if ((await scout.locator('nav.sidebar .nav-flyout').count()) !== 0) fail('N4: the flyout closes after navigating');
+  if (!(await title(scout)).includes('Shortlist')) fail(`N4: keyboard navigation from the flyout (${await title(scout)})`);
+  say('N4: ArrowDown + Enter navigates from the flyout (Players → Shortlist) and closes it');
+  await scout.click('nav.sidebar button[aria-label="Recruitment"]');
+  await scout.waitForTimeout(150);
+  await scout.keyboard.press('Escape');
+  await scout.waitForTimeout(150);
+  if ((await scout.locator('nav.sidebar .nav-flyout').count()) !== 0) fail('N4: Escape closes the flyout');
+  say('N4: Escape closes the flyout and returns focus to the rail');
   await scout.reload();
   await scout.waitForSelector('nav.sidebar', { timeout: 15000 });
   if ((await scout.locator('nav.sidebar.collapsed').count()) !== 1) fail('N4: collapsed state must persist across reload');
@@ -178,7 +222,6 @@ const scout = await clubLogin(scoutCtx, 'Noa Winter', 'First-Team Scout');
   await scout.waitForTimeout(700);
   if (!(await scout.locator('.nav-shortcuts').innerText()).includes('Coverage')) fail('shortcut persistence');
   say('Shortcuts: persist across reload (stored by item id)');
-  // a stored shortcut to a destination this role cannot see drops silently
   await scout.evaluate(() => {
     const k = Object.keys(localStorage).find((x) => x.startsWith('sb-nav-shortcuts:'));
     if (k) localStorage.setItem(k, JSON.stringify(['verification', 'coverage']));
@@ -190,7 +233,6 @@ const scout = await clubLogin(scoutCtx, 'Noa Winter', 'First-Team Scout');
   if (sc.includes('Verification')) fail('revoked/forbidden shortcut leaked');
   if (!sc.includes('Coverage')) fail('valid shortcut survived filtering');
   say('Shortcuts: a shortcut to a forbidden destination disappears gracefully; valid pins remain');
-  // malformed stored collapse preference must not break boot
   await scout.evaluate(() => localStorage.setItem('sb-nav-collapsed', '{broken'));
   await scout.reload();
   await scout.waitForSelector('nav.sidebar', { timeout: 15000 });
@@ -201,20 +243,25 @@ const scout = await clubLogin(scoutCtx, 'Noa Winter', 'First-Team Scout');
 const leadCtx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
 const lead = await clubLogin(leadCtx, 'Maria Keane', 'Head of Recruitment');
 {
-  const sections = await lead.locator('nav.sidebar button.nav-section').allInnerTexts();
+  const sections = await sectionLabels(lead);
   if (!sections.some((s) => s.includes('Organisation'))) fail('N2: lead must see Organisation');
-  say('N2: head of recruitment sees Organisation');
-  await lead.click('nav.sidebar button:has-text("Organisation")');
-  await lead.waitForSelector('nav.subnav');
-  if (!(await topbar(lead)).includes('Staff & Security')) fail('N2: Organisation default child');
+  if (sections.length !== 6) fail(`N2: expected 5 sections + Inbox, saw ${sections.length}`);
+  say('N2: head of recruitment sees Organisation (5 sections + Inbox)');
+  await lead.click('nav.sidebar button.nav-section:has-text("Organisation")');
+  await lead.waitForTimeout(300);
+  if (!(await title(lead)).includes('Staff & Security')) fail('N2: Organisation default child');
   say('N2: Organisation → Staff & Security opens');
-  await lead.click('nav.subnav button:has-text("Verification")');
+  await lead.click('nav.sidebar .nav-sec.open .nav-child:has-text("Verification")');
   await lead.waitForSelector('text=Ma vérification, text=My verification', { timeout: 15000 }).catch(() => {});
-  if ((await topbar(lead)) !== 'Organisation / Verification') fail('N2: Verification breadcrumb');
-  say('N2: Organisation → Verification opens the M14 console');
+  if ((await title(lead)) !== 'Organisation / Verification') fail(`N2: Verification title (${await title(lead)})`);
+  say('N2: Organisation → Verification opens the M14 console from the sidebar');
   await goHash(lead, 'trials');
-  if ((await topbar(lead)) !== 'Recruitment / Trials & Reports') fail('N2: Trials reachable');
+  if ((await title(lead)) !== 'Recruitment / Trials & Reports') fail('N2: Trials reachable');
   say('N2: Recruitment → Trials reachable; no route lost');
+  await goHash(lead, 'recruitment/dashboard');
+  if ((await title(lead)) !== 'Recruitment / Director Dashboard') fail(`N2: dashboard pretty link (${await title(lead)})`);
+  if (!(await lead.locator('nav.sidebar .nav-sec.open .nav-group-label:has-text("Analytics")').count())) fail('N2: Analytics group is visible inside Recruitment');
+  say('N2: #/recruitment/dashboard still resolves — Director Dashboard sits in Recruitment › Analytics');
   await lead.keyboard.press('Control+k');
   await lead.fill('.palette input', 'verification');
   await lead.waitForTimeout(200);
@@ -232,7 +279,7 @@ const lead = await clubLogin(leadCtx, 'Maria Keane', 'Head of Recruitment');
     const sb = document.querySelector('nav.sidebar');
     return { over: sb.scrollHeight > sb.clientHeight, oy: getComputedStyle(sb).overflowY, sections: sb.querySelectorAll('button.nav-section').length };
   });
-  if (m.sections !== 6) fail('N5: sections at 640px');
+  if (m.sections !== 5) fail(`N5: sections at 640px (${m.sections})`);
   if (m.over && m.oy !== 'auto') fail('N5: sidebar must scroll when it overflows');
   say('N5: 640px height — every destination reachable (sidebar scrolls if needed, regression guard held)');
   await scout.setViewportSize({ width: 420, height: 800 });
@@ -241,21 +288,91 @@ const lead = await clubLogin(leadCtx, 'Maria Keane', 'Head of Recruitment');
   await scout.click('button.nav-hamburger');
   await scout.waitForTimeout(300);
   if ((await scout.locator('nav.sidebar.drawer-open').count()) !== 1) fail('N5: drawer opens');
-  await scout.click('nav.sidebar button:has-text("Recruitment")');
+  const drawer = await scout.evaluate(() => { const s = document.querySelector('nav.sidebar'); const cs = getComputedStyle(s); return { dir: cs.flexDirection, w: Math.round(s.getBoundingClientRect().width) }; });
+  if (drawer.dir !== 'column' || drawer.w < 200) fail(`N5: the drawer must be a column (${JSON.stringify(drawer)})`);
+  say('N5: the drawer is a vertical list, not a row');
+  await scout.click('nav.sidebar button.nav-section:has-text("Recruitment")');
   await scout.waitForTimeout(300);
   if ((await scout.locator('nav.sidebar.drawer-open').count()) !== 0) fail('N5: drawer closes after navigation');
-  if (!(await topbar(scout)).includes('Pipeline')) fail('N5: drawer navigation');
+  if (!(await title(scout)).includes('Players')) fail('N5: drawer navigation');
   say('N5: narrow-width drawer opens, navigates, closes — active state obvious');
+  const strip = await scout.locator('nav.subnav button').allInnerTexts();
+  if (!strip.length || strip.length > 7 || !strip.includes('Players') || strip.includes('Recruitment Rooms')) fail(`N5: the phone strip lists the active GROUP only (${strip.join('|')})`);
+  say(`N5: the phone strip lists the Discover group only (${strip.join(' · ')}), never the whole section`);
+  const chrome = await scout.evaluate(() => ({
+    topbar: Math.round(document.querySelector('.topbar').getBoundingClientRect().height),
+    scrollW: document.documentElement.scrollWidth, vw: innerWidth,
+    report: (() => { const b = document.querySelector('.topbar-safety'); return b && b.getBoundingClientRect().width > 0 ? b.getAttribute('aria-label') : null; })(),
+  }));
+  if (chrome.topbar > 64) fail(`N5: the phone top bar is one row (${chrome.topbar}px)`);
+  if (chrome.scrollW > chrome.vw) fail(`N5: horizontal overflow at 420px (${chrome.scrollW} > ${chrome.vw})`);
+  if (!chrome.report) fail('N5: Report / Block must stay reachable on a phone');
+  say(`N5: one-row top bar (${chrome.topbar}px), Report / Block reachable ("${chrome.report}"), no horizontal overflow`);
+  // N9: a deep link on a phone lands on the right group strip.
+  await goHash(scout, 'rooms');
+  const pipe = await scout.locator('nav.subnav button').allInnerTexts();
+  if (!pipe.includes('Recruitment Rooms') || !pipe.includes('Player Requests') || pipe.includes('Players')) fail(`N9: phone deep link → Pipeline strip (${pipe.join('|')})`);
+  if (!(await scout.locator('nav.subnav button.active').innerText()).includes('Recruitment Rooms')) fail('N9: active page marked in the strip');
+  say('N9: a phone deep link to Rooms shows the Pipeline strip with Rooms active');
   await scout.setViewportSize({ width: 1280, height: 800 });
+}
+
+// ======================================= N10 — keyboard: accordion toggles
+{
+  await goHash(scout, 'search');
+  const toggle = scout.locator('nav.sidebar .nav-toggle[aria-label$="Squad & Planning"]');
+  if ((await toggle.count()) !== 1) fail('N10: every multi-page section has a toggle button');
+  if ((await toggle.getAttribute('aria-expanded')) !== 'false') fail('N10: a non-active section starts collapsed');
+  await toggle.focus();
+  await scout.keyboard.press('Enter');
+  await scout.waitForTimeout(150);
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') fail('N10: Enter expands');
+  const panel = await toggle.getAttribute('aria-controls');
+  if (!panel || !(await scout.locator(`#${panel} .nav-child`).count())) fail('N10: aria-controls points at the page list');
+  if (!(await activeChild(scout)).includes('Players')) fail('N10: expanding another section does not move the active page');
+  say('N10: a section toggle is a real button — Enter expands it, aria-expanded/aria-controls are correct, the active page is unchanged');
+  await scout.keyboard.press('Enter');
+  await scout.waitForTimeout(150);
+  if ((await toggle.getAttribute('aria-expanded')) !== 'false') fail('N10: Enter collapses again');
+  const rec = scout.locator('nav.sidebar .nav-toggle[aria-label$="Recruitment"]');
+  await rec.click();
+  await scout.waitForTimeout(150);
+  await goHash(scout, 'rooms');
+  if ((await rec.getAttribute('aria-expanded')) !== 'true') fail('N10: navigating into a section re-opens it');
+  say('N10: the active section is always expanded — navigating into it re-opens it');
+}
+
+// ============================ N11 — deep link + refresh + back / forward
+{
+  await goHash(scout, 'rooms');
+  await scout.reload();
+  await scout.waitForSelector('nav.sidebar', { timeout: 15000 });
+  await scout.waitForTimeout(500);
+  if ((await title(scout)) !== 'Recruitment / Recruitment Rooms') fail(`N11: refresh keeps the page (${await title(scout)})`);
+  if ((await activeChild(scout)) !== 'Recruitment Rooms') fail('N11: refresh keeps the accordion state');
+  say('N11: refresh on a deep link keeps section, page and title');
+  await goHash(scout, 'planner');
+  if ((await title(scout)) !== 'Squad & Planning / Squad Planner') fail('N11: second page');
+  await scout.goBack();
+  await scout.waitForTimeout(400);
+  if ((await title(scout)) !== 'Recruitment / Recruitment Rooms') fail(`N11: back (${await title(scout)})`);
+  await scout.goForward();
+  await scout.waitForTimeout(400);
+  if ((await title(scout)) !== 'Squad & Planning / Squad Planner') fail(`N11: forward (${await title(scout)})`);
+  if (!(await scout.locator('nav.sidebar button.nav-section.active').innerText()).includes('Squad')) fail('N11: forward highlights the section');
+  say('N11: browser back / forward move between sections with the title and highlight following');
 }
 
 // ============================================= EN/FR labels on the new nav
 {
   await lead.selectOption('nav.sidebar select', 'fr');
-  await lead.waitForSelector('nav.sidebar button:has-text("Découvrir")', { timeout: 8000 });
-  say('i18n: sidebar sections translate (Découvrir)');
+  await lead.waitForSelector('nav.sidebar button:has-text("Recrutement")', { timeout: 8000 });
+  await goHash(lead, 'ledger');
+  if (!(await lead.locator('nav.sidebar .nav-sec.open .nav-group-label:has-text("Statistiques")').count())) fail('i18n: group labels translate');
+  if (!(await title(lead)).includes('Recrutement')) fail('i18n: the h1 crumb translates');
+  say('i18n: sections, group labels and the page title translate (Recrutement › Statistiques)');
   await lead.selectOption('nav.sidebar select', 'en');
-  await lead.waitForSelector('nav.sidebar button:has-text("Discover")', { timeout: 8000 });
+  await lead.waitForSelector('nav.sidebar button:has-text("Recruitment")', { timeout: 8000 });
 }
 
 // ============================================================ N6 — grassroots
@@ -269,9 +386,14 @@ const grassCtx = await browser.newContext({ viewport: { width: 1280, height: 800
   await grass.click('button:has-text("Enter workspace")');
   await grass.waitForSelector('nav.sidebar', { timeout: 20000 });
   await grass.waitForTimeout(700);
-  const sections = await grass.locator('nav.sidebar button.nav-section').allInnerTexts();
-  if (!sections.some((s) => s.includes('Team'))) fail('N6: grassroots Team section');
-  say('N6: grassroots gets its own reduced structure (Team, not Squad & Planning)');
+  const sections = await sectionLabels(grass);
+  if (!sections.some((s) => s.includes('Players')) || !sections.some((s) => s.includes('Club'))) fail(`N6: grassroots sections (${sections.join('|')})`);
+  if (sections.some((s) => /Team|Network|Squad & Planning/.test(s))) fail(`N6: old grassroots sections linger (${sections.join('|')})`);
+  say('N6: grassroots gets its own reduced structure — Home, Players, Recruitment, Club, Inbox');
+  await grass.click('nav.sidebar button.nav-section:has-text("Club")');
+  await grass.waitForTimeout(300);
+  if (!(await title(grass)).includes('Clubs & Groups')) fail(`N6: Club opens on Clubs & Groups for every role (${await title(grass)})`);
+  say('N6: Club opens on Clubs & Groups — the page that used to be Network, still visible to everyone');
   await grass.keyboard.press('Control+k');
   await grass.fill('.palette input', 'budgets');
   await grass.waitForTimeout(200);
@@ -283,8 +405,15 @@ const grassCtx = await browser.newContext({ viewport: { width: 1280, height: 800
   await grass.keyboard.press('Escape');
   await grass.evaluate(() => { location.hash = '#/squad'; });
   await grass.waitForTimeout(300);
-  if (!(await topbar(grass)).includes('Squad')) fail('N6: grassroots deep link');
-  say('N6: grassroots deep links work');
+  if ((await title(grass)) !== 'Players / Squad & Match Days') fail(`N6: grassroots deep link (${await title(grass)})`);
+  say('N6: grassroots deep links work (#/squad → Players / Squad & Match Days)');
+  await grass.setViewportSize({ width: 390, height: 844 });
+  await grass.waitForTimeout(300);
+  await grass.click('button.nav-hamburger');
+  await grass.waitForTimeout(300);
+  const d = await grass.evaluate(() => { const s = document.querySelector('nav.sidebar'); return { dir: getComputedStyle(s).flexDirection, w: Math.round(s.getBoundingClientRect().width), scrollW: document.documentElement.scrollWidth }; });
+  if (d.dir !== 'column' || d.scrollW > 390) fail(`N6: grassroots phone drawer (${JSON.stringify(d)})`);
+  say('N6: the grassroots phone drawer is a column with no horizontal overflow (P2.5 defect D1 closed)');
 }
 
 // ============================================================ N8 — T&S
@@ -298,7 +427,7 @@ const grassCtx = await browser.newContext({ viewport: { width: 1280, height: 800
   const groups = await admin.locator('nav.sidebar button').allInnerTexts();
   const expect = ['Home', 'Cases', 'Verification', 'Safety', 'Operations', 'System'];
   if (!expect.every((g) => groups.some((x) => x.includes(g)))) fail(`N8: admin groups (${groups.join('|')})`);
-  say('N8: T&S console shows six grouped destinations instead of 22 flat tabs');
+  say('N8: T&S console shows six grouped destinations instead of 22 flat tabs (unchanged by P2.5)');
   const tour = [
     ['Cases', ['Report queue', 'Evidence disputes', 'Ver. disputes', 'Support desk']],
     ['Verification', ['Verification', 'Club verification', 'Guardian IDV', 'Staff checks', 'Coach affiliations']],
@@ -324,24 +453,37 @@ const grassCtx = await browser.newContext({ viewport: { width: 1280, height: 800
   say(`N8: all ${toured + 1} legacy T&S destinations remain reachable through the grouped navigation`);
 }
 
-// ============================== server authorization unaffected (negative)
+// ============================== N12 — server authorization unaffected
 {
   const r1 = await fetch(`${API}/admin/verification/queue`);
   if (r1.status !== 401) fail('server auth: admin queue must still 401 without the key');
   const r2 = await fetch(`${API}/org/verification/requests`);
   if (r2.status !== 401) fail('server auth: org route must still 401 without a session');
-  say('Server authorization unaffected: hidden navigation changes nothing about 401/403 rules');
+  // A scout's OWN session, on a route the sidebar hides from them.
+  const noa = await (await fetch(`${API}/auth/org/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Noa Winter', role: 'First-Team Scout' }) })).json();
+  const r3 = await fetch(`${API}/org/verification/requests`, { headers: { authorization: `Bearer ${noa.token}` } });
+  if (r3.status === 200) fail('server auth: a scout must not read the verification console just because the sidebar could be edited');
+  say(`N12: server authorization unaffected — hidden navigation changes nothing about 401/403 rules (scout → ${r3.status})`);
 }
 
-// ================================ N7 — player app intentionally unchanged
+// ======================================= N7 — player app: five destinations
 {
-  const tabs = fs.readFileSync(path.join(ROOT, 'scoutbox-player', 'src', 'app', '(tabs)', '_layout.tsx'), 'utf8');
-  for (const id of ['discover', 'inbox', 'profile', 'upload', 'you']) {
-    if (!tabs.includes(`'${id}'`)) fail(`N7: player tab ${id} changed`);
+  const tabsDir = path.join(ROOT, 'scoutbox-player', 'src', 'app', '(tabs)');
+  const layout = fs.readFileSync(path.join(tabsDir, '_layout.tsx'), 'utf8');
+  for (const id of ['discover', 'football', 'opportunities', 'inbox', 'you']) {
+    if (!layout.includes(`name: '${id}'`)) fail(`N7: player tab ${id} missing from the bar`);
+    if (!fs.existsSync(path.join(tabsDir, `${id}.tsx`))) fail(`N7: player route ${id} has no screen`);
   }
-  say('N7: player navigation intentionally untouched (M15 Passport absent) — follow-up documented in NAVIGATION_ARCHITECTURE.md');
+  for (const id of ['profile', 'upload']) {
+    if (!/name: '(profile|upload)'[^\n]*hidden: true/.test(layout) || !layout.includes(`name: '${id}'`)) fail(`N7: ${id} must keep its route off the bar`);
+    if (!fs.existsSync(path.join(tabsDir, `${id}.tsx`))) fail(`N7: player route ${id} removed`);
+  }
+  if (!layout.includes('href: null')) fail('N7: hidden routes are hidden with href: null, not deleted');
+  const football = fs.readFileSync(path.join(tabsDir, 'football.tsx'), 'utf8');
+  if (!/PageTabs/.test(football) || !/href="\/upload"/.test(football)) fail('N7: Football carries page tabs and the + Add evidence action');
+  say('N7: player app — Home / Football / Opportunities / Inbox / You; Profile and Upload stay routes (href: null); Football has page tabs and + Add evidence (browser journeys live in the player suites)');
 }
 
 await browser.close();
-console.log(`\nnavLive: ${passed} checks passed — N1–N8 complete`);
+console.log(`\nnavLive: ${passed} checks passed — N1–N12 complete`);
 process.exit(0);

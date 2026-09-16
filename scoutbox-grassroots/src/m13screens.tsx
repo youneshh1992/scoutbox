@@ -48,7 +48,6 @@ export function ImportsScreen({ session, notify }: ScreenProps) {
 
   return (
     <div>
-      <h2>{t('nav.imports')}</h2>
       <div className="section">
         <h3>{t('m13.import.title')}</h3>
         <div className="notice" style={{ fontSize: 12.5 }}>{t('m13.import.note')} <a href={m13.importTemplateUrl()} download="scoutbox-prospects-template.csv">{t('m13.import.template')}</a></div>
@@ -146,7 +145,6 @@ export function CoverageScreen({ session, notify }: ScreenProps) {
 
   return (
     <div>
-      <h2>{t('nav.coverage')}</h2>
       <div className="section">
         <h3>{t('m13.cov.plans')}</h3>
         {(plans ?? []).map((p) => (
@@ -227,7 +225,6 @@ export function CalibrationScreen({ session, notify }: ScreenProps) {
 
   return (
     <div>
-      <h2>{t('nav.calibration')}</h2>
       <div className="section">
         <h3>{t('m13.cal.sessions')}</h3>
         {(list ?? []).map((c) => (
@@ -305,7 +302,6 @@ export function InsightScreen({ session, notify, openPlayer }: ScreenProps) {
 
   return (
     <div>
-      <h2>{t('nav.insight')}</h2>
       {report ? (
         <div className="section">
           <h3>{t('m13.exp.funnel')} <span className="dim" style={{ fontWeight: 400 }}>({report.funnel.windowDays}d)</span></h3>
@@ -381,7 +377,6 @@ export function NetworkScreen({ session, notify }: ScreenProps) {
 
   return (
     <div>
-      <h2>{t('nav.network')}</h2>
       <div className="section">
         <h3>{t('m13.grp.title')}</h3>
         {(groups?.invites ?? []).map((iv) => (
@@ -480,8 +475,7 @@ export function BudgetsScreen({ session, notify }: ScreenProps) {
 
   return (
     <div>
-      <h2>{t('nav.budgets')}</h2>
-      <div className="notice" style={{ fontSize: 12.5 }}>{t('m13.bud.note')}</div>
+      <p className="pagehint">{t('m13.bud.note')}</p>
       <div className="enter-row">
         <select aria-label="Case" value={caseId} onChange={(e) => setCaseId(e.target.value)}>
           <option value="">{t('m13.bud.pickCase')}</option>
@@ -534,11 +528,10 @@ export function RepresentationScreen({ session, notify }: ScreenProps) {
   const [data, reload, err] = useAsync(() => m13.listRepresentations(session), [session]);
   const [playerId, setPlayerId] = useState('');
   if (session.org.type !== 'agency') {
-    return <div><h2>{t('nav.representation')}</h2><div className="notice block">{t('m13.rep.agencyOnly')}</div></div>;
+    return <div><div className="notice block">{t('m13.rep.agencyOnly')}</div></div>;
   }
   return (
     <div>
-      <h2>{t('nav.representation')}</h2>
       <div className="notice" style={{ fontSize: 12.5 }}>{data?.note ?? err}</div>
       {(data?.items ?? []).map((r) => (
         <div key={r.id} className="section">
@@ -578,7 +571,6 @@ export function OrganisationScreen({ session, notify }: ScreenProps) {
 
   return (
     <div>
-      <h2>{t('nav.organisation')}</h2>
       <NotificationPreferencesPanel session={session} notify={notify} />
       <AuditLogPanel session={session} />
       {awaitingAck.length > 0 && (

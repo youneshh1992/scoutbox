@@ -540,7 +540,6 @@ export function MatchingScreen({
 
   return (
     <div>
-      <h2>{t('m19.title')}</h2>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 4 }}>{t('m19.intro')}</div>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}>{t('m19.noScore')}</div>
 
@@ -749,7 +748,6 @@ function WatchlistList({ session, tick, onOpenWatchlist, onNewWatchlist }: Watch
 
   return (
     <div>
-      <h2>{t('m19.wl.title')}</h2>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 4 }}>{t('m19.wl.intro')}</div>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}>{t('m19.wl.derivedNote')}</div>
 

@@ -252,6 +252,15 @@ const en = {
   m22reason_INSUFFICIENT_LIGHT: 'There is not enough light.',
   m22reason_UNSUPPORTED_PROTOCOL: 'This activity is not supported yet.',
 
+  // M23 P2.5 — navigation. Tab titles and page tabs were string literals.
+  tabHome: 'Home', tabFootball: 'Football', tabOpportunities: 'Opportunities', tabInbox: 'Inbox', tabUpdates: 'Updates', tabYou: 'You',
+  tabProfile: 'Profile', tabUpload: 'Upload',
+  segPassport: 'Passport', segDevelopment: 'Development', segBoxCam: 'Box Cam', segCombine: 'Combine',
+  segProfile: 'Profile', segAccount: 'Account', segClubs: 'Clubs',
+  addEvidence: '+ Add evidence', back: 'Back', sectionsOf: 'Sections of this page',
+  footballHint: 'Your football record — what clubs see, and what you are working on.',
+  opportunitiesHint: 'Everything you can pursue, and everything a club has offered you.',
+
 };
 const fr: typeof en = {
   passport: 'Passeport de preuves', addClaim: 'Consigner une donnée', insufficient: 'Preuves encore insuffisantes — c’est affiché tel quel, jamais maquillé.',
@@ -494,6 +503,14 @@ const fr: typeof en = {
   m22reason_BALL_NOT_DETECTED: 'Nous ne voyons pas le ballon.',
   m22reason_INSUFFICIENT_LIGHT: 'La lumi\u00e8re est insuffisante.',
   m22reason_UNSUPPORTED_PROTOCOL: 'Cette activit\u00e9 n\u2019est pas encore prise en charge.',
+
+  tabHome: 'Accueil', tabFootball: 'Football', tabOpportunities: 'Opportunit\u00e9s', tabInbox: 'Messages', tabUpdates: 'Mises \u00e0 jour', tabYou: 'Vous',
+  tabProfile: 'Profil', tabUpload: 'Envoyer',
+  segPassport: 'Passeport', segDevelopment: 'D\u00e9veloppement', segBoxCam: 'Box Cam', segCombine: 'Combine',
+  segProfile: 'Profil', segAccount: 'Compte', segClubs: 'Clubs',
+  addEvidence: '+ Ajouter une preuve', back: 'Retour', sectionsOf: 'Sections de cette page',
+  footballHint: 'Votre dossier football \u2014 ce que voient les clubs, et ce sur quoi vous travaillez.',
+  opportunitiesHint: 'Tout ce que vous pouvez viser, et tout ce qu\u2019un club vous a propos\u00e9.',
 
 };
 
