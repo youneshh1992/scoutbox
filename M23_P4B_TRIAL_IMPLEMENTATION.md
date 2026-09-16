@@ -413,7 +413,8 @@ day the server accepts). A minor's own device renders the outcome line only.
 I, N, X, T, L, Z), 535 checks, 331 negative (62 %). `m23TrialPersistence` —
 4 sections, 36 checks. `m23TrialPerf` — 20 sessions × 0/5/20 links, +400
 cases, scan audit (≤ 5 touches per collection per journey), index decision:
-not added. `m23TrialLive` — adult A1–A12, minor M2–M8, negatives N1–N15,
+not added. `m23TrialLive` — adult A1–A12, accessibility A13 (tab semantics,
+keyboard, focus, live region), French A14, minor M2–M8, negatives N1–N15,
 390/360 px, labels, no page errors, 122 checks (53 negative). The M15, M20
 and M23 suites that read trials were extended, not weakened (Passport
 `trial_attended` re-keyed on attendance; `trial_process` metric with two
