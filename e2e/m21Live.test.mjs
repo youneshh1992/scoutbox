@@ -123,6 +123,15 @@ const watch = (page, who) => {
   return page;
 };
 
+// P2.5: the Development section sits on Football › Development. Its root
+// carries aria-label="Development" only once a plan exists; before that the
+// empty / loading state renders the section title alone. Wait for the
+// section TITLE (a second "Development" text beside the page tab), whatever
+// the state.
+const waitDev = (p) => p.waitForFunction(
+  () => [...document.querySelectorAll('div')].filter((d) => d.children.length === 0 && d.textContent.trim() === 'Development').length >= 2,
+  null, { timeout: 30000 },
+);
 // ---------------------------------------------------------------- the player
 const ctxPlayer = await browser.newContext({ viewport: { width: 480, height: 1200 } });
 const player = watch(await ctxPlayer.newPage(), 'player');
@@ -132,7 +141,7 @@ await player.locator('text=Enter').nth(0).click();           // Kola Adeyemi, ad
 await player.waitForSelector('text=Your visibility right now', { timeout: 30000 });
 await player.click('a[href="/football"]');
 await player.getByRole('tab', { name: 'Development' }).click();
-await player.waitForSelector('[aria-label="Development"]', { timeout: 30000 });
+await waitDev(player);
 say('the player app carries a Development section on the Football tab');
 
 const KOLA = (await j('POST', '/auth/player/login', { playerId: 'pl-adeyemi' })).body.token;
@@ -158,7 +167,7 @@ async function reopenYou(p) {
   }
   await p.click('a[href="/football"]');
   await p.getByRole('tab', { name: 'Development' }).click();
-  await p.waitForSelector('[aria-label="Development"]', { timeout: 30000 });
+  await waitDev(p);
   await p.waitForTimeout(1200);
 }
 
@@ -476,7 +485,7 @@ let clubPlanId = null; let clubGoalId = null;
     await minorPage.waitForSelector('text=Your visibility right now', { timeout: 30000 });
     await minorPage.click('a[href="/football"]');
     await minorPage.getByRole('tab', { name: 'Development' }).click();
-    await minorPage.waitForSelector('[aria-label="Development"]', { timeout: 30000 });
+    await waitDev(minorPage);
     const body = await minorPage.locator('body').innerText();
     ok(/Improve first touch under pressure/.test(body), 'H10: the minor sees the plan their guardian manages');
     ok(!/Add goal/.test(body), 'H10: and is offered no way to add to it');
@@ -514,7 +523,7 @@ let clubPlanId = null; let clubGoalId = null;
   await small.waitForSelector('text=Your visibility right now', { timeout: 30000 });
   await small.click('a[href="/football"]');
   await small.getByRole('tab', { name: 'Development' }).click();
-  await small.waitForSelector('[aria-label="Development"]', { timeout: 30000 });
+  await waitDev(small);
   // Wait for the section to finish loading before judging what it shows.
   for (let i = 0; i < 40; i++) {
     const txt = await devText(small);

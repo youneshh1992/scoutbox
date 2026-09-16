@@ -256,7 +256,8 @@ say('J2: the scout opens a Recruitment Room from Discover');
   if (!stillHere || !/briefs/.test(hash)) fail(`J3: declining the prompt did not keep the form (hash ${hash})`);
   say('J3: declining keeps the form and reverses the navigation');
   // Sidebar navigation goes through the same guard.
-  await scout.click('nav.sidebar :text("Discover")', { timeout: 5000 }).catch(() => {});
+  // P2.5: Discover is a group inside Recruitment now; click a section button that navigates.
+  await scout.click('nav.sidebar button.nav-section:has-text("Squad & Planning")', { timeout: 5000 }).catch(() => {});
   await scout.waitForTimeout(600);
   if (dialogs.length < 2) fail('J3: sidebar navigation bypassed the guard');
   if (!(await scout.locator('[aria-label="Recruitment brief criteria"]').count())) fail('J3: declining the sidebar prompt still navigated');

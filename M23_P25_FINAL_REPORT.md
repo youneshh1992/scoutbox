@@ -59,7 +59,7 @@ Branch `claude/desktop-project-migration-wyk3ec`, on top of the P2 tip
 34. `navConfig.test.mjs` — 256 checks: group validator, ≤ 7 per group, groups survive filtering, empty group vanishes, three broken configs refused, every label in EN and FR, per-app role filtering with no widening, resolver checks.
 35. `navLive.test.mjs` — rewritten, 46 checks, N1–N12 (accordion, flyout keyboard, drawer column, group strip, one-row top bar, phone deep link, toggle semantics, refresh/back/forward, EN/FR groups, Grassroots Players/Club, T&S tour, scout-token authorization, player tab set).
 36. Player suites migrated (m12/m13/m14/m15/m16/m162/m17/m21/m22 Live, m12/m13/m14/m162/m17/m21 demo spotchecks, uiSpotcheck) to the new tabs and `getByRole('tab')`.
-37. `m19Live` anchors on the top bar `h1`; `m14DemoSpotcheck` and `m13DemoSpotcheck` use the sidebar / `h1` instead of the strip and a removed `h2`.
+37. `m19Live` anchors on the top bar `h1`; `m14DemoSpotcheck` and `m13DemoSpotcheck` use the sidebar / `h1` instead of the strip and a removed `h2`; `m182Live` J3 clicks a section button (Discover is a group); `m21Live` waits for the Development section title rather than an `aria-label` that only exists once a plan is loaded; `m12Live` / `m15Live` select the page tab their step needs (Profile, Clubs, Football).
 
 ### Verification
 38. Typechecks: club, grassroots, admin, player — all clean.
@@ -69,7 +69,7 @@ Branch `claude/desktop-project-migration-wyk3ec`, on top of the P2 tip
 42. `git diff bf069b1 -- scoutbox-server` is **empty**: the frozen recruitment lifecycle is untouched.
 43. Contact Workflow code search: none. `recruitmentOffers` remains an optional store (unchanged from P2). No generated files changed.
 44. Measurements before/after recorded (§2).
-45. Two commits on a clean tree; §3 lists the third (docs + final verification).
+45. Four commits on a clean tree: `5258a2e` (shared nav + shell), `ca2eda9` (Player, headers, Room, navLive), `e3e79de` (documents), and the closing commit (test re-anchors + final report).
 46. Not pushed, no PR.
 
 ## 2. Measured result (Chromium, demo bundles)
@@ -95,7 +95,77 @@ Branch `claude/desktop-project-migration-wyk3ec`, on top of the P2 tip
 
 ## 3. Regression battery
 
-__BATTERY__
+### Browser suites (33, Chromium, sequential)
+
+| suite | first run | after test-anchor fix |
+|---|---|---|
+| navConfig | pass — navConfig: 256 checks passed | — |
+| uiSpotcheck | pass — UI SPOTCHECK OK | — |
+| demoOffline | pass — DEMO BUILDS OK | — |
+| crosstab | pass — CROSS-TAB E2E OK | — |
+| demoHostOrdering | pass — demoHostOrdering: all 15 checks passed | — |
+| m12DemoSpotcheck | pass — M12 DEMO SPOTCHECK OK — zero page errors | — |
+| m13DemoSpotcheck | fail (test anchor) —  | pass — M13 DEMO SPOTCHECK OK — zero page errors (FR anchor → top bar h1) |
+| m14DemoSpotcheck | pass —  | — |
+| m162DemoSpotcheck | pass — m162DemoSpotcheck: 21 checks passed — Trust Score demo story OK, zero page errors | — |
+| m17DemoSpotcheck | pass — m17DemoSpotcheck: 47 checks passed — Recruitment Rooms demo story OK, zero page errors | — |
+| m18DemoSpotcheck | pass — M18 headless spotcheck: ALL CHECKS PASSED — zero page errors | — |
+| m181DemoSpotcheck | pass — M18.1 headless spotcheck: ALL CHECKS PASSED — zero page errors | — |
+| m182DemoSpotcheck | pass — M18.2 headless spotcheck: ALL CHECKS PASSED — zero page errors | — |
+| m19DemoSpotcheck | pass — M19 headless spotcheck: ALL CHECKS PASSED — zero page errors | — |
+| m20DemoSpotcheck | pass — M20 headless spotcheck: ALL CHECKS PASSED — zero page errors | — |
+| m21DemoSpotcheck | pass — M21 headless spotcheck: ALL CHECKS PASSED — zero page errors | — |
+| liveIntegration | pass — LIVE INTEGRATION OK — separate contexts, one backend, no demo bus | — |
+| navLive | pass — navLive: 46 checks passed — N1–N12 complete | — |
+| m12Live | fail (test anchor) —  | pass — M12 LIVE INTEGRATION OK (Opportunities tab for the board; You › Profile / Clubs page tabs) |
+| m13Live | fail (test anchor) —  | pass — M13 LIVE INTEGRATION OK (Clubs page tab; `/you?tab=clubs` deep link) |
+| m14Live | pass — m14Live: L1–L7 all passed (separate contexts, live backend) | — |
+| m15Live | fail (test anchor) —  | pass — 21 checks, P1–P8 + T&S (Clubs page tab for references; back to Football before sharing) |
+| m16Live | pass — m16Live: 10 checks passed — Box Cam cross-app journey complete | — |
+| m162Live | pass — m162Live: 11 checks passed — Trust Profile journeys complete | — |
+| m17Live | pass — m17Live: 25 checks passed — Recruitment Room journeys complete | — |
+| m18Live | pass — m18Live: 60 checks passed — Second Look and Nobody Missed journeys complete | — |
+| m181Live | pass — M18.1 live browser journeys: 37 checks passed (H1–H10) | — |
+| m182Live | fail (test anchor) —  | pass — 37 checks (J3 clicks a real section button; Discover is a group now) |
+| m19Live | pass — M19 live journeys: 17 checks passed | — |
+| m20Live | pass — M20 live journeys: 59 checks passed | — |
+| m21Live | fail (test anchor) —  | pass — 68 checks (waits for the Development section title in any state) |
+| m22Live | pass — production Combine eligibility: NOT ELIGIBLE — real-world validation not completed | — |
+| m23Live | pass — m23Live: 39 checks passed — P2 sweep corrections verified end to end | — |
+
+### Server suites (25, plus apiE2E against a fresh :4000 server)
+
+| suite | result |
+|---|---|
+| testTrust | pass — 23 trust/safeguarding tests passed |
+| apiE2E | pass — 130 API checks passed (rerun with a server on :4000; the battery's first attempt had no server on that port) |
+| connectedE2E | pass — 43 connected-mode checks passed |
+| m12E2E | pass — m12E2E: all 147 checks passed |
+| m13E2E | pass — m13E2E: all 212 checks passed |
+| m14E2E | pass — m14E2E: all 193 checks passed |
+| m141E2E | pass — M14.1 adversarial suite: 94 checks passed |
+| m15E2E | pass — M15 acceptance suite: 185 checks passed, 71 negative/abuse checks (38% of all checks) |
+| m16E2E | pass — M16 acceptance suite: 118 checks passed, 55 negative/abuse checks (47% of all checks) |
+| m161E2E | pass — all M16.1 checks passed |
+| m162E2E | pass — all M16.2 checks passed |
+| m17E2E | pass — all M17 checks passed |
+| m18E2E | pass — all M18 checks passed |
+| m181E2E | pass — all M18.1 checks passed |
+| m182E2E | pass — all M18.2 checks passed |
+| m19E2E | pass — all M19 checks passed |
+| m20E2E | pass — all M20 checks passed |
+| m21E2E | pass — all M21 checks passed |
+| m22E2E | pass — M22 acceptance suite: 112 checks passed, 82 negative/integrity/security checks (73% of all checks) |
+| m23E2E | pass — all M23 P2 checks passed |
+| m23Persistence | pass — M23-D2 persistence suite: 67 checks passed, 20 negative/integrity checks (30%) |
+| m23BootContract | pass — all M23 boot-contract checks passed |
+| m17Perf | pass — Passport projection (same player, direct)  median 1.6 ms   p90 1.7 ms |
+| m18Perf | pass — matching the WHOLE brief costs 1.45× a single Passport assembly — the match runs on light facts, not assembled Passports |
+| m181Perf | pass — noise. Worth revisiting if Passports of that size become common; today the |
+
+Frozen P2 suites among them: m23E2E, m23Persistence (67), m23BootContract, m17E2E, m18E2E, m20E2E — all green, and `scoutbox-server` is byte-identical to `bf069b1`.
+
+Six browser suites failed on the first pass, every one on a selector that pointed at chrome P2.5 removed or moved (a removed `h2`, the old Home/Inbox/You placement of a player section, the former Discover section button, the Development section's empty-state label). No failure was a product regression; each was re-anchored on the destination and rerun (right-hand column).
 
 ## 4. Constraints honoured
 
@@ -111,3 +181,36 @@ __BATTERY__
 - Pipeline phone strip (6–7 tabs) scrolls by 2–3 tabs at 390px (by design; cap is 7).
 - Accordion open state is session-only (deliberate).
 - T&S console untouched (66px bar, tab row) — group further only if operators ask.
+
+## 6. Final audit (§113)
+
+| check | result |
+|---|---|
+| Typecheck club / grassroots / admin / player | clean / clean / clean / clean |
+| Builds club / grassroots / admin (vite) + player web export | built by navLive and the live suites; demo bundles rebuilt at `ca2eda9` |
+| navConfig | 256 checks |
+| navLive | 46 checks, N1–N12 |
+| Browser suites (33) | 33 green (6 after test re-anchoring, none a product regression) |
+| Server suites (25) + apiE2E | 25 green + 130 API checks |
+| Frozen P2 suites (m23E2E, m23Persistence, m23BootContract, m17E2E, m18E2E, m20E2E) | green |
+| `git diff bf069b1 -- scoutbox-server` | empty |
+| Contact Workflow code | none |
+| `recruitmentOffers` | optional store, unchanged |
+| Generated files | unchanged |
+| Routes removed | 0 |
+| Permission widening | 0 (navConfig per-role id sets; navLive N12 scout token → 403) |
+| Mobile | drawer column, group strip ≤ 7, one-row 54px bar, Report reachable, no overflow (navLive N5/N6/N9) |
+| Deep links | every hash route and pretty route unchanged; refresh + back/forward verified (navLive N11) |
+| Tree | clean after the closing commit |
+| Push / PR | none |
+
+## 7. Success condition (§114)
+
+Navigation clutter and page chrome are reduced on every surface — Pro
+6 → 5 sections with Recruitment grouped, Grassroots 6 → 4, Player 5 → 5
+restructured with page tabs, top bars one row (202 → 54px on a phone),
+Room header 336 → 141px — and nothing was removed, hidden from a role it
+was visible to, or unlinked. The server is untouched, the frozen
+recruitment lifecycle is untouched, the Contact Workflow is not started,
+and every suite in the battery is green. **Stopped here (§115): not
+pushed, no PR.**

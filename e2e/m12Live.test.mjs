@@ -103,6 +103,7 @@ await player.goto('http://localhost:8281/');
 await player.waitForSelector('text=Our promises to every player', { timeout: 30000 });
 await player.locator('text=Enter').nth(0).click(); // Kola (dev login, live server)
 await player.waitForSelector('text=Your visibility right now', { timeout: 20000 });
+await player.click('a[href="/opportunities"]'); // P2.5: the board lives on Opportunities
 await player.waitForSelector('text=Opportunity board', { timeout: 20000 });
 await player.waitForSelector('text=U23 look — pressing forwards', { timeout: 15000 });
 say('E1: the opportunity reached the player’s board in his own context');
@@ -134,7 +135,8 @@ if (pageText.includes('live test') || pageText.includes('monitor')) fail('raw as
 say('E2: the raw report (recommendation, reasons) is NOT in the player view');
 
 // ---- E3: evidence claim logged through the passport UI, visible to the org
-await player.click('a[href="/profile"]');
+await player.click('a[href="/you"]');
+await player.getByRole('tab', { name: 'Profile' }).click(); // P2.5: the passport sits on You › Profile (Clubs was left selected above)
 await player.waitForSelector('text=Evidence passport', { timeout: 20000 });
 await player.fill('input[aria-label="Evidence claim label"]', 'Assists 2025/26');
 await player.fill('input[aria-label="Evidence value"]', '7');

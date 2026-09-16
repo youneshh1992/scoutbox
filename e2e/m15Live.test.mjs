@@ -174,8 +174,10 @@ await player.waitForSelector('text=Football Passport', { timeout: 20000 });
 {
   await j(`/org/verification/staff/${sam.userId}/departed`, { method: 'POST', body: JSON.stringify({}) }, bearer(maria.token));
   await player.reload();
-  await player.click('a[href="/football"]').catch(() => {});
-  await player.waitForSelector('text=Football Passport', { timeout: 25000 });
+  // P2.5: coach references (M14) live on You › Clubs.
+  await player.click('a[href="/you"]').catch(() => {});
+  await player.getByRole('tab', { name: 'Clubs' }).click();
+  await player.waitForSelector('text=Coach references', { timeout: 25000 });
   await player.waitForSelector('text=Coach affiliation was verified when this reference was submitted.', { timeout: 15000 });
   say('P4: after the coach departs, the reference shows its SNAPSHOT provenance — historical truth never rewritten');
 }
@@ -183,6 +185,9 @@ await player.waitForSelector('text=Football Passport', { timeout: 20000 });
 // ================================================================ P6
 let kolaShareUrl = null;
 {
+  // P2.5: sharing lives on the Football Passport; P4 left the page on You › Clubs.
+  await player.click('a[href="/football"]');
+  await player.waitForSelector('text=Football Passport', { timeout: 25000 });
   await player.getByText('Create public link', { exact: true }).click();
   await player.waitForSelector('text=/\\/passport\\/shared\\//', { timeout: 15000 });
   kolaShareUrl = (await player.locator('text=/\\/passport\\/shared\\//').first().innerText()).trim();

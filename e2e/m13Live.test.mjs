@@ -195,7 +195,7 @@ say('L4: Pro Network screen reads exactly the shared pack');
 // The long-lived SPA page occasionally resets to its Home tab on a live-sync
 // tick; open a fresh page at /you in the SAME authenticated context instead.
 const player2 = await ctxPlayer.newPage();
-await player2.goto('http://localhost:8291/you');
+await player2.goto('http://localhost:8291/you?tab=clubs'); // P2.5: Club transition sits on You › Clubs
 await player2.waitForSelector('text=Club transition', { timeout: 25000 });
 await player2.getByText('Withdraw', { exact: true }).locator('visible=true').first().click({ timeout: 15000 });
 await player2.waitForSelector('text=cannot be remotely erased', { timeout: 10000 }).catch(async () => {
