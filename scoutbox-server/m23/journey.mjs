@@ -205,8 +205,19 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
       // §80 — the note is NEVER projected. It is org-private free text and it
       // has no business travelling inside a summary that other surfaces embed.
       hasNote: !!d.note,
+      // P5 — a formal decision is the same row with an outcome; legacy rows
+      // read as advisory recommendations. Ids, the outcome word, a count.
+      kind: d.kind === 'formal' ? 'formal' : 'recommendation',
+      outcome: d.kind === 'formal' ? d.outcome ?? null : null,
+      evidenceCount: d.kind === 'formal' ? (Array.isArray(d.evidenceRefs) ? d.evidenceRefs.length : 0) : 0,
     }));
   const currentDecision = decisions.filter((d) => !d.supersededById).slice(-1)[0] ?? null;
+  const currentFormal = currentDecision && currentDecision.kind === 'formal' ? currentDecision : null;
+  // P5 — the case's single draft, for the club only: its existence, its
+  // outcome and who holds it. Never its rationale; never on any other viewer.
+  const decisionDraft = kase.decisionDraft && typeof kase.decisionDraft === 'object'
+    ? { id: kase.decisionDraft.id ?? null, outcome: kase.decisionDraft.outcome ?? null, by: kase.decisionDraft.by?.name ?? null, updatedAt: kase.decisionDraft.updatedAt ?? null }
+    : null;
 
   // P4B — the Trial workflow, as MILESTONES: ids, states, times and counts
   // (§87). Never instructions, an address, a note, an observation or an
@@ -265,6 +276,13 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
     activeTrial: trials.some((t) => t.status === 'awaiting_report'),
     offerAwaitingResponse: offers.some((o) => o.status === 'sent'),
   });
+  // P5 §61 — evaluation exists (a submitted assessment or a completed trial)
+  // and no FORMAL decision stands on a live case. Derived by looking, never
+  // stored, never a status; a workflow-coverage fact, not a judgement.
+  conditions.decisionOutstanding = !LIFECYCLE_TERMINAL.includes(status)
+    && !currentFormal
+    && (assessments.some((a) => a.state !== 'draft') || trials.some((t) => t.workflow?.workflowState === 'completed'));
+  conditions.hasFormalDecision = !!currentFormal;
 
   // §31/§42 — next actions are deterministic AND permission-aware. An action
   // this person cannot perform is not a suggestion, it is a dead end with a
@@ -298,7 +316,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
     trials,
     trialsOmitted,
     assessments,
-    decisions: { all: decisions, current: currentDecision },
+    decisions: { all: decisions, current: currentDecision, formal: currentFormal, draft: decisionDraft },
     offer: { available: offersAvailable, records: offers },
     outcome: {
       available: outcomeAvailable,
@@ -407,7 +425,7 @@ function timelineFor(kase, decisions, contactRecords = [], trial = {}) {
     });
   }
   for (const d of decisions) {
-    out.push({ _k: `decision:${d.id}`, kind: 'decision', at: d.at, by: d.by, recommendation: d.recommendation, reasonCodes: d.reasonCodes });
+    out.push({ _k: `decision:${d.id}`, kind: d.kind === 'formal' ? (d.supersededById ? 'decision_superseded' : 'decision_recorded') : 'decision', at: d.at, by: d.by, recommendation: d.recommendation, reasonCodes: d.reasonCodes, decisionKind: d.kind ?? 'recommendation', outcome: d.outcome ?? null, decisionId: d.id });
   }
   out.sort(byTimeThenKey);
   return out.map(({ _k, ...rest }) => rest);

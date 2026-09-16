@@ -59,6 +59,8 @@ const M = {
     'Rooms can be reopened, so this is not a one-way funnel: a room counts once for each stage it ever reached, not once per visit. A recent window is incomplete by construction — rooms opened last week have not had time to reach a signing.', { ratio: true }),
   trial_process: meta('trial_process', 'pipeline', 'Trial process', 'trials', 'window_entry', ['requests', 'trials'],
     'These are counts of process steps in the window — invitations sent, accepted, schedules confirmed, trials completed, cancelled or declined — never how a trial went. No rate is built on them: a club that invites five players and completes three has not "converted 60%", it has run three trials.'),
+  decision_outcomes: meta('decision_outcomes', 'pipeline', 'Formal decisions', 'decisions', 'window_entry', ['roomDecisions'],
+    'Counts of formal recruitment decisions finalized in the window, by outcome — progress, hold, reject — and how many were later superseded. A process count, never a verdict on anyone: a club that rejects nine players and progresses one has run ten decisions, not ranked ten people.'),
   exit_reason_mix: meta('exit_reason_mix', 'pipeline', 'Why rooms ended', 'decisions', 'window_completion', ['roomDecisions', 'recruitmentCases'],
     'This is the reason the club recorded, not the reason that operated. A decision carrying codes in two categories counts in both, so the shares add up to more than 100%.', { ratio: true }),
   time_to_first_decision: meta('time_to_first_decision', 'duration', 'Time to first decision', 'days', 'window_completion', ['recruitmentCases', 'roomDecisions'],
@@ -191,6 +193,13 @@ function buildDashboard(filters: DashboardFilters): Dashboard {
         ...count(1),
         steps: { invited: count(3), declined: count(1), accepted: count(2), scheduled: count(2), completed: count(1), cancelled: count(0) },
         note: 'Each step is counted on the day it happened, so one trial can appear under several steps in one window and under none in another. Counts are never suppressed; no rate is offered.',
+      } as Metric,
+      decision_outcomes: {
+        ...M.decision_outcomes,
+        ...count(3),
+        outcomes: { progress: count(1), hold: count(1), reject: count(1) },
+        superseded: count(0),
+        note: 'Formal decisions finalized in the window, by outcome. Counts only; no rate, no ranking, no reason.',
       } as Metric,
       exit_reason_mix: {
         ...M.exit_reason_mix,

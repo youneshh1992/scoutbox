@@ -27,7 +27,7 @@ import {
 } from './metrics.mjs';
 import {
   pipelineStageCounts, funnelProgression, exitReasonMix, roomSourceMix, sourceStageReach,
-  transitions, firstTerminalAt, trialProcess,
+  transitions, firstTerminalAt, trialProcess, decisionOutcomes,
 } from './funnels.mjs';
 import {
   timeToFirstDecision, timeInStage, timeToTrialRequested, timeTrialRequestedToCompleted,
@@ -198,6 +198,7 @@ const FAMILY_BUILDERS = {
     funnel_progression: funnelProgression(ctx),
     exit_reason_mix: exitReasonMix(ctx),
     trial_process: trialProcess(ctx),
+    decision_outcomes: decisionOutcomes(ctx),
   }),
   duration: (ctx) => ({
     time_to_first_decision: timeToFirstDecision(ctx),

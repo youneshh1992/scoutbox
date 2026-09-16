@@ -134,6 +134,16 @@ boundary, and no metric names a player the organisation may not currently see.
 - **Limitation** — These are counts of process steps in the window — invitations sent, accepted, schedules confirmed, trials completed, cancelled or declined — never how a trial went. No rate is built on them: a club that invites five players and completes three has not "converted 60%", it has run three trials.
 - **What it never reads** — attendance notes, assessments, observations, the message, the venue, the reason text.
 
+#### F5 · `decision_outcomes` (M23 P5)
+- **Definition** — counts of formal recruitment decisions finalized in the window, by outcome (progress, hold, reject), plus how many of those were later superseded.
+- **Unit** — count of decisions; the headline number is all formal decisions in the window.
+- **Source** — `db.roomDecisions[]` rows with `kind: 'formal'` (`outcome`, `createdAt`, `supersededById`).
+- **Numerator / denominator** — counts only; **no denominator, no rate**. A reject count beside a progress count is not a hit rate and ranks nobody.
+- **Time semantics** — window-entry: a decision counts in the window it was finalized in.
+- **Small-n** — none; counts are never suppressed and no rate exists to withhold.
+- **Limitation** — Counts of formal recruitment decisions finalized in the window, by outcome — progress, hold, reject — and how many were later superseded. A process count, never a verdict on anyone: a club that rejects nine players and progresses one has run ten decisions, not ranked ten people. Advisory M17 recommendations are not counted here (they are opinions, not decisions).
+- **What it never reads** — reason codes, the rationale, evidence references, assessments, the player.
+
 ### Family T — how long the process takes
 
 All T metrics report **median and interquartile range**, never a mean: one

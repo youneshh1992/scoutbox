@@ -270,6 +270,11 @@ export const STATUS_EVIDENCE_REQUIRED = table({
   trial_requested: { kind: 'trial_invited', note: 'a trial invitation must have been sent to the player or their guardian' },
   trial_scheduled: { kind: 'trial_confirmed', note: 'a trial schedule must have been confirmed with at least one concrete session' },
   trial_completed: { kind: 'trial_completed', note: 'a trial must have been completed' },
+  // M23 P5 (§56): the ONE widening P5 makes — not a new status, not a new
+  // edge. Considering an offer is the club's formal decision to progress, and
+  // the record that proves it is a finalized formal decision on this case. A
+  // draft, an advisory recommendation or a superseded decision proves nothing.
+  offer_consideration: { kind: 'decision_progress', note: 'a finalized recruitment decision to progress must exist for this case' },
   offer_made: { kind: 'offer_sent', note: 'an offer must have been sent' },
   offer_accepted: { kind: 'offer_accepted_by_recipient', note: 'the recipient must have accepted their own offer' },
   offer_declined: { kind: 'offer_declined_by_recipient', note: 'the recipient must have declined their own offer' },
@@ -621,6 +626,13 @@ export const roomCan = (role, action) => {
     trial_view: 0,
     trial_assess: 1,
     trial_write: 2,
+    // M23 P5 — formal recruitment decision. Reading the decision is club
+    // memory; drafting and finalizing are the recruitment act and sit with
+    // the room lead, exactly where `record_decision` already sits. A scout
+    // contributes assessments and discussion, not the decision.
+    decision_view: 0,
+    decision_draft: 2,
+    decision_finalize: 2,
     manage_any_room: 3,
   }[action];
   return need != null && rank >= need;

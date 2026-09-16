@@ -112,6 +112,19 @@ export const EVENT_REGISTRY = {
     privacyClass: 'org_internal', payload: ['orgId', 'roomId'],
     dedupeStrategy: 'fingerprint', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: true,
   },
+  // ---- M23 P5 formal decision. Org-private, ids only (§80, §81): never the
+  // outcome, never a reason code, never the rationale. The client refetches
+  // through the authorised read; analytics reads the store, not the stream.
+  room_decision_finalized: {
+    domain: 'recruitment', sourceSystem: 'roomDecisions', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'decisionId'],
+    dedupeStrategy: 'none', replayPolicy: 'never', notificationEligible: true, analyticsEligible: false,
+  },
+  room_decision_superseded: {
+    domain: 'recruitment', sourceSystem: 'roomDecisions', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'decisionId'],
+    dedupeStrategy: 'none', replayPolicy: 'never', notificationEligible: true, analyticsEligible: false,
+  },
   recruitment_room_reopened_from_second_look: {
     // Emitted since M18, never classified until M18.2. It carried an orgId, so
     // the subject rules kept it inside the organisation — but only by luck of

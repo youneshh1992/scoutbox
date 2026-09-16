@@ -28,6 +28,8 @@ const PAGE_DEFAULT = 25;
 /** Room activity types worth an administrator's attention. Chatter is not. */
 const ROOM_ACTIONS = new Set([
   'room_created', 'room_status_changed', 'room_reopened', 'room_decision_recorded',
+  // M23 P5 — the formal decision: drafted, discarded, finalized, superseded.
+  'room_decision_drafted', 'room_decision_draft_discarded', 'room_decision_finalized', 'room_decision_superseded',
   'room_owner_changed', 'room_member_assigned', 'room_priority_changed',
   'room_evidence_requested', 'room_assessment_assigned',
 ]);
@@ -71,7 +73,9 @@ function safeDetail(action, detail) {
   const out = {};
   for (const k of ['from', 'to', 'status', 'priority', 'recommendation', 'version', 'criteriaChanged', 'sourceContext', 'kind', 'channel', 'recipientType', 'code',
     // P4B Trial detail: ids, states, counts and flags only.
-    'sessionId', 'trialSessionId', 'state', 'source', 'revision', 'sessionCount', 'material', 'requiresConfirmation', 'phase', 'cancelledBy', 'attendedSessions', 'slotId', 'day', 'hadReason']) {
+    'sessionId', 'trialSessionId', 'state', 'source', 'revision', 'sessionCount', 'material', 'requiresConfirmation', 'phase', 'cancelledBy', 'attendedSessions', 'slotId', 'day', 'hadReason',
+    // P5 Decision detail: ids and the outcome word only — never the rationale.
+    'outcome', 'decisionId', 'supersedes', 'draftId']) {
     if (detail[k] !== undefined) out[k] = detail[k];
   }
   if (Array.isArray(detail.reasonCodes)) out.reasonCodes = detail.reasonCodes.slice(0, 10);

@@ -201,6 +201,11 @@ export function registerRooms(ctx) {
       note: d.note, by: d.by, createdAt: d.createdAt,
       supersededById: d.supersededById ?? null,
       snapshot: d.snapshot ?? null,
+      // M23 P5 — a formal decision is the same row with an outcome. Legacy
+      // rows read as advisory recommendations; nothing is backfilled.
+      kind: d.kind === 'formal' ? 'formal' : 'recommendation',
+      outcome: d.kind === 'formal' ? d.outcome ?? null : null,
+      lifecycle: d.kind === 'formal' ? d.lifecycle ?? null : null,
     };
   }
 
@@ -771,6 +776,9 @@ export function registerRooms(ctx) {
   };
   ctx.findRoomForRequest = findRoom;
   ctx.roomIsRoom = isRoom;
+  // M23 P5 — the decision-time snapshot, captured by the formal decision
+  // route through exactly the code the advisory recommendation uses.
+  ctx.captureRoomSnapshot = (room, req, trigger) => captureSnapshot(room, req, trigger);
 
   /**
    * The lifecycle write seam, shared with M23.

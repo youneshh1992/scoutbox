@@ -238,7 +238,9 @@ export function registerDelivery(ctx) {
     // transport, so the honest `failed` state can be exercised end to end.
     // `trial` (M23 P4B) makes the next Trial invitation, acceptance or
     // completion refuse at the transport with NOTHING written.
-    const channel = ['push', 'contact', 'trial'].includes(req.body?.channel) ? req.body.channel : 'email';
+    // `decision` (M23 P5) makes the next formal decision finalize refuse
+    // before anything is written.
+    const channel = ['push', 'contact', 'trial', 'decision'].includes(req.body?.channel) ? req.body.channel : 'email';
     const count = Math.min(Math.max(Number(req.body?.count) || 1, 1), 20);
     db.deliveryFailInject[channel] = (db.deliveryFailInject[channel] ?? 0) + count;
     persistNow();

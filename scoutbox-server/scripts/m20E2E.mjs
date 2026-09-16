@@ -135,6 +135,8 @@ section('§1 — the metric registry is internally consistent');
   // rate, and it never declares a read of the club's notes, instructions,
   // attendance notes or assessments.
   neg(METRICS.trial_process.ratio === false && METRICS.trial_process.distribution !== true, 'trial_process offers no rate and no distribution — a completion count beside an invitation count is not a conversion');
+  neg(METRICS.decision_outcomes.ratio === false && METRICS.decision_outcomes.distribution !== true, 'decision_outcomes offers no rate and no distribution — a reject count beside a progress count ranks nobody');
+  neg(METRICS.decision_outcomes.reads.every((f) => !/note|reason|rationale|evidence|assessment|rating|player|trust/i.test(f)), 'decision_outcomes reads the outcome word and two timestamps — no reason code, no rationale, no evidence, no player field');
   neg(METRICS.trial_process.reads.every((f) => !/note|instruction|message|reason|assessment|rating|observation|venue/i.test(f)), 'trial_process reads no note, instruction, message, reason, assessment, rating, observation or venue field');
   for (const rel of clients) {
     const src = read(rel);

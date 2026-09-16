@@ -33,6 +33,8 @@ import { trialIntegrity, deriveWorkflowState } from './trial.mjs';
 export const EVIDENCE_KINDS = Object.freeze([
   'contact_delivered',
   'trial_invited',
+  // M23 P5 — the ONE decision-shaped kind: a finalized formal decision to progress.
+  'decision_progress',
   'trial_confirmed',
   'trial_completed',
   'offer_sent',
@@ -147,6 +149,21 @@ export function createEvidenceProvider(db) {
         return hit
           ? { satisfied: true, sourceType: 'trial', sourceId: hit.id }
           : { satisfied: false, reason: 'no_completed_trial' };
+      }
+
+      // ---- P5 Decision evidence. The ONE widening P5 makes: `offer_consideration`
+      // now needs a FINALIZED formal decision to progress (mandate §56). A draft
+      // is not a decision; a superseded decision no longer speaks; an advisory
+      // M17 recommendation is not a formal decision. Same direction as every
+      // other kind: decision truth -> lifecycle; nothing written.
+      if (kind === 'decision_progress') {
+        const decisions = db?.roomDecisions;
+        if (!Array.isArray(decisions)) return { satisfied: false, reason: 'decisions_store_unavailable' };
+        const hit = decisions.find((d) => d && typeof d === 'object' && d.kind === 'formal' && d.state !== 'draft' && d.outcome === 'progress'
+          && d.roomId === kase.id && d.orgId === kase.orgId && d.playerId === kase.playerId && !d.supersededById);
+        return hit
+          ? { satisfied: true, sourceType: 'decision', sourceId: hit.id }
+          : { satisfied: false, reason: 'no_finalized_progress_decision' };
       }
 
       // Offer evidence arrives with its own phase.

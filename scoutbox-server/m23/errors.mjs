@@ -181,6 +181,40 @@ export const M23_ERROR_HTTP = table({
   TRIAL_STATE_UNKNOWN: 500,
   TRIAL_STORE_MISSING: 500,
   TRIAL_TRANSPORT_REFUSED: 500,
+
+  // ======================================================== M23 P5 Decision
+  // Same bands, same rule: no default. Every code below is produced by
+  // m23/decision.mjs or m23/decisionRoutes.mjs and swept by the drift guard.
+
+  // ---- 400: fix the request.
+  DECISION_OUTCOME_INVALID: 400,
+  DECISION_REASON_INVALID: 400,
+  DECISION_CONTENT_INVALID: 400,
+  DECISION_EVIDENCE_INVALID: 400,
+  DECISION_CASE_MISMATCH: 400,
+  DECISION_CLIENT_KEY_INVALID: 400,
+  DECISION_REV_REQUIRED: 400,
+
+  // ---- 403: not yours to do.
+  DECISION_NOT_PERMITTED: 403,
+  DECISION_BLOCKED: 403,
+
+  // ---- 404: concealment. Reached only after the room's own concealing
+  // lookup; a draft that does not exist is not a thing to find.
+  DECISION_NOT_FOUND: 404,
+
+  // ---- 409: the decision or the case is not where the caller thought.
+  DECISION_INVALID_STATE: 409,
+  DECISION_ALREADY_FINAL: 409,
+  DECISION_VERSION_CONFLICT: 409,
+  DECISION_IDEMPOTENCY_CONFLICT: 409,
+  DECISION_LIFECYCLE_CONFLICT: 409,
+  DECISION_SUBJECT_REMOVED: 409,
+
+  // ---- 500: ours.
+  DECISION_STATE_UNKNOWN: 500,
+  DECISION_STORE_MISSING: 500,
+  DECISION_TRANSPORT_REFUSED: 500,
 });
 
 /** The codes that mean "this build or its data is broken", not "your request was". */

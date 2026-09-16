@@ -128,6 +128,9 @@ function PipelinePanels({ f }: { f: Family }) {
   const mix = m.exit_reason_mix;
   const trialProcess = m.trial_process;
   const trialSteps = (trialProcess?.steps ?? {}) as Record<string, Figure>;
+  const decisionOutcomes = m.decision_outcomes;
+  const outcomeFigures = (decisionOutcomes?.outcomes ?? {}) as Record<string, Figure>;
+  const supersededFigure = decisionOutcomes?.superseded as Figure | undefined;
   const rows = (stages?.rows ?? []) as { status: string; terminal: boolean; value: number }[];
   const funnelRows = (funnel?.rows ?? []) as { stage: string; value: number; reachedOutsideWindow: number; share: Figure }[];
   const mixRows = (mix?.rows ?? []) as { category: string; value: number; share: Figure }[];
@@ -200,6 +203,25 @@ function PipelinePanels({ f }: { f: Family }) {
         )}
       </Panel>
 
+      {decisionOutcomes && (
+        <Panel metric={decisionOutcomes}>
+          <p className="muted small" data-no-rate="true">{t('m20.decisionOutcomes.noRate')}</p>
+          <div className="table-scroll">
+            <table className="data">
+              <thead><tr><th>{t('m20.col.outcome')}</th><th>{t('m20.col.decisions')}</th></tr></thead>
+              <tbody>
+                {['progress', 'hold', 'reject'].map((o) => (
+                  <tr key={o}>
+                    <td>{t(`m20.decisionOutcomes.${o}`)}</td>
+                    <td data-count={outcomeFigures[o]?.value ?? 0}>{outcomeFigures[o]?.value ?? 0}</td>
+                  </tr>
+                ))}
+                <tr><td>{t('m20.decisionOutcomes.superseded')}</td><td data-count={supersededFigure?.value ?? 0}>{supersededFigure?.value ?? 0}</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
       <Panel metric={trialProcess}>
         <p className="muted small" data-no-rate="true">{t('m20.trialProcess.noRate')}</p>
         <div className="table-scroll">

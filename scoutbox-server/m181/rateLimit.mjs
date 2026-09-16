@@ -107,6 +107,10 @@ export const RATE_LIMIT_POLICY = {
   trial_response: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'Trial schedule confirmations, declines and cancellations by a player or guardian.' },
   trial_evidence_link: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Box Cam sessions linked to a Trial.' },
   trial_attendance: { max: 120, windowMs: 3_600_000, scope: 'org', note: 'Trial attendance and completion records.' },
+  // M23 P5 — formal recruitment decisions. Drafting is cheap and frequent;
+  // finalizing is the recruitment act itself.
+  decision_draft: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Decision drafts opened or edited.' },
+  decision_finalize: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Formal recruitment decisions finalized or superseded.' },
 
   // outbound to people
   evidence_request: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Evidence requests to players and guardians.' },

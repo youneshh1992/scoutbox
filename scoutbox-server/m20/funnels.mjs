@@ -283,6 +283,26 @@ export const SOURCE_METRICS = { roomSourceMix, sourceStageReach };
  * completion count beside an invitation count already invites the reader to
  * divide, so the limitation sentence says why they must not.
  */
+/**
+ * M23 P5 — formal decisions finalized in the window, by outcome. Reads the
+ * outcome WORD and two timestamps; never the reason codes, the rationale, the
+ * evidence references or anything about the player. Superseded rows still
+ * count as decisions that were made; the `superseded` figure says how many.
+ */
+export function decisionOutcomes(ctx) {
+  const w = ctx.window;
+  const rows = (ctx.roomDecisions ?? []).filter((d) => d && typeof d === 'object' && d.kind === 'formal' && d.state !== 'draft' && inWindow(d.createdAt, w));
+  const by = { progress: 0, hold: 0, reject: 0 };
+  for (const d of rows) if (Object.prototype.hasOwnProperty.call(by, d.outcome)) by[d.outcome] += 1;
+  return {
+    ...wire(METRICS.decision_outcomes),
+    ...count(rows.length),
+    outcomes: Object.fromEntries(Object.entries(by).map(([k, n]) => [k, count(n)])),
+    superseded: count(rows.filter((d) => d.supersededById).length),
+    note: 'Formal decisions finalized in the window, by outcome. Counts only; no rate, no ranking, no reason.',
+  };
+}
+
 export function trialProcess(ctx) {
   const w = ctx.window;
   const invitations = (ctx.requests ?? []).filter((r) => r && r.type === 'trial' && r.caseId);
