@@ -178,6 +178,14 @@ m12, m13, m14 (L1–L7), m15 (21), m16 (10), m162 (11), m17 (25), m18 (60),
 m181 (37), m182 (37), m19 (17), m20 (59), m21 (68), m22, m23 (39),
 m23Contact (82, 33 negative). No M22 artifact churn from the browser run.
 
+**Harness hygiene (found by the first fresh-clone run):** `apiE2E`'s
+persistence check looked for the snapshot in the server directory's default
+`data/` folder instead of the `DATA_DIR` the server under test was given,
+so it passed in the working tree (where a default `data/` exists) and
+failed in a fresh clone. The check now honours `DATA_DIR`; the clone runs
+`apiE2E` first on its fresh server. No stray servers, ports or temp
+directories are left by any script (verified after each battery).
+
 **Typechecks:** scoutbox-player `tsc --noEmit` exit 0 (the only client whose
 source changed; Pro, Grassroots and Admin sources untouched).
 **Builds:** the player demo export (`expo export --platform web`) via

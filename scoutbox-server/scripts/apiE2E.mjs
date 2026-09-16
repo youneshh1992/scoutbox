@@ -431,12 +431,16 @@ r = await j('/org/friendlies', {}, bearer(HACKNEY));
 ok(r.body.find((f) => f.id === friendlyId)?.responses.some((x) => /happy to travel/.test(x.message)), 'the poster sees who is up for it');
 
 // ---- 14. storage + SQLite persistence on disk
+// The server under test honours DATA_DIR; so does this check (M23 P4A
+// closure — harness hygiene: in a fresh clone there is no default `data/`
+// directory, and the check must look where the server actually writes).
+const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(SERVER_DIR, 'data');
 let stored = false;
 for (let i = 0; i < 20 && !stored; i++) {
-  stored = fs.existsSync(path.join(SERVER_DIR, 'data', 'scoutbox.db')) || fs.existsSync(path.join(SERVER_DIR, 'data', 'db.json'));
+  stored = fs.existsSync(path.join(DATA_DIR, 'scoutbox.db')) || fs.existsSync(path.join(DATA_DIR, 'db.json'));
   if (!stored) await new Promise((res) => setTimeout(res, 500));
 }
 ok(stored, 'snapshot persisted (SQLite, or JSON fallback on old Node)');
-ok(fs.existsSync(path.join(SERVER_DIR, 'data', 'media')), 'media blobs live on object storage (disk), outside the database');
+ok(fs.existsSync(path.join(DATA_DIR, 'media')), 'media blobs live on object storage (disk), outside the database');
 
 console.log(`\n${passed} API checks passed`);
