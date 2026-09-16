@@ -140,7 +140,49 @@ The words below name distinct facts and are never used for one another.
 Storing it would create a second truth about one fact, which could then
 disagree with the first. It appears in `journey.conditions`, alongside
 `trialActive` and `offerAwaitingResponse`, which are derived for the same
-reason.
+reason. P5 adds `decisionOutstanding` (a non-terminal case with no formal
+decision) and `hasFormalDecision` beside it, derived the same way.
+
+### Formal Decision (P5)
+
+The club's internal, explicit, human act on a case: a row in
+`db.roomDecisions` with `kind: 'formal'` and an outcome of `progress`,
+`hold` or `reject`, recorded by a room lead or recruitment lead in the same
+save as the lifecycle move it asks for. It ends at `offer_consideration`.
+
+**Not** an advisory recommendation (M17's rows, which have no `kind`), not a
+draft, not a score, not an offer, and not something the player is told.
+Nothing derives it from evidence, an assessment, a trial, Box Cam or a Trust
+Score; a case with a completed trial and two assessments saying "sign" still
+has no decision until a person records one.
+
+### Advisory Recommendation
+
+An M17 decision row (`POST /org/rooms/:id/decisions`). An opinion in the
+chain, shown as *advisory* when it is at the head. It evidences nothing: an
+advisory "offer" does not satisfy `offer_consideration`.
+
+### Draft Decision
+
+`kase.decisionDraft` — one per case, with its own `rev`, edited and
+discarded under `expectedRev`. Labelled *Draft — not a formal decision*. It
+moves nothing, notifies nobody, is not in the chain and is not a milestone.
+Finalizing it writes the formal row and clears it in one save.
+
+### Supersession
+
+A later formal decision replacing the current one. The earlier row is not
+edited: it gains `supersededById` and its own `rev` moves; the later row
+carries `supersession { of, reason }` with the reason the history keeps.
+Both remain readable. There is no "edit a decision".
+
+### Outcome vs recommendation
+
+The **outcome** (`progress | hold | reject`) is what a formal decision *is*.
+The **recommendation** (`offer | continue_watching | archive`) is how M17
+spells the same row so every legacy reader — Second Look, Nobody Missed, the
+journey, M20 — keeps reading one chain. A formal row carries both; an
+advisory row carries only the second.
 
 ### Offer Made
 

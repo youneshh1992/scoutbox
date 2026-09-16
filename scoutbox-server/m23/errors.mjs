@@ -259,11 +259,12 @@ const PUBLIC_ERROR_FIELDS = [
   // requirement codes that are missing. Vocabulary, never a person.
   'field', 'offered', 'expected', 'reasons',
   // P5: a Decision refusal may name the LIFECYCLE code underneath a
-  // DECISION_LIFECYCLE_CONFLICT, echo the reference `{ kind, id }` it refused,
-  // echo the `supersedes` id the caller named, and list the reason codes it
-  // did not know or will not accept. All of it is the caller's own input or
-  // vocabulary; none of it is a person or a record.
-  'lifecycle', 'ref', 'supersedes', 'unknown', 'prohibited',
+  // DECISION_LIFECYCLE_CONFLICT, echo the reference `{ kind, id }` it refused
+  // and echo the `supersedes` id the caller named. All of it is the caller's
+  // own input or vocabulary; none of it is a person or a record. The reason
+  // code lists (`unknown`, `prohibited`) stay internal, as they were for the
+  // lifecycle route (m23E2E Y11 pins that shape).
+  'lifecycle', 'ref', 'supersedes',
 ];
 
 /**

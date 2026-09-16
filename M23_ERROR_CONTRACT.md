@@ -212,3 +212,29 @@ admits 429, and the `EXTERNAL` set (codes raised by another module) lists
 `CONTACT_VERSION_CONFLICT` beside `ROOM_VERSION_CONFLICT`. Hidden-case parity
 (`Y12`/`Y13`) is asserted again for the Contact list, one-by-id, write and
 send in `m23ContactE2E` R5–R5d.
+
+## 7. M23 P5 — the Decision codes (appended)
+
+P5 extends the same table, under the same rule (no default branch), with
+nineteen `DECISION_*` codes and no new band:
+
+| band | codes |
+|---|---|
+| 400 | `DECISION_OUTCOME_INVALID`, `DECISION_REASON_INVALID`, `DECISION_CONTENT_INVALID`, `DECISION_EVIDENCE_INVALID`, `DECISION_CASE_MISMATCH`, `DECISION_CLIENT_KEY_INVALID`, `DECISION_REV_REQUIRED` |
+| 403 | `DECISION_NOT_PERMITTED`, `DECISION_BLOCKED` (a decision to *progress* while the family's block stands; a hold or a rejection is not refused by it) |
+| 404 | `DECISION_NOT_FOUND` (a draft that does not exist; reached only after the room's own concealing lookup) |
+| 409 | `DECISION_INVALID_STATE`, `DECISION_ALREADY_FINAL`, `DECISION_VERSION_CONFLICT`, `DECISION_IDEMPOTENCY_CONFLICT`, `DECISION_LIFECYCLE_CONFLICT`, `DECISION_SUBJECT_REMOVED` |
+| 500 | `DECISION_STATE_UNKNOWN` (two formal rows both claiming to be current — corruption, not a tie), `DECISION_STORE_MISSING`, `DECISION_TRANSPORT_REFUSED` |
+
+`DECISION_LIFECYCLE_CONFLICT` is the one code that wraps another: the
+formal decision asked the ONE lifecycle validator for a move and was
+refused. Its body carries the lifecycle code under `lifecycle`, the
+`allowed` states and `current.status`, so the caller can tell "no edge from
+here" from "not your role" without a second request. `DECISION_CASE_MISMATCH`
+is deliberately the same body whether the cited record belongs to another
+case or does not exist at all. The public field list grew by `lifecycle`,
+`ref` (the refused `{ kind, id }`, the caller's own input) and `supersedes`
+(echoed); the reason-code lists a refusal computes (`unknown`, `prohibited`)
+stay internal, as they always were for the lifecycle route. Every code is producible: the drift guard (`m23E2E` Y3) failed the
+first time `DECISION_STATE_UNKNOWN` existed in the table without a producer,
+and passes now that the duplicate-head reader raises it.
