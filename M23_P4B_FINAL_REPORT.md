@@ -80,7 +80,7 @@ Companion documents: `M23_P4B_TRIAL_IMPLEMENTATION.md`,
 64. **Minor live journey** — live M2–M8: routed to Amara, child's device outcome-only, material reschedule re-asks the guardian, guardian confirms in the UI.
 65. **Negative live paths** — live N1–N15: gate at Watching, no lifecycle shortcut, contributor read-only, foreign org 404, revoked guardian, block after invitation, attendance before start, completion gate, stale/string rev, key conflict, sentinels, evidence without consent, child device, 390/360, pending invitation.
 66. **Trial test totals** — `m23TrialE2E` 535 checks (331 negative, 62 %); `m23TrialPersistence` 36 (13 negative); `m23TrialPerf` measured; `m23TrialLive` 122 checks (53 negative, 43 %); adversarial sweep 51/51.
-67. **Server regression totals** — 43 scripts, all exit 0 (see §"Server battery" below).
+67. **Server regression totals** — 42 scripts, all exit 0 (see §"Server battery" below).
 68. **Browser/live/demo totals** — 36 scripts (navConfig, demoFreshness, uiSpotcheck, demoOffline, crosstab, demoHostOrdering, 11 demo spotchecks, liveIntegration, navLive, 17 Live suites), all exit 0, demos rebuilt first (see §"Browser battery" below).
 69. **Typechecks** — `tsc --noEmit` exit 0 for scoutbox-club, scoutbox-grassroots, scoutbox-player, scoutbox-admin.
 70. **Builds** — `npm run build` (tsc -b + vite) exit 0 for club, grassroots, admin; player web export through `buildDemos`; the live suite builds club + player bundles.
