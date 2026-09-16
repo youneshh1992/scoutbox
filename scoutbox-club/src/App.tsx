@@ -27,8 +27,7 @@ import {
   saveCollapsed, saveShortcuts, screenFromHash, watchlistFromHash,
   NAV_SECTIONS, type NavContext,
 } from './nav';
-import { CommandPalette, NeedsAttention, Sidebar, SecondaryNav, useNavSections, usePaletteHotkey } from './navui';
-import { Icon } from './icons';
+import { CommandPalette, NeedsAttention, OrgChips, Sidebar, SecondaryNav, TopBar, useNavSections, usePaletteHotkey } from './navui';
 import { fmtStamp, getLang, setLang, t } from './i18n';
 import { confirmLeave, guardHashChange, installDirtyGuard, noteNavigated } from './dirtyGuard';
 
@@ -460,10 +459,12 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
         onOpenPalette={() => setPaletteOpen(true)}
         drawerOpen={drawerOpen}
         onCloseDrawer={() => setDrawerOpen(false)}
+        brand={{ short: 'P', long: 'Pro' }}
         footer={
           <div className="whoami">
             <b>{session.scoutName}</b>
             {session.role} · {session.org.name} · {session.org.plan}
+            <OrgChips org={session.org} />
             <div style={{ marginTop: 6 }}>
               <button onClick={() => setScreen('verification')} style={{ padding: 0, color: 'var(--muted)', fontSize: 12 }}>{t('navsec.myVerification')}</button>
             </div>
@@ -483,32 +484,16 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
         }
       />
       <div className="main">
-        <div className="topbar">
-          <button className="nav-hamburger" aria-label={t('navsec.openMenu')} onClick={() => setDrawerOpen(true)}><Icon name="menu" /></button>
-          <h2>
-            {breadcrumbSection && breadcrumbSection.children.length > 1 && (
-              <><span className="crumb">{t(breadcrumbSection.labelKey as Parameters<typeof t>[0])}</span><span className="crumb-sep"> / </span></>
-            )}
-            {screenLabel}
-          </h2>
-          {session.org.trustedPartner && <span className="pill gold">Trusted Partner</span>}
-          {session.org.safeguardingCertified && <span className="pill green">🛡 Safeguarding Certified</span>}
-          {session.org.type === 'club' && (session.org.verified
-            ? <span className="pill outline-green">Verified club</span>
-            : <span className="pill">verification pending — U18 hidden</span>)}
-          <span className={`pill ${session.org.type === 'agency' ? 'red' : 'blue'}`}>{session.org.type}</span>
-          {live ? <span className="pill outline-green">● live sync</span> : <span className="pill red">○ reconnecting — updates resume automatically</span>}
-          <button
-            onClick={openBell}
-            title="Notifications"
-            aria-label={`Notifications${unread > 0 ? ` — ${unread} unread` : ''}`}
-            aria-expanded={bellOpen}
-            style={{ position: 'relative' }}
-          >
-            🔔{unread > 0 && <span className="bell-badge" aria-hidden="true">{unread}</span>}
-          </button>
-          <button onClick={() => setSafetyOpen(true)} title="One-click reporting — available on every screen" aria-label="Report or block — available on every screen">⚑ Report / Block</button>
-        </div>
+        <TopBar
+          title={screenLabel}
+          crumb={breadcrumbSection && breadcrumbSection.children.length > 1 ? t(breadcrumbSection.labelKey as Parameters<typeof t>[0]) : null}
+          live={live}
+          unread={unread}
+          bellOpen={bellOpen}
+          onToggleBell={openBell}
+          onReport={() => setSafetyOpen(true)}
+          onOpenDrawer={() => setDrawerOpen(true)}
+        />
         {bellOpen && (
           <div className="bell-panel">
             {notifications.length === 0 && <div className="notice">Nothing yet — you'll hear the moment a player or guardian responds.</div>}

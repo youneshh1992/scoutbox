@@ -1,19 +1,37 @@
-// M15-Nav — navigation UI. All structure comes from nav.ts; nothing here
-// keeps its own list of destinations. Visibility filtering is convenience —
-// the server stays authoritative for every route.
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+// M15-Nav / P2.5 — navigation UI. All structure comes from nav.ts; nothing
+// here keeps its own list of destinations. Visibility filtering is
+// convenience — the server stays authoritative for every route.
+//
+// P2.5 changed the shape, not the rules:
+//   • the sidebar is an ACCORDION — the active section is expanded and lists
+//     its children, arranged by group; other sections toggle with a chevron
+//     for the session (nothing persisted: there is nothing worth remembering);
+//   • the collapsed 64px rail opens a keyboard-operable FLYOUT per section;
+//   • the page tab strip is gone from the desktop — it was a second navigation
+//     bar carrying destinations. At phone width, where the sidebar is a
+//     drawer, `SecondaryNav` lists only the active GROUP's siblings (≤ 6);
+//   • the top bar is one row: the page `<h1>`, a live-state dot, the bell and
+//     Report / Block. Organisation badges moved to the account block, where
+//     the organisation is named.
+// This file is byte-identical in Pro and Grassroots; the brand is a prop.
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { ScreenId } from './App';
 import {
-  INBOX_ITEM, MAX_SHORTCUTS, type NavContext, type NavLocation, type NavSection,
-  allItems, filterSections, searchNav,
+  INBOX_ITEM, MAX_SHORTCUTS, type NavContext, type NavItem, type NavLocation, type NavSection,
+  allItems, filterSections, groupSiblings, groupedChildren, searchNav,
 } from './nav';
 import { Icon } from './icons';
 import { t } from './i18n';
 
+type TKey = Parameters<typeof t>[0];
+const tr = (key: string) => t(key as TKey);
+
+export interface Brand { short: string; long: string }
+
 // ------------------------------------------------------------------ Sidebar
 export function Sidebar({
   sections, location, onNavigate, collapsed, onToggleCollapsed, shortcuts,
-  onTogglePin, unreadMessages, badges = {}, onOpenPalette, drawerOpen, onCloseDrawer, footer,
+  onTogglePin, unreadMessages, badges = {}, onOpenPalette, drawerOpen, onCloseDrawer, footer, brand,
 }: {
   sections: NavSection[];
   location: NavLocation;
@@ -28,49 +46,68 @@ export function Sidebar({
   drawerOpen: boolean;
   onCloseDrawer: () => void;
   footer: ReactNode;
+  brand: Brand;
 }) {
   const labelFor = (id: ScreenId) => {
     const hit = allItems().find(({ item }) => item.id === id);
-    return hit ? t(hit.item.labelKey as Parameters<typeof t>[0]) : id;
+    return hit ? tr(hit.item.labelKey) : id;
   };
   const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform ?? '');
+
+  // Accordion state. The active section is ALWAYS open; others can be opened
+  // for the session with their chevron. Deterministic and unpersisted.
+  const [open, setOpen] = useState<Set<string>>(() => new Set(location.sectionId ? [location.sectionId] : []));
+  useEffect(() => {
+    if (location.sectionId) setOpen((prev) => (prev.has(location.sectionId!) ? prev : new Set(prev).add(location.sectionId!)));
+  }, [location.sectionId]);
+  const toggle = (id: string) => setOpen((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+
+  // Collapsed-rail flyout: at most one open. Closed by Escape, by clicking
+  // elsewhere, by leaving it with the pointer, and by navigating.
+  const [flyout, setFlyout] = useState<string | null>(null);
+  const navRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!flyout) return;
+    const onDown = (e: MouseEvent) => { if (navRef.current && !navRef.current.contains(e.target as Node)) setFlyout(null); };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [flyout]);
+  useEffect(() => { if (!collapsed) setFlyout(null); }, [collapsed]);
+
+  const go = useCallback((id: ScreenId) => { onNavigate(id); onCloseDrawer(); setFlyout(null); }, [onNavigate, onCloseDrawer]);
+
   return (
     <>
       {drawerOpen && <div className="drawer-veil nav-drawer-veil" onClick={onCloseDrawer} />}
-      <nav className={`sidebar ${collapsed ? 'collapsed' : ''} ${drawerOpen ? 'drawer-open' : ''}`} aria-label="Main navigation">
-        <div className="brand">{collapsed ? <span>S<span className="brand-sub">P</span></span> : <>Scout<span>Box</span> <span className="brand-sub">Pro</span></>}</div>
+      <nav ref={navRef} className={`sidebar ${collapsed ? 'collapsed' : ''} ${drawerOpen ? 'drawer-open' : ''}`} aria-label="Main navigation">
+        <div className="brand">{collapsed ? <span>S<span className="brand-sub">{brand.short}</span></span> : <>Scout<span>Box</span> <span className="brand-sub">{brand.long}</span></>}</div>
 
         <button className="nav-search" onClick={onOpenPalette} aria-label={t('navsec.searchAria')} title={t('navsec.searchAria')}>
           <Icon name="search" />
           {!collapsed && <><span className="grow">{t('navsec.search')}</span><kbd>{isMac ? '⌘K' : 'Ctrl+K'}</kbd></>}
         </button>
 
-        {sections.map((s) => {
-          const active = location.sectionId === s.id;
-          const label = t(s.labelKey as Parameters<typeof t>[0]);
-          const count = badges[s.id];
-          return (
-            <button
-              key={s.id}
-              className={`nav-section ${active ? 'active' : ''}`}
-              aria-current={active ? 'page' : undefined}
-              aria-label={label}
-              title={collapsed ? label : undefined}
-              onClick={() => { onNavigate(s.children[0].id); onCloseDrawer(); }}
-            >
-              <Icon name={s.icon} />
-              {!collapsed && <span className="grow">{label}</span>}
-              {!!count && count > 0 && <span className="nav-badge" aria-label={`${count}`}>{count}</span>}
-              {active && <span className="nav-active-bar" aria-hidden="true" />}
-            </button>
-          );
-        })}
+        {sections.map((s) => (
+          <SectionRow
+            key={s.id}
+            section={s}
+            active={location.sectionId === s.id}
+            activeItemId={location.itemId}
+            expanded={open.has(s.id)}
+            onToggle={() => toggle(s.id)}
+            collapsed={collapsed}
+            flyoutOpen={flyout === s.id}
+            onFlyout={(want) => setFlyout(want ? s.id : null)}
+            count={badges[s.id]}
+            onNavigate={go}
+          />
+        ))}
 
         {shortcuts.length > 0 && !collapsed && (
           <div className="nav-shortcuts">
             <div className="nav-group-label">{t('navsec.shortcuts')}</div>
             {shortcuts.map((id) => (
-              <button key={id} className={`nav-shortcut ${location.itemId === id ? 'active' : ''}`} onClick={() => { onNavigate(id); onCloseDrawer(); }}>
+              <button key={id} className={`nav-shortcut ${location.itemId === id ? 'active' : ''}`} onClick={() => go(id)}>
                 <Icon name="pin" size={12} />
                 <span className="grow">{labelFor(id)}</span>
                 <span
@@ -89,11 +126,12 @@ export function Sidebar({
           aria-current={location.itemId === 'messages' ? 'page' : undefined}
           aria-label={t('nav.messages')}
           title={collapsed ? t('nav.messages') : undefined}
-          onClick={() => { onNavigate('messages'); onCloseDrawer(); }}
+          onClick={() => go('messages')}
         >
           <Icon name="inbox" />
           {!collapsed && <span className="grow">{t('nav.messages')}</span>}
           {unreadMessages > 0 && <span className="nav-badge">{unreadMessages}</span>}
+          {location.itemId === 'messages' && <span className="nav-active-bar" aria-hidden="true" />}
         </button>
 
         <div className="spacer" />
@@ -107,38 +145,200 @@ export function Sidebar({
   );
 }
 
-// ------------------------------------------------------------ SecondaryNav
-// One reusable page-level tab row for the active section. Keyboard: roving
-// arrows; narrow widths scroll horizontally (no unreachable tabs).
+/** One section: its button, its chevron, and — when expanded or flown out —
+ *  its grouped children. */
+function SectionRow({ section: s, active, activeItemId, expanded, onToggle, collapsed, flyoutOpen, onFlyout, count, onNavigate }: {
+  section: NavSection; active: boolean; activeItemId: ScreenId | null; expanded: boolean; onToggle: () => void;
+  collapsed: boolean; flyoutOpen: boolean; onFlyout: (open: boolean) => void; count?: number; onNavigate: (id: ScreenId) => void;
+}) {
+  const label = tr(s.labelKey);
+  const multi = s.children.length > 1;
+  const groups = groupedChildren(s);
+  const panelId = `navsec-${s.id}`;
+  const flyRef = useRef<HTMLDivElement>(null);
+  const iconRef = useRef<HTMLButtonElement>(null);
+
+  // Keyboard inside a flyout: arrows move, Escape closes and returns focus.
+  const onFlyKey = (e: KeyboardEvent) => {
+    const items = Array.from(flyRef.current?.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]') ?? []);
+    const i = items.findIndex((b) => b === document.activeElement);
+    if (e.key === 'Escape') { e.preventDefault(); onFlyout(false); iconRef.current?.focus(); return; }
+    if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length]?.focus(); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length]?.focus(); }
+  };
+  useEffect(() => {
+    if (flyoutOpen) flyRef.current?.querySelector<HTMLButtonElement>('button[role="menuitem"]')?.focus();
+  }, [flyoutOpen]);
+
+  const children = (role: 'menuitem' | undefined) => groups.map((g) => (
+    <div key={g.id ?? 'all'} className="nav-group">
+      {g.labelKey && <div className="nav-group-label">{tr(g.labelKey)}</div>}
+      {g.children.map((c) => (
+        <button
+          key={c.id}
+          role={role}
+          className={`nav-child ${activeItemId === c.id ? 'active' : ''}`}
+          aria-current={activeItemId === c.id ? 'page' : undefined}
+          onClick={() => onNavigate(c.id)}
+        >
+          {tr(c.labelKey)}
+        </button>
+      ))}
+    </div>
+  ));
+
+  if (collapsed) {
+    // Rail: a single-child section navigates; a multi-child one opens a menu.
+    return (
+      <div className="nav-sec" onMouseLeave={() => flyoutOpen && onFlyout(false)}>
+        <button
+          ref={iconRef}
+          className={`nav-section ${active ? 'active' : ''}`}
+          aria-current={active ? 'page' : undefined}
+          aria-label={label}
+          title={label}
+          aria-haspopup={multi ? 'menu' : undefined}
+          aria-expanded={multi ? flyoutOpen : undefined}
+          onClick={() => (multi ? onFlyout(!flyoutOpen) : onNavigate(s.children[0].id))}
+          onKeyDown={(e) => { if (multi && e.key === 'ArrowRight') { e.preventDefault(); onFlyout(true); } }}
+        >
+          <Icon name={s.icon} />
+          {!!count && count > 0 && <span className="nav-badge" aria-label={`${count}`}>{count}</span>}
+          {active && <span className="nav-active-bar" aria-hidden="true" />}
+        </button>
+        {multi && flyoutOpen && (
+          <div ref={flyRef} className="nav-flyout" role="menu" aria-label={label} onKeyDown={onFlyKey}>
+            <div className="nav-flyout-title" aria-hidden="true">{label}</div>
+            {children('menuitem')}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className={`nav-sec ${expanded && multi ? 'open' : ''}`}>
+      <div className="nav-sec-row">
+        <button
+          className={`nav-section ${active ? 'active' : ''}`}
+          aria-current={active ? 'page' : undefined}
+          aria-label={label}
+          onClick={() => onNavigate(s.children[0].id)}
+        >
+          <Icon name={s.icon} />
+          <span className="grow">{label}</span>
+          {!!count && count > 0 && <span className="nav-badge" aria-label={`${count}`}>{count}</span>}
+          {active && <span className="nav-active-bar" aria-hidden="true" />}
+        </button>
+        {multi && (
+          <button
+            className="nav-toggle"
+            aria-expanded={expanded}
+            aria-controls={panelId}
+            aria-label={`${t('navsec.toggle')} ${label}`}
+            title={`${t('navsec.toggle')} ${label}`}
+            onClick={onToggle}
+          >
+            <Icon name="chevron" size={12} />
+          </button>
+        )}
+      </div>
+      {multi && expanded && (
+        <div id={panelId} className="nav-children" aria-label={`${t('navsec.pagesIn')} ${label}`}>
+          {children(undefined)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------- SecondaryNav
+// P2.5: phone width only (CSS hides it above 900px, where the sidebar lists
+// the same pages). It shows the active GROUP's siblings — never the whole
+// section — so it fits in one row. Keyboard: roving arrows.
 export function SecondaryNav({ section, activeItemId, onNavigate }: {
   section: NavSection;
   activeItemId: ScreenId | null;
   onNavigate: (id: ScreenId) => void;
 }) {
   const ref = useRef<HTMLElement>(null);
-  if (section.children.length <= 1) return null;
+  const items: NavItem[] = groupSiblings(section, activeItemId);
+  if (items.length <= 1) return null;
   const onKey = (e: KeyboardEvent) => {
     if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
     const btns = Array.from(ref.current?.querySelectorAll<HTMLButtonElement>('button') ?? []);
     const i = btns.findIndex((b) => b === document.activeElement);
     if (i === -1) return;
     e.preventDefault();
-    const next = btns[(i + (e.key === 'ArrowRight' ? 1 : btns.length - 1)) % btns.length];
-    next?.focus();
+    btns[(i + (e.key === 'ArrowRight' ? 1 : btns.length - 1)) % btns.length]?.focus();
   };
   return (
-    <nav className="subnav" aria-label={t(section.labelKey as Parameters<typeof t>[0])} ref={ref} onKeyDown={onKey}>
-      {section.children.map((c) => (
+    <nav className="subnav" aria-label={t('navsec.inThisArea')} ref={ref} onKeyDown={onKey}>
+      {items.map((c) => (
         <button
           key={c.id}
           className={activeItemId === c.id ? 'active' : ''}
           aria-current={activeItemId === c.id ? 'page' : undefined}
           onClick={() => onNavigate(c.id)}
         >
-          {t(c.labelKey as Parameters<typeof t>[0])}
+          {tr(c.labelKey)}
         </button>
       ))}
     </nav>
+  );
+}
+
+// ------------------------------------------------------------------ TopBar
+/**
+ * One row. The page title is the page's `<h1>` (§47); the crumb inside it is
+ * the owning section, muted. Live state is a dot while healthy and a red
+ * pill while reconnecting — the one state a user must act on. Report / Block
+ * is never hidden (§33): under 640px it shrinks to its glyph with the same
+ * accessible name.
+ */
+export function TopBar({ title, crumb, live, unread, bellOpen, onToggleBell, onReport, onOpenDrawer }: {
+  title: string; crumb?: string | null; live: boolean; unread: number; bellOpen: boolean;
+  onToggleBell: () => void; onReport: () => void; onOpenDrawer: () => void;
+}) {
+  return (
+    <header className="topbar">
+      <button className="nav-hamburger" aria-label={t('navsec.openMenu')} onClick={onOpenDrawer}><Icon name="menu" /></button>
+      <h1 className="page-title">
+        {crumb && <><span className="crumb">{crumb}</span><span className="crumb-sep"> / </span></>}
+        {title}
+      </h1>
+      {live
+        ? <span className="live-dot on" role="status" aria-label={t('navsec.liveOk')} title={t('navsec.liveOk')} />
+        : <span className="pill red" role="status">○ {t('navsec.liveOff')}</span>}
+      <button
+        className="topbar-bell"
+        onClick={onToggleBell}
+        title="Notifications"
+        aria-label={`Notifications${unread > 0 ? ` — ${unread} unread` : ''}`}
+        aria-expanded={bellOpen}
+      >
+        🔔{unread > 0 && <span className="bell-badge" aria-hidden="true">{unread}</span>}
+      </button>
+      <button className="topbar-safety" onClick={onReport} title={t('navsec.reportAria')} aria-label={t('navsec.reportAria')}>
+        <span aria-hidden="true">⚑</span> <span className="safety-long">{t('navsec.report')}</span>
+      </button>
+    </header>
+  );
+}
+
+/** The organisation's standing badges — moved out of the top bar, where they
+ *  repeated on every page, to the account block, where the organisation is
+ *  named. Same pills, same wording. */
+export function OrgChips({ org }: { org: { type: string; trustedPartner?: boolean; safeguardingCertified?: boolean; verified?: boolean } }) {
+  return (
+    <div className="org-chips" aria-label={t('navsec.orgStatus')}>
+      {org.trustedPartner && <span className="pill gold">Trusted Partner</span>}
+      {org.safeguardingCertified && <span className="pill green">🛡 Safeguarding Certified</span>}
+      {org.type === 'club' && (org.verified
+        ? <span className="pill outline-green">Verified club</span>
+        : <span className="pill">verification pending — U18 hidden</span>)}
+      <span className={`pill ${org.type === 'agency' ? 'red' : 'blue'}`}>{org.type}</span>
+    </div>
   );
 }
 
@@ -156,7 +356,7 @@ export function CommandPalette({ ctx, open, onClose, onNavigate, shortcuts, onTo
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => { if (open) { setQ(''); setSel(0); setTimeout(() => inputRef.current?.focus(), 0); } }, [open]);
   if (!open) return null;
-  const results = searchNav(q, ctx, (k) => t(k as Parameters<typeof t>[0]));
+  const results = searchNav(q, ctx, tr);
   const go = (itemId: ScreenId) => { onNavigate(itemId); onClose(); };
   const onKey = (e: KeyboardEvent) => {
     if (e.key === 'Escape') { e.preventDefault(); onClose(); }
@@ -194,6 +394,7 @@ export function CommandPalette({ ctx, open, onClose, onNavigate, shortcuts, onTo
               >
                 <span className="palette-path">
                   {r.sectionLabel && <><span className="dim">{r.sectionLabel}</span><span className="dim"> › </span></>}
+                  {r.groupLabel && <><span className="dim">{r.groupLabel}</span><span className="dim"> › </span></>}
                   <b>{r.label}</b>
                 </span>
                 {(pinned || canPin) && (

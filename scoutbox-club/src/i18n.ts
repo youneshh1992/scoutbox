@@ -96,8 +96,15 @@ const en = {
   // ---- M14 Verification & Trust
   'nav.verification': 'Verification',
   // M15-Nav: sections, secondary labels, palette, shortcuts (EN)
-  'navsec.home': 'Home', 'navsec.discover': 'Discover', 'navsec.recruitment': 'Recruitment',
+  'navsec.home': 'Home', 'navsec.recruitment': 'Recruitment',
   'navsec.planning': 'Squad & Planning', 'navsec.network': 'Network', 'navsec.organisation': 'Organisation',
+  // P2.5: the groups inside Recruitment, and the shell's own labels.
+  'navgrp.discover': 'Discover', 'navgrp.pipeline': 'Pipeline', 'navgrp.evidence': 'Evidence',
+  'navgrp.intelligence': 'Intelligence', 'navgrp.analytics': 'Analytics', 'navgrp.planning': 'Planning',
+  'navsec.toggle': 'Show or hide the pages in', 'navsec.pagesIn': 'Pages in', 'navsec.inThisArea': 'In this area',
+  'navsec.liveOk': 'Live sync connected', 'navsec.liveOff': 'Reconnecting \u2014 updates resume automatically',
+  'navsec.report': 'Report / Block', 'navsec.reportAria': 'Report or block \u2014 available on every screen',
+  'navsec.orgStatus': 'Organisation status',
   'navsec.search': 'Search ScoutBox', 'navsec.searchAria': 'Search ScoutBox (Ctrl+K / \u2318K)',
   'navsec.searchPlaceholder': 'Jump to\u2026 (e.g. verification, trials, coverage)',
   'navsec.searchResults': 'Destinations', 'navsec.searchEmpty': 'No destination matches \u2014 check the spelling, or you may not have access.',
@@ -1172,8 +1179,15 @@ const fr: typeof en = {
   // ---- M14 Vérification et confiance
   'nav.verification': 'V\u00e9rification',
   // M15-Nav (FR)
-  'navsec.home': 'Accueil', 'navsec.discover': 'D\u00e9couvrir', 'navsec.recruitment': 'Recrutement',
+  'navsec.home': 'Accueil', 'navsec.recruitment': 'Recrutement',
   'navsec.planning': 'Effectif et planification', 'navsec.network': 'R\u00e9seau', 'navsec.organisation': 'Organisation',
+  // P2.5 (FR)
+  'navgrp.discover': 'D\u00e9couvrir', 'navgrp.pipeline': 'Pipeline', 'navgrp.evidence': 'Preuves',
+  'navgrp.intelligence': 'Analyse', 'navgrp.analytics': 'Statistiques', 'navgrp.planning': 'Planification',
+  'navsec.toggle': 'Afficher ou masquer les pages de', 'navsec.pagesIn': 'Pages de', 'navsec.inThisArea': 'Dans cette zone',
+  'navsec.liveOk': 'Synchronisation en direct active', 'navsec.liveOff': 'Reconnexion \u2014 les mises \u00e0 jour reprennent automatiquement',
+  'navsec.report': 'Signaler / Bloquer', 'navsec.reportAria': 'Signaler ou bloquer \u2014 disponible sur chaque \u00e9cran',
+  'navsec.orgStatus': 'Statut de l\u2019organisation',
   'navsec.search': 'Rechercher ScoutBox', 'navsec.searchAria': 'Rechercher dans ScoutBox (Ctrl+K / \u2318K)',
   'navsec.searchPlaceholder': 'Aller \u00e0\u2026 (ex. v\u00e9rification, essais, couverture)',
   'navsec.searchResults': 'Destinations', 'navsec.searchEmpty': 'Aucune destination \u2014 v\u00e9rifiez l\u2019orthographe, ou vous n\u2019y avez peut-\u00eatre pas acc\u00e8s.',

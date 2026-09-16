@@ -11,6 +11,16 @@
   --gold: #f2c14e;
   --danger: #ff6b6b;
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  /* P2.5 chrome tokens — the sidebar, top bar and content padding read these;
+     no chrome rule below carries its own magic number. */
+  --sidebar-w: 218px;
+  --sidebar-w-collapsed: 64px;
+  --chrome-x: 22px;
+  --chrome-y: 10px;
+  --title-size: 17px;
+  --nav-item-py: 8px;
+  --nav-child-py: 6px;
+  --content-pad: 22px;
 }
 
 * { box-sizing: border-box; margin: 0; }
@@ -74,25 +84,25 @@ input:focus, select:focus { outline: none; border-color: var(--accent-2); }
 .login input { width: 280px; }
 
 /* ---------- shell ---------- */
-.shell { display: grid; grid-template-columns: 218px 1fr; height: 100vh; }
+.shell { display: grid; grid-template-columns: var(--sidebar-w) 1fr; height: 100vh; }
 .sidebar {
   background: var(--bg-2);
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  padding: 18px 12px;
-  gap: 4px;
+  padding: 14px 10px;
+  gap: 2px;
   /* The nav outgrew one viewport; without this, items past the fold are unreachable. */
   min-height: 0;
   overflow-y: auto;
 }
-.sidebar .brand { font-size: 20px; font-weight: 800; padding: 4px 10px 18px; }
+.sidebar .brand { font-size: 18px; font-weight: 800; padding: 2px 10px 12px; }
 .sidebar .brand span { color: var(--accent); }
 .sidebar button {
   background: none;
   border: none;
   text-align: left;
-  padding: 10px 12px;
+  padding: var(--nav-item-py) 12px;
   color: var(--muted);
   border-radius: 8px;
 }
@@ -100,18 +110,27 @@ input:focus, select:focus { outline: none; border-color: var(--accent-2); }
 .sidebar .spacer { flex: 1; }
 .sidebar .whoami { padding: 10px 12px; font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--line); }
 .sidebar .whoami b { color: var(--text); display: block; }
+.org-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.org-chips .pill { font-size: 10.5px; padding: 1px 7px; }
 
 .main { display: flex; flex-direction: column; overflow: hidden; }
+/* P2.5 — one row: title, live state, bell, Report / Block. */
 .topbar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px 22px;
+  gap: 10px;
+  min-height: 48px;
+  padding: var(--chrome-y) var(--chrome-x);
   border-bottom: 1px solid var(--line);
   background: var(--bg-2);
 }
-.topbar h2 { font-size: 18px; flex: 1; }
-.content { flex: 1; overflow-y: auto; padding: 22px; }
+.topbar h1.page-title { font-size: var(--title-size); font-weight: 700; flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar .topbar-bell { position: relative; }
+.live-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; background: var(--accent); box-shadow: 0 0 0 3px rgba(53, 208, 127, 0.18); }
+.topbar .safety-long { display: inline; }
+.content { flex: 1; overflow-y: auto; padding: var(--content-pad); }
+/* P2.5 — a page hint: one muted line where a boxed paragraph used to be. */
+.pagehint { color: var(--muted); font-size: 12.5px; line-height: 1.45; margin: 0 0 12px; }
 
 /* M19 — text that exists only for assistive technology. A criterion's outcome
    is carried visually by a ✓ / ○ glyph; this is the same fact in words, so a
@@ -372,13 +391,29 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
 
-/* ---------- M15-Nav: compact sections, subnav, palette, drawer ---------- */
-.shell.nav-collapsed { grid-template-columns: 64px 1fr; }
-.sidebar.collapsed { padding: 18px 8px; }
-.sidebar.collapsed .brand { font-size: 15px; padding: 4px 6px 14px; }
+/* ---------- M15-Nav / P2.5: sections, accordion, flyout, palette, drawer ---------- */
+.shell.nav-collapsed { grid-template-columns: var(--sidebar-w-collapsed) 1fr; }
+.sidebar.collapsed { padding: 14px 8px; }
+.sidebar.collapsed .brand { font-size: 15px; padding: 2px 6px 12px; }
 .sidebar button.nav-section, .sidebar button.nav-search, .sidebar button.nav-collapse { display: flex; align-items: center; gap: 10px; width: 100%; position: relative; }
-.sidebar.collapsed button.nav-section, .sidebar.collapsed button.nav-search, .sidebar.collapsed button.nav-collapse { justify-content: center; padding: 10px 6px; }
+.sidebar.collapsed button.nav-section, .sidebar.collapsed button.nav-search, .sidebar.collapsed button.nav-collapse { justify-content: center; padding: 9px 6px; }
 .nav-section .grow, .nav-search .grow, .nav-shortcut .grow { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* accordion */
+.nav-sec { position: relative; }
+.nav-sec-row { display: flex; align-items: center; gap: 2px; }
+.nav-sec-row .nav-section { flex: 1; min-width: 0; }
+.nav-toggle { flex: 0 0 26px; width: 26px; height: 26px; padding: 0; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); border-radius: 6px; }
+.nav-toggle svg { transition: transform 0.12s ease; }
+.nav-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+.nav-children { display: flex; flex-direction: column; gap: 1px; padding: 1px 0 6px; }
+.nav-children .nav-group-label { padding: 7px 12px 2px 34px; }
+.sidebar .nav-child { display: block; width: 100%; padding: var(--nav-child-py) 10px var(--nav-child-py) 34px; font-size: 13px; color: var(--muted); border-radius: 6px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar .nav-child.active { color: var(--text); font-weight: 600; background: var(--panel-2); }
+/* collapsed-rail flyout */
+.nav-flyout { position: absolute; left: calc(100% + 6px); top: 0; min-width: 224px; max-height: 70vh; overflow-y: auto; background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 6px; z-index: 85; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45); }
+.nav-flyout-title { font-size: 12.5px; font-weight: 700; color: var(--text); padding: 6px 10px 4px; }
+.nav-flyout .nav-group-label { padding: 7px 10px 2px; }
+.nav-flyout .nav-child { padding-left: 10px; }
 .sidebar .nav-search { border: 1px solid var(--line); background: var(--bg); color: var(--muted); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; font-size: 13px; }
 .sidebar .nav-search kbd, .palette kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; color: var(--muted); background: var(--bg-2); }
 .nav-section { font-size: 14px; }
@@ -395,8 +430,11 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .crumb { color: var(--muted); font-weight: 500; }
 .crumb-sep { color: var(--muted); }
 
-.subnav { display: flex; gap: 4px; padding: 8px 22px 0; border-bottom: 1px solid var(--line); background: var(--bg-2); overflow-x: auto; flex-shrink: 0; }
-.subnav button { background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 12px 10px; color: var(--muted); white-space: nowrap; font-size: 13.5px; }
+/* P2.5 — the page tab strip exists only where the sidebar does not: at phone
+   width, listing the active GROUP's siblings. On the desktop the sidebar's
+   accordion is that list, so the strip is not rendered as chrome. */
+.subnav { display: none; gap: 2px; padding: 4px 10px 0; border-bottom: 1px solid var(--line); background: var(--bg-2); overflow-x: auto; flex-shrink: 0; }
+.subnav button { background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 6px 10px 8px; color: var(--muted); white-space: nowrap; font-size: 13px; }
 .subnav button.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
 
 .palette-veil { position: fixed; inset: 0; background: rgba(3, 8, 18, 0.62); z-index: 90; display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh; }
@@ -419,6 +457,7 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
   .sidebar.drawer-open { transform: translateX(0); }
   .nav-drawer-veil { z-index: 70; }
   .nav-hamburger { display: inline-flex; }
+  .subnav { display: flex; }
 }
 
 /* M18.1 — phone width.
@@ -430,8 +469,11 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
    inputs were wider than the content column. Nothing here changes the desktop
    layout — every rule is inside the query. */
 @media (max-width: 640px) {
-  .topbar { flex-wrap: wrap; row-gap: 8px; padding: 10px 14px; }
-  .topbar h2 { flex: 1 1 100%; font-size: 16px; }
+  /* P2.5: the bar no longer wraps — it is one row with a truncating title,
+     and Report / Block keeps its accessible name behind its glyph. */
+  .topbar { padding: 8px 12px; gap: 8px; min-height: 46px; }
+  .topbar h1.page-title { font-size: 15px; }
+  .topbar .safety-long { display: none; }
   .content { padding: 14px; }
   .bell-panel { left: 8px; right: 8px; width: auto; max-height: 60vh; }
   .drawer { width: 100vw; }

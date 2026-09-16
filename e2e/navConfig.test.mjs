@@ -4,7 +4,7 @@
 // deterministic, role filtering hides what it should (client convenience),
 // the palette never reveals restricted destinations, aliases resolve, hash
 // deep-link parsing is strict, and shortcut persistence degrades gracefully.
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -50,18 +50,30 @@ const GRASS_IDS = ['feed', 'filmroom', 'search', 'shortlist', 'requests', 'messa
   'dashboard'];
 
 const LABELS = {
-  'navsec.home': 'Home', 'navsec.discover': 'Discover', 'navsec.recruitment': 'Recruitment',
-  'navsec.planning': 'Squad & Planning', 'navsec.team': 'Team', 'navsec.network': 'Network',
-  'navsec.organisation': 'Organisation', 'nav.verification': 'Verification', 'nav.trials': 'Trials & Reports',
+  'navsec.home': 'Home', 'navsec.recruitment': 'Recruitment',
+  'navsec.planning': 'Squad & Planning', 'navsec.players': 'Players', 'navsec.network': 'Network',
+  'navsec.organisation': 'Organisation', 'navsec.club': 'Club', 'nav.verification': 'Verification', 'nav.trials': 'Trials & Reports',
   'nav.coverage': 'Coverage', 'nav.assessments': 'Assessments', 'nav.messages': 'Inbox',
 };
-const tr = (k) => LABELS[k] ?? k.replace(/^nav2?\./, '').replace(/^navsec\./, '');
+const tr = (k) => LABELS[k] ?? k.replace(/^nav2?\./, '').replace(/^navsec\./, '').replace(/^navgrp\./, '');
 
 const SCOUT = { role: 'First-Team Scout', verLevel: null };
 const LEAD = { role: 'Head of Recruitment', verLevel: null };
 const REVIEWER = { role: 'Analyst', verLevel: 'verification_reviewer' };
 
-for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 6], ['scoutbox-grassroots', GRASS_IDS, 6]]) {
+// P2.5: every label key the configuration names must exist in BOTH
+// dictionaries of its app — a raw key in the sidebar is a defect, and the
+// French half is where one would hide.
+function dictionaries(app) {
+  const src = readFileSync(path.join(ROOT, app, 'src', 'i18n.ts'), 'utf8');
+  const frAt = src.indexOf('\nconst fr');
+  const keys = (s) => new Set([...s.matchAll(/'((?:nav|navsec|nav2|navgrp)\.[A-Za-z0-9_]+)':/g)].map((m) => m[1]));
+  return { en: keys(src.slice(0, frAt)), fr: keys(src.slice(frAt)) };
+}
+
+// P2.5: five sections in Pro, four in Grassroots. Discover folded into
+// Recruitment; Grassroots' Network folded into Club and Team became Players.
+for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scoutbox-grassroots', GRASS_IDS, 4]]) {
   const nav = await loadNav(app);
   section(`${app} — configuration integrity`);
   ok(nav.NAV_SECTIONS.length === expectSections, `exactly ${expectSections} primary sections`);
@@ -71,6 +83,48 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 6], ['scout
   const missing = IDS.filter((id) => !mapped.includes(id));
   const extra = mapped.filter((id) => !IDS.includes(id));
   ok(missing.length === 0 && extra.length === 0, `all ${IDS.length} legacy destinations mapped exactly once (missing: ${missing.join(',') || '—'}; extra: ${extra.join(',') || '—'})`);
+
+  section(`${app} — P2.5 groups: presentation overlay, structurally sound`);
+  const problems = nav.validateNavConfig();
+  for (const p of problems) console.error(`   ${p}`);
+  ok(problems.length === 0, 'every child of a grouped section is in exactly one group, and every group item is a real child');
+  const rec = nav.NAV_SECTIONS.find((s) => s.id === 'recruitment');
+  ok(!!rec?.groups && rec.groups.length >= 5, `Recruitment is grouped (${rec?.groups?.length ?? 0} groups)`);
+  const views = nav.groupedChildren(rec);
+  ok(views.every((g) => g.children.length <= 7), `no group has more than 7 pages (max ${Math.max(...views.map((g) => g.children.length))})`);
+  ok(views.reduce((n, g) => n + g.children.length, 0) === rec.children.length, 'the grouped view shows every child exactly once');
+  const disc = views[0];
+  ok(disc.id === 'discover' && disc.children[0].id === 'search', 'Recruitment opens on Discover → Players, so the most-used page is still first');
+  // A filtered section keeps its groups, and a group emptied by filtering vanishes.
+  const filteredRec = nav.filterSections(SCOUT).find((s) => s.id === 'recruitment');
+  ok(nav.groupedChildren(filteredRec).length === views.length, 'groups survive role filtering');
+  const fakeSection = { ...rec, children: rec.children.filter((c) => !['dashboard', 'funnel', 'ledger'].includes(c.id)) };
+  ok(!nav.groupedChildren(fakeSection).some((g) => g.id === 'analytics'), 'a group with no visible child is not drawn as an empty heading');
+  // The phone strip lists one group, never the section.
+  const sib = nav.groupSiblings(rec, 'rooms').map((c) => c.id);
+  ok(sib.includes('recruitment') && sib.includes('rooms') && !sib.includes('search') && sib.length <= 7, `phone strip for Rooms lists its Pipeline siblings only (${sib.length})`);
+  ok(nav.groupOf(rec, 'ledger')?.id === 'analytics', 'the Discovery Ledger lives in Analytics beside the Funnel');
+  const home = nav.NAV_SECTIONS.find((s) => s.id === 'home');
+  ok(nav.groupedChildren(home).length === 1 && nav.groupedChildren(home)[0].id === null, 'an ungrouped section yields one unlabelled group');
+  // Deliberately broken configurations are refused.
+  const broken1 = [{ ...rec, groups: [...rec.groups, { id: 'dup', labelKey: 'x', items: ['rooms'] }] }];
+  ok(nav.validateNavConfig(broken1).some((p) => /rooms.*2 groups/.test(p)), 'a child in two groups is reported');
+  const broken2 = [{ ...rec, groups: rec.groups.map((g, i) => (i === 0 ? { ...g, items: g.items.slice(1) } : g)) }];
+  ok(nav.validateNavConfig(broken2).some((p) => /search.*0 groups/.test(p)), 'a child in no group is reported');
+  const broken3 = [{ ...rec, groups: [...rec.groups, { id: 'ghost', labelKey: 'x', items: ['not-a-page'] }] }];
+  ok(nav.validateNavConfig(broken3).some((p) => /not a child/.test(p)), 'a group item that is not a child is reported');
+
+  section(`${app} — every navigation label exists in EN and FR`);
+  const dict = dictionaries(app);
+  const used = new Set(nav.NAV_SECTIONS.flatMap((s) => [s.labelKey, ...s.children.map((c) => c.labelKey), ...(s.groups ?? []).map((g) => g.labelKey)]).concat([nav.INBOX_ITEM.labelKey]));
+  const missEn = [...used].filter((k) => !dict.en.has(k));
+  const missFr = [...used].filter((k) => !dict.fr.has(k));
+  ok(missEn.length === 0, `EN has every label the configuration names (${used.size} keys; missing: ${missEn.join(',') || '—'})`);
+  ok(missFr.length === 0, `FR has every label the configuration names (missing: ${missFr.join(',') || '—'})`);
+  for (const k of ['navsec.toggle', 'navsec.pagesIn', 'navsec.inThisArea', 'navsec.liveOk', 'navsec.liveOff', 'navsec.report', 'navsec.reportAria', 'navsec.orgStatus']) {
+    if (!dict.en.has(k) || !dict.fr.has(k)) fail(`shell label ${k} missing in ${dict.en.has(k) ? 'FR' : 'EN'}`); else passed++;
+  }
+  console.log('✓ the shell\'s own labels (toggle, live state, Report / Block) exist in EN and FR (8 folded)');
 
   section(`${app} — deterministic resolver`);
   for (const id of IDS) {
@@ -82,25 +136,49 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 6], ['scout
   console.log(`✓ resolver maps every destination (${IDS.length} checks folded)`);
   ok(nav.resolveNavigationLocation('verification').sectionId === 'organisation', 'direct /verification highlights Organisation');
   ok(nav.resolveNavigationLocation('assessments').sectionId === 'recruitment', 'direct /assessments highlights Recruitment');
+  ok(nav.resolveNavigationLocation('search').sectionId === 'recruitment', 'P2.5: direct /search highlights Recruitment (Discover is its first group)');
+  ok(nav.resolveNavigationLocation('ledger').sectionId === 'recruitment', 'P2.5: direct /ledger highlights Recruitment (Analytics)');
+  if (app === 'scoutbox-grassroots') {
+    ok(nav.resolveNavigationLocation('squad').sectionId === 'players', 'P2.5: direct /squad highlights Players');
+    ok(nav.resolveNavigationLocation('network').sectionId === 'organisation', 'P2.5: direct /network highlights Club');
+    ok(nav.resolveNavigationLocation('coverage').sectionId === 'recruitment', 'P2.5: direct /coverage highlights Recruitment (Planning group)');
+  }
   const unknown = nav.resolveNavigationLocation('nonexistent');
   ok(unknown.sectionId === null && unknown.itemId === null, 'unknown path highlights nothing');
 
   section(`${app} — role-aware filtering (client convenience only)`);
   const scoutSections = nav.filterSections(SCOUT);
-  ok(!scoutSections.some((s) => s.id === 'organisation'), 'ordinary scout: Organisation absent (no empty category shown)');
-  ok(scoutSections.length === expectSections - 1, 'scout sees the compact set');
-  ok(nav.filterSections(LEAD).some((s) => s.id === 'organisation'), 'lead role: Organisation present');
+  if (app === 'scoutbox-club') {
+    ok(!scoutSections.some((s) => s.id === 'organisation'), 'ordinary scout: Organisation absent (no empty category shown)');
+    ok(scoutSections.length === expectSections - 1, 'scout sees the compact set');
+  } else {
+    // P2.5: Grassroots' Club holds Clubs & Groups (always visible, exactly as
+    // it was under Network) plus the gated admin pages. A non-lead therefore
+    // sees Club with ONE child — and nothing that was hidden before.
+    const club = scoutSections.find((s) => s.id === 'organisation');
+    ok(!!club && club.children.map((c) => c.id).join(',') === 'network', 'ordinary coach: Club shows Clubs & Groups only — no admin page leaks');
+    ok(scoutSections.length === expectSections, 'coach sees every section (none is empty)');
+  }
+  ok(nav.filterSections(LEAD).some((s) => s.id === 'organisation'), 'lead role: Organisation / Club present');
   const revOrg = nav.filterSections(REVIEWER).find((s) => s.id === 'organisation');
   ok(!!revOrg && revOrg.children.some((c) => c.id === 'verification'), 'verification authority (non-lead): Organisation → Verification visible');
+  ok(!revOrg.children.some((c) => c.id === 'imports' || c.id === 'plan'), 'integrations and plan stay lead-only even for verification reviewers');
   if (app === 'scoutbox-club') {
     ok(!revOrg.children.some((c) => c.id === 'budgets'), 'finance stays lead-only even for verification reviewers');
   }
+  // P2.5: regrouping widened nothing. The set of ids a role can see is the
+  // same set it could see before, computed from the same predicates.
+  const visibleIds = (ctx) => new Set(nav.filterSections(ctx).flatMap((s) => s.children.map((c) => c.id)));
+  const scoutIds = visibleIds(SCOUT), leadIds = visibleIds(LEAD);
+  ok(!scoutIds.has('verification') && !scoutIds.has('organisation') && !scoutIds.has('imports') && !scoutIds.has('plan'), 'scout still sees none of the four admin pages');
+  ok([...scoutIds].every((id) => leadIds.has(id)), 'everything a scout sees, a lead sees (no inversion)');
 
   section(`${app} — command search permission filtering + aliases`);
   ok(nav.searchNav('verification', SCOUT, tr).length === 0, 'restricted destination NEVER appears for a scout');
   ok(nav.searchNav('verify', SCOUT, tr).length === 0, 'aliases cannot bypass the permission filter');
   const leadVer = nav.searchNav('verification', LEAD, tr);
-  ok(leadVer.some((r) => r.itemId === 'verification' && r.sectionLabel === 'Organisation'), 'lead search: Organisation → Verification');
+  const orgLabel = app === 'scoutbox-club' ? 'Organisation' : 'Club';
+  ok(leadVer.some((r) => r.itemId === 'verification' && r.sectionLabel === orgLabel), `lead search: ${orgLabel} → Verification`);
   ok(nav.searchNav('trial', LEAD, tr).some((r) => r.itemId === 'trials'), 'alias/prefix: "trial" finds Trials');
   ok(nav.searchNav('coverage', SCOUT, tr).some((r) => r.itemId === 'coverage'), 'scout can find Coverage');
   ok(nav.searchNav('reports', LEAD, tr).some((r) => r.itemId === 'assessments'), 'alias "reports" → Assessments');

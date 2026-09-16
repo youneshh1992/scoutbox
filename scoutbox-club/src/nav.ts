@@ -20,11 +20,29 @@ export interface NavItem {
   visible?: (ctx: NavContext) => boolean;
 }
 
+/**
+ * P2.5 — a labelled subgroup INSIDE a section.
+ *
+ * Presentation only. It decides how a section's children are arranged in the
+ * sidebar and which siblings the phone-width strip lists. It is NOT a
+ * navigation level: a group has no route, cannot be "opened", and never
+ * appears in a breadcrumb. Every child of a grouped section belongs to
+ * exactly one group — `validateNavConfig` says so and `navConfig` asserts it.
+ */
+export interface NavGroup {
+  id: string;
+  labelKey: string;
+  items: ScreenId[];
+}
+
 export interface NavSection {
-  id: 'home' | 'discover' | 'recruitment' | 'planning' | 'network' | 'organisation';
+  id: 'home' | 'recruitment' | 'planning' | 'network' | 'organisation';
   labelKey: string;
   icon: string; // key into icons.tsx
   children: NavItem[];
+  /** Optional grouping of `children` for display. `children` stays the one
+   *  flat, complete list every other consumer (resolver, palette, tests) reads. */
+  groups?: NavGroup[];
   visible?: (ctx: NavContext) => boolean;
 }
 
@@ -43,54 +61,61 @@ const leadOrVer = (ctx: NavContext) => isLeadRole(ctx.role) || ctx.verLevel !== 
 // ---------------------------------------------------------------- sections
 // Every legacy sidebar ScreenId appears EXACTLY ONCE below (asserted by the
 // nav test suite), except `messages` which is the Inbox utility.
+//
+// P2.5: five sections, not six. Discover was the *finding* half of
+// recruitment and lived beside it as a peer; it is now the first group inside
+// Recruitment, and Recruitment's fifteen flat peers — which arrived one
+// milestone at a time and were rendered as a 2,000px-wide tab strip — are
+// arranged into five groups by what they are for. No route moved: every
+// screen id is the hash it always was.
 export const NAV_SECTIONS: NavSection[] = [
   {
     id: 'home', labelKey: 'navsec.home', icon: 'home',
     children: [{ id: 'feed', labelKey: 'nav.feed', aliases: ['dashboard', 'accueil', 'home'] }],
   },
   {
-    id: 'discover', labelKey: 'navsec.discover', icon: 'search',
+    id: 'recruitment', labelKey: 'navsec.recruitment', icon: 'target',
+    // Order = display order. The groups below name the same ids and nothing
+    // else; `validateNavConfig` refuses a child in zero or two groups.
     children: [
-      { id: 'search', labelKey: 'nav2.search', aliases: ['players', 'player search', 'find players', 'joueurs', 'recherche'] },
+      // — Discover: finding and watching players.
+      { id: 'search', labelKey: 'nav2.search', aliases: ['players', 'player search', 'find players', 'discover', 'joueurs', 'recherche'] },
       { id: 'shortlist', labelKey: 'nav.shortlist', aliases: ['watchlist', 'saved players', 'présélection'] },
       { id: 'filmroom', labelKey: 'nav.filmroom', aliases: ['film', 'clips', 'footage', 'vidéo'] },
+      { id: 'insight', labelKey: 'nav.insight', aliases: ['scouting insight', 'suitability', 'matches', 'analyse'] },
+      // — Pipeline: the cases themselves and the club's outbound demand.
+      { id: 'recruitment', labelKey: 'nav2.recruitment', aliases: ['pipeline', 'applications', 'cases', 'recrutement'] },
+      // M17: the club's private decision layer over a player.
+      { id: 'rooms', labelKey: 'nav2.rooms', aliases: ['recruitment rooms', 'room', 'rooms', 'workspace', 'salles'] },
+      { id: 'requests', labelKey: 'nav2.requests', aliases: ['player requests', 'contact requests', 'demandes'] },
       { id: 'opportunities', labelKey: 'nav.opportunities', aliases: ['open roles', 'positions', 'opportunités'] },
       { id: 'campaigns', labelKey: 'nav.campaigns', aliases: ['campagnes'] },
-      { id: 'insight', labelKey: 'nav.insight', aliases: ['scouting insight', 'suitability', 'matches', 'analyse'] },
-      { id: 'ledger', labelKey: 'nav.ledger', aliases: ['discovery ledger', 'audit trail', 'registre'] },
-    ],
-  },
-  {
-    id: 'recruitment', labelKey: 'navsec.recruitment', icon: 'target',
-    children: [
-      { id: 'recruitment', labelKey: 'nav2.recruitment', aliases: ['pipeline', 'applications', 'cases', 'recrutement'] },
-      // M17: the club's private decision layer over a player. It lives inside
-      // Recruitment as ONE destination — no seventh sidebar section.
-      { id: 'rooms', labelKey: 'nav2.rooms', aliases: ['recruitment rooms', 'room', 'rooms', 'workspace', 'salles'] },
-      // M18: three more destinations INSIDE Recruitment — never a seventh
-      // sidebar section. Second Look reports what changed since a decision;
-      // Nobody Missed is evaluation coverage over a written brief; Briefs is
-      // the club's own explicit demand.
-      { id: 'secondlook', labelKey: 'nav2.secondlook', aliases: ['second look', 'worth another look', 'evidence changed', 'reconsider', 'second regard', 'nouveau regard'] },
-      { id: 'nobodymissed', labelKey: 'nav2.nobodymissed', aliases: ['nobody missed', 'evaluation coverage', 'coverage gaps', 'not yet evaluated', 'couverture d’évaluation'] },
-      { id: 'briefs', labelKey: 'nav2.briefs', aliases: ['recruitment briefs', 'brief', 'briefs', 'criteria', 'cahier des charges', 'briefs de recrutement'] },
-      // M19: two more destinations INSIDE Recruitment, for the same reason —
-      // Player Matching answers "who satisfies the criteria we wrote, and
-      // why"; a Dynamic Watchlist saves those criteria and keeps the answer
-      // current. Neither is a ranking, and neither earns a sidebar section.
-      { id: 'matching', labelKey: 'nav2.matching', aliases: ['player matching', 'explainable matching', 'match criteria', 'who matches', 'why this player matches', 'correspondance', 'critères de correspondance'] },
-      { id: 'watchlists', labelKey: 'nav2.watchlists', aliases: ['dynamic watchlists', 'dynamic watchlist', 'saved criteria', 'listes dynamiques', 'critères enregistrés'] },
-      // M20: the Director Dashboard is recruitment ANALYTICS, so it belongs
-      // beside the work it measures rather than in a section of its own. It
-      // measures the process — never a player, never a colleague.
-      { id: 'dashboard', labelKey: 'nav2.dashboard', aliases: ['director dashboard', 'recruitment analytics', 'analytics', 'pipeline health', 'how long does it take', 'stalled rooms', 'tableau de bord', 'analyse du recrutement'] },
+      { id: 'outcomes', labelKey: 'nav2.outcomes', aliases: ['signings', 'post-signing', 'outcomes', 'signatures'] },
+      // — Evidence: what the club has actually recorded about players.
       { id: 'assessments', labelKey: 'nav.assessments', aliases: ['reports', 'scouting reports', 'assessment', 'évaluations', 'rapports'] },
       { id: 'video', labelKey: 'nav2.video', aliases: ['evidence', 'video workspace', 'evidence requests', 'preuves'] },
       { id: 'trials', labelKey: 'nav.trials', aliases: ['trial', 'trial reports', 'essais'] },
       { id: 'trialdays', labelKey: 'nav.trialdays', aliases: ['trial days', 'journées d’essai'] },
-      { id: 'requests', labelKey: 'nav2.requests', aliases: ['player requests', 'contact requests', 'demandes'] },
-      { id: 'outcomes', labelKey: 'nav2.outcomes', aliases: ['signings', 'post-signing', 'outcomes', 'signatures'] },
+      // — Intelligence: written demand and what it turns up. M18/M19 — none
+      // of these is a ranking, and none of them earns a sidebar section.
+      { id: 'briefs', labelKey: 'nav2.briefs', aliases: ['recruitment briefs', 'brief', 'briefs', 'criteria', 'cahier des charges', 'briefs de recrutement'] },
+      { id: 'matching', labelKey: 'nav2.matching', aliases: ['player matching', 'explainable matching', 'match criteria', 'who matches', 'why this player matches', 'correspondance', 'critères de correspondance'] },
+      { id: 'watchlists', labelKey: 'nav2.watchlists', aliases: ['dynamic watchlists', 'dynamic watchlist', 'saved criteria', 'listes dynamiques', 'critères enregistrés'] },
+      { id: 'secondlook', labelKey: 'nav2.secondlook', aliases: ['second look', 'worth another look', 'evidence changed', 'reconsider', 'second regard', 'nouveau regard'] },
+      { id: 'nobodymissed', labelKey: 'nav2.nobodymissed', aliases: ['nobody missed', 'evaluation coverage', 'coverage gaps', 'not yet evaluated', 'couverture d’évaluation'] },
+      // — Analytics: the process measured. M20's Director Dashboard measures
+      // the process, never a player and never a colleague; the Funnel counts
+      // recorded events; the Ledger is the append-only record they come from.
+      { id: 'dashboard', labelKey: 'nav2.dashboard', aliases: ['director dashboard', 'recruitment analytics', 'analytics', 'pipeline health', 'how long does it take', 'stalled rooms', 'tableau de bord', 'analyse du recrutement'] },
       { id: 'funnel', labelKey: 'nav.funnel', aliases: ['recruitment funnel', 'entonnoir'] },
+      { id: 'ledger', labelKey: 'nav.ledger', aliases: ['discovery ledger', 'audit trail', 'registre'] },
+    ],
+    groups: [
+      { id: 'discover', labelKey: 'navgrp.discover', items: ['search', 'shortlist', 'filmroom', 'insight'] },
+      { id: 'pipeline', labelKey: 'navgrp.pipeline', items: ['recruitment', 'rooms', 'requests', 'opportunities', 'campaigns', 'outcomes'] },
+      { id: 'evidence', labelKey: 'navgrp.evidence', items: ['assessments', 'video', 'trials', 'trialdays'] },
+      { id: 'intelligence', labelKey: 'navgrp.intelligence', items: ['briefs', 'matching', 'watchlists', 'secondlook', 'nobodymissed'] },
+      { id: 'analytics', labelKey: 'navgrp.analytics', items: ['dashboard', 'funnel', 'ledger'] },
     ],
   },
   {
@@ -156,6 +181,63 @@ export function allItems(): { section: NavSection; item: NavItem }[] {
   return NAV_SECTIONS.flatMap((section) => section.children.map((item) => ({ section, item })));
 }
 
+// ------------------------------------------------------------------ groups
+export interface NavGroupView { id: string | null; labelKey: string | null; children: NavItem[] }
+
+/**
+ * A section's children arranged by group, in group order. Works on a section
+ * that has already been through `filterSections`: a group whose every item
+ * was filtered out disappears rather than rendering an empty heading. A
+ * section without groups yields one unlabelled group holding all children.
+ */
+export function groupedChildren(section: NavSection): NavGroupView[] {
+  if (!section.groups || section.groups.length === 0) return [{ id: null, labelKey: null, children: section.children }];
+  const byId = new Map(section.children.map((c) => [c.id, c] as const));
+  return section.groups
+    .map((g) => ({ id: g.id, labelKey: g.labelKey, children: g.items.map((id) => byId.get(id)).filter((c): c is NavItem => !!c) }))
+    .filter((g) => g.children.length > 0);
+}
+
+/** The items shown beside `itemId` at phone width: its group, or the whole
+ *  section when the section has no groups. Never more than one group. */
+export function groupSiblings(section: NavSection, itemId: ScreenId | null): NavItem[] {
+  const hit = groupedChildren(section).find((g) => g.children.some((c) => c.id === itemId));
+  return hit ? hit.children : groupedChildren(section)[0]?.children ?? [];
+}
+
+/** The group an item belongs to, or null in an ungrouped section. */
+export function groupOf(section: NavSection, itemId: ScreenId | null): NavGroupView | null {
+  const hit = groupedChildren(section).find((g) => g.children.some((c) => c.id === itemId));
+  return hit && hit.id ? hit : null;
+}
+
+/**
+ * Structural soundness of the configuration, as a list of problems. Empty
+ * means sound. Checked by `navConfig` so a child that is added to a section
+ * but forgotten in its groups fails a test instead of silently vanishing from
+ * the sidebar.
+ */
+export function validateNavConfig(sections: NavSection[] = NAV_SECTIONS): string[] {
+  const problems: string[] = [];
+  for (const s of sections) {
+    if (!s.groups) continue;
+    const ids = s.children.map((c) => c.id);
+    const seen = new Map<string, number>();
+    for (const g of s.groups) {
+      if (g.items.length === 0) problems.push(`${s.id}/${g.id}: empty group`);
+      for (const id of g.items) {
+        seen.set(id, (seen.get(id) ?? 0) + 1);
+        if (!ids.includes(id)) problems.push(`${s.id}/${g.id}: "${id}" is not a child of ${s.id}`);
+      }
+    }
+    for (const id of ids) {
+      const n = seen.get(id) ?? 0;
+      if (n !== 1) problems.push(`${s.id}: "${id}" appears in ${n} groups (must be exactly 1)`);
+    }
+  }
+  return problems;
+}
+
 /** Command-palette search over PERMITTED destinations only. Aliases are for
  *  finding things, never for bypassing the visibility filter. */
 export function searchNav(query: string, ctx: NavContext, translate: (key: string) => string) {
@@ -165,9 +247,12 @@ export function searchNav(query: string, ctx: NavContext, translate: (key: strin
     section.children.map((item) => ({
       sectionId: section.id, itemId: item.id,
       sectionLabel: translate(section.labelKey), label: translate(item.labelKey),
+      // P2.5: the palette path names the group too ("Recruitment › Pipeline ›
+      // Rooms"), so a result says where it lives in the sidebar.
+      groupLabel: (() => { const g = groupOf(section, item.id); return g?.labelKey ? translate(g.labelKey) : ''; })(),
       aliases: item.aliases ?? [],
     }))
-  ).concat([{ sectionId: 'home' as NavSection['id'], itemId: INBOX_ITEM.id, sectionLabel: '', label: translate(INBOX_ITEM.labelKey), aliases: INBOX_ITEM.aliases ?? [] }]);
+  ).concat([{ sectionId: 'home' as NavSection['id'], itemId: INBOX_ITEM.id, sectionLabel: '', groupLabel: '', label: translate(INBOX_ITEM.labelKey), aliases: INBOX_ITEM.aliases ?? [] }]);
   if (!q) return rows.slice(0, 8);
   const scored = rows.map((r) => {
     const label = r.label.toLowerCase();

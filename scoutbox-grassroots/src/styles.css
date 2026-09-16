@@ -376,30 +376,13 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 /* ------------------------------------------------ mobile / small screens
    Grassroots managers run their club from a phone on a touchline — the
    whole workspace has to work one-handed at 390px. */
+/* P2.5 — this block used to turn the sidebar into a horizontal top strip. That
+   predates the M15-Nav drawer (900px, below); with both rules live at phone
+   width the drawer inherited `flex-direction: row` and laid its buttons out
+   sideways inside a 260px panel, 1,349px wide, with the account buttons
+   collapsed to nothing. The strip rules are gone; the content-level
+   responsive rules that were always right stay. */
 @media (max-width: 860px) {
-  body { overflow: auto; }
-  #root { height: auto; min-height: 100vh; }
-  .shell { display: flex; flex-direction: column; height: auto; min-height: 100vh; }
-  .sidebar {
-    flex-direction: row;
-    align-items: center;
-    overflow-x: auto;
-    border-right: none;
-    border-bottom: 1px solid var(--line);
-    padding: 10px 12px;
-    gap: 2px;
-    position: sticky;
-    top: 0;
-    z-index: 30;
-    -webkit-overflow-scrolling: touch;
-  }
-  .sidebar .brand { padding: 0 10px 0 0; font-size: 16px; white-space: nowrap; }
-  .sidebar button { white-space: nowrap; padding: 8px 10px; font-size: 13px; }
-  .sidebar .spacer, .sidebar .whoami { display: none; }
-  .nav-badge { position: static; transform: none; margin-left: 6px; }
-  .main { overflow: visible; }
-  .topbar { flex-wrap: wrap; padding: 10px 14px; gap: 8px; }
-  .content { padding: 14px; overflow-y: visible; }
   .filters input[type='text'], .filters input:not([type]) { width: 100%; flex: 1 1 100%; }
   .filters select, .filters input[type='date'] { flex: 1 1 45%; }
   .player-grid { grid-template-columns: 1fr; }
@@ -430,13 +413,53 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
 
-/* ---------- M15-Nav: compact sections, subnav, palette, drawer ---------- */
-.shell.nav-collapsed { grid-template-columns: 64px 1fr; }
-.sidebar.collapsed { padding: 18px 8px; }
-.sidebar.collapsed .brand { font-size: 15px; padding: 4px 6px 14px; }
+/* ---------- M15-Nav / P2.5: sections, accordion, flyout, palette, drawer ---------- */
+:root {
+  /* P2.5 chrome tokens (same values as Pro). */
+  --sidebar-w: 218px;
+  --sidebar-w-collapsed: 64px;
+  --chrome-x: 22px;
+  --chrome-y: 10px;
+  --title-size: 17px;
+  --nav-item-py: 8px;
+  --nav-child-py: 6px;
+  --content-pad: 22px;
+}
+.shell { grid-template-columns: var(--sidebar-w) 1fr; }
+.sidebar { padding: 14px 10px; gap: 2px; }
+.sidebar .brand { font-size: 18px; padding: 2px 10px 12px; }
+.sidebar button { padding: var(--nav-item-py) 12px; }
+.org-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.org-chips .pill { font-size: 10.5px; padding: 1px 7px; }
+.topbar { gap: 10px; min-height: 48px; padding: var(--chrome-y) var(--chrome-x); }
+.topbar h1.page-title { font-size: var(--title-size); font-weight: 700; flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar .topbar-bell { position: relative; }
+.live-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; background: var(--accent); box-shadow: 0 0 0 3px rgba(139, 195, 74, 0.18); }
+.topbar .safety-long { display: inline; }
+.content { padding: var(--content-pad); }
+.pagehint { color: var(--muted); font-size: 12.5px; line-height: 1.45; margin: 0 0 12px; }
+.shell.nav-collapsed { grid-template-columns: var(--sidebar-w-collapsed) 1fr; }
+.sidebar.collapsed { padding: 14px 8px; }
+.sidebar.collapsed .brand { font-size: 15px; padding: 2px 6px 12px; }
 .sidebar button.nav-section, .sidebar button.nav-search, .sidebar button.nav-collapse { display: flex; align-items: center; gap: 10px; width: 100%; position: relative; }
-.sidebar.collapsed button.nav-section, .sidebar.collapsed button.nav-search, .sidebar.collapsed button.nav-collapse { justify-content: center; padding: 10px 6px; }
+.sidebar.collapsed button.nav-section, .sidebar.collapsed button.nav-search, .sidebar.collapsed button.nav-collapse { justify-content: center; padding: 9px 6px; }
 .nav-section .grow, .nav-search .grow, .nav-shortcut .grow { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* accordion */
+.nav-sec { position: relative; }
+.nav-sec-row { display: flex; align-items: center; gap: 2px; }
+.nav-sec-row .nav-section { flex: 1; min-width: 0; }
+.nav-toggle { flex: 0 0 26px; width: 26px; height: 26px; padding: 0; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); border-radius: 6px; }
+.nav-toggle svg { transition: transform 0.12s ease; }
+.nav-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+.nav-children { display: flex; flex-direction: column; gap: 1px; padding: 1px 0 6px; }
+.nav-children .nav-group-label { padding: 7px 12px 2px 34px; }
+.sidebar .nav-child { display: block; width: 100%; padding: var(--nav-child-py) 10px var(--nav-child-py) 34px; font-size: 13px; color: var(--muted); border-radius: 6px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar .nav-child.active { color: var(--text); font-weight: 600; background: var(--panel-2); }
+/* collapsed-rail flyout */
+.nav-flyout { position: absolute; left: calc(100% + 6px); top: 0; min-width: 224px; max-height: 70vh; overflow-y: auto; background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 6px; z-index: 85; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45); }
+.nav-flyout-title { font-size: 12.5px; font-weight: 700; color: var(--text); padding: 6px 10px 4px; }
+.nav-flyout .nav-group-label { padding: 7px 10px 2px; }
+.nav-flyout .nav-child { padding-left: 10px; }
 .sidebar .nav-search { border: 1px solid var(--line); background: var(--bg); color: var(--muted); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; font-size: 13px; }
 .sidebar .nav-search kbd, .palette kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; color: var(--muted); background: var(--bg-2); }
 .nav-section { font-size: 14px; }
@@ -453,8 +476,9 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .crumb { color: var(--muted); font-weight: 500; }
 .crumb-sep { color: var(--muted); }
 
-.subnav { display: flex; gap: 4px; padding: 8px 22px 0; border-bottom: 1px solid var(--line); background: var(--bg-2); overflow-x: auto; flex-shrink: 0; }
-.subnav button { background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 12px 10px; color: var(--muted); white-space: nowrap; font-size: 13.5px; }
+/* P2.5 — phone width only: the active GROUP's siblings (see Pro). */
+.subnav { display: none; gap: 2px; padding: 4px 10px 0; border-bottom: 1px solid var(--line); background: var(--bg-2); overflow-x: auto; flex-shrink: 0; }
+.subnav button { background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 6px 10px 8px; color: var(--muted); white-space: nowrap; font-size: 13px; }
 .subnav button.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
 
 .palette-veil { position: fixed; inset: 0; background: rgba(3, 8, 18, 0.62); z-index: 90; display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh; }
@@ -477,6 +501,7 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
   .sidebar.drawer-open { transform: translateX(0); }
   .nav-drawer-veil { z-index: 70; }
   .nav-hamburger { display: inline-flex; }
+  .subnav { display: flex; }
 }
 
 /* M18.1 — phone width.
@@ -488,8 +513,9 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
    inputs were wider than the content column. Nothing here changes the desktop
    layout — every rule is inside the query. */
 @media (max-width: 640px) {
-  .topbar { flex-wrap: wrap; row-gap: 8px; padding: 10px 14px; }
-  .topbar h2 { flex: 1 1 100%; font-size: 16px; }
+  .topbar { padding: 8px 12px; gap: 8px; min-height: 46px; }
+  .topbar h1.page-title { font-size: 15px; }
+  .topbar .safety-long { display: none; }
   .content { padding: 14px; }
   .bell-panel { left: 8px; right: 8px; width: auto; max-height: 60vh; }
   .drawer { width: 100vw; }
