@@ -731,7 +731,7 @@ section('C — the concurrency matrix (§92): one truth per case, whatever the o
   const KEEP = ['pl-adeyemi', 'pl-carvalho', 'pl-guni', 'pl-imani', 'pl-osei', 'pl-nowak', 'pl-kim'];
   const leaver = (roster.items ?? roster).find((pl) => (pl.age ?? 0) >= 18 && !KEEP.includes(pl.id));
   if (!leaver) { console.error('   roster', JSON.stringify((roster.items ?? roster).map((pl) => [pl.id, pl.age]))); fail('C6 needs an adult in the seed'); }
-  J.LEAVER = leaver.id;
+  J.LEAVER = leaver.id; J.LEAVER_NAME = leaver.name;
   const c6 = await reviewed(maria.token, leaver.id);
   J.LEAVER_RID = c6;
   await draft(c6, { outcome: 'hold' });
@@ -863,6 +863,11 @@ section('T — the subject removed their account: no new decision about a person
     neg(expect(await draft(gone, { outcome: 'hold' }), 409, 'DECISION_SUBJECT_REMOVED'), 'T2 opening a draft is refused as SUBJECT_REMOVED');
     const cur = (await surface(gone)).body;
     ok(cur.current === null || cur.current.kind === 'formal', 'T3 whatever was decided before the removal stays on record');
+    // §175: the decision record must not resurrect the removed player's PII.
+    const leaverName = J.LEAVER_NAME;
+    const jrGone = await journey(gone);
+    const orgN = await notifs('/org/notifications', maria.token);
+    neg(!!leaverName && !has(cur, leaverName) && !has(jrGone.decisions, leaverName) && !has(jrGone.history, leaverName) && !orgN.some((n) => /formal decision recorded/.test(n.text) && n.text.includes(leaverName)), `T4 the decision surface, history, journey and org notifications carry no trace of the removed player's name ("${leaverName}")`);
   } else ok(true, 'T2/T3 (the removed player\'s room is not listed by id — the surface above already proved the gate)');
 }
 

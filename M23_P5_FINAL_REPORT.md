@@ -12,7 +12,7 @@ Documents of record: `M23_P5_DECISION_REUSE_AUDIT.md`,
 ## The 76 items (§174)
 
 1. **Starting tip** — `2889bd6` (M23 P4B closure: correct the server battery count).
-2. **Final tip** — the commit that carries this filled report (its hash is in the closure message); `24b9086` carried the unfilled draft; the closure commit is `f080bfe` (P5-4), which is the bundled tip. Phase commits: `1e2c0c5` (P5-1 server), `66a14ea` (P5-2 clients), `2c55952` (P5-3 tests + D-P5-1/D-P5-2), `f080bfe` (P5-4 docs).
+2. **Final tip** — the bookkeeping-closure commit that carries the corrected §175 (its hash is in the closure message); `24b9086` carried the unfilled draft, `280fc7c` the filled one; the P5-4 closure commit is `f080bfe`. The recovery bundle is recut at the final tip (see the closure section). Phase commits: `1e2c0c5` (P5-1 server), `66a14ea` (P5-2 clients), `2c55952` (P5-3 tests + D-P5-1/D-P5-2), `f080bfe` (P5-4 docs).
 3. **Schema version** — 2304, unchanged. **P5 adds no migration.**
 4. **New stores** — none. `db.roomDecisions` (M17) carries the formal rows; the draft is `kase.decisionDraft`. No `recruitmentDecisions`, `decisionDrafts` or `recruitmentOffers` (persistence §1, §5).
 5. **Existing decision system reuse** — M17's `roomDecisions` chain (`supersedes`/`supersededById`), `REASON_CODES` taxonomy, `validateReasonCodes`, `captureSnapshot`, `roomCan`, `GET /decisions` reader, Second Look reader, Nobody Missed `room_decided`, M20 decision family, journey decision projection — all reused; the reuse audit classifies R1–R30.
@@ -64,7 +64,7 @@ Documents of record: `M23_P5_DECISION_REUSE_AUDIT.md`,
 51. **Reject live journey** — Mateus: reject without a reason refused, with a revisitable reason → Archived → Second Look item after new evidence (live R1–R3b).
 52. **Non-Trial decision path** — Imani: no assessment, no trial, draft opens, hold recorded from Under review (live D1–D2b).
 53. **Negative live paths** — N1–N16 as listed in the suite header (readiness, scout, foreign club, disabled finalize, reject without reason, second draft, stale rev, replace without reason, no offer button, sentinels, player token, lifecycle by hand, 390/360, blocked family, a11y, FR).
-54. **Decision test totals** — `m23DecisionE2E` 434 (314 negative, 72 %); `m23DecisionPersistence` 48 (17 negative); `m23DecisionPerf` measured; `m23DecisionLive` 86 (25 negative). Prototype keys (§95) and invalid types (§96) covered in U6, U11, U12, U16, U19, U22, K1, X1–X8.
+54. **Decision test totals** — `m23DecisionE2E` 435 (315 negative, 72 %; T4 added at bookkeeping closure); `m23DecisionPersistence` 48 (17 negative); `m23DecisionPerf` measured; `m23DecisionLive` 86 (25 negative). Prototype keys (§95) and invalid types (§96) covered in U6, U11, U12, U16, U19, U22, K1, X1–X8.
 55. **Server regression totals** — 45 scripts, all exit 0 on the final tree (one owned :4000 server, sequential); the first battery run caught the Y11 shape widening, fixed in `f080bfe` and re-run green (table below).
 56. **Browser/live/demo totals** — 37 browser scripts, all exit 0 on the final tree with demos rebuilt at `f080bfe`: navConfig 282, demoFreshness 13, uiSpotcheck, demoOffline, crosstab, demoHostOrdering, eleven demo spotchecks, liveIntegration, navLive 64, and seventeen live suites including `m23TrialLive` 122 (53 negative) and `m23DecisionLive` 86 (25 negative) (table below)..
 57. **Typechecks** — club, grassroots, admin, player: 0 errors.
@@ -79,12 +79,12 @@ Documents of record: `M23_P5_DECISION_REUSE_AUDIT.md`,
 66. **Open Medium** — 0.
 67. **Open Low** — 4 inherited (P4A-D6, D7, D8, D11), owner phases unchanged.
 68. **Known limitations** — no precondition on `on_hold`/`archived` (a hold or archive by hand records no `decisionId`); the assessment summary caps `assessmentIds` at 20 in the row's snapshot; the notification to owner/lead uses the existing `recruitment_room` type rather than a decision-specific one; the demo store simulates the server's rules without the blind rule.
-69. **Bundle path** — `/home/user/scoutbox-m23-p5-decision.bundle`.
+69. **Bundle path** — `/home/user/scoutbox-m23-p5-decision.bundle` (recut at the final tip at bookkeeping closure; the figures in items 70–72 are those of the `f080bfe` cut and are superseded by the closure message).
 70. **Bundle SHA-256** — `46d3b29b1cdfc2cd3e535049c80d6b71801bd8cfd9998207035b1fc9910c6e59` (4080115 bytes; secret scan of the tracked tree at HEAD: 0 hits)..
 71. **Bundle verify** — `git bundle verify`: "The bundle records a complete history." Fresh clone HEAD `f080bfe873d147a36bd00c25d965f983e3fabaf4` and tree `ae4e3c76110637af89da5d0f62c41f73f5f6281c` equal the workspace; control-byte sweep 0 files..
 72. **Fresh clone result** — the clone boots on a fresh data directory (`schemaVersion 2304`, `X-ScoutBox-Schema: 2304`); 26 suites run from the clone all exit 0 (apiE2E 130, m23DecisionE2E, m23DecisionPersistence, m23DecisionPerf, m23TrialE2E, m23TrialPersistence, m23TrialPerf, m23P4AClosureE2E 337, m12E2E 152, m15E2E 189, m23ContactE2E, m23ContactPersistence, m23E2E, m23BootContract, m23Persistence 67, m17E2E, m18E2E, m20E2E, m182E2E, m22E2E 112, m22Blocker 60, m22Robustness 48); the clone tree is clean after the tests; club, grassroots and admin build from the clone; **`m23DecisionLive` runs from the clone: 86 checks passed (25 negative)**..
-73. **Tree status** — clean. The bundle was cut at the closure commit `f080bfe` with only this report untracked; the report commits (`24b9086`, then the fill-in that follows it — the first commit carried unfilled placeholders because the fill script aborted, and history is not rewritten) sit above the bundled tip..
-74. **Push status** — not pushed (the branch's remote tip stays `2889bd6`; local is 6 commits ahead).
+73. **Tree status** — clean at every commit; the `f080bfe` bundle predated the report commits and was replaced at bookkeeping closure by a bundle cut at the final tip (closure section)..
+74. **Push status** — not pushed (the branch's remote tip stays `2889bd6`; local is 7 commits ahead after the bookkeeping closure).
 75. **PR status** — none opened.
 76. **Deployment status** — none.
 
@@ -198,7 +198,19 @@ Documents of record: `M23_P5_DECISION_REUSE_AUDIT.md`,
 | rating / trust / Box Cam result / attendance read to produce an outcome | grep in decision routes | 0 |
 | `m23E2E` drift guard (every `DECISION_*` code producible) | Y3 | green |
 
-## §175 Final truth audit (verbatim, with the executed evidence)
+## §175 Final truth audit (the mandate's block, verbatim, with the executed evidence)
+
+Bookkeeping closure note: the first two report commits (`24b9086`, `280fc7c`)
+reproduced only the first nineteen lines of this block — the negative safety
+assertions of its first three groups — and my closing message described it as
+"every line answers NO". The mandate's §175 has sixty-four assertion lines
+in both polarities (31 negative safety assertions, 33 positive proof
+assertions), three counts and three closing NOs. The full block is
+below; every value is answered from executed evidence (suite ids refer to
+`m23DecisionE2E` unless prefixed `live` = `m23DecisionLive`, `persistence` =
+`m23DecisionPersistence`). One line — the removed player's PII — had no
+dedicated assertion before this closure; T4 was added to the suite and run
+(435 checks, 315 negative, all green) rather than answered from inspection.
 
 Evidence automatically creates recruitment decision: NO — J10 (a completed trial and two assessments, still `current: null`), D1–D2 (a decision with nothing cited); the only writer is `finalizeHandler` on a human's draft.
 Assessment automatically creates recruitment decision: NO — J10; the assessment routes (`m12/scouting.mjs`) are untouched and write no decision.
@@ -221,7 +233,102 @@ Private assessment leaks through decision projection: NO — U36, J19b, Q4, I1 (
 Private Room discussion leaks through decision projection: NO — I1 (`PRIVATE_ROOM_RATIONALE_SENTINEL_8812`, recorded as an advisory note, absent from every non-room surface).
 Decision event leaks rationale text: NO — J21b (the SSE frame carries ids only), I4b (audit detail never carries the note).
 Foreign org can enumerate decision: NO — W4 (404 on every route), I5, R11.
+Removed player PII is resurrected by decision history: NO — T4 (added at closure: after the account deletion the decision surface, history, journey and org notifications carry no trace of the player's name), T1–T3; `decisionView` has no player field and `kase.playerName` is nulled by `deletePlayerData`.
 
-## §176
+Lifecycle direct-write bypass introduced: NO — §160 sweep (0 `status =` writes in `m23/decision.mjs` and `m23/decisionRoutes.mjs`); the route calls `ctx.applyLifecycleTransition` only, after `canTransitionRecruitmentCase`; D3/D3b rollback; `m23/lifecycle.mjs` has no diff since `2889bd6`.
+M23 lifecycle widened: NO — P13 (no invented state), P13b (the transition table covers exactly the existing statuses); the only diff to `m17/shared.mjs` since `2889bd6` is one *precondition* entry (`offer_consideration` now requires a finalized progress decision — a narrowing of what may reach it) and three `roomCan` ranks. No status, no edge.
+M17 reason taxonomy confused with lifecycle reason taxonomy: NO — U9 (lifecycle codes refused as decision reasons), R3 (`rejected` refused on a draft), R7/R7b/R7c (the case history carries `rejected`, the decision carries the decision codes, neither carries the other's).
+Final decision can be silently edited in place: NO — H8b (the superseded row keeps its outcome and note; only `supersededById` and `rev` change); there is no PATCH/PUT route for a formal row (0 in `decisionRoutes.mjs`); supersession needs a named head, its rev and a reason (H2–H6).
+Stale rev silently overwrites decision: NO — J17, K1 (twelve non-integer forms refused), K2–K3, H5 (`supersedesRev` mismatch is a conflict), persistence §2 (rev enforced from the snapshot).
+Same idempotency key accepts different decision payload: NO — K5 (draft), K8 (finalize), persistence §2 (restored keys with mismatched fingerprints are conflicts).
+Duplicate finalize creates duplicate formal decision: NO — C1 (two finalizes, different keys: one decision), C2 (same key: one decision, one replay), J28/J29, C4 (two supersedes: one successor, no duplicate heads).
+Finalization can partially persist before lifecycle failure: NO — D3b (validator refusal: no row, no move, draft intact), F2–F3b (injected transport failure: no row, head untouched, draft intact, case unmoved, no audit entry); one `persistNow()` after the move.
+Positive decision creates recruitmentOffers row: NO — persistence §5 (no new top-level store after a progress decision), §161 (0 writers of `recruitmentOffers` in server code).
+Offer Workflow implemented: NO — §161 (0 offer writers, 0 moves to `offer_made` outside the lifecycle tables, 0 offer terms or notifications in P5 files), J30, live N9/N9b.
+Signing invariant weakened: NO — P11 (`signed` still requires `confirmed_join`; `offer_made` still requires `offer_sent`), U5; `m23/lifecycle.mjs` unchanged; `m23E2E` 382 green (P2's signed-evidence hardening checks included).
 
-**M23 P5 COMPLETE — Assessment + Recruitment Decision Integration is built, tested, documented, bundled and verified from a fresh clone. Zero Critical, zero High, zero Medium open. Nothing pushed, no PR, no deployment.**
+Assessments remain independent: YES — U35/U36 (per-assessor rows, no average), Q1–Q3 (the blind rule kept, withheld counts said), live A4d.
+Assessment disagreement remains visible: YES — U37, J8, live A4b ("Assessors differ … neither is marked correct").
+Box Cam remains evidence only: YES — U23–U25 (state-level metadata, no result), E1 (`rating` and `trust_score` reference kinds refused), candidates carry `observation.state` only.
+CV refusal remains neutral: YES — `m22/*` has no diff since `2889bd6`; `m22E2E` 112, `m22Blocker` 60, `m22Robustness` 48, `m22CvEval`, `m22Holdout`, `m22Perf`, `m22Live` green in the batteries; P5 passes P4B's neutral `observationCopy` through unchanged and `m23TrialE2E` (refusal-copy group E) is green.
+Trial remains separate from decision: YES — J6/J7 (completion moves the case, not the decision), J10, D1–D2 (a decision with no trial).
+Formal decision is explicit human action: YES — the outcome is typed on the request (U6: nothing else is an outcome); the only writer is `finalizeHandler` on the lead's draft (J18); live A7 (finalize behind an explicit confirmation).
+Progress-to-offer-consideration path works: YES — J18/J18b, D2, live A7–A7i.
+Hold path works: YES — H7, D4, B4, live H2–H2e, live D2.
+Reject path works: YES — R5/R5b, live R2/R2b.
+Second Look integration works where applicable: YES — R8–R11, live R3.
+Non-Trial decision path works where supported: YES — D1–D4, live D1–D2b.
+Decision privacy proven: YES — I1 (three sentinels × 29 surfaces), I2–I5, live N10a–c, N11.
+Idempotency proven: YES — K4–K8, J28, J31, F4.
+Restart idempotency proven: YES — Z1–Z7, persistence §2 and §5 (SIGKILL and graceful stops, keys replay after reboot).
+Concurrency proven: YES — C1–C8b.
+Atomicity/failure injection proven: YES — F1–F4, D3b.
+EN/FR complete: YES — `dc.*` key sets identical between EN and FR in both club apps (96 = 96); live N16/N16b (French tab, no English fallback).
+390px flow passes: YES — live N13, N13b, N13c (club) and N13a (player).
+360px flow passes: YES — live N13d.
+Accessibility checks pass: YES — live N15–N15e (tab semantics, every control labelled, fieldset/legend, live region, keyboard).
+All typechecks green: YES — club, grassroots, admin, player: 0 errors on the final tree; re-run from the fresh clone at closure (see the closure section).
+All required builds green: YES — club, grassroots, admin (Vite) and player (Expo web) on the tree; club, grassroots, admin from the fresh clone.
+Full server regression green: YES — 45/45 scripts exit 0 on the final tree (table above).
+Full browser/live/demo regression green: YES — 37/37 scripts exit 0 with demos rebuilt (table above).
+P2.5 navigation regression green: YES — `navConfig` 282, `navLive` 64.
+P3 Contact regression green: YES — `m23ContactE2E`, `m23ContactPersistence`, `m23ContactPerf`, `m23ContactLive`.
+P4A closure regression green: YES — `m23P4AClosureE2E` 337 (210 negative).
+P4B Trial regression green: YES — `m23TrialE2E`, `m23TrialPersistence`, `m23TrialPerf`, `m23TrialLive` 122.
+M17 regression green: YES — `m17E2E`, `m17Perf`, `m17Live`, `m17DemoSpotcheck`.
+M18 regression green: YES — `m18E2E`, `m181E2E`, `m182E2E`, their perf scripts, `m18Live`, `m181Live`, `m182Live`, the three demo spotchecks.
+M20 regression green: YES — `m20E2E` 265, `m20Perf`, `m20Live` 59, `m20DemoSpotcheck`.
+M22 regression green: YES — `m22E2E` 112, `m22Blocker` 60, `m22Robustness` 48, `m22CvEval`, `m22Holdout`, `m22Perf`, `m22Live`.
+Recovery bundle verifies: YES — see the closure section (recut at the final tip).
+Fresh clone passes P5 core tests: YES — see the closure section.
+Tree clean: YES — `git status --short` empty after the closure commit.
+
+Open Critical defects: 0
+Open High defects: 0
+Open reasonably-fixable Medium defects: 0
+
+P5.5 artwork redesign begun: NO
+PR created: NO
+Deployment performed: NO
+
+## §176 (verbatim)
+
+M23 P5 ASSESSMENT + RECRUITMENT DECISION INTEGRATION COMPLETE
+EVIDENCE, ASSESSMENT, DISCUSSION AND FORMAL DECISION REMAIN DISTINCT
+FORMAL RECRUITMENT DECISIONS ARE EXPLICIT, AUDITABLE AND EVIDENCE-REFERENCED
+PLAYER/GUARDIAN PRIVACY IS PRESERVED
+POSITIVE DECISIONS STOP AT OFFER CONSIDERATION
+NO OFFER WORKFLOW HAS BEEN IMPLEMENTED
+ZERO KNOWN CRITICAL DEFECTS
+ZERO KNOWN HIGH DEFECTS
+ZERO KNOWN REASONABLY-FIXABLE MEDIUM DEFECTS
+P5 FROZEN AND RECOVERABLE
+READY FOR M23 P5.5 SCOUTBOX VISUAL SYSTEM
+
+## Final bookkeeping closure
+
+- **Final P5 tip** — the commit that carries this section (its hash is in the
+  closure message and in the bundle log; a commit cannot contain its own
+  hash). Report history: `24b9086` (unfilled draft), `280fc7c` (filled),
+  then this closure commit, which corrects §175 to the full block, restores
+  the verbatim §176, adds T4 to `m23DecisionE2E` and this section.
+- **Truth audit** — reviewed line by line against source, suites, the
+  adversarial sweep and both batteries; polarity as the mandate defines it:
+  31 negative safety assertions NO, 33 positive proof assertions YES, counts
+  0/0/0, three closing NOs — the set diffed line-for-line against the
+  mandate's block (70 = 70). No production source changed in this closure; one
+  test assertion (T4) was added.
+- **Recovery bundle** — recut at the final tip after this commit, replacing
+  the `f080bfe` bundle; its SHA-256, size, verify result and the fresh-clone
+  results (HEAD/tree equality, schema boot, the P5 suites, the regression
+  suites, four typechecks, builds, the P5 live journey from the clone) are
+  in the closure message and in the scratch log
+  `scratchpad/m23/bundle-p5-final.log`, because the tip that is hashed
+  cannot carry the hash.
+- **Open defects** — Critical 0, High 0, Medium 0, Low 4 inherited P4A items
+  (D6, D7, D8, D11), none touching visual-system migration, navigation,
+  shared component architecture, accessibility foundations or localisation
+  infrastructure.
+- **P5.5 readiness** — P5 frozen; P5.5 (visual system) not begun; Offer
+  Workflow not begun; `recruitmentOffers` not implemented; nothing pushed,
+  no PR, no deployment.
