@@ -86,7 +86,7 @@ reasonably-fixable Medium affecting existing production.
 | D-P56A-6 | Low | Notification addressing | Withdraw notification goes to the first non-removed agency user, not the proposer (`m13/transitions.mjs:304-305`). | The agency is the counterparty in the current model; nothing leaks; addressed by the personal model. | P5.6B B5 |
 | D-P56A-7 | Low | Grassroots `AgencyWall` copy | Present in `scoutbox-grassroots` but unreachable (grassroots orgs are never agencies). | Dead copy; harmless. | P5.6B B7 (remove with nav change) |
 | D-P56A-8 | Low | SSE audience | `trust_safety_only` maps to `identity.kind === 'admin'`, which `sseIdentityFor` never yields (`server.mjs:354-369, 409-413`). | Pre-existing since M18.2; fails closed (nobody receives it); no Agent event uses it. | M18.2 follow-up, unscheduled |
-| D-P56A-9 | Medium (pre-existing, documented in M14.1) | T&S identity | Shared `x-admin-key` with optional declared-reviewer headers; `attribution: 'shared_admin_key'` when absent. | Not reasonably fixable inside P5.6A (a per-reviewer T&S identity is a feature); today no T&S decision unlocks a regulated action. Becomes a **prerequisite** for P5.6C (DR-29) because a review resolution there would. | P5.6C |
+| D-P56A-9 | **Medium — OPEN, not downgraded** (pre-existing, documented in M14.1) | T&S identity | Shared `x-admin-key` with optional declared-reviewer headers; `attribution: 'shared_admin_key'` when absent. | Not fixed in P5.6A (an architecture milestone; a per-reviewer T&S identity is a feature with its own auth model and audit). **Decision (DR-29, frozen gate):** P5.6B may proceed because no regulated approval or rejection in P5.6B depends on reviewer identity (verification review outcomes are advisory facts re-checked at every authorization step; the client's confirmation, not T&S, is the root of private access). Before any P5.6C conflict/compliance decision becomes production-capable, per-reviewer T&S identity must be implemented and audited. | **P5.6C entry gate G-C0** |
 | D-P56A-10 | Low | `safeTrustProjection` | No `'agency'` case → `null` for agency Rooms (`m162/shared.mjs:454` vs `m17/rooms.mjs:131`). | Fails closed; the decision to show a `pro_club`-level view to a confirmed agent is DR-21, a feature. | P5.6B B4 |
 | D-P56A-11 | Low | Doc drift | `M16_BOX_CAM.md`, `M22_MATRIX.md` B6 (inherited P4A-D7); `M23_P5_DEFECT_REGISTER.md` "Open at closure" still lists the four P4A Lows. | Unchanged by P5.6A. | as before |
 
@@ -107,10 +107,18 @@ All Low, owners unchanged; no P5.6A code touches those paths.
 - **Regulatory uncertainties** (snapshot §9): ten items, none a software
   defect; each carries "blocking for build?" and "needs counsel?".
 
-## Open at closure
+## Open at closure (currency closure, 18 Sep 2026)
 
-Critical: 0. High: 0. Medium affecting existing production and
-reasonably fixable: 0 (D-P56A-9 is pre-existing, documented, not
-reasonably fixable inside an architecture milestone, and scheduled as a
-P5.6C prerequisite). Low: D-P56A-2 … D-P56A-8, D-P56A-10, D-P56A-11 plus
-the four inherited P4A items, each with an owner.
+Open Critical production defects: 0. Open High production defects: 0.
+Open reasonably-fixable Medium production defects **blocking P5.6B**: 0.
+**Open Medium prerequisite before P5.6C: D-P56A-9, shared T&S reviewer
+identity (not fixed; not downgraded).** ScoutBox does not claim zero
+Medium globally while D-P56A-9 is open. Low: D-P56A-2 … D-P56A-8,
+D-P56A-10, D-P56A-11 plus the four inherited P4A items, each with an
+owner.
+
+Regulatory currency is not a software defect and is recorded in the
+snapshot (§9, §11), but for completeness: the first cut of the P5.6A
+documents cited the FA 2025-26 regulations as current after they had
+been superseded on 1 June 2026; corrected in the currency-closure commit
+(snapshot §1, §3.11; DR-50). No production code depended on it.

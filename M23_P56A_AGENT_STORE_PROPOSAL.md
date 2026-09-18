@@ -71,6 +71,8 @@ Shape:
 ```
 { id, agentUserId, agencyOrgId, clientKind ∈ player|coach|club, clientId|externalRef, guardianId|null, isRegulatoryMinor,
   jurisdiction: { memberAssociation, declaredBy, confirmedByClient }, scope: [employment|transfer|commercial|other_services],
+  agencyParty: boolean,                       // FA 2026-27 3.3 Guidance / 4.1(b): the agency is also a party (R-E2b, DR-45)
+  agencyPerformanceConsentId: consentId|null, // all-parties written consent letting a licensed colleague perform; England only; disabled until L-9
   exclusive: boolean, startAt, endAt (≤ 24 months after startAt for player/coach), legalAdviceNotice: { shownAt, acknowledgedConsentId },
   feeTerms: { …as data, policyState } | null, documents: [evidenceId], shareWithAgencyStaff: boolean,
   status, proposedAt, confirmedAt, confirmedBy: { kind, id }, terminatedAt, terminatedBy, terminationReasonCode, disputedAt,
@@ -120,7 +122,7 @@ Shape: `{ id, transactionId, agentUserId, agencyOrgId (as at), partyRole, agreem
 
 | Question | Answer |
 |---|---|
-| Concept | The consent ledger: `dual_representation`, `guardian_approach`, `guardian_agreement`, `legal_advice_ack`, `client_staff_sharing` (the `shareWithAgencyStaff` change as a consent so it is attributable and revocable). |
+| Concept | The consent ledger: `dual_representation`, `agency_performance` (FA 2026-27 R-E2b; all parties to the agreement; England only), `guardian_approach`, `guardian_agreement`, `legal_advice_ack`, `client_staff_sharing` (the `shareWithAgencyStaff` change as a consent so it is attributable and revocable). |
 | Existing reusable store? | Box Cam / Combine consent lives on player prefs (`boxPrefsFor`), M14 tokens are single-use; neither is a ledger. |
 | New store required? | **YES.** |
 | Reason | Consents must be advance, attributable, revocable, versioned by policy and provable in order (R-F13 "prior written consent", R-F20 "prior written consent", R-F10 legal-advice acknowledgement). A ledger row is the only shape that supports "was this consent in force at time T under policy V". |
@@ -144,7 +146,7 @@ Shape: `{ id, kind, subject: { kind, id }, grantedBy: { kind, id, displayName },
 | PII level | None. |
 | History model | Immutable versions; a new version is a new row with `supersedes`. |
 
-Shape: `{ id: 'jp-<ma>-<n>', regulator, memberAssociation|null, effectiveFrom, effectiveTo|null, supersedes|null, rules: { [ruleId]: { state, params, sourceRef } }, sources: [ { title, url, date } ], publishedBy: [reviewerA, reviewerB], publishedAt }`.
+Shape: `{ id: 'jp-<jurisdiction>-<season>-<n>', regulator, jurisdiction, effectiveFrom, effectiveTo|null, policyVersion, supersedes|null, rules: { [ruleId]: { ruleStatus ∈ ACTIVE|SUSPENDED|PARTIALLY_SUSPENDED|JURISDICTION_OVERRIDE|UNDER_LEGAL_REVIEW|UNKNOWN, params, sourceRef: [ { source, version, effectiveDate, retrievedDate, url } ], note } }, publishedBy: [reviewerA, reviewerB], publishedAt }`. A rule that exists in source text while its enforcement is suspended is a row with `ruleStatus: SUSPENDED` (or `UNDER_LEGAL_REVIEW` when the suspension's own status is unsettled), never a deleted row. Initial versions: `jp-fifa-2025-1`, `jp-eng-2026-27-1`, `jp-usa-2024-1` (contents in the authorization contract §5.3).
 
 ## 8. Stores considered and rejected
 
@@ -174,8 +176,10 @@ Shape: `{ id: 'jp-<ma>-<n>', regulator, memberAssociation|null, effectiveFrom, e
 2. For each `db.orgs` row with `type === 'agency'`: set `platform: 'agent'`.
 3. For each `db.representations` row: insert a `representationAgreements`
    row as described in §3 with `legacy` set; leave the source row in place.
-4. Seed `jurisdictionPolicies` with `jp-fifa-1` and `jp-eng-1` from the
-   snapshot's rule states, sources and dates; `jp-usa-1` with every rule
-   `not_encoded` except licence-required.
+4. Seed `jurisdictionPolicies` with `jp-fifa-2025-1` and
+   `jp-eng-2026-27-1` (FA 2026-27, in force 1 Jun 2026) from the
+   currency-closed snapshot's rule statuses, sources and retrieved dates;
+   `jp-usa-2024-1` with every rule `UNKNOWN` except licence, background
+   check and SafeSport.
 5. Boot contract test (`m23BootContract` pattern) asserts all eight exist
    on a clean boot and after upgrade from 2304.

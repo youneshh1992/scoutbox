@@ -85,6 +85,8 @@ line is a legal-review item (`M23_P56A_AGENT_REGULATORY_SNAPSHOT.md` §8).
 | A27 | Dispute an agreement | CLIENT_ACTION | — | client | → T&S queue (C6). |
 | A28 | Record a legal-advice acknowledgement | CLIENT_ACTION | R-F10 (12(4)(a)–(b)), FA 4.5 | client | `regulatoryConsents{kind: legal_advice_ack}`. |
 | A29 | Assign / novate an agreement to another agent | **not built** | L-10 | — | Refused `REGULATORY_REVIEW_REQUIRED` until counsel answers L-10. |
+| A29b | Perform services for a client under a colleague's agency-party agreement (England, FA 2026-27 reg. 4.1(b)) | **REGULATED_AGENT_ACTION** | R-E2b; L-9 | a licensed, FA-registered colleague at the same agency, with all parties' `agency_performance` consent | Modelled (DR-45); England national scope only; **disabled in production until L-9**; performer recorded per act. |
+| A29c | Record the `agency_performance` consent | CLIENT_ACTION (client / guardian) + SHARED_WORKFLOW_ACTION (club party) | FA 3.3 Guidance, 4.1(b)(ii) | every party to the agreement | Consent-ledger row; revocable. |
 
 ## 5. Client workspace (agent's view of a confirmed client)
 
@@ -112,7 +114,7 @@ line is a legal-review item (`M23_P56A_AGENT_REGULATORY_SNAPSHOT.md` §8).
 | A41 | Add a party; declare which party the agent represents | **REGULATED_AGENT_ACTION** | R-F13–R-F15 | agent | Each `transactionRepresentations` row needs an active agreement with that party (or a `MANUAL_REGULATORY_REVIEW_REQUIRED` entry for entity clients without a ScoutBox record, DR-18). |
 | A42 | Request dual-representation consent | **REGULATED_AGENT_ACTION** | R-F13 (12(8)(a)), R-E7 (6.3) | agent | Only where the engine returned `PERMITTED_DUAL_REPRESENTATION_CONSENT_REQUIRED`. |
 | A43 | Grant dual-representation consent | CLIENT_ACTION (individual) / SHARED_WORKFLOW_ACTION (engaging entity user) | R-F13, R-E7 | the individual client (or guardian); the club's authorised user | Recorded per party, in advance, with the policy version; never assumed from silence. |
-| A44 | Record transaction terms (fee, payer, instalments) as data | **REGULATED_AGENT_ACTION** | R-F24 (suspended), R-E9 | agent | No validation of caps (P-5); the ledger records the applicable policy state (`suspended`, `in_force`, `not_encoded`). |
+| A44 | Record transaction terms (fee, payer, instalments) as data | **REGULATED_AGENT_ACTION** | R-F24 (suspended), R-E9 | agent | No validation of caps (P-5); the ledger records each applicable rule's `ruleStatus` (`ACTIVE`, `SUSPENDED`, `PARTIALLY_SUSPENDED`, `JURISDICTION_OVERRIDE`, `UNDER_LEGAL_REVIEW`, `UNKNOWN`) and policy version. |
 | A45 | Record Other Services alongside (24-month presumption) | **REGULATED_AGENT_ACTION** | R-F17 | agent | The engine flags `OTHER_SERVICES_PRESUMPTION` for review, never adjudicates. |
 | A46 | Correspondence inside the Transaction Room | SHARED_WORKFLOW_ACTION | R-F3 (L-14) | each party in its lane | Moderated; regulated for the agent lane. |
 | A47 | Close / withdraw a Transaction | **REGULATED_AGENT_ACTION** (agent) / SHARED (club) | — | agent or engaging club user | History retained. |

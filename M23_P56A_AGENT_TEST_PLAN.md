@@ -72,7 +72,7 @@ D-P56A-1 regression check added to `m162E2E` (defect register).
 E1–E15 from `M23_P56A_CONFLICT_ENGINE_CONTRACT.md` §7, plus: E16 severity
 ordering when several rules fire; E17 `inputHash` stable under key order;
 E18 `suspended` rule contributes a reason and never blocks; E19
-`not_encoded` yields review; E20 reasons carry codes only (regex: no name,
+`UNKNOWN` and `UNDER_LEGAL_REVIEW` yield review (never allow/block); E20 reasons carry codes only (regex: no name,
 no email, no org name in any reason).
 
 ## Group F — dual representation
@@ -82,13 +82,20 @@ no email, no org name in any reason).
 | F3 | Consent after first act | still required (`CONSENT_NOT_IN_ADVANCE`) |
 | F4 | Consent revoked → next mutation re-evaluates → required again | |
 | F5 | Consent from a club user not marked signatory | insufficient (`SIGNATORY_REQUIRED`) |
-| F6 | FIFA-only jurisdiction | 422 `REGULATORY_REVIEW_REQUIRED` (`RULE_SUSPENDED`), queue item created |
+| F6 | FIFA-only / international-dimension jurisdiction; individual + engaging | 422 `REGULATORY_REVIEW_REQUIRED` (`RULE_STATUS_UNCERTAIN`, `FIFA-12.8`), queue item created; **never** `CLEAR`, never consent-required |
+| F7 | England national; individual + engaging + a second individual (multiple representation), all four safeguards recorded | proceeds (`ENG-6.3`, `DUAL_CONSENTED`) — England's table, not FIFA's |
+| F8 | England national; consent recorded without `fullParticularsProvided` / `legalAdviceOffered` | still required (`PARTICULARS_MISSING` / `LEGAL_ADVICE_NOT_OFFERED`) |
+| F9 | `jp-fifa-2025-2` published with 12(8)–(10) `ACTIVE` (test fixture) → F6 re-run | consent-required; earlier evaluation rows unchanged |
+| F10 | England national; agreement `agencyParty: true`; colleague performs under an `agency_performance` consent from all parties | proceeds with `AGENCY_PERFORMANCE_CONSENTED`; performer recorded on the transaction |
+| F11 | F10 without the consent, or with a consent from only some parties, or performer not FA-registered, or not affiliated, or international dimension | 403 `REPRESENTATION_REQUIRED` / review; never proceeds |
+| F12 | F10 while the route's production flag is off (pre-L-9) | 403 `REPRESENTATION_REQUIRED` with reason `ROUTE_DISABLED_PENDING_REVIEW` |
 
 ## Group G — prohibited representation
 
-| G1 | releasing + individual, England | 403 `TRANSACTION_CONFLICT` (`CONF-REL-IND`) |
-| G2 | releasing + engaging | `CONF-REL-ENG` |
-| G3 | all three | `CONF-ALL` |
+| G1 | releasing + individual, England national | 403 `TRANSACTION_CONFLICT` (`ENG-6.4`) |
+| G2 | releasing + engaging, England national | `ENG-6.4` |
+| G3 | all three, England national | `ENG-6.4` |
+| G3b | releasing + individual, international dimension (FIFA set) | 422 `REGULATORY_REVIEW_REQUIRED` (`RULE_STATUS_UNCERTAIN`, `FIFA-12.9`) — **not** `TRANSACTION_CONFLICT` while the FIFA status is `UNDER_LEGAL_REVIEW` |
 | G4 | Connected colleague creates the conflict | same codes + `CONNECTED_AGENT_ATTRIBUTION` |
 | G5 | Prohibition never reveals the colleague's client | neg |
 
@@ -97,9 +104,10 @@ no email, no org name in any reason).
 | H1 | Agency search / discovery returns no minor (unchanged) | neg (existing suites stay green) |
 | H2 | Add a minor as prospect | 403 `MINOR_APPROACH_NOT_PERMITTED`, identical body for a non-existent id |
 | H3 | Approach request without minors authorisation | 403 `AGENT_MINOR_ACCREDITATION_REQUIRED` |
-| H4 | With authorisation but before `earliestPermittedApproachAt` (England: before 1 Sep of the year they turn 16) | 403 `MINOR_APPROACH_NOT_PERMITTED`, `reason: timing`, **no date in the body** |
+| H4 | With authorisation but before `earliestPermittedApproachAt` (England, FA 2026-27 reg. 5.1: before 1 Sep of the Academic Year in which they reach 16; fixture: a minor reaching 16 on 15 Mar 2027 is approachable from 1 Sep 2026, one reaching 16 on 15 Sep 2027 only from 1 Sep 2027) | 403 `MINOR_APPROACH_NOT_PERMITTED`, `reason: timing`, **no date in the body** |
+| H4b | Same fixture evaluated under a non-England jurisdiction with no encoded first-contract age | 422 `REGULATORY_REVIEW_REQUIRED` (`INSUFFICIENT_DATA`); the England formula is **not** applied |
 | H5 | On/after the date → guardian consent request created; agent still sees nothing about the minor | neg |
-| H6 | Jurisdiction with `not_encoded` timing | 422 `REGULATORY_REVIEW_REQUIRED`, nothing created |
+| H6 | Jurisdiction with `UNKNOWN` timing parameter | 422 `REGULATORY_REVIEW_REQUIRED`, nothing created |
 | H7 | Minor turns 18 mid-agreement → `isRegulatoryMinor` false; guardian controls hand over per existing majority logic | |
 | H8 | Minors-pathway read never returns DOB or location | neg |
 | H9 | `visibleToOrg(minor, agency)` remains false throughout (testTrust check) | neg |
@@ -188,7 +196,7 @@ Transaction Room tabs; R10 block ends access live (SSE).
 ## Group S — corruption and historical policy
 
 | S1 | Agreement row with `status: active` but no `confirmedAt` (corrupt) | treated as not active (`REPRESENTATION_REQUIRED`), T&S flagged |
-| S2 | Evaluation recorded under `jp-eng-1`; policy `jp-eng-2` published; read shows both, verdict unchanged until re-run | |
+| S2 | Evaluation recorded under `jp-eng-2026-27-1`; policy `jp-eng-2026-27-2` published; read shows both, verdict unchanged until re-run | |
 | S3 | Consent referencing a policy version that never existed | insufficient |
 | S4 | `jurisdictionPolicies` row missing at boot | boot contract fails loudly (M23-D2 rule) |
 

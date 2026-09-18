@@ -118,6 +118,25 @@ Refusals: `REPRESENTATION_REQUIRED` (no active row),
 cover). The one agreement-per-pair rule (R-F10, FA 4.4) is enforced at
 proposal time (409 `REPRESENTATION_ALREADY_EXISTS`).
 
+**England-only colleague route (FA 2026-27 reg. 3.3 Guidance and 4.1(b);
+snapshot R-E2b; currency closure).** Where the agreement's jurisdiction is
+England (`jp-eng-2026-27`), the action is inside the FA's national scope,
+the agreement has `agencyParty: true`, and an unrevoked
+`regulatoryConsents{ kind: agency_performance }` from **all parties to the
+agreement** predates the act, step 6 also accepts a performing agent who
+is not the contracting agent provided that they (a) passed step 5 with a
+verified FIFA licence **and** verified FA registration, (b) hold an active
+`agencyAffiliations` row at the same agency as the contracting agent, and
+(c) are recorded as the performer on the resulting transaction row (the FA
+requires every performing agent on the AF1, reg. 6.2 Guidance). The
+regulated act is still attributed to that one licensed natural person
+(P-2). Outside England, or for an international-dimension agreement, this
+basis is `UNKNOWN` and the step refuses `REPRESENTATION_REQUIRED`; a T&S
+review may not waive it (L-9). If the contracting agent leaves the agency
+the route stays available only while the consent is unrevoked and the
+agency remains a party; the parties are notified and may revoke (FA 3.3
+Guidance leaves the consequences to the parties).
+
 Step 6 does not apply to proposals (A14, A17): there is no agreement yet;
 the policy step (7) governs them.
 
@@ -133,9 +152,10 @@ the policy step (7) governs them.
   requiresGuardian: boolean,          // subject is a regulatory minor; guardian consent outstanding
   requiresMinorAccreditation: boolean,
   requiresNationalRegistration: boolean,
-  requiresLegalReview: boolean,       // rule state 'doubtful' | 'not_encoded' | policy conflict
-  reasons: [ { code, ruleId, state: 'in_force'|'suspended'|'doubtful'|'not_encoded', jurisdiction } ],
-  policyVersion: 'jp-<ma>-<n>' | ['jp-fifa-<n>', 'jp-eng-<n>']
+  requiresLegalReview: boolean,       // deciding rule UNDER_LEGAL_REVIEW | UNKNOWN | policy contradiction | mixed scope
+  reasons: [ { code, ruleId, ruleStatus: 'ACTIVE'|'SUSPENDED'|'PARTIALLY_SUSPENDED'|'JURISDICTION_OVERRIDE'|'UNDER_LEGAL_REVIEW'|'UNKNOWN',
+               regulator, jurisdiction, policyVersion } ],
+  policyVersions: ['jp-fifa-2025-1', 'jp-eng-2026-27-1', ...]
 }
 ```
 
@@ -169,16 +189,46 @@ Resolved once per action and stored on the record:
 
 ### 5.3 Versioned policy layer (A-1)
 
-`jurisdictionPolicies` rows (`{ regulator: 'FIFA' | MA code,
-effectiveFrom, effectiveTo, policyVersion, rules: { <ruleId>: { state,
-params } }, sources: [...] }`). Every evaluation names the versions it
-used. Publishing a new version is a COMPLIANCE_ACTION with dual control
-(C7). The initial content is exactly the snapshot's verified rules with
-their recorded states: FIFA 12(8)–(10) `suspended`, 14/15 `suspended`,
-16(1)(b)–(c) `doubtful`, 13 `in_force`, 12(1)–(7) `in_force`; England 6.3–6.5
-`in_force`, 5.1–5.8 `in_force`, 7 `in_force` (no cap), 4.7 `in_force`;
-U.S. minors `not_encoded`. Nothing here is legal authority (mandate §170);
-the versions carry their source URLs and dates.
+`jurisdictionPolicies` rows are versioned by **regulator, jurisdiction,
+effective date, policy version and per-rule status**:
+
+```
+{ id: 'jp-eng-2026-27-1', regulator: 'FA', jurisdiction: 'ENG', effectiveFrom: '2026-06-01', effectiveTo: null,
+  policyVersion: 1, supersedes: null,
+  rules: { 'ENG-6.3': { ruleStatus: 'ACTIVE', params: {...},
+                        sourceRef: [{ source: 'FA Football Agent Regulations 2026-27 s.17', version: '2026-27',
+                                      effectiveDate: '2026-06-01', retrievedDate: '2026-09-18' }] }, ... },
+  publishedBy: [reviewerA, reviewerB], publishedAt }
+```
+
+`ruleStatus ∈ ACTIVE | SUSPENDED | PARTIALLY_SUSPENDED |
+JURISDICTION_OVERRIDE | UNDER_LEGAL_REVIEW | UNKNOWN` (snapshot §0 maps
+these to the five human classifications). A rule may exist in source text
+while its enforcement is suspended, and that distinction is
+representable: the FFAR text rows exist with `SUSPENDED` or
+`UNDER_LEGAL_REVIEW`, never deleted. The engine's treatment of each status
+is fixed in `M23_P56A_CONFLICT_ENGINE_CONTRACT.md` §3; the fail-honest
+rule is that `UNDER_LEGAL_REVIEW` and `UNKNOWN` deciding rules yield
+`MANUAL_REGULATORY_REVIEW_REQUIRED`, never an allow or a block chosen by
+ScoutBox.
+
+Initial versions (from the currency-closed snapshot, all retrieved 18 Sep
+2026): `jp-fifa-2025-1` — FFAR 2025 edition; 8, 11, 12(1)–(7), 12(13)–(14),
+13, 14(9), 16(2)(c), 16(3), 18 `ACTIVE`; 12(8)–(10), 14(2)(6)(7)(8)(10)(11)(12)(13),
+15(1)–(4), 16(2)(h)(j)(k)(4), 19, submission rule `UNDER_LEGAL_REVIEW`
+(Circular 1873 + CJEU 16 Jul 2026 + no FIFA notice, snapshot §11);
+16(1)(b)–(c) `UNDER_LEGAL_REVIEW`; 13(1) first-contract-age parameter
+`UNKNOWN` for every country. `jp-eng-2026-27-1` — FA 2026-27 (in force 1
+Jun 2026); 2, 3, 4, 5.1–5.7, 6.1–6.7, 7.2–7.4, 7.10, 7.11, 7.14, 8.3–8.8,
+9.5, 9.6 `ACTIVE`; 6.3–6.5 marked `JURISDICTION_OVERRIDE` of FIFA
+12(8)–(10) for national-scope transactions; 7.13 and reporting limbs
+mirroring suspended FFAR provisions `PARTIALLY_SUSPENDED`/`UNKNOWN` (L-7);
+8.1(b)–(c), 8.2 `UNDER_LEGAL_REVIEW`; minors timing `params: { formula:
+'academic_year_16', academicYearStart: '09-01' }`. `jp-usa-2024-1` —
+licence, background check, SafeSport `ACTIVE`; all else `UNKNOWN`.
+Publishing a new version is a COMPLIANCE_ACTION with dual control and
+counsel review (C7). Nothing here is legal authority; the versions carry
+their source references.
 
 ### 5.4 Conflict evaluation
 
@@ -225,14 +275,22 @@ removing the global rule (§48); this contract keeps it.
 
 `earliestPermittedApproachAt(minor, policySet)`:
 
-- England (R-E4): 1 September of the Academic Year (1 Sep–31 Aug) in which
-  the minor turns 16;
-- FIFA formula (R-F20): six months before the minor may sign a first
-  professional contract under the employing country's law; requires the
-  employing country and its first-contract age from the policy set; if
-  absent → `INSUFFICIENT_DATA`;
-- stricter of the applicable set wins; none encoded → `INSUFFICIENT_DATA`
-  → refused.
+- England (R-E4, FA 2026-27 reg. 5.1, `jp-eng-2026-27-1`): 1 September of
+  the Academic Year (1 Sep–31 Aug) in which the minor reaches 16; the
+  guidance table for 2025–2027 is encoded as-is (a minor reaching 16
+  between 1 Sep 2026 and 31 Aug 2027 → from 1 Sep 2026). This formula is
+  **England's only** and is never copied into the FIFA/global entry.
+- FIFA formula (R-F20, FFAR 13(1), `ACTIVE` with an `UNKNOWN` parameter):
+  six months before the minor may sign a first professional contract
+  under the employing country's law; requires the employing country and
+  its encoded first-contract age; if absent → `INSUFFICIENT_DATA`.
+- The applicable entry is chosen by the minor's jurisdiction and the
+  transaction's scope; where both an `ACTIVE` national rule and the FIFA
+  rule apply, the stricter date wins; none encoded → `INSUFFICIENT_DATA`
+  → refused. **No production minors pathway exists for any jurisdiction
+  whose entry is not encoded from primary sources and legally reviewed**
+  (P-4); "the FIFA rule alone" is never sufficient for a national
+  jurisdiction.
 
 ## 8. Error families (§134) — public shape
 
@@ -256,7 +314,7 @@ removing the global rule (§48); this contract keeps it.
 
 `PUBLIC_ERROR_FIELDS` grows by exactly: `facet, state, memberAssociation,
 required, reasons, policyVersion, consentsOutstanding, consentKind,
-reviewId, agreementId`. `reasons` entries are `{code, ruleId, state}`
+reviewId, agreementId`. `reasons` entries are `{code, ruleId, ruleStatus, regulator, jurisdiction, policyVersion}`
 only; prose stays server-side.
 
 ## 9. Events (§135)

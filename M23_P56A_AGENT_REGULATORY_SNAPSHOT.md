@@ -1,8 +1,11 @@
 # M23 P5.6A — Agent Regulatory Snapshot
 
-Snapshot date: **18 September 2026**. Every rule below was read from the
-governing body's own text on that date, from the sources listed in §1. The
-four categories the mandate demands are kept apart throughout:
+Snapshot date: **18 September 2026** (currency closure; supersedes the
+first cut of this document, which used the FA's 2025-26 texts as if
+current). Every rule below was read from the governing body's own text on
+that date, from the sources listed in §1, and every **current** rule names
+its source, version/season, effective date and retrieved date. The four
+categories the mandate demands are kept apart throughout:
 
 - **VERIFIED CURRENT RULE** — quoted or closely paraphrased from a primary
   source, with article number, edition and date.
@@ -12,44 +15,79 @@ four categories the mandate demands are kept apart throughout:
   the rule and the policy can be enforced and re-versioned.
 - **LEGAL-REVIEW ITEM** — anything ScoutBox must not decide alone.
 
+Each rule also carries a **rule-status classification** (§0) because a rule
+can exist in a governing body's text while its enforcement is suspended,
+overridden by a national regulator, or of uncertain legal status.
+
 Nothing in this document is legal advice, and no ScoutBox review replaces
-specialist sports-law counsel (§5 of the mandate). Where this snapshot found
-a conflict with the mandate's hypotheses (§6 A–I), the source wins and the
-conflict is recorded in §4.
+specialist sports-law counsel. Where this snapshot found a conflict with
+the mandate's hypotheses (§6 A–I of the original mandate), the source wins
+and the conflict is recorded in §5. Where governing-body materials conflict
+with each other, the conflict is recorded in §11 and the architecture
+fails honest (`MANUAL_REGULATORY_REVIEW_REQUIRED`), never to a guess.
+
+---
+
+## 0. Rule-status classification (used throughout)
+
+| Classification | Meaning | Engine `ruleStatus` (policy layer) |
+|---|---|---|
+| **CURRENTLY OPERATIVE** | The body whose rule it is says it applies now, and no later instrument of that body suspends it | `ACTIVE` |
+| **TEXT EXISTS BUT ENFORCEMENT SUSPENDED** | The rule is in the current edition's text; the same body has suspended its application/enforcement by a later instrument that has not been withdrawn | `SUSPENDED` (or `PARTIALLY_SUSPENDED` when only part of a provision is affected) |
+| **OPERATIVE IN SPECIFIC JURISDICTION** | A national regulator applies its equivalent rule in its territory regardless of the FIFA-level status | `JURISDICTION_OVERRIDE` (national policy set carries `ACTIVE`; FIFA set carries its own status) |
+| **LEGAL STATUS UNCERTAIN** | Governing-body materials conflict, or the instrument's own end-condition may have occurred without the body saying so | `UNDER_LEGAL_REVIEW` |
+| **COUNSEL REVIEW REQUIRED** | ScoutBox cannot settle the question from the sources; counsel must | `UNDER_LEGAL_REVIEW` (blocking) or `UNKNOWN` (not encoded) |
+
+A rule may carry more than one classification (e.g. FIFA 12(8): TEXT
+EXISTS BUT ENFORCEMENT SUSPENDED **and** LEGAL STATUS UNCERTAIN **and**
+OPERATIVE IN SPECIFIC JURISDICTION (England)). The engine resolves per
+jurisdiction: `ACTIVE` applies; `SUSPENDED` contributes a reason and does
+not block; `JURISDICTION_OVERRIDE` selects the national entry;
+`UNDER_LEGAL_REVIEW`, `UNKNOWN` → `MANUAL_REGULATORY_REVIEW_REQUIRED`.
 
 ---
 
 ## 1. Sources read
 
-| # | Source | Body | Jurisdiction | Edition / date | How obtained |
-|---|---|---|---|---|---|
-| S1 | FIFA Football Agent Regulations (FFAR) — `digitalhub.fifa.com/m/1e7b741fa0fae779/original/FIFA-Football-Agent-Regulations.pdf` | FIFA | worldwide (international dimension) | Approved by the FIFA Council 10 December 2024, **in force 1 January 2025** (art. 28); PDF metadata "FFAR 2024 Cover V2", 2024-12-11 | PDF fetched and text-extracted locally (39 pages) |
-| S2 | FIFA Circular no. 1873 "FIFA Football Agent Regulations: update on implementation" — `digitalhub.fifa.com/m/76b4cdc63e42e03f/original/1873_FIFA-Football-Agent-Regulations-update-on-implementation.pdf` | FIFA | worldwide | 30 December 2023 | PDF fetched and text-extracted |
-| S3 | Court of Justice of the EU, Press Release No 110/26, Judgment in Case C-209/23 *RRC Sports* — `curia.europa.eu/site/upload/docs/application/pdf/2026-07/cp260110en.pdf` | CJEU (via Regional Court, Mainz) | EU law; effect on FFAR worldwide via FIFA's own suspension | **16 July 2026** | PDF fetched and text-extracted; the full judgment text was not read (press release only) |
-| S4 | FIFA news "FIFA welcomes Court of Justice of the European Union decision on FIFA Football Agent Regulations" — `inside.fifa.com/news/welcomes-court-of-justice-european-union-decision-football-agent-regulations` | FIFA | — | 16 July 2026 | web page |
-| S5 | FIFA "FAQ & How to contact us" (agents) — `inside.fifa.com/transfer-system/agents/faq-agents` | FIFA | — | page states last updated 23 January 2025 | web page |
-| S6 | FIFA agents hub — `inside.fifa.com/legal/football-regulatory/agents` (links: how to become licensed, education, Agents Chamber, national regulations, general secretariat decisions, representation agreement template, licensed agents directory `agents.fifa.com/directory-agents`) | FIFA | — | read 18 Sep 2026 | web page (directory page is script-rendered; its fields could not be read) |
-| S7 | The FA Football Agent Regulations 2025-26 (Rules of The Association, Section 19, "6 August 2025") — `thefa.com/-/media/files/thefaportal/governance-docs/rules-of-the-association/2025-26/section-19---the-football-agent-regulations---6-august-2025.ashx` | The FA | England | **in force 1 June 2025**; suspended provisions "shaded in grey" | PDF fetched and text-extracted (shading is not visible in extracted text — see L-7) |
-| S8 | The FA Football Agent Regulations Guidance 2025-26 — `thefa.com/-/media/files/thefaportal/governance-docs/agents/2025-26-forms/the-fa-football-agent-regulations-guidance-2025-26.ashx` | The FA | England | 2025-26 | PDF fetched and text-extracted |
-| S9 | The FA "List of FA Registered Football Agents as of 22 May 2026" — `thefa.com/-/media/files/thefaportal/governance-docs/agents/2025-26-forms/list-of-fa-registered-football-agents-22nd-may-26.ashx` | The FA | England | 22 May 2026 | located by search; existence verified, content not read |
-| S10 | U.S. Soccer "Player Agents" — `ussoccer.com/federation-services/soccer-agents` | U.S. Soccer Federation | United States | read 18 Sep 2026 (exam dates for 2026 listed) | web page |
-| S11 | Secondary (not relied on for any rule, used only to locate primary texts): Lewis Silkin, LawInSport, Clifford Chance, Brick Court, Ashurst, 14 Sports Law, EU Law Live, Mondaq | — | — | 2023–2026 | search results |
+All retrieved **18 September 2026** unless stated. "Current" sources are
+the active basis; "historical" sources are kept only where they explain
+prior behaviour and are never labelled current.
 
-**Not available:** no FIFA circular lifting or amending the Circular 1873
-suspension after the CJEU judgment was found on 18 September 2026 (S4 says
-only that FIFA will consult agent representatives and that a new transfer
-system enters into force on 1 January 2027). The FIFA "general secretariat
-decisions" page (S6) states "last updated 3 September 2025" and its list
-could not be read. The FIFA Agent Platform and the licensed-agents
-directory expose **no documented public API**. U.S. Soccer's own national
-regulations document was not located; only S10 was read.
+| # | Source | Body | Jurisdiction | Version / season | Effective | Status in this snapshot | How obtained |
+|---|---|---|---|---|---|---|---|
+| S1 | FIFA Football Agent Regulations (FFAR) — `digitalhub.fifa.com/m/1e7b741fa0fae779/original/FIFA-Football-Agent-Regulations.pdf` | FIFA | worldwide (international dimension) | Edition approved by the FIFA Council 10 Dec 2024; PDF metadata "FFAR 2024 Cover V2" | **1 January 2025** (art. 28) | **CURRENT text** | PDF fetched and text-extracted (39 pp.) |
+| S2 | FIFA Circular no. 1873 "FIFA Football Agent Regulations: update on implementation" — `digitalhub.fifa.com/m/76b4cdc63e42e03f/original/1873_FIFA-Football-Agent-Regulations-update-on-implementation.pdf` | FIFA | worldwide | 30 Dec 2023 | 30 Dec 2023 | **CURRENT instrument** (last FIFA instrument on suspension found; not withdrawn; see §11) | PDF fetched and text-extracted |
+| S3 | CJEU Press Release No 110/26, judgment in Case C-209/23 *RRC Sports* — `curia.europa.eu/site/upload/docs/application/pdf/2026-07/cp260110en.pdf` | CJEU | EU law | 16 Jul 2026 | 16 Jul 2026 | CURRENT (press release; full judgment not read) | PDF fetched and text-extracted |
+| S4 | FIFA news "FIFA welcomes Court of Justice of the European Union decision on FIFA Football Agent Regulations" — `inside.fifa.com/news/welcomes-court-of-justice-european-union-decision-football-agent-regulations` | FIFA | — | 16 Jul 2026 | — | CURRENT (FIFA's only post-judgment statement found; silent on the suspension) | web page |
+| S5 | FIFA "FAQ & How to contact us" (agents) — `inside.fifa.com/transfer-system/agents/faq-agents` | FIFA | — | page states **last updated 23 January 2025** | — | CURRENT page, **pre-dates S3**; describes rule *text* without mentioning S2 (see §11) | web page, re-read 18 Sep 2026 |
+| S6 | FIFA agents hub and "Latest agents news" — `inside.fifa.com/transfer-system/agents`, `…/agents/latest`, `…/agents/national-football-agent-regulations` | FIFA | — | news list read 18 Sep 2026: items dated 16 Jul 2026, 12 Mar 2026, 18 Dec 2025, 15 May 2025 … | — | CURRENT; **no circular, implementation notice or FAQ update after 16 Jul 2026 is listed**; the national-regulations page is script-rendered and its list could not be read | web pages |
+| S6b | FIFA "Bureau of the Council approves new regulatory framework for the global football transfer system" — `inside.fifa.com/transfer-system/news/bureau-council-new-regulatory-framework-global-football-transfer-system-2027` | FIFA | — | 10 Jun 2026 | RSTP in force 1 Jan 2027 | CURRENT; contains **no** agent-regulation content | web page |
+| **S7** | **The FA Football Agent Regulations 2026-27** — FA Handbook 2026-27, Rules of The Association **section 17**: `thefa.com/-/media/files/thefaportal/governance-docs/rules-of-the-association/2026-27/section-17---football-agent-regulations.ashx` (24 pp., SHA-256 `3c2aa25b…07bf8`); the same text without the Handbook page furniture at `thefa.com/-/media/files/thefaportal/governance-docs/agents/the-fa-football-agent-regulations-2026-27.ashx` (SHA-256 `b43adf99…1ebb`) | The FA | England | **2026-27** | **"These Regulations came into force on 1 June 2026."** (introduction). Introduction also states: "A number of provisions of these Regulations are temporarily suspended … (see FIFA Circular 1873, dated 30 December 2023). The suspended provisions are shaded in grey. … any provision that is not shaded in grey is effective." | **CURRENT — the active England basis** | PDFs fetched and text-extracted; grey shading is not recoverable from extracted text (L-7); the 2026-27 guidance (S8) is used to infer which provisions are *not* suspended |
+| **S8** | **The FA Football Agent Regulations Guidance 2026-27** — `thefa.com/-/media/files/thefaportal/governance-docs/agents/the-fa-football-agent-regulations-guidance-2026-27.ashx` (34 pp., SHA-256 `abc83559…1222`) | The FA | England | 2026-27 | accompanies S7 | **CURRENT**. States: "These guidance notes do not, therefore, cover the suspended provisions but shall be updated in due course should there be any relevant change to the regulatory position." | PDF fetched and text-extracted |
+| **S9** | The FA "List of FA Registered Football Agents — 18 September 2026" (linked from `thefa.com/football-rules-governance/policies/player-status---agents/fa-registered-football-agents`; earlier versions 28 Aug, 11 Sep 2026 located) | The FA | England | 18 Sep 2026 | — | CURRENT; page text: "Only individuals registered with The FA as agents are authorised to conduct football agent services on behalf of players, coaches and clubs in England." | page read; list content not read |
+| **S9b** | FA "Representation Agreements" page and templates — `thefa.com/football-rules-governance/policies/player-status---agents/representation-agreements`: FA NFAR Standard Player-Coach, Club, Tripartite, Subcontract agreements and Notification of Termination letter (DOCX); Player-Coach template SHA-256 `ee68fae4…9fad` | The FA | England | undated DOCX; page current | — | CURRENT ("intended for use where football agent services are provided to a player registered in England or to a club in relation to a national transaction") | page read; Player-Coach DOCX fetched and text-extracted |
+| **S9c** | FA "FA Registered Football Agent — Criminal Record Check Process" — `thefa.com/-/media/files/thefaportal/governance-docs/agents/fa-registered-football-agent---criminal-record-check-process.ashx` (SHA-256 `56ae4d7b…1173`) | The FA | England | undated | — | CURRENT (minors authorisation material; procedure via First Advantage / KnowYourPeople, enhanced DBS) | PDF fetched and text-extracted |
+| S9d | FA agent regulations landing page — `thefa.com/football-rules-governance/policies/player-status---agents/fa-football-agent-regulations` | The FA | England | — | — | CURRENT: "The FA Football Agent Regulations have been updated ahead of the 2026/27 season and come into effect from 1st June 2026." Forms linked: AF1 (July 2025 version), AF2, AF-NR, Annual Return, CH1 | web page |
+| S10 | U.S. Soccer "Player Agents" — `ussoccer.com/federation-services/soccer-agents` | U.S. Soccer | United States | read 18 Sep 2026 | — | CURRENT (thin) | web page |
+| S11 | Secondary (never relied on for a rule; used to locate primary texts and to check whether any FIFA instrument after S3 exists): 14 Sports Law (Aug 2026), Macfarlanes, White & Case, Concurrences, Lagom, Inside World Football (17 Jul 2026), Lewis Silkin, LawInSport, Mondaq | — | — | 2023–2026 | — | contextual only | search results |
+| **H1 (historical)** | The FA Football Agent Regulations 2025-26 (Rules of The Association section 19, "6 August 2025"), in force 1 June 2025 – 31 May 2026 | The FA | England | 2025-26 | superseded 1 Jun 2026 | **HISTORICAL — NOT CURRENT**; used only in §3.11 to record what changed | PDF text kept from the first cut |
+| **H2 (historical)** | The FA Football Agent Regulations Guidance 2025-26 | The FA | England | 2025-26 | superseded | HISTORICAL — NOT CURRENT | as above |
+
+**Not available on 18 September 2026:** any FIFA circular, implementation
+notice, General Secretariat decision or FAQ update issued after the CJEU
+judgment that lifts, confirms, narrows or replaces the Circular 1873
+suspension (S6 news list ends at 16 Jul 2026 for agent items; S4 is silent
+on the suspension; S5 was last updated before the judgment). The FIFA
+Agent Platform and the licensed-agents directory expose **no documented
+public API**. U.S. Soccer's national regulations text was not located.
 
 ---
 
 ## 2. Verified current rules — FIFA (S1 unless stated)
 
 Format per rule: rule · body · jurisdiction · source · edition · effective
-· architectural consequence · legal review?
+· retrieved 18 Sep 2026 · **status** · architectural consequence · legal
+review?
 
 ### 2.1 Who is a football agent
 
@@ -58,9 +96,11 @@ Format per rule: rule · body · jurisdiction · source · edition · effective
   Agent Services" (Definitions). "Only a Football Agent may perform Football
   Agent Services" (art. 11(1)). A licence "is issued to a natural person …
   is strictly personal and non-transferable" (art. 8(1)(a)–(b)). — FIFA ·
-  worldwide · S1 · 2025 · in force 1 Jan 2025 · **Consequence:** the licensed
-  identity is a person, never an organisation; every regulated action must
-  be attributable to that person. · Legal review: NO (unambiguous).
+  worldwide · S1 · 2025 · in force 1 Jan 2025 · **CURRENTLY OPERATIVE**
+  (not among the S2 suspended provisions; S3: the licence requirement "may
+  be justified"). · **Consequence:** the licensed identity is a person,
+  never an organisation; every regulated action must be attributable to
+  that person. · Legal review: NO.
 - **R-F2 Agencies are vehicles, not licensees.** "Agency: an organisation,
   entity, firm or private company retaining, comprising, employing or
   otherwise acting as a vehicle for the business affairs of one or more
@@ -69,22 +109,22 @@ Format per rule: rule · body · jurisdiction · source · edition · effective
   the Agency that are not Football Agents may not perform Football Agent
   Services or make any Approach to a potential Client … A Football Agent
   remains fully responsible for any conduct by their Agency" (art. 11(3)).
-  · **Consequence:** an agency organisation carries no licence; unlicensed
-  staff have no regulated action; the agent is accountable for agency
-  staff — which ScoutBox must make visible in audit. · Legal review: NO.
+  · **CURRENTLY OPERATIVE.** · **Consequence:** an agency organisation
+  carries no licence; unlicensed staff have no regulated action; the agent
+  is accountable for agency staff. England adds a *licensed-colleague*
+  performance route (R-E2b). · Legal review: NO.
 - **R-F3 What counts as a regulated service.** "Football Agent Services:
   football-related services performed for or on behalf of a Client,
   including any negotiation, communication relating or preparatory to the
   same, or other related activity, with the purpose, objective and/or
-  intention of concluding a Transaction" (Definitions). "Other Services:
-  … including but not limited to, providing legal advice, financial
-  planning, scouting, consultancy, management of image rights and
-  negotiating commercial contracts." · **Consequence:** the action
-  classification (§73 of the mandate) must treat *preparatory
-  communication intended to conclude a Transaction* as regulated, and must
-  not let "scouting"/"consultancy" labels escape the conflict rules where
-  the regulations attach Other Services to them (see R-F13, R-F14). ·
-  Legal review: YES for edge cases (what is "preparatory").
+  intention of concluding a Transaction" (Definitions). "Other Services: …
+  including but not limited to, providing legal advice, financial planning,
+  scouting, consultancy, management of image rights and negotiating
+  commercial contracts." · **CURRENTLY OPERATIVE.** · **Consequence:**
+  preparatory communication intended to conclude a Transaction is
+  regulated; "scouting"/"consultancy" labels do not escape the conflict
+  rules where Other Services are attached (R-F13, R-F14). · Legal review:
+  YES for edge cases (L-14).
 - **R-F4 Approach is defined broadly.** "Approach: (i) any physical,
   in-person contact or contact via any means of electronic communication
   with a Client; (ii) any direct or indirect contact with another person or
@@ -92,83 +132,53 @@ Format per rule: rule · body · jurisdiction · source · edition · effective
   (iii) any action when a Football Agent uses or directs another person or
   organisation to contact a Client on their behalf" (Definitions). "Only a
   Football Agent may Approach a potential Client" (art. 12(2)). ·
-  **Consequence:** an in-app message from an agent or agency staff to a
-  player, guardian or family member *is* an Approach; the minors gate and
-  the licence gate sit in front of message send, not after. · Legal
-  review: NO.
-- **R-F5 Eligibility is continuous.** Art. 5 lists eligibility (no listed
-  criminal convictions incl. sexual abuse and child trafficking; no
-  suspension ≥ 2 years by a regulator; not an official of a club, league,
-  association; no Interest in a club, academy or league; no betting
-  interest; no unlicensed activity in the prior 24 months; no bankruptcy in
-  5 years) and "An applicant must satisfy the eligibility requirements … at
-  all times after obtaining a licence" (art. 5(2)(b)). · **Consequence:**
-  licence status is not a one-time fact; see R-F7. · Legal review: NO.
-- **R-F6 CPD is annual and enforced by automatic suspension.** "To maintain
-  their licence, a Football Agent shall comply with the CPD requirements on
-  an annual basis" (art. 9(1)); FIFA FAQ (S5): "A football agent must earn a
-  minimum of 20 credits per CPD calendar year", "A CPD calendar year runs
-  from 1 October to 30 September", "If a football agent fails to meet the
-  CPD Requirements, their licence will automatically be provisionally
-  suspended." · **Consequence:** licence status can change on a calendar
-  boundary without any transaction; caches must expire (see §6). · Legal
-  review: NO.
-- **R-F7 Licence states.** "If a Football Agent fails to: a) meet the
-  eligibility requirements at any time; b) pay the annual licence fee … c)
-  comply with the CPD requirements … or d) comply with their reporting
-  obligations; their licence shall automatically be provisionally
-  suspended" (art. 17(1)); withdrawal after 60 days without rectification
-  (art. 17(4)(b)); voluntary temporary suspension or termination (art. 10).
-  · **Consequence:** the identity model must carry at least `active`,
-  `provisionally_suspended`, `suspended`, `withdrawn`, `terminated`,
-  plus ScoutBox's own `unverified`/`stale` states; a withdrawn licence
-  requires a full new application (art. 10(2)). · Legal review: NO.
+  **CURRENTLY OPERATIVE.** · **Consequence:** an in-app message from an
+  agent or agency staff to a player, guardian or family member *is* an
+  Approach; the minors gate and the licence gate sit before message send. ·
+  Legal review: NO.
+- **R-F5 Eligibility is continuous.** Art. 5 eligibility (no listed criminal
+  convictions incl. sexual abuse and child trafficking; no suspension ≥ 2
+  years; not an official; no Interest in a club, academy or league; no
+  betting interest; no unlicensed activity in the prior 24 months; no
+  bankruptcy in 5 years) and "at all times after obtaining a licence" (art.
+  5(2)(b)). · **CURRENTLY OPERATIVE.** · Legal review: NO.
+- **R-F6 CPD is annual and enforced by automatic suspension.** Art. 9(1);
+  S5: 20 credits per CPD year (1 Oct–30 Sep); failure → automatic
+  provisional suspension. · **CURRENTLY OPERATIVE.** · **Consequence:**
+  licence status can change on a calendar boundary; caches must expire. ·
+  Legal review: NO.
+- **R-F7 Licence states.** Art. 17(1) automatic provisional suspension
+  (eligibility, fee, CPD, reporting); withdrawal after 60 days (17(4)(b));
+  voluntary suspension/termination (art. 10). · **CURRENTLY OPERATIVE**
+  (the reporting limb interacts with the suspended reporting duties,
+  R-F25). · **Consequence:** states `active`, `provisionally_suspended`,
+  `suspended`, `withdrawn`, `terminated` plus ScoutBox's `unverified` /
+  `stale`. · Legal review: NO.
 
 ### 2.2 Representation agreements
 
-- **R-F8 Written agreement first.** "A Football Agent may only perform
-  Football Agent Services for a Client after having entered into a written
-  Representation Agreement with that Client" (art. 12(1)). Minimum content:
-  "a) The names of the parties b) The duration (if applicable) c) The
-  amount of the service fee … d) The nature of the Football Agent Services
-  … e) The parties' signatures" (art. 12(7)). · **Consequence:** no
-  regulated action without a recorded agreement; the five minimum fields
-  are the objective validation set. · Legal review: NO for the fields; YES
-  for enforceability of any given agreement.
-- **R-F9 Maximum term for Individuals: two years.** "A Representation
-  Agreement concluded between an Individual and a Football Agent may not
-  exceed two years. This term may be extended by a new Representation
-  Agreement only. Any automatic renewal provision … shall be null and void"
-  (art. 12(3)). Entity agreements have no maximum (art. 12(5)). · Legal
-  review: NO.
-- **R-F10 One agreement per agent–Individual pair at a time; legal-advice
-  notice.** "A Football Agent may only execute one Representation Agreement
-  with the same Individual at any one time. Before entering into … or
-  before amending … the Football Agent shall: a) inform the Individual in
-  writing that they should consider taking independent legal advice … and
-  b) obtain the Individual's written confirmation that they have either
-  obtained or decided not to take such independent legal advice" (art.
-  12(4)). · **Consequence:** overlap check per (agent, individual);
-  legal-advice notice and acknowledgement are two dated facts on the
-  agreement record, required again on amendment. · Legal review: NO.
-- **R-F11 Autonomy clauses void; termination for just cause.** Clauses
-  limiting or penalising an Individual's autonomous negotiation are void
-  (art. 12(13)). Either party may terminate for just cause, which includes
-  "the withdrawal or suspension of a Football Agent licence" (art. 12(14)).
-  · **Consequence:** the agreement record must not be architected as
-  "exclusive control"; termination with a reason is a first-class event. ·
-  Legal review: YES (consequences of termination without just cause).
-- **R-F12 The exclusive-agreement approach window is now legally
-  doubtful.** Art. 16(1)(b)–(c): an agent may "not Approach a Client that
-  is bound by an exclusive Representation Agreement with another Football
-  Agent, except in the final two months". S3 (CJEU, 16 July 2026): "The
-  rule prohibiting agents from approaching or concluding representation
-  agreements with a client who is already bound by an exclusive
-  representation agreement outside of a two-month window preceding the
-  expiry of the contract appears, in any event, to be incompatible with the
-  prohibition on cartels." · **Consequence:** ScoutBox must NOT encode the
-  two-month window as a hard block; at most as a versioned, jurisdiction-
-  scoped policy flag defaulting to *manual review*. · Legal review: **YES**.
+- **R-F8 Written agreement first.** Art. 12(1); minimum content art. 12(7)
+  (names, duration if applicable, service fee, nature of services,
+  signatures). · **CURRENTLY OPERATIVE.** · Legal review: NO for the
+  fields; YES for enforceability (L-3).
+- **R-F9 Maximum term for Individuals: two years** (art. 12(3)); entity
+  agreements have no maximum (12(5)); automatic renewal void. ·
+  **CURRENTLY OPERATIVE.** · Legal review: NO.
+- **R-F10 One agreement per agent–Individual pair; legal-advice notice and
+  acknowledgement, again on amendment** (art. 12(4)). · **CURRENTLY
+  OPERATIVE.** · Legal review: NO.
+- **R-F11 Autonomy clauses void; termination for just cause** incl.
+  licence withdrawal/suspension (art. 12(13)–(14)). · **CURRENTLY
+  OPERATIVE.** · Legal review: YES (consequences of termination).
+- **R-F12 Exclusive-agreement approach window.** Art. 16(1)(b)–(c): no
+  Approach to / agreement with a Client bound by an exclusive agreement
+  with another agent "except in the final two months". S3: this rule
+  "appears, in any event, to be incompatible with the prohibition on
+  cartels". Not listed in S2. · **TEXT EXISTS; LEGAL STATUS UNCERTAIN;
+  COUNSEL REVIEW REQUIRED** (in the FIFA text and still in the FA 2026-27
+  text, R-E10; found incompatible by the CJEU; final ruling with the
+  national court). · **Consequence:** never a hard block; manual review
+  (DR-33). · Legal review: **YES** (L-2).
 
 ### 2.3 Multiple representation and conflicts
 
@@ -178,341 +188,485 @@ Format per rule: rule · body · jurisdiction · source · edition · effective
   this article. a) Permitted dual representation: a Football Agent may
   perform Football Agent Services and Other Services for an Individual and
   an Engaging Entity in the same Transaction, provided that prior explicit
-  written consent is given by both Clients" (art. 12(8)). · **Consequence:**
-  the Conflict Engine's baseline. · Legal review: YES as to enforceability
-  in the EU (see R-F16), NO as to content.
-- **R-F14 Prohibited combinations.** "A Football Agent may, in particular,
-  not perform Football Agent Services or Other Services in the same
-  Transaction for: a) a Releasing Entity and Individual; or b) a Releasing
-  Entity and Engaging Entity; or c) all parties within the same
-  Transaction" (art. 12(9)). Note the words *and Other Services*: relabelling
-  the work as consultancy or scouting does not lift the prohibition. ·
-  Legal review: same as R-F13.
-- **R-F15 Connected agents are one agent for conflict purposes.** "A
-  Football Agent and a Connected Football Agent may not perform Football
-  Agent Services or Other Services for different Clients in the same
-  Transaction, except in accordance with paragraph 8" (art. 12(10)).
-  "Connected Football Agent" covers the same Agency (employment, directors,
-  shareholders, co-owners), close family, and repeated cooperation or
-  revenue sharing (Definitions). · **Consequence:** the engine must
-  evaluate the agent **and their connected agents** — same agency is
-  connected by definition, so an internal "Chinese wall" does not cure a
-  same-agency conflict under the FIFA text (see L-4). · Legal review: YES.
-- **R-F16 Suspension status of R-F13–R-F15.** Circular 1873 (S2, 30 Dec
-  2023) lists among the provisions temporarily suspended worldwide "The
-  prohibition of double representation (article 12 paragraphs 8-10)",
-  "until the European Court of Justice renders a final decision in the
-  pending procedures concerning the FFAR", and "recommend[s] all the member
-  associations to temporarily suspend the equivalent provisions". The CJEU
-  delivered its judgment on 16 July 2026 (S3): "it is ultimately for the
-  court before which the dispute was brought to assess whether the
-  contested FIFA rules are contrary to the prohibition on cartels or whether
-  they may be considered to be justified"; limits on multiple representation
-  are obstacles to the freedom to provide services whose justification is
-  for the national court. No FIFA instrument lifting the suspension was
-  found by 18 September 2026 (S4 announces consultation only). ·
-  **Consequence:** the Conflict Engine must be **policy-versioned** with a
-  `suspended` flag per rule and per jurisdiction; England's own rule (R-E7)
-  is in force regardless. · Legal review: **YES — status changes with the
-  Mainz court and any FIFA circular.**
-- **R-F17 Other Services presumption (24 months).** "Where a Football Agent
-  or a Connected Football Agent, in the 24 months prior to or following a
-  Transaction, performs Other Services for a Client involved in that
-  Transaction, it shall be presumed that the Other Services formed part of
-  the Football Agent Services" (art. 15(3)); listed as suspended with art.
-  15(1)–(4) by S2. · **Consequence:** record Other Services engagements with
-  dates so the presumption can be evaluated when in force. · Legal review:
-  YES.
-- **R-F18 Interests.** Clients, ineligible persons and holders of
-  registration rights (RSTP 18bis/18ter) "may not have an Interest in any
-  affairs of a Football Agent or their Agency" (art. 11(4)); applicants may
-  "not hold, either personally or through their Agency, any Interest in a
-  club, academy, league or Single-Entity League" (art. 5(1)(a)(v)); clients
-  may not "Permit a Football Agent or their Agency to have an Interest in
-  them" (art. 18(2)(i)). "Interest" includes beneficial ownership and any
-  position of material influence (Definitions). · **Consequence:** an
-  *interest declaration* record with a placeholder in the engine; ScoutBox
-  cannot verify ownership and must say so. · Legal review: YES.
-- **R-F19 Disclosure of conflicts is an obligation.** Agents must "avoid
-  conflicts of interest" (art. 16(2)(c)) and may not conceal "a conflict of
-  interest (even if such conflict would otherwise be permitted)" (art.
-  16(3)(c)(i)). · Legal review: NO.
+  written consent is given by both Clients" (art. 12(8)). · **TEXT EXISTS
+  BUT ENFORCEMENT SUSPENDED** (S2: "The prohibition of double
+  representation (article 12 paragraphs 8-10)") **+ LEGAL STATUS
+  UNCERTAIN** (§11) **+ OPERATIVE IN SPECIFIC JURISDICTION** (England,
+  R-E7, with a *broader* permitted set). · **Consequence:** the Conflict
+  Engine encodes the text with `ruleStatus` per jurisdiction; FIFA-only
+  jurisdictions → `UNDER_LEGAL_REVIEW` → `MANUAL_REGULATORY_REVIEW_REQUIRED`.
+  · Legal review: **YES** (L-1).
+- **R-F14 Prohibited combinations.** Art. 12(9): "a) a Releasing Entity and
+  Individual; or b) a Releasing Entity and Engaging Entity; or c) all
+  parties". Same status as R-F13. England's 6.4 is in force (R-E7). ·
+  Legal review: YES (L-1).
+- **R-F15 Connected agents are one agent for conflict purposes.** Art.
+  12(10) and the "Connected Football Agent" definition (same Agency,
+  directors/shareholders/co-owners, close family, repeated cooperation or
+  revenue sharing). Same status as R-F13 (12(10) is inside the suspended
+  range); England's 6.5 and definition are in force (R-E7). ·
+  **Consequence:** the engine evaluates the agent **and** connected agents;
+  same agency is connected by definition. · Legal review: YES (L-4).
+- **R-F16 Suspension status of R-F13–R-F15 (the governing facts).**
+  1. S2 (30 Dec 2023): the Bureau of the FIFA Council "approved the
+     worldwide temporary suspension of the FFAR rules affected by the
+     above-mentioned German court decision, **until the European Court of
+     Justice renders a final decision in the pending procedures concerning
+     the FFAR**", and "recommend[s] all the member associations to
+     temporarily suspend the equivalent provisions … unless they conflict
+     with mandatory provisions of the law applicable in their territory."
+     Suspended: art. 15(1)–(4), 14(6)(8)(11), 14(2)(10), 14(7)(12),
+     **12(8)–(10)**, 16(2)(h)(j)(k)(4), 19, and the submission rule
+     (4(2), 16(2)(b), 3(2)(c)(d), 20, 21).
+  2. S3 (16 Jul 2026): the CJEU has rendered its decision in C-209/23; the
+     licence, fee cap, ban on multiple representation, client-pays and pro
+     rata rules "may be justified", subject to the national court's
+     assessment; the exclusivity window appears incompatible; GDPR
+     precludes publication of sanctions and detailed transaction data.
+  3. S4 (16 Jul 2026): FIFA "welcomes" the decision, will "invite agent
+     representatives to a meeting in the coming weeks with the aim of
+     reaching a consensual solution", and refers to "the new transfer
+     system set to enter into force on 1 January 2027". **It does not say
+     the suspension is lifted, maintained or modified.**
+  4. S5 (last updated 23 Jan 2025): describes dual representation,
+     prohibited combinations and fee caps as rules, with no mention of S2.
+  5. S7/S8 (The FA, in force 1 Jun 2026, i.e. after S5 and before S3):
+     still shade the equivalent FA provisions as suspended "see FIFA
+     Circular 1873" and say guidance "shall be updated in due course should
+     there be any relevant change to the regulatory position". No FA
+     update after 16 Jul 2026 was found.
+  6. S6: no FIFA instrument after S3 on agents is listed.
+  · **Classification: TEXT EXISTS BUT ENFORCEMENT SUSPENDED (last express
+  governing-body instrument) + LEGAL STATUS UNCERTAIN (the instrument's
+  own end-condition — a CJEU decision — has occurred, but the pending
+  German procedure is not finally decided and FIFA has issued nothing) →
+  COUNSEL REVIEW REQUIRED.** ScoutBox does **not** infer that the
+  suspension continues merely because S2 remains online, and does **not**
+  infer that S3 lifted it. · **Consequence:** `jp-fifa-2025-1` carries
+  `ruleStatus: UNDER_LEGAL_REVIEW` for 12(8)–(10), 14, 15, 16(2)(h)(j)(k)(4),
+  19; the engine returns `MANUAL_REGULATORY_REVIEW_REQUIRED` wherever those
+  rules would decide an outcome and no national `ACTIVE` entry applies. ·
+  Legal review: **YES — L-1, the single most consequential open item.**
+- **R-F17 Other Services presumption (24 months)** (art. 15(3)); inside the
+  suspended art. 15(1)–(4). · **TEXT EXISTS BUT ENFORCEMENT SUSPENDED +
+  LEGAL STATUS UNCERTAIN.** · **Consequence:** record Other Services with
+  dates; review, never prohibit (DR-34). · Legal review: YES.
+- **R-F18 Interests** (arts. 5(1)(a)(v), 11(4), 18(2)(i)). · **CURRENTLY
+  OPERATIVE.** · Legal review: YES (verification is impossible for
+  ScoutBox; declaration only).
+- **R-F19 Disclosure of conflicts** (art. 16(2)(c), 16(3)(c)(i)). ·
+  **CURRENTLY OPERATIVE.** · Legal review: NO.
 
 ### 2.4 Minors
 
 - **R-F20 Approach timing and guardian consent.** "An Approach (and/or any
   subsequent execution of a Representation Agreement) to a minor or their
-  legal guardian in relation to any Football Agent Services may only be made
-  no more than six months before the minor reaches the age where they may
-  sign their first professional contract in accordance with the law
-  applicable in the country or territory where the minor will be employed.
-  This Approach may only be made once prior written consent has been
-  obtained from the minor's legal guardian" (art. 13(1)). · **Consequence:**
-  `earliestPermittedApproachAt` is derived from a jurisdiction-specific
-  first-professional-contract age, never from a universal constant; prior
-  written guardian consent is a precondition of the *first* contact. ·
-  Legal review: **YES** (the applicable age per country; which country's
-  law when the employing territory is not yet known).
-- **R-F21 Minors accreditation.** "A Football Agent that wishes to represent
-  a minor or represent a club in a Transaction involving a minor shall first
-  successfully complete the designated CPD course on minors and comply with
-  any requirement to represent a minor established by the law applicable in
-  the country or territory of the member association where the minor will
-  be employed" (art. 13(2)); FAQ (S5): the agent "must then pass an
-  assessment … to gain the relevant accreditation". · **Consequence:** a
-  per-agent `minorsAccreditation` fact with provenance and date; national
-  overlays add their own (R-E4, R-U2). · Legal review: NO on the FIFA fact;
-  YES on national additions.
-- **R-F22 Enforceability with minors.** A minor's Representation Agreement
-  is enforceable only if it meets art. 12(7), the agent complied with art.
-  13(1)–(2), and it "is signed by the minor and their legal guardian as
-  provided by the law applicable" (art. 13(3)). Violations of art. 13(1):
-  "at a minimum, … a fine and a suspension of a Football Agent licence of up
-  to two years" (art. 13(4)). "A Football Agent may not receive a service
-  fee when engaged to perform Football Agent Services relating to a minor
-  unless the relevant player is signing their first or subsequent
-  professional contract" (art. 14(9)). · Legal review: YES (enforceability).
-- **R-F23 Undue advantages to family.** Agents may not "Offer or pay any
-  undue personal, pecuniary or other advantage … to an Individual (or any
-  family member or legal guardian or friend of that Individual) in relation
-  to a Representation Agreement" (art. 16(3)(b)(ii)). · Legal review: NO.
+  legal guardian … may only be made no more than six months before the
+  minor reaches the age where they may sign their first professional
+  contract in accordance with the law applicable in the country or
+  territory where the minor will be employed. This Approach may only be
+  made once prior written consent has been obtained from the minor's legal
+  guardian" (art. 13(1)). · **CURRENTLY OPERATIVE** (not in S2); **but its
+  parameter (the first-contract age) is COUNSEL REVIEW REQUIRED per
+  country**, and England applies its own calendar formula (R-E4,
+  JURISDICTION_OVERRIDE). · **Consequence:** `earliestPermittedApproachAt`
+  needs a per-jurisdiction parameter; England's rule is never generalised
+  into the FIFA/global policy; where the parameter is not encoded the
+  result is `INSUFFICIENT_DATA` → refusal. · Legal review: **YES** (L-6).
+- **R-F21 Minors accreditation** (art. 13(2); S5 CPD course + assessment,
+  valid three years). · **CURRENTLY OPERATIVE.** · Legal review: NO on the
+  FIFA fact; YES on national additions.
+- **R-F22 Enforceability with minors** (art. 13(3)–(4); no fee unless a
+  professional contract, art. 14(9)). · **CURRENTLY OPERATIVE** (14(9) is
+  not among the suspended paragraphs). · Legal review: YES (enforceability).
+- **R-F23 Undue advantages to family** (art. 16(3)(b)(ii)). · **CURRENTLY
+  OPERATIVE.** · Legal review: NO.
 
 ### 2.5 Fees
 
-- **R-F24 Fee framework and its suspension.** Art. 14: client pays (14(2)),
-  exception when the Individual's annual Remuneration is below USD 200,000
-  (14(3)), invoice basis (14(4)), fee only under an agreement in force at the
-  time of the services (14(5)), instalments (14(6)), pro rata (14(7)), dual
-  representation: the Engaging Entity may pay up to 50 % (14(10)), Clearing
-  House (14(13)). Art. 15 cap: 5 %/3 % for Individual or Engaging Entity,
-  10 %/6 % for permitted dual, 10 % of transfer compensation for a Releasing
-  Entity. **S2 suspends worldwide:** "the service fee cap (article 15
-  paragraphs 1-4)", "the rules concerning service fee payments (article 14
-  paragraphs 6, 8 and 11)", "the client pays rule (article 14 paragraphs 2
-  and 10)", "the rules regarding the timing of service fee payments
-  (article 14 paragraphs 7 and 12)", "the rule that service fee payments
-  must be made via the FIFA Clearing House (article 14 paragraph 13)". S3:
-  the cap and the client-pays and pro-rata rules are for the national court
-  to assess; FIFA (S4) says the court "confirmed that key FFAR elements can
-  be justified". · **Consequence:** ScoutBox must not hard-code any
-  percentage or payer rule; a fee ledger records what was agreed and the
-  policy version in force; England applies no cap (R-E9). · Legal review:
-  **YES, and jurisdiction by jurisdiction.**
+- **R-F24 Fee framework.** Art. 14 (client pays 14(2); USD 200,000
+  exception 14(3); invoice basis 14(4); instalments 14(6); pro rata 14(7);
+  dual: Engaging Entity up to 50 % 14(10); Clearing House 14(13)); art. 15
+  cap (5 %/3 %, 10 %/6 % dual, 10 % releasing). S2 suspends 15(1)–(4),
+  14(2)(6)(7)(8)(10)(11)(12)(13). S3: cap, client-pays, pro rata "may be
+  justified" (national court). · **TEXT EXISTS BUT ENFORCEMENT SUSPENDED +
+  LEGAL STATUS UNCERTAIN**; England: no cap provision, client pays,
+  conditional remuneration includable (R-E9, JURISDICTION_OVERRIDE with its
+  own partial suspension, L-7). · **Consequence:** no percentage or payer
+  rule hard-coded; ledger records terms + `ruleStatus`. · Legal review:
+  **YES** (L-5).
 
 ### 2.6 Reporting, publication, jurisdiction, transition
 
-- **R-F25 Reporting to the FIFA Platform.** Within 14 days: representation
-  agreements and their amendment/termination, other-services agreements,
-  fee payments, cooperation/revenue-sharing arrangements between agents,
-  eligibility-affecting information, settlements (art. 16(2)(j)); Agency
-  ownership, agent count and employee names within 14 days of the first
-  Transaction involving the Agency (art. 16(2)(k)). S2 suspends "the
-  reporting obligations (article 16 paragraphs 2 h), j), k) and 4)" and
-  "the submission rule (article 4 paragraph 2; article 16 paragraph 2 b);
-  article 3 paragraphs 2 c) and d); article 20; and article 21)". ·
-  **Consequence:** ScoutBox may *help* an agent keep these records; it must
-  not claim to file them and must not build automatic regulatory reporting
-  (mandate §5). · Legal review: YES.
-- **R-F26 Publication is constrained by the GDPR.** Art. 19 (FIFA shall
-  make available agents' names, clients, exclusivity, expiry, services,
-  sanctions, transactions and fee amounts) is suspended by S2; S3: "the
-  GDPR precludes the disclosure and publication, by a federation such as
-  FIFA, of any sanction imposed on agents or their clients and of detailed
-  information on all transactions involving agents." · **Consequence:**
-  ScoutBox must not publish agents' client lists, sanctions or transaction
-  details; the neutral agent directory (mandate §44) may show only what the
-  agent chooses and what a public regulator list shows. · Legal review:
-  YES.
-- **R-F27 Scope and national regulations.** FFAR applies to Representation
-  Agreements "with an international dimension" and conduct connected to an
-  international transfer (art. 2(1)–(2)); otherwise "the national football
-  agent regulations of where the Client is registered or domiciled at the
-  time the Representation Agreement is signed shall apply" (art. 2(3)).
-  National regulations "shall incorporate articles 11 to 21 … by reference"
-  and "may introduce … stricter measures" (art. 3(2)–(3)). Recognition of
-  national-law licensing systems (art. 24). Disputes with an international
-  dimension go to the Agents Chamber of the Football Tribunal (art. 20). ·
-  **Consequence:** at least two policy sets can apply to one Transaction
-  (FIFA + one or more national); a domestic/international flag must be
-  preserved. · Legal review: YES for edge cases.
-- **R-F28 Clients' duties.** Clients "shall satisfy themselves that a
-  Football Agent is appropriately licensed by FIFA prior to signing" (art.
-  18(1)(c)); clubs may not "interfere in, or influence, the freedom of an
-  Individual to select a Football Agent" (art. 18(2)(d)) nor engage an
-  unlicensed person (art. 18(2)(a)). · **Consequence:** ScoutBox must never
-  steer a player toward an agent on a club's or its own account (mandate
-  §43, §45, §97). · Legal review: NO.
-- **R-F29 FIFA representation agreement template exists** (S6 lists "FIFA
-  Representation Agreement template"); its mandatory-use status could not be
-  read from the page. · Legal review: YES before any template is offered.
-- **R-F30 Licensed agents directory.** S6 links "Licensed Agents Directory"
-  at `agents.fifa.com/directory-agents`; the page is script-rendered and
-  its fields, search parameters and data currency could not be read; no API
-  is documented anywhere read. · **Consequence:** no live automated FIFA
-  verification can be assumed (mandate §148); see §6.
+- **R-F25 Reporting to the FIFA Platform** (art. 16(2)(j)(k)); S2 suspends
+  16(2)(h)(j)(k)(4) and the submission rule. · **TEXT EXISTS BUT
+  ENFORCEMENT SUSPENDED + LEGAL STATUS UNCERTAIN.** · **Consequence:** no
+  automatic regulatory reporting (L-16); records kept so an agent can
+  report. · Legal review: YES.
+- **R-F26 Publication is constrained by the GDPR.** Art. 19 suspended (S2);
+  S3: GDPR precludes publishing sanctions and detailed transaction data. ·
+  **SUSPENDED + (for sanctions/transaction detail) CURRENTLY PRECLUDED by
+  EU law per S3.** · **Consequence:** ScoutBox publishes no client lists,
+  sanctions or transaction details. · Legal review: YES.
+- **R-F27 Scope and national regulations.** Art. 2(1)–(3): FFAR applies to
+  agreements "with an international dimension" and international
+  transfers; otherwise the national regulations of where the Client is
+  registered/domiciled at signing apply; art. 3 requires national
+  regulations incorporating arts. 11–21 and permits stricter measures. ·
+  **CURRENTLY OPERATIVE.** · **Consequence:** domestic vs international
+  jurisdiction must be resolved per transaction (§9 item "domestic vs
+  international"). · Legal review: YES for edge cases.
+- **R-F28 Clients' duties** (art. 18(1)(c), 18(2)(a)(d)). · **CURRENTLY
+  OPERATIVE.** · Legal review: NO.
+- **R-F29 FIFA representation agreement template exists** (S6); mandatory
+  status unknown. · **COUNSEL REVIEW REQUIRED** (L-12).
+- **R-F30 Licensed agents directory** (`agents.fifa.com/directory-agents`;
+  script-rendered; no API). · **Consequence:** no live automated FIFA
+  verification can be assumed.
 
 ---
 
-## 3. Verified current rules — England (S7, S8, S9)
+## 3. Verified current rules — England (S7, S8, S9, S9b, S9c; 2026-27)
 
-- **R-E1 Registration.** "Before carrying out any conduct or activity that
-  falls within the scope of these Regulations …, a Football Agent must first
-  register with The Association to become an FA Registered Football Agent"
-  (reg. 2.1); "To register …, a Football Agent must (i) hold a FIFA Licence;
-  and (ii) complete … the relevant registration documentation" (reg. 2.2);
-  The FA "shall publish such FA Registered Football Agent's name" (reg.
-  2.3) — S9 is that list (22 May 2026). Registration is indefinite (2.5) and
-  "Upon an FA Registered Football Agent's FIFA Licence being suspended or
-  withdrawn that person's registration with The Association shall be
-  automatically and immediately suspended or withdrawn" (2.10). A Digital
-  ID showing name, registration number and minors authorisation must be
-  presented on request (2.8; S8). · **Consequence:** England = FIFA licence
-  **plus** national registration; the two have separate states. · Legal
+Active basis: **The FA Football Agent Regulations 2026-27 (section 17),
+in force 1 June 2026, retrieved 18 September 2026**, with the 2026-27
+Guidance. The 2025-26 texts (H1, H2) are historical only. Regulation
+numbers below are the **2026-27** numbers (the minors section was
+renumbered; see §3.11).
+
+Suspension inside the FA text: the FA shades suspended provisions grey
+and says the unshaded text is effective; shading is not recoverable from
+the extracted text (L-7). The 2026-27 Guidance "do[es] not … cover the
+suspended provisions", so a provision the Guidance covers is **inferred
+not suspended**; this inference is marked "(G-covered)" and is not a
+substitute for the shaded PDF (L-7 stays open).
+
+- **R-E1 Registration (FIFA licence prerequisite).** "Before carrying out
+  any conduct or activity that falls within the scope of these Regulations
+  …, a Football Agent must first register with The Association to become
+  an FA Registered Football Agent" (2.1); "To register with The
+  Association, a Football Agent must (i) hold a FIFA Licence; and (ii)
+  complete in full and submit … the relevant registration documentation"
+  (2.2); S8: "To register as an 'FA Registered Football Agent' an
+  individual must first be a FIFA Licensed Football Agent." The FA
+  publishes the registered list (2.3; S9, 18 Sep 2026). Registration is
+  indefinite subject to suspension/withdrawal (2.5). "Upon an FA Registered
+  Football Agent's FIFA Licence being suspended or withdrawn that person's
+  registration with The Association shall be automatically and
+  immediately suspended or withdrawn" (2.10). Digital ID with name,
+  registration number and minors authorisation, presented on request (2.8;
+  S8). No registration fee (S8). — The FA · England · S7 · 2026-27 · 1 Jun
+  2026 · retrieved 18 Sep 2026 · **CURRENTLY OPERATIVE** (G-covered 2.1,
+  2.2, 2.8, 2.9, 2.10). · **Consequence:** England = FIFA licence **plus**
+  national registration, two separate verification facets; loss of the
+  FIFA licence cascades to the FA registration automatically. · Legal
   review: NO.
-- **R-E2 Agency in England.** Reg. 3.3 mirrors FFAR 11(3). S8: "Only a
-  natural person 'FA Registered Football Agent' can perform football agent
-  services under a representation agreement … The Agent's Agency can in
-  addition also be a party to the representation agreement but cannot
-  perform football agent services"; under the previous Intermediaries
-  Regulations an agency company could register and contract alone — "This
-  is not permitted under the current FA Agent Regulations." Novation to
-  another agent is recorded on a CH1 form within 14 days (reg. 4.10; S8).
-  Assignment or sub-contracting between two FA Registered Football Agents
-  is permitted with lodging (reg. 4.11). · **Consequence:** the individual
-  agent is always a party; the agency may be an additional party; change of
-  agent is a recorded novation, not an edit. · Legal review: YES (the
-  legal party question, mandate §122).
-- **R-E3 Representation agreements.** Two-year maximum for players/coaches
-  (4.3); one agreement with the same player/coach at a time, with a
-  tripartite exception at the time of a National Transaction (4.4 +
-  guidance); legal-advice notice must also offer PFA/LMA advice and be
-  evidenced in an annex (4.5); Obligatory Terms of the Standard
-  Representation Agreement are mandatory (4.7); three FA templates exist
-  (player/coach–agent, club–agent, tripartite); autonomy clauses void
-  (4.8); just cause includes withdrawal/suspension/expiry of the FA minors
-  authorisation (4.9(c)); agreements must be lodged with The FA within 14
-  days or by registration of the Transaction (8.3(g)). · **Consequence:**
-  an England overlay adds Obligatory Terms, PFA/LMA wording, lodging
-  deadlines, novation forms. · Legal review: YES (template use).
-- **R-E4 Minors — timing.** "An Approach to a Minor or their legal guardian
-  … shall not be made before 1 September in the Academic Year in which the
-  Minor reaches the age of 16. Subject to the foregoing, such an Approach
-  … may only be made once prior written consent has been obtained from the
-  Minor's legal guardian" (5.1); the same for entering any agreement (5.2);
-  "Academic Year" means 1 September to 31 August (definitions); "Minor"
-  means a Player or Coach under the age of 18 (definitions). Guidance table
-  2025–2027: a minor turning 16 between 1 Sep 2025 and 31 Aug 2026 may be
-  approached from 1 Sep 2025. · **Consequence:** England's
-  `earliestPermittedApproachAt` = 1 September of the academic year of the
-  16th birthday — a date rule, not an age-in-months rule; it differs from
-  the FIFA six-month formulation and must be its own policy entry. · Legal
-  review: NO on the date; YES on interaction with FIFA 13(1) for
-  international cases.
-- **R-E5 Minors — additional authorisation.** Before approaching,
-  representing, or entering any agreement with a Minor, or representing a
-  club in a Transaction involving a Minor, the agent "must obtain additional
-  authorisation to deal with Minors from The Association" (5.3), including
-  a criminal record check "(including … a valid and current FA Registered
-  Football Agent DBS check (or equivalent))" (5.4); S8: an enhanced check
-  issued within the prior three months; FIFA's minors requirement must also
-  be met; "FA authorisation to work with Minors is valid for three years"
-  (5.5, S8); automatic suspension if requirements lapse (5.5), duty to
-  self-report (5.6). · **Consequence:** a jurisdiction-scoped
-  `minorsAuthorisation` fact with an expiry, separate from the FIFA minors
-  accreditation. · Legal review: NO.
-- **R-E6 Minors — enforceability and sanction.** Agreement enforceable
-  only if signed by the Minor and the legal guardian in the FA's prescribed
-  form (5.7); violation of 5.1/5.2 sanctioned by at least a fine and up to
-  two years' registration suspension (5.8). No fee for minors unless a
-  professional contract (7.10). · Legal review: YES (enforceability).
-- **R-E7 Multiple representation in England (in force).** "An FA Registered
-  Football Agent may only perform Football Agent Services and Other
-  Services for one party in a National Transaction, save that: a) … for
-  more than one party in the same National Transaction (permitted dual or
-  multiple representation), provided that: (i) … all parties' prior written
-  consent … (ii) … inform all parties … of the full particulars of the
-  proposed arrangements including … the proposed fee … (iii) All parties are
-  given the reasonable opportunity to take independent legal advice … (iv)
-  … all parties provide their express written consent" (6.3(a)); without a
-  party's consent the agent may continue for the first party only (6.3(b)).
-  "When acting for a Releasing Club, an FA Registered Football Agent may not
-  perform Football Agent Services or Other Services for any other party"
-  (6.4). Connected agents (6.5). No conditioning a Transaction on a specific
-  agent (6.7). S8: "Completion and submission of the AF1 Form at the
+- **R-E2 Agency in England; only registered natural persons act.** "Only
+  an FA Registered Football Agent may perform Football Agent Services"
+  (3.1). "An FA Registered Football Agent may conduct their business
+  affairs through an Agency. In such circumstances, the FA Registered
+  Football Agent must ensure that any employees, contractors, agents or
+  other representatives of the Agency … that are not FA Registered
+  Football Agents do not: a) perform Football Agent Services … b) make any
+  Approach … or c) enter into a Representation Agreement" (3.3). "An FA
+  Registered Football Agent is fully responsible for any conduct by their
+  Agency" (3.4). · **CURRENTLY OPERATIVE** (G-covered 3.3, 3.4). · Legal
+  review: NO.
+- **R-E2b (NEW in 2026-27) Licensed colleague may perform under an
+  agency-party agreement with all parties' written consent.** 3.3
+  Guidance: "the relevant Representation Agreement must be entered into by
+  the FA Registered Football Agent and may, in addition, be entered into
+  by their Agency. **Where an Agency is party to a Representation
+  Agreement, and provided that all parties to the Representation Agreement
+  have provided written consent, any other FA Registered Football Agent
+  employed by the Agency may perform Football Agent Services in respect of
+  that Representation Agreement.** If the FA Registered Football Agent
+  leaves that Agency, the consequences shall be a matter for the Agency,
+  the FA Registered Football Agent and their clients to determine …" 4.1:
+  an agent may perform services "a) after having entered into a
+  Representation Agreement …; or b) if employed by an Agency, after an FA
+  Registered Agent who conducts their business affairs through the same
+  Agency has entered into a Representation Agreement …, provided that: (i)
+  the Agency is also party to the Representation Agreement; and (ii) all
+  parties to the Representation Agreement have provided written consent."
+  4.1 Guidance: the contracting agent must ensure services are "carried
+  out only by FA Registered Football Agents"; S8 (6.2): every performing
+  agent must be detailed on the AF1 "including in instances where a
+  different Agent from the same Agency is the party to the corresponding
+  Representation Agreement." Under H2 (2025-26) the opposite was stated
+  ("only the FA Registered Football Agent which enters into the
+  Representation Agreement is permitted to conduct Football Agent
+  Services"). · **CURRENTLY OPERATIVE — OPERATIVE IN SPECIFIC JURISDICTION
+  (England; National Transactions)** (G-covered 3.3, 4.1). · **Consequence
+  (architecture change):** the agreement record needs `agencyParty:
+  boolean` and a consent kind `agency_performance` (all parties, written,
+  in advance); the authorization step "verify representation scope" must
+  accept, for an England-governed agreement only, a performing agent who
+  is (i) FA-registered and licence-verified, (ii) currently affiliated to
+  the same agency, when (iii) the agency is a party and (iv) the
+  `agency_performance` consent is in force; every performing agent is
+  recorded on the transaction (AF1 duty). Outside England this route is
+  `UNKNOWN` → refused (`REPRESENTATION_REQUIRED`). The licensed-person
+  principle (R-F1) is untouched: the performer is still a licensed natural
+  person, individually verified. · Legal review: **YES** (L-9 updated:
+  interplay with FFAR 11(3)/12 for international-dimension agreements;
+  which parties' consent — S7 says "all parties to the Representation
+  Agreement").
+- **R-E3 Representation agreements.** Two-year maximum for players/coaches,
+  extension by new agreement only, automatic renewal void (4.3; club
+  agreements have no maximum, 4.3 Guidance); one agreement with the same
+  player/coach at a time, tripartite exception "at the time of a National
+  Transaction" in permitted dual representation (4.4 + Guidance); before
+  entering **or amending**, written notice to consider independent legal
+  advice and PFA/LMA advice, and written confirmation evidenced in an Annex
+  in the prescribed form (4.5 + Guidance; S9b template carries the
+  "Statement on independent legal advice" and the Annex "Legal advice
+  declaration" with a guardian signature line for a minor); multiple club
+  agreements only for different Transactions (4.6); entire agreement with
+  all Obligatory Terms of the Standard Representation Agreement plus names,
+  duration, fee, nature of services, signatures (4.7; three FA templates;
+  an agreement with a player at a non-FA club need not use the Obligatory
+  Terms but must meet FFAR 12.7); autonomy clauses void (4.8); just cause
+  includes withdrawal/suspension/expiry of minors authorisation (4.9);
+  novation recorded in the prescribed form within 14 days (4.10);
+  assignment/sub-contracting between registered agents with lodging (4.11;
+  S9b Subcontract template); non-compliant terms unenforceable (4.12). ·
+  **CURRENTLY OPERATIVE** (G-covered 4.1, 4.2, 4.7, 4.10, 4.11). ·
+  **Consequence:** England overlay = Obligatory Terms, PFA/LMA wording,
+  Annex, lodging, novation and sub-contract forms; the template
+  distinguishes exclusive / non-exclusive by tick-box (non-exclusive by
+  default). · Legal review: YES on template use (L-12).
+- **R-E4 Minors — timing (exact current England rule, versioned
+  `jp-eng-2026-27`).** "An FA Registered Football Agent may not, **before 1
+  September in the Academic Year in which the Minor reaches the age of
+  16**: a) make an Approach to a Minor or their legal guardian (whether
+  directly or indirectly) in relation to any Football Agent Services or
+  Other Services; b) make an Approach to a Minor or their legal guardian
+  (whether directly or indirectly) in relation to entering into a
+  Representation Agreement; or c) enter into any agreement with a Minor or
+  their legal guardian (whether a Representation Agreement or an agreement
+  other than a Representation Agreement, including but not limited to
+  agreements relating to Other Services). Subject to the foregoing, such an
+  Approach to or agreement with a Minor may only be made once prior written
+  consent has been obtained from the Minor's legal guardian." (5.1). 5.1
+  Guidance table, "for the purposes of the years 2025 to 2027": minor
+  reaching 16 between 1 Sep 2024–31 Aug 2025 → from 1 Sep 2024; 1 Sep
+  2025–31 Aug 2026 → from 1 Sep 2025; **1 Sep 2026–31 Aug 2027 → from 1
+  Sep 2026**. "Academic Year" means 1 September to 31 August inclusive;
+  "Minor" means a Player or Coach under the age of 18 (Appendix I). S8:
+  "An Agent cannot approach a Minor (or their legal guardian) until 1
+  September in the Academic Year in which the Minor turns 16 years old."
+  Sanction: at minimum a fine and up to two years' registration suspension
+  (5.7). — The FA · England · S7 · 2026-27 · 1 Jun 2026 · retrieved 18 Sep
+  2026 · **CURRENTLY OPERATIVE — OPERATIVE IN SPECIFIC JURISDICTION**
+  (G-covered 5.1). The formula is **unchanged in substance** from 2025-26
+  (the two former paragraphs 5.1/5.2 were merged into one 5.1 with limbs
+  a–c and the "directly or indirectly" wording added). · **Consequence:**
+  England's `earliestPermittedApproachAt = 1 September of the Academic
+  Year (1 Sep–31 Aug) in which the minor turns 16`, encoded in
+  `jp-eng-2026-27` only; **never generalised into the FIFA/global entry**
+  (which keeps the six-months-before-first-contract-age formula with an
+  unencoded parameter, R-F20). Guardian prior written consent precedes any
+  Approach (limbs a and b) and any agreement (limb c); "indirect" approach
+  is covered, so a message routed via the family is an Approach. · Legal
+  review: NO on the date; YES on interaction with FFAR 13(1) for
+  international-dimension cases (L-6).
+- **R-E5 Minors — additional authorisation.** Before an Approach to,
+  representation of, or any agreement with a Minor, or representing a club
+  in a Transaction involving a Minor, "they must obtain additional
+  authorisation to deal with Minors from The Association" (5.2); suitability
+  incl. criminal record checks "in the United Kingdom and/or overseas
+  (including presentation … of a valid and current FA Registered Football
+  Agent DBS check (or equivalent))" (5.3); S8: enhanced criminal record
+  check issued within three months prior to submission; a DBS obtained for
+  another football role is not accepted (5.3 Guidance); The FA may require
+  a minors course under the FA CPD Requirements; valid **three years**
+  (5.4); automatic suspension/withdrawal if requirements lapse (5.4); duty
+  to self-report (5.5); Legacy Additional Authorisations expire within
+  three years (transitional, 13.x). S9c describes the DBS application
+  route. · **CURRENTLY OPERATIVE** (G-covered 5.3). · **Consequence:** a
+  jurisdiction-scoped `minorsAuthorisation{ma: ENG}` facet with `expiresAt`
+  (≤ 3 years), separate from the FIFA minors accreditation; the Digital ID
+  shows it. · Legal review: NO.
+- **R-E6 Minors — enforceability and fee.** A minor's agreement is
+  enforceable only if it meets 4.7, the agent complied with 5.1 and 5.2,
+  and "the Representation Agreement is signed by the Minor and their legal
+  guardian in such form as may be prescribed" (5.6); no service fee for a
+  Minor unless entering a first or subsequent professional contract that
+  comes into force (7.10; Guidance: a Scholarship Agreement or PGA Contract
+  is not a professional contract; Playing Contracts at 18, or 17 if not in
+  full-time education). · **CURRENTLY OPERATIVE** (G-covered 7.10). · Legal
+  review: YES (enforceability, L-3).
+- **R-E7 Multiple representation in England — verified 2026-27 text, in
+  force.** "An FA Registered Football Agent may only perform Football
+  Agent Services and Other Services for one party in a National
+  Transaction, save that: a) An FA Registered Football Agent may perform
+  Football Agent Services and Other Services for more than one party in
+  the same National Transaction (**permitted dual or multiple
+  representation**), provided that: (i) The FA Registered Football Agent
+  obtains all parties' prior written consent to them providing services to
+  any other party to the National Transaction … in the form prescribed by
+  The Association …; (ii) Once the FA Registered Football Agent and the
+  other party(ies) have agreed terms, but prior to them entering into a
+  Representation Agreement, the FA Registered Football Agent must inform
+  all parties in the form prescribed … of the full particulars of the
+  proposed arrangements including, without limitation, the proposed fee
+  (if any) to be paid by all parties …; (iii) All parties are given the
+  reasonable opportunity to take independent legal advice, meaning that, in
+  the case of a Player or Coach, the FA Registered Football Agent must
+  inform the Player or Coach in writing that they should consider taking:
+  (i) independent legal advice; and (ii) in addition or as an alternative,
+  advice from the PFA or LMA …, prior to providing written consent …; and
+  (iv) Having been given such opportunity, all parties provide their
+  express written consent for the FA Registered Football Agent to enter
+  into a Representation Agreement with the other party(ies) on the proposed
+  terms in the form prescribed …" (6.3(a)). Without a party's consent the
+  agent may continue for the first party only and take no remuneration from
+  the others (6.3(b)). "When acting for a Releasing Club, an FA Registered
+  Football Agent may not perform Football Agent Services or Other Services
+  for any other party (e.g. the Player/Coach and/or the Engaging Club) in
+  the same National Transaction" (6.4). "An FA Registered Football Agent
+  and a Connected Football Agent may not perform Football Agent Services or
+  Other Services for different players, coaches or Clubs in the same
+  National Transaction, except in accordance with Regulation 6.3" (6.5).
+  Self-representation must be stated in the contract (6.6); no
+  conditioning a Transaction on a specific agent (6.7); no concealment of
+  roles or sham agreements (6.1). S8 (6.3): "'Dual' or 'Multiple'
+  representation (i.e. where the Agent represents either two or more than
+  two parties in a transaction respectively) is currently permitted under
+  the new FA Agent Regulations, provided that the following safeguards …
+  are complied with … Completion and submission of the AF1 Form at the
   completion of a Transaction will constitute written consent to the
-  arrangement." · **Consequence:** England is *broader* than FIFA (multiple
-  representation, not only individual + engaging) but keeps the releasing-
-  club prohibition; the engine needs per-jurisdiction outcome tables. ·
-  Legal review: YES (interplay with the suspended FIFA rule for
-  international transactions).
-- **R-E8 Lodging and forms.** Representation agreements with players/coaches
-  lodged within 14 days (8.3(g)(i)); Agents Form (AF1) at completion of every
-  Transaction, including self-represented ones (6.2, 6.6; S8). · Legal
-  review: NO (facts), YES (whether ScoutBox may generate forms).
-- **R-E9 Fees in England.** Reg. 7 has **no service fee cap provision** in the
-  2025-26 text; client pays (7.2) with the USD 200,000 exception (7.3);
-  invoice basis (7.5); conditional payments (bonuses) may be included in
-  the fee base in England (S8: "An Agent representing a Player or Coach can
-  now receive a percentage of a Player/Coach's conditional remuneration") —
-  a difference from FFAR 15(2)(a); Clearing House (7.13). The introduction
-  states "A number of provisions of these Regulations are temporarily
-  suspended … shaded in grey" and the shading is not recoverable from the
-  extracted text (see L-7). Secondary sources (S11) report a 30 November
-  2023 FA arbitration award that the cap and pro-rata rules would breach
-  the Competition Act 1998; not read at first hand. · Legal review:
-  **YES.**
-- **R-E10 Exclusive-agreement approach window in England.** Present at reg.
-  8 (lines mirroring FFAR 16(1)(b)–(c)); after S3 its status is doubtful. ·
-  Legal review: YES.
+  arrangement." Dual fee split: the Engaging Club may pay up to 50 % under
+  6.3 (7.11). — The FA · England · S7/S8 · 2026-27 · 1 Jun 2026 · retrieved
+  18 Sep 2026 · **CURRENTLY OPERATIVE — OPERATIVE IN SPECIFIC JURISDICTION
+  (England, National Transactions)** (G-covered 6.2, 6.3). · **Consequence
+  (confirmed):** England's conflict matrix is **genuinely different** from
+  the FIFA text: any combination of parties other than one involving a
+  Releasing Club is permitted with the four safeguards, including
+  individual + engaging + a further individual; the releasing-club
+  exclusivity (6.4) and connected-agent attribution (6.5) are in force.
+  The engine must carry an England table, not inherit FIFA's
+  "individual + engaging only" table (§11 of the conflict engine
+  contract). For a Transaction with an international dimension, FFAR's
+  status governs and is uncertain → review. · Legal review: YES (L-1
+  interplay; L-4).
+- **R-E8 Disclosure, lodging and forms.** Agents Form (AF1, "July 2025
+  version" per S9d) at completion of every Transaction incl. self-
+  represented ones (6.2, 6.6); lodge within 14 days of execution,
+  amendment or termination (or by registration of the Transaction) every
+  Representation Agreement, other agreements, fee payments, cooperation
+  arrangements, eligibility-affecting information and settlements (8.3(g));
+  disclose within 14 days any contractual or customary arrangement with a
+  player, coach, club or club official, **or within 14 days of registering
+  where it pre-dates registration** (8.5, new limb b); conflict-of-interest
+  disclosure form within 14 days (8.6); notify FIFA-licence suspension
+  within 14 days (8.3(d)); Annual Return of all payments (8.5; Annual Return
+  form). **New in 2026-27:** agents must keep electronic communications and
+  telephone records relating to Football Agent Services, retained "for no
+  less than 6 years", must not use disappearing-message functions, and
+  must not alter or destroy them (8.7); must notify HMRC settlement
+  agreements within 14 days (8.8); must not loan or gift money to a club or
+  club official (8.4(f)); must not engage a non-registered person in
+  Football Agent Services (8.4(g), with a carve-out for a minor's
+  non-registered parent/guardian); clubs must ensure agents acting in
+  club-official-type roles (recruitment, scouting, analysis) comply (9.6).
+  · **CURRENTLY OPERATIVE** (G-covered 8.3, 8.4, 8.5, 8.6, 9.5, 9.6);
+  reporting limbs that mirror suspended FFAR 16(2)(h)(j)(k) may be shaded
+  (L-7). · **Consequence:** ScoutBox keeps records so agents can lodge;
+  it does not file (L-16); the six-year retention duty is a data-retention
+  input for L-11; the Transaction record names every performing agent. ·
+  Legal review: YES (which limbs are shaded).
+- **R-E9 Fees in England.** Reg. 7 contains **no percentage cap provision**
+  (the only "percentage" in the text is the prohibition on fees linked to a
+  future registration event, 7.8); client pays (7.2) with the USD 200,000
+  exception under which the Engaging Club may pay on the player's behalf
+  subject to conditions (7.3, G-covered); fee calculated on Remuneration
+  incl. conditional elements, not varying with performance events (7.4,
+  G-covered; S8: conditional remuneration may be included); invoice basis
+  (7.5); pro rata for longer contracts (7.7); no fee for minors (7.10,
+  G-covered); dual 50 % (7.11); Clearing House (7.13, **not G-covered —
+  likely shaded**); proof of payment to The FA **within 14 days** (7.14,
+  G-covered; was 7 days / "as directed" in 2025-26). · **PARTIALLY
+  SUSPENDED / COUNSEL REVIEW REQUIRED for the shaded limbs** (L-7); the
+  G-covered limbs are **CURRENTLY OPERATIVE**. · **Consequence:** ledger
+  records terms and `ruleStatus`; no validation. · Legal review: **YES**
+  (L-5, L-7).
+- **R-E10 Exclusive-agreement approach window in England.** 8.1(b)–(c) and
+  8.2 (no Approach/agreement with a client bound by another agent's
+  exclusive agreement "except in the final two months"; a new agreement
+  signed in that window commences only on expiry); mirrored for clients at
+  9.x. Present in the 2026-27 text; not G-covered under 8.1; after S3 its
+  legal status is doubtful. · **TEXT EXISTS; LEGAL STATUS UNCERTAIN;
+  COUNSEL REVIEW REQUIRED** (L-2). · **Consequence:** manual review, never
+  a hard block (DR-33).
+- **R-E11 National vs international scope.** Scope 1.1: the FA regulations
+  govern conduct connected to a National Transaction, agreements with
+  Clubs, agreements with players/coaches "save where that Representation
+  Agreement solely governs Football Agent Services related to a Specified
+  International Transaction", approaches, and minors approaches;
+  "National Transaction" = employment/unemployment/registration/transfer
+  of a player or coach with a Club (Appendix I); "Specified International
+  Transaction" = a transfer to a club not affiliated to The FA or not in an
+  FA-authorised competition. · **CURRENTLY OPERATIVE** (G-covered 1.1). ·
+  **Consequence:** the jurisdiction resolver must classify each
+  Transaction as England-national (FA set governs) or international
+  dimension (FFAR governs, status uncertain) before choosing a conflict
+  table (§9, "domestic vs international"). · Legal review: YES for mixed
+  cases.
+
+### 3.11 What changed from 2025-26 to 2026-27 (H1 → S7), for the record
+
+| Area | 2025-26 (historical) | 2026-27 (current) | Architectural effect |
+|---|---|---|---|
+| Handbook section | 19 | 17 | citation only |
+| In force | 1 Jun 2025 | 1 Jun 2026 | policy version `jp-eng-2026-27` |
+| Agency-party agreements | only the contracting agent may perform services (H2) | any FA Registered agent employed by the agency may perform, if the agency is a party and all parties consent in writing (3.3 Guidance, 4.1(b)) | **new consent kind, new scope rule (R-E2b)** |
+| Minors timing | 5.1 (Approach) + 5.2 (agreement), same date | merged 5.1 (a)–(c), "directly or indirectly"; date unchanged | numbering; `jp-eng-2026-27` records the same formula |
+| Minors authorisation etc. | 5.3–5.8 | 5.2–5.7 | numbering |
+| Proof of fee payment | 7 days / as directed | 14 days (7.14) | ledger note only |
+| Agent prohibitions | — | 8.4(f) loans/gifts to clubs; 8.4(g) engaging non-registered persons | compliance checklist |
+| Record keeping | — | 8.7: keep messages and call records ≥ 6 years; no disappearing messages | retention input (L-11) |
+| Tax settlements | — | 8.8: notify HMRC settlements within 14 days | compliance checklist |
+| Disclosure timing | 14 days of arrangement | + 14 days of registration for pre-existing arrangements (8.5(b)) | compliance checklist |
+| Clubs | 9.6 club officials and manager | + agents acting in club-official-type roles (recruitment, scouting, analysis) | club-side integration note |
+| Dual/multiple representation (6.3–6.5) | as now | **unchanged** | none |
+| Fee regime (7.x) | as now | unchanged apart from 7.14 | none |
+| Exclusivity window (8.1(b)–(c)) | as now | unchanged | none |
 
 ---
 
 ## 4. Verified current rules — United States (S10)
 
-- **R-U1 FIFA licence required; FFAR enforced from 1 January 2024.** S10:
-  "Effective January 1, 2024, U.S. Soccer enforces the new FIFA Football
-  Agent Regulations (FFAR), which require that any individual acting as a
-  Football Agent within U.S. Soccer's jurisdiction be licensed by FIFA."
-  · Legal review: NO.
-- **R-U2 Background check and SafeSport training.** S10: "U.S. Soccer
-  requires all agents operating within the United States to undergo a
-  criminal background check and complete the U.S. Center for SafeSport's
-  Training … especially critical for agents who represent minors"; U.S.
-  Soccer "reserves the right to deny, suspend, or revoke an agent's
-  permission to operate". · **Consequence:** a U.S. overlay carries two
-  facts (background check, SafeSport training) with dates and a U.S. Soccer
-  permission state. · Legal review: YES (whether these are conditions
-  precedent to every action or only to minors work; the page does not say).
-- **R-U3 Not found.** A U.S. Soccer national football-agent regulations
-  text, a U.S. minors approach date, and the "age at which a minor may sign
-  a first professional contract" for the United States (which depends on
-  league rules and state law on minors' contracts) were not located. ·
-  Legal review: **YES — blocking for any U.S. minors pathway.**
+- **R-U1 FIFA licence required; FFAR enforced from 1 January 2024.** S10
+  (retrieved 18 Sep 2026): "Effective January 1, 2024, U.S. Soccer enforces
+  the new FIFA Football Agent Regulations (FFAR), which require that any
+  individual acting as a Football Agent within U.S. Soccer's jurisdiction
+  be licensed by FIFA." · **CURRENTLY OPERATIVE** (licence). · Legal
+  review: NO.
+- **R-U2 Background check and SafeSport training** required for all agents
+  operating in the United States; U.S. Soccer may deny, suspend or revoke
+  permission. · **CURRENTLY OPERATIVE** as stated; scope **COUNSEL REVIEW
+  REQUIRED**. · Legal review: YES.
+- **R-U3 Not found.** No U.S. Soccer national regulations text, no minors
+  approach date, no first-professional-contract age. · **UNKNOWN →
+  COUNSEL REVIEW REQUIRED — blocking for any U.S. minors pathway** (L-8).
 
 ---
 
-## 5. The mandate's hypotheses (§6 A–I) against the sources
+## 5. The mandate's hypotheses (§6 A–I) against the current sources
 
-| # | Hypothesis | Verified? | Source | Note |
+| # | Hypothesis | Verified? | Source | Status / note |
 |---|---|---|---|---|
-| A | Only a FIFA-licensed natural person may perform regulated services | **YES** | FFAR Def., art. 8(1), 11(1) | exact |
-| B | Written representation agreement before services | **YES** | art. 12(1), 12(7) | exact |
-| C | Maximum duration for player/coach agreements | **YES — two years** | art. 12(3); FA 4.3 | entity agreements have none (12(5)) |
-| D | Only one agreement between the same agent and Individual at a time | **YES** | art. 12(4); FA 4.4 | England allows a tripartite agreement at Transaction time alongside it |
-| E | Independent-legal-advice notice and acknowledgement | **YES** | art. 12(4)(a)–(b); FA 4.5 adds PFA/LMA | required again on amendment |
-| F | Single-party representation is the general rule | **YES as written; SUSPENDED by FIFA since 30 Dec 2023; national court to assess after 16 Jul 2026; IN FORCE in England (6.3)** | art. 12(8); S2; S3; FA 6.3 | the prompt's assumption is right about the text and wrong if read as "currently enforced by FIFA worldwide" — **conflict recorded** |
-| G | Dual representation narrowly limited to individual + engaging entity with advance written consent | **YES for FIFA (12(8)(a)); England is broader — dual *or multiple* with all parties' consent (6.3(a))** | art. 12(8)(a); FA 6.3 | **conflict recorded**: not "narrow" everywhere |
-| H | Releasing-entity combinations prohibited | **YES** — releasing + individual, releasing + engaging, all parties (12(9)); England: releasing club may act for no other party (6.4) | art. 12(9); FA 6.4 | FIFA text suspended per S2; England in force |
-| I | Minors: timing, guardian consent, accreditation | **YES** | art. 13(1)–(3), 14(9); FA 5.1–5.7 | timing formula differs: FIFA "six months before first-professional-contract age per employing country"; England "1 September of the academic year of the 16th birthday" |
-
-Additional facts the mandate did not hypothesise and the sources establish:
-Connected Football Agents (R-F15); the 24-month Other Services presumption
-(R-F17); the CJEU's doubt about the exclusive-agreement approach window
-(R-F12); the GDPR limit on publication (R-F26); England's national
-registration, DBS-backed minors authorisation with three-year validity,
-Obligatory Terms and lodging (R-E1–R-E8); England's absence of a fee cap and
-inclusion of conditional remuneration (R-E9); U.S. background check and
-SafeSport training (R-U2).
+| A | Only a FIFA-licensed natural person may perform regulated services | **YES** | FFAR Def., 8(1), 11(1); FA 2.2, 3.1 | CURRENTLY OPERATIVE everywhere read |
+| B | Written representation agreement before services | **YES** | 12(1), 12(7); FA 4.1 | England 2026-27 adds the agency-party colleague route (R-E2b) |
+| C | Maximum duration for player/coach agreements | **YES — two years** | 12(3); FA 4.3 | entity agreements none |
+| D | One agreement between the same agent and Individual at a time | **YES** | 12(4); FA 4.4 | England tripartite exception at Transaction time |
+| E | Independent-legal-advice notice and acknowledgement | **YES** | 12(4)(a)–(b); FA 4.5 + Annex | required again on amendment |
+| F | Single-party representation is the general rule | **YES as FFAR text; TEXT EXISTS BUT ENFORCEMENT SUSPENDED by S2; LEGAL STATUS UNCERTAIN after S3; CURRENTLY OPERATIVE in England (6.3, 2026-27)** | 12(8); S2; S3; S4; FA 6.3 | **conflict recorded** — the hypothesis is wrong if read as "currently enforced by FIFA worldwide" |
+| G | Dual representation narrowly limited to individual + engaging entity with advance written consent | **YES for the FFAR text (suspended/uncertain); NO for England — dual *or multiple*, any combination not involving the releasing club, with four safeguards (6.3(a), 2026-27)** | 12(8)(a); FA 6.3 | **conflict recorded**; England has its own matrix |
+| H | Releasing-entity combinations prohibited | **YES** | 12(9) (suspended/uncertain); FA 6.4 (in force) | |
+| I | Minors: timing, guardian consent, accreditation | **YES** | 13(1)–(3), 14(9); FA 5.1–5.7 (2026-27) | formulas differ; England's is a calendar rule; not generalised |
 
 ---
 
@@ -520,104 +674,143 @@ SafeSport training (R-U2).
 
 - **P-1** ScoutBox is infrastructure. It never holds a licence, never
   performs or offers Football Agent Services, never negotiates, and never
-  chooses an agent for anyone. Copy, roles and pricing are audited against
-  this (mandate §1, §43, §97).
+  chooses an agent for anyone.
 - **P-2** Regulated actions are attributable to one licensed natural person
   with an active, verified licence at the moment of the action. No shared
-  agency login, no "submit as Agent X" proxy (mandate §10, §76).
-- **P-3** Verification ≠ authorization ≠ client confirmation. A verified
-  licence grants nothing about a specific player; a recorded agreement grants
-  nothing until the client (or guardian) has confirmed it in ScoutBox
-  (mandate §12, §145). Stricter than the regulations, by choice.
+  agency login, no proxy. (England's R-E2b route still names one licensed
+  performer per act.)
+- **P-3** Verification ≠ authorization ≠ client confirmation. Stricter than
+  the regulations, by choice.
 - **P-4** "Agencies never see minors" stays for discovery, search, scouting
   and analytics. The only minor pathway is the guardian-authorised
   representation pathway, gated by jurisdiction timing, guardian consent,
   the agent's minors accreditation/authorisation, and national permission,
-  each failing closed (mandate §46–§53).
-- **P-5** No fee percentage, payer rule or cap is hard-coded. The fee ledger
-  records agreed terms and the policy version; ScoutBox processes no money
-  (mandate §93–§96).
-- **P-6** No publication of client lists, sanctions or transaction details
-  by ScoutBox (R-F26). The neutral directory shows regulator-published facts
-  (FIFA directory entry, FA registered list entry) and the agent's own
-  chosen profile only; no paid ranking (mandate §44–§45).
-- **P-7** Where a FIFA rule is suspended and a national rule is in force,
-  the stricter applicable rule is applied to that jurisdiction's
-  transactions, and any conflict between applicable policies yields
-  `MANUAL_REGULATORY_REVIEW_REQUIRED` (mandate §126).
-- **P-8** No bulk solicitation feature; no import equals representation;
-  prospect ≠ client (mandate §82, §143, §144).
+  each failing closed; **no production minor pathway outside a
+  jurisdiction whose rules have been encoded from primary sources and
+  legally reviewed** (today: none enabled; England encodable).
+- **P-5** No fee percentage, payer rule or cap is hard-coded; ScoutBox
+  processes no money.
+- **P-6** No publication of client lists, sanctions or transaction details;
+  neutral directory; no paid ranking.
+- **P-7** Where the operative status of a rule is uncertain, or applicable
+  policies conflict, the engine returns `MANUAL_REGULATORY_REVIEW_REQUIRED`;
+  ScoutBox does not silently choose the stricter or the looser reading. A
+  national `ACTIVE` rule is applied in its territory; where a national rule
+  is stricter than an `ACTIVE` FIFA rule, the stricter applies.
+- **P-8** No bulk solicitation; no import equals representation; prospect ≠
+  client.
 
-## 7. Architectural recommendations (derived; detailed in the sibling documents)
+## 7. Architectural recommendations
 
-- **A-1** A versioned jurisdiction policy layer keyed by
-  `{ regulator, memberAssociation, effectiveFrom, effectiveTo, policyVersion }`
-  carrying per-rule `state ∈ in_force | suspended | doubtful | not_encoded`,
-  so Circular 1873, the CJEU judgment and future circulars are data, not
-  code (`M23_P56A_AGENT_AUTHORIZATION_CONTRACT.md` §3).
-- **A-2** A licence/accreditation verification abstraction with fail-honest
-  states (`verified`, `verification_pending`, `verification_stale`,
-  `manual_review_required`, `unverifiable`) and `recheckAt`, because no
-  FIFA or FA API exists (R-F30, §148 of the mandate).
-- **A-3** A Conflict Engine evaluating the licensed individual **and
-  connected agents** per Transaction, returning the five mandated outcomes
-  with reasons and policy version (`M23_P56A_CONFLICT_ENGINE_CONTRACT.md`).
-- **A-4** Minors gate computing `earliestPermittedApproachAt` from the
-  applicable policy set (FIFA formula needs the employing country's
-  first-professional-contract age; England's is a calendar rule), requiring
-  prior guardian consent recorded server-side before any Approach, and the
-  agent's minors accreditation plus national authorisation.
-- **A-5** Append-only regulatory records (agreements, consents, evaluations)
-  with the policy version preserved on each.
+- **A-1** Versioned jurisdiction policy layer keyed by `{ regulator,
+  jurisdiction (memberAssociation), effectiveFrom, effectiveTo,
+  policyVersion }` with per-rule `ruleStatus ∈ ACTIVE | SUSPENDED |
+  PARTIALLY_SUSPENDED | JURISDICTION_OVERRIDE | UNDER_LEGAL_REVIEW |
+  UNKNOWN`, `sourceRef` (source id, version/season, effective date,
+  retrieved date) and `params`. Initial versions: `jp-fifa-2025-1`
+  (FFAR 2025 text + S2 + S3 statuses), `jp-eng-2026-27-1` (S7/S8),
+  `jp-usa-2024-1` (S10, mostly `UNKNOWN`).
+- **A-2** Fail-honest licence/registration/accreditation verification with
+  `recheckAt`; no register integration pretended.
+- **A-3** Conflict Engine with per-jurisdiction tables (FIFA text table;
+  England 2026-27 table), connected-agent attribution, and
+  `MANUAL_REGULATORY_REVIEW_REQUIRED` for any `UNDER_LEGAL_REVIEW` /
+  `UNKNOWN` deciding rule.
+- **A-4** Minors gate: `earliestPermittedApproachAt` from the applicable
+  policy entry only; England calendar rule in `jp-eng`; FIFA formula with
+  unencoded parameter → `INSUFFICIENT_DATA`; guardian consent ledger;
+  jurisdiction-scoped accreditation facets.
+- **A-5** Append-only regulatory records with policy versions and
+  `ruleStatus` at evaluation time preserved.
+- **A-6 (new)** Agreement records carry `agencyParty` and, for England,
+  the `agency_performance` consent; the scope check has an England-only
+  colleague route (R-E2b); performing agents are recorded per act.
 
 ## 8. Legal-review items (register)
 
 | ID | Item | Why | Blocking for P5.6B build? | Blocking for P5.6C? |
 |---|---|---|---|---|
-| L-1 | Status of FFAR art. 12(8)–(10), 14, 15, 16(2)(h)(j)(k)(4), 19 after the CJEU judgment; whether/when FIFA lifts Circular 1873 | S2 + S3 + S4 leave it to the Mainz court and FIFA | NO (identity, agreements, clients do not depend on it) | **YES** for the engine's default outcome tables outside England |
-| L-2 | The exclusive-agreement two-month approach window (FFAR 16(1)(b)–(c); FA equivalent) | CJEU: "appears … incompatible with the prohibition on cartels" | NO | YES — must default to manual review, never a hard block |
-| L-3 | Enforceability of representation agreements recorded or templated in ScoutBox, electronic-signature sufficiency, minors' agreements | mandate §5, §22, §65 | NO (record externally signed evidence only) | NO |
-| L-4 | Same-agency "Chinese walls": FFAR treats same-agency agents as Connected (12(10)); England 6.5 likewise | mandate §102 | NO | YES — engine must treat same agency as connected unless counsel says otherwise |
-| L-5 | Fee rules per jurisdiction (cap, client pays, conditional remuneration in England, Clearing House) | R-F24, R-E9 | NO (ledger only) | NO (ledger only), YES before any fee validation |
-| L-6 | Which country's law fixes the minor's first-professional-contract age when the employing territory is unknown at approach time (FFAR 13(1)) | R-F20 | NO | **YES for any non-England minors pathway** |
-| L-7 | Exact set of suspended FA provisions (grey shading not recoverable from the PDF text) | R-E9 | NO | YES for England fee/reporting encoding |
-| L-8 | U.S. national regulations text, U.S. minors timing, whether background check/SafeSport are preconditions for all actions | R-U3 | NO | **YES for any U.S. pathway** |
-| L-9 | Legal party to the agreement: individual, agency, or both (England allows the agency as an additional party) | R-E2, mandate §122 | NO (model both, individual mandatory) | NO |
-| L-10 | Co-agents / assignment / sub-contracting (FA 4.11) and novation (FA 4.10) across jurisdictions | mandate §123 | NO | NO (not built until verified) |
-| L-11 | Right to erasure vs regulatory retention of agreements/consents (GDPR; FIFA 14-day and multi-year record duties) | mandate §157 | NO | NO |
-| L-12 | Whether ScoutBox may generate FA/FIFA forms or templates (AF1, CH1, Standard Representation Agreement) | R-E8, R-F29 | NO | NO |
-| L-13 | Competition-law posture of a neutral agent directory and of subscription pricing for agents | mandate §44, §97 | NO | NO |
-| L-14 | Interpretation of "preparatory communication" (what in-app messages are regulated) | R-F3 | NO | YES for the action classification's boundary cases |
-| L-15 | Employment-law, tax and transfer-compensation consequences of any recorded terms | mandate §5 | NO | NO |
-| L-16 | Automatic regulatory reporting (FIFA Platform, FA lodging) | R-F25, R-E8 | NO (not built) | NO (not built) |
+| L-1 | **Current operative status** of FFAR 12(8)–(10), 14, 15, 16(2)(h)(j)(k)(4), 19: Circular 1873 says "until the ECJ renders a final decision"; the ECJ has; FIFA has issued nothing; the German procedure continues | §11 | NO | **YES** — FIFA-only outcome tables stay `UNDER_LEGAL_REVIEW` until counsel/FIFA say otherwise |
+| L-2 | Exclusive-agreement window (FFAR 16(1)(b)–(c); FA 8.1(b)–(c), 8.2) | S3 | NO | YES — manual review only |
+| L-3 | Enforceability of recorded/templated agreements, e-signature sufficiency, minors' agreements | mandate | NO | NO |
+| L-4 | Same-agency Chinese walls vs Connected Football Agent (FFAR 12(10); FA 6.5 + definition) | | NO | YES — connected by default |
+| L-5 | Fee rules per jurisdiction | R-F24, R-E9 | NO | NO (ledger), YES before validation |
+| L-6 | Non-England minors timing parameter; which country's law when employment undecided | R-F20 | NO | **YES for any non-England minors pathway** |
+| L-7 | Exact set of shaded (suspended) FA 2026-27 provisions; the G-covered inference is not proof | S7 intro | NO | YES for England fee/reporting encoding |
+| L-8 | U.S. national regulations text, minors timing, scope of background check/SafeSport | R-U3 | NO | **YES for any U.S. pathway** |
+| L-9 | Agency as party and the 2026-27 colleague-performance route (R-E2b): which parties' consent, form, interaction with FFAR 11(3)/12 for international-dimension agreements, effect of the contracting agent leaving | R-E2b | NO (model it; England-only; consent-gated) | YES before enabling the route in production |
+| L-10 | Assignment / sub-contracting / novation across jurisdictions | FA 4.10–4.11 | NO | NO (not built) |
+| L-11 | Erasure vs retention (GDPR; FA 8.7 six-year retention; FIFA duties) | FA 8.7 | NO | NO |
+| L-12 | Generating FA/FIFA forms or templates | R-E8, R-F29 | NO | NO |
+| L-13 | Competition-law posture of the directory and subscription pricing | | NO | NO |
+| L-14 | "Preparatory communication" boundary | R-F3 | NO | YES for boundary cases |
+| L-15 | Employment-law / tax consequences of recorded terms | | NO | NO |
+| L-16 | Automatic regulatory reporting (FIFA Platform; FA lodging; AF1) | | NO (not built) | NO (not built) |
+| L-17 (new) | Electronic signature / electronic lodging sufficiency for FA "form prescribed by The Association" consents and Annexes | R-E3, R-E7 | NO (record externally executed evidence) | NO |
+| L-18 (new) | Domestic vs international jurisdiction resolution for mixed transactions (FA scope 1.1; FFAR 2(1)–(3)) | R-E11, R-F27 | NO | YES for the resolver's default |
 
-## 9. Regulatory uncertainty register (§190)
+## 9. Regulatory uncertainty register (§190, updated)
 
-| Rule | What is known | What is uncertain | Jurisdiction | Blocking for build? | Needs counsel? |
-|---|---|---|---|---|---|
-| Multiple representation (FFAR 12(8)–(10)) | Text (S1); suspended worldwide by S2; CJEU 16 Jul 2026 refers justification to the national court (S3) | Whether FIFA reinstates, amends or replaces it; timing | FIFA / all except where national rule is in force | P5.6B no; P5.6C engine defaults yes | YES |
-| Fee cap, client pays, pro rata, Clearing House (14, 15) | Text (S1); suspended (S2); England has no cap (S7) | Reinstatement; national variants | FIFA + each MA | No (ledger only) | YES |
-| Exclusive-agreement approach window (16(1)(b)–(c)) | CJEU: appears incompatible with Art. 101 TFEU (S3) | Final national ruling; FIFA response | FIFA + England | No | YES |
-| Publication (19) | Suspended (S2); GDPR precludes publishing sanctions and transaction details (S3) | What FIFA will still publish (names) | FIFA | No | YES |
-| Minor approach timing (13(1)) | Six months before the first-professional-contract age of the employing country; England fixed at 1 Sep of the academic year of the 16th birthday | The age in each other country; which country when employment is undecided | FIFA, all MAs except England | England no; others yes | YES |
-| U.S. national rules | FIFA licence enforced from 1 Jan 2024; background check + SafeSport training required (S10) | The U.S. Soccer regulations text; minors timing; scope of the two requirements | United States | Yes for U.S. minors | YES |
-| FA suspended provisions | Some provisions are shaded as suspended (S7 intro) | Which exactly (shading lost in extraction) | England | No; yes for fee/reporting encoding | YES |
-| Agency as party | England: agency may be an additional party, individual mandatory (S8) | Other jurisdictions | all | No | YES |
-| Co-agent / assignment | England permits assignment between registered agents with lodging (S7 4.11) | FIFA and others | all | No (not built) | YES |
-| FIFA template mandatory? | A template exists (S6) | Whether use is mandatory anywhere | FIFA | No | YES |
+| Issue | What is known | What is uncertain | Jurisdiction | Blocking for build? | Needs counsel? | Engine posture |
+|---|---|---|---|---|---|---|
+| **FIFA suspended-rule operative status** (12(8)–(10), 14, 15, 16(2)(h)(j)(k)(4), 19) | Text (S1); suspended by S2 "until the ECJ renders a final decision"; ECJ decided 16 Jul 2026 (S3); FIFA statement silent (S4); FAQ pre-dates judgment (S5); FA 2026-27 (1 Jun 2026) still shades equivalents; no later FIFA instrument (S6) | Whether the suspension has ended by its own terms, continues pending the German court, or will be replaced with the 2027 framework | FIFA / all MAs relying on S2 | P5.6B no; P5.6C FIFA-only tables yes | **YES** | `UNDER_LEGAL_REVIEW` → review |
+| **England multiple-representation regime** | 6.3–6.5 verified in the 2026-27 text and guidance, in force, G-covered; AF1 = written consent | None on content; interplay with FFAR for international-dimension transactions | England (National Transactions) | No | YES only for L-1 interplay | `ACTIVE` in `jp-eng-2026-27` (JURISDICTION_OVERRIDE) |
+| **Non-England minor approach timing** | FIFA formula (13(1)) with a per-country parameter; England calendar rule encoded | The first-contract age per country; which country when employment is undecided; U.S. rules | all MAs except England | **Yes for any non-England minors pathway** | **YES** | `UNKNOWN` param → `INSUFFICIENT_DATA` → refused |
+| **Domestic vs international transaction jurisdiction** | FA scope 1.1 + definitions; FFAR 2(1)–(3) | Mixed cases (foreign client, English club; loans; Specified International Transactions with FA-affiliated parties) | England + FIFA | No | YES (L-18) | resolver returns both sets; contradiction → review |
+| **Fee / payment rules** | FFAR 14–15 suspended/uncertain; FA reg. 7: no cap, client pays, conditional remuneration, 14-day proof; Clearing House likely shaded | Which FA limbs are shaded (L-7); reinstatement | FIFA + England | No (ledger only) | YES | recorded, not validated |
+| **Same-agency / connected-agent attribution** | FFAR 12(10) + definition (suspended/uncertain); FA 6.5 + definition (in force); new FA colleague-performance route (R-E2b) | Whether walls can cure; how R-E2b interacts with 6.5 when colleagues serve different parties | all | No | YES (L-4, L-9) | connected by default; R-E2b England-only, consent-gated |
+| **Electronic signature / regulatory filing sufficiency** | FA prescribes forms and Annexes; ScoutBox has no e-signature | Whether in-app confirmations satisfy "written consent in the form prescribed"; whether ScoutBox may lodge | England + FIFA | No | YES (L-17, L-12, L-16) | record externally executed evidence; never file |
+| Exclusive-agreement window | S3 doubt; text remains in FFAR and FA 8.1/8.2 | Final national ruling; FIFA/FA response | FIFA + England | No | YES | `UNDER_LEGAL_REVIEW` → review, never block |
+| Publication (19) | Suspended; GDPR precludes sanctions/transaction publication (S3) | What FIFA will still publish | FIFA | No | YES | ScoutBox publishes nothing |
+| U.S. national rules | Licence; background check; SafeSport | Regulations text; minors | United States | Yes for U.S. minors | YES | `UNKNOWN` |
+| FIFA template mandatory? | Template exists | Mandatory anywhere? | FIFA | No | YES | not offered |
 
 ## 10. Future jurisdiction overlays (framework only)
 
-FFAR art. 3 requires every member association to have national regulations
-incorporating arts. 11–21 and permits stricter measures; art. 2(3) chooses
-the national set by where the Client is registered or domiciled at signing.
-Therefore an overlay for France (FFF), Germany (DFB), Italy (FIGC), Spain
-(RFEF) or any other association is the same shape as England's: a policy
-set with `{ memberAssociation, effectiveFrom, policyVersion }`, entries for
-national registration, minors timing formula and accreditation, multiple-
-representation table, fee posture, lodging duties, and per-rule `state`.
-France's national-law licensing (art. 24 recognition) and any national
-minors law are examples of entries that must be encoded from primary
-sources before that overlay is switched on; until then the resolver
-returns `not_encoded` → `MANUAL_REGULATORY_REVIEW_REQUIRED` (mandate §19,
-§126). None of these overlays was researched in P5.6A.
+Unchanged in substance: each MA overlay is a policy set of the same shape
+with `ruleStatus` per rule and `sourceRef` per entry; until encoded from
+primary sources and reviewed, every rule is `UNKNOWN` →
+`MANUAL_REGULATORY_REVIEW_REQUIRED`, and no minors pathway is enabled.
+None was researched in P5.6A.
+
+## 11. Reconciling the FIFA FAQ with Circular 1873 (the tension, stated)
+
+**The tension.** S5 (FIFA FAQ, last updated 23 Jan 2025) describes as
+rules: dual representation of an individual and an engaging entity with
+advance written consent (the engaging entity may pay up to 50 %); the
+prohibition of releasing entity + individual, releasing entity + engaging
+entity, and all parties; the fee caps; client pays. S2 (Circular 1873, 30
+Dec 2023) ordered the worldwide temporary suspension of exactly those
+provisions (12(8)–(10), 14, 15) "until the European Court of Justice
+renders a final decision in the pending procedures". S5 never mentions S2.
+S3 (16 Jul 2026) is the ECJ's decision in one of those procedures, but it
+refers the proportionality assessment back to the national court, so "the
+pending procedures" are not finished. S4 (FIFA, same day) does not say
+whether the suspension continues. The FA's 2026-27 text (in force 1 Jun
+2026) still shades its equivalents as suspended by reference to S2.
+Secondary commentary in August 2026 (S11) reads the suspension as
+continuing; that is opinion, not an instrument.
+
+**What ScoutBox concludes.** (a) The FFAR text is current (S1). (b) The
+last express FIFA instrument on enforcement is S2, and it has not been
+withdrawn. (c) S2's own end-condition may or may not have occurred; FIFA
+has not said. (d) Therefore the **current operative status of FFAR
+12(8)–(10), 14, 15, 16(2)(h)(j)(k)(4) and 19 is not conclusively
+established** on 18 September 2026. (e) England's equivalents in 6.3–6.5
+and reg. 7 (unshaded limbs) are operative in England by the FA's own
+current text, independent of (d).
+
+**What ScoutBox does architecturally while (d) holds.** The FIFA policy
+entry carries `ruleStatus: UNDER_LEGAL_REVIEW` for those articles with
+`sourceRef` = {S1, S2, S3, S4, S5} and a note quoting the tension. The
+Conflict Engine, for any transaction where one of those FIFA rules would
+decide the outcome and no national `ACTIVE` entry applies, returns
+`MANUAL_REGULATORY_REVIEW_REQUIRED` with reason `RULE_STATUS_UNCERTAIN`
+and the rule ids. It does **not** return `CLEAR` (which would assume the
+suspension continues and the rule is unenforced) and does **not** return
+`PROHIBITED_CONFLICT` (which would assume the rule is back in force).
+Transactions inside England's national scope use `jp-eng-2026-27`, where
+6.3–6.5 are `ACTIVE`, and are evaluated normally. A FIFA circular, FAQ
+update or General Secretariat notice that settles the question becomes a
+new `jp-fifa` version published under dual control with counsel review
+(C7); nothing changes by code.
