@@ -49,7 +49,12 @@ interface Metrics {
   staleFacets: number; note: string;
 }
 
-const STATUSES = ['PENDING', 'IN_REVIEW', 'APPROVED', 'REJECTED', 'CANCELLED', 'SUPERSEDED'];
+const STATUSES = ['OPEN', 'PENDING', 'IN_REVIEW', 'APPROVED', 'REJECTED', 'CANCELLED', 'SUPERSEDED'];
+const STATUS_LABEL: Record<string, string> = {
+  OPEN: 'open work (awaiting or in review)', PENDING: 'awaiting review', IN_REVIEW: 'in review',
+  APPROVED: 'approved', REJECTED: 'rejected', CANCELLED: 'cancelled', SUPERSEDED: 'superseded',
+};
+const matchesFilter = (r: { status: string }, f: string) => (f === 'OPEN' ? r.status === 'PENDING' || r.status === 'IN_REVIEW' : r.status === f);
 const KIND_LABEL: Record<string, string> = {
   verification_facet: 'Verification of a facet',
   representation_dispute: 'Client dispute',
@@ -128,7 +133,7 @@ export function M25Panel({ tab, say }: { tab: M25Tab; adminKey: string; say: (t:
   const [authError, setAuthError] = useState<string | null>(null);
 
   const [reviews, setReviews] = useState<Review[]>([]);
-  const [statusFilter, setStatusFilter] = useState('PENDING');
+  const [statusFilter, setStatusFilter] = useState('OPEN');
   const [open, setOpen] = useState<string | null>(null);
   const [detail, setDetail] = useState<{ review: Review; subjectDetail: SubjectDetail | null } | null>(null);
   const [policies, setPolicies] = useState<PolicyVersion[]>([]);
@@ -170,14 +175,16 @@ export function M25Panel({ tab, say }: { tab: M25Tab; adminKey: string; say: (t:
     if (!token) return;
     setError(null);
     if (DEMO) {
-      setReviews(demoReviews.filter((r) => !statusFilter || r.status === statusFilter));
+      setReviews(demoReviews.filter((r) => matchesFilter(r, statusFilter)));
       setPolicies(demoPolicies); setReviewers(demoReviewers); setAudit(demoAudit); setMetrics(demoMetrics);
       return;
     }
     try {
       if (tab === 'agentreview') {
-        const q = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
-        setReviews((await call<{ items: Review[] }>(`/ts/compliance/reviews${q}`)).items);
+        // Fetched whole and filtered here: a decision changes an item's status, and an
+        // item you are deciding must not vanish out from under you mid-decision.
+        const all = (await call<{ items: Review[] }>('/ts/compliance/reviews')).items;
+        setReviews(all.filter((r) => matchesFilter(r, statusFilter)));
         setMetrics(await call<Metrics>('/ts/compliance/metrics'));
       }
       if (tab === 'agentpolicy') setPolicies((await call<{ items: PolicyVersion[] }>('/ts/compliance/policies')).items);
@@ -278,8 +285,8 @@ export function M25Panel({ tab, say }: { tab: M25Tab; adminKey: string; say: (t:
         {error && <div className="notice block" role="alert" data-testid="review-error">{error}</div>}
         <div className="list-row" style={{ gap: 8 }}>
           <label className="chk">Status
-            <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setOpen(null); setDetail(null); }} aria-label="Filter by status" data-testid="status-filter">
-              {STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ').toLowerCase()}</option>)}
+            <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); }} aria-label="Filter by status" data-testid="status-filter">
+              {STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s] ?? s.toLowerCase()}</option>)}
             </select>
           </label>
           <span className="grow dim">{reviews.length} item(s)</span>
@@ -294,6 +301,66 @@ export function M25Panel({ tab, say }: { tab: M25Tab; adminKey: string; say: (t:
             <div className="stat"><div className="v">{metrics.staleFacets}</div><div className="k">Stale verifications</div></div>
           </div>
         )}
+
+        {/* The item being worked on lives in its OWN panel. A decision changes its
+            status, and an item must not vanish out from under the person deciding it
+            because the list filter no longer matches. */}
+        {item && (
+          <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }} data-testid="review-detail" data-review={item.id} data-status={item.status}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span className="pill">{KIND_LABEL[item.kind] ?? item.kind}</span>
+              <span className="grow dim">{item.id} · raised {when(item.requestedAt)}{item.policyVersions.length ? ` · ${item.policyVersions.join(', ')}` : ''}</span>
+              {item.startedBy && <span className="dim">started by {item.startedBy.name}</span>}
+              <span className={`pill ${item.status === 'PENDING' ? 'gold' : item.status === 'IN_REVIEW' ? 'blue' : item.status === 'APPROVED' ? 'green' : item.status === 'REJECTED' ? 'red' : ''}`} data-testid="open-status">{item.status.replace(/_/g, ' ').toLowerCase()}</span>
+              <button onClick={() => { setOpen(null); setDetail(null); }}>Close</button>
+            </div>
+            <div className="dim">{item.reasons.map((x) => `${x.code}${x.ruleId ? ` (${x.ruleId}: ${x.ruleStatus})` : ''}`).join(' · ') || '—'}</div>
+            <div className="notice" data-testid="subject-detail">
+              <b>What this review needs.</b>{' '}
+              {detail?.subjectDetail
+                ? Object.entries(detail.subjectDetail).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`).join(' · ')
+                : 'The subject record is no longer available; the item can still be closed.'}
+            </div>
+            {item.snapshot && <div className="dim">Snapshot at the time it was raised: {JSON.stringify(item.snapshot).slice(0, 400)}</div>}
+            {item.decision ? (
+              <div className="notice" data-testid="review-decision">
+                <b>{item.decision.outcome}</b> by {item.decision.reviewer.name} ({ROLE_LABEL[item.decision.reviewer.role] ?? item.decision.reviewer.role}) · {item.decision.reasonCode}
+                {item.decision.reason ? <div>{item.decision.reason}</div> : null}
+                {item.decision.evidenceRefs?.length ? <div className="dim">evidence: {item.decision.evidenceRefs.join(' · ')}</div> : null}
+                {item.decision.resultingState ? <div className="dim">resulting state: {JSON.stringify(item.decision.resultingState)}</div> : null}
+                {['APPROVED', 'REJECTED'].includes(item.status) && !item.supersededBy && (
+                  <div style={{ marginTop: 6, display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <input style={{ flex: 1 }} placeholder="Why this decision should be reconsidered" value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} aria-label="Reason to supersede" />
+                    <button onClick={() => void act(item, 'supersede', { reason: form.reason }, 'A new review supersedes it. The original decision is retained, untouched.')} data-testid="supersede">Supersede</button>
+                  </div>
+                )}
+                {item.supersededBy && <div className="dim">superseded by {item.supersededBy}</div>}
+              </div>
+            ) : (
+              <>
+                {item.status === 'PENDING' && <div><button className="primary" onClick={() => void act(item, 'start', {}, 'Started — the item is attributed to you.')} data-testid="start">Start review</button></div>}
+                <div className="form-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                  <label>Reason code<input value={form.reasonCode} onChange={(e) => setForm({ ...form, reasonCode: e.target.value })} placeholder="e.g. fa_list_match" data-testid="reason-code" /></label>
+                  <label>Written reason<input value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} placeholder="What you examined and concluded" data-testid="reason-text" /></label>
+                </div>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12.5, color: 'var(--muted)' }}>
+                  Evidence references (one per line; required to approve)
+                  <textarea rows={3} value={form.evidence} onChange={(e) => setForm({ ...form, evidence: e.target.value })} data-testid="evidence" />
+                </label>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button className="primary" onClick={() => resolve(item, 'APPROVED')} data-testid="approve">Approve</button>
+                  <button onClick={() => resolve(item, 'REJECTED')} data-testid="reject">Reject</button>
+                  <button onClick={() => { if (!form.reason.trim()) return say('Cancelling needs a written reason.'); void act(item, 'cancel', { reason: form.reason.trim() }, 'Cancelled. Nothing about the subject changed.'); }} data-testid="cancel">Cancel item</button>
+                </div>
+                <div className="dim">
+                  Your name, role and the evidence you cite are recorded with the decision and shown to the agency as an attributed
+                  role — never as an anonymous action, and never with your reason text.
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {reviews.length === 0 && <div className="notice">Nothing at this status.</div>}
         {reviews.map((r) => (
           <div key={r.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }} data-testid={`review-${r.id}`} data-status={r.status}>
@@ -304,62 +371,14 @@ export function M25Panel({ tab, say }: { tab: M25Tab; adminKey: string; say: (t:
               <span className={`pill ${r.status === 'PENDING' ? 'gold' : r.status === 'IN_REVIEW' ? 'blue' : r.status === 'APPROVED' ? 'green' : r.status === 'REJECTED' ? 'red' : ''}`}>{r.status.replace(/_/g, ' ').toLowerCase()}</span>
               <button onClick={() => (open === r.id ? (setOpen(null), setDetail(null)) : void openItem(r.id))} data-testid={`open-${r.id}`}>{open === r.id ? 'Close' : 'Open'}</button>
             </div>
-            <div className="dim">
-              {r.reasons.map((x) => `${x.code}${x.ruleId ? ` (${x.ruleId}: ${x.ruleStatus})` : ''}`).join(' · ') || '—'}
-            </div>
-            {open === r.id && item && (
-              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }} data-testid="review-detail">
-                <div className="notice" data-testid="subject-detail">
-                  <b>What this review needs.</b>{' '}
-                  {detail?.subjectDetail
-                    ? Object.entries(detail.subjectDetail).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`).join(' · ')
-                    : 'The subject record is no longer available; the item can still be closed.'}
-                </div>
-                {item.snapshot && <div className="dim">Snapshot at the time it was raised: {JSON.stringify(item.snapshot).slice(0, 400)}</div>}
-                {item.decision ? (
-                  <div className="notice" data-testid="review-decision">
-                    <b>{item.decision.outcome}</b> by {item.decision.reviewer.name} ({ROLE_LABEL[item.decision.reviewer.role] ?? item.decision.reviewer.role}) · {item.decision.reasonCode}
-                    {item.decision.reason ? <div>{item.decision.reason}</div> : null}
-                    {item.decision.evidenceRefs?.length ? <div className="dim">evidence: {item.decision.evidenceRefs.join(' · ')}</div> : null}
-                    {item.decision.resultingState ? <div className="dim">resulting state: {JSON.stringify(item.decision.resultingState)}</div> : null}
-                    {['APPROVED', 'REJECTED'].includes(item.status) && !item.supersededBy && (
-                      <div style={{ marginTop: 6, display: 'flex', gap: 8, alignItems: 'center' }}>
-                        <input style={{ flex: 1 }} placeholder="Why this decision should be reconsidered" value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} aria-label="Reason to supersede" />
-                        <button onClick={() => void act(item, 'supersede', { reason: form.reason }, 'A new review supersedes it. The original decision is retained, untouched.')} data-testid="supersede">Supersede</button>
-                      </div>
-                    )}
-                    {item.supersededBy && <div className="dim">superseded by {item.supersededBy}</div>}
-                  </div>
-                ) : (
-                  <>
-                    {item.status === 'PENDING' && <div><button className="primary" onClick={() => void act(item, 'start', {}, 'Started — the item is attributed to you.')} data-testid="start">Start review</button></div>}
-                    <div className="form-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
-                      <label>Reason code<input value={form.reasonCode} onChange={(e) => setForm({ ...form, reasonCode: e.target.value })} placeholder="e.g. fa_list_match" data-testid="reason-code" /></label>
-                      <label>Written reason<input value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} placeholder="What you examined and concluded" data-testid="reason-text" /></label>
-                    </div>
-                    <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12.5, color: 'var(--muted)' }}>
-                      Evidence references (one per line; required to approve)
-                      <textarea rows={3} value={form.evidence} onChange={(e) => setForm({ ...form, evidence: e.target.value })} data-testid="evidence" />
-                    </label>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      <button className="primary" onClick={() => resolve(item, 'APPROVED')} data-testid="approve">Approve</button>
-                      <button onClick={() => resolve(item, 'REJECTED')} data-testid="reject">Reject</button>
-                      <button onClick={() => { if (!form.reason.trim()) return say('Cancelling needs a written reason.'); void act(item, 'cancel', { reason: form.reason.trim() }, 'Cancelled. Nothing about the subject changed.'); }} data-testid="cancel">Cancel item</button>
-                    </div>
-                    <div className="dim">
-                      Your name, role and the evidence you cite are recorded with the decision and shown to the agency as an attributed
-                      role — never as an anonymous action, and never with your reason text.
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
+            <div className="dim">{r.reasons.map((x) => `${x.code}${x.ruleId ? ` (${x.ruleId}: ${x.ruleStatus})` : ''}`).join(' · ') || '—'}</div>
           </div>
         ))}
         {metrics && <div className="notice" data-testid="metrics-note">{metrics.note}</div>}
       </div>
     );
   }
+
 
   // -------------------------------------------------------------- policy
   if (tab === 'agentpolicy') {

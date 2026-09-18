@@ -24,8 +24,18 @@ export const CONFLICT_OUTCOMES = Object.freeze([
 export const PERMITTED_WITH_CONSENT = 'PERMITTED_DUAL_REPRESENTATION_CONSENT_REQUIRED';
 export const OUTCOME_ALIASES = Object.freeze({ PERMITTED_WITH_CONSENT });
 
-/** Severity order for aggregation: the most severe outcome wins; all reasons are kept. */
-const SEVERITY = Object.freeze({ INSUFFICIENT_DATA: 4, MANUAL_REGULATORY_REVIEW_REQUIRED: 3, PROHIBITED_CONFLICT: 2, [PERMITTED_WITH_CONSENT]: 1, CLEAR: 0 });
+/**
+ * Severity order for aggregation: the most severe outcome wins; all reasons are kept.
+ *
+ * PROHIBITED_CONFLICT dominates everything. A prohibition under an ACTIVE rule is a
+ * definite answer, while "needs attributed review" and "insufficient data" are the
+ * ABSENCE of one — so no missing fact and no uncertain rule can soften it, and the
+ * domain layer must never record a representation for a prohibited combination as
+ * merely "declared, pending review". No reviewer could approve such an item anyway
+ * (REVIEW_CANNOT_OVERRIDE_ACTIVE_RULE), so recording it would leave the agent shown
+ * as acting for a party they must not act for, on an item that can never resolve.
+ */
+const SEVERITY = Object.freeze({ PROHIBITED_CONFLICT: 4, INSUFFICIENT_DATA: 3, MANUAL_REGULATORY_REVIEW_REQUIRED: 2, [PERMITTED_WITH_CONSENT]: 1, CLEAR: 0 });
 export const mostSevere = (a, b) => (SEVERITY[a] >= SEVERITY[b] ? a : b);
 
 export const PARTY_ROLES = Object.freeze(['individual', 'engaging_entity', 'releasing_entity']);

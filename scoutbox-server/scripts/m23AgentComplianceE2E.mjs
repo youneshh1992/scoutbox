@@ -28,7 +28,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SEEDED_POLICY_VERSIONS, RULE_STATUSES } from '../m25/policyVersions.mjs';
 import { selectPolicyVersion, applicablePolicySet, ruleAt, resolveScope, evaluatePolicy, evaluateMinorGate, earliestPermittedApproachAt, isRegulatoryMinor, representationScopeProblem, MINOR_PATHWAY_PRODUCTION_ENABLED, POLICY_FACETS } from '../m25/policy.mjs';
-import { evaluateConflict, consentSufficiency, CONFLICT_OUTCOMES, PERMITTED_WITH_CONSENT, OUTCOME_ALIASES, conflictSummaryForParty, inputHashOf } from '../m25/conflict.mjs';
+import { evaluateConflict, consentSufficiency, CONFLICT_OUTCOMES, PERMITTED_WITH_CONSENT, OUTCOME_ALIASES, conflictSummaryForParty, inputHashOf, mostSevere } from '../m25/conflict.mjs';
 import { createVerificationProvider, facetFromProviderAnswer, PROVIDER_STATES } from '../m25/provider.mjs';
 import { M25_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../m25/errors.mjs';
 import { COMPLIANCE_AUDIT_ACTIONS } from '../m25/audit.mjs';
@@ -541,10 +541,15 @@ section('S/T — revocation, stale client submits, party change invalidates the 
   const add = await j('POST', `/org/agent/compliance/contexts/${CTX1}/parties`, { partyRole: 'releasing_entity', subjectKind: 'club', subjectId: 'org-harbour', expectedRev: ctx.rev }, ANA.token);
   ok(add.status === 201 && add.body.context.evaluationCount === before + 1 && add.body.evaluation.outcome === 'CLEAR', 'T2 adding the releasing club re-evaluates the context at once (#10, #11); with no representation of it the clearance stays CLEAR');
   const rel = collect('T3', await j('POST', `/org/agent/compliance/contexts/${CTX1}/representations`, { partyRole: 'releasing_entity' }, ANA.token));
-  neg(expect(rel, 422, 'REGULATORY_REVIEW_REQUIRED') && rel.body.reasons.some((r) => r.code === 'PROHIBITED_COMBINATION' && r.ruleId === 'ENG-6.4'), 'T3 declaring the releasing club too: the declared-only fact goes to review, and the review carries the ACTIVE prohibition');
-  neg(expect(collect('T4', await j('POST', `/ts/compliance/reviews/${rel.body.reviewId}/resolve`, { outcome: 'APPROVED', reasonCode: 'x', reason: 'trying', evidenceRefs: ['e'] }, PRIYA.token)), 409, 'REVIEW_CANNOT_OVERRIDE_ACTIVE_RULE'), 'T4 a reviewer cannot approve past an objectively prohibited ACTIVE rule (#28)');
-  const rejected = await j('POST', `/ts/compliance/reviews/${rel.body.reviewId}/resolve`, { outcome: 'REJECTED', reasonCode: 'prohibited_combination', reason: 'FA 6.4: a releasing club\'s agent acts for nobody else.' }, PRIYA.token);
-  ok(rejected.status === 200 && rejected.body.review.decision.resultingState.representationStatus === 'withdrawn', 'T5 rejecting it withdraws the declared representation');
+  neg(expect(rel, 403, 'REPRESENTATION_CONFLICT') && rel.body.outcome === 'PROHIBITED_CONFLICT' && rel.body.reasons.some((r) => r.code === 'PROHIBITED_COMBINATION' && r.ruleId === 'ENG-6.4' && r.ruleStatus === 'ACTIVE'), 'T3 declaring the releasing club too is REFUSED outright under the ACTIVE prohibition — an entity with no ScoutBox agreement does not soften it into review');
+  {
+    const after = (await j('GET', `/org/agent/compliance/contexts/${CTX1}`, undefined, ANA.token)).body.context;
+    const queue = (await j('GET', '/ts/compliance/reviews?status=PENDING', undefined, MARCUS.token)).body.items;
+    neg(rel.body.reviewId === undefined && !after.representations.some((r) => r.partyRole === 'releasing_entity' && r.status !== 'withdrawn') && !queue.some((r) => r.subject?.contextId === CTX1 && r.subject?.partyRole === 'releasing_entity'), 'T4 nothing was recorded: no representation, no review id in the refusal, and no review item a reviewer could never resolve (#28)');
+  }
+  // The severity order is the guard: a prohibition is a definite answer, so nothing
+  // that is merely UNDECIDED can outrank it and turn a refusal into a stored record.
+  neg(mostSevere('MANUAL_REGULATORY_REVIEW_REQUIRED', 'PROHIBITED_CONFLICT') === 'PROHIBITED_CONFLICT' && mostSevere('INSUFFICIENT_DATA', 'PROHIBITED_CONFLICT') === 'PROHIBITED_CONFLICT' && mostSevere('CLEAR', 'PROHIBITED_CONFLICT') === 'PROHIBITED_CONFLICT', 'T5 PROHIBITED_CONFLICT outranks review, insufficient data and clearance alike — a block beats everything (regression guard, defect C14)');
   neg(expect(collect('T6', await j('POST', `/org/agent/compliance/contexts/${CTX1}/override`, { outcome: 'CLEAR' }, ANA.token)), 404, null) && (await j('POST', `/org/agent/compliance/contexts/${CTX1}/evaluate`, { outcome: 'CLEAR', clearance: 'CLEAR' }, ANA.token)).body.evaluation.outcome === 'CLEAR', 'T7 the agent has no override route and an outcome in the body changes nothing (#27)');
   // A prohibited combination refused at mutation time, nothing recorded.
   const ctx2 = await j('POST', '/org/agent/compliance/contexts', { type: 'transfer', jurisdictions: ['ENG'], parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi' }, { partyRole: 'releasing_entity', subjectKind: 'club', subjectId: 'org-harbour' }] }, ANA.token);
