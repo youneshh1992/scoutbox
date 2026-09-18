@@ -58,6 +58,11 @@ ConflictResult = {
 }
 ```
 
+`PERMITTED_DUAL_REPRESENTATION_CONSENT_REQUIRED` is the mandated name
+(original P5.6A mandate §35) for the outcome the currency-closure mandate
+calls `PERMITTED_WITH_CONSENT`; the two are one outcome and the shorter
+name is an accepted alias in copy and tests (DR-51).
+
 Severity order for aggregation: `INSUFFICIENT_DATA` >
 `MANUAL_REGULATORY_REVIEW_REQUIRED` > `PROHIBITED_CONFLICT` >
 `PERMITTED_DUAL_REPRESENTATION_CONSENT_REQUIRED` > `CLEAR`. The most
@@ -84,6 +89,25 @@ How the engine treats each status when the rule would decide an outcome:
 | `JURISDICTION_OVERRIDE` | the national entry named in `params.overrideRuleId` is used for transactions inside that jurisdiction's scope; the FIFA entry's own status still governs international-dimension transactions |
 | `UNDER_LEGAL_REVIEW` | **`MANUAL_REGULATORY_REVIEW_REQUIRED`** with reason `RULE_STATUS_UNCERTAIN` — never `CLEAR`, never `PROHIBITED_CONFLICT` |
 | `UNKNOWN` | `MANUAL_REGULATORY_REVIEW_REQUIRED` with reason `POLICY_NOT_ENCODED` (or `INSUFFICIENT_DATA` when the missing thing is a parameter needed to evaluate an `ACTIVE` rule) |
+| `PENDING_IMPLEMENTATION` | **not applied** before `effectiveFrom`; reason `RULE_NOT_YET_IN_FORCE` attached for transparency; the previously applicable entry decides |
+
+### 3a. Fail-closed vs manual review (frozen; mandate §11)
+
+| Situation | Result | Why |
+|---|---|---|
+| Licence required and inactive / unverified / stale | **fail closed** (403 at authorization step 5) | objective mandatory condition absent |
+| Required minors accreditation / authorisation absent | fail closed | objective |
+| Required guardian consent absent (approach or agreement) | fail closed (422 `GUARDIAN_CONSENT_REQUIRED`; nothing proceeds) | objective |
+| Representation agreement absent / expired / out of scope | fail closed | objective |
+| Clearly prohibited combination under an `ACTIVE` rule (England 6.4) | fail closed (`PROHIBITED_CONFLICT`) | objective under active policy |
+| Competing rules may apply; deciding rule `UNDER_LEGAL_REVIEW`; jurisdiction cannot be determined; overlays contradict; source status legally uncertain | **manual regulatory review** (`MANUAL_REGULATORY_REVIEW_REQUIRED`) | uncertainty is not permission and not a prohibition ScoutBox may assert |
+| A needed parameter or policy row is missing | `INSUFFICIENT_DATA` (refuses; routed to review) | neither allow nor guess |
+
+Both branches refuse the mutation. The difference is what happens next:
+a fail-closed refusal tells the caller which objective condition to
+satisfy; a manual-review result creates an attributed T&S queue item
+(authorization contract §14) and nothing proceeds until a person
+resolves it under a named policy version.
 
 Initial content (from the snapshot; every entry cites source, version,
 effective date and retrieved date 18 Sep 2026):

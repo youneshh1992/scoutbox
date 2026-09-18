@@ -121,7 +121,12 @@ outcome + codes, Consents, Terms it is party to, Correspondence, Timeline).
   agency changes. Verification facets are M14 claims with subtypes;
   effective state recomputed at read time plus `recheckAt` (30 d,
   DR-6). No register integration; T&S human review against the FIFA
-  directory / FA list; the `honest` string says so (DR-4).
+  directory / FA list; the `honest` string says so (DR-4). **Frozen:**
+  FIFA licence ≠ national registration ≠ domestic authorisation — three
+  facets, separately verified and expiring; an agent may be FIFA-licensed
+  and still unauthorised for a domestic activity (DR-53). The licence
+  holder is a natural person only, re-confirmed against FFAR 8(1)/11(1)
+  and FA 2026-27 2.2/3.1 on 18 Sep 2026.
 - **Agency = `db.orgs{type:'agency', platform:'agent'}`.** Tenant for
   administrative data and the agency's business records. Never a
   licensee (R-F2). England (FA 2026-27, in force 1 Jun 2026) additionally
@@ -176,10 +181,13 @@ by accident (Rooms, DR-23).
   `party_guardian`, `party_club_signatory`, `party_club_member`,
   `agency_admin_observer`, `trust_safety`. Capabilities per role live in a
   table like `roomCan` but in the Agent module.
-- The engine is pure, versioned, deterministic, with five outcomes,
-  connected-agent attribution, per-rule `ruleStatus` handling (`ACTIVE`,
-  `SUSPENDED`, `PARTIALLY_SUSPENDED`, `JURISDICTION_OVERRIDE`,
-  `UNDER_LEGAL_REVIEW`, `UNKNOWN`), **two conflict tables** — England
+- The engine is pure, versioned, deterministic, with five outcomes
+  (`PERMITTED_WITH_CONSENT` accepted as the alias of the consent-required
+  outcome, DR-51), connected-agent attribution, per-rule `ruleStatus`
+  handling (`ACTIVE`, `SUSPENDED`, `PARTIALLY_SUSPENDED`,
+  `JURISDICTION_OVERRIDE`, `PENDING_IMPLEMENTATION`, `UNDER_LEGAL_REVIEW`,
+  `UNKNOWN`), the frozen fail-closed vs manual-review distinction
+  (DR-52), **two conflict tables** — England
   2026-27 (dual *or multiple* representation with four safeguards;
   releasing club exclusive; ACTIVE) and the FIFA text (12(8)–(10),
   `UNDER_LEGAL_REVIEW` → manual review, never allow/block by assumption,
@@ -205,8 +213,8 @@ by accident (Rooms, DR-23).
 
 | Phase | Scope | Exit gate |
 |---|---|---|
-| **P5.6B — Agent core app** | B1 agent identity (`agentProfiles`) + agency tenancy (`platform`, `agencyAffiliations`, tiers, invariants) + migration 2305; B2 verification facets on M14 (subtypes incl. FA registration and FA minors authorisation, `recheckAt`, fail-honest states, T&S review queue — **verification outcomes are advisory facts re-checked at every step, never an approval of a regulated act, so the anonymous-reviewer gap does not gate P5.6B**) and the compliance dashboard; B3 representation agreements (propose → confirm → active → terminate/dispute; versions; legal-advice ack; jurisdiction; `agencyParty` + `agency_performance` consent recorded but **the colleague route stays disabled until L-9**; legacy migration of `db.representations`); B4 Clients workspace; B5 Inbox integration; B6 Opportunities read-through; B7 `scoutbox-agent` shell + nav + EN/FR + 390/360 + a11y + demo mode; B8 Player/Club integration; B9 `m24AgentE2E`, persistence, boot contract, perf, `m24AgentLive`, fresh-clone recovery, docs. **No minors pathway routes, no conflict decisions, no T&S approvals of regulated acts** in B. | groups A–D, K, L, O, P, Q, R green; zero-defect gate; every existing suite green; no regulated approval/rejection depends on anonymous reviewer identity (DR-29) |
-| **P5.6C — Conflict & compliance engine** | **Entry gate G-C0 (frozen, DR-29): per-reviewer T&S identity implemented and audited before any conflict/compliance decision is production-capable; D-P56A-9 stays Medium until then.** Then: `jurisdictionPolicies` store + dual-control publish with `ruleStatus`; policy evaluation (§18 output); Conflict Engine (pure) with the England 2026-27 table and the FIFA text table + `evaluations[]`; minors gate + guardian consent routes (groups H, I, J) enabled for England only; T&S review queue; `m24ConflictE2E`, `m24MinorsE2E`. | G-C0 met; groups E–J, N, S green; snapshot L-1 (FIFA status), L-7 (FA shading), L-9 (colleague route) re-checked; no non-England minors pathway enabled |
+| **P5.6B — Agent core app** | B1 agent identity (`agentProfiles`) + agency tenancy (`platform`, `agencyAffiliations`, tiers, invariants) + migration 2305; B2 verification facets on M14 (subtypes incl. FA registration and FA minors authorisation, `recheckAt`, fail-honest states, T&S review queue — **verification outcomes are advisory facts re-checked at every step, never an approval of a regulated act, so the anonymous-reviewer gap does not gate P5.6B**) and the compliance dashboard; B3 representation agreements (propose → confirm → active → terminate/dispute; versions; legal-advice ack; jurisdiction; `agencyParty` + `agency_performance` consent recorded but **the colleague route stays disabled until L-9**; legacy migration of `db.representations`); B4 Clients workspace; B5 Inbox integration; B6 Opportunities read-through; B7 `scoutbox-agent` shell + nav + EN/FR + 390/360 + a11y + demo mode; B8 Player/Club integration; B9 `m24AgentE2E`, persistence, boot contract, perf, `m24AgentLive`, fresh-clone recovery, docs. **No minors pathway routes, no conflict decisions, no regulatory overrides, no dispute resolution, no T&S approvals of regulated acts** in B; agent-licence reviews refuse without a declared reviewer (interim, not G-C0). P5.6B is never production-authoritative for regulatory conflict adjudication. | groups A–D, K, L, O, P, Q, R green; zero-defect gate; every existing suite green; no regulated approval/rejection depends on anonymous reviewer identity (DR-29) |
+| **P5.6C — Conflict & compliance engine** | **Entry gate G-C0 (frozen, DR-29): per-reviewer T&S identity implemented and audited — recording reviewer user id, role, timestamp, policy version, action, reason, evidence (authorization contract §14) — before any of conflict review, regulatory override, licence adjudication, representation dispute resolution, minor compliance approval or manual-review resolution is production-capable; D-P56A-9 stays Medium until then.** Then: `jurisdictionPolicies` store + dual-control publish with `ruleStatus`; policy evaluation (§18 output); Conflict Engine (pure) with the England 2026-27 table and the FIFA text table + `evaluations[]`; minors gate + guardian consent routes (groups H, I, J) enabled for England only; T&S review queue; `m24ConflictE2E`, `m24MinorsE2E`. | G-C0 met; groups E–J, N, S green; snapshot L-1 (FIFA status), L-7 (FA shading), L-9 (colleague route) re-checked; no non-England minors pathway enabled |
 | **P5.6D — Transaction workspace** | `agentTransactions`, `transactionRepresentations`, Transaction Room (tabs, roles, lanes), consent requests/grants, terms as data, agency invoices (data only), Document Vault visibility `parties_only`, club-side party routes and signatory flag. **No Offer Workflow.** | group M green; matrix invariants re-run with clubs in the Room |
 | **P5.6E — Parity integration** | Contact channel binding to a verified counterparty; `player.agentName` replaced by the confirmed agreement; Trial/opportunity share-with-agent flows; club Case one-way link; removal of the M13 F10 write routes; parity checklist (§12) signed off. | parity definition met; batteries green; bundle + fresh clone |
 

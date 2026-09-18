@@ -117,6 +117,18 @@ Medium globally while D-P56A-9 is open. Low: D-P56A-2 … D-P56A-8,
 D-P56A-10, D-P56A-11 plus the four inherited P4A items, each with an
 owner.
 
+Exact counts (mandate §34, categories not collapsed):
+
+| Category | Count | Items |
+|---|---|---|
+| Open Critical production defects | 0 | — |
+| Open High production defects | 0 | — |
+| Open Medium blocking P5.6B (reasonably fixable) | 0 | — |
+| Open Medium prerequisite before P5.6C | 1 | D-P56A-9 |
+| Open Low | 13 | D-P56A-2, -3, -4, -5, -6, -7, -8, -10, -11; P4A-D6, P4A-D7, P4A-D8, P4A-D11 |
+| Regulatory uncertainties | 19 | snapshot §9 U-1 … U-19 |
+| Legal-review items | 18 | snapshot §8 L-1 … L-18 |
+
 Regulatory currency is not a software defect and is recorded in the
 snapshot (§9, §11), but for completeness: the first cut of the P5.6A
 documents cited the FA 2025-26 regulations as current after they had

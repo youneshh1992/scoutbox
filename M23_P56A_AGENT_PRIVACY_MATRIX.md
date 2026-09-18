@@ -62,6 +62,15 @@ Additional rows the mandate did not list but the product needs:
 | 19. Prospect (CRM row; adult only) | — (the player is not told they are a prospect: nothing exists to tell, no access was granted) | — | OWN | per agency policy: name only | FULL (agency's) | FULL | FULL | — | — | — | — | — | FULL |
 | 20. Block against the agency | OWN | OWN | — (sees `NOT_VISIBLE`, never "blocked") | — | — | — | — | — | — | — | — | — | FULL |
 
+**Currency note (FA 2026-27, R-E2b, DR-45).** Where an England-governed
+agreement has the agency as a party and an unrevoked `agency_performance`
+consent from all parties, a licensed, FA-registered colleague performing
+under it is treated as *Licensed Agent* for that agreement's rows (3, 7,
+8, 12, 14, 15, 17) for as long as the consent stands, and is recorded as
+the performer; every other "Other Agent at Same Agency" cell is
+unchanged. The route is disabled in production until L-9. No other cell
+in this matrix moved in the currency closure.
+
 ## Column notes
 
 - **Player.** Sees every record naming them (agreements, consents,

@@ -146,7 +146,7 @@ Shape: `{ id, kind, subject: { kind, id }, grantedBy: { kind, id, displayName },
 | PII level | None. |
 | History model | Immutable versions; a new version is a new row with `supersedes`. |
 
-Shape: `{ id: 'jp-<jurisdiction>-<season>-<n>', regulator, jurisdiction, effectiveFrom, effectiveTo|null, policyVersion, supersedes|null, rules: { [ruleId]: { ruleStatus ∈ ACTIVE|SUSPENDED|PARTIALLY_SUSPENDED|JURISDICTION_OVERRIDE|UNDER_LEGAL_REVIEW|UNKNOWN, params, sourceRef: [ { source, version, effectiveDate, retrievedDate, url } ], note } }, publishedBy: [reviewerA, reviewerB], publishedAt }`. A rule that exists in source text while its enforcement is suspended is a row with `ruleStatus: SUSPENDED` (or `UNDER_LEGAL_REVIEW` when the suspension's own status is unsettled), never a deleted row. Initial versions: `jp-fifa-2025-1`, `jp-eng-2026-27-1`, `jp-usa-2024-1` (contents in the authorization contract §5.3).
+Shape: `{ id: 'jp-<jurisdiction>-<season>-<n>', regulator, jurisdiction, effectiveFrom, effectiveTo|null, policyVersion, supersedes|null, rules: { [ruleId]: { ruleStatus ∈ ACTIVE|SUSPENDED|PARTIALLY_SUSPENDED|JURISDICTION_OVERRIDE|PENDING_IMPLEMENTATION|UNDER_LEGAL_REVIEW|UNKNOWN, params, sourceRef: [ { source, version, effectiveDate, retrievedDate, url } ], note } }, publishedBy: [reviewerA, reviewerB], publishedAt }`. A rule that exists in source text while its enforcement is suspended is a row with `ruleStatus: SUSPENDED` (or `UNDER_LEGAL_REVIEW` when the suspension's own status is unsettled), never a deleted row. Initial versions: `jp-fifa-2025-1`, `jp-eng-2026-27-1`, `jp-usa-2024-1` (contents in the authorization contract §5.3).
 
 ## 8. Stores considered and rejected
 

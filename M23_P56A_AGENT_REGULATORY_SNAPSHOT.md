@@ -37,6 +37,21 @@ fails honest (`MANUAL_REGULATORY_REVIEW_REQUIRED`), never to a guess.
 | **OPERATIVE IN SPECIFIC JURISDICTION** | A national regulator applies its equivalent rule in its territory regardless of the FIFA-level status | `JURISDICTION_OVERRIDE` (national policy set carries `ACTIVE`; FIFA set carries its own status) |
 | **LEGAL STATUS UNCERTAIN** | Governing-body materials conflict, or the instrument's own end-condition may have occurred without the body saying so | `UNDER_LEGAL_REVIEW` |
 | **COUNSEL REVIEW REQUIRED** | ScoutBox cannot settle the question from the sources; counsel must | `UNDER_LEGAL_REVIEW` (blocking) or `UNKNOWN` (not encoded) |
+| **ANNOUNCED, NOT YET IN FORCE** | The body has published or announced a rule with a future effective date (e.g. the 1 Jan 2027 transfer framework) | `PENDING_IMPLEMENTATION` (never applied before `effectiveFrom`; recorded so the version can be prepared) |
+
+Source/rule **currency labels** used in §1 and on each rule (mandate §3):
+`CURRENT` (in force, not suspended), `HISTORICAL` (kept only to explain
+prior behaviour), `SUPERSEDED` (replaced by a later edition; never a
+basis), `CURRENT_BUT_SUSPENDED` (in the current edition; enforcement
+suspended by the same body), `CURRENT_WITH_PARTIAL_SUSPENSION` (some
+limbs suspended), `UNCERTAIN_OPERATIVE_STATUS` (current text; enforcement
+status not conclusively established). Historical and current materials
+are never mixed in one rule entry.
+
+**Rule text vs rule enforcement.** Every rule below separates "the text
+exists in the current edition" (its currency label) from "the rule is
+currently enforceable" (its classification and `ruleStatus`). The two
+are recorded as distinct facts and stored as distinct fields.
 
 A rule may carry more than one classification (e.g. FIFA 12(8): TEXT
 EXISTS BUT ENFORCEMENT SUSPENDED **and** LEGAL STATUS UNCERTAIN **and**
@@ -72,6 +87,19 @@ prior behaviour and are never labelled current.
 | S11 | Secondary (never relied on for a rule; used to locate primary texts and to check whether any FIFA instrument after S3 exists): 14 Sports Law (Aug 2026), Macfarlanes, White & Case, Concurrences, Lagom, Inside World Football (17 Jul 2026), Lewis Silkin, LawInSport, Mondaq | — | — | 2023–2026 | — | contextual only | search results |
 | **H1 (historical)** | The FA Football Agent Regulations 2025-26 (Rules of The Association section 19, "6 August 2025"), in force 1 June 2025 – 31 May 2026 | The FA | England | 2025-26 | superseded 1 Jun 2026 | **HISTORICAL — NOT CURRENT**; used only in §3.11 to record what changed | PDF text kept from the first cut |
 | **H2 (historical)** | The FA Football Agent Regulations Guidance 2025-26 | The FA | England | 2025-26 | superseded | HISTORICAL — NOT CURRENT | as above |
+
+**Currency labels per source (mandate §3):** S1 `CURRENT` (text) — with
+arts. 12(8)–(10), 14, 15, 16(2)(h)(j)(k)(4), 19 and the submission rule
+`UNCERTAIN_OPERATIVE_STATUS` (see R-F16) and all other articles
+`CURRENT`; S2 `CURRENT` instrument, whose own end-condition is
+`UNCERTAIN_OPERATIVE_STATUS`; S3, S4, S6, S6b `CURRENT`; S5 `CURRENT`
+page whose content is `HISTORICAL` as to enforcement status (pre-dates
+S3 and S2 silent); S7 `CURRENT_WITH_PARTIAL_SUSPENSION` (grey-shaded
+limbs); S8, S9, S9b, S9c, S9d `CURRENT`; S10 `CURRENT` (thin); S11
+contextual only; H1, H2 `SUPERSEDED` (1 June 2026) and used only as
+`HISTORICAL` context in §3.11. Announced but not in force: the FIFA
+transfer framework of 1 January 2027 (S6b) — `PENDING_IMPLEMENTATION`,
+no agent-regulation content published.
 
 **Not available on 18 September 2026:** any FIFA circular, implementation
 notice, General Secretariat decision or FAQ update issued after the CJEU
@@ -749,21 +777,54 @@ substitute for the shaded PDF (L-7 stays open).
 | L-17 (new) | Electronic signature / electronic lodging sufficiency for FA "form prescribed by The Association" consents and Annexes | R-E3, R-E7 | NO (record externally executed evidence) | NO |
 | L-18 (new) | Domestic vs international jurisdiction resolution for mixed transactions (FA scope 1.1; FFAR 2(1)–(3)) | R-E11, R-F27 | NO | YES for the resolver's default |
 
-## 9. Regulatory uncertainty register (§190, updated)
+## 9. Regulatory uncertainty register (§190, updated; tags per mandate §18)
 
-| Issue | What is known | What is uncertain | Jurisdiction | Blocking for build? | Needs counsel? | Engine posture |
+Tags: `KNOWN` (settled from a current primary source), `UNCERTAIN`
+(sources conflict or are silent), `COUNSEL_REQUIRED`, `BLOCKS_BUILD`
+(architecture/contract cannot be finished without it), `BLOCKS_PRODUCTION_ONLY`
+(may be built behind a disabled route/flag; may not be enabled in
+production until resolved).
+
+| # | Issue | Tags | What is known | What is uncertain | Jurisdiction | Engine posture |
 |---|---|---|---|---|---|---|
-| **FIFA suspended-rule operative status** (12(8)–(10), 14, 15, 16(2)(h)(j)(k)(4), 19) | Text (S1); suspended by S2 "until the ECJ renders a final decision"; ECJ decided 16 Jul 2026 (S3); FIFA statement silent (S4); FAQ pre-dates judgment (S5); FA 2026-27 (1 Jun 2026) still shades equivalents; no later FIFA instrument (S6) | Whether the suspension has ended by its own terms, continues pending the German court, or will be replaced with the 2027 framework | FIFA / all MAs relying on S2 | P5.6B no; P5.6C FIFA-only tables yes | **YES** | `UNDER_LEGAL_REVIEW` → review |
-| **England multiple-representation regime** | 6.3–6.5 verified in the 2026-27 text and guidance, in force, G-covered; AF1 = written consent | None on content; interplay with FFAR for international-dimension transactions | England (National Transactions) | No | YES only for L-1 interplay | `ACTIVE` in `jp-eng-2026-27` (JURISDICTION_OVERRIDE) |
-| **Non-England minor approach timing** | FIFA formula (13(1)) with a per-country parameter; England calendar rule encoded | The first-contract age per country; which country when employment is undecided; U.S. rules | all MAs except England | **Yes for any non-England minors pathway** | **YES** | `UNKNOWN` param → `INSUFFICIENT_DATA` → refused |
-| **Domestic vs international transaction jurisdiction** | FA scope 1.1 + definitions; FFAR 2(1)–(3) | Mixed cases (foreign client, English club; loans; Specified International Transactions with FA-affiliated parties) | England + FIFA | No | YES (L-18) | resolver returns both sets; contradiction → review |
-| **Fee / payment rules** | FFAR 14–15 suspended/uncertain; FA reg. 7: no cap, client pays, conditional remuneration, 14-day proof; Clearing House likely shaded | Which FA limbs are shaded (L-7); reinstatement | FIFA + England | No (ledger only) | YES | recorded, not validated |
-| **Same-agency / connected-agent attribution** | FFAR 12(10) + definition (suspended/uncertain); FA 6.5 + definition (in force); new FA colleague-performance route (R-E2b) | Whether walls can cure; how R-E2b interacts with 6.5 when colleagues serve different parties | all | No | YES (L-4, L-9) | connected by default; R-E2b England-only, consent-gated |
-| **Electronic signature / regulatory filing sufficiency** | FA prescribes forms and Annexes; ScoutBox has no e-signature | Whether in-app confirmations satisfy "written consent in the form prescribed"; whether ScoutBox may lodge | England + FIFA | No | YES (L-17, L-12, L-16) | record externally executed evidence; never file |
-| Exclusive-agreement window | S3 doubt; text remains in FFAR and FA 8.1/8.2 | Final national ruling; FIFA/FA response | FIFA + England | No | YES | `UNDER_LEGAL_REVIEW` → review, never block |
-| Publication (19) | Suspended; GDPR precludes sanctions/transaction publication (S3) | What FIFA will still publish | FIFA | No | YES | ScoutBox publishes nothing |
-| U.S. national rules | Licence; background check; SafeSport | Regulations text; minors | United States | Yes for U.S. minors | YES | `UNKNOWN` |
-| FIFA template mandatory? | Template exists | Mandatory anywhere? | FIFA | No | YES | not offered |
+| U-1 | **Current FIFA double/multiple-representation enforcement status** (12(8)–(10)) | `UNCERTAIN`, `COUNSEL_REQUIRED`, `BLOCKS_PRODUCTION_ONLY` (FIFA-only conflict outcomes) | Text current (S1); suspended by S2 "until the ECJ renders a final decision"; ECJ decided 16 Jul 2026 (S3); FIFA statement silent (S4); no later instrument (S6); FA 2026-27 still shades equivalents | Whether the suspension ended by its own terms, continues pending the German court, or is replaced by the 2027 framework | FIFA / MAs relying on S2 | `UNDER_LEGAL_REVIEW` → manual review |
+| U-2 | **Relationship between the current FIFA FAQ and Circular 1873** | `UNCERTAIN`, `COUNSEL_REQUIRED` | FAQ (23 Jan 2025) describes 12(8)–(9), 14, 15 as rules without mentioning S2; S2 suspends them | Which document FIFA regards as operative guidance | FIFA | §11: neither is treated as proof; review |
+| U-3 | **Impact / implementation status after the July 2026 CJEU judgment** | `UNCERTAIN`, `COUNSEL_REQUIRED`, `BLOCKS_PRODUCTION_ONLY` | Judgment content (S3); FIFA "welcomes", will consult agents, 2027 system (S4); no implementation notice found | Timetable, scope, and whether any article "resumed" | FIFA | `UNDER_LEGAL_REVIEW`; a notice becomes a new `jp-fifa` version |
+| U-4 | **Current England multiple-representation rules** | `KNOWN` | FA 2026-27 6.3–6.5 + Guidance, in force 1 Jun 2026, G-covered; AF1 = written consent; 7.11 50 % | None on content | England (National Transactions) | `ACTIVE` (`jp-eng-2026-27-1`) |
+| U-5 | **FIFA vs England conflict matrix** | `KNOWN` (difference), `COUNSEL_REQUIRED` (interplay for international-dimension cases, L-1/L-18) | England permits dual **or multiple** (any set without the releasing club) with four safeguards; FIFA text permits individual + engaging only | Which table governs a transaction with both an English national element and an international dimension | England + FIFA | separate tables; `JURISDICTION_OVERRIDE` in national scope; mixed → review |
+| U-6 | **Non-England minor timing** | `UNCERTAIN`, `COUNSEL_REQUIRED`, `BLOCKS_PRODUCTION_ONLY` (any non-England minors pathway) | FIFA 13(1) formula with a per-country first-contract-age parameter; England's calendar rule encoded separately | The parameter per country; which country when employment is undecided; U.S. rules | all MAs except England | `UNKNOWN` param → `INSUFFICIENT_DATA` → refused |
+| U-7 | **Domestic vs international jurisdiction** | `KNOWN` (definitions), `UNCERTAIN` (mixed cases), `COUNSEL_REQUIRED` (L-18) | FA scope 1.1, "National Transaction", "Specified International Transaction"; FFAR 2(1)–(3) | Foreign client + English club; loans; FA-affiliated parties in Specified International Transactions | England + FIFA | resolver: `national` / `international` / `unknown`; `unknown` → `INSUFFICIENT_DATA`; mixed → review |
+| U-8 | **Connected-agent attribution** | `KNOWN` (England, FA 6.5 + definition, ACTIVE), `UNCERTAIN` (FIFA 12(10), U-1) | Same agency, ownership, family, repeated cooperation/revenue sharing are "connected" | FIFA enforcement status | all | attributed by default |
+| U-9 | **Same-agency conflicts / information barriers** | `UNCERTAIN`, `COUNSEL_REQUIRED` (L-4, L-9) | No FA or FIFA text recognises an information barrier as curing connectedness; FA 2026-27 R-E2b lets colleagues perform under one agreement with consent | Whether any wall can cure; how R-E2b interacts with 6.5 when colleagues serve different parties | all | connected by default; R-E2b England-only, consent-gated, disabled pending L-9 |
+| U-10 | **Fee caps** | `UNCERTAIN` (FIFA 15, U-1), `KNOWN` (England: no cap provision in reg. 7) | as stated | FIFA reinstatement | FIFA + England | recorded, never validated |
+| U-11 | **Client-pays** | `UNCERTAIN` (FIFA 14(2)), `KNOWN` (England 7.2–7.3 ACTIVE, G-covered) | as stated | FIFA status | FIFA + England | recorded |
+| U-12 | **Payment timing / pro rata / instalments** | `UNCERTAIN` (FIFA 14(6)(7)(12)), `KNOWN` (England 7.4–7.7, 7.14 14-day proof, G-covered) | as stated | FIFA status; which FA limbs are shaded (L-7) | FIFA + England | recorded |
+| U-13 | **Clearing-house rules** | `UNCERTAIN` (FIFA 14(13); FA 7.13 not G-covered, likely shaded) | text exists in both | operative status | FIFA + England | recorded; no payment channel built |
+| U-14 | **Electronic-signature sufficiency** | `UNCERTAIN`, `COUNSEL_REQUIRED` (L-17, L-3) | FA prescribes forms/Annexes; FIFA requires written agreements; ScoutBox has no e-signature | Whether in-app confirmations satisfy "written" / "in the form prescribed" | England + FIFA | client confirmation is ScoutBox's own access root; externally executed evidence recorded |
+| U-15 | **Regulatory filing / submission sufficiency** | `UNCERTAIN`, `COUNSEL_REQUIRED` (L-12, L-16) | FA lodging (8.3(g)), AF1, CH1, Annual Return; FIFA Platform (suspended limbs) | Whether ScoutBox may generate or lodge anything | England + FIFA | never files; keeps records |
+| U-16 | Exclusive-agreement window | `UNCERTAIN`, `COUNSEL_REQUIRED` (L-2) | S3 doubt; text remains in FFAR 16(1)(b)–(c) and FA 8.1(b)–(c), 8.2 | final national ruling; FIFA/FA response | FIFA + England | `UNDER_LEGAL_REVIEW`; never block |
+| U-17 | Publication (19) | `KNOWN` (GDPR limit per S3), `UNCERTAIN` (what FIFA publishes) | as stated | | FIFA | ScoutBox publishes nothing |
+| U-18 | U.S. national rules | `UNCERTAIN`, `COUNSEL_REQUIRED`, `BLOCKS_PRODUCTION_ONLY` (any U.S. pathway) | licence; background check; SafeSport | regulations text; minors | United States | `UNKNOWN` |
+| U-19 | FIFA template mandatory? | `UNCERTAIN`, `COUNSEL_REQUIRED` (L-12) | template exists | mandatory anywhere? | FIFA | not offered |
+
+Nothing in this register is `BLOCKS_BUILD` for P5.6B: the architecture
+and contracts are complete with these items represented as statuses.
+Items tagged `BLOCKS_PRODUCTION_ONLY` gate the enabling of specific
+routes in P5.6C/D, not the build.
+
+## 12. Minors — per-jurisdiction current rules (mandate §12; never derived across jurisdictions)
+
+| Field | FIFA (FFAR 2025, `jp-fifa-2025-1`) | England (FA 2026-27, `jp-eng-2026-27-1`) | United States (`jp-usa-2024-1`) |
+|---|---|---|---|
+| Earliest lawful approach timing | "no more than six months before the minor reaches the age where they may sign their first professional contract in accordance with the law applicable in the country or territory where the minor will be employed" (13(1)) — **ACTIVE rule, parameter UNKNOWN per country** | not before **1 September in the Academic Year (1 Sep–31 Aug) in which the Minor reaches 16** (5.1(a)–(c); guidance table 2025–2027) — **ACTIVE** | **UNKNOWN** (no primary text found) |
+| How first-professional-contract age is determined | by the employing country's law (13(1)); not encoded for any country | not used: England applies a calendar rule; FA Rule C: Playing Contracts at 18, or 17 if not in full-time education (7.10 Guidance context) | UNKNOWN |
+| Guardian-consent requirement | "prior written consent … from the minor's legal guardian" (13(1)) | "prior written consent … from the Minor's legal guardian" (5.1) | UNKNOWN |
+| Must consent precede the approach? | YES ("This Approach may only be made once prior written consent has been obtained") | YES (applies to Approaches direct or indirect and to any agreement; 5.1) | UNKNOWN |
+| Agent accreditation / CPD / minors authorisation | designated CPD course on minors + assessment, accreditation valid three years (13(2); S5) | additional authorisation to deal with Minors: suitability incl. enhanced DBS (within three months of submission), possible minors course, valid three years, automatic suspension on lapse, self-report (5.2–5.5); Digital ID shows it | background check + SafeSport training required for all agents (S10); minors-specific rules UNKNOWN |
+| National registration requirement | via the applicable MA's national regulations (3, 13(2)) | FA registration on a FIFA licence (2.1–2.2); loss of FIFA licence cascades (2.10) | FIFA licence enforced by U.S. Soccer; permission may be denied/suspended/revoked (S10) |
+| Required agreement form | written; signed by the minor and legal guardian "as provided by the law applicable" (13(3)); FIFA template exists (mandatory status unknown) | Standard Representation Agreement Obligatory Terms + Annex; signed by the Minor **and** legal guardian in the prescribed form (5.6; S9b template has both lines) | UNKNOWN |
+| Additional domestic safeguards | no fee unless first/subsequent professional contract (14(9)); sanction ≥ fine + up to two years' suspension (13(4)) | no fee unless a professional contract comes into force; Scholarship/PGA is not one (7.10); sanction ≥ fine + up to two years' registration suspension (5.7); non-registered parent/guardian carve-out (8.4(g)); club duties (9.x) | UNKNOWN |
+| Production pathway status in ScoutBox | **none** (parameter unencoded → `INSUFFICIENT_DATA`) | **encodable; not implemented; not enabled** (architecture only) | **none** |
 
 ## 10. Future jurisdiction overlays (framework only)
 

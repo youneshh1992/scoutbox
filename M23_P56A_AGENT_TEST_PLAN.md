@@ -43,6 +43,8 @@ D-P56A-1 regression check added to `m162E2E` (defect register).
 | B5 | Departure ends access: sessions revoked, SSE closed, client reads 403/404 | neg |
 | B6 | `req.body.role: 'Head of Agency'` on login grants nothing | neg |
 | B7 | Agency org logs into the club app with `platform` discriminator | `PLATFORM_MISMATCH` (P5.6B B7) |
+| B8 | T&S approves an agent-licence claim with the shared key and **no** declared reviewer | 403 `REVIEWER_IDENTITY_REQUIRED`; claim unchanged (interim P5.6B rule; G-C0 replaces it in P5.6C) |
+| B9 | Any P5.6B route that would resolve a conflict review, override a policy result, adjudicate a dispute or approve a minor pathway | does not exist (route inventory check) |
 
 ## Group C — representation agreement
 

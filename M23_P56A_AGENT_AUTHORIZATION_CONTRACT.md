@@ -202,8 +202,13 @@ effective date, policy version and per-rule status**:
 ```
 
 `ruleStatus ∈ ACTIVE | SUSPENDED | PARTIALLY_SUSPENDED |
-JURISDICTION_OVERRIDE | UNDER_LEGAL_REVIEW | UNKNOWN` (snapshot §0 maps
-these to the five human classifications). A rule may exist in source text
+JURISDICTION_OVERRIDE | PENDING_IMPLEMENTATION | UNDER_LEGAL_REVIEW |
+UNKNOWN` (snapshot §0 maps these to the human classifications). Each rule
+entry is versioned by at least: regulator, jurisdiction, policy version,
+`effectiveFrom`, `effectiveTo` (if known), rule identifier, `ruleStatus`,
+source version and `retrievedAt` (inside `sourceRef`). Historical
+compliance decisions preserve the policy version **and** each deciding
+rule's `ruleStatus` as evaluated at the time (`evaluations[]`). A rule may exist in source text
 while its enforcement is suspended, and that distinction is
 representable: the FFAR text rows exist with `SUSPENDED` or
 `UNDER_LEGAL_REVIEW`, never deleted. The engine's treatment of each status
@@ -229,6 +234,19 @@ licence, background check, SafeSport `ACTIVE`; all else `UNKNOWN`.
 Publishing a new version is a COMPLIANCE_ACTION with dual control and
 counsel review (C7). Nothing here is legal authority; the versions carry
 their source references.
+
+### 5.3a Fail-closed vs manual review (frozen)
+
+Objective mandatory conditions fail closed at the step that owns them:
+licence (step 5), accreditation/registration (step 5), agreement scope
+(step 6), guardian consent (step 7 → 422 with nothing created), a
+prohibited combination under an `ACTIVE` rule (step 7 → 403). Uncertainty
+— competing rules, a deciding rule `UNDER_LEGAL_REVIEW` or `UNKNOWN`, an
+unresolvable jurisdiction, contradictory overlays, legally uncertain
+source status — yields `MANUAL_REGULATORY_REVIEW_REQUIRED` (422) with a
+T&S queue item. Neither branch proceeds. Uncertainty is never treated as
+permission; ScoutBox never selects the convenient reading (P-7; conflict
+engine contract §3a).
 
 ### 5.4 Conflict evaluation
 
@@ -368,6 +386,46 @@ whether the subject exists (anti-enumeration).
 - Licence revocation: every regulated action refused at step 5; existing
   agreements flagged `agent_licence_inactive` for the client to see;
   clients notified.
+
+## 13a. Licence ≠ national registration ≠ domestic authorisation (frozen)
+
+A FIFA licence (`fifa_agent` facet), a national registration (`national_agent_registration{ma}`)
+and a domestic activity authorisation (`minors_authorisation{ma}`, U.S.
+background check/SafeSport) are three separate verification facets with
+separate states, sources, expiries and `recheckAt` clocks. An agent may
+be FIFA-licensed yet not authorised for a particular domestic activity;
+step 5 checks every facet the applicable policy requires for the action.
+Loss of the FIFA licence cascades to England's registration
+automatically (FA 2.10) and is mirrored by the state machine. The licence
+holder is always a natural person (FFAR 8(1), 11(1); FA 2.2, 3.1 —
+re-confirmed against the current texts on 18 Sep 2026); no agency entity
+ever holds a licence facet.
+
+## 14. T&S action attribution contract (P5.6C; architecture only)
+
+Every manual compliance action that unlocks, refuses or overrides a
+regulated outcome — conflict review resolution, regulatory override,
+licence / registration / minors-authorisation adjudication,
+representation dispute resolution, minor compliance approval, resolution
+of any `MANUAL_REGULATORY_REVIEW_REQUIRED` item — must record:
+
+```
+{ reviewerUserId (an authenticated T&S identity, never the shared key alone),
+  reviewerRole, at, policyVersions, action, reasonCode + reason, evidenceRefs: [claimId | evidenceId | url],
+  subject: { kind, id }, resultingState }
+```
+
+A record whose `reviewerUserId` is absent or resolves to
+`attribution: 'shared_admin_key'` is **not a valid compliance action** for
+the purposes above. This contract is the substance of gate G-C0 (DR-29):
+per-reviewer T&S identity must be implemented and audited before any of
+those actions is production-capable. Interim measure inside P5.6B (which
+has no production-capable compliance adjudication): agent-licence and
+registration reviews used to set the `verified` facet must at minimum
+carry a declared reviewer (`x-admin-reviewer-id`/`-name`, already
+supported by M14.1) and are refused without one; this is an interim
+attribution, not the audited identity G-C0 requires, and is recorded as
+such on the claim.
 
 ## 13. §191 answers this contract fixes
 
