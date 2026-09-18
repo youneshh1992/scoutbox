@@ -48,7 +48,7 @@ Suites: **E** = `scoutbox-server/scripts/m23AgentE2E.mjs`, **P** =
 | ID | Severity | Area | Observation | Disposition |
 |---|---|---|---|---|
 | D-P56B-12 | Low (pre-existing, P5) | Boot log | `event registry lists names the server never emits: room_decision_finalized, room_decision_superseded` at every boot: the P5 events are registered and broadcast from `m23/decisionRoutes.mjs` but the boot-time check reads `EMITTED_EVENTS` in `server.mjs`, which P5 did not extend. Present at `fe4b18e`. | Not touched in P5.6B (outside the mandate's tree; the M18.2 regression is green either way). Recorded for the next bookkeeping pass. |
-| D-P56A-9 | **Medium — OPEN, not downgraded** | T&S identity | Shared `x-admin-key`; no per-reviewer identity. | Unchanged by P5.6B by design: P5.6B added **no** T&S mutation, so no P5.6B outcome depends on reviewer identity (E R5–R10). Remains the P5.6C entry gate **G-C0**. |
+| D-P56A-9 | **Medium — OPEN, not downgraded** | T&S identity | Shared `x-admin-key`; no per-reviewer identity. | Unchanged by P5.6B by design: P5.6B added **no** T&S mutation, so no P5.6B outcome depends on reviewer identity (E R5–R10). Remains the P5.6C entry gate **G-C0**. **Closure-audit classification: P5.6C PREREQUISITE ONLY, not a P5.6B blocker** — the audit re-inspected `m24/index.mjs` (exactly two admin routes, both GET; no `adminRouter` mutation for `/agent` anywhere in the server) and re-ran E R5–R10 (17 adjudication probes → 404 with the shared key; disputed relationship and profile byte-identical). No P5.6B route lets the shared key approve/reject a licence, resolve a dispute, approve a minor pathway, override regulatory state or resolve a manual review. |
 
 ## Disposition of the P5.6A register
 
@@ -72,3 +72,4 @@ Suites: **E** = `scoutbox-server/scripts/m23AgentE2E.mjs`, **P** =
 | Low fixed in P5.6B | 8 | D-P56B-3, -5, -6, -7, -8, -9, -10, -11 |
 | Open Medium prerequisite before P5.6C | 1 | D-P56A-9 (G-C0) |
 | Open Low | 1 new + inherited | D-P56B-12; P5.6A Lows as dispositioned above |
+| **Blocking P5.6B (Critical, High, or reasonably-fixable Medium)** | **0** | — (confirmed unchanged by the closure audit on `d694ad5`; no code change was needed) |

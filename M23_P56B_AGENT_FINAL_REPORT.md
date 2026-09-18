@@ -15,7 +15,7 @@ report. The frozen P5.6A set is unchanged.
 ## §104 — the 75 items
 
 1. **Starting tip** — `fe4b18e` (P5.6A closure pass 2), pushed as Stage 1 with all seven pre-checks matching (branch, HEAD, clean tree, origin at `669d060`, ahead 4 / behind 0, `origin/main` untouched). After the push local == origin == `fe4b18e`.
-2. **Final local tip** — the closure commit that carries this report; its hash is printed in the chat reply and by `git rev-parse HEAD`. P5.6B commits: `c98034b` (server), `e6518a8` (clients + registration), `6fbf675` (browser suites, D-P56B-9/-11, four documents), then the closure commit (test report, final report). Four P5.6B commits on top of `fe4b18e`; `origin/claude/desktop-project-migration-wyk3ec` remains at `fe4b18e`.
+2. **Final local tip** — `d694ad5` carried this report at P5.6B closure; the closure audit (§109) adds one documents-only commit on top of it. P5.6B commits: `c98034b` (server), `e6518a8` (clients + registration), `6fbf675` (browser suites, D-P56B-9/-11, four documents), `d694ad5` (test report, final report). Four P5.6B commits on top of `fe4b18e`; `origin/claude/desktop-project-migration-wyk3ec` remains at `fe4b18e`.
 3. **Schema** — 2304 → **2305**, exactly one step (`m240_001_agent_core_stores`), idempotent, non-destructive. Clean boot works (three empty stores; `/healthz` reports 2305); upgrade from 2304 works (P §2–§3); a pre-M23 snapshot upgrades 2200 → 2305 (`m23Persistence` §47).
 4. **New stores** — `agentProfiles`, `agencyAffiliations`, `representationAgreements`, all `migration`-guaranteed in `storeContract.mjs`, owner `m24`, production-required (`m23BootContract`: 127 production-read stores, 0 missing).
 5. **No agent-specific auth database** — sessions, tokens and `db.users` are the existing ones; an agency user logs in on `platform: 'agent'` with the same `/auth/org/login` (E T1, E1–E9).
@@ -167,7 +167,7 @@ Open reasonably-fixable Medium: 0
 Open Medium prerequisite before P5.6C: 1 (D-P56A-9 / G-C0)
 ```
 
-## §106 — success and NOT READY
+## §106 — success, and what stays deferred by design
 
 **P5.6B succeeded** as the foundation the mandate scoped: identity,
 membership, verification state, relationship records, the Clients
@@ -175,28 +175,55 @@ workspace, the Agent inbox, the Opportunities shell, navigation, and the
 player/club integration foundations, each proven by a dedicated suite and
 a live journey, with every existing regression green and nothing pushed.
 
-**NOT READY for production, and says so in every surface:**
+The first version of this section was headed "NOT READY". The closure
+audit (§109) re-read that heading against the code, the suites and the
+defect register and found it was a **bookkeeping mislabel**: every item
+under it is either a mandated exclusion, a P5.6C prerequisite or a
+recorded non-blocking Low; none is a P5.6B defect and none requires a code
+change. The list is kept, reworded as what it is — **deferred by design,
+and every surface says so**:
 
 - No regulated action is possible in production. Verification cannot reach
   `VERIFIED` without a provider or attributed review; both are absent by
   design. A production agent's request is refused with
   `AGENT_VERIFICATION_REQUIRED` and the honest reason. This is correct, not
-  a gap: the alternative was a fake register.
+  a gap: the alternative was a fake register. *(P5.6C prerequisite: G-C0.)*
 - Disputes cannot be resolved. They suspend access and stop. Resolution is
   P5.6C, gated on **G-C0** (per-reviewer Trust & Safety identity,
-  D-P56A-9, open).
+  D-P56A-9, open). *(P5.6C prerequisite; adjudication was forbidden here.)*
 - No conflict engine, no multiple-representation policy, no transaction
   room, no offer, no fee. The Agent workspace states what it is not.
+  *(Mandated exclusion.)*
 - The minor pathway is recorded and inert. Minors are unreachable from the
-  Agent platform in every direction.
+  Agent platform in every direction. *(Mandated exclusion.)*
 - The legacy F10 representation lane still exists beside the new store
   (mirrored read-only) until P5.6E retires it; the club app's Representation
   screen and the player's earlier Representation section are unchanged.
+  *(P5.6E scope; non-blocking.)*
 - Identity is per-organisation, so ending an agency membership ends the
   person's access to that organisation; a person's profile survives, but a
-  cross-organisation identity is not modelled in this build.
+  cross-organisation identity is not modelled in this build. *(Documented
+  limitation; non-blocking.)*
 - One pre-existing Low boot warning (D-P56B-12, P5's decision events not
-  listed in `EMITTED_EVENTS`) is recorded, not fixed here.
+  listed in `EMITTED_EVENTS`) is recorded, not fixed here. *(Pre-existing
+  at `fe4b18e`; non-blocking Low.)*
+
+```
+M23 P5.6B SCOUTBOX AGENT CORE APP COMPLETE
+SCOUTBOX AGENT IS NOW A REAL FIFTH APPLICATION
+LICENSED INDIVIDUAL AND AGENCY ORGANISATION REMAIN DISTINCT
+CLIENT ACCESS REQUIRES VALID CONFIRMED RELATIONSHIP BASIS
+AGENT CLAIMS DO NOT CREATE PRIVATE PLAYER ACCESS
+MINOR DISCOVERY REMAINS BLOCKED
+PRIVATE CLUB EVIDENCE AND DECISIONS REMAIN PRIVATE
+CANONICAL INBOX / NOTIFICATIONS / AUDIT / BLOCKS ARE REUSED
+NO CONFLICT ENGINE OR REGULATED TRANSACTION ADJUDICATION HAS BEEN PREMATURELY IMPLEMENTED
+G-C0 REMAINS REQUIRED BEFORE P5.6C
+ZERO KNOWN CRITICAL DEFECTS
+ZERO KNOWN HIGH DEFECTS
+ZERO KNOWN REASONABLY-FIXABLE MEDIUM DEFECTS AFFECTING P5.6B
+READY FOR M23 P5.6C CONFLICT & COMPLIANCE ENGINE
+```
 
 ## §107 — commit / push discipline, as executed
 
@@ -209,3 +236,61 @@ carried `669d060..fe4b18e` after the seven checks; verified local == origin
 
 P5.6B stops here. P5.6C (attributed T&S identity G-C0, dispute and conflict
 adjudication, compliance decisions) is not begun.
+
+## §109 — closure audit (documents only)
+
+Run against `d694ad5` with a clean tree, before any edit to this file.
+Purpose: decide whether the "NOT READY" heading in the first §106 named a
+real blocker. Method: git pre-check, all six documents re-read, the code
+re-inspected, every §95 suite and every P5.6B suite re-run, five typechecks
+and four Vite builds re-run.
+
+**Pre-check** — branch `claude/desktop-project-migration-wyk3ec`, HEAD
+`d694ad5`, remote `fe4b18e`, ahead 4 / behind 0, `git status --short`
+empty. All as expected.
+
+**Code re-inspection** — `m24/index.mjs` registers 21 org routes, 6 player
+routes and exactly **2 admin routes, both GET**; no `adminRouter.post|patch|
+put|delete` for `/agent` exists anywhere in the server. The module reads
+and writes only `agentProfiles`, `agencyAffiliations`,
+`representationAgreements`, `notifications`, `users`, `orgs` and `players`;
+no reference to offers, signings, passport, trust, Box Cam, trials,
+assessments, decisions, rooms, Second Look, briefs or contacts. The player
+lookup skips every non-adult before any other filter; both opportunities
+routes require `agreementGrantsAccess` **and** `orgCanSee`; the player
+routes refuse a minor before touching a record. D-P56B-12 is confirmed
+pre-existing: at `fe4b18e` the event registry already listed
+`room_decision_finalized` and `EMITTED_EVENTS` in `server.mjs` did not.
+
+**Re-run results (all exit 0)** — m23AgentE2E 407 (250 neg, 61 %);
+m23AgentPersistence 68 (24 neg); m23BootContract 61; m162E2E 136; m17E2E
+515; m18E2E 287; m181E2E 196; m182E2E 365; m22Blocker 60; m23E2E 382;
+m23ContactE2E 418; m23TrialE2E 535; m23DecisionE2E 435; m23P4AClosureE2E
+337; m23Persistence 67; m23ContactPersistence, m23TrialPersistence,
+m23DecisionPersistence all passed; navConfig 339; m23AgentLive 82 (25 neg,
+0 page errors); navLive 64; m23AgentDemoSpotcheck OK (0 page errors);
+demoFreshness 16. `tsc --noEmit` exit 0 for agent, club, grassroots, admin,
+player; `vite build` exit 0 for agent, club, grassroots, admin. The tree
+was still clean after the runs.
+
+**Classification of every "NOT READY" reason** —
+
+| Reason as first written | Class | Blocks P5.6B | Blocks P5.6C | Code change |
+|---|---|---|---|---|
+| No regulated action in production (no provider, no attributed review) | P5.6C PREREQUISITE ONLY (G-C0) | no | yes, for production compliance acts | no |
+| Disputes cannot be resolved | P5.6C PREREQUISITE ONLY (adjudication forbidden in P5.6B) | no | yes | no |
+| No conflict engine / multiple representation / transaction room / offer / fee | mandated exclusion | no | n/a | no |
+| Minor pathway recorded and inert | mandated exclusion | no | n/a | no |
+| Legacy F10 lane coexists (read-only mirror) | KNOWN NON-BLOCKING (P5.6E scope) | no | no | no |
+| Identity per-organisation | KNOWN NON-BLOCKING documented limitation | no | no | no |
+| D-P56B-12 boot warning | KNOWN NON-BLOCKING LOW, pre-existing at `fe4b18e` | no | no | no |
+| D-P56A-9 shared T&S identity (G-C0) | P5.6C PREREQUISITE ONLY: P5.6B contains no authoritative anonymous review path (E R5–R10: 17 probes → 404, state byte-identical) | no | yes | no |
+
+**Verdict: A — P5.6B implementation is actually ready; the previous
+"NOT READY" was a stale/bookkeeping label.** Real blockers: none. Open
+Critical 0, High 0, reasonably-fixable Medium affecting P5.6B 0, Medium
+prerequisite before P5.6C 1 (D-P56A-9), open Low 1 new (D-P56B-12).
+Production code changed by the audit: **no**. Documents changed: this
+file, `M23_P56B_AGENT_TEST_REPORT.md` §5, `M23_P56B_AGENT_DEFECT_REGISTER.md`
+(G-C0 classification note). Nothing pushed, no PR, no deploy, P5.6C not
+begun.

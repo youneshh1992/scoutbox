@@ -131,3 +131,39 @@ unchanged and unaffected.
   the M13 demo spotcheck (legacy Representation section kept) cover.
 - `connectedE2E`, `apiE2E` — not in §95; the connected demo bundle was
   rebuilt by `buildDemos` and its freshness verified.
+
+## 5. Closure audit re-run (on `d694ad5`, clean tree)
+
+Every suite above was run again, sequentially, from the tip the final
+report names, before any document was edited. Exact result lines:
+
+| Suite | Result |
+|---|---|
+| `m23AgentE2E` | 407 checks passed, 250 negative (61 %) |
+| `m23AgentPersistence` | 68 checks passed, 24 negative (35 %) |
+| `m23BootContract` | 61 checks passed, 43 negative (70 %) |
+| `m162E2E` | 136 checks passed, 63 negative (46 %) |
+| `m17E2E` | 515 checks passed, 210 negative (41 %) |
+| `m18E2E` | 287 checks passed, 173 negative (60 %) |
+| `m181E2E` | 196 checks passed, 103 negative (53 %) |
+| `m182E2E` | 365 checks passed, 205 negative (56 %) |
+| `m22Blocker` | all 60 checks passed |
+| `m23E2E` | 382 checks passed, 262 negative (69 %) |
+| `m23ContactE2E` | 418 checks passed, 240 negative (57 %) |
+| `m23TrialE2E` | 535 checks passed, 331 negative (62 %) |
+| `m23DecisionE2E` | 435 checks passed, 315 negative (72 %) |
+| `m23P4AClosureE2E` | 337 checks passed, 210 negative (62 %) |
+| `m23Persistence` | 67 checks passed, 20 negative (30 %) |
+| `m23ContactPersistence` / `m23TrialPersistence` / `m23DecisionPersistence` | all checks passed (exit 0) |
+| `navConfig` | 339 checks passed |
+| `m23AgentLive` | 82 checks passed (25 negative, 30 %), no page errors |
+| `navLive` | 64 checks passed — N1–N17 complete |
+| `m23AgentDemoSpotcheck` | OK — zero page errors |
+| `demoFreshness` | 16 checks passed |
+
+Typechecks (`tsc --noEmit`): agent, club, grassroots, admin, player — all
+exit 0. Builds (`vite build`): agent, club, grassroots, admin — all exit 0.
+The Expo export was not re-run in the audit; the live suite's player
+bundle (`dist-live24`) was rebuilt and exercised by `m23AgentLive` (C, N9,
+N10). `git status --short` was empty after every run. No suite failed, no
+suite was skipped that §95 names, and no "not run" was converted to a pass.
