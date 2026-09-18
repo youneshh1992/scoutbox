@@ -15,6 +15,7 @@ export const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..'
 export const DEMO_APPS = {
   'scoutbox-club-demo.html': { app: 'scoutbox-club', extra: ['package.json', 'index.html'] },
   'scoutbox-grassroots-demo.html': { app: 'scoutbox-grassroots', extra: ['package.json', 'index.html'] },
+  'scoutbox-agent-demo.html': { app: 'scoutbox-agent', extra: ['package.json', 'index.html'] },
   'scoutbox-admin-demo.html': { app: 'scoutbox-admin', extra: ['package.json', 'index.html'] },
   'scoutbox-player-demo.html': { app: 'scoutbox-player', extra: ['package.json', 'app.json'] },
 };

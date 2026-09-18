@@ -316,5 +316,100 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   ok(nav.loadCollapsed() === false, 'malformed collapsed preference reads as expanded');
 }
 
+
+// ---------------------------------------------------------------- M23 P5.6B
+// ScoutBox Agent: the same nav contract (one source of truth, strict hashes,
+// EN/FR labels, convenience-only filtering) on a four-section workspace.
+{
+  const app = 'scoutbox-agent';
+  const AGENT_IDS = ['home', 'profile', 'clients', 'opportunities', 'agency', 'inbox'];
+  const nav = await loadNav(app);
+  section(`${app} — configuration integrity`);
+  ok(nav.NAV_SECTIONS.length === 4, 'exactly 4 primary sections (Home, Clients, Opportunities, Agency)');
+  const mapped = nav.NAV_SECTIONS.flatMap((s) => s.children.map((c) => c.id)).concat([nav.INBOX_ITEM.id]);
+  const dupes = mapped.filter((id, i) => mapped.indexOf(id) !== i);
+  ok(dupes.length === 0, `no destination appears twice (${dupes.join(',') || 'none'})`);
+  const missing = AGENT_IDS.filter((id) => !mapped.includes(id));
+  const extra = mapped.filter((id) => !AGENT_IDS.includes(id));
+  ok(missing.length === 0 && extra.length === 0, `all ${AGENT_IDS.length} destinations mapped exactly once (missing: ${missing.join(',') || '—'}; extra: ${extra.join(',') || '—'})`);
+  ok(nav.validateNavConfig().length === 0, 'the configuration is structurally sound');
+  ok(nav.INBOX_ITEM.id === 'inbox', 'Inbox is the utility destination');
+  ok(!mapped.includes('transactions') && !mapped.includes('offers') && !mapped.includes('negotiation') && !mapped.includes('fees'), 'no Transactions, Offers, Negotiation or Fees destination exists (P5.6C/D)');
+  for (const sec of nav.NAV_SECTIONS) for (const c of sec.children) if (c.shortKey && !c.shortKey.startsWith('navshort.')) fail(`${c.id}: short label key must be a navshort.* key`);
+
+  section(`${app} — every navigation label exists in EN and FR`);
+  const dict = dictionaries(app);
+  const used = new Set(nav.NAV_SECTIONS.flatMap((s) => [s.labelKey, ...s.children.map((c) => c.labelKey), ...s.children.filter((c) => c.shortKey).map((c) => c.shortKey)]).concat([nav.INBOX_ITEM.labelKey]));
+  const missEn = [...used].filter((k) => !dict.en.has(k));
+  const missFr = [...used].filter((k) => !dict.fr.has(k));
+  ok(missEn.length === 0, `EN has every label the configuration names (${used.size} keys; missing: ${missEn.join(',') || '—'})`);
+  ok(missFr.length === 0, `FR has every label the configuration names (missing: ${missFr.join(',') || '—'})`);
+  for (const k of ['navsec.more', 'navsec.moreAria', 'navsec.moreMenu', 'navsec.toggle', 'navsec.pagesIn', 'navsec.inThisArea', 'navsec.liveOk', 'navsec.liveOff', 'navsec.report', 'navsec.reportAria', 'navsec.orgStatus']) {
+    if (!dict.en.has(k) || !dict.fr.has(k)) fail(`shell label ${k} missing in ${dict.en.has(k) ? 'FR' : 'EN'}`); else passed++;
+  }
+  console.log('✓ the shell\'s own labels exist in EN and FR (11 folded)');
+  {
+    const enDict = readFileSync(path.join(ROOT, app, 'src', 'i18n.ts'), 'utf8');
+    const en = (k) => { const m = enDict.match(new RegExp(`'${k.replace('.', '\\.')}': '([^']*)'`)); return m ? m[1] : k; };
+    const over = [];
+    for (const sec of nav.filterSections({ role: 'Agent', tiers: ['licensed_agent', 'agency_admin'] })) for (const g of nav.groupedChildren(sec)) {
+      const lay = nav.stripLayout(sec, g.children[0].id);
+      if (lay.visible.length + lay.overflow.length <= 1) continue;
+      const chars = lay.visible.reduce((n, c) => n + en(c.shortKey ?? c.labelKey).length, 0) + (lay.overflow.length ? 6 : 0);
+      if (chars > 34) over.push(`${sec.id}: ${chars} chars`);
+    }
+    ok(over.length === 0, `every phone strip fits a 360px row by label budget (${over.join('; ') || 'all ≤ 34 chars'})`);
+  }
+
+  section(`${app} — deterministic resolver`);
+  for (const id of AGENT_IDS) {
+    const loc = nav.resolveNavigationLocation(id);
+    if (id === 'inbox') { if (loc.itemId !== 'inbox' || loc.sectionId !== null) fail(`inbox resolves (${id})`); else passed++; continue; }
+    if (!loc.sectionId || loc.itemId !== id) fail(`resolver maps ${id}`); else passed++;
+  }
+  console.log(`✓ resolver maps every destination (${AGENT_IDS.length} checks folded)`);
+  ok(nav.resolveNavigationLocation('profile').sectionId === 'home', 'direct /profile highlights Home');
+  ok(nav.resolveNavigationLocation('nonexistent').sectionId === null && nav.resolveNavigationLocation('nonexistent').itemId === null, 'unknown path highlights nothing');
+
+  section(`${app} — role-aware filtering (client convenience only; the server matrix decides)`);
+  const LICENSED = { role: 'Agent', tiers: ['licensed_agent'] };
+  const ADMIN = { role: 'Director', tiers: ['agency_admin'] };
+  const STAFF = { role: 'Analyst', tiers: ['analyst'] };
+  const UNKNOWN = { role: 'Agent', tiers: null };
+  ok(nav.filterSections(LICENSED).some((s) => s.id === 'opportunities'), 'a licensed agent sees Opportunities');
+  ok(!nav.filterSections(ADMIN).some((s) => s.id === 'opportunities') && !nav.filterSections(STAFF).some((s) => s.id === 'opportunities'), 'an administrator or analyst does not (the board reads only through an active relationship)');
+  ok(!nav.filterSections(UNKNOWN).some((s) => s.id === 'opportunities'), 'before /me answers, nothing tier-gated is shown (fail closed)');
+  ok(['home', 'clients', 'agency'].every((id) => nav.filterSections(STAFF).some((s) => s.id === id)), 'Home, Clients and Agency stay visible to every member (their content is server-filtered)');
+  ok(nav.filterSections({ role: 'Head of Everything', tiers: ['assistant'] }).length === 3, 'a lead-looking job title changes nothing — only server-reported tiers do');
+  ok(!nav.searchNav('opportun', STAFF, tr).some((r) => r.itemId === 'opportunities') && !nav.searchNav('board', STAFF, tr).some((r) => r.itemId === 'opportunities') && !nav.searchNav('trials', STAFF, tr).some((r) => r.itemId === 'opportunities'), 'the palette never reveals Opportunities to a non-agent, by label or alias');
+  ok(nav.searchNav('licence', LICENSED, tr).some((r) => r.itemId === 'profile'), 'alias "licence" finds My profile & verification');
+  ok(nav.searchNav('team', STAFF, tr).some((r) => r.itemId === 'agency'), 'alias "team" finds Agency');
+  ok(nav.searchNav('inbox', STAFF, tr).some((r) => r.itemId === 'inbox'), 'utility Inbox searchable');
+  ok(nav.searchNav('offer', LICENSED, tr).length === 0 && nav.searchNav('transaction', LICENSED, tr).length === 0, 'no destination answers to "offer" or "transaction"');
+
+  section(`${app} — hash deep links (strict)`);
+  ok(nav.screenFromHash('#/clients') === 'clients' && nav.screenFromHash('#/agency') === 'agency' && nav.screenFromHash('#/inbox') === 'inbox', 'flat hashes parse');
+  ok(nav.screenFromHash('#/nope') === null && nav.screenFromHash('#foo') === null && nav.screenFromHash('') === null && nav.screenFromHash('#/Clients') === null, 'unknown, malformed and wrongly-cased hashes rejected');
+  ok(nav.screenFromHash('#/clients/rep-7') === 'clients' && nav.clientFromHash('#/clients/rep-7')?.id === 'rep-7' && nav.clientFromHash('#/clients/rep-7')?.tab === 'overview', 'a client deep link resolves to Clients and carries the id (Overview by default)');
+  ok(nav.clientFromHash('#/clients/rep-7/opportunities')?.tab === 'opportunities' && nav.screenFromHash('#/clients/rep-7/activity') === 'clients', 'a client tab deep link carries its tab');
+  ok(nav.clientFromHash('#/clients/rep-7/offer') === null && nav.screenFromHash('#/clients/rep-7/offer') === null, 'an unknown client tab (offer) is rejected outright');
+  ok(nav.clientFromHash('#/clients/') === null && nav.clientFromHash('#/clients/a/b/c') === null && nav.clientFromHash('#/clients/../x') === null && nav.clientFromHash('') === null, 'malformed client deep links rejected');
+  ok(nav.hashForClient('rep-7') === '#/clients/rep-7' && nav.hashForClient('rep-7', 'activity') === '#/clients/rep-7/activity', 'client hashes round-trip');
+  ok(nav.screenFromHash('#/agency/team') === 'agency' && nav.agencyTabFromHash('#/agency/team') === 'team' && nav.agencyTabFromHash('#/agency/billing') === null && nav.screenFromHash('#/agency/billing') === null, 'agency tab deep links are strict');
+  ok(nav.hashForAgency('overview') === '#/agency' && nav.hashForAgency('settings') === '#/agency/settings', 'agency hashes round-trip');
+  for (const id of AGENT_IDS) if (nav.screenFromHash(nav.hashForScreen(id)) !== id) fail(`hash round-trip for ${id}`); else passed++;
+  console.log('✓ every screen hash the app writes, it can read back (6 folded)');
+
+  section(`${app} — shortcuts persistence (graceful)`);
+  store.clear();
+  nav.saveShortcuts('org1', 'u1', ['clients', 'opportunities']);
+  ok(nav.loadShortcuts('org1', 'u1', LICENSED).join(',') === 'clients,opportunities', 'pins persist by id');
+  ok(nav.loadShortcuts('org1', 'u1', STAFF).join(',') === 'clients', 'a pin to a now-hidden destination drops silently');
+  store.set('sb-agent-shortcuts:org1:u1', '{not json');
+  ok(nav.loadShortcuts('org1', 'u1', LICENSED).length === 0, 'malformed stored shortcuts → empty, no crash');
+  store.set('sb-agent-shortcuts:org1:u1', JSON.stringify(['ghost', 42, 'agency']));
+  ok(nav.loadShortcuts('org1', 'u1', LICENSED).join(',') === 'agency', 'invalid ids and types filtered out');
+}
+
 console.log(`\nnavConfig: ${passed} checks passed${process.exitCode ? ' (WITH FAILURES)' : ''}`);
 process.exit(process.exitCode ?? 0);

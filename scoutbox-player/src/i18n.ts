@@ -3,6 +3,18 @@
 // the English originals live here permanently. Web builds persist the
 // choice; native storage would use AsyncStorage behind the same helper.
 const en = {
+  // ---- M23 P5.6B My Agent
+  m24title: 'My Agent', m24intro: 'Nothing is active until you confirm it. You can end an active relationship at any time; the record stays in your history.',
+  m24none: 'No agent has asked to represent you.', m24minor: 'Agent representation is not available for under-18 accounts in ScoutBox.',
+  m24pending: 'Awaiting your answer', m24active: 'Active', m24declined: 'Declined', m24expired: 'Expired', m24disputed: 'Disputed', m24ended: 'Ended',
+  m24confirm: 'Confirm', m24decline: 'Decline', m24end: 'End relationship', m24dispute: 'Dispute', m24disputeReason: 'Why are you disputing this? (kept private; never shown to the agent)',
+  m24confirmed: 'Confirmed — active from now until the end date.', m24declinedMsg: 'Declined. The agent cannot ask again for 30 days.',
+  m24endedMsg: 'Ended. Their access stops now; the record stays.', m24disputedMsg: 'Disputed. Their access is suspended. Attributed Trust & Safety review is not yet available in this build, so this cannot be resolved here yet.',
+  m24share: 'Share status with the agency\u2019s staff', m24unshare: 'Stop sharing status with agency staff', m24shareNote: 'Sharing shows agency staff only that a relationship exists and its status — never your profile.',
+  m24scope: 'Scope', m24term: 'Term', m24months: 'months', m24ends: 'Ends', m24agency: 'Agency', m24licence: 'FIFA licence', m24honestVerified: 'Verified against recorded provenance in ScoutBox; check the provenance before relying on it.',
+  m24honestUnverified: 'This agent\u2019s licence is NOT verified in ScoutBox.', m24legacy: 'Legacy agency-level record from the earlier Representation section; manage it there.',
+  m24whatIs: 'A ScoutBox relationship record. It is not a representation contract and ScoutBox has not assessed its legal validity.',
+  m24failed: 'That did not go through. Nothing was changed.', m24conflict: 'This changed since you loaded it. Reload and try again.',
   passport: 'Evidence passport', addClaim: 'Log a claim', insufficient: 'Not enough evidence yet — that is simply shown, never padded.',
   provenance: 'How each claim was checked — not a rating of your football.',
   board: 'Opportunity board', apply: 'Apply', applied: 'Applied', withdraw: 'Withdraw',
@@ -282,6 +294,18 @@ const en = {
   ctGuardianNote: 'This contact was routed to you because the player is under age. The club sees your answer, never your child’s.',
 };
 const fr: typeof en = {
+  // ---- M23 P5.6B Mon agent (FR)
+  m24title: 'Mon agent', m24intro: 'Rien n\u2019est actif tant que vous ne l\u2019avez pas confirm\u00e9. Vous pouvez mettre fin \u00e0 une relation active \u00e0 tout moment ; l\u2019enregistrement reste dans votre historique.',
+  m24none: 'Aucun agent n\u2019a demand\u00e9 \u00e0 vous repr\u00e9senter.', m24minor: 'La repr\u00e9sentation par un agent n\u2019est pas disponible pour les comptes de moins de 18 ans dans ScoutBox.',
+  m24pending: 'En attente de votre r\u00e9ponse', m24active: 'Active', m24declined: 'Refus\u00e9e', m24expired: 'Expir\u00e9e', m24disputed: 'Contest\u00e9e', m24ended: 'Termin\u00e9e',
+  m24confirm: 'Confirmer', m24decline: 'Refuser', m24end: 'Mettre fin \u00e0 la relation', m24dispute: 'Contester', m24disputeReason: 'Pourquoi contestez-vous ? (reste priv\u00e9 ; jamais montr\u00e9 \u00e0 l\u2019agent)',
+  m24confirmed: 'Confirm\u00e9e \u2014 active d\u00e8s maintenant jusqu\u2019\u00e0 la date de fin.', m24declinedMsg: 'Refus\u00e9e. L\u2019agent ne peut pas redemander pendant 30 jours.',
+  m24endedMsg: 'Termin\u00e9e. Son acc\u00e8s s\u2019arr\u00eate maintenant ; l\u2019enregistrement reste.', m24disputedMsg: 'Contest\u00e9e. Son acc\u00e8s est suspendu. La revue attribu\u00e9e par Trust & Safety n\u2019est pas encore disponible dans cette version ; cela ne peut donc pas encore \u00eatre r\u00e9solu ici.',
+  m24share: 'Partager le statut avec le personnel de l\u2019agence', m24unshare: 'Ne plus partager le statut avec le personnel de l\u2019agence', m24shareNote: 'Le partage montre au personnel de l\u2019agence seulement qu\u2019une relation existe et son statut \u2014 jamais votre profil.',
+  m24scope: 'P\u00e9rim\u00e8tre', m24term: 'Dur\u00e9e', m24months: 'mois', m24ends: 'Fin', m24agency: 'Agence', m24licence: 'Licence FIFA', m24honestVerified: 'V\u00e9rifi\u00e9 selon une provenance enregistr\u00e9e dans ScoutBox ; v\u00e9rifiez la provenance avant de vous y fier.',
+  m24honestUnverified: 'La licence de cet agent N\u2019EST PAS v\u00e9rifi\u00e9e dans ScoutBox.', m24legacy: 'Enregistrement h\u00e9rit\u00e9 au niveau de l\u2019agence, issu de l\u2019ancienne section Repr\u00e9sentation ; g\u00e9rez-le l\u00e0-bas.',
+  m24whatIs: 'Un enregistrement de relation ScoutBox. Ce n\u2019est pas un contrat de repr\u00e9sentation et ScoutBox n\u2019a pas \u00e9valu\u00e9 sa validit\u00e9 juridique.',
+  m24failed: 'Cela n\u2019a pas abouti. Rien n\u2019a \u00e9t\u00e9 modifi\u00e9.', m24conflict: 'Cela a chang\u00e9 depuis le chargement. Rechargez et r\u00e9essayez.',
   passport: 'Passeport de preuves', addClaim: 'Consigner une donnée', insufficient: 'Preuves encore insuffisantes — c’est affiché tel quel, jamais maquillé.',
   provenance: 'Comment chaque donnée a été vérifiée — pas une note de votre football.',
   board: 'Tableau des opportunités', apply: 'Postuler', applied: 'Candidature envoyée', withdraw: 'Retirer',

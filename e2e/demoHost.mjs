@@ -45,6 +45,7 @@ export const DEFAULT_PORT = Number(process.env.DEMO_PORT || 8099);
 /** The bundles the host serves, in a fixed order so the marker is stable. */
 export const BUNDLES = Object.freeze([
   'scoutbox-admin-demo.html',
+  'scoutbox-agent-demo.html',
   'scoutbox-club-demo.html',
   'scoutbox-connected-demo.html',
   'scoutbox-grassroots-demo.html',

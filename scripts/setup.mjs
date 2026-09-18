@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const APPS = ['scoutbox-server', 'scoutbox-player', 'scoutbox-club', 'scoutbox-admin', 'e2e'];
-// scoutbox-grassroots/node_modules is a symlink to scoutbox-club's — no install.
+// scoutbox-grassroots/node_modules and scoutbox-agent/node_modules are symlinks to scoutbox-club's — no install.
 
 let failed = false;
 const fail = (m) => { console.error(`✗ ${m}`); failed = true; };
@@ -39,16 +39,20 @@ for (const app of APPS) {
   }
 }
 
-const grassLink = path.join(ROOT, 'scoutbox-grassroots', 'node_modules');
-if (!fs.existsSync(grassLink)) {
-  try {
-    fs.symlinkSync(path.join('..', 'scoutbox-club', 'node_modules'), grassLink, 'junction');
-    okay('scoutbox-grassroots: node_modules symlink restored');
-  } catch (e) {
-    fail(`scoutbox-grassroots: could not restore node_modules symlink (${e.message})`);
+// The two Vite apps that share scoutbox-club's dependency set (identical
+// lockfiles): Grassroots since M8, Agent since M23 P5.6B.
+for (const shared of ['scoutbox-grassroots', 'scoutbox-agent']) {
+  const link = path.join(ROOT, shared, 'node_modules');
+  if (!fs.existsSync(link)) {
+    try {
+      fs.symlinkSync(path.join('..', 'scoutbox-club', 'node_modules'), link, 'junction');
+      okay(`${shared}: node_modules symlink restored`);
+    } catch (e) {
+      fail(`${shared}: could not restore node_modules symlink (${e.message})`);
+    }
+  } else {
+    okay(`${shared}: node_modules symlink present`);
   }
-} else {
-  okay('scoutbox-grassroots: node_modules symlink present');
 }
 
 if (failed) { console.error('\nSetup incomplete — fix the ✗ items above.'); process.exit(1); }

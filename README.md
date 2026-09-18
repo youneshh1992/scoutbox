@@ -1,6 +1,6 @@
 # ScoutBox — Full System (Milestone 11: one connected system)
 
-Five pieces, one live dataset:
+Six pieces, one live dataset:
 
 | Folder | What it is | Run |
 |---|---|---|
@@ -9,6 +9,7 @@ Five pieces, one live dataset:
 | `scoutbox-club/`   | **ScoutBox Pro** — the club & agent recruitment portal (React, landscape). | `npm install && npm run dev` (port 5173) |
 | `scoutbox-admin/`  | The internal Trust & Safety console (reports, verification, IDV, suspensions, audit). | `npm install && npm run dev` (port 5174, key: `scoutbox-admin`) |
 | `scoutbox-grassroots/` | **ScoutBox Grassroots** — the separate club platform for federation-registered semi-pro & amateur clubs. | `npm install && npm run dev` (port 5175) |
+| `scoutbox-agent/` | **ScoutBox Agent** — the workspace for licensed football agents and their agencies (M23 P5.6B): client relationships confirmed by the player, verification facets, agency roles. No transactions, offers or negotiation. | shares `scoutbox-club/node_modules`; `npm run dev` (port 5176) |
 
 ## Local development — the connected system (Milestone 11)
 
@@ -27,7 +28,7 @@ Claude cloud sessions cannot expose ports to your browser at all.
 ```bash
 # from the repository root, on YOUR machine:
 npm run setup    # 1. once after cloning — installs every app from its lockfile, checks Node ≥ 22
-npm run dev      # 2. every time — backend + Player + Pro + Grassroots (npm run dev:all adds the T&S console)
+npm run dev      # 2. every time — backend + Player + Pro + Grassroots + Agent (npm run dev:all adds the T&S console)
 ```
 
 The launcher validates prerequisites, refuses to double-start if the ports are
@@ -38,6 +39,7 @@ URLs (printed by the launcher once the backend is healthy):
 - ScoutBox Player (web): http://localhost:8081
 - ScoutBox Pro: http://localhost:5173
 - ScoutBox Grassroots: http://localhost:5175
+- ScoutBox Agent: http://localhost:5176
 - API: http://localhost:4000 (`/health`), T&S console (optional): http://localhost:5174
 
 **Database**: created automatically at `scoutbox-server/data/scoutbox.db` on

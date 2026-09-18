@@ -1,7 +1,8 @@
-// Build all three self-contained demo bundles into e2e/dist/:
+// Build the self-contained demo bundles into e2e/dist/:
 //   scoutbox-club-demo.html   (VITE_DEMO=1)
 //   scoutbox-player-demo.html (Expo web export + deep-path history shim)
 //   scoutbox-admin-demo.html  (VITE_DEMO=1)
+//   scoutbox-grassroots-demo.html, scoutbox-agent-demo.html (VITE_DEMO=1)
 // These single files are what gets published as the app tabs.
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -24,6 +25,9 @@ inline(path.join(ROOT, 'scoutbox-admin', 'dist'), path.join(OUT, 'scoutbox-admin
 run('VITE_DEMO=1 npx vite build', path.join(ROOT, 'scoutbox-grassroots'));
 inline(path.join(ROOT, 'scoutbox-grassroots', 'dist'), path.join(OUT, 'scoutbox-grassroots-demo.html'));
 
+run('VITE_DEMO=1 npx vite build', path.join(ROOT, 'scoutbox-agent'));
+inline(path.join(ROOT, 'scoutbox-agent', 'dist'), path.join(OUT, 'scoutbox-agent-demo.html'));
+
 // Demo is explicit now: without EXPO_PUBLIC_DEMO=1 the player app builds in
 // LIVE mode against the real backend.
 run('EXPO_PUBLIC_DEMO=1 npx expo export --clear --platform web --output-dir dist-demo', path.join(ROOT, 'scoutbox-player'));
@@ -45,7 +49,7 @@ if (!html.includes(shim)) {
 // which crashes app bundles at boot into a white screen. Replace throwing
 // storage with an in-memory shim before any bundle code runs, in every demo.
 const storageShim = '<script data-storage-shim>(function(){function mem(){var m=new Map;return{getItem:function(k){k=String(k);return m.has(k)?m.get(k):null},setItem:function(k,v){m.set(String(k),String(v))},removeItem:function(k){m.delete(String(k))},clear:function(){m.clear()},key:function(i){return Array.from(m.keys())[i]!==undefined?Array.from(m.keys())[i]:null},get length(){return m.size}}}function guard(n){try{window[n].getItem("__probe__")}catch(e){try{Object.defineProperty(window,n,{value:mem(),configurable:true})}catch(e2){}}}guard("localStorage");guard("sessionStorage")})();</script>';
-for (const f of ['scoutbox-club-demo.html', 'scoutbox-admin-demo.html', 'scoutbox-grassroots-demo.html', 'scoutbox-player-demo.html']) {
+for (const f of ['scoutbox-club-demo.html', 'scoutbox-admin-demo.html', 'scoutbox-grassroots-demo.html', 'scoutbox-agent-demo.html', 'scoutbox-player-demo.html']) {
   const p = path.join(OUT, f);
   let doc = fs.readFileSync(p, 'utf8');
   if (!doc.includes('data-storage-shim')) {
@@ -60,7 +64,7 @@ for (const f of ['scoutbox-club-demo.html', 'scoutbox-admin-demo.html', 'scoutbo
 const sha = execSync('git rev-parse --short HEAD', { cwd: ROOT }).toString().trim();
 const built = new Date().toISOString().slice(0, 10);
 const badge = `<div data-demo-badge style="position:fixed;left:8px;bottom:8px;z-index:2147483000;background:rgba(11,18,32,.85);border:1px solid #263a5e;color:#8fa3c8;font:10.5px/1.4 system-ui,sans-serif;border-radius:8px;padding:3px 8px;pointer-events:none">Interactive demo — sample data · build ${sha} · ${built}</div>`;
-for (const f of ['scoutbox-club-demo.html', 'scoutbox-admin-demo.html', 'scoutbox-grassroots-demo.html', 'scoutbox-player-demo.html']) {
+for (const f of ['scoutbox-club-demo.html', 'scoutbox-admin-demo.html', 'scoutbox-grassroots-demo.html', 'scoutbox-agent-demo.html', 'scoutbox-player-demo.html']) {
   const p = path.join(OUT, f);
   let doc = fs.readFileSync(p, 'utf8');
   doc = doc.replace(/<div data-demo-badge[^>]*>[^<]*<\/div>/, ''); // idempotent

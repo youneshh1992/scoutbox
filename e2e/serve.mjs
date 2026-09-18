@@ -24,6 +24,7 @@ const FILES = {
   '/admin/': 'scoutbox-admin-demo.html',
   '/deep/nested/': 'scoutbox-player-demo.html',
   '/grassroots/': 'scoutbox-grassroots-demo.html',
+  '/agent/': 'scoutbox-agent-demo.html',
   '/connected/': 'scoutbox-connected-demo.html',
 };
 
@@ -36,4 +37,4 @@ http.createServer((req, res) => {
   if (!key) { res.writeHead(404); return res.end('not found'); }
   res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
   res.end(fs.readFileSync(path.join(DIST, FILES[key])));
-}).listen(PORT, () => console.log(`demo host on :${PORT} build ${BUILD_MARKER} — /club /player /admin /deep/nested`));
+}).listen(PORT, () => console.log(`demo host on :${PORT} build ${BUILD_MARKER} — /club /player /admin /grassroots /agent /deep/nested`));

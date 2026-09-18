@@ -30,13 +30,14 @@ const APPS = [
   { name: 'player', dir: 'scoutbox-player', port: 8081, cmd: 'npx', args: ['expo', 'start', '--web', '--port', '8081'], env: { EXPO_PUBLIC_API_URL: API_URL, BROWSER: 'none' }, url: 'http://localhost:8081', label: 'ScoutBox Player (web)', marker: 'root' },
   { name: 'pro', dir: 'scoutbox-club', port: 5173, cmd: 'npx', args: ['vite', '--port', '5173', '--strictPort'], url: 'http://localhost:5173', label: 'ScoutBox Pro', marker: 'ScoutBox Pro' },
   { name: 'grassroots', dir: 'scoutbox-grassroots', port: 5175, cmd: 'npx', args: ['vite', '--port', '5175', '--strictPort'], url: 'http://localhost:5175', label: 'ScoutBox Grassroots', marker: 'ScoutBox Grassroots' },
+  { name: 'agent', dir: 'scoutbox-agent', port: 5176, cmd: 'npx', args: ['vite', '--port', '5176', '--strictPort'], url: 'http://localhost:5176', label: 'ScoutBox Agent', marker: 'ScoutBox Agent' },
   ...(WITH_ADMIN ? [{ name: 'admin', dir: 'scoutbox-admin', port: 5174, cmd: 'npx', args: ['vite', '--port', '5174', '--strictPort'], url: 'http://localhost:5174', label: 'Trust & Safety console', marker: 'ScoutBox' }] : []),
 ];
 
 // ---------- prerequisites: deps installed, ports free
 let bad = false;
 for (const app of APPS) {
-  if (app.name !== 'grassroots' && !fs.existsSync(path.join(ROOT, app.dir, 'node_modules'))) {
+  if (app.name !== 'grassroots' && app.name !== 'agent' && !fs.existsSync(path.join(ROOT, app.dir, 'node_modules'))) {
     console.error(`✗ ${app.dir}/node_modules missing — run \`npm run setup\` first (installs from the lockfiles).`);
     bad = true;
   }
