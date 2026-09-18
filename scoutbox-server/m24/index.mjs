@@ -26,6 +26,7 @@ import { rateLimitedBody } from '../m181/rateLimit.mjs';
 import { normaliseClientKey, payloadFingerprint } from '../m23/contact.mjs';
 import { sendAgentError } from './errors.mjs';
 import { agentAuditRows } from './audit.mjs';
+import { facetFromProviderAnswer, FACET_METHOD } from '../m25/provider.mjs';
 import {
   AGENT_POLICY_VERSION, VERIFICATION_STATES, FACETS, JURISDICTIONS, TIERS, SCOPES, MAX_TERM_MONTHS, EXPIRY_ALERT_MS,
   newFacets, effectiveFacetState, evaluateSubmission, requiredFacetsFor, verificationGap,
@@ -39,10 +40,14 @@ export function registerAgent(rawCtx) {
   const {
     db, orgRouter, playerRouter, adminRouter, nextId, persistNow, notify, broadcast,
     findPlayer, isBlocked, playerViewForOrg, orgSafe, revokeOrgUserAccess, rateLimit, isAdult,
-    orgCanSee, checkEligibility, distanceBand, moderateOrRefuse,
+    orgCanSee, checkEligibility, distanceBand, moderateOrRefuse, verificationProvider,
   } = ctx;
 
   const testProviderEnabled = process.env.AGENT_VERIFICATION_TEST_PROVIDER === '1';
+  // P5.6C seams the Compliance Engine fills after it registers: a facet that
+  // needs attributed review, a client's dispute, and the policy layer's
+  // verdict on an Approach. Absent (tests of the pure core), P5.6B behaviour.
+  const hooks = { facetNeedsReview: null, representationDisputed: null, authorizeApproach: null };
   const now = () => Date.now();
   const hist = (record, action, by, detail = null) => {
     record.history ??= [];
@@ -117,15 +122,17 @@ export function registerAgent(rawCtx) {
     if (!p) return null;
     const fifa = facetView(p.facets?.fifa_licence);
     const national = Object.fromEntries(Object.entries(p.facets?.national_registration ?? {}).map(([k, v]) => [k, facetView(v)]));
+    const domestic = Object.fromEntries(Object.entries(p.facets?.domestic_authorisation ?? {}).map(([k, v]) => [k, facetView(v)]));
     const minors = Object.fromEntries(Object.entries(p.facets?.minors_authorisation ?? {}).map(([k, v]) => [k, facetView(v)]));
     return {
       id: p.id, userId: p.userId, agencyOrgId: p.agencyOrgId, displayName: p.displayName,
-      declared: p.declared ?? {}, facets: { fifa_licence: fifa, national_registration: national, minors_authorisation: minors },
+      declared: p.declared ?? {}, facets: { fifa_licence: fifa, national_registration: national, domestic_authorisation: domestic, minors_authorisation: minors },
       regulatoryState: {
         fifaLicence: fifa?.state ?? 'UNVERIFIED',
         jurisdictions: (p.declared?.jurisdictions ?? []).map((ma) => ({
           memberAssociation: ma,
           nationalRegistration: national[ma]?.state ?? 'UNVERIFIED',
+          domesticAuthorisation: domestic[ma]?.state ?? 'UNVERIFIED',
           minorsAuthorisation: minors[ma]?.state ?? 'UNVERIFIED',
           regulatedActionsPermitted: !verificationGap(p, ma, now()),
         })),
@@ -278,11 +285,21 @@ export function registerAgent(rawCtx) {
     if (facet === 'minors_authorisation') {
       // Recorded, never activated: no production minors pathway exists (P5.6A DR-49).
     }
-    const outcome = evaluateSubmission({ facet, reference, testProviderEnabled, now: now() });
-    const next = { state: outcome.state, reference, memberAssociation: ma, provenance: outcome.provenance, submittedAt: now(), verifiedAt: outcome.verifiedAt, recheckAt: outcome.recheckAt, note: outcome.note };
+    // P5.6C: ONE provider abstraction (fail-honest). Without it, the P5.6B
+    // synthetic/none evaluation; with it, the same states plus UNAVAILABLE,
+    // which writes nothing and answers 503 — an outage is never a permission.
+    const outcome = verificationProvider
+      ? verificationProvider[FACET_METHOD[facet]]({ reference, now: now() })
+      : evaluateSubmission({ facet, reference, testProviderEnabled, now: now() });
+    if (outcome.state === 'UNAVAILABLE') return sendAgentError(res, { error: 'REGULATORY_PROVIDER_UNAVAILABLE', retryAfter: 300, message: 'The verification source is unavailable. Nothing was recorded; try again later or the reference will be queued for attributed review when the source answers.' }, 'facet');
+    const next = verificationProvider
+      ? facetFromProviderAnswer(outcome, { reference, memberAssociation: ma, now: now() })
+      : { state: outcome.state, reference, memberAssociation: ma, provenance: outcome.provenance, submittedAt: now(), verifiedAt: outcome.verifiedAt, recheckAt: outcome.recheckAt, note: outcome.note };
+    p.facets[facet] ??= {};
     const prev = facet === 'fifa_licence' ? p.facets.fifa_licence : p.facets[facet][ma];
     if (facet === 'fifa_licence') p.facets.fifa_licence = next; else p.facets[facet][ma] = next;
     hist(p, 'agent_verification_submitted', byOrg(req), { facet, memberAssociation: ma });
+    if (next.state === 'MANUAL_REVIEW_REQUIRED' && hooks.facetNeedsReview) hooks.facetNeedsReview(p, { facet, memberAssociation: ma, reference }, byOrg(req));
     if ((prev?.state ?? 'UNVERIFIED') !== next.state) {
       hist(p, 'agent_verification_state_changed', byOrg(req), { facet, memberAssociation: ma, from: prev?.state ?? 'UNVERIFIED', to: next.state, state: next.state });
       broadcast('agent_verification_state_changed', { orgId: req.org.id, userId: p.userId, facet, state: next.state });
@@ -449,6 +466,8 @@ export function registerAgent(rawCtx) {
     if (!resolveMembership(req, res)) return;
     if (!requireCap(req, res, 'agency.audit.read')) return;
     const all = agentAuditRows(db, req.org, { findPlayer, orgCanSee });
+    // P5.6C: compliance rows (contexts, consents, attributed reviews) ride the same feed, same shape.
+    if (hooks.auditRows) { all.push(...hooks.auditRows(req.org)); all.sort((a, b) => (b.at - a.at) || String(b.id).localeCompare(String(a.id))); }
     const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 25));
     let start = 0;
     if (req.query.cursor) {
@@ -561,6 +580,23 @@ export function registerAgent(rawCtx) {
     }
     const conflict = requestConflict(db.representationAgreements ?? [], { agentUserId: req.orgUser.id, playerId: player.id, now: now() });
     if (conflict) return sendAgentError(res, { ...conflict, message: conflict.error === 'REPRESENTATION_COOLDOWN' ? 'A recent request to this player was declined or ended; wait before asking again.' : 'A relationship with this player already exists or is pending.' }, 'request');
+    // P5.6C: an Approach is a regulated act — the versioned policy layer has
+    // the last word at mutation time (registration and domestic authorisation
+    // under the applicable national rules; the exclusive-agreement window,
+    // which is UNDER_LEGAL_REVIEW, goes to attributed review, never a block,
+    // and never names the other agent).
+    let policyVersions = [];
+    if (hooks.authorizeApproach) {
+      const { decision, policySet } = hooks.authorizeApproach({ profile: profileOf(req.orgUser.id), jurisdiction, player, agentUserId: req.orgUser.id });
+      policyVersions = policySet.policies.map((x) => x.id);
+      if (decision.facetGaps.length) { const g = decision.facetGaps[0]; return sendAgentError(res, { error: g.code, facet: g.facet, memberAssociation: g.memberAssociation, state: g.state, message: `A regulated action needs a VERIFIED ${g.facet}${g.memberAssociation ? ` (${g.memberAssociation})` : ''}; it is ${g.state}.` }, 'request'); }
+      if (decision.blocked) return sendAgentError(res, { error: 'AGENT_ACTION_NOT_PERMITTED', reasons: decision.reasons.filter((r) => r.code !== 'FACET_VERIFIED'), policyVersions, message: 'An ACTIVE encoded rule does not permit this approach.' }, 'request');
+      if (decision.requiresManualReview) {
+        const unsupported = decision.reasons.some((r) => r.code === 'POLICY_NOT_ENCODED');
+        const review = hooks.createApproachReview ? hooks.createApproachReview({ req, decision, playerId: player.id, jurisdiction }) : null;
+        return sendAgentError(res, { error: unsupported ? 'JURISDICTION_UNSUPPORTED' : 'REGULATORY_REVIEW_REQUIRED', reviewId: review?.id ?? undefined, reasons: decision.reasons.filter((r) => r.code !== 'FACET_VERIFIED'), policyVersions, message: unsupported ? 'No encoded policy covers this jurisdiction; the request cannot proceed.' : 'The deciding rule\'s operative status is uncertain. The request was not sent; an attributed Trust & Safety review item records the question.' }, 'request');
+      }
+    }
     const a = {
       id: nextId('rep'), agentUserId: req.orgUser.id, agencyOrgId: req.org.id,
       clientKind: 'player', clientId: player.id, isRegulatoryMinor: false,
@@ -568,10 +604,10 @@ export function registerAgent(rawCtx) {
       status: 'proposed', proposedAt: now(), confirmedAt: null, confirmedBy: null,
       declinedAt: null, terminatedAt: null, terminatedBy: null, terminationReasonCode: null, disputedAt: null, disputeReason: null,
       shareWithAgencyStaff: false, documents: [], legacy: null,
-      policyVersion: AGENT_POLICY_VERSION, keys: key ? { request: { key, fp } } : {},
+      policyVersion: AGENT_POLICY_VERSION, policyVersions, keys: key ? { request: { key, fp } } : {},
       createdAt: now(), rev: 1, revAt: now(), revBy: null, history: [],
     };
-    hist(a, 'representation_requested', byOrg(req), { scope, termMonths, jurisdiction });
+    hist(a, 'representation_requested', byOrg(req), { scope, termMonths, jurisdiction, policyVersions });
     db.representationAgreements.push(a);
     persistNow();
     broadcast('representation_requested', { orgId: req.org.id, agreementId: a.id, agentUserId: a.agentUserId });
@@ -726,6 +762,9 @@ export function registerAgent(rawCtx) {
     else if (event === 'representation_disputed') broadcast('representation_disputed', ev);
     else broadcast('representation_terminated', ev);
     if (a.agentUserId) notify({ kind: 'org_user', id: a.agentUserId }, notifyType, notifyText, a.id);
+    // P5.6C: a dispute becomes an attributed review item (P5.6A C6). The
+    // reason stays with the client; the reviewer sees only that one exists.
+    if (to === 'disputed' && hooks.representationDisputed) hooks.representationDisputed(a, byPlayer(req));
     res.json({ relationship: { ...agreementForClient(a, now()), agent: agentIdentityForClient(a) } });
   }
 
@@ -809,5 +848,9 @@ export function registerAgent(rawCtx) {
     }
   }
 
-  return { onPlayerDeleted, effectiveAgreementStatus, agreementGrantsAccess, testProviderEnabled };
+  return {
+    onPlayerDeleted, effectiveAgreementStatus, agreementGrantsAccess, testProviderEnabled,
+    // P5.6C: the Compliance Engine reuses exactly these gates rather than its own copies.
+    resolveMembership, requireCap, profileOf, facetView, hooks,
+  };
 }

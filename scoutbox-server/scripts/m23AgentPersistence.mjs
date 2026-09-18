@@ -102,30 +102,32 @@ function snapshot2304() {
     ],
   };
   runMigrations(db);
-  // Now REWIND to a 2304 snapshot: drop the 2305 step and its stores.
+  // Now REWIND to a 2304 snapshot: drop the 2305 step (and the P5.6C 2306 step) and their stores.
   db.schema.version = 2304;
-  db.schema.migrations = db.schema.migrations.filter((m) => m.id !== 'm240_001_agent_core_stores');
+  db.schema.migrations = db.schema.migrations.filter((m) => m.id !== 'm240_001_agent_core_stores' && m.id !== 'm250_001_compliance_stores');
   delete db.agentProfiles; delete db.agencyAffiliations; delete db.representationAgreements;
+  delete db.tsReviewers; delete db.jurisdictionPolicies; delete db.regulatoryReviews; delete db.regulatoryConsents; delete db.complianceContexts;
   return db;
 }
 
 // ======================================================= 1 — the step
+// Pins updated in P5.6C: the Agent step is still the one 2305 step; the schema is now 2306 (Compliance stores, one step).
 section('1 — schema 2305: one step, three empty stores, idempotent, production-required');
 {
   const step = MIGRATIONS.find((m) => m.id === 'm240_001_agent_core_stores');
-  ok(step?.version === 2305 && SCHEMA_VERSION === 2305, 'm240_001_agent_core_stores is version 2305, the current schema');
-  ok(MIGRATIONS.filter((m) => m.version === 2305).length === 1 && MIGRATIONS.filter((m) => m.version > 2304).length === 1, 'exactly one step above 2304');
-  neg(!MIGRATIONS.some((m) => m.version > 2305), 'and nothing above 2305');
+  ok(step?.version === 2305 && SCHEMA_VERSION === 2306, 'm240_001_agent_core_stores is version 2305; the current schema is 2306 (P5.6C)');
+  ok(MIGRATIONS.filter((m) => m.version === 2305).length === 1 && MIGRATIONS.filter((m) => m.version > 2304).length === 2, 'exactly one step at 2305; two steps above 2304 (2305 Agent, 2306 Compliance)');
+  neg(!MIGRATIONS.some((m) => m.version > 2306), 'and nothing above 2306');
   const fresh = {};
   const up = runMigrations(fresh);
-  ok(up.to === 2305 && Array.isArray(fresh.agentProfiles) && fresh.agentProfiles.length === 0 && Array.isArray(fresh.agencyAffiliations) && fresh.agencyAffiliations.length === 0 && Array.isArray(fresh.representationAgreements) && fresh.representationAgreements.length === 0, 'a clean database gets three EMPTY stores — empty is the truthful default');
+  ok(up.to === 2306 && Array.isArray(fresh.agentProfiles) && fresh.agentProfiles.length === 0 && Array.isArray(fresh.agencyAffiliations) && fresh.agencyAffiliations.length === 0 && Array.isArray(fresh.representationAgreements) && fresh.representationAgreements.length === 0, 'a clean database gets three EMPTY stores — empty is the truthful default');
   neg(fresh.agentAuth === undefined && fresh.agentSessions === undefined && fresh.agentUsers === undefined && fresh.offers === undefined, 'no agent auth database and no offers store was invented');
   const { schema: _s1, ...storesBefore } = fresh;
   const idsBefore = fresh.schema.migrations.map((m) => m.id).join();
   const before = stableJson(storesBefore);
   const again = runMigrations(fresh);
   const { schema: _s2, ...storesAfter } = fresh;
-  ok(again.ran.length === 0 && stableJson(storesAfter) === before && fresh.schema.migrations.map((m) => m.id).join() === idsBefore && fresh.schema.version === 2305, 'running again changes no store and adds no migration record');
+  ok(again.ran.length === 0 && stableJson(storesAfter) === before && fresh.schema.migrations.map((m) => m.id).join() === idsBefore && fresh.schema.version === 2306, 'running again changes no store and adds no migration record');
   for (const s of ['agentProfiles', 'agencyAffiliations', 'representationAgreements']) ok(guaranteeFor(s) === 'migration' && PRODUCTION_REQUIRED_STORES.includes(s), `${s} is migration-guaranteed and production-required`);
 }
 
@@ -137,7 +139,7 @@ section('2 — upgrade from 2304: affiliations bootstrapped honestly, legacy row
   const srcBefore = stableJson(db.representations);
   const usersBefore = stableJson(db.users);
   const up = runMigrations(db);
-  ok(up.ran.join(',') === 'm240_001_agent_core_stores' && up.to === 2305, 'a 2304 snapshot runs exactly the Agent step');
+  ok(up.ran.join(',') === 'm240_001_agent_core_stores,m250_001_compliance_stores' && up.to === 2306, 'a 2304 snapshot runs exactly the Agent step and then the P5.6C Compliance step');
   const affs = db.agencyAffiliations;
   const lead = affs.find((a) => a.userId === 'usr-lead');
   const staff = affs.find((a) => a.userId === 'usr-staff');
@@ -177,7 +179,7 @@ section('3 — a real boot over the upgraded snapshot');
   ok(s.up, 'the server boots over a 2304 snapshot');
   if (s.up) {
     const h = await s.j('GET', '/healthz');
-    ok(h.body.schemaVersion === 2305 && /m240_001_agent_core_stores/.test(s.log()), 'and reports 2305 having applied the Agent step at boot');
+    ok(h.body.schemaVersion === 2306 && /m240_001_agent_core_stores/.test(s.log()), 'and reports 2306 having applied the Agent step (and the Compliance step) at boot');
     const lead = (await s.j('POST', '/auth/org/login', { orgId: 'org-ag', scoutName: 'Lead Person', role: 'Managing Director', platform: 'agent' })).body;
     const staff = (await s.j('POST', '/auth/org/login', { orgId: 'org-ag', scoutName: 'Staff Person', role: 'Scout', platform: 'agent' })).body;
     const me = await s.j('GET', '/org/agent/me', undefined, lead.token);
@@ -236,13 +238,13 @@ section('4 — clean boot → relationship → stop → snapshot → reboot');
     team: (await s.j('GET', '/org/agent/agency/team', undefined, tomas.token)).body.members,
   };
   const snap = await s.stop();
-  ok(snap && snap.schema.version === 2305 && snap.representationAgreements.length === 1 && snap.agentProfiles.length === 1 && snap.agencyAffiliations.length === 2, 'the snapshot holds one agreement, one profile, two affiliations at 2305');
+  ok(snap && snap.schema.version === 2306 && snap.representationAgreements.length === 1 && snap.agentProfiles.length === 1 && snap.agencyAffiliations.length === 2, 'the snapshot holds one agreement, one profile, two affiliations at 2306');
   const row = snap.representationAgreements[0];
   ok(row.keys.request.key === 'rt-1' && row.keys.confirm.key === 'rt-c' && row.rev === 2 && row.history.length === 2 && row.confirmedBy?.id === 'pl-adeyemi', 'keys, rev, history and confirmation are on disk');
   ok(snap.agentProfiles[0].facets.fifa_licence.provenance.provider === 'local-synthetic-test-provider', 'provenance is on disk');
   neg(!('trust' in row) && !('passport' in row) && !('offer' in row), 'the row carries no trust, passport or offer field');
   s = await bootOn(dir, port + 1);
-  ok(s.up && (await s.j('GET', '/healthz')).body.schemaVersion === 2305, 'reboot at 2305');
+  ok(s.up && (await s.j('GET', '/healthz')).body.schemaVersion === 2306, 'reboot at 2306');
   neg(!/m240_001_agent_core_stores/.test(s.log()), 'the 2305 step did NOT run again');
   const tomas2 = (await s.j('POST', '/auth/org/login', { orgId: 'org-northstar', scoutName: 'Tomás Rivera', role: 'Director', platform: 'agent' })).body;
   const after = {

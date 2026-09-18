@@ -26,6 +26,8 @@ import { registerAnalytics } from './m20/index.mjs';
 import { registerDevelopment } from './m21/index.mjs';
 import { registerM23, migrateM23 } from './m23/index.mjs';
 import { registerAgent } from './m24/index.mjs';
+import { registerCompliance } from './m25/index.mjs';
+import { createVerificationProvider } from './m25/provider.mjs';
 import { createEvidenceProvider } from './m23/evidence.mjs';
 import { COMBINE_PROTOCOLS } from './m16/combineShared.mjs';
 import { registerSourceChanges } from './m181/sourceChanges.mjs';
@@ -3744,6 +3746,8 @@ function deletePlayerData(playerId) {
   // M23 P5.6B: agent relationships become id-only tombstones (no name is
   // stored on them; the dispute text and any player-authored history names go).
   m24Ctx?.onPlayerDeleted?.(playerId, at);
+  // M23 P5.6C: compliance contexts and consents keep only the id.
+  m25Ctx?.onPlayerDeleted?.(playerId, at);
   db.channels = db.channels.filter((c) => c.playerId !== playerId);
   db.notifications = db.notifications.filter((n) => !(n.audience.kind === 'player' && n.audience.id === playerId));
   db.pairingCodes = db.pairingCodes.filter((c) => c.playerId !== playerId);
@@ -3829,8 +3833,24 @@ const ADMIN_KEY = process.env.ADMIN_KEY || 'scoutbox-admin';
 const adminRouter = express.Router();
 app.use('/admin', (req, res, next) => {
   if (req.headers['x-admin-key'] !== ADMIN_KEY) return res.status(401).json({ error: 'ADMIN_KEY_REQUIRED' });
+  // M23 P5.6C (G-C0): when an AUTHENTICATED reviewer session is presented
+  // beside the shared key, legacy admin actions are attributed to that person
+  // (derived from the session, never from a header). The shared key alone
+  // remains what it was: read-only and non-authoritative for compliance.
+  const session = sessionFor(req);
+  if (session?.kind === 'ts_reviewer') {
+    const reviewer = (db.tsReviewers ?? []).find((r) => r && r.id === session.refId && r.status === 'active');
+    if (reviewer) req.reviewer = reviewer;
+  }
   next();
 }, adminRouter);
+
+// M23 P5.6C — the attributed Trust & Safety lane. Every route here resolves
+// a specific authenticated reviewer (never the shared key) before it runs;
+// the middleware is installed by registerCompliance() below.
+let m25Ctx = null;
+const tsRouter = express.Router();
+app.use('/ts', (req, res, next) => (m25Ctx ? m25Ctx.reviewerAuth(req, res, next) : res.status(503).json({ error: 'REVIEWER_LANE_NOT_READY' })), tsRouter);
 
 adminRouter.get('/overview', (_req, res) => {
   res.json({
@@ -4251,10 +4271,31 @@ const m23Ctx = registerM23({
 // player, org, block and opportunity records through their own gates and
 // writes nothing into them. No conflict adjudication, no transactions, no
 // fee enforcement and no Trust & Safety mutation live here (P5.6C/D, G-C0).
+// The verification provider is created ONCE, here, and handed to both the
+// Agent core (facet submissions) and the Compliance Engine (rechecks): one
+// provider, one honest status, no second path to a VERIFIED facet.
+const verificationProvider = createVerificationProvider({ synthetic: process.env.AGENT_VERIFICATION_TEST_PROVIDER === '1' });
 m24Ctx = registerAgent({
   ...m19Ctx,
   isAdult,
+  verificationProvider,
 });
+
+// ------------------------------------------ M23 P5.6C Conflict & Compliance Engine
+// The regulated compliance layer: per-reviewer Trust & Safety identity (G-C0),
+// the versioned jurisdiction policy engine, the pure Conflict Engine, the
+// consent ledger, attributed manual review and the minors gate. It reads the
+// Agent core's records and re-authorises every regulated mutation at mutation
+// time. No Transaction Room, no Offer, no signing, no negotiation lives here.
+m25Ctx = registerCompliance({
+  ...m19Ctx,
+  isAdult, tsRouter, verificationProvider,
+  hashPassword, verifyPassword, createSession, sessionFor, devLogins: DEV_LOGINS,
+  agent: m24Ctx,
+});
+// The Agent core's hooks into the compliance lane (review items for
+// manual-review facets and disputes; the policy layer's verdict on an Approach).
+Object.assign(m24Ctx.hooks, m25Ctx.hooks);
 
 // ------------------------------------------------- M18.1 operator surface
 // What this deployment can and cannot actually do. ScoutBox is careful to be
@@ -4333,6 +4374,11 @@ export const EMITTED_EVENTS = Object.freeze([
   // the client side reuses `notify`.
   'agent_profile_created', 'agent_verification_state_changed', 'agency_affiliation_created', 'agency_affiliation_ended',
   'representation_requested', 'representation_confirmed', 'representation_rejected', 'representation_terminated', 'representation_disputed',
+  // M23 P5.6C Conflict & Compliance Engine. org_private to the agency, ids
+  // and state words only; the policy publication is a content-free ping.
+  'regulatory_review_requested', 'regulatory_review_started', 'regulatory_review_resolved', 'conflict_evaluated',
+  'regulatory_consent_requested', 'regulatory_consent_granted', 'regulatory_consent_declined', 'regulatory_consent_revoked',
+  'agent_authorisation_state_changed', 'policy_version_published',
 ]);
 {
   const problems = assertEventRegistry({ emitted: EMITTED_EVENTS });

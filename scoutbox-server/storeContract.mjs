@@ -137,6 +137,12 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   agentProfiles: { guarantee: 'migration', owner: 'm24', reason: 'P5.6B: the licensed natural person\'s agent profile and verification facets; personal, survives agency departure' },
   agencyAffiliations: { guarantee: 'migration', owner: 'm24', reason: 'P5.6B: time-aware Agent ↔ Agency membership with roles; the permission matrix reads it on every request' },
   representationAgreements: { guarantee: 'migration', owner: 'm24', reason: 'P5.6B: the client-confirmed relationship record — the only basis for an agent\'s private client access' },
+  // M23 P5.6C — Conflict & Compliance Engine. Guaranteed by migration 2306.
+  tsReviewers: { guarantee: 'migration', owner: 'm25', reason: 'P5.6C: per-reviewer Trust & Safety identity (G-C0); empty in production until an operator bootstraps one — the shared key creates none' },
+  jurisdictionPolicies: { guarantee: 'migration', owner: 'm25', reason: 'P5.6C: versioned jurisdiction policy rows with per-rule operative status; seeded from code, published thereafter under dual control' },
+  regulatoryReviews: { guarantee: 'migration', owner: 'm25', reason: 'P5.6C: attributed manual regulatory review items; every decision names its reviewer' },
+  regulatoryConsents: { guarantee: 'migration', owner: 'm25', reason: 'P5.6C: the append-only, party-specific consent ledger; a revocation is a new row' },
+  complianceContexts: { guarantee: 'migration', owner: 'm25', reason: 'P5.6C: the minimal conflict-evaluation context with its evaluation snapshots; not a Transaction Room' },
   reputationSeed: { guarantee: 'migration', owner: 'core', reason: 'demo track records; EMPTY is the correct production value — fabricating them would be worse than the bug (D2)' },
   requests: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   reviewLater: { guarantee: 'module', owner: 'm13', reason: 'existed only because insightSweep() happens to run once synchronously at registration; a store whose existence depends on a sweep moves the day the sweep is made lazy' },

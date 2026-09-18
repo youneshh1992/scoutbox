@@ -21,6 +21,11 @@ export const M24_ERROR_HTTP = table({
   AGENT_PROFILE_REQUIRED: 403,
   AGENT_VERIFICATION_REQUIRED: 403,
   SELF_PROMOTION_BLOCKED: 403,
+  // P5.6C: the policy layer's objective refusals on an Approach (own state only).
+  AGENT_VERIFICATION_STALE: 403,
+  AGENT_LICENCE_INACTIVE: 403,
+  AGENT_NATIONAL_REGISTRATION_REQUIRED: 403,
+  AGENT_DOMESTIC_AUTHORISATION_REQUIRED: 403,
 
   // ---- 404: concealment. A player who does not exist, a minor, a blocked
   // player, a foreign agency's record and another agent's record all answer
@@ -41,8 +46,15 @@ export const M24_ERROR_HTTP = table({
   LAST_ADMIN: 409,
   MEMBER_ALREADY_AFFILIATED: 409,
 
+  // ---- 422: the policy needs a further act (P5.6C: an attributed review).
+  REGULATORY_REVIEW_REQUIRED: 422,
+  JURISDICTION_UNSUPPORTED: 422,
+
   // ---- 429: deterministic per-player request cooldown.
   REPRESENTATION_COOLDOWN: 429,
+
+  // ---- 503: the verification source is down; nothing is assumed (P5.6C).
+  REGULATORY_PROVIDER_UNAVAILABLE: 503,
 
   // ---- 500: ours.
   AGENT_STORE_MISSING: 500,
@@ -54,6 +66,8 @@ export const httpStatusFor = (code) => M24_ERROR_HTTP[code] ?? null;
 export const PUBLIC_ERROR_FIELDS = [
   'error', 'message', 'allowed', 'facet', 'memberAssociation', 'state',
   'expectedRev', 'currentRev', 'updatedBy', 'updatedAt', 'retryAt', 'status', 'agreementId', 'field',
+  // P5.6C: reason codes and policy references (codes only, never prose), the review id, the retry hint.
+  'reasons', 'policyVersions', 'reviewId', 'retryAfter',
 ];
 
 export function publicErrorBody(out) {
@@ -62,7 +76,12 @@ export function publicErrorBody(out) {
     return { ok: false, error: code, message: 'The Agent workspace cannot serve this request. This has been recorded.' };
   }
   const body = { ok: false };
-  for (const k of PUBLIC_ERROR_FIELDS) if (out?.[k] !== undefined) body[k] = out[k];
+  for (const k of PUBLIC_ERROR_FIELDS) {
+    if (out?.[k] === undefined) continue;
+    body[k] = k === 'reasons' && Array.isArray(out[k])
+      ? out[k].map((r) => ({ code: r.code, ruleId: r.ruleId ?? null, ruleStatus: r.ruleStatus ?? null, regulator: r.regulator ?? null, jurisdiction: r.jurisdiction ?? null, policyVersion: r.policyVersion ?? null }))
+      : out[k];
+  }
   return body;
 }
 

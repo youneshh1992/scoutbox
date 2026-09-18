@@ -54,6 +54,10 @@ export const CATEGORIES = Object.freeze({
   // because a request is something a person must answer; a player who mutes
   // it is muting solicitations, which is their right.
   representation: { label: 'Agent representation requests and changes', default: true, mandatory: false },
+  // M23 P5.6C: compliance — a review that needs answering, a consent someone
+  // is waiting on, a verification that went stale. Mandatory (P5.6A final
+  // architecture §9): muting it would mute a regulatory obligation.
+  compliance: { label: 'Regulatory review, consent and verification', default: true, mandatory: true },
   security_account: { label: 'Security and account', default: true, mandatory: true },
 });
 export const CATEGORY_NAMES = Object.freeze(Object.keys(CATEGORIES));
@@ -120,6 +124,14 @@ export const TYPE_CATEGORY = Object.freeze({
   representation_expiring: 'representation',
   agent_verification: 'security_account',
   agency_membership: 'security_account',
+  // M23 P5.6C Conflict & Compliance Engine
+  regulatory_review_required: 'compliance',
+  regulatory_review_completed: 'compliance',
+  regulatory_consent_requested: 'compliance',
+  regulatory_consent_granted: 'compliance',
+  regulatory_consent_declined: 'compliance',
+  regulatory_consent_revoked: 'compliance',
+  agent_verification_stale: 'compliance',
   transition: 'security_account',
   // security and account — mandatory
   verification: 'security_account',

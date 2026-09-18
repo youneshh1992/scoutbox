@@ -381,6 +381,31 @@ for (const [name, payload] of [
   };
 }
 
+// ---- M23 P5.6C Conflict & Compliance Engine. org_private to the AGENCY,
+// ids and state words only: never a reason text, never a reviewer's note,
+// never a party's name, never another agency's agent.
+for (const [name, payload] of [
+  ['regulatory_review_requested', ['orgId', 'reviewId', 'kind']],
+  ['regulatory_review_started', ['orgId', 'reviewId']],
+  ['regulatory_review_resolved', ['orgId', 'reviewId', 'outcome']],
+  // `ctxId` (not `contextId`): the M18.2 personal-field sweep reads "text" in
+  // "contextId"; the key names a compliance context id and nothing else.
+  ['conflict_evaluated', ['orgId', 'ctxId', 'outcome']],
+  ['regulatory_consent_requested', ['orgId', 'consentId', 'ctxId']],
+  ['regulatory_consent_granted', ['orgId', 'consentId', 'ctxId']],
+  ['regulatory_consent_declined', ['orgId', 'consentId', 'ctxId']],
+  ['regulatory_consent_revoked', ['orgId', 'consentId', 'ctxId']],
+  ['agent_authorisation_state_changed', ['orgId', 'userId', 'state']],
+]) {
+  EVENT_REGISTRY[name] = {
+    domain: 'compliance', sourceSystem: name.startsWith('regulatory_consent') ? 'regulatoryConsents' : name === 'conflict_evaluated' ? 'complianceContexts' : name.startsWith('regulatory_review') ? 'regulatoryReviews' : 'agentProfiles',
+    audience: 'org_private', privacyClass: 'org_internal', payload, dedupeStrategy: 'none', replayPolicy: 'never',
+    notificationEligible: true, analyticsEligible: false,
+  };
+}
+// A policy publication is a global, content-free fact: clients refetch the policy read.
+EVENT_REGISTRY.policy_version_published = ping('compliance', 'jurisdictionPolicies');
+
 export const EVENT_NAMES = Object.freeze(Object.keys(EVENT_REGISTRY));
 
 /** Audience for an event. Unknown names fail closed — the M18.1 rule, unchanged. */

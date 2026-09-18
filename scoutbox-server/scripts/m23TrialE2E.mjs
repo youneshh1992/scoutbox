@@ -210,7 +210,7 @@ section('P — error bands, rate policies, events, migration, evidence, permissi
   }
   neg(EVENT_REGISTRY.trial_assessment_recorded === undefined && EVENT_REGISTRY.trial_observed === undefined, 'P5 no event announces an assessment or an observation — judgement never broadcasts');
   const step = MIGRATIONS.find((m) => m.id === 'm230_005_trial_workflow');
-  ok(step?.version === 2304 && SCHEMA_VERSION === 2305, 'P6 migration m230_005_trial_workflow is version 2304; the current schema is 2305 (P5.6B Agent stores)');
+  ok(step?.version === 2304 && SCHEMA_VERSION === 2306, 'P6 migration m230_005_trial_workflow is version 2304; the current schema is 2306 (P5.6B Agent stores at 2305, P5.6C Compliance stores at 2306)');
   const old = { schema: { version: 2303, migrations: MIGRATIONS.filter((m) => m.version <= 2303).map((m) => ({ id: m.id, version: m.version, at: 1 })) }, trials: [{ id: 't1', orgId: 'o', playerId: 'p', status: 'reported', proposedDate: '2025-05-01', acceptedAt: 1, report: { id: 'r' } }, { id: 't2', orgId: 'o', playerId: 'p', status: 'awaiting_report', workflowState: 'scheduled', schedule: { confirmedAt: 1, sessions: [{ id: 's', startsAt: 1, endsAt: 2 }] }, attendance: [], completion: null, rev: 4 }] };
   const up = runMigrations(old);
   ok(up.ran.includes('m230_005_trial_workflow') && old.trials[0].workflowState === 'legacy_accepted' && old.trials[0].schedule === null && Array.isArray(old.trials[0].attendance) && old.trials[0].completion === null && old.trials[0].rev === 1 && Array.isArray(old.trials[0].history) && old.trials[0].keys && old.trials[0].reminders, 'P7 a 2303 row gains neutral containers and legacy_accepted; status and report untouched');

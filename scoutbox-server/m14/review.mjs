@@ -64,6 +64,10 @@ export function registerVerificationReview(ctx) {
   // events honestly say `shared_admin_key` instead of inventing a person.
   // This limitation is documented in M14_VERIFICATION.md.
   const reviewerOf = (req) => {
+    // M23 P5.6C (G-C0): an AUTHENTICATED reviewer session, when presented
+    // beside the shared key, is the attribution — derived by the server from
+    // the session, never from a header a caller typed.
+    if (req?.reviewer?.id) return { id: req.reviewer.id, name: req.reviewer.name ?? req.reviewer.id, attribution: 'authenticated_reviewer' };
     const id = String(req?.headers?.['x-admin-reviewer-id'] ?? '').trim().slice(0, 60);
     const name = String(req?.headers?.['x-admin-reviewer-name'] ?? '').trim().slice(0, 80);
     return id

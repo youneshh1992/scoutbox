@@ -85,7 +85,8 @@ section('A — verification engine: honest states, separate facets, decay, no pr
 {
   ok(VERIFICATION_STATES.length === 6 && ['UNVERIFIED', 'PENDING', 'VERIFIED', 'STALE', 'INACTIVE', 'MANUAL_REVIEW_REQUIRED'].every((s) => VERIFICATION_STATES.includes(s)), 'A1 the six honest verification states, exactly');
   neg(!VERIFICATION_STATES.includes('APPROVED') && !VERIFICATION_STATES.includes('LICENSED') && !VERIFICATION_STATES.includes('TRUSTED'), 'A2 no state claims a licence, an approval or trust — a state describes provenance, never authority');
-  ok(FACETS.length === 3 && FACETS.includes('fifa_licence') && FACETS.includes('national_registration') && FACETS.includes('minors_authorisation'), 'A3 three facets, never one boolean');
+  // P5.6C added the fourth facet (domestic_authorisation, P5.6A DR-53); the invariant is "separate facets, never one boolean".
+  ok(FACETS.length === 4 && FACETS.includes('fifa_licence') && FACETS.includes('national_registration') && FACETS.includes('domestic_authorisation') && FACETS.includes('minors_authorisation'), 'A3 four separate facets, never one boolean');
   const f = newFacets();
   ok(f.fifa_licence.state === 'UNVERIFIED' && f.fifa_licence.reference === null && Object.keys(f.national_registration).length === 0 && Object.keys(f.minors_authorisation).length === 0, 'A4 a new profile is UNVERIFIED with nothing declared');
   ok(effectiveFacetState(null) === 'UNVERIFIED' && effectiveFacetState({}) === 'UNVERIFIED' && effectiveFacetState(undefined) === 'UNVERIFIED', 'A5 a missing facet reads UNVERIFIED, never anything better');
@@ -251,7 +252,8 @@ section('T1 — events, notification categories, rate policies and stores are de
   }
   for (const s of ['agentProfiles', 'agencyAffiliations', 'representationAgreements']) ok(guaranteeFor(s) === 'migration' && PRODUCTION_REQUIRED_STORES.includes(s), `T1 ${s} is migration-guaranteed and production-required`);
   const step = MIGRATIONS.find((m) => m.id === 'm240_001_agent_core_stores');
-  ok(step?.version === 2305 && SCHEMA_VERSION === 2305 && MIGRATIONS.filter((m) => m.version === 2305).length === 1, 'T1 exactly one step advances the schema to 2305');
+  // Pin updated in P5.6C: the Agent step is still the one 2305 step; the schema is now 2306 (Compliance stores).
+  ok(step?.version === 2305 && SCHEMA_VERSION === 2306 && MIGRATIONS.filter((m) => m.version === 2305).length === 1, 'T1 exactly one step advances the schema to 2305 (the current schema is 2306, P5.6C)');
   neg(guaranteeFor('agentAuth') !== 'migration' && guaranteeFor('agentSessions') !== 'migration' && guaranteeFor('agentUsers') !== 'migration' && guaranteeFor('offers') !== 'migration' && guaranteeFor('agentTransactions') !== 'migration', 'T1 no agent auth database, no offers and no transaction store is guaranteed (signings is the existing M12 store, which P5.6B never writes)');
 }
 
@@ -296,7 +298,7 @@ const collect = (label, r) => { if (r.status >= 400) ERROR_BODIES.push({ label, 
 section('E — platform gating: agent login, org listing, club user refused');
 {
   const h = await j('GET', '/healthz');
-  ok(h.body.schemaVersion === 2305, 'E1 the server reports schema 2305');
+  ok(h.body.schemaVersion === 2306, 'E1 the server reports schema 2306 (P5.6C; the P5.6B step is 2305)');
   const orgs = await j('GET', '/orgs?platform=agent');
   ok(orgs.status === 200 && orgs.body.length === 1 && orgs.body[0].id === 'org-northstar' && orgs.body[0].type === 'agency', 'E2 the agent platform lists agency organisations only');
   neg(!orgs.body.some((o) => o.type === 'club'), 'E3 no club appears on the agent login');
@@ -809,7 +811,7 @@ section('W — restart: everything survives the process dying');
   neg(expect(await j('POST', '/auth/org/login', { orgId: 'org-northstar', scoutName: 'Carl Temp', role: 'Assistant', platform: 'agent' }), 403, 'USER_REMOVED'), 'W7 the ended member is still out');
   neg((await j('GET', `/org/agent/clients/${DELETED_REL}`, undefined, ana2.token)).body.client.removed === true, 'W8 the tombstone is still a tombstone');
   const h = await j('GET', '/healthz');
-  ok(h.body.schemaVersion === 2305, 'W9 schema 2305 after restart; the 2305 step did not run twice');
+  ok(h.body.schemaVersion === 2306, 'W9 schema 2306 after restart; the 2305 step did not run twice');
   const db = openStore(DATA_DIR).load()?.db;
   ok(db.schema.migrations.filter((m) => m.id === 'm240_001_agent_core_stores').length === 1, 'W10 exactly one 2305 migration record');
 }

@@ -28,6 +28,7 @@
 
 import { planCatalogue, archetypeCatalogue } from '../catalogue.mjs';
 import { MIGRATION_GUARANTEED } from '../storeContract.mjs';
+import { SEEDED_POLICY_VERSIONS } from '../m25/policyVersions.mjs';
 
 // 23.0.0 — bumped because M23-D2 changes what a migrated database GUARANTEES:
 // seven more collections are present after an upgrade that were previously
@@ -59,7 +60,17 @@ import { MIGRATION_GUARANTEED } from '../storeContract.mjs';
 // organisation) and `representationAgreements` (the client-confirmed
 // relationship record). The P5.6A transaction, consent and policy stores are
 // deliberately NOT created here: they belong to P5.6C/D.
-export const SCHEMA_VERSION = 2305;
+//
+// 23.0.6 — M23 P5.6C adds FIVE stores for the Conflict & Compliance Engine,
+// each justified in M23_P56C_FINAL_REPORT.md: `tsReviewers` (per-reviewer
+// Trust & Safety identity — the G-C0 record), `jurisdictionPolicies` (the
+// versioned policy layer, seeded from code, published thereafter under dual
+// control), `regulatoryReviews` (attributed manual review items),
+// `regulatoryConsents` (the append-only consent ledger) and
+// `complianceContexts` (the minimal conflict-evaluation context — NOT a
+// Transaction Room). It also gives every agent profile a fourth facet
+// container, `domestic_authorisation`, empty by default.
+export const SCHEMA_VERSION = 2306;
 
 /**
  * Every step is idempotent: running it twice is the same as running it once.
@@ -420,6 +431,78 @@ export const MIGRATIONS = [
           legacy: { fromRepresentationId: r.id, regulatoryStatus: 'not_regulated_record', representativeName: r.representativeName ?? null },
           policyVersion: 1, keys: {}, createdAt: now, rev: 1, revAt: now, revBy: null,
           history: [{ id: id('aud'), at: now, action: 'representation_requested', by: { kind: 'system', userId: null, name: 'migration 2305' }, detail: { legacy: true, phase: status } }],
+        });
+      }
+    },
+  },
+  {
+    id: 'm250_001_compliance_stores',
+    version: 2306,
+    // M23 P5.6C — Conflict & Compliance Engine. Five containers plus three
+    // idempotent, non-destructive bootstraps:
+    //
+    //   1. The three policy versions the P5.6A regulatory snapshot encoded
+    //      (jp-fifa-2025-1, jp-eng-2026-27-1, jp-usa-2024-1) are seeded as
+    //      PUBLISHED rows attributed to this migration. Later versions are
+    //      published only through the attributed, dual-controlled route.
+    //   2. Every agent profile gains an empty `domestic_authorisation` facet
+    //      container (P5.6A DR-53: licence ≠ national registration ≠ domestic
+    //      authorisation). Empty is the truthful default; nothing is verified.
+    //   3. Facets already sitting in MANUAL_REVIEW_REQUIRED and relationships
+    //      already `disputed` get a PENDING review item, requested by this
+    //      migration, so the attributed review lane sees them. No reviewer
+    //      identity is invented; no historical record is rewritten.
+    //
+    //   `tsReviewers` starts EMPTY. Production reviewers come from the
+    //   operator bootstrap (TS_REVIEWER_BOOTSTRAP_*) or from an existing
+    //   administrator; the shared admin key can create none.
+    note: 'M23 P5.6C: compliance stores (tsReviewers, jurisdictionPolicies, regulatoryReviews, regulatoryConsents, complianceContexts); seeded policy versions; domestic_authorisation facet container; review items for pre-existing manual-review facets and disputes.',
+    up(db) {
+      db.tsReviewers ??= [];
+      db.jurisdictionPolicies ??= [];
+      db.regulatoryReviews ??= [];
+      db.regulatoryConsents ??= [];
+      db.complianceContexts ??= [];
+      const now = Date.now();
+      let seq = 0;
+      const id = (p) => `${p}-mig2306-${now.toString(36)}-${(seq += 1)}`;
+      const system = { kind: 'system', userId: null, name: 'migration 2306' };
+      for (const v of SEEDED_POLICY_VERSIONS) {
+        if (db.jurisdictionPolicies.some((p) => p && p.id === v.id)) continue;
+        db.jurisdictionPolicies.push({
+          ...structuredClone(v), publishedAt: now, proposedBy: null, approvedBy: null,
+          createdAt: now, rev: 1, revAt: now, revBy: null,
+          history: [{ id: id('aud'), at: now, action: 'policy_version_published', by: system, detail: { policyVersion: v.id, seeded: true } }],
+        });
+      }
+      for (const p of db.agentProfiles ?? []) {
+        if (!p) continue;
+        p.facets ??= {};
+        p.facets.domestic_authorisation ??= {};
+        const facets = [['fifa_licence', null, p.facets.fifa_licence]];
+        for (const f of ['national_registration', 'domestic_authorisation', 'minors_authorisation']) for (const [ma, rec] of Object.entries(p.facets[f] ?? {})) facets.push([f, ma, rec]);
+        for (const [facet, ma, rec] of facets) {
+          if (!rec || rec.state !== 'MANUAL_REVIEW_REQUIRED') continue;
+          if (db.regulatoryReviews.some((r) => r && r.kind === 'verification_facet' && r.subject?.profileId === p.id && r.subject?.facet === facet && (r.subject?.memberAssociation ?? null) === ma && (r.status === 'PENDING' || r.status === 'IN_REVIEW'))) continue;
+          db.regulatoryReviews.push({
+            id: id('rrv'), kind: 'verification_facet', status: 'PENDING', agencyOrgId: p.agencyOrgId ?? null, agentUserId: p.userId,
+            subject: { profileId: p.id, userId: p.userId, facet, memberAssociation: ma, referenceHash: rec.reference ? String(String(rec.reference).length) : null },
+            reasons: [{ code: 'NO_PROVIDER', ruleId: null, ruleStatus: null, policyVersion: null }], policyVersions: [], snapshot: null,
+            requestedAt: now, requestedBy: system, startedAt: null, startedBy: null, decidedAt: null, decision: null, supersedes: null, supersededBy: null,
+            keys: {}, rev: 1, revAt: now, revBy: null,
+            history: [{ id: id('aud'), at: now, action: 'regulatory_review_requested', by: system, detail: { kind: 'verification_facet', reasonCodes: ['NO_PROVIDER'], migrated: true } }],
+          });
+        }
+      }
+      for (const a of db.representationAgreements ?? []) {
+        if (!a || a.status !== 'disputed') continue;
+        if (db.regulatoryReviews.some((r) => r && r.kind === 'representation_dispute' && r.subject?.agreementId === a.id && (r.status === 'PENDING' || r.status === 'IN_REVIEW'))) continue;
+        db.regulatoryReviews.push({
+          id: id('rrv'), kind: 'representation_dispute', status: 'PENDING', agencyOrgId: a.agencyOrgId ?? null, agentUserId: a.agentUserId ?? null,
+          subject: { agreementId: a.id }, reasons: [{ code: 'CLIENT_DISPUTE', ruleId: null, ruleStatus: null, policyVersion: null }], policyVersions: [], snapshot: null,
+          requestedAt: now, requestedBy: system, startedAt: null, startedBy: null, decidedAt: null, decision: null, supersedes: null, supersededBy: null,
+          keys: {}, rev: 1, revAt: now, revBy: null,
+          history: [{ id: id('aud'), at: now, action: 'regulatory_review_requested', by: system, detail: { kind: 'representation_dispute', reasonCodes: ['CLIENT_DISPUTE'], migrated: true } }],
         });
       }
     },

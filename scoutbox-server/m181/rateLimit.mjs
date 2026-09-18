@@ -121,6 +121,12 @@ export const RATE_LIMIT_POLICY = {
   agent_profile_write: { max: 60, windowMs: 3_600_000, scope: 'actor', note: 'Agent profile edits and verification submissions.' },
   agent_affiliation_write: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Agency team and settings changes.' },
   agent_client_response: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'Relationship confirmations, declines, terminations and disputes by a player.' },
+  // M23 P5.6C Conflict & Compliance Engine.
+  compliance_context_write: { max: 60, windowMs: 3_600_000, scope: 'actor', note: 'Compliance context creation, party additions and representation declarations by a licensed agent.' },
+  compliance_consent_request: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'Consent requests sent to parties by a licensed agent.' },
+  compliance_consent_response: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'Consent grants, declines and revocations by a party.' },
+  ts_review_decision: { max: 120, windowMs: 3_600_000, scope: 'actor', note: 'Attributed Trust & Safety review decisions.' },
+  ts_policy_publish: { max: 10, windowMs: 86_400_000, scope: 'actor', note: 'Policy version proposals by a Trust & Safety administrator.' },
 
   // outbound to people
   evidence_request: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Evidence requests to players and guardians.' },

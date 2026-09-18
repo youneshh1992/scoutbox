@@ -144,7 +144,7 @@ section('1 — schema 2304: neutral containers, nothing renamed, nothing invente
 {
   ok(guaranteeFor('trials') === 'migration' && PRODUCTION_REQUIRED_STORES.includes('trials') && JOURNEY_REQUIRED_STORES.includes('trials'), 'trials is migration-guaranteed, production-required and journey-required (unchanged from P4A)');
   const step = MIGRATIONS.find((m) => m.id === 'm230_005_trial_workflow');
-  ok(step?.version === 2304 && SCHEMA_VERSION === 2305, 'm230_005_trial_workflow is version 2304; the current schema is 2305 (P5.6B Agent stores)');
+  ok(step?.version === 2304 && SCHEMA_VERSION === 2306, 'm230_005_trial_workflow is version 2304; the current schema is 2306 (P5.6B Agent stores at 2305, P5.6C Compliance stores at 2306)');
   const db = { players: [], orgs: [], guardians: [], users: [], sessions: [], ledger: [], notifications: [], trials: [legacyTrial(), soundTrial()] };
   runMigrations(db);
   db.schema.version = 2303; db.schema.migrations = db.schema.migrations.filter((m) => m.id !== 'm230_005_trial_workflow');

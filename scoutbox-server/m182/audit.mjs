@@ -23,6 +23,7 @@
  */
 
 import { agentAuditRows } from '../m24/audit.mjs';
+import { complianceAuditRows } from '../m25/audit.mjs';
 
 const PAGE_MAX = 50;
 const PAGE_DEFAULT = 25;
@@ -200,6 +201,8 @@ export function registerAudit(ctx) {
     // lifecycle for an agency organisation. Same rules: subject named only
     // where the org may see them; no reference numbers, no reason text.
     if (org.type === 'agency') rows.push(...agentAuditRows(db, org, { findPlayer, orgCanSee }));
+    // M23 P5.6C: the compliance domain — contexts, consents and reviews, content-free.
+    if (org.type === 'agency') rows.push(...complianceAuditRows(db, org));
     for (const l of db.ledger ?? []) {
       if (l.orgId !== org.id || !LEDGER_ACTIONS.has(l.type)) continue;
       rows.push({

@@ -36,8 +36,13 @@ export const VERIFICATION_STATES = Object.freeze([
   'MANUAL_REVIEW_REQUIRED',  // no authoritative source; attributed human review needed (G-C0)
 ]);
 
-/** The regulatory facets P5.6A keeps separate (never one boolean). */
-export const FACETS = Object.freeze(['fifa_licence', 'national_registration', 'minors_authorisation']);
+/**
+ * The regulatory facets P5.6A keeps separate (never one boolean). P5.6C adds
+ * `domestic_authorisation` (P5.6A DR-53: a FIFA licence, a national
+ * registration and a domestic activity authorisation — e.g. the U.S. Soccer
+ * background check + SafeSport — are three different facts with three clocks).
+ */
+export const FACETS = Object.freeze(['fifa_licence', 'national_registration', 'domestic_authorisation', 'minors_authorisation']);
 
 /** How long a VERIFIED facet stays current before it must be re-checked (P5.6A DR-6). */
 export const RECHECK_MS = 30 * 24 * 60 * 60 * 1000;
@@ -53,6 +58,7 @@ const emptyFacet = () => ({
 export const newFacets = () => ({
   fifa_licence: emptyFacet(),
   national_registration: {},   // keyed by member association, e.g. ENG
+  domestic_authorisation: {},  // keyed by member association (P5.6C), e.g. USA background check + SafeSport
   minors_authorisation: {},    // keyed by member association
 });
 
@@ -90,7 +96,7 @@ export function evaluateSubmission({ facet, reference, testProviderEnabled = fal
   return {
     state: 'MANUAL_REVIEW_REQUIRED', verifiedAt: null, recheckAt: null,
     provenance: { provider: 'none', kind: 'none', at: now },
-    note: `No ${facet === 'fifa_licence' ? 'FIFA' : 'national'} register integration exists in this build, and attributed Trust & Safety review of agent licences is not yet available (P5.6A gate G-C0). A submitted reference is a declaration, not a verification.`,
+    note: `No ${facet === 'fifa_licence' ? 'FIFA' : 'national'} register integration exists in this build. A submitted reference is a declaration, not a verification; it is queued for attributed Trust & Safety review (G-C0), and nothing is verified until a named reviewer decides.`,
   };
 }
 
@@ -156,6 +162,11 @@ export const PERMISSIONS = Object.freeze(Object.assign(Object.create(null), {
   'agency.settings.write':      ['agency_admin'],
   'agency.audit.read':          ['agency_admin'],
   'agency.compliance.read':     ['agency_admin', 'licensed_agent'],
+  // M23 P5.6C: the compliance workspace. Reading one's own compliance state is
+  // every member's; opening a context, declaring a representation and
+  // requesting consent are regulated acts of the licensed individual only.
+  'compliance.read':            TIERS,
+  'compliance.contexts.write':  ['licensed_agent'],
 }));
 
 export function can(tiers, capability) {
