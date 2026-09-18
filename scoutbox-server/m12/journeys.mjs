@@ -66,39 +66,10 @@ export function registerJourneys(ctx) {
     })));
   });
 
-  function boardFor(player) {
-    // Eligible discovery: the player sees only what they could actually apply
-    // to, with the reasons computed the same way the application gate uses.
-    const today = new Date().toISOString().slice(0, 10);
-    const rows = [];
-    for (const o of db.opportunities.filter(oppOpen)) {
-      const org = db.orgs.find((x) => x.id === o.orgId);
-      if (!org || org.suspended) continue;
-      if (!orgCanSee(org, player)) continue; // visibility is mutual: an org that can't see the player can't receive their application
-      const { eligible, reasons } = checkEligibility(o.eligibility, player, org);
-      if (!eligible) continue;
-      const existing = db.applications.find((a) => a.opportunityId === o.id && a.playerId === player.id && a.status !== 'withdrawn');
-      rows.push({
-        ...o, via: 'opportunity',
-        distance: distanceBand(org.location, player.location),
-        applied: existing ? { id: existing.id, status: existing.status } : null,
-      });
-    }
-    // Existing grassroots open days ride the same board — integrated, not
-    // duplicated: they keep their own registration flow and records.
-    for (const t of db.openTrials.filter((t) => t.date >= today)) {
-      const org = db.orgs.find((x) => x.id === t.orgId);
-      if (!org || org.suspended || !orgCanSee(org, player)) continue;
-      rows.push({
-        id: t.id, via: 'open_trial', type: 'open_day', orgId: t.orgId, orgName: org.name,
-        title: t.title, deadline: t.date, schedule: t.date, category: 'mixed',
-        distance: distanceBand(org.location, player.location),
-        applied: (t.registrations ?? []).some((r) => r.playerId === player.id) ? { status: 'registered' } : null,
-        note: 'Registered through the open-day flow.',
-      });
-    }
-    return rows.sort((a, b) => String(a.deadline).localeCompare(String(b.deadline)));
-  }
+  // M23 P5.6B: the board is a pure module-level function so the Agent
+  // workspace can project a confirmed client's board through exactly the
+  // same eligibility and mutual-visibility rules — one engine, not two.
+  const boardFor = (player) => opportunityBoardFor(db, player, { orgCanSee, checkEligibility, distanceBand });
 
   playerRouter.get('/opportunity-board', (req, res) => {
     res.json({ items: boardFor(req.player), minor: req.playerIsMinor, note: req.playerIsMinor ? 'Applications for under-18s are made by your parent/guardian.' : null });
@@ -818,4 +789,43 @@ export function registerJourneys(ctx) {
     persistNow();
     res.json({ check: { ...s.check, state: checkState(s.check) } });
   });
+}
+
+/**
+ * The player's opportunity board — what they could actually apply to, with
+ * eligibility computed the same way the application gate computes it.
+ * Pure over the db and the injected rules; shared by the player, guardian and
+ * (M23 P5.6B) Agent client-workspace readers.
+ */
+export function opportunityBoardFor(db, player, { orgCanSee, checkEligibility, distanceBand }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const open = (o) => o.status === 'published' && o.deadline >= today;
+  const rows = [];
+  for (const o of (db.opportunities ?? []).filter(open)) {
+    const org = db.orgs.find((x) => x.id === o.orgId);
+    if (!org || org.suspended) continue;
+    if (!orgCanSee(org, player)) continue; // visibility is mutual: an org that can't see the player can't receive their application
+    const { eligible } = checkEligibility(o.eligibility, player, org);
+    if (!eligible) continue;
+    const existing = (db.applications ?? []).find((a) => a.opportunityId === o.id && a.playerId === player.id && a.status !== 'withdrawn');
+    rows.push({
+      ...o, via: 'opportunity',
+      distance: distanceBand(org.location, player.location),
+      applied: existing ? { id: existing.id, status: existing.status } : null,
+    });
+  }
+  // Existing grassroots open days ride the same board — integrated, not
+  // duplicated: they keep their own registration flow and records.
+  for (const t of (db.openTrials ?? []).filter((t) => t.date >= today)) {
+    const org = db.orgs.find((x) => x.id === t.orgId);
+    if (!org || org.suspended || !orgCanSee(org, player)) continue;
+    rows.push({
+      id: t.id, via: 'open_trial', type: 'open_day', orgId: t.orgId, orgName: org.name,
+      title: t.title, deadline: t.date, schedule: t.date, category: 'mixed',
+      distance: distanceBand(org.location, player.location),
+      applied: (t.registrations ?? []).some((r) => r.playerId === player.id) ? { status: 'registered' } : null,
+      note: 'Registered through the open-day flow.',
+    });
+  }
+  return rows.sort((a, b) => String(a.deadline).localeCompare(String(b.deadline)));
 }

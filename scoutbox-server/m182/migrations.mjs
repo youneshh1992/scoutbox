@@ -51,7 +51,15 @@ import { MIGRATION_GUARANTEED } from '../storeContract.mjs';
 // every existing `db.trials` row (D-20): the row keeps its M12 meaning and
 // its report-obligation `status`; the new fields say "nothing recorded" —
 // never a fabricated schedule, attendance or completion.
-export const SCHEMA_VERSION = 2304;
+//
+// 23.0.5 — M23 P5.6B adds THREE stores for the ScoutBox Agent core app, the
+// minimum set the P5.6A store proposal justified for this phase:
+// `agentProfiles` (the licensed natural person's verification facets),
+// `agencyAffiliations` (time-aware membership and roles in an agency
+// organisation) and `representationAgreements` (the client-confirmed
+// relationship record). The P5.6A transaction, consent and policy stores are
+// deliberately NOT created here: they belong to P5.6C/D.
+export const SCHEMA_VERSION = 2305;
 
 /**
  * Every step is idempotent: running it twice is the same as running it once.
@@ -333,6 +341,86 @@ export const MIGRATIONS = [
         t.rev ??= 1;
         t.history ??= [];
         t.reminders ??= {};
+      }
+    },
+  },
+  {
+    id: 'm240_001_agent_core_stores',
+    version: 2305,
+    // M23 P5.6B — ScoutBox Agent core. Three containers of user data (empty is
+    // the truthful default) plus two idempotent, non-destructive bootstraps:
+    //
+    //   1. Every existing agency staff row (`db.users` whose organisation is
+    //      of type 'agency', not removed) gains an `agencyAffiliations` row so
+    //      the permission matrix has something to read. Nobody is made a
+    //      licensed agent by this step — a self-typed login role is not a
+    //      licence (P5.6A S9). A role matching the platform's lead heuristic
+    //      becomes `agency_admin`; everyone else becomes `assistant`; an
+    //      agency left with no admin gets its earliest member as admin, so a
+    //      restored snapshot can still be administered.
+    //   2. Every M13 F10 `db.representations` row is mirrored into
+    //      `representationAgreements` as a LEGACY, agency-level record with
+    //      `agentUserId: null` (P5.6A store proposal §3). A legacy row names
+    //      no licensed individual and, by construction of the access
+    //      predicate, authorises no regulated action. The source rows are
+    //      left in place: the F10 routes and the M16.2 relationship source
+    //      keep reading them until P5.6E retires that lane.
+    note: 'M23 P5.6B: Agent core stores (agentProfiles, agencyAffiliations, representationAgreements) with non-destructive bootstraps.',
+    up(db) {
+      db.agentProfiles ??= [];
+      db.agencyAffiliations ??= [];
+      db.representationAgreements ??= [];
+      const now = Date.now();
+      const isLead = (role) => /head|director|lead|manager|owner|chief/i.test(role ?? '');
+      let seq = 0;
+      const id = (p) => `${p}-mig2305-${now.toString(36)}-${(seq += 1)}`;
+      const agencies = (db.orgs ?? []).filter((o) => o && o.type === 'agency');
+      for (const org of agencies) {
+        const members = (db.users ?? []).filter((u) => u && u.orgId === org.id && !u.removedAt)
+          .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+        for (const u of members) {
+          if (db.agencyAffiliations.some((a) => a && a.agencyOrgId === org.id && a.userId === u.id)) continue;
+          const tiers = [isLead(u.role) ? 'agency_admin' : 'assistant'];
+          db.agencyAffiliations.push({
+            id: id('aff'), agencyOrgId: org.id, userId: u.id, tiers,
+            // Never in the future: a clock skew on the user row must not
+            // produce a membership that has not "started" yet.
+            startedAt: Math.min(typeof u.createdAt === 'number' ? u.createdAt : now, now), endedAt: null, endedReason: null,
+            createdAt: now, rev: 1, revAt: now, revBy: null,
+            history: [{ id: id('aud'), at: now, action: 'agency_affiliation_created', by: { kind: 'system', userId: null, name: 'migration 2305' }, detail: { tiers, legacy: true } }],
+          });
+        }
+        const hasAdmin = db.agencyAffiliations.some((a) => a && a.agencyOrgId === org.id && a.endedAt == null && (a.tiers ?? []).includes('agency_admin'));
+        if (!hasAdmin) {
+          const first = db.agencyAffiliations.filter((a) => a && a.agencyOrgId === org.id && a.endedAt == null)
+            .sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0))[0];
+          if (first && !(first.tiers ?? []).includes('agency_admin')) {
+            first.tiers = [...(first.tiers ?? []), 'agency_admin'];
+            first.history.push({ id: id('aud'), at: now, action: 'agency_affiliation_updated', by: { kind: 'system', userId: null, name: 'migration 2305' }, detail: { tiers: first.tiers, legacy: true } });
+          }
+        }
+      }
+      for (const r of db.representations ?? []) {
+        if (!r || !r.id) continue;
+        if (db.representationAgreements.some((a) => a?.legacy?.fromRepresentationId === r.id)) continue;
+        const status = r.status === 'active' && r.endAt && r.endAt < now ? 'expired'
+          : r.status === 'proposed' ? 'proposed'
+            : r.status === 'active' ? 'active'
+              : r.status === 'withdrawn' ? 'terminated_by_client'
+                : r.status === 'disputed' ? 'disputed' : 'terminated_by_client';
+        db.representationAgreements.push({
+          id: id('rep'), agentUserId: null, agencyOrgId: r.agencyOrgId ?? null,
+          clientKind: 'player', clientId: r.playerId, isRegulatoryMinor: false,
+          jurisdiction: null, scope: [r.scope === 'contracts_only' ? 'employment' : r.scope === 'commercial_only' ? 'commercial' : 'employment'],
+          exclusive: false, termMonths: null, startAt: r.startAt ?? null, endAt: r.endAt ?? null,
+          status, proposedAt: r.createdAt ?? null, confirmedAt: r.confirmedAt ?? null, confirmedBy: r.confirmedAt ? { kind: 'player', id: r.playerId } : null,
+          declinedAt: null, terminatedAt: r.withdrawnAt ?? null, terminatedBy: r.withdrawnAt ? 'client' : null, terminationReasonCode: null,
+          disputedAt: r.disputedAt ?? null, disputeReason: null,
+          shareWithAgencyStaff: false, documents: [],
+          legacy: { fromRepresentationId: r.id, regulatoryStatus: 'not_regulated_record', representativeName: r.representativeName ?? null },
+          policyVersion: 1, keys: {}, createdAt: now, rev: 1, revAt: now, revBy: null,
+          history: [{ id: id('aud'), at: now, action: 'representation_requested', by: { kind: 'system', userId: null, name: 'migration 2305' }, detail: { legacy: true, phase: status } }],
+        });
       }
     },
   },

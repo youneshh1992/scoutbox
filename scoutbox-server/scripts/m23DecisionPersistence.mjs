@@ -123,7 +123,8 @@ const lead = (s) => s.j('POST', '/auth/org/login', { orgId: 'org-x', scoutName: 
 // ======================================================= 1 — no migration
 section('1 — no P5 migration: one decision store, the draft on the case, nothing renamed');
 {
-  ok(SCHEMA_VERSION === 2304 && !MIGRATIONS.some((m) => /decision/i.test(m.id) && m.version > 2304), `the schema is still ${SCHEMA_VERSION}: P5 adds no migration step`);
+  // P5.6B moved the schema to 2305 for the Agent stores; the P5 truth — no decision migration — is unchanged.
+  ok(SCHEMA_VERSION === 2305 && !MIGRATIONS.some((m) => /decision/i.test(m.id) && m.version > 2304), `the schema is ${SCHEMA_VERSION}: P5 adds no migration step (2305 is the P5.6B Agent step)`);
   ok(guaranteeFor('roomDecisions') === 'migration' && PRODUCTION_REQUIRED_STORES.includes('roomDecisions') && JOURNEY_REQUIRED_STORES.includes('roomDecisions'), 'roomDecisions is migration-guaranteed, production-required and journey-required (M17, unchanged)');
   neg(guaranteeFor('recruitmentDecisions') !== 'migration' && guaranteeFor('decisionDrafts') !== 'migration' && guaranteeFor('recruitmentOffers') !== 'migration', 'no second decision store, no draft store, no offer store is guaranteed by the registry');
   const fresh = {};

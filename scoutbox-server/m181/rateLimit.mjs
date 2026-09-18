@@ -112,6 +112,16 @@ export const RATE_LIMIT_POLICY = {
   decision_draft: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Decision drafts opened or edited.' },
   decision_finalize: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Formal recruitment decisions finalized or superseded.' },
 
+  // M23 P5.6B ScoutBox Agent core. Relationship requests are solicitations of
+  // a person and are the abuse-sensitive one: per ACTOR (the licensed
+  // individual), per day, and separate from the deterministic per-player
+  // cooldown in m24. Lookups are bounded against enumeration.
+  agent_representation_request: { max: 40, windowMs: 86_400_000, scope: 'actor', note: 'Representation relationship requests that reach a player lookup (malformed input and the agent\'s own verification refusals do not count).' },
+  agent_player_lookup: { max: 120, windowMs: 3_600_000, scope: 'actor', note: 'Player lookups from the Agent workspace.' },
+  agent_profile_write: { max: 60, windowMs: 3_600_000, scope: 'actor', note: 'Agent profile edits and verification submissions.' },
+  agent_affiliation_write: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Agency team and settings changes.' },
+  agent_client_response: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'Relationship confirmations, declines, terminations and disputes by a player.' },
+
   // outbound to people
   evidence_request: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Evidence requests to players and guardians.' },
   org_invite: { max: 25, windowMs: 86_400_000, scope: 'org', note: 'Staff invitations.' },

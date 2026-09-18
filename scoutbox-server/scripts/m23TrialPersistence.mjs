@@ -144,14 +144,14 @@ section('1 — schema 2304: neutral containers, nothing renamed, nothing invente
 {
   ok(guaranteeFor('trials') === 'migration' && PRODUCTION_REQUIRED_STORES.includes('trials') && JOURNEY_REQUIRED_STORES.includes('trials'), 'trials is migration-guaranteed, production-required and journey-required (unchanged from P4A)');
   const step = MIGRATIONS.find((m) => m.id === 'm230_005_trial_workflow');
-  ok(step?.version === 2304 && SCHEMA_VERSION === 2304, 'm230_005_trial_workflow is version 2304, the current schema');
+  ok(step?.version === 2304 && SCHEMA_VERSION === 2305, 'm230_005_trial_workflow is version 2304; the current schema is 2305 (P5.6B Agent stores)');
   const db = { players: [], orgs: [], guardians: [], users: [], sessions: [], ledger: [], notifications: [], trials: [legacyTrial(), soundTrial()] };
   runMigrations(db);
   db.schema.version = 2303; db.schema.migrations = db.schema.migrations.filter((m) => m.id !== 'm230_005_trial_workflow');
   // Simulate a 2303 snapshot: strip the containers from the legacy row only (it never had them).
   const before = stableJson(db.trials[1]);
   const up = runMigrations(db);
-  ok(up.ran.join(',') === 'm230_005_trial_workflow' && up.to === 2304, 'a 2303 snapshot runs exactly the Trial step');
+  ok(up.ran[0] === 'm230_005_trial_workflow' && up.ran.every((id) => id === 'm230_005_trial_workflow' || id === 'm240_001_agent_core_stores') && up.to === SCHEMA_VERSION, 'a 2303 snapshot runs the Trial step first, then only the P5.6B Agent step');
   const l = db.trials[0];
   ok(l.workflowState === 'legacy_accepted' && l.caseId === null && l.schedule === null && Array.isArray(l.attendance) && l.attendance.length === 0 && l.completion === null && l.rev === 1 && Array.isArray(l.history) && l.history.length === 0 && stableJson(l.keys) === '{}' && stableJson(l.reminders) === '{}', 'the legacy row gains legacy_accepted and empty containers');
   neg(l.status === 'reported' && l.report.id === 'rep-1' && l.proposedDate === '2026-12-01' && l.notes === 'Bring boots' && l.day.checkins.length === 1 && l.day.emergency.name === 'Mum', 'and keeps status, report, date, notes and the P2 day record exactly — no attendance derived from the check-in, no completion invented');

@@ -132,6 +132,11 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   recruitmentOffers: { guarantee: 'optional', owner: 'core', reason: 'M23 P4 has not shipped. The journey reports offer.available=false rather than an empty list — we cannot answer that yet is a different statement from there are none' },
   reports: { guarantee: 'migration', owner: 'core', reason: 'report-user/scout/club submissions (D2)' },
   representations: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
+  // M23 P5.6B — ScoutBox Agent core. Guaranteed by migration 2305 so a
+  // restored older snapshot has them before any Agent route can run.
+  agentProfiles: { guarantee: 'migration', owner: 'm24', reason: 'P5.6B: the licensed natural person\'s agent profile and verification facets; personal, survives agency departure' },
+  agencyAffiliations: { guarantee: 'migration', owner: 'm24', reason: 'P5.6B: time-aware Agent ↔ Agency membership with roles; the permission matrix reads it on every request' },
+  representationAgreements: { guarantee: 'migration', owner: 'm24', reason: 'P5.6B: the client-confirmed relationship record — the only basis for an agent\'s private client access' },
   reputationSeed: { guarantee: 'migration', owner: 'core', reason: 'demo track records; EMPTY is the correct production value — fabricating them would be worse than the bug (D2)' },
   requests: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   reviewLater: { guarantee: 'module', owner: 'm13', reason: 'existed only because insightSweep() happens to run once synchronously at registration; a store whose existence depends on a sweep moves the day the sweep is made lazy' },

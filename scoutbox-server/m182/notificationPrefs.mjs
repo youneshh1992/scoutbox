@@ -50,6 +50,10 @@ export const CATEGORIES = Object.freeze({
   // together. Splitting it would have produced three switches that are almost
   // always set the same way, which is how a preferences screen stops being read.
   development_updates: { label: 'Development plans, goals and reviews', default: true, mandatory: false },
+  // M23 P5.6B: agent relationship requests and their outcomes. On by default
+  // because a request is something a person must answer; a player who mutes
+  // it is muting solicitations, which is their right.
+  representation: { label: 'Agent representation requests and changes', default: true, mandatory: false },
   security_account: { label: 'Security and account', default: true, mandatory: true },
 });
 export const CATEGORY_NAMES = Object.freeze(Object.keys(CATEGORIES));
@@ -107,6 +111,15 @@ export const TYPE_CATEGORY = Object.freeze({
   signing: 'activity',
   released: 'activity',
   representation: 'activity',
+  // M23 P5.6B Agent core
+  representation_request: 'representation',
+  representation_confirmed: 'representation',
+  representation_rejected: 'representation',
+  representation_terminated: 'representation',
+  representation_disputed: 'representation',
+  representation_expiring: 'representation',
+  agent_verification: 'security_account',
+  agency_membership: 'security_account',
   transition: 'security_account',
   // security and account — mandatory
   verification: 'security_account',

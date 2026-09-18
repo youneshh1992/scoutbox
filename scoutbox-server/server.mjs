@@ -25,6 +25,7 @@ import { registerMatching } from './m19/index.mjs';
 import { registerAnalytics } from './m20/index.mjs';
 import { registerDevelopment } from './m21/index.mjs';
 import { registerM23, migrateM23 } from './m23/index.mjs';
+import { registerAgent } from './m24/index.mjs';
 import { createEvidenceProvider } from './m23/evidence.mjs';
 import { COMBINE_PROTOCOLS } from './m16/combineShared.mjs';
 import { registerSourceChanges } from './m181/sourceChanges.mjs';
@@ -635,6 +636,7 @@ const NOTIFY_COALESCE_MS = 6 * 60 * 60 * 1000;
 // direction for the few notifications seeding may create at boot.
 let notificationAllows = () => true;
 let m182Ctx = null; // assigned when the M18.2 modules register, below
+let m24Ctx = null; // M23 P5.6B — assigned when the Agent module registers, below
 const notificationsSuppressed = { count: 0 };
 
 function notify(audience, type, text, refId = null) {
@@ -1512,6 +1514,8 @@ app.get('/orgs', (req, res) => {
   // only grassroots clubs, the main app never lists them.
   if (req.query.platform === 'grassroots') list = list.filter((o) => o.level === 'grassroots');
   else if (req.query.platform === 'main') list = list.filter((o) => o.level !== 'grassroots');
+  // M23 P5.6B: the Agent app lists agency organisations only.
+  else if (req.query.platform === 'agent') list = list.filter((o) => o.type === 'agency');
   res.json(list.map((o) => ({
     id: o.id, name: o.name, type: o.type, level: o.level ?? null, plan: o.plan, trustedPartner: o.trustedPartner,
     verified: o.verified, safeguardingCertified: safeguardingCertified(o),
@@ -1575,6 +1579,12 @@ app.post('/auth/org/login', (req, res) => {
   }
   if (org.level !== 'grassroots' && wantsGrassroots) {
     return res.status(403).json({ error: 'PLATFORM_MISMATCH', message: 'ScoutBox Grassroots is for federation-registered grassroots clubs only.' });
+  }
+  // M23 P5.6B: ScoutBox Agent is for agency organisations only. (An agency
+  // logging into the club app is unchanged in this phase — the legacy M13
+  // representation lane and its suites still live there until P5.6E.)
+  if (platform === 'agent' && org.type !== 'agency') {
+    return res.status(403).json({ error: 'PLATFORM_MISMATCH', message: 'ScoutBox Agent is for agency organisations only.' });
   }
   if (!scoutName || !scoutName.trim()) {
     // Accountability by user: no anonymous / shared workspace access.
@@ -3731,6 +3741,9 @@ function deletePlayerData(playerId) {
   for (const ot of db.openTrials ?? []) {
     for (const reg of ot.registrations ?? []) if (reg.playerId === playerId) reg.playerName = null;
   }
+  // M23 P5.6B: agent relationships become id-only tombstones (no name is
+  // stored on them; the dispute text and any player-authored history names go).
+  m24Ctx?.onPlayerDeleted?.(playerId, at);
   db.channels = db.channels.filter((c) => c.playerId !== playerId);
   db.notifications = db.notifications.filter((n) => !(n.audience.kind === 'player' && n.audience.id === playerId));
   db.pairingCodes = db.pairingCodes.filter((c) => c.playerId !== playerId);
@@ -4232,6 +4245,17 @@ const m23Ctx = registerM23({
   guardianManagedOnly,
 });
 
+// ------------------------------------------------ M23 P5.6B ScoutBox Agent core
+// The fifth application's server domain: agent profiles, agency affiliations
+// and client-confirmed representation relationships. It reads the canonical
+// player, org, block and opportunity records through their own gates and
+// writes nothing into them. No conflict adjudication, no transactions, no
+// fee enforcement and no Trust & Safety mutation live here (P5.6C/D, G-C0).
+m24Ctx = registerAgent({
+  ...m19Ctx,
+  isAdult,
+});
+
 // ------------------------------------------------- M18.1 operator surface
 // What this deployment can and cannot actually do. ScoutBox is careful to be
 // honest about missing capability inside the product; this is the same honesty
@@ -4305,6 +4329,10 @@ export const EMITTED_EVENTS = Object.freeze([
   // guardian id ever rides on one of these.
   'trial_invited', 'trial_accepted', 'trial_declined', 'trial_scheduled', 'trial_rescheduled',
   'trial_cancelled', 'trial_attendance_recorded', 'trial_completed', 'trial_evidence_linked',
+  // M23 P5.6B ScoutBox Agent core. All org_private to the agency, ids only;
+  // the client side reuses `notify`.
+  'agent_profile_created', 'agent_verification_state_changed', 'agency_affiliation_created', 'agency_affiliation_ended',
+  'representation_requested', 'representation_confirmed', 'representation_rejected', 'representation_terminated', 'representation_disputed',
 ]);
 {
   const problems = assertEventRegistry({ emitted: EMITTED_EVENTS });
@@ -4318,7 +4346,7 @@ export const EMITTED_EVENTS = Object.freeze([
 // public/club and the T&S console into public/admin, and this serves them
 // alongside the API. Local dev keeps using the Vite/Expo dev servers.
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
-for (const [route, dir] of [['/app', 'club'], ['/console', 'admin'], ['/grassroots', 'grassroots']]) {
+for (const [route, dir] of [['/app', 'club'], ['/console', 'admin'], ['/grassroots', 'grassroots'], ['/agent', 'agent']]) {
   const full = path.join(PUBLIC_DIR, dir);
   if (fs.existsSync(path.join(full, 'index.html'))) {
     app.use(route, express.static(full));

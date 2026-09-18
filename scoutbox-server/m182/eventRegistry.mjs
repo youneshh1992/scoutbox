@@ -359,6 +359,28 @@ export const EVENT_REGISTRY = {
   },
 };
 
+// ---- M23 P5.6B ScoutBox Agent core. All org_private to the AGENCY, ids
+// only. The player side hears through the existing `notify` stream (their
+// own preferences apply); no event here ever carries a licence reference, a
+// dispute reason or a client's name.
+for (const [name, payload] of [
+  ['agent_profile_created', ['orgId', 'userId']],
+  ['agent_verification_state_changed', ['orgId', 'userId', 'facet', 'state']],
+  ['agency_affiliation_created', ['orgId', 'userId']],
+  ['agency_affiliation_ended', ['orgId', 'userId']],
+  ['representation_requested', ['orgId', 'agreementId', 'agentUserId']],
+  ['representation_confirmed', ['orgId', 'agreementId', 'agentUserId']],
+  ['representation_rejected', ['orgId', 'agreementId', 'agentUserId']],
+  ['representation_terminated', ['orgId', 'agreementId', 'agentUserId']],
+  ['representation_disputed', ['orgId', 'agreementId', 'agentUserId']],
+]) {
+  EVENT_REGISTRY[name] = {
+    domain: 'agent', sourceSystem: 'representationAgreements', audience: 'org_private',
+    privacyClass: 'org_internal', payload, dedupeStrategy: 'none', replayPolicy: 'never',
+    notificationEligible: true, analyticsEligible: false,
+  };
+}
+
 export const EVENT_NAMES = Object.freeze(Object.keys(EVENT_REGISTRY));
 
 /** Audience for an event. Unknown names fail closed — the M18.1 rule, unchanged. */

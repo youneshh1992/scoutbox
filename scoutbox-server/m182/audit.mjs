@@ -22,6 +22,8 @@
  *      stable across reads (time, then id).
  */
 
+import { agentAuditRows } from '../m24/audit.mjs';
+
 const PAGE_MAX = 50;
 const PAGE_DEFAULT = 25;
 
@@ -194,6 +196,10 @@ export function registerAudit(ctx) {
         });
       }
     }
+    // M23 P5.6B: the Agent domain — profile, affiliation and relationship
+    // lifecycle for an agency organisation. Same rules: subject named only
+    // where the org may see them; no reference numbers, no reason text.
+    if (org.type === 'agency') rows.push(...agentAuditRows(db, org, { findPlayer, orgCanSee }));
     for (const l of db.ledger ?? []) {
       if (l.orgId !== org.id || !LEDGER_ACTIONS.has(l.type)) continue;
       rows.push({
