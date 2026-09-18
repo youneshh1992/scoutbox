@@ -403,6 +403,33 @@ for (const [name, payload] of [
     notificationEligible: true, analyticsEligible: false,
   };
 }
+// ---- M23 P5.6D Agent Transaction Workspace. org_private to the AGENCY that
+// holds the workspace, ids and state words only: never a party's name, never a
+// document's label, never a note, never a term, never a fee. A club party and
+// the individual hear through the `notify` stream, where their own preferences
+// apply and the text is written for them.
+//
+// The payload key is `txId`, not `transactionId`: short, and consistent with
+// the `ctxId` the P5.6C events use for the same reason (the M18.2 personal-field
+// sweep reads substrings, so a key is chosen to be obviously about an id).
+for (const [name, payload] of [
+  ['agent_transaction_created', ['orgId', 'txId']],
+  ['agent_transaction_party_changed', ['orgId', 'txId', 'partyRole']],
+  ['agent_transaction_compliance_updated', ['orgId', 'txId', 'outcome']],
+  ['agent_transaction_status_changed', ['orgId', 'txId', 'status']],
+  ['agent_transaction_document_added', ['orgId', 'txId', 'docId']],
+  ['agent_transaction_message_linked', ['orgId', 'txId']],
+  ['agent_transaction_held', ['orgId', 'txId', 'status']],
+  ['agent_transaction_cancelled', ['orgId', 'txId', 'status']],
+  ['agent_transaction_closed', ['orgId', 'txId', 'status']],
+]) {
+  EVENT_REGISTRY[name] = {
+    domain: 'transaction', sourceSystem: name === 'agent_transaction_document_added' ? 'transactionDocuments' : 'agentTransactions',
+    audience: 'org_private', privacyClass: 'org_internal', payload, dedupeStrategy: 'none', replayPolicy: 'never',
+    notificationEligible: true, analyticsEligible: false,
+  };
+}
+
 // A policy publication is a global, content-free fact: clients refetch the policy read.
 EVENT_REGISTRY.policy_version_published = ping('compliance', 'jurisdictionPolicies');
 

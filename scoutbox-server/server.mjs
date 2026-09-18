@@ -27,6 +27,7 @@ import { registerDevelopment } from './m21/index.mjs';
 import { registerM23, migrateM23 } from './m23/index.mjs';
 import { registerAgent } from './m24/index.mjs';
 import { registerCompliance } from './m25/index.mjs';
+import { registerTransactions } from './m26/index.mjs';
 import { createVerificationProvider } from './m25/provider.mjs';
 import { createEvidenceProvider } from './m23/evidence.mjs';
 import { COMBINE_PROTOCOLS } from './m16/combineShared.mjs';
@@ -3748,6 +3749,9 @@ function deletePlayerData(playerId) {
   m24Ctx?.onPlayerDeleted?.(playerId, at);
   // M23 P5.6C: compliance contexts and consents keep only the id.
   m25Ctx?.onPlayerDeleted?.(playerId, at);
+  // M23 P5.6D: a transaction keeps its ids, roles, states and times and loses
+  // the person; every representation naming the subject is withdrawn.
+  m26Ctx?.onPlayerDeleted?.(playerId, at);
   db.channels = db.channels.filter((c) => c.playerId !== playerId);
   db.notifications = db.notifications.filter((n) => !(n.audience.kind === 'player' && n.audience.id === playerId));
   db.pairingCodes = db.pairingCodes.filter((c) => c.playerId !== playerId);
@@ -3849,6 +3853,9 @@ app.use('/admin', (req, res, next) => {
 // a specific authenticated reviewer (never the shared key) before it runs;
 // the middleware is installed by registerCompliance() below.
 let m25Ctx = null;
+// M23 P5.6D — the Agent Transaction Workspace, declared here because the
+// account-deletion sweep above runs before its registration below.
+let m26Ctx = null;
 const tsRouter = express.Router();
 app.use('/ts', (req, res, next) => (m25Ctx ? m25Ctx.reviewerAuth(req, res, next) : res.status(503).json({ error: 'REVIEWER_LANE_NOT_READY' })), tsRouter);
 
@@ -4297,6 +4304,24 @@ m25Ctx = registerCompliance({
 // manual-review facets and disputes; the policy layer's verdict on an Approach).
 Object.assign(m24Ctx.hooks, m25Ctx.hooks);
 
+// ------------------------------------------- M23 P5.6D Agent Transaction Workspace
+// The canonical multi-party workspace: Player ↔ Agent ↔ Engaging Club ↔
+// Releasing Club. Operational infrastructure, not a legal actor. It owns the
+// transaction, its party model, its state machine, its document classification
+// and its audience-filtered timeline; it owns NO rule, NO policy and NO consent
+// row — the compliance verdict comes from P5.6C through one narrow seam and is
+// re-derived at every material mutation. No Offer, no signing, no negotiation.
+m26Ctx = registerTransactions({
+  ...m19Ctx,
+  isAdult, tsRouter,
+  agent: m24Ctx,
+  compliance: m25Ctx.transactionSeam,
+});
+// The transaction domain's rows join the agency audit feed beside the P5.6B and
+// P5.6C rows, so an agency has ONE audit rather than three.
+const m25AuditRows = m24Ctx.hooks.auditRows;
+m24Ctx.hooks.auditRows = (org) => [...(m25AuditRows?.(org) ?? []), ...m26Ctx.hooks.auditRows(org)].sort((a, b) => (b.at - a.at) || String(b.id).localeCompare(String(a.id)));
+
 // ------------------------------------------------- M18.1 operator surface
 // What this deployment can and cannot actually do. ScoutBox is careful to be
 // honest about missing capability inside the product; this is the same honesty
@@ -4379,6 +4404,12 @@ export const EMITTED_EVENTS = Object.freeze([
   'regulatory_review_requested', 'regulatory_review_started', 'regulatory_review_resolved', 'conflict_evaluated',
   'regulatory_consent_requested', 'regulatory_consent_granted', 'regulatory_consent_declined', 'regulatory_consent_revoked',
   'agent_authorisation_state_changed', 'policy_version_published',
+  // M23 P5.6D Agent Transaction Workspace. org_private to the agency that holds
+  // the workspace, ids and state words only; the club and the individual hear
+  // through `notify`, where their own preferences apply.
+  'agent_transaction_created', 'agent_transaction_party_changed', 'agent_transaction_compliance_updated',
+  'agent_transaction_status_changed', 'agent_transaction_document_added', 'agent_transaction_message_linked',
+  'agent_transaction_held', 'agent_transaction_cancelled', 'agent_transaction_closed',
 ]);
 {
   const problems = assertEventRegistry({ emitted: EMITTED_EVENTS });

@@ -58,6 +58,14 @@ export const CATEGORIES = Object.freeze({
   // is waiting on, a verification that went stale. Mandatory (P5.6A final
   // architecture §9): muting it would mute a regulatory obligation.
   compliance: { label: 'Regulatory review, consent and verification', default: true, mandatory: true },
+  // M23 P5.6D: transaction workspace activity — a party asked to confirm, a
+  // document shared, a status change. ONE category rather than three, for the
+  // same reason `development_updates` is one: three switches nobody sets
+  // differently is how a preferences screen stops being read. It is NOT
+  // mandatory, because operational workspace traffic is not a regulatory
+  // obligation — the compliance half of a transaction is routed to
+  // `compliance`, which is, and which a person cannot mute.
+  transaction_updates: { label: 'Transaction workspace activity', default: true, mandatory: false },
   security_account: { label: 'Security and account', default: true, mandatory: true },
 });
 export const CATEGORY_NAMES = Object.freeze(Object.keys(CATEGORIES));
@@ -132,6 +140,12 @@ export const TYPE_CATEGORY = Object.freeze({
   regulatory_consent_declined: 'compliance',
   regulatory_consent_revoked: 'compliance',
   agent_verification_stale: 'compliance',
+  // M23 P5.6D Agent Transaction Workspace. Workspace traffic and "we need you
+  // to do something" are operational; a compliance change is not, and goes to
+  // the mandatory category.
+  agent_transaction: 'transaction_updates',
+  agent_transaction_action: 'transaction_updates',
+  agent_transaction_compliance: 'compliance',
   transition: 'security_account',
   // security and account — mandatory
   verification: 'security_account',

@@ -167,6 +167,13 @@ export const PERMISSIONS = Object.freeze(Object.assign(Object.create(null), {
   // requesting consent are regulated acts of the licensed individual only.
   'compliance.read':            TIERS,
   'compliance.contexts.write':  ['licensed_agent'],
+  // M23 P5.6D: the transaction workspace. Reading the agency's transactions is
+  // every member's; opening one, changing its parties, binding a
+  // representation, recording terms and moving its status are regulated acts of
+  // the licensed individual only (mandate §62 "Do not permit generic agency
+  // staff", P5.6A store proposal §4 "Opened by the agent").
+  'transactions.read':          TIERS,
+  'transactions.write':         ['licensed_agent'],
 }));
 
 export function can(tiers, capability) {

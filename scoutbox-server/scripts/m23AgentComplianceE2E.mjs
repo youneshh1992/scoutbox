@@ -249,8 +249,15 @@ section('Z — error contract, permissions, registry, notifications, rate polici
   for (const [k, scope] of [['compliance_context_write', 'actor'], ['compliance_consent_request', 'actor'], ['compliance_consent_response', 'actor'], ['ts_review_decision', 'actor'], ['ts_policy_publish', 'actor']]) ok(RATE_LIMIT_POLICY[k]?.scope === scope && RATE_LIMIT_POLICY[k].max > 0, `Z8 rate policy ${k}`);
   for (const s of ['tsReviewers', 'jurisdictionPolicies', 'regulatoryReviews', 'regulatoryConsents', 'complianceContexts']) ok(guaranteeFor(s) === 'migration' && PRODUCTION_REQUIRED_STORES.includes(s), `AD1 ${s} is migration-guaranteed and production-required`);
   const step = MIGRATIONS.find((m) => m.id === 'm250_001_compliance_stores');
-  ok(step?.version === 2306 && SCHEMA_VERSION === 2306 && MIGRATIONS.filter((m) => m.version === 2306).length === 1, 'AD2 exactly one step advances the schema to 2306');
-  neg(guaranteeFor('agentTransactions') !== 'migration' && guaranteeFor('transactionRepresentations') !== 'migration' && guaranteeFor('offers') !== 'migration' && guaranteeFor('agencyInvoices') !== 'migration', 'AD3 no transaction, offer or invoice store was created — P5.6C owns evaluation, not the Transaction Room');
+  // P5.6C's own step is 2306 and is still the ONLY step at 2306. The current
+  // schema has moved past it (P5.6D is 2307), which is what a later milestone
+  // advancing the schema exactly once looks like from here.
+  ok(step?.version === 2306 && MIGRATIONS.filter((m) => m.version === 2306).length === 1 && SCHEMA_VERSION >= 2306, 'AD2 exactly one step advances the schema to 2306, and the current schema is at or past it');
+  // P5.6C created no transaction store. `agentTransactions` and
+  // `transactionRepresentations` exist from P5.6D onward — created by step
+  // m260_001, never by m250_001, which is the assertion that still matters.
+  neg(!/agentTransactions|transactionRepresentations|transactionDocuments|offers|signings|agencyInvoices/.test(String(step?.up ?? '')), 'AD3 the P5.6C migration step creates no transaction, offer, signing or invoice store — P5.6C owns evaluation, not the Transaction Room');
+  neg(guaranteeFor('offers') !== 'migration' && guaranteeFor('agencyInvoices') !== 'migration' && guaranteeFor('recruitmentOffers') !== 'migration', 'AD3b no offer or agency-invoice store is migration-guaranteed anywhere in the repository');
   ok(COMPLIANCE_AUDIT_ACTIONS.has('regulatory_review_resolved') && COMPLIANCE_AUDIT_ACTIONS.has('regulatory_consent_revoked') && !COMPLIANCE_AUDIT_ACTIONS.has('offer_made'), 'AE3 the audit projection lists review, consent and context actions and no offer action');
 }
 function TIERS_ALL() { return ['licensed_agent', 'agency_admin', 'analyst', 'assistant', 'finance']; }
@@ -291,7 +298,7 @@ const collect = (label, r) => { if (r.status >= 400) ERROR_BODIES.push({ label, 
 section('A — G-C0: reviewer identity is authenticated, derived by the server, and never the shared key');
 let PRIYA, MARCUS, LEA;
 {
-  ok((await j('GET', '/healthz')).body.schemaVersion === 2306, 'A0 schema 2306');
+  ok((await j('GET', '/healthz')).body.schemaVersion === SCHEMA_VERSION && SCHEMA_VERSION >= 2306, `A0 schema ${SCHEMA_VERSION} (P5.6C required at least 2306)`);
   neg(expect(collect('A1', await j('GET', '/ts/compliance/reviews', undefined, null, ADMIN)), 401, 'REVIEWER_AUTH_REQUIRED'), 'A1 the shared admin key alone gets no reviewer lane (#1)');
   neg(expect(collect('A2', await j('POST', '/ts/compliance/reviews/rrv-1/resolve', { outcome: 'APPROVED' }, null, ADMIN)), 401, 'REVIEWER_AUTH_REQUIRED'), 'A2 …and cannot resolve anything');
   PRIYA = (await reviewerLogin('tsr-dev-admin', 'dev-reviewer-admin')).body;

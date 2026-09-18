@@ -70,7 +70,17 @@ import { SEEDED_POLICY_VERSIONS } from '../m25/policyVersions.mjs';
 // `complianceContexts` (the minimal conflict-evaluation context — NOT a
 // Transaction Room). It also gives every agent profile a fourth facet
 // container, `domestic_authorisation`, empty by default.
-export const SCHEMA_VERSION = 2306;
+//
+// 23.0.7 — M23 P5.6D adds THREE stores for the Agent Transaction Workspace:
+// `agentTransactions` (the frozen P5.6A §4 multi-party workspace entity),
+// `transactionRepresentations` (the frozen P5.6A §5 (agent, party role,
+// transaction) binding) and `transactionDocuments` (the document
+// classification and visibility layer, which references the canonical evidence
+// vault and stores no bytes of its own). No Offer store, no signing writer and
+// no `agencyInvoices`: the first two are out of scope by mandate, and the third
+// was named for P5.6D by the store proposal but is deferred with its reason
+// recorded, because no fee workflow exists for it to serve.
+export const SCHEMA_VERSION = 2307;
 
 /**
  * Every step is idempotent: running it twice is the same as running it once.
@@ -505,6 +515,38 @@ export const MIGRATIONS = [
           history: [{ id: id('aud'), at: now, action: 'regulatory_review_requested', by: system, detail: { kind: 'representation_dispute', reasonCodes: ['CLIENT_DISPUTE'], migrated: true } }],
         });
       }
+    },
+  },
+  {
+    id: 'm260_001_transaction_stores',
+    version: 2307,
+    // M23 P5.6D — Agent Transaction Workspace. THREE containers and nothing
+    // else. There is no data to backfill and none is invented: a transaction
+    // is a new concept, no earlier record is one, and turning an existing
+    // `recruitmentCases` row or `complianceContexts` row into a transaction
+    // would be exactly the conflation P5.6D §3 forbids.
+    //
+    //   `agentTransactions`         the frozen P5.6A §4 entity: the multi-party
+    //                              workspace, its parties, its status ladder,
+    //                              its compliance snapshot, its scoped notes,
+    //                              its linked threads and its append-only
+    //                              history.
+    //   `transactionRepresentations` the frozen P5.6A §5 store, separate from
+    //                              the transaction on purpose: the conflict
+    //                              engine's unit of evaluation is the (agent,
+    //                              party role, transaction) triple, and a triple
+    //                              with its own lifecycle, rev and review link
+    //                              is a record, not a field.
+    //   `transactionDocuments`      the classification layer: documentType,
+    //                              owner, visibility class, version chain,
+    //                              expiry and a REFERENCE into the canonical
+    //                              evidence vault. It stores no bytes; ScoutBox
+    //                              has one upload path and this is not a second.
+    note: 'M23 P5.6D: transaction stores (agentTransactions, transactionRepresentations, transactionDocuments). Three empty containers; nothing is backfilled and no existing record is reinterpreted as a transaction.',
+    up(db) {
+      db.agentTransactions ??= [];
+      db.transactionRepresentations ??= [];
+      db.transactionDocuments ??= [];
     },
   },
 ];

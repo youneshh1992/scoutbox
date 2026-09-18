@@ -127,6 +127,11 @@ export const RATE_LIMIT_POLICY = {
   compliance_consent_response: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'Consent grants, declines and revocations by a party.' },
   ts_review_decision: { max: 120, windowMs: 3_600_000, scope: 'actor', note: 'Attributed Trust & Safety review decisions.' },
   ts_policy_publish: { max: 10, windowMs: 86_400_000, scope: 'actor', note: 'Policy version proposals by a Trust & Safety administrator.' },
+  // M23 P5.6D Agent Transaction Workspace.
+  transaction_write: { max: 60, windowMs: 3_600_000, scope: 'actor', note: 'Transaction creation, party changes, representation bindings, terms and re-evaluations by a licensed agent.' },
+  transaction_status_write: { max: 60, windowMs: 3_600_000, scope: 'actor', note: 'Transaction status transitions and party confirmations.' },
+  transaction_document_write: { max: 120, windowMs: 3_600_000, scope: 'actor', note: 'Transaction document metadata by any party to a transaction.' },
+  transaction_note_write: { max: 120, windowMs: 3_600_000, scope: 'actor', note: 'Scoped transaction notes by any party to a transaction.' },
 
   // outbound to people
   evidence_request: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Evidence requests to players and guardians.' },

@@ -141,25 +141,28 @@ function snapshot2305() {
 }
 
 // ======================================================= 1 — the step
-section('1 — schema 2306: one step, five stores, three seeded policies, idempotent, production-required');
+section('1 — the P5.6C step: one step at 2306, five stores, three seeded policies, idempotent, production-required');
 {
   const step = MIGRATIONS.find((m) => m.id === STEP);
-  ok(step?.version === 2306 && SCHEMA_VERSION === 2306, `${STEP} is version 2306; the current schema is 2306`);
-  ok(MIGRATIONS.filter((m) => m.version === 2306).length === 1 && MIGRATIONS.filter((m) => m.version > 2305).length === 1, 'exactly one step at 2306 and none other above 2305 — the migration was advanced exactly once');
-  neg(!MIGRATIONS.some((m) => m.version > 2306), 'and nothing above 2306');
+  ok(step?.version === 2306 && SCHEMA_VERSION >= 2306, `${STEP} is version 2306; the current schema is ${SCHEMA_VERSION}`);
+  ok(MIGRATIONS.filter((m) => m.version === 2306).length === 1, 'exactly one step at 2306 — P5.6C advanced the schema exactly once');
+  // The rule is one step per version, not "nothing above 2306": a later
+  // milestone advancing the schema once is exactly what this asserts still holds.
+  const versionsAbove = MIGRATIONS.filter((m) => m.version > 2305).map((m) => m.version);
+  neg(new Set(versionsAbove).size === versionsAbove.length, 'every schema version above 2305 is reached by exactly one step — no version is advanced twice');
   const fresh = {};
   const up = runMigrations(fresh);
-  ok(up.to === 2306 && STORES.every((s) => Array.isArray(fresh[s])), 'a clean database gets the five stores');
+  ok(up.to === SCHEMA_VERSION && STORES.every((s) => Array.isArray(fresh[s])), 'a clean database gets the five stores');
   ok(fresh.jurisdictionPolicies.length === SEEDED_POLICY_VERSIONS.length && fresh.jurisdictionPolicies.map((p) => p.id).sort().join() === SEEDED_POLICY_VERSIONS.map((p) => p.id).sort().join(), `the ${SEEDED_POLICY_VERSIONS.length} P5.6A policy versions are seeded (FIFA baseline, England 2026/27, USA)`);
   ok(fresh.jurisdictionPolicies.every((p) => p.status === 'published' && p.proposedBy === null && p.approvedBy === null && p.history[0].by.name === 'migration 2306' && p.history[0].detail.seeded === true), 'each seeded version is published, attributed to the migration, with no reviewer invented');
   neg(fresh.tsReviewers.length === 0 && fresh.regulatoryReviews.length === 0 && fresh.regulatoryConsents.length === 0 && fresh.complianceContexts.length === 0, 'reviewers, reviews, consents and contexts start EMPTY — nobody is a reviewer by default');
-  neg(fresh.transactionRooms === undefined && fresh.offers === undefined && fresh.negotiations === undefined, 'no Transaction Room, offer or negotiation store was invented (out of scope)');
+  neg(fresh.offers === undefined && fresh.negotiations === undefined && fresh.signings !== undefined && !String(step.up).includes('agentTransactions'), 'the P5.6C step invented no offer or negotiation store and created no transaction store of its own (out of scope for P5.6C)');
   const { schema: _s1, ...storesBefore } = fresh;
   const idsBefore = fresh.schema.migrations.map((m) => m.id).join();
   const before = stableJson(storesBefore);
   const again = runMigrations(fresh);
   const { schema: _s2, ...storesAfter } = fresh;
-  ok(again.ran.length === 0 && stableJson(storesAfter) === before && fresh.schema.migrations.map((m) => m.id).join() === idsBefore && fresh.schema.version === 2306, 'running again changes no store and adds no migration record');
+  ok(again.ran.length === 0 && stableJson(storesAfter) === before && fresh.schema.migrations.map((m) => m.id).join() === idsBefore && fresh.schema.version === SCHEMA_VERSION, 'running again changes no store and adds no migration record');
   for (const s of STORES) ok(guaranteeFor(s) === 'migration' && PRODUCTION_REQUIRED_STORES.includes(s), `${s} is migration-guaranteed and production-required`);
 }
 
@@ -173,7 +176,7 @@ section('2 — upgrade from 2305: seeded policies, domestic container, migrated 
   const agreementsBefore = stableJson(db.representationAgreements);
   const usersBefore = stableJson(db.users);
   const up = runMigrations(db);
-  ok(up.ran.join(',') === STEP && up.to === 2306, 'a 2305 snapshot runs exactly the one P5.6C step');
+  ok(up.ran[0] === STEP && up.to === SCHEMA_VERSION, 'a 2305 snapshot runs the P5.6C step first, then any later milestone\'s step, and lands on the current schema');
   ok(db.jurisdictionPolicies.length === SEEDED_POLICY_VERSIONS.length && db.jurisdictionPolicies.every((p) => p.status === 'published'), 'the policy versions are seeded as published rows');
   ok(db.agentProfiles.every((p) => p.facets.domestic_authorisation && Object.keys(p.facets.domestic_authorisation).length === 0), 'every profile gains an EMPTY domestic_authorisation container — nothing is verified by a migration');
   neg(stableJson(db.agentProfiles.map(stripDomestic)) === profilesBefore, 'apart from that container no byte of a profile changed (states, references, provenance, revs)');
@@ -209,7 +212,7 @@ section('3 — a real boot over the upgraded snapshot');
   ok(s.up, 'the server boots over a 2305 snapshot');
   if (s.up) {
     const h = await s.j('GET', '/healthz');
-    ok(h.body.schemaVersion === 2306 && new RegExp(STEP).test(s.log()), 'and reports 2306 having applied the Compliance step at boot');
+    ok(h.body.schemaVersion === SCHEMA_VERSION && new RegExp(STEP).test(s.log()), `and reports ${SCHEMA_VERSION} having applied the Compliance step at boot`);
     neg(expect(await s.j('GET', '/ts/compliance/reviews', undefined, null, ADMIN), 401, 'REVIEWER_AUTH_REQUIRED'), 'the shared admin key has no reviewer lane over a migrated database either (G-C0)');
     const priya = (await s.j('POST', '/auth/reviewer/login', { reviewerId: 'tsr-dev-admin', secret: 'dev-reviewer-admin' })).body;
     ok(priya?.token, 'a dev-seeded reviewer logs in (dev logins only; production uses TS_REVIEWER_BOOTSTRAP_*)');
@@ -278,7 +281,7 @@ section('4 — clean boot → context → review → consent → revocation → 
   };
   ok(beforeStop.ctx.context.clearance.outcome === PERMITTED_WITH_CONSENT && beforeStop.ctx.context.clearance.consentsOutstanding.some((x) => x.partyRole === 'individual' && x.reasonCode === 'CONSENT_REVOKED'), 'before the stop: consent outstanding again, named as revoked');
   const snap = await s.stop();
-  ok(snap && snap.schema.version === 2306 && snap.complianceContexts.length === 1 && snap.regulatoryReviews.length === 1 && snap.tsReviewers.length === 3, 'the snapshot holds one context, one review, the three dev reviewers at 2306');
+  ok(snap && snap.schema.version === SCHEMA_VERSION && snap.complianceContexts.length === 1 && snap.regulatoryReviews.length === 1 && snap.tsReviewers.length === 3, 'the snapshot holds one context, one review, the three dev reviewers at 2306');
   const ctxRow = snap.complianceContexts[0];
   if (!(ctxRow.keys?.create?.key === 'rt-ctx' && ctxRow.representations.length === 2 && ctxRow.evaluations?.length >= 4 && ctxRow.rev >= 4)) console.error('   ctx row', JSON.stringify({ keys: ctxRow.keys, reps: ctxRow.representations.map((r) => [r.partyRole, r.status, r.keys]), evaluations: ctxRow.evaluations?.length, rev: ctxRow.rev }));
   ok(ctxRow.keys.create.key === 'rt-ctx' && ctxRow.representations.length === 2 && ctxRow.representations[0].keys.declare.key === 'rt-rep-1' && ctxRow.representations[1].keys.declare.key === 'rt-rep-2' && ctxRow.evaluations.length >= 4 && ctxRow.rev >= 4, 'keys, both representations, the evaluation history and the rev are on disk');
@@ -293,7 +296,7 @@ section('4 — clean boot → context → review → consent → revocation → 
   ok(snap.sessions.some((x) => x.kind === 'ts_reviewer' && x.refId === 'tsr-dev-reviewer'), 'the reviewer session is on disk');
   neg(!('transactionRoomId' in ctxRow) && !('offer' in ctxRow) && !('fee' in ctxRow), 'the context row carries no room, offer or fee field');
   s = await bootOn(dir, port + 1);
-  ok(s.up && (await s.j('GET', '/healthz')).body.schemaVersion === 2306, 'reboot at 2306');
+  ok(s.up && (await s.j('GET', '/healthz')).body.schemaVersion === SCHEMA_VERSION, `reboot at ${SCHEMA_VERSION}`);
   neg(!new RegExp(STEP).test(s.log()), 'the 2306 step did NOT run again');
   const ana2 = (await s.j('POST', '/auth/org/login', { orgId: 'org-northstar', scoutName: 'Ana Costa', role: 'Agent', platform: 'agent' })).body;
   const kola2 = (await s.j('POST', '/auth/player/login', { playerId: 'pl-adeyemi' })).body;

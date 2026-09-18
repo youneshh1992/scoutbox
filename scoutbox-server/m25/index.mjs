@@ -675,6 +675,18 @@ export function registerCompliance(rawCtx) {
   };
   orgRouter.post('/agent/compliance/contexts/:id/consents/request', (req, res) => {
     const c = ownContext(req, res, req.params.id, { write: true }); if (!c) return;
+    requestDualRepresentationConsent(req, res, c);
+  });
+  /**
+   * Request a party's prior written consent to multiple representation.
+   *
+   * Extracted from the route body so the P5.6D transaction workspace requests a
+   * consent through EXACTLY this code (its own route resolves the transaction
+   * and hands over the linked context). A second implementation would be a
+   * second set of rules about when a consent may exist, which is the one thing
+   * a consent ledger must not have.
+   */
+  function requestDualRepresentationConsent(req, res, c) {
     if (c.status !== 'open') return sendComplianceError(res, { error: 'CONTEXT_CLOSED' }, 'consents');
     const b = req.body ?? {};
     const key = clientKeyOr400(req, res); if (key === undefined) return;
@@ -713,7 +725,7 @@ export function registerCompliance(rawCtx) {
     else for (const u of (db.verAdmins ?? []).filter((a) => a.orgId === party.subjectId && a.status === 'active')) notify({ kind: 'org_user', id: u.userId }, 'regulatory_consent_requested', `${agentName} (${req.org.name}) asks your club's written consent to act for more than one party in a ${c.type.replace(/_/g, ' ')}. Only a recorded signatory may answer.`, k.id);
     persistNow();
     res.status(201).json({ consent: consentForAgent(k) });
-  });
+  }
 
   /** One consent answer path for both lanes. `who` resolves the acting party and its authority. */
   function consentAnswer(req, res, { action, who, by, rateKey }) {
@@ -979,9 +991,79 @@ export function registerCompliance(rawCtx) {
     return createReview({ kind: 'conflict_evaluation', agencyOrgId: req.org.id, agentUserId: req.orgUser.id, subject: { approach: true, playerId, jurisdiction }, reasons: decision.reasons.filter((r) => r.code !== 'FACET_VERIFIED'), policyVersions: decision.policyVersions, snapshot: { outcome: 'MANUAL_REGULATORY_REVIEW_REQUIRED', reasons: decision.reasons, policyVersions: decision.policyVersions, evaluatedAt: now() }, requestedBy: byOrg(req) });
   }
 
+  // ============================================================ P5.6D seam
+  /**
+   * What the transaction workspace (m26) is allowed to do with the compliance
+   * layer, and nothing more.
+   *
+   * The seam exists because a transaction must not own a second conflict
+   * engine, a second consent ledger or a second policy resolver. A transaction
+   * OWNS one `complianceContexts` row — the evaluation record P5.6C already
+   * knows how to evaluate, flag on policy publication, tombstone on account
+   * deletion and attach reviews to — and reads its verdict. The transaction is
+   * the multi-party workspace; the context is the evaluation artifact. Neither
+   * replaces the other and no fact lives in both as truth.
+   *
+   * The context stays PERSONAL to the agent who opened it: a club party never
+   * reads it, because the frozen privacy matrix gives a club the outcome and
+   * its reason codes (row 14), never the evaluation's internals. The
+   * transaction's own projection is what a club sees.
+   */
+  const transactionSeam = {
+    /** Open the evaluation context a transaction owns. `transactionId` is recorded for provenance in both directions. */
+    openContext({ agencyOrgId, agentUserId, type, jurisdictions, transactionId, by }) {
+      const c = {
+        id: nextId('ctx'), agencyOrgId, agentUserId, type, jurisdictions, parties: [], representations: [],
+        otherServices: [], interests: [], resolvedFacts: [], evaluations: [], reEvaluationPending: false, status: 'open',
+        origin: 'transaction', transactionId,
+        openedAt: now(), closedAt: null, keys: {}, rev: 1, revAt: now(), revBy: null, history: [],
+      };
+      hist(c, 'compliance_context_opened', by, { type, policyVersions: policySetFor(jurisdictions).policies.map((x) => x.id) });
+      db.complianceContexts.push(c);
+      return c;
+    },
+    contextById,
+    /**
+     * Project the transaction's parties and representation bindings into the
+     * context the engine reads. The transaction's own stores remain the truth;
+     * this is the evaluation input, rebuilt from them every time, so a stale
+     * mirror cannot exist.
+     */
+    project(c, { parties, representations }) {
+      c.parties = parties.map((p) => ({ id: p.id, partyRole: p.partyRole, subjectKind: p.subjectKind, subjectId: p.subjectId, addedAt: p.addedAt, removed: !!p.removed, ...(p.removedAt ? { removedAt: p.removedAt } : {}) }));
+      c.representations = representations.map((r) => ({ id: r.id, agentUserId: r.agentUserId, partyRole: r.partyRole, agreementId: r.agreementId ?? null, status: r.status, declaredOnly: !!r.declaredOnly, reviewId: r.reviewId ?? null, firstActAt: r.firstActAt ?? null }));
+    },
+    evaluate(c, by, opts = {}) { return evaluateAndRecord(c, by, opts); },
+    lastEvaluation,
+    consentsFor: (ctxId) => db.regulatoryConsents.filter((k) => k && k.contextId === ctxId && k.kind !== 'revocation').map((k) => ({ ...k, status: consentStatusOf(k), revokedAt: revokedAtOf(k) })),
+    closeContext(c, by) {
+      if (!c || c.status === 'closed') return;
+      c.status = 'closed'; c.closedAt = now();
+      hist(c, 'compliance_context_closed', by);
+      for (const r of db.regulatoryReviews) if (r && r.subject?.contextId === c.id && (r.status === 'PENDING' || r.status === 'IN_REVIEW')) { r.status = 'CANCELLED'; r.decidedAt = now(); hist(r, 'regulatory_review_cancelled', by, { reasonCode: 'context_closed' }); }
+    },
+    /** The facet gate as DATA: the first refusal payload, or null. The caller decides how to answer. */
+    facetGateProblem(agentUserId, mas) {
+      const p = profileOf(agentUserId);
+      if (!p) return { error: 'AGENT_VERIFICATION_REQUIRED', message: 'Create your agent profile first.' };
+      const set = policySetFor(mas);
+      const d = evaluatePolicy({ action: 'declare_representation', memberAssociations: mas, facets: facetStatesOf(p), policySet: set.policies, missingPolicies: set.missing, now: now() });
+      if (d.facetGaps.length) { const g = d.facetGaps[0]; return { error: g.code, facet: g.facet, memberAssociation: g.memberAssociation, state: g.state, gate: 'FACET_NOT_VERIFIED' }; }
+      if (d.requiresManualReview && d.reasons.some((r) => r.code === 'POLICY_NOT_ENCODED')) return { error: 'JURISDICTION_UNSUPPORTED', reasons: d.reasons.filter((r) => r.code === 'POLICY_NOT_ENCODED'), policyVersions: d.policyVersions, gate: 'JURISDICTION_UNSUPPORTED' };
+      return null;
+    },
+    /** The agent's facet states, for the party-revision hash (a licence change must make a snapshot stale). */
+    facetStatesFor: (agentUserId) => { const p = profileOf(agentUserId); return p ? facetStatesOf(p) : null; },
+    representationScopeProblem,
+    requestConsent: requestDualRepresentationConsent,
+    reviewsForContext: (ctxId) => db.regulatoryReviews.filter((r) => r && r.subject?.contextId === ctxId).map((r) => ({ id: r.id, kind: r.kind, status: r.status, requestedAt: r.requestedAt, decidedAt: r.decidedAt ?? null, outcome: r.decision?.outcome ?? null })),
+    createReview,
+    byOrg, bySystem,
+  };
+
   return {
     reviewerAuth, provider, onPlayerDeleted, hooks: { facetNeedsReview, representationDisputed, authorizeApproach, createApproachReview, auditRows: (org) => complianceAuditRows(db, org) },
     complianceAuditRows: (org) => complianceAuditRows(db, org),
-    facetStatesOf, policySetFor,
+    facetStatesOf, policySetFor, transactionSeam,
   };
 }

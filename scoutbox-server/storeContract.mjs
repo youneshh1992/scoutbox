@@ -143,6 +143,10 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   regulatoryReviews: { guarantee: 'migration', owner: 'm25', reason: 'P5.6C: attributed manual regulatory review items; every decision names its reviewer' },
   regulatoryConsents: { guarantee: 'migration', owner: 'm25', reason: 'P5.6C: the append-only, party-specific consent ledger; a revocation is a new row' },
   complianceContexts: { guarantee: 'migration', owner: 'm25', reason: 'P5.6C: the minimal conflict-evaluation context with its evaluation snapshots; not a Transaction Room' },
+  // M23 P5.6D — Agent Transaction Workspace. Guaranteed by migration 2307.
+  agentTransactions: { guarantee: 'migration', owner: 'm26', reason: 'P5.6D: the frozen P5.6A §4 multi-party transaction workspace — parties, status ladder, compliance snapshot, scoped notes and append-only history; never a recruitment case, never an offer, never a signing' },
+  transactionRepresentations: { guarantee: 'migration', owner: 'm26', reason: 'P5.6D: the frozen P5.6A §5 (agent, party role, transaction) binding with its own lifecycle, rev and review link — the conflict engine\'s unit of evaluation, kept out of the transaction row on purpose' },
+  transactionDocuments: { guarantee: 'migration', owner: 'm26', reason: 'P5.6D: document classification and visibility — type, owner, visibility class, version chain, expiry and a reference into the canonical evidence vault; stores no bytes, so it is not a second upload path' },
   reputationSeed: { guarantee: 'migration', owner: 'core', reason: 'demo track records; EMPTY is the correct production value — fabricating them would be worse than the bug (D2)' },
   requests: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   reviewLater: { guarantee: 'module', owner: 'm13', reason: 'existed only because insightSweep() happens to run once synchronously at registration; a store whose existence depends on a sweep moves the day the sweep is made lazy' },
