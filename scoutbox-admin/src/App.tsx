@@ -11,6 +11,7 @@ import { M14Panel, M14_TABS, type M14Tab } from './m14tabs';
 import { M15Panel, M15_TABS, type M15Tab } from './m15tabs';
 import { M16Panel, M16_TABS, type M16Tab } from './m16tabs';
 import { M162Panel, M162_TABS, type M162Tab } from './m162tabs';
+import { M25Panel, M25_TABS, type M25Tab } from './m25tabs';
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000';
 const DEMO = import.meta.env.VITE_DEMO === '1';
@@ -92,7 +93,7 @@ async function call<T>(key: string, path: string, init?: RequestInit): Promise<T
   return body as T;
 }
 
-type Tab = 'overview' | 'reports' | 'clubs' | 'guardians' | 'blocks' | 'moderation' | 'threads' | 'outbox' | 'billing' | M12Tab | M13Tab | M14Tab | M15Tab | M16Tab | M162Tab;
+type Tab = 'overview' | 'reports' | 'clubs' | 'guardians' | 'blocks' | 'moderation' | 'threads' | 'outbox' | 'billing' | M12Tab | M13Tab | M14Tab | M15Tab | M16Tab | M162Tab | M25Tab;
 // M15-Nav: the flat 22-tab sidebar becomes six grouped destinations with a
 // page-level tab row. Every legacy tab id stays a live destination — the
 // groups are presentation only; the admin key + server rules still gate all
@@ -103,6 +104,9 @@ const NAV_GROUPS: { id: string; label: string; tabs: Tab[] }[] = [
   { id: 'verification', label: 'Verification', tabs: ['verification', 'clubs', 'guardians', 'staffchecks', 'coaches'] },
   { id: 'safety', label: 'Safety', tabs: ['blocks', 'moderation', 'threads', 'drillguide'] },
   { id: 'operations', label: 'Operations', tabs: ['outcomes', 'representation', 'groups', 'deliverycentre', 'outbox', 'billing'] },
+  // M23 P5.6C: the attributed compliance lane. Its own credentialed sign-in —
+  // the admin key that opens this console is not a reviewer identity (G-C0).
+  { id: 'agents', label: 'Agents', tabs: ['agentreview', 'agentpolicy', 'agentreviewers'] },
   { id: 'system', label: 'System', tabs: ['servicehealth', 'backups'] },
 ];
 const groupOfTab = (tab: Tab) => NAV_GROUPS.find((g) => g.tabs.includes(tab)) ?? NAV_GROUPS[0];
@@ -123,6 +127,7 @@ const TABS: { id: Tab; label: string }[] = [
   ...M15_TABS,
   ...M16_TABS,
   ...M162_TABS,
+  ...M25_TABS,
 ];
 
 export default function App() {
@@ -311,6 +316,9 @@ export default function App() {
           )}
           {tab === 'trust' && (
             <M162Panel tab={tab as M162Tab} adminKey={key} say={say} />
+          )}
+          {M25_TABS.some((x) => x.id === tab) && (
+            <M25Panel tab={tab as M25Tab} adminKey={key} say={say} />
           )}
           {tab === 'reports' && (
             <div className="list-rows">

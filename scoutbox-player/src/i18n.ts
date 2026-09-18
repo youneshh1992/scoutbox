@@ -3,6 +3,23 @@
 // the English originals live here permanently. Web builds persist the
 // choice; native storage would use AsyncStorage behind the same helper.
 const en = {
+  // ---- M23 P5.6C agent consent (multiple representation)
+  m25title: 'Agent consent', m25intro: 'An agent who would act for more than one side of the same transaction needs your written consent first. You may decline, and declining changes nothing else about your relationship.',
+  m25pending: 'Awaiting your answer', m25granted: 'You consented', m25declined: 'You declined', m25revoked: 'You revoked your consent',
+  m25agency: 'Agency', m25licence: 'FIFA licence in ScoutBox', m25transaction: 'Transaction', m25alsoActingFor: 'They would also act for',
+  m25typeEmployment: 'an employment contract', m25typeTransfer: 'a transfer', m25typeLoan: 'a loan', m25typeOther: 'other services',
+  m25roleIndividual: 'you', m25roleEngaging: 'the club signing', m25roleReleasing: 'the club releasing',
+  m25whatItMeans: 'What this means: the same agent would represent both sides at once. That is only permitted where the rules allow it and every party has agreed in advance, in writing.',
+  m25beforeYouAnswer: 'Before you answer: you should have been given the full particulars of what the agent proposes, and told that you may take independent legal advice from someone of your choosing. Confirm both below.',
+  m25ackParticulars: 'I was given the full particulars', m25ackLegalAdvice: 'I was told I may take independent legal advice',
+  m25needAck: 'Both confirmations are needed to consent. Declining needs neither.',
+  m25grant: 'I consent', m25decline: 'I do not consent', m25revoke: 'Revoke my consent',
+  m25grantedMsg: 'Recorded. Your consent applies to this transaction only.', m25declinedMsg: 'Recorded. The agent may continue to act for one party only.',
+  m25revokedMsg: 'Revoked. Anything that needs your consent from now on will be refused.',
+  m25grantedOn: 'Consented on', m25revokeNote: 'Revoking stops any future action that needs your consent. It does not undo what already happened, and the record of both your consent and your revocation stays.',
+  m25declinedNote: 'You declined this request. The agent would have to ask again for a new transaction.',
+  m25revokedNote: 'You revoked this consent. The earlier consent stays in the record; it is not erased.',
+  m25failed: 'That did not go through. Nothing was changed.', m25conflict: 'This changed since you loaded it. Reload and try again.',
   // ---- M23 P5.6B My Agent
   m24title: 'My Agent', m24intro: 'Nothing is active until you confirm it. You can end an active relationship at any time; the record stays in your history.',
   m24none: 'No agent has asked to represent you.', m24minor: 'Agent representation is not available for under-18 accounts in ScoutBox.',
@@ -294,6 +311,23 @@ const en = {
   ctGuardianNote: 'This contact was routed to you because the player is under age. The club sees your answer, never your child’s.',
 };
 const fr: typeof en = {
+  // ---- M23 P5.6C consentement agent (FR)
+  m25title: 'Consentement \u00e0 l\u2019agent', m25intro: 'Un agent qui agirait pour plus d\u2019une partie \u00e0 la m\u00eame transaction a d\u2019abord besoin de votre consentement \u00e9crit. Vous pouvez refuser, et un refus ne change rien d\u2019autre \u00e0 votre relation.',
+  m25pending: 'En attente de votre r\u00e9ponse', m25granted: 'Vous avez consenti', m25declined: 'Vous avez refus\u00e9', m25revoked: 'Vous avez r\u00e9voqu\u00e9 votre consentement',
+  m25agency: 'Agence', m25licence: 'Licence FIFA dans ScoutBox', m25transaction: 'Transaction', m25alsoActingFor: 'Il agirait aussi pour',
+  m25typeEmployment: 'un contrat de travail', m25typeTransfer: 'un transfert', m25typeLoan: 'un pr\u00eat', m25typeOther: 'd\u2019autres services',
+  m25roleIndividual: 'vous', m25roleEngaging: 'le club qui signe', m25roleReleasing: 'le club qui lib\u00e8re',
+  m25whatItMeans: 'Ce que cela signifie : le m\u00eame agent repr\u00e9senterait les deux c\u00f4t\u00e9s \u00e0 la fois. Ce n\u2019est permis que l\u00e0 o\u00f9 les r\u00e8gles l\u2019autorisent et si chaque partie a donn\u00e9 son accord \u00e9crit au pr\u00e9alable.',
+  m25beforeYouAnswer: 'Avant de r\u00e9pondre : vous devez avoir re\u00e7u toutes les informations sur ce que l\u2019agent propose, et avoir \u00e9t\u00e9 inform\u00e9 que vous pouvez prendre un conseil juridique ind\u00e9pendant aupr\u00e8s de la personne de votre choix. Confirmez les deux ci-dessous.',
+  m25ackParticulars: 'J\u2019ai re\u00e7u toutes les informations', m25ackLegalAdvice: 'On m\u2019a inform\u00e9 que je peux prendre un conseil juridique ind\u00e9pendant',
+  m25needAck: 'Les deux confirmations sont n\u00e9cessaires pour consentir. Un refus n\u2019en demande aucune.',
+  m25grant: 'Je consens', m25decline: 'Je ne consens pas', m25revoke: 'R\u00e9voquer mon consentement',
+  m25grantedMsg: 'Enregistr\u00e9. Votre consentement ne vaut que pour cette transaction.', m25declinedMsg: 'Enregistr\u00e9. L\u2019agent ne peut continuer \u00e0 agir que pour une seule partie.',
+  m25revokedMsg: 'R\u00e9voqu\u00e9. Tout ce qui n\u00e9cessite votre consentement sera d\u00e9sormais refus\u00e9.',
+  m25grantedOn: 'Consenti le', m25revokeNote: 'La r\u00e9vocation emp\u00eache toute action future n\u00e9cessitant votre consentement. Elle n\u2019annule pas ce qui a d\u00e9j\u00e0 eu lieu, et la trace de votre consentement comme de votre r\u00e9vocation reste.',
+  m25declinedNote: 'Vous avez refus\u00e9 cette demande. L\u2019agent devrait redemander pour une nouvelle transaction.',
+  m25revokedNote: 'Vous avez r\u00e9voqu\u00e9 ce consentement. Le consentement ant\u00e9rieur reste dans le registre ; il n\u2019est pas effac\u00e9.',
+  m25failed: 'Cela n\u2019a pas abouti. Rien n\u2019a \u00e9t\u00e9 modifi\u00e9.', m25conflict: 'Cela a chang\u00e9 depuis le chargement. Rechargez et r\u00e9essayez.',
   // ---- M23 P5.6B Mon agent (FR)
   m24title: 'Mon agent', m24intro: 'Rien n\u2019est actif tant que vous ne l\u2019avez pas confirm\u00e9. Vous pouvez mettre fin \u00e0 une relation active \u00e0 tout moment ; l\u2019enregistrement reste dans votre historique.',
   m24none: 'Aucun agent n\u2019a demand\u00e9 \u00e0 vous repr\u00e9senter.', m24minor: 'La repr\u00e9sentation par un agent n\u2019est pas disponible pour les comptes de moins de 18 ans dans ScoutBox.',

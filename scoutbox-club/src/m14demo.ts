@@ -107,7 +107,40 @@ const me: MyVerification = {
 
 const dl = <T,>(v: T): Promise<T> => new Promise((r) => setTimeout(() => r(v), 120));
 
+
+// ---- M23 P5.6C: one open consent ask and one granted-then-revocable ask.
+const DEMO_CONSENT_HONEST = 'You may decline. Consent is specific to this agent, this transaction context and these parties; it can be revoked at any time, and a revocation stops any future regulated action that needs it. ScoutBox records your answer; it does not advise you.';
+const DEMO_CLUB_CONSENTS: import('./m14api').ClubConsentRequest[] = [
+  {
+    id: 'rcs-c1', kind: 'dual_representation', status: 'requested', partyRole: 'engaging_entity',
+    agent: { userId: 'usr-ana', displayName: 'Ana Costa', agency: 'North Star Sports Agency', licence: 'VERIFIED' },
+    context: { id: 'ctx-c1', type: 'employment_contract', jurisdictions: ['ENG'], parties: [{ partyRole: 'individual', subjectKind: 'player', name: null }, { partyRole: 'engaging_entity', subjectKind: 'club', name: 'Eastport FC' }] },
+    otherPartyRoles: ['individual'],
+    particulars: { fullParticularsProvided: true, legalAdviceOffered: true, proposedFeeDisclosed: true, acknowledged: null },
+    policyVersions: ['jp-fifa-2025-1', 'jp-eng-2026-27-1'], ruleIds: ['ENG-6.3'],
+    requestedAt: Date.now() - 3 * 3600e3, grantedAt: null, declinedAt: null, revokedAt: null, rev: 1, honest: DEMO_CONSENT_HONEST,
+  },
+];
+
 export const demoM14: M14Api = {
+  async agentConsents() { return { items: structuredClone(DEMO_CLUB_CONSENTS), signatory: true }; },
+  async answerAgentConsent(_s, id, action, input) {
+    const k = DEMO_CLUB_CONSENTS.find((x) => x.id === id);
+    if (!k) throw new Error('Not found.');
+    if (input.expectedRev !== k.rev) throw new Error('This changed since you loaded it. Reload and try again.');
+    if (action === 'revoke') {
+      if (k.status !== 'granted') throw new Error('Only a granted consent can be revoked.');
+      k.status = 'revoked'; k.revokedAt = Date.now(); k.rev += 1;
+      return { consent: structuredClone(k) };
+    }
+    if (k.status !== 'requested') throw new Error('That request has already been answered.');
+    if (action === 'grant' && (!input.acknowledgedParticulars || !input.acknowledgedLegalAdvice)) {
+      throw new Error('To grant, confirm the club received the full particulars and was told it may take independent legal advice.');
+    }
+    if (action === 'grant') { k.status = 'granted'; k.grantedAt = Date.now(); } else { k.status = 'declined'; k.declinedAt = Date.now(); }
+    k.rev += 1;
+    return { consent: structuredClone(k) };
+  },
   me: () => dl(me),
   startIdentity: () => dl({ claim: myClaims[0] }),
   requestAffiliation: (_s, role) => dl({ affiliation: mk({ claimType: 'CLUB_AFFILIATION', status: 'collecting_evidence' }), role: mk({ role, status: 'collecting_evidence' }), next: 'Prove control of your work email; the organisation confirms the relationship.' }),

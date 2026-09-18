@@ -8,8 +8,7 @@
 import { useEffect, useState } from 'react';
 import type { Session } from './api';
 import {
-  m14, type MyVerification, type PublicVerProfile, type SubjectClaim, type VerBadge,
-} from './m14api';
+  m14, type MyVerification, type PublicVerProfile, type SubjectClaim, type VerBadge, type ClubConsentRequest } from './m14api';
 import { fmtDate, t } from './i18n';
 
 type ScreenProps = { session: Session; tick: number; notify: (text: string, error?: boolean) => void; openPlayer: (id: string) => void };
@@ -103,11 +102,11 @@ function ClaimRow({ claim, session, notify, onChange }: { claim: SubjectClaim; s
 
 // =============================================================== screen
 export function VerificationScreen({ session, notify, tick }: ScreenProps) {
-  const [tab, setTab] = useState<'me' | 'requests' | 'staff' | 'domains' | 'admins' | 'more'>('me');
+  const [tab, setTab] = useState<'me' | 'requests' | 'staff' | 'domains' | 'admins' | 'consents' | 'more'>('me');
   const [me, reloadMe] = useAsync<MyVerification>(() => m14.me(session), [session, tick]);
   const TABS: [typeof tab, string][] = [
     ['me', t('m14.tab.me')], ['requests', t('m14.tab.requests')], ['staff', t('m14.tab.staff')],
-    ['domains', t('m14.tab.domains')], ['admins', t('m14.tab.admins')], ['more', t('m14.tab.more')],
+    ['domains', t('m14.tab.domains')], ['admins', t('m14.tab.admins')], ['consents', t('m25.tab.consents')], ['more', t('m14.tab.more')],
   ];
   return (
     <div>
@@ -122,6 +121,7 @@ export function VerificationScreen({ session, notify, tick }: ScreenProps) {
       {tab === 'staff' && <StaffTab session={session} notify={notify} />}
       {tab === 'domains' && <DomainsTab session={session} notify={notify} />}
       {tab === 'admins' && <AdminsTab session={session} notify={notify} />}
+      {tab === 'consents' && <AgentConsentsTab session={session} notify={notify} tick={tick} />}
       {tab === 'more' && <MoreTab session={session} notify={notify} />}
     </div>
   );
@@ -417,6 +417,89 @@ function MoreTab({ session, notify }: { session: Session; notify: ScreenProps['n
             catch (e) { notify(e instanceof Error ? e.message : 'failed', true); }
           }}>{t('m14.coi.declare')}</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================ M23 P5.6C
+/**
+ * The club's side of a multiple-representation consent. Placed here because the
+ * authority is the same one this console already manages: only the club's
+ * recorded verification administrator — its signatory — can bind the club. The
+ * server decides that; `signatory` below is its answer, and a non-signatory
+ * sees the ask read-only rather than a hidden button.
+ *
+ * No fee, no contract terms, no legal advice. ScoutBox records the answer.
+ */
+function AgentConsentsTab({ session, notify, tick }: { session: Session; notify: ScreenProps['notify']; tick: number }) {
+  const [data, reload, err] = useAsync<{ items: ClubConsentRequest[]; signatory: boolean }>(() => m14.agentConsents(session), [session, tick]);
+  const [ack, setAck] = useState<Record<string, { particulars: boolean; legalAdvice: boolean }>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const toggle = (id: string, field: 'particulars' | 'legalAdvice') =>
+    setAck((cur) => {
+      const prev = cur[id] ?? { particulars: false, legalAdvice: false };
+      return { ...cur, [id]: { ...prev, [field]: !prev[field] } };
+    });
+  const answer = async (k: ClubConsentRequest, action: 'grant' | 'decline' | 'revoke') => {
+    setBusy(true); setError(null);
+    const a = ack[k.id] ?? { particulars: false, legalAdvice: false };
+    try {
+      await m14.answerAgentConsent(session, k.id, action, {
+        ...(action === 'grant' ? { acknowledgedParticulars: a.particulars, acknowledgedLegalAdvice: a.legalAdvice } : {}),
+        expectedRev: k.rev, clientKey: `cc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      });
+      notify(action === 'grant' ? t('m25.grantedMsg') : action === 'decline' ? t('m25.declinedMsg') : t('m25.revokedMsg'));
+      reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('m25.failed'));
+    } finally { setBusy(false); }
+  };
+  const items = data?.items ?? [];
+  return (
+    <div data-testid="club-agent-consents">
+      <div className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>{t('m25.intro')}</div>
+      {data && !data.signatory && <div className="notice warn" data-testid="not-signatory">{t('m25.notSignatory')}</div>}
+      {err && <div className="notice block" role="alert">{err}</div>}
+      {error && <div className="notice block" role="alert">{error}</div>}
+      {items.length === 0 && <div className="notice">{t('m25.none')}</div>}
+      <div className="list-rows">
+        {items.map((k) => {
+          const a = ack[k.id] ?? { particulars: false, legalAdvice: false };
+          const cls = k.status === 'granted' ? 'green' : k.status === 'requested' ? 'blue' : 'red';
+          return (
+            <div key={k.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }} data-testid={`club-consent-${k.id}`} data-status={k.status}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span className="grow"><b>{k.agent.displayName ?? '—'}</b> <span className="dim">· {k.agent.agency ?? '—'} · {t('m25.licence')}: {k.agent.licence.replace(/_/g, ' ').toLowerCase()}</span></span>
+                <span className={`pill ${cls}`}>{t(`m25.status.${k.status}`)}</span>
+              </div>
+              <div className="dim" style={{ fontSize: 12.5 }}>
+                {t('m25.transaction')}: {t(`m25.type.${k.context?.type ?? 'other_services'}`)}{k.context?.jurisdictions?.length ? ` (${k.context.jurisdictions.join(', ')})` : ''} · {t('m25.alsoActingFor')}: {k.otherPartyRoles.map((r) => t(`m25.role.${r}`)).join(', ')}
+              </div>
+              <div className="dim" style={{ fontSize: 12.5 }}>{t('m25.whatItMeans')}</div>
+              {k.status === 'requested' && data?.signatory && (
+                <>
+                  <div className="dim" style={{ fontSize: 12.5 }}>{t('m25.beforeYouAnswer')}</div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5 }}><input type="checkbox" checked={a.particulars} onChange={() => toggle(k.id, 'particulars')} /> {t('m25.ackParticulars')}</label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5 }}><input type="checkbox" checked={a.legalAdvice} onChange={() => toggle(k.id, 'legalAdvice')} /> {t('m25.ackLegalAdvice')}</label>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button className="primary" disabled={busy || !a.particulars || !a.legalAdvice} onClick={() => answer(k, 'grant')} data-testid={`grant-${k.id}`}>{t('m25.grant')}</button>
+                    <button disabled={busy} onClick={() => answer(k, 'decline')} data-testid={`decline-${k.id}`}>{t('m25.decline')}</button>
+                  </div>
+                  {(!a.particulars || !a.legalAdvice) && <div className="dim" style={{ fontSize: 12 }}>{t('m25.needAck')}</div>}
+                </>
+              )}
+              {k.status === 'granted' && data?.signatory && (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button disabled={busy} onClick={() => answer(k, 'revoke')} data-testid={`revoke-${k.id}`}>{t('m25.revoke')}</button>
+                  <span className="dim" style={{ fontSize: 12 }}>{t('m25.revokeNote')}</span>
+                </div>
+              )}
+              <div className="dim" style={{ fontSize: 12 }}>{k.honest}</div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

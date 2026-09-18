@@ -12,6 +12,24 @@ export interface VerBadge {
   period: { from: number | null; to: number | null } | null;
   verifiedAt: number | null; provenance: string;
 }
+
+// ------------------------------------------------------------ M23 P5.6C
+// An agent who would act for both a club and the individual in the same
+// transaction needs the club's prior written consent. Only the club's recorded
+// verification authority (its signatory) can bind it — the server decides that,
+// and `signatory` below is its answer, never a client claim.
+export interface ClubConsentRequest {
+  id: string; kind: string; status: 'requested' | 'granted' | 'declined' | 'revoked';
+  partyRole: string;
+  agent: { userId: string | null; displayName: string | null; agency: string | null; licence: string };
+  context: { id: string; type: string; jurisdictions: string[]; parties: { partyRole: string; subjectKind: string; name: string | null }[] } | null;
+  otherPartyRoles: string[];
+  particulars: { fullParticularsProvided: boolean; legalAdviceOffered: boolean; proposedFeeDisclosed: boolean; acknowledged: unknown } | null;
+  policyVersions: string[]; ruleIds: string[];
+  requestedAt: number; grantedAt: number | null; declinedAt: number | null; revokedAt: number | null;
+  rev: number; honest: string;
+}
+
 export interface PublicVerProfile { subjectType: string; subjectId: string; identityVerified: boolean; badges: VerBadge[]; organisationStatus?: string }
 export interface SubjectClaim {
   id: string; claimType: string; status: string;
@@ -55,6 +73,9 @@ export interface ConflictRow { id: string; userId: string; kind: string; subject
 
 export interface M14Api {
   me(s: Session): Promise<MyVerification>;
+  /** M23 P5.6C: the club's own consent lane. `signatory` says whether THIS user may bind the club. */
+  agentConsents(s: Session): Promise<{ items: ClubConsentRequest[]; signatory: boolean }>;
+  answerAgentConsent(s: Session, id: string, action: 'grant' | 'decline' | 'revoke', input: { acknowledgedParticulars?: boolean; acknowledgedLegalAdvice?: boolean; expectedRev: number; clientKey: string }): Promise<{ consent: ClubConsentRequest }>;
   startIdentity(s: Session): Promise<{ claim: SubjectClaim }>;
   requestAffiliation(s: Session, role: string): Promise<{ affiliation: SubjectClaim; role: SubjectClaim; next: string }>;
   addEvidence(s: Session, claimId: string, input: { dataUrl?: string; filename?: string; note?: string }): Promise<{ claim: SubjectClaim }>;
@@ -111,6 +132,8 @@ const G = (s: Session, path: string) => req<any>(path, { headers: H(s) });
 
 export const httpM14: M14Api = {
   me: (s) => G(s, '/org/verification/me'),
+  agentConsents: (s) => G(s, '/org/compliance/consents'),
+  answerAgentConsent: (s, id, action, input) => P(s, `/org/compliance/consents/${encodeURIComponent(id)}/${action}`, input),
   startIdentity: (s) => P(s, '/org/verification/identity'),
   requestAffiliation: (s, role) => P(s, '/org/verification/affiliation', { role }),
   addEvidence: (s, claimId, input) => P(s, `/org/verification/claims/${claimId}/evidence`, input),
