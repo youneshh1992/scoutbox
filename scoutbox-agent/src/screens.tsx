@@ -579,7 +579,7 @@ function TeamTab({ session, tick, notify, me }: ScreenProps & { me: Me | null })
   const toggle = (list: Tier[], x: Tier) => (list.includes(x) ? list.filter((y) => y !== x) : [...list, x]);
   const add = async () => {
     setBusy(true); setErr(null);
-    try { await agent.addMember(session, { name, role: role || undefined, tiers, clientKey: keyRef.current }); keyRef.current = clientKey(); setName(''); setRole(''); markClean(); team.reload(); } catch (e) { setErr(e); } finally { setBusy(false); }
+    try { await agent.addMember(session, { name, role: role || undefined, tiers, clientKey: keyRef.current }); keyRef.current = clientKey(); setName(''); setRole(''); setTiers(['assistant']); markClean(); team.reload(); } catch (e) { setErr(e); } finally { setBusy(false); }
   };
   const saveTiers = async (m: Member) => {
     setBusy(true); setErr(null);

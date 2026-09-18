@@ -719,7 +719,12 @@ export function registerAgent(rawCtx) {
     hist(a, event === 'representation_confirmed' ? 'representation_confirmed' : event === 'representation_rejected' ? 'representation_rejected' : event === 'representation_disputed' ? 'representation_disputed' : 'representation_terminated', byPlayer(req), { from: st, to, by: 'client', hadReason: !!reason });
     bumpRev(a, { by: { id: req.player.id, name: req.player.name }, at: t });
     persistNow();
-    broadcast(event, { orgId: a.agencyOrgId, agreementId: a.id, agentUserId: a.agentUserId });
+    // Literal event names: the M18.2 registry audit reads call sites textually.
+    const ev = { orgId: a.agencyOrgId, agreementId: a.id, agentUserId: a.agentUserId };
+    if (event === 'representation_confirmed') broadcast('representation_confirmed', ev);
+    else if (event === 'representation_rejected') broadcast('representation_rejected', ev);
+    else if (event === 'representation_disputed') broadcast('representation_disputed', ev);
+    else broadcast('representation_terminated', ev);
     if (a.agentUserId) notify({ kind: 'org_user', id: a.agentUserId }, notifyType, notifyText, a.id);
     res.json({ relationship: { ...agreementForClient(a, now()), agent: agentIdentityForClient(a) } });
   }
