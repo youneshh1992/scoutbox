@@ -476,6 +476,36 @@ section('§41 — a Trust Score grants no permission whatsoever');
   neg(_p6.status === 401 && _p6.body?.error === 'ORG_AUTH_REQUIRED', 'a player token cannot use the org Trust route');
 }
 
+// ================= D-P56A-1 — agency representation as a live relationship
+section('D-P56A-1 — an agency relationship counts only while it is active');
+{
+  // Regression for M23 P5.6A defect D-P56A-1: the relationship source keyed
+  // agency representations by a field the record does not have (`orgId`
+  // instead of `agencyOrgId`) and kept counting a withdrawn / disputed /
+  // expired relationship because `confirmedAt` survives those transitions.
+  const distinctOf = async () => (await j('GET', '/player/trust-profile', undefined, kola.token)).body?.trust?.components?.relationships?.detail?.distinct;
+  const d0 = await distinctOf();
+  ok(typeof d0 === 'number', 'the self view exposes the distinct-relationship count');
+  const proposed = await j('POST', '/org/representation/propose', { playerId: 'pl-adeyemi', scope: 'full' }, alex.token);
+  ok(proposed.status === 201 && proposed.body?.representation?.id, 'the agency proposes representation to an adult');
+  neg((await distinctOf()) === d0, 'a PROPOSED (unconfirmed) representation is not a verified relationship');
+  const repId = proposed.body.representation.id;
+  ok((await j('POST', `/player/representation/${repId}/confirm`, {}, kola.token)).status === 200, 'the player confirms it');
+  ok((await distinctOf()) === d0 + 1, 'a confirmed, active agency representation counts as exactly one distinct relationship');
+  ok((await j('POST', `/player/representation/${repId}/withdraw`, {}, kola.token)).status === 200, 'the player withdraws it');
+  neg((await distinctOf()) === d0, 'a WITHDRAWN representation stops counting although confirmedAt is still set');
+  const again = await j('POST', '/org/representation/propose', { playerId: 'pl-adeyemi', scope: 'full' }, alex.token);
+  ok(again.status === 201, 'a fresh proposal after withdrawal is accepted');
+  ok((await j('POST', `/player/representation/${again.body.representation.id}/confirm`, {}, kola.token)).status === 200, 'the player confirms the second one');
+  ok((await j('POST', `/player/representation/${again.body.representation.id}/dispute`, { reason: 'not my agent' }, kola.token)).status === 200, 'the player disputes it');
+  neg((await distinctOf()) === d0, 'a DISPUTED representation stops counting');
+  // Source guard: the key must be the record's real field so two agencies
+  // stay two distinct relationships instead of collapsing onto `undefined`.
+  const { readFileSync } = await import('node:fs');
+  const trustSrc = readFileSync(new URL('../m162/trust.mjs', import.meta.url), 'utf8');
+  neg(!/rel:agency:\$\{rep\.orgId\}/.test(trustSrc) && /rel:agency:\$\{rep\.agencyOrgId\}/.test(trustSrc), 'the relationship key reads `agencyOrgId`, the field the representation record actually carries');
+}
+
 // ============================================================== metrics
 section('metrics — privacy-safe aggregate counters');
 {
