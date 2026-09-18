@@ -322,7 +322,7 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
 // EN/FR labels, convenience-only filtering) on a four-section workspace.
 {
   const app = 'scoutbox-agent';
-  const AGENT_IDS = ['home', 'profile', 'clients', 'opportunities', 'agency', 'inbox'];
+  const AGENT_IDS = ['home', 'profile', 'compliance', 'clients', 'opportunities', 'agency', 'inbox'];
   const nav = await loadNav(app);
   section(`${app} — configuration integrity`);
   ok(nav.NAV_SECTIONS.length === 4, 'exactly 4 primary sections (Home, Clients, Opportunities, Agency)');
@@ -369,6 +369,7 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   }
   console.log(`✓ resolver maps every destination (${AGENT_IDS.length} checks folded)`);
   ok(nav.resolveNavigationLocation('profile').sectionId === 'home', 'direct /profile highlights Home');
+  ok(nav.resolveNavigationLocation('compliance').sectionId === 'home', 'direct /compliance highlights Home (P5.6C)');
   ok(nav.resolveNavigationLocation('nonexistent').sectionId === null && nav.resolveNavigationLocation('nonexistent').itemId === null, 'unknown path highlights nothing');
 
   section(`${app} — role-aware filtering (client convenience only; the server matrix decides)`);
@@ -398,7 +399,11 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   ok(nav.screenFromHash('#/agency/team') === 'agency' && nav.agencyTabFromHash('#/agency/team') === 'team' && nav.agencyTabFromHash('#/agency/billing') === null && nav.screenFromHash('#/agency/billing') === null, 'agency tab deep links are strict');
   ok(nav.hashForAgency('overview') === '#/agency' && nav.hashForAgency('settings') === '#/agency/settings', 'agency hashes round-trip');
   for (const id of AGENT_IDS) if (nav.screenFromHash(nav.hashForScreen(id)) !== id) fail(`hash round-trip for ${id}`); else passed++;
-  console.log('✓ every screen hash the app writes, it can read back (6 folded)');
+  console.log('✓ every screen hash the app writes, it can read back (7 folded)');
+  ok(nav.screenFromHash('#/compliance/ctx-7') === 'compliance' && nav.contextFromHash('#/compliance/ctx-7') === 'ctx-7', 'a compliance context deep link resolves and carries its id');
+  ok(nav.contextFromHash('#/compliance/rep-7') === null && nav.contextFromHash('#/compliance/') === null && nav.contextFromHash('#/compliance/ctx-7/offer') === null && nav.contextFromHash('#/compliance/../x') === null, 'a non-context id, an empty id, an unknown sub-route and traversal are all rejected');
+  ok(nav.hashForContext('ctx-7') === '#/compliance/ctx-7', 'context hashes round-trip');
+  ok(nav.searchNav('consent', LICENSED, tr).some((r) => r.itemId === 'compliance') && nav.searchNav('conflit', LICENSED, tr).some((r) => r.itemId === 'compliance'), 'aliases "consent" and "conflit" find Conflicts & compliance');
 
   section(`${app} — shortcuts persistence (graceful)`);
   store.clear();

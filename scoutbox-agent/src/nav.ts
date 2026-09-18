@@ -45,6 +45,9 @@ export const NAV_SECTIONS: NavSection[] = [
     children: [
       { id: 'home', labelKey: 'nav.home', aliases: ['dashboard', 'accueil', 'overview'] },
       { id: 'profile', labelKey: 'nav.profile', shortKey: 'navshort.profile', aliases: ['verification', 'licence', 'license', 'fifa', 'registration', 'my profile', 'vérification', 'licence fifa'] },
+      // P5.6C: the agent's own regulatory standing, conflict contexts, consents
+      // and attributed review items. Not a transaction room (no offer, no terms).
+      { id: 'compliance', labelKey: 'nav.compliance', shortKey: 'navshort.compliance', aliases: ['conflict', 'conflicts', 'consent', 'consents', 'policy', 'policies', 'review', 'regulatory', 'conformité', 'conflit', 'consentement'] },
     ],
   },
   {
@@ -180,6 +183,7 @@ export function searchNav(query: string, ctx: NavContext, translate: (key: strin
 //   "#/clients/:id"                       → one client relationship
 //   "#/clients/:id/<tab>"                 → …opened on a tab
 //   "#/agency/<tab>"                      → the Agency workspace on a tab
+//   "#/compliance/<ctxId>"                → one compliance context (P5.6C)
 export const CLIENT_TABS = ['overview', 'representation', 'opportunities', 'activity'] as const;
 export type ClientTab = (typeof CLIENT_TABS)[number];
 export const AGENCY_TABS = ['overview', 'team', 'compliance', 'settings'] as const;
@@ -187,6 +191,7 @@ export type AgencyTab = (typeof AGENCY_TABS)[number];
 
 const CLIENT_HASH = /^#\/clients\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})(?:\/(overview|representation|opportunities|activity))?$/;
 const AGENCY_HASH = /^#\/agency\/(overview|team|compliance|settings)$/;
+const CONTEXT_HASH = /^#\/compliance\/(ctx-[A-Za-z0-9][A-Za-z0-9_-]{0,63})$/;
 
 export function clientFromHash(hash: string): { id: string; tab: ClientTab } | null {
   const m = CLIENT_HASH.exec(hash ?? '');
@@ -200,9 +205,16 @@ export function agencyTabFromHash(hash: string): AgencyTab | null {
 }
 export const hashForAgency = (tab: AgencyTab = 'overview') => (tab === 'overview' ? '#/agency' : `#/agency/${tab}`);
 
+export function contextFromHash(hash: string): string | null {
+  const m = CONTEXT_HASH.exec(hash ?? '');
+  return m ? m[1] : null;
+}
+export const hashForContext = (id: string) => `#/compliance/${id}`;
+
 export function screenFromHash(hash: string): ScreenId | null {
   if (clientFromHash(hash)) return 'clients';
   if (agencyTabFromHash(hash)) return 'agency';
+  if (contextFromHash(hash)) return 'compliance';
   const m = /^#\/([a-z]+)$/.exec(hash ?? '');
   if (!m) return null;
   const id = m[1];

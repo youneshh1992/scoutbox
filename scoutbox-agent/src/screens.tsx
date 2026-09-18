@@ -181,7 +181,7 @@ export function ProfileScreen({ session, tick, notify, me }: ScreenProps & { me:
       markClean(); notify(t('profile.saved')); prof.reload();
     } catch (e) { setErr(e); } finally { setBusy(false); }
   };
-  const submitFacet = (facet: 'fifa_licence' | 'national_registration' | 'minors_authorisation') => async (reference: string, ma?: string) => {
+  const submitFacet = (facet: 'fifa_licence' | 'national_registration' | 'domestic_authorisation' | 'minors_authorisation') => async (reference: string, ma?: string) => {
     const r = await agent.submitFacet(session, facet, { reference, memberAssociation: ma });
     notify(`${t('profile.submittedOk')} ${tr(`state.${r.facet.state}`)}`);
     prof.reload();
@@ -222,6 +222,9 @@ export function ProfileScreen({ session, tick, notify, me }: ScreenProps & { me:
                   <FacetCard title={t('profile.fifa')} facet={p.facets.fifa_licence} testProvider={testProvider} onSubmit={submitFacet('fifa_licence')} />
                   {(juris.length ? juris : ['ENG']).map((ma) => (
                     <FacetCard key={`nr-${ma}`} title={t('profile.national')} ma={ma} facet={p.facets.national_registration[ma] ?? null} testProvider={testProvider} onSubmit={submitFacet('national_registration')} />
+                  ))}
+                  {(juris.length ? juris : ['ENG']).map((ma) => (
+                    <FacetCard key={`da-${ma}`} title={t('profile.domestic')} ma={ma} facet={p.facets.domestic_authorisation?.[ma] ?? null} testProvider={testProvider} onSubmit={submitFacet('domestic_authorisation')} note={t('profile.domesticNote')} />
                   ))}
                   {(juris.length ? juris : ['ENG']).map((ma) => (
                     <FacetCard key={`mn-${ma}`} title={t('profile.minors')} ma={ma} facet={p.facets.minors_authorisation[ma] ?? null} testProvider={testProvider} onSubmit={submitFacet('minors_authorisation')} note={t('profile.minorsNote')} />

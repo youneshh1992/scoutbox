@@ -4,9 +4,10 @@ import { agent, type Me } from './agentApi';
 import {
   AgencyScreen, ClientsScreen, HomeScreen, InboxScreen, OpportunitiesScreen, ProfileScreen, SafetyModal, Toast, markClean,
 } from './screens';
+import { ComplianceScreen } from './compliance';
 import {
   NAV_SECTIONS, type NavContext, type AgencyTab, type ClientTab,
-  agencyTabFromHash, clientFromHash, hashForAgency, hashForClient, hashForScreen, loadCollapsed, loadShortcuts,
+  agencyTabFromHash, clientFromHash, contextFromHash, hashForAgency, hashForClient, hashForContext, hashForScreen, loadCollapsed, loadShortcuts,
   resolveNavigationLocation, saveCollapsed, saveShortcuts, screenFromHash,
 } from './nav';
 import { CommandPalette, NeedsAttention, OrgChips, Sidebar, SecondaryNav, TopBar, useNavSections, usePaletteHotkey } from './navui';
@@ -28,7 +29,7 @@ function loadSession(): Session | null {
   }
 }
 
-export type ScreenId = 'home' | 'profile' | 'clients' | 'opportunities' | 'agency' | 'inbox';
+export type ScreenId = 'home' | 'profile' | 'compliance' | 'clients' | 'opportunities' | 'agency' | 'inbox';
 
 /** Where a notification leads. Types not listed stay plain text. */
 const NOTIFICATION_SCREEN: Record<string, ScreenId> = {
@@ -39,7 +40,14 @@ const NOTIFICATION_SCREEN: Record<string, ScreenId> = {
   representation_disputed: 'clients',
   representation_expiring: 'clients',
   agent_verification: 'profile',
+  agent_verification_stale: 'compliance',
   agency_membership: 'agency',
+  regulatory_review_required: 'compliance',
+  regulatory_review_completed: 'compliance',
+  regulatory_consent_requested: 'compliance',
+  regulatory_consent_granted: 'compliance',
+  regulatory_consent_declined: 'compliance',
+  regulatory_consent_revoked: 'compliance',
 };
 
 interface BellRow { n: Notification; count: number; unread: boolean }
@@ -119,14 +127,26 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   const [screen, setScreenState] = useState<ScreenId>(() => screenFromHash(window.location.hash) ?? 'home');
   const [client, setClient] = useState<{ id: string; tab: ClientTab } | null>(() => clientFromHash(window.location.hash));
   const [agencyTab, setAgencyTab] = useState<AgencyTab>(() => agencyTabFromHash(window.location.hash) ?? 'overview');
+  const [contextId, setContextId] = useState<string | null>(() => contextFromHash(window.location.hash));
 
   const setScreen = useCallback((id: ScreenId) => {
     if (!confirmLeave(t('common.unsaved'))) return;
     markClean();
     setScreenState(id);
     setClient(null);
+    setContextId(null);
     if (id !== 'agency') setAgencyTab('overview');
     try { if (window.location.hash !== hashForScreen(id)) window.history.replaceState(null, '', hashForScreen(id)); } catch { /* sandboxed */ }
+    noteNavigated();
+  }, []);
+  /** Opening a compliance context PUSHES, so Back closes it again. */
+  const openContext = useCallback((id: string | null) => {
+    if (!confirmLeave(t('common.unsaved'))) return;
+    markClean();
+    setScreenState('compliance');
+    setContextId(id);
+    const target = id ? hashForContext(id) : hashForScreen('compliance');
+    try { if (window.location.hash !== target) window.history.pushState(null, '', target); } catch { /* sandboxed */ }
     noteNavigated();
   }, []);
   /** Opening a client PUSHES, so the browser Back button closes it again. */
@@ -167,6 +187,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
       const id = screenFromHash(window.location.hash);
       if (id) setScreenState(id);
       setClient(clientFromHash(window.location.hash));
+      setContextId(contextFromHash(window.location.hash));
       setAgencyTab(agencyTabFromHash(window.location.hash) ?? 'overview');
     };
     window.addEventListener('hashchange', onHash);
@@ -315,7 +336,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
               return (
                 <div key={n.id} className="list-row" style={{ opacity: u ? 1 : 0.7 }}>
                   <span className="grow" style={{ fontSize: 13 }}>{n.text}{count > 1 && <span className="pill" style={{ marginLeft: 6 }}>×{count}</span>}</span>
-                  {dest && <button onClick={() => { if (dest === 'clients' && n.refId && /^rep-/.test(n.refId)) openClient(n.refId); else setScreen(dest); setBellOpen(false); }}>{t('common.open')}</button>}
+                  {dest && <button onClick={() => { if (dest === 'clients' && n.refId && /^rep-/.test(n.refId)) openClient(n.refId); else if (dest === 'compliance' && n.refId && /^ctx-/.test(n.refId)) openContext(n.refId); else setScreen(dest); setBellOpen(false); }}>{t('common.open')}</button>}
                   <span className="dim">{fmtStamp(n.ts)}</span>
                 </div>
               );
@@ -330,6 +351,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
           )}
           {screen === 'home' && <HomeScreen {...props} onNavigate={setScreen} />}
           {screen === 'profile' && <ProfileScreen {...props} me={me} />}
+          {screen === 'compliance' && <ComplianceScreen {...props} me={me} contextId={contextId} onOpenContext={openContext} onOpenClient={openClient} />}
           {screen === 'clients' && (
             <ClientsScreen {...props} me={me} clientId={client?.id ?? null} clientTab={client?.tab ?? 'overview'} onOpenClient={openClient} onClientTab={clientTab} onCloseClient={closeClient} />
           )}

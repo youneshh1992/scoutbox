@@ -7,8 +7,8 @@
 // nothing here is a second source of truth for a real deployment.
 import type { CoreApi, Notification, Org, Session } from './api';
 import type {
-  AgentApi, AgencyOverview, AuditRow, ClientRow, ComplianceRow, FacetView, Home, Me, Member, Opportunity,
-  Profile, Relationship, Tier, VerificationState,
+  AgentApi, AgencyOverview, AgentConsent, AuditRow, Clearance, ClientRow, ClubHit, ComplianceContext, ComplianceOverview, ComplianceRow,
+  FacetView, Home, Me, Member, MinorReadiness, Opportunity, PartyRole, PolicyVersionPublic, Profile, Reason, Relationship, ReviewPublic, Tier, VerificationState,
 } from './agentApi';
 
 const NOW = Date.now();
@@ -42,7 +42,14 @@ const PERMISSIONS: Record<string, Tier[]> = {
   'inbox.read': ['licensed_agent', 'agency_admin', 'analyst', 'assistant', 'finance'], 'agency.read': ['licensed_agent', 'agency_admin', 'analyst', 'assistant', 'finance'],
   'agency.team.read': ['licensed_agent', 'agency_admin', 'analyst', 'assistant', 'finance'], 'agency.team.write': ['agency_admin'],
   'agency.settings.write': ['agency_admin'], 'agency.audit.read': ['agency_admin'], 'agency.compliance.read': ['agency_admin', 'licensed_agent'],
+  // M23 P5.6C
+  'compliance.read': ['licensed_agent', 'agency_admin', 'analyst', 'assistant', 'finance'], 'compliance.contexts.write': ['licensed_agent'],
 };
+/** The public club directory the demo picks an engaging or releasing entity from. */
+const DEMO_CLUBS: ClubHit[] = [
+  { id: 'org-eastport', name: 'Eastport FC', type: 'club', verified: true },
+  { id: 'org-harbour', name: 'Harbour City FC', type: 'club', verified: false },
+];
 const can = (tiers: Tier[], cap: string) => (PERMISSIONS[cap] ?? []).some((t) => tiers.includes(t));
 
 // ------------------------------------------------------------- players
@@ -76,6 +83,8 @@ const PROFILES: DemoProfile[] = [{
   facets: {
     fifa_licence: facet('VERIFIED', { reference: 'TEST-VERIFIED-777', provenance: { provider: 'local-synthetic-test-provider', kind: 'synthetic', at: NOW - 10 * DAY }, submittedAt: NOW - 10 * DAY, verifiedAt: NOW - 10 * DAY, recheckAt: NOW + 20 * DAY, note: 'Verified by the LOCAL SYNTHETIC test provider. This is not a FIFA, FA or U.S. Soccer register check and never exists in production.' }),
     national_registration: { ENG: facet('VERIFIED', { reference: 'TEST-VERIFIED-FA', memberAssociation: 'ENG', provenance: { provider: 'local-synthetic-test-provider', kind: 'synthetic', at: NOW - 9 * DAY }, submittedAt: NOW - 9 * DAY, verifiedAt: NOW - 9 * DAY, recheckAt: NOW + 21 * DAY, note: 'Verified by the LOCAL SYNTHETIC test provider.' }) },
+    // P5.6C: a fourth facet, empty. A licence is not a national registration and neither is a domestic authorisation.
+    domestic_authorisation: {},
     minors_authorisation: {},
   },
   rev: 3, revAt: NOW - 9 * DAY, createdAt: NOW - 12 * DAY,
@@ -97,10 +106,15 @@ const profileView = (p: DemoProfile | undefined): Profile | null => {
   const fifa = p.facets.fifa_licence ? { ...p.facets.fifa_licence, state: effState(p.facets.fifa_licence) } : null;
   return {
     id: `agp-${p.userId}`, userId: p.userId, agencyOrgId: ORG.id, displayName: p.displayName, declared: p.declared,
-    facets: { fifa_licence: fifa, national_registration: Object.fromEntries(Object.entries(p.facets.national_registration).map(([k, f]) => [k, { ...f, state: effState(f) }])), minors_authorisation: Object.fromEntries(Object.entries(p.facets.minors_authorisation).map(([k, f]) => [k, { ...f, state: effState(f) }])) },
+    facets: {
+      fifa_licence: fifa,
+      national_registration: Object.fromEntries(Object.entries(p.facets.national_registration).map(([k, f]) => [k, { ...f, state: effState(f) }])),
+      domestic_authorisation: Object.fromEntries(Object.entries(p.facets.domestic_authorisation).map(([k, f]) => [k, { ...f, state: effState(f) }])),
+      minors_authorisation: Object.fromEntries(Object.entries(p.facets.minors_authorisation).map(([k, f]) => [k, { ...f, state: effState(f) }])),
+    },
     regulatoryState: {
       fifaLicence: effState(p.facets.fifa_licence),
-      jurisdictions: p.declared.jurisdictions.map((ma) => ({ memberAssociation: ma, nationalRegistration: effState(p.facets.national_registration[ma]), minorsAuthorisation: effState(p.facets.minors_authorisation[ma]), regulatedActionsPermitted: !gap(p, ma) })),
+      jurisdictions: p.declared.jurisdictions.map((ma) => ({ memberAssociation: ma, nationalRegistration: effState(p.facets.national_registration[ma]), domesticAuthorisation: effState(p.facets.domestic_authorisation[ma]), minorsAuthorisation: effState(p.facets.minors_authorisation[ma]), regulatedActionsPermitted: !gap(p, ma) })),
     },
     policyVersion: 1, createdAt: p.createdAt, updatedAt: p.revAt, rev: p.rev, revAt: p.revAt, history: p.history,
     honest: 'Verification states are derived from recorded provenance. A licence number you typed is a declaration, not a verified licence. No FIFA, FA or U.S. Soccer register integration exists in this build.',
@@ -172,6 +186,102 @@ const memberRow = (a: Aff): Member => {
   return { affiliationId: a.id, userId: a.userId, name: u?.name ?? null, role: u?.role ?? null, tiers: a.tiers, active: a.endedAt === null, startedAt: a.startedAt, endedAt: a.endedAt, endedReason: a.endedReason, licensed: !!p, fifaLicence: p ? effState(p.facets.fifa_licence) : null, rev: a.rev, revAt: a.revAt };
 };
 
+
+// ============================================================ M23 P5.6C compliance (demo)
+// The demo mirrors the SERVER's verdicts for the journey it shows: a single
+// represented party is CLEAR, a second party needs prior written consent, an
+// entity with no ScoutBox agreement is only "declared" and waits for an
+// attributed review, and a rule whose status is UNDER_LEGAL_REVIEW never
+// resolves itself here. Nothing in this file is a second source of truth.
+const PROVIDER_STATUS = {
+  provider: 'local-synthetic-test-provider', live: false,
+  registers: { fifa: 'not_connected', fa: 'not_connected', ussf: 'not_connected' },
+  note: 'LOCAL SYNTHETIC test provider active. Verifies only TEST-* references. Never exists in production.',
+};
+const DEMO_POLICIES: PolicyVersionPublic[] = [
+  { id: 'jp-fifa-2025-1', regulator: 'FIFA', jurisdiction: 'INT', policyVersion: 1, supersedes: null, effectiveFrom: '2025-10-01', effectiveTo: null, status: 'published', publishedAt: NOW - 300 * DAY },
+  { id: 'jp-eng-2026-27-1', regulator: 'FA', jurisdiction: 'ENG', policyVersion: 1, supersedes: null, effectiveFrom: '2026-07-01', effectiveTo: null, status: 'published', publishedAt: NOW - 80 * DAY },
+];
+const reason = (code: string, over: Partial<Reason> = {}): Reason => ({ code, ruleId: null, ruleStatus: null, regulator: null, jurisdiction: null, policyVersion: null, ...over });
+const ENG_MULTI = { ruleId: 'ENG-6.3', ruleStatus: 'ACTIVE' as const, regulator: 'FA', jurisdiction: 'ENG', policyVersion: 'jp-eng-2026-27-1' };
+const FIFA_OVERRIDDEN = { ruleId: 'FIFA-12.8', ruleStatus: 'JURISDICTION_OVERRIDE' as const, regulator: 'FIFA', jurisdiction: 'INT', policyVersion: 'jp-fifa-2025-1', overrideRuleId: 'ENG-6.3' };
+
+interface DemoCtx {
+  id: string; type: ComplianceContext['type']; status: 'open' | 'closed'; jurisdictions: string[];
+  parties: ComplianceContext['parties']; representations: ComplianceContext['representations'];
+  clearance: Clearance | null; reEvaluationPending: boolean; evaluations: number; openedAt: number; closedAt: number | null;
+  rev: number; revAt: number; history: ComplianceContext['history'];
+}
+const CTX_HONEST = 'A compliance context is a minimal record for conflict evaluation. It is not a Transaction Room: no negotiation, no terms, no offer and no signing happen here.';
+const CONSENTS: AgentConsent[] = [];
+const REVIEWS: ReviewPublic[] = [];
+const CTXS: DemoCtx[] = [];
+
+const cxHist = (c: DemoCtx, action: string, detail: Record<string, unknown> | null = null, byKind = 'org') => {
+  c.history.push({ id: id('aud'), at: Date.now(), action, byKind, detail });
+};
+const clearanceOf = (c: DemoCtx): Clearance => {
+  const at = Date.now();
+  const roles = c.representations.filter((r) => r.status === 'verified').map((r) => r.partyRole);
+  const declared = c.representations.filter((r) => r.status === 'pending_review');
+  const base = { policyVersions: DEMO_POLICIES.map((p) => p.id), evaluatedAt: at, inputHash: `demo-${c.id}-${c.representations.length}-${CONSENTS.filter((k) => k.contextId === c.id).map((k) => k.status).join('')}`, current: true, requiredActions: [] as Clearance['requiredActions'] };
+  const national = [reason('NATIONAL_RULE_APPLIES', FIFA_OVERRIDDEN)];
+  if (declared.length) {
+    return { ...base, outcome: 'MANUAL_REGULATORY_REVIEW_REQUIRED', alias: null, reasons: [...national, reason('REPRESENTATION_UNVERIFIED', { partyRole: declared[0].partyRole })], consentsOutstanding: [], requiredActions: [{ action: 'await_attributed_review', partyRoles: declared.map((r) => r.partyRole) }] };
+  }
+  if (roles.length === 0) return { ...base, outcome: 'CLEAR', alias: null, reasons: [...national, reason('NO_REPRESENTATION')], consentsOutstanding: [] };
+  if (roles.length === 1) return { ...base, outcome: 'CLEAR', alias: null, reasons: [...national, reason('SINGLE_PARTY', { ...ENG_MULTI, partyRoles: roles })], consentsOutstanding: [] };
+  if (roles.includes('releasing_entity') && roles.includes('individual')) {
+    return { ...base, outcome: 'PROHIBITED_CONFLICT', alias: null, reasons: [...national, reason('PROHIBITED_COMBINATION', { ruleId: 'ENG-6.4', ruleStatus: 'ACTIVE', regulator: 'FA', jurisdiction: 'ENG', policyVersion: 'jp-eng-2026-27-1', partyRoles: roles })], consentsOutstanding: [] };
+  }
+  const outstanding = roles
+    .map((role) => {
+      const k = CONSENTS.find((x) => x.contextId === c.id && x.partyRole === role);
+      if (k?.status === 'granted') return null;
+      const reasonCode = k?.status === 'revoked' ? 'CONSENT_REVOKED' : k?.status === 'declined' ? 'CONSENT_DECLINED' : 'CONSENT_MISSING';
+      return { partyRole: role, consentKind: 'dual_representation', reasonCode };
+    })
+    .filter((x): x is { partyRole: PartyRole; consentKind: string; reasonCode: string } => x !== null);
+  if (outstanding.length === 0) {
+    return { ...base, outcome: 'CLEAR', alias: null, reasons: [...national, reason('DUAL_CONSENTED', { ...ENG_MULTI, partyRoles: roles })], consentsOutstanding: [] };
+  }
+  return {
+    ...base, outcome: 'PERMITTED_DUAL_REPRESENTATION_CONSENT_REQUIRED', alias: 'PERMITTED_WITH_CONSENT',
+    reasons: [...national, reason('CONSENT_REQUIRED', { ...ENG_MULTI, partyRoles: roles })], consentsOutstanding: outstanding,
+    requiredActions: [{ action: 'obtain_written_consent', partyRoles: outstanding.map((o) => o.partyRole) }],
+  };
+};
+const reEvaluate = (c: DemoCtx, byKind = 'org') => { c.clearance = clearanceOf(c); c.evaluations += 1; c.reEvaluationPending = false; cxHist(c, 'compliance_context_evaluated', { outcome: c.clearance.outcome }, byKind); return c.clearance; };
+const ctxView = (c: DemoCtx): ComplianceContext => ({
+  id: c.id, type: c.type, status: c.status, jurisdictions: c.jurisdictions,
+  scope: c.jurisdictions.some((j) => j !== 'INT') && !c.jurisdictions.includes('INT') ? 'national' : 'international',
+  parties: structuredClone(c.parties), representations: structuredClone(c.representations),
+  clearance: c.clearance ? structuredClone(c.clearance) : null, reEvaluationPending: c.reEvaluationPending,
+  evaluationCount: c.evaluations, openedAt: c.openedAt, closedAt: c.closedAt, rev: c.rev, revAt: c.revAt,
+  history: structuredClone(c.history), honest: CTX_HONEST,
+});
+const freshnessOf = (p: DemoProfile | undefined): ComplianceOverview['freshness'] => {
+  if (!p) return [];
+  const rows: ComplianceOverview['freshness'] = [];
+  const push = (facet: ComplianceOverview['freshness'][number]['facet'], ma: string | null, f: FacetView | undefined | null) => {
+    if (!f) return;
+    rows.push({ facet, memberAssociation: ma, state: effState(f), storedState: f.state, recheckAt: f.recheckAt, daysUntilRecheck: f.recheckAt === null ? null : Math.ceil((f.recheckAt - Date.now()) / DAY), provenance: f.provenance, verifiedAt: f.verifiedAt });
+  };
+  push('fifa_licence', null, p.facets.fifa_licence);
+  for (const [ma, f] of Object.entries(p.facets.national_registration)) push('national_registration', ma, f);
+  for (const [ma, f] of Object.entries(p.facets.domestic_authorisation)) push('domestic_authorisation', ma, f);
+  for (const [ma, f] of Object.entries(p.facets.minors_authorisation)) push('minors_authorisation', ma, f);
+  return rows;
+};
+const MINOR_READINESS: MinorReadiness[] = [{
+  memberAssociation: 'ENG', pathwayEnabledInProduction: false,
+  timingRule: { ruleId: 'ENG-5.1', ruleStatus: 'ACTIVE', formula: 'academic_year_16' }, timingEncoded: true,
+  agentReady: false, gaps: [{ facet: 'minors_authorisation', memberAssociation: 'ENG', state: 'UNVERIFIED', code: 'AGENT_MINOR_AUTHORISATION_REQUIRED' }],
+  reasons: [reason('AGENT_STATE_INVALID')],
+  honest: 'General discovery of minors by agencies is prohibited and no minor representation workflow is live in any jurisdiction. This is the agent\u2019s own readiness under the encoded rules, evaluated against no subject.',
+}];
+const COMPLIANCE_HONEST = 'ScoutBox policy results say whether this workflow may proceed under the currently encoded rules. They are not statements of legal validity and no governing body has approved anything here.';
+
 // ============================================================ core
 export const demoCore: CoreApi = {
   listOrgs: () => delay([ORG]),
@@ -213,12 +323,12 @@ export const demoAgent: AgentApi = {
     const home: Home = { profileState: fifa, hasProfile: !!p, tiers: a.tiers, counts, alerts, unreadNotifications: (NOTES[s.userId] ?? []).filter((n) => !n.read).length, regulatoryNotice: 'ScoutBox is infrastructure. It performs no football-agent services, adjudicates no conflicts and confirms no regulatory status. Relationship records here are confirmed by the client, not by ScoutBox.' };
     return delay(home);
   },
-  async getProfile(s) { affOf(s); return delay({ profile: profileView(PROFILES.find((p) => p.userId === s.userId)), states: ['UNVERIFIED', 'PENDING', 'VERIFIED', 'STALE', 'INACTIVE', 'MANUAL_REVIEW_REQUIRED'], facets: ['fifa_licence', 'national_registration', 'minors_authorisation'], jurisdictions: ['INT', 'ENG', 'USA'] }); },
+  async getProfile(s) { affOf(s); return delay({ profile: profileView(PROFILES.find((p) => p.userId === s.userId)), states: ['UNVERIFIED', 'PENDING', 'VERIFIED', 'STALE', 'INACTIVE', 'MANUAL_REVIEW_REQUIRED'], facets: ['fifa_licence', 'national_registration', 'domestic_authorisation', 'minors_authorisation'], jurisdictions: ['INT', 'ENG', 'USA'] }); },
   async saveProfile(s, input) {
     need(s, 'profile.write.own');
     let p = PROFILES.find((x) => x.userId === s.userId);
     if (!p) {
-      p = { userId: s.userId, displayName: input.displayName?.trim() || userOf(s).name, declared: { fifaLicenceNumber: input.fifaLicenceNumber?.trim() || null, jurisdictions: input.jurisdictions ?? [] }, facets: { fifa_licence: facet('UNVERIFIED'), national_registration: {}, minors_authorisation: {} }, rev: 1, revAt: Date.now(), createdAt: Date.now(), history: [{ id: id('h'), at: Date.now(), action: 'agent_profile_created', detail: null }] };
+      p = { userId: s.userId, displayName: input.displayName?.trim() || userOf(s).name, declared: { fifaLicenceNumber: input.fifaLicenceNumber?.trim() || null, jurisdictions: input.jurisdictions ?? [] }, facets: { fifa_licence: facet('UNVERIFIED'), national_registration: {}, domestic_authorisation: {}, minors_authorisation: {} }, rev: 1, revAt: Date.now(), createdAt: Date.now(), history: [{ id: id('h'), at: Date.now(), action: 'agent_profile_created', detail: null }] };
       PROFILES.push(p);
     } else {
       if (input.expectedRev !== undefined && input.expectedRev !== p.rev) refuse(409, 'REPRESENTATION_VERSION_CONFLICT', 'Someone else changed this while you were working on it.');
@@ -250,8 +360,9 @@ export const demoAgent: AgentApi = {
       : /^TEST-INACTIVE-/i.test(ref)
         ? facet('INACTIVE', { reference: ref, memberAssociation: ma, provenance: { provider: 'local-synthetic-test-provider', kind: 'synthetic', at }, submittedAt: at, note: 'Reported inactive by the LOCAL SYNTHETIC test provider.' })
         : facet('MANUAL_REVIEW_REQUIRED', { reference: ref, memberAssociation: ma, provenance: { provider: 'none', kind: 'none', at }, submittedAt: at, note: `No ${f === 'fifa_licence' ? 'FIFA' : 'national'} register integration exists in this build, and attributed Trust & Safety review of agent licences is not yet available (P5.6A gate G-C0). A submitted reference is a declaration, not a verification.` });
-    const prev = f === 'fifa_licence' ? p!.facets.fifa_licence : p!.facets[f][ma!];
-    if (f === 'fifa_licence') p!.facets.fifa_licence = next; else p!.facets[f][ma!] = next;
+    const bucket = f === 'national_registration' ? 'national_registration' : f === 'domestic_authorisation' ? 'domestic_authorisation' : 'minors_authorisation';
+    const prev = f === 'fifa_licence' ? p!.facets.fifa_licence : p!.facets[bucket][ma!];
+    if (f === 'fifa_licence') p!.facets.fifa_licence = next; else p!.facets[bucket][ma!] = next;
     if ((prev?.state ?? 'UNVERIFIED') !== next.state) p!.history.push({ id: id('h'), at, action: 'agent_verification_state_changed', detail: { facet: f, memberAssociation: ma, from: prev?.state ?? 'UNVERIFIED', to: next.state } });
     p!.rev += 1; p!.revAt = at;
     return delay({ profile: profileView(p)!, facet: next, provider: 'local-synthetic-test-provider' });
@@ -380,6 +491,215 @@ export const demoAgent: AgentApi = {
     for (const r of RELS) if (grants(r, s.userId)) for (const o of BOARD[r.clientId] ?? []) items.push({ ...o, clientId: r.clientId, clientName: PLAYERS.find((p) => p.id === r.clientId)?.name, agreementId: r.id });
     items.sort((x, y) => String(x.deadline).localeCompare(String(y.deadline)));
     return delay({ items, note: 'Only opportunities legitimately visible to a confirmed client appear here. Club-private recruitment cases never do.' });
+  },
+  // ---- M23 P5.6C compliance
+  async complianceOverview(s) {
+    need(s, 'compliance.read');
+    const p = PROFILES.find((x) => x.userId === s.userId);
+    const mine = CTXS.filter(() => true).map(ctxView);
+    const overview: ComplianceOverview = {
+      provider: PROVIDER_STATUS,
+      facets: p ? {
+        fifa_licence: effState(p.facets.fifa_licence),
+        national_registration: Object.fromEntries(Object.entries(p.facets.national_registration).map(([k, f]) => [k, effState(f)])),
+        domestic_authorisation: Object.fromEntries(Object.entries(p.facets.domestic_authorisation).map(([k, f]) => [k, effState(f)])),
+        minors_authorisation: Object.fromEntries(Object.entries(p.facets.minors_authorisation).map(([k, f]) => [k, effState(f)])),
+      } : null,
+      freshness: freshnessOf(p),
+      policies: { inEffect: DEMO_POLICIES.map(({ id: pid, regulator, jurisdiction, effectiveFrom }) => ({ id: pid, regulator, jurisdiction, effectiveFrom })), missing: [] },
+      reviews: structuredClone(REVIEWS), contexts: mine, consents: structuredClone(CONSENTS),
+      minorReadiness: MINOR_READINESS,
+      counts: {
+        reviewsPending: REVIEWS.filter((r) => r.status === 'PENDING' || r.status === 'IN_REVIEW').length,
+        contextsOpen: CTXS.filter((c) => c.status === 'open').length,
+        consentsOutstanding: CONSENTS.filter((k) => k.status === 'requested').length,
+        staleFacets: freshnessOf(p).filter((f) => f.state === 'STALE').length,
+      },
+      honest: COMPLIANCE_HONEST,
+    };
+    return delay(overview);
+  },
+  async compliancePolicies(s) {
+    affOf(s);
+    return delay({ inEffect: structuredClone(DEMO_POLICIES), missing: [], ruleStatuses: ['ACTIVE', 'SUSPENDED', 'PARTIALLY_SUSPENDED', 'JURISDICTION_OVERRIDE', 'PENDING_IMPLEMENTATION', 'UNDER_LEGAL_REVIEW', 'UNKNOWN'], honest: 'These are ScoutBox\u2019s encoded platform rules with their operative status as recorded on the retrieval date. They are not legal advice and a status can change without a deploy.' });
+  },
+  async recheckFacet(s, facet, memberAssociation) {
+    need(s, 'compliance.contexts.write');
+    const p = PROFILES.find((x) => x.userId === s.userId);
+    if (!p) refuse(403, 'AGENT_VERIFICATION_REQUIRED', 'Create your agent profile first.');
+    const bucket = facet === 'national_registration' ? 'national_registration' : facet === 'domestic_authorisation' ? 'domestic_authorisation' : 'minors_authorisation';
+    const cur = facet === 'fifa_licence' ? p!.facets.fifa_licence : p!.facets[bucket][memberAssociation ?? 'ENG'];
+    if (!cur) refuse(404, 'AGENT_FACET_NOT_FOUND', 'Nothing has been submitted for that facet.');
+    const at = Date.now();
+    const next: FacetView = { ...cur!, state: cur!.state, recheckAt: at + 30 * DAY, provenance: { provider: 'local-synthetic-test-provider', kind: 'synthetic', at }, note: 'Re-checked against the LOCAL SYNTHETIC test provider. This is not a FIFA, FA or U.S. Soccer register check and never exists in production.' };
+    if (facet === 'fifa_licence') p!.facets.fifa_licence = next; else p!.facets[bucket][memberAssociation ?? 'ENG'] = next;
+    p!.rev += 1; p!.revAt = at;
+    return delay({ facet: next, provider: PROVIDER_STATUS });
+  },
+  async contexts(s) {
+    need(s, 'compliance.read');
+    return delay({ items: CTXS.map(ctxView), types: ['employment_contract', 'transfer', 'loan', 'other_services'], partyRoles: ['individual', 'engaging_entity', 'releasing_entity'] });
+  },
+  async createContext(s, input) {
+    need(s, 'compliance.contexts.write');
+    const g = gap(PROFILES.find((x) => x.userId === s.userId), input.jurisdictions.find((j) => j !== 'INT') ?? 'INT');
+    if (g) refuse(403, g.error, g.message);
+    const hit = CTXS.find((c) => c.history.some((h) => h.detail?.clientKey === input.clientKey));
+    if (hit) return delay({ context: ctxView(hit), idempotent: true });
+    const parties: ComplianceContext['parties'] = [];
+    for (const raw of input.parties) {
+      if (raw.subjectKind === 'player') {
+        const pl = PLAYERS.find((x) => x.id === raw.subjectId);
+        const rel = RELS.find((r) => r.clientId === raw.subjectId && r.agentUserId === s.userId && eff(r) === 'active');
+        if (!pl || pl.blocked || !rel) refuse(404, 'PARTY_NOT_FOUND', 'That party is not available to you.');
+        parties.push({ id: id('cpt'), partyRole: raw.partyRole, subjectKind: 'player', subjectId: pl!.id, name: pl!.name, removed: false });
+      } else {
+        const club = DEMO_CLUBS.find((c) => c.id === raw.subjectId);
+        if (!club) refuse(404, 'PARTY_NOT_FOUND', 'That party is not available to you.');
+        parties.push({ id: id('cpt'), partyRole: raw.partyRole, subjectKind: 'club', subjectId: club!.id, name: club!.name, removed: false });
+      }
+    }
+    const c: DemoCtx = { id: id('ctx'), type: input.type, status: 'open', jurisdictions: input.jurisdictions, parties, representations: [], clearance: null, reEvaluationPending: false, evaluations: 0, openedAt: Date.now(), closedAt: null, rev: 1, revAt: Date.now(), history: [] };
+    cxHist(c, 'compliance_context_opened', { type: input.type, clientKey: input.clientKey });
+    CTXS.unshift(c);
+    const evaluation = reEvaluate(c);
+    return delay({ context: ctxView(c), evaluation });
+  },
+  async context(s, cid) {
+    need(s, 'compliance.read');
+    const c = CTXS.find((x) => x.id === cid);
+    if (!c) refuse(404, 'CONTEXT_NOT_FOUND', 'Not found.');
+    return delay({ context: ctxView(c!) });
+  },
+  async evaluateContext(s, cid) {
+    need(s, 'compliance.contexts.write');
+    const c = CTXS.find((x) => x.id === cid);
+    if (!c) refuse(404, 'CONTEXT_NOT_FOUND', 'Not found.');
+    const evaluation = reEvaluate(c!);
+    c!.rev += 1; c!.revAt = Date.now();
+    return delay({ context: ctxView(c!), evaluation });
+  },
+  async addParty(s, cid, input) {
+    need(s, 'compliance.contexts.write');
+    const c = CTXS.find((x) => x.id === cid);
+    if (!c) refuse(404, 'CONTEXT_NOT_FOUND', 'Not found.');
+    if (c!.status !== 'open') refuse(409, 'CONTEXT_CLOSED', 'This context is closed.');
+    if (c!.parties.some((p) => p.partyRole === input.partyRole && !p.removed)) refuse(409, 'CONTEXT_PARTY_EXISTS', `A ${input.partyRole} party is already named.`);
+    const club = input.subjectKind === 'club' ? DEMO_CLUBS.find((x) => x.id === input.subjectId) : null;
+    const pl = input.subjectKind === 'player' ? PLAYERS.find((x) => x.id === input.subjectId) : null;
+    if (!club && !pl) refuse(404, 'PARTY_NOT_FOUND', 'That party is not available to you.');
+    c!.parties.push({ id: id('cpt'), partyRole: input.partyRole, subjectKind: input.subjectKind, subjectId: input.subjectId, name: club?.name ?? pl!.name, removed: false });
+    cxHist(c!, 'compliance_context_party_added', { partyRole: input.partyRole });
+    const evaluation = reEvaluate(c!);
+    c!.rev += 1; c!.revAt = Date.now();
+    return delay({ context: ctxView(c!), evaluation });
+  },
+  async declare(s, cid, input) {
+    need(s, 'compliance.contexts.write');
+    const c = CTXS.find((x) => x.id === cid);
+    if (!c) refuse(404, 'CONTEXT_NOT_FOUND', 'Not found.');
+    if (c!.status !== 'open') refuse(409, 'CONTEXT_CLOSED', 'This context is closed.');
+    const party = c!.parties.find((p) => p.partyRole === input.partyRole && !p.removed);
+    if (!party) refuse(404, 'PARTY_NOT_FOUND', 'That party is not available to you.');
+    if (c!.representations.some((r) => r.partyRole === input.partyRole && r.status !== 'withdrawn')) refuse(409, 'CONTEXT_PARTY_EXISTS', 'You already represent this party in this context.');
+    const declaredOnly = party!.subjectKind === 'club';
+    if (!declaredOnly) {
+      const rel = RELS.find((r) => r.id === input.agreementId && r.agentUserId === s.userId && r.clientId === party!.subjectId);
+      if (!rel) refuse(403, 'REPRESENTATION_REQUIRED', 'A client-confirmed, active relationship with this party is required.');
+      if (eff(rel!) !== 'active') refuse(403, 'REPRESENTATION_EXPIRED', 'That relationship is not active.');
+    }
+    // The verdict is computed with the proposal included; a refusal records nothing.
+    const proposed = { id: id('crp'), agentUserId: s.userId, partyRole: input.partyRole, agreementId: declaredOnly ? null : input.agreementId ?? null, status: declaredOnly ? 'pending_review' : 'verified', declaredOnly, reviewId: null as string | null, firstActAt: declaredOnly ? null : Date.now() };
+    c!.representations.push(proposed);
+    const result = clearanceOf(c!);
+    if (result.outcome === 'PROHIBITED_CONFLICT') {
+      c!.representations.pop();
+      c!.clearance = clearanceOf(c!);
+      const e = new DemoError(403, 'REPRESENTATION_CONFLICT', 'An encoded ACTIVE rule prohibits this combination of parties. Nothing was recorded.');
+      e.details = { error: 'REPRESENTATION_CONFLICT', reasons: result.reasons.filter((r) => r.code === 'PROHIBITED_COMBINATION'), policyVersions: result.policyVersions, outcome: result.outcome };
+      throw e;
+    }
+    if (result.outcome === 'PERMITTED_DUAL_REPRESENTATION_CONSENT_REQUIRED') {
+      c!.representations.pop();
+      c!.clearance = clearanceOf(c!);
+      const e = new DemoError(422, 'CONSENT_REQUIRED', 'Prior, party-specific written consent is outstanding. Request it; nothing was recorded.');
+      e.details = { error: 'CONSENT_REQUIRED', consentsOutstanding: result.consentsOutstanding, reasons: result.reasons.filter((r) => r.code === 'CONSENT_REQUIRED'), policyVersions: result.policyVersions, outcome: result.outcome, contextId: c!.id };
+      throw e;
+    }
+    cxHist(c!, 'compliance_representation_declared', { partyRole: input.partyRole, status: proposed.status });
+    if (declaredOnly) {
+      const review: ReviewPublic = {
+        id: id('rrv'), kind: 'representation_declared', status: 'PENDING', agencyOrgId: ORG.id, agentUserId: s.userId,
+        subject: { contextId: c!.id, representationId: proposed.id, partyRole: input.partyRole },
+        reasons: [reason('REPRESENTATION_UNVERIFIED', { partyRole: input.partyRole })], policyVersions: DEMO_POLICIES.map((x) => x.id),
+        requestedAt: Date.now(), startedAt: null, decidedAt: null, decision: null, startedBy: null, supersedes: null, supersededBy: null,
+        snapshot: { outcome: 'MANUAL_REGULATORY_REVIEW_REQUIRED', evaluatedAt: Date.now(), policyVersions: DEMO_POLICIES.map((x) => x.id) }, rev: 1, revAt: Date.now(),
+      };
+      proposed.reviewId = review.id;
+      REVIEWS.unshift(review);
+      cxHist(c!, 'regulatory_review_requested', { kind: 'representation_declared' });
+      reEvaluate(c!);
+      c!.rev += 1; c!.revAt = Date.now();
+      const e = new DemoError(422, 'REGULATORY_REVIEW_REQUIRED', 'Representation of an entity without a ScoutBox agreement is recorded as declared and needs attributed review. It is not effective until a named reviewer confirms it.');
+      e.details = { error: 'REGULATORY_REVIEW_REQUIRED', reviewId: review.id, contextId: c!.id, reasons: review.reasons, policyVersions: review.policyVersions, outcome: 'MANUAL_REGULATORY_REVIEW_REQUIRED' };
+      throw e;
+    }
+    const evaluation = reEvaluate(c!);
+    c!.rev += 1; c!.revAt = Date.now();
+    return delay({ context: ctxView(c!), representation: { id: proposed.id, partyRole: input.partyRole, status: proposed.status }, evaluation });
+  },
+  async withdraw(s, cid, repId) {
+    need(s, 'compliance.contexts.write');
+    const c = CTXS.find((x) => x.id === cid);
+    if (!c) refuse(404, 'CONTEXT_NOT_FOUND', 'Not found.');
+    const rep = c!.representations.find((r) => r.id === repId);
+    if (!rep) refuse(404, 'CONTEXT_NOT_FOUND', 'Not found.');
+    rep!.status = 'withdrawn';
+    cxHist(c!, 'compliance_representation_withdrawn', { partyRole: rep!.partyRole });
+    const evaluation = reEvaluate(c!);
+    c!.rev += 1; c!.revAt = Date.now();
+    return delay({ context: ctxView(c!), evaluation });
+  },
+  async closeContext(s, cid) {
+    need(s, 'compliance.contexts.write');
+    const c = CTXS.find((x) => x.id === cid);
+    if (!c) refuse(404, 'CONTEXT_NOT_FOUND', 'Not found.');
+    if (c!.status === 'closed') return delay({ context: ctxView(c!), idempotent: true });
+    c!.status = 'closed'; c!.closedAt = Date.now();
+    for (const r of REVIEWS) if (r.subject?.contextId === c!.id && (r.status === 'PENDING' || r.status === 'IN_REVIEW')) { r.status = 'CANCELLED'; r.decidedAt = Date.now(); }
+    cxHist(c!, 'compliance_context_closed');
+    c!.rev += 1; c!.revAt = Date.now();
+    return delay({ context: ctxView(c!) });
+  },
+  async requestConsent(s, cid, input) {
+    need(s, 'compliance.contexts.write');
+    const c = CTXS.find((x) => x.id === cid);
+    if (!c) refuse(404, 'CONTEXT_NOT_FOUND', 'Not found.');
+    const party = c!.parties.find((p) => p.partyRole === input.partyRole && !p.removed);
+    if (!party) refuse(404, 'PARTY_NOT_FOUND', 'That party is not available to you.');
+    const open = CONSENTS.find((k) => k.contextId === c!.id && k.partyRole === input.partyRole && k.status === 'requested');
+    if (open) refuse(409, 'CONSENT_ALREADY_REQUESTED', 'A consent request is already open for that party.');
+    const k: AgentConsent = {
+      id: id('rcs'), kind: 'dual_representation', status: 'requested', contextId: c!.id, partyRole: input.partyRole, subjectKind: party!.subjectKind,
+      requestedAt: Date.now(), grantedAt: null, declinedAt: null, revokedAt: null, policyVersions: DEMO_POLICIES.map((x) => x.id), ruleIds: ['ENG-6.3'],
+      particulars: { fullParticularsProvided: input.fullParticularsProvided, legalAdviceOffered: input.legalAdviceOffered, proposedFeeDisclosed: input.proposedFeeDisclosed, acknowledged: null }, rev: 1, revAt: Date.now(),
+    };
+    CONSENTS.unshift(k);
+    cxHist(c!, 'regulatory_consent_requested', { partyRole: input.partyRole });
+    // The demo's simulated counterparty answers after a moment so the journey
+    // can be seen end to end; in the product the party answers in their own app.
+    window.setTimeout(() => {
+      if (k.status !== 'requested') return;
+      k.status = 'granted'; k.grantedAt = Date.now(); k.rev += 1; k.revAt = Date.now();
+      cxHist(c!, 'regulatory_consent_granted', { partyRole: input.partyRole }, party!.subjectKind === 'player' ? 'player' : 'club_user');
+      reEvaluate(c!, party!.subjectKind === 'player' ? 'player' : 'club_user');
+      (NOTES[s.userId] ??= []).unshift({ id: id('n'), ts: Date.now(), type: 'regulatory_consent_granted', text: 'A party granted written consent to multiple representation for one transaction context. It is specific to that context and can be revoked.', refId: c!.id, read: false });
+    }, 5000);
+    return delay({ consent: structuredClone(k) });
+  },
+  async clubs(s) {
+    affOf(s);
+    return delay(structuredClone(DEMO_CLUBS));
   },
   async inbox(s) {
     need(s, 'inbox.read');

@@ -9,7 +9,7 @@ import { demoAgent } from './agentDemo';
 
 export const VERIFICATION_STATES = ['UNVERIFIED', 'PENDING', 'VERIFIED', 'STALE', 'INACTIVE', 'MANUAL_REVIEW_REQUIRED'] as const;
 export type VerificationState = (typeof VERIFICATION_STATES)[number];
-export const FACETS = ['fifa_licence', 'national_registration', 'minors_authorisation'] as const;
+export const FACETS = ['fifa_licence', 'national_registration', 'domestic_authorisation', 'minors_authorisation'] as const;
 export type Facet = (typeof FACETS)[number];
 export const TIERS = ['licensed_agent', 'agency_admin', 'analyst', 'assistant', 'finance'] as const;
 export type Tier = (typeof TIERS)[number];
@@ -37,10 +37,10 @@ export interface Profile {
   agencyOrgId: string;
   displayName: string;
   declared: { fifaLicenceNumber: string | null; jurisdictions: string[] };
-  facets: { fifa_licence: FacetView | null; national_registration: Record<string, FacetView>; minors_authorisation: Record<string, FacetView> };
+  facets: { fifa_licence: FacetView | null; national_registration: Record<string, FacetView>; domestic_authorisation: Record<string, FacetView>; minors_authorisation: Record<string, FacetView> };
   regulatoryState: {
     fifaLicence: VerificationState;
-    jurisdictions: { memberAssociation: string; nationalRegistration: VerificationState; minorsAuthorisation: VerificationState; regulatedActionsPermitted: boolean }[];
+    jurisdictions: { memberAssociation: string; nationalRegistration: VerificationState; domesticAuthorisation: VerificationState; minorsAuthorisation: VerificationState; regulatedActionsPermitted: boolean }[];
   };
   policyVersion: number;
   createdAt: number;
@@ -195,6 +195,88 @@ export interface PlayerHit { id: string; name: string; position: string | null; 
 
 export interface RequestInput { playerId: string; scope: Scope[]; termMonths: number; jurisdiction: Jurisdiction; exclusive: boolean; clientKey: string }
 
+
+// ------------------------------------------------------------ M23 P5.6C — compliance
+// The server's projections, copied faithfully. A reason carries a code, a
+// rule id, that rule's OPERATIVE status and the policy version it came from —
+// never prose, never a reviewer's note, never another agent's id.
+export const CONFLICT_OUTCOMES = ['CLEAR', 'PERMITTED_DUAL_REPRESENTATION_CONSENT_REQUIRED', 'PROHIBITED_CONFLICT', 'MANUAL_REGULATORY_REVIEW_REQUIRED', 'INSUFFICIENT_DATA'] as const;
+export type ConflictOutcome = (typeof CONFLICT_OUTCOMES)[number];
+export const CONTEXT_TYPES = ['employment_contract', 'transfer', 'loan', 'other_services'] as const;
+export type ContextType = (typeof CONTEXT_TYPES)[number];
+export const PARTY_ROLES = ['individual', 'engaging_entity', 'releasing_entity'] as const;
+export type PartyRole = (typeof PARTY_ROLES)[number];
+export type RuleStatus = 'ACTIVE' | 'SUSPENDED' | 'PARTIALLY_SUSPENDED' | 'JURISDICTION_OVERRIDE' | 'PENDING_IMPLEMENTATION' | 'UNDER_LEGAL_REVIEW' | 'UNKNOWN';
+
+export interface Reason { code: string; ruleId: string | null; ruleStatus: RuleStatus | null; regulator?: string | null; jurisdiction?: string | null; policyVersion: string | null; partyRoles?: string[]; partyRole?: string | null; overrideRuleId?: string | null }
+export interface ConsentOutstanding { partyRole: PartyRole; consentKind: string; reasonCode: string }
+export interface Clearance {
+  outcome: ConflictOutcome;
+  alias: string | null;
+  reasons: Reason[];
+  consentsOutstanding: ConsentOutstanding[];
+  requiredActions: { action: string; partyRoles?: string[]; reasonCodes?: string[] }[];
+  policyVersions: string[];
+  evaluatedAt: number;
+  inputHash: string;
+  /** False after a policy publication until the agent re-evaluates (never silently re-verdicted). */
+  current: boolean;
+}
+export interface ContextParty { id: string; partyRole: PartyRole; subjectKind: 'player' | 'club'; subjectId: string; name: string | null; removed: boolean }
+export interface ContextRepresentation { id: string; agentUserId: string; partyRole: PartyRole; agreementId: string | null; status: 'verified' | 'pending_review' | 'withdrawn' | string; declaredOnly: boolean; reviewId: string | null; firstActAt: number | null }
+export interface ComplianceContext {
+  id: string;
+  type: ContextType;
+  status: 'open' | 'closed';
+  jurisdictions: string[];
+  scope: 'national' | 'international' | 'unknown';
+  parties: ContextParty[];
+  representations: ContextRepresentation[];
+  clearance: Clearance | null;
+  reEvaluationPending: boolean;
+  evaluationCount: number;
+  openedAt: number;
+  closedAt: number | null;
+  rev: number;
+  revAt: number | null;
+  history: { id: string; at: number; action: string; byKind: string | null; detail: Record<string, unknown> | null }[];
+  honest: string;
+}
+export interface AgentConsent {
+  id: string; kind: string; status: 'requested' | 'granted' | 'declined' | 'revoked' | string; contextId: string | null; partyRole: PartyRole | null; subjectKind: 'player' | 'club' | null;
+  requestedAt: number | null; grantedAt: number | null; declinedAt: number | null; revokedAt: number | null; policyVersions: string[]; ruleIds: string[];
+  particulars: { fullParticularsProvided: boolean; legalAdviceOffered: boolean; proposedFeeDisclosed: boolean; acknowledged: unknown } | null; rev: number; revAt: number | null;
+}
+export interface ReviewPublic {
+  id: string; kind: 'verification_facet' | 'representation_dispute' | 'representation_declared' | 'conflict_evaluation' | string;
+  status: 'PENDING' | 'IN_REVIEW' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'SUPERSEDED' | string;
+  agencyOrgId: string; agentUserId: string | null; subject: Record<string, unknown>; reasons: Reason[]; policyVersions: string[];
+  requestedAt: number; startedAt: number | null; decidedAt: number | null;
+  decision: { outcome: string; reasonCode: string; reviewer: { id: string; name: string; role: string }; evidenceCount: number } | null;
+  startedBy: { id: string; name: string } | null; supersedes: string | null; supersededBy: string | null;
+  snapshot: { outcome: string | null; evaluatedAt: number | null; policyVersions: string[] } | null; rev: number; revAt: number | null;
+}
+export interface FacetFreshness { facet: Facet; memberAssociation: string | null; state: VerificationState; storedState: string; recheckAt: number | null; daysUntilRecheck: number | null; provenance: { provider: string; kind?: string } | null; verifiedAt: number | null }
+export interface ProviderStatus { provider: string; live: boolean; registers: Record<string, string>; note: string }
+export interface PolicyInEffect { id: string; regulator: string; jurisdiction: string; effectiveFrom: string }
+export interface MinorReadiness { memberAssociation: string; pathwayEnabledInProduction: boolean; timingRule: { ruleId: string; ruleStatus: RuleStatus; formula: string | null } | null; timingEncoded: boolean; agentReady: boolean; gaps: { facet: string; memberAssociation: string | null; state: string; code: string }[]; reasons: Reason[]; honest: string }
+export interface ComplianceOverview {
+  provider: ProviderStatus;
+  facets: { fifa_licence: VerificationState; national_registration: Record<string, VerificationState>; domestic_authorisation: Record<string, VerificationState>; minors_authorisation: Record<string, VerificationState> } | null;
+  freshness: FacetFreshness[];
+  policies: { inEffect: PolicyInEffect[]; missing: string[] };
+  reviews: ReviewPublic[];
+  contexts: ComplianceContext[];
+  consents: AgentConsent[];
+  minorReadiness: MinorReadiness[];
+  counts: { reviewsPending: number; contextsOpen: number; consentsOutstanding: number; staleFacets: number };
+  honest: string;
+}
+export interface PolicyVersionPublic { id: string; regulator: string; jurisdiction: string; policyVersion: number; supersedes: string | null; effectiveFrom: string; effectiveTo: string | null; status: string; publishedAt: number | null; rules?: Record<string, { ruleStatus: RuleStatus; textStatus?: string; sourceRef?: string | null; note?: string | null }> }
+export interface ClubHit { id: string; name: string; type: string; verified?: boolean }
+export interface ContextCreateInput { type: ContextType; jurisdictions: string[]; parties: { partyRole: PartyRole; subjectKind: 'player' | 'club'; subjectId: string }[]; clientKey: string }
+export interface ContextMutation { context: ComplianceContext; evaluation?: Clearance; representation?: { id: string; partyRole: PartyRole; status: string }; idempotent?: boolean }
+
 export interface AgentApi {
   me(s: Session): Promise<Me>;
   home(s: Session): Promise<Home>;
@@ -217,6 +299,21 @@ export interface AgentApi {
   clientOpportunities(s: Session, id: string): Promise<{ items: Opportunity[]; clientId: string; note: string }>;
   opportunities(s: Session): Promise<{ items: Opportunity[]; note: string }>;
   inbox(s: Session): Promise<{ notifications: import('./api').Notification[]; pending: Relationship[]; note: string }>;
+  // ---- M23 P5.6C compliance
+  complianceOverview(s: Session): Promise<ComplianceOverview>;
+  compliancePolicies(s: Session): Promise<{ inEffect: PolicyVersionPublic[]; missing: string[]; ruleStatuses: string[]; honest: string }>;
+  recheckFacet(s: Session, facet: Facet, memberAssociation?: string): Promise<{ facet: FacetView; provider: ProviderStatus }>;
+  contexts(s: Session): Promise<{ items: ComplianceContext[]; types: string[]; partyRoles: string[] }>;
+  createContext(s: Session, input: ContextCreateInput): Promise<ContextMutation>;
+  context(s: Session, id: string): Promise<{ context: ComplianceContext }>;
+  evaluateContext(s: Session, id: string): Promise<{ context: ComplianceContext; evaluation: Clearance }>;
+  addParty(s: Session, id: string, input: { partyRole: PartyRole; subjectKind: 'player' | 'club'; subjectId: string; expectedRev?: number }): Promise<ContextMutation>;
+  declare(s: Session, id: string, input: { partyRole: PartyRole; agreementId?: string; clientKey: string; expectedRev?: number }): Promise<ContextMutation>;
+  withdraw(s: Session, id: string, repId: string, expectedRev?: number): Promise<ContextMutation>;
+  closeContext(s: Session, id: string, expectedRev?: number): Promise<ContextMutation>;
+  requestConsent(s: Session, id: string, input: { partyRole: PartyRole; fullParticularsProvided: boolean; legalAdviceOffered: boolean; proposedFeeDisclosed: boolean; clientKey: string }): Promise<{ consent: AgentConsent; idempotent?: boolean }>;
+  /** Public club directory (names only) — the pool an engaging or releasing entity is picked from. */
+  clubs(s: Session): Promise<ClubHit[]>;
 }
 
 const post = <T,>(s: Session, path: string, body: unknown, method = 'POST') => request<T>(path, { method, headers: headers(s), body: JSON.stringify(body) });
@@ -244,6 +341,19 @@ export const httpAgent: AgentApi = {
   clientOpportunities: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}/opportunities`),
   opportunities: (s) => get(s, '/org/agent/opportunities'),
   inbox: (s) => get(s, '/org/agent/inbox'),
+  complianceOverview: (s) => get(s, '/org/agent/compliance/overview'),
+  compliancePolicies: (s) => get(s, '/org/agent/compliance/policies'),
+  recheckFacet: (s, facet, memberAssociation) => post(s, `/org/agent/compliance/facets/${facet}/recheck`, memberAssociation ? { memberAssociation } : {}),
+  contexts: (s) => get(s, '/org/agent/compliance/contexts'),
+  createContext: (s, input) => post(s, '/org/agent/compliance/contexts', input),
+  context: (s, id) => get(s, `/org/agent/compliance/contexts/${encodeURIComponent(id)}`),
+  evaluateContext: (s, id) => post(s, `/org/agent/compliance/contexts/${encodeURIComponent(id)}/evaluate`, {}),
+  addParty: (s, id, input) => post(s, `/org/agent/compliance/contexts/${encodeURIComponent(id)}/parties`, input),
+  declare: (s, id, input) => post(s, `/org/agent/compliance/contexts/${encodeURIComponent(id)}/representations`, input),
+  withdraw: (s, id, repId, expectedRev) => post(s, `/org/agent/compliance/contexts/${encodeURIComponent(id)}/representations/${encodeURIComponent(repId)}/withdraw`, expectedRev === undefined ? {} : { expectedRev }),
+  closeContext: (s, id, expectedRev) => post(s, `/org/agent/compliance/contexts/${encodeURIComponent(id)}/close`, expectedRev === undefined ? {} : { expectedRev }),
+  requestConsent: (s, id, input) => post(s, `/org/agent/compliance/contexts/${encodeURIComponent(id)}/consents/request`, input),
+  clubs: async () => (await request<ClubHit[]>('/orgs?platform=main')).filter((o) => o.type === 'club'),
 };
 
 export const agent: AgentApi = DEMO_MODE ? demoAgent : httpAgent;
