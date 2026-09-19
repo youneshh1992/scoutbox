@@ -330,10 +330,13 @@ export function buildTimeline(src) {
       when: normWhen(r.confirmedAt ?? r.startAt), title: { org: r.agencyName }, org: org(r.agencyOrgId, r.agencyName),
       provenance: 'system_recorded', visibility: 'recruitment', source: { type: 'representation', id: r.id },
     });
-    if (r.withdrawnAt || (r.endAt && r.endAt < Date.now())) {
+    // M23 P5.6E: a DISPUTE ends the relationship's standing as surely as a
+    // withdrawal or an expiry. Without this a disputed row read as a
+    // representation that started and never ended.
+    if (r.withdrawnAt || r.disputedAt || (r.endAt && r.endAt < Date.now())) {
       push({
         id: evId('representation', r.id, 'representation_ended'), type: 'representation_ended',
-        when: normWhen(r.withdrawnAt ?? r.endAt), title: { org: r.agencyName }, org: org(r.agencyOrgId, r.agencyName),
+        when: normWhen(r.withdrawnAt ?? r.disputedAt ?? r.endAt), title: { org: r.agencyName }, org: org(r.agencyOrgId, r.agencyName),
         provenance: 'system_recorded', visibility: 'recruitment', source: { type: 'representation', id: r.id },
       });
     }
@@ -444,7 +447,22 @@ export function clubHistory(src) {
 // verified coach > ScoutBox review > guardian > player. Player input NEVER
 // silently wins over an authoritative current record — it becomes a flagged
 // conflict for the self view instead.
-export function currentStatus({ history, prefs, representations = [], identity = null }) {
+/**
+ * M23 P5.6E (E-2): the representation headline comes from the CANONICAL P5.6B
+ * lane, not from the legacy M13 F10 lane.
+ *
+ * Two things were wrong with reading the legacy lane here. It used the STORED
+ * status, and a legacy row's status is never updated on expiry — the F10 lane
+ * computes freshness at read time precisely because of that — so a row whose
+ * term had ended was presented to a club as the player's current
+ * representation. And a legacy row names no licensed individual, so it is not
+ * the authoritative answer to "who represents this player" in the first place.
+ *
+ * A legacy record still exists and still matters as history, so when there is
+ * no canonical relationship and a legacy one was once confirmed, the projection
+ * says that in words instead of either showing it as current or hiding it.
+ */
+export function currentStatus({ history, prefs, representations = [], agreements = [], identity = null, now = Date.now() }) {
   const authoritative = history.rows.find((r) => r.current && provRank(r.provenance) >= provRank('scoutbox_reviewed'));
   const selfCurrent = history.rows.find((r) => r.current && (r.provenance === 'player_submitted' || r.provenance === 'guardian_submitted'));
   const conflicts = [];
@@ -457,7 +475,12 @@ export function currentStatus({ history, prefs, representations = [], identity =
   }
   const anyCurrent = history.rows.find((r) => r.current);
   const currentClub = authoritative ?? anyCurrent ?? null;
-  const activeRep = representations.find((r) => r.status === 'active');
+  const activeRep = (agreements ?? []).find((a) => a
+    && typeof a.agentUserId === 'string' && a.agentUserId
+    && a.confirmedAt && a.status === 'active'
+    && !(typeof a.endAt === 'number' && a.endAt <= now)) ?? null;
+  // History only: a legacy row that was once confirmed, whatever became of it.
+  const legacyOnly = !activeRep && (representations ?? []).some((r) => r && r.confirmedAt);
   return {
     currentClub: currentClub && {
       orgId: currentClub.orgId, orgName: currentClub.orgName, role: currentClub.role,
@@ -467,7 +490,16 @@ export function currentStatus({ history, prefs, representations = [], identity =
     positions: prefs?.positions ?? null, // { primary, secondary[] } player-declared
     availability: prefs?.availability ?? null,
     availableFrom: prefs?.availableFrom ?? null,
-    representation: activeRep ? { agencyName: activeRep.agencyName, scope: activeRep.scope, since: whenDisplay(normWhen(activeRep.confirmedAt ?? activeRep.startAt)) } : null,
+    representation: activeRep ? {
+      agencyName: activeRep.agencyName ?? null,
+      agentDisplayName: activeRep.agentDisplayName ?? null,
+      scope: activeRep.scope ?? null,
+      since: whenDisplay(normWhen(activeRep.confirmedAt ?? activeRep.startAt)),
+      source: 'canonical',
+    } : null,
+    representationNote: legacyOnly
+      ? 'An earlier representation record exists in the player\u2019s history. It names no licensed individual and is not a current representation; a current one is a relationship a licensed agent requested and the player confirmed.'
+      : null,
     identity,
     conflicts,
   };

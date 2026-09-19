@@ -531,37 +531,43 @@ section('F2 — consent-based transitions');
 }
 
 // ================================================================ F10
-section('F10 — adult representation (DOB-gated live)');
+section('F10 — the legacy representation lane is CLOSED (M23 P5.6E E-1)');
 {
-  let r = await j('POST', '/org/representation/propose', { playerId: 'pl-guni', representativeName: 'Alex Agent', scope: 'full' }, agency.token);
-  ok(r.status === 403 && (r.body.error === 'UNDER_18_WALL' || r.body.error === 'NOT_VISIBLE'), 'agency cannot propose on a 14-year-old');
-  r = await j('POST', '/org/representation/propose', { playerId: kid17Id, representativeName: 'Alex Agent' }, agency.token);
-  ok(r.status === 403, 'agency cannot propose on a 17-year-old (DOB boundary)');
-  r = await j('POST', '/org/representation/propose', { playerId: kid16Id, representativeName: 'Alex Agent' }, agency.token);
-  ok(r.status === 403, 'agency cannot propose on a 16-year-old (DOB boundary)');
-
-  r = await j('POST', '/org/representation/propose', { playerId: 'pl-adeyemi', representativeName: 'Alex Agent', scope: 'contracts_only', endMonths: 12, credentialNote: 'FA licence PDF uploaded' }, agency.token);
-  const rep = r.body.representation;
-  ok(r.status === 201 && rep.status === 'proposed', 'agency proposes representation for an adult');
-  ok(rep.credential.honest.includes('NOT an independently verified licence'), 'uploaded credential labelled honestly (not a verified licence)');
-
-  r = await j('POST', '/org/representation/propose', { playerId: 'pl-adeyemi' }, maria.token);
-  ok(r.status === 403 && r.body.error === 'AGENCY_ONLY', 'clubs cannot use the agency lane');
-
-  r = await j('GET', '/player/representation', undefined, adeyemi.token);
-  ok(r.body.items[0]?.id === rep.id, 'adult player sees the proposal');
-  r = await j('POST', `/player/representation/${rep.id}/confirm`, {}, adeyemi.token);
-  ok(r.status === 200 && r.body.representation.status === 'active', 'player confirmation activates the relationship');
-
-  let ar = await fetch(`${BASE}/admin/representations/${rep.id}/review-credential`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify({ valid: true }) });
-  const arb = await ar.json();
-  ok(arb.representation.credential.reviewStatus === 'reviewed_valid' && arb.honest.includes('No independent licence-register integration'), 'T&S review recorded as a DOCUMENT review, register check honestly absent');
-
-  r = await j('POST', `/player/representation/${rep.id}/withdraw`, {}, adeyemi.token);
-  ok(r.status === 200 && r.body.note.includes('History is retained'), 'withdrawal revokes access, history retained');
-  r = await j('GET', '/org/representation', undefined, agency.token);
-  const withdrawn = r.body.items.find((x) => x.id === rep.id);
-  ok(withdrawn.status === 'withdrawn' && withdrawn.history.length >= 2, 'agency sees the truthful withdrawn state + attribution');
+  // P5.6E §5/§7 permit exactly ONE active authority writer, and it is the
+  // canonical P5.6B lane: a licensed individual requests, the client confirms.
+  // This lane created relationships with no licence check, no jurisdiction
+  // policy, no conflict evaluation, no consent ledger, no rev and no
+  // idempotency — and a confirmed row fed the Trust relationship input and the
+  // Passport representation headline. It now creates nothing.
+  //
+  // What an EXISTING legacy row can and cannot do is proven in
+  // m23AgentIntegrationE2E, which seeds one; there is deliberately no way to
+  // create one here any more.
+  const bodies = [];
+  for (const [label, playerId] of [['a 14-year-old', 'pl-guni'], ['a 17-year-old', kid17Id], ['a 16-year-old', kid16Id], ['an adult', 'pl-adeyemi']]) {
+    const r = await j('POST', '/org/representation/propose', { playerId, representativeName: 'Alex Agent', scope: 'full' }, agency.token);
+    ok(r.status === 410 && r.body.error === 'REPRESENTATION_LANE_CLOSED', `the closed lane creates nothing for ${label}`);
+    bodies.push(JSON.stringify(r.body));
+  }
+  // The closure is UNIFORM: the answer for a 14-year-old is byte-identical to
+  // the answer for an adult, so the refusal no longer distinguishes a minor
+  // from a visible adult. The old lane's 403 UNDER_18_WALL / NOT_VISIBLE split
+  // told the caller which one they had asked about.
+  ok(new Set(bodies).size === 1, 'and the refusal is identical for a minor and an adult — the closure is not an age oracle');
+  const r2 = await j('POST', '/org/representation/propose', { playerId: 'pl-adeyemi' }, maria.token);
+  ok(r2.status === 403 && r2.body.error === 'AGENCY_ONLY', 'a club is still refused the agency lane before the closure is even reached');
+  // The read routes stay open: history must remain visible to the people named
+  // in it, and a player must always be able to see what exists about them.
+  const list = await j('GET', '/org/representation', undefined, agency.token);
+  ok(list.status === 200 && Array.isArray(list.body.items), 'the agency can still READ the historical lane');
+  const mine = await j('GET', '/player/representation', undefined, adeyemi.token);
+  ok(mine.status === 200 && Array.isArray(mine.body.items), 'and the adult player can still read their own records');
+  ok(mine.body.items.length === 0, 'with nothing in it, because the writer is closed and nothing was ever created here');
+  // The canonical lane is where a relationship comes from now, and it is named
+  // in the refusal so a caller is redirected rather than merely blocked.
+  const closed = await j('POST', '/org/representation/propose', { playerId: 'pl-adeyemi' }, agency.token);
+  ok(closed.body.canonicalRoute === 'POST /org/agent/clients/request', 'the refusal names the canonical route');
+  ok(/licensed agent/.test(closed.body.message) && /confirm/.test(closed.body.message), 'and explains that a relationship is requested by a licensed agent and becomes active when the client confirms it');
 }
 
 // ================================================================ F4

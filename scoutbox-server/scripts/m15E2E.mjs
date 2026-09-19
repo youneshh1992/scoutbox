@@ -31,7 +31,7 @@ const neg = (cond, msg) => { negatives++; ok(cond, `[neg] ${msg}`); };
 const section = (name) => console.log(`\n— ${name} —`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const ENV = { ...process.env, PORT: String(PORT), DATA_DIR, M13_FAST_RETRY: '1', M13_QUIET_LOGS: '1', TEST_LICENCE_REGISTRY: '1' };
+const ENV = { ...process.env, PORT: String(PORT), DATA_DIR, M13_FAST_RETRY: '1', M13_QUIET_LOGS: '1', TEST_LICENCE_REGISTRY: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1' };
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 {
@@ -435,10 +435,20 @@ section('H9 — corrections: dispute flow, never direct edits (§22)');
 section('H10 — representation (adults only) + signing');
 let signingDone = false;
 {
-  let r = await j('POST', '/org/representation/propose', { playerId: 'pl-adeyemi', scope: 'contracts_only' }, alex.token);
-  ok(r.status === 201, 'agency proposes representation to an adult (M13 flow)');
-  r = await j('POST', `/player/representation/${r.body.representation.id}/confirm`, {}, kola.token);
-  ok(r.status === 200, 'player confirms — representation active');
+  // M23 P5.6E: the representation HEADLINE on the Passport now comes from the
+  // canonical P5.6B lane, so the fixture builds a canonical relationship — a
+  // named licensed agent requests and the client confirms. The legacy F10
+  // writer is closed (E-1) and is asserted closed below.
+  const closed = await j('POST', '/org/representation/propose', { playerId: 'pl-adeyemi', scope: 'contracts_only' }, alex.token);
+  neg(closed.status === 410 && closed.body.error === 'REPRESENTATION_LANE_CLOSED', 'the legacy representation writer is closed and names the canonical route (P5.6E E-1)');
+  await j('POST', '/org/agent/agency/team', { name: 'Ana Agent', tiers: ['licensed_agent'] }, alex.token);
+  const ana = await login('org-northstar', 'Ana Agent', 'Agent', 'agent');
+  await j('POST', '/org/agent/profile', { displayName: 'Ana Agent', jurisdictions: ['ENG'] }, ana.token);
+  await j('POST', '/org/agent/profile/facets/fifa_licence/submit', { reference: 'TEST-VERIFIED-ANA' }, ana.token);
+  let r = await j('POST', '/org/agent/clients/request', { playerId: 'pl-adeyemi', scope: ['employment'], jurisdiction: 'INT' }, ana.token);
+  ok(r.status === 201, `a licensed agent requests the adult client through the canonical lane (${r.status} ${r.body?.error ?? ''})`);
+  r = await j('POST', `/player/agent/relationships/${r.body.relationship.id}/confirm`, { expectedRev: 1 }, kola.token);
+  ok(r.status === 200, 'player confirms — the canonical relationship is active');
   const agView = await j('GET', '/org/players/pl-adeyemi/football-passport', undefined, alex.token);
   ok(agView.status === 200 && agView.body.viewer === 'agency' && !!agView.body.representation?.agencyName, 'agency passport view shows the (adult) representation status');
   r = await j('POST', '/org/players/pl-adeyemi/signing', {}, maria.token);

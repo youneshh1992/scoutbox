@@ -316,7 +316,7 @@ section('U13 — viewer-safe projection hides restricted sources');
 
 // ================================================= HTTP journeys
 section('HTTP — routes, projections and the authorization boundary');
-const ENV = { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', M13_FAST_RETRY: '1', BOX_CAM_TEST_PROVIDER: '1' };
+const ENV = { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', M13_FAST_RETRY: '1', BOX_CAM_TEST_PROVIDER: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1' };
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 {
@@ -486,24 +486,54 @@ section('D-P56A-1 — an agency relationship counts only while it is active');
   const distinctOf = async () => (await j('GET', '/player/trust-profile', undefined, kola.token)).body?.trust?.components?.relationships?.detail?.distinct;
   const d0 = await distinctOf();
   ok(typeof d0 === 'number', 'the self view exposes the distinct-relationship count');
-  const proposed = await j('POST', '/org/representation/propose', { playerId: 'pl-adeyemi', scope: 'full' }, alex.token);
-  ok(proposed.status === 201 && proposed.body?.representation?.id, 'the agency proposes representation to an adult');
-  neg((await distinctOf()) === d0, 'a PROPOSED (unconfirmed) representation is not a verified relationship');
-  const repId = proposed.body.representation.id;
-  ok((await j('POST', `/player/representation/${repId}/confirm`, {}, kola.token)).status === 200, 'the player confirms it');
-  ok((await distinctOf()) === d0 + 1, 'a confirmed, active agency representation counts as exactly one distinct relationship');
-  ok((await j('POST', `/player/representation/${repId}/withdraw`, {}, kola.token)).status === 200, 'the player withdraws it');
-  neg((await distinctOf()) === d0, 'a WITHDRAWN representation stops counting although confirmedAt is still set');
-  const again = await j('POST', '/org/representation/propose', { playerId: 'pl-adeyemi', scope: 'full' }, alex.token);
-  ok(again.status === 201, 'a fresh proposal after withdrawal is accepted');
-  ok((await j('POST', `/player/representation/${again.body.representation.id}/confirm`, {}, kola.token)).status === 200, 'the player confirms the second one');
-  ok((await j('POST', `/player/representation/${again.body.representation.id}/dispute`, { reason: 'not my agent' }, kola.token)).status === 200, 'the player disputes it');
-  neg((await distinctOf()) === d0, 'a DISPUTED representation stops counting');
-  // Source guard: the key must be the record's real field so two agencies
-  // stay two distinct relationships instead of collapsing onto `undefined`.
+  // M23 P5.6E: the legacy F10 writer is closed (E-1), and Trust now reads the
+  // CANONICAL P5.6B lane as a relationship source. The D-P56A-1 regression moves
+  // with it: the state filter is the point, and it is asserted here against the
+  // lane that can actually create a relationship.
+  const closed = await j('POST', '/org/representation/propose', { playerId: 'pl-adeyemi', scope: 'full' }, alex.token);
+  neg(closed.status === 410 && closed.body.error === 'REPRESENTATION_LANE_CLOSED', 'the legacy representation writer creates nothing (P5.6E E-1)');
+  await j('POST', '/org/agent/agency/team', { name: 'Ana Agent', tiers: ['licensed_agent'] }, alex.token);
+  const ana = await login('org-northstar', 'Ana Agent', 'Agent', 'agent');
+  await j('POST', '/org/agent/profile', { displayName: 'Ana Agent', jurisdictions: ['ENG'] }, ana.token);
+  await j('POST', '/org/agent/profile/facets/fifa_licence/submit', { reference: 'TEST-VERIFIED-ANA' }, ana.token);
+  const proposed = await j('POST', '/org/agent/clients/request', { playerId: 'pl-adeyemi', scope: ['employment'], jurisdiction: 'INT' }, ana.token);
+  ok(proposed.status === 201 && proposed.body?.relationship?.id, `a licensed agent requests the adult client (${proposed.status} ${proposed.body?.error ?? ''})`);
+  neg((await distinctOf()) === d0, 'a PROPOSED (unconfirmed) relationship is not a verified relationship');
+  const repId = proposed.body.relationship.id;
+  ok((await j('POST', `/player/agent/relationships/${repId}/confirm`, { expectedRev: 1 }, kola.token)).status === 200, 'the player confirms it');
+  ok((await distinctOf()) === d0 + 1, 'a confirmed, active relationship counts as exactly one distinct relationship');
+  const active = (await j('GET', '/player/agent/relationships', undefined, kola.token)).body.items.find((x) => x.id === repId);
+  ok((await j('POST', `/player/agent/relationships/${repId}/terminate`, { expectedRev: active.rev }, kola.token)).status === 200, 'the player terminates it');
+  neg((await distinctOf()) === d0, 'a TERMINATED relationship stops counting although confirmedAt is still set');
+  // The canonical lane has an anti-spam cooldown the legacy lane never had:
+  // after a termination the same agent may not re-request the same client for
+  // 30 days. That is the correct behaviour, so it is asserted rather than
+  // worked around.
+  const tooSoon = await j('POST', '/org/agent/clients/request', { playerId: 'pl-adeyemi', scope: ['employment'], jurisdiction: 'INT' }, ana.token);
+  neg(tooSoon.status === 429 && tooSoon.body.error === 'REPRESENTATION_COOLDOWN', 'the same agent cannot immediately re-request a client who just terminated');
+  // The dispute leg uses a DIFFERENT adult client, which also proves two
+  // relationships with the same agency collapse to one distinct relationship
+  // per client rather than leaking across players.
+  const mateus = (await j('POST', '/auth/player/login', { playerId: 'pl-carvalho' })).body;
+  const distinctMateus = async () => (await j('GET', '/player/trust-profile', undefined, mateus.token)).body?.trust?.components?.relationships?.detail?.distinct;
+  const m0 = await distinctMateus();
+  const again = await j('POST', '/org/agent/clients/request', { playerId: 'pl-carvalho', scope: ['employment'], jurisdiction: 'INT' }, ana.token);
+  ok(again.status === 201, `a request for a different adult client is accepted (${again.status} ${again.body?.error ?? ''})`);
+  const id2 = again.body.relationship.id;
+  ok((await j('POST', `/player/agent/relationships/${id2}/confirm`, { expectedRev: 1 }, mateus.token)).status === 200, 'that client confirms it');
+  ok((await distinctMateus()) === m0 + 1, 'and it counts as one distinct relationship for THAT client');
+  neg((await distinctOf()) === d0, 'while the first client, whose relationship ended, still counts none');
+  const active2 = (await j('GET', '/player/agent/relationships', undefined, mateus.token)).body.items.find((x) => x.id === id2);
+  ok((await j('POST', `/player/agent/relationships/${id2}/dispute`, { reason: 'not my agent', expectedRev: active2.rev }, mateus.token)).status === 200, 'the client disputes it');
+  neg((await distinctMateus()) === m0, 'a DISPUTED relationship stops counting');
+  // Source guards. The legacy key must still read the field the record actually
+  // carries, and the canonical source must apply the same state filter rather
+  // than counting any agreement it finds.
   const { readFileSync } = await import('node:fs');
   const trustSrc = readFileSync(new URL('../m162/trust.mjs', import.meta.url), 'utf8');
-  neg(!/rel:agency:\$\{rep\.orgId\}/.test(trustSrc) && /rel:agency:\$\{rep\.agencyOrgId\}/.test(trustSrc), 'the relationship key reads `agencyOrgId`, the field the representation record actually carries');
+  neg(!/rel:agency:\$\{rep\.orgId\}/.test(trustSrc) && /rel:agency:\$\{rep\.agencyOrgId\}/.test(trustSrc), 'the legacy relationship key reads `agencyOrgId`, the field the representation record actually carries');
+  neg(/db\.representationAgreements/.test(trustSrc) && /a\.confirmedAt \&\& a\.status !== 'active'|!a\.confirmedAt \|\| a\.status !== 'active'/.test(trustSrc), 'the canonical source requires confirmedAt AND an active status');
+  neg(/typeof a\.agentUserId !== 'string'/.test(trustSrc), 'and it refuses a legacy mirror row, which names no licensed individual');
 }
 
 // ============================================================== metrics

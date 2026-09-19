@@ -91,6 +91,23 @@ export function registerTrust(ctx) {
       if (rep.endAt && rep.endAt < now) continue;
       out.push({ key: `rel:agency:${rep.agencyOrgId}`, kind: 'agency', verified: true });
     }
+    // M23 P5.6E: the CANONICAL P5.6B lane is a relationship source too. Without
+    // this, Trust was blind to the authoritative lane and could only see the
+    // legacy one — so a real, licensed, client-confirmed relationship counted
+    // for nothing while a legacy row counted.
+    //
+    // The same state filter applies, for the same reason (D-P56A-1): only a row
+    // that names a licensed individual, was confirmed by the client, is
+    // `active` and has not passed its end date is a verified relationship. The
+    // key is the AGENCY, so one client represented by two agencies is two
+    // relationships and moving between agents inside one agency is not.
+    for (const a of (db.representationAgreements ?? [])) {
+      if (!a || a.clientId !== player.id) continue;
+      if (typeof a.agentUserId !== 'string' || !a.agentUserId) continue; // a legacy mirror names nobody
+      if (!a.confirmedAt || a.status !== 'active') continue;
+      if (typeof a.endAt === 'number' && a.endAt <= now) continue;
+      out.push({ key: `rel:agency:${a.agencyOrgId}`, kind: 'agency', verified: true });
+    }
     return out;
   }
 

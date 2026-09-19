@@ -234,31 +234,33 @@ export function registerTransitions(ctx) {
   };
   const repView = (r) => ({ ...r, status: repFresh(r), credential: r.credential && { ...r.credential, honest: r.credential.reviewStatus === 'reviewed_valid' ? 'document reviewed by Trust & Safety — this is a document review, not an independent licence-register check (no register integration is configured)' : 'uploaded document, review pending — NOT an independently verified licence' } });
 
-  // Agencies propose; only ADULT players (DOB, live) can be the subject.
+  /**
+   * M23 P5.6E — CLOSED (E-1). This was the legacy F10 writer: any member of any
+   * agency-typed org could create a relationship that the player could confirm
+   * to `active`, with no licence check, no jurisdiction policy, no conflict
+   * evaluation, no consent ledger, no rev and no idempotency. A confirmed
+   * legacy row then fed the M16.2 Trust relationship input and the Passport
+   * representation headline — which is authority, even though the P5.6B access
+   * predicate refused it private client access.
+   *
+   * P5.6E §5/§7 permit exactly one active authority writer, and it is the
+   * canonical P5.6B lane: a LICENSED individual requests, the client confirms.
+   * So this route now creates nothing and says where the real one is. The
+   * refusal is deliberately explicit rather than a 404: the caller is a
+   * legitimate agency user being redirected, not someone probing.
+   *
+   * The player-side confirm / withdraw / dispute routes below stay OPEN on
+   * purpose. A player must always be able to end or dispute a record that
+   * already names them; closing those would trap them in it.
+   */
   orgRouter.post('/representation/propose', (req, res) => {
     if (req.org.type !== 'agency') return res.status(403).json({ error: 'AGENCY_ONLY', message: 'Representation relationships belong to the agency lane.' });
-    const p = findPlayer(req.body?.playerId);
-    if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
-    if (!isAdult(p)) return res.status(403).json({ error: 'UNDER_18_WALL', message: 'Representation exists for adults only. Age is evaluated from date of birth at request time.' });
-    if (!orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE' });
-    if (db.representations.some((r) => r.playerId === p.id && r.agencyOrgId === req.org.id && ['proposed', 'active'].includes(repFresh(r)))) {
-      return res.status(409).json({ error: 'ALREADY_PROPOSED' });
-    }
-    const rep = {
-      id: nextId('rep'), playerId: p.id, playerName: p.name,
-      agencyOrgId: req.org.id, agencyName: req.org.name,
-      representativeName: String(req.body?.representativeName ?? req.orgUser.name).slice(0, 80),
-      scope: ['full', 'contracts_only', 'commercial_only'].includes(req.body?.scope) ? req.body.scope : 'full',
-      startAt: Date.now(), endAt: req.body?.endMonths ? Date.now() + Math.min(Math.max(Number(req.body.endMonths), 1), 36) * 30 * 86_400_000 : null,
-      credential: req.body?.credentialNote ? { source: 'uploaded_document', note: String(req.body.credentialNote).slice(0, 200), reviewStatus: 'pending', reviewedAt: null } : null,
-      status: 'proposed', confirmedAt: null, withdrawnAt: null, disputedAt: null,
-      createdAt: Date.now(), history: [],
-    };
-    histAppend(rep, 'org', req.orgUser.id, req.orgUser.name, 'proposed');
-    db.representations.push(rep);
-    notify({ kind: 'player', id: p.id }, 'representation', `${req.org.name} proposes to represent you (${rep.scope.replace('_', ' ')}). Nothing is active until YOU confirm it.`, rep.id);
-    persistNow();
-    res.status(201).json({ representation: repView(rep) });
+    return res.status(410).json({
+      error: 'REPRESENTATION_LANE_CLOSED',
+      message: 'This lane no longer creates relationships. A representation relationship is requested by a licensed agent in ScoutBox Agent and becomes active only when the client confirms it.',
+      canonicalRoute: 'POST /org/agent/clients/request',
+      note: 'Existing records here remain readable as history, and the player can still withdraw or dispute one.',
+    });
   });
 
   orgRouter.get('/representation', (req, res) => {

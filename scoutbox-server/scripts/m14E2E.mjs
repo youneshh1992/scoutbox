@@ -412,8 +412,14 @@ let kid17;
   const dobY = (y) => { const d = new Date(); d.setFullYear(d.getFullYear() - y); d.setDate(d.getDate() + 10); return d.toISOString().slice(0, 10); };
   kid17 = (await j('POST', '/guardian/children', { name: 'Noor Test17', dob: dobY(18), position: 'CM', foot: 'right', lat: 51.5, lng: -0.06 }, amara.token)).body?.player;
   ok(kid17?.id, 'guardian creates a 17-year-old (existing DOB/country logic — no new age system)');
+  // M23 P5.6E: the legacy lane creates nothing at all now (E-1), for a minor and
+  // an adult alike. The claim this check protects — that verifying an agency
+  // changes nothing about a minor — moves to the canonical lane, which refuses a
+  // minor on its own gate.
   let r = await j('POST', '/org/representation/propose', { playerId: kid17.id, scope: 'full_representation' }, alex.token);
-  ok(r.status === 403, 'agency representation of a 17-year-old still refused — verification changes nothing');
+  ok(r.status === 410 && r.body.error === 'REPRESENTATION_LANE_CLOSED', 'the legacy representation lane is closed — verification does not reopen it');
+  const canonicalMinor = await j('POST', '/org/agent/clients/request', { playerId: kid17.id, scope: ['employment'], jurisdiction: 'INT' }, alex.token);
+  ok(canonicalMinor.status >= 400, `and the canonical lane refuses a 17-year-old too — verification changes nothing (${canonicalMinor.status} ${canonicalMinor.body?.error ?? ''})`);
   const kidTok = (await j('POST', '/auth/player/login', { playerId: kid17.id })).body;
   const inv = await j('POST', '/org/verification/player-invites', { name: 'Noor Test17', squad: 'U18' }, maria.token);
   ok(inv.status === 201 && inv.body.code, 'verified club mints a squad invitation (code handed over, single-use)');

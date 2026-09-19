@@ -124,7 +124,26 @@ export function registerPassportCore(ctx) {
       opportunityTitle: db.opportunities.find((o) => o.id === a.opportunityId)?.title ?? null,
     }));
     const transitions = db.transitionCases.filter((t) => t.playerId === pid);
+    // History: every legacy M13 F10 row that was once confirmed, whatever became
+    // of it. The timeline is the right place for these; the representation
+    // HEADLINE is not built from them (M23 P5.6E, E-2).
     const representations = db.representations.filter((r) => r.playerId === pid && r.confirmedAt);
+    /**
+     * The canonical P5.6B relationships, shaped for the projection: a named
+     * licensed individual, their agency, the scope and the dates. Read here so
+     * the Passport's representation headline comes from the authoritative lane
+     * rather than being blind to it (M23 P5.6E §2/§5).
+     */
+    const agentAgreements = (db.representationAgreements ?? [])
+      .filter((a) => a && a.clientId === pid && typeof a.agentUserId === 'string' && a.agentUserId)
+      .map((a) => ({
+        id: a.id, status: a.status, scope: Array.isArray(a.scope) ? a.scope : [],
+        startAt: a.startAt ?? null, endAt: a.endAt ?? null, confirmedAt: a.confirmedAt ?? null,
+        agentUserId: a.agentUserId,
+        agentDisplayName: (db.agentProfiles ?? []).find((x) => x && x.userId === a.agentUserId)?.displayName
+          ?? db.users.find((u) => u && u.id === a.agentUserId)?.name ?? null,
+        agencyName: orgOf(a.agencyOrgId)?.name ?? null,
+      }));
     const achievements = db.passportAchievements.filter((a) => a.playerId === pid);
     const vouches = (db.vouches ?? []).filter((v) => v.playerId === pid && v.status === 'published' && !v.withdrawn);
 
@@ -195,7 +214,7 @@ export function registerPassportCore(ctx) {
       identity,
       prefs,
       history,
-      status: currentStatus({ history, prefs, representations, identity }),
+      status: currentStatus({ history, prefs, representations, agreements: agentAgreements, identity }),
       evidenceSummary: {
         fullMatches: fullMatchEvidence.length,
         clips: (player.media ?? []).length,
