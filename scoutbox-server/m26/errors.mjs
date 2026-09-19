@@ -51,6 +51,18 @@ export const M26_ERROR_HTTP = table({
   // ---- 409: the record is not where the caller thought it was.
   TRANSACTION_VERSION_CONFLICT: 409,
   TRANSACTION_IDEMPOTENCY_CONFLICT: 409,
+  // M23 P5.6E §37. The request is fine; a live transaction already covers this
+  // individual, this type and these clubs. 409, because there is nothing in the
+  // request to fix — the caller continues in the one that exists, or ends it.
+  TRANSACTION_DUPLICATE_CONTEXT: 409,
+  // M23 P5.6E §32/§36. A transaction that cites a recruitment case must be
+  // answering that club's own invitation. These four are 409: the citation is
+  // well-formed and the caller is permitted, but the invitation is not there,
+  // not open, not about this client, or not addressed to this agency.
+  HANDOFF_NOT_FOUND: 409,
+  HANDOFF_NOT_OPEN: 409,
+  HANDOFF_SUBJECT_MISMATCH: 409,
+  HANDOFF_NOT_ADDRESSED: 409,
   TRANSACTION_PARTY_EXISTS: 409,
   TRANSACTION_TRANSITION_NOT_ALLOWED: 409,
   TRANSACTION_NOT_LIVE: 409,

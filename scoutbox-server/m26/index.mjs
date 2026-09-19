@@ -58,6 +58,11 @@ export function registerTransactions(rawCtx) {
   const {
     db, orgRouter, playerRouter, tsRouter, nextId, persistNow, notify, broadcast,
     findPlayer, isBlocked, isAdult, orgCanSee, rateLimit, agent, compliance,
+    // M23 P5.6E — the cross-app integration seam. A HOLDER filled in after this
+    // module registers: it carries the recruitment-case handoff binding and the
+    // duplicate rule. Absent (a suite booting P5.6D alone), a transaction may
+    // not cite a recruitment case at all, which is the fail-closed answer.
+    integration = null,
   } = rawCtx;
 
   // Registration-time presence (migration 2307 guarantees these; this is the
@@ -249,6 +254,19 @@ export function registerTransactions(rawCtx) {
    * which stays the single truth — the frozen P5.6A §4 shape, and the only one
    * that can carry a party's confirmation and its history.
    */
+  /**
+   * Does this recruitment case belong to this organisation? Asked before a club
+   * is shown a case reference, so the engaging club sees only ITS OWN case id —
+   * a reference copied from somewhere else stays invisible.
+   *
+   * Asked of the P5.6E seam, NOT of `db.recruitmentCases`: this module does not
+   * read the recruitment domain's store, and that boundary is worth more than
+   * the one line it would save. No seam registered → false, so the reference
+   * simply does not appear.
+   */
+  const recruitmentCaseBelongsTo = (caseId, orgId) =>
+    integration?.caseBelongsTo ? integration.caseBelongsTo(caseId, orgId) === true : false;
+
   function projectTransaction(tx, viewer) {
     const roles = roomRolesFor(tx, viewer);
     const partyRole = viewer.kind === 'club' ? clubPartyRoleOf(tx, viewer.orgId) : viewer.kind === 'player' ? 'individual' : null;
@@ -336,7 +354,19 @@ export function registerTransactions(rawCtx) {
       // not redacted, so its existence is not disclosed either.
       notes: (Array.isArray(tx.notes) ? tx.notes : []).filter((n) => !n.removedAt && canSeeVisibility(n.visibility, roles, partyRole)).map((n) => ({ id: n.id, visibility: n.visibility, text: n.text, at: n.at, actor: actorLabel(n.by) })),
       linkedThreads: (Array.isArray(tx.linkedThreads) ? tx.linkedThreads : []).map((t) => ({ id: t.id, channelId: t.channelId, linkedAt: t.linkedAt, actor: actorLabel(t.linkedBy), readable: channelReadableBy(t.channelId, viewer) })),
-      links: { trialId: tx.links?.trialId ?? null, opportunityId: tx.links?.opportunityId ?? null },
+      // M23 P5.6E §36. The recruitment-case reference is visible ONLY to the
+      // representing agent and to the club that OWNS that case. A club's internal
+      // recruitment case is club-private (P5.6D §46): the individual does not
+      // learn its id, Trust & Safety has no use for it, and a releasing club must
+      // never learn the engaging club's internal case — which is precisely what
+      // an unconditional field here would have told all three. Absent, not
+      // redacted, so its existence is not disclosed either.
+      links: {
+        trialId: tx.links?.trialId ?? null,
+        opportunityId: tx.links?.opportunityId ?? null,
+        ...(tx.links?.recruitmentCaseId && (isAgent || (viewer.kind === 'club' && partyRole === 'engaging_entity' && recruitmentCaseBelongsTo(tx.links.recruitmentCaseId, viewer.orgId)))
+          ? { recruitmentCaseId: tx.links.recruitmentCaseId } : {}),
+      },
       terms: isAgent || roles.includes('party_club_signatory') || roles.includes('party_individual')
         ? { versions: (Array.isArray(tx.terms?.versions) ? tx.terms.versions : []).filter((v) => canSeeVisibility(v.visibility, roles, partyRole)).map((v) => ({ id: v.id, at: v.at, summary: v.summary, visibility: v.visibility, recordedFor: v.recordedFor, actor: actorLabel(v.by) })) }
         : { versions: [] },
@@ -540,16 +570,54 @@ export function registerTransactions(rawCtx) {
       if (parties.some((x) => x.partyRole === party.partyRole)) return sendTransactionError(res, { error: 'TRANSACTION_PARTY_EXISTS', partyRole: party.partyRole, message: `A ${party.partyRole} party is already named.` }, 'create');
       parties.push(party);
     }
+
+    // M23 P5.6E §36/§37. An optional reference back to the recruitment case whose
+    // club invited this workspace, and the duplicate rule. Both are REFERENCES:
+    // nothing about the case is copied in, and the case's own truth stays its own.
+    const caseRef = b.recruitmentCaseId === undefined || b.recruitmentCaseId === null || b.recruitmentCaseId === ''
+      ? null : String(b.recruitmentCaseId);
+    const individualId = parties.find((p) => p.partyRole === 'individual')?.subjectId ?? null;
+    if (individualId && integration?.duplicateTransactionOf) {
+      const dup = integration.duplicateTransactionOf(db.agentTransactions ?? [], {
+        clientId: individualId, type,
+        engagingOrgId: parties.find((p) => p.partyRole === 'engaging_entity')?.subjectId ?? null,
+        releasingOrgId: parties.find((p) => p.partyRole === 'releasing_entity')?.subjectId ?? null,
+        terminalStatuses: TERMINAL_STATUSES,
+        partiesOf: (t) => t.parties ?? [],
+      });
+      // Same individual, same type, same clubs on both sides, and the earlier one
+      // still live. A loan beside a transfer, or a second engaging club, is a
+      // legitimately separate transaction and is NOT refused.
+      if (dup) return sendTransactionError(res, { error: 'TRANSACTION_DUPLICATE_CONTEXT', transactionId: dup.id, message: 'A live transaction already covers this individual, this type and these clubs. Continue in that one, or end it first.' }, 'create');
+    }
     const tx = {
       id: nextId('atx'), agencyOrgId: req.org.id, agentUserId: req.orgUser.id, type, jurisdictions,
       status: 'DRAFT', parties, contextId: null, compliance: null, reEvaluationPending: false,
-      notes: [], linkedThreads: [], links: { trialId: null, opportunityId: null }, terms: { versions: [] },
+      notes: [], linkedThreads: [], links: { trialId: null, opportunityId: null, recruitmentCaseId: caseRef }, terms: { versions: [] },
       holdReasonCode: null, holdReason: null, heldAt: null, cancelReasonCode: null, closeReasonCode: null,
       initiatedBy: byAgent(req), initiatedAt: now(), createdAt: now(), updatedAt: now(),
       keys: key ? { create: { key, fp } } : {}, rev: 1, revAt: now(), revBy: null, history: [],
     };
     for (const p of parties) hist(p, 'transaction_party_added', byAgent(req), { partyRole: p.partyRole, subjectKind: p.subjectKind });
     hist(tx, 'transaction_created', byAgent(req), { count: parties.length });
+    // §32/§36. A workspace that cites a recruitment case must be answering that
+    // club's own invitation, and the invitation must have been addressed to this
+    // agency. Bound BEFORE the transaction is stored, so a refusal leaves nothing
+    // behind: a citation that does not check out creates no transaction at all,
+    // rather than a transaction with a reference nobody authorised.
+    if (caseRef) {
+      if (!integration?.bindHandoff) return sendTransactionError(res, { error: 'HANDOFF_NOT_FOUND', message: 'A recruitment case cannot be referenced in this build.' }, 'create');
+      const problem = integration.bindHandoff({
+        recruitmentCaseId: caseRef, transactionId: tx.id, agencyOrgId: req.org.id,
+        agentUserId: req.orgUser.id, clientId: individualId, at: now(),
+      });
+      if (problem) {
+        return sendTransactionError(res, {
+          error: problem,
+          message: 'No open invitation from that recruitment case is addressed to you. A club invites a workspace; citing a case you were not invited to does not open one.',
+        }, 'create');
+      }
+    }
     const ctx = compliance.openContext({ agencyOrgId: req.org.id, agentUserId: req.orgUser.id, type, jurisdictions, transactionId: tx.id, by: byAgent(req) });
     tx.contextId = ctx.id;
     db.agentTransactions.push(tx);

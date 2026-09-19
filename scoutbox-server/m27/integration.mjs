@@ -335,6 +335,118 @@ export function clubAgentPresence({ decision = null, agent = null, agency = null
   });
 }
 
+// ---------------------------------------------- §32–§39 transaction handoff
+
+/**
+ * The handoff's own states. A handoff is an INVITATION, not a transaction: it
+ * records that an authorised club has explicitly decided to take a recruitment
+ * case outside its own walls, and it is the thing an agent may then act on.
+ *
+ * It exists because of §33: a positive internal decision must NOT become a
+ * transaction by itself. Nor may the club create the transaction — P5.6D's
+ * frozen creation policy is that a licensed individual with current verification
+ * opens one (`transactions.write`), and a club unilaterally opening a workspace
+ * that names a player and their agent is exactly the internal-intent-becomes-
+ * external-commitment move §33 forbids. So the club invites, and the agent (or,
+ * for an unrepresented player, nobody yet) opens the canonical transaction.
+ */
+export const HANDOFF_STATUSES = Object.freeze(['invited', 'accepted', 'withdrawn', 'expired']);
+
+/** How long an uninvited-upon handoff stands before it reads as expired. */
+export const HANDOFF_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** The status a handoff HAS at `now` — an invitation nobody took up goes stale. */
+export function effectiveHandoffStatus(h, now = Date.now()) {
+  if (!h || !HANDOFF_STATUSES.includes(h.status)) return null;
+  if (h.status === 'invited' && typeof h.invitedAt === 'number' && now - h.invitedAt >= HANDOFF_TTL_MS) return 'expired';
+  return h.status;
+}
+
+/** Every reason a handoff can be refused. One meaning each; none names a person. */
+export const HANDOFF_BLOCKERS = Object.freeze([
+  'HANDOFF_NOT_PERMITTED',          // the actor's club role does not include this
+  'HANDOFF_DECISION_REQUIRED',      // no finalised formal decision to progress exists
+  'HANDOFF_CASE_STATE',             // the case is not at a lifecycle point that permits it
+  'HANDOFF_SUBJECT_UNAVAILABLE',    // the player is removed, or not visible to this club
+  'HANDOFF_MINOR_PATHWAY_DISABLED', // the player is under the age of majority
+  'HANDOFF_BLOCKED',                // a canonical block between the player and the club
+  'HANDOFF_EXISTS',                 // one is already standing
+  'HANDOFF_TRANSACTION_EXISTS',     // a live transaction already covers this context
+  'HANDOFF_COMPLIANCE_UNAVAILABLE', // the compliance layer cannot answer right now
+]);
+
+/**
+ * §34. THE precondition check, pure. Returns every blocker, in `HANDOFF_BLOCKERS`
+ * order, so a club sees the whole picture rather than one at a time — and so the
+ * readiness view and the mutation cannot disagree, because they call this.
+ *
+ * What it deliberately does NOT take: the decision's reasons, its note, its
+ * evidence or its author. "Do not expose internal rationale" (§34) is enforced
+ * by the signature: the rationale is not an argument, so it cannot leak into a
+ * refusal, a projection or an event.
+ */
+export function handoffBlockers({
+  canWrite = false,
+  hasFinalProgressDecision = false,
+  caseStatus = null,
+  eligibleCaseStatuses = ['offer_consideration'],
+  subjectPresent = false,
+  isAdult = false,
+  minorPathwayOpen = false,
+  blocked = false,
+  existingHandoffStatus = null,
+  liveTransactionId = null,
+  complianceEvaluable = false,
+} = {}) {
+  const out = [];
+  if (canWrite !== true) out.push('HANDOFF_NOT_PERMITTED');
+  if (hasFinalProgressDecision !== true) out.push('HANDOFF_DECISION_REQUIRED');
+  if (!eligibleCaseStatuses.includes(caseStatus)) out.push('HANDOFF_CASE_STATE');
+  if (subjectPresent !== true) out.push('HANDOFF_SUBJECT_UNAVAILABLE');
+  if (isAdult !== true && !minorPathwayOpen) out.push('HANDOFF_MINOR_PATHWAY_DISABLED');
+  if (blocked === true) out.push('HANDOFF_BLOCKED');
+  if (existingHandoffStatus === 'invited' || existingHandoffStatus === 'accepted') out.push('HANDOFF_EXISTS');
+  if (typeof liveTransactionId === 'string' && liveTransactionId) out.push('HANDOFF_TRANSACTION_EXISTS');
+  if (complianceEvaluable !== true) out.push('HANDOFF_COMPLIANCE_UNAVAILABLE');
+  return out;
+}
+
+/**
+ * §37. The duplicate rule, deterministic and deliberately narrow.
+ *
+ * Two transactions are "the same context" only when the individual, the type,
+ * the engaging entity AND the releasing entity all match and the earlier one is
+ * not in a terminal state. Anything else is a legitimately separate transaction:
+ * a loan and a permanent transfer for the same player are two different things,
+ * two clubs competing for the same player are two different things, and a
+ * cancelled one does not block its replacement ("Do not over-block legitimate
+ * separate transactions").
+ *
+ * `partiesOf` is passed in so this stays pure and the caller keeps ownership of
+ * the party shape.
+ */
+export function duplicateTransactionOf(transactions, { clientId, type, engagingOrgId = null, releasingOrgId = null, terminalStatuses = [], partiesOf }) {
+  const want = (t) => {
+    const parties = partiesOf(t) ?? [];
+    const find = (role) => parties.find((p) => p && p.partyRole === role && !p.removed) ?? null;
+    return {
+      individual: find('individual')?.subjectId ?? null,
+      engaging: find('engaging_entity')?.subjectId ?? null,
+      releasing: find('releasing_entity')?.subjectId ?? null,
+    };
+  };
+  for (const t of transactions) {
+    if (!t || t.type !== type) continue;
+    if (terminalStatuses.includes(t.status)) continue;
+    const got = want(t);
+    if (got.individual !== clientId) continue;
+    if ((got.engaging ?? null) !== (engagingOrgId ?? null)) continue;
+    if ((got.releasing ?? null) !== (releasingOrgId ?? null)) continue;
+    return t;
+  }
+  return null;
+}
+
 /** Does this surface need a compliance answer before it may proceed? */
 export const surfaceIsRegulated = (surface) => (Object.hasOwn(SURFACES, surface) ? SURFACES[surface].regulated === true : false);
 

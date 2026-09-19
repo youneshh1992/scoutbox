@@ -125,6 +125,20 @@ export const EVENT_REGISTRY = {
     privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'decisionId'],
     dedupeStrategy: 'none', replayPolicy: 'never', notificationEligible: true, analyticsEligible: false,
   },
+  // ---- M23 P5.6E. An authorised club invited a transaction workspace from this
+  // case, or withdrew that invitation. Ids only, and — like the decision events
+  // above — never the outcome, never a reason and never the rationale that led
+  // the club here (§32 "Do not expose the internal decision itself").
+  transaction_handoff_invited: {
+    domain: 'recruitment', sourceSystem: 'recruitmentCases', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'handoffId'],
+    dedupeStrategy: 'none', replayPolicy: 'never', notificationEligible: true, analyticsEligible: false,
+  },
+  transaction_handoff_withdrawn: {
+    domain: 'recruitment', sourceSystem: 'recruitmentCases', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'handoffId'],
+    dedupeStrategy: 'none', replayPolicy: 'never', notificationEligible: true, analyticsEligible: false,
+  },
   recruitment_room_reopened_from_second_look: {
     // Emitted since M18, never classified until M18.2. It carried an orgId, so
     // the subject rules kept it inside the organisation — but only by luck of
@@ -380,6 +394,9 @@ for (const [name, payload] of [
   // A club routed a contact to the agent as well as to the client. Ids only: not
   // the club's name, not the subject, not a word of the message.
   ['contact_agent_routed', ['orgId', 'contactId', 'agentUserId']],
+  // An agent brought an opportunity to a client's attention. Not WHICH
+  // opportunity and not the client: a stream should not carry either.
+  ['agent_opportunity_shared', ['orgId', 'agreementId', 'agentUserId']],
 ]) {
   EVENT_REGISTRY[name] = {
     domain: 'agent', sourceSystem: 'representationAgreements', audience: 'org_private',

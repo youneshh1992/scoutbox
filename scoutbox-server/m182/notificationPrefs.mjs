@@ -134,6 +134,13 @@ export const TYPE_CATEGORY = Object.freeze({
   // client shares, and a club message the client's agent was made a party to.
   representation_disclosure: 'representation',
   representation_contact: 'representation',
+  // An opportunity an agent put in front of their client is a message about a
+  // real chance, so it lives with the other opportunity traffic, not with
+  // relationship admin.
+  representation_opportunity: 'messages',
+  // A club inviting a transaction workspace is workspace traffic, like every
+  // other P5.6D notification.
+  representation_transaction: 'transaction_updates',
   agent_verification: 'security_account',
   agency_membership: 'security_account',
   // M23 P5.6C Conflict & Compliance Engine

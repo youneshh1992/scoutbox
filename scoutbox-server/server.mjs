@@ -4329,6 +4329,9 @@ m26Ctx = registerTransactions({
   isAdult, tsRouter,
   agent: m24Ctx,
   compliance: m25Ctx.transactionSeam,
+  // The same P5.6E holder the recruitment side reads. M26 is registered before
+  // M27 too, so the handoff binding and the duplicate rule arrive by reference.
+  integration: agentIntegration,
 });
 // An attributed review of a declared-only binding lands on the transaction's own
 // representation row, which is its truth — not only on the compliance context's
@@ -4346,6 +4349,10 @@ m25Ctx.transactionSeam.hooks.representationReviewed = m26Ctx.representationRevie
 m27Ctx = registerIntegration({
   ...m19Ctx,
   isAdult,
+  // M17's own concealing case lookup and its own role ranking, passed rather
+  // than re-derived — the handoff must be as invisible to a foreign club as the
+  // case itself is.
+  findRoomForRequest: m17Ctx.findRoomForRequest,
   agent: m24Ctx,
   compliance: m25Ctx.integrationSeam,
 });
@@ -4447,7 +4454,10 @@ export const EMITTED_EVENTS = Object.freeze([
   // M23 P5.6E cross-app integration. Two names, both org_private to the agency
   // and both ids only: the client changed a disclosure choice (not WHICH one),
   // and a club routed a contact to the agent as well as to the client.
-  'representation_disclosure_changed', 'contact_agent_routed',
+  'representation_disclosure_changed', 'contact_agent_routed', 'agent_opportunity_shared',
+  // and the P5 → transaction handoff, which is recruitment-domain because the
+  // club's case is where it lives.
+  'transaction_handoff_invited', 'transaction_handoff_withdrawn',
 ]);
 {
   const problems = assertEventRegistry({ emitted: EMITTED_EVENTS });

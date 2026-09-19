@@ -154,6 +154,9 @@ export const PERMISSIONS = Object.freeze(Object.assign(Object.create(null), {
   'clients.request':            ['licensed_agent'],
   'clients.terminate':          ['licensed_agent'],
   'clients.opportunities.read': ['licensed_agent'],
+  // M23 P5.6E: bringing an opportunity to a client's attention is a regulated
+  // act of the licensed individual, not agency admin work.
+  'clients.opportunities.share': ['licensed_agent'],
   'players.lookup':             ['licensed_agent'],
   'inbox.read':                 TIERS,
   'agency.read':                TIERS,
@@ -264,9 +267,43 @@ export function agreementGrantsAccess(a, agentUserId, now = Date.now()) {
  * This lives here, beside `shareWithAgencyStaff`, because it is a field of the
  * relationship record — not in a new store (P5.6E §103) and not in a second
  * consent ledger (P5.6C owns the regulatory one).
+ *
+ * There is deliberately no key for "my agent may receive a club's message
+ * INSTEAD of me". §21 lists that routing as an illustrative option, but it
+ * cannot be delivered honestly: the player's Inbox row is what "delivered"
+ * means for a Contact, so a message with no player row would need an
+ * agent-side Inbox with its own response path — a second contact system, which
+ * §20 forbids outright. A club may add the agent beside the player; it cannot
+ * replace them. See M23_P56E_INTEGRATION_BOUNDARIES.md.
  */
 export const DISCLOSURE_KEYS = Object.freeze(['clubPresence', 'contactRouting', 'trialVisibility']);
 export const DISCLOSURE_DEFAULT = Object.freeze({ clubPresence: false, contactRouting: false, trialVisibility: false });
+
+/**
+ * M23 P5.6E §18 — the opportunity shares an agent has made to this client, held
+ * ON the relationship they were made under. Not a new store: a share is an act
+ * inside one representation relationship, it dies with it, and there is nowhere
+ * else it could live without duplicating the relationship's own authority
+ * (§103). Capped, because an unbounded array on a hot row is a defect waiting
+ * to happen — and the cap answers with a named refusal rather than losing the
+ * oldest, because an audit trail that silently forgets is not one.
+ */
+export const MAX_OPPORTUNITY_SHARES = 200;
+
+export const shareView = (s) => ({
+  id: s.id,
+  opportunityId: s.opportunityId,
+  via: s.via ?? null,
+  title: s.title ?? null,
+  orgName: s.orgName ?? null,
+  deadline: s.deadline ?? null,
+  note: s.note ?? null,
+  sharedAt: s.sharedAt,
+  sharedByName: s.sharedBy?.name ?? null,
+  withdrawnAt: s.withdrawnAt ?? null,
+  rev: s.rev ?? 1,
+  honest: 'Your agent brought this to your attention. Applying is your own action — nobody can apply for you.',
+});
 
 export function normaliseDisclosure(raw) {
   const out = { ...DISCLOSURE_DEFAULT };
