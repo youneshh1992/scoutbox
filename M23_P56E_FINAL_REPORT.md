@@ -1,8 +1,15 @@
 # M23 P5.6E — final report
 
-**ScoutBox Agent Cross-App Integration.** Eight local commits, no push, no PR, no
-deploy. 66 files, +6,721 / −143 lines against the P5.6D tip (`6d3401b`) — of which
-53 files and +4,907 lines are code and tests, the rest documentation.
+**ScoutBox Agent Cross-App Integration.** Eleven local commits, no push, no PR, no
+deploy — eight implementation commits, a totals correction, and two repair-pass
+commits, plus the closure commit this report is part of. 66 files,
++6,721 / −143 lines against the P5.6D tip (`6d3401b`) for the implementation phases
+— of which 53 files and +4,907 lines are code and tests, the rest documentation.
+
+*This report was re-evaluated by the final repair pass rather than preserved. Items
+93, 99, 100, 102 and 104, the sceptical section and the truth block all changed; the
+repair pass has its own section below and its own document,
+`M23_P56E_REPAIR_REPORT.md`.*
 
 ---
 
@@ -206,7 +213,9 @@ deploy. 66 files, +6,721 / −143 lines against the P5.6D tip (`6d3401b`) — of
 
 ### Defects (93–99)
 
-93. **Eleven** defects found. Nine in P5.6E's own new code, two pre-existing.
+93. **Thirteen** defects found — eleven in the implementation phases and two more
+    in the repair pass (E-15, E-16). Ten in P5.6E's own new code, three
+    pre-existing.
 94. **Four** were caught by pre-existing P5.6C/P5.6D assertions rather than by
     reading the code, which is the argument for the whole battery.
 95. Two were cross-party privacy leaks that single-party tests cannot see: E-6 (a
@@ -219,20 +228,24 @@ deploy. 66 files, +6,721 / −143 lines against the P5.6D tip (`6d3401b`) — of
 98. Three were undeclared error codes answering 500 for what were plain 4xx
     refusals: E-10, E-12, E-13.
 99. Every one is fixed at the **root** with a regression that would catch it again.
-    Two further behaviours were examined and deliberately **not** changed, with the
-    reasoning recorded (A1, A2 in the defect register).
+    One further behaviour (A2, a draft naming an adult non-client) was examined and
+    deliberately **not** changed, with the reasoning and mitigations recorded. A1 is
+    no longer in that category: a fix for it was written, tested, shown to break six
+    frozen suites, and rejected on that evidence — see the repair pass below.
 
 ### Tests (100–104)
 
-100. `m23AgentIntegrationE2E`: **491** checks, **243** negative (49%), pure half
-     plus HTTP half, groups A–AT.
+100. `m23AgentIntegrationE2E`: **535** checks, **281** negative (53%), pure half
+     plus HTTP half, groups A–AV.
 101. `m23AgentIntegrationLive`: **98** checks, **39** negative (40%), six journeys
      across four real clients and one real backend.
-102. Server battery: **26** suites green, plus **17** perf and load suites, plus
+102. Server battery: **36** suites green, plus **15** perf and load suites, plus
      `apiE2E` (130 checks) against a live server.
 103. Browser battery: **7** live suites green — 98, 82, 82, 86, 108, 86, 122, 39,
      64 checks — plus `navConfig` (359) and six demo suites.
-104. Typechecks 5 / 5, builds 5 / 5, demos rebuilt and spotchecked.
+104. Typechecks 5 / 5, builds 5 / 5, demos rebuilt and spotchecked. (The player app
+     is an Expo project: it builds with `expo export --platform web`, not with an
+     `npm run build` script it does not have.)
 
 ### Prohibitions honoured (105–108)
 
@@ -248,17 +261,57 @@ deploy. 66 files, +6,721 / −143 lines against the P5.6D tip (`6d3401b`) — of
 
 ## What a reader should be sceptical about
 
-Three things, stated because a report that only lists successes is not a report.
+Stated because a report that only lists successes is not a report.
 
-- **The negative ratio is 49%**, below the 53–61% of the three earlier agent-lane
-  suites. Genuine adversarial groups were added (AP, AQ, AR, AS, AT) rather than
-  padding, and the number is left where it honestly landed.
-- **One flake was observed**: running four browser suites concurrently made
-  `m23AgentLive` fail once on a timing assertion; alone it passes all 82 checks.
-  Recorded rather than quietly re-run.
 - **No grassroots-owned case** was driven end to end through a real grassroots
   browser session. The `orgRouter` code path is identical and the built artefact is
   asserted, but that is inference from shared code, not observation of a journey.
+  **This is the one item on this list the repair pass did not close.**
+- **A2 remains an accepted behaviour, not a fix.** A licensed agent can send one
+  factual "you have been named; confirm or ignore" notification to an adult they do
+  not represent. Narrowing it means changing P5.6D's frozen party model and
+  breaking its own AD5 assertion, so it is documented with its mitigations rather
+  than quietly altered.
+- **An agency org still reaches club list surfaces, scoped to itself.** A gate was
+  built and rejected on evidence (below). What is now asserted is that the data is
+  isolated — fifteen checks — not that the surfaces are absent.
+
+Two items that *were* on this list before the repair pass, and are no longer:
+
+- ~~The negative ratio is 49%~~ → it is **53%** after groups AU and AV, which
+  matches the earlier agent-lane suites. The groups were added because they assert
+  something real; the ratio moved as a side effect.
+- ~~One flake was observed and recorded rather than fixed~~ → it was root-caused
+  (a 3,500 ms toast lifetime sampled every 250 ms), fixed by recording toasts
+  instead of sampling for them, and re-proved under deliberate CPU starvation.
+
+---
+
+## The repair pass
+
+Run after the eight implementation commits, under the instruction *repair
+everything that needs repairing before moving to the next step*. Three commits:
+`0564912`, `66582f3`, and this documentation commit.
+
+### What it found
+
+| # | Finding | Disposition |
+| --- | --- | --- |
+| 1 | The contention flake | **Root-caused and fixed.** `e2e/toastLog.mjs` records each toast via a `MutationObserver` installed on the browser *context*, so a 3.5-second toast cannot be missed by a 250 ms poll. No sleeps added. Four suites converted. |
+| 2 | An agency org on club list surfaces | **A gate was written, tested, and rejected.** `m27/orgKind.mjs` (16-prefix fail-closed allowlist) passed the agent lane and broke six frozen suites — including `m23TrialE2E` W3, "an agency may invite an adult (the wall is about minors)". Reverted in full; the behaviour is instead **proven safe** by new group AU. |
+| 3 | E-15: a green live suite that never exited | **Fixed.** `process.on('exit', cleanup)` cannot fire while the backend, the browser and four static servers hold the event loop. The suite hung for ever holding five ports, which silently cost two iterations of the contention battery. Now closes the browser and exits, as its three siblings do. |
+| 4 | E-16: two new writes with no rate quota | **Fixed.** `opportunity_share` (60/h, actor) and `transaction_handoff` (30/h, org) on the platform's own M18.1 provider. The invite → withdraw → invite loop was unbounded at two notifications per turn; both halves now draw on one budget. Group AV proves it. |
+| 5 | A2, the draft naming an adult non-client | **Not changed**, with reasons and mitigations — see above. |
+| 6 | The adversarial audit, 14 groups, 179 checks | **No product defect found.** Ten of its own assertions were wrong and were corrected against the real interfaces. |
+
+### What it deliberately did not do
+
+- It did not weaken a test to make behaviour pass. The one place a test changed its
+  claim (AV3b2) it was made *more* direct, not less.
+- It did not redesign frozen architecture. The one attempt to change a frozen
+  product shape was abandoned the moment six suites said it was a change and not a
+  repair.
+- It added no migration, no store and no route. `SCHEMA_VERSION` is still 2307.
 
 ## The truth block
 
@@ -266,11 +319,13 @@ Three things, stated because a report that only lists successes is not a report.
   counts are the suites' own printed totals.
 - `SCHEMA_VERSION` is 2307 and no migration was added. Verified by reading the
   constant and by `m23BootContract` passing.
-- The eleven defects were all reproduced before being fixed. E-14's pre-existence
-  was proven by stashing every P5.6E change and re-running the failing suite.
-- The two accepted behaviours (A1, A2) were **not** fixed. They are documented with
-  the reasoning and the mitigations that exist, and named as candidates for a
-  future milestone.
+- The thirteen defects were all reproduced before being fixed. E-14's pre-existence
+  was proven by stashing every P5.6E change and re-running the failing suite; E-15's
+  by two blocked battery iterations and a process still alive 13 minutes after
+  reporting success; E-16's by 15 unrefused invite/withdraw cycles.
+- **One** accepted behaviour (A2) was not fixed, and is documented with its
+  reasoning and mitigations. A1 was not gated because a gate for it was built,
+  tested and rejected on evidence — that is a decision, not a deferral.
 - `m22/perf.json` and `m22/holdout.json` were modified by running those suites and
   then **reverted**, because this machine ran without `--expose-gc` and
   re-recording would have replaced a controlled measurement with a worse one.
@@ -293,3 +348,22 @@ Three things, stated because a report that only lists successes is not a report.
 | `a87dbe6` | tests: the integration acceptance suite, and five defects it found |
 | `5fb8d1b` | tests: six live browser journeys through the real clients |
 | `aabd071` | docs: thirteen documents and this report |
+| `eba439c` | docs: correct this report's own totals |
+| `0564912` | repair: the Chromium flake root-caused; the org-kind gate built and rejected; the adversarial audit |
+| `66582f3` | repair: E-15 the suite that never exited, E-16 the two writes with no quota |
+| *(this commit)* | repair closure: the defect register, the test report, this report, and `M23_P56E_REPAIR_REPORT.md` |
+
+The full account of the repair pass — 62 items and a 41-statement truth block — is
+in **`M23_P56E_REPAIR_REPORT.md`**.
+
+## Document names
+
+This milestone's documents carry `INTEGRATION` names where the mandate referred to
+them generically. The mapping, so no document is thought missing:
+
+| Mandate's name | This repository's file |
+| --- | --- |
+| `CROSS_APP_ARCHITECTURE` | `M23_P56E_INTEGRATION_MODEL.md` |
+| `AUTHORIZATION_PRIVACY_MATRIX` | `M23_P56E_INTEGRATION_AUTH_MATRIX.md` + `M23_P56E_INTEGRATION_PRIVACY_MATRIX.md` |
+| `TEST_REPORT` | `M23_P56E_INTEGRATION_TEST_REPORT.md` |
+| `AGENT_INTEGRATION_DEFECT_REGISTER` | `M23_P56E_INTEGRATION_DEFECT_REGISTER.md` |
