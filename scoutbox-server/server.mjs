@@ -4317,6 +4317,10 @@ m26Ctx = registerTransactions({
   agent: m24Ctx,
   compliance: m25Ctx.transactionSeam,
 });
+// An attributed review of a declared-only binding lands on the transaction's own
+// representation row, which is its truth — not only on the compliance context's
+// evaluation projection.
+m25Ctx.transactionSeam.hooks.representationReviewed = m26Ctx.representationReviewed;
 // The transaction domain's rows join the agency audit feed beside the P5.6B and
 // P5.6C rows, so an agency has ONE audit rather than three.
 const m25AuditRows = m24Ctx.hooks.auditRows;

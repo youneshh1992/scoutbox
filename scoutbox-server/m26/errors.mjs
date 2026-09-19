@@ -3,11 +3,18 @@
  * branch, a public-field allowlist.
  *
  * The refusals this table exists to keep indistinguishable (§78, adversarial
- * 4–6, 23): a transaction that does not exist, a transaction belonging to
- * another agency, a transaction belonging to another club, a transaction whose
- * individual is a minor, and a transaction whose individual has blocked the
- * caller's organisation all answer `TRANSACTION_NOT_FOUND` with the same body.
- * A caller who can tell those apart has an oracle.
+ * 4–6, 23): a transaction that does not exist, one belonging to another agency,
+ * one belonging to another club, and one belonging to another player all answer
+ * `TRANSACTION_NOT_FOUND` with the same body. Naming a party who does not
+ * exist, who is a minor, who is invisible to the caller's organisation or who
+ * has blocked it all answer `TRANSACTION_PARTY_NOT_FOUND` with the same body. A
+ * caller who can tell those apart has an oracle.
+ *
+ * Once a caller can already READ a transaction, concealment has nothing left to
+ * protect there, and a 404 on a record they are looking at would be a lie. A
+ * party who becomes unavailable AFTER the fact therefore stops the writes with
+ * `TRANSACTION_PARTY_UNAVAILABLE` — one code for removed, invisible, blocked
+ * and minor alike, so it still distinguishes nothing.
  *
  * A refusal never carries: a document's content, a note's text, a fee term, a
  * counterparty's name, another agency's agent, a reviewer's reason, a player's
@@ -57,6 +64,12 @@ export const M26_ERROR_HTTP = table({
   TRANSACTION_COMPLIANCE_PENDING: 422,
   TRANSACTION_COMPLIANCE_BLOCKED: 422,
   TRANSACTION_COMPLIANCE_STALE: 422,
+  // A party to an EXISTING transaction is no longer available to the caller's
+  // organisation. Uniform across "removed", "no longer visible", "blocked" and
+  // "now a minor", so it is not an oracle — and honest, unlike a 404 on a record
+  // the caller can still read. (Naming a party on CREATE stays the uniform
+  // TRANSACTION_PARTY_NOT_FOUND, because there the caller IS probing.)
+  TRANSACTION_PARTY_UNAVAILABLE: 422,
   CONSENT_REQUIRED: 422,
   REGULATORY_REVIEW_REQUIRED: 422,
   JURISDICTION_UNSUPPORTED: 422,

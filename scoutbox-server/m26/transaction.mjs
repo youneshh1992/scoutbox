@@ -103,15 +103,20 @@ const nullProto = (o) => Object.freeze(Object.assign(Object.create(null), o));
  * Transitions an ACTOR may request. Deliberately does NOT contain READY,
  * COMPLIANCE_PENDING or COMPLIANCE_BLOCKED: those three are the compliance
  * layer's answer, not anyone's request, so no request body — and no client,
- * however authorised — can write them. That is what makes adversarial cases
- * 25 and 26 ("manual-review transaction tries ACTIVE", "prohibited
- * transaction tries ACTIVE") structurally impossible rather than guarded.
+ * however authorised — can write them. A caller who asks for READY is refused
+ * by this map; a caller who asks for ACTIVE is refused by the compliance gate,
+ * with the reason. Both are what adversarial cases 25 and 26 ("manual-review
+ * transaction tries ACTIVE", "prohibited transaction tries ACTIVE") ask for.
  */
 export const ACTOR_TRANSITIONS = nullProto({
   DRAFT: ['PARTIES_CONFIRMED', 'CANCELLED'],
   PARTIES_CONFIRMED: ['CANCELLED'],
-  COMPLIANCE_PENDING: ['CANCELLED'],
-  COMPLIANCE_BLOCKED: ['CANCELLED'],
+  // ACTIVE is requestable from the two compliance states on purpose: the
+  // request is then refused BY COMPLIANCE, with the real reason, instead of by
+  // the transition map with a generic one. The gate requires `clear`, so the
+  // safety is identical and the answer is more honest.
+  COMPLIANCE_PENDING: ['ACTIVE', 'CANCELLED'],
+  COMPLIANCE_BLOCKED: ['ACTIVE', 'CANCELLED'],
   READY: ['ACTIVE', 'ON_HOLD', 'CANCELLED'],
   ACTIVE: ['ON_HOLD', 'CLOSED', 'CANCELLED'],
   ON_HOLD: ['ACTIVE', 'CLOSED', 'CANCELLED'],
@@ -365,7 +370,12 @@ export function statusForComplianceState(state) {
   if (!state) return null;
   if (state.blocked) return 'COMPLIANCE_BLOCKED';
   if (state.clear) return 'READY';
-  if (state.pendingReason === 'PARTIES_NOT_CONFIRMED') return 'PARTIES_CONFIRMED';
+  // Neither of these is a compliance question yet: the parties are not all
+  // confirmed, or nobody has claimed authority. Calling them COMPLIANCE_PENDING
+  // would make PARTIES_CONFIRMED a state no transaction ever rests in, and
+  // would tell a party that compliance is outstanding when nothing has been
+  // asked of it.
+  if (state.pendingReason === 'PARTIES_NOT_CONFIRMED' || state.pendingReason === 'REPRESENTATION_MISSING') return 'PARTIES_CONFIRMED';
   return 'COMPLIANCE_PENDING';
 }
 

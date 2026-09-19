@@ -83,6 +83,19 @@ export function registerTransactions(rawCtx) {
   };
   const str = (v, max) => String(v ?? '').trim().slice(0, max);
 
+  /**
+   * Record an accepted mutation with a ROLE rather than a person.
+   *
+   * `rev` is a token every party to the transaction sees, and M18.1's canonical
+   * `revBy` carries the display name of whoever moved it — which is right inside
+   * one organisation and wrong here: it told the individual which named person
+   * at the club had last touched the record, and told a club which named person
+   * at the agency had (defect D2). The audit keeps the real actor in
+   * `history[].by`; the shared token carries the role, and the 409 conflict body
+   * then says "Club signatory changed this" rather than naming someone.
+   */
+  const bumpTxRev = (record, by) => bumpRev(record, { by: { id: null, name: actorLabel(by)?.label ?? null }, at: now() });
+
   const txById = (id) => db.agentTransactions.find((t) => t && t.id === id) ?? null;
   const repsOf = (txId) => db.transactionRepresentations.filter((r) => r && r.transactionId === txId);
   const docsOf = (txId) => db.transactionDocuments.filter((d) => d && d.transactionId === txId && !d.removedAt);
@@ -400,7 +413,13 @@ export function registerTransactions(rawCtx) {
   /** Steps 8 and 15 for any write: safeguarding, then liveness. */
   function writableOr(res, tx, where) {
     const guard = safeguardingProblem(tx);
-    if (guard) { notFound(res, where); return false; }
+    // The READ stays available: the transaction is the parties' own record of
+    // what happened, and the P5.6C precedent keeps such a record readable with
+    // the person tombstoned out of it. The WRITE stops, and says so in terms
+    // that are identical for removed, invisible, blocked and minor — so the
+    // refusal is honest to a caller who can already see the record, and is
+    // still not an oracle.
+    if (guard) { sendTransactionError(res, { error: 'TRANSACTION_PARTY_UNAVAILABLE', message: 'A party to this transaction is no longer available to your organisation. Nothing further can be written to it; its record stays.' }, where); return false; }
     if (tx.status === 'ARCHIVED') { sendTransactionError(res, { error: 'TRANSACTION_ARCHIVED', status: tx.status, message: 'An archived transaction is read-only.' }, where); return false; }
     if (!LIVE_STATUSES.includes(tx.status)) { sendTransactionError(res, { error: 'TRANSACTION_NOT_LIVE', status: tx.status, message: 'This transaction has ended. Its record stays; nothing further can be written to it.' }, where); return false; }
     return true;
@@ -556,7 +575,7 @@ export function registerTransactions(rawCtx) {
     partyChanged(tx, byAgent(req));
     broadcast('agent_transaction_party_changed', { orgId: tx.agencyOrgId, txId: tx.id, partyRole: party.partyRole });
     notifyParty(tx, party, 'agent_transaction_action', `A transaction workspace now names you as the ${party.partyRole.replace(/_/g, ' ')}. Confirm your participation to let it proceed. Confirming does not agree to any terms.`);
-    bumpRev(tx, { by: req.orgUser, at: now() }); persistNow();
+    bumpTxRev(tx, byAgent(req)); persistNow();
     res.status(201).json({ transaction: projectTransaction(tx, agentViewer(req)) });
   });
 
@@ -583,7 +602,7 @@ export function registerTransactions(rawCtx) {
     }
     partyChanged(tx, byAgent(req));
     broadcast('agent_transaction_party_changed', { orgId: tx.agencyOrgId, txId: tx.id, partyRole: party.partyRole });
-    bumpRev(tx, { by: req.orgUser, at: now() }); persistNow();
+    bumpTxRev(tx, byAgent(req)); persistNow();
     res.json({ transaction: projectTransaction(tx, agentViewer(req)) });
   });
 
@@ -665,20 +684,22 @@ export function registerTransactions(rawCtx) {
     const result = compliance.evaluate(ctx, byAgent(req), { proposed });
     if (result.outcome === 'PROHIBITED_CONFLICT') {
       applyComplianceSnapshot(tx, { state: complianceStateFrom({ outcome: result.outcome, reasons: result.reasons, representationCount: repsOf(tx.id).filter((r) => r.status !== 'withdrawn').length, partiesConfirmed: partiesConfirmed(tx) }), result, ctx, by: byAgent(req), partyRevision: currentPartyRevision(tx) });
-      bumpRev(tx, { by: req.orgUser, at: now() }); persistNow();
+      bumpTxRev(tx, byAgent(req)); persistNow();
       return sendTransactionError(res, { error: 'REPRESENTATION_CONFLICT', reasons: result.reasons.filter((r) => ['PROHIBITED_COMBINATION', 'COMBINATION_NOT_PERMITTED', 'CONNECTED_AGENT_ATTRIBUTION'].includes(r.code)), policyVersions: result.policyVersions, outcome: result.outcome, message: 'An encoded ACTIVE rule prohibits this combination of parties. Nothing was recorded.' }, 'representations');
     }
     if (result.outcome === 'PERMITTED_DUAL_REPRESENTATION_CONSENT_REQUIRED') {
       applyComplianceSnapshot(tx, { state: complianceStateFrom({ outcome: result.outcome, reasons: result.reasons, consentsOutstanding: result.consentsOutstanding, representationCount: repsOf(tx.id).filter((r) => r.status !== 'withdrawn').length, partiesConfirmed: partiesConfirmed(tx) }), result, ctx, by: byAgent(req), partyRevision: currentPartyRevision(tx) });
-      bumpRev(tx, { by: req.orgUser, at: now() }); persistNow();
+      bumpTxRev(tx, byAgent(req)); persistNow();
       return sendTransactionError(res, { error: 'CONSENT_REQUIRED', consentsOutstanding: result.consentsOutstanding, reasons: result.reasons.filter((r) => r.code === 'CONSENT_REQUIRED'), policyVersions: result.policyVersions, outcome: result.outcome, contextId: ctx.id, message: 'Prior, party-specific written consent is outstanding. Request it; nothing was recorded.' }, 'representations');
     }
     if (!guardRev(req, res, tx, { errorCode: 'TRANSACTION_VERSION_CONFLICT', current: { status: tx.status } })) return;
     const needsReview = result.outcome === 'MANUAL_REGULATORY_REVIEW_REQUIRED' || result.outcome === 'INSUFFICIENT_DATA';
     if (needsReview && !declaredOnly) {
+      // Nothing is recorded: the binding the caller asked for does not exist,
+      // and a review item exists instead.
       const review = compliance.createReview({ kind: 'conflict_evaluation', agencyOrgId: tx.agencyOrgId, agentUserId: req.orgUser.id, subject: { contextId: ctx.id, transactionId: tx.id, partyRole }, reasons: result.reasons.filter((r) => r.code !== 'FACET_VERIFIED'), policyVersions: result.policyVersions, snapshot: { ...result, proposed: { partyRole, agentUserId: req.orgUser.id } }, requestedBy: byAgent(req) });
       applyComplianceSnapshot(tx, { state: complianceStateFrom({ outcome: result.outcome, reasons: result.reasons, representationCount: repsOf(tx.id).filter((r) => r.status !== 'withdrawn').length, partiesConfirmed: partiesConfirmed(tx) }), result, ctx, by: byAgent(req), partyRevision: currentPartyRevision(tx) });
-      bumpRev(tx, { by: req.orgUser, at: now() }); persistNow();
+      bumpTxRev(tx, byAgent(req)); persistNow();
       return sendTransactionError(res, { error: 'REGULATORY_REVIEW_REQUIRED', reasons: review.reasons, policyVersions: result.policyVersions, outcome: result.outcome, contextId: ctx.id, message: 'The deciding rule\'s operative status is uncertain or not encoded. An attributed review item was created; nothing proceeds until it is resolved under a named policy version.' }, 'representations');
     }
     const rep = {
@@ -696,7 +717,14 @@ export function registerTransactions(rawCtx) {
     db.transactionRepresentations.push(rep);
     hist(tx, 'transaction_representation_attached', byAgent(req), { partyRole, status: rep.status });
     recheckCompliance(tx, byAgent(req));
-    bumpRev(tx, { by: req.orgUser, at: now() }); persistNow();
+    bumpTxRev(tx, byAgent(req)); persistNow();
+    // A declared-only binding is RECORDED and NOT EFFECTIVE. It answers 422 with
+    // the review it created rather than 201, for the same reason P5.6C does: a
+    // 201 reads as "this is now in force", and it is not — an attributed
+    // reviewer has to confirm it first (DR-18).
+    if (declaredOnly) {
+      return sendTransactionError(res, { error: 'REGULATORY_REVIEW_REQUIRED', reasons: result.reasons.filter((r) => r.code !== 'FACET_VERIFIED'), policyVersions: result.policyVersions, outcome: result.outcome, contextId: ctx.id, partyRole, message: 'Representation of an entity with no ScoutBox agreement is recorded as declared and needs attributed review. It is not effective until a named reviewer confirms it.' }, 'representations');
+    }
     res.status(201).json({ transaction: projectTransaction(tx, agentViewer(req)), representation: { id: rep.id, partyRole, status: rep.status } });
   });
 
@@ -710,9 +738,9 @@ export function registerTransactions(rawCtx) {
     rep.status = 'withdrawn'; rep.withdrawnAt = now(); rep.withdrawnReason = 'agent_withdrew';
     hist(rep, 'transaction_representation_withdrawn', byAgent(req), { partyRole: rep.partyRole });
     hist(tx, 'transaction_representation_withdrawn', byAgent(req), { partyRole: rep.partyRole });
-    bumpRev(rep, { by: req.orgUser, at: now() });
+    bumpTxRev(rep, byAgent(req));
     recheckCompliance(tx, byAgent(req));
-    bumpRev(tx, { by: req.orgUser, at: now() }); persistNow();
+    bumpTxRev(tx, byAgent(req)); persistNow();
     res.json({ transaction: projectTransaction(tx, agentViewer(req)) });
   });
 
@@ -721,7 +749,7 @@ export function registerTransactions(rawCtx) {
     if (!writableOr(res, tx, 'evaluate')) return;
     if (limitedOr429(res, 'transaction_write', req.orgUser.id)) return;
     recheckCompliance(tx, byAgent(req));
-    bumpRev(tx, { by: req.orgUser, at: now() }); persistNow();
+    bumpTxRev(tx, byAgent(req)); persistNow();
     res.json({ transaction: projectTransaction(tx, agentViewer(req)) });
   });
 
@@ -740,14 +768,18 @@ export function registerTransactions(rawCtx) {
     const guard = safeguardingProblem(tx);
     // ARCHIVED is the one transition a safeguarding stop must not prevent:
     // shelving a record the workspace can no longer act on is the safe move.
-    if (guard && to !== 'ARCHIVED') return notFound(res, 'status');
-    if (!actorTransitionAllowed(tx.status, to)) return sendTransactionError(res, { error: 'TRANSACTION_TRANSITION_NOT_ALLOWED', from: tx.status, to, allowed: ACTOR_TRANSITIONS[tx.status] ?? [], message: 'That is not a transition this transaction can make from its current state.' }, 'status');
-    if (limitedOr429(res, 'transaction_status_write', req.orgUser.id)) return;
+    if (guard && to !== 'ARCHIVED') return sendTransactionError(res, { error: 'TRANSACTION_PARTY_UNAVAILABLE', message: 'A party to this transaction is no longer available to your organisation. It can be archived; it cannot be progressed.' }, 'status');
     const key = clientKeyOr400(req, res); if (key === undefined) return;
     const reasonCode = str(req.body?.reasonCode, 60);
     const reason = str(req.body?.reason, TRANSACTION_LIMITS.reason);
     const fp = payloadFingerprint({ to, reasonCode, reason });
+    // The idempotency check comes BEFORE the transition check: a replay of a
+    // transition that already happened must answer "already done", not "you
+    // cannot do that from here" — which is what the caller would see, since the
+    // transition it is replaying is exactly what moved the transaction.
     if (key && tx.keys?.[`status:${key}`]) { if (tx.keys[`status:${key}`].fp === fp) return res.json({ transaction: projectTransaction(tx, agentViewer(req)), idempotent: true }); return sendTransactionError(res, { error: 'TRANSACTION_IDEMPOTENCY_CONFLICT' }, 'status'); }
+    if (!actorTransitionAllowed(tx.status, to)) return sendTransactionError(res, { error: 'TRANSACTION_TRANSITION_NOT_ALLOWED', from: tx.status, to, allowed: ACTOR_TRANSITIONS[tx.status] ?? [], message: 'That is not a transition this transaction can make from its current state.' }, 'status');
+    if (limitedOr429(res, 'transaction_status_write', req.orgUser.id)) return;
     if (to === 'PARTIES_CONFIRMED') {
       if (!partiesConfirmed(tx)) return sendTransactionError(res, { error: 'TRANSACTION_PARTIES_NOT_CONFIRMED', awaiting: partiesAwaitingConfirmation(tx), message: 'Every required party must confirm its own participation first. Naming a party is not confirming it.' }, 'status');
     }
@@ -755,18 +787,28 @@ export function registerTransactions(rawCtx) {
     if (to === 'CANCELLED' && !CANCEL_REASON_CODES.includes(reasonCode)) return sendTransactionError(res, { error: 'TRANSACTION_INPUT_INVALID', field: 'reasonCode', allowed: CANCEL_REASON_CODES }, 'status');
     if (to === 'CLOSED' && !CLOSE_REASON_CODES.includes(reasonCode)) return sendTransactionError(res, { error: 'TRANSACTION_INPUT_INVALID', field: 'reasonCode', allowed: CLOSE_REASON_CODES }, 'status');
     if (to === 'ACTIVE') {
+      // A stale snapshot authorises nothing (§27). Refusing FIRST — before the
+      // re-check — is deliberate: it means the caller cannot enter the live
+      // workflow on facts they have not seen, because they must re-evaluate and
+      // read the new answer before asking again. The re-check below is the
+      // second guard, not the only one.
+      const stale0 = stalenessOf(tx);
+      if (stale0) {
+        tx.reEvaluationPending = true;
+        hist(tx, 'transaction_compliance_stale', byAgent(req), { staleness: stale0 });
+        tx.updatedAt = now(); bumpTxRev(tx, byAgent(req)); persistNow();
+        return sendTransactionError(res, { error: 'TRANSACTION_COMPLIANCE_STALE', staleness: stale0, message: 'The recorded compliance evaluation no longer matches the current facts. Re-evaluate and read the new answer before progressing.' }, 'status');
+      }
       // Leaving a hold never resumes on trust (§19): compliance is re-checked
       // here, in this request, and the answer decides.
       const { safeguarding, state } = recheckCompliance(tx, byAgent(req));
       if (safeguarding) { persistNow(); return notFound(res, 'status'); }
-      if (state?.blocked) { bumpRev(tx, { by: req.orgUser, at: now() }); persistNow(); return sendTransactionError(res, { error: 'TRANSACTION_COMPLIANCE_BLOCKED', outcome: state.outcome, reasons: state.reasonCodes.map((code) => ({ code })), message: 'An encoded ACTIVE rule prohibits this combination. A reviewer cannot approve past it; only changed facts or a new policy version can.' }, 'status'); }
-      if (!state?.clear) { bumpRev(tx, { by: req.orgUser, at: now() }); persistNow(); return sendTransactionError(res, { error: 'TRANSACTION_COMPLIANCE_PENDING', pendingReason: state?.pendingReason ?? null, outcome: state?.outcome ?? null, reasons: (state?.reasonCodes ?? []).map((code) => ({ code })), message: 'This transaction cannot progress while compliance is outstanding.' }, 'status'); }
-      const stale = stalenessOf(tx);
-      if (stale) { bumpRev(tx, { by: req.orgUser, at: now() }); persistNow(); return sendTransactionError(res, { error: 'TRANSACTION_COMPLIANCE_STALE', staleness: stale, message: 'The compliance evaluation no longer matches the current facts. Re-evaluate before progressing.' }, 'status'); }
+      if (state?.blocked) { bumpTxRev(tx, byAgent(req)); persistNow(); return sendTransactionError(res, { error: 'TRANSACTION_COMPLIANCE_BLOCKED', outcome: state.outcome, reasons: state.reasonCodes.map((code) => ({ code })), message: 'An encoded ACTIVE rule prohibits this combination. A reviewer cannot approve past it; only changed facts or a new policy version can.' }, 'status'); }
+      if (!state?.clear) { bumpTxRev(tx, byAgent(req)); persistNow(); return sendTransactionError(res, { error: 'TRANSACTION_COMPLIANCE_PENDING', pendingReason: state?.pendingReason ?? null, outcome: state?.outcome ?? null, reasons: (state?.reasonCodes ?? []).map((code) => ({ code })), message: 'This transaction cannot progress while compliance is outstanding.' }, 'status'); }
       // Re-check the transition: the re-evaluation above may have moved the
       // status, and the caller's transition must still be legal from where the
       // transaction now is.
-      if (!actorTransitionAllowed(tx.status, to)) { bumpRev(tx, { by: req.orgUser, at: now() }); persistNow(); return sendTransactionError(res, { error: 'TRANSACTION_TRANSITION_NOT_ALLOWED', from: tx.status, to, allowed: ACTOR_TRANSITIONS[tx.status] ?? [] }, 'status'); }
+      if (!actorTransitionAllowed(tx.status, to)) { bumpTxRev(tx, byAgent(req)); persistNow(); return sendTransactionError(res, { error: 'TRANSACTION_TRANSITION_NOT_ALLOWED', from: tx.status, to, allowed: ACTOR_TRANSITIONS[tx.status] ?? [] }, 'status'); }
     }
     if (!guardRev(req, res, tx, { errorCode: 'TRANSACTION_VERSION_CONFLICT', current: { status: tx.status } })) return;
     const from = tx.status;
@@ -794,7 +836,7 @@ export function registerTransactions(rawCtx) {
     for (const p of tx.parties.filter((x) => !x.removed)) {
       notifyParty(tx, p, 'agent_transaction', `A transaction you are party to is now "${to.replace(/_/g, ' ').toLowerCase()}". Nothing has been agreed or signed.`);
     }
-    tx.updatedAt = now(); bumpRev(tx, { by: req.orgUser, at: now() }); persistNow();
+    tx.updatedAt = now(); bumpTxRev(tx, byAgent(req)); persistNow();
     res.json({ transaction: projectTransaction(tx, agentViewer(req)) });
   });
 
@@ -836,7 +878,7 @@ export function registerTransactions(rawCtx) {
     const v = { id: nextId('txt'), at: now(), by: byAgent(req), recordedFor, visibility, summary, version: tx.terms.versions.length + 1 };
     tx.terms.versions.push(v);
     hist(tx, 'transaction_terms_recorded', byAgent(req), { partyRole: recordedFor, visibility, version: v.version });
-    tx.updatedAt = now(); bumpRev(tx, { by: req.orgUser, at: now() }); persistNow();
+    tx.updatedAt = now(); bumpTxRev(tx, byAgent(req)); persistNow();
     res.status(201).json({ transaction: projectTransaction(tx, agentViewer(req)) });
   });
 
@@ -855,7 +897,7 @@ export function registerTransactions(rawCtx) {
     tx.links ??= { trialId: null, opportunityId: null };
     tx.links.opportunityId = opp.id;
     hist(tx, 'transaction_status_changed', byAgent(req), { from: tx.status, to: tx.status });
-    tx.updatedAt = now(); bumpRev(tx, { by: req.orgUser, at: now() }); persistNow();
+    tx.updatedAt = now(); bumpTxRev(tx, byAgent(req)); persistNow();
     res.json({ transaction: projectTransaction(tx, agentViewer(req)) });
   });
 
@@ -966,7 +1008,7 @@ export function registerTransactions(rawCtx) {
     hist(d, 'transaction_document_added', byAgent(req), { documentType: d.documentType, visibility: d.visibility, version: d.version });
     old.supersededBy = d.id;
     hist(old, 'transaction_document_superseded', byAgent(req), { version: old.version });
-    bumpRev(old, { by: req.orgUser, at: now() });
+    bumpTxRev(old, byAgent(req));
     db.transactionDocuments.push(d);
     hist(tx, 'transaction_document_superseded', byAgent(req), { documentType: d.documentType, version: d.version });
     tx.updatedAt = now(); persistNow();
@@ -995,7 +1037,7 @@ export function registerTransactions(rawCtx) {
     const n = { id: nextId('txn'), visibility, text, by, at: now(), removedAt: null };
     tx.notes.push(n);
     hist(tx, 'transaction_note_added', by, { visibility });
-    tx.updatedAt = now(); bumpRev(tx, { by: { id: by.userId, name: by.name }, at: now() }); persistNow();
+    tx.updatedAt = now(); bumpTxRev(tx, by); persistNow();
     res.status(201).json({ note: { id: n.id, visibility: n.visibility, text: n.text, at: n.at, actor: actorLabel(n.by) } });
   }
 
@@ -1054,7 +1096,7 @@ export function registerTransactions(rawCtx) {
     partyChanged(tx, byClubUser(req));
     broadcast('agent_transaction_party_changed', { orgId: tx.agencyOrgId, txId: tx.id, partyRole: party.partyRole });
     notify({ kind: 'org_user', id: tx.agentUserId }, 'agent_transaction', `A club confirmed its participation as the ${party.partyRole.replace(/_/g, ' ')} in a transaction.`, tx.id);
-    bumpRev(tx, { by: req.orgUser, at: now() }); persistNow();
+    bumpTxRev(tx, byClubUser(req)); persistNow();
     res.json({ transaction: projectTransaction(tx, clubViewer(req)) });
   });
   orgRouter.get('/transactions/:id/documents', (req, res) => {
@@ -1097,7 +1139,7 @@ export function registerTransactions(rawCtx) {
     tx.linkedThreads.push({ id: nextId('txm'), channelId: ch.id, linkedBy: byClubUser(req), linkedAt: now() });
     hist(tx, 'transaction_message_linked', byClubUser(req), { count: tx.linkedThreads.length });
     broadcast('agent_transaction_message_linked', { orgId: tx.agencyOrgId, txId: tx.id });
-    tx.updatedAt = now(); bumpRev(tx, { by: req.orgUser, at: now() }); persistNow();
+    tx.updatedAt = now(); bumpTxRev(tx, byClubUser(req)); persistNow();
     res.status(201).json({ transaction: projectTransaction(tx, clubViewer(req)) });
   });
   /** Reference a trial of THIS club for THIS individual (§50). A reference only; no assessment crosses. */
@@ -1112,7 +1154,7 @@ export function registerTransactions(rawCtx) {
     tx.links ??= { trialId: null, opportunityId: null };
     tx.links.trialId = trial.id;
     hist(tx, 'transaction_status_changed', byClubUser(req), { from: tx.status, to: tx.status });
-    tx.updatedAt = now(); bumpRev(tx, { by: req.orgUser, at: now() }); persistNow();
+    tx.updatedAt = now(); bumpTxRev(tx, byClubUser(req)); persistNow();
     res.json({ transaction: projectTransaction(tx, clubViewer(req)) });
   });
 
@@ -1143,7 +1185,7 @@ export function registerTransactions(rawCtx) {
     partyChanged(tx, byPlayer(req));
     broadcast('agent_transaction_party_changed', { orgId: tx.agencyOrgId, txId: tx.id, partyRole: party.partyRole });
     notify({ kind: 'org_user', id: tx.agentUserId }, 'agent_transaction', 'Your client confirmed their participation in a transaction.', tx.id);
-    bumpRev(tx, { by: { id: req.player.id, name: req.player.name }, at: now() }); persistNow();
+    bumpTxRev(tx, byPlayer(req)); persistNow();
     res.json({ transaction: projectTransaction(tx, playerViewer(req)) });
   });
   playerRouter.get('/transactions/:id/documents', (req, res) => {
@@ -1186,11 +1228,6 @@ export function registerTransactions(rawCtx) {
     const status = req.query.status ? String(req.query.status) : null;
     res.json({ items: db.agentTransactions.filter((t) => t && (!status || t.status === status)).map(tsView), statuses: TRANSACTION_STATUSES, note: 'States, ids and party roles only. Transaction documents, notes, messages and terms are the parties\' and are not exposed here.' });
   });
-  tsRouter.get('/transactions/:id', (req, res) => {
-    const tx = txById(req.params.id);
-    if (!tx) return notFound(res, 'ts');
-    res.json({ transaction: tsView(tx), audit: transactionAuditRows(db, { transactionId: tx.id }).slice(0, TRANSACTION_LIMITS.historyPage) });
-  });
   /** Process metrics only (§76): durations and counts. No agent is ranked and no player is ranked. */
   tsRouter.get('/transactions/metrics', (_req, res) => {
     const all = db.agentTransactions.filter(Boolean);
@@ -1221,7 +1258,12 @@ export function registerTransactions(rawCtx) {
       note: 'Process metrics only. No agent, club or player is ranked, and no subscription or payment status enters any transaction outcome.',
     });
   });
-
+  // Registered BEFORE the `:id` route, or Express would read "metrics" as an id.
+  tsRouter.get('/transactions/:id', (req, res) => {
+    const tx = txById(req.params.id);
+    if (!tx) return notFound(res, 'ts');
+    res.json({ transaction: tsView(tx), audit: transactionAuditRows(db, { transactionId: tx.id }).slice(0, TRANSACTION_LIMITS.historyPage) });
+  });
   // ============================================================ lifecycle hooks
 
   /**
@@ -1255,8 +1297,31 @@ export function registerTransactions(rawCtx) {
     }
   }
 
+  /**
+   * An attributed reviewer decided a declared-only binding (an entity client
+   * with no ScoutBox agreement, P5.6A DR-18). The `transactionRepresentations`
+   * row is the truth, so the decision lands here; the compliance context's
+   * array is re-projected on the next evaluation.
+   *
+   * An approval records NO act by the agent: `firstActAt` stays null until the
+   * agent themselves acts, so a later party-specific consent is still "in
+   * advance" — the same rule P5.6C applies to its own review-verified rows.
+   */
+  function representationReviewed({ transactionId, representationId, outcome, by, reviewId }) {
+    const tx = txById(transactionId);
+    const rep = db.transactionRepresentations.find((r) => r && r.id === representationId && r.transactionId === transactionId);
+    if (!tx || !rep || rep.status !== 'pending_review') return;
+    if (outcome === 'APPROVED') { rep.status = 'verified'; rep.declaredOnly = false; rep.verifiedAt = now(); rep.verifiedByReviewId = reviewId; }
+    else { rep.status = 'withdrawn'; rep.withdrawnAt = now(); rep.withdrawnReason = 'review_rejected'; }
+    hist(rep, outcome === 'APPROVED' ? 'transaction_representation_attached' : 'transaction_representation_withdrawn', by, { partyRole: rep.partyRole, status: rep.status });
+    hist(tx, outcome === 'APPROVED' ? 'transaction_representation_attached' : 'transaction_representation_withdrawn', by, { partyRole: rep.partyRole, status: rep.status });
+    bumpTxRev(rep, by);
+    if (LIVE_STATUSES.includes(tx.status)) recheckCompliance(tx, by);
+    tx.updatedAt = now();
+  }
+
   return {
-    onPlayerDeleted,
+    onPlayerDeleted, representationReviewed,
     hooks: { auditRows: (org) => transactionAuditRows(db, { agencyOrgId: org.id }) },
     transactionAuditRows: (filter) => transactionAuditRows(db, filter),
   };

@@ -918,6 +918,14 @@ export function registerCompliance(rawCtx) {
     const c = contextById(r.subject?.contextId);
     if (!c) return { contextOutcome: null, note: 'context gone' };
     if (r.kind === 'representation_declared') {
+      // P5.6D: when the declaration belongs to a transaction, the
+      // `transactionRepresentations` row is the TRUTH and the context's array is
+      // its evaluation projection — so the reviewer's decision must land on the
+      // row, not only on the projection. The hook is filled in by m26 at
+      // registration; absent (P5.6C-only builds) nothing changes.
+      if (r.subject?.transactionId && transactionHooks.representationReviewed) {
+        transactionHooks.representationReviewed({ transactionId: r.subject.transactionId, representationId: r.subject.representationId, outcome, by, reviewId: r.id });
+      }
       const rep = c.representations.find((x) => x.id === r.subject.representationId);
       if (rep && rep.status === 'pending_review') {
         rep.status = outcome === 'APPROVED' ? 'verified' : 'withdrawn';
@@ -1009,7 +1017,15 @@ export function registerCompliance(rawCtx) {
    * its reason codes (row 14), never the evaluation's internals. The
    * transaction's own projection is what a club sees.
    */
+  /**
+   * Filled in by m26 at registration. A P5.6C-only build leaves it empty and
+   * every branch that consults it is a no-op, which is why it is an object with
+   * null members rather than an optional import.
+   */
+  const transactionHooks = { representationReviewed: null };
+
   const transactionSeam = {
+    hooks: transactionHooks,
     /** Open the evaluation context a transaction owns. `transactionId` is recorded for provenance in both directions. */
     openContext({ agencyOrgId, agentUserId, type, jurisdictions, transactionId, by }) {
       const c = {
