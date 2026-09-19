@@ -1,7 +1,8 @@
 # M23 P5.6E — final report
 
-**ScoutBox Agent Cross-App Integration.** Seven local commits, no push, no PR, no
-deploy. 53 files, +4,907 / −143 lines against the P5.6D tip (`6d3401b`).
+**ScoutBox Agent Cross-App Integration.** Eight local commits, no push, no PR, no
+deploy. 66 files, +6,721 / −143 lines against the P5.6D tip (`6d3401b`) — of which
+53 files and +4,907 lines are code and tests, the rest documentation.
 
 ---
 
@@ -291,3 +292,4 @@ Three things, stated because a report that only lists successes is not a report.
 | `6b365e6` | clients: the four surfaces that changed, and the one that did not |
 | `a87dbe6` | tests: the integration acceptance suite, and five defects it found |
 | `5fb8d1b` | tests: six live browser journeys through the real clients |
+| `aabd071` | docs: thirteen documents and this report |
