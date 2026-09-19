@@ -16,11 +16,12 @@ import { useCallback, useEffect, useState } from 'react';
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000';
 const DEMO = import.meta.env.VITE_DEMO === '1';
 
-export type M25Tab = 'agentreview' | 'agentpolicy' | 'agentreviewers';
+export type M25Tab = 'agentreview' | 'agentpolicy' | 'agentreviewers' | 'agenttransactions';
 export const M25_TABS: { id: M25Tab; label: string }[] = [
   { id: 'agentreview', label: 'Agent compliance review' },
   { id: 'agentpolicy', label: 'Jurisdiction policy' },
   { id: 'agentreviewers', label: 'Reviewer identities' },
+  { id: 'agenttransactions', label: 'Agent transactions' },
 ];
 
 // ------------------------------------------------------------------ types
@@ -35,6 +36,28 @@ interface Review {
   snapshot: Record<string, unknown> | null; rev: number;
 }
 interface SubjectDetail { [k: string]: unknown }
+/**
+ * M23 P5.6D — the Trust & Safety read of a transaction. Deliberately thin: ids,
+ * party ROLES, states, counts. The parties' documents, notes, messages and
+ * working particulars are theirs and are not exposed to this console at all
+ * (§40/§34), so there is nothing here to leak and no action to take.
+ */
+interface TsTransaction {
+  id: string; type: string; status: string; jurisdictions: string[];
+  agencyOrgId: string; agentUserId: string | null;
+  parties: { partyRole: string; subjectKind: string; removed: boolean; confirmed: boolean }[];
+  representations: { partyRole: string; status: string; declaredOnly: boolean; reviewId: string | null }[];
+  compliance: { outcome: string | null; pendingReason: string | null; blocked: boolean; clear: boolean; reasonCodes: string[]; policyVersions: string[]; evaluatedAt: number | null; stale: string | null } | null;
+  reviews: { id: string; kind: string; status: string }[];
+  documentCount: number; noteCount: number; linkedThreadCount: number;
+  createdAt: number; updatedAt: number; rev: number;
+}
+interface TxMetrics {
+  byStatus: Record<string, number>; byType: Record<string, number>;
+  medianDurationMs: number | null; medianCompliancePendingMs: number | null; medianConsentWaitMs: number | null;
+  cancellationReasons: Record<string, number>; holdReasons: Record<string, number>;
+  staleSnapshots: number; note: string;
+}
 interface PolicyVersion {
   id: string; regulator: string; jurisdiction: string; policyVersion: number; supersedes: string | null;
   effectiveFrom: string; effectiveTo: string | null; status: string; publishedAt: number | null;
@@ -53,6 +76,20 @@ const STATUSES = ['OPEN', 'PENDING', 'IN_REVIEW', 'APPROVED', 'REJECTED', 'CANCE
 const STATUS_LABEL: Record<string, string> = {
   OPEN: 'open work (awaiting or in review)', PENDING: 'awaiting review', IN_REVIEW: 'in review',
   APPROVED: 'approved', REJECTED: 'rejected', CANCELLED: 'cancelled', SUPERSEDED: 'superseded',
+};
+const TX_STATUSES = ['DRAFT', 'PARTIES_CONFIRMED', 'COMPLIANCE_PENDING', 'COMPLIANCE_BLOCKED', 'READY', 'ACTIVE', 'ON_HOLD', 'CANCELLED', 'CLOSED', 'ARCHIVED'];
+const TX_STATUS_LABEL: Record<string, string> = {
+  DRAFT: 'draft', PARTIES_CONFIRMED: 'parties confirmed', COMPLIANCE_PENDING: 'compliance pending',
+  COMPLIANCE_BLOCKED: 'compliance blocked', READY: 'ready to proceed in ScoutBox', ACTIVE: 'in progress',
+  ON_HOLD: 'on hold', CANCELLED: 'cancelled', CLOSED: 'closed', ARCHIVED: 'archived',
+};
+/** A duration in words. Never a bare millisecond count in front of a human. */
+const ms = (v: number | null) => {
+  if (v === null) return 'not enough data';
+  const h = v / 3600e3;
+  if (h < 1) return `${Math.round(v / 60e3)} min`;
+  if (h < 48) return `${h.toFixed(1)} h`;
+  return `${(h / 24).toFixed(1)} days`;
 };
 const matchesFilter = (r: { status: string }, f: string) => (f === 'OPEN' ? r.status === 'PENDING' || r.status === 'IN_REVIEW' : r.status === f);
 const KIND_LABEL: Record<string, string> = {
@@ -123,6 +160,47 @@ const demoMetrics: Metrics = {
   note: 'Process metrics only. No agent is ranked and no subscription or payment status enters any compliance outcome.',
 };
 
+// M23 P5.6D — synthetic transactions for the demo build. Roles and states only,
+// exactly as the real T&S read gives them: no names, no documents, no notes.
+const demoTxs: TsTransaction[] = [
+  {
+    id: 'atx-d1', type: 'employment_contract', status: 'ACTIVE', jurisdictions: ['ENG'], agencyOrgId: 'org-northstar', agentUserId: 'usr-ana',
+    parties: [{ partyRole: 'individual', subjectKind: 'player', removed: false, confirmed: true }, { partyRole: 'engaging_entity', subjectKind: 'club', removed: false, confirmed: true }],
+    representations: [{ partyRole: 'individual', status: 'verified', declaredOnly: false, reviewId: null }],
+    compliance: { outcome: 'CLEAR', pendingReason: null, blocked: false, clear: true, reasonCodes: [], policyVersions: ['jp-eng-2026-27-1'], evaluatedAt: NOW - 2 * 3600e3, stale: null },
+    reviews: [], documentCount: 2, noteCount: 1, linkedThreadCount: 1, createdAt: NOW - 9 * 86400e3, updatedAt: NOW - 2 * 3600e3, rev: 11,
+  },
+  {
+    id: 'atx-d2', type: 'transfer', status: 'COMPLIANCE_PENDING', jurisdictions: ['INT', 'ENG'], agencyOrgId: 'org-northstar', agentUserId: 'usr-ana',
+    parties: [{ partyRole: 'individual', subjectKind: 'player', removed: false, confirmed: true }, { partyRole: 'engaging_entity', subjectKind: 'club', removed: false, confirmed: true }, { partyRole: 'releasing_entity', subjectKind: 'club', removed: false, confirmed: false }],
+    representations: [{ partyRole: 'individual', status: 'verified', declaredOnly: false, reviewId: null }, { partyRole: 'engaging_entity', status: 'pending_review', declaredOnly: true, reviewId: 'rrv-d2' }],
+    compliance: { outcome: 'PERMITTED_DUAL_REPRESENTATION_CONSENT_REQUIRED', pendingReason: 'CONSENT_REQUIRED', blocked: false, clear: false, reasonCodes: ['DUAL_REPRESENTATION_CONSENT_REQUIRED'], policyVersions: ['jp-fifa-2025-1', 'jp-eng-2026-27-1'], evaluatedAt: NOW - 20 * 3600e3, stale: null },
+    reviews: [{ id: 'rrv-d2', kind: 'representation_declared', status: 'PENDING' }], documentCount: 1, noteCount: 0, linkedThreadCount: 0, createdAt: NOW - 4 * 86400e3, updatedAt: NOW - 20 * 3600e3, rev: 7,
+  },
+  {
+    id: 'atx-d3', type: 'loan', status: 'COMPLIANCE_BLOCKED', jurisdictions: ['ENG'], agencyOrgId: 'org-northstar', agentUserId: 'usr-ana',
+    parties: [{ partyRole: 'individual', subjectKind: 'player', removed: false, confirmed: true }, { partyRole: 'engaging_entity', subjectKind: 'club', removed: false, confirmed: true }, { partyRole: 'releasing_entity', subjectKind: 'club', removed: false, confirmed: true }],
+    representations: [{ partyRole: 'individual', status: 'verified', declaredOnly: false, reviewId: null }, { partyRole: 'releasing_entity', status: 'verified', declaredOnly: false, reviewId: null }],
+    compliance: { outcome: 'PROHIBITED_CONFLICT', pendingReason: null, blocked: true, clear: false, reasonCodes: ['PROHIBITED_MULTIPLE_REPRESENTATION'], policyVersions: ['jp-eng-2026-27-1'], evaluatedAt: NOW - 30 * 3600e3, stale: null },
+    reviews: [], documentCount: 0, noteCount: 2, linkedThreadCount: 0, createdAt: NOW - 6 * 86400e3, updatedAt: NOW - 30 * 3600e3, rev: 5,
+  },
+  {
+    id: 'atx-d4', type: 'transfer', status: 'CANCELLED', jurisdictions: ['ENG'], agencyOrgId: 'org-northstar', agentUserId: 'usr-ana',
+    parties: [{ partyRole: 'individual', subjectKind: 'player', removed: true, confirmed: true }, { partyRole: 'engaging_entity', subjectKind: 'club', removed: false, confirmed: true }],
+    representations: [], compliance: null, reviews: [],
+    documentCount: 0, noteCount: 0, linkedThreadCount: 0, createdAt: NOW - 40 * 86400e3, updatedAt: NOW - 30 * 86400e3, rev: 9,
+  },
+];
+const demoTxMetrics: TxMetrics = {
+  byStatus: { DRAFT: 1, PARTIES_CONFIRMED: 0, COMPLIANCE_PENDING: 1, COMPLIANCE_BLOCKED: 1, READY: 0, ACTIVE: 1, ON_HOLD: 1, CANCELLED: 1, CLOSED: 0, ARCHIVED: 0 },
+  byType: { employment_contract: 2, transfer: 2, loan: 1, other_services: 0 },
+  medianDurationMs: 10 * 86400e3, medianCompliancePendingMs: 22 * 3600e3, medianConsentWaitMs: 14 * 3600e3,
+  cancellationReasons: { parties_withdrew: 1, duplicate: 0, opened_in_error: 0, compliance_not_resolvable: 0, other: 0 },
+  holdReasons: { awaiting_party: 1, awaiting_document: 0, awaiting_regulatory_step: 0, other: 0 },
+  staleSnapshots: 1,
+  note: 'Process metrics only. No agent, club or player is ranked, and no subscription or payment status enters any transaction outcome.',
+};
+
 // ------------------------------------------------------------------ panel
 export function M25Panel({ tab, say }: { tab: M25Tab; adminKey: string; say: (t: string) => void }) {
   // The reviewer session. Deliberately not the admin key, and deliberately not persisted.
@@ -140,6 +218,9 @@ export function M25Panel({ tab, say }: { tab: M25Tab; adminKey: string; say: (t:
   const [reviewers, setReviewers] = useState<Reviewer[]>([]);
   const [audit, setAudit] = useState<DecisionRow[]>([]);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
+  const [txs, setTxs] = useState<TsTransaction[]>([]);
+  const [txMetrics, setTxMetrics] = useState<TxMetrics | null>(null);
+  const [txStatusFilter, setTxStatusFilter] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   // One resolution form per open item.
@@ -177,6 +258,7 @@ export function M25Panel({ tab, say }: { tab: M25Tab; adminKey: string; say: (t:
     if (DEMO) {
       setReviews(demoReviews.filter((r) => matchesFilter(r, statusFilter)));
       setPolicies(demoPolicies); setReviewers(demoReviewers); setAudit(demoAudit); setMetrics(demoMetrics);
+      setTxs(demoTxs.filter((x) => !txStatusFilter || x.status === txStatusFilter)); setTxMetrics(demoTxMetrics);
       return;
     }
     try {
@@ -192,12 +274,17 @@ export function M25Panel({ tab, say }: { tab: M25Tab; adminKey: string; say: (t:
         setReviewers((await call<{ items: Reviewer[] }>('/ts/reviewers')).items);
         setAudit((await call<{ items: DecisionRow[] }>('/ts/compliance/audit')).items);
       }
+      if (tab === 'agenttransactions') {
+        const q = txStatusFilter ? `?status=${encodeURIComponent(txStatusFilter)}` : '';
+        setTxs((await call<{ items: TsTransaction[] }>(`/ts/transactions${q}`)).items);
+        setTxMetrics(await call<TxMetrics>('/ts/transactions/metrics'));
+      }
     } catch (e) {
       const err = e as Error & { code?: string };
       if (err.code === 'REVIEWER_REVOKED' || err.code === 'REVIEWER_AUTH_REQUIRED') { signOut(); setAuthError('This reviewer session has ended. Sign in again.'); return; }
       setError(err.message);
     }
-  }, [token, tab, statusFilter, call]);
+  }, [token, tab, statusFilter, txStatusFilter, call]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -422,6 +509,83 @@ export function M25Panel({ tab, say }: { tab: M25Tab; adminKey: string; say: (t:
           </div>
         ))}
         {policies.length === 0 && <div className="notice">No policy version is stored. Until one is, every jurisdiction reads as unsupported and nothing proceeds automatically.</div>}
+      </div>
+    );
+  }
+
+  // ------------------------------------------------------- transactions (P5.6D)
+  // A READ, not a console. Trust & Safety sees states, ids, party ROLES and
+  // process counts; it cannot confirm a party, write a note, read a document or
+  // move a transaction, because none of those are Trust & Safety's to do. A
+  // compliance question about one is answered through the review queue, where a
+  // named reviewer resolves facts against cited evidence.
+  if (tab === 'agenttransactions') {
+    return (
+      <div className="list-rows" data-testid="ts-transactions">
+        {who}
+        <div className="notice">
+          Agent transaction workspaces, as states and party <b>roles</b>. The parties' documents, notes, conversations and working
+          particulars are theirs and are not shown here. Nothing on this tab changes a transaction: a compliance question is answered in
+          the review queue, by a named reviewer, against cited evidence.
+        </div>
+        {error && <div className="notice block" role="alert" data-testid="tx-error">{error}</div>}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label htmlFor="tx-status">Status</label>
+          <select id="tx-status" value={txStatusFilter} onChange={(e) => setTxStatusFilter(e.target.value)} data-testid="tx-status-filter">
+            <option value="">every status</option>
+            {TX_STATUSES.map((st) => <option key={st} value={st}>{TX_STATUS_LABEL[st] ?? st}</option>)}
+          </select>
+          <span className="dim">{txs.length} shown</span>
+        </div>
+        {txMetrics && (
+          <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }} data-testid="tx-metrics">
+            <b>Process metrics</b>
+            <div className="dim">
+              median time open {ms(txMetrics.medianDurationMs)} · median time in compliance pending {ms(txMetrics.medianCompliancePendingMs)} ·
+              median consent wait {ms(txMetrics.medianConsentWaitMs)} · stale compliance snapshots {txMetrics.staleSnapshots}
+            </div>
+            <div className="dim">
+              {TX_STATUSES.filter((st) => (txMetrics.byStatus[st] ?? 0) > 0).map((st) => `${TX_STATUS_LABEL[st] ?? st}: ${txMetrics.byStatus[st]}`).join(' · ') || 'no transaction yet'}
+            </div>
+            <div className="dim" style={{ fontSize: 12 }}>{txMetrics.note}</div>
+          </div>
+        )}
+        {txs.length === 0 && <div className="notice" data-testid="tx-empty">No transaction matches.</div>}
+        {txs.map((x) => {
+          const c = x.compliance;
+          const word = !c ? 'not evaluated' : c.blocked ? 'blocked by policy' : c.stale ? 'needs re-checking' : c.clear ? 'clear' : (c.pendingReason ?? 'pending');
+          const cls = !c ? '' : c.blocked ? 'red' : c.clear && !c.stale ? 'green' : 'gold';
+          return (
+            <div key={x.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }} data-testid={`ts-tx-${x.id}`} data-status={x.status}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span className="grow"><b>{x.id}</b> <span className="dim">· {x.type.replace(/_/g, ' ')} · {x.jurisdictions.join(', ') || 'no jurisdiction resolved'} · agency {x.agencyOrgId}</span></span>
+                <span className="pill">{TX_STATUS_LABEL[x.status] ?? x.status}</span>
+                <span className={`pill ${cls}`}>{word}</span>
+              </div>
+              <div className="dim">
+                parties: {x.parties.map((pt) => `${pt.partyRole.replace(/_/g, ' ')} (${pt.subjectKind}${pt.removed ? ', removed' : pt.confirmed ? ', confirmed' : ', unconfirmed'})`).join(' · ') || 'none'}
+              </div>
+              <div className="dim">
+                representation: {x.representations.map((r) => `${r.partyRole.replace(/_/g, ' ')} — ${r.status}${r.declaredOnly ? ' (declared, not yet reviewed)' : ''}`).join(' · ') || 'none attached'}
+              </div>
+              {c && (
+                <div className="dim">
+                  {c.outcome ?? 'no outcome'}{c.reasonCodes.length ? ` · ${c.reasonCodes.join(', ')}` : ''}
+                  {c.policyVersions.length ? ` · policy ${c.policyVersions.join(', ')}` : ''}
+                  {c.evaluatedAt ? ` · evaluated ${when(c.evaluatedAt)}` : ''}{c.stale ? ` · snapshot stale (${c.stale})` : ''}
+                </div>
+              )}
+              {x.reviews.length > 0 && (
+                <div className="dim">open review: {x.reviews.map((r) => `${r.id} (${KIND_LABEL[r.kind] ?? r.kind}, ${r.status})`).join(' · ')}</div>
+              )}
+              <div className="dim" style={{ fontSize: 12 }}>
+                {x.documentCount} document{x.documentCount === 1 ? '' : 's'} · {x.noteCount} note{x.noteCount === 1 ? '' : 's'} ·
+                {' '}{x.linkedThreadCount} linked conversation{x.linkedThreadCount === 1 ? '' : 's'} · opened {when(x.createdAt)} · last change {when(x.updatedAt)} · rev {x.rev}
+                {' '}<span title="Counts only. The contents are the parties' and are not exposed to this console.">(counts only)</span>
+              </div>
+            </div>
+          );
+        })}
       </div>
     );
   }

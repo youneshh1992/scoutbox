@@ -189,7 +189,7 @@ section('pure G/§27 — the party revision covers the eight inputs staleness is
 
 section('pure M/§39/§40 — timeline audiences, and the audit that is not a timeline');
 {
-  ok(TIMELINE_AUDIENCES.length === 5 && TIMELINE_AUDIENCES.includes('audit_only'), 'M-p1 five audiences, one of which reaches nobody\'s timeline');
+  ok(TIMELINE_AUDIENCES.length === 6 && TIMELINE_AUDIENCES.includes('audit_only'), 'M-p1 six audiences, one of which reaches nobody\'s timeline');
   ok(timelineAudienceOf('transaction_note_added') === 'audit_only', 'M-p2 a scoped note is audit-only: an internal note is not a club\'s timeline entry (§39)');
   ok(timelineAudienceOf('transaction_representation_attached') === 'agent_only', 'M-p3 a representation is the agent\'s regulated act, in the agent\'s lane');
   ok(timelineAudienceOf('transaction_status_changed') === 'all_parties' && timelineAudienceOf('transaction_party_confirmed') === 'all_parties', 'M-p4 status and confirmation reach every party');
@@ -198,6 +198,12 @@ section('pure M/§39/§40 — timeline audiences, and the audit that is not a ti
   neg(!timelineVisible('agent_only', ['party_club_signatory'], 'engaging_entity') && !timelineVisible('agent_only', ['party_individual']), 'M-p7 the agent lane reaches no club and no player');
   ok(timelineVisible('all_parties', ['party_individual']) && timelineVisible('player_and_agent', ['party_individual']) && !timelineVisible('player_and_agent', ['party_club_signatory'], 'engaging_entity'), 'M-p8 all_parties and player_and_agent behave as named');
   neg(!timelineVisible('all_parties', []), 'M-p9 a non-party sees no timeline at all');
+  // D11: an entry ABOUT a document is only as visible as the document.
+  ok(timelineAudienceOf('transaction_document_added') === 'per_document' && timelineAudienceOf('transaction_document_superseded') === 'per_document', 'M-p10 a document entry takes its audience from the document, not from "every party"');
+  neg(!timelineVisible('per_document', ['party_club_signatory'], 'engaging_entity', { visibility: 'AGENT_PRIVATE' }), 'M-p11 a club is never told that an AGENT_PRIVATE document was added — the class would leak with the announcement (D11)');
+  neg(!timelineVisible('per_document', ['party_individual'], null, { visibility: 'ENGAGING_CLUB_PRIVATE' }) && !timelineVisible('per_document', ['party_club_signatory'], 'engaging_entity', { visibility: 'RELEASING_CLUB_PRIVATE' }), 'M-p12 …and the same holds for a club-private document facing the individual, and for one club facing the other');
+  ok(timelineVisible('per_document', ['party_individual'], null, { visibility: 'ALL_TRANSACTION_PARTIES' }) && timelineVisible('per_document', ['representing_agent'], null, { visibility: 'AGENT_PRIVATE' }), 'M-p13 a shared document still reaches every party, and the agent still sees their own');
+  neg(!timelineVisible('per_document', ['party_individual'], null, {}) && !timelineVisible('per_document', ['party_individual'], null, null), 'M-p14 a document entry with no class recorded reaches nobody — it fails closed');
   const tx = { history: [{ id: 'h1', at: T0, action: 'transaction_created', by: { kind: 'org', userId: 'u1', name: 'Ana Costa' }, detail: { count: 2, secret: 'fee 12%' } }, { id: 'h2', at: T0 + 1, action: 'transaction_note_added', by: { kind: 'org', userId: 'u1', name: 'Ana' }, detail: { visibility: 'AGENT_PRIVATE' } }] };
   const clubTl = timelineFor(tx, ['party_club_signatory'], 'engaging_entity');
   ok(clubTl.length === 1 && clubTl[0].action === 'transaction_created', 'M-p10 the club timeline holds the creation and not the note');
@@ -775,16 +781,34 @@ section('AC/AD/§73/§74 — events and notifications say little and reveal noth
 section('AE/§83 — EN/FR parity for every new production string');
 {
   const i18n = readFileSync(path.join(ROOT, 'scoutbox-agent', 'src', 'i18n.ts'), 'utf8');
-  const en = i18n.slice(i18n.indexOf('en:'), i18n.indexOf('fr:'));
-  const fr = i18n.slice(i18n.indexOf('fr:'));
-  const keysIn = (s) => new Set([...s.matchAll(/^\s{4}([a-zA-Z0-9_]+):/gm)].map((m) => m[1]));
-  const enKeys = keysIn(en); const frKeys = keysIn(fr);
+  // The catalogue is `const en = {` … `const fr: typeof en = {`, and every key is
+  // QUOTED (`'txStatus.DRAFT':`) — a dotted key cannot be a bare identifier. An
+  // extractor that assumed bare keys found none and passed vacuously.
+  const enStart = i18n.indexOf('const en = {');
+  const frStart = i18n.indexOf('const fr: typeof en = {');
+  ok(enStart > -1 && frStart > enStart, 'AE0 the agent catalogue has one English and one French dictionary, in that order');
+  const keysIn = (part) => new Set([...part.matchAll(/'([A-Za-z0-9_.]+)':/g)].map((m) => m[1]));
+  const enKeys = keysIn(i18n.slice(enStart, frStart)); const frKeys = keysIn(i18n.slice(frStart));
   const missing = [...enKeys].filter((k) => !frKeys.has(k));
   const extra = [...frKeys].filter((k) => !enKeys.has(k));
   ok(enKeys.size > 100 && missing.length === 0 && extra.length === 0, `AE1 the agent app has EN/FR parity across ${enKeys.size} keys${missing.length ? ` — missing ${missing.slice(0, 6).join(', ')}` : ''}${extra.length ? ` — extra ${extra.slice(0, 6).join(', ')}` : ''}`);
-  const txKeys = [...enKeys].filter((k) => /^tx[A-Z]/.test(k));
-  ok(txKeys.length >= 30, `AE2 ${txKeys.length} transaction strings exist, and every one has a French counterpart`);
-  neg(txKeys.every((k) => frKeys.has(k)), 'AE3 no transaction string is English-only');
+  const txKeys = [...enKeys].filter((k) => /^(tx|txStatus|txPending|txStale|txBlocker|txType|txBasis|txAction|txTab|visibility|docType|party|consentKind)\./.test(k));
+  ok(txKeys.length >= 30, `AE2 ${txKeys.length} transaction strings exist in English`);
+  neg(txKeys.length > 0 && txKeys.every((k) => frKeys.has(k)), 'AE3 no transaction string is English-only');
+  // Every status, party role, compliance state, consent state, visibility class
+  // and error the server can hand the client has a word in BOTH languages (§83).
+  const bothHave = (k) => enKeys.has(k) && frKeys.has(k);
+  neg(TRANSACTION_STATUSES.every((st) => bothHave(`txStatus.${st}`)), 'AE4 every one of the ten statuses has an EN and a FR word — no raw enum reaches a screen');
+  neg(DOCUMENT_VISIBILITY.every((v) => bothHave(`visibility.${v}`)), 'AE5 every document visibility class has an EN and a FR word');
+  neg(PARTY_ROLES.every((r) => bothHave(`party.${r}`)), 'AE6 every party role has an EN and a FR word');
+  neg(DOCUMENT_TYPES.every((d) => bothHave(`docType.${d}`)), 'AE9 every document type has an EN and a FR word');
+  neg(TRANSACTION_TYPES.every((x) => bothHave(`txType.${x}`)), 'AE10 every transaction type has an EN and a FR word');
+  // Club and player surfaces carry the same statuses in both languages.
+  const clubI18n = readFileSync(path.join(ROOT, 'scoutbox-club', 'src', 'i18n.ts'), 'utf8');
+  const clubEnd = clubI18n.indexOf('const fr: typeof en = {');
+  const clubEn = keysIn(clubI18n.slice(0, clubEnd)); const clubFr = keysIn(clubI18n.slice(clubEnd));
+  neg(TRANSACTION_STATUSES.every((st) => clubEn.has(`m26.status.${st}`) && clubFr.has(`m26.status.${st}`)), 'AE7 the club surface names every status in EN and FR');
+  neg([...clubEn].filter((k) => k.startsWith('m26.')).every((k) => clubFr.has(k)), 'AE8 no club transaction string is English-only');
 }
 
 // ============================================================ AF/AG/AH — contracts the browser suite proves

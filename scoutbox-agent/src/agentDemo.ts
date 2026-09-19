@@ -9,6 +9,7 @@ import type { CoreApi, Notification, Org, Session } from './api';
 import type {
   AgentApi, AgencyOverview, AgentConsent, AuditRow, Clearance, ClientRow, ClubHit, ComplianceContext, ComplianceOverview, ComplianceRow,
   FacetView, Home, Me, Member, MinorReadiness, Opportunity, PartyRole, PolicyVersionPublic, Profile, Reason, Relationship, ReviewPublic, Tier, VerificationState,
+  Transaction, TransactionList, TransactionStatus, TransactionType, TxDocument, TxNote, TxTimelineEntry, DocumentVisibility, DocumentType,
 } from './agentApi';
 
 const NOW = Date.now();
@@ -299,6 +300,144 @@ export const demoCore: CoreApi = {
 };
 
 // ============================================================ agent
+// ------------------------------------------- M23 P5.6D transaction workspace
+// Six synthetic transactions, one per state the mandate asks the demo to show
+// (§86): compliance clear, consent required, attributed review, blocked by an
+// active rule, on hold and cancelled. No minor appears in any of them and none
+// implies a minor pathway exists; nothing here is an offer or a signing.
+const HONEST_TX = 'A ScoutBox transaction is a permissioned workspace. "Ready" means ScoutBox currently permits this workflow to proceed under the encoded rules — it is not a statement of legal validity, no governing body has approved anything, no offer exists and nothing has been signed.';
+const HONEST_OFFER = 'Readiness means ScoutBox currently permits this workflow to proceed under the encoded rules. No offer exists, no offer can be created here, and nothing has been agreed, approved or signed.';
+const ROLE_AGENT = { kind: 'agent', label: 'Representing agent' };
+const ROLE_CLUB = { kind: 'club', label: 'Club signatory' };
+const ROLE_PLAYER = { kind: 'player', label: 'Player' };
+
+let txSeq = 0;
+function demoTx(input: {
+  type: TransactionType; status: TransactionStatus; playerId: string; engaging: string; releasing?: string;
+  confirmed?: boolean; clear?: boolean; blocked?: boolean; pendingReason?: string | null; stale?: string | null;
+  consents?: { partyRole: PartyRole; status: string }[]; hold?: string; cancelReason?: string; documents?: TxDocument[]; notes?: TxNote[];
+}): Transaction {
+  txSeq += 1;
+  const at = NOW - txSeq * 3 * DAY;
+  const party = (partyRole: PartyRole, subjectKind: 'player' | 'club', subjectId: string): Transaction['parties'][number] => ({
+    id: `txp-d${txSeq}-${partyRole}`, partyRole, subjectKind, subjectId,
+    name: subjectKind === 'player' ? (PLAYERS.find((x) => x.id === subjectId)?.name ?? null) : (DEMO_CLUBS.find((x) => x.id === subjectId)?.name ?? null),
+    removed: false, removedAt: null, confirmedAt: input.confirmed === false ? null : at + DAY,
+    confirmedByKind: subjectKind === 'player' ? 'player' : 'club_user', addedAt: at, subjectRemovedAt: null,
+  });
+  const parties = [party('individual', 'player', input.playerId), party('engaging_entity', 'club', input.engaging)];
+  if (input.releasing) parties.push(party('releasing_entity', 'club', input.releasing));
+  const required: PartyRole[] = input.releasing ? ['individual', 'engaging_entity', 'releasing_entity'] : ['individual', 'engaging_entity'];
+  const clear = !!input.clear;
+  const allowed: TransactionStatus[] = input.status === 'READY' ? ['ACTIVE', 'ON_HOLD', 'CANCELLED']
+    : input.status === 'ACTIVE' ? ['ON_HOLD', 'CLOSED', 'CANCELLED']
+      : input.status === 'ON_HOLD' ? ['ACTIVE', 'CLOSED', 'CANCELLED']
+        : input.status === 'CANCELLED' ? ['ARCHIVED']
+          : input.status === 'DRAFT' ? ['PARTIES_CONFIRMED', 'CANCELLED'] : ['ACTIVE', 'CANCELLED'];
+  const blockers: string[] = [];
+  if (!['READY', 'ACTIVE'].includes(input.status)) blockers.push('TRANSACTION_NOT_READY');
+  if (input.stale) blockers.push('COMPLIANCE_SNAPSHOT_STALE');
+  if (!clear) blockers.push('COMPLIANCE_NOT_CLEAR');
+  return {
+    id: `atx-d${txSeq}`, type: input.type, status: input.status, jurisdictions: ['ENG'],
+    playerId: input.playerId, engagingOrgId: input.engaging, releasingOrgId: input.releasing ?? null,
+    viewerRoles: ['representing_agent'], viewerPartyRole: null,
+    agency: { id: ORG.id, name: ORG.name },
+    parties, requiredPartyRoles: required,
+    awaitingConfirmation: input.confirmed === false ? required : [],
+    partiesConfirmed: input.confirmed !== false,
+    representations: input.confirmed === false ? [] : [{
+      id: `txr-d${txSeq}`, partyRole: 'individual', agentUserId: 'usr-ana', status: 'verified', declaredOnly: false,
+      basis: 'client_confirmed_agreement', scope: ['employment', 'transfer'], jurisdictions: ['ENG'],
+      verifiedAt: at + DAY, withdrawnAt: null, createdAt: at + DAY, agreementId: 'rep-d1', reviewId: null, firstActAt: at + DAY,
+    }],
+    compliance: {
+      outcome: input.blocked ? 'PROHIBITED_CONFLICT' : clear ? 'CLEAR' : input.pendingReason === 'CONSENT_REQUIRED' ? 'PERMITTED_DUAL_REPRESENTATION_CONSENT_REQUIRED' : 'MANUAL_REGULATORY_REVIEW_REQUIRED',
+      pendingReason: input.pendingReason ?? null, blocked: !!input.blocked, clear, snapshotClear: clear || !!input.stale,
+      reasonCodes: input.blocked ? ['PROHIBITED_COMBINATION'] : clear ? [] : input.pendingReason === 'CONSENT_REQUIRED' ? ['CONSENT_REQUIRED'] : ['RULE_STATUS_UNCERTAIN'],
+      consentRequirements: (input.consents ?? []).filter((c) => c.status === 'requested').map((c) => ({ partyRole: c.partyRole, consentKind: 'dual_representation', reasonCode: 'CONSENT_MISSING' })),
+      evaluatedAt: at + 2 * DAY, stale: input.stale ?? null, staleness: input.stale ?? null,
+      evaluationId: `atx-d${txSeq}#1`, contextId: `ctx-d${txSeq}`, policyVersions: DEMO_POLICIES.map((x) => x.id), verificationFreshness: 'VERIFIED',
+      honest: 'ScoutBox has evaluated its own encoded rules. It has not determined anyone\u2019s legal rights and no governing body has approved anything.',
+    },
+    consents: (input.consents ?? []).map((c, i) => ({
+      id: `rcs-d${txSeq}-${i}`, kind: 'dual_representation', partyRole: c.partyRole, status: c.status,
+      requestedAt: at + 2 * DAY, grantedAt: c.status === 'granted' ? at + 2 * DAY + 3600_000 : null,
+      declinedAt: null, revokedAt: c.status === 'revoked' ? at + 3 * DAY : null, mine: false,
+    })),
+    documents: input.documents ?? [],
+    notes: input.notes ?? [],
+    linkedThreads: [],
+    links: { trialId: null, opportunityId: null },
+    terms: { versions: [] },
+    offerBoundary: { canStartOfferWorkflow: blockers.length === 0, blockers, honest: HONEST_OFFER },
+    hold: input.status === 'ON_HOLD' ? { reasonCode: input.hold ?? 'awaiting_document', reason: 'Waiting on the club letter.', at: at + 4 * DAY } : null,
+    cancelReasonCode: input.cancelReason ?? null, closeReasonCode: null,
+    allowedTransitions: allowed,
+    initiatedBy: 'org', initiatedAt: at, createdAt: at, updatedAt: at + 4 * DAY,
+    rev: 4, revAt: at + 4 * DAY, revBy: 'Representing agent',
+    honest: HONEST_TX,
+  };
+}
+
+const demoDoc = (n: number, label: string, visibility: DocumentVisibility, documentType: DocumentType, ownerKind: string, actor: { kind: string; label: string }): TxDocument => ({
+  id: `txd-d${n}`, documentType, visibility, version: 1, label, ownerKind, ownerPartyRole: null,
+  uploadedAt: NOW - 2 * DAY, actor, expiresAt: null, expired: false, signedAt: null, supersedes: null,
+  evidence: null, downloadable: false, rev: 1, revAt: NOW - 2 * DAY, revBy: actor.label,
+});
+
+const TXS: Transaction[] = [
+  demoTx({ type: 'employment_contract', status: 'READY', playerId: 'pl-adeyemi', engaging: 'org-eastport', clear: true,
+    documents: [demoDoc(1, 'Draft term sheet', 'ALL_TRANSACTION_PARTIES', 'term_sheet_draft', 'agent', ROLE_AGENT), demoDoc(2, 'Club letter of intent', 'ENGAGING_AGENT_SHARED', 'club_document', 'club', ROLE_CLUB)],
+    notes: [{ id: 'txn-d1', visibility: 'AGENT_PRIVATE', text: 'Client wants the release clause discussed before anything else.', at: NOW - 2 * DAY, actor: ROLE_AGENT }] }),
+  demoTx({ type: 'transfer', status: 'COMPLIANCE_PENDING', playerId: 'pl-carvalho', engaging: 'org-eastport', releasing: 'org-harbour',
+    pendingReason: 'CONSENT_REQUIRED', consents: [{ partyRole: 'individual', status: 'granted' }, { partyRole: 'engaging_entity', status: 'requested' }],
+    documents: [demoDoc(3, 'Mandate (working copy)', 'AGENT_PRIVATE', 'mandate', 'agent', ROLE_AGENT)] }),
+  demoTx({ type: 'loan', status: 'COMPLIANCE_PENDING', playerId: 'pl-okafor', engaging: 'org-harbour', releasing: 'org-eastport', pendingReason: 'MANUAL_REVIEW' }),
+  demoTx({ type: 'other_services', status: 'COMPLIANCE_BLOCKED', playerId: 'pl-adeyemi', engaging: 'org-harbour', blocked: true, pendingReason: null }),
+  demoTx({ type: 'employment_contract', status: 'ON_HOLD', playerId: 'pl-carvalho', engaging: 'org-harbour', clear: true, stale: 'INPUTS_CHANGED', hold: 'awaiting_party_decision',
+    notes: [{ id: 'txn-d2', visibility: 'PLAYER_AGENT_SHARED', text: 'Agreed with the client to pause until the window reopens.', at: NOW - DAY, actor: ROLE_AGENT }] }),
+  demoTx({ type: 'transfer', status: 'CANCELLED', playerId: 'pl-okafor', engaging: 'org-eastport', releasing: 'org-harbour', cancelReason: 'window_closed' }),
+];
+const txList = (): TransactionList => ({
+  items: structuredClone(TXS), statuses: [...TRANSACTION_STATUSES_DEMO], types: ['employment_contract', 'transfer', 'loan', 'other_services'],
+  partyRoles: ['individual', 'engaging_entity', 'releasing_entity'],
+  documentTypes: ['representation_agreement_reference', 'compliance_consent_reference', 'guardian_evidence', 'mandate', 'term_sheet_draft', 'employment_contract_draft', 'club_document', 'regulatory_evidence', 'correspondence_attachment'],
+  visibilities: ['AGENT_PRIVATE', 'PLAYER_PRIVATE', 'ENGAGING_CLUB_PRIVATE', 'RELEASING_CLUB_PRIVATE', 'PLAYER_AGENT_SHARED', 'ENGAGING_AGENT_SHARED', 'RELEASING_AGENT_SHARED', 'ALL_TRANSACTION_PARTIES', 'T_AND_S_ONLY'],
+  roomRoles: ['representing_agent', 'party_individual', 'party_guardian', 'party_club_signatory', 'party_club_member', 'agency_admin_observer', 'trust_safety'],
+  holdReasonCodes: ['awaiting_party_decision', 'awaiting_document', 'awaiting_regulatory_answer', 'window_closed', 'party_request', 'other'],
+  cancelReasonCodes: ['party_withdrew', 'terms_not_agreed', 'window_closed', 'compliance_not_cleared', 'duplicate', 'other'],
+  closeReasonCodes: ['process_concluded', 'proceeded_outside_scoutbox', 'superseded', 'other'],
+  transitions: TRANSACTION_STATUSES_DEMO.map((from) => ({ from, byActor: [], byCompliance: [] })),
+  pendingReasons: ['CONSENT_REQUIRED', 'MANUAL_REVIEW', 'INSUFFICIENT_DATA', 'PROVIDER_UNAVAILABLE', 'JURISDICTION_UNSUPPORTED', 'FACET_NOT_VERIFIED', 'PARTIES_NOT_CONFIRMED', 'REPRESENTATION_MISSING'],
+  counts: {
+    live: TXS.filter((t) => !['CANCELLED', 'CLOSED', 'ARCHIVED'].includes(t.status)).length,
+    blocked: TXS.filter((t) => t.status === 'COMPLIANCE_BLOCKED').length,
+    pending: TXS.filter((t) => t.status === 'COMPLIANCE_PENDING').length,
+    ready: TXS.filter((t) => t.status === 'READY').length,
+    awaitingConfirmation: TXS.filter((t) => !t.partiesConfirmed).length,
+  },
+  honest: HONEST_TX,
+});
+const TRANSACTION_STATUSES_DEMO: TransactionStatus[] = ['DRAFT', 'PARTIES_CONFIRMED', 'COMPLIANCE_PENDING', 'COMPLIANCE_BLOCKED', 'READY', 'ACTIVE', 'ON_HOLD', 'CANCELLED', 'CLOSED', 'ARCHIVED'];
+const findTx = (id: string) => {
+  const tx = TXS.find((t) => t.id === id);
+  if (!tx) refuse(404, 'TRANSACTION_NOT_FOUND', 'No transaction with that reference is available to you.');
+  return tx as Transaction;
+};
+const txHist = (tx: Transaction, action: string, detail: Record<string, unknown> | null = null, actor = ROLE_AGENT) => {
+  (TX_TIMELINE[tx.id] ??= []).unshift({ id: id('aud'), at: Date.now(), action, audience: 'all_parties', actor, detail });
+  tx.updatedAt = Date.now(); tx.rev += 1; tx.revAt = Date.now(); tx.revBy = actor.label;
+};
+const TX_TIMELINE: Record<string, TxTimelineEntry[]> = {};
+for (const tx of TXS) {
+  TX_TIMELINE[tx.id] = [
+    { id: `aud-${tx.id}-3`, at: tx.updatedAt, action: 'transaction_compliance_evaluated', audience: 'all_parties', actor: { kind: 'system', label: 'ScoutBox' }, detail: { outcome: tx.compliance.outcome, pendingReason: tx.compliance.pendingReason } },
+    { id: `aud-${tx.id}-2`, at: tx.createdAt + DAY, action: 'transaction_party_confirmed', audience: 'all_parties', actor: ROLE_PLAYER, detail: { partyRole: 'individual' } },
+    { id: `aud-${tx.id}-1`, at: tx.createdAt, action: 'transaction_created', audience: 'all_parties', actor: ROLE_AGENT, detail: { count: tx.parties.length } },
+  ];
+}
+
 export const demoAgent: AgentApi = {
   async me(s) {
     const u = userOf(s); const a = affOf(s);
@@ -696,6 +835,174 @@ export const demoAgent: AgentApi = {
       (NOTES[s.userId] ??= []).unshift({ id: id('n'), ts: Date.now(), type: 'regulatory_consent_granted', text: 'A party granted written consent to multiple representation for one transaction context. It is specific to that context and can be revoked.', refId: c!.id, read: false });
     }, 5000);
     return delay({ consent: structuredClone(k) });
+  },
+  async transactions(s, status) {
+    need(s, 'transactions.read');
+    const l = txList();
+    if (status) l.items = l.items.filter((t) => t.status === status);
+    return delay(l);
+  },
+  async createTransaction(s, input) {
+    need(s, 'transactions.write');
+    const playerName = PLAYERS.find((p) => p.id === input.parties.find((x) => x.partyRole === 'individual')?.subjectId)?.name;
+    if (!playerName) refuse(404, 'TRANSACTION_PARTY_NOT_FOUND', 'No such party is available to you.');
+    const tx = demoTx({
+      type: input.type, status: 'DRAFT', confirmed: false,
+      playerId: input.parties.find((x) => x.partyRole === 'individual')!.subjectId,
+      engaging: input.parties.find((x) => x.partyRole === 'engaging_entity')?.subjectId ?? 'org-eastport',
+      releasing: input.parties.find((x) => x.partyRole === 'releasing_entity')?.subjectId,
+      pendingReason: 'PARTIES_NOT_CONFIRMED',
+    });
+    TXS.unshift(tx);
+    TX_TIMELINE[tx.id] = [{ id: id('aud'), at: Date.now(), action: 'transaction_created', audience: 'all_parties', actor: ROLE_AGENT, detail: { count: tx.parties.length } }];
+    // The demo's simulated counterparties confirm after a moment so the journey
+    // can be seen end to end; in the product each party confirms in its own app.
+    window.setTimeout(() => {
+      for (const p of tx.parties) p.confirmedAt = Date.now();
+      tx.partiesConfirmed = true; tx.awaitingConfirmation = []; tx.status = 'PARTIES_CONFIRMED';
+      tx.allowedTransitions = ['CANCELLED'];
+      tx.compliance.pendingReason = 'REPRESENTATION_MISSING';
+      txHist(tx, 'transaction_party_confirmed', { partyRole: 'engaging_entity' }, ROLE_CLUB);
+    }, 4000);
+    return delay({ transaction: structuredClone(tx) });
+  },
+  async transaction(s, tid) { need(s, 'transactions.read'); return delay({ transaction: structuredClone(findTx(tid)) }); },
+  async addTxParty(s, tid, input) {
+    need(s, 'transactions.write');
+    const tx = findTx(tid);
+    if (tx.parties.some((p) => !p.removed && p.partyRole === input.partyRole)) refuse(409, 'TRANSACTION_PARTY_EXISTS', 'A party already holds that role.');
+    tx.parties.push({ id: id('txp'), partyRole: input.partyRole, subjectKind: input.subjectKind, subjectId: input.subjectId, name: DEMO_CLUBS.find((c) => c.id === input.subjectId)?.name ?? null, removed: false, removedAt: null, confirmedAt: null, confirmedByKind: null, addedAt: Date.now(), subjectRemovedAt: null });
+    tx.partiesConfirmed = false; tx.awaitingConfirmation = [input.partyRole];
+    txHist(tx, 'transaction_party_added', { partyRole: input.partyRole });
+    return delay({ transaction: structuredClone(tx) });
+  },
+  async removeTxParty(s, tid, partyId) {
+    need(s, 'transactions.write');
+    const tx = findTx(tid);
+    const p = tx.parties.find((x) => x.id === partyId);
+    if (!p) refuse(404, 'TRANSACTION_PARTY_NOT_FOUND', 'No such party.');
+    p!.removed = true; p!.removedAt = Date.now();
+    for (const r of tx.representations) if (r.partyRole === p!.partyRole) { r.status = 'withdrawn'; r.withdrawnAt = Date.now(); }
+    tx.partiesConfirmed = false; tx.awaitingConfirmation = [p!.partyRole]; tx.status = 'PARTIES_CONFIRMED';
+    tx.compliance.clear = false; tx.compliance.pendingReason = 'PARTIES_NOT_CONFIRMED'; tx.compliance.staleness = 'INPUTS_CHANGED'; tx.compliance.stale = 'INPUTS_CHANGED';
+    txHist(tx, 'transaction_party_removed', { partyRole: p!.partyRole });
+    return delay({ transaction: structuredClone(tx) });
+  },
+  async bindRepresentation(s, tid, input) {
+    need(s, 'transactions.write');
+    const tx = findTx(tid);
+    if (!input.agreementId) refuse(403, 'REPRESENTATION_REQUIRED', 'A client-confirmed, active relationship with this party is required.');
+    if (tx.representations.some((r) => r.partyRole === input.partyRole && r.status !== 'withdrawn')) refuse(409, 'TRANSACTION_PARTY_EXISTS', 'You already represent this party in this transaction.');
+    tx.representations.push({ id: id('txr'), partyRole: input.partyRole, agentUserId: s.userId, status: 'verified', declaredOnly: false, basis: 'client_confirmed_agreement', scope: ['employment', 'transfer'], jurisdictions: ['ENG'], verifiedAt: Date.now(), withdrawnAt: null, createdAt: Date.now(), agreementId: input.agreementId, reviewId: null, firstActAt: Date.now() });
+    tx.compliance.clear = true; tx.compliance.pendingReason = null; tx.compliance.outcome = 'CLEAR'; tx.compliance.staleness = null; tx.compliance.stale = null; tx.compliance.snapshotClear = true;
+    tx.status = 'READY'; tx.allowedTransitions = ['ACTIVE', 'ON_HOLD', 'CANCELLED'];
+    tx.offerBoundary = { canStartOfferWorkflow: true, blockers: [], honest: HONEST_OFFER };
+    txHist(tx, 'transaction_representation_attached', { partyRole: input.partyRole, status: 'verified' });
+    return delay({ transaction: structuredClone(tx), representation: { id: tx.representations.at(-1)!.id, partyRole: input.partyRole, status: 'verified' } });
+  },
+  async unbindRepresentation(s, tid, repId) {
+    need(s, 'transactions.write');
+    const tx = findTx(tid);
+    const r = tx.representations.find((x) => x.id === repId);
+    if (!r) refuse(404, 'TRANSACTION_NOT_FOUND', 'Not found.');
+    r!.status = 'withdrawn'; r!.withdrawnAt = Date.now();
+    tx.compliance.clear = false; tx.compliance.pendingReason = 'REPRESENTATION_MISSING';
+    tx.status = 'PARTIES_CONFIRMED'; tx.allowedTransitions = ['CANCELLED'];
+    txHist(tx, 'transaction_representation_withdrawn', { partyRole: r!.partyRole });
+    return delay({ transaction: structuredClone(tx) });
+  },
+  async evaluateTransaction(s, tid) {
+    need(s, 'transactions.write');
+    const tx = findTx(tid);
+    tx.compliance.evaluatedAt = Date.now();
+    tx.compliance.staleness = null; tx.compliance.stale = null;
+    if (tx.compliance.clear) { tx.status = 'READY'; tx.allowedTransitions = ['ACTIVE', 'ON_HOLD', 'CANCELLED']; tx.offerBoundary = { canStartOfferWorkflow: true, blockers: [], honest: HONEST_OFFER }; }
+    txHist(tx, 'transaction_compliance_evaluated', { outcome: tx.compliance.outcome, pendingReason: tx.compliance.pendingReason }, { kind: 'system', label: 'ScoutBox' });
+    return delay({ transaction: structuredClone(tx) });
+  },
+  async setTransactionStatus(s, tid, input) {
+    need(s, 'transactions.write');
+    const tx = findTx(tid);
+    if (!tx.allowedTransitions.includes(input.to)) refuse(409, 'TRANSACTION_TRANSITION_NOT_ALLOWED', 'That is not a transition this transaction can make from its current state.');
+    if (input.to === 'ACTIVE' && tx.compliance.staleness) refuse(422, 'TRANSACTION_COMPLIANCE_STALE', 'The recorded compliance evaluation no longer matches the current facts. Re-evaluate and read the new answer before progressing.');
+    if (input.to === 'ACTIVE' && !tx.compliance.clear) refuse(422, 'TRANSACTION_COMPLIANCE_PENDING', 'This transaction cannot progress while compliance is outstanding.');
+    const from = tx.status;
+    tx.status = input.to;
+    tx.allowedTransitions = input.to === 'ACTIVE' ? ['ON_HOLD', 'CLOSED', 'CANCELLED'] : input.to === 'ON_HOLD' ? ['ACTIVE', 'CLOSED', 'CANCELLED'] : input.to === 'CANCELLED' || input.to === 'CLOSED' ? ['ARCHIVED'] : [];
+    tx.hold = input.to === 'ON_HOLD' ? { reasonCode: input.reasonCode ?? null, reason: input.reason ?? null, at: Date.now() } : null;
+    if (input.to === 'CANCELLED') tx.cancelReasonCode = input.reasonCode ?? null;
+    if (input.to === 'CLOSED') tx.closeReasonCode = input.reasonCode ?? null;
+    txHist(tx, input.to === 'ON_HOLD' ? 'transaction_held' : input.to === 'CANCELLED' ? 'transaction_cancelled' : input.to === 'CLOSED' ? 'transaction_closed' : input.to === 'ARCHIVED' ? 'transaction_archived' : 'transaction_status_changed', { from, to: input.to });
+    return delay({ transaction: structuredClone(tx) });
+  },
+  async requestTxConsent(s, tid, input) {
+    need(s, 'transactions.write');
+    const tx = findTx(tid);
+    const k: AgentConsent = {
+      id: id('rcs'), kind: 'dual_representation', status: 'requested', contextId: tx.compliance.contextId ?? null, partyRole: input.partyRole,
+      subjectKind: input.partyRole === 'individual' ? 'player' : 'club', requestedAt: Date.now(), grantedAt: null, declinedAt: null, revokedAt: null,
+      policyVersions: DEMO_POLICIES.map((x) => x.id), ruleIds: ['ENG-6.3'],
+      particulars: { fullParticularsProvided: input.fullParticularsProvided, legalAdviceOffered: input.legalAdviceOffered, proposedFeeDisclosed: input.proposedFeeDisclosed, acknowledged: null }, rev: 1, revAt: Date.now(),
+    };
+    tx.consents.push({ id: k.id, kind: k.kind, partyRole: input.partyRole, status: 'requested', requestedAt: Date.now(), grantedAt: null, declinedAt: null, revokedAt: null, mine: false });
+    txHist(tx, 'transaction_consent_requested', { partyRole: input.partyRole });
+    return delay({ consent: structuredClone(k) });
+  },
+  async recordTerms(s, tid, input) {
+    need(s, 'transactions.write');
+    const tx = findTx(tid);
+    tx.terms.versions.push({ id: id('txt'), at: Date.now(), summary: input.summary, visibility: input.visibility, recordedFor: input.recordedFor, actor: ROLE_AGENT });
+    txHist(tx, 'transaction_terms_recorded', { partyRole: input.recordedFor, visibility: input.visibility });
+    return delay({ transaction: structuredClone(tx) });
+  },
+  async txDocuments(s, tid) {
+    need(s, 'transactions.read');
+    const tx = findTx(tid);
+    return delay({ items: structuredClone(tx.documents), documentTypes: txList().documentTypes, uploadable: ['AGENT_PRIVATE', 'PLAYER_AGENT_SHARED', 'ENGAGING_AGENT_SHARED', 'RELEASING_AGENT_SHARED', 'ALL_TRANSACTION_PARTIES'] });
+  },
+  async addTxDocument(s, tid, input) {
+    need(s, 'transactions.write');
+    const tx = findTx(tid);
+    const d: TxDocument = { id: id('txd'), documentType: input.documentType, visibility: input.visibility, version: 1, label: input.label, ownerKind: 'agent', ownerPartyRole: null, uploadedAt: Date.now(), actor: ROLE_AGENT, expiresAt: input.expiresAt ?? null, expired: false, signedAt: null, supersedes: null, evidence: null, downloadable: false, rev: 1, revAt: Date.now(), revBy: 'Representing agent' };
+    tx.documents.unshift(d);
+    txHist(tx, 'transaction_document_added', { documentType: input.documentType, visibility: input.visibility });
+    return delay({ document: structuredClone(d) });
+  },
+  async supersedeTxDocument(s, tid, docId, input) {
+    need(s, 'transactions.write');
+    const tx = findTx(tid);
+    const old = tx.documents.find((d) => d.id === docId);
+    if (!old) refuse(404, 'DOCUMENT_NOT_FOUND', 'No document with that reference is available to you.');
+    const next: TxDocument = { ...structuredClone(old!), id: id('txd'), version: old!.version + 1, label: input.label ?? old!.label, supersedes: old!.id, uploadedAt: Date.now(), rev: 1 };
+    tx.documents = tx.documents.filter((d) => d.id !== old!.id);
+    tx.documents.unshift(next);
+    txHist(tx, 'transaction_document_superseded', { documentType: next.documentType, version: next.version });
+    return delay({ document: structuredClone(next) });
+  },
+  async txDocumentReference(s, tid, docId) {
+    need(s, 'transactions.read');
+    const tx = findTx(tid);
+    const d = tx.documents.find((x) => x.id === docId);
+    if (!d) refuse(404, 'DOCUMENT_NOT_FOUND', 'No document with that reference is available to you.');
+    return delay({ document: structuredClone(d!), reference: null, note: 'This document is a placeholder: no file has been attached to it in the evidence vault.' });
+  },
+  async addTxNote(s, tid, input) {
+    need(s, 'transactions.read');
+    const tx = findTx(tid);
+    const n: TxNote = { id: id('txn'), visibility: input.visibility, text: input.text, at: Date.now(), actor: ROLE_AGENT };
+    tx.notes.unshift(n);
+    txHist(tx, 'transaction_note_added', { visibility: input.visibility });
+    return delay({ note: structuredClone(n) });
+  },
+  async txTimeline(s, tid) {
+    need(s, 'transactions.read');
+    const tx = findTx(tid);
+    return delay({ items: structuredClone(TX_TIMELINE[tx.id] ?? []), note: 'The timeline is what YOU may see of what happened. The platform audit holds more operational detail and is not this.' });
+  },
+  async txMessages(s, tid) {
+    need(s, 'transactions.read');
+    const tx = findTx(tid);
+    return delay({ items: structuredClone(tx.linkedThreads), note: 'Correspondence lives in the canonical ScoutBox Inbox. A link records that a conversation exists and who shared it; reading it still needs the Inbox\u2019s own authorisation, which transaction membership alone does not give. ScoutBox never negotiates and never replies for anyone.' });
   },
   async clubs(s) {
     affOf(s);

@@ -1,9 +1,10 @@
 // ScoutBox Agent — the ONE navigation source of truth (M15-Nav pattern).
 //
-// Four sections and one utility destination. The workspace is deliberately
-// small: an agent's day is their clients, the opportunities those clients
-// can legitimately see, their own regulatory standing and their agency.
-// Nothing here is a transaction, an offer or a negotiation (P5.6C/D).
+// Five sections and one utility destination: an agent's day is their clients,
+// the transactions they act in, the opportunities those clients can legitimately
+// see, their own regulatory standing and their agency. The transaction workspace
+// (P5.6D) is a permissioned multi-party record — it is NOT an offer workflow and
+// NOT a negotiation surface, and nothing in it agrees or signs anything.
 //
 // Visibility filtering here is CONVENIENCE ONLY. The server enforces every
 // permission through its matrix on every request; hiding a destination never
@@ -22,7 +23,7 @@ export interface NavItem {
 export interface NavGroup { id: string; labelKey: string; items: ScreenId[] }
 
 export interface NavSection {
-  id: 'home' | 'clients' | 'opportunities' | 'agency';
+  id: 'home' | 'clients' | 'transactions' | 'opportunities' | 'agency';
   labelKey: string;
   icon: string;
   children: NavItem[];
@@ -54,6 +55,15 @@ export const NAV_SECTIONS: NavSection[] = [
     id: 'clients', labelKey: 'navsec.clients', icon: 'user',
     children: [
       { id: 'clients', labelKey: 'nav.clients', aliases: ['players', 'relationships', 'representation', 'requests', 'joueurs', 'représentation'] },
+    ],
+  },
+  {
+    // P5.6D: the multi-party transaction workspace. Reading is every member's;
+    // opening one, changing its parties and moving its status are the licensed
+    // individual's, and the server refuses the rest whatever this list shows.
+    id: 'transactions', labelKey: 'navsec.transactions', icon: 'target',
+    children: [
+      { id: 'transactions', labelKey: 'nav.transactions', shortKey: 'navshort.transactions', aliases: ['transaction', 'transfer', 'loan', 'deal', 'workspace', 'parties', 'transfert', 'pr\u00eat', 'op\u00e9ration'] },
     ],
   },
   {
@@ -184,6 +194,8 @@ export function searchNav(query: string, ctx: NavContext, translate: (key: strin
 //   "#/clients/:id/<tab>"                 → …opened on a tab
 //   "#/agency/<tab>"                      → the Agency workspace on a tab
 //   "#/compliance/<ctxId>"                → one compliance context (P5.6C)
+//   "#/transactions/:id"                  → one transaction workspace (P5.6D)
+//   "#/transactions/:id/<tab>"            → …opened on a tab
 export const CLIENT_TABS = ['overview', 'representation', 'opportunities', 'activity'] as const;
 export type ClientTab = (typeof CLIENT_TABS)[number];
 export const AGENCY_TABS = ['overview', 'team', 'compliance', 'settings'] as const;
@@ -192,6 +204,9 @@ export type AgencyTab = (typeof AGENCY_TABS)[number];
 const CLIENT_HASH = /^#\/clients\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})(?:\/(overview|representation|opportunities|activity))?$/;
 const AGENCY_HASH = /^#\/agency\/(overview|team|compliance|settings)$/;
 const CONTEXT_HASH = /^#\/compliance\/(ctx-[A-Za-z0-9][A-Za-z0-9_-]{0,63})$/;
+export const TRANSACTION_TABS = ['overview', 'parties', 'compliance', 'documents', 'messages', 'timeline'] as const;
+export type TransactionTab = (typeof TRANSACTION_TABS)[number];
+const TRANSACTION_HASH = /^#\/transactions\/(atx-[A-Za-z0-9][A-Za-z0-9_-]{0,63})(?:\/(overview|parties|compliance|documents|messages|timeline))?$/;
 
 export function clientFromHash(hash: string): { id: string; tab: ClientTab } | null {
   const m = CLIENT_HASH.exec(hash ?? '');
@@ -211,10 +226,17 @@ export function contextFromHash(hash: string): string | null {
 }
 export const hashForContext = (id: string) => `#/compliance/${id}`;
 
+export function transactionFromHash(hash: string): { id: string; tab: TransactionTab } | null {
+  const m = TRANSACTION_HASH.exec(hash ?? '');
+  return m ? { id: m[1], tab: (m[2] as TransactionTab | undefined) ?? 'overview' } : null;
+}
+export const hashForTransaction = (id: string, tab: TransactionTab = 'overview') => (tab === 'overview' ? `#/transactions/${id}` : `#/transactions/${id}/${tab}`);
+
 export function screenFromHash(hash: string): ScreenId | null {
   if (clientFromHash(hash)) return 'clients';
   if (agencyTabFromHash(hash)) return 'agency';
   if (contextFromHash(hash)) return 'compliance';
+  if (transactionFromHash(hash)) return 'transactions';
   const m = /^#\/([a-z]+)$/.exec(hash ?? '');
   if (!m) return null;
   const id = m[1];

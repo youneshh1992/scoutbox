@@ -322,10 +322,10 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
 // EN/FR labels, convenience-only filtering) on a four-section workspace.
 {
   const app = 'scoutbox-agent';
-  const AGENT_IDS = ['home', 'profile', 'compliance', 'clients', 'opportunities', 'agency', 'inbox'];
+  const AGENT_IDS = ['home', 'profile', 'compliance', 'clients', 'transactions', 'opportunities', 'agency', 'inbox'];
   const nav = await loadNav(app);
   section(`${app} — configuration integrity`);
-  ok(nav.NAV_SECTIONS.length === 4, 'exactly 4 primary sections (Home, Clients, Opportunities, Agency)');
+  ok(nav.NAV_SECTIONS.length === 5, 'exactly 5 primary sections (Home, Clients, Transactions, Opportunities, Agency)');
   const mapped = nav.NAV_SECTIONS.flatMap((s) => s.children.map((c) => c.id)).concat([nav.INBOX_ITEM.id]);
   const dupes = mapped.filter((id, i) => mapped.indexOf(id) !== i);
   ok(dupes.length === 0, `no destination appears twice (${dupes.join(',') || 'none'})`);
@@ -334,7 +334,10 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   ok(missing.length === 0 && extra.length === 0, `all ${AGENT_IDS.length} destinations mapped exactly once (missing: ${missing.join(',') || '—'}; extra: ${extra.join(',') || '—'})`);
   ok(nav.validateNavConfig().length === 0, 'the configuration is structurally sound');
   ok(nav.INBOX_ITEM.id === 'inbox', 'Inbox is the utility destination');
-  ok(!mapped.includes('transactions') && !mapped.includes('offers') && !mapped.includes('negotiation') && !mapped.includes('fees'), 'no Transactions, Offers, Negotiation or Fees destination exists (P5.6C/D)');
+  // P5.6D added Transactions and nothing else: the workspace is a destination,
+  // an Offer, a negotiation and a fee workflow are still not.
+  ok(mapped.includes('transactions'), 'Transactions is a real destination (P5.6D)');
+  ok(!mapped.includes('offers') && !mapped.includes('offer') && !mapped.includes('negotiation') && !mapped.includes('fees') && !mapped.includes('signings'), 'no Offers, Negotiation, Fees or Signings destination exists');
   for (const sec of nav.NAV_SECTIONS) for (const c of sec.children) if (c.shortKey && !c.shortKey.startsWith('navshort.')) fail(`${c.id}: short label key must be a navshort.* key`);
 
   section(`${app} — every navigation label exists in EN and FR`);
@@ -370,6 +373,7 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   console.log(`✓ resolver maps every destination (${AGENT_IDS.length} checks folded)`);
   ok(nav.resolveNavigationLocation('profile').sectionId === 'home', 'direct /profile highlights Home');
   ok(nav.resolveNavigationLocation('compliance').sectionId === 'home', 'direct /compliance highlights Home (P5.6C)');
+  ok(nav.resolveNavigationLocation('transactions').sectionId === 'transactions', 'direct /transactions highlights Transactions (P5.6D)');
   ok(nav.resolveNavigationLocation('nonexistent').sectionId === null && nav.resolveNavigationLocation('nonexistent').itemId === null, 'unknown path highlights nothing');
 
   section(`${app} — role-aware filtering (client convenience only; the server matrix decides)`);
@@ -380,13 +384,15 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   ok(nav.filterSections(LICENSED).some((s) => s.id === 'opportunities'), 'a licensed agent sees Opportunities');
   ok(!nav.filterSections(ADMIN).some((s) => s.id === 'opportunities') && !nav.filterSections(STAFF).some((s) => s.id === 'opportunities'), 'an administrator or analyst does not (the board reads only through an active relationship)');
   ok(!nav.filterSections(UNKNOWN).some((s) => s.id === 'opportunities'), 'before /me answers, nothing tier-gated is shown (fail closed)');
-  ok(['home', 'clients', 'agency'].every((id) => nav.filterSections(STAFF).some((s) => s.id === id)), 'Home, Clients and Agency stay visible to every member (their content is server-filtered)');
-  ok(nav.filterSections({ role: 'Head of Everything', tiers: ['assistant'] }).length === 3, 'a lead-looking job title changes nothing — only server-reported tiers do');
+  ok(['home', 'clients', 'transactions', 'agency'].every((id) => nav.filterSections(STAFF).some((s) => s.id === id)), 'Home, Clients, Transactions and Agency stay visible to every member (their content is server-filtered)');
+  ok(nav.filterSections({ role: 'Head of Everything', tiers: ['assistant'] }).length === 4, 'a lead-looking job title changes nothing — only server-reported tiers do');
   ok(!nav.searchNav('opportun', STAFF, tr).some((r) => r.itemId === 'opportunities') && !nav.searchNav('board', STAFF, tr).some((r) => r.itemId === 'opportunities') && !nav.searchNav('trials', STAFF, tr).some((r) => r.itemId === 'opportunities'), 'the palette never reveals Opportunities to a non-agent, by label or alias');
   ok(nav.searchNav('licence', LICENSED, tr).some((r) => r.itemId === 'profile'), 'alias "licence" finds My profile & verification');
   ok(nav.searchNav('team', STAFF, tr).some((r) => r.itemId === 'agency'), 'alias "team" finds Agency');
   ok(nav.searchNav('inbox', STAFF, tr).some((r) => r.itemId === 'inbox'), 'utility Inbox searchable');
-  ok(nav.searchNav('offer', LICENSED, tr).length === 0 && nav.searchNav('transaction', LICENSED, tr).length === 0, 'no destination answers to "offer" or "transaction"');
+  ok(nav.searchNav('offer', LICENSED, tr).length === 0 && nav.searchNav('negotiat', LICENSED, tr).length === 0 && nav.searchNav('fee', LICENSED, tr).length === 0, 'no destination answers to "offer", "negotiat" or "fee"');
+  ok(nav.searchNav('transaction', LICENSED, tr).some((r) => r.itemId === 'transactions'), 'the palette finds Transactions for a licensed agent');
+  ok(nav.searchNav('transfert', LICENSED, tr).some((r) => r.itemId === 'transactions'), 'and by its French alias');
 
   section(`${app} — hash deep links (strict)`);
   ok(nav.screenFromHash('#/clients') === 'clients' && nav.screenFromHash('#/agency') === 'agency' && nav.screenFromHash('#/inbox') === 'inbox', 'flat hashes parse');
@@ -398,6 +404,16 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   ok(nav.hashForClient('rep-7') === '#/clients/rep-7' && nav.hashForClient('rep-7', 'activity') === '#/clients/rep-7/activity', 'client hashes round-trip');
   ok(nav.screenFromHash('#/agency/team') === 'agency' && nav.agencyTabFromHash('#/agency/team') === 'team' && nav.agencyTabFromHash('#/agency/billing') === null && nav.screenFromHash('#/agency/billing') === null, 'agency tab deep links are strict');
   ok(nav.hashForAgency('overview') === '#/agency' && nav.hashForAgency('settings') === '#/agency/settings', 'agency hashes round-trip');
+  // P5.6D transaction deep links. Strict: the id shape is fixed, and a tab the
+  // detail screen does not have (offer, signing, fees) is rejected outright, so
+  // no hash can conjure a surface that does not exist.
+  ok(nav.screenFromHash('#/transactions') === 'transactions' && nav.screenFromHash('#/transactions/atx-7') === 'transactions', 'transaction hashes parse');
+  ok(nav.transactionFromHash('#/transactions/atx-7')?.id === 'atx-7' && nav.transactionFromHash('#/transactions/atx-7')?.tab === 'overview', 'a transaction deep link carries the id, Overview by default');
+  ok(nav.transactionFromHash('#/transactions/atx-7/compliance')?.tab === 'compliance' && nav.transactionFromHash('#/transactions/atx-7/timeline')?.tab === 'timeline', 'a transaction tab deep link carries its tab');
+  ok(nav.transactionFromHash('#/transactions/atx-7/offer') === null && nav.screenFromHash('#/transactions/atx-7/offer') === null, 'an offer tab on a transaction is rejected outright');
+  ok(nav.transactionFromHash('#/transactions/atx-7/signing') === null && nav.transactionFromHash('#/transactions/atx-7/fees') === null, 'so are signing and fees');
+  ok(nav.transactionFromHash('#/transactions/') === null && nav.transactionFromHash('#/transactions/rep-7') === null && nav.transactionFromHash('#/transactions/../x') === null && nav.transactionFromHash('#/transactions/atx-7/a/b') === null, 'malformed transaction deep links rejected, including a client id in a transaction slot');
+  ok(nav.hashForTransaction('atx-7') === '#/transactions/atx-7' && nav.hashForTransaction('atx-7', 'documents') === '#/transactions/atx-7/documents', 'transaction hashes round-trip');
   for (const id of AGENT_IDS) if (nav.screenFromHash(nav.hashForScreen(id)) !== id) fail(`hash round-trip for ${id}`); else passed++;
   console.log('✓ every screen hash the app writes, it can read back (7 folded)');
   ok(nav.screenFromHash('#/compliance/ctx-7') === 'compliance' && nav.contextFromHash('#/compliance/ctx-7') === 'ctx-7', 'a compliance context deep link resolves and carries its id');

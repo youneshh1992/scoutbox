@@ -21,6 +21,7 @@ import { ExposureSection, PreferencesSection, RepresentationSection, Transitions
 import { InviteCodeSection, ReferencesSection } from '../../components/M14Sections';
 import { MyAgentSection } from '../../components/MyAgentSection';
 import { AgentConsentSection } from '../../components/AgentConsentSection';
+import { AgentTransactionSection } from '../../components/AgentTransactionSection';
 import { ProfileBody } from './profile';
 
 export default function You() {
@@ -271,6 +272,7 @@ export default function You() {
             <TransitionsSection actor={actor} isMinor={isMinor} mediaOptions={mediaOptions} />
             <MyAgentSection playerId={actor.id} isMinor={isMinor} />
             <AgentConsentSection playerId={actor.id} isMinor={isMinor} />
+            <AgentTransactionSection playerId={actor.id} isMinor={isMinor} />
             <RepresentationSection playerId={actor.id} isMinor={isMinor} />
             <ExposureSection playerId={actor.id} />
             <ReferencesSection playerId={actor.id} />

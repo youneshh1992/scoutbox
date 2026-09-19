@@ -71,6 +71,36 @@ export interface ReferenceRow {
 export interface PlayerInviteRow { id: string; name: string; squad: string; status: string; byName: string; createdAt: number; expiresAt: number; guardianApproved: { guardianId: string; at: number } | null }
 export interface ConflictRow { id: string; userId: string; kind: string; subject: string; note: string; createdAt: number; withdrawnAt: number | null }
 
+// ------------------------------------------- M23 P5.6D transaction workspace
+// The club's side of a multi-party transaction: the transactions this club is
+// actually a party to, projected for THIS club. What the server withholds — the
+// other club's private documents, the agent's private notes, the agent's own
+// agreement reference, the policy versions, any fee — has no field here.
+export interface ClubTxParty { id: string; partyRole: string; subjectKind: string; subjectId: string; name: string | null; removed: boolean; confirmedAt: number | null; confirmedByKind: string | null }
+export interface ClubTxDocument { id: string; documentType: string; visibility: string; version: number; label: string; uploadedAt: number; actor: { kind: string; label: string } | null; downloadable: boolean }
+export interface ClubTransaction {
+  id: string;
+  type: string;
+  status: string;
+  jurisdictions: string[];
+  viewerRoles: string[];
+  viewerPartyRole: string | null;
+  agency: { id: string; name: string | null } | null;
+  parties: ClubTxParty[];
+  awaitingConfirmation: string[];
+  partiesConfirmed: boolean;
+  representations: { id: string; partyRole: string; status: string; basis: string; scope: string[] }[];
+  compliance: { outcome: string | null; pendingReason: string | null; blocked: boolean; clear: boolean; reasonCodes: string[]; evaluatedAt: number | null; staleness: string | null; honest: string };
+  consents: { id: string | null; kind: string; partyRole: string | null; status: string; mine: boolean }[];
+  documents: ClubTxDocument[];
+  notes: { id: string; visibility: string; text: string; at: number; actor: { kind: string; label: string } | null }[];
+  offerBoundary: { canStartOfferWorkflow: boolean; blockers: string[]; honest: string };
+  updatedAt: number;
+  rev: number;
+  honest: string;
+}
+export interface ClubTxTimelineEntry { id: string; at: number; action: string; audience: string; actor: { kind: string; label: string } | null; detail: Record<string, unknown> | null }
+
 export interface M14Api {
   me(s: Session): Promise<MyVerification>;
   /** M23 P5.6C: the club's own consent lane. `signatory` says whether THIS user may bind the club. */
@@ -115,6 +145,11 @@ export interface M14Api {
 
   listConflicts(s: Session): Promise<{ items: ConflictRow[] }>;
   declareConflict(s: Session, kind: string, subject: string, note: string): Promise<{ conflict: ConflictRow; note: string }>;
+  // ---- M23 P5.6D: the club's transaction party lane
+  transactions(s: Session): Promise<{ items: ClubTransaction[]; signatory: boolean; statuses: string[]; documentTypes: string[]; note: string | null; honest: string }>;
+  confirmTransaction(s: Session, id: string, input: { expectedRev: number }): Promise<{ transaction: ClubTransaction }>;
+  transactionNote(s: Session, id: string, input: { text: string; visibility: string; expectedRev: number }): Promise<{ note: { id: string } }>;
+  transactionTimeline(s: Session, id: string): Promise<{ items: ClubTxTimelineEntry[]; note: string }>;
 }
 
 // ------------------------------------------------------------- http client
@@ -133,6 +168,10 @@ const G = (s: Session, path: string) => req<any>(path, { headers: H(s) });
 export const httpM14: M14Api = {
   me: (s) => G(s, '/org/verification/me'),
   agentConsents: (s) => G(s, '/org/compliance/consents'),
+  transactions: (s) => G(s, '/org/transactions'),
+  confirmTransaction: (s, id, input) => P(s, `/org/transactions/${encodeURIComponent(id)}/confirm`, input),
+  transactionNote: (s, id, input) => P(s, `/org/transactions/${encodeURIComponent(id)}/notes`, input),
+  transactionTimeline: (s, id) => G(s, `/org/transactions/${encodeURIComponent(id)}/timeline`),
   answerAgentConsent: (s, id, action, input) => P(s, `/org/compliance/consents/${encodeURIComponent(id)}/${action}`, input),
   startIdentity: (s) => P(s, '/org/verification/identity'),
   requestAffiliation: (s, role) => P(s, '/org/verification/affiliation', { role }),

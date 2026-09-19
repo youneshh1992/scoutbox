@@ -106,7 +106,9 @@ const NAV_GROUPS: { id: string; label: string; tabs: Tab[] }[] = [
   { id: 'operations', label: 'Operations', tabs: ['outcomes', 'representation', 'groups', 'deliverycentre', 'outbox', 'billing'] },
   // M23 P5.6C: the attributed compliance lane. Its own credentialed sign-in —
   // the admin key that opens this console is not a reviewer identity (G-C0).
-  { id: 'agents', label: 'Agents', tabs: ['agentreview', 'agentpolicy', 'agentreviewers'] },
+  // M23 P5.6D adds the transaction READ to the same lane: same reviewer gate,
+  // states and party roles only, and no action on a transaction at all.
+  { id: 'agents', label: 'Agents', tabs: ['agentreview', 'agentpolicy', 'agentreviewers', 'agenttransactions'] },
   { id: 'system', label: 'System', tabs: ['servicehealth', 'backups'] },
 ];
 const groupOfTab = (tab: Tab) => NAV_GROUPS.find((g) => g.tabs.includes(tab)) ?? NAV_GROUPS[0];

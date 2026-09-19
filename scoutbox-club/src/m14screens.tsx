@@ -8,7 +8,8 @@
 import { useEffect, useState } from 'react';
 import type { Session } from './api';
 import {
-  m14, type MyVerification, type PublicVerProfile, type SubjectClaim, type VerBadge, type ClubConsentRequest } from './m14api';
+  m14, type MyVerification, type PublicVerProfile, type SubjectClaim, type VerBadge, type ClubConsentRequest,
+  type ClubTransaction, type ClubTxTimelineEntry } from './m14api';
 import { fmtDate, t } from './i18n';
 
 type ScreenProps = { session: Session; tick: number; notify: (text: string, error?: boolean) => void; openPlayer: (id: string) => void };
@@ -102,11 +103,12 @@ function ClaimRow({ claim, session, notify, onChange }: { claim: SubjectClaim; s
 
 // =============================================================== screen
 export function VerificationScreen({ session, notify, tick }: ScreenProps) {
-  const [tab, setTab] = useState<'me' | 'requests' | 'staff' | 'domains' | 'admins' | 'consents' | 'more'>('me');
+  const [tab, setTab] = useState<'me' | 'requests' | 'staff' | 'domains' | 'admins' | 'consents' | 'transactions' | 'more'>('me');
   const [me, reloadMe] = useAsync<MyVerification>(() => m14.me(session), [session, tick]);
   const TABS: [typeof tab, string][] = [
     ['me', t('m14.tab.me')], ['requests', t('m14.tab.requests')], ['staff', t('m14.tab.staff')],
-    ['domains', t('m14.tab.domains')], ['admins', t('m14.tab.admins')], ['consents', t('m25.tab.consents')], ['more', t('m14.tab.more')],
+    ['domains', t('m14.tab.domains')], ['admins', t('m14.tab.admins')], ['consents', t('m25.tab.consents')],
+    ['transactions', t('m26.tab.transactions')], ['more', t('m14.tab.more')],
   ];
   return (
     <div>
@@ -122,6 +124,7 @@ export function VerificationScreen({ session, notify, tick }: ScreenProps) {
       {tab === 'domains' && <DomainsTab session={session} notify={notify} />}
       {tab === 'admins' && <AdminsTab session={session} notify={notify} />}
       {tab === 'consents' && <AgentConsentsTab session={session} notify={notify} tick={tick} />}
+      {tab === 'transactions' && <AgentTransactionsTab session={session} notify={notify} tick={tick} />}
       {tab === 'more' && <MoreTab session={session} notify={notify} />}
     </div>
   );
@@ -501,6 +504,207 @@ function AgentConsentsTab({ session, notify, tick }: { session: Session; notify:
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/**
+ * M23 P5.6D — the club's side of an Agent Transaction (§44/§45).
+ *
+ * A club sees the transactions it is ACTUALLY a party to, and only what its own
+ * side is entitled to. The engaging club and the releasing club are separate
+ * party roles: neither sees the other's private documents or notes, and neither
+ * sees the agent's private working notes. Nothing here exposes the club's
+ * internal recruitment work to the agent either — that lane is one-way private.
+ *
+ * The club can do exactly two things: confirm its OWN participation (signatory
+ * only, §64) and record a note scoped to its own side. Compliance is the
+ * server's answer, shown as words rather than colour alone.
+ *
+ * No offer, no signing, no fee execution. ScoutBox records; the parties decide.
+ */
+function AgentTransactionsTab({ session, notify, tick }: { session: Session; notify: ScreenProps['notify']; tick: number }) {
+  const [data, reload, err] = useAsync(() => m14.transactions(session), [session, tick]);
+  const [open, setOpen] = useState<string | null>(null);
+  const items = data?.items ?? [];
+  return (
+    <div data-testid="club-transactions">
+      <div className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>{t('m26.intro')}</div>
+      {data && !data.signatory && <div className="notice warn" data-testid="tx-not-signatory">{data.note ?? t('m26.notSignatory')}</div>}
+      {err && <div className="notice block" role="alert">{err}</div>}
+      {data && items.length === 0 && <div className="notice" data-testid="tx-none">{t('m26.none')}</div>}
+      <div className="list-rows">
+        {items.map((tx) => (
+          <ClubTransactionRow
+            key={tx.id} tx={tx} session={session} notify={notify} reload={reload}
+            signatory={data?.signatory ?? false}
+            expanded={open === tx.id} onToggle={() => setOpen((c) => (c === tx.id ? null : tx.id))}
+          />
+        ))}
+      </div>
+      {data?.honest && <div className="dim" style={{ fontSize: 12, marginTop: 10 }}>{data.honest}</div>}
+    </div>
+  );
+}
+
+/** Compliance state as a word plus its reason. Never colour alone (§84). */
+function TxComplianceLine({ tx }: { tx: ClubTransaction }) {
+  const c = tx.compliance;
+  const word = c.blocked ? t('m26.compliance.blocked')
+    : c.staleness && c.staleness !== 'current' ? t('m26.compliance.stale')
+    : c.clear ? t('m26.compliance.clear')
+    : c.pendingReason ? t(`m26.pending.${c.pendingReason}`, t('m26.compliance.pending'))
+    : t('m26.compliance.pending');
+  const cls = c.blocked ? 'red' : c.clear && c.staleness === 'current' ? 'green' : 'blue';
+  return (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+      <span className={`pill ${cls}`}>{word}</span>
+      {c.evaluatedAt && <span className="dim" style={{ fontSize: 12 }}>{t('m26.evaluatedAt')}: {fmtDate(c.evaluatedAt)}</span>}
+    </div>
+  );
+}
+
+function ClubTransactionRow({ tx, session, notify, reload, signatory, expanded, onToggle }: {
+  tx: ClubTransaction; session: Session; notify: ScreenProps['notify']; reload: () => void;
+  signatory: boolean; expanded: boolean; onToggle: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [noteText, setNoteText] = useState('');
+  const side = tx.viewerPartyRole === 'releasing_entity' ? 'RELEASING' : 'ENGAGING';
+  const noteOptions = [`${side}_CLUB_PRIVATE`, `${side}_AGENT_SHARED`, 'ALL_TRANSACTION_PARTIES'];
+  const [noteVis, setNoteVis] = useState(noteOptions[0]);
+  const individual = tx.parties.find((p) => p.partyRole === 'individual' && !p.removed);
+  const mine = tx.parties.find((p) => !p.removed && p.subjectKind === 'club' && p.partyRole === tx.viewerPartyRole);
+  const [timeline, setTimeline] = useState<ClubTxTimelineEntry[] | null>(null);
+  const key = () => `ctx-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+  const confirm = async () => {
+    setBusy(true); setError(null);
+    try {
+      await m14.confirmTransaction(session, tx.id, { expectedRev: tx.rev });
+      notify(t('m26.confirmedMsg')); reload();
+    } catch (e) { setError(e instanceof Error ? e.message : t('m26.failed')); } finally { setBusy(false); }
+  };
+  const addNote = async () => {
+    setBusy(true); setError(null);
+    try {
+      await m14.transactionNote(session, tx.id, { text: noteText, visibility: noteVis, expectedRev: tx.rev });
+      setNoteText(''); notify(t('m26.noteAdded')); reload();
+    } catch (e) { setError(e instanceof Error ? e.message : t('m26.failed')); } finally { setBusy(false); }
+  };
+  const loadTimeline = async () => {
+    setError(null);
+    try { const r = await m14.transactionTimeline(session, tx.id); setTimeline(r.items); }
+    catch (e) { setError(e instanceof Error ? e.message : t('m26.failed')); }
+  };
+
+  return (
+    <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }} data-testid={`club-tx-${tx.id}`} data-status={tx.status}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span className="grow">
+          <b>{individual?.name ?? t('m26.individualUnnamed')}</b>{' '}
+          <span className="dim">· {t(`m25.type.${tx.type}`, tx.type)} · {t('m26.yourSide')}: {t(`m25.role.${tx.viewerPartyRole ?? 'engaging_entity'}`)}</span>
+        </span>
+        <span className="pill">{t(`m26.status.${tx.status}`, tx.status)}</span>
+        <button onClick={onToggle} aria-expanded={expanded} data-testid={`tx-toggle-${tx.id}`}>{expanded ? t('m26.hide') : t('m26.show')}</button>
+      </div>
+      <TxComplianceLine tx={tx} />
+      <div className="dim" style={{ fontSize: 12.5 }}>{t('m26.updated')}: {fmtDate(tx.updatedAt)}</div>
+      {error && <div className="notice block" role="alert">{error}</div>}
+      {mine && !mine.confirmedAt && (
+        signatory
+          ? <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button className="primary" disabled={busy} onClick={confirm} data-testid={`tx-confirm-${tx.id}`}>{t('m26.confirm')}</button>
+              <span className="dim" style={{ fontSize: 12 }}>{t('m26.confirmNote')}</span>
+            </div>
+          : <div className="dim" style={{ fontSize: 12.5 }}>{t('m26.confirmNeedsSignatory')}</div>
+      )}
+      {mine?.confirmedAt && <div className="dim" style={{ fontSize: 12.5 }}>{t('m26.confirmedOn')}: {fmtDate(mine.confirmedAt)}</div>}
+
+      {expanded && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, borderTop: '1px solid var(--line, #ddd)', paddingTop: 8 }}>
+          <section aria-label={t('m26.parties')}>
+            <h4 style={{ margin: '0 0 4px' }}>{t('m26.parties')}</h4>
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5 }}>
+              {tx.parties.filter((p) => !p.removed).map((p) => (
+                <li key={p.id} data-testid={`tx-party-${p.partyRole}`}>
+                  {t(`m25.role.${p.partyRole}`, p.partyRole)}: {p.name ?? t('m26.unnamed')} — {p.confirmedAt ? t('m26.partyConfirmed') : t('m26.partyAwaiting')}
+                </li>
+              ))}
+            </ul>
+            {tx.agency && <div className="dim" style={{ fontSize: 12.5, marginTop: 4 }}>{t('m26.agency')}: {tx.agency.name ?? t('m26.unnamed')}</div>}
+          </section>
+
+          <section aria-label={t('m26.compliance')}>
+            <h4 style={{ margin: '0 0 4px' }}>{t('m26.compliance')}</h4>
+            <div className="dim" style={{ fontSize: 12.5 }}>{tx.compliance.honest}</div>
+            {tx.consents.length > 0 && (
+              <ul style={{ margin: '4px 0 0', paddingLeft: 18, fontSize: 12.5 }}>
+                {tx.consents.map((c, i) => (
+                  <li key={c.id ?? `c${i}`} data-testid={`tx-consent-${c.kind}-${c.partyRole ?? 'none'}`}>
+                    {t(`m26.consent.${c.kind}`, c.kind)} — {t(`m25.status.${c.status}`, c.status)}
+                    {c.mine ? ` · ${t('m26.consentMine')}` : ''}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section aria-label={t('m26.documents')}>
+            <h4 style={{ margin: '0 0 4px' }}>{t('m26.documents')}</h4>
+            {tx.documents.length === 0 && <div className="dim" style={{ fontSize: 12.5 }}>{t('m26.noDocuments')}</div>}
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5 }}>
+              {tx.documents.map((d) => (
+                <li key={d.id} data-testid={`tx-doc-${d.id}`}>
+                  {t(`m26.docType.${d.documentType}`, d.documentType)} · {t(`m26.visibility.${d.visibility}`, d.visibility)} · v{d.version}
+                  {!d.downloadable && <span className="dim"> · {t('m26.notDownloadable')}</span>}
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <section aria-label={t('m26.notes')}>
+            <h4 style={{ margin: '0 0 4px' }}>{t('m26.notes')}</h4>
+            {tx.notes.length === 0 && <div className="dim" style={{ fontSize: 12.5 }}>{t('m26.noNotes')}</div>}
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5 }}>
+              {tx.notes.map((n) => (
+                <li key={n.id}>{t(`m26.visibility.${n.visibility}`, n.visibility)}: {n.text} <span className="dim">· {fmtDate(n.at)}</span></li>
+              ))}
+            </ul>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6, alignItems: 'flex-end' }}>
+              <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12.5, gap: 2 }}>
+                {t('m26.noteVisibility')}
+                <select value={noteVis} onChange={(e) => setNoteVis(e.target.value)} data-testid={`tx-note-vis-${tx.id}`}>
+                  {noteOptions.map((v) => <option key={v} value={v}>{t(`m26.visibility.${v}`, v)}</option>)}
+                </select>
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12.5, gap: 2, flex: '1 1 200px' }}>
+                {t('m26.noteText')}
+                <input value={noteText} onChange={(e) => setNoteText(e.target.value)} data-testid={`tx-note-text-${tx.id}`} />
+              </label>
+              <button disabled={busy || !noteText.trim()} onClick={addNote} data-testid={`tx-note-add-${tx.id}`}>{t('m26.addNote')}</button>
+            </div>
+            <div className="dim" style={{ fontSize: 12 }}>{t('m26.noteScopeNote')}</div>
+          </section>
+
+          <section aria-label={t('m26.timeline')}>
+            <h4 style={{ margin: '0 0 4px' }}>{t('m26.timeline')}</h4>
+            {timeline === null
+              ? <button onClick={loadTimeline} data-testid={`tx-timeline-load-${tx.id}`}>{t('m26.loadTimeline')}</button>
+              : timeline.length === 0
+                ? <div className="dim" style={{ fontSize: 12.5 }}>{t('m26.noTimeline')}</div>
+                : <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12.5 }} data-testid={`tx-timeline-${tx.id}`}>
+                    {timeline.map((e) => (
+                      <li key={e.id}>{t(`m26.event.${e.action}`, e.action.replace(/_/g, ' '))} <span className="dim">· {fmtDate(e.at)}{e.actor ? ` · ${e.actor.label}` : ''}</span></li>
+                    ))}
+                  </ol>}
+          </section>
+
+          <div className="dim" style={{ fontSize: 12 }} data-testid={`tx-offer-boundary-${tx.id}`}>{tx.offerBoundary.honest}</div>
+          <div className="dim" style={{ fontSize: 12 }}>{tx.honest}</div>
+        </div>
+      )}
     </div>
   );
 }

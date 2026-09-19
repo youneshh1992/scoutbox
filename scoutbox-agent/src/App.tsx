@@ -5,11 +5,11 @@ import {
   AgencyScreen, ClientsScreen, HomeScreen, InboxScreen, OpportunitiesScreen, ProfileScreen, SafetyModal, Toast, markClean,
 } from './screens';
 import { ComplianceScreen } from './compliance';
+import { TransactionsScreen } from './transactions';
 import {
-  NAV_SECTIONS, type NavContext, type AgencyTab, type ClientTab,
+  NAV_SECTIONS, type NavContext, type AgencyTab, type ClientTab, type TransactionTab,
   agencyTabFromHash, clientFromHash, contextFromHash, hashForAgency, hashForClient, hashForContext, hashForScreen, loadCollapsed, loadShortcuts,
-  resolveNavigationLocation, saveCollapsed, saveShortcuts, screenFromHash,
-} from './nav';
+  resolveNavigationLocation, saveCollapsed, saveShortcuts, screenFromHash, transactionFromHash, hashForTransaction,} from './nav';
 import { CommandPalette, NeedsAttention, OrgChips, Sidebar, SecondaryNav, TopBar, useNavSections, usePaletteHotkey } from './navui';
 import { fmtStamp, getLang, setLang, t } from './i18n';
 import { confirmLeave, guardHashChange, installDirtyGuard, noteNavigated } from './dirtyGuard';
@@ -29,7 +29,7 @@ function loadSession(): Session | null {
   }
 }
 
-export type ScreenId = 'home' | 'profile' | 'compliance' | 'clients' | 'opportunities' | 'agency' | 'inbox';
+export type ScreenId = 'home' | 'profile' | 'compliance' | 'transactions' | 'clients' | 'opportunities' | 'agency' | 'inbox';
 
 /** Where a notification leads. Types not listed stay plain text. */
 const NOTIFICATION_SCREEN: Record<string, ScreenId> = {
@@ -48,6 +48,11 @@ const NOTIFICATION_SCREEN: Record<string, ScreenId> = {
   regulatory_consent_granted: 'compliance',
   regulatory_consent_declined: 'compliance',
   regulatory_consent_revoked: 'compliance',
+  // M23 P5.6D: workspace traffic and its compliance half both land on the
+  // transaction, because that is where the person can act on either.
+  agent_transaction: 'transactions',
+  agent_transaction_action: 'transactions',
+  agent_transaction_compliance: 'transactions',
 };
 
 interface BellRow { n: Notification; count: number; unread: boolean }
@@ -128,6 +133,10 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   const [client, setClient] = useState<{ id: string; tab: ClientTab } | null>(() => clientFromHash(window.location.hash));
   const [agencyTab, setAgencyTab] = useState<AgencyTab>(() => agencyTabFromHash(window.location.hash) ?? 'overview');
   const [contextId, setContextId] = useState<string | null>(() => contextFromHash(window.location.hash));
+  // The open transaction AND its tab, both read from the hash: a deep link to
+  // #/transactions/atx-7/documents must open the documents tab, not whichever
+  // tab the screen happened to be on (D14).
+  const [transaction, setTransaction] = useState<{ id: string; tab: TransactionTab } | null>(() => transactionFromHash(window.location.hash));
 
   const setScreen = useCallback((id: ScreenId) => {
     if (!confirmLeave(t('common.unsaved'))) return;
@@ -135,6 +144,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     setScreenState(id);
     setClient(null);
     setContextId(null);
+    setTransaction(null);
     if (id !== 'agency') setAgencyTab('overview');
     try { if (window.location.hash !== hashForScreen(id)) window.history.replaceState(null, '', hashForScreen(id)); } catch { /* sandboxed */ }
     noteNavigated();
@@ -147,6 +157,25 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     setContextId(id);
     const target = id ? hashForContext(id) : hashForScreen('compliance');
     try { if (window.location.hash !== target) window.history.pushState(null, '', target); } catch { /* sandboxed */ }
+    noteNavigated();
+  }, []);
+  /** Opening a transaction PUSHES, so Back closes it again. */
+  const openTransaction = useCallback((id: string | null, tab: TransactionTab = 'overview') => {
+    if (!confirmLeave(t('common.unsaved'))) return;
+    markClean();
+    setScreenState('transactions');
+    setTransaction(id ? { id, tab } : null);
+    const target = id ? hashForTransaction(id, tab) : hashForScreen('transactions');
+    try { if (window.location.hash !== target) window.history.pushState(null, '', target); } catch { /* sandboxed */ }
+    noteNavigated();
+  }, []);
+  /** Switching tab REPLACES, so Back closes the transaction rather than walking its tabs. */
+  const transactionTab = useCallback((tab: TransactionTab) => {
+    setTransaction((c) => {
+      if (!c) return c;
+      try { window.history.replaceState(null, '', hashForTransaction(c.id, tab)); } catch { /* sandboxed */ }
+      return { ...c, tab };
+    });
     noteNavigated();
   }, []);
   /** Opening a client PUSHES, so the browser Back button closes it again. */
@@ -188,6 +217,10 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
       if (id) setScreenState(id);
       setClient(clientFromHash(window.location.hash));
       setContextId(contextFromHash(window.location.hash));
+      // The hash is the truth for an open transaction too. Without this, going
+      // back to #/transactions left the detail on screen, because the id lived
+      // only in state (D12).
+      setTransaction(transactionFromHash(window.location.hash));
       setAgencyTab(agencyTabFromHash(window.location.hash) ?? 'overview');
     };
     window.addEventListener('hashchange', onHash);
@@ -336,7 +369,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
               return (
                 <div key={n.id} className="list-row" style={{ opacity: u ? 1 : 0.7 }}>
                   <span className="grow" style={{ fontSize: 13 }}>{n.text}{count > 1 && <span className="pill" style={{ marginLeft: 6 }}>×{count}</span>}</span>
-                  {dest && <button onClick={() => { if (dest === 'clients' && n.refId && /^rep-/.test(n.refId)) openClient(n.refId); else if (dest === 'compliance' && n.refId && /^ctx-/.test(n.refId)) openContext(n.refId); else setScreen(dest); setBellOpen(false); }}>{t('common.open')}</button>}
+                  {dest && <button onClick={() => { if (dest === 'clients' && n.refId && /^rep-/.test(n.refId)) openClient(n.refId); else if (dest === 'compliance' && n.refId && /^ctx-/.test(n.refId)) openContext(n.refId); else if (dest === 'transactions' && n.refId && /^atx-/.test(n.refId)) openTransaction(n.refId); else setScreen(dest); setBellOpen(false); }}>{t('common.open')}</button>}
                   <span className="dim">{fmtStamp(n.ts)}</span>
                 </div>
               );
@@ -352,6 +385,9 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
           {screen === 'home' && <HomeScreen {...props} onNavigate={setScreen} />}
           {screen === 'profile' && <ProfileScreen {...props} me={me} />}
           {screen === 'compliance' && <ComplianceScreen {...props} me={me} contextId={contextId} onOpenContext={openContext} onOpenClient={openClient} />}
+          {screen === 'transactions' && (
+            <TransactionsScreen {...props} me={me} transactionId={transaction?.id ?? null} transactionTab={transaction?.tab ?? 'overview'} onOpenTransaction={openTransaction} onTransactionTab={transactionTab} />
+          )}
           {screen === 'clients' && (
             <ClientsScreen {...props} me={me} clientId={client?.id ?? null} clientTab={client?.tab ?? 'overview'} onOpenClient={openClient} onClientTab={clientTab} onCloseClient={closeClient} />
           )}

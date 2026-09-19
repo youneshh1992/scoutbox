@@ -7,7 +7,7 @@
 import type {
   M14Api, MyVerification, SubjectClaim, VerRequestRow, StaffRow, VerAdminRow,
   DomainRow, DomainRequest, RootTransfer, ReferenceRow, PlayerInviteRow, ConflictRow,
-  PublicVerProfile,
+  PublicVerProfile, ClubTransaction,
 } from './m14api';
 
 const now = Date.now();
@@ -122,8 +122,99 @@ const DEMO_CLUB_CONSENTS: import('./m14api').ClubConsentRequest[] = [
   },
 ];
 
+// M23 P5.6D — two synthetic transactions this demo club is a party to: one it
+// is ENGAGING in (compliance clear once it confirms) and one it is RELEASING
+// from (consent outstanding). The club sees its own private note and the
+// documents shared with it; the other club's private note and the agent's
+// private file are not in this fixture because they would not be in the
+// projection either. Nothing here is an offer or a signing.
+const TX_HONEST = 'A ScoutBox transaction is a permissioned workspace. "Ready" means ScoutBox currently permits this workflow to proceed under the encoded rules \u2014 it is not a statement of legal validity, no governing body has approved anything, no offer exists and nothing has been signed.';
+const TX_OFFER = 'Readiness means ScoutBox currently permits this workflow to proceed under the encoded rules. No offer exists, no offer can be created here, and nothing has been agreed, approved or signed.';
+const TX_COMPLIANCE_HONEST = 'ScoutBox has evaluated its own encoded rules. It has not determined anyone\u2019s legal rights and no governing body has approved anything.';
+const DEMO_CLUB_TXS: ClubTransaction[] = [
+  {
+    id: 'atx-c1', type: 'employment_contract', status: 'PARTIES_CONFIRMED', jurisdictions: ['ENG'],
+    viewerRoles: ['party_club_signatory'], viewerPartyRole: 'engaging_entity',
+    agency: { id: 'org-northstar', name: 'North Star Sports Agency' },
+    parties: [
+      { id: 'p1', partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi', name: 'Kola Adeyemi', removed: false, confirmedAt: now - day, confirmedByKind: 'player' },
+      { id: 'p2', partyRole: 'engaging_entity', subjectKind: 'club', subjectId: 'org-eastport', name: 'Eastport United', removed: false, confirmedAt: null, confirmedByKind: null },
+    ],
+    awaitingConfirmation: ['engaging_entity'], partiesConfirmed: false,
+    representations: [{ id: 'r1', partyRole: 'individual', status: 'verified', basis: 'client_confirmed_agreement', scope: ['employment'] }],
+    compliance: { outcome: null, pendingReason: 'PARTIES_NOT_CONFIRMED', blocked: false, clear: false, reasonCodes: [], evaluatedAt: now - day, staleness: null, honest: TX_COMPLIANCE_HONEST },
+    consents: [],
+    documents: [{ id: 'd1', documentType: 'term_sheet_draft', visibility: 'ALL_TRANSACTION_PARTIES', version: 1, label: 'Draft term sheet', uploadedAt: now - day, actor: { kind: 'agent', label: 'Representing agent' }, downloadable: false }],
+    notes: [],
+    offerBoundary: { canStartOfferWorkflow: false, blockers: ['TRANSACTION_NOT_READY', 'COMPLIANCE_NOT_CLEAR', 'ENGAGING_ENTITY_NOT_CONFIRMED'], honest: TX_OFFER },
+    updatedAt: now - day, rev: 3, honest: TX_HONEST,
+  },
+  {
+    id: 'atx-c2', type: 'transfer', status: 'COMPLIANCE_PENDING', jurisdictions: ['ENG'],
+    viewerRoles: ['party_club_signatory'], viewerPartyRole: 'releasing_entity',
+    agency: { id: 'org-northstar', name: 'North Star Sports Agency' },
+    parties: [
+      { id: 'p3', partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-carvalho', name: 'Mateus Carvalho', removed: false, confirmedAt: now - 5 * day, confirmedByKind: 'player' },
+      { id: 'p4', partyRole: 'engaging_entity', subjectKind: 'club', subjectId: 'org-harbour', name: 'Harbour City FC', removed: false, confirmedAt: now - 5 * day, confirmedByKind: 'club_user' },
+      { id: 'p5', partyRole: 'releasing_entity', subjectKind: 'club', subjectId: 'org-eastport', name: 'Eastport United', removed: false, confirmedAt: now - 4 * day, confirmedByKind: 'club_user' },
+    ],
+    awaitingConfirmation: [], partiesConfirmed: true,
+    representations: [
+      { id: 'r2', partyRole: 'individual', status: 'verified', basis: 'client_confirmed_agreement', scope: ['transfer'] },
+      { id: 'r3', partyRole: 'engaging_entity', status: 'verified', basis: 'declared', scope: [] },
+    ],
+    compliance: { outcome: 'PERMITTED_DUAL_REPRESENTATION_CONSENT_REQUIRED', pendingReason: 'CONSENT_REQUIRED', blocked: false, clear: false, reasonCodes: ['CONSENT_REQUIRED'], evaluatedAt: now - 3 * day, staleness: null, honest: TX_COMPLIANCE_HONEST },
+    consents: [
+      { id: null, kind: 'dual_representation', partyRole: 'individual', status: 'granted', mine: false },
+      { id: 'rcs-c1', kind: 'dual_representation', partyRole: 'engaging_entity', status: 'requested', mine: false },
+    ],
+    documents: [],
+    notes: [{ id: 'n1', visibility: 'RELEASING_CLUB_PRIVATE', text: 'Board will not go below the buy-out figure.', at: now - 2 * day, actor: { kind: 'club', label: 'Club signatory' } }],
+    offerBoundary: { canStartOfferWorkflow: false, blockers: ['TRANSACTION_NOT_READY', 'COMPLIANCE_NOT_CLEAR'], honest: TX_OFFER },
+    updatedAt: now - 2 * day, rev: 7, honest: TX_HONEST,
+  },
+];
+
 export const demoM14: M14Api = {
   async agentConsents() { return { items: structuredClone(DEMO_CLUB_CONSENTS), signatory: true }; },
+  async transactions() {
+    return {
+      items: structuredClone(DEMO_CLUB_TXS), signatory: true,
+      statuses: ['DRAFT', 'PARTIES_CONFIRMED', 'COMPLIANCE_PENDING', 'COMPLIANCE_BLOCKED', 'READY', 'ACTIVE', 'ON_HOLD', 'CANCELLED', 'CLOSED', 'ARCHIVED'],
+      documentTypes: ['club_document', 'regulatory_evidence', 'correspondence_attachment'],
+      note: null, honest: TX_HONEST,
+    };
+  },
+  async confirmTransaction(_s, id) {
+    const tx = DEMO_CLUB_TXS.find((t) => t.id === id);
+    if (!tx) throw new Error('No transaction with that reference is available to you.');
+    const mine = tx.parties.find((p) => p.partyRole === tx.viewerPartyRole);
+    if (mine && !mine.confirmedAt) {
+      mine.confirmedAt = Date.now(); mine.confirmedByKind = 'club_user';
+      tx.awaitingConfirmation = tx.awaitingConfirmation.filter((r) => r !== tx.viewerPartyRole);
+      tx.partiesConfirmed = tx.awaitingConfirmation.length === 0;
+      tx.compliance.pendingReason = tx.partiesConfirmed ? 'REPRESENTATION_MISSING' : 'PARTIES_NOT_CONFIRMED';
+      tx.rev += 1; tx.updatedAt = Date.now();
+    }
+    return { transaction: structuredClone(tx) };
+  },
+  async transactionNote(_s, id, input) {
+    const tx = DEMO_CLUB_TXS.find((t) => t.id === id);
+    if (!tx) throw new Error('No transaction with that reference is available to you.');
+    tx.notes.unshift({ id: `n-${Date.now().toString(36)}`, visibility: input.visibility, text: input.text, at: Date.now(), actor: { kind: 'club', label: 'Club signatory' } });
+    tx.rev += 1; tx.updatedAt = Date.now();
+    return { note: { id: tx.notes[0].id } };
+  },
+  async transactionTimeline(_s, id) {
+    const tx = DEMO_CLUB_TXS.find((t) => t.id === id);
+    return {
+      items: tx ? [
+        { id: `t-${id}-2`, at: tx.updatedAt, action: 'transaction_compliance_evaluated', audience: 'all_parties', actor: { kind: 'system', label: 'ScoutBox' }, detail: { outcome: tx.compliance.outcome } },
+        { id: `t-${id}-1`, at: tx.updatedAt - day, action: 'transaction_created', audience: 'all_parties', actor: { kind: 'agent', label: 'Representing agent' }, detail: { count: tx.parties.length } },
+      ] : [],
+      note: 'The timeline is what this club may see of what happened.',
+    };
+  },
   async answerAgentConsent(_s, id, action, input) {
     const k = DEMO_CLUB_CONSENTS.find((x) => x.id === id);
     if (!k) throw new Error('Not found.');

@@ -277,6 +277,95 @@ export interface ClubHit { id: string; name: string; type: string; verified?: bo
 export interface ContextCreateInput { type: ContextType; jurisdictions: string[]; parties: { partyRole: PartyRole; subjectKind: 'player' | 'club'; subjectId: string }[]; clientKey: string }
 export interface ContextMutation { context: ComplianceContext; evaluation?: Clearance; representation?: { id: string; partyRole: PartyRole; status: string }; idempotent?: boolean }
 
+// ------------------------------------------------------------ M23 P5.6D — transactions
+// The multi-party transaction workspace, projected for ONE viewer by the
+// server. What a party may not see has no field here to arrive in: the agent's
+// agreement reference and the policy versions appear only in the agent's own
+// projection, a counterparty's consent carries a state and no particulars, and
+// a document the viewer's lane excludes is absent rather than redacted.
+export const TRANSACTION_STATUSES = ['DRAFT', 'PARTIES_CONFIRMED', 'COMPLIANCE_PENDING', 'COMPLIANCE_BLOCKED', 'READY', 'ACTIVE', 'ON_HOLD', 'CANCELLED', 'CLOSED', 'ARCHIVED'] as const;
+export type TransactionStatus = (typeof TRANSACTION_STATUSES)[number];
+export const TRANSACTION_TYPES = CONTEXT_TYPES;
+export type TransactionType = ContextType;
+export const DOCUMENT_TYPES = ['representation_agreement_reference', 'compliance_consent_reference', 'guardian_evidence', 'mandate', 'term_sheet_draft', 'employment_contract_draft', 'club_document', 'regulatory_evidence', 'correspondence_attachment'] as const;
+export type DocumentType = (typeof DOCUMENT_TYPES)[number];
+export const DOCUMENT_VISIBILITY = ['AGENT_PRIVATE', 'PLAYER_PRIVATE', 'ENGAGING_CLUB_PRIVATE', 'RELEASING_CLUB_PRIVATE', 'PLAYER_AGENT_SHARED', 'ENGAGING_AGENT_SHARED', 'RELEASING_AGENT_SHARED', 'ALL_TRANSACTION_PARTIES', 'T_AND_S_ONLY'] as const;
+export type DocumentVisibility = (typeof DOCUMENT_VISIBILITY)[number];
+export type RoomRole = 'representing_agent' | 'party_individual' | 'party_guardian' | 'party_club_signatory' | 'party_club_member' | 'agency_admin_observer' | 'trust_safety';
+
+export interface TxParty {
+  id: string; partyRole: PartyRole; subjectKind: 'player' | 'club'; subjectId: string;
+  name: string | null; removed: boolean; removedAt: number | null;
+  confirmedAt: number | null; confirmedByKind: string | null; addedAt: number; subjectRemovedAt: number | null;
+}
+export interface TxRepresentation {
+  id: string; partyRole: PartyRole; agentUserId: string; status: string; declaredOnly: boolean;
+  basis: 'client_confirmed_agreement' | 'declared'; scope: string[]; jurisdictions: string[];
+  verifiedAt: number | null; withdrawnAt: number | null; createdAt: number;
+  /** Agent-only: the relationship this binding rests on, and the review it raised. */
+  agreementId?: string | null; reviewId?: string | null; firstActAt?: number | null;
+}
+export interface TxCompliance {
+  outcome: string | null; pendingReason: string | null; blocked: boolean; clear: boolean;
+  /** What the RECORDED evaluation said. `clear` is the current answer; these differ when the snapshot is stale. */
+  snapshotClear?: boolean;
+  reasonCodes: string[]; consentRequirements: { partyRole: PartyRole; consentKind: string; reasonCode: string }[];
+  evaluatedAt: number | null; stale: string | null; staleness: string | null;
+  evaluationId?: string; contextId?: string | null; policyVersions?: string[]; verificationFreshness?: string | null;
+  honest: string;
+}
+export interface TxConsentView {
+  id: string | null; kind: string; partyRole: PartyRole | null; status: string;
+  requestedAt: number | null; grantedAt: number | null; declinedAt: number | null; revokedAt: number | null;
+  mine: boolean; particulars?: unknown; policyVersions?: string[];
+}
+export interface TxDocument {
+  id: string; documentType: DocumentType; visibility: DocumentVisibility; version: number; label: string;
+  ownerKind: string | null; ownerPartyRole: PartyRole | null; uploadedAt: number; actor: { kind: string; label: string } | null;
+  expiresAt: number | null; expired: boolean; signedAt: number | null; supersedes: string | null;
+  evidence: { kind: string; present: boolean } | null; downloadable: boolean;
+  rev: number; revAt: number | null; revBy: string | null;
+}
+export interface TxNote { id: string; visibility: DocumentVisibility; text: string; at: number; actor: { kind: string; label: string } | null }
+export interface TxThread { id: string; channelId: string; linkedAt: number; actor: { kind: string; label: string } | null; readable: boolean }
+export interface TxTermsVersion { id: string; at: number; summary: string; visibility: DocumentVisibility; recordedFor: PartyRole; actor: { kind: string; label: string } | null }
+export interface TxTimelineEntry { id: string; at: number; action: string; audience: string; actor: { kind: string; label: string } | null; detail: Record<string, unknown> | null }
+export interface OfferBoundary { canStartOfferWorkflow: boolean; blockers: string[]; honest: string }
+
+export interface Transaction {
+  id: string; type: TransactionType; status: TransactionStatus; jurisdictions: string[];
+  playerId: string | null; engagingOrgId: string | null; releasingOrgId: string | null;
+  viewerRoles: RoomRole[]; viewerPartyRole: PartyRole | null;
+  agency: { id: string; name: string | null } | null;
+  parties: TxParty[]; requiredPartyRoles: PartyRole[]; awaitingConfirmation: PartyRole[]; partiesConfirmed: boolean;
+  representations: TxRepresentation[]; compliance: TxCompliance; consents: TxConsentView[];
+  documents: TxDocument[]; notes: TxNote[]; linkedThreads: TxThread[];
+  links: { trialId: string | null; opportunityId: string | null };
+  terms: { versions: TxTermsVersion[] };
+  offerBoundary: OfferBoundary;
+  hold: { reasonCode: string | null; reason: string | null; at: number | null } | null;
+  cancelReasonCode: string | null; closeReasonCode: string | null;
+  allowedTransitions: TransactionStatus[];
+  initiatedBy: string | null; initiatedAt: number; createdAt: number; updatedAt: number;
+  rev: number; revAt: number | null; revBy: string | null;
+  honest: string;
+}
+export interface TransactionList {
+  items: Transaction[]; statuses: string[]; types: string[]; partyRoles: string[];
+  documentTypes: string[]; visibilities: string[]; roomRoles: string[];
+  holdReasonCodes: string[]; cancelReasonCodes: string[]; closeReasonCodes: string[];
+  transitions: { from: string; byActor: string[]; byCompliance: string[] }[];
+  pendingReasons: string[];
+  counts: { live: number; blocked: number; pending: number; ready: number; awaitingConfirmation: number };
+  honest: string;
+}
+export interface TransactionMutation { transaction: Transaction; representation?: { id: string; partyRole: PartyRole; status: string }; idempotent?: boolean }
+export interface TransactionCreateInput {
+  type: TransactionType; jurisdictions: string[];
+  parties: { partyRole: PartyRole; subjectKind: 'player' | 'club'; subjectId: string }[];
+  clientKey: string;
+}
+
 export interface AgentApi {
   me(s: Session): Promise<Me>;
   home(s: Session): Promise<Home>;
@@ -314,6 +403,25 @@ export interface AgentApi {
   requestConsent(s: Session, id: string, input: { partyRole: PartyRole; fullParticularsProvided: boolean; legalAdviceOffered: boolean; proposedFeeDisclosed: boolean; clientKey: string }): Promise<{ consent: AgentConsent; idempotent?: boolean }>;
   /** Public club directory (names only) — the pool an engaging or releasing entity is picked from. */
   clubs(s: Session): Promise<ClubHit[]>;
+  // ---- M23 P5.6D transactions
+  transactions(s: Session, status?: string): Promise<TransactionList>;
+  createTransaction(s: Session, input: TransactionCreateInput): Promise<TransactionMutation>;
+  transaction(s: Session, id: string): Promise<{ transaction: Transaction }>;
+  addTxParty(s: Session, id: string, input: { partyRole: PartyRole; subjectKind: 'player' | 'club'; subjectId: string; clientKey: string; expectedRev?: number }): Promise<TransactionMutation>;
+  removeTxParty(s: Session, id: string, partyId: string, expectedRev?: number): Promise<TransactionMutation>;
+  bindRepresentation(s: Session, id: string, input: { partyRole: PartyRole; agreementId?: string | null; clientKey: string; expectedRev?: number }): Promise<TransactionMutation>;
+  unbindRepresentation(s: Session, id: string, repId: string, expectedRev?: number): Promise<TransactionMutation>;
+  evaluateTransaction(s: Session, id: string): Promise<TransactionMutation>;
+  setTransactionStatus(s: Session, id: string, input: { to: TransactionStatus; reasonCode?: string; reason?: string; clientKey: string; expectedRev?: number }): Promise<TransactionMutation>;
+  requestTxConsent(s: Session, id: string, input: { partyRole: PartyRole; fullParticularsProvided: boolean; legalAdviceOffered: boolean; proposedFeeDisclosed: boolean; clientKey: string }): Promise<{ consent: AgentConsent; idempotent?: boolean }>;
+  recordTerms(s: Session, id: string, input: { summary: string; recordedFor: PartyRole; visibility: DocumentVisibility; expectedRev?: number }): Promise<TransactionMutation>;
+  txDocuments(s: Session, id: string): Promise<{ items: TxDocument[]; documentTypes: string[]; uploadable: string[] }>;
+  addTxDocument(s: Session, id: string, input: { documentType: DocumentType; visibility: DocumentVisibility; label: string; expiresAt?: number | null; clientKey: string }): Promise<{ document: TxDocument; idempotent?: boolean }>;
+  supersedeTxDocument(s: Session, id: string, docId: string, input: { label?: string; expectedRev?: number }): Promise<{ document: TxDocument }>;
+  txDocumentReference(s: Session, id: string, docId: string): Promise<{ document: TxDocument; reference: { kind: string; id: string } | null; note: string }>;
+  addTxNote(s: Session, id: string, input: { text: string; visibility: DocumentVisibility; expectedRev?: number }): Promise<{ note: TxNote }>;
+  txTimeline(s: Session, id: string): Promise<{ items: TxTimelineEntry[]; note: string }>;
+  txMessages(s: Session, id: string): Promise<{ items: TxThread[]; note: string }>;
 }
 
 const post = <T,>(s: Session, path: string, body: unknown, method = 'POST') => request<T>(path, { method, headers: headers(s), body: JSON.stringify(body) });
@@ -354,6 +462,24 @@ export const httpAgent: AgentApi = {
   closeContext: (s, id, expectedRev) => post(s, `/org/agent/compliance/contexts/${encodeURIComponent(id)}/close`, expectedRev === undefined ? {} : { expectedRev }),
   requestConsent: (s, id, input) => post(s, `/org/agent/compliance/contexts/${encodeURIComponent(id)}/consents/request`, input),
   clubs: async () => (await request<ClubHit[]>('/orgs?platform=main')).filter((o) => o.type === 'club'),
+  transactions: (s, status) => get(s, `/org/agent/transactions${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  createTransaction: (s, input) => post(s, '/org/agent/transactions', input),
+  transaction: (s, id) => get(s, `/org/agent/transactions/${encodeURIComponent(id)}`),
+  addTxParty: (s, id, input) => post(s, `/org/agent/transactions/${encodeURIComponent(id)}/parties`, input),
+  removeTxParty: (s, id, partyId, expectedRev) => post(s, `/org/agent/transactions/${encodeURIComponent(id)}/parties/${encodeURIComponent(partyId)}/remove`, expectedRev === undefined ? {} : { expectedRev }),
+  bindRepresentation: (s, id, input) => post(s, `/org/agent/transactions/${encodeURIComponent(id)}/representations`, input),
+  unbindRepresentation: (s, id, repId, expectedRev) => post(s, `/org/agent/transactions/${encodeURIComponent(id)}/representations/${encodeURIComponent(repId)}/withdraw`, expectedRev === undefined ? {} : { expectedRev }),
+  evaluateTransaction: (s, id) => post(s, `/org/agent/transactions/${encodeURIComponent(id)}/evaluate`, {}),
+  setTransactionStatus: (s, id, input) => post(s, `/org/agent/transactions/${encodeURIComponent(id)}/status`, input),
+  requestTxConsent: (s, id, input) => post(s, `/org/agent/transactions/${encodeURIComponent(id)}/consents/request`, input),
+  recordTerms: (s, id, input) => post(s, `/org/agent/transactions/${encodeURIComponent(id)}/terms`, input),
+  txDocuments: (s, id) => get(s, `/org/agent/transactions/${encodeURIComponent(id)}/documents`),
+  addTxDocument: (s, id, input) => post(s, `/org/agent/transactions/${encodeURIComponent(id)}/documents`, input),
+  supersedeTxDocument: (s, id, docId, input) => post(s, `/org/agent/transactions/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}/supersede`, input),
+  txDocumentReference: (s, id, docId) => get(s, `/org/agent/transactions/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}/reference`),
+  addTxNote: (s, id, input) => post(s, `/org/agent/transactions/${encodeURIComponent(id)}/notes`, input),
+  txTimeline: (s, id) => get(s, `/org/agent/transactions/${encodeURIComponent(id)}/timeline`),
+  txMessages: (s, id) => get(s, `/org/agent/transactions/${encodeURIComponent(id)}/messages`),
 };
 
 export const agent: AgentApi = DEMO_MODE ? demoAgent : httpAgent;

@@ -491,7 +491,14 @@ export const partiesAwaitingConfirmation = (tx) =>
  * roles they hold. `audit_only` never reaches any party's timeline — that is
  * what keeps the platform audit distinct from the user-visible timeline (§40).
  */
-export const TIMELINE_AUDIENCES = Object.freeze(['all_parties', 'agent_only', 'player_and_agent', 'club_side', 'audit_only']);
+/**
+ * `per_document` is not a fixed audience: an entry about a document reaches
+ * exactly the parties the DOCUMENT's own visibility class admits. Announcing
+ * "a document classified AGENT_PRIVATE was added" to every party would leak the
+ * private thing's existence and its class to people who cannot open it (D11),
+ * which is the same disclosure the class exists to prevent (§33/§34/§39).
+ */
+export const TIMELINE_AUDIENCES = Object.freeze(['all_parties', 'agent_only', 'player_and_agent', 'club_side', 'per_document', 'audit_only']);
 
 const ACTION_AUDIENCE = nullProto({
   transaction_created: 'all_parties',
@@ -505,9 +512,9 @@ const ACTION_AUDIENCE = nullProto({
   transaction_archived: 'all_parties',
   transaction_compliance_evaluated: 'all_parties',
   transaction_compliance_stale: 'all_parties',
-  transaction_document_added: 'all_parties',
-  transaction_document_superseded: 'all_parties',
-  transaction_document_removed: 'all_parties',
+  transaction_document_added: 'per_document',
+  transaction_document_superseded: 'per_document',
+  transaction_document_removed: 'per_document',
   transaction_message_linked: 'all_parties',
   transaction_terms_recorded: 'all_parties',
   // The agent's own lane: a representation is the agent's regulated act and a
@@ -523,11 +530,21 @@ const ACTION_AUDIENCE = nullProto({
 
 export const timelineAudienceOf = (action) => ACTION_AUDIENCE[action] ?? 'audit_only';
 
-/** Does a viewer holding `roles` receive a timeline entry with this audience? */
-export function timelineVisible(audience, roles, partyRole = null) {
+/**
+ * Does a viewer holding `roles` receive a timeline entry with this audience?
+ *
+ * `detail` matters only for `per_document`, where the document's own visibility
+ * class decides. A `per_document` entry that carries no class is withheld: an
+ * unclassifiable document entry fails closed rather than defaulting to everyone.
+ */
+export function timelineVisible(audience, roles, partyRole = null, detail = null) {
   if (audience === 'audit_only') return false;
   if (!Array.isArray(roles) || !roles.length) return false;
   if (roles.includes('trust_safety')) return true;
+  if (audience === 'per_document') {
+    const v = typeof detail?.visibility === 'string' ? detail.visibility : null;
+    return v ? canSeeVisibility(v, roles, partyRole) : false;
+  }
   if (audience === 'all_parties') return true;
   if (audience === 'agent_only') return roles.includes('representing_agent');
   if (audience === 'player_and_agent') return roles.includes('representing_agent') || roles.includes('party_individual') || roles.includes('party_guardian');
@@ -540,7 +557,7 @@ export function timelineFor(tx, roles, partyRole = null, { limit = 200 } = {}) {
   const out = [];
   for (const h of Array.isArray(tx?.history) ? tx.history : []) {
     const audience = timelineAudienceOf(h?.action);
-    if (!timelineVisible(audience, roles, partyRole)) continue;
+    if (!timelineVisible(audience, roles, partyRole, h?.detail)) continue;
     out.push({ id: h.id, at: h.at, action: h.action, audience, actor: actorLabel(h.by), detail: safeTimelineDetail(h.detail) });
   }
   return out.slice(-limit).reverse();
