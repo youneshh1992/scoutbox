@@ -317,18 +317,27 @@ export function contactTargetSnapshot(routing, at = Date.now()) {
  * Nothing about the agreement's terms, no commission, no other client, no
  * compliance evidence and no reviewer note has a field to arrive in.
  */
+const stateWord = (v) => (typeof v === 'string' && v ? v : 'unknown');
+
 export function clubAgentPresence({ decision = null, agent = null, agency = null, facets = null } = {}) {
   if (decision?.allowed !== true) return null;
   return Object.freeze({
     represented: true,
     agent: { displayName: agent?.displayName ?? null },
     agency: { id: agency?.id ?? null, name: agency?.name ?? null },
-    // Facet by facet, each with the state ScoutBox actually knows. "verified"
+    // Facet by facet, each a single STATE WORD and nothing else. "verified"
     // here means verified IN SCOUTBOX, and the wording says so.
+    //
+    // Anything that is not a string reads as 'unknown'. The national and
+    // domestic facets are stored per member association, and handing a club
+    // `{ ENG: 'VERIFIED', USA: 'STALE' }` would tell it which jurisdictions this
+    // agent works in — a fact about the agent that nobody asked the player to
+    // disclose. The caller flattens to the one jurisdiction that is relevant;
+    // this refuses to render anything else.
     verification: Object.freeze({
-      fifaLicence: facets?.fifa_licence ?? 'unknown',
-      nationalRegistration: facets?.national_registration ?? 'unknown',
-      domesticAuthorisation: facets?.domestic_authorisation ?? 'unknown',
+      fifaLicence: stateWord(facets?.fifa_licence),
+      nationalRegistration: stateWord(facets?.national_registration),
+      domesticAuthorisation: stateWord(facets?.domestic_authorisation),
     }),
     contactPathway: 'contact_agent',
     honest: 'Licence status as verified in ScoutBox, with the date of that check. ScoutBox is not a licence register and does not speak for any governing body. No agreement terms and no fee are shown here, to anyone.',

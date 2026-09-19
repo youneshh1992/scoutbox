@@ -424,6 +424,21 @@ function timelineFor(kase, decisions, contactRecords = [], trial = {}) {
       reasonCodes: h.detail?.reasonCodes ?? [],
     });
   }
+  // M23 P5.6E — the club's own record that it invited a transaction workspace from
+  // this case, and that it withdrew the invitation. A milestone, because it is the
+  // moment the case reached outside the Room. Ids, a time, the colleague who did it
+  // and WHETHER the player was represented — never who their agent is, never a term,
+  // never an amount. Keyed on the handoff id so an invite and a later re-invite keep
+  // a stable order rather than colliding.
+  for (const h of kase.history ?? []) {
+    if (h?.action !== 'transaction_handoff_invited' && h?.action !== 'transaction_handoff_withdrawn') continue;
+    out.push({
+      _k: `${h.action}:${h.detail?.handoffId ?? ''}`,
+      kind: h.action, at: h.at, by: h.by?.name ?? null,
+      handoffId: h.detail?.handoffId ?? null,
+      ...(h.detail?.represented === undefined ? {} : { represented: h.detail.represented === true }),
+    });
+  }
   for (const d of decisions) {
     out.push({ _k: `decision:${d.id}`, kind: d.kind === 'formal' ? (d.supersededById ? 'decision_superseded' : 'decision_recorded') : 'decision', at: d.at, by: d.by, recommendation: d.recommendation, reasonCodes: d.reasonCodes, decisionKind: d.kind ?? 'recommendation', outcome: d.outcome ?? null, decisionId: d.id });
   }

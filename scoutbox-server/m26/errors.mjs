@@ -37,6 +37,16 @@ export const M26_ERROR_HTTP = table({
   DOCUMENT_VISIBILITY_NOT_PERMITTED: 403,
   SIGNATORY_REQUIRED: 403,
   AGENT_VERIFICATION_REQUIRED: 403,
+  // P5.6E — the facet gate this module already calls (`compliance.facetGateProblem`)
+  // can answer with any of P5.6C's objective licence refusals, not just
+  // AGENT_VERIFICATION_REQUIRED. Declaring only one of them meant a lapsed
+  // licence reached a caller as a 500 about OUR state, when it is a plain,
+  // nameable 403 about theirs. All of them are declared here for that reason.
+  AGENT_LICENCE_INACTIVE: 403,
+  AGENT_VERIFICATION_STALE: 403,
+  AGENT_NATIONAL_REGISTRATION_REQUIRED: 403,
+  AGENT_DOMESTIC_AUTHORISATION_REQUIRED: 403,
+  AGENT_MINOR_AUTHORISATION_REQUIRED: 403,
   REPRESENTATION_REQUIRED: 403,
   REPRESENTATION_SCOPE_INSUFFICIENT: 403,
   REPRESENTATION_CONFLICT: 403,

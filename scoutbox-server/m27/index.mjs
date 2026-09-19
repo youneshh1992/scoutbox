@@ -216,6 +216,18 @@ export function registerIntegration(ctx) {
   // ------------------------------------------------------- club presence
 
   /**
+   * The three facet STATE WORDS for one jurisdiction. A per-association map is
+   * the agent's own business: which jurisdictions they are registered in is a
+   * fact about them that no player was asked to disclose, so only the agreement's
+   * own jurisdiction is read, and a missing one is absent rather than guessed.
+   */
+  const flatFacets = (states, jurisdiction) => (states ? {
+    fifa_licence: typeof states.fifa_licence === 'string' ? states.fifa_licence : null,
+    national_registration: jurisdiction ? states.national_registration?.[jurisdiction] ?? null : null,
+    domestic_authorisation: jurisdiction ? states.domestic_authorisation?.[jurisdiction] ?? null : null,
+  } : null);
+
+  /**
    * §14/§63. The Club-facing "represented by" projection, answered from the
    * PLAYER's own disclosure choice. A club does not learn who represents a
    * player because the player exists; it learns because the player said so.
@@ -233,7 +245,9 @@ export function registerIntegration(ctx) {
       decision,
       agent: { displayName: profile?.displayName ?? user?.name ?? null },
       agency: { id: org?.id ?? null, name: org?.name ?? null },
-      facets: compliance?.facetStatesFor ? compliance.facetStatesFor(agreement.agentUserId) : null,
+      // Flattened to the ONE jurisdiction this relationship names, so the badge
+      // carries three state words and not a map of everywhere this agent works.
+      facets: flatFacets(compliance?.facetStatesFor ? compliance.facetStatesFor(agreement.agentUserId) : null, agreement.jurisdiction),
     });
   }
 
@@ -469,6 +483,15 @@ export function registerIntegration(ctx) {
     const found = agent.findOwnAgreement(req, res, req.params.id);
     if (!found) return;
     if (found.summaryOnly) return res.status(403).json({ error: 'AGENT_ACTION_NOT_PERMITTED' });
+    // The same gate the other two client-scoped reads use. A share list is a list of
+    // things said to a particular client, so it closes when the mandate does — the
+    // agent's own history of having acted is not a standing window onto a person who
+    // is no longer their client. `client_private` and not `opportunity_share`: this
+    // is a read of the relationship, not the regulated act of making a suggestion.
+    const decision = decide({ surface: 'client_private', clientId: found.clientId, agentUserId: req.orgUser.id });
+    if (decision.allowed !== true) {
+      return res.status(403).json({ error: decision.code, rule: decision.rule, message: 'This client\'s record is not open to you right now.' });
+    }
     res.json({ items: (found.opportunityShares ?? []).map(shareView).sort((x, y) => y.sharedAt - x.sharedAt) });
   });
 

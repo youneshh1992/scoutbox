@@ -14,6 +14,9 @@ export const M24_ERROR_HTTP = table({
   AGENT_SCOPE_INVALID: 400,
   AGENT_TERM_INVALID: 400,
   AGENT_JURISDICTION_INVALID: 400,
+  // P5.6E: the client's own disclosure choices. A malformed request is the
+  // caller's to fix, and saying so is not a 500 about our own state.
+  REPRESENTATION_INPUT_INVALID: 400,
 
   // ---- 403: not yours to do (own state; nothing about a subject).
   AGENT_ACTION_NOT_PERMITTED: 403,

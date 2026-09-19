@@ -805,6 +805,17 @@ export function registerAgent(rawCtx) {
     if (body.disclosure !== undefined && (body.disclosure === null || typeof body.disclosure !== 'object' || Array.isArray(body.disclosure))) {
       return sendAgentError(res, { error: 'REPRESENTATION_INPUT_INVALID', field: 'disclosure', message: `disclosure must be an object with any of: ${DISCLOSURE_KEYS.join(', ')}.` }, 'sharing');
     }
+    // Each disclosure is a yes or a no, and nothing else. A key sent as a
+    // truthy string or a 1 is REFUSED rather than read as a no: coercing it
+    // would silently turn OFF a choice the client was trying to turn on, and a
+    // privacy setting is the last place to guess at an intention.
+    if (body.disclosure !== undefined) {
+      for (const k of DISCLOSURE_KEYS) {
+        if (Object.hasOwn(body.disclosure, k) && typeof body.disclosure[k] !== 'boolean') {
+          return sendAgentError(res, { error: 'REPRESENTATION_INPUT_INVALID', field: `disclosure.${k}`, message: 'Each disclosure is true or false. Send the choice as a boolean; nothing is assumed from another kind of value.' }, 'sharing');
+        }
+      }
+    }
     if (!guardRev(req, res, a, { errorCode: 'REPRESENTATION_VERSION_CONFLICT', current: {} })) return;
 
     const changed = {};

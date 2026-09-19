@@ -145,7 +145,12 @@ section('C0 — the guardian decision is a request outcome in the notification t
   ok(CATEGORIES.messages.default === true && CATEGORIES.messages.mandatory === false, 'C0b that category is on by default for every existing, new and migrated person, and may be muted like every other request outcome');
   ok(TYPE_CATEGORY.accepted === 'messages' && TYPE_CATEGORY.declined === 'messages', 'C0c the club-side outcome rows live in the same category — one taxonomy, no parallel system');
   neg(TYPE_CATEGORY.update === 'discovery_nudges' && CATEGORIES.discovery_nudges.default === false, 'C0d `update` still means a discovery nudge (off by default) — the type was wrong for the child, the category was not changed to fit it');
-  neg(Object.keys(CATEGORIES).filter((k) => CATEGORIES[k].mandatory).join() === 'security_account', 'C0e no new mandatory category was invented; security_account is still the only one');
+  // P4A's point stands: a milestone must not make its own traffic unmutable to get
+  // attention. The set has grown by exactly one since, and deliberately: P5.6C's
+  // `compliance` carries regulatory review, consent and verification, where muting
+  // would mute an obligation rather than a preference. Pinned as a set so the next
+  // milestone that wants to add a third has to come and change this line.
+  neg(Object.keys(CATEGORIES).filter((k) => CATEGORIES[k].mandatory).sort().join() === 'compliance,security_account', 'C0e the mandatory categories are still exactly two — security_account and P5.6C\'s compliance; no milestone has quietly added a third');
 }
 
 // =================================================================== HTTP
