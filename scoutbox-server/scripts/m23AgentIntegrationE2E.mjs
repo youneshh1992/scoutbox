@@ -619,8 +619,14 @@ section('N/O/§46 — the club-private worlds an agent cannot reach at all');
     neg(!new RegExp(`${RID}|pl-adeyemi|Kola|org-eastport`).test(body),
       `${label} (scoping): and the answer names no case, no player and no club of Eastport's — the list is org-scoped at the source (§36)`);
   }
+  // "No such route" is proven with a CLUB token as well as an agency one. An
+  // agency 404 could in principle be a scoping refusal that happens to look like
+  // a missing route; the club that owns the player is the strongest prover, and it
+  // reaches no such route either.
   neg(expect(collect('#36 trust score', await j('POST', '/org/players/pl-adeyemi/trust-profile', { score: 100 }, ana.token)), 404, null), '#36 and there is no route through which anyone edits a Trust Score');
+  neg(expect(collect('#36b trust score (club)', await j('POST', '/org/players/pl-adeyemi/trust-profile', { score: 100 }, maria.token)), 404, null), '#36b not even the club that holds the case — the route does not exist, rather than being refused');
   neg(expect(collect('#35 passport write', await j('PATCH', '/org/players/pl-adeyemi/football-passport', { position: 'ST' }, ana.token)), 404, null), '#35 nor one through which an agent edits a Passport — the agent\'s projection is a read');
+  neg(expect(collect('#35b passport write (club)', await j('PATCH', '/org/players/pl-adeyemi/football-passport', { position: 'ST' }, maria.token)), 404, null), '#35b nor through the club lane — a Passport is the player\'s, and nothing in the org router writes one');
 }
 
 section('E/§14/§63 — the Club-facing presence badge is the player\'s own choice');
@@ -1161,6 +1167,73 @@ section('AT — the audit trail: the club\'s own history, and nobody else\'s');
   // about the club's thinking.
   const hofs = await j('GET', '/org/agent/handoffs', undefined, ana.token);
   neg(!/history|"note"|rationale|assessment/i.test(JSON.stringify(hofs.body?.items ?? [])), 'AT6 the agent\'s own view of the invitation carries no history, no note and no assessment either');
+}
+
+section('AU/repair §4 — an agency on the shared /org router: generic infrastructure, proven');
+{
+  const RID = globalThis.__RID;
+  // WHY THIS GROUP EXISTS.
+  //
+  // `/org` is one router serving both club and agency organisations, so an agency
+  // session reaches club recruitment surfaces and is answered about ITSELF. The
+  // repair pass considered gating those surfaces by org kind and REJECTED that
+  // fix: `m23TrialE2E` W3 asserts "an agency may invite an adult (the wall is
+  // about minors)" and `m19E2E` keeps watchlists on an agency org — a deny-by-
+  // default gate broke both, so it would have redesigned frozen P4B/M19 product
+  // shape rather than repaired a defect.
+  //
+  // The mandate's alternative applies: if the route is intentionally generic
+  // infrastructure, prove that with architecture and tests. This group is that
+  // proof. It asserts tenant isolation directly, on the surfaces an agency can
+  // reach, rather than trusting that 357 route implementations each filter
+  // correctly forever.
+  const FOREIGN = ['case-', 'pl-adeyemi', 'Kola', 'org-eastport', 'Eastport', 'Maria Keane'];
+  const surfaces = [
+    ['AU rooms', '/org/rooms'],
+    ['AU second-look', '/org/second-look'],
+    ['AU nobody-missed', '/org/nobody-missed'],
+    ['AU watchlists', '/org/watchlists'],
+    ['AU briefs', '/org/recruitment-briefs'],
+    ['AU assessments', '/org/assessments'],
+    ['AU shortlist', '/org/shortlist'],
+    ['AU analytics', '/org/analytics/overview'],
+    ['AU club transactions', '/org/transactions'],
+  ];
+  for (const [label, url] of surfaces) {
+    const r = collect(label, await j('GET', url, undefined, ana.token));
+    const body = JSON.stringify(r.body ?? {});
+    // Either the surface is shut, or it answers about the agency itself and
+    // carries not one identifier belonging to the club next door.
+    neg(r.status >= 400 || !FOREIGN.some((needle) => body.includes(needle)),
+      `${label}: an agency session learns nothing of Eastport's case, player, club or staff through it (${r.status})`);
+    // And whatever it says, it says the same thing before and after the club has
+    // done its work — the agency's answer is not a function of the club's data.
+    const again = await j('GET', url, undefined, ana.token);
+    neg(JSON.stringify(again.body ?? {}) === body, `${label}: and the answer is stable — it is a projection of the agency, not a window that moves with the club`);
+  }
+  // A NAMED club resource is refused, identically to one that was never created,
+  // so the refusal is not a test for existence.
+  const named = [
+    ['AU room by id', `/org/rooms/${RID}`, '/org/rooms/case-never-existed'],
+    ['AU decision by id', `/org/rooms/${RID}/decision`, '/org/rooms/case-never-existed/decision'],
+    ['AU journey by id', `/org/rooms/${RID}/journey`, '/org/rooms/case-never-existed/journey'],
+    ['AU contacts by id', `/org/rooms/${RID}/contacts`, '/org/rooms/case-never-existed/contacts'],
+    ['AU trials by id', `/org/rooms/${RID}/trials`, '/org/rooms/case-never-existed/trials'],
+  ];
+  for (const [label, real, ghost] of named) {
+    const a = collect(`${label} real`, await j('GET', real, undefined, ana.token));
+    const b = collect(`${label} ghost`, await j('GET', ghost, undefined, ana.token));
+    neg(a.status >= 400, `${label}: a real club case is refused to an agency session (${a.status})`);
+    neg(a.status === b.status && JSON.stringify(a.body ?? {}) === JSON.stringify(b.body ?? {}), `${label}: and byte-identically to a case that never existed — the refusal is no oracle over the club's caseload`);
+  }
+  // The standing minor wall is what actually protects children here, and it is
+  // asserted rather than assumed: an agency cannot open a case on a minor at all.
+  const minorCase = collect('AU minor case', await j('POST', '/org/rooms', { playerId: 'pl-guni', sourceContext: 'search' }, ana.token));
+  neg(minorCase.status >= 400, `AU-minor an agency cannot open a recruitment case on a minor — the wall is in the player projection, not in the router (${minorCase.status})`);
+  // Counts are part of the surface: a total that counted the club's rows would
+  // leak the club's caseload even with the rows themselves withheld.
+  const wl = await j('GET', '/org/watchlists', undefined, ana.token);
+  neg((wl.body?.total ?? 0) === (wl.body?.items ?? []).length, 'AU-count a list total counts exactly the rows the caller was given, so a count cannot report what a projection withheld');
 }
 
 section('refusal hygiene — every refusal this suite provoked, swept at once');

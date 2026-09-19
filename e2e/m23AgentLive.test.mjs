@@ -31,6 +31,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { toastRecordingContexts, waitToast } from './toastLog.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
@@ -123,6 +124,9 @@ const j = async (method, p, body, token, extra = {}) => {
 };
 
 browser = await chromium.launch({ executablePath: EXE });
+// Toasts vanish after 3.5s; record them as they render so a starved poll cannot
+// miss one. See e2e/toastLog.mjs.
+const newContext = toastRecordingContexts(browser);
 const errors = [];
 const watch = (page, who) => { page.on('pageerror', (e) => errors.push(`${who}: ${e}`)); return page; };
 
@@ -145,6 +149,20 @@ async function enterAgent(ctx, name, role, who, { expectFail = false } = {}) {
 const go = async (page, hash) => { await page.evaluate((h) => { location.hash = h; }, hash); await sleep(500); };
 const bodyText = (page) => page.locator('body').innerText();
 const sidebarText = (page) => page.locator('nav.sidebar').innerText();
+/**
+ * Durable page text OR a toast that really rendered. `waitText` alone samples the
+ * DOM, so it can miss a toast whose 3.5s lifetime falls between two polls on a
+ * starved machine; the recorded toast log closes that window without a sleep.
+ */
+async function waitTextOrToast(page, re, ms = 20000) {
+  for (let i = 0; i < Math.ceil(ms / 250); i++) {
+    if (re.test(await bodyText(page).catch(() => ''))) return true;
+    const log = await page.evaluate(() => window.__toastLog ?? []).catch(() => []);
+    if (log.some((t) => re.test(t))) return true;
+    await sleep(250);
+  }
+  return false;
+}
 async function waitText(page, re, ms = 15000) { for (let i = 0; i < ms / 250; i++) { if (re.test(await bodyText(page).catch(() => ''))) return true; await sleep(250); } return false; }
 
 // ------------------------------------------------------------ player helpers
@@ -167,7 +185,7 @@ async function myAgentCard(page, re = /Ana Costa/) {
 }
 
 // ================================================================== A — ADMIN
-const ctxTomas = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+const ctxTomas = await newContext({ viewport: { width: 1440, height: 900 } });
 const tomas = await enterAgent(ctxTomas, 'Tomás Rivera', 'Director', 'tomas');
 say('A1: the seeded agency Director signs in through the real Agent client (platform=agent)');
 {
@@ -200,7 +218,7 @@ say('A5: Agency › Team opens by deep link');
 }
 
 // ================================================================== B — AGENT
-const ctxAna = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+const ctxAna = await newContext({ viewport: { width: 1440, height: 900 } });
 const ana = await enterAgent(ctxAna, 'Ana Costa', 'Agent', 'ana');
 say('B1: Ana signs in');
 {
@@ -227,7 +245,7 @@ await ana.page.waitForSelector('[data-testid="profile-form"]', { timeout: 15000 
   // A real-looking reference goes to manual review.
   await fifa.locator('input').fill('FIFA-2024-777');
   await fifa.locator('button:has-text("Submit for verification")').click();
-  ok(await waitText(ana.page, /Manual review required/), 'B10: submitting the real-looking number → Manual review required (no register is pretended)');
+  ok(await waitTextOrToast(ana.page, /Manual review required/), 'B10: submitting the real-looking number → Manual review required (no register is pretended)');
   ok(/G-C0/.test(await fifa.innerText()), 'B10b: …with the G-C0 note on the facet');
   await fifa.locator('input').fill('TEST-VERIFIED-777');
   await fifa.locator('button:has-text("Submit for verification")').click();
@@ -258,7 +276,11 @@ let REL = null;
   await ana.page.fill('[data-testid="term-input"]', '18');
   await ana.page.selectOption('[data-testid="request-form"] select', 'ENG');
   await ana.page.click('[data-testid="send-request"]');
-  ok(await waitText(ana.page, /Request sent\. Nothing is active until the player confirms/), 'B16: the request is sent and the toast says nothing is active yet');
+  // B16 asserts on a TOAST, which the app removes after 3.5s. Read the recorded
+  // toast log rather than sampling the DOM: under CPU contention two samples can
+  // straddle the whole lifetime and miss a toast that really appeared. B17 below
+  // asserts the durable outcome, so the product fact is covered either way.
+  ok(await waitToast(ana.page, /Request sent\. Nothing is active until the player confirms/), 'B16: the request is sent and the toast says nothing is active yet');
   await ana.page.waitForSelector('[data-testid="clients-pending"]', { timeout: 15000 });
   const row = ana.page.locator('[data-testid="clients-pending"] .list-row').first();
   ok(/Kola Adeyemi/.test(await row.innerText()) && /Awaiting confirmation/.test(await row.innerText()), 'B17: Kola is listed under "Awaiting the client\'s answer"');
@@ -273,7 +295,7 @@ let REL = null;
 }
 
 // ================================================================== C — CLIENT
-const ctxKola = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+const ctxKola = await newContext({ viewport: { width: 1440, height: 900 } });
 const kola = await enterPlayer(ctxKola, 'Kola Adeyemi', 'kola');
 say('C1: Kola signs in to the player app');
 {
@@ -334,7 +356,7 @@ say('C1: Kola signs in to the player app');
 
 // ================================================================== N — NEGATIVES
 {
-  const ctxClub = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const ctxClub = await newContext({ viewport: { width: 1440, height: 900 } });
   const page = watch(await ctxClub.newPage(), 'club');
   await page.goto(`http://localhost:${AGENT_PORT}/`);
   await page.waitForSelector('.org-card', { timeout: 25000 });
@@ -356,7 +378,7 @@ say('C1: Kola signs in to the player app');
   await form.getByLabel('Analyst').check();
   await tomas.page.click('button:has-text("Add member")');
   ok(await waitText(tomas.page, /Ben Okoro/), 'N2: Ben is added as an analyst');
-  const ctxBen = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const ctxBen = await newContext({ viewport: { width: 1440, height: 900 } });
   const ben = await enterAgent(ctxBen, 'Ben Okoro', 'Analyst', 'ben');
   neg(!/Opportunit/.test(await sidebarText(ben.page)), 'N2b: an analyst sees no Opportunities');
   await go(ben.page, '#/clients');
@@ -391,7 +413,7 @@ say('C1: Kola signs in to the player app');
   neg(/no offer, negotiation, fee or contract happens here/i.test(all[0]) || /No transaction room/i.test(all[0]), 'N5b: Home says explicitly what the workspace is not');
 }
 {
-  const ctxPhone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const ctxPhone = await newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const phone = watch(await ctxPhone.newPage(), 'phone');
   phone.on('dialog', (d) => d.accept());
   await phone.goto(`http://localhost:${AGENT_PORT}/`);
@@ -453,7 +475,7 @@ say('C1: Kola signs in to the player app');
   await sleep(300);
 }
 {
-  const ctxKolaPhone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const ctxKolaPhone = await newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const kp = await enterPlayer(ctxKolaPhone, 'Kola Adeyemi', 'kola-phone');
   const card = await myAgentCard(kp);
   ok(/Ana Costa/.test(await card.innerText()) && /Disputed/.test(await card.innerText()), 'N9: 390px: My Agent is visible in the player app with the disputed record');

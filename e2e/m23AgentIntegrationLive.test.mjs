@@ -40,6 +40,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { toastRecordingContexts, waitToast } from './toastLog.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
@@ -166,6 +167,9 @@ if (!REL || conf.status !== 200 || !RID || oppRes.status !== 201) {
 say(`setup: Ana is a verified licensed agent, Kola confirmed her mandate, and Eastport has a case (${RID}) with an approach agreed`);
 
 browser = await chromium.launch({ executablePath: EXE });
+// Toasts vanish after 3.5s; record them as they render so a starved poll cannot
+// miss one. See e2e/toastLog.mjs.
+const newContext = toastRecordingContexts(browser);
 const errors = [];
 const watch = (page, who) => { page.on('pageerror', (e) => errors.push(`${who}: ${e}`)); return page; };
 const go = async (page, hash) => {
@@ -245,7 +249,7 @@ const noSideScroll = async (page) => page.evaluate(() => document.documentElemen
 // ============================================================ A — the PLAYER
 // Three separate choices, each starting off. This is the root of every
 // authority the rest of this suite exercises.
-const ctxKola = await browser.newContext({ viewport: { width: 390, height: 844 } });
+const ctxKola = await newContext({ viewport: { width: 390, height: 844 } });
 const kola = await enterPlayer(ctxKola, 'Kola Adeyemi', 'kola');
 say('A1: Kola signs in to the real player app on a 390-wide screen');
 {
@@ -271,7 +275,7 @@ say('A1: Kola signs in to the real player app on a 390-wide screen');
 }
 
 // ============================================================== B — the CLUB
-const ctxMaria = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+const ctxMaria = await newContext({ viewport: { width: 1440, height: 900 } });
 const maria = await enterClub(ctxMaria, CLUB_PORT, 'Eastport', 'Maria Keane', 'Head of Recruitment', 'maria');
 say('B1: Maria signs in to the real Pro client');
 let CONTACT_ID = null;
@@ -303,7 +307,7 @@ let CONTACT_ID = null;
 }
 
 // ============================================================= C — the AGENT
-const ctxAna = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+const ctxAna = await newContext({ viewport: { width: 1440, height: 900 } });
 const ana = await enterAgent(ctxAna, 'Ana Costa', 'Agent', 'ana');
 say('C1: Ana signs in to the real Agent client');
 {
@@ -462,7 +466,7 @@ let TX = null;
 // =============================================================== N — negatives
 {
   // N1. Neither club app offers a route that reaches the agent instead of the player.
-  const grass = await enterClub(await browser.newContext({ viewport: { width: 1440, height: 900 } }), GRASS_PORT, 'Moss Side Athletic', 'Pat Doyle', 'Head Coach', 'grass').catch(() => null);
+  const grass = await enterClub(await newContext({ viewport: { width: 1440, height: 900 } }), GRASS_PORT, 'Moss Side Athletic', 'Pat Doyle', 'Head Coach', 'grass').catch(() => null);
   if (grass) {
     const nav = await grass.locator('nav.sidebar').innerText();
     neg(!/Agents?\b|Agency/i.test(nav), 'N1: the grassroots app grew no Agent destination — an agent is a party to work, not a section of the club app');

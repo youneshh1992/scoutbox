@@ -38,6 +38,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { toastRecordingContexts, waitToast } from './toastLog.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
@@ -162,6 +163,9 @@ if (!REL || !anaApi?.token || !hal?.token) fail('setup failed');
 say('setup: Ana is a verified licensed agent with a client-confirmed relationship; each club has its own recorded signatory');
 
 browser = await chromium.launch({ executablePath: EXE });
+// Toasts vanish after 3.5s; record them as they render so a starved poll cannot
+// miss one. See e2e/toastLog.mjs.
+const newContext = toastRecordingContexts(browser);
 const errors = [];
 const watch = (page, who) => { page.on('pageerror', (e) => errors.push(`${who}: ${e}`)); return page; };
 /**
@@ -207,7 +211,7 @@ async function enterClub(ctx, orgText, name, role, who) {
 }
 
 // ============================================================== A — the agent
-const ctxAna = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+const ctxAna = await newContext({ viewport: { width: 1440, height: 900 } });
 const ana = watch(await ctxAna.newPage(), 'ana');
 ana.on('dialog', (d) => d.accept());
 {
@@ -278,7 +282,7 @@ let TX = null;
 }
 
 // ============================================================== D — the player
-const ctxKola = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+const ctxKola = await newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 const kola = watch(await ctxKola.newPage(), 'kola');
 {
   await kola.goto(`http://localhost:${PLAYER_PORT}/`);
@@ -302,7 +306,7 @@ const kola = watch(await ctxKola.newPage(), 'kola');
 }
 
 // ============================================================== E — engaging club
-const ctxMaria = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+const ctxMaria = await newContext({ viewport: { width: 1280, height: 900 } });
 const mariaPage = await enterClub(ctxMaria, 'Eastport', 'Maria Keane', 'Head of Recruitment', 'maria');
 {
   const lane = mariaPage.locator('[data-testid="club-transactions"]');
@@ -327,7 +331,7 @@ const mariaPage = await enterClub(ctxMaria, 'Eastport', 'Maria Keane', 'Head of 
 }
 
 // ============================================================== F — releasing club
-const ctxDev = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+const ctxDev = await newContext({ viewport: { width: 1280, height: 900 } });
 const devPage = await enterClub(ctxDev, 'Harbour', 'Dev Ansah', 'Director of Football', 'dev');
 {
   const row = devPage.locator(`[data-testid="club-tx-${TX}"]`);
@@ -413,7 +417,7 @@ const devPage = await enterClub(ctxDev, 'Harbour', 'Dev Ansah', 'Director of Foo
 }
 
 // ============================================================== J — Trust & Safety
-const ctxTs = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+const ctxTs = await newContext({ viewport: { width: 1440, height: 900 } });
 const ts = watch(await ctxTs.newPage(), 'trust-safety');
 {
   await ts.goto(`http://localhost:${ADMIN_PORT}/`);
@@ -535,7 +539,7 @@ const ts = watch(await ctxTs.newPage(), 'trust-safety');
   await sleep(500);
 }
 {
-  const halPage = watch(await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage(), 'hal');
+  const halPage = watch(await (await newContext({ viewport: { width: 1280, height: 900 } })).newPage(), 'hal');
   await halPage.goto(`http://localhost:${CLUB_PORT}/`);
   await halPage.waitForSelector('.org-card', { timeout: 25000 });
   await halPage.click('.org-card:has-text("Eastport")');

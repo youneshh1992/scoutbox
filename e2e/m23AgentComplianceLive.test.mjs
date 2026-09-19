@@ -42,6 +42,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { toastRecordingContexts, waitToast } from './toastLog.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
@@ -160,10 +161,27 @@ if (!REL || !anaApi?.token || !dev?.token) fail('setup failed');
 say('setup: Ana is a verified licensed agent with a client-confirmed relationship; Eastport has a recorded signatory');
 
 browser = await chromium.launch({ executablePath: EXE });
+// Toasts vanish after 3.5s; record them as they render so a starved poll cannot
+// miss one. See e2e/toastLog.mjs.
+const newContext = toastRecordingContexts(browser);
 const errors = [];
 const watch = (page, who) => { page.on('pageerror', (e) => errors.push(`${who}: ${e}`)); return page; };
 const go = async (page, hash) => { await page.evaluate((h) => { location.hash = h; }, hash); await sleep(500); };
 const bodyText = (page) => page.locator('body').innerText();
+/**
+ * Durable page text OR a toast that really rendered. `waitText` alone samples the
+ * DOM, so it can miss a toast whose 3.5s lifetime falls between two polls on a
+ * starved machine; the recorded toast log closes that window without a sleep.
+ */
+async function waitTextOrToast(page, re, ms = 20000) {
+  for (let i = 0; i < Math.ceil(ms / 250); i++) {
+    if (re.test(await bodyText(page).catch(() => ''))) return true;
+    const log = await page.evaluate(() => window.__toastLog ?? []).catch(() => []);
+    if (log.some((t) => re.test(t))) return true;
+    await sleep(250);
+  }
+  return false;
+}
 async function waitText(page, re, ms = 15000) { for (let i = 0; i < ms / 250; i++) { if (re.test(await bodyText(page).catch(() => ''))) return true; await sleep(250); } return false; }
 async function waitFor(fn, ms = 15000) { for (let i = 0; i < ms / 250; i++) { if (await fn().catch(() => false)) return true; await sleep(250); } return false; }
 
@@ -181,7 +199,7 @@ async function enterAgent(ctx, name, role, who) {
 }
 
 // ============================================================== A — the agent
-const ctxAna = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+const ctxAna = await newContext({ viewport: { width: 1440, height: 900 } });
 const ana = await enterAgent(ctxAna, 'Ana Costa', 'Agent', 'ana');
 say('A1: Ana signs in through the real Agent client');
 {
@@ -248,7 +266,7 @@ let REVIEW_ID = null;
 }
 
 // ============================================================== C — the console
-const ctxTs = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+const ctxTs = await newContext({ viewport: { width: 1440, height: 900 } });
 const ts = watch(await ctxTs.newPage(), 'trust-safety');
 ts.on('dialog', (d) => d.accept());
 {
@@ -288,7 +306,7 @@ ts.on('dialog', (d) => d.accept());
   await ts.fill('[data-testid="reason-text"]', 'The club mandate letter was examined against the club\'s recorded signatory.');
   await ts.click('[data-testid="approve"]');
   await sleep(800);
-  neg(await waitText(ts, /evidence reference/i, 6000), 'C7: an approval that cites NO evidence is refused — the console says an evidence reference is required');
+  neg(await waitTextOrToast(ts, /evidence reference/i, 9000), 'C7: an approval that cites NO evidence is refused — the console says an evidence reference is required');
   ok(await waitFor(async () => (await ts.locator('[data-testid="review-decision"]').count()) === 0), 'C7b: …and nothing was decided');
   await ts.fill('[data-testid="evidence"]', 'Eastport FC mandate letter, 12 Sep 2026');
   await ts.click('[data-testid="approve"]');
@@ -317,7 +335,7 @@ ts.on('dialog', (d) => d.accept());
 }
 
 // ============================================================== E — the player
-const ctxKola = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+const ctxKola = await newContext({ viewport: { width: 1440, height: 900 } });
 const kola = watch(await ctxKola.newPage(), 'kola');
 {
   await kola.goto(`http://localhost:${PLAYER_PORT}/`);
@@ -348,7 +366,7 @@ const kola = watch(await ctxKola.newPage(), 'kola');
 }
 
 // ============================================================== F — the club
-const ctxMaria = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+const ctxMaria = await newContext({ viewport: { width: 1440, height: 900 } });
 const mariaPage = watch(await ctxMaria.newPage(), 'maria');
 mariaPage.on('dialog', (d) => d.accept());
 {
@@ -435,7 +453,7 @@ mariaPage.on('dialog', (d) => d.accept());
   neg(/not a Transaction Room/i.test(screens[1]), 'N3b: the context says explicitly what it is not');
 }
 {
-  const ctxPhone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const ctxPhone = await newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const phone = watch(await ctxPhone.newPage(), 'phone');
   phone.on('dialog', (d) => d.accept());
   await phone.goto(`http://localhost:${AGENT_PORT}/`);
@@ -491,7 +509,7 @@ mariaPage.on('dialog', (d) => d.accept());
   neg(a.status === 403 && a.body.error === 'COMPLIANCE_ACTION_NOT_PERMITTED', `N7c: a guardian-managed account cannot answer a real consent that belongs to someone else (${a.status} ${a.body.error})`);
 }
 {
-  const ctxDev = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const ctxDev = await newContext({ viewport: { width: 1440, height: 900 } });
   const devPage = watch(await ctxDev.newPage(), 'dev-ansah');
   await devPage.goto(`http://localhost:${CLUB_PORT}/`);
   await devPage.waitForSelector('.org-card', { timeout: 25000 });
