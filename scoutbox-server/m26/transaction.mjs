@@ -98,6 +98,17 @@ export const LIVE_STATUSES = Object.freeze(['DRAFT', 'PARTIES_CONFIRMED', 'COMPL
 export const TERMINAL_STATUSES = Object.freeze(['CANCELLED', 'CLOSED', 'ARCHIVED']);
 
 const nullProto = (o) => Object.freeze(Object.assign(Object.create(null), o));
+/**
+ * Defensive container accessors.
+ *
+ * A snapshot can hold a row that a partial write, a hand-edit or an older shape
+ * left without its arrays. Before this, one such row made EVERY party's list
+ * route answer 500 — a malformed record took the whole surface down rather than
+ * being contained to itself (defect D8). A row with no parties belongs to
+ * nobody, which is the safe reading as well as the tolerant one.
+ */
+const partiesOf = (tx) => (Array.isArray(tx?.parties) ? tx.parties : []);
+
 
 /**
  * Transitions an ACTOR may request. Deliberately does NOT contain READY,
@@ -185,9 +196,10 @@ export function roomRolesFor(tx, viewer) {
   const roles = [];
   if (!tx || !viewer) return roles;
   const live = (p) => p && !p.removed;
+  const parties = partiesOf(tx);
   if (viewer.kind === 'ts_reviewer') return ['trust_safety'];
   if (viewer.kind === 'player') {
-    if (tx.parties.some((p) => live(p) && p.subjectKind === 'player' && p.subjectId === viewer.playerId)) roles.push('party_individual');
+    if (parties.some((p) => live(p) && p.subjectKind === 'player' && p.subjectId === viewer.playerId)) roles.push('party_individual');
     return roles;
   }
   if (viewer.kind === 'agency') {
@@ -197,15 +209,17 @@ export function roomRolesFor(tx, viewer) {
     return roles;
   }
   if (viewer.kind === 'club') {
-    if (!tx.parties.some((p) => live(p) && p.subjectKind === 'club' && p.subjectId === viewer.orgId)) return roles;
+    if (!parties.some((p) => live(p) && p.subjectKind === 'club' && p.subjectId === viewer.orgId)) return roles;
     roles.push(viewer.signatory ? 'party_club_signatory' : 'party_club_member');
   }
   return roles;
 }
 
 /** The party role a club viewer occupies in this transaction, or null. */
+export { partiesOf };
+
 export const clubPartyRoleOf = (tx, orgId) =>
-  tx?.parties.find((p) => p && !p.removed && p.subjectKind === 'club' && p.subjectId === orgId)?.partyRole ?? null;
+  partiesOf(tx).find((p) => p && !p.removed && p.subjectKind === 'club' && p.subjectId === orgId)?.partyRole ?? null;
 
 // ------------------------------------------------------------------ documents
 
@@ -436,8 +450,8 @@ export function offerReadiness(tx, { complianceState = null, staleness = null } 
   if (!['READY', 'ACTIVE'].includes(tx.status)) blockers.push('TRANSACTION_NOT_READY');
   if (staleness) blockers.push('COMPLIANCE_SNAPSHOT_STALE');
   if (!complianceState?.clear) blockers.push('COMPLIANCE_NOT_CLEAR');
-  if (!tx.parties.some((p) => !p.removed && p.partyRole === 'individual' && p.confirmedAt)) blockers.push('INDIVIDUAL_NOT_CONFIRMED');
-  if (!tx.parties.some((p) => !p.removed && p.partyRole === 'engaging_entity' && p.confirmedAt)) blockers.push('ENGAGING_ENTITY_NOT_CONFIRMED');
+  if (!partiesOf(tx).some((p) => !p.removed && p.partyRole === 'individual' && p.confirmedAt)) blockers.push('INDIVIDUAL_NOT_CONFIRMED');
+  if (!partiesOf(tx).some((p) => !p.removed && p.partyRole === 'engaging_entity' && p.confirmedAt)) blockers.push('ENGAGING_ENTITY_NOT_CONFIRMED');
   return { canStartOfferWorkflow: blockers.length === 0, blockers, honest: OFFER_HONEST };
 }
 
@@ -456,7 +470,7 @@ export function requiredPartyRoles(type) {
 export function partiesConfirmed(tx) {
   if (!tx) return false;
   for (const role of requiredPartyRoles(tx.type)) {
-    const p = tx.parties.find((x) => x && !x.removed && x.partyRole === role);
+    const p = partiesOf(tx).find((x) => x && !x.removed && x.partyRole === role);
     if (!p || !p.confirmedAt) return false;
   }
   return true;
@@ -465,7 +479,7 @@ export function partiesConfirmed(tx) {
 /** The party roles still waiting for their own confirmation. */
 export const partiesAwaitingConfirmation = (tx) =>
   requiredPartyRoles(tx?.type).filter((role) => {
-    const p = tx?.parties.find((x) => x && !x.removed && x.partyRole === role);
+    const p = partiesOf(tx).find((x) => x && !x.removed && x.partyRole === role);
     return !p || !p.confirmedAt;
   });
 
@@ -524,7 +538,7 @@ export function timelineVisible(audience, roles, partyRole = null) {
 /** Build one viewer's timeline from a transaction's append-only history. */
 export function timelineFor(tx, roles, partyRole = null, { limit = 200 } = {}) {
   const out = [];
-  for (const h of tx?.history ?? []) {
+  for (const h of Array.isArray(tx?.history) ? tx.history : []) {
     const audience = timelineAudienceOf(h?.action);
     if (!timelineVisible(audience, roles, partyRole)) continue;
     out.push({ id: h.id, at: h.at, action: h.action, audience, actor: actorLabel(h.by), detail: safeTimelineDetail(h.detail) });

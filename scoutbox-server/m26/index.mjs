@@ -42,6 +42,7 @@ import { effectiveAgreementStatus, agreementGrantsAccess, affiliationActive, tie
 import { sendTransactionError, notFound } from './errors.mjs';
 import { transactionAuditRows } from './audit.mjs';
 import {
+  partiesOf,
   TRANSACTION_TYPES, TRANSACTION_STATUSES, LIVE_STATUSES, TERMINAL_STATUSES, PARTY_ROLES, ROOM_ROLES,
   ACTOR_TRANSITIONS, ALL_TRANSITIONS, actorTransitionAllowed, complianceTransitionAllowed,
   DOCUMENT_TYPES, DOCUMENT_VISIBILITY, NOTE_VISIBILITY, canSeeVisibility, uploadableVisibilities,
@@ -115,7 +116,7 @@ export function registerTransactions(rawCtx) {
     const consents = tx.contextId ? compliance.consentsFor(tx.contextId) : [];
     const blocked = [];
     const minors = [];
-    for (const p of tx.parties) {
+    for (const p of partiesOf(tx)) {
       if (p.removed || p.subjectKind !== 'player') continue;
       const pl = findPlayer(p.subjectId);
       if (!pl) { blocked.push(p.subjectId); continue; }
@@ -123,7 +124,7 @@ export function registerTransactions(rawCtx) {
       if (!isAdult(pl)) minors.push(pl.id);
     }
     return partyRevisionOf({
-      parties: tx.parties, agentUserId: tx.agentUserId, representations: reps,
+      parties: partiesOf(tx), agentUserId: tx.agentUserId, representations: reps,
       consents: consents.map((k) => ({ id: k.id, status: k.status })),
       facetStates: compliance.facetStatesFor(tx.agentUserId) ?? {},
       policyVersions: tx.contextId ? (compliance.lastEvaluation(compliance.contextById(tx.contextId) ?? {})?.policyVersions ?? []) : [],
@@ -139,7 +140,7 @@ export function registerTransactions(rawCtx) {
    * it, which is why it lives here and not inside the conflict engine.
    */
   function safeguardingProblem(tx) {
-    for (const p of tx.parties) {
+    for (const p of partiesOf(tx)) {
       if (p.removed || p.subjectKind !== 'player') continue;
       const pl = findPlayer(p.subjectId);
       if (!pl) return 'SUBJECT_GONE';
@@ -177,7 +178,7 @@ export function registerTransactions(rawCtx) {
       return { safeguarding: null, state, result: null, gateProblem: gate };
     }
     if (!ctx) return { safeguarding: null, state: complianceStateFrom({ gate: 'REPRESENTATION_MISSING', partiesConfirmed: confirmed }), result: null };
-    compliance.project(ctx, { parties: tx.parties, representations: reps });
+    compliance.project(ctx, { parties: partiesOf(tx), representations: reps });
     const result = compliance.evaluate(ctx, by, { record });
     const state = complianceStateFrom({
       outcome: result.outcome, reasons: result.reasons, consentsOutstanding: result.consentsOutstanding,
@@ -253,7 +254,7 @@ export function registerTransactions(rawCtx) {
     const partyRole = viewer.kind === 'club' ? clubPartyRoleOf(tx, viewer.orgId) : viewer.kind === 'player' ? 'individual' : null;
     const stale = stalenessOf(tx);
     const state = tx.compliance?.state ?? null;
-    const live = tx.parties.filter((p) => !p.removed);
+    const live = partiesOf(tx).filter((p) => !p.removed);
     const isAgent = roles.includes('representing_agent');
     const reps = repsOf(tx.id);
     const consents = tx.contextId ? compliance.consentsFor(tx.contextId) : [];
@@ -269,7 +270,7 @@ export function registerTransactions(rawCtx) {
       // to know who represents whom. The AGENT's individual name is shared
       // too — they are a party's representative, not a hidden actor.
       agency: isAgent || roles.length ? { id: tx.agencyOrgId, name: orgById(tx.agencyOrgId)?.name ?? null } : null,
-      parties: tx.parties.map((p) => ({
+      parties: partiesOf(tx).map((p) => ({
         id: p.id, partyRole: p.partyRole, subjectKind: p.subjectKind, subjectId: p.subjectId,
         name: partyName(p, viewer), removed: !!p.removed, removedAt: p.removedAt ?? null,
         confirmedAt: p.confirmedAt ?? null, confirmedByKind: p.confirmedBy?.kind ?? null,
@@ -298,8 +299,17 @@ export function registerTransactions(rawCtx) {
        * side's agents)"); the policy versions and the evaluation reference for
        * the agent, who is the party the rules bind.
        */
+      /**
+       * `clear` is the CURRENT answer, so a stale snapshot is never presented as
+       * one: a client that reads only this field would otherwise be told the
+       * transaction is clear on the strength of an evaluation that no longer
+       * matches the facts. The recorded verdict stays visible as `snapshotClear`
+       * beside the staleness reason, because "what the last evaluation said" is
+       * a real and useful fact — it is just not a clearance.
+       */
       compliance: state ? {
-        outcome: state.outcome, pendingReason: state.pendingReason, blocked: state.blocked, clear: state.clear,
+        outcome: state.outcome, pendingReason: stale ? (state.pendingReason ?? 'SNAPSHOT_STALE') : state.pendingReason,
+        blocked: state.blocked, clear: state.clear && !stale, snapshotClear: state.clear,
         reasonCodes: state.reasonCodes, consentRequirements: tx.compliance.consentRequirements ?? [],
         evaluatedAt: tx.compliance.evaluatedAt, stale: stale, staleness: stale,
         ...(isAgent ? { evaluationId: tx.compliance.evaluationId, contextId: tx.compliance.contextId, policyVersions: tx.compliance.policyVersions, verificationFreshness: tx.compliance.verificationFreshness } : {}),
@@ -324,11 +334,11 @@ export function registerTransactions(rawCtx) {
       documents: docsOf(tx.id).filter((d) => canSeeVisibility(d.visibility, roles, partyRole) && !d.supersededBy).map((d) => documentView(d, roles, partyRole)),
       // Notes reuse the visibility classes; a note nobody may see is absent,
       // not redacted, so its existence is not disclosed either.
-      notes: (tx.notes ?? []).filter((n) => !n.removedAt && canSeeVisibility(n.visibility, roles, partyRole)).map((n) => ({ id: n.id, visibility: n.visibility, text: n.text, at: n.at, actor: actorLabel(n.by) })),
-      linkedThreads: (tx.linkedThreads ?? []).map((t) => ({ id: t.id, channelId: t.channelId, linkedAt: t.linkedAt, actor: actorLabel(t.linkedBy), readable: channelReadableBy(t.channelId, viewer) })),
+      notes: (Array.isArray(tx.notes) ? tx.notes : []).filter((n) => !n.removedAt && canSeeVisibility(n.visibility, roles, partyRole)).map((n) => ({ id: n.id, visibility: n.visibility, text: n.text, at: n.at, actor: actorLabel(n.by) })),
+      linkedThreads: (Array.isArray(tx.linkedThreads) ? tx.linkedThreads : []).map((t) => ({ id: t.id, channelId: t.channelId, linkedAt: t.linkedAt, actor: actorLabel(t.linkedBy), readable: channelReadableBy(t.channelId, viewer) })),
       links: { trialId: tx.links?.trialId ?? null, opportunityId: tx.links?.opportunityId ?? null },
       terms: isAgent || roles.includes('party_club_signatory') || roles.includes('party_individual')
-        ? { versions: (tx.terms?.versions ?? []).filter((v) => canSeeVisibility(v.visibility, roles, partyRole)).map((v) => ({ id: v.id, at: v.at, summary: v.summary, visibility: v.visibility, recordedFor: v.recordedFor, actor: actorLabel(v.by) })) }
+        ? { versions: (Array.isArray(tx.terms?.versions) ? tx.terms.versions : []).filter((v) => canSeeVisibility(v.visibility, roles, partyRole)).map((v) => ({ id: v.id, at: v.at, summary: v.summary, visibility: v.visibility, recordedFor: v.recordedFor, actor: actorLabel(v.by) })) }
         : { versions: [] },
       offerBoundary: offerReadiness(tx, { complianceState: state, staleness: stale }),
       hold: tx.status === 'ON_HOLD' ? { reasonCode: tx.holdReasonCode ?? null, reason: roles.length ? tx.holdReason ?? null : null, at: tx.heldAt ?? null } : null,
@@ -402,7 +412,7 @@ export function registerTransactions(rawCtx) {
   function playerTransaction(req, res, id) {
     if (req.playerIsMinor) { notFound(res, 'transaction'); return null; }
     const tx = txById(id);
-    if (!tx || !tx.parties.some((p) => !p.removed && p.subjectKind === 'player' && p.subjectId === req.player.id)) { notFound(res, 'transaction'); return null; }
+    if (!tx || !partiesOf(tx).some((p) => !p.removed && p.subjectKind === 'player' && p.subjectId === req.player.id)) { notFound(res, 'transaction'); return null; }
     return tx;
   }
 
@@ -563,8 +573,8 @@ export function registerTransactions(rawCtx) {
     const party = resolveParty(req, res, req.body, { type: tx.type }); if (!party) return;
     const fp = payloadFingerprint({ partyRole: party.partyRole, subjectId: party.subjectId });
     if (key && tx.keys?.[`party:${key}`]) { if (tx.keys[`party:${key}`].fp === fp) return res.json({ transaction: projectTransaction(tx, agentViewer(req)), idempotent: true }); return sendTransactionError(res, { error: 'TRANSACTION_IDEMPOTENCY_CONFLICT' }, 'parties'); }
-    if (tx.parties.some((x) => !x.removed && x.partyRole === party.partyRole)) return sendTransactionError(res, { error: 'TRANSACTION_PARTY_EXISTS', partyRole: party.partyRole }, 'parties');
-    if (tx.parties.length >= TRANSACTION_LIMITS.parties * 3) return sendTransactionError(res, { error: 'TRANSACTION_INPUT_INVALID', field: 'parties', message: 'This transaction already holds the maximum number of party records.' }, 'parties');
+    if (partiesOf(tx).some((x) => !x.removed && x.partyRole === party.partyRole)) return sendTransactionError(res, { error: 'TRANSACTION_PARTY_EXISTS', partyRole: party.partyRole }, 'parties');
+    if (partiesOf(tx).length >= TRANSACTION_LIMITS.parties * 3) return sendTransactionError(res, { error: 'TRANSACTION_INPUT_INVALID', field: 'parties', message: 'This transaction already holds the maximum number of party records.' }, 'parties');
     if (!guardRev(req, res, tx, { errorCode: 'TRANSACTION_VERSION_CONFLICT', current: { status: tx.status } })) return;
     hist(party, 'transaction_party_added', byAgent(req), { partyRole: party.partyRole, subjectKind: party.subjectKind });
     tx.parties.push(party);
@@ -587,7 +597,7 @@ export function registerTransactions(rawCtx) {
   orgRouter.post('/agent/transactions/:id/parties/:pid/remove', (req, res) => {
     const tx = ownTransaction(req, res, req.params.id, { write: true }); if (!tx) return;
     if (!writableOr(res, tx, 'parties')) return;
-    const party = tx.parties.find((p) => p && p.id === req.params.pid);
+    const party = partiesOf(tx).find((p) => p && p.id === req.params.pid);
     if (!party) return sendTransactionError(res, { error: 'TRANSACTION_PARTY_NOT_FOUND' }, 'parties');
     if (party.removed) return res.json({ transaction: projectTransaction(tx, agentViewer(req)), idempotent: true });
     if (!guardRev(req, res, tx, { errorCode: 'TRANSACTION_VERSION_CONFLICT', current: { status: tx.status } })) return;
@@ -641,7 +651,7 @@ export function registerTransactions(rawCtx) {
     const b = req.body ?? {};
     const key = clientKeyOr400(req, res); if (key === undefined) return;
     const partyRole = String(b.partyRole ?? '');
-    const party = tx.parties.find((p) => !p.removed && p.partyRole === partyRole);
+    const party = partiesOf(tx).find((p) => !p.removed && p.partyRole === partyRole);
     if (!party) return sendTransactionError(res, { error: 'TRANSACTION_PARTY_NOT_FOUND' }, 'representations');
     const fp = payloadFingerprint({ partyRole, agreementId: b.agreementId ?? null });
     if (key) {
@@ -679,7 +689,7 @@ export function registerTransactions(rawCtx) {
     // Steps 11–14: conflict, consent, minor gate and review, with the proposed
     // binding included. Nothing is recorded if the answer is not permissive.
     const ctx = compliance.contextById(tx.contextId);
-    compliance.project(ctx, { parties: tx.parties, representations: repsOf(tx.id).filter((r) => r.status !== 'withdrawn') });
+    compliance.project(ctx, { parties: partiesOf(tx), representations: repsOf(tx.id).filter((r) => r.status !== 'withdrawn') });
     const proposed = { agentUserId: req.orgUser.id, partyRole, agreementId: agreement?.id ?? null, declaredOnly, status: declaredOnly ? 'declared' : 'verified', firstActAt: now() };
     const result = compliance.evaluate(ctx, byAgent(req), { proposed });
     if (result.outcome === 'PROHIBITED_CONFLICT') {
@@ -833,7 +843,7 @@ export function registerTransactions(rawCtx) {
     else if (to === 'CANCELLED') broadcast('agent_transaction_cancelled', payload);
     else if (to === 'CLOSED') broadcast('agent_transaction_closed', payload);
     else broadcast('agent_transaction_status_changed', payload);
-    for (const p of tx.parties.filter((x) => !x.removed)) {
+    for (const p of partiesOf(tx).filter((x) => !x.removed)) {
       notifyParty(tx, p, 'agent_transaction', `A transaction you are party to is now "${to.replace(/_/g, ' ').toLowerCase()}". Nothing has been agreed or signed.`);
     }
     tx.updatedAt = now(); bumpTxRev(tx, byAgent(req)); persistNow();
@@ -850,7 +860,7 @@ export function registerTransactions(rawCtx) {
     if (!writableOr(res, tx, 'consents')) return;
     const ctx = compliance.contextById(tx.contextId);
     if (!ctx) return notFound(res, 'consents');
-    compliance.project(ctx, { parties: tx.parties, representations: repsOf(tx.id).filter((r) => r.status !== 'withdrawn') });
+    compliance.project(ctx, { parties: partiesOf(tx), representations: repsOf(tx.id).filter((r) => r.status !== 'withdrawn') });
     compliance.requestConsent(req, res, ctx);
   });
 
@@ -891,7 +901,7 @@ export function registerTransactions(rawCtx) {
     const opp = (db.opportunities ?? []).find((o) => o && o.id === opportunityId);
     // A link to an opportunity the agent cannot see would disclose that it
     // exists, so an unknown and an invisible opportunity answer alike.
-    const engaging = tx.parties.find((p) => !p.removed && p.partyRole === 'engaging_entity');
+    const engaging = partiesOf(tx).find((p) => !p.removed && p.partyRole === 'engaging_entity');
     if (!opp || !engaging || opp.orgId !== engaging.subjectId) return sendTransactionError(res, { error: 'TRANSACTION_INPUT_INVALID', field: 'opportunityId', message: 'No opportunity of the engaging club matches that reference.' }, 'links');
     if (!guardRev(req, res, tx, { errorCode: 'TRANSACTION_VERSION_CONFLICT', current: { status: tx.status } })) return;
     tx.links ??= { trialId: null, opportunityId: null };
@@ -955,7 +965,7 @@ export function registerTransactions(rawCtx) {
     // Only the parties the CLASS admits hear about it: a notification is a
     // disclosure, and an AGENT_PRIVATE document discloses nothing to anyone.
     if (visibility !== 'AGENT_PRIVATE') {
-      for (const p of tx.parties.filter((x) => !x.removed)) {
+      for (const p of partiesOf(tx).filter((x) => !x.removed)) {
         const otherRoles = p.subjectKind === 'player' ? ['party_individual'] : ['party_club_signatory'];
         if (!canSeeVisibility(visibility, otherRoles, p.partyRole)) continue;
         if (p.subjectKind === 'player' && owner.kind === 'player' && p.subjectId === owner.id) continue;
@@ -1086,7 +1096,7 @@ export function registerTransactions(rawCtx) {
     const tx = clubTransaction(req, res, req.params.id, { signatory: true }); if (!tx) return;
     if (!writableOr(res, tx, 'confirm')) return;
     if (limitedOr429(res, 'transaction_status_write', req.orgUser.id)) return;
-    const party = tx.parties.find((p) => !p.removed && p.subjectKind === 'club' && p.subjectId === req.org.id);
+    const party = partiesOf(tx).find((p) => !p.removed && p.subjectKind === 'club' && p.subjectId === req.org.id);
     if (!party) return notFound(res, 'confirm');
     if (party.confirmedAt) return res.json({ transaction: projectTransaction(tx, clubViewer(req)), idempotent: true });
     if (!guardRev(req, res, tx, { errorCode: 'TRANSACTION_VERSION_CONFLICT', current: { status: tx.status } })) return;
@@ -1130,7 +1140,7 @@ export function registerTransactions(rawCtx) {
     if (!writableOr(res, tx, 'messages')) return;
     const channelId = str(req.body?.channelId, 60);
     const ch = (db.channels ?? []).find((c) => c && c.id === channelId && c.orgId === req.org.id);
-    const individual = tx.parties.find((p) => !p.removed && p.partyRole === 'individual');
+    const individual = partiesOf(tx).find((p) => !p.removed && p.partyRole === 'individual');
     if (!ch || !individual || ch.playerId !== individual.subjectId) return sendTransactionError(res, { error: 'MESSAGE_THREAD_NOT_FOUND', message: 'No conversation of yours with this transaction\'s individual matches that reference.' }, 'messages');
     if ((tx.linkedThreads ?? []).some((t) => t.channelId === ch.id)) return res.json({ transaction: projectTransaction(tx, clubViewer(req)), idempotent: true });
     if ((tx.linkedThreads ?? []).length >= TRANSACTION_LIMITS.linkedThreads) return sendTransactionError(res, { error: 'TRANSACTION_INPUT_INVALID', field: 'channelId', message: 'This transaction already links the maximum number of conversations.' }, 'messages');
@@ -1147,7 +1157,7 @@ export function registerTransactions(rawCtx) {
     const tx = clubTransaction(req, res, req.params.id, { signatory: true }); if (!tx) return;
     if (!writableOr(res, tx, 'links')) return;
     const trialId = str(req.body?.trialId, 60);
-    const individual = tx.parties.find((p) => !p.removed && p.partyRole === 'individual');
+    const individual = partiesOf(tx).find((p) => !p.removed && p.partyRole === 'individual');
     const trial = (db.trials ?? []).find((t) => t && t.id === trialId && t.orgId === req.org.id && individual && t.playerId === individual.subjectId);
     if (!trial) return sendTransactionError(res, { error: 'TRANSACTION_INPUT_INVALID', field: 'trialId', message: 'No trial of yours with this transaction\'s individual matches that reference.' }, 'links');
     if (!guardRev(req, res, tx, { errorCode: 'TRANSACTION_VERSION_CONFLICT', current: { status: tx.status } })) return;
@@ -1163,7 +1173,7 @@ export function registerTransactions(rawCtx) {
   playerRouter.get('/transactions', (req, res) => {
     if (req.playerIsMinor) return res.json({ items: [], minor: true, note: 'Agent transactions are not available for under-18 accounts in ScoutBox.' });
     const viewer = playerViewer(req);
-    const mine = db.agentTransactions.filter((t) => t && t.parties.some((p) => !p.removed && p.subjectKind === 'player' && p.subjectId === req.player.id));
+    const mine = db.agentTransactions.filter((t) => t && partiesOf(t).some((p) => !p.removed && p.subjectKind === 'player' && p.subjectId === req.player.id));
     res.json({ items: mine.map((t) => projectTransaction(t, viewer)), statuses: TRANSACTION_STATUSES, honest: HONEST_TRANSACTION });
   });
   playerRouter.get('/transactions/:id', (req, res) => {
@@ -1175,7 +1185,7 @@ export function registerTransactions(rawCtx) {
     const tx = playerTransaction(req, res, req.params.id); if (!tx) return;
     if (!writableOr(res, tx, 'confirm')) return;
     if (limitedOr429(res, 'transaction_status_write', req.player.id)) return;
-    const party = tx.parties.find((p) => !p.removed && p.subjectKind === 'player' && p.subjectId === req.player.id);
+    const party = partiesOf(tx).find((p) => !p.removed && p.subjectKind === 'player' && p.subjectId === req.player.id);
     if (!party) return notFound(res, 'confirm');
     if (party.confirmedAt) return res.json({ transaction: projectTransaction(tx, playerViewer(req)), idempotent: true });
     if (!guardRev(req, res, tx, { errorCode: 'TRANSACTION_VERSION_CONFLICT', current: { status: tx.status } })) return;
@@ -1217,11 +1227,11 @@ export function registerTransactions(rawCtx) {
   const tsView = (tx) => ({
     id: tx.id, type: tx.type, status: tx.status, jurisdictions: tx.jurisdictions,
     agencyOrgId: tx.agencyOrgId, agentUserId: tx.agentUserId,
-    parties: tx.parties.map((p) => ({ partyRole: p.partyRole, subjectKind: p.subjectKind, removed: !!p.removed, confirmed: !!p.confirmedAt })),
+    parties: partiesOf(tx).map((p) => ({ partyRole: p.partyRole, subjectKind: p.subjectKind, removed: !!p.removed, confirmed: !!p.confirmedAt })),
     representations: repsOf(tx.id).map((r) => ({ partyRole: r.partyRole, status: r.status, declaredOnly: !!r.declaredOnly, reviewId: r.reviewId ?? null })),
     compliance: tx.compliance ? { outcome: tx.compliance.outcome, pendingReason: tx.compliance.pendingReason, blocked: tx.compliance.blocked, clear: tx.compliance.clear, reasonCodes: tx.compliance.reasonCodes, policyVersions: tx.compliance.policyVersions, evaluatedAt: tx.compliance.evaluatedAt, stale: snapshotStaleness(tx, currentPartyRevision(tx)) } : null,
     reviews: tx.contextId ? compliance.reviewsForContext(tx.contextId) : [],
-    documentCount: docsOf(tx.id).length, noteCount: (tx.notes ?? []).filter((n) => !n.removedAt).length, linkedThreadCount: (tx.linkedThreads ?? []).length,
+    documentCount: docsOf(tx.id).length, noteCount: (Array.isArray(tx.notes) ? tx.notes : []).filter((n) => !n.removedAt).length, linkedThreadCount: (Array.isArray(tx.linkedThreads) ? tx.linkedThreads : []).length,
     createdAt: tx.createdAt, updatedAt: tx.updatedAt, rev: tx.rev,
   });
   tsRouter.get('/transactions', (req, res) => {
@@ -1277,7 +1287,7 @@ export function registerTransactions(rawCtx) {
     for (const tx of db.agentTransactions) {
       if (!tx) continue;
       let touched = false;
-      for (const p of tx.parties) {
+      for (const p of partiesOf(tx)) {
         if (p.subjectKind !== 'player' || p.subjectId !== playerId) continue;
         p.removed = true; p.removedAt ??= at; p.subjectRemovedAt = at;
         if (p.confirmedBy?.kind === 'player') p.confirmedBy = { kind: 'player', userId: null, name: null };
