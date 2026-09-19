@@ -56,6 +56,7 @@ import { POLICY_ACTIONS, MINOR_PATHWAY_PRODUCTION_ENABLED } from '../m25/policy.
 import { EVENT_REGISTRY, EVENT_NAMES } from '../m182/eventRegistry.mjs';
 import { TYPE_CATEGORY, CATEGORIES } from '../m182/notificationPrefs.mjs';
 import { MIGRATIONS, SCHEMA_VERSION, PRODUCTION_REQUIRED_STORES } from '../m182/migrations.mjs';
+import { RATE_LIMIT_POLICY } from '../m181/rateLimit.mjs';
 import { openStore } from '../store.mjs';
 
 const PORT = 7100 + Math.floor(Math.random() * 200);
@@ -1234,6 +1235,94 @@ section('AU/repair §4 — an agency on the shared /org router: generic infrastr
   // leak the club's caseload even with the rows themselves withheld.
   const wl = await j('GET', '/org/watchlists', undefined, ana.token);
   neg((wl.body?.total ?? 0) === (wl.body?.items ?? []).length, 'AU-count a list total counts exactly the rows the caller was given, so a count cannot report what a projection withheld');
+}
+
+// ================================== AV — repair §25: the two new writes are quotas
+//
+// WHY THIS GROUP EXISTS, AND WHY IT IS LAST.
+//
+// Both writes P5.6E adds end in a notification to a PERSON, and both can be
+// repeated after being taken back: a share can be withdrawn and another made, and
+// only 'invited' and 'accepted' block a new handoff, so a withdrawn invitation may
+// deliberately be re-issued. The §25 review found neither carried a quota while
+// every comparable write in the codebase does, which left invite → withdraw →
+// invite as an unbounded way to make a player's and an agent's notifications ring.
+//
+// It runs last because proving a quota means spending it: every other assertion in
+// this suite has already had its budget.
+section('AV/repair §25 — the two new writes draw on the platform\'s own quotas');
+{
+  const RID = globalThis.__RID;
+  ok(typeof RATE_LIMIT_POLICY.opportunity_share?.max === 'number' && typeof RATE_LIMIT_POLICY.transaction_handoff?.max === 'number',
+    `AV1 both writes are named in the platform's one rate policy (opportunity_share ${RATE_LIMIT_POLICY.opportunity_share?.max}/h, transaction_handoff ${RATE_LIMIT_POLICY.transaction_handoff?.max}/h)`);
+  ok(RATE_LIMIT_POLICY.opportunity_share.scope === 'actor' && RATE_LIMIT_POLICY.transaction_handoff.scope === 'org',
+    'AV1b scoped to the individual who shares and to the club that invites — the party whose conduct it is');
+
+  // Sharing: a burst of attempts on the agent's OWN client. The quota is charged
+  // after authorization and before the board is searched, so an unbounded probe of
+  // opportunity ids costs budget too.
+  let shareLimited = null;
+  for (let i = 0; i < RATE_LIMIT_POLICY.opportunity_share.max + 3 && !shareLimited; i++) {
+    const r = await j('POST', `/org/agent/clients/${REP}/opportunities/opp-burst-${i}/share`, { clientKey: key() }, ana.token);
+    if (r.status === 429) shareLimited = collect('AV share rate limited', r);
+  }
+  neg(shareLimited !== null, `AV2 a share burst is refused 429 within the named policy (${RATE_LIMIT_POLICY.opportunity_share.max}/h)`);
+  ok(shareLimited?.body?.error === 'RATE_LIMITED' && shareLimited?.body?.action === 'opportunity_share',
+    'AV2b with the platform\'s own RATE_LIMITED body naming the action, not a bespoke refusal');
+  neg(!/pl-|Kola|Adeyemi|Ana Agent|North Star/.test(JSON.stringify(shareLimited?.body ?? {})),
+    'AV2c and the refusal names neither the client nor the agent — a quota message is not a disclosure');
+
+  // The handoff: the loop itself, invite → withdraw → invite, on one club budget.
+  //
+  // It needs a case whose invitation has NOT been taken up — the case above ends
+  // the suite with an accepted handoff, and an accepted one refuses both halves at
+  // 409 before any quota, which is correct and proves nothing about the quota. So
+  // the loop is driven on a second case of this club's own, taken to
+  // offer_consideration the ordinary way: shortlist, draft, finalise.
+  // A player this suite has not otherwise touched: pl-svensson is removed by #34
+  // and pl-adeyemi is the case above.
+  const second = await j('POST', '/org/rooms', { playerId: 'pl-alvarez', reason: 'P5.6E repair §25' }, maria.token);
+  const RID2 = second.body?.room?.roomId ?? second.body?.existingRoomId ?? null;
+  const jr2 = (await j('GET', `/org/rooms/${RID2}/journey`, undefined, maria.token)).body;
+  await j('POST', `/org/rooms/${RID2}/lifecycle`, { action: 'shortlist', expectedRev: jr2?.case?.rev }, maria.token);
+  const dr2 = await j('POST', `/org/rooms/${RID2}/decision/draft`, { outcome: 'progress', note: 'Internal: repair-pass fixture.' }, maria.token);
+  const fin2 = await j('POST', `/org/rooms/${RID2}/decision/finalize`, { clientKey: key(), expectedRev: dr2.body?.draft?.rev ?? 1 }, maria.token);
+  ok(RID2 !== null && fin2.status === 201, `AV3-fixture a second case of this club's own reaches offer_consideration by the ordinary path (case ${RID2}, create ${second.status}, draft ${dr2.status}, finalise ${fin2.status})`);
+
+  let handoffLimited = null;
+  let halves = 0;
+  for (let i = 0; i < RATE_LIMIT_POLICY.transaction_handoff.max + 3 && !handoffLimited; i++) {
+    const inv = await j('POST', `/org/rooms/${RID2}/transaction-handoff`, { clientKey: key() }, maria.token);
+    halves++;
+    if (inv.status === 429) { handoffLimited = collect('AV handoff rate limited', inv); break; }
+    if (inv.status !== 201) break;
+    const wd = await j('POST', `/org/rooms/${RID2}/transaction-handoff/withdraw`, {}, maria.token);
+    halves++;
+    if (wd.status === 429) { handoffLimited = collect('AV handoff rate limited', wd); break; }
+    if (wd.status !== 200) break;
+  }
+  neg(handoffLimited !== null, `AV3 the invite/withdraw loop is refused 429 after ${halves} halves, within the named policy (${RATE_LIMIT_POLICY.transaction_handoff.max}/h) — the loop is closed`);
+  ok(handoffLimited?.body?.error === 'RATE_LIMITED' && handoffLimited?.body?.action === 'transaction_handoff',
+    'AV3b naming transaction_handoff, so both halves of the loop draw on one club budget rather than each having its own');
+  // That both halves draw on ONE budget is shown directly rather than by counting:
+  // once the budget is gone, whichever half was not the one to hit it is refused
+  // too. (Counting would prove nothing here — earlier groups in this suite already
+  // spent part of this club's hour, which is exactly how a shared budget behaves.)
+  const otherHalf = handoffLimited?.body?.action === 'transaction_handoff'
+    ? await j('POST', `/org/rooms/${RID2}/transaction-handoff/withdraw`, {}, maria.token)
+    : null;
+  ok(otherHalf?.status === 429 && otherHalf?.body?.action === 'transaction_handoff',
+    `AV3b2 and with the budget gone the OTHER half of the loop is refused too, so withdrawing is charged rather than free (${otherHalf?.status})`);
+  neg(!/pl-|Svensson|case-|hof-/.test(JSON.stringify(handoffLimited?.body ?? {})),
+    'AV3c and it names neither the subject nor the case');
+
+  // A quota is not an authorization. A caller who was refused before must still be
+  // refused the same way once the budget is gone — otherwise 429 would become a
+  // softer, more informative answer than the real one.
+  const scoutAfter = collect('AV4', await j('POST', `/org/rooms/${RID}/transaction-handoff`, { clientKey: key() }, tom.token));
+  neg(expect(scoutAfter, 403, 'HANDOFF_NOT_PERMITTED'), 'AV4 a scout is still refused HANDOFF_NOT_PERMITTED, not 429 — the quota is charged after authorization, so it never speaks for it');
+  const foreignAfter = collect('AV5', await j('POST', `/org/rooms/${RID}/transaction-handoff`, { clientKey: key() }, rita.token));
+  neg(expect(foreignAfter, 404, 'ROOM_NOT_FOUND'), 'AV5 and a foreign club still gets the case\'s own 404 — an exhausted quota is no existence oracle');
 }
 
 section('refusal hygiene — every refusal this suite provoked, swept at once');

@@ -132,6 +132,16 @@ export const RATE_LIMIT_POLICY = {
   transaction_status_write: { max: 60, windowMs: 3_600_000, scope: 'actor', note: 'Transaction status transitions and party confirmations.' },
   transaction_document_write: { max: 120, windowMs: 3_600_000, scope: 'actor', note: 'Transaction document metadata by any party to a transaction.' },
   transaction_note_write: { max: 120, windowMs: 3_600_000, scope: 'actor', note: 'Scoped transaction notes by any party to a transaction.' },
+  // M23 P5.6E cross-app integration. Both writes reach a PERSON with a
+  // notification, and both can be repeated: a share can be withdrawn and a new
+  // one made, and a handoff invitation can be withdrawn and re-issued (only
+  // 'invited' and 'accepted' block a new one, by design — a club must be able to
+  // re-invite after it has taken its own invitation back). Without a quota the
+  // invite/withdraw pair is an unbounded way to make a player's and an agent's
+  // notification list ring, so the same provider that guards every comparable
+  // write guards these two.
+  opportunity_share: { max: 60, windowMs: 3_600_000, scope: 'actor', note: 'Opportunities an agent shares with a client, and withdrawals of them.' },
+  transaction_handoff: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Transaction-workspace invitations a club issues from a recruitment case, and withdrawals of them.' },
 
   // outbound to people
   evidence_request: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Evidence requests to players and guardians.' },

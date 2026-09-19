@@ -34,6 +34,7 @@ import {
 } from '../m24/shared.mjs';
 import { MINOR_PATHWAY_PRODUCTION_ENABLED } from '../m25/policy.mjs';
 import { opportunityBoardFor } from '../m12/journeys.mjs';
+import { rateLimitedBody } from '../m181/rateLimit.mjs';
 import { plainShared, normaliseClientKey, payloadFingerprint } from '../m23/contact.mjs';
 import { chainHead, isFormal } from '../m23/decision.mjs';
 import { roomRole, roomCan } from '../m17/shared.mjs';
@@ -52,10 +53,25 @@ export function registerIntegration(ctx) {
   const {
     db, orgRouter, playerRouter, nextId, persistNow, notify, broadcast,
     findPlayer, isAdult, isBlocked, orgCanSee, checkEligibility, distanceBand,
-    agent, compliance,
+    agent, compliance, rateLimit,
   } = ctx;
 
   const now = () => Date.now();
+
+  /**
+   * The M18.1 provider, not a second one. Both of this module's writes end in a
+   * notification to a person and both can be repeated after being taken back, so
+   * each carries a quota like every comparable write in the codebase.
+   *
+   * The quota is charged only once a request has passed authorization and is
+   * about to change something: a refused caller should not be able to spend the
+   * budget of the club or the agent they are impersonating, and a malformed body
+   * is not an act.
+   */
+  const limitedOr429 = (res, action, key) => {
+    if (rateLimit?.limited?.(action, key)) { res.status(429).json(rateLimitedBody(action)); return true; }
+    return false;
+  };
   const clientKeyOf = (req, res) => {
     const k = normaliseClientKey(req.body?.clientKey);
     if (!k.ok) { res.status(400).json({ error: 'AGENT_CLIENT_KEY_INVALID', message: k.message }); return undefined; }
@@ -416,6 +432,14 @@ export function registerIntegration(ctx) {
           : 'You cannot share an opportunity with this client right now.',
       });
     }
+    // Charged here: after authorization, so a refused agent never spends the
+    // budget, and BEFORE the board is searched, like
+    // `agent_representation_request` — an unbounded loop of share attempts is
+    // both a way to make a client's notifications ring and a way to probe the
+    // board one id at a time, and the uniform 404 below only hides which answer
+    // it got, not how many times it asked. Sharing and withdrawing draw on one
+    // budget, so the share/withdraw loop cannot outlive it either.
+    if (limitedOr429(res, 'opportunity_share', req.orgUser.id)) return;
     const player = findPlayer(a.clientId);
     const board = opportunityBoardFor(db, player, { orgCanSee, checkEligibility, distanceBand });
     const opp = board.find((o) => o && o.id === req.params.oppId) ?? null;
@@ -429,6 +453,8 @@ export function registerIntegration(ctx) {
     if (a.opportunityShares.length >= MAX_OPPORTUNITY_SHARES) {
       return res.status(409).json({ error: 'OPPORTUNITY_SHARE_LIMIT', message: `This relationship already holds ${MAX_OPPORTUNITY_SHARES} shares, which is the most one record keeps.` });
     }
+    // The per-record cap above bounds STORAGE for one relationship. It does not
+    // bound the rate and it does not span clients; the quota above does both.
 
     const at = now();
     const share = {
@@ -467,6 +493,10 @@ export function registerIntegration(ctx) {
     // Withdrawing needs no live basis check: an agent whose relationship has
     // ended must still be able to take back something they put in front of a
     // client, and taking something away can never widen anyone's access.
+    //
+    // It does draw on the same quota as sharing, because it is the other half of
+    // the loop the quota exists to close.
+    if (limitedOr429(res, 'opportunity_share', req.orgUser.id)) return;
     const at = now();
     share.withdrawnAt = at;
     share.rev = (share.rev ?? 1) + 1;
@@ -639,6 +669,12 @@ export function registerIntegration(ctx) {
         message: 'This case cannot be handed to a transaction workspace right now.',
       });
     }
+    // Charged after every blocker, so a club that is not permitted to hand off
+    // cannot spend the budget, and before the two notifications this sends. Only
+    // 'invited' and 'accepted' block a new invitation — a withdrawn one may be
+    // re-issued, deliberately — so without a quota invite/withdraw/invite is an
+    // unbounded way to make a player's and an agent's notifications ring.
+    if (limitedOr429(res, 'transaction_handoff', kase.orgId)) return;
     const { agreement } = soleActiveAgentFor(kase.playerId);
     const at = now();
     const h = {
@@ -687,6 +723,8 @@ export function registerIntegration(ctx) {
     if (h.status === 'accepted') {
       return res.status(409).json({ error: 'HANDOFF_ALREADY_ACCEPTED', transactionId: h.transactionId, message: 'A workspace has already been opened from this invitation. Withdrawing the invitation would not close it — act in the workspace instead.' });
     }
+    // The other half of the invite/withdraw loop, on the same club budget.
+    if (limitedOr429(res, 'transaction_handoff', kase.orgId)) return;
     const at = now();
     h.status = 'withdrawn';
     h.withdrawnAt = at;

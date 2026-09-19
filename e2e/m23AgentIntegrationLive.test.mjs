@@ -546,3 +546,16 @@ let TX = null;
 
 console.log(`\nM23 P5.6E integration live: ${passed} checks passed, ${negatives} negative/privacy/safeguarding checks (${Math.round((negatives / Math.max(passed, 1)) * 100)}%)`);
 console.log('all M23 P5.6E live journeys passed');
+
+// Exit explicitly, as the three sibling agent live suites do.
+//
+// `process.on('exit', cleanup)` above cannot retire these handles by itself: the
+// spawned backend, the browser and the four static servers all keep the event
+// loop alive, so node never reaches `exit` and the suite hangs forever after
+// printing a green summary — holding :4040 and the four client ports, which
+// makes every subsequent run of this suite die in its own port preflight (and
+// would hang a CI job until its timeout). Closing the browser and exiting runs
+// the `exit` handler, which kills the backend, closes the statics and removes
+// the data directory.
+await browser.close();
+process.exit(0);
