@@ -174,7 +174,10 @@ say('A1: the seeded agency Director signs in through the real Agent client (plat
   const nav = await sidebarText(tomas.page);
   ok(/Clients/.test(nav) && /Agency/.test(nav) && /Inbox/.test(nav), 'A2: the sidebar carries Clients, Agency and Inbox');
   neg(!/Opportunit/.test(nav), 'A2b: an administrator who is not a licensed agent sees no Opportunities section (convenience filter; the server refuses anyway)');
-  neg(!/Transaction|Offer|Negotiat|Fees?\b/i.test(nav), 'A2c: no Transactions, Offers, Negotiation or Fees destination exists');
+  // P5.6D made Transactions a real destination (every member may READ the
+  // agency's transactions; the server refuses the writes). Offers, Negotiation
+  // and Fees are still nobody's destination, which is what this guards.
+  neg(!/Offer|Negotiat|Fees?\b|Signing/i.test(nav), 'A2c: no Offers, Negotiation, Fees or Signings destination exists');
   await tomas.page.waitForSelector('[data-testid="agent-home"]', { timeout: 15000 });
   ok(await waitText(tomas.page, /adjudicates no conflicts/), 'A3: Home carries the regulatory notice — ScoutBox adjudicates nothing');
   ok(/Agency administrator/.test(await tomas.page.locator('[data-testid="my-tiers"]').innerText()), 'A4: the account block shows the migrated role: Agency administrator');
@@ -380,7 +383,11 @@ say('C1: Kola signs in to the player app');
   // The workspace may SAY there is no offer / negotiation / fee here; it may not offer one. Strip the honesty sentences, then sweep.
   const honest = /[^.\n]*(not part of this workspace|no offer, negotiation, fee or contract|no transaction room|aucune offre|ne font pas partie)[^.\n]*[.\n]/gi;
   const txt = all.join('\n').replace(honest, ' ');
-  neg(!/\boffers?\b|negotiat|commission|\bfees?\b|transaction/i.test(txt), 'N5: after removing the sentences that say there is none, no offer, negotiation, commission, fee or transaction wording remains on any of ten screens');
+  // "Transaction" is a real destination since P5.6D, so it is no longer swept for
+  // here — m23AgentTransactionLive owns that surface and its own wording sweep.
+  // What must still be absent everywhere is an offer, a negotiation, a commission
+  // and a fee.
+  neg(!/\boffers?\b|negotiat|commission|\bfees?\b/i.test(txt), 'N5: after removing the sentences that say there is none, no offer, negotiation, commission or fee wording remains on any of ten screens');
   neg(/no offer, negotiation, fee or contract happens here/i.test(all[0]) || /No transaction room/i.test(all[0]), 'N5b: Home says explicitly what the workspace is not');
 }
 {

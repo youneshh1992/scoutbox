@@ -45,6 +45,10 @@ const PERMISSIONS: Record<string, Tier[]> = {
   'agency.settings.write': ['agency_admin'], 'agency.audit.read': ['agency_admin'], 'agency.compliance.read': ['agency_admin', 'licensed_agent'],
   // M23 P5.6C
   'compliance.read': ['licensed_agent', 'agency_admin', 'analyst', 'assistant', 'finance'], 'compliance.contexts.write': ['licensed_agent'],
+  // M23 P5.6D. Mirrors the server matrix in m24/shared.mjs exactly: reading the
+  // agency's transactions is every member's, and every WRITE is the licensed
+  // individual's. Omitting them made the demo refuse its own screen (D15).
+  'transactions.read': ['licensed_agent', 'agency_admin', 'analyst', 'assistant', 'finance'], 'transactions.write': ['licensed_agent'],
 };
 /** The public club directory the demo picks an engaging or releasing entity from. */
 const DEMO_CLUBS: ClubHit[] = [

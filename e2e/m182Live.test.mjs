@@ -281,9 +281,15 @@ await goto(scout, ORG, '[data-panel="notification-preferences"]');
   say('J4: the preferences panel says email is a local outbox, not delivery');
   const mandatory = panel.locator('input[type="checkbox"][disabled]');
   if (!(await mandatory.count())) fail('J4: the mandatory category is not locked in the UI');
-  const mLabel = await mandatory.first().getAttribute('aria-label');
-  if (!/Security and account/.test(mLabel ?? '')) fail(`J4: the locked control is not the security category (${mLabel})`);
-  say('J4: "Security and account" is locked and labelled Always on');
+  // There is more than one mandatory category since P5.6C added the regulatory
+  // lane, so this asserts the CLAIM — every locked control says why it is locked,
+  // and the security category is one of them — rather than which one happens to
+  // render first.
+  const mLabels = await mandatory.evaluateAll((els) => els.map((e) => e.getAttribute('aria-label') ?? ''));
+  const unexplained = mLabels.filter((l) => !/Always on/i.test(l));
+  if (unexplained.length) fail(`J4: a locked control does not say it is always on (${unexplained.join('; ')})`);
+  if (!mLabels.some((l) => /Security and account/.test(l))) fail(`J4: the security category is not among the locked ones (${mLabels.join('; ')})`);
+  say(`J4: every mandatory category is locked and labelled Always on (${mLabels.length}: ${mLabels.map((l) => l.split(':')[0]).join(', ')})`);
   let sent = null;
   const onReq = (r) => { if (r.method() === 'PUT' && /notification-preferences$/.test(new URL(r.url()).pathname)) sent = JSON.parse(r.postData() ?? '{}'); };
   scout.on('request', onReq);

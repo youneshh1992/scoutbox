@@ -252,9 +252,15 @@ section('T1 — events, notification categories, rate policies and stores are de
   }
   for (const s of ['agentProfiles', 'agencyAffiliations', 'representationAgreements']) ok(guaranteeFor(s) === 'migration' && PRODUCTION_REQUIRED_STORES.includes(s), `T1 ${s} is migration-guaranteed and production-required`);
   const step = MIGRATIONS.find((m) => m.id === 'm240_001_agent_core_stores');
-  // Pin updated in P5.6C: the Agent step is still the one 2305 step; the schema is now 2306 (Compliance stores).
-  ok(step?.version === 2305 && SCHEMA_VERSION === 2306 && MIGRATIONS.filter((m) => m.version === 2305).length === 1, 'T1 exactly one step advances the schema to 2305 (the current schema is 2306, P5.6C)');
-  neg(guaranteeFor('agentAuth') !== 'migration' && guaranteeFor('agentSessions') !== 'migration' && guaranteeFor('agentUsers') !== 'migration' && guaranteeFor('offers') !== 'migration' && guaranteeFor('agentTransactions') !== 'migration', 'T1 no agent auth database, no offers and no transaction store is guaranteed (signings is the existing M12 store, which P5.6B never writes)');
+  // The P5.6B step is FROZEN at 2305 and is the only step at that version. Later
+  // milestones keep adding steps above it (2306 Compliance, 2307 Transaction), so
+  // this asserts the frozen fact and forward-only movement, not a literal current
+  // version that every later milestone would break.
+  ok(step?.version === 2305 && SCHEMA_VERSION >= 2306 && MIGRATIONS.filter((m) => m.version === 2305).length === 1, `T1 exactly one step advances the schema to 2305, and the schema has only moved forward since (now ${SCHEMA_VERSION})`);
+  // P5.6D added agentTransactions, so it is no longer in this list. What P5.6B
+  // asserted and what must stay true is that the Agent app has no parallel
+  // identity database and no Offer store — those are the claims, not the count.
+  neg(guaranteeFor('agentAuth') !== 'migration' && guaranteeFor('agentSessions') !== 'migration' && guaranteeFor('agentUsers') !== 'migration' && guaranteeFor('offers') !== 'migration', 'T1 no agent auth database and no offers store is guaranteed (signings is the existing M12 store, which no Agent milestone writes)');
 }
 
 // =================================================================== HTTP
@@ -298,7 +304,7 @@ const collect = (label, r) => { if (r.status >= 400) ERROR_BODIES.push({ label, 
 section('E — platform gating: agent login, org listing, club user refused');
 {
   const h = await j('GET', '/healthz');
-  ok(h.body.schemaVersion === 2306, 'E1 the server reports schema 2306 (P5.6C; the P5.6B step is 2305)');
+  ok(h.body.schemaVersion >= 2306, `E1 the server reports a schema at or above 2306 (now ${h.body.schemaVersion}; the P5.6B step is 2305)`);
   const orgs = await j('GET', '/orgs?platform=agent');
   ok(orgs.status === 200 && orgs.body.length === 1 && orgs.body[0].id === 'org-northstar' && orgs.body[0].type === 'agency', 'E2 the agent platform lists agency organisations only');
   neg(!orgs.body.some((o) => o.type === 'club'), 'E3 no club appears on the agent login');
@@ -752,7 +758,10 @@ section('S — the subsystems Agent must not touch');
   neg(expect((await j('GET', '/org/agent/clients/' + REL + '/box-cam', undefined, ANA.token)), 404, null), 'S10 no Box Cam route');
   neg(expect((await j('POST', '/org/agent/clients/' + REL + '/trust', { score: 99 }, ANA.token)), 404, null), 'S11 no Trust route');
   neg(expect((await j('POST', '/org/agent/clients/' + REL + '/contact', { body: 'hi' }, ANA.token)), 404, null), 'S12 no Contact route — an Agent is not a Club Contact actor in P5.6B');
-  neg(expect((await j('POST', '/org/agent/transactions', {}, ANA.token)), 404, null) && expect(await j('GET', '/org/agent/fees', undefined, ANA.token), 404, null), 'S13 no transaction room, no fee route');
+  // P5.6D made /org/agent/transactions a real route, so it no longer 404s — it
+  // refuses an empty body instead. The claim that survives is that no FEE route
+  // exists, and that a transaction still cannot be opened out of nothing.
+  neg(expect((await j('POST', '/org/agent/transactions', {}, ANA.token)), 400, 'TRANSACTION_INPUT_INVALID') && expect(await j('GET', '/org/agent/fees', undefined, ANA.token), 404, null), 'S13 no fee route, and an empty body opens no transaction');
   neg(expect((await j('POST', '/org/agent/clients/' + REL + '/apply', { opportunityId: 'x' }, ANA.token)), 404, null), 'S14 no route lets the agent APPLY for the client — applying is the player\'s act');
 }
 
@@ -811,7 +820,7 @@ section('W — restart: everything survives the process dying');
   neg(expect(await j('POST', '/auth/org/login', { orgId: 'org-northstar', scoutName: 'Carl Temp', role: 'Assistant', platform: 'agent' }), 403, 'USER_REMOVED'), 'W7 the ended member is still out');
   neg((await j('GET', `/org/agent/clients/${DELETED_REL}`, undefined, ana2.token)).body.client.removed === true, 'W8 the tombstone is still a tombstone');
   const h = await j('GET', '/healthz');
-  ok(h.body.schemaVersion === 2306, 'W9 schema 2306 after restart; the 2305 step did not run twice');
+  ok(h.body.schemaVersion === SCHEMA_VERSION, `W9 schema ${h.body.schemaVersion} after restart; no step ran twice`);
   const db = openStore(DATA_DIR).load()?.db;
   ok(db.schema.migrations.filter((m) => m.id === 'm240_001_agent_core_stores').length === 1, 'W10 exactly one 2305 migration record');
 }

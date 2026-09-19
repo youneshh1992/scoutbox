@@ -93,6 +93,50 @@ await agent.waitForSelector('[data-testid="provider-status"]', { timeout: 15000 
   if (!/not a Transaction Room/i.test(await text(agent))) fail('agent demo: the context must say what it is not');
   say('agent demo: a context evaluates CLEAR, one party is recorded, and the club declaration is refused into attributed review');
 }
+// ---- M23 P5.6D: the transaction workspace in the demo artifact (§86)
+await agent.evaluate(() => { location.hash = '#/transactions'; });
+await agent.waitForSelector('[data-testid="transactions-screen"]', { timeout: 15000 });
+await agent.waitForSelector('[data-testid="tx-list"]', { timeout: 15000 });
+{
+  const rows = await agent.locator('[data-testid="tx-row"]').count();
+  if (rows < 6) fail(`agent demo: the six named transaction examples are missing (${rows} rows)`);
+  const states = await agent.locator('[data-testid="tx-row"] [data-testid="tx-status"]').evaluateAll((els) => els.map((e) => e.getAttribute('data-status')));
+  for (const want of ['READY', 'COMPLIANCE_PENDING', 'COMPLIANCE_BLOCKED', 'ON_HOLD', 'CANCELLED']) {
+    if (!states.includes(want)) fail(`agent demo: no ${want} example in the demo transactions (${states.join(', ')})`);
+  }
+  const body = await text(agent);
+  if (!/not a statement of legal validity|no governing body has approved/i.test(body)) fail('agent demo: the transaction list must say what a ScoutBox state is not');
+  say(`agent demo: Transactions shows the six synthetic examples, covering ${new Set(states).size} states, with the honest wording`);
+}
+{
+  await agent.locator('[data-testid="tx-open"]').first().click();
+  await agent.waitForSelector('[data-testid="transaction-detail"]', { timeout: 15000 });
+  const body = await text(agent);
+  if (!/no offer exists|nothing has been signed/i.test(body)) fail('agent demo: an open transaction must say no offer exists and nothing has been signed');
+  await agent.click('[data-testid="tx-tab-compliance"]');
+  await agent.waitForSelector('[data-testid="tx-offer-boundary"]', { timeout: 15000 });
+  if ((await agent.locator('[data-testid="tx-offer-blockers"]').count()) === 0 && (await agent.locator('[data-testid="tx-offer-boundary"]').getAttribute('data-ready')) !== '1') {
+    fail('agent demo: offer readiness must be stated either way, with its blockers when it is false');
+  }
+  await agent.click('[data-testid="tx-tab-parties"]');
+  await agent.waitForSelector('[data-testid="tx-panel-parties"]', { timeout: 15000 });
+  const parties = await text(agent);
+  if (/\b(\d{1,2}\/\d{1,2}\/\d{4}|date of birth|dob)\b/i.test(parties)) fail('agent demo: no date of birth belongs on a party row');
+  say('agent demo: a transaction states the offer boundary and names its parties by role');
+}
+{
+  // §86: no demo may imply that a minor pathway is open.
+  const all = [];
+  for (const h of ['#/transactions', '#/compliance']) { await agent.evaluate((x) => { location.hash = x; }, h); await agent.waitForTimeout(700); all.push(await text(agent)); }
+  const joined = all.join('\n');
+  // Looked for as CLAIMS, not as digits: a bare "17" is a count or a date on
+  // these screens, and matching it would fail on anything.
+  const stripped = joined.replace(/[^.\n]*(pathway not enabled|not production-enabled|remains blocked|blocked for minors|no minor)[^.\n]*[.\n]/gi, ' ');
+  if (/\b1[0-7]\s*(years? old|yrs?|yo)\b|\bunder[- ]?18\b|minor pathway (is )?(open|enabled|available)|minors? (are|is) (now )?(enabled|supported|allowed)/i.test(stripped)) {
+    fail('agent demo: nothing in the demo may imply a minor pathway is open');
+  }
+  say('agent demo: no demo surface implies that minors are enabled');
+}
 await agent.evaluate(() => { location.hash = '#/agency/compliance'; });
 await agent.waitForSelector('[data-testid="compliance-honest"]', { timeout: 15000 });
 await agent.selectOption('nav.sidebar select[aria-label="Language"]', 'fr');
@@ -192,7 +236,7 @@ await ts.waitForSelector('[data-testid="decision-audit"]', { timeout: 15000 });
 await ts.close();
 
 if (errors.length) fail(`page errors:\n${errors.join('\n')}`);
-console.log('\nM23 P5.6B/P5.6C AGENT + COMPLIANCE DEMO SPOTCHECK OK — zero page errors');
+console.log('\nM23 P5.6B/P5.6C/P5.6D AGENT + COMPLIANCE + TRANSACTION DEMO SPOTCHECK OK — zero page errors');
 await browser.close();
 await demo.stop();
 process.exit(0);
