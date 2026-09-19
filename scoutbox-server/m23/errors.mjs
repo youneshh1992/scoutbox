@@ -99,6 +99,10 @@ export const M23_ERROR_HTTP = table({
   CONTACT_RECIPIENT_MISMATCH: 400,
   CONTACT_ACTION_UNKNOWN: 400,
   CONTACT_RESPONSE_INVALID: 400,
+  // M23 P5.6E. A routing mode this build does not know. 400, because it is the
+  // request that is wrong and the caller can fix it — and refusing beats
+  // silently reading it as `player_only`, which would hide the caller's bug.
+  CONTACT_MODE_INVALID: 400,
 
   // ---- 403: not yours to do. `CONTACT_BLOCKED` keeps the platform's
   // existing shape (the request route answers `BLOCKED` 403 to a club).

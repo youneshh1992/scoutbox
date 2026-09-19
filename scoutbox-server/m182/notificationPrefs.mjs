@@ -130,6 +130,10 @@ export const TYPE_CATEGORY = Object.freeze({
   representation_terminated: 'representation',
   representation_disputed: 'representation',
   representation_expiring: 'representation',
+  // M23 P5.6E. Both are about the representation relationship itself — what the
+  // client shares, and a club message the client's agent was made a party to.
+  representation_disclosure: 'representation',
+  representation_contact: 'representation',
   agent_verification: 'security_account',
   agency_membership: 'security_account',
   // M23 P5.6C Conflict & Compliance Engine

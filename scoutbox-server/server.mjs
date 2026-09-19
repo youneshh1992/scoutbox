@@ -28,6 +28,7 @@ import { registerM23, migrateM23 } from './m23/index.mjs';
 import { registerAgent } from './m24/index.mjs';
 import { registerCompliance } from './m25/index.mjs';
 import { registerTransactions } from './m26/index.mjs';
+import { registerIntegration } from './m27/index.mjs';
 import { createVerificationProvider } from './m25/provider.mjs';
 import { createEvidenceProvider } from './m23/evidence.mjs';
 import { COMBINE_PROTOCOLS } from './m16/combineShared.mjs';
@@ -3856,6 +3857,8 @@ let m25Ctx = null;
 // M23 P5.6D — the Agent Transaction Workspace, declared here because the
 // account-deletion sweep above runs before its registration below.
 let m26Ctx = null;
+// M23 P5.6E — the cross-app integration layer, registered after all four.
+let m27Ctx = null;
 const tsRouter = express.Router();
 app.use('/ts', (req, res, next) => (m25Ctx ? m25Ctx.reviewerAuth(req, res, next) : res.status(503).json({ error: 'REVIEWER_LANE_NOT_READY' })), tsRouter);
 
@@ -4243,7 +4246,17 @@ migrateM23(db);
 const recruitmentEvidence = createEvidenceProvider(db);
 m17Ctx.recruitmentEvidence = recruitmentEvidence;
 
+// ------------------------------------------ M23 P5.6E the integration seam holder
+// M23 is registered BEFORE the Agent, Compliance and Integration layers, so the
+// seam cannot be handed over as a value. This holder is: one object, filled in
+// below once `registerIntegration` exists, read at REQUEST time. A build that
+// never fills it (a suite that boots M23 alone) routes every contact to the
+// player and to nobody else, which is the honest answer when nothing in the
+// process can resolve an agent's authority.
+const agentIntegration = {};
+
 const m23Ctx = registerM23({
+  agentIntegration,
   recruitmentEvidenceProvider: recruitmentEvidence,
   ...m19Ctx,
   isAdult,
@@ -4321,6 +4334,23 @@ m26Ctx = registerTransactions({
 // representation row, which is its truth — not only on the compliance context's
 // evaluation projection.
 m25Ctx.transactionSeam.hooks.representationReviewed = m26Ctx.representationReviewed;
+// ------------------------------------------- M23 P5.6E Agent cross-app integration
+// The ONE layer that answers "may this agent see or do this, on this surface,
+// for this client, right now?" — for Contact routing, Trial projection, the club
+// Agent-presence badge, an opportunity share and a transaction handoff. It owns
+// no store, declares no migration and duplicates no rule: the basis is P5.6B's
+// access predicate, the licence is P5.6B's facets, the policy verdict is P5.6C's
+// through one narrow seam, and the client's disclosure choices are a field of the
+// agreement they are choices about. It is registered LAST because it reads all
+// four layers and is read by the first of them through the holder above.
+m27Ctx = registerIntegration({
+  ...m19Ctx,
+  isAdult,
+  agent: m24Ctx,
+  compliance: m25Ctx.integrationSeam,
+});
+Object.assign(agentIntegration, m27Ctx.seam);
+
 // The transaction domain's rows join the agency audit feed beside the P5.6B and
 // P5.6C rows, so an agency has ONE audit rather than three.
 const m25AuditRows = m24Ctx.hooks.auditRows;
@@ -4414,6 +4444,10 @@ export const EMITTED_EVENTS = Object.freeze([
   'agent_transaction_created', 'agent_transaction_party_changed', 'agent_transaction_compliance_updated',
   'agent_transaction_status_changed', 'agent_transaction_document_added', 'agent_transaction_message_linked',
   'agent_transaction_held', 'agent_transaction_cancelled', 'agent_transaction_closed',
+  // M23 P5.6E cross-app integration. Two names, both org_private to the agency
+  // and both ids only: the client changed a disclosure choice (not WHICH one),
+  // and a club routed a contact to the agent as well as to the client.
+  'representation_disclosure_changed', 'contact_agent_routed',
 ]);
 {
   const problems = assertEventRegistry({ emitted: EMITTED_EVENTS });

@@ -24,6 +24,7 @@
 
 import {
   SCOPES, effectiveAgreementStatus, agreementGrantsAccess, normaliseScope,
+  DISCLOSURE_KEYS, DISCLOSURE_DEFAULT, normaliseDisclosure,
 } from '../m24/shared.mjs';
 
 const nullProto = (o) => Object.freeze(Object.assign(Object.create(null), o));
@@ -81,6 +82,7 @@ export const DENY_CODES = Object.freeze([
   'SURFACE_UNKNOWN',           // fail closed on an unrecognised surface
   'NO_REPRESENTATION',         // no canonical basis at all
   'REPRESENTATION_NOT_ACTIVE', // a basis existed once; its status is not active now
+  'REPRESENTATION_AMBIGUOUS',  // two active agents and nothing to choose between them
   'SUBJECT_UNAVAILABLE',       // removed, tombstoned or not resolvable
   'MINOR_PATHWAY_DISABLED',    // the client is a regulatory minor and the pathway is closed
   'BLOCKED',                   // canonical safety state
@@ -98,16 +100,22 @@ const allow = (basis, surface) => Object.freeze({ allowed: true, code: null, rul
  * The canonical basis: which agreement, if any, makes this agent this player's
  * representative right now.
  *
- * Returns `{ ok, agreementId, scope, agencyOrgId, status }`. `ok` is true only
- * for a basis that `agreementGrantsAccess` accepts. When one or more agreements
- * exist but none is active, `status` names the most informative non-active state
- * so a caller can say "not active" rather than "none" — to the AGENT, who
- * already knows the relationship exists. It is never returned to a third party.
+ * Returns `{ ok, agentUserId, agreementId, scope, agencyOrgId, status }`. `ok` is
+ * true only for a basis that `agreementGrantsAccess` accepts. When one or more
+ * agreements exist but none is active, `status` names the most informative
+ * non-active state so a caller can say "not active" rather than "none" — to the
+ * AGENT, who already knows the relationship exists. It is never returned to a
+ * third party.
+ *
+ * `agentUserId` is part of the basis and not merely an input echoed back: a
+ * routing snapshot, a club presence badge and an agent's own read all need to
+ * name the individual the agreement names, and a basis that omitted it made the
+ * caller re-derive it — which is exactly how a caller ends up recording `null`
+ * where a person should be.
  */
 export function agentClientBasis({ agreements = [], agentUserId = null, clientId = null, now = Date.now() } = {}) {
-  if (typeof agentUserId !== 'string' || !agentUserId || typeof clientId !== 'string' || !clientId) {
-    return { ok: false, agreementId: null, scope: [], agencyOrgId: null, status: null };
-  }
+  const none = (status = null) => ({ ok: false, agentUserId: null, agreementId: null, scope: [], agencyOrgId: null, status });
+  if (typeof agentUserId !== 'string' || !agentUserId || typeof clientId !== 'string' || !clientId) return none();
   let fallback = null;
   for (const a of agreements) {
     if (!a || a.clientId !== clientId) continue;
@@ -115,6 +123,7 @@ export function agentClientBasis({ agreements = [], agentUserId = null, clientId
     if (agreementGrantsAccess(a, agentUserId, now)) {
       return {
         ok: true,
+        agentUserId: a.agentUserId,
         agreementId: a.id,
         scope: normaliseScope(a.scope),
         agencyOrgId: a.agencyOrgId ?? null,
@@ -128,7 +137,7 @@ export function agentClientBasis({ agreements = [], agentUserId = null, clientId
     const rank = st === 'disputed' ? 3 : st === 'expired' ? 2 : 1;
     if (!fallback || rank > fallback.rank) fallback = { rank, status: st };
   }
-  return { ok: false, agreementId: null, scope: [], agencyOrgId: null, status: fallback?.status ?? null };
+  return none(fallback?.status ?? null);
 }
 
 /**
@@ -205,24 +214,14 @@ export function agentSurfaceDecision({
 }
 
 /**
- * The client's disclosure choices. Each is a separate answer to a separate
- * question, and each DEFAULTS TO FALSE: a player who has said nothing has not
- * agreed to their agent being routed their club contact, shown on a club's
- * screen or given their trial schedule.
- *
- * This is the opposite of the convenient default, and it is the right one: §21
- * says do not automatically replace the player with the agent, and §15 says a
- * club does not get agent data merely because the player exists.
+ * The client's disclosure choices are a FIELD OF THE AGREEMENT, so they are
+ * defined with the agreement (`m24/shared.mjs`) and re-exported here: this layer
+ * is where they are read as permissions, not where they are stored. Each
+ * defaults to false — §21 says do not automatically replace the player with the
+ * agent, and §15 says a club does not get agent data merely because the player
+ * exists, so silence is never permission.
  */
-export const DISCLOSURE_KEYS = Object.freeze(['clubPresence', 'contactRouting', 'trialVisibility']);
-export const DISCLOSURE_DEFAULT = Object.freeze({ clubPresence: false, contactRouting: false, trialVisibility: false });
-
-export function normaliseDisclosure(raw) {
-  const out = { ...DISCLOSURE_DEFAULT };
-  if (!raw || typeof raw !== 'object') return Object.freeze(out);
-  for (const k of DISCLOSURE_KEYS) if (raw[k] === true) out[k] = true;
-  return Object.freeze(out);
-}
+export { DISCLOSURE_KEYS, DISCLOSURE_DEFAULT, normaliseDisclosure };
 
 /** Which disclosure key a surface reads. A surface with no key needs none. */
 export const SURFACE_DISCLOSURE = nullProto({
@@ -233,13 +232,33 @@ export const SURFACE_DISCLOSURE = nullProto({
 });
 
 /**
+ * Which regulated action each regulated surface is, in the P5.6C policy engine's
+ * vocabulary (`POLICY_ACTIONS`). A surface that is not regulated has no action
+ * and asks the compliance layer nothing.
+ */
+export const POLICY_ACTION_FOR_SURFACE = nullProto({
+  contact_participation: 'approach_adult',
+  trial_coordination: 'approach_adult',
+  opportunity_share: 'approach_adult',
+  transaction_initiation: 'declare_representation',
+});
+
+/**
  * Contact routing (§21). Given the canonical recipient the P3 resolver produced
  * and the agent decision, say who is validly routable NOW.
  *
- * The player is never removed: an agent is added BESIDE them, or not at all.
  * `mode` is what the club chose and is honoured only where it is permitted.
+ *
+ * THERE IS NO `agent_only`. A club may ask for the player alone or for the
+ * player AND the agent; it may not ask for the agent INSTEAD of the player.
+ * §21 says do not automatically replace the player with the agent, and a mode
+ * that removed them would do exactly that — the player whose ScoutBox Inbox the
+ * message lands in would never learn a club had approached them, and an
+ * intercepted approach is precisely the "broader authority than the current
+ * relationship permits" this milestone exists to prevent. The player is
+ * therefore always a target; an agent is added BESIDE them, or not at all.
  */
-export const CONTACT_ROUTING_MODES = Object.freeze(['player_only', 'agent_only', 'both']);
+export const CONTACT_ROUTING_MODES = Object.freeze(['player_only', 'both']);
 
 export function contactRouting({ recipient = null, agentDecision = null, requestedMode = 'player_only' } = {}) {
   if (!recipient) return { ok: false, error: 'CONTACT_RECIPIENT_UNAVAILABLE' };
@@ -253,22 +272,25 @@ export function contactRouting({ recipient = null, agentDecision = null, request
   if (mode === 'player_only' || !agentOk) {
     return {
       ok: true,
-      // Asking for the agent alone and not being allowed one falls back to the
-      // player, who is always a valid route — it does not fail the contact.
+      // Asking for the agent and not being allowed one falls back to the player,
+      // who is always a valid route — it does not fail the contact. The caller
+      // is TOLD which rule refused, because a club that asked deserves an answer.
       mode: 'player_only',
       targets: [recipient],
       agent: null,
       agentRefusal: agentOk ? null : (agentDecision?.code ?? 'NO_REPRESENTATION'),
     };
   }
-  const agentTarget = { type: 'agent', agentUserId: agentDecision.basis.agentUserId ?? null, agreementId: agentDecision.basis.agreementId, minor: false };
-  return {
-    ok: true,
-    mode,
-    targets: mode === 'agent_only' ? [agentTarget] : [recipient, agentTarget],
-    agent: agentTarget,
-    agentRefusal: null,
-  };
+  // Defence in depth: a routed agent with no id is not a routed agent. If a
+  // basis ever reaches here without naming the individual, refuse rather than
+  // record a party that is nobody — a snapshot saying "an agent was routed" with
+  // no agent in it is worse than no snapshot at all.
+  const agentUserId = agentDecision.basis?.agentUserId ?? null;
+  if (typeof agentUserId !== 'string' || !agentUserId) {
+    return { ok: true, mode: 'player_only', targets: [recipient], agent: null, agentRefusal: 'NO_REPRESENTATION' };
+  }
+  const agentTarget = { type: 'agent', agentUserId, agreementId: agentDecision.basis.agreementId, minor: false };
+  return { ok: true, mode: 'both', targets: [recipient, agentTarget], agent: agentTarget, agentRefusal: null };
 }
 
 /**

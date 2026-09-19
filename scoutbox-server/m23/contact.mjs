@@ -86,6 +86,14 @@ export const EXTERNAL_CHANNELS = Object.freeze(Object.keys(CONTACT_CHANNELS).fil
 
 export const RESPONSE_KINDS = Object.freeze(['accepted', 'declined']);
 
+/**
+ * M23 P5.6E — the routing modes a club may ask for. The player is a target in
+ * both: `both` adds their agent BESIDE them. There is deliberately no mode that
+ * reaches an agent INSTEAD of the player (see `contactRouting` in
+ * `m27/integration.mjs` for why).
+ */
+export const CONTACT_MODES = Object.freeze(['player_only', 'both']);
+
 // ------------------------------------------------------------------ limits
 
 export const CONTACT_LIMITS = Object.freeze({
@@ -355,6 +363,13 @@ export function contactView(c) {
     channelLabel: CONTACT_CHANNELS[c.channel]?.label ?? c.channel,
     external: !!CONTACT_CHANNELS[c.channel]?.external,
     recipient: c.recipient ? { type: c.recipient.type, minor: !!c.recipient.minor } : null,
+    // M23 P5.6E — what the club asked for, and what was actually routed. The
+    // snapshot carries roles and ids only: the agent's own name is not the club's
+    // to learn from here, and the club already has the agent-presence projection
+    // for that, gated on the player's own choice.
+    contactMode: c.contactMode ?? 'player_only',
+    routedToAgent: !!c.routingSnapshot?.agent,
+    routedAt: c.routingSnapshot?.at ?? null,
     subject: c.subject ?? null,
     body: c.body ?? null,
     summary: c.summary ?? null,
@@ -393,6 +408,7 @@ export function contactMilestone(c) {
     status: c.status,
     channel: c.channel,
     recipientType: c.recipient?.type ?? null,
+    routedToAgent: !!c.routingSnapshot?.agent,
     initiatedAt: c.status === 'recorded' ? (c.occurredAt ?? c.recordedAt ?? null) : (c.deliveredAt ?? null),
     respondedAt: c.respondedAt ?? null,
     responseKind: c.response?.kind ?? null,
@@ -419,6 +435,17 @@ export function contactIntegrity(c, { orgId = null, caseId = null } = {}) {
   if (caseId && c.caseId !== caseId) problems.push('case_mismatch');
   if (typeof c.playerId !== 'string') problems.push('player_missing');
   if (['delivered', 'responded', 'recorded'].includes(c.status) && !c.recipient?.type) problems.push('recipient_missing');
+  // M23 P5.6E. An unknown mode and a malformed snapshot both mean the record
+  // cannot say who it reached, which is exactly what this store is for.
+  if (c.contactMode !== undefined && c.contactMode !== null && !CONTACT_MODES.includes(c.contactMode)) problems.push('contact_mode_unknown');
+  if (c.routingSnapshot !== undefined && c.routingSnapshot !== null) {
+    const r = c.routingSnapshot;
+    if (typeof r !== 'object' || Array.isArray(r) || !Number.isFinite(r.at) || !CONTACT_MODES.includes(r.mode)) problems.push('routing_snapshot_malformed');
+    else if (r.agent !== null && r.agent !== undefined && typeof r.agent?.agentUserId !== 'string') problems.push('routing_snapshot_malformed');
+    // A routed agent on a contact that never left the building is a
+    // contradiction: only a send writes a snapshot.
+    else if (r.agent && !['delivered', 'responded'].includes(c.status)) problems.push('routing_snapshot_unsent');
+  }
   if (c.history !== undefined && !Array.isArray(c.history)) problems.push('history_malformed');
   if (['delivered', 'responded'].includes(c.status) && !Number.isFinite(c.deliveredAt)) problems.push('timestamp_malformed');
   if (c.status === 'recorded' && !Number.isFinite(c.occurredAt)) problems.push('timestamp_malformed');

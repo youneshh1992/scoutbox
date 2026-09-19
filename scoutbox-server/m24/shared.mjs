@@ -253,6 +253,30 @@ export function agreementGrantsAccess(a, agentUserId, now = Date.now()) {
   return a.agentUserId === agentUserId && a.confirmedAt != null && effectiveAgreementStatus(a, now) === 'active';
 }
 
+/**
+ * M23 P5.6E — the client's DISCLOSURE choices, stored on the agreement they are
+ * choices about. Each is a separate answer to a separate question, and each
+ * DEFAULTS TO FALSE: a player who has said nothing has not agreed to their agent
+ * being routed a club's message, shown on a club's screen, or given their trial
+ * schedule. Confirming a representation relationship is not consenting to any of
+ * those three; they are asked and answered one at a time.
+ *
+ * This lives here, beside `shareWithAgencyStaff`, because it is a field of the
+ * relationship record — not in a new store (P5.6E §103) and not in a second
+ * consent ledger (P5.6C owns the regulatory one).
+ */
+export const DISCLOSURE_KEYS = Object.freeze(['clubPresence', 'contactRouting', 'trialVisibility']);
+export const DISCLOSURE_DEFAULT = Object.freeze({ clubPresence: false, contactRouting: false, trialVisibility: false });
+
+export function normaliseDisclosure(raw) {
+  const out = { ...DISCLOSURE_DEFAULT };
+  if (!raw || typeof raw !== 'object') return Object.freeze(out);
+  // Only an explicit `true` is a yes. A truthy string, a 1 and an absent key are
+  // all "they have not said yes".
+  for (const k of DISCLOSURE_KEYS) if (raw[k] === true) out[k] = true;
+  return Object.freeze(out);
+}
+
 /** Whether a NEW request from this agent to this player is blocked by an existing record. */
 export function requestConflict(agreements, { agentUserId, playerId, now = Date.now() }) {
   for (const a of agreements) {
@@ -310,6 +334,10 @@ export function agreementForAgent(a, now = Date.now()) {
     declinedAt: a.declinedAt ?? null, terminatedAt: a.terminatedAt ?? null, terminatedBy: a.terminatedBy ?? null,
     terminationReasonCode: a.terminationReasonCode ?? null, disputedAt: a.disputedAt ?? null,
     shareWithAgencyStaff: !!a.shareWithAgencyStaff,
+    // The agent sees the client's disclosure choices, because they are the
+    // agent's own permissions: an agent who is not routed a club's message
+    // should know that, rather than wonder why nothing arrives.
+    disclosure: normaliseDisclosure(a.disclosure),
     documents: (a.documents ?? []).map((d) => ({ id: d.id, label: d.label ?? null, addedAt: d.addedAt ?? null })),
     legacy: a.legacy ?? null,
     subjectRemovedAt: a.subjectRemovedAt ?? null,

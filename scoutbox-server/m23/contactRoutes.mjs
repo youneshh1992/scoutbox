@@ -33,7 +33,7 @@ import { canTransitionRecruitmentCase, RECRUITMENT_LIFECYCLE_POLICY_VERSION } fr
 import { sendDomainError } from './errors.mjs';
 import {
   CONTACT_POLICY_VERSION, CONTACT_LIMITS, CONTACT_CHANNELS, EXTERNAL_CHANNELS, CONTACT_STATUSES,
-  CONTACT_CASE_STATUSES, canContactAction, contactRoleAllows, validateContactContent,
+  CONTACT_CASE_STATUSES, CONTACT_MODES, canContactAction, contactRoleAllows, validateContactContent,
   normaliseClientKey, resolveContactRecipient, validateExternalRecord, cooldownFor,
   payloadFingerprint, contactView, contactIntegrity, caseAcceptsContact, byAtThenId,
 } from './contact.mjs';
@@ -42,6 +42,12 @@ export function registerContact(ctx) {
   const {
     db, orgRouter, nextId, persistNow, notify, broadcast, findPlayer, isBlocked, isAdult,
     rateLimit, mailer, isLead, moderateOrRefuse, issueRecruitmentRequest,
+    // M23 P5.6E — the ONE cross-app integration seam. It is a HOLDER: M23 is
+    // registered before the Agent, Compliance and Integration layers, so the
+    // methods arrive later. Until they do, `agentRoute` is absent and every
+    // contact routes to the player and to nobody else — the honest answer when
+    // nothing can resolve an agent's authority.
+    agentIntegration = null,
   } = ctx;
 
   const now = () => Date.now();
@@ -117,9 +123,75 @@ export function registerContact(ctx) {
     isAdult, visibleToOrg, isBlocked, now: new Date(),
   });
 
-  const routingView = (r) => (r.ok
-    ? { available: true, type: r.recipient.type, minor: r.recipient.minor }
-    : { available: false, type: null, minor: null, reason: r.error });
+  /**
+   * M23 P5.6E §21–§23 — the routing MODE the club asks for.
+   *
+   * `player_only` is the default and always available. `both` asks that the
+   * player's own agent be a party as well; whether that is permitted is not the
+   * club's call and not a stored flag — it is re-derived through the integration
+   * seam at compose time AND again at send time.
+   *
+   * An unrecognised value is refused rather than quietly downgraded: a club that
+   * typed something this build does not know deserves to be told, and silently
+   * reading it as `player_only` would hide a client bug behind a safe default.
+   */
+  function modeOf(res, body) {
+    const raw = body?.contactMode;
+    if (raw === undefined || raw === null || raw === '') return 'player_only';
+    if (typeof raw !== 'string' || !CONTACT_MODES.includes(raw)) {
+      err(res, 'CONTACT_MODE_INVALID', 'contactMode must be "player_only" or "both". There is no mode that reaches an agent instead of the player.', { allowed: CONTACT_MODES });
+      return null;
+    }
+    return raw;
+  }
+
+  /**
+   * The whole routing answer: the canonical recipient AND whether the client's
+   * agent is a valid second party right now. The seam owns the agent decision;
+   * this file owns neither the representation rule nor the licence rule nor the
+   * disclosure rule, so there is no second copy of any of them here.
+   */
+  function routeFor(req, room, requestedMode = 'player_only') {
+    const base = recipientFor(req, room);
+    if (!base.ok) return { recipient: base, routing: null };
+    if (requestedMode === 'player_only' || !agentIntegration?.contactRoute) {
+      return {
+        recipient: base,
+        routing: {
+          ok: true, mode: 'player_only', targets: [base.recipient], agent: null,
+          agentRefusal: requestedMode === 'player_only' ? null : 'NO_REPRESENTATION',
+        },
+      };
+    }
+    return {
+      recipient: base,
+      routing: agentIntegration.contactRoute({
+        recipient: base.recipient, clientId: room.playerId, viewerOrgId: req.org.id, requestedMode,
+      }),
+    };
+  }
+
+  /**
+   * What the club is told. The recipient type and the minor flag as before, plus
+   * the agent answer: whether an agent is a party, and — when the club asked and
+   * the answer was no — WHICH rule refused, as a code.
+   *
+   * The code names a category, never a person: `NO_REPRESENTATION` does not say
+   * whether the player has an agent whose licence lapsed or no agent at all, and
+   * `DISCLOSURE_WITHHELD` does not quote the client. A club learns what it may
+   * do, not facts about the player it has not been given.
+   */
+  const routingView = (r, routing = null) => (r.ok
+    ? {
+      available: true,
+      type: r.recipient.type,
+      minor: r.recipient.minor,
+      mode: routing?.mode ?? 'player_only',
+      agentParty: !!routing?.agent,
+      agentRefusal: routing?.agentRefusal ?? null,
+      modes: CONTACT_MODES,
+    }
+    : { available: false, type: null, minor: null, reason: r.error, mode: null, agentParty: false, agentRefusal: null, modes: CONTACT_MODES });
 
   /** The case must have AGREED to approach the player (contact_planned) or already have done so. */
   function caseGate(res, room) {
@@ -169,12 +241,15 @@ export function registerContact(ctx) {
     if (!storeOr500(res)) return;
     const { room, role } = got;
     const { list, omitted } = contactsOf(room);
-    const routing = recipientFor(req, room);
+    // The preview asks for the widest mode the club could choose, so the club can
+    // see whether an agent WOULD be a party before it drafts anything. Asking is
+    // not routing: nothing is sent and nobody is told.
+    const { recipient: routing, routing: route } = routeFor(req, room, 'both');
     const cooldown = cooldownFor(store(), { orgId: room.orgId, playerId: room.playerId, now: now() });
     res.json({
       items: list.map(contactView),
       omitted,
-      routing: routingView(routing),
+      routing: routingView(routing, route),
       case: { status: room.room.status, acceptsContact: caseAcceptsContact(room.room.status), planAction: 'planContact' },
       canWrite: contactRoleAllows(role, 'contact_write'),
       cooldown: cooldown ? { until: cooldown.retryAt } : null,
@@ -206,12 +281,26 @@ export function registerContact(ctx) {
     if (!key.ok) return err(res, key.error, key.message);
     const content = validateContactContent(req.body ?? {});
     if (!content.ok) return err(res, content.error, content.message);
-    const fp = payloadFingerprint({ subject: content.subject, body: content.body });
+    const mode = modeOf(res, req.body);
+    if (mode === null) return;
+    // The mode is part of what makes this "the same request": the same words to
+    // the player alone and the same words to the player and their agent are two
+    // different contacts, and one clientKey must not stand for both.
+    const fp = payloadFingerprint({ subject: content.subject, body: content.body, contactMode: mode });
+    // A draft created BEFORE P5.6E has a fingerprint over the words alone. A
+    // client replaying such a key must still be answered with the contact it
+    // already created — otherwise the upgrade silently turns every in-flight
+    // retry into a second draft. The stored record's own mode stands in for the
+    // one its fingerprint never carried, so a genuinely different request (same
+    // key, different mode) still conflicts.
+    const legacyFp = payloadFingerprint({ subject: content.subject, body: content.body });
+    const keyMatches = (c) => c.keys?.create?.fp === fp
+      || (c.keys?.create?.fp === legacyFp && (c.contactMode ?? 'player_only') === mode);
 
     // Replay of the same create: the same Contact, not a second one.
     if (key.key) {
       const prior = contactsOf(room).list.find((c) => c.keys?.create?.key === key.key);
-      if (prior && prior.keys.create.fp === fp) return res.json({ contact: contactView(prior), idempotent: true });
+      if (prior && keyMatches(prior)) return res.json({ contact: contactView(prior), idempotent: true });
       if (prior) return err(res, 'CONTACT_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different draft.');
     }
 
@@ -220,7 +309,7 @@ export function registerContact(ctx) {
 
     // A draft for someone the club cannot contact is refused at compose time,
     // and the same rule runs again at send time (§17: block before compose).
-    const routing = recipientFor(req, room);
+    const { recipient: routing, routing: route } = routeFor(req, room, mode);
     if (!routing.ok) return err(res, routing.error, routing.message);
 
     if (!moderateOrRefuse(res, `${content.subject ?? ''}\n${content.body}`, { kind: 'recruitment_contact', orgId: req.org.id, userId: req.orgUser.id })) return;
@@ -230,6 +319,10 @@ export function registerContact(ctx) {
     const c = {
       id: nextId('rct'), orgId: room.orgId, caseId: room.id, playerId: room.playerId,
       status: 'draft', channel: 'in_app', recipient: null,
+      // What the club ASKED for, and nothing more. `routingSnapshot` — what was
+      // actually routed — is written only by a send, because a draft routed
+      // nothing to anybody (§22).
+      contactMode: mode, routingSnapshot: null,
       subject: content.subject, body: content.body, summary: null,
       createdBy: by, createdAt: at, updatedAt: at,
       sentBy: null, sentAt: null, deliveredAt: null, failedAt: null, failureCode: null,
@@ -240,14 +333,15 @@ export function registerContact(ctx) {
       history: [], rev: 0, revAt: at, revBy: null,
       policyVersion: CONTACT_POLICY_VERSION,
     };
-    record(c, 'contact_created', by, { channel: 'in_app' }, at);
+    record(c, 'contact_created', by, { channel: 'in_app', contactMode: mode }, at);
     bumpRev(c, { by: req.orgUser, at });
     s.push(c);
     // NOTHING ELSE. No case history, no notification, no request row, no
-    // outbox entry, no delivery state. A draft is a record of intent.
+    // outbox entry, no delivery state, and — even where an agent would be a
+    // valid party — no agent is told anything. A draft is a record of intent.
     persistNow();
     broadcast('contact_created', { orgId: room.orgId, roomId: room.id, contactId: c.id });
-    res.status(201).json({ contact: contactView(c), routing: routingView(routing) });
+    res.status(201).json({ contact: contactView(c), routing: routingView(routing, route) });
   });
 
   orgRouter.patch('/rooms/:id/contacts/:cid', (req, res) => {
@@ -266,7 +360,9 @@ export function registerContact(ctx) {
       body: body.body === undefined ? c.body : body.body,
     });
     if (!content.ok) return err(res, content.error, content.message);
-    const routing = recipientFor(req, room);
+    const mode = body.contactMode === undefined ? (c.contactMode ?? 'player_only') : modeOf(res, body);
+    if (mode === null) return;
+    const { recipient: routing, routing: route } = routeFor(req, room, mode);
     if (!routing.ok) return err(res, routing.error, routing.message);
     if (!moderateOrRefuse(res, `${content.subject ?? ''}\n${content.body}`, { kind: 'recruitment_contact', orgId: req.org.id, userId: req.orgUser.id })) return;
 
@@ -274,11 +370,12 @@ export function registerContact(ctx) {
     const changed = [];
     if (content.subject !== c.subject) { c.subject = content.subject; changed.push('subject'); }
     if (content.body !== c.body) { c.body = content.body; changed.push('body'); }
+    if (mode !== (c.contactMode ?? 'player_only')) { c.contactMode = mode; changed.push('contactMode'); }
     c.updatedAt = at;
     record(c, 'contact_edited', actorOf(req), { fields: changed }, at);
     bumpRev(c, { by: req.orgUser, at });
     persistNow();
-    res.json({ contact: contactView(c), routing: routingView(routing) });
+    res.json({ contact: contactView(c), routing: routingView(routing, route) });
   });
 
   orgRouter.post('/rooms/:id/contacts/:cid/cancel', (req, res) => {
@@ -330,10 +427,13 @@ export function registerContact(ctx) {
     if (!revGate(req, res, c)) return;
     if (limited('contact_send', req.org.id)) return res.status(429).json(rateLimitedBody('contact_send'));
 
-    // RE-DERIVED NOW (§14, §17, §21): the player's age, the guardian route,
-    // the block relation and the visibility wall are read at this moment, not
-    // from the draft.
-    const routing = recipientFor(req, room);
+    // RE-DERIVED NOW (P3 §14, §17, §21; P5.6E §23): the player's age, the
+    // guardian route, the block relation and the visibility wall are read at this
+    // moment, not from the draft — and so is the AGENT's authority. A draft
+    // composed while the relationship was active and the client's disclosure was
+    // on sends to the player alone if either has since changed. The mode the club
+    // stored is a request; this is the answer.
+    const { recipient: routing, routing: route } = routeFor(req, room, c.contactMode ?? 'player_only');
     if (!routing.ok) return err(res, routing.error, routing.message);
     const recipient = routing.recipient;
     const player = findPlayer(room.playerId);
@@ -385,7 +485,23 @@ export function registerContact(ctx) {
     c.failureCode = null;
     c.attempts.push({ at, ok: true, code: null });
     c.updatedAt = at;
-    record(c, 'contact_sent', by, { channel: 'in_app', recipientType: recipient.type, attempt: c.attempts.length }, at);
+    // §22 — WHO WAS VALIDLY ROUTED, at this moment, as roles and ids. A later
+    // change to the relationship does not rewrite it and the next contact is
+    // routed from the authority in force then. The snapshot is what the agent's
+    // own read is filtered by, so it is the record of participation, not a label.
+    c.routingSnapshot = agentIntegration?.contactTargetSnapshot
+      ? agentIntegration.contactTargetSnapshot(route, at)
+      : { at, mode: route.mode, player: true, guardian: recipient.type === 'guardian', agent: null, honest: 'Routed to the recipient only: no agent authority could be resolved when this was sent.' };
+    record(c, 'contact_sent', by, {
+      channel: 'in_app', recipientType: recipient.type, attempt: c.attempts.length,
+      mode: route.mode, agentParty: !!route.agent,
+    }, at);
+    // A club that asked for the agent and did not get one is told so IN THE
+    // RECORD, not only in the response: the history is where a club later looks
+    // to understand who saw a message.
+    if ((c.contactMode ?? 'player_only') !== 'player_only' && !route.agent) {
+      record(c, 'contact_agent_routing_refused', by, { reasonCode: route.agentRefusal ?? 'NO_REPRESENTATION' }, at);
+    }
     bumpRev(c, { by: req.orgUser, at });
 
     const moved = advanceCase(req, room, c, at);
@@ -409,6 +525,17 @@ export function registerContact(ctx) {
       }
     }
 
+    // M23 P5.6E §24 — the agent hears through the canonical notification stream
+    // into the Agent workspace's OWN Inbox. No second Inbox is created, no
+    // `db.requests` row is written for the agent, and the agent cannot answer:
+    // accepting or declining belongs to the person the message is about. The text
+    // carries the club's name and nothing about the club's recruitment process.
+    if (route.agent?.agentUserId) {
+      notify({ kind: 'org_user', id: route.agent.agentUserId }, 'representation_contact',
+        `${req.org.name} has sent your client a message and routed you a copy. Your client answers it themselves, in their own Inbox.`, c.id);
+      broadcast('contact_agent_routed', { orgId: room.orgId, contactId: c.id, agentUserId: route.agent.agentUserId });
+    }
+
     persistNow();
     broadcast('contact_sent', { orgId: room.orgId, roomId: room.id, contactId: c.id });
     if (emailJob) {
@@ -420,7 +547,11 @@ export function registerContact(ctx) {
         persistNow();
       });
     }
-    res.json({ contact: contactView(c), delivered: true, case: moved ? { from: moved.from, to: moved.to } : { unchanged: true, status: room.room.status } });
+    res.json({
+      contact: contactView(c), delivered: true,
+      routing: routingView(routing, route),
+      case: moved ? { from: moved.from, to: moved.to } : { unchanged: true, status: room.room.status },
+    });
   });
 
   // ------------------------------------------------------- external record
@@ -439,6 +570,11 @@ export function registerContact(ctx) {
 
     // Who the club MAY have spoken to is derived, then compared with what the
     // club says. A minor recorded as "the player" is refused, not corrected.
+    //
+    // An attested external contact carries NO routing mode: ScoutBox did not
+    // observe it and routed nothing. The `agent` channel already exists for "we
+    // spoke via the agent or guardian" and is a statement about the world, not a
+    // ScoutBox permission — so it grants the agent no read here.
     const routing = recipientFor(req, room);
     if (!routing.ok) return err(res, routing.error, routing.message);
     const check = validateExternalRecord(body, { now: now(), derivedRecipientType: routing.recipient.type });
@@ -459,6 +595,7 @@ export function registerContact(ctx) {
     const c = {
       id: nextId('rct'), orgId: room.orgId, caseId: room.id, playerId: room.playerId,
       status: 'recorded', channel: check.channel, recipient: routing.recipient,
+      contactMode: 'player_only', routingSnapshot: null,
       subject: null, body: null, summary: check.summary,
       createdBy: by, createdAt: at, updatedAt: at,
       sentBy: null, sentAt: null, deliveredAt: null, failedAt: null, failureCode: null,
@@ -521,7 +658,9 @@ export function registerContact(ctx) {
       channels: Object.keys(CONTACT_CHANNELS).map((id) => ({ id, label: CONTACT_CHANNELS[id].label, external: CONTACT_CHANNELS[id].external })),
       caseStatuses: CONTACT_CASE_STATUSES,
       limits: CONTACT_LIMITS,
+      modes: CONTACT_MODES,
       note: 'A draft is not a contact. Delivered means the message is in the recipient\'s ScoutBox Inbox; ScoutBox does not report whether it was read.',
+      agentNote: 'You may ask that the player\'s own agent be a party as well ("both"). Whether that is permitted is decided by the player\'s relationship, the agent\'s licence and the player\'s own choice — and it is decided again when you send. There is no mode that reaches an agent instead of the player.',
     });
   });
 

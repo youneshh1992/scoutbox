@@ -31,7 +31,7 @@ import { hasVerLevel } from '../m14/shared.mjs';
 import { effectiveFacetState, RECHECK_MS, effectiveAgreementStatus, agreementGrantsAccess, affiliationActive, tiersOf, can, JURISDICTIONS, termEndAt } from '../m24/shared.mjs';
 import { sendComplianceError } from './errors.mjs';
 import { RULE_STATUSES, SEEDED_POLICY_VERSIONS } from './policyVersions.mjs';
-import { applicablePolicySet, evaluatePolicy, evaluateMinorGate, representationScopeProblem, resolveScope, ruleAt, MINOR_PATHWAY_PRODUCTION_ENABLED, POLICY_FACETS } from './policy.mjs';
+import { applicablePolicySet, evaluatePolicy, evaluateMinorGate, representationScopeProblem, resolveScope, ruleAt, MINOR_PATHWAY_PRODUCTION_ENABLED, POLICY_FACETS, POLICY_ACTIONS } from './policy.mjs';
 import { evaluateConflict, conflictSummaryForParty, PARTY_ROLES, CONTEXT_TYPES, PERMITTED_WITH_CONSENT } from './conflict.mjs';
 import { createVerificationProvider, facetFromProviderAnswer, FACET_METHOD } from './provider.mjs';
 import { complianceAuditRows, reviewerDecisionRows } from './audit.mjs';
@@ -1077,9 +1077,47 @@ export function registerCompliance(rawCtx) {
     byOrg, bySystem,
   };
 
+  /**
+   * M23 P5.6E — the ONE narrow seam the cross-app integration layer asks. It
+   * answers a single question: under the encoded policy in force right now, is
+   * this agent clear to perform this regulated action in this jurisdiction?
+   *
+   * It grants nothing, opens nothing and writes nothing. An unsupported
+   * jurisdiction, an unencoded rule and a stale facet all answer "not clear",
+   * and the reason codes are the policy engine's own — the integration layer
+   * does not invent a compliance vocabulary.
+   */
+  const integrationSeam = {
+    clearFor({ agentUserId, jurisdiction, action }) {
+      if (!POLICY_ACTIONS.includes(action)) return { clear: false, reasonCodes: ['ACTION_UNKNOWN'], policyVersions: [] };
+      const p = profileOf(agentUserId);
+      if (!p) return { clear: false, reasonCodes: ['AGENT_PROFILE_REQUIRED'], policyVersions: [] };
+      // The ACTION's jurisdiction, and only that one — exactly as
+      // `authorizeApproach` does it. A jurisdiction the agent merely declared an
+      // interest in must not make an action elsewhere unlawful: an agent working
+      // internationally who has not registered with the FA is not thereby barred
+      // from an international act. `evaluatePolicy` adds the INT scope itself.
+      const mas = [jurisdiction].filter((m) => typeof m === 'string' && m);
+      // No jurisdiction at all is not "the international default": it is a
+      // question this build cannot answer, and it fails closed.
+      if (!mas.length) return { clear: false, reasonCodes: ['JURISDICTION_UNKNOWN'], policyVersions: [] };
+      const set = policySetFor(mas);
+      const d = evaluatePolicy({
+        action, memberAssociations: mas, facets: facetStatesOf(p),
+        policySet: set.policies, missingPolicies: set.missing, now: now(),
+      });
+      return {
+        clear: d.allowed === true,
+        reasonCodes: [...new Set(d.reasons.filter((r) => r.code !== 'FACET_VERIFIED').map((r) => r.code))],
+        policyVersions: d.policyVersions,
+      };
+    },
+    facetStatesFor: (agentUserId) => { const p = profileOf(agentUserId); return p ? facetStatesOf(p) : null; },
+  };
+
   return {
     reviewerAuth, provider, onPlayerDeleted, hooks: { facetNeedsReview, representationDisputed, authorizeApproach, createApproachReview, auditRows: (org) => complianceAuditRows(db, org) },
     complianceAuditRows: (org) => complianceAuditRows(db, org),
-    facetStatesOf, policySetFor, transactionSeam,
+    facetStatesOf, policySetFor, transactionSeam, integrationSeam,
   };
 }

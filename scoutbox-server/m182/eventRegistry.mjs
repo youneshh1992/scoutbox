@@ -373,6 +373,13 @@ for (const [name, payload] of [
   ['representation_rejected', ['orgId', 'agreementId', 'agentUserId']],
   ['representation_terminated', ['orgId', 'agreementId', 'agentUserId']],
   ['representation_disputed', ['orgId', 'agreementId', 'agentUserId']],
+  // M23 P5.6E. The client changed one of their disclosure choices; WHICH one is
+  // not in the payload, because the agent reads the relationship for that and a
+  // stream should not carry a person's choices around.
+  ['representation_disclosure_changed', ['orgId', 'agreementId', 'agentUserId']],
+  // A club routed a contact to the agent as well as to the client. Ids only: not
+  // the club's name, not the subject, not a word of the message.
+  ['contact_agent_routed', ['orgId', 'contactId', 'agentUserId']],
 ]) {
   EVENT_REGISTRY[name] = {
     domain: 'agent', sourceSystem: 'representationAgreements', audience: 'org_private',

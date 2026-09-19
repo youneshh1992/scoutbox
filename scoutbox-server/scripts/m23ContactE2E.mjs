@@ -894,6 +894,33 @@ section('X — content at the HTTP boundary');
   neg(expect(collect('too large', await j('POST', `/org/rooms/${RID}/contacts`, { body: 'x'.repeat(21_000_000) }, maria.token)), 413, 'REQUEST_TOO_LARGE', ''), 'X8 a body over the shared 20 MB HTTP limit is refused before any handler runs');
 }
 
+// ==================================================================== Y
+// M23 P5.6E — the routing MODE at the HTTP boundary. The agent-side behaviour
+// (who is routed, what they then see, and the re-authorization at send time)
+// belongs to `m23AgentIntegrationE2E`, which has an agent and a confirmed
+// relationship to work with. What belongs HERE is the part that is Contact's own:
+// the vocabulary, the refusal, and that a club with no agent in the picture is
+// unaffected.
+section('Y — the routing mode is vocabulary, and an unknown one is refused');
+{
+  const RID = J.RID;
+  const policy = await j('GET', '/org/recruitment/contact-policy', undefined, maria.token);
+  ok(Array.isArray(policy.body?.modes) && policy.body.modes.join(',') === 'player_only,both', 'Y1 the published modes are exactly player_only and both');
+  neg(!policy.body.modes.includes('agent_only'), 'Y1b there is no mode that reaches an agent INSTEAD of the player — the player is a target in both');
+  neg(expect(collect('mode agent_only', await j('POST', `/org/rooms/${RID}/contacts`, { body: 'Hello', contactMode: 'agent_only' }, maria.token)), 400, 'CONTACT_MODE_INVALID', ''), 'Y2 contactMode "agent_only" → 400 CONTACT_MODE_INVALID, refused rather than downgraded to player_only');
+  neg(expect(collect('mode nonsense', await j('POST', `/org/rooms/${RID}/contacts`, { body: 'Hello', contactMode: 'everyone' }, maria.token)), 400, 'CONTACT_MODE_INVALID', ''), 'Y2b so is any other unknown mode');
+  neg(expect(collect('mode non-text', await j('POST', `/org/rooms/${RID}/contacts`, { body: 'Hello', contactMode: { both: true } }, maria.token)), 400, 'CONTACT_MODE_INVALID', ''), 'Y2c and a mode that is not text at all');
+  const omitted = await j('POST', `/org/rooms/${RID}/contacts`, { body: 'No mode named at all.' }, maria.token);
+  ok(omitted.status === 201 && omitted.body.contact.contactMode === 'player_only', 'Y3 omitting contactMode means the player alone — the safe answer is the default');
+  neg(omitted.body.contact.routedToAgent === false && omitted.body.contact.routedAt === null, 'Y3b and a draft has routed nothing to anybody, whatever mode it asks for');
+  const both = await j('POST', `/org/rooms/${RID}/contacts`, { body: 'Asking for the representative too.', contactMode: 'both' }, maria.token);
+  ok(both.status === 201 && both.body.contact.contactMode === 'both', 'Y4 a club may ask for "both" — it is a request, not an entitlement');
+  neg(both.body.routing?.agentParty === false && both.body.routing?.agentRefusal === 'NO_REPRESENTATION',
+    'Y4b and with no canonical relationship in the picture the answer is no, with the rule that refused named');
+  await j('POST', `/org/rooms/${RID}/contacts/${both.body.contact.id}/cancel`, { expectedRev: both.body.contact.rev }, maria.token);
+  await j('POST', `/org/rooms/${RID}/contacts/${omitted.body.contact.id}/cancel`, { expectedRev: omitted.body.contact.rev }, maria.token);
+}
+
 // ==================================================================== S
 section('S — the subsystems Contact must not touch');
 {

@@ -32,6 +32,7 @@ import {
   newFacets, effectiveFacetState, evaluateSubmission, requiredFacetsFor, verificationGap,
   normaliseTiers, affiliationActive, tiersOf, PERMISSIONS, can, capabilitiesOf, affiliationChangeProblem,
   normaliseScope, termMonthsOf, termEndAt, effectiveAgreementStatus, agreementGrantsAccess, requestConflict,
+  DISCLOSURE_KEYS, normaliseDisclosure,
   clientTransitionAllowed, agentTransitionAllowed, agreementForAgent, agreementForClient, agreementSummaryForStaff,
 } from './shared.mjs';
 
@@ -785,19 +786,59 @@ export function registerAgent(rawCtx) {
     notifyText: 'A client disputed the representation relationship. Private access is suspended pending attributed Trust & Safety review, which is not yet available in this build.',
   }));
 
+  /**
+   * The client's own choices about this relationship: whether agency staff see a
+   * summary row (P5.6B), and — M23 P5.6E — the three separate DISCLOSURE choices
+   * that decide whether their agent is a routable party on a club's contact,
+   * appears on a club's screen, or is given their trial schedule.
+   *
+   * ONE route, because they are one record and each change is one rev and one
+   * history entry. Each key is read only when the body actually carries it, so a
+   * client answering one question does not silently answer the other two, and
+   * only an explicit `true` is a yes.
+   */
   playerRouter.patch('/agent/relationships/:id/sharing', (req, res) => {
     if (req.playerIsMinor) return sendAgentError(res, { error: 'AGENT_ACTION_NOT_PERMITTED' }, 'sharing');
     const a = (db.representationAgreements ?? []).find((x) => x && x.id === req.params.id && x.clientId === req.player.id);
     if (!a) return sendAgentError(res, { error: 'REPRESENTATION_NOT_FOUND' }, 'sharing');
+    const body = req.body ?? {};
+    if (body.disclosure !== undefined && (body.disclosure === null || typeof body.disclosure !== 'object' || Array.isArray(body.disclosure))) {
+      return sendAgentError(res, { error: 'REPRESENTATION_INPUT_INVALID', field: 'disclosure', message: `disclosure must be an object with any of: ${DISCLOSURE_KEYS.join(', ')}.` }, 'sharing');
+    }
     if (!guardRev(req, res, a, { errorCode: 'REPRESENTATION_VERSION_CONFLICT', current: {} })) return;
-    const v = !!req.body?.shareWithAgencyStaff;
-    if (v !== !!a.shareWithAgencyStaff) {
-      a.shareWithAgencyStaff = v;
-      hist(a, 'representation_sharing_changed', byPlayer(req), { shareWithAgencyStaff: v });
+
+    const changed = {};
+    if (body.shareWithAgencyStaff !== undefined) {
+      const v = body.shareWithAgencyStaff === true;
+      if (v !== !!a.shareWithAgencyStaff) { a.shareWithAgencyStaff = v; changed.shareWithAgencyStaff = v; }
+    }
+    if (body.disclosure !== undefined) {
+      const current = normaliseDisclosure(a.disclosure);
+      const next = { ...current };
+      for (const k of DISCLOSURE_KEYS) if (Object.hasOwn(body.disclosure, k)) next[k] = body.disclosure[k] === true;
+      for (const k of DISCLOSURE_KEYS) if (next[k] !== current[k]) changed[k] = next[k];
+      // Turning a disclosure OFF is immediate and needs no reason: it stops the
+      // next contact being routed, the next club screen naming the agent and the
+      // next read of the trial schedule. What was already validly routed stays
+      // in the record, because rewriting history would be a lie about what
+      // happened (§22).
+      if (Object.keys(changed).some((k) => DISCLOSURE_KEYS.includes(k))) a.disclosure = next;
+    }
+    if (Object.keys(changed).length) {
+      hist(a, 'representation_sharing_changed', byPlayer(req), changed);
       bumpRev(a, { by: { id: req.player.id, name: req.player.name }, at: now() });
       persistNow();
+      broadcast('representation_disclosure_changed', { orgId: a.agencyOrgId, agreementId: a.id, agentUserId: a.agentUserId });
+      if (a.agentUserId) {
+        notify({ kind: 'org_user', id: a.agentUserId }, 'representation_disclosure',
+          'A client changed what they share with you. Open the relationship to see which parts of their record and process you can currently see.', a.id);
+      }
     }
-    res.json({ relationship: { ...agreementForClient(a, now()), agent: agentIdentityForClient(a) } });
+    res.json({
+      relationship: { ...agreementForClient(a, now()), agent: agentIdentityForClient(a) },
+      disclosureKeys: DISCLOSURE_KEYS,
+      note: 'Each of these is a separate choice, each starts off, and each can be turned off again at any time. Confirming a relationship does not turn any of them on.',
+    });
   });
 
   // ============================================================ ADMIN: read only
@@ -852,5 +893,9 @@ export function registerAgent(rawCtx) {
     onPlayerDeleted, effectiveAgreementStatus, agreementGrantsAccess, testProviderEnabled,
     // P5.6C: the Compliance Engine reuses exactly these gates rather than its own copies.
     resolveMembership, requireCap, profileOf, facetView, hooks,
+    // P5.6E: the integration seam's agent-facing reads resolve `:id` through the
+    // SAME concealing lookup as every other client route, so a foreign agreement
+    // is a 404 there for the same reason it is one here.
+    findOwnAgreement,
   };
 }

@@ -512,8 +512,28 @@ function sessionView(s, att, { withAddress, withInstructions, withEvidence }) {
   };
 }
 
-/** The current schedule for a viewer. Legacy rows carry a date-only, timezone-less entry, flagged. */
-function scheduleView(t, viewer) {
+/**
+ * The current schedule for a viewer. Legacy rows carry a date-only,
+ * timezone-less entry, flagged.
+ *
+ * The three viewers, and what each one is:
+ *
+ *   `club`             the organising club: everything operational, evidence included
+ *   `family_accepted`  the player or guardian who accepted: the exact venue
+ *                      address and the club's joining instructions, which were
+ *                      held back from the invitation (P4B D-23)
+ *   `agent`            M23 P5.6E: an authorised agent reading their client's
+ *                      trial. Times, session kinds, the venue's NAME and town,
+ *                      attendance. Not the address, not the instructions, not
+ *                      the evidence list — those belong to the family and the
+ *                      club, and an agent is neither.
+ *
+ * An unrecognised viewer gets the narrowest of the three, so a new caller that
+ * forgets to name itself under-shares rather than over-shares.
+ */
+export const TRIAL_SCHEDULE_VIEWERS = Object.freeze(['club', 'family_accepted', 'agent']);
+
+export function scheduleView(t, viewer) {
   const att = currentAttendance(t);
   if (!t.schedule) {
     if (isTrialDate(t.proposedDate)) return { legacy: true, timezone: null, revision: 0, confirmedAt: null, date: t.proposedDate, sessions: [] };
