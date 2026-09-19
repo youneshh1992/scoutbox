@@ -3,7 +3,7 @@
 // Mirrors the server's rules: a proposal can be confirmed, declined or
 // disputed; an active relationship can be ended or disputed; a dispute is
 // terminal here; a minor sees nothing.
-import type { AgentRelationship, PlayerM24 } from './m24client';
+import type { AgentRelationship, PlayerM24, SharedOpportunity } from './m24client';
 
 const NOW = Date.now();
 const DAY = 86_400_000;
@@ -16,8 +16,8 @@ const UNVERIFIED_AGENT = { userId: 'usr-tomas', displayName: 'Tomás Rivera', ag
 
 const RELS: Record<string, AgentRelationship[]> = {
   'pl-adeyemi': [
-    { id: 'rep-p1', status: 'proposed', pending: true, scope: ['employment', 'transfer'], exclusive: false, jurisdiction: 'ENG', termMonths: 18, startAt: null, endAt: null, proposedAt: NOW - 2 * DAY, confirmedAt: null, terminatedBy: null, disputeReason: null, shareWithAgencyStaff: false, legacy: null, rev: 1, honest: HONEST, agent: ANA },
-    { id: 'rep-p2', status: 'proposed', pending: true, scope: ['commercial'], exclusive: false, jurisdiction: 'INT', termMonths: 12, startAt: null, endAt: null, proposedAt: NOW - DAY, confirmedAt: null, terminatedBy: null, disputeReason: null, shareWithAgencyStaff: false, legacy: null, rev: 1, honest: HONEST, agent: UNVERIFIED_AGENT },
+    { id: 'rep-p1', status: 'proposed', pending: true, scope: ['employment', 'transfer'], exclusive: false, jurisdiction: 'ENG', termMonths: 18, startAt: null, endAt: null, proposedAt: NOW - 2 * DAY, confirmedAt: null, terminatedBy: null, disputeReason: null, shareWithAgencyStaff: false, disclosure: { clubPresence: false, contactRouting: false, trialVisibility: false }, legacy: null, rev: 1, honest: HONEST, agent: ANA },
+    { id: 'rep-p2', status: 'proposed', pending: true, scope: ['commercial'], exclusive: false, jurisdiction: 'INT', termMonths: 12, startAt: null, endAt: null, proposedAt: NOW - DAY, confirmedAt: null, terminatedBy: null, disputeReason: null, shareWithAgencyStaff: false, disclosure: { clubPresence: false, contactRouting: false, trialVisibility: false }, legacy: null, rev: 1, honest: HONEST, agent: UNVERIFIED_AGENT },
   ],
 };
 
@@ -46,5 +46,31 @@ export const m24mock: PlayerM24 = {
     if (expectedRev !== r.rev) throw new MockError('REPRESENTATION_VERSION_CONFLICT', 'This changed since you loaded it. Reload and try again.');
     if (r.shareWithAgencyStaff !== share) { r.shareWithAgencyStaff = share; r.rev += 1; }
     return delay(r);
+  },
+  // M23 P5.6E — one disclosure at a time, exactly as the server does it: the
+  // other two are untouched, so a demo cannot teach the wrong mental model.
+  setDisclosure: (pid, id, key, value, expectedRev) => {
+    const r = (RELS[pid] ?? []).find((x) => x.id === id);
+    if (!r) throw new MockError('REPRESENTATION_NOT_FOUND', 'Not found.');
+    if (expectedRev !== r.rev) throw new MockError('REPRESENTATION_VERSION_CONFLICT', 'This changed since you loaded it. Reload and try again.');
+    if (r.disclosure[key] !== value) { r.disclosure = { ...r.disclosure, [key]: value }; r.rev += 1; }
+    return delay(r);
+  },
+  sharedOpportunities: (pid) => {
+    if (pid === 'pl-guni' || pid === 'pl-tomasz') return delay({ items: [] as SharedOpportunity[], minor: true });
+    const rel = (RELS[pid] ?? []).find((x) => x.status === 'active');
+    // Nothing is shown unless a relationship is actually active — a demo must
+    // not suggest an ended agent keeps putting things in front of you.
+    if (!rel) return delay({ items: [] as SharedOpportunity[], note: 'Opportunities your agent brought to your attention appear here.' });
+    return delay({
+      items: [{
+        id: 'aos-demo-1', opportunityId: 'opp-demo-1', via: 'opportunity',
+        title: 'First-team trial week', orgName: 'Eastport FC', deadline: new Date(NOW + 21 * DAY).toISOString().slice(0, 10),
+        note: 'Your profile fits what they described. Worth a look.',
+        sharedAt: NOW - 3600_000, sharedByName: rel.agent.displayName, withdrawnAt: null,
+        honest: 'Your agent brought this to your attention. Applying is your own action — nobody can apply for you.',
+      }] as SharedOpportunity[],
+      note: 'Opportunities your agent brought to your attention. Each one is still yours to apply for, or not: your agent cannot apply for you and ScoutBox will not do it on their word.',
+    });
   },
 };

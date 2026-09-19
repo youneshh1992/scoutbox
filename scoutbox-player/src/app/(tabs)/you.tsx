@@ -19,7 +19,7 @@ import { PageHeader, PageTabs, pickTab } from '../../components/PageChrome';
 import { AccessSection, FeedbackDevSection } from '../../components/M12Sections';
 import { ExposureSection, PreferencesSection, RepresentationSection, TransitionsSection } from '../../components/M13Sections';
 import { InviteCodeSection, ReferencesSection } from '../../components/M14Sections';
-import { MyAgentSection } from '../../components/MyAgentSection';
+import { AgentSharedOpportunities, MyAgentSection } from '../../components/MyAgentSection';
 import { AgentConsentSection } from '../../components/AgentConsentSection';
 import { AgentTransactionSection } from '../../components/AgentTransactionSection';
 import { ProfileBody } from './profile';
@@ -271,6 +271,7 @@ export default function You() {
             <PreferencesSection actor={actor} isMinor={isMinor} />
             <TransitionsSection actor={actor} isMinor={isMinor} mediaOptions={mediaOptions} />
             <MyAgentSection playerId={actor.id} isMinor={isMinor} />
+            <AgentSharedOpportunities playerId={actor.id} isMinor={isMinor} />
             <AgentConsentSection playerId={actor.id} isMinor={isMinor} />
             <AgentTransactionSection playerId={actor.id} isMinor={isMinor} />
             <RepresentationSection playerId={actor.id} isMinor={isMinor} />

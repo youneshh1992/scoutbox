@@ -146,6 +146,68 @@ export interface ClientDetail {
   mode: 'own' | 'summary';
 }
 
+// ============================================ M23 P5.6E cross-app integration
+
+/** A club contact that was routed to this agent as well as to the client (§24). */
+export interface RoutedContact {
+  id: string;
+  club: { id: string; name: string | null };
+  status: string;
+  channel: string;
+  subject: string | null;
+  body: string | null;
+  routedAt: number;
+  routedMode: string;
+  deliveredAt: number | null;
+  respondedAt: number | null;
+  responseKind: string | null;
+}
+
+/** A client's trial as an authorised agent may see it (§26–§29). */
+export interface ClientTrial {
+  id: string;
+  club: { id: string; name: string | null };
+  workflowState: string;
+  workflowLabel: string;
+  legacy: boolean;
+  acceptedAt: number | null;
+  schedule: {
+    legacy?: boolean; timezone: string | null; revision: number; confirmedAt: number | null;
+    date?: string;
+    sessions: { id: string; kind: string; startsAt: number; endsAt: number; venue: { name: string; town: string | null } | null; attendance: { state: string } }[];
+  } | null;
+  awaitingClientConfirmation: boolean;
+  completion: { state: string; at: number } | null;
+  reportObligation: 'outstanding' | 'filed' | null;
+}
+
+/** An opportunity this agent put in front of this client (§18). */
+export interface OpportunityShare {
+  id: string;
+  opportunityId: string;
+  via: string | null;
+  title: string | null;
+  orgName: string | null;
+  deadline: string | null;
+  note: string | null;
+  sharedAt: number;
+  sharedByName: string | null;
+  withdrawnAt: number | null;
+  rev: number;
+  honest: string;
+}
+
+/** A club's invitation to open a transaction workspace (§32/§39). */
+export interface TransactionHandoff {
+  handoffId: string;
+  recruitmentCaseId: string;
+  clientId: string;
+  agreementId: string;
+  club: { id: string; name: string | null };
+  invitedAt: number;
+  expiresAt: number;
+}
+
 export interface Opportunity {
   id: string;
   via: string;
@@ -386,6 +448,13 @@ export interface AgentApi {
   client(s: Session, id: string): Promise<ClientDetail>;
   terminate(s: Session, id: string, input: { reasonCode?: string; clientKey: string; expectedRev: number }): Promise<{ relationship: Relationship; idempotent?: boolean }>;
   clientOpportunities(s: Session, id: string): Promise<{ items: Opportunity[]; clientId: string; note: string }>;
+  // ---- M23 P5.6E cross-app integration
+  clientContacts(s: Session, id: string): Promise<{ items: RoutedContact[]; clientId: string; note: string }>;
+  clientTrials(s: Session, id: string): Promise<{ items: ClientTrial[]; clientId: string; clientName: string | null; note: string; honest: string }>;
+  clientShares(s: Session, id: string): Promise<{ items: OpportunityShare[] }>;
+  shareOpportunity(s: Session, id: string, oppId: string, input: { note?: string; clientKey: string }): Promise<{ share: OpportunityShare; idempotent?: boolean; note?: string }>;
+  withdrawShare(s: Session, id: string, shareId: string): Promise<{ share: OpportunityShare; idempotent?: boolean }>;
+  handoffs(s: Session): Promise<{ items: TransactionHandoff[]; note: string }>;
   opportunities(s: Session): Promise<{ items: Opportunity[]; note: string }>;
   inbox(s: Session): Promise<{ notifications: import('./api').Notification[]; pending: Relationship[]; note: string }>;
   // ---- M23 P5.6C compliance
@@ -447,6 +516,13 @@ export const httpAgent: AgentApi = {
   client: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}`),
   terminate: (s, id, input) => post(s, `/org/agent/clients/${encodeURIComponent(id)}/terminate`, input),
   clientOpportunities: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}/opportunities`),
+  // ---- M23 P5.6E
+  clientContacts: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}/contacts`),
+  clientTrials: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}/trials`),
+  clientShares: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}/opportunities/shares`),
+  shareOpportunity: (s, id, oppId, input) => post(s, `/org/agent/clients/${encodeURIComponent(id)}/opportunities/${encodeURIComponent(oppId)}/share`, input),
+  withdrawShare: (s, id, shareId) => post(s, `/org/agent/clients/${encodeURIComponent(id)}/opportunities/shares/${encodeURIComponent(shareId)}/withdraw`, {}),
+  handoffs: (s) => get(s, '/org/agent/handoffs'),
   opportunities: (s) => get(s, '/org/agent/opportunities'),
   inbox: (s) => get(s, '/org/agent/inbox'),
   complianceOverview: (s) => get(s, '/org/agent/compliance/overview'),

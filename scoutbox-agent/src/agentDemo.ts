@@ -10,6 +10,7 @@ import type {
   AgentApi, AgencyOverview, AgentConsent, AuditRow, Clearance, ClientRow, ClubHit, ComplianceContext, ComplianceOverview, ComplianceRow,
   FacetView, Home, Me, Member, MinorReadiness, Opportunity, PartyRole, PolicyVersionPublic, Profile, Reason, Relationship, ReviewPublic, Tier, VerificationState,
   Transaction, TransactionList, TransactionStatus, TransactionType, TxDocument, TxNote, TxTimelineEntry, DocumentVisibility, DocumentType,
+  RoutedContact, ClientTrial, OpportunityShare, TransactionHandoff,
 } from './agentApi';
 
 const NOW = Date.now();
@@ -441,6 +442,36 @@ for (const tx of TXS) {
     { id: `aud-${tx.id}-1`, at: tx.createdAt, action: 'transaction_created', audience: 'all_parties', actor: ROLE_AGENT, detail: { count: tx.parties.length } },
   ];
 }
+
+// ============================================ M23 P5.6E cross-app integration
+// Synthetic, and deliberately partial: rep-d1's client has said yes to contact
+// routing and trial visibility, rep-d2's has not. A demo that showed everything
+// open would teach the wrong mental model about whose choice this is.
+const P56E_DISCLOSED = new Set(['rep-d1']);
+const ROUTED_CONTACTS: Record<string, RoutedContact[]> = {
+  'rep-d1': [{
+    id: 'rct-d1', club: { id: 'org-eastport', name: 'Eastport FC' }, status: 'responded', channel: 'in_app',
+    subject: 'A conversation about next season',
+    body: 'We have followed your season closely and would like to talk about what next season could look like. Your representative is copied here.',
+    routedAt: NOW - 5 * DAY, routedMode: 'both', deliveredAt: NOW - 5 * DAY, respondedAt: NOW - 4 * DAY, responseKind: 'accepted',
+  }],
+};
+const CLIENT_TRIALS: Record<string, ClientTrial[]> = {
+  'rep-d1': [{
+    id: 'trl-d1', club: { id: 'org-eastport', name: 'Eastport FC' },
+    workflowState: 'scheduled', workflowLabel: 'Scheduled', legacy: false, acceptedAt: NOW - 3 * DAY,
+    schedule: {
+      timezone: 'Europe/London', revision: 1, confirmedAt: NOW - 3 * DAY,
+      sessions: [{ id: 'tses-d1', kind: 'training', startsAt: NOW + 4 * DAY, endsAt: NOW + 4 * DAY + 2 * 3600_000, venue: { name: 'Eastport Dome', town: 'Eastport' }, attendance: { state: 'not_recorded' } }],
+    },
+    awaitingClientConfirmation: false, completion: null, reportObligation: null,
+  }],
+};
+const SHARES: Record<string, OpportunityShare[]> = { 'rep-d1': [], 'rep-d2': [] };
+const HANDOFFS: TransactionHandoff[] = [{
+  handoffId: 'hof-d1', recruitmentCaseId: 'case-d1', clientId: 'pl-adeyemi', agreementId: 'rep-d1',
+  club: { id: 'org-eastport', name: 'Eastport FC' }, invitedAt: NOW - 2 * DAY, expiresAt: NOW + 28 * DAY,
+}];
 
 export const demoAgent: AgentApi = {
   async me(s) {
@@ -1015,5 +1046,45 @@ export const demoAgent: AgentApi = {
   async inbox(s) {
     need(s, 'inbox.read');
     return delay({ notifications: NOTES[s.userId] ?? [], pending: RELS.filter((r) => r.agentUserId === s.userId && eff(r) === 'proposed').map((r) => forAgent(r, s.userId)), note: 'Operational messages only. Negotiation and offers are not part of this workspace.' });
+  },
+
+  // ---- M23 P5.6E. Each refuses exactly as the server does when the client has
+  // not chosen to share — the refusal is the honest answer, not a gap.
+  async clientContacts(s, id) {
+    if (!P56E_DISCLOSED.has(id)) refuse(403, 'DISCLOSURE_WITHHELD', 'Your client has not chosen to route you their club messages. That choice is theirs and they can change it at any time in My Agent.');
+    return delay({ items: ROUTED_CONTACTS[id] ?? [], clientId: RELS.find((x) => x.id === id)?.clientId ?? id, note: 'Contacts a club routed to you as well as to your client. The club\u2019s own recruitment case, its internal notes and its assessment of your client are not here and never will be. Answering is your client\u2019s act, not yours.' });
+  },
+  async clientTrials(s, id) {
+    if (!P56E_DISCLOSED.has(id)) refuse(403, 'DISCLOSURE_WITHHELD', 'Your client has not chosen to share their trial schedule with you. That choice is theirs and they can change it at any time in My Agent.');
+    return delay({
+      items: CLIENT_TRIALS[id] ?? [], clientId: RELS.find((x) => x.id === id)?.clientId ?? id, clientName: null,
+      note: 'Your client\u2019s trials as the club and your client have recorded them.',
+      honest: 'Nothing here is an offer, a negotiation or a fee. A trial is an assessment opportunity.',
+    });
+  },
+  async clientShares(s, id) { return delay({ items: (SHARES[id] ?? []).slice().sort((a, b) => b.sharedAt - a.sharedAt) }); },
+  async shareOpportunity(s, id, oppId, input) {
+    SHARES[id] ??= [];
+    const existing = SHARES[id].find((x) => x.opportunityId === oppId && !x.withdrawnAt);
+    if (existing) refuse(409, 'OPPORTUNITY_ALREADY_SHARED', 'You have already shared this opportunity with this client.');
+    const share: OpportunityShare = {
+      id: `aos-${Date.now().toString(36)}`, opportunityId: oppId, via: 'opportunity',
+      title: null, orgName: null, deadline: null, note: input.note?.trim() ? input.note.trim() : null,
+      sharedAt: Date.now(), sharedByName: userOf(s).name, withdrawnAt: null, rev: 1,
+      honest: 'Your agent brought this to your attention. Applying is your own action \u2014 nobody can apply for you.',
+    };
+    SHARES[id].push(share);
+    return delay({ share, note: 'Shared. Your client decides whether to apply, on their own screen, in their own name.' });
+  },
+  async withdrawShare(s, id, shareId) {
+    const share = (SHARES[id] ?? []).find((x) => x.id === shareId);
+    // `refuse` always throws, but its return type does not say so; the guard
+    // keeps that promise to the type system rather than asserting past it.
+    if (!share) { refuse(404, 'OPPORTUNITY_SHARE_NOT_FOUND', 'Not found.'); throw new Error('unreachable'); }
+    if (!share.withdrawnAt) { share.withdrawnAt = Date.now(); share.rev += 1; }
+    return delay({ share });
+  },
+  async handoffs() {
+    return delay({ items: HANDOFFS.slice(), note: 'Clubs that have invited a transaction workspace for one of your clients. Their recruitment case, their assessment and their reasons are not here. Opening a workspace is your action and commits nobody to anything.' });
   },
 };

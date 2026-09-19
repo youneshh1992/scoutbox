@@ -364,6 +364,10 @@ export interface ContactRecord {
   id: string;
   caseId: string;
   playerId: string;
+  /** M23 P5.6E — what the club asked for, and what was actually routed. */
+  contactMode?: 'player_only' | 'both';
+  routedToAgent?: boolean;
+  routedAt?: number | null;
   status: 'draft' | 'delivered' | 'failed' | 'responded' | 'recorded' | 'cancelled' | string;
   statusLabel: string;
   channel: 'in_app' | ContactExternalChannel | string;
@@ -399,11 +403,46 @@ export interface ContactRecord {
   policyVersion: number;
 }
 
+/** M23 P5.6E §38 — the club's readiness view for the transaction handoff. */
+export interface HandoffView {
+  id: string;
+  status: 'invited' | 'accepted' | 'withdrawn' | 'expired' | string;
+  storedStatus: string;
+  invitedAt: number | null;
+  invitedByName: string | null;
+  acceptedAt: number | null;
+  withdrawnAt: number | null;
+  transactionId: string | null;
+  representedAtInvitation: boolean;
+  caseId: string;
+  rev: number;
+  honest: string;
+}
+export interface HandoffSurface {
+  handoff: HandoffView | null;
+  available: boolean;
+  /** Codes, in a fixed order. Never a reason in prose and never the decision's rationale. */
+  blockers: string[];
+  blockerVocabulary: string[];
+  action: string;
+  note: string;
+}
+
 export interface ContactRouting {
   available: boolean;
   type: 'player' | 'guardian' | null;
   minor: boolean | null;
   reason?: string;
+  /**
+   * M23 P5.6E §21. `mode` is what the SERVER decided, not what this screen
+   * asked for; `agentParty` says whether the client's own agent is a party;
+   * `agentRefusal` names the rule that refused when the club asked and the
+   * answer was no. A code, never a person and never a reason in prose.
+   */
+  mode?: 'player_only' | 'both' | null;
+  agentParty?: boolean;
+  agentRefusal?: string | null;
+  modes?: ('player_only' | 'both')[];
 }
 
 export interface ContactList {
@@ -594,9 +633,9 @@ export interface RoomsApi {
   link(s: Session, roomId: string, input: { trialId?: string; signingId?: string; requestId?: string }): Promise<{ links: Room['links'] }>;
   // M23 P3 — Contact. Page-local to the Room; there is no top-level surface.
   contacts(s: Session, roomId: string): Promise<ContactList>;
-  createContact(s: Session, roomId: string, input: { subject?: string | null; body: string; clientKey?: string }): Promise<{ contact: ContactRecord; routing: ContactRouting }>;
-  patchContact(s: Session, roomId: string, contactId: string, input: { subject?: string | null; body?: string; expectedRev: number }): Promise<{ contact: ContactRecord; routing: ContactRouting }>;
-  sendContact(s: Session, roomId: string, contactId: string, input: { expectedRev: number; clientKey?: string }): Promise<{ contact: ContactRecord; delivered: boolean; case?: ContactCaseMove; idempotent?: boolean }>;
+  createContact(s: Session, roomId: string, input: { subject?: string | null; body: string; contactMode?: 'player_only' | 'both'; clientKey?: string }): Promise<{ contact: ContactRecord; routing: ContactRouting }>;
+  patchContact(s: Session, roomId: string, contactId: string, input: { subject?: string | null; body?: string; contactMode?: 'player_only' | 'both'; expectedRev: number }): Promise<{ contact: ContactRecord; routing: ContactRouting }>;
+  sendContact(s: Session, roomId: string, contactId: string, input: { expectedRev: number; clientKey?: string }): Promise<{ contact: ContactRecord; delivered: boolean; routing?: ContactRouting; case?: ContactCaseMove; idempotent?: boolean }>;
   cancelContact(s: Session, roomId: string, contactId: string, input: { expectedRev: number }): Promise<{ contact: ContactRecord }>;
   recordExternalContact(s: Session, roomId: string, input: { channel: string; occurredAt: number | string; summary?: string | null; recipientType: 'player' | 'guardian'; clientKey?: string }): Promise<{ contact: ContactRecord; case?: ContactCaseMove; idempotent?: boolean }>;
   // M23 P4B — Trial. Page-local to the Room, plus the existing Trials & Reports list.
@@ -612,6 +651,10 @@ export interface RoomsApi {
   unlinkTrialEvidence(s: Session, roomId: string, trialId: string, evidenceId: string, input: { expectedRev: number }): Promise<{ trial: TrialClubView; evidence: TrialEvidenceView[]; idempotent?: boolean }>;
   // M23 P5 — formal decision.
   decision(s: Session, roomId: string): Promise<DecisionSurface>;
+  // ---- M23 P5.6E: the P5 decision → transaction handoff (§32–§38).
+  handoff(s: Session, roomId: string): Promise<HandoffSurface>;
+  inviteHandoff(s: Session, roomId: string, input: { clientKey?: string }): Promise<{ handoff: HandoffView; idempotent?: boolean; note?: string }>;
+  withdrawHandoff(s: Session, roomId: string): Promise<{ handoff: HandoffView; idempotent?: boolean }>;
   createDecisionDraft(s: Session, roomId: string, input: DecisionDraftInput): Promise<{ draft: DecisionDraft | null; decision?: FormalDecision; idempotent?: boolean }>;
   updateDecisionDraft(s: Session, roomId: string, input: DecisionDraftInput & { expectedRev: number }): Promise<{ draft: DecisionDraft }>;
   discardDecisionDraft(s: Session, roomId: string, expectedRev: number): Promise<{ draft: null; discarded: { id: string } }>;
@@ -671,6 +714,10 @@ export const httpRooms: RoomsApi = {
   createContact: (s, roomId, input) => req(`/org/rooms/${roomId}/contacts`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   patchContact: (s, roomId, contactId, input) => req(`/org/rooms/${roomId}/contacts/${contactId}`, { method: 'PATCH', headers: H(s), body: JSON.stringify(input) }),
   sendContact: (s, roomId, contactId, input) => req(`/org/rooms/${roomId}/contacts/${contactId}/send`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  // ---- M23 P5.6E
+  handoff: (s, roomId) => req(`/org/rooms/${roomId}/transaction-handoff`, { headers: H(s) }),
+  inviteHandoff: (s, roomId, input) => req(`/org/rooms/${roomId}/transaction-handoff`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  withdrawHandoff: (s, roomId) => req(`/org/rooms/${roomId}/transaction-handoff/withdraw`, { method: 'POST', headers: H(s), body: '{}' }),
   cancelContact: (s, roomId, contactId, input) => req(`/org/rooms/${roomId}/contacts/${contactId}/cancel`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   recordExternalContact: (s, roomId, input) => req(`/org/rooms/${roomId}/contacts/external`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   trials: (s, roomId) => req(`/org/rooms/${roomId}/trials`, { headers: H(s) }),

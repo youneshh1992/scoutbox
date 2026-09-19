@@ -383,8 +383,15 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
   const d = useLoad(() => agent.client(session, id), [session, id, tick]);
   const det = d.data as ClientDetail | null;
   const opps = useLoad(() => (det && det.mode === 'own' && det.access ? agent.clientOpportunities(session, id) : Promise.resolve(null)), [session, id, det?.access, tick]);
+  // M23 P5.6E. Loaded only where a basis exists, and each one refuses on its own
+  // terms when the client's disclosure for it is off — the error IS the answer, so
+  // it is rendered rather than swallowed.
+  const contacts = useLoad(() => (det && det.mode === 'own' && det.access && tab === 'contacts' ? agent.clientContacts(session, id) : Promise.resolve(null)), [session, id, det?.access, tab, tick]);
+  const trials = useLoad(() => (det && det.mode === 'own' && det.access && tab === 'trials' ? agent.clientTrials(session, id) : Promise.resolve(null)), [session, id, det?.access, tab, tick]);
+  const shares = useLoad(() => (det && det.mode === 'own' && det.access ? agent.clientShares(session, id) : Promise.resolve(null)), [session, id, det?.access, tick]);
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  const [shareNote, setShareNote] = useState<Record<string, string>>({});
   if (d.error) return <><button onClick={onBack}>← {t('clients.back')}</button><ErrorLine error={d.error} onRetry={d.reload} /></>;
   if (!det) return <Loading />;
   if (det.mode === 'summary') {
@@ -407,6 +414,20 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
     if (!confirmDestructive({ ...(withdrawing ? DESTRUCTIVE_ACTIONS.withdrawRequest : DESTRUCTIVE_ACTIONS.terminateRelationship), name: c.name ?? r.clientId })) return;
     setBusy(true); setErr(null);
     try { await agent.terminate(session, r.id, { reasonCode: withdrawing ? 'withdrawn' : 'agent_ended', clientKey: clientKey(), expectedRev: r.rev }); notify(t('clients.terminated')); d.reload(); } catch (e) { setErr(e); } finally { setBusy(false); }
+  };
+  /** §18 — share, and nothing else. A refused share says which rule refused. */
+  const share = async (oppId: string) => {
+    setBusy(true); setErr(null);
+    try {
+      await agent.shareOpportunity(session, r.id, oppId, { note: shareNote[oppId] ?? '', clientKey: clientKey() });
+      notify(t('share.done'));
+      setShareNote((c) => ({ ...c, [oppId]: '' }));
+      shares.reload();
+    } catch (e) { setErr(e); } finally { setBusy(false); }
+  };
+  const withdrawShare = async (shareId: string) => {
+    setBusy(true); setErr(null);
+    try { await agent.withdrawShare(session, r.id, shareId); notify(t('share.withdrawn')); shares.reload(); } catch (e) { setErr(e); } finally { setBusy(false); }
   };
   const labelFor = (x: ClientTab) => tr(`clients.tab.${x}`);
   return (
@@ -468,7 +489,102 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
                 <p className="pagehint">{opps.data?.note ?? t('clients.oppsNote')}</p>
                 <ErrorLine error={opps.error} onRetry={opps.reload} />
                 {opps.data && opps.data.items.length === 0 && <div className="notice">{t('clients.noOpps')}</div>}
-                <div className="list-rows" data-testid="client-opps">{(opps.data?.items ?? []).map((o) => <OppRow key={o.id} o={o} />)}</div>
+                <div className="list-rows" data-testid="client-opps">{(opps.data?.items ?? []).map((o) => {
+                  const shared = (shares.data?.items ?? []).find((x) => x.opportunityId === o.id && !x.withdrawnAt) ?? null;
+                  return (
+                    <div key={o.id} data-testid={`opp-wrap-${o.id}`}>
+                      <OppRow o={o} />
+                      {/*
+                        M23 P5.6E §18. Bringing it to the client's attention — and
+                        nothing more. There is deliberately no "apply" control here
+                        at any role: applying is the client's own act on their own
+                        screen, and a button here would be a lie about that.
+                      */}
+                      <div className="row" style={{ gap: 8, margin: '4px 0 10px', flexWrap: 'wrap', alignItems: 'center' }}>
+                        {shared ? (
+                          <>
+                            <span className="pill" data-testid={`share-state-${o.id}`}>{t('share.shared')}</span>
+                            <span className="dim" style={{ fontSize: 12 }}>{fmtStamp(shared.sharedAt)}</span>
+                            <button disabled={busy} onClick={() => withdrawShare(shared.id)} data-testid={`share-withdraw-${o.id}`}>{t('share.withdraw')}</button>
+                          </>
+                        ) : (
+                          <>
+                            <input
+                              aria-label={t('share.noteLabel')}
+                              placeholder={t('share.notePlaceholder')}
+                              value={shareNote[o.id] ?? ''}
+                              maxLength={300}
+                              onChange={(e) => setShareNote((c) => ({ ...c, [o.id]: e.target.value }))}
+                              data-testid={`share-note-${o.id}`}
+                              style={{ flex: '1 1 220px', minWidth: 0 }}
+                            />
+                            <button disabled={busy} onClick={() => share(o.id)} data-testid={`share-${o.id}`}>{t('share.action')}</button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}</div>
+                <p className="dim" style={{ fontSize: 12.5 }}>{t('share.honest')}</p>
+              </>
+            )}
+          </Panel>
+        )}
+        {tab === 'contacts' && (
+          <Panel id="contacts" label={labelFor('contacts')}>
+            {!det.access && <div className="notice warn" data-testid="contacts-no-access">{t('clients.noAccessOpps')}</div>}
+            {det.access && (
+              <>
+                <p className="pagehint">{contacts.data?.note ?? t('contacts.intro')}</p>
+                <ErrorLine error={contacts.error} onRetry={contacts.reload} />
+                {contacts.data && contacts.data.items.length === 0 && <div className="notice" data-testid="contacts-none">{t('contacts.none')}</div>}
+                <div className="list-rows" data-testid="client-contacts">
+                  {(contacts.data?.items ?? []).map((k) => (
+                    <div key={k.id} className="list-row" data-testid={`contact-${k.id}`} style={{ alignItems: 'flex-start', flexDirection: 'column', gap: 4 }}>
+                      <div className="row" style={{ gap: 8, width: '100%', flexWrap: 'wrap' }}>
+                        <strong className="grow">{k.club.name ?? '—'}</strong>
+                        <span className="pill">{tr(`contactStatus.${k.status}`) === `contactStatus.${k.status}` ? k.status : tr(`contactStatus.${k.status}`)}</span>
+                        <span className="dim" style={{ fontSize: 12 }}>{fmtStamp(k.routedAt)}</span>
+                      </div>
+                      {k.subject && <div style={{ fontWeight: 600, fontSize: 13 }}>{k.subject}</div>}
+                      {k.body && <div style={{ fontSize: 12.5, whiteSpace: 'pre-wrap' }}>{k.body}</div>}
+                      <div className="dim" style={{ fontSize: 12 }}>
+                        {k.responseKind ? `${t('contacts.clientAnswered')}: ${tr(`contactResponse.${k.responseKind}`) === `contactResponse.${k.responseKind}` ? k.responseKind : tr(`contactResponse.${k.responseKind}`)}` : t('contacts.awaitingClient')}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="dim" style={{ fontSize: 12.5 }}>{t('contacts.honest')}</p>
+              </>
+            )}
+          </Panel>
+        )}
+        {tab === 'trials' && (
+          <Panel id="trials" label={labelFor('trials')}>
+            {!det.access && <div className="notice warn" data-testid="trials-no-access">{t('clients.noAccessOpps')}</div>}
+            {det.access && (
+              <>
+                <p className="pagehint">{trials.data?.note ?? t('trials.intro')}</p>
+                <ErrorLine error={trials.error} onRetry={trials.reload} />
+                {trials.data && trials.data.items.length === 0 && <div className="notice" data-testid="trials-none">{t('trials.none')}</div>}
+                <div className="list-rows" data-testid="client-trials">
+                  {(trials.data?.items ?? []).map((x) => (
+                    <div key={x.id} className="list-row" data-testid={`trial-${x.id}`} style={{ alignItems: 'flex-start', flexDirection: 'column', gap: 4 }}>
+                      <div className="row" style={{ gap: 8, width: '100%', flexWrap: 'wrap' }}>
+                        <strong className="grow">{x.club.name ?? '—'}</strong>
+                        <span className="pill" data-testid={`trial-state-${x.id}`}>{x.workflowLabel}</span>
+                        {x.awaitingClientConfirmation && <span className="pill warn">{t('trials.awaitingClient')}</span>}
+                      </div>
+                      {(x.schedule?.sessions ?? []).map((ss) => (
+                        <div key={ss.id} className="dim" style={{ fontSize: 12.5 }}>
+                          {fmtStamp(ss.startsAt)} → {new Date(ss.endsAt).toLocaleTimeString()} · {ss.venue?.name ?? '—'}{ss.venue?.town ? `, ${ss.venue.town}` : ''} · {tr(`attendance.${ss.attendance.state}`) === `attendance.${ss.attendance.state}` ? ss.attendance.state.replace(/_/g, ' ') : tr(`attendance.${ss.attendance.state}`)}
+                        </div>
+                      ))}
+                      {x.reportObligation && <div className="dim" style={{ fontSize: 12 }}>{t(x.reportObligation === 'outstanding' ? 'trials.reportOutstanding' : 'trials.reportFiled')}</div>}
+                    </div>
+                  ))}
+                </div>
+                <p className="dim" style={{ fontSize: 12.5 }}>{trials.data?.honest ?? t('trials.honest')}</p>
               </>
             )}
           </Panel>

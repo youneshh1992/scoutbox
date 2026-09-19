@@ -36,6 +36,12 @@ export interface AgentRelationship {
   terminatedBy: 'agent' | 'client' | null;
   disputeReason: string | null;
   shareWithAgencyStaff: boolean;
+  /**
+   * M23 P5.6E — the client's three separate disclosure choices. Each starts
+   * false and each can be turned off again at any time; confirming a
+   * relationship turns none of them on.
+   */
+  disclosure: { clubPresence: boolean; contactRouting: boolean; trialVisibility: boolean };
   legacy: { fromRepresentationId: string } | null;
   rev: number;
   honest: string;
@@ -44,16 +50,39 @@ export interface AgentRelationship {
 
 export type AgentAction = 'confirm' | 'decline' | 'terminate' | 'dispute';
 
+/** M23 P5.6E — which disclosure a toggle is about. */
+export type DisclosureKey = 'clubPresence' | 'contactRouting' | 'trialVisibility';
+
+/** M23 P5.6E §19 — an opportunity an agent put in front of this player. */
+export interface SharedOpportunity {
+  id: string;
+  opportunityId: string;
+  via: string | null;
+  title: string | null;
+  orgName: string | null;
+  deadline: string | null;
+  note: string | null;
+  sharedAt: number;
+  sharedByName: string | null;
+  withdrawnAt: number | null;
+  honest: string;
+}
+
 export interface PlayerM24 {
   list(playerId: string): Promise<{ items: AgentRelationship[]; minor?: boolean; note?: string }>;
   act(playerId: string, id: string, action: AgentAction, input: { expectedRev: number; reason?: string; clientKey: string }): Promise<AgentRelationship>;
   setSharing(playerId: string, id: string, share: boolean, expectedRev: number): Promise<AgentRelationship>;
+  /** One disclosure at a time: answering one question must not answer the others. */
+  setDisclosure(playerId: string, id: string, key: DisclosureKey, value: boolean, expectedRev: number): Promise<AgentRelationship>;
+  sharedOpportunities(playerId: string): Promise<{ items: SharedOpportunity[]; minor?: boolean; note?: string }>;
 }
 
 const live: PlayerM24 = {
   list: (pid) => req('/player/agent/relationships', pid),
   act: async (pid, id, action, input) => (await req<{ relationship: AgentRelationship }>(`/player/agent/relationships/${encodeURIComponent(id)}/${action}`, pid, { method: 'POST', body: JSON.stringify(input) })).relationship,
   setSharing: async (pid, id, share, expectedRev) => (await req<{ relationship: AgentRelationship }>(`/player/agent/relationships/${encodeURIComponent(id)}/sharing`, pid, { method: 'PATCH', body: JSON.stringify({ shareWithAgencyStaff: share, expectedRev }) })).relationship,
+  setDisclosure: async (pid, id, key, value, expectedRev) => (await req<{ relationship: AgentRelationship }>(`/player/agent/relationships/${encodeURIComponent(id)}/sharing`, pid, { method: 'PATCH', body: JSON.stringify({ disclosure: { [key]: value }, expectedRev }) })).relationship,
+  sharedOpportunities: (pid) => req('/player/agent/shared-opportunities', pid),
 };
 
 export const m24: PlayerM24 = DEMO ? m24mock : live;

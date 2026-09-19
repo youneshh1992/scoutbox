@@ -600,6 +600,10 @@ export function TransactionsScreen({ session, me, transactionId, transactionTab,
   const [filter, setFilter] = useState('');
   const { data: list, error: listError, loading: listLoading, reload: reloadList } = useLoad(() => agent.transactions(s), []);
   const { data: clubs } = useLoad(() => agent.clubs(s), []);
+  // M23 P5.6E §39 — clubs that have invited a workspace for one of this agent's
+  // clients. Shown on the Transactions screen because that is where a workspace
+  // is opened; nothing about the club's recruitment thinking comes with it.
+  const { data: handoffs } = useLoad(() => agent.handoffs(s), []);
   const { data: detail, error: detailError, loading: detailLoading, reload: reloadDetail } = useLoad(
     () => (transactionId ? agent.transaction(s, transactionId) : Promise.resolve(null)), [transactionId],
   );
@@ -657,6 +661,21 @@ export function TransactionsScreen({ session, me, transactionId, transactionTab,
         <Stat v={l.counts.awaitingConfirmation} k={t('tx.countAwaiting')} testId="count-awaiting" />
       </div>
       <p className="dim" data-testid="tx-list-honest">{l.honest}</p>
+      {(handoffs?.items.length ?? 0) > 0 && (
+        <section data-testid="tx-handoffs" style={{ margin: '12px 0' }}>
+          <h4 style={{ margin: '0 0 4px' }}>{t('handoff.title')}</h4>
+          <p className="dim" style={{ fontSize: 12.5, margin: '0 0 8px' }}>{t('handoff.intro')}</p>
+          <div className="list-rows">
+            {(handoffs?.items ?? []).map((h) => (
+              <div key={h.handoffId} className="list-row" data-testid={`handoff-${h.handoffId}`}>
+                <span className="grow"><strong>{h.club.name ?? '—'}</strong></span>
+                <span className="dim" style={{ fontSize: 12 }}>{t('handoff.expires')} {fmtDate(h.expiresAt)}</span>
+              </div>
+            ))}
+          </div>
+          <p className="dim" style={{ fontSize: 12.5 }}>{t('handoff.honest')}</p>
+        </section>
+      )}
       <div className="row wrap gap">
         <label>{t('tx.status')}
           <select value={filter} onChange={(e) => setFilter(e.target.value)} data-testid="tx-filter">

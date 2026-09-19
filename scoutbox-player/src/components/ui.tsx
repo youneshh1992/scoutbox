@@ -21,16 +21,23 @@ export function Pill({ label, tone = 'default' }: { label: string; tone?: 'defau
   );
 }
 
-export function Button({ label, onPress, primary, danger, disabled, small }: {
+export function Button({ label, onPress, primary, danger, disabled, small, testID }: {
   label: string;
   onPress: () => void;
   primary?: boolean;
   danger?: boolean;
   disabled?: boolean;
   small?: boolean;
+  /**
+   * Optional stable handle for a live browser test. A label is the accessible
+   * name and is translated; a testID is neither, so a journey can name the
+   * control it means without pinning English.
+   */
+  testID?: string;
 }) {
   return (
     <Pressable
+      testID={testID}
       onPress={onPress}
       disabled={disabled}
       // M21 §115: the control announces itself as a button and carries its

@@ -196,12 +196,15 @@ export function searchNav(query: string, ctx: NavContext, translate: (key: strin
 //   "#/compliance/<ctxId>"                → one compliance context (P5.6C)
 //   "#/transactions/:id"                  → one transaction workspace (P5.6D)
 //   "#/transactions/:id/<tab>"            → …opened on a tab
-export const CLIENT_TABS = ['overview', 'representation', 'opportunities', 'activity'] as const;
+// M23 P5.6E adds two READ tabs: the club contacts a club routed to this agent,
+// and the client's trials as scheduling (never assessment). Both are gated on the
+// client's own disclosure choice, and both refuse plainly when it is off.
+export const CLIENT_TABS = ['overview', 'representation', 'opportunities', 'contacts', 'trials', 'activity'] as const;
 export type ClientTab = (typeof CLIENT_TABS)[number];
 export const AGENCY_TABS = ['overview', 'team', 'compliance', 'settings'] as const;
 export type AgencyTab = (typeof AGENCY_TABS)[number];
 
-const CLIENT_HASH = /^#\/clients\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})(?:\/(overview|representation|opportunities|activity))?$/;
+const CLIENT_HASH = /^#\/clients\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})(?:\/(overview|representation|opportunities|contacts|trials|activity))?$/;
 const AGENCY_HASH = /^#\/agency\/(overview|team|compliance|settings)$/;
 const CONTEXT_HASH = /^#\/compliance\/(ctx-[A-Za-z0-9][A-Za-z0-9_-]{0,63})$/;
 export const TRANSACTION_TABS = ['overview', 'parties', 'compliance', 'documents', 'messages', 'timeline'] as const;

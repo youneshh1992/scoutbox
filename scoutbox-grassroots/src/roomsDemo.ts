@@ -1397,6 +1397,20 @@ export const demoRooms: RoomsApi = {
     return delay({ trial: trialView(tr), evidence: evidenceView(tr) });
   },
   // ---- M23 P5 formal decision
+  // ---- M23 P5.6E. Synthetic: the demo case has no finalised decision to
+  // progress, so the handoff is honestly unavailable and says which rule refused.
+  // A demo that offered the button would teach that a decision is enough, which
+  // is the one thing §33 forbids.
+  handoff: async (_s, roomId) => delay({
+    handoff: null,
+    available: false,
+    blockers: ['HANDOFF_DECISION_REQUIRED'],
+    blockerVocabulary: ['HANDOFF_NOT_PERMITTED', 'HANDOFF_DECISION_REQUIRED', 'HANDOFF_CASE_STATE', 'HANDOFF_SUBJECT_UNAVAILABLE', 'HANDOFF_MINOR_PATHWAY_DISABLED', 'HANDOFF_BLOCKED', 'HANDOFF_EXISTS', 'HANDOFF_TRANSACTION_EXISTS', 'HANDOFF_COMPLIANCE_UNAVAILABLE'],
+    action: 'inviteToTransaction',
+    note: 'Inviting a transaction is a separate, explicit decision. ScoutBox never creates one from a recruitment decision by itself, and this invitation is not an offer.',
+  }),
+  inviteHandoff: async () => { throw new ApiError(422, 'HANDOFF_DECISION_REQUIRED', 'A finalised decision to progress is needed first.'); },
+  withdrawHandoff: async () => { throw new ApiError(404, 'HANDOFF_NOT_FOUND', 'There is no invitation to withdraw.'); },
   decision: async (_s, roomId) => {
     const r = find(roomId);
     if (!r) throw new Error('ROOM_NOT_FOUND');

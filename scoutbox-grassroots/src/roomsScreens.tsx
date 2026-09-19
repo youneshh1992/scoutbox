@@ -1275,6 +1275,12 @@ function ContactPanel({ session, room, notify, reload }: PanelProps) {
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [bump, setBump] = useState(0);
   const [subject, setSubject] = useState('');
+  /**
+   * M23 P5.6E — the routing the club asks for. `player_only` is the default and
+   * is always available; `both` asks that the client's own agent be a party as
+   * well. There is no third option, and the server decides again at send time.
+   */
+  const [mode, setMode] = useState<'player_only' | 'both'>('player_only');
   const [body, setBody] = useState('');
   const [editing, setEditing] = useState<ContactRecord | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1305,15 +1311,15 @@ function ContactPanel({ session, room, notify, reload }: PanelProps) {
   const moveText = (moved: ContactCaseMove | undefined) => (moved && 'to' in moved ? ` ${t('ct.caseMoved')}` : '');
 
   const saveDraft = () => run(async () => {
-    if (editing) { await rooms.patchContact(session, room.roomId, editing.id, { subject: subject.trim() || null, body: body.trim(), expectedRev: editing.rev }); clearCompose(); return t('ct.updated'); }
-    await rooms.createContact(session, room.roomId, { subject: subject.trim() || null, body: body.trim(), clientKey: createKey });
+    if (editing) { await rooms.patchContact(session, room.roomId, editing.id, { subject: subject.trim() || null, body: body.trim(), contactMode: mode, expectedRev: editing.rev }); clearCompose(); return t('ct.updated'); }
+    await rooms.createContact(session, room.roomId, { subject: subject.trim() || null, body: body.trim(), contactMode: mode, clientKey: createKey });
     clearCompose();
     return t('ct.drafted');
   });
   const sendNow = () => run(async () => {
     const c = editing
-      ? (await rooms.patchContact(session, room.roomId, editing.id, { subject: subject.trim() || null, body: body.trim(), expectedRev: editing.rev })).contact
-      : (await rooms.createContact(session, room.roomId, { subject: subject.trim() || null, body: body.trim(), clientKey: createKey })).contact;
+      ? (await rooms.patchContact(session, room.roomId, editing.id, { subject: subject.trim() || null, body: body.trim(), contactMode: mode, expectedRev: editing.rev })).contact
+      : (await rooms.createContact(session, room.roomId, { subject: subject.trim() || null, body: body.trim(), contactMode: mode, clientKey: createKey })).contact;
     const r = await rooms.sendContact(session, room.roomId, c.id, { expectedRev: c.rev, clientKey: `${createKey}-send` });
     clearCompose();
     return r.delivered ? `${t('ct.sent')}${moveText(r.case)}` : t('ct.sendFailed');
@@ -1350,11 +1356,48 @@ function ContactPanel({ session, room, notify, reload }: PanelProps) {
         <div className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>{t('ct.intro')}</div>
 
         {/* Routing: who this WOULD reach, decided by the server now — never by this screen. */}
-        <div className="badges" style={{ marginBottom: 8 }} aria-label={t('ct.routingLabel')}>
+        <div className="badges" style={{ marginBottom: 8 }} aria-label={t('ct.routingLabel')} data-testid="ct-routing" data-agent-party={routing.agentParty ? '1' : '0'}>
           {routing.available
             ? <span className={`pill ${routing.type === 'guardian' ? 'gold' : 'blue'}`}>{routing.type === 'guardian' ? t('ct.routeGuardian') : t('ct.routePlayer')}</span>
             : <span className="pill">{t('ct.routeUnavailable')}{routing.reason ? ` — ${t(`ct.reason.${routing.reason}`, '')}` : ''}</span>}
+          {/*
+            M23 P5.6E §21. The client's own agent as a SECOND party, never a
+            replacement. When the club asked and the answer was no, the rule that
+            refused is named as a code — the club learns what it may do, not
+            facts about the player it has not been given.
+          */}
+          {routing.available && routing.agentParty && <span className="pill blue" data-testid="ct-agent-party">{t('ct.agentParty')}</span>}
+          {routing.available && !routing.agentParty && routing.agentRefusal && (
+            <span className="pill" data-testid="ct-agent-refused" data-code={routing.agentRefusal}>{t(`ct.agentRefusal.${routing.agentRefusal}`, t('ct.agentRefusal.default'))}</span>
+          )}
         </div>
+        {/*
+          The mode the club ASKS for. Whether it is honoured is re-derived when
+          the message is sent, so a stale screen cannot route anybody: asking is
+          not permission, and there is deliberately no option that reaches the
+          agent INSTEAD of the player.
+        */}
+        {data.canWrite && routing.available && !routing.minor && (
+          <fieldset className="room-fieldset" style={{ marginBottom: 8 }} data-testid="ct-mode">
+            <legend style={{ fontSize: 12.5 }}>{t('ct.modeLegend')}</legend>
+            {(routing.modes ?? ['player_only', 'both']).map((m) => (
+              <label key={m} style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 13, marginRight: 14 }}>
+                <input
+                  type="radio"
+                  name="contact-mode"
+                  value={m}
+                  checked={mode === m}
+                  onChange={() => setMode(m)}
+                  data-testid={`ct-mode-${m}`}
+                  aria-label={t(`ct.mode.${m}`)}
+                />
+                {t(`ct.mode.${m}`)}
+              </label>
+            ))}
+            <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>{t('ct.modeNote')}</div>
+          </fieldset>
+        )}
+
 
         {!data.case.acceptsContact && (
           <div className="notice block" role="status" style={{ marginBottom: 8 }}>

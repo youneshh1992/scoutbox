@@ -10,8 +10,22 @@ import { useEffect, useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
 import { colors } from '../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
-import { m24, m24ClientKey, type AgentAction, type AgentRelationship } from '../data/m24client';
+import { m24, m24ClientKey, type AgentAction, type AgentRelationship, type DisclosureKey } from '../data/m24client';
 import { pt } from '../i18n';
+
+/**
+ * M23 P5.6E — the three disclosure choices, in the order a player meets them.
+ * Each is a SEPARATE question with its own words, because they are separate
+ * questions: one asks whether clubs may see who represents you, one whether a
+ * club's message also reaches your agent, one whether your agent is given your
+ * trial schedule. Each starts off. Confirming a relationship turns none of them
+ * on, and turning one off stops the next one immediately.
+ */
+const DISCLOSURES: { key: DisclosureKey; label: Parameters<typeof pt>[0]; help: Parameters<typeof pt>[0] }[] = [
+  { key: 'clubPresence', label: 'm27dPresence', help: 'm27dPresenceHelp' },
+  { key: 'contactRouting', label: 'm27dRouting', help: 'm27dRoutingHelp' },
+  { key: 'trialVisibility', label: 'm27dTrials', help: 'm27dTrialsHelp' },
+];
 
 function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): [T | null, () => void, string | null] {
   const [v, setV] = useState<T | null>(null);
@@ -54,6 +68,17 @@ export function MyAgentSection({ playerId, isMinor }: { playerId: string; isMino
   const share = async (r: AgentRelationship) => {
     setBusy(true); setMsg(null);
     try { await m24.setSharing(playerId, r.id, !r.shareWithAgencyStaff, r.rev); reload(); } catch (e) { setMsg(e instanceof Error && e.message ? e.message : pt('m24failed')); } finally { setBusy(false); }
+  };
+  /** One disclosure, one request. The other two are not sent, so they cannot move. */
+  const disclose = async (r: AgentRelationship, key: DisclosureKey) => {
+    setBusy(true); setMsg(null);
+    try {
+      await m24.setDisclosure(playerId, r.id, key, !(r.disclosure?.[key] ?? false), r.rev);
+      reload();
+    } catch (e) {
+      const code = (e as { code?: string }).code;
+      setMsg(code === 'REPRESENTATION_VERSION_CONFLICT' ? pt('m24conflict') : e instanceof Error && e.message ? e.message : pt('m24failed'));
+    } finally { setBusy(false); }
   };
   const items = data?.items ?? [];
   return (
@@ -103,6 +128,40 @@ export function MyAgentSection({ playerId, isMinor }: { playerId: string; isMino
                   <Muted size={11}>{pt('m24shareNote')}</Muted>
                 </View>
               )}
+              {/*
+                M23 P5.6E — what this agent may see and be sent. Three separate
+                choices, each with its own state in words (on / off) rather than
+                a bare switch, so a screen reader and a glance both get the same
+                answer. Every one starts off.
+              */}
+              {r.status === 'active' && (
+                <View style={{ marginTop: 8 }} testID={`my-agent-disclosure-${r.id}`}>
+                  <Text style={{ color: colors.text, fontWeight: '700', fontSize: 12.5 }}>{pt('m27dTitle')}</Text>
+                  <Muted size={11}>{pt('m27dIntro')}</Muted>
+                  {DISCLOSURES.map((d) => {
+                    const on = r.disclosure?.[d.key] === true;
+                    return (
+                      <View key={d.key} style={{ marginTop: 6 }} testID={`my-agent-d-${d.key}`}>
+                        <Row>
+                          <Text style={{ color: colors.text, fontSize: 12.5, flex: 1 }}>{pt(d.label)}</Text>
+                          <Pill label={on ? pt('m27dOn') : pt('m27dOff')} tone={on ? 'green' : 'default'} />
+                        </Row>
+                        <Muted size={11}>{pt(d.help)}</Muted>
+                        <View style={{ marginTop: 4, alignSelf: 'flex-start' }}>
+                          <Button
+                            small
+                            disabled={busy}
+                            label={on ? pt('m27dTurnOff') : pt('m27dTurnOn')}
+                            onPress={() => disclose(r, d.key)}
+                            testID={`my-agent-d-${d.key}-toggle`}
+                          />
+                        </View>
+                      </View>
+                    );
+                  })}
+                  <Muted size={11}>{pt('m27dHonest')}</Muted>
+                </View>
+              )}
             </>
           )}
           <Muted size={11}>{pt('m24whatIs')}</Muted>
@@ -110,6 +169,42 @@ export function MyAgentSection({ playerId, isMinor }: { playerId: string; isMino
       ))}
       {items.length === 0 && !err && <Muted size={12}>{pt('m24none')}</Muted>}
       {msg && <View accessibilityLiveRegion="polite"><Muted size={12}>{msg}</Muted></View>}
+    </Card>
+  );
+}
+
+/**
+ * M23 P5.6E §19 — opportunities an agent put in front of this player.
+ *
+ * A separate card, because it is a separate thing: these are chances to look at,
+ * not relationship admin. Every row says in words that applying is the player's
+ * own action, and there is no "apply" button here at all — the player applies on
+ * the opportunity's own screen, in their own name, exactly as they always did.
+ */
+export function AgentSharedOpportunities({ playerId, isMinor }: { playerId: string; isMinor: boolean }) {
+  const [data, , err] = useLoad(() => m24.sharedOpportunities(playerId), [playerId]);
+  if (isMinor) return null;
+  const items = (data?.items ?? []).filter((s) => !s.withdrawnAt);
+  // Absent rather than empty: a card that says "your agent has shared nothing"
+  // is a nudge about having an agent, and this surface is not for that.
+  if (!items.length) return null;
+  return (
+    <Card testID="agent-shared-opportunities">
+      <SectionTitle>📣 {pt('m27sTitle')}</SectionTitle>
+      <Muted size={12}>{pt('m27sIntro')}</Muted>
+      {err && <Muted size={12}>{err}</Muted>}
+      {items.map((s) => (
+        <View key={s.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6 }} testID={`agent-shared-${s.id}`}>
+          <Row>
+            <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, flex: 1 }}>{s.title ?? pt('m27sUntitled')}</Text>
+            {s.deadline && <Pill label={`${pt('m27sBy')} ${s.deadline}`} tone="blue" />}
+          </Row>
+          <Muted size={12}>{s.orgName ?? '—'} · {pt('m27sSharedBy')} {s.sharedByName ?? '—'} · {fmt(s.sharedAt)}</Muted>
+          {s.note && <Text style={{ color: colors.text, fontSize: 12.5, marginTop: 4 }}>{s.note}</Text>}
+          <Muted size={11}>{pt('m27sYours')}</Muted>
+        </View>
+      ))}
+      <Muted size={11}>{pt('m27sHonest')}</Muted>
     </Card>
   );
 }

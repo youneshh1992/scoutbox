@@ -15,6 +15,7 @@ import { ApiError, type Session } from './api';
 import { confirmDestructive, DESTRUCTIVE_ACTIONS } from './confirmAction';
 import {
   rooms, type Room, type DecisionSurface, type DecisionOutcome, type DecisionDraft, type FormalDecision, type DecisionEvidenceRefKind,
+  type HandoffSurface,
 } from './roomsApi';
 import { t, fmtDateTime } from './i18n';
 
@@ -255,6 +256,9 @@ export function DecisionWorkflow({ session, room, notify, reload }: Props) {
         </div>
       )}
 
+      {/* ---- M23 P5.6E: the transaction handoff ---- */}
+      <HandoffSection session={session} room={room} notify={notify} />
+
       {/* ---- history ---- */}
       <div className="section" aria-label={t('dc.history')}>
         <h4>{t('dc.history')}</h4>
@@ -265,6 +269,65 @@ export function DecisionWorkflow({ session, room, notify, reload }: Props) {
         {data.omitted > 0 && <div className="dim" style={{ fontSize: 12 }}>{t('dc.omitted').replace('{n}', String(data.omitted))}</div>}
         <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{t('rm.decisionAppendOnly')}</div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * M23 P5.6E §32/§38 — the club's transaction-handoff entrypoint.
+ *
+ * It sits below the decision because it FOLLOWS one, and it is a separate,
+ * explicit act: ScoutBox never opens a workspace because a decision said
+ * "progress". The control appears only when the server says every precondition
+ * is met, and every refusal is a code the screen words — the decision's reasons,
+ * its note and its evidence never reach this component, because they are not in
+ * what the server sends it.
+ *
+ * "Visibility of button is not authorization": pressing it asks the server,
+ * which checks everything again.
+ */
+function HandoffSection({ session, room, notify }: { session: Props['session']; room: Props['room']; notify: Props['notify'] }) {
+  const [data, setData] = useState<HandoffSurface | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => {
+    try { setData(await rooms.handoff(session, room.roomId)); setError(null); } catch (e) { setError(decisionErrMessage(e)); }
+  }, [session, room.roomId]);
+  useEffect(() => { void load(); }, [load, room.rev]);
+  if (error) return <div className="section" aria-label={t('hof.title')}><h4>{t('hof.title')}</h4><div className="notice block">{error}</div></div>;
+  if (!data) return null;
+  const h = data.handoff;
+  const act = async (fn: () => Promise<unknown>, okKey: string) => {
+    setBusy(true); setError(null);
+    try { await fn(); notify(t(okKey)); await load(); } catch (e) { setError(decisionErrMessage(e)); } finally { setBusy(false); }
+  };
+  return (
+    <div className="section" aria-label={t('hof.title')} data-testid="handoff-section" data-available={data.available ? '1' : '0'}>
+      <h4>{t('hof.title')}</h4>
+      <div className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>{t('hof.intro')}</div>
+      {h && (
+        <div className="badges" style={{ marginBottom: 8 }} data-testid="handoff-state" data-status={h.status}>
+          <span className={`pill ${h.status === 'accepted' ? 'blue' : h.status === 'invited' ? 'gold' : ''}`}>{t(`hof.${h.status}`, h.status)}</span>
+          <span className="dim" style={{ fontSize: 12 }}>{h.representedAtInvitation ? t('hof.represented') : t('hof.notRepresented')}</span>
+        </div>
+      )}
+      {!data.available && data.blockers.length > 0 && (
+        <div className="notice block" role="status" style={{ marginBottom: 8 }} data-testid="handoff-blockers">
+          {t('hof.blocked')}
+          <ul style={{ margin: '4px 0 0 18px', padding: 0 }}>
+            {data.blockers.map((b) => <li key={b} data-testid={`handoff-blocker-${b}`}>{t(`hof.b.${b}`, b)}</li>)}
+          </ul>
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {data.available && (
+          <button className="primary" disabled={busy} onClick={() => act(() => rooms.inviteHandoff(session, room.roomId, { clientKey: `hof-${Date.now().toString(36)}` }), 'hof.invited')} data-testid="handoff-invite">{t('hof.invite')}</button>
+        )}
+        {h?.status === 'invited' && (
+          <button disabled={busy} onClick={() => act(() => rooms.withdrawHandoff(session, room.roomId), 'hof.withdrawn')} data-testid="handoff-withdraw">{t('hof.withdraw')}</button>
+        )}
+      </div>
+      <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>{h?.honest ?? t('hof.honest')}</div>
     </div>
   );
 }
