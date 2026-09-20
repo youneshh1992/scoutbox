@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError, DEMO_MODE, type Notification, type Org, type Session } from './api';
-import { agent, type Me } from './agentApi';
+import { agent, demoIdentities, type Me } from './agentApi';
 import {
   AgencyScreen, ClientsScreen, HomeScreen, InboxScreen, OpportunitiesScreen, ProfileScreen, SafetyModal, Toast, markClean,
 } from './screens';
@@ -96,10 +96,10 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
   useEffect(() => {
     api.listOrgs().then((list) => { setOrgs(list); if (list.length === 1) setSelected(list[0].id); }).catch(() => setError(t('login.unreachable')));
   }, []);
-  const enter = async () => {
+  const enter = async (asName = scoutName, asRole = role) => {
     if (!selected) return setError(t('login.pickOrg'));
-    if (!scoutName.trim()) return setError(t('login.nameRequired'));
-    try { onLogin(await api.login(selected, scoutName, role, password || undefined)); } catch (e) { setError(e instanceof Error ? e.message : 'Login failed'); }
+    if (!asName.trim()) return setError(t('login.nameRequired'));
+    try { onLogin(await api.login(selected, asName, asRole, password || undefined)); } catch (e) { setError(e instanceof Error ? e.message : 'Login failed'); }
   };
   return (
     <div className="login">
@@ -116,11 +116,33 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
           </button>
         ))}
       </div>
+      {DEMO_MODE && demoIdentities.length > 0 && (
+        // The demo's roster, offered rather than guessed. A name that is not on
+        // it is refused AGENCY_MEMBERSHIP_REQUIRED — correctly, because only an
+        // administrator adds a member — and in a demo there is no administrator
+        // to ask, so an unlisted name used to be a dead end.
+        <div className="demo-identities" data-testid="demo-identities">
+          <p className="tagline" style={{ maxWidth: 560, textAlign: 'center', fontSize: 12.5, margin: '0 0 10px' }}>{t('login.demoWho')}</p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
+            {demoIdentities.map((d) => (
+              <button
+                key={d.name}
+                className="secondary"
+                data-testid={`demo-as-${d.tier}`}
+                onClick={() => { setScoutName(d.name); setRole(d.role); void enter(d.name, d.role); }}
+                title={t('login.demoAs').replace('{name}', d.name)}
+              >
+                {d.name} <span className="pill">{d.tier.replace(/_/g, ' ')}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="enter-row">
         <input placeholder={t('login.name')} value={scoutName} onChange={(e) => setScoutName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && enter()} aria-label={t('login.name')} />
         <input type="password" placeholder={t('login.password')} value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && enter()} className="login-pw" aria-label={t('login.password')} />
         <select value={role} onChange={(e) => setRole(e.target.value)} aria-label="Role">{ROLES.map((r) => <option key={r}>{r}</option>)}</select>
-        <button className="primary" onClick={enter}>{t('login.enter')}</button>
+        <button className="primary" onClick={() => void enter()}>{t('login.enter')}</button>
       </div>
       <div className="tagline" style={{ maxWidth: 560, textAlign: 'center', fontSize: 12.5 }}>{t('login.roleNote')}</div>
       {error && <div className="notice block">{error}</div>}

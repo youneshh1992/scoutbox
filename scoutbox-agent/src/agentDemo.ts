@@ -36,6 +36,29 @@ const AFFS: Aff[] = [
   { id: 'aff-2', userId: 'usr-ana', tiers: ['licensed_agent'], startedAt: NOW - 300 * DAY, endedAt: null, endedReason: null, rev: 1, revAt: NOW - 300 * DAY },
   { id: 'aff-3', userId: 'usr-ben', tiers: ['analyst'], startedAt: NOW - 120 * DAY, endedAt: null, endedReason: null, rev: 1, revAt: NOW - 120 * DAY },
 ];
+/**
+ * The identities this demo actually has an agency affiliation for.
+ *
+ * Why this is exported: the login screen takes a free-text name, exactly as the
+ * real app does, and the demo's `login` invents a user for any name it does not
+ * recognise — but it does NOT invent an affiliation, because the real server does
+ * not either. A brand-new name at an agency is correctly refused
+ * AGENCY_MEMBERSHIP_REQUIRED ("your agency's administrator sets your roles", as
+ * the login screen itself says).
+ *
+ * That refusal is right, so it is not what gets changed. What was wrong is that
+ * nothing told you who you CAN be, so any other name led to a workspace that
+ * refused every request with no administrator anywhere to ask. The login screen
+ * now offers these, derived from the fixtures rather than retyped, so the list
+ * cannot drift out of step with AFFS.
+ */
+export const DEMO_IDENTITIES: { name: string; role: string; tier: Tier }[] = AFFS
+  .filter((a) => a.endedAt === null)
+  .map((a) => {
+    const u = USERS.find((x) => x.id === a.userId);
+    return { name: u?.name ?? a.userId, role: u?.role ?? 'Agent', tier: a.tiers[0] };
+  });
+
 const PERMISSIONS: Record<string, Tier[]> = {
   'me.read': ['licensed_agent', 'agency_admin', 'analyst', 'assistant', 'finance'],
   'profile.write.own': ['licensed_agent'], 'verification.submit': ['licensed_agent'], 'clients.read.own': ['licensed_agent'],

@@ -5,7 +5,7 @@
 // (a client's private data before confirmation, a colleague's relationship, a
 // dispute reason) has no field here to arrive in.
 import { DEMO_MODE, headers, request, type Session } from './api';
-import { demoAgent } from './agentDemo';
+import { demoAgent, DEMO_IDENTITIES } from './agentDemo';
 
 export const VERIFICATION_STATES = ['UNVERIFIED', 'PENDING', 'VERIFIED', 'STALE', 'INACTIVE', 'MANUAL_REVIEW_REQUIRED'] as const;
 export type VerificationState = (typeof VERIFICATION_STATES)[number];
@@ -559,6 +559,8 @@ export const httpAgent: AgentApi = {
 };
 
 export const agent: AgentApi = DEMO_MODE ? demoAgent : httpAgent;
+/** The demo's agency roster, surfaced so the login screen can offer it (empty outside demo mode). */
+export const demoIdentities = DEMO_MODE ? DEMO_IDENTITIES : [];
 
 /** A fresh idempotency key for one intended action. */
 export const clientKey = () => `ag-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

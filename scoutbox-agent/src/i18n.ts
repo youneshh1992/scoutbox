@@ -66,6 +66,8 @@ const en = {
   'login.enter': 'Enter workspace', 'login.pickOrg': 'Pick an agency.', 'login.nameRequired': 'Enter your name — every session is attributed to a named individual.',
   'login.unreachable': 'Cannot reach scoutbox-server on localhost:4000 — start it first.',
   'login.roleNote': 'A role you type here is a job title. It grants nothing: your agency’s administrator sets your roles, and only a verified licence permits a regulated action.',
+  'login.demoWho': 'This demo has three people on the agency’s roster. Sign in as one of them — any other name is correctly refused, because only an administrator can add a member.',
+  'login.demoAs': 'Sign in as {name}',
   // ---- home
   'home.title': 'Overview', 'home.active': 'Active clients', 'home.pending': 'Awaiting confirmation', 'home.expiring': 'Ending within 30 days',
   'home.disputed': 'Disputed', 'home.expired': 'Expired', 'home.noProfile': 'You have no agent profile yet. Create one under My profile & verification.',
@@ -364,6 +366,8 @@ const fr: typeof en = {
   'login.enter': 'Entrer dans l’espace de travail', 'login.pickOrg': 'Choisissez une agence.', 'login.nameRequired': 'Saisissez votre nom — chaque session est attribuée à une personne nommée.',
   'login.unreachable': 'Impossible de joindre scoutbox-server sur localhost:4000 — démarrez-le d’abord.',
   'login.roleNote': 'Le rôle saisi ici est un intitulé de poste. Il n’accorde rien : l’administrateur de votre agence définit vos rôles, et seule une licence vérifiée permet une action réglementée.',
+  'login.demoWho': 'Cette démo compte trois personnes inscrites à l’agence. Connectez-vous en tant que l’une d’elles — tout autre nom est refusé à juste titre, car seul un administrateur peut ajouter un membre.',
+  'login.demoAs': 'Se connecter en tant que {name}',
   'home.title': 'Vue d’ensemble', 'home.active': 'Clients actifs', 'home.pending': 'En attente de confirmation', 'home.expiring': 'Se terminant sous 30 jours',
   'home.disputed': 'Contestées', 'home.expired': 'Expirées', 'home.noProfile': 'Vous n’avez pas encore de profil d’agent. Créez-en un sous Mon profil et vérification.',
   'home.verificationState': 'Facette licence FIFA', 'home.tiers': 'Vos rôles dans cette agence',
