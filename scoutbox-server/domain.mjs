@@ -27,16 +27,39 @@ export function adultAgeFor(country) {
  * caught it. Birthday semantics: the player turns N at 00:00 UTC on the
  * birthday; a 29 February birthday counts on 1 March in a non-leap year.
  */
+/**
+ * Age on a date, or NaN when the date of birth cannot be read.
+ *
+ * M23 P5.6F (F-8). `new Date(null)` is not an invalid date — it is the epoch, so
+ * a record with `dob: null` used to compute as a 56-year-old and sail through
+ * every adult gate on the platform. `0` and `false` did the same. Only
+ * `undefined`, `''` and an unparseable string happened to fail closed, and they
+ * did so by accident rather than by rule.
+ *
+ * A missing date of birth is exactly the shape an IMPORTED record has: the M13
+ * prospect import treats dob as optional (m13/imports.mjs) and projects a
+ * missing one as `dob: null`. So "age unknown" is a real state, and the only
+ * safe reading of it is NOT "adult".
+ *
+ * NaN is deliberate rather than a thrown error: every caller either compares it
+ * (`>= adultAge`, `< required` — both false for NaN, which is the closed answer)
+ * or renders it (JSON null, i.e. "unknown"). A record whose age cannot be
+ * established is never treated as an adult.
+ */
 export function ageOn(dob, onDate = new Date()) {
+  if (typeof dob !== 'string' || dob.trim() === '') return NaN;
   const birth = new Date(dob);
+  if (Number.isNaN(birth.getTime())) return NaN;
   let age = onDate.getUTCFullYear() - birth.getUTCFullYear();
   const m = onDate.getUTCMonth() - birth.getUTCMonth();
   if (m < 0 || (m === 0 && onDate.getUTCDate() < birth.getUTCDate())) age--;
   return age;
 }
 
+/** Adult only when the age is KNOWN and reaches the threshold. Unknown is not adult. */
 export function isAdult(player, onDate = new Date()) {
-  return ageOn(player.dob, onDate) >= adultAgeFor(player.country);
+  const age = ageOn(player?.dob, onDate);
+  return Number.isFinite(age) && age >= adultAgeFor(player?.country);
 }
 
 // ---------------------------------------------------- platform separation

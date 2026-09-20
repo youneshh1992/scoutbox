@@ -235,25 +235,89 @@ export function termMonthsOf(raw) {
 
 export const termEndAt = (startAt, months) => startAt + months * MONTH_MS;
 
+/**
+ * A temporal boundary on an agreement is one of exactly two things, and telling
+ * them apart is the whole of the P5.6F F-2/F-3 repair:
+ *
+ *   ABSENT (null / undefined) — an OPEN boundary. This is legal and common: a
+ *     proposal is written with `startAt: null, endAt: null` (m24/index.mjs), and
+ *     an open-ended mandate is contract-legal for an entity under FFAR 12(5).
+ *     An absent boundary keeps its meaning and constrains nothing.
+ *
+ *   PRESENT — a claim about time that an authorization decision is about to rely
+ *     on. It must be READABLE (a finite number of epoch ms) and it must be
+ *     SATISFIED. Anything else — an ISO-8601 string from an imported row, a NaN
+ *     left by a failed Date.parse, a numeric string, an Infinity — is a boundary
+ *     we cannot evaluate, and an unevaluable boundary in a security decision must
+ *     REFUSE, never be ignored.
+ *
+ * The pre-P5.6F code got both directions wrong. `startAt` was never consulted
+ * anywhere, so a mandate whose term began in a year granted access today. And
+ * `typeof a.endAt === 'number'` let every non-number fall straight through the
+ * expiry guard into "not expired", so a mandate that ended in 2024 granted access
+ * for ever — and `NaN` did the same, being a number for which `NaN <= now` is
+ * false.
+ */
+const boundaryAbsent = (v) => v === null || v === undefined;
+/** A present boundary as a finite number, or null when it cannot be read. */
+const readBoundary = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+/** Has a PRESENT end boundary been reached, or is it unreadable? Either way: over. */
+function endBoundaryPassed(endAt, now) {
+  if (boundaryAbsent(endAt)) return false;          // open-ended never expires
+  const n = readBoundary(endAt);
+  if (n === null) return true;                      // present but unreadable → fail closed
+  return n <= now;                                  // `endAt === now` is over
+}
+
+/** Has a PRESENT start boundary been reached? An absent start is already open. */
+function startBoundaryReached(startAt, now) {
+  if (boundaryAbsent(startAt)) return true;         // open start
+  const n = readBoundary(startAt);
+  if (n === null) return false;                     // present but unreadable → fail closed
+  return n <= now;                                  // `startAt === now` counts as started
+}
+
+/**
+ * Does the agreement's TERM cover `now`? Exported so the term rule can be
+ * asserted directly rather than only through a route's response.
+ *
+ * Note on the status vocabulary: a not-yet-started mandate is still an `active`
+ * agreement — AGREEMENT_STATUSES has no "not yet in force" value, and P5.6F does
+ * not invent one, because that would change a frozen contract. So a future-start
+ * row keeps reading as `active` in a projection (truthfully: it is a live
+ * agreement) while granting no access at all. Access is the question this
+ * function answers; status is a different question.
+ */
+export function agreementTermCoversNow(a, now = Date.now()) {
+  if (!a) return false;
+  return startBoundaryReached(a.startAt, now) && !endBoundaryPassed(a.endAt, now);
+}
+
 /** The status a record HAS at `now`: an active agreement past its end reads as expired. */
 export function effectiveAgreementStatus(a, now = Date.now()) {
   if (!a) return null;
-  if (a.status === 'active' && typeof a.endAt === 'number' && a.endAt <= now) return 'expired';
+  if (a.status === 'active' && endBoundaryPassed(a.endAt, now)) return 'expired';
   return a.status;
 }
 
 /**
  * THE access predicate (P5.6A step 6, P5.6B §17/§29/§30/§31): private client
  * access exists only for the agent named on an ACTIVE, client-confirmed,
- * unexpired relationship. Nothing else — not a proposal, not a dispute, not
- * a colleague's agreement, not agency membership — grants it. The caller
- * applies the block and visibility gates separately (step 8).
+ * unexpired relationship WHOSE TERM COVERS NOW. Nothing else — not a proposal,
+ * not a dispute, not a colleague's agreement, not agency membership, not a
+ * mandate that has yet to begin — grants it. The caller applies the block and
+ * visibility gates separately (step 8).
  */
 export function agreementGrantsAccess(a, agentUserId, now = Date.now()) {
   // A legacy agency-level row has no agent; it can never match a caller,
   // not even a caller with no id.
   if (!a || typeof a.agentUserId !== 'string' || !a.agentUserId) return false;
-  return a.agentUserId === agentUserId && a.confirmedAt != null && effectiveAgreementStatus(a, now) === 'active';
+  if (a.agentUserId !== agentUserId || a.confirmedAt == null) return false;
+  // effectiveAgreementStatus covers the END boundary (including unreadable);
+  // the start boundary is this predicate's own responsibility.
+  if (effectiveAgreementStatus(a, now) !== 'active') return false;
+  return startBoundaryReached(a.startAt, now);
 }
 
 /**

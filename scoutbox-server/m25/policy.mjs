@@ -257,6 +257,11 @@ export function evaluatePolicy({ action, memberAssociations = [], facets = {}, p
 
 /** FFAR "Minor" / FA "Minor": under 18. A separate predicate from the visibility age of majority (DR-14). */
 export function isRegulatoryMinor(dob, now = Date.now()) {
+  // P5.6F (F-8): `new Date(null)` is the EPOCH, not an invalid date, so a null
+  // date of birth used to answer "not a minor" (a 56-year-old) instead of
+  // "unknown". Same for 0 and false. Only a non-empty string can be a date of
+  // birth here; anything else is unknown, and unknown blocks (evaluateMinorGate).
+  if (typeof dob !== 'string' || dob.trim() === '') return null;
   const b = new Date(dob);
   if (Number.isNaN(b.getTime())) return null;
   const on = new Date(now);

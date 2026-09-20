@@ -110,9 +110,21 @@ export function registerCompliance(rawCtx) {
   app.post('/auth/reviewer/login', (req, res) => {
     const id = String(req.body?.reviewerId ?? '').trim();
     const secret = String(req.body?.secret ?? '');
+    // P5.6F: the compliance lane is the one where a guessed credential buys the
+    // most, so the per-identifier failed-login budget is checked here BEFORE the
+    // secret is verified. An unknown id, a wrong secret and a revoked reviewer
+    // already share one refusal; the lockout shares it too, so the 429 tells an
+    // attacker nothing the uniform refusal did not already withhold.
+    const bucket = `reviewer:${id.toLowerCase()}`;
+    if (rateLimit.peek('login_failure', bucket).limited) {
+      return res.status(429).json(rateLimitedBody('login_failure'));
+    }
     const r = reviewerById(id);
     const good = r && r.status === 'active' && !!verifyPassword(secret, r.secretHash);
-    if (!good) return sendComplianceError(res, { error: 'REVIEWER_CREDENTIALS_INVALID', message: 'Reviewer id and secret do not match an active reviewer.' }, 'login');
+    if (!good) {
+      rateLimit.limited('login_failure', bucket);
+      return sendComplianceError(res, { error: 'REVIEWER_CREDENTIALS_INVALID', message: 'Reviewer id and secret do not match an active reviewer.' }, 'login');
+    }
     const token = createSession('ts_reviewer', r.id);
     res.json({ token, reviewer: publicReviewer(r) });
   });

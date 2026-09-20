@@ -601,6 +601,37 @@ function devLoginRefused(res) {
   return true;
 }
 
+// ----------------------------------------------- M23 P5.6F: failed-login budget
+//
+// Complements `authLimiter` above rather than replacing it. That one is per IP
+// and counts every /auth request including successes; this one is per IDENTIFIER
+// and counts only wrong guesses. Both are wanted: the IP limiter bounds volume,
+// this bounds guessing at one account.
+//
+// Three properties the wiring has to preserve, each of which is a way to get
+// this wrong:
+//
+//   1. A SUCCESS costs nothing. Only `noteLoginFailure` charges the bucket, so
+//      ordinary sign-in traffic can never lock anybody out.
+//   2. The lockout is tested BEFORE the credential is verified, so a correct
+//      guess arriving after the budget is gone is refused rather than rewarded.
+//   3. An identifier that does not exist is charged and refused IDENTICALLY to
+//      one that does, so the 429 is not a new account-existence oracle. (The
+//      pre-existing 404 on an unknown id is frozen behaviour from M7 and is not
+//      changed here — but this limiter must not add a second signal on top.)
+
+/** Normalise an identifier to one bucket: trimmed, lower-cased, never empty. */
+const loginKey = (identifier) => String(identifier ?? '').trim().toLowerCase() || 'unknown';
+
+/** True (and the response already sent) when this identifier is locked out. */
+function loginLockedOut(res, identifier) {
+  if (!rateLimit.peek('login_failure', loginKey(identifier)).limited) return false;
+  res.status(429).json(rateLimitedBody('login_failure'));
+  return true;
+}
+
+const noteLoginFailure = (identifier) => { rateLimit.limited('login_failure', loginKey(identifier)); };
+
 // ------------------------------------------------------------ notifications
 // In-app notification feed. audience = {kind: 'player'|'guardian'|'org_user', id}.
 // (Push / email delivery is a production integration behind this same record.)
@@ -1043,11 +1074,14 @@ app.post('/auth/player/signup', (req, res) => {
 });
 
 app.post('/auth/player/login', (req, res) => {
+  // P5.6F: lockout first — before the lookup, so an unknown id and a real one
+  // are refused identically once the budget is gone.
+  if (loginLockedOut(res, `player:${req.body?.playerId}`)) return;
   const p = findPlayer(req.body?.playerId);
-  if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
+  if (!p) { noteLoginFailure(`player:${req.body?.playerId}`); return res.status(404).json({ error: 'PLAYER_NOT_FOUND' }); }
   if (p.password) {
     const check = verifyPassword(req.body?.password ?? '', p.password);
-    if (!check) return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This profile is password-protected.' });
+    if (!check) { noteLoginFailure(`player:${p.id}`); return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This profile is password-protected.' }); }
     if (check === 'upgrade') p.password = hashPassword(req.body.password); // migrate legacy plain-text
   } else if (!DEV_LOGINS) {
     return devLoginRefused(res);
@@ -1132,11 +1166,13 @@ app.post('/auth/guardian/verify-email', (req, res) => {
 });
 
 app.post('/auth/guardian/login', (req, res) => {
+  const tried = `guardian:${req.body?.guardianId ?? req.body?.email}`;
+  if (loginLockedOut(res, tried)) return;
   const g = db.guardians.find((x) => x.id === req.body?.guardianId || x.email === req.body?.email);
-  if (!g) return res.status(404).json({ error: 'GUARDIAN_NOT_FOUND' });
+  if (!g) { noteLoginFailure(tried); return res.status(404).json({ error: 'GUARDIAN_NOT_FOUND' }); }
   if (g.password) {
     const check = verifyPassword(req.body?.password ?? '', g.password);
-    if (!check) return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This account is password-protected.' });
+    if (!check) { noteLoginFailure(tried); return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This account is password-protected.' }); }
     if (check === 'upgrade') g.password = hashPassword(req.body.password);
   } else if (!DEV_LOGINS) {
     return devLoginRefused(res);
@@ -1573,8 +1609,9 @@ app.post('/auth/org/register-grassroots', (req, res) => {
 
 app.post('/auth/org/login', (req, res) => {
   const { orgId, scoutName, role, platform } = req.body || {};
+  if (loginLockedOut(res, `org:${orgId}`)) return;
   const org = db.orgs.find((o) => o.id === orgId);
-  if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
+  if (!org) { noteLoginFailure(`org:${orgId}`); return res.status(404).json({ error: 'ORG_NOT_FOUND' }); }
   // Hard platform separation: a grassroots club exists only on ScoutBox
   // Grassroots; every other org exists only on ScoutBox. No crossover.
   const wantsGrassroots = platform === 'grassroots';
@@ -1598,7 +1635,7 @@ app.post('/auth/org/login', (req, res) => {
   // (seeded demo) orgs are a development shortcut only.
   if (org.password) {
     const check = verifyPassword(req.body?.password ?? '', org.password);
-    if (!check) return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This organisation is password-protected.' });
+    if (!check) { noteLoginFailure(`org:${orgId}`); return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This organisation is password-protected.' }); }
     if (check === 'upgrade') org.password = hashPassword(req.body.password);
   } else if (!DEV_LOGINS) {
     return devLoginRefused(res);

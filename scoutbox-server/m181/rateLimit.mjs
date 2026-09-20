@@ -143,6 +143,20 @@ export const RATE_LIMIT_POLICY = {
   opportunity_share: { max: 60, windowMs: 3_600_000, scope: 'actor', note: 'Opportunities an agent shares with a client, and withdrawals of them.' },
   transaction_handoff: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Transaction-workspace invitations a club issues from a recruitment case, and withdrawals of them.' },
 
+  // M23 P5.6F — credential guessing, per identifier.
+  //
+  // `app.use('/auth', authLimiter)` (M7, adapters.mjs) already throttles the
+  // whole /auth surface at 40/min per IP, and that stays. What it cannot do is
+  // bound guessing against ONE account: an attacker spread across addresses gets
+  // 40/min from each, while a shared-NAT office shares a single bucket. Worse,
+  // it counts SUCCESSES, so ordinary sign-in traffic spends the anti-guessing
+  // budget and one tenant's normal use can deny another tenant's login from the
+  // same egress address.
+  //
+  // This policy is the complement, not the replacement: charged only when a
+  // guess is WRONG, and keyed by the identifier that was tried.
+  login_failure: { max: 20, windowMs: 900_000, scope: 'actor', note: 'Failed sign-in attempts, per identifier tried. A successful sign-in costs nothing.' },
+
   // outbound to people
   evidence_request: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Evidence requests to players and guardians.' },
   org_invite: { max: 25, windowMs: 86_400_000, scope: 'org', note: 'Staff invitations.' },
@@ -207,6 +221,17 @@ export function createRateLimiter({ provider = process.env.SCOUTBOX_RATE_LIMIT_P
       const policy = RATE_LIMIT_POLICY[action];
       if (!policy) throw new Error(`Unknown rate-limit action "${action}".`);
       return impl.consume(`${action}:${keyPart}`, policy.max, policy.windowMs, now);
+    },
+    /**
+     * Read a bucket WITHOUT consuming a unit. Needed by any check that must run
+     * before the expensive or revealing part of a request — a failed-login
+     * lockout has to be tested before the credential is verified, or a correct
+     * guess made after the budget is gone would still be rewarded.
+     */
+    peek: (action, keyPart, now) => {
+      const policy = RATE_LIMIT_POLICY[action];
+      if (!policy) throw new Error(`Unknown rate-limit action "${action}".`);
+      return impl.peek(`${action}:${keyPart}`, policy.max, policy.windowMs, now);
     },
     reset: (action, keyPart) => impl.reset(`${action}:${keyPart}`),
     /** Operator-facing capability. Never claims protection it does not have. */
