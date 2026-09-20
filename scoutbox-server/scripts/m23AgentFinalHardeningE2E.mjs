@@ -524,9 +524,22 @@ section('N/live — private club recruitment intelligence stays private');
     const txt = JSON.stringify(r.body ?? {});
     neg(!/org-eastport|org-harbour|Maria Keane|Rita Vale/.test(txt), `N2 the agency's own ${what} contains no other org's case, player or user (A1 category D)`);
   }
-  const realCase = await j('GET', '/org/rooms/room-eastport-1', undefined, ada.token);
-  const noCase = await j('GET', '/org/rooms/room-never-existed', undefined, ada.token);
-  ok(realCase.status === noCase.status, `N3 asking for a REAL club case id and an invented one return the same status (${realCase.status}) — existence does not leak through a direct link`);
+  // A1 category B, proved against a case that REALLY EXISTS. Comparing two
+  // invented ids would be worthless: both 404 whatever the rule is. So the club
+  // opens a genuine case first, confirms it can read it, and only then is the
+  // agency's refusal compared against an id that never existed.
+  const made = await j('POST', '/org/rooms', { playerId: 'pl-adeyemi', sourceContext: 'scouted' }, maria.token);
+  const caseId = made.body?.room?.roomId ?? made.body?.roomId ?? made.body?.existingRoomId ?? null;
+  ok(!!caseId, `N3 the club opened a real recruitment case (${made.status}, id ${caseId})`);
+  const clubOwn = await j('GET', `/org/rooms/${caseId}`, undefined, maria.token);
+  ok(clubOwn.status === 200 && JSON.stringify(clubOwn.body).includes(caseId), 'N3b and the club itself reads it — so the id is real and populated, which is what makes the next check mean something');
+  for (const path of ['', '/decision', '/contacts', '/trials']) {
+    const real = await j('GET', `/org/rooms/${caseId}${path}`, undefined, ada.token);
+    const ghost = await j('GET', `/org/rooms/case-never-existed${path}`, undefined, ada.token);
+    collect(`agency on club case${path}`, real);
+    neg(real.status === ghost.status && JSON.stringify(real.body) === JSON.stringify(ghost.body),
+      `N3c an agency asking for a REAL club case${path || ' (detail)'} gets BYTE-IDENTICAL bytes to an invented id (${real.status}) — existence does not leak through a direct link`);
+  }
 }
 
 section('AE/live — error privacy, swept over every refusal this suite provoked');
