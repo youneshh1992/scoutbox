@@ -498,6 +498,22 @@ const ts = watch(await ctxTs.newPage(), 'trust-safety');
     await go(ana, `#/transactions/${TX}`);
     await ana.waitForSelector('[data-testid="transaction-detail"]', { timeout: 15000 });
   }
+  // M23 P5.6F (F-6): the two tablet widths the release checklist names had never
+  // been rendered on the Agent portal by any suite. Content is asserted at each
+  // width as well as fit — a blank page has no horizontal scroll either.
+  for (const w of [{ width: 1024, height: 900 }, { width: 768, height: 1024 }]) {
+    await ana.setViewportSize(w);
+    await sleep(450);
+    ok(await ana.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth + 1), `N4f: ${w.width}px: the transaction workspace fits`);
+    const tabs = await ana.evaluate(() => document.querySelectorAll('[role="tab"]').length);
+    ok(tabs === 6, `N4g: ${w.width}px: and it is still the whole workspace, not a collapsed shell (${tabs} tabs)`);
+    await go(ana, '#/transactions');
+    await ana.waitForSelector('[data-testid="transactions-screen"]', { timeout: 15000 });
+    ok(await ana.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth + 1), `N4h: ${w.width}px: so does the list`);
+    ok((await ana.innerText('[data-testid="transactions-screen"]')).trim().length > 40, `N4i: ${w.width}px: and the list still has its content`);
+    await go(ana, `#/transactions/${TX}`);
+    await ana.waitForSelector('[data-testid="transaction-detail"]', { timeout: 15000 });
+  }
   await ana.setViewportSize({ width: 1280, height: 900 });
   await sleep(400);
   ok(await ana.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth + 1), 'N4c: 1280px: and no overflow at the narrower desktop width');

@@ -439,6 +439,26 @@ say('C1: Kola signs in to the player app');
   await go(phone, '#/profile');
   await phone.waitForSelector('[data-testid="facet-fifa-licence"]', { timeout: 15000 });
   ok(await phone.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth + 1), 'N6g: 360px: the verification page fits');
+  // M23 P5.6F (F-6). The release checklist names six viewports. Reading the
+  // suites rather than the reports showed 1440, 1280, 390 and 360 covered on the
+  // Agent portal and 1024 and 768 covered NOWHERE on it — the two tablet widths
+  // had never been rendered by any Agent suite in P5.6B–E. Closed here on the
+  // densest surfaces, and each width asserts CONTENT as well as fit, because a
+  // blank page has no horizontal scroll either.
+  for (const w of [{ width: 1024, height: 900 }, { width: 768, height: 1024 }]) {
+    await phone.setViewportSize(w);
+    await go(phone, '#/clients');
+    await phone.waitForSelector('[data-testid="agent-clients"]', { timeout: 15000 });
+    await sleep(400);
+    ok(await phone.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth + 1), `N6h: ${w.width}px: the client list fits`);
+    ok((await phone.innerText('[data-testid="agent-clients"]')).trim().length > 20, `N6i: ${w.width}px: and it still HAS its content, not an empty shell that happens not to overflow`);
+    await go(phone, `#/clients/${REL}`);
+    await phone.waitForSelector('[data-testid="client-detail"]', { timeout: 15000 });
+    await sleep(400);
+    ok(await phone.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth + 1), `N6j: ${w.width}px: the client detail fits`);
+    const tabs = await phone.evaluate(() => document.querySelectorAll('[role="tab"]').length);
+    ok(tabs >= 4, `N6k: ${w.width}px: with its tab strip intact (${tabs} tabs) — the workspace is whole, not collapsed away`);
+  }
   await ctxPhone.close();
 }
 {
