@@ -5,6 +5,7 @@
 // server-side (fail-closed on missing location), grassroots 50 km preserved.
 
 import { GRASSROOTS_RADIUS_KM, parseTrialDate, trialReportDueAt } from '../domain.mjs';
+import { parseStrictDateOnly, parseDateOrInstant, isExpiredAt, isAbsent } from '../temporal.mjs';
 import { trialFamilyView, trialOutcomeLine } from '../m23/trial.mjs';
 
 export function registerJourneys(ctx) {
@@ -23,6 +24,7 @@ export function registerJourneys(ctx) {
     if (!OPP_TYPES.includes(b.type)) return res.status(400).json({ error: 'TYPE_INVALID', allowed: OPP_TYPES });
     if (!b.title || !String(b.title).trim()) return res.status(400).json({ error: 'TITLE_REQUIRED' });
     if (!b.deadline) return res.status(400).json({ error: 'DEADLINE_REQUIRED' });
+    if (!parseStrictDateOnly(b.deadline).ok) return res.status(400).json({ error: 'DATE_INVALID', field: 'deadline', message: 'A deadline is a calendar day written YYYY-MM-DD.', expected: 'YYYY-MM-DD' });
     if (b.description && !moderateOrRefuse(res, b.description, { kind: 'opportunity', orgId: req.org.id })) return;
     const elig = b.eligibility ?? {};
     const opp = {
@@ -224,6 +226,7 @@ export function registerJourneys(ctx) {
     const b = req.body ?? {};
     if (!b.title || !Array.isArray(b.drills) || !b.drills.length) return res.status(400).json({ error: 'TITLE_AND_DRILLS_REQUIRED' });
     if (!b.deadline) return res.status(400).json({ error: 'DEADLINE_REQUIRED' });
+    if (!parseStrictDateOnly(b.deadline).ok) return res.status(400).json({ error: 'DATE_INVALID', field: 'deadline', message: 'A deadline is a calendar day written YYYY-MM-DD.', expected: 'YYYY-MM-DD' });
     const camp = {
       id: nextId('cmp'), orgId: req.org.id, orgName: req.org.name,
       title: String(b.title).slice(0, 120),
@@ -536,10 +539,28 @@ export function registerJourneys(ctx) {
     if (t) res.json({ trial: trialDayView(t, 'org') });
   });
 
-  function checkState(c) {
+  /**
+   * M23 P5.7 (T-2): a REVIEWED background check whose expiry cannot be read
+   * used to read `reviewed` for ever (`NaN < now` is false). A check nobody
+   * can date is not a current check: it reads `expired`, which is the state
+   * the trial-day gate refuses. A missing expiry stays "no expiry recorded".
+   */
+  function checkState(c, now = Date.now()) {
     if (!c) return 'missing';
-    if (c.status === 'reviewed' && c.expiresAt && new Date(c.expiresAt).getTime() < Date.now()) return 'expired';
+    if (c.status === 'reviewed' && !isAbsent(c.expiresAt) && isExpiredAt(readCheckExpiry(c.expiresAt), now)) return 'expired';
     return c.status;
+  }
+  /** A stored check expiry — a DATE_ONLY (valid through that day) or an instant — as the first instant it no longer holds; NaN when unreadable. */
+  function readCheckExpiry(v) {
+    const p = parseDateOrInstant(v, { dayEdge: 'end' });
+    return p.ok ? p.ms : NaN;
+  }
+  /** Validate a check expiry from a request. Returns the canonical stored value, or a 400 already sent. */
+  function checkExpiryOrRefuse(res, raw) {
+    if (isAbsent(raw)) return null;
+    const p = parseDateOrInstant(raw, { dayEdge: 'end' });
+    if (!p.ok) { res.status(400).json({ error: 'DATE_INVALID', field: 'expiresAt', message: `A check expiry is a calendar day (YYYY-MM-DD) or an ISO 8601 date-time with an offset (${p.why}).`, expected: p.expected }); return undefined; }
+    return p.precision === 'day' ? p.value : new Date(p.ms).toISOString();
   }
 
   function trialDayView(t, side) {
@@ -579,6 +600,8 @@ export function registerJourneys(ctx) {
     if (!t) return;
     const { name, role, check } = req.body ?? {};
     if (!name || !role) return res.status(400).json({ error: 'NAME_AND_ROLE_REQUIRED' });
+    const expiresAt = check ? checkExpiryOrRefuse(res, check.expiresAt) : null;
+    if (expiresAt === undefined) return;
     const s = {
       id: nextId('stf'), name: String(name).slice(0, 80), role: String(role).slice(0, 60),
       check: check ? {
@@ -587,7 +610,7 @@ export function registerJourneys(ctx) {
         // Filing a reference does NOT make it reviewed — Trust & Safety (or
         // the club's safeguarding officer via T&S) moves it to 'reviewed'.
         status: 'pending',
-        expiresAt: check.expiresAt ?? null,
+        expiresAt,
         reviewedBy: null,
       } : null,
       addedBy: req.orgUser.name, addedAt: Date.now(),
@@ -782,10 +805,12 @@ export function registerJourneys(ctx) {
     if (!s?.check) return res.status(404).json({ error: 'CHECK_NOT_FOUND' });
     const { status, expiresAt } = req.body ?? {};
     if (!['reviewed', 'rejected'].includes(status)) return res.status(400).json({ error: 'STATUS_INVALID', allowed: ['reviewed', 'rejected'] });
+    const exp = checkExpiryOrRefuse(res, expiresAt);
+    if (exp === undefined) return;
     s.check.status = status;
     s.check.reviewedBy = 'Trust & Safety';
     s.check.reviewedAt = Date.now();
-    if (expiresAt) s.check.expiresAt = expiresAt;
+    if (exp !== null) s.check.expiresAt = exp;
     persistNow();
     res.json({ check: { ...s.check, state: checkState(s.check) } });
   });

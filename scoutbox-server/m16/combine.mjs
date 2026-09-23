@@ -17,6 +17,7 @@
 // provider has — not even the test one — so their sprint/jump/distance
 // numbers are never fabricated anywhere.
 import { isAdult, visibleToOrg } from '../domain.mjs';
+import { ageOrNull, endOfDayExclusive, parseStrictDateOnly, isAbsent } from '../temporal.mjs';
 import { latestDrill, PROVIDERS, providerFor } from './drills.mjs';
 import {
   COMBINE_PROTOCOLS, combineProtocol, latestCombineProtocol, measurementSupported,
@@ -42,7 +43,9 @@ export function registerCombine(ctx) {
 
   const orgCanSee = (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id);
   const guardianOwnsChild = (g, id) => g.childIds.includes(id);
-  const ageOf = (p) => { try { return Math.floor((Date.now() - new Date(p.dob).getTime()) / (365.25 * 86_400_000)); } catch { return null; } };
+  // M23 P5.7 (T-8): THE age rule (a missing dob used to compute as NaN here and
+  // serialise as null by accident; now it is null by rule).
+  const ageOf = (p) => ageOrNull(p?.dob, Date.now());
   const prodProvider = PROVIDERS[PROD_PROVIDER_ID];
 
   // ------------------------------------------------- M22: the Combine gate
@@ -466,7 +469,9 @@ export function registerCombine(ctx) {
    *  request window (after it was created, before its deadline). */
   function requiredDone(r) {
     const done = new Set();
-    const deadlineMs = r.deadline ? new Date(`${r.deadline}T23:59:59Z`).getTime() : Infinity;
+    // M23 P5.7: a deadline is a DATE_ONLY covering the whole day; an unreadable
+    // one is a window that has already closed, never one that stays open.
+    const deadlineMs = r.deadline ? (endOfDayExclusive(r.deadline) ?? -Infinity) : Infinity;
     for (const a of verifiedAttempts(r.playerId)) {
       if (!r.protocolIds.includes(a.protocolId)) continue;
       const at = a.completedAt ?? 0;
@@ -545,6 +550,7 @@ export function registerCombine(ctx) {
     const { title, protocolIds, deadline, instructions } = req.body ?? {};
     const ids = Array.isArray(protocolIds) ? [...new Set(protocolIds.map(String))] : [];
     if (ids.length === 0) return res.status(400).json({ error: 'PROTOCOLS_REQUIRED' });
+    if (!isAbsent(deadline) && !parseStrictDateOnly(deadline).ok) return res.status(400).json({ error: 'DATE_INVALID', field: 'deadline', message: 'A deadline is a calendar day written YYYY-MM-DD.', expected: 'YYYY-MM-DD' });
     for (const pid of ids) {
       const proto = latestCombineProtocol(pid);
       if (!proto || proto.status !== 'active') return res.status(404).json({ error: 'PROTOCOL_UNKNOWN', protocolId: pid });

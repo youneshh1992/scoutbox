@@ -26,6 +26,7 @@ import {
   SCOPES, effectiveAgreementStatus, agreementGrantsAccess, normaliseScope,
   DISCLOSURE_KEYS, DISCLOSURE_DEFAULT, normaliseDisclosure,
 } from '../m24/shared.mjs';
+import { readInstant } from '../temporal.mjs';
 
 const nullProto = (o) => Object.freeze(Object.assign(Object.create(null), o));
 
@@ -367,7 +368,13 @@ export const HANDOFF_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 /** The status a handoff HAS at `now` — an invitation nobody took up goes stale. */
 export function effectiveHandoffStatus(h, now = Date.now()) {
   if (!h || !HANDOFF_STATUSES.includes(h.status)) return null;
-  if (h.status === 'invited' && typeof h.invitedAt === 'number' && now - h.invitedAt >= HANDOFF_TTL_MS) return 'expired';
+  if (h.status === 'invited') {
+    // M23 P5.7: an invitation is dated by the server when it is made. One
+    // whose clock cannot be read (NaN, a string, missing) has no TTL anyone
+    // can compute and reads expired — never "standing for ever".
+    const at = readInstant(h.invitedAt);
+    if (at === null || now - at >= HANDOFF_TTL_MS) return 'expired';
+  }
   return h.status;
 }
 

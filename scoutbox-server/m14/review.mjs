@@ -13,6 +13,7 @@
 //  * Revocation/suspension propagates to effective badges immediately via the
 //    read-time engine; history is never deleted.
 import { decideReview, normalizeDomain, domainOfEmail, domainCovered, sha256 } from './shared.mjs';
+import { parseDateOrInstant, isAbsent } from '../temporal.mjs';
 
 // ---------------------------------------------------------------- registry
 // Licence-registry adapter (§13/§63). Interface every future FA/UEFA/
@@ -90,10 +91,19 @@ export function registerVerificationReview(ctx) {
   orgRouter.post('/verification/licence', (req, res) => {
     const { licenceType, issuer, identifier, issueDate, expiry, dataUrl, filename, holderName } = req.body ?? {};
     if (!licenceType?.trim() || !issuer?.trim()) return res.status(400).json({ error: 'FIELDS_REQUIRED', message: 'licenceType and issuer are required.' });
+    // M23 P5.7 (T-3): a malformed expiry used to become `null` — "no expiry" —
+    // so a licence declared with a typo never expired. A DATE_ONLY expiry
+    // covers the whole day (the licence is valid THROUGH that day).
+    const exp = isAbsent(expiry) ? null : parseDateOrInstant(expiry, { dayEdge: 'end' });
+    if (exp && !exp.ok) return res.status(400).json({ error: 'DATE_INVALID', field: 'expiry', message: `An expiry is a calendar day written YYYY-MM-DD (${exp.why}).`, expected: 'YYYY-MM-DD' });
+    const issued = isAbsent(issueDate) ? null : parseDateOrInstant(issueDate, { dayEdge: 'start' });
+    if (issued && !issued.ok) return res.status(400).json({ error: 'DATE_INVALID', field: 'issueDate', message: `An issue date is a calendar day written YYYY-MM-DD (${issued.why}).`, expected: 'YYYY-MM-DD' });
+    if (issued && exp && !(issued.ms < exp.ms)) return res.status(400).json({ error: 'INTERVAL_INVALID', field: 'expiry', message: 'A licence cannot expire before it was issued.' });
     const claim = createClaim({
       subjectType: 'user', subjectId: req.orgUser.id, claimType: 'LICENCE',
       organisationId: null, status: 'collecting_evidence', verificationMethod: 'document_submitted',
-      validUntil: expiry ? Date.parse(expiry) || null : null,
+      validFrom: issued ? issued.ms : null,
+      validUntil: exp ? exp.ms : null,
       metadata: {
         licenceType: String(licenceType).slice(0, 80), issuer: String(issuer).slice(0, 80),
         identifier: String(identifier ?? '').slice(0, 60) || null,
@@ -148,13 +158,25 @@ export function registerVerificationReview(ctx) {
     }
     if (lookup.result === 'match') {
       const rec = lookup.record;
+      // M23 P5.7 (T-3): the register's expiry must be readable before it can
+      // verify anything. `Date.parse(x) || claim.validUntil` used to keep the
+      // SELF-DECLARED expiry when the authoritative one could not be read.
+      const regUntil = isAbsent(rec.validUntil) ? null : parseDateOrInstant(rec.validUntil, { dayEdge: 'end' });
+      if (regUntil && !regUntil.ok) {
+        claim.metadata.registry = { provider: providerId, result: 'unreadable_record', checkedAt: Date.now(), reference: rec.identifier };
+        claim.reviewReasons = [...new Set([...claim.reviewReasons, 'REGISTRY_RECORD_UNREADABLE'])];
+        transition(claim, 'requires_human_review', { actorKind: 'system', reason: 'registry record carried an unreadable expiry' }, req);
+        vmetric('routedToHumanReview');
+        persistNow();
+        return res.json({ claim: { id: claim.id, status: claim.status, display: claim.metadata.display }, provider: { id: providerId, result: 'unreadable_record' }, note: 'The register matched but its expiry date could not be read. Nothing is verified from a record that cannot be dated; a reviewer decides.' });
+      }
       const ev = addEvidence({
         type: 'registry_result', source: providerId, suppliedByKind: 'system', suppliedById: null,
         orgId: req.org.id, claimIds: [claim.id], visibility: 'trust_and_safety',
         meta: { identifier: rec.identifier, licenceType: rec.licenceType, validUntil: rec.validUntil },
       }, req);
       claim.evidenceIds.push(ev.id);
-      claim.validUntil = Date.parse(rec.validUntil) || claim.validUntil;
+      claim.validUntil = regUntil ? regUntil.ms : claim.validUntil;
       claim.metadata.display = `Licence verified: ${rec.licenceType}`;
       claim.metadata.registry = { provider: providerId, result: 'match', checkedAt: Date.now(), reference: rec.identifier };
       transition(claim, 'automated_checks_passed', { actorKind: 'system' }, req);
@@ -523,17 +545,25 @@ export function registerVerificationReview(ctx) {
     if (!reasonRequired(req, res)) return;
     const { action } = req.body ?? {}; // reinstate | revoke | correct | dismiss
     const c = claimById(d.claimId);
+    // M23 P5.7 (T-3): a corrected expiry is an instant or a calendar day that
+    // exists, or null. `Number(x) || null` used to turn a typo into "no expiry".
+    let validUntilCorrection = null;
+    if (req.body?.validUntil !== undefined && !isAbsent(req.body.validUntil)) {
+      const p = parseDateOrInstant(req.body.validUntil, { dayEdge: 'end' });
+      if (!p.ok) return res.status(400).json({ error: 'DATE_INVALID', field: 'validUntil', message: `validUntil is a calendar day (YYYY-MM-DD) or an instant (${p.why}).`, expected: p.expected });
+      validUntilCorrection = p.ms;
+    }
     if (c && c.status === 'disputed') {
       if (action === 'reinstate' || action === 'dismiss') adminTransition(c, 'verified', req, { method: c.verificationMethod, reason: req.body.reason, eventType: 'claim.reinstated' });
       else if (action === 'revoke') adminTransition(c, 'revoked', req, { reason: req.body.reason });
       else if (action === 'correct') {
         adminTransition(c, 'verified', req, { method: c.verificationMethod, reason: req.body.reason, eventType: 'claim.corrected' });
         if (req.body.role) c.role = String(req.body.role).slice(0, 60);
-        if (req.body.validUntil !== undefined) c.validUntil = Number(req.body.validUntil) || null;
+        if (req.body.validUntil !== undefined) c.validUntil = validUntilCorrection;
         if (req.body.current !== undefined) c.current = !!req.body.current;
       }
     } else if (c && action === 'correct') {
-      if (req.body.validUntil !== undefined) c.validUntil = Number(req.body.validUntil) || null;
+      if (req.body.validUntil !== undefined) c.validUntil = validUntilCorrection;
       if (req.body.current !== undefined) c.current = !!req.body.current;
       verEvent('claim.corrected', { claimId: c.id, subjectId: c.subjectId, orgId: c.organisationId, reason: req.body.reason, actorKind: 'trust_safety' });
     }

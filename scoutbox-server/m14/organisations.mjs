@@ -9,6 +9,7 @@
 // of employment. Where no authority exists, the case routes to Trust & Safety
 // as a prepared human-review case — humans are the LAST step, not the first.
 import { isAdult, visibleToOrg } from '../domain.mjs';
+import { parseDateOrInstant, isAbsent } from '../temporal.mjs';
 import {
   emailProblem, domainOfEmail, isFreeMail, isDisposable, normalizeDomain,
   domainCovered, riskFlags, decideReview, evidenceCompleteness, verLevelRank,
@@ -418,8 +419,16 @@ export function registerOrganisationVerification(ctx) {
           roleClaim.role = String(role).trim().slice(0, 60);
         }
       }
-      const from = Number.isFinite(Number(validFrom)) && validFrom ? Number(validFrom) : Date.now();
-      const until = action === 'mark_former' ? (Number(validUntil) || Date.now()) : (Number(validUntil) || null);
+      // M23 P5.7 (T-3): the period bounds are instants or calendar days that
+      // exist. `Number(x) || null` used to read a typo as "no end".
+      const fromP = isAbsent(validFrom) ? null : parseDateOrInstant(validFrom, { dayEdge: 'start' });
+      if (fromP && !fromP.ok) return res.status(400).json({ error: 'DATE_INVALID', field: 'validFrom', message: `validFrom is a calendar day (YYYY-MM-DD) or an instant (${fromP.why}).`, expected: fromP.expected });
+      const untilP = isAbsent(validUntil) ? null : parseDateOrInstant(validUntil, { dayEdge: 'end' });
+      if (untilP && !untilP.ok) return res.status(400).json({ error: 'DATE_INVALID', field: 'validUntil', message: `validUntil is a calendar day (YYYY-MM-DD) or an instant (${untilP.why}).`, expected: untilP.expected });
+      const from = fromP ? fromP.ms : Date.now();
+      const until = untilP ? untilP.ms : (action === 'mark_former' ? Date.now() : null);
+      // Ordering is checked only when the club STATED both ends; a defaulted start is "now" by convention, not a claim.
+      if (fromP && untilP && !(from < until)) return res.status(400).json({ error: 'INTERVAL_INVALID', field: 'validUntil', message: 'The period must end after it starts.' });
       const err = decide('verified', { validFrom: from, validUntil: until, current: action !== 'mark_former' });
       if (err) return res.status(409).json({ error: err });
       notify({ kind: 'org_user', id: claim.subjectId }, 'verification', `${req.org.name} confirmed your ${action === 'mark_former' ? 'historical ' : ''}affiliation${roleClaim ? ` as ${roleClaim.role}` : ''}. ✓`, claim.id);
@@ -468,7 +477,9 @@ export function registerOrganisationVerification(ctx) {
     if (req.params.userId === req.orgUser.id) return res.status(403).json({ error: 'SELF_VERIFICATION_FORBIDDEN', message: 'Ask another administrator to record your own departure.' });
     const claims = db.verClaims.filter((c) => c.organisationId === req.org.id && c.subjectId === req.params.userId && c.subjectType === 'user' && c.status === 'verified' && c.current !== false);
     if (!claims.length) return res.status(404).json({ error: 'NO_CURRENT_VERIFIED_CLAIMS' });
-    const until = Number(req.body?.validUntil) || Date.now();
+    const untilP = isAbsent(req.body?.validUntil) ? null : parseDateOrInstant(req.body.validUntil, { dayEdge: 'end' });
+    if (untilP && !untilP.ok) return res.status(400).json({ error: 'DATE_INVALID', field: 'validUntil', message: `validUntil is a calendar day (YYYY-MM-DD) or an instant (${untilP.why}).`, expected: untilP.expected });
+    const until = untilP ? untilP.ms : Date.now();
     for (const c of claims) {
       verEvent('claim.corrected', { claimId: c.id, subjectId: c.subjectId, orgId: req.org.id, before: { current: true }, after: { current: false, validUntil: until }, reason: 'marked departed' }, req);
       c.current = false;            // history is NOT erased — the verified period closes

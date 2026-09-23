@@ -24,6 +24,7 @@
 // vocabulary), which is safe because the engine touches that vocabulary only
 // inside function bodies — see the lazy band rank in m19/match.mjs.
 import { matchBrief } from '../m19/match.mjs';
+import { parseStrictDateOnly, isDayWithin, isAbsent } from '../temporal.mjs';
 
 // =====================================================================
 // SECOND LOOK POLICY
@@ -631,8 +632,12 @@ export function validateRecruitmentBrief(input = {}, { orgLevel = 'pro' } = {}) 
 
   const combineProtocols = Array.isArray(input.combineProtocols) ? [...new Set(input.combineProtocols.map(String))] : [];
 
-  const activeFrom = input.activeFrom ?? null;
-  const activeUntil = input.activeUntil ?? null;
+  // M23 P5.7: the window bounds are calendar days that EXIST. An unreadable
+  // `activeUntil` used to compare as "never passed" and keep a brief live for ever.
+  const activeFrom = isAbsent(input.activeFrom) ? null : input.activeFrom;
+  const activeUntil = isAbsent(input.activeUntil) ? null : input.activeUntil;
+  if (activeFrom !== null && !parseStrictDateOnly(activeFrom).ok) errs.push({ field: 'activeFrom', error: 'DATE_INVALID' });
+  if (activeUntil !== null && !parseStrictDateOnly(activeUntil).ok) errs.push({ field: 'activeUntil', error: 'DATE_INVALID' });
   if (activeFrom && activeUntil && String(activeFrom) > String(activeUntil)) {
     errs.push({ field: 'activeWindow', error: 'BRIEF_WINDOW_INVALID' });
   }
@@ -814,7 +819,6 @@ export function safeM18Projection(item) {
  */
 export function briefIsLiveOn(b, today = new Date().toISOString().slice(0, 10)) {
   if (!b || b.status !== 'active') return false;
-  if (b.activeFrom && today < String(b.activeFrom)) return false;
-  if (b.activeUntil && today > String(b.activeUntil)) return false;
-  return true;
+  // M23 P5.7: unreadable bounds close the window (a pre-P5.7 row with garbage in it is not live).
+  return isDayWithin(today, b.activeFrom, b.activeUntil);
 }

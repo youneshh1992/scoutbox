@@ -14,6 +14,7 @@
 //  * M14 does NOT introduce a new age system: all age gates continue to use
 //    the existing DOB/country isAdult() from domain.mjs.
 import crypto from 'node:crypto';
+import { isExpiredAt, readInstant } from '../temporal.mjs';
 
 // ------------------------------------------------------------- claim types
 export const CLAIM_TYPES = [
@@ -117,7 +118,10 @@ export function effectiveStatus(claim, { org = null, subjectRemoved = false, now
   let status = claim.status;
   // Expiry applies to CURRENT claims. A closed period (current=false) is
   // finished history — it does not "expire", it remains a verified past fact.
-  if (status === 'verified' && claim.current !== false && claim.validUntil && claim.validUntil < now) { status = 'expired'; reasons.push('VALID_UNTIL_PASSED'); }
+  // M23 P5.7 (T-3): `validUntil` is an EXCLUSIVE expiry instant; a claim is
+  // expired at exactly that instant. `null` means no expiry. An unreadable
+  // value (a string, NaN) is NOT "no expiry" — it reads expired.
+  if (status === 'verified' && claim.current !== false && isExpiredAt(claim.validUntil, now)) { status = 'expired'; reasons.push('VALID_UNTIL_PASSED'); }
   if (subjectRemoved && claim.current) reasons.push('SUBJECT_ACCOUNT_INACTIVE');
   const orgScoped = !!claim.organisationId;
   if (orgScoped) {
@@ -411,7 +415,7 @@ export function toPublicVerificationProfile({ subjectType, subjectId, claims, or
     const org = claim.organisationId ? orgsById.get(claim.organisationId) ?? null : null;
     const eff = effectiveStatus(claim, { org, subjectRemoved, now });
     if (!eff.displayable) continue;
-    const y = (ms) => (ms ? new Date(ms).getFullYear() : null);
+    const y = (ms) => (readInstant(ms) !== null && ms ? new Date(ms).getUTCFullYear() : null); // M23 P5.7: UTC, not the server's zone
     if (claim.claimType === 'PERSON_IDENTITY') {
       // Structured identity assurance (M14.1): the public projection carries
       // WHAT kind of confirmation stands behind the identity — a manual

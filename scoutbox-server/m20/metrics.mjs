@@ -444,6 +444,8 @@ export function distribution(values, { min = SMALL_N_MIN, excluded = 0 } = {}) {
 /** A plain count. Never suppressed — a director may always see their own work. */
 export const count = (n) => ({ n: Number(n) || 0, value: Number(n) || 0, empty: false, suppressed: false });
 
+import { parseStrictDateOnly } from '../temporal.mjs';
+
 export const DAY_MS = 86_400_000;
 /** Whole days between two instants, as a float. Durations are never rounded to zero. */
 export const days = (from, to) => (Number(to) - Number(from)) / DAY_MS;
@@ -476,7 +478,8 @@ export const DEFAULT_WINDOW = 'last_90_days';
 export function resolveWindow({ preset, from, to } = {}, nowMs = Date.now()) {
   const today = utcDay(nowMs);
   if (from || to) {
-    const ok = (d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(`${d}T00:00:00Z`));
+    // M23 P5.7: a day that exists. `2026-02-30` passed the old shape-and-parse test as 2 March.
+    const ok = (d) => parseStrictDateOnly(d).ok;
     if (!ok(from) || !ok(to)) return { error: 'WINDOW_INVALID', detail: 'from and to must both be calendar days as YYYY-MM-DD.' };
     if (from > to) return { error: 'WINDOW_INVALID', detail: 'from must not be after to.' };
     if (from > today) return { error: 'WINDOW_INVALID', detail: 'from must not be in the future.' };

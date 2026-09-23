@@ -7,6 +7,7 @@
 // denominators and windows instead of claims about discrimination.
 import crypto from 'node:crypto';
 import { exposureHook } from './enterprise.mjs';
+import { parseStrictDateOnly } from '../temporal.mjs';
 
 const EXPOSURE_WINDOW_DAYS = 90;
 const STALE_DAYS = 180;
@@ -89,7 +90,11 @@ export function registerInsight(ctx) {
     const quarters = { Q1: 0, Q2: 0, Q3: 0, Q4: 0 };
     for (const a of assessed) {
       const p = findPlayer(a.playerId);
-      if (p?.dob) quarters[`Q${Math.floor((new Date(p.dob).getMonth()) / 3) + 1}`]++;
+      // M23 P5.7 (T-9): the UTC month of a READABLE birth day. `getMonth()`
+      // on a UTC-midnight date read the previous month in any zone west of
+      // Greenwich, so 1 April births counted in Q1 when the server ran in New York.
+      const day = parseStrictDateOnly(p?.dob);
+      if (day.ok) quarters[`Q${Math.floor(new Date(day.t).getUTCMonth() / 3) + 1}`]++;
     }
     const total = assessed.length;
     res.json({

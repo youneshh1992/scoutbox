@@ -5,6 +5,8 @@
 // the verifying actor's authority, corrections supersede without erasing,
 // and "insufficient evidence" is a first-class display state.
 
+import { parseDateOrInstant, isAbsent, readInstant } from '../temporal.mjs';
+
 const CLAIM_TYPES = ['statistic', 'attendance', 'assessment_result', 'reference', 'footage', 'availability'];
 
 export function registerPassport(ctx) {
@@ -47,7 +49,9 @@ export function registerPassport(ctx) {
       units: units ? String(units).slice(0, 20) : null,
       season: season ? String(season).slice(0, 20) : null,
       source, // { kind: 'player'|'guardian'|'org'|'coach', id, name }
-      observedAt: observedAt ? new Date(observedAt).getTime() : null,
+      // M23 P5.7: an evidence date the route has already validated (readInstant
+      // keeps a legacy row's finite number and drops anything else to null).
+      observedAt: readInstant(observedAt),
       recordedAt: at,
       mediaIds: Array.isArray(mediaIds) ? mediaIds.filter((m) => player.media.some((x) => x.id === m)) : [],
       verification: {
@@ -131,8 +135,17 @@ export function registerPassport(ctx) {
     if (!label || !String(label).trim()) return res.status(400).json({ error: 'LABEL_REQUIRED' });
     if (note && !moderateOrRefuse(res, note, { kind: 'evidence_note', playerId: player.id })) return;
     if (!moderateOrRefuse(res, label, { kind: 'evidence_label', playerId: player.id })) return;
+    // M23 P5.7 (§16): an observation date is a calendar day or an instant that
+    // exists, and not in the future — evidence of something that has not happened is not evidence.
+    let observed = null;
+    if (!isAbsent(observedAt)) {
+      const p = parseDateOrInstant(observedAt, { dayEdge: 'start' });
+      if (!p.ok) return res.status(400).json({ error: 'DATE_INVALID', field: 'observedAt', message: `observedAt is a calendar day (YYYY-MM-DD) or an ISO 8601 date-time with an offset (${p.why}).`, expected: p.expected });
+      if (p.ms > Date.now() + 5 * 60_000) return res.status(400).json({ error: 'DATE_INVALID', field: 'observedAt', message: 'An observation cannot be dated in the future.' });
+      observed = p.ms;
+    }
     const rec = newEvidence({
-      player, claimType, label, value, units, season, mediaIds, observedAt, note,
+      player, claimType, label, value, units, season, mediaIds, observedAt: observed, note,
       source: { kind: sourceKind, id: sourceId, name: sourceName },
       tier, method, reviewer,
     });

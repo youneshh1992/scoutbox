@@ -79,6 +79,19 @@ import {
   weeklyGoal,
   nextActions,
 } from './domain.mjs';
+import { parseDobStrict, parseStrictDateOnly, readInstant, utcDayOf, validateIanaZone, localParts } from './temporal.mjs';
+
+/**
+ * M23 P5.7: a DATE_ONLY a client typed (open day, match day, friendly,
+ * attendance, medical record) is a calendar day that exists, or a 400.
+ * Returns true when it is; false after sending the refusal.
+ */
+function dateOnlyOrRefuse(res, value, field) {
+  const p = parseStrictDateOnly(value);
+  if (p.ok) return true;
+  res.status(400).json({ error: 'DATE_INVALID', field, message: `${field} must be a calendar day written YYYY-MM-DD (${p.why}).`, expected: 'YYYY-MM-DD' });
+  return false;
+}
 
 const PORT = process.env.PORT || 4000;
 const db = buildSeed();
@@ -638,6 +651,11 @@ const noteLoginFailure = (identifier) => { rateLimit.limited('login_failure', lo
 // Quiet hours + the minors' school-hours mute apply to PUSH delivery: the
 // in-app feed always receives the record, but `deferredPush` marks anything
 // that production push infra must hold back.
+// M23 P5.7 (T-12): quiet hours and the school-hours mute are WALL-CLOCK rules
+// for the person, so they are evaluated in a named zone — the person's own
+// when their preferences carry one, otherwise the platform's home zone —
+// never in whatever zone the server process happens to run in.
+const PLATFORM_HOME_ZONE = 'Europe/London';
 function pushDeferred(audience, now = new Date()) {
   let prefs = null;
   let minor = false;
@@ -648,9 +666,11 @@ function pushDeferred(audience, now = new Date()) {
   } else if (audience.kind === 'guardian') {
     prefs = db.guardians.find((g) => g.id === audience.id)?.notificationPrefs;
   }
-  const minutes = now.getHours() * 60 + now.getMinutes();
+  const zone = validateIanaZone(prefs?.timezone).ok ? prefs.timezone : PLATFORM_HOME_ZONE;
+  const wall = localParts(now.getTime(), zone);
+  const minutes = Number(wall.hour) * 60 + Number(wall.minute);
   const schoolMute = prefs?.schoolHoursMute ?? minor; // minors muted in school hours by default
-  const day = now.getDay();
+  const day = new Date(Date.UTC(Number(wall.year), Number(wall.month) - 1, Number(wall.day))).getUTCDay();
   if (schoolMute && day >= 1 && day <= 5 && minutes >= 8 * 60 + 30 && minutes <= 15 * 60 + 30) return true;
   if (prefs?.quietStart && prefs?.quietEnd) {
     const [qsH, qsM] = prefs.quietStart.split(':').map(Number);
@@ -1025,7 +1045,8 @@ app.post('/auth/player/signup', (req, res) => {
   // stored. Before F-8 an unreadable dob computed as the epoch and passed every
   // adult gate; after F-8 it fails closed as "age unknown" — but a sign-up that
   // stores it would still create an account whose age can never be established.
-  if (!Number.isFinite(ageOn(dob))) return res.status(400).json({ error: 'DOB_INVALID', message: 'Enter a date of birth as YYYY-MM-DD.' });
+  // M23 P5.7 (§24): a real day, not in the future, not implausibly old.
+  if (!parseDobStrict(dob, Date.now()).ok) return res.status(400).json({ error: 'DOB_INVALID', message: 'Enter a date of birth as YYYY-MM-DD.' });
   if (!password || String(password).length < 8) {
     return res.status(400).json({ error: 'PASSWORD_REQUIRED', message: 'Pick a password of at least 8 characters — your profile is yours alone.' });
   }
@@ -1273,7 +1294,8 @@ guardianRouter.post('/children', (req, res) => {
   // stored. Before F-8 an unreadable dob computed as the epoch and passed every
   // adult gate; after F-8 it fails closed as "age unknown" — but a sign-up that
   // stores it would still create an account whose age can never be established.
-  if (!Number.isFinite(ageOn(dob))) return res.status(400).json({ error: 'DOB_INVALID', message: 'Enter a date of birth as YYYY-MM-DD.' });
+  // M23 P5.7 (§24): a real day, not in the future, not implausibly old.
+  if (!parseDobStrict(dob, Date.now()).ok) return res.status(400).json({ error: 'DOB_INVALID', message: 'Enter a date of birth as YYYY-MM-DD.' });
   if (ageOn(dob) >= adultAgeFor(country)) {
     return res.status(400).json({ error: 'NOT_A_MINOR', message: 'Adults create their own account with player sign-up.' });
   }
@@ -2206,7 +2228,7 @@ orgRouter.get('/feed', (req, res) => {
     if (!t.reminderSent && dueAt !== null && dueAt - Date.now() < 48 * 3600 * 1000) {
       t.reminderSent = true;
       const request = db.requests.find((r) => r.id === t.requestId);
-      if (request?.userId) notify({ kind: 'org_user', id: request.userId }, 'report_due', `Mandatory trial report for ${t.playerName} is due ${new Date(t.reportDueAt).toLocaleDateString()}.`, t.id);
+      if (request?.userId) notify({ kind: 'org_user', id: request.userId }, 'report_due', `Mandatory trial report for ${t.playerName} is due ${utcDayOf(dueAt)}.`, t.id); // M23 P5.7: the UTC day, not the server locale
     }
   }
   items.sort((a, b) => b.ts - a.ts);
@@ -2280,7 +2302,10 @@ orgRouter.get('/trials/:id/ics', (req, res) => {
     // An unconfirmed revision is TENTATIVE: the club can hold the slots, the
     // calendar says the family has not yet agreed to them.
     const status = cancelled ? 'CANCELLED' : t.schedule.confirmedAt ? 'CONFIRMED' : 'TENTATIVE';
-    const stamp = new Date(t.schedule.confirmedAt ?? t.schedule.proposedAt ?? t.acceptedAt).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+    // M23 P5.7 (T-11): DTSTAMP from the first READABLE clock; a row with none
+    // used to throw inside toISOString and answer 500.
+    const stampMs = readInstant(t.schedule.confirmedAt) ?? readInstant(t.schedule.proposedAt) ?? readInstant(t.acceptedAt) ?? Date.now();
+    const stamp = new Date(stampMs).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
     const events = t.schedule.sessions.slice().sort((a, b) => (a.startsAt - b.startsAt) || String(a.id).localeCompare(String(b.id))).flatMap((s) => {
       const where = s.venue ? [s.venue.name, s.venue.address, s.venue.town].filter(Boolean).join(', ') : (t.venue ?? null);
       return [
@@ -2504,6 +2529,11 @@ orgRouter.post('/open-trials', (req, res) => {
   }
   const { title, date, venue, ageGroup, positions, notes } = req.body || {};
   if (!title || !date || !venue) return res.status(400).json({ error: 'TITLE_DATE_VENUE_REQUIRED' });
+  // M23 P5.7 (T-10): the open-day date gates the no-ghosting rule above
+  // (`t.date < today`) and the upcoming list (`t.date >= today`) by string
+  // comparison. Text that is not a day compared as "upcoming for ever" and
+  // never became a past day whose registrants are owed an answer.
+  if (!dateOnlyOrRefuse(res, date, 'date')) return;
   if (notes && !moderateOrRefuse(res, notes, { kind: 'open_trial_notes', orgId: req.org.id })) return;
   const trial = {
     id: nextId('open'), orgId: req.org.id, orgName: req.org.name,
@@ -2678,6 +2708,7 @@ orgRouter.post('/matchday', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
   const { fixture, venue, date, result, playerIds } = req.body || {};
   if (!fixture || !date) return res.status(400).json({ error: 'FIXTURE_AND_DATE_REQUIRED' });
+  if (!dateOnlyOrRefuse(res, date, 'date')) return; // M23 P5.7: a match day is a day that exists
   const ids = Array.isArray(playerIds) ? playerIds : [];
   const onSquad = new Set((req.org.squad ?? []).map((e) => e.playerId).filter(Boolean));
   const credited = [];
@@ -2766,6 +2797,7 @@ orgRouter.post('/friendlies', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
   const { ageGroup, date, venue, notes } = req.body || {};
   if (!date) return res.status(400).json({ error: 'DATE_REQUIRED' });
+  if (!dateOnlyOrRefuse(res, date, 'date')) return; // M23 P5.7
   if (notes && !moderateOrRefuse(res, notes, { kind: 'friendly_notes', orgId: req.org.id })) return;
   const friendly = {
     id: nextId('fr'), orgId: req.org.id, orgName: req.org.name, postedByUserId: req.orgUser.id,
@@ -3224,6 +3256,7 @@ playerRouter.post('/medical/share', (req, res) => {
 
 playerRouter.post('/medical/records', (req, res) => {
   const { type, title, date, layoffWeeks, cleared, conditionStatus } = req.body || {};
+  if (date && !dateOnlyOrRefuse(res, date, 'date')) return; // M23 P5.7: a medical record is dated on a day that exists
   if (conditionStatus) req.player.medical.conditionStatus = conditionStatus;
   if (title) {
     req.player.medical.records.push({ id: nextId('md'), type: type || 'note', title, date: date || new Date().toISOString().slice(0, 10), layoffWeeks: layoffWeeks ?? null, cleared: cleared ?? null });
@@ -3268,6 +3301,7 @@ playerRouter.post('/attendance', (req, res) => {
   if (missing.length) {
     return res.status(400).json({ error: 'ATTENDANCE_UNVERIFIABLE', message: 'Verified attendance needs fixture, venue, date, GPS and device data.', missing });
   }
+  if (!dateOnlyOrRefuse(res, date, 'date')) return; // M23 P5.7: verified attendance on a day that exists
   const item = { id: nextId('att'), fixture, venue, date, gps, deviceConfirmed: true, verified: true };
   req.player.attendance.push(item);
   recordActivity(req.player);
@@ -3661,11 +3695,17 @@ function prefsHandler(getTarget) {
   return (req, res) => {
     const target = getTarget(req);
     if (req.method === 'POST') {
-      const { quietStart, quietEnd, schoolHoursMute } = req.body || {};
+      const { quietStart, quietEnd, schoolHoursMute, timezone } = req.body || {};
+      // M23 P5.7: quiet hours are HH:MM wall-clock values in a named zone.
+      const hhmm = (v) => v == null || v === '' ? null : (typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v) ? v : undefined);
+      const qs = hhmm(quietStart); const qe = hhmm(quietEnd);
+      if (qs === undefined || qe === undefined) return res.status(400).json({ error: 'TIME_INVALID', message: 'Quiet hours are written HH:MM (24-hour).', expected: 'HH:MM' });
+      if (timezone != null && timezone !== '' && !validateIanaZone(timezone).ok) return res.status(400).json({ error: 'TIMEZONE_INVALID', message: 'timezone must be an IANA time zone name, for example Europe/London.' });
       target.notificationPrefs = {
-        quietStart: quietStart ?? target.notificationPrefs?.quietStart ?? null,
-        quietEnd: quietEnd ?? target.notificationPrefs?.quietEnd ?? null,
+        quietStart: quietStart === undefined ? target.notificationPrefs?.quietStart ?? null : qs,
+        quietEnd: quietEnd === undefined ? target.notificationPrefs?.quietEnd ?? null : qe,
         schoolHoursMute: schoolHoursMute ?? target.notificationPrefs?.schoolHoursMute ?? null,
+        timezone: timezone === undefined ? target.notificationPrefs?.timezone ?? null : (timezone || null),
       };
       persist();
     }

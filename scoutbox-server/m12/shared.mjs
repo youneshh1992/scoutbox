@@ -1,5 +1,6 @@
 // M12 shared: additive migrations + helpers used by every feature module.
 import { isAdult, visibleToOrg, haversineKm } from '../domain.mjs';
+import { ageOrNull } from '../temporal.mjs';
 
 // ------------------------------------------------------------- migrations
 // Same non-destructive convention as server.mjs: every new collection is
@@ -93,7 +94,9 @@ export function buildShared(ctx) {
   function checkEligibility(elig, player, org) {
     const reasons = [];
     if (!elig) return { eligible: true, reasons };
-    const age = player.dob ? Math.floor((Date.now() - new Date(player.dob).getTime()) / (365.25 * 86_400_000)) : null;
+    // M23 P5.7 (T-8): THE age rule, not a second one. An unreadable date of
+    // birth is `null`, and null fails both age bounds below (closed).
+    const age = ageOrNull(player.dob, Date.now());
     if (elig.minAge != null && (age === null || age < elig.minAge)) reasons.push(`minimum age ${elig.minAge}`);
     if (elig.maxAge != null && (age === null || age > elig.maxAge)) reasons.push(`maximum age ${elig.maxAge}`);
     if (elig.maxLevel === 'semi_pro' && player.level === 'pro') reasons.push('amateur/semi-pro only');

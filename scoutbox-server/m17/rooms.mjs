@@ -28,6 +28,7 @@ import {
 } from './shared.mjs';
 import { guardRev, bumpRev, revMeta } from '../m181/concurrency.mjs';
 import { rateLimitedBody } from '../m181/rateLimit.mjs';
+import { parseDateOrInstant, isAbsent } from '../temporal.mjs';
 
 export function registerRooms(ctx) {
   const {
@@ -50,6 +51,17 @@ export function registerRooms(ctx) {
   // Comment bodies are stored inert: markup is removed on write, so no renderer
   // anywhere — ours or a future one — can be talked into executing it.
   const plainText = (s, max) => String(s ?? '').replace(/<[^>]*>/g, '').replace(/[<>]/g, '').trim().slice(0, max);
+  /**
+   * M23 P5.7: a due date is a calendar day or an instant that EXISTS, or it is
+   * absent. Returns the canonical stored value (a `YYYY-MM-DD` string or
+   * integer ms), null for absent, or undefined after sending a 400.
+   */
+  const dueAtOrRefuse = (res, raw) => {
+    if (isAbsent(raw)) return null;
+    const p = parseDateOrInstant(raw, { dayEdge: 'end' });
+    if (!p.ok) { res.status(400).json({ error: 'DATE_INVALID', field: 'dueAt', message: `A due date is a calendar day (YYYY-MM-DD) or an ISO 8601 date-time with an offset (${p.why}).`, expected: p.expected }); return undefined; }
+    return p.precision === 'day' ? p.value : p.ms;
+  };
 
   const isRoom = (c) => !!c?.room;
 
@@ -1021,10 +1033,12 @@ export function registerRooms(ctx) {
     }
     const linkedResourceType = LINKED_RESOURCE_TYPES.includes(req.body?.linkedResourceType) ? req.body.linkedResourceType : null;
 
+    const dueAt = dueAtOrRefuse(res, req.body?.dueAt);
+    if (dueAt === undefined) return;
     const t = {
       id: nextId('tsk'), title, description,
       assigneeUserId: assignee?.id ?? null, assigneeName: assignee?.name ?? null,
-      status: 'open', dueAt: req.body?.dueAt ?? null,
+      status: 'open', dueAt,
       linkedResourceType, linkedResourceId: linkedResourceType ? String(req.body?.linkedResourceId ?? '') || null : null,
       createdBy: { userId: req.orgUser.id, name: req.orgUser.name },
       createdAt: now(), completedAt: null,
@@ -1191,7 +1205,9 @@ export function registerRooms(ctx) {
     const u = orgUser(req.org.id, String(req.body?.userId ?? ''));
     if (!u) return res.status(404).json({ error: 'USER_NOT_IN_ORG' });
     const kind = plainText(req.body?.kind, 60) || 'Assessment';
-    const a = { id: nextId('asg'), userId: u.id, name: u.name, task: `${kind} assessment`, dueAt: req.body?.dueAt ?? null, status: 'open', createdAt: now() };
+    const dueAt = dueAtOrRefuse(res, req.body?.dueAt);
+    if (dueAt === undefined) return;
+    const a = { id: nextId('asg'), userId: u.id, name: u.name, task: `${kind} assessment`, dueAt, status: 'open', createdAt: now() };
     room.assignments ??= [];
     room.assignments.push(a);
     activity(room, req, 'room_assessment_assigned', { assignmentId: a.id, userId: u.id, kind });

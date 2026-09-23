@@ -37,6 +37,7 @@
 import { guardRev, bumpRev, revMeta } from '../m181/concurrency.mjs';
 import { rateLimitedBody } from '../m181/rateLimit.mjs';
 import { normaliseClientKey, payloadFingerprint } from '../m23/contact.mjs';
+import { isExpiredAt, isAbsent, parseDateOrInstant } from '../temporal.mjs';
 import { hasVerLevel } from '../m14/shared.mjs';
 import { effectiveAgreementStatus, agreementGrantsAccess, affiliationActive, tiersOf, can } from '../m24/shared.mjs';
 import { sendTransactionError, notFound } from './errors.mjs';
@@ -385,7 +386,7 @@ export function registerTransactions(rawCtx) {
     id: d.id, documentType: d.documentType, visibility: d.visibility, version: d.version,
     label: d.label, ownerKind: d.owner?.kind ?? null, ownerPartyRole: d.ownerPartyRole ?? null,
     uploadedAt: d.createdAt, actor: actorLabel(d.uploadedBy),
-    expiresAt: d.expiresAt ?? null, expired: typeof d.expiresAt === 'number' && d.expiresAt <= now(),
+    expiresAt: d.expiresAt ?? null, expired: isExpiredAt(d.expiresAt, now()), // M23 P5.7: an unreadable expiry reads expired, never "current"
     signedAt: d.signedAt ?? null, supersedes: d.supersedes ?? null,
     evidence: d.evidenceRef ? { kind: d.evidenceRef.kind, present: true } : null,
     downloadable: !!d.evidenceRef && canSeeVisibility(d.visibility, roles, partyRole),
@@ -1012,8 +1013,12 @@ export function registerTransactions(rawCtx) {
       if (!ev || !mine) return sendTransactionError(res, { error: 'DOCUMENT_INPUT_INVALID', field: 'evidenceRef', message: 'No evidence record of yours matches that reference.' }, 'documents');
       evidenceRef = { kind: 'verification_evidence', id: ev.id };
     }
-    const expiresAt = b.expiresAt == null ? null : Number(b.expiresAt);
-    if (expiresAt !== null && (!Number.isFinite(expiresAt) || expiresAt <= now())) return sendTransactionError(res, { error: 'DOCUMENT_INPUT_INVALID', field: 'expiresAt', message: 'An expiry must be a future timestamp.' }, 'documents');
+    // M23 P5.7: an integer timestamp, an ISO 8601 instant with an offset, or a
+    // calendar day (valid through that day) — never a coerced numeric string.
+    const expP = isAbsent(b.expiresAt) ? null : parseDateOrInstant(b.expiresAt, { dayEdge: 'end' });
+    if (expP && !expP.ok) return sendTransactionError(res, { error: 'DOCUMENT_INPUT_INVALID', field: 'expiresAt', message: `An expiry must be a timestamp, an ISO 8601 date-time with an offset, or a calendar day (${expP.why}).` }, 'documents');
+    const expiresAt = expP ? expP.ms : null;
+    if (expiresAt !== null && expiresAt <= now()) return sendTransactionError(res, { error: 'DOCUMENT_INPUT_INVALID', field: 'expiresAt', message: 'An expiry must be a future timestamp.' }, 'documents');
     const fp = payloadFingerprint({ documentType, visibility, label, evidenceRef });
     if (key) {
       const hit = db.transactionDocuments.find((d) => d && d.transactionId === tx.id && d.keys?.add?.key === key);
@@ -1050,7 +1055,7 @@ export function registerTransactions(rawCtx) {
   function readDocumentReference(req, res, tx, { roles, partyRole }) {
     const d = db.transactionDocuments.find((x) => x && x.id === req.params.docId && x.transactionId === tx.id && !x.removedAt);
     if (!d || !canSeeVisibility(d.visibility, roles, partyRole)) return sendTransactionError(res, { error: 'DOCUMENT_NOT_FOUND', message: 'No document with that reference is available to you.' }, 'documents');
-    if (typeof d.expiresAt === 'number' && d.expiresAt <= now()) return sendTransactionError(res, { error: 'DOCUMENT_NOT_FOUND', message: 'No document with that reference is available to you.' }, 'documents');
+    if (isExpiredAt(d.expiresAt, now())) return sendTransactionError(res, { error: 'DOCUMENT_NOT_FOUND', message: 'No document with that reference is available to you.' }, 'documents');
     if (!d.evidenceRef) return res.json({ document: documentView(d, roles, partyRole), reference: null, note: 'This document is a placeholder: no file has been attached to it in the evidence vault.' });
     res.json({
       document: documentView(d, roles, partyRole),

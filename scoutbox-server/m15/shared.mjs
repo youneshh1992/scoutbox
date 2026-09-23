@@ -11,6 +11,7 @@
 // is unit-testable without a server.
 import crypto from 'node:crypto';
 import { isLegacyTrial, currentAttendance, TRIAL_ATTENDED_STATES } from '../m23/trial.mjs';
+import { parseStrictDateOnly } from '../temporal.mjs';
 
 // ------------------------------------------------------------- provenance
 // One vocabulary for "where did this come from". Ordered least→most
@@ -86,17 +87,23 @@ export function normWhen(input) {
   }
   if (typeof input === 'object') {
     const y = Number(input.year ?? input.y);
-    if (!Number.isFinite(y)) return null;
+    if (!Number.isInteger(y) || y < 1900 || y > 2100) return null;
     const m = input.month ?? input.m;
     if (m != null && Number.isFinite(Number(m))) {
-      const mm = Math.min(Math.max(Number(m), 1), 12);
+      // M23 P5.7: a month that does not exist is not clamped to one that does.
+      const mm = Number(m);
+      if (!Number.isInteger(mm) || mm < 1 || mm > 12) return null;
       return { t: Date.UTC(y, mm - 1, 1), precision: 'month', y, m: mm };
     }
     return { t: Date.UTC(y, 0, 1), precision: 'year', y };
   }
   if (typeof input === 'string') {
-    const dm = /^(\d{4})-(\d{2})-(\d{2})/.exec(input);
-    if (dm) return normWhen(Date.UTC(+dm[1], +dm[2] - 1, +dm[3]));
+    const dm = /^(\d{4}-\d{2}-\d{2})/.exec(input);
+    if (dm) {
+      // M23 P5.7: a day-precision history date is a day that exists (30 February used to roll to March).
+      const d = parseStrictDateOnly(dm[1]);
+      return d.ok ? normWhen(d.t) : null;
+    }
     const mm = /^(\d{4})-(\d{2})$/.exec(input);
     if (mm) return normWhen({ year: +mm[1], month: +mm[2] });
     const yy = /^(\d{4})$/.exec(input);

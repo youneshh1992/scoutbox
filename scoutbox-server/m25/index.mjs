@@ -24,6 +24,7 @@
  */
 
 import { visibleToOrg } from '../domain.mjs';
+import { parseStrictDateOnly } from '../temporal.mjs';
 import { guardRev, bumpRev, revMeta } from '../m181/concurrency.mjs';
 import { rateLimitedBody } from '../m181/rateLimit.mjs';
 import { normaliseClientKey, payloadFingerprint } from '../m23/contact.mjs';
@@ -197,8 +198,10 @@ export function registerCompliance(rawCtx) {
     if (!/^jp-[a-z]{2,6}-[0-9a-z-]{2,20}$/i.test(String(b.id ?? ''))) errs.push('id');
     if (!JURISDICTIONS.includes(b.jurisdiction)) errs.push('jurisdiction');
     if (!Number.isInteger(b.policyVersion) || b.policyVersion < 1) errs.push('policyVersion');
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(b.effectiveFrom ?? ''))) errs.push('effectiveFrom');
-    if (b.effectiveTo != null && !/^\d{4}-\d{2}-\d{2}$/.test(String(b.effectiveTo))) errs.push('effectiveTo');
+    // M23 P5.7 (T-4): a real calendar day in bounds, not merely the shape of one.
+    if (!parseStrictDateOnly(b.effectiveFrom).ok) errs.push('effectiveFrom');
+    if (b.effectiveTo != null && !parseStrictDateOnly(b.effectiveTo).ok) errs.push('effectiveTo');
+    if (b.effectiveTo != null && parseStrictDateOnly(b.effectiveFrom).ok && parseStrictDateOnly(b.effectiveTo).ok && !(b.effectiveFrom < b.effectiveTo)) errs.push('effectiveTo');
     if (!b.rules || typeof b.rules !== 'object' || !Object.keys(b.rules).length) errs.push('rules');
     else for (const [id, r] of Object.entries(b.rules)) {
       if (!RULE_STATUSES.includes(r?.ruleStatus)) errs.push(`rules.${id}.ruleStatus`);

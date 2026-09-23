@@ -33,6 +33,7 @@
  */
 
 import { parseTrialDate, isTrialDate } from '../domain.mjs';
+import { validateIanaZone, parseInstant as parseCanonicalInstant, localParts as canonicalLocalParts } from '../temporal.mjs';
 import { normaliseClientKey, payloadFingerprint } from './contact.mjs';
 
 export const TRIAL_POLICY_VERSION = 1;
@@ -120,92 +121,33 @@ export { payloadFingerprint };
 
 // ------------------------------------------------------------------ time
 
-let supportedZones = null;
-function zoneSet() {
-  if (supportedZones) return supportedZones;
-  let list = [];
-  try { list = Intl.supportedValuesOf('timeZone'); } catch { list = []; }
-  supportedZones = new Set([...list, 'UTC']);
-  return supportedZones;
-}
-
-/**
- * Current IANA names that older ICU builds still canonicalise to a legacy
- * alias. The runtime formats them correctly; it only REPORTS the old name
- * (Asia/Kolkata → Asia/Calcutta), which would fail an exact-name check and
- * refuse a real city. Each key is exact-case; the value is what the runtime
- * must resolve it to for the name to be accepted (P4B defect D-P4B-1).
- */
-const MODERN_ZONE_ALIASES = Object.freeze({
-  'Asia/Kolkata': 'Asia/Calcutta', 'Europe/Kyiv': 'Europe/Kiev', 'Asia/Ho_Chi_Minh': 'Asia/Saigon', 'Asia/Kathmandu': 'Asia/Katmandu',
-  'Asia/Yangon': 'Asia/Rangoon', 'America/Nuuk': 'America/Godthab', 'Atlantic/Faroe': 'Atlantic/Faeroe', 'Pacific/Chuuk': 'Pacific/Truk',
-  'Pacific/Pohnpei': 'Pacific/Ponape', 'Pacific/Kanton': 'Pacific/Enderbury', 'Asia/Dhaka': 'Asia/Dacca', 'Asia/Thimphu': 'Asia/Thimbu',
-  'Asia/Macau': 'Asia/Macao', 'Asia/Ulaanbaatar': 'Asia/Ulan_Bator', 'Africa/Asmara': 'Africa/Asmera', 'America/Argentina/Buenos_Aires': 'America/Buenos_Aires',
-  'America/Argentina/Catamarca': 'America/Catamarca', 'America/Argentina/Cordoba': 'America/Cordoba', 'America/Argentina/Jujuy': 'America/Jujuy',
-  'America/Argentina/Mendoza': 'America/Mendoza', 'America/Indiana/Indianapolis': 'America/Indianapolis', 'America/Kentucky/Louisville': 'America/Louisville',
-  'Atlantic/Faroe': 'Atlantic/Faeroe', 'Europe/Kyiv': 'Europe/Kiev',
-});
-
 /**
  * An organiser timezone is an exact IANA name this runtime knows (D-21). No
  * case-folding, no alias resolution, no fallback to the server's zone: a
- * schedule whose zone is unknown is refused, never guessed.
+ * schedule whose zone is unknown is refused, never guessed. M23 P5.7: the
+ * check itself is the platform's (`temporal.mjs`); this keeps the Trial code.
  */
 export function validateTimezone(tz) {
-  const bad = { ok: false, error: 'TRIAL_TIMEZONE_INVALID', message: 'timezone must be an IANA time zone name, for example Europe/London.' };
-  if (typeof tz !== 'string' || tz === '' || tz.length > 64) return bad;
-  const known = zoneSet().has(tz);
-  const modern = Object.prototype.hasOwnProperty.call(MODERN_ZONE_ALIASES, tz) ? MODERN_ZONE_ALIASES[tz] : null;
-  if (!known && !modern) return bad;
-  try {
-    const resolved = new Intl.DateTimeFormat('en-GB', { timeZone: tz }).resolvedOptions().timeZone;
-    // Exact case: the runtime folds `europe/london`, this validator does not.
-    if (resolved !== tz && resolved !== modern) return bad;
-  } catch { return bad; }
-  return { ok: true, timezone: tz };
+  const v = validateIanaZone(tz);
+  if (!v.ok) return { ok: false, error: 'TRIAL_TIMEZONE_INVALID', message: v.message };
+  return { ok: true, timezone: v.timezone };
 }
-
-const ISO_INSTANT_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|[+-]\d{2}:\d{2})$/;
 
 /**
  * The ONE parser for a Trial instant (mandate §46). Accepts an ISO 8601
  * date-time WITH an explicit offset or `Z`, or a finite integer millisecond
  * timestamp; anything else — a bare local time, a date-only string, a number
  * that is not an integer, text, an object — is refused. Returns UTC ms.
+ * M23 P5.7: the parsing is the platform's; the year bound and code are Trial's.
  */
 export function parseInstant(v) {
-  const bad = (why) => ({ ok: false, error: 'TRIAL_SCHEDULE_INVALID', message: `A session time must be an ISO 8601 date-time with an explicit offset or Z, or a millisecond timestamp (${why}).` });
-  let ms;
-  if (typeof v === 'number') {
-    if (!Number.isInteger(v)) return bad('not a whole number');
-    ms = v;
-  } else if (typeof v === 'string') {
-    if (!ISO_INSTANT_RE.test(v)) return bad('wrong shape');
-    ms = Date.parse(v);
-    if (!Number.isFinite(ms)) return bad('not a real date-time');
-    // Calendar validity: Date.parse accepts 2026-02-31 as March 3. Round-trip the day.
-    const m = ISO_INSTANT_RE.exec(v);
-    const day = parseTrialDate(`${m[1]}-${m[2]}-${m[3]}`);
-    if (!day.ok) return bad('no such calendar day');
-    const hh = Number(m[4]); const mm = Number(m[5]); const ss = Number(m[6] ?? 0);
-    if (hh > 23 || mm > 59 || ss > 59) return bad('no such time of day');
-  } else {
-    return bad('not a date-time');
-  }
-  const y = new Date(ms).getUTCFullYear();
-  if (!Number.isFinite(ms) || y < TRIAL_INSTANT_YEAR_MIN || y > TRIAL_INSTANT_YEAR_MAX) return bad(`year outside ${TRIAL_INSTANT_YEAR_MIN}–${TRIAL_INSTANT_YEAR_MAX}`);
-  return { ok: true, ms };
+  const p = parseCanonicalInstant(v, { yearMin: TRIAL_INSTANT_YEAR_MIN, yearMax: TRIAL_INSTANT_YEAR_MAX });
+  if (!p.ok) return { ok: false, error: 'TRIAL_SCHEDULE_INVALID', message: `A session time must be an ISO 8601 date-time with an explicit offset or Z, or a millisecond timestamp (${p.why}).` };
+  return { ok: true, ms: p.ms };
 }
 
 /** Local wall-clock parts of an instant in a zone. Deterministic; Intl-backed. */
-export function localParts(ms, timezone) {
-  const f = new Intl.DateTimeFormat('en-GB', {
-    timeZone: timezone, hourCycle: 'h23',
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
-  });
-  const p = Object.fromEntries(f.formatToParts(new Date(ms)).filter((x) => x.type !== 'literal').map((x) => [x.type, x.value]));
-  return { year: p.year, month: p.month, day: p.day, hour: p.hour === '24' ? '00' : p.hour, minute: p.minute, second: p.second };
-}
+export const localParts = canonicalLocalParts;
 
 /** `YYYY-MM-DD` of an instant in the organiser zone — the day the family sees. */
 export function localDay(ms, timezone) {

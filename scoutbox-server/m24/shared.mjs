@@ -22,6 +22,8 @@
  *     representation, fee enforcement or Offer work (P5.6C/D).
  */
 
+import { isExpiredAt, readInstant } from '../temporal.mjs';
+
 export const AGENT_POLICY_VERSION = 1;
 
 // -------------------------------------------------------------- verification
@@ -62,10 +64,19 @@ export const newFacets = () => ({
   minors_authorisation: {},    // keyed by member association
 });
 
-/** Effective state of one facet at `now`: VERIFIED decays to STALE past recheckAt. */
+/**
+ * Effective state of one facet at `now`: VERIFIED decays to STALE past
+ * recheckAt. M23 P5.7 (T-1): a VERIFIED facet whose recheck clock is PRESENT
+ * but cannot be read (NaN, an ISO string, a numeric string) used to stay
+ * VERIFIED for ever, because the decay test was `typeof === 'number' && <=
+ * now` and an unreadable clock failed the first half. It now reads STALE.
+ * An ABSENT clock (null/undefined) keeps the frozen P5.6B reading — a legacy
+ * row without a shelf life does not decay — exactly the absent-versus-
+ * unreadable distinction the F-2/F-3 repair drew for agreement terms.
+ */
 export function effectiveFacetState(facet, now = Date.now()) {
   if (!facet || !facet.state) return 'UNVERIFIED';
-  if (facet.state === 'VERIFIED' && typeof facet.recheckAt === 'number' && facet.recheckAt <= now) return 'STALE';
+  if (facet.state === 'VERIFIED' && !boundaryAbsent(facet.recheckAt) && isExpiredAt(facet.recheckAt, now)) return 'STALE';
   return VERIFICATION_STATES.includes(facet.state) ? facet.state : 'MANUAL_REVIEW_REQUIRED';
 }
 
@@ -130,8 +141,14 @@ export const normaliseTiers = (raw) => {
   return out;
 };
 
+/**
+ * M23 P5.7 (T-14): the same absent-versus-unreadable rule as an agreement
+ * term. `typeof -Infinity === 'number'` made a membership that "started at
+ * minus infinity" active, and one that "ends at infinity" active for ever.
+ */
 export const affiliationActive = (a, now = Date.now()) =>
-  !!a && typeof a.startedAt === 'number' && a.startedAt <= now && (a.endedAt == null || a.endedAt > now);
+  !!a && readInstant(a.startedAt) !== null && a.startedAt <= now
+  && (boundaryAbsent(a.endedAt) || (readInstant(a.endedAt) !== null && a.endedAt > now));
 
 export const tiersOf = (a) => (a ? normaliseTiers(a.tiers) : []);
 

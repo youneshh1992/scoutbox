@@ -19,6 +19,7 @@
  */
 
 import { ROOM_TRANSITIONS } from '../m17/shared.mjs';
+import { parseInstant, readInstant } from '../temporal.mjs';
 
 export const CONTACT_POLICY_VERSION = 1;
 
@@ -290,10 +291,14 @@ export function validateExternalRecord({ channel, occurredAt, summary, recipient
   if (!has(CONTACT_CHANNELS, channel) || !CONTACT_CHANNELS[channel].external) {
     return { ok: false, error: 'CONTACT_CHANNEL_INVALID', message: `Channel must be one of ${EXTERNAL_CHANNELS.join(', ')}.`, allowed: EXTERNAL_CHANNELS };
   }
-  const ts = typeof occurredAt === 'number' ? occurredAt : typeof occurredAt === 'string' ? Date.parse(occurredAt) : NaN;
-  if (!Number.isFinite(ts)) {
-    return { ok: false, error: 'CONTACT_OCCURRED_AT_INVALID', message: 'occurredAt must be a date and time.' };
+  // M23 P5.7 (T-6): one instant parser. A bare local time (`2026-03-01T10:00`)
+  // used to be read in whatever zone the server runs in, `02/03/2026` was read
+  // as an American date, and `2026-02-30T10:00Z` as 2 March. All refused now.
+  const parsed = parseInstant(occurredAt);
+  if (!parsed.ok) {
+    return { ok: false, error: 'CONTACT_OCCURRED_AT_INVALID', message: 'occurredAt must be a date and time: ISO 8601 with an explicit offset or Z, or a millisecond timestamp.' };
   }
+  const ts = parsed.ms;
   if (ts > now + CONTACT_LIMITS.occurredAtSkewMs) {
     return { ok: false, error: 'CONTACT_OCCURRED_AT_INVALID', message: 'A contact cannot be recorded before it has happened.' };
   }
@@ -316,8 +321,10 @@ export function validateExternalRecord({ channel, occurredAt, summary, recipient
  * answered. Server-enforced, clock-injected, no randomness.
  */
 export function cooldownFor(contacts, { orgId, playerId, now = Date.now(), exceptId = null }) {
+  // M23 P5.7 (T-13): a FINITE delivery instant. `typeof Infinity === 'number'`
+  // let a corrupt `deliveredAt: Infinity` cool the pair down for ever.
   const recent = contacts.filter((c) => c && c.orgId === orgId && c.playerId === playerId && c.id !== exceptId
-    && c.channel === 'in_app' && c.status === 'delivered' && typeof c.deliveredAt === 'number'
+    && c.channel === 'in_app' && c.status === 'delivered' && readInstant(c.deliveredAt) !== null
     && now - c.deliveredAt < CONTACT_LIMITS.cooldownMs);
   if (recent.length === 0) return null;
   const latest = Math.max(...recent.map((c) => c.deliveredAt));

@@ -7,6 +7,7 @@
 //  * Outgoing webhooks are signed, tenant-scoped, retried with bounds, and
 //    SSRF-guarded. Connectors report "not configured" until credentialed.
 import crypto from 'node:crypto';
+import { parseDobStrict } from '../temporal.mjs';
 
 const PROSPECT_FIELDS = ['name', 'dob', 'position', 'foot', 'heightCm', 'provider', 'externalId', 'notes'];
 const POSITIONS = ['GK', 'CB', 'RB', 'LB', 'RWB', 'LWB', 'CDM', 'CM', 'CAM', 'RW', 'LW', 'ST', 'CF'];
@@ -68,8 +69,13 @@ export function registerImports(ctx) {
       const errors = [];
       if (!rec.name) errors.push('name is required');
       if (!rec.provider || !rec.externalId) errors.push('provider and externalId are required — identity is never name-only');
-      if (rec.dob && !/^\d{4}-\d{2}-\d{2}$/.test(rec.dob)) errors.push('dob must be YYYY-MM-DD');
-      if (rec.dob && (rec.dob < '1940-01-01' || rec.dob > new Date().toISOString().slice(0, 10))) errors.push('dob out of range');
+      // M23 P5.7: the platform DOB rule (shape, a day that exists, not in the
+      // future), then the import's own floor. A 30 February used to pass the shape check.
+      if (rec.dob) {
+        const d = parseDobStrict(rec.dob, Date.now());
+        if (!d.ok) errors.push(d.why === 'wrong shape' || d.why === 'not text' ? 'dob must be YYYY-MM-DD' : `dob out of range (${d.why})`);
+        else if (rec.dob < '1940-01-01') errors.push('dob out of range');
+      }
       if (rec.position && !POSITIONS.includes(rec.position)) errors.push(`position must be one of ${POSITIONS.join('/')}`);
       if (rec.heightCm && (!/^\d+$/.test(rec.heightCm) || +rec.heightCm < 100 || +rec.heightCm > 230)) errors.push('heightCm must be 100–230');
       const identKey = `${rec.provider}::${rec.externalId}`;

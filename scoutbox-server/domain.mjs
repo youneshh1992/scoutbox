@@ -1,6 +1,8 @@
 // Shared domain logic: safeguarding + trust score.
 // The player app mirrors this in src/domain/ — keep the two in sync.
 
+import { parseStrictDateOnly, ageOnMs } from './temporal.mjs';
+
 // Age of majority per country (ISO alpha-2). Anything not listed: 18.
 export const ADULT_AGE = {
   DEFAULT: 18,
@@ -59,20 +61,15 @@ export function adultAgeFor(country) {
  * parsing already refuses it.
  */
 export function parseDob(dob) {
-  if (typeof dob !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dob)) return null;
-  const t = new Date(`${dob}T00:00:00Z`);
-  if (Number.isNaN(t.getTime()) || t.toISOString().slice(0, 10) !== dob) return null;
-  return dob;
+  // M23 P5.7: the shape, calendar and year-bound checks live in ONE place
+  // (temporal.mjs). This is the DOB name for that rule, kept for its callers.
+  const p = parseStrictDateOnly(dob);
+  return p.ok ? p.value : null;
 }
 
 export function ageOn(dob, onDate = new Date()) {
-  const day = parseDob(dob);
-  if (day === null) return NaN;
-  const birth = new Date(`${day}T00:00:00Z`);
-  let age = onDate.getUTCFullYear() - birth.getUTCFullYear();
-  const m = onDate.getUTCMonth() - birth.getUTCMonth();
-  if (m < 0 || (m === 0 && onDate.getUTCDate() < birth.getUTCDate())) age--;
-  return age;
+  const nowMs = onDate instanceof Date ? onDate.getTime() : Number(onDate);
+  return ageOnMs(dob, nowMs);
 }
 
 /** Adult only when the age is KNOWN and reaches the threshold. Unknown is not adult. */
@@ -237,8 +234,6 @@ export const TRIAL_DATE_YEAR_MAX = 2100;
 export const TRIAL_REPORT_WINDOW_MS = 7 * 24 * 3600 * 1000;
 export const TRIAL_DETAIL_LIMITS = Object.freeze({ venue: 200, notes: 500, altSlots: 2 });
 
-const TRIAL_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
-
 /**
  * @returns {{ok:true, value:string|null, t:number|null} | {ok:false, error:'TRIAL_DATE_INVALID', message:string, expected:string}}
  *   `value` is the canonical string (or null for "no date"); `t` is the UTC
@@ -247,17 +242,11 @@ const TRIAL_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 export function parseTrialDate(input) {
   if (input === undefined || input === null || input === '') return { ok: true, value: null, t: null };
   const invalid = (why) => ({ ok: false, error: 'TRIAL_DATE_INVALID', message: `A trial date must be a calendar day written ${TRIAL_DATE_SYNTAX} (${why}).`, expected: TRIAL_DATE_SYNTAX });
-  if (typeof input !== 'string') return invalid('not text');
-  const m = TRIAL_DATE_RE.exec(input);
-  if (!m) return invalid('wrong shape');
-  const y = Number(m[1]); const mo = Number(m[2]); const d = Number(m[3]);
-  if (y < TRIAL_DATE_YEAR_MIN || y > TRIAL_DATE_YEAR_MAX) return invalid(`year outside ${TRIAL_DATE_YEAR_MIN}–${TRIAL_DATE_YEAR_MAX}`);
-  if (mo < 1 || mo > 12) return invalid('no such month');
-  if (d < 1 || d > 31) return invalid('no such day');
-  const t = Date.UTC(y, mo - 1, d);
-  const back = new Date(t);
-  if (back.getUTCFullYear() !== y || back.getUTCMonth() !== mo - 1 || back.getUTCDate() !== d) return invalid('no such day in that month');
-  return { ok: true, value: input, t };
+  // M23 P5.7: one DATE_ONLY parser for the platform; this keeps the Trial
+  // vocabulary (its error code and its 2000–2100 bound) at the edge.
+  const p = parseStrictDateOnly(input, { yearMin: TRIAL_DATE_YEAR_MIN, yearMax: TRIAL_DATE_YEAR_MAX });
+  if (!p.ok) return invalid(p.why);
+  return { ok: true, value: p.value, t: p.t };
 }
 
 /** True only for a stored value that is a valid trial date (never for "no date"). */

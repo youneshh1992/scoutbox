@@ -6,6 +6,7 @@
 // visibleToOrg (incl. the agency/minor wall and the grassroots 50 km rule),
 // blocks, guardian ownership, adult checks. Passport adds no new access.
 import { isAdult, visibleToOrg } from '../domain.mjs';
+import { ageOrNull } from '../temporal.mjs';
 import {
   buildTimeline, clubHistory, currentStatus, temporalConflicts, completeness,
   projectPassport, passportRevision, normWhen, whenDisplay, evId, PROVENANCE_COPY,
@@ -185,12 +186,9 @@ export function registerPassportCore(ctx) {
       : null;
 
     const history = clubHistory({ affiliations: [], squads, careerEntries, signingRows });
-    const age = (() => {
-      const d = new Date(player.dob); const t = new Date();
-      let a = t.getFullYear() - d.getFullYear();
-      if (t < new Date(t.getFullYear(), d.getMonth(), d.getDate())) a--;
-      return a;
-    })();
+    // M23 P5.7 (T-8): THE age rule. The local-getter version here gave a
+    // different answer around a birthday in any non-UTC zone.
+    const age = ageOrNull(player.dob, now);
 
     const fullMatchEvidence = evidence.filter((e) => e.claimType === 'footage' && !e.superseded);
     const recentAssessment = assessments.some((a) => (a.submittedAt ?? a.createdAt) > now - 365 * 86_400_000);

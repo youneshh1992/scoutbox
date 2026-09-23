@@ -13,6 +13,7 @@
 
 import { createHash } from 'node:crypto';
 import { resolveScope, ruleAt } from './policy.mjs';
+import { readInstant } from '../temporal.mjs';
 
 export const CONFLICT_OUTCOMES = Object.freeze([
   'CLEAR',
@@ -67,7 +68,10 @@ export function consentSufficiency(consent, { partyRole, agentUserId, contextId,
   if (consent.kind !== 'dual_representation') return { ok: false, reasonCode: 'CONSENT_MISSING' };
   // A revocation is a fact in its own right (the ledger derives status 'revoked'): it is reported before anything else.
   if (consent.revokedAt != null || consent.status === 'revoked') return { ok: false, reasonCode: 'CONSENT_REVOKED' };
-  if (consent.status !== 'granted' || typeof consent.grantedAt !== 'number') return { ok: false, reasonCode: consent.status === 'declined' ? 'CONSENT_DECLINED' : 'CONSENT_MISSING' };
+  // M23 P5.7: a grant is dated by a READABLE instant. `typeof NaN === 'number'`
+  // let an undated grant through and then passed the in-advance test below
+  // (`NaN > firstActAt` is false).
+  if (consent.status !== 'granted' || readInstant(consent.grantedAt) === null) return { ok: false, reasonCode: consent.status === 'declined' ? 'CONSENT_DECLINED' : 'CONSENT_MISSING' };
   if (consent.contextId !== contextId) return { ok: false, reasonCode: 'CONSENT_WRONG_CONTEXT' };
   if (consent.agentUserId !== agentUserId) return { ok: false, reasonCode: 'CONSENT_WRONG_AGENT' };
   if (consent.partyRole !== partyRole) return { ok: false, reasonCode: 'CONSENT_WRONG_PARTY' };

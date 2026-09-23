@@ -19,6 +19,8 @@
  * development server whose own vocabulary has drifted towards a rating.
  */
 
+import { parseDateOrInstant } from '../temporal.mjs';
+
 export const DEVELOPMENT_POLICY_VERSION = 1;
 
 /**
@@ -363,12 +365,18 @@ export function boundedText(raw, max, { field }) {
   return { value: s };
 }
 
-/** A date the caller supplied, as an instant. Rejects nonsense rather than repairing it. */
+/**
+ * A date the caller supplied, as an instant. Rejects nonsense rather than
+ * repairing it. M23 P5.7 (T-7): a calendar day (`YYYY-MM-DD`, read as the
+ * start of that UTC day), an ISO 8601 date-time WITH an offset or Z, or an
+ * integer timestamp. A bare local time and an ambiguous `02/03/2026` used to
+ * be read in the server's zone and the engine's locale; both are refused now.
+ */
 export function parseDate(raw, { field }) {
   if (raw == null || raw === '') return { value: null };
-  const t = typeof raw === 'number' ? raw : Date.parse(String(raw));
-  if (!Number.isFinite(t)) return { error: 'DATE_INVALID', field, detail: `${field} is not a date.` };
-  return { value: t };
+  const p = parseDateOrInstant(raw, { dayEdge: 'start' });
+  if (!p.ok) return { error: 'DATE_INVALID', field, detail: `${field} is not a date (${p.why}).`, expected: p.expected };
+  return { value: p.ms };
 }
 
 /** One transition check for all three record kinds. */

@@ -22,6 +22,7 @@
 
 import { RULE_STATUSES } from './policyVersions.mjs';
 import { parseDob } from '../domain.mjs';
+import { parseStrictDateOnly, readInstant } from '../temporal.mjs';
 
 export { RULE_STATUSES };
 
@@ -32,7 +33,18 @@ export const POLICY_FACETS = Object.freeze(['fifa_licence', 'national_registrati
 
 const DAY = 24 * 60 * 60 * 1000;
 
-const dateMs = (iso) => (typeof iso === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(iso) ? Date.parse(`${iso}T00:00:00Z`) : (typeof iso === 'number' ? iso : NaN));
+/**
+ * A policy boundary (`effectiveFrom` / `effectiveTo`) as an instant: a strict
+ * DATE_ONLY (UTC midnight of that day) or a finite integer timestamp; NaN
+ * otherwise. M23 P5.7 (T-4): the previous regex-then-Date.parse accepted
+ * `2026-02-30` as 2 March — a published policy could start on a day that does
+ * not exist. NaN fails every window comparison, so an unreadable boundary
+ * means the version is never selected (closed).
+ */
+const dateMs = (iso) => {
+  if (typeof iso === 'string') { const p = parseStrictDateOnly(iso); return p.ok ? p.t : NaN; }
+  return readInstant(iso) ?? NaN;
+};
 
 // ------------------------------------------------------------ versions
 
@@ -282,8 +294,12 @@ export function isRegulatoryMinor(dob, now = Date.now()) {
  * country's first-contract age — a parameter that is UNKNOWN everywhere.
  */
 export function earliestPermittedApproachAt(dob, entry, { employingCountry = null } = {}) {
-  const b = new Date(dob);
-  if (Number.isNaN(b.getTime()) || !entry?.rule) return { at: null, reason: 'MINOR_TIMING_NOT_ENCODED' };
+  // M23 P5.7 (T-5): `new Date(null)` is the epoch and `new Date('2010-02-30')`
+  // is 2 March; a formula over either produced a confident, wrong date. One
+  // DOB rule for the platform: parseDob.
+  const day = parseDob(dob);
+  if (day === null || !entry?.rule) return { at: null, reason: 'MINOR_TIMING_NOT_ENCODED' };
+  const b = new Date(`${day}T00:00:00Z`);
   const p = entry.rule.params ?? {};
   if (p.formula === 'academic_year_16') {
     const sixteenth = Date.UTC(b.getUTCFullYear() + 16, b.getUTCMonth(), b.getUTCDate());
@@ -359,7 +375,7 @@ export function evaluateMinorGate({ dob, memberAssociation, employingCountry = n
   d.facetGaps.push(...licence.facetGaps);
   d.reasons.push(...licence.reasons.filter((r) => r.code !== 'FACET_VERIFIED' || true));
   // Guardian first: a prior, unrevoked approach consent must PRE-EXIST (no retroactive consent).
-  const approachConsent = (guardianConsents ?? []).find((c) => c && c.kind === 'guardian_approach' && typeof c.grantedAt === 'number' && c.grantedAt <= now && c.revokedAt == null);
+  const approachConsent = (guardianConsents ?? []).find((c) => c && c.kind === 'guardian_approach' && readInstant(c.grantedAt) !== null && c.grantedAt <= now && c.revokedAt == null);
   if (!approachConsent) { d.requiresGuardian = true; d.reasons.push(reasonOf('GUARDIAN_CONSENT_REQUIRED', timing, { consentKind: 'guardian_approach' })); }
   else d.reasons.push(reasonOf('GUARDIAN_CONSENT_PRESENT', timing, { consentKind: 'guardian_approach' }));
   return finish(d, policySet);
