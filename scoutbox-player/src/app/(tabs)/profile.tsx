@@ -306,7 +306,8 @@ export function ProfileBody() {
                   <View>
                     <Muted size={12}>Contracted until</Muted>
                     <Text style={styles.contractV}>
-                      {new Date(me.contractUntil).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+                      {/* M23 P5.7 (§6): a calendar day renders as that day in every zone */}
+                      {new Date(me.contractUntil).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', ...(/^\d{4}-\d{2}-\d{2}$/.test(String(me.contractUntil)) ? { timeZone: 'UTC' } : {}) })}
                     </Text>
                   </View>
                 )}

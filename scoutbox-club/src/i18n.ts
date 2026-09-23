@@ -1013,6 +1013,13 @@ const en = {
   'discover.orderingGrassroots': 'Ordered by First Team Seekers first, then distance, then profile completeness, then player id. Not ability, and not the Trust Score (evidence confidence).',
   'brief.unsaved': 'You have unsaved changes to this Recruitment Brief. Leave without saving?',
   'common.conflict': 'Someone else changed this while you were working on it. Reload to see their change, then apply yours — nothing of theirs was overwritten.',
+  // M23 P5.7 — the platform's temporal refusals, in the person's language.
+  'err.DATE_INVALID': 'That is not a real calendar day. Write it as YYYY-MM-DD.',
+  'err.DOB_INVALID': 'That is not a real date of birth. Write it as YYYY-MM-DD, in the past.',
+  'err.TIMESTAMP_INVALID': 'That is not a real date and time.',
+  'err.INTERVAL_INVALID': 'The end must come after the start.',
+  'err.TIME_INVALID': 'Write the time as HH:MM (24-hour).',
+  'err.TIMEZONE_INVALID': 'Choose a time zone from the list, for example Europe/London.',
   'common.loadFailed': 'That did not load.',
   'm18.sl.cardLabel': 'Second Look item',
   'm18.sl.playerWithheld': 'Player not available to your organisation',
@@ -2585,6 +2592,12 @@ const fr: typeof en = {
   'discover.orderingGrassroots': 'Trié par First Team Seekers d’abord, puis distance, puis complétude du profil, puis identifiant du joueur. Pas les qualités, et pas le Trust Score (confiance dans les preuves).',
   'brief.unsaved': 'Vous avez des modifications non enregistrées sur ce brief de recrutement. Quitter sans enregistrer ?',
   'common.conflict': 'Quelqu’un d’autre a modifié cet élément pendant que vous y travailliez. Rechargez pour voir sa modification, puis appliquez la vôtre — rien de son travail n’a été écrasé.',
+  'err.DATE_INVALID': 'Ce n’est pas un jour du calendrier. Écrivez-le sous la forme AAAA-MM-JJ.',
+  'err.DOB_INVALID': 'Ce n’est pas une date de naissance valide. Écrivez-la sous la forme AAAA-MM-JJ, dans le passé.',
+  'err.TIMESTAMP_INVALID': 'Ce n’est pas une date et une heure valides.',
+  'err.INTERVAL_INVALID': 'La fin doit venir après le début.',
+  'err.TIME_INVALID': 'Écrivez l’heure sous la forme HH:MM (24 h).',
+  'err.TIMEZONE_INVALID': 'Choisissez un fuseau horaire dans la liste, par exemple Europe/Paris.',
   'common.loadFailed': 'Le chargement a échoué.',
   'm18.sl.cardLabel': 'Élément du Second regard',
   'm18.sl.playerWithheld': 'Joueur non disponible pour votre organisation',
@@ -3163,8 +3176,12 @@ export function t(key: keyof typeof en | (string & {}), fallback?: string): stri
   return dict[key] ?? (en as Record<string, string>)[key] ?? fallback ?? key;
 }
 // Locale-aware formatting (dates/numbers follow the chosen language).
+// M23 P5.7 (§6): a calendar day (`YYYY-MM-DD`) has no zone, so it is rendered
+// as that day everywhere — `new Date('2027-06-30')` is UTC midnight, which a
+// browser west of Greenwich used to print as 29 June.
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 export const fmtDate = (ts: number | string) =>
-  new Date(ts).toLocaleDateString(getLang() === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  new Date(ts).toLocaleDateString(getLang() === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric', ...(typeof ts === 'string' && DATE_ONLY.test(ts) ? { timeZone: 'UTC' } : {}) });
 export const fmtDateTime = (ts: number) =>
   new Date(ts).toLocaleString(getLang() === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 /** Time of day only. Use it ONLY where the surrounding context already fixes

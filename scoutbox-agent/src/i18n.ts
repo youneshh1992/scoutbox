@@ -612,7 +612,9 @@ export function t(key: keyof typeof en | (string & {}), fallback?: string): stri
   const dict = current === 'fr' ? fr : en;
   return (dict as Record<string, string>)[key] ?? fallback ?? key;
 }
-export const fmtDate = (ts: number | string) => new Date(ts).toLocaleDateString(current === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+// M23 P5.7 (§6): a calendar day (`YYYY-MM-DD`) has no zone and renders as that day everywhere.
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+export const fmtDate = (ts: number | string) => new Date(ts).toLocaleDateString(current === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric', ...(typeof ts === 'string' && DATE_ONLY.test(ts) ? { timeZone: 'UTC' } : {}) });
 export const fmtStamp = (ts: number | string) => {
   const d = new Date(ts);
   const sameDay = d.toDateString() === new Date().toDateString();

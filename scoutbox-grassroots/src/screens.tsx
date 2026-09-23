@@ -72,6 +72,9 @@ export function Toast({ text, error }: { text: string; error?: boolean }) {
 }
 
 function errMsg(e: unknown): string {
+  // M23 P5.7: a temporal refusal (DATE_INVALID, INTERVAL_INVALID, …) has a
+  // translated sentence; anything else keeps the server's own message.
+  if (e instanceof ApiError) { const translated = t(`err.${e.code}`, ''); if (translated) return translated; }
   return e instanceof Error ? e.message : 'Something went wrong';
 }
 
