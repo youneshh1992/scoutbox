@@ -46,10 +46,29 @@ export function adultAgeFor(country) {
  * or renders it (JSON null, i.e. "unknown"). A record whose age cannot be
  * established is never treated as an adult.
  */
+/**
+ * The one reading of a date of birth the platform accepts: a `YYYY-MM-DD`
+ * string that names a day which EXISTS. Returns the normalised string, or null.
+ *
+ * M23 P5.6F review (F-12b). `new Date('2010-02-30')` is not an invalid date in
+ * V8 — it rolls over to 2 March — so a format check alone let 30 February, 31
+ * April and 29 February in a non-leap year through as readable dates, and the
+ * platform created accounts with birthdays that do not exist. The round-trip
+ * (`parse`, then print, then compare) is what catches a day that only exists
+ * because the engine was polite about it. Month 13 never needed this: ISO
+ * parsing already refuses it.
+ */
+export function parseDob(dob) {
+  if (typeof dob !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dob)) return null;
+  const t = new Date(`${dob}T00:00:00Z`);
+  if (Number.isNaN(t.getTime()) || t.toISOString().slice(0, 10) !== dob) return null;
+  return dob;
+}
+
 export function ageOn(dob, onDate = new Date()) {
-  if (typeof dob !== 'string' || dob.trim() === '') return NaN;
-  const birth = new Date(dob);
-  if (Number.isNaN(birth.getTime())) return NaN;
+  const day = parseDob(dob);
+  if (day === null) return NaN;
+  const birth = new Date(`${day}T00:00:00Z`);
   let age = onDate.getUTCFullYear() - birth.getUTCFullYear();
   const m = onDate.getUTCMonth() - birth.getUTCMonth();
   if (m < 0 || (m === 0 && onDate.getUTCDate() < birth.getUTCDate())) age--;

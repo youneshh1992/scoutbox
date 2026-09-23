@@ -193,7 +193,7 @@ thing under test was broken.
 | | |
 | --- | --- |
 | **Severity** | **LOW** — verification integrity (no product impact) |
-| **Origin** | the contention runner, and `browser-battery.sh` before it |
+| **Origin** | this session's scratchpad runners (the contention runner and a `browser-battery.sh` before it) — neither was ever a tracked file |
 | **Release blocking** | no |
 
 `ss` is **not installed** in this container: `command -v ss` finds nothing, and it
@@ -373,6 +373,26 @@ established, created by the platform itself.
 **Fix.** Both sign-up paths refuse `400 DOB_INVALID` when `ageOn(dob)` is not
 finite. **Regression** AD6–AD7: four unreadable shapes refused, a readable adult
 date still signs up (201).
+
+**F-12b — and the first fix was itself incomplete.** Re-proving F-12 for the
+push audit with a wider set of shapes found that `2010-02-30` was **accepted on
+both paths**. `new Date('2010-02-30')` is not an invalid date in V8 — it rolls
+over to 2 March — so "is `ageOn` finite?" said yes, and the platform created an
+account, and a guardian-created child, with a birthday that does not exist. 31
+April and 29 February in a non-leap year behave the same; month 13 was already
+refused only because ISO parsing happens to reject it.
+
+**Root fix.** One reading of a date of birth for the whole platform:
+`parseDob` in `domain.mjs` accepts a `YYYY-MM-DD` string only when the parsed
+day prints back as the same string. `ageOn` and `isRegulatoryMinor` both use
+it, so a rolled-over date is now "age unknown" everywhere — including for any
+such row an import already stored — and both sign-up paths refuse it. Every dob
+the seed and the suites write is canonical `YYYY-MM-DD` (checked with `git
+grep` before tightening), so nothing valid is refused; a real leap day still
+reads. **Regression** AD8–AD8g (pure) and AD6/AD7c (live, both paths).
+
+The lesson is the one this milestone keeps relearning: "is it parseable?" is
+not "is it a date". The first F-12 fix asked the first question.
 
 ---
 

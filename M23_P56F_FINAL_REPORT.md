@@ -53,7 +53,7 @@ third.
 | 10 | **F-3** malformed-end fail-open | **FIXED** at the root, in `effectiveAgreementStatus` so status and access cannot disagree |
 | 11 | **F-5** failed-login per-identifier limiter | **IMPLEMENTED** beside the IP limiter, never instead of it; seven properties measured live |
 | 12 | Rate-limit audit | 51 policies. P5.6E's two survive and are re-proved (`opportunity_share` 60/h actor, `transaction_handoff` 30/h org); one-shot state changes deliberately unquota'd with the reason recorded |
-| 13 | Final hardening suite | `m23AgentFinalHardeningE2E` — **265 checks, 149 negative (56%)** after the review pass (247/137 at first close) |
+| 13 | Final hardening suite | `m23AgentFinalHardeningE2E` — **286 checks, 166 negative (58%)** after the review pass and the F-12b repair (247/137 at first close, 265/149 after the review) |
 | 14 | A1 | **closed** — classified A/B/C/D; twelve `/org` surfaces probed with an agency token, **zero** foreign-org references; category B refused by concealment against a **real** club case id |
 | 15 | A2 | **closed as accepted** — a frozen P5.6D property; twelve authorities re-proved as not granted by naming |
 | 16 | A3 | **closed by observation** — `m23AgentGrassrootsLive`, 49 checks / 27 negative, in Chromium |

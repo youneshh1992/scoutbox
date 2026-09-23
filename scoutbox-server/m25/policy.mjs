@@ -21,6 +21,7 @@
  */
 
 import { RULE_STATUSES } from './policyVersions.mjs';
+import { parseDob } from '../domain.mjs';
 
 export { RULE_STATUSES };
 
@@ -261,9 +262,11 @@ export function isRegulatoryMinor(dob, now = Date.now()) {
   // date of birth used to answer "not a minor" (a 56-year-old) instead of
   // "unknown". Same for 0 and false. Only a non-empty string can be a date of
   // birth here; anything else is unknown, and unknown blocks (evaluateMinorGate).
-  if (typeof dob !== 'string' || dob.trim() === '') return null;
-  const b = new Date(dob);
-  if (Number.isNaN(b.getTime())) return null;
+  // …and (F-12b) a day that only exists because V8 rolled it over — 30 February
+  // — is not a date of birth either. One rule for the whole platform: parseDob.
+  const day = parseDob(dob);
+  if (day === null) return null;
+  const b = new Date(`${day}T00:00:00Z`);
   const on = new Date(now);
   let age = on.getUTCFullYear() - b.getUTCFullYear();
   const m = on.getUTCMonth() - b.getUTCMonth();

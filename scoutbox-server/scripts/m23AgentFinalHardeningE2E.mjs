@@ -54,7 +54,7 @@ import {
   ruleStatusAt, selectPolicyVersion,
 } from '../m25/policy.mjs';
 import { TRANSACTION_STATUSES, DOCUMENT_TYPES, DOCUMENT_VISIBILITY, TIMELINE_AUDIENCES } from '../m26/transaction.mjs';
-import { isAdult } from '../domain.mjs';
+import { isAdult, ageOn, parseDob } from '../domain.mjs';
 import { agentClientBasis } from '../m27/integration.mjs';
 import { EVENT_REGISTRY } from '../m182/eventRegistry.mjs';
 import { SCHEMA_VERSION } from '../m182/migrations.mjs';
@@ -237,6 +237,18 @@ section('AD/pure — strict input validation: no security decision rests on trut
   neg(termMonthsOf('12abc') === null && termMonthsOf(0) === null && termMonthsOf(MAX_TERM_MONTHS + 1) === null, 'AD5 a term length is an integer in range or it is refused — FFAR 12(3) caps it at two years');
   neg(termMonthsOf(NaN) === null && termMonthsOf([]) === null && termMonthsOf({}) === null, 'AD5b and NaN, an array and an object are not term lengths');
   ok(termMonthsOf(undefined) === 12 && termMonthsOf(24) === 24, 'AD5c an absent term takes the documented default and a legal one is kept');
+  // F-12b. `new Date('2010-02-30')` is not invalid in V8 — it is 2 March — so a
+  // format check let birthdays that do not exist through as readable. The
+  // platform's one dob reading now round-trips the day.
+  for (const [label, dob] of [['30 February', '2010-02-30'], ['31 April', '2011-04-31'], ['29 February in a non-leap year', '2023-02-29']]) {
+    neg(parseDob(dob) === null, `AD8 ${label} (${dob}) is not a date of birth — V8 would have rolled it over, and the platform refuses to`);
+    neg(Number.isNaN(ageOn(dob, new Date(T0))), `AD8b so it has no age`);
+    neg(isAdult({ dob }, new Date(T0)) === false, `AD8c and is never an adult`);
+    neg(isRegulatoryMinor(dob, T0) === null, `AD8d and is "unknown" to the minor gate, which blocks`);
+  }
+  ok(parseDob('2012-02-29') === '2012-02-29' && Number.isFinite(ageOn('2012-02-29', new Date(T0))), 'AD8e while a REAL leap day still reads — strict is not the same as broken');
+  ok(parseDob('1990-01-01') === '1990-01-01', 'AD8f and an ordinary date round-trips unchanged');
+  neg(parseDob('1990-1-1') === null && parseDob('01/01/1990') === null && parseDob('1990-01-01T00:00:00Z') === null, 'AD8g only the canonical YYYY-MM-DD shape is a date of birth — every dob the seed and the import write is that shape, so nothing valid is refused');
 }
 
 section('D/pure — the role matrix: which tier may act (§10)');
@@ -583,12 +595,21 @@ section('AD/live — sign-up refuses a date of birth it cannot read (review find
   // one, so `dob: 12345` created an account whose age could never be
   // established — and before F-8 that account computed as a 56-year-old.
   const signup = (dob) => j('POST', '/auth/player/signup', { name: 'Dob Probe', dob, country: 'GB', password: 'a-long-enough-password' });
-  for (const [label, dob] of [['a number', 12345], ['garbage', 'not-a-date'], ['an array', ['1990-01-01']], ['an object', { y: 1990 }]]) {
+  for (const [label, dob] of [['a number', 12345], ['garbage', 'not-a-date'], ['an array', ['1990-01-01']], ['an object', { y: 1990 }], ['30 February (V8 rolls it to 2 March)', '1990-02-30'], ['31 April', '1991-04-31'], ['29 February in a non-leap year', '1993-02-29']]) {
     const r = collect(`signup dob ${label}`, await signup(dob));
     neg(expect(r, 400, 'DOB_INVALID'), `AD6 sign-up with ${label} as a date of birth is refused 400 DOB_INVALID — not stored as an account whose age can never be established`);
   }
   const control = await signup('1990-01-01');
-  ok(control.status === 200 || control.status === 201, `AD7 while a readable adult date of birth still signs up (${control.status})`);
+  ok(control.status === 201, `AD7 while a readable adult date of birth still signs up (${control.status})`);
+  // The guardian-created child path shares the rule. The seeded guardian has an
+  // open login in development, so this costs one /auth call.
+  const gAuth = await j('POST', '/auth/guardian/login', { guardianId: 'gd-amara' });
+  ok(gAuth.status === 200, `AD7b fixture: the seeded guardian signs in (${gAuth.status})`);
+  const child = (dob) => j('POST', '/guardian/children', { name: `Child Probe ${Math.random().toString(36).slice(2, 6)}`, dob, country: 'GB' }, gAuth.body?.token);
+  const rolled = collect('child dob 30 Feb', await child('2012-02-30'));
+  neg(expect(rolled, 400, 'DOB_INVALID'), 'AD7c a guardian cannot create a child born on 30 February either — one dob rule, both paths');
+  const realChild = await child('2012-05-05');
+  ok(realChild.status === 201, `AD7d while a real minor's date of birth still creates the child (${realChild.status})`);
 }
 
 // ---------------------------------------------------------------------------

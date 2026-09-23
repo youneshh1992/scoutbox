@@ -14,7 +14,7 @@ the difference is stated.
 
 | Suite | Checks | Negative | Note |
 | --- | --- | --- | --- |
-| `m23AgentFinalHardeningE2E` | **265** | 149 (56%) | new, reconstructed from the mandate; +18 in the review pass (F-11, F-12 regressions; six weak sites pinned) |
+| `m23AgentFinalHardeningE2E` | **286** | 166 (58%) | new, reconstructed from the mandate; +18 in the review pass (F-11, F-12 regressions; six weak sites pinned); +21 for F-12b (rolled-over dates, both sign-up paths, pure + live) |
 | `m23AgentGrassrootsLive` | **49** | 27 (55%) | new, closes A3; +1 in the review pass (G7 pinned to one branch) |
 | `m23AgentLive` | 82 → **90** | 25 | +8: the Agent portal at 1024 and 768 (F-6) |
 | `m23AgentTransactionLive` | 108 → **116** | 46 | +8: same |
@@ -38,7 +38,7 @@ Counted from the current inventory rather than a remembered total.
 | m23AgentTransactionE2E | 404 | 215 (53%) |
 | m23AgentComplianceE2E | 346 | 194 (56%) |
 | m23P4AClosureE2E | 337 | 210 (62%) |
-| **m23AgentFinalHardeningE2E** | **265** | **149 (56%)** |
+| **m23AgentFinalHardeningE2E** | **286** | **166 (58%)** |
 | m13E2E / m14E2E / m15E2E / m12E2E / m16E2E / m22E2E / m141E2E | 212 / 194 / 190 / 152 / 118 / 112 / 94 | — |
 | m23P56ERepairAudit | 179 | 134 (75%) |
 | persistence: Compliance 83, Agent 68, D2 67, Transaction 63, Contact 61, Decision 48, Trial 36 | 426 total | — |
