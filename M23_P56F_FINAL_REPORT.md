@@ -53,10 +53,10 @@ third.
 | 10 | **F-3** malformed-end fail-open | **FIXED** at the root, in `effectiveAgreementStatus` so status and access cannot disagree |
 | 11 | **F-5** failed-login per-identifier limiter | **IMPLEMENTED** beside the IP limiter, never instead of it; seven properties measured live |
 | 12 | Rate-limit audit | 51 policies. P5.6E's two survive and are re-proved (`opportunity_share` 60/h actor, `transaction_handoff` 30/h org); one-shot state changes deliberately unquota'd with the reason recorded |
-| 13 | Final hardening suite | `m23AgentFinalHardeningE2E` — **247 checks, 137 negative (55%)** |
+| 13 | Final hardening suite | `m23AgentFinalHardeningE2E` — **265 checks, 149 negative (56%)** after the review pass (247/137 at first close) |
 | 14 | A1 | **closed** — classified A/B/C/D; twelve `/org` surfaces probed with an agency token, **zero** foreign-org references; category B refused by concealment against a **real** club case id |
 | 15 | A2 | **closed as accepted** — a frozen P5.6D property; twelve authorities re-proved as not granted by naming |
-| 16 | A3 | **closed by observation** — `m23AgentGrassrootsLive`, 48 checks / 27 negative, in Chromium |
+| 16 | A3 | **closed by observation** — `m23AgentGrassrootsLive`, 49 checks / 27 negative, in Chromium |
 | 17 | Representation | one canonical predicate; all six non-active states, unconfirmed, foreign agent and legacy mirror grant nothing |
 | 18 | Legacy authority | a legacy mirror grants no access and yields no integration basis; it may still READ as active, because the predicate withholds authority rather than the record being rewritten |
 | 19 | Same-agency | four colleague tiers **and** the agency administrator refused the client record and find no mandate in their own list; the representing agent reads it 200 |
@@ -88,7 +88,7 @@ third.
 | 45 | Concurrency | stale rev → 409; the two state-changed-but-session-live cases refused on the next request |
 | 46 | Tombstones | a deleted player is no longer named; no resurrected PII |
 | 47 | Corruption | the F-2/F-3/F-8 rule **is** the corruption answer: an unreadable value in a security decision refuses |
-| 48 | Grassroots direct browser | 48 checks / 27 negative; radius withholding 12 of 14, each withheld id answering 403 identically |
+| 48 | Grassroots direct browser | 49 checks / 27 negative; radius withholding 12 of 14, each withheld id answering 403 identically; the minor branch pinned rather than either-way |
 | 49 | Viewports | all six on the Agent portal; **1024 and 768 added this milestone (F-6)**, each asserting content as well as fit |
 | 50 | Accessibility | labelled controls, a labelled tablist with exactly one selected, keyboard reachability, `alert`/`status` roles — green in the live suites |
 | 51 | EN/FR | French asserted with no English fallback leaking, and the French screen withholds exactly what the English one withholds |
@@ -152,6 +152,17 @@ signing writer, no new minor pathway.
    figures.
 6. **Three findings were defects in this pass's own evidence** (F-6, F-7, F-9),
    not in the product.
+7. **The review pass found the same shape in this pass's own suites.** Six sites
+   — two `ok(true)`s, one `neg(true)`, an either-way `if/else`, a swallowed
+   `waitForSelector`, and eight `status >= 400` assertions — would have stayed
+   green under contradictory products. All pinned; the suites grew 247 → 265
+   and 48 → 49, and the register's F-7 entry was narrowed where it had
+   overclaimed about a committed script that did not exist.
+8. **Two more product findings came out of that same review** (F-11, a guardian
+   with two failed-login budgets; F-12, sign-up storing an unreadable date of
+   birth) and **one from the user** (F-10, the demo's dead-end login). All three
+   fixed with regressions. The first pass had declared itself complete before
+   any of them were known.
 
 ## Conclusion
 

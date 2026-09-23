@@ -140,7 +140,8 @@ const grass = watch(await ctx.newPage(), 'grassroots');
 grass.on('dialog', (d) => d.accept());
 await grass.goto(`http://localhost:${GRASS_PORT}/`);
 await grass.waitForSelector('.org-card', { timeout: 30000 });
-ok(true, 'G1 the Grassroots app loads and offers its clubs');
+const clubCards = await grass.locator('.org-card').count();
+ok(clubCards >= 2, `G1 the Grassroots app loads and offers its clubs (${clubCards} on the chooser)`);
 
 const cardText = await grass.$eval('.org-grid', (el) => el.innerText);
 neg(!/Northstar|agency/i.test(cardText), 'G1b and the club chooser offers no AGENCY — an agency has no account on this platform');
@@ -150,7 +151,7 @@ await grass.fill('.enter-row input', 'Pat Doyle');
 await grass.selectOption('.enter-row select', { index: 0 }).catch(() => {});
 await grass.click('button:has-text("Enter workspace")');
 await grass.waitForSelector('nav.sidebar', { timeout: 30000 });
-ok(true, 'G2 a verified grassroots club signs in and reaches its workspace');
+ok((await grass.locator('nav.sidebar').count()) === 1 && /Hackney Marsh Rovers/.test(await grass.evaluate(() => document.body.innerText)), 'G2 a verified grassroots club signs in and reaches its workspace, which names the club it belongs to');
 
 const grassToken = await grass.evaluate(() => {
   try { return JSON.parse(localStorage.getItem('scoutbox-grassroots-session') ?? 'null')?.token ?? null; } catch { return null; }
@@ -178,7 +179,7 @@ for (const [what, url] of [
   ['agent inbox', '/org/agent/inbox'],
 ]) {
   const r = await j('GET', url, undefined, grassToken);
-  neg(r.status >= 400, `G4 a grassroots session is refused the agent lane's ${what} (${r.status}) — hiding a control is not a boundary; this is`);
+  neg(r.status === 403 && typeof r.body?.error === 'string', `G4 a grassroots session is refused the agent lane's ${what} — 403 ${r.body?.error} — hiding a control is not a boundary; this is`);
 }
 
 // ================================================= G5 — safeguards on the list
@@ -222,23 +223,28 @@ neg(probes.every((s) => s === probes[0]), `G6f and every withheld id answers ide
 
 // ============================================== G7 — minors, still protected
 
+// Pinned to ONE branch. Hackney Marsh Rovers is seeded verified with the
+// safeguarding contract signed, so it MAY see a local minor — the same bar as
+// any club — and the assertion is about what it gets, not whether it gets in.
+// An either-way `if (200) … else refused` here would have passed under two
+// contradictory products.
 const minor = await j('GET', '/org/players/pl-guni', undefined, grassToken);
-if (minor.status === 200) {
-  const t = JSON.stringify(minor.body);
-  neg(!/"dob"\s*:\s*"\d{4}/.test(t), 'G7 a verified, safeguarding-signed grassroots club may see a local minor — and still gets no date of birth');
-  neg(!/"email"|"phone"/.test(t), 'G7b and no contact details');
-} else {
-  neg(minor.status >= 400, `G7 the minor is not reachable by this grassroots club at all (${minor.status})`);
-}
+ok(minor.status === 200, `G7 a verified, safeguarding-signed grassroots club can open a local minor's record (${minor.status})`);
+const minorText = JSON.stringify(minor.body ?? {});
+neg(!/"dob"\s*:\s*"\d{4}/.test(minorText), 'G7a and still gets no date of birth');
+neg(!/"email"|"phone"/.test(minorText), 'G7b and no contact details');
 const agentOnMinor = await j('POST', '/org/agent/clients/request', { playerId: 'pl-guni', scope: ['employment'], jurisdiction: 'ENG', clientKey: 'grass-probe-1' }, grassToken);
-neg(agentOnMinor.status >= 400, `G7c and a grassroots session cannot open an agent mandate on a minor (${agentOnMinor.status}) — the agent lane is closed to this platform whoever the subject is`);
+neg(agentOnMinor.status === 403 && typeof agentOnMinor.body?.error === 'string', `G7c and a grassroots session cannot open an agent mandate on a minor — 403 ${agentOnMinor.body?.error} — the agent lane is closed to this platform whoever the subject is`);
 
 // ============================================== G8 — the player side agrees
 
 const player = watch(await ctx.newPage(), 'player');
 await player.goto(`http://localhost:${PLAYER_PORT}/`);
-await player.waitForSelector('text=/Sign in|Continue|Your visibility/i', { timeout: 40000 }).catch(() => {});
-ok(true, 'G8 the player app renders against the same live API');
+// No `.catch(() => {})` swallowing the wait and no `ok(true)` after it: if the
+// player app does not put up its entry screen, this is a failure, not a pass.
+await player.waitForSelector('text=/Sign in|Continue|Your visibility/i', { timeout: 40000 });
+const playerEntry = await player.locator('text=/Sign in|Continue|Your visibility/i').count();
+ok(playerEntry > 0, `G8 the player app renders its entry screen against the same live API (${playerEntry} matching element${playerEntry === 1 ? '' : 's'})`);
 const playerShell = await player.evaluate(() => document.body.innerText);
 neg(!/Hackney Marsh Rovers.*(agent|agency)/is.test(playerShell), 'G8b and carries no agency vocabulary attached to the grassroots club');
 

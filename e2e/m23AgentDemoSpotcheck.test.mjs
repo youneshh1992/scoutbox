@@ -25,6 +25,26 @@ const agent = await page(`${demo.host}/agent/`);
 await agent.waitForSelector('.org-card', { timeout: 20000 });
 if (!/Self-contained demo/.test(await text(agent))) fail('agent demo: the login does not declare itself a demo');
 await agent.click('.org-card:has-text("North Star")');
+// P5.6F review regression. Every suite signs in as a seeded identity — the one
+// name that works — so the dead end a human hit by typing their own name was
+// invisible to all of them. Two facts, both asserted: the roster is offered,
+// and a stranger is STILL refused, because the fix must not have weakened the
+// membership rule to make the demo friendlier.
+const roster = await agent.locator('[data-testid="demo-identities"] button').allInnerTexts();
+if (roster.length !== 3) fail(`agent demo: expected the three-person agency roster on the login screen, saw ${roster.length}`);
+if (!roster.some((r) => /agency.admin/i.test(r))) fail('agent demo: the roster does not say who the administrator is');
+say('agent demo: the login screen offers the agency roster with each person\'s tier');
+const stranger = await page(`${demo.host}/agent/`);
+await stranger.waitForSelector('.org-card', { timeout: 20000 });
+await stranger.click('.org-card:has-text("North Star")');
+await stranger.fill('.enter-row input[aria-label]', 'Some Stranger');
+await stranger.click('button:has-text("Enter workspace")');
+await stranger.waitForSelector('text=not an active member of this agency', { timeout: 15000 });
+say('agent demo: a name that is not on the roster is still refused AGENCY_MEMBERSHIP_REQUIRED — the demo did not weaken the rule');
+// Pages in one context share localStorage; the stranger's session must not be
+// restored onto Ana's page below.
+await stranger.evaluate(() => localStorage.removeItem('scoutbox-agent-session'));
+await stranger.close();
 await agent.fill('.enter-row input[aria-label]', 'Ana Costa');
 await agent.click('button:has-text("Enter workspace")');
 await agent.waitForSelector('[data-testid="agent-home"]', { timeout: 20000 });

@@ -14,8 +14,8 @@ the difference is stated.
 
 | Suite | Checks | Negative | Note |
 | --- | --- | --- | --- |
-| `m23AgentFinalHardeningE2E` | **247** | 137 (55%) | new, reconstructed from the mandate |
-| `m23AgentGrassrootsLive` | **48** | 27 (56%) | new, closes A3 |
+| `m23AgentFinalHardeningE2E` | **265** | 149 (56%) | new, reconstructed from the mandate; +18 in the review pass (F-11, F-12 regressions; six weak sites pinned) |
+| `m23AgentGrassrootsLive` | **49** | 27 (55%) | new, closes A3; +1 in the review pass (G7 pinned to one branch) |
 | `m23AgentLive` | 82 → **90** | 25 | +8: the Agent portal at 1024 and 768 (F-6) |
 | `m23AgentTransactionLive` | 108 → **116** | 46 | +8: same |
 
@@ -38,7 +38,7 @@ Counted from the current inventory rather than a remembered total.
 | m23AgentTransactionE2E | 404 | 215 (53%) |
 | m23AgentComplianceE2E | 346 | 194 (56%) |
 | m23P4AClosureE2E | 337 | 210 (62%) |
-| **m23AgentFinalHardeningE2E** | **247** | **137 (55%)** |
+| **m23AgentFinalHardeningE2E** | **265** | **149 (56%)** |
 | m13E2E / m14E2E / m15E2E / m12E2E / m16E2E / m22E2E / m141E2E | 212 / 194 / 190 / 152 / 118 / 112 / 94 | — |
 | m23P56ERepairAudit | 179 | 134 (75%) |
 | persistence: Compliance 83, Agent 68, D2 67, Transaction 63, Contact 61, Decision 48, Trial 36 | 426 total | — |
@@ -109,7 +109,12 @@ exits. No live surviving server, suite, Chromium or Vite process.
 This is only trustworthy because of F-7: `ss` is **not installed** in this
 container, so every previous `ss -ltn | grep` port check reported "zero
 listeners" unconditionally. A check that cannot fail is worse than no check. The
-probe now reads `/proc/net/tcp`.
+probe now reads `/proc/net/tcp`, and since the review pass the tooling is in the
+repository — `e2e/tools/listeners.mjs`, `survivors.mjs`, `reap.mjs` and
+`contention.sh` — so a fresh clone can re-measure this rather than trust the log
+above. (The first draft of this report kept the probes in a scratchpad that a
+container rebuild would have erased, which is the mistake this milestone is
+about.)
 
 **On zombies.** Immediately after a suite exits, Chromium leaves several
 processes in state `Z` — already exited, holding no port or memory, waiting to be

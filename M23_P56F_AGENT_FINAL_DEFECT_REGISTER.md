@@ -212,10 +212,16 @@ the evidence: the observer log now shows the held-port set descending
 held ports and then their release during an earlier reap, which an `ss`-based
 check reported as "zero" throughout.
 
-**Wider consequence, stated rather than quietly fixed:** the same idiom is in
-`browser-battery.sh`, so earlier milestones' per-suite leak detector has never
-run on this machine. Their suites were green; their leak detector was not
-running.
+**Scope, corrected in the review pass.** An earlier draft of this entry said the
+same idiom sat in a committed `browser-battery.sh` and that earlier milestones'
+leak detector had therefore never run. That overstated it: `git grep "ss -ltn"`
+finds **no tracked file** using `ss` — the inert checks lived only in this
+session's scratchpad runners. The correct statement is narrower and still worth
+making: **the P5.6F contention proof's own first attempt was vacuous**, and the
+repository previously shipped **no** port-release tooling at all. The probes are
+now committed under `e2e/tools/` (`listeners.mjs`, `survivors.mjs`, `reap.mjs`,
+`contention.sh`), so a fresh clone can reproduce the measurement rather than
+trust a log.
 
 **Related, and also fixed:** `pgrep -f "node .*server.mjs"` matches the calling
 shell's own command line and killed this session twice with exit 144. Process
@@ -302,6 +308,98 @@ padding them.
 
 ---
 
+## F-10 — the agent demo was a dead end for anyone not on its roster
+
+| | |
+| --- | --- |
+| **Severity** | **LOW** — user-facing, demo mode only |
+| **Origin** | P5.6B `scoutbox-agent/src/agentDemo.ts` |
+| **Found by** | the user, opening the published demo after the milestone closed |
+| **Release blocking** | no |
+
+The demo's login invents a *user* for any unrecognised name but never invents an
+*affiliation*, so every request afterwards was refused
+`AGENCY_MEMBERSHIP_REQUIRED` under a generic "That did not load." — and nothing
+told you that only `Ana Costa`, `Tomás Rivera` or `Ben Okoro` would work.
+
+**The refusal is correct** and was not changed: the real server refuses a
+non-member identically, because only an administrator adds one. The fix offers
+the roster on the login screen (derived from the fixtures, so it cannot drift)
+and leaves the free-text path refusing a stranger, byte for byte.
+
+**Why no suite caught it:** every suite signs in as a seeded identity — the one
+name that works. The bug existed only for a human typing their own name.
+`m23AgentDemoSpotcheck` now asserts both the roster and the stranger's refusal.
+
+---
+
+## F-11 — a guardian had two failed-login budgets (**review pass**)
+
+| | |
+| --- | --- |
+| **Severity** | **LOW** — security, defence in depth |
+| **Origin** | F-5's own wiring (this milestone) |
+| **Release blocking** | no |
+
+`/auth/guardian/login` accepts `guardianId` **or** `email`, and F-5 keyed the
+budget by whichever was tried. One account, two names, **two** budgets: a guesser
+alternating them got 42 attempts per window instead of 21.
+
+**Fix.** After the account resolves, the lockout is also checked against the
+canonical `guardian:<id>` bucket, and a failure charges both the tried name and
+the canonical one. **Regression** AA6–AA8b, on a fresh server so the per-IP
+budget cannot be what fires: lock the account by id (429 at attempt 22), then
+the same account by email is *already* locked — even with the right password.
+
+The player and org lanes were checked for the same shape: `findPlayer` is exact
+id only, and an org resolves by `orgId` only, so neither has an alias.
+
+---
+
+## F-12 — sign-up stored a date of birth it could not read (**review pass**)
+
+| | |
+| --- | --- |
+| **Severity** | **LOW** — data integrity |
+| **Origin** | M7 registration, exposed by F-8's analysis |
+| **Release blocking** | no |
+
+Registration refused an **absent** dob (`NAME_AND_DOB_REQUIRED`) but not an
+**unreadable** one: `dob: 12345`, `'not-a-date'`, an array or an object were all
+stored. Before F-8 such an account computed as a 56-year-old; after F-8 it fails
+closed as "age unknown" — safer, but still an account whose age can never be
+established, created by the platform itself.
+
+**Fix.** Both sign-up paths refuse `400 DOB_INVALID` when `ageOn(dob)` is not
+finite. **Regression** AD6–AD7: four unreadable shapes refused, a readable adult
+date still signs up (201).
+
+---
+
+## The review pass, and what it found in its own work
+
+A second reviewer went through the milestone with the same adversarial brief
+the milestone applied to P5.6A–E. Besides F-11 and F-12, it found that the
+reconstruction's **own suites contained the shape it had filed as F-9**:
+
+| Where | What | Now |
+| --- | --- | --- |
+| hardening V3 | `ok(true, …)` inside an `if (status === 200)`, with an `else` that also passed — two contradictory products would both have been green | pinned to 200, plus an assertion that the record reads as terminated |
+| hardening N1 | `neg(true, …)` in the 404 branch | a real condition: 404, **or** 200 with zero rows and zero total |
+| hardening D6, D8, T1, T2, A13, J4, J6, V4 | `status >= 400` — nearly `!== 200` | exact statuses (404 / 403 / 401 / 409), with the error code printed into the evidence |
+| Grassroots G1, G2 | `ok(true, …)` after a `waitForSelector` | the club-card count, and the workspace naming its club |
+| Grassroots G7 | `if (200) … else refused` — either-way | pinned to 200: Hackney Marsh is seeded verified with the safeguarding contract signed |
+| Grassroots G8 | `waitForSelector(...).catch(() => {})` then `ok(true, …)` — **exactly the F-9 shape** | the wait is unswallowed and the entry screen is counted |
+
+The suites grew from 247 → **265** (hardening) and 48 → **49** (Grassroots) with
+these, and every added check can fail. The point of recording this is not
+self-flagellation; it is that "no weak assertions" was a claim the first pass
+made about itself, and the claim was wrong in six places. A milestone that
+audits everything except its own instruments will report a clean bill it has
+not earned.
+
+---
+
 ## Two §34 quota observations
 
 Both P5.6E quotas survive in the base and are re-proved rather than rewritten:
@@ -333,8 +431,9 @@ add a mechanism without bounding anything.
 | Critical | 0 | 0 | **0** |
 | High | 1 (F-2) | 1 | **0** |
 | Medium | 3 (F-3, F-5, **F-8**) | 3 | **0** |
-| Low | 4 (F-4, F-6, F-7, F-9) | 2 (F-6, F-7) | **2** by decision (F-4, F-9 — both documentation/frozen-suite, neither a product risk) |
+| Low | 7 (F-4, F-6, F-7, F-9, F-10, F-11, F-12) | 5 (F-6, F-7, F-10, F-11, F-12) | **2** by decision (F-4, F-9 — both documentation/frozen-suite, neither a product risk) |
 | Withdrawn | 1 (F-1) | — | — |
+| Weak assertions in this milestone's own suites | 6 sites | 6 | **0** |
 
 | | |
 | --- | --- |
@@ -346,6 +445,8 @@ add a mechanism without bounding anything.
 | Accepted architectural property | **1** — A2 |
 | Product-shape question | **1** — A1 |
 
-Three of the nine findings were defects in this milestone's own evidence rather
-than in the product (F-6, F-7, F-9). A hardening pass that finds nothing wrong
-with its own instruments has probably not looked at them.
+Four of the twelve findings were defects in this milestone's own evidence rather
+than in the product (F-6, F-7, F-9, and the six weak assertions the review pass
+found in the reconstruction's own suites). A hardening pass that finds nothing
+wrong with its own instruments has probably not looked at them — and the review
+pass proved that of the first pass, too.

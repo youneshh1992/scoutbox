@@ -60,6 +60,7 @@ import { EVENT_REGISTRY } from '../m182/eventRegistry.mjs';
 import { SCHEMA_VERSION } from '../m182/migrations.mjs';
 import { RATE_LIMIT_POLICY } from '../m181/rateLimit.mjs';
 import { openStore } from '../store.mjs';
+import { hashPassword } from '../adapters.mjs';
 
 const PORT = 7400 + Math.floor(Math.random() * 150);
 const BASE = `http://localhost:${PORT}`;
@@ -322,8 +323,15 @@ await stop(server);
   const snap = store.load();
   const agency = snap.db.orgs.find((o) => o.type === 'agency');
   snap.db.orgs.push({ ...structuredClone(agency), id: 'org-southgate', name: 'Southgate Sports Management', slug: 'southgate' });
+  // A password-protected guardian reachable by id AND by email, for the
+  // failed-login alias check (F-11). The seeded guardians have open (null)
+  // passwords in development, so nothing about them can ever fail to
+  // authenticate — and a budget that is never charged cannot be tested.
+  const guardianBase = snap.db.guardians[0];
+  snap.db.guardians.push({ ...structuredClone(guardianBase), id: 'gd-locktest', name: 'Lock Test', email: 'locktest@example.test', password: hashPassword('right-password-1'), childIds: [] });
   store.save(snap);
   ok(snap.db.orgs.filter((o) => o.type === 'agency').length === 2, 'fixture: two agencies exist');
+  ok(snap.db.guardians.some((g) => g.id === 'gd-locktest' && g.password), 'fixture: a password-protected guardian exists, so a wrong password is a chargeable failure');
 }
 server = await boot();
 
@@ -361,14 +369,14 @@ section('D/live — same-agency membership grants no confidential client access 
   const colleagues = [['a licensed colleague', ben], ['an analyst', cleo], ['an assistant', dov], ['finance', eve]];
   for (const [who, tok] of colleagues) {
     const detail = collect(`${who} client detail`, await j('GET', `/org/agent/clients/${REP}`, undefined, tok.token));
-    neg(detail.status === 403 || detail.status === 404, `D6 ${who} at the OWNING agency cannot open the client record (${detail.status})`);
+    neg(expect(detail, 404, null), `D6 ${who} at the OWNING agency cannot open the client record — concealed as 404 ${detail.body?.error}, the same shape as a record that never existed`);
     const list = await j('GET', '/org/agent/clients', undefined, tok.token);
     const namesClient = JSON.stringify(list.body ?? {}).includes(REP);
     neg(!namesClient, `D7 ${who} does not see the mandate in their own client list either`);
   }
   // The agency administrator may know the business exists, but not read the file.
   const adminDetail = collect('admin client detail', await j('GET', `/org/agent/clients/${REP}`, undefined, alex.token));
-  neg(adminDetail.status >= 400, `D8 the agency ADMINISTRATOR cannot open the representing agent's client record either (${adminDetail.status})`);
+  neg(expect(adminDetail, 404, null), `D8 the agency ADMINISTRATOR cannot open the representing agent's client record either — 404 ${adminDetail.body?.error}`);
   const owner = await j('GET', `/org/agent/clients/${REP}`, undefined, ada.token);
   ok(owner.status === 200, 'D9 while the representing agent can — the wall is between people, not around the whole agency');
 }
@@ -377,10 +385,10 @@ section('T/live — the club/agency boundary, in both directions');
 {
   for (const [what, url] of [['clients', '/org/agent/clients'], ['agent home', '/org/agent/home'], ['compliance contexts', '/org/agent/compliance/contexts'], ['agent transactions', '/org/agent/transactions'], ['agent inbox', '/org/agent/inbox']]) {
     const r = collect(`club on ${what}`, await j('GET', url, undefined, maria.token));
-    neg(r.status >= 400, `T1 a CLUB session is refused the agent lane's ${what} (${r.status})`);
+    neg(expect(r, 403, null), `T1 a CLUB session is refused the agent lane's ${what} — 403 ${r.body?.error}`);
   }
   const foreign = collect('foreign agency', await j('GET', `/org/agent/clients/${REP}`, undefined, (await login('org-southgate', 'Zed Admin', 'Director', 'agent')).token));
-  neg(foreign.status >= 400, `T2 a FOREIGN agency cannot open another agency's mandate (${foreign.status})`);
+  neg(expect(foreign, 404, null), `T2 a FOREIGN agency cannot open another agency's mandate — concealed as 404 ${foreign.body?.error}`);
 }
 
 section('A/live — authority is re-derived on the NEXT request, not at login (§11)');
@@ -395,7 +403,7 @@ section('A/live — authority is re-derived on the NEXT request, not at login (�
   ok(end.status === 200 || end.status === 204, `A12 the administrator ended Ben's affiliation (${end.status})`);
   for (const [what, url] of [['home', '/org/agent/home'], ['clients', '/org/agent/clients'], ['profile', '/org/agent/profile'], ['compliance', '/org/agent/compliance/contexts'], ['transactions', '/org/agent/transactions']]) {
     const r = collect(`ended affiliation on ${what}`, await j('GET', url, undefined, ben.token));
-    neg(r.status >= 400, `A13 Ben's still-live session is refused ${what} on the very next request (${r.status})`);
+    neg(expect(r, 401, null), `A13 Ben's still-live session is refused ${what} on the very next request — 401 ${r.body?.error}, and the session is gone rather than merely denied`);
   }
 }
 
@@ -404,12 +412,12 @@ section('J/live — a minor is indistinguishable from a player who does not exis
   const minor = await j('POST', '/org/agent/clients/request', { playerId: 'pl-guni', scope: ['employment'], jurisdiction: 'ENG' , clientKey: key() }, ada.token);
   const ghost = await j('POST', '/org/agent/clients/request', { playerId: 'pl-does-not-exist-at-all', scope: ['employment'], jurisdiction: 'ENG' , clientKey: key() }, ada.token);
   collect('minor request', minor); collect('ghost request', ghost);
-  neg(minor.status >= 400, `J4 a mandate request naming a MINOR is refused (${minor.status})`);
-  neg(ghost.status >= 400, `J4b and so is one naming a player who does not exist (${ghost.status})`);
+  neg(expect(minor, 404, null), `J4 a mandate request naming a MINOR is refused — 404 ${minor.body?.error}`);
+  neg(expect(ghost, 404, null), `J4b and so is one naming a player who does not exist — 404 ${ghost.body?.error}`);
   ok(minor.status === ghost.status && JSON.stringify(minor.body) === JSON.stringify(ghost.body), 'J5 and the two refusals are BYTE-IDENTICAL — the refusal is not an age oracle and not an existence oracle');
   // Forging the facts that would open the minor pathway changes nothing.
   const forged = collect('forged minor', await j('POST', '/org/agent/clients/request', { playerId: 'pl-guni', scope: ['employment'], jurisdiction: 'ENG', dob: '1990-01-01', isAdult: true, guardianConsent: true, minorPathway: true , clientKey: key() }, ada.token));
-  neg(forged.status >= 400, `J6 forging dob, isAdult, guardianConsent and minorPathway in the body does not open the minor pathway (${forged.status})`);
+  neg(expect(forged, 404, null), `J6 forging dob, isAdult, guardianConsent and minorPathway in the body does not open the minor pathway — 404 ${forged.body?.error}`);
   ok(JSON.stringify(forged.body) === JSON.stringify(ghost.body), 'J6b and the forged request is refused identically to the ghost — the client cannot assert its way past a server-side age rule');
   const players = await j('GET', '/org/agent/players?q=Guni', undefined, ada.token);
   neg(!JSON.stringify(players.body ?? {}).includes('pl-guni'), 'J7 and the minor does not appear in an agent player search');
@@ -436,17 +444,17 @@ section('V/live — deep links after authority loss, and history is not access')
   const after = collect('terminated client detail', await j('GET', `/org/agent/clients/${REP}`, undefined, ada.token));
   // P5.6B deliberately keeps an ENDED mandate as the agent's own history, so the
   // assertion is about CONTENTS, not about a status code.
-  if (after.status === 200) {
-    const txt = JSON.stringify(after.body);
-    ok(true, 'V3 the relationship record itself still answers 200 — an ended mandate is the agent\'s own history, deliberately (P5.6B)');
-    neg(!/Passport|passport/.test(txt), 'V3b but it carries no Passport');
-    neg(!/assessment/i.test(txt), 'V3c no assessments');
-    neg(!/"contacts":\s*\[[^\]]/.test(txt), 'V3d and no contacts — history is not access');
-  } else {
-    neg(after.status >= 400, `V3 the terminated mandate is refused outright (${after.status})`);
-  }
+  // Pinned, not either-way: P5.6B keeps an ended mandate as the agent's own
+  // history, so the record MUST still answer 200. A test that also accepted a
+  // refusal here would pass under two contradictory products.
+  ok(after.status === 200, `V3 the relationship record itself still answers 200 — an ended mandate is the agent's own history, deliberately (P5.6B) (${after.status})`);
+  const txt = JSON.stringify(after.body ?? {});
+  ok(/terminated/i.test(txt), 'V3a and reads as terminated, so history says what happened');
+  neg(!/Passport|passport/.test(txt), 'V3b but it carries no Passport');
+  neg(!/assessment/i.test(txt), 'V3c no assessments');
+  neg(!/"contacts":\s*\[[^\]]/.test(txt), 'V3d and no contacts — history is not access');
   const opps = collect('terminated opportunities', await j('GET', `/org/agent/clients/${REP}/opportunities`, undefined, ada.token));
-  neg(opps.status >= 400, `V4 and the client-scoped surfaces reached by the ids she still holds are refused (${opps.status})`);
+  neg(expect(opps, 409, null), `V4 and the client-scoped surfaces reached by the ids she still holds are refused — 409 ${opps.body?.error}: the relationship exists but is not active, which is a state conflict, not a missing record`);
 }
 
 section('AC/live — rev conflicts: two answers to one question cannot both land');
@@ -517,11 +525,15 @@ section('N/live — private club recruitment intelligence stays private');
 {
   for (const [what, url] of [['second look', '/org/second-look'], ['nobody missed', '/org/nobody-missed'], ['watchlists', '/org/watchlists'], ['assessments', '/org/assessments'], ['analytics overview', '/org/analytics/overview'], ['rooms', '/org/rooms']]) {
     const r = await j('GET', url, undefined, ada.token);
-    if (r.status >= 400) { neg(true, `N1 an agency session is refused the club's ${what} (${r.status})`); continue; }
-    // A1: these are intentionally GENERIC org surfaces. Answered, but about the
-    // caller's OWN org — which for an agency is empty. The assertion is that no
-    // other org's data is in it, not that the route refuses.
-    const txt = JSON.stringify(r.body ?? {});
+    // A1 category D: intentionally generic org surfaces. Each is either absent
+    // for an agency (404) or answered about the caller's OWN org, which for an
+    // agency is EMPTY. Both halves are asserted — a `neg(true)` in the 404
+    // branch would be an unconditional pass, the shape F-9 records.
+    const b = r.body ?? {};
+    const items = Array.isArray(b) ? b : (b.items ?? []);
+    const emptyOwn = r.status === 200 && items.length === 0 && (b.total === undefined || b.total === 0);
+    neg(r.status === 404 || emptyOwn, `N1 the club's ${what} is absent for an agency (404) or answered about its OWN org and EMPTY — got ${r.status}, ${items.length} rows, total ${b.total ?? '—'}`);
+    const txt = JSON.stringify(b);
     neg(!/org-eastport|org-harbour|Maria Keane|Rita Vale/.test(txt), `N2 the agency's own ${what} contains no other org's case, player or user (A1 category D)`);
   }
   // A1 category B, proved against a case that REALLY EXISTS. Comparing two
@@ -565,6 +577,20 @@ section('AI/live — the store survives a restart with its authority intact');
   ok(schemaHeader === String(SCHEMA_VERSION), `AI3 the persisted store is still at schema ${SCHEMA_VERSION} (header said ${schemaHeader})`);
 }
 
+section('AD/live — sign-up refuses a date of birth it cannot read (review finding F-12)');
+{
+  // Registration already refused an ABSENT dob. It did not refuse an UNREADABLE
+  // one, so `dob: 12345` created an account whose age could never be
+  // established — and before F-8 that account computed as a 56-year-old.
+  const signup = (dob) => j('POST', '/auth/player/signup', { name: 'Dob Probe', dob, country: 'GB', password: 'a-long-enough-password' });
+  for (const [label, dob] of [['a number', 12345], ['garbage', 'not-a-date'], ['an array', ['1990-01-01']], ['an object', { y: 1990 }]]) {
+    const r = collect(`signup dob ${label}`, await signup(dob));
+    neg(expect(r, 400, 'DOB_INVALID'), `AD6 sign-up with ${label} as a date of birth is refused 400 DOB_INVALID — not stored as an account whose age can never be established`);
+  }
+  const control = await signup('1990-01-01');
+  ok(control.status === 200 || control.status === 201, `AD7 while a readable adult date of birth still signs up (${control.status})`);
+}
+
 // ---------------------------------------------------------------------------
 // AA runs LAST, on purpose.
 //
@@ -592,6 +618,26 @@ section('AA/live — the failed-login budget, per identifier (F-5)');
   neg(upper.status === 429, `AA4 and an upper-cased identifier shares the same bucket (${upper.status}) — case is not a way to get a fresh budget`);
   const other = await tryRev('tsr-dev-reviewer', 'dev-reviewer');
   ok(other.status === 200, 'AA5 while a DIFFERENT reviewer signs in normally from the same IP — which an IP-scoped limit alone could never satisfy, and is the whole reason this policy exists');
+}
+
+section('AA/live — one account, two names, ONE budget (review finding F-11)');
+{
+  // A guardian can be named by id or by email. Until the review pass those were
+  // two failed-login buckets for one password — a guesser alternating them got
+  // 42 attempts per window instead of 21. A fresh server: fresh per-IP AND
+  // per-identifier buckets, so this measures only what it claims to.
+  await stop(server); server = await boot();
+  const byId = (pw) => j('POST', '/auth/guardian/login', { guardianId: 'gd-locktest', password: pw });
+  const byEmail = (pw) => j('POST', '/auth/guardian/login', { email: 'locktest@example.test', password: pw });
+  ok((await byId('right-password-1')).status === 200, 'AA6 the fixture guardian signs in by id with the right password');
+  ok((await byEmail('right-password-1')).status === 200, 'AA6b and by email — two names, one account');
+  let lockedAt = 0;
+  for (let i = 1; i <= 25 && !lockedAt; i++) { const r = await byId(`wrong-${i}`); if (r.status === 429) lockedAt = i; }
+  ok(lockedAt > 0 && lockedAt <= 23, `AA7 wrong passwords BY ID reach the lockout (first 429 at attempt ${lockedAt})`);
+  const viaEmail = collect('alias after lockout', await byEmail('wrong-again'));
+  neg(viaEmail.status === 429 && viaEmail.body?.action === 'login_failure', `AA8 and the SAME account tried BY EMAIL is already locked (${viaEmail.status} ${viaEmail.body?.action ?? viaEmail.body?.error}) — an alias is not a second budget`);
+  const rightViaEmail = collect('right password via alias while locked', await byEmail('right-password-1'));
+  neg(rightViaEmail.status === 429, `AA8b even with the right password (${rightViaEmail.status}) — the lockout is checked before the credential on the alias path too`);
 }
 
 console.log(`\nM23 P5.6F final hardening (reconstructed): ${passed} checks passed, ${negatives} negative/security/privacy checks (${Math.round((negatives / passed) * 100)}%)`);

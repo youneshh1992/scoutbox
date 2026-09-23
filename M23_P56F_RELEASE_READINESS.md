@@ -11,7 +11,7 @@ what was run, so a reader can re-run it rather than trust the verdict.
 
 | # | Area | Verdict | Evidence |
 | --- | --- | --- | --- |
-| 1 | **AUTH** | **PASS** | Player token, club token and the shared admin key all refused on the lanes that are not theirs. An affiliation ended mid-session is refused on the next request across five agent routes with no re-login. `login_failure` measured on seven properties (F-5). |
+| 1 | **AUTH** | **PASS** | Player token, club token and the shared admin key all refused on the lanes that are not theirs. An affiliation ended mid-session is refused on the next request across five agent routes with no re-login. `login_failure` measured on seven properties (F-5), and — after the review pass — a guardian named by id or by email shares **one** budget (F-11, AA6–AA8b). |
 | 2 | **REPRESENTATION** | **PASS** | One predicate. 22 temporal cases: future start, +1ms start, `NaN`, ISO string, `Infinity`, end exactly now, past end, unreadable end — all refused; open-ended and in-term still granted. Six non-active states, unconfirmed, foreign agent, legacy mirror: none grants. |
 | 3 | **COMPLIANCE** | **PASS** | `m23AgentComplianceE2E` 346/194 green; context create/parties/representations under key + rev; close is one-shot and refused by state on a second call. |
 | 4 | **CONFLICT** | **PASS** | 25 outcome pairs against the implemented order; five forbidden downgrades asserted individually; the input fingerprint is key-order independent. Divergence from the frozen prose recorded as F-4, code unchanged. |
@@ -69,6 +69,21 @@ frozen suites re-run green.
 It is worth being plain about what that means for the original P5.6F's own claim
 of release readiness: it declared zero open Medium defects while this one was
 present and undetected. The reconstruction is not merely a re-creation.
+
+## The review pass
+
+A second reviewer went over the closed milestone with the same brief it had
+applied to P5.6A–E. It changed nothing above from PASS to anything else, and it
+changed three things that matter to whether the PASSes are believable:
+
+- **Two product findings** (F-11 guardian alias budgets, F-12 unreadable dob at
+  sign-up) and **one user-found defect** (F-10 the demo's dead-end login), all
+  fixed with regressions that can fail.
+- **Six weak assertions in this milestone's own suites** — the shape it had
+  filed as F-9 against P5.6E — pinned to exact statuses and single branches.
+- **The contention tooling committed** (`e2e/tools/`), so PASS on row 29 and
+  row 31 is reproducible from a fresh clone rather than from a scratchpad that
+  a container rebuild erases — the failure mode this whole milestone is about.
 
 ## Verdict
 

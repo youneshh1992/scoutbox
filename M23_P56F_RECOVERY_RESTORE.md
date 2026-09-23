@@ -134,3 +134,9 @@ with no `node_modules`, no database and no build output (§26):
 
 So: **source from the bundle, runtime from the repository, data from a
 migration.** All three executed.
+
+**And, since the review pass, the measuring instruments come with the source.**
+The port-release probe, the survivor check, the reaper and the contention runner
+were originally scratchpad files — the same ephemeral place the first P5.6F
+bundle died in. They are now `e2e/tools/`, so a fresh clone can re-measure the
+contention claim instead of trusting a log that was pasted into a document.

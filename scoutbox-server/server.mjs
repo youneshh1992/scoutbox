@@ -1021,6 +1021,11 @@ app.get('/meta', (_req, res) => {
 app.post('/auth/player/signup', (req, res) => {
   const { name, dob, country = 'GB', position, foot, password } = req.body || {};
   if (!name || !dob) return res.status(400).json({ error: 'NAME_AND_DOB_REQUIRED' });
+  // P5.6F review: a date of birth that cannot be READ must be refused here, not
+  // stored. Before F-8 an unreadable dob computed as the epoch and passed every
+  // adult gate; after F-8 it fails closed as "age unknown" — but a sign-up that
+  // stores it would still create an account whose age can never be established.
+  if (!Number.isFinite(ageOn(dob))) return res.status(400).json({ error: 'DOB_INVALID', message: 'Enter a date of birth as YYYY-MM-DD.' });
   if (!password || String(password).length < 8) {
     return res.status(400).json({ error: 'PASSWORD_REQUIRED', message: 'Pick a password of at least 8 characters — your profile is yours alone.' });
   }
@@ -1166,13 +1171,24 @@ app.post('/auth/guardian/verify-email', (req, res) => {
 });
 
 app.post('/auth/guardian/login', (req, res) => {
+  // A guardian can be named by id OR by email, which is two identifiers for one
+  // account. The failed-login budget is therefore charged against BOTH the
+  // identifier that was tried and the account it resolved to: a guesser who
+  // alternates id and email otherwise gets two budgets for one password.
   const tried = `guardian:${req.body?.guardianId ?? req.body?.email}`;
   if (loginLockedOut(res, tried)) return;
   const g = db.guardians.find((x) => x.id === req.body?.guardianId || x.email === req.body?.email);
   if (!g) { noteLoginFailure(tried); return res.status(404).json({ error: 'GUARDIAN_NOT_FOUND' }); }
+  const canonical = `guardian:${g.id}`;
+  const aliased = loginKey(canonical) !== loginKey(tried);
+  if (aliased && loginLockedOut(res, canonical)) return;
   if (g.password) {
     const check = verifyPassword(req.body?.password ?? '', g.password);
-    if (!check) { noteLoginFailure(tried); return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This account is password-protected.' }); }
+    if (!check) {
+      noteLoginFailure(tried);
+      if (aliased) noteLoginFailure(canonical);
+      return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This account is password-protected.' });
+    }
     if (check === 'upgrade') g.password = hashPassword(req.body.password);
   } else if (!DEV_LOGINS) {
     return devLoginRefused(res);
@@ -1253,6 +1269,11 @@ guardianRouter.post('/children', (req, res) => {
   }
   const { name, dob, country = 'GB', position, foot, heightCm, weightKg } = req.body || {};
   if (!name || !dob) return res.status(400).json({ error: 'NAME_AND_DOB_REQUIRED' });
+  // P5.6F review: a date of birth that cannot be READ must be refused here, not
+  // stored. Before F-8 an unreadable dob computed as the epoch and passed every
+  // adult gate; after F-8 it fails closed as "age unknown" — but a sign-up that
+  // stores it would still create an account whose age can never be established.
+  if (!Number.isFinite(ageOn(dob))) return res.status(400).json({ error: 'DOB_INVALID', message: 'Enter a date of birth as YYYY-MM-DD.' });
   if (ageOn(dob) >= adultAgeFor(country)) {
     return res.status(400).json({ error: 'NOT_A_MINOR', message: 'Adults create their own account with player sign-up.' });
   }
