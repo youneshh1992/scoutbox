@@ -17,7 +17,7 @@
 // Nothing is rewritten, re-ordered or "repaired" on boot.
 
 import { spawn } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -302,6 +302,111 @@ section('4 — planted corruption is named, refused, omitted, never repaired; a 
   ok((await j('GET', `/org/signings/${R.kim.SID}`, undefined, maria.token, at(T0 + 3 * H))).body.signing.status === 'COMPLETED', '4.8 a sound neighbour still reads');
   const db2 = await s.stop();
   neg(JSON.stringify(db2.signingPackages.filter((p) => /^spk-t/.test(p.id))) === rowsBefore && JSON.stringify(db2.signings) === signingsBefore, '4.9 nothing was repaired, dropped or written on boot or on stop');
+}
+
+// --------------------------------------------------------- 5 — P7.1 hardening (§76)
+section('5 — P7.1: bytes, rows and evidence edited on disk fail closed after a restart; a completion interrupted by a restart converges');
+{
+  const db = R.db; // after section 4's stop: the seven planted rows are still there (never repaired), the genuine ones sound
+  const store = openStore(DIR);
+  const mediaFile = (mediaId) => path.join(DIR, 'media', `${mediaId}.bin`);
+  const kimEv = (db.verEvidence ?? []).find((e) => e && e.meta?.signingPackageId === R.kim.SID && e.meta?.signingDocumentKind === 'signing');
+  ok(!!kimEv?.mediaId && existsSync(mediaFile(kimEv.mediaId)), '5.0 Kim\'s signed document sits in the vault on disk');
+  const originalBytes = readFileSync(mediaFile(kimEv.mediaId));
+  const kimRow = db.signings.find((x) => x.signingPackageId === R.kim.SID);
+  const login = async (j) => (await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' })).body.token;
+  const cycle = async (label, mutate, check) => {
+    const snap = store.load(); await mutate(snap.db); store.save({ ...snap, db: snap.db });
+    const s = await bootOn(DIR, PORT);
+    ok(s.up, `5.${label} the server boots`);
+    const tok = await login(s.j);
+    await check(s, tok);
+    const after = await s.stop();
+    return after;
+  };
+  // 5.1 the vault bytes swapped after a restart: the document is not served, the completed record and package still read
+  await cycle('1a', () => { writeFileSync(mediaFile(kimEv.mediaId), DOC2); }, async (s, tok) => {
+    const kim = (await s.j('POST', '/auth/player/login', { playerId: 'pl-kim' })).body.token;
+    neg((await s.j('GET', `/org/signings/${R.kim.SID}/document`, undefined, tok)).body?.error === 'SIGNING_STATE_UNKNOWN' && (await s.j('GET', `/player/signings/${R.kim.SID}/document`, undefined, kim, at(T0 + 3 * H))).body?.error === 'SIGNING_STATE_UNKNOWN', '5.1 the bytes on disk no longer hash to the digest every party confirmed: nobody is served them');
+    ok((await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).body.signing?.status === 'COMPLETED' && (await s.j('GET', '/org/signings', undefined, tok)).body.some((x) => x.id === kimRow.id), '5.1b the completed record and the package still read: the swap is on the bytes, the record is untouched');
+  });
+  await cycle('1b', () => { writeFileSync(mediaFile(kimEv.mediaId), originalBytes); }, async (s, tok) => {
+    const d = (await s.j('GET', `/org/signings/${R.kim.SID}/document`, undefined, tok)).body;
+    ok(d?.file && sha256(Buffer.from(d.file.base64, 'base64')) === SHA, '5.1c the original bytes back: served again, nothing was repaired');
+  });
+  // 5.2 a duplicate completion row on disk
+  await cycle('2', (d) => { d.signings.push({ ...kimRow, id: 'sign-dup-p' }); }, async (s, tok) => {
+    neg((await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).body?.error === 'SIGNING_STATE_UNKNOWN' && (await s.j('GET', `/org/rooms/${R.kim.RID}/signing`, undefined, tok, at(T0 + 3 * H))).body.packages.find((p) => p.id === R.kim.SID)?.integrity.includes('DUPLICATE_SIGNING_ROWS'), '5.2 two rows for one package after a restart: corruption, named DUPLICATE_SIGNING_ROWS');
+  });
+  await cycle('2b', (d) => { d.signings = d.signings.filter((x) => x.id !== 'sign-dup-p'); }, async (s, tok) => { ok((await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).status === 200, '5.2b removed: readable'); });
+  // 5.3 corrupted party evidence on disk
+  await cycle('3', (d) => { const p = d.signingPackages.find((x) => x.id === R.kim.SID); p.__bk = JSON.stringify(p); p.revisions[0].requiredParties[0].evidenceRef.documentSha256 = SHA2; }, async (s, tok) => {
+    neg((await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).body?.error === 'SIGNING_STATE_UNKNOWN', '5.3 an evidence reference edited to another digest: corruption');
+  });
+  await cycle('3b', (d) => { const p = d.signingPackages.find((x) => x.id === R.kim.SID); const bk = JSON.parse(p.__bk); for (const k of Object.keys(p)) delete p[k]; Object.assign(p, bk); }, async (s, tok) => { ok((await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).status === 200, '5.3b restored'); });
+  // 5.4 a completed package whose row is gone
+  await cycle('4', (d) => { d.signings = d.signings.filter((x) => x.id !== kimRow.id); }, async (s, tok) => {
+    neg((await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).body?.error === 'SIGNING_STATE_UNKNOWN' && (await s.j('GET', `/org/rooms/${R.kim.RID}/signing`, undefined, tok, at(T0 + 3 * H))).body.packages.find((p) => p.id === R.kim.SID)?.integrity.includes('COMPLETED_WITHOUT_ROW') && (await s.j('GET', `/org/rooms/${R.kim.RID}/journey`, undefined, tok)).body.outcome.signing === null, '5.4 COMPLETED without its row: corruption, the journey shows no signing, nothing is fabricated to fill the gap');
+    neg((await s.j('POST', `/org/signings/${R.kim.SID}/complete`, { expectedRev: 99, clientKey: key() }, tok, at(T0 + 3 * H))).body?.error === 'SIGNING_STATE_UNKNOWN', '5.4b a "completion" cannot recreate the row');
+  });
+  await cycle('4b', (d) => { d.signings.push(kimRow); }, async (s, tok) => { ok((await s.j('GET', `/org/rooms/${R.kim.RID}/journey`, undefined, tok)).body.outcome.signing?.id === kimRow.id, '5.4c the row back: the journey shows it again'); });
+  // 5.5 a row naming a package that never completed (Kola's DRAFT)
+  await cycle('5', (d) => { d.signings.push({ ...kimRow, id: 'sign-forged-p', signingPackageId: R.kola.SID, playerId: 'pl-adeyemi', caseId: R.kola.RID, offerId: R.kola.OID }); }, async (s, tok) => {
+    neg((await s.j('GET', `/org/signings/${R.kola.SID}`, undefined, tok)).body?.error === 'SIGNING_STATE_UNKNOWN' && (await s.j('GET', `/org/rooms/${R.kola.RID}/signing`, undefined, tok)).body.packages.find((p) => p.id === R.kola.SID)?.integrity.includes('ROW_WITHOUT_COMPLETION'), '5.5 a row for a DRAFT package: ROW_WITHOUT_COMPLETION, corruption');
+    const rev = (await s.j('GET', `/org/rooms/${R.kola.RID}/journey`, undefined, tok)).body.case.rev;
+    neg((await s.j('POST', `/org/rooms/${R.kola.RID}/lifecycle`, { action: 'confirmSignedOutcome', expectedRev: rev }, tok)).status === 422 && (await s.j('GET', `/org/rooms/${R.kola.RID}/journey`, undefined, tok)).body.lifecycle.currentStage === 'offer_accepted', '5.5b the forged row is not evidence for signed: the case stays at offer_accepted');
+  });
+  await cycle('5b', (d) => { d.signings = d.signings.filter((x) => x.id !== 'sign-forged-p'); }, async (s, tok) => { ok((await s.j('GET', `/org/signings/${R.kola.SID}`, undefined, tok)).status === 200, '5.5c removed: readable'); });
+  // 5.6 lazy expiry across the restart: the stored word is still READY, the read is EXPIRED
+  {
+    const snap = store.load();
+    ok(snap.db.signingPackages.find((p) => p.id === R.theo.SID).status === 'READY', '5.6 Martin\'s package is stored READY through every restart (EXPIRED is never written)');
+  }
+  // 5.7 a completion interrupted by a restart: (a) before persistence → nothing; (b) after persistence, before the effects → converged on replay
+  const playerTok = async (j, id) => (await j('POST', '/auth/player/login', { playerId: id })).body.token;
+  let N = null;
+  await cycle('7a', () => {}, async (s, tok) => {
+    const { j } = s;
+    const journey = async (RID) => (await j('GET', `/org/rooms/${RID}/journey?limit=200`, undefined, tok)).body;
+    const lifecycle = async (RID, action) => j('POST', `/org/rooms/${RID}/lifecycle`, { action, expectedRev: (await journey(RID)).case.rev }, tok);
+    const r = await j('POST', '/org/rooms', { playerId: 'pl-nowak', sourceContext: 'search' }, tok);
+    const RID = r.body?.room?.roomId ?? r.body?.existingRoomId;
+    await lifecycle(RID, 'startReview'); await lifecycle(RID, 'shortlist');
+    const dr = await j('POST', `/org/rooms/${RID}/decision/draft`, { outcome: 'progress', note: 'internal' }, tok);
+    await j('POST', `/org/rooms/${RID}/decision/finalize`, { expectedRev: dr.body.draft.rev, clientKey: key() }, tok);
+    const c = await j('POST', `/org/rooms/${RID}/offers`, { terms: TERMS, expiresAt: T0 + 14 * DAY, clientKey: key() }, tok, at(T0 + 4 * H));
+    const i = await j('POST', `/org/offers/${c.body.offer.id}/issue`, { expectedRev: 1, clientKey: key() }, tok, at(T0 + 4 * H));
+    const nowak = await playerTok(j, 'pl-nowak');
+    const a = await j('POST', `/player/offers/${c.body.offer.id}/accept`, { revisionId: i.body.offer.currentRevisionId, clientKey: key() }, nowak, at(T0 + 4 * H));
+    const st = await j('POST', `/org/offers/${c.body.offer.id}/signing`, { clientKey: key() }, tok, at(T0 + 4 * H));
+    const SID = st.body.signing.id;
+    const at1 = await j('POST', `/org/signings/${SID}/document`, { dataUrl: dataUrl(DOC), filename: 'contract.pdf', expectedRev: st.body.signing.rev }, tok, at(T0 + 4 * H));
+    const rd = await j('POST', `/org/signings/${SID}/ready`, { expectedRev: at1.body.signing.rev, clientKey: key() }, tok, at(T0 + 4 * H));
+    const SREV = rd.body.signing.currentRevision.id;
+    const ps = await j('POST', `/player/signings/${SID}/complete`, { revisionId: SREV, documentSha256: SHA, clientKey: key() }, nowak, at(T0 + 5 * H));
+    const cs = await j('POST', `/org/signings/${SID}/parties/club/complete`, { expectedRev: ps.status === 200 ? (await j('GET', `/org/signings/${SID}`, undefined, tok)).body.signing.rev : 0, revisionId: SREV, documentSha256: SHA, clientKey: key() }, tok, at(T0 + 5 * H));
+    ok(a.status === 200 && st.status === 201 && rd.status === 200 && ps.status === 200 && cs.status === 200, '5.7 Nowak: both parties confirmed on a fresh package');
+    N = { RID, SID, rev: cs.body.signing.rev, KC: key() };
+    await j('POST', '/__faults', { rules: 'internal:signing.complete.after_lifecycle:1' });
+    const boom = await j('POST', `/org/signings/${SID}/complete`, { expectedRev: N.rev, clientKey: N.KC }, tok, at(T0 + 5 * H));
+    neg(boom.status === 500 && boom.body.error === 'SIGNING_STATE_UNKNOWN', '5.7a the completion fails after the lifecycle moved (before persistence) — and the server is now stopped by SIGTERM with the rolled-back state');
+  });
+  await cycle('7b', () => {}, async (s, tok) => {
+    ok((await s.j('GET', `/org/signings/${N.SID}`, undefined, tok, at(T0 + 5 * H))).body.signing.status === 'IN_PROGRESS' && (await s.j('GET', '/org/signings', undefined, tok)).body.every((x) => x.signingPackageId !== N.SID) && (await s.j('GET', `/org/rooms/${N.RID}/journey`, undefined, tok)).body.lifecycle.currentStage === 'offer_accepted', '5.7b after the restart: IN_PROGRESS, no row, offer_accepted — the interrupted completion left nothing behind');
+    await s.j('POST', '/__faults', { rules: 'internal:signing.complete.effects:1' });
+    const done = await s.j('POST', `/org/signings/${N.SID}/complete`, { expectedRev: (await s.j('GET', `/org/signings/${N.SID}`, undefined, tok)).body.signing.rev, clientKey: N.KC }, tok, at(T0 + 5 * H));
+    ok(done.status === 200 && done.body.signing.status === 'COMPLETED', '5.7c the same key completes; the after-effects fail (simulated) — the authoritative writes were already persisted');
+  });
+  await cycle('7c', () => {}, async (s, tok) => {
+    const replay = await s.j('POST', `/org/signings/${N.SID}/complete`, { expectedRev: 999, clientKey: N.KC }, tok, at(T0 + 5 * H));
+    ok(replay.status === 200 && replay.body.idempotent === true && (await s.j('GET', '/org/signings', undefined, tok)).body.filter((x) => x.signingPackageId === N.SID).length === 1 && (await s.j('GET', `/org/rooms/${N.RID}/journey`, undefined, tok)).body.lifecycle.currentStage === 'signed', '5.7d after another restart the key replays, one row, the case signed: converged');
+    neg((await s.j('POST', `/org/signings/${N.SID}/complete`, { expectedRev: 999, clientKey: key() }, tok, at(T0 + 5 * H))).body.error === 'SIGNING_ALREADY_COMPLETED', '5.7e a fresh completion is refused');
+  });
+  // 5.8 planted corruption from section 4 is STILL there and still refused: nothing repaired it across five restarts
+  {
+    const snap = store.load();
+    neg(snap.db.signingPackages.filter((p) => /^spk-t/.test(p.id)).length === 10, '5.8 the ten planted rows survived every restart untouched — never repaired, never dropped');
+  }
 }
 
 console.log(`\nM23 P7 Signing persistence: ${passed} checks passed, ${negatives} negative (${Math.round((negatives / Math.max(passed, 1)) * 100)}%)`);
