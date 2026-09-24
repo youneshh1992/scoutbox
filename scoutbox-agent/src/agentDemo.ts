@@ -1077,6 +1077,15 @@ export const demoAgent: AgentApi = {
     if (!P56E_DISCLOSED.has(id)) refuse(403, 'DISCLOSURE_WITHHELD', 'Your client has not chosen to route you their club messages. That choice is theirs and they can change it at any time in My Agent.');
     return delay({ items: ROUTED_CONTACTS[id] ?? [], clientId: RELS.find((x) => x.id === id)?.clientId ?? id, note: 'Contacts a club routed to you as well as to your client. The club\u2019s own recruitment case, its internal notes and its assessment of your client are not here and never will be. Answering is your client\u2019s act, not yours.' });
   },
+  // M23 P6 — only what the client shared; the demo client has shared nothing yet.
+  async clientOffers(s, id) {
+    void s;
+    return delay({
+      items: [], clientId: RELS.find((x) => x.id === id)?.clientId ?? id, clientName: null,
+      note: 'Only the Offers your client chose to share with you, as the club issued them. Accepting or declining is your client\u2019s own act; ScoutBox does not let you do it on their behalf.',
+      honest: 'Nothing here is a negotiation, a fee or a signing. An accepted Offer is not a signed contract.',
+    });
+  },
   async clientTrials(s, id) {
     if (!P56E_DISCLOSED.has(id)) refuse(403, 'DISCLOSURE_WITHHELD', 'Your client has not chosen to share their trial schedule with you. That choice is theirs and they can change it at any time in My Agent.');
     return delay({

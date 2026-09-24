@@ -606,14 +606,16 @@ export function registerOffers(rawCtx) {
 
   const recipientView = (o, at) => offerRecipientView(o, at, { orgName: orgOf(o.orgId)?.name ?? null });
 
-  function markViewed(o, { kind, id }, at) {
+  /** A read receipt for the live revision (§40): a fact about delivery, never a status. Returns true when a new one was recorded. */
+  function markViewed(o, { kind, id }, at, { persist = true } = {}) {
     const cur = liveRevision(o);
-    if (!cur) return;
+    if (!cur) return false;
     o.readReceipts ??= [];
-    if (o.readReceipts.some((r) => r && r.revisionId === cur.id && r.viewerKind === kind && r.viewerId === id)) return;
+    if (o.readReceipts.some((r) => r && r.revisionId === cur.id && r.viewerKind === kind && r.viewerId === id)) return false;
     o.readReceipts.push({ revisionId: cur.id, viewerKind: kind, viewerId: id, firstViewedAt: at });
     hist(o, 'offer_viewed', { kind, id, name: null }, { revisionId: cur.id }, at);
-    persistNow();
+    if (persist) persistNow();
+    return true;
   }
 
   function listHandler(by) {
@@ -622,7 +624,12 @@ export function registerOffers(rawCtx) {
       const at = now(req);
       const actorId = by === 'guardian' ? req.guardian.id : req.player.id;
       const playerIds = by === 'guardian' ? req.guardian.childIds : [req.player.id];
-      const items = recipientOffers({ by, actorId, playerIds, at }).map((o) => ({ ...recipientView(o, at), playerName: findPlayer(o.playerId)?.name ?? null }));
+      // The list shows the full terms, so listing IS the recipient's first sight of a revision: one receipt per live revision, persisted once.
+      const rows = recipientOffers({ by, actorId, playerIds, at });
+      let added = false;
+      for (const o of rows) if (markViewed(o, { kind: by, id: actorId }, at, { persist: false })) added = true;
+      if (added) persistNow();
+      const items = rows.map((o) => ({ ...recipientView(o, at), playerName: findPlayer(o.playerId)?.name ?? null }));
       res.json({ items, note: 'Offers issued to you, as the club issued them. Read the exact revision; accept or decline before it expires. Accepting in ScoutBox is not a signing.' });
     };
   }

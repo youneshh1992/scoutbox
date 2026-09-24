@@ -132,7 +132,9 @@ section('1 — no P5 migration: one decision store, the draft on the case, nothi
   neg(guaranteeFor('recruitmentDecisions') !== 'migration' && guaranteeFor('decisionDrafts') !== 'migration' && guaranteeFor('recruitmentOffers') !== 'migration', 'no second decision store, no draft store, no offer store is guaranteed by the registry');
   const fresh = {};
   runMigrations(fresh);
-  ok(Array.isArray(fresh.roomDecisions) && fresh.roomDecisions.length === 0 && fresh.recruitmentDecisions === undefined && fresh.decisionDrafts === undefined && fresh.recruitmentOffers === undefined, 'a clean database gets an empty roomDecisions and no P5-invented store');
+  // Migrations ALONE: P5 invented no store, and the P6 Offer store is created by
+  // its module at registration (guarantee 'module'), so it is absent here too.
+  ok(Array.isArray(fresh.roomDecisions) && fresh.roomDecisions.length === 0 && fresh.recruitmentDecisions === undefined && fresh.decisionDrafts === undefined && fresh.recruitmentOffers === undefined, 'a clean database gets an empty roomDecisions and no P5-invented store (the P6 Offer store arrives with its module, not a migration)');
   const db = baseDb();
   db.roomDecisions.push(legacyRow(), formalRow(), headRow());
   db.recruitmentCases[0].decisionDraft = draftRow();
@@ -274,7 +276,7 @@ section('5 — clean boot: draft → finalize → stop → reboot: one store, ke
   const snap1 = await s2.stop();
   const row = snap1.roomDecisions.find((x) => x.id === fin.body.decision.id);
   ok(row && row.kind === 'formal' && row.state === 'final' && row.outcome === 'progress' && row.keys.finalize.key === 'clean-final' && row.keys.draft.key === 'clean-draft' && row.draftId === d.body.draft.id && snap1.recruitmentCases[0].decisionDraft === null && snap1.recruitmentCases[0].room.status === 'offer_consideration', 'the snapshot holds the formal row on roomDecisions with both keys, the draft cleared, the case at offer_consideration');
-  neg(!Object.keys(snap1).some((k) => /offer|decisionDraft|recruitmentDecision/i.test(k)), 'no new top-level store appeared in the snapshot');
+  neg(!Object.keys(snap1).some((k) => /decisionDraft|recruitmentDecision/i.test(k)) && Object.keys(snap1).filter((k) => /offer/i.test(k)).join() === 'recruitmentOffers', 'no P5 top-level store appeared in the snapshot (the P6 Offer store is the one Offer store)');
   const s3 = await bootOn(DIR, PORT + 6);
   const L3 = await lead(s3);
   const replayFin = await s3.j('POST', '/org/rooms/case-x/decision/finalize', { expectedRev: 1, clientKey: 'clean-final' }, L3.token);

@@ -27,6 +27,7 @@ import type {
   TrialWorkflowState, TrialAttendanceState, TrialSessionView, TrialRevisionView, TrialAttendanceRecord, TrialHistoryEntry,
   TrialClubView, TrialInvitationView, TrialList, TrialEvidenceView, TrialEvidenceCandidate,
   DecisionSurface, DecisionDraft, FormalDecision, DecisionOutcome, DecisionEvidenceRef, DecisionFinalizeResult,
+  OfferClubView, OfferSurface, OfferRevisionView, OfferStatus, OfferTerms, OfferActor, OfferHistoryItem,
 } from './roomsApi';
 import type { RecruitmentPassport } from './m15api';
 import { ApiError } from './api';
@@ -793,6 +794,92 @@ const validateDecisionContent = (input: { outcome?: DecisionOutcome | null; reas
   return { outcome: (input.outcome ?? null) as DecisionOutcome | null, codes, note, refs };
 };
 
+
+// ---- M23 P6 — the canonical Offer (demo). One live Offer per room; issued
+// revisions are immutable; the recipient's answer is simulated by the demo
+// clock only through the explicit demo helpers — never typed by the club.
+interface DemoOffer extends OfferClubView { keys: { create: { key: string; fp: string } | null; issue: { key: string; revisionId: string }[]; withdraw: { key: string; revisionId: string }[]; revise: { key: string; revisionId: string }[] }; history: OfferHistoryItem[] }
+const offerStore: DemoOffer[] = [];
+const OFFER_STATUS_LABELS: Record<OfferStatus, string> = { DRAFT: 'Draft — not issued', ISSUED: 'Issued — awaiting response', ACCEPTED: 'Offer accepted — signing pending', DECLINED: 'Declined by the recipient', WITHDRAWN: 'Withdrawn by the club', EXPIRED: 'Expired', SUPERSEDED: 'Superseded by a later revision' };
+const OFFER_HONEST = 'An Offer is the club\'s proposal, issued as an exact revision. An acceptance in ScoutBox is the recipient saying yes to that revision; it is not a signing, not a registration and not an executed contract.';
+const offerApiErr = apiErr;
+const offerRevOf = (o: DemoOffer, id: string) => o.revisions.find((r) => r.id === id) ?? null;
+const offerCur = (o: DemoOffer) => offerRevOf(o, o.currentRevisionId);
+const offerEffective = (r: OfferRevisionView, now: number): OfferStatus => (r.storedStatus === 'ISSUED' && (r.expiresAt === null || !(now < r.expiresAt)) ? 'EXPIRED' : r.storedStatus);
+const offerLive = (o: DemoOffer) => o.revisions.filter((r) => r.issuedAt !== null && r.storedStatus !== 'DRAFT').sort((a, b) => b.revisionNumber - a.revisionNumber)[0] ?? null;
+const offerRefresh = (o: DemoOffer, now = Date.now()) => {
+  for (const r of o.revisions) { r.status = offerEffective(r, now); r.statusLabel = OFFER_STATUS_LABELS[r.status]; }
+  const cur = offerCur(o); const live = offerLive(o);
+  o.status = cur ? cur.status : 'DRAFT'; o.statusLabel = OFFER_STATUS_LABELS[o.status];
+  o.currentRevision = cur; o.liveRevisionId = live?.id ?? null; o.liveStatus = live ? live.status : null; o.awaitingResponse = o.liveStatus === 'ISSUED';
+  o.firstViewedAt = o.firstViewedAt ?? null;
+  return o;
+};
+const offerView = (o: DemoOffer): OfferClubView => { const { keys: _k, history: _h, ...rest } = offerRefresh(o); return JSON.parse(JSON.stringify(rest)) as OfferClubView; };
+const offerHist = (o: DemoOffer, action: string, by: OfferActor, revisionId: string | null, at: number) => { o.history.push({ id: nid('aud'), at, action, by, revisionId }); };
+const offerRevGate = (o: DemoOffer, expectedRev: unknown) => {
+  if (!Number.isInteger(expectedRev) || (expectedRev as number) < 0) throw offerApiErr(400, 'OFFER_REV_REQUIRED', 'expectedRev must be a non-negative integer.');
+  if (expectedRev !== o.rev) throw offerApiErr(409, 'OFFER_REV_CONFLICT', 'Someone else changed this while you were working on it. Reload to see their change, then apply yours.', { currentRev: o.rev });
+};
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+const offerTermsOf = (raw: Partial<OfferTerms> | undefined, prev: OfferTerms | null): OfferTerms => {
+  const t = raw ?? {};
+  const pick = (k: 'role' | 'squad' | 'conditions', max: number) => { const v = t[k] === undefined ? prev?.[k] ?? null : t[k]; if (v !== null && typeof v !== 'string') throw offerApiErr(400, 'OFFER_TERMS_INVALID', `The ${k} must be text.`, { field: k }); const s = (v ?? '').trim(); if (s.length > max) throw offerApiErr(400, 'OFFER_TERMS_INVALID', `Keep the ${k} under ${max} characters.`, { field: k }); return s || null; };
+  const day = (k: 'startDate' | 'endDate') => { const v = t[k] === undefined ? prev?.[k] ?? null : t[k]; if (v === null || v === '') return null; if (typeof v !== 'string' || !DATE_ONLY.test(v) || Number.isNaN(Date.parse(`${v}T00:00:00Z`)) || new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) !== v) throw offerApiErr(400, 'OFFER_TERMS_INVALID', `The ${k} must be a calendar day written YYYY-MM-DD.`, { field: k }); return v; };
+  const terms: OfferTerms = { offerType: 'direct_recruitment', role: pick('role', 80), squad: pick('squad', 80), startDate: day('startDate'), endDate: day('endDate'), conditions: pick('conditions', 1000) };
+  if (terms.startDate && terms.endDate && !(terms.startDate < terms.endDate)) throw offerApiErr(400, 'OFFER_TERMS_INVALID', 'The end date must be after the start date.', { field: 'endDate' });
+  return terms;
+};
+const offerExpiryOf = (raw: string | number | null | undefined, prev: number | null, now: number): number | null => {
+  if (raw === undefined) return prev;
+  if (raw === null || raw === '') return null;
+  const ms = typeof raw === 'number' ? raw : (/(Z|[+-]\d{2}:\d{2})$/.test(raw) ? Date.parse(raw) : NaN);
+  if (!Number.isFinite(ms)) throw offerApiErr(400, 'OFFER_EXPIRY_INVALID', 'expiresAt must be an ISO 8601 date-time with an explicit offset or Z, or a millisecond timestamp.', { field: 'expiresAt' });
+  if (ms < now + 3_600_000) throw offerApiErr(400, 'OFFER_EXPIRY_INVALID', 'An Offer must stay open for at least an hour after it is issued.', { field: 'expiresAt' });
+  if (ms > now + 180 * DAY) throw offerApiErr(400, 'OFFER_EXPIRY_INVALID', 'An Offer cannot stay open for more than 180 days.', { field: 'expiresAt' });
+  return ms;
+};
+const offerText = (v: string | null | undefined, prev: string | null, max: number, field: string) => { if (v === undefined) return prev; if (v === null || v === '') return null; if (typeof v !== 'string') throw offerApiErr(400, 'OFFER_INPUT_INVALID', `The ${field} must be text.`, { field }); const s = v.trim(); if (s.length > max) throw offerApiErr(400, 'OFFER_INPUT_INVALID', `Keep the ${field} under ${max} characters.`, { field }); return s || null; };
+const offerBlockers = (r: DemoRoom, forIssue: boolean, offer: DemoOffer | null): string[] => {
+  const b: string[] = [];
+  if (!r.available) b.push('SUBJECT_REMOVED');
+  if (!forIssue) {
+    if (r.status !== 'offer_consideration') b.push('CASE_STATE');
+    if (!formalOf(r.roomId).some((d) => d.state === 'final' && d.outcome === 'progress' && !d.supersededById)) b.push('DECISION_REQUIRED');
+    if (offerStore.some((o) => o.caseId === r.roomId && ['DRAFT', 'ISSUED'].includes(offerRefresh(o).status))) b.push('OFFER_LIVE');
+  } else {
+    if (!['offer_consideration', 'offer_made'].includes(r.status)) b.push('CASE_STATE');
+    if (offer?.transactionId) b.push('TRANSACTION_NOT_READY');
+  }
+  return b;
+};
+const newOfferRevision = (o: DemoOffer | null, terms: OfferTerms, msg: string | null, note: string | null, expiresAt: number | null, at: number, supersedes: string | null): OfferRevisionView => ({
+  id: nid('rofr'), revisionNumber: (o?.revisions.length ?? 0) + 1, status: 'DRAFT', storedStatus: 'DRAFT', statusLabel: OFFER_STATUS_LABELS.DRAFT, terms, recipientMessage: msg, documents: [],
+  expiresAt, issuedAt: null, createdAt: at, supersedesRevisionId: supersedes, supersededByRevisionId: null, withdrawnAt: null, respondedAt: null, rev: 1,
+  internalNote: note, issuedBy: null, createdBy: { kind: 'org', name: ME.name }, withdrawnBy: null, withdrawReason: null, recipient: null, readiness: null,
+});
+const findOffer = (offerId: string) => { const o = offerStore.find((x) => x.id === offerId); if (!o) throw offerApiErr(404, 'OFFER_NOT_FOUND', 'No Offer with that reference is available to you.'); return offerRefresh(o); };
+const offerSurfaceOf = (r: DemoRoom): OfferSurface => {
+  const offers = offerStore.filter((o) => o.caseId === r.roomId).map(offerView).sort((a, b) => b.createdAt - a.createdAt);
+  const live = offers.find((o) => ['DRAFT', 'ISSUED'].includes(o.status)) ?? null;
+  const liveStore = live ? offerStore.find((o) => o.id === live.id) ?? null : null;
+  return {
+    offers, liveOfferId: live?.id ?? null,
+    requirements: { role: 'room_lead', canDraft: true, canIssue: true, status: r.status, statusLabel: STATUS_LABELS[r.status] ?? r.status, draftBlockers: offerBlockers(r, false, null), issueBlockers: live && live.status === 'DRAFT' ? offerBlockers(r, true, liveStore) : [], blocked: false, subjectRemoved: !r.available },
+    vocabulary: { statuses: Object.keys(OFFER_STATUS_LABELS) as OfferStatus[], statusLabels: OFFER_STATUS_LABELS, types: ['direct_recruitment'], responseTypes: ['accepted', 'declined'] },
+    limits: { role: 80, squad: 80, conditions: 1000, recipientMessage: 2000, internalNote: 2000, withdrawReason: 400, declineReason: 400, documentLabel: 120, documents: 10, revisions: 20, clientKey: 64, minExpiryMs: 3_600_000, maxExpiryMs: 180 * DAY, historyPage: 200 },
+    policyVersion: 1,
+    note: 'An Offer is created only by an explicit act here. A positive recruitment decision opens the door; it never walks through it. Issuing an Offer moves the case to Offer made; the recipient\'s own acceptance or decline moves it on. Nothing here is a signing.',
+  };
+};
+const moveRoomForOffer = (r: DemoRoom, to: string, trigger: string) => {
+  if (r.status === to) return { applied: false, action: trigger, reason: 'already_there', from: r.status, to: r.status, at: Date.now() };
+  if (!(TRANSITIONS[r.status] ?? []).includes(to)) throw offerApiErr(409, 'OFFER_LIFECYCLE_CONFLICT', `The case at "${STATUS_LABELS[r.status] ?? r.status}" cannot take the step an Offer asks for.`, { current: { status: r.status } });
+  const from = r.status; r.status = to; r.updatedAt = Date.now();
+  log(r, 'room_status_changed', { from, to, reasonCodes: [], trigger });
+  return { applied: true, action: trigger, from, to, at: Date.now() };
+};
+
 export const demoRooms: RoomsApi = {
   list: async (_s, params = {}) => {
     let list = roomStore.slice();
@@ -1530,6 +1617,109 @@ export const demoRooms: RoomsApi = {
     trialEvent(tr, 'trial_evidence_unlinked', { kind: 'org', name: ME.name }, { trialSessionId: sess.id, sessionId: hit.sessionId }, now);
     bumpTrial(tr, now);
     return delay({ trial: trialView(tr), evidence: evidenceView(tr) });
+  },
+  // ---- M23 P6 — the canonical Offer (demo)
+  offers: async (_s, roomId) => { const r = find(roomId); if (!r) throw offerApiErr(404, 'ROOM_NOT_FOUND', 'No such room.'); return delay(offerSurfaceOf(r)); },
+  createOffer: async (_s, roomId, input) => {
+    const r = find(roomId); if (!r) throw offerApiErr(404, 'ROOM_NOT_FOUND', 'No such room.');
+    const now = Date.now();
+    const terms = offerTermsOf(input.terms, null);
+    const msg = offerText(input.recipientMessage, null, 2000, 'recipientMessage'); const note = offerText(input.internalNote, null, 2000, 'internalNote');
+    const expiresAt = offerExpiryOf(input.expiresAt, null, now);
+    const fp = JSON.stringify({ terms, msg, note, expiresAt });
+    if (input.clientKey) { const prior = offerStore.find((o) => o.caseId === roomId && o.keys.create?.key === input.clientKey); if (prior) { if (prior.keys.create?.fp === fp) return delay({ offer: offerView(prior), idempotent: true }); throw offerApiErr(409, 'OFFER_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different Offer.'); } }
+    const blockers = offerBlockers(r, false, null);
+    if (blockers.includes('SUBJECT_REMOVED')) throw offerApiErr(409, 'OFFER_SUBJECT_REMOVED', 'This player removed their ScoutBox account.');
+    if (blockers.includes('CASE_STATE')) throw offerApiErr(409, 'OFFER_STATE_INVALID', `An Offer is drafted from Offer consideration; this case is at "${STATUS_LABELS[r.status] ?? r.status}".`, { current: { status: r.status } });
+    if (blockers.includes('DECISION_REQUIRED')) throw offerApiErr(422, 'OFFER_ISSUE_NOT_ALLOWED', 'A finalized recruitment decision to progress must stand on this case before an Offer is drafted.', { reasons: ['DECISION_REQUIRED'] });
+    if (blockers.includes('OFFER_LIVE')) throw offerApiErr(409, 'OFFER_STATE_INVALID', 'This case already has a live Offer.');
+    const rev = newOfferRevision(null, terms, msg, note, expiresAt, now, null);
+    const o: DemoOffer = {
+      id: nid('rof'), caseId: roomId, playerId: r.playerId, orgId: 'org-demo', type: 'direct_recruitment', status: 'DRAFT', statusLabel: OFFER_STATUS_LABELS.DRAFT,
+      currentRevisionId: rev.id, liveRevisionId: null, liveStatus: null, awaitingResponse: false, currentRevision: rev, revisions: [rev], responses: [], firstViewedAt: null, agentShared: false,
+      decisionId: formalHead(roomId)?.id ?? null, transactionId: input.transactionId ?? null, lifecycle: null, createdAt: now, updatedAt: now, rev: 1, policyVersion: 1, honest: OFFER_HONEST,
+      keys: { create: input.clientKey ? { key: input.clientKey, fp } : null, issue: [], withdraw: [], revise: [] }, history: [],
+    };
+    offerHist(o, 'offer_draft_created', { kind: 'org', name: ME.name }, rev.id, now);
+    offerStore.push(o);
+    return delay({ offer: offerView(o) });
+  },
+  offer: async (_s, offerId) => delay({ offer: offerView(findOffer(offerId)) }),
+  offerHistory: async (_s, offerId) => { const o = findOffer(offerId); return delay({ items: o.history.slice(), offerId: o.id }); },
+  updateOfferDraft: async (_s, offerId, input) => {
+    const o = findOffer(offerId); const cur = offerCur(o)!; const now = Date.now();
+    if (cur.status !== 'DRAFT') throw offerApiErr(409, 'OFFER_STATE_INVALID', 'Only a draft revision can be edited. Issued terms are immutable; open a new revision to change them.', { current: { status: cur.status } });
+    const terms = input.terms !== undefined ? offerTermsOf(input.terms, cur.terms) : cur.terms;
+    const msg = offerText(input.recipientMessage, cur.recipientMessage, 2000, 'recipientMessage'); const note = offerText(input.internalNote, cur.internalNote ?? null, 2000, 'internalNote');
+    const expiresAt = offerExpiryOf(input.expiresAt, cur.expiresAt, now);
+    offerRevGate(o, input.expectedRev);
+    cur.terms = terms; cur.recipientMessage = msg; cur.internalNote = note; cur.expiresAt = expiresAt; cur.rev += 1;
+    o.rev += 1; o.updatedAt = now;
+    offerHist(o, 'offer_draft_updated', { kind: 'org', name: ME.name }, cur.id, now);
+    return delay({ offer: offerView(o) });
+  },
+  issueOffer: async (_s, offerId, input) => {
+    const o = findOffer(offerId); const cur = offerCur(o)!; const now = Date.now();
+    const used = input.clientKey ? o.keys.issue.find((k) => k.key === input.clientKey) : null;
+    if (used) { if (used.revisionId === cur.id) return delay({ offer: offerView(o), lifecycle: o.lifecycle, idempotent: true }); throw offerApiErr(409, 'OFFER_IDEMPOTENCY_CONFLICT', 'This clientKey was already used to issue a different revision.'); }
+    if (cur.status !== 'DRAFT') throw offerApiErr(409, 'OFFER_STATE_INVALID', cur.status === 'ISSUED' ? 'This revision is already issued.' : 'Only a draft revision can be issued.', { current: { status: cur.status } });
+    if (o.liveStatus === 'ACCEPTED') throw offerApiErr(409, 'OFFER_STATE_INVALID', 'The recipient accepted the revision that is out.', { current: { status: 'ACCEPTED' } });
+    offerRevGate(o, input.expectedRev);
+    const r = find(o.caseId)!;
+    if (!r.available) throw offerApiErr(409, 'OFFER_SUBJECT_REMOVED', 'This player removed their ScoutBox account.');
+    if (!['offer_consideration', 'offer_made'].includes(r.status)) throw offerApiErr(409, 'OFFER_LIFECYCLE_CONFLICT', `The case at "${STATUS_LABELS[r.status] ?? r.status}" cannot take an issued Offer.`, { current: { status: r.status } });
+    if (!cur.terms.startDate) throw offerApiErr(400, 'OFFER_TERMS_INVALID', 'An issued Offer names the day it would start.', { field: 'startDate' });
+    if (cur.expiresAt === null) throw offerApiErr(400, 'OFFER_EXPIRY_INVALID', 'An issued Offer needs an expiry.', { field: 'expiresAt' });
+    if (!(cur.expiresAt >= now + 3_600_000)) throw offerApiErr(400, 'OFFER_EXPIRY_INVALID', 'An Offer must stay open for at least an hour after it is issued.', { field: 'expiresAt' });
+    if (o.transactionId) throw offerApiErr(422, 'OFFER_COMPLIANCE_BLOCKED', 'The transaction workspace does not currently permit an Offer.', { blockers: ['TRANSACTION_NOT_READY'] });
+    const prev = cur.supersedesRevisionId ? offerRevOf(o, cur.supersedesRevisionId) : null;
+    const prevIssued = prev && prev.storedStatus === 'ISSUED' ? prev : null;
+    const moved = moveRoomForOffer(r, 'offer_made', 'sendOffer');
+    cur.storedStatus = 'ISSUED'; cur.issuedAt = now; cur.issuedBy = { kind: 'org', name: ME.name }; cur.recipient = { type: 'player', minor: false }; cur.rev += 1;
+    if (prevIssued) { prevIssued.storedStatus = 'SUPERSEDED'; prevIssued.supersededByRevisionId = cur.id; }
+    o.lifecycle = moved; o.rev += 1; o.updatedAt = now;
+    if (input.clientKey) o.keys.issue.push({ key: input.clientKey, revisionId: cur.id });
+    if (prevIssued) offerHist(o, 'offer_superseded', { kind: 'org', name: ME.name }, cur.id, now);
+    offerHist(o, 'offer_issued', { kind: 'org', name: ME.name }, cur.id, now);
+    offerRefresh(o);
+    return delay({ offer: offerView(o), lifecycle: moved, case: moved.applied ? { from: moved.from, to: moved.to } : { unchanged: true as const, status: r.status }, rev: o.rev });
+  },
+  withdrawOffer: async (_s, offerId, input) => {
+    const o = findOffer(offerId); const cur = offerCur(o)!; const now = Date.now();
+    const used = input.clientKey ? o.keys.withdraw.find((k) => k.key === input.clientKey) : null;
+    if (used) { if (used.revisionId === cur.id) return delay({ offer: offerView(o), lifecycle: o.lifecycle, idempotent: true }); throw offerApiErr(409, 'OFFER_IDEMPOTENCY_CONFLICT', 'This clientKey was already used to withdraw a different revision.'); }
+    if (cur.status === 'ACCEPTED' || cur.status === 'DECLINED') throw offerApiErr(409, 'OFFER_ALREADY_RESPONDED', 'The recipient has already answered this Offer.');
+    if (cur.status !== 'DRAFT' && cur.status !== 'ISSUED') throw offerApiErr(409, 'OFFER_STATE_INVALID', `A revision that is ${OFFER_STATUS_LABELS[cur.status]} is not withdrawn.`, { current: { status: cur.status } });
+    const reason = offerText(input.reason, null, 400, 'reason');
+    offerRevGate(o, input.expectedRev);
+    const wasIssued = cur.status === 'ISSUED';
+    cur.storedStatus = 'WITHDRAWN'; cur.withdrawnAt = now; cur.withdrawnBy = { kind: 'org', name: ME.name }; cur.withdrawReason = reason; cur.rev += 1;
+    const r = find(o.caseId)!;
+    const moved = wasIssued && r.status === 'offer_made' ? moveRoomForOffer(r, 'offer_consideration', 'considerOffer') : { applied: false, action: null, reason: 'draft', from: r.status, to: r.status, at: now };
+    o.lifecycle = moved; o.rev += 1; o.updatedAt = now;
+    if (input.clientKey) o.keys.withdraw.push({ key: input.clientKey, revisionId: cur.id });
+    offerHist(o, 'offer_withdrawn', { kind: 'org', name: ME.name }, cur.id, now);
+    return delay({ offer: offerView(o), lifecycle: moved });
+  },
+  reviseOffer: async (_s, offerId, input) => {
+    const o = findOffer(offerId); const prev = offerCur(o)!; const now = Date.now();
+    const used = input.clientKey ? o.keys.revise.find((k) => k.key === input.clientKey) : null;
+    if (used && offerRevOf(o, used.revisionId)) return delay({ offer: offerView(o), idempotent: true });
+    if (prev.status === 'DRAFT') throw offerApiErr(409, 'OFFER_STATE_INVALID', 'This Offer already has a draft revision. Edit it or withdraw it.');
+    if (prev.status === 'ACCEPTED') throw offerApiErr(409, 'OFFER_STATE_INVALID', 'An accepted Offer is not revised.');
+    if (o.revisions.length >= 20) throw offerApiErr(409, 'OFFER_STATE_INVALID', 'An Offer carries at most 20 revisions.');
+    const r = find(o.caseId)!;
+    if (!r.available) throw offerApiErr(409, 'OFFER_SUBJECT_REMOVED', 'This player removed their ScoutBox account.');
+    if (!['offer_consideration', 'offer_made'].includes(r.status)) throw offerApiErr(409, 'OFFER_LIFECYCLE_CONFLICT', `The case at "${STATUS_LABELS[r.status] ?? r.status}" cannot take a new Offer revision.`, { current: { status: r.status } });
+    offerRevGate(o, input.expectedRev);
+    const terms = offerTermsOf(input.terms, prev.terms);
+    const msg = offerText(input.recipientMessage, prev.recipientMessage, 2000, 'recipientMessage'); const note = offerText(input.internalNote, prev.internalNote ?? null, 2000, 'internalNote');
+    const expiresAt = offerExpiryOf(input.expiresAt, null, now);
+    const rev = newOfferRevision(o, terms, msg, note, expiresAt, now, prev.status === 'ISSUED' ? prev.id : null);
+    o.revisions.push(rev); o.currentRevisionId = rev.id; o.rev += 1; o.updatedAt = now;
+    if (input.clientKey) o.keys.revise.push({ key: input.clientKey, revisionId: rev.id });
+    offerHist(o, 'offer_draft_created', { kind: 'org', name: ME.name }, rev.id, now);
+    return delay({ offer: offerView(o) });
   },
   funnel: async () => delay(funnelOf(roomStore)),
 };

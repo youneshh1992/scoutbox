@@ -79,6 +79,28 @@ export interface SquadInvite { id: string; orgName: string; playerName: string; 
 export interface FollowUpView { id: string; playerId: string; orgName: string; milestone: string; dueAt: number; outcomeState: string; report: { registrationStatus: string; matchesPlayed: number | null; progression: string | null } | null }
 export interface UploadSession { id: string; chunkSize: number; totalChunks: number; received: number[]; status: string; finalisedMediaId: string | null }
 
+// M23 P6 — the recipient's view of the canonical Offer: the ISSUED revisions
+// exactly as the club issued them, the recipient message, the expiry, the
+// documents by their Offer id. Never the club's internal note, never a
+// decision or transaction reference. Accepting is the recipient's own act and
+// is NOT a signing.
+export type OfferStatus = 'DRAFT' | 'ISSUED' | 'ACCEPTED' | 'DECLINED' | 'WITHDRAWN' | 'EXPIRED' | 'SUPERSEDED';
+export interface FamilyOfferTerms { offerType: string; role: string | null; squad: string | null; startDate: string | null; endDate: string | null; conditions: string | null }
+export interface FamilyOfferRevision {
+  id: string; revisionNumber: number; status: OfferStatus; storedStatus: OfferStatus; statusLabel: string | null; terms: FamilyOfferTerms;
+  recipientMessage: string | null; documents: { id: string; label: string | null }[]; expiresAt: number | null; issuedAt: number | null; createdAt: number | null;
+  supersedesRevisionId: string | null; supersededByRevisionId: string | null; withdrawnAt: number | null; respondedAt: number | null; rev: number;
+}
+export interface FamilyOfferResponse { id: string; revisionId: string; responseType: 'accepted' | 'declined'; actorType: 'player' | 'guardian'; occurredAt: number }
+export interface FamilyOffer {
+  id: string; playerId: string; playerName?: string | null; club: { id: string; name: string | null }; type: string; status: OfferStatus | null; statusLabel: string | null;
+  currentRevisionId: string | null; currentRevision: FamilyOfferRevision | null; revisions: FamilyOfferRevision[]; awaitingYourResponse: boolean;
+  responses: FamilyOfferResponse[]; agentShared: boolean; policyVersion: number; honest: string;
+}
+export interface FamilyOfferHistory { id: string; at: number; action: string; by: { kind: string | null; name: string | null } | null; revisionId: string | null }
+export interface OfferAnswerResult { offer: FamilyOffer; lifecycle: unknown; signing?: { created: false; note: string }; idempotent?: boolean }
+export interface OfferDocumentFile { document: { id: string; label: string | null; mime: string | null; bytes: number | null; filename: string | null }; file: { mime: string; base64: string } | null }
+
 export interface PlayerM12 {
   getPassport(playerId: string): Promise<PassportView>;
   addEvidence(playerId: string, input: { claimType: string; label: string; value?: number | string; units?: string; season?: string }): Promise<void>;
@@ -138,6 +160,18 @@ export interface PlayerM12 {
   gRespondSquadInvite(guardianId: string, inviteId: string, accept: boolean): Promise<void>;
   gFollowUps(guardianId: string): Promise<FollowUpView[]>;
   gRespondFollowUp(guardianId: string, followUpId: string, agree: boolean, note?: string): Promise<void>;
+  // M23 P6 — Offers, the recipient's side. A guardian route acts only where the server addressed the revision to that guardian.
+  getOffers(playerId: string): Promise<FamilyOffer[]>;
+  getOffer(playerId: string, offerId: string): Promise<{ offer: FamilyOffer; history: FamilyOfferHistory[] }>;
+  acceptOffer(playerId: string, offerId: string, revisionId: string, clientKey: string): Promise<OfferAnswerResult>;
+  declineOffer(playerId: string, offerId: string, revisionId: string, clientKey: string, reason?: string): Promise<OfferAnswerResult>;
+  shareOfferWithAgent(playerId: string, offerId: string, share: boolean, agreementId?: string): Promise<{ offer: FamilyOffer }>;
+  getOfferDocument(playerId: string, offerId: string, docId: string): Promise<OfferDocumentFile>;
+  gOffers(guardianId: string): Promise<FamilyOffer[]>;
+  gOffer(guardianId: string, offerId: string): Promise<{ offer: FamilyOffer; history: FamilyOfferHistory[] }>;
+  gAcceptOffer(guardianId: string, offerId: string, revisionId: string, clientKey: string): Promise<OfferAnswerResult>;
+  gDeclineOffer(guardianId: string, offerId: string, revisionId: string, clientKey: string, reason?: string): Promise<OfferAnswerResult>;
+  gOfferDocument(guardianId: string, offerId: string, docId: string): Promise<OfferDocumentFile>;
 }
 
 const post = (path: string, id: string, body?: unknown, method = 'POST') =>
@@ -209,6 +243,18 @@ const live: PlayerM12 = {
   gRespondSquadInvite: (gid, iid, accept) => post(`/guardian/squad-invites/${iid}/respond`, gid, { accept }),
   gFollowUps: (gid) => req('/guardian/followups', gid),
   gRespondFollowUp: (gid, fid, agree, note) => post(`/guardian/followups/${fid}/respond`, gid, { agree, note }),
+  // ---- M23 P6
+  getOffers: async (pid) => (await req<{ items: FamilyOffer[] }>('/player/offers', pid)).items,
+  getOffer: (pid, oid) => req(`/player/offers/${oid}`, pid),
+  acceptOffer: (pid, oid, revisionId, clientKey) => post(`/player/offers/${oid}/accept`, pid, { revisionId, clientKey }),
+  declineOffer: (pid, oid, revisionId, clientKey, reason) => post(`/player/offers/${oid}/decline`, pid, { revisionId, clientKey, ...(reason ? { reason } : {}) }),
+  shareOfferWithAgent: (pid, oid, share, agreementId) => post(`/player/offers/${oid}/share-agent`, pid, { share, ...(agreementId ? { agreementId } : {}) }),
+  getOfferDocument: (pid, oid, docId) => req(`/player/offers/${oid}/documents/${docId}`, pid),
+  gOffers: async (gid) => (await req<{ items: FamilyOffer[] }>('/guardian/offers', gid)).items,
+  gOffer: (gid, oid) => req(`/guardian/offers/${oid}`, gid),
+  gAcceptOffer: (gid, oid, revisionId, clientKey) => post(`/guardian/offers/${oid}/accept`, gid, { revisionId, clientKey }),
+  gDeclineOffer: (gid, oid, revisionId, clientKey, reason) => post(`/guardian/offers/${oid}/decline`, gid, { revisionId, clientKey, ...(reason ? { reason } : {}) }),
+  gOfferDocument: (gid, oid, docId) => req(`/guardian/offers/${oid}/documents/${docId}`, gid),
 };
 
 export const m12: PlayerM12 = DEMO ? m12mock : live;

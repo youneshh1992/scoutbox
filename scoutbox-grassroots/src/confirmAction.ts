@@ -48,6 +48,9 @@ export const DESTRUCTIVE_ACTIONS: Record<string, DestructiveAction> = {
   // M23 P5 — a formal decision is not destructive, but it is the club's recruitment act and is confirmed like one: the copy says what it records and what it does not (no offer, nothing sent).
   finalizeDecision: { titleKey: 'confirm.finalizeDecision', bodyKey: 'confirm.finalizeDecisionBody', cls: 'irreversible' },
   discardDecisionDraft: { titleKey: 'confirm.discardDecisionDraft', bodyKey: 'confirm.discardDecisionDraftBody', cls: 'tombstone' },
+  // M23 P6 — issuing an Offer is the club's outward act: an exact revision reaches a person and cannot be edited afterwards; withdrawing closes it.
+  issueOffer: { titleKey: 'confirm.issueOffer', bodyKey: 'confirm.issueOfferBody', cls: 'irreversible' },
+  withdrawOffer: { titleKey: 'confirm.withdrawOffer', bodyKey: 'confirm.withdrawOfferBody', cls: 'archive' },
   archiveBrief: { titleKey: 'confirm.archiveBrief', bodyKey: 'confirm.archiveBriefBody', cls: 'archive' },
   pauseBrief: { titleKey: 'confirm.pauseBrief', bodyKey: 'confirm.pauseBriefBody', cls: 'reversible' },
   deleteSavedSearch: { titleKey: 'confirm.deleteSavedSearch', bodyKey: 'confirm.deleteSavedSearchBody', cls: 'irreversible' },

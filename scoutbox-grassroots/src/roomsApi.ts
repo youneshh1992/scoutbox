@@ -607,6 +607,41 @@ export interface DecisionDraftInput { outcome?: DecisionOutcome | null; reasonCo
 export interface DecisionFinalizeInput { expectedRev: number; clientKey?: string; supersedes?: string; supersedesRev?: number; supersessionReason?: string }
 export interface DecisionFinalizeResult { decision: FormalDecision; lifecycle: DecisionLifecycleEffect | null; case?: { from: string; to: string } | { unchanged: true; status: string }; rev?: number; idempotent?: boolean }
 
+
+// ---- M23 P6 — the canonical Offer. A club's proposal, issued as an exact,
+// immutable revision; the recipient's own acceptance or decline; never a
+// signing. The club view carries the internal note; nothing here carries the
+// decision's rationale or an assessment.
+export type OfferStatus = 'DRAFT' | 'ISSUED' | 'ACCEPTED' | 'DECLINED' | 'WITHDRAWN' | 'EXPIRED' | 'SUPERSEDED';
+export interface OfferTerms { offerType: 'direct_recruitment'; role: string | null; squad: string | null; startDate: string | null; endDate: string | null; conditions: string | null }
+export interface OfferDocumentRef { id: string; label: string | null }
+export interface OfferActor { kind: string | null; name: string | null }
+export interface OfferRevisionView {
+  id: string; revisionNumber: number; status: OfferStatus; storedStatus: OfferStatus; statusLabel: string | null; terms: OfferTerms;
+  recipientMessage: string | null; documents: OfferDocumentRef[]; expiresAt: number | null; issuedAt: number | null; createdAt: number | null;
+  supersedesRevisionId: string | null; supersededByRevisionId: string | null; withdrawnAt: number | null; respondedAt: number | null; rev: number;
+  internalNote?: string | null; issuedBy?: OfferActor | null; createdBy?: OfferActor | null; withdrawnBy?: OfferActor | null; withdrawReason?: string | null;
+  recipient?: { type: 'player' | 'guardian'; minor: boolean } | null; readiness?: { transactionId: string; evaluatedAt: number; status: string; blockers: string[] } | null;
+}
+export interface OfferResponseView { id: string; revisionId: string; responseType: 'accepted' | 'declined'; actorType: 'player' | 'guardian'; forPlayerId: string; occurredAt: number; reason: string | null }
+export interface OfferLifecycleEffect { applied: boolean; action: string | null; from?: string; to?: string | null; reason?: string; at: number }
+export interface OfferClubView {
+  id: string; caseId: string; playerId: string; orgId: string; type: string; status: OfferStatus; statusLabel: string | null;
+  currentRevisionId: string; liveRevisionId: string | null; liveStatus: OfferStatus | null; awaitingResponse: boolean;
+  currentRevision: OfferRevisionView | null; revisions: OfferRevisionView[]; responses: OfferResponseView[];
+  firstViewedAt: number | null; agentShared: boolean; decisionId: string | null; transactionId: string | null; lifecycle: OfferLifecycleEffect | null;
+  createdAt: number; updatedAt: number | null; rev: number; policyVersion: number; honest: string;
+}
+export interface OfferRequirements { role: string | null; canDraft: boolean; canIssue: boolean; status: string | null; statusLabel: string | null; draftBlockers: string[]; issueBlockers: string[]; blocked: boolean; subjectRemoved: boolean }
+export interface OfferSurface {
+  offers: OfferClubView[]; liveOfferId: string | null; requirements: OfferRequirements;
+  vocabulary: { statuses: OfferStatus[]; statusLabels: Record<string, string>; types: string[]; responseTypes: string[] };
+  limits: Record<string, number>; policyVersion: number; note: string;
+}
+export interface OfferDraftInput { terms?: Partial<OfferTerms>; recipientMessage?: string | null; internalNote?: string | null; expiresAt?: string | number | null; documents?: { evidenceId: string; label?: string | null }[]; transactionId?: string | null; clientKey?: string }
+export interface OfferHistoryItem { id: string; at: number; action: string; by: OfferActor | null; revisionId: string | null }
+export type OfferCaseMove = { from: string; to: string } | { unchanged: true; status: string };
+
 export interface RoomsApi {
   list(s: Session, params?: RoomListParams): Promise<RoomListResult>;
   needsAttention(s: Session): Promise<{ items: RoomAttentionItem[]; note: string }>;
@@ -659,6 +694,15 @@ export interface RoomsApi {
   updateDecisionDraft(s: Session, roomId: string, input: DecisionDraftInput & { expectedRev: number }): Promise<{ draft: DecisionDraft }>;
   discardDecisionDraft(s: Session, roomId: string, expectedRev: number): Promise<{ draft: null; discarded: { id: string } }>;
   finalizeDecision(s: Session, roomId: string, input: DecisionFinalizeInput): Promise<DecisionFinalizeResult>;
+  // M23 P6 — the canonical Offer. Page-local to the Room's Offer tab.
+  offers(s: Session, roomId: string): Promise<OfferSurface>;
+  createOffer(s: Session, roomId: string, input: OfferDraftInput): Promise<{ offer: OfferClubView; idempotent?: boolean }>;
+  offer(s: Session, offerId: string): Promise<{ offer: OfferClubView }>;
+  offerHistory(s: Session, offerId: string): Promise<{ items: OfferHistoryItem[]; offerId: string }>;
+  updateOfferDraft(s: Session, offerId: string, input: OfferDraftInput & { expectedRev: number }): Promise<{ offer: OfferClubView }>;
+  issueOffer(s: Session, offerId: string, input: { expectedRev: number; clientKey?: string }): Promise<{ offer: OfferClubView; lifecycle: OfferLifecycleEffect | null; case?: OfferCaseMove; rev?: number; idempotent?: boolean }>;
+  withdrawOffer(s: Session, offerId: string, input: { expectedRev: number; reason?: string; clientKey?: string }): Promise<{ offer: OfferClubView; lifecycle: OfferLifecycleEffect | null; idempotent?: boolean }>;
+  reviseOffer(s: Session, offerId: string, input: OfferDraftInput & { expectedRev: number }): Promise<{ offer: OfferClubView; idempotent?: boolean }>;
   funnel(s: Session): Promise<RoomFunnel>;
 }
 
@@ -735,6 +779,15 @@ export const httpRooms: RoomsApi = {
   updateDecisionDraft: (s, roomId, input) => req(`/org/rooms/${roomId}/decision/draft`, { method: 'PATCH', headers: H(s), body: JSON.stringify(input) }),
   discardDecisionDraft: (s, roomId, expectedRev) => req(`/org/rooms/${roomId}/decision/draft`, { method: 'DELETE', headers: H(s), body: JSON.stringify({ expectedRev }) }),
   finalizeDecision: (s, roomId, input) => req(`/org/rooms/${roomId}/decision/finalize`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  // ---- M23 P6
+  offers: (s, roomId) => req(`/org/rooms/${roomId}/offers`, { headers: H(s) }),
+  createOffer: (s, roomId, input) => req(`/org/rooms/${roomId}/offers`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  offer: (s, offerId) => req(`/org/offers/${offerId}`, { headers: H(s) }),
+  offerHistory: (s, offerId) => req(`/org/offers/${offerId}/history`, { headers: H(s) }),
+  updateOfferDraft: (s, offerId, input) => req(`/org/offers/${offerId}/draft`, { method: 'PATCH', headers: H(s), body: JSON.stringify(input) }),
+  issueOffer: (s, offerId, input) => req(`/org/offers/${offerId}/issue`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  withdrawOffer: (s, offerId, input) => req(`/org/offers/${offerId}/withdraw`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  reviseOffer: (s, offerId, input) => req(`/org/offers/${offerId}/revise`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   funnel: (s) => req('/org/rooms-funnel', { headers: H(s) }),
 };
 

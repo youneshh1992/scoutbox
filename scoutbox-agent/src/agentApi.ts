@@ -164,6 +164,20 @@ export interface RoutedContact {
 }
 
 /** A client's trial as an authorised agent may see it (§26–§29). */
+// M23 P6 — a client's Offer, read-only, only when the client shared it. Terms
+// and state; never the club's note, never documents, never an accept control.
+export interface ClientOfferRevision {
+  id: string; revisionNumber: number; status: string; storedStatus: string; statusLabel: string | null;
+  terms: { offerType: string; role: string | null; squad: string | null; startDate: string | null; endDate: string | null; conditions: string | null };
+  recipientMessage: string | null; documents: never[]; expiresAt: number | null; issuedAt: number | null; createdAt: number | null;
+  supersedesRevisionId: string | null; supersededByRevisionId: string | null; withdrawnAt: number | null; respondedAt: number | null; rev: number;
+}
+export interface ClientOffer {
+  id: string; clientId: string; club: { id: string; name: string | null }; type: string; status: string | null; statusLabel: string | null;
+  currentRevision: ClientOfferRevision | null; revisions: ClientOfferRevision[]; awaitingClientResponse: boolean;
+  responses: { id: string; revisionId: string; responseType: 'accepted' | 'declined'; actorType: 'player' | 'guardian'; occurredAt: number }[];
+  sharedAt: number | null; honest: string;
+}
 export interface ClientTrial {
   id: string;
   club: { id: string; name: string | null };
@@ -451,6 +465,8 @@ export interface AgentApi {
   // ---- M23 P5.6E cross-app integration
   clientContacts(s: Session, id: string): Promise<{ items: RoutedContact[]; clientId: string; note: string }>;
   clientTrials(s: Session, id: string): Promise<{ items: ClientTrial[]; clientId: string; clientName: string | null; note: string; honest: string }>;
+  // M23 P6 — read-only projection of the Offers this client chose to share.
+  clientOffers(s: Session, id: string): Promise<{ items: ClientOffer[]; clientId: string; clientName: string | null; note: string; honest: string }>;
   clientShares(s: Session, id: string): Promise<{ items: OpportunityShare[] }>;
   shareOpportunity(s: Session, id: string, oppId: string, input: { note?: string; clientKey: string }): Promise<{ share: OpportunityShare; idempotent?: boolean; note?: string }>;
   withdrawShare(s: Session, id: string, shareId: string): Promise<{ share: OpportunityShare; idempotent?: boolean }>;
@@ -519,6 +535,7 @@ export const httpAgent: AgentApi = {
   // ---- M23 P5.6E
   clientContacts: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}/contacts`),
   clientTrials: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}/trials`),
+  clientOffers: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}/offers`),
   clientShares: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}/opportunities/shares`),
   shareOpportunity: (s, id, oppId, input) => post(s, `/org/agent/clients/${encodeURIComponent(id)}/opportunities/${encodeURIComponent(oppId)}/share`, input),
   withdrawShare: (s, id, shareId) => post(s, `/org/agent/clients/${encodeURIComponent(id)}/opportunities/shares/${encodeURIComponent(shareId)}/withdraw`, {}),

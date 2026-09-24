@@ -2,7 +2,7 @@
 // Realistic synthetic fixtures for every feature; in-memory only.
 import type {
   PlayerM12, PassportView, FeedbackItem, ObjectiveRec, BoardItem, ApplicationRec,
-  CampaignView, FamilyTrial, SafetyPack, SquadInvite, FollowUpView, UploadSession, EvidenceRec,
+  CampaignView, FamilyTrial, SafetyPack, SquadInvite, FollowUpView, UploadSession, EvidenceRec, FamilyOffer, FamilyOfferHistory,
 } from './m12client';
 
 const NOW = Date.now();
@@ -103,6 +103,30 @@ function pack(t: FamilyTrial, forGuardian: boolean): SafetyPack {
     },
   };
 }
+
+
+// ---- M23 P6 — an issued Offer (demo). The club's exact revision; accepting is not a signing.
+const OFFER_LABELS: Record<string, string> = { DRAFT: 'Draft — not issued', ISSUED: 'Issued — awaiting response', ACCEPTED: 'Offer accepted — signing pending', DECLINED: 'Declined by the recipient', WITHDRAWN: 'Withdrawn by the club', EXPIRED: 'Expired', SUPERSEDED: 'Superseded by a later revision' };
+const OFFERS: FamilyOffer[] = [{
+  id: 'rof-demo-1', playerId: 'pl-adeyemi', playerName: 'Kola Adeyemi', club: { id: 'org-eastport', name: 'Eastport FC' }, type: 'direct_recruitment', status: 'ISSUED', statusLabel: OFFER_LABELS.ISSUED,
+  currentRevisionId: 'rofr-demo-1',
+  currentRevision: { id: 'rofr-demo-1', revisionNumber: 1, status: 'ISSUED', storedStatus: 'ISSUED', statusLabel: OFFER_LABELS.ISSUED, terms: { offerType: 'direct_recruitment', role: 'Central midfielder', squad: 'Under-23s', startDate: '2027-07-01', endDate: '2029-06-30', conditions: 'Subject to a medical and registration with the league.' }, recipientMessage: 'We would like you to join the U23 group from July. Read the terms and take your time.', documents: [{ id: 'rofd-demo-1', label: 'Outline of the proposal (PDF)' }], expiresAt: NOW + 12 * DAY, issuedAt: NOW - 2 * DAY, createdAt: NOW - 3 * DAY, supersedesRevisionId: null, supersededByRevisionId: null, withdrawnAt: null, respondedAt: null, rev: 2 },
+  revisions: [], awaitingYourResponse: true, responses: [], agentShared: false, policyVersion: 1,
+  honest: 'Accepting an Offer in ScoutBox tells the club you say yes to exactly these terms. It is not a signature, not a registration and not a contract; nothing is signed here.',
+}];
+OFFERS[0].revisions = [OFFERS[0].currentRevision!];
+const OFFER_HISTORY: FamilyOfferHistory[] = [{ id: 'aud-demo-1', at: NOW - 2 * DAY, action: 'offer_issued', by: { kind: 'org', name: 'Maria Keane' }, revisionId: 'rofr-demo-1' }];
+const offerAnswer = (oid: string, revisionId: string, responseType: 'accepted' | 'declined', actorType: 'player' | 'guardian') => {
+  const o = OFFERS.find((x) => x.id === oid); if (!o) throw new Error('OFFER_NOT_FOUND');
+  const r = o.revisions.find((x) => x.id === revisionId); if (!r) throw new Error('OFFER_NOT_FOUND');
+  if (r.status !== 'ISSUED') throw new Error('OFFER_ALREADY_RESPONDED');
+  const at = Date.now();
+  r.status = responseType === 'accepted' ? 'ACCEPTED' : 'DECLINED'; r.storedStatus = r.status; r.statusLabel = OFFER_LABELS[r.status]; r.respondedAt = at; r.rev += 1;
+  o.status = r.status; o.statusLabel = OFFER_LABELS[r.status]; o.awaitingYourResponse = false;
+  o.responses.push({ id: id('rofa'), revisionId, responseType, actorType, occurredAt: at });
+  OFFER_HISTORY.push({ id: id('aud'), at, action: responseType === 'accepted' ? 'offer_accepted' : 'offer_declined', by: { kind: actorType, name: null }, revisionId });
+  return delay({ offer: { ...o }, lifecycle: { applied: true, to: responseType === 'accepted' ? 'offer_accepted' : 'offer_declined' }, signing: { created: false as const, note: 'Accepting an Offer in ScoutBox is not a signing. Nothing was signed and no contract exists.' } });
+};
 
 export const m12mock: PlayerM12 = {
   getPassport: (pid) => delay(passport(pid)),
@@ -256,6 +280,18 @@ export const m12mock: PlayerM12 = {
   },
   gSetEmergencyContact: async () => delay(undefined),
   gSafetyPack: (_gid, tid) => delay(pack(TRIALS.find((x) => x.id === tid) ?? TRIALS[0], true)),
+  // ---- M23 P6 — Offers (demo). The minor's guardian route sees none: the pathway is closed in this build.
+  getOffers: () => delay(OFFERS.map((o) => ({ ...o }))),
+  getOffer: async (_pid, oid) => { const o = OFFERS.find((x) => x.id === oid); if (!o) throw new Error('OFFER_NOT_FOUND'); return delay({ offer: { ...o }, history: OFFER_HISTORY.slice() }); },
+  acceptOffer: (_pid, oid, revisionId) => offerAnswer(oid, revisionId, 'accepted', 'player'),
+  declineOffer: (_pid, oid, revisionId) => offerAnswer(oid, revisionId, 'declined', 'player'),
+  shareOfferWithAgent: async (_pid, oid, share) => { const o = OFFERS.find((x) => x.id === oid); if (!o) throw new Error('OFFER_NOT_FOUND'); o.agentShared = share; return delay({ offer: { ...o } }); },
+  getOfferDocument: async (_pid, _oid, docId) => delay({ document: { id: docId, label: 'Outline of the proposal (PDF)', mime: 'application/pdf', bytes: 9, filename: 'outline.pdf' }, file: { mime: 'application/pdf', base64: 'JVBERi0xLjQK' } }),
+  gOffers: () => delay([]),
+  gOffer: async () => { throw new Error('OFFER_NOT_FOUND'); },
+  gAcceptOffer: async () => { throw new Error('OFFER_NOT_FOUND'); },
+  gDeclineOffer: async () => { throw new Error('OFFER_NOT_FOUND'); },
+  gOfferDocument: async () => { throw new Error('OFFER_DOCUMENT_NOT_FOUND'); },
   gSquadInvites: () => delay([{ id: 'sqi-2', orgName: 'Eastport FC', playerName: 'Guni Adebayo', note: 'U15 development squad', status: 'pending_guardian' }]),
   gRespondSquadInvite: async () => delay(undefined),
   gFollowUps: () => delay(FOLLOWUPS.map((f) => ({ ...f, playerId: 'pl-guni' }))),

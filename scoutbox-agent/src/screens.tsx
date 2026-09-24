@@ -388,6 +388,8 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
   // it is rendered rather than swallowed.
   const contacts = useLoad(() => (det && det.mode === 'own' && det.access && tab === 'contacts' ? agent.clientContacts(session, id) : Promise.resolve(null)), [session, id, det?.access, tab, tick]);
   const trials = useLoad(() => (det && det.mode === 'own' && det.access && tab === 'trials' ? agent.clientTrials(session, id) : Promise.resolve(null)), [session, id, det?.access, tab, tick]);
+  // M23 P6. Loaded only on its tab; the server answers 403 when the mandate, scope or licence does not hold NOW, and that answer is rendered.
+  const offers = useLoad(() => (det && det.mode === 'own' && det.access && tab === 'offers' ? agent.clientOffers(session, id) : Promise.resolve(null)), [session, id, det?.access, tab, tick]);
   const shares = useLoad(() => (det && det.mode === 'own' && det.access ? agent.clientShares(session, id) : Promise.resolve(null)), [session, id, det?.access, tick]);
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
@@ -585,6 +587,42 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
                   ))}
                 </div>
                 <p className="dim" style={{ fontSize: 12.5 }}>{trials.data?.honest ?? t('trials.honest')}</p>
+              </>
+            )}
+          </Panel>
+        )}
+        {tab === 'offers' && (
+          <Panel id="offers" label={labelFor('offers')}>
+            {!det.access && <div className="notice warn" data-testid="offers-no-access">{t('clients.noAccessOpps')}</div>}
+            {det.access && (
+              <>
+                <p className="pagehint">{t('offers.intro')}</p>
+                <ErrorLine error={offers.error} onRetry={offers.reload} />
+                {offers.data && offers.data.items.length === 0 && <div className="notice" data-testid="offers-none">{t('offers.none')}</div>}
+                <div className="list-rows" data-testid="client-offers">
+                  {(offers.data?.items ?? []).map((x) => {
+                    const cur = x.currentRevision;
+                    return (
+                      <div key={x.id} className="list-row" data-testid={`offer-${x.id}`} data-status={x.status ?? ''} style={{ alignItems: 'flex-start', flexDirection: 'column', gap: 4 }}>
+                        <div className="row" style={{ gap: 8, width: '100%', flexWrap: 'wrap' }}>
+                          <strong className="grow">{x.club.name ?? '—'}</strong>
+                          <span className="pill" data-testid={`offer-state-${x.id}`}>{tr(`offers.st.${x.status ?? ''}`) === `offers.st.${x.status ?? ''}` ? x.statusLabel ?? x.status : tr(`offers.st.${x.status ?? ''}`)}</span>
+                          {x.awaitingClientResponse && <span className="pill warn">{t('offers.awaitingClient')}</span>}
+                        </div>
+                        {cur && (
+                          <div className="dim" style={{ fontSize: 12.5 }} data-testid={`offer-terms-${x.id}`}>
+                            {t('offers.revision')} {cur.revisionNumber} · {cur.terms.role ?? '—'}{cur.terms.squad ? ` · ${cur.terms.squad}` : ''} · {cur.terms.startDate ?? '—'}{cur.terms.endDate ? ` → ${cur.terms.endDate}` : ''}
+                            {cur.expiresAt ? ` · ${t('offers.expires')} ${fmtStamp(cur.expiresAt)}` : ''}
+                          </div>
+                        )}
+                        {cur?.terms.conditions && <div className="dim" style={{ fontSize: 12.5 }}>{cur.terms.conditions}</div>}
+                        {x.status === 'ACCEPTED' && <div className="dim" style={{ fontSize: 12.5 }} data-testid={`offer-signing-pending-${x.id}`}>{t('offers.signingPending')}</div>}
+                        {x.sharedAt && <div className="dim" style={{ fontSize: 12 }}>{t('offers.sharedAt')} {fmtStamp(x.sharedAt)}</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="dim" style={{ fontSize: 12.5 }}>{t('offers.honest')}</p>
               </>
             )}
           </Panel>
