@@ -415,7 +415,8 @@ mariaPage.on('dialog', (d) => d.accept());
   await kola.waitForSelector('[data-testid="agent-consent"]', { timeout: 30000 });
   await card.locator('text=Revoke my consent').last().click();
   ok(await waitFor(async () => /revoked/i.test(await card.innerText({ timeout: 1500 }).catch(() => '')), 20000), 'G1: Kola revokes his consent from the same card');
-  ok(/does not undo what already happened/i.test(await card.innerText()), 'G1b: the card says what a revocation does and does not undo');
+  // The note sits under the consent that is still granted; the card re-reads after the revocation, so wait for the words rather than reading at once.
+  ok(await waitFor(async () => /does not undo what already happened/i.test(await card.innerText({ timeout: 1500 }).catch(() => '')), 15000), 'G1b: the card says what a revocation does and does not undo');
   await go(ana, `#/compliance/${CTX}`);
   await ana.waitForSelector('[data-testid="clearance"]', { timeout: 15000 });
   ok(await waitFor(async () => (await ana.locator('[data-testid="clearance"] [data-testid="outcome"]').getAttribute('data-outcome', { timeout: 1500 })) === 'PERMITTED_DUAL_REPRESENTATION_CONSENT_REQUIRED', 20000), 'G2: Ana\'s clearance says consent is outstanding again, at once');

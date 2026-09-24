@@ -246,7 +246,8 @@ await ana.page.waitForSelector('[data-testid="profile-form"]', { timeout: 15000 
   await fifa.locator('input').fill('FIFA-2024-777');
   await fifa.locator('button:has-text("Submit for verification")').click();
   ok(await waitTextOrToast(ana.page, /Manual review required/), 'B10: submitting the real-looking number → Manual review required (no register is pretended)');
-  ok(/G-C0/.test(await fifa.innerText()), 'B10b: …with the G-C0 note on the facet');
+  // The note arrives with the profile's re-read after the toast; wait for it rather than reading the facet at once.
+  ok(await fifa.locator('text=G-C0').first().waitFor({ timeout: 10000 }).then(() => true).catch(() => false), 'B10b: …with the G-C0 note on the facet');
   await fifa.locator('input').fill('TEST-VERIFIED-777');
   await fifa.locator('button:has-text("Submit for verification")').click();
   for (let i = 0; i < 40; i++) { if (/local-synthetic-test-provider/.test(await fifa.innerText())) break; await sleep(250); }
@@ -404,12 +405,22 @@ say('C1: Kola signs in to the player app');
   }
   // The workspace may SAY there is no offer / negotiation / fee here; it may not offer one. Strip the honesty sentences, then sweep.
   const honest = /[^.\n]*(not part of this workspace|no offer, negotiation, fee or contract|no transaction room|aucune offre|ne font pas partie)[^.\n]*[.\n]/gi;
-  const txt = all.join('\n').replace(honest, ' ');
   // "Transaction" is a real destination since P5.6D, so it is no longer swept for
   // here — m23AgentTransactionLive owns that surface and its own wording sweep.
-  // What must still be absent everywhere is an offer, a negotiation, a commission
-  // and a fee.
-  neg(!/\boffers?\b|negotiat|commission|\bfees?\b/i.test(txt), 'N5: after removing the sentences that say there is none, no offer, negotiation, commission or fee wording remains on any of ten screens');
+  // "Offers" is a read-only destination since P6 (the client's shared Offers;
+  // m23OfferLive owns that surface and its wording), and since P8 the client's
+  // journey line names the factual stage ("Offer received", "Offer accepted —
+  // signing pending"). The tab label and the stage words are stripped like the
+  // honesty sentences. What must still be absent everywhere is an offer the
+  // agent could make or answer, a negotiation, a commission and a fee.
+  const allowed = /^\s*(Offers|Offres)\s*$|\bOffers? (received|accepted|declined|issued|withdrawn|revised|expired|reçue|acceptée|refusée|émise|retirée|révisée|expirée)\b[^\n]*/gim;
+  const txt = all.join('\n').replace(honest, ' ').replace(allowed, ' ');
+  const sweep = /\boffers?\b|negotiat|commission|\bfees?\b/i;
+  const hits = all.map((t, i) => { const m = t.replace(honest, ' ').match(new RegExp(`.{0,60}(${sweep.source}).{0,60}`, 'i')); return m ? `screen ${i}: …${m[0].replace(/\s+/g, ' ')}…` : null; }).filter(Boolean);
+  neg(!sweep.test(txt), `N5: after removing the sentences that say there is none, no offer, negotiation, commission or fee wording remains on any of ten screens${hits.length ? ` (${hits.join(' | ')})` : ''}`);
+  // The client overview's journey line is words only: no control names an Offer (the Offers tab is a read-only destination).
+  await go(ana.page, `#/clients/${REL}`); await sleep(700);
+  neg((await ana.page.locator('button:not([role="tab"]), a').filter({ hasText: /\boffers?\b|negotiat|commission|\bfees?\b/i }).count()) === 0, 'N5c: on the client overview no control names an offer, a negotiation, a commission or a fee — the journey line is read-only words');
   neg(/no offer, negotiation, fee or contract happens here/i.test(all[0]) || /No transaction room/i.test(all[0]), 'N5b: Home says explicitly what the workspace is not');
 }
 {
