@@ -340,6 +340,15 @@ let OID_K = null; let R1_K = null;
   const txt = await sec2.innerText();
   ok(/First team/.test(txt) && /Revision 1 · ↻ Replaced by a newer revision/.test(txt), 'S3f: revision 2\'s terms, and revision 1 listed as replaced');
   neg(((await getOffer(OID_K, LEAD)).body.offer.responses.length) === 0, 'S3g: no response row was written by the refused attempt');
+  // The club pauses the case while revision 2 is out: the app says so and offers no answer control.
+  const hold = await lifecycle(ROOM_K, 'holdCase', LEAD);
+  ok(hold.status === 200 && (await journey(ROOM_K, LEAD)).lifecycle.currentStage === 'on_hold', `S3h: the club pauses the case (API) while revision 2 is out (${hold.status} ${JSON.stringify(hold.body).slice(0, 200)} → ${(await journey(ROOM_K, LEAD)).lifecycle.currentStage})`);
+  const sec3 = await refreshOffers(kola);
+  neg(await waitIn(sec3, /The club has paused this case/), 'S3i: the player app says the case is paused and the Offer cannot be answered for now');
+  neg((await sec3.locator(`[data-testid="offer-accept-${OID_K}"]`).count()) === 0 && (await sec3.locator(`[data-testid="offer-decline-${OID_K}"]`).count()) === 0, 'S3j: no accept or decline control while paused');
+  expect(await j('POST', `/player/offers/${OID_K}/accept`, { revisionId: (await j('GET', '/player/offers', undefined, KOLA)).body.items[0].currentRevisionId, clientKey: key() }, KOLA), 409, 'OFFER_LIFECYCLE_CONFLICT', 'S3k: forcing the request is refused OFFER_LIFECYCLE_CONFLICT');
+  const resume = await lifecycle(ROOM_K, 'resumeCase', LEAD);
+  ok(resume.status === 200, 'S3l: the club resumes the case (it returns to review; the Offer stays unanswerable until the club issues again — documented)');
 }
 
 // ================================================================== S4 — REVOKED AGENT / SAME AGENCY

@@ -7,7 +7,8 @@
 // A minor's own device shows nothing: in this build no Offer is issued to a
 // player under the age of majority, and a guardian route sees only what the
 // server addressed to that guardian.
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
 import { Linking, Text, TextInput, View } from 'react-native';
 import { m12, type FamilyOffer, type FamilyOfferRevision, type OfferStatus } from '../data/m12client';
 import { colors } from '../theme';
@@ -39,11 +40,16 @@ export function OfferSection({ actor }: { actor: Actor }) {
   const [reason, setReason] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // P6.1 (stale UX): the tab keeps this screen mounted, so an Offer the club
+  // paused, withdrew or revised while the player was elsewhere would stay on
+  // screen as it was. Every return to the tab re-reads the list.
+  const [focusTick, setFocusTick] = useState(0);
+  useFocusEffect(useCallback(() => { setFocusTick((x) => x + 1); }, []));
   useEffect(() => {
     let on = true;
     (actor.kind === 'player' ? m12.getOffers(actor.id) : m12.gOffers(actor.id)).then((x) => on && setOffers(x)).catch(() => on && setOffers([]));
     return () => { on = false; };
-  }, [actor.id, actor.kind, tick]);
+  }, [actor.id, actor.kind, tick, focusTick]);
   if (!offers) return null;
   if (offers.length === 0 && actor.kind === 'player') return null;
 
@@ -119,6 +125,7 @@ export function OfferSection({ actor }: { actor: Actor }) {
               </View>
             )}
             {o.status === 'ACCEPTED' && <View style={{ marginTop: 6 }} testID={`offer-signing-pending-${o.id}`}><Text style={{ color: colors.accent, fontSize: 13, fontWeight: '700' }}>{pt('offerSigningPending')}</Text></View>}
+            {o.status === 'ISSUED' && o.notAnswerableReason === 'CASE_PAUSED' && <View style={{ marginTop: 6 }} testID={`offer-paused-${o.id}`} accessibilityRole="text"><Muted size={12.5}>{pt('offerPaused')}</Muted></View>}
             {mine && <Muted size={12}>{mine.actorType === 'guardian' && actor.kind === 'player' ? pt('offerAnsweredByGuardian') : `${pt('offerAnsweredAt')} ${fmt(mine.occurredAt)}`}</Muted>}
             {live && !arm && (
               <Row style={{ marginTop: 6, flexWrap: 'wrap' }}>

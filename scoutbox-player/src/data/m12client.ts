@@ -94,7 +94,7 @@ export interface FamilyOfferRevision {
 export interface FamilyOfferResponse { id: string; revisionId: string; responseType: 'accepted' | 'declined'; actorType: 'player' | 'guardian'; occurredAt: number }
 export interface FamilyOffer {
   id: string; playerId: string; playerName?: string | null; club: { id: string; name: string | null }; type: string; status: OfferStatus | null; statusLabel: string | null;
-  currentRevisionId: string | null; currentRevision: FamilyOfferRevision | null; revisions: FamilyOfferRevision[]; awaitingYourResponse: boolean;
+  currentRevisionId: string | null; currentRevision: FamilyOfferRevision | null; revisions: FamilyOfferRevision[]; awaitingYourResponse: boolean; answerable?: boolean; notAnswerableReason?: string | null;
   responses: FamilyOfferResponse[]; agentShared: boolean; policyVersion: number; honest: string;
 }
 export interface FamilyOfferHistory { id: string; at: number; action: string; by: { kind: string | null; name: string | null } | null; revisionId: string | null }

@@ -672,20 +672,18 @@ section('O — partial failure: authoritative state first, side effects never tu
 section('P — lifecycle consistency: a case paused while a revision is out');
 {
   const { RID, OID, R } = globalThis.__O;
-  const hold = await lifecycle(RID, 'holdCase', { reasonCodes: ['budget_review'] });
-  const st = await stage(RID);
-  if (st === 'on_hold') {
-    const s = await surface(RID);
-    ok(s.body.offers.find((o) => o.id === OID).integrity.includes('LIVE_OFFER_CASE_NOT_AT_OFFER_MADE'), 'P7 the club surface names the inconsistency (an issued Offer on a paused case)');
-    const pv = await pGet(OID, imani.token);
-    neg(pv.body.offer.answerable === false && pv.body.offer.notAnswerableReason === 'CASE_PAUSED' && pv.body.offer.awaitingYourResponse === false, 'P8 the recipient is told the Offer cannot be answered right now — before trying');
-    neg(expect(await pAccept(OID, { revisionId: R, clientKey: key() }, imani.token), 409, 'OFFER_LIFECYCLE_CONFLICT'), 'P9 and an attempt is refused with nothing recorded');
-    ok((await getOffer(OID)).body.offer.responses.length === 0 && (await getOffer(OID)).body.offer.status === 'ISSUED', 'P9b no response row, the Offer still ISSUED');
-    const resume = await lifecycle(RID, 'resumeCase', {}).catch(() => ({ status: 0 }));
-    void resume;
-    const st2 = await stage(RID);
-    ok(['offer_made', 'offer_consideration', 'on_hold', 'under_review', 'shortlisted'].includes(st2), `P10 the case resumes where the lifecycle allows (${st2})`);
-  } else ok(true, `P7–P10 (holdCase answered ${hold.status} ${hold.body?.error ?? ''}; the paused-case rule is proven at the pure level P-p3/P-p5 and by the 409 in m23OfferE2E)`);
+  const hold = await lifecycle(RID, 'holdCase', {});
+  ok(hold.status === 200 && (await stage(RID)) === 'on_hold', `P6.5 the club pauses the case while revision 1 is out (${hold.status} ${hold.body?.error ?? 'ok'})`);
+  const s = await surface(RID);
+  ok(s.body.offers.find((o) => o.id === OID).integrity.includes('LIVE_OFFER_CASE_NOT_AT_OFFER_MADE'), 'P7 the club surface names the inconsistency (an issued Offer on a paused case)');
+  const pv = await pGet(OID, imani.token);
+  neg(pv.body.offer.answerable === false && pv.body.offer.notAnswerableReason === 'CASE_PAUSED' && pv.body.offer.awaitingYourResponse === false, 'P8 the recipient is told the Offer cannot be answered because the case is paused — nothing else about the case');
+  neg(expect(await pAccept(OID, { revisionId: R, clientKey: key() }, imani.token), 409, 'OFFER_LIFECYCLE_CONFLICT'), 'P9 and an attempt is refused with nothing recorded');
+  ok((await getOffer(OID)).body.offer.responses.length === 0 && (await getOffer(OID)).body.offer.status === 'ISSUED', 'P9b no response row, the Offer still ISSUED');
+  const resume = await lifecycle(RID, 'resumeCase', {});
+  const st2 = await stage(RID);
+  ok(resume.status === 200 && st2 === 'under_review', `P10 resuming returns the case to review (${st2}); the Offer stays unanswerable until the club issues again`);
+  neg((await pGet(OID, imani.token)).body.offer.answerable === false, 'P10b still not answerable after the resume (the case is not at offer_made)');
 }
 
 // ================================================================ H — rate limits: aliases, closure safety, replay
