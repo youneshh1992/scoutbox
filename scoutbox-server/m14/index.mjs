@@ -120,7 +120,10 @@ export function registerM14(ctx) {
     // sanitized server name = our own id; the original name is metadata only
     ctx.storage.saveDataUrl(id, `data:${mime};base64,${buf.toString('base64')}`);
     return {
-      mediaId: id, sha256: sha256(buf), mime, bytes: buf.length, filename: String(filename ?? '').slice(0, 120),
+      // M23 P7 (D-P7-1): the digest is of the exact BYTES. `sha256(String(buf))`
+      // hashed a UTF-8 decoding of the file, so two different binaries could
+      // share a digest and a signing document's digest did not name its bytes.
+      mediaId: id, sha256: crypto.createHash('sha256').update(buf).digest('hex'), mime, bytes: buf.length, filename: String(filename ?? '').slice(0, 120),
       // contentSignature is format identification (magic bytes), NOT malware
       // scanning — malwareScan stays not_configured and is never conflated.
       checks: { malwareScan: 'not_configured', contentSignature: 'matched_claimed_type' },

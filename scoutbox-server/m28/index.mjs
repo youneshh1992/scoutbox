@@ -92,6 +92,13 @@ export function registerOffers(rawCtx) {
    */
   const safe = (label, fn) => { try { return fn(); } catch (e) { console.error(`OFFER side_effect_failed ${label}: ${e?.message ?? e}`); return undefined; } };
 
+  // M23 P7 — a read-only signing summary on every Offer view (ids and the
+  // status word), bound late by the server once the Signing module exists.
+  // An accepted Offer with no package reads `signing: null`: nothing is inferred.
+  let signingSummary = null;
+  const withSigning = (o, at, view) => ({ ...view, signing: signingSummary ? signingSummary(o.id, o.orgId, at) : null });
+  const clubView = (o, at) => withSigning(o, at, offerClubView(o, at));
+
   function storeOr500(res) {
     if (!Array.isArray(db.recruitmentOffers)) {
       console.error('OFFER store_missing db.recruitmentOffers is absent or not a list');
@@ -253,7 +260,7 @@ export function registerOffers(rawCtx) {
     if (!storeOr500(res)) return;
     const { room: kase, role } = got;
     const at = now(req);
-    const offers = offersOfCase(kase).map((o) => ({ ...offerClubView(o, at), integrity: [...offerIntegrity(o, { orgId: kase.orgId, caseId: kase.id }), ...offerCaseConsistency(o, kase, at)] })).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+    const offers = offersOfCase(kase).map((o) => ({ ...clubView(o, at), integrity: [...offerIntegrity(o, { orgId: kase.orgId, caseId: kase.id }), ...offerCaseConsistency(o, kase, at)] })).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
     const live = liveOfferOf(kase, at);
     res.json({
       offers,
@@ -292,7 +299,7 @@ export function registerOffers(rawCtx) {
     if (key.key) {
       const prior = offersOfCase(kase).find((o) => o.keys?.create?.key === key.key);
       if (prior) {
-        if (prior.keys.create.fp === fp) return res.json({ offer: offerClubView(prior, at), idempotent: true });
+        if (prior.keys.create.fp === fp) return res.json({ offer: clubView(prior, at), idempotent: true });
         return err(res, 'OFFER_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different Offer.');
       }
     }
@@ -336,13 +343,13 @@ export function registerOffers(rawCtx) {
     audit(kase, 'org', req.orgUser.id, req.orgUser.name, 'offer_draft_created', { offerId: offer.id, revisionId: rev.id });
     persistNow();
     safe('offer_draft_created', () => broadcast?.('offer_draft_created', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id }));
-    res.status(201).json({ offer: offerClubView(offer, at) });
+    res.status(201).json({ offer: clubView(offer, at) });
   });
 
   orgRouter.get('/offers/:id', (req, res) => {
     const got = offerFor(req, res, 'offer_view');
     if (!got) return;
-    res.json({ offer: offerClubView(got.offer, now(req)) });
+    res.json({ offer: clubView(got.offer, now(req)) });
   });
 
   orgRouter.get('/offers/:id/history', (req, res) => {
@@ -387,7 +394,7 @@ export function registerOffers(rawCtx) {
     hist(offer, 'offer_draft_updated', by, { revisionId: rev.id }, at);
     persistNow();
     safe('offer_draft_updated', () => broadcast?.('offer_draft_updated', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id }));
-    res.json({ offer: offerClubView(offer, at) });
+    res.json({ offer: clubView(offer, at) });
   });
 
   /**
@@ -408,7 +415,7 @@ export function registerOffers(rawCtx) {
     const rev = currentRevision(offer);
     const usedIssue = key.key ? keyRow(offer, 'issue', key.key) : null;
     if (usedIssue) {
-      if (usedIssue.revisionId === rev.id) return res.json({ offer: offerClubView(offer, at), lifecycle: offer.lifecycle ?? null, idempotent: true });
+      if (usedIssue.revisionId === rev.id) return res.json({ offer: clubView(offer, at), lifecycle: offer.lifecycle ?? null, idempotent: true });
       return err(res, 'OFFER_IDEMPOTENCY_CONFLICT', 'This clientKey was already used to issue a different revision.');
     }
     const st = effectiveRevisionStatus(rev, at);
@@ -480,7 +487,7 @@ export function registerOffers(rawCtx) {
       if (!uid || uid === req.orgUser.id) continue;
       safe('notifyClub', () => notify({ kind: 'org_user', id: uid }, 'recruitment_offer', `Recruitment Room — ${kase.playerName ?? 'a removed player'}: Offer revision ${rev.revisionNumber} issued.`, offer.id));
     }
-    res.json({ offer: offerClubView(offer, at), lifecycle: moved, case: moved.applied ? { from: moved.from, to: moved.to } : { unchanged: true, status: kase.room.status }, rev: kase.room.rev });
+    res.json({ offer: clubView(offer, at), lifecycle: moved, case: moved.applied ? { from: moved.from, to: moved.to } : { unchanged: true, status: kase.room.status }, rev: kase.room.rev });
   });
 
   orgRouter.post('/offers/:id/withdraw', (req, res) => {
@@ -493,7 +500,7 @@ export function registerOffers(rawCtx) {
     const rev = currentRevision(offer);
     const usedWithdraw = key.key ? keyRow(offer, 'withdraw', key.key) : null;
     if (usedWithdraw) {
-      if (usedWithdraw.revisionId === rev.id) return res.json({ offer: offerClubView(offer, at), lifecycle: offer.lifecycle ?? null, idempotent: true });
+      if (usedWithdraw.revisionId === rev.id) return res.json({ offer: clubView(offer, at), lifecycle: offer.lifecycle ?? null, idempotent: true });
       return err(res, 'OFFER_IDEMPOTENCY_CONFLICT', 'This clientKey was already used to withdraw a different revision.');
     }
     const w = canWithdrawRevision(offer, at);
@@ -525,7 +532,7 @@ export function registerOffers(rawCtx) {
       safe('notify', () => notifyRecipient(rev, `${orgOf(kase.orgId)?.name ?? 'The club'} has withdrawn its Offer. Nothing further is needed from you.`, offer.id));
       safe('notifyAgent', () => notifyAgent(offer, `The Offer to your client ${kase.playerName ?? ''} was withdrawn by the club.`.replace(/\s+/g, ' ')));
     }
-    res.json({ offer: offerClubView(offer, at), lifecycle: moved });
+    res.json({ offer: clubView(offer, at), lifecycle: moved });
   });
 
   /** A new DRAFT revision on an Offer whose current revision is issued, expired, withdrawn or declined (§25). */
@@ -537,7 +544,7 @@ export function registerOffers(rawCtx) {
     const key = normaliseOfferClientKey(req.body?.clientKey);
     if (!key.ok) return err(res, key.error, key.message);
     const usedRevise = key.key ? keyRow(offer, 'revise', key.key) : null;
-    if (usedRevise && (offer.revisions ?? []).some((r) => r.id === usedRevise.revisionId)) return res.json({ offer: offerClubView(offer, at), idempotent: true });
+    if (usedRevise && (offer.revisions ?? []).some((r) => r.id === usedRevise.revisionId)) return res.json({ offer: clubView(offer, at), idempotent: true });
     const c = canRevise(offer, at);
     if (!c.ok) return err(res, c.error, c.message ?? 'This Offer cannot be revised.');
     if (subjectRemoved(kase)) return err(res, 'OFFER_SUBJECT_REMOVED', 'This player removed their ScoutBox account. No new revision is written.');
@@ -577,7 +584,7 @@ export function registerOffers(rawCtx) {
     audit(kase, 'org', req.orgUser.id, req.orgUser.name, 'offer_draft_created', { offerId: offer.id, revisionId: rev.id, revises: prev.id });
     persistNow();
     safe('offer_draft_created', () => broadcast?.('offer_draft_created', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id }));
-    res.status(201).json({ offer: offerClubView(offer, at) });
+    res.status(201).json({ offer: clubView(offer, at) });
   });
 
   orgRouter.get('/recruitment/offer-policy', (_req, res) => {
@@ -636,7 +643,7 @@ export function registerOffers(rawCtx) {
   }
 
   const caseOpenFor = (o) => { const k = (db.recruitmentCases ?? []).find((x) => x?.id === o.caseId && x.orgId === o.orgId); return !k || k.room?.status === 'offer_made'; };
-  const recipientView = (o, at) => offerRecipientView(o, at, { orgName: orgOf(o.orgId)?.name ?? null, caseOpen: caseOpenFor(o) });
+  const recipientView = (o, at) => withSigning(o, at, offerRecipientView(o, at, { orgName: orgOf(o.orgId)?.name ?? null, caseOpen: caseOpenFor(o) }));
 
   /** A read receipt for the live revision (§40): a fact about delivery, never a status. Returns true when a new one was recorded. */
   function markViewed(o, { kind, id }, at, { persist = true } = {}) {
@@ -865,7 +872,7 @@ export function registerOffers(rawCtx) {
       if (!o || o.playerId !== a.clientId || !soundOffer(o, at)) continue;
       if (!o.agentShare || o.agentShare.agentUserId !== req.orgUser.id) continue; // not shared with THIS agent: invisible
       if (!liveRevision(o)) continue;
-      items.push(offerAgentView(o, at, { orgName: orgOf(o.orgId)?.name ?? null }));
+      items.push(withSigning(o, at, offerAgentView(o, at, { orgName: orgOf(o.orgId)?.name ?? null })));
     }
     items.sort((x, y) => (y.sharedAt ?? 0) - (x.sharedAt ?? 0));
     res.json({
@@ -886,6 +893,7 @@ export function registerOffers(rawCtx) {
   }
 
   return {
+    setSigningSummary: (fn) => { signingSummary = typeof fn === 'function' ? fn : null; },
     offerEvidenceReady: true,
     offersOfCase,
     onPlayerDeleted,

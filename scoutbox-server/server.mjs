@@ -30,6 +30,7 @@ import { registerCompliance } from './m25/index.mjs';
 import { registerTransactions } from './m26/index.mjs';
 import { registerIntegration } from './m27/index.mjs';
 import { registerOffers } from './m28/index.mjs';
+import { registerSigning } from './m29/index.mjs';
 import { createVerificationProvider } from './m25/provider.mjs';
 import { createEvidenceProvider } from './m23/evidence.mjs';
 import { COMBINE_PROTOCOLS } from './m16/combineShared.mjs';
@@ -2438,61 +2439,23 @@ orgRouter.post('/trials/:trialId/report', (req, res) => {
 // timeline + contract, freezes the attribution evidence from the Proof Pack,
 // and notifies the player (and guardian for minors).
 orgRouter.post('/players/:id/signing', (req, res) => {
+  // M23 P7 (§88): the LEGACY recording route. It no longer writes anything
+  // itself: the completed-signing record and every side effect come from the
+  // ONE writer in m29, and a recruitment that went through the canonical
+  // Offer cannot be short-circuited here — an accepted Offer or a signing
+  // package between this club and player means the signing workflow on the
+  // case owns the outcome. Kept for clients that never used P6; retirement
+  // is flagged for P7.1.
   const p = findPlayer(req.params.id);
   if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
   if (!visibleToOrg(p, req.org)) return res.status(403).json({ error: 'UNDER_18_WALL' });
   if (isBlocked(p.id, req.org.id)) return res.status(403).json({ error: 'BLOCKED' });
-  const events = db.ledger.filter((l) => l.playerId === p.id && l.orgId === req.org.id);
-  const first = events[0] ?? null;
-  const windowMonths = db.plans[req.org.plan]?.attributionWindowMonths ?? 18;
-  const windowEnds = first ? first.ts + windowMonths * 30.44 * 24 * 3600 * 1000 : null;
-  const row = ledgerAppend({ type: 'signing', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
-  const signing = {
-    id: nextId('sign'),
-    playerId: p.id,
-    playerName: p.name,
-    orgId: req.org.id,
-    orgName: req.org.name,
-    userId: req.orgUser.id,
-    scoutName: req.orgUser.name,
-    ts: row.ts,
-    firstQualifyingInteraction: first,
-    attributionWindowMonths: windowMonths,
-    insideAttributionWindow: first ? row.ts <= windowEnds : false,
-  };
-  db.signings.push(signing);
-  // The revenue event: a signing inside the attribution window issues the
-  // success-fee invoice through the billing adapter (Stripe when live).
-  if (signing.insideAttributionWindow) void billing.invoiceForSigning(signing, req.org);
-  // A signing moves the player's level: grassroots signings make semi-pros,
-  // academy/pro signings make pros — who then leave the Grassroots platform.
-  const levelBefore = p.level ?? 'amateur';
-  p.level = playerLevelAfterSigning(req.org.level);
-  if (levelBefore === 'amateur' && p.level === 'semi_pro') {
-    // The level-up moment: a life event, celebrated and recorded.
-    p.timeline.push({ year: String(new Date().getFullYear()), event: `Levelled up: amateur → semi-pro with ${req.org.name}` });
-    notify({ kind: 'player', id: p.id }, 'level_up', `⬆️ You're semi-pro. ${req.org.name} signed you — one step up the ladder, recorded forever on your pathway.`, p.id);
-    if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'level_up', `${p.name} levelled up: amateur → semi-pro with ${req.org.name}.`, p.id);
-  } else if (levelBefore !== 'pro' && p.level === 'pro') {
-    p.timeline.push({ year: String(new Date().getFullYear()), event: `Levelled up: ${levelBefore.replace('_', '-')} → pro with ${req.org.name}` });
-    notify({ kind: 'player', id: p.id }, 'level_up', `⬆️ Academy/pro level reached with ${req.org.name}. Your grassroots journey got you here.`, p.id);
-    if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'level_up', `${p.name} reached academy/pro level with ${req.org.name}.`, p.id);
-  }
-  refreshJourneyBadges(p);
-  // A grassroots signing puts the player straight onto the club's squad list,
-  // so match-day logging and gap analysis start from the real roster.
-  if (req.org.level === 'grassroots') {
-    req.org.squad ??= [];
-    if (!req.org.squad.some((e) => e.playerId === p.id)) {
-      req.org.squad.push({ id: nextId('sq'), playerId: p.id, name: p.name, position: p.position ?? '', source: 'signing', addedAt: row.ts });
-    }
-  }
-  p.contractStatus = 'under_contract';
-  p.availability = 'not_seeking';
-  p.timeline.push({ year: String(new Date().getFullYear()), event: `Signed by ${req.org.name} — discovered on ScoutBox` });
-  notify({ kind: 'player', id: p.id }, 'signing', `🎉 ${req.org.name} recorded your signing. Congratulations — it's on your timeline.`, signing.id);
-  if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'signing', `${req.org.name} recorded ${p.name}'s signing.`, signing.id);
-  broadcast('players', { playerId: p.id });
+  const blocker = m29Ctx?.legacyRecordingBlocker?.(p.id, req.org.id, Date.now());
+  if (blocker) return res.status(409).json({ ok: false, error: blocker.error, message: blocker.message });
+  if (!m29Ctx?.recordCompletedSigning) return res.status(500).json({ error: 'SIGNING_STORE_MISSING' });
+  const { signing, effects } = m29Ctx.recordCompletedSigning({ player: p, org: req.org, actor: req.orgUser, at: Date.now(), legacy: { note: typeof req.body?.note === 'string' ? req.body.note.slice(0, 400) : null } });
+  persistNow();
+  try { effects?.(); } catch (e) { console.error(`SIGNING legacy side_effect_failed: ${e?.message ?? e}`); }
   res.status(201).json({ ok: true, signing });
 });
 
@@ -3854,6 +3817,7 @@ function deletePlayerData(playerId) {
   m26Ctx?.onPlayerDeleted?.(playerId, at);
   // M23 P6.1: Offers keep ids, states and times and lose the person's name and words.
   m28Ctx?.onPlayerDeleted?.(playerId, at);
+  m29Ctx?.onPlayerDeleted?.(playerId, at);
   db.channels = db.channels.filter((c) => c.playerId !== playerId);
   db.notifications = db.notifications.filter((n) => !(n.audience.kind === 'player' && n.audience.id === playerId));
   db.pairingCodes = db.pairingCodes.filter((c) => c.playerId !== playerId);
@@ -3961,6 +3925,7 @@ let m26Ctx = null;
 // M23 P5.6E — the cross-app integration layer, registered after all four.
 let m27Ctx = null;
 let m28Ctx = null; // M23 P6 — assigned when the Offer module registers, below
+let m29Ctx = null; // M23 P7 — assigned when the Signing module registers, below
 const tsRouter = express.Router();
 app.use('/ts', (req, res, next) => (m25Ctx ? m25Ctx.reviewerAuth(req, res, next) : res.status(503).json({ error: 'REVIEWER_LANE_NOT_READY' })), tsRouter);
 
@@ -4483,6 +4448,28 @@ m28Ctx = registerOffers({
   transactions: m26Ctx,
 });
 
+// ------------------------------------------------ M23 P7 Signing & Contract
+// Completion. The ONE writer of `db.signings`, of the lifecycle move to
+// `signed` and of a player's `contractStatus` for a recruitment signing.
+// Registered after the Offer module because a package is opened over an
+// ACCEPTED Offer revision and read by reference; the Offer views get a
+// read-only signing summary through a late-bound hook.
+m29Ctx = registerSigning({
+  ...m19Ctx,
+  isAdult,
+  storage,
+  ledgerAppend,
+  billing,
+  refreshJourneyBadges,
+  findRoomForRequest: m17Ctx.findRoomForRequest,
+  applyLifecycleTransition: m17Ctx.applyLifecycleTransition,
+  recruitmentEvidenceProvider: recruitmentEvidence,
+  agent: m24Ctx,
+  integration: agentIntegration,
+  evidence: { storeFile: m14Ctx.storeEvidenceFile, add: m14Ctx.addEvidence },
+});
+m28Ctx.setSigningSummary?.(m29Ctx.summaryForOffer);
+
 // The transaction domain's rows join the agency audit feed beside the P5.6B and
 // P5.6C rows, so an agency has ONE audit rather than three.
 const m25AuditRows = m24Ctx.hooks.auditRows;
@@ -4587,6 +4574,9 @@ export const EMITTED_EVENTS = Object.freeze([
   // ids only (plus the status WORD on a response). The recipient and a shared
   // agent hear through `notify`; a term, a note or a reason is never on the wire.
   'offer_draft_created', 'offer_draft_updated', 'offer_issued', 'offer_superseded', 'offer_withdrawn', 'offer_responded',
+  // M23 P7 signing workflow. Org_private, ids plus a party type word; never a
+  // document, a digest, a term or a signatory's name.
+  'signing_created', 'signing_ready', 'signing_party_completed', 'signing_completed', 'signing_cancelled', 'signing_voided', 'signing_superseded',
 ]);
 {
   const problems = assertEventRegistry({ emitted: EMITTED_EVENTS });

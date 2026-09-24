@@ -163,7 +163,9 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   secondLookItems: { guarantee: 'migration', owner: 'm18', reason: 'Second Look / Nobody Missed collection, guaranteed by the migration registry' },
   secrets: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   sessions: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
-  signings: { guarantee: 'migration', owner: 'core', reason: 'the evidence the signed lifecycle state rests on; exactly one writer in the repository' },
+  signings: { guarantee: 'migration', owner: 'core', reason: 'the evidence the signed lifecycle state rests on; exactly one writer in the repository — recordCompletedSigning in m29 since P7' },
+  // M23 P7 — the signing workflow. Guaranteed by migration 2308 (m280_001_signing_workflow).
+  signingPackages: { guarantee: 'migration', owner: 'm29', reason: 'P7: the signing workflow record — immutable signing revisions (document digest, required parties, contract days), party completion evidence, keys, history and rev; distinct from db.signings, the completed-signing record' },
   sourceChanges: { guarantee: 'migration', owner: 'm18.1', reason: 'M18.1 source-change clock, guaranteed by the migration registry' },
   squadInvites: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   ssoConfigs: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },

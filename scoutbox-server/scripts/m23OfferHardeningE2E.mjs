@@ -791,7 +791,7 @@ section('Z — restart: idempotency keys, terminal states, the paused-case warni
   ok((await issue(globalThis.__G.OID, { expectedRev: 1, clientKey: globalThis.__G.KI }, re.token)).body.idempotent === true, 'Z3 the issue key replays after the reboot');
   ok((await pAccept(globalThis.__G.OID, { revisionId: globalThis.__G.R, clientKey: globalThis.__G.KA }, theoRe.token)).body.idempotent === true, 'Z4 the accept key replays after the reboot');
   neg(expect(await aList(REP, beaRe.token), 404, 'REPRESENTATION_NOT_FOUND'), 'Z5 the same-agency rule holds after the reboot');
-  neg((await j('GET', '/healthz')).body.schemaVersion === 2307, 'Z6 schema 2307 — P6.1 added no migration');
+  neg((await j('GET', '/healthz')).body.schemaVersion === 2308, 'Z6 schema 2308 — P6.1 added no migration; the one step past 2307 is P7\'s signing store');
 }
 
 // ---------------------------------------------------------------- report

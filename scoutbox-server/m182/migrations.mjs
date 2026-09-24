@@ -80,7 +80,7 @@ import { SEEDED_POLICY_VERSIONS } from '../m25/policyVersions.mjs';
 // no `agencyInvoices`: the first two are out of scope by mandate, and the third
 // was named for P5.6D by the store proposal but is deferred with its reason
 // recorded, because no fee workflow exists for it to serve.
-export const SCHEMA_VERSION = 2307;
+export const SCHEMA_VERSION = 2308;
 
 /**
  * Every step is idempotent: running it twice is the same as running it once.
@@ -547,6 +547,21 @@ export const MIGRATIONS = [
       db.agentTransactions ??= [];
       db.transactionRepresentations ??= [];
       db.transactionDocuments ??= [];
+    },
+  },
+  {
+    id: 'm280_001_signing_workflow',
+    version: 2308,
+    // M23 P7 — Signing & Contract Completion. ONE container and nothing else:
+    // `signingPackages`, the workflow record (revisions, parties, evidence
+    // references, keys, history, rev). `db.signings` — the completed-signing
+    // record — already exists and keeps its meaning; nothing is backfilled
+    // into either. A case at `signed` or a player `under_contract` from before
+    // P7 is NOT turned into a package: no historical signature is inferred
+    // and no signature actor is invented (P7 §6).
+    note: 'M23 P7: signing workflow store (signingPackages). One empty container; nothing is backfilled and no lifecycle state, player contract status or legacy signing row is reinterpreted as a signing package.',
+    up(db) {
+      db.signingPackages ??= [];
     },
   },
 ];

@@ -369,6 +369,45 @@ export const EVENT_REGISTRY = {
     privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'offerId', 'status'],
     dedupeStrategy: 'none', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: true,
   },
+  // ---- M23 P7 — the signing workflow (P7 §46–§47). Org-private, ids plus a
+  // party TYPE word on `signing_party_completed`; never a term, a document, a
+  // digest, a note, a fee or a signatory's identity. The player and a shared
+  // agent hear through notifications with a factual line.
+  signing_created: {
+    domain: 'recruitment', sourceSystem: 'signingPackages', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'signingPackageId', 'offerId'],
+    dedupeStrategy: 'none', replayPolicy: 'replay', notificationEligible: false, analyticsEligible: true,
+  },
+  signing_ready: {
+    domain: 'recruitment', sourceSystem: 'signingPackages', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'signingPackageId', 'revisionId'],
+    dedupeStrategy: 'none', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: true,
+  },
+  signing_party_completed: {
+    domain: 'recruitment', sourceSystem: 'signingPackages', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'signingPackageId', 'revisionId', 'partyType'],
+    dedupeStrategy: 'none', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: true,
+  },
+  signing_completed: {
+    domain: 'recruitment', sourceSystem: 'signingPackages', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'signingPackageId', 'signingId'],
+    dedupeStrategy: 'none', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: true,
+  },
+  signing_cancelled: {
+    domain: 'recruitment', sourceSystem: 'signingPackages', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'signingPackageId'],
+    dedupeStrategy: 'none', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: true,
+  },
+  signing_voided: {
+    domain: 'recruitment', sourceSystem: 'signingPackages', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'signingPackageId'],
+    dedupeStrategy: 'none', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: true,
+  },
+  signing_superseded: {
+    domain: 'recruitment', sourceSystem: 'signingPackages', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'signingPackageId', 'revisionId', 'supersedes'],
+    dedupeStrategy: 'none', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: false,
+  },
 
   player_development_evidence_changed: {
     domain: 'box_cam', sourceSystem: 'boxSessions', audience: 'player_private',

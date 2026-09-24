@@ -116,6 +116,14 @@ export const RATE_LIMIT_POLICY = {
   offer_issue: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Offers issued to players and guardians.' },
   offer_withdraw: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Offers withdrawn.' },
   offer_response: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'Offer acceptances and declines by a player or guardian.' },
+  // M23 P7 — the signing workflow. Club acts share one budget per organisation
+  // per action family; a party's own completion is per person. Closure acts
+  // (cancel, void, complete) sit on their own budget so a busy club is never
+  // starved of the act that ends a signing.
+  signing_start: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Signing packages opened over accepted Offers.' },
+  signing_document_write: { max: 120, windowMs: 3_600_000, scope: 'org', note: 'Signing documents attached, drafts edited, packages presented or superseded.' },
+  signing_party_completion: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'A party confirming the exact signing document (player, or the club signatory).' },
+  signing_closure: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Signings completed, cancelled or voided.' },
   trial_evidence_link: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Box Cam sessions linked to a Trial.' },
   trial_attendance: { max: 120, windowMs: 3_600_000, scope: 'org', note: 'Trial attendance and completion records.' },
   // M23 P5 — formal recruitment decisions. Drafting is cheap and frequent;

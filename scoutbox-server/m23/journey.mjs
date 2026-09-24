@@ -39,6 +39,7 @@ import { trialMilestone, trialIntegrity } from './trial.mjs';
 // M23 P6 — the Offer domain's own status derivation (lazy expiry), so the
 // journey never reads a stored status an expired revision has outgrown.
 import { offerStatus as canonicalOfferStatus, liveStatus as canonicalLiveStatus, offerIntegrity, offerCaseConsistency, offerCaseCorrupt } from '../m28/offer.mjs';
+import { effectiveStatus as signingEffectiveStatus, currentRevision as signingCurrentRevision, signingIntegrity } from '../m29/signing.mjs';
 
 /** Stores this projection may not proceed without. `recruitmentContacts` joined in P3. */
 export const JOURNEY_REQUIRED_STORES = Object.freeze([
@@ -331,7 +332,14 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
       available: outcomeAvailable,
       // A signing is a separate, confirmed fact. It is reported as what it is
       // and never inferred from the lifecycle reaching `offer_accepted`.
-      signing: signing ? { id: signing.id, at: signing.ts } : null,
+      signing: signing ? { id: signing.id, at: signing.ts, method: signing.method ?? 'LEGACY_RECORDED', signingPackageId: signing.signingPackageId ?? null } : null,
+      // M23 P7 — the signing WORKFLOW, ids and the status word only. A case at
+      // `signed` from before P7 has none, and none is invented for it.
+      signingPackages: Array.isArray(db.signingPackages)
+        ? db.signingPackages
+          .filter((p) => p?.caseId === kase.id && p.orgId === kase.orgId && p.playerId === kase.playerId && signingIntegrity(p, { orgId: kase.orgId }).length === 0)
+          .map((p) => ({ id: p.id, status: signingEffectiveStatus(p, now), revisionNumber: signingCurrentRevision(p)?.revisionNumber ?? null, offerId: p.offerId, signingId: p.completion?.signingId ?? null }))
+        : [],
     },
     history: { entries: page, total: history.length, cursor, nextCursor: cursor + page.length < history.length ? cursor + page.length : null },
     generatedAt: now,

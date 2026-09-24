@@ -92,7 +92,7 @@ section('A — model and store: seven statuses, terminal at revision level, one 
   ok(minorOfferPathwayOpen('GB', { GB: true, DEFAULT: false }) === true && minorOfferPathwayOpen('FR', { GB: true, DEFAULT: false }) === false, 'A8b opening it is a policy-table change, per jurisdiction');
   // The store: module-guaranteed, owned by m28, created without a migration.
   ok(STORE_CONTRACT.recruitmentOffers?.guarantee === 'module' && STORE_CONTRACT.recruitmentOffers.owner === 'm28', 'A9 recruitmentOffers is a MODULE-guaranteed store owned by m28 (§4)');
-  ok(SCHEMA_VERSION === 2307 && !MIGRATIONS.some((m) => /offer/i.test(m.id ?? '')), `A10 schema is still ${SCHEMA_VERSION} and no migration names an Offer (§60: reuse the reserved store, no unnecessary migration)`);
+  ok(SCHEMA_VERSION === 2308 && !MIGRATIONS.some((m) => /offer/i.test(m.id ?? '')), `A10 schema is ${SCHEMA_VERSION} (P7's signing store is the one step past 2307) and still no migration names an Offer (§60: reuse the reserved store, no unnecessary migration)`);
   ok(STORE_CONTRACT.signings?.guarantee !== undefined, 'A11 the signings store contract is untouched');
   // Capabilities.
   ok(roomCan('viewer', 'offer_view') && roomCan('contributor', 'offer_view') && !roomCan('contributor', 'offer_draft') && !roomCan('contributor', 'offer_issue') && roomCan('room_lead', 'offer_draft') && roomCan('room_lead', 'offer_issue') && roomCan('recruitment_admin', 'offer_issue') && !roomCan('viewer', 'offer_draft'), 'A12 roomCan: anyone who reads the room reads Offers; drafting and issuing sit with the room lead (§16)');
