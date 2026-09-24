@@ -1,0 +1,49 @@
+# M23 P7.1 — Signing defect register
+
+Every defect the hostile review and the hardening suites found in the P7
+signing workflow, with the §89 fields. Severity follows P6.1/P7: Critical
+(fabricated or lost signing / lifecycle), High (authorization, privacy, data
+integrity), Medium (correctness a user or an auditor would notice), Low
+(honesty, wording, UX, documentation). Fixture mistakes are listed apart
+and are not product defects.
+
+## Product defects
+
+| ID | Severity | Component | Reproduction | Actual | Expected | Impact | Root cause | Fix | Regression | Status | Release blocking? | Legacy impact |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| D-P71-1 | High (data integrity) | m29 document verification | present a document, let the player confirm, overwrite the vault file on disk (or edit the revision's digest, or point the revision at another package's vault row), then sign for the club and complete | the club signature and the completion compared stored digests only; the swapped bytes were served under the original digest; completion succeeded | any disagreement between the bytes on disk, the vault row and the revision's digest fails closed at present, party completion, completion and serve; a vault row of another package is refused | a completed signing could reference bytes nobody confirmed | P7 verified the digest at upload and compared stored strings afterwards; nothing re-read the bytes | `documentBytesProblem` (H-P71-1): re-hash the vault bytes, match row and revision, require `meta.signingPackageId === pkg.id`; refused as `SIGNING_STATE_UNKNOWN`, nothing served | hardening B5–B16, C1–C5; persistence 5.1 | fixed R1 | yes | none: every P7 vault row a signing references carries the package id |
+| D-P71-2 | High (authorization / data integrity) | m23 evidence rule `signingSupports` | plant a `db.signings` row naming a live package (or a package that never completed), then `POST /org/rooms/:id/lifecycle confirmSignedOutcome` | the row satisfied the `signed` evidence rule; the case moved to `signed` by hand beside a live package | a row that names a package is evidence only if that package is COMPLETED and names the row back | a forged or stray row let the club reach `signed` without a canonical completion | the P5 rule checked org, player and no cancellation; P7 added `signingPackageId` to rows without teaching the rule about it | `signingSupports(signing, kase, packages)` (H-P71-2); legacy rows (no package) unchanged | hardening P10; persistence 5.5b | fixed R1 | yes | none for legacy rows |
+| D-P71-3 | Medium (data integrity) | m29 `recordCompletedSigning` | two packages over one Offer both reaching completion (only possible through corruption) | uniqueness relied on `completedRowFor(pkg)` (per package) and a gate check outside the writer | the writer itself refuses a second row per Offer | defence in depth for §20/§29 | the structural check lived in the route, not the writer | the writer returns `duplicate` when a row for the Offer exists | hardening J1, J11–J12 (one row) | fixed R1 | no | none |
+| D-P71-4 | Low (availability) | m181 rate policies | 30 completions in an hour by any lead | cancel and void drew on the same `signing_closure` budget as completion; a safety closure could be starved | cancel/void have their own budget | a hostile lead could block a colleague's cancellation for an hour | one policy for three acts | `signing_safety_closure` 60/h per org for cancel/void (H-P71-4) | hardening X1–X3 | fixed R1 | no | none |
+| D-P71-5 | Medium (partial failure) | m29 `completeParty` | a throw after the party mutation and before `persistNow()` (fault seam) | the party stayed COMPLETED in memory while the caller got 500; disk and memory disagreed until the next persist | a failed party write leaves the party PENDING and the package untouched | a 500 with a signature recorded in memory only | no unit of work around the party write | snapshot/rollback of the party, statuses, keys, history, case history and rev; seam `signing.party.after_write` (H-P71-5) | hardening Q1–Q3 | fixed R1 | no | none |
+| D-P71-6 | Low (error taxonomy) | m29 `canCompleteParty` | supersede a presented revision after the player signed; the player replays against revision 1 while revision 2 is still a draft | `SIGNING_STATE_INVALID` (the package is DRAFT) | `SIGNING_SUPERSEDED` (the act names a superseded revision) | the player's app showed the generic sentence instead of "the club presented a newer revision" | the state word was checked before the revision the party named | a superseded revision on a live package is named first | live D6; hardening J6b | fixed R3 | no | none |
+| D-P71-7 | Low (display drift) | agent app `screens.tsx` | an expired package and then a live one over the same shared Offer | the agent's line showed the first package stored (the expired one) | the live package, else the completed one, else the latest (the server's Offer summary rule) | the agent read a stale state for a client with a live signing | `items.find` by Offer id | select live → completed → latest | live F2 | fixed R3 | no | none |
+| D-P71-8 | Low (documentation) | M23_P7_SIGNING_BLOCK_MATRIX.md | read the deletion row | said `onPlayerDeleted` cancels live packages | it nulls names and stamps the package; the club may cancel | a reader would expect a cancellation that never happens | the P7 document described an intent the code (rightly) did not implement | corrected in place | — | fixed R3 | no | none |
+| D-P71-9 | Low (error taxonomy) | m29 `canCompleteParty` | an org actor with an arbitrary id on the PLAYER party | `SIGNING_PARTY_NOT_REQUIRED` | `SIGNING_NOT_PERMITTED` (the kind, not the lookup, is the reason) | a misleading sentence to a caller who could never sign that party | party lookup before the kind check | kind first | hardening D8, ZF; P7 A22 | fixed R1 | no | none |
+| D-P71-10 | Low (correctness) | m29 `ready` | present with a new `expiresAt` while rate-limited | `pkg.expiresAt` was assigned before the rate check, so a 429 left the in-memory package changed and unpersisted | no mutation before every refusal | drift between memory and disk until the next persist | ordering | the expiry is validated first, assigned after the checks (H-P71-6) | hardening (ordering asserted in the audit) | fixed R1 | no | none |
+| D-P71-11 | Medium (data integrity) | m29 `signingIntegrity` | plant a duplicate required party, a party naming another player or club, a missing recipient or club party, a guardian beside an adult, an evidence reference naming another revision / digest / actor / instant, a pending party carrying evidence, an expiry 400 days out | the rows read as sound | each is corruption: refused, omitted, never repaired | forged parties or evidence could pass the completion gate on the values they carry | P7 checked shape, kinds and temporal order, not identity and binding | eleven new integrity codes | hardening A1–A12, D1–D12, S4; persistence 5.3 | fixed R1 | yes (as a corruption class) | none: no P7-written row trips them |
+| D-P71-12 | Medium (data integrity) | m29 `signingConsistency` | remove a completed package's row; add a row for a live package; duplicate a row; point a completion at a row id the store lacks | the package read as sound and the journey silently showed no signing | `COMPLETED_WITHOUT_ROW`, `ROW_WITHOUT_COMPLETION`, `DUPLICATE_SIGNING_ROWS`, `COMPLETION_ROW_MISMATCH` are corruption | a package and its record could disagree without anyone being told | consistency coupled the package to the Offer and the case, not to `db.signings` | rows and the player passed into consistency from every reader | hardening P5–P15; persistence 5.2–5.5 | fixed R1 | yes | none |
+| D-P71-13 | Low (honesty) | m29 case surface | the player declares `free_agent` after a completed signing | nothing on the club's surface said the two disagreed | `PLAYER_CONTRACT_STATUS_DIVERGED` named as a warning; nothing overwritten | an auditor comparing the signing to the player's status had no signal | the player's own route was never coupled to the signing (by design) | the warning; detection only (H-P71-3) | hardening P2–P4 | fixed R1 | no | none |
+
+## Fixture and assertion mistakes (test-side, not product defects)
+
+| ID | Suite | What | Resolution | Commit |
+| --- | --- | --- | --- | --- |
+| T-P71-1 | m23SigningE2E A32 | the pure `done` fixture's evidence reference carried only a digest; the new integrity rules (rightly) flagged it | the fixture carries every field a real reference carries | R1 |
+| T-P71-2 | m23SigningHardeningE2E B10, Q5 | asserted "not under contract" for Mateus Carvalho, who is seeded `under_contract` | compare with the value before the act | R1 |
+| T-P71-3 | m23SigningHardeningE2E E5b | expected a demoted Head to be unable to cancel; she opened the room and is its room lead (a room lead manages) | the refusal is asserted for a scout who is not the room lead | R1 |
+| T-P71-4 | m23SigningHardeningE2E J6, J10 | demanded one race order where two are legal (the supersede or the party first; a stale rev refused on rev or on the winner's state) | both orders asserted with their codes | R1 |
+| T-P71-5 | m23SigningHardeningLive (first run) | the HTTP fixture reused one `clientKey` per Offer for two starts, so the second start replayed the first (expired) package | keys are unique per call | R3 |
+| T-P71-6 | m23SigningPerf (P7) | the 10-revision fixture completed a party before presentation | fixed in P7 R4 | — |
+
+## Totals
+
+| Severity | Found | Fixed | Open |
+| --- | --- | --- | --- |
+| Critical | 0 | 0 | 0 |
+| High | 2 | 2 | 0 |
+| Medium | 4 | 4 | 0 |
+| Low | 7 | 7 | 0 |
+
+Known P7.1 flakes: 0 (every lane green on its first run at the final tip;
+earlier red runs were the assertion mistakes above, each fixed once).

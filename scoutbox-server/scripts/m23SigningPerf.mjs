@@ -27,8 +27,8 @@ const T0 = 1_800_000_000_000;
 const DAY = 86_400_000;
 const by = { kind: 'org', id: 'u', name: 'Lead' };
 const SHA = 'a'.repeat(64);
-function party(type, forEntityId, done, readyAt = T0 + 1) {
-  return { partyType: type, forEntityId, forPlayerId: 'pl-T', status: done ? 'COMPLETED' : 'PENDING', completedAt: done ? readyAt + 1 : null, completedBy: done ? { kind: type === 'PLAYER' ? 'player' : 'org', id: forEntityId, name: 'N' } : null, method: done ? 'PLATFORM_ACKNOWLEDGMENT' : null, evidenceRef: done ? { kind: 'platform_acknowledgment', id: 'sgev-1', revisionId: 'spr-0', documentSha256: SHA, at: readyAt + 1, actorKind: 'player', actorId: forEntityId } : null };
+function party(type, forEntityId, done, readyAt = T0 + 1, revisionId = 'spr-0') {
+  return { partyType: type, forEntityId, forPlayerId: 'pl-T', status: done ? 'COMPLETED' : 'PENDING', completedAt: done ? readyAt + 1 : null, completedBy: done ? { kind: type === 'PLAYER' ? 'player' : 'org', id: forEntityId, name: 'N' } : null, method: done ? 'PLATFORM_ACKNOWLEDGMENT' : null, evidenceRef: done ? { kind: 'platform_acknowledgment', id: 'sgev-1', revisionId, documentSha256: SHA, at: readyAt + 1, actorKind: type === 'PLAYER' ? 'player' : 'org', actorId: forEntityId } : null };
 }
 function revision(i, n, playerId, orgId) {
   const last = i === n - 1;
@@ -36,7 +36,7 @@ function revision(i, n, playerId, orgId) {
     id: `spr-${i}`, revisionNumber: i + 1, status: last ? 'IN_PROGRESS' : 'SUPERSEDED', createdAt: T0 + i, createdBy: by, readyAt: T0 + i + 1, readyBy: by, completedAt: null,
     document: { id: `sgd-${i}`, evidenceId: `vevd-${i}`, sha256: SHA, filename: 'contract.pdf', mime: 'application/pdf', bytes: 40_000, label: 'Contract' }, executedDocument: null,
     contract: { startDate: '2027-07-01', endDate: '2029-06-30' },
-    requiredParties: [party('PLAYER', playerId, last, T0 + i + 1), party('CLUB_SIGNATORY', orgId, false, T0 + i + 1)],
+    requiredParties: [party('PLAYER', playerId, last, T0 + i + 1, `spr-${i}`), party('CLUB_SIGNATORY', orgId, false, T0 + i + 1, `spr-${i}`)],
     policySnapshot: { policyVersion: 1, jurisdiction: 'GB', offerPolicyVersion: 1 },
     supersedesRevisionId: i ? `spr-${i - 1}` : null, supersededByRevisionId: last ? null : `spr-${i + 1}`,
   };
