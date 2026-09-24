@@ -547,7 +547,7 @@ section('§9/§12 — the contract is checked against the running server, not tr
   // §12 OWNER VALIDATION. `owner: 'm14'` must mean M14 actually initialises it.
   // Proven by source: the init site the scan found must live under the owner's
   // directory (or be the core composition root).
-  const OWNER_DIR = { core: ['server.mjs', 'm182/'], m12: ['m12/'], m13: ['m13/'], m14: ['m14/'], m15: ['m15/'], m16: ['m16/'], m17: ['m17/'], m18: ['m18/'], 'm18.1': ['m181/'], m21: ['m21/'] };
+  const OWNER_DIR = { core: ['server.mjs', 'm182/'], m12: ['m12/'], m13: ['m13/'], m14: ['m14/'], m15: ['m15/'], m16: ['m16/'], m17: ['m17/'], m18: ['m18/'], 'm18.1': ['m181/'], m21: ['m21/'], m28: ['m28/'] };
   const wrongOwner = [];
   for (const r of rows) {
     if (r.classification !== 'MODULE_BOOT') continue;
@@ -636,8 +636,11 @@ section('§11 — the drift guard: a new store cannot be added unexplained');
     'and no optional store is read without a presence gate in the same file');
 
   // The three exclusions are deliberate and named, not a silent filter.
-  ok(Object.keys(NOT_A_STORE).length === 2 && Object.keys(OPTIONAL_BY_DESIGN).length === 1,
-    `${Object.keys(NOT_A_STORE).length} names excluded as not-a-store and ${Object.keys(OPTIONAL_BY_DESIGN).length} classified optional — each with a written reason, all from the contract`);
+  // M23 P6 shipped the canonical Offer store: `recruitmentOffers` moved from
+  // optional (P2: "we cannot answer that yet") to module-guaranteed (m28), so
+  // no optional-by-design store remains: every store the contract names is guaranteed.
+  ok(Object.keys(NOT_A_STORE).length === 2 && Object.keys(OPTIONAL_BY_DESIGN).length === 0 && !('recruitmentOffers' in OPTIONAL_BY_DESIGN),
+    `${Object.keys(NOT_A_STORE).length} names excluded as not-a-store and ${Object.keys(OPTIONAL_BY_DESIGN).length} classified optional — each with a written reason, all from the contract; recruitmentOffers is no longer one of them (P6)`);
 }
 
 // ==================================================== the machine-readable result

@@ -1561,18 +1561,22 @@ section('Z — what P2 deliberately does NOT ship, asserted rather than assumed'
   const jz = await j('GET', `/org/rooms/${ROOM}/journey`, undefined, maria.token);
   ok(jz.status === 200, 'Z1 the journey projects with no offers store present at all');
 
-  ok(guaranteeFor('recruitmentOffers') === 'optional',
-    'Z2 the store contract classifies it optional — not migration, not module, not absent from the contract');
+  // M23 P6 shipped the canonical Offer store. The classification P2 reserved
+  // ('optional': "we cannot answer that yet") is now 'module', owned by m28
+  // and created at registration — NOT by a migration, so the schema stays at
+  // 2307 and no lifecycle state is reinterpreted as an Offer (P6 §4, §60).
+  ok(guaranteeFor('recruitmentOffers') === 'module',
+    'Z2 the store contract classifies it MODULE-guaranteed (P6) — not migration, not optional, not absent from the contract');
   neg(MIGRATION_GUARANTEED.includes('recruitmentOffers') === false
-    && MODULE_GUARANTEED.includes('recruitmentOffers') === false,
-  'Z3 and no boot path claims to guarantee it, so its absence cannot fail the boot contract');
+    && MODULE_GUARANTEED.includes('recruitmentOffers') === true,
+  'Z3 and the module boot path guarantees it while no migration claims it, so the schema did not move for it');
   neg(JOURNEY_REQUIRED_STORES.includes('recruitmentOffers') === false
     && JOURNEY_OPTIONAL_STORES.includes('recruitmentOffers'),
   'Z4 the journey treats it as optional, so its absence is not a JOURNEY_STORE_MISSING');
 
   // The distinction the optional classification exists to protect.
-  ok(jz.body.offer?.available === false,
-    'Z5 the journey reports offers as UNAVAILABLE — not as an empty list of offers that exist');
+  ok(jz.body.offer?.available === true,
+    'Z5 the journey reports offers as AVAILABLE (P6): the store exists, so "there are none" is now an honest answer');
   ok(Array.isArray(jz.body.offer?.records) && jz.body.offer.records.length === 0,
     'Z6 and degrades structurally: a real empty list beside the flag, never an invented record');
 

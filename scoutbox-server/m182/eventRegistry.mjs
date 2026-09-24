@@ -331,6 +331,44 @@ export const EVENT_REGISTRY = {
     privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'contactId'],
     dedupeStrategy: 'none', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: true,
   },
+  // ---- M23 P6 — the canonical Offer (P6 §35–§36). Every Offer event is
+  // org-private: it carries the organisation, the case and the Offer id and
+  // NOTHING else — no term, no expiry, no note, no recipient, no reason. The
+  // recipient and the shared agent are told through notifications, whose text
+  // is a factual line; a live event never leaves the club's own channel. The
+  // `status` on `offer_responded` is the revision's new status word only
+  // (ACCEPTED / DECLINED); a rationale is never on the wire. Replay: an Offer
+  // event is a fact of the case timeline and may be replayed to the club.
+  offer_draft_created: {
+    domain: 'recruitment', sourceSystem: 'recruitmentOffers', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'offerId'],
+    dedupeStrategy: 'none', replayPolicy: 'replay', notificationEligible: false, analyticsEligible: false,
+  },
+  offer_draft_updated: {
+    domain: 'recruitment', sourceSystem: 'recruitmentOffers', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'offerId'],
+    dedupeStrategy: 'none', replayPolicy: 'never', notificationEligible: false, analyticsEligible: false,
+  },
+  offer_issued: {
+    domain: 'recruitment', sourceSystem: 'recruitmentOffers', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'offerId'],
+    dedupeStrategy: 'none', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: true,
+  },
+  offer_superseded: {
+    domain: 'recruitment', sourceSystem: 'recruitmentOffers', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'offerId'],
+    dedupeStrategy: 'none', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: true,
+  },
+  offer_withdrawn: {
+    domain: 'recruitment', sourceSystem: 'recruitmentOffers', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'offerId'],
+    dedupeStrategy: 'none', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: true,
+  },
+  offer_responded: {
+    domain: 'recruitment', sourceSystem: 'recruitmentOffers', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'offerId', 'status'],
+    dedupeStrategy: 'none', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: true,
+  },
 
   player_development_evidence_changed: {
     domain: 'box_cam', sourceSystem: 'boxSessions', audience: 'player_private',

@@ -1403,9 +1403,30 @@ export function registerTransactions(rawCtx) {
     tx.updatedAt = now();
   }
 
+  /**
+   * M23 P6 — the ONE seam the Offer domain reads (P6 §11). A transaction is
+   * "available to this Offer" only when the asking club is its ENGAGING
+   * entity and the transaction is linked to exactly the recruitment case the
+   * Offer is on; anything else answers null, so a club cannot learn that a
+   * transaction exists by naming its id from an unrelated case. Readiness is
+   * re-derived NOW from the live compliance snapshot and staleness — never
+   * from anything the Offer stored. Read-only: no transaction is created,
+   * moved or touched here, and no Offer is.
+   */
+  function offerReadinessFor(transactionId, { orgId, caseId } = {}) {
+    if (typeof transactionId !== 'string' || !transactionId || !orgId || !caseId) return null;
+    const tx = txById(transactionId);
+    if (!tx) return null;
+    if (clubPartyRoleOf(tx, orgId) !== 'engaging_entity') return null;
+    if (tx.links?.recruitmentCaseId !== caseId) return null;
+    const readiness = offerReadiness(tx, { complianceState: tx.compliance?.state ?? null, staleness: stalenessOf(tx) });
+    return { tx: { id: tx.id, status: tx.status, type: tx.type ?? null }, readiness };
+  }
+
   return {
     onPlayerDeleted, representationReviewed,
     hooks: { auditRows: (org) => transactionAuditRows(db, { agencyOrgId: org.id }) },
     transactionAuditRows: (filter) => transactionAuditRows(db, filter),
+    offerReadinessFor,
   };
 }

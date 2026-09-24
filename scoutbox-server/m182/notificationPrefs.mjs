@@ -66,6 +66,12 @@ export const CATEGORIES = Object.freeze({
   // obligation — the compliance half of a transaction is routed to
   // `compliance`, which is, and which a person cannot mute.
   transaction_updates: { label: 'Transaction workspace activity', default: true, mandatory: false },
+  // M23 P6: an Offer issued, withdrawn, answered or expiring. On by default and
+  // NOT mandatory: an Offer is something a person must answer, but answering
+  // it is their own free act and a recipient may choose not to hear about
+  // Offers at all — a club is never owed a channel to a player. The category
+  // carries no term, note or rationale; the text is a factual line only.
+  offer_updates: { label: 'Offers and Offer answers', default: true, mandatory: false },
   security_account: { label: 'Security and account', default: true, mandatory: true },
 });
 export const CATEGORY_NAMES = Object.freeze(Object.keys(CATEGORIES));
@@ -155,6 +161,8 @@ export const TYPE_CATEGORY = Object.freeze({
   // to do something" are operational; a compliance change is not, and goes to
   // the mandatory category.
   agent_transaction: 'transaction_updates',
+  // M23 P6: the canonical Offer — one type, one category.
+  recruitment_offer: 'offer_updates',
   agent_transaction_action: 'transaction_updates',
   agent_transaction_compliance: 'compliance',
   transition: 'security_account',

@@ -633,6 +633,13 @@ export const roomCan = (role, action) => {
     decision_view: 0,
     decision_draft: 2,
     decision_finalize: 2,
+    // M23 P6 — the canonical Offer. Reading an Offer is club memory (the
+    // internal note is a club note); drafting, issuing, withdrawing and
+    // revising are the outward-facing recruitment act and sit with the room
+    // lead, exactly where `record_decision` and `decision_finalize` sit.
+    offer_view: 0,
+    offer_draft: 2,
+    offer_issue: 2,
     manage_any_room: 3,
   }[action];
   return need != null && rank >= need;

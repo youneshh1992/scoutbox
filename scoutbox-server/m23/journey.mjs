@@ -36,6 +36,9 @@ import {
 import { ROOM_STATUS_LABELS, ROOM_TRANSITIONS } from '../m17/shared.mjs';
 import { contactMilestone, contactIntegrity } from './contact.mjs';
 import { trialMilestone, trialIntegrity } from './trial.mjs';
+// M23 P6 — the Offer domain's own status derivation (lazy expiry), so the
+// journey never reads a stored status an expired revision has outgrown.
+import { offerStatus as canonicalOfferStatus, liveStatus as canonicalLiveStatus, offerIntegrity } from '../m28/offer.mjs';
 
 /** Stores this projection may not proceed without. `recruitmentContacts` joined in P3. */
 export const JOURNEY_REQUIRED_STORES = Object.freeze([
@@ -257,9 +260,15 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   // Optional stores: absent because their phase has not shipped. Structural
   // degradation (an empty list plus an explicit availability flag), never an
   // invented record.
+  // P6: the canonical Offer store. Only this case's own rows (same org, same
+  // player), with an integrity check so a malformed row projects nothing; the
+  // status is DERIVED (an ISSUED revision past its expiry reads EXPIRED).
+  // Terms, notes and documents never appear in the journey.
   const offersAvailable = Array.isArray(db.recruitmentOffers);
   const offers = offersAvailable
-    ? db.recruitmentOffers.filter((o) => o?.caseId === kase.id).map((o) => ({ id: o.id, type: o.type, status: o.status }))
+    ? db.recruitmentOffers
+      .filter((o) => o?.caseId === kase.id && o.orgId === kase.orgId && o.playerId === kase.playerId && offerIntegrity(o, { orgId: kase.orgId, caseId: kase.id }).length === 0)
+      .map((o) => ({ id: o.id, type: o.type, status: canonicalOfferStatus(o, now), liveStatus: canonicalLiveStatus(o, now) }))
     : [];
 
   const signing = db.signings.find((s) => s?.orgId === kase.orgId && s.playerId === kase.playerId) ?? null;
@@ -274,7 +283,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
     status,
     hasCurrentDecision: !!currentDecision,
     activeTrial: trials.some((t) => t.status === 'awaiting_report'),
-    offerAwaitingResponse: offers.some((o) => o.status === 'sent'),
+    offerAwaitingResponse: offers.some((o) => o.liveStatus === 'ISSUED'),
   });
   // P5 §61 — evaluation exists (a submitted assessment or a completed trial)
   // and no FORMAL decision stands on a live case. Derived by looking, never

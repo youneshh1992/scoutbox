@@ -105,6 +105,17 @@ export const RATE_LIMIT_POLICY = {
   trial_invite: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Trial invitations sent to players and guardians.' },
   trial_schedule: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Trial schedules proposed, revised or cancelled.' },
   trial_response: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'Trial schedule confirmations, declines and cancellations by a player or guardian.' },
+  // M23 P6 — Offer. Drafting and revising are quiet club work (one budget, so
+  // an alias cannot double it — the F-11 lesson); issuing and withdrawing are
+  // outward acts with a person on the other end and get a tighter budget;
+  // a recipient's answers are keyed by the person answering, never by the
+  // player the Offer names (a guardian answering for two children is one
+  // person). The "one live Offer per case" rule in m28 is deterministic and
+  // separate from these limits.
+  offer_draft_write: { max: 120, windowMs: 3_600_000, scope: 'org', note: 'Offer drafts created, edited or revised.' },
+  offer_issue: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Offers issued to players and guardians.' },
+  offer_withdraw: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Offers withdrawn.' },
+  offer_response: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'Offer acceptances and declines by a player or guardian.' },
   trial_evidence_link: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Box Cam sessions linked to a Trial.' },
   trial_attendance: { max: 120, windowMs: 3_600_000, scope: 'org', note: 'Trial attendance and completion records.' },
   // M23 P5 — formal recruitment decisions. Drafting is cheap and frequent;

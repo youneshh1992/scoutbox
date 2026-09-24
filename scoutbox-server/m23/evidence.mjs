@@ -28,6 +28,11 @@
 
 import { CONTACT_EVIDENCE_STATUSES, contactIntegrity } from './contact.mjs';
 import { trialIntegrity, deriveWorkflowState } from './trial.mjs';
+// M23 P6 — the Offer domain's pure evidence predicate. The lifecycle asks; the
+// Offer store answers; nothing here writes an Offer or a status.
+import { offerEvidence } from '../m28/offer.mjs';
+
+const OFFER_EVIDENCE_KINDS = Object.freeze(['offer_sent', 'offer_accepted_by_recipient', 'offer_declined_by_recipient']);
 
 /** Every kind the lifecycle can ask about. Anything else is a programming error. */
 export const EVIDENCE_KINDS = Object.freeze([
@@ -72,7 +77,10 @@ export function createEvidenceProvider(db) {
     /**
      * @returns {{satisfied: boolean, reason?: string, sourceType?: string, sourceId?: string}}
      */
-    check(kind, { kase } = {}) {
+    check(kind, { kase, now: at } = {}) {
+      // The lifecycle passes its own clock; a caller that passes none gets
+      // the real one. A P6 Offer expiry is judged at THIS instant (§48).
+      const now = Number.isFinite(at) ? at : Date.now();
       if (!EVIDENCE_KINDS.includes(kind)) {
         // An unknown kind is a bug in the caller, not a business answer.
         // Fail closed and name it, rather than defaulting either way.
@@ -166,7 +174,18 @@ export function createEvidenceProvider(db) {
           : { satisfied: false, reason: 'no_finalized_progress_decision' };
       }
 
-      // Offer evidence arrives with its own phase.
+      // ---- P6 Offer evidence. Answered from the canonical Offer store through
+      // a pure predicate owned by the Offer domain (m28/offer.mjs): an ISSUED
+      // revision satisfies `offer_sent`; a response row on that revision, by
+      // the recipient the revision was addressed to, satisfies the accepted
+      // or declined kind. A draft is not an Offer sent; a club user naming
+      // `recordOfferAccepted` with no recipient response is refused here.
+      // Reads; never writes.
+      if (OFFER_EVIDENCE_KINDS.includes(kind)) {
+        if (!Array.isArray(db?.recruitmentOffers)) return { satisfied: false, reason: 'offers_store_unavailable' };
+        return offerEvidence(db.recruitmentOffers, kase, kind, now);
+      }
+
       return { satisfied: false, reason: 'not_implemented' };
     },
   };

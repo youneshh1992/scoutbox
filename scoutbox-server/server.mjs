@@ -29,6 +29,7 @@ import { registerAgent } from './m24/index.mjs';
 import { registerCompliance } from './m25/index.mjs';
 import { registerTransactions } from './m26/index.mjs';
 import { registerIntegration } from './m27/index.mjs';
+import { registerOffers } from './m28/index.mjs';
 import { createVerificationProvider } from './m25/provider.mjs';
 import { createEvidenceProvider } from './m23/evidence.mjs';
 import { COMBINE_PROTOCOLS } from './m16/combineShared.mjs';
@@ -4456,6 +4457,30 @@ m27Ctx = registerIntegration({
 });
 Object.assign(agentIntegration, m27Ctx.seam);
 
+// ------------------------------------------------- M23 P6 Canonical Offer workflow
+// The first authoritative Offer domain. A P5 decision to progress AUTHORISES
+// considering an Offer and creates none; an explicit club act drafts one;
+// issuing freezes an exact immutable revision and moves the case to
+// `offer_made`; the recipient's own acceptance or decline — and nothing else
+// — moves it to `offer_accepted` / `offer_declined`. It moves the case only
+// through the ONE validator (with the real evidence provider, which now reads
+// its store) and the ONE status writer; it never writes `signed`, never
+// touches `db.signings`, never negotiates and never lets an agent act for a
+// player. Registered after the Agent layers because it reads the P5.6E seam
+// (an agent's basis and scope) and P5.6D's readiness seam, by reference.
+const m28Ctx = registerOffers({
+  ...m19Ctx,
+  isAdult,
+  storage,
+  findRoomForRequest: m17Ctx.findRoomForRequest,
+  applyLifecycleTransition: m17Ctx.applyLifecycleTransition,
+  recruitmentEvidenceProvider: recruitmentEvidence,
+  agent: m24Ctx,
+  integration: agentIntegration,
+  transactions: m26Ctx,
+});
+void m28Ctx;
+
 // The transaction domain's rows join the agency audit feed beside the P5.6B and
 // P5.6C rows, so an agency has ONE audit rather than three.
 const m25AuditRows = m24Ctx.hooks.auditRows;
@@ -4556,6 +4581,10 @@ export const EMITTED_EVENTS = Object.freeze([
   // and the P5 → transaction handoff, which is recruitment-domain because the
   // club's case is where it lives.
   'transaction_handoff_invited', 'transaction_handoff_withdrawn',
+  // M23 P6 canonical Offer. All org_private to the club that owns the case,
+  // ids only (plus the status WORD on a response). The recipient and a shared
+  // agent hear through `notify`; a term, a note or a reason is never on the wire.
+  'offer_draft_created', 'offer_draft_updated', 'offer_issued', 'offer_superseded', 'offer_withdrawn', 'offer_responded',
 ]);
 {
   const problems = assertEventRegistry({ emitted: EMITTED_EVENTS });
