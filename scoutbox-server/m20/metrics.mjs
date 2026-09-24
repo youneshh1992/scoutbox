@@ -145,6 +145,20 @@ export const METRICS = {
     ratio: false,
     limitation: 'Counts of formal recruitment decisions finalized in the window, by outcome — progress, hold, reject — and how many were later superseded. A process count, never a verdict on anyone: a club that rejects nine players and progresses one has run ten decisions, not ranked ten people.',
   }),
+  // M23 P8 (§42–§45) — the journey funnel from the CANONICAL RECORDS, not from
+  // the case's status history: a stage counts only when the record that proves
+  // it exists. Case-based: a case counts once per stage however many retries,
+  // revisions or re-invitations it carried. Beside each stage the number of
+  // cases whose lifecycle history reached the state WITHOUT such a record
+  // (legacy cases, or drift) is reported, never folded in.
+  journey_evidence_funnel: M('journey_evidence_funnel', 'pipeline', 'Journey stages (from the records)', {
+    unit: 'rooms',
+    semantics: 'window_entry',
+    sources: ['recruitmentCases', 'recruitmentContacts', 'requests', 'trials', 'assessments', 'roomDecisions', 'recruitmentOffers', 'signingPackages', 'signings'],
+    reads: ['createdAt', 'caseId', 'orgId', 'playerId', 'status', 'deliveredAt', 'occurredAt', 'recordedAt', 'cancelledAt', 'type', 'acceptedAt', 'schedule.confirmedAt', 'completion.state', 'completion.at', 'state', 'submittedAt', 'kind', 'outcome', 'supersededById', 'roomId', 'revisions.status', 'revisions.issuedAt', 'revisions.respondedAt', 'signingPackageId', 'ts', 'history.action', 'history.detail.to'],
+    ratio: false,
+    limitation: 'Each stage counts cases for which the record itself exists — a delivered contact, a completed trial, a submitted assessment, a finalized decision, an issued or answered Offer, a completed signing — not cases whose status merely says so. A case counts once per stage however many retries or revisions it carried. Cases whose history reached a stage with no record behind it are shown apart as "history only"; they are older cases, not progress. A recent window is incomplete by construction.',
+  }),
   exit_reason_mix: M('exit_reason_mix', 'pipeline', 'Why rooms ended', {
     unit: 'decisions',
     semantics: 'window_completion',

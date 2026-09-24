@@ -30,9 +30,14 @@ with Offer and signing milestones).
 `journeyFor` scopes every store to the case first (same `caseId`, `orgId`,
 `playerId`; structurally sound by each domain's own integrity check):
 
-`recruitmentContacts`, `requests` (type `trial`), `trials`, `assessments`
-(org + player), `roomDecisions`, `recruitmentOffers`, `signingPackages`, the
-supporting `signings` row, `case.history`, `blocks`, `players`.
+`recruitmentContacts`, `requests` (type `trial`), `trials` (rows whose
+`caseId` is this case — the same scope as the evidence gate; a legacy trial
+with no `caseId` is the club's history of the player, listed in the Room's
+`trials[]` but never this case's current Trial, trial stage or timeline entry
+— D-P8-16), `assessments` (org + player: an M12 assessment is the club's
+record of the player, not of a case), `roomDecisions`, `recruitmentOffers`,
+`signingPackages`, the supporting `signings` row, `case.history`, `blocks`,
+`players`.
 
 The supporting signing row (`supportingSigningRow`) is the row a COMPLETED
 package **on this case** names back, else the club's un-packaged (legacy) row

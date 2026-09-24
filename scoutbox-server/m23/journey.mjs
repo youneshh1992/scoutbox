@@ -258,9 +258,14 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
     if (trialIntegrity(t, { orgId: kase.orgId, caseId: t.caseId ?? null }).length) { trialsOmitted += 1; continue; }
     trials.push({ id: t.id, status: t.status, proposedDate: t.proposedDate ?? null, hasReport: !!t.report, workflow: trialMilestone(t) });
   }
-  const trialRows = db.trials.filter((t) => t?.orgId === kase.orgId && t.playerId === kase.playerId && trials.some((x) => x.id === t.id));
+  // P8 — the model, the current-resource selection and the timeline read THIS
+  // case's Trials only (`caseId`), the same scope as the evidence provider: a
+  // Trial from this club's earlier, ended case with the same player is that
+  // case's history, never this case's current Trial or its trial stage. The
+  // `trials` list above stays the club's view of the player (P4).
+  const trialRows = db.trials.filter((t) => t?.orgId === kase.orgId && t.playerId === kase.playerId && t.caseId === kase.id && trials.some((x) => x.id === t.id));
   const trialInvitations = db.requests.filter((r) => r?.type === 'trial' && r.caseId === kase.id && r.orgId === kase.orgId);
-  const trialAssessments = (db.assessments ?? []).filter((a) => a?.orgId === kase.orgId && a.playerId === kase.playerId && a.context?.trialId && trials.some((x) => x.id === a.context.trialId));
+  const trialAssessments = (db.assessments ?? []).filter((a) => a?.orgId === kase.orgId && a.playerId === kase.playerId && a.context?.trialId && trialRows.some((x) => x.id === a.context.trialId));
 
   const contacts = db.requests
     .filter((r) => r?.orgId === kase.orgId && r.playerId === kase.playerId)

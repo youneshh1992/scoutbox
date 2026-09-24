@@ -12,6 +12,11 @@ Every rule is deterministic: tiers in order, newest first within a tier by
 the named instant, ties broken by the id (descending) so two reads of the
 same store agree whatever the storage order.
 
+Every selector is fed THIS case's rows only (`caseId`, `orgId`, `playerId`).
+A club's second case for the same player, opened after the first ended, has
+no current Contact, Trial, Offer or package until it makes its own — the
+first case keeps naming its own (D-P8-16, journey E2E D10–D12).
+
 | Kind | Function | Tier 1 | Tier 2 | Tier 3 | Tier 4 | Never |
 | --- | --- | --- | --- | --- | --- | --- |
 | Contact | `currentContactForCase(contacts)` | `delivered` (awaiting an answer), by `deliveredAt` | `responded` / `recorded`, by the response or occurrence instant | `draft`, by `updatedAt` | `failed` | `cancelled` |

@@ -129,6 +129,10 @@ function PipelinePanels({ f }: { f: Family }) {
   const trialProcess = m.trial_process;
   const trialSteps = (trialProcess?.steps ?? {}) as Record<string, Figure>;
   const decisionOutcomes = m.decision_outcomes;
+  // M23 P8 — the journey funnel from the records themselves (case-based).
+  const jf = m.journey_evidence_funnel;
+  const jfRows = (jf?.rows ?? []) as { stage: string; value: number; historyOnly: number; basis: string; source: string }[];
+  const jfIntervals = (jf?.intervals ?? {}) as Record<string, { n: number; medianDays: number | null }>;
   const outcomeFigures = (decisionOutcomes?.outcomes ?? {}) as Record<string, Figure>;
   const supersededFigure = decisionOutcomes?.superseded as Figure | undefined;
   const rows = (stages?.rows ?? []) as { status: string; terminal: boolean; value: number }[];
@@ -233,6 +237,35 @@ function PipelinePanels({ f }: { f: Family }) {
                   <td>{t(`m20.trialProcess.${step}`)}</td>
                   <td data-count={trialSteps[step]?.value ?? 0}>{trialSteps[step]?.value ?? 0}</td>
                 </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+      <Panel metric={jf}>
+        <p className="muted small" data-counting="case">{t('m20.jf.counting')}</p>
+        <div className="table-scroll">
+          <table className="data" data-testid="journey-evidence-funnel">
+            <thead><tr><th>{t('m20.col.stage')}</th><th>{t('m20.col.cases')}</th><th>{t('m20.col.historyOnly')}</th><th>{t('m20.col.record')}</th></tr></thead>
+            <tbody>
+              {jfRows.map((r) => (
+                <tr key={r.stage} data-stage={r.stage}>
+                  <td>{t(`m20.jf.${r.stage}`, r.stage.replace(/_/g, ' '))}</td>
+                  <td data-count={r.value}>{r.value}</td>
+                  <td className="muted">{r.historyOnly}</td>
+                  <td className="muted"><code>{r.source}</code></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <h4 style={{ margin: '10px 0 4px' }}>{t('m20.jf.intervals')}</h4>
+        <div className="table-scroll">
+          <table className="data">
+            <thead><tr><th>{t('m20.col.interval')}</th><th>{t('m20.col.cases')}</th><th>{t('m20.col.medianDays')}</th></tr></thead>
+            <tbody>
+              {Object.entries(jfIntervals).map(([k, v]) => (
+                <tr key={k}><td>{t(`m20.jf.int.${k}`, k.replace(/_/g, ' '))}</td><td>{v.n}</td><td>{v.medianDays === null ? t('m20.fig.empty') : v.medianDays}</td></tr>
               ))}
             </tbody>
           </table>

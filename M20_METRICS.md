@@ -149,6 +149,16 @@ boundary, and no metric names a player the organisation may not currently see.
 All T metrics report **median and interquartile range**, never a mean: one
 eighteen-month room would move a mean and tell a director nothing.
 
+#### F6 · `journey_evidence_funnel` (M23 P8)
+- **Definition** — the recruitment journey funnel from the canonical records: for the cohort of cases opened in the window, how many hold the record that proves each stage — a delivered/recorded contact, a trial invitation, a confirmed schedule, a completed trial, a submitted assessment, a finalized decision (by outcome), an issued / accepted / declined Offer, a signing package, a completed signing. Beside each stage, "history only": cohort cases whose status history reached the state with no record behind it (older cases), shown apart and never added.
+- **Unit** — count of cases (rooms); the headline number is the cohort size.
+- **Source** — `db.recruitmentContacts`, `db.requests` (type trial), `db.trials`, `db.assessments`, `db.roomDecisions` (formal heads), `db.recruitmentOffers` (revision status and instants), `db.signingPackages`, `db.signings` (a row named back by a COMPLETED package on the case, or a legacy row recorded after the case opened). Ids, states and instants only.
+- **Numerator / denominator** — counts only; **no rate**, no ranking. Case-based: a case counts once per stage however many retries, revisions, re-invitations or packages it carried.
+- **Time semantics** — window-entry on the case's opening (the same cohort as `funnel_progression`, so the two panels read side by side). Intervals (contact → trial scheduled, trial completed → progress decision, decision → Offer issued, Offer issued → accepted, accepted → signed) are medians in days of the records' own instants, over cohort cases that completed both ends.
+- **Small-n** — none; counts are never suppressed and no rate exists to withhold.
+- **Limitation** — Each stage counts cases for which the record itself exists — a delivered contact, a completed trial, a submitted assessment, a finalized decision, an issued or answered Offer, a completed signing — not cases whose status merely says so. A case counts once per stage however many retries or revisions it carried. Cases whose history reached a stage with no record behind it are shown apart as "history only"; they are older cases, not progress. A recent window is incomplete by construction.
+- **What it never reads** — a note, a rationale, a reason code, a term, a digest, a Trust Score, an assessment rating, the player's name.
+
 #### T1 · `time_to_first_decision`
 - **Definition** — elapsed time from room creation to the first recorded decision on that room.
 - **Unit** — days.

@@ -323,3 +323,102 @@ export function trialProcess(ctx) {
     note: 'Each step is counted on the day it happened, so one trial can appear under several steps in one window and under none in another. Counts are never suppressed; no rate is offered.',
   };
 }
+
+
+// ---------------------------------------------------------------- M23 P8
+
+/** The evidence rule for each journey stage, over the context's org-scoped records. One function per stage; each returns the instant that proves it, or null. */
+const JOURNEY_EVIDENCE = Object.freeze({
+  contacted: (k, x) => firstAt(x.contactsByCase.get(k.id), (c) => ['delivered', 'responded', 'recorded'].includes(c.status) && !c.cancelledAt, (c) => c.deliveredAt ?? c.occurredAt ?? c.recordedAt),
+  trial_requested: (k, x) => firstAt(x.requestsByCase.get(k.id), (r) => r.type === 'trial', (r) => r.createdAt),
+  trial_scheduled: (k, x) => firstAt(x.trialsByCase.get(k.id), (t) => Number.isFinite(t.schedule?.confirmedAt) || t.completion?.state === 'completed', (t) => t.schedule?.confirmedAt ?? t.completion?.at),
+  trial_completed: (k, x) => firstAt(x.trialsByCase.get(k.id), (t) => t.completion?.state === 'completed', (t) => t.completion?.at),
+  assessed: (k, x) => firstAt(x.assessmentsByPlayer.get(k.playerId), (a) => a.state !== 'draft', (a) => a.submittedAt ?? a.createdAt),
+  decision_progress: (k, x) => decisionAt(x.decisionsByCase.get(k.id), 'progress'),
+  decision_hold: (k, x) => decisionAt(x.decisionsByCase.get(k.id), 'hold'),
+  decision_reject: (k, x) => decisionAt(x.decisionsByCase.get(k.id), 'reject'),
+  offer_issued: (k, x) => firstAt(x.offersByCase.get(k.id), (o) => (o.revisions ?? []).some((r) => r && r.issuedAt && r.status !== 'DRAFT'), (o) => Math.min(...(o.revisions ?? []).filter((r) => r && r.issuedAt).map((r) => Number(r.issuedAt)))),
+  offer_accepted: (k, x) => firstAt(x.offersByCase.get(k.id), (o) => (o.revisions ?? []).some((r) => r && r.status === 'ACCEPTED'), (o) => (o.revisions ?? []).find((r) => r && r.status === 'ACCEPTED')?.respondedAt),
+  offer_declined: (k, x) => firstAt(x.offersByCase.get(k.id), (o) => (o.revisions ?? []).some((r) => r && r.status === 'DECLINED'), (o) => (o.revisions ?? []).find((r) => r && r.status === 'DECLINED')?.respondedAt),
+  signing_started: (k, x) => firstAt(x.packagesByCase.get(k.id), () => true, (p) => p.createdAt),
+  signed: (k, x) => {
+    // A canonical row: a COMPLETED package on THIS case that names the row back. A legacy row: no package, recorded after the case opened.
+    const pkgs = x.packagesByCase.get(k.id) ?? [];
+    for (const p of pkgs) { if (p.status === 'COMPLETED' && p.completion?.signingId) { const row = x.signingsById.get(p.completion.signingId); if (row && row.signingPackageId === p.id && !row.cancelledAt) return Number(p.completion.completedAt) || Number(row.ts) || null; } }
+    const legacy = (x.signingsByPlayer.get(k.playerId) ?? []).filter((s) => !s.signingPackageId && !s.cancelledAt && !s.voidedAt && (!Number.isFinite(Number(k.createdAt)) || Number(s.ts) >= Number(k.createdAt)));
+    return legacy.length ? Math.min(...legacy.map((s) => Number(s.ts))) : null;
+  },
+});
+/** The lifecycle state whose history entry is the "history only" counterpart of each stage. */
+const JOURNEY_STAGE_STATUS = Object.freeze({ contacted: 'contacted', trial_requested: 'trial_requested', trial_scheduled: 'trial_scheduled', trial_completed: 'trial_completed', decision_progress: 'offer_consideration', offer_issued: 'offer_made', offer_accepted: 'offer_accepted', offer_declined: 'offer_declined', signed: 'signed' });
+export const JOURNEY_FUNNEL_STAGES = Object.freeze(Object.keys(JOURNEY_EVIDENCE));
+const SOURCE_OF = Object.freeze({ contacted: 'recruitmentContacts', trial_requested: 'requests', trial_scheduled: 'trials', trial_completed: 'trials', assessed: 'assessments', decision_progress: 'roomDecisions', decision_hold: 'roomDecisions', decision_reject: 'roomDecisions', offer_issued: 'recruitmentOffers', offer_accepted: 'recruitmentOffers', offer_declined: 'recruitmentOffers', signing_started: 'signingPackages', signed: 'signings' });
+
+function firstAt(rows, pred, atOf) {
+  let best = null;
+  for (const r of rows ?? []) { if (!r || !pred(r)) continue; const t = Number(atOf(r)); if (!Number.isFinite(t) || t <= 0) continue; if (best === null || t < best) best = t; }
+  return best;
+}
+function decisionAt(rows, outcome) {
+  // The formal head (nothing supersedes it) with this outcome — one decision per case, the one that stands.
+  const heads = (rows ?? []).filter((d) => d && d.kind === 'formal' && d.state !== 'draft' && !d.supersededById && d.outcome === outcome);
+  return heads.length ? Math.min(...heads.map((d) => Number(d.createdAt) || Infinity)) : null;
+}
+const groupBy = (rows, keyOf) => { const m = new Map(); for (const r of rows ?? []) { if (!r) continue; const k = keyOf(r); if (!m.has(k)) m.set(k, []); m.get(k).push(r); } return m; };
+const median = (xs) => { const a = xs.filter((x) => Number.isFinite(x)).sort((p, q) => p - q); if (!a.length) return null; const mid = Math.floor(a.length / 2); return a.length % 2 ? a[mid] : (a[mid - 1] + a[mid]) / 2; };
+const days = (ms) => Math.round((ms / 86_400_000) * 10) / 10;
+
+/**
+ * M23 P8 — the journey funnel from the records (§42–§45). Cohort: cases
+ * opened in the window (the same cohort rule as `funnel_progression`, so the
+ * two panels can be read side by side). Case-based: a case counts once per
+ * stage. `historyOnly` per stage counts cohort cases whose lifecycle history
+ * reached the corresponding state with NO record behind it — reported apart,
+ * never added. `intervals` are medians of canonical instants, in days, over
+ * the cases that completed both ends inside the cohort.
+ */
+export function journeyEvidenceFunnel(ctx) {
+  const w = ctx.window;
+  const cohort = (ctx.rooms ?? []).filter((k) => k && inWindow(k.createdAt, w));
+  const x = {
+    contactsByCase: groupBy(ctx.contacts, (c) => c.caseId),
+    requestsByCase: groupBy(ctx.requests, (r) => r.caseId),
+    trialsByCase: groupBy(ctx.trials, (t) => t.caseId),
+    assessmentsByPlayer: groupBy(ctx.assessments, (a) => a.playerId),
+    decisionsByCase: groupBy(ctx.decisions, (d) => d.roomId),
+    offersByCase: groupBy(ctx.offers, (o) => o.caseId),
+    packagesByCase: groupBy(ctx.packages, (p) => p.caseId),
+    signingsById: new Map((ctx.signings ?? []).filter(Boolean).map((s) => [s.id, s])),
+    signingsByPlayer: groupBy(ctx.signings, (s) => s.playerId),
+  };
+  const reached = (k, status) => (k.history ?? []).some((h) => h && h.action === 'room_status_changed' && h.detail?.to === status) || k.room?.status === status;
+  const rows = [];
+  const instants = new Map(); // stage → Map(caseId → at)
+  for (const stage of JOURNEY_FUNNEL_STAGES) {
+    let value = 0; let historyOnly = 0; const m = new Map();
+    for (const k of cohort) {
+      const at = JOURNEY_EVIDENCE[stage](k, x);
+      if (at !== null) { value += 1; m.set(k.id, at); }
+      else if (JOURNEY_STAGE_STATUS[stage] && reached(k, JOURNEY_STAGE_STATUS[stage])) historyOnly += 1;
+    }
+    instants.set(stage, m);
+    rows.push({ stage, value, historyOnly, basis: 'case', source: SOURCE_OF[stage] });
+  }
+  const between = (a, b) => { const ma = instants.get(a); const mb = instants.get(b); const xs = []; for (const [id, t1] of ma) { const t2 = mb.get(id); if (Number.isFinite(t2) && t2 >= t1) xs.push(t2 - t1); } return { n: xs.length, medianDays: xs.length ? days(median(xs)) : null }; };
+  const intervals = {
+    contact_to_trial: between('contacted', 'trial_scheduled'),
+    trial_completed_to_decision: between('trial_completed', 'decision_progress'),
+    decision_to_offer: between('decision_progress', 'offer_issued'),
+    offer_issued_to_accepted: between('offer_issued', 'offer_accepted'),
+    accepted_to_signed: between('offer_accepted', 'signed'),
+  };
+  return {
+    ...wire(METRICS.journey_evidence_funnel),
+    ...count(cohort.length),
+    cohort: count(cohort.length),
+    rows,
+    intervals,
+    counting: 'case',
+    note: 'Each stage counts cases with the record that proves it. "History only" counts cohort cases whose status history reached the stage with no such record (older cases), shown apart and never added. Intervals are medians of the records\' own instants, in days.',
+  };
+}

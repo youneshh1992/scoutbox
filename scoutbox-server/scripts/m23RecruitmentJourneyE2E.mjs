@@ -481,6 +481,23 @@ const L = {};
   b = await jb(L.broken);
   neg(b.classification === 'integrity_error' && b.integrity.includes('STALE_POINTER') && b.integrity.includes('LIFECYCLE_AHEAD_OF_EVIDENCE') && b.stage === 'contact' && (await jb(L.broken, maria.token)).nextAction.code === 'CONTINUE_EVALUATION', 'D8 a history entry that CLAIMS a Contact which is gone: integrity_error, STALE_POINTER, LIFECYCLE_AHEAD_OF_EVIDENCE — named, not repaired, no crash');
   ok((await j('GET', `/org/rooms/${L.broken}`, undefined, maria.token)).status === 200 && (await j('GET', `/org/rooms/${L.broken}/contacts`, undefined, maria.token)).status === 200, 'D9 the Room and its Contact tab still read');
+  // D10 — the same club opens a SECOND case for a player after the first ended:
+  // the first case's completed Trial is that case's history. It is not this
+  // case's current Trial, not its trial stage, not on its timeline — the same
+  // scope as the evidence gate (trial rows carry `caseId`).
+  const RID1 = await reviewed(maria.token, 'pl-imani');
+  const c1 = await contacted(RID1, 'pl-imani'); await respondContact(c1.REQID, 'pl-imani');
+  const TB = T0 + 3 * DAY;
+  await trialInvited(RID1, TB); const TID1 = await trialAccepted(RID1, 'pl-imani', TB); await trialCompleted(RID1, TID1, TB);
+  const b1 = await jb(RID1);
+  const ended = await lifecycle(RID1, 'rejectCase', { reasonCodes: ['rejected'] });
+  if (ended.status !== 200) console.error(`   D10 reject: ${ended.status} ${JSON.stringify(ended.body).slice(0, 220)}`);
+  const RID2 = await openRoom(maria.token, 'pl-imani');
+  const b2 = await jb(RID2); const j2 = await journey(RID2);
+  ok(b1.resources.trialId === TID1 && ended.status === 200 && RID2 !== RID1 && b2.stage === 'watching' && b2.resources.trialId === null && b2.resources.contactId === null && !done(b2).some((x) => x.startsWith('trial') || x.startsWith('contact')) && !j2.history.entries.some((e) => e.kind.startsWith('trial_') || e.kind.startsWith('contact_')) && b2.classification === 'canonical', 'D10 a second case after the first ended: the earlier Trial and Contact are the earlier case\'s history — not this case\'s current resources, stages or timeline');
+  await lifecycle(RID2, 'startReview');
+  neg(expect(await lifecycle(RID2, 'planTrial'), 422, 'LIFECYCLE_EVIDENCE_REQUIRED') && (await stage(RID2)) === 'under_review', 'D11 the second case cannot borrow the first case\'s invitation or Trial to move on');
+  ok((await jb(RID1)).resources.trialId === TID1 && (await jb(RID1)).stage === 'ended', 'D12 the ended case still names its own Trial');
 }
 
 // ================================================================ F — audiences

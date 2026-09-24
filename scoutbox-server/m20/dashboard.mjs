@@ -27,7 +27,7 @@ import {
 } from './metrics.mjs';
 import {
   pipelineStageCounts, funnelProgression, exitReasonMix, roomSourceMix, sourceStageReach,
-  transitions, firstTerminalAt, trialProcess, decisionOutcomes,
+  transitions, firstTerminalAt, trialProcess, decisionOutcomes, journeyEvidenceFunnel,
 } from './funnels.mjs';
 import {
   timeToFirstDecision, timeInStage, timeToTrialRequested, timeTrialRequestedToCompleted,
@@ -176,6 +176,14 @@ export function buildReportingContext({
     watchlists: (db.dynamicWatchlists ?? []).filter((w2) => w2.orgId === orgId),
     watchlistHistory: (db.watchlistHistory ?? []).filter((h) => h.orgId === orgId),
     trials: (db.trials ?? []).filter((t) => t && t.orgId === orgId),
+    // M23 P8 — the canonical records the journey funnel counts. Org-scoped and
+    // room-filtered like decisions; ids, states and instants only reach the
+    // projection (the metric's `reads` declaration is asserted at boot).
+    contacts: (db.recruitmentContacts ?? []).filter((c) => c && c.orgId === orgId && keptRoomIds.has(c.caseId)),
+    assessments: (db.assessments ?? []).filter((a) => a && a.orgId === orgId),
+    offers: (db.recruitmentOffers ?? []).filter((o) => o && o.orgId === orgId && keptRoomIds.has(o.caseId)),
+    packages: (db.signingPackages ?? []).filter((p) => p && p.orgId === orgId && keptRoomIds.has(p.caseId)),
+    signings: (db.signings ?? []).filter((s) => s && s.orgId === orgId),
     // M23 P4B: trial invitations (requests of type trial tied to a case) for
     // the process counts. Ids, states and times only reach the projection.
     requests: (db.requests ?? []).filter((r) => r && r.orgId === orgId && r.type === 'trial'),
@@ -209,6 +217,7 @@ const FAMILY_BUILDERS = {
     exit_reason_mix: exitReasonMix(ctx),
     trial_process: trialProcess(ctx),
     decision_outcomes: decisionOutcomes(ctx),
+    journey_evidence_funnel: journeyEvidenceFunnel(ctx),
   }),
   duration: (ctx) => ({
     time_to_first_decision: timeToFirstDecision(ctx),
