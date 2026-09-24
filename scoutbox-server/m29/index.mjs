@@ -54,7 +54,7 @@ export function registerSigning(rawCtx) {
   const {
     db, orgRouter, playerRouter, guardianRouter, adminRouter, nextId, persistNow, notify, broadcast, findPlayer, isBlocked,
     rateLimit, isLead, audit, orgCanSee, storage, ledgerAppend, billing = null, refreshJourneyBadges = null, isAdult = null,
-    agent = null, integration = null, evidence = null,
+    agent = null, integration = null, evidence = null, faults = null,
   } = ctx;
 
   // The store is migration-guaranteed (m280_001_signing_workflow, schema 2308);
@@ -551,7 +551,7 @@ export function registerSigning(rawCtx) {
     const problems = completionGate(pkg, { now: at, offer: offer ? { ...offer, status: canonicalOfferStatus(offer, at) } : null, offerRevision: offerRev ? { ...offerRev, status: effectiveRevisionStatus(offerRev, at) } : null, kase, otherCompleted, blocked: isBlocked(pkg.playerId, pkg.orgId) });
     if (problems.length) {
       const first = problems[0];
-      const code = first === 'EXPIRED' ? 'SIGNING_EXPIRED' : first === 'ALREADY_COMPLETED' ? 'SIGNING_ALREADY_COMPLETED' : first === 'PARTIES_INCOMPLETE' ? 'SIGNING_PARTIES_INCOMPLETE' : first === 'DOCUMENT_REQUIRED' ? 'SIGNING_DOCUMENT_REQUIRED' : first === 'DOCUMENT_MISMATCH' || first === 'EVIDENCE_INVALID' || first === 'TEMPORAL_ORDER' ? 'SIGNING_EVIDENCE_INVALID' : first === 'BLOCKED' ? 'SIGNING_BLOCKED' : first === 'LIFECYCLE_CONFLICT' ? 'SIGNING_LIFECYCLE_CONFLICT' : first === 'OFFER_NOT_ACCEPTED' || first === 'OFFER_REVISION_MISMATCH' ? 'SIGNING_OFFER_NOT_ACCEPTED' : first === 'CONFLICTING_COMPLETED_SIGNING' ? 'SIGNING_CONFLICT' : first.startsWith('STATE_') ? 'SIGNING_STATE_INVALID' : 'SIGNING_STATE_UNKNOWN';
+      const code = first === 'EXPIRED' ? 'SIGNING_EXPIRED' : first === 'ALREADY_COMPLETED' ? 'SIGNING_ALREADY_COMPLETED' : first === 'STATE_VOIDED' ? 'SIGNING_VOIDED' : first === 'STATE_CANCELLED' ? 'SIGNING_CANCELLED' : first === 'PARTIES_INCOMPLETE' ? 'SIGNING_PARTIES_INCOMPLETE' : first === 'DOCUMENT_REQUIRED' ? 'SIGNING_DOCUMENT_REQUIRED' : first === 'DOCUMENT_MISMATCH' || first === 'EVIDENCE_INVALID' || first === 'TEMPORAL_ORDER' ? 'SIGNING_EVIDENCE_INVALID' : first === 'BLOCKED' ? 'SIGNING_BLOCKED' : first === 'LIFECYCLE_CONFLICT' ? 'SIGNING_LIFECYCLE_CONFLICT' : first === 'OFFER_NOT_ACCEPTED' || first === 'OFFER_REVISION_MISMATCH' ? 'SIGNING_OFFER_NOT_ACCEPTED' : first === 'CONFLICTING_COMPLETED_SIGNING' ? 'SIGNING_CONFLICT' : first.startsWith('STATE_') ? 'SIGNING_STATE_INVALID' : 'SIGNING_STATE_UNKNOWN';
       return err(res, code, 'The signing cannot be completed yet.', { blockers: problems, current: { status: effectiveStatus(pkg, at) } });
     }
     if (subjectRemoved(kase)) return err(res, 'SIGNING_SUBJECT_REMOVED', 'This player removed their ScoutBox account.');
@@ -579,11 +579,13 @@ export function registerSigning(rawCtx) {
       const written = recordCompletedSigning({ player, org, actor: req.orgUser, at, pkg, rev });
       if (written.duplicate) { rollback('duplicate_row'); return err(res, 'SIGNING_ALREADY_COMPLETED', 'A completed signing record already exists for this package.'); }
       signing = written.signing; effects = written.effects;
+      if (faults?.shouldFail?.('signing.complete.after_row')) throw new Error('simulated failure after the db.signings row (development fault layer)');
       pkg.completion = { signingId: signing.id, completedAt: at, completedBy: by, contract: rev.contract, documentSha256: rev.document.sha256, lifecycle: null };
       // The lifecycle asks the ONE validator with the real evidence provider — which now finds the row this completion just wrote.
       moved = advanceCase({ req, room: kase, action: 'confirmSignedOutcome', at, trigger: `signing:complete:${pkg.id}`, keyDetail: { signingPackageId: pkg.id, signingId: signing.id } });
       if (!moved.applied) { rollback(`lifecycle_${moved.reason}`); return err(res, 'SIGNING_LIFECYCLE_CONFLICT', moved.message ?? 'The case could not be moved to Signed; nothing was recorded.', { lifecycle: moved, current: { status: kase.room.status } }); }
       pkg.completion.lifecycle = { from: moved.from, to: moved.to, at };
+      if (faults?.shouldFail?.('signing.complete.after_lifecycle')) throw new Error('simulated failure after the lifecycle moved (development fault layer)');
       kase.links ??= {}; kase.links.signingId = signing.id;
       if (key) keyList(pkg, 'complete').push({ key, fp, signingId: signing.id, at });
       hist(pkg, 'signing_completed', by, { revisionId: rev.id, signingId: signing.id, sha256: rev.document.sha256 }, at);
@@ -594,7 +596,7 @@ export function registerSigning(rawCtx) {
       rollback(`threw ${e?.message ?? e}`);
       return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be completed; nothing was recorded.');
     }
-    safe('effects', () => effects?.());
+    safe('effects', () => { if (faults?.shouldFail?.('signing.complete.effects')) throw new Error('simulated failure in the after-effects (development fault layer)'); effects?.(); });
     safe('broadcast', () => broadcast?.('signing_completed', { orgId: pkg.orgId, roomId: kase.id, signingPackageId: pkg.id, signingId: signing.id }));
     safe('notify_agent', () => notifyAgent(pkg, `${org.name} completed the signing for your client ${player.name}.`));
     safe('notify_club', () => notifyClubLeads(pkg, `Signing completed for ${player.name}. The case reads Signed.`));

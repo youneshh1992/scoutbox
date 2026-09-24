@@ -24,7 +24,11 @@
  * so a single server can be walked through slow → failed → recovered.
  */
 
-export const FAULT_KINDS = ['delay', 'unavailable', 'timeout', 'retryable', 'fatal'];
+export const FAULT_KINDS = ['delay', 'unavailable', 'timeout', 'retryable', 'fatal', 'internal'];
+// `internal:STEP[:N]` is not a route fault: a domain that owns a multi-store unit
+// of work (M23 P7 signing completion) asks `shouldFail(STEP)` at a named seam
+// and throws when a rule names it, for the first N hits (default 1). It proves
+// the rollback path with a real failure, and cannot exist in production.
 
 export function parseFaultRules(spec = '') {
   return String(spec).split(';').map((s) => s.trim()).filter(Boolean).map((rule) => {
@@ -50,7 +54,7 @@ export function createFaultLayer({ env = process.env } = {}) {
   const middleware = (req, res, next) => {
     if (!enabled || rules.length === 0) return next();
     const path = String(req.originalUrl ?? req.url ?? '').split('?')[0];
-    const rule = rules.find((r) => matches(r.pattern, path));
+    const rule = rules.find((r) => r.kind !== 'internal' && matches(r.pattern, path));
     if (!rule) return next();
     rule.hits += 1;
     const fail = (status, error, retryable, message) => res.status(status).json({
@@ -87,5 +91,14 @@ export function createFaultLayer({ env = process.env } = {}) {
     });
   }
 
-  return { enabled, install, middleware, rules: () => rules };
+  /** Development only: does a rule name this internal seam (and has it hits left)? Always false in production. */
+  function shouldFail(step) {
+    if (!enabled) return false;
+    const rule = rules.find((r) => r.kind === 'internal' && r.pattern === step);
+    if (!rule) return false;
+    rule.hits += 1;
+    return rule.hits <= (rule.arg ?? 1);
+  }
+
+  return { enabled, install, middleware, rules: () => rules, shouldFail };
 }

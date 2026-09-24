@@ -275,17 +275,20 @@ section('4 — planted corruption is named, refused, omitted, never repaired; a 
   const c5 = clone('spk-t5', {}); revOf(c5).requiredParties[0].completedAt = revOf(c5).readyAt - 1;
   const c6 = clone('spk-t6', { caseId: R.chi.RID, offerId: R.chi.OID }); // a COMPLETED package on a case that is at offer_accepted (Okafor's)
   const c7 = clone('spk-t7', {}); revOf(c7).document = null; // presented without a document
-  db.signingPackages.push(c1, c2, c3, c4, c5, c6, c7);
+  const c8 = clone('spk-t8', { offerId: R.chi.OID }); // #5 an Offer that names another player (Okafor's)
+  const c9 = clone('spk-t9', { caseId: R.chi.RID }); // #6 a case that names another player
+  const c10 = clone('spk-t10', { offerRevisionId: 'rofr-stale' }); // #7 bound to an Offer revision the Offer does not hold
+  db.signingPackages.push(c1, c2, c3, c4, c5, c6, c7, c8, c9, c10);
   const rowsBefore = JSON.stringify(db.signingPackages.filter((p) => /^spk-t/.test(p.id)));
   const signingsBefore = JSON.stringify(db.signings);
   const chiStage = db.recruitmentCases.find((c) => c.id === R.chi.RID).room.status;
   openStore(DIR).save({ db });
   const s = await bootOn(DIR, PORT);
-  ok(s.up, '4.1 the server boots with seven corrupt rows present — corruption is not fatal to the process');
+  ok(s.up, '4.1 the server boots with ten corrupt rows present — corruption is not fatal to the process');
   const { j } = s;
   const maria = (await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' })).body;
   const kim = (await j('POST', '/auth/player/login', { playerId: 'pl-kim' })).body.token;
-  for (const [id, why] of [['spk-t1', 'an unknown status word'], ['spk-t2', 'COMPLETED without its completion record'], ['spk-t3', 'a PLAYER party completed by an org actor'], ['spk-t4', 'a pointer at a non-latest revision'], ['spk-t5', 'a party completed before the revision was presented'], ['spk-t6', 'a COMPLETED package on a case that is not signed'], ['spk-t7', 'presented without a document']]) {
+  for (const [id, why] of [['spk-t1', 'an unknown status word'], ['spk-t2', 'COMPLETED without its completion record'], ['spk-t3', 'a PLAYER party completed by an org actor'], ['spk-t4', 'a pointer at a non-latest revision'], ['spk-t5', 'a party completed before the revision was presented'], ['spk-t6', 'a COMPLETED package on a case that is not signed'], ['spk-t7', 'presented without a document'], ['spk-t8', 'an Offer that names another player'], ['spk-t9', 'a case that names another player'], ['spk-t10', 'a stale Offer revision']]) {
     const r = await j('GET', `/org/signings/${id}`, undefined, maria.token);
     neg(r.status === 500 && r.body.error === 'SIGNING_STATE_UNKNOWN' && !has(r.body, 'revisions') && !has(r.body, 'stack'), `4.2 ${id} (${why}): 500 SIGNING_STATE_UNKNOWN, nothing internal in the body`);
     const m = await j('POST', `/org/signings/${id}/complete`, { expectedRev: 1, clientKey: key() }, maria.token);

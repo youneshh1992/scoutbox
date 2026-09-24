@@ -84,14 +84,14 @@ const writeSnapshot = (dir, db) => openStore(dir).save({ db, idCounter: 500_000,
 section('1 — the P5.6D step: one step at 2307, three EMPTY stores, idempotent, production-required');
 {
   const step = MIGRATIONS.find((m) => m.id === STEP);
-  ok(step?.version === 2307 && SCHEMA_VERSION === 2307, `${STEP} is version 2307; the current schema is ${SCHEMA_VERSION}`);
+  ok(step?.version === 2307 && SCHEMA_VERSION === 2308, `${STEP} is version 2307; the current schema is ${SCHEMA_VERSION} (P7 added m280_001_signing_workflow at 2308)`);
   ok(MIGRATIONS.filter((m) => m.version === 2307).length === 1, 'exactly one step at 2307 — the schema was advanced exactly once');
-  neg(!MIGRATIONS.some((m) => m.version > 2307), 'and nothing above 2307');
+  neg(MIGRATIONS.filter((m) => m.version > 2307).map((m) => m.id).join(',') === 'm280_001_signing_workflow', 'and exactly one step above 2307 — P7\'s signing workflow');
   const versions = MIGRATIONS.filter((m) => m.version).map((m) => m.version);
   neg(new Set(versions).size === versions.length, 'every versioned step reaches a distinct schema version — no version is advanced twice');
   const fresh = {};
   const up = runMigrations(fresh);
-  ok(up.to === 2307 && STORES.every((s) => Array.isArray(fresh[s])), 'a clean database gets the three stores');
+  ok(up.to === 2308 && STORES.every((s) => Array.isArray(fresh[s])), 'a clean database gets the three stores (and the schema lands at 2308)');
   neg(STORES.every((s) => fresh[s].length === 0), 'all three start EMPTY — a transaction is a new concept and no existing record is reinterpreted as one');
   neg(fresh.recruitmentOffers === undefined && fresh.offers === undefined && fresh.agencyInvoices === undefined, 'no offer and no agency-invoice store was created (out of scope; the invoice store is deferred with its reason recorded)');
   const { schema: _s1, ...storesBefore } = fresh;
@@ -121,15 +121,16 @@ section('2 — upgrade from 2306: three containers appear and nothing else moves
   db.complianceContexts.push({ id: 'ctx-1', agencyOrgId: 'org-a', agentUserId: 'usr-1', type: 'transfer', jurisdictions: ['ENG'], parties: [], representations: [], evaluations: [], status: 'open', history: [] });
   db.representationAgreements.push({ id: 'rep-1', agentUserId: 'usr-1', agencyOrgId: 'org-a', clientId: 'pl-1', status: 'active', confirmedAt: 1, scope: ['transfer'], rev: 1, history: [] });
   db.schema.version = 2306;
-  db.schema.migrations = db.schema.migrations.filter((m) => m.id !== STEP);
-  delete db.agentTransactions; delete db.transactionRepresentations; delete db.transactionDocuments;
+  // A TRUE 2306 snapshot: the P5.6D step and the P7 step (m280_001_signing_workflow, 2308) are both dropped with their stores.
+  db.schema.migrations = db.schema.migrations.filter((m) => m.id !== STEP && m.id !== 'm280_001_signing_workflow');
+  delete db.agentTransactions; delete db.transactionRepresentations; delete db.transactionDocuments; delete db.signingPackages;
   const casesBefore = stableJson(db.recruitmentCases);
   const contextsBefore = stableJson(db.complianceContexts);
   const agreementsBefore = stableJson(db.representationAgreements);
   const playersBefore = stableJson(db.players);
   ok(db.schema.version === 2306 && db.agentTransactions === undefined, 'the fixture is a 2306 snapshot with a recruitment case, a compliance context and an agreement, and no transaction store');
   const up = runMigrations(db);
-  ok(up.ran.join(',') === STEP && up.to === 2307, 'a 2306 snapshot runs exactly the one P5.6D step');
+  ok(up.ran.join(',') === `${STEP},m280_001_signing_workflow` && up.to === 2308, 'a 2306 snapshot runs exactly the P5.6D step and then the P7 step, in order');
   neg(STORES.every((s) => Array.isArray(db[s]) && db[s].length === 0), 'the three containers appear EMPTY');
   neg(stableJson(db.recruitmentCases) === casesBefore, 'the recruitment case is untouched — it did not become a transaction and gained no transaction field (§3)');
   neg(stableJson(db.complianceContexts) === contextsBefore, 'the compliance context is untouched — it is not reinterpreted as a transaction either');
@@ -137,7 +138,7 @@ section('2 — upgrade from 2306: three containers appear and nothing else moves
   db.schema.version = 2306; db.schema.migrations = db.schema.migrations.filter((m) => m.id !== STEP);
   db.agentTransactions.push({ id: 'atx-partial' });
   const rerun = runMigrations(db);
-  neg(rerun.ran.join(',') === STEP && db.agentTransactions.length === 1, 'a partial upgrade (the store exists, the record does not) completes without duplicating anything');
+  neg(rerun.ran[0] === STEP && db.agentTransactions.length === 1, 'a partial upgrade (the store exists, the record does not) completes without duplicating anything');
   writeSnapshot(dir, db);
   globalThis.UPGRADE_DIR = dir;
 }
@@ -149,7 +150,7 @@ section('3 — a real boot over the upgraded snapshot');
   ok(s.up, 'the server boots over a 2306-derived snapshot');
   if (s.up) {
     const h = await s.j('GET', '/healthz');
-    ok(h.body.schemaVersion === 2307, 'and reports 2307');
+    ok(h.body.schemaVersion === 2308, 'and reports 2308');
     neg(!new RegExp(STEP).test(s.log()), 'the P5.6D step did NOT run again — the migration record says it already ran');
     const org = await s.j('POST', '/auth/org/login', { orgId: 'org-a', scoutName: 'Boot Admin', role: 'Director', platform: 'agent' });
     const list = await s.j('GET', '/org/agent/transactions', undefined, org.body.token);
@@ -208,7 +209,7 @@ section('4 — a real workspace survives a restart byte for byte');
     await s.stop();
   }
   const snap = snapshotOf(dir);
-  ok(snap && snap.schema.version === 2307 && snap.agentTransactions.length === 1 && snap.transactionRepresentations.length === 1 && snap.transactionDocuments.length === 2, 'the snapshot on disk holds one transaction, one representation binding and two document versions at 2307');
+  ok(snap && snap.schema.version === 2308 && snap.agentTransactions.length === 1 && snap.transactionRepresentations.length === 1 && snap.transactionDocuments.length === 2, 'the snapshot on disk holds one transaction, one representation binding and two document versions at 2307');
   const row = snap.agentTransactions[0];
   ok(row.status === 'ON_HOLD' && row.holdReasonCode === 'awaiting_document' && row.parties.length === 2 && row.parties.every((p) => p.confirmedAt), 'the status, its reason code and both party confirmations are on disk');
   ok(row.compliance?.evaluationId && row.compliance.contextId && row.compliance.partyRevision && row.compliance.policyVersions.length >= 1, 'the compliance snapshot reference — evaluation, context, party revision and policy versions — is on disk');

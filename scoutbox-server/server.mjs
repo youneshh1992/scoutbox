@@ -4467,6 +4467,7 @@ m29Ctx = registerSigning({
   agent: m24Ctx,
   integration: agentIntegration,
   evidence: { storeFile: m14Ctx.storeEvidenceFile, add: m14Ctx.addEvidence },
+  faults: faultLayer,
 });
 m28Ctx.setSigningSummary?.(m29Ctx.summaryForOffer);
 

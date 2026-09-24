@@ -27,7 +27,7 @@ import { M29_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../m29/err
 import {
   SIGNING_STATUSES, SIGNING_STORED_STATUSES, SIGNING_METHODS, PARTY_TYPES, MINOR_SIGNING_PATHWAY_ENABLED, minorSigningPathwayOpen,
   payloadFingerprint, validateContractDates, validateExpiry, requiredPartiesFor, effectiveStatus, canStart, canCompleteParty, completionGate,
-  signingIntegrity, signingConsistency, signingRecipientView, signingAgentView, signingClubView, cleanText,
+  signingIntegrity, signingConsistency, signingCorrupt, SIGNING_CORRUPTION, signingRecipientView, signingAgentView, signingClubView, cleanText,
 } from '../m29/signing.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -671,6 +671,60 @@ section('Y — temporal integrity: server clock, DATE_ONLY contract days, imposs
     const spoof = await start(N2.OID, { clientKey: key(), createdAt: 1, signedAt: 1, completedAt: 1 });
     neg(spoof.status === 409 || (spoof.status === 201 && sv(spoof).createdAt === T0), '#43 Y6 body timestamps are ignored: the server instant is the only clock');
   } else ok(true, 'Y2–Y6 (Mateus\'s case could not be re-offered here; the date rules are proven at the pure level A13)');
+}
+
+// ================================================================ AD — adversarial closure (#5 #6 #7 #28 #48)
+section('AD — reference mismatches, a voided package, and a completion that fails half-way');
+{
+  // #5 #6 #7 (pure): a package whose Offer, case or Offer revision contradicts it is corruption — omitted, refused, never repaired.
+  const TT = T0;
+  const mk = (patch = {}) => ({ id: 'spk-x', orgId: 'o1', playerId: 'p1', caseId: 'c1', offerId: 'rof-1', offerRevisionId: 'rofr-1', status: 'READY', currentRevisionId: 'spr-1', createdAt: TT, expiresAt: TT + DAY, revisions: [{ id: 'spr-1', revisionNumber: 1, status: 'READY', createdAt: TT, readyAt: TT + 1, document: { evidenceId: 'ev', sha256: SHA_A }, contract: { startDate: '2027-07-01', endDate: null }, requiredParties: [{ partyType: 'PLAYER', forEntityId: 'p1', status: 'PENDING' }, { partyType: 'CLUB_SIGNATORY', forEntityId: 'o1', status: 'PENDING' }] }], ...patch });
+  const okOffer = { id: 'rof-1', orgId: 'o1', playerId: 'p1', caseId: 'c1', revisions: [{ id: 'rofr-1', status: 'ACCEPTED' }] };
+  const okCase = { id: 'c1', orgId: 'o1', playerId: 'p1', room: { status: 'offer_accepted' } };
+  ok(signingConsistency(mk(), { offer: okOffer, kase: okCase }, TT).length === 0, 'AD0 a sound package over its accepted Offer revision has no consistency problem');
+  const c5 = signingConsistency(mk(), { offer: { ...okOffer, playerId: 'p2' }, kase: okCase }, TT);
+  neg(c5.includes('OFFER_REFERENCE_MISMATCH') && signingCorrupt(c5), '#5 AD1 a package whose Offer names another player is corruption');
+  neg(signingConsistency(mk(), { offer: okOffer, kase: { ...okCase, playerId: 'p2' } }, TT).includes('CASE_REFERENCE_MISMATCH') && signingConsistency(mk(), { offer: { ...okOffer, caseId: 'c9' }, kase: okCase }, TT).includes('OFFER_REFERENCE_MISMATCH'), '#6 AD2 a package whose case names another player, or whose Offer belongs to another case, is corruption');
+  const staleOffer = { ...okOffer, revisions: [{ id: 'rofr-0', status: 'SUPERSEDED', supersededByRevisionId: 'rofr-1' }, { id: 'rofr-1', status: 'ACCEPTED' }] };
+  neg(signingConsistency(mk({ offerRevisionId: 'rofr-0' }), { offer: staleOffer, kase: okCase }, TT).includes('OFFER_REVISION_MISMATCH') && signingConsistency(mk({ offerRevisionId: 'rofr-9' }), { offer: staleOffer, kase: okCase }, TT).includes('OFFER_REVISION_MISMATCH') && signingConsistency(mk(), { offer: staleOffer, kase: okCase }, TT).length === 0 && SIGNING_CORRUPTION.includes('OFFER_REVISION_MISMATCH'), '#7 AD3 a package bound to a superseded or unknown Offer revision is corruption; bound to the accepted one it is sound');
+
+  // #28 (HTTP): a voided package writes nothing and moves nothing. Harbour (Rita) and Svensson.
+  const V = await presented(rita.token, 'pl-svensson');
+  const vs = await pSign(V.SID, { revisionId: V.SREV, documentSha256: SHA_A, clientKey: key() }, P['pl-svensson'].token);
+  ok(vs.status === 200, 'AD4 Svensson confirms Harbour\'s document');
+  const vRev = async () => (await sGet(V.SID, rita.token)).body.signing.rev;
+  const vo = await voidP(V.SID, { expectedRev: await vRev(), reason: 'Wrong document presented', clientKey: key() }, rita.token);
+  ok(vo.status === 200 && sv(vo).status === 'VOIDED' && sv(vo).terminal === true && sv(vo).voidReason === 'Wrong document presented', '#28 AD5 the recruitment lead voids the presented package, with a reason on the record');
+  const vStage = await stage(V.RID, rita.token); const vRows = await signings(rita.token);
+  if (vStage !== 'offer_accepted' || !Array.isArray(vRows)) console.error('   AD6 diag →', vStage, JSON.stringify(vRows).slice(0, 200));
+  neg(expect(await complete(V.SID, { expectedRev: sv(vo).rev, clientKey: key() }, rita.token), 409, 'SIGNING_VOIDED') && vStage === 'offer_accepted' && vRows.every((s) => s.signingPackageId !== V.SID && s.offerId !== V.OID), '#28 AD6 a voided package cannot complete, moved no case and wrote no signing (Harbour\'s earlier legacy row for Svensson is not this package)');
+  neg(expect(await pSign(V.SID, { revisionId: V.SREV, documentSha256: SHA_A, clientKey: key() }, P['pl-svensson'].token), 409, 'SIGNING_VOIDED') && expect(await clubSign(V.SID, { expectedRev: sv(vo).rev, revisionId: V.SREV, documentSha256: SHA_A, clientKey: key() }, rita.token), 409, 'SIGNING_VOIDED'), 'AD7 nor can any party confirm it');
+  const pvv = await pGet(V.SID, P['pl-svensson'].token);
+  ok(pvv.status === 200 && pvv.body.signing.status === 'VOIDED' && pvv.body.signing.nextAction === null, 'AD8 the player reads Voided with nothing to do');
+  const vr = await sRoom(V.RID, rita.token);
+  ok(vr.body.requirements.startBlockers.length === 0 && vr.body.livePackageId === null && (await j('GET', `/org/offers/${V.OID}`, undefined, rita.token, at(T0))).body.offer.status === 'ACCEPTED', 'AD9 the accepted Offer is unchanged and a new signing can be opened');
+
+  // #48 (HTTP, §87): a completion that fails AFTER the db.signings row, and one that fails AFTER the case moved, both leave NOTHING behind.
+  const setFaults = (rules) => j('POST', '/__faults', { rules });
+  const plKey = (p) => { const x = p?.player ?? p ?? {}; return JSON.stringify([x.contractStatus ?? null, x.availability ?? null, x.level ?? null, (x.timeline ?? []).length]); };
+  for (const [who, playerId, seam] of [['after the db.signings row was written', 'pl-imani', 'signing.complete.after_row'], ['after the case moved to signed', 'pl-martin', 'signing.complete.after_lifecycle']]) {
+    const F = await presented(rita.token, playerId);
+    const fs1 = await pSign(F.SID, { revisionId: F.SREV, documentSha256: SHA_A, clientKey: key() }, P[playerId].token);
+    const fRev = async () => (await sGet(F.SID, rita.token)).body.signing.rev;
+    const fs2 = await clubSign(F.SID, { expectedRev: await fRev(), revisionId: F.SREV, documentSha256: SHA_A, clientKey: key() }, rita.token);
+    ok(fs1.status === 200 && fs2.status === 200, `AD10 ${playerId}: both parties confirmed Harbour's document`);
+    const before = { pkg: JSON.stringify((await sGet(F.SID, rita.token)).body.signing), rows: (await signings(rita.token)).length, stage: await stage(F.RID, rita.token), player: plKey(await orgPlayer(playerId)), hist: (await sHist(F.SID, rita.token)).body.items.length, caseHist: (await journey(F.RID, rita.token)).case.history?.length ?? null };
+    ok((await setFaults(`internal:${seam}:1`)).status === 200, `AD11 fault armed: the next completion throws ${who}`);
+    const boom = await complete(F.SID, { expectedRev: JSON.parse(before.pkg).rev, clientKey: key() }, rita.token);
+    neg(expect(boom, 500, 'SIGNING_STATE_UNKNOWN') && !has(boom.body, 'simulated') && !has(boom.body, 'stack'), `#48 AD12 the completion fails ${who}: 500 SIGNING_STATE_UNKNOWN, nothing internal in the body`);
+    await setFaults('');
+    const afterPkg = (await sGet(F.SID, rita.token)).body.signing;
+    neg(JSON.stringify(afterPkg) === before.pkg && (await signings(rita.token)).length === before.rows && (await stage(F.RID, rita.token)) === before.stage && plKey(await orgPlayer(playerId)) === before.player && (await sHist(F.SID, rita.token)).body.items.length === before.hist, `#48 AD13 ${who}: the package, db.signings, the case, the player and the history are exactly as before — nothing half-written`);
+    if (seam.endsWith('after_lifecycle')) await setFaults('internal:signing.complete.effects:1');
+    const retry = await complete(F.SID, { expectedRev: afterPkg.rev, clientKey: key() }, rita.token);
+    await setFaults('');
+    ok(retry.status === 200 && sv(retry).status === 'COMPLETED' && (await signings(rita.token)).filter((s) => s.playerId === playerId).length === 1 && (await stage(F.RID, rita.token)) === 'signed' && plKey(await orgPlayer(playerId)).includes('under_contract'), `AD14 ${who}: once the fault is gone the same completion succeeds${seam.endsWith('after_lifecycle') ? ' even with the after-effects (badges, notifications) failing' : ''} — exactly one row, the case signed, the player under contract`);
+  }
 }
 
 // ================================================================ Z — the signing boundary (source sweep) and restart

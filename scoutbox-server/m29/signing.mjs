@@ -316,11 +316,20 @@ export function signingConsistency(pkg, { offer, kase }, now) {
   const st = effectiveStatus(pkg, now);
   if (offer && (offer.orgId !== pkg.orgId || offer.playerId !== pkg.playerId || offer.caseId !== pkg.caseId)) problems.push('OFFER_REFERENCE_MISMATCH');
   if (kase && (kase.orgId !== pkg.orgId || kase.playerId !== pkg.playerId)) problems.push('CASE_REFERENCE_MISMATCH');
+  // §9, §66 (#7): the package is bound to the ACCEPTED Offer revision. A binding to a revision the Offer does not hold,
+  // one that was superseded or withdrawn, or one whose answer was not an acceptance, is a package this server never wrote.
+  const revs = Array.isArray(offer?.revisions) ? offer.revisions : null;
+  if (revs && revs.length) {
+    const bound = revs.find((r) => r && r.id === pkg.offerRevisionId) ?? null;
+    const answer = bound ? (Array.isArray(offer.responses) ? offer.responses.find((x) => x && x.revisionId === bound.id) ?? null : null) : null;
+    const stale = !bound || !!bound.supersededByRevisionId || !!bound.withdrawnAt || (answer && answer.responseType !== 'accepted') || (typeof bound.status === 'string' && !['ACCEPTED', 'ISSUED'].includes(bound.status));
+    if (stale) problems.push('OFFER_REVISION_MISMATCH');
+  }
   if (st === 'COMPLETED' && kase && kase.room?.status !== 'signed') problems.push('COMPLETED_BUT_CASE_NOT_SIGNED');
   if (st && st !== 'COMPLETED' && LIVE.includes(st) && kase && kase.room?.status !== 'offer_accepted') problems.push('LIVE_SIGNING_CASE_NOT_AT_OFFER_ACCEPTED');
   return problems;
 }
-export const SIGNING_CORRUPTION = Object.freeze(['OFFER_REFERENCE_MISMATCH', 'CASE_REFERENCE_MISMATCH', 'COMPLETED_BUT_CASE_NOT_SIGNED']);
+export const SIGNING_CORRUPTION = Object.freeze(['OFFER_REFERENCE_MISMATCH', 'CASE_REFERENCE_MISMATCH', 'OFFER_REVISION_MISMATCH', 'COMPLETED_BUT_CASE_NOT_SIGNED']);
 export const signingCorrupt = (problems) => (problems ?? []).some((p) => SIGNING_CORRUPTION.includes(p));
 
 // ------------------------------------------------------------- views

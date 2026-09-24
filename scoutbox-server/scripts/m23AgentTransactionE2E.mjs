@@ -243,8 +243,9 @@ section('pure AA/AC/AD — stores, migration, events, notifications, rate polici
 {
   for (const s of ['agentTransactions', 'transactionRepresentations', 'transactionDocuments']) ok(guaranteeFor(s) === 'migration' && PRODUCTION_REQUIRED_STORES.includes(s), `AA1 ${s} is migration-guaranteed and production-required`);
   const step = MIGRATIONS.find((m) => m.id === 'm260_001_transaction_stores');
-  ok(step?.version === 2307 && SCHEMA_VERSION === 2307 && MIGRATIONS.filter((m) => m.version === 2307).length === 1, 'AA2 exactly one step advances the schema to 2307');
-  neg(!MIGRATIONS.some((m) => m.version > 2307), 'AA3 and nothing above it');
+  ok(step?.version === 2307 && MIGRATIONS.filter((m) => m.version === 2307).length === 1, 'AA2 exactly one step advances the schema to 2307');
+  // P7 (m280_001_signing_workflow) is the ONE step above it: the current schema is 2308.
+  neg(SCHEMA_VERSION === 2308 && MIGRATIONS.filter((m) => m.version > 2307).length === 1 && MIGRATIONS.find((m) => m.version > 2307)?.version === 2308, 'AA3 and exactly one step above it — P7\'s signing workflow at 2308');
   const src = String(step.up);
   neg(!/recruitmentCases|complianceContexts|signings|offers/.test(src), 'AA4 the step reinterprets no existing record as a transaction and creates no offer or signing store (§3, §5)');
   const fresh = {}; step.up(fresh);

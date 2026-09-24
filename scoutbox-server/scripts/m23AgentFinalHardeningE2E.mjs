@@ -57,7 +57,7 @@ import { TRANSACTION_STATUSES, DOCUMENT_TYPES, DOCUMENT_VISIBILITY, TIMELINE_AUD
 import { isAdult, ageOn, parseDob } from '../domain.mjs';
 import { agentClientBasis } from '../m27/integration.mjs';
 import { EVENT_REGISTRY } from '../m182/eventRegistry.mjs';
-import { SCHEMA_VERSION } from '../m182/migrations.mjs';
+import { SCHEMA_VERSION, MIGRATIONS } from '../m182/migrations.mjs';
 import { RATE_LIMIT_POLICY } from '../m181/rateLimit.mjs';
 import { openStore } from '../store.mjs';
 import { hashPassword } from '../adapters.mjs';
@@ -280,9 +280,10 @@ section('W/pure — events, and the vocabulary that must not appear');
   const names = Object.keys(EVENT_REGISTRY);
   ok(names.length > 0, 'W1 the event registry is populated');
   neg(!names.some((n) => /offer_made|offer_accepted|offer_declined/.test(n)), 'W2 no offer lifecycle event exists (§15)');
-  neg(!names.some((n) => /signing|signed_contract/.test(n)), 'W2b nor a signing event');
+  // P7 added the signing workflow's own club-private events (signing_*); the AGENT domain still emits none, and no `signed_contract` vocabulary exists.
+  neg(!names.some((n) => /signed_contract/.test(n)) && names.filter((n) => /signing/.test(n)).every((n) => /^signing_/.test(n) && EVENT_REGISTRY[n].audience === 'org_private') && !names.some((n) => /^(agent|representation|transaction).*sign/.test(n)), 'W2b nor an agent-domain signing event — the P7 signing_* events are the club\'s own, org_private');
   neg(!names.some((n) => /commission|fee_agreed/.test(n)), 'W2c nor a commission event');
-  ok(SCHEMA_VERSION === 2307, 'W3 the schema is 2307 — P5.6F adds no migration');
+  ok(SCHEMA_VERSION === 2308 && !MIGRATIONS.some((m) => /agent|representation|transaction|compliance/i.test(m.id) && m.version > 2307), 'W3 the schema is 2308 (P7) — P5.6F added no migration');
 }
 
 // =================================================================== LIVE
