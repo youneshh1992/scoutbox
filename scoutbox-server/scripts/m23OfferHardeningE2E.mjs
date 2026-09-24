@@ -391,6 +391,7 @@ section('P — accept vs accept / decline vs decline / accept vs decline / accep
   neg(r.loser?.body?.error === 'OFFER_ALREADY_RESPONDED', 'P3c the loser reads OFFER_ALREADY_RESPONDED');
   // accept vs withdraw — Tanaka
   x = await issued(maria.token, 'pl-tanaka');
+  globalThis.__T = { RID: x.RID, OID: x.OID, R: x.R };
   r = await check('P4 accept vs withdraw', x.RID, x.OID, x.R, tanaka.token, [() => pAccept(x.OID, { revisionId: x.R, clientKey: key() }, tanaka.token), () => withdraw(x.OID, { expectedRev: x.rev, clientKey: key() })], ['offer_accepted', 'offer_consideration']);
   neg((r.o.status === 'ACCEPTED' && r.loser?.body?.error === 'OFFER_ALREADY_RESPONDED') || (r.o.status === 'WITHDRAWN' && r.loser?.body?.error === 'OFFER_WITHDRAWN'), `P4c the loser is told which state won (${r.loser?.body?.error})`);
   // decline vs withdraw — Svensson again (reopen)
@@ -586,6 +587,7 @@ section('D — block transitions at every point of the Offer life');
   } else ok(true, `D5–D10 (Nowak's case is at ${stK}; the after-draft block rules are asserted in m23OfferE2E R)`);
   // block before decline / before withdraw — Mensah (a fresh case)
   const RT = await toConsideration(maria.token, 'pl-mensah');
+  globalThis.__M = { RT };
   await reopen(RT);
   if (await stage(RT) === 'offer_consideration') {
     const c = await create(RT, { terms: TERMS, expiresAt: T0 + 7 * DAY, clientKey: key() });
@@ -749,6 +751,30 @@ section('L — notification privacy: every Offer notification carries a factual 
   neg(all.length > 5 && all.every((n) => !has(n, TERMS.role) && !has(n, TERMS.conditions) && !has(n, S_NOTE) && !has(n, S_DEC) && !has(n, S_TX) && !has(n, S_MSG) && !/2027-07-01|Under-23s/.test(JSON.stringify(n))), `L3 ${all.length} Offer notifications across five inboxes carry no term, condition, note, rationale, transaction note or message`);
   ok(all.every((n) => typeof n.refId === 'string' && /^rof-/.test(n.refId)), 'L4 every one references the Offer by id (the deep link the app re-authorises)');
   neg(!(await notifs('/player/notifications', kola.token)).some((n) => /draft/i.test(n.text ?? '')), 'L5 no draft was ever announced to a recipient');
+}
+
+// ================================================================ Y — subject deletion
+section('Y — subject deletion: names nulled, the club\'s record kept, no new write about a person who left');
+{
+  const { OID } = globalThis.__T;
+  const before = (await getOffer(OID)).body.offer;
+  const storedRow = () => openStore(DATA_DIR).load().db.recruitmentOffers.find((o) => o.id === OID);
+  ok(before.status === 'ACCEPTED' && typeof storedRow().responses[0]?.actorName === 'string' && !has(before.responses, 'actorName'), 'Y1 Tanaka accepted earlier: the stored response row names him; the club view never carried the name');
+  const del = await j('DELETE', '/player/account', undefined, tanaka.token);
+  ok(del.status === 200 && del.body.deleted === true, 'Y2 Tanaka deletes his ScoutBox account');
+  const o = await getOffer(OID);
+  ok(o.status === 200 && o.body.offer.status === 'ACCEPTED' && o.body.offer.responses.length === 1, 'Y3 the club still reads its own record: the acceptance is historical fact, the row is not deleted');
+  neg(storedRow().responses.every((r) => r.actorName === null && r.reason === null) && storedRow().subjectRemovedAt > 0 && o.body.offer.responses.every((r) => r.reason === null), 'Y4 his name and his reason are gone from the stored response row; the Offer records that its subject left');
+  neg((await history(OID)).body.items.filter((h) => h.by?.kind === 'player').every((h) => !h.by.name), 'Y5 and from every history line he wrote');
+  neg(expect(await pGet(OID, tanaka.token), 401, null), 'Y6 his session is dead');
+  neg(expect(await revise(OID, { expiresAt: T0 + 7 * DAY, expectedRev: o.body.offer.rev, clientKey: key() }), 409, 'OFFER_STATE_INVALID'), 'Y7 no revision over an accepted Offer (state is refused first, deletion or not)');
+  // A person who left with an open case: no new draft is written about them.
+  const { RT } = globalThis.__M;
+  const delM = await j('DELETE', '/player/account', undefined, kwame.token);
+  ok(delM.status === 200, 'Y8 Mensah (case at consideration, Offer withdrawn) deletes his account');
+  const c = await create(RT, { terms: TERMS, expiresAt: T0 + 7 * DAY, clientKey: key() });
+  neg(c.status === 409 && c.body.error === 'OFFER_SUBJECT_REMOVED' || c.status === 404, `Y9 no draft is written about a person who left (${c.status} ${c.body?.error})`);
+  neg(!(await surface(RT)).body?.offers?.some((x) => ['DRAFT', 'ISSUED'].includes(x.status)), 'Y10 nothing live exists on his case afterwards');
 }
 
 // ================================================================ Z — restart: keys, terminal states, corrupt rows fail closed (the persistence suite covers the rest)
