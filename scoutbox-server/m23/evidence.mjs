@@ -57,11 +57,17 @@ export const EVIDENCE_KINDS = Object.freeze([
  *   - same player       — another player's signing proves nothing about this one
  *   - not cancelled     — a reversed signing is not a signing
  */
-function signingSupports(signing, kase) {
+function signingSupports(signing, kase, packages = null) {
   if (!signing) return false;
   if (signing.orgId !== kase.orgId) return false;
   if (signing.playerId !== kase.playerId) return false;
   if (signing.cancelledAt || signing.revokedAt || signing.voidedAt) return false;
+  // M23 P7.1 (§32): a row that names a signing package is evidence only if that package exists, is COMPLETED and names
+  // this row back — a row planted beside a live package proves nothing. A legacy row (no package) keeps its meaning.
+  if (signing.signingPackageId) {
+    const pkg = Array.isArray(packages) ? packages.find((x) => x && x.id === signing.signingPackageId) ?? null : null;
+    if (!pkg || pkg.status !== 'COMPLETED' || pkg.completion?.signingId !== signing.id || pkg.orgId !== kase.orgId || pkg.playerId !== kase.playerId) return false;
+  }
   return true;
 }
 
@@ -94,7 +100,7 @@ export function createEvidenceProvider(db) {
         // collection is absent the database is broken, and answering
         // "unsatisfied" would be indistinguishable from answering truthfully.
         if (!Array.isArray(signings)) return { satisfied: false, reason: 'signings_store_unavailable' };
-        const hit = signings.find((s) => signingSupports(s, kase));
+        const hit = signings.find((s) => signingSupports(s, kase, db?.signingPackages));
         return hit
           ? { satisfied: true, sourceType: 'signing', sourceId: hit.id }
           : { satisfied: false, reason: 'no_confirmed_join' };

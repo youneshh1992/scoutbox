@@ -201,9 +201,9 @@ export function canCompleteParty(pkg, { partyType, actorKind, actorId, revisionI
     const old = (pkg.revisions ?? []).find((r) => r && r.id === revisionId);
     return old ? { ok: false, error: 'SIGNING_SUPERSEDED', message: 'That signing revision was replaced. Sign the current revision.', current: { revisionId: rev.id } } : { ok: false, error: 'SIGNING_INPUT_INVALID', field: 'revisionId', message: 'Name the signing revision you are completing.' };
   }
+  if (!(PARTY_ACTOR_KINDS[partyType] ?? []).includes(actorKind)) return { ok: false, error: 'SIGNING_NOT_PERMITTED', message: 'You cannot sign for that party.' };
   const party = findParty(rev, partyType, partyType === 'CLUB_SIGNATORY' ? pkg.orgId : actorId);
   if (!party) return { ok: false, error: 'SIGNING_PARTY_NOT_REQUIRED', message: 'This signing does not require your signature.' };
-  if (!(PARTY_ACTOR_KINDS[partyType] ?? []).includes(actorKind)) return { ok: false, error: 'SIGNING_NOT_PERMITTED', message: 'You cannot sign for that party.' };
   if (party.status === 'COMPLETED') return { ok: false, error: 'SIGNING_PARTY_ALREADY_COMPLETED', message: 'Your signature is already recorded on this revision.' };
   if (!rev.document?.sha256 || typeof documentSha256 !== 'string' || documentSha256.toLowerCase() !== String(rev.document.sha256).toLowerCase()) return { ok: false, error: 'SIGNING_DOCUMENT_MISMATCH', message: 'Confirm the exact document you read: its digest does not match the revision presented.' };
   return { ok: true, revision: rev, party };
@@ -213,8 +213,9 @@ export function canCompleteParty(pkg, { partyType, actorKind, actorId, revisionI
  * The completion gate (§22): every mandatory condition, all named. Only an
  * empty list lets the canonical completion run.
  */
-export function completionGate(pkg, { now, offer, offerRevision, kase, otherCompleted = false, blocked = false }) {
+export function completionGate(pkg, { now, offer, offerRevision, kase, otherCompleted = false, blocked = false, documentProblem = null }) {
   const problems = [];
+  if (documentProblem) problems.push(`DOCUMENT_BYTES_${String(documentProblem).toUpperCase()}`);
   const st = effectiveStatus(pkg, now);
   if (st === null) problems.push('STATE_UNKNOWN');
   else if (st === 'COMPLETED') problems.push('ALREADY_COMPLETED');
@@ -264,6 +265,11 @@ export function signingIntegrity(pkg, { orgId = null } = {}) {
   const exp = readInstant(pkg.expiresAt);
   if (pkg.expiresAt !== null && pkg.expiresAt !== undefined && exp === null) problems.push('expires_at');
   if (exp !== null && c0 !== null && exp <= c0) problems.push('expiry_before_created');
+  // P7.1 §42: a stored expiry no act could have set (beyond the maximum from the latest instant the package was worked on) is tampering, not a longer-lived package.
+  if (exp !== null) {
+    const worked = Math.max(c0 ?? 0, ...(Array.isArray(pkg.revisions) ? pkg.revisions.flatMap((r) => [readInstant(r?.createdAt) ?? 0, readInstant(r?.readyAt) ?? 0]) : [0]));
+    if (worked > 0 && exp > worked + SIGNING_LIMITS.maxExpiryMs + DAY_MS) problems.push('expiry_beyond_max');
+  }
   if (!Array.isArray(pkg.revisions) || pkg.revisions.length === 0) problems.push('revisions');
   else {
     const ids = new Set(); const nums = new Set();
@@ -280,14 +286,32 @@ export function signingIntegrity(pkg, { orgId = null } = {}) {
       if (['READY', 'IN_PROGRESS', 'COMPLETED'].includes(r.status) && (rr === null || !r.document?.evidenceId || !r.document?.sha256)) problems.push('presented_without_document');
       if (!Array.isArray(r.requiredParties) || r.requiredParties.length === 0) problems.push('parties');
       else {
+        // P7.1 §11: the required parties are the package's own — one recipient party (PLAYER or GUARDIAN), one CLUB_SIGNATORY,
+        // each naming the package's player and club. Anything else is a party this server never wrote.
+        const types = r.requiredParties.map((p) => p?.partyType);
+        if (new Set(types).size !== types.length) problems.push('party_duplicate');
+        if (!types.includes('PLAYER') && !types.includes('GUARDIAN')) problems.push('party_recipient_missing');
+        if (types.includes('PLAYER') && types.includes('GUARDIAN')) problems.push('party_recipient_duplicate');
+        if (!types.includes('CLUB_SIGNATORY')) problems.push('party_club_missing');
         for (const p of r.requiredParties) {
           if (!p || !PARTY_TYPES.includes(p.partyType) || !PARTY_STATUSES.includes(p.status)) { problems.push('party_shape'); continue; }
+          if (p.forPlayerId !== undefined && p.forPlayerId !== pkg.playerId) problems.push('party_player_mismatch');
+          if (p.partyType === 'PLAYER' && p.forEntityId !== pkg.playerId) problems.push('party_entity_mismatch');
+          if (p.partyType === 'CLUB_SIGNATORY' && p.forEntityId !== pkg.orgId) problems.push('party_entity_mismatch');
           if (p.status === 'COMPLETED') {
             const pc = readInstant(p.completedAt);
             if (pc === null || !p.completedBy || !SIGNING_METHODS.includes(p.method) || !p.evidenceRef) problems.push('party_evidence');
             if (pc !== null && rr !== null && pc < rr) problems.push('party_before_ready');
             if (p.completedBy && !(PARTY_ACTOR_KINDS[p.partyType] ?? []).includes(p.completedBy.kind)) problems.push('party_actor_kind');
-          }
+            // P7.1 §10: the evidence reference names THIS revision, THIS document's digest, THIS actor, at THIS instant.
+            const ev = p.evidenceRef;
+            if (ev && typeof ev === 'object') {
+              if (ev.revisionId !== r.id) problems.push('party_evidence_revision');
+              if (r.document?.sha256 && ev.documentSha256 !== r.document.sha256) problems.push('party_evidence_digest');
+              if (p.completedBy && (ev.actorId !== p.completedBy.id || ev.actorKind !== p.completedBy.kind)) problems.push('party_evidence_actor');
+              if (pc !== null && readInstant(ev.at) !== pc) problems.push('party_evidence_instant');
+            }
+          } else if (p.completedAt || p.completedBy || p.evidenceRef) problems.push('party_pending_with_evidence');
         }
       }
       if (r.status === 'COMPLETED') {
@@ -311,9 +335,19 @@ export function signingIntegrity(pkg, { orgId = null } = {}) {
 }
 
 /** ACCEPTED-Offer coupling (§65, §66): a package whose Offer or case contradicts it is corruption. */
-export function signingConsistency(pkg, { offer, kase }, now) {
+export function signingConsistency(pkg, { offer, kase, rows = null, player = null }, now) {
   const problems = [];
   const st = effectiveStatus(pkg, now);
+  // P7.1 §32–§33: the completed-signing record and the package agree, or the package is corruption; the player's own
+  // contract status is a projection that may lawfully move (they can declare a later change), so a divergence is a warning.
+  if (Array.isArray(rows)) {
+    const mine = rows.filter((s) => s && s.signingPackageId === pkg.id);
+    if (st === 'COMPLETED' && mine.length === 0) problems.push('COMPLETED_WITHOUT_ROW');
+    if (mine.length > 1) problems.push('DUPLICATE_SIGNING_ROWS');
+    if (st !== 'COMPLETED' && mine.length > 0) problems.push('ROW_WITHOUT_COMPLETION');
+    if (st === 'COMPLETED' && pkg.completion?.signingId && !mine.some((s) => s.id === pkg.completion.signingId)) problems.push('COMPLETION_ROW_MISMATCH');
+  }
+  if (player && st === 'COMPLETED' && player.contractStatus !== 'under_contract') problems.push('PLAYER_CONTRACT_STATUS_DIVERGED');
   if (offer && (offer.orgId !== pkg.orgId || offer.playerId !== pkg.playerId || offer.caseId !== pkg.caseId)) problems.push('OFFER_REFERENCE_MISMATCH');
   if (kase && (kase.orgId !== pkg.orgId || kase.playerId !== pkg.playerId)) problems.push('CASE_REFERENCE_MISMATCH');
   // §9, §66 (#7): the package is bound to the ACCEPTED Offer revision. A binding to a revision the Offer does not hold,
@@ -329,7 +363,7 @@ export function signingConsistency(pkg, { offer, kase }, now) {
   if (st && st !== 'COMPLETED' && LIVE.includes(st) && kase && kase.room?.status !== 'offer_accepted') problems.push('LIVE_SIGNING_CASE_NOT_AT_OFFER_ACCEPTED');
   return problems;
 }
-export const SIGNING_CORRUPTION = Object.freeze(['OFFER_REFERENCE_MISMATCH', 'CASE_REFERENCE_MISMATCH', 'OFFER_REVISION_MISMATCH', 'COMPLETED_BUT_CASE_NOT_SIGNED']);
+export const SIGNING_CORRUPTION = Object.freeze(['OFFER_REFERENCE_MISMATCH', 'CASE_REFERENCE_MISMATCH', 'OFFER_REVISION_MISMATCH', 'COMPLETED_BUT_CASE_NOT_SIGNED', 'COMPLETED_WITHOUT_ROW', 'DUPLICATE_SIGNING_ROWS', 'ROW_WITHOUT_COMPLETION', 'COMPLETION_ROW_MISMATCH']);
 export const signingCorrupt = (problems) => (problems ?? []).some((p) => SIGNING_CORRUPTION.includes(p));
 
 // ------------------------------------------------------------- views
