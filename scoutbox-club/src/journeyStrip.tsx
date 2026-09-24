@@ -87,8 +87,9 @@ export function JourneyStrip({ session, room, journey, notify, reload, onTab, bu
     <section className="section" aria-label={t('jn.title')} data-testid="journey-strip" data-stage={jb.stage} data-next={na.code} data-classification={jb.classification}>
       <ol className="journey-rail" aria-label={t('jn.railLabel')}>
         {PIPELINE_STAGES.map((s, i) => {
-          const state = done.has(s) ? 'done' : (s === jb.stage || (jb.stage === 'signing' && s === 'signing')) ? 'current' : i < currentIdx ? 'passed' : 'pending';
-          const glyph = state === 'done' ? '✓' : state === 'current' ? '●' : '○';
+          // The current stage is marked current even when it is also done (signed): a reader must always find ONE aria-current step.
+          const state = s === jb.stage ? 'current' : done.has(s) ? 'done' : i < currentIdx ? 'passed' : 'pending';
+          const glyph = done.has(s) ? '✓' : state === 'current' ? '●' : '○';
           return (
             <li key={s} className={`journey-step ${state}`} aria-current={state === 'current' ? 'step' : undefined} data-stage={s} data-state={state}>
               <span aria-hidden="true">{glyph}</span> <span>{stageLabel(s)}</span>

@@ -51,12 +51,16 @@ export const M23_ERROR_HTTP = table({
 
   // ---- 403: not yours to do.
   LIFECYCLE_NOT_PERMITTED: 403,
+  // M23 P8 — the agent journey route: a summary row opens no client's journey.
+  AGENT_ACTION_NOT_PERMITTED: 403,
 
   // ---- 404: concealment. A case in another organisation, a case that never
   // existed, and a case with no workspace all answer identically. Anything
   // that distinguishes them is an existence oracle.
   CASE_NOT_FOUND: 404,
   CASE_NOT_A_ROOM: 404,
+  // M23 P8 — the guardian journey route: not this guardian's child.
+  CHILD_NOT_FOUND: 404,
   LIFECYCLE_CASE_NOT_A_ROOM: 404,
 
   // ---- 409: the case is not in a position for this. There is nothing in the

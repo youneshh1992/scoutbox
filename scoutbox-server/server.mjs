@@ -4519,6 +4519,10 @@ m29Ctx = registerSigning({
   refreshJourneyBadges,
   findRoomForRequest: m17Ctx.findRoomForRequest,
   applyLifecycleTransition: m17Ctx.applyLifecycleTransition,
+  // M23 P8 — the lifecycle writer's own snapshot/restore, so a completion that
+  // fails after the case moved restores status, stage, rev and history together.
+  lifecycleSnapshot: m17Ctx.lifecycleSnapshot,
+  restoreLifecycle: m17Ctx.restoreLifecycle,
   recruitmentEvidenceProvider: recruitmentEvidence,
   agent: m24Ctx,
   integration: agentIntegration,
@@ -4598,7 +4602,7 @@ export const EMITTED_EVENTS = Object.freeze([
   'players', 'orgs', 'opportunities', 'openTrials', 'campaigns', 'friendlies', 'ledger',
   'messages', 'typing', 'inbox', 'notify',
   'requests', 'applications', 'feedback', 'evidence',
-  'recruitment_room_archived', 'recruitment_room_reopened_from_second_look',
+  'recruitment_case_moved', 'assessment_submitted', 'recruitment_room_archived', 'recruitment_room_reopened_from_second_look',
   'player_development_evidence_changed',
   'watchlist_created', 'watchlist_updated', 'watchlist_membership_changed',
   'watchlist_archived', 'matching_room_created',

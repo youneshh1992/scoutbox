@@ -112,6 +112,24 @@ export const EVENT_REGISTRY = {
     privacyClass: 'org_internal', payload: ['orgId', 'roomId'],
     dedupeStrategy: 'fingerprint', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: true,
   },
+  // ---- M23 P8. A club member submitted an assessment: org-private, ids only
+  // (the org and the assessment). The Room re-reads its journey; the subject is
+  // NOT named, so nothing about the club's evaluation reaches the player's or a
+  // rival club's stream.
+  assessment_submitted: {
+    domain: 'assessments', sourceSystem: 'assessments', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'assessmentId'],
+    dedupeStrategy: 'fingerprint', replayPolicy: 'replay', notificationEligible: false, analyticsEligible: false,
+  },
+  // ---- M23 P8. A case moved on the recruitment lifecycle (any writer: the
+  // semantic-action route, a domain seam, the legacy status route, a reopen).
+  // Org-private, ids and the two status WORDS only: no reason code, no note,
+  // no actor. An open Room re-reads the journey when it arrives.
+  recruitment_case_moved: {
+    domain: 'recruitment_rooms', sourceSystem: 'cases', audience: 'org_private',
+    privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'from', 'to'],
+    dedupeStrategy: 'fingerprint', replayPolicy: 'replay', notificationEligible: false, analyticsEligible: false,
+  },
   // ---- M23 P5 formal decision. Org-private, ids only (§80, §81): never the
   // outcome, never a reason code, never the rationale. The client refetches
   // through the authorised read; analytics reads the store, not the stream.

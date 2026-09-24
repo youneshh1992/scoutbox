@@ -462,11 +462,13 @@ export function validateRecruitmentJourney(facts) {
   for (const r of facts.foreign ?? []) problems.add(r);
   // Claimed pointers on the history.
   const reached = { contacted: null, trial_requested: null, trial_scheduled: null, trial_completed: null, offer_consideration: null, offer_made: null, offer_accepted: null, offer_declined: null, signed: null };
-  let lastAt = null;
   for (const h of facts.history ?? []) {
     if (!h || typeof h !== 'object') continue;
+    // A malformed instant is corruption. Out-of-order instants are NOT: the
+    // history is append-only and the timeline sorts by instant, so a later
+    // entry with an earlier instant (a test clock, a clock step) is shown where
+    // its instant puts it, never re-ordered into a believable fake sequence.
     if (h.at !== undefined && !isFiniteAt(h.at)) problems.add('TEMPORAL_ORDER');
-    if (isFiniteAt(h.at)) { if (lastAt !== null && h.at < lastAt - 1) problems.add('TEMPORAL_ORDER'); lastAt = Math.max(lastAt ?? 0, h.at); }
     if (h.action !== 'room_status_changed') continue;
     const d = h.detail ?? {};
     const to = d.to;

@@ -259,6 +259,10 @@ export function registerScouting(ctx) {
     audit(a, 'org', req.orgUser.id, req.orgUser.name, 'submitted');
     ledgerAppend({ type: 'assessment_submitted', playerId: a.playerId, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
     persistNow();
+    // M23 P8 — an open Room re-reads on this (org-private, ids only): a
+    // colleague's submitted assessment changes the case's next action, and
+    // nothing else told the Room. The subject is not named on the stream.
+    broadcast('assessment_submitted', { orgId: req.org.id, assessmentId: a.id });
     res.json({ assessment: assessmentView(a) });
   });
 

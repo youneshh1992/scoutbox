@@ -58,7 +58,7 @@ export function NotificationBell() {
                       <Text style={{ color: colors.text, fontSize: 13.5, lineHeight: 19 }}>{n.text}</Text>
                       <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
                         <Muted size={11.5}>{new Date(n.ts).toLocaleString()}</Muted>
-                        {dest ? <Button small label="Open" onPress={() => { setOpen(false); router.push(dest as never); }} /> : null}
+                        {dest ? <Button small label="Open" testID="notification-open" onPress={() => { setOpen(false); router.push(dest as never); }} /> : null}
                       </Row>
                     </Card>
                   );

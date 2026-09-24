@@ -70,6 +70,16 @@ const statusLabel = (code: string, fallback?: string | null) => t(`rm.st.${code}
 const healthLabel = (code: string | null, fallback?: string | null) => (code ? t(`rm.health.${code}`, fallback ?? code.replace(/_/g, ' ')) : t('rm.none'));
 const reasonLabel = (code: string) => t(`rm.reason.${code}`, code.replace(/_/g, ' '));
 const recommendationLabel = (code: string) => t(`rm.rec.${code}`, code.replace(/_/g, ' '));
+/** M23 P8 (D-P8-15): a context may be a word or an M12 object; a list row shows a label, never an object (React refuses objects as children). */
+const contextWord = (c: unknown): string | null => {
+  if (typeof c === 'string') return c;
+  if (!c || typeof c !== 'object') return null;
+  const o = c as { fixture?: unknown; date?: unknown; trialId?: unknown };
+  const bits = [o.fixture, o.date].filter((x): x is string => typeof x === 'string' && x.trim() !== '');
+  return bits.length ? bits.join(' · ') : (o.trialId ? 'trial' : null);
+};
+/** M23 P8 (D-P8-15): an assessment's recommendation may arrive as a word or as the M12 `{ verdict }` object; the Room shows the word and never throws. */
+const recommendationWord = (r: unknown): string | null => (typeof r === 'string' ? r : r && typeof r === 'object' && typeof (r as { verdict?: unknown }).verdict === 'string' ? (r as { verdict: string }).verdict : null);
 const priorityLabel = (code: string) => t(`rm.pri.${code}`, code);
 const taskStateLabel = (code: string) => t(`rm.task.${code}`, code.replace(/_/g, ' '));
 const reviewStateLabel = (code: string) => t(`rm.rev.${code}`, code.replace(/_/g, ' '));
@@ -846,9 +856,9 @@ function AssessmentsPanel({ session, room, notify, reload, staff }: PanelProps) 
       <div className="list-rows">
         {room.assessments.map((a) => (
           <div key={a.id} className="list-row" style={{ flexWrap: 'wrap' }}>
-            <span className="grow"><b>{a.scoutName}</b>{a.context ? <span className="dim"> · {a.context}</span> : null}</span>
+            <span className="grow"><b>{a.scoutName}</b>{contextWord(a.context) ? <span className="dim"> · {contextWord(a.context)}</span> : null}</span>
             <span className="pill">{t(`rm.assess.${a.state}`, a.state.replace(/_/g, ' '))}</span>
-            {a.recommendation && <span className="pill blue">{t(`rm.rec.${a.recommendation}`, a.recommendation.replace(/_/g, ' '))}</span>}
+            {recommendationWord(a.recommendation) && <span className="pill blue">{t(`rm.rec.${recommendationWord(a.recommendation)}`, recommendationWord(a.recommendation)!.replace(/_/g, ' '))}</span>}
             <span className="dim">{a.submittedAt ? fmtDate(a.submittedAt) : fmtDate(a.createdAt)}</span>
           </div>
         ))}

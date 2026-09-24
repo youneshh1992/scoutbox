@@ -86,6 +86,16 @@ export function registerRooms(ctx) {
     return rest;
   }
 
+  /** M23 P8 (D-P8-15): an M12 assessment's `context` is a word or an object; the Room list row shows a short label. */
+  function assessmentContextLabel(ctx) {
+    if (ctx == null) return null;
+    if (typeof ctx === 'string') return ctx;
+    if (typeof ctx !== 'object') return null;
+    const bits = [ctx.fixture, ctx.date].filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim());
+    if (bits.length) return bits.join(' · ');
+    return ctx.trialId ? 'trial' : null;
+  }
+
   /** The single writer of room status. `case.stage` is derived here and only here. */
   function applyStatus(room, status, org, by = null) {
     room.room.status = status;
@@ -238,8 +248,13 @@ export function registerRooms(ctx) {
       .map((a) => ({
         id: a.id, scoutUserId: a.scoutUserId, scoutName: a.scoutName,
         templateId: a.templateId, templateVersion: a.templateVersion,
-        state: a.state, recommendation: a.recommendation ?? null,
-        context: a.context ?? null, createdAt: a.createdAt, submittedAt: a.submittedAt ?? null,
+        // M23 P8 (D-P8-15): an M12 assessment's recommendation is `{ verdict, reasons }`;
+        // the Room reads the verdict WORD only. The reasons are the scout's rationale
+        // and belong to the assessment surface, not to a list row — and a client that
+        // expected a word here crashed the whole Room on the first submitted assessment.
+        state: a.state, recommendation: typeof a.recommendation === 'string' ? a.recommendation : (a.recommendation?.verdict ?? null),
+        // Likewise the context: a word or a short label (fixture · date, or "trial"), never the object.
+        context: assessmentContextLabel(a.context), createdAt: a.createdAt, submittedAt: a.submittedAt ?? null,
       }));
   }
 
@@ -729,6 +744,7 @@ export function registerRooms(ctx) {
     }
     activity(room, req, 'room_status_changed', { from, to, reasonCodes: reasons.codes, note: note ? true : false });
     vmetric('recruitment_room_status_changed');
+    broadcast?.('recruitment_case_moved', { orgId: room.orgId, roomId: room.id, from, to });
     if (to === 'archived' || to === 'closed' || to === 'withdrawn') vmetric('recruitment_room_archived');
     if (to === 'signed') vmetric('recruitment_room_signed');
 
@@ -805,6 +821,7 @@ export function registerRooms(ctx) {
     if (sourceContext) room.room.sourceContext = sourceContext;
     activity(room, req, 'room_reopened', { from, to, reasonCodes: reasons.codes, sourceContext, sourceRef });
     vmetric('recruitment_room_reopened');
+    broadcast?.('recruitment_case_moved', { orgId: room.orgId, roomId: room.id, from, to });
     persistNow();
     return { ok: true, room: buildRecruitmentRoom(room, req), from, to };
   };
@@ -881,6 +898,8 @@ export function registerRooms(ctx) {
     // mean a second funnel, silently disagreeing with the first.
     write('room_status_changed', { from, to, reasonCodes, trigger });
     vmetric('recruitment_room_status_changed');
+    // M23 P8 — open Rooms re-read the journey on this event (ids and words only).
+    broadcast?.('recruitment_case_moved', { orgId: room.orgId, roomId: room.id, from, to });
     return { from, to };
   }
 

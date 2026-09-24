@@ -51,6 +51,10 @@ export function registerM23(rawCtx) {
 
   /** Evidence provider. P2 ships the null provider: no phase supplies evidence yet. */
   const evidenceProvider = () => ctx.recruitmentEvidenceProvider ?? NULL_EVIDENCE_PROVIDER;
+  // M23 P8 — the same per-request test clock the Offer and signing routes
+  // honour (development only), so an expiry-derived stage reads the same here.
+  const TEST_CLOCK = process.env.SCOUTBOX_TEST_CLOCK === '1' && process.env.NODE_ENV !== 'production';
+  const nowOf = (req) => { if (TEST_CLOCK && req?.get) { const n = Number(req.get('x-scoutbox-test-clock')); if (Number.isFinite(n) && n > 0) return n; } return Date.now(); };
 
   // Domain errors answer through `sendDomainError` in errors.mjs — the ONE
   // mapping table, shared with the P3 Contact routes.
@@ -65,7 +69,7 @@ export function registerM23(rawCtx) {
       orgId: req.org.id,
       userId: req.orgUser.id,
       role: roomRole({ room, user: req.orgUser, isLead: isLead(req.orgUser) }),
-    }, { evidence: evidenceProvider(), historyLimit: req.query.limit, historyCursor: req.query.cursor });
+    }, { now: nowOf(req), evidence: evidenceProvider(), historyLimit: req.query.limit, historyCursor: req.query.cursor });
 
     if (!out.ok) return sendDomainError(res, out, 'journey');
     return res.json(out);

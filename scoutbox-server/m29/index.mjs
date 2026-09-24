@@ -606,7 +606,7 @@ export function registerSigning(rawCtx) {
     // ---- the unit of work
     // M23 P8 — the case part of the snapshot is the lifecycle writer's own
     // (status, stage, rev, instants, history length, links), not a bare status.
-    const snapshot = { pkg: JSON.stringify(pkg), signingsLen: db.signings.length, ledgerLen: (db.ledger ?? []).length, invoicesLen: (db.invoices ?? []).length, player: JSON.stringify(player), squad: JSON.stringify(org.squad ?? null), caseStatus: kase.room.status, caseHistoryLen: (kase.history ?? []).length, lifecycle: ctx.lifecycleSnapshot?.(kase) ?? null };
+    const snapshot = { pkg: JSON.stringify(pkg), signingsLen: db.signings.length, ledgerLen: (db.ledger ?? []).length, invoicesLen: (db.invoices ?? []).length, player: JSON.stringify(player), squad: JSON.stringify(org.squad ?? null), caseStatus: kase.room.status, lifecycle: ctx.lifecycleSnapshot(kase) };
     const rollback = (why) => {
       console.error(`SIGNING completion_rolled_back ${pkg.id}: ${why}`);
       Object.assign(pkg, JSON.parse(snapshot.pkg));
@@ -615,8 +615,7 @@ export function registerSigning(rawCtx) {
       if (Array.isArray(db.invoices)) db.invoices.length = snapshot.invoicesLen;
       Object.assign(player, JSON.parse(snapshot.player));
       if (snapshot.squad !== 'null') org.squad = JSON.parse(snapshot.squad);
-      if (snapshot.lifecycle && ctx.restoreLifecycle) ctx.restoreLifecycle(kase, snapshot.lifecycle);
-      else { kase.room.status = snapshot.caseStatus; if (Array.isArray(kase.history)) kase.history.length = snapshot.caseHistoryLen; }
+      ctx.restoreLifecycle(kase, snapshot.lifecycle);
     };
     const by = byOrg(req);
     let effects = null; let moved = null; let signing = null;
