@@ -38,7 +38,7 @@ import { contactMilestone, contactIntegrity } from './contact.mjs';
 import { trialMilestone, trialIntegrity } from './trial.mjs';
 // M23 P6 — the Offer domain's own status derivation (lazy expiry), so the
 // journey never reads a stored status an expired revision has outgrown.
-import { offerStatus as canonicalOfferStatus, liveStatus as canonicalLiveStatus, offerIntegrity } from '../m28/offer.mjs';
+import { offerStatus as canonicalOfferStatus, liveStatus as canonicalLiveStatus, offerIntegrity, offerCaseConsistency, offerCaseCorrupt } from '../m28/offer.mjs';
 
 /** Stores this projection may not proceed without. `recruitmentContacts` joined in P3. */
 export const JOURNEY_REQUIRED_STORES = Object.freeze([
@@ -267,7 +267,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   const offersAvailable = Array.isArray(db.recruitmentOffers);
   const offers = offersAvailable
     ? db.recruitmentOffers
-      .filter((o) => o?.caseId === kase.id && o.orgId === kase.orgId && o.playerId === kase.playerId && offerIntegrity(o, { orgId: kase.orgId, caseId: kase.id }).length === 0)
+      .filter((o) => o?.caseId === kase.id && o.orgId === kase.orgId && o.playerId === kase.playerId && offerIntegrity(o, { orgId: kase.orgId, caseId: kase.id }).length === 0 && !offerCaseCorrupt(offerCaseConsistency(o, kase, now)))
       .map((o) => ({ id: o.id, type: o.type, status: canonicalOfferStatus(o, now), liveStatus: canonicalLiveStatus(o, now) }))
     : [];
 

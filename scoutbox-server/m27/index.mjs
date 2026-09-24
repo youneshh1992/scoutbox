@@ -818,6 +818,9 @@ export function registerIntegration(ctx) {
      */
     caseBelongsTo: (caseId, orgId) => (db.recruitmentCases ?? []).some((k) => k && k.id === caseId && k.orgId === orgId),
     basisFor,
+    // P6.1: the licence fact for a read that is not a regulated ACTION but is
+    // agent work all the same (the Offer projection, m28). One predicate, here.
+    licenceCurrentFor,
     activeAgentsFor,
     soleActiveAgentFor,
     // routing

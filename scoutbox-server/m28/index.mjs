@@ -41,7 +41,7 @@ import {
   MINOR_OFFER_PATHWAY_ENABLED, minorOfferPathwayOpen,
   normaliseOfferClientKey, payloadFingerprint, validateTerms, validateMessages, validateExpiry, validateDocumentRefs,
   effectiveRevisionStatus, currentRevision, liveRevision, liveStatus, wasIssued, offerStatus, canRevise, canRespondToRevision, canWithdrawRevision, responderMatches,
-  nextRevisionNumber, offerIntegrity, offerClubView, offerRecipientView, offerAgentView, offerHistoryView,
+  nextRevisionNumber, offerIntegrity, offerCaseConsistency, offerCaseCorrupt, offerClubView, offerRecipientView, offerAgentView, offerHistoryView,
 } from './offer.mjs';
 
 const TEST_CLOCK = process.env.SCOUTBOX_TEST_CLOCK === '1';
@@ -84,6 +84,14 @@ export function registerOffers(rawCtx) {
   const keyList = (offer, act) => { offer.keys ??= {}; if (!Array.isArray(offer.keys[act])) offer.keys[act] = offer.keys[act] ? [offer.keys[act]] : []; return offer.keys[act]; };
   const keyRow = (offer, act, k) => keyList(offer, act).find((x) => x && x.key === k) ?? null;
 
+  /**
+   * P6.1 (§39): a side effect (event, notification, audit line) that throws
+   * after the authoritative state was persisted must not turn a real success
+   * into a 500 — the client would retry and the replay would say "done"
+   * anyway. Logged, never fatal.
+   */
+  const safe = (label, fn) => { try { return fn(); } catch (e) { console.error(`OFFER side_effect_failed ${label}: ${e?.message ?? e}`); return undefined; } };
+
   function storeOr500(res) {
     if (!Array.isArray(db.recruitmentOffers)) {
       console.error('OFFER store_missing db.recruitmentOffers is absent or not a list');
@@ -116,6 +124,11 @@ export function registerOffers(rawCtx) {
     if (problems.length) { console.error(`OFFER integrity ${o.id}: ${problems.join(',')}`); err(res, 'OFFER_STATE_UNKNOWN', 'This Offer cannot be read.'); return null; }
     const room = (db.recruitmentCases ?? []).find((k) => k && k.id === o.caseId && k.orgId === req.org.id) ?? null;
     if (!room || !room.room) { notFound(res, 'club'); return null; }
+    // P6.1 (§27, §28, §38): the Offer's player is the case's player, and the
+    // Offer and the case cannot say two things that are both false.
+    if (o.playerId !== room.playerId) { console.error(`OFFER integrity ${o.id}: player_mismatch`); err(res, 'OFFER_STATE_UNKNOWN', 'This Offer cannot be read.'); return null; }
+    const consistency = offerCaseConsistency(o, room, now(req));
+    if (offerCaseCorrupt(consistency)) { console.error(`OFFER consistency ${o.id}: ${consistency.join(',')}`); err(res, 'OFFER_STATE_UNKNOWN', 'This Offer cannot be read.'); return null; }
     const role = roleFor(req, room);
     if (!roomCan(role, need)) {
       err(res, 'OFFER_NOT_PERMITTED', need === 'offer_view' ? 'Your role cannot read Offers on this case.' : 'Only a room lead or recruitment lead can draft, issue or withdraw an Offer.');
@@ -199,7 +212,10 @@ export function registerOffers(rawCtx) {
     const verdict = canTransitionRecruitmentCase(room, action, { role, evidence: evidenceProvider(), now: at });
     if (verdict.ok) {
       const org = orgOf(room.orgId);
-      const { from, to } = ctx.applyLifecycleTransition({ req, room, to: verdict.to, reasonCodes: [], trigger, actor: actor ? { ...actor, org } : null });
+      let effect;
+      try { effect = ctx.applyLifecycleTransition({ req, room, to: verdict.to, reasonCodes: [], trigger, actor: actor ? { ...actor, org } : null }); }
+      catch (e) { console.error(`OFFER lifecycle_writer_threw ${action}: ${e?.message ?? e}`); return { applied: false, action, reason: 'writer_failed', message: null, allowed: [], from: room.room.status, to: null, at }; }
+      const { from, to } = effect;
       const last = room.history[room.history.length - 1];
       if (last?.action === 'room_status_changed') last.detail = { ...last.detail, lifecycleAction: action, clientKey: null, policyVersion: RECRUITMENT_LIFECYCLE_POLICY_VERSION, ...keyDetail };
       return { applied: true, action, from, to, at };
@@ -237,7 +253,7 @@ export function registerOffers(rawCtx) {
     if (!storeOr500(res)) return;
     const { room: kase, role } = got;
     const at = now(req);
-    const offers = offersOfCase(kase).map((o) => offerClubView(o, at)).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+    const offers = offersOfCase(kase).map((o) => ({ ...offerClubView(o, at), integrity: [...offerIntegrity(o, { orgId: kase.orgId, caseId: kase.id }), ...offerCaseConsistency(o, kase, at)] })).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
     const live = liveOfferOf(kase, at);
     res.json({
       offers,
@@ -319,7 +335,7 @@ export function registerOffers(rawCtx) {
     db.recruitmentOffers.push(offer);
     audit(kase, 'org', req.orgUser.id, req.orgUser.name, 'offer_draft_created', { offerId: offer.id, revisionId: rev.id });
     persistNow();
-    broadcast?.('offer_draft_created', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id });
+    safe('offer_draft_created', () => broadcast?.('offer_draft_created', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id }));
     res.status(201).json({ offer: offerClubView(offer, at) });
   });
 
@@ -370,7 +386,7 @@ export function registerOffers(rawCtx) {
     bumpRev(offer, { by: req.orgUser, at });
     hist(offer, 'offer_draft_updated', by, { revisionId: rev.id }, at);
     persistNow();
-    broadcast?.('offer_draft_updated', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id });
+    safe('offer_draft_updated', () => broadcast?.('offer_draft_updated', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id }));
     res.json({ offer: offerClubView(offer, at) });
   });
 
@@ -456,13 +472,13 @@ export function registerOffers(rawCtx) {
     if (prevIssued) hist(offer, 'offer_issued', by, { revisionId: rev.id, revisionNumber: rev.revisionNumber, expiresAt: rev.expiresAt }, at);
     audit(kase, 'org', req.orgUser.id, req.orgUser.name, prevIssued ? 'offer_superseded' : 'offer_issued', { offerId: offer.id, revisionId: rev.id, supersedes: prevIssued?.id ?? null, to: moved.applied ? moved.to : undefined });
     persistNow();
-    if (prevIssued) broadcast?.('offer_superseded', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id });
-    broadcast?.('offer_issued', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id });
-    notifyRecipient(rev, `${org.name ?? 'A club'} has issued you an Offer${prevIssued ? ' (a revised one)' : ''}. Read the exact terms in ScoutBox and answer before it expires. Accepting is not a signing.`, offer.id);
-    notifyAgent(offer, `Your client ${kase.playerName ?? ''} received a${prevIssued ? ' revised' : 'n'} Offer from ${org.name ?? 'a club'}. Their answer is their own act.`.replace(/\s+/g, ' '));
+    if (prevIssued) safe('offer_superseded', () => broadcast?.('offer_superseded', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id }));
+    safe('offer_issued', () => broadcast?.('offer_issued', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id }));
+    safe('notify', () => notifyRecipient(rev, `${org.name ?? 'A club'} has issued you an Offer${prevIssued ? ' (a revised one)' : ''}. Read the exact terms in ScoutBox and answer before it expires. Accepting is not a signing.`, offer.id));
+    safe('notifyAgent', () => notifyAgent(offer, `Your client ${kase.playerName ?? ''} received a${prevIssued ? ' revised' : 'n'} Offer from ${org.name ?? 'a club'}. Their answer is their own act.`.replace(/\s+/g, ' ')));
     for (const uid of new Set([kase.ownerUserId, kase.room?.leadScoutUserId])) {
       if (!uid || uid === req.orgUser.id) continue;
-      notify({ kind: 'org_user', id: uid }, 'recruitment_offer', `Recruitment Room — ${kase.playerName ?? 'a removed player'}: Offer revision ${rev.revisionNumber} issued.`, offer.id);
+      safe('notifyClub', () => notify({ kind: 'org_user', id: uid }, 'recruitment_offer', `Recruitment Room — ${kase.playerName ?? 'a removed player'}: Offer revision ${rev.revisionNumber} issued.`, offer.id));
     }
     res.json({ offer: offerClubView(offer, at), lifecycle: moved, case: moved.applied ? { from: moved.from, to: moved.to } : { unchanged: true, status: kase.room.status }, rev: kase.room.rev });
   });
@@ -504,10 +520,10 @@ export function registerOffers(rawCtx) {
     hist(offer, 'offer_withdrawn', by, { revisionId: rev.id, wasIssued, hadReason: !!reason }, at);
     audit(kase, 'org', req.orgUser.id, req.orgUser.name, 'offer_withdrawn', { offerId: offer.id, revisionId: rev.id, wasIssued, to: moved.applied ? moved.to : undefined });
     persistNow();
-    broadcast?.('offer_withdrawn', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id });
+    safe('offer_withdrawn', () => broadcast?.('offer_withdrawn', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id }));
     if (wasIssued) {
-      notifyRecipient(rev, `${orgOf(kase.orgId)?.name ?? 'The club'} has withdrawn its Offer. Nothing further is needed from you.`, offer.id);
-      notifyAgent(offer, `The Offer to your client ${kase.playerName ?? ''} was withdrawn by the club.`.replace(/\s+/g, ' '));
+      safe('notify', () => notifyRecipient(rev, `${orgOf(kase.orgId)?.name ?? 'The club'} has withdrawn its Offer. Nothing further is needed from you.`, offer.id));
+      safe('notifyAgent', () => notifyAgent(offer, `The Offer to your client ${kase.playerName ?? ''} was withdrawn by the club.`.replace(/\s+/g, ' ')));
     }
     res.json({ offer: offerClubView(offer, at), lifecycle: moved });
   });
@@ -560,7 +576,7 @@ export function registerOffers(rawCtx) {
     hist(offer, 'offer_draft_created', by, { revisionId: rev.id, revisionNumber: rev.revisionNumber, supersedes: rev.supersedesRevisionId }, at);
     audit(kase, 'org', req.orgUser.id, req.orgUser.name, 'offer_draft_created', { offerId: offer.id, revisionId: rev.id, revises: prev.id });
     persistNow();
-    broadcast?.('offer_draft_created', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id });
+    safe('offer_draft_created', () => broadcast?.('offer_draft_created', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id }));
     res.status(201).json({ offer: offerClubView(offer, at) });
   });
 
@@ -581,11 +597,26 @@ export function registerOffers(rawCtx) {
    * live recipient rule on every read — a route that a lost guardianship or a
    * new block changes at once.
    */
+  /**
+   * P6.1 (§27, §38, §81): a row a recipient or an agent may be shown is one
+   * whose own shape is sound AND whose case does not contradict it. A row that
+   * fails is omitted — never repaired, never shown as a lesser truth.
+   */
+  function soundOffer(o, at) {
+    if (!o || offerIntegrity(o).length) return false;
+    const k = (db.recruitmentCases ?? []).find((x) => x?.id === o.caseId && x.orgId === o.orgId) ?? null;
+    if (!k) return true; // no case to disagree with (a legacy row); the row's own integrity carried it
+    if (k.playerId !== o.playerId) { console.error(`OFFER integrity ${o.id}: player_mismatch`); return false; }
+    const c = offerCaseConsistency(o, k, at);
+    if (offerCaseCorrupt(c)) { console.error(`OFFER consistency ${o.id}: ${c.join(',')}`); return false; }
+    return true;
+  }
+
   function recipientOffers({ by, actorId, playerIds, at }) {
     const out = [];
     for (const o of db.recruitmentOffers ?? []) {
       if (!o || !playerIds.includes(o.playerId)) continue;
-      if (offerIntegrity(o).length) continue;
+      if (!soundOffer(o, at)) continue;
       const live = liveRevision(o);
       if (!live) continue; // a draft — or a draft withdrawn before issue — is invisible, not redacted
       const snap = live.recipientSnapshot;
@@ -604,7 +635,8 @@ export function registerOffers(rawCtx) {
     return o;
   }
 
-  const recipientView = (o, at) => offerRecipientView(o, at, { orgName: orgOf(o.orgId)?.name ?? null });
+  const caseOpenFor = (o) => { const k = (db.recruitmentCases ?? []).find((x) => x?.id === o.caseId && x.orgId === o.orgId); return !k || k.room?.status === 'offer_made'; };
+  const recipientView = (o, at) => offerRecipientView(o, at, { orgName: orgOf(o.orgId)?.name ?? null, caseOpen: caseOpenFor(o) });
 
   /** A read receipt for the live revision (§40): a fact about delivery, never a status. Returns true when a new one was recorded. */
   function markViewed(o, { kind, id }, at, { persist = true } = {}) {
@@ -733,9 +765,9 @@ export function registerOffers(rawCtx) {
       hist(o, responseType === 'accepted' ? 'offer_accepted' : 'offer_declined', who, { revisionId: rev.id, responseId: response.id, hadReason: !!reason }, at);
       if (room) audit(room, by, actorId, actorName, responseType === 'accepted' ? 'offer_accepted' : 'offer_declined', { offerId: o.id, revisionId: rev.id, to: moved.applied ? moved.to : undefined });
       persistNow();
-      if (room) broadcast?.('offer_responded', { orgId: o.orgId, roomId: room.id, offerId: o.id, status: rev.status });
-      notifyClub(o, `${actorName} ${responseType} Offer revision ${rev.revisionNumber} for ${room?.playerName ?? player?.name ?? 'the player'}${responseType === 'accepted' ? ' — accepted in ScoutBox; signing pending' : ''}.`);
-      notifyAgent(o, `Your client ${player?.name ?? ''} ${responseType} the Offer from ${org.name ?? 'the club'}.`.replace(/\s+/g, ' '));
+      if (room) safe('offer_responded', () => broadcast?.('offer_responded', { orgId: o.orgId, roomId: room.id, offerId: o.id, status: rev.status }));
+      safe('notifyClub', () => notifyClub(o, `${actorName} ${responseType} Offer revision ${rev.revisionNumber} for ${room?.playerName ?? player?.name ?? 'the player'}${responseType === 'accepted' ? ' — accepted in ScoutBox; signing pending' : ''}.`));
+      safe('notifyAgent', () => notifyAgent(o, `Your client ${player?.name ?? ''} ${responseType} the Offer from ${org.name ?? 'the club'}.`.replace(/\s+/g, ' ')));
       res.json({ offer: recipientView(o, at), lifecycle: moved, signing: { created: false, note: 'Accepting an Offer in ScoutBox is not a signing. Nothing was signed and no contract exists.' } });
     };
   }
@@ -746,15 +778,20 @@ export function registerOffers(rawCtx) {
     if (!o) return;
     const at = now(req);
     if (!isAdult(req.player)) return err(res, 'OFFER_NOT_PERMITTED', 'Sharing an Offer with an agent is an adult client\'s own act.');
+    // Un-sharing needs no agent at all (P6.1): a client whose mandate has ended must still be able to clear the share.
+    if (req.body?.share === false) {
+      if (o.agentShare) hist(o, 'offer_agent_share_withdrawn', { kind: 'player', id: req.player.id, name: req.player.name }, null, at);
+      o.agentShare = null;
+      o.updatedAt = at;
+      persistNow();
+      return res.json({ offer: recipientView(o, at) });
+    }
     const sole = integration?.soleActiveAgentFor?.(req.player.id, at) ?? { agreement: null, ambiguous: false };
     const agreementId = typeof req.body?.agreementId === 'string' ? req.body.agreementId : null;
     let agreement = sole.agreement;
     if (agreementId) agreement = (db.representationAgreements ?? []).find((a) => a && a.id === agreementId && a.clientId === req.player.id && integration?.basisFor?.({ agentUserId: a.agentUserId, clientId: req.player.id, at })?.ok) ?? null;
     if (!agreement) return err(res, 'OFFER_INPUT_INVALID', sole.ambiguous ? 'You have more than one active agent. Name the agreement (agreementId) you are sharing with.' : 'No active representation agreement to share with.', { field: 'agreementId' });
-    if (req.body?.share === false) {
-      o.agentShare = null;
-      hist(o, 'offer_agent_share_withdrawn', { kind: 'player', id: req.player.id, name: req.player.name }, null, at);
-    } else {
+    {
       o.agentShare = { agentUserId: agreement.agentUserId, agreementId: agreement.id, at, by: { kind: 'player', id: req.player.id } };
       hist(o, 'offer_agent_shared', { kind: 'player', id: req.player.id, name: req.player.name }, { agreementId: agreement.id }, at);
       notify({ kind: 'org_user', id: agreement.agentUserId }, 'recruitment_offer', `${req.player.name} shared an Offer with you to read. Their answer is their own act.`, o.id);
@@ -815,10 +852,17 @@ export function registerOffers(rawCtx) {
     const basis = integration?.basisFor?.({ agentUserId: req.orgUser.id, clientId: a.clientId, at });
     const scopeOk = !!basis?.ok && (basis.scope ?? []).some((s) => s === 'employment' || s === 'transfer');
     if (!scopeOk) return res.status(403).json({ error: 'SCOPE_INSUFFICIENT', message: 'Your representation scope with this client does not cover employment or transfer.' });
+    // P6.1 (D-P61-2): the licence is consulted NOW, as this route's contract
+    // always said. `client_private` is not a regulated action in P5.6E, so the
+    // decision above never asked; an Offer is employment business, and an agent
+    // whose required facets are not verified reads nothing. Fail closed when
+    // the fact cannot be asked.
+    const licenceCurrent = integration?.licenceCurrentFor ? integration.licenceCurrentFor(req.orgUser.id, a.jurisdiction ?? null, at) : false;
+    if (licenceCurrent !== true) return res.status(403).json({ error: 'LICENCE_NOT_CURRENT', rule: 'LICENCE', message: 'This client\'s Offers are not open to you right now.' });
     const player = findPlayer(a.clientId);
     const items = [];
     for (const o of db.recruitmentOffers ?? []) {
-      if (!o || o.playerId !== a.clientId || offerIntegrity(o).length) continue;
+      if (!o || o.playerId !== a.clientId || !soundOffer(o, at)) continue;
       if (!o.agentShare || o.agentShare.agentUserId !== req.orgUser.id) continue; // not shared with THIS agent: invisible
       if (!liveRevision(o)) continue;
       items.push(offerAgentView(o, at, { orgName: orgOf(o.orgId)?.name ?? null }));
@@ -831,8 +875,19 @@ export function registerOffers(rawCtx) {
     });
   });
 
+  /** P6.1 (§66): a deleted player leaves ids and states behind, never a name. */
+  function onPlayerDeleted(playerId, at) {
+    for (const o of db.recruitmentOffers ?? []) {
+      if (!o || o.playerId !== playerId) continue;
+      for (const r of o.responses ?? []) if (r && r.actorType === 'player') { r.actorName = null; r.reason = null; }
+      for (const h of o.history ?? []) if (h?.by && h.by.kind === 'player') h.by.name = null;
+      o.subjectRemovedAt = at;
+    }
+  }
+
   return {
     offerEvidenceReady: true,
     offersOfCase,
+    onPlayerDeleted,
   };
 }

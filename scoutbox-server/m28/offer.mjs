@@ -128,7 +128,17 @@ export function normaliseOfferClientKey(raw) {
 }
 
 /** A stable fingerprint of the parts of a request that make it "the same request". */
-export const payloadFingerprint = (parts) => JSON.stringify(parts, Object.keys(parts).sort());
+// P6.1 (D-P61-1): the fingerprint is a DEEP canonical serialisation. The
+// previous form passed the top-level key list as JSON.stringify's replacer,
+// which also filters every nested object — so `terms` serialised as `{}` and a
+// retry under the same key with DIFFERENT terms replayed the earlier Offer as
+// if it were the same request. Now every level is key-sorted and complete.
+const canonical = (v) => {
+  if (Array.isArray(v)) return v.map(canonical);
+  if (v && typeof v === 'object') { const o = {}; for (const k of Object.keys(v).sort()) o[k] = canonical(v[k]); return o; }
+  return v === undefined ? null : v;
+};
+export const payloadFingerprint = (parts) => JSON.stringify(canonical(parts));
 
 // ------------------------------------------------------------------ terms
 
@@ -137,6 +147,10 @@ function cleanText(raw, max, { oneLine = false } = {}) {
   if (typeof raw !== 'string') return { ok: false };
   // eslint-disable-next-line no-control-regex
   let s = raw.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '');
+  // P6.1 (§61): directional and zero-width format controls are stripped — they
+  // let a message read differently from what was typed (bidi spoofing) and
+  // survive into logs; ordinary Unicode text is kept as typed.
+  s = s.replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g, '');
   if (oneLine) s = s.replace(/[\r\n]+/g, ' ');
   s = s.trim();
   if (s.length > max) return { ok: false, tooLong: true };
@@ -345,7 +359,7 @@ export function offerIntegrity(offer, { orgId = null, caseId = null } = {}) {
     for (const r of offer.revisions) {
       if (!r || typeof r.id !== 'string' || ids.has(r.id)) { problems.push('revision_id'); continue; }
       ids.add(r.id);
-      if (!Number.isInteger(r.revisionNumber) || nums.has(r.revisionNumber)) problems.push('revision_number');
+      if (!Number.isInteger(r.revisionNumber) || r.revisionNumber < 1 || nums.has(r.revisionNumber)) problems.push('revision_number');
       nums.add(r.revisionNumber);
       if (!OFFER_STATUSES.includes(r.status)) problems.push('revision_status');
       // A revision that left DRAFT by being issued carries the instant it was
@@ -356,12 +370,30 @@ export function offerIntegrity(offer, { orgId = null, caseId = null } = {}) {
       if (issuedLike && readInstant(r.expiresAt) === null) problems.push('expires_at');
       if (r.status === 'WITHDRAWN' && readInstant(r.withdrawnAt) === null) problems.push('withdrawn_at');
       if (r.status === 'WITHDRAWN' && r.issuedAt !== null && r.issuedAt !== undefined && readInstant(r.issuedAt) === null) problems.push('issued_at');
+      // P6.1 (§43, §44): temporal order and bounds. A revision issued before it
+      // was drafted, answered or withdrawn before it was issued, or open for
+      // longer than the issue rule ever allows, is corruption — and corruption
+      // never widens authority (the row is refused, never read as live).
+      const c0 = readInstant(r.createdAt); const i0 = readInstant(r.issuedAt); const x0 = readInstant(r.expiresAt);
+      if (c0 !== null && i0 !== null && i0 < c0) problems.push('issued_before_created');
+      if (i0 !== null && readInstant(r.respondedAt) !== null && readInstant(r.respondedAt) < i0) problems.push('responded_before_issued');
+      if (c0 !== null && readInstant(r.withdrawnAt) !== null && readInstant(r.withdrawnAt) < c0) problems.push('withdrawn_before_created');
+      if (issuedLike && i0 !== null && x0 !== null && x0 > i0 + OFFER_LIMITS.maxExpiryMs + DAY_MS) problems.push('expiry_out_of_bounds');
+      if (issuedLike && i0 !== null && x0 !== null && x0 < i0) problems.push('expired_before_issued');
       if (r.status === 'ACCEPTED' || r.status === 'DECLINED') {
         const resp = (offer.responses ?? []).find((x) => x && x.revisionId === r.id);
         if (!resp || !OFFER_RESPONSE_TYPES.includes(resp.responseType) || !OFFER_RESPONSE_ACTORS.includes(resp.actorType)) problems.push('response');
       }
     }
-    if (!ids.has(offer.currentRevisionId)) problems.push('current_revision');
+    if (typeof offer.currentRevisionId !== 'string' || !ids.has(offer.currentRevisionId)) problems.push('current_revision');
+    else {
+      // P6.1 (§29, §81): the pointer names the LATEST revision. The one shape in
+      // which a later revision exists is a draft discarded by an acceptance of
+      // the revision before it (recorded WITHDRAWN); any other later revision
+      // means two revisions each claim to be current.
+      const cur = offer.revisions.find((r) => r && r.id === offer.currentRevisionId);
+      if (cur && offer.revisions.some((r) => r && r !== cur && Number.isInteger(r.revisionNumber) && r.revisionNumber > cur.revisionNumber && r.status !== 'WITHDRAWN')) problems.push('current_revision_not_latest');
+    }
   }
   if (!Array.isArray(offer.responses)) problems.push('responses');
   else {
@@ -374,6 +406,27 @@ export function offerIntegrity(offer, { orgId = null, caseId = null } = {}) {
   }
   return problems;
 }
+
+/**
+ * P6.1 (§38) — case/Offer consistency. The case is the authority for where
+ * recruitment stands; the Offer is the authority for what was proposed and
+ * answered. Two readings that cannot both be true are CORRUPTION (refused,
+ * never repaired on read); a case the club moved away from Offer made while
+ * a revision is still out is a WARNING the club surface shows and the
+ * recipient view reflects as "not answerable right now".
+ */
+export const OFFER_CASE_CORRUPTION = Object.freeze(['ACCEPTED_BUT_CASE_DECLINED', 'DECLINED_BUT_CASE_ACCEPTED']);
+export function offerCaseConsistency(offer, kase, now) {
+  const problems = [];
+  if (!offer || !kase) return problems;
+  const live = liveStatus(offer, now);
+  const st = kase.room?.status ?? null;
+  if (live === 'ACCEPTED' && st === 'offer_declined') problems.push('ACCEPTED_BUT_CASE_DECLINED');
+  if (live === 'DECLINED' && st === 'offer_accepted') problems.push('DECLINED_BUT_CASE_ACCEPTED');
+  if (live === 'ISSUED' && st !== 'offer_made') problems.push('LIVE_OFFER_CASE_NOT_AT_OFFER_MADE');
+  return problems;
+}
+export const offerCaseCorrupt = (problems) => (problems ?? []).some((p) => OFFER_CASE_CORRUPTION.includes(p));
 
 // ------------------------------------------------------------------ evidence
 
@@ -465,7 +518,7 @@ export function offerClubView(offer, now) {
  * internal note, never a draft, never the decision or transaction reference,
  * never the readiness blockers.
  */
-export function offerRecipientView(offer, now, { orgName = null } = {}) {
+export function offerRecipientView(offer, now, { orgName = null, caseOpen = true } = {}) {
   const issued = (offer.revisions ?? []).filter(wasIssued).sort((a, b) => a.revisionNumber - b.revisionNumber);
   const curIssued = liveRevision(offer);
   const st = curIssued ? effectiveRevisionStatus(curIssued, now) : null;
@@ -476,7 +529,11 @@ export function offerRecipientView(offer, now, { orgName = null } = {}) {
     currentRevisionId: curIssued ? curIssued.id : null,
     currentRevision: curIssued ? revisionBase(curIssued, now) : null,
     revisions: issued.map((r) => revisionBase(r, now)),
-    awaitingYourResponse: st === 'ISSUED',
+    awaitingYourResponse: st === 'ISSUED' && caseOpen,
+    // P6.1: an issued revision whose case the club has paused or moved cannot
+    // be answered right now; the recipient is told so instead of hitting a 409.
+    answerable: st === 'ISSUED' && caseOpen,
+    notAnswerableReason: st === 'ISSUED' && !caseOpen ? 'CASE_PAUSED' : null,
     responses: (offer.responses ?? []).map((x) => ({ id: x.id, revisionId: x.revisionId, responseType: x.responseType, actorType: x.actorType, occurredAt: x.occurredAt })),
     agentShared: !!offer.agentShare,
     policyVersion: OFFER_POLICY_VERSION,

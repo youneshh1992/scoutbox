@@ -3852,6 +3852,8 @@ function deletePlayerData(playerId) {
   // M23 P5.6D: a transaction keeps its ids, roles, states and times and loses
   // the person; every representation naming the subject is withdrawn.
   m26Ctx?.onPlayerDeleted?.(playerId, at);
+  // M23 P6.1: Offers keep ids, states and times and lose the person's name and words.
+  m28Ctx?.onPlayerDeleted?.(playerId, at);
   db.channels = db.channels.filter((c) => c.playerId !== playerId);
   db.notifications = db.notifications.filter((n) => !(n.audience.kind === 'player' && n.audience.id === playerId));
   db.pairingCodes = db.pairingCodes.filter((c) => c.playerId !== playerId);
@@ -3958,6 +3960,7 @@ let m25Ctx = null;
 let m26Ctx = null;
 // M23 P5.6E — the cross-app integration layer, registered after all four.
 let m27Ctx = null;
+let m28Ctx = null; // M23 P6 — assigned when the Offer module registers, below
 const tsRouter = express.Router();
 app.use('/ts', (req, res, next) => (m25Ctx ? m25Ctx.reviewerAuth(req, res, next) : res.status(503).json({ error: 'REVIEWER_LANE_NOT_READY' })), tsRouter);
 
@@ -4468,7 +4471,7 @@ Object.assign(agentIntegration, m27Ctx.seam);
 // touches `db.signings`, never negotiates and never lets an agent act for a
 // player. Registered after the Agent layers because it reads the P5.6E seam
 // (an agent's basis and scope) and P5.6D's readiness seam, by reference.
-const m28Ctx = registerOffers({
+m28Ctx = registerOffers({
   ...m19Ctx,
   isAdult,
   storage,
@@ -4479,7 +4482,6 @@ const m28Ctx = registerOffers({
   integration: agentIntegration,
   transactions: m26Ctx,
 });
-void m28Ctx;
 
 // The transaction domain's rows join the agency audit feed beside the P5.6B and
 // P5.6C rows, so an agency has ONE audit rather than three.
