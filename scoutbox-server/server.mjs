@@ -31,6 +31,7 @@ import { registerTransactions } from './m26/index.mjs';
 import { registerIntegration } from './m27/index.mjs';
 import { registerOffers } from './m28/index.mjs';
 import { registerSigning } from './m29/index.mjs';
+import { registerJourneyRoutes } from './m23/journeyRoutes.mjs';
 import { createVerificationProvider } from './m25/provider.mjs';
 import { createEvidenceProvider } from './m23/evidence.mjs';
 import { COMBINE_PROTOCOLS } from './m16/combineShared.mjs';
@@ -765,7 +766,11 @@ function notify(audience, type, text, refId = null) {
 }
 
 function notificationsFor(kind, id) {
-  return db.notifications.filter((n) => n.audience.kind === kind && n.audience.id === id).slice().reverse();
+  // M23 P8 §30 — each row is decorated at READ time with the current,
+  // authorized resource its refId points to (or null). Nothing is stored.
+  const resolve = journeyCtx?.notificationTargetFor;
+  return db.notifications.filter((n) => n.audience.kind === kind && n.audience.id === id).slice().reverse()
+    .map((n) => (resolve ? { ...n, target: resolve(n, { kind, id }) } : n));
 }
 
 function markNotificationsRead(kind, id) {
@@ -4521,6 +4526,18 @@ m29Ctx = registerSigning({
   faults: faultLayer,
 });
 m28Ctx.setSigningSummary?.(m29Ctx.summaryForOffer);
+
+// ------------------------------------------------ M23 P8 journey audiences
+// The player's, the guardian's and an authorized agent's journeys, and the
+// notification target resolver. Registered after M24–M29 because the agent
+// route proves its basis through the same seams the Offer and signing agent
+// routes use. Reads only.
+const journeyCtx = registerJourneyRoutes({
+  ...m19Ctx,
+  recruitmentEvidenceProvider: recruitmentEvidence,
+  agent: m24Ctx,
+  integration: agentIntegration,
+});
 
 // The transaction domain's rows join the agency audit feed beside the P5.6B and
 // P5.6C rows, so an agency has ONE audit rather than three.

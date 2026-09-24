@@ -597,11 +597,16 @@ function playerJourneyFor(db, kase, viewer, shared, now) {
  */
 function agentJourneyFor(db, kase, viewer, now) {
   const grants = new Set(viewer.grants ?? []);
-  const contactRecords = grants.has('contacts') ? db.recruitmentContacts.filter((c) => c && c.caseId === kase.id && c.orgId === kase.orgId && ['delivered', 'responded'].includes(c.status) && contactIntegrity(c, { orgId: kase.orgId, caseId: kase.id }).length === 0).map(contactMilestone) : [];
+  // Only the records the client's own act routed or shared to THIS agent: a
+  // contact whose routing snapshot names them, an Offer the client shared
+  // with them, the packages over those Offers. Trials follow the client's
+  // disclosure choice (the `trials` grant).
+  const contactRecords = grants.has('contacts') ? db.recruitmentContacts.filter((c) => c && c.caseId === kase.id && c.orgId === kase.orgId && ['delivered', 'responded'].includes(c.status) && c.routingSnapshot?.agent?.agentUserId === viewer.userId && contactIntegrity(c, { orgId: kase.orgId, caseId: kase.id }).length === 0).map(contactMilestone) : [];
   const trialRows = grants.has('trials') ? db.trials.filter((t) => t && t.caseId === kase.id && t.orgId === kase.orgId && t.playerId === kase.playerId && !t.subjectRemovedAt && trialIntegrity(t, { orgId: kase.orgId, caseId: kase.id }).length === 0) : [];
   const invitations = grants.has('trials') ? db.requests.filter((r) => r?.type === 'trial' && r.caseId === kase.id && r.orgId === kase.orgId) : [];
-  const offerRows = grants.has('offers') && Array.isArray(db.recruitmentOffers) ? db.recruitmentOffers.filter((o) => o?.caseId === kase.id && o.orgId === kase.orgId && o.playerId === kase.playerId && offerIntegrity(o, { orgId: kase.orgId, caseId: kase.id }).length === 0 && liveRevisionOf(o)) : [];
-  const packages = grants.has('signings') && Array.isArray(db.signingPackages) ? db.signingPackages.filter((p) => p?.caseId === kase.id && p.orgId === kase.orgId && p.playerId === kase.playerId && signingIntegrity(p, { orgId: kase.orgId }).length === 0 && signingCurrentRevision(p)?.readyAt) : [];
+  const offerRows = grants.has('offers') && Array.isArray(db.recruitmentOffers) ? db.recruitmentOffers.filter((o) => o?.caseId === kase.id && o.orgId === kase.orgId && o.playerId === kase.playerId && o.agentShare?.agentUserId === viewer.userId && offerIntegrity(o, { orgId: kase.orgId, caseId: kase.id }).length === 0 && liveRevisionOf(o)) : [];
+  const sharedOfferIds = new Set(offerRows.map((o) => o.id));
+  const packages = grants.has('signings') && Array.isArray(db.signingPackages) ? db.signingPackages.filter((p) => p?.caseId === kase.id && p.orgId === kase.orgId && p.playerId === kase.playerId && sharedOfferIds.has(p.offerId) && signingIntegrity(p, { orgId: kase.orgId }).length === 0 && signingCurrentRevision(p)?.readyAt) : [];
   const offer = currentOfferForCase(offerRows, now);
   const signing = currentSigningForCase(packages, now);
   const signingRow = signing?.status === 'COMPLETED' && signing.completion?.signingId ? (db.signings ?? []).find((s) => s?.id === signing.completion.signingId && s.signingPackageId === signing.id) ?? null : null;
