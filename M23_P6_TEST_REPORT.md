@@ -23,7 +23,53 @@ status and code.
 
 ## 2. Server battery (§69)
 
-⟨SERVER_BATTERY_TABLE⟩
+40 server suites (38 existing + the 2 new ones) and apiE2E, each on its own random port with `DATA_DIR` set, run sequentially after the browser battery (a reap-based lane never runs beside a live suite):
+
+| Suite | Result |
+| --- | --- |
+| m23OfferE2E | green — 447 checks |
+| m23OfferPersistence | green — 59 checks |
+| m23TemporalIntegrityE2E | green — 493 checks |
+| connectedE2E | green — 43 checks |
+| m12E2E | green — 152 checks |
+| m13E2E | green — 212 checks |
+| m14E2E | green — 194 checks |
+| m141E2E | green — 94 checks |
+| m15E2E | green — 190 checks |
+| m16E2E | green — 118 checks |
+| m161E2E | green |
+| m162E2E | green |
+| m17E2E | green — 17 checks |
+| m18E2E | green — 18 checks |
+| m181E2E | green |
+| m182E2E | green |
+| m19E2E | green — 19 checks |
+| m20E2E | green — 20 checks |
+| m21E2E | green — 21 checks |
+| m22E2E | green — 112 checks |
+| testTrust | green |
+| m23E2E | green |
+| m23Persistence | green — 67 checks |
+| m23BootContract | green — 57 checks |
+| m23P4AClosureE2E | green — 337 checks |
+| m23ContactE2E | green — 428 checks |
+| m23ContactPersistence | green — 61 checks |
+| m23TrialE2E | green — 535 checks |
+| m23TrialPersistence | green — 36 checks |
+| m23DecisionE2E | green — 435 checks |
+| m23DecisionPersistence | green — 48 checks |
+| m23AgentE2E | green — 407 checks |
+| m23AgentPersistence | green — 68 checks |
+| m23AgentComplianceE2E | green — 346 checks |
+| m23AgentCompliancePersistence | green — 83 checks |
+| m23AgentTransactionE2E | green — 404 checks |
+| m23AgentTransactionPersistence | green — 63 checks |
+| m23AgentIntegrationE2E | green — 535 checks |
+| m23P56ERepairAudit | green — 179 checks |
+| m23AgentFinalHardeningE2E | green — 286 checks |
+| apiE2E | green — 130 checks |
+
+Total: 41 rows, 41 `rc=0`, 0 failures. Suites whose final line the lane's count parser does not read (m161E2E, m162E2E, m181E2E, m182E2E — 399 checks, m23E2E — 379 checks, testTrust) all exited 0 with no `✗` line.
 
 ## 3. apiE2E (§70)
 
@@ -43,7 +89,27 @@ status and code.
 
 ## 6. Browser battery (§72)
 
-⟨BROWSER_BATTERY_TABLE⟩
+The P5.7 sequential battery (`KEEP_DIST=1`, ports read from `/proc/net/tcp`), plus the new suite:
+
+| Suite | Checks |
+| --- | --- |
+| navConfig | green — 359 |
+| m15Live | green — 21 |
+| m12Live | green |
+| m21Live | green — 68 |
+| m23AgentGrassrootsLive | green — 49 |
+| m23AgentLive | green — 90 |
+| m23AgentComplianceLive | green — 86 |
+| m23AgentTransactionLive | green — 116 |
+| m23AgentIntegrationLive | green — 98 |
+| m23ContactLive | green — 82 |
+| m23TrialLive | green — 122 |
+| m23DecisionLive | green — 86 |
+| m23Live | green — 39 |
+| navLive | green — 64 |
+| m23OfferLive (run separately, before the battery) | green — 98 |
+
+15 browser suites, 0 failures, 0 page errors; after the battery the only listening ports were the environment's own (2024, 2025, 43819, 44193) — every suite port was released.
 
 ## 7. Typechecks and builds (§73, §74)
 
@@ -78,7 +144,23 @@ where it was.
 
 ## 11. Fresh clone (§79)
 
-⟨FRESH_CLONE_TABLE⟩
+From the R3 tip `fbd1292`, into an empty directory, with nothing reused (0 carried `node_modules`, 0 `dist` directories, 0 `.db` files — counted):
+
+| Step | Result |
+| --- | --- |
+| clone | tip fbd1292 = source tip; clean |
+| install (server, e2e, five apps) | rc 0 each |
+| `SCHEMA_VERSION` declared | 2307, 17 migrations |
+| cold boot on an empty store | `X-ScoutBox-Schema: 2307`; `scoutbox.db` created; port 4141 released after stop |
+| five typechecks | 5/5 rc 0 |
+| five builds (player via `expo export`) | 5/5, `index.html` present each |
+| `m23OfferE2E` | all checks passed (447), rc 0 |
+| `m23OfferPersistence` | all checks passed (59), rc 0 |
+| `m23TemporalIntegrityE2E` | 493 checks, 335 negative, rc 0 |
+| `m23AgentTransactionE2E` | all checks passed (404), rc 0 |
+| `m23DecisionE2E` | all checks passed (435), rc 0 |
+| one real live Club → Player Offer journey (`m23OfferLive`, Chromium; club, player and agent apps) | 98 checks, 30 negative, rc 0 |
+| survivors | none live (12 already-exited zombies awaiting reap, holding nothing) |
 
 ## 12. Flakes
 

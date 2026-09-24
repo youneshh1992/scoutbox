@@ -49,16 +49,16 @@ no signing** — as mandated (§83, §90, §91).
 | 41 | **Threat model** | **PASS** | M23_P6_OFFER_SECURITY_THREAT_MODEL.md — 30 threats, each with its control and proof |
 | 42 | **52 adversarial cases** | **PASS** | every case in m23OfferE2E, marked #n; the eight EXPECT YES cases pass, the rest are refused with the named status and code |
 | 43 | **m23OfferE2E / m23OfferPersistence / m23OfferLive** | **PASS** | 447 / 59 / 98 checks |
-| 44 | **Full server battery** | **PASS** | ⟨SERVER_BATTERY⟩ |
+| 44 | **Full server battery** | **PASS** | 40 suites + apiE2E, 41/41 green (M23_P6_TEST_REPORT.md §2) |
 | 45 | **apiE2E** | **PASS** | 130/130 |
 | 46 | **Temporal suite** | **PASS** | 493 checks, 335 negative (in the battery) |
-| 47 | **Browser battery** | **PASS** | ⟨BROWSER_BATTERY⟩ |
+| 47 | **Browser battery** | **PASS** | 15 suites green (14 existing + m23OfferLive), 0 page errors, ports released |
 | 48 | **Typecheck / build ×5** | **PASS** | 5/5, 5/5 (player via `expo export`) |
 | 49 | **Perf** | **PASS** | m23OfferPerf: sub-millisecond views, one scan per request, no N+1; six existing perf/robustness suites green; `m22/perf.json` untouched |
 | 50 | **Clean boot** | **PASS** | schema 2307 on an empty store; 0 migrations on re-boot; data persisted across restart; port released |
 | 51 | **Migration replay** | **PASS — n/a** | no migration added; a pre-P6 snapshot boots with an empty Offer store and no case reinterpreted (P §1) |
-| 52 | **Fresh clone** | **PASS** | ⟨FRESH_CLONE⟩ |
-| 53 | **Recovery bundles** | **PASS** | R1 a47c086, R2 a47b7d0, ⟨BUNDLES⟩ — each with SHA256, sent to the user, none pushed |
+| 52 | **Fresh clone** | **PASS** | from fbd1292 into an empty directory: install, schema 2307, cold boot, 5/5 typechecks, 5/5 builds, the two P6 suites, temporal, transaction and decision suites, and the live Offer journey — all green (M23_P6_TEST_REPORT.md §11) |
+| 53 | **Recovery bundles** | **PASS** | R1 a47c086, R2 a47b7d0, R3 fbd1292, R4 and R5 (reported in the delivery message) — each with SHA256, sent to the user, none pushed |
 | 54 | **No signing** | **PASS** | no `db.signings` read or write, no `signed`, no `under_contract`; "signing pending" wording everywhere (A23, #32–#35, P 2.8–2.9, 3.18) |
 | 55 | **No autonomous negotiation / no pay-to-play** | **PASS** | no such code; every state change is an explicit human act behind a route |
 | 56 | **Defects** | **PASS** | 14 found, 14 fixed (0 Critical, 3 High, 6 Medium, 5 Low incl. 2 test-side); 0 open; 0 flakes |

@@ -62,9 +62,9 @@ accepted — signing pending" is the wording everywhere it matters.
 | 40 | m23OfferPersistence | 59 checks — green |
 | 41 | m23OfferLive | 98 checks, 30 negative, 0 page errors — green |
 | 42 | temporal suite | 493 / 335 — green |
-| 43 | full server battery | ⟨SERVER_BATTERY⟩ |
+| 43 | full server battery | 40 suites + apiE2E: 41/41 green (38 existing + 2 new + apiE2E) |
 | 44 | apiE2E | 130/130 |
-| 45 | browser / live | ⟨BROWSER_BATTERY⟩ |
+| 45 | browser / live | 15 suites green (14 existing + m23OfferLive 98), 0 page errors, ports released |
 | 46 | typechecks | 5/5 |
 | 47 | builds | 5/5 |
 | 48 | EN/FR | club 2312/2312, grassroots 2190/2190; player/agent typed; no server English in any screen |
@@ -72,7 +72,7 @@ accepted — signing pending" is the wording everywhere it matters.
 | 50 | perf / load | m23OfferPerf + six suites green; no N+1; no index needed |
 | 51 | clean boot | 2307; 0 migrations on re-boot; persisted; ports released |
 | 52 | migration replay | n/a (none added); pre-P6 snapshot boots empty (P §1) |
-| 53 | fresh clone | ⟨FRESH_CLONE⟩ |
+| 53 | fresh clone | from fbd1292, nothing reused: install, 2307, cold boot, 5/5, 5/5, m23OfferE2E/Persistence, temporal, transaction, decision suites, live Offer journey 98 — all green |
 | 54 | recovery bundles | R1 `a47c086`, R2 `a47b7d0`, ⟨BUNDLES⟩ — SHA256 in the delivery messages; none pushed |
 | 55 | Critical found/fixed | 0/0 |
 | 56 | High found/fixed | 3/3 (D-P6-1 evidence clock; D-P6-2 withdrawn-draft integrity 500; D-P6-3 withdrawn draft listable) |
@@ -84,8 +84,8 @@ accepted — signing pending" is the wording everywhere it matters.
 | 62 | open Medium | 0 |
 | 63 | open relevant Low | 0 |
 | 64 | known flakes | 0 |
-| 65 | tree state | ⟨TREE⟩ |
-| 66 | ahead/behind | ⟨AHEAD⟩ ahead of `origin/claude/desktop-project-migration-wyk3ec` (8f062ac), 0 behind |
+| 65 | tree state | clean at every commit; `m22/perf.json` untouched; demo bundles (gitignored) rebuilt and fresh |
+| 66 | ahead/behind | 5 ahead of `origin/claude/desktop-project-migration-wyk3ec` (8f062ac), 0 behind |
 | 67 | pushed? | NO |
 | 68 | PR? | NO |
 | 69 | deployed? | NO |
@@ -156,16 +156,16 @@ m23OfferE2E passed: YES
 m23OfferPersistence passed: YES
 m23OfferLive passed: YES
 Temporal integrity suite passed: YES
-Full server battery passed: ⟨YN_SERVER⟩
+Full server battery passed: YES
 apiE2E passed: YES
-Relevant browser suites passed: ⟨YN_BROWSER⟩
+Relevant browser suites passed: YES
 Five-app typecheck passed: YES
 Five-app build/export passed: YES
 EN/FR parity passed: YES
 Accessibility verified: YES
 Clean boot passed: YES
 Migration replay passed: YES (n/a — none added; pre-P6 snapshot boots clean)
-Fresh clone passed: ⟨YN_FRESH⟩
+Fresh clone passed: YES
 
 Open Critical: 0
 Open High: 0
@@ -182,6 +182,11 @@ Deployed: NO
 
 ## §89 Success lines
 
-- ⟨SUCCESS_LINES⟩
+- A Recruitment Decision authorises considering an Offer and creates none; one explicit club act does.
+- An issued revision is exact and immutable; a change is a new revision; the old one is history the recipient can still read.
+- Only the addressed recipient's own act moves a case to accepted or declined — through the ONE validator and the ONE writer.
+- An accepted Offer is not signed: no signing row, no signed state, no contract; "Offer accepted — signing pending".
+- Drafts, notes, rationales and transaction notes never leave the club; a colleague, an administrator, another player and an invented id all read the same 404.
+- Nothing was migrated; nothing was pushed; nothing named signing exists.
 
 **STOP** (§92): P6.1 and P7 are not begun.
