@@ -21,7 +21,7 @@ accepted — signing pending" is the wording everywhere it matters.
 | # | Item | Answer |
 | --- | --- | --- |
 | 1 | starting tip | `8f062ac` (local = remote at Stage 0; ahead/behind 0/0; clean) |
-| 2 | final local tip | ⟨FINAL_TIP⟩ |
+| 2 | final local tip | R5 = the commit that contains this file (its hash is in the delivery message; a file cannot contain its own commit's hash). R4 = `57aa197` |
 | 3 | starting schema | 2307, 17 migrations |
 | 4 | final schema | 2307, 17 migrations |
 | 5 | migration name | none — `recruitmentOffers` is module-guaranteed by m28 (decision: M23_P6_OFFER_MODEL.md §2) |
@@ -73,7 +73,7 @@ accepted — signing pending" is the wording everywhere it matters.
 | 51 | clean boot | 2307; 0 migrations on re-boot; persisted; ports released |
 | 52 | migration replay | n/a (none added); pre-P6 snapshot boots empty (P §1) |
 | 53 | fresh clone | from fbd1292, nothing reused: install, 2307, cold boot, 5/5, 5/5, m23OfferE2E/Persistence, temporal, transaction, decision suites, live Offer journey 98 — all green |
-| 54 | recovery bundles | R1 `a47c086`, R2 `a47b7d0`, ⟨BUNDLES⟩ — SHA256 in the delivery messages; none pushed |
+| 54 | recovery bundles | R1 `a47c086`, R2 `a47b7d0`, R3 `fbd1292`, R4 `57aa197`, R5 = this commit — SHA256 in the delivery messages; none pushed |
 | 55 | Critical found/fixed | 0/0 |
 | 56 | High found/fixed | 3/3 (D-P6-1 evidence clock; D-P6-2 withdrawn-draft integrity 500; D-P6-3 withdrawn draft listable) |
 | 57 | Medium found/fixed | 6/6 (D-P6-4 live-vs-current gate; D-P6-5 overwritten keys; D-P6-6 split rev contract; D-P6-7 receipt from list; D-P6-8 agent hash regex; D-P6-14 server English in FR screens) |
@@ -173,7 +173,7 @@ Open Medium: 0
 Open relevant Low: 0
 Known flakes: 0
 
-Local tip: ⟨FINAL_TIP⟩
+Local tip: R5 (this commit; R4 = 57aa197) — 5 commits ahead of 8f062ac
 Remote tip: 8f062ac (unchanged)
 Pushed: NO
 PR: NO
