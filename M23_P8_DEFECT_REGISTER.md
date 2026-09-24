@@ -41,6 +41,8 @@ product defects.
 | T-P8-7 | m23JourneyPerf | the synthetic Trial lacked `schedule.timezone` and the Offer revision lacked `response`, so the fixture read as integrity_error | fixture fixed; the probe reads canonical | R5 |
 | T-P8-8 | m20E2E | the demo bundles and M20_METRICS.md must carry a new metric's limitation word for word | added to both apps' `m20Demo.ts` and to the document | R5 |
 | T-P8-10 | m23JourneyPerf | the synthetic store gave ONE club a hundred live cases for one player, a shape M17 never allows; the timeline count grew with N, which is what exposed D-P8-16 | one case per (club, player) pair; the probe now reads 19 timeline entries at every N | R5 |
+| T-P8-11 | m23AgentLive N5 | the P5.6B wording sweep of the client overview met the "Offers" tab label — a read-only destination since P6 — and the P8 journey line's factual stage words; the reused agent bundle that the lane had run against dated from before P6, so the sweep had never seen either | the tab label and the stage words are stripped like the honesty sentences; N5c asserts no control on the overview names an offer, a negotiation, a commission or a fee; the failure message names the screen and the words | R6 |
+| T-P8-12 | m23AgentLive B10b, m23AgentComplianceLive G1b | a card was read the moment a toast appeared, before its re-read landed (one fail each on the first fresh-bundle run, green on the rerun) | both wait for the words with a bounded wait | R6 |
 | T-P8-9 | m23E2E Y2, m182E2E | new M23 route codes must be in the ONE error table; new events must be in `EMITTED_EVENTS` | `CHILD_NOT_FOUND` 404, `AGENT_ACTION_NOT_PERMITTED` 403; the two events listed | R4 |
 
 ## Recorded, not fixed (outside P8's scope; no authoritative truth affected)
@@ -62,6 +64,8 @@ product defects.
 | Medium | 12 | 12 | 0 |
 | Low | 2 | 2 | 0 |
 
-Known P8 flakes: 0 (every lane green on its first run at the final tip;
-earlier red runs were the assertion mistakes above, each fixed once, and
-D-P8-15 which was a real crash).
+Known P8 flakes: 0 (every server-side lane green on its first run at its
+tip; in the browser battery two P5.6 suites were red once on the first pass
+over bundles built from the tip and green after a test-side fix each,
+T-P8-11 and T-P8-12; earlier red runs of the P8 suites were the assertion
+mistakes above, each fixed once, and D-P8-15 which was a real crash).
