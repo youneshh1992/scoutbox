@@ -263,8 +263,8 @@ section('pure K/L/M — the trial projection is scheduling, and nothing adjacent
 
 section('pure §102/§103 — no new store, and no migration');
 {
-  ok(SCHEMA_VERSION === 2307, 'AN-p1 the schema is still 2307: P5.6E adds no migration (§102 "prefer NO migration")');
-  neg(!MIGRATIONS.some((m) => m.version > 2307), 'AN-p2 and no step above 2307 exists');
+  ok(SCHEMA_VERSION === 2308 && !MIGRATIONS.some((m) => /agent|integration|p56e/i.test(m.id) && m.version > 2307), 'AN-p1 the schema is 2308 (P7\'s signing store): P5.6E adds no migration (§102 "prefer NO migration")');
+  neg(MIGRATIONS.filter((m) => m.version > 2307).every((m) => m.id === 'm280_001_signing_workflow'), 'AN-p2 and the only step above 2307 is P7\'s signing store');
   neg(!MIGRATIONS.some((m) => /integration|disclosure|handoff|share/i.test(m.id)), 'AN-p3 no P5.6E migration id exists at all');
   const p56e = ['agentOpportunityShares', 'representationDisclosures', 'transactionHandoffs', 'agentContacts', 'agentTrials'];
   neg(!p56e.some((s) => PRODUCTION_REQUIRED_STORES.includes(s)), 'AN-p4 and none of the five stores P5.6E might have declared exists — the disclosure lives on the agreement, the share lives on the agreement, and the handoff lives on the case (§103)');

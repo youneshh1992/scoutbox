@@ -558,7 +558,7 @@ section('S/live — authorization is decided before a date is read (§29 error p
 
 section('T/live — persistence and restart: normalised values survive as what they are');
 {
-  ok((await j('GET', '/healthz')).headers.get('x-scoutbox-schema') === String(SCHEMA_VERSION) && SCHEMA_VERSION === 2307, 'T1 schema 2307 — P5.7 adds no migration');
+  ok((await j('GET', '/healthz')).headers.get('x-scoutbox-schema') === String(SCHEMA_VERSION) && SCHEMA_VERSION === 2308, 'T1 schema 2308 — P5.7 adds no migration (the one step past 2307 is P7\'s signing store)');
   await stop(server);
   server = await boot();
   const maria = await login('org-eastport', 'Maria Keane', 'Head of Recruitment');
