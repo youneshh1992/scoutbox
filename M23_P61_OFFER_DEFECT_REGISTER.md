@@ -21,6 +21,7 @@ signing, negotiation or a minor pathway.
 | D-P61-11 | Medium | m28/index.mjs recipient/agent lists, m23/journey.mjs | plant a case/Offer disagreement; list as the recipient, the agent, or read the journey | the row was listed (and a read receipt was written on it) | omitted, nothing written | a recipient shown an Offer the club's case contradicts | the lists checked row integrity only | `soundOffer` (integrity + player match + consistency) in both lists; the journey filter | persistence 5.7, 5.22 | fixed | yes | none |
 | D-P61-12 | Low (test) | scripts/m23OfferPersistence.mjs | run after D-P61-4 | 2.12 and nine dependants failed: revision 2 was issued with a test clock earlier than the revise that created it | a monotonic clock | a false corruption signal in the suite | the `issue` helper pinned `at(T0)` | revision 2 issued at T0+H | 94 checks green | fixed | no | none |
 | D-P61-13 | Low (test) | scripts/m23OfferHardeningE2E.mjs, e2e/m23OfferHardeningLive.test.mjs | first runs | SSE frames are `data: {"event":…}` not `event:` lines; the journey timeline keys history by target status (moves must be counted from the room's raw activity); `revise` carries no expiry (by design); a case that reached a terminal state was reused; the UTC-day assertion had its instants inverted; no second agency in the seed; race pairs were started while building the argument list (before the stream and the counters were in place); the player app has no `/` tab and can log in only as four players | exact counts and deterministic fixtures | none in product | test-side | fixtures reassigned (one player per terminal outcome), a second agency seeded before boot, race pairs as thunks, the stream settled before the race, exact `=== 1` counts | 243 / 48 green | fixed | no | none |
+| D-P61-14 | Medium | scoutbox-player `M23Offer` | leave the Offers tab open; the club pauses the case (or withdraws / revises); return to the tab | the screen showed the Offer exactly as before, with an Accept control on a revision the server would refuse; nothing told the player the case was paused | the list re-read on every return to the tab; the paused state named in the player's own language with no answer control | stale UX: an invitation to act on a state that no longer exists (the server refused it, so no data was ever wrong) | the tab keeps the screen mounted, so the effect that reads the list ran only on mount and after the player's own act; the API's `notAnswerableReason` was never rendered | `useFocusEffect` bumps a tick that re-runs the read; a `CASE_PAUSED` line (EN/FR, typed) and no control while paused | live S3h–S3l; hardening P6.5–P10b (API); 5/5 typechecks; demos rebuilt, freshness 16/16 | fixed | no (server-side the act was already refused) | none |
 
 ## Totals
 
@@ -28,12 +29,21 @@ signing, negotiation or a minor pathway.
 | --- | --- | --- | --- |
 | Critical | 0 | 0 | 0 |
 | High | 2 | 2 | 0 |
-| Medium | 7 | 7 | 0 |
+| Medium | 9 | 9 | 0 |
 | Low | 3 (1 product, 2 test-side) | 3 | 0 |
 
 Known P6.1 flakes: 0. Every re-run followed a code or test fix; no
 suite failed twice for the same reason, and none passed on retry without
 a change.
+
+## Harness incident (not a defect, disclosed)
+
+`m23AgentComplianceE2E` (P5.6C, untouched by P6.1) threw `server did
+not come up` once in the final confirmation lane, immediately after the
+fresh-clone lane's five builds: its 40 s boot window expired under load.
+No assertion failed; the suite passed 346/346 in the battery, in the
+post-fix regression and on a re-run with no change. Recorded in
+M23_P61_OFFER_TEST_REPORT.md §10–§11.
 
 ## Not defects (decisions recorded)
 

@@ -81,8 +81,11 @@ A case put `on_hold` while a revision is out: the club surface names
 `LIVE_OFFER_CASE_NOT_AT_OFFER_MADE` on the Offer, the recipient reads
 `answerable: false` with `notAnswerableReason: 'CASE_PAUSED'`, and an
 attempt is 409 `OFFER_LIFECYCLE_CONFLICT` with nothing recorded (P7–P9;
-survives a restart, Z). Resuming the case (through the lifecycle) makes
-the revision answerable again if it has not expired.
+survives a restart, Z). Resuming the case (`resumeCase`) returns it to `under_review`, not to
+`offer_made`, so the revision stays unanswerable; the club makes an Offer
+answerable again by stepping the case to consideration (`shortlist` →
+`considerOffer`) and issuing a new revision, or by withdrawing. The player
+app names the paused state in its own words (live S3i).
 
 ## 6. Nothing removed
 
