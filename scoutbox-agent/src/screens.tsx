@@ -620,7 +620,9 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
                         {cur?.terms.conditions && <div className="dim" style={{ fontSize: 12.5 }}>{cur.terms.conditions}</div>}
                         {x.status === 'ACCEPTED' && <div className="dim" style={{ fontSize: 12.5 }} data-testid={`offer-signing-pending-${x.id}`}>{t('offers.signingPending')}</div>}
                         {(() => {
-                          const sg = signings.data?.items.find((g) => g.offerId === x.id) ?? null;
+                          // P7.1 (D-P71-7): several packages can exist over one Offer (an expired one, then a live one). Show the live one, else the completed one, else the latest — the same choice the server's Offer summary makes.
+                          const forOffer = (signings.data?.items ?? []).filter((g) => g.offerId === x.id);
+                          const sg = forOffer.find((g) => !g.terminal) ?? forOffer.find((g) => g.status === 'COMPLETED') ?? forOffer[forOffer.length - 1] ?? null;
                           if (!sg) return signings.data?.refused && x.status === 'ACCEPTED' ? <div className="dim" style={{ fontSize: 12 }} data-testid={`offer-signing-withheld-${x.id}`}>{t('signing.withheld')}</div> : null;
                           const done = sg.requiredParties.filter((p) => p.status === 'COMPLETED').length;
                           const label = tr(`signing.st.${sg.status}`) === `signing.st.${sg.status}` ? sg.statusLabel ?? sg.status : tr(`signing.st.${sg.status}`);

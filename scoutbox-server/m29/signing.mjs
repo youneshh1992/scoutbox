@@ -193,6 +193,12 @@ export function canMarkReady(pkg, now) {
  * completed against the exact current revision, whose digest the actor names.
  */
 export function canCompleteParty(pkg, { partyType, actorKind, actorId, revisionId, documentSha256 }, now) {
+  // P7.1: a confirmation that names a revision this package has already superseded is told so, whatever the package's
+  // live state (a DRAFT awaiting re-presentation included) — the party's own act is what the answer is about.
+  if (isLive(pkg, now) && revisionId !== pkg.currentRevisionId) {
+    const older = (pkg.revisions ?? []).find((r) => r && r.id === revisionId && r.status === 'SUPERSEDED');
+    if (older) return { ok: false, error: 'SIGNING_SUPERSEDED', message: 'That signing revision was replaced. Sign the current revision once it is presented.', current: { revisionId: pkg.currentRevisionId } };
+  }
   const s = stateRefusal(pkg, now, ['READY', 'IN_PROGRESS']);
   if (!s.ok) return s;
   const rev = currentRevision(pkg);
