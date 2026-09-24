@@ -569,6 +569,28 @@ function isBlocked(playerId, orgId) {
   return db.blocks.some((b) => b.playerId === playerId && b.orgId === orgId);
 }
 
+/**
+ * M23 P8 (§26/§27) — the player's CANONICAL live contract, if any: a
+ * completed-signing row written by the ONE writer over a COMPLETED signing
+ * package, not cancelled, whose contract end (if any) has not passed at
+ * `now`. This is the record that owns `under_contract`; a self-declaration
+ * or a club's squad housekeeping never overrides it.
+ */
+function canonicalContractFor(playerId, now = Date.now(), { exceptOrgId = null } = {}) {
+  const today = new Date(now).toISOString().slice(0, 10);
+  for (const s of db.signings ?? []) {
+    if (!s || s.playerId !== playerId || !s.signingPackageId) continue;
+    if (s.cancelledAt || s.revokedAt || s.voidedAt) continue;
+    if (exceptOrgId && s.orgId === exceptOrgId) continue;
+    const pkg = (db.signingPackages ?? []).find((p) => p && p.id === s.signingPackageId && p.status === 'COMPLETED' && p.completion?.signingId === s.id);
+    if (!pkg) continue;
+    const end = s.contract?.endDate ?? pkg.completion?.contract?.endDate ?? null;
+    if (typeof end === 'string' && end < today) continue;
+    return { signing: s, packageId: pkg.id, orgId: s.orgId, endDate: end };
+  }
+  return null;
+}
+
 // -------------------------------------------------------------- sessions
 // Real sessions: logins mint a bearer token; every authenticated route
 // resolves the caller from the token. Nothing trusts a client-sent id.
@@ -2446,6 +2468,11 @@ orgRouter.post('/players/:id/signing', (req, res) => {
   // package between this club and player means the signing workflow on the
   // case owns the outcome. Kept for clients that never used P6; retirement
   // is flagged for P7.1.
+  // M23 P8 (§26/§27): recording a joining is a CLUB's act and a lead's act.
+  // An agency has no squad to sign a player into, and a scout could not
+  // complete the canonical workflow either; the same authority applies here.
+  if (req.org.type === 'agency' || req.org.level === 'agent') return res.status(403).json({ error: 'SIGNING_NOT_PERMITTED', message: 'Only a club records a signing.' });
+  if (!/head|director|lead|manager|owner|chief/i.test(req.orgUser?.role ?? '')) return res.status(403).json({ error: 'LEAD_REQUIRED', message: 'Only recruitment leads and directors can record a signing.' });
   const p = findPlayer(req.params.id);
   if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
   if (!visibleToOrg(p, req.org)) return res.status(403).json({ error: 'UNDER_18_WALL' });
@@ -2648,8 +2675,14 @@ orgRouter.post('/squad/:entryId/release', (req, res) => {
   req.org.squad = req.org.squad.filter((e) => e !== entry);
   const p = entry.playerId ? findPlayer(entry.playerId) : null;
   if (p) {
-    p.availability = 'available_now';
-    p.contractStatus = 'free_agent';
+    // M23 P8 (§27): releasing a player from THIS club's squad does not speak
+    // for a contract another club completed in ScoutBox. The squad row goes;
+    // the canonical contract truth stays with its writer.
+    const other = canonicalContractFor(p.id, Date.now(), { exceptOrgId: req.org.id });
+    if (!other) {
+      p.availability = 'available_now';
+      p.contractStatus = 'free_agent';
+    }
     if (referenceText) {
       db.vouches.push({
         id: nextId('vch'), playerId: p.id, playerName: p.name,
@@ -3242,15 +3275,33 @@ playerRouter.post('/location', (req, res) => {
   res.json({ ok: true });
 });
 
+// M23 P8 (§26): the player's self-service declaration. `under_contract` is
+// CANONICAL contract truth and is written by exactly one thing — the
+// completed-signing writer in m29 — so it cannot be self-declared here, and
+// while a canonical live contract stands no self-declared word replaces it.
+// The other five words remain the player's own to declare (their intent and
+// their reading of a contract ScoutBox did not write); availability is always
+// theirs.
+const SELF_DECLARABLE_CONTRACT_STATUSES = ['expiring_summer', 'scholarship_ending', 'release_approaching', 'free_agent', 'unknown'];
 playerRouter.post('/availability', (req, res) => {
   if (guardianManagedOnly(req, res)) return;
   const { availability, contractStatus } = req.body || {};
   const AV = ['available_now', 'end_of_season', 'loan_open', 'overseas_open', 'not_seeking'];
-  const CS = ['under_contract', 'expiring_summer', 'scholarship_ending', 'release_approaching', 'free_agent', 'unknown'];
+  const CS = ['under_contract', ...SELF_DECLARABLE_CONTRACT_STATUSES];
   if (availability && !AV.includes(availability)) return res.status(400).json({ error: 'BAD_AVAILABILITY', allowed: AV });
   if (contractStatus && !CS.includes(contractStatus)) return res.status(400).json({ error: 'BAD_CONTRACT_STATUS', allowed: CS });
+  if (contractStatus === 'under_contract') {
+    return res.status(403).json({ error: 'CONTRACT_STATUS_NOT_SELF_DECLARABLE', message: 'Under contract is recorded when a signing completes in ScoutBox; it cannot be declared here.', allowed: SELF_DECLARABLE_CONTRACT_STATUSES });
+  }
+  if (contractStatus) {
+    const canonical = canonicalContractFor(req.player.id);
+    if (canonical) {
+      return res.status(409).json({ error: 'CONTRACT_STATUS_CANONICAL', message: 'Your contract status is set by a signing completed in ScoutBox and cannot be changed here while that contract stands.', contractStatus: req.player.contractStatus, endDate: canonical.endDate ?? null });
+    }
+  }
   if (availability) req.player.availability = availability;
   if (contractStatus) req.player.contractStatus = contractStatus;
+  persist();
   broadcast('players', { playerId: req.player.id });
   res.json({ availability: req.player.availability, contractStatus: req.player.contractStatus });
 });

@@ -201,7 +201,7 @@ ok(r.status === 403 && r.body.error === 'GRASSROOTS_PLATFORM_ONLY', 'grassroots 
 r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-hackneymarsh', scoutName: 'Dee Mensah', role: 'Manager', platform: 'grassroots' }) });
 ok(r.status === 200 && r.body.token, 'grassroots club logs in on its own platform');
 const HACKNEY = r.body.token;
-const MOSS = (await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-mossside', scoutName: 'Pat Doyle', platform: 'grassroots' }) })).body.token;
+const MOSS = (await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-mossside', scoutName: 'Pat Doyle', role: 'Head Coach', platform: 'grassroots' }) })).body.token;
 
 let orgList = await j('/orgs?platform=grassroots');
 ok(orgList.body.length >= 2 && orgList.body.every((o) => o.level === 'grassroots'), 'grassroots login screen lists only grassroots clubs');

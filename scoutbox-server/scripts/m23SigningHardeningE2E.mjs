@@ -578,11 +578,18 @@ section('P — case/signing/contract consistency: contradictions are named, neve
   const G = globalThis.__G; // Kola: COMPLETED, case signed, under_contract
   const room0 = await sRoom(G.RID, maria.token);
   ok(room0.body.packages.find((p) => p.id === G.SID)?.integrity.length === 0, 'P1 Kola\'s completed package is consistent: no problem named');
-  // (a) the player declares a different contract status: a divergence, detected, not repaired
-  ok((await j('POST', '/player/availability', { contractStatus: 'free_agent' }, P['pl-adeyemi'].token)).status === 200, 'P2 Kola declares himself a free agent (his own availability route)');
+  // (a) M23 P8 §26: the player's own route can no longer create the divergence — `under_contract` is not
+  // self-declarable, and no word replaces it while the canonical contract stands. A divergence that
+  // reaches the store some other way is still detected, never repaired.
+  neg(expect(await j('POST', '/player/availability', { contractStatus: 'free_agent' }, P['pl-adeyemi'].token), 409, 'CONTRACT_STATUS_CANONICAL') && (await orgPlayer('pl-adeyemi', maria.token)).contractStatus === 'under_contract', 'P2 Kola cannot declare himself a free agent while his ScoutBox contract stands (409 CONTRACT_STATUS_CANONICAL); nothing changed');
+  await offline((db) => { db.players.find((x) => x.id === 'pl-adeyemi').contractStatus = 'free_agent'; });
+  await relogin();
   const room1 = await sRoom(G.RID, maria.token);
-  neg(room1.body.packages.find((p) => p.id === G.SID)?.integrity.includes('PLAYER_CONTRACT_STATUS_DIVERGED') && (await sGet(G.SID, maria.token)).status === 200 && (await orgPlayer('pl-adeyemi', maria.token)).contractStatus === 'free_agent', 'P3 the club surface names PLAYER_CONTRACT_STATUS_DIVERGED; the package still reads; nothing overwrote his declaration');
-  ok((await j('POST', '/player/availability', { contractStatus: 'under_contract' }, P['pl-adeyemi'].token)).status === 200 && (await sRoom(G.RID, maria.token)).body.packages.find((p) => p.id === G.SID)?.integrity.length === 0, 'P4 declared under contract again: consistent');
+  neg(room1.body.packages.find((p) => p.id === G.SID)?.integrity.includes('PLAYER_CONTRACT_STATUS_DIVERGED') && (await sGet(G.SID, maria.token)).status === 200 && (await orgPlayer('pl-adeyemi', maria.token)).contractStatus === 'free_agent', 'P3 a divergence planted in the store: the club surface names PLAYER_CONTRACT_STATUS_DIVERGED; the package still reads; nothing overwrote the stored value');
+  neg(expect(await j('POST', '/player/availability', { contractStatus: 'under_contract' }, P['pl-adeyemi'].token), 403, 'CONTRACT_STATUS_NOT_SELF_DECLARABLE'), 'P4 under_contract cannot be self-declared either (403): only the completed-signing writer says it');
+  await offline((db) => { db.players.find((x) => x.id === 'pl-adeyemi').contractStatus = 'under_contract'; });
+  await relogin();
+  ok((await sRoom(G.RID, maria.token)).body.packages.find((p) => p.id === G.SID)?.integrity.length === 0 && (await j('POST', '/player/availability', { availability: 'not_seeking' }, P['pl-adeyemi'].token)).status === 200, 'P4b restored: consistent; availability stays the player\'s own to declare');
   // (b) the completed record disappears: the package is corruption
   let rowBackup = null;
   await offline((db) => { const i = db.signings.findIndex((s) => s.signingPackageId === G.SID); rowBackup = db.signings[i]; db.signings.splice(i, 1); });

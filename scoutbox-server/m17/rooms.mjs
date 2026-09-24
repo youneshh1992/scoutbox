@@ -29,6 +29,10 @@ import {
 import { guardRev, bumpRev, revMeta } from '../m181/concurrency.mjs';
 import { rateLimitedBody } from '../m181/rateLimit.mjs';
 import { parseDateOrInstant, isAbsent } from '../temporal.mjs';
+// M23 P8 — the lifecycle's own role table, so the legacy status route and the
+// semantic-action route agree on WHO may reach a state (a room lead could reach
+// `signed` here while `confirmSignedOutcome` needs a recruitment lead).
+import { LIFECYCLE_ACTIONS } from '../m23/lifecycle.mjs';
 
 export function registerRooms(ctx) {
   const {
@@ -668,6 +672,18 @@ export function registerRooms(ctx) {
     })) return;
 
     const to = String(req.body?.status ?? '');
+    // M23 P8 — role parity. Every state a semantic action reaches carries that
+    // action's role requirement HERE too; otherwise this route is the side
+    // door around it (a room lead reaching `signed`, which the lifecycle
+    // reserves for a recruitment lead). A state no action names keeps M17's
+    // `set_status` rule.
+    const namingActions = Object.values(LIFECYCLE_ACTIONS).filter((a) => a.to === to);
+    if (namingActions.length) {
+      const role = roleFor(req, room);
+      const rank = { viewer: 0, contributor: 1, room_lead: 2, recruitment_admin: 3 };
+      const allowed = namingActions.some((a) => a.roles.some((r) => (rank[role] ?? -1) >= rank[r]));
+      if (!allowed) return res.status(403).json({ error: 'ROOM_PERMISSION_REQUIRED', message: 'Your role cannot move the room to that state.', required: [...new Set(namingActions.flatMap((a) => a.roles))] });
+    }
     const reasons = validateReasonCodes(req.body?.reasonCodes ?? []);
     if (!reasons.ok) return res.status(400).json(reasons);
     const note = req.body?.note == null ? null : plainText(req.body.note, 2000);
@@ -756,6 +772,12 @@ export function registerRooms(ctx) {
   ctx.reopenRoom = ({ req, room, to = 'under_review', reasonCodes = [], sourceContext = null, sourceRef = null }) => {
     const role = roleFor(req, room);
     if (!roomCan(role, 'reopen')) return { ok: false, status: 403, error: 'ROOM_PERMISSION_REQUIRED' };
+    // M23 P8 — a reopen reopens something CLOSED. A live room (contacted,
+    // shortlisted, on hold…) pulled back to under_review through this bridge
+    // would rewrite a live case under a "reopened" label; it is refused.
+    if (!REOPENED_FROM.includes(room.room.status)) {
+      return { ok: false, status: 409, error: 'ROOM_NOT_REOPENABLE', message: `A room at ${ROOM_STATUS_LABELS[room.room.status] ?? room.room.status} is not closed, so it cannot be reopened.`, current: { status: room.room.status } };
+    }
     const reasons = validateReasonCodes(reasonCodes);
     if (!reasons.ok) return { ok: false, status: 400, ...reasons };
     const check = validateTransition(room.room.status, to, { reasonCodes: reasons.codes });
@@ -804,7 +826,40 @@ export function registerRooms(ctx) {
    * appends the history entry M20's funnel reads, in that order, so a status
    * that moved is always a status with a recorded reason for moving.
    */
+  /**
+   * M23 P8 — the lifecycle's unit of work. `applyStatus` changes five things
+   * on the case (status, stage, updatedAt, archived/closed instants, rev) and
+   * writes history; a caller that restores only `room.status` after a
+   * failure leaves the stage and the rev out of step. These two helpers are
+   * the ONE way to snapshot and restore what the writer touches, used by the
+   * writer itself and by the domains whose own unit of work spans it.
+   */
+  ctx.lifecycleSnapshot = (room) => ({
+    stage: room.stage ?? null,
+    room: { ...room.room },
+    historyLen: Array.isArray(room.history) ? room.history.length : null,
+    links: room.links ? { ...room.links } : null,
+  });
+  ctx.restoreLifecycle = (room, snap) => {
+    if (!snap) return;
+    room.stage = snap.stage;
+    for (const k of Object.keys(room.room)) if (!(k in snap.room)) delete room.room[k];
+    Object.assign(room.room, snap.room);
+    if (snap.historyLen !== null && Array.isArray(room.history)) room.history.length = snap.historyLen;
+    if (snap.links) room.links = { ...snap.links };
+  };
+
   ctx.applyLifecycleTransition = ({ req, room, to, reasonCodes = [], trigger = 'lifecycle', actor = null }) => {
+    const snap = ctx.lifecycleSnapshot(room);
+    try {
+      return applyLifecycleTransitionInner({ req, room, to, reasonCodes, trigger, actor });
+    } catch (e) {
+      // A throw after `applyStatus` must not leave the case half-moved.
+      ctx.restoreLifecycle(room, snap);
+      throw e;
+    }
+  };
+  function applyLifecycleTransitionInner({ req, room, to, reasonCodes = [], trigger = 'lifecycle', actor = null }) {
     const from = room.room.status;
     // M23 P4B: a case may move BECAUSE a recipient acted (a guardian accepted
     // a concrete trial slot), through this same writer. The recipient never
@@ -827,7 +882,7 @@ export function registerRooms(ctx) {
     write('room_status_changed', { from, to, reasonCodes, trigger });
     vmetric('recruitment_room_status_changed');
     return { from, to };
-  };
+  }
 
   /**
    * The ONE room creator reachable from another milestone, shared with M18

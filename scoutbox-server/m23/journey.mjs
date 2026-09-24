@@ -39,7 +39,14 @@ import { trialMilestone, trialIntegrity } from './trial.mjs';
 // M23 P6 — the Offer domain's own status derivation (lazy expiry), so the
 // journey never reads a stored status an expired revision has outgrown.
 import { offerStatus as canonicalOfferStatus, liveStatus as canonicalLiveStatus, offerIntegrity, offerCaseConsistency, offerCaseCorrupt } from '../m28/offer.mjs';
-import { effectiveStatus as signingEffectiveStatus, currentRevision as signingCurrentRevision, signingIntegrity } from '../m29/signing.mjs';
+import { effectiveStatus as signingEffectiveStatus, currentRevision as signingCurrentRevision, signingIntegrity, signingConsistency, signingCorrupt, isLive as signingIsLive, findParty } from '../m29/signing.mjs';
+// M23 P8 — the journey MODEL: stage, completed stages, current resources, the
+// server-derived next action, the validator and the timeline visibility table.
+import {
+  JOURNEY_POLICY_VERSION, canonicalStageFor, completedStagesFor, nextActionFor, validateRecruitmentJourney,
+  currentContactForCase, currentTrialForCase, currentAssessmentForCase, currentDecisionForCase, currentOfferForCase, currentSigningForCase,
+  playerNextActionFor, playerStageFor, timelineVisibleTo, offerTimelineEntry, signingTimelineEntry,
+} from './journeyModel.mjs';
 
 /** Stores this projection may not proceed without. `recruitmentContacts` joined in P3. */
 export const JOURNEY_REQUIRED_STORES = Object.freeze([
@@ -52,6 +59,10 @@ export const JOURNEY_OPTIONAL_STORES = Object.freeze(['recruitmentOffers', 'outc
 
 export const JOURNEY_VIEWERS = Object.freeze([
   'org_staff', 'grassroots_staff', 'player_self', 'guardian', 'trust_safety',
+  // M23 P8 — an authorized agent: the route proves the basis (representation,
+  // scope, licence, the client's own share) and passes `authorized: true`;
+  // the projection then shows the factual workflow stages the client shared.
+  'agent',
 ]);
 
 const HISTORY_PAGE_DEFAULT = 50;
@@ -155,7 +166,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   // Offer arrive in later phases — so the honest answer to every player and
   // guardian is the same one they would get for a case that was never opened.
   if (viewer.kind === 'player_self' || viewer.kind === 'guardian') {
-    const shared = sharedRecordsFor(db, kase, viewer);
+    const shared = sharedRecordsFor(db, kase, viewer, now);
     if (shared.length === 0) {
       return { ok: false, error: 'CASE_NOT_FOUND', message: 'No such recruitment case.' };
     }
@@ -165,6 +176,11 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
       // Deliberately NOT the case id: the player is being shown the things
       // that were shared with them, not a window onto the club's workspace.
       shared,
+      // M23 P8 — the player's own journey: a stage word derived only from
+      // records that reached them, the one thing they could do now, the ids
+      // of their current records, and the milestones they were party to.
+      // No case id, no lifecycle state, no priority, no decision, no note.
+      journey: playerJourneyFor(db, kase, viewer, shared, now),
       policyVersion: RECRUITMENT_LIFECYCLE_POLICY_VERSION,
       generatedAt: now,
     };
@@ -173,6 +189,15 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   // ---- §38 — Trust & Safety is not a master key.
   if (viewer.kind === 'trust_safety' && viewer.authorized !== true) {
     return { ok: false, error: 'CASE_NOT_FOUND', message: 'No such recruitment case.' };
+  }
+
+  // ---- M23 P8 §17/§47 — an agent is not a master key either. The route
+  // establishes the basis; without `authorized: true` the case does not exist.
+  if (viewer.kind === 'agent') {
+    if (viewer.authorized !== true || viewer.playerId !== kase.playerId) {
+      return { ok: false, error: 'CASE_NOT_FOUND', message: 'No such recruitment case.' };
+    }
+    return agentJourneyFor(db, kase, viewer, now);
   }
 
   // A history that is not a list cannot be read, and must not be reported as
@@ -272,10 +297,33 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
       .map((o) => ({ id: o.id, type: o.type, status: canonicalOfferStatus(o, now), liveStatus: canonicalLiveStatus(o, now) }))
     : [];
 
-  const signing = db.signings.find((s) => s?.orgId === kase.orgId && s.playerId === kase.playerId) ?? null;
+  // M23 P7.1/P8 — the signing ROW that supports this case: the one a
+  // COMPLETED package on THIS case names back, else (legacy) the club's
+  // un-packaged row for this player. A row that names another case's
+  // package proves nothing here.
+  const packageRows = Array.isArray(db.signingPackages) ? db.signingPackages.filter((p) => p?.caseId === kase.id && p.orgId === kase.orgId && p.playerId === kase.playerId) : [];
+  const signing = supportingSigningRow(db, kase, packageRows) ?? null;
   const outcomeAvailable = Array.isArray(db.outcomeReports);
 
-  const history = timelineFor(kase, decisions, contactRecords, { trials: trialRows, invitations: trialInvitations, assessments: trialAssessments });
+  // ---- M23 P8 — the journey block: stage, completed stages, current
+  // resources, the server-derived next action and the classification.
+  const offerRows = offersAvailable ? db.recruitmentOffers.filter((o) => o?.caseId === kase.id && o.orgId === kase.orgId && o.playerId === kase.playerId && offerIntegrity(o, { orgId: kase.orgId, caseId: kase.id }).length === 0) : [];
+  const soundPackages = packageRows.filter((p) => signingIntegrity(p, { orgId: kase.orgId }).length === 0);
+  const allAssessments = db.assessments.filter((a) => a?.orgId === kase.orgId && a.playerId === kase.playerId);
+  const journeyBlock = journeyFor(db, kase, {
+    status, role, now,
+    contacts: db.recruitmentContacts.filter((c) => c && c.caseId === kase.id && c.orgId === kase.orgId && contactIntegrity(c, { orgId: kase.orgId, caseId: kase.id }).length === 0),
+    trials: trialRows, trialRequests: trialInvitations, assessments: allAssessments,
+    decisions: db.roomDecisions.filter((d) => d?.roomId === kase.id && d.orgId === kase.orgId),
+    offers: offerRows, packages: soundPackages, signingRow: signing,
+    foreign: foreignReferences(db, kase),
+    domainProblems: [
+      ...offerRows.flatMap((o) => offerCaseConsistency(o, kase, now).filter((c) => offerCaseCorrupt([c]))),
+      ...soundPackages.flatMap((p) => signingConsistency(p, { offer: offerRows.find((o) => o.id === p.offerId) ?? null, kase, rows: db.signings, player: (db.players ?? []).find((x) => x?.id === kase.playerId) ?? null }, now).filter((c) => signingCorrupt([c]))),
+    ],
+  });
+
+  const history = timelineFor(kase, decisions, contactRecords, { trials: trialRows, invitations: trialInvitations, assessments: trialAssessments, offers: offerRows, packages: soundPackages, now });
   const limit = Math.min(Math.max(Number(historyLimit) || HISTORY_PAGE_DEFAULT, 1), HISTORY_PAGE_MAX);
   const cursor = Math.max(Number(historyCursor) || 0, 0);
   const page = history.slice(cursor, cursor + limit);
@@ -322,6 +370,9 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
     },
     conditions,
     nextActions: actions,
+    // M23 P8 — ONE server-derived next action, the current resources and the
+    // classification. Clients read these; they never compute them.
+    journey: journeyBlock,
     contact: { records: contacts, contacts: contactRecords, omitted: contactsOmitted },
     trials,
     trialsOmitted,
@@ -355,7 +406,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
  * Inbox. It deliberately contains no case id, no stage, no room, no decision
  * and no count of anything internal.
  */
-function sharedRecordsFor(db, kase, viewer) {
+function sharedRecordsFor(db, kase, viewer, now = Date.now()) {
   const mine = (r) => {
     if (r?.orgId !== kase.orgId || r.playerId !== kase.playerId) return false;
     if (viewer.kind === 'player_self') return r.routedTo !== 'guardian' && viewer.playerId === kase.playerId;
@@ -381,8 +432,198 @@ function sharedRecordsFor(db, kase, viewer) {
     const m = trialMilestone(t);
     return { kind: 'trial', id: t.id, workflowState: m.workflowState, at: t.acceptedAt, scheduledAt: m.scheduledAt, revision: m.revision, sessionCount: m.sessions.length, completion: m.completion };
   });
-  return [...requests, ...trials];
+  // M23 P8 — an Offer whose live revision was ISSUED to this recipient, and a
+  // signing package PRESENTED to them, crossed the share boundary too. Ids,
+  // status words and instants; no terms, no digest, no note.
+  const offers = offersSharedWith(db, kase, viewer, now).map(({ offer, revision, liveStatus }) => ({ kind: 'offer', id: offer.id, revisionId: revision?.id ?? null, revisionNumber: revision?.revisionNumber ?? null, status: liveStatus, at: revision?.issuedAt ?? offer.createdAt ?? null, respondedAt: revision?.respondedAt ?? null }));
+  const signings = packagesSharedWith(db, kase, viewer, now).map((p) => ({ kind: 'signing', id: p.id, status: signingEffectiveStatus(p, now), revisionNumber: signingCurrentRevision(p)?.revisionNumber ?? null, at: signingCurrentRevision(p)?.readyAt ?? p.createdAt ?? null, completedAt: p.completion?.completedAt ?? null }));
+  return [...requests, ...trials, ...offers, ...signings];
 }
+
+/** Offers of this case whose live revision was issued to THIS recipient (the snapshot names them). */
+function offersSharedWith(db, kase, viewer, now) {
+  if (!Array.isArray(db.recruitmentOffers)) return [];
+  const out = [];
+  for (const o of db.recruitmentOffers) {
+    if (!o || o.caseId !== kase.id || o.orgId !== kase.orgId || o.playerId !== kase.playerId) continue;
+    if (offerIntegrity(o, { orgId: kase.orgId, caseId: kase.id }).length) continue;
+    const cur = currentOfferForCase([o], now);
+    const rev = cur?.revision; const snap = rev?.recipientSnapshot;
+    if (!rev?.issuedAt || !snap) continue;
+    const mine = viewer.kind === 'player_self' ? (snap.type === 'player' && snap.playerId === viewer.playerId) : (snap.type === 'guardian' && snap.guardianId === viewer.guardianId);
+    if (mine) out.push(cur);
+  }
+  return out;
+}
+
+/** Signing packages of this case presented (READY or later) with a required party for THIS recipient. */
+function packagesSharedWith(db, kase, viewer, now) {
+  if (!Array.isArray(db.signingPackages)) return [];
+  return db.signingPackages.filter((p) => {
+    if (!p || p.caseId !== kase.id || p.orgId !== kase.orgId || p.playerId !== kase.playerId) return false;
+    if (signingIntegrity(p, { orgId: kase.orgId }).length) return false;
+    const rev = signingCurrentRevision(p);
+    if (!rev?.readyAt) return false; // a DRAFT never reached anyone
+    return viewer.kind === 'player_self'
+      ? !!findParty(rev, 'PLAYER', viewer.playerId)
+      : !!findParty(rev, 'GUARDIAN', viewer.guardianId);
+  });
+}
+
+/**
+ * The signing ROW that supports THIS case (P7.1 §32 applied to the journey):
+ * a row a COMPLETED package on this case names back, else — for a case from
+ * before P7 — the club's un-packaged row for this player. A row that belongs
+ * to another case's package is not this case's evidence.
+ */
+function supportingSigningRow(db, kase, packageRows) {
+  const rows = (db.signings ?? []).filter((s) => s && s.orgId === kase.orgId && s.playerId === kase.playerId && !s.cancelledAt && !s.revokedAt && !s.voidedAt);
+  for (const p of packageRows) {
+    if (p.status !== 'COMPLETED' || !p.completion?.signingId) continue;
+    const row = rows.find((s) => s.id === p.completion.signingId && s.signingPackageId === p.id);
+    if (row) return row;
+  }
+  return rows.find((s) => !s.signingPackageId) ?? null;
+}
+
+/** Records that name this case but another player or club: reported, never used. */
+function foreignReferences(db, kase) {
+  const out = new Set();
+  const check = (rows, orgKey = 'orgId') => {
+    for (const r of rows ?? []) {
+      if (!r || r.caseId !== kase.id) continue;
+      if (r[orgKey] !== kase.orgId) out.add('CLUB_MISMATCH');
+      if (r.playerId !== undefined && r.playerId !== kase.playerId) out.add('PLAYER_MISMATCH');
+    }
+  };
+  check(db.recruitmentContacts); check(db.trials); check(db.requests); check(db.recruitmentOffers); check(db.signingPackages);
+  for (const d of db.roomDecisions ?? []) { if (d?.roomId === kase.id && (d.orgId !== kase.orgId || (d.playerId !== undefined && d.playerId !== kase.playerId))) out.add(d.orgId !== kase.orgId ? 'CLUB_MISMATCH' : 'PLAYER_MISMATCH'); }
+  return [...out];
+}
+
+/**
+ * M23 P8 — the journey block for the club: the canonical stage, the completed
+ * stages with their basis, the current resource of each kind, ONE next
+ * action for this viewer, and the validator's verdict. Reads; never writes.
+ */
+function journeyFor(db, kase, f) {
+  const contact = currentContactForCase(f.contacts);
+  const trial = currentTrialForCase(f.trials);
+  const trialRequest = (f.trialRequests ?? []).filter((r) => r?.status === 'pending' && !r.subjectRemovedAt).sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0))[0] ?? null;
+  const assessment = currentAssessmentForCase(f.assessments);
+  const assessed = (f.assessments ?? []).some((a) => a && a.state !== 'draft');
+  const decisionHead = currentDecisionForCase(f.decisions);
+  const decision = decisionHead && decisionHead.kind === 'formal' ? decisionHead : null;
+  const offer = currentOfferForCase(f.offers, f.now);
+  const signing = currentSigningForCase(f.packages, f.now);
+  const facts = { ...f, kase, createdAt: kase.createdAt ?? null, history: Array.isArray(kase.history) ? kase.history : [], historyMalformed: kase.history !== undefined && !Array.isArray(kase.history) };
+  const blocked = (db.blocks ?? []).some((b) => b && b.playerId === kase.playerId && b.orgId === kase.orgId);
+  const subjectRemoved = !!kase.subjectRemovedAt || !(db.players ?? []).some((p) => p?.id === kase.playerId);
+  const verdict = validateRecruitmentJourney(facts);
+  const next = nextActionFor({ status: f.status, role: f.role, now: f.now, blocked, subjectRemoved, contact, trial, trialRequest, assessed, decision, offer, signing, signingRow: f.signingRow });
+  return {
+    policyVersion: JOURNEY_POLICY_VERSION,
+    stage: canonicalStageFor(f.status, { assessed, signingOpened: !!(signing && signingIsLive(signing, f.now)) }),
+    completedStages: completedStagesFor(facts),
+    resources: {
+      contactId: contact?.id ?? null,
+      trialRequestId: trialRequest?.id ?? null,
+      trialId: trial?.id ?? null,
+      assessmentId: assessment?.id ?? null,
+      decisionId: decision?.id ?? null,
+      offerId: offer?.offer.id ?? null,
+      offerRevisionId: offer?.revision?.id ?? null,
+      signingPackageId: signing?.id ?? null,
+      completedSigningId: f.signingRow?.id ?? signing?.completion?.signingId ?? null,
+    },
+    nextAction: next,
+    classification: verdict.classification,
+    integrity: verdict.problems,
+    blocked, subjectRemoved,
+  };
+}
+
+/**
+ * M23 P8 §16 — the player's (or guardian's) journey with ONE club: derived
+ * only from records that reached them. Stage word, next action, current
+ * ids, the milestones they were party to. No case id, no lifecycle word
+ * (except `signed`, which is theirs), no priority, no decision, no note.
+ */
+function playerJourneyFor(db, kase, viewer, shared, now) {
+  const audience = viewer.kind === 'guardian' ? 'guardian' : 'player';
+  const requests = shared.filter((s) => s.kind === 'contact_request');
+  const contactReqs = requests.filter((r) => r.type === 'contact');
+  const trialReqs = requests.filter((r) => r.type === 'trial');
+  const trialRows = db.trials.filter((t) => shared.some((s) => s.kind === 'trial' && s.id === t?.id));
+  const offers = offersSharedWith(db, kase, viewer, now);
+  const offer = offers.length ? currentOfferForCase(offers.map((x) => x.offer), now) : null;
+  const packages = packagesSharedWith(db, kase, viewer, now);
+  const signing = packages.length ? currentSigningForCase(packages, now) : null;
+  const signingRow = signing && signing.status === 'COMPLETED' && signing.completion?.signingId ? (db.signings ?? []).find((s) => s?.id === signing.completion.signingId && s.signingPackageId === signing.id) ?? null : null;
+  const stage = playerStageFor({ contacts: contactReqs, trialRequests: trialReqs, trials: trialRows, offer, signing, signingRow, now });
+  const partyType = audience === 'guardian' ? 'GUARDIAN' : 'PLAYER';
+  const partyId = audience === 'guardian' ? viewer.guardianId : viewer.playerId;
+  const pendingParty = signing && ['READY', 'IN_PROGRESS'].includes(signingEffectiveStatus(signing, now)) && findParty(signingCurrentRevision(signing), partyType, partyId)?.status === 'PENDING' ? signing : null;
+  const awaitingConfirmation = trialRows.find((t) => t.schedule && !t.schedule.confirmedAt && (t.schedule.sessions ?? []).length > 0 && !t.completion) ?? null;
+  const nextAction = playerNextActionFor({
+    pendingContactRequest: contactReqs.find((r) => r.status === 'pending') ?? null,
+    pendingTrialRequest: trialReqs.find((r) => r.status === 'pending') ?? null,
+    trialAwaitingConfirmation: awaitingConfirmation,
+    issuedOffer: offer && offer.liveStatus === 'ISSUED' ? offer : null,
+    signingPending: pendingParty,
+  });
+  // The milestones they were party to, from the same derivations the club's
+  // timeline uses, filtered by the visibility table — never club history.
+  const contactRecords = db.recruitmentContacts.filter((c) => c && c.caseId === kase.id && c.orgId === kase.orgId && ['delivered', 'responded'].includes(c.status) && contactIntegrity(c, { orgId: kase.orgId, caseId: kase.id }).length === 0 && (audience === 'guardian' ? c.recipient?.type === 'guardian' : c.recipient?.type === 'player')).map(contactMilestone);
+  const invitations = db.requests.filter((r) => r?.type === 'trial' && r.caseId === kase.id && r.orgId === kase.orgId && trialReqs.some((x) => x.id === r.id));
+  const timeline = timelineFor(kase, [], contactRecords, { trials: trialRows, invitations, assessments: [], offers: offers.map((x) => x.offer), packages, now })
+    .filter((e) => timelineVisibleTo(e.kind, audience))
+    .map(({ by, contactId, ...rest }) => rest); // never a club member's name, never the club's Contact record id
+  return {
+    policyVersion: JOURNEY_POLICY_VERSION,
+    stage, nextAction,
+    resources: { contactRequestId: contactReqs.find((r) => r.status === 'pending')?.id ?? contactReqs[contactReqs.length - 1]?.id ?? null, trialRequestId: trialReqs.find((r) => r.status === 'pending')?.id ?? null, trialId: currentTrialForCase(trialRows)?.id ?? null, offerId: offer?.offer.id ?? null, offerRevisionId: offer?.revision?.id ?? null, signingPackageId: signing?.id ?? null },
+    timeline,
+  };
+}
+
+/**
+ * M23 P8 §17 — an authorized agent's projection: the factual workflow stages
+ * the client shared, and nothing about the club's process. The route has
+ * already proved the basis; `viewer.grants` says which record kinds the
+ * scope and the client's shares permit (`contacts`, `trials`, `offers`,
+ * `signings`). Ungranted kinds read as absent, not as refused, so the
+ * projection itself does not disclose what it is hiding.
+ */
+function agentJourneyFor(db, kase, viewer, now) {
+  const grants = new Set(viewer.grants ?? []);
+  const contactRecords = grants.has('contacts') ? db.recruitmentContacts.filter((c) => c && c.caseId === kase.id && c.orgId === kase.orgId && ['delivered', 'responded'].includes(c.status) && contactIntegrity(c, { orgId: kase.orgId, caseId: kase.id }).length === 0).map(contactMilestone) : [];
+  const trialRows = grants.has('trials') ? db.trials.filter((t) => t && t.caseId === kase.id && t.orgId === kase.orgId && t.playerId === kase.playerId && !t.subjectRemovedAt && trialIntegrity(t, { orgId: kase.orgId, caseId: kase.id }).length === 0) : [];
+  const invitations = grants.has('trials') ? db.requests.filter((r) => r?.type === 'trial' && r.caseId === kase.id && r.orgId === kase.orgId) : [];
+  const offerRows = grants.has('offers') && Array.isArray(db.recruitmentOffers) ? db.recruitmentOffers.filter((o) => o?.caseId === kase.id && o.orgId === kase.orgId && o.playerId === kase.playerId && offerIntegrity(o, { orgId: kase.orgId, caseId: kase.id }).length === 0 && liveRevisionOf(o)) : [];
+  const packages = grants.has('signings') && Array.isArray(db.signingPackages) ? db.signingPackages.filter((p) => p?.caseId === kase.id && p.orgId === kase.orgId && p.playerId === kase.playerId && signingIntegrity(p, { orgId: kase.orgId }).length === 0 && signingCurrentRevision(p)?.readyAt) : [];
+  const offer = currentOfferForCase(offerRows, now);
+  const signing = currentSigningForCase(packages, now);
+  const signingRow = signing?.status === 'COMPLETED' && signing.completion?.signingId ? (db.signings ?? []).find((s) => s?.id === signing.completion.signingId && s.signingPackageId === signing.id) ?? null : null;
+  const stage = playerStageFor({ contacts: contactRecords, trialRequests: invitations, trials: trialRows, offer, signing, signingRow, now });
+  const timeline = timelineFor(kase, [], contactRecords, { trials: trialRows, invitations, assessments: [], offers: offerRows, packages, now })
+    .filter((e) => timelineVisibleTo(e.kind, 'agent'))
+    .map(({ by, ...rest }) => rest);
+  return {
+    ok: true,
+    viewer: 'agent',
+    journey: {
+      policyVersion: JOURNEY_POLICY_VERSION,
+      stage,
+      resources: { contactId: currentContactForCase(db.recruitmentContacts.filter((c) => c && c.caseId === kase.id && contactRecords.some((m) => m.id === c.id)))?.id ?? null, trialId: currentTrialForCase(trialRows)?.id ?? null, offerId: offer?.offer.id ?? null, offerRevisionId: offer?.revision?.id ?? null, signingPackageId: signing?.id ?? null },
+      timeline,
+      grants: [...grants],
+    },
+    policyVersion: RECRUITMENT_LIFECYCLE_POLICY_VERSION,
+    generatedAt: now,
+  };
+}
+const liveRevisionOf = (o) => (o?.revisions ?? []).some((r) => r && r.status !== 'DRAFT' && r.issuedAt);
 
 /**
  * The club timeline: lifecycle-meaningful events only.
@@ -428,6 +669,18 @@ function timelineFor(kase, decisions, contactRecords = [], trial = {}) {
     if (c.respondedAt != null) {
       out.push({ _k: `contact_response:${c.id}`, kind: 'contact_response_received', at: c.respondedAt, by: null, responseKind: c.responseKind, contactId: c.id });
     }
+  }
+  // M23 P8 — Offer and signing milestones from each record's own append-only
+  // history: ids, words and instants. Never a term, a digest, a note or a
+  // recipient's name. A live revision that expired unanswered is a derived
+  // milestone at its expiry instant (nothing writes EXPIRED).
+  for (const o of trial.offers ?? []) {
+    for (const h of o.history ?? []) { const e = offerTimelineEntry(o, h); if (e) out.push(e); }
+    const live = canonicalLiveStatus(o, trial.now ?? Date.now());
+    if (live === 'EXPIRED') { const r = (o.revisions ?? []).filter((x) => x?.issuedAt).sort((a, b) => b.revisionNumber - a.revisionNumber)[0]; if (r?.expiresAt) out.push({ _k: `offer_expired:${o.id}:${r.id}`, kind: 'offer_expired', at: r.expiresAt, by: null, byKind: null, offerId: o.id, offerRevisionId: r.id }); }
+  }
+  for (const p of trial.packages ?? []) {
+    for (const h of p.history ?? []) { const e = signingTimelineEntry(p, h); if (e) out.push(e); }
   }
   for (const h of kase.history ?? []) {
     if (!TIMELINE_ACTIONS.has(h?.action)) continue;

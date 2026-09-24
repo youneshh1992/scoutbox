@@ -36,6 +36,8 @@ import { rateLimitedBody } from '../m181/rateLimit.mjs';
 import { canTransitionRecruitmentCase, NULL_EVIDENCE_PROVIDER, RECRUITMENT_LIFECYCLE_POLICY_VERSION } from '../m23/lifecycle.mjs';
 import { playerLevelAfterSigning } from '../domain.mjs';
 import { offerStatus as canonicalOfferStatus, effectiveRevisionStatus } from '../m28/offer.mjs';
+// M23 P8 §54 — the ONE current-package rule (live → completed → newest terminal).
+import { currentSigningForOffer } from '../m23/journeyModel.mjs';
 import { sendSigningError, notFound, documentNotFound } from './errors.mjs';
 import {
   SIGNING_POLICY_VERSION, SIGNING_STATUSES, SIGNING_STATUS_LABELS, SIGNING_METHODS, SIGNING_LIMITS, PARTY_TYPES,
@@ -602,7 +604,9 @@ export function registerSigning(rawCtx) {
     if (!player || !org) return err(res, 'SIGNING_STATE_UNKNOWN', 'This signing cannot be completed.');
     if (limited('signing_closure', req.org.id)) return res.status(429).json(rateLimitedBody('signing_closure'));
     // ---- the unit of work
-    const snapshot = { pkg: JSON.stringify(pkg), signingsLen: db.signings.length, ledgerLen: (db.ledger ?? []).length, invoicesLen: (db.invoices ?? []).length, player: JSON.stringify(player), squad: JSON.stringify(org.squad ?? null), caseStatus: kase.room.status, caseHistoryLen: (kase.history ?? []).length };
+    // M23 P8 — the case part of the snapshot is the lifecycle writer's own
+    // (status, stage, rev, instants, history length, links), not a bare status.
+    const snapshot = { pkg: JSON.stringify(pkg), signingsLen: db.signings.length, ledgerLen: (db.ledger ?? []).length, invoicesLen: (db.invoices ?? []).length, player: JSON.stringify(player), squad: JSON.stringify(org.squad ?? null), caseStatus: kase.room.status, caseHistoryLen: (kase.history ?? []).length, lifecycle: ctx.lifecycleSnapshot?.(kase) ?? null };
     const rollback = (why) => {
       console.error(`SIGNING completion_rolled_back ${pkg.id}: ${why}`);
       Object.assign(pkg, JSON.parse(snapshot.pkg));
@@ -611,8 +615,8 @@ export function registerSigning(rawCtx) {
       if (Array.isArray(db.invoices)) db.invoices.length = snapshot.invoicesLen;
       Object.assign(player, JSON.parse(snapshot.player));
       if (snapshot.squad !== 'null') org.squad = JSON.parse(snapshot.squad);
-      kase.room.status = snapshot.caseStatus;
-      if (Array.isArray(kase.history)) kase.history.length = snapshot.caseHistoryLen;
+      if (snapshot.lifecycle && ctx.restoreLifecycle) ctx.restoreLifecycle(kase, snapshot.lifecycle);
+      else { kase.room.status = snapshot.caseStatus; if (Array.isArray(kase.history)) kase.history.length = snapshot.caseHistoryLen; }
     };
     const by = byOrg(req);
     let effects = null; let moved = null; let signing = null;
@@ -834,7 +838,7 @@ export function registerSigning(rawCtx) {
   /** A minimal, identity-free summary for the Offer views and the journey: ids and the status word. */
   function summaryForOffer(offerId, orgId, at = Date.now()) {
     const rows = packagesOf(offerId, orgId).filter((p) => soundPackage(p, at));
-    const live = rows.find((p) => isLive(p, at)) ?? rows.find((p) => effectiveStatus(p, at) === 'COMPLETED') ?? rows[0] ?? null;
+    const live = currentSigningForOffer(rows, at);
     if (!live) return null;
     const rev = currentRevision(live);
     return { signingPackageId: live.id, status: effectiveStatus(live, at), revisionNumber: rev?.revisionNumber ?? null, presented: !!rev?.readyAt, completedAt: live.completion?.completedAt ?? null, signingId: live.completion?.signingId ?? null };

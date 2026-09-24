@@ -67,7 +67,16 @@ function signingSupports(signing, kase, packages = null) {
   if (signing.signingPackageId) {
     const pkg = Array.isArray(packages) ? packages.find((x) => x && x.id === signing.signingPackageId) ?? null : null;
     if (!pkg || pkg.status !== 'COMPLETED' || pkg.completion?.signingId !== signing.id || pkg.orgId !== kase.orgId || pkg.playerId !== kase.playerId) return false;
+    // M23 P8 (§9/§52): a canonical package proves the case it was opened on,
+    // not another case of the same club and player.
+    if (pkg.caseId !== kase.id) return false;
+    return true;
   }
+  // M23 P8: a LEGACY row (no package) proves a joining only for a case that
+  // existed when it was recorded. A historical row from years before this
+  // case was opened is not this case's outcome.
+  const ts = Number(signing.ts); const opened = Number(kase.createdAt);
+  if (Number.isFinite(ts) && Number.isFinite(opened) && ts < opened) return false;
   return true;
 }
 
