@@ -53,7 +53,7 @@ export function registerSigning(rawCtx) {
   const ctx = { ...rawCtx, ...buildShared(rawCtx) };
   const {
     db, orgRouter, playerRouter, guardianRouter, adminRouter, nextId, persistNow, notify, broadcast, findPlayer, isBlocked,
-    rateLimit, isLead, audit, orgCanSee, storage, ledgerAppend, billing = null, refreshJourneyBadges = null,
+    rateLimit, isLead, audit, orgCanSee, storage, ledgerAppend, billing = null, refreshJourneyBadges = null, isAdult = null,
     agent = null, integration = null, evidence = null,
   } = ctx;
 
@@ -305,6 +305,9 @@ export function registerSigning(rawCtx) {
     if (subjectRemoved(kase)) blockers.push('SUBJECT_REMOVED');
     if (isBlocked(kase.playerId, kase.orgId)) blockers.push('BLOCKED');
     if (kase.room?.status !== 'offer_accepted') blockers.push('CASE_STATE');
+    // §14: for a player under the age of majority the readiness names the closed pathway before anyone tries, whatever the Offer's state.
+    const subject = findPlayer(kase.playerId);
+    if (subject && typeof isAdult === 'function' && !isAdult(subject) && !minorSigningPathwayOpen(orgOf(kase.orgId)?.country ?? 'GB')) blockers.push('MINOR_PATHWAY_CLOSED');
     const accepted = (db.recruitmentOffers ?? []).find((o) => o && o.caseId === kase.id && o.orgId === kase.orgId && canonicalOfferStatus(o, at) === 'ACCEPTED') ?? null;
     if (!accepted) blockers.push('OFFER_NOT_ACCEPTED');
     else {

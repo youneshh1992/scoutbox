@@ -51,6 +51,13 @@ export const DESTRUCTIVE_ACTIONS: Record<string, DestructiveAction> = {
   // M23 P6 — issuing an Offer is the club's outward act: an exact revision reaches a person and cannot be edited afterwards; withdrawing closes it.
   issueOffer: { titleKey: 'confirm.issueOffer', bodyKey: 'confirm.issueOfferBody', cls: 'irreversible' },
   withdrawOffer: { titleKey: 'confirm.withdrawOffer', bodyKey: 'confirm.withdrawOfferBody', cls: 'archive' },
+  // M23 P7 — signing acts. Presenting and completing are irreversible facts on the record.
+  presentSigning: { titleKey: 'confirm.presentSigning', bodyKey: 'confirm.presentSigningBody', cls: 'irreversible' },
+  clubSignSigning: { titleKey: 'confirm.clubSignSigning', bodyKey: 'confirm.clubSignSigningBody', cls: 'irreversible' },
+  completeSigning: { titleKey: 'confirm.completeSigning', bodyKey: 'confirm.completeSigningBody', cls: 'irreversible' },
+  cancelSigning: { titleKey: 'confirm.cancelSigning', bodyKey: 'confirm.cancelSigningBody', cls: 'archive' },
+  voidSigning: { titleKey: 'confirm.voidSigning', bodyKey: 'confirm.voidSigningBody', cls: 'archive' },
+  supersedeSigning: { titleKey: 'confirm.supersedeSigning', bodyKey: 'confirm.supersedeSigningBody', cls: 'archive' },
   archiveBrief: { titleKey: 'confirm.archiveBrief', bodyKey: 'confirm.archiveBriefBody', cls: 'archive' },
   pauseBrief: { titleKey: 'confirm.pauseBrief', bodyKey: 'confirm.pauseBriefBody', cls: 'reversible' },
   deleteSavedSearch: { titleKey: 'confirm.deleteSavedSearch', bodyKey: 'confirm.deleteSavedSearchBody', cls: 'irreversible' },

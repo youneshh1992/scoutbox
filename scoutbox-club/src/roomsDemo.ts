@@ -30,6 +30,7 @@ import type {
   OfferClubView, OfferSurface, OfferRevisionView, OfferStatus, OfferTerms, OfferActor, OfferHistoryItem,
 } from './roomsApi';
 import type { RecruitmentPassport } from './m15api';
+import type { SigningStatus, SigningClubView, SigningRevisionView, SigningHistoryItem } from './roomsApi';
 import { ApiError } from './api';
 
 // ------------------------------------------------------------ local notes
@@ -880,6 +881,21 @@ const moveRoomForOffer = (r: DemoRoom, to: string, trigger: string) => {
   return { applied: true, action: trigger, from, to, at: Date.now() };
 };
 
+// ---- M23 P7 — signing demo store and helpers
+const SIGNING_STATUSES: SigningStatus[] = ['DRAFT', 'READY', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'VOIDED', 'EXPIRED', 'SUPERSEDED'];
+const SIGNING_LABELS: Record<string, string> = { DRAFT: 'Draft — not presented for signing', READY: 'Presented — awaiting signatures', IN_PROGRESS: 'In progress — some signatures recorded', COMPLETED: 'Signing completed', CANCELLED: 'Cancelled', VOIDED: 'Voided', EXPIRED: 'Expired — not completed in time', SUPERSEDED: 'Superseded by a newer signing revision' };
+const SIGNING_HONEST = 'ScoutBox records the signing workflow and the evidence each party gives against the exact document. It does not execute the agreement and claims no legal effect beyond what it records.';
+type DemoSigningRevision = SigningRevisionView;
+interface DemoSigning { id: string; caseId: string; playerId: string; offerId: string; offerRevisionId: string; status: SigningStatus; createdAt: number; updatedAt: number; rev: number; expiresAt: number; internalNote: string | null; startKey: string | null; completion: SigningClubView['completion']; cancelReason: string | null; voidReason: string | null; history: SigningHistoryItem[]; revisions: DemoSigningRevision[] }
+const signingStore: DemoSigning[] = [];
+const currentSigningRevision = (p: DemoSigning) => p.revisions[p.revisions.length - 1];
+const signingOr404 = (id: string) => { const p = signingStore.find((x) => x.id === id); if (!p) throw offerApiErr(404, 'SIGNING_NOT_FOUND', 'No signing with that reference is available to you.'); return p; };
+const signingRevGate = (p: DemoSigning, expectedRev: number) => { if (expectedRev !== p.rev) throw offerApiErr(409, 'SIGNING_REV_CONFLICT', 'Someone else changed this signing while you were working on it. Reload to see their change.', { currentRev: p.rev }); };
+const bumpSigning = (p: DemoSigning) => { p.rev += 1; p.updatedAt = Date.now(); };
+const signingHist = (p: DemoSigning, action: string, at: number) => { p.history.push({ id: nid('aud'), at, action, by: { kind: 'org', name: ME.name }, revisionId: currentSigningRevision(p).id }); };
+const demoDigest = (s: string) => { let h = 0; for (let i = 0; i < s.length; i += 1) h = (h * 31 + s.charCodeAt(i)) >>> 0; return (h.toString(16).padStart(8, '0') + 'demo').padEnd(64, '0'); };
+const signingView = (p: DemoSigning): SigningClubView => ({ id: p.id, orgId: 'org-demo', orgName: 'Demo FC', caseId: p.caseId, playerId: p.playerId, offerId: p.offerId, offerRevisionId: p.offerRevisionId, transactionId: null, status: p.status, storedStatus: p.status, statusLabel: SIGNING_LABELS[p.status] ?? null, terminal: ['COMPLETED', 'CANCELLED', 'VOIDED', 'EXPIRED'].includes(p.status), currentRevisionId: currentSigningRevision(p).id, currentRevision: currentSigningRevision(p), revisions: p.revisions.slice(), expiresAt: p.expiresAt, internalNote: p.internalNote, completion: p.completion, cancelledAt: p.status === 'CANCELLED' ? p.updatedAt : null, cancelReason: p.cancelReason, voidedAt: p.status === 'VOIDED' ? p.updatedAt : null, voidReason: p.voidReason, createdAt: p.createdAt, createdBy: { kind: 'org', name: ME.name }, updatedAt: p.updatedAt, rev: p.rev, policyVersion: 1, honest: SIGNING_HONEST });
+
 export const demoRooms: RoomsApi = {
   list: async (_s, params = {}) => {
     let list = roomStore.slice();
@@ -1721,6 +1737,44 @@ export const demoRooms: RoomsApi = {
     offerHist(o, 'offer_draft_created', { kind: 'org', name: ME.name }, rev.id, now);
     return delay({ offer: offerView(o) });
   },
+  // ---- M23 P7 — the signing workflow (demo). One package per accepted Offer; the demo player "signs" instantly when presented.
+  signing: async (_s, roomId) => {
+    const r = find(roomId); if (!r) throw offerApiErr(404, 'ROOM_NOT_FOUND', 'No such room.');
+    const accepted = offerStore.find((o) => o.caseId === roomId && o.status === 'ACCEPTED') ?? null;
+    const packages = signingStore.filter((p) => p.caseId === roomId).map(signingView);
+    const live = packages.find((p) => ['DRAFT', 'READY', 'IN_PROGRESS'].includes(p.status ?? '')) ?? null;
+    const blockers: string[] = [];
+    if (r.status !== 'offer_accepted') blockers.push('CASE_STATE');
+    if (!accepted) blockers.push('OFFER_NOT_ACCEPTED');
+    if (packages.some((p) => p.status === 'COMPLETED')) blockers.push('ALREADY_COMPLETED'); else if (live) blockers.push('PACKAGE_LIVE');
+    return delay({ packages: packages.map((p) => ({ ...p, integrity: [] })), livePackageId: live?.id ?? null, legacySigning: null, requirements: { role: 'recruitment_admin', canManage: true, canComplete: true, status: r.status, startBlockers: blockers, acceptedOfferId: accepted?.id ?? null }, vocabulary: { statuses: SIGNING_STATUSES, statusLabels: SIGNING_LABELS, partyTypes: ['PLAYER', 'GUARDIAN', 'CLUB_SIGNATORY'], methods: ['PLATFORM_ACKNOWLEDGMENT', 'UPLOAD_EXECUTED_DOCUMENT'] }, policyVersion: 1, honest: SIGNING_HONEST });
+  },
+  startSigning: async (_s, offerId, input) => {
+    const o = offerStore.find((x) => x.id === offerId); if (!o) throw offerApiErr(404, 'SIGNING_NOT_FOUND', 'No signing with that reference is available to you.');
+    const prior = input.clientKey ? signingStore.find((p) => p.offerId === offerId && p.startKey === input.clientKey) : null;
+    if (prior) return delay({ signing: signingView(prior), idempotent: true });
+    if (o.status !== 'ACCEPTED') throw offerApiErr(409, 'SIGNING_OFFER_NOT_ACCEPTED', 'A signing can only be opened over an accepted Offer revision.');
+    if (signingStore.some((p) => p.offerId === offerId && ['DRAFT', 'READY', 'IN_PROGRESS', 'COMPLETED'].includes(p.status))) throw offerApiErr(409, 'SIGNING_PACKAGE_EXISTS', 'A signing is already open for this Offer.');
+    const now = Date.now(); const cur = o.currentRevision;
+    const p: DemoSigning = { id: nid('spk'), caseId: o.caseId, playerId: o.playerId, offerId, offerRevisionId: cur?.id ?? '', status: 'DRAFT', createdAt: now, updatedAt: now, rev: 1, expiresAt: now + 30 * 86_400_000, internalNote: input.internalNote ?? null, startKey: input.clientKey ?? null, completion: null, cancelReason: null, voidReason: null, history: [], revisions: [{ id: nid('spr'), revisionNumber: 1, status: 'DRAFT', statusLabel: SIGNING_LABELS.DRAFT, createdAt: now, readyAt: null, completedAt: null, document: null, executedDocument: null, contract: { startDate: input.contract?.startDate ?? cur?.terms.startDate ?? null, endDate: input.contract?.endDate ?? cur?.terms.endDate ?? null }, requiredParties: [{ partyType: 'PLAYER', status: 'PENDING', completedAt: null, method: null, completedBy: null }, { partyType: 'CLUB_SIGNATORY', status: 'PENDING', completedAt: null, method: null, completedBy: null }], supersedesRevisionId: null, supersededByRevisionId: null }] };
+    signingHist(p, 'signing_created', now);
+    signingStore.push(p);
+    return delay({ signing: signingView(p) });
+  },
+  signingPackage: async (_s, id) => delay({ signing: signingView(signingOr404(id)), integrity: [] }),
+  signingHistory: async (_s, id) => delay({ items: signingOr404(id).history.slice(), signingPackageId: id }),
+  signingDocument: async (_s, id, kind = 'document') => { const p = signingOr404(id); const rev = currentSigningRevision(p); const d = kind === 'executed' ? rev.executedDocument : rev.document; if (!d) throw offerApiErr(404, 'SIGNING_DOCUMENT_NOT_FOUND', 'No document with that reference is available to you.'); return delay({ document: d, file: { mime: d.mime ?? 'application/pdf', base64: btoa('%PDF-1.4 demo') } }); },
+  updateSigningDraft: async (_s, id, input) => { const p = signingOr404(id); signingRevGate(p, input.expectedRev); if (p.status !== 'DRAFT') throw offerApiErr(409, 'SIGNING_STATE_INVALID', 'This signing is not a draft.'); const rev = currentSigningRevision(p); if (input.contract) rev.contract = { startDate: input.contract.startDate ?? rev.contract?.startDate ?? null, endDate: input.contract.endDate === undefined ? rev.contract?.endDate ?? null : input.contract.endDate }; if (input.internalNote !== undefined) p.internalNote = input.internalNote; bumpSigning(p); return delay({ signing: signingView(p) }); },
+  attachSigningDocument: async (_s, id, input) => { const p = signingOr404(id); signingRevGate(p, input.expectedRev); if (p.status !== 'DRAFT') throw offerApiErr(409, 'SIGNING_STATE_INVALID', 'This signing is not a draft.'); const rev = currentSigningRevision(p); rev.document = { id: nid('sgd'), label: input.label ?? input.filename, filename: input.filename, mime: 'application/pdf', bytes: input.dataUrl.length, sha256: demoDigest(input.dataUrl) }; signingHist(p, 'signing_document_attached', Date.now()); bumpSigning(p); return delay({ signing: signingView(p) }); },
+  attachExecutedDocument: async (_s, id, input) => { const p = signingOr404(id); signingRevGate(p, input.expectedRev); const rev = currentSigningRevision(p); rev.executedDocument = { id: nid('sgx'), label: input.filename, filename: input.filename, mime: 'application/pdf', bytes: input.dataUrl.length, sha256: demoDigest(input.dataUrl) }; bumpSigning(p); return delay({ signing: signingView(p) }); },
+  presentSigning: async (_s, id, input) => { const p = signingOr404(id); signingRevGate(p, input.expectedRev); const rev = currentSigningRevision(p); if (p.status !== 'DRAFT') throw offerApiErr(409, 'SIGNING_STATE_INVALID', 'This signing is not a draft.'); if (!rev.document) throw offerApiErr(422, 'SIGNING_DOCUMENT_REQUIRED', 'Attach the exact document the parties will sign before presenting it.'); const now = Date.now(); rev.status = 'READY'; rev.readyAt = now; p.status = 'READY'; signingHist(p, 'signing_ready', now); // the demo player confirms a moment later
+    setTimeout(() => { const pl = rev.requiredParties.find((x) => x.partyType === 'PLAYER'); if (pl && pl.status === 'PENDING' && p.status === 'READY') { pl.status = 'COMPLETED'; pl.completedAt = Date.now(); pl.method = 'PLATFORM_ACKNOWLEDGMENT'; pl.completedBy = { kind: 'player', name: 'Demo Player' }; rev.status = 'IN_PROGRESS'; p.status = 'IN_PROGRESS'; signingHist(p, 'signing_party_completed', Date.now()); bumpSigning(p); } }, 1500);
+    bumpSigning(p); return delay({ signing: signingView(p) }); },
+  completeClubParty: async (_s, id, input) => { const p = signingOr404(id); signingRevGate(p, input.expectedRev); const rev = currentSigningRevision(p); if (!['READY', 'IN_PROGRESS'].includes(p.status)) throw offerApiErr(409, 'SIGNING_STATE_INVALID', 'This signing is not presented.'); if (input.documentSha256 !== rev.document?.sha256) throw offerApiErr(409, 'SIGNING_DOCUMENT_MISMATCH', 'Confirm the exact document you read.'); const c = rev.requiredParties.find((x) => x.partyType === 'CLUB_SIGNATORY')!; if (c.status === 'COMPLETED') throw offerApiErr(409, 'SIGNING_PARTY_ALREADY_COMPLETED', 'Already recorded.'); const now = Date.now(); c.status = 'COMPLETED'; c.completedAt = now; c.method = 'PLATFORM_ACKNOWLEDGMENT'; c.completedBy = { kind: 'org', name: ME.name }; rev.status = 'IN_PROGRESS'; p.status = 'IN_PROGRESS'; signingHist(p, 'signing_party_completed', now); bumpSigning(p); return delay({ signing: signingView(p) }); },
+  completeSigning: async (_s, id, input) => { const p = signingOr404(id); signingRevGate(p, input.expectedRev); const rev = currentSigningRevision(p); if (p.status === 'COMPLETED') throw offerApiErr(409, 'SIGNING_ALREADY_COMPLETED', 'This signing is already completed.'); if (!rev.requiredParties.every((x) => x.status === 'COMPLETED')) throw offerApiErr(409, 'SIGNING_PARTIES_INCOMPLETE', 'The signing cannot be completed yet.', { blockers: ['PARTIES_INCOMPLETE'] }); const now = Date.now(); rev.status = 'COMPLETED'; rev.completedAt = now; p.status = 'COMPLETED'; p.completion = { signingId: nid('sign'), completedAt: now, contract: rev.contract, lifecycle: { from: 'offer_accepted', to: 'signed', at: now } }; const r = find(p.caseId); if (r) { r.status = 'signed'; } signingHist(p, 'signing_completed', now); bumpSigning(p); return delay({ signing: signingView(p), lifecycle: { applied: true, action: 'confirmSignedOutcome', from: 'offer_accepted', to: 'signed', at: now }, signingId: p.completion.signingId }); },
+  cancelSigning: async (_s, id, input) => { const p = signingOr404(id); signingRevGate(p, input.expectedRev); if (!['DRAFT', 'READY', 'IN_PROGRESS'].includes(p.status)) throw offerApiErr(409, 'SIGNING_STATE_INVALID', 'This signing cannot be cancelled.'); const now = Date.now(); p.status = 'CANCELLED'; currentSigningRevision(p).status = 'CANCELLED'; p.cancelReason = input.reason ?? null; signingHist(p, 'signing_cancelled', now); bumpSigning(p); return delay({ signing: signingView(p) }); },
+  voidSigning: async (_s, id, input) => { const p = signingOr404(id); signingRevGate(p, input.expectedRev); if (!['READY', 'IN_PROGRESS'].includes(p.status)) throw offerApiErr(409, 'SIGNING_STATE_INVALID', 'This signing cannot be voided.'); const now = Date.now(); p.status = 'VOIDED'; currentSigningRevision(p).status = 'VOIDED'; p.voidReason = input.reason ?? null; signingHist(p, 'signing_voided', now); bumpSigning(p); return delay({ signing: signingView(p) }); },
+  supersedeSigning: async (_s, id, input) => { const p = signingOr404(id); signingRevGate(p, input.expectedRev); if (!['READY', 'IN_PROGRESS'].includes(p.status)) throw offerApiErr(409, 'SIGNING_STATE_INVALID', 'This signing cannot be superseded.'); const prev = currentSigningRevision(p); const now = Date.now(); const rev: DemoSigningRevision = { id: nid('spr'), revisionNumber: p.revisions.length + 1, status: 'DRAFT', statusLabel: SIGNING_LABELS.DRAFT, createdAt: now, readyAt: null, completedAt: null, document: null, executedDocument: null, contract: { startDate: prev.contract?.startDate ?? null, endDate: prev.contract?.endDate ?? null }, requiredParties: [{ partyType: 'PLAYER', status: 'PENDING', completedAt: null, method: null, completedBy: null }, { partyType: 'CLUB_SIGNATORY', status: 'PENDING', completedAt: null, method: null, completedBy: null }], supersedesRevisionId: prev.id, supersededByRevisionId: null }; prev.status = 'SUPERSEDED'; prev.supersededByRevisionId = rev.id; p.revisions.push(rev); p.status = 'DRAFT'; signingHist(p, 'signing_superseded', now); bumpSigning(p); return delay({ signing: signingView(p) }); },
   funnel: async () => delay(funnelOf(roomStore)),
 };
 

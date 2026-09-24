@@ -178,6 +178,15 @@ export interface ClientOffer {
   responses: { id: string; revisionId: string; responseType: 'accepted' | 'declined'; actorType: 'player' | 'guardian'; occurredAt: number }[];
   sharedAt: number | null; honest: string;
 }
+// M23 P7 — a client's signing over an Offer the client shared: state and
+// progress only. No document bytes, no note, no signatory identity beyond
+// the kind, and no control: the agent never signs, acknowledges or completes.
+export interface ClientSigning {
+  id: string; clientId: string; club: { id: string; name: string | null }; offerId: string;
+  status: string; statusLabel: string | null; terminal: boolean; currentRevisionNumber: number | null; presented: boolean; expiresAt: number | null;
+  requiredParties: { partyType: 'PLAYER' | 'GUARDIAN' | 'CLUB_SIGNATORY'; status: 'PENDING' | 'COMPLETED'; completedAt: number | null }[];
+  clientActionRequired: boolean; contract: { startDate: string | null; endDate: string | null } | null; completedAt: number | null; honest: string;
+}
 export interface ClientTrial {
   id: string;
   club: { id: string; name: string | null };
@@ -467,6 +476,7 @@ export interface AgentApi {
   clientTrials(s: Session, id: string): Promise<{ items: ClientTrial[]; clientId: string; clientName: string | null; note: string; honest: string }>;
   // M23 P6 — read-only projection of the Offers this client chose to share.
   clientOffers(s: Session, id: string): Promise<{ items: ClientOffer[]; clientId: string; clientName: string | null; note: string; honest: string }>;
+  clientSignings(s: Session, id: string): Promise<{ items: ClientSigning[]; clientId: string; clientName: string | null; honest: string }>;
   clientShares(s: Session, id: string): Promise<{ items: OpportunityShare[] }>;
   shareOpportunity(s: Session, id: string, oppId: string, input: { note?: string; clientKey: string }): Promise<{ share: OpportunityShare; idempotent?: boolean; note?: string }>;
   withdrawShare(s: Session, id: string, shareId: string): Promise<{ share: OpportunityShare; idempotent?: boolean }>;
@@ -536,6 +546,7 @@ export const httpAgent: AgentApi = {
   clientContacts: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}/contacts`),
   clientTrials: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}/trials`),
   clientOffers: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}/offers`),
+  clientSignings: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}/signings`),
   clientShares: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}/opportunities/shares`),
   shareOpportunity: (s, id, oppId, input) => post(s, `/org/agent/clients/${encodeURIComponent(id)}/opportunities/${encodeURIComponent(oppId)}/share`, input),
   withdrawShare: (s, id, shareId) => post(s, `/org/agent/clients/${encodeURIComponent(id)}/opportunities/shares/${encodeURIComponent(shareId)}/withdraw`, {}),

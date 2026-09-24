@@ -390,6 +390,8 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
   const trials = useLoad(() => (det && det.mode === 'own' && det.access && tab === 'trials' ? agent.clientTrials(session, id) : Promise.resolve(null)), [session, id, det?.access, tab, tick]);
   // M23 P6. Loaded only on its tab; the server answers 403 when the mandate, scope or licence does not hold NOW, and that answer is rendered.
   const offers = useLoad(() => (det && det.mode === 'own' && det.access && tab === 'offers' ? agent.clientOffers(session, id) : Promise.resolve(null)), [session, id, det?.access, tab, tick]);
+  // M23 P7 — signing progress over the shared Offers; a refusal (scope, licence, basis) hides the line rather than the Offers.
+  const signings = useLoad(() => (det && det.mode === 'own' && det.access && tab === 'offers' ? agent.clientSignings(session, id).then((r) => ({ ...r, refused: null as string | null })).catch((e: unknown) => ({ items: [], clientId: id, clientName: null, honest: '', refused: (e as { code?: string } | null)?.code ?? 'REFUSED' })) : Promise.resolve(null)), [session, id, det?.access, tab, tick]);
   const shares = useLoad(() => (det && det.mode === 'own' && det.access ? agent.clientShares(session, id) : Promise.resolve(null)), [session, id, det?.access, tick]);
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
@@ -617,12 +619,28 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
                         )}
                         {cur?.terms.conditions && <div className="dim" style={{ fontSize: 12.5 }}>{cur.terms.conditions}</div>}
                         {x.status === 'ACCEPTED' && <div className="dim" style={{ fontSize: 12.5 }} data-testid={`offer-signing-pending-${x.id}`}>{t('offers.signingPending')}</div>}
+                        {(() => {
+                          const sg = signings.data?.items.find((g) => g.offerId === x.id) ?? null;
+                          if (!sg) return signings.data?.refused && x.status === 'ACCEPTED' ? <div className="dim" style={{ fontSize: 12 }} data-testid={`offer-signing-withheld-${x.id}`}>{t('signing.withheld')}</div> : null;
+                          const done = sg.requiredParties.filter((p) => p.status === 'COMPLETED').length;
+                          const label = tr(`signing.st.${sg.status}`) === `signing.st.${sg.status}` ? sg.statusLabel ?? sg.status : tr(`signing.st.${sg.status}`);
+                          return (
+                            <div className="dim" style={{ fontSize: 12.5 }} data-testid={`offer-signing-${x.id}`} data-signing-status={sg.status}>
+                              <span className="pill" data-testid={`signing-state-${sg.id}`}>{label}</span>
+                              {' '}{t('signing.revision')} {sg.currentRevisionNumber ?? '—'} · {t('signing.parties').replace('{done}', String(done)).replace('{total}', String(sg.requiredParties.length))}
+                              {sg.clientActionRequired ? ` · ${t('signing.clientAction')}` : ''}
+                              {sg.completedAt ? ` · ${t('signing.completedAt')} ${fmtStamp(sg.completedAt)}` : ''}
+                              {sg.contract?.startDate ? ` · ${sg.contract.startDate}${sg.contract.endDate ? ` → ${sg.contract.endDate}` : ''}` : ''}
+                            </div>
+                          );
+                        })()}
                         {x.sharedAt && <div className="dim" style={{ fontSize: 12 }}>{t('offers.sharedAt')} {fmtStamp(x.sharedAt)}</div>}
                       </div>
                     );
                   })}
                 </div>
                 <p className="dim" style={{ fontSize: 12.5 }}>{t('offers.honest')}</p>
+                {signings.data && signings.data.items.length > 0 && <p className="dim" style={{ fontSize: 12.5 }} data-testid="client-signings-honest">{t('signing.honest')}</p>}
               </>
             )}
           </Panel>

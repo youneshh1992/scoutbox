@@ -12,6 +12,7 @@ import { BoardSection, FollowUpsSection, SquadInvitesSection, TrialSafetySection
 import { OpportunityFitSection } from '../../components/M13Sections';
 import { TrialWorkflowSection } from '../../components/M23Trial';
 import { OfferSection } from '../../components/M23Offer';
+import { SigningSection } from '../../components/M23Signing';
 
 export default function Opportunities() {
   const { playerId } = useSession();
@@ -25,6 +26,7 @@ export default function Opportunities() {
         {actor ? <SquadInvitesSection actor={actor} /> : null}
         {actor ? <TrialWorkflowSection actor={actor} /> : null}
         {actor ? <OfferSection actor={actor} /> : null}
+        {actor ? <SigningSection actor={actor} /> : null}
         {actor ? <TrialSafetySection actor={actor} /> : null}
         {actor ? <FollowUpsSection actor={actor} /> : null}
       </ScrollView>

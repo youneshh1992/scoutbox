@@ -32,6 +32,7 @@ import { t, fmtDate, fmtDateTime } from './i18n';
 import { TrialPanel } from './trialPanel';
 import { DecisionWorkflow } from './decisionPanel';
 import { OfferWorkflow } from './offerPanel';
+import { SigningWorkflow } from './signingPanel';
 
 interface RoomsScreenProps {
   session: Session;
@@ -44,12 +45,12 @@ interface RoomsScreenProps {
   onCloseRoom?: () => void;
 }
 
-type TabId = 'overview' | 'passport' | 'evidence' | 'assessments' | 'combine' | 'development' | 'discussion' | 'contact' | 'trial' | 'activity' | 'decision' | 'offer';
+type TabId = 'overview' | 'passport' | 'evidence' | 'assessments' | 'combine' | 'development' | 'discussion' | 'contact' | 'trial' | 'activity' | 'decision' | 'offer' | 'signing';
 
 const TAB_KEYS: [TabId, string][] = [
   ['overview', 'rm.tab.overview'], ['passport', 'rm.tab.passport'], ['evidence', 'rm.tab.evidence'],
   ['assessments', 'rm.tab.assessments'], ['combine', 'rm.tab.combine'], ['development', 'rm.tab.development'],
-  ['discussion', 'rm.tab.discussion'], ['contact', 'rm.tab.contact'], ['trial', 'rm.tab.trial'], ['activity', 'rm.tab.activity'], ['decision', 'rm.tab.decision'], ['offer', 'rm.tab.offer'],
+  ['discussion', 'rm.tab.discussion'], ['contact', 'rm.tab.contact'], ['trial', 'rm.tab.trial'], ['activity', 'rm.tab.activity'], ['decision', 'rm.tab.decision'], ['offer', 'rm.tab.offer'], ['signing', 'rm.tab.signing'],
 ];
 
 const VIEWS: [string, string][] = [
@@ -352,6 +353,7 @@ function RoomView({ session, tick, notify, openPlayer, roomId, onCloseRoom }: Ro
         {tab === 'activity' && <ActivityPanel {...shared} />}
         {tab === 'decision' && <DecisionPanel {...shared} />}
         {tab === 'offer' && <OfferWorkflow session={session} room={room} notify={notify} reload={reload} />}
+        {tab === 'signing' && <SigningWorkflow session={session} room={room} notify={notify} reload={reload} />}
       </div>
 
       <div className="dim" style={{ fontSize: 12, marginTop: 10 }}>🔒 {room.privacyNote}</div>

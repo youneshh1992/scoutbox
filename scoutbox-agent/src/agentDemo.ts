@@ -1086,6 +1086,11 @@ export const demoAgent: AgentApi = {
       honest: 'Nothing here is a negotiation, a fee or a signing. An accepted Offer is not a signed contract.',
     });
   },
+  // M23 P7 — the signing rides on the shared Offer; the demo client has shared nothing, so there is nothing to show.
+  async clientSignings(s, id) {
+    void s;
+    return delay({ items: [], clientId: RELS.find((x) => x.id === id)?.clientId ?? id, clientName: null, honest: 'Read-only. Your client signs as themselves; ScoutBox does not let you sign, acknowledge or complete for a client.' });
+  },
   async clientTrials(s, id) {
     if (!P56E_DISCLOSED.has(id)) refuse(403, 'DISCLOSURE_WITHHELD', 'Your client has not chosen to share their trial schedule with you. That choice is theirs and they can change it at any time in My Agent.');
     return delay({

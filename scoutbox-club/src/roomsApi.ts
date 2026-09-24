@@ -642,6 +642,35 @@ export interface OfferDraftInput { terms?: Partial<OfferTerms>; recipientMessage
 export interface OfferHistoryItem { id: string; at: number; action: string; by: OfferActor | null; revisionId: string | null }
 export type OfferCaseMove = { from: string; to: string } | { unchanged: true; status: string };
 
+// ---- M23 P7 — Signing & Contract Completion. The workflow record over an
+// ACCEPTED Offer revision: immutable signing revisions (document digest,
+// required parties, contract days), party completion evidence, one completion.
+export type SigningStatus = 'DRAFT' | 'READY' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'VOIDED' | 'EXPIRED' | 'SUPERSEDED';
+export type SigningPartyType = 'PLAYER' | 'GUARDIAN' | 'CLUB_SIGNATORY';
+export interface SigningDocumentView { id: string | null; label: string | null; filename: string | null; mime: string | null; bytes: number | null; sha256: string | null }
+export interface SigningPartyView { partyType: SigningPartyType; status: 'PENDING' | 'COMPLETED'; completedAt: number | null; method: string | null; completedBy: OfferActor | null }
+export interface SigningRevisionView {
+  id: string; revisionNumber: number; status: SigningStatus; statusLabel: string | null; createdAt: number | null; readyAt: number | null; completedAt: number | null;
+  document: SigningDocumentView | null; executedDocument: SigningDocumentView | null; contract: { startDate: string | null; endDate: string | null } | null;
+  requiredParties: SigningPartyView[]; supersedesRevisionId: string | null; supersededByRevisionId: string | null; createdBy?: OfferActor | null; readyBy?: OfferActor | null;
+}
+export interface SigningClubView {
+  id: string; orgId: string; orgName: string | null; caseId: string; playerId: string; offerId: string; offerRevisionId: string; transactionId: string | null;
+  status: SigningStatus | null; storedStatus: string; statusLabel: string | null; terminal: boolean; currentRevisionId: string; currentRevision: SigningRevisionView | null; revisions: SigningRevisionView[];
+  expiresAt: number | null; internalNote: string | null;
+  completion: { signingId: string; completedAt: number; contract: { startDate: string | null; endDate: string | null } | null; lifecycle: { from: string; to: string; at: number } | null } | null;
+  cancelledAt: number | null; cancelReason: string | null; voidedAt: number | null; voidReason: string | null; createdAt: number; createdBy: OfferActor | null; updatedAt: number; rev: number; policyVersion: number; honest: string;
+}
+export interface SigningRequirements { role: string | null; canManage: boolean; canComplete: boolean; status: string | null; startBlockers: string[]; acceptedOfferId: string | null }
+export interface SigningSurface {
+  packages: (SigningClubView & { integrity: string[] })[]; livePackageId: string | null;
+  legacySigning: { id: string; at: number | null; method: string } | null; requirements: SigningRequirements;
+  vocabulary: { statuses: SigningStatus[]; statusLabels: Record<string, string>; partyTypes: SigningPartyType[]; methods: string[] }; policyVersion: number; honest: string;
+}
+export interface SigningHistoryItem { id: string; at: number; action: string; by: OfferActor | null; revisionId: string | null }
+export interface SigningDocumentFile { document: SigningDocumentView; file: { mime: string; base64: string } | null }
+export interface SigningActInput { expectedRev: number; clientKey?: string; reason?: string }
+
 export interface RoomsApi {
   list(s: Session, params?: RoomListParams): Promise<RoomListResult>;
   needsAttention(s: Session): Promise<{ items: RoomAttentionItem[]; note: string }>;
@@ -703,6 +732,21 @@ export interface RoomsApi {
   issueOffer(s: Session, offerId: string, input: { expectedRev: number; clientKey?: string }): Promise<{ offer: OfferClubView; lifecycle: OfferLifecycleEffect | null; case?: OfferCaseMove; rev?: number; idempotent?: boolean }>;
   withdrawOffer(s: Session, offerId: string, input: { expectedRev: number; reason?: string; clientKey?: string }): Promise<{ offer: OfferClubView; lifecycle: OfferLifecycleEffect | null; idempotent?: boolean }>;
   reviseOffer(s: Session, offerId: string, input: OfferDraftInput & { expectedRev: number }): Promise<{ offer: OfferClubView; idempotent?: boolean }>;
+  // M23 P7 — the signing workflow. Page-local to the Room's Signing tab.
+  signing(s: Session, roomId: string): Promise<SigningSurface>;
+  startSigning(s: Session, offerId: string, input: { clientKey?: string; contract?: { startDate?: string | null; endDate?: string | null }; internalNote?: string | null; expiresAt?: string | number | null }): Promise<{ signing: SigningClubView; idempotent?: boolean }>;
+  signingPackage(s: Session, signingId: string): Promise<{ signing: SigningClubView; integrity: string[] }>;
+  signingHistory(s: Session, signingId: string): Promise<{ items: SigningHistoryItem[]; signingPackageId: string }>;
+  signingDocument(s: Session, signingId: string, kind?: 'document' | 'executed'): Promise<SigningDocumentFile>;
+  updateSigningDraft(s: Session, signingId: string, input: { contract?: { startDate?: string | null; endDate?: string | null }; internalNote?: string | null; expectedRev: number }): Promise<{ signing: SigningClubView }>;
+  attachSigningDocument(s: Session, signingId: string, input: { dataUrl: string; filename: string; label?: string | null; expectedRev: number }): Promise<{ signing: SigningClubView }>;
+  attachExecutedDocument(s: Session, signingId: string, input: { dataUrl: string; filename: string; expectedRev: number }): Promise<{ signing: SigningClubView }>;
+  presentSigning(s: Session, signingId: string, input: SigningActInput & { expiresAt?: string | number | null }): Promise<{ signing: SigningClubView; idempotent?: boolean }>;
+  completeClubParty(s: Session, signingId: string, input: SigningActInput & { revisionId: string; documentSha256: string }): Promise<{ signing: SigningClubView; idempotent?: boolean }>;
+  completeSigning(s: Session, signingId: string, input: SigningActInput): Promise<{ signing: SigningClubView; lifecycle: OfferLifecycleEffect | null; signingId?: string; idempotent?: boolean }>;
+  cancelSigning(s: Session, signingId: string, input: SigningActInput): Promise<{ signing: SigningClubView; idempotent?: boolean }>;
+  voidSigning(s: Session, signingId: string, input: SigningActInput): Promise<{ signing: SigningClubView; idempotent?: boolean }>;
+  supersedeSigning(s: Session, signingId: string, input: SigningActInput): Promise<{ signing: SigningClubView; idempotent?: boolean }>;
   funnel(s: Session): Promise<RoomFunnel>;
 }
 
@@ -788,6 +832,21 @@ export const httpRooms: RoomsApi = {
   issueOffer: (s, offerId, input) => req(`/org/offers/${offerId}/issue`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   withdrawOffer: (s, offerId, input) => req(`/org/offers/${offerId}/withdraw`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   reviseOffer: (s, offerId, input) => req(`/org/offers/${offerId}/revise`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  // M23 P7 — the signing workflow.
+  signing: (s, roomId) => req(`/org/rooms/${roomId}/signing`, { headers: H(s) }),
+  startSigning: (s, offerId, input) => req(`/org/offers/${offerId}/signing`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  signingPackage: (s, id) => req(`/org/signings/${id}`, { headers: H(s) }),
+  signingHistory: (s, id) => req(`/org/signings/${id}/history`, { headers: H(s) }),
+  signingDocument: (s, id, kind = 'document') => req(`/org/signings/${id}/document${kind === 'executed' ? '?kind=executed' : ''}`, { headers: H(s) }),
+  updateSigningDraft: (s, id, input) => req(`/org/signings/${id}`, { method: 'PATCH', headers: H(s), body: JSON.stringify(input) }),
+  attachSigningDocument: (s, id, input) => req(`/org/signings/${id}/document`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  attachExecutedDocument: (s, id, input) => req(`/org/signings/${id}/executed-document`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  presentSigning: (s, id, input) => req(`/org/signings/${id}/ready`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  completeClubParty: (s, id, input) => req(`/org/signings/${id}/parties/club/complete`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  completeSigning: (s, id, input) => req(`/org/signings/${id}/complete`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  cancelSigning: (s, id, input) => req(`/org/signings/${id}/cancel`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  voidSigning: (s, id, input) => req(`/org/signings/${id}/void`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  supersedeSigning: (s, id, input) => req(`/org/signings/${id}/supersede`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   funnel: (s) => req('/org/rooms-funnel', { headers: H(s) }),
 };
 
