@@ -32,6 +32,10 @@ import { t, fmtDate, fmtDateTime } from './i18n';
 import { TrialPanel } from './trialPanel';
 import { DecisionWorkflow } from './decisionPanel';
 import { OfferWorkflow } from './offerPanel';
+// M23 P8 — a grassroots club that took an Offer to acceptance continues to the signing here (no dead end).
+import { SigningWorkflow } from './signingPanel';
+import { JourneyStrip, JourneyTimeline, useRoomJourney } from './journeyStrip';
+import type { RoomJourney } from './roomsApi';
 
 interface RoomsScreenProps {
   session: Session;
@@ -40,16 +44,19 @@ interface RoomsScreenProps {
   openPlayer: (id: string) => void;
   /** Deep link: "#/recruitment/rooms/:roomId" opens this room directly. */
   roomId?: string | null;
+  /** M23 P8: the tab a deep link named ("#/recruitment/rooms/:id/offer"). */
+  roomTab?: string | null;
+  onRoomTab?: (roomId: string, tab: string) => void;
   onOpenRoom?: (roomId: string) => void;
   onCloseRoom?: () => void;
 }
 
-type TabId = 'overview' | 'passport' | 'evidence' | 'assessments' | 'combine' | 'development' | 'discussion' | 'contact' | 'trial' | 'activity' | 'decision' | 'offer';
+type TabId = 'overview' | 'passport' | 'evidence' | 'assessments' | 'combine' | 'development' | 'discussion' | 'contact' | 'trial' | 'activity' | 'decision' | 'offer' | 'signing';
 
 const TAB_KEYS: [TabId, string][] = [
   ['overview', 'rm.tab.overview'], ['passport', 'rm.tab.passport'], ['evidence', 'rm.tab.evidence'],
   ['assessments', 'rm.tab.assessments'], ['combine', 'rm.tab.combine'], ['development', 'rm.tab.development'],
-  ['discussion', 'rm.tab.discussion'], ['contact', 'rm.tab.contact'], ['trial', 'rm.tab.trial'], ['activity', 'rm.tab.activity'], ['decision', 'rm.tab.decision'], ['offer', 'rm.tab.offer'],
+  ['discussion', 'rm.tab.discussion'], ['contact', 'rm.tab.contact'], ['trial', 'rm.tab.trial'], ['activity', 'rm.tab.activity'], ['decision', 'rm.tab.decision'], ['offer', 'rm.tab.offer'], ['signing', 'rm.tab.signing'],
 ];
 
 // Grassroots keeps the same statuses and the same gates, but has no offers or
@@ -83,6 +90,10 @@ function errMessage(e: unknown): string {
     // A lost update is now refused rather than applied, so it has to be
     // explainable: the person is told their work is intact and what to do.
     if (e.code === 'ROOM_VERSION_CONFLICT') return t('common.conflict');
+    // M23 P8 — the legacy status move's three refusals, explained rather than echoed.
+    if (e.code === 'ROOM_EVIDENCE_REQUIRED') return t('rm.errEvidenceRequired');
+    if (e.code === 'ROOM_TRANSITION_INVALID') return t('rm.errTransitionInvalid');
+    if (e.code === 'ROOM_PERMISSION_REQUIRED') return t('rm.errPermission');
     return e.message;
   }
   return e instanceof Error ? e.message : 'failed';
@@ -278,14 +289,27 @@ function RoomsList({ session, tick, onOpenRoom }: RoomsScreenProps) {
 }
 
 // =================================================================== room
-function RoomView({ session, tick, notify, openPlayer, roomId, onCloseRoom }: RoomsScreenProps & { roomId: string }) {
+const isTabId = (x: unknown): x is TabId => TAB_KEYS.some(([id]) => id === x);
+
+function RoomView({ session, tick, notify, openPlayer, roomId, roomTab, onRoomTab, onCloseRoom }: RoomsScreenProps & { roomId: string }) {
   const [room, setRoom] = useState<Room | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [tab, setTab] = useState<TabId>('overview');
+  const [tab, setTabState] = useState<TabId>(isTabId(roomTab) ? roomTab : 'overview');
   const [bump, setBump] = useState(0);
   const [staff, setStaff] = useState<StaffRow[]>([]);
 
   const reload = useCallback(() => setBump((b) => b + 1), []);
+  // M23 P8 — the tab follows the deep link (back/forward included), and a click writes the tab into the link.
+  useEffect(() => { if (isTabId(roomTab)) setTabState(roomTab); }, [roomTab, roomId]);
+  const setTab = useCallback((id: TabId) => { setTabState(id); onRoomTab?.(roomId, id); }, [onRoomTab, roomId]);
+  // §55 — returning to the page re-reads the case.
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') reload(); };
+    window.addEventListener('focus', reload);
+    window.addEventListener('pageshow', reload);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { window.removeEventListener('focus', reload); window.removeEventListener('pageshow', reload); document.removeEventListener('visibilitychange', onVisible); };
+  }, [reload]);
 
   useEffect(() => {
     let live = true;
@@ -310,14 +334,23 @@ function RoomView({ session, tick, notify, openPlayer, roomId, onCloseRoom }: Ro
       </div>
     );
   }
-  if (!room) return <div className="dim">{t('rm.loading')}</div>;
+  if (!room) return <RoomLoading />;
 
-  const shared = { session, room, notify, reload, staff, openPlayer };
+  return <RoomBody session={session} room={room} tick={tick} notify={notify} reload={reload} staff={staff} openPlayer={openPlayer} tab={tab} setTab={setTab} onCloseRoom={onCloseRoom} />;
+}
+
+function RoomLoading() { return <div className="dim">{t('rm.loading')}</div>; }
+
+function RoomBody({ session, room, tick, notify, reload, staff, openPlayer, tab, setTab, onCloseRoom }: PanelProps & { tick: number; tab: TabId; setTab: (id: TabId) => void; onCloseRoom?: () => void }) {
+  // M23 P8 — ONE journey read per room view, shared by the strip and the timeline.
+  const { journey, bump } = useRoomJourney(session, room, tick);
+  const shared = { session, room, notify, reload, staff, openPlayer, journey };
 
   return (
     <div>
       <button onClick={() => onCloseRoom?.()}>← {t('rm.back')}</button>
       <RoomHeader {...shared} />
+      <JourneyStrip session={session} room={room} journey={journey} notify={notify} reload={reload} bump={bump} onTab={(id) => setTab(id as TabId)} />
 
       {/* In-screen tab strip: scrolls horizontally on a narrow layout. */}
       <div
@@ -354,6 +387,7 @@ function RoomView({ session, tick, notify, openPlayer, roomId, onCloseRoom }: Ro
         {tab === 'activity' && <ActivityPanel {...shared} />}
         {tab === 'decision' && <DecisionPanel {...shared} />}
         {tab === 'offer' && <OfferWorkflow session={session} room={room} notify={notify} reload={reload} />}
+        {tab === 'signing' && <SigningWorkflow session={session} room={room} notify={notify} reload={reload} />}
       </div>
 
       <div className="dim" style={{ fontSize: 12, marginTop: 10 }}>🔒 {room.privacyNote}</div>
@@ -368,6 +402,8 @@ interface PanelProps {
   reload: () => void;
   staff: StaffRow[];
   openPlayer: (id: string) => void;
+  /** M23 P8 — the journey projection (null until read, or in demo mode). */
+  journey?: RoomJourney | null;
 }
 
 // ---------------------------------------------------------------- header
@@ -1059,7 +1095,7 @@ function ActivityRows({ items }: { items: RoomActivityItem[] }) {
   );
 }
 
-function ActivityPanel({ session, room }: PanelProps) {
+function ActivityPanel({ session, room, journey }: PanelProps) {
   const [items, setItems] = useState<RoomActivityItem[]>(room.activity.items);
   const [cursor, setCursor] = useState<string | null>(room.activity.nextCursor);
   const [total, setTotal] = useState(room.activity.total);
@@ -1079,6 +1115,7 @@ function ActivityPanel({ session, room }: PanelProps) {
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 6 }}>{t('rm.activityNote')}</div>
       <ActivityRows items={items} />
       {cursor && <button style={{ marginTop: 8 }} onClick={more}>{t('rm.more')}</button>}
+      {journey ? <JourneyTimeline journey={journey} /> : null}
     </div>
   );
 }

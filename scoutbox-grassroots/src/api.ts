@@ -363,6 +363,14 @@ export interface Channel {
   closed?: boolean;
 }
 
+/** M23 P8 — the current, authorized resource a notification points to, resolved by the server at read time (null when nothing current is open to this person). */
+export type NotificationTarget =
+  | { kind: 'room'; roomId: string; tab: string }
+  | { kind: 'client'; clientId: string; tab: string }
+  | { kind: 'inbox'; requestId: string }
+  | { kind: 'trial'; trialId: string }
+  | { kind: 'offer'; offerId: string; offerRevisionId: string }
+  | { kind: 'signing'; signingPackageId: string; superseded?: boolean };
 export interface Notification {
   id: string;
   ts: number;
@@ -370,6 +378,7 @@ export interface Notification {
   text: string;
   refId: string | null;
   read: boolean;
+  target?: NotificationTarget | null;
   /** How many times this identical notification arrived while still unread. */
   repeatCount?: number;
 }

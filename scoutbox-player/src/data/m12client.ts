@@ -123,6 +123,15 @@ export interface FamilySigningHistory { id: string; at: number; action: string; 
 export interface SigningDocumentFile { document: FamilySigningDocument; file: { mime: string; base64: string } | null }
 export interface SigningCompleteResult { signing: FamilySigning; idempotent?: boolean }
 
+// M23 P8 — the player-facing journey. Only stages that involve the recipient; never a club's internal state.
+export type PlayerJourneyStage = 'contacted' | 'trial_invited' | 'trial_scheduled' | 'trial_completed' | 'offer_received' | 'offer_accepted' | 'offer_declined' | 'signing' | 'signed' | 'none';
+export type PlayerNextActionCode = 'RESPOND_TO_CONTACT' | 'RESPOND_TO_TRIAL_INVITATION' | 'CONFIRM_TRIAL_SCHEDULE' | 'RESPOND_TO_OFFER' | 'SIGN' | 'NONE';
+export interface PlayerJourney {
+  club: { id: string; name: string | null; level: string | null; verified: boolean };
+  shared: { kind: string; id: string; status?: string | null; at?: number | null }[];
+  journey: { policyVersion: number; stage: PlayerJourneyStage; nextAction: { code: PlayerNextActionCode; resources: Record<string, string | null> }; resources: Record<string, string | null>; timeline: { kind: string; at: number; [k: string]: unknown }[] };
+}
+
 export interface PlayerM12 {
   getPassport(playerId: string): Promise<PassportView>;
   addEvidence(playerId: string, input: { claimType: string; label: string; value?: number | string; units?: string; season?: string }): Promise<void>;
@@ -189,6 +198,9 @@ export interface PlayerM12 {
   declineOffer(playerId: string, offerId: string, revisionId: string, clientKey: string, reason?: string): Promise<OfferAnswerResult>;
   shareOfferWithAgent(playerId: string, offerId: string, share: boolean, agreementId?: string): Promise<{ offer: FamilyOffer }>;
   getOfferDocument(playerId: string, offerId: string, docId: string): Promise<OfferDocumentFile>;
+  // M23 P8 — the recipient's journeys, one per club that reached them (server-derived stage and next action).
+  getJourneys(playerId: string): Promise<PlayerJourney[]>;
+  gJourneys(guardianId: string, childId: string): Promise<PlayerJourney[]>;
   // M23 P7 — signing (player only; the guardian pathway is closed and lists nothing)
   getSignings(playerId: string): Promise<FamilySigning[]>;
   getSigning(playerId: string, signingId: string): Promise<{ signing: FamilySigning; history: FamilySigningHistory[] }>;
@@ -278,6 +290,8 @@ const live: PlayerM12 = {
   declineOffer: (pid, oid, revisionId, clientKey, reason) => post(`/player/offers/${oid}/decline`, pid, { revisionId, clientKey, ...(reason ? { reason } : {}) }),
   shareOfferWithAgent: (pid, oid, share, agreementId) => post(`/player/offers/${oid}/share-agent`, pid, { share, ...(agreementId ? { agreementId } : {}) }),
   getOfferDocument: (pid, oid, docId) => req(`/player/offers/${oid}/documents/${docId}`, pid),
+  getJourneys: async (pid) => (await req<{ items: PlayerJourney[] }>('/player/journeys', pid)).items,
+  gJourneys: async (gid, childId) => (await req<{ items: PlayerJourney[] }>(`/guardian/children/${encodeURIComponent(childId)}/journeys`, gid)).items,
   getSignings: async (pid) => (await req<{ items: FamilySigning[] }>('/player/signings', pid)).items,
   getSigning: (pid, sid) => req(`/player/signings/${sid}`, pid),
   getSigningDocument: (pid, sid, revisionId) => req(`/player/signings/${sid}/document${revisionId ? `?revisionId=${encodeURIComponent(revisionId)}` : ''}`, pid),

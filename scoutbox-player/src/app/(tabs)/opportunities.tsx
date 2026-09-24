@@ -13,6 +13,7 @@ import { OpportunityFitSection } from '../../components/M13Sections';
 import { TrialWorkflowSection } from '../../components/M23Trial';
 import { OfferSection } from '../../components/M23Offer';
 import { SigningSection } from '../../components/M23Signing';
+import { JourneySection } from '../../components/M23Journey';
 
 export default function Opportunities() {
   const { playerId } = useSession();
@@ -21,6 +22,7 @@ export default function Opportunities() {
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <PageHeader title={pt('tabOpportunities')} hint={pt('opportunitiesHint')} />
+        {actor ? <JourneySection actor={actor} /> : null}
         {actor ? <BoardSection actor={actor} /> : null}
         {actor ? <OpportunityFitSection actor={actor} /> : null}
         {actor ? <SquadInvitesSection actor={actor} /> : null}

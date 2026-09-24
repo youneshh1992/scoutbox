@@ -298,14 +298,28 @@ export function searchNav(query: string, ctx: NavContext, translate: (key: strin
 // parsed by its own strict pattern and resolved separately from the screen id,
 // so the flat "#/<screenId>" contract above is unchanged and every malformed
 // hash still rejects exactly as before.
-const ROOM_HASH = /^#\/recruitment\/rooms\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})$/;
+// M23 P8 — a room link may name the TAB the person should land on
+// ("#/recruitment/rooms/:roomId/offer"), so a notification, a colleague's link
+// or the journey's next action opens the right function of the case. An
+// unknown tab makes the whole hash malformed, exactly like an unknown id.
+export const ROOM_TABS = ['overview', 'passport', 'evidence', 'assessments', 'combine', 'development', 'discussion', 'contact', 'trial', 'activity', 'decision', 'offer', 'signing'] as const;
+export type RoomTab = typeof ROOM_TABS[number];
+const ROOM_HASH = /^#\/recruitment\/rooms\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})(?:\/([a-z]+))?$/;
 
 /** The room id inside a deep link, or null for any other (or malformed) hash. */
 export function roomFromHash(hash: string): string | null {
   const m = ROOM_HASH.exec(hash ?? '');
-  return m ? m[1] : null;
+  if (!m) return null;
+  if (m[2] && !(ROOM_TABS as readonly string[]).includes(m[2])) return null;
+  return m[1];
 }
-export const hashForRoom = (roomId: string) => `#/recruitment/rooms/${roomId}`;
+/** The tab inside a room deep link (null when the link names none, or the hash is not a room link). */
+export function roomTabFromHash(hash: string): RoomTab | null {
+  const m = ROOM_HASH.exec(hash ?? '');
+  if (!m || !m[2] || !(ROOM_TABS as readonly string[]).includes(m[2])) return null;
+  return m[2] as RoomTab;
+}
+export const hashForRoom = (roomId: string, tab?: string | null) => `#/recruitment/rooms/${roomId}${tab && tab !== 'overview' && (ROOM_TABS as readonly string[]).includes(tab) ? `/${tab}` : ''}`;
 
 // M18 extends the SAME mechanism rather than inventing a second one:
 //   "#/recruitment/second-look"      → the Second Look queue

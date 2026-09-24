@@ -21,7 +21,7 @@ import { DirectorDashboardScreen } from './m20Screens';
 import type { DashboardFilters } from './m20Api';
 import { m14 } from './m14api';
 import {
-  briefFromHash, criteriaFromHash, hashForBrief, hashForMatching, hashForRoom, hashForScreen,
+  briefFromHash, criteriaFromHash, hashForBrief, hashForMatching, hashForRoom, hashForScreen, roomTabFromHash, type RoomTab,
   dashboardFromHash, hashForDashboard,
   hashForWatchlist, loadCollapsed, loadShortcuts, resolveNavigationLocation, roomFromHash,
   saveCollapsed, saveShortcuts, screenFromHash, watchlistFromHash,
@@ -229,6 +229,9 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   // M17: the first parameterised route. The room id lives beside the screen id
   // so back/forward/refresh/deep-entry all land on exactly the same place.
   const [roomId, setRoomId] = useState<string | null>(() => roomFromHash(window.location.hash));
+  // M23 P8 — the tab a room link names, so a notification or a colleague's
+  // link lands on the right function of the case.
+  const [roomTab, setRoomTab] = useState<RoomTab | null>(() => roomTabFromHash(window.location.hash));
   // M18 reuses that same mechanism for "#/recruitment/briefs/:briefId".
   const [briefId, setBriefId] = useState<string | null>(() => briefFromHash(window.location.hash));
   // M19 reuses it a third time: one watchlist id, and the opaque criteria
@@ -253,12 +256,19 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     noteNavigated();
   }, []);
   /** Opening a room PUSHES, so the browser Back button closes it again. */
-  const openRoom = useCallback((id: string) => {
+  const openRoom = useCallback((id: string, tab: RoomTab | null = null) => {
     if (!confirmLeave(t('brief.unsaved'))) return;
     setScreenState('rooms');
     setBriefId(null);
     setRoomId(id);
-    try { if (window.location.hash !== hashForRoom(id)) window.history.pushState(null, '', hashForRoom(id)); } catch { /* sandboxed */ }
+    setRoomTab(tab);
+    try { if (window.location.hash !== hashForRoom(id, tab)) window.history.pushState(null, '', hashForRoom(id, tab)); } catch { /* sandboxed */ }
+    noteNavigated();
+  }, []);
+  /** M23 P8 — a tab change inside a room REPLACES the hash (no history entry per tab). */
+  const onRoomTab = useCallback((id: string, tab: string) => {
+    setRoomTab(tab as RoomTab);
+    try { if (window.location.hash !== hashForRoom(id, tab)) window.history.replaceState(null, '', hashForRoom(id, tab)); } catch { /* sandboxed */ }
     noteNavigated();
   }, []);
   const closeRoom = useCallback(() => {
@@ -336,6 +346,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
       const id = screenFromHash(window.location.hash);
       if (id) setScreenState(id);
       setRoomId(roomFromHash(window.location.hash));
+      setRoomTab(roomTabFromHash(window.location.hash));
       setBriefId(briefFromHash(window.location.hash));
       setWatchlistId(watchlistFromHash(window.location.hash));
       setMatchState(criteriaFromHash(window.location.hash));
@@ -499,15 +510,20 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
           <div className="bell-panel">
             {notifications.length === 0 && <div className="notice">Nothing yet — you'll hear the moment a player or guardian responds.</div>}
             {bellRows(notifications).slice(0, 20).map(({ n, count, unread }) => {
-              const dest = NOTIFICATION_SCREEN[n.type];
+              // M23 P8 — the server resolved the CURRENT resource this row
+              // points to (a room and its tab), re-authorized at read time. A
+              // row with no target keeps the type-level destination, or stays
+              // plain text.
+              const target = n.target ?? null;
+              const dest = target?.kind === 'room' ? 'rooms' : NOTIFICATION_SCREEN[n.type];
               return (
-                <div key={n.id} className="list-row" style={{ opacity: unread ? 1 : 0.7 }}>
+                <div key={n.id} className="list-row" style={{ opacity: unread ? 1 : 0.7 }} data-target-kind={target?.kind ?? ''}>
                   <span className="grow" style={{ fontSize: 13 }}>
                     {n.text}
                     {count > 1 && <span className="pill" style={{ marginLeft: 6 }}>×{count}</span>}
                   </span>
                   {dest && (
-                    <button onClick={() => { setScreen(dest); setBellOpen(false); }}>{t('common.open')}</button>
+                    <button onClick={() => { if (target?.kind === 'room') openRoom(target.roomId, target.tab as RoomTab); else setScreen(dest); setBellOpen(false); }}>{t('common.open')}</button>
                   )}
                   <span className="dim">{fmtStamp(n.ts)}</span>
                 </div>
@@ -534,7 +550,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
           {screen === 'plan' && <PlanScreen {...props} />}
           {screen === 'assessments' && <AssessmentsScreen {...props} />}
           {screen === 'recruitment' && <RecruitmentScreen {...props} />}
-          {screen === 'rooms' && <RoomsScreen {...props} roomId={roomId} onOpenRoom={openRoom} onCloseRoom={closeRoom} />}
+          {screen === 'rooms' && <RoomsScreen {...props} roomId={roomId} roomTab={roomTab} onRoomTab={onRoomTab} onOpenRoom={openRoom} onCloseRoom={closeRoom} />}
           {screen === 'secondlook' && <SecondLookScreen {...props} />}
           {screen === 'nobodymissed' && <NobodyMissedScreen {...props} onOpenRoom={openRoom} />}
           {screen === 'briefs' && <BriefsScreen {...props} briefId={briefId} onOpenBrief={openBrief} onCloseBrief={closeBrief} />}

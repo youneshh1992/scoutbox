@@ -28,6 +28,7 @@ import type {
   TrialClubView, TrialInvitationView, TrialList, TrialEvidenceView, TrialEvidenceCandidate,
   DecisionSurface, DecisionDraft, FormalDecision, DecisionOutcome, DecisionEvidenceRef, DecisionFinalizeResult,
   OfferClubView, OfferSurface, OfferRevisionView, OfferStatus, OfferTerms, OfferActor, OfferHistoryItem,
+  SigningSurface,
 } from './roomsApi';
 import type { RecruitmentPassport } from './m15api';
 import { ApiError } from './api';
@@ -880,7 +881,14 @@ const moveRoomForOffer = (r: DemoRoom, to: string, trigger: string) => {
   return { applied: true, action: trigger, from, to, at: Date.now() };
 };
 
+/** M23 P8 — the demo has no server to derive a journey; the strip hides itself. A lifecycle action maps to the demo status move. */
+const DEMO_LIFECYCLE_TO: Record<string, string> = { startReview: 'under_review', planContact: 'contact_planned', shortlist: 'shortlisted', prioritise: 'priority', considerOffer: 'offer_consideration', holdCase: 'on_hold', resumeCase: 'under_review', rejectCase: 'archived', withdrawCase: 'withdrawn', closeCase: 'closed', reopenCase: 'under_review' };
+const demoNoSigning = () => { throw offerApiErr(503, 'SIGNING_NOT_FOUND', 'Signing is not part of the grassroots demo.'); };
 export const demoRooms: RoomsApi = {
+  journey: async (_s, roomId) => { const r = find(roomId); if (!r) throw offerApiErr(404, 'ROOM_NOT_FOUND', 'No such room.'); return delay({ ok: true as const, journey: null, history: { entries: [], total: 0 }, generatedAt: Date.now() }); },
+  lifecycle: async (s, roomId, input) => { const to = DEMO_LIFECYCLE_TO[input.action]; if (!to) throw offerApiErr(400, 'LIFECYCLE_ACTION_UNKNOWN', 'Unknown recruitment action.'); const r = await demoRooms.setStatus(s, roomId, { status: to, reasonCodes: input.reasonCodes ?? [], expectedRev: input.expectedRev }); return { ok: true, to, rev: r.room.rev }; },
+  signing: async (_s, roomId) => { const r = find(roomId); if (!r) throw offerApiErr(404, 'ROOM_NOT_FOUND', 'No such room.'); return delay({ packages: [], livePackageId: null, requirements: { role: null, canManage: false, canComplete: false, status: r.status, startBlockers: ['CASE_STATE'], acceptedOfferId: null }, honest: 'Signing is not part of the grassroots demo.', policyVersion: 1 } as unknown as SigningSurface); },
+  startSigning: async () => demoNoSigning(), signingPackage: async () => demoNoSigning(), signingHistory: async () => demoNoSigning(), signingDocument: async () => demoNoSigning(), updateSigningDraft: async () => demoNoSigning(), attachSigningDocument: async () => demoNoSigning(), attachExecutedDocument: async () => demoNoSigning(), presentSigning: async () => demoNoSigning(), completeClubParty: async () => demoNoSigning(), completeSigning: async () => demoNoSigning(), cancelSigning: async () => demoNoSigning(), voidSigning: async () => demoNoSigning(), supersedeSigning: async () => demoNoSigning(),
   list: async (_s, params = {}) => {
     let list = roomStore.slice();
     const view = params.view ?? 'all';

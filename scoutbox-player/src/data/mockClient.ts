@@ -840,6 +840,9 @@ export const mockClient: PlayerClient = {
   setAvailability: (playerId, availability?: Availability, contractStatus?: ContractStatus) => {
     const p = getPlayer(playerId);
     if (isMinorProfile(p)) throw new ClientError('GUARDIAN_MANAGED', 'This setting is managed by your parent or guardian.');
+    // M23 P8 §26 — the same two refusals the server gives.
+    if (contractStatus === 'under_contract') throw new ClientError('CONTRACT_STATUS_NOT_SELF_DECLARABLE', 'Under contract is recorded when a signing completes in ScoutBox; it cannot be declared here.');
+    if (contractStatus && p.contractStatus === 'under_contract') throw new ClientError('CONTRACT_STATUS_CANONICAL', 'Your contract status is set by a signing completed in ScoutBox and cannot be changed here while that contract stands.');
     if (availability) p.availability = availability;
     if (contractStatus) p.contractStatus = contractStatus;
     emit();

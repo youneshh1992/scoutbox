@@ -671,7 +671,21 @@ export interface SigningHistoryItem { id: string; at: number; action: string; by
 export interface SigningDocumentFile { document: SigningDocumentView; file: { mime: string; base64: string } | null }
 export interface SigningActInput { expectedRev: number; clientKey?: string; reason?: string }
 
+// ---------------------------------------------------------------- M23 P8 journey
+// The server-derived journey block (m23/journeyModel.mjs). The client renders
+// it and never computes a stage or a next action.
+export type JourneyStage = 'watching' | 'review' | 'contact' | 'trial' | 'assessment' | 'decision' | 'offer' | 'acceptance' | 'signing' | 'signed' | 'paused' | 'ended';
+export type JourneyTab = 'overview' | 'contact' | 'trial' | 'assessments' | 'decision' | 'offer' | 'signing';
+export interface JourneyNextAction { code: string; stage: JourneyStage | null; kind: 'club' | 'await' | 'none'; tab: JourneyTab; lifecycleAction: string | null; permitted: boolean | null; blockedBy: string[]; resources: Record<string, string | null> }
+export interface JourneyCompletedStage { stage: JourneyStage; basis: 'canonical' | 'lifecycle'; at: number | null; [k: string]: unknown }
+export interface JourneyBlock { policyVersion: number; stage: JourneyStage; completedStages: JourneyCompletedStage[]; resources: Record<string, string | null>; nextAction: JourneyNextAction; classification: 'canonical' | 'legacy' | 'partially_canonical' | 'integrity_error'; integrity: string[]; blocked: boolean; subjectRemoved: boolean }
+export interface JourneyHistoryEntry { kind: string; at: number; by: string | null; to?: string | null; from?: string | null; revisionNumber?: number; partyType?: string; [k: string]: unknown }
+export interface RoomJourney { ok: true; journey: JourneyBlock | null; lifecycle?: { currentStage: string; allowedNext: string[]; terminal: boolean; reopenable: boolean }; nextActions?: string[]; history: { entries: JourneyHistoryEntry[]; total: number }; generatedAt: number }
+
 export interface RoomsApi {
+  // M23 P8 — the journey projection and the semantic lifecycle action.
+  journey(s: Session, roomId: string): Promise<RoomJourney>;
+  lifecycle(s: Session, roomId: string, input: { action: string; reasonCodes?: string[]; expectedRev?: number; clientKey?: string }): Promise<{ ok?: boolean; from?: string; to?: string; rev?: number; idempotent?: boolean }>;
   list(s: Session, params?: RoomListParams): Promise<RoomListResult>;
   needsAttention(s: Session): Promise<{ items: RoomAttentionItem[]; note: string }>;
   summaries(s: Session, playerIds: string[]): Promise<{ items: RoomSummaryRow[] }>;
@@ -781,6 +795,9 @@ export const httpRooms: RoomsApi = {
     return { ok: true, room: body.room as Room, adoptedExistingCase: !!body.adoptedExistingCase };
   },
   get: async (s, roomId) => (await req<{ room: Room }>(`/org/rooms/${roomId}`, { headers: H(s) })).room,
+  // M23 P8
+  journey: (s, roomId) => req(`/org/rooms/${roomId}/journey?limit=200`, { headers: H(s) }),
+  lifecycle: (s, roomId, input) => req(`/org/rooms/${roomId}/lifecycle`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   patch: async (s, roomId, input) => (await req<{ room: Room }>(`/org/rooms/${roomId}`, { method: 'PATCH', headers: H(s), body: JSON.stringify(input) })).room,
   setStatus: (s, roomId, input) => req(`/org/rooms/${roomId}/status`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   activity: (s, roomId, params = {}) => req(`/org/rooms/${roomId}/activity${qs({ limit: params.limit, cursor: params.cursor })}`, { headers: H(s) }),

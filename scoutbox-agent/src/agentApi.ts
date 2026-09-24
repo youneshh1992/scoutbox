@@ -451,6 +451,11 @@ export interface TransactionCreateInput {
   clientKey: string;
 }
 
+// M23 P8 — the agent's factual journey view. Stage words are the recipient's vocabulary; no club process word ever appears.
+export type ClientJourneyStage = 'contacted' | 'trial_invited' | 'trial_scheduled' | 'trial_completed' | 'offer_received' | 'offer_accepted' | 'offer_declined' | 'signing' | 'signed' | 'none';
+export interface ClientJourneyItem { club: { id: string; name: string | null; level: string | null; verified: boolean }; journey: { policyVersion: number; stage: ClientJourneyStage; resources: Record<string, string | null>; timeline: { kind: string; at: number; [k: string]: unknown }[]; grants: string[] } }
+export interface ClientJourneyResult { relationshipId: string; clientId: string; grants: string[]; items: ClientJourneyItem[]; generatedAt: number }
+
 export interface AgentApi {
   me(s: Session): Promise<Me>;
   home(s: Session): Promise<Home>;
@@ -477,6 +482,8 @@ export interface AgentApi {
   // M23 P6 — read-only projection of the Offers this client chose to share.
   clientOffers(s: Session, id: string): Promise<{ items: ClientOffer[]; clientId: string; clientName: string | null; note: string; honest: string }>;
   clientSignings(s: Session, id: string): Promise<{ items: ClientSigning[]; clientId: string; clientName: string | null; honest: string }>;
+  // M23 P8 — the client's journeys, one per club that shared something with this agent (server-derived stage; factual only).
+  clientJourney(s: Session, id: string): Promise<ClientJourneyResult>;
   clientShares(s: Session, id: string): Promise<{ items: OpportunityShare[] }>;
   shareOpportunity(s: Session, id: string, oppId: string, input: { note?: string; clientKey: string }): Promise<{ share: OpportunityShare; idempotent?: boolean; note?: string }>;
   withdrawShare(s: Session, id: string, shareId: string): Promise<{ share: OpportunityShare; idempotent?: boolean }>;
@@ -547,6 +554,7 @@ export const httpAgent: AgentApi = {
   clientTrials: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}/trials`),
   clientOffers: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}/offers`),
   clientSignings: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}/signings`),
+  clientJourney: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}/journey`),
   clientShares: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}/opportunities/shares`),
   shareOpportunity: (s, id, oppId, input) => post(s, `/org/agent/clients/${encodeURIComponent(id)}/opportunities/${encodeURIComponent(oppId)}/share`, input),
   withdrawShare: (s, id, shareId) => post(s, `/org/agent/clients/${encodeURIComponent(id)}/opportunities/shares/${encodeURIComponent(shareId)}/withdraw`, {}),

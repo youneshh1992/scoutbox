@@ -250,12 +250,23 @@ export function ProfileBody() {
               </View>
             )}
             <SectionTitle>Contract status</SectionTitle>
-            <Row>
-              {(Object.keys(CONTRACT_LABELS) as ContractStatus[]).filter((c) => c !== 'unknown').map((c) => (
-                <Button key={c} small primary={me.contractStatus === c} label={CONTRACT_LABELS[c]}
-                  onPress={() => set(() => client.setAvailability(playerId, undefined, c))} />
-              ))}
-            </Row>
+            {/* M23 P8 §26 — "Under contract" is recorded by a signing completed in
+                ScoutBox and cannot be declared here; while that contract stands the
+                other words are read-only too. The server refuses either way; this
+                only stops the tap from being offered. */}
+            {me.contractStatus === 'under_contract' ? (
+              <View testID="contract-status-canonical">
+                <Row><Button small primary label={CONTRACT_LABELS.under_contract} onPress={() => undefined} /></Row>
+                <Muted size={12}>Recorded when your signing completed in ScoutBox. It updates from your contract, not from this screen.</Muted>
+              </View>
+            ) : (
+              <Row>
+                {(Object.keys(CONTRACT_LABELS) as ContractStatus[]).filter((c) => c !== 'unknown' && c !== 'under_contract').map((c) => (
+                  <Button key={c} small primary={me.contractStatus === c} label={CONTRACT_LABELS[c]}
+                    onPress={() => set(() => client.setAvailability(playerId, undefined, c))} />
+                ))}
+              </Row>
+            )}
           </Card>
         ) : (
           <Card>

@@ -566,3 +566,10 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .subnav-menu-item { text-align: left; background: none; border: none; border-radius: 8px; padding: 10px 12px; color: var(--muted); font-size: 14px; min-height: 40px; }
 .subnav-menu-item:hover, .subnav-menu-item:focus-visible { background: var(--panel); color: var(--text); }
 .subnav-menu-item.active { color: var(--text); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
+
+/* ---------- M23 P8 journey strip ---------- */
+.journey-rail { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0; padding: 0; }
+.journey-step { font-size: 12.5px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--bg-2); }
+.journey-step.done { color: var(--accent); border-color: var(--accent); }
+.journey-step.current { color: var(--text); border-color: var(--accent-2); font-weight: 700; }
+.journey-step.passed { opacity: 0.8; }

@@ -1086,6 +1086,11 @@ export const demoAgent: AgentApi = {
       honest: 'Nothing here is a negotiation, a fee or a signing. An accepted Offer is not a signed contract.',
     });
   },
+  // M23 P8 — the demo client shared nothing, so no club's stage is open to the agent.
+  async clientJourney(s, id) {
+    void s;
+    return delay({ relationshipId: id, clientId: RELS.find((x) => x.id === id)?.clientId ?? id, grants: [] as string[], items: [], generatedAt: Date.now() });
+  },
   // M23 P7 — the signing rides on the shared Offer; the demo client has shared nothing, so there is nothing to show.
   async clientSignings(s, id) {
     void s;

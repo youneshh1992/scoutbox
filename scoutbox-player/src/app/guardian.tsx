@@ -13,6 +13,7 @@ import { useSession } from '../state';
 import { BoardSection, CampaignsSection, FeedbackDevSection, FollowUpsSection, PassportSection, SquadInvitesSection, TrialSafetySection } from '../components/M12Sections';
 import { TrialSlotChips, TrialWorkflowSection } from '../components/M23Trial';
 import { OfferSection } from '../components/M23Offer';
+import { JourneySection } from '../components/M23Journey';
 import { AckSection, OpportunityFitSection, PreferencesSection, TransitionsSection } from '../components/M13Sections';
 import { ChildReferencesSection, InviteCodeSection } from '../components/M14Sections';
 import { FootballPassportSection } from '../components/M15Sections';
@@ -594,6 +595,7 @@ export default function GuardianDashboard() {
             ))}
             <AckSection actor={{ kind: 'guardian', id: guardianId, childId: children[0]?.id ?? '' }} />
             <SquadInvitesSection actor={{ kind: 'guardian', id: guardianId, childId: children[0]?.id ?? '' }} />
+            <JourneySection actor={{ kind: 'guardian', id: guardianId, childId: children[0]?.id ?? '' }} />
             <TrialWorkflowSection actor={{ kind: 'guardian', id: guardianId, childId: children[0]?.id ?? '' }} />
             <OfferSection actor={{ kind: 'guardian', id: guardianId, childId: children[0]?.id ?? '' }} />
             <TrialSafetySection actor={{ kind: 'guardian', id: guardianId, childId: children[0]?.id ?? '' }} />

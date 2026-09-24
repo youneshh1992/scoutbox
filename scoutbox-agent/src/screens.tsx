@@ -379,6 +379,36 @@ function ClientList({ rows, onOpen }: { rows: ClientRow[]; onOpen: (id: string) 
   );
 }
 
+/**
+ * M23 P8 §17 — the client's journeys with clubs, as the server projects them
+ * for THIS agent: only clubs that shared something (a contact routed to the
+ * agent, an Offer the client shared, a trial the client disclosed), only
+ * factual stage words, never a club's assessment, decision or priority. A
+ * refusal (basis, scope, licence) is rendered as the answer it is.
+ */
+function ClientJourneyLine({ session, id, tick }: { session: Session; id: string; tick: number }) {
+  const j = useLoad(() => agent.clientJourney(session, id), [session, id, tick]);
+  if (j.error) return <Section title={t('clients.journey.title')}><ErrorLine error={j.error} onRetry={j.reload} /></Section>;
+  if (!j.data) return null;
+  const stage = (s: string) => t(`clients.journey.st.${s}`, s.replace(/_/g, ' '));
+  return (
+    <Section title={t('clients.journey.title')}>
+      <div className="dim" style={{ fontSize: 12.5, marginBottom: 6 }}>{t('clients.journey.honest')}</div>
+      {j.data.items.length === 0 ? <div className="dim" data-testid="client-journey-empty">{t('clients.journey.none')}</div> : (
+        <div className="list-rows" data-testid="client-journey">
+          {j.data.items.map((it) => (
+            <div key={it.club.id} className="list-row" style={{ flexWrap: 'wrap' }} data-testid={`client-journey-${it.club.id}`} data-stage={it.journey.stage}>
+              <span className="grow"><b>{it.club.name ?? it.club.id}</b></span>
+              <span className="pill">{stage(it.journey.stage)}</span>
+              {it.journey.timeline.length > 0 && <span className="dim" style={{ fontSize: 12 }}>{t('clients.journey.last')} {t(`clients.journey.ev.${it.journey.timeline[it.journey.timeline.length - 1].kind}`, it.journey.timeline[it.journey.timeline.length - 1].kind.replace(/_/g, ' '))} · {fmtDate(it.journey.timeline[it.journey.timeline.length - 1].at)}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </Section>
+  );
+}
+
 function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { session: Session; id: string; tab: ClientTab; onTab: (t: ClientTab) => void; onBack: () => void; notify: ScreenProps['notify']; tick: number }) {
   const d = useLoad(() => agent.client(session, id), [session, id, tick]);
   const det = d.data as ClientDetail | null;
@@ -457,6 +487,7 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
                 <Stat v={c.country ?? '—'} k="Country" />
               </div>
             </Section>
+            {det.access && <ClientJourneyLine session={session} id={id} tick={tick} />}
             {det.access && (
               <Section title={t('clients.profileFields')}>
                 <div className="dim" style={{ fontSize: 12.5 }}>{Object.keys(c).filter((k) => !['id', 'name', 'accessBasis'].includes(k) && c[k] !== null && typeof c[k] !== 'object').map((k) => `${k}: ${String(c[k])}`).join(' · ')}</div>

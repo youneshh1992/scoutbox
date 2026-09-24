@@ -288,6 +288,8 @@ export const m12mock: PlayerM12 = {
   shareOfferWithAgent: async (_pid, oid, share) => { const o = OFFERS.find((x) => x.id === oid); if (!o) throw new Error('OFFER_NOT_FOUND'); o.agentShared = share; return delay({ offer: { ...o } }); },
   getOfferDocument: async (_pid, _oid, docId) => delay({ document: { id: docId, label: 'Outline of the proposal (PDF)', mime: 'application/pdf', bytes: 9, filename: 'outline.pdf' }, file: { mime: 'application/pdf', base64: 'JVBERi0xLjQK' } }),
   // M23 P7 — the demo never presents a signing: nothing is signed in a demo, and the section stays quiet.
+  getJourneys: () => delay([]),
+  gJourneys: () => delay([]),
   getSignings: () => delay([]),
   getSigning: async () => { throw new Error('SIGNING_NOT_FOUND'); },
   getSigningDocument: async () => { throw new Error('SIGNING_DOCUMENT_NOT_FOUND'); },

@@ -32,6 +32,8 @@ export interface Session {
   token: string;
 }
 
+/** M23 P8 — the current, authorized resource a notification points to, resolved by the server at read time. */
+export type NotificationTarget = { kind: 'client'; clientId: string; tab: string } | { kind: string; [k: string]: unknown };
 export interface Notification {
   id: string;
   ts: number;
@@ -40,6 +42,7 @@ export interface Notification {
   refId: string | null;
   read: boolean;
   repeatCount?: number;
+  target?: NotificationTarget | null;
 }
 
 export interface ReportInput {

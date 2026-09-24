@@ -229,6 +229,14 @@ export interface GuardianDigest {
   note: string;
 }
 
+/** M23 P8 — the current, authorized resource a notification points to, resolved by the server at read time. */
+export type NotificationTarget =
+  | { kind: 'inbox'; requestId: string }
+  | { kind: 'trial'; trialId: string }
+  | { kind: 'offer'; offerId: string; offerRevisionId: string }
+  | { kind: 'signing'; signingPackageId: string; superseded?: boolean }
+  | { kind: 'room'; roomId: string; tab: string }
+  | { kind: 'client'; clientId: string; tab: string };
 export interface AppNotification {
   id: string;
   ts: number;
@@ -236,6 +244,7 @@ export interface AppNotification {
   text: string;
   refId: string | null;
   read: boolean;
+  target?: NotificationTarget | null;
 }
 
 export interface Insights {

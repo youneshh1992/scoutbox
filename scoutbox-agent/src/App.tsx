@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError, DEMO_MODE, type Notification, type Org, type Session } from './api';
-import { agent, demoIdentities, type Me } from './agentApi';
+import { agent, demoIdentities, isSummary, type Me } from './agentApi';
 import {
   AgencyScreen, ClientsScreen, HomeScreen, InboxScreen, OpportunitiesScreen, ProfileScreen, SafetyModal, Toast, markClean,
 } from './screens';
@@ -202,6 +202,29 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     noteNavigated();
   }, []);
   /** Opening a client PUSHES, so the browser Back button closes it again. */
+  /**
+   * M23 P8 §30 — a contact, Offer or signing notification carries a server-
+   * resolved target naming the CLIENT (the player) and the tab; the agent's own
+   * relationship with that client is looked up now, so a revoked mandate opens
+   * nothing. Other rows keep their type-level destination.
+   */
+  const openTarget = useCallback(async (n: Notification) => {
+    const target = n.target ?? null;
+    const dest = NOTIFICATION_SCREEN[n.type];
+    if (target?.kind === 'client' && session) {
+      try {
+        const list = await agent.clients(session);
+        const rel = (list.items ?? []).find((r) => r.clientId === (target as { clientId: string }).clientId && !isSummary(r));
+        if (rel) { openClient(rel.id, ((target as { tab?: string }).tab as ClientTab) ?? 'overview'); return; }
+      } catch { /* the relationship is not open to this agent now: plain text */ }
+      if (dest) setScreen(dest);
+      return;
+    }
+    if (dest === 'clients' && n.refId && /^rep-/.test(n.refId)) openClient(n.refId);
+    else if (dest === 'compliance' && n.refId && /^ctx-/.test(n.refId)) openContext(n.refId);
+    else if (dest === 'transactions' && n.refId && /^atx-/.test(n.refId)) openTransaction(n.refId);
+    else if (dest) setScreen(dest);
+  }, [session]);
   const openClient = useCallback((id: string, tab: ClientTab = 'overview') => {
     if (!confirmLeave(t('common.unsaved'))) return;
     markClean();
@@ -392,7 +415,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
               return (
                 <div key={n.id} className="list-row" style={{ opacity: u ? 1 : 0.7 }}>
                   <span className="grow" style={{ fontSize: 13 }}>{n.text}{count > 1 && <span className="pill" style={{ marginLeft: 6 }}>×{count}</span>}</span>
-                  {dest && <button onClick={() => { if (dest === 'clients' && n.refId && /^rep-/.test(n.refId)) openClient(n.refId); else if (dest === 'compliance' && n.refId && /^ctx-/.test(n.refId)) openContext(n.refId); else if (dest === 'transactions' && n.refId && /^atx-/.test(n.refId)) openTransaction(n.refId); else setScreen(dest); setBellOpen(false); }}>{t('common.open')}</button>}
+                  {(dest || n.target?.kind === 'client') && <button onClick={() => { void openTarget(n); setBellOpen(false); }}>{t('common.open')}</button>}
                   <span className="dim">{fmtStamp(n.ts)}</span>
                 </div>
               );
