@@ -8,7 +8,7 @@
 // screen before any request is made.
 //
 //   node e2e/entryCredit.test.mjs            # builds the five bundles, serves them, checks each at 1280 and 390
-//   KEEP_DIST=1 …                           # reuses dist-credit bundles when present
+//   KEEP_DIST=1 …                           # reuses dist-livecredit bundles when present
 
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -19,7 +19,7 @@ import { chromium } from 'playwright-core';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
-const DIST = 'dist-credit';
+const DIST = 'dist-livecredit'; // under the ignored dist-live* pattern
 const APPS = [['scoutbox-club', 8551, 'Club'], ['scoutbox-grassroots', 8552, 'Grassroots'], ['scoutbox-agent', 8553, 'Agent'], ['scoutbox-admin', 8554, 'Admin'], ['scoutbox-player', 8555, 'Player onboarding']];
 const CREDIT = /Built by\s*Guni\s*&\s*Younes/i;
 

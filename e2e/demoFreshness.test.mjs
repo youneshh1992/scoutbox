@@ -23,6 +23,9 @@ for (const [file, { app, extra }] of Object.entries(DEMO_APPS)) {
   const now = sourceFingerprint(app, extra);
   ok(fingerprint === now, `${file}: built from the current ${app} source (${fingerprint?.slice(0, 8) ?? '—'} vs ${now.slice(0, 8)})`);
   ok(/data-demo-badge/.test(html) && /Interactive demo/.test(html), `${file}: declares itself an interactive demo with its build id`);
+  // M23 P8 §60/§76 — the entry-screen credit ships in every demo bundle: the
+  // signature element and the words, in whichever case the app sets them.
+  ok(/login-signature/.test(html) && /built by/i.test(html) && /Guni (&amp;|&) Younes/.test(html), `${file}: carries the entry-screen credit (login-signature, "Built by Guni & Younes")`);
 }
 // The stamp is content-derived: the same source must fingerprint the same way twice.
 ok(sourceFingerprint('scoutbox-club', DEMO_APPS['scoutbox-club-demo.html'].extra) === sourceFingerprint('scoutbox-club', DEMO_APPS['scoutbox-club-demo.html'].extra), 'fingerprint is deterministic');
