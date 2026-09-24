@@ -243,6 +243,7 @@ export default function App() {
           <button className="primary" onClick={() => setEntered(true)}>Enter</button>
         </div>
         {error && <div className="notice block">{error}</div>}
+        <div className="login-signature" data-testid="login-signature">Built by <span>Guni &amp; Younes</span></div>
       </div>
     );
   }

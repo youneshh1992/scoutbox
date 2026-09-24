@@ -296,6 +296,9 @@ export default function Onboarding() {
             <Pill label="Safeguarding-first" tone="blue" />
             {mode === 'demo' && <Pill label="Demo mode — no server connected" />}
           </Row>
+          <Text style={styles.signature} testID="login-signature">
+            BUILT BY <Text style={styles.signatureName}>Guni &amp; Younes</Text>
+          </Text>
         </View>
 
         {serverDown && (
@@ -622,6 +625,9 @@ const styles = StyleSheet.create({
   },
   logo: { color: colors.text, fontSize: 34, fontWeight: '800', letterSpacing: -0.5 },
   tagline: { color: colors.muted, fontSize: 13.5, textAlign: 'center' },
+  // The makers' signature on the entry screen: quiet, centred, never a control.
+  signature: { color: colors.muted, fontSize: 12, letterSpacing: 0.4, textAlign: 'center', marginTop: 6 },
+  signatureName: { color: colors.accent, fontSize: 13.5, fontWeight: '700', letterSpacing: 0 },
   name: { color: colors.text, fontSize: 16, fontWeight: '700' },
   roleCard: {
     flexDirection: 'row',

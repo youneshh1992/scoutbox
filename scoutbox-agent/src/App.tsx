@@ -146,6 +146,7 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
       </div>
       <div className="tagline" style={{ maxWidth: 560, textAlign: 'center', fontSize: 12.5 }}>{t('login.roleNote')}</div>
       {error && <div className="notice block">{error}</div>}
+      <div className="login-signature" data-testid="login-signature">Built by <span>Guni &amp; Younes</span></div>
     </div>
   );
 }

@@ -246,6 +246,7 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
           >Register club</button>
         </div>
       </div>
+      <div className="login-signature" data-testid="login-signature">Built by <span>Guni &amp; Younes</span></div>
     </div>
   );
 }

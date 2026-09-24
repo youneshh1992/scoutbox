@@ -217,6 +217,7 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
         <button className="primary" onClick={enter}>Enter workspace</button>
       </div>
       {error && <div className="notice block">{error}</div>}
+      <div className="login-signature" data-testid="login-signature">Built by <span>Guni &amp; Younes</span></div>
     </div>
   );
 }

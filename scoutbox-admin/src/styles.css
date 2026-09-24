@@ -57,6 +57,9 @@ input:focus, select:focus { outline: none; border-color: var(--accent-2); }
 }
 .login h1 { font-size: 42px; letter-spacing: -1px; }
 .login h1 span { color: var(--accent); }
+/* The makers' signature on the entry screen: quiet, centred, never a control. */
+.login .login-signature { color: var(--muted); font-size: 12.5px; letter-spacing: 0.4px; text-transform: uppercase; opacity: 0.85; }
+.login .login-signature span { color: var(--accent); font-weight: 700; text-transform: none; letter-spacing: 0; font-size: 13.5px; }
 .login .tagline { color: var(--muted); margin-top: 6px; }
 .org-grid { display: flex; gap: 16px; }
 .org-card {
