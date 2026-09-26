@@ -60,3 +60,73 @@ that attacks it.
 ## 4. Counts
 
 18 lifecycle rows + 1 discovery row + 2 non-state stages (assessment, decision) + 1 signing row = 22 stage rows; 9 resource sub-state rows; 8 cross-cutting rows.
+
+## 5. Audits folded in at R5 (§42–§46)
+
+### 5.1 Authorization before existence (§42)
+
+Every recruitment lookup is org-scoped first (`findRoom`, `findContact`,
+`findTrial`, `offerFor`, `packageFor`, `findOwnAgreement`) and answers the
+same status and body for a foreign resource and a fabricated id (hardening
+E1–E2, N1: a foreign Room link and a fabricated one read the same; the
+refusal carries no player identity). Agent routes decide membership, then
+the agreement, then the grants (K, L). The discovery wall (`UNDER_18_WALL`,
+`VERIFIED_CLUBS_ONLY`, `NOT_VISIBLE`) names its rule on purpose (N-P81-2);
+a blocked player reads as absent on every discovery route (D-P81-8) and the
+Box Cam link decides consent before it admits a session exists (D-P81-9).
+A forged token answers 401 (N6); a removed user's old link answers 401 with
+the session revoked (N5, J8–J10).
+
+### 5.2 Rate-limit aliasing (§43)
+
+One limiter (`m181/rateLimit.mjs`), budgets per org / actor. The legacy
+doors draw on the canonical budgets: `POST /org/players/:id/request` on
+`contact_send` / `trial_invite` with one pending request per type (D-P81-4,
+U3–U4); `POST /org/players/:id/signing` on `signing_closure` with one
+standing row (D-P81-3, U1–U2). The memory store evicts (expired first, then
+the fewest-hit quarter) and never resets a budget being spent (D-P81-5,
+refined R4; U5, Z6). Login failures are keyed by the tried identifier
+(N-P81-5, recorded).
+
+### 5.3 Idempotency across the whole chain (§44)
+
+A client key is scoped to ONE resource and ONE action: an Offer's issue key
+replayed on the lifecycle route is a stale request there, never a replay of
+the issue (V4); a party's signature key replays only while its revision is
+current (D-P81-12, V3/Z13); an M17 decision key fingerprints content
+(D-P81-11, V2); a Contact send replay reports current truth (D-P81-10, V1).
+A key dies with authority: permission is checked BEFORE the key is read on
+every replay (`m23/index.mjs` lifecycle; contact send V5: a user without the
+room role gets 403 `CONTACT_NOT_PERMITTED`, never the replay). After a
+restart a key replays exactly once and writes no second history entry (Q2,
+persistence 5.6). No key ever moves a case across a stage it did not
+already cross.
+
+### 5.4 Client-supplied authority truth (§45)
+
+A sweep of every request-body read in m17, m181, m23, m24, m27, m28 and m29
+for `role`, `isLead`, `verified`, `licensed`, `isAdult`, `isGuardian`,
+`canSign`, `canOffer`, `caseStatus`, `journeyStage`, `currentResource`,
+`stage`, `status`, `orgId`, `playerId` finds two reads, neither an
+authority: the lifecycle route REFUSES a body that names a `stage` or a
+`status` (`LIFECYCLE_STAGE_NOT_SETTABLE`), and the agency-admin team route
+stores a member's display `role` LABEL (`m24` — a label, never a tier; the
+tiers are set by the admin's own capability check). Role, lead authority,
+verification, licence, adulthood, guardianship and every "can" are read
+from the live user, player, guardian, profile and affiliation rows on every
+request (`orgAuth`, `roomRole`, `isLead`, `isAdult`, `agentGrants`); the
+three web apps read no state off an event payload (Z17) and no domain
+assigns a lifecycle status (Z18).
+
+### 5.5 Client-supplied resource truth (§46)
+
+A body names a resource by id (`revisionId`, `signingPackageId`,
+`trialId`, `supersedes`) and the server re-derives its state: an answer to a
+superseded revision is `OFFER_SUPERSEDED` (A6); a signature on a superseded
+package revision is refused (A7); a stale `supersedesRev` on a decision is
+`DECISION_VERSION_CONFLICT` (A5); a Trial cancel with the schedule's rev
+meets the completion (A4); a lifecycle move with a stale `expectedRev` is
+`ROOM_VERSION_CONFLICT` naming `currentRev` (A3). The "current" Offer,
+package, Trial and decision are chosen by the server's selectors
+(M23_P81_CURRENT_RESOURCE_INTEGRITY.md), never by a client-named id.
+

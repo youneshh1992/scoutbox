@@ -31,6 +31,7 @@ import {
 } from '../m23/journeyModel.mjs';
 import { LIFECYCLE_ACTIONS, canTransitionRecruitmentCase, heldFromStatus, lifecycleTargetFor } from '../m23/lifecycle.mjs';
 import { memoryRateLimitProvider } from '../m181/rateLimit.mjs';
+import { journeyEvidenceFunnel } from '../m20/funnels.mjs';
 import { isAdult } from '../domain.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -976,7 +977,8 @@ section('T — analytics: retries, revisions, reopening, second cases and legacy
   const find = (d) => { const m = JSON.stringify(d); return m; };
   const d1 = await dash();
   ok(d1 && find(d1).includes('journey_evidence_funnel'), 'T1 the funnel metric is on the dashboard');
-  const metric = (d) => (d.metrics ?? d.items ?? []).find?.((m) => m.id === 'journey_evidence_funnel' || m.key === 'journey_evidence_funnel') ?? null;
+  const metric = (d) => d?.data?.pipeline?.metrics?.journey_evidence_funnel ?? null;
+  ok(metric(d1) && metric(d1).id === 'journey_evidence_funnel' && Array.isArray(metric(d1).rows), 'T1b the metric is read at its real path (data.pipeline.metrics), so the checks below are not vacuous');
   const m1 = metric(d1);
   const stageRow = (m, st) => (m?.rows ?? m?.stages ?? m?.value?.rows ?? []).find?.((r) => r.stage === st) ?? null;
   const val = (r) => r?.value ?? r?.cases ?? r?.count ?? null;
@@ -984,14 +986,29 @@ section('T — analytics: retries, revisions, reopening, second cases and legacy
   const K = globalThis.__K;
   await j('POST', `/org/rooms/${K.RID}/lifecycle`, { action: 'shortlist', expectedRev: 0, clientKey: 'k-none' }, maria.token);
   const d2 = await dash(); const m2 = metric(d2);
-  ok(JSON.stringify(m1) === JSON.stringify(m2), 'T2 a refused / replayed request changes no figure');
+  ok(m1 && m2 && JSON.stringify(m1) === JSON.stringify(m2), 'T2 a refused / replayed request changes no figure');
   // Second case for the same player counts as its own case, never re-counting the first case's stages.
   const signedBefore = val(stageRow(m2, 'signed'));
   const second = globalThis.__C.NEW;
   const jbS = await jb(second);
   ok(jbS.stage !== 'signed', 'T3 the second case is not signed (its own stages only)');
   const d3 = await dash(); const m3 = metric(d3);
-  ok(val(stageRow(m3, 'signed')) === signedBefore, `T4 the second case did not add to signed (${signedBefore})`);
+  ok(Number.isInteger(signedBefore) && signedBefore >= 1 && val(stageRow(m3, 'signed')) === signedBefore, `T4 the second case did not add to signed (${signedBefore})`);
+  // T7 (pure, D-P81-18): the ended case's assessment is not the second case's `assessed`.
+  {
+    const now = Date.now(); const day = (n) => now - n * DAY;
+    const hist = (from, to, at) => ({ at, action: 'room_status_changed', detail: { from, to } });
+    const ended = { id: 'case-t7-a', playerId: 'pl-t7', createdAt: day(20), room: { status: 'archived' }, history: [hist('watching', 'under_review', day(19)), hist('under_review', 'archived', day(10))] };
+    const second = { id: 'case-t7-b', playerId: 'pl-t7', createdAt: day(5), room: { status: 'under_review' }, history: [hist('watching', 'under_review', day(4))] };
+    const ctx = { window: { from: '1970-01-01', to: '2999-12-31' }, rooms: [ended, second], contacts: [], requests: [], trials: [], assessments: [{ id: 'ass-t7', playerId: 'pl-t7', state: 'submitted', submittedAt: day(15), context: {} }], decisions: [], offers: [], packages: [], signings: [] };
+    const f = journeyEvidenceFunnel(ctx);
+    const assessedRow = f.rows.find((r) => r.stage === 'assessed');
+    neg(assessedRow.value === 1 && f.cohort.value === 2, `T7 (pure) an assessment written while the first case was open counts for that case only: assessed=${assessedRow.value} of ${f.cohort.value} cases (D-P81-18)`);
+    const late = journeyEvidenceFunnel({ ...ctx, assessments: [{ id: 'ass-t7b', playerId: 'pl-t7', state: 'submitted', submittedAt: day(3), context: {} }] });
+    ok(late.rows.find((r) => r.stage === 'assessed').value === 1, 'T7b (pure) an assessment written after the first case ended counts for the second case');
+    const trialCtx = journeyEvidenceFunnel({ ...ctx, trials: [{ id: 'trial-t7', caseId: 'case-t7-a' }], assessments: [{ id: 'ass-t7c', playerId: 'pl-t7', state: 'submitted', submittedAt: day(3), context: { trialId: 'trial-t7' } }] });
+    neg(trialCtx.rows.find((r) => r.stage === 'assessed').value === 1, 'T7c (pure) an assessment in the context of the first case\'s Trial belongs to the first case whenever it was written');
+  }
   neg(!/PRIVATE_HARDENING|rank|score/i.test(JSON.stringify(m3 ?? {})), 'T5 the funnel carries no note, no rank, no score');
   const intervals = m3?.intervals ?? m3?.value?.intervals ?? [];
   neg((Array.isArray(intervals) ? intervals : Object.values(intervals)).every((iv) => iv == null || typeof iv !== 'object' || !Number.isFinite(iv.medianDays) || iv.medianDays >= 0), 'T6 no interval reads negative');

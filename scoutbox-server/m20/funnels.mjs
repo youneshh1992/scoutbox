@@ -333,7 +333,8 @@ const JOURNEY_EVIDENCE = Object.freeze({
   trial_requested: (k, x) => firstAt(x.requestsByCase.get(k.id), (r) => r.type === 'trial', (r) => r.createdAt),
   trial_scheduled: (k, x) => firstAt(x.trialsByCase.get(k.id), (t) => Number.isFinite(t.schedule?.confirmedAt) || t.completion?.state === 'completed', (t) => t.schedule?.confirmedAt ?? t.completion?.at),
   trial_completed: (k, x) => firstAt(x.trialsByCase.get(k.id), (t) => t.completion?.state === 'completed', (t) => t.completion?.at),
-  assessed: (k, x) => firstAt(x.assessmentsByPlayer.get(k.playerId), (a) => a.state !== 'draft', (a) => a.submittedAt ?? a.createdAt),
+  // M23 P8.1 (D-P81-18): the club's assessment of the player counts for ONE case — the case whose Trial it was written in, else the case that was OPEN when it was written. A second case never counts the ended case's assessment as its own `assessed`.
+  assessed: (k, x) => firstAt(x.assessmentsByPlayer.get(k.playerId), (a) => a.state !== 'draft' && assessmentOfCase(a, k, x), (a) => a.submittedAt ?? a.createdAt),
   decision_progress: (k, x) => decisionAt(x.decisionsByCase.get(k.id), 'progress'),
   decision_hold: (k, x) => decisionAt(x.decisionsByCase.get(k.id), 'hold'),
   decision_reject: (k, x) => decisionAt(x.decisionsByCase.get(k.id), 'reject'),
@@ -354,6 +355,21 @@ const JOURNEY_STAGE_STATUS = Object.freeze({ contacted: 'contacted', trial_reque
 export const JOURNEY_FUNNEL_STAGES = Object.freeze(Object.keys(JOURNEY_EVIDENCE));
 const SOURCE_OF = Object.freeze({ contacted: 'recruitmentContacts', trial_requested: 'requests', trial_scheduled: 'trials', trial_completed: 'trials', assessed: 'assessments', decision_progress: 'roomDecisions', decision_hold: 'roomDecisions', decision_reject: 'roomDecisions', offer_issued: 'recruitmentOffers', offer_accepted: 'recruitmentOffers', offer_declined: 'recruitmentOffers', signing_started: 'signingPackages', signed: 'signings' });
 
+/** When a case stopped being open: its latest terminal transition if it is terminal now, else never (a reopened case is open again). */
+function caseEndedAt(k) {
+  const status = k.room?.status ?? k.status ?? null;
+  if (!TERMINAL_ROOM_STATUSES.includes(status)) return Infinity;
+  const ends = transitions(k).filter((t) => TERMINAL_ROOM_STATUSES.includes(t.to)).map((t) => Number(t.at) || 0);
+  return ends.length ? Math.max(...ends) : 0;
+}
+/** M23 P8.1 (D-P81-18): does this assessment belong to this case? (mirrors m23/journey.mjs ownedByAnotherCase) */
+function assessmentOfCase(a, k, x) {
+  const tid = a?.context?.trialId;
+  if (typeof tid === 'string' && tid) { const t = x.trialsById.get(tid); return !!t && t.caseId === k.id; }
+  const at = Number(a?.submittedAt ?? a?.createdAt);
+  if (!Number.isFinite(at)) return false;
+  return !(x.casesByPlayer.get(k.playerId) ?? []).some((o) => o && o.id !== k.id && Number(o.createdAt) <= at && at <= caseEndedAt(o));
+}
 function firstAt(rows, pred, atOf) {
   let best = null;
   for (const r of rows ?? []) { if (!r || !pred(r)) continue; const t = Number(atOf(r)); if (!Number.isFinite(t) || t <= 0) continue; if (best === null || t < best) best = t; }
@@ -385,6 +401,8 @@ export function journeyEvidenceFunnel(ctx) {
     requestsByCase: groupBy(ctx.requests, (r) => r.caseId),
     trialsByCase: groupBy(ctx.trials, (t) => t.caseId),
     assessmentsByPlayer: groupBy(ctx.assessments, (a) => a.playerId),
+    trialsById: new Map((ctx.trials ?? []).filter(Boolean).map((t) => [t.id, t])),
+    casesByPlayer: groupBy(ctx.rooms, (k) => k.playerId),
     decisionsByCase: groupBy(ctx.decisions, (d) => d.roomId),
     offersByCase: groupBy(ctx.offers, (o) => o.caseId),
     packagesByCase: groupBy(ctx.packages, (p) => p.caseId),

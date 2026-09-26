@@ -29,7 +29,7 @@ events, notifications, documents, deep links, logs. Checks:
 | timeline entries (all audiences) | kinds from the visibility table; `by` is a club member's name for the club only; the player's and agent's `by` is null |
 | documents | Offer documents to the recipient and a shared agent only; package documents to the parties and a shared agent; the executed document to the parties; never to a colleague |
 | error bodies | every refusal is a code and a sentence about the opener's access, never about the resource's content (journey E2E E group; m23E2E E) |
-| logs | `console.error` lines carry ids and codes (`SIGNING completion_rolled_back <id>: <why>`, `CONTACT transport_failed <id>`); no body text, no terms, no names beyond the actor recorded in the audit trail; no journey export route exists |
+| logs | `console.error` lines carry ids and codes only (R5 sweep of m23 / m28 / m29: `CONTACT integrity <id>: <codes>`, `CONTACT transport_failed <id> attempt=<n>`, `CONTACT lifecycle_not_applied <id> <code>`, `DECISION integrity …`, `DECISION transport_failed finalize case=<id>`, `TRIAL integrity …`, `TRIAL lifecycle_not_applied <case> <action> <code>`, `TRIAL transport_failed invitation case=<id>`, `OFFER side_effect_failed <label>: <message>`, `SIGNING completion_rolled_back <id>: <why>`, `M23/M28 <where> <code> — <the error body sent to the client>`); no request body, no terms, no note, no rationale, no name is ever logged; no journey export route exists (Z21: no journey store) |
 
 ## 3. Minors through the whole chain (M group)
 
