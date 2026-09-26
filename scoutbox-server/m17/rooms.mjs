@@ -1201,8 +1201,17 @@ export function registerRooms(ctx) {
     if (clientKey) {
       const dup = db.roomDecisions.find((d) => d.roomId === room.id && d.clientKey === clientKey);
       // Idempotent submit: the same key returns the same decision instead of
-      // stacking a duplicate onto the decision memory.
-      if (dup) return res.status(200).json({ decision: decisionView(dup), idempotent: true });
+      // stacking a duplicate onto the decision memory. M23 P8.1 (D-P81-11): the
+      // same key with DIFFERENT content is a different request wearing the
+      // same name, and a key that named a formal M23 decision is not this
+      // route's to replay — both are conflicts, never a silent old answer.
+      if (dup) {
+        const codesOf = (xs) => [...new Set((Array.isArray(xs) ? xs : []).map((x) => String(x)))].sort().join(',');
+        const same = dup.kind !== 'formal' && (dup.recommendation ?? null) === (req.body?.recommendation ?? null)
+          && codesOf(dup.reasonCodes) === codesOf(req.body?.reasonCodes);
+        if (!same) return res.status(409).json({ error: 'DECISION_IDEMPOTENCY_CONFLICT', message: 'This clientKey was already used for a different decision.' });
+        return res.status(200).json({ decision: decisionView(dup), idempotent: true });
+      }
     }
     // M18.1: a decision is pinned to the room revision it was written against.
     // Two colleagues deciding at once therefore produce ONE accepted decision
@@ -1302,7 +1311,10 @@ export function registerRooms(ctx) {
     // Deliberately no free-text field: a scout can never send their own words
     // to a player or a guardian from inside a private room. The engine's
     // whitelisted, rule-derived wording is the only thing that travels.
-    const out = ctx.requestEvidenceGap({ org: req.org, suggestionId });
+    // M23 P8.1 (D-P81-6): the suggestion must be about THIS room's player. A
+    // room's request authority never reaches another player's profile — not
+    // even one this org may otherwise see — so the id is scoped to the room.
+    const out = ctx.requestEvidenceGap({ org: req.org, suggestionId, playerId: room.playerId });
     if (!out.ok) return res.status(out.status).json({ error: out.error, ...(out.message ? { message: out.message } : {}), ...(out.detail ?? {}) });
     activity(room, req, 'room_evidence_requested', { suggestionId, ruleId: out.suggestion.ruleId, routedTo: out.routedTo });
     vmetric('room_evidence_requested');

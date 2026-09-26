@@ -160,6 +160,10 @@ section('U1 — the room state machine is explicit, total and mapped onto M12');
   neg(!canTransition('signed', 'offer_accepted'), 'a signing does not revert to an acceptance');
   neg(!canTransition('signed', 'on_hold'), 'a signing cannot be put on hold');
   neg(!canTransition('on_hold', 'signed'), 'a held case is not signed without going back through the work');
+  // M23 P8.1 (D-P81-1): these stay refused AS TABLE EDGES — a paused case is
+  // not answered, claimed or moved into an evidence-bearing state by anything
+  // but `resumeCase`, which returns it to where it was held from through the
+  // ONE validator (m23/lifecycle.mjs), never through this table.
   neg(!canTransition('on_hold', 'offer_made'), 'nor straight to an offer');
   neg(!canTransition('on_hold', 'offer_accepted'), 'nor to an acceptance');
   neg(!canTransition('on_hold', 'contacted'), 'nor to contact having happened');

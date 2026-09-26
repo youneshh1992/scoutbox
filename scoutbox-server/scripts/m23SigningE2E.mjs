@@ -483,10 +483,14 @@ section('L — lifecycle: only the canonical completion reaches signed');
   const nRev = async () => (await sGet(sv(s).id)).body.signing.rev;
   neg(expect(await clubSign(sv(s).id, { expectedRev: await nRev(), revisionId: revOf(r).id, documentSha256: SHA_A, clientKey: key() }), 409, 'SIGNING_LIFECYCLE_CONFLICT'), 'L6 the club signatory cannot sign on a paused case');
   const resume = await lifecycle(N.RID, 'resumeCase');
-  ok(resume.status === 200 && (await stage(N.RID)) === 'under_review', 'L7 resumed to review');
-  neg(expect(await clubSign(sv(s).id, { expectedRev: await nRev(), revisionId: revOf(r).id, documentSha256: SHA_A, clientKey: key() }), 409, 'SIGNING_LIFECYCLE_CONFLICT'), 'L8 still not at offer_accepted: still refused — the package waits, nothing is inferred');
+  // M23 P8.1 (D-P81-1): a hold is a pause, not a rewind — the resume returns the
+  // case to Offer accepted, where it was held from, and the signing continues;
+  // the package itself was never touched by the hold.
+  ok(resume.status === 200 && (await stage(N.RID)) === 'offer_accepted', 'L7 resumed to where it was held from (offer_accepted)');
+  const cs = await clubSign(sv(s).id, { expectedRev: await nRev(), revisionId: revOf(r).id, documentSha256: SHA_A, clientKey: key() });
+  ok(cs.status === 200, `L8 back at offer_accepted, the club signatory may sign again (${cs.status} ${cs.body?.error ?? 'ok'})`);
   const c = await cancel(sv(s).id, { expectedRev: await nRev(), reason: 'Case reopened for review', clientKey: key() });
-  ok(c.status === 200 && sv(c).status === 'CANCELLED' && (await stage(N.RID)) === 'under_review', '#27 L9 cancellation ends the package and moves no case');
+  ok(c.status === 200 && sv(c).status === 'CANCELLED' && (await stage(N.RID)) === 'offer_accepted', '#27 L9 cancellation ends the package and moves no case');
   neg((await signings()).every((x) => x.playerId !== 'pl-nowak'), '#27 L10 a cancelled package wrote no signing');
 }
 

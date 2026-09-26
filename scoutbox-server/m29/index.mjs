@@ -509,7 +509,11 @@ export function registerSigning(rawCtx) {
     const view = () => (actorKind === 'org' ? { signing: signingClubView(pkg, at, { orgName }) } : { signing: signingRecipientView(pkg, at, { orgName, partyType, forEntityId: actorId }) });
     if (key) {
       const row = keyRow(pkg, 'party', key);
-      if (row) { if (row.fp === fp && row.actorId === actorId) return res.json({ ...view(), idempotent: true }); return err(res, 'SIGNING_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different request.'); }
+      // M23 P8.1 (D-P81-12): a replay is "the same signature" only while the
+      // revision it signed is still the package's current one. After a
+      // supersede voided that confirmation, the old key does not answer
+      // `idempotent: true` as if the signature still stood.
+      if (row) { if (row.fp === fp && row.actorId === actorId && (b.revisionId ?? null) === (pkg.currentRevisionId ?? null)) return res.json({ ...view(), idempotent: true }); return err(res, 'SIGNING_IDEMPOTENCY_CONFLICT', row.fp === fp && row.actorId === actorId ? 'This clientKey signed a revision that is no longer current; sign the current revision with a new key.' : 'This clientKey was already used for a different request.'); }
     }
     const method = b.method === undefined ? 'PLATFORM_ACKNOWLEDGMENT' : b.method;
     if (method !== 'PLATFORM_ACKNOWLEDGMENT') return err(res, 'SIGNING_METHOD_UNKNOWN', 'That signing method is not available here.', { allowed: ['PLATFORM_ACKNOWLEDGMENT'] });

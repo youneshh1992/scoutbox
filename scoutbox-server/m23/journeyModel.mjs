@@ -420,7 +420,7 @@ export const JOURNEY_CLASSIFICATIONS = Object.freeze(['canonical', 'legacy', 'pa
 /** Journey-level integrity codes. The domain codes (offer/signing consistency) are folded in as they are. */
 export const JOURNEY_INTEGRITY_CODES = Object.freeze([
   'LIFECYCLE_STATE_UNKNOWN', 'PLAYER_MISMATCH', 'CLUB_MISMATCH', 'CASE_MISMATCH',
-  'STALE_POINTER', 'LIFECYCLE_AHEAD_OF_EVIDENCE', 'LIFECYCLE_BEHIND_TERMINAL_EVIDENCE', 'HISTORY_MALFORMED', 'TEMPORAL_ORDER',
+  'STALE_POINTER', 'LIFECYCLE_AHEAD_OF_EVIDENCE', 'LIFECYCLE_BEHIND_TERMINAL_EVIDENCE', 'EVIDENCE_AHEAD_OF_LIFECYCLE', 'HISTORY_MALFORMED', 'TEMPORAL_ORDER',
 ]);
 
 /**
@@ -503,6 +503,26 @@ export function validateRecruitmentJourney(facts) {
   // Terminal evidence the lifecycle lags behind.
   const completedPkg = (facts.packages ?? []).some((p) => signingEffectiveStatus(p, now) === 'COMPLETED');
   if ((completedPkg || facts.signingRow) && status !== 'signed' && !TERMINAL_ROOM_STATUSES.includes(status) && status !== 'on_hold') problems.add('LIFECYCLE_BEHIND_TERMINAL_EVIDENCE');
+  // M23 P8.1 (§14) — evidence AHEAD of the lifecycle: a canonical record proves
+  // a state this case never recorded reaching (an accepted revision on a case
+  // whose history never reached offer_accepted; a delivered Contact with no
+  // `contacted` ever recorded). Every canonical writer moves the case in the
+  // same unit of work and rolls back when it cannot, so this is drift — named,
+  // never repaired, and never turned into invented history entries. A held or
+  // ended case is exempt: its evidence may legitimately outlive its last live
+  // state (a trial completed after the hold, a package voided after closure).
+  if (!TERMINAL_ROOM_STATUSES.includes(status) && status !== 'on_hold') {
+    const ahead = [
+      ['contacted', evidence.contacted],
+      ['trial_scheduled', evidence.trial_scheduled],
+      ['trial_completed', evidence.trial_completed],
+      ['offer_made', evidence.offer_made],
+      ['offer_accepted', evidence.offer_accepted],
+    ];
+    for (const [state, proved] of ahead) {
+      if (proved && !reached[state] && status !== state) problems.add('EVIDENCE_AHEAD_OF_LIFECYCLE');
+    }
+  }
   for (const code of facts.domainProblems ?? []) problems.add(code);
   const list = [...problems].sort();
   let classification = 'canonical';

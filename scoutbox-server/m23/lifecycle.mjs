@@ -145,7 +145,13 @@ export const LIFECYCLE_ACTIONS = Object.freeze(Object.assign(Object.create(null)
   recordOfferDeclined:{ to: 'offer_declined',      reason: 'player_declined',            roles: ['room_lead', 'recruitment_admin'] },
   confirmSignedOutcome:{ to: 'signed',             reason: 'signed_outcome',             roles: ['recruitment_admin'] },
   holdCase:           { to: 'on_hold',             reason: 'on_hold',                    roles: ['room_lead', 'recruitment_admin'] },
-  resumeCase:         { to: 'under_review',        reason: 'hold_resumed',               roles: ['room_lead', 'recruitment_admin'], applicableFrom: (f) => f === 'on_hold' },
+  // M23 P8.1 (D-P81-1): a hold is a pause, not a rewind. Resuming returns the
+  // case to the state it was held FROM — a live Offer stays "Offer made", an
+  // accepted Offer stays "Offer accepted" and the signing can continue — when
+  // that state's own evidence still stands. `to` is the fallback (a case with
+  // no hold on its history, or whose held-from evidence is gone) and the
+  // static target the vocabulary and the legacy route's role parity read.
+  resumeCase:         { to: 'under_review',        reason: 'hold_resumed',               roles: ['room_lead', 'recruitment_admin'], applicableFrom: (f) => f === 'on_hold', resolveTo: resumeTargetFor },
   rejectCase:         { to: 'archived',            reason: 'rejected',                   roles: ['room_lead', 'recruitment_admin'], reasonCodesRequired: true },
   withdrawCase:       { to: 'withdrawn',           reason: 'withdrawn',                  roles: ['room_lead', 'recruitment_admin'], reasonCodesRequired: true },
   closeCase:          { to: 'closed',              reason: 'case_closed',                roles: ['room_lead', 'recruitment_admin'], reasonCodesRequired: true },
@@ -153,6 +159,50 @@ export const LIFECYCLE_ACTIONS = Object.freeze(Object.assign(Object.create(null)
 }));
 
 export const LIFECYCLE_ACTION_NAMES = Object.freeze(Object.keys(LIFECYCLE_ACTIONS));
+
+/**
+ * The state a held case was held FROM: the newest `on_hold` entry on its
+ * append-only history names it. Null when the history carries no hold (a case
+ * planted at on_hold, or an M12 case adopted there).
+ */
+export function heldFromStatus(kase) {
+  const h = Array.isArray(kase?.history) ? kase.history : [];
+  for (let i = h.length - 1; i >= 0; i -= 1) {
+    const e = h[i];
+    if (!e || e.action !== 'room_status_changed' || e.detail?.to !== 'on_hold') continue;
+    const from = e.detail?.from;
+    return typeof from === 'string' ? from : null;
+  }
+  return null;
+}
+
+/**
+ * Where `resumeCase` takes a case (D-P81-1): the held-from state when it is a
+ * live state whose evidence (if the state needs any) still stands; otherwise
+ * the fallback `under_review`. The resume is its own edge — the `on_hold`
+ * table row names no evidence-bearing state on purpose, so nothing but a
+ * resume takes a paused case forward. Evidence is asked of the ONE provider
+ * exactly as a forward move would ask it — nothing here trusts the history's
+ * word that the state was earned.
+ */
+function resumeTargetFor(kase, { evidence = NULL_EVIDENCE_PROVIDER, now = Date.now() } = {}) {
+  const fallback = 'under_review';
+  const from = heldFromStatus(kase);
+  if (!from || from === 'on_hold' || !ROOM_STATUSES.includes(from) || TERMINAL_ROOM_STATUSES.includes(from)) return fallback;
+  const pre = LIFECYCLE_PRECONDITIONS[from];
+  if (pre) {
+    const verdict = evidence.check(pre.kind, { kase, action: 'resumeCase', now }) ?? { satisfied: false };
+    if (verdict.satisfied !== true) return fallback;
+  }
+  return from;
+}
+
+/** The state an action would move THIS case to — static for every action but `resumeCase`. */
+export function lifecycleTargetFor(kase, action, context = {}) {
+  const def = LIFECYCLE_ACTIONS[action];
+  if (!def) return null;
+  return def.resolveTo ? def.resolveTo(kase, context) : def.to;
+}
 
 /** Role ranking, mirroring m17/shared.mjs roomCan. */
 const ROLE_RANK = { viewer: 0, contributor: 1, room_lead: 2, recruitment_admin: 3 };
@@ -237,15 +287,23 @@ export function canTransitionRecruitmentCase(kase, action, context = {}) {
     return { ok: false, error: 'LIFECYCLE_NOT_PERMITTED', message: 'Your role cannot take this recruitment action.' };
   }
 
+  // M23 P8.1 — the target is resolved for THIS case (only `resumeCase` resolves;
+  // every other action's target is its static `to`).
+  const to = def.resolveTo ? def.resolveTo(kase, { evidence, now }) : def.to;
   const allowed = ROOM_TRANSITIONS[from] ?? [];
-  if (from === def.to) {
+  if (from === to) {
     return { ok: false, error: 'LIFECYCLE_NO_CHANGE', message: 'The case is already in that state.', allowed };
   }
-  if (!allowed.includes(def.to)) {
+  // A resolving action (resumeCase) is its own edge: the table keeps the
+  // evidence-bearing states OUT of the `on_hold` row on purpose, so that
+  // nothing but a resume takes a paused case back into one. The target is
+  // still a live, known state and still meets its precondition below.
+  const ownEdge = !!def.resolveTo && ROOM_STATUSES.includes(to) && !TERMINAL_ROOM_STATUSES.includes(to);
+  if (!allowed.includes(to) && !ownEdge) {
     return {
       ok: false,
       error: 'LIFECYCLE_TRANSITION_INVALID',
-      message: `A case at "${from}" cannot move to "${def.to}".`,
+      message: `A case at "${from}" cannot move to "${to}".`,
       allowed,
     };
   }
@@ -267,7 +325,7 @@ export function canTransitionRecruitmentCase(kase, action, context = {}) {
     return { ok: false, error: 'LIFECYCLE_REASON_REQUIRED', message: 'Ending a recruitment case requires a recorded reason.' };
   }
 
-  const pre = LIFECYCLE_PRECONDITIONS[def.to];
+  const pre = LIFECYCLE_PRECONDITIONS[to];
   if (pre) {
     const verdict = evidence.check(pre.kind, { kase, action, now }) ?? { satisfied: false, reason: 'no_verdict' };
     if (verdict.satisfied !== true) {
@@ -281,7 +339,7 @@ export function canTransitionRecruitmentCase(kase, action, context = {}) {
     }
   }
 
-  return { ok: true, to: def.to, from, reason: def.reason };
+  return { ok: true, to, from, reason: def.reason };
 }
 
 /** Which semantic actions are available right now, for this role. */

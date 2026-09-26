@@ -682,8 +682,11 @@ section('P — lifecycle consistency: a case paused while a revision is out');
   ok((await getOffer(OID)).body.offer.responses.length === 0 && (await getOffer(OID)).body.offer.status === 'ISSUED', 'P9b no response row, the Offer still ISSUED');
   const resume = await lifecycle(RID, 'resumeCase', {});
   const st2 = await stage(RID);
-  ok(resume.status === 200 && st2 === 'under_review', `P10 resuming returns the case to review (${st2}); the Offer stays unanswerable until the club issues again`);
-  neg((await pGet(OID, imani.token)).body.offer.answerable === false, 'P10b still not answerable after the resume (the case is not at offer_made)');
+  // M23 P8.1 (D-P81-1): a hold is a pause, not a rewind — resuming returns the
+  // case to Offer made, where it was held from, and the live revision is
+  // answerable again. Nothing was rewritten: the revision stayed ISSUED throughout.
+  ok(resume.status === 200 && st2 === 'offer_made', `P10 resuming returns the case to where it was held from (${st2}); the Offer is answerable again`);
+  ok((await pGet(OID, imani.token)).body.offer.answerable === true && (await getOffer(OID)).body.offer.status === 'ISSUED', 'P10b answerable again after the resume, the revision still ISSUED and unanswered');
 }
 
 // ================================================================ H — rate limits: aliases, closure safety, replay

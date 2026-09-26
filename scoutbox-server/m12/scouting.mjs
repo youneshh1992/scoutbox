@@ -491,7 +491,11 @@ export function registerScouting(ctx) {
   orgRouter.post('/cases/:id/tasks', (req, res) => {
     const c = findCase(req, res);
     if (!c) return;
-    const t = { id: nextId('tsk'), title: String(req.body?.title ?? '').slice(0, 200), dueAt: req.body?.dueAt ?? null, assigneeUserId: req.body?.assigneeUserId ?? null, status: 'open', createdAt: Date.now() };
+    // M23 P8.1 (D-P81-13): a task is given to someone in THIS organisation, as
+    // the Room task route already requires; a foreign or unknown user id is refused.
+    const assigneeRaw = req.body?.assigneeUserId ? String(req.body.assigneeUserId) : null;
+    if (assigneeRaw && !db.users.some((u) => u.id === assigneeRaw && u.orgId === req.org.id && !u.removedAt)) return res.status(404).json({ error: 'USER_NOT_IN_ORG' });
+    const t = { id: nextId('tsk'), title: String(req.body?.title ?? '').slice(0, 200), dueAt: req.body?.dueAt ?? null, assigneeUserId: assigneeRaw, status: 'open', createdAt: Date.now() };
     if (!t.title) return res.status(400).json({ error: 'TITLE_REQUIRED' });
     c.tasks.push(t);
     persistNow();

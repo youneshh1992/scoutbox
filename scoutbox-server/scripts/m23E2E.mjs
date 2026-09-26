@@ -627,7 +627,10 @@ section('J — the positive journeys');
   neg(held.lifecycle.terminal === false, 'J7b and a held case is NOT terminal');
   ok(held.conditions.onHold === true, 'J7c the derived condition reports the hold');
   const resume = await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'resumeCase', expectedRev: held.case.rev }, maria.token);
-  ok(resume.status === 200 && resume.body.to === 'under_review', 'J8 and it resumes into review');
+  // M23 P8.1 (D-P81-1): a resume returns the case to the state it was held FROM
+  // (here a pre-contact state with no record to lose), never to a state further back.
+  const heldFrom = after.lifecycle.currentStage;
+  ok(resume.status === 200 && resume.body.to === heldFrom && resume.body.to !== 'on_hold', `J8 and it resumes to where it was held from (${heldFrom})`);
 
   // J9/J11 — reject, preserving everything.
   const beforeReject = (await j('GET', `/org/rooms/${ROOM}/journey`, undefined, maria.token)).body;

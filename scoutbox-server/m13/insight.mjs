@@ -473,8 +473,11 @@ export function registerInsight(ctx) {
   // request through exactly this code — same anti-pestering window, same
   // guardian routing, same whitelisted player-safe wording. Returns a result
   // object rather than writing a response, so both callers share the rules.
-  function requestEvidenceGap({ org, suggestionId }) {
-    const s = db.evidenceSuggestions.find((x) => x.id === suggestionId && x.orgId === org.id);
+  function requestEvidenceGap({ org, suggestionId, playerId = null }) {
+    // `playerId` (M23 P8.1): when the caller acts from a Recruitment Room, the
+    // suggestion must be about that room's player; any other player's
+    // suggestion reads as not found, the same answer as a fabricated id.
+    const s = db.evidenceSuggestions.find((x) => x.id === suggestionId && x.orgId === org.id && (playerId === null || x.playerId === playerId));
     if (!s) return { ok: false, status: 404, error: 'SUGGESTION_NOT_FOUND' };
     if (s.status !== 'suggested') return { ok: false, status: 409, error: 'NOT_OPEN', detail: { status: s.status } };
     const p = findPlayer(s.playerId);

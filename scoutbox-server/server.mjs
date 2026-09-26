@@ -1568,8 +1568,13 @@ guardianRouter.post('/children/:id/medical/share', (req, res) => {
 guardianRouter.post('/report', (req, res) => handleReport(req, res, { by: 'guardian', byId: req.guardian.id }));
 guardianRouter.post('/block', (req, res) => {
   const { orgId, playerId, reason } = req.body || {};
-  const childId = playerId && req.guardian.childIds.includes(playerId) ? playerId : req.guardian.childIds[0];
-  if (!orgId || !childId) return res.status(400).json({ error: 'ORG_AND_CHILD_REQUIRED' });
+  // M23 P8.1 (D-P81-7): a block lands on the child it names. A playerId that is
+  // not this guardian's child is refused, never silently swapped for the first
+  // child; with no playerId, a guardian of exactly one child means that child.
+  if (playerId && !req.guardian.childIds.includes(playerId)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
+  const childId = playerId || (req.guardian.childIds.length === 1 ? req.guardian.childIds[0] : null);
+  if (!orgId || !childId) return res.status(400).json({ error: 'ORG_AND_CHILD_REQUIRED', message: playerId ? undefined : 'Name which child the block is for (playerId).' });
+  if (!db.orgs.some((o) => o.id === orgId)) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
   db.blocks.push({ id: nextId('blk'), playerId: childId, orgId, by: 'guardian', reason: reason || '', ts: Date.now() });
   ledgerAppend({ type: 'org_blocked_by_guardian', playerId: childId, orgId, orgName: db.orgs.find((o) => o.id === orgId)?.name ?? orgId, userId: null, scoutName: 'guardian' });
   broadcast('players');
@@ -1866,7 +1871,9 @@ orgRouter.get('/players/:id', (req, res) => {
 // player or any other organisation.
 orgRouter.post('/players/:id/notes', (req, res) => {
   const p = findPlayer(req.params.id);
-  if (!p || !visibleToOrg(p, req.org)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
+  // M23 P8.1 (D-P81-8): a player who blocked this organisation reads as absent
+  // on every discovery route, exactly as the profile read already answers.
+  if (!p || !visibleToOrg(p, req.org) || isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
   const { text } = req.body || {};
   if (!text || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
   const note = { id: nextId('note'), orgId: req.org.id, playerId: p.id, userId: req.orgUser.id, scoutName: req.orgUser.name, text: text.trim(), ts: Date.now() };
@@ -1878,7 +1885,7 @@ orgRouter.post('/players/:id/notes', (req, res) => {
 // "More like this" — the similarity engine as a search entry point.
 orgRouter.get('/players/:id/morelike', (req, res) => {
   const p = findPlayer(req.params.id);
-  if (!p || !visibleToOrg(p, req.org)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
+  if (!p || !visibleToOrg(p, req.org) || isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
   const ranked = db.players
     .filter((c) => c.id !== p.id && visibleToOrg(c, req.org) && !isBlocked(c.id, req.org.id))
     .map((c) => ({ ...playerViewForOrg(c, req.org), similarity: similarityScore(p, c) }))
@@ -1890,7 +1897,7 @@ orgRouter.get('/players/:id/morelike', (req, res) => {
 for (const action of ['save', 'shortlist']) {
   orgRouter.post(`/players/:id/${action}`, (req, res) => {
     const p = findPlayer(req.params.id);
-    if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
+    if (!p || isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
     if (!visibleToOrg(p, req.org)) return res.status(403).json({ error: 'UNDER_18_WALL' });
     const row = ledgerAppend({ type: action, playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
     res.status(201).json({ ok: true, ledgerId: row.id });
@@ -1950,6 +1957,14 @@ orgRouter.post('/players/:id/request', (req, res) => {
     trialDetails = check.details;
     if (trialDetails.notes && !moderateOrRefuse(res, trialDetails.notes, { kind: 'trial_notes', orgId: req.org.id })) return;
   }
+  // M23 P8.1 (D-P81-4): this legacy route is a second path to the same inbox
+  // row as a canonical Contact send or Trial invitation. After the body has
+  // been validated exactly as before, it draws on the SAME budgets and keeps
+  // the same one-pending rule, so it is not an unmetered alias: a club cannot
+  // flood a player through the old door.
+  const pendingSame = db.requests.find((r) => r && r.orgId === req.org.id && r.playerId === p.id && r.type === type && r.status === 'pending' && !r.subjectRemovedAt);
+  if (pendingSame) return res.status(409).json({ error: 'REQUEST_PENDING', message: `A ${type} request to this player is already awaiting an answer.`, requestId: pendingSame.id });
+  if (rateLimit.limited(type === 'trial' ? 'trial_invite' : 'contact_send', req.org.id)) return res.status(429).json(rateLimitedBody(type === 'trial' ? 'trial_invite' : 'contact_send'));
   const request = issueRecruitmentRequest({ org: req.org, orgUser: req.orgUser, player: p, type, message, trialDetails });
   res.status(201).json({ ok: true, requestId: request.id, status: 'pending', routedTo: request.routedTo });
 });
@@ -2484,6 +2499,15 @@ orgRouter.post('/players/:id/signing', (req, res) => {
   if (isBlocked(p.id, req.org.id)) return res.status(403).json({ error: 'BLOCKED' });
   const blocker = m29Ctx?.legacyRecordingBlocker?.(p.id, req.org.id, Date.now());
   if (blocker) return res.status(409).json({ ok: false, error: blocker.error, message: blocker.message });
+  // M23 P8.1 (D-P81-3): ONE standing legacy row per club and player. A second
+  // recording while one stands (not cancelled, voided or revoked) would be a
+  // second signing row, a second invoice and a second set of notifications for
+  // one joining — the same invariant the canonical workflow keeps per package
+  // and per Offer. The route also draws on the canonical closure budget, so it
+  // is not an unmetered alias of `/signings/:id/complete`.
+  const standing = db.signings.find((s) => s && s.orgId === req.org.id && s.playerId === p.id && !s.signingPackageId && !s.cancelledAt && !s.revokedAt && !s.voidedAt);
+  if (standing) return res.status(409).json({ ok: false, error: 'SIGNING_ALREADY_RECORDED', message: 'A signing of this player by your club is already on record.', signingId: standing.id });
+  if (rateLimit.limited('signing_closure', req.org.id)) return res.status(429).json(rateLimitedBody('signing_closure'));
   if (!m29Ctx?.recordCompletedSigning) return res.status(500).json({ error: 'SIGNING_STORE_MISSING' });
   const { signing, effects } = m29Ctx.recordCompletedSigning({ player: p, org: req.org, actor: req.orgUser, at: Date.now(), legacy: { note: typeof req.body?.note === 'string' ? req.body.note.slice(0, 400) : null } });
   persistNow();
@@ -2925,7 +2949,7 @@ orgRouter.get('/ledger', (req, res) => {
 // Proof Pack: attribution evidence for this org on this player.
 orgRouter.get('/players/:id/proofpack', (req, res) => {
   const p = findPlayer(req.params.id);
-  if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
+  if (!p || isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
   if (!visibleToOrg(p, req.org)) return res.status(403).json({ error: 'UNDER_18_WALL' });
   const events = db.ledger.filter((l) => l.playerId === p.id && l.orgId === req.org.id);
   const first = events[0] || null;

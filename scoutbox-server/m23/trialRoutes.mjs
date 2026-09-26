@@ -656,16 +656,19 @@ export function registerTrial(ctx) {
    */
   function linkAuthorisation(req, room, boxSessionId) {
     if (typeof boxSessionId !== 'string' || !boxSessionId) return { ok: false, error: 'TRIAL_EVIDENCE_REF_INVALID', message: 'boxSessionId must be a session id.' };
-    const s = (db.boxSessions ?? []).find((x) => x && x.id === boxSessionId) ?? null;
-    if (!s || s.playerId !== room.playerId) return { ok: false, error: 'TRIAL_BOXCAM_INCOMPATIBLE', message: 'No Box Cam session of this player with that id is available to your organisation.' };
-    const provider = PROVIDERS[s.provider];
-    if (provider?.testOnly && !testProviderEnabled) return { ok: false, error: 'TRIAL_BOXCAM_INCOMPATIBLE', message: 'No Box Cam session of this player with that id is available to your organisation.' };
+    // M23 P8.1 (D-P81-9): consent is decided BEFORE the session is looked up,
+    // so a club without consent gets the same answer for a real session and a
+    // fabricated id — the refusal never confirms that footage exists.
     const player = findPlayer(room.playerId);
     if (!player || !orgCanSee(req.org, player)) return { ok: false, error: 'TRIAL_BOXCAM_INCOMPATIBLE', message: 'No Box Cam session of this player with that id is available to your organisation.' };
     // The Combine consent rule, reused unchanged: the player's recruitment
     // opt-in or an active Combine request from this organisation. A trial is
     // not consent to the player's home footage.
     if (!combineOrgMaySeeResults?.(req.org, player)) return { ok: false, error: 'EVIDENCE_CONSENT_REQUIRED', message: 'This player has not shared Box Cam activity with your organisation.' };
+    const s = (db.boxSessions ?? []).find((x) => x && x.id === boxSessionId) ?? null;
+    if (!s || s.playerId !== room.playerId) return { ok: false, error: 'TRIAL_BOXCAM_INCOMPATIBLE', message: 'No Box Cam session of this player with that id is available to your organisation.' };
+    const provider = PROVIDERS[s.provider];
+    if (provider?.testOnly && !testProviderEnabled) return { ok: false, error: 'TRIAL_BOXCAM_INCOMPATIBLE', message: 'No Box Cam session of this player with that id is available to your organisation.' };
     if (['cancelled', 'invalidated'].includes(s.verificationState) || s.status === 'cancelled') return { ok: false, error: 'EVIDENCE_WITHDRAWN', message: 'This Box Cam session was withdrawn or invalidated and cannot be cited.' };
     if (!s.finalizedAt) return { ok: false, error: 'EVIDENCE_NOT_FINAL', message: 'This Box Cam session has not finished; only a finalised session can be cited.' };
     return { ok: true, session: s };

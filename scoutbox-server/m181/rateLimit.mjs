@@ -192,12 +192,23 @@ export function memoryRateLimitProvider() {
     consume(key, max, windowMs, now = Date.now()) {
       const b = buckets.get(key);
       if (!b || now - b.start > windowMs) {
-        buckets.set(key, { start: now, n: 1 });
+        // M23 P8.1 (D-P81-5): the memory bound EVICTS, it never resets. The
+        // old rule cleared every bucket once 20 000 existed — and login
+        // failures are keyed by whatever identifier the caller typed, so
+        // 20 000 wrong guesses at made-up names emptied every club's, agent's
+        // and player's budget at once. Now: expired buckets go first; if the
+        // store is still full, the oldest quarter goes; live budgets survive.
+        if (buckets.size >= 20_000) {
+          for (const [k, v] of buckets) if (now - v.start > v.windowMs) buckets.delete(k);
+          if (buckets.size >= 20_000) {
+            const oldest = [...buckets.entries()].sort((x, y) => x[1].start - y[1].start).slice(0, Math.ceil(buckets.size / 4));
+            for (const [k] of oldest) buckets.delete(k);
+          }
+        }
+        buckets.set(key, { start: now, n: 1, windowMs });
         return { limited: false, remaining: Math.max(0, max - 1), resetAt: now + windowMs };
       }
       b.n += 1;
-      // Crude memory bound: this is a speed bump, not an accounting system.
-      if (buckets.size > 20_000) buckets.clear();
       return { limited: b.n > max, remaining: Math.max(0, max - b.n), resetAt: b.start + windowMs };
     },
     peek(key, max, windowMs, now = Date.now()) {

@@ -416,7 +416,10 @@ export function registerContact(ctx) {
       // different Contact is a different request wearing the same name.
       const holder = contactsOf(room).list.find((x) => x.keys?.send?.key === key.key);
       if (holder && holder.id !== c.id) return err(res, 'CONTACT_IDEMPOTENCY_CONFLICT', 'This clientKey was already used to send a different contact.');
-      if (holder && holder.id === c.id) return res.json({ contact: contactView(c), delivered: c.status !== 'failed', idempotent: true });
+      // M23 P8.1 (D-P81-10): the replay answers with the Contact's CURRENT
+      // truth — `delivered` is true only for a delivered (or answered)
+      // Contact, never for one that failed and was then cancelled.
+      if (holder && holder.id === c.id) return res.json({ contact: contactView(c), delivered: ['delivered', 'responded'].includes(c.status), idempotent: true });
     }
 
     // Validation before the rev guard, as the lifecycle route does: a stale

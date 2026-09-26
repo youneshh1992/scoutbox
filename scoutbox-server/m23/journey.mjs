@@ -526,6 +526,12 @@ function journeyFor(db, kase, f) {
   const subjectRemoved = !!kase.subjectRemovedAt || !(db.players ?? []).some((p) => p?.id === kase.playerId);
   const verdict = validateRecruitmentJourney(facts);
   const next = nextActionFor({ status: f.status, role: f.role, now: f.now, blocked, subjectRemoved, contact, trial, trialRequest, assessed, decision, offer, signing, signingRow: f.signingRow });
+  // M23 P8.1 (§13/§14/§36) — a case whose lifecycle and records disagree fails
+  // CLOSED on the strip: the act is still named (so the reader knows where the
+  // case stands), but it is not offered until the record is put right. The
+  // domain routes keep their own gates; this only stops a client from being
+  // handed an act the projection cannot vouch for.
+  if (verdict.classification === 'integrity_error' && next.kind === 'club' && !next.blockedBy.includes('INTEGRITY_ERROR')) next.blockedBy.push('INTEGRITY_ERROR');
   return {
     policyVersion: JOURNEY_POLICY_VERSION,
     stage: canonicalStageFor(f.status, { assessed, signingOpened: !!(signing && signingIsLive(signing, f.now)) }),
