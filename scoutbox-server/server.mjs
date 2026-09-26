@@ -4725,6 +4725,8 @@ export const EMITTED_EVENTS = Object.freeze([
   // M23 P7 signing workflow. Org_private, ids plus a party type word; never a
   // document, a digest, a term or a signatory's name.
   'signing_created', 'signing_ready', 'signing_party_completed', 'signing_completed', 'signing_cancelled', 'signing_voided', 'signing_superseded',
+  // M23 P5 decisions (declared in PRE-M24, PM-15; broadcast since P5).
+  'room_decision_finalized', 'room_decision_superseded',
 ]);
 {
   const problems = assertEventRegistry({ emitted: EMITTED_EVENTS });

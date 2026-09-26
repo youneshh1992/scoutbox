@@ -414,7 +414,13 @@ export function registerDecision(ctx) {
       audit(kase, 'org', req.orgUser.id, req.orgUser.name, action, { decisionId: row.id, outcome, supersedes: headFormal?.id ?? null, reasonCodes: content.reasonCodes, note: !!content.note, to: lifecycle.applied ? lifecycle.to : undefined });
       persistNow();
 
-      broadcast?.(action, { orgId: kase.orgId, roomId: kase.id, decisionId: row.id });
+      // Literal names (PRE-M24 PM-15): the M18.2 source scan only sees call
+      // sites with a literal event name, and EMITTED_EVENTS must match it. With a
+      // variable name neither listed these two events, so every boot warned that
+      // the registry names events the server never emits.
+      const decisionEvent = { orgId: kase.orgId, roomId: kase.id, decisionId: row.id };
+      if (headFormal) broadcast?.('room_decision_superseded', decisionEvent);
+      else broadcast?.('room_decision_finalized', decisionEvent);
       if (TERMINAL_ROOM_STATUSES.includes(kase.room.status)) {
         // The Second Look contract: the same ids-only event M17 broadcasts when a room is archived.
         broadcast?.('recruitment_room_archived', { orgId: kase.orgId, roomId: kase.id });

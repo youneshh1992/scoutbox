@@ -56,6 +56,7 @@ const playerLogin = async (id = 'pl-adeyemi') => (await j('POST', '/auth/player/
 section('S — sessions have a lifetime, sign-out revokes, every resolution path agrees (PM-4)');
 let S = await boot();
 ok(S.up, 'server booted');
+neg(!/never emits|EVENT REGISTRY/.test(S.log()), `S0 the boot log carries no event-registry drift warning (PM-15)${/never emits/.test(S.log()) ? `: ${S.log().match(/never emits[^\n]*/)[0]}` : ''}`);
 {
   // S1–S2 sign-out revokes the bearer token (org and player)
   const t = await orgLogin();
