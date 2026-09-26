@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, ApiError, DEMO_MODE, type Notification, type Org, type Session } from './api';
+import { api, ApiError, DEMO_MODE, revokeSession, type Notification, type Org, type Session } from './api';
 import { agent, demoIdentities, isSummary, type Me } from './agentApi';
 import {
   AgencyScreen, ClientsScreen, HomeScreen, InboxScreen, OpportunitiesScreen, ProfileScreen, SafetyModal, Toast, markClean,
@@ -74,9 +74,16 @@ export default function App() {
     setSession(s);
   };
   const logout = () => {
+    revokeSession(session); // PRE-M24 (PM-4): the server forgets the token too
     try { localStorage.removeItem(SESSION_KEY); } catch { /* private mode */ }
     setSession(null);
   };
+  // PRE-M24 (PM-3): a sign-out (or another sign-in) in another tab of this browser ends this one too.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => { if (e.key === SESSION_KEY || e.key === null) setSession(loadSession()); };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
   useEffect(() => {
     const restored = loadSession();
     if (!restored) return;
@@ -324,10 +331,11 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     return () => window.removeEventListener('sb-lang', onLang);
   }, []);
   useEffect(() => api.onChange(session, (event, payload) => {
+    if (event === 'session_expired') { onLogout(); return; } // PRE-M24 (PM-3)
     if (event === 'sse_status') { setLive((payload as { connected?: boolean } | undefined)?.connected !== false); return; }
     if (event === 'typing') return;
     setTick((x) => x + 1);
-  }), [session]);
+  }), [session]); // eslint-disable-line react-hooks/exhaustive-deps
   // M23 P8.1 (§20, §29) — an agent's authority is re-derived on every read;
   // when the window regains focus or becomes visible every screen re-reads,
   // so a representation that ended or a licence that lapsed while the tab

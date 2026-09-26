@@ -171,6 +171,20 @@ section('§48 — boot refuses configuration that is unsafe in production');
     .some((p) => p.code === 'DEV_LOGIN_IN_PRODUCTION'), 'dev login is fatal in production');
   neg(productionConfigProblems({ env: {}, trustWeightsTotal: 95 }).some((p) => p.code === 'TRUST_WEIGHTS_INVALID' && p.fatal),
     'Trust Score weights that do not total 100 are fatal in EVERY mode — a wrong score is not a development-only problem');
+  // PRE-M24 (PM-1, PM-2): the admin key and the synthetic licence register.
+  const SAFE = { NODE_ENV: 'production', SCOUTBOX_MEDIA_SECRET: 's', ADMIN_KEY: 'a-long-production-admin-key-0123' };
+  neg(productionConfigProblems({ env: { NODE_ENV: 'production', SCOUTBOX_MEDIA_SECRET: 's' } }).some((p) => p.code === 'ADMIN_KEY_UNSAFE' && p.fatal),
+    'PM-1: an unset ADMIN_KEY is fatal in production (the T&S API would accept the public development key)');
+  neg(productionConfigProblems({ env: { ...SAFE, ADMIN_KEY: 'scoutbox-admin' } }).some((p) => p.code === 'ADMIN_KEY_UNSAFE' && p.fatal),
+    'PM-1: the development default key is fatal in production');
+  neg(productionConfigProblems({ env: { ...SAFE, ADMIN_KEY: 'short' } }).some((p) => p.code === 'ADMIN_KEY_UNSAFE' && p.fatal),
+    'PM-1: a trivially short key is fatal in production');
+  neg(productionConfigProblems({ env: { ...SAFE, AGENT_VERIFICATION_TEST_PROVIDER: '1' } }).some((p) => p.code === 'AGENT_TEST_PROVIDER_IN_PRODUCTION' && p.fatal),
+    'PM-2: the synthetic agent licence register is fatal in production');
+  ok(productionConfigProblems({ env: SAFE, trustWeightsTotal: 100 }).length === 0,
+    'PM-1/PM-2: a production configuration with its own admin key and no test provider passes');
+  ok(productionConfigProblems({ env: { AGENT_VERIFICATION_TEST_PROVIDER: '1' }, trustWeightsTotal: 100 }).length === 0,
+    'PM-1/PM-2: development keeps the default admin key and the synthetic register');
   ok(productionConfigProblems({ env: { BOX_CAM_TEST_PROVIDER: '1' }, trustWeightsTotal: 100 }).length === 0,
     'the same simulator configuration is fine in development (§74: local development stays possible)');
 }

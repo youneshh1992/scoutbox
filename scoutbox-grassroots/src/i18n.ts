@@ -3186,13 +3186,16 @@ export function t(key: keyof typeof en | (string & {}), fallback?: string): stri
 // as that day everywhere — `new Date('2027-06-30')` is UTC midnight, which a
 // browser west of Greenwich used to print as 29 June.
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
-export const fmtDate = (ts: number | string) =>
+// PRE-M24 (PM-12): a missing or unreadable stamp (legacy or damaged row) shows a
+// dash, never the browser's "Invalid Date".
+const badStamp = (ts: unknown) => ts === null || ts === undefined || ts === '' || Number.isNaN(new Date(ts as number | string).getTime());
+export const fmtDate = (ts: number | string) => badStamp(ts) ? '—' :
   new Date(ts).toLocaleDateString(getLang() === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric', ...(typeof ts === 'string' && DATE_ONLY.test(ts) ? { timeZone: 'UTC' } : {}) });
-export const fmtDateTime = (ts: number) =>
+export const fmtDateTime = (ts: number) => badStamp(ts) ? '—' :
   new Date(ts).toLocaleString(getLang() === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 /** Time of day only. Use it ONLY where the surrounding context already fixes
  *  the day — otherwise a bare clock reads as "today" for a week-old record. */
-export const fmtTime = (ts: number | string) =>
+export const fmtTime = (ts: number | string) => badStamp(ts) ? '—' :
   new Date(ts).toLocaleTimeString(getLang() === 'fr' ? 'fr-FR' : 'en-GB', { hour: '2-digit', minute: '2-digit' });
 /**
  * A stamp that cannot mislead: the time alone while it is still today, the
@@ -3201,6 +3204,7 @@ export const fmtTime = (ts: number | string) =>
  * lies in a feed.
  */
 export const fmtStamp = (ts: number | string) => {
+  if (badStamp(ts)) return '—';
   const d = new Date(ts);
   return new Date().toDateString() === d.toDateString() ? fmtTime(ts) : `${fmtDate(ts)} ${fmtTime(ts)}`;
 };

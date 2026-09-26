@@ -6,6 +6,18 @@
 // surface is designed so storage can swap to Postgres without changes.
 
 import express from 'express';
+import { installAsyncErrorForwarding } from './m181/asyncErrors.mjs';
+// PRE-M24 (PM-9): a rejected async handler answers 500 instead of ending the process.
+installAsyncErrorForwarding();
+
+// PRE-M24 (PM-10): free text in a request body is a string or absent. A value
+// of any other type used to throw on `.trim()` (a 500 — and, inside an async
+// handler, the end of the process: PM-9) or was stored as an object that
+// every screen rendering it then crashed on. `optText` accepts absent or a
+// string within the length limit; everything else is a 400 at the route.
+const optText = (v, max = 500) => v === undefined || v === null || (typeof v === 'string' && v.length <= max);
+const reqText = (v, max = 500) => typeof v === 'string' && v.trim().length > 0 && v.length <= max;
+const badField = (res, field) => res.status(400).json({ error: 'FIELD_INVALID', field, message: `${field} must be text.` });
 import cors from 'cors';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -513,7 +525,8 @@ app.get('/events', (req, res) => {
   }
   // Identity resolves at connect time from the live session, so logout or
   // suspension invalidates streams even inside a ticket's lifetime.
-  const session = db.sessions.find((s) => s.token === t.token);
+  const found = db.sessions.find((s) => s.token === t.token);
+  const session = sessionLive(found) ? found : null;
   const identity = sseIdentityFor(session);
   if (!identity) return res.status(401).json({ error: 'SESSION_INVALID', message: 'Log in again — this session is no longer valid.' });
   res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
@@ -595,7 +608,25 @@ function canonicalContractFor(playerId, now = Date.now(), { exceptOrgId = null }
 // -------------------------------------------------------------- sessions
 // Real sessions: logins mint a bearer token; every authenticated route
 // resolves the caller from the token. Nothing trusts a client-sent id.
+// PRE-M24 (PM-4): a session has an absolute lifetime. Before this, a bearer
+// token lived forever — stored with a creation time nothing checked, persisted
+// across restarts, and never revoked by any app's sign-out. Expiry is decided
+// in ONE place (`sessionLive`) and applied wherever a session is resolved:
+// the bearer lookup, the event-stream connect and a signed media link. A
+// session with no valid creation time is treated as expired (fail closed).
+const SESSION_TTL_MS = (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000;
+function sessionLive(s, now = Date.now()) {
+  if (!s) return false;
+  const born = Number(s.createdAt);
+  return Number.isFinite(born) && born > 0 && now - born < SESSION_TTL_MS;
+}
+function pruneExpiredSessions(now = Date.now()) {
+  const before = db.sessions.length;
+  db.sessions = db.sessions.filter((x) => sessionLive(x, now));
+  return before - db.sessions.length;
+}
 function createSession(kind, refId, extra = {}) {
+  pruneExpiredSessions();
   const token = newToken();
   // sid: a non-secret session identifier that media URLs are bound to — the
   // URL dies with the session (logout) and is re-checked against the
@@ -608,7 +639,9 @@ function createSession(kind, refId, extra = {}) {
 function sessionFor(req) {
   const header = req.headers.authorization ?? '';
   if (!header.startsWith('Bearer ')) return null;
-  return db.sessions.find((s) => s.token === header.slice(7)) ?? null;
+  const found = db.sessions.find((s) => s.token === header.slice(7)) ?? null;
+  if (found && !sessionLive(found)) { db.sessions = db.sessions.filter((s) => s !== found); persist(); return null; }
+  return found;
 }
 
 app.post('/auth/logout', (req, res) => {
@@ -1173,7 +1206,7 @@ function guardianManagedOnly(req, res) {
 
 app.post('/auth/guardian/signup', async (req, res) => {
   const { name, email, password } = req.body || {};
-  if (!name || !email || !email.includes('@')) return res.status(400).json({ error: 'NAME_AND_EMAIL_REQUIRED' });
+  if (!reqText(name, 120) || !reqText(email, 254) || !email.includes('@')) return res.status(400).json({ error: 'NAME_AND_EMAIL_REQUIRED' }); // PRE-M24 (PM-10)
   if (!password || String(password).length < 8) {
     return res.status(400).json({ error: 'PASSWORD_REQUIRED', message: 'Pick a password of at least 8 characters.' });
   }
@@ -1649,14 +1682,18 @@ app.post('/auth/org/register-grassroots', (req, res) => {
   if (password !== undefined && String(password).length < 8) {
     return res.status(400).json({ error: 'PASSWORD_TOO_SHORT', message: 'Club passwords need at least 8 characters.' });
   }
-  if (!name || !name.trim()) return res.status(400).json({ error: 'NAME_REQUIRED' });
+  if (!reqText(name, 120)) return res.status(400).json({ error: 'NAME_REQUIRED' }); // PRE-M24 (PM-10)
+  for (const [f, v, max] of [['country', country, 2], ['city', city, 80], ['federation', federation, 120], ['registrationId', registrationId, 60], ['role', role, 60]]) if (!optText(v, max)) return badField(res, f);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    if (typeof lat === 'number' || typeof lng === 'number') return badField(res, 'location');
+  }
   if (!federation || !registrationId) {
     return res.status(400).json({ error: 'FEDERATION_REQUIRED', message: 'Grassroots clubs must hold a federation registration — name the federation and your registration id.' });
   }
   if (typeof lat !== 'number' || typeof lng !== 'number') {
     return res.status(400).json({ error: 'LOCATION_REQUIRED', message: 'The 50km scouting radius is measured from your ground — a location is required.' });
   }
-  if (!scoutName || !scoutName.trim()) return res.status(400).json({ error: 'SCOUT_NAME_REQUIRED' });
+  if (!reqText(scoutName, 120)) return res.status(400).json({ error: 'SCOUT_NAME_REQUIRED' }); // PRE-M24 (PM-10)
   const org = {
     id: nextId('org'),
     name: name.trim(),
@@ -1704,7 +1741,8 @@ app.post('/auth/org/login', (req, res) => {
   if (platform === 'agent' && org.type !== 'agency') {
     return res.status(403).json({ error: 'PLATFORM_MISMATCH', message: 'ScoutBox Agent is for agency organisations only.' });
   }
-  if (!scoutName || !scoutName.trim()) {
+  if (!optText(role, 60)) return badField(res, 'role'); // PRE-M24 (PM-10)
+  if (typeof scoutName !== 'string' || !scoutName.trim()) {
     // Accountability by user: no anonymous / shared workspace access.
     return res.status(400).json({ error: 'SCOUT_NAME_REQUIRED', message: 'Every session is attributed to a named individual.' });
   }
@@ -2316,7 +2354,8 @@ orgRouter.get('/searches', (req, res) => {
 
 orgRouter.post('/searches', (req, res) => {
   const { name, filters } = req.body || {};
-  if (!name || !name.trim()) return res.status(400).json({ error: 'NAME_REQUIRED' });
+  if (!reqText(name, 120)) return res.status(400).json({ error: 'NAME_REQUIRED' }); // PRE-M24 (PM-10)
+  if (filters != null && (typeof filters !== 'object' || Array.isArray(filters))) return badField(res, 'filters');
   const ss = { id: nextId('ss'), orgId: req.org.id, userId: req.orgUser.id, scoutName: req.orgUser.name, name: name.trim(), filters: filters ?? {}, createdAt: Date.now() };
   db.savedSearches.push(ss);
   res.status(201).json(ss);
@@ -2548,7 +2587,9 @@ orgRouter.post('/open-trials', (req, res) => {
     });
   }
   const { title, date, venue, ageGroup, positions, notes } = req.body || {};
-  if (!title || !date || !venue) return res.status(400).json({ error: 'TITLE_DATE_VENUE_REQUIRED' });
+  if (!reqText(title, 160) || !date || !reqText(venue, 160)) return res.status(400).json({ error: 'TITLE_DATE_VENUE_REQUIRED' });
+  if (!optText(ageGroup, 40)) return badField(res, 'ageGroup'); // PRE-M24 (PM-10)
+  if (!optText(notes, 2000)) return badField(res, 'notes');
   // M23 P5.7 (T-10): the open-day date gates the no-ghosting rule above
   // (`t.date < today`) and the upcoming list (`t.date >= today`) by string
   // comparison. Text that is not a day compared as "upcoming for ever" and
@@ -2558,7 +2599,7 @@ orgRouter.post('/open-trials', (req, res) => {
   const trial = {
     id: nextId('open'), orgId: req.org.id, orgName: req.org.name,
     title: String(title).trim(), date: String(date), venue: String(venue).trim(),
-    ageGroup: ageGroup || 'open', positions: Array.isArray(positions) ? positions : [],
+    ageGroup: ageGroup || 'open', positions: Array.isArray(positions) ? positions.filter((x) => typeof x === 'string').slice(0, 20) : [],
     notes: notes || '', createdByUserId: req.orgUser.id, createdAt: Date.now(), registrations: [],
   };
   db.openTrials.push(trial);
@@ -2680,7 +2721,8 @@ orgRouter.get('/squad', (req, res) => {
 orgRouter.post('/squad', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
   const { name, position, playerId } = req.body || {};
-  if (!name || !name.trim()) return res.status(400).json({ error: 'NAME_REQUIRED' });
+  if (!reqText(name, 120)) return res.status(400).json({ error: 'NAME_REQUIRED' }); // PRE-M24 (PM-10)
+  if (!optText(position, 40)) return badField(res, 'position');
   if (playerId) {
     const p = findPlayer(playerId);
     if (!p || !visibleToOrg(p, req.org)) return res.status(403).json({ error: 'PLAYER_NOT_VISIBLE' });
@@ -2823,6 +2865,7 @@ orgRouter.post('/friendlies', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
   const { ageGroup, date, venue, notes } = req.body || {};
   if (!date) return res.status(400).json({ error: 'DATE_REQUIRED' });
+  for (const [f, v, max] of [['ageGroup', ageGroup, 40], ['venue', venue, 160], ['notes', notes, 2000]]) if (!optText(v, max)) return badField(res, f); // PRE-M24 (PM-10)
   if (!dateOnlyOrRefuse(res, date, 'date')) return; // M23 P5.7
   if (notes && !moderateOrRefuse(res, notes, { kind: 'friendly_notes', orgId: req.org.id })) return;
   const friendly = {
@@ -2905,7 +2948,7 @@ const FREE_MAIL = /@(gmail|googlemail|hotmail|outlook|yahoo|icloud|aol|proton|pr
 
 orgRouter.post('/verification/email', async (req, res) => {
   const { email } = req.body || {};
-  if (!email || !email.includes('@')) return res.status(400).json({ error: 'EMAIL_REQUIRED' });
+  if (!reqText(email, 254) || !email.includes('@')) return res.status(400).json({ error: 'EMAIL_REQUIRED' }); // PRE-M24 (PM-10)
   if (FREE_MAIL.test(email)) {
     return res.status(422).json({
       error: 'COMPANY_EMAIL_REQUIRED',
@@ -3245,7 +3288,8 @@ playerRouter.post('/badges', (req, res) => {
 // store, ~12MB cap; production = object storage behind the same endpoint).
 playerRouter.post('/media', (req, res) => {
   const { title, kind = 'video', dataUrl, attendanceId } = req.body || {};
-  if (!title) return res.status(400).json({ error: 'TITLE_REQUIRED' });
+  if (!reqText(title, 160)) return res.status(400).json({ error: 'TITLE_REQUIRED' }); // PRE-M24 (PM-10): an object title was stored and crashed every screen showing it
+  if (!optText(kind, 20)) return badField(res, 'kind');
   if (!moderateOrRefuse(res, title, { kind: 'media_title', playerId: req.player.id })) return;
   const item = { id: nextId('media'), title, kind, uploadedAt: new Date().toISOString(), url: null, views: 0, tags: {}, verifiedClip: null };
   if (dataUrl) {
@@ -3283,6 +3327,10 @@ playerRouter.post('/medical/share', (req, res) => {
 playerRouter.post('/medical/records', (req, res) => {
   const { type, title, date, layoffWeeks, cleared, conditionStatus } = req.body || {};
   if (date && !dateOnlyOrRefuse(res, date, 'date')) return; // M23 P5.7: a medical record is dated on a day that exists
+  // PRE-M24 (PM-10): each field has its type; nothing else is stored.
+  for (const [f, v, max] of [['type', type, 40], ['title', title, 160], ['conditionStatus', conditionStatus, 40]]) if (!optText(v, max)) return badField(res, f);
+  if (layoffWeeks != null && !(typeof layoffWeeks === 'number' && Number.isFinite(layoffWeeks) && layoffWeeks >= 0 && layoffWeeks <= 520)) return badField(res, 'layoffWeeks');
+  if (cleared != null && typeof cleared !== 'boolean') return badField(res, 'cleared');
   if (conditionStatus) req.player.medical.conditionStatus = conditionStatus;
   if (title) {
     req.player.medical.records.push({ id: nextId('md'), type: type || 'note', title, date: date || new Date().toISOString().slice(0, 10), layoffWeeks: layoffWeeks ?? null, cleared: cleared ?? null });
@@ -4161,6 +4209,7 @@ app.get('/media/:id', (req, res) => {
   let session = null;
   if (sid && exp > Date.now() && String(req.query.s ?? '') === mediaSig(id, exp, sid)) {
     session = db.sessions.find((x) => x.sid === sid) ?? null;
+    if (!sessionLive(session)) session = null;
   }
   // Path 2: a direct bearer fetch (native clients, tests).
   session ??= sessionFor(req);

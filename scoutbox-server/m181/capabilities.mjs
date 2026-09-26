@@ -138,5 +138,27 @@ export function productionConfigProblems({ env = process.env, trustWeightsTotal 
       fatal: true,
     });
   }
+  // PRE-M24 (PM-1): the Trust & Safety API is guarded by one shared key. It
+  // used to fall back to the public development value `scoutbox-admin`
+  // whenever ADMIN_KEY was unset, so forgetting one variable handed full T&S
+  // access to anyone who has read this repository. Production must name its
+  // own key, and it must not be the development default or trivially short.
+  if (production && (!env.ADMIN_KEY || env.ADMIN_KEY === 'scoutbox-admin' || String(env.ADMIN_KEY).length < 16)) {
+    problems.push({
+      code: 'ADMIN_KEY_UNSAFE',
+      message: 'ADMIN_KEY is unset, is the development default or is shorter than 16 characters; the Trust & Safety API would accept a publicly known key.',
+      fatal: true,
+    });
+  }
+  // PRE-M24 (PM-2): the synthetic agent-verification provider verifies any
+  // `TEST-VERIFIED-*` reference. Like the Box Cam simulator above, it must
+  // never be reachable in production — an agent could self-verify a licence.
+  if (production && env.AGENT_VERIFICATION_TEST_PROVIDER === '1') {
+    problems.push({
+      code: 'AGENT_TEST_PROVIDER_IN_PRODUCTION',
+      message: 'AGENT_VERIFICATION_TEST_PROVIDER=1 enables the synthetic licence register, which verifies any TEST-VERIFIED reference.',
+      fatal: true,
+    });
+  }
   return problems;
 }

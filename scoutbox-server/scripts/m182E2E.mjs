@@ -773,7 +773,7 @@ section('§43 — a production boot refuses simulated faults and exposes no faul
   await sleep(800);
   const PPORT = PORT + 10; const PBASE = `http://localhost:${PPORT}`;
   const PDATA = mkdtempSync(path.join(tmpdir(), 'sbx-m182prod-'));
-  const prodEnv = { ...process.env, NODE_ENV: 'production', PORT: String(PPORT), DATA_DIR: PDATA, M13_QUIET_LOGS: '1', SCOUTBOX_MEDIA_SECRET: 'm182-test-secret-value-not-real' };
+  const prodEnv = { ...process.env, NODE_ENV: 'production', PORT: String(PPORT), DATA_DIR: PDATA, M13_QUIET_LOGS: '1', SCOUTBOX_MEDIA_SECRET: 'm182-test-secret-value-not-real', ADMIN_KEY: 'm182-test-admin-key-not-real' }; // PRE-M24 (PM-1): a real deployment names its own admin key
   const withFaults = spawn(process.execPath, [SERVER], { env: { ...prodEnv, SCOUTBOX_FAULTS: 'unavailable:/org/players' }, stdio: 'ignore' });
   children.push(withFaults);
   const exited = await new Promise((resolve) => { const t = setTimeout(() => resolve(null), 8000); withFaults.on('exit', (code) => { clearTimeout(t); resolve(code); }); });

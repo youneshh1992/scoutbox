@@ -145,8 +145,11 @@ export const httpCore: CoreApi = {
           cb('sse_status', { connected: false });
           window.setTimeout(connect, Math.min(15_000, 1000 * 2 ** Math.min(retry++, 4)));
         };
-      } catch {
+      } catch (e) {
         if (closed) return;
+        // PRE-M24 (PM-3): a 401 on the ticket means the session is gone; stop
+        // asking every 15 s and let the app sign out.
+        if (e instanceof ApiError && e.status === 401) { closed = true; cb('session_expired', {}); return; }
         dropped = true;
         cb('sse_status', { connected: false });
         window.setTimeout(connect, Math.min(15_000, 1000 * 2 ** Math.min(retry++, 4)));
@@ -159,3 +162,11 @@ export const httpCore: CoreApi = {
 
 import { demoCore } from './agentDemo';
 export const api: CoreApi = DEMO_MODE ? demoCore : httpCore;
+
+/** PRE-M24 (PM-4): signing out revokes the session on the server (best effort, fire-and-forget). */
+export function revokeSession(s: Session | null): void {
+  if (DEMO_MODE || !s?.token) return;
+  try {
+    void fetch(`${API_URL}/auth/logout`, { method: 'POST', headers: { authorization: `Bearer ${s.token}` }, keepalive: true }).catch(() => {});
+  } catch { /* offline: the server lifetime still ends it */ }
+}

@@ -688,7 +688,7 @@ export function registerOrganisationVerification(ctx) {
     const today = db.verPlayerInvites.filter((i) => i.orgId === req.org.id && i.createdAt > Date.now() - 86_400_000).length;
     if (today >= INVITES_PER_DAY) return res.status(429).json({ error: 'INVITE_RATE_LIMIT', message: `Deterministic limit: ${INVITES_PER_DAY} invitations per organisation per day.` });
     const { name, email, squad, playerId } = req.body ?? {};
-    if (!name?.trim()) return res.status(400).json({ error: 'NAME_REQUIRED' });
+    if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'NAME_REQUIRED' }); // PRE-M24 (PM-10)
     if (email && emailProblem(email)) return res.status(400).json({ error: 'EMAIL_SYNTAX' });
     // M14.1 recipient binding: when the invite targets an EXISTING ScoutBox
     // player, the token is bound to that identity and nobody else can attach

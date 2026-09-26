@@ -213,6 +213,9 @@ export function registerDelivery(ctx) {
 
   orgRouter.put('/delivery/prefs', (req, res) => {
     const { quietStart, quietEnd, email } = req.body ?? {};
+    // PRE-M24 (PM-10): quiet hours are HH:MM or absent — an object was stored and read back as a time.
+    const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+    for (const [f, v] of [['quietStart', quietStart], ['quietEnd', quietEnd]]) if (v != null && !(typeof v === 'string' && HHMM.test(v))) return res.status(400).json({ error: 'FIELD_INVALID', field: f, message: `${f} is a time written HH:MM.` });
     req.orgUser.deliveryPrefs = {
       quietStart: quietStart ?? null, quietEnd: quietEnd ?? null,
       channels: { email: email !== false },

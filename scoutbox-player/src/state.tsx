@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { client, type Me } from './data/client';
-import { ClientError, type AppNotification, type Channel } from './data/types';
+import { ClientError, isSessionEnded, type AppNotification, type Channel } from './data/types';
 import type { ChildInboxItem, Guardian, GuardianInboxRequest, InboxRequest } from './domain/types';
 import { isAdult } from './domain/safeguarding';
 
@@ -117,6 +117,15 @@ export function SessionProvider({ children: kids }: { children: ReactNode }) {
     setPopup(null);
     seenNotifIds.current = null;
   }, []);
+  // PRE-M24 (PM-5): the server said this session no longer exists (expired,
+  // revoked, the account removed). End the stored identity — the same path as
+  // signing out — instead of staying "signed in" with every request refused.
+  const endSession = useCallback(() => {
+    clearIdentityState();
+    setPlayerId(null);
+    setGuardianId(null);
+    storeSession(null);
+  }, [clearIdentityState]);
 
   const refresh = useCallback(async () => {
     try {
@@ -148,10 +157,11 @@ export function SessionProvider({ children: kids }: { children: ReactNode }) {
         setChannels(chans);
         surfaceFresh(notifs);
       }
-    } catch {
-      // transient — keep last good state
+    } catch (e) {
+      if (isSessionEnded(e)) endSession(); // PRE-M24 (PM-5)
+      // anything else is transient — keep last good state
     }
-  }, [playerId, guardianId, surfaceFresh]);
+  }, [playerId, guardianId, surfaceFresh, endSession]);
 
   const markNotificationsRead = useCallback(async () => {
     try {
@@ -179,8 +189,8 @@ export function SessionProvider({ children: kids }: { children: ReactNode }) {
         }
       } catch (err) {
         const code = err instanceof ClientError ? err.code : '';
-        if (code.includes('NOT_FOUND')) {
-          storeSession(null); // stale identity — handled, not a crash
+        if (code.includes('NOT_FOUND') || isSessionEnded(err)) {
+          storeSession(null); // stale identity or an ended session — handled, not a crash (PRE-M24 PM-5)
         } else if (!cancelled) {
           // Transient failure (e.g. live-mode network blip): keep the session;
           // refresh() already tolerates temporary errors.
@@ -204,6 +214,7 @@ export function SessionProvider({ children: kids }: { children: ReactNode }) {
       ? ({ kind: 'guardian', id: guardianId } as const)
       : ({ kind: 'player', id: playerId! } as const);
     return client.onChange((event, payload) => {
+      if (event === 'session_expired') { endSession(); return; } // PRE-M24 (PM-3)
       if (event === 'typing') return; // ephemeral — screens listen for it directly
       if (event === 'sse_status') {
         setLiveConnected((payload as { connected?: boolean } | undefined)?.connected !== false);
@@ -211,7 +222,7 @@ export function SessionProvider({ children: kids }: { children: ReactNode }) {
       }
       void refresh(); // includes 'reconnected' — the authoritative catch-up refetch
     }, auth);
-  }, [playerId, guardianId, refresh]);
+  }, [playerId, guardianId, refresh, endSession]);
 
   const value = useMemo<SessionState>(
     () => ({
@@ -249,6 +260,8 @@ export function SessionProvider({ children: kids }: { children: ReactNode }) {
         storeSession({ kind: 'guardian', id });
       },
       logout: () => {
+        const id = playerId ?? guardianId;
+        if (id) void client.logout?.(id); // PRE-M24 (PM-4): revoke server-side, forget the token here
         clearIdentityState();
         setPlayerId(null);
         setGuardianId(null);

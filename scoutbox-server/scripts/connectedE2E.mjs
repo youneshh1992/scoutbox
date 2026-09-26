@@ -239,7 +239,8 @@ await new Promise((res) => setTimeout(res, 300));
 // M18.1 boot assertions refuse production mode without a per-deployment media
 // signing secret, so this production-mode section supplies one — a real
 // deployment would. The assertion itself is exercised directly in m181E2E.
-await startServer({ NODE_ENV: 'production', SCOUTBOX_MEDIA_SECRET: 'connected-e2e-media-secret' });
+// PRE-M24 (PM-1): production also refuses to start without its own admin key.
+await startServer({ NODE_ENV: 'production', SCOUTBOX_MEDIA_SECRET: 'connected-e2e-media-secret', ADMIN_KEY: 'connected-e2e-admin-key-not-real' });
 r = await j('/auth/player/login', { method: 'POST', body: JSON.stringify({ playerId: 'pl-adeyemi' }) });
 ok(r.status === 403 && r.body.error === 'DEV_LOGIN_DISABLED', 'passwordless seed player login refused in production');
 r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane' }) });
@@ -256,7 +257,12 @@ r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: p
 ok(r.status === 401, 'a wrong org password is refused');
 // Pro clubs get credentials via Trust & Safety provisioning — the production
 // login path that never depends on ALLOW_DEV_LOGINS.
+// PRE-M24 (PM-1): in production the T&S API answers only the deployment's own
+// key; the public development key is refused (proved just below).
+const prodAdmin = { 'x-admin-key': 'connected-e2e-admin-key-not-real' };
 r = await j('/admin/clubs/org-eastport/credentials', { method: 'POST', body: JSON.stringify({ password: 'eastport-secret-1' }) }, admin);
+ok(r.status === 401, 'the public development admin key is refused by a production server (PM-1)');
+r = await j('/admin/clubs/org-eastport/credentials', { method: 'POST', body: JSON.stringify({ password: 'eastport-secret-1' }) }, prodAdmin);
 ok(r.status === 200, 'T&S provisions credentials for a Pro club');
 r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane', password: 'eastport-secret-1' }) });
 ok(r.status === 200 && r.body.token && !('password' in r.body.org), 'the provisioned Pro club logs in with its password in production (hash never echoed)');

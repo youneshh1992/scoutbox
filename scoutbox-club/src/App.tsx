@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, ApiError, DEMO_MODE, type Channel, type Notification, type Org, type Session } from './api';
+import { api, ApiError, DEMO_MODE, revokeSession, type Channel, type Notification, type Org, type Session } from './api';
 import {
   FeedScreen, FilmRoomScreen, SearchScreen, ShortlistScreen, RequestsScreen, MessagesScreen,
   TrialsScreen, FixturesScreen, LedgerScreen, FunnelScreen, ReputationScreen, PlanScreen,
@@ -123,6 +123,7 @@ export default function App() {
     setSession(s);
   };
   const logout = () => {
+    revokeSession(session); // PRE-M24 (PM-4): the server forgets the token too
     try {
       localStorage.removeItem(SESSION_KEY);
       // Offline drafts are identity-scoped and cleared on logout — nothing
@@ -147,6 +148,15 @@ export default function App() {
       if (e instanceof ApiError && e.status === 401) logout();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // PRE-M24 (PM-3): a sign-out (or a different sign-in) in ANOTHER tab of this
+  // browser ends this tab's workspace too, instead of leaving it acting on a
+  // token the server no longer honours.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => { if (e.key === SESSION_KEY || e.key === null) setSession(loadSession()); };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, []);
 
   return session ? <Workspace session={session} onLogout={logout} /> : <Login onLogin={login} />;
@@ -406,10 +416,11 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     return () => window.removeEventListener('sb-lang', onLang);
   }, []);
   useEffect(() => api.onChange(session, (event, payload) => {
+    if (event === 'session_expired') { onLogout(); return; } // PRE-M24 (PM-3)
     if (event === 'sse_status') { setLive((payload as { connected?: boolean } | undefined)?.connected !== false); return; }
     if (event === 'typing') return; // transient — handled inside Messages
     setTick((t) => t + 1);
-  }), [session]);
+  }), [session]); // eslint-disable-line react-hooks/exhaustive-deps
   // M23 P8.1 (§29, §71) — a missed event, a dropped stream or a tab left in the
   // background: every screen re-reads canonical state when the window regains
   // focus or becomes visible again. Nothing local is trusted over the server.
@@ -424,9 +435,13 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   }, [session]);
 
   useEffect(() => {
-    api.getNotifications(session).then(setNotifications).catch(() => {});
+    // PRE-M24 (PM-3): this read runs on every refresh signal, so it is where a
+    // session that died mid-use (expired, revoked, the user removed) is
+    // noticed. Only a 401 ends the session; anything else is a transient
+    // failure the workspace survives.
+    api.getNotifications(session).then(setNotifications).catch((e) => { if (e instanceof ApiError && e.status === 401) onLogout(); });
     api.getChannels(session).then(setChannels).catch(() => {});
-  }, [session, tick]);
+  }, [session, tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const unread = notifications.filter((n) => !n.read).length;
 

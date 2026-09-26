@@ -27,6 +27,12 @@ function rememberToken(id: string, token: string | undefined) {
     if (typeof localStorage !== 'undefined') localStorage.setItem(TOKENS_KEY, JSON.stringify(Object.fromEntries(tokens)));
   } catch { /* memory copy still works */ }
 }
+function forgetToken(id: string) {
+  tokens.delete(id);
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(TOKENS_KEY, JSON.stringify(Object.fromEntries(tokens)));
+  } catch { /* memory copy already gone */ }
+}
 const authHeader = (id?: string): Record<string, string> =>
   id && tokens.has(id) ? { authorization: `Bearer ${tokens.get(id)}` } : {};
 
@@ -61,7 +67,19 @@ const SEED_IDENTITIES: DemoIdentity[] = [
 export const httpClient: PlayerClient = {
   mode: 'live',
 
-  listDemoIdentities: async () => SEED_IDENTITIES,
+  // PRE-M24 (PM-11): the seed identities are passwordless DEVELOPMENT logins.
+  // A production server refuses them (DEV_LOGIN_DISABLED), so offering them
+  // there showed four "Enter" buttons that could only fail. The server says
+  // whether they work (`/health` → devLogins); none are offered when it says no
+  // or cannot be asked.
+  listDemoIdentities: async () => {
+    try {
+      const h = await fetch(`${API_URL}/health`).then((r) => r.json());
+      return h?.devLogins === true ? SEED_IDENTITIES : [];
+    } catch {
+      return [];
+    }
+  },
 
   signup: async (input: SignupInput) => {
     const r = await request<{ playerId: string; token?: string }>('/auth/player/signup', undefined, {
@@ -79,6 +97,16 @@ export const httpClient: PlayerClient = {
     });
     rememberToken(r.playerId, r.token);
     return r;
+  },
+
+  // PRE-M24 (PM-4): signing out revokes the session server-side and removes the
+  // token from this device. Before this, sign-out only forgot the identity:
+  // the token stayed in localStorage and stayed valid on the server.
+  logout: async (accountId) => {
+    const token = tokens.get(accountId);
+    forgetToken(accountId);
+    if (!token) return;
+    try { await fetch(`${API_URL}/auth/logout`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, keepalive: true }); } catch { /* offline: the server lifetime ends it */ }
   },
 
   getMe: (playerId) => request<Me>('/player/me', playerId),
@@ -322,6 +350,8 @@ export const httpClient: PlayerClient = {
       if (stopped) return;
       try {
         const res = await fetch(`${API_URL}/events/ticket`, { method: 'POST', headers: { ...authHeader(auth.id) } });
+        // PRE-M24 (PM-3): a 401 means the session is gone — stop asking every 15 s and let the app end it.
+        if (res.status === 401) { stopped = true; cb('session_expired', {}); return; }
         if (!res.ok) throw new Error('ticket refused');
         const { ticket } = (await res.json()) as { ticket: string };
         if (stopped) return;

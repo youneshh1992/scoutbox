@@ -58,6 +58,14 @@ clubs set one at registration, and Trust & Safety provisions Pro club
 credentials (`POST /admin/clubs/:id/credentials`). For isolated test
 accounts, sign up through the apps instead of touching the seed.
 
+**Production configuration**: with `NODE_ENV=production` (the Docker image
+sets it) the server refuses to start unless `SCOUTBOX_MEDIA_SECRET` is set
+and `ADMIN_KEY` is set to your own value of at least 16 characters — the
+development default `scoutbox-admin` is refused, because the Trust & Safety
+API would otherwise accept a publicly known key. It also refuses the test
+providers (`BOX_CAM_TEST_PROVIDER=1`, `AGENT_VERIFICATION_TEST_PROVIDER=1`).
+Example: `docker run -e SCOUTBOX_MEDIA_SECRET=… -e ADMIN_KEY=… -v data:/srv/data scoutbox`.
+
 **Phone on the same Wi-Fi**: the phone cannot reach your machine's
 `localhost`. Find your LAN address (`hostname -I` / `ipconfig getifaddr en0`)
 and start the player app with

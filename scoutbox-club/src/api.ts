@@ -648,8 +648,12 @@ export const httpApi: ScoutboxApi = {
           cb('sse_status', { connected: false });
           window.setTimeout(connect, Math.min(15_000, 1000 * 2 ** Math.min(retry++, 4)));
         };
-      } catch {
+      } catch (e) {
         if (closed) return;
+        // PRE-M24 (PM-3): a 401 on the ticket means the session is gone
+        // (expired, revoked, the user removed). Retrying would ask every 15 s
+        // for ever; instead the stream stops and the app signs out.
+        if (e instanceof ApiError && e.status === 401) { closed = true; cb('session_expired', {}); return; }
         dropped = true;
         cb('sse_status', { connected: false });
         window.setTimeout(connect, Math.min(15_000, 1000 * 2 ** Math.min(retry++, 4)));
@@ -663,3 +667,16 @@ export const httpApi: ScoutboxApi = {
 // The active client: live server by default, in-browser demo when VITE_DEMO=1.
 import { demoApi } from './demo';
 export const api: ScoutboxApi = DEMO_MODE ? demoApi : httpApi;
+
+/**
+ * PRE-M24 (PM-4): signing out revokes the session on the server. Before this,
+ * "Switch org" only forgot the token in this browser, so it stayed valid
+ * server-side. Best effort and fire-and-forget (`keepalive` survives the page
+ * change); the local sign-out never waits on the network.
+ */
+export function revokeSession(s: Session | null): void {
+  if (DEMO_MODE || !s?.token) return;
+  try {
+    void fetch(`${API_URL}/auth/logout`, { method: 'POST', headers: { authorization: `Bearer ${s.token}` }, keepalive: true }).catch(() => {});
+  } catch { /* offline: the server lifetime still ends it */ }
+}

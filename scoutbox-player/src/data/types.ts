@@ -121,6 +121,15 @@ export class ClientError extends Error {
   }
 }
 
+/**
+ * PRE-M24 (PM-5): the server's answer when a session no longer exists
+ * (expired, revoked, the account removed). The app ends the stored identity on
+ * it instead of treating it as a transient failure and staying "signed in"
+ * with every request refused.
+ */
+export const isSessionEnded = (e: unknown): boolean =>
+  e instanceof ClientError && /(^|_)AUTH_REQUIRED$|^SESSION_INVALID$/.test(e.code);
+
 export interface AttendanceInput {
   fixture: string;
   venue: string;
@@ -274,6 +283,8 @@ export interface PlayerClient {
   /** Real sessions: login mints a bearer token the client holds internally.
    *  Passwordless demo seeds log in without one; new accounts require theirs. */
   login(playerId: string, password?: string): Promise<{ playerId: string; name: string }>;
+  /** PRE-M24 (PM-4): revoke this account's session on the server and forget its token here. Optional: the demo client holds none. */
+  logout?(accountId: string): Promise<void>;
   /** Child device pairing: exchange the guardian's code for the child login. */
   pair(code: string): Promise<{ playerId: string; name: string }>;
   getMe(playerId: string): Promise<Me>;

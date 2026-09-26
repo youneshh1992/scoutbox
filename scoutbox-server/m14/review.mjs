@@ -90,7 +90,7 @@ export function registerVerificationReview(ctx) {
 
   orgRouter.post('/verification/licence', (req, res) => {
     const { licenceType, issuer, identifier, issueDate, expiry, dataUrl, filename, holderName } = req.body ?? {};
-    if (!licenceType?.trim() || !issuer?.trim()) return res.status(400).json({ error: 'FIELDS_REQUIRED', message: 'licenceType and issuer are required.' });
+    if (typeof licenceType !== 'string' || typeof issuer !== 'string' || !licenceType.trim() || !issuer.trim()) return res.status(400).json({ error: 'FIELDS_REQUIRED', message: 'licenceType and issuer are required.' }); // PRE-M24 (PM-10)
     // M23 P5.7 (T-3): a malformed expiry used to become `null` — "no expiry" —
     // so a licence declared with a typo never expired. A DATE_ONLY expiry
     // covers the whole day (the licence is valid THROUGH that day).

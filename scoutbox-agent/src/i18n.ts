@@ -644,8 +644,11 @@ export function t(key: keyof typeof en | (string & {}), fallback?: string): stri
 }
 // M23 P5.7 (§6): a calendar day (`YYYY-MM-DD`) has no zone and renders as that day everywhere.
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
-export const fmtDate = (ts: number | string) => new Date(ts).toLocaleDateString(current === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric', ...(typeof ts === 'string' && DATE_ONLY.test(ts) ? { timeZone: 'UTC' } : {}) });
+// PRE-M24 (PM-12): an unreadable stamp shows a dash, never "Invalid Date".
+const badStamp = (ts: unknown) => ts === null || ts === undefined || ts === '' || Number.isNaN(new Date(ts as number | string).getTime());
+export const fmtDate = (ts: number | string) => badStamp(ts) ? '—' : new Date(ts).toLocaleDateString(current === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric', ...(typeof ts === 'string' && DATE_ONLY.test(ts) ? { timeZone: 'UTC' } : {}) });
 export const fmtStamp = (ts: number | string) => {
+  if (badStamp(ts)) return '—';
   const d = new Date(ts);
   const sameDay = d.toDateString() === new Date().toDateString();
   return sameDay ? d.toLocaleTimeString(current === 'fr' ? 'fr-FR' : 'en-GB', { hour: '2-digit', minute: '2-digit' }) : fmtDate(ts);

@@ -73,7 +73,7 @@ export function registerEnterprise(ctx) {
     if (!requireLead(req, res)) return;
     const { email, name, role } = req.body ?? {};
     if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'EMAIL_INVALID' });
-    if (!name?.trim()) return res.status(400).json({ error: 'NAME_REQUIRED' });
+    if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'NAME_REQUIRED' }); // PRE-M24 (PM-10)
     if (db.users.some((u) => u.orgId === req.org.id && !u.removedAt && u.email === email)) {
       return res.status(409).json({ error: 'ALREADY_STAFF', message: 'Someone with this email is already on your staff.' });
     }
@@ -333,7 +333,8 @@ export function registerEnterprise(ctx) {
 
   orgRouter.post('/support', (req, res) => {
     const { subject, body, refs } = req.body ?? {};
-    if (!subject?.trim()) return res.status(400).json({ error: 'SUBJECT_REQUIRED' });
+    if (typeof subject !== 'string' || !subject.trim()) return res.status(400).json({ error: 'SUBJECT_REQUIRED' }); // PRE-M24 (PM-10)
+    if (body != null && typeof body !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field: 'body' });
     const t = {
       id: nextId('tkt'), orgId: req.org.id, byUserId: req.orgUser.id, byName: req.orgUser.name,
       subject: String(subject).slice(0, 160), body: String(body ?? '').slice(0, 2000),
