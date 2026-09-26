@@ -410,6 +410,18 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     if (event === 'typing') return; // transient — handled inside Messages
     setTick((t) => t + 1);
   }), [session]);
+  // M23 P8.1 (§29, §71) — a missed event, a dropped stream or a tab left in the
+  // background: every screen re-reads canonical state when the window regains
+  // focus or becomes visible again. Nothing local is trusted over the server.
+  useEffect(() => {
+    if (!session) return undefined;
+    const refetch = () => setTick((t) => t + 1);
+    const onVisible = () => { if (document.visibilityState === 'visible') refetch(); };
+    window.addEventListener('focus', refetch);
+    window.addEventListener('pageshow', refetch);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { window.removeEventListener('focus', refetch); window.removeEventListener('pageshow', refetch); document.removeEventListener('visibilitychange', onVisible); };
+  }, [session]);
 
   useEffect(() => {
     api.getNotifications(session).then(setNotifications).catch(() => {});

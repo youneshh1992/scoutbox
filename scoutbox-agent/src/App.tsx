@@ -328,6 +328,19 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     if (event === 'typing') return;
     setTick((x) => x + 1);
   }), [session]);
+  // M23 P8.1 (§20, §29) — an agent's authority is re-derived on every read;
+  // when the window regains focus or becomes visible every screen re-reads,
+  // so a representation that ended or a licence that lapsed while the tab
+  // sat in the background is not shown a moment longer than it must be.
+  useEffect(() => {
+    if (!session) return undefined;
+    const refetch = () => setTick((x) => x + 1);
+    const onVisible = () => { if (document.visibilityState === 'visible') refetch(); };
+    window.addEventListener('focus', refetch);
+    window.addEventListener('pageshow', refetch);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { window.removeEventListener('focus', refetch); window.removeEventListener('pageshow', refetch); document.removeEventListener('visibilitychange', onVisible); };
+  }, [session]);
   useEffect(() => { api.getNotifications(session).then(setNotifications).catch(() => {}); }, [session, tick]);
   const unread = notifications.filter((n) => !n.read).length;
   const notify = useCallback((text: string, error = false) => {
