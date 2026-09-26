@@ -49,13 +49,13 @@ that attacks it.
 | Dependency | Where it is decided | Attack | Answer |
 | --- | --- | --- | --- |
 | Role | `roomRole(room, user, isLead)` on every request from the live user row; `removedAt` ends sessions and streams | role removed while a tab is open | the next request is refused (`ROOM_PERMISSION_REQUIRED` / `LIFECYCLE_NOT_PERMITTED`); the strip re-reads and drops the control (live C) |
-| Org membership | `orgAuth`: session → org → user, `removedAt`, `suspended` | removed user keeps a token or a stream | 401 `USER_REMOVED`; sessions deleted; SSE closed on removal |
+| Org membership | `orgAuth`: session → org → user, `removedAt`, `suspended` | removed user keeps a token or a stream | sessions deleted at removal (the next request answers 401 `ORG_AUTH_REQUIRED`); a new login answers 401 `USER_REMOVED`; SSE closed on removal (hardening J8–J10) |
 | Agent authority | `integration.decide` / `basisFor` / `licenceCurrentFor` on every read; `findOwnAgreement` | expiry, termination, licence lapse, affiliation loss, scope change, block | the journey read answers 403 with the rule; deep links open nothing (F7, live G7; hardening K) |
 | Block | `isBlocked(playerId, orgId)` at every send / issue / start / completion and on every discovery read | block landing mid-stage | the next act refuses; history stays; closure acts (withdraw, cancel, void, report) stay (M23_P81_BLOCK_TRANSITION_MATRIX.md) |
 | Minor | `isAdult` (unknown / malformed DOB → not adult) at every recipient resolution; `minorOfferPathwayOpen` / `minorSigningPathwayOpen` closed | malformed DOB | fails closed (hardening M) |
 | Temporal | `parseStrictDateOnly`, finite-instant guards in the model, the funnel and the timeline | NaN, Infinity, out-of-range | TEMPORAL_ORDER; omitted from intervals; never re-ordered (hardening R, T) |
 | Idempotency | per-resource key rows with fingerprints; every route authorizes before it looks a key up | key replay after authority loss or supersession | authorization first (a removed role meets 403 before the key); a signature key dies with its revision (D-P81-12) |
-| Rate limits | one limiter, budgets per org / actor; legacy routes now draw on the canonical budgets (D-P81-4) and dedupe (D-P81-3) | aliasing through an old route; flooding the bucket store | same budget; eviction never resets live budgets (D-P81-5) |
+| Rate limits | one limiter, budgets per org / actor; legacy routes now draw on the canonical budgets (D-P81-4) and dedupe (D-P81-3) | aliasing through an old route; flooding the bucket store | same budget; eviction never resets live budgets — expired first, then the buckets with the fewest hits (a flood is 20 000 keys touched once), oldest among equals (D-P81-5, refined R4) |
 
 ## 4. Counts
 

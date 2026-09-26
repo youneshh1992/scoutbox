@@ -11,7 +11,7 @@ authoritative result. Checks: `m23RecruitmentJourneyHardeningE2E` group B
 
 | # | Race | First to land | Second meets | One result | Check |
 | --- | --- | --- | --- | --- | --- |
-| 1 | Contact send vs block | either | send after block: 409 `CONTACT_BLOCKED`, nothing moves; block after send: the Contact stays delivered and the case `contacted` — the block stops what comes next, not what happened | one delivered Contact or none; the block always stands | B1; contact E2E |
+| 1 | Contact send vs block | either | send after block: 403 `CONTACT_BLOCKED`, nothing moves; block after send: the Contact stays delivered and the case `contacted` — the block stops what comes next, not what happened | one delivered Contact or none; the block always stands | B1; contact E2E |
 | 2 | Contact response vs Trial invitation | either | an invitation while the Contact is unanswered is allowed (the case is `contacted`); the answer after the invitation lands on the Contact only | both records; the case moves once per record (`trial_requested` by the invitation) | B2 |
 | 3 | Trial schedule vs Trial cancel | either | the loser's `expectedRev` is stale: 409 `TRIAL_VERSION_CONFLICT` | one Trial state | B3; trial E2E |
 | 4 | Trial completion vs reschedule | either | stale rev: 409; a reschedule of a completed Trial is refused by state | one completion | B4 |

@@ -421,6 +421,11 @@ export const JOURNEY_CLASSIFICATIONS = Object.freeze(['canonical', 'legacy', 'pa
 export const JOURNEY_INTEGRITY_CODES = Object.freeze([
   'LIFECYCLE_STATE_UNKNOWN', 'PLAYER_MISMATCH', 'CLUB_MISMATCH', 'CASE_MISMATCH',
   'STALE_POINTER', 'LIFECYCLE_AHEAD_OF_EVIDENCE', 'LIFECYCLE_BEHIND_TERMINAL_EVIDENCE', 'EVIDENCE_AHEAD_OF_LIFECYCLE', 'HISTORY_MALFORMED', 'TEMPORAL_ORDER',
+  // M23 P8.1 (D-P81-17): a structurally corrupt record that NAMES this case
+  // (an Offer, a package, a Contact or a Trial that fails its own integrity
+  // check) is omitted from the projection — and the omission is a problem,
+  // never a quiet downgrade to "legacy" with a live-looking next action.
+  'RECORD_CORRUPT',
 ]);
 
 /**
@@ -480,6 +485,13 @@ export function validateRecruitmentJourney(facts) {
     if (d.offerId && !ids.offer.has(d.offerId)) problems.add('STALE_POINTER');
     if (d.signingPackageId && !ids.package.has(d.signingPackageId)) problems.add('STALE_POINTER');
   }
+  // M23 P8.1 (D-P81-16): the case's own link to a completed signing row is a
+  // claim like any other. Every writer of `links.signingId` checks the row
+  // exists, so a link that names no row is corruption — a stale pointer,
+  // never a legacy `signed`. (Absent ids on the facts: the check is skipped.)
+  if ((Number(facts.corruptRecords) || 0) > 0) problems.add('RECORD_CORRUPT');
+  const linkedSigning = kase?.links?.signingId;
+  if (typeof linkedSigning === 'string' && linkedSigning && facts.signingRowIds instanceof Set && !facts.signingRowIds.has(linkedSigning)) problems.add('STALE_POINTER');
   // Evidence per reached state.
   const evidence = {
     contacted: (facts.contacts ?? []).some((c) => CONTACT_EVIDENCE_STATUSES.includes(c.status) && !c.cancelledAt),

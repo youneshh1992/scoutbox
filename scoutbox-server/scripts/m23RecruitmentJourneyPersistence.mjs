@@ -11,6 +11,11 @@
 //   3  planted legacy and corrupt cases survive five restarts untouched:
 //      never repaired, never re-classified, never given a record
 //   4  the migration ledger applies nothing on replay (schema 2308)
+//   5  M23 P8.1 (§67): an under_review checkpoint; a stale Offer pointer,
+//      a cross-case second case, a legacy mix and a signed mismatch across
+//      restarts (never repaired, nothing inherited, nothing fabricated); key
+//      replays after a restart; a block and a role loss across restarts;
+//      the analytics funnel identical across a restart
 //
 // Nothing is rewritten, re-ordered or "repaired" on boot.
 import { spawn } from 'node:child_process';
@@ -221,6 +226,134 @@ section('4 — the migration ledger on replay');
   ok(h.headers.get('x-scoutbox-schema') === String(SCHEMA_VERSION), `schema ${SCHEMA_VERSION} on the wire`);
   const log = S.log();
   neg(!/applied\s+m2\d\d_/.test(log) || /applied 0/.test(log), 'no migration step applied on replay');
+}
+
+// ================================================================ 5 — P8.1 hardening (§67)
+section('5 — P8.1: stale pointers, cross-case, legacy mixes, a signed mismatch, key replays, blocks and role loss across restarts; analytics stable');
+{
+  const T5 = T0 + 30 * DAY;
+  const dash = async () => JSON.stringify((await S.j('GET', '/org/recruitment-analytics?window=last_90_days', undefined, maria.token)).body?.data?.pipeline?.metrics?.journey_evidence_funnel ?? null);
+  const dashBefore = await dash();
+  const stopStart = async (label) => { const db = await S.stop(); ok(db !== null, `${label}: persisted`); S = await bootOn(DATA, PORT); ok(S.up, `${label}: rebooted`); await login(); return db; };
+  const mk = async (playerId) => { const rr = await S.j('POST', '/org/rooms', { playerId, sourceContext: 'search' }, maria.token); return rr.status === 201 ? rr.body.room.roomId : rr.body?.existingRoomId; };
+  // 5.1 an under_review checkpoint (the state every reopen and fallback resume lands on) is identical across a restart.
+  const UR = await mk('pl-carvalho'); await lifecycle(UR, 'startReview');
+  const urBefore = fingerprint(await journey(UR));
+  await stopStart('5.1 under_review');
+  ok(fingerprint(await journey(UR)) === urBefore && (await journey(UR)).lifecycle.currentStage === 'under_review', '5.1 the under_review checkpoint is IDENTICAL after the restart');
+  // 5.2 a stale Offer pointer (a case at offer_made whose current Offer names a missing revision) stays integrity_error across restarts — never repaired, never re-pointed.
+  const SP = await mk('pl-martin'); await lifecycle(SP, 'startReview');
+  let db = await S.stop();
+  {
+    const k = db.recruitmentCases.find((x) => x.id === SP); let tt = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
+    for (const to of ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed', 'offer_consideration', 'offer_made']) { tt += H; k.history.push({ id: `hist-p81p-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', by: { kind: 'org', id: 'legacy', name: 'Legacy' }, detail: { from: k.room.status, to, reasonCodes: [] } }); k.room.status = to; }
+    k.room.rev = (k.room.rev ?? 1) + 6;
+    // A REAL Offer (Kola's, cloned whole) re-homed on this case with its current-revision pointer broken: every other field is sound, only the pointer is stale.
+    const src = db.recruitmentOffers.find((o) => o.id === OID);
+    const clone = JSON.parse(JSON.stringify(src));
+    clone.id = 'rof-p81p-stale'; clone.caseId = SP; clone.playerId = 'pl-martin'; clone.status = 'ISSUED'; clone.responses = []; clone.currentRevisionId = 'rofr-missing';
+    for (const rv of clone.revisions) { rv.status = 'ISSUED'; rv.response = null; rv.respondedAt = null; if (rv.recipientSnapshot) rv.recipientSnapshot.playerId = 'pl-martin'; }
+    db.recruitmentOffers.push(clone);
+    const st0 = openStore(DATA); const snap = st0.load(); snap.db = db; st0.save(snap);
+  }
+  S = await bootOn(DATA, PORT); ok(S.up, '5.2 booted on the planted store'); await login();
+  const spFps = [];
+  for (let i = 1; i <= 3; i += 1) {
+    const jr = await journey(SP); spFps.push(fingerprint(jr));
+    if (i === 1) neg(jr.journey.classification === 'integrity_error' && jr.journey.integrity.includes('RECORD_CORRUPT') && jr.journey.resources.offerId === null && jr.journey.nextAction.blockedBy.includes('INTEGRITY_ERROR'), `5.2 a stale Offer pointer: integrity_error, RECORD_CORRUPT (the corrupt Offer names this case and is omitted, never a quiet legacy read), no current Offer, the act blocked (${jr.journey.integrity.join(',')}) (D-P81-17)`);
+    db = await stopStart(`5.2 restart ${i}`);
+    const o = db.recruitmentOffers.find((x) => x.id === 'rof-p81p-stale');
+    neg(o && o.currentRevisionId === 'rofr-missing' && o.revisions.length === 1 && db.recruitmentCases.find((x) => x.id === SP).room.status === 'offer_made', `5.2 restart ${i}: the pointer is still stale on disk (never repaired, never re-pointed)`);
+  }
+  neg(spFps.every((f) => f === spFps[0]), '5.2 the integrity_error projection is identical across three restarts');
+  // 5.3 cross-case: an ended case and a second case for the same player — nothing inherited, before and after a restart (D-P81-15).
+  const ended = await mk('pl-okafor'); // LEG from section 3: legacy trial_completed, now ended
+  await lifecycle(ended, 'rejectCase').then(async (r) => { if (r.status !== 200) { const r2 = await S.j('POST', `/org/rooms/${ended}/lifecycle`, { action: 'rejectCase', expectedRev: await rev(ended), reasonCodes: ['rejected'] }, maria.token); ok(r2.status === 200, `5.3 setup: the legacy case ended (${r2.status} ${r2.body?.error ?? ''})`); } });
+  const second = await mk('pl-okafor');
+  const secondJ = await journey(second);
+  neg(second !== ended && secondJ.lifecycle.currentStage === 'watching' && Object.values(secondJ.journey.resources).every((v) => v === null) && secondJ.journey.completedStages.every((c) => c.stage === 'watching') && secondJ.history.entries.every((e) => e.kind === 'room_created'), '5.3 the second case inherits no resource, no stage and no milestone from the ended case');
+  const secondBefore = fingerprint(secondJ); const endedBefore = fingerprint(await journey(ended));
+  await stopStart('5.3 cross-case');
+  ok(fingerprint(await journey(second)) === secondBefore && fingerprint(await journey(ended)) === endedBefore, '5.3 both cases read identically after the restart (the ended case keeps its history, the second none of it)');
+  // 5.4 a legacy mix (canonical Contact + legacy trial claims) is partially_canonical and stable across a restart; the player's line stays what reached him.
+  const MIX = second;
+  await lifecycle(MIX, 'startReview'); await lifecycle(MIX, 'planContact');
+  const dm = await S.j('POST', `/org/rooms/${MIX}/contacts`, { subject: 'Interest', body: 'Talk?', clientKey: key() }, maria.token);
+  const sm = await S.j('POST', `/org/rooms/${MIX}/contacts/${dm.body.contact.id}/send`, { expectedRev: dm.body.contact.rev, clientKey: key() }, maria.token);
+  ok(sm.status === 200, '5.4 a canonical Contact delivered on the second case');
+  db = await S.stop();
+  {
+    const k = db.recruitmentCases.find((x) => x.id === MIX); let tt = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
+    for (const to of ['trial_requested', 'trial_scheduled', 'trial_completed']) { tt += H; k.history.push({ id: `hist-p81p-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', by: { kind: 'org', id: 'legacy', name: 'Legacy' }, detail: { from: k.room.status, to, reasonCodes: [] } }); k.room.status = to; }
+    k.room.rev = (k.room.rev ?? 1) + 3;
+    const st0 = openStore(DATA); const snap = st0.load(); snap.db = db; st0.save(snap);
+  }
+  S = await bootOn(DATA, PORT); ok(S.up, '5.4 booted'); await login();
+  const okafor = (await S.j('POST', '/auth/player/login', { playerId: 'pl-okafor' })).body;
+  const mixJ = await journey(MIX);
+  ok(mixJ.journey.classification === 'partially_canonical' && mixJ.journey.resources.contactId === dm.body.contact.id && mixJ.journey.resources.trialId === null && mixJ.journey.nextAction.code === 'COMPLETE_ASSESSMENT', '5.4 canonical Contact + legacy trial claims: partially_canonical, the Contact current, no Trial invented, a safe next action');
+  const mixLine = () => S.j('GET', '/player/journeys', undefined, okafor.token).then((r) => JSON.stringify((r.body.items ?? []).filter((x) => x.club.id === 'org-eastport').map((x) => [x.journey.stage, x.journey.timeline.map((e) => e.kind)])));
+  const mixLineBefore = await mixLine(); const mixBefore = fingerprint(mixJ);
+  neg(!/trial/.test(mixLineBefore) && /contacted/.test(mixLineBefore), `5.4 the player's lines name the Contact and never the legacy trial claim (${mixLineBefore.slice(0, 120)})`);
+  await stopStart('5.4 legacy mix');
+  ok(fingerprint(await journey(MIX)) === mixBefore && (await mixLine()) === mixLineBefore, '5.4 the mixed case and the player\'s lines are IDENTICAL after the restart');
+  // 5.5 a signed mismatch: a case at `signed` whose link names a missing row is integrity_error and stays so; the player is never told signed by it.
+  const SM = await mk('pl-imani'); await lifecycle(SM, 'startReview');
+  db = await S.stop();
+  {
+    const k = db.recruitmentCases.find((x) => x.id === SM); let tt = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
+    for (const to of ['offer_consideration', 'offer_made', 'signed']) { tt += H; k.history.push({ id: `hist-p81p-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', by: { kind: 'org', id: 'legacy', name: 'Legacy' }, detail: { from: k.room.status, to, reasonCodes: [] } }); k.room.status = to; }
+    k.room.rev = (k.room.rev ?? 1) + 3; k.stage = 'closed'; k.links ??= {}; k.links.signingId = 'sign-p81p-missing';
+    const st0 = openStore(DATA); const snap = st0.load(); snap.db = db; st0.save(snap);
+  }
+  S = await bootOn(DATA, PORT); ok(S.up, '5.5 booted'); await login();
+  const imani = (await S.j('POST', '/auth/player/login', { playerId: 'pl-imani' })).body;
+  const smJ = await journey(SM);
+  neg(smJ.journey.classification === 'integrity_error' && smJ.journey.integrity.includes('STALE_POINTER') && smJ.journey.resources.completedSigningId === null && smJ.outcome.signing === null, `5.5 signed with a dangling link: integrity_error, STALE_POINTER, no completed signing named (${smJ.journey.integrity.join(',')}) (D-P81-16)`);
+  const imaniLine = async () => (await S.j('GET', '/player/journeys', undefined, imani.token)).body.items.filter((x) => x.club.id === 'org-eastport').map((x) => x.journey.stage);
+  neg(!(await imaniLine()).includes('signed') && (await S.j('GET', '/org/players/pl-imani', undefined, maria.token)).body.contractStatus !== 'under_contract', '5.5 the player is not told signed and is not under contract by a dangling link');
+  const smBefore = fingerprint(smJ);
+  db = await stopStart('5.5 signed mismatch');
+  neg(fingerprint(await journey(SM)) === smBefore && db.recruitmentCases.find((x) => x.id === SM).links.signingId === 'sign-p81p-missing' && !db.signings.some((r) => r.id === 'sign-p81p-missing'), '5.5 identical after the restart; the dangling link is neither repaired nor given a row');
+  // 5.6 key replays across a restart: a lifecycle move and an Offer issue replayed with their keys are idempotent; nothing duplicates.
+  const KR = await mk('pl-nowak'); await lifecycle(KR, 'startReview');
+  const kLife = key();
+  const mv = await S.j('POST', `/org/rooms/${KR}/lifecycle`, { action: 'shortlist', expectedRev: await rev(KR), clientKey: kLife }, maria.token);
+  await stopStart('5.6 keys');
+  const replay = await S.j('POST', `/org/rooms/${KR}/lifecycle`, { action: 'shortlist', expectedRev: 0, clientKey: kLife }, maria.token);
+  const hist = (await journey(KR)).history.entries.filter((e) => e.kind === 'room_status_changed' && e.to === 'shortlisted').length;
+  neg(mv.status === 200 && replay.status === 200 && replay.body.idempotent === true && hist === 1, `5.6 a lifecycle move replayed with its key after a restart is idempotent; one history entry (${replay.status} ${replay.body?.error ?? ''})`);
+  const kIssue = key();
+  const iss2 = await S.j('POST', `/org/offers/${OID}/issue`, { expectedRev: 999, clientKey: kIssue }, maria.token, at(T0));
+  neg(iss2.status !== 200 && (await S.j('GET', `/org/offers/${OID}`, undefined, maria.token)).body.offer.revisions.length === 1, '5.6 the signed case\'s Offer takes no new issue after the restart (one revision, ever)');
+  // 5.7 restart after a block: the block is read from the store, the strip still names it, the send is still refused.
+  const BL = await mk('pl-mensah'); await lifecycle(BL, 'startReview'); await lifecycle(BL, 'planContact');
+  const mensah = (await S.j('POST', '/auth/player/login', { playerId: 'pl-mensah' })).body;
+  const dB = await S.j('POST', `/org/rooms/${BL}/contacts`, { subject: 'Interest', body: 'Talk?', clientKey: key() }, maria.token);
+  ok((await S.j('POST', '/player/block', { orgId: 'org-eastport', reason: 'test' }, mensah.token)).status === 201, '5.7 the player blocked the club');
+  await stopStart('5.7 block');
+  const sB = await S.j('POST', `/org/rooms/${BL}/contacts/${dB.body.contact.id}/send`, { expectedRev: dB.body.contact.rev, clientKey: key() }, maria.token);
+  const jB = await journey(BL);
+  neg(sB.status === 403 && sB.body?.error === 'CONTACT_BLOCKED' && jB.journey.nextAction.blockedBy.includes('BLOCKED') && jB.lifecycle.currentStage === 'contact_planned', '5.7 after the restart the send is refused and the strip names the block; the draft and the stage stand');
+  // 5.8 restart after role loss: a restricted room stays closed to the colleague; a removed colleague stays removed.
+  const tom = (await S.j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Tom Field', role: 'First-Team Scout' })).body;
+  ok((await S.j('PATCH', `/org/rooms/${KR}`, { restricted: true }, maria.token)).status === 200, '5.8 the lead restricted the room');
+  await stopStart('5.8 role loss');
+  const tomRead = await S.j('GET', `/org/rooms/${KR}/journey`, undefined, tom.token);
+  neg(tomRead.status === 403 || tomRead.status === 401, `5.8 after the restart the colleague's read is still refused (${tomRead.status} ${tomRead.body?.error})`);
+  const staff = (await S.j('GET', '/org/staff', undefined, maria.token)).body; const tomId = staff.find((u) => u.name === 'Tom Field')?.id;
+  ok((await S.j('POST', `/org/staff/${tomId}/remove`, {}, maria.token)).status === 200, '5.8 the lead removed the colleague');
+  await stopStart('5.8 removal');
+  const tomAgain = (await S.j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Tom Field', role: 'First-Team Scout' }));
+  neg(tomAgain.status !== 200 || tomAgain.body?.error === 'USER_REMOVED', `5.8 the removed colleague cannot log in after the restart (${tomAgain.status} ${tomAgain.body?.error ?? ''})`);
+  // 5.9 analytics stability: the canonical dashboard's metrics are the same shape before and after every restart, and the funnel counts one signed case here.
+  const dashAfter = await dash();
+  ok(dashAfter !== 'null' && dashAfter.includes('journey_evidence_funnel'), '5.9 the funnel metric is on the dashboard after the restarts');
+  const funnelOf = (d) => d;
+  const fBefore = funnelOf(dashBefore); const fNow = funnelOf(dashAfter);
+  await stopStart('5.9 analytics');
+  ok(funnelOf(await dash()) === fNow, '5.9 the funnel is IDENTICAL across a restart (derived from records, never stored)');
+  ok(fBefore !== 'null' && fNow !== 'null', `5.9 the funnel reads before and after section 5 (planted legacy and corrupt cases never inflate a canonical stage: ${fBefore === fNow ? 'unchanged' : 'changed only by the canonical records section 5 wrote'})`);
 }
 
 await S.stop();

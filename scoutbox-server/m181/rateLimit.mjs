@@ -197,12 +197,15 @@ export function memoryRateLimitProvider() {
         // failures are keyed by whatever identifier the caller typed, so
         // 20 000 wrong guesses at made-up names emptied every club's, agent's
         // and player's budget at once. Now: expired buckets go first; if the
-        // store is still full, the oldest quarter goes; live budgets survive.
+        // store is still full, a quarter goes — the buckets with the FEWEST
+        // hits first (a flood is 20 000 keys touched once), oldest among
+        // equals — so a budget that is actually being spent is the last thing
+        // evicted (P8.1 hardening U5: the flood alone never reaches it).
         if (buckets.size >= 20_000) {
           for (const [k, v] of buckets) if (now - v.start > v.windowMs) buckets.delete(k);
           if (buckets.size >= 20_000) {
-            const oldest = [...buckets.entries()].sort((x, y) => x[1].start - y[1].start).slice(0, Math.ceil(buckets.size / 4));
-            for (const [k] of oldest) buckets.delete(k);
+            const victims = [...buckets.entries()].sort((x, y) => (x[1].n - y[1].n) || (x[1].start - y[1].start)).slice(0, Math.ceil(buckets.size / 4));
+            for (const [k] of victims) buckets.delete(k);
           }
         }
         buckets.set(key, { start: now, n: 1, windowMs });

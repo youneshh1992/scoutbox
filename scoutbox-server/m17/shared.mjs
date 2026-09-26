@@ -235,9 +235,12 @@ export const ROOM_TRANSITIONS = table({
   // stays open.
   // M23 P8.1 (D-P81-1): `resumeCase` returns the case to the state it was held
   // FROM (m23/lifecycle.mjs resolves the target and is the ONE edge out of a
-  // hold into an evidence-bearing state). This row deliberately does NOT name
-  // those states: while a case is paused, nothing else — not the recipient's
-  // answer, not a hand move on the legacy route — takes it out of the hold.
+  // hold into a held-from state). This row deliberately names NONE of the
+  // states a recipient's answer reaches (contacted, trial_scheduled,
+  // trial_completed, offer_made, offer_accepted, signed): while a case is
+  // paused, nothing else — not the recipient's answer, not a hand move on the
+  // legacy route — takes it out of the hold. Its two evidence-bearing exits
+  // (trial_requested, offer_consideration) keep their preconditions.
   on_hold: ['under_review', 'shortlisted', 'priority', 'contact_planned', 'trial_requested', 'offer_consideration', 'withdrawn', 'archived', 'closed'],
   // Reopening is a first-class move, not a delete-and-recreate.
   withdrawn: ['under_review', 'archived', 'closed'],

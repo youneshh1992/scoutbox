@@ -12,7 +12,7 @@ D/L, the P8 live D group.
 | Link | After | Server answer on open | Client behaviour |
 | --- | --- | --- | --- |
 | Room `#/recruitment/rooms/:id/:tab` | the opener's role removed from the room (restricted room) | 403 `ROOM_RESTRICTED` / `ROOM_PERMISSION_REQUIRED` on the room read | the Room says it is not open to them; the list re-reads (live C; hardening live L4) |
-| Room | the opener removed from the org | 401 `USER_REMOVED` on every call; the stream closed | the app signs the user out to the login screen |
+| Room | the opener removed from the org | 401 on every call (`ORG_AUTH_REQUIRED`: the session itself was revoked at removal; `USER_REMOVED` at any new login); the stream closed | the app signs the user out to the login screen |
 | Room | the case ended (withdrawn / archived / closed) | 200: the Room reads; every mutation refuses by state; the strip names `CASE_ENDED`, no control | read-only tabs; the strip shows no act (live D; hardening W) |
 | Room | the player blocked the org | 200: the Room reads with `playerAvailable: false`; every forward act refuses | the strip names the act with `BLOCKED`; the player header reads withheld |
 | Room tab of another org's case | — | 404 `ROOM_NOT_FOUND` (the same body as a fabricated id) | "not found" |

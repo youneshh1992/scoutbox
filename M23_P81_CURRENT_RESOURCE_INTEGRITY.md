@@ -35,7 +35,13 @@ order (journey E2E A6–A12; hardening F1–F6 shuffle the arrays and re-read).
 A club opens a second case for a player after the first ended (archived,
 withdrawn, closed or signed), or another allowed org opens its own. Every
 selector is fed **this case's rows only** (`caseId`; for decisions
-`roomId`; for assessments the club's own records, documented). The new case
+`roomId`; for assessments D-P81-15: an assessment belongs to the case whose
+Trial it was written in, else to the case that was OPEN when it was
+written — an ended case keeps its own and a second case inherits none).
+The player's and guardian's lines are scoped the same way: a request or a
+Trial that names the ended case, or that was written while it was open,
+is that case's line and never the second case's (D-P81-15; hardening
+C8–C11, persistence 5.3, live L8). The new case
 therefore starts with no current Contact, Trial, decision, Offer or package,
 its completed stages carry nothing from the first case, its timeline shows
 its own history, and the first case keeps naming its own records
@@ -46,17 +52,20 @@ Offer's `caseId` are set by their writers and never re-pointed.
 
 | Pointer | Where | If it names a missing record | If it names a record of another case / player / org | If the state word is unknown |
 | --- | --- | --- | --- | --- |
-| `offer.currentRevisionId` | m28 | `offerIntegrity` → the Offer is omitted with `OFFER_CURRENT_REVISION_MISSING`; the projection classifies `integrity_error`; the next action is named and blocked (`INTEGRITY_ERROR`, P8.1) | `offerCaseConsistency` → `CASE_MISMATCH` / `PLAYER_MISMATCH` / `CLUB_MISMATCH`, omitted | `offerIntegrity` → omitted; `effectiveRevisionStatus` never treats an unknown word as live |
+| `offer.currentRevisionId` | m28 | `offerIntegrity` → the Offer is omitted with `OFFER_CURRENT_REVISION_MISSING`; the projection classifies `integrity_error` (`RECORD_CORRUPT`, plus `STALE_POINTER` when the history claims the Offer); the next action is named and blocked (`INTEGRITY_ERROR`, P8.1) | `offerCaseConsistency` → `CASE_MISMATCH` / `PLAYER_MISMATCH` / `CLUB_MISMATCH`, omitted | `offerIntegrity` → omitted; `effectiveRevisionStatus` never treats an unknown word as live |
 | `pkg.currentRevisionId` | m29 | `signingIntegrity` → omitted with its code; `integrity_error` | `signingConsistency` → omitted | unknown status → not live, not completed (`signingIsLive` false) |
 | `trial.requestId`, `trial.caseId` | m23/trial | `trialIntegrity` → omitted, counted | `CASE_MISMATCH` → omitted | `deriveWorkflowState` → not live |
 | `contact.caseId` | m23/contact | `contactIntegrity` → omitted, counted | omitted | unknown status → never evidence (`CONTACT_EVIDENCE_STATUSES`) |
 | history `contactId` / `trialId` / `requestId` / `decisionId` / `offerId` / `signingPackageId` | case history | `STALE_POINTER` + `LIFECYCLE_AHEAD_OF_EVIDENCE` | the foreign reference is folded in as `CASE_MISMATCH` etc. | — |
-| `case.links.signingId` | m17 | not read for truth (the projection reads the row) | — | — |
+| `case.links.signingId` | m17 | `STALE_POINTER` (D-P81-16): every writer checks the row exists, so a dangling link is corruption — `integrity_error`, no completed signing named, the player never told `signed` by it (persistence 5.5) | — | — |
+| any Offer, package, Trial or Contact that NAMES this case and fails its own integrity check | m28 / m29 / m23 | `RECORD_CORRUPT` (D-P81-17): the record is omitted from the projection AND the case is `integrity_error` with the act blocked — never a quiet downgrade to `legacy` with a live-looking `REVISE_OR_WITHDRAW_OFFER` (persistence 5.2; hardening R1) | the same | — |
 | `case.room.status` | m17 | — | — | `LIFECYCLE_STATE_UNKNOWN`; `nextAction = STATE_UNKNOWN`; no lifecycle move (`LIFECYCLE_STATE_UNKNOWN` from the validator) |
 
 Nothing here is repaired on read and nothing widens authority: a corrupt
 Offer or package is simply not current, so no act is offered on it and the
-domain routes refuse it with their own integrity codes.
+domain routes refuse it with their own integrity codes; since R4 the
+omission itself is a named problem (`RECORD_CORRUPT`), so the case can never
+read as a sound legacy case while a corrupt record names it.
 
 ## 5. Evidence and lifecycle drift (§13, §14)
 

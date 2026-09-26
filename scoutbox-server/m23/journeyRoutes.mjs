@@ -102,6 +102,28 @@ export function registerJourneyRoutes(ctx) {
   const caseFor = (caseId, orgId) => (db.recruitmentCases ?? []).find((k) => k && k.id === caseId && k.room && (orgId === null || k.orgId === orgId)) ?? null;
   const room = (k, tab) => (k ? { kind: 'room', roomId: k.id, tab } : null);
   const blocked = (playerId, orgId) => (db.blocks ?? []).some((b) => b && b.playerId === playerId && b.orgId === orgId);
+  /**
+   * M23 P8.1 (D-P81-14): an agent's target is re-derived through the SAME
+   * authority the client routes prove on every read — a live representation
+   * (`client_private`), and for the Offer tab the employment/transfer scope
+   * and a current licence. An agent whose representation ended, whose licence
+   * lapsed or whose affiliation was removed keeps the row (history) and loses
+   * the destination: the row is plain text, exactly as a player's is when the
+   * resource is no longer theirs to open. A share alone never grants a target.
+   */
+  function agentTarget(agentUserId, playerId, tab, at) {
+    if (typeof agentUserId !== 'string' || !agentUserId) return null;
+    const priv = integration?.decide?.({ surface: 'client_private', clientId: playerId, agentUserId, at });
+    if (priv?.allowed !== true) return null;
+    if (tab === 'offers') {
+      const basis = integration?.basisFor?.({ agentUserId, clientId: playerId, at });
+      const scopeOk = !!basis?.ok && (basis.scope ?? []).some((s) => s === 'employment' || s === 'transfer');
+      const agreement = (db.representationAgreements ?? []).find((a) => a && a.agentUserId === agentUserId && a.clientId === playerId && a.id === basis?.agreementId) ?? (db.representationAgreements ?? []).find((a) => a && a.agentUserId === agentUserId && a.clientId === playerId) ?? null;
+      const licenceCurrent = integration?.licenceCurrentFor ? integration.licenceCurrentFor(agentUserId, agreement?.jurisdiction ?? null, at) : false;
+      if (!scopeOk || licenceCurrent !== true) return null;
+    }
+    return { kind: 'client', clientId: playerId, tab };
+  }
 
   /**
    * @param {object} n           the notification row
@@ -141,7 +163,7 @@ export function registerJourneyRoutes(ctx) {
         if (kind === 'org_user') {
           if (c.orgId === orgId) return room(caseFor(c.caseId, orgId), 'contact');
           // an agent the contact was routed to: their client's contacts tab
-          return c.routingSnapshot?.agent?.agentUserId === audience.id ? { kind: 'client', clientId: c.playerId, tab: 'contacts' } : null;
+          return c.routingSnapshot?.agent?.agentUserId === audience.id ? agentTarget(audience.id, c.playerId, 'contacts', at) : null;
         }
         return null;
       }
@@ -150,7 +172,7 @@ export function registerJourneyRoutes(ctx) {
         if (!o) return null;
         if (kind === 'org_user') {
           if (o.orgId === orgId) return room(caseFor(o.caseId, orgId), 'offer');
-          return o.agentShare?.agentUserId === audience.id ? { kind: 'client', clientId: o.playerId, tab: 'offers' } : null;
+          return o.agentShare?.agentUserId === audience.id ? agentTarget(audience.id, o.playerId, 'offers', at) : null;
         }
         const rev = (o.revisions ?? []).filter((r) => r && r.issuedAt).sort((x, y) => y.revisionNumber - x.revisionNumber)[0] ?? null;
         const snap = rev?.recipientSnapshot;
@@ -169,7 +191,7 @@ export function registerJourneyRoutes(ctx) {
         if (kind === 'org_user') {
           if (p.orgId === orgId) return room(caseFor(p.caseId, orgId), 'signing');
           const o = (db.recruitmentOffers ?? []).find((x) => x && x.id === p.offerId);
-          return o?.agentShare?.agentUserId === audience.id ? { kind: 'client', clientId: p.playerId, tab: 'offers' } : null;
+          return o?.agentShare?.agentUserId === audience.id ? agentTarget(audience.id, p.playerId, 'offers', at) : null;
         }
         const rev = (current.revisions ?? []).find((r) => r && r.id === current.currentRevisionId) ?? null;
         if (!rev?.readyAt) return null; // never presented: nothing for a recipient to open

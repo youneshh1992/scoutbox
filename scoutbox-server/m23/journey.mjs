@@ -109,6 +109,29 @@ const TRIAL_TIMELINE_ACTIONS = new Set([
  * carry player identity (M17's room header) re-run `orgCanSee` on every read,
  * which is where that check belongs.
  */
+/**
+ * M23 P8.1 (D-P81-15) — a record belongs to ONE case. A row that names a case
+ * belongs to that case and no other. A row that names none (a legacy request,
+ * a legacy Trial, an assessment written outside a Trial) belongs to the case
+ * of this club and player that was OPEN when it was written: an ended case
+ * keeps what happened while it lived, and a second case opened later
+ * inherits nothing from it. A row older than every case belongs to the case
+ * being read (the pre-case history the club always had).
+ */
+function caseEndedAt(k) {
+  if (!LIFECYCLE_TERMINAL.includes(k?.room?.status)) return Infinity;
+  const ends = (k.history ?? []).filter((e) => e?.action === 'room_status_changed' && LIFECYCLE_TERMINAL.includes(e.detail?.to)).map((e) => Number(e.at) || 0);
+  return ends.length ? Math.max(...ends) : (Number(k.room?.updatedAt) || 0);
+}
+function ownedByAnotherCase(db, kase, { caseId = null, at = null }) {
+  if (typeof caseId === 'string' && caseId) return caseId !== kase.id;
+  const ts = Number(at);
+  if (!Number.isFinite(ts)) return false;
+  return (db.recruitmentCases ?? []).some((k) => k && k.id !== kase.id && k.orgId === kase.orgId && k.playerId === kase.playerId && k.room && Number(k.room.createdAt) <= ts && ts <= caseEndedAt(k));
+}
+const trialCaseOf = (db, trialId) => (typeof trialId === 'string' ? (db.trials ?? []).find((t) => t && t.id === trialId)?.caseId ?? null : null);
+const contactCaseOf = (db, contactId) => (typeof contactId === 'string' ? (db.recruitmentContacts ?? []).find((c) => c && c.id === contactId)?.caseId ?? null : null);
+
 export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   const {
     now = Date.now(),
@@ -314,13 +337,20 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   // resources, the server-derived next action and the classification.
   const offerRows = offersAvailable ? db.recruitmentOffers.filter((o) => o?.caseId === kase.id && o.orgId === kase.orgId && o.playerId === kase.playerId && offerIntegrity(o, { orgId: kase.orgId, caseId: kase.id }).length === 0) : [];
   const soundPackages = packageRows.filter((p) => signingIntegrity(p, { orgId: kase.orgId }).length === 0);
-  const allAssessments = db.assessments.filter((a) => a?.orgId === kase.orgId && a.playerId === kase.playerId);
+  // P8.1 (D-P81-17): every record naming THIS case that failed its integrity check — omitted above, and a problem below.
+  const offersCorrupt = offersAvailable ? db.recruitmentOffers.filter((o) => o?.caseId === kase.id && o.orgId === kase.orgId && offerIntegrity(o, { orgId: kase.orgId, caseId: kase.id }).length > 0).length : 0;
+  const packagesCorrupt = packageRows.length - soundPackages.length;
+  const trialsCorrupt = db.trials.filter((t) => t?.caseId === kase.id && t.orgId === kase.orgId && trialIntegrity(t, { orgId: kase.orgId, caseId: kase.id }).length > 0).length;
+  const corruptRecords = offersCorrupt + packagesCorrupt + trialsCorrupt + contactsOmitted;
+  // P8.1 (D-P81-15): this case's assessments — never the ended case's (a Trial of another case, or written while another case was open).
+  const allAssessments = db.assessments.filter((a) => a?.orgId === kase.orgId && a.playerId === kase.playerId && !ownedByAnotherCase(db, kase, { caseId: trialCaseOf(db, a.context?.trialId), at: a.createdAt }));
   const journeyBlock = journeyFor(db, kase, {
     status, role, now,
     contacts: db.recruitmentContacts.filter((c) => c && c.caseId === kase.id && c.orgId === kase.orgId && contactIntegrity(c, { orgId: kase.orgId, caseId: kase.id }).length === 0),
     trials: trialRows, trialRequests: trialInvitations, assessments: allAssessments,
     decisions: db.roomDecisions.filter((d) => d?.roomId === kase.id && d.orgId === kase.orgId),
     offers: offerRows, packages: soundPackages, signingRow: signing,
+    corruptRecords,
     foreign: foreignReferences(db, kase),
     domainProblems: [
       ...offerRows.flatMap((o) => offerCaseConsistency(o, kase, now).filter((c) => offerCaseCorrupt([c]))),
@@ -414,6 +444,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
 function sharedRecordsFor(db, kase, viewer, now = Date.now()) {
   const mine = (r) => {
     if (r?.orgId !== kase.orgId || r.playerId !== kase.playerId) return false;
+    if (ownedByAnotherCase(db, kase, { caseId: r.caseId ?? contactCaseOf(db, r.contactId), at: r.createdAt })) return false; // P8.1 (D-P81-15): the ended case's request is its own line
     if (viewer.kind === 'player_self') return r.routedTo !== 'guardian' && viewer.playerId === kase.playerId;
     return r.routedTo === 'guardian' && r.guardianId === viewer.guardianId;
   };
@@ -430,6 +461,7 @@ function sharedRecordsFor(db, kase, viewer, now = Date.now()) {
   // the outcome line, never the guardian's record. No case id, no history.
   const mineTrial = (t) => {
     if (t?.orgId !== kase.orgId || t.playerId !== kase.playerId || t.subjectRemovedAt) return false;
+    if (ownedByAnotherCase(db, kase, { caseId: t.caseId ?? null, at: t.acceptedAt ?? t.createdAt })) return false; // P8.1 (D-P81-15)
     if (viewer.kind === 'player_self') return viewer.playerId === kase.playerId && (t.recipient ? t.recipient.type === 'player' : t.acceptedBy === 'player');
     return t.recipient ? t.recipient.type === 'guardian' && t.recipient.guardianId === viewer.guardianId : t.acceptedBy === 'guardian';
   };
@@ -521,7 +553,7 @@ function journeyFor(db, kase, f) {
   const decision = decisionHead && decisionHead.kind === 'formal' ? decisionHead : null;
   const offer = currentOfferForCase(f.offers, f.now);
   const signing = currentSigningForCase(f.packages, f.now);
-  const facts = { ...f, kase, createdAt: kase.createdAt ?? null, history: Array.isArray(kase.history) ? kase.history : [], historyMalformed: kase.history !== undefined && !Array.isArray(kase.history) };
+  const facts = { ...f, kase, createdAt: kase.createdAt ?? null, history: Array.isArray(kase.history) ? kase.history : [], historyMalformed: kase.history !== undefined && !Array.isArray(kase.history), signingRowIds: new Set((db.signings ?? []).filter((s) => s && s.orgId === kase.orgId && s.playerId === kase.playerId).map((s) => s.id)) };
   const blocked = (db.blocks ?? []).some((b) => b && b.playerId === kase.playerId && b.orgId === kase.orgId);
   const subjectRemoved = !!kase.subjectRemovedAt || !(db.players ?? []).some((p) => p?.id === kase.playerId);
   const verdict = validateRecruitmentJourney(facts);
