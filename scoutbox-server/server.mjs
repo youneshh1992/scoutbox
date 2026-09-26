@@ -4291,6 +4291,7 @@ const m162Ctx = registerM162({
 // every read. A Room grants no access to anything.
 const m17Ctx = registerM17({
   rateLimit,
+  faults: faultLayer, // M23 P8.1 — the development fault seam inside the ONE lifecycle writer
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
@@ -4518,6 +4519,7 @@ Object.assign(agentIntegration, m27Ctx.seam);
 // (an agent's basis and scope) and P5.6D's readiness seam, by reference.
 m28Ctx = registerOffers({
   ...m19Ctx,
+  faults: faultLayer, // M23 P8.1 — the development fault seam after an answer moved the case
   isAdult,
   storage,
   findRoomForRequest: m17Ctx.findRoomForRequest,

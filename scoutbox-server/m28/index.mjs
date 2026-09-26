@@ -54,7 +54,7 @@ export function registerOffers(rawCtx) {
   const {
     db, orgRouter, playerRouter, guardianRouter, nextId, persistNow, notify, broadcast, findPlayer, isBlocked,
     rateLimit, isLead, moderateOrRefuse, audit, orgCanSee, isAdult, storage,
-    agent = null, integration = null, transactions = null,
+    agent = null, integration = null, transactions = null, faults = null,
   } = ctx;
 
   // The store is created HERE, at registration, on every boot (the M12–M16
@@ -772,6 +772,11 @@ export function registerOffers(rawCtx) {
       hist(o, responseType === 'accepted' ? 'offer_accepted' : 'offer_declined', who, { revisionId: rev.id, responseId: response.id, hadReason: !!reason }, at);
       if (room) audit(room, by, actorId, actorName, responseType === 'accepted' ? 'offer_accepted' : 'offer_declined', { offerId: o.id, revisionId: rev.id, to: moved.applied ? moved.to : undefined });
       persistNow();
+      // M23 P8.1 (§34) — a development-only fault seam after the answer, the
+      // case move and the persisted snapshot: the caller sees a failure, the
+      // store carries the whole answer, and a retry with the same clientKey
+      // replays it (idempotent) without a second move or a second notification.
+      if (faults?.shouldFail?.('offer.respond.after_persist')) throw new Error('simulated failure after the answer was persisted (development fault layer)');
       if (room) safe('offer_responded', () => broadcast?.('offer_responded', { orgId: o.orgId, roomId: room.id, offerId: o.id, status: rev.status }));
       safe('notifyClub', () => notifyClub(o, `${actorName} ${responseType} Offer revision ${rev.revisionNumber} for ${room?.playerName ?? player?.name ?? 'the player'}${responseType === 'accepted' ? ' — accepted in ScoutBox; signing pending' : ''}.`));
       safe('notifyAgent', () => notifyAgent(o, `Your client ${player?.name ?? ''} ${responseType} the Offer from ${org.name ?? 'the club'}.`.replace(/\s+/g, ' ')));

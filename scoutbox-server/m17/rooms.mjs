@@ -38,6 +38,7 @@ export function registerRooms(ctx) {
   const {
     db, orgRouter, adminRouter, nextId, persistNow, notify, ledgerAppend, broadcast,
     findPlayer, moderateOrRefuse, playerViewForOrg, orgCanSee, isLead, audit, vmetric,
+    faults = null,
   } = ctx;
 
   // ------------------------------------------------------------- utilities
@@ -889,6 +890,10 @@ export function registerRooms(ctx) {
       ? audit(room, actor.kind ?? 'system', actor.id ?? null, actor.name ?? null, type, detail)
       : activity(room, req, type, detail));
     applyStatus(room, to, org, by);
+    // M23 P8.1 (§15) — a development-only fault seam between the status write
+    // and the history entry: the outer writer's snapshot/restore must leave
+    // status, stage, rev, instants and history exactly as they were.
+    if (faults?.shouldFail?.('lifecycle.after_status')) throw new Error('simulated failure after the status write (development fault layer)');
     if (REOPENED_FROM.includes(from) && OPEN_ROOM_STATUSES.includes(to)) {
       room.room.reopened = { by: { userId: by.id ?? null, name: by.name ?? null }, at: now(), from, reasonCodes };
       write('room_reopened', { from, to, reasonCodes });
