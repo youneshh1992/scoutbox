@@ -58,6 +58,24 @@ rewritten by the change (hardening W3; m23E2E J8).
 - The M12 wall (`UNDER_18_WALL`, `VERIFIED_CLUBS_ONLY`, `NOT_VISIBLE`) keeps
   naming its rule (N-P81-2).
 
+## 5a. What R4–R5 changed for legacy rows (D-P81-15 … D-P81-18)
+
+- A legacy request or Trial with NO `caseId`, and an assessment written
+  outside a Trial, belongs to the case of that club and player that was
+  OPEN when it was written; if it is older than every case it belongs to the
+  case being read. For a player with one case nothing changes; for a player
+  whose case ended and who has a second case, the ended case keeps its rows
+  and the second case inherits none (D-P81-15; the funnel's `assessed`
+  follows the same rule, D-P81-18).
+- A legacy `signed` case whose `links.signingId` names a row still reads
+  `signed` with the row named (persistence 3, LSIGN). One whose link names
+  NO row is now `integrity_error` / `STALE_POINTER` (D-P81-16) instead of a
+  quiet legacy `signed`; no writer can produce such a link, so only a
+  corrupt store is affected.
+- A legacy case with no corrupt record is classified exactly as before; a
+  corrupt record NAMING the case is now `RECORD_CORRUPT` (D-P81-17) rather
+  than an omission that let the case read as sound legacy data.
+
 ## 6. Proof
 
 `m23RecruitmentJourneyHardeningE2E` S (the four mixed shapes, planted with

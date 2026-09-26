@@ -3,7 +3,7 @@
 How late, duplicate, out-of-order and missed events and notifications are
 kept from resurrecting a stale action (§26–§31, §72). Checks:
 `m23RecruitmentJourneyHardeningE2E` groups O and P;
-`m23RecruitmentJourneyHardeningLive` L6–L8.
+`m23RecruitmentJourneyHardeningLive` L3, L6, L7.
 
 ## 1. Events (SSE)
 
@@ -14,7 +14,7 @@ kept from resurrecting a stale action (§26–§31, §72). Checks:
 | Client handling | club / grassroots / agent `App.tsx` | **every event only bumps a refetch counter** (`setTick`); no handler reads `from`, `to`, `status` or any id off the payload to change local state. The journey strip re-reads `GET /org/rooms/:id/journey` on the tick |
 | Out of order | client | two events in any order produce two refetches of canonical state — the second read is the truth whatever the first event said (P1–P2) |
 | Duplicate delivery | client + timeline | a duplicated event is one more refetch; the timeline is derived from records and history, so nothing is added twice (P3) |
-| Missed event | client | a dropped stream reconnects with `Last-Event-ID` and replays buffered events, or receives `resync` and refetches everything; a tab that missed everything refetches on focus, `pageshow` and visibility (P8.1 app-level; P8 strip) and on reload (P4; live L7) |
+| Missed event | client | a dropped stream reconnects with `Last-Event-ID` and replays buffered events, or receives `resync` and refetches everything; a tab that missed everything refetches on focus, `pageshow` and visibility (P8.1 app-level; P8 strip) and on reload (P4; hardening live L3) |
 | Reconnect | `api.ts onChange` | one `EventSource` at a time: the previous is closed before a reconnect, listeners are attached once per source, the cleanup closes the source (P5: two events after a reconnect, one refetch each, no doubled handler) |
 | Stream identity | server | the ticket resolves the LIVE session at connect; a removed user's stream is closed at removal; a suspended org's stream goes silent |
 

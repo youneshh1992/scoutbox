@@ -392,7 +392,8 @@ expect(await j('POST', `/org/rooms/${ROOM_A}/trials/${TRIAL_A.id}/sessions/${SID
   await j('POST', `/player/box-cam/sessions/${bx.body.session.id}/start`, { nonce: bx.body.nonce, liveness: bx.body.livenessChallenge }, KOLA);
   await j('POST', `/player/box-cam/sessions/${bx.body.session.id}/complete`, { nonce: bx.body.nonce }, KOLA);
   expect(await j('POST', `/org/rooms/${ROOM_A}/trials/${TRIAL_A.id}/sessions/${SID_A}/evidence`, { boxSessionId: bx.body.session.id, expectedRev: TRIAL_A.rev + 1 }, LEAD), 403, 'EVIDENCE_CONSENT_REQUIRED', 'N11c: linking his finalised session is refused 403 EVIDENCE_CONSENT_REQUIRED — a trial is not consent');
-  expect(await j('POST', `/org/rooms/${ROOM_A}/trials/${TRIAL_A.id}/sessions/${SID_A}/evidence`, { boxSessionId: 'bx-any', expectedRev: TRIAL_A.rev + 1 }, LEAD), 404, 'TRIAL_BOXCAM_INCOMPATIBLE', 'N11d: an unknown session id is 404 TRIAL_BOXCAM_INCOMPATIBLE — the consent state is not enumerable through guesses');
+  // M23 P8.1 (D-P81-9): consent is decided BEFORE the session is looked up, so without consent a fabricated id gets the SAME refusal as a real session — the existence of footage is not enumerable through guesses (the club's own consent state is already on its candidates list, N11).
+  expect(await j('POST', `/org/rooms/${ROOM_A}/trials/${TRIAL_A.id}/sessions/${SID_A}/evidence`, { boxSessionId: 'bx-any', expectedRev: TRIAL_A.rev + 1 }, LEAD), 403, 'EVIDENCE_CONSENT_REQUIRED', 'N11d: an unknown session id is refused exactly like a real one without consent (403 EVIDENCE_CONSENT_REQUIRED) — whether footage exists is not enumerable through guesses (D-P81-9)');
 }
 
 // A12 — completion through the gate, once the session has ended (test clock).

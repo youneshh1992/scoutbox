@@ -515,7 +515,10 @@ await signingTab(lead.page, ROOM_M);
   await sw(lead.page).locator('[data-testid="signing-reason"]').fill('Terms to be reconsidered.');
   await sw(lead.page).locator('[data-testid="signing-cancel"]').click();
   ok(await waitLive(lead.page, /Signing cancelled\. The accepted Offer is unchanged/), 'G3: CANCEL with a reason, behind a confirmation');
-  ok((await sw(lead.page).locator('[data-testid="signing-package"]').getAttribute('data-status')) === 'CANCELLED', 'G3b: the package is CANCELLED');
+  // The live-region sentence comes from the mutation's answer; the panel's status comes from its own re-read a moment later — wait for the re-read rather than assume its order (P8.1 T-P81-28).
+  let g3status = null;
+  for (let i = 0; i < 40 && g3status !== 'CANCELLED'; i++) { g3status = await sw(lead.page).locator('[data-testid="signing-package"]').getAttribute('data-status').catch(() => null); if (g3status !== 'CANCELLED') await lead.page.waitForTimeout(250); }
+  ok(g3status === 'CANCELLED', 'G3b: the package is CANCELLED');
   const o = (await j('GET', `/org/rooms/${ROOM_M}/offers`, undefined, LEAD)).body.offers[0];
   ok(o.status === 'ACCEPTED' && (await journey(ROOM_M, LEAD)).lifecycle.currentStage === 'offer_accepted', 'G3c: the accepted Offer and the case are unchanged');
   ok((await sw(lead.page).locator('[data-testid="signing-start-again"]').count()) === 1, 'G4: a new signing can be opened');

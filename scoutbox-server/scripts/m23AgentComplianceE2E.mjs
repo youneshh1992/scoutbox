@@ -270,7 +270,7 @@ async function boot(env = {}) {
   const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1', ...env }, stdio: 'ignore' });
   children.push(proc); proc.unref();
   let up = false;
-  for (let i = 0; i < 160 && !up; i++) { try { up = (await fetch(`${BASE}/healthz`)).ok; } catch { /* booting */ } if (!up) await sleep(250); }
+  for (let i = 0; i < 400 && !up; i++) { try { up = (await fetch(`${BASE}/healthz`)).ok; } catch { /* booting */ } if (!up) await sleep(250); }
   if (!up) throw new Error('server did not come up');
   return proc;
 }

@@ -177,8 +177,9 @@ say('L1: and performs a lead-authorized lifecycle action successfully (200, watc
 const resumed = await j(`/org/rooms/${ROOM_ID}/lifecycle`, {
   method: 'POST', body: JSON.stringify({ action: 'resumeCase', expectedRev: hold.body.currentRev }),
 }, lead.auth);
-if (resumed.status !== 200 || resumed.body?.to !== 'under_review') fail(`L1: resume failed — ${resumed.status}`);
-say('L1: and resumes it (200, on_hold → under_review)');
+// M23 P8.1 (D-P81-1): a resume returns the case to the state it was held FROM (here `watching`), never to a fixed state.
+if (resumed.status !== 200 || resumed.body?.to !== 'watching') fail(`L1: resume failed — ${resumed.status} ${resumed.body?.to ?? ''}`);
+say('L1: and resumes it (200, on_hold → watching, the held-from state)');
 
 // ====================================== L2 — the negative control
 
