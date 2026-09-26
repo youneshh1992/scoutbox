@@ -23,6 +23,7 @@ import { openStore } from '../store.mjs';
 import { JOURNEY_REQUIRED_STORES } from '../m23/journey.mjs';
 import { decisionIntegrity, duplicateFinalHeads, chainHead, isFormal } from '../m23/decision.mjs';
 import { guaranteeFor } from '../storeContract.mjs';
+import { pickPort } from './testPort.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', 'server.mjs');
@@ -63,7 +64,7 @@ async function bootOn(dataDir, port) {
   return { up, j, stop, log: () => log };
 }
 
-const PORT = 5800 + Math.floor(Math.random() * 200);
+const PORT = pickPort(5800, 200, [0, 1, 2, 3, 4, 5, 6]); // TH-6: never a fetch-blocked port
 const T0 = 1_800_000_000_000;
 const BY = { userId: 'usr-owner', name: 'Owner', role: 'Head of Recruitment' };
 

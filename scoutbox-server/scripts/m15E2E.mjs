@@ -9,6 +9,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { pickPort } from './testPort.mjs';
 import {
   buildTimeline, clubHistory, currentStatus, temporalConflicts,
   evaluateGaps, completeness, GAP_RULES, GAP_RULES_VERSION,
@@ -17,7 +18,7 @@ import {
   sha256, mintShareSecret, shareProblem, SHARE_MODES,
 } from '../m15/shared.mjs';
 
-const PORT = 4900 + Math.floor(Math.random() * 300);
+const PORT = pickPort(4900, 300, [0]); // TH-6: never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m15-'));
 const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'server.mjs');

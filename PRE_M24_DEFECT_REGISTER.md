@@ -11,16 +11,18 @@ Fix commits (local, not pushed):
 |---|---|---|
 | R1 | `ef968b3` | runtime, session, input and production-config fixes (PM-1–PM-6, PM-9–PM-13) + server regressions |
 | R2 | `9f3f7f7` | keyboard and dialog accessibility fixes (PM-7, PM-8, PM-14) + the live browser regression suite |
-| R3 | this commit | PM-15 boot-log drift fix + its regression; this register; the P8.1 deep-link matrix correction |
+| R3 | `637906d` | PM-15 boot-log drift fix + its regression; this register; the P8.1 deep-link matrix correction |
+| R3b | this commit | TH-6: no server suite can draw a port that `fetch()` refuses (test harness only; no product file changed) |
 
 New regression suites:
 
-- `scoutbox-server/scripts/preM24SweepE2E.mjs` has 33 checks, 20 of them negative.
+- `scoutbox-server/scripts/preM24SweepE2E.mjs` has 36 checks, 23 of them negative.
   - S0: the boot log carries no event-registry drift warning.
   - S: session lifetime and revocation.
   - A: an async handler failure no longer ends the process.
   - T: 21 malformed bodies on 14 routes.
   - P: production boot with an unsafe admin key or test providers.
+  - H: no suite can draw a port that `fetch()` refuses (TH-6).
 - `e2e/preM24SweepLive.test.mjs` has 30 checks, 22 of them negative, and runs against a real server and real Club, Grassroots, Agent and Player bundles.
 - `m181E2E` §48 gains the PM-1 and PM-2 negatives.
 
@@ -97,6 +99,7 @@ Open product defects at Critical, High, fixable Medium or relevant Low: **0**.
 | TH-3 | sweep crawler | The planted-data run renamed Eastport, and the org-card selector used the full name | The Club planted pass could not sign in | Selector `Eastport` | Fixed |
 | TH-4 | targeted sweep | T3a asserted that "Under review" was absent from the header, but it is also a Move-to option | False failure; the product was correct | Asserts on the next-action code instead | Fixed |
 | TH-5 | `preM24SweepLive` S5a (during authoring) | Waited for landing text that sits below the fold on the landing variant | False failure; the product was correct (probe: 401 → landing) | Asserts landing text present and signed-in shell absent | Fixed before commit |
+| TH-6 | 12 server suites (`m14E2E`, `m15E2E`, `m161E2E`, `m182E2E`, `m22E2E`, `m23AgentComplianceE2E`, `m23AgentPersistence`, `m23ContactE2E`, `m23DecisionE2E`, `m23DecisionPersistence`, `m23OfferPersistence`, `m23Persistence`) | Each draws a random base port and boots servers at fixed offsets from it. Those ranges reached ports the Fetch standard refuses (5060/5061, 6000, 6566, 6665–6697), and Node's `fetch()` fails with `bad port` before it opens a socket | Intermittent mid-suite death with rc=1 and no ✗ line. Seen once in the R3 gate (`m23DecisionPersistence`, 44 s) and reproduced 1 in 29 runs under load: `TypeError: fetch failed … cause: bad port` on `PORT + 6` = 6000. Roughly 3% of that suite's runs; other suites up to 1% | `scripts/testPort.mjs` `pickPort(base, range, offsets)` draws only bases whose every used offset is reachable; all 12 suites use it. Regression: `preM24SweepE2E` H1 (fetch refuses 6000), H2 (2,800 draws), H3 (no suite's reachable range touches a refused port). `m23DecisionPersistence` 60/60 after the fix | Fixed (R3b) |
 | TA-1 | `m182E2E`, `connectedE2E` | Booted production without `ADMIN_KEY` / used the public key | Failed once PM-1 made that fatal, as intended | Both pass the deployment's own key, as they already did for `SCOUTBOX_MEDIA_SECRET`; `connectedE2E` gains a negative asserting the public key is refused. Not weakened: one check added, none removed | Adapted (R1) |
 
 ## 3. Cosmetic observations (not defects under the sweep policy)

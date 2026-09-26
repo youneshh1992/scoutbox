@@ -52,8 +52,9 @@ import { STATUS_EVIDENCE_REQUIRED, ROOM_TRANSITIONS, ROOM_STATUSES, roomCan, PRO
 import { createEvidenceProvider, EVIDENCE_KINDS } from '../m23/evidence.mjs';
 import { canTransitionRecruitmentCase, LIFECYCLE_ACTIONS } from '../m23/lifecycle.mjs';
 import { readFileSync } from 'node:fs';
+import { pickPort } from './testPort.mjs';
 
-const PORT = 6400 + Math.floor(Math.random() * 200);
+const PORT = pickPort(6400, 200, [0]); // TH-6: never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23d-'));
 const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'server.mjs');

@@ -21,8 +21,9 @@ import {
   combineResultHash, comparisonMatrix,
 } from '../m16/combineShared.mjs';
 import { PROVIDERS } from '../m16/drills.mjs';
+import { pickPort } from './testPort.mjs';
 
-const PORT = 4900 + Math.floor(Math.random() * 180);
+const PORT = pickPort(4900, 180, [0]); // TH-6: never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m161-'));
 const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'server.mjs');

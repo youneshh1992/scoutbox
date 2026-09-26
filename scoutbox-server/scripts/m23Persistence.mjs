@@ -42,6 +42,7 @@ import { openStore } from '../store.mjs';
 import { ROOM_STATUSES, ROOM_STATUS_LABELS, TERMINAL_ROOM_STATUSES, stageForRoomStatus } from '../m17/shared.mjs';
 import { buildRecruitmentJourney, JOURNEY_REQUIRED_STORES, JOURNEY_OPTIONAL_STORES } from '../m23/journey.mjs';
 import { NULL_EVIDENCE_PROVIDER } from '../m23/lifecycle.mjs';
+import { pickPort } from './testPort.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', 'server.mjs');
@@ -292,7 +293,7 @@ console.log('\n— §33/§34 — a real server on a real restored snapshot —')
   const snap = priorSnapshot({ withExistingRows: true });
   store.save({ savedAt: Date.now(), idCounter: 500, db: snap });
 
-  const PORT = 4970 + Math.floor(Math.random() * 120);
+  const PORT = pickPort(4970, 120, [0]); // TH-6: never a fetch-blocked port
   const BASE = `http://localhost:${PORT}`;
   const children = [];
   process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });

@@ -10,11 +10,12 @@
 //   P  production configuration (PM-1, PM-2) is proved in m181E2E §48; here a
 //      real production boot is refused without its own admin key.
 import { spawn } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openStore } from '../store.mjs';
+import { isFetchBlockedPort, pickPort } from './testPort.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', 'server.mjs');
@@ -25,7 +26,7 @@ const neg = (c, m) => { negatives++; ok(c, `[neg] ${m}`); };
 const section = (n) => console.log(`\n— ${n} —`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const DAY = 24 * 3600 * 1000;
-const PORT = 7400 + Math.floor(Math.random() * 200);
+const PORT = pickPort(7400, 200, [0, 201, 202, 203, 204, 250]);
 const BASE = `http://localhost:${PORT}`;
 const DATA = mkdtempSync(path.join(tmpdir(), 'sbx-prem24-'));
 const children = [];
@@ -233,6 +234,31 @@ section('P — production refuses to start without its own admin key (PM-1)');
   }
   const p4 = await boot({ NODE_ENV: 'production', SCOUTBOX_MEDIA_SECRET: 'sweep-media-secret', ADMIN_KEY: 'sweep-production-admin-key-0123', AGENT_VERIFICATION_TEST_PROVIDER: '1' }, d2, PORT + 204);
   neg(!p4.up && /AGENT_TEST_PROVIDER_IN_PRODUCTION/.test(p4.log()), 'P6 the synthetic agent licence register is refused in production (PM-2)');
+}
+
+// ================================================================ H — the test harness itself
+section('H — no suite can draw a port that fetch() refuses (TH-6)');
+{
+  // H1 the cause: Node's fetch() refuses a Fetch-standard "bad port" before it opens a socket.
+  const refused = await fetch('http://localhost:6000/healthz').then(() => null, (e) => String(e?.cause?.message ?? e));
+  neg(refused === 'bad port', `H1 fetch() refuses port 6000 outright (${refused}) — why a random port there failed a suite mid-way`);
+  // H2 the picker never returns a base whose span touches a refused port (exhaustive over many draws).
+  let clean = true;
+  for (const [base, range, offsets] of [[4600, 300, [0, 300]], [4900, 300, [0]], [5800, 200, [0, 1, 2, 3, 4, 5, 6]], [5900, 200, [0]], [5990, 8, [0, 10, 11]], [6400, 200, [0]], [6500, 200, [0, 1, 3]]]) {
+    for (let i = 0; i < 400; i++) { const p = pickPort(base, range, offsets); if (offsets.some((k) => isFetchBlockedPort(p + k))) clean = false; }
+  }
+  neg(clean, 'H2 pickPort never lands a server on a fetch-refused port (2,800 draws over the seven ranges the suites use)');
+  // H3 every server suite: the ports it can reach (random base + every literal offset) avoid the refused list.
+  const bad = [];
+  for (const f of readdirSync(HERE).filter((n) => n.endsWith('.mjs'))) {
+    const src = readFileSync(path.join(HERE, f), 'utf8');
+    for (const m of src.matchAll(/const\s+(\w+)\s*=\s*(\d{3,5})\s*\+\s*Math\.floor\(Math\.random\(\)\s*\*\s*(\d+)\)/g)) {
+      const [, v, b, r] = m; const offs = new Set([0]);
+      for (const o of src.matchAll(new RegExp(`\\b${v}\\s*\\+\\s*(\\d+)`, 'g'))) offs.add(Number(o[1]));
+      for (const o of offs) for (let x = 0; x < Number(r); x++) if (isFetchBlockedPort(Number(b) + x + o)) bad.push(`${f}:${Number(b) + x + o}`);
+    }
+  }
+  neg(bad.length === 0, `H3 no server suite's random port range reaches a fetch-refused port${bad.length ? `: ${[...new Set(bad)].slice(0, 6).join(', ')}` : ''}`);
 }
 
 console.log(`\nPRE-M24 sweep server regressions: ${passed} checks passed, ${negatives} negative, ${failures} failed`);

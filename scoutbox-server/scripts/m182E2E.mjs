@@ -34,12 +34,13 @@ import { ageOn, isAdult, adultAgeFor } from '../domain.mjs';
 import { POLICY, secondLookStatus, secondLookExpired, briefIsLiveOn, validateRecruitmentBrief } from '../m18/shared.mjs';
 import { PROVENANCE } from '../m15/shared.mjs';
 import { openStore } from '../store.mjs';
+import { pickPort } from './testPort.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = path.join(HERE, '..');
 const ROOT = path.join(SERVER_DIR, '..');
 const SERVER = path.join(SERVER_DIR, 'server.mjs');
-const PORT = 5990 + Math.floor(Math.random() * 8);
+const PORT = pickPort(5990, 8, [0, 10, 11]); // TH-6: never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m182-'));
 

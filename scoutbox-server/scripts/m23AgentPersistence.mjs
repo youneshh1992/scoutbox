@@ -32,6 +32,7 @@ const ABOVE_2304 = MIGRATIONS.filter((m) => m.version > 2304).map((m) => m.id);
 import { openStore } from '../store.mjs';
 import { guaranteeFor } from '../storeContract.mjs';
 import { effectiveFacetState, agreementGrantsAccess, clientTransitionAllowed, agentTransitionAllowed, verificationGap } from '../m24/shared.mjs';
+import { pickPort } from './testPort.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', 'server.mjs');
@@ -73,7 +74,7 @@ async function bootOn(dataDir, port) {
   return { up, j, stop, log: () => log };
 }
 
-const PORT = 6500 + Math.floor(Math.random() * 200);
+const PORT = pickPort(6500, 200, [0, 1, 3]); // TH-6: never a fetch-blocked port
 const T0 = 1_700_000_000_000; // 2023-11-14 — firmly in the past, so createdAt-based windows have started
 
 // ------------------------------------------------------------- fixtures

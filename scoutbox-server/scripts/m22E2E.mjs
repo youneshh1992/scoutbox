@@ -23,13 +23,14 @@ import { ProductionCvProvider, PROVIDER_ERRORS, canTransition } from '../m22/pro
 import { combineVerifiedProtocols, combineEligibility } from '../m22/eligibility.mjs';
 import { decodeFrame } from '../m22/frames.mjs';
 import { FRAME_LIMITS, FRAME_ENCODING } from '../m22/policy.mjs';
+import { pickPort } from './testPort.mjs';
 import {
   sequence, jugglePath, touchPath, stationaryPath, rollPath,
   independentBouncePath, DEFAULT_PERSON,
 } from '../m22/scenes.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const PORT = 4960 + Math.floor(Math.random() * 200);
+const PORT = pickPort(4960, 200, [0]); // TH-6: never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m22-'));
 const SERVER = path.join(HERE, '..', 'server.mjs');

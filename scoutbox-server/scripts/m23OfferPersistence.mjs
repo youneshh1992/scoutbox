@@ -23,6 +23,7 @@ import { MIGRATIONS, SCHEMA_VERSION } from '../m182/migrations.mjs';
 import { openStore } from '../store.mjs';
 import { guaranteeFor } from '../storeContract.mjs';
 import { offerIntegrity } from '../m28/offer.mjs';
+import { pickPort } from './testPort.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', 'server.mjs');
@@ -66,7 +67,7 @@ async function bootOn(dataDir, port) {
   return { up, j, stop, log: () => log };
 }
 
-const PORT = 5900 + Math.floor(Math.random() * 200);
+const PORT = pickPort(5900, 200, [0]); // TH-6: never a fetch-blocked port
 const T0 = Date.now();
 const at = (ms) => ({ 'x-scoutbox-test-clock': String(ms) });
 const TERMS = { role: 'Central midfielder', squad: 'Under-23s', startDate: '2027-07-01', endDate: '2029-06-30', conditions: 'Subject to a medical.' };

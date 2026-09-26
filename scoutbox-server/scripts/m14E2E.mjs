@@ -16,8 +16,9 @@ import {
   consumeToken, toPublicVerificationProfile, verLevelFor, orgVerificationStatus,
 } from '../m14/shared.mjs';
 import { totp } from '../m13/shared.mjs';
+import { pickPort } from './testPort.mjs';
 
-const PORT = 4600 + Math.floor(Math.random() * 300);
+const PORT = pickPort(4600, 300, [0, 300]); // TH-6: never a fetch-blocked port
 const DOWN_PORT = PORT + 300;
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m14-'));

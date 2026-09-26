@@ -47,8 +47,9 @@ import { RATE_LIMIT_POLICY } from '../m181/rateLimit.mjs';
 import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../m182/migrations.mjs';
 import { guaranteeFor } from '../storeContract.mjs';
 import { roomCan } from '../m17/shared.mjs';
+import { pickPort } from './testPort.mjs';
 
-const PORT = 5900 + Math.floor(Math.random() * 200);
+const PORT = pickPort(5900, 200, [0]); // TH-6: never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23c-'));
 const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'server.mjs');

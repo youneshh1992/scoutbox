@@ -39,8 +39,9 @@ import { TYPE_CATEGORY, CATEGORIES } from '../m182/notificationPrefs.mjs';
 import { MIGRATIONS, SCHEMA_VERSION, PRODUCTION_REQUIRED_STORES } from '../m182/migrations.mjs';
 import { guaranteeFor } from '../storeContract.mjs';
 import { openStore } from '../store.mjs';
+import { pickPort } from './testPort.mjs';
 
-const PORT = 6500 + Math.floor(Math.random() * 200);
+const PORT = pickPort(6500, 200, [0]); // TH-6: never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m25-'));
 const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'server.mjs');
