@@ -404,6 +404,19 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   const [safetyOpen, setSafetyOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [bellOpen, setBellOpen] = useState(false);
+  // PRE-M24 (PM-7): Escape closes the notification panel and the phone drawer,
+  // and focus returns to the button that opened it (keyboard users were left
+  // with an open panel and no way to dismiss it without a pointer).
+  useEffect(() => {
+    if (!bellOpen && !drawerOpen) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (bellOpen) { setBellOpen(false); (document.querySelector('.topbar-bell') as HTMLElement | null)?.focus(); }
+      if (drawerOpen) { setDrawerOpen(false); (document.querySelector('.nav-hamburger') as HTMLElement | null)?.focus(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [bellOpen, drawerOpen]);
   const [channels, setChannels] = useState<Channel[]>([]);
   const seenNotifIds = useRef<Set<string> | null>(null);
 
@@ -529,6 +542,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
           live={live}
           unread={unread}
           bellOpen={bellOpen}
+          drawerOpen={drawerOpen}
           onToggleBell={openBell}
           onReport={() => setSafetyOpen(true)}
           onOpenDrawer={() => setDrawerOpen(true)}

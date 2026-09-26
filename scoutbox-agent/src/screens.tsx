@@ -4,6 +4,7 @@
 // reading (httpState), a conflict as the shared conflict notice.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, type Notification, type Session } from './api';
+import { useDialog } from './dialog';
 import {
   agent, clientKey, isSummary, JURISDICTIONS, SCOPES, TIERS,
   type AgencyOverview, type AuditRow, type ClientDetail, type ClientRow, type ComplianceRow, type FacetView, type Home, type Me,
@@ -951,6 +952,7 @@ export function AgencyScreen({ session, tick, notify, me, tab, onTab }: ScreenPr
 
 // ============================================================ Report / Block
 export function SafetyModal({ session, notify, onClose }: { session: Session; notify: ScreenProps['notify']; onClose: () => void }) {
+  const dialogRef = useDialog<HTMLDivElement>(onClose); // PRE-M24 (PM-8)
   const [reason, setReason] = useState('');
   const [target, setTarget] = useState('');
   const [urgent, setUrgent] = useState(false);
@@ -965,7 +967,7 @@ export function SafetyModal({ session, notify, onClose }: { session: Session; no
   return (
     <>
       <div className="drawer-veil" onClick={onClose} />
-      <div className="drawer" role="dialog" aria-modal="true" aria-label={t('report.title')} style={{ width: 'min(520px, 92vw)' }}>
+      <div className="drawer" ref={dialogRef} role="dialog" aria-modal="true" aria-label={t('report.title')} tabIndex={-1} style={{ width: 'min(520px, 92vw)' }}>
         <div className="head"><h3>{t('report.title')}</h3><button className="close" onClick={onClose} aria-label={t('common.close')}>✕</button></div>
         <p className="pagehint">{t('report.body')}</p>
         <div className="form-grid" style={{ gridTemplateColumns: '1fr' }}>

@@ -98,7 +98,7 @@ export function Sidebar({
   return (
     <>
       {drawerOpen && <div className="drawer-veil nav-drawer-veil" onClick={onCloseDrawer} />}
-      <nav ref={navRef} className={`sidebar ${collapsed ? 'collapsed' : ''} ${drawerOpen ? 'drawer-open' : ''}`} aria-label="Main navigation">
+      <nav ref={navRef} id="app-sidebar" className={`sidebar ${collapsed ? 'collapsed' : ''} ${drawerOpen ? 'drawer-open' : ''}`} aria-label="Main navigation">
         <div className="brand">{collapsed ? <span>S<span className="brand-sub">{brand.short}</span></span> : <>Scout<span>Box</span> <span className="brand-sub">{brand.long}</span></>}</div>
 
         <button className="nav-search" onClick={onOpenPalette} aria-label={t('navsec.searchAria')} title={t('navsec.searchAria')}>
@@ -387,13 +387,14 @@ export function SecondaryNav({ section, activeItemId, onNavigate }: {
  * is never hidden (§33): under 640px it shrinks to its glyph with the same
  * accessible name.
  */
-export function TopBar({ title, crumb, live, unread, bellOpen, onToggleBell, onReport, onOpenDrawer }: {
-  title: string; crumb?: string | null; live: boolean; unread: number; bellOpen: boolean;
+export function TopBar({ title, crumb, live, unread, bellOpen, drawerOpen = false, onToggleBell, onReport, onOpenDrawer }: {
+  title: string; crumb?: string | null; live: boolean; unread: number; bellOpen: boolean; drawerOpen?: boolean;
   onToggleBell: () => void; onReport: () => void; onOpenDrawer: () => void;
 }) {
   return (
     <header className="topbar">
-      <button className="nav-hamburger" aria-label={t('navsec.openMenu')} onClick={onOpenDrawer}><Icon name="menu" /></button>
+      {/* PRE-M24 (PM-7): the menu button says whether the drawer is open */}
+      <button className="nav-hamburger" aria-label={t('navsec.openMenu')} aria-expanded={drawerOpen} aria-controls="app-sidebar" onClick={onOpenDrawer}><Icon name="menu" /></button>
       <h1 className="page-title" tabIndex={-1}>
         {crumb && <><span className="crumb">{crumb}</span><span className="crumb-sep"> / </span></>}
         {title}

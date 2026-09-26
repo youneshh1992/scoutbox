@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { pressable, useDialog } from './dialog';
 import {
   api, ApiError,
   type Session, type Player, type PlayerDetail, type OrgRequest, type Trial,
@@ -134,6 +135,7 @@ export function SafetyModal({ session, notify, onClose, presetPlayerId }: {
   onClose: () => void;
   presetPlayerId?: string;
 }) {
+  const dialogRef = useDialog<HTMLDivElement>(onClose); // PRE-M24 (PM-8)
   const [targetKind, setTargetKind] = useState<'player' | 'scout' | 'club'>(presetPlayerId ? 'player' : 'scout');
   const [target, setTarget] = useState(presetPlayerId ?? '');
   const [reason, setReason] = useState('');
@@ -163,7 +165,7 @@ export function SafetyModal({ session, notify, onClose, presetPlayerId }: {
   return (
     <>
       <div className="drawer-veil" onClick={onClose} />
-      <div className="drawer" style={{ width: 'min(520px, 92vw)' }}>
+      <div className="drawer" ref={dialogRef} role="dialog" aria-modal="true" aria-label="Report & block" tabIndex={-1} style={{ width: 'min(520px, 92vw)' }}>
         <div className="head">
           <div>
             <h3>Report &amp; block</h3>
@@ -242,7 +244,7 @@ export function FeedScreen({ session, tick, openPlayer }: ScreenProps) {
       {items.length === 0 && <div className="notice">Quiet fortnight — nothing new yet.</div>}
       <div className="list-rows">
         {items.map((it, i) => (
-          <div key={i} className="list-row" style={{ cursor: 'pointer' }} onClick={() => openPlayer(it.playerId)}>
+          <div key={i} className="list-row" style={{ cursor: 'pointer' }} {...pressable(() => openPlayer(it.playerId))}>
             <span className={`pill ${it.type === 'report_due' ? 'red' : it.type === 'shortlist_new_clip' ? 'gold' : it.type === 'new_player' ? 'green' : 'blue'}`}>
               {FEED_LABELS[it.type]}
             </span>
@@ -321,7 +323,7 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
             <video key={current.media.id} className="filmroom-video" src={api.mediaUrl(current.media.url)!} controls autoPlay muted loop />
             <div className="filmroom-overlay">
               <div className="row1">
-                <a style={{ color: 'var(--text)', fontWeight: 700, fontSize: 18, cursor: 'pointer' }} onClick={() => openPlayer(current.player.id)}>
+                <a style={{ color: 'var(--text)', fontWeight: 700, fontSize: 18, cursor: 'pointer' }} {...pressable(() => openPlayer(current.player.id))}>
                   {current.player.name}
                 </a>
                 <span className="pill blue">{current.player.position}</span>
@@ -369,7 +371,7 @@ export function FixturesScreen({ session, tick, openPlayer }: ScreenProps) {
           const key = `${f.fixture}|${f.date}`;
           return (
             <div key={key} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-              <div style={{ display: 'flex', gap: 12, alignItems: 'center', cursor: 'pointer' }} onClick={() => setOpenKey(openKey === key ? null : key)}>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', cursor: 'pointer' }} {...pressable(() => setOpenKey(openKey === key ? null : key))}>
                 <span className="pill green">GPS ✓</span>
                 <span className="grow"><b>{f.fixture}</b> <span className="dim">— {f.venue}</span></span>
                 <span className="dim">{f.date}</span>
@@ -378,7 +380,7 @@ export function FixturesScreen({ session, tick, openPlayer }: ScreenProps) {
               {openKey === key && (
                 <div className="list-rows" style={{ marginTop: 8 }}>
                   {f.players.map((p) => (
-                    <div key={p.id} className="list-row" style={{ cursor: 'pointer' }} onClick={() => openPlayer(p.id)}>
+                    <div key={p.id} className="list-row" style={{ cursor: 'pointer' }} {...pressable(() => openPlayer(p.id))}>
                       <span className="pill blue">{p.position}</span>
                       <span className="grow">{p.name}</span>
                       <span className="dim">{p.age} · {t('term.profileSignal')} {p.trustScore}%</span>
@@ -402,6 +404,7 @@ export function CompareModal({ session, playerIds, onClose }: {
   playerIds: string[];
   onClose: () => void;
 }) {
+  const dialogRef = useDialog<HTMLDivElement>(onClose); // PRE-M24 (PM-8)
   const [players, setPlayers] = useState<PlayerDetail[]>([]);
   useEffect(() => {
     Promise.all(playerIds.map((id) => api.getPlayer(session, id).catch(() => null)))
@@ -428,7 +431,7 @@ export function CompareModal({ session, playerIds, onClose }: {
   return (
     <>
       <div className="drawer-veil" onClick={onClose} />
-      <div className="drawer" style={{ width: 'min(980px, 94vw)' }}>
+      <div className="drawer" ref={dialogRef} role="dialog" aria-modal="true" aria-label="Compare" tabIndex={-1} style={{ width: 'min(980px, 94vw)' }}>
         <div className="head">
           <div><h3>Compare</h3><div className="sub">Side by side — verified data only.</div></div>
           <button className="close" onClick={onClose}>Close</button>
@@ -552,7 +555,7 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
       </div>
       <div className="player-grid">
         {players.map((p) => (
-          <div key={p.id} className="player-card" onClick={() => openPlayer(p.id)}>
+          <div key={p.id} className="player-card" {...pressable(() => openPlayer(p.id))}>
             <div className="row1">
               <span className="name">{p.name}</span>
               <span style={{ display: 'flex', gap: 6, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
@@ -594,7 +597,7 @@ export function ShortlistScreen({ session, tick, openPlayer }: ScreenProps) {
   return (
     <div className="player-grid">
       {players.map((p) => (
-        <div key={p.id} className="player-card" onClick={() => openPlayer(p.id)}>
+        <div key={p.id} className="player-card" {...pressable(() => openPlayer(p.id))}>
           <div className="row1"><span className="name">{p.name}</span><span className="pill blue">{p.position}</span></div>
           <TrustBar score={p.trustScore} />
         </div>
@@ -617,7 +620,7 @@ export function RequestsScreen({ session, tick, openPlayer }: ScreenProps) {
           <div key={r.id} className="list-row">
             <span className={`pill ${r.type === 'trial' ? 'gold' : 'blue'}`}>{r.type}</span>
             <span className="grow">
-              <a style={{ color: 'var(--accent-2)', cursor: 'pointer' }} onClick={() => openPlayer(r.playerId)}>{r.playerName ?? r.playerId}</a>
+              <a style={{ color: 'var(--accent-2)', cursor: 'pointer' }} {...pressable(() => openPlayer(r.playerId))}>{r.playerName ?? r.playerId}</a>
               {r.routedTo === 'guardian' && <span className="pill red" style={{ marginLeft: 8 }}>→ guardian</span>}
               {r.message && <span className="dim"> — “{r.message}”</span>}
             </span>
@@ -722,7 +725,7 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
               key={c.id}
               className="list-row"
               style={{ cursor: 'pointer', borderColor: openId === c.id ? 'var(--accent-2)' : undefined }}
-              onClick={() => setOpenId(c.id)}
+              {...pressable(() => setOpenId(c.id))}
             >
               <span className="grow">
                 <b>{c.playerName}</b>{c.closed && <span className="pill red" style={{ marginLeft: 6 }}>closed</span>}
@@ -949,7 +952,7 @@ export function LedgerScreen({ session, tick, openPlayer }: ScreenProps) {
               <tr key={r.id}>
                 <td>{fmtDateTime(r.ts)}</td>
                 <td>{LEDGER_LABELS[r.type] ?? r.type}</td>
-                <td><a style={{ color: 'var(--accent-2)', cursor: 'pointer' }} onClick={() => openPlayer(r.playerId)}>{r.playerId}</a></td>
+                <td><a style={{ color: 'var(--accent-2)', cursor: 'pointer' }} {...pressable(() => openPlayer(r.playerId))}>{r.playerId}</a></td>
                 <td>{r.scoutName}</td>
               </tr>
             ))}
@@ -1549,6 +1552,7 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
    *  decision layer). Absent in surfaces that cannot navigate. */
   onOpenRoom?: (roomId: string) => void;
 }) {
+  const dialogRef = useDialog<HTMLDivElement>(onClose); // PRE-M24 (PM-8)
   const [player, setPlayer] = useState<PlayerDetail | null>(null);
   const [proof, setProof] = useState<ProofPack | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1621,7 +1625,7 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
   return (
     <>
       <div className="drawer-veil" onClick={onClose} />
-      <div className="drawer">
+      <div className="drawer" ref={dialogRef} role="dialog" aria-modal="true" aria-label={player?.name ?? 'Player'} tabIndex={-1}>
         {error && <><div className="notice block">{error}</div><div style={{ marginTop: 14 }}><button onClick={onClose}>Close</button></div></>}
         {player && (
           <>

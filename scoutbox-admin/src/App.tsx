@@ -469,7 +469,7 @@ export default function App() {
               <div className="notice">Every conversation on the platform is auditable — this is the "all communications logged" promise, inspectable.</div>
               {threads.map((t) => (
                 <div key={t.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', cursor: 'pointer' }} onClick={() => setOpenThread(openThread === t.id ? null : t.id)}>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', cursor: 'pointer' }} role="button" tabIndex={0} aria-expanded={openThread === t.id} onClick={() => setOpenThread(openThread === t.id ? null : t.id)} onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setOpenThread(openThread === t.id ? null : t.id); } }} /* PRE-M24 (PM-14): keyboard-operable */>
                     <span className="grow"><b>{t.orgName}</b> ↔ {t.counterparty === 'guardian' ? `guardian of ${t.playerName}` : t.playerName}</span>
                     <span className="dim">{t.scoutRole} — {t.scoutName}</span>
                     <span className="pill">{t.messages.length} msg</span>
