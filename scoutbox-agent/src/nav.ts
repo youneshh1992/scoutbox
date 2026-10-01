@@ -10,6 +10,9 @@
 // permission through its matrix on every request; hiding a destination never
 // becomes authorization, and typing a hidden route still hits the same rules.
 import type { ScreenId } from './App';
+// M24B — the client and transaction cases are category → subcategory (caseNav.ts).
+import { CLIENT_NAV, TRANSACTION_NAV } from './caseNav';
+import { allSubs, caseSegments, parseCaseSegments, resolveTab, type CaseLocation } from '../../design-system/caseNav';
 
 export interface NavItem {
   id: ScreenId;
@@ -199,23 +202,32 @@ export function searchNav(query: string, ctx: NavContext, translate: (key: strin
 // M23 P5.6E adds two READ tabs: the club contacts a club routed to this agent,
 // and the client's trials as scheduling (never assessment). Both are gated on the
 // client's own disclosure choice, and both refuse plainly when it is off.
-export const CLIENT_TABS = ['overview', 'representation', 'opportunities', 'contacts', 'trials', 'offers', 'activity'] as const;
-export type ClientTab = (typeof CLIENT_TABS)[number];
+// M24B — a link names "<category>/<sub>"; the old flat "<tab>" form and the server's
+// notification tabs (contacts, offers) still resolve to their subcategory.
+export const CLIENT_TABS = allSubs(CLIENT_NAV) as readonly string[];
+export type ClientTab = string;
 export const AGENCY_TABS = ['overview', 'team', 'compliance', 'settings'] as const;
 export type AgencyTab = (typeof AGENCY_TABS)[number];
 
-const CLIENT_HASH = /^#\/clients\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})(?:\/(overview|representation|opportunities|contacts|trials|offers|activity))?$/;
+const CLIENT_HASH = /^#\/clients\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})((?:\/[a-z][a-z0-9-]*){0,2})$/;
+const segsOf = (s: string | undefined) => (s ? s.slice(1).split('/') : []);
 const AGENCY_HASH = /^#\/agency\/(overview|team|compliance|settings)$/;
 const CONTEXT_HASH = /^#\/compliance\/(ctx-[A-Za-z0-9][A-Za-z0-9_-]{0,63})$/;
-export const TRANSACTION_TABS = ['overview', 'parties', 'compliance', 'documents', 'messages', 'timeline'] as const;
-export type TransactionTab = (typeof TRANSACTION_TABS)[number];
-const TRANSACTION_HASH = /^#\/transactions\/(atx-[A-Za-z0-9][A-Za-z0-9_-]{0,63})(?:\/(overview|parties|compliance|documents|messages|timeline))?$/;
+export const TRANSACTION_TABS = allSubs(TRANSACTION_NAV) as readonly string[];
+export type TransactionTab = string;
+const TRANSACTION_HASH = /^#\/transactions\/(atx-[A-Za-z0-9][A-Za-z0-9_-]{0,63})((?:\/[a-z][a-z0-9-]*){0,2})$/;
 
 export function clientFromHash(hash: string): { id: string; tab: ClientTab } | null {
   const m = CLIENT_HASH.exec(hash ?? '');
-  return m ? { id: m[1], tab: (m[2] as ClientTab | undefined) ?? 'overview' } : null;
+  if (!m) return null;
+  const loc = parseCaseSegments(CLIENT_NAV, segsOf(m[2]));
+  return loc ? { id: m[1], tab: loc.sub } : null;
 }
-export const hashForClient = (id: string, tab: ClientTab = 'overview') => (tab === 'overview' ? `#/clients/${id}` : `#/clients/${id}/${tab}`);
+export function clientLocationFromHash(hash: string): CaseLocation | null {
+  const m = CLIENT_HASH.exec(hash ?? '');
+  return m ? parseCaseSegments(CLIENT_NAV, segsOf(m[2])) : null;
+}
+export const hashForClient = (id: string, tab: ClientTab = 'summary') => `#/clients/${id}${caseSegments(CLIENT_NAV, resolveTab(CLIENT_NAV, tab)).map((s) => `/${s}`).join('')}`;
 
 export function agencyTabFromHash(hash: string): AgencyTab | null {
   const m = AGENCY_HASH.exec(hash ?? '');
@@ -231,9 +243,15 @@ export const hashForContext = (id: string) => `#/compliance/${id}`;
 
 export function transactionFromHash(hash: string): { id: string; tab: TransactionTab } | null {
   const m = TRANSACTION_HASH.exec(hash ?? '');
-  return m ? { id: m[1], tab: (m[2] as TransactionTab | undefined) ?? 'overview' } : null;
+  if (!m) return null;
+  const loc = parseCaseSegments(TRANSACTION_NAV, segsOf(m[2]));
+  return loc ? { id: m[1], tab: loc.sub } : null;
 }
-export const hashForTransaction = (id: string, tab: TransactionTab = 'overview') => (tab === 'overview' ? `#/transactions/${id}` : `#/transactions/${id}/${tab}`);
+export function transactionLocationFromHash(hash: string): CaseLocation | null {
+  const m = TRANSACTION_HASH.exec(hash ?? '');
+  return m ? parseCaseSegments(TRANSACTION_NAV, segsOf(m[2])) : null;
+}
+export const hashForTransaction = (id: string, tab: TransactionTab = 'overview') => `#/transactions/${id}${caseSegments(TRANSACTION_NAV, resolveTab(TRANSACTION_NAV, tab)).map((s) => `/${s}`).join('')}`;
 
 export function screenFromHash(hash: string): ScreenId | null {
   if (clientFromHash(hash)) return 'clients';

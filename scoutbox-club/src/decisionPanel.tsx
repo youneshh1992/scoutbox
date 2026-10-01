@@ -332,7 +332,7 @@ function HandoffSection({ session, room, notify }: { session: Props['session']; 
   );
 }
 
-function DecisionCard({ d, compact = false }: { d: FormalDecision; compact?: boolean }) {
+export function DecisionCard({ d, compact = false }: { d: FormalDecision; compact?: boolean }) {
   const formal = d.kind === 'formal';
   return (
     <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }} data-decision-id={d.id} data-outcome={d.outcome ?? undefined} data-kind={d.kind}>

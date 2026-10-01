@@ -20,6 +20,10 @@ import {
   type Transaction, type TransactionList, type TransactionStatus, type TransactionType, type TxDocument, type TxTimelineEntry,
 } from './agentApi';
 import { httpState } from './httpState';
+import { CaseNav, casePanelProps } from '../../design-system/CaseNav';
+import { defaultLocation, locate } from '../../design-system/caseNav';
+import { TRANSACTION_NAV } from './caseNav';
+import type { TransactionTab } from './nav';
 import { fmtDate, fmtStamp, t } from './i18n';
 import { StatePill, type ScreenProps } from './screens';
 
@@ -231,8 +235,8 @@ function NewTransactionForm({ s, clubs, onCreated }: { s: Session; clubs: ClubHi
 }
 
 // ------------------------------------------------------------ detail tabs
-const TABS = ['overview', 'parties', 'compliance', 'documents', 'messages', 'timeline'] as const;
-type Tab = (typeof TABS)[number];
+// M24B — the workspace's six functions sit in two categories (caseNav.ts).
+type Tab = TransactionTab;
 
 function PartiesTab({ s, tx, reload }: { s: Session; tx: Transaction; reload: () => void }) {
   const [busy, setBusy] = useState(false);
@@ -627,14 +631,12 @@ export function TransactionsScreen({ session, me, transactionId, transactionTab,
           <h3 className="grow">{tx.parties.find((p) => p.partyRole === 'individual')?.name ?? t('tx.partyUnnamed')} · {tr(`txType.${tx.type}`, tx.type)}</h3>
           <TxStatusPill status={tx.status} />
         </div>
-        <div className="tabs" role="tablist" aria-label={t('tx.tabs')} data-testid="tx-tabs">
-          {TABS.map((x) => (
-            <button key={x} role="tab" aria-selected={tab === x} className={tab === x ? 'active' : ''} onClick={() => setTab(x)} data-testid={`tx-tab-${x}`}>
-              {tr(`txTab.${x}`, x)}
-            </button>
-          ))}
-        </div>
-        <div role="tabpanel" data-testid={`tx-panel-${tab}`}>
+        <CaseNav
+          model={TRANSACTION_NAV} value={locate(TRANSACTION_NAV, tab) ?? defaultLocation(TRANSACTION_NAV)} onChange={(l) => setTab(l.sub)} translate={(k) => tr(k)} idPrefix="tx"
+          label={t('tx.tabs')} categoriesLabel={t('tx.areas')} subsLabel={(x) => `${t('tx.pagesIn')} ${x}`}
+          testId="tx-tabs" catTestId={(x) => `tx-cat-${x}`} subTestId={(x) => `tx-tab-${x}`}
+        />
+        <div {...casePanelProps('tx', tab, tr(`txTab.${tab}`, tab))} data-testid={`tx-panel-${tab}`}>
           {tab === 'overview' && <OverviewTab s={s} tx={tx} reload={reloadAll} />}
           {tab === 'parties' && <PartiesTab s={s} tx={tx} reload={reloadAll} />}
           {tab === 'compliance' && <ComplianceTab s={s} tx={tx} reload={reloadAll} />}

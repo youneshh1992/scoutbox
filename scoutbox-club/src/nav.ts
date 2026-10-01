@@ -9,6 +9,8 @@
 // never becomes authorization, and typing a hidden route still hits the same
 // server rules.
 import type { ScreenId } from './App';
+import { ROOM_NAV } from './caseNav';
+import { allSubs, caseSegments, parseCaseSegments, resolveTab, type CaseLocation } from '../../design-system/caseNav';
 
 export interface NavItem {
   id: ScreenId;
@@ -308,24 +310,38 @@ export function searchNav(query: string, ctx: NavContext, translate: (key: strin
 // ("#/recruitment/rooms/:roomId/offer"), so a notification, a colleague's link
 // or the journey's next action opens the right function of the case. An
 // unknown tab makes the whole hash malformed, exactly like an unknown id.
-export const ROOM_TABS = ['overview', 'passport', 'evidence', 'assessments', 'combine', 'development', 'discussion', 'contact', 'trial', 'activity', 'decision', 'offer', 'signing'] as const;
-export type RoomTab = typeof ROOM_TABS[number];
-const ROOM_HASH = /^#\/recruitment\/rooms\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})(?:\/([a-z]+))?$/;
+// M24B — the Room's functions are arranged as CATEGORY → SUBCATEGORY (see
+// caseNav.ts). A link names "<category>/<sub>"; the old flat "<tab>" form and
+// the server's tab names ("offer", "signing", "trial", …) still resolve to the
+// subcategory that replaced them, so no notification, next action or bookmark
+// broke. An unknown segment makes the whole hash malformed, exactly as before.
+export const ROOM_TABS = [...new Set([...allSubs(ROOM_NAV), ...ROOM_NAV.categories.flatMap((c) => c.subs.flatMap((s) => [...(s.legacy ?? [])]))])] as readonly string[];
+export type RoomTab = string;
+const ROOM_HASH = /^#\/recruitment\/rooms\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})((?:\/[a-z][a-z0-9-]*){0,2})$/;
+const roomSegs = (m: RegExpExecArray) => (m[2] ? m[2].slice(1).split('/') : []);
 
 /** The room id inside a deep link, or null for any other (or malformed) hash. */
 export function roomFromHash(hash: string): string | null {
   const m = ROOM_HASH.exec(hash ?? '');
   if (!m) return null;
-  if (m[2] && !(ROOM_TABS as readonly string[]).includes(m[2])) return null;
+  if (!parseCaseSegments(ROOM_NAV, roomSegs(m))) return null;
   return m[1];
 }
-/** The tab inside a room deep link (null when the link names none, or the hash is not a room link). */
+/** The category/subcategory a room link names (the default when it names none; null when the hash is not a room link). */
+export function roomLocationFromHash(hash: string): CaseLocation | null {
+  const m = ROOM_HASH.exec(hash ?? '');
+  return m ? parseCaseSegments(ROOM_NAV, roomSegs(m)) : null;
+}
+/** The subcategory a room link names explicitly (null when the link names none, or the hash is not a room link). */
 export function roomTabFromHash(hash: string): RoomTab | null {
   const m = ROOM_HASH.exec(hash ?? '');
-  if (!m || !m[2] || !(ROOM_TABS as readonly string[]).includes(m[2])) return null;
-  return m[2] as RoomTab;
+  if (!m || roomSegs(m).length === 0) return null;
+  return parseCaseSegments(ROOM_NAV, roomSegs(m))?.sub ?? null;
 }
-export const hashForRoom = (roomId: string, tab?: string | null) => `#/recruitment/rooms/${roomId}${tab && tab !== 'overview' && (ROOM_TABS as readonly string[]).includes(tab) ? `/${tab}` : ''}`;
+export const hashForRoom = (roomId: string, tab?: string | null) => {
+  const segs = caseSegments(ROOM_NAV, resolveTab(ROOM_NAV, tab));
+  return `#/recruitment/rooms/${roomId}${segs.map((s) => `/${s}`).join('')}`;
+};
 
 // M18 extends the SAME mechanism rather than inventing a second one:
 //   "#/recruitment/second-look"      → the Second Look queue

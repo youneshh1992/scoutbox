@@ -34,7 +34,12 @@ import { DecisionWorkflow } from './decisionPanel';
 import { OfferWorkflow } from './offerPanel';
 // M23 P8 — a grassroots club that took an Offer to acceptance continues to the signing here (no dead end).
 import { SigningWorkflow } from './signingPanel';
-import { JourneyStrip, JourneyTimeline, useRoomJourney } from './journeyStrip';
+import { JourneyStrip, useRoomJourney } from './journeyStrip';
+// M24B — category → subcategory navigation and the read-oriented panels.
+import { CaseNav, CaseCrumb, casePanelProps } from '../../design-system/CaseNav';
+import { defaultLocation, locate, resolveTab } from '../../design-system/caseNav';
+import { ROOM_NAV } from './caseNav';
+import { DocumentsPanel, InboxPanel, JourneyPanel, PastDecisionsPanel, PastOffersPanel, PastSigningsPanel, PastTrialsPanel, SecondLookPanel, TasksPanel, TimelinePanel } from './roomCase';
 import type { RoomJourney } from './roomsApi';
 
 interface RoomsScreenProps {
@@ -51,13 +56,8 @@ interface RoomsScreenProps {
   onCloseRoom?: () => void;
 }
 
-type TabId = 'overview' | 'passport' | 'evidence' | 'assessments' | 'combine' | 'development' | 'discussion' | 'contact' | 'trial' | 'activity' | 'decision' | 'offer' | 'signing';
-
-const TAB_KEYS: [TabId, string][] = [
-  ['overview', 'rm.tab.overview'], ['passport', 'rm.tab.passport'], ['evidence', 'rm.tab.evidence'],
-  ['assessments', 'rm.tab.assessments'], ['combine', 'rm.tab.combine'], ['development', 'rm.tab.development'],
-  ['discussion', 'rm.tab.discussion'], ['contact', 'rm.tab.contact'], ['trial', 'rm.tab.trial'], ['activity', 'rm.tab.activity'], ['decision', 'rm.tab.decision'], ['offer', 'rm.tab.offer'], ['signing', 'rm.tab.signing'],
-];
+/** M24B — a subcategory id of ROOM_NAV (see caseNav.ts); legacy flat tab ids resolve to one. */
+type TabId = string;
 
 // Grassroots keeps the same statuses and the same gates, but has no offers or
 // signings pipeline in practice — so it offers no Offers saved view. Rooms in
@@ -299,19 +299,20 @@ function RoomsList({ session, tick, onOpenRoom }: RoomsScreenProps) {
 }
 
 // =================================================================== room
-const isTabId = (x: unknown): x is TabId => TAB_KEYS.some(([id]) => id === x);
+const isTabId = (x: unknown): x is TabId => typeof x === 'string' && !!resolveTab(ROOM_NAV, x);
+const subOf = (x: unknown): TabId => (typeof x === 'string' && resolveTab(ROOM_NAV, x)?.sub) || defaultLocation(ROOM_NAV).sub;
 
 function RoomView({ session, tick, notify, openPlayer, roomId, roomTab, onRoomTab, onCloseRoom }: RoomsScreenProps & { roomId: string }) {
   const [room, setRoom] = useState<Room | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [tab, setTabState] = useState<TabId>(isTabId(roomTab) ? roomTab : 'overview');
+  const [tab, setTabState] = useState<TabId>(subOf(roomTab));
   const [bump, setBump] = useState(0);
   const [staff, setStaff] = useState<StaffRow[]>([]);
 
   const reload = useCallback(() => setBump((b) => b + 1), []);
   // M23 P8 — the tab follows the deep link (back/forward included), and a click writes the tab into the link.
-  useEffect(() => { if (isTabId(roomTab)) setTabState(roomTab); }, [roomTab, roomId]);
-  const setTab = useCallback((id: TabId) => { setTabState(id); onRoomTab?.(roomId, id); }, [onRoomTab, roomId]);
+  useEffect(() => { if (isTabId(roomTab)) setTabState(subOf(roomTab)); }, [roomTab, roomId]);
+  const setTab = useCallback((id: TabId) => { const sub = subOf(id); setTabState(sub); onRoomTab?.(roomId, sub); }, [onRoomTab, roomId]);
   // §55 — returning to the page re-reads the case.
   useEffect(() => {
     const onVisible = () => { if (document.visibilityState === 'visible') reload(); };
@@ -355,6 +356,8 @@ function RoomBody({ session, room, tick, notify, reload, staff, openPlayer, tab,
   // M23 P8 — ONE journey read per room view, shared by the strip and the timeline.
   const { journey, bump } = useRoomJourney(session, room, tick);
   const shared = { session, room, notify, reload, staff, openPlayer, journey };
+  const loc = locate(ROOM_NAV, tab) ?? defaultLocation(ROOM_NAV);
+  const casePanel = { session, room, notify, reload, staff, journey, openSub: (sub: string) => setTab(sub) };
 
   return (
     <div>
@@ -362,42 +365,45 @@ function RoomBody({ session, room, tick, notify, reload, staff, openPlayer, tab,
       <RoomHeader {...shared} />
       <JourneyStrip session={session} room={room} journey={journey} notify={notify} reload={reload} bump={bump} onTab={(id) => setTab(id as TabId)} />
 
-      {/* In-screen tab strip: scrolls horizontally on a narrow layout. */}
-      <div
-        role="tablist"
-        aria-label={t('rm.tabsLabel')}
-        style={{ display: 'flex', gap: 6, flexWrap: 'nowrap', overflowX: 'auto', margin: '10px 0', paddingBottom: 4 }}
-      >
-        {TAB_KEYS.map(([id, key]) => (
-          <button
-            key={id}
-            role="tab"
-            id={`rm-tab-${id}`}
-            aria-selected={tab === id}
-            aria-controls={`rm-panel-${id}`}
-            className={tab === id ? 'primary' : ''}
-            style={{ whiteSpace: 'nowrap', flex: '0 0 auto' }}
-            onClick={() => setTab(id)}
-          >
-            {t(key)}
-          </button>
-        ))}
-      </div>
+      {/* M24B — category → subcategory. Only the current category's pages are
+          in the DOM; the panel below is the ARIA tabpanel of the selected one. */}
+      <CaseCrumb model={ROOM_NAV} value={loc} translate={(k) => t(k)} prefix={[t('nav2.rooms'), room.playerAvailable ? (room.playerName ?? '') : t('rm.playerWithheld')]} />
+      <CaseNav
+        model={ROOM_NAV}
+        value={loc}
+        onChange={(l) => setTab(l.sub)}
+        translate={(k) => t(k)}
+        idPrefix="rm"
+        label={t('rm.tabsLabel')}
+        categoriesLabel={t('rm.areasLabel')}
+        subsLabel={(c) => `${t('rm.pagesIn')} ${c}`}
+        testId="room-nav"
+      />
 
-      <div role="tabpanel" id={`rm-panel-${tab}`} aria-labelledby={`rm-tab-${tab}`} aria-label={t(`rm.tab.${tab}`)}>
-        {tab === 'overview' && <OverviewPanel {...shared} />}
+      <div {...casePanelProps('rm', tab, t(`rm.tab.${tab}`))}>
+        {tab === 'summary' && <SummaryPanel {...shared} />}
+        {tab === 'journey' && <JourneyPanel {...casePanel} />}
+        {tab === 'tasks' && <TasksPanel {...casePanel} />}
+        {tab === 'activity' && <ActivityPanel {...shared} />}
         {tab === 'passport' && <PassportPanel {...shared} />}
         {tab === 'evidence' && <EvidencePanel {...shared} />}
         {tab === 'assessments' && <AssessmentsPanel {...shared} />}
         {tab === 'combine' && <RoomCombinePanel {...shared} />}
         {tab === 'development' && <DevelopmentPanel {...shared} />}
-        {tab === 'discussion' && <DiscussionPanel {...shared} />}
+        {tab === 'decision' && <DecisionPanel {...shared} />}
+        {tab === 'secondlook' && <SecondLookPanel {...casePanel} />}
         {tab === 'contact' && <ContactPanel {...shared} />}
         {tab === 'trial' && <TrialPanel session={session} room={room} notify={notify} reload={reload} />}
-        {tab === 'activity' && <ActivityPanel {...shared} />}
-        {tab === 'decision' && <DecisionPanel {...shared} />}
+        {tab === 'inbox' && <InboxPanel {...casePanel} />}
+        {tab === 'discussion' && <DiscussionPanel {...shared} />}
         {tab === 'offer' && <OfferWorkflow session={session} room={room} notify={notify} reload={reload} />}
         {tab === 'signing' && <SigningWorkflow session={session} room={room} notify={notify} reload={reload} />}
+        {tab === 'documents' && <DocumentsPanel {...casePanel} />}
+        {tab === 'timeline' && <TimelinePanel {...casePanel} />}
+        {tab === 'past-decisions' && <PastDecisionsPanel {...casePanel} />}
+        {tab === 'past-trials' && <PastTrialsPanel {...casePanel} />}
+        {tab === 'past-offers' && <PastOffersPanel {...casePanel} />}
+        {tab === 'past-signings' && <PastSigningsPanel {...casePanel} />}
       </div>
 
       <div className="dim" style={{ fontSize: 12, marginTop: 10 }}>🔒 {room.privacyNote}</div>
@@ -649,25 +655,7 @@ function ReadinessBlock({ readiness }: { readiness: RoomReadiness | null }) {
   );
 }
 
-function OverviewPanel({ session, room, notify, reload, staff }: PanelProps) {
-  const [title, setTitle] = useState('');
-  const [assignee, setAssignee] = useState('');
-
-  const addTask = async () => {
-    if (!title.trim()) return;
-    try {
-      await rooms.createTask(session, room.roomId, { title: title.trim(), assigneeUserId: assignee || null });
-      notify(t('rm.taskAdded'));
-      setTitle(''); setAssignee('');
-      reload();
-    } catch (e) { notify(errMessage(e), true); }
-  };
-
-  const setTaskStatus = async (taskId: string, status: string) => {
-    try { await rooms.updateTask(session, room.roomId, taskId, { status }); reload(); }
-    catch (e) { notify(errMessage(e), true); }
-  };
-
+function SummaryPanel({ room }: PanelProps) {
   return (
     <>
       <div className="section" aria-label={t('rm.summary')}>
@@ -702,31 +690,6 @@ function OverviewPanel({ session, room, notify, reload, staff }: PanelProps) {
           ))}
         </div>
         <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>{t('rm.requestEvidenceNote')}</div>
-      </div>
-
-      <div className="section" aria-label={t('rm.tasks')}>
-        <h4>{t('rm.tasks')}</h4>
-        <div className="dim" style={{ fontSize: 12.5, marginBottom: 6 }}>{t('rm.tasksNote')}</div>
-        <div className="list-rows">
-          {room.tasks.map((task) => (
-            <div key={task.id} className="list-row" style={{ flexWrap: 'wrap' }}>
-              <span className="grow"><b>{task.title}</b>{task.description ? <span className="dim"> — {task.description}</span> : null}</span>
-              <span className="dim">{task.assigneeName ?? t('rm.unassigned')}</span>
-              <select aria-label={`${t('rm.taskStatus')} ${task.title}`} value={task.status} onChange={(e) => setTaskStatus(task.id, e.target.value)}>
-                {ROOM_TASK_STATES.map((s) => <option key={s} value={s}>{taskStateLabel(s)}</option>)}
-              </select>
-            </div>
-          ))}
-          {room.tasks.length === 0 && <div className="dim">{t('rm.noTasks')}</div>}
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-          <input style={{ flex: 1, minWidth: 160 }} aria-label={t('rm.taskTitle')} placeholder={t('rm.taskTitle')} value={title} onChange={(e) => setTitle(e.target.value)} />
-          <select aria-label={t('rm.assignee')} value={assignee} onChange={(e) => setAssignee(e.target.value)}>
-            <option value="">{t('rm.unassigned')}</option>
-            {staff.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
-          <button className="primary" onClick={addTask}>{t('rm.newTask')}</button>
-        </div>
       </div>
 
       <div className="section" aria-label={t('rm.latestActivity')}>
@@ -1105,7 +1068,7 @@ function ActivityRows({ items }: { items: RoomActivityItem[] }) {
   );
 }
 
-function ActivityPanel({ session, room, journey }: PanelProps) {
+function ActivityPanel({ session, room }: PanelProps) {
   const [items, setItems] = useState<RoomActivityItem[]>(room.activity.items);
   const [cursor, setCursor] = useState<string | null>(room.activity.nextCursor);
   const [total, setTotal] = useState(room.activity.total);
@@ -1125,7 +1088,6 @@ function ActivityPanel({ session, room, journey }: PanelProps) {
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 6 }}>{t('rm.activityNote')}</div>
       <ActivityRows items={items} />
       {cursor && <button style={{ marginTop: 8 }} onClick={more}>{t('rm.more')}</button>}
-      {journey ? <JourneyTimeline journey={journey} /> : null}
     </div>
   );
 }

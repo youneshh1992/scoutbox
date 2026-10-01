@@ -21,8 +21,13 @@ let dirtyFlag = false;
 registerDirtyGuard(() => dirtyFlag);
 export const markDirty = () => { dirtyFlag = true; };
 export const markClean = () => { dirtyFlag = false; };
+import type { ClientOffer, ClientSigning } from './agentApi';
 import { fmtDate, fmtStamp, t } from './i18n';
-import { AGENCY_TABS, CLIENT_TABS, type AgencyTab, type ClientTab } from './nav';
+import { AGENCY_TABS, hashForTransaction, hashForContext, type AgencyTab, type ClientTab } from './nav';
+// M24B — the client case as category → subcategory.
+import { CaseNav, CaseCrumb, casePanelProps } from '../../design-system/CaseNav';
+import { defaultLocation, locate } from '../../design-system/caseNav';
+import { CLIENT_NAV } from './caseNav';
 
 type TKey = Parameters<typeof t>[0];
 const tr = (k: string) => t(k as TKey);
@@ -83,7 +88,7 @@ function Tabs<T extends string>({ tabs, active, onChange, label, labelFor }: { t
   );
 }
 const Panel = ({ id, label, children }: { id: string; label: string; children: ReactNode }) => (
-  <div role="tabpanel" id={`panel-${id}`} aria-labelledby={`tab-${id}`} aria-label={label}>{children}</div>
+  <div {...casePanelProps('client', id, label)}>{children}</div>
 );
 
 const Section = ({ title, children }: { title: string; children: ReactNode }) => (
@@ -418,12 +423,19 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
   // terms when the client's disclosure for it is off — the error IS the answer, so
   // it is rendered rather than swallowed.
   const contacts = useLoad(() => (det && det.mode === 'own' && det.access && tab === 'contacts' ? agent.clientContacts(session, id) : Promise.resolve(null)), [session, id, det?.access, tab, tick]);
-  const trials = useLoad(() => (det && det.mode === 'own' && det.access && tab === 'trials' ? agent.clientTrials(session, id) : Promise.resolve(null)), [session, id, det?.access, tab, tick]);
+  const trials = useLoad(() => (det && det.mode === 'own' && det.access && (tab === 'trials' || tab === 'tasks') ? agent.clientTrials(session, id) : Promise.resolve(null)), [session, id, det?.access, tab, tick]);
   // M23 P6. Loaded only on its tab; the server answers 403 when the mandate, scope or licence does not hold NOW, and that answer is rendered.
-  const offers = useLoad(() => (det && det.mode === 'own' && det.access && tab === 'offers' ? agent.clientOffers(session, id) : Promise.resolve(null)), [session, id, det?.access, tab, tick]);
+  const offers = useLoad(() => (det && det.mode === 'own' && det.access && (tab === 'offers' || tab === 'tasks' || tab === 'past-offers') ? agent.clientOffers(session, id) : Promise.resolve(null)), [session, id, det?.access, tab, tick]);
   // M23 P7 — signing progress over the shared Offers; a refusal (scope, licence, basis) hides the line rather than the Offers.
-  const signings = useLoad(() => (det && det.mode === 'own' && det.access && tab === 'offers' ? agent.clientSignings(session, id).then((r) => ({ ...r, refused: null as string | null })).catch((e: unknown) => ({ items: [], clientId: id, clientName: null, honest: '', refused: (e as { code?: string } | null)?.code ?? 'REFUSED' })) : Promise.resolve(null)), [session, id, det?.access, tab, tick]);
+  const signings = useLoad(() => (det && det.mode === 'own' && det.access && (tab === 'signings' || tab === 'tasks' || tab === 'past-signings') ? agent.clientSignings(session, id).then((r) => ({ ...r, refused: null as string | null })).catch((e: unknown) => ({ items: [], clientId: id, clientName: null, honest: '', refused: (e as { code?: string } | null)?.code ?? 'REFUSED' })) : Promise.resolve(null)), [session, id, det?.access, tab, tick]);
   const shares = useLoad(() => (det && det.mode === 'own' && det.access ? agent.clientShares(session, id) : Promise.resolve(null)), [session, id, det?.access, tick]);
+  // M24B — read-only pages over records the agent already reads elsewhere: the
+  // compliance contexts naming this client, the transaction workspaces the
+  // client is a party to (where the agent's own documents live), the full
+  // journey timeline. Each is loaded only on its page and refuses on its own terms.
+  const contexts = useLoad(() => (det && det.mode === 'own' && tab === 'compliance' ? agent.contexts(session) : Promise.resolve(null)), [session, id, det?.mode, tab, tick]);
+  const txs = useLoad(() => (det && det.mode === 'own' && tab === 'documents' ? agent.transactions(session) : Promise.resolve(null)), [session, id, det?.mode, tab, tick]);
+  const timeline = useLoad(() => (det && det.mode === 'own' && det.access && tab === 'timeline' ? agent.clientJourney(session, id) : Promise.resolve(null)), [session, id, det?.access, tab, tick]);
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [shareNote, setShareNote] = useState<Record<string, string>>({});
@@ -464,7 +476,30 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
     setBusy(true); setErr(null);
     try { await agent.withdrawShare(session, r.id, shareId); notify(t('share.withdrawn')); shares.reload(); } catch (e) { setErr(e); } finally { setBusy(false); }
   };
-  const labelFor = (x: ClientTab) => tr(`clients.tab.${x}`);
+  const labelFor = (x: string) => tr(`clients.tab.${x}`);
+  const loc = locate(CLIENT_NAV, tab) ?? defaultLocation(CLIENT_NAV);
+  const sub = loc.sub;
+  const noAccess = (testId: string) => <div className="notice warn" data-testid={testId}>{t('clients.noAccessOpps')}</div>;
+  const signingLabel = (s: ClientSigning) => (tr(`signing.st.${s.status}`) === `signing.st.${s.status}` ? s.statusLabel ?? s.status : tr(`signing.st.${s.status}`));
+  const offerLabel = (x: ClientOffer) => (tr(`offers.st.${x.status ?? ''}`) === `offers.st.${x.status ?? ''}` ? x.statusLabel ?? x.status : tr(`offers.st.${x.status ?? ''}`));
+  const PAST_OFFER = new Set(['DECLINED', 'WITHDRAWN', 'EXPIRED', 'SUPERSEDED']);
+  const signingRow = (sg: ClientSigning) => {
+    const done = sg.requiredParties.filter((p) => p.status === 'COMPLETED').length;
+    return (
+      <div key={sg.id} className="list-row" data-testid={`offer-signing-${sg.offerId}`} data-signing-status={sg.status} style={{ alignItems: 'flex-start', flexDirection: 'column', gap: 4 }}>
+        <div className="row" style={{ gap: 8, width: '100%', flexWrap: 'wrap' }}>
+          <strong className="grow">{sg.club.name ?? '—'}</strong>
+          <span className="pill" data-testid={`signing-state-${sg.id}`}>{signingLabel(sg)}</span>
+          {sg.clientActionRequired && <span className="pill warn">{t('signing.clientAction')}</span>}
+        </div>
+        <div className="dim" style={{ fontSize: 12.5 }}>
+          {t('signing.revision')} {sg.currentRevisionNumber ?? '—'} · {t('signing.parties').replace('{done}', String(done)).replace('{total}', String(sg.requiredParties.length))}
+          {sg.completedAt ? ` · ${t('signing.completedAt')} ${fmtStamp(sg.completedAt)}` : ''}
+          {sg.contract?.startDate ? ` · ${sg.contract.startDate}${sg.contract.endDate ? ` → ${sg.contract.endDate}` : ''}` : ''}
+        </div>
+      </div>
+    );
+  };
   return (
     <div data-testid="client-detail" data-status={r.status}>
       <button onClick={onBack}>← {t('clients.back')}</button>
@@ -477,27 +512,69 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
       {r.status === 'disputed' && <div className="notice block" style={{ marginTop: 8 }} data-testid="disputed-note">{t('clients.disputedNote')}</div>}
       {r.status === 'expired' && <div className="notice warn" style={{ marginTop: 8 }}>{t('clients.expiredNote')}</div>}
       <div style={{ marginTop: 12 }}>
-        <Tabs tabs={CLIENT_TABS} active={tab} onChange={onTab} label={t('clients.title')} labelFor={labelFor} />
-        {tab === 'overview' && (
-          <Panel id="overview" label={labelFor('overview')}>
-            <Section title={t('clients.identity')}>
-              <div className="stat-grid">
-                <Stat v={c.position ?? '—'} k="Position" />
-                <Stat v={c.age ?? '—'} k="Age" />
-                <Stat v={c.club ?? '—'} k="Club" />
-                <Stat v={c.country ?? '—'} k="Country" />
-              </div>
-            </Section>
-            {det.access && <ClientJourneyLine session={session} id={id} tick={tick} />}
-            {det.access && (
-              <Section title={t('clients.profileFields')}>
-                <div className="dim" style={{ fontSize: 12.5 }}>{Object.keys(c).filter((k) => !['id', 'name', 'accessBasis'].includes(k) && c[k] !== null && typeof c[k] !== 'object').map((k) => `${k}: ${String(c[k])}`).join(' · ')}</div>
+        {/* M24B — category → subcategory; only the current category's pages are in the DOM. */}
+        <CaseCrumb model={CLIENT_NAV} value={loc} translate={tr} prefix={[t('clients.title'), c.name ?? r.clientId]} />
+        <CaseNav
+          model={CLIENT_NAV} value={loc} onChange={(l) => onTab(l.sub)} translate={tr} idPrefix="client"
+          label={t('clients.sections')} categoriesLabel={t('clients.areas')} subsLabel={(x) => `${t('clients.pagesIn')} ${x}`}
+          testId="client-nav" catTestId={(x) => `client-cat-${x}`} subTestId={(x) => `client-tab-${x}`}
+        />
+        <Panel id={sub} label={labelFor(sub)}>
+          {sub === 'summary' && (
+            <>
+              <Section title={t('clients.identity')}>
+                <div className="stat-grid">
+                  <Stat v={c.position ?? '—'} k="Position" />
+                  <Stat v={c.age ?? '—'} k="Age" />
+                  <Stat v={c.club ?? '—'} k="Club" />
+                  <Stat v={c.country ?? '—'} k="Country" />
+                </div>
               </Section>
-            )}
-          </Panel>
-        )}
-        {tab === 'representation' && (
-          <Panel id="representation" label={labelFor('representation')}>
+              <Section title={t('clients.tab.representation')}>
+                <div className="stat-grid">
+                  <Stat v={scopeLabel(r.scope)} k={t('clients.scope')} />
+                  <Stat v={r.termMonths ?? '—'} k={t('clients.term')} />
+                  <Stat v={r.startAt ? fmtDate(r.startAt) : '—'} k={t('clients.startedAt')} />
+                  <Stat v={r.endAt ? fmtDate(r.endAt) : '—'} k={t('clients.endsAt')} />
+                </div>
+              </Section>
+            </>
+          )}
+          {sub === 'journey' && (det.access ? <ClientJourneyLine session={session} id={id} tick={tick} /> : noAccess('journey-no-access'))}
+          {sub === 'tasks' && (
+            <Section title={t('clients.tasksTitle')}>
+              <p className="pagehint">{t('clients.tasksNote')}</p>
+              {!det.access ? noAccess('tasks-no-access') : (() => {
+                const rows: { key: string; text: string; sub: string }[] = [];
+                for (const x of offers.data?.items ?? []) if (x.awaitingClientResponse) rows.push({ key: `o-${x.id}`, text: `${t('clients.taskOffer')} · ${x.club.name ?? '—'}`, sub: 'offers' });
+                for (const g of signings.data?.items ?? []) if (g.clientActionRequired) rows.push({ key: `s-${g.id}`, text: `${t('clients.taskSigning')} · ${g.club.name ?? '—'}`, sub: 'signings' });
+                for (const x of trials.data?.items ?? []) if (x.awaitingClientConfirmation) rows.push({ key: `t-${x.id}`, text: `${t('clients.taskTrial')} · ${x.club.name ?? '—'}`, sub: 'trials' });
+                const withheld = [offers.error ? t('clients.tab.offers') : null, signings.data?.refused ? t('clients.tab.signings') : null, trials.error ? t('clients.tab.trials') : null].filter(Boolean);
+                return (
+                  <>
+                    {rows.length === 0 && <div className="notice" data-testid="client-tasks-none">{t('clients.tasksNone')}</div>}
+                    <div className="list-rows" data-testid="client-tasks">
+                      {rows.map((row) => <div key={row.key} className="list-row"><span className="grow">{row.text}</span><button onClick={() => onTab(row.sub)}>{labelFor(row.sub)}</button></div>)}
+                    </div>
+                    {withheld.length > 0 && <p className="dim" style={{ fontSize: 12.5 }}>{withheld.join(', ')}: {t('clients.taskWithheld')}</p>}
+                  </>
+                );
+              })()}
+            </Section>
+          )}
+          {sub === 'activity' && (<>
+            <div className="list-rows" data-testid="client-activity">
+              {r.history.slice().reverse().map((h) => (
+                <div key={h.id} className="list-row"><span className="grow">{tr(`action.${h.action}`) === `action.${h.action}` ? h.action.replace(/_/g, ' ') : tr(`action.${h.action}`)}{h.byName ? ` · ${h.byName}` : ''}</span><span className="dim">{fmtStamp(h.at)}</span></div>
+              ))}
+            </div>
+          </>)}
+          {sub === 'profile' && (det.access ? (
+            <Section title={t('clients.profileFields')}>
+              <div className="dim" style={{ fontSize: 12.5 }}>{Object.keys(c).filter((k) => !['id', 'name', 'accessBasis'].includes(k) && c[k] !== null && typeof c[k] !== 'object').map((k) => `${k}: ${String(c[k])}`).join(' · ')}</div>
+            </Section>
+          ) : noAccess('profile-no-access'))}
+          {sub === 'representation' && (<>
             <div className="stat-grid" style={{ marginBottom: 12 }}>
               <Stat v={scopeLabel(r.scope)} k={t('clients.scope')} />
               <Stat v={r.termMonths ?? '—'} k={t('clients.term')} />
@@ -515,10 +592,27 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
             {(r.status === 'proposed' || r.status === 'active') && !r.legacy && (
               <div style={{ marginTop: 10 }}><button disabled={busy} onClick={end} data-testid="terminate">{r.status === 'proposed' ? t('clients.withdraw') : t('clients.terminate')}</button></div>
             )}
-          </Panel>
-        )}
-        {tab === 'opportunities' && (
-          <Panel id="opportunities" label={labelFor('opportunities')}>
+          </>)}
+          {sub === 'compliance' && (
+            <Section title={t('clients.tab.compliance')}>
+              <p className="pagehint">{t('clients.complianceNote')}</p>
+              <ErrorLine error={contexts.error} onRetry={contexts.reload} />
+              {contexts.data && (() => {
+                const mine = contexts.data.items.filter((cx) => cx.parties.some((pa) => pa.subjectKind === 'player' && pa.subjectId === r.clientId && !pa.removed));
+                return mine.length === 0 ? <div className="notice" data-testid="client-compliance-none">{t('clients.complianceNone')}</div> : (
+                  <div className="list-rows" data-testid="client-compliance">
+                    {mine.map((cx) => (
+                      <div key={cx.id} className="list-row" data-context={cx.id}>
+                        <span className="grow"><strong>{cx.type}</strong> <span className="dim">· {cx.status} · {cx.jurisdictions.join(', ') || '—'}</span></span>
+                        <a className="linklike" href={hashForContext(cx.id)}>{t('clients.complianceOpen')}</a>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </Section>
+          )}
+          {sub === 'opportunities' && (<>
             {!det.access && <div className="notice warn" data-testid="opps-no-access">{t('clients.noAccessOpps')}</div>}
             {det.access && (
               <>
@@ -564,10 +658,8 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
                 <p className="dim" style={{ fontSize: 12.5 }}>{t('share.honest')}</p>
               </>
             )}
-          </Panel>
-        )}
-        {tab === 'contacts' && (
-          <Panel id="contacts" label={labelFor('contacts')}>
+          </>)}
+          {sub === 'contacts' && (<>
             {!det.access && <div className="notice warn" data-testid="contacts-no-access">{t('clients.noAccessOpps')}</div>}
             {det.access && (
               <>
@@ -593,10 +685,8 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
                 <p className="dim" style={{ fontSize: 12.5 }}>{t('contacts.honest')}</p>
               </>
             )}
-          </Panel>
-        )}
-        {tab === 'trials' && (
-          <Panel id="trials" label={labelFor('trials')}>
+          </>)}
+          {sub === 'trials' && (<>
             {!det.access && <div className="notice warn" data-testid="trials-no-access">{t('clients.noAccessOpps')}</div>}
             {det.access && (
               <>
@@ -623,10 +713,8 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
                 <p className="dim" style={{ fontSize: 12.5 }}>{trials.data?.honest ?? t('trials.honest')}</p>
               </>
             )}
-          </Panel>
-        )}
-        {tab === 'offers' && (
-          <Panel id="offers" label={labelFor('offers')}>
+          </>)}
+          {sub === 'offers' && (<>
             {!det.access && <div className="notice warn" data-testid="offers-no-access">{t('clients.noAccessOpps')}</div>}
             {det.access && (
               <>
@@ -651,43 +739,91 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
                         )}
                         {cur?.terms.conditions && <div className="dim" style={{ fontSize: 12.5 }}>{cur.terms.conditions}</div>}
                         {x.status === 'ACCEPTED' && <div className="dim" style={{ fontSize: 12.5 }} data-testid={`offer-signing-pending-${x.id}`}>{t('offers.signingPending')}</div>}
-                        {(() => {
-                          // P7.1 (D-P71-7): several packages can exist over one Offer (an expired one, then a live one). Show the live one, else the completed one, else the latest — the same choice the server's Offer summary makes.
-                          const forOffer = (signings.data?.items ?? []).filter((g) => g.offerId === x.id);
-                          const sg = forOffer.find((g) => !g.terminal) ?? forOffer.find((g) => g.status === 'COMPLETED') ?? forOffer[forOffer.length - 1] ?? null;
-                          if (!sg) return signings.data?.refused && x.status === 'ACCEPTED' ? <div className="dim" style={{ fontSize: 12 }} data-testid={`offer-signing-withheld-${x.id}`}>{t('signing.withheld')}</div> : null;
-                          const done = sg.requiredParties.filter((p) => p.status === 'COMPLETED').length;
-                          const label = tr(`signing.st.${sg.status}`) === `signing.st.${sg.status}` ? sg.statusLabel ?? sg.status : tr(`signing.st.${sg.status}`);
-                          return (
-                            <div className="dim" style={{ fontSize: 12.5 }} data-testid={`offer-signing-${x.id}`} data-signing-status={sg.status}>
-                              <span className="pill" data-testid={`signing-state-${sg.id}`}>{label}</span>
-                              {' '}{t('signing.revision')} {sg.currentRevisionNumber ?? '—'} · {t('signing.parties').replace('{done}', String(done)).replace('{total}', String(sg.requiredParties.length))}
-                              {sg.clientActionRequired ? ` · ${t('signing.clientAction')}` : ''}
-                              {sg.completedAt ? ` · ${t('signing.completedAt')} ${fmtStamp(sg.completedAt)}` : ''}
-                              {sg.contract?.startDate ? ` · ${sg.contract.startDate}${sg.contract.endDate ? ` → ${sg.contract.endDate}` : ''}` : ''}
-                            </div>
-                          );
-                        })()}
                         {x.sharedAt && <div className="dim" style={{ fontSize: 12 }}>{t('offers.sharedAt')} {fmtStamp(x.sharedAt)}</div>}
                       </div>
                     );
                   })}
                 </div>
                 <p className="dim" style={{ fontSize: 12.5 }}>{t('offers.honest')}</p>
-                {signings.data && signings.data.items.length > 0 && <p className="dim" style={{ fontSize: 12.5 }} data-testid="client-signings-honest">{t('signing.honest')}</p>}
               </>
             )}
-          </Panel>
-        )}
-        {tab === 'activity' && (
-          <Panel id="activity" label={labelFor('activity')}>
-            <div className="list-rows" data-testid="client-activity">
-              {r.history.slice().reverse().map((h) => (
-                <div key={h.id} className="list-row"><span className="grow">{tr(`action.${h.action}`) === `action.${h.action}` ? h.action.replace(/_/g, ' ') : tr(`action.${h.action}`)}{h.byName ? ` · ${h.byName}` : ''}</span><span className="dim">{fmtStamp(h.at)}</span></div>
+          </>)}
+          {sub === 'signings' && (
+            <>
+              {!det.access && noAccess('signings-no-access')}
+              {det.access && (
+                <>
+                  <p className="pagehint">{t('signing.honest')}</p>
+                  {signings.data?.refused && <div className="notice warn" data-testid="client-signings-withheld">{t('signing.withheld')}</div>}
+                  {signings.data && !signings.data.refused && signings.data.items.filter((g) => !g.terminal || g.status === 'COMPLETED').length === 0 && <div className="notice" data-testid="signings-none">{t('clients.pastSigningsNone')}</div>}
+                  <div className="list-rows" data-testid="client-signings">{(signings.data?.items ?? []).filter((g) => !g.terminal || g.status === 'COMPLETED').map(signingRow)}</div>
+                  {signings.data && signings.data.items.length > 0 && <p className="dim" style={{ fontSize: 12.5 }} data-testid="client-signings-honest">{t('signing.honest')}</p>}
+                </>
+              )}
+            </>
+          )}
+          {sub === 'documents' && (
+            <Section title={t('clients.tab.documents')}>
+              <p className="pagehint">{t('clients.documentsNote')}</p>
+              <ErrorLine error={txs.error} onRetry={txs.reload} />
+              {txs.data && (() => {
+                const mine = txs.data.items.filter((tx) => tx.playerId === r.clientId);
+                return mine.length === 0 ? <div className="notice" data-testid="client-documents-none">{t('clients.documentsNone')}</div> : (
+                  <div className="list-rows" data-testid="client-documents">
+                    {mine.map((tx) => (
+                      <div key={tx.id} className="list-row" data-tx={tx.id}>
+                        <span className="grow"><strong>{tr(`txType.${tx.type}`) === `txType.${tx.type}` ? tx.type : tr(`txType.${tx.type}`)}</strong> <span className="dim">· {tx.status} · {tx.documents.length} {t('txTab.documents').toLowerCase()}</span></span>
+                        <a className="linklike" href={hashForTransaction(tx.id, 'documents')}>{t('clients.documentsOpen')}</a>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </Section>
+          )}
+          {sub === 'timeline' && (
+            <Section title={t('clients.tab.timeline')}>
+              <p className="pagehint">{t('clients.timelineNote')}</p>
+              {!det.access && noAccess('timeline-no-access')}
+              <ErrorLine error={timeline.error} onRetry={timeline.reload} />
+              {timeline.data && timeline.data.items.every((it) => it.journey.timeline.length === 0) && <div className="notice" data-testid="client-timeline-none">{t('clients.timelineNone')}</div>}
+              {timeline.data && timeline.data.items.filter((it) => it.journey.timeline.length > 0).map((it) => (
+                <div key={it.club.id} className="list-rows" data-testid={`client-timeline-${it.club.id}`}>
+                  <div className="list-row"><strong className="grow">{it.club.name ?? it.club.id}</strong><span className="pill">{t(`clients.journey.st.${it.journey.stage}`, it.journey.stage.replace(/_/g, ' '))}</span></div>
+                  {it.journey.timeline.map((ev, i) => (
+                    <div key={`${ev.kind}-${ev.at}-${i}`} className="list-row" data-kind={ev.kind}><span className="dim" style={{ minWidth: 120 }}>{fmtStamp(ev.at)}</span><span className="grow">{t(`clients.journey.ev.${ev.kind}`, ev.kind.replace(/_/g, ' '))}</span></div>
+                  ))}
+                </div>
               ))}
-            </div>
-          </Panel>
-        )}
+            </Section>
+          )}
+          {sub === 'past-offers' && (
+            <Section title={t('clients.tab.past-offers')}>
+              <p className="pagehint">{t('clients.historyNote')}</p>
+              {!det.access && noAccess('past-offers-no-access')}
+              <ErrorLine error={offers.error} onRetry={offers.reload} />
+              {offers.data && offers.data.items.filter((x) => PAST_OFFER.has(x.status ?? '')).length === 0 && <div className="notice" data-testid="past-offers-none">{t('clients.pastOffersNone')}</div>}
+              <div className="list-rows" data-testid="client-past-offers">
+                {(offers.data?.items ?? []).filter((x) => PAST_OFFER.has(x.status ?? '')).map((x) => (
+                  <div key={x.id} className="list-row" data-testid={`past-offer-${x.id}`} data-status={x.status ?? ''}>
+                    <strong className="grow">{x.club.name ?? '—'}</strong>
+                    <span className="pill">{offerLabel(x)}</span>
+                    <span className="dim" style={{ fontSize: 12 }}>{x.currentRevision ? `${t('offers.revision')} ${x.currentRevision.revisionNumber}` : ''}{x.responses.length ? ` · ${fmtStamp(x.responses[x.responses.length - 1].occurredAt)}` : ''}</span>
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
+          {sub === 'past-signings' && (
+            <Section title={t('clients.tab.past-signings')}>
+              <p className="pagehint">{t('clients.historyNote')}</p>
+              {!det.access && noAccess('past-signings-no-access')}
+              {signings.data?.refused && <div className="notice warn">{t('signing.withheld')}</div>}
+              {signings.data && !signings.data.refused && signings.data.items.filter((g) => g.terminal).length === 0 && <div className="notice" data-testid="past-signings-none">{t('clients.pastSigningsNone')}</div>}
+              <div className="list-rows" data-testid="client-past-signings">{(signings.data?.items ?? []).filter((g) => g.terminal).map(signingRow)}</div>
+            </Section>
+          )}
+        </Panel>
       </div>
     </div>
   );

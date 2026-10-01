@@ -470,3 +470,39 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 /* the entry screen carries the appearance control too (top-right) */
 .login { position: relative; }
 .login-toolbar { position: absolute; top: 16px; right: 16px; }
+
+/* ------------------------------------------------------------------ M24B case navigation
+   Row 1: the categories of one case (a segmented control — the current one is
+   heavier, carries a dot and aria-current). Row 2: the current category's
+   subcategories as light underline tabs. Both rows scroll sideways on a phone;
+   nothing shrinks below 13px and every target is ≥44px tall there. */
+.casenav { display: flex; flex-direction: column; gap: 10px; margin: 12px 0 14px; }
+.casenav-catnav { min-width: 0; }
+.casenav-cats { display: flex; gap: 4px; margin: 0; padding: 4px; list-style: none; background: var(--sb-wash); border: 1px solid var(--sb-rule); border-radius: 12px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.casenav-cats::-webkit-scrollbar { display: none; }
+.casenav-cats li { flex: 1 0 auto; min-width: 0; }
+.casenav-cat { width: 100%; min-height: 40px; padding: 8px 14px; border: 1px solid transparent; border-radius: 9px; background: none; box-shadow: none; color: var(--sb-quiet); font-size: 13px; font-weight: 500; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.casenav-cat:hover { color: var(--sb-ink); filter: none; }
+.casenav-cat[aria-current="true"] { background: var(--sb-white); color: var(--sb-ink); font-weight: 650; border-color: var(--sb-panel-border); box-shadow: var(--sb-shadow-panel); }
+.casenav-cat[aria-current="true"]::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--sb-green); flex: 0 0 auto; }
+.casenav-cat-count { font-size: 11px; font-weight: 500; color: var(--sb-quiet); padding: 1px 6px; border-radius: 999px; background: var(--sb-wash); }
+.casenav-cat[aria-current="true"] .casenav-cat-count { background: var(--sb-nav-active-bg, var(--sb-wash)); color: var(--sb-tab-active); }
+.casenav-subs { display: flex; gap: 16px; border-bottom: 1px solid var(--sb-rule); overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.casenav-subs::-webkit-scrollbar { display: none; }
+.casenav-sub { background: none; border: 0; box-shadow: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 9px 2px 10px; margin-bottom: -1px; color: var(--sb-quiet); font-size: 13px; font-weight: 500; white-space: nowrap; min-height: 40px; flex: 0 0 auto; }
+.casenav-sub:hover { color: var(--sb-ink); filter: none; }
+.casenav-sub[aria-selected="true"] { color: var(--sb-tab-active); border-bottom-color: var(--sb-tab-line); font-weight: 600; }
+.casenav-crumb { margin: 0 0 6px; font-size: 12px; color: var(--sb-quiet); display: flex; flex-wrap: wrap; gap: 0; }
+.casenav-crumb-current { color: var(--sb-ink); font-weight: 600; }
+:root[data-theme="dark"] .casenav-cats { background: var(--sb-wash); border-color: var(--sb-rule); }
+:root[data-theme="dark"] .casenav-cat, :root[data-app="agent"]:not([data-theme="dark"]) .casenav-cat, :root[data-theme="dark"] .casenav-sub, :root[data-app="agent"]:not([data-theme="dark"]) .casenav-sub { background: none; box-shadow: none; }
+:root[data-theme="dark"] .casenav-cat[aria-current="true"], :root[data-app="agent"]:not([data-theme="dark"]) .casenav-cat[aria-current="true"] { background: var(--sb-white); box-shadow: var(--sb-shadow-panel); }
+@media (max-width: 640px) {
+  .casenav { margin: 10px 0 12px; }
+  .casenav-cats li { flex: 0 0 auto; }
+  .casenav-cat { min-height: 44px; padding: 10px 14px; }
+  .casenav-cat-count { display: none; }
+  .casenav-subs { gap: 14px; }
+  .casenav-sub { min-height: 44px; padding: 12px 4px; }
+  .casenav-crumb { display: none; }
+}
