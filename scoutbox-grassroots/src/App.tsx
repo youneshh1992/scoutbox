@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ThemeToggle, useTheme, type Theme } from '../../design-system/theme';
+import { initials } from '../../design-system/text';
+import { Icon } from './icons';
 import { api, ApiError, DEMO_MODE, revokeSession, type Channel, type Notification, type Org, type Session } from './api';
 import {
   FeedScreen, FilmRoomScreen, SearchScreen, ShortlistScreen, RequestsScreen, MessagesScreen,
@@ -156,10 +159,14 @@ export default function App() {
     return () => window.removeEventListener('storage', onStorage);
   }, []);
 
-  return session ? <Workspace session={session} onLogout={logout} /> : <Login onLogin={login} />;
+  // M24A — one appearance per application, persisted under its own key.
+  const { theme, toggle: toggleTheme } = useTheme('grass');
+  return session
+    ? <Workspace session={session} onLogout={logout} theme={theme} onToggleTheme={toggleTheme} />
+    : <Login onLogin={login} theme={theme} onToggleTheme={toggleTheme} />;
 }
 
-function Login({ onLogin }: { onLogin: (s: Session) => void }) {
+function Login({ onLogin, theme, onToggleTheme }: { onLogin: (s: Session) => void; theme: Theme; onToggleTheme: () => void }) {
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [scoutName, setScoutName] = useState('');
@@ -184,8 +191,9 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
 
   return (
     <div className="login">
+      <div className="login-toolbar"><ThemeToggle theme={theme} onToggle={onToggleTheme} labels={{ aria: t('theme.aria'), light: t('theme.light'), dark: t('theme.dark') }} /></div>
       <div style={{ textAlign: 'center' }}>
-        <h1>Scout<span>Box</span> <span style={{ fontSize: 22, fontWeight: 700, color: 'var(--accent-2)' }}>Grassroots</span></h1>
+        <h1><span className="wordmark">ScoutBox</span><span className="brand-sub">Grassroots</span></h1>
         <div className="tagline">Local football only: federation-registered grassroots clubs scouting within 50km of their ground. Every action attributed. No unsolicited contact.</div>
         {DEMO_MODE && <div className="pill blue" style={{ marginTop: 10 }}>Self-contained demo — no server needed</div>}
       </div>
@@ -261,7 +269,7 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
   );
 }
 
-function Workspace({ session, onLogout }: { session: Session; onLogout: () => void }) {
+function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Session; onLogout: () => void; theme: Theme; onToggleTheme: () => void }) {
   // Deep links: the hash IS the screen id ("#/verification"). Unknown or
   // absent hashes land on Home without highlighting a wrong section.
   const [screen, setScreenState] = useState<ScreenId>(() => screenFromHash(window.location.hash) ?? 'feed');
@@ -538,25 +546,21 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
         drawerOpen={drawerOpen}
         onCloseDrawer={() => setDrawerOpen(false)}
         brand={{ short: 'G', long: 'Grassroots' }}
+        org={{ initials: initials(session.org.name), name: session.org.name, line: session.org.plan }}
         footer={
-          <div className="whoami">
-            <b>{session.scoutName}</b>
-            {session.role} · {session.org.name} · {session.org.plan}
+          <div className="p-account">
+            <div className="p-who"><span className="p-avatar" aria-hidden="true">{initials(session.scoutName)}</span><div><strong>{session.scoutName}</strong><small>{session.role}</small></div></div>
             <OrgChips org={session.org} />
-            <div style={{ marginTop: 6 }}>
-              <button onClick={() => setScreen('verification')} style={{ padding: 0, color: 'var(--muted)', fontSize: 12 }}>{t('navsec.myVerification')}</button>
-            </div>
-            <div style={{ marginTop: 6 }}>
-              <label style={{ fontSize: 12 }} title={t('common.machineTranslated')}>
+            <div className="p-links">
+              <button onClick={() => setScreen('verification')}><Icon name="badge-check" size={14} />{t('navsec.myVerification')}</button>
+              <label title={t('common.machineTranslated')}>
                 {t('common.language')}:{' '}
                 <select aria-label={t('common.language')} value={lang} onChange={(e) => { setLang(e.target.value as 'en' | 'fr'); setLangTick((x) => x + 1); }}>
                   <option value="en">English</option>
                   <option value="fr">Français (trad. automatique)</option>
                 </select>
               </label>
-            </div>
-            <div style={{ marginTop: 6 }}>
-              <button onClick={onLogout} style={{ padding: 0, color: 'var(--accent-2)' }}>Switch org</button>
+              <button onClick={onLogout}><Icon name="log-out" size={14} />Switch org</button>
             </div>
           </div>
         }
@@ -569,6 +573,10 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
           unread={unread}
           bellOpen={bellOpen}
           drawerOpen={drawerOpen}
+          edition="Grassroots"
+          theme={theme}
+          onToggleTheme={onToggleTheme}
+          onOpenPalette={() => setPaletteOpen(true)}
           onToggleBell={openBell}
           onReport={() => setSafetyOpen(true)}
           onOpenDrawer={() => setDrawerOpen(true)}
@@ -597,6 +605,8 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
         )}
         {activeSection && <SecondaryNav section={activeSection} activeItemId={loc.itemId} onNavigate={setScreen} />}
         <div className="content">
+          {/* M24A — the reference page heading; the top bar keeps the document <h1>. */}
+          <div className="f-heading"><p className="f-display" aria-hidden="true">{screenLabel}</p></div>
           {screen === 'feed' && (
             <NeedsAttention session={session} tick={tick} unreadMessages={unreadMessages} verLevel={verLevel} onNavigate={setScreen} />
           )}

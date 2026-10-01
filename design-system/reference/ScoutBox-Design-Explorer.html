@@ -1,0 +1,2140 @@
+<!doctype html>
+<html lang="en" data-visualize-standalone>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src 'unsafe-inline' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Scoutbox Platform Agent</title>
+<style>:root{color-scheme:light dark;background:light-dark(rgb(255 255 255), rgb(24 24 24))}html,body{margin:0}body{box-sizing:border-box;padding:1rem;background:inherit}iframe{display:block;width:100%;height:calc(100vh - 2rem);margin:0 auto;border:0}</style>
+</head>
+<body>
+<iframe id="codex-visualization" sandbox="allow-scripts" referrerpolicy="no-referrer" title="Scoutbox Platform Agent" data-srcdoc="&lt;!doctype html&gt;
+&lt;html lang=&quot;en&quot; data-visualize-standalone&gt;
+&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;&gt;
+&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;&gt;
+&lt;meta name=&quot;referrer&quot; content=&quot;no-referrer&quot;&gt;
+&lt;meta http-equiv=&quot;Content-Security-Policy&quot; content=&quot;default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27; &#x27;unsafe-eval&#x27; &#x27;wasm-unsafe-eval&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src &#x27;unsafe-inline&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src &#x27;none&#x27;; object-src &#x27;none&#x27;; base-uri &#x27;none&#x27;; form-action &#x27;none&#x27;&quot;&gt;
+&lt;title&gt;Scoutbox Platform Agent&lt;/title&gt;
+&lt;style&gt;:root {
+  color-scheme: light dark;
+  background-color: var(
+    --background,
+    var(--color-background-primary, light-dark(rgb(255 255 255), rgb(24 24 24)))
+  ) !important;
+
+  /* Agent-facing contract; keep in sync with SKILL.md. */
+  --background: var(
+    --color-background-primary,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --card: color-mix(in oklab, var(--foreground) 5%, var(--background));
+  --card-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --popover: var(
+    --color-background-secondary,
+    light-dark(rgb(255 255 255), rgb(45 45 45))
+  );
+  --popover-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --primary: var(
+    --color-text-info,
+    light-dark(rgb(51 156 255), rgb(131 195 255))
+  );
+  --primary-foreground: var(
+    --color-text-inverse,
+    light-dark(rgb(255 255 255), rgb(13 13 13))
+  );
+  --secondary: var(
+    --color-background-secondary,
+    light-dark(rgb(255 255 255 / 96%), rgb(54 54 54 / 96%))
+  );
+  --secondary-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --muted: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --muted-foreground: var(
+    --color-text-secondary,
+    light-dark(rgb(26 28 31 / 49.4%), rgb(255 255 255 / 49.8%))
+  );
+  --accent: var(
+    --color-background-info,
+    light-dark(rgb(229 242 255), rgb(13 39 63))
+  );
+  --accent-foreground: var(
+    --color-text-info,
+    light-dark(rgb(51 156 255), rgb(131 195 255))
+  );
+  --destructive: var(
+    --color-text-warning,
+    light-dark(rgb(226 85 7), rgb(255 133 73))
+  );
+  --border: var(
+    --color-border-secondary,
+    light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%))
+  );
+  --input: var(
+    --color-border-primary,
+    light-dark(
+      rgb(26 28 31 / 11.8%),
+      color-mix(in oklab, rgb(0 0 0) 10%, transparent)
+    )
+  );
+  --ring: var(
+    --color-ring-primary,
+    light-dark(rgb(51 156 255), rgb(131 195 255 / 76%))
+  );
+  --font-size-base: var(--font-text-md-size, 14px);
+  --blue: light-dark(rgb(51 156 255), rgb(51 156 255));
+  --orange: light-dark(rgb(226 85 7), rgb(251 106 34));
+  --green: light-dark(rgb(0 162 64), rgb(64 201 119));
+  --red: light-dark(rgb(224 46 42), rgb(255 103 100));
+  --purple: light-dark(rgb(146 79 247), rgb(173 123 249));
+  --yellow: light-dark(rgb(255 195 0), rgb(255 210 64));
+  --viz-series-1: var(--primary);
+  --viz-series-2: light-dark(rgb(243 136 59), rgb(245 154 86));
+  --viz-series-3: light-dark(rgb(93 201 119), rgb(116 213 139));
+  --viz-series-4: light-dark(rgb(235 119 177), rgb(240 143 192));
+  --viz-series-5: light-dark(rgb(155 121 236), rgb(170 145 239));
+  --viz-series-6: light-dark(rgb(58 185 177), rgb(90 203 194));
+
+  /* Internal implementation variables; not part of the agent contract. */
+  --font-sans: -apple-system, system-ui, &quot;Segoe UI&quot;, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, &quot;SF Mono&quot;, Menlo, Consolas, &quot;Liberation Mono&quot;,
+    monospace;
+  --font-size-normal: max(11px, var(--font-size-base));
+  --font-size-tooltip: calc(var(--font-size-base) - 1px);
+  --font-size-small: max(11px, calc(var(--font-size-base) - 2px));
+  --font-size-h1: calc(var(--font-size-normal) * 1.7142857143);
+  --font-size-h2: calc(var(--font-size-normal) * 1.4285714286);
+  --font-size-h3: calc(var(--font-size-normal) * 1.2857142857);
+  --font-weight-normal: 430;
+  --font-weight-medium: 500;
+  --icon-size: 16px;
+  --line-height-normal: calc(var(--font-size-normal) * 1.5);
+  --line-height-tooltip: calc(var(--font-size-tooltip) * 1.4285714286);
+  --line-height-small: calc(var(--font-size-small) + 4px);
+  --corner-shape: round;
+  --radius: var(--border-radius-lg, 10px);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-2xl: calc(var(--radius) * 1.6);
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 2px -1px rgb(0 0 0 / 8%);
+  --checkmark-image: url(&quot;data:image/svg+xml,%3Csvg xmlns=&#x27;http://www.w3.org/2000/svg&#x27; viewBox=&#x27;0 0 17 17&#x27;%3E%3Cpath d=&#x27;M12.8961 3.64101C13.1297 3.41418 13.4984 3.37523 13.7779 3.56581C14.0571 3.75635 14.1554 4.11331 14.0299 4.41347L13.9615 4.53847L7.71151 13.7045C7.59411 13.8767 7.4063 13.9877 7.19881 14.0072C6.99136 14.0267 6.78564 13.9533 6.63826 13.806L2.88826 10.056L2.79842 9.9457C2.6192 9.67407 2.64927 9.30496 2.88826 9.06581C3.12738 8.82669 3.49647 8.79676 3.76815 8.97597L3.8785 9.06581L7.03084 12.2182L12.8053 3.74941L12.8961 3.64101Z&#x27;/%3E%3C/svg%3E&quot;);
+
+  /* Legacy aliases; not part of the current agent contract. */
+  --viz-bg: transparent;
+  --viz-panel: var(--card);
+  --viz-border: var(--border);
+  --viz-text: var(--foreground);
+  --viz-muted: var(--muted-foreground);
+  --viz-accent: var(--primary);
+  --viz-accent-text: var(--primary-foreground);
+  --viz-accent-bg: var(--accent);
+  --viz-font-size: var(--font-size-base);
+  --viz-warning: var(--destructive);
+}
+
+:root[data-theme=&quot;light&quot;] {
+  color-scheme: light;
+}
+
+:root[data-theme=&quot;dark&quot;] {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html &gt; body {
+  /* Preserve MCP aliases for older inline renderers without creating :root cycles. */
+  --color-background-primary: var(
+    --background,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --color-text-primary: var(
+    --foreground,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --color-border-secondary: var(
+    --border,
+    light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%))
+  );
+
+  margin: 0;
+  padding: var(--visualize-paint-gutter, 0px);
+  color: var(--foreground);
+  background: transparent !important;
+  font-family: var(--font-sans) !important;
+  font-size: var(--font-size-normal);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
+}
+
+.cursor-interaction {
+  cursor: var(--cursor-interaction, pointer);
+}
+
+a {
+  color: color-mix(in srgb, var(--viz-accent) 80%, var(--viz-text) 20%);
+  cursor: var(--cursor-interaction, pointer);
+  font-weight: var(--font-weight-medium, 500);
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+
+a:is(:hover, :focus-visible) {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 0.5px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+  margin-block: 0;
+}
+
+h1 {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h3,
+h4,
+h5,
+h6 {
+  font-size: var(--font-size-h3);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.3;
+}
+
+b,
+strong,
+th {
+  font-weight: var(--font-weight-medium);
+}
+
+code:not(pre code) {
+  display: inline;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  corner-shape: var(--corner-shape);
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  word-break: break-word;
+}
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--foreground);
+  font: inherit;
+  text-align: start;
+}
+
+.table :is(th, td) {
+  padding-block: 10px;
+  padding-inline: 0 24px;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--border);
+  text-align: start;
+  vertical-align: top;
+}
+
+.table-responsive &gt; .table :is(th, td) {
+  overflow-wrap: break-word;
+}
+
+.table :is(th, td):last-child {
+  padding-inline-end: 0;
+}
+
+.table :is(caption, thead th) {
+  font-weight: 600;
+}
+
+.table thead th {
+  padding-block: 8px;
+  border-bottom-color: color-mix(in srgb, var(--foreground) 16%, transparent);
+}
+
+.table tbody tr:last-child :is(th, td) {
+  border-bottom: 0;
+}
+
+.table.table-sm :is(th, td) {
+  padding-block: 6px;
+}
+
+.table.table-sm :is(th, td):not(:last-child) {
+  padding-inline-end: 16px;
+}
+
+.table :is(.text-end, [align=&quot;right&quot;]) {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.table :is(.text-center, [align=&quot;center&quot;]) {
+  text-align: center;
+}
+
+.table .text-nowrap {
+  white-space: nowrap;
+}
+
+#widget {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: transparent !important;
+}
+
+.card {
+  min-width: 0;
+  padding: 12px;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  border-radius: var(--radius-2xl);
+  corner-shape: var(--corner-shape);
+  color: var(--card-foreground);
+  background: var(--card);
+}
+
+#widget &gt; :not(.card, .progress) {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  top: 0;
+  left: 0;
+  width: max-content;
+  max-width: min(
+    20rem,
+    var(--tooltip-available-width, calc(100vw - 10px)),
+    calc(100vw - 10px)
+  );
+  max-height: min(
+    var(--tooltip-available-height, calc(100vh - 10px)),
+    calc(100vh - 10px)
+  );
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  corner-shape: var(--corner-shape);
+  color: var(--popover-foreground);
+  background: var(--popover);
+  box-shadow: none;
+  font-size: var(--font-size-tooltip);
+  line-height: var(--line-height-tooltip);
+  overflow-wrap: break-word;
+  white-space: normal;
+  pointer-events: none;
+  user-select: none;
+}
+
+.viz-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(max(180px, 24%), 1fr));
+  gap: 10px;
+}
+
+.viz-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.viz-stat-value {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+.viz-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+hr {
+  width: 100%;
+  height: 1px;
+  margin-block: 6px;
+  border: 0;
+  background: var(--border);
+}
+
+.nav {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.progress {
+  display: flex;
+  height: 8px;
+  margin-block: calc((var(--line-height-normal, 1.5em) - 8px) / 2);
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+}
+
+.progress-bar:only-child {
+  border-radius: var(--radius-full);
+}
+
+.progress-bar {
+  height: 100%;
+  flex-shrink: 0;
+  border: 0;
+  background: var(--viz-series-1);
+}
+
+.viz-badge {
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  color: var(--accent-foreground);
+  background: var(--accent);
+  font-weight: var(--font-weight-medium);
+}
+
+small,
+.text-small,
+.viz-badge {
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+}
+
+.text-muted {
+  color: var(--muted-foreground);
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.viz-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.viz-controls &gt; .form-label {
+  display: grid;
+  min-width: min(100%, 260px);
+  flex: 1 1 280px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin-bottom: 0;
+}
+
+.viz-controls &gt; .form-label &gt; :is(.form-control, .form-range, .form-select) {
+  grid-column: 1 / -1;
+}
+
+.btn,
+.nav-link,
+.form-check-input,
+.form-control,
+.form-range,
+.form-select {
+  font: inherit;
+}
+
+.btn,
+.nav-link {
+  appearance: button;
+  display: inline-flex;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 8px;
+  -webkit-app-region: no-drag;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: var(--corner-shape);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: var(--cursor-interaction, pointer);
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.btn:is(.btn-block, .viz-tile) {
+  inline-size: 100%;
+}
+
+.btn.viz-tile {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+a.btn {
+  cursor: var(--cursor-interaction, pointer);
+  text-decoration: none;
+}
+
+.btn:not(:disabled):hover,
+.nav-link:not(:disabled):not([aria-disabled=&quot;true&quot;]):hover {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn-primary {
+  border-color: transparent;
+  color: var(--primary-foreground);
+  background: var(--foreground);
+  background-clip: padding-box;
+}
+
+.btn-primary .text-muted {
+  color: color-mix(in srgb, var(--primary-foreground) 50%, transparent);
+}
+
+.btn-primary:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 80%, transparent);
+  background-clip: padding-box;
+}
+
+.btn-ghost {
+  border-color: transparent;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.btn-ghost:not(:disabled):hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.nav-pills .nav-link {
+  min-width: 0;
+  border-color: transparent;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.nav-justified .nav-link {
+  flex: 1 1 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.nav-pills .nav-link.active {
+  color: var(--foreground);
+  background: var(--muted);
+}
+
+.btn:disabled,
+.nav-link:disabled,
+.nav-link[aria-disabled=&quot;true&quot;] {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+[data-lucide] {
+  stroke-width: 1.6;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--foreground);
+}
+
+.form-control {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: var(--corner-shape);
+  color: var(--foreground);
+  background: var(--secondary);
+}
+
+.form-control::placeholder {
+  color: var(--muted-foreground);
+}
+
+.form-control[type=&quot;file&quot;] {
+  padding: 0;
+  overflow: hidden;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control[type=&quot;file&quot;]::file-selector-button {
+  min-height: 26px;
+  margin-right: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--input);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: inherit;
+  font: inherit;
+}
+
+.form-control[type=&quot;file&quot;]:not(:disabled):hover::file-selector-button {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-control-color[type=&quot;color&quot;] {
+  width: 40px;
+  height: 28px;
+  padding: 3px;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch {
+  border: 0;
+  border-radius: calc(var(--radius-lg) - 4px);
+  corner-shape: var(--corner-shape);
+}
+
+textarea.form-control {
+  height: auto;
+  min-height: 72px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.form-control:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-control:disabled,
+.form-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.form-select {
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 32px 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: var(--corner-shape);
+  color: var(--foreground);
+  background-color: var(--secondary);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+    linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-select:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-select:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-check {
+  display: flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 6px;
+}
+
+.form-check-input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin: 0;
+  border: 1px solid var(--input);
+  color: var(--primary-foreground);
+  background-color: transparent;
+  cursor: var(--cursor-interaction, default);
+  transition:
+    background-color 150ms,
+    border-color 150ms,
+    box-shadow 150ms;
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;] {
+  border-color: var(--input);
+  border-radius: var(--radius-sm);
+  corner-shape: var(--corner-shape);
+  background-color: var(--secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input:not(:disabled):not(:checked):hover {
+  background-color: var(--card);
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;]:checked {
+  border-color: var(--primary);
+  background-color: var(--primary);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input[type=&quot;checkbox&quot;]:checked::before {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--primary-foreground);
+  content: &quot;&quot;;
+  mask: var(--checkmark-image) center / 12px 12px no-repeat;
+}
+
+.form-check-input[type=&quot;radio&quot;] {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+}
+
+.form-check-input[type=&quot;radio&quot;]:checked {
+  border: 2px solid var(--primary);
+  background:
+    radial-gradient(circle, var(--primary-foreground) 0 2.5px, transparent 3px),
+    var(--primary);
+}
+
+.form-check:not(.form-switch) .form-check-input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+}
+
+.form-switch .form-check-input:disabled,
+.form-switch .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.form-check-label {
+  color: var(--foreground);
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-switch .form-check-input {
+  position: relative;
+  width: 32px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+  box-shadow: none;
+  transition: background-color 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 1px solid light-dark(var(--primary-foreground), var(--foreground));
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+  box-shadow: var(--shadow-sm);
+  content: &quot;&quot;;
+  transform: translate(2px, -50%);
+  transition: transform 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input:checked {
+  background: var(--primary);
+}
+
+.form-switch .form-check-input:checked::before {
+  transform: translate(14px, -50%);
+}
+
+.form-switch .form-check-input:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.form-range {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 28px;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  outline: none;
+  border: 0;
+  accent-color: var(--primary);
+  background: linear-gradient(
+      color-mix(in srgb, var(--foreground) 7%, transparent),
+      color-mix(in srgb, var(--foreground) 7%, transparent)
+    )
+    center / 100% 2px no-repeat;
+}
+
+.form-range::-webkit-slider-runnable-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-webkit-slider-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range::-moz-range-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-moz-range-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.btn:not(.btn-primary, .viz-tile):is(
+  [aria-pressed=&quot;true&quot;],
+  [aria-selected=&quot;true&quot;],
+  .is-selected
+) {
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.btn.viz-tile:is([aria-pressed=&quot;true&quot;], [aria-selected=&quot;true&quot;], .is-selected) {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.btn:focus-visible,
+.nav-link:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+  .btn,
+  .nav-link,
+  .form-control,
+  .form-select {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Keep small-screen WebKit from zooming when a text field receives focus. */
+  .form-control,
+  .form-select {
+    font-size: max(16px, var(--font-size-normal));
+  }
+
+  .form-control[type=&quot;file&quot;]::file-selector-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .form-control-color[type=&quot;color&quot;] {
+    width: 44px;
+    height: 44px;
+  }
+
+  .form-control:is(
+    [type=&quot;date&quot;],
+    [type=&quot;datetime-local&quot;],
+    [type=&quot;month&quot;],
+    [type=&quot;time&quot;],
+    [type=&quot;week&quot;]
+  ) {
+    min-width: 0;
+    max-width: 100%;
+    padding-block: 8px;
+  }
+
+  .form-check {
+    min-height: 44px;
+    padding-inline: 15px;
+  }
+
+  .form-check-input {
+    position: relative;
+  }
+
+  .form-check-input::after {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 44px;
+    height: 44px;
+    content: &quot;&quot;;
+    transform: translate(-50%, -50%);
+  }
+
+  .form-check-label {
+    display: inline-flex;
+    min-width: 44px;
+    min-height: 44px;
+    align-items: center;
+  }
+
+  .form-range {
+    height: 44px;
+    touch-action: pan-y;
+  }
+
+  .form-range::-webkit-slider-runnable-track {
+    height: 44px;
+  }
+
+  .form-range::-moz-range-track {
+    height: 44px;
+  }
+
+  .form-range::-webkit-slider-thumb {
+    margin-top: 12px;
+  }
+}
+
+svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+#widget &gt; svg {
+  width: 100%;
+}
+
+/* Model-authored chart rules can otherwise stretch icons after these styles load. */
+svg.lucide {
+  display: block;
+  width: var(--icon-size) !important;
+  height: var(--icon-size) !important;
+  flex: none;
+  margin: 0 !important;
+  stroke-width: 1.6;
+}
+
+.text-warning,
+.text-destructive {
+  color: var(--destructive);
+}
+
+html&gt;body{padding:0}&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;script type=&quot;application/json&quot; id=&quot;codex-visualization-widget-state&quot;&gt;__CODEX_VISUALIZATION_WIDGET_STATE__&lt;/script&gt;
+&lt;script&gt;(() =&gt; {
+  const root = document.documentElement;
+  const mediaQuery = globalThis.matchMedia(&quot;(prefers-color-scheme: dark)&quot;);
+  const apply = Reflect.apply;
+  const isArray = Array.isArray;
+  const hasOwn = Object.hasOwn;
+  const parentWindow = globalThis.parent;
+  const stringify = JSON.stringify;
+  const parse = JSON.parse;
+  const encode = TextEncoder.prototype.encode.bind(new TextEncoder());
+  const initialStateElement = document.getElementById(
+    &quot;codex-visualization-widget-state&quot;,
+  );
+  const initialGlobals = parse(initialStateElement?.textContent ?? &quot;{}&quot;);
+  initialStateElement?.remove();
+  /** @type {Record&lt;string, unknown&gt; | null} */
+  let state = initialGlobals.widgetState ?? null;
+  const statePersistence = initialGlobals.statePersistence ?? &quot;none&quot;;
+  let nextStateRequestId = 0;
+  /** @type {Map&lt;number, { resolve: () =&gt; void; reject: (error: Error) =&gt; void; timeout: ReturnType&lt;typeof globalThis.setTimeout&gt;; serializedState: string }&gt;} */
+  const pendingStateWrites = new Map();
+  const persistenceError = () =&gt;
+    Object.assign(
+      new Error(&quot;The host could not persist the widget state update&quot;),
+      {
+        code: -32000,
+        data: { code: &quot;widget_state_persistence_failed&quot;, retryable: false },
+      },
+    );
+  /**
+   * @param {object} prototype
+   * @param {string} property
+   */
+  const getPrototypeGetter = (prototype, property) =&gt; {
+    // oxlint-disable-next-line typescript/unbound-method -- invoked through captured Reflect.apply
+    const getter = Object.getOwnPropertyDescriptor(prototype, property)?.get;
+    if (getter == null) {
+      throw new Error(`Missing ${property} getter`);
+    }
+    return getter;
+  };
+  const getMessageData = getPrototypeGetter(MessageEvent.prototype, &quot;data&quot;);
+  const getMessagePorts = getPrototypeGetter(MessageEvent.prototype, &quot;ports&quot;);
+  const getMessageSource = getPrototypeGetter(MessageEvent.prototype, &quot;source&quot;);
+  // oxlint-disable-next-line typescript/unbound-method -- captured before the untrusted fragment runs
+  const addHostMessageListener = MessagePort.prototype.addEventListener;
+  // oxlint-disable-next-line typescript/unbound-method -- captured before the untrusted fragment runs
+  const postHostMessage = MessagePort.prototype.postMessage;
+  // oxlint-disable-next-line typescript/unbound-method -- captured before the untrusted fragment runs
+  const startHostPort = MessagePort.prototype.start;
+  // oxlint-disable-next-line typescript/unbound-method -- captured before the untrusted fragment runs
+  const stopMessagePropagation = Event.prototype.stopImmediatePropagation;
+  /** @type {MessagePort | null} */
+  let hostPort = null;
+  const postToHost = (type, payload) =&gt; {
+    if (hostPort != null) {
+      apply(postHostMessage, hostPort, [{ type, ...payload }]);
+    }
+  };
+  const openExternal = ({ href }) =&gt; {
+    if (globalThis.navigator.userActivation?.isActive === true) {
+      postToHost(&quot;open-external&quot;, { href });
+    }
+  };
+  const sendFollowUpMessage = ({ context, prompt, title }) =&gt; {
+    if (globalThis.navigator.userActivation?.isActive === true) {
+      postToHost(&quot;follow-up&quot;, { context, prompt, title });
+    }
+    return Promise.resolve();
+  };
+  /**
+   * @param {Record&lt;string, unknown&gt; | ((previous: Record&lt;string, unknown&gt; | null) =&gt; Record&lt;string, unknown&gt;)} next
+   * @returns {Promise&lt;void&gt;}
+   */
+  const setWidgetState = async (next) =&gt; {
+    const nextState = typeof next === &quot;function&quot; ? next(state) : next;
+    if (
+      nextState == null ||
+      typeof nextState !== &quot;object&quot; ||
+      isArray(nextState)
+    ) {
+      throw new TypeError(&quot;Widget state must be a JSON object&quot;);
+    }
+    const inputState = stringify(
+      nextState,
+      (_key, /** @type {unknown} */ value) =&gt; {
+        if (
+          typeof value === &quot;undefined&quot; ||
+          typeof value === &quot;function&quot; ||
+          typeof value === &quot;symbol&quot; ||
+          (typeof value === &quot;number&quot; &amp;&amp; !Number.isFinite(value))
+        ) {
+          throw new TypeError(&quot;Widget state must be a JSON object&quot;);
+        }
+        return value;
+      },
+    );
+    const parsedState = parse(inputState);
+    if (
+      parsedState == null ||
+      typeof parsedState !== &quot;object&quot; ||
+      isArray(parsedState)
+    ) {
+      throw new TypeError(&quot;Widget state must be a JSON object&quot;);
+    }
+    const storedState = {
+      modelContent: null,
+      privateContent: null,
+      ...parsedState,
+    };
+    const serializedState = stringify(storedState);
+    if (encode(serializedState).length &gt; 16 * 1024) {
+      throw new TypeError(
+        &quot;Widget state must be a JSON object of at most 16 KiB&quot;,
+      );
+    }
+    if (
+      hasOwn(storedState, &quot;imageIds&quot;) &amp;&amp;
+      (!isArray(storedState.imageIds) ||
+        storedState.imageIds.some(
+          (/** @type {unknown} */ id) =&gt; typeof id !== &quot;string&quot;,
+        ))
+    ) {
+      throw new TypeError(&quot;Widget state imageIds must be an array of strings&quot;);
+    }
+    if (storedState.imageIds?.length &gt; 0) {
+      throw Object.assign(
+        new TypeError(&quot;Visualization state does not support image attachments&quot;),
+        { code: -32602, data: { code: &quot;images_unsupported&quot; } },
+      );
+    }
+    state = storedState;
+    globalThis.openai.widgetState = state;
+    globalThis.dispatchEvent(
+      new CustomEvent(&quot;openai:set_globals&quot;, {
+        detail: { globals: { widgetState: state } },
+      }),
+    );
+    if (statePersistence === &quot;none&quot;) {
+      throw persistenceError();
+    }
+    const id = ++nextStateRequestId;
+    return new Promise((resolve, reject) =&gt; {
+      const timeout = globalThis.setTimeout(() =&gt; {
+        pendingStateWrites.delete(id);
+        reject(persistenceError());
+      }, 30_000);
+      pendingStateWrites.set(id, { resolve, reject, timeout, serializedState });
+      postToHost(&quot;widget-state-write&quot;, { id, state: serializedState });
+    });
+  };
+  const syncTheme = () =&gt; {
+    const theme = mediaQuery.matches ? &quot;dark&quot; : &quot;light&quot;;
+    root.dataset.theme = theme;
+    globalThis.openai = {
+      ...globalThis.openai,
+      openExternal,
+      sendFollowUpMessage,
+      setWidgetState,
+      theme,
+      visualizationStyleVariables: {},
+      visualizationTheme: theme,
+      widgetState: state,
+      statePersistence,
+      stateModelContext: &quot;none&quot;,
+    };
+    globalThis.dispatchEvent(
+      new CustomEvent(&quot;openai:set_globals&quot;, {
+        detail: { globals: globalThis.openai },
+      }),
+    );
+  };
+  const sendHeight = () =&gt; {
+    postToHost(&quot;height&quot;, {
+      height: Math.ceil(
+        Math.max(
+          document.body.scrollHeight,
+          document.body.getBoundingClientRect().height,
+        ),
+      ),
+    });
+  };
+
+  globalThis.addEventListener(
+    &quot;message&quot;,
+    (event) =&gt; {
+      const data = apply(getMessageData, event, []);
+      const ports = apply(getMessagePorts, event, []);
+      const source = apply(getMessageSource, event, []);
+      if (
+        hostPort != null ||
+        source !== parentWindow ||
+        typeof data !== &quot;object&quot; ||
+        data?.type !== &quot;codex-visualization-initialize&quot; ||
+        !isArray(ports) ||
+        ports.length !== 1
+      ) {
+        return;
+      }
+      apply(stopMessagePropagation, event, []);
+      const nextHostPort = ports[0];
+      try {
+        apply(addHostMessageListener, nextHostPort, [
+          &quot;message&quot;,
+          (event) =&gt; {
+            const data = apply(getMessageData, event, []);
+            if (typeof data === &quot;object&quot; &amp;&amp; data?.type === &quot;measure&quot;) {
+              sendHeight();
+            } else if (
+              typeof data === &quot;object&quot; &amp;&amp;
+              data?.type === &quot;widget-state-result&quot;
+            ) {
+              /** @type {unknown} */
+              const id = data.id;
+              if (typeof id !== &quot;number&quot;) {
+                return;
+              }
+              const pending = pendingStateWrites.get(id);
+              if (pending != null) {
+                pendingStateWrites.delete(id);
+                globalThis.clearTimeout(pending.timeout);
+                if (data.ok === true) {
+                  pending.resolve();
+                } else {
+                  pending.reject(persistenceError());
+                }
+              }
+            }
+          },
+        ]);
+        apply(startHostPort, nextHostPort, []);
+      } catch {
+        return;
+      }
+      hostPort = nextHostPort;
+      for (const [id, { serializedState }] of pendingStateWrites) {
+        postToHost(&quot;widget-state-write&quot;, { id, state: serializedState });
+      }
+      sendHeight();
+    },
+    { capture: true },
+  );
+  document.currentScript?.remove();
+  mediaQuery.addEventListener(&quot;change&quot;, syncTheme);
+  globalThis.addEventListener(&quot;click&quot;, (event) =&gt; {
+    if (event.defaultPrevented) {
+      return;
+    }
+    let element = null;
+    if (event.target instanceof globalThis.Element) {
+      element = event.target;
+    } else if (event.target instanceof globalThis.Node) {
+      element = event.target.parentElement;
+    }
+    const link = element?.closest(&quot;a[href]&quot;);
+    const href = link?.getAttribute(&quot;href&quot;);
+    if (href == null) {
+      return;
+    }
+    if (href.startsWith(&quot;#&quot;)) {
+      let id;
+      try {
+        id = decodeURIComponent(href.slice(1));
+      } catch {
+        return;
+      }
+      const target = id.length === 0 ? root : document.getElementById(id);
+      if (
+        target == null ||
+        globalThis.navigator.userActivation?.isActive !== true
+      ) {
+        return;
+      }
+      event.preventDefault();
+      postToHost(&quot;scroll-to&quot;, {
+        top: target.getBoundingClientRect().top + globalThis.scrollY,
+      });
+      return;
+    }
+    event.preventDefault();
+    openExternal({ href });
+  });
+  new ResizeObserver(sendHeight).observe(document.body);
+  syncTheme();
+})();
+&lt;/script&gt;
+&lt;div id=&quot;scoutbox-platform&quot; aria-label=&quot;ScoutBox Platform design study&quot;&gt;
+ &lt;div class=&quot;f-explorer&quot;&gt;&lt;div&gt;&lt;span class=&quot;f-study&quot;&gt;DESIGN 03 / PLATFORM&lt;/span&gt;&lt;span class=&quot;f-explains&quot;&gt;Five applications · Albert Sans · 23 example screens&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;f-pickers&quot;&gt;&lt;label&gt;Application&lt;select id=&quot;f-app&quot; aria-label=&quot;Application&quot;&gt;&lt;option value=&quot;pro&quot;&gt;ScoutBox Pro&lt;/option&gt;&lt;option value=&quot;player&quot;&gt;ScoutBox Player&lt;/option&gt;&lt;option value=&quot;grass&quot;&gt;ScoutBox Grassroots&lt;/option&gt;&lt;option value=&quot;agent&quot;&gt;ScoutBox Agent&lt;/option&gt;&lt;option value=&quot;safety&quot;&gt;Trust &amp; Safety&lt;/option&gt;&lt;/select&gt;&lt;/label&gt;&lt;label&gt;Screen&lt;select id=&quot;f-screen&quot; aria-label=&quot;Screen&quot;&gt;&lt;/select&gt;&lt;/label&gt;&lt;/div&gt;&lt;/div&gt;
+ &lt;div id=&quot;f-canvas&quot; aria-label=&quot;Platform application preview&quot;&gt;&lt;/div&gt;
+ &lt;div class=&quot;f-footer&quot;&gt;&lt;span&gt;PLATFORM / &lt;span id=&quot;f-current&quot;&gt;&lt;/span&gt;&lt;/span&gt;&lt;span&gt;Interactive design study · illustrative data&lt;/span&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;style&gt;
+@import url(&#x27;https://fonts.googleapis.com/css2?family=Albert+Sans:wght@400;500;600;700;800&amp;display=swap&#x27;);
+#scoutbox-platform{--f-paper:#f5f3ed;--f-white:#fffef9;--f-ink:#222923;--f-quiet:#636a60;--f-rule:#cdd0c4;--f-wash:#e9eadf;--f-green:#00e676;font-family:&#x27;Albert Sans&#x27;,sans-serif;color:var(--f-ink);font-size:14px;line-height:1.5;color-scheme:light}
+#scoutbox-platform *{box-sizing:border-box}#scoutbox-platform button,#scoutbox-platform input,#scoutbox-platform select,#scoutbox-platform textarea{font:inherit;color:inherit}#scoutbox-platform button{border:0;background:none;text-align:left}#scoutbox-platform button:hover{filter:brightness(.94)}#scoutbox-platform button:focus-visible,#scoutbox-platform select:focus-visible,#scoutbox-platform input:focus-visible{outline:2px solid #00783e;outline-offset:4px}#scoutbox-platform h1,#scoutbox-platform h2,#scoutbox-platform h3,#scoutbox-platform p{margin:0}#scoutbox-platform h1{font-size:44px;line-height:1.05;font-weight:500;letter-spacing:-1.9px}#scoutbox-platform h2{font-size:23px;line-height:1.2;font-weight:500;letter-spacing:-.7px}#scoutbox-platform h3{font-size:16px;font-weight:600;line-height:1.35;letter-spacing:-.25px}#scoutbox-platform svg{width:18px;height:18px;flex-shrink:0}#scoutbox-platform .f-serif{font-family:&#x27;Albert Sans&#x27;,sans-serif;font-weight:400;letter-spacing:-1.6px;font-optical-sizing:auto}#scoutbox-platform .f-mono{font-family:&#x27;Albert Sans&#x27;,sans-serif;font-size:11px;font-weight:400;letter-spacing:.3px}#scoutbox-platform .f-kicker{text-transform:uppercase;font-family:&#x27;Albert Sans&#x27;,sans-serif;font-size:11px;letter-spacing:1px;color:var(--f-quiet);line-height:1.5}#scoutbox-platform .f-sub{font-size:13px;color:var(--f-quiet);line-height:1.6;margin-top:7px}#scoutbox-platform .f-explorer{display:flex;justify-content:space-between;align-items:end;gap:20px;flex-wrap:wrap;padding:0 0 22px;color:#222923}#scoutbox-platform .f-study{display:block;font-family:&#x27;Albert Sans&#x27;,sans-serif;font-size:11px;letter-spacing:1px}#scoutbox-platform .f-explains{display:block;font-size:15px;margin-top:6px}#scoutbox-platform .f-pickers{display:flex;gap:14px;flex-wrap:wrap}#scoutbox-platform .f-pickers label{font-size:11px;display:grid;gap:6px;min-width:160px;color:#636a60}#scoutbox-platform select{border:0;border-bottom:1px solid #909b8e;border-radius:0;padding:8px 25px 8px 0;background:transparent;font-size:13px;min-height:40px;min-width:0;width:100%}#scoutbox-platform #f-canvas{background:var(--f-paper);border:1px solid var(--f-rule);min-width:0;overflow:hidden}#scoutbox-platform .f-footer{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:11px;color:#687065;margin-top:12px}
+#scoutbox-platform .f-wordmark{font-size:32px;font-weight:800;letter-spacing:-2px;line-height:1;display:inline-flex;align-items:baseline;white-space:nowrap}#scoutbox-platform .f-wordmark:after{content:&#x27;&#x27;;display:inline-block;width:9px;height:9px;background:var(--f-green);margin-left:3px}#scoutbox-platform .f-masthead{padding:25px 32px 22px;display:flex;align-items:center;justify-content:space-between;gap:20px;border-bottom:1px solid var(--f-ink)}#scoutbox-platform .f-brandlock{display:flex;align-items:center;gap:18px}#scoutbox-platform .f-brandlock .f-kicker{border-left:1px solid var(--f-rule);padding-left:18px;max-width:120px}#scoutbox-platform .f-org{display:flex;align-items:center;gap:12px;font-size:12px}#scoutbox-platform .f-seal{height:35px;width:35px;border:1px solid var(--f-ink);display:grid;place-items:center;font-family:&#x27;Albert Sans&#x27;,sans-serif;font-size:20px;border-radius:50%;flex-shrink:0}#scoutbox-platform .f-topnav{display:flex;align-items:center;gap:26px;padding:0 32px;border-bottom:1px solid var(--f-rule);flex-wrap:wrap}#scoutbox-platform .f-topnav button{padding:15px 0;border-bottom:3px solid transparent;font-size:12px}#scoutbox-platform .f-topnav button.active{border-color:var(--f-ink);font-weight:700}#scoutbox-platform .f-topnav .f-navnum{font-family:&#x27;Albert Sans&#x27;,sans-serif;color:var(--f-quiet);font-size:11px;margin-right:7px}#scoutbox-platform .f-topnav .f-utility{margin-left:auto;display:flex;align-items:center;gap:12px}#scoutbox-platform .f-content{padding:30px 32px 34px;min-height:570px}#scoutbox-platform .f-heading{display:flex;justify-content:space-between;align-items:end;gap:20px;margin-bottom:26px;flex-wrap:wrap}#scoutbox-platform .f-heading .f-kicker{margin-bottom:13px}#scoutbox-platform .f-display{font-family:&#x27;Albert Sans&#x27;,sans-serif;font-size:62px;font-weight:400;line-height:1;letter-spacing:-2.2px}#scoutbox-platform .f-display em{font-weight:400}#scoutbox-platform .f-heading-side{max-width:240px;text-align:right}#scoutbox-platform .f-heading-side p{font-size:12px;color:var(--f-quiet);margin-bottom:12px}#scoutbox-platform .f-button{display:inline-flex;align-items:center;justify-content:space-between;gap:20px;padding:12px 17px;border:1px solid var(--f-ink);background:var(--f-ink);color:var(--f-white);font-size:12px;font-weight:500;min-height:43px}#scoutbox-platform .f-button.lime{background:var(--f-green);color:#14271b;border-color:var(--f-green)}#scoutbox-platform .f-button.outline{background:transparent;color:var(--f-ink);border-color:var(--f-rule)}#scoutbox-platform .f-textbtn{padding:7px 0;display:inline-flex;align-items:center;gap:9px;font-size:12px;border-bottom:1px solid var(--f-ink);line-height:1.5}#scoutbox-platform .f-flex{display:flex;align-items:center;justify-content:space-between;gap:14px}#scoutbox-platform .f-inline{display:flex;align-items:center;gap:10px;flex-wrap:wrap}#scoutbox-platform .f-divider{border-top:1px solid var(--f-rule);margin:25px 0}#scoutbox-platform .f-sectionline{display:flex;align-items:baseline;gap:12px;border-top:1px solid var(--f-ink);padding:14px 0;margin-top:26px}#scoutbox-platform .f-sectionline span{font:11px &#x27;Albert Sans&#x27;,sans-serif;color:var(--f-quiet)}#scoutbox-platform .f-sectionline h2{font-size:19px}#scoutbox-platform .f-status{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#3d5443}#scoutbox-platform .f-status:before{content:&#x27;&#x27;;width:6px;height:6px;display:inline-block;background:#008f4c}#scoutbox-platform .f-status.pending{color:#8b5b28}#scoutbox-platform .f-status.pending:before{background:#b47a2f}#scoutbox-platform .f-status.urgent{color:#913b32}#scoutbox-platform .f-status.urgent:before{background:#ab4736}#scoutbox-platform .f-two{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:30px}#scoutbox-platform .f-ruledaside{border-left:1px solid var(--f-rule);padding-left:26px}#scoutbox-platform .f-stack{display:grid;gap:20px}#scoutbox-platform .f-paper{padding:22px;background:var(--f-white);border:1px solid var(--f-rule)}#scoutbox-platform .f-initial{height:42px;width:34px;background:var(--f-wash);display:grid;place-items:center;font-family:&#x27;Albert Sans&#x27;,sans-serif;font-size:18px;flex-shrink:0}#scoutbox-platform .f-line{padding:16px 0;border-bottom:1px solid var(--f-rule)}#scoutbox-platform .f-line:last-child{border:0}#scoutbox-platform .f-note{padding:15px 0 15px 14px;border-left:3px solid var(--f-green);font-size:12px;color:var(--f-quiet);line-height:1.7}#scoutbox-platform .f-filters{display:flex;gap:20px;align-items:center;flex-wrap:wrap;padding:15px 0;border-top:1px solid var(--f-ink);border-bottom:1px solid var(--f-rule);margin-bottom:24px}#scoutbox-platform .f-filters button{font-size:12px;display:flex;align-items:center;gap:9px;padding:0}#scoutbox-platform .f-filters .f-filtercount{font-family:&#x27;Albert Sans&#x27;,sans-serif;font-size:11px;color:var(--f-quiet);margin-left:auto}#scoutbox-platform .f-talent-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.92fr);gap:30px}#scoutbox-platform .f-candidate{padding:19px 14px 19px 0;width:100%;display:grid;grid-template-columns:30px 1fr 20px;align-items:center;gap:10px;border-bottom:1px solid var(--f-rule)}#scoutbox-platform .f-candidate strong{font-weight:500;font-size:19px;letter-spacing:-.5px}#scoutbox-platform .f-candidate small{display:block;font-size:12px;color:var(--f-quiet);margin-top:4px}#scoutbox-platform .f-candidate.active{background:var(--f-ink);color:var(--f-white);padding-left:14px;border-left:3px solid var(--f-green)}#scoutbox-platform .f-candidate.active small,#scoutbox-platform .f-candidate.active .f-mono{color:#bdc6bc}#scoutbox-platform .f-playername{font-size:45px;font-family:&#x27;Albert Sans&#x27;,sans-serif;line-height:1.05;letter-spacing:-1.8px}#scoutbox-platform .f-previewheading{margin:20px 0 16px}#scoutbox-platform .f-big-number{font-family:&#x27;Albert Sans&#x27;,sans-serif;letter-spacing:-3px;font-size:72px;font-weight:400;line-height:1}#scoutbox-platform .f-specs{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;border-top:1px solid var(--f-rule);border-bottom:1px solid var(--f-rule);padding:16px 0;margin:20px 0}#scoutbox-platform .f-specs small{display:block;font:11px &#x27;Albert Sans&#x27;,sans-serif;color:var(--f-quiet);margin-bottom:7px}#scoutbox-platform .f-specs strong{font-size:17px;font-weight:500}#scoutbox-platform .f-footnote{font-size:11px;line-height:1.6;color:var(--f-quiet);margin-top:16px}#scoutbox-platform .f-ledger{overflow:auto}#scoutbox-platform table{width:100%;border-collapse:collapse;text-align:left;font-size:13px}#scoutbox-platform th{font:11px &#x27;Albert Sans&#x27;,sans-serif;color:var(--f-quiet);border-bottom:1px solid var(--f-ink);padding:13px 12px 13px 0;font-weight:400;white-space:nowrap}#scoutbox-platform td{padding:19px 12px 19px 0;border-bottom:1px solid var(--f-rule)}#scoutbox-platform td small{display:block;font-size:11px;color:var(--f-quiet);margin-top:4px}#scoutbox-platform .f-stagepath{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin:0 0 28px}#scoutbox-platform .f-stagepath div{border-top:2px solid var(--f-rule);padding-top:9px;font-size:11px;color:var(--f-quiet)}#scoutbox-platform .f-stagepath .done{border-color:#00a556}#scoutbox-platform .f-stagepath .current{border-color:var(--f-ink);color:var(--f-ink);font-weight:600}#scoutbox-platform .f-quote{font-family:&#x27;Albert Sans&#x27;,sans-serif;font-size:25px;line-height:1.45;letter-spacing:-.5px;margin:18px 0}#scoutbox-platform .f-strip{display:grid;grid-template-columns:repeat(3,1fr);margin:28px 0 32px;border-top:1px solid var(--f-ink);border-bottom:1px solid var(--f-rule)}#scoutbox-platform .f-strip&gt;div{padding:18px 20px;border-right:1px solid var(--f-rule)}#scoutbox-platform .f-strip&gt;div:first-child{padding-left:0}#scoutbox-platform .f-strip&gt;div:last-child{border:0}#scoutbox-platform .f-strip .f-big-number{font-size:53px;display:block;margin-bottom:9px}#scoutbox-platform .f-bars{display:grid;gap:15px}#scoutbox-platform .f-bar{display:grid;grid-template-columns:95px 1fr 25px;gap:12px;align-items:center;font-size:12px}#scoutbox-platform .f-bar-track{height:12px;background:var(--f-wash)}#scoutbox-platform .f-bar-track span{display:block;height:100%;background:#008b4b}#scoutbox-platform .f-ticket{display:grid;grid-template-columns:110px 1fr;background:var(--f-wash);border-top:3px solid var(--f-ink)}#scoutbox-platform .f-ticket-date{padding:20px;border-right:1px dashed #b0b7a9;text-align:center;display:flex;flex-direction:column;justify-content:center}#scoutbox-platform .f-ticket-date .f-big-number{font-size:59px;margin:6px 0}#scoutbox-platform .f-ticket-info{padding:23px}#scoutbox-platform .f-fixture{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:20px;padding:26px 0}#scoutbox-platform .f-clubname{font:32px/1.15 &#x27;Albert Sans&#x27;,sans-serif;letter-spacing:-.7px}#scoutbox-platform .f-fixture .f-clubname:last-child{text-align:right}#scoutbox-platform .f-scorebox{padding:10px;background:var(--f-green);font:13px &#x27;Albert Sans&#x27;,sans-serif}#scoutbox-platform .f-message{padding:18px 0 18px 15px;border-left:1px solid var(--f-rule);font-size:14px;line-height:1.7}#scoutbox-platform .f-message.mine{border-left:3px solid #00bc62;background:#ecede3;padding-right:15px}#scoutbox-platform .f-message header{display:flex;align-items:center;justify-content:space-between;gap:10px;font:11px &#x27;Albert Sans&#x27;,sans-serif;color:var(--f-quiet);margin-bottom:9px}#scoutbox-platform .f-compose{border-top:1px solid var(--f-ink);display:flex;align-items:center;gap:12px;margin-top:20px;padding-top:15px}#scoutbox-platform .f-compose input{border:0;background:none;min-width:0;flex:1;padding:12px 0;font-size:14px}#scoutbox-platform .f-compose button{padding:10px;background:var(--f-green)}#scoutbox-platform .f-feedback{font-size:12px;line-height:1.7;color:#205534;margin-top:18px}#scoutbox-platform .f-endnote{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;border-top:1px solid var(--f-rule);padding:16px 32px;font:11px &#x27;Albert Sans&#x27;,sans-serif;color:var(--f-quiet)}
+#scoutbox-platform .f-mobile-board{display:grid;grid-template-columns:minmax(0,360px) minmax(0,360px);justify-content:center;gap:46px;padding:35px;background:#e8e9df}#scoutbox-platform .f-device-label{font:11px &#x27;Albert Sans&#x27;,sans-serif;letter-spacing:1px;margin-bottom:13px;color:#5d665b}#scoutbox-platform .f-phone{background:var(--f-paper);border:1px solid #bfc7b8;border-radius:24px;overflow:hidden;box-shadow:0 10px 25px #2939210a}#scoutbox-platform .f-phone-status{display:flex;justify-content:space-between;padding:13px 20px 6px;font:11px &#x27;Albert Sans&#x27;,sans-serif}#scoutbox-platform .f-phone-head{display:flex;justify-content:space-between;align-items:center;padding:18px 20px;border-bottom:1px solid var(--f-ink)}#scoutbox-platform .f-phone-head .f-wordmark{font-size:26px}#scoutbox-platform .f-phone-body{padding:23px 20px;min-height:585px}#scoutbox-platform .f-phone h1{font-family:&#x27;Albert Sans&#x27;,sans-serif;font-size:46px;font-weight:400;letter-spacing:-1.7px;line-height:1.07}#scoutbox-platform .f-phone h2{font-size:21px}#scoutbox-platform .f-phone .f-specs{gap:8px}#scoutbox-platform .f-phone .f-specs strong{font-size:15px}#scoutbox-platform .f-phone .f-sectionline{margin-top:23px;padding:13px 0}#scoutbox-platform .f-phone .f-sub{font-size:13px}#scoutbox-platform .f-phone .f-note{font-size:12px}#scoutbox-platform .f-bottomnav{display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid var(--f-rule);padding:14px 8px 18px;gap:3px;background:var(--f-white)}#scoutbox-platform .f-bottomnav button{font-size:11px;text-align:center;padding:8px 0;border-top:2px solid transparent;min-height:40px}#scoutbox-platform .f-bottomnav button.active{border-color:var(--f-ink);font-weight:700}#scoutbox-platform .f-passcover{background:var(--f-green);padding:21px 20px;margin:22px 0 0;position:relative;min-height:156px;display:flex;flex-direction:column;justify-content:space-between;color:#123524}#scoutbox-platform .f-passcover .f-mono{color:#214e32}#scoutbox-platform .f-passcover .f-cover-title{font:italic 37px/1 &#x27;Albert Sans&#x27;,sans-serif;letter-spacing:-1px;max-width:190px;position:relative;z-index:1;margin:16px 0}#scoutbox-platform .f-passcover .f-cover-index{font:100px/1 &#x27;Albert Sans&#x27;,sans-serif;letter-spacing:-10px;position:absolute;right:15px;top:26px;opacity:.15;pointer-events:none}#scoutbox-platform .f-passlink{display:flex;align-items:center;justify-content:space-between;padding:13px 0;border-bottom:1px solid var(--f-ink);font-size:13px;width:100%}#scoutbox-platform .f-calendarrow{display:grid;grid-template-columns:45px 1fr 18px;gap:12px;align-items:center;padding:15px 0;border-bottom:1px solid var(--f-rule);width:100%;text-align:left}#scoutbox-platform .f-calendarrow .f-datebig{font:32px/1 &#x27;Albert Sans&#x27;,sans-serif}#scoutbox-platform .f-record{padding:15px 0;border-bottom:1px solid var(--f-rule);display:grid;grid-template-columns:34px 1fr;gap:12px}#scoutbox-platform .f-record .f-index{font:11px &#x27;Albert Sans&#x27;,sans-serif;color:var(--f-quiet);padding-top:3px}#scoutbox-platform .f-football-drawing{position:relative;background:#e3e7dc;height:170px;margin:22px 0;overflow:hidden}#scoutbox-platform .f-pitch{position:absolute;inset:19px 22px;border:1px solid #788675}#scoutbox-platform .f-pitch:before{content:&#x27;&#x27;;position:absolute;inset:0 50%;border-left:1px solid #788675}#scoutbox-platform .f-pitch:after{content:&#x27;&#x27;;position:absolute;border:1px solid #788675;border-radius:50%;width:50px;height:50px;left:calc(50% - 25px);top:calc(50% - 25px)}#scoutbox-platform .f-drill-time{position:absolute;inset:0;display:grid;place-items:center;font:76px &#x27;Albert Sans&#x27;,sans-serif;color:#192c1e;background:#e3e7dc77}#scoutbox-platform .f-toast{padding:12px 0;border-top:1px solid #007d3f;margin-top:15px;font-size:12px;color:#205534}
+@media(max-width:820px){#scoutbox-platform .f-masthead{padding:22px}#scoutbox-platform .f-content{padding:25px 22px}#scoutbox-platform .f-topnav{padding:0 22px;gap:18px}#scoutbox-platform .f-display{font-size:53px}#scoutbox-platform .f-mobile-board{gap:22px;padding:25px 18px}#scoutbox-platform .f-phone-body{padding:22px 16px}#scoutbox-platform .f-talent-layout{gap:20px}#scoutbox-platform .f-two{gap:22px}#scoutbox-platform .f-org .f-orgperson{display:none}}
+@media(max-width:640px){#scoutbox-platform .f-talent-layout,#scoutbox-platform .f-two{grid-template-columns:1fr}#scoutbox-platform .f-ruledaside{border-left:0;padding-left:0;border-top:1px solid var(--f-ink);padding-top:22px}#scoutbox-platform .f-mobile-board{grid-template-columns:minmax(0,360px);padding:25px 13px}#scoutbox-platform .f-mobile-board .f-companion{display:none}#scoutbox-platform .f-heading-side{text-align:left;max-width:none}#scoutbox-platform .f-display{font-size:46px}#scoutbox-platform .f-wordmark{font-size:28px}#scoutbox-platform .f-org{display:none}#scoutbox-platform .f-topnav{gap:15px}#scoutbox-platform .f-topnav .f-utility{margin-left:0}#scoutbox-platform .f-topnav button{font-size:12px}#scoutbox-platform .f-content{padding:26px 18px}#scoutbox-platform .f-masthead{padding:22px 18px}#scoutbox-platform .f-ledger table{min-width:530px}#scoutbox-platform .f-ticket{grid-template-columns:85px 1fr}#scoutbox-platform .f-ticket-date{padding:15px 9px}#scoutbox-platform .f-ticket-info{padding:18px 13px}#scoutbox-platform .f-ticket-info h2{font-size:22px}#scoutbox-platform .f-fixture{gap:14px}#scoutbox-platform .f-clubname{font-size:28px}#scoutbox-platform .f-pickers{width:100%;gap:15px}#scoutbox-platform .f-pickers label{flex:1;min-width:0}#scoutbox-platform .f-explorer{gap:17px}#scoutbox-platform .f-strip&gt;div{padding:18px 12px}#scoutbox-platform .f-strip .f-big-number{font-size:44px}#scoutbox-platform .f-strip .f-kicker{font-size:11px;letter-spacing:0}#scoutbox-platform .f-endnote{padding:15px 18px}}
+@media(pointer:coarse){#scoutbox-platform button{min-height:44px}#scoutbox-platform select,#scoutbox-platform input{font-size:16px}}
+
+/* Platform layout: one type family across every application and control. */
+#scoutbox-platform{--f-paper:#f6f7f3;--f-white:#fff;--f-ink:#1e2923;--f-quiet:#677268;--f-rule:#e1e6df;--f-wash:#edf1e9;font-family:&#x27;Albert Sans&#x27;,sans-serif;line-height:1.5}
+#scoutbox-platform *{font-family:&#x27;Albert Sans&#x27;,sans-serif}#scoutbox-platform em{font-style:normal}#scoutbox-platform .f-kicker{font-size:11px;letter-spacing:.5px;font-weight:600}#scoutbox-platform .f-mono{letter-spacing:0;font-size:12px}#scoutbox-platform .f-serif,#scoutbox-platform .f-display{font-family:&#x27;Albert Sans&#x27;,sans-serif;font-weight:650;font-size:32px;line-height:1.18;letter-spacing:-1px}#scoutbox-platform h2{font-size:20px;font-weight:600;letter-spacing:-.45px}#scoutbox-platform .f-quote{font-size:18px;font-weight:400;letter-spacing:0;line-height:1.7;padding:18px;background:#f0f3ed;border-radius:10px}#scoutbox-platform .f-wordmark{font-size:23px;letter-spacing:-1.1px;font-weight:800}#scoutbox-platform .f-wordmark:after{width:6px;height:6px;margin-left:3px;border-radius:1px}#scoutbox-platform #f-canvas{border-radius:14px}#scoutbox-platform .f-pickers select{border:1px solid var(--f-rule);background:#fff;padding:9px 26px 9px 12px;border-radius:8px}#scoutbox-platform .f-study{font-weight:600;letter-spacing:.8px}#scoutbox-platform .f-footer{font-size:12px}
+#scoutbox-platform .p-shell{display:grid;grid-template-columns:204px minmax(0,1fr);min-height:740px}#scoutbox-platform .p-sidebar{background:#fff;border-right:1px solid var(--f-rule);padding:25px 14px 20px;display:flex;flex-direction:column;gap:21px}#scoutbox-platform .p-brand{padding:0 10px;display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}#scoutbox-platform .p-edition{font-size:11px;color:var(--f-quiet)}#scoutbox-platform .p-org{display:flex;align-items:center;gap:8px;padding:10px 8px;border:1px solid var(--f-rule);border-radius:8px;font-size:11px;width:100%;background:#fafbf8}#scoutbox-platform .p-org&gt;span:nth-child(2){flex:1;min-width:0}#scoutbox-platform .p-org&gt;svg{width:13px}#scoutbox-platform .p-avatar{display:inline-grid;place-items:center;background:#e2eadd;color:#365443;width:34px;height:34px;border-radius:50%;font-weight:650;font-size:12px;flex-shrink:0}#scoutbox-platform .p-avatar.club{background:#edf1e9;border-radius:8px}#scoutbox-platform .p-avatar.large{width:68px;height:68px;font-size:23px;border:4px solid #fff;box-shadow:0 0 0 1px #d8e2d4}#scoutbox-platform .p-navgroup{margin-bottom:20px}#scoutbox-platform .p-navlabel{font-size:11px;letter-spacing:.8px;font-weight:650;color:#737f73;display:block;padding:0 11px 8px}#scoutbox-platform .p-navitem{display:flex;align-items:center;gap:10px;padding:10px 11px;width:100%;font-size:12px;color:#546155;border-radius:7px;min-height:40px;margin:3px 0}#scoutbox-platform .p-navitem svg{width:17px;height:17px}#scoutbox-platform .p-navitem.active{background:#e5f5e9;color:#1b5935;font-weight:650}#scoutbox-platform .p-navitem.active svg{color:#007f42}#scoutbox-platform .p-navitem b{font-size:11px;background:#e9eee6;border-radius:4px;padding:1px 5px;margin-left:auto}#scoutbox-platform .p-account{margin-top:auto;display:flex;gap:9px;align-items:center;border-top:1px solid var(--f-rule);padding:19px 5px 0}#scoutbox-platform .p-account strong{font-size:12px;font-weight:600}#scoutbox-platform .p-account small{font-size:11px;display:block;color:var(--f-quiet);margin-top:2px}#scoutbox-platform .p-workspace{min-width:0}#scoutbox-platform .p-topbar{min-height:67px;display:flex;align-items:center;justify-content:space-between;gap:15px;padding:15px 26px;border-bottom:1px solid var(--f-rule);background:#fcfdfa}#scoutbox-platform .p-breadcrumb{font-size:11px;color:var(--f-quiet);display:flex;align-items:center;gap:10px;flex-wrap:wrap}#scoutbox-platform .p-breadcrumb strong{font-weight:500;color:#2e4031}#scoutbox-platform .p-toolbar{display:flex;align-items:center;gap:13px}#scoutbox-platform .p-toolbar button{display:flex;align-items:center;padding:0;color:#58685a}#scoutbox-platform .p-top-search{gap:8px;font-size:11px}#scoutbox-platform kbd{font-family:&#x27;Albert Sans&#x27;,sans-serif;font-size:11px;padding:2px 4px;border:1px solid #dce3d8;border-radius:3px;color:#727d70;background:#fff}#scoutbox-platform .f-content{padding:29px 26px;min-height:0}#scoutbox-platform .f-heading{margin-bottom:24px;gap:14px}#scoutbox-platform .f-heading .f-kicker{display:none}#scoutbox-platform .f-heading-side p{font-size:12px;margin-bottom:12px}#scoutbox-platform .f-heading-side{max-width:215px}#scoutbox-platform .f-button{border-radius:7px;padding:10px 14px;font-size:12px;gap:12px;border-color:#243b2c;background:#243b2c;color:#fff;font-weight:600;min-height:40px}#scoutbox-platform .f-button.lime{background:#00e676;border-color:#00e676;color:#113822}#scoutbox-platform .f-button.outline{border-color:#d8e0d4;background:#fff;color:#314736}#scoutbox-platform .f-textbtn{border-bottom:0;color:#267248;font-size:12px;font-weight:500}#scoutbox-platform .f-sectionline{border-top:0;margin-top:26px;padding:0 0 15px}#scoutbox-platform .f-sectionline&gt;span{display:none}#scoutbox-platform .f-filters{border:1px solid var(--f-rule);border-radius:9px;background:#fff;padding:12px 14px;gap:16px;margin-bottom:20px}#scoutbox-platform .f-filtercount{font-size:11px}#scoutbox-platform .f-talent-layout{gap:20px}#scoutbox-platform .f-ruledaside{border:1px solid var(--f-rule);border-radius:12px;background:#fff;padding:20px;align-self:start}#scoutbox-platform .f-playername{font-size:29px;font-weight:650;line-height:1.15;letter-spacing:-.8px}#scoutbox-platform .f-playername br{display:none}#scoutbox-platform .f-playername em:before{content:&#x27; &#x27;}#scoutbox-platform .f-candidate{padding:16px 10px;grid-template-columns:26px 1fr 18px;gap:9px;border-bottom:1px solid var(--f-rule)}#scoutbox-platform .f-candidate strong{font-size:16px;font-weight:600;letter-spacing:-.3px}#scoutbox-platform .f-candidate small{font-size:11px}#scoutbox-platform .f-candidate.active{padding-left:10px;background:#eaf5e9;color:#254530;border-left:3px solid #00bc62;border-radius:5px}#scoutbox-platform .f-candidate.active small,#scoutbox-platform .f-candidate.active .f-mono{color:#4c7257}#scoutbox-platform .f-specs{padding:14px 0;margin:17px 0}#scoutbox-platform .f-specs strong{font-size:16px;font-weight:600}#scoutbox-platform .f-specs small{font-size:11px;letter-spacing:.3px}#scoutbox-platform .f-record{gap:9px;padding:14px 0;grid-template-columns:24px 1fr}#scoutbox-platform .f-record h3{font-size:14px}#scoutbox-platform .f-record .f-sub{font-size:12px}#scoutbox-platform .f-note{background:#eff5ec;border:0;padding:14px;border-radius:8px;color:#466047}#scoutbox-platform .f-strip{border:0;gap:12px;margin:20px 0 26px}#scoutbox-platform .f-strip&gt;div{padding:18px!important;background:#fff;border:1px solid var(--f-rule)!important;border-radius:10px}#scoutbox-platform .f-strip .f-big-number{font-size:32px;font-weight:650;letter-spacing:-1px;margin-bottom:7px}#scoutbox-platform .f-strip .f-kicker{font-size:11px;letter-spacing:0;text-transform:none;font-weight:400}#scoutbox-platform .f-two{gap:22px;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr)}#scoutbox-platform .f-ledger{border:1px solid var(--f-rule);border-radius:10px;background:#fff}#scoutbox-platform th{padding:12px;background:#fafbf7;border-color:var(--f-rule);font-size:11px;letter-spacing:.4px}#scoutbox-platform td{padding:16px 12px;font-size:12px}#scoutbox-platform tbody tr:last-child td{border-bottom:0}#scoutbox-platform .f-status{font-size:11px}#scoutbox-platform .f-stagepath{padding:15px;background:#fff;border:1px solid var(--f-rule);border-radius:9px;gap:8px}#scoutbox-platform .f-ticket{border:1px solid var(--f-rule);border-radius:12px;overflow:hidden;background:#fff;grid-template-columns:95px 1fr}#scoutbox-platform .f-ticket-date{background:#eef5e9;border:0}#scoutbox-platform .f-ticket-date .f-big-number{font-size:38px;font-weight:650;letter-spacing:-1px}#scoutbox-platform .f-clubname{font-size:25px;font-weight:650;letter-spacing:-.5px}#scoutbox-platform .f-fixture{gap:13px}#scoutbox-platform .f-scorebox{background:#e3eee1;border-radius:50%;padding:8px 12px;font-size:12px}#scoutbox-platform .f-message{background:#fff;border:1px solid var(--f-rule);padding:16px;border-radius:12px 12px 12px 2px;font-size:13px}#scoutbox-platform .f-message.mine{background:#e4f4e6;border:0;border-radius:12px 12px 2px 12px;margin-left:25px}#scoutbox-platform .f-compose{background:#fff;border:1px solid var(--f-rule);padding:8px 12px;border-radius:9px}#scoutbox-platform .f-compose button{border-radius:6px}#scoutbox-platform .f-bar-track{border-radius:5px;overflow:hidden}
+#scoutbox-platform .f-mobile-board{background:#e9eee6;gap:36px;padding:30px;align-items:start}#scoutbox-platform .f-device-label{font-size:11px;font-weight:600;letter-spacing:.7px}#scoutbox-platform .f-phone{border-radius:30px;border-color:#d0d9cb;box-shadow:0 14px 34px #1836220d}#scoutbox-platform .f-phone-status{padding:14px 21px 4px;font-weight:600;font-size:12px}#scoutbox-platform .f-phone-status svg{height:14px;width:17px}#scoutbox-platform .f-phone-head{height:64px;padding:16px 20px;border:0;gap:10px}#scoutbox-platform .f-phone-head strong{font-size:16px;font-weight:600;flex:1}#scoutbox-platform .f-phone-head .f-wordmark{font-size:24px}#scoutbox-platform .p-bell{position:relative;padding:8px;border:1px solid #e2e8de;border-radius:50%;background:#fff}#scoutbox-platform .p-bell span{width:5px;height:5px;background:#00bc62;border-radius:50%;position:absolute;top:7px;right:8px}#scoutbox-platform .p-back{padding:4px 0}#scoutbox-platform .f-phone-body{padding:12px 18px 23px;min-height:620px}#scoutbox-platform .f-phone h1{font-size:25px;font-weight:700;letter-spacing:-.6px;line-height:1.2;margin:6px 0}#scoutbox-platform .f-phone h2{font-size:17px;font-weight:650;letter-spacing:-.3px}#scoutbox-platform .p-greeting{margin:0 0 22px}#scoutbox-platform .p-greeting .f-sub{font-size:12px;margin:0}#scoutbox-platform .p-passport{background:#173b27;color:#fff;border-radius:15px;padding:18px;position:relative;overflow:hidden}#scoutbox-platform .p-passport h2{font-size:24px;margin-top:19px;color:#fff}#scoutbox-platform .p-passport p{font-size:12px;margin-top:6px;color:#cfdfd0}#scoutbox-platform .p-passport .p-avatar{background:#00e676;color:#153c25;width:41px;height:41px;font-size:15px}#scoutbox-platform .p-label{font-size:11px;background:#ffffff16;padding:5px 8px;border-radius:5px;font-weight:500}#scoutbox-platform .p-label.light{background:#e7eee2;color:#426146}#scoutbox-platform .p-passport-link{margin-top:18px;padding:12px 0 0;border-top:1px solid #ffffff26;width:100%;display:flex;align-items:center;justify-content:space-between;font-size:12px;color:#fff;font-weight:600}#scoutbox-platform .p-section{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:25px 0 12px}#scoutbox-platform .p-count{font-size:11px;border-radius:50%;background:#e5ede0;height:22px;width:22px;display:grid;place-items:center}#scoutbox-platform .p-mobile-row{display:flex;align-items:center;gap:11px;width:100%;background:#fff;border:1px solid var(--f-rule);padding:14px 12px;border-radius:11px;margin-top:9px}#scoutbox-platform .p-mobile-row&gt;span:nth-child(2){flex:1;min-width:0}#scoutbox-platform .p-mobile-row strong{font-size:13px;font-weight:600;display:block}#scoutbox-platform .p-mobile-row small{font-size:11px;color:var(--f-quiet);display:block;margin-top:5px}#scoutbox-platform .p-mobile-row&gt;svg{width:15px}#scoutbox-platform .p-mobile-icon{background:#edf3e8;border-radius:9px;padding:10px;display:inline-flex;align-items:center;justify-content:center;color:#437650;flex-shrink:0}#scoutbox-platform .p-development{border:1px solid var(--f-rule);background:#fff;border-radius:12px;padding:16px}#scoutbox-platform .p-development strong{font-size:13px}#scoutbox-platform .p-development .f-sub{font-size:11px;margin-top:4px}#scoutbox-platform .p-development .f-inline{flex-wrap:nowrap;align-items:center;gap:10px}#scoutbox-platform .f-phone .f-button{width:100%;justify-content:center;font-size:13px;min-height:43px;border-radius:9px}#scoutbox-platform .f-bottomnav{gap:3px;border-color:#e3e9df;padding:11px 10px 17px;background:#fff}#scoutbox-platform .f-bottomnav button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;border:0;padding:4px 2px;font-size:11px;color:#6c776c;min-height:43px}#scoutbox-platform .f-bottomnav button svg{height:20px;width:20px}#scoutbox-platform .f-bottomnav button.active{color:#16733e;font-weight:650;background:#eef7eb;border-radius:9px}#scoutbox-platform .p-profile-intro{text-align:center;padding:4px 0 19px}#scoutbox-platform .p-profile-intro h1{font-size:24px;margin-top:13px}#scoutbox-platform .p-profile-intro .f-status{margin-top:10px}#scoutbox-platform .p-mobile-tabs{display:flex;gap:7px;border-bottom:1px solid var(--f-rule);margin-bottom:19px;justify-content:space-between}#scoutbox-platform .p-mobile-tabs button{font-size:12px;padding:11px 4px;color:#768174;border-bottom:2px solid transparent}#scoutbox-platform .p-mobile-tabs button.active{font-weight:600;color:#206e3d;border-color:#00bd62}#scoutbox-platform .p-trust{background:#fff;border:1px solid var(--f-rule);border-radius:12px;padding:16px}#scoutbox-platform .p-small-label{font-size:11px;color:#6f7b6b;display:block;margin-bottom:5px}#scoutbox-platform .p-score{font-size:32px;font-weight:700;letter-spacing:-1px}#scoutbox-platform .p-score span{font-size:11px;font-weight:400;letter-spacing:0;color:#71806e;margin-left:2px}#scoutbox-platform .p-trust .f-sub{font-size:11px;margin:12px 0 8px}#scoutbox-platform .p-trust .f-textbtn{font-size:11px;gap:3px}#scoutbox-platform .p-history{background:#fff;border:1px solid var(--f-rule);border-radius:12px;padding:0 14px}#scoutbox-platform .p-history .f-record:last-child{border:0}#scoutbox-platform .p-history .f-index{color:#568a63;font-weight:600}#scoutbox-platform .p-training-visual{background:#dfead9;height:170px;border-radius:14px;position:relative;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;color:#254b2d}#scoutbox-platform .p-training-visual .f-pitch{opacity:.35;inset:15px 20px}#scoutbox-platform .p-training-visual&gt;span{background:#f6fbf0;border-radius:50%;padding:10px;position:relative;display:flex}#scoutbox-platform .p-training-visual b,#scoutbox-platform .p-training-visual small{position:relative;background:#dfead9;padding:0 5px}#scoutbox-platform .p-training-visual small{font-size:12px}#scoutbox-platform .p-session-facts{display:flex;gap:18px;font-size:12px;margin:18px 0;color:#4c624c}#scoutbox-platform .p-session-facts span{display:flex;align-items:center;gap:6px}#scoutbox-platform .p-chat-person{display:flex;align-items:center;gap:11px;padding:4px 0 17px}#scoutbox-platform .p-chat-person .f-sub{font-size:11px;margin-top:3px}#scoutbox-platform .p-chat-safety{font-size:11px;color:#547255;display:flex;gap:8px;align-items:center;background:#eaf2e4;border-radius:8px;padding:11px}#scoutbox-platform .p-chat-safety svg{width:15px}#scoutbox-platform .p-chat-date{text-align:center;color:#87917e;font-size:11px;margin:22px 0}#scoutbox-platform .p-bubble{border:1px solid var(--f-rule);background:#fff;border-radius:13px 13px 13px 3px;padding:13px;font-size:13px;line-height:1.6;max-width:90%;margin:15px 0}#scoutbox-platform .p-bubble small{display:block;font-size:11px;margin-top:8px;color:#75806c}#scoutbox-platform .p-bubble.mine{margin-left:auto;background:#dbf4e1;border-color:#dbf4e1;border-radius:13px 13px 3px 13px}#scoutbox-platform .p-chat-invite{padding:17px;background:#fff;border:1px solid var(--f-rule);border-radius:12px;margin:20px 0}#scoutbox-platform .p-chat-invite h3{margin-top:12px}#scoutbox-platform .p-chat-invite .f-sub{font-size:12px;margin-bottom:15px}#scoutbox-platform .p-chat-compose{display:flex;align-items:center;gap:7px;padding:7px 7px 7px 13px;background:#fff;border:1px solid var(--f-rule);border-radius:22px;margin-top:20px}#scoutbox-platform .p-chat-compose input{width:100%;min-width:0;border:0;background:none;font-size:12px;padding:6px 0}#scoutbox-platform .p-chat-compose button{padding:8px;border-radius:50%;background:#00e676;display:flex}#scoutbox-platform .f-phone .f-feedback{font-size:11px}
+@media(max-width:1050px){#scoutbox-platform .p-top-search span,#scoutbox-platform .p-top-search kbd{display:none}#scoutbox-platform .f-heading-side{max-width:185px}#scoutbox-platform .f-heading-side p{font-size:11px}#scoutbox-platform .f-content{padding:25px 21px}#scoutbox-platform .f-two{grid-template-columns:minmax(0,1.15fr) minmax(0,1fr)}#scoutbox-platform .f-display{font-size:29px}#scoutbox-platform .f-ledger table{min-width:440px}}
+@media(max-width:820px){#scoutbox-platform .p-shell{grid-template-columns:170px minmax(0,1fr)}#scoutbox-platform .p-sidebar{padding:22px 10px 15px}#scoutbox-platform .p-navitem{font-size:11px;padding:10px 8px;gap:8px}#scoutbox-platform .p-org{font-size:11px;gap:6px}#scoutbox-platform .p-org .p-avatar{width:27px;height:27px}#scoutbox-platform .p-brand{padding:0 6px}#scoutbox-platform .p-brand .f-wordmark{font-size:21px}#scoutbox-platform .p-breadcrumb{font-size:11px}#scoutbox-platform .p-topbar{padding:14px 17px}#scoutbox-platform .f-talent-layout,#scoutbox-platform .f-two{grid-template-columns:1fr}#scoutbox-platform .f-heading-side{text-align:left;max-width:none}#scoutbox-platform .f-heading-side p{display:none}#scoutbox-platform .f-mobile-board{padding:25px 17px;gap:19px}#scoutbox-platform .f-phone-body{padding:12px 15px 22px}#scoutbox-platform .f-phone h1{font-size:23px}#scoutbox-platform .p-passport h2{font-size:22px}#scoutbox-platform .p-label{font-size:11px}#scoutbox-platform .f-strip&gt;div{padding:14px!important}}
+@media(max-width:620px){#scoutbox-platform .p-shell{grid-template-columns:1fr}#scoutbox-platform .p-sidebar{padding:16px;border-right:0;border-bottom:1px solid var(--f-rule);gap:12px}#scoutbox-platform .p-sidebar .p-org,#scoutbox-platform .p-account,#scoutbox-platform .p-navlabel,#scoutbox-platform .p-navgroup:not(:first-child){display:none}#scoutbox-platform .p-sidebar nav .p-navgroup:first-child{display:flex;flex-wrap:wrap;gap:5px;margin:0}#scoutbox-platform .p-navitem{width:auto;font-size:11px;padding:8px;min-height:36px;margin:0}#scoutbox-platform .p-navitem svg{width:15px}#scoutbox-platform .p-toolbar{gap:12px}#scoutbox-platform .p-toolbar&gt;button:last-child{display:none}#scoutbox-platform .p-topbar{min-height:52px;padding:12px 17px}#scoutbox-platform .f-display{font-size:27px}#scoutbox-platform .f-content{padding:24px 17px}#scoutbox-platform .f-mobile-board{grid-template-columns:minmax(0,360px);padding:20px 10px}#scoutbox-platform .f-strip{gap:8px}#scoutbox-platform .f-strip&gt;div{padding:12px!important}#scoutbox-platform .f-strip .f-big-number{font-size:28px}#scoutbox-platform .f-ruledaside{padding:17px}#scoutbox-platform .f-quote{font-size:16px}#scoutbox-platform .f-talent-layout{gap:22px}#scoutbox-platform .f-heading-side{width:100%}#scoutbox-platform .f-stagepath{padding:12px 9px;gap:4px}#scoutbox-platform .f-stagepath div{font-size:11px}#scoutbox-platform .f-ticket{grid-template-columns:78px 1fr}}
+
+
+#scoutbox-platform .ag-panel{background:#fff;border:1px solid var(--f-rule);border-radius:12px;padding:20px;min-width:0}
+#scoutbox-platform .ag-panel h2{margin-bottom:10px}#scoutbox-platform .ag-panel .f-strip{margin:0}
+#scoutbox-platform .ag-person-row{display:flex;align-items:center;gap:12px;width:100%;padding:16px 0;border-bottom:1px solid var(--f-rule)}#scoutbox-platform .ag-person-row:last-child{border:0}#scoutbox-platform .ag-person-row&gt;span:nth-child(2){flex:1;min-width:0}#scoutbox-platform .ag-person-row strong{font-size:13px;font-weight:600;display:block}#scoutbox-platform .ag-person-row small{display:block;color:var(--f-quiet);font-size:11px;margin-top:4px}
+#scoutbox-platform .ag-tabs{display:flex;gap:18px;flex-wrap:wrap;border-bottom:1px solid var(--f-rule);margin-bottom:23px}#scoutbox-platform .ag-tabs button{padding:11px 0;border-bottom:2px solid transparent;font-size:12px;color:var(--f-quiet)}#scoutbox-platform .ag-tabs button.active{color:#16753f;border-color:#00b65e;font-weight:600}
+#scoutbox-platform .ag-filters{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 18px}#scoutbox-platform .ag-filters button{font-size:12px;border:1px solid var(--f-rule);border-radius:7px;background:#fff;padding:9px 13px}#scoutbox-platform .ag-filters button.active{background:#e1f2e5;color:#215b38;border-color:#c5ddc9}
+#scoutbox-platform .ag-request{margin-top:22px}#scoutbox-platform .ag-form{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:18px 0}#scoutbox-platform .ag-form label,#scoutbox-platform .ag-note-label{font-size:12px;font-weight:500;display:grid;gap:8px}#scoutbox-platform .ag-form input,#scoutbox-platform .ag-form select,#scoutbox-platform .ag-note-label textarea,#scoutbox-platform .ag-note-label select{border:1px solid #d5dfd1;border-radius:7px;background:#fcfdfa;width:100%;min-width:0;padding:10px;font-size:13px}#scoutbox-platform .ag-note-label{margin:17px 0}#scoutbox-platform .ag-note-label textarea{min-height:90px;resize:vertical}#scoutbox-platform .ag-check{display:flex;align-items:center;gap:8px;margin:14px 0 20px;font-size:13px}#scoutbox-platform .ag-check input{accent-color:#00b75f}
+#scoutbox-platform .ag-details{display:grid;grid-template-columns:1fr 1fr;gap:20px;padding:20px 0}#scoutbox-platform .ag-details small{display:block;font-size:11px;color:var(--f-quiet);margin-bottom:6px}#scoutbox-platform .ag-details strong{font-size:13px;font-weight:500;overflow-wrap:anywhere}
+#scoutbox-platform .ag-empty{padding:35px 25px;background:#fff;border:1px solid var(--f-rule);border-radius:12px;text-align:center;margin-bottom:20px}#scoutbox-platform .ag-empty&gt;svg{width:28px;height:28px;color:#729179;margin:0 auto 15px}#scoutbox-platform .ag-empty h2{font-size:19px}#scoutbox-platform .ag-empty .f-sub{max-width:430px;margin:10px auto 0}
+#scoutbox-platform .ag-banner{display:flex;align-items:center;gap:14px;background:#e9f3e5;color:#2f5c39;padding:17px;border-radius:10px}#scoutbox-platform .ag-banner .f-sub{color:#55745a;font-size:12px}
+@media(max-width:620px){#scoutbox-platform .ag-form,#scoutbox-platform .ag-details{grid-template-columns:1fr}#scoutbox-platform .ag-panel{padding:17px}#scoutbox-platform .ag-panel.f-flex{flex-wrap:wrap}#scoutbox-platform .ag-tabs{gap:13px}#scoutbox-platform .ag-empty{padding:25px 17px}}
+
+
+/* Agent-only dark embossed finish. Other application styles are unchanged. */
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;]{--f-paper:#202223;--f-white:#ffffff;--f-ink:#ffffff;--f-quiet:#ffffff;--f-rule:#393c3d;--f-wash:#2a2d2e;background:#202223;border-color:#343738;color:#fff;color-scheme:dark}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] *{color:#fff}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .p-sidebar{background:#121415;border-right-color:#303334;box-shadow:1px 0 0 #ffffff05}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .p-workspace{background:#202223}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .p-topbar{background:#1a1c1d;border-bottom-color:#343738;box-shadow:inset 0 1px 0 #ffffff04,0 1px 0 #00000030}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .p-brand .p-edition{color:#d9b76b;font-size:12px;font-weight:600;text-shadow:0 1px 1px #00000080}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .p-brand .f-wordmark{text-shadow:0 1px 1px #00000080}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .p-org{background:#1b1e1f;border-color:#343839;box-shadow:inset 0 1px 0 #ffffff07,0 2px 3px #00000020}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .p-navitem.active{background:#29302b;color:#fff;box-shadow:inset 0 1px 0 #ffffff09,inset 3px 0 0 #00e676,0 2px 3px #00000022}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .p-avatar,#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .p-avatar.club,#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .p-mobile-icon,#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .p-count{background:#333a35;color:#fff;border-color:#4a514b;box-shadow:inset 0 1px 0 #ffffff0b,0 1px 2px #00000020}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .p-avatar.large{border-color:#333a35;box-shadow:0 0 0 1px #505950}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .ag-panel,#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .f-ruledaside,#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .f-strip&gt;div,#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .ag-empty,#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .f-ledger{background:#272a2b;border:1px solid #383c3d!important;box-shadow:inset 0 1px 0 #ffffff08,inset 0 -1px 0 #00000018,0 3px 7px #0000001a}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] th{background:#2c3031;border-color:#434748}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .f-note,#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .ag-banner{background:#2c332e;box-shadow:inset 0 1px 2px #00000025,0 1px 0 #ffffff06}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .f-button{background:#363b3d;border-color:#555d5e;color:#fff;box-shadow:inset 0 1px 0 #ffffff0c,0 2px 3px #00000025}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .f-button.lime{background:#00e676;border-color:#00e676;color:#113822}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .f-button.outline{background:#2e3334;border-color:#51595a;color:#fff}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .ag-filters button{background:#292d2e;border-color:#454b4c;box-shadow:inset 0 1px 0 #ffffff07}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .ag-filters button.active{background:#34483a;border-color:#568368;color:#fff}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .ag-tabs button.active{color:#fff;border-bottom-color:#00e676}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .ag-form input,#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .ag-form select,#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .ag-note-label textarea,#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .ag-note-label select{background:#1d2021;border-color:#454b4c;color:#fff;box-shadow:inset 0 2px 4px #0000002b,0 1px 0 #ffffff06}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] input::placeholder,#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] textarea::placeholder{color:#fff;opacity:1}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] kbd{background:#292d2e;border-color:#515657;color:#fff}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .f-status:before{background:#00e676}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .f-status.pending:before{background:#e9b866}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .f-status.urgent:before{background:#ff8e80}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] button:focus-visible,#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] input:focus-visible,#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] select:focus-visible,#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] textarea:focus-visible{outline-color:#00e676}
+
+/* Appearance control remains in every application&#x27;s header. */
+#scoutbox-platform #f-canvas .p-theme-toggle{display:inline-flex;align-items:center;gap:7px;padding:7px 9px;min-height:36px;border:1px solid #d8e0d4;border-radius:8px;background:#fff;color:#314736;font-size:11px;white-space:nowrap;flex-shrink:0}
+#scoutbox-platform #f-canvas .p-theme-toggle svg{width:15px;height:15px}
+#scoutbox-platform #f-canvas .p-theme-track{display:inline-flex;width:27px;height:16px;padding:2px;border-radius:12px;background:#ccd5ce}
+#scoutbox-platform #f-canvas .p-theme-track&gt;span{width:12px;height:12px;border-radius:50%;background:#fff;box-shadow:0 1px 2px #0003}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .p-theme-toggle{background:#292d2e;color:#fff;border-color:#454b4c;box-shadow:inset 0 1px 0 #ffffff0b}
+#scoutbox-platform #f-canvas .p-theme-toggle[aria-checked=&quot;true&quot;] .p-theme-track{background:#00e676}
+#scoutbox-platform #f-canvas .p-theme-toggle[aria-checked=&quot;true&quot;] .p-theme-track&gt;span{transform:translateX(11px);background:#113822}
+#scoutbox-platform #f-canvas .f-phone-head .p-theme-text{display:none}
+#scoutbox-platform #f-canvas .f-phone-head .p-theme-toggle{padding:7px 6px;gap:5px;margin-left:auto}
+#scoutbox-platform #f-canvas[data-app=&quot;agent&quot;] .p-brand .p-edition{font-weight:700;font-size:12px;color:#a67c2e;background:none;-webkit-text-fill-color:currentColor;text-shadow:none;filter:none}
+#scoutbox-platform #f-canvas[data-app=&quot;agent&quot;][data-theme=&quot;dark&quot;] .p-brand .p-edition{color:#a67c2e;background:none;-webkit-text-fill-color:currentColor;text-shadow:none;filter:none}
+#scoutbox-platform #f-canvas:not([data-app=&quot;agent&quot;]) .p-brand .p-edition{font-size:11px;font-weight:400;text-shadow:none;color:var(--f-quiet)}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] :is(.f-filters,.f-stagepath,.f-ticket,.f-message,.f-compose,.p-mobile-row,.p-development,.p-trust,.p-history,.p-bubble,.p-chat-invite,.p-chat-compose){background:#272a2b;border-color:#393c3d;box-shadow:inset 0 1px 0 #ffffff08,0 3px 7px #0000001a}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] :is(.f-candidate.active,.f-message.mine,.p-bubble.mine,.p-chat-safety,.p-label.light,.f-ticket-date,.f-scorebox,.f-stagepath .done,.f-stagepath .current){background:#2c3c31;border-color:#44564a}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .f-mobile-board{background:#181b1c}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .f-phone{background:#202223;border-color:#414647;box-shadow:inset 0 1px 0 #ffffff08,0 14px 34px #0004}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] :is(.f-phone-head,.f-phone-status,.f-bottomnav){background:#1a1c1d;border-color:#393c3d}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .f-bottomnav button.active{background:#2c3c31;color:#00e676;border-color:transparent}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .f-bottomnav button.active *{color:#00e676}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] :is(.p-bell,.p-training-visual,.p-training-visual&gt;span,.p-training-visual b,.p-training-visual small){background:#2c3330;border-color:#414a44}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] :is(.f-compose input,.p-chat-compose input){background:transparent;color:#fff}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .f-bar-track{background:#393f3b}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .f-bar-track&gt;span{background:#00e676}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] :is(.f-initial,.f-seal){background:#333a35;border-color:#515950}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] :is(.f-button.lime,.f-button.lime *,.f-compose button,.f-compose button *,.p-chat-compose button,.p-chat-compose button *){color:#113822;background-color:#00e676;border-color:#00e676}
+#scoutbox-platform #f-canvas[data-theme=&quot;dark&quot;] .p-passport .p-avatar{background:#00e676;color:#113822}
+@media(max-width:620px){#scoutbox-platform .p-topbar{flex-wrap:wrap}#scoutbox-platform #f-canvas .p-toolbar .p-theme-toggle{display:inline-flex}#scoutbox-platform .p-toolbar{gap:9px}#scoutbox-platform #f-canvas .f-phone-head{padding-left:15px;padding-right:15px;gap:7px}#scoutbox-platform #f-canvas .f-phone-head .f-wordmark{font-size:22px}}
+
+/* Agent light palette: warm ivory, sail cream and soft sand. */
+#scoutbox-platform #f-canvas[data-app=&quot;agent&quot;][data-theme=&quot;light&quot;]{--f-paper:#f9f6ef;--f-white:#fdfbf6;--f-ink:#302d25;--f-quiet:#696151;--f-rule:#ebe4d7;--f-wash:#f5efe4;background:var(--f-paper);border-color:var(--f-rule)}
+#scoutbox-platform #f-canvas[data-app=&quot;agent&quot;][data-theme=&quot;light&quot;] .p-sidebar{background:#fdfaf4;border-color:var(--f-rule);box-shadow:inset -1px 0 0 #fff7}
+#scoutbox-platform #f-canvas[data-app=&quot;agent&quot;][data-theme=&quot;light&quot;] .p-workspace{background:var(--f-paper)}
+#scoutbox-platform #f-canvas[data-app=&quot;agent&quot;][data-theme=&quot;light&quot;] .p-topbar{background:#fbf8f1;border-color:var(--f-rule);box-shadow:inset 0 1px 0 #fff6}
+#scoutbox-platform #f-canvas[data-app=&quot;agent&quot;][data-theme=&quot;light&quot;] :is(.ag-panel,.f-ruledaside,.f-strip&gt;div,.ag-empty,.f-ledger){background:#fdfbf6;border-color:var(--f-rule);box-shadow:inset 0 1px 0 #fff9,0 2px 5px #705b3710}
+#scoutbox-platform #f-canvas[data-app=&quot;agent&quot;][data-theme=&quot;light&quot;] :is(.p-org,.f-button.outline,.ag-filters button,.p-theme-toggle,kbd){background:#fcf9f3;border-color:var(--f-rule);color:#514937;box-shadow:inset 0 1px 0 #fff8}
+#scoutbox-platform #f-canvas[data-app=&quot;agent&quot;][data-theme=&quot;light&quot;] th{background:#f8f3e9;border-color:var(--f-rule)}
+#scoutbox-platform #f-canvas[data-app=&quot;agent&quot;][data-theme=&quot;light&quot;] :is(.f-note,.ag-banner){background:#f6f0e5;color:#514937}
+#scoutbox-platform #f-canvas[data-app=&quot;agent&quot;][data-theme=&quot;light&quot;] .ag-banner .f-sub{color:var(--f-quiet)}
+#scoutbox-platform #f-canvas[data-app=&quot;agent&quot;][data-theme=&quot;light&quot;] :is(.p-avatar,.p-avatar.club,.p-mobile-icon,.p-count){background:#f3ecde;color:#615139;border-color:#e8dfcc}
+#scoutbox-platform #f-canvas[data-app=&quot;agent&quot;][data-theme=&quot;light&quot;] .p-avatar.large{border-color:#fdfbf6;box-shadow:0 0 0 1px #e8dfcc}
+#scoutbox-platform #f-canvas[data-app=&quot;agent&quot;][data-theme=&quot;light&quot;] :is(.p-navlabel,.p-navitem,.p-breadcrumb,.p-breadcrumb strong,.p-toolbar button){color:#615a49}
+#scoutbox-platform #f-canvas[data-app=&quot;agent&quot;][data-theme=&quot;light&quot;] :is(.p-navitem.active,.ag-filters button.active){background:#f5efdf;color:#373e2d;border-color:#e7ddc8;box-shadow:inset 3px 0 0 #00e676,inset 0 1px 0 #fff6}
+#scoutbox-platform #f-canvas[data-app=&quot;agent&quot;][data-theme=&quot;light&quot;] :is(.ag-form input,.ag-form select,.ag-note-label textarea,.ag-note-label select){background:#fefcf8;border-color:#e9e0cf;color:var(--f-ink);box-shadow:inset 0 1px 2px #80653a0c}
+#scoutbox-platform #f-canvas[data-app=&quot;agent&quot;][data-theme=&quot;light&quot;] .p-theme-track{background:#e9e0cf}
+#scoutbox-platform #f-canvas[data-app=&quot;agent&quot;][data-theme=&quot;light&quot;] .p-theme-track&gt;span{background:#fefcf8}
+/* Grassroots: barely visible turf grain and pitch markings behind the content. */
+#scoutbox-platform #f-canvas[data-app=&quot;grass&quot;] .f-content{position:relative;isolation:isolate;--grass-line:rgba(36,59,44,.065);--grass-grain:rgba(36,59,44,.018);background-image:repeating-linear-gradient(103deg,transparent 0px,transparent 3px,var(--grass-grain) 3px,var(--grass-grain) 4px,transparent 4px,transparent 9px),repeating-linear-gradient(90deg,transparent 0px,transparent 110px,rgba(36,59,44,.009) 110px,rgba(36,59,44,.009) 220px)}
+#scoutbox-platform #f-canvas[data-app=&quot;grass&quot;][data-theme=&quot;dark&quot;] .f-content{--grass-line:rgba(255,255,255,.065);--grass-grain:rgba(255,255,255,.012)}
+#scoutbox-platform #f-canvas[data-app=&quot;grass&quot;] .f-content::before{content:&quot;&quot;;position:absolute;pointer-events:none;z-index:-1;top:105px;left:4%;right:4%;height:400px;border:1px solid var(--grass-line);border-radius:2px;background-image:linear-gradient(var(--grass-line),var(--grass-line)),radial-gradient(circle at center,transparent 0 66px,var(--grass-line) 66px 67px,transparent 67px),radial-gradient(circle at center,var(--grass-line) 0 2px,transparent 2px);background-size:1px 100%,100% 100%,100% 100%;background-position:center;background-repeat:no-repeat}
+#scoutbox-platform #f-canvas[data-app=&quot;grass&quot;] .f-content::after{content:&quot;&quot;;position:absolute;pointer-events:none;z-index:-1;top:205px;left:4%;width:12%;height:200px;border:1px solid var(--grass-line);border-left:0}
+@media(max-width:620px){#scoutbox-platform #f-canvas[data-app=&quot;grass&quot;] .f-content::before{top:130px;height:480px;background-size:100% 1px,100% 100%,100% 100%}#scoutbox-platform #f-canvas[data-app=&quot;grass&quot;] .f-content::after{top:130px;left:30%;width:40%;height:75px;border:1px solid var(--grass-line);border-top:0}}
+#scoutbox-platform #f-canvas[data-app=&quot;grass&quot;][data-theme=&quot;light&quot;] .p-workspace{background:#e5f5e9}
+#scoutbox-platform #f-canvas[data-app=&quot;grass&quot;][data-theme=&quot;light&quot;] .f-content{--grass-line:rgba(255,255,255,.52);background-color:#e5f5e9}
+#scoutbox-platform #f-canvas[data-app=&quot;grass&quot;][data-theme=&quot;dark&quot;] .p-workspace{background:#252e26}
+#scoutbox-platform #f-canvas[data-app=&quot;grass&quot;][data-theme=&quot;dark&quot;] .f-content{--grass-line:rgba(255,255,255,.10);background-color:#252e26}
+/* Player pitch texture sits behind all cards without altering the surface colour. */
+#scoutbox-platform #f-canvas[data-app=&quot;player&quot;] .f-phone-body{position:relative;isolation:isolate;--player-pitch:rgba(255,255,255,.8);--player-grain:rgba(36,59,44,.018);background-image:repeating-linear-gradient(103deg,transparent 0 3px,var(--player-grain) 3px 4px,transparent 4px 9px),repeating-linear-gradient(90deg,transparent 0 70px,rgba(36,59,44,.009) 70px 140px)}
+#scoutbox-platform #f-canvas[data-app=&quot;player&quot;][data-theme=&quot;dark&quot;] .f-phone-body{--player-pitch:rgba(255,255,255,.075);--player-grain:rgba(255,255,255,.012)}
+#scoutbox-platform #f-canvas[data-app=&quot;player&quot;] .f-phone-body::before{content:&quot;&quot;;position:absolute;pointer-events:none;z-index:-1;top:28px;left:12px;right:12px;height:510px;border:1px solid var(--player-pitch);border-radius:2px;background-image:linear-gradient(var(--player-pitch),var(--player-pitch)),radial-gradient(circle at center,transparent 0 48px,var(--player-pitch) 48px 49px,transparent 49px),radial-gradient(circle at center,var(--player-pitch) 0 2px,transparent 2px);background-size:100% 1px,100% 100%,100% 100%;background-position:center;background-repeat:no-repeat}
+#scoutbox-platform #f-canvas[data-app=&quot;player&quot;] .f-phone-body::after{content:&quot;&quot;;position:absolute;pointer-events:none;z-index:-1;top:28px;left:28%;width:44%;height:65px;border:1px solid var(--player-pitch);border-top:0}
+&lt;/style&gt;
+&lt;script&gt;
+(()=&gt;{
+const root=document.getElementById(&#x27;scoutbox-platform&#x27;),canvas=root.querySelector(&#x27;#f-canvas&#x27;),app=root.querySelector(&#x27;#f-app&#x27;),screen=root.querySelector(&#x27;#f-screen&#x27;);
+const pages={agent:[&#x27;Agency overview&#x27;,&#x27;Clients&#x27;,&#x27;Client detail&#x27;,&#x27;Client opportunities&#x27;,&#x27;Transactions&#x27;,&#x27;Transaction workspace&#x27;,&#x27;Conflicts &amp; compliance&#x27;,&#x27;My profile &amp; verification&#x27;,&#x27;Agency team&#x27;,&#x27;Operational inbox&#x27;],pro:[&#x27;Player discovery&#x27;,&#x27;Recruitment room&#x27;,&#x27;Director’s desk&#x27;],player:[&#x27;Home&#x27;,&#x27;Football Passport&#x27;,&#x27;Box Cam practice&#x27;,&#x27;Club conversation&#x27;],grass:[&#x27;Club &amp; squad&#x27;,&#x27;Trial day&#x27;,&#x27;Guardian conversation&#x27;],safety:[&#x27;Review queue&#x27;,&#x27;Verification&#x27;,&#x27;Safeguarding case&#x27;]};
+const saved=window.openai?.widgetState?.privateContent||{};
+const state={app:pages[saved.app]?saved.app:&#x27;agent&#x27;,screen:0,player:0,paper:&#x27;warm&#x27;,agentClient:0,agentTab:0,agentTx:1,agentTxTab:0,agentFilter:&#x27;All&#x27;,agentRequest:false,agentShared:false,agentRead:false};if(Number.isInteger(saved.screen)&amp;&amp;pages[state.app][saved.screen])state.screen=saved.screen;if(saved.paper===&#x27;cool&#x27;)state.paper=&#x27;cool&#x27;;
+function restoreAgent(s){for(const [k,max] of [[&#x27;agentClient&#x27;,4],[&#x27;agentTab&#x27;,6],[&#x27;agentTx&#x27;,4],[&#x27;agentTxTab&#x27;,5]])if(Number.isInteger(s[k])&amp;&amp;s[k]&gt;=0&amp;&amp;s[k]&lt;=max)state[k]=s[k];if([&#x27;All&#x27;,&#x27;Active&#x27;,&#x27;Pending&#x27;,&#x27;Ended / disputed&#x27;].includes(s.agentFilter))state.agentFilter=s.agentFilter;for(const k of [&#x27;agentRequest&#x27;,&#x27;agentShared&#x27;,&#x27;agentRead&#x27;])if(typeof s[k]===&#x27;boolean&#x27;)state[k]=s[k];}
+state.themes={pro:&#x27;light&#x27;,player:&#x27;light&#x27;,grass:&#x27;light&#x27;,agent:&#x27;dark&#x27;,safety:&#x27;light&#x27;};
+function restoreThemes(s){for(const a of Object.keys(state.themes))if([&#x27;light&#x27;,&#x27;dark&#x27;].includes(s.themes?.[a]))state.themes[a]=s.themes[a];}
+restoreThemes(saved);restoreAgent(saved);
+const icons=n=&gt;&#x27;&lt;i data-lucide=&quot;&#x27;+n+&#x27;&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&#x27;;
+const themeToggle=()=&gt;&#x27;&lt;button type=&quot;button&quot; class=&quot;p-theme-toggle cursor-interaction&quot; data-theme-toggle role=&quot;switch&quot; aria-label=&quot;Dark theme&quot; aria-checked=&quot;&#x27;+(state.themes[state.app]===&#x27;dark&#x27;)+&#x27;&quot;&gt;&#x27;+icons(state.themes[state.app]===&#x27;dark&#x27;?&#x27;moon&#x27;:&#x27;sun&#x27;)+&#x27;&lt;span class=&quot;p-theme-text&quot;&gt;&#x27;+(state.themes[state.app]===&#x27;dark&#x27;?&#x27;Dark&#x27;:&#x27;Light&#x27;)+&#x27;&lt;/span&gt;&lt;span class=&quot;p-theme-track&quot; aria-hidden=&quot;true&quot;&gt;&lt;span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/button&gt;&#x27;;
+const action=(text,go=&#x27;&#x27;,style=&#x27;&#x27;)=&gt;&#x27;&lt;button class=&quot;f-button cursor-interaction &#x27;+style+&#x27;&quot; &#x27;+(go?&#x27;data-go=&quot;&#x27;+go+&#x27;&quot;&#x27;:&#x27;data-demo=&quot;&#x27;+text+&#x27;&quot;&#x27;)+&#x27;&gt;&#x27;+text+icons(&#x27;arrow-up-right&#x27;)+&#x27;&lt;/button&gt;&#x27;;
+const link=(text,go=&#x27;&#x27;)=&gt;&#x27;&lt;button class=&quot;f-textbtn cursor-interaction&quot; &#x27;+(go?&#x27;data-go=&quot;&#x27;+go+&#x27;&quot;&#x27;:&#x27;data-demo=&quot;&#x27;+text+&#x27;&quot;&#x27;)+&#x27;&gt;&#x27;+text+icons(&#x27;arrow-right&#x27;)+&#x27;&lt;/button&gt;&#x27;;
+const status=(text,kind=&#x27;&#x27;)=&gt;&#x27;&lt;span class=&quot;f-status &#x27;+kind+&#x27;&quot;&gt;&#x27;+text+&#x27;&lt;/span&gt;&#x27;;
+const section=(n,t)=&gt;&#x27;&lt;div class=&quot;f-sectionline&quot;&gt;&lt;span&gt;&#x27;+n+&#x27;&lt;/span&gt;&lt;h2&gt;&#x27;+t+&#x27;&lt;/h2&gt;&lt;/div&gt;&#x27;;
+const heading=(ref,title,side=&#x27;&#x27;)=&gt;&#x27;&lt;div class=&quot;f-heading&quot;&gt;&lt;div&gt;&lt;div class=&quot;f-kicker&quot;&gt;&#x27;+ref+&#x27;&lt;/div&gt;&lt;h1 class=&quot;f-display&quot;&gt;&#x27;+title+&#x27;&lt;/h1&gt;&lt;/div&gt;&#x27;+(side?&#x27;&lt;div class=&quot;f-heading-side&quot;&gt;&#x27;+side+&#x27;&lt;/div&gt;&#x27;:&#x27;&#x27;)+&#x27;&lt;/div&gt;&#x27;;
+const record=(n,t,s)=&gt;&#x27;&lt;div class=&quot;f-record&quot;&gt;&lt;span class=&quot;f-index&quot;&gt;&#x27;+n+&#x27;&lt;/span&gt;&lt;div&gt;&lt;h3&gt;&#x27;+t+&#x27;&lt;/h3&gt;&lt;p class=&quot;f-sub&quot;&gt;&#x27;+s+&#x27;&lt;/p&gt;&lt;/div&gt;&lt;/div&gt;&#x27;;
+const notice=t=&gt;&#x27;&lt;div class=&quot;f-note&quot;&gt;&#x27;+t+&#x27;&lt;/div&gt;&#x27;;
+const data=[{name:&#x27;Kola Adeyemi&#x27;,initial:&#x27;KA&#x27;,city:&#x27;Manchester&#x27;,age:22,pos:&#x27;ST&#x27;,club:&#x27;Eastport United&#x27;,foot:&#x27;Right&#x27;,evidence:&#x27;Club confirmed&#x27;,avail:&#x27;Open to trials&#x27;},{name:&#x27;Mateus Carvalho&#x27;,initial:&#x27;MC&#x27;,city:&#x27;Porto&#x27;,age:21,pos:&#x27;ST&#x27;,club:&#x27;Porto district&#x27;,foot:&#x27;Left&#x27;,evidence:&#x27;Full-match footage&#x27;,avail:&#x27;Available now&#x27;},{name:&#x27;Santiago Álvarez&#x27;,initial:&#x27;SA&#x27;,city:&#x27;London&#x27;,age:23,pos:&#x27;CF&#x27;,club:&#x27;North London FC&#x27;,foot:&#x27;Right&#x27;,evidence:&#x27;Coach reference&#x27;,avail:&#x27;Open to trials&#x27;},{name:&#x27;Kwame Mensah&#x27;,initial:&#x27;KM&#x27;,city:&#x27;Birmingham&#x27;,age:20,pos:&#x27;ST&#x27;,club:&#x27;Westside Athletic&#x27;,foot:&#x27;Right&#x27;,evidence:&#x27;Match footage&#x27;,avail:&#x27;Open to loan&#x27;}];
+function discovery(){const p=data[state.player];return heading(&#x27;Eastport FC / Recruitment / 01&#x27;,&#x27;Discover players&#x27;,&#x27;&lt;p&gt;Find players against your recruitment brief.&lt;/p&gt;&#x27;+action(&#x27;Open recruitment room&#x27;,&#x27;pro:1&#x27;,&#x27;lime&#x27;))+&#x27;&lt;div class=&quot;f-filters&quot;&gt;&lt;button data-demo=&quot;Recruitment brief&quot; class=&quot;cursor-interaction&quot;&gt;First-team striker &#x27;+icons(&#x27;chevron-down&#x27;)+&#x27;&lt;/button&gt;&lt;button data-demo=&quot;Availability filter&quot; class=&quot;cursor-interaction&quot;&gt;Open to trials &#x27;+icons(&#x27;chevron-down&#x27;)+&#x27;&lt;/button&gt;&lt;button data-demo=&quot;Additional filters&quot; class=&quot;cursor-interaction&quot;&gt;&#x27;+icons(&#x27;sliders-horizontal&#x27;)+&#x27; Filters&lt;/button&gt;&lt;span class=&quot;f-filtercount&quot;&gt;04 SHOWN / 12 IN BRIEF&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;f-talent-layout&quot;&gt;&lt;section&gt;&lt;div class=&quot;f-flex f-kicker&quot; style=&quot;padding-bottom:14px&quot;&gt;&lt;span&gt;Player / Location&lt;/span&gt;&lt;span&gt;Profile&lt;/span&gt;&lt;/div&gt;&#x27;+data.map((x,i)=&gt;&#x27;&lt;button class=&quot;f-candidate cursor-interaction &#x27;+(state.player===i?&#x27;active&#x27;:&#x27;&#x27;)+&#x27;&quot; data-player=&quot;&#x27;+i+&#x27;&quot; aria-pressed=&quot;&#x27;+(state.player===i)+&#x27;&quot;&gt;&lt;span class=&quot;f-mono&quot;&gt;0&#x27;+(i+1)+&#x27;&lt;/span&gt;&lt;span&gt;&lt;strong&gt;&#x27;+x.name+&#x27;&lt;/strong&gt;&lt;small&gt;&#x27;+x.pos+&#x27; / &#x27;+x.age+&#x27; / &#x27;+x.city+&#x27;&lt;/small&gt;&lt;/span&gt;&#x27;+icons(&#x27;arrow-up-right&#x27;)+&#x27;&lt;/button&gt;&#x27;).join(&#x27;&#x27;)+&#x27;&lt;p class=&quot;f-footnote&quot;&gt;Ordered by profile completeness. This is not an ability ranking.&lt;/p&gt;&lt;div class=&quot;f-sectionline&quot;&gt;&lt;span&gt;01.1&lt;/span&gt;&lt;h2&gt;Nobody Missed&lt;/h2&gt;&lt;/div&gt;&lt;p class=&quot;f-sub&quot;&gt;Four players meet this brief and are still awaiting a meaningful assessment.&lt;/p&gt;&#x27;+link(&#x27;Review coverage&#x27;,&#x27;pro:2&#x27;)+&#x27;&lt;/section&gt;&lt;aside class=&quot;f-ruledaside&quot;&gt;&lt;div class=&quot;f-flex&quot;&gt;&lt;span class=&quot;f-kicker&quot;&gt;Football Passport / Preview&lt;/span&gt;&lt;span class=&quot;f-mono&quot;&gt;0&#x27;+(state.player+1)+&#x27;&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;f-previewheading&quot;&gt;&lt;h2 class=&quot;f-playername&quot;&gt;&#x27;+p.name.split(&#x27; &#x27;)[0]+&#x27;&lt;br&gt;&lt;em&gt;&#x27;+p.name.split(&#x27; &#x27;).slice(1).join(&#x27; &#x27;)+&#x27;&lt;/em&gt;&lt;/h2&gt;&lt;p class=&quot;f-sub&quot;&gt;&#x27;+p.club+&#x27;&lt;/p&gt;&lt;/div&gt;&#x27;+status(p.avail)+&#x27;&lt;div class=&quot;f-specs&quot;&gt;&lt;div&gt;&lt;small&gt;POSITION&lt;/small&gt;&lt;strong&gt;&#x27;+p.pos+&#x27;&lt;/strong&gt;&lt;/div&gt;&lt;div&gt;&lt;small&gt;AGE&lt;/small&gt;&lt;strong&gt;&#x27;+p.age+&#x27;&lt;/strong&gt;&lt;/div&gt;&lt;div&gt;&lt;small&gt;FOOT&lt;/small&gt;&lt;strong&gt;&#x27;+p.foot+&#x27;&lt;/strong&gt;&lt;/div&gt;&lt;/div&gt;&lt;h3&gt;Evidence on record&lt;/h3&gt;&#x27;+record(&#x27;01&#x27;,p.evidence,&#x27;Source and provenance available to review&#x27;)+record(&#x27;02&#x27;,&#x27;Full match · 90 minutes&#x27;,&#x27;Match context, without a highlights-only view&#x27;)+&#x27;&lt;div style=&quot;margin-top:18px&quot;&gt;&#x27;+action(&#x27;View Passport&#x27;,state.player===0?&#x27;player:1&#x27;:&#x27;&#x27;,&#x27;outline&#x27;)+&#x27;&lt;/div&gt;&lt;/aside&gt;&lt;/div&gt;&#x27;;}
+function room(){return heading(&#x27;Recruitment room / SB–024 / Club-private&#x27;,&#x27;Kola Adeyemi&#x27;,action(&#x27;Review decision&#x27;,&#x27;&#x27;,&#x27;lime&#x27;))+&#x27;&lt;div class=&quot;f-stagepath&quot;&gt;&#x27;+[&#x27;Identified&#x27;,&#x27;Shortlisted&#x27;,&#x27;Assessment&#x27;,&#x27;Trial&#x27;,&#x27;Decision&#x27;].map((t,i)=&gt;&#x27;&lt;div class=&quot;&#x27;+(i&lt;2?&#x27;done&#x27;:i===2?&#x27;current&#x27;:&#x27;&#x27;)+&#x27;&quot;&gt;&#x27;+t+&#x27;&lt;/div&gt;&#x27;).join(&#x27;&#x27;)+&#x27;&lt;/div&gt;&lt;div class=&quot;f-two&quot;&gt;&lt;section&gt;&lt;div class=&quot;f-flex&quot;&gt;&lt;span class=&quot;f-kicker&quot;&gt;01 / Working note&lt;/span&gt;&#x27;+status(&#x27;In assessment&#x27;)+&#x27;&lt;/div&gt;&lt;p class=&quot;f-quote&quot;&gt;“Movement between the lines is promising. Review a full match before deciding on a trial.”&lt;/p&gt;&lt;p class=&quot;f-sub&quot;&gt;Maria Keane / Head of Recruitment / 28 Sep&lt;/p&gt;&#x27;+section(&#x27;02&#x27;,&#x27;Independent assessments&#x27;)+&#x27;&lt;div class=&quot;f-ledger&quot;&gt;&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;ASSESSOR&lt;/th&gt;&lt;th&gt;VIEW&lt;/th&gt;&lt;th&gt;STATE&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&lt;tr&gt;&lt;td&gt;Alex Ford&lt;small&gt;First-team scout&lt;/small&gt;&lt;/td&gt;&lt;td&gt;Progress to trial&lt;/td&gt;&lt;td&gt;&#x27;+status(&#x27;Submitted&#x27;)+&#x27;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;Jo Beckett&lt;small&gt;Analyst&lt;/small&gt;&lt;/td&gt;&lt;td&gt;Further observation&lt;/td&gt;&lt;td&gt;&#x27;+status(&#x27;Submitted&#x27;)+&#x27;&lt;/td&gt;&lt;/tr&gt;&lt;/tbody&gt;&lt;/table&gt;&lt;/div&gt;&lt;p class=&quot;f-footnote&quot;&gt;Separate professional opinions. They are not combined into a score.&lt;/p&gt;&#x27;+section(&#x27;03&#x27;,&#x27;Evidence file&#x27;)+record(&#x27;A&#x27;,&#x27;Full match vs Harbour U23&#x27;,&#x27;90 minutes / Uploaded by player / Source review available&#x27;)+record(&#x27;B&#x27;,&#x27;Current club affiliation&#x27;,&#x27;Eastport United / Club confirmed&#x27;)+&#x27;&lt;/section&gt;&lt;aside class=&quot;f-ruledaside&quot;&gt;&lt;div class=&quot;f-kicker&quot;&gt;Case owner&lt;/div&gt;&lt;h2 style=&quot;margin:12px 0&quot;&gt;Maria Keane&lt;/h2&gt;&lt;p class=&quot;f-sub&quot;&gt;First-team recruitment&lt;/p&gt;&lt;div class=&quot;f-divider&quot;&gt;&lt;/div&gt;&lt;div class=&quot;f-kicker&quot;&gt;Next action / Due today&lt;/div&gt;&lt;h3 style=&quot;margin-top:12px&quot;&gt;Review both assessments&lt;/h3&gt;&lt;p class=&quot;f-sub&quot;&gt;Consider the disagreement and the supporting evidence before recording a decision.&lt;/p&gt;&lt;div style=&quot;margin-top:18px&quot;&gt;&#x27;+action(&#x27;Open assessments&#x27;,&#x27;&#x27;,&#x27;outline&#x27;)+&#x27;&lt;/div&gt;&lt;div class=&quot;f-divider&quot;&gt;&lt;/div&gt;&#x27;+notice(&#x27;Club notes and decisions stay private. Recording a decision does not send an offer or a message to the player.&#x27;)+&#x27;&lt;/aside&gt;&lt;/div&gt;&#x27;;}
+function director(){return heading(&#x27;Eastport FC / Intelligence / September&#x27;,&#x27;Recruitment overview&#x27;,&#x27;&lt;p&gt;Recruitment activity&lt;br&gt;01–30 September 2026&lt;/p&gt;&#x27;+link(&#x27;View player index&#x27;,&#x27;pro:0&#x27;))+&#x27;&lt;div class=&quot;f-strip&quot;&gt;&#x27;+[[&#x27;24&#x27;,&#x27;Active cases&#x27;],[&#x27;08&#x27;,&#x27;Awaiting assessment&#x27;],[&#x27;03&#x27;,&#x27;Scheduled trials&#x27;]].map(x=&gt;&#x27;&lt;div&gt;&lt;strong class=&quot;f-big-number&quot;&gt;&#x27;+x[0]+&#x27;&lt;/strong&gt;&lt;span class=&quot;f-kicker&quot;&gt;&#x27;+x[1]+&#x27;&lt;/span&gt;&lt;/div&gt;&#x27;).join(&#x27;&#x27;)+&#x27;&lt;/div&gt;&lt;div class=&quot;f-two&quot;&gt;&lt;section&gt;&lt;div class=&quot;f-flex&quot; style=&quot;margin-bottom:24px&quot;&gt;&lt;h2&gt;Where things stand&lt;/h2&gt;&lt;span class=&quot;f-mono&quot;&gt;24 CASES&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;f-bars&quot;&gt;&#x27;+[[&#x27;Identified&#x27;,10],[&#x27;Shortlisted&#x27;,6],[&#x27;Assessment&#x27;,5],[&#x27;Trial&#x27;,3]].map(x=&gt;&#x27;&lt;div class=&quot;f-bar&quot;&gt;&lt;span&gt;&#x27;+x[0]+&#x27;&lt;/span&gt;&lt;span class=&quot;f-bar-track&quot;&gt;&lt;span style=&quot;width:&#x27;+x[1]*10+&#x27;%&quot;&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;f-mono&quot;&gt;&#x27;+x[1]+&#x27;&lt;/span&gt;&lt;/div&gt;&#x27;).join(&#x27;&#x27;)+&#x27;&lt;/div&gt;&lt;p class=&quot;f-footnote&quot;&gt;Current stage counts. Activity, not a measure of player quality.&lt;/p&gt;&#x27;+section(&#x27;02&#x27;,&#x27;Second Look&#x27;)+&#x27;&lt;div class=&quot;f-inline&quot;&gt;&lt;span class=&quot;f-initial&quot;&gt;MC&lt;/span&gt;&lt;div&gt;&lt;h3&gt;Mateus Carvalho&lt;/h3&gt;&lt;p class=&quot;f-sub&quot;&gt;New match footage since your last decision&lt;/p&gt;&lt;/div&gt;&lt;/div&gt;&lt;p class=&quot;f-sub&quot; style=&quot;margin:16px 0&quot;&gt;Previous reason: insufficient match evidence. Review the new source before deciding whether to reopen.&lt;/p&gt;&#x27;+link(&#x27;Review the evidence&#x27;,&#x27;pro:1&#x27;)+&#x27;&lt;/section&gt;&lt;aside class=&quot;f-ruledaside&quot;&gt;&lt;div class=&quot;f-kicker&quot;&gt;01 / Needs a decision&lt;/div&gt;&#x27;+record(&#x27;04&#x27;,&#x27;Unassessed players&#x27;,&#x27;Meet the brief / No meaningful assessment yet&#x27;)+record(&#x27;02&#x27;,&#x27;Overdue case tasks&#x27;,&#x27;Awaiting a named owner’s update&#x27;)+record(&#x27;01&#x27;,&#x27;Evidence change&#x27;,&#x27;Second Look is ready for review&#x27;)+&#x27;&lt;div style=&quot;margin-top:22px&quot;&gt;&#x27;+action(&#x27;Open recruitment room&#x27;,&#x27;pro:1&#x27;,&#x27;lime&#x27;)+&#x27;&lt;/div&gt;&lt;/aside&gt;&lt;/div&gt;&#x27;;}
+function squad(){return heading(&#x27;Hackney Marsh Rovers / Club edition&#x27;,&#x27;Club overview&#x27;,&#x27;&lt;p&gt;Senior squad&lt;br&gt;Sunday league / 2026–27&lt;/p&gt;&#x27;+action(&#x27;View trial day&#x27;,&#x27;grass:1&#x27;,&#x27;lime&#x27;))+&#x27;&lt;div class=&quot;f-two&quot;&gt;&lt;section&gt;&lt;div class=&quot;f-kicker&quot;&gt;Next fixture / Sunday 04 Oct / 10:30&lt;/div&gt;&lt;div class=&quot;f-fixture&quot;&gt;&lt;div class=&quot;f-clubname&quot;&gt;Hackney&lt;br&gt;&lt;em&gt;Rovers&lt;/em&gt;&lt;/div&gt;&lt;div class=&quot;f-scorebox&quot;&gt;v&lt;/div&gt;&lt;div class=&quot;f-clubname&quot;&gt;Walthamstow&lt;br&gt;&lt;em&gt;Athletic&lt;/em&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class=&quot;f-flex&quot;&gt;&lt;span class=&quot;f-sub&quot;&gt;Hackney Marshes / League fixture&lt;/span&gt;&#x27;+link(&#x27;Matchday details&#x27;)+&#x27;&lt;/div&gt;&lt;/section&gt;&lt;aside class=&quot;f-ruledaside&quot;&gt;&lt;div class=&quot;f-kicker&quot;&gt;On the noticeboard&lt;/div&gt;&lt;div class=&quot;f-line&quot;&gt;&lt;h3&gt;Tuesday training&lt;/h3&gt;&lt;p class=&quot;f-sub&quot;&gt;18:30 / Senior squad / Coach Jamie&lt;/p&gt;&lt;/div&gt;&lt;div class=&quot;f-line&quot;&gt;&lt;h3&gt;Thursday trial session&lt;/h3&gt;&lt;p class=&quot;f-sub&quot;&gt;17:00 / Eight accepted invitations&lt;/p&gt;&#x27;+link(&#x27;View session&#x27;,&#x27;grass:1&#x27;)+&#x27;&lt;/div&gt;&lt;/aside&gt;&lt;/div&gt;&#x27;+section(&#x27;01&#x27;,&#x27;Squad members&#x27;)+&#x27;&lt;div class=&quot;f-ledger&quot;&gt;&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;PLAYER&lt;/th&gt;&lt;th&gt;POSITION&lt;/th&gt;&lt;th&gt;SQUAD&lt;/th&gt;&lt;th&gt;CLUB RELATIONSHIP&lt;/th&gt;&lt;th&gt;&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&#x27;+[[&#x27;Jordan Lewis&#x27;,&#x27;CM&#x27;,&#x27;Confirmed&#x27;],[&#x27;Amir Shah&#x27;,&#x27;CB&#x27;,&#x27;Confirmed&#x27;],[&#x27;Noah Taylor&#x27;,&#x27;GK&#x27;,&#x27;Awaiting confirmation&#x27;]].map(x=&gt;&#x27;&lt;tr&gt;&lt;td&gt;&lt;strong style=&quot;font-weight:500&quot;&gt;&#x27;+x[0]+&#x27;&lt;/strong&gt;&lt;/td&gt;&lt;td class=&quot;f-mono&quot;&gt;&#x27;+x[1]+&#x27;&lt;/td&gt;&lt;td&gt;Senior&lt;/td&gt;&lt;td&gt;&#x27;+status(x[2],x[2]===&#x27;Confirmed&#x27;?&#x27;&#x27;:&#x27;pending&#x27;)+&#x27;&lt;/td&gt;&lt;td&gt;&#x27;+link(&#x27;View&#x27;)+&#x27;&lt;/td&gt;&lt;/tr&gt;&#x27;).join(&#x27;&#x27;)+&#x27;&lt;/tbody&gt;&lt;/table&gt;&lt;/div&gt;&#x27;;}
+function trial(){return heading(&#x27;Hackney Marsh Rovers / Recruitment&#x27;,&#x27;Senior squad trial&#x27;,action(&#x27;Session details&#x27;,&#x27;&#x27;,&#x27;outline&#x27;))+&#x27;&lt;div class=&quot;f-ticket&quot;&gt;&lt;div class=&quot;f-ticket-date&quot;&gt;&lt;span class=&quot;f-mono&quot;&gt;THURSDAY&lt;/span&gt;&lt;span class=&quot;f-big-number&quot;&gt;01&lt;/span&gt;&lt;span class=&quot;f-mono&quot;&gt;OCT / 2026&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;f-ticket-info&quot;&gt;&lt;div class=&quot;f-kicker&quot;&gt;Senior squad / Trial session&lt;/div&gt;&lt;h2 style=&quot;margin:9px 0&quot;&gt;Hackney Marsh Rovers&lt;/h2&gt;&lt;p class=&quot;f-sub&quot;&gt;17:00–18:30 BST / Hackney Marshes&lt;/p&gt;&lt;div style=&quot;margin-top:12px&quot;&gt;&#x27;+status(&#x27;Scheduled&#x27;)+&#x27;&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class=&quot;f-two&quot; style=&quot;margin-top:28px&quot;&gt;&lt;section&gt;&lt;div class=&quot;f-flex&quot;&gt;&lt;h2&gt;Expected players&lt;/h2&gt;&lt;span class=&quot;f-mono&quot;&gt;08 ACCEPTED&lt;/span&gt;&lt;/div&gt;&#x27;+record(&#x27;01&#x27;,&#x27;Kola Adeyemi&#x27;,&#x27;ST / Adult player / Invitation accepted&#x27;)+record(&#x27;02&#x27;,&#x27;Guni Adebayo&#x27;,&#x27;RW / Guardian: Amara / Guardian accepted&#x27;)+record(&#x27;03&#x27;,&#x27;Noah Taylor&#x27;,&#x27;GK / Adult player / Invitation accepted&#x27;)+&#x27;&lt;p class=&quot;f-footnote&quot;&gt;Showing 3 of 8 players.&lt;/p&gt;&lt;/section&gt;&lt;aside class=&quot;f-ruledaside&quot;&gt;&lt;div class=&quot;f-kicker&quot;&gt;Session schedule&lt;/div&gt;&#x27;+record(&#x27;17:00&#x27;,&#x27;Welcome &amp; warm-up&#x27;,&#x27;Jamie Turner&#x27;)+record(&#x27;17:20&#x27;,&#x27;Small-sided games&#x27;,&#x27;Alex Ford&#x27;)+record(&#x27;18:15&#x27;,&#x27;Next steps&#x27;,&#x27;Both coaches&#x27;)+&#x27;&lt;div style=&quot;margin-top:18px&quot;&gt;&#x27;+notice(&#x27;Under-18 arrangements and exact venue details are shared with the guardian.&#x27;)+&#x27;&lt;/div&gt;&lt;/aside&gt;&lt;/div&gt;&#x27;;}
+function conversation(guardian=false){let name=guardian?&#x27;Amara Adebayo&#x27;:&#x27;Maria Keane&#x27;;return heading(guardian?&#x27;Messages / Guardian conversation&#x27;:&#x27;Inbox / Eastport FC&#x27;,guardian?&#x27;Amara Adebayo&#x27;:&#x27;Eastport FC&#x27;,status(guardian?&#x27;Guardian-managed&#x27;:&#x27;Accepted conversation&#x27;))+&#x27;&lt;div class=&quot;f-two&quot;&gt;&lt;section&gt;&#x27;+notice(guardian?&#x27;Amara is Guni’s guardian. Guni cannot receive or send club messages.&#x27;:&#x27;This is an accepted club conversation. Report or block is always available.&#x27;)+&#x27;&lt;div class=&quot;f-stack&quot; style=&quot;margin-top:24px&quot;&gt;&lt;div class=&quot;f-message&quot;&gt;&lt;header&gt;&lt;span&gt;&#x27;+name+&#x27;&lt;/span&gt;&lt;span&gt;10:24&lt;/span&gt;&lt;/header&gt;&lt;p&gt;&#x27;+(guardian?&#x27;Thank you for inviting Guni. I’ll bring him on Thursday and stay for the session. What should he bring?&#x27;:&#x27;Hi Kola, thanks for sharing your match footage. We’d like to invite you to our next trial session.&#x27;)+&#x27;&lt;/p&gt;&lt;/div&gt;&lt;div class=&quot;f-message mine&quot;&gt;&lt;header&gt;&lt;span&gt;&#x27;+(guardian?&#x27;Jamie Turner&#x27;:&#x27;You&#x27;)+&#x27;&lt;/span&gt;&lt;span&gt;10:28 / Read&lt;/span&gt;&lt;/header&gt;&lt;p&gt;&#x27;+(guardian?&#x27;Football boots, shin pads and water. We’ll send all the arrangements to you here.&#x27;:&#x27;Thank you, Maria. I’d be interested. Could you share the session details?&#x27;)+&#x27;&lt;/p&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class=&quot;f-compose&quot;&gt;&lt;input aria-label=&quot;Draft message&quot; placeholder=&quot;Write a reply…&quot;&gt;&lt;button class=&quot;cursor-interaction&quot; data-demo=&quot;Send message&quot; aria-label=&quot;Send message&quot;&gt;&#x27;+icons(&#x27;arrow-up&#x27;)+&#x27;&lt;/button&gt;&lt;/div&gt;&lt;/section&gt;&lt;aside class=&quot;f-ruledaside&quot;&gt;&lt;div class=&quot;f-kicker&quot;&gt;Shared context&lt;/div&gt;&lt;h2 style=&quot;margin:15px 0&quot;&gt;Thursday’s trial&lt;/h2&gt;&lt;p class=&quot;f-sub&quot;&gt;01 October / 17:00–18:30 BST&lt;/p&gt;&lt;div style=&quot;margin:18px 0&quot;&gt;&#x27;+status(&#x27;Invitation accepted&#x27;)+&#x27;&lt;/div&gt;&#x27;+link(&#x27;Session details&#x27;,&#x27;grass:1&#x27;)+&#x27;&lt;div class=&quot;f-divider&quot;&gt;&lt;/div&gt;&#x27;+link(&#x27;Report or block&#x27;)+&#x27;&lt;/aside&gt;&lt;/div&gt;&#x27;;}
+function safety(){if(state.screen===0)return heading(&#x27;Trust &amp; Safety / Operations&#x27;,&#x27;Review queue&#x27;,&#x27;&lt;p&gt;Open review queue&lt;br&gt;Tuesday 29 September&lt;/p&gt;&#x27;+action(&#x27;Review urgent report&#x27;,&#x27;safety:2&#x27;,&#x27;lime&#x27;))+&#x27;&lt;div class=&quot;f-note&quot; style=&quot;border-color:#a34a36;margin-bottom:25px&quot;&gt;&lt;strong style=&quot;color:#8b382e&quot;&gt;01 urgent safeguarding report.&lt;/strong&gt; Communication is restricted while the report is reviewed.&lt;/div&gt;&lt;div class=&quot;f-ledger&quot;&gt;&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;REF.&lt;/th&gt;&lt;th&gt;REPORT&lt;/th&gt;&lt;th&gt;PRIORITY&lt;/th&gt;&lt;th&gt;RECEIVED&lt;/th&gt;&lt;th&gt;&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&lt;tr&gt;&lt;td class=&quot;f-mono&quot;&gt;184&lt;/td&gt;&lt;td&gt;Request to move off-platform&lt;small&gt;Reported by guardian&lt;/small&gt;&lt;/td&gt;&lt;td&gt;&#x27;+status(&#x27;Urgent&#x27;,&#x27;urgent&#x27;)+&#x27;&lt;/td&gt;&lt;td&gt;12 min ago&lt;/td&gt;&lt;td&gt;&#x27;+link(&#x27;Review&#x27;,&#x27;safety:2&#x27;)+&#x27;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td class=&quot;f-mono&quot;&gt;183&lt;/td&gt;&lt;td&gt;Trial feedback overdue&lt;small&gt;Reported by player&lt;/small&gt;&lt;/td&gt;&lt;td&gt;Standard&lt;/td&gt;&lt;td&gt;2 hours ago&lt;/td&gt;&lt;td&gt;&#x27;+link(&#x27;Review&#x27;)+&#x27;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td class=&quot;f-mono&quot;&gt;182&lt;/td&gt;&lt;td&gt;Club affiliation disputed&lt;small&gt;Record correction&lt;/small&gt;&lt;/td&gt;&lt;td&gt;Standard&lt;/td&gt;&lt;td&gt;Yesterday&lt;/td&gt;&lt;td&gt;&#x27;+link(&#x27;Review&#x27;,&#x27;safety:1&#x27;)+&#x27;&lt;/td&gt;&lt;/tr&gt;&lt;/tbody&gt;&lt;/table&gt;&lt;/div&gt;&#x27;+section(&#x27;02&#x27;,&#x27;Verification desk&#x27;)+&#x27;&lt;div class=&quot;f-flex&quot;&gt;&lt;div&gt;&lt;h3&gt;Two organisations awaiting review&lt;/h3&gt;&lt;p class=&quot;f-sub&quot;&gt;Review submitted evidence and the scope of each claim.&lt;/p&gt;&lt;/div&gt;&#x27;+action(&#x27;Open verification&#x27;,&#x27;safety:1&#x27;,&#x27;outline&#x27;)+&#x27;&lt;/div&gt;&#x27;;
+if(state.screen===1)return heading(&#x27;Verification / VR–082 / Organisation claim&#x27;,&#x27;Harbour City FC&#x27;,status(&#x27;Awaiting review&#x27;,&#x27;pending&#x27;))+&#x27;&lt;div class=&quot;f-two&quot;&gt;&lt;section&gt;&lt;div class=&quot;f-kicker&quot;&gt;01 / Source evidence&lt;/div&gt;&#x27;+record(&#x27;A&#x27;,&#x27;Club registration record&#x27;,&#x27;PDF / Two pages / Submitted by applicant&#x27;)+link(&#x27;Inspect registration document&#x27;)+record(&#x27;B&#x27;,&#x27;Organisation domain&#x27;,&#x27;Domain control confirmed / Employment not established&#x27;)+record(&#x27;C&#x27;,&#x27;Representative authority&#x27;,&#x27;Club secretary letter / Manual review required&#x27;)+link(&#x27;Inspect authority evidence&#x27;)+&#x27;&lt;div class=&quot;f-divider&quot;&gt;&lt;/div&gt;&#x27;+notice(&#x27;Confirm only the claim supported by evidence. Domain control alone does not establish employment or authority.&#x27;)+&#x27;&lt;/section&gt;&lt;aside class=&quot;f-ruledaside&quot;&gt;&lt;div class=&quot;f-kicker&quot;&gt;02 / Review outcome&lt;/div&gt;&lt;h2 style=&quot;margin:15px 0&quot;&gt;Review outcome&lt;/h2&gt;&lt;p class=&quot;f-sub&quot;&gt;Document your rationale and the scope of the verification.&lt;/p&gt;&lt;div class=&quot;f-stack&quot; style=&quot;margin-top:23px&quot;&gt;&#x27;+action(&#x27;Record review&#x27;,&#x27;&#x27;,&#x27;lime&#x27;)+action(&#x27;Request evidence&#x27;,&#x27;&#x27;,&#x27;outline&#x27;)+&#x27;&lt;/div&gt;&lt;p class=&quot;f-footnote&quot;&gt;High-risk approvals require a second reviewer. Reviewers cannot approve their own claim.&lt;/p&gt;&lt;/aside&gt;&lt;/div&gt;&#x27;;
+return heading(&#x27;Safeguarding / SB–184 / Report review&#x27;,&#x27;Safeguarding case&#x27;,status(&#x27;Urgent / restricted&#x27;,&#x27;urgent&#x27;))+&#x27;&lt;div class=&quot;f-two&quot;&gt;&lt;section&gt;&lt;div class=&quot;f-kicker&quot;&gt;01 / The original report&lt;/div&gt;&lt;p class=&quot;f-quote&quot;&gt;“The scout asked us to continue the conversation on WhatsApp.”&lt;/p&gt;&lt;p class=&quot;f-sub&quot;&gt;Reported by guardian / 29 September / 10:04&lt;/p&gt;&#x27;+section(&#x27;02&#x27;,&#x27;Case history&#x27;)+record(&#x27;10:04&#x27;,&#x27;Guardian report received&#x27;,&#x27;Original report preserved&#x27;)+record(&#x27;10:04&#x27;,&#x27;Communication restricted&#x27;,&#x27;Safeguarding precaution / Not a final finding&#x27;)+record(&#x27;10:16&#x27;,&#x27;Review opened&#x27;,&#x27;Awaiting a documented outcome&#x27;)+&#x27;&lt;/section&gt;&lt;aside class=&quot;f-ruledaside&quot;&gt;&lt;div class=&quot;f-kicker&quot;&gt;03 / Evidence &amp; outcome&lt;/div&gt;&lt;h2 style=&quot;margin:15px 0&quot;&gt;Review before deciding.&lt;/h2&gt;&lt;p class=&quot;f-sub&quot;&gt;Inspect the relevant messages and organisation history. Preserve the basis of your decision.&lt;/p&gt;&lt;div class=&quot;f-stack&quot; style=&quot;margin-top:24px&quot;&gt;&#x27;+action(&#x27;Inspect messages&#x27;,&#x27;&#x27;,&#x27;outline&#x27;)+action(&#x27;Record an outcome&#x27;,&#x27;&#x27;,&#x27;lime&#x27;)+&#x27;&lt;/div&gt;&lt;div style=&quot;margin-top:25px&quot;&gt;&#x27;+notice(&#x27;Rationale, reviewer attribution and actions remain in the case history.&#x27;)+&#x27;&lt;/div&gt;&lt;/aside&gt;&lt;/div&gt;&#x27;;}
+function mobileBody(n){
+if(n===0)return &#x27;&lt;div class=&quot;p-greeting&quot;&gt;&lt;div&gt;&lt;p class=&quot;f-sub&quot;&gt;Tuesday, 29 September&lt;/p&gt;&lt;h1&gt;Good morning, Kola&lt;/h1&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class=&quot;p-passport&quot;&gt;&lt;div class=&quot;f-flex&quot;&gt;&lt;span class=&quot;p-avatar&quot;&gt;KA&lt;/span&gt;&lt;span class=&quot;p-label&quot;&gt;Your Football Passport&lt;/span&gt;&lt;/div&gt;&lt;h2&gt;Kola Adeyemi&lt;/h2&gt;&lt;p&gt;Striker · Manchester · Open to trials&lt;/p&gt;&lt;button class=&quot;p-passport-link cursor-interaction&quot; data-go=&quot;player:1&quot;&gt;View your Passport &#x27;+icons(&#x27;arrow-right&#x27;)+&#x27;&lt;/button&gt;&lt;/div&gt;&lt;div class=&quot;p-section&quot;&gt;&lt;h2&gt;Needs your attention&lt;/h2&gt;&lt;span class=&quot;p-count&quot;&gt;2&lt;/span&gt;&lt;/div&gt;&lt;button class=&quot;p-mobile-row cursor-interaction&quot; data-go=&quot;player:3&quot;&gt;&lt;span class=&quot;p-mobile-icon&quot;&gt;&#x27;+icons(&#x27;calendar-days&#x27;)+&#x27;&lt;/span&gt;&lt;span&gt;&lt;strong&gt;Trial invitation&lt;/strong&gt;&lt;small&gt;Eastport FC · Thursday, 1 October&lt;/small&gt;&lt;/span&gt;&#x27;+icons(&#x27;chevron-right&#x27;)+&#x27;&lt;/button&gt;&lt;button class=&quot;p-mobile-row cursor-interaction&quot; data-go=&quot;player:3&quot;&gt;&lt;span class=&quot;p-mobile-icon&quot;&gt;&#x27;+icons(&#x27;message-circle&#x27;)+&#x27;&lt;/span&gt;&lt;span&gt;&lt;strong&gt;Maria Keane replied&lt;/strong&gt;&lt;small&gt;Eastport FC · 12 minutes ago&lt;/small&gt;&lt;/span&gt;&#x27;+icons(&#x27;chevron-right&#x27;)+&#x27;&lt;/button&gt;&lt;div class=&quot;p-section&quot;&gt;&lt;h2&gt;Your development&lt;/h2&gt;&#x27;+link(&#x27;View&#x27;,&#x27;player:2&#x27;)+&#x27;&lt;/div&gt;&lt;div class=&quot;p-development&quot;&gt;&lt;div class=&quot;f-inline&quot;&gt;&lt;span class=&quot;p-mobile-icon&quot;&gt;&#x27;+icons(&#x27;scan-line&#x27;)+&#x27;&lt;/span&gt;&lt;span&gt;&lt;strong&gt;First touch &amp; ball control&lt;/strong&gt;&lt;p class=&quot;f-sub&quot;&gt;Continue your Box Cam practice&lt;/p&gt;&lt;/span&gt;&lt;/div&gt;&lt;div style=&quot;margin-top:18px&quot;&gt;&#x27;+action(&#x27;Start a practice session&#x27;,&#x27;player:2&#x27;,&#x27;lime&#x27;)+&#x27;&lt;/div&gt;&lt;/div&gt;&#x27;;
+if(n===1)return &#x27;&lt;div class=&quot;p-profile-intro&quot;&gt;&lt;span class=&quot;p-avatar large&quot;&gt;KA&lt;/span&gt;&lt;h1&gt;Kola Adeyemi&lt;/h1&gt;&lt;p class=&quot;f-sub&quot;&gt;Striker · Manchester&lt;/p&gt;&#x27;+status(&#x27;Open to trials&#x27;)+&#x27;&lt;/div&gt;&lt;div class=&quot;p-mobile-tabs&quot;&gt;&lt;button class=&quot;active cursor-interaction&quot; data-go=&quot;player:1&quot;&gt;Overview&lt;/button&gt;&lt;button class=&quot;cursor-interaction&quot; data-demo=&quot;Passport evidence&quot;&gt;Evidence&lt;/button&gt;&lt;button class=&quot;cursor-interaction&quot; data-go=&quot;player:2&quot;&gt;Development&lt;/button&gt;&lt;/div&gt;&lt;div class=&quot;p-trust&quot;&gt;&lt;div class=&quot;f-flex&quot;&gt;&lt;div&gt;&lt;span class=&quot;p-small-label&quot;&gt;Trust Score&lt;/span&gt;&lt;h3&gt;Strong evidence&lt;/h3&gt;&lt;/div&gt;&lt;strong class=&quot;p-score&quot;&gt;79&lt;span&gt;/100&lt;/span&gt;&lt;/strong&gt;&lt;/div&gt;&lt;p class=&quot;f-sub&quot;&gt;Evidence confidence, not football ability.&lt;/p&gt;&lt;button class=&quot;f-textbtn cursor-interaction&quot; data-demo=&quot;Trust Score details&quot;&gt;What contributes to this score? &#x27;+icons(&#x27;chevron-right&#x27;)+&#x27;&lt;/button&gt;&lt;/div&gt;&lt;div class=&quot;p-section&quot;&gt;&lt;h2&gt;Football history&lt;/h2&gt;&#x27;+link(&#x27;Edit&#x27;)+&#x27;&lt;/div&gt;&lt;div class=&quot;p-history&quot;&gt;&#x27;+record(&#x27;01&#x27;,&#x27;Eastport United FC&#x27;,&#x27;Current club · Club confirmed&#x27;)+record(&#x27;02&#x27;,&#x27;Full match vs Harbour U23&#x27;,&#x27;90 minutes · Uploaded by you&#x27;)+record(&#x27;03&#x27;,&#x27;Coach reference&#x27;,&#x27;Tom Field · Source available&#x27;)+&#x27;&lt;/div&gt;&lt;div style=&quot;margin-top:20px&quot;&gt;&#x27;+action(&#x27;Share Passport&#x27;,&#x27;&#x27;,&#x27;lime&#x27;)+&#x27;&lt;/div&gt;&#x27;;
+if(n===2)return &#x27;&lt;div class=&quot;p-greeting&quot;&gt;&lt;p class=&quot;f-sub&quot;&gt;Football / Box Cam&lt;/p&gt;&lt;h1&gt;Your next session&lt;/h1&gt;&lt;/div&gt;&lt;div class=&quot;p-training-visual&quot;&gt;&lt;div class=&quot;f-pitch&quot;&gt;&lt;/div&gt;&lt;span&gt;&#x27;+icons(&#x27;scan-line&#x27;)+&#x27;&lt;/span&gt;&lt;b&gt;Ball control&lt;/b&gt;&lt;small&gt;60-second practice&lt;/small&gt;&lt;/div&gt;&lt;div class=&quot;p-section&quot;&gt;&lt;h2&gt;First touch practice&lt;/h2&gt;&lt;span class=&quot;p-label light&quot;&gt;Practice&lt;/span&gt;&lt;/div&gt;&lt;p class=&quot;f-sub&quot;&gt;Set your phone down with a clear view of the ball. You’ll need one ball and space to move.&lt;/p&gt;&lt;div class=&quot;p-session-facts&quot;&gt;&lt;span&gt;&#x27;+icons(&#x27;timer&#x27;)+&#x27;60 seconds&lt;/span&gt;&lt;span&gt;&#x27;+icons(&#x27;circle-check&#x27;)+&#x27;One ball&lt;/span&gt;&lt;/div&gt;&#x27;+action(&#x27;Set up camera&#x27;,&#x27;&#x27;,&#x27;lime&#x27;)+&#x27;&lt;div class=&quot;p-section&quot;&gt;&lt;h2&gt;Recent sessions&lt;/h2&gt;&lt;/div&gt;&lt;div class=&quot;p-history&quot;&gt;&#x27;+record(&#x27;28&#x27;,&#x27;Ball control&#x27;,&#x27;28 September · 60 seconds · Recorded&#x27;)+record(&#x27;26&#x27;,&#x27;Keep-ups&#x27;,&#x27;26 September · Practice · Recorded&#x27;)+&#x27;&lt;/div&gt;&lt;p class=&quot;f-footnote&quot;&gt;Practice observations are separate from verified Combine results.&lt;/p&gt;&#x27;;
+return &#x27;&lt;div class=&quot;p-chat-person&quot;&gt;&lt;span class=&quot;p-avatar club&quot;&gt;EF&lt;/span&gt;&lt;div&gt;&lt;h2&gt;Eastport FC&lt;/h2&gt;&lt;p class=&quot;f-sub&quot;&gt;Maria Keane · Head of Recruitment&lt;/p&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class=&quot;p-chat-safety&quot;&gt;&#x27;+icons(&#x27;shield-check&#x27;)+&#x27;&lt;span&gt;Accepted conversation · Report or block anytime&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;p-chat-date&quot;&gt;Today&lt;/div&gt;&lt;div class=&quot;p-bubble&quot;&gt;Hi Kola, we’d like to invite you to our next trial session.&lt;small&gt;Maria · 10:24&lt;/small&gt;&lt;/div&gt;&lt;div class=&quot;p-bubble mine&quot;&gt;Thank you, Maria. Could you share the details?&lt;small&gt;You · 10:28 · Read&lt;/small&gt;&lt;/div&gt;&lt;div class=&quot;p-chat-invite&quot;&gt;&lt;span class=&quot;p-mobile-icon&quot;&gt;&#x27;+icons(&#x27;calendar-days&#x27;)+&#x27;&lt;/span&gt;&lt;h3&gt;First-team trial&lt;/h3&gt;&lt;p class=&quot;f-sub&quot;&gt;Thursday, 1 October · 10:00 BST&lt;/p&gt;&#x27;+action(&#x27;Review invitation&#x27;,&#x27;&#x27;,&#x27;outline&#x27;)+&#x27;&lt;/div&gt;&lt;div class=&quot;p-chat-compose&quot;&gt;&lt;input placeholder=&quot;Write a message…&quot; aria-label=&quot;Draft reply&quot;&gt;&lt;button class=&quot;cursor-interaction&quot; data-demo=&quot;Send reply&quot; aria-label=&quot;Send reply&quot;&gt;&#x27;+icons(&#x27;arrow-up&#x27;)+&#x27;&lt;/button&gt;&lt;/div&gt;&#x27;;
+}
+function phone(n,label){const title=[&#x27;Home&#x27;,&#x27;Football Passport&#x27;,&#x27;Box Cam&#x27;,&#x27;Messages&#x27;][n];return &#x27;&lt;section&gt;&lt;div class=&quot;f-device-label&quot;&gt;&#x27;+label+&#x27;&lt;/div&gt;&lt;div class=&quot;f-phone&quot;&gt;&lt;div class=&quot;f-phone-status&quot;&gt;&lt;span&gt;9:41&lt;/span&gt;&lt;span class=&quot;f-inline&quot;&gt;&#x27;+icons(&#x27;signal&#x27;)+icons(&#x27;battery-full&#x27;)+&#x27;&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;f-phone-head&quot;&gt;&#x27;+(n===0?&#x27;&lt;span class=&quot;f-wordmark&quot;&gt;ScoutBox&lt;/span&gt;&#x27;:&#x27;&lt;button class=&quot;cursor-interaction p-back&quot; data-go=&quot;player:0&quot; aria-label=&quot;Back to Home&quot;&gt;&#x27;+icons(&#x27;chevron-left&#x27;)+&#x27;&lt;/button&gt;&lt;strong&gt;&#x27;+title+&#x27;&lt;/strong&gt;&#x27;)+themeToggle()+&#x27;&lt;button class=&quot;cursor-interaction p-bell&quot; data-demo=&quot;Notifications&quot; aria-label=&quot;Notifications&quot;&gt;&#x27;+icons(&#x27;bell&#x27;)+&#x27;&lt;span&gt;&lt;/span&gt;&lt;/button&gt;&lt;/div&gt;&lt;div class=&quot;f-phone-body&quot;&gt;&#x27;+mobileBody(n)+&#x27;&lt;div class=&quot;f-feedback&quot; aria-live=&quot;polite&quot;&gt;&lt;/div&gt;&lt;/div&gt;&lt;nav class=&quot;f-bottomnav&quot; aria-label=&quot;Player navigation&quot;&gt;&#x27;+[[&#x27;house&#x27;,&#x27;Home&#x27;,0],[&#x27;circle-user-round&#x27;,&#x27;Football&#x27;,1],[&#x27;compass&#x27;,&#x27;Explore&#x27;,-1],[&#x27;message-circle&#x27;,&#x27;Inbox&#x27;,3],[&#x27;user-round&#x27;,&#x27;You&#x27;,-1]].map(([icon,t,i])=&gt;&#x27;&lt;button class=&quot;cursor-interaction &#x27;+(n===i||n===2&amp;&amp;i===1?&#x27;active&#x27;:&#x27;&#x27;)+&#x27;&quot; &#x27;+(i&gt;=0?&#x27;data-go=&quot;player:&#x27;+i+&#x27;&quot;&#x27;:&#x27;data-demo=&quot;&#x27;+t+&#x27;&quot;&#x27;)+&#x27;&gt;&#x27;+icons(icon)+&#x27;&lt;span&gt;&#x27;+t+&#x27;&lt;/span&gt;&lt;/button&gt;&#x27;).join(&#x27;&#x27;)+&#x27;&lt;/nav&gt;&lt;/div&gt;&lt;/section&gt;&#x27;;}
+const nav={pro:[[&#x27;Discovery&#x27;,0],[&#x27;Recruitment&#x27;,1],[&#x27;Intelligence&#x27;,2]],grass:[[&#x27;Club &amp; squad&#x27;,0],[&#x27;Trial days&#x27;,1],[&#x27;Messages&#x27;,2]],safety:[[&#x27;Queue&#x27;,0],[&#x27;Verification&#x27;,1],[&#x27;Safeguarding&#x27;,2]]};
+const agentClients=[{name:&#x27;Kola Adeyemi&#x27;,initials:&#x27;KA&#x27;,position:&#x27;ST&#x27;,age:22,city:&#x27;London&#x27;,scope:&#x27;Employment, Transfer&#x27;,term:&#x27;18 months&#x27;,jurisdiction:&#x27;ENG&#x27;,status:&#x27;Active&#x27;,shared:true},{name:&#x27;Mateus Carvalho&#x27;,initials:&#x27;MC&#x27;,position:&#x27;CM&#x27;,age:21,city:&#x27;Porto&#x27;,scope:&#x27;Employment&#x27;,term:&#x27;12 months&#x27;,jurisdiction:&#x27;INT&#x27;,status:&#x27;Active&#x27;,shared:false},{name:&#x27;Chinedu Okafor&#x27;,initials:&#x27;CO&#x27;,position:&#x27;ST&#x27;,age:22,city:&#x27;Lagos&#x27;,scope:&#x27;Employment&#x27;,term:&#x27;12 months&#x27;,jurisdiction:&#x27;INT&#x27;,status:&#x27;Awaiting confirmation&#x27;,shared:false},{name:&#x27;Filip Nowak&#x27;,initials:&#x27;FN&#x27;,status:&#x27;Disputed&#x27;,scope:&#x27;Employment&#x27;,term:&#x27;12 months&#x27;,jurisdiction:&#x27;INT&#x27;,shared:false},{name:&#x27;Riku Tanaka&#x27;,initials:&#x27;RT&#x27;,status:&#x27;Declined&#x27;,scope:&#x27;Employment&#x27;,term:&#x27;12 months&#x27;,jurisdiction:&#x27;INT&#x27;,shared:false}];
+const agentTx=[{name:&#x27;Kola Adeyemi&#x27;,type:&#x27;Employment contract&#x27;,club:&#x27;Eastport FC&#x27;,state:&#x27;Ready to proceed&#x27;,reason:&#x27;Current platform evaluation&#x27;,ready:true},{name:&#x27;Mateus Carvalho&#x27;,type:&#x27;Transfer&#x27;,club:&#x27;Eastport FC ← Harbour City FC&#x27;,state:&#x27;Compliance outstanding&#x27;,reason:&#x27;Prior written consent outstanding&#x27;,ready:false},{name:&#x27;Chinedu Okafor&#x27;,type:&#x27;Loan&#x27;,club:&#x27;Harbour City FC ← Eastport FC&#x27;,state:&#x27;Compliance outstanding&#x27;,reason:&#x27;Attributed review required&#x27;,ready:false},{name:&#x27;Kola Adeyemi&#x27;,type:&#x27;Other services&#x27;,club:&#x27;Harbour City FC&#x27;,state:&#x27;Blocked&#x27;,reason:&#x27;Prohibited by an active encoded rule&#x27;,ready:false},{name:&#x27;Mateus Carvalho&#x27;,type:&#x27;Employment contract&#x27;,club:&#x27;Harbour City FC&#x27;,state:&#x27;On hold&#x27;,reason:&#x27;Re-check needed · Facts have changed&#x27;,ready:false}];
+function agButton(text,attrs=&#x27;&#x27;,style=&#x27;outline&#x27;){return &#x27;&lt;button class=&quot;f-button cursor-interaction &#x27;+style+&#x27;&quot; &#x27;+attrs+&#x27;&gt;&#x27;+text+icons(&#x27;arrow-up-right&#x27;)+&#x27;&lt;/button&gt;&#x27;;}
+function agTabs(items,field){return &#x27;&lt;div class=&quot;ag-tabs&quot; role=&quot;tablist&quot; aria-label=&quot;&#x27;+(field===&#x27;agentTab&#x27;?&#x27;Client sections&#x27;:&#x27;Transaction sections&#x27;)+&#x27;&quot;&gt;&#x27;+items.map((x,i)=&gt;&#x27;&lt;button role=&quot;tab&quot; aria-selected=&quot;&#x27;+(state[field]===i)+&#x27;&quot; class=&quot;cursor-interaction &#x27;+(state[field]===i?&#x27;active&#x27;:&#x27;&#x27;)+&#x27;&quot; data-ag-tab=&quot;&#x27;+field+&#x27;:&#x27;+i+&#x27;&quot;&gt;&#x27;+x+&#x27;&lt;/button&gt;&#x27;).join(&#x27;&#x27;)+&#x27;&lt;/div&gt;&#x27;;}
+function agSummary(items){return &#x27;&lt;div class=&quot;f-strip&quot;&gt;&#x27;+items.map(([value,label])=&gt;&#x27;&lt;div&gt;&lt;strong class=&quot;f-big-number&quot;&gt;&#x27;+value+&#x27;&lt;/strong&gt;&lt;span class=&quot;f-kicker&quot;&gt;&#x27;+label+&#x27;&lt;/span&gt;&lt;/div&gt;&#x27;).join(&#x27;&#x27;)+&#x27;&lt;/div&gt;&#x27;;}
+function agStatus(value){return status(value,[&#x27;Active&#x27;,&#x27;Ready to proceed&#x27;,&#x27;Confirmed&#x27;,&#x27;Granted&#x27;,&#x27;Recorded · synthetic&#x27;].includes(value)?&#x27;&#x27;:value===&#x27;Disputed&#x27;||value===&#x27;Blocked&#x27;?&#x27;urgent&#x27;:&#x27;pending&#x27;);}
+function agClientTable(filter=&#x27;All&#x27;){const clients=agentClients.map((c,i)=&gt;({...c,i})).filter(c=&gt;filter===&#x27;All&#x27;||filter===&#x27;Active&#x27;&amp;&amp;c.status===&#x27;Active&#x27;||filter===&#x27;Pending&#x27;&amp;&amp;c.status===&#x27;Awaiting confirmation&#x27;||filter===&#x27;Ended / disputed&#x27;&amp;&amp;[&#x27;Declined&#x27;,&#x27;Disputed&#x27;].includes(c.status));return &#x27;&lt;div class=&quot;f-ledger&quot;&gt;&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;CLIENT&lt;/th&gt;&lt;th&gt;SCOPE&lt;/th&gt;&lt;th&gt;RELATIONSHIP&lt;/th&gt;&lt;th&gt;&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&#x27;+clients.map(c=&gt;&#x27;&lt;tr&gt;&lt;td&gt;&lt;div class=&quot;f-inline&quot;&gt;&lt;span class=&quot;p-avatar&quot;&gt;&#x27;+c.initials+&#x27;&lt;/span&gt;&lt;div&gt;&lt;strong&gt;&#x27;+c.name+&#x27;&lt;/strong&gt;&lt;small&gt;&#x27;+c.jurisdiction+&#x27; · &#x27;+c.term+&#x27;&lt;/small&gt;&lt;/div&gt;&lt;/div&gt;&lt;/td&gt;&lt;td&gt;&#x27;+c.scope+&#x27;&lt;/td&gt;&lt;td&gt;&#x27;+agStatus(c.status)+&#x27;&lt;/td&gt;&lt;td&gt;&lt;button class=&quot;f-textbtn cursor-interaction&quot; data-ag-client=&quot;&#x27;+c.i+&#x27;&quot;&gt;View &#x27;+icons(&#x27;chevron-right&#x27;)+&#x27;&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;&#x27;).join(&#x27;&#x27;)+&#x27;&lt;/tbody&gt;&lt;/table&gt;&lt;/div&gt;&#x27;;}
+function agentOverview(){return heading(&#x27;Agent&#x27;,&#x27;Agency overview&#x27;,&#x27;&lt;p&gt;Welcome back, Ana.&lt;br&gt;North Star Sports Agency&lt;/p&gt;&#x27;+agButton(&#x27;View clients&#x27;,&#x27;data-go=&quot;agent:1&quot;&#x27;,&#x27;lime&#x27;))+agSummary([[&#x27;2&#x27;,&#x27;Active clients&#x27;],[&#x27;1&#x27;,&#x27;Awaiting confirmation&#x27;],[&#x27;1&#x27;,&#x27;Disputed relationship&#x27;]])+&#x27;&lt;div class=&quot;f-two&quot;&gt;&lt;section&gt;&lt;div class=&quot;ag-panel&quot;&gt;&lt;div class=&quot;f-flex&quot;&gt;&lt;h2&gt;Needs your attention&lt;/h2&gt;&lt;span class=&quot;p-count&quot;&gt;3&lt;/span&gt;&lt;/div&gt;&#x27;+record(&#x27;01&#x27;,&#x27;Consent outstanding&#x27;,&#x27;Mateus Carvalho · Transfer workspace&#x27;)+link(&#x27;Review transaction&#x27;,&#x27;agent:5&#x27;)+record(&#x27;02&#x27;,&#x27;Chinedu has not answered yet&#x27;,&#x27;Relationship request · Nothing is active yet&#x27;)+record(&#x27;03&#x27;,&#x27;Filip disputed the relationship&#x27;,&#x27;Private access suspended · Review required&#x27;)+&#x27;&lt;/div&gt;&#x27;+section(&#x27;&#x27;,&#x27;Your active clients&#x27;)+&#x27;&lt;div class=&quot;ag-panel&quot;&gt;&#x27;+agentClients.slice(0,2).map((c,i)=&gt;&#x27;&lt;button class=&quot;ag-person-row cursor-interaction&quot; data-ag-client=&quot;&#x27;+i+&#x27;&quot;&gt;&lt;span class=&quot;p-avatar&quot;&gt;&#x27;+c.initials+&#x27;&lt;/span&gt;&lt;span&gt;&lt;strong&gt;&#x27;+c.name+&#x27;&lt;/strong&gt;&lt;small&gt;&#x27;+c.scope+&#x27;&lt;/small&gt;&lt;/span&gt;&#x27;+icons(&#x27;chevron-right&#x27;)+&#x27;&lt;/button&gt;&#x27;).join(&#x27;&#x27;)+&#x27;&lt;/div&gt;&lt;/section&gt;&lt;aside class=&quot;f-ruledaside&quot;&gt;&lt;h2&gt;Your verification&lt;/h2&gt;&lt;p class=&quot;f-sub&quot;&gt;Ana Costa · Licensed-agent role&lt;/p&gt;&lt;div class=&quot;f-line&quot;&gt;&lt;strong&gt;FIFA licence facet&lt;/strong&gt;&lt;p class=&quot;f-sub&quot;&gt;Recorded as verified in the supplied demo&lt;/p&gt;&#x27;+status(&#x27;Synthetic test provider&#x27;)+&#x27;&lt;/div&gt;&lt;div class=&quot;f-line&quot;&gt;&lt;strong&gt;National registration · ENG&lt;/strong&gt;&lt;p class=&quot;f-sub&quot;&gt;Recorded separately from the licence&lt;/p&gt;&lt;/div&gt;&#x27;+link(&#x27;View verification&#x27;,&#x27;agent:7&#x27;)+&#x27;&lt;div class=&quot;f-divider&quot;&gt;&lt;/div&gt;&#x27;+notice(&#x27;No live FIFA, FA or U.S. Soccer register is connected in this reference build. Agency roles do not establish a personal licence.&#x27;)+&#x27;&lt;/aside&gt;&lt;/div&gt;&#x27;;}
+function agentClientsPage(){return heading(&#x27;Agent&#x27;,&#x27;Clients&#x27;,agButton(&#x27;Request relationship&#x27;,&#x27;data-ag-request=&quot;open&quot;&#x27;,&#x27;lime&#x27;))+&#x27;&lt;p class=&quot;f-sub&quot; style=&quot;margin:-10px 0 22px&quot;&gt;Client-confirmed relationships. Requests stay separate until the player accepts.&lt;/p&gt;&lt;div class=&quot;ag-filters&quot;&gt;&#x27;+[&#x27;All&#x27;,&#x27;Active&#x27;,&#x27;Pending&#x27;,&#x27;Ended / disputed&#x27;].map(t=&gt;&#x27;&lt;button class=&quot;cursor-interaction &#x27;+(state.agentFilter===t?&#x27;active&#x27;:&#x27;&#x27;)+&#x27;&quot; data-ag-filter=&quot;&#x27;+t+&#x27;&quot;&gt;&#x27;+t+&#x27;&lt;/button&gt;&#x27;).join(&#x27;&#x27;)+&#x27;&lt;/div&gt;&#x27;+agClientTable(state.agentFilter)+(state.agentRequest?&#x27;&lt;section class=&quot;ag-panel ag-request&quot;&gt;&lt;div class=&quot;f-flex&quot;&gt;&lt;h2&gt;Request a relationship&lt;/h2&gt;&lt;button class=&quot;f-textbtn cursor-interaction&quot; data-ag-request=&quot;close&quot;&gt;Close&lt;/button&gt;&lt;/div&gt;&lt;p class=&quot;f-sub&quot;&gt;Adult players only. The client must confirm in their own app.&lt;/p&gt;&lt;div class=&quot;ag-form&quot;&gt;&lt;label&gt;Find an adult player&lt;input placeholder=&quot;Type at least two characters&quot; aria-label=&quot;Find an adult player&quot;&gt;&lt;/label&gt;&lt;label&gt;Scope&lt;select aria-label=&quot;Relationship scope&quot;&gt;&lt;option&gt;Employment&lt;/option&gt;&lt;option&gt;Transfer&lt;/option&gt;&lt;option&gt;Commercial&lt;/option&gt;&lt;option&gt;Other services&lt;/option&gt;&lt;/select&gt;&lt;/label&gt;&lt;label&gt;Term (months)&lt;input type=&quot;number&quot; min=&quot;1&quot; max=&quot;24&quot; value=&quot;12&quot; aria-label=&quot;Term in months&quot;&gt;&lt;/label&gt;&lt;label&gt;Jurisdiction&lt;select aria-label=&quot;Jurisdiction&quot;&gt;&lt;option&gt;ENG&lt;/option&gt;&lt;option&gt;INT&lt;/option&gt;&lt;/select&gt;&lt;/label&gt;&lt;/div&gt;&lt;label class=&quot;ag-check&quot;&gt;&lt;input type=&quot;checkbox&quot;&gt; Exclusive relationship&lt;/label&gt;&#x27;+action(&#x27;Preview request&#x27;)+&#x27;&lt;/section&gt;&#x27;:&#x27;&#x27;)+&#x27;&lt;div style=&quot;margin-top:22px&quot;&gt;&#x27;+notice(&#x27;No under-18 players appear in the Agent lookup. A relationship record is not a representation contract.&#x27;)+&#x27;&lt;/div&gt;&#x27;;}
+function agentClientDetail(){const c=agentClients[state.agentClient],active=c.status===&#x27;Active&#x27;;let content=&#x27;&#x27;;if(!active)content=&#x27;&lt;div class=&quot;ag-panel&quot;&gt;&lt;h2&gt;&#x27;+(c.status===&#x27;Disputed&#x27;?&#x27;Private access suspended&#x27;:c.status===&#x27;Awaiting confirmation&#x27;?&#x27;Waiting for client confirmation&#x27;:&#x27;Relationship not active&#x27;)+&#x27;&lt;/h2&gt;&lt;p class=&quot;f-sub&quot;&gt;&#x27;+(c.status===&#x27;Disputed&#x27;?&#x27;The client disputed this relationship. Client-private information is unavailable; resolution requires attributed Trust &amp; Safety review.&#x27;:c.status===&#x27;Awaiting confirmation&#x27;?&#x27;A request is not representation. Opportunities and private recruitment updates remain unavailable until the client confirms.&#x27;:&#x27;The request was declined. No client-private access is available.&#x27;)+&#x27;&lt;/p&gt;&lt;div class=&quot;f-divider&quot;&gt;&lt;/div&gt;&lt;p class=&quot;f-sub&quot;&gt;Scope: &#x27;+c.scope+&#x27; · Term: &#x27;+c.term+&#x27; · Jurisdiction: &#x27;+c.jurisdiction+&#x27;&lt;/p&gt;&#x27;+action(c.status===&#x27;Awaiting confirmation&#x27;?&#x27;Withdraw request&#x27;:&#x27;View relationship history&#x27;,&#x27;&#x27;,&#x27;outline&#x27;)+&#x27;&lt;/div&gt;&#x27;;
+else {const t=state.agentTab;if(t===0)content=&#x27;&lt;div class=&quot;f-two&quot;&gt;&lt;section&gt;&lt;div class=&quot;ag-panel&quot;&gt;&lt;div class=&quot;f-flex&quot;&gt;&lt;h2&gt;Client profile&lt;/h2&gt;&#x27;+status(&#x27;Access active&#x27;)+&#x27;&lt;/div&gt;&lt;div class=&quot;f-specs&quot;&gt;&lt;div&gt;&lt;small&gt;POSITION&lt;/small&gt;&lt;strong&gt;&#x27;+c.position+&#x27;&lt;/strong&gt;&lt;/div&gt;&lt;div&gt;&lt;small&gt;AGE&lt;/small&gt;&lt;strong&gt;&#x27;+c.age+&#x27;&lt;/strong&gt;&lt;/div&gt;&lt;div&gt;&lt;small&gt;LOCATION&lt;/small&gt;&lt;strong&gt;&#x27;+c.city+&#x27;&lt;/strong&gt;&lt;/div&gt;&lt;/div&gt;&lt;p class=&quot;f-sub&quot;&gt;Only the fields your client has made available to you.&lt;/p&gt;&lt;/div&gt;&#x27;+section(&#x27;&#x27;,&#x27;Recruitment journeys&#x27;)+&#x27;&lt;div class=&quot;ag-empty&quot;&gt;&#x27;+icons(&#x27;route&#x27;)+&#x27;&lt;h3&gt;No shared stage yet&lt;/h3&gt;&lt;p class=&quot;f-sub&quot;&gt;When a club shares an update with your client and access is permitted, it appears here.&lt;/p&gt;&lt;/div&gt;&lt;/section&gt;&lt;aside class=&quot;f-ruledaside&quot;&gt;&lt;h2&gt;Representation&lt;/h2&gt;&lt;div class=&quot;f-line&quot;&gt;&lt;strong&gt;&#x27;+c.scope+&#x27;&lt;/strong&gt;&lt;p class=&quot;f-sub&quot;&gt;&#x27;+c.jurisdiction+&#x27; · &#x27;+c.term+&#x27;&lt;/p&gt;&lt;/div&gt;&lt;div class=&quot;f-line&quot;&gt;&lt;strong&gt;Client confirmation&lt;/strong&gt;&lt;p class=&quot;f-sub&quot;&gt;Confirmed in the player’s own account&lt;/p&gt;&lt;/div&gt;&lt;div class=&quot;f-line&quot;&gt;&lt;strong&gt;Agency staff sharing&lt;/strong&gt;&lt;p class=&quot;f-sub&quot;&gt;&#x27;+(c.shared?&#x27;Relationship summary shared&#x27;:&#x27;Not shared with agency staff&#x27;)+&#x27;&lt;/p&gt;&lt;/div&gt;&#x27;+notice(&#x27;Club-private shortlists, assessments and internal decisions are never included.&#x27;)+&#x27;&lt;/aside&gt;&lt;/div&gt;&#x27;;
+if(t===1)content=&#x27;&lt;div class=&quot;ag-panel&quot;&gt;&lt;h2&gt;Confirmed relationship&lt;/h2&gt;&lt;div class=&quot;ag-details&quot;&gt;&lt;div&gt;&lt;small&gt;Scope&lt;/small&gt;&lt;strong&gt;&#x27;+c.scope+&#x27;&lt;/strong&gt;&lt;/div&gt;&lt;div&gt;&lt;small&gt;Term&lt;/small&gt;&lt;strong&gt;&#x27;+c.term+&#x27;&lt;/strong&gt;&lt;/div&gt;&lt;div&gt;&lt;small&gt;Jurisdiction&lt;/small&gt;&lt;strong&gt;&#x27;+c.jurisdiction+&#x27;&lt;/strong&gt;&lt;/div&gt;&lt;div&gt;&lt;small&gt;Confirmed by&lt;/small&gt;&lt;strong&gt;&#x27;+c.name+&#x27;&lt;/strong&gt;&lt;/div&gt;&lt;/div&gt;&#x27;+notice(&#x27;This records the client’s confirmation in ScoutBox. It is not a representation contract or an assessment of legal validity.&#x27;)+&#x27;&lt;div style=&quot;margin-top:20px&quot;&gt;&#x27;+action(&#x27;End relationship&#x27;,&#x27;&#x27;,&#x27;outline&#x27;)+&#x27;&lt;/div&gt;&lt;/div&gt;&#x27;;
+if(t===2)content=agentOpportunities(true);
+if(t===3)content=&#x27;&lt;div class=&quot;ag-empty&quot;&gt;&#x27;+icons(&#x27;mail&#x27;)+&#x27;&lt;h2&gt;No routed club contact&lt;/h2&gt;&lt;p class=&quot;f-sub&quot;&gt;Only club messages addressed to you as well as the client can appear here, where the client permits access.&lt;/p&gt;&lt;/div&gt;&#x27;+notice(&#x27;Responding to the club’s request is the client’s action. You cannot answer for them.&#x27;);
+if(t===4)content=&#x27;&lt;div class=&quot;ag-panel&quot;&gt;&lt;h2&gt;Shared trial scheduling&lt;/h2&gt;&lt;p class=&quot;f-sub&quot;&gt;No trial schedule is shared for this client in this example.&lt;/p&gt;&lt;/div&gt;&lt;div style=&quot;margin-top:20px&quot;&gt;&#x27;+notice(&#x27;This view is limited to scheduling. Club assessments, trial reports, Box Cam footage and exact venue addresses are not shown.&#x27;)+&#x27;&lt;/div&gt;&#x27;;
+if(t===5)content=&#x27;&lt;div class=&quot;ag-empty&quot;&gt;&#x27;+icons(&#x27;file-check-2&#x27;)+&#x27;&lt;h2&gt;No offer shared yet&lt;/h2&gt;&lt;p class=&quot;f-sub&quot;&gt;Only offers the client chose to share are visible. Offer and signing progress are read-only.&lt;/p&gt;&lt;/div&gt;&#x27;+notice(&#x27;The client accepts, declines and signs for themselves. An accepted offer is not a signed contract.&#x27;);
+if(t===6)content=&#x27;&lt;div class=&quot;ag-panel&quot;&gt;&lt;h2&gt;Relationship activity&lt;/h2&gt;&#x27;+record(&#x27;01&#x27;,&#x27;Relationship requested&#x27;,&#x27;Ana Costa · Attributed agent action&#x27;)+record(&#x27;02&#x27;,&#x27;Relationship confirmed&#x27;,c.name+&#x27; · Confirmed in their own account&#x27;)+record(&#x27;03&#x27;,&#x27;Agency sharing preference recorded&#x27;,c.shared?&#x27;Client permitted summary sharing&#x27;:&#x27;Client did not permit summary sharing&#x27;)+&#x27;&lt;/div&gt;&#x27;;
+}return &#x27;&lt;div style=&quot;margin-bottom:17px&quot;&gt;&#x27;+link(&#x27;Back to clients&#x27;,&#x27;agent:1&#x27;)+&#x27;&lt;/div&gt;&#x27;+heading(&#x27;Client&#x27;,c.name,agStatus(c.status))+(active?agTabs([&#x27;Overview&#x27;,&#x27;Representation&#x27;,&#x27;Opportunities&#x27;,&#x27;Club contacts&#x27;,&#x27;Trials&#x27;,&#x27;Offers&#x27;,&#x27;Activity&#x27;],&#x27;agentTab&#x27;):&#x27;&#x27;)+content;}
+function agentOpportunities(embedded=false){return (embedded?&#x27;&#x27;:heading(&#x27;Agent&#x27;,&#x27;Client opportunities&#x27;,&#x27;&lt;p&gt;Visible through active, confirmed client relationships.&lt;/p&gt;&#x27;))+&#x27;&lt;div class=&quot;ag-panel&quot;&gt;&lt;div class=&quot;f-flex&quot;&gt;&lt;div&gt;&lt;span class=&quot;p-small-label&quot;&gt;Illustrative opportunity · Kola Adeyemi’s board&lt;/span&gt;&lt;h2&gt;Senior squad trial&lt;/h2&gt;&lt;p class=&quot;f-sub&quot;&gt;Eastport FC · Striker · England&lt;/p&gt;&lt;/div&gt;&lt;span class=&quot;p-mobile-icon&quot;&gt;&#x27;+icons(&#x27;calendar-days&#x27;)+&#x27;&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;f-divider&quot;&gt;&lt;/div&gt;&lt;p class=&quot;f-sub&quot;&gt;Bring this opportunity to your client’s attention with an optional note.&lt;/p&gt;&lt;label class=&quot;ag-note-label&quot;&gt;Note to client&lt;textarea placeholder=&quot;Why this opportunity?&quot; aria-label=&quot;Note to client&quot;&gt;&lt;/textarea&gt;&lt;/label&gt;&#x27;+agButton(state.agentShared?&#x27;Shared with client&#x27;:&#x27;Preview sharing with client&#x27;,&#x27;data-ag-share=&quot;toggle&quot;&#x27;,state.agentShared?&#x27;outline&#x27;:&#x27;lime&#x27;)+(state.agentShared?&#x27;&lt;p class=&quot;f-footnote&quot;&gt;Demo state only · Nothing has been sent. &#x27;+ &#x27;&lt;button class=&quot;f-textbtn cursor-interaction&quot; data-ag-share=&quot;toggle&quot;&gt;Withdraw preview share&lt;/button&gt;&lt;/p&gt;&#x27;:&#x27;&#x27;)+&#x27;&lt;/div&gt;&lt;div style=&quot;margin-top:20px&quot;&gt;&#x27;+notice(&#x27;Only opportunities legitimately visible to a client appear. Applying remains the player’s own action; an agent cannot apply on their behalf.&#x27;)+&#x27;&lt;/div&gt;&#x27;;}
+function agentTransactions(){return heading(&#x27;Agent&#x27;,&#x27;Transactions&#x27;,action(&#x27;Open a transaction&#x27;,&#x27;&#x27;,&#x27;lime&#x27;))+agSummary([[&#x27;5&#x27;,&#x27;Live workspaces&#x27;],[&#x27;1&#x27;,&#x27;Ready to proceed&#x27;],[&#x27;2&#x27;,&#x27;Compliance outstanding&#x27;]])+&#x27;&lt;div class=&quot;f-ledger&quot;&gt;&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;CLIENT / TYPE&lt;/th&gt;&lt;th&gt;PARTIES&lt;/th&gt;&lt;th&gt;STATUS&lt;/th&gt;&lt;th&gt;&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&#x27;+agentTx.map((x,i)=&gt;&#x27;&lt;tr&gt;&lt;td&gt;&lt;strong&gt;&#x27;+x.name+&#x27;&lt;/strong&gt;&lt;small&gt;&#x27;+x.type+&#x27;&lt;/small&gt;&lt;/td&gt;&lt;td&gt;&#x27;+x.club+&#x27;&lt;small&gt;ENG&lt;/small&gt;&lt;/td&gt;&lt;td&gt;&#x27;+agStatus(x.state)+&#x27;&lt;small&gt;&#x27;+x.reason+&#x27;&lt;/small&gt;&lt;/td&gt;&lt;td&gt;&lt;button class=&quot;f-textbtn cursor-interaction&quot; data-ag-tx=&quot;&#x27;+i+&#x27;&quot;&gt;Open &#x27;+icons(&#x27;chevron-right&#x27;)+&#x27;&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;&#x27;).join(&#x27;&#x27;)+&#x27;&lt;/tbody&gt;&lt;/table&gt;&lt;/div&gt;&#x27;+section(&#x27;&#x27;,&#x27;Workspace invitations&#x27;)+&#x27;&lt;div class=&quot;ag-panel f-flex&quot;&gt;&lt;div&gt;&lt;h3&gt;Eastport FC&lt;/h3&gt;&lt;p class=&quot;f-sub&quot;&gt;A club invitation to open a permissioned workspace&lt;/p&gt;&lt;/div&gt;&#x27;+action(&#x27;View invitation&#x27;,&#x27;&#x27;,&#x27;outline&#x27;)+&#x27;&lt;/div&gt;&lt;p class=&quot;f-footnote&quot;&gt;An invitation is not an offer. A workspace does not establish authority, create consent or sign anything.&lt;/p&gt;&#x27;;}
+function agentTransactionDetail(){const x=agentTx[state.agentTx],t=state.agentTxTab,consent=state.agentTx===1;let body=&#x27;&#x27;;
+if(t===0)body=&#x27;&lt;div class=&quot;f-two&quot;&gt;&lt;section&gt;&lt;div class=&quot;ag-panel&quot;&gt;&lt;h2&gt;Workspace status&lt;/h2&gt;&lt;div class=&quot;ag-details&quot;&gt;&lt;div&gt;&lt;small&gt;Type&lt;/small&gt;&lt;strong&gt;&#x27;+x.type+&#x27;&lt;/strong&gt;&lt;/div&gt;&lt;div&gt;&lt;small&gt;Jurisdiction&lt;/small&gt;&lt;strong&gt;ENG&lt;/strong&gt;&lt;/div&gt;&lt;div&gt;&lt;small&gt;Parties confirmed&lt;/small&gt;&lt;strong&gt;&#x27;+(consent?&#x27;3 of 3&#x27;:&#x27;2 of 2&#x27;)+&#x27;&lt;/strong&gt;&lt;/div&gt;&lt;div&gt;&lt;small&gt;Representation bindings&lt;/small&gt;&lt;strong&gt;1 recorded&lt;/strong&gt;&lt;/div&gt;&lt;/div&gt;&#x27;+agStatus(x.state)+&#x27;&lt;/div&gt;&#x27;+section(&#x27;&#x27;,&#x27;Recorded terms&#x27;)+&#x27;&lt;div class=&quot;ag-panel&quot;&gt;&lt;p class=&quot;f-sub&quot;&gt;Nothing recorded.&lt;/p&gt;&lt;p class=&quot;f-footnote&quot;&gt;Terms record what the parties agreed. ScoutBox does not propose, accept or validate them.&lt;/p&gt;&#x27;+action(&#x27;Preview recorded terms&#x27;,&#x27;&#x27;,&#x27;outline&#x27;)+&#x27;&lt;/div&gt;&lt;/section&gt;&lt;aside class=&quot;f-ruledaside&quot;&gt;&lt;h2&gt;Readiness&lt;/h2&gt;&lt;p class=&quot;f-sub&quot;&gt;&#x27;+x.reason+&#x27;&lt;/p&gt;&lt;div style=&quot;margin:18px 0&quot;&gt;&#x27;+agStatus(x.ready?&#x27;Ready to proceed&#x27;:&#x27;Not ready to proceed&#x27;)+&#x27;&lt;/div&gt;&#x27;+agButton(&#x27;Inspect compliance&#x27;,&#x27;data-ag-tab=&quot;agentTxTab:2&quot;&#x27;,&#x27;outline&#x27;)+&#x27;&lt;div class=&quot;f-divider&quot;&gt;&lt;/div&gt;&#x27;+notice(&#x27;Readiness is the current result of ScoutBox’s encoded rules. It is not legal approval, an offer or a signature.&#x27;)+&#x27;&lt;/aside&gt;&lt;/div&gt;&#x27;;
+if(t===1)body=&#x27;&lt;div class=&quot;ag-panel&quot;&gt;&lt;h2&gt;Transaction parties&lt;/h2&gt;&#x27;+record(&#x27;01&#x27;,x.name,&#x27;Individual · Confirmed in their own account&#x27;)+record(&#x27;02&#x27;,state.agentTx===3?&#x27;Harbour City FC&#x27;:&#x27;Eastport FC&#x27;,&#x27;Engaging club · Recorded signatory confirmed&#x27;)+(consent?record(&#x27;03&#x27;,&#x27;Harbour City FC&#x27;,&#x27;Releasing club · Recorded signatory confirmed&#x27;):&#x27;&#x27;)+&#x27;&lt;div class=&quot;f-divider&quot;&gt;&lt;/div&gt;&lt;h3&gt;Representation binding&lt;/h3&gt;&lt;p class=&quot;f-sub&quot;&gt;Ana Costa → &#x27;+x.name+&#x27; · Client-confirmed basis&lt;/p&gt;&lt;p class=&quot;f-footnote&quot;&gt;General representation alone is not authority for this transaction. Scope, jurisdiction and conflicts are checked separately.&lt;/p&gt;&lt;/div&gt;&#x27;;
+if(t===2)body=&#x27;&lt;div class=&quot;ag-panel&quot;&gt;&lt;div class=&quot;f-flex&quot;&gt;&lt;h2&gt;Current compliance evaluation&lt;/h2&gt;&#x27;+agStatus(x.state)+&#x27;&lt;/div&gt;&lt;p class=&quot;f-sub&quot;&gt;&#x27;+x.reason+&#x27;&lt;/p&gt;&lt;div class=&quot;f-divider&quot;&gt;&lt;/div&gt;&lt;div class=&quot;ag-details&quot;&gt;&lt;div&gt;&lt;small&gt;Policy versions&lt;/small&gt;&lt;strong&gt;jp-fifa-2025-1&lt;br&gt;jp-eng-2026-27-1&lt;/strong&gt;&lt;/div&gt;&lt;div&gt;&lt;small&gt;Source&lt;/small&gt;&lt;strong&gt;Supplied demo / encoded rules&lt;/strong&gt;&lt;/div&gt;&lt;/div&gt;&#x27;+action(&#x27;Re-evaluate preview&#x27;,&#x27;&#x27;,&#x27;outline&#x27;)+&#x27;&lt;/div&gt;&#x27;+section(&#x27;&#x27;,&#x27;Consent ledger&#x27;)+&#x27;&lt;div class=&quot;f-ledger&quot;&gt;&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;PARTY&lt;/th&gt;&lt;th&gt;CONSENT&lt;/th&gt;&lt;th&gt;RECORDED STATE&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&#x27;+(consent?&#x27;&lt;tr&gt;&lt;td&gt;&#x27;+x.name+&#x27;&lt;/td&gt;&lt;td&gt;Multiple representation&lt;/td&gt;&lt;td&gt;&#x27;+status(&#x27;Granted&#x27;)+&#x27;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;Eastport FC&lt;/td&gt;&lt;td&gt;Multiple representation&lt;/td&gt;&lt;td&gt;&#x27;+status(&#x27;Requested&#x27;,&#x27;pending&#x27;)+&#x27;&lt;/td&gt;&lt;/tr&gt;&#x27;:&#x27;&lt;tr&gt;&lt;td colspan=&quot;3&quot;&gt;No consent request is shown for this example.&lt;/td&gt;&lt;/tr&gt;&#x27;)+&#x27;&lt;/tbody&gt;&lt;/table&gt;&lt;/div&gt;&lt;p class=&quot;f-footnote&quot;&gt;Each party answers for itself. Revocation remains on the ledger and stops later actions that depend on that consent.&lt;/p&gt;&#x27;;
+if(t===3)body=&#x27;&lt;div class=&quot;f-flex&quot; style=&quot;margin-bottom:20px&quot;&gt;&lt;div&gt;&lt;h2&gt;Documents &amp; access&lt;/h2&gt;&lt;p class=&quot;f-sub&quot;&gt;References to the evidence vault, with an explicit audience.&lt;/p&gt;&lt;/div&gt;&#x27;+action(&#x27;Add a document&#x27;,&#x27;&#x27;,&#x27;lime&#x27;)+&#x27;&lt;/div&gt;&lt;div class=&quot;f-ledger&quot;&gt;&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;DOCUMENT&lt;/th&gt;&lt;th&gt;VISIBILITY&lt;/th&gt;&lt;th&gt;VERSION&lt;/th&gt;&lt;th&gt;&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&lt;tr&gt;&lt;td&gt;Mandate (working copy)&lt;small&gt;Draft · Agent record&lt;/small&gt;&lt;/td&gt;&lt;td&gt;&#x27;+icons(&#x27;lock-keyhole&#x27;)+&#x27; Only me&lt;/td&gt;&lt;td&gt;1&lt;/td&gt;&lt;td&gt;&#x27;+action(&#x27;Inspect&#x27;,&#x27;&#x27;,&#x27;outline&#x27;)+&#x27;&lt;/td&gt;&lt;/tr&gt;&lt;/tbody&gt;&lt;/table&gt;&lt;/div&gt;&#x27;+section(&#x27;&#x27;,&#x27;Private notes&#x27;)+&#x27;&lt;div class=&quot;ag-panel&quot;&gt;&lt;label class=&quot;ag-note-label&quot;&gt;Audience&lt;select aria-label=&quot;Note visibility&quot;&gt;&lt;option&gt;Only me&lt;/option&gt;&lt;option&gt;The individual and me&lt;/option&gt;&lt;option&gt;Every party to this transaction&lt;/option&gt;&lt;/select&gt;&lt;/label&gt;&lt;label class=&quot;ag-note-label&quot;&gt;Note&lt;textarea aria-label=&quot;Transaction note&quot; placeholder=&quot;Add a note for the selected audience&quot;&gt;&lt;/textarea&gt;&lt;/label&gt;&#x27;+action(&#x27;Preview note&#x27;,&#x27;&#x27;,&#x27;outline&#x27;)+&#x27;&lt;/div&gt;&#x27;;
+if(t===4)body=&#x27;&lt;div class=&quot;ag-empty&quot;&gt;&#x27;+icons(&#x27;messages-square&#x27;)+&#x27;&lt;h2&gt;No linked conversation in this view&lt;/h2&gt;&lt;p class=&quot;f-sub&quot;&gt;Transaction correspondence uses existing conversations. Being a transaction party does not grant access to someone else’s thread.&lt;/p&gt;&lt;/div&gt;&#x27;;
+if(t===5)body=&#x27;&lt;div class=&quot;ag-panel&quot;&gt;&lt;h2&gt;Transaction history&lt;/h2&gt;&#x27;+record(&#x27;01&#x27;,&#x27;Workspace opened&#x27;,&#x27;Ana Costa · Attributed action&#x27;)+record(&#x27;02&#x27;,&#x27;Parties confirmed&#x27;,&#x27;Each party confirmed for itself&#x27;)+record(&#x27;03&#x27;,&#x27;Representation bound&#x27;,&#x27;Checked against the client-confirmed agreement&#x27;)+record(&#x27;04&#x27;,&#x27;Compliance evaluated&#x27;,x.reason)+(consent?record(&#x27;05&#x27;,&#x27;Consent requested&#x27;,&#x27;Eastport FC · Awaiting their response&#x27;):&#x27;&#x27;)+&#x27;&lt;/div&gt;&#x27;;
+return &#x27;&lt;div style=&quot;margin-bottom:17px&quot;&gt;&#x27;+link(&#x27;Back to transactions&#x27;,&#x27;agent:4&#x27;)+&#x27;&lt;/div&gt;&#x27;+heading(&#x27;Transaction&#x27;,x.name,agStatus(x.state))+&#x27;&lt;p class=&quot;f-sub&quot; style=&quot;margin:-12px 0 20px&quot;&gt;&#x27;+x.type+&#x27; · &#x27;+x.club+&#x27;&lt;/p&gt;&#x27;+agTabs([&#x27;Overview&#x27;,&#x27;Parties&#x27;,&#x27;Compliance&#x27;,&#x27;Documents&#x27;,&#x27;Messages&#x27;,&#x27;Timeline&#x27;],&#x27;agentTxTab&#x27;)+body;}
+function agentCompliance(){return heading(&#x27;Agent&#x27;,&#x27;Conflicts &amp; compliance&#x27;,action(&#x27;Open a context&#x27;,&#x27;&#x27;,&#x27;outline&#x27;))+&#x27;&lt;div class=&quot;ag-banner&quot;&gt;&#x27;+icons(&#x27;shield-check&#x27;)+&#x27;&lt;div&gt;&lt;strong&gt;Check the facts behind every result&lt;/strong&gt;&lt;p class=&quot;f-sub&quot;&gt;Current verification, recorded parties, consents and the operative policy version.&lt;/p&gt;&lt;/div&gt;&lt;/div&gt;&#x27;+agSummary([[&#x27;2&#x27;,&#x27;Compliance outstanding&#x27;],[&#x27;1&#x27;,&#x27;Consent awaited&#x27;],[&#x27;1&#x27;,&#x27;Re-check needed&#x27;]])+&#x27;&lt;div class=&quot;f-ledger&quot;&gt;&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;TRANSACTION&lt;/th&gt;&lt;th&gt;OUTCOME / ACTION&lt;/th&gt;&lt;th&gt;&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&#x27;+agentTx.slice(1).map((x,i)=&gt;&#x27;&lt;tr&gt;&lt;td&gt;&#x27;+x.name+&#x27;&lt;small&gt;&#x27;+x.type+&#x27;&lt;/small&gt;&lt;/td&gt;&lt;td&gt;&#x27;+agStatus(x.state)+&#x27;&lt;small&gt;&#x27;+x.reason+&#x27;&lt;/small&gt;&lt;/td&gt;&lt;td&gt;&lt;button class=&quot;f-textbtn cursor-interaction&quot; data-ag-tx=&quot;&#x27;+(i+1)+&#x27;&quot;&gt;Inspect&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;&#x27;).join(&#x27;&#x27;)+&#x27;&lt;/tbody&gt;&lt;/table&gt;&lt;/div&gt;&#x27;+section(&#x27;&#x27;,&#x27;Minors pathway&#x27;)+notice(&#x27;Not enabled in any jurisdiction in this build. Readiness information does not enable representation or discovery of under-18 players.&#x27;)+&#x27;&lt;p class=&quot;f-footnote&quot;&gt;An active prohibition cannot be cured by consent. Uncertain facts require attributed review; a reviewer cannot override a prohibition.&lt;/p&gt;&#x27;;}
+function agentProfile(){return heading(&#x27;Agent&#x27;,&#x27;My profile &amp; verification&#x27;,action(&#x27;Edit profile&#x27;,&#x27;&#x27;,&#x27;outline&#x27;))+&#x27;&lt;div class=&quot;ag-panel&quot;&gt;&lt;div class=&quot;f-inline&quot;&gt;&lt;span class=&quot;p-avatar large&quot;&gt;AC&lt;/span&gt;&lt;div&gt;&lt;h2&gt;Ana Costa&lt;/h2&gt;&lt;p class=&quot;f-sub&quot;&gt;Licensed-agent role · North Star Sports Agency&lt;/p&gt;&lt;p class=&quot;f-sub&quot;&gt;Declared licence reference · FIFA-2024-777&lt;/p&gt;&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;&lt;div style=&quot;margin-top:20px&quot;&gt;&#x27;+notice(&#x27;These verification states come from the supplied demo’s local synthetic provider. No live FIFA, FA or U.S. Soccer register is connected.&#x27;)+&#x27;&lt;/div&gt;&#x27;+section(&#x27;&#x27;,&#x27;Verification facets&#x27;)+&#x27;&lt;div class=&quot;f-ledger&quot;&gt;&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;FACET&lt;/th&gt;&lt;th&gt;STATE&lt;/th&gt;&lt;th&gt;PROVENANCE / NOTE&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&lt;tr&gt;&lt;td&gt;FIFA licence&lt;/td&gt;&lt;td&gt;&#x27;+status(&#x27;Recorded · synthetic&#x27;)+&#x27;&lt;/td&gt;&lt;td&gt;Local synthetic test provider&lt;small&gt;Not an official register check&lt;/small&gt;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;National registration · ENG&lt;/td&gt;&lt;td&gt;&#x27;+status(&#x27;Recorded · synthetic&#x27;)+&#x27;&lt;/td&gt;&lt;td&gt;Local synthetic test provider&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;Domestic authorisation · ENG&lt;/td&gt;&lt;td&gt;&#x27;+status(&#x27;Unverified&#x27;,&#x27;pending&#x27;)+&#x27;&lt;/td&gt;&lt;td&gt;Separate jurisdiction requirement&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;Minors authorisation · ENG&lt;/td&gt;&lt;td&gt;&#x27;+status(&#x27;Unverified&#x27;,&#x27;pending&#x27;)+&#x27;&lt;/td&gt;&lt;td&gt;Recorded only&lt;small&gt;No minor pathway enabled&lt;/small&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/tbody&gt;&lt;/table&gt;&lt;/div&gt;&lt;p class=&quot;f-footnote&quot;&gt;A typed licence number is a declaration. Changing a verified declared number resets the FIFA facet to unverified.&lt;/p&gt;&#x27;;}
+function agentAgency(){return heading(&#x27;Agency&#x27;,&#x27;North Star Sports Agency&#x27;,&#x27;&lt;p&gt;Agency directory&lt;br&gt;Member roles and access&lt;/p&gt;&#x27;)+agSummary([[&#x27;3&#x27;,&#x27;Active members&#x27;],[&#x27;1&#x27;,&#x27;Administrator&#x27;],[&#x27;1&#x27;,&#x27;Licensed-agent member&#x27;]])+&#x27;&lt;div class=&quot;f-ledger&quot;&gt;&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;MEMBER&lt;/th&gt;&lt;th&gt;AGENCY ROLE&lt;/th&gt;&lt;th&gt;ACCESS SCOPE&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&lt;tr&gt;&lt;td&gt;&lt;strong&gt;Ana Costa&lt;/strong&gt;&lt;small&gt;Agent&lt;/small&gt;&lt;/td&gt;&lt;td&gt;Licensed agent&lt;/td&gt;&lt;td&gt;Own confirmed clients&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;&lt;strong&gt;Tomás Rivera&lt;/strong&gt;&lt;small&gt;Director&lt;/small&gt;&lt;/td&gt;&lt;td&gt;Agency administrator&lt;/td&gt;&lt;td&gt;Membership, roles and settings&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;&lt;strong&gt;Ben Okoro&lt;/strong&gt;&lt;small&gt;Analyst&lt;/small&gt;&lt;/td&gt;&lt;td&gt;Analyst&lt;/td&gt;&lt;td&gt;Client-permitted summaries only&lt;/td&gt;&lt;/tr&gt;&lt;/tbody&gt;&lt;/table&gt;&lt;/div&gt;&lt;p class=&quot;f-footnote&quot;&gt;Directory preview · Membership changes are managed by an agency administrator.&lt;/p&gt;&#x27;+section(&#x27;&#x27;,&#x27;Agency standing&#x27;)+notice(&#x27;The agency itself holds no football-agent licence. A job title or administrator role does not grant permission to perform regulated agent actions.&#x27;)+&#x27;&lt;div class=&quot;ag-panel&quot; style=&quot;margin-top:20px&quot;&gt;&lt;h2&gt;Membership &amp; audit&lt;/h2&gt;&lt;p class=&quot;f-sub&quot;&gt;Ending membership ends current access while preserving past attribution. Members cannot grant themselves administrator status, and an agency must retain an administrator.&lt;/p&gt;&#x27;+action(&#x27;View audit history&#x27;,&#x27;&#x27;,&#x27;outline&#x27;)+&#x27;&lt;/div&gt;&#x27;;}
+function agentInbox(){return heading(&#x27;Agent&#x27;,&#x27;Inbox&#x27;,&#x27;&lt;p&gt;Operational notices&lt;br&gt;No negotiation or offer acceptance here&lt;/p&gt;&#x27;)+&#x27;&lt;div class=&quot;ag-panel&quot;&gt;&lt;div class=&quot;f-flex&quot;&gt;&lt;h2&gt;Notices&lt;/h2&gt;&#x27;+agButton(&#x27;Preview mark all read&#x27;,&#x27;data-ag-read=&quot;toggle&quot;&#x27;,&#x27;outline&#x27;)+&#x27;&lt;/div&gt;&lt;button class=&quot;ag-person-row cursor-interaction&quot; data-ag-client=&quot;3&quot;&gt;&lt;span class=&quot;p-mobile-icon&quot;&gt;&#x27;+icons(&#x27;shield-alert&#x27;)+&#x27;&lt;/span&gt;&lt;span&gt;&lt;strong&gt;Relationship disputed&lt;/strong&gt;&lt;small&gt;Filip Nowak · Private access suspended&lt;/small&gt;&lt;/span&gt;&#x27;+(state.agentRead?&#x27;&#x27;: &#x27;&lt;span class=&quot;p-count&quot;&gt;1&lt;/span&gt;&#x27;)+icons(&#x27;chevron-right&#x27;)+&#x27;&lt;/button&gt;&lt;button class=&quot;ag-person-row cursor-interaction&quot; data-ag-client=&quot;2&quot;&gt;&lt;span class=&quot;p-mobile-icon&quot;&gt;&#x27;+icons(&#x27;clock&#x27;)+&#x27;&lt;/span&gt;&lt;span&gt;&lt;strong&gt;Awaiting client confirmation&lt;/strong&gt;&lt;small&gt;Chinedu Okafor · Relationship request&lt;/small&gt;&lt;/span&gt;&#x27;+icons(&#x27;chevron-right&#x27;)+&#x27;&lt;/button&gt;&lt;button class=&quot;ag-person-row cursor-interaction&quot; data-ag-tx=&quot;1&quot;&gt;&lt;span class=&quot;p-mobile-icon&quot;&gt;&#x27;+icons(&#x27;file-check-2&#x27;)+&#x27;&lt;/span&gt;&lt;span&gt;&lt;strong&gt;Consent still outstanding&lt;/strong&gt;&lt;small&gt;Mateus Carvalho · Transfer workspace&lt;/small&gt;&lt;/span&gt;&#x27;+icons(&#x27;chevron-right&#x27;)+&#x27;&lt;/button&gt;&lt;/div&gt;&lt;p class=&quot;f-footnote&quot;&gt;Reading a notice does not change relationship, consent or transaction status.&lt;/p&gt;&#x27;;}
+function agentPage(){return [agentOverview,agentClientsPage,agentClientDetail,agentOpportunities,agentTransactions,agentTransactionDetail,agentCompliance,agentProfile,agentAgency,agentInbox][state.screen]();}
+
+function desktop(){
+const names={agent:&#x27;Agent&#x27;,pro:&#x27;Pro&#x27;,grass:&#x27;Grassroots&#x27;,safety:&#x27;Trust &amp; Safety&#x27;},orgs={agent:&#x27;North Star Sports Agency&#x27;,pro:&#x27;Eastport FC&#x27;,grass:&#x27;Hackney Marsh Rovers&#x27;,safety:&#x27;Safety workspace&#x27;};
+const menus={
+agent:[[&#x27;WORKSPACE&#x27;,[[&#x27;layout-dashboard&#x27;,&#x27;Overview&#x27;,0],[&#x27;users&#x27;,&#x27;Clients&#x27;,1],[&#x27;compass&#x27;,&#x27;Opportunities&#x27;,3],[&#x27;inbox&#x27;,&#x27;Inbox&#x27;,9]]],[&#x27;TRANSACTIONS&#x27;,[[&#x27;folders&#x27;,&#x27;Transactions&#x27;,4],[&#x27;shield-check&#x27;,&#x27;Conflicts &amp; compliance&#x27;,6]]],[&#x27;AGENCY&#x27;,[[&#x27;badge-check&#x27;,&#x27;My verification&#x27;,7],[&#x27;building-2&#x27;,&#x27;Agency &amp; team&#x27;,8]]]],
+pro:[[&#x27;WORKSPACE&#x27;,[[&#x27;layout-dashboard&#x27;,&#x27;Overview&#x27;,2],[&#x27;search&#x27;,&#x27;Discover players&#x27;,0],[&#x27;folder-open&#x27;,&#x27;Recruitment rooms&#x27;,1]]],[&#x27;RECRUITMENT&#x27;,[[&#x27;list-checks&#x27;,&#x27;Shortlists&#x27;,null],[&#x27;calendar-days&#x27;,&#x27;Trials&#x27;,null],[&#x27;message-circle&#x27;,&#x27;Messages&#x27;,null]]],[&#x27;ORGANISATION&#x27;,[[&#x27;users&#x27;,&#x27;Staff &amp; permissions&#x27;,null],[&#x27;settings-2&#x27;,&#x27;Settings&#x27;,null]]]],
+grass:[[&#x27;YOUR CLUB&#x27;,[[&#x27;layout-dashboard&#x27;,&#x27;Club overview&#x27;,0],[&#x27;users&#x27;,&#x27;Squad&#x27;,0],[&#x27;calendar-days&#x27;,&#x27;Trial days&#x27;,1],[&#x27;message-circle&#x27;,&#x27;Messages&#x27;,2]]],[&#x27;CLUB OPERATIONS&#x27;,[[&#x27;clipboard-list&#x27;,&#x27;Matchdays&#x27;,null],[&#x27;network&#x27;,&#x27;Club network&#x27;,null],[&#x27;settings-2&#x27;,&#x27;Settings&#x27;,null]]]],
+safety:[[&#x27;REVIEW WORKSPACE&#x27;,[[&#x27;inbox&#x27;,&#x27;Review queue&#x27;,0],[&#x27;badge-check&#x27;,&#x27;Verification&#x27;,1],[&#x27;shield-check&#x27;,&#x27;Safeguarding&#x27;,2]]],[&#x27;OPERATIONS&#x27;,[[&#x27;files&#x27;,&#x27;Evidence disputes&#x27;,null],[&#x27;history&#x27;,&#x27;Audit history&#x27;,null],[&#x27;settings-2&#x27;,&#x27;Settings&#x27;,null]]]]};
+const title=pages[state.app][state.screen],content=state.app===&#x27;agent&#x27;?agentPage():state.app===&#x27;pro&#x27;?[discovery,room,director][state.screen]():state.app===&#x27;grass&#x27;?[squad,trial,()=&gt;conversation(true)][state.screen]():safety();
+return &#x27;&lt;div class=&quot;p-shell&quot;&gt;&lt;aside class=&quot;p-sidebar&quot;&gt;&lt;div class=&quot;p-brand&quot;&gt;&lt;span class=&quot;f-wordmark&quot;&gt;ScoutBox&lt;/span&gt;&lt;span class=&quot;p-edition&quot;&gt;&#x27;+names[state.app]+&#x27;&lt;/span&gt;&lt;/div&gt;&lt;button class=&quot;p-org cursor-interaction&quot; data-demo=&quot;Switch workspace&quot;&gt;&lt;span class=&quot;p-avatar club&quot;&gt;&#x27;+(state.app===&#x27;pro&#x27;?&#x27;EF&#x27;:state.app===&#x27;grass&#x27;?&#x27;HR&#x27;:state.app===&#x27;agent&#x27;?&#x27;NS&#x27;:&#x27;TS&#x27;)+&#x27;&lt;/span&gt;&lt;span&gt;&#x27;+orgs[state.app]+&#x27;&lt;/span&gt;&#x27;+icons(&#x27;chevrons-up-down&#x27;)+&#x27;&lt;/button&gt;&lt;nav aria-label=&quot;Workspace navigation&quot;&gt;&#x27;+menus[state.app].map(([group,items])=&gt;&#x27;&lt;div class=&quot;p-navgroup&quot;&gt;&lt;span class=&quot;p-navlabel&quot;&gt;&#x27;+group+&#x27;&lt;/span&gt;&#x27;+items.map(([icon,t,n])=&gt;&#x27;&lt;button class=&quot;p-navitem cursor-interaction &#x27;+((n===state.screen||(state.app===&#x27;agent&#x27;&amp;&amp;((state.screen===2&amp;&amp;n===1)||(state.screen===5&amp;&amp;n===4))))&amp;&amp;t!==&#x27;Squad&#x27;?&#x27;active&#x27;:&#x27;&#x27;)+&#x27;&quot; &#x27;+(n===null?&#x27;data-demo=&quot;&#x27;+t+&#x27;&quot;&#x27;:&#x27;data-go=&quot;&#x27;+state.app+&#x27;:&#x27;+n+&#x27;&quot;&#x27;)+&#x27;&gt;&#x27;+icons(icon)+&#x27;&lt;span&gt;&#x27;+t+&#x27;&lt;/span&gt;&#x27;+(t===&#x27;Messages&#x27;?&#x27;&lt;b&gt;2&lt;/b&gt;&#x27;:&#x27;&#x27;)+&#x27;&lt;/button&gt;&#x27;).join(&#x27;&#x27;)+&#x27;&lt;/div&gt;&#x27;).join(&#x27;&#x27;)+&#x27;&lt;/nav&gt;&lt;div class=&quot;p-account&quot;&gt;&lt;span class=&quot;p-avatar&quot;&gt;&#x27;+(state.app===&#x27;pro&#x27;?&#x27;MK&#x27;:state.app===&#x27;grass&#x27;?&#x27;JT&#x27;:state.app===&#x27;agent&#x27;?&#x27;AC&#x27;:&#x27;TS&#x27;)+&#x27;&lt;/span&gt;&lt;div&gt;&lt;strong&gt;&#x27;+(state.app===&#x27;pro&#x27;?&#x27;Maria Keane&#x27;:state.app===&#x27;grass&#x27;?&#x27;Jamie Turner&#x27;:state.app===&#x27;agent&#x27;?&#x27;Ana Costa&#x27;:&#x27;Safety team&#x27;)+&#x27;&lt;/strong&gt;&lt;small&gt;&#x27;+(state.app===&#x27;pro&#x27;?&#x27;Head of Recruitment&#x27;:state.app===&#x27;grass&#x27;?&#x27;Club manager&#x27;:state.app===&#x27;agent&#x27;?&#x27;Licensed agent&#x27;:&#x27;Review workspace&#x27;)+&#x27;&lt;/small&gt;&lt;/div&gt;&lt;/div&gt;&lt;/aside&gt;&lt;div class=&quot;p-workspace&quot;&gt;&lt;header class=&quot;p-topbar&quot;&gt;&lt;div class=&quot;p-breadcrumb&quot;&gt;&#x27;+names[state.app]+&#x27;&lt;span&gt;/&lt;/span&gt;&lt;strong&gt;&#x27;+title+&#x27;&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;p-toolbar&quot;&gt;&#x27;+themeToggle()+&#x27;&lt;button class=&quot;cursor-interaction p-top-search&quot; data-demo=&quot;Search workspace&quot;&gt;&#x27;+icons(&#x27;search&#x27;)+&#x27;&lt;span&gt;Search workspace&lt;/span&gt;&lt;kbd&gt;⌘ K&lt;/kbd&gt;&lt;/button&gt;&lt;button class=&quot;cursor-interaction&quot; data-demo=&quot;Notifications&quot; aria-label=&quot;Notifications&quot;&gt;&#x27;+icons(&#x27;bell&#x27;)+&#x27;&lt;/button&gt;&lt;button class=&quot;cursor-interaction&quot; data-demo=&quot;Help&quot; aria-label=&quot;Help&quot;&gt;&#x27;+icons(&#x27;circle-help&#x27;)+&#x27;&lt;/button&gt;&lt;/div&gt;&lt;/header&gt;&lt;main class=&quot;f-content&quot;&gt;&#x27;+content+&#x27;&lt;div class=&quot;f-feedback&quot; aria-live=&quot;polite&quot;&gt;&lt;/div&gt;&lt;/main&gt;&lt;/div&gt;&lt;/div&gt;&#x27;;
+}
+function render(){canvas.dataset.app=state.app;canvas.dataset.theme=state.themes[state.app];root.style.setProperty(&#x27;--f-paper&#x27;,state.paper===&#x27;cool&#x27;?&#x27;#f1f5f4&#x27;:&#x27;#f6f7f3&#x27;);app.value=state.app;screen.innerHTML=pages[state.app].map((p,i)=&gt;&#x27;&lt;option value=&quot;&#x27;+i+&#x27;&quot;&gt;&#x27;+p+&#x27;&lt;/option&gt;&#x27;).join(&#x27;&#x27;);screen.value=String(state.screen);canvas.innerHTML=state.app===&#x27;player&#x27;?&#x27;&lt;div class=&quot;f-mobile-board&quot;&gt;&#x27;+phone(state.screen,&#x27;01 / &#x27;+pages.player[state.screen].toUpperCase())+&#x27;&lt;div class=&quot;f-companion&quot;&gt;&#x27;+phone(state.screen===0?1:0,&#x27;02 / &#x27;+(state.screen===0?&#x27;FOOTBALL PASSPORT&#x27;:&#x27;HOME&#x27;))+&#x27;&lt;/div&gt;&lt;/div&gt;&#x27;:desktop();root.querySelector(&#x27;#f-current&#x27;).textContent=app.options[app.selectedIndex].text+&#x27; / &#x27;+pages[state.app][state.screen];if(globalThis.lucide)lucide.createIcons({attrs:{width:18,height:18}});root.querySelectorAll(&#x27;button,select&#x27;).forEach(el=&gt;el.classList.add(&#x27;cursor-interaction&#x27;));}
+function save(){window.openai?.setWidgetState?.({modelContent:{concept:&#x27;Platform&#x27;,application:state.app,screen:pages[state.app][state.screen],paper:state.paper,theme:state.themes[state.app]},privateContent:{...state}})?.catch(()=&gt;{});}
+root.addEventListener(&#x27;click&#x27;,e=&gt;{const theme=e.target.closest(&#x27;[data-theme-toggle]&#x27;);if(theme){const i=Array.from(root.querySelectorAll(&#x27;[data-theme-toggle]&#x27;)).indexOf(theme);state.themes[state.app]=state.themes[state.app]===&#x27;dark&#x27;?&#x27;light&#x27;:&#x27;dark&#x27;;render();save();root.querySelectorAll(&#x27;[data-theme-toggle]&#x27;)[i]?.focus();return;}const g=e.target.closest(&#x27;[data-go]&#x27;),p=e.target.closest(&#x27;[data-player]&#x27;),d=e.target.closest(&#x27;[data-demo]&#x27;);if(g){let [a,n]=g.dataset.go.split(&#x27;:&#x27;);state.app=a;state.screen=Number(n);render();save();}else if(p){state.player=Number(p.dataset.player);render();save();}else if(d){let box=d.closest(&#x27;.f-phone-body&#x27;)||d.closest(&#x27;.f-phone&#x27;)||d.closest(&#x27;.f-content&#x27;)||canvas;let feedback=box.querySelector(&#x27;.f-feedback&#x27;);if(!feedback){feedback=document.createElement(&#x27;div&#x27;);feedback.className=&#x27;f-feedback&#x27;;feedback.setAttribute(&#x27;role&#x27;,&#x27;status&#x27;);box.appendChild(feedback);}feedback.textContent=d.dataset.demo+&#x27; — design preview only. No live data is changed.&#x27;;}});
+root.addEventListener(&#x27;click&#x27;,e=&gt;{let c=e.target.closest(&#x27;[data-ag-client]&#x27;),t=e.target.closest(&#x27;[data-ag-tx]&#x27;),tab=e.target.closest(&#x27;[data-ag-tab]&#x27;),filter=e.target.closest(&#x27;[data-ag-filter]&#x27;),request=e.target.closest(&#x27;[data-ag-request]&#x27;),share=e.target.closest(&#x27;[data-ag-share]&#x27;),read=e.target.closest(&#x27;[data-ag-read]&#x27;);if(c){state.agentClient=Number(c.dataset.agClient);state.agentTab=0;state.app=&#x27;agent&#x27;;state.screen=2;}else if(t){state.agentTx=Number(t.dataset.agTx);state.agentTxTab=0;state.app=&#x27;agent&#x27;;state.screen=5;}else if(tab){const [f,i]=tab.dataset.agTab.split(&#x27;:&#x27;);state[f]=Number(i);}else if(filter){state.agentFilter=filter.dataset.agFilter;}else if(request){state.agentRequest=request.dataset.agRequest===&#x27;open&#x27;;}else if(share){state.agentShared=!state.agentShared;}else if(read){state.agentRead=!state.agentRead;}else{return;}render();save();});
+app.addEventListener(&#x27;change&#x27;,()=&gt;{state.app=app.value;state.screen=0;render();save();});screen.addEventListener(&#x27;change&#x27;,()=&gt;{state.screen=Number(screen.value);render();save();});
+window.addEventListener(&#x27;openai:set_globals&#x27;,e=&gt;{let s=e.detail?.globals?.widgetState?.privateContent;if(s&amp;&amp;pages[s.app]&amp;&amp;Number.isInteger(s.screen)&amp;&amp;pages[s.app][s.screen]){restoreThemes(s);restoreAgent(s);state.app=s.app;state.screen=s.screen;state.paper=s.paper===&#x27;cool&#x27;?&#x27;cool&#x27;:&#x27;warm&#x27;;if(Number.isInteger(s.player)&amp;&amp;data[s.player])state.player=s.player;render();}});
+render();if(globalThis.Tweak){const t=new Tweak({container:root,onChange:()=&gt;{render();save();}});t.addSelect(state,&#x27;paper&#x27;,{label:&#x27;Paper tone&#x27;,options:[{label:&#x27;Soft off-white (recommended)&#x27;,value:&#x27;warm&#x27;},{label:&#x27;Cool mineral&#x27;,value:&#x27;cool&#x27;}]});}
+})();
+&lt;/script&gt;
+
+&lt;script src=&quot;https://unpkg.com/@floating-ui/core@1.7.3/dist/floating-ui.core.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script src=&quot;https://unpkg.com/@floating-ui/dom@1.7.4/dist/floating-ui.dom.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  if (window.FloatingUIDOM == null) {
+    return;
+  }
+  const { autoUpdate, computePosition, flip, offset, shift, size } =
+    window.FloatingUIDOM;
+  const tooltipPlacements = new Set([&quot;top&quot;, &quot;right&quot;, &quot;bottom&quot;, &quot;left&quot;]);
+  const tooltipId = `codex-visualization-tooltip-${
+    window.crypto?.randomUUID?.() ?? Date.now().toString(36)
+  }`;
+  const tooltipGap = 5;
+  const hoverDelay = 700;
+  const skipDelay = 300;
+  let activeTrigger = null;
+  let pendingTrigger = null;
+  let tooltip = null;
+  let openTimeout = null;
+  let autoUpdateCleanup = null;
+  let positionRequest = 0;
+  let skipDelayUntil = 0;
+  let lastPointerWasTouch = false;
+  let pinnedByTouch = false;
+
+  const getTrigger = (event) =&gt; {
+    for (const target of event.composedPath()) {
+      if (target?.nodeType === Node.ELEMENT_NODE) {
+        const trigger = target.closest(&quot;[data-tooltip]&quot;);
+        if (trigger) return trigger;
+      }
+    }
+    return null;
+  };
+  const containsTarget = (trigger, target) =&gt;
+    target?.nodeType != null &amp;&amp; trigger.contains(target);
+  const getContent = (trigger) =&gt;
+    trigger.getAttribute(&quot;data-tooltip&quot;)?.trim() ?? &quot;&quot;;
+  const getPlacement = (trigger) =&gt; {
+    const placement = trigger.getAttribute(&quot;data-tooltip-placement&quot;);
+    return tooltipPlacements.has(placement) ? placement : &quot;top&quot;;
+  };
+  const getTooltip = () =&gt; {
+    if (tooltip == null) {
+      tooltip = document.createElement(&quot;div&quot;);
+      tooltip.id = tooltipId;
+      tooltip.className = &quot;tooltip&quot;;
+      tooltip.setAttribute(&quot;role&quot;, &quot;tooltip&quot;);
+    }
+    return tooltip;
+  };
+  const setDescribedBy = (trigger, described) =&gt; {
+    const ids = new Set(
+      (trigger.getAttribute(&quot;aria-describedby&quot;) ?? &quot;&quot;)
+        .split(/\s+/)
+        .filter(Boolean),
+    );
+    if (described) {
+      ids.add(tooltipId);
+    } else {
+      ids.delete(tooltipId);
+    }
+    if (ids.size === 0) {
+      trigger.removeAttribute(&quot;aria-describedby&quot;);
+    } else {
+      trigger.setAttribute(&quot;aria-describedby&quot;, [...ids].join(&quot; &quot;));
+    }
+  };
+  const clearOpenTimeout = () =&gt; {
+    if (openTimeout != null) {
+      window.clearTimeout(openTimeout);
+      openTimeout = null;
+    }
+    pendingTrigger = null;
+  };
+  const closeTooltip = (activateSkipDelay = true) =&gt; {
+    clearOpenTimeout();
+    pinnedByTouch = false;
+    positionRequest += 1;
+    autoUpdateCleanup?.();
+    autoUpdateCleanup = null;
+    if (activeTrigger == null) {
+      return;
+    }
+    setDescribedBy(activeTrigger, false);
+    activeTrigger = null;
+    tooltip?.remove();
+    if (activateSkipDelay) {
+      skipDelayUntil = Date.now() + skipDelay;
+    }
+  };
+  const updatePosition = (trigger, floating) =&gt; {
+    const request = ++positionRequest;
+    void computePosition(trigger, floating, {
+      middleware: [
+        offset(tooltipGap),
+        flip({ padding: tooltipGap }),
+        shift({ padding: tooltipGap }),
+        size({
+          padding: tooltipGap,
+          apply({ availableHeight, availableWidth, elements }) {
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-width&quot;,
+              `${Math.max(0, availableWidth)}px`,
+            );
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-height&quot;,
+              `${Math.max(0, availableHeight)}px`,
+            );
+          },
+        }),
+      ],
+      placement: getPlacement(trigger),
+      strategy: &quot;fixed&quot;,
+    })
+      .then(({ x, y }) =&gt; {
+        if (activeTrigger !== trigger || request !== positionRequest) {
+          return;
+        }
+        const scale = window.devicePixelRatio || 1;
+        floating.style.transform = `translate(${Math.round(x * scale) / scale}px, ${Math.round(y * scale) / scale}px)`;
+        floating.style.visibility = &quot;visible&quot;;
+      })
+      .catch(() =&gt; {
+        if (activeTrigger === trigger &amp;&amp; request === positionRequest) {
+          closeTooltip(false);
+        }
+      });
+  };
+  const openTooltip = (trigger) =&gt; {
+    const content = getContent(trigger);
+    if (!trigger.isConnected || content.length === 0) {
+      return;
+    }
+    clearOpenTimeout();
+    if (activeTrigger === trigger) {
+      return;
+    }
+    closeTooltip();
+    const floating = getTooltip();
+    floating.textContent = content;
+    floating.style.visibility = &quot;hidden&quot;;
+    floating.style.transform = &quot;translate(0, 0)&quot;;
+    document.body.appendChild(floating);
+    activeTrigger = trigger;
+    setDescribedBy(trigger, true);
+    autoUpdateCleanup = autoUpdate(trigger, floating, () =&gt; {
+      updatePosition(trigger, floating);
+    });
+  };
+  const requestOpen = (trigger, immediate = false) =&gt; {
+    if (
+      getContent(trigger).length === 0 ||
+      activeTrigger === trigger ||
+      pendingTrigger === trigger
+    ) {
+      return;
+    }
+    clearOpenTimeout();
+    pendingTrigger = trigger;
+    const delay =
+      immediate || activeTrigger != null || Date.now() &lt; skipDelayUntil
+        ? 0
+        : hoverDelay;
+    if (delay === 0) {
+      openTooltip(trigger);
+      return;
+    }
+    openTimeout = window.setTimeout(() =&gt; {
+      openTimeout = null;
+      pendingTrigger = null;
+      openTooltip(trigger);
+    }, delay);
+  };
+  const handlePointerOpen = (event) =&gt; {
+    if (event.pointerType === &quot;touch&quot;) {
+      return;
+    }
+    const trigger = getTrigger(event);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    requestOpen(trigger);
+  };
+  const handlePointer = (event) =&gt; {
+    lastPointerWasTouch =
+      event.type === &quot;pointerdown&quot; &amp;&amp; event.pointerType === &quot;touch&quot;;
+  };
+  const handleTouchClick = (event) =&gt; {
+    const isTouch = event.pointerType === &quot;touch&quot; || lastPointerWasTouch;
+    lastPointerWasTouch = false;
+    if (!isTouch || event.detail === 0) {
+      return;
+    }
+    const trigger = getTrigger(event);
+    if (
+      trigger == null ||
+      !trigger.isConnected ||
+      getContent(trigger).length === 0 ||
+      (pinnedByTouch &amp;&amp; activeTrigger === trigger)
+    ) {
+      if (pinnedByTouch) {
+        closeTooltip();
+      }
+      return;
+    }
+    openTooltip(trigger);
+    pinnedByTouch = activeTrigger === trigger;
+    window.setTimeout(() =&gt; {
+      if (activeTrigger === trigger &amp;&amp; !trigger.isConnected) {
+        closeTooltip(false);
+      }
+    }, 0);
+  };
+  const handleLeave = (event) =&gt; {
+    if (pinnedByTouch) {
+      return;
+    }
+    const trigger = getTrigger(event);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const handleFocusIn = (event) =&gt; {
+    const trigger = getTrigger(event);
+    if (trigger?.matches(&quot;:focus-visible&quot;)) {
+      requestOpen(trigger, true);
+    }
+  };
+  const handleKeyDown = (event) =&gt; {
+    if (event.key === &quot;Escape&quot;) {
+      closeTooltip();
+    }
+  };
+  const handleContextMenu = (event) =&gt; {
+    lastPointerWasTouch = false;
+    const trigger = getTrigger(event);
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const handlers = {
+    pointerover: handlePointerOpen,
+    pointerdown: handlePointer,
+    pointercancel: handlePointer,
+    click: handleTouchClick,
+    pointerout: handleLeave,
+    focusin: handleFocusIn,
+    focusout: handleLeave,
+    keydown: handleKeyDown,
+    contextmenu: handleContextMenu,
+  };
+  const roots = new Map();
+  const handledEvents = new WeakSet();
+  const handleEvent = (event) =&gt; {
+    if (handledEvents.has(event)) return;
+    handledEvents.add(event);
+    handlers[event.type](event);
+  };
+  const discoverRoots = (node) =&gt; {
+    if (node.shadowRoot) listen(node.shadowRoot);
+    for (const element of node.querySelectorAll(&quot;*&quot;)) {
+      if (element.shadowRoot) listen(element.shadowRoot);
+    }
+  };
+  const listen = (root) =&gt; {
+    if (roots.has(root)) return;
+    for (const type of Object.keys(handlers)) root.addEventListener(type, handleEvent);
+    const observer = new window.MutationObserver((records) =&gt; {
+      for (const { addedNodes } of records) {
+        for (const node of addedNodes) {
+          if (node.nodeType === Node.ELEMENT_NODE) discoverRoots(node);
+        }
+      }
+      for (const [root, cleanup] of roots) {
+        if (root.host &amp;&amp; !root.host.isConnected) {
+          cleanup();
+          roots.delete(root);
+        }
+      }
+      if (activeTrigger &amp;&amp; !activeTrigger.isConnected) closeTooltip(false);
+    });
+    observer.observe(root, { childList: true, subtree: true });
+    roots.set(root, () =&gt; {
+      observer.disconnect();
+      for (const type of Object.keys(handlers)) root.removeEventListener(type, handleEvent);
+    });
+    discoverRoots(root);
+  };
+  const destroy = () =&gt; {
+    closeTooltip(false);
+    lastPointerWasTouch = false;
+    for (const cleanup of roots.values()) cleanup();
+    roots.clear();
+    tooltip = null;
+  };
+
+  // Events between children of one shadow root never reach the document.
+  listen(document);
+  window.addEventListener(&quot;pagehide&quot;, destroy, { once: true });
+})();
+&lt;/script&gt;
+&lt;script id=&quot;codex-visualization-tabs&quot;&gt;
+(() =&gt; {
+  const selector = &#x27;.nav[role=&quot;tablist&quot;] [role=&quot;tab&quot;]&#x27;;
+  const disabled = &#x27;:disabled,[aria-disabled=&quot;true&quot;]&#x27;;
+  const selectTab = (selected) =&gt; {
+    const panelId = selected.getAttribute(&quot;aria-controls&quot;);
+    for (const tab of selected.closest(&#x27;[role=&quot;tablist&quot;]&#x27;).querySelectorAll(&#x27;[role=&quot;tab&quot;]&#x27;)) {
+      const active = tab === selected;
+      tab.classList.toggle(&quot;active&quot;, active);
+      tab.setAttribute(&quot;aria-selected&quot;, String(active));
+      const id = tab.getAttribute(&quot;aria-controls&quot;);
+      const panel = id &amp;&amp; document.getElementById(id);
+      if (panel != null) {
+        panel.hidden = id !== panelId;
+        if (!panel.hidden &amp;&amp; selected.id) {
+          panel.setAttribute(&quot;aria-labelledby&quot;, selected.id);
+        }
+      }
+    }
+  };
+  const interact = (event) =&gt; {
+    const tab = event.target?.closest?.(selector);
+    if (event.defaultPrevented || tab == null || tab.matches(disabled)) {
+      return;
+    }
+    if (event.type === &quot;click&quot;) {
+      selectTab(tab);
+      return;
+    }
+    const tabs = Array.from(
+      tab.closest(&#x27;[role=&quot;tablist&quot;]&#x27;).querySelectorAll(&#x27;[role=&quot;tab&quot;]&#x27;),
+    ).filter((candidate) =&gt; !candidate.matches(disabled));
+    const current = tabs.indexOf(tab);
+    let next;
+    if (event.key === &quot;ArrowRight&quot; || event.key === &quot;ArrowDown&quot;) {
+      next = (current + 1) % tabs.length;
+    } else if (event.key === &quot;ArrowLeft&quot; || event.key === &quot;ArrowUp&quot;) {
+      next = (current + tabs.length - 1) % tabs.length;
+    } else if (event.key === &quot;Home&quot;) {
+      next = 0;
+    } else if (event.key === &quot;End&quot;) {
+      next = tabs.length - 1;
+    } else {
+      return;
+    }
+    event.preventDefault();
+    tabs[next].focus();
+    selectTab(tabs[next]);
+  };
+
+  for (const list of document.querySelectorAll(&#x27;.nav[role=&quot;tablist&quot;]&#x27;)) {
+    const selected =
+      list.querySelector(&#x27;[role=&quot;tab&quot;][aria-selected=&quot;true&quot;]&#x27;) ??
+      list.querySelector(&#x27;[role=&quot;tab&quot;].active&#x27;) ??
+      list.querySelector(&#x27;[role=&quot;tab&quot;]&#x27;);
+    if (selected != null) {
+      selectTab(selected);
+    }
+  }
+  document.addEventListener(&quot;click&quot;, interact);
+  document.addEventListener(&quot;keydown&quot;, interact);
+  window.addEventListener(&quot;pagehide&quot;, () =&gt; {
+    document.removeEventListener(&quot;click&quot;, interact);
+    document.removeEventListener(&quot;keydown&quot;, interact);
+  }, { once: true });
+})();
+&lt;/script&gt;
+&lt;script id=&quot;codex-visualization-lucide&quot; async src=&quot;https://unpkg.com/lucide@1.17.0/dist/umd/lucide.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  const initialize = () =&gt; {
+    globalThis.lucide?.createIcons({ attrs: { width: 16, height: 16 } });
+  };
+  if (globalThis.lucide != null) {
+    initialize();
+    return;
+  }
+  document
+    .getElementById(&quot;codex-visualization-lucide&quot;)
+    ?.addEventListener(&quot;load&quot;, initialize, { once: true });
+})();
+&lt;/script&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;
+"></iframe>
+<script>(() => {
+  const frame = document.getElementById("codex-visualization");
+  if (!(frame instanceof HTMLIFrameElement)) {
+    return;
+  }
+  let viewportHeight = globalThis.innerHeight;
+  const storageKey = `codex:visualization-widget-state-v2:${JSON.stringify([
+    globalThis.location.pathname,
+    globalThis.location.search,
+  ])}`;
+  const parseState = (serializedState) => {
+    if (
+      typeof serializedState !== "string" ||
+      new TextEncoder().encode(serializedState).length > 16 * 1024
+    ) {
+      throw new TypeError(
+        "Widget state must be a JSON object of at most 16 KiB",
+      );
+    }
+    /** @type {unknown} */
+    const state = JSON.parse(serializedState);
+    if (
+      state == null ||
+      typeof state !== "object" ||
+      Array.isArray(state) ||
+      ("imageIds" in state &&
+        (!Array.isArray(state.imageIds) || state.imageIds.length > 0))
+    ) {
+      throw new TypeError("Widget state must be a JSON object");
+    }
+    const storedState = { modelContent: null, privateContent: null, ...state };
+    const canonicalState = JSON.stringify(
+      storedState,
+      (_key, /** @type {unknown} */ value) => {
+        if (typeof value === "number" && !Number.isFinite(value)) {
+          throw new TypeError("Widget state must contain finite numbers");
+        }
+        return value;
+      },
+    );
+    if (new TextEncoder().encode(canonicalState).length > 16 * 1024) {
+      throw new TypeError(
+        "Widget state must be a JSON object of at most 16 KiB",
+      );
+    }
+    return storedState;
+  };
+  let storage = null;
+  let state = null;
+  try {
+    const localStorage = globalThis.localStorage;
+    const probeKey = `${storageKey}:probe`;
+    localStorage.setItem(probeKey, "1");
+    localStorage.removeItem(probeKey);
+    storage = localStorage;
+    const savedState = storage.getItem(storageKey);
+    if (savedState != null) {
+      try {
+        state = parseState(savedState);
+      } catch {
+        // Invalid saved state does not disable future writes.
+      }
+    }
+  } catch {
+    storage = null;
+  }
+  const initialGlobals = {
+    widgetState: state,
+    statePersistence: storage == null ? "none" : "local",
+  };
+
+  const channel = new MessageChannel();
+  channel.port1.addEventListener("message", (event) => {
+    const data = event.data;
+    if (typeof data !== "object" || data == null) {
+      return;
+    }
+    if (data.type === "widget-state-write") {
+      if (!Number.isSafeInteger(data.id) || data.id <= 0) {
+        return;
+      }
+      let ok = false;
+      try {
+        if (storage != null) {
+          const state = parseState(data.state);
+          storage.setItem(storageKey, JSON.stringify(state));
+          ok = true;
+        }
+      } catch {
+        // Storage denial, quota limits, and invalid state return a failed receipt.
+      }
+      channel.port1.postMessage({
+        type: "widget-state-result",
+        id: data.id,
+        ok,
+      });
+      return;
+    }
+    if (data.type === "height") {
+      const height = data.height;
+      if (
+        typeof height === "number" &&
+        Number.isFinite(height) &&
+        height >= 0 &&
+        height <= 10_000
+      ) {
+        frame.style.height = Math.ceil(height) + "px";
+      }
+      return;
+    }
+    if (data.type === "scroll-to") {
+      const top = data.top;
+      if (
+        typeof top === "number" &&
+        Number.isFinite(top) &&
+        top >= 0 &&
+        globalThis.navigator.userActivation?.isActive === true
+      ) {
+        globalThis.scrollTo({
+          top: Math.ceil(
+            globalThis.scrollY + frame.getBoundingClientRect().top + top,
+          ),
+        });
+      }
+      return;
+    }
+    if (data.type === "open-external") {
+      const rawHref = data.href;
+      if (typeof rawHref !== "string") {
+        return;
+      }
+      let href;
+      try {
+        const url = new URL(rawHref, document.baseURI);
+        if (url.protocol !== "https:") {
+          return;
+        }
+        href = url.href;
+      } catch {
+        return;
+      }
+      if (globalThis.navigator.userActivation?.isActive === true) {
+        const anchor = document.createElement("a");
+        anchor.href = href;
+        anchor.rel = "noopener noreferrer";
+        anchor.target = "_blank";
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+      }
+      return;
+    }
+    if (data.type === "follow-up") {
+      const prompt = data.prompt;
+      if (
+        typeof prompt !== "string" ||
+        globalThis.navigator.userActivation?.isActive !== true
+      ) {
+        return;
+      }
+      const title = data.title;
+      globalThis.prompt(typeof title === "string" ? title : prompt, prompt);
+    }
+  });
+  channel.port1.start();
+  const srcdoc = frame.dataset.srcdoc;
+  if (srcdoc == null) {
+    return;
+  }
+  globalThis.addEventListener("resize", () => {
+    const height = Number.parseFloat(frame.style.height);
+    if (!Number.isFinite(height) || height <= viewportHeight) {
+      frame.style.removeProperty("height");
+    }
+    viewportHeight = globalThis.innerHeight;
+    channel.port1.postMessage({ type: "measure" });
+  });
+  frame.addEventListener(
+    "load",
+    () => {
+      frame.contentWindow?.postMessage(
+        { type: "codex-visualization-initialize" },
+        "*",
+        [channel.port2],
+      );
+    },
+    { once: true },
+  );
+  // Match the trusted bootstrap element, not the same text in an authored title.
+  frame.srcdoc = srcdoc.replace(
+    '<script type="application/json" id="codex-visualization-widget-state">__CODEX_VISUALIZATION_WIDGET_STATE__<\/script>',
+    () =>
+      '<script type="application/json" id="codex-visualization-widget-state">' +
+      JSON.stringify(initialGlobals).replaceAll("<", "\\u003c") +
+      "<\/script>",
+  );
+  delete frame.dataset.srcdoc;
+})();
+</script>
+</body>
+</html>

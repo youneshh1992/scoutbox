@@ -5,6 +5,8 @@
 // scoutbox-server with the x-admin-key header.
 
 import { useCallback, useEffect, useState } from 'react';
+import { ThemeToggle, useTheme } from '../../design-system/theme';
+import { Icon } from '../../design-system/icons';
 import { M12Panel, M12_TABS, type M12Tab } from './m12tabs';
 import { M13Panel, M13_TABS, type M13Tab } from './m13tabs';
 import { M14Panel, M14_TABS, type M14Tab } from './m14tabs';
@@ -112,6 +114,9 @@ const NAV_GROUPS: { id: string; label: string; tabs: Tab[] }[] = [
   { id: 'system', label: 'System', tabs: ['servicehealth', 'backups'] },
 ];
 const groupOfTab = (tab: Tab) => NAV_GROUPS.find((g) => g.tabs.includes(tab)) ?? NAV_GROUPS[0];
+// M24A — the platform icon for each destination group (lucide names).
+const GROUP_ICON: Record<string, string> = { home: 'layout-dashboard', cases: 'inbox', verification: 'badge-check', safety: 'shield-check', operations: 'folders', agents: 'users', system: 'settings-2' };
+const THEME_LABELS = { aria: 'Dark theme', light: 'Light', dark: 'Dark' };
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
@@ -153,6 +158,8 @@ export default function App() {
   const [outcomeDrafts, setOutcomeDrafts] = useState<Record<string, string>>({});
 
   const say = (text: string) => { setToast(text); setTimeout(() => setToast(null), 3500); };
+  // M24A — one appearance for Trust & Safety, persisted under its own key.
+  const { theme, toggle: toggleTheme } = useTheme('safety');
 
   const load = useCallback(async () => {
     setError(null);
@@ -234,8 +241,9 @@ export default function App() {
   if (!entered) {
     return (
       <div className="login">
+        <div className="login-toolbar"><ThemeToggle theme={theme} onToggle={toggleTheme} labels={THEME_LABELS} /></div>
         <div style={{ textAlign: 'center' }}>
-          <h1>Scout<span>Box</span> <span style={{ fontSize: 22 }}>Trust &amp; Safety</span></h1>
+          <h1><span className="wordmark">ScoutBox</span><span className="brand-sub">Trust &amp; Safety</span></h1>
           <div className="tagline">Staff console — report review, verification, audit.</div>
         </div>
         <div className="enter-row">
@@ -251,28 +259,40 @@ export default function App() {
   return (
     <div className="shell">
       <nav className="sidebar" aria-label="Main navigation">
-        <div className="brand">Scout<span>Box</span> T&amp;S</div>
+        <div className="brand" title="ScoutBox Trust &amp; Safety"><span className="wordmark">ScoutBox</span><span className="brand-sub">Trust &amp; Safety</span></div>
+        <div className="p-org" aria-label="Safety workspace">
+          <span className="p-avatar club" aria-hidden="true">TS</span>
+          <span><strong>Safety workspace</strong><small>{DEMO ? 'Demo data' : 'Live console'}</small></span>
+        </div>
+        <span className="nav-group-label" aria-hidden="true">Review workspace</span>
         {NAV_GROUPS.map((g) => {
           const active = groupOfTab(tab).id === g.id;
           const pending = g.id === 'cases' ? reports.filter((r) => r.status === 'pending_review').length : 0;
           return (
-            <button key={g.id} className={active ? 'active' : ''} onClick={() => setTab(g.tabs[0])} style={{ position: 'relative' }} aria-current={active ? 'page' : undefined}>
-              {g.label}
+            <button key={g.id} className={`nav-section ${active ? 'active' : ''}`} onClick={() => setTab(g.tabs[0])} style={{ position: 'relative' }} aria-current={active ? 'page' : undefined}>
+              <Icon name={GROUP_ICON[g.id] ?? 'folders'} />
+              <span className="grow">{g.label}</span>
               {pending > 0 && <span className="nav-badge">{pending}</span>}
             </button>
           );
         })}
         <div className="spacer" />
-        <div className="whoami"><b>Safety staff</b>{DEMO ? 'Demo mode' : 'Live'}</div>
+        <div className="p-account">
+          <div className="p-who"><span className="p-avatar" aria-hidden="true">TS</span><div><strong>Safety staff</strong><small>{DEMO ? 'Demo mode' : 'Live'}</small></div></div>
+        </div>
       </nav>
       <div className="main">
         <div className="topbar">
           <h2>
-            {groupOfTab(tab).tabs.length > 1 && <><span className="crumb">{groupOfTab(tab).label}</span><span className="crumb-sep"> / </span></>}
+            <span className="crumb">Trust &amp; Safety</span><span className="crumb-sep" aria-hidden="true"> / </span>
+            {groupOfTab(tab).tabs.length > 1 && <><span className="crumb">{groupOfTab(tab).label}</span><span className="crumb-sep" aria-hidden="true"> / </span></>}
             {TABS.find((t) => t.id === tab)?.label}
           </h2>
-          {DEMO && <span className="pill blue">demo data</span>}
-          <button onClick={() => void load()}>↻ Refresh</button>
+          <div className="p-toolbar">
+            <ThemeToggle theme={theme} onToggle={toggleTheme} labels={THEME_LABELS} />
+            {DEMO && <span className="pill blue">demo data</span>}
+            <button onClick={() => void load()} title="Refresh"><Icon name="refresh-cw" size={18} /> Refresh</button>
+          </div>
         </div>
         {groupOfTab(tab).tabs.length > 1 && (
           <nav className="subnav" aria-label={groupOfTab(tab).label}>
@@ -284,6 +304,8 @@ export default function App() {
           </nav>
         )}
         <div className="content">
+          {/* M24A — the reference page heading; the top bar keeps the crumb path. */}
+          <div className="f-heading"><p className="f-display" aria-hidden="true">{TABS.find((t) => t.id === tab)?.label}</p></div>
           {tab === 'overview' && overview && (
             <div className="stat-grid">
               <Stat v={overview.players} k="Players" />

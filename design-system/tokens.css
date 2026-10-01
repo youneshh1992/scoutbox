@@ -1,0 +1,207 @@
+/* ScoutBox design system — tokens.
+   Source of truth: ScoutBox-Design-Explorer.html ("Platform" layer). Every
+   value below is the reference's computed value; nothing is invented.
+
+   Scoping:
+     :root                       the platform light palette (Pro, Grassroots,
+                                 Trust & Safety, and the Player web build)
+     :root[data-theme="dark"]    the dark embossed palette, shared by every app
+     :root[data-app="agent"]     the Agent cream palette (light) and its gold label
+     :root[data-app="grass"]     the Grassroots workspace surfaces
+
+   The legacy names (--bg, --panel, --line, --text, --muted, --accent …) are
+   kept as ALIASES of the new tokens so the screens that read them inline
+   follow the theme without being rewritten. New styles use the --sb- names. */
+:root {
+  color-scheme: light;
+  /* type */
+  --sb-font: 'Albert Sans', -apple-system, system-ui, 'Segoe UI', sans-serif;
+  /* surfaces */
+  --sb-paper: #f6f7f3;      /* workspace */
+  --sb-white: #ffffff;      /* panels, cards, ledgers */
+  --sb-surface: #ffffff;    /* sidebar */
+  --sb-topbar: #fcfdfa;
+  --sb-wash: #edf1e9;       /* soft fill: tracks, avatars, quiet chips */
+  --sb-org: #fafbf8;
+  --sb-th: #fafbf7;
+  --sb-note: #eff5ec;
+  --sb-note-ink: #466047;
+  --sb-input: #fcfdfa;
+  --sb-input-border: #d5dfd1;
+  /* ink */
+  --sb-ink: #1e2923;
+  --sb-quiet: #677268;
+  --sb-rule: #e1e6df;
+  --sb-panel-border: #e1e6df;
+  --sb-nav: #546155;
+  --sb-navlabel: #737f73;
+  --sb-crumb: #2e4031;
+  --sb-tool: #58685a;
+  /* brand */
+  --sb-green: #00e676;
+  --sb-green-ink: #113822;
+  --sb-green-deep: #243b2c; /* the default (dark green) button */
+  --sb-green-text: #007f42; /* green as text / icon on light surfaces */
+  --sb-link: #267248;
+  --sb-focus: #00783e;
+  --sb-gold: #a67c2e;
+  /* states */
+  --sb-nav-active-bg: #e5f5e9;
+  --sb-nav-active-fg: #1b5935;
+  --sb-nav-active-icon: #007f42;
+  --sb-candidate-bg: #eaf5e9;
+  --sb-candidate-fg: #254530;
+  --sb-tab-active: #16753f;
+  --sb-tab-line: #00b65e;
+  --sb-filter-active-bg: #e1f2e5;
+  --sb-filter-active-fg: #215b38;
+  --sb-filter-active-border: #c5ddc9;
+  --sb-mine: #e4f4e6;
+  --sb-avatar-bg: #e2eadd;
+  --sb-avatar-fg: #365443;
+  --sb-count-bg: #e5ede0;
+  --sb-ok: #008f4c;  --sb-ok-ink: #3d5443;
+  --sb-pending: #b47a2f; --sb-pending-ink: #8b5b28;
+  --sb-urgent: #ab4736; --sb-urgent-ink: #913b32;
+  --sb-info-bg: #e6eef8; --sb-info-ink: #1e4a7a;
+  --sb-gold-bg: #f7efd6; --sb-gold-ink: #7a5a12;
+  --sb-danger-bg: #fbe4e1;
+  --sb-outline-border: #d8e0d4;
+  --sb-outline-fg: #314736;
+  --sb-kbd-border: #dce3d8; --sb-kbd-fg: #727d70;
+  --sb-track: #ccd5ce;
+  --sb-knob: #ffffff;
+  --sb-veil: rgba(30, 41, 35, 0.42);
+  --sb-shadow-panel: none;
+  --sb-shadow-pop: 0 12px 40px rgba(30, 41, 35, 0.14);
+  /* geometry */
+  --sb-sidebar-w: 204px;
+  --sb-sidebar-w-collapsed: 64px;
+  --sb-topbar-h: 67px;
+  --sb-content-x: 26px;
+  --sb-content-y: 29px;
+  --sb-radius: 7px;
+  --sb-radius-panel: 12px;
+
+  /* legacy aliases (read inline by existing screens) */
+  --bg: var(--sb-paper);
+  --bg-2: var(--sb-surface);
+  --panel: var(--sb-white);
+  --panel-2: var(--sb-wash);
+  --line: var(--sb-rule);
+  --text: var(--sb-ink);
+  --muted: var(--sb-quiet);
+  --accent: var(--sb-green-text);
+  --accent-2: var(--sb-link);
+  --gold: var(--sb-gold);
+  --danger: var(--sb-urgent);
+  font-family: var(--sb-font);
+}
+
+/* ---------------------------------------------------------------- dark */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --sb-paper: #202223;
+  --sb-white: #272a2b;
+  --sb-surface: #121415;
+  --sb-topbar: #1a1c1d;
+  --sb-wash: #2a2d2e;
+  --sb-org: #1b1e1f;
+  --sb-th: #2c3031;
+  --sb-note: #2c332e;
+  --sb-note-ink: #ffffff;
+  --sb-input: #1d2021;
+  --sb-input-border: #454b4c;
+  --sb-ink: #ffffff;
+  --sb-quiet: #ffffff;
+  --sb-rule: #393c3d;
+  --sb-panel-border: #383c3d;
+  --sb-nav: #ffffff;
+  --sb-navlabel: #ffffff;
+  --sb-crumb: #ffffff;
+  --sb-tool: #ffffff;
+  --sb-green-deep: #363b3d;
+  --sb-green-text: #00e676;
+  --sb-link: #00e676;
+  --sb-focus: #00e676;
+  --sb-gold: #d9b76b;
+  --sb-nav-active-bg: #29302b;
+  --sb-nav-active-fg: #ffffff;
+  --sb-nav-active-icon: #00e676;
+  --sb-candidate-bg: #2c3c31;
+  --sb-candidate-fg: #ffffff;
+  --sb-tab-active: #ffffff;
+  --sb-tab-line: #00e676;
+  --sb-filter-active-bg: #34483a;
+  --sb-filter-active-fg: #ffffff;
+  --sb-filter-active-border: #568368;
+  --sb-mine: #2c3c31;
+  --sb-avatar-bg: #333a35;
+  --sb-avatar-fg: #ffffff;
+  --sb-count-bg: #333a35;
+  --sb-ok: #00e676;  --sb-ok-ink: #ffffff;
+  --sb-pending: #e9b866; --sb-pending-ink: #ffffff;
+  --sb-urgent: #ff8e80; --sb-urgent-ink: #ffffff;
+  --sb-info-bg: #2c3c31; --sb-info-ink: #ffffff;
+  --sb-gold-bg: #3a3527; --sb-gold-ink: #ffffff;
+  --sb-danger-bg: #3c2a2a;
+  --sb-outline-border: #51595a;
+  --sb-outline-fg: #ffffff;
+  --sb-kbd-border: #515657; --sb-kbd-fg: #ffffff;
+  --sb-track: #ccd5ce;
+  --sb-knob: #ffffff;
+  --sb-veil: rgba(0, 0, 0, 0.62);
+  --sb-shadow-panel: inset 0 1px 0 #ffffff08, inset 0 -1px 0 #00000018, 0 3px 7px #0000001a;
+  --sb-shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+/* --------------------------------------------------- Agent: cream light */
+:root[data-app="agent"]:not([data-theme="dark"]) {
+  --sb-paper: #f9f6ef;
+  --sb-white: #fdfbf6;
+  --sb-surface: #fdfaf4;
+  --sb-topbar: #fbf8f1;
+  --sb-wash: #f5efe4;
+  --sb-org: #fcf9f3;
+  --sb-th: #f8f3e9;
+  --sb-note: #f6f0e5;
+  --sb-note-ink: #514937;
+  --sb-input: #fefcf8;
+  --sb-input-border: #e9e0cf;
+  --sb-ink: #302d25;
+  --sb-quiet: #696151;
+  --sb-rule: #ebe4d7;
+  --sb-panel-border: #ebe4d7;
+  --sb-nav: #615a49;
+  --sb-navlabel: #615a49;
+  --sb-crumb: #615a49;
+  --sb-tool: #615a49;
+  --sb-nav-active-bg: #f5efdf;
+  --sb-nav-active-fg: #373e2d;
+  --sb-filter-active-bg: #f5efdf;
+  --sb-filter-active-fg: #373e2d;
+  --sb-filter-active-border: #e7ddc8;
+  --sb-avatar-bg: #f3ecde;
+  --sb-avatar-fg: #615139;
+  --sb-count-bg: #f3ecde;
+  --sb-outline-border: #ebe4d7;
+  --sb-outline-fg: #514937;
+  --sb-kbd-border: #ebe4d7; --sb-kbd-fg: #514937;
+  --sb-track: #e9e0cf;
+  --sb-knob: #fefcf8;
+  --sb-shadow-panel: inset 0 1px 0 #fff9, 0 2px 5px #705b3710;
+}
+
+/* ---------------------------------------- Grassroots: workspace surfaces */
+:root[data-app="grass"] {
+  --sb-workspace: #e5f5e9;
+  --grass-line: rgba(255, 255, 255, 0.52);
+  --grass-grain: rgba(36, 59, 44, 0.018);
+  --grass-band: rgba(36, 59, 44, 0.009);
+}
+:root[data-app="grass"][data-theme="dark"] {
+  --sb-workspace: #252e26;
+  --grass-line: rgba(255, 255, 255, 0.10);
+  --grass-grain: rgba(255, 255, 255, 0.012);
+  --grass-band: rgba(255, 255, 255, 0.009);
+}

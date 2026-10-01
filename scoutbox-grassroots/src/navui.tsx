@@ -21,12 +21,15 @@ import {
   allItems, filterSections, groupedChildren, searchNav, stripLayout,
 } from './nav';
 import { Icon } from './icons';
+import { ThemeToggle, type Theme } from '../../design-system/theme';
 import { t } from './i18n';
 
 type TKey = Parameters<typeof t>[0];
 const tr = (key: string) => t(key as TKey);
 
 export interface Brand { short: string; long: string }
+/** The organisation block under the wordmark (reference `.p-org`): initials tile, name, one quiet line. */
+export interface OrgBlock { initials: string; name: string; line?: string }
 
 /** ≤ 900px: the sidebar is a drawer. Tapping a multi-page section there
  *  expands it (the pages are the point of opening a drawer) rather than
@@ -45,7 +48,7 @@ function useIsPhoneShell(): boolean {
 // ------------------------------------------------------------------ Sidebar
 export function Sidebar({
   sections, location, onNavigate, collapsed, onToggleCollapsed, shortcuts,
-  onTogglePin, unreadMessages, badges = {}, onOpenPalette, drawerOpen, onCloseDrawer, footer, brand,
+  onTogglePin, unreadMessages, badges = {}, onOpenPalette, drawerOpen, onCloseDrawer, footer, brand, org,
 }: {
   sections: NavSection[];
   location: NavLocation;
@@ -61,12 +64,12 @@ export function Sidebar({
   onCloseDrawer: () => void;
   footer: ReactNode;
   brand: Brand;
+  org?: OrgBlock;
 }) {
   const labelFor = (id: ScreenId) => {
     const hit = allItems().find(({ item }) => item.id === id);
     return hit ? tr(hit.item.labelKey) : id;
   };
-  const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform ?? '');
 
   // Accordion state. The active section is ALWAYS open; others can be opened
   // for the session with their chevron. Deterministic and unpersisted.
@@ -98,12 +101,16 @@ export function Sidebar({
     <>
       {drawerOpen && <div className="drawer-veil nav-drawer-veil" onClick={onCloseDrawer} />}
       <nav ref={navRef} id="app-sidebar" className={`sidebar ${collapsed ? 'collapsed' : ''} ${drawerOpen ? 'drawer-open' : ''}`} aria-label="Main navigation">
-        <div className="brand">{collapsed ? <span>S<span className="brand-sub">{brand.short}</span></span> : <>Scout<span>Box</span> <span className="brand-sub">{brand.long}</span></>}</div>
-
-        <button className="nav-search" onClick={onOpenPalette} aria-label={t('navsec.searchAria')} title={t('navsec.searchAria')}>
-          <Icon name="search" />
-          {!collapsed && <><span className="grow">{t('navsec.search')}</span><kbd>{isMac ? '⌘K' : 'Ctrl+K'}</kbd></>}
-        </button>
+        {/* M24A — the reference wordmark: one ink, a green square, the edition beside it. */}
+        <div className="brand" title={`ScoutBox ${brand.long}`}>
+          {collapsed ? <span className="wordmark" aria-label={`ScoutBox ${brand.long}`}>S</span> : <><span className="wordmark">ScoutBox</span><span className="brand-sub">{brand.long}</span></>}
+        </div>
+        {org && (
+          <div className="p-org" aria-label={org.name}>
+            <span className="p-avatar club" aria-hidden="true">{org.initials}</span>
+            <span><strong>{org.name}</strong>{org.line && <small>{org.line}</small>}</span>
+          </div>
+        )}
 
         {sections.map((s) => (
           <SectionRow
@@ -386,33 +393,48 @@ export function SecondaryNav({ section, activeItemId, onNavigate }: {
  * is never hidden (§33): under 640px it shrinks to its glyph with the same
  * accessible name.
  */
-export function TopBar({ title, crumb, live, unread, bellOpen, drawerOpen = false, onToggleBell, onReport, onOpenDrawer }: {
-  title: string; crumb?: string | null; live: boolean; unread: number; bellOpen: boolean; drawerOpen?: boolean;
+export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOpen = false, theme, onToggleTheme, onOpenPalette, onToggleBell, onReport, onOpenDrawer }: {
+  title: string; crumb?: string | null; edition?: string; live: boolean; unread: number; bellOpen: boolean; drawerOpen?: boolean;
+  theme: Theme; onToggleTheme: () => void; onOpenPalette: () => void;
   onToggleBell: () => void; onReport: () => void; onOpenDrawer: () => void;
 }) {
+  const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform ?? '');
   return (
     <header className="topbar">
       {/* PRE-M24 (PM-7): the menu button says whether the drawer is open */}
       <button className="nav-hamburger" aria-label={t('navsec.openMenu')} aria-expanded={drawerOpen} aria-controls="app-sidebar" onClick={onOpenDrawer}><Icon name="menu" /></button>
-      <h1 className="page-title" tabIndex={-1}>
-        {crumb && <><span className="crumb">{crumb}</span><span className="crumb-sep"> / </span></>}
-        {title}
-      </h1>
-      {live
-        ? <span className="live-dot on" role="status" aria-label={t('navsec.liveOk')} title={t('navsec.liveOk')} />
-        : <span className="pill red" role="status">○ {t('navsec.liveOff')}</span>}
-      <button
-        className="topbar-bell"
-        onClick={onToggleBell}
-        title="Notifications"
-        aria-label={`Notifications${unread > 0 ? ` — ${unread} unread` : ''}`}
-        aria-expanded={bellOpen}
-      >
-        🔔{unread > 0 && <span className="bell-badge" aria-hidden="true">{unread}</span>}
-      </button>
-      <button className="topbar-safety" onClick={onReport} title={t('navsec.reportAria')} aria-label={t('navsec.reportAria')}>
-        <span aria-hidden="true">⚑</span> <span className="safety-long">{t('navsec.report')}</span>
-      </button>
+      {/* M24A — the reference breadcrumb: edition / section / page. The page
+          name stays the document's <h1>; the parts before it are its path. */}
+      <div className="p-breadcrumb">
+        {edition && <span className="crumb crumb-edition" aria-hidden="true">{edition}<span className="crumb-sep"> / </span></span>}
+        <h1 className="page-title" tabIndex={-1}>
+          {crumb && <><span className="crumb">{crumb}</span><span className="crumb-sep"> / </span></>}
+          {title}
+        </h1>
+      </div>
+      <div className="p-toolbar">
+        <ThemeToggle theme={theme} onToggle={onToggleTheme} labels={{ aria: t('theme.aria'), light: t('theme.light'), dark: t('theme.dark') }} />
+        <button className="p-top-search" onClick={onOpenPalette} aria-label={t('navsec.searchAria')} title={t('navsec.searchAria')}>
+          <Icon name="search" size={18} />
+          <span>{t('navsec.searchWorkspace')}</span>
+          <kbd>{isMac ? '⌘ K' : 'Ctrl K'}</kbd>
+        </button>
+        {live
+          ? <span className="live-dot on" role="status" aria-label={t('navsec.liveOk')} title={t('navsec.liveOk')} />
+          : <span className="pill red" role="status">○ {t('navsec.liveOff')}</span>}
+        <button
+          className="topbar-bell"
+          onClick={onToggleBell}
+          title="Notifications"
+          aria-label={`Notifications${unread > 0 ? ` — ${unread} unread` : ''}`}
+          aria-expanded={bellOpen}
+        >
+          <Icon name="bell" size={18} />{unread > 0 && <span className="bell-badge" aria-hidden="true">{unread}</span>}
+        </button>
+        <button className="topbar-safety" onClick={onReport} title={t('navsec.reportAria')} aria-label={t('navsec.reportAria')}>
+          <Icon name="flag" size={18} /> <span className="safety-long">{t('navsec.report')}</span>
+        </button>
+      </div>
     </header>
   );
 }

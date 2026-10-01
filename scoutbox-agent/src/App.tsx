@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ThemeToggle, useTheme, type Theme } from '../../design-system/theme';
+import { initials } from '../../design-system/text';
+import { Icon } from './icons';
 import { api, ApiError, DEMO_MODE, revokeSession, type Notification, type Org, type Session } from './api';
 import { agent, demoIdentities, isSummary, type Me } from './agentApi';
 import {
@@ -90,10 +93,14 @@ export default function App() {
     api.getNotifications(restored).catch((e) => { if (e instanceof ApiError && e.status === 401) logout(); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  return session ? <Workspace session={session} onLogout={logout} /> : <Login onLogin={login} />;
+  // M24A — one appearance per application, persisted under its own key.
+  const { theme, toggle: toggleTheme } = useTheme('agent');
+  return session
+    ? <Workspace session={session} onLogout={logout} theme={theme} onToggleTheme={toggleTheme} />
+    : <Login onLogin={login} theme={theme} onToggleTheme={toggleTheme} />;
 }
 
-function Login({ onLogin }: { onLogin: (s: Session) => void }) {
+function Login({ onLogin, theme, onToggleTheme }: { onLogin: (s: Session) => void; theme: Theme; onToggleTheme: () => void }) {
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [scoutName, setScoutName] = useState('');
@@ -110,8 +117,9 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
   };
   return (
     <div className="login">
+      <div className="login-toolbar"><ThemeToggle theme={theme} onToggle={onToggleTheme} labels={{ aria: t('theme.aria'), light: t('theme.light'), dark: t('theme.dark') }} /></div>
       <div style={{ textAlign: 'center' }}>
-        <h1>Scout<span>Box</span> <span style={{ fontSize: 22, fontWeight: 700, color: 'var(--gold)' }}>Agent</span></h1>
+        <h1><span className="wordmark">ScoutBox</span><span className="brand-sub">Agent</span></h1>
         <div className="tagline">{t('login.tagline')}</div>
         {DEMO_MODE && <div className="pill blue" style={{ marginTop: 10 }}>{t('login.demo')}</div>}
       </div>
@@ -158,7 +166,7 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
   );
 }
 
-function Workspace({ session, onLogout }: { session: Session; onLogout: () => void }) {
+function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Session; onLogout: () => void; theme: Theme; onToggleTheme: () => void }) {
   const [screen, setScreenState] = useState<ScreenId>(() => screenFromHash(window.location.hash) ?? 'home');
   const [client, setClient] = useState<{ id: string; tab: ClientTab } | null>(() => clientFromHash(window.location.hash));
   const [agencyTab, setAgencyTab] = useState<AgencyTab>(() => agencyTabFromHash(window.location.hash) ?? 'overview');
@@ -409,23 +417,21 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
         drawerOpen={drawerOpen}
         onCloseDrawer={() => setDrawerOpen(false)}
         brand={{ short: 'A', long: 'Agent' }}
+        org={{ initials: initials(session.org.name), name: session.org.name, line: session.org.plan }}
         footer={
-          <div className="whoami">
-            <b>{session.scoutName}</b>
-            {session.role} · {session.org.name}
+          <div className="p-account">
+            <div className="p-who"><span className="p-avatar" aria-hidden="true">{initials(session.scoutName)}</span><div><strong>{session.scoutName}</strong><small>{session.role}</small></div></div>
             <OrgChips org={session.org} />
-            {me && <div style={{ marginTop: 6, display: 'flex', gap: 4, flexWrap: 'wrap' }} data-testid="my-tiers">{me.affiliation.tiers.map((x) => <span key={x} className="pill blue" style={{ fontSize: 10.5, padding: '1px 7px' }}>{t(`tier.${x}` as Parameters<typeof t>[0])}</span>)}</div>}
-            <div style={{ marginTop: 6 }}>
-              <label style={{ fontSize: 12 }} title={t('common.machineTranslated')}>
+            {me && <div className="org-chips" data-testid="my-tiers">{me.affiliation.tiers.map((x) => <span key={x} className="pill blue">{t(`tier.${x}` as Parameters<typeof t>[0])}</span>)}</div>}
+            <div className="p-links">
+              <label title={t('common.machineTranslated')}>
                 {t('common.language')}:{' '}
                 <select aria-label={t('common.language')} value={lang} onChange={(e) => { setLang(e.target.value as 'en' | 'fr'); setLangTick((x) => x + 1); }}>
                   <option value="en">English</option>
                   <option value="fr">Français (trad. automatique)</option>
                 </select>
               </label>
-            </div>
-            <div style={{ marginTop: 6 }}>
-              <button onClick={onLogout} style={{ padding: 0, color: 'var(--accent-2)' }}>{t('common.switchOrg')}</button>
+              <button onClick={onLogout}><Icon name="log-out" size={14} />{t('common.switchOrg')}</button>
             </div>
           </div>
         }
@@ -438,6 +444,10 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
           unread={unread}
           bellOpen={bellOpen}
           drawerOpen={drawerOpen}
+          edition="Agent"
+          theme={theme}
+          onToggleTheme={onToggleTheme}
+          onOpenPalette={() => setPaletteOpen(true)}
           onToggleBell={openBell}
           onReport={() => setSafetyOpen(true)}
           onOpenDrawer={() => setDrawerOpen(true)}
@@ -459,6 +469,8 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
         )}
         {activeSection && <SecondaryNav section={activeSection} activeItemId={loc.itemId} onNavigate={setScreen} />}
         <div className="content">
+          {/* M24A — the reference page heading; the top bar keeps the document <h1>. */}
+          <div className="f-heading"><p className="f-display" aria-hidden="true">{screenLabel}</p></div>
           {meError && <div className="notice block" role="alert" data-testid="me-error">{meError}</div>}
           {screen === 'home' && homeCounts && (
             <NeedsAttention unread={unread} pending={homeCounts.pending} disputed={homeCounts.disputed} expiringSoon={homeCounts.expiringSoon} verificationGap={homeCounts.gap} onNavigate={setScreen} />
