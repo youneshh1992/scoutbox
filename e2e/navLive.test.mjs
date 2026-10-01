@@ -747,11 +747,17 @@ for (const width of [390, 360]) {
     const box = await inside(sel);
     if (!box || box.left < 0 || box.right > box.iw) fail(`N17 ${width}px: ${sel} is clipped (${JSON.stringify(box)})`);
   }
-  // Keyboard: name → password → role → button, and the button shows its focus ring.
+  // Keyboard: name → password → (show/hide) → role → button, and the button shows its focus ring.
+  // M24C: the password field carries a show / hide control, so the walk is
+  // "Tab until the submit", at most five presses.
   await page.focus('.enter-row input');
-  await page.keyboard.press('Tab'); await page.keyboard.press('Tab'); await page.keyboard.press('Tab');
-  const focus = await page.evaluate(() => { const el = document.activeElement; const cs = getComputedStyle(el); return { tag: el.tagName, text: el.textContent, outline: cs.outlineStyle, outlineWidth: cs.outlineWidth }; });
-  if (focus.tag !== 'BUTTON' || !/Enter workspace/.test(focus.text)) fail(`N17 ${width}px: three Tabs from the name field must reach Enter workspace (got ${focus.tag} ${focus.text})`);
+  let focus = null;
+  for (let i = 0; i < 5; i++) {
+    await page.keyboard.press('Tab');
+    focus = await page.evaluate(() => { const el = document.activeElement; const cs = getComputedStyle(el); return { tag: el.tagName, text: el.textContent, outline: cs.outlineStyle, outlineWidth: cs.outlineWidth }; });
+    if (focus.tag === 'BUTTON' && /Enter workspace/.test(focus.text)) break;
+  }
+  if (!focus || focus.tag !== 'BUTTON' || !/Enter workspace/.test(focus.text)) fail(`N17 ${width}px: Tab from the name field must reach Enter workspace within five presses (got ${focus?.tag} ${focus?.text})`);
   if (focus.outline === 'none' || focus.outlineWidth === '0px') fail(`N17 ${width}px: the focused button has no visible focus ring`);
   // The real login still works from the keyboard.
   await page.keyboard.press('Enter');
@@ -759,22 +765,24 @@ for (const width of [390, 360]) {
   say(`N17 ${width}px: the login fits (innerWidth ${m.iw} = scrollWidth ${m.sw}), every field and the button are inside the viewport, keyboard login works`);
   await ctx.close();
 }
-// Desktop: the enter row is still one line and nothing moved.
+// Desktop (M24C): the two-panel authentication card — the introduction on
+// the left, the form on the right, the fields stacked in the form, the card
+// no wider than ~1000px and nothing widening the document.
 {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
   await page.goto(CLUB);
   await page.waitForSelector('.org-card', { timeout: 20000 });
   const row = await page.evaluate(() => {
-    // The row is align-items: center, so the children share a vertical centre
-    // (within a pixel), not a top; the cards are align-items: stretch.
+    const box = (sel) => document.querySelector(sel)?.getBoundingClientRect() ?? null;
+    const promo = box('.auth-promo'), form = box('.auth-form'), card = box('.auth-card');
     const centres = [...document.querySelectorAll('.enter-row > *')].map((el) => { const r = el.getBoundingClientRect(); return Math.round(r.top + r.height / 2); });
-    const cards = [...document.querySelectorAll('.org-card')].map((el) => Math.round(el.getBoundingClientRect().top));
-    const rowOneLine = Math.max(...centres) - Math.min(...centres) <= 1;
-    return { rowOneLine, centres, cardsOneLine: new Set(cards).size === 1, sw: document.documentElement.scrollWidth, iw: window.innerWidth };
+    const stacked = new Set(centres).size === centres.length;
+    const sideBySide = !!promo && !!form && Math.round(promo.right) <= Math.round(form.left) + 1 && Math.abs(promo.top - form.top) <= 1;
+    return { sideBySide, stacked, cardWidth: card && Math.round(card.width), promoShare: promo && card ? Math.round((promo.width / card.width) * 100) : null, sw: document.documentElement.scrollWidth, iw: window.innerWidth };
   });
-  if (!row.rowOneLine || !row.cardsOneLine || row.sw > row.iw) fail(`N17 desktop: the login layout changed (${JSON.stringify(row)})`);
-  say('N17 desktop: the organisation cards and the enter row are each still one line');
+  if (!row.sideBySide || !row.stacked || !row.cardWidth || row.cardWidth > 1001 || row.promoShare < 40 || row.promoShare > 50 || row.sw > row.iw) fail(`N17 desktop: the authentication layout is wrong (${JSON.stringify(row)})`);
+  say(`N17 desktop: introduction (${row.promoShare}%) beside the form, fields stacked, card ${row.cardWidth}px, no overflow`);
   await ctx.close();
 }
 

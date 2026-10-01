@@ -150,8 +150,9 @@ await club.waitForSelector('text=boots or trainers', { timeout: 10000 });
 await club.waitForSelector('nav.sidebar .nav-badge', { state: 'detached', timeout: 15000 });
 say('A: opening the thread clears the badge (read state persisted per channel)');
 // read receipt reaches the player
-await player.waitForSelector('text=✓✓ read', { timeout: 15000 });
-say('A: player sees the ✓✓ read receipt');
+// M24C: the receipt reads "You · 10:28 · Read" under the player's own bubble.
+await player.waitForSelector('text=/· Read$/', { timeout: 15000 });
+say('A: player sees the read receipt');
 
 // ================= B. Grassroots ↔ eligible local adult =================
 const grass = await ctxGrass.newPage();
