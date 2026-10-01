@@ -616,7 +616,7 @@ export default function GuardianDashboard() {
 
 const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  scroll: { padding: 18, gap: 10, maxWidth: 560, width: '100%', alignSelf: 'center' },
+  scroll: { paddingHorizontal: 18, paddingTop: 12, paddingBottom: 24, gap: 10 },
   h1: { color: colors.text, fontSize: 26, fontWeight: '800', marginTop: 6 },
   org: { color: colors.text, fontSize: 16, fontWeight: '700' },
   subject: { color: colors.text, fontSize: 15, fontWeight: '700' },

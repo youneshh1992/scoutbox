@@ -16,7 +16,8 @@ import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { Text } from './Text';
 import { useColors } from '../theme';
-import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
+import { Muted, Pill, Row } from './ui';
+import { RefCard, TextButton } from './Reference';
 import { trust, type TrustActor, type TrustSelf } from '../data/trustClient';
 import { pt } from '../i18n';
 
@@ -74,19 +75,31 @@ export function TrustProfileSection({ actor, childName }: { actor: TrustActor; c
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, actor.kind]);
 
+  // M24C — the reference's Trust card: a small label, the band as the
+  // heading, the score on the right, the disclaimer, and a text link that
+  // opens the derivation. The words are the server's, as before.
   return (
-    <Card>
-      <SectionTitle>{pt('trsTitle')}{childName ? ` — ${childName}` : ''}</SectionTitle>
-
-      {!t && !err ? <Muted size={12}>{pt('trsLoading')}</Muted> : null}
-      {err ? <Muted size={12}>{err}</Muted> : null}
+    <RefCard testID="trust-card">
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 14 }}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: colors.muted, fontSize: 11, marginBottom: 5 }}>{pt('trsTitle')}{childName ? ` — ${childName}` : ''}</Text>
+          <Text role="heading" aria-level={3} style={{ color: colors.text, fontSize: 16, fontWeight: '600', letterSpacing: -0.25 }}>{t ? t.bandLabel : err ? err : pt('trsLoading')}</Text>
+        </View>
+        {t ? (
+          <Text style={{ color: colors.text, fontSize: 32, fontWeight: '700', letterSpacing: -1, lineHeight: 38 }}>
+            {t.score}<Text style={{ color: colors.muted, fontSize: 11, fontWeight: '400', letterSpacing: 0 }}>/100</Text>
+          </Text>
+        ) : null}
+      </View>
 
       {t ? (
         <>
-          <TrustScoreHeader t={t} />
-
-          <Row style={{ marginTop: 4 }}>
-            <Button small label={why ? pt('trsHide') : pt('trsWhy')} onPress={() => setWhy((x) => !x)} />
+          <View style={{ marginTop: 12, marginBottom: 8, gap: 2 }}>
+            <Muted size={11}>{trustDisclaimer(t)}</Muted>
+            {t.simulatedEvidenceIncluded ? <Row><Pill label={pt('trsDemoShort')} tone="gold" /><Muted size={11}>{pt('trsDemoSim')}</Muted></Row> : null}
+          </View>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <TextButton size={11} label={why ? pt('trsHide') : pt('trsWhy')} onPress={() => setWhy((x) => !x)} testID="trust-why" />
             <Muted size={11}>{pt('trsPolicy')} {t.policyVersion}</Muted>
           </Row>
 
@@ -131,6 +144,6 @@ export function TrustProfileSection({ actor, childName }: { actor: TrustActor; c
           </View>
         </>
       ) : null}
-    </Card>
+    </RefCard>
   );
 }

@@ -9,6 +9,7 @@ import { View } from 'react-native';
 import { Text, TextInput } from './Text';
 import { useColors, type Palette } from '../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
+import { HistoryList, SectionHead } from './Reference';
 import { m15, type FootballPassport, type PassportActor, type PassportEvent, type PassportShare } from '../data/m15client';
 import { pt } from '../i18n';
 
@@ -199,17 +200,20 @@ export function FootballPassportSection({ actor, isMinor, childName }: { actor: 
         <Muted key={g.id} size={12}>· {pt(GAP_LABEL[g.id] ?? 'm15gapCareer')}</Muted>
       ))}
 
-      {/* Club history — provenance per row, trials never appear here */}
+      {/* Club history — provenance per row, trials never appear here.
+          M24C: the reference's numbered record list. */}
       {p.clubHistory.length > 0 ? (
-        <View style={{ marginTop: 8 }}>
-          <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{pt('m15history')}</Text>
-          {p.clubHistory.map((r2) => (
-            <Row key={`${r2.orgName}-${r2.from}`} style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6, marginTop: 6 }}>
-              <Text style={{ color: colors.text, fontSize: 13, flexShrink: 1 }}>{r2.orgName}{r2.role ? ` · ${r2.role}` : ''}</Text>
-              <Muted size={12}>{r2.from ?? '—'} → {r2.current ? pt('m15now') : r2.to ?? '—'}</Muted>
-              <ProvPill provenance={r2.provenance} />
-            </Row>
-          ))}
+        <View style={{ marginTop: 4 }}>
+          <SectionHead title={pt('m15history')} />
+          <HistoryList
+            testID="passport-history"
+            rows={p.clubHistory.map((r2, i) => ({
+              index: String(i + 1).padStart(2, '0'),
+              title: `${r2.orgName}${r2.role ? ` · ${r2.role}` : ''}`,
+              sub: `${r2.from ?? '—'} → ${r2.current ? pt('m15now') : r2.to ?? '—'}`,
+              right: <ProvPill provenance={r2.provenance} />,
+            }))}
+          />
         </View>
       ) : null}
 

@@ -4,13 +4,15 @@ import { Text } from '../../components/Text';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { PitchBackdrop } from '../../components/PitchBackdrop';
 import { client, type Insights, type PlayerFeedItem } from '../../data/client';
-import type { DirectoryClub, Opportunities } from '../../data/types';
+import type { Channel, DirectoryClub, Opportunities } from '../../data/types';
 import { SAFEGUARDING_PROMISES, U18_PROMISES } from '../../domain/safeguarding';
 import { useSession } from '../../state';
 import { useColors, useStyles, type Palette } from '../../theme';
 import { pt } from '../../i18n';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from '../../components/ui';
 import { PageHeader } from '../../components/PageChrome';
+import { useRouter } from 'expo-router';
+import { DevelopmentCard, Greeting, MobileRow, PassportCard, SectionHead } from '../../components/Reference';
 
 const NOTICED_LABELS: Record<string, string> = {
   first_touch: 'First touch', pace: 'Pace', positioning: 'Positioning', work_rate: 'Work rate',
@@ -39,7 +41,8 @@ const ORGS = [
 export default function Discover() {
   const colors = useColors();
   const styles = useStyles(makeStyles);
-  const { me, isMinor, playerId, notifications, refresh } = useSession();
+  const { me, isMinor, playerId, notifications, refresh, inbox, channels } = useSession();
+  const router = useRouter();
   const [insights, setInsights] = useState<Insights | null>(null);
   const [feed, setFeed] = useState<PlayerFeedItem[]>([]);
   const [directory, setDirectory] = useState<DirectoryClub[]>([]);
@@ -63,6 +66,32 @@ export default function Discover() {
     setRefreshing(false);
   }, [refresh, load]);
 
+  // M24C — the reference Home: greeting, Passport card, what needs you, your
+  // development. Everything below is read from the session the app already
+  // holds; nothing here is a fabricated record.
+  const hour = new Date().getHours();
+  const first = (me?.name ?? '').split(/\s+/)[0] || '';
+  const greeting = pt(hour < 12 ? 'homeMorning' : hour < 18 ? 'homeAfternoon' : 'homeEvening').replace('{name}', first);
+  const dateLine = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+  const availKey = me ? (`avail_${me.availability}` as Parameters<typeof pt>[0]) : null;
+  const passportLine = [me?.position ?? pt('fbNoPosition'), me?.city, availKey ? pt(availKey) : null].filter(Boolean).join(' · ');
+  const unreadIn = (c: Channel) => c.messages.filter((m) => m.sender.kind === 'org_user' && m.ts > (c.readBy?.counterparty ?? 0)).length;
+  const attention: { key: string; icon: string; title: string; sub: string }[] = [
+    ...inbox.filter((r) => r.status === 'pending').map((r) => ({
+      key: r.id,
+      icon: r.type === 'trial' ? 'calendar-days' : 'message-circle',
+      title: 'guardianManaged' in r && r.guardianManaged ? pt('homeWithGuardian') : r.type === 'trial' ? pt('homeTrialInvite') : pt('homeContactRequest'),
+      sub: 'createdAt' in r ? `${r.orgName} · ${new Date(r.createdAt).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}` : r.orgName,
+    })),
+    ...channels.filter((c) => unreadIn(c) > 0).map((c) => ({
+      key: c.id,
+      icon: 'message-circle',
+      title: pt('homeReplied').replace('{name}', c.scoutName),
+      sub: `${c.orgName} · ${pt('homeNewMessages').replace('{n}', String(unreadIn(c)))}`,
+    })),
+  ];
+  const devFocus = me?.nextActions?.find((a) => a.gain)?.label ?? pt('homeDevDefault');
+
   const weekly = feed.find((i): i is Extract<PlayerFeedItem, { type: 'weekly_report' }> => i.type === 'weekly_report');
   const noticed = feed.find((i): i is Extract<PlayerFeedItem, { type: 'scouts_noticed' }> => i.type === 'scouts_noticed');
 
@@ -75,10 +104,24 @@ export default function Discover() {
       >
         <PageHeader title={pt('tabHome')} wordmark />
 
+        <Greeting kicker={dateLine} title={greeting} testID="home-greeting" />
+        {me && (
+          <PassportCard name={me.name} line={passportLine} label={pt('homePassportLabel')} linkLabel={pt('homeViewPassport')} onOpen={() => router.push('/football')} />
+        )}
+        <SectionHead title={pt('homeAttention')} count={attention.length} testID="home-attention" />
+        {attention.length > 0
+          ? attention.map((a) => <MobileRow key={a.key} icon={a.icon} title={a.title} sub={a.sub} onPress={() => router.push('/inbox')} />)
+          : <Muted size={12.5}>{pt('homeNothingPending')}</Muted>}
+        <SectionHead title={pt('homeDevelopment')} link={pt('homeView')} onLink={() => router.push('/football?tab=development')} />
+        <DevelopmentCard icon="scan-line" title={devFocus} sub={pt('homeDevHint')}>
+          <Button primary label={pt('homeStartPractice')} onPress={() => router.push('/football?tab=boxcam')} />
+        </DevelopmentCard>
+
+        <SectionHead title={pt('homeMore')} />
         {weekly && (
           <Card>
             <Row style={{ justifyContent: 'space-between' }}>
-              <SectionTitle>📬 Your weekly scout report</SectionTitle>
+              <SectionTitle>Your weekly scout report</SectionTitle>
               {weekly.report.streak > 0 && <Pill label={`🔥 ${weekly.report.streak}-day streak`} tone="gold" />}
             </Row>
             <Muted size={13.5}>
@@ -100,7 +143,7 @@ export default function Discover() {
 
         {me?.pathway && (
           <Card>
-            <SectionTitle>🛤 Your pathway</SectionTitle>
+            <SectionTitle>Your pathway</SectionTitle>
             <Row style={{ gap: 6 }}>
               {me.pathway.steps.map((s, i) => (
                 <View key={s.key} style={{ flex: 1, alignItems: 'center', gap: 4 }}>
@@ -127,7 +170,7 @@ export default function Discover() {
 
         {opportunities && opportunities.clubs.length > 0 && (
           <Card>
-            <SectionTitle>📡 Clubs within reach</SectionTitle>
+            <SectionTitle>Clubs within reach</SectionTitle>
             <Muted size={12.5}>
               The 50 km rule works both ways: every club below can actually sign you.
               {opportunities.lookingForYou ? ` ${opportunities.lookingForYou} of them are looking for your position.` : ''}
@@ -172,7 +215,7 @@ export default function Discover() {
 
         {noticed && (
           <Card>
-            <SectionTitle>👀 What scouts noticed</SectionTitle>
+            <SectionTitle>What scouts noticed</SectionTitle>
             <Row>
               {Object.entries(noticed.tags).sort((a, b) => b[1] - a[1]).map(([t, n]) => (
                 <Pill key={t} label={`${NOTICED_LABELS[t] ?? t} ×${n}`} tone="gold" />
@@ -186,7 +229,7 @@ export default function Discover() {
 
         {me?.nextActions && me.nextActions.length > 0 && (
           <Card>
-            <SectionTitle>💪 Build your profile strength</SectionTitle>
+            <SectionTitle>Build your profile strength</SectionTitle>
             {me.nextActions.map((a) => (
               <Row key={a.id}>
                 <Pill label={a.gain ? `+${a.gain}` : '✅'} tone={a.gain ? 'green' : 'gold'} />
@@ -198,7 +241,7 @@ export default function Discover() {
 
         {insights && (
           <Card>
-            <SectionTitle>👁 Who&apos;s watching you</SectionTitle>
+            <SectionTitle>Who&apos;s watching you</SectionTitle>
             {insights.weeklySeries && insights.weeklySeries.some((v) => v > 0) && (
               <Row style={{ alignItems: 'flex-end', height: 44, gap: 4 }}>
                 {insights.weeklySeries.map((v, i) => {
@@ -312,7 +355,7 @@ export default function Discover() {
 
 const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  scroll: { padding: 18, gap: 10, maxWidth: 560, width: '100%', alignSelf: 'center' },
+  scroll: { paddingHorizontal: 18, paddingTop: 12, paddingBottom: 24, gap: 10 },
   cardTitle: { color: colors.text, fontSize: 15.5, fontWeight: '700' },
   insightTile: {
     flexGrow: 1,

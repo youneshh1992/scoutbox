@@ -291,7 +291,7 @@ export default function You() {
 
 const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  scroll: { padding: 18, gap: 10, maxWidth: 560, width: '100%', alignSelf: 'center' },
+  scroll: { paddingHorizontal: 18, paddingTop: 12, paddingBottom: 24, gap: 10 },
   cardTitle: { color: colors.text, fontSize: 16, fontWeight: '700' },
   timeInput: {
     borderWidth: 1, borderColor: colors.line, borderRadius: 8, color: colors.text,

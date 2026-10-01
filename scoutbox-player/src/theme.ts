@@ -52,6 +52,13 @@ export const palettes = {
     grain: 'rgba(36,59,44,0.018)',
     band: 'rgba(36,59,44,0.009)',
     veil: 'rgba(30,41,35,0.42)',
+    frame: '#e9eee6',      // the quiet surround outside the phone viewport (web only)
+    frameLine: '#d9dfd5',
+    training: '#dfead9',   // the Box Cam hero
+    trainingDisc: '#f6fbf0',
+    trainingLine: '#788675',
+    bubbleMeta: '#75806c',
+    chatDate: '#87917e',
   },
   dark: {
     bg: '#202223',
@@ -88,6 +95,13 @@ export const palettes = {
     grain: 'rgba(255,255,255,0.012)',
     band: 'rgba(255,255,255,0.009)',
     veil: 'rgba(0,0,0,0.62)',
+    frame: '#181b1c',
+    frameLine: '#2c3031',
+    training: '#2c3330',
+    trainingDisc: '#414a44',
+    trainingLine: '#5c6a5e',
+    bubbleMeta: '#b9c2b8',
+    chatDate: '#9aa39a',
   },
 } as const;
 
@@ -136,7 +150,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
     const root = document.documentElement;
     root.setAttribute('data-app', 'player'); root.setAttribute('data-theme', scheme); root.style.colorScheme = scheme;
-    document.body.style.backgroundColor = palettes[scheme].bg;
+    // M24C — the page behind the phone viewport is the quiet surround; the
+    // viewport itself paints the app background.
+    document.body.style.backgroundColor = palettes[scheme].frame;
   }, [scheme]);
   const set = useCallback((s: Scheme) => { setScheme(s); void writeStored(s); }, []);
   const toggle = useCallback(() => set(scheme === 'dark' ? 'light' : 'dark'), [scheme, set]);
@@ -145,6 +161,29 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 }
 
 export const useTheme = () => useContext(ThemeContext);
+
+/** M24C — the authentication composition has its own brand colours (the
+ *  deep-green form panel) whatever appearance the player saved. Rendering a
+ *  subtree under this provider makes every existing component read those
+ *  colours; the saved light/dark choice is untouched and applies again the
+ *  moment the person is signed in. */
+export const AUTH_PANEL: Palette = {
+  ...palettes.dark,
+  bg: '#103a32', bg2: '#0e332c', panel: '#0d2f28', panel2: '#164839', line: '#2f6a57',
+  text: '#f7faf7', muted: '#a9d9c2',
+  accent: '#f7faf7', accentInk: '#103a32', accentText: '#00e676', accent2: '#8fe6b8',
+  tabActive: '#f7faf7', tabActiveBg: '#164839', tabInactive: '#a9d9c2',
+  iconBg: '#164839', iconFg: '#8fe6b8', greenBg: '#164839', greenInk: '#c8f3dc', infoBg: '#164839', infoInk: '#c8f3dc',
+  danger: '#ffb3a8', dangerBg: '#4a2b27', dangerInk: '#ffd4cc', knob: '#f7faf7', track: '#2f6a57',
+  frame: '#00e676', frameLine: '#00e676',
+};
+export const AUTH_PAGE = { green: '#00e676', promo: '#68e99f', ink: '#113822', inkSoft: '#1f5a3a' } as const;
+
+export function ThemeOverride({ colors, children }: { colors: Palette; children: ReactNode }) {
+  const base = useContext(ThemeContext);
+  const value = useMemo<ThemeValue>(() => ({ ...base, colors }), [base, colors]);
+  return createElement(ThemeContext.Provider, { value }, children);
+}
 export const useColors = (): Palette => useContext(ThemeContext).colors;
 
 /** Theme-aware StyleSheet: `const styles = useStyles(makeStyles)` where

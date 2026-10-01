@@ -7,6 +7,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { SessionProvider } from '../state';
 import { palettes, ThemeProvider, useTheme } from '../theme';
 import { Text, FONT_FILES } from '../components/Text';
+import { MobileViewport } from '../components/MobileViewport';
 
 // Root error boundary: a runtime failure renders a recoverable screen, never
 // a silent white page. Server data is untouched — reloading is always safe.
@@ -47,12 +48,16 @@ function Themed() {
   return (
     <>
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: colors.bg },
-        }}
-      />
+      {/* M24C — every route, its header and its bottom navigation render
+          inside the phone viewport; a wide browser only adds the surround. */}
+      <MobileViewport>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: colors.bg },
+          }}
+        />
+      </MobileViewport>
     </>
   );
 }

@@ -30,13 +30,15 @@ export function Pill({ label, tone = 'default' }: { label: string; tone?: 'defau
   );
 }
 
-export function Button({ label, onPress, primary, danger, disabled, small, testID }: {
+export function Button({ label, onPress, primary, danger, disabled, small, pill, testID }: {
   label: string;
   onPress: () => void;
   primary?: boolean;
   danger?: boolean;
   disabled?: boolean;
   small?: boolean;
+  /** M24C — the authentication submit: a compact rounded pill. */
+  pill?: boolean;
   /**
    * Optional stable handle for a live browser test. A label is the accessible
    * name and is translated; a testID is neither, so a journey can name the
@@ -59,6 +61,7 @@ export function Button({ label, onPress, primary, danger, disabled, small, testI
       style={({ pressed }) => [
         styles.btn,
         small && { paddingVertical: 7, paddingHorizontal: 12, minHeight: 34 },
+        pill && { borderRadius: 999, paddingHorizontal: 24, alignSelf: 'flex-start', minHeight: 42 },
         primary && { backgroundColor: colors.accent, borderColor: colors.accent },
         danger && { backgroundColor: colors.dangerBg, borderColor: colors.danger },
         (pressed || disabled) && { opacity: 0.6 },

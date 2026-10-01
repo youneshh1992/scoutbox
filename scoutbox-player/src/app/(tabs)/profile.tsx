@@ -584,7 +584,7 @@ function StatTile({ icon, v, k }: { icon: string; v: string; k: string }) {
 
 const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  scroll: { padding: 18, gap: 12, maxWidth: 560, width: '100%', alignSelf: 'center' },
+  scroll: { paddingHorizontal: 18, paddingTop: 12, paddingBottom: 24, gap: 12 },
   identityRow: { flexDirection: 'row', gap: 16, alignItems: 'flex-start' },
   avatarCard: {
     width: 128,

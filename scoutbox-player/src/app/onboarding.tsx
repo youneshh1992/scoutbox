@@ -1,21 +1,20 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from '../components/Text';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { PitchBackdrop } from '../components/PitchBackdrop';
 import { ThemeSwitch } from '../components/ThemeSwitch';
 import { useRouter } from 'expo-router';
 import { client, ClientError, type DemoIdentity } from '../data/client';
 import { adultAgeFor, ageOn, SAFEGUARDING_PROMISES, U18_PROMISES } from '../domain/safeguarding';
 import { POSITIONS } from '../domain/types';
 import { useSession } from '../state';
-import { useColors, useStyles, type Palette } from '../theme';
-import { Button, Card, Muted, Pill, Row, SectionTitle } from '../components/ui';
+import { AUTH_PAGE, AUTH_PANEL, ThemeOverride, useColors, useStyles, type Palette } from '../theme';
+import { Button, Card, Muted, Row, SectionTitle } from '../components/ui';
 
 const COUNTRIES = ['GB', 'PT', 'FR', 'SE', 'PL', 'NG', 'GH', 'AR', 'JP', 'KR', 'TH', 'SG', 'US'];
 
 type Step =
-  | 'welcome' | 'pair'
+  | 'welcome' | 'signin' | 'pair'
   | 'details' | 'football' | 'needs-guardian'
   | 'g-account' | 'g-email' | 'g-verify' | 'g-disclaimer' | 'g-child';
 
@@ -31,18 +30,18 @@ function RoleCard({ icon, title, subtitle, accent, onPress }: {
       onPress={onPress}
       style={({ pressed }) => [
         styles.roleCard,
-        accent && { borderColor: colors.accent, backgroundColor: colors.tabActiveBg },
+        accent && { borderColor: colors.accentText, backgroundColor: colors.tabActiveBg },
         pressed && { opacity: 0.75, transform: [{ scale: 0.99 }] },
       ]}
     >
-      <View style={[styles.roleIcon, accent && { borderColor: colors.accent }]}>
+      <View style={[styles.roleIcon, accent && { borderColor: colors.accentText }]}>
         <Text style={{ fontSize: 24 }}>{icon}</Text>
       </View>
       <View style={{ flex: 1, gap: 3 }}>
         <Text style={styles.roleTitle}>{title}</Text>
         <Muted size={12.5}>{subtitle}</Muted>
       </View>
-      <Text style={{ color: accent ? colors.accent : colors.muted, fontSize: 20 }}>›</Text>
+      <Text style={{ color: accent ? colors.accentText : colors.muted, fontSize: 20 }}>›</Text>
     </Pressable>
   );
 }
@@ -84,7 +83,7 @@ function Avatar({ name, tone }: { name: string; tone?: 'gold' }) {
   const initials = name.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
   return (
     <View style={[styles.avatar, tone === 'gold' && { borderColor: colors.gold }]}>
-      <Text style={{ color: tone === 'gold' ? colors.gold : colors.accent, fontWeight: '800', fontSize: 15 }}>{initials}</Text>
+      <Text style={{ color: tone === 'gold' ? colors.gold : colors.accentText, fontWeight: '800', fontSize: 15 }}>{initials}</Text>
     </View>
   );
 }
@@ -101,7 +100,11 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 export default function Onboarding() {
   const colors = useColors();
-  const styles = useStyles(makeStyles);
+  // M24C — the screen's own styles are built from the authentication panel's
+  // palette: everything the screen lays out itself sits inside that panel,
+  // whatever appearance the player saved. The sub-components read the same
+  // palette through the ThemeOverride below.
+  const styles = useMemo(() => makeStyles(AUTH_PANEL), []);
   const router = useRouter();
   const { loginPlayer, loginGuardian, mode } = useSession();
   const [step, setStep] = useState<Step>('welcome');
@@ -144,6 +147,47 @@ export default function Onboarding() {
 
   // child device pairing
   const [pairCode, setPairCode] = useState('');
+
+  // M24C — sign in with the credentials the backend already accepts: a
+  // guardian's email + password (/auth/guardian/login) or a player's id +
+  // password (/auth/player/login). Nothing new is minted here; a failed
+  // attempt keeps the non-sensitive input and shows the server's reason.
+  const [siEmail, setSiEmail] = useState('');
+  const [siPassword, setSiPassword] = useState('');
+  const [siPlayerId, setSiPlayerId] = useState('');
+  const [siPlayerPassword, setSiPlayerPassword] = useState('');
+  const [showPw, setShowPw] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const signInGuardian = async () => {
+    if (busy) return;
+    setError(null);
+    if (!siEmail.trim().includes('@')) return setError('Enter the email address of your guardian account.');
+    if (!siPassword) return setError('Enter your password.');
+    setBusy('guardian');
+    try {
+      const { guardianId } = await client.guardianLogin(siEmail.trim(), siPassword);
+      setSiPassword('');
+      loginGuardian(guardianId);
+      router.replace('/guardian');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Sign-in failed.');
+    } finally { setBusy(null); }
+  };
+  const signInPlayer = async () => {
+    if (busy) return;
+    setError(null);
+    if (!siPlayerId.trim()) return setError('Enter your player id.');
+    if (!siPlayerPassword) return setError('Enter your password.');
+    setBusy('player');
+    try {
+      await client.login(siPlayerId.trim(), siPlayerPassword);
+      setSiPlayerPassword('');
+      loginPlayer(siPlayerId.trim());
+      router.replace('/(tabs)/discover');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Sign-in failed.');
+    } finally { setBusy(null); }
+  };
 
   // Live mode: an unreachable backend is an actionable error, never a silent
   // fall-back to fabricated data.
@@ -292,27 +336,45 @@ export default function Onboarding() {
   };
 
   const onGuardianPath = step.startsWith('g-');
+  const entry = step === 'welcome' || step === 'signin';
+  const stepTitle: Partial<Record<Step, string>> = {
+    pair: 'Pair this device', details: 'Create your player account', football: 'Your football', 'needs-guardian': 'Under-18s join with a guardian',
+    'g-account': 'Guardian account', 'g-email': 'Email verification', 'g-verify': 'ID verification', 'g-disclaimer': 'Safeguarding disclaimer', 'g-child': 'Your child',
+  };
 
+  // M24C — the authentication composition (reference B, stacked for a phone):
+  // the ScoutBox Player mark near the top, a compact green introduction, then
+  // the deep-green form panel. The panel keeps its brand colours whatever
+  // appearance the player saved; every existing step renders inside it.
   return (
-    <SafeAreaView style={styles.safe}>
-        <PitchBackdrop />
-      <ScrollView contentContainerStyle={styles.scroll}>
-        {/* ---- hero */}
-        <View style={styles.themeRow}><ThemeSwitch /></View>
-        <View style={styles.hero}>
-          <Text style={styles.logo}>
-            ScoutBox<Text style={{ color: colors.accent }}>▪</Text>
-          </Text>
-          <Text style={styles.tagline}>Build a verified profile. Get discovered. Never pay to be seen.</Text>
-          <Row style={{ justifyContent: 'center', marginTop: 4 }}>
-            <Pill label="Free for players — forever" tone="green" />
-            <Pill label="Safeguarding-first" tone="blue" />
-            {mode === 'demo' && <Pill label="Demo mode — no server connected" />}
-          </Row>
-          <Text style={styles.signature} testID="login-signature">
-            BUILT BY <Text style={styles.signatureName}>Guni &amp; Younes</Text>
-          </Text>
+    <SafeAreaView style={styles.safe} testID="auth-screen">
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+        <View style={styles.topRow}>
+          <View style={styles.brand} accessibilityRole="header" aria-level={1} accessibilityLabel="ScoutBox Player">
+            <Text style={styles.logo}>ScoutBox<Text style={{ color: AUTH_PAGE.ink }}>▪</Text></Text>
+            <Text style={styles.product}>Player</Text>
+          </View>
+          <ThemeSwitch />
         </View>
+
+        {entry && (
+          <View style={styles.intro} testID="auth-intro">
+            <Text style={styles.introTitle}>Your football. Your next opportunity.</Text>
+            <View style={{ gap: 6 }}>
+              {[
+                'A verified Football Passport that clubs can read.',
+                'No unsolicited contact: every approach needs your yes.',
+                'Trials, Offers and signings in one place, on your terms.',
+              ].map((line) => (
+                <View key={line.slice(0, 16)} style={{ flexDirection: 'row', gap: 8 }}>
+                  <Text style={styles.introMark}>✓</Text>
+                  <Text style={styles.introLine}>{line}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
 
         {serverDown && (
           <Card style={{ borderColor: colors.danger, gap: 8 }}>
@@ -325,8 +387,55 @@ export default function Onboarding() {
           </Card>
         )}
 
-        {onGuardianPath && (
-          <StepDots current={{ 'g-account': 1, 'g-email': 2, 'g-verify': 3, 'g-disclaimer': 4, 'g-child': 5 }[step as 'g-account'] ?? 1} />
+        <ThemeOverride colors={AUTH_PANEL}>
+        <View style={styles.panel} testID="auth-panel">
+        {entry ? (
+          <View role="tablist" aria-label="Sign in or sign up" style={styles.authTabs}>
+            {([['signin', 'Sign in'], ['welcome', 'Sign up']] as const).map(([k, label]) => {
+              const on = step === k;
+              return (
+                <Pressable key={k} role="tab" aria-selected={on} testID={`auth-tab-${k}`} onPress={() => { setError(null); setStep(k); }} style={({ pressed }) => [styles.authTab, pressed && { opacity: 0.7 }]}>
+                  <Text style={[styles.authTabText, on && styles.authTabTextOn]}>{label}</Text>
+                  {k === 'signin' ? <Text style={styles.authTabDivider}>|</Text> : null}
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : (
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 6 }}>
+            <Text role="heading" aria-level={2} style={styles.stepHeading}>{stepTitle[step] ?? ''}</Text>
+            {onGuardianPath && (
+              <StepDots current={{ 'g-account': 1, 'g-email': 2, 'g-verify': 3, 'g-disclaimer': 4, 'g-child': 5 }[step as 'g-account'] ?? 1} />
+            )}
+          </View>
+        )}
+
+        {step === 'signin' && (
+          <View style={{ gap: 12 }} testID="auth-signin">
+            <SectionTitle>Parent or guardian</SectionTitle>
+            <Field label="Email">
+              <TextInput style={styles.input} placeholder="you@example.com" placeholderTextColor={AUTH_PANEL.muted} value={siEmail} onChangeText={setSiEmail} autoCapitalize="none" autoComplete="email" keyboardType="email-address" textContentType="emailAddress" inputMode="email" accessibilityLabel="Guardian email" />
+            </Field>
+            <Field label="Password">
+              <View style={styles.pwRow}>
+                <TextInput style={[styles.input, { flex: 1 }]} placeholder="Your password" placeholderTextColor={AUTH_PANEL.muted} value={siPassword} onChangeText={setSiPassword} secureTextEntry={!showPw} autoComplete="current-password" textContentType="password" accessibilityLabel="Guardian password" onSubmitEditing={() => void signInGuardian()} />
+                <Pressable onPress={() => setShowPw((x) => !x)} accessibilityRole="button" accessibilityLabel={showPw ? 'Hide password' : 'Show password'} hitSlop={8} style={styles.pwToggle}><Text style={styles.pwToggleText}>{showPw ? 'Hide' : 'Show'}</Text></Pressable>
+              </View>
+            </Field>
+            <Button primary pill label={busy === 'guardian' ? 'Signing in…' : 'Sign in'} disabled={busy !== null} onPress={() => void signInGuardian()} testID="auth-signin-guardian" />
+
+            <SectionTitle>Player (18+)</SectionTitle>
+            <Field label="Player id">
+              <TextInput style={styles.input} placeholder="The id on your profile" placeholderTextColor={AUTH_PANEL.muted} value={siPlayerId} onChangeText={setSiPlayerId} autoCapitalize="none" autoComplete="username" accessibilityLabel="Player id" />
+            </Field>
+            <Field label="Password">
+              <TextInput style={styles.input} placeholder="Your password" placeholderTextColor={AUTH_PANEL.muted} value={siPlayerPassword} onChangeText={setSiPlayerPassword} secureTextEntry={!showPw} autoComplete="current-password" textContentType="password" accessibilityLabel="Player password" onSubmitEditing={() => void signInPlayer()} />
+            </Field>
+            <Button primary pill label={busy === 'player' ? 'Signing in…' : 'Sign in as player'} disabled={busy !== null} onPress={() => void signInPlayer()} testID="auth-signin-player" />
+            <Pressable onPress={() => setStep('pair')} style={({ pressed }) => [styles.pairLink, pressed && { opacity: 0.7 }]}>
+              <Text style={{ color: AUTH_PANEL.accent2, fontSize: 13.5, fontWeight: '600' }}>I have a code from my parent/guardian</Text>
+            </Pressable>
+          </View>
         )}
 
         {step === 'welcome' && (
@@ -345,42 +454,36 @@ export default function Onboarding() {
               onPress={() => setStep('g-account')}
             />
             <Pressable onPress={() => setStep('pair')} style={({ pressed }) => [styles.pairLink, pressed && { opacity: 0.7 }]}>
-              <Text style={{ color: colors.accent2, fontSize: 13.5, fontWeight: '600' }}>
+              <Text style={{ color: AUTH_PANEL.accent2, fontSize: 13.5, fontWeight: '600' }}>
                 🔗  I have a code from my parent/guardian
               </Text>
             </Pressable>
+          </>
+        )}
 
-            <SectionTitle>Our promises to every player</SectionTitle>
-            <CheckList items={SAFEGUARDING_PROMISES} />
-
-            <SectionTitle>Under-18? The rules that protect you</SectionTitle>
-            <CheckList items={U18_PROMISES.slice(0, 3)} mark="🛡" markColor={colors.accent2} />
-
-            {identities.length > 0 && (
-              <>
-                <SectionTitle>Or continue as a demo account</SectionTitle>
-                <Card style={{ gap: 0, paddingVertical: 4 }}>
-                  {identities.map((d, i) => (
-                    <View key={d.id} style={[styles.demoRow, i > 0 && styles.demoRowBorder]}>
-                      <Avatar name={d.name} />
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.name}>{d.name}</Text>
-                        <Muted size={12}>{d.position}</Muted>
-                      </View>
-                      <Button small label="Enter" onPress={() => enterAsPlayer(d.id)} />
-                    </View>
-                  ))}
-                  <View style={[styles.demoRow, styles.demoRowBorder]}>
-                    <Avatar name="Amara Adebayo" tone="gold" />
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.name}>Amara Adebayo</Text>
-                      <Muted size={12}>Parent / guardian of Guni (14)</Muted>
-                    </View>
-                    <Button small label="Enter" onPress={enterDemoGuardian} />
+        {entry && identities.length > 0 && (
+          <>
+            <SectionTitle>Or continue as a demo account</SectionTitle>
+            <Card style={{ gap: 0, paddingVertical: 4 }} testID="demo-identities">
+              {identities.map((d, i) => (
+                <View key={d.id} style={[styles.demoRow, i > 0 && styles.demoRowBorder]}>
+                  <Avatar name={d.name} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.name}>{d.name}</Text>
+                    <Muted size={12}>{d.position}</Muted>
                   </View>
-                </Card>
-              </>
-            )}
+                  <Button small label="Enter" onPress={() => enterAsPlayer(d.id)} />
+                </View>
+              ))}
+              <View style={[styles.demoRow, styles.demoRowBorder]}>
+                <Avatar name="Amara Adebayo" tone="gold" />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.name}>Amara Adebayo</Text>
+                  <Muted size={12}>Parent / guardian of Guni (14)</Muted>
+                </View>
+                <Button small label="Enter" onPress={enterDemoGuardian} />
+              </View>
+            </Card>
           </>
         )}
 
@@ -462,7 +565,7 @@ export default function Onboarding() {
               Self sign-up is {adultAgeFor(country)}+ in your country. Younger players join through a
               parent or guardian — the API itself refuses a minor self-signup.
             </Muted>
-            <Button primary label="Continue" onPress={checkDetails} />
+            <Button primary pill label="Continue" onPress={checkDetails} />
             <Button label="Back" onPress={() => setStep('welcome')} />
           </>
         )}
@@ -485,7 +588,7 @@ export default function Onboarding() {
                 ))}
               </Row>
             </Card>
-            <Button primary label="Create profile" onPress={create} />
+            <Button primary pill label="Create profile" onPress={create} />
             <Button label="Back" onPress={() => setStep('details')} />
           </>
         )}
@@ -498,7 +601,7 @@ export default function Onboarding() {
               keeps you safe. You still upload your videos, edit your stats and complete drills; scouts can
               only ever talk to your parent, never to you.
             </Muted>
-            <Button primary label="Set up the guardian account" onPress={() => setStep('g-account')} />
+            <Button primary pill label="Set up the guardian account" onPress={() => setStep('g-account')} />
             <Button label="Back to start" onPress={() => setStep('welcome')} />
           </Card>
         )}
@@ -520,7 +623,7 @@ export default function Onboarding() {
               <Field label="Password">
                 <TextInput style={styles.input} placeholder="Password (required, 8+ characters)" placeholderTextColor={colors.muted} value={gPassword} onChangeText={setGPassword} secureTextEntry />
               </Field>
-              <Button primary label="Continue to email verification" onPress={guardianCreate} />
+              <Button primary pill label="Continue to email verification" onPress={guardianCreate} />
             </Card>
             <Button label="Back" onPress={() => setStep('welcome')} />
           </>
@@ -547,7 +650,7 @@ export default function Onboarding() {
                 onChangeText={(v) => setGEmailCode(v.toUpperCase().slice(0, 6))}
                 autoCapitalize="characters"
               />
-              <Button primary label="Verify email" onPress={guardianVerifyEmail} />
+              <Button primary pill label="Verify email" onPress={guardianVerifyEmail} />
             </Card>
           </>
         )}
@@ -567,7 +670,7 @@ export default function Onboarding() {
               <Field label="Document reference">
                 <TextInput style={styles.input} placeholder="Document reference number" placeholderTextColor={colors.muted} value={docRef} onChangeText={setDocRef} />
               </Field>
-              <Button primary label="Verify my identity" onPress={guardianVerify} />
+              <Button primary pill label="Verify my identity" onPress={guardianVerify} />
             </Card>
           </>
         )}
@@ -580,7 +683,7 @@ export default function Onboarding() {
               By continuing you confirm you are this child&apos;s parent or legal guardian, you will manage
               all club contact on their behalf, and you accept the rules above.
             </Muted>
-            <Button primary label="I agree — continue" onPress={guardianDisclaimer} />
+            <Button primary pill label="I agree — continue" onPress={guardianDisclaimer} />
           </>
         )}
 
@@ -607,41 +710,64 @@ export default function Onboarding() {
                 <Button key={p} small label={p} primary={childPosition === p} onPress={() => setChildPosition(p)} />
               ))}
             </Row>
-            <Button primary label="Create child profile" onPress={guardianAddChild} />
+            <Button primary pill label="Create child profile" onPress={guardianAddChild} />
           </>
         )}
 
         {error && (
-          <Card style={{ borderColor: colors.danger }}>
-            <Text style={{ color: colors.danger }}>{error}</Text>
+          <Card style={{ borderColor: AUTH_PANEL.danger }} testID="auth-error">
+            <Text style={{ color: AUTH_PANEL.danger }} role="alert">{error}</Text>
           </Card>
         )}
+        </View>
+        </ThemeOverride>
+
+        {step === 'welcome' && (
+          <>
+            <Text style={styles.outsideTitle}>Our promises to every player</Text>
+            <CheckList items={SAFEGUARDING_PROMISES} />
+            <Text style={styles.outsideTitle}>Under-18? The rules that protect you</Text>
+            <CheckList items={U18_PROMISES.slice(0, 3)} mark="🛡" markColor={colors.accent2} />
+          </>
+        )}
+
+        <View style={styles.footer}>
+          {mode === 'demo' && <Text style={styles.footerNote}>Demo mode — no server connected</Text>}
+          <Text style={styles.signature} testID="login-signature">
+            BUILT BY <Text style={styles.signatureName}>Guni &amp; Younes</Text>
+          </Text>
+        </View>
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const makeStyles = (colors: Palette) => StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
-  scroll: { padding: 20, gap: 12, maxWidth: 520, width: '100%', alignSelf: 'center' },
-  themeRow: { flexDirection: 'row', justifyContent: 'flex-end', marginBottom: -8 },
-  hero: { alignItems: 'center', gap: 6, paddingTop: 14, paddingBottom: 10 },
-  crest: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: colors.panel2,
-    borderWidth: 2,
-    borderColor: colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 2,
-  },
-  logo: { color: colors.text, fontSize: 34, fontWeight: '800', letterSpacing: -0.5 },
-  tagline: { color: colors.muted, fontSize: 13.5, textAlign: 'center' },
+  // M24C — the page is the brand green; the form panel is the deep green.
+  safe: { flex: 1, backgroundColor: AUTH_PAGE.green },
+  scroll: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 28, gap: 14 },
+  topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 48 },
+  brand: { flexDirection: 'row', alignItems: 'baseline', gap: 7 },
+  logo: { color: AUTH_PAGE.ink, fontSize: 26, fontWeight: '800', letterSpacing: -1.1 },
+  product: { color: AUTH_PAGE.inkSoft, fontSize: 12, fontWeight: '600' },
+  intro: { backgroundColor: AUTH_PAGE.promo, borderRadius: 14, padding: 18, gap: 12 },
+  introTitle: { color: AUTH_PAGE.ink, fontSize: 22, fontWeight: '700', letterSpacing: -0.5, lineHeight: 27 },
+  introMark: { color: AUTH_PAGE.ink, fontSize: 13, fontWeight: '800', lineHeight: 19 },
+  introLine: { color: AUTH_PAGE.ink, fontSize: 13, lineHeight: 19, flex: 1 },
+  panel: { backgroundColor: AUTH_PANEL.bg, borderRadius: 14, padding: 18, gap: 12, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 18, shadowOffset: { width: 0, height: 8 } },
+  authTabs: { flexDirection: 'row', alignItems: 'center', gap: 2, marginBottom: 4 },
+  authTab: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingRight: 8, minHeight: 44 },
+  authTabText: { color: AUTH_PANEL.muted, fontSize: 15, fontWeight: '500' },
+  authTabTextOn: { color: AUTH_PANEL.text, fontWeight: '700' },
+  authTabDivider: { color: AUTH_PANEL.line, fontSize: 15 },
+  stepHeading: { color: AUTH_PANEL.text, fontSize: 17, fontWeight: '600', letterSpacing: -0.3, flexShrink: 1 },
+  outsideTitle: { color: AUTH_PAGE.ink, fontSize: 17, fontWeight: '600', letterSpacing: -0.3, marginTop: 10 },
+  footer: { alignItems: 'center', gap: 6, marginTop: 8 },
+  footerNote: { color: AUTH_PAGE.inkSoft, fontSize: 12 },
   // The makers' signature on the entry screen: quiet, centred, never a control.
-  signature: { color: colors.muted, fontSize: 12, letterSpacing: 0.4, textAlign: 'center', marginTop: 6 },
-  signatureName: { color: colors.accentText, fontSize: 13.5, fontWeight: '700', letterSpacing: 0 },
+  signature: { color: AUTH_PAGE.inkSoft, fontSize: 12, letterSpacing: 0.4, textAlign: 'center' },
+  signatureName: { color: AUTH_PAGE.ink, fontSize: 13.5, fontWeight: '700', letterSpacing: 0 },
   name: { color: colors.text, fontSize: 16, fontWeight: '700' },
   roleCard: {
     flexDirection: 'row',
@@ -650,7 +776,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     backgroundColor: colors.panel,
     borderColor: colors.line,
     borderWidth: 1,
-    borderRadius: 16,
+    borderRadius: 14,
     padding: 16,
   },
   roleIcon: {
@@ -664,7 +790,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     justifyContent: 'center',
   },
   roleTitle: { color: colors.text, fontSize: 16, fontWeight: '700' },
-  pairLink: { alignItems: 'center', paddingVertical: 6 },
+  pairLink: { alignItems: 'center', paddingVertical: 8, minHeight: 44, justifyContent: 'center' },
   dotsRow: { flexDirection: 'row', gap: 8, justifyContent: 'center', paddingVertical: 2 },
   dot: {
     width: 10,
@@ -682,7 +808,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     borderRadius: 20,
     backgroundColor: colors.bg2,
     borderWidth: 1.5,
-    borderColor: colors.accent,
+    borderColor: colors.accentText,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -694,15 +820,20 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     padding: 10,
   },
   fieldLabel: { color: colors.muted, fontSize: 11.5, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8 },
+  // The reference's minimalist underlined input.
   input: {
-    backgroundColor: colors.bg2,
-    borderColor: colors.line,
-    borderWidth: 1,
-    borderRadius: 10,
+    backgroundColor: 'transparent',
+    borderBottomColor: colors.line,
+    borderBottomWidth: 1,
+    borderRadius: 0,
     color: colors.text,
-    paddingHorizontal: 14,
+    paddingHorizontal: 0,
     paddingVertical: 10,
     fontSize: 15,
+    minHeight: 44,
   },
+  pwRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  pwToggle: { paddingVertical: 10, paddingHorizontal: 4, minHeight: 44, justifyContent: 'center' },
+  pwToggleText: { color: colors.accent2, fontSize: 12.5, fontWeight: '600' },
   codeInput: { letterSpacing: 6, textAlign: 'center', fontSize: 20, fontWeight: '700' },
 });

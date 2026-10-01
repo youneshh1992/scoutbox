@@ -17,11 +17,12 @@ import { BoxTrainingSection } from '../../components/M16Sections';
 import { DevelopmentHubSection } from '../../components/M21Sections';
 import { CombineSection } from '../../components/CombineSection';
 import { TrustProfileSection } from '../../components/TrustProfileSection';
+import { ProfileIntro } from '../../components/Reference';
 
 export default function Football() {
   const colors = useColors();
   const styles = useStyles(makeStyles);
-  const { playerId, isMinor } = useSession();
+  const { playerId, isMinor, me } = useSession();
   const params = useLocalSearchParams<{ tab?: string }>();
   const TABS = [
     { key: 'passport', label: pt('segPassport') },
@@ -40,7 +41,6 @@ export default function Football() {
       <ScrollView contentContainerStyle={styles.scroll}>
         <PageHeader
           title={pt('tabFootball')}
-          hint={pt('footballHint')}
           action={(
             <Link href="/upload" asChild>
               <Pressable accessibilityRole="button" accessibilityLabel={pt('addEvidence')} style={styles.primary}>
@@ -49,6 +49,14 @@ export default function Football() {
             </Link>
           )}
         />
+        {/* M24C — the reference's profile introduction: avatar, name, one line, status. */}
+        {me ? (
+          <ProfileIntro
+            name={me.name}
+            line={[me.position ?? pt('fbNoPosition'), me.city].filter(Boolean).join(' · ')}
+            status={pt(`avail_${me.availability}` as Parameters<typeof pt>[0])}
+          />
+        ) : null}
         <PageTabs tabs={TABS} value={tab} onChange={setTab} />
 
         {/* M16.2 — the Passport payload carries no numeric score, so the Trust
@@ -66,7 +74,7 @@ export default function Football() {
 
 const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  scroll: { padding: 18, gap: 10, maxWidth: 560, width: '100%', alignSelf: 'center' },
+  scroll: { paddingHorizontal: 18, paddingTop: 12, paddingBottom: 24, gap: 10 },
   primary: { backgroundColor: colors.accent, borderRadius: 10, paddingVertical: 7, paddingHorizontal: 12 },
   primaryText: { color: colors.accentInk, fontWeight: '700', fontSize: 13 },
 });

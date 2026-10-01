@@ -11,10 +11,11 @@ import { createElement, useEffect, useRef, useState } from 'react';
 import { Platform, View } from 'react-native';
 import { Text, TextInput } from './Text';
 import { useColors, type Palette } from '../theme';
-import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
+import { Button, Card, Muted, Pill, Row } from './ui';
 import { m16, type BoxActor, type BoxAssignment, type BoxChallenge, type BoxDashboard, type BoxDrill, type BoxSession, type BoxTarget, type DevelopmentPlan, type BoxPrefs } from '../data/m16client';
 import { pt } from '../i18n';
 import { M22BoxCamCv } from './M22BoxCamCv';
+import { Footnote, Greeting, HistoryList, LightLabel, RefCard, SessionFacts, SectionHead, TrainingVisual } from './Reference';
 
 const DEMO = process.env.EXPO_PUBLIC_DEMO === '1';
 const WEB = Platform.OS === 'web';
@@ -262,11 +263,27 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
     setCapture({ drill, target, assignmentId, challengeEntryId });
   };
 
+  // M24C — the reference Box Cam page: the next session as a hero, the drill
+  // as a heading with its target facts, the lime primary action, then the
+  // recent sessions as numbered records. The drill, target and sessions are
+  // the server's; the rest of Box Training follows underneath unchanged.
+  const next = drills[0] ?? null;
+  const nextTarget: BoxTarget | null = next ? (next.targetTypes[0] === 'repetitions' ? { type: 'repetitions', value: 100 } : { type: 'duration', value: 20 * 60000 }) : null;
+  const targetFact = nextTarget
+    ? nextTarget.type === 'repetitions' ? pt('bcPracticeReps').replace('{n}', String(nextTarget.value))
+      : nextTarget.value >= 60000 ? pt('bcPracticeMin').replace('{n}', String(Math.round(nextTarget.value / 60000)))
+        : pt('bcPracticeLen').replace('{n}', String(Math.round(nextTarget.value / 1000)))
+    : '';
+  const dayOf = (ts: number | null) => (ts ? String(new Date(ts).getDate()).padStart(2, '0') : '—');
+  const dateOf = (ts: number | null) => (ts ? new Date(ts).toLocaleDateString(undefined, { day: 'numeric', month: 'long' }) : '');
   return (
-    <Card>
-      <SectionTitle>{pt('m16title')}{childName ? ` — ${childName}` : ''}</SectionTitle>
-      <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }}>{pt('m16trainInBox')}</Text>
-      <Muted size={12}>{pt('m16tagline')}</Muted>
+    <View style={{ gap: 0 }} testID="boxcam-section">
+      <Greeting kicker={`${pt('tabFootball')} / ${pt('segBoxCam')}${childName ? ` — ${childName}` : ''}`} title={pt('bcNextSession')} />
+      <TrainingVisual title={next?.title ?? pt('m16trainInBox')} sub={targetFact || pt('m16tagline')} />
+      <SectionHead title={next?.title ?? pt('m16trainInBox')} />
+      <View style={{ marginTop: -8, marginBottom: 10, flexDirection: 'row' }}><LightLabel label={pt('bcPractice')} /></View>
+      <Muted size={13}>{next?.setup?.space ? `${next.summary} ${pt('bcSetupHint')}` : pt('bcSetupHint')}</Muted>
+      {next ? <SessionFacts facts={[{ icon: 'timer', label: targetFact }, { icon: 'circle-check', label: next.setup?.equipment?.[0] ?? pt('bcOneBall') }]} /> : null}
 
       {cv ? (
         <M22BoxCamCv
@@ -282,7 +299,7 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
       ) : result ? (
         <ResultCard actor={actor} session={result} onClose={() => setResult(null)} reload={reloadAll} />
       ) : (
-        <Row style={{ marginTop: 6 }}>
+        <View style={{ gap: 8 }}>
           <Button primary label={pt('m16startBoxCam')} onPress={() => drills[0] && startDrill(drills[0])} />
           {actor.kind === 'player' ? (
             <Button
@@ -291,9 +308,31 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
               onPress={() => void startCv()}
             />
           ) : null}
-          {dash ? <Pill label={`${pt('m16streak')}: ${dash.streakWeeks}`} tone="gold" /> : null}
-        </Row>
+          {dash ? <Row><Pill label={`${pt('m16streak')}: ${dash.streakWeeks}`} tone="gold" /></Row> : null}
+        </View>
       )}
+
+      {/* Recent sessions — the reference's numbered records (server sessions, verbatim). */}
+      {dash && dash.recent.length > 0 ? (
+        <>
+          <SectionHead title={pt('bcRecent')} />
+          <HistoryList
+            testID="boxcam-recent"
+            rows={(expanded ? dash.recent : dash.recent.slice(0, 4)).map((s2) => ({
+              index: dayOf(s2.endedAt ?? s2.createdAt),
+              title: s2.drillTitle,
+              sub: `${dateOf(s2.endedAt ?? s2.createdAt)} · ${s2.verifiedReps != null ? `${s2.verifiedReps} reps` : fmt(s2.verifiedActiveMs ?? 0)} · ${s2.stateCopy ?? pt('bcRecorded')}${s2.simulated ? ` · ${pt('m16sim')}` : ''}`,
+            }))}
+          />
+          {dash.recent.length > 4 ? <Row style={{ marginTop: 8 }}><Button small label={expanded ? pt('m16less') : pt('m16more')} onPress={() => setExpanded((x) => !x)} /></Row> : null}
+        </>
+      ) : null}
+      <Footnote>{pt('bcSeparate')}</Footnote>
+
+      <SectionHead title={pt('bcMore')} />
+      <RefCard>
+      <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{pt('m16title')} · {pt('m16trainInBox')}</Text>
+      <Muted size={12}>{pt('m16tagline')}</Muted>
 
       {/* Development activity — evidence of training, never a rating */}
       {plan ? (
@@ -314,19 +353,16 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
         </View>
       ) : null}
 
-      {/* Recent sessions */}
+      {/* Verification state per recent session (the reference list above shows the record; this shows the server's state word). */}
       {dash && dash.recent.length > 0 ? (
         <View style={{ marginTop: 10 }}>
           <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{pt('m16myTraining')}</Text>
-          {(expanded ? dash.recent : dash.recent.slice(0, 4)).map((s) => (
+          {dash.recent.slice(0, expanded ? undefined : 4).map((s) => (
             <Row key={s.id} style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6, marginTop: 6 }}>
               <Text style={{ color: colors.text, fontSize: 13, flexShrink: 1 }}>{s.drillTitle}</Text>
-              <Muted size={12}>{s.verifiedReps != null ? `${s.verifiedReps} reps` : fmt(s.verifiedActiveMs ?? 0)}</Muted>
               <StatePill state={s.verificationState} />
-              {s.simulated ? <Pill label={pt('m16sim')} /> : null}
             </Row>
           ))}
-          {dash.recent.length > 4 ? <Button small label={expanded ? pt('m16less') : pt('m16more')} onPress={() => setExpanded((x) => !x)} /> : null}
         </View>
       ) : null}
 
@@ -370,7 +406,8 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
 
       {drillData?.providers.some((p) => p.id === 'production_cv') ? <Muted size={11}>{pt('m16providerNote')}</Muted> : null}
       {msg ? <Muted size={12}>{msg}</Muted> : null}
-    </Card>
+      </RefCard>
+    </View>
   );
 }
 

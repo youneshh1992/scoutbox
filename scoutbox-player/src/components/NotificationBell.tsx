@@ -96,6 +96,11 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     borderColor: colors.line,
     padding: 18,
     maxHeight: '80%',
+    // M24C — the sheet keeps the phone's width even when a wide browser
+    // hosts the viewport (a Modal renders outside the frame on the web).
+    width: '100%',
+    maxWidth: 430,
+    alignSelf: 'center',
   },
   title: { color: colors.text, fontSize: 20, fontWeight: '600', letterSpacing: -0.45 },
 });
