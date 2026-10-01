@@ -19,6 +19,17 @@ html = html.replace(/<script([^>]*)src="([^"]+)"([^>]*)><\/script>/g, (m, pre, s
   return `<script${isModule ? ' type="module"' : ''}>${esc(js)}</script>`;
 });
 
+// M24A — bundled fonts. The Player export refers to its Albert Sans faces by
+// asset path; a single-file demo has no /assets beside it, so each referenced
+// font becomes a data: URI inside the bundle (the portals inline theirs at
+// build time through Vite's assetsInlineLimit).
+html = html.replace(/"(\/?assets\/[^"]+\.(ttf|woff2|otf))"/g, (m, ref, ext) => {
+  const file = path.join(distDir, ref.replace(/^\//, ''));
+  if (!fs.existsSync(file)) return m;
+  const mime = ext === 'woff2' ? 'font/woff2' : ext === 'otf' ? 'font/otf' : 'font/ttf';
+  return `"data:${mime};base64,${fs.readFileSync(file).toString('base64')}"`;
+});
+
 // Strip favicon links (the artifact host provides its own) and preloads.
 html = html.replace(/<link[^>]*rel="(icon|shortcut icon|modulepreload|preload)"[^>]*>/g, '');
 

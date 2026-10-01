@@ -1,129 +1,85 @@
 <title>ScoutBox — App Launcher</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&display=swap">
 <style>
-  :root {
-    --ground: #0b1220;
-    --panel: #121d33;
-    --panel-2: #16233c;
-    --line: #263a5e;
-    --ink: #e8eefc;
-    --dim: #8fa3c8;
-    --green: #35d07f;
-    --leaf: #8bc34a;
-    --orange: #ff9d42;
-    --gold: #f2c14e;
-    --display: 'Sora', system-ui, -apple-system, sans-serif;
-  }
-  body {
-    background: var(--ground);
-    color: var(--ink);
-    font: 15px/1.6 system-ui, -apple-system, 'Segoe UI', sans-serif;
-    padding: 0 20px 56px;
-  }
+  /* M24A — the launcher wears the platform design: Albert Sans, the paper ground, hairline panels, the brand green. */
+  :root { --ground: #f6f7f3; --panel: #ffffff; --panel-2: #edf1e9; --line: #e1e6df; --ink: #1e2923; --dim: #677268; --green: #00e676; --green-ink: #113822; --green-text: #007f42; --gold: #a67c2e; --leaf: #007f42; --orange: #b47a2f; color-scheme: light; }
+  @media (prefers-color-scheme: dark) { :root { --ground: #202223; --panel: #272a2b; --panel-2: #2a2d2e; --line: #393c3d; --ink: #ffffff; --dim: #ffffff; --gold: #d9b76b; --leaf: #00e676; --green-text: #00e676; color-scheme: dark; } }
+  @font-face { font-family: 'Albert Sans'; font-style: normal; font-weight: 100 900; font-display: swap; src: url('../design-system/fonts/AlbertSans-normal.woff2') format('woff2'); }
+  body { background: var(--ground); color: var(--ink); font: 14px/1.6 'Albert Sans', -apple-system, system-ui, 'Segoe UI', sans-serif; padding: 0 20px 56px; margin: 0; }
   .wrap { max-width: 780px; margin: 0 auto; }
-
   header { padding: 44px 0 8px; }
-  .mark {
-    font-family: var(--display); font-weight: 800; font-size: 34px; letter-spacing: -0.5px;
-    text-wrap: balance;
-  }
-  .mark .box { color: var(--green); }
-  .sub { color: var(--dim); margin: 6px 0 0; max-width: 62ch; }
-  .buildchip {
-    display: inline-flex; align-items: center; gap: 7px; margin-top: 14px;
-    border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px;
-    font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums;
-  }
+  .mark { font-weight: 800; font-size: 32px; letter-spacing: -1.4px; line-height: 1; display: inline-flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .mark .box::after { content: ''; display: inline-block; width: 8px; height: 8px; background: var(--green); margin-left: 3px; border-radius: 1px; }
+  .mark small { font-size: 13px; font-weight: 400; letter-spacing: 0; color: var(--dim); }
+  .sub { color: var(--dim); margin: 8px 0 0; max-width: 62ch; }
+  .buildchip { display: inline-flex; align-items: center; gap: 7px; margin-top: 14px; border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; background: var(--panel); }
   .buildchip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
-  .buildchip code { color: var(--ink); font-size: 12px; }
-
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 26px; }
+  .buildchip code { color: var(--ink); font-size: 12px; font-family: inherit; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 26px; }
   @media (max-width: 620px) { .grid { grid-template-columns: 1fr; } }
-
-  a.app {
-    display: flex; flex-direction: column; gap: 6px;
-    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
-    padding: 18px 18px 16px; text-decoration: none; color: var(--ink);
-    border-top: 3px solid var(--accent, var(--line));
-    transition: background .15s ease, transform .15s ease;
-  }
-  a.app:hover { background: var(--panel-2); transform: translateY(-2px); }
-  a.app:focus-visible { outline: 2px solid var(--accent, var(--green)); outline-offset: 2px; }
-  @media (prefers-reduced-motion: reduce) { a.app { transition: none; } a.app:hover { transform: none; } }
+  a.app { display: flex; flex-direction: column; gap: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 18px 16px; text-decoration: none; color: var(--ink); box-shadow: inset 3px 0 0 var(--accent, var(--line)); transition: border-color .15s ease; }
+  a.app:hover { border-color: var(--green); }
+  a.app:focus-visible { outline: 2px solid var(--green-text); outline-offset: 2px; }
   .app .top { display: flex; align-items: center; gap: 10px; }
-  .app .emoji { font-size: 22px; }
-  .app h2 { font-family: var(--display); font-weight: 700; font-size: 17px; margin: 0; }
-  .app p { margin: 0; color: var(--dim); font-size: 13.5px; }
-  .app .go { margin-top: auto; padding-top: 8px; font-size: 13px; font-weight: 600; color: var(--accent, var(--green)); }
+  .app .emoji { font-size: 20px; }
+  .app h2 { font-weight: 650; font-size: 17px; letter-spacing: -0.3px; margin: 0; }
+  .app p { margin: 0; color: var(--dim); font-size: 13px; }
+  .app .go { margin-top: auto; padding-top: 8px; font-size: 12.5px; font-weight: 600; color: var(--green-text); }
   .app.player { --accent: var(--green); }
-  .app.pro { --accent: var(--orange); }
+  .app.pro { --accent: #243b2c; }
   .app.grass { --accent: var(--leaf); }
-  .app.connected { --accent: var(--gold); }
-  .badge {
-    margin-left: auto; font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase;
-    color: var(--dim); border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; white-space: nowrap;
-  }
-
+  .app.agent { --accent: var(--gold); }
+  .app.safety { --accent: var(--orange); }
+  .app.connected { --accent: var(--line); }
+  .badge { margin-left: auto; font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--dim); border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
   section.notes { margin-top: 34px; }
-  section.notes h3 {
-    font-family: var(--display); font-size: 13px; font-weight: 700; letter-spacing: .08em;
-    text-transform: uppercase; color: var(--dim); margin: 0 0 10px;
-  }
-  section.notes.feature h3 { color: var(--green); }
+  section.notes h3 { font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); margin: 0 0 10px; }
+  section.notes.feature h3 { color: var(--green-text); }
   section.notes ul { margin: 0; padding-left: 20px; color: var(--ink); max-width: 66ch; }
   section.notes li { margin-bottom: 8px; }
-  section.notes li::marker { color: var(--green); }
-  .hosted {
-    margin-top: 26px; background: var(--panel); border: 1px solid var(--line);
-    border-left: 3px solid var(--gold); border-radius: 10px; padding: 14px 16px;
-    color: var(--ink); font-size: 14px; max-width: 66ch; box-sizing: border-box;
-  }
+  section.notes li::marker { color: var(--green-text); }
+  .hosted { margin-top: 26px; background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--gold); border-radius: 10px; padding: 14px 16px; color: var(--ink); font-size: 13px; max-width: 66ch; box-sizing: border-box; }
   .hosted b { color: var(--gold); }
-  .honest {
-    margin-top: 14px; background: var(--panel-2); border: 1px solid var(--line);
-    border-left: 3px solid var(--green); border-radius: 10px; padding: 12px 16px;
-    color: var(--ink); font-size: 13px; max-width: 66ch; box-sizing: border-box;
-  }
-  .honest b { color: var(--green); }
+  .honest { margin-top: 14px; background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--green); border-radius: 10px; padding: 12px 16px; color: var(--ink); font-size: 13px; max-width: 66ch; box-sizing: border-box; }
+  .honest b { color: var(--green-text); }
   footer { margin-top: 30px; color: var(--dim); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 </style>
 
 <div class="wrap">
   <header>
-    <div class="mark">Scout<span class="box">Box</span> — App Launcher</div>
-    <p class="sub">One bookmark for every ScoutBox app. Each tile opens an interactive demo of the actual current interface, running entirely in your browser on synthetic sample data.</p>
-    <span class="buildchip"><span class="dot"></span>Source version <code>f49d1a7</code> · built 2026-09-14 · Milestone 22 — Real Box Cam CV v1</span>
+    <div class="mark"><span class="box">ScoutBox</span><small>App Launcher</small></div>
+    <p class="sub">One bookmark for every ScoutBox app. Each tile opens an interactive demo of the actual current interface — the approved M24A design on the real product — running entirely in your browser on synthetic sample data. Every app carries its own light / dark switch in the header.</p>
+    <span class="buildchip"><span class="dot"></span>Source version <code>M24A</code> · design implementation · Albert Sans · five applications</span>
   </header>
 
   <div class="grid">
-    <a class="app player" href="https://claude.ai/code/artifact/b91499f1-5c88-4f4b-aca1-6094bef11106">
-      <div class="top"><span class="emoji">⚽</span><h2>ScoutBox Player</h2></div>
-      <p>The mobile app for players and guardians — profile, Football Passport, Box Training, At-Home Combine, and the <b>ScoutBox Trust Score</b>: how strongly your record is backed by evidence, explained component by component. Nothing a club decides about you appears here.</p>
+    <a class="app player" href="scoutbox-player-demo.html">
+      <div class="top"><span class="emoji">⚽</span><h2>ScoutBox Player</h2><span class="badge">Mobile</span></div>
+      <p>The mobile app for players and guardians — Home, Football Passport, Box Cam and messaging on the approved phone layout with the pitch behind the content. Nothing a club decides about you appears here.</p>
       <span class="go">Open Player →</span>
     </a>
-    <a class="app pro" href="https://claude.ai/code/artifact/34c738e4-7660-471c-9fbe-b34a162c8e1e">
+    <a class="app pro" href="scoutbox-club-demo.html">
       <div class="top"><span class="emoji">🔭</span><h2>ScoutBox Pro</h2></div>
-      <p>The recruitment desk for professional clubs — Recruitment Rooms, Second Look, Nobody Missed, and now <b>Player Matching</b> and <b>Dynamic Watchlists</b>: which players you can already see satisfy the criteria <i>you</i> wrote, criterion by criterion, and a saved set of criteria that stays current. No match score, no ranking, no recommendation.</p>
+      <p>The recruitment desk for professional clubs — player discovery, Recruitment Rooms and the recruitment overview, in the approved portal shell with its light surfaces and dark embossed surfaces.</p>
       <span class="go">Open Pro →</span>
     </a>
-    <a class="app grass" href="https://claude.ai/code/artifact/d2b059f1-ebfd-44ce-b98f-b685f5f2e856">
+    <a class="app grass" href="scoutbox-grassroots-demo.html">
       <div class="top"><span class="emoji">🌱</span><h2>ScoutBox Grassroots</h2></div>
-      <p>The free toolkit for grassroots clubs — local discovery, squad board, sessions, club messaging, Box Training, a simpler Recruitment Room, Second Look and Nobody Missed, and the same Player Matching and Dynamic Watchlists within the local radius.</p>
+      <p>The free toolkit for grassroots clubs — club overview, squad, trial days and guardian conversations on the turf-textured workspace with its faint pitch markings.</p>
       <span class="go">Open Grassroots →</span>
     </a>
-    <a class="app pro" style="--accent: #a688ff" href="https://claude.ai/code/artifact/4172504f-ecf4-4c25-ac9f-a5d59ac22e58">
+    <a class="app agent" href="scoutbox-agent-demo.html">
+      <div class="top"><span class="emoji">🤝</span><h2>ScoutBox Agent</h2></div>
+      <p>The workspace for licensed agents and their agencies — clients, transactions, conflicts &amp; compliance, verification, the directory and the operational inbox. Opens dark; its light palette is the approved cream.</p>
+      <span class="go">Open Agent →</span>
+    </a>
+    <a class="app safety" href="scoutbox-admin-demo.html">
       <div class="top"><span class="emoji">🛡️</span><h2>Trust &amp; Safety</h2></div>
-      <p>The ScoutBox back office — report queue, evidence disputes, staff-check review, coach affiliations, outcome aggregates, the Box Cam case desk and the Trust Score derivation inspector.</p>
-      <span class="go" style="color:#a688ff">Open Trust &amp; Safety →</span>
+      <p>The ScoutBox back office — review queue, verification desk, safeguarding cases, evidence disputes and audit history, with every permission and sensitive-data rule unchanged.</p>
+      <span class="go">Open Trust &amp; Safety →</span>
     </a>
-    <a class="app pro" style="--accent: #5ec8ff" href="scoutbox-agent-demo.html">
-      <div class="top"><span class="emoji">🤝</span><h2>ScoutBox Agent</h2><span class="badge">M23 P5.6B</span></div>
-      <p>The workspace for licensed agents and their agencies — <b>clients</b> a player confirmed in their own app, the opportunities those clients can already see, verification facet by facet with honest states, and agency roles. No transaction room, no offer, no negotiation, and nothing the shared Trust &amp; Safety key can adjudicate.</p>
-      <span class="go" style="color:#5ec8ff">Open Agent →</span>
-    </a>
-    <a class="app connected" href="https://claude.ai/code/artifact/f86846c4-6616-4883-8b89-eda1c7f40c2f">
+    <a class="app connected" href="scoutbox-connected-demo.html">
       <div class="top"><span class="emoji">🔗</span><h2>Connected Demo</h2><span class="badge">Shared simulation</span></div>
-      <p>All three apps in one page sharing one synthetic dataset — send a contact request in Pro, accept and reply as the player, watch it land back. No live backend.</p>
+      <p>Pro, Grassroots and Player in one page sharing one synthetic dataset — send a contact request in Pro, accept and reply as the player, watch it land back. No live backend.</p>
       <span class="go">Open Connected Demo →</span>
     </a>
   </div>

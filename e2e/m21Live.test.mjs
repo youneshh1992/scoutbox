@@ -194,7 +194,8 @@ async function selectPlan(p, title) {
   for (let i = 0; i < 25; i++) {
     await p.waitForTimeout(400);
     const txt = (await section.innerText().catch(() => '')).trimStart();
-    if (txt.startsWith(`DEVELOPMENT\n${title}`)) return true;
+    // M24A: section headings are sentence case now ("Development", not "DEVELOPMENT"); the plan name must still lead the section.
+    if (txt.toUpperCase().startsWith(`DEVELOPMENT\n${title.toUpperCase()}`)) return true;
   }
   return false;
 }

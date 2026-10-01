@@ -32,9 +32,17 @@ function walk(dir, out = []) {
 export function sourceFingerprint(app, extra = []) {
   const base = path.join(ROOT, app);
   const files = walk(path.join(base, 'src')).concat(extra.map((f) => path.join(base, f)).filter((f) => fs.existsSync(f)));
+  // M24A — the portals render from the shared design system (tokens, shell
+  // CSS, icons, fonts), so a change there must invalidate their bundles too.
+  // The retained reference HTML is documentation, not source.
+  const shared = app === 'scoutbox-player' ? [] : walk(path.join(ROOT, 'design-system')).filter((f) => !f.includes(`${path.sep}reference${path.sep}`));
   const h = createHash('sha256');
   for (const f of files) {
     h.update(path.relative(base, f)); h.update('\0');
+    h.update(fs.readFileSync(f)); h.update('\0');
+  }
+  for (const f of shared) {
+    h.update(path.relative(ROOT, f)); h.update('\0');
     h.update(fs.readFileSync(f)); h.update('\0');
   }
   // The inliner and the demo build script shape the bundle too.
