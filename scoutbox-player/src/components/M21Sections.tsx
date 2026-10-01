@@ -15,8 +15,9 @@
 //   • a club's internal review note. It is not in the payload — the screen
 //     shows that the club wrote one, which is different from showing it.
 import { useEffect, useState } from 'react';
-import { Text, TextInput, View } from 'react-native';
-import { colors } from '../theme';
+import { View } from 'react-native';
+import { Text, TextInput } from './Text';
+import { useColors, type Palette } from '../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
 import {
   m21, type DevActor, type DevelopmentPlanView, type GoalView, type ActionView,
@@ -25,10 +26,10 @@ import {
 } from '../data/m21client';
 import { pt, pFmtDate } from '../i18n';
 
-const input = {
+const inputStyle = (colors: Palette) => ({
   backgroundColor: colors.panel2, color: colors.text, borderRadius: 8,
   paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, borderWidth: 1, borderColor: colors.line,
-} as const;
+} as const);
 
 /** State is never colour alone: every pill carries its word (§115). */
 const GOAL_TONE: Record<string, 'green' | 'blue' | 'gold' | 'red' | 'default'> = {
@@ -74,6 +75,7 @@ function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): [T | null, () => voi
 // ------------------------------------------------------------------ pieces
 
 function TargetBlock({ t }: { t: TargetView }) {
+  const colors = useColors();
   return (
     <View style={{ gap: 4, borderLeftWidth: 2, borderLeftColor: colors.line, paddingLeft: 10 }}>
       <Row>
@@ -90,6 +92,7 @@ function TargetBlock({ t }: { t: TargetView }) {
 }
 
 function EvidenceRow({ e }: { e: EvidenceView }) {
+  const colors = useColors();
   return (
     <View style={{ gap: 3, paddingVertical: 4 }}>
       <Row>
@@ -110,6 +113,7 @@ function EvidenceRow({ e }: { e: EvidenceView }) {
 }
 
 function ActionRow({ a, onSet, canWrite }: { a: ActionView; onSet: (status: string) => void; canWrite: boolean }) {
+  const colors = useColors();
   const due = dueLabel(a.due);
   return (
     <View style={{ gap: 4, paddingVertical: 6, borderTopWidth: 1, borderTopColor: colors.line }}>
@@ -135,6 +139,7 @@ function ActionRow({ a, onSet, canWrite }: { a: ActionView; onSet: (status: stri
 }
 
 function GoalCard({ g, view, actor, reload }: { g: GoalView; view: DevelopmentPlanView; actor: DevActor; reload: () => void }) {
+  const colors = useColors();
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState('');
@@ -186,7 +191,7 @@ function GoalCard({ g, view, actor, reload }: { g: GoalView; view: DevelopmentPl
         adding ? (
           <View style={{ gap: 6 }}>
             <TextInput
-              style={input}
+              style={inputStyle(colors)}
               value={title}
               onChangeText={setTitle}
               placeholder={pt('m21actionTitle')}
@@ -253,6 +258,7 @@ function GoalCard({ g, view, actor, reload }: { g: GoalView; view: DevelopmentPl
 }
 
 function ReviewCard({ r }: { r: ReviewView }) {
+  const colors = useColors();
   return (
     <Card>
       <Row>
@@ -280,6 +286,7 @@ function ReviewCard({ r }: { r: ReviewView }) {
 // ------------------------------------------------------------------ screen
 
 export function DevelopmentHubSection({ actor }: { actor: DevActor }) {
+  const colors = useColors();
   const [cat] = useLoad<DevelopmentCatalogue>(() => m21.catalogue(actor), [actor.id]);
   const [list, reloadList] = useLoad(() => m21.plans(actor), [actor.id]);
   const [planId, setPlanId] = useState<string | null>(null);
@@ -389,7 +396,7 @@ export function DevelopmentHubSection({ actor }: { actor: DevActor }) {
       {view.access.writeGoals ? (
         <Card>
           <TextInput
-            style={input}
+            style={inputStyle(colors)}
             value={newGoal}
             onChangeText={setNewGoal}
             placeholder={pt('m21goalTitle')}
@@ -426,7 +433,7 @@ export function DevelopmentHubSection({ actor }: { actor: DevActor }) {
           {/* A reflection is never presented as an assessment. */}
           <Muted size={12}>{pt('m21reflectionNote')}</Muted>
           <TextInput
-            style={[input, { minHeight: 64 }]}
+            style={[inputStyle(colors), { minHeight: 64 }]}
             multiline
             value={reflection}
             onChangeText={setReflection}

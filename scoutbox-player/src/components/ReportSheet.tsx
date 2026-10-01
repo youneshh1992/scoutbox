@@ -3,10 +3,12 @@
 // An urgent report immediately suspends communication pending review.
 
 import { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { Text, TextInput } from './Text';
+import { Icon } from './Icon';
 import { client } from '../data/client';
 import { useSession } from '../state';
-import { colors } from '../theme';
+import { useColors, useStyles, type Palette } from '../theme';
 import { Button, Card, Muted, Row, SectionTitle } from './ui';
 
 const KNOWN_ORGS = [
@@ -16,11 +18,13 @@ const KNOWN_ORGS = [
 ];
 
 export function ReportButton() {
+  const colors = useColors();
+  const styles = useStyles(makeStyles);
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Pressable onPress={() => setOpen(true)} style={styles.flagBtn} accessibilityLabel="Report or block">
-        <Text style={{ color: colors.danger, fontSize: 13, fontWeight: '700' }}>⚑ Report</Text>
+      <Pressable onPress={() => setOpen(true)} style={styles.flagBtn} accessibilityRole="button" accessibilityLabel="Report or block" testID="report-button">
+        <Icon name="flag" size={16} color={colors.danger} />
       </Pressable>
       {open && <ReportSheet onClose={() => setOpen(false)} />}
     </>
@@ -28,6 +32,8 @@ export function ReportButton() {
 }
 
 export function ReportSheet({ onClose }: { onClose: () => void }) {
+  const colors = useColors();
+  const styles = useStyles(makeStyles);
   const { kind, playerId, guardianId, refresh } = useSession();
   const [targetKind, setTargetKind] = useState<'club' | 'scout'>('club');
   const [orgId, setOrgId] = useState(KNOWN_ORGS[0].id);
@@ -79,7 +85,7 @@ export function ReportSheet({ onClose }: { onClose: () => void }) {
               <Button small label="Close" onPress={onClose} />
             </Row>
             {done ? (
-              <Card style={{ borderColor: colors.accent }}>
+              <Card>
                 <Muted size={14}>{done}</Muted>
               </Card>
             ) : (
@@ -140,14 +146,8 @@ export function ReportSheet({ onClose }: { onClose: () => void }) {
   );
 }
 
-const styles = StyleSheet.create({
-  flagBtn: {
-    borderWidth: 1,
-    borderColor: colors.danger,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-  },
+const makeStyles = (colors: Palette) => StyleSheet.create({
+  flagBtn: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.bg2, alignItems: 'center', justifyContent: 'center' },
   veil: { flex: 1, backgroundColor: 'rgba(3,8,18,0.7)', justifyContent: 'flex-end' },
   sheet: {
     backgroundColor: colors.bg2,

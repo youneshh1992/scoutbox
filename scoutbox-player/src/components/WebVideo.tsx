@@ -3,10 +3,12 @@
 // production wires expo-av here.
 
 import { createElement } from 'react';
-import { Platform, Text, View } from 'react-native';
-import { colors } from '../theme';
+import { Platform, View } from 'react-native';
+import { Text } from './Text';
+import { useColors } from '../theme';
 
 export function WebVideo({ src }: { src: string }) {
+  const colors = useColors();
   if (Platform.OS === 'web') {
     return createElement('video', {
       src,

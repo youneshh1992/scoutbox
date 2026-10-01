@@ -5,8 +5,9 @@
 // and revocable sharing. Adults manage their own shares; a minor's shares
 // are guardian-managed — the SERVER enforces all of it, this is only UI.
 import { useEffect, useState } from 'react';
-import { Text, TextInput, View } from 'react-native';
-import { colors } from '../theme';
+import { View } from 'react-native';
+import { Text, TextInput } from './Text';
+import { useColors, type Palette } from '../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
 import { m15, type FootballPassport, type PassportActor, type PassportEvent, type PassportShare } from '../data/m15client';
 import { pt } from '../i18n';
@@ -25,10 +26,10 @@ function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): [T | null, () => voi
   return [v, () => setTick((x) => x + 1), err];
 }
 
-const input = {
+const inputStyle = (colors: Palette) => ({
   backgroundColor: colors.panel2, color: colors.text, borderRadius: 8,
   paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, borderWidth: 1, borderColor: colors.line,
-} as const;
+} as const);
 
 // Short provenance chips; the long honest copy comes from the server.
 const PROV_TONE: Record<string, 'green' | 'blue' | 'gold' | 'default'> = {
@@ -72,6 +73,7 @@ function eventLabel(e: PassportEvent): string {
 }
 
 function TimelineRow({ e }: { e: PassportEvent }) {
+  const colors = useColors();
   const [open, setOpen] = useState(false);
   return (
     <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6, marginTop: 6 }}>
@@ -97,6 +99,7 @@ const GAP_LABEL: Record<string, Parameters<typeof pt>[0]> = {
 };
 
 function SharesPanel({ actor }: { actor: PassportActor }) {
+  const colors = useColors();
   const [shares, reload] = useLoad<PassportShare[]>(() => m15.shares(actor), [actor.id]);
   const [minted, setMinted] = useState<{ url: string; note: string } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -138,6 +141,7 @@ function SharesPanel({ actor }: { actor: PassportActor }) {
 
 /** The full Passport section for the You tab (player) and guardian child view. */
 export function FootballPassportSection({ actor, isMinor, childName }: { actor: PassportActor; isMinor?: boolean; childName?: string }) {
+  const colors = useColors();
   const [p, reload, err] = useLoad<FootballPassport>(() => m15.passport(actor), [actor.id, actor.kind === 'guardian' ? actor.childId : '']);
   const [showAll, setShowAll] = useState(false);
   const [careerOrg, setCareerOrg] = useState('');
@@ -232,7 +236,7 @@ export function FootballPassportSection({ actor, isMinor, childName }: { actor: 
           </Row>
         ))}
         <Row style={{ marginTop: 6 }}>
-          <TextInput style={[input, { flex: 1 }]} value={achTitle} onChangeText={setAchTitle} placeholder={pt('m15achPlaceholder')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15achPlaceholder')} />
+          <TextInput style={[inputStyle(colors), { flex: 1 }]} value={achTitle} onChangeText={setAchTitle} placeholder={pt('m15achPlaceholder')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15achPlaceholder')} />
           <Button small label={pt('m15add')} onPress={() => { if (achTitle.trim()) void act(async () => { await m15.addAchievement(actor, { title: achTitle.trim() }); setAchTitle(''); }, pt('m15achAdded')); }} />
         </Row>
       </View>
@@ -242,9 +246,9 @@ export function FootballPassportSection({ actor, isMinor, childName }: { actor: 
         <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{pt('m15careerTitle')}</Text>
         <Muted size={12}>{pt('m15careerNote')}</Muted>
         <Row style={{ marginTop: 6 }}>
-          <TextInput style={[input, { flex: 2, minWidth: 120 }]} value={careerOrg} onChangeText={setCareerOrg} placeholder={pt('m15careerOrg')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15careerOrg')} />
-          <TextInput style={[input, { flex: 1, minWidth: 70 }]} value={careerFrom} onChangeText={setCareerFrom} placeholder={pt('m15careerFrom')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15careerFrom')} />
-          <TextInput style={[input, { flex: 1, minWidth: 70 }]} value={careerTo} onChangeText={setCareerTo} placeholder={pt('m15careerTo')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15careerTo')} />
+          <TextInput style={[inputStyle(colors), { flex: 2, minWidth: 120 }]} value={careerOrg} onChangeText={setCareerOrg} placeholder={pt('m15careerOrg')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15careerOrg')} />
+          <TextInput style={[inputStyle(colors), { flex: 1, minWidth: 70 }]} value={careerFrom} onChangeText={setCareerFrom} placeholder={pt('m15careerFrom')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15careerFrom')} />
+          <TextInput style={[inputStyle(colors), { flex: 1, minWidth: 70 }]} value={careerTo} onChangeText={setCareerTo} placeholder={pt('m15careerTo')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15careerTo')} />
           <Button small label={pt('m15add')} onPress={() => {
             if (!careerOrg.trim() || !careerFrom.trim()) { setMsg(pt('m15careerNeedYear')); return; }
             void act(async () => {
@@ -261,7 +265,7 @@ export function FootballPassportSection({ actor, isMinor, childName }: { actor: 
         <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{pt('m15corrTitle')}</Text>
         <Muted size={12}>{pt('m15corrNote')}</Muted>
         <Row style={{ marginTop: 6 }}>
-          <TextInput style={[input, { flex: 1 }]} value={corrReason} onChangeText={setCorrReason} placeholder={pt('m15corrPlaceholder')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15corrPlaceholder')} />
+          <TextInput style={[inputStyle(colors), { flex: 1 }]} value={corrReason} onChangeText={setCorrReason} placeholder={pt('m15corrPlaceholder')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15corrPlaceholder')} />
           <Button small label={pt('m15corrFile')} onPress={() => {
             if (corrReason.trim()) void act(async () => { const r = await m15.fileCorrection(actor, { targetType: 'club_history', reason: corrReason.trim() }); setCorrReason(''); setMsg(r.note); }, pt('m15corrFiled'));
           }} />

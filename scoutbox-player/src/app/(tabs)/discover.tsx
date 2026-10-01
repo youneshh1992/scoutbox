@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../../components/Text';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { PitchBackdrop } from '../../components/PitchBackdrop';
 import { client, type Insights, type PlayerFeedItem } from '../../data/client';
 import type { DirectoryClub, Opportunities } from '../../data/types';
 import { SAFEGUARDING_PROMISES, U18_PROMISES } from '../../domain/safeguarding';
 import { useSession } from '../../state';
-import { colors } from '../../theme';
+import { useColors, useStyles, type Palette } from '../../theme';
 import { pt } from '../../i18n';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from '../../components/ui';
 import { PageHeader } from '../../components/PageChrome';
@@ -35,6 +37,8 @@ const ORGS = [
 ] as const;
 
 export default function Discover() {
+  const colors = useColors();
+  const styles = useStyles(makeStyles);
   const { me, isMinor, playerId, notifications, refresh } = useSession();
   const [insights, setInsights] = useState<Insights | null>(null);
   const [feed, setFeed] = useState<PlayerFeedItem[]>([]);
@@ -64,14 +68,15 @@ export default function Discover() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+        <PitchBackdrop />
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
       >
-        <PageHeader title={pt('tabHome')} />
+        <PageHeader title={pt('tabHome')} wordmark />
 
         {weekly && (
-          <Card style={{ borderColor: colors.accent }}>
+          <Card>
             <Row style={{ justifyContent: 'space-between' }}>
               <SectionTitle>📬 Your weekly scout report</SectionTitle>
               {weekly.report.streak > 0 && <Pill label={`🔥 ${weekly.report.streak}-day streak`} tone="gold" />}
@@ -94,7 +99,7 @@ export default function Discover() {
         )}
 
         {me?.pathway && (
-          <Card style={{ borderColor: colors.accent2 }}>
+          <Card>
             <SectionTitle>🛤 Your pathway</SectionTitle>
             <Row style={{ gap: 6 }}>
               {me.pathway.steps.map((s, i) => (
@@ -104,7 +109,7 @@ export default function Discover() {
                     backgroundColor: s.reached || s.key === me.pathway!.level ? colors.accent : colors.bg2,
                     borderWidth: 1, borderColor: s.reached ? colors.accent : colors.line,
                   }}>
-                    <Text style={{ color: s.reached ? '#04240f' : colors.muted, fontWeight: '800', fontSize: 12 }}>{i + 1}</Text>
+                    <Text style={{ color: s.reached ? colors.accentInk : colors.muted, fontWeight: '800', fontSize: 12 }}>{i + 1}</Text>
                   </View>
                   <Text style={{ color: s.reached ? colors.text : colors.muted, fontSize: 11.5, fontWeight: s.reached ? '700' : '400', textAlign: 'center' }}>{s.label}</Text>
                 </View>
@@ -121,7 +126,7 @@ export default function Discover() {
         )}
 
         {opportunities && opportunities.clubs.length > 0 && (
-          <Card style={{ borderColor: colors.accent }}>
+          <Card>
             <SectionTitle>📡 Clubs within reach</SectionTitle>
             <Muted size={12.5}>
               The 50 km rule works both ways: every club below can actually sign you.
@@ -166,7 +171,7 @@ export default function Discover() {
         )}
 
         {noticed && (
-          <Card style={{ borderColor: colors.gold }}>
+          <Card>
             <SectionTitle>👀 What scouts noticed</SectionTitle>
             <Row>
               {Object.entries(noticed.tags).sort((a, b) => b[1] - a[1]).map(([t, n]) => (
@@ -192,7 +197,7 @@ export default function Discover() {
         )}
 
         {insights && (
-          <Card style={{ borderColor: colors.accent2 }}>
+          <Card>
             <SectionTitle>👁 Who&apos;s watching you</SectionTitle>
             {insights.weeklySeries && insights.weeklySeries.some((v) => v > 0) && (
               <Row style={{ alignItems: 'flex-end', height: 44, gap: 4 }}>
@@ -227,7 +232,7 @@ export default function Discover() {
         )}
 
         {me && (
-          <Card style={{ borderColor: colors.accent }}>
+          <Card>
             <Text style={styles.cardTitle}>Your visibility right now</Text>
             {isMinor ? (
               <>
@@ -305,7 +310,7 @@ export default function Discover() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: 18, gap: 10, maxWidth: 560, width: '100%', alignSelf: 'center' },
   cardTitle: { color: colors.text, fontSize: 15.5, fontWeight: '700' },
@@ -318,7 +323,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     alignItems: 'center',
   },
-  insightV: { color: colors.accent, fontSize: 22, fontWeight: '800' },
+  insightV: { color: colors.accentText, fontSize: 22, fontWeight: '800' },
   goalTrack: { height: 6, borderRadius: 3, backgroundColor: colors.bg2, overflow: 'hidden' },
   goalFill: { height: '100%', backgroundColor: colors.accent },
 });

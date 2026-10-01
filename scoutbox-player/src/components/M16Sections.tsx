@@ -8,8 +8,9 @@
 // mode) it uses the honest web-limited provider (presence + active duration
 // only); the demo uses a clearly-labelled simulated provider.
 import { createElement, useEffect, useRef, useState } from 'react';
-import { Platform, Text, TextInput, View } from 'react-native';
-import { colors } from '../theme';
+import { Platform, View } from 'react-native';
+import { Text, TextInput } from './Text';
+import { useColors, type Palette } from '../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
 import { m16, type BoxActor, type BoxAssignment, type BoxChallenge, type BoxDashboard, type BoxDrill, type BoxSession, type BoxTarget, type DevelopmentPlan, type BoxPrefs } from '../data/m16client';
 import { pt } from '../i18n';
@@ -32,7 +33,7 @@ function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): [T | null, () => voi
   return [v, () => setTick((x) => x + 1), err];
 }
 
-const input = { backgroundColor: colors.panel2, color: colors.text, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, borderWidth: 1, borderColor: colors.line } as const;
+const inputStyle = (colors: Palette) => ({ backgroundColor: colors.panel2, color: colors.text, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, borderWidth: 1, borderColor: colors.line } as const);
 
 const PROV_TONE: Record<string, 'green' | 'blue' | 'gold' | 'default'> = { verified: 'green', partially_verified: 'gold' };
 function StatePill({ state }: { state: string | null }) {
@@ -47,6 +48,7 @@ function CapturePanel({ actor, drill, target, assignmentId, challengeEntryId, on
   actor: BoxActor; drill: BoxDrill; target: BoxTarget; assignmentId?: string; challengeEntryId?: string;
   onDone: (s: BoxSession) => void; onClose: () => void;
 }) {
+  const colors = useColors();
   const playerId = actor.id; // sessions are always minted for the acting player (guardian assists on-device)
   const [phase, setPhase] = useState<'setup' | 'ready' | 'recording' | 'error'>('setup');
   const [msg, setMsg] = useState<string | null>(null);
@@ -132,7 +134,7 @@ function CapturePanel({ actor, drill, target, assignmentId, challengeEntryId, on
   const verified = target.type === 'duration' ? Math.min(elapsed, target.value) : elapsed;
 
   return (
-    <Card style={{ borderColor: colors.accent }}>
+    <Card>
       <Row><Text style={{ color: colors.text, fontWeight: '800', fontSize: 16 }}>{pt('m16boxCam')}</Text><Pill label={drill.title} tone="blue" /></Row>
       {DEMO ? <Muted size={12}>{pt('m16demoSim')}</Muted> : null}
 
@@ -164,7 +166,7 @@ function CapturePanel({ actor, drill, target, assignmentId, challengeEntryId, on
         <View>
           <Row style={{ marginTop: 6 }}>
             <View style={{ flex: 1 }}><Muted size={11}>{pt('m16target')}</Muted><Text style={{ color: colors.text, fontWeight: '800', fontSize: 18 }}>{target.type === 'duration' ? fmt(target.value) : `${target.value}`}</Text></View>
-            <View style={{ flex: 1 }}><Muted size={11}>{pt('m16boxVerified')}</Muted><Text style={{ color: colors.accent, fontWeight: '800', fontSize: 18 }}>{fmt(verified)}</Text></View>
+            <View style={{ flex: 1 }}><Muted size={11}>{pt('m16boxVerified')}</Muted><Text style={{ color: colors.accentText, fontWeight: '800', fontSize: 18 }}>{fmt(verified)}</Text></View>
             <View style={{ flex: 1 }}><Muted size={11}>{pt('m16session')}</Muted><Text style={{ color: colors.text, fontWeight: '800', fontSize: 18 }}>{fmt(elapsed)}</Text></View>
           </Row>
           <Pill label={pt('m16trainingDetected')} tone="green" />
@@ -177,6 +179,7 @@ function CapturePanel({ actor, drill, target, assignmentId, challengeEntryId, on
 
 // ---------------------------------------------------------- result screen
 function ResultCard({ actor, session, onClose, reload }: { actor: BoxActor; session: BoxSession; onClose: () => void; reload: () => void }) {
+  const colors = useColors();
   const [note, setNote] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
   const verified = ['verified', 'partially_verified'].includes(session.verificationState ?? '');
@@ -186,15 +189,15 @@ function ResultCard({ actor, session, onClose, reload }: { actor: BoxActor; sess
       <Row><Pill label={session.drillTitle} tone="blue" /><StatePill state={session.verificationState} /></Row>
       <Row style={{ marginTop: 6 }}>
         <View style={{ flex: 1 }}><Muted size={11}>{pt('m16target')}</Muted><Text style={{ color: colors.text, fontWeight: '700' }}>{session.target.type === 'duration' ? fmt(session.target.value) : `${session.target.value}`}</Text></View>
-        <View style={{ flex: 1 }}><Muted size={11}>{pt('m16boxVerified')}</Muted><Text style={{ color: colors.accent, fontWeight: '800' }}>{session.verifiedReps != null ? `${session.verifiedReps}` : fmt(session.verifiedActiveMs ?? 0)}{session.target.type !== 'duration' && session.verifiedReps != null ? ` / ${session.target.value}` : ''}</Text></View>
+        <View style={{ flex: 1 }}><Muted size={11}>{pt('m16boxVerified')}</Muted><Text style={{ color: colors.accentText, fontWeight: '800' }}>{session.verifiedReps != null ? `${session.verifiedReps}` : fmt(session.verifiedActiveMs ?? 0)}{session.target.type !== 'duration' && session.verifiedReps != null ? ` / ${session.target.value}` : ''}</Text></View>
         <View style={{ flex: 1 }}><Muted size={11}>{pt('m16session')}</Muted><Text style={{ color: colors.text, fontWeight: '700' }}>{fmt(session.sessionDurationMs ?? 0)}</Text></View>
       </Row>
       {session.stateCopy ? <Muted size={12}>{session.stateCopy}</Muted> : null}
-      {verified ? <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 15, marginTop: 6 }}>{pt('m16workCounts')}</Text> : null}
+      {verified ? <Text style={{ color: colors.accentText, fontWeight: '800', fontSize: 15, marginTop: 6 }}>{pt('m16workCounts')}</Text> : null}
       {verified ? <Muted size={12}>{fmt(session.verifiedActiveMs ?? 0)} {pt('m16willRecord')}</Muted> : null}
       {session.provenanceDetail ? <View style={{ marginTop: 6, backgroundColor: colors.panel2, borderRadius: 8, padding: 8 }}><Muted size={11.5}>{session.provenanceLabel} — {session.provenanceDetail}</Muted></View> : null}
       <Row style={{ marginTop: 8 }}>
-        <TextInput style={[input, { flex: 1 }]} value={note} onChangeText={setNote} placeholder={pt('m16notePlaceholder')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m16notePlaceholder')} />
+        <TextInput style={[inputStyle(colors), { flex: 1 }]} value={note} onChangeText={setNote} placeholder={pt('m16notePlaceholder')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m16notePlaceholder')} />
         <Button small label={pt('m16addNote')} onPress={async () => { if (note.trim()) { try { await m16.addNote(actor.id, session.id, note.trim()); setMsg(pt('m16noteSaved')); } catch (e) { setMsg(e instanceof Error ? e.message : 'failed'); } } }} />
       </Row>
       <Muted size={11}>{pt('m16noteProvenance')}</Muted>
@@ -206,6 +209,7 @@ function ResultCard({ actor, session, onClose, reload }: { actor: BoxActor; sess
 
 // ------------------------------------------------------------ main section
 export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxActor; isMinor?: boolean; childName?: string }) {
+  const colors = useColors();
   // M22 §55 — the live server-side CV path, alongside the existing M16
   // aggregate-event path. Only players run it: the provider session binds to
   // the nonce of a session the ACTOR owns, and a guardian's session is not
@@ -371,6 +375,7 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
 }
 
 function AssignmentRow({ a, drills, onStart, onAccept }: { a: BoxAssignment; drills: BoxDrill[]; onStart: (d: BoxDrill, assignmentId?: string) => void; onAccept: () => void }) {
+  const colors = useColors();
   const drill = drills.find((d) => d.id === a.drillId);
   return (
     <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6, marginTop: 6 }}>

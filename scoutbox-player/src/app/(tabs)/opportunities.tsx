@@ -4,8 +4,9 @@
 // check-ins at the foot of You. Same sections, one destination.
 import { ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { PitchBackdrop } from '../../components/PitchBackdrop';
 import { useSession } from '../../state';
-import { colors } from '../../theme';
+import { useColors, useStyles, type Palette } from '../../theme';
 import { pt } from '../../i18n';
 import { PageHeader } from '../../components/PageChrome';
 import { BoardSection, FollowUpsSection, SquadInvitesSection, TrialSafetySection } from '../../components/M12Sections';
@@ -16,10 +17,13 @@ import { SigningSection } from '../../components/M23Signing';
 import { JourneySection } from '../../components/M23Journey';
 
 export default function Opportunities() {
+  const colors = useColors();
+  const styles = useStyles(makeStyles);
   const { playerId } = useSession();
   const actor = playerId ? { kind: 'player' as const, id: playerId } : null;
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+        <PitchBackdrop />
       <ScrollView contentContainerStyle={styles.scroll}>
         <PageHeader title={pt('tabOpportunities')} hint={pt('opportunitiesHint')} />
         {actor ? <JourneySection actor={actor} /> : null}
@@ -36,7 +40,7 @@ export default function Opportunities() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: 18, gap: 10, maxWidth: 560, width: '100%', alignSelf: 'center' },
 });

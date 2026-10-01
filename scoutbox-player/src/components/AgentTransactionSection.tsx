@@ -12,8 +12,9 @@
 // plainly what that does and does not mean. Nothing here is an offer, nothing
 // is a signature, and ScoutBox never negotiates on anyone's behalf.
 import { useEffect, useState } from 'react';
-import { Text, View } from 'react-native';
-import { colors } from '../theme';
+import { View } from 'react-native';
+import { Text } from './Text';
+import { useColors } from '../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
 import { m26, type PlayerTransaction, type TxTimelineEntry } from '../data/m26client';
 import { pt } from '../i18n';
@@ -58,6 +59,7 @@ function Timeline({ playerId, tx }: { playerId: string; tx: PlayerTransaction })
 }
 
 export function AgentTransactionSection({ playerId, isMinor }: { playerId: string; isMinor: boolean }) {
+  const colors = useColors();
   const [data, reload, err] = useLoad(() => m26.list(playerId), [playerId]);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

@@ -299,6 +299,7 @@ const en = {
   segPassport: 'Passport', segDevelopment: 'Development', segBoxCam: 'Box Cam', segCombine: 'Combine',
   segProfile: 'Profile', segAccount: 'Account', segClubs: 'Clubs',
   addEvidence: '+ Add evidence', back: 'Back', sectionsOf: 'Sections of this page',
+  themeAria: 'Dark theme', themeLight: 'Light', themeDark: 'Dark',
   footballHint: 'Your football record — what clubs see, and what you are working on.',
   opportunitiesHint: 'Everything you can pursue, and everything a club has offered you.',
 
@@ -685,6 +686,7 @@ const fr: typeof en = {
   segPassport: 'Passeport', segDevelopment: 'D\u00e9veloppement', segBoxCam: 'Box Cam', segCombine: 'Combine',
   segProfile: 'Profil', segAccount: 'Compte', segClubs: 'Clubs',
   addEvidence: '+ Ajouter une preuve', back: 'Retour', sectionsOf: 'Sections de cette page',
+  themeAria: 'Thème sombre', themeLight: 'Clair', themeDark: 'Sombre',
   footballHint: 'Votre dossier football \u2014 ce que voient les clubs, et ce sur quoi vous travaillez.',
   opportunitiesHint: 'Tout ce que vous pouvez viser, et tout ce qu\u2019un club vous a propos\u00e9.',
 

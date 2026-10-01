@@ -3,9 +3,10 @@
 // and may cancel; nothing here is a judgement. A minor's own device shows the
 // guardian-managed outcome line only.
 import { useEffect, useState } from 'react';
-import { Text, TextInput, View } from 'react-native';
+import { View } from 'react-native';
+import { Text, TextInput } from './Text';
 import { m12, isOutcomeLine, type FamilyTrial, type FamilyTrialWorkflow } from '../data/m12client';
-import { colors } from '../theme';
+import { useColors } from '../theme';
 import { pt } from '../i18n';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
 
@@ -28,6 +29,7 @@ const fmtEnd = (ms: number, zone: string | null) => {
 };
 
 export function TrialWorkflowSection({ actor }: { actor: Actor }) {
+  const colors = useColors();
   const [trials, setTrials] = useState<FamilyTrial[] | null>(null);
   const [tick, setTick] = useState(0);
   const [reason, setReason] = useState<Record<string, string>>({});
@@ -130,6 +132,7 @@ export function TrialWorkflowSection({ actor }: { actor: Actor }) {
 
 /** The slot chips of a P4B invitation: day + times in the organiser zone + venue. Picking one is choosing the DAY the server accepts. */
 export function TrialSlotChips({ slots, chosenDay, onPick }: { slots: { id: string; day: string; kind: string | null; startsAt: number; endsAt: number; timezone: string; venue: { name: string; town: string | null } | null }[]; chosenDay: string; onPick: (day: string) => void }) {
+  const colors = useColors();
   return (
     <View style={{ gap: 6, marginTop: 4 }}>
       {slots.map((sl) => {

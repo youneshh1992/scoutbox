@@ -4,15 +4,17 @@
 // All functionality from Milestone 2 is preserved below the fold.
 
 import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { Text, TextInput } from '../../components/Text';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { PitchBackdrop } from '../../components/PitchBackdrop';
 import { client, type PlayerCV, type Benchmarks } from '../../data/client';
 import {
   AVAILABILITY_LABELS, CONTRACT_LABELS,
   type Availability, type ContractStatus,
 } from '../../domain/types';
 import { useSession } from '../../state';
-import { colors } from '../../theme';
+import { useColors, useStyles, type Palette } from '../../theme';
 import { pt } from '../../i18n';
 import { Button, Card, Muted, Pill, Row, SectionTitle, TrustBar } from '../../components/ui';
 import { PageHeader } from '../../components/PageChrome';
@@ -41,8 +43,10 @@ function completenessLabel(score: number): string {
  * player's own record is one tap from the bar rather than a fifth tab.
  */
 export default function Profile() {
+  const styles = useStyles(makeStyles);
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+        <PitchBackdrop />
       <ScrollView contentContainerStyle={styles.scroll}>
         <PageHeader title={pt('tabProfile')} back />
         <ProfileBody />
@@ -52,6 +56,8 @@ export default function Profile() {
 }
 
 export function ProfileBody() {
+  const colors = useColors();
+  const styles = useStyles(makeStyles);
   const { playerId, me, isMinor, refresh } = useSession();
   const [cvOpen, setCvOpen] = useState(false);
   const [cv, setCv] = useState<PlayerCV | null>(null);
@@ -95,7 +101,7 @@ export function ProfileBody() {
           <View style={{ flex: 1, gap: 4 }}>
             <Row>
               <Text style={styles.name}>{me.name}</Text>
-              {me.identityVerified && <Text style={{ color: colors.accent, fontSize: 18 }}>✔</Text>}
+              {me.identityVerified && <Text style={{ color: colors.accentText, fontSize: 18 }}>✔</Text>}
             </Row>
             <Text style={styles.subline}>
               {me.position ?? '—'} · {me.age} · {me.foot ? `${me.foot[0].toUpperCase()}${me.foot.slice(1)} Foot` : '—'} {flagEmoji(me.country)}
@@ -117,7 +123,7 @@ export function ProfileBody() {
 
         {/* aging up: an 18th birthday hands the account to the player */}
         {me.agingUp?.eligible && (
-          <Card style={{ borderColor: colors.gold }}>
+          <Card>
             <SectionTitle>🎂 You&apos;re 18 — this account can become fully yours</SectionTitle>
             <Muted size={13}>
               Your parent/guardian has kept this account safe until now. Completing the handover moves
@@ -565,6 +571,8 @@ export function ProfileBody() {
 }
 
 function StatTile({ icon, v, k }: { icon: string; v: string; k: string }) {
+  const colors = useColors();
+  const styles = useStyles(makeStyles);
   return (
     <View style={styles.statTile}>
       <Text style={{ fontSize: 20 }}>{icon}</Text>
@@ -574,7 +582,7 @@ function StatTile({ icon, v, k }: { icon: string; v: string; k: string }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: 18, gap: 12, maxWidth: 560, width: '100%', alignSelf: 'center' },
   identityRow: { flexDirection: 'row', gap: 16, alignItems: 'flex-start' },
@@ -583,7 +591,7 @@ const styles = StyleSheet.create({
     height: 128,
     borderRadius: 22,
     borderWidth: 1.5,
-    borderColor: colors.accent,
+    borderColor: colors.line,
     backgroundColor: colors.panel,
     alignItems: 'center',
     justifyContent: 'center',
@@ -610,15 +618,15 @@ const styles = StyleSheet.create({
     borderRadius: 17,
     backgroundColor: colors.panel2,
     borderWidth: 1,
-    borderColor: colors.accent,
+    borderColor: colors.line,
     alignItems: 'center',
     justifyContent: 'center',
   },
   name: { color: colors.text, fontSize: 27, fontWeight: '800' },
   subline: { color: colors.text, fontSize: 16.5, fontWeight: '600' },
-  trustBig: { color: colors.accent, fontSize: 54, fontWeight: '800', lineHeight: 56 },
+  trustBig: { color: colors.accentText, fontSize: 54, fontWeight: '800', lineHeight: 56 },
   trustDenom: { color: colors.muted, fontSize: 18, fontWeight: '700', marginBottom: 8 },
-  standing: { color: colors.accent, fontSize: 14.5, fontWeight: '600' },
+  standing: { color: colors.accentText, fontSize: 14.5, fontWeight: '600' },
   trustTrack: { height: 8, borderRadius: 4, backgroundColor: colors.bg, overflow: 'visible' },
   trustFill: { height: '100%', borderRadius: 4, backgroundColor: colors.accent },
   trustKnob: {

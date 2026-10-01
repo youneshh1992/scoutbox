@@ -1,41 +1,54 @@
 // M23 P2.5 — page chrome for the player app.
 //
-// PageHeader: one compact row — title, optional back control, optional
-// primary action, then the bell and the ⚑ Report button that every screen
-// carries. Every tab used to draw its own 26px title row; this is the one
-// place that decides what a page header looks like.
+// PageHeader: the reference's 64px phone header. Home carries the wordmark;
+// every other page carries a back chevron (when it is not a tab root) and
+// its title. On the right, in the reference's order: the page's own primary
+// action, the appearance switch, the notification bell, and the ⚑ Report
+// control that every screen keeps (§33).
 //
-// PageTabs: the "functions of one destination" control. A destination is a
-// tab in the bar; the things you do there are page tabs. Rendered as a real
-// tablist so a screen reader, a keyboard and a test all see the same thing.
+// PageTabs: the "functions of one destination" control — the reference's
+// underline tabs. Rendered as a real tablist so a screen reader, a keyboard
+// and a test all see the same thing.
 import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { colors } from '../theme';
+import { Text } from './Text';
+import { Icon } from './Icon';
+import { useColors, useStyles, type Palette } from '../theme';
 import { pt } from '../i18n';
 import { NotificationBell } from './NotificationBell';
 import { ReportButton } from './ReportSheet';
+import { ThemeSwitch } from './ThemeSwitch';
 
-export function PageHeader({ title, back, action, hint }: { title: string; back?: boolean; action?: ReactNode; hint?: string }) {
+export function PageHeader({ title, back, action, hint, wordmark }: { title: string; back?: boolean; action?: ReactNode; hint?: string; wordmark?: boolean }) {
   const router = useRouter();
+  const colors = useColors();
+  const styles = useStyles(makeStyles);
   return (
     <View style={styles.header}>
       <View style={styles.headerRow}>
         <View style={styles.titleRow}>
           {back && (
-            <Pressable accessibilityRole="button" accessibilityLabel={pt('back')} onPress={() => router.back()} style={styles.back}>
-              <Text style={styles.backText}>‹</Text>
+            <Pressable accessibilityRole="button" accessibilityLabel={pt('back')} onPress={() => router.back()} style={styles.back} hitSlop={8}>
+              <Icon name="chevron-left" size={20} color={colors.text} />
             </Pressable>
           )}
-          <Text role="heading" aria-level={1} style={styles.h1} numberOfLines={1}>{title}</Text>
+          {wordmark ? (
+            <View style={styles.wordmarkRow} accessibilityRole="header" aria-level={1} accessibilityLabel={title}>
+              <Text style={styles.wordmark}>ScoutBox</Text><View style={[styles.square, { backgroundColor: colors.accent }]} />
+            </View>
+          ) : (
+            <Text role="heading" aria-level={1} style={styles.h1} numberOfLines={1}>{title}</Text>
+          )}
         </View>
         <View style={styles.actions}>
-          {action}
+          <ThemeSwitch />
           <NotificationBell />
           <ReportButton />
         </View>
       </View>
       {hint ? <Text style={styles.hint}>{hint}</Text> : null}
+      {action ? <View style={styles.actionRow}>{action}</View> : null}
     </View>
   );
 }
@@ -43,6 +56,7 @@ export function PageHeader({ title, back, action, hint }: { title: string; back?
 export interface PageTab { key: string; label: string }
 
 export function PageTabs({ tabs, value, onChange }: { tabs: PageTab[]; value: string; onChange: (key: string) => void }) {
+  const styles = useStyles(makeStyles);
   return (
     <View role="tablist" aria-label={pt('sectionsOf')} style={styles.tabs}>
       {tabs.map((t) => {
@@ -69,24 +83,24 @@ export function pickTab(tabs: PageTab[], wanted: string | string[] | undefined):
   return tabs.some((t) => t.key === w) ? (w as string) : tabs[0].key;
 }
 
-const styles = StyleSheet.create({
-  header: { gap: 4 },
-  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 40 },
+const makeStyles = (colors: Palette) => StyleSheet.create({
+  header: { gap: 6, marginBottom: 6 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, minHeight: 48 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 0 },
-  h1: { color: colors.text, fontSize: 21, fontWeight: '800', flexShrink: 1 },
-  hint: { color: colors.muted, fontSize: 12.5, lineHeight: 17 },
-  back: {
-    width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: colors.line,
-    backgroundColor: colors.bg2, alignItems: 'center', justifyContent: 'center',
-  },
-  backText: { color: colors.text, fontSize: 20, lineHeight: 22 },
+  h1: { color: colors.text, fontSize: 16, fontWeight: '600', flexShrink: 1 },
+  wordmarkRow: { flexDirection: 'row', alignItems: 'baseline' },
+  wordmark: { color: colors.text, fontSize: 24, fontWeight: '800', letterSpacing: -1.1, lineHeight: 26 },
+  square: { width: 6, height: 6, borderRadius: 1, marginLeft: 3 },
+  hint: { color: colors.muted, fontSize: 12.5, lineHeight: 18 },
+  actionRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 4 },
+  back: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', marginLeft: -6 },
   tabs: {
-    flexDirection: 'row', flexWrap: 'wrap', gap: 4, padding: 3,
-    borderRadius: 12, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.bg2,
+    flexDirection: 'row', gap: 7, justifyContent: 'space-between',
+    borderBottomWidth: 1, borderBottomColor: colors.line, marginBottom: 12,
   },
-  tab: { paddingVertical: 7, paddingHorizontal: 12, borderRadius: 9, flexGrow: 1, alignItems: 'center' },
-  tabOn: { backgroundColor: colors.panel },
-  tabText: { color: colors.muted, fontSize: 13, fontWeight: '600' },
-  tabTextOn: { color: colors.text },
+  tab: { paddingVertical: 11, paddingHorizontal: 4, borderBottomWidth: 2, borderBottomColor: 'transparent', flexGrow: 1, alignItems: 'center', marginBottom: -1 },
+  tabOn: { borderBottomColor: colors.accent },
+  tabText: { color: colors.tabInactive, fontSize: 12, fontWeight: '500' },
+  tabTextOn: { color: colors.tabActive, fontWeight: '600' },
 });

@@ -3,8 +3,10 @@
 // declines, and the full communications log is always visible.
 
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { Text, TextInput } from '../components/Text';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { PitchBackdrop } from '../components/PitchBackdrop';
 import { Redirect, useRouter } from 'expo-router';
 import { client, type Channel, type FiledReport, type GuardianDigest, type Insights } from '../data/client';
 import type { NotificationPrefs, GuardianOpenTrial } from '../data/types';
@@ -19,10 +21,11 @@ import { ChildReferencesSection, InviteCodeSection } from '../components/M14Sect
 import { FootballPassportSection } from '../components/M15Sections';
 import { BoxTrainingSection } from '../components/M16Sections';
 import { DevelopmentHubSection } from '../components/M21Sections';
-import { colors } from '../theme';
+import { useColors, useStyles, type Palette } from '../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle, TrustBar } from '../components/ui';
 import { ReportButton } from '../components/ReportSheet';
 import { NotificationBell } from '../components/NotificationBell';
+import { ThemeSwitch } from '../components/ThemeSwitch';
 import { Threads } from '../components/Threads';
 import { PopupBanner } from '../components/PopupBanner';
 import { pt } from '../i18n';
@@ -34,6 +37,8 @@ const CHILD_AVAILABILITY = [
 ] as const;
 
 export default function GuardianDashboard() {
+  const colors = useColors();
+  const styles = useStyles(makeStyles);
   const router = useRouter();
   const { kind, guardianId, guardian, guardianInbox, children, notifications, refresh, logout, mode } = useSession();
   const [error, setError] = useState<string | null>(null);
@@ -142,6 +147,7 @@ export default function GuardianDashboard() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+        <PitchBackdrop />
       <PopupBanner />
       <ScrollView
         contentContainerStyle={styles.scroll}
@@ -150,13 +156,14 @@ export default function GuardianDashboard() {
         <Row style={{ justifyContent: 'space-between' }}>
           <Text style={styles.h1}>Guardian</Text>
           <Row>
+            <ThemeSwitch />
             <NotificationBell />
             <ReportButton />
           </Row>
         </Row>
 
         {digest && digest.children.length > 0 && (
-          <Card style={{ borderColor: colors.accent }}>
+          <Card>
             <SectionTitle>📬 This week&apos;s digest</SectionTitle>
             {digest.children.map((c) => (
               <Muted key={c.id} size={13}>
@@ -607,7 +614,7 @@ export default function GuardianDashboard() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: 18, gap: 10, maxWidth: 560, width: '100%', alignSelf: 'center' },
   h1: { color: colors.text, fontSize: 26, fontWeight: '800', marginTop: 6 },

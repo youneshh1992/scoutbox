@@ -7,8 +7,9 @@
 // agent's access and is terminal here — attributed Trust & Safety review is
 // not yet available, and the card says so rather than pretending otherwise.
 import { useEffect, useState } from 'react';
-import { Text, TextInput, View } from 'react-native';
-import { colors } from '../theme';
+import { View } from 'react-native';
+import { Text, TextInput } from './Text';
+import { useColors } from '../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
 import { m24, m24ClientKey, type AgentAction, type AgentRelationship, type DisclosureKey } from '../data/m24client';
 import { pt } from '../i18n';
@@ -48,6 +49,7 @@ const tone = (s: AgentRelationship['status']): 'green' | 'blue' | 'gold' | 'red'
 const fmt = (ts: number | null) => (ts ? new Date(ts).toLocaleDateString() : '—');
 
 export function MyAgentSection({ playerId, isMinor }: { playerId: string; isMinor: boolean }) {
+  const colors = useColors();
   const [data, reload, err] = useLoad(() => m24.list(playerId), [playerId]);
   const [msg, setMsg] = useState<string | null>(null);
   const [reason, setReason] = useState<Record<string, string>>({});
@@ -182,6 +184,7 @@ export function MyAgentSection({ playerId, isMinor }: { playerId: string; isMino
  * the opportunity's own screen, in their own name, exactly as they always did.
  */
 export function AgentSharedOpportunities({ playerId, isMinor }: { playerId: string; isMinor: boolean }) {
+  const colors = useColors();
   const [data, , err] = useLoad(() => m24.sharedOpportunities(playerId), [playerId]);
   if (isMinor) return null;
   const items = (data?.items ?? []).filter((s) => !s.withdrawnAt);

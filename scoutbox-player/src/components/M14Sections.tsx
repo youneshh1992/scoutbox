@@ -2,8 +2,9 @@
 // verification provenance) and squad-invitation acceptance. Verification is
 // display-only here — it changes nothing about who may see or contact whom.
 import { useEffect, useState } from 'react';
-import { Text, TextInput, View } from 'react-native';
-import { colors } from '../theme';
+import { View } from 'react-native';
+import { Text, TextInput } from './Text';
+import { useColors, type Palette } from '../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
 import { m14, type PlayerReference } from '../data/m14client';
 import { pt, pFmtDate } from '../i18n';
@@ -22,12 +23,13 @@ function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): [T | null, () => voi
   return [v, () => setTick((x) => x + 1), err];
 }
 
-const input = {
+const inputStyle = (colors: Palette) => ({
   backgroundColor: colors.panel2, color: colors.text, borderRadius: 8,
   paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, borderWidth: 1, borderColor: colors.line,
-} as const;
+} as const);
 
 function ReferenceCard({ r }: { r: PlayerReference }) {
+  const colors = useColors();
   return (
     <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8, marginTop: 8 }}>
       <Row>
@@ -73,6 +75,7 @@ export function ChildReferencesSection({ guardianId, childId, childName }: { gua
 /** Squad invitation code entry. Adults accept for themselves; the guardian
  *  variant accepts for a child. The server enforces both — this is only UI. */
 export function InviteCodeSection({ actor }: { actor: { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string; childName: string } }) {
+  const colors = useColors();
   const [code, setCode] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
   return (
@@ -81,7 +84,7 @@ export function InviteCodeSection({ actor }: { actor: { kind: 'player'; id: stri
       <Muted>{actor.kind === 'guardian' ? pt('m14invGuardianNote') : pt('m14invNote')}</Muted>
       <Row style={{ marginTop: 6 }}>
         <TextInput
-          style={[input, { flex: 1 }]} value={code} onChangeText={setCode}
+          style={[inputStyle(colors), { flex: 1 }]} value={code} onChangeText={setCode}
           placeholder={pt('m14invPlaceholder')} placeholderTextColor={colors.muted}
           accessibilityLabel={pt('m14invPlaceholder')}
         />

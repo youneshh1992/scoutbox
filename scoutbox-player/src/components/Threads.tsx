@@ -4,10 +4,11 @@
 // clip attachments included.
 
 import { useEffect, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from './Text';
 import { client, type Channel, type MessageAttachment } from '../data/client';
 import type { MediaItem } from '../domain/types';
-import { colors } from '../theme';
+import { useColors, useStyles, type Palette } from '../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
 import { WebVideo } from './WebVideo';
 
@@ -24,6 +25,8 @@ export function Threads({ channels, onSend, onOpen, onTyping, attachableClips, e
   /** Identity for the scoped live stream (typing pings). */
   auth?: { kind: 'player' | 'guardian'; id: string };
 }) {
+  const colors = useColors();
+  const styles = useStyles(makeStyles);
   const [openId, setOpenId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [attachId, setAttachId] = useState<string | null>(null);
@@ -203,10 +206,11 @@ function Attachment({ attachment }: { attachment?: MessageAttachment | null }) {
 }
 
 export function ThreadsHeader() {
+  const colors = useColors();
   return <SectionTitle>Messages — on-platform only</SectionTitle>;
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Palette) => StyleSheet.create({
   pending: { opacity: 0.65 },
   failed: { borderWidth: 1, borderColor: colors.danger },
   org: { color: colors.text, fontSize: 15.5, fontWeight: '700' },
@@ -218,8 +222,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   bubble: { maxWidth: '82%', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 7, gap: 2 },
-  mine: { alignSelf: 'flex-end', backgroundColor: '#14497a' },
-  theirs: { alignSelf: 'flex-start', backgroundColor: colors.panel2 },
+  mine: { alignSelf: 'flex-end', backgroundColor: colors.mine, borderTopRightRadius: 3 },
+  theirs: { alignSelf: 'flex-start', backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.line, borderBottomLeftRadius: 3 },
   input: {
     backgroundColor: colors.bg,
     borderColor: colors.line,

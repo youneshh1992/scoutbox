@@ -21,9 +21,10 @@
 // more than it informs.
 
 import { createElement, useCallback, useEffect, useRef, useState } from 'react';
-import { Text, View } from 'react-native';
+import { View } from 'react-native';
+import { Text } from './Text';
 import { Button, Card, Muted, Pill, Row } from './ui';
-import { colors } from '../theme';
+import { useColors } from '../theme';
 import { pt } from '../i18n';
 import { m22, captureGray8, releaseCaptureSurface } from '../data/m22client';
 import type { CvFinalize, ReadyCheckItem, ReadyCheckResult } from '../data/m22client';
@@ -53,6 +54,7 @@ export function M22BoxCamCv({
 }: {
   playerId: string; sessionId: string; nonce: string; protocolId: string; onClose: () => void;
 }) {
+  const colors = useColors();
   const [phase, setPhase] = useState<Phase>('ready_check');
   const [checks, setChecks] = useState<ReadyCheckResult | null>(null);
   const [elapsed, setElapsed] = useState(0);

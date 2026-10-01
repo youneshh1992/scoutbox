@@ -3,8 +3,9 @@
 // adults; guardian panel for minors), representation (You, adults only),
 // coarse exposure (You), and action-required acknowledgements (Inbox).
 import { useState } from 'react';
-import { Text, TextInput, View } from 'react-native';
-import { colors } from '../theme';
+import { View } from 'react-native';
+import { Text, TextInput } from './Text';
+import { useColors, type Palette } from '../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
 import { m13, type AckNotification, type Preferences, type RepresentationView, type TransitionCase, type Verdict } from '../data/m13client';
 import { m12, type BoardItem } from '../data/m12client';
@@ -26,15 +27,16 @@ function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): [T | null, () => voi
   return [v, () => setTick((x) => x + 1), err];
 }
 
-const input = {
+const inputStyle = (colors: Palette) => ({
   backgroundColor: colors.panel2, color: colors.text, borderRadius: 8,
   paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, borderWidth: 1, borderColor: colors.line,
-} as const;
+} as const);
 
 const fitTone = (v: string): 'green' | 'red' | 'default' => (v === 'compatible' ? 'green' : v === 'conflict' ? 'red' : 'default');
 
 // -------------------------------------------------- F3 private preferences
 export function PreferencesSection({ actor, isMinor }: { actor: Actor; isMinor: boolean }) {
+  const colors = useColors();
   const [data, reload] = useLoad(
     () => (actor.kind === 'player' ? m13.getPreferences(actor.id) : m13.gGetPreferences(actor.id, actor.childId)),
     [actor.id]
@@ -69,7 +71,7 @@ export function PreferencesSection({ actor, isMinor }: { actor: Actor; isMinor: 
       {!readOnly && (
         <Row style={{ marginTop: 8 }}>
           <TextInput
-            accessibilityLabel={pt('m13travel')} style={[input, { width: 90 }]} keyboardType="numeric"
+            accessibilityLabel={pt('m13travel')} style={[inputStyle(colors), { width: 90 }]} keyboardType="numeric"
             placeholder="km" placeholderTextColor={colors.muted} value={travel} onChangeText={setTravel}
           />
           <Button small label={pt('m13saveTravel')} onPress={() => travel && save({ travelLimitKm: Number(travel) })} />
@@ -84,6 +86,7 @@ export function PreferencesSection({ actor, isMinor }: { actor: Actor; isMinor: 
 
 // ----------------------------------------------------- F3 opportunity fit
 export function OpportunityFitSection({ actor }: { actor: Actor }) {
+  const colors = useColors();
   const [board, reloadBoard] = useLoad<{ items: BoardItem[] }>(
     () => (actor.kind === 'player' ? m12.getBoard(actor.id) : m12.gBoard(actor.id, actor.childId)),
     [actor.id]
@@ -139,6 +142,7 @@ export function OpportunityFitSection({ actor }: { actor: Actor }) {
 
 // --------------------------------------------------------- F2 transitions
 export function TransitionsSection({ actor, isMinor, mediaOptions }: { actor: Actor; isMinor: boolean; mediaOptions: { id: string; title: string }[] }) {
+  const colors = useColors();
   const [cases, reload, err] = useLoad<TransitionCase[]>(
     () => (actor.kind === 'player' ? m13.listTransitions(actor.id) : m13.gListTransitions(actor.id)),
     [actor.id]
@@ -178,7 +182,7 @@ export function TransitionsSection({ actor, isMinor, mediaOptions }: { actor: Ac
           ))}
           {c.status === 'open' && (
             <Row style={{ marginTop: 6 }}>
-              <TextInput accessibilityLabel="Org id" style={[input, { flex: 1 }]} placeholder="org-eastport" placeholderTextColor={colors.muted} value={orgInput} onChangeText={setOrgInput} />
+              <TextInput accessibilityLabel="Org id" style={[inputStyle(colors), { flex: 1 }]} placeholder="org-eastport" placeholderTextColor={colors.muted} value={orgInput} onChangeText={setOrgInput} />
               <Button small label={pt('m13trnGrant')} onPress={() => orgInput && act(
                 () => (actor.kind === 'player' ? m13.addRecipient(actor.id, c.id, orgInput) : m13.gAddRecipient(actor.id, c.id, orgInput)),
                 pt('m13trnGranted')
@@ -210,6 +214,7 @@ export function TransitionsSection({ actor, isMinor, mediaOptions }: { actor: Ac
 
 // ------------------------------------------------------ F10 representation
 export function RepresentationSection({ playerId, isMinor }: { playerId: string; isMinor: boolean }) {
+  const colors = useColors();
   const [items, reload, err] = useLoad<RepresentationView[]>(() => m13.listRepresentation(playerId), [playerId]);
   const [msg, setMsg] = useState<string | null>(null);
   if (isMinor) return null; // structurally absent for under-18s — nothing to render
@@ -240,6 +245,7 @@ export function RepresentationSection({ playerId, isMinor }: { playerId: string;
 
 // ------------------------------------------------------------ F4 exposure
 export function ExposureSection({ playerId }: { playerId: string }) {
+  const colors = useColors();
   const [exp] = useLoad(() => m13.exposure(playerId), [playerId]);
   if (!exp) return null;
   return (

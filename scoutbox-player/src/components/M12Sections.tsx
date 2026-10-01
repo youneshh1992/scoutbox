@@ -5,8 +5,9 @@
 // Accessibility: accessibilityLabel/role on controls, status text announced
 // via accessibilityLiveRegion.
 import { useCallback, useEffect, useState } from 'react';
-import { Platform, Switch, Text, TextInput, View } from 'react-native';
-import { colors } from '../theme';
+import { Platform, Switch, View } from 'react-native';
+import { Text, TextInput } from './Text';
+import { useColors, type Palette } from '../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
 import { m12, type BoardItem, type FeedbackItem, type CampaignView, type FamilyTrial, type FollowUpView, type ObjectiveRec, type PassportView, type SafetyPack, type SquadInvite, type UploadSession } from '../data/m12client';
 import { getDataSaver, getPLang, pFmtDate, pt, setDataSaver, setPLang } from '../i18n';
@@ -28,13 +29,14 @@ function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): [T | null, () => voi
   return [v, () => setTick((x) => x + 1)];
 }
 
-const input = {
+const inputStyle = (colors: Palette) => ({
   backgroundColor: colors.panel2, color: colors.text, borderRadius: 8,
   paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, borderWidth: 1, borderColor: colors.line,
-} as const;
+} as const);
 
 // ------------------------------------------------------------- F1 passport
 export function PassportSection({ actor }: { actor: Actor }) {
+  const colors = useColors();
   const [pp, reload] = useLoad<PassportView>(
     () => (actor.kind === 'player' ? m12.getPassport(actor.id) : m12.gPassport(actor.id, actor.childId)),
     [actor.id]
@@ -73,10 +75,10 @@ export function PassportSection({ actor }: { actor: Actor }) {
         </View>
       ))}
       <View style={{ marginTop: 10, gap: 6 }}>
-        <TextInput style={input} placeholder="Claim (e.g. Assists this season)" placeholderTextColor={colors.muted}
+        <TextInput style={inputStyle(colors)} placeholder="Claim (e.g. Assists this season)" placeholderTextColor={colors.muted}
           accessibilityLabel="Evidence claim label" value={label} onChangeText={setLabel} />
         <Row>
-          <TextInput style={[input, { flex: 1 }]} placeholder="Value" placeholderTextColor={colors.muted}
+          <TextInput style={[inputStyle(colors), { flex: 1 }]} placeholder="Value" placeholderTextColor={colors.muted}
             accessibilityLabel="Evidence value" value={value} onChangeText={setValue} keyboardType="numeric" />
           <Button small label={pt('addClaim')} onPress={async () => {
             if (!label.trim()) return;
@@ -97,6 +99,7 @@ export function PassportSection({ actor }: { actor: Actor }) {
 
 // --------------------------------------------------------------- F5 board
 export function BoardSection({ actor }: { actor: Actor }) {
+  const colors = useColors();
   const [board, reload] = useLoad<{ items: BoardItem[]; minor?: boolean; note?: string | null }>(
     () => (actor.kind === 'player' ? m12.getBoard(actor.id) : m12.gBoard(actor.id, actor.childId)),
     [actor.id]
@@ -148,6 +151,7 @@ export function BoardSection({ actor }: { actor: Actor }) {
 
 // ----------------------------------------------------------- F6 campaigns
 export function CampaignsSection({ actor, mediaOptions }: { actor: Actor; mediaOptions: { id: string; title: string }[] }) {
+  const colors = useColors();
   const [camps, reload] = useLoad<CampaignView[]>(
     () => (actor.kind === 'player' ? m12.getCampaigns(actor.id) : m12.gCampaigns(actor.id, actor.childId)),
     [actor.id]
@@ -204,6 +208,7 @@ function AttemptForm({ actor, campaign, mediaOptions, onDone }: { actor: Actor; 
 
 // -------------------------------------------- F2 feedback + F8 development
 export function FeedbackDevSection({ actor }: { actor: Actor }) {
+  const colors = useColors();
   const [fb] = useLoad<{ guardianManaged?: boolean; count?: number; items: FeedbackItem[] }>(
     () => (actor.kind === 'player' ? m12.getFeedback(actor.id) : m12.gFeedback(actor.id, actor.childId)),
     [actor.id]
@@ -247,7 +252,7 @@ export function FeedbackDevSection({ actor }: { actor: Actor }) {
             <Muted key={r.id} size={12}>🔁 reassessment {r.status}{r.outcome ? ` — ${r.outcome.note}` : ''}</Muted>
           ))}
           <Row style={{ marginTop: 6, flexWrap: 'wrap' }}>
-            <TextInput style={[input, { flex: 1, minWidth: 120 }]} placeholder={pt('logProgress')} placeholderTextColor={colors.muted}
+            <TextInput style={[inputStyle(colors), { flex: 1, minWidth: 120 }]} placeholder={pt('logProgress')} placeholderTextColor={colors.muted}
               accessibilityLabel={pt('logProgress')} value={progressNote} onChangeText={setProgressNote} />
             {actor.kind === 'player' && (
               <Button small label="＋" onPress={async () => {
@@ -287,6 +292,7 @@ export function FeedbackDevSection({ actor }: { actor: Actor }) {
 
 // ---------------------------------------------------------- F9 trial days
 export function TrialSafetySection({ actor }: { actor: Actor }) {
+  const colors = useColors();
   const [trials, reload] = useLoad<FamilyTrial[]>(
     () => (actor.kind === 'player' ? m12.getTrials(actor.id) : m12.gTrials(actor.id)),
     [actor.id]
@@ -325,8 +331,8 @@ export function TrialSafetySection({ actor }: { actor: Actor }) {
             }} />
           </Row>
           <Row style={{ marginTop: 6, flexWrap: 'wrap' }}>
-            <TextInput style={[input, { flex: 1, minWidth: 100 }]} placeholder="Contact name" placeholderTextColor={colors.muted} accessibilityLabel="Emergency contact name" value={emName} onChangeText={setEmName} />
-            <TextInput style={[input, { flex: 1, minWidth: 100 }]} placeholder="Phone" placeholderTextColor={colors.muted} accessibilityLabel="Emergency contact phone" value={emPhone} onChangeText={setEmPhone} />
+            <TextInput style={[inputStyle(colors), { flex: 1, minWidth: 100 }]} placeholder="Contact name" placeholderTextColor={colors.muted} accessibilityLabel="Emergency contact name" value={emName} onChangeText={setEmName} />
+            <TextInput style={[inputStyle(colors), { flex: 1, minWidth: 100 }]} placeholder="Phone" placeholderTextColor={colors.muted} accessibilityLabel="Emergency contact phone" value={emPhone} onChangeText={setEmPhone} />
             <Button small label={pt('emergency').split(' (')[0]} onPress={async () => {
               if (!emName || !emPhone) return;
               try {
@@ -356,6 +362,7 @@ export function TrialSafetySection({ actor }: { actor: Actor }) {
 
 // ------------------------------------------------------- F10 squad invites
 export function SquadInvitesSection({ actor }: { actor: Actor }) {
+  const colors = useColors();
   const [invites, reload] = useLoad<SquadInvite[]>(
     () => (actor.kind === 'player' ? m12.getSquadInvites(actor.id) : m12.gSquadInvites(actor.id)),
     [actor.id]
@@ -387,6 +394,7 @@ export function SquadInvitesSection({ actor }: { actor: Actor }) {
 
 // ---------------------------------------------------------- F11 follow-ups
 export function FollowUpsSection({ actor }: { actor: Actor }) {
+  const colors = useColors();
   const [ups, reload] = useLoad<FollowUpView[]>(
     () => (actor.kind === 'player' ? m12.getFollowUps(actor.id) : m12.gFollowUps(actor.id)),
     [actor.id]
@@ -423,6 +431,7 @@ export function FollowUpsSection({ actor }: { actor: Actor }) {
 
 // -------------------------------------- F12 access & inclusion (You tab)
 export function AccessSection({ playerId, mediaOptions, isMinor }: { playerId: string; mediaOptions: { id: string; title: string }[]; isMinor: boolean }) {
+  const colors = useColors();
   const [lang, setLangState] = useState(getPLang());
   const [saver, setSaver] = useState(getDataSaver());
   const [msg, setMsg] = useState<string | null>(null);
@@ -451,7 +460,7 @@ export function AccessSection({ playerId, mediaOptions, isMinor }: { playerId: s
       {mediaOptions.length > 0 && (
         <View style={{ marginTop: 8 }}>
           <Muted size={12}>{pt('captions')} — for “{mediaOptions[0].title}”. Uncaptioned video is labelled as such, never passed off as covered.</Muted>
-          <TextInput style={[input, { minHeight: 60, marginTop: 4 }]} multiline placeholder={'WEBVTT\n\n00:00.000 --> 00:04.000\n…'}
+          <TextInput style={[inputStyle(colors), { minHeight: 60, marginTop: 4 }]} multiline placeholder={'WEBVTT\n\n00:00.000 --> 00:04.000\n…'}
             placeholderTextColor={colors.muted} accessibilityLabel={pt('captions')} value={vtt} onChangeText={setVtt} />
           <Button small label="Save captions" onPress={async () => {
             try { await m12.setCaptions(playerId, mediaOptions[0].id, vtt); setMsg('Caption track saved.'); }
@@ -466,6 +475,7 @@ export function AccessSection({ playerId, mediaOptions, isMinor }: { playerId: s
 
 // ------------------------------------------------ F12A resumable uploads
 export function ResumableUploadCard({ playerId, onDone }: { playerId: string; onDone: () => void }) {
+  const colors = useColors();
   const [session, setSession] = useState<UploadSession | null>(null);
   const [progress, setProgress] = useState(0);
   const [paused, setPaused] = useState(false);

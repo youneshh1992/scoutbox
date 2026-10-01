@@ -2,12 +2,14 @@
 // Expo developer page ("Unmatched Route", English only, with a link to the
 // /_sitemap route list). Nothing is changed; the reader gets a way home.
 import { useRouter } from 'expo-router';
-import { SafeAreaView, Text, View } from 'react-native';
+import { SafeAreaView, View } from 'react-native';
+import { Text } from '../components/Text';
 import { Button, Card, Muted } from '../components/ui';
 import { pt } from '../i18n';
-import { colors } from '../theme';
+import { useColors } from '../theme';
 
 export default function NotFound() {
+  const colors = useColors();
   const router = useRouter();
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>

@@ -6,9 +6,10 @@
 // priority, its decision or its assessments (§16, §58).
 import { useCallback, useEffect, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
-import { Text, View } from 'react-native';
+import { View } from 'react-native';
+import { Text } from './Text';
 import { m12, type PlayerJourney, type PlayerJourneyStage } from '../data/m12client';
-import { colors } from '../theme';
+import { useColors } from '../theme';
 import { pt } from '../i18n';
 import { Card, Muted, Pill, Row, SectionTitle } from './ui';
 
@@ -20,6 +21,7 @@ const stLabel = (s: PlayerJourneyStage) => { const key = `jnSt_${s}` as Paramete
 const nextLabel = (code: string) => { const key = `jnNext_${code}` as Parameters<typeof pt>[0]; try { return pt(key) ?? ''; } catch { return ''; } };
 
 export function JourneySection({ actor }: { actor: Actor }) {
+  const colors = useColors();
   const [items, setItems] = useState<PlayerJourney[] | null>(null);
   // Every return to the tab re-reads: a club may have moved while the person was elsewhere (§55).
   const [focusTick, setFocusTick] = useState(0);
@@ -42,7 +44,7 @@ export function JourneySection({ actor }: { actor: Actor }) {
               <Pill label={`${GLYPH[j.journey.stage] ?? ''} ${stLabel(j.journey.stage)}`} tone={tone(j.journey.stage)} />
             </Row>
             {j.journey.nextAction.code !== 'NONE' ? (
-              <Text style={{ color: colors.accent, fontSize: 13 }} testID="journey-next">{nextLabel(j.journey.nextAction.code)}</Text>
+              <Text style={{ color: colors.accentText, fontSize: 13 }} testID="journey-next">{nextLabel(j.journey.nextAction.code)}</Text>
             ) : (
               <Muted size={12.5}>{pt('jnNothingToDo')}</Muted>
             )}

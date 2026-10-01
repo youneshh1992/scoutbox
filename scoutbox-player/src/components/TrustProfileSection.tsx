@@ -13,8 +13,9 @@
 // Everything shown is derived server-side and rendered verbatim: this screen
 // never computes, adjusts or predicts a score.
 import { useEffect, useState } from 'react';
-import { Text, View } from 'react-native';
-import { colors } from '../theme';
+import { View } from 'react-native';
+import { Text } from './Text';
+import { useColors } from '../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
 import { trust, type TrustActor, type TrustSelf } from '../data/trustClient';
 import { pt } from '../i18n';
@@ -40,6 +41,7 @@ export const trustDisclaimer = (t: { disclaimer?: string } | null | undefined): 
 /** Score + band + disclaimer, shared by the Trust Profile card and by the
  *  visually separate Trust block inside the Combine Card. */
 export function TrustScoreHeader({ t, compact }: { t: TrustSelf; compact?: boolean }) {
+  const colors = useColors();
   return (
     <View>
       <Row>
@@ -56,6 +58,7 @@ export function TrustScoreHeader({ t, compact }: { t: TrustSelf; compact?: boole
 
 // ---------------------------------------------------------- the main section
 export function TrustProfileSection({ actor, childName }: { actor: TrustActor; childName?: string }) {
+  const colors = useColors();
   const key = actor.kind === 'guardian' ? actor.childId : actor.id;
   const [t, setT] = useState<TrustSelf | null>(null);
   const [err, setErr] = useState<string | null>(null);

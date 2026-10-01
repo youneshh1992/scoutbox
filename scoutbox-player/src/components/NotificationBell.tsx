@@ -1,15 +1,19 @@
 import { useState } from 'react';
 import { useRouter } from 'expo-router';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import type { NotificationTarget } from '../data/types';
 import { useSession } from '../state';
-import { colors } from '../theme';
+import { Text } from './Text';
+import { Icon } from './Icon';
+import { useColors, useStyles, type Palette } from '../theme';
 import { Button, Card, Muted, Row } from './ui';
 
 export function NotificationBell() {
   const { notifications, unread, markNotificationsRead, guardianId } = useSession();
   const [open, setOpen] = useState(false);
   const router = useRouter();
+  const colors = useColors();
+  const styles = useStyles(makeStyles);
   // M23 P8 §30 — a row whose server-resolved target is current opens the
   // screen that holds it: a contact or trial invitation lives in the Inbox,
   // a trial schedule, an Offer or a signing on Opportunities (the guardian
@@ -29,13 +33,10 @@ export function NotificationBell() {
 
   return (
     <>
-      <Pressable onPress={openPanel} style={styles.bell} accessibilityLabel="Notifications">
-        <Text style={{ fontSize: 15 }}>🔔</Text>
-        {unread > 0 && (
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>{unread}</Text>
-          </View>
-        )}
+      {/* M24A — the reference bell: a round hairline button with a green dot while something is unread. */}
+      <Pressable onPress={openPanel} style={styles.bell} accessibilityRole="button" accessibilityLabel="Notifications" accessibilityValue={unread > 0 ? { text: `${unread} unread` } : undefined}>
+        <Icon name="bell" size={16} color={colors.text} />
+        {unread > 0 && <View style={styles.dot} accessibilityElementsHidden />}
       </Pressable>
       {open && (
         <Modal transparent animationType="slide" onRequestClose={() => setOpen(false)}>
@@ -72,33 +73,21 @@ export function NotificationBell() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Palette) => StyleSheet.create({
   bell: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: colors.line,
     backgroundColor: colors.bg2,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  badge: {
-    position: 'absolute',
-    top: -5,
-    right: -5,
-    backgroundColor: colors.danger,
-    borderRadius: 999,
-    minWidth: 18,
-    height: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 4,
-  },
-  badgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
-  veil: { flex: 1, backgroundColor: 'rgba(3,8,18,0.7)', justifyContent: 'flex-end' },
+  dot: { position: 'absolute', top: 7, right: 8, width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent },
+  veil: { flex: 1, backgroundColor: colors.veil, justifyContent: 'flex-end' },
   sheet: {
-    backgroundColor: colors.bg2,
+    backgroundColor: colors.bg,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
     borderWidth: 1,
@@ -106,5 +95,5 @@ const styles = StyleSheet.create({
     padding: 18,
     maxHeight: '80%',
   },
-  title: { color: colors.text, fontSize: 20, fontWeight: '800' },
+  title: { color: colors.text, fontSize: 20, fontWeight: '600', letterSpacing: -0.45 },
 });

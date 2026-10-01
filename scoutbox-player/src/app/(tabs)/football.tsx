@@ -3,11 +3,13 @@
 // the You tab; they are page tabs here, and "+ Add evidence" is the primary
 // action (it opens the existing Upload screen, whose route is unchanged).
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text } from 'react-native';
+import { Pressable, ScrollView, StyleSheet } from 'react-native';
+import { Text } from '../../components/Text';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { PitchBackdrop } from '../../components/PitchBackdrop';
 import { Link, useLocalSearchParams } from 'expo-router';
 import { useSession } from '../../state';
-import { colors } from '../../theme';
+import { useColors, useStyles, type Palette } from '../../theme';
 import { pt } from '../../i18n';
 import { PageHeader, PageTabs, pickTab } from '../../components/PageChrome';
 import { FootballPassportSection } from '../../components/M15Sections';
@@ -17,6 +19,8 @@ import { CombineSection } from '../../components/CombineSection';
 import { TrustProfileSection } from '../../components/TrustProfileSection';
 
 export default function Football() {
+  const colors = useColors();
+  const styles = useStyles(makeStyles);
   const { playerId, isMinor } = useSession();
   const params = useLocalSearchParams<{ tab?: string }>();
   const TABS = [
@@ -32,6 +36,7 @@ export default function Football() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+        <PitchBackdrop />
       <ScrollView contentContainerStyle={styles.scroll}>
         <PageHeader
           title={pt('tabFootball')}
@@ -59,9 +64,9 @@ export default function Football() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: 18, gap: 10, maxWidth: 560, width: '100%', alignSelf: 'center' },
   primary: { backgroundColor: colors.accent, borderRadius: 10, paddingVertical: 7, paddingHorizontal: 12 },
-  primaryText: { color: '#04240f', fontWeight: '700', fontSize: 13 },
+  primaryText: { color: colors.accentInk, fontWeight: '700', fontSize: 13 },
 });

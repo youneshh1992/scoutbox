@@ -10,8 +10,9 @@
 // production, tests whose metric the device cannot measure are shown honestly
 // as "Measurement not yet supported on this device" and never estimated.
 import { createElement, useEffect, useRef, useState } from 'react';
-import { Platform, Text, View } from 'react-native';
-import { colors } from '../theme';
+import { Platform, View } from 'react-native';
+import { Text } from './Text';
+import { useColors } from '../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
 import {
   combine, type CombineActor, type CombineAttempt, type CombineCard,
@@ -76,6 +77,7 @@ const valueStruck = (state: string) => state === 'invalidated' || state === 'pro
 
 // ------------------------------------------------------- verified result row
 function ResultRow({ a }: { a: CombineAttempt }) {
+  const colors = useColors();
   const [why, setWhy] = useState(false);
   const verified = a.combineState === 'combine_verified';
   const partial = a.combineState === 'partially_measured';
@@ -121,6 +123,7 @@ function CombineCapturePanel({ playerId, protocol, requestId, onDone, onClose }:
   playerId: string; protocol: CombineProtocol; requestId?: string;
   onDone: (a: CombineAttempt) => void; onClose: () => void;
 }) {
+  const colors = useColors();
   const [phase, setPhase] = useState<'setup' | 'ready' | 'recording' | 'error'>('setup');
   const [msg, setMsg] = useState<string | null>(null);
   const [attemptId, setAttemptId] = useState<string | null>(null);
@@ -211,7 +214,7 @@ function CombineCapturePanel({ playerId, protocol, requestId, onDone, onClose }:
   async function cancel() { stopCamera(); if (attemptId) { try { await combine.cancel(playerId, attemptId); } catch { /* ignore */ } } onClose(); }
 
   return (
-    <Card style={{ borderColor: colors.accent }}>
+    <Card>
       <Row><Text style={{ color: colors.text, fontWeight: '800', fontSize: 16 }}>{pt('cmbAttempt')}</Text><Pill label={protocol.title} tone="blue" /></Row>
       <Muted size={12}>{pt('cmbPoweredBy')}</Muted>
       {DEMO ? <Muted size={12}>{pt('cmbDemoSim')}</Muted> : null}
@@ -245,7 +248,7 @@ function CombineCapturePanel({ playerId, protocol, requestId, onDone, onClose }:
         <View>
           <Row style={{ marginTop: 6 }}>
             <View style={{ flex: 1 }}><Muted size={11}>{pt('cmbWindow')}</Muted><Text style={{ color: colors.text, fontWeight: '800', fontSize: 18 }}>{fmtClock(windowMs)}</Text></View>
-            <View style={{ flex: 1 }}><Muted size={11}>{pt('cmbElapsed')}</Muted><Text style={{ color: colors.accent, fontWeight: '800', fontSize: 18 }}>{fmtClock(elapsed)}</Text></View>
+            <View style={{ flex: 1 }}><Muted size={11}>{pt('cmbElapsed')}</Muted><Text style={{ color: colors.accentText, fontWeight: '800', fontSize: 18 }}>{fmtClock(elapsed)}</Text></View>
           </Row>
           <Pill label={pt('cmbObserving')} tone="green" />
           <Muted size={11.5}>{pt('cmbObservingNote')}</Muted>
@@ -258,6 +261,7 @@ function CombineCapturePanel({ playerId, protocol, requestId, onDone, onClose }:
 
 // -------------------------------------------------------------- result card
 function CombineResultCard({ attempt, onClose }: { attempt: CombineAttempt; onClose: () => void }) {
+  const colors = useColors();
   const verified = attempt.combineState === 'combine_verified';
   const partial = attempt.combineState === 'partially_measured';
   return (
@@ -278,7 +282,7 @@ function CombineResultCard({ attempt, onClose }: { attempt: CombineAttempt; onCl
         )}
       </Row>
       {valueStruck(attempt.combineState) && attempt.measuredValue != null ? <Muted size={12}>{pt('cmbValueNotCounted')}</Muted> : null}
-      {verified ? <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 15 }}>{pt('cmbWorkCounts')}</Text> : null}
+      {verified ? <Text style={{ color: colors.accentText, fontWeight: '800', fontSize: 15 }}>{pt('cmbWorkCounts')}</Text> : null}
       {verified ? <Muted size={12}>{pt('cmbRecordProve')}</Muted> : null}
       {partial ? <Muted size={12}>{pt('cmbMeasuredNotVerified')}</Muted> : null}
       {attempt.stateCopy ? <Muted size={12}>{attempt.stateCopy}</Muted> : null}
@@ -295,6 +299,7 @@ function CombineResultCard({ attempt, onClose }: { attempt: CombineAttempt; onCl
 
 // ------------------------------------------------------------- main section
 export function CombineSection({ actor, childName }: { actor: CombineActor; childName?: string }) {
+  const colors = useColors();
   const key = actor.kind === 'guardian' ? actor.childId : actor.id;
   const isPlayer = actor.kind === 'player';
   const [overview, reloadOverview] = useLoad<CombineOverview>(() => combine.overview(actor), [key]);
@@ -356,7 +361,7 @@ export function CombineSection({ actor, childName }: { actor: CombineActor; chil
               {card.results.length > 0 ? card.results.map((r) => (
                 <Row key={r.protocolId} style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 4, marginTop: 4 }}>
                   <Text style={{ color: colors.text, fontSize: 13, flexShrink: 1 }}>{r.protocolTitle}</Text>
-                  <Text style={{ color: colors.accent, fontWeight: '800' }}>{r.display}<Text style={{ color: colors.muted, fontWeight: '600', fontSize: 12 }}> {r.unit}</Text></Text>
+                  <Text style={{ color: colors.accentText, fontWeight: '800' }}>{r.display}<Text style={{ color: colors.muted, fontWeight: '600', fontSize: 12 }}> {r.unit}</Text></Text>
                   {r.combineVerified ? <VerifiedBadge /> : null}
                 </Row>
               )) : <Muted size={12}>{pt('cmbNoResults')}</Muted>}
@@ -413,6 +418,7 @@ export function CombineSection({ actor, childName }: { actor: CombineActor; chil
 }
 
 function RequestRow({ r, protocols, onStart, canStart }: { r: CombineRequest; protocols: CombineProtocol[]; onStart: (p: CombineProtocol, requestId?: string) => void; canStart: boolean }) {
+  const colors = useColors();
   return (
     <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6, marginTop: 6 }}>
       <Row>

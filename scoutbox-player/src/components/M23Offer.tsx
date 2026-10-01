@@ -9,9 +9,10 @@
 // server addressed to that guardian.
 import { useCallback, useEffect, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
-import { Linking, Text, TextInput, View } from 'react-native';
+import { Linking, View } from 'react-native';
+import { Text, TextInput } from './Text';
 import { m12, type FamilyOffer, type FamilyOfferRevision, type OfferStatus } from '../data/m12client';
-import { colors } from '../theme';
+import { useColors } from '../theme';
 import { pt } from '../i18n';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
 
@@ -34,6 +35,7 @@ const errMsg = (e: unknown) => {
 const keyFor = (oid: string, rid: string, what: string) => `of-${what}-${oid}-${rid}`;
 
 export function OfferSection({ actor }: { actor: Actor }) {
+  const colors = useColors();
   const [offers, setOffers] = useState<FamilyOffer[] | null>(null);
   const [tick, setTick] = useState(0);
   const [arm, setArm] = useState<{ id: string; what: 'accept' | 'decline' } | null>(null);
@@ -124,7 +126,7 @@ export function OfferSection({ actor }: { actor: Actor }) {
                 )}
               </View>
             )}
-            {o.status === 'ACCEPTED' && <View style={{ marginTop: 6 }} testID={`offer-signing-pending-${o.id}`}><Text style={{ color: colors.accent, fontSize: 13, fontWeight: '700' }}>{pt('offerSigningPending')}</Text></View>}
+            {o.status === 'ACCEPTED' && <View style={{ marginTop: 6 }} testID={`offer-signing-pending-${o.id}`}><Text style={{ color: colors.accentText, fontSize: 13, fontWeight: '700' }}>{pt('offerSigningPending')}</Text></View>}
             {o.status === 'ISSUED' && o.notAnswerableReason === 'CASE_PAUSED' && <View style={{ marginTop: 6 }} testID={`offer-paused-${o.id}`} accessibilityRole="text"><Muted size={12.5}>{pt('offerPaused')}</Muted></View>}
             {mine && <Muted size={12}>{mine.actorType === 'guardian' && actor.kind === 'player' ? pt('offerAnsweredByGuardian') : `${pt('offerAnsweredAt')} ${fmt(mine.occurredAt)}`}</Muted>}
             {live && !arm && (

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native';
+import { Text, TextInput } from '../../components/Text';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { PitchBackdrop } from '../../components/PitchBackdrop';
 import { client } from '../../data/client';
 import type { Channel } from '../../data/types';
 import type { ChildInboxItem, InboxRequest } from '../../domain/types';
 import { useSession } from '../../state';
-import { colors } from '../../theme';
+import { useColors, useStyles, type Palette } from '../../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from '../../components/ui';
 import { pt } from '../../i18n';
 import { PageHeader } from '../../components/PageChrome';
@@ -18,6 +20,8 @@ function isChildItem(r: InboxRequest | ChildInboxItem): r is ChildInboxItem {
 }
 
 export default function Inbox() {
+  const colors = useColors();
+  const styles = useStyles(makeStyles);
   const { playerId, inbox, isMinor, me, refresh, notifications } = useSession();
   const [error, setError] = useState<string | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -57,6 +61,7 @@ export default function Inbox() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+        <PitchBackdrop />
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
@@ -209,7 +214,7 @@ export default function Inbox() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: 18, gap: 10, maxWidth: 560, width: '100%', alignSelf: 'center' },
   org: { color: colors.text, fontSize: 16, fontWeight: '700' },

@@ -10,8 +10,9 @@
 // No fee, no contract terms and no legal advice appear here. ScoutBox records
 // the answer; it does not advise the player.
 import { useEffect, useState } from 'react';
-import { Text, View } from 'react-native';
-import { colors } from '../theme';
+import { View } from 'react-native';
+import { Text } from './Text';
+import { useColors } from '../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
 import { m25, m25ClientKey, type AgentConsentRequest, type ConsentAction } from '../data/m25client';
 import { pt } from '../i18n';
@@ -39,6 +40,7 @@ const roleKey = (r: string) => (r === 'individual' ? 'm25roleIndividual' : r ===
 const fmt = (ts: number | null) => (ts ? new Date(ts).toLocaleDateString() : '—');
 
 export function AgentConsentSection({ playerId, isMinor }: { playerId: string; isMinor: boolean }) {
+  const colors = useColors();
   const [data, reload, err] = useLoad(() => m25.list(playerId), [playerId]);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

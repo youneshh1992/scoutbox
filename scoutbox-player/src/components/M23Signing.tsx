@@ -10,9 +10,10 @@
 // jurisdiction in this build (§14), and the server lists nothing for it.
 import { useCallback, useEffect, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
-import { Linking, Text, View } from 'react-native';
+import { Linking, View } from 'react-native';
+import { Text } from './Text';
 import { m12, type FamilySigning, type FamilySigningParty, type SigningPartyType, type SigningStatus } from '../data/m12client';
-import { colors } from '../theme';
+import { useColors } from '../theme';
 import { pt } from '../i18n';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
 
@@ -40,6 +41,7 @@ const errMsg = (e: unknown) => {
 const keyFor = (sid: string, rid: string) => `sg-complete-${sid}-${rid}`;
 
 export function SigningSection({ actor }: { actor: Actor }) {
+  const colors = useColors();
   const [items, setItems] = useState<FamilySigning[] | null>(null);
   const [tick, setTick] = useState(0);
   const [arm, setArm] = useState<string | null>(null);
@@ -116,7 +118,7 @@ export function SigningSection({ actor }: { actor: Actor }) {
             )}
             {s.status === 'COMPLETED' && s.completion && (
               <View style={{ marginTop: 6 }} testID={`signing-completed-${s.id}`}>
-                <Text style={{ color: colors.accent, fontSize: 13, fontWeight: '700' }}>{pt('signingCompleted').replace('{when}', fmt(s.completion.completedAt))}</Text>
+                <Text style={{ color: colors.accentText, fontSize: 13, fontWeight: '700' }}>{pt('signingCompleted').replace('{when}', fmt(s.completion.completedAt))}</Text>
                 <Muted size={12}>{pt('signingCompletedNote')}</Muted>
               </View>
             )}

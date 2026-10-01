@@ -5,14 +5,16 @@
 // and placement check-ins to Opportunities; every section is the same
 // component reading the same server projection as before.
 import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from '../../components/Text';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { PitchBackdrop } from '../../components/PitchBackdrop';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { client, type FiledReport, type SeasonWrap } from '../../data/client';
 import type { NotificationPrefs } from '../../data/types';
 import { SAFEGUARDING_PROMISES, U18_PROMISES } from '../../domain/safeguarding';
 import { useSession } from '../../state';
-import { colors } from '../../theme';
+import { useColors, useStyles, type Palette } from '../../theme';
 import { pt } from '../../i18n';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from '../../components/ui';
 import { PageHeader, PageTabs, pickTab } from '../../components/PageChrome';
@@ -25,6 +27,8 @@ import { AgentTransactionSection } from '../../components/AgentTransactionSectio
 import { ProfileBody } from './profile';
 
 export default function You() {
+  const colors = useColors();
+  const styles = useStyles(makeStyles);
   const router = useRouter();
   const { me, mode, isMinor, logout, playerId, notifications } = useSession();
   const params = useLocalSearchParams<{ tab?: string }>();
@@ -91,6 +95,7 @@ export default function You() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+        <PitchBackdrop />
       <ScrollView contentContainerStyle={styles.scroll}>
         <PageHeader title={pt('tabYou')} />
         <PageTabs tabs={TABS} value={tab} onChange={setTab} />
@@ -119,7 +124,7 @@ export default function You() {
             </Card>
 
             {isMinor && (
-              <Card style={{ borderColor: colors.accent2 }}>
+              <Card>
                 <SectionTitle>Your guardian-managed account</SectionTitle>
                 <Muted size={13}>
                   Your parent or guardian owns this account and handles everything club-related. If anything
@@ -145,7 +150,7 @@ export default function You() {
             )}
 
             {me?.pathway && (
-              <Card style={{ borderColor: colors.accent }}>
+              <Card>
                 <Row style={{ justifyContent: 'space-between' }}>
                   <SectionTitle>🎉 Your season wrap</SectionTitle>
                   <Button small primary label={wrap ? 'Refresh' : 'Show my season'} onPress={async () => {
@@ -284,7 +289,7 @@ export default function You() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: 18, gap: 10, maxWidth: 560, width: '100%', alignSelf: 'center' },
   cardTitle: { color: colors.text, fontSize: 16, fontWeight: '700' },

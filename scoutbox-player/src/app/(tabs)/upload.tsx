@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from '../../components/Text';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { PitchBackdrop } from '../../components/PitchBackdrop';
 import { client, type ProgrammeInfo } from '../../data/client';
 import type { Drill } from '../../domain/types';
 import { useSession } from '../../state';
-import { colors } from '../../theme';
+import { useColors, useStyles, type Palette } from '../../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from '../../components/ui';
 import { pt } from '../../i18n';
 import { PageHeader } from '../../components/PageChrome';
@@ -44,6 +46,8 @@ const STAT_FIELDS = [
 ] as const;
 
 export default function Upload() {
+  const colors = useColors();
+  const styles = useStyles(makeStyles);
   const { playerId, me, isMinor, refresh } = useSession();
   const [mediaTitle, setMediaTitle] = useState('');
   const [pickedFile, setPickedFile] = useState<{ dataUrl: string; name: string } | null>(null);
@@ -119,6 +123,7 @@ export default function Upload() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+        <PitchBackdrop />
       <ScrollView contentContainerStyle={styles.scroll}>
         <PageHeader title={pt('tabUpload')} back />
         <Muted>
@@ -221,7 +226,7 @@ export default function Upload() {
         </Card>
 
         {programme && (
-          <Card style={{ borderColor: colors.accent2 }}>
+          <Card>
             <SectionTitle>🎓 Your training programme</SectionTitle>
             {!programme.current ? (
               <>
@@ -285,7 +290,7 @@ export default function Upload() {
           <SectionTitle>🏟 At-home combine</SectionTitle>
           <Muted size={12.5}>
             Standardised drills with a measurable number. Record it on video and the result is
-            <Text style={{ color: colors.accent }}> combine-verified</Text> — real numbers clubs can trust,
+            <Text style={{ color: colors.accentText }}> combine-verified</Text> — real numbers clubs can trust,
             from anywhere.
           </Muted>
           {drills.map((d) => (
@@ -357,7 +362,7 @@ export default function Upload() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: 18, gap: 10, maxWidth: 560, width: '100%', alignSelf: 'center' },
   input: {

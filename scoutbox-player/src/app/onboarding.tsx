@@ -1,12 +1,15 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from '../components/Text';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { PitchBackdrop } from '../components/PitchBackdrop';
+import { ThemeSwitch } from '../components/ThemeSwitch';
 import { useRouter } from 'expo-router';
 import { client, ClientError, type DemoIdentity } from '../data/client';
 import { adultAgeFor, ageOn, SAFEGUARDING_PROMISES, U18_PROMISES } from '../domain/safeguarding';
 import { POSITIONS } from '../domain/types';
 import { useSession } from '../state';
-import { colors } from '../theme';
+import { useColors, useStyles, type Palette } from '../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from '../components/ui';
 
 const COUNTRIES = ['GB', 'PT', 'FR', 'SE', 'PL', 'NG', 'GH', 'AR', 'JP', 'KR', 'TH', 'SG', 'US'];
@@ -21,12 +24,14 @@ type Step =
 function RoleCard({ icon, title, subtitle, accent, onPress }: {
   icon: string; title: string; subtitle: string; accent?: boolean; onPress: () => void;
 }) {
+  const colors = useColors();
+  const styles = useStyles(makeStyles);
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [
         styles.roleCard,
-        accent && { borderColor: colors.accent, backgroundColor: '#12291f' },
+        accent && { borderColor: colors.accent, backgroundColor: colors.tabActiveBg },
         pressed && { opacity: 0.75, transform: [{ scale: 0.99 }] },
       ]}
     >
@@ -43,6 +48,8 @@ function RoleCard({ icon, title, subtitle, accent, onPress }: {
 }
 
 function StepDots({ current }: { current: number }) {
+  const colors = useColors();
+  const styles = useStyles(makeStyles);
   return (
     <View style={styles.dotsRow}>
       {[1, 2, 3, 4, 5].map((n) => (
@@ -52,14 +59,16 @@ function StepDots({ current }: { current: number }) {
   );
 }
 
-function CheckList({ items, mark = '✓', markColor = colors.accent }: {
+function CheckList({ items, mark = '✓', markColor }: {
   items: readonly string[]; mark?: string; markColor?: string;
 }) {
+  const colors = useColors();
+  const markTone = markColor ?? colors.accentText;
   return (
     <Card style={{ gap: 12 }}>
       {items.map((p) => (
         <View key={p.slice(0, 20)} style={{ flexDirection: 'row', gap: 10 }}>
-          <Text style={{ color: markColor, fontSize: 14, fontWeight: '800', lineHeight: 19 }}>{mark}</Text>
+          <Text style={{ color: markTone, fontSize: 14, fontWeight: '800', lineHeight: 19 }}>{mark}</Text>
           <View style={{ flex: 1 }}>
             <Muted size={13.5}>{p}</Muted>
           </View>
@@ -70,6 +79,8 @@ function CheckList({ items, mark = '✓', markColor = colors.accent }: {
 }
 
 function Avatar({ name, tone }: { name: string; tone?: 'gold' }) {
+  const colors = useColors();
+  const styles = useStyles(makeStyles);
   const initials = name.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
   return (
     <View style={[styles.avatar, tone === 'gold' && { borderColor: colors.gold }]}>
@@ -79,6 +90,7 @@ function Avatar({ name, tone }: { name: string; tone?: 'gold' }) {
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
+  const styles = useStyles(makeStyles);
   return (
     <View style={{ gap: 5 }}>
       <Text style={styles.fieldLabel}>{label}</Text>
@@ -88,6 +100,8 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 }
 
 export default function Onboarding() {
+  const colors = useColors();
+  const styles = useStyles(makeStyles);
   const router = useRouter();
   const { loginPlayer, loginGuardian, mode } = useSession();
   const [step, setStep] = useState<Step>('welcome');
@@ -281,14 +295,13 @@ export default function Onboarding() {
 
   return (
     <SafeAreaView style={styles.safe}>
+        <PitchBackdrop />
       <ScrollView contentContainerStyle={styles.scroll}>
         {/* ---- hero */}
+        <View style={styles.themeRow}><ThemeSwitch /></View>
         <View style={styles.hero}>
-          <View style={styles.crest}>
-            <Text style={{ fontSize: 30 }}>⚽</Text>
-          </View>
           <Text style={styles.logo}>
-            Scout<Text style={{ color: colors.accent }}>Box</Text>
+            ScoutBox<Text style={{ color: colors.accent }}>▪</Text>
           </Text>
           <Text style={styles.tagline}>Build a verified profile. Get discovered. Never pay to be seen.</Text>
           <Row style={{ justifyContent: 'center', marginTop: 4 }}>
@@ -478,7 +491,7 @@ export default function Onboarding() {
         )}
 
         {step === 'needs-guardian' && (
-          <Card style={{ borderColor: colors.accent2 }}>
+          <Card>
             <Text style={styles.name}>Under-18s join with a parent or guardian</Text>
             <Muted size={14}>
               Your account will be owned and managed by your parent or guardian — that&apos;s how ScoutBox
@@ -608,9 +621,10 @@ export default function Onboarding() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: 20, gap: 12, maxWidth: 520, width: '100%', alignSelf: 'center' },
+  themeRow: { flexDirection: 'row', justifyContent: 'flex-end', marginBottom: -8 },
   hero: { alignItems: 'center', gap: 6, paddingTop: 14, paddingBottom: 10 },
   crest: {
     width: 68,
@@ -627,7 +641,7 @@ const styles = StyleSheet.create({
   tagline: { color: colors.muted, fontSize: 13.5, textAlign: 'center' },
   // The makers' signature on the entry screen: quiet, centred, never a control.
   signature: { color: colors.muted, fontSize: 12, letterSpacing: 0.4, textAlign: 'center', marginTop: 6 },
-  signatureName: { color: colors.accent, fontSize: 13.5, fontWeight: '700', letterSpacing: 0 },
+  signatureName: { color: colors.accentText, fontSize: 13.5, fontWeight: '700', letterSpacing: 0 },
   name: { color: colors.text, fontSize: 16, fontWeight: '700' },
   roleCard: {
     flexDirection: 'row',
