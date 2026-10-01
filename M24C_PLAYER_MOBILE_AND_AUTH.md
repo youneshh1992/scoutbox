@@ -90,14 +90,23 @@ values; colours come from the active palette so light and dark both match):
 ## 3. Authentication (all applications)
 
 `design-system/AuthShell.tsx` + the `.login.auth-page` block in
-`design-system/platform.css`: the `#00E676` page, one centred card of at most
-1000 px (introduction `#68E99F` ≈45%, form `#103A32` ≈55%, 14 px radius, soft
+`design-system/platform.css`. **M24C.1 palette** (the `--auth-*` tokens;
+`AUTH_PANEL` / `AUTH_PAGE` on the Player): the page and the form are the
+dark football green `#173B27` of the Football Passport card, the
+introduction is the bright brand green `#00E676` with `#113822` text, the
+submit is `#00E676` with `#113822` text (pressed: `#113822`), pale
+supporting surfaces are `#E5F5E9`, text on dark green is white with
+`#CFDFD0` for supporting copy and placeholders, underlines are light green at
+35 %, focus is `#00E676`. Behind the centred surfaces the approved pitch
+motif (white boundary, halfway line, centre circle and spot, one penalty
+area at 8 %, grain and mowing bands under 2 %, 1 px lines) — oversized on
+desktop so it shows in the margins, upright and cropped on a phone, never
+in front of a tap or in the accessibility tree, never moving. One centred
+card of at most 1000 px (introduction ≈45 %, form ≈55 %, 14 px radius, soft
 shadow, 44 px padding, form content 360 px wide), the ScoutBox wordmark with
 the product identity above the form, `AuthTabs` only where sign-up exists,
-`AuthField` labelled underlined inputs (`#F7FAF7` text, light-green
-underlines, `#00E676` focus), `PasswordInput` with show / hide, and the
-compact rounded light submit with deep-green text. Under 720 px the panels
-stack. The theme toggle stays on the page (its stored choice is restored in
+`AuthField` labelled underlined inputs, `PasswordInput` with show / hide, and
+the compact rounded submit. Under 720 px the panels stack. The theme toggle stays on the page (its stored choice is restored in
 the workspace after sign-in); the entry surface itself keeps its brand
 colours in both states. Nothing here touches the signed-in theme tokens.
 
