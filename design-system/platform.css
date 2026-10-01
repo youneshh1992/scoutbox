@@ -508,27 +508,53 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 }
 
 /* ------------------------------------------------------------------ M24C authentication
-   The brand-green page, one centred two-panel card: a soft-green introduction
-   (≈45%) and the deep-green form (≈55%), the product mark above the form,
-   labelled underlined inputs, a compact rounded light submit with deep-green
-   text. These colours belong to the entry surface only — the signed-in
-   application keeps its saved light / dark tokens untouched. */
+   The dark football green page (#173B27, the Football Passport card's green)
+   with the approved pitch motif behind it, one centred two-panel card: the
+   bright-green introduction (#00E676, ≈45%) and the dark-green form (≈55%),
+   the product mark above the form, labelled underlined inputs, a bright-green
+   submit with deep-green text. These tokens belong to the entry surface only
+   — the signed-in application keeps its saved light / dark tokens untouched.
+   The pitch is two pseudo-elements: pointer-events none, outside the
+   accessibility tree, behind the opaque card, no animation. */
 .login.auth-page {
-  --auth-green: #00e676; --auth-promo: #68e99f; --auth-panel: #103a32; --auth-ink: #f7faf7; --auth-soft: #a9d9c2;
-  --auth-line: #3e7a64; --auth-line-strong: #6fb894; --auth-focus: #00e676; --auth-field: #0d2f28; --auth-promo-ink: #113822;
-  background: var(--auth-green); color: var(--auth-promo-ink); min-height: 100vh; padding: 56px 20px 32px; gap: 0; justify-content: center; align-items: center;
+  --auth-green: #00e676;        /* bright brand green: the introduction, the submit, focus */
+  --auth-dark: #173b27;         /* dark football green: the page and the form panel */
+  --auth-deep: #113822;         /* deep green: text on bright / pale green, pressed states */
+  --auth-pale: #e5f5e9;         /* pale supporting surfaces */
+  --auth-ink: #ffffff;          /* main text on dark green */
+  --auth-soft: #cfdfd0;         /* supporting text on dark green */
+  --auth-promo: var(--auth-green); --auth-panel: var(--auth-dark); --auth-promo-ink: var(--auth-deep);
+  --auth-line: rgba(207, 223, 208, 0.35); --auth-line-strong: rgba(207, 223, 208, 0.6); --auth-focus: var(--auth-green);
+  --auth-pitch: rgba(255, 255, 255, 0.08); --auth-grain: rgba(255, 255, 255, 0.016); --auth-band: rgba(255, 255, 255, 0.012);
+  position: relative; isolation: isolate; overflow-x: hidden;
+  background-color: var(--auth-dark);
+  background-image:
+    repeating-linear-gradient(103deg, transparent 0 3px, var(--auth-grain) 3px 4px, transparent 4px 9px),
+    repeating-linear-gradient(90deg, transparent 0 140px, var(--auth-band) 140px 280px);
+  color: var(--auth-ink); min-height: 100vh; padding: 56px 20px 32px; gap: 0; justify-content: center; align-items: center;
 }
-.auth-page .login-toolbar { top: 14px; right: 16px; }
+/* the pitch: boundary, halfway line, centre circle and spot (::before); one penalty area (::after) */
+.login.auth-page::before {
+  content: ''; position: absolute; pointer-events: none; z-index: -1; left: 50%; top: 50%; width: 1640px; height: 1060px; transform: translate(-50%, -50%);
+  border: 1px solid var(--auth-pitch); border-radius: 2px;
+  background-image: linear-gradient(var(--auth-pitch), var(--auth-pitch)), radial-gradient(circle at center, transparent 0 92px, var(--auth-pitch) 92px 93px, transparent 93px), radial-gradient(circle at center, var(--auth-pitch) 0 2.5px, transparent 2.5px);
+  background-size: 1px 100%, 100% 100%, 100% 100%; background-position: center; background-repeat: no-repeat;
+}
+.login.auth-page::after {
+  content: ''; position: absolute; pointer-events: none; z-index: -1; left: calc(50% - 820px); top: calc(50% - 230px); width: 250px; height: 460px;
+  border: 1px solid var(--auth-pitch); border-left: 0; border-radius: 0 2px 2px 0;
+}
+.auth-page .login-toolbar { top: 14px; right: 16px; z-index: 2; }
 .auth-card {
-  display: grid; grid-template-columns: 45fr 55fr; width: 100%; max-width: 1000px;
-  border-radius: 14px; overflow: hidden; box-shadow: 0 24px 60px rgba(17, 56, 34, 0.28), 0 2px 6px rgba(17, 56, 34, 0.12);
+  position: relative; z-index: 1; display: grid; grid-template-columns: 45fr 55fr; width: 100%; max-width: 1000px;
+  border-radius: 14px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(0, 0, 0, 0.2);
 }
 .auth-promo { background: var(--auth-promo); color: var(--auth-promo-ink); padding: 44px 40px; display: flex; flex-direction: column; justify-content: center; gap: 22px; }
 .auth-promo h2 { font-size: 30px; line-height: 1.12; letter-spacing: -0.9px; font-weight: 700; text-wrap: balance; color: var(--auth-promo-ink); }
-.auth-points { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 11px; font-size: 14px; line-height: 1.5; max-width: 34ch; }
+.auth-points { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 11px; font-size: 14px; line-height: 1.5; max-width: 34ch; color: var(--auth-promo-ink); }
 .auth-points li { display: flex; gap: 10px; align-items: flex-start; }
 .auth-points li::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--auth-promo-ink); flex-shrink: 0; margin-top: 7px; }
-.auth-promo .pill { background: rgba(255, 255, 255, 0.55); border-color: transparent; color: var(--auth-promo-ink); }
+.auth-promo .pill { background: var(--auth-pale); border-color: transparent; color: var(--auth-deep); }
 .auth-form { background: var(--auth-panel); color: var(--auth-ink); padding: 44px 44px 36px; display: flex; flex-direction: column; align-items: stretch; gap: 18px; }
 .auth-form > * { width: 100%; max-width: 360px; align-self: center; }
 .auth-form h1 { font-size: 30px; font-weight: 800; letter-spacing: -1.3px; line-height: 1; display: inline-flex; align-items: baseline; gap: 7px; flex-wrap: wrap; justify-content: flex-start; color: var(--auth-ink); margin-bottom: 4px; }
@@ -539,7 +565,7 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .auth-form .tagline, .auth-form .dim { color: var(--auth-soft); }
 .auth-tabs { display: flex; align-items: center; gap: 8px; margin: 2px 0 2px; }
 .auth-tab-wrap { display: inline-flex; align-items: center; gap: 8px; }
-.auth-tab-divider { color: var(--auth-line); font-size: 15px; }
+.auth-tab-divider { color: var(--auth-line-strong); font-size: 15px; }
 .auth-tab { background: none; border: 0; padding: 8px 2px; min-height: 40px; font-size: 15px; font-weight: 500; color: var(--auth-soft); border-radius: 4px; box-shadow: none; }
 .auth-tab:hover { filter: none; color: var(--auth-ink); }
 .auth-tab.on { color: var(--auth-ink); font-weight: 700; }
@@ -547,10 +573,10 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .auth-form .org-grid { display: flex; flex-direction: column; gap: 8px; }
 .auth-form .org-card { width: 100%; padding: 12px 14px; border-radius: 10px; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--auth-line); color: var(--auth-ink); box-shadow: none; gap: 6px; }
 .auth-form .org-card:hover { border-color: var(--auth-line-strong); }
-.auth-form .org-card.selected { border-color: var(--auth-green); box-shadow: inset 0 0 0 1px var(--auth-green); background: rgba(0, 230, 118, 0.08); }
+.auth-form .org-card.selected { border-color: var(--auth-green); box-shadow: inset 0 0 0 1px var(--auth-green); background: rgba(0, 230, 118, 0.1); }
 .auth-form .org-card .org-name { font-size: 14.5px; }
 .auth-form .org-card .pill, .auth-form .demo-identities .pill { background: rgba(255, 255, 255, 0.1); border-color: transparent; color: var(--auth-soft); }
-.auth-form .org-card .pill.green { color: #c8f3dc; }
+.auth-form .org-card .pill.green { color: var(--auth-pale); }
 .auth-form .org-card .pill.gold { color: #f3dca3; }
 .auth-form .enter-row, .auth-form .reg-grid { display: flex; flex-direction: column; align-items: stretch; gap: 14px; width: 100%; }
 .auth-field { display: flex; flex-direction: column; gap: 4px; width: 100%; }
@@ -562,8 +588,8 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 }
 .auth-form form { display: flex; flex-direction: column; gap: 16px; width: 100%; }
 .auth-form select { color-scheme: dark; }
-.auth-form select option { background: var(--auth-field); color: var(--auth-ink); }
-.auth-form input::placeholder, .auth-form textarea::placeholder { color: var(--auth-soft); opacity: 0.75; }
+.auth-form select option { background: var(--auth-deep); color: var(--auth-ink); }
+.auth-form input::placeholder, .auth-form textarea::placeholder { color: var(--auth-soft); opacity: 0.85; }
 .auth-form input:focus, .auth-form select:focus, .auth-form textarea:focus { border-bottom-color: var(--auth-focus); outline: none; }
 .auth-form input:focus-visible, .auth-form select:focus-visible, .auth-form textarea:focus-visible, .auth-form button:focus-visible { outline: 2px solid var(--auth-focus); outline-offset: 3px; }
 .auth-pw { display: flex; align-items: flex-end; gap: 10px; width: 100%; }
@@ -572,12 +598,15 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .auth-form button.auth-eye:hover { filter: none; color: var(--auth-ink); }
 .auth-form button.primary, .auth-form .enter-row button.primary, .auth-form .reg-grid button.primary {
   align-self: flex-start; width: auto; max-width: none; min-height: 42px; padding: 10px 26px; border-radius: 999px;
-  background: var(--auth-ink); border-color: var(--auth-ink); color: var(--auth-panel); font-size: 13px; font-weight: 700; box-shadow: none; margin-top: 4px;
+  background: var(--auth-green); border-color: var(--auth-green); color: var(--auth-deep); font-size: 13px; font-weight: 700; box-shadow: none; margin-top: 4px;
 }
 .auth-form button.primary:hover { filter: brightness(0.94); }
-.auth-form button.primary:disabled { opacity: 0.55; }
+.auth-form button.primary:active { background: var(--auth-deep); border-color: var(--auth-deep); color: var(--auth-ink); filter: none; }
+.auth-form button.primary:disabled { opacity: 0.5; }
 .auth-form button:not(.primary):not(.auth-tab):not(.auth-eye):not(.org-card):not(.p-theme-toggle) { background: transparent; border: 1px solid var(--auth-line-strong); color: var(--auth-ink); box-shadow: none; }
-.auth-form .notice { background: rgba(255, 179, 168, 0.12); border: 1px solid rgba(255, 179, 168, 0.5); color: #ffd4cc; border-radius: 8px; padding: 10px 12px; font-size: 13px; max-width: none; }
+.auth-form button:not(.primary):not(.auth-tab):not(.auth-eye):not(.org-card):not(.p-theme-toggle):active { background: var(--auth-deep); }
+/* errors keep their own hue so a refusal never reads as success on a green surface */
+.auth-form .notice { background: rgba(255, 179, 168, 0.12); border: 1px solid rgba(255, 179, 168, 0.55); color: #ffd4cc; border-radius: 8px; padding: 10px 12px; font-size: 13px; max-width: none; }
 .auth-form .register-box { margin: 0; padding: 0; background: none; border: 0; box-shadow: none; max-width: none; }
 .auth-form .register-box h3 { color: var(--auth-ink); font-size: 15px; margin-bottom: 4px; }
 .auth-form .demo-identities { display: flex; flex-direction: column; gap: 8px; }
@@ -587,6 +616,9 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .auth-form .wordmark { color: var(--auth-ink); }
 @media (max-width: 720px) {
   .login.auth-page { padding: 64px 12px 24px; justify-content: flex-start; }
+  /* the pitch stands upright on a phone and crops naturally */
+  .login.auth-page::before { left: 6%; right: 6%; width: auto; top: 54px; height: 150vh; transform: none; background-image: linear-gradient(var(--auth-pitch), var(--auth-pitch)), radial-gradient(circle at center, transparent 0 56px, var(--auth-pitch) 56px 57px, transparent 57px), radial-gradient(circle at center, var(--auth-pitch) 0 2px, transparent 2px); background-size: 100% 1px, 100% 100%, 100% 100%; }
+  .login.auth-page::after { left: 28%; width: 44%; top: 54px; height: 90px; border: 1px solid var(--auth-pitch); border-top: 0; border-radius: 0 0 2px 2px; }
   .auth-card { grid-template-columns: 1fr; border-radius: 12px; }
   .auth-promo { padding: 24px 20px; gap: 14px; }
   .auth-promo h2 { font-size: 23px; }

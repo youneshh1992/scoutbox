@@ -9,6 +9,7 @@ import { adultAgeFor, ageOn, SAFEGUARDING_PROMISES, U18_PROMISES } from '../doma
 import { POSITIONS } from '../domain/types';
 import { useSession } from '../state';
 import { AUTH_PAGE, AUTH_PANEL, ThemeOverride, useColors, useStyles, type Palette } from '../theme';
+import { PitchBackdrop } from '../components/PitchBackdrop';
 import { Button, Card, Muted, Row, SectionTitle } from '../components/ui';
 
 const COUNTRIES = ['GB', 'PT', 'FR', 'SE', 'PL', 'NG', 'GH', 'AR', 'JP', 'KR', 'TH', 'SG', 'US'];
@@ -348,11 +349,15 @@ export default function Onboarding() {
   // appearance the player saved; every existing step renders inside it.
   return (
     <SafeAreaView style={styles.safe} testID="auth-screen">
+      {/* M24C.1 — the approved pitch behind the entry screen, in the
+          authentication palette (white lines at 8%), behind every surface,
+          never in front of a tap, hidden from assistive technology. */}
+      <ThemeOverride colors={AUTH_PANEL}><PitchBackdrop height={760} top={64} /></ThemeOverride>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <View style={styles.topRow}>
           <View style={styles.brand} accessibilityRole="header" aria-level={1} accessibilityLabel="ScoutBox Player">
-            <Text style={styles.logo}>ScoutBox<Text style={{ color: AUTH_PAGE.ink }}>▪</Text></Text>
+            <Text style={styles.logo}>ScoutBox<Text style={{ color: AUTH_PAGE.green }}>▪</Text></Text>
             <Text style={styles.product}>Player</Text>
           </View>
           <ThemeSwitch />
@@ -745,29 +750,29 @@ export default function Onboarding() {
 
 const makeStyles = (colors: Palette) => StyleSheet.create({
   // M24C — the page is the brand green; the form panel is the deep green.
-  safe: { flex: 1, backgroundColor: AUTH_PAGE.green },
+  safe: { flex: 1, backgroundColor: AUTH_PAGE.page },
   scroll: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 28, gap: 14 },
   topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 48 },
   brand: { flexDirection: 'row', alignItems: 'baseline', gap: 7 },
-  logo: { color: AUTH_PAGE.ink, fontSize: 26, fontWeight: '800', letterSpacing: -1.1 },
-  product: { color: AUTH_PAGE.inkSoft, fontSize: 12, fontWeight: '600' },
-  intro: { backgroundColor: AUTH_PAGE.promo, borderRadius: 14, padding: 18, gap: 12 },
+  logo: { color: AUTH_PAGE.white, fontSize: 26, fontWeight: '800', letterSpacing: -1.1 },
+  product: { color: AUTH_PAGE.soft, fontSize: 12, fontWeight: '600' },
+  intro: { backgroundColor: AUTH_PAGE.green, borderRadius: 14, padding: 18, gap: 12 },
   introTitle: { color: AUTH_PAGE.ink, fontSize: 22, fontWeight: '700', letterSpacing: -0.5, lineHeight: 27 },
   introMark: { color: AUTH_PAGE.ink, fontSize: 13, fontWeight: '800', lineHeight: 19 },
   introLine: { color: AUTH_PAGE.ink, fontSize: 13, lineHeight: 19, flex: 1 },
-  panel: { backgroundColor: AUTH_PANEL.bg, borderRadius: 14, padding: 18, gap: 12, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 18, shadowOffset: { width: 0, height: 8 } },
+  panel: { backgroundColor: AUTH_PANEL.bg, borderRadius: 14, padding: 18, gap: 12, borderWidth: 1, borderColor: AUTH_PAGE.panelLine, shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 18, shadowOffset: { width: 0, height: 8 } },
   authTabs: { flexDirection: 'row', alignItems: 'center', gap: 2, marginBottom: 4 },
   authTab: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingRight: 8, minHeight: 44 },
   authTabText: { color: AUTH_PANEL.muted, fontSize: 15, fontWeight: '500' },
   authTabTextOn: { color: AUTH_PANEL.text, fontWeight: '700' },
   authTabDivider: { color: AUTH_PANEL.line, fontSize: 15 },
   stepHeading: { color: AUTH_PANEL.text, fontSize: 17, fontWeight: '600', letterSpacing: -0.3, flexShrink: 1 },
-  outsideTitle: { color: AUTH_PAGE.ink, fontSize: 17, fontWeight: '600', letterSpacing: -0.3, marginTop: 10 },
+  outsideTitle: { color: AUTH_PAGE.white, fontSize: 17, fontWeight: '600', letterSpacing: -0.3, marginTop: 10 },
   footer: { alignItems: 'center', gap: 6, marginTop: 8 },
-  footerNote: { color: AUTH_PAGE.inkSoft, fontSize: 12 },
+  footerNote: { color: AUTH_PAGE.soft, fontSize: 12 },
   // The makers' signature on the entry screen: quiet, centred, never a control.
-  signature: { color: AUTH_PAGE.inkSoft, fontSize: 12, letterSpacing: 0.4, textAlign: 'center' },
-  signatureName: { color: AUTH_PAGE.ink, fontSize: 13.5, fontWeight: '700', letterSpacing: 0 },
+  signature: { color: AUTH_PAGE.soft, fontSize: 12, letterSpacing: 0.4, textAlign: 'center' },
+  signatureName: { color: AUTH_PAGE.white, fontSize: 13.5, fontWeight: '700', letterSpacing: 0 },
   name: { color: colors.text, fontSize: 16, fontWeight: '700' },
   roleCard: {
     flexDirection: 'row',

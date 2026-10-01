@@ -169,15 +169,22 @@ export const useTheme = () => useContext(ThemeContext);
  *  moment the person is signed in. */
 export const AUTH_PANEL: Palette = {
   ...palettes.dark,
-  bg: '#103a32', bg2: '#0e332c', panel: '#0d2f28', panel2: '#164839', line: '#2f6a57',
-  text: '#f7faf7', muted: '#a9d9c2',
-  accent: '#f7faf7', accentInk: '#103a32', accentText: '#00e676', accent2: '#8fe6b8',
-  tabActive: '#f7faf7', tabActiveBg: '#164839', tabInactive: '#a9d9c2',
-  iconBg: '#164839', iconFg: '#8fe6b8', greenBg: '#164839', greenInk: '#c8f3dc', infoBg: '#164839', infoInk: '#c8f3dc',
-  danger: '#ffb3a8', dangerBg: '#4a2b27', dangerInk: '#ffd4cc', knob: '#f7faf7', track: '#2f6a57',
-  frame: '#00e676', frameLine: '#00e676',
+  // M24C.1 — the ScoutBox greens only: the dark football green of the
+  // Football Passport card for the surfaces, white and #CFDFD0 for the text,
+  // the bright brand green for the primary action, links and focus.
+  bg: '#173b27', bg2: '#113822', panel: '#113822', panel2: '#1d4a33', line: 'rgba(207,223,208,0.35)',
+  text: '#ffffff', muted: '#cfdfd0',
+  accent: '#00e676', accentInk: '#113822', accentText: '#00e676', accent2: '#00e676',
+  tabActive: '#ffffff', tabActiveBg: '#113822', tabInactive: '#cfdfd0',
+  iconBg: '#113822', iconFg: '#00e676', greenBg: '#113822', greenInk: '#e5f5e9', infoBg: '#113822', infoInk: '#e5f5e9',
+  goldBg: '#113822', goldInk: '#f3dca3',
+  // errors keep their own hue so a refusal never reads as success
+  danger: '#ffb3a8', dangerBg: '#4a2b27', dangerInk: '#ffd4cc', knob: '#ffffff', track: 'rgba(207,223,208,0.35)',
+  frame: '#173b27', frameLine: '#173b27',
+  // the pitch behind the entry screen: white lines at 8%, grain under 2%
+  pitch: 'rgba(255,255,255,0.08)', grain: 'rgba(255,255,255,0.016)', band: 'rgba(255,255,255,0.012)',
 };
-export const AUTH_PAGE = { green: '#00e676', promo: '#68e99f', ink: '#113822', inkSoft: '#1f5a3a' } as const;
+export const AUTH_PAGE = { page: '#173b27', green: '#00e676', ink: '#113822', white: '#ffffff', soft: '#cfdfd0', pale: '#e5f5e9', panelLine: 'rgba(255,255,255,0.14)' } as const;
 
 export function ThemeOverride({ colors, children }: { colors: Palette; children: ReactNode }) {
   const base = useContext(ThemeContext);
