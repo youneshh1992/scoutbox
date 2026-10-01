@@ -302,6 +302,14 @@ const en = {
   themeAria: 'Dark theme', themeLight: 'Light', themeDark: 'Dark',
   footballHint: 'Your football record — what clubs see, and what you are working on.',
   opportunitiesHint: 'Everything you can pursue, and everything a club has offered you.',
+  // M24B — the recruitment experience as category → subcategory.
+  caseAreas: 'Areas of your recruitment', catJourney: 'My journey', catContact: 'Club contact', catTrial: 'Trial', catOffer: 'Offer', catSigning: 'Signing', catBoard: 'Board',
+  subOverview: 'Overview', subStage: 'Current stage', subTasks: 'Tasks', subActivity: 'Activity', subMessages: 'Messages', subContact: 'Contact', subInvitation: 'Invitation', subSchedule: 'Schedule', subDetails: 'Details', subOffer: 'Offer', subDocuments: 'Documents', subResponse: 'Response', subSigning: 'Signing', subContract: 'Contract', subBoard: 'Open roles', subFit: 'Fit check', subInvites: 'Squad invites', subFollowUps: 'Follow-ups',
+  jnNone: 'No club has put anything in front of you yet.', jnSharedTitle: 'Shared with you by this club', jnShared_contact_request: 'contact request', jnShared_trial: 'trial', jnShared_offer: 'Offer', jnShared_signing: 'signing',
+  jnTasksTitle: 'What you can do now', jnTasksHint: 'Only what the server says is yours to do. This screen creates nothing.', jnGo: 'Go there', jnActivityTitle: 'Everything that happened', jnActivityHint: 'Each milestone a club put in front of you, oldest first. Read-only.', jnActivityNone: 'Nothing yet.',
+  ctxRequestsTitle: 'Club contact requests', ctxRequestsNone: 'No club has asked to contact you.', ctxTrialReqTitle: 'Trial invitations', ctxTrialReqNone: 'No trial invitation.', ctxAnswerInInbox: 'Answer in your Inbox — nothing reaches you unless you accept.', ctxOpenInbox: 'Open Inbox', ctxWithGuardian: 'with your guardian',
+  ctxMessagesTitle: 'Messages', ctxMessagesNone: 'No conversation yet. Accept a request in your Inbox and the thread opens there.', ctxMessagesCount: 'messages', ctxMinorMessages: 'Clubs talk to your parent or guardian; the outcome shows in Updates.',
+  offerNoDocuments: 'No document on this Offer.', offerAwaitingYou: 'Awaiting your answer — answer it under Offer.', signingNoneYet: 'Nothing to sign right now.', signingContractNone: 'This document names no contract days.',
 
   // M23 P3 — Contact response (the answer to a club's contact belongs to that contact)
   ctReply: 'Your reply (optional)',
@@ -689,6 +697,13 @@ const fr: typeof en = {
   themeAria: 'Thème sombre', themeLight: 'Clair', themeDark: 'Sombre',
   footballHint: 'Votre dossier football \u2014 ce que voient les clubs, et ce sur quoi vous travaillez.',
   opportunitiesHint: 'Tout ce que vous pouvez viser, et tout ce qu\u2019un club vous a propos\u00e9.',
+  caseAreas: 'Zones de votre recrutement', catJourney: 'Mon parcours', catContact: 'Contact club', catTrial: 'Essai', catOffer: 'Offre', catSigning: 'Signature', catBoard: 'Tableau',
+  subOverview: 'Vue d’ensemble', subStage: 'Étape actuelle', subTasks: 'Tâches', subActivity: 'Activité', subMessages: 'Messages', subContact: 'Contact', subInvitation: 'Invitation', subSchedule: 'Planning', subDetails: 'Détails', subOffer: 'Offre', subDocuments: 'Documents', subResponse: 'Réponse', subSigning: 'Signature', subContract: 'Contrat', subBoard: 'Postes ouverts', subFit: 'Adéquation', subInvites: 'Invitations d’équipe', subFollowUps: 'Suivis',
+  jnNone: 'Aucun club ne vous a encore rien présenté.', jnSharedTitle: 'Partagé avec vous par ce club', jnShared_contact_request: 'demande de contact', jnShared_trial: 'essai', jnShared_offer: 'Offre', jnShared_signing: 'signature',
+  jnTasksTitle: 'Ce que vous pouvez faire maintenant', jnTasksHint: 'Uniquement ce que le serveur dit être à vous de faire. Cet écran ne crée rien.', jnGo: 'Y aller', jnActivityTitle: 'Tout ce qui s’est passé', jnActivityHint: 'Chaque jalon qu’un club vous a présenté, du plus ancien au plus récent. Lecture seule.', jnActivityNone: 'Rien pour l’instant.',
+  ctxRequestsTitle: 'Demandes de contact des clubs', ctxRequestsNone: 'Aucun club n’a demandé à vous contacter.', ctxTrialReqTitle: 'Invitations à l’essai', ctxTrialReqNone: 'Aucune invitation à l’essai.', ctxAnswerInInbox: 'Répondez dans votre messagerie — rien ne vous atteint sans votre accord.', ctxOpenInbox: 'Ouvrir la messagerie', ctxWithGuardian: 'chez votre tuteur',
+  ctxMessagesTitle: 'Messages', ctxMessagesNone: 'Aucune conversation pour l’instant. Acceptez une demande dans votre messagerie et le fil s’y ouvre.', ctxMessagesCount: 'messages', ctxMinorMessages: 'Les clubs parlent à votre parent ou tuteur ; le résultat apparaît dans Mises à jour.',
+  offerNoDocuments: 'Aucun document sur cette Offre.', offerAwaitingYou: 'En attente de votre réponse — répondez sous Offre.', signingNoneYet: 'Rien à signer pour l’instant.', signingContractNone: 'Ce document ne nomme aucune date de contrat.',
 
   // M23 P3 \u2014 R\u00e9ponse \u00e0 un contact
   ctReply: 'Votre r\u00e9ponse (facultative)',

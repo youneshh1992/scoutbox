@@ -34,7 +34,10 @@ const errMsg = (e: unknown) => {
 };
 const keyFor = (oid: string, rid: string, what: string) => `of-${what}-${oid}-${rid}`;
 
-export function OfferSection({ actor }: { actor: Actor }) {
+export type OfferView = 'all' | 'offer' | 'documents' | 'response';
+
+// M24B — one read, three views: the Offer (terms + your act), its documents, your answer and sharing.
+export function OfferSection({ actor, view = 'all' }: { actor: Actor; view?: OfferView }) {
   const colors = useColors();
   const [offers, setOffers] = useState<FamilyOffer[] | null>(null);
   const [tick, setTick] = useState(0);
@@ -53,7 +56,8 @@ export function OfferSection({ actor }: { actor: Actor }) {
     return () => { on = false; };
   }, [actor.id, actor.kind, tick, focusTick]);
   if (!offers) return null;
-  if (offers.length === 0 && actor.kind === 'player') return null;
+  if (offers.length === 0 && actor.kind === 'player' && view === 'all') return null;
+  const show = (...views: OfferView[]) => view === 'all' || views.includes(view);
 
   const answer = async (o: FamilyOffer, rev: FamilyOfferRevision, what: 'accept' | 'decline') => {
     if (busy) return;
@@ -109,11 +113,11 @@ export function OfferSection({ actor }: { actor: Actor }) {
             {cur && (
               <View style={{ marginTop: 4, backgroundColor: colors.panel2, borderRadius: 8, padding: 8 }} testID={`offer-revision-${cur.id}`}>
                 <Muted size={12}>{pt('offerRevision')} {cur.revisionNumber} · {cur.status === 'EXPIRED' ? pt('offerExpired') : pt('offerExpires')} {fmt(cur.expiresAt)}</Muted>
-                <Text style={{ color: colors.text, fontSize: 13, marginTop: 4 }}>{pt('offerRole')}: {cur.terms.role ?? '—'}{cur.terms.squad ? ` · ${pt('offerSquad')}: ${cur.terms.squad}` : ''}</Text>
-                <Text style={{ color: colors.text, fontSize: 13 }}>{pt('offerStart')}: {cur.terms.startDate ?? '—'}{cur.terms.endDate ? ` · ${pt('offerEnd')}: ${cur.terms.endDate}` : ''}</Text>
-                {cur.terms.conditions ? <Muted size={12.5}>{pt('offerConditions')}: {cur.terms.conditions}</Muted> : null}
-                {cur.recipientMessage ? <Muted size={12.5}>{pt('offerMessage')}: “{cur.recipientMessage}”</Muted> : null}
-                {cur.documents.length > 0 && (
+                {show('offer') && <Text style={{ color: colors.text, fontSize: 13, marginTop: 4 }}>{pt('offerRole')}: {cur.terms.role ?? '—'}{cur.terms.squad ? ` · ${pt('offerSquad')}: ${cur.terms.squad}` : ''}</Text>}
+                {show('offer') && <Text style={{ color: colors.text, fontSize: 13 }}>{pt('offerStart')}: {cur.terms.startDate ?? '—'}{cur.terms.endDate ? ` · ${pt('offerEnd')}: ${cur.terms.endDate}` : ''}</Text>}
+                {show('offer') && cur.terms.conditions ? <Muted size={12.5}>{pt('offerConditions')}: {cur.terms.conditions}</Muted> : null}
+                {show('offer') && cur.recipientMessage ? <Muted size={12.5}>{pt('offerMessage')}: “{cur.recipientMessage}”</Muted> : null}
+                {show('documents') && cur.documents.length > 0 && (
                   <View style={{ marginTop: 4 }}>
                     <Muted size={12}>{pt('offerDocuments')}</Muted>
                     {cur.documents.map((d) => (
@@ -124,18 +128,20 @@ export function OfferSection({ actor }: { actor: Actor }) {
                     ))}
                   </View>
                 )}
+                {view === 'documents' && cur.documents.length === 0 && <Muted size={12.5}>{pt('offerNoDocuments')}</Muted>}
               </View>
             )}
-            {o.status === 'ACCEPTED' && <View style={{ marginTop: 6 }} testID={`offer-signing-pending-${o.id}`}><Text style={{ color: colors.accentText, fontSize: 13, fontWeight: '700' }}>{pt('offerSigningPending')}</Text></View>}
-            {o.status === 'ISSUED' && o.notAnswerableReason === 'CASE_PAUSED' && <View style={{ marginTop: 6 }} testID={`offer-paused-${o.id}`} accessibilityRole="text"><Muted size={12.5}>{pt('offerPaused')}</Muted></View>}
-            {mine && <Muted size={12}>{mine.actorType === 'guardian' && actor.kind === 'player' ? pt('offerAnsweredByGuardian') : `${pt('offerAnsweredAt')} ${fmt(mine.occurredAt)}`}</Muted>}
-            {live && !arm && (
+            {show('offer', 'response') && o.status === 'ACCEPTED' && <View style={{ marginTop: 6 }} testID={`offer-signing-pending-${o.id}`}><Text style={{ color: colors.accentText, fontSize: 13, fontWeight: '700' }}>{pt('offerSigningPending')}</Text></View>}
+            {show('offer') && o.status === 'ISSUED' && o.notAnswerableReason === 'CASE_PAUSED' && <View style={{ marginTop: 6 }} testID={`offer-paused-${o.id}`} accessibilityRole="text"><Muted size={12.5}>{pt('offerPaused')}</Muted></View>}
+            {show('offer', 'response') && mine && <Muted size={12}>{mine.actorType === 'guardian' && actor.kind === 'player' ? pt('offerAnsweredByGuardian') : `${pt('offerAnsweredAt')} ${fmt(mine.occurredAt)}`}</Muted>}
+            {view === 'response' && !mine && live && <Muted size={12.5}>{pt('offerAwaitingYou')}</Muted>}
+            {show('offer') && live && !arm && (
               <Row style={{ marginTop: 6, flexWrap: 'wrap' }}>
                 <Button small primary label={pt('offerAccept')} onPress={() => setArm({ id: o.id, what: 'accept' })} testID={`offer-accept-${o.id}`} />
                 <Button small label={pt('offerDecline')} onPress={() => setArm({ id: o.id, what: 'decline' })} testID={`offer-decline-${o.id}`} />
               </Row>
             )}
-            {live && arm?.id === o.id && cur && (
+            {show('offer') && live && arm?.id === o.id && cur && (
               <View style={{ marginTop: 6, borderRadius: 8, borderWidth: 1, borderColor: colors.gold, padding: 8 }} accessibilityRole="alert" testID={`offer-confirm-${o.id}`}>
                 <Text style={{ color: colors.text, fontSize: 13 }}>{(arm.what === 'accept' ? pt('offerAcceptWarn') : pt('offerDeclineWarn')).replace('{n}', String(cur.revisionNumber))}</Text>
                 {arm.what === 'decline' && (
@@ -152,19 +158,19 @@ export function OfferSection({ actor }: { actor: Actor }) {
                 <Muted size={12}>{pt('offerNotSigning')}</Muted>
               </View>
             )}
-            {actor.kind === 'player' && o.status !== 'DRAFT' && (
+            {show('response') && actor.kind === 'player' && o.status !== 'DRAFT' && (
               <Row style={{ marginTop: 6, flexWrap: 'wrap' }}>
                 <Button small label={o.agentShared ? pt('offerAgentUnshare') : pt('offerAgentShare')} onPress={() => share(o)} disabled={busy === o.id} testID={`offer-share-${o.id}`} />
                 <Muted size={12}>{o.agentShared ? pt('offerAgentShared') : pt('offerAgentShareHint')}</Muted>
               </Row>
             )}
-            {older.length > 0 && (
+            {show('offer') && older.length > 0 && (
               <View style={{ marginTop: 6 }}>
                 <Muted size={12}>{pt('offerOlderRevisions')}</Muted>
                 {older.map((r) => <Muted key={r.id} size={12}>{pt('offerRevision')} {r.revisionNumber} · {stLabel(r.status)} · {r.terms.role ?? '—'} · {r.terms.startDate ?? '—'}</Muted>)}
               </View>
             )}
-            <Muted size={12}>{pt('offerNotSigning')}</Muted>
+            {show('offer') && <Muted size={12}>{pt('offerNotSigning')}</Muted>}
           </View>
         );
       })}

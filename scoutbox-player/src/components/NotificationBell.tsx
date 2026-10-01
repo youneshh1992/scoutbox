@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { playerCategoryFor } from '../caseNav';
 import { useRouter } from 'expo-router';
 import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import type { NotificationTarget } from '../data/types';
@@ -22,7 +23,8 @@ export function NotificationBell() {
     if (!target) return null;
     if (guardianId) return target.kind === 'inbox' || target.kind === 'trial' || target.kind === 'offer' ? '/guardian' : null;
     if (target.kind === 'inbox') return '/(tabs)/inbox';
-    if (target.kind === 'trial' || target.kind === 'offer' || target.kind === 'signing') return '/(tabs)/opportunities';
+    // M24B — the category of Opportunities that holds the record (Trial / Offer / Signing).
+    if (target.kind === 'trial' || target.kind === 'offer' || target.kind === 'signing') return `/(tabs)/opportunities?cat=${playerCategoryFor(target.kind)}`;
     return null;
   };
 

@@ -40,7 +40,10 @@ const errMsg = (e: unknown) => {
 };
 const keyFor = (sid: string, rid: string) => `sg-complete-${sid}-${rid}`;
 
-export function SigningSection({ actor }: { actor: Actor }) {
+export type SigningView = 'all' | 'signing' | 'documents' | 'contract';
+
+// M24B — one read, three views: the signing (status, parties, your act), the document and its digest, the contract days and the completion record.
+export function SigningSection({ actor, view = 'all' }: { actor: Actor; view?: SigningView }) {
   const colors = useColors();
   const [items, setItems] = useState<FamilySigning[] | null>(null);
   const [tick, setTick] = useState(0);
@@ -56,8 +59,13 @@ export function SigningSection({ actor }: { actor: Actor }) {
     (actor.kind === 'player' ? m12.getSignings(actor.id) : m12.gSignings(actor.id)).then((x) => on && setItems(x)).catch(() => on && setItems([]));
     return () => { on = false; };
   }, [actor.id, actor.kind, tick, focusTick]);
-  if (!items || items.length === 0) return null;
+  if (!items) return null;
   if (actor.kind !== 'player') return null;
+  const show = (...views: SigningView[]) => view === 'all' || views.includes(view);
+  if (items.length === 0) {
+    if (view === 'all') return null;
+    return <Card testID="signing-section"><SectionTitle>✍️ {pt('signingTitle')}</SectionTitle><Muted size={12.5}>{pt('signingNoneYet')}</Muted></Card>;
+  }
 
   const confirm = async (s: FamilySigning) => {
     if (busy || !s.nextAction) return;
@@ -99,8 +107,9 @@ export function SigningSection({ actor }: { actor: Actor }) {
             {cur && (
               <View style={{ marginTop: 4, backgroundColor: colors.panel2, borderRadius: 8, padding: 8 }} testID={`signing-revision-${cur.id}`}>
                 <Muted size={12}>{pt('signingRevision')} {cur.revisionNumber} · {pt('signingPresentedAt')} {fmt(cur.readyAt)}{s.expiresAt ? ` · ${pt('signingExpires')} ${fmt(s.expiresAt)}` : ''}</Muted>
-                {cur.contract && <Text style={{ color: colors.text, fontSize: 13, marginTop: 4 }}>{pt('signingStart')}: {cur.contract.startDate ?? '—'}{cur.contract.endDate ? ` · ${pt('signingEnd')}: ${cur.contract.endDate}` : ''}</Text>}
-                {cur.document ? (
+                {show('contract') && cur.contract && <Text style={{ color: colors.text, fontSize: 13, marginTop: 4 }}>{pt('signingStart')}: {cur.contract.startDate ?? '—'}{cur.contract.endDate ? ` · ${pt('signingEnd')}: ${cur.contract.endDate}` : ''}</Text>}
+                {view === 'contract' && !cur.contract && <Muted size={12.5}>{pt('signingContractNone')}</Muted>}
+                {show('documents') && (cur.document ? (
                   <View style={{ marginTop: 4 }} testID={`signing-document-${cur.id}`}>
                     <Row>
                       <Text style={{ color: colors.text, fontSize: 12.5, flex: 1 }}>{cur.document.label ?? cur.document.filename ?? pt('signingDocument')}</Text>
@@ -108,27 +117,27 @@ export function SigningSection({ actor }: { actor: Actor }) {
                     </Row>
                     <Muted size={11.5}>{pt('signingDigest')}: <Text testID={`signing-digest-${cur.id}`} accessibilityLabel={cur.document.sha256 ?? undefined}>{shortSha(cur.document.sha256)}</Text></Muted>
                   </View>
-                ) : <Muted size={12.5}>{pt('signingNoDocument')}</Muted>}
-                <View style={{ marginTop: 4 }} testID={`signing-parties-${cur.id}`}>
+                ) : <Muted size={12.5}>{pt('signingNoDocument')}</Muted>)}
+                {show('signing') && <View style={{ marginTop: 4 }} testID={`signing-parties-${cur.id}`}>
                   {cur.requiredParties.map((p) => (
                     <Muted key={p.partyType} size={12}>{p.status === 'COMPLETED' ? '✓' : '○'} {partyLabel(p.partyType)} · {p.status === 'COMPLETED' ? `${pt('signingPartyDone')} ${fmt(p.completedAt)}` : pt('signingPartyPending')}</Muted>
                   ))}
-                </View>
+                </View>}
               </View>
             )}
-            {s.status === 'COMPLETED' && s.completion && (
+            {show('signing', 'contract') && s.status === 'COMPLETED' && s.completion && (
               <View style={{ marginTop: 6 }} testID={`signing-completed-${s.id}`}>
                 <Text style={{ color: colors.accentText, fontSize: 13, fontWeight: '700' }}>{pt('signingCompleted').replace('{when}', fmt(s.completion.completedAt))}</Text>
                 <Muted size={12}>{pt('signingCompletedNote')}</Muted>
               </View>
             )}
-            {mine?.status === 'COMPLETED' && s.status !== 'COMPLETED' && <View testID={`signing-yours-done-${s.id}`}><Muted size={12}>{pt('signingYouConfirmed')} {fmt(mine.completedAt)} · {pt('signingAwaitingOthers')}</Muted></View>}
-            {live && arm !== s.id && (
+            {show('signing') && mine?.status === 'COMPLETED' && s.status !== 'COMPLETED' && <View testID={`signing-yours-done-${s.id}`}><Muted size={12}>{pt('signingYouConfirmed')} {fmt(mine.completedAt)} · {pt('signingAwaitingOthers')}</Muted></View>}
+            {show('signing') && live && arm !== s.id && (
               <Row style={{ marginTop: 6, flexWrap: 'wrap' }}>
                 <Button small primary label={pt('signingSign')} onPress={() => setArm(s.id)} testID={`signing-sign-${s.id}`} />
               </Row>
             )}
-            {live && arm === s.id && cur && s.nextAction && (
+            {show('signing') && live && arm === s.id && cur && s.nextAction && (
               <View style={{ marginTop: 6, borderRadius: 8, borderWidth: 1, borderColor: colors.gold, padding: 8 }} accessibilityRole="alert" testID={`signing-confirm-${s.id}`}>
                 <Text style={{ color: colors.text, fontSize: 13 }}>{pt('signingConfirmWarn').replace('{n}', String(cur.revisionNumber)).replace('{club}', s.club.name ?? '—')}</Text>
                 <Muted size={11.5}>{pt('signingDigest')}: {shortSha(s.nextAction.documentSha256)}</Muted>
@@ -139,13 +148,13 @@ export function SigningSection({ actor }: { actor: Actor }) {
                 </Row>
               </View>
             )}
-            {older.length > 0 && (
+            {show('signing') && older.length > 0 && (
               <View style={{ marginTop: 6 }}>
                 <Muted size={12}>{pt('signingOlderRevisions')}</Muted>
                 {older.map((r) => <Muted key={r.id} size={12}>{pt('signingRevision')} {r.revisionNumber} · {stLabel(r.status)} · {shortSha(r.document?.sha256 ?? null)}</Muted>)}
               </View>
             )}
-            {s.status !== 'COMPLETED' && <Muted size={12}>{pt('signingNotYetSigned')}</Muted>}
+            {show('signing', 'contract') && s.status !== 'COMPLETED' && <Muted size={12}>{pt('signingNotYetSigned')}</Muted>}
           </View>
         );
       })}

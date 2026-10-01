@@ -28,7 +28,8 @@ const fmtEnd = (ms: number, zone: string | null) => {
   try { return new Date(ms).toLocaleTimeString(undefined, { timeZone: zone ?? undefined, hour: '2-digit', minute: '2-digit' }); } catch { return new Date(ms).toLocaleTimeString(); }
 };
 
-export function TrialWorkflowSection({ actor }: { actor: Actor }) {
+// M24B — `standalone`: on its own page the section shows an honest empty state instead of vanishing.
+export function TrialWorkflowSection({ actor, standalone = false }: { actor: Actor; standalone?: boolean }) {
   const colors = useColors();
   const [trials, setTrials] = useState<FamilyTrial[] | null>(null);
   const [tick, setTick] = useState(0);
@@ -42,7 +43,7 @@ export function TrialWorkflowSection({ actor }: { actor: Actor }) {
   }, [actor.id, actor.kind, tick]);
   if (!trials) return null;
   const withWorkflow = trials.filter((t) => t.workflow);
-  if (withWorkflow.length === 0) return null;
+  if (withWorkflow.length === 0) return standalone ? <Card testID="trial-workflow"><SectionTitle>📅 {pt('trialWf')}</SectionTitle><Muted size={12.5}>{pt('trialWfNone')}</Muted></Card> : null;
 
   const act = async (t: FamilyTrial, what: 'confirm' | 'decline' | 'cancel') => {
     if (busy) return;
