@@ -12,6 +12,7 @@
 // tenant isolation at the API level) live in scripts/m17E2E.mjs; this suite
 // proves the real UI drives them.
 import { spawn, execSync } from 'node:child_process';
+import { roomTab, roomPanelLabel } from './caseNavHelpers.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -110,12 +111,12 @@ say('R1: "Add to Recruitment Room" creates the room and lands in it');
   // Every tab is reachable — no dead section.
   const tabs = ['Overview', 'Passport', 'Evidence', 'Assessments', 'Combine', 'Development', 'Discussion', 'Activity', 'Decision'];
   for (const name of tabs) {
-    await scoutA.click(`[aria-label="Room sections"] button[role="tab"]:has-text("${name}")`);
-    await scoutA.waitForSelector(`[role="tabpanel"][aria-label="${name}"]`, { timeout: 10000 });
+    await roomTab(scoutA, name);
+    await scoutA.waitForSelector(`[role="tabpanel"][aria-label="${roomPanelLabel(name)}"]`, { timeout: 10000 });
   }
-  say('R1: all nine room tabs render');
+  say('R1: all nine legacy room pages render inside their categories (M24B)');
   // Readiness is counts and words, never a score.
-  await scoutA.click('[aria-label="Room sections"] button[role="tab"]:has-text("Overview")');
+  await roomTab(scoutA, 'Overview');
   const overview = await scoutA.locator('[role="tabpanel"]').innerText();
   if (/readiness score|decision score|signing probability|player score/i.test(overview)) fail('R1: a numeric readiness or player score appeared');
   say('R1: decision readiness is counts and blockers, never a score');
@@ -150,7 +151,7 @@ say('browser Forward returns to the list');
 // ================================================= R2: assign assessments
 await scoutA.evaluate((h) => { location.hash = h; }, ROOM_HASH);
 await scoutA.waitForSelector('[aria-label="Room header"]', { timeout: 15000 });
-await scoutA.click('[aria-label="Room sections"] button[role="tab"]:has-text("Assessments")');
+await roomTab(scoutA, 'Assessments');
 await scoutA.waitForSelector('[role="tabpanel"][aria-label="Assessments"]', { timeout: 10000 });
 {
   const panel = await scoutA.locator('[role="tabpanel"][aria-label="Assessments"]').innerText();
@@ -163,7 +164,7 @@ await scoutA.waitForSelector('[role="tabpanel"][aria-label="Assessments"]', { ti
 }
 
 // =================================== R5: status change captures a snapshot
-await scoutA.click('[aria-label="Room sections"] button[role="tab"]:has-text("Overview")');
+await roomTab(scoutA, 'Overview');
 await scoutA.selectOption('[aria-label="Move to"]', 'under_review');
 await scoutA.click('button:has-text("Apply")');
 await scoutA.waitForTimeout(600);
@@ -178,7 +179,7 @@ await scoutA.waitForTimeout(900);
   if (!snaps.body.items?.some((s) => s.trigger === 'status:shortlisted')) fail('R5: shortlisting captured no snapshot');
   say('R5: shortlisting captured the evidence confidence at that moment');
 }
-await scoutA.click('[aria-label="Room sections"] button[role="tab"]:has-text("Decision")');
+await roomTab(scoutA, 'Decision');
 await scoutA.waitForSelector('[role="tabpanel"][aria-label="Decision"]', { timeout: 10000 });
 {
   const panel = await scoutA.locator('[role="tabpanel"][aria-label="Decision"]').innerText();
@@ -191,7 +192,7 @@ await scoutA.waitForSelector('[role="tabpanel"][aria-label="Decision"]', { timeo
 // ================================== R7: archive with a reason, then reopen
 {
   const before = await scoutA.locator('body').innerText();
-  await scoutA.click('[aria-label="Room sections"] button[role="tab"]:has-text("Overview")');
+  await roomTab(scoutA, 'Overview');
   // M18.2: archiving asks for confirmation with its consequence stated; accept it.
   scoutA.on('dialog', (d) => d.accept());
   await scoutA.selectOption('[aria-label="Move to"]', 'archived');
@@ -221,7 +222,7 @@ await scoutA.waitForSelector('[role="tabpanel"][aria-label="Decision"]', { timeo
   if (!/Under review/i.test(reopened)) fail('R7: the room did not reopen');
   say('R7: an archived room can be reopened');
 
-  await scoutA.click('[aria-label="Room sections"] button[role="tab"]:has-text("Activity")');
+  await roomTab(scoutA, 'Activity');
   await scoutA.waitForSelector('[role="tabpanel"][aria-label="Activity"]', { timeout: 10000 });
   const activity = await scoutA.locator('[role="tabpanel"][aria-label="Activity"]').innerText();
   if (!/reopen/i.test(activity)) fail('R7: the reopen is not on the activity timeline');

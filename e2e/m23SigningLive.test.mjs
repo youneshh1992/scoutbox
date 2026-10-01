@@ -39,6 +39,7 @@
 // m23SigningE2E.mjs; this suite proves the real interfaces drive them.
 
 import { spawn, execSync } from 'node:child_process';
+import { roomTab, playerCategory, playerSub } from './caseNavHelpers.mjs';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -188,10 +189,8 @@ async function openRoomFor(page, playerName) {
   if (!/^case-/.test(id)) fail(`could not read the room id from the deep link (${hash})`);
   return id;
 }
-const tab = async (page, name) => {
-  await page.click(`[role="tablist"] button[role="tab"]:has-text("${name}")`);
-  await page.waitForSelector(`[role="tabpanel"][aria-label="${name}"]`, { timeout: 10000 });
-};
+// M24B — the Room is category → subcategory; the helper opens the category that holds the page, then the page.
+const tab = async (page, name) => { await roomTab(page, name); };
 const sw = (page) => page.locator('[data-testid="signing-workflow"]');
 const headerStatus = async (page) => (await page.locator('[aria-label="Room header"] .badges').innerText());
 const liveLine = (page) => sw(page).locator('[role="status"][aria-live="polite"]').first().innerText();
@@ -345,18 +344,24 @@ const SID_A = (await j('GET', `/org/rooms/${ROOM_A}/signing`, undefined, LEAD)).
 const ctxKola = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 const kola = await enterPlayer(ctxKola, 'Kola Adeyemi', 'kola', 'text=Your visibility right now');
 {
-  await goTab(kola, '/opportunities');
+  await playerCategory(kola, 'signing'); // M24B — Signing › Signing
   const sec = kola.locator('[data-testid="signing-section"]');
   await sec.waitFor({ timeout: 20000 });
   ok(await waitIn(sec, /Signing/i), 'B1: Kola\'s Opportunities carries the Signing section at 390px');
   const txt = await sec.innerText();
-  ok(/Eastport FC/.test(txt) && /Presented — awaiting signatures/.test(txt) && /Signing revision 1/.test(txt) && /2027-07-01/.test(txt) && /2029-06-30/.test(txt), 'B2: the presented revision: club, revision 1, contract days');
+  // M24B — the contract days live under Signing › Contract and the document under Signing › Documents.
+  await playerSub(kola, 'Contract');
+  const txtContract = await sec.innerText();
+  await playerSub(kola, 'Documents');
+  const txtDocs = await sec.innerText();
+  ok(/Eastport FC/.test(txt) && /Presented — awaiting signatures/.test(txt) && /Signing revision 1/.test(txt) && /2027-07-01/.test(txtContract) && /2029-06-30/.test(txtContract), 'B2: the presented revision: club, revision 1 (Signing); contract days (Contract)');
   const rev = (await j('GET', '/player/signings', undefined, KOLA)).body.items[0];
   ok(rev.id === SID_A && rev.nextAction?.action === 'COMPLETE_SIGNATURE' && rev.nextAction.documentSha256 === PDF_SHA, 'B2b: the server tells the player their next act names the exact digest');
   const digest = sec.locator(`[data-testid="signing-digest-${rev.currentRevisionId}"]`);
-  ok((await digest.count()) === 1 && (await digest.getAttribute('aria-label')) === PDF_SHA && new RegExp(`${PDF_SHA.slice(0, 12)}…${PDF_SHA.slice(-8)}`).test(txt), 'B2c: the digest is shown (short) and carried in full for assistive tech');
+  ok((await digest.count()) === 1 && (await digest.getAttribute('aria-label')) === PDF_SHA && new RegExp(`${PDF_SHA.slice(0, 12)}…${PDF_SHA.slice(-8)}`).test(txtDocs), 'B2c: the digest is shown (short, under Documents) and carried in full for assistive tech');
+  await playerSub(kola, 'Signing');
   ok(/You \(player\)/.test(txt) && /Club signatory/.test(txt) && /not yet signed/.test(txt), 'B2d: the parties by kind — the player and a club signatory — both not yet signed');
-  neg(!txt.includes(S_NOTE) && !txt.includes(S_OFFER_NOTE) && !txt.includes(S_DEC) && !/internal note/i.test(txt), 'B2e: no internal note, no Offer note, no decision reaches the player');
+  neg([txt, txtContract, txtDocs].every((x) => !x.includes(S_NOTE) && !x.includes(S_OFFER_NOTE) && !x.includes(S_DEC) && !/internal note/i.test(x)), 'B2e: no internal note, no Offer note, no decision reaches the player (all three pages)');
   ok(/Not signed yet\. Accepting the Offer was not a signature/.test(txt), 'B2f: the section says nothing is signed yet and that accepting was not a signature');
   ok(await kola.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth + 1), 'N13a: 390px: no horizontal scroll');
   neg((await sec.locator(`[data-testid="signing-confirm-${SID_A}"]`).count()) === 0, 'B3: nothing is signed by one tap: no confirmation box is open');
@@ -413,7 +418,7 @@ await signingTab(lead.page, ROOM_A);
   expect(await j('POST', '/org/players/pl-adeyemi/signing', { note: 'legacy' }, LEAD), 409, 'SIGNING_CANONICAL_REQUIRED', 'C7c: the legacy route refuses to record beside a canonical signing');
   // The player reads the completion.
   await goTab(kola, '/football');
-  await goTab(kola, '/opportunities');
+  await playerCategory(kola, 'signing');
   const sec = kola.locator('[data-testid="signing-section"]');
   ok(await waitIn(sec, /Signing completed/), 'C8: Kola\'s section reads Signing completed after a return to the tab');
   const t2 = await sec.innerText();
@@ -431,11 +436,11 @@ const ana = await enterAgent(ctxAna, 'Ana Agent', 'Agent', 'ana');
   neg(r.status === 200 && r.body.items.length === 0, 'D1b: the signings API lists nothing before the share');
   const sh = await j('POST', `/player/offers/${OFFER_A}/share-agent`, { share: true }, KOLA);
   ok(sh.status === 200 && sh.body.offer.agentShared === true, 'D2: Kola shares the Offer with his agent (HTTP) — his own act');
-  await go(ana, `#/clients/${REL}/offers`);
+  await go(ana, `#/clients/${REL}/transaction/signings`); // M24B — Transaction › Signing
   await ana.locator(`[data-testid="offer-signing-${OFFER_A}"]`).waitFor({ timeout: 15000 });
   const line = ana.locator(`[data-testid="offer-signing-${OFFER_A}"]`);
   ok((await line.getAttribute('data-signing-status')) === 'COMPLETED' && /Signed/.test(await line.innerText()) && /2 of 2 parties signed/.test(await line.innerText()) && /Signing revision 1/.test(await line.innerText()) && /2027-07-01/.test(await line.innerText()), 'D3: Ana reads the signing line under the shared Offer: Signed, 2 of 2 parties, revision 1, contract days');
-  const txt = await ana.locator('[data-testid="client-offers"]').innerText();
+  const txt = await ana.locator('[data-testid="client-signings"]').innerText();
   neg(!txt.includes(S_NOTE) && !txt.includes(S_OFFER_NOTE) && !txt.includes(PDF_SHA) && !/Maria Keane/.test(txt), 'D3b: no note, no digest, no signatory name in the agent\'s projection');
   neg((await line.locator('button').count()) === 0 && !/sign|confirm|complete/i.test(await line.locator('button').allInnerTexts().then((x) => x.join(' '))), 'D3c: no control on the signing line');
   ok(/does not let you sign, acknowledge or complete for a client/.test(await bodyText(ana)), 'D3d: the page says ScoutBox does not let an agent sign for a client');
@@ -452,7 +457,7 @@ const ana = await enterAgent(ctxAna, 'Ana Agent', 'Agent', 'ana');
 {
   const term = await j('POST', `/player/agent/relationships/${REL}/terminate`, { clientKey: 'live-terminate' }, KOLA);
   ok(term.status === 200, 'E1: Kola ends the representation (his own act)');
-  await go(ana, `#/clients/${REL}/offers`);
+  await go(ana, `#/clients/${REL}/transaction/signings`);
   ok(await waitText(ana, /Opportunities open only through an active, client-confirmed rela/), 'E2: Ana\'s deep link to the client\'s Offers now says access is closed');
   neg((await ana.locator(`[data-testid="offer-signing-${OFFER_A}"]`).count()) === 0 && (await ana.locator('[data-testid="client-offers"]').count()) === 0 && !(await bodyText(ana)).includes('2027-07-01'), 'E2b: no signing line, no Offer list, no contract day survives the revocation');
   const r = await j('GET', `/org/agent/clients/${REL}/signings`, undefined, anaApi.token);
@@ -562,7 +567,7 @@ for (const width of [1440, 1280, 768, 390, 360]) {
   await lead.page.evaluate((h) => { location.hash = h; }, `#/recruitment/rooms/${ROOM_A}`);
   await lead.page.reload();
   await lead.page.waitForSelector('[aria-label="En-tête de la salle"]', { timeout: 25000 });
-  await lead.page.click('[role="tablist"] button[role="tab"]:has-text("Signature")');
+  await roomTab(lead.page, 'signing'); // M24B — by page id, so the French label is what is asserted below, not what is clicked
   const frPanel = lead.page.locator('[role="tabpanel"][aria-label="Signature"] [data-testid="signing-workflow"]');
   await frPanel.waitFor({ timeout: 10000 });
   let frTxt = '';
@@ -573,8 +578,8 @@ for (const width of [1440, 1280, 768, 390, 360]) {
   await lead.page.reload();
   await kola.evaluate(() => localStorage.setItem('sb-player-lang', 'fr'));
   await kola.reload();
-  await kola.waitForSelector('a[href="/opportunities"]', { timeout: 30000 }).catch(() => {});
-  await goTab(kola, '/opportunities');
+  await kola.waitForSelector('a[href^="/opportunities"]', { timeout: 30000 }).catch(() => {});
+  await playerCategory(kola, 'signing');
   const sec = kola.locator('[data-testid="signing-section"]');
   const frOk = await waitIn(sec, /Signature complétée le/);
   ok(frOk && /Signataire du club/.test(await sec.innerText()) && !/Club signatory|Signing completed/.test(await sec.innerText()), 'N16b: FR — the player\'s Signing section renders in French');

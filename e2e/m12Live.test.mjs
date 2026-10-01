@@ -10,6 +10,7 @@
 // Requires dist-live bundles built for :4001 (liveIntegration builds them —
 // run that first, or this script rebuilds if missing).
 import { spawn, execSync } from 'node:child_process';
+import { playerCategory, playerSub } from './caseNavHelpers.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -103,7 +104,7 @@ await player.goto('http://localhost:8281/');
 await player.waitForSelector('text=Our promises to every player', { timeout: 30000 });
 await player.locator('text=Enter').nth(0).click(); // Kola (dev login, live server)
 await player.waitForSelector('text=Your visibility right now', { timeout: 20000 });
-await player.click('a[href="/opportunities"]'); // P2.5: the board lives on Opportunities
+await playerCategory(player, 'board'); // M24B: the board is the Board category of Opportunities
 await player.waitForSelector('text=Opportunity board', { timeout: 20000 });
 await player.waitForSelector('text=U23 look — pressing forwards', { timeout: 15000 });
 say('E1: the opportunity reached the player’s board in his own context');

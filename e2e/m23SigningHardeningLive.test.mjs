@@ -27,6 +27,7 @@
 //                        zero page errors in every context
 
 import { spawn, execSync } from 'node:child_process';
+import { roomTab, playerCategory, playerSub } from './caseNavHelpers.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -160,10 +161,8 @@ async function enterClub(ctx, org, name, role, who) {
   if (!token) fail(`${name}: the client stored no session token after login`);
   return { page, token };
 }
-const tab = async (page, name) => {
-  await page.click(`[role="tablist"] button[role="tab"]:has-text("${name}")`);
-  await page.waitForSelector(`[role="tabpanel"][aria-label="${name}"]`, { timeout: 10000 });
-};
+// M24B — the Room is category → subcategory; the helper opens the category that holds the page, then the page.
+const tab = async (page, name) => { await roomTab(page, name); };
 const sw = (page) => page.locator('[data-testid="signing-workflow"]');
 const headerStatus = async (page) => (await page.locator('[aria-label="Room header"] .badges').innerText());
 const liveLine = (page) => sw(page).locator('[role="status"][aria-live="polite"]').first().innerText();
@@ -351,7 +350,7 @@ const kola = await enterPlayer(ctxKola, 'Kola Adeyemi', 'kola', 'text=Your visib
   const room = await j('GET', `/org/rooms/${ROOM_C}/signing`, undefined, LEAD);
   ok(room.body.livePackageId === null && room.body.requirements.startBlockers.length === 0, 'D0: the expired package is not live: a new one may be opened over the same accepted Offer');
   const PD = await presentedHttp(OFFER_C, LEAD);
-  await goTab(kola, '/opportunities');
+  await playerCategory(kola, 'signing'); // M24B — Signing › Signing
   const sec = kola.locator('[data-testid="signing-section"]');
   await sec.waitFor({ timeout: 20000 });
   ok(await waitIn(sec, /Presented — awaiting signatures/), 'D1: Kola\'s section shows the newly presented revision');
@@ -364,7 +363,7 @@ const kola = await enterPlayer(ctxKola, 'Kola Adeyemi', 'kola', 'text=Your visib
   const sup = await j('POST', `/org/signings/${PD.SID}/supersede`, { expectedRev: (await j('GET', `/org/signings/${PD.SID}`, undefined, LEAD)).body.signing.rev, reason: 'Clause 4 amended', clientKey: 'live-d-sup' }, LEAD);
   ok(sup.status === 201 && sup.body.signing.currentRevision.revisionNumber === 2, 'D3: the club replaces the document (HTTP): revision 2 opens as a draft, every party pending');
   await goTab(kola, '/football');
-  await goTab(kola, '/opportunities');
+  await playerCategory(kola, 'signing');
   ok(await waitIn(sec, /Superseded by a newer revision/), 'D4: on his return Kola\'s section shows revision 1 as superseded');
   const txt = await sec.innerText();
   neg((await sec.locator(`[data-testid="signing-sign-${PD.SID}"]`).count()) === 0 && !/Presented — awaiting signatures/.test(txt), 'D5: nothing to sign — revision 2 has not been presented, and his revision-1 confirmation no longer counts');
@@ -374,7 +373,7 @@ const kola = await enterPlayer(ctxKola, 'Kola Adeyemi', 'kola', 'text=Your visib
   const r2 = await j('POST', `/org/signings/${PD.SID}/ready`, { expectedRev: a2.body.signing.rev, clientKey: 'live-d-ready2' }, LEAD);
   ok(a2.status === 200 && r2.status === 200 && r2.body.signing.currentRevision.document.sha256 !== PD.sha, 'D7: revision 2 presented with a different document (a different digest)');
   await goTab(kola, '/football');
-  await goTab(kola, '/opportunities');
+  await playerCategory(kola, 'signing');
   ok(await waitIn(sec, /Signing revision 2/) && (await sec.locator(`[data-testid="signing-sign-${PD.SID}"]`).count()) === 1, 'D8: Kola sees revision 2 with a fresh "Sign this document" — every party signs again');
   neg(!(await sec.innerText()).includes(S_NOTE), 'D9: no internal note reached him');
   globalThis.__D = { SID: PD.SID, rev2sha: r2.body.signing.currentRevision.document.sha256 };
@@ -395,16 +394,16 @@ const ctxAna = await browser.newContext({ viewport: { width: 1280, height: 800 }
 const ana = await enterAgent(ctxAna, 'Ana Agent', 'Agent', 'ana');
 {
   ok((await j('POST', `/player/offers/${OFFER_C}/share-agent`, { share: true }, KOLA)).status === 200, 'F1: Kola shares the Offer with Ana (HTTP)');
-  await go(ana, `#/clients/${REL}/offers`);
+  await go(ana, `#/clients/${REL}/transaction/signings`); // M24B — Transaction › Signing
   await ana.locator(`[data-testid="offer-signing-${OFFER_C}"]`).waitFor({ timeout: 15000 });
   const line = ana.locator(`[data-testid="offer-signing-${OFFER_C}"]`);
   ok(/Presented for signature|Signing in progress/.test(await line.innerText()) && /Signing revision 2/.test(await line.innerText()) && (await line.locator('button').count()) === 0, 'F2: Ana reads the live package\'s state and revision, no control');
-  neg(!(await ana.locator('[data-testid="client-offers"]').innerText()).includes(S_NOTE) && !(await ana.locator('[data-testid="client-offers"]').innerText()).includes(globalThis.__D.rev2sha.slice(0, 12)), 'F3: no note, no digest');
+  neg(!(await ana.locator('[data-testid="client-signings"]').innerText()).includes(S_NOTE) && !(await ana.locator('[data-testid="client-signings"]').innerText()).includes(globalThis.__D.rev2sha.slice(0, 12)), 'F3: no note, no digest');
   const bea = (await j('POST', '/auth/org/login', { orgId: 'org-northstar', scoutName: 'Bea Agent', role: 'Agent', platform: 'agent' })).body;
   expect(await j('GET', `/org/agent/clients/${REL}/signings`, undefined, bea.token), 404, 'REPRESENTATION_NOT_FOUND', 'F4: Bea (same agency): NOT FOUND');
   const term = await j('POST', `/player/agent/relationships/${REL}/terminate`, { clientKey: 'live-terminate' }, KOLA);
   ok(term.status === 200, 'F5: Kola ends the representation');
-  await go(ana, `#/clients/${REL}/offers`);
+  await go(ana, `#/clients/${REL}/transaction/signings`);
   ok(await waitText(ana, /Opportunities open only through an active, client-confirmed rela/), 'F6: Ana\'s deep link shows no access');
   neg((await ana.locator(`[data-testid="offer-signing-${OFFER_C}"]`).count()) === 0 && (await ana.locator('[data-testid="client-offers"]').count()) === 0, 'F6b: no signing line survives the revocation');
   const r = await j('GET', `/org/agent/clients/${REL}/signings`, undefined, anaApi.token);
@@ -426,7 +425,7 @@ for (const width of [1440, 1280, 1024, 768, 390, 360]) {
 }
 {
   await goTab(kola, '/football');
-  await goTab(kola, '/opportunities');
+  await playerCategory(kola, 'signing');
   ok(await kola.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth + 1), 'W: 390px: the player app with two packages (expired + presented) has no horizontal scroll');
 }
 

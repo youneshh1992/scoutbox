@@ -245,8 +245,10 @@ const kids = (await j('/guardian/children', {}, bearer(amara.token))).body;
 const minorId = (Array.isArray(kids) ? kids : kids.children ?? [])[0]?.id;
 const agency = (await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-northstar', scoutName: 'Alex Agent', role: 'Agent' }) })).body;
 r = await j('/org/representation/propose', { method: 'POST', body: JSON.stringify({ playerId: minorId, scope: 'full_representation' }) }, bearer(agency.token));
-if (r.status !== 403) fail(`agency representation of a minor was not refused (got ${r.status})`);
-say('L6: agency representation of a minor still 403s — verification bypasses nothing');
+// M23 P5.6 retired the legacy representation route (410 Gone): representation now exists only through
+// the agent workspace's client request, whose minor rule m23AgentGrassrootsLive proves. Either answer is a refusal.
+if (r.status !== 403 && r.status !== 410) fail(`agency representation of a minor was not refused (got ${r.status})`);
+say(`L6: agency representation of a minor is refused (${r.status}) — verification bypasses nothing`);
 
 // ================================================================ L7
 const dee = (await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-hackneymarsh', scoutName: 'Dee Coach', role: 'Manager', platform: 'grassroots' }) })).body;

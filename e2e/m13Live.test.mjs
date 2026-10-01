@@ -11,6 +11,7 @@
 //       Pro Network screen reads the pack; revocation cuts it off live.
 //       Grassroots context renders its M13 screens (isolated by default).
 import { spawn, execSync } from 'node:child_process';
+import { playerCategory, playerSub } from './caseNavHelpers.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -108,11 +109,13 @@ await player.locator('text=Save travel limit').click();
 await player.waitForSelector('text=Saved — private to you', { timeout: 10000 });
 say('L1: adult player saved a private preference through his own screen');
 
-await player.click('a[href="/opportunities"]');
-await player.waitForSelector('text=Opportunity fit', { timeout: 20000 });
+await playerCategory(player, 'board'); // M24B: the board is Board › Open roles
+await player.waitForSelector('text=Opportunity board', { timeout: 20000 });
 await player.locator('div', { hasText: 'First-team look — wide forwards' }).locator('text=Apply').last().click();
 await player.waitForSelector('text=Application submitted', { timeout: 10000 });
-// board reloads on apply; the fit section fetches its own copy
+// board reloads on apply; the fit section (Board › Fit check) fetches its own copy
+await playerSub(player, 'Fit check');
+await player.waitForSelector('text=Opportunity fit', { timeout: 20000 });
 await player.locator('text=Check fit').first().click();
 await player.waitForSelector('text=travel time unavailable', { timeout: 15000 });
 say('L1: fit verdicts render with the honest “travel time unavailable” line');

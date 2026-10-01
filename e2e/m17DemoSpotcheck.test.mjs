@@ -4,6 +4,7 @@
 // Grassroots and does NOT exist in the player app.
 // Requires `node serve.mjs` on :8099.
 import { chromium } from 'playwright-core';
+import { roomTab, roomPanelLabel } from './caseNavHelpers.mjs';
 import { ensureDemoHost } from './demoHost.mjs';
 
 // D7 (M22 §74-§76): own the demo host instead of assuming one is up.
@@ -74,30 +75,31 @@ async function driveClub(url, label, { enterprise }) {
   }
 
   for (const tab of ['Overview', 'Passport', 'Evidence', 'Assessments', 'Combine', 'Development', 'Discussion', 'Activity', 'Decision']) {
-    await app.click(`[aria-label="Room sections"] button[role="tab"]:has-text("${tab}")`);
-    await app.waitForSelector(`[role="tabpanel"][aria-label="${tab}"]`, { timeout: 10000 });
+    await roomTab(app, tab);
+    await app.waitForSelector(`[role="tabpanel"][aria-label="${roomPanelLabel(tab)}"]`, { timeout: 10000 });
   }
-  say(`${label}: all nine room tabs render`);
+  say(`${label}: all nine legacy room pages render inside their categories (M24B)`);
 
   // Readiness is counts and words; health is a word.
-  await app.click('[aria-label="Room sections"] button[role="tab"]:has-text("Overview")');
+  await roomTab(app, 'Overview');
   {
-    const panel = await app.locator('[role="tabpanel"][aria-label="Overview"]').innerText();
+    const panel = await app.locator('[role="tabpanel"][aria-label="Summary"]').innerText();
     if (FORBIDDEN.test(panel)) fail(`${label}: prohibited scoring language on the overview`);
     say(`${label}: the overview carries no second score`);
     if (!/Ready for review|Waiting on evidence|Assessment outstanding|Trial pending|Decision recorded/i.test(panel)) fail(`${label}: room health is not shown as a word`);
     say(`${label}: room health is a word, never a number`);
   }
 
-  // A room task is staff work and says so.
+  // A room task is staff work and says so (M24B: Overview › Tasks).
   {
-    const panel = await app.locator('[role="tabpanel"][aria-label="Overview"]').innerText();
+    await roomTab(app, 'Tasks');
+    const panel = await app.locator('[role="tabpanel"][aria-label="Tasks"]').innerText();
     if (!/never sent to the player/i.test(panel)) fail(`${label}: the tasks note does not say tasks are never sent to the player`);
     say(`${label}: room tasks state they are never sent to the player`);
   }
 
   // Discussion is internal, and a deleted comment is tombstoned not erased.
-  await app.click('[aria-label="Room sections"] button[role="tab"]:has-text("Discussion")');
+  await roomTab(app, 'Discussion');
   {
     const panel = await app.locator('[role="tabpanel"][aria-label="Discussion"]').innerText();
     if (!/tombstoned, never erased/i.test(panel)) fail(`${label}: the tombstone rule is not explained`);
@@ -105,7 +107,7 @@ async function driveClub(url, label, { enterprise }) {
   }
 
   // The decision tab is human-framed and append-only.
-  await app.click('[aria-label="Room sections"] button[role="tab"]:has-text("Decision")');
+  await roomTab(app, 'Decision');
   {
     const panel = await app.locator('[role="tabpanel"][aria-label="Decision"]').innerText();
     if (!/human judgement/i.test(panel)) fail(`${label}: the decision tab does not say the decision is human`);
@@ -125,7 +127,7 @@ async function driveClub(url, label, { enterprise }) {
   await app.waitForTimeout(500);
   await app.click('button[aria-label^="Open room"]');
   await app.waitForSelector('[aria-label="Room header"]', { timeout: 20000 });
-  await app.click('[aria-label="Room sections"] button[role="tab"]:has-text("Decision")');
+  await roomTab(app, 'Decision');
   {
     const panel = await app.locator('[role="tabpanel"][aria-label="Decision"]').innerText();
     if (!/Trust( Score)? at decision/i.test(panel)) fail(`${label}: the decision-time Trust snapshot is not shown`);
@@ -138,7 +140,7 @@ async function driveClub(url, label, { enterprise }) {
 
   if (enterprise) {
     // Structured reasons only — and never a protected characteristic.
-    await app.click('[aria-label="Room sections"] button[role="tab"]:has-text("Overview")');
+    await roomTab(app, 'Overview');
     const reasons = await app.locator('[aria-label="Reasons"]').innerText().catch(() => '');
     if (/nationality|ethnic|religion|disab|postcode|income/i.test(reasons)) fail(`${label}: a protected characteristic is offered as a reason`);
     say(`${label}: the reason picker offers no protected characteristic`);

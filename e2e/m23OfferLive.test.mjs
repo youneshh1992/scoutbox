@@ -32,6 +32,7 @@
 // the real interfaces drive them.
 
 import { spawn, execSync } from 'node:child_process';
+import { roomTab, playerCategory, playerSub } from './caseNavHelpers.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -176,10 +177,8 @@ async function openRoomFor(page, playerName) {
   if (!/^case-/.test(id)) fail(`could not read the room id from the deep link (${hash})`);
   return id;
 }
-const tab = async (page, name) => {
-  await page.click(`[role="tablist"] button[role="tab"]:has-text("${name}")`);
-  await page.waitForSelector(`[role="tabpanel"][aria-label="${name}"]`, { timeout: 10000 });
-};
+// M24B — the Room is category → subcategory; the helper opens the category that holds the page, then the page.
+const tab = async (page, name) => { await roomTab(page, name); };
 const ow = (page) => page.locator('[data-testid="offer-workflow"]');
 const headerStatus = async (page) => (await page.locator('[aria-label="Room header"] .badges').innerText());
 const liveLine = (page) => ow(page).locator('[role="status"][aria-live="polite"]').first().innerText();
@@ -315,7 +314,7 @@ await offerTab(lead.page, ROOM_A);
 const ctxKola = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 const kola = await enterPlayer(ctxKola, 'Kola Adeyemi', 'kola', 'text=Your visibility right now');
 {
-  await goTab(kola, '/opportunities');
+  await playerCategory(kola, 'offer'); // M24B — Offer › Offer
   const sec = kola.locator('[data-testid="offer-section"]');
   await sec.waitFor({ timeout: 20000 });
   ok(await waitIn(sec, /Offers/i), 'B1: Kola\'s Opportunities carries the Offers section at 390px');
@@ -376,7 +375,7 @@ const MAT = (await j('POST', '/auth/player/login', { playerId: 'pl-carvalho' }))
   ok(await waitLive(lead.page, /Offer issued/), 'D2: issued to Mateus straight from the editor (the on-screen draft is saved first)');
   const ctxMat = await browser.newContext({ viewport: { width: 360, height: 780 }, isMobile: true, hasTouch: true });
   const mat = await enterPlayer(ctxMat, 'Mateus Carvalho', 'mateus', 'text=Your visibility right now');
-  await goTab(mat, '/opportunities');
+  await playerCategory(mat, 'offer');
   const sec = mat.locator('[data-testid="offer-section"]');
   await sec.waitFor({ timeout: 15000 });
   ok(await mat.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth + 1), 'N13b: 360px: the player app has no horizontal scroll');
@@ -402,7 +401,7 @@ const ana = await enterAgent(ctxAna, 'Ana Agent', 'Agent', 'ana');
   ok(await waitText(ana, /No Offer has been shared with you by this client/), 'E1: Ana\'s Offers tab for Kola shows nothing — the issued Offer was not shared');
   neg(!(await bodyText(ana)).includes('Central midfielder'), 'E1b: no term leaks before the share');
   // Kola shares from his app.
-  await goTab(kola, '/opportunities');
+  await playerCategory(kola, 'offer', 'Response'); // M24B — sharing with the agent lives under Offer › Response
   const sec = kola.locator('[data-testid="offer-section"]');
   await sec.waitFor({ timeout: 15000 });
   const offerId = (await j('GET', '/player/offers', undefined, KOLA)).body.items[0].id;

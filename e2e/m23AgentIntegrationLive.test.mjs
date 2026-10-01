@@ -34,6 +34,7 @@
 // this suite proves the real interfaces drive them.
 
 import { spawn, execSync } from 'node:child_process';
+import { roomTab as openRoomTab, clientTab } from './caseNavHelpers.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -234,10 +235,8 @@ const myAgentCard = async (page) => {
   await waitIn(card, /Ana Costa/, 20000);
   return card;
 };
-const roomTab = async (page, name) => {
-  await page.click(`[role="tablist"] button[role="tab"]:has-text("${name}")`);
-  await page.waitForSelector(`[role="tabpanel"][aria-label="${name}"]`, { timeout: 15000 });
-};
+// M24B — the Room is category → subcategory; the helper opens the category that holds the page, then the page.
+const roomTab = async (page, name) => { await openRoomTab(page, name); };
 const openRoom = async (page, tabName) => {
   await page.evaluate((h) => { location.hash = h; }, `#/recruitment/rooms/${RID}`);
   await page.reload();

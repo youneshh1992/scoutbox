@@ -35,6 +35,7 @@
 //                        390/360 on Opportunities; zero page errors everywhere
 
 import { spawn, execSync } from 'node:child_process';
+import { roomTab, playerCategory, playerSub } from './caseNavHelpers.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -265,7 +266,7 @@ await j('POST', `/player/requests/${req.id}/respond`, { accept: true, message: '
 const T1 = T0 + DAY;
 const inv = await j('POST', `/org/rooms/${RK}/trials`, { timezone: 'Europe/London', venue: { name: 'Eastport Dome', town: 'Eastport', address: 'Gate B' }, message: 'Come and train.', slots: [{ startsAt: T1 + 2 * H, endsAt: T1 + 4 * H, kind: 'training' }], clientKey: key() }, lead.token, at(T1));
 ok(inv.status === 201 && await waitNext(lead.page, 'AWAIT_TRIAL_RESPONSE') && await stageOf(lead.page) === 'trial', 'L2d: answered and invited over HTTP: the strip reads trial / waiting');
-await lead.page.click('[role="tab"]:has-text("Contact")');
+await roomTab(lead.page, 'Contact');
 await sleep(800);
 const gateShown = await waitText(lead.page, /Contact opens once the case is at/, 10000);
 const composeNow = await lead.page.locator('textarea[aria-label]').first().isEnabled().catch(() => false);
@@ -339,7 +340,7 @@ await sleep(800);
 ok(await waitText(sv, /Eastport/, 10000), 'L6b: his bell still lists the Eastport row (history is not erased)');
 const openBtns = sv.locator('[data-testid="notification-open"]');
 if (await openBtns.count() > 0) { await openBtns.first().click({ force: true }); await sleep(1200); }
-else { await goTab(sv, '/opportunities'); }
+else { await playerCategory(sv, 'offer'); }
 await sleep(800);
 neg(await sv.locator(`[data-testid="offer-accept-${OS}"]`).count() === 0 && !/Accept this offer|Accept the offer/i.test(await bodyText(sv)), 'L6c: wherever Open lands, no accept control exists for the withdrawn Offer');
 const svJourney = (await j('GET', '/player/journeys', undefined, SVENSSON)).body.items.find((x) => x.club.id === 'org-eastport');
@@ -374,7 +375,7 @@ ok(!!OKid && (await journey(RK, lead.token)).lifecycle.currentStage === 'offer_m
 ok((await j('POST', `/player/offers/${OKid}/share-agent`, { share: true, agreementId: REL }, KOLA)).status === 200, 'L7b: Kola shares the Offer with Ana');
 const ctxAna = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 const ana = await enterAgent(ctxAna, 'Ana Agent', 'Agent', 'ana', { cutEvents: true });
-await go(ana, `#/clients/${REL}/overview`);
+await go(ana, `#/clients/${REL}/overview/journey`);
 await ana.locator('[data-testid="client-journey-org-eastport"]').waitFor({ timeout: 20000 });
 ok(await ana.locator('[data-testid="client-journey-org-eastport"]').getAttribute('data-stage') === 'offer_received', 'L7c: Ana\'s client page shows Eastport FC: Offer received');
 await ana.click('button.topbar-bell').catch(() => null);
@@ -403,7 +404,7 @@ await ctxAna.close();
 console.log('\n— L8: a second Room for Nowak after his first case ended —');
 const RN2 = await roomFor('pl-nowak', lead.token);
 ok(RN2 && RN2 !== RN, 'L8a: a new Room opened (the ended one is not reused)');
-await openRoom(lead.page, RN2, 'activity');
+await openRoom(lead.page, RN2, 'timeline');
 ok(await stageOf(lead.page) === 'watching' && await nextCode(lead.page) === 'REVIEW_PLAYER', 'L8b: the second case starts at watching with "Start the review"');
 const doneSteps = await lead.page.locator('.journey-step.done').count();
 neg(doneSteps === 0, `L8c: the rail inherits nothing from the ended case (${doneSteps} done steps)`);
@@ -415,12 +416,12 @@ neg(!(await j('GET', '/player/journeys', undefined, NOWAK)).body.items.some((x) 
 console.log('\n— L9: same-agency colleagues open Ana\'s client link —');
 const ctxBea = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 const bea = await enterAgent(ctxBea, 'Bea Agent', 'Agent', 'bea');
-await go(bea, `#/clients/${REL}/overview`);
+await go(bea, `#/clients/${REL}/overview/journey`);
 neg((await waitText(bea, /not available|not found|not open to you|No such|does not exist/i, 15000)) || (await bea.locator('[data-testid="client-journey"]').count()) === 0, 'L9a: Bea (colleague) opens no client and no journey');
 await ctxBea.close();
 const ctxAlex = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 const alexPage = await enterAgent(ctxAlex, 'Alex Agent', 'Director', 'alex');
-await go(alexPage, `#/clients/${REL}/overview`);
+await go(alexPage, `#/clients/${REL}/overview/journey`);
 await sleep(1500);
 neg((await alexPage.locator('[data-testid="client-journey-org-eastport"]').count()) === 0, 'L9b: Alex (agency admin) sees no club stage for Ana\'s client');
 await ctxAlex.close();

@@ -23,6 +23,7 @@
 // proves the real interfaces drive them.
 
 import { spawn, execSync } from 'node:child_process';
+import { roomTab, playerCategory, playerSub } from './caseNavHelpers.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -171,8 +172,7 @@ async function openRoomFor(page, playerName) {
 }
 
 const tab = async (page, name) => {
-  await page.click(`[role="tablist"] button[role="tab"]:has-text("${name}")`);
-  await page.waitForSelector(`[role="tabpanel"][aria-label="${name}"]`, { timeout: 10000 });
+  await roomTab(page, name); // M24B — category → subcategory
   // The Contact panel renders a loading line until its list arrives.
   if (name === 'Contact') await page.locator('[role="tabpanel"][aria-label="Contact"] [aria-label="Contact history"]').waitFor({ timeout: 15000 });
 };
@@ -241,10 +241,11 @@ say('A1: a recruitment lead signs in through the real client');
 const ROOM_A = await openRoomFor(lead.page, 'Kola Adeyemi');
 say(`A2: the lead opens a Recruitment Room for an adult player through the UI (${ROOM_A})`);
 {
-  const tabs = await lead.page.locator('[role="tablist"] button[role="tab"]').allInnerTexts();
-  ok(tabs.includes('Contact'), 'A2b: the room offers a page-local Contact tab');
-  const idx = tabs.indexOf('Contact');
-  ok(idx > tabs.indexOf('Discussion') && idx < tabs.indexOf('Activity'), 'A2c: it sits after Discussion — internal talk first, shared communication second');
+  // M24B — the pages of every category, read off the category buttons (only the open category's pages are in the tablist).
+  const tabs = await lead.page.locator('[data-casenav="room"] .casenav-cat').evaluateAll((els) => els.flatMap((e) => (e.dataset.subs ?? '').split(' ')));
+  ok(tabs.includes('contact'), 'A2b: the room offers a page-local Contact tab');
+  const idx = tabs.indexOf('contact');
+  ok(idx > tabs.indexOf('discussion') && idx - tabs.indexOf('discussion') === 1, 'A2c: it sits right after Discussion in Engagement — internal talk first, shared communication second (M24B)');
 }
 
 await tab(lead.page, 'Contact');

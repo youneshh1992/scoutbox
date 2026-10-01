@@ -27,6 +27,7 @@
 // proves the real interfaces drive them.
 
 import { spawn, execSync } from 'node:child_process';
+import { roomTab, playerCategory, playerSub } from './caseNavHelpers.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -165,10 +166,8 @@ async function openRoomFor(page, playerName) {
   if (!/^case-/.test(id)) fail(`could not read the room id from the deep link (${hash})`);
   return id;
 }
-const tab = async (page, name) => {
-  await page.click(`[role="tablist"] button[role="tab"]:has-text("${name}")`);
-  await page.waitForSelector(`[role="tabpanel"][aria-label="${name}"]`, { timeout: 10000 });
-};
+// M24B — the Room is category → subcategory; the helper opens the category that holds the page, then the page.
+const tab = async (page, name) => { await roomTab(page, name); };
 const dw = (page) => page.locator('[data-testid="decision-workflow"]');
 const headerStatus = async (page) => (await page.locator('[aria-label="Room header"] .badges').innerText());
 const liveLine = (page) => dw(page).locator('[role="status"][aria-live="polite"]').first().innerText();
@@ -225,8 +224,9 @@ say('A1: a recruitment lead signs in through the real client');
 const ROOM_A = await openRoomFor(lead.page, 'Kola Adeyemi');
 say(`A2: the lead opens a Recruitment Room for an adult player (${ROOM_A})`);
 {
-  const tabs = await lead.page.locator('[role="tablist"] button[role="tab"]').allInnerTexts();
-  ok(tabs.includes('Decision'), 'A2b: the room offers the existing Decision tab — no new tab was added');
+  // M24B — the pages of every category, read off the category buttons (only the open category's pages are in the tablist).
+  const tabs = await lead.page.locator('[data-casenav="room"] .casenav-cat').evaluateAll((els) => els.flatMap((e) => (e.dataset.subs ?? '').split(' ')));
+  ok(tabs.includes('decision'), 'A2b: the room offers the existing Decision tab — no new tab was added');
 }
 await lifecycle(ROOM_A, 'startReview', LEAD);
 

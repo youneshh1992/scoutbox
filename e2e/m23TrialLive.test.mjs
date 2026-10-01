@@ -26,6 +26,7 @@
 // proves the real interfaces drive them.
 
 import { spawn, execSync } from 'node:child_process';
+import { roomTab, playerCategory, playerSub } from './caseNavHelpers.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -167,8 +168,7 @@ async function openRoomFor(page, playerName) {
   return id;
 }
 const tab = async (page, name) => {
-  await page.click(`[role="tablist"] button[role="tab"]:has-text("${name}")`);
-  await page.waitForSelector(`[role="tabpanel"][aria-label="${name}"]`, { timeout: 10000 });
+  await roomTab(page, name); // M24B — category → subcategory
   if (name === 'Trial') await page.locator('[role="tabpanel"][aria-label="Trial"] [aria-label="Trials"]').waitFor({ timeout: 15000 });
 };
 const trialPanel = (page) => page.locator('[role="tabpanel"][aria-label="Trial"]');
@@ -243,9 +243,10 @@ say('A1: a recruitment lead signs in through the real client');
 const ROOM_A = await openRoomFor(lead.page, 'Kola Adeyemi');
 say(`A2: the lead opens a Recruitment Room for an adult player (${ROOM_A})`);
 {
-  const tabs = await lead.page.locator('[role="tablist"] button[role="tab"]').allInnerTexts();
-  ok(tabs.includes('Trial'), 'A2b: the room offers a page-local Trial tab');
-  ok(tabs.indexOf('Trial') > tabs.indexOf('Contact') && tabs.indexOf('Trial') < tabs.indexOf('Activity'), 'A2c: it sits after Contact — first the conversation, then the trial');
+  // M24B — the pages of every category, read off the category buttons (only the open category's pages are in the tablist).
+  const tabs = await lead.page.locator('[data-casenav="room"] .casenav-cat').evaluateAll((els) => els.flatMap((e) => (e.dataset.subs ?? '').split(' ')));
+  ok(tabs.includes('trial'), 'A2b: the room offers a page-local Trial tab');
+  ok(tabs.indexOf('trial') > tabs.indexOf('contact') && tabs.indexOf('trial') - tabs.indexOf('contact') === 1, 'A2c: it sits right after Contact in Engagement — first the conversation, then the trial (M24B)');
 }
 
 // N1 — the gate at watching.
@@ -314,7 +315,7 @@ const TRIAL_A = (await j('GET', `/org/rooms/${ROOM_A}/trials`, undefined, LEAD))
 const SID_A = TRIAL_A.schedule.sessions[0].id;
 
 // The player's Opportunities: the address and instructions arrive with acceptance.
-await goTab(kola, '/opportunities');
+await playerCategory(kola, 'trial', 'Schedule'); // M24B — Trial › Schedule
 await kola.waitForSelector('[data-testid="trial-workflow"]', { timeout: 20000 });
 {
   const txt = await kola.locator('[data-testid="trial-workflow"]').innerText();
@@ -358,7 +359,7 @@ expect(await j('POST', `/org/rooms/${ROOM_A}/trials/${TRIAL_A.id}/sessions/${SID
   const attr = a.body.assessment.attributesSnapshot[0].id;
   await j('PUT', `/org/assessments/${a.body.assessment.id}`, { ratings: [{ attrId: attr, rating: 2, note: S_ASSESS }], recommendation: { verdict: 'pass', reasons: S_ASSESS } }, LEAD);
   await reenter(kola, 'Kola Adeyemi', 'a[href="/inbox"]');
-  await goTab(kola, '/opportunities');
+  await playerCategory(kola, 'trial', 'Schedule');
   await kola.waitForSelector('[data-testid="trial-workflow"]', { timeout: 20000 });
   const txt = await bodyText(kola);
   neg(!txt.includes(S_NOTE) && !txt.includes(S_ASSESS), 'N10b: the player\'s Opportunities carry neither the attendance note nor the assessment sentinel');
@@ -407,7 +408,7 @@ expect(await j('POST', `/org/rooms/${ROOM_A}/trials/${TRIAL_A.id}/sessions/${SID
   neg(/Report owed/.test(panel), 'A12c: the mandatory report is still owed — completion is not the report');
   neg(!(await trialPanel(lead.page).locator('button:has-text("Mark trial completed")').count()), 'A12d: no further completion control');
   await reenter(kola, 'Kola Adeyemi', 'a[href="/inbox"]');
-  await goTab(kola, '/opportunities');
+  await playerCategory(kola, 'trial', 'Schedule');
   await kola.waitForSelector('[data-testid="trial-workflow"]', { timeout: 20000 });
   const txt = await kola.locator('[data-testid="trial-workflow"]').innerText();
   ok(/Completed/.test(txt) && /This is not an assessment/.test(txt), 'A12e: the player sees Completed and is told it is not an assessment');
@@ -460,7 +461,7 @@ await goTab(guni, '/inbox');
   ok(/guardian-managed/.test(txt) && /Eastport FC/.test(txt), 'N12: the child\'s Updates show a guardian-managed item from the club');
   neg(!/U14 training session/.test(txt) && !/Gate B/.test(txt) && !(await guni.locator('[data-testid^="trial-slot-"]').count()), 'N12b: never the message, the address or a slot to pick');
 }
-await goTab(guni, '/opportunities');
+await playerCategory(guni, 'trial', 'Schedule');
 await guni.waitForSelector('[data-testid="trial-workflow"]', { timeout: 20000 });
 {
   const txt = await guni.locator('[data-testid="trial-workflow"]').innerText();
@@ -626,7 +627,7 @@ await guni.waitForSelector('[data-testid="trial-workflow"]', { timeout: 20000 })
   await lead.page.evaluate(() => localStorage.setItem('sb-lang', 'fr'));
   await lead.page.reload();
   await lead.page.waitForSelector('[aria-label="En-tête de la salle"]', { timeout: 25000 });
-  await lead.page.click('[role="tablist"] button[role="tab"]:has-text("Essai")');
+  await roomTab(lead.page, 'trial'); // M24B — by page id; the French label is asserted on the panel below
   const frPanel = lead.page.locator('[role="tabpanel"][aria-label="Essai"]');
   await frPanel.waitFor({ timeout: 10000 });
   let frTxt = '';
@@ -636,7 +637,7 @@ await guni.waitForSelector('[data-testid="trial-workflow"]', { timeout: 20000 })
   await lead.page.reload();
   await kola.evaluate(() => localStorage.setItem('sb-player-lang', 'fr'));
   await reenter(kola, 'Kola Adeyemi', 'a[href="/inbox"]');
-  await goTab(kola, '/opportunities');
+  await playerCategory(kola, 'trial', 'Planning'); // M24B — the app is in French here: Trial › Planning
   await kola.waitForSelector('[data-testid="trial-workflow"]', { timeout: 20000 });
   let frFam = '';
   for (let i = 0; i < 40 && !/vos essais/i.test(frFam); i++) { frFam = await bodyText(kola); if (!/vos essais/i.test(frFam)) await sleep(250); }

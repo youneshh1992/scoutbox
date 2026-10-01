@@ -26,6 +26,7 @@
 // Ports differ from every other live suite so batteries never collide.
 
 import { spawn, execSync } from 'node:child_process';
+import { roomTab, playerCategory, playerSub } from './caseNavHelpers.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -160,10 +161,8 @@ async function enterClub(ctx, org, name, role, who) {
   if (!token) fail(`${name}: the client stored no session token after login`);
   return { page, token };
 }
-const tab = async (page, name) => {
-  await page.click(`[role="tablist"] button[role="tab"]:has-text("${name}")`);
-  await page.waitForSelector(`[role="tabpanel"][aria-label="${name}"]`, { timeout: 10000 });
-};
+// M24B — the Room is category → subcategory; the helper opens the category that holds the page, then the page.
+const tab = async (page, name) => { await roomTab(page, name); };
 const ow = (page) => page.locator('[data-testid="offer-workflow"]');
 const liveLine = (page) => ow(page).locator('[role="status"][aria-live="polite"]').first().innerText();
 async function waitPanel(page, re) { for (let i = 0; i < 40; i++) { if (re.test(await ow(page).innerText().catch(() => ''))) return true; await sleep(250); } return false; }
@@ -215,13 +214,13 @@ async function enterPlayer(ctx, rowText, who, landing = 'text=Your visibility ri
 }
 const goTab = async (page, href) => { await page.click(`a[href="${href}"]`); await page.waitForTimeout(900); };
 async function offersSection(page) {
-  await goTab(page, '/opportunities');
+  await playerCategory(page, 'offer'); // M24B — Offer › Offer
   const sec = page.locator('[data-testid="offer-section"]');
   await sec.waitFor({ timeout: 20000 });
   return sec;
 }
 /** The player app re-reads its Offers on a tab change; leaving and returning is a reload. */
-async function refreshOffers(page) { await goTab(page, '/discover'); await goTab(page, '/opportunities'); return page.locator('[data-testid="offer-section"]'); }
+async function refreshOffers(page) { await goTab(page, '/discover'); await playerCategory(page, 'offer'); return page.locator('[data-testid="offer-section"]'); }
 
 // ------------------------------------------------------------- agent helpers
 

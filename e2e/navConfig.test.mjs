@@ -397,11 +397,11 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   section(`${app} — hash deep links (strict)`);
   ok(nav.screenFromHash('#/clients') === 'clients' && nav.screenFromHash('#/agency') === 'agency' && nav.screenFromHash('#/inbox') === 'inbox', 'flat hashes parse');
   ok(nav.screenFromHash('#/nope') === null && nav.screenFromHash('#foo') === null && nav.screenFromHash('') === null && nav.screenFromHash('#/Clients') === null, 'unknown, malformed and wrongly-cased hashes rejected');
-  ok(nav.screenFromHash('#/clients/rep-7') === 'clients' && nav.clientFromHash('#/clients/rep-7')?.id === 'rep-7' && nav.clientFromHash('#/clients/rep-7')?.tab === 'overview', 'a client deep link resolves to Clients and carries the id (Overview by default)');
+  ok(nav.screenFromHash('#/clients/rep-7') === 'clients' && nav.clientFromHash('#/clients/rep-7')?.id === 'rep-7' && nav.clientFromHash('#/clients/rep-7')?.tab === 'summary', 'a client deep link resolves to Clients and carries the id (Overview › Summary by default — M24B)');
   ok(nav.clientFromHash('#/clients/rep-7/opportunities')?.tab === 'opportunities' && nav.screenFromHash('#/clients/rep-7/activity') === 'clients', 'a client tab deep link carries its tab');
   ok(nav.clientFromHash('#/clients/rep-7/offer') === null && nav.screenFromHash('#/clients/rep-7/offer') === null, 'an unknown client tab (offer) is rejected outright');
   ok(nav.clientFromHash('#/clients/') === null && nav.clientFromHash('#/clients/a/b/c') === null && nav.clientFromHash('#/clients/../x') === null && nav.clientFromHash('') === null, 'malformed client deep links rejected');
-  ok(nav.hashForClient('rep-7') === '#/clients/rep-7' && nav.hashForClient('rep-7', 'activity') === '#/clients/rep-7/activity', 'client hashes round-trip');
+  ok(nav.hashForClient('rep-7') === '#/clients/rep-7' && nav.hashForClient('rep-7', 'activity') === '#/clients/rep-7/overview/activity' && nav.clientFromHash('#/clients/rep-7/activity')?.tab === 'activity', 'client hashes round-trip (M24B: a link names its category; the legacy flat form still reads)');
   ok(nav.screenFromHash('#/agency/team') === 'agency' && nav.agencyTabFromHash('#/agency/team') === 'team' && nav.agencyTabFromHash('#/agency/billing') === null && nav.screenFromHash('#/agency/billing') === null, 'agency tab deep links are strict');
   ok(nav.hashForAgency('overview') === '#/agency' && nav.hashForAgency('settings') === '#/agency/settings', 'agency hashes round-trip');
   // P5.6D transaction deep links. Strict: the id shape is fixed, and a tab the
@@ -413,7 +413,7 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   ok(nav.transactionFromHash('#/transactions/atx-7/offer') === null && nav.screenFromHash('#/transactions/atx-7/offer') === null, 'an offer tab on a transaction is rejected outright');
   ok(nav.transactionFromHash('#/transactions/atx-7/signing') === null && nav.transactionFromHash('#/transactions/atx-7/fees') === null, 'so are signing and fees');
   ok(nav.transactionFromHash('#/transactions/') === null && nav.transactionFromHash('#/transactions/rep-7') === null && nav.transactionFromHash('#/transactions/../x') === null && nav.transactionFromHash('#/transactions/atx-7/a/b') === null, 'malformed transaction deep links rejected, including a client id in a transaction slot');
-  ok(nav.hashForTransaction('atx-7') === '#/transactions/atx-7' && nav.hashForTransaction('atx-7', 'documents') === '#/transactions/atx-7/documents', 'transaction hashes round-trip');
+  ok(nav.hashForTransaction('atx-7') === '#/transactions/atx-7' && nav.hashForTransaction('atx-7', 'documents') === '#/transactions/atx-7/records/documents' && nav.transactionFromHash('#/transactions/atx-7/documents')?.tab === 'documents', 'transaction hashes round-trip (M24B: a link names its category; the legacy flat form still reads)');
   for (const id of AGENT_IDS) if (nav.screenFromHash(nav.hashForScreen(id)) !== id) fail(`hash round-trip for ${id}`); else passed++;
   console.log('✓ every screen hash the app writes, it can read back (7 folded)');
   ok(nav.screenFromHash('#/compliance/ctx-7') === 'compliance' && nav.contextFromHash('#/compliance/ctx-7') === 'ctx-7', 'a compliance context deep link resolves and carries its id');

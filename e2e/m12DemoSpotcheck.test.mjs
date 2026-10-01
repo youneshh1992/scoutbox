@@ -2,6 +2,7 @@
 // examples of the new features and the interactive demo actions work.
 // Serve dist first: node serve.mjs &
 import { chromium } from 'playwright-core';
+import { playerCategory, playerSub } from './caseNavHelpers.mjs';
 import { ensureDemoHost } from './demoHost.mjs';
 
 // D7 (M22 §74-§76): this test OWNS its demo host. It used to assume one
@@ -81,7 +82,7 @@ await mob.waitForSelector('text=Our promises to every player', { timeout: 30000 
 await mob.getByText('Enter', { exact: true }).first().click();
 await mob.waitForSelector('text=Your visibility right now', { timeout: 20000 });
 // P2.5: the board lives on the Opportunities tab.
-await mob.click('a[href="/opportunities"]');
+await playerCategory(mob, 'board'); // M24B: Board › Open roles
 await mob.waitForSelector('text=Opportunity board', { timeout: 20000 });
 await mob.waitForSelector('text=U23 open trial — attackers', { timeout: 10000 });
 say('Player demo: opportunity board populated');
@@ -95,8 +96,9 @@ await mob.waitForSelector('text=pressing triggers', { timeout: 20000 });
 await mob.getByRole('tab', { name: 'Account' }).click();
 await mob.waitForSelector('text=Access & language', { timeout: 10000 });
 say('Player demo: feedback loop + access settings');
-await mob.click('a[href="/opportunities"]'); // P2.5: squad invitations sit with the other opportunities
+await playerCategory(mob, 'board', 'Squad invites'); // M24B: Board › Squad invites
 await mob.waitForSelector('text=Squad invitations', { timeout: 20000 });
+await playerCategory(mob, 'trial', 'Details'); // M24B: the trial-day safety pack is Trial › Details
 await mob.waitForSelector('text=safety pack', { timeout: 10000 });
 say('Player demo: squad invites + trial safety pack');
 

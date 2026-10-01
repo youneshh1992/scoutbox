@@ -25,6 +25,7 @@
 // this suite proves the real interfaces drive them.
 
 import { spawn, execSync } from 'node:child_process';
+import { clientTab } from './caseNavHelpers.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -290,7 +291,7 @@ let REL = null;
   await ana.page.waitForSelector('[data-testid="client-detail"]', { timeout: 15000 });
   ok(/#\/clients\/rep-/.test(await ana.page.evaluate(() => location.hash)), 'B18: opening a client is a deep link');
   neg(/No access: awaiting the client/.test(await ana.page.locator('[data-testid="access-line"]').innerText()), 'B19: the detail says No access — a request is a claim, not access');
-  await ana.page.click('[role="tablist"] button[role="tab"]:has-text("Opportunities")');
+  await clientTab(ana.page, 'opportunities');
   neg(await ana.page.locator('[data-testid="opps-no-access"]').count() === 1, 'B20: the Opportunities tab opens nothing through a pending request');
   ok(await ana.page.locator('[data-testid="home-active"], [data-testid="agent-clients"]').count() >= 0, '(navigation ok)');
 }
@@ -319,14 +320,14 @@ say('C1: Kola signs in to the player app');
   await ana.page.waitForSelector('[data-testid="client-detail"]', { timeout: 20000 });
   ok(await waitText(ana.page, /Access: active confirmed relationship/), 'D1: Ana\'s client detail now states the access basis: active confirmed relationship');
   ok(/Active/.test(await ana.page.locator('[data-testid="client-detail"] [data-status]').first().innerText()), 'D2: status Active');
-  await ana.page.click('[role="tablist"] button[role="tab"]:has-text("Opportunities")');
+  await clientTab(ana.page, 'opportunities');
   await ana.page.waitForSelector('[data-testid="client-opps"]', { state: 'attached', timeout: 15000 });
   ok(/Applying is the player/.test(await bodyText(ana.page)), 'D3: the client\'s Opportunities tab opens on the client\'s own board and says applying is the player\'s act');
   const agentView = (await j('GET', `/org/agent/clients/${REL}`, undefined, ana.token)).body;
   const kolaBoard = (await j('GET', '/player/opportunity-board', undefined, (await j('POST', '/auth/player/login', { playerId: 'pl-adeyemi' })).body.token)).body.items.map((o) => o.id).sort();
   const agentBoard = (await j('GET', `/org/agent/clients/${REL}/opportunities`, undefined, ana.token)).body.items.map((o) => o.id).sort();
   ok(agentView.access === true && JSON.stringify(kolaBoard) === JSON.stringify(agentBoard), 'D4: the board the agent reads is exactly the board the player sees (same engine, same rules)');
-  await ana.page.click('[role="tablist"] button[role="tab"]:has-text("Activity")');
+  await clientTab(ana.page, 'activity');
   ok(/Confirmed by client/.test(await ana.page.locator('[data-testid="client-activity"]').innerText()), 'D5: Activity shows "Confirmed by client"');
   await go(ana.page, '#/opportunities');
   await ana.page.waitForSelector('[data-testid="agent-opportunities"]', { timeout: 15000 });
@@ -349,7 +350,7 @@ say('C1: Kola signs in to the player app');
   neg(/Access suspended/.test(await ana.page.locator('[data-testid="access-line"]').innerText()), 'E2: Ana\'s access is suspended');
   ok(await ana.page.locator('[data-testid="disputed-note"]').count() === 1 && /nothing here can resolve it/.test(await ana.page.locator('[data-testid="disputed-note"]').innerText()), 'E3: the detail says nothing here can resolve a dispute');
   neg(!(await bodyText(ana.page)).includes(S_REASON), 'E4: the dispute reason never reaches the agent\'s screen');
-  await ana.page.click('[role="tablist"] button[role="tab"]:has-text("Representation")');
+  await clientTab(ana.page, 'representation');
   neg((await ana.page.locator('[data-testid="terminate"]').count()) === 0, 'E5: no End/Withdraw button on a disputed relationship — the agent cannot route around it');
   const adminView = (await j('GET', '/admin/agent/relationships', undefined, undefined, { 'x-admin-key': process.env.ADMIN_KEY || 'scoutbox-admin' })).body;
   neg(adminView.readOnly === true && !JSON.stringify(adminView).includes(S_REASON), 'E6: the shared T&S key sees a read-only list without the reason');
@@ -468,13 +469,14 @@ say('C1: Kola signs in to the player app');
     await sleep(400);
     ok(await phone.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth + 1), `N6j: ${w.width}px: the client detail fits`);
     const tabs = await phone.evaluate(() => document.querySelectorAll('[role="tab"]').length);
-    ok(tabs >= 4, `N6k: ${w.width}px: with its tab strip intact (${tabs} tabs) — the workspace is whole, not collapsed away`);
+    ok(tabs >= 3 && (await phone.locator('.casenav-cat').count()) === 5, `N6k: ${w.width}px: with its navigation intact (${tabs} pages in the open category, five categories) — the workspace is whole, not collapsed away`);
   }
   await ctxPhone.close();
 }
 {
   await go(ana.page, `#/clients/${REL}`);
   await ana.page.waitForSelector('[role="tablist"]', { timeout: 15000 });
+  await clientTab(ana.page, 'representation'); // M24B — Player › Representation
   const tab = ana.page.locator('[role="tablist"] button[role="tab"]:has-text("Representation")');
   await tab.click();
   const sel = await tab.getAttribute('aria-selected');

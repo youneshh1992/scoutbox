@@ -32,6 +32,7 @@
 // this suite proves the real interfaces drive them.
 
 import { spawn, execSync } from 'node:child_process';
+import { txTab } from './caseNavHelpers.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -257,15 +258,15 @@ let TX = null;
   neg(/draft/i.test(status), 'B3b: the state reaches the screen as a WORD, not a colour (§84)');
   const compliance = await ana.locator('[data-testid="tx-compliance"]').first().innerText();
   neg(/not confirmed|parties/i.test(compliance) && !/clear/i.test(await ana.locator('[data-testid="tx-compliance-state"]').first().innerText()), 'B4: a DRAFT implies no clearance, and the reason names WHICH refusal it is (§13/§15)');
-  await ana.click('[data-testid="tx-tab-compliance"]');
+  await txTab(ana, 'compliance');
   await ana.waitForSelector('[data-testid="tx-offer-boundary"]', { timeout: 15000 });
   neg((await ana.locator('[data-testid="tx-offer-boundary"]').getAttribute('data-ready')) === '0', 'B5: offer readiness is false on a DRAFT (§53/§54)');
   neg(/not ready|pas pr/i.test(await ana.locator('[data-testid="tx-offer-ready"]').innerText()), 'B5b: …and the workspace says so in words, not only by a grey pill');
   neg((await ana.locator('[data-testid="tx-offer-blockers"] li').count()) > 0, 'B5c: …and names what is missing, so readiness is never a bare no');
   neg(!/Start an offer|Make an offer|Send offer|Sign the|Create offer/i.test(await bodyText(ana)), 'B5d: and there is no control anywhere that would start one — P5.6D computes readiness and stops (§54)');
-  await ana.click('[data-testid="tx-tab-overview"]');
+  await txTab(ana, 'overview');
   await ana.waitForSelector('[data-testid="tx-panel-overview"]', { timeout: 10000 });
-  await ana.click('[data-testid="tx-tab-parties"]');
+  await txTab(ana, 'parties');
   await ana.waitForSelector('[data-testid="tx-panel-parties"]', { timeout: 10000 });
   const parties = await ana.locator('[data-testid="tx-party"]').count();
   ok(parties === 3, `B6: all three parties are identified by role (${parties})`);
@@ -376,7 +377,7 @@ const devPage = await enterClub(ctxDev, 'Harbour', 'Dev Ansah', 'Director of Foo
 
 // ============================================================== H — documents
 {
-  await ana.click('[data-testid="tx-tab-documents"]');
+  await txTab(ana, 'documents');
   await ana.waitForSelector('[data-testid="tx-panel-documents"]', { timeout: 10000 });
   await ana.selectOption('[data-testid="tx-doc-type"]', 'mandate');
   await ana.selectOption('[data-testid="tx-doc-visibility"]', 'AGENT_PRIVATE');
@@ -403,7 +404,7 @@ const devPage = await enterClub(ctxDev, 'Harbour', 'Dev Ansah', 'Director of Foo
 
 // ============================================================== I — timeline
 {
-  await ana.click('[data-testid="tx-tab-timeline"]');
+  await txTab(ana, 'timeline');
   await ana.waitForSelector('[data-testid="tx-panel-timeline"]', { timeout: 10000 });
   await waitFor(async () => (await ana.locator('[data-testid="tx-timeline-entry"]').count()) >= 4, 20000);
   const entries = await ana.locator('[data-testid="tx-timeline-entry"]').count();
@@ -506,7 +507,8 @@ const ts = watch(await ctxTs.newPage(), 'trust-safety');
     await sleep(450);
     ok(await ana.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth + 1), `N4f: ${w.width}px: the transaction workspace fits`);
     const tabs = await ana.evaluate(() => document.querySelectorAll('[role="tab"]').length);
-    ok(tabs === 6, `N4g: ${w.width}px: and it is still the whole workspace, not a collapsed shell (${tabs} tabs)`);
+    const cats = await ana.evaluate(() => document.querySelectorAll('[data-testid="tx-tabs"] .casenav-cat').length);
+    ok(tabs === 3 && cats === 2, `N4g: ${w.width}px: and it is still the whole workspace, not a collapsed shell (${cats} categories, ${tabs} pages in the open one — M24B)`);
     await go(ana, '#/transactions');
     await ana.waitForSelector('[data-testid="transactions-screen"]', { timeout: 15000 });
     ok(await ana.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth + 1), `N4h: ${w.width}px: so does the list`);
@@ -533,11 +535,13 @@ const ts = watch(await ctxTs.newPage(), 'trust-safety');
   });
   ok(labels.total >= 1 && labels.unlabelled === 0, `N5: every control on a transaction is labelled (${labels.total} controls)`);
   const tabs = await ana.evaluate(() => {
-    const list = document.querySelector('[data-testid="tx-tabs"]');
+    const nav = document.querySelector('[data-testid="tx-tabs"]');
+    const list = nav?.querySelector('[role="tablist"]');
     const btns = [...(list?.querySelectorAll('[role="tab"]') ?? [])];
-    return { role: list?.getAttribute('role'), tabs: btns.length, selected: btns.filter((b) => b.getAttribute('aria-selected') === 'true').length, labelled: !!list?.getAttribute('aria-label') };
+    const cats = [...(nav?.querySelectorAll('.casenav-cat') ?? [])];
+    return { role: list?.getAttribute('role'), tabs: btns.length, selected: btns.filter((b) => b.getAttribute('aria-selected') === 'true').length, labelled: !!list?.getAttribute('aria-label'), cats: cats.length, current: cats.filter((c) => c.getAttribute('aria-current') === 'true').length, catsLabelled: !!nav?.querySelector('nav[aria-label]') };
   });
-  ok(tabs.role === 'tablist' && tabs.tabs === 6 && tabs.selected === 1 && tabs.labelled, `N5b: the six tabs are a labelled tablist with exactly one selected (${JSON.stringify(tabs)})`);
+  ok(tabs.role === 'tablist' && tabs.tabs === 3 && tabs.selected === 1 && tabs.labelled && tabs.cats === 2 && tabs.current === 1 && tabs.catsLabelled, `N5b: M24B — two labelled categories with exactly one current, and the open category's three pages are a labelled tablist with exactly one selected (${JSON.stringify(tabs)})`);
   const focusable = await ana.evaluate(() => [...document.querySelectorAll('[data-testid="transaction-detail"] button, [data-testid="transaction-detail"] select, [data-testid="transaction-detail"] input')].every((el) => el.tabIndex >= 0));
   ok(focusable, 'N5c: every control is reachable from the keyboard');
 }

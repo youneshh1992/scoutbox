@@ -30,6 +30,7 @@
 //                     player's Opportunities; zero page errors in every context
 
 import { spawn, execSync } from 'node:child_process';
+import { roomTab, playerCategory, playerSub } from './caseNavHelpers.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -287,7 +288,7 @@ ok(await railDone() === 9 && await railCurrent() === 'signed' && /✓\s*Signed/.
 ok(await lead.page.locator('[data-testid="journey-strip"][aria-label]').count() === 1 && await lead.page.locator('.journey-rail li[aria-current="step"]').count() >= 1 && await lead.page.locator('[role="tablist"] [role="tab"][aria-selected="true"]').count() === 1, 'A28a: the strip is a labelled region, the current step carries aria-current, the tabs are ARIA tabs');
 const railText = await lead.page.locator('.journey-rail').innerText();
 ok(/✓/.test(railText) && /Signed/.test(railText), 'A28b: done steps are marked by a glyph and a word, not by colour alone');
-await lead.page.click('[role="tab"]:has-text("Activity")');
+await roomTab(lead.page, 'Timeline'); // M24B — the journey timeline lives under History › Timeline
 await lead.page.locator('[data-testid="journey-timeline"]').waitFor({ timeout: 15000 });
 const tl = await lead.page.locator('[data-testid="journey-timeline"]').innerText();
 ok(/Signing completed/.test(tl) && /Offer accepted/.test(tl) && /Trial completed/.test(tl) && /Contact sent/.test(tl) && /Decision finalized/.test(tl), 'A29: the journey timeline carries the milestones: contact, trial, decision, Offer, signing');
@@ -375,14 +376,14 @@ neg(await waitText(lead.page, /does not exist/i, 15000), 'D3: a foreign or fabri
 // An ended case.
 const wd = await lifecycle(RN, 'withdrawCase', lead.token, { reasonCodes: ['withdrawn'] });
 ok(wd.status === 200, 'D4: Nowak\'s case is withdrawn');
-await openRoom(lead.page, RN, 'activity');
+await openRoom(lead.page, RN, 'timeline');
 ok(await stageOf(lead.page) === 'ended' && await nextCode(lead.page) === 'CASE_ENDED' && await goBtn(lead.page).count() === 0, 'D5: the ended case reads ended with no act');
 ok(/Status changed/.test(await lead.page.locator('[data-testid="journey-timeline"]').innerText()), 'D6: its history is intact on the timeline');
 // Back / forward re-read.
 await openRoom(lead.page, RID, 'signing');
-await lead.page.click('[role="tab"]:has-text("Offer")');
+await roomTab(lead.page, 'Offer');
 await sleep(400);
-ok(/\/offer$/.test(await lead.page.evaluate(() => location.hash)), 'D7: a tab click writes the tab into the link');
+ok(/\/deal\/offer$/.test(await lead.page.evaluate(() => location.hash)), 'D7: a tab click writes the category and the tab into the link (M24B)');
 await lead.page.goBack();
 await sleep(1200);
 const backHash = await lead.page.evaluate(() => location.hash);
@@ -401,7 +402,7 @@ const row = lead.page.locator('.bell-panel .list-row[data-target-kind="room"]').
 ok(await row.count() === 1, 'E1: the club\'s bell has a row with a server-resolved room target');
 await row.locator('button:has-text("Open")').click();
 await sleep(800);
-ok(/#\/recruitment\/rooms\/case-[^/]+\/(offer|signing)/.test(await lead.page.evaluate(() => location.hash)), 'E2: Open lands on the Room\'s Offer or Signing tab');
+ok(/#\/recruitment\/rooms\/case-[^/]+\/deal\/(offer|signing)/.test(await lead.page.evaluate(() => location.hash)), 'E2: Open lands on the Room\'s Deal › Offer or Signing page (M24B — the server\'s flat tab resolved to its category)');
 
 // ================================================================== P — the player
 console.log('\n— P: the player\'s journey line —');
@@ -432,18 +433,18 @@ else { negatives += 1; say('P6: (Nowak\'s demo row is not on the landing; the se
 console.log('\n— G: the agent\'s factual line —');
 const ctxAna = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 const ana = await enterAgent(ctxAna, 'Ana Agent', 'Agent', 'ana');
-await go(ana, `#/clients/${REL}/overview`);
+await go(ana, `#/clients/${REL}/overview/journey`);
 await ana.locator('[data-testid="client-detail"]').waitFor({ timeout: 20000 });
 ok(await waitText(ana, /No club has shared a stage with you/, 15000), 'G1: before the share, Ana\'s journey line says no club shared a stage');
 ok((await j('POST', `/player/offers/${OID}/share-agent`, { share: true, agreementId: REL }, KOLA)).status === 200, 'G2: Kola shares the Offer with Ana');
-await go(ana, '#/home'); await go(ana, `#/clients/${REL}/overview`);
+await go(ana, '#/home'); await go(ana, `#/clients/${REL}/overview/journey`);
 await ana.locator('[data-testid="client-journey-org-eastport"]').waitFor({ timeout: 20000 });
 ok(await ana.locator('[data-testid="client-journey-org-eastport"]').getAttribute('data-stage') === 'signed' && /Eastport/.test(await ana.locator('[data-testid="client-journey"]').innerText()), 'G3: now the line reads Eastport FC: Signed');
 const anaText = await bodyText(ana);
 neg(!anaText.includes(S_DEC) && !anaText.includes(S_ASSESS) && !anaText.includes(S_NOTE) && !/Decision|Assessment|Priority|Shortlist/.test(await ana.locator('[data-testid="client-journey"]').innerText()), 'G4: no decision, assessment, priority or note on her page');
 const ctxBea = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 const bea = await enterAgent(ctxBea, 'Bea Agent', 'Agent', 'bea');
-await go(bea, `#/clients/${REL}/overview`);
+await go(bea, `#/clients/${REL}/overview/journey`);
 neg(await waitText(bea, /not available|not found|not open to you|No such/i, 15000) || (await bea.locator('[data-testid="client-journey"]').count()) === 0, 'G5: Bea (same agency) opens no client and no journey');
 await ctxBea.close();
 // Kola ends the representation.
@@ -451,7 +452,7 @@ const rels = (await j('GET', '/player/agent/relationships', undefined, KOLA)).bo
 const mine = (rels.items ?? rels).find?.((r) => r.id === REL);
 const ended = await j('POST', `/player/agent/relationships/${REL}/terminate`, { reasonCode: 'player_ended', expectedRev: mine?.rev ?? 2 }, KOLA);
 ok(ended.status === 200, 'G6: Kola ends the representation');
-await go(ana, '#/home'); await go(ana, `#/clients/${REL}/overview`);
+await go(ana, '#/home'); await go(ana, `#/clients/${REL}/overview/journey`);
 await sleep(1500);
 neg((await ana.locator('[data-testid="client-journey-org-eastport"]').count()) === 0, 'G7: Ana\'s line no longer shows Eastport\'s stage: authority is re-derived on every read');
 await ctxAna.close();

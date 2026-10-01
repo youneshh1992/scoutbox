@@ -2,6 +2,7 @@
 // artifact HTML) through the new M13 surfaces and fails on any page error.
 // Requires `node serve.mjs` on :8099.
 import { chromium } from 'playwright-core';
+import { playerCategory, playerSub } from './caseNavHelpers.mjs';
 import { ensureDemoHost } from './demoHost.mjs';
 
 // D7 (M22 §74-§76): own the demo host instead of assuming one is up.
@@ -73,7 +74,7 @@ await player.getByRole('tab', { name: 'Clubs' }).click();
 await player.waitForSelector('text=Suitability preferences', { timeout: 20000 });
 await player.waitForSelector('text=NOT an independently verified licence', { timeout: 15000 });
 say('player demo: preferences + representation (honest credential label) render on You');
-await player.click('a[href="/opportunities"]');
+await playerCategory(player, 'board', 'Fit check'); // M24B: Board › Fit check
 await player.waitForSelector('text=Opportunity fit', { timeout: 20000 });
 say('player demo: opportunity fit section renders on Opportunities');
 await player.close();
