@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ThemeToggle, useTheme, type Theme } from '../../design-system/theme';
+import { AuthAccessNote, AuthField, AuthPage, PasswordInput } from '../../design-system/AuthShell';
 import { initials } from '../../design-system/text';
 import { Icon } from './icons';
 import { api, ApiError, DEMO_MODE, revokeSession, type Notification, type Org, type Session } from './api';
@@ -107,62 +108,83 @@ function Login({ onLogin, theme, onToggleTheme }: { onLogin: (s: Session) => voi
   const [password, setPassword] = useState('');
   const [role, setRole] = useState(ROLES[0]);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
     api.listOrgs().then((list) => { setOrgs(list); if (list.length === 1) setSelected(list[0].id); }).catch(() => setError(t('login.unreachable')));
   }, []);
   const enter = async (asName = scoutName, asRole = role) => {
+    if (busy) return;
     if (!selected) return setError(t('login.pickOrg'));
     if (!asName.trim()) return setError(t('login.nameRequired'));
-    try { onLogin(await api.login(selected, asName, asRole, password || undefined)); } catch (e) { setError(e instanceof Error ? e.message : 'Login failed'); }
+    setBusy(true);
+    try { onLogin(await api.login(selected, asName, asRole, password || undefined)); } catch (e) { setError(e instanceof Error ? e.message : 'Login failed'); } finally { setBusy(false); }
   };
+  // M24C — invitation-only: an agency's administrator adds its members, so
+  // there is no public sign-up control here, only the access note.
   return (
-    <div className="login">
-      <div className="login-toolbar"><ThemeToggle theme={theme} onToggle={onToggleTheme} labels={{ aria: t('theme.aria'), light: t('theme.light'), dark: t('theme.dark') }} /></div>
-      <div style={{ textAlign: 'center' }}>
-        <h1><span className="wordmark">ScoutBox</span><span className="brand-sub">Agent</span></h1>
-        <div className="tagline">{t('login.tagline')}</div>
-        {DEMO_MODE && <div className="pill blue" style={{ marginTop: 10 }}>{t('login.demo')}</div>}
-      </div>
-      <div className="org-grid">
-        {orgs.map((o) => (
-          <button key={o.id} className={`org-card ${selected === o.id ? 'selected' : ''}`} onClick={() => setSelected(o.id)}>
-            <span className="org-name">{o.name}</span>
-            <span><span className="pill red">{o.type}</span> <span className="pill">{o.plan}</span></span>
-          </button>
-        ))}
-      </div>
-      {DEMO_MODE && demoIdentities.length > 0 && (
-        // The demo's roster, offered rather than guessed. A name that is not on
-        // it is refused AGENCY_MEMBERSHIP_REQUIRED — correctly, because only an
-        // administrator adds a member — and in a demo there is no administrator
-        // to ask, so an unlisted name used to be a dead end.
-        <div className="demo-identities" data-testid="demo-identities">
-          <p className="tagline" style={{ maxWidth: 560, textAlign: 'center', fontSize: 12.5, margin: '0 0 10px' }}>{t('login.demoWho')}</p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
-            {demoIdentities.map((d) => (
-              <button
-                key={d.name}
-                className="secondary"
-                data-testid={`demo-as-${d.tier}`}
-                onClick={() => { setScoutName(d.name); setRole(d.role); void enter(d.name, d.role); }}
-                title={t('login.demoAs').replace('{name}', d.name)}
-              >
-                {d.name} <span className="pill">{d.tier.replace(/_/g, ' ')}</span>
+    <AuthPage
+      app="agent"
+      product="Agent"
+      heading="Represent players. Manage opportunities."
+      points={[
+        'Client-confirmed relationships — nothing is active until the player confirms.',
+        'Shared journeys, Offers and signings, each refused on its own terms.',
+        'Transaction workspaces with parties, compliance and documents.',
+      ]}
+      toolbar={<ThemeToggle theme={theme} onToggle={onToggleTheme} labels={{ aria: t('theme.aria'), light: t('theme.light'), dark: t('theme.dark') }} />}
+      aside={DEMO_MODE ? <div className="pill blue">{t('login.demo')}</div> : undefined}
+    >
+      <form className="auth-signin" onSubmit={(e) => { e.preventDefault(); void enter(); }} aria-label="Sign in" noValidate>
+        <div className="auth-field" role="group" aria-labelledby="agent-org-label">
+          <span className="auth-label" id="agent-org-label">Agency</span>
+          <div className="org-grid">
+            {orgs.map((o) => (
+              <button type="button" key={o.id} className={`org-card ${selected === o.id ? 'selected' : ''}`} aria-pressed={selected === o.id} onClick={() => setSelected(o.id)}>
+                <span className="org-name">{o.name}</span>
+                <span><span className="pill red">{o.type}</span> <span className="pill">{o.plan}</span></span>
               </button>
             ))}
           </div>
         </div>
-      )}
-      <div className="enter-row">
-        <input placeholder={t('login.name')} value={scoutName} onChange={(e) => setScoutName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && enter()} aria-label={t('login.name')} />
-        <input type="password" placeholder={t('login.password')} value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && enter()} className="login-pw" aria-label={t('login.password')} />
-        <select value={role} onChange={(e) => setRole(e.target.value)} aria-label="Role">{ROLES.map((r) => <option key={r}>{r}</option>)}</select>
-        <button className="primary" onClick={() => void enter()}>{t('login.enter')}</button>
-      </div>
-      <div className="tagline" style={{ maxWidth: 560, textAlign: 'center', fontSize: 12.5 }}>{t('login.roleNote')}</div>
-      {error && <div className="notice block">{error}</div>}
-      <div className="login-signature" data-testid="login-signature">Built by <span>Guni &amp; Younes</span></div>
-    </div>
+        {DEMO_MODE && demoIdentities.length > 0 && (
+          // The demo's roster, offered rather than guessed. A name that is not on
+          // it is refused AGENCY_MEMBERSHIP_REQUIRED — correctly, because only an
+          // administrator adds a member — and in a demo there is no administrator
+          // to ask, so an unlisted name used to be a dead end.
+          <div className="demo-identities" data-testid="demo-identities">
+            <p className="tagline" style={{ maxWidth: 560, textAlign: 'center', fontSize: 12.5, margin: '0 0 10px' }}>{t('login.demoWho')}</p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {demoIdentities.map((d) => (
+                <button
+                  type="button"
+                  key={d.name}
+                  className="secondary"
+                  data-testid={`demo-as-${d.tier}`}
+                  onClick={() => { setScoutName(d.name); setRole(d.role); void enter(d.name, d.role); }}
+                  title={t('login.demoAs').replace('{name}', d.name)}
+                >
+                  {d.name} <span className="pill">{d.tier.replace(/_/g, ' ')}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="enter-row">
+          <AuthField label={t('login.name')}>
+            <input placeholder={t('login.name')} value={scoutName} onChange={(e) => setScoutName(e.target.value)} aria-label={t('login.name')} autoComplete="name" />
+          </AuthField>
+          <AuthField label={t('login.password')}>
+            <PasswordInput placeholder={t('login.password')} value={password} onChange={(e) => setPassword(e.target.value)} className="login-pw" aria-label={t('login.password')} autoComplete="current-password" />
+          </AuthField>
+          <AuthField label="Role" hint={t('login.roleNote')}>
+            <select value={role} onChange={(e) => setRole(e.target.value)} aria-label="Role">{ROLES.map((r) => <option key={r}>{r}</option>)}</select>
+          </AuthField>
+          <button type="submit" className="primary" disabled={busy} aria-busy={busy}>{busy ? '…' : t('login.enter')}</button>
+        </div>
+      </form>
+      {error && <div className="notice block" role="alert">{error}</div>}
+      <AuthAccessNote>Agency access is granted by your agency’s administrator. There is no public sign-up.</AuthAccessNote>
+    </AuthPage>
   );
 }
 

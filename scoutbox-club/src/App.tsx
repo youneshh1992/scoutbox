@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ThemeToggle, useTheme, type Theme } from '../../design-system/theme';
+import { AuthAccessNote, AuthField, AuthPage, PasswordInput } from '../../design-system/AuthShell';
 import { initials } from '../../design-system/text';
 import { Icon } from './icons';
 import { api, ApiError, DEMO_MODE, revokeSession, type Channel, type Notification, type Org, type Session } from './api';
@@ -176,67 +177,89 @@ function Login({ onLogin, theme, onToggleTheme }: { onLogin: (s: Session) => voi
   const [password, setPassword] = useState('');
   const [role, setRole] = useState(ROLES[0]);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api.listOrgs().then(setOrgs).catch(() => setError('Cannot reach scoutbox-server on localhost:4000 — start it first.'));
   }, []);
 
+  // M24C — one submission at a time; a refusal keeps the name, organisation
+  // and role so only the password needs retyping.
   const enter = async () => {
+    if (busy) return;
     if (!selected) return setError('Pick an organisation.');
     if (!scoutName.trim()) return setError('Enter your name — every session is attributed to a named individual.');
+    setBusy(true);
     try {
       onLogin(await api.login(selected, scoutName, role, password || undefined));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Login failed');
-    }
+    } finally { setBusy(false); }
   };
 
   return (
-    <div className="login">
-      <div className="login-toolbar"><ThemeToggle theme={theme} onToggle={onToggleTheme} labels={{ aria: t('theme.aria'), light: t('theme.light'), dark: t('theme.dark') }} /></div>
-      <div style={{ textAlign: 'center' }}>
-        <h1><span className="wordmark">ScoutBox</span><span className="brand-sub">Pro</span></h1>
-        <div className="tagline">The recruitment OS. Every action attributed. No unsolicited contact.</div>
-        {DEMO_MODE && <div className="pill blue" style={{ marginTop: 10 }}>Self-contained demo — no server needed</div>}
-      </div>
-      <div className="org-grid">
-        {orgs.map((o) => (
-          <button key={o.id} className={`org-card ${selected === o.id ? 'selected' : ''}`} onClick={() => setSelected(o.id)}>
-            <span className="org-name">{o.name}</span>
-            <span>
-              <span className={`pill ${o.type === 'agency' ? 'red' : 'blue'}`}>{o.type}</span>{' '}
-              <span className="pill">{o.plan}</span>{' '}
-              {o.trustedPartner && <span className="pill gold">Trusted Partner</span>}{' '}
-              {o.type === 'club' && (o.verified
-                ? <span className="pill green">Verified</span>
-                : <span className="pill">verification pending</span>)}
-            </span>
-          </button>
-        ))}
-      </div>
-      <div className="enter-row">
-        <input
-          placeholder="Your name (scout / coach / agent)"
-          value={scoutName}
-          onChange={(e) => setScoutName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && enter()}
-        />
-        <input
-          type="password"
-          placeholder="Club password (if provisioned)"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && enter()}
-          className="login-pw"
-        />
-        <select value={role} onChange={(e) => setRole(e.target.value)}>
-          {ROLES.map((r) => <option key={r}>{r}</option>)}
-        </select>
-        <button className="primary" onClick={enter}>Enter workspace</button>
-      </div>
-      {error && <div className="notice block">{error}</div>}
-      <div className="login-signature" data-testid="login-signature">Built by <span>Guni &amp; Younes</span></div>
-    </div>
+    <AuthPage
+      app="pro"
+      product="Pro"
+      heading="A clearer view of your next signing."
+      points={[
+        'Recruitment Rooms: evidence, assessments and one attributed decision per case.',
+        'Contact, trials, Offers and signings on one canonical journey.',
+        'No unsolicited contact — every approach is a request the player answers.',
+      ]}
+      toolbar={<ThemeToggle theme={theme} onToggle={onToggleTheme} labels={{ aria: t('theme.aria'), light: t('theme.light'), dark: t('theme.dark') }} />}
+      aside={DEMO_MODE ? <div className="pill blue">Self-contained demo — no server needed</div> : undefined}
+    >
+      <form className="auth-signin" onSubmit={(e) => { e.preventDefault(); void enter(); }} aria-label="Sign in" noValidate>
+        <div className="auth-field" role="group" aria-labelledby="pro-org-label">
+          <span className="auth-label" id="pro-org-label">Organisation</span>
+          <div className="org-grid">
+            {orgs.map((o) => (
+              <button type="button" key={o.id} className={`org-card ${selected === o.id ? 'selected' : ''}`} aria-pressed={selected === o.id} onClick={() => setSelected(o.id)}>
+                <span className="org-name">{o.name}</span>
+                <span>
+                  <span className={`pill ${o.type === 'agency' ? 'red' : 'blue'}`}>{o.type}</span>{' '}
+                  <span className="pill">{o.plan}</span>{' '}
+                  {o.trustedPartner && <span className="pill gold">Trusted Partner</span>}{' '}
+                  {o.type === 'club' && (o.verified
+                    ? <span className="pill green">Verified</span>
+                    : <span className="pill">verification pending</span>)}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="enter-row">
+          <AuthField label="Your name">
+            <input
+              placeholder="Your name (scout / coach / agent)"
+              value={scoutName}
+              onChange={(e) => setScoutName(e.target.value)}
+              autoComplete="name"
+              aria-label="Your name"
+            />
+          </AuthField>
+          <AuthField label="Club password" hint="Only if your organisation was provisioned with one.">
+            <PasswordInput
+              placeholder="Club password (if provisioned)"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="login-pw"
+              autoComplete="current-password"
+              aria-label="Club password"
+            />
+          </AuthField>
+          <AuthField label="Role">
+            <select value={role} onChange={(e) => setRole(e.target.value)} aria-label="Role">
+              {ROLES.map((r) => <option key={r}>{r}</option>)}
+            </select>
+          </AuthField>
+          <button type="submit" className="primary" disabled={busy} aria-busy={busy}>{busy ? 'Entering…' : 'Enter workspace'}</button>
+        </div>
+      </form>
+      {error && <div className="notice block" role="alert">{error}</div>}
+      <AuthAccessNote>Club access is provisioned by ScoutBox for your organisation. There is no public sign-up.</AuthAccessNote>
+    </AuthPage>
   );
 }
 

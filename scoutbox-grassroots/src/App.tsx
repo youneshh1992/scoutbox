@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ThemeToggle, useTheme, type Theme } from '../../design-system/theme';
+import { AuthField, AuthPage, AuthTabs, PasswordInput } from '../../design-system/AuthShell';
 import { initials } from '../../design-system/text';
 import { Icon } from './icons';
 import { api, ApiError, DEMO_MODE, revokeSession, type Channel, type Notification, type Org, type Session } from './api';
@@ -173,6 +174,8 @@ function Login({ onLogin, theme, onToggleTheme }: { onLogin: (s: Session) => voi
   const [password, setPassword] = useState('');
   const [role, setRole] = useState(ROLES[0]);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState<'signin' | 'register'>('signin');
   const [reg, setReg] = useState({ name: '', federation: '', registrationId: '', city: '', lat: '', lng: '', scoutName: '' });
 
   useEffect(() => {
@@ -180,92 +183,118 @@ function Login({ onLogin, theme, onToggleTheme }: { onLogin: (s: Session) => voi
   }, []);
 
   const enter = async () => {
+    if (busy) return;
     if (!selected) return setError('Pick an organisation.');
     if (!scoutName.trim()) return setError('Enter your name — every session is attributed to a named individual.');
+    setBusy(true);
     try {
       onLogin(await api.login(selected, scoutName, role, password || undefined));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Login failed');
-    }
+    } finally { setBusy(false); }
   };
 
+  const register = async () => {
+    if (busy) return;
+    setError(null);
+    setBusy(true);
+    try {
+      onLogin(await api.registerGrassroots({
+        name: reg.name.trim(), federation: reg.federation.trim(), registrationId: reg.registrationId.trim(),
+        city: reg.city.trim(), lat: Number(reg.lat), lng: Number(reg.lng), scoutName: reg.scoutName.trim(), role: 'Manager',
+      }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Registration failed');
+    } finally { setBusy(false); }
+  };
+
+  // M24C — Grassroots is the one portal with a real public registration
+  // (/auth/org/register-grassroots), so it carries both controls.
   return (
-    <div className="login">
-      <div className="login-toolbar"><ThemeToggle theme={theme} onToggle={onToggleTheme} labels={{ aria: t('theme.aria'), light: t('theme.light'), dark: t('theme.dark') }} /></div>
-      <div style={{ textAlign: 'center' }}>
-        <h1><span className="wordmark">ScoutBox</span><span className="brand-sub">Grassroots</span></h1>
-        <div className="tagline">Local football only: federation-registered grassroots clubs scouting within 50km of their ground. Every action attributed. No unsolicited contact.</div>
-        {DEMO_MODE && <div className="pill blue" style={{ marginTop: 10 }}>Self-contained demo — no server needed</div>}
-      </div>
-      <div className="org-grid">
-        {orgs.map((o) => (
-          <button key={o.id} className={`org-card ${selected === o.id ? 'selected' : ''}`} onClick={() => setSelected(o.id)}>
-            <span className="org-name">{o.name}</span>
-            <span>
-              <span className={`pill ${o.type === 'agency' ? 'red' : 'blue'}`}>{o.type}</span>{' '}
-              <span className="pill">{o.plan}</span>{' '}
-              {o.trustedPartner && <span className="pill gold">Trusted Partner</span>}{' '}
-              {o.type === 'club' && (o.verified
-                ? <span className="pill green">Verified</span>
-                : <span className="pill">verification pending</span>)}
-            </span>
-          </button>
-        ))}
-      </div>
-      <div className="enter-row">
-        <input
-          placeholder="Your name (manager / coach / volunteer)"
-          value={scoutName}
-          onChange={(e) => setScoutName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && enter()}
-        />
-        <input
-          type="password"
-          placeholder="Club password (if provisioned)"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && enter()}
-          className="login-pw"
-        />
-        <select value={role} onChange={(e) => setRole(e.target.value)}>
-          {ROLES.map((r) => <option key={r}>{r}</option>)}
-        </select>
-        <button className="primary" onClick={enter}>Enter workspace</button>
-      </div>
-      {error && <div className="notice block">{error}</div>}
-      <div className="register-box">
-        <h3>Register your club</h3>
-        <p className="dim" style={{ margin: '4px 0 10px', fontSize: 13 }}>
-          ScoutBox Grassroots is for federation-registered semi-pro and amateur clubs only. Scouting is
-          limited to players within 50km of your ground; adults are visible immediately, under-18s only
-          after verification and the safeguarding contract.
-        </p>
-        <div className="reg-grid">
-          <input placeholder="Club name" value={reg.name} onChange={(e) => setReg({ ...reg, name: e.target.value })} />
-          <input placeholder="Federation (e.g. The FA — England)" value={reg.federation} onChange={(e) => setReg({ ...reg, federation: e.target.value })} />
-          <input placeholder="Federation registration id" value={reg.registrationId} onChange={(e) => setReg({ ...reg, registrationId: e.target.value })} />
-          <input placeholder="Town / city" value={reg.city} onChange={(e) => setReg({ ...reg, city: e.target.value })} />
-          <input placeholder="Ground latitude (e.g. 51.55)" value={reg.lat} onChange={(e) => setReg({ ...reg, lat: e.target.value })} />
-          <input placeholder="Ground longitude (e.g. -0.02)" value={reg.lng} onChange={(e) => setReg({ ...reg, lng: e.target.value })} />
-          <input placeholder="Your name" value={reg.scoutName} onChange={(e) => setReg({ ...reg, scoutName: e.target.value })} />
-          <button
-            className="primary"
-            onClick={async () => {
-              setError(null);
-              try {
-                onLogin(await api.registerGrassroots({
-                  name: reg.name.trim(), federation: reg.federation.trim(), registrationId: reg.registrationId.trim(),
-                  city: reg.city.trim(), lat: Number(reg.lat), lng: Number(reg.lng), scoutName: reg.scoutName.trim(), role: 'Manager',
-                }));
-              } catch (e) {
-                setError(e instanceof Error ? e.message : 'Registration failed');
-              }
-            }}
-          >Register club</button>
-        </div>
-      </div>
-      <div className="login-signature" data-testid="login-signature">Built by <span>Guni &amp; Younes</span></div>
-    </div>
+    <AuthPage
+      app="grass"
+      product="Grassroots"
+      heading="Your club. Your community. Your next player."
+      points={[
+        'Federation-registered grassroots clubs scouting within 50 km of their ground.',
+        'Adults are visible at once; under-18s only after verification and the safeguarding contract.',
+        'Every action attributed to a named person. No unsolicited contact.',
+      ]}
+      toolbar={<ThemeToggle theme={theme} onToggle={onToggleTheme} labels={{ aria: t('theme.aria'), light: t('theme.light'), dark: t('theme.dark') }} />}
+      aside={DEMO_MODE ? <div className="pill blue">Self-contained demo — no server needed</div> : undefined}
+    >
+      <AuthTabs tabs={[{ id: 'signin', label: 'Sign in' }, { id: 'register', label: 'Register club' }] as const} value={mode} onChange={(m) => { setError(null); setMode(m); }} label="Sign in or register your club" />
+      {mode === 'signin' && (
+        <form className="auth-signin" onSubmit={(e) => { e.preventDefault(); void enter(); }} aria-label="Sign in" noValidate>
+          <div className="auth-field" role="group" aria-labelledby="grass-org-label">
+            <span className="auth-label" id="grass-org-label">Club</span>
+            <div className="org-grid">
+              {orgs.map((o) => (
+                <button type="button" key={o.id} className={`org-card ${selected === o.id ? 'selected' : ''}`} aria-pressed={selected === o.id} onClick={() => setSelected(o.id)}>
+                  <span className="org-name">{o.name}</span>
+                  <span>
+                    <span className={`pill ${o.type === 'agency' ? 'red' : 'blue'}`}>{o.type}</span>{' '}
+                    <span className="pill">{o.plan}</span>{' '}
+                    {o.trustedPartner && <span className="pill gold">Trusted Partner</span>}{' '}
+                    {o.type === 'club' && (o.verified
+                      ? <span className="pill green">Verified</span>
+                      : <span className="pill">verification pending</span>)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="enter-row">
+            <AuthField label="Your name">
+              <input
+                placeholder="Your name (manager / coach / volunteer)"
+                value={scoutName}
+                onChange={(e) => setScoutName(e.target.value)}
+                autoComplete="name"
+                aria-label="Your name"
+              />
+            </AuthField>
+            <AuthField label="Club password" hint="Only if your club was provisioned with one.">
+              <PasswordInput
+                placeholder="Club password (if provisioned)"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="login-pw"
+                autoComplete="current-password"
+                aria-label="Club password"
+              />
+            </AuthField>
+            <AuthField label="Role">
+              <select value={role} onChange={(e) => setRole(e.target.value)} aria-label="Role">
+                {ROLES.map((r) => <option key={r}>{r}</option>)}
+              </select>
+            </AuthField>
+            <button type="submit" className="primary" disabled={busy} aria-busy={busy}>{busy ? 'Entering…' : 'Enter workspace'}</button>
+          </div>
+        </form>
+      )}
+      {mode === 'register' && (
+        <form className="register-box" onSubmit={(e) => { e.preventDefault(); void register(); }} aria-label="Register your club" noValidate>
+          <h3>Register your club</h3>
+          <p className="dim" style={{ margin: '4px 0 10px', fontSize: 13 }}>
+            ScoutBox Grassroots is for federation-registered semi-pro and amateur clubs only. Scouting is
+            limited to players within 50km of your ground; adults are visible immediately, under-18s only
+            after verification and the safeguarding contract.
+          </p>
+          <div className="reg-grid">
+            <AuthField label="Club name"><input placeholder="Club name" value={reg.name} onChange={(e) => setReg({ ...reg, name: e.target.value })} autoComplete="organization" /></AuthField>
+            <AuthField label="Federation"><input placeholder="Federation (e.g. The FA — England)" value={reg.federation} onChange={(e) => setReg({ ...reg, federation: e.target.value })} /></AuthField>
+            <AuthField label="Federation registration id"><input placeholder="Federation registration id" value={reg.registrationId} onChange={(e) => setReg({ ...reg, registrationId: e.target.value })} /></AuthField>
+            <AuthField label="Town / city"><input placeholder="Town / city" value={reg.city} onChange={(e) => setReg({ ...reg, city: e.target.value })} autoComplete="address-level2" /></AuthField>
+            <AuthField label="Ground latitude"><input placeholder="Ground latitude (e.g. 51.55)" value={reg.lat} onChange={(e) => setReg({ ...reg, lat: e.target.value })} inputMode="decimal" /></AuthField>
+            <AuthField label="Ground longitude"><input placeholder="Ground longitude (e.g. -0.02)" value={reg.lng} onChange={(e) => setReg({ ...reg, lng: e.target.value })} inputMode="decimal" /></AuthField>
+            <AuthField label="Your name"><input placeholder="Your name" value={reg.scoutName} onChange={(e) => setReg({ ...reg, scoutName: e.target.value })} autoComplete="name" /></AuthField>
+            <button type="submit" className="primary" disabled={busy} aria-busy={busy}>{busy ? 'Registering…' : 'Register club'}</button>
+          </div>
+        </form>
+      )}
+      {error && <div className="notice block" role="alert">{error}</div>}
+    </AuthPage>
   );
 }
 

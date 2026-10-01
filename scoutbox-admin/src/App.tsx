@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { ThemeToggle, useTheme } from '../../design-system/theme';
+import { AuthAccessNote, AuthField, AuthPage, PasswordInput } from '../../design-system/AuthShell';
 import { Icon } from '../../design-system/icons';
 import { M12Panel, M12_TABS, type M12Tab } from './m12tabs';
 import { M13Panel, M13_TABS, type M13Tab } from './m13tabs';
@@ -239,20 +240,31 @@ export default function App() {
   };
 
   if (!entered) {
+    // M24C — staff only: the admin key is the credential, there is no
+    // registration of any kind, and that is said on the surface.
     return (
-      <div className="login">
-        <div className="login-toolbar"><ThemeToggle theme={theme} onToggle={toggleTheme} labels={THEME_LABELS} /></div>
-        <div style={{ textAlign: 'center' }}>
-          <h1><span className="wordmark">ScoutBox</span><span className="brand-sub">Trust &amp; Safety</span></h1>
-          <div className="tagline">Staff console — report review, verification, audit.</div>
-        </div>
-        <div className="enter-row">
-          <input type="password" placeholder="Admin key" value={key} onChange={(e) => setKey(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && setEntered(true)} />
-          <button className="primary" onClick={() => setEntered(true)}>Enter</button>
-        </div>
-        {error && <div className="notice block">{error}</div>}
-        <div className="login-signature" data-testid="login-signature">Built by <span>Guni &amp; Younes</span></div>
-      </div>
+      <AuthPage
+        app="safety"
+        product="Trust & Safety"
+        heading="Protect the people behind the game."
+        points={[
+          'Report review with an attributed outcome the reporter reads.',
+          'Club verification, guardian ID checks and safeguarding records.',
+          'Moderation and the append-only audit of every action.',
+        ]}
+        toolbar={<ThemeToggle theme={theme} onToggle={toggleTheme} labels={THEME_LABELS} />}
+      >
+        <form className="auth-signin" onSubmit={(e) => { e.preventDefault(); if (key) setEntered(true); }} aria-label="Sign in" noValidate>
+          <div className="enter-row">
+            <AuthField label="Admin key">
+              <PasswordInput placeholder="Admin key" value={key} onChange={(e) => setKey(e.target.value)} autoComplete="current-password" aria-label="Admin key" />
+            </AuthField>
+            <button type="submit" className="primary" disabled={!key}>Enter</button>
+          </div>
+        </form>
+        {error && <div className="notice block" role="alert">{error}</div>}
+        <AuthAccessNote>Staff access is issued by ScoutBox. There is no registration.</AuthAccessNote>
+      </AuthPage>
     );
   }
 
