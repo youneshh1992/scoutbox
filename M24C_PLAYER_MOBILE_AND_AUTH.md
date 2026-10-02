@@ -110,9 +110,11 @@ most 1000 px (introduction ≈45 %, form ≈55 %, 14 px radius, soft shadow,
 44 px padding, form content 360 px wide), the product identity beside the
 wordmark, `AuthTabs` only where sign-up exists, `AuthField` labelled
 underlined inputs, `PasswordInput` with show / hide, and the compact rounded
-submit. Under 720 px the panels stack. The theme toggle stays on the page (its stored choice is restored in
-the workspace after sign-in); the entry surface itself keeps its brand
-colours in both states. Nothing here touches the signed-in theme tokens.
+submit. Under 720 px the panels stack. The entry surface keeps its brand
+colours whatever theme is saved. (M24E: the theme toggle that used to sit on
+the entry page is gone — the entry screens have one fixed appearance, see
+`M24E_AUTH_SINGLE_MODE.md`; the stored choice is still restored in the
+workspace after sign-in.) Nothing here touches the signed-in theme tokens.
 
 | App | Identity | Flows shown | Credentials (unchanged backend) |
 |---|---|---|---|

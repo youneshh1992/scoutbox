@@ -260,13 +260,14 @@ export default function You() {
 
             {actor && !isMinor ? <InviteCodeSection actor={actor} /> : null}
 
-            <Button
-              label="Log out"
-              onPress={() => {
-                logout();
-                router.replace('/onboarding');
-              }}
-            />
+            {/* M24E — the way out. Sign out ends this identity's session on the
+                server and on the device and returns to the entry screen; Switch
+                account does the same and opens the entry screen on Sign in, so the
+                next person signs in as themselves — no identity carries over. */}
+            <View style={{ gap: 8, marginTop: 8 }}>
+              <Button label="Sign out" testID="sign-out" onPress={() => { logout(); router.replace('/onboarding'); }} />
+              <Button label="Switch account" testID="switch-account" onPress={() => { logout(); router.replace('/onboarding?mode=signin'); }} />
+            </View>
           </>
         )}
 

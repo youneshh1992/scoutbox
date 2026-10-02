@@ -10,7 +10,9 @@
 @import './tokens.css';
 
 * { box-sizing: border-box; margin: 0; }
-html { font-family: var(--sb-font); }
+html { font-family: var(--sb-font); font-optical-sizing: auto; }
+/* M24E — the wordmark is the one piece of text not in Inter (the established brand mark). */
+.wordmark { font-family: var(--sb-font-brand); }
 body { background: var(--sb-paper); color: var(--sb-ink); overflow: hidden; font-family: var(--sb-font); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
 #root { height: 100vh; }
 h1, h2, h3, h4, p { margin: 0; }
@@ -94,6 +96,21 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px
   background: var(--sb-surface); border-right: 1px solid var(--sb-rule);
   display: flex; flex-direction: column; gap: 2px; padding: 22px 12px 16px;
   min-height: 0; overflow-y: auto; scrollbar-width: thin;
+}
+/* M24E — the navigation region scrolls on its own when it outgrows the
+   viewport; the wordmark above and the account block (Sign out, Switch
+   organisation) below stay reachable. On a very short viewport the sidebar
+   itself still scrolls as a last resort. */
+.nav-scroll { flex: 1 1 auto; min-height: 140px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; display: flex; flex-direction: column; gap: 2px; margin: 0 -4px; padding: 0 4px; }
+/* A landscape phone (≤ 420px tall): tighter sidebar so the wordmark, the
+   organisation, a few sections and the exits all fit without scrolling the
+   sidebar itself. */
+@media (max-height: 420px) {
+  .sidebar { padding: 14px 12px 10px; }
+  .sidebar .brand { padding-bottom: 10px; }
+  .p-org { margin-bottom: 10px; }
+  .nav-scroll { min-height: 96px; }
+  .p-account { margin-top: 6px; padding-top: 10px; gap: 8px; }
 }
 :root[data-theme="dark"] .sidebar { border-right-color: #303334; box-shadow: 1px 0 0 #ffffff05; }
 :root[data-app="agent"]:not([data-theme="dark"]) .sidebar { box-shadow: inset -1px 0 0 #fff7; }
@@ -181,6 +198,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px
 .p-account .p-links { display: flex; flex-direction: column; gap: 4px; }
 .p-account .p-links button, .p-account .p-links label { padding: 4px 6px; min-height: 28px; font-size: 11.5px; color: var(--sb-quiet); width: auto; display: inline-flex; align-items: center; gap: 6px; }
 .p-account .p-links select { font-size: 11.5px; padding: 3px 6px; min-height: 26px; }
+.p-account .p-links button[data-exit] { color: var(--sb-quiet); }
+.p-account .p-links button[data-exit="sign-out"] { color: var(--sb-urgent-ink, var(--sb-ink)); }
 .whoami { display: contents; }
 .org-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
 .org-chips .pill { font-size: 10.5px; padding: 1px 7px; }
@@ -327,8 +346,8 @@ td small { display: block; font-size: 11px; color: var(--sb-quiet); margin-top: 
 .drawer .head .sub { color: var(--sb-quiet); margin-top: 4px; }
 .drawer .close { margin-left: auto; }
 .drawer .actions { display: flex; gap: 10px; margin: 14px 0 22px; flex-wrap: wrap; }
-.bell-panel { position: absolute; right: 24px; top: calc(var(--sb-topbar-h) - 6px); width: 380px; max-height: 420px; overflow-y: auto; background: var(--sb-white); border: 1px solid var(--sb-panel-border); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 6px; z-index: 60; box-shadow: var(--sb-shadow-pop); }
-.thread { display: flex; flex-direction: column; gap: 8px; max-height: 420px; overflow-y: auto; padding: 12px; border-radius: 12px; }
+.bell-panel { position: absolute; right: 24px; top: calc(var(--sb-topbar-h) - 6px); width: min(380px, calc(100vw - 32px)); max-height: min(420px, calc(100vh - var(--sb-topbar-h) - 12px)); overflow-y: auto; background: var(--sb-white); border: 1px solid var(--sb-panel-border); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 6px; z-index: 60; box-shadow: var(--sb-shadow-pop); }
+.thread { display: flex; flex-direction: column; gap: 8px; max-height: min(420px, 60vh); overflow-y: auto; padding: 12px; border-radius: 12px; }
 .bubble { max-width: 72%; border-radius: 12px 12px 12px 2px; padding: 10px 14px; font-size: 13px; line-height: 1.6; background: var(--sb-paper); border: 1px solid var(--sb-rule); }
 .bubble.mine { align-self: flex-end; background: var(--sb-mine); border: 0; border-radius: 12px 12px 2px 12px; }
 .bubble.theirs { align-self: flex-start; }
@@ -391,12 +410,12 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .subnav-menu-item:hover, .subnav-menu-item:focus-visible { background: var(--sb-wash); color: var(--sb-ink); filter: none; }
 .subnav-menu-item.active { color: var(--sb-ink); font-weight: 600; box-shadow: inset 3px 0 0 var(--sb-green); }
 
-.palette-veil { position: fixed; inset: 0; background: var(--sb-veil); z-index: 90; display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh; }
+.palette-veil { position: fixed; inset: 0; background: var(--sb-veil); z-index: 90; display: flex; align-items: flex-start; justify-content: center; padding-top: min(12vh, 48px); overflow-y: auto; }
 .palette { width: min(560px, 92vw); background: var(--sb-white); border: 1px solid var(--sb-panel-border); border-radius: 12px; overflow: hidden; box-shadow: var(--sb-shadow-pop); }
 .palette-input-row { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--sb-rule); color: var(--sb-quiet); }
 .palette-input-row input { flex: 1; background: none; border: none; color: var(--sb-ink); font-size: 15px; padding: 0; box-shadow: none; }
 .palette-input-row input:focus { outline: none; border: none; }
-.palette-results { max-height: 320px; overflow-y: auto; padding: 6px; }
+.palette-results { max-height: min(320px, calc(100vh - 160px)); overflow-y: auto; padding: 6px; }
 .palette-row { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; }
 .palette-row.selected { background: var(--sb-nav-active-bg); color: var(--sb-nav-active-fg); }
 .palette-path .dim { color: var(--sb-quiet); }
@@ -542,13 +561,16 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
   --auth-line: rgba(207, 223, 208, 0.35); --auth-line-strong: rgba(207, 223, 208, 0.6); --auth-focus: var(--auth-green);
   --auth-pitch: rgba(255, 255, 255, 0.08); --auth-grain: rgba(255, 255, 255, 0.016); --auth-band: rgba(255, 255, 255, 0.012);
   --auth-card-edge: rgba(255, 255, 255, 0.1); --auth-submit: var(--auth-green); --auth-submit-ink: var(--auth-deep);
-  position: relative; isolation: isolate; overflow-x: hidden;
+  position: relative; isolation: isolate; overflow-x: hidden; color-scheme: dark;
   background-color: var(--auth-dark);
   background-image:
     repeating-linear-gradient(103deg, transparent 0 3px, var(--auth-grain) 3px 4px, transparent 4px 9px),
     repeating-linear-gradient(90deg, transparent 0 140px, var(--auth-band) 140px 280px);
-  color: var(--auth-ink); min-height: 100vh; padding: 56px 20px 32px; gap: 0; justify-content: center; align-items: center;
+  color: var(--auth-ink); height: 100vh; height: 100dvh; overflow-y: auto; padding: 32px 20px; gap: 0; justify-content: flex-start; align-items: center;
 }
+/* M24E — the card centres by auto margins, so a short viewport scrolls the
+   page from the top instead of clipping the first row behind the top edge. */
+.auth-card { margin: auto 0; flex-shrink: 0; }
 /* the pitch: boundary, halfway line, centre circle and spot (::before); one penalty area (::after) */
 .login.auth-page::before {
   content: ''; position: absolute; pointer-events: none; z-index: -1; left: 50%; top: 50%; width: 1640px; height: 1060px; transform: translate(-50%, -50%);
@@ -653,34 +675,30 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
     repeating-linear-gradient(97deg, transparent 0 5px, rgba(17, 56, 34, 0.05) 5px 6px, transparent 6px 13px),
     repeating-linear-gradient(90deg, transparent 0 56px, rgba(17, 56, 34, 0.06) 56px 112px);
 }
-/* Agent: the two background colours of the Agent application itself — the
-   sidebar surface for the introduction, the workspace for the form and the
-   page — so the entry screen follows the saved cream / dark appearance. */
+/* Agent: ONE fixed appearance — the Agent application's dark personality
+   (#121415 sidebar surface for the introduction, #202223 workspace for the
+   form, cream ink, the gold label) — whatever appearance the person saved
+   inside the workspace. M24E: no token here follows data-theme. */
 :root[data-app="agent"] .login.auth-page {
-  --auth-promo: var(--sb-surface); --auth-panel: var(--sb-paper); --auth-dark: var(--sb-paper);
-  --auth-ink: var(--sb-ink); --auth-soft: var(--sb-quiet); --auth-promo-ink: var(--sb-ink);
-  --auth-line: var(--sb-input-border, var(--sb-rule)); --auth-line-strong: var(--sb-quiet); --auth-card-edge: var(--sb-rule);
-  --auth-pale: var(--sb-white); --auth-deep: var(--sb-ink); --auth-submit: var(--sb-green); --auth-submit-ink: var(--sb-green-ink);
-  --auth-pitch: rgba(48, 45, 37, 0.1); --auth-grain: rgba(48, 45, 37, 0.02); --auth-band: rgba(48, 45, 37, 0.012);
-  background-color: var(--sb-paper);
+  --auth-promo: #121415; --auth-panel: #202223; --auth-dark: #202223;
+  --auth-ink: #fdfaf4; --auth-soft: #cfc9bc; --auth-promo-ink: #fdfaf4;
+  --auth-line: rgba(253, 250, 244, 0.18); --auth-line-strong: rgba(253, 250, 244, 0.42); --auth-card-edge: rgba(255, 255, 255, 0.1);
+  --auth-pale: #fdfaf4; --auth-deep: #121415; --auth-submit: #00e676; --auth-submit-ink: #113822;
+  --auth-pitch: rgba(255, 255, 255, 0.08); --auth-grain: rgba(255, 255, 255, 0.016); --auth-band: rgba(255, 255, 255, 0.012);
+  background-color: #202223;
 }
-:root[data-app="agent"][data-theme="dark"] .login.auth-page { --auth-pitch: rgba(255, 255, 255, 0.08); --auth-grain: rgba(255, 255, 255, 0.016); --auth-band: rgba(255, 255, 255, 0.012); }
-:root[data-app="agent"] .auth-promo { border-right: 1px solid var(--sb-rule); }
-:root[data-app="agent"] .auth-card { box-shadow: 0 24px 60px rgba(48, 45, 37, 0.14), 0 2px 6px rgba(48, 45, 37, 0.08); }
-:root[data-app="agent"][data-theme="dark"] .auth-card { box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.2); }
+:root[data-app="agent"] .auth-promo { border-right: 1px solid rgba(255, 255, 255, 0.08); }
+:root[data-app="agent"] .auth-card { box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.2); }
 :root[data-app="agent"] .auth-form .org-card { background: none; }
-:root[data-app="agent"] .auth-form .notice { background: var(--sb-danger-bg); border-color: var(--sb-urgent); color: var(--sb-urgent-ink); }
-:root[data-app="agent"] .auth-form select { color-scheme: light; }
-:root[data-app="agent"][data-theme="dark"] .auth-form select { color-scheme: dark; }
-:root[data-app="agent"] .auth-form select option { background: var(--sb-white); color: var(--sb-ink); }
-:root[data-app="agent"] .auth-promo .pill { background: var(--sb-paper); border-color: var(--sb-rule); color: var(--sb-quiet); }
+:root[data-app="agent"] .auth-form select option { background: #202223; color: #fdfaf4; }
+:root[data-app="agent"] .auth-form h1 .brand-sub { color: #a67c2e; background: #fbf4e4; }
 @media (max-width: 720px) {
-  .login.auth-page { padding: 64px 12px 24px; justify-content: flex-start; }
+  .login.auth-page { padding: 24px 12px; justify-content: flex-start; }
   /* the pitch stands upright on a phone and crops naturally */
   .login.auth-page::before { left: 6%; right: 6%; width: auto; top: 54px; height: 150vh; transform: none; background-image: linear-gradient(var(--auth-pitch), var(--auth-pitch)), radial-gradient(circle at center, transparent 0 56px, var(--auth-pitch) 56px 57px, transparent 57px), radial-gradient(circle at center, var(--auth-pitch) 0 2px, transparent 2px); background-size: 100% 1px, 100% 100%, 100% 100%; }
   .login.auth-page::after { left: 28%; width: 44%; top: 54px; height: 90px; border: 1px solid var(--auth-pitch); border-top: 0; border-radius: 0 0 2px 2px; }
   .auth-card { grid-template-columns: 1fr; border-radius: 12px; }
-  :root[data-app="agent"] .auth-promo { border-right: 0; border-bottom: 1px solid var(--sb-rule); }
+  :root[data-app="agent"] .auth-promo { border-right: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
   .auth-card { grid-template-columns: 1fr; border-radius: 12px; }
   /* M24D — a phone shows the headline and one sentence; the points are desktop reading. */
   .auth-promo { padding: 28px 24px; gap: 10px; }

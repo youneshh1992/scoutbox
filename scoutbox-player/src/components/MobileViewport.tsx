@@ -7,22 +7,31 @@
 // the same single phone screen a 390px window does. No breakpoint anywhere
 // else may change the structure; the frame is the only thing a wide window
 // adds, and the screen inside it is never scaled.
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { Platform, StyleSheet, View, useWindowDimensions } from 'react-native';
-import { useColors } from '../theme';
+import { usePathname } from 'expo-router';
+import { AUTH_PAGE, useColors } from '../theme';
 
 export const MOBILE_VIEWPORT_MAX = 430;
 
 export function MobileViewport({ children }: { children: ReactNode }) {
   const colors = useColors();
   const { width } = useWindowDimensions();
+  // M24E — the entry screen has ONE appearance: around it the surround is the
+  // entry page's own green, never the light or dark frame the person saved.
+  const pathname = usePathname();
+  const onAuth = pathname === '/onboarding';
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    document.body.style.backgroundColor = onAuth ? AUTH_PAGE.page : colors.frame;
+  }, [onAuth, colors.frame]);
   if (Platform.OS !== 'web') return <>{children}</>;
   const framed = width > MOBILE_VIEWPORT_MAX;
   return (
-    <View style={[styles.surround, { backgroundColor: colors.frame }]} testID="mobile-viewport-surround">
+    <View style={[styles.surround, { backgroundColor: onAuth ? AUTH_PAGE.page : colors.frame }]} testID="mobile-viewport-surround" data-auth-fixed={onAuth ? '1' : undefined}>
       <View
         testID="mobile-viewport"
-        style={[styles.frame, { backgroundColor: colors.bg }, framed && { borderLeftWidth: 1, borderRightWidth: 1, borderColor: colors.frameLine }]}
+        style={[styles.frame, { backgroundColor: onAuth ? AUTH_PAGE.page : colors.bg }, framed && { borderLeftWidth: 1, borderRightWidth: 1, borderColor: onAuth ? AUTH_PAGE.panelLine : colors.frameLine }]}
       >
         {children}
       </View>

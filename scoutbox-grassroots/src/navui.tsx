@@ -115,6 +115,7 @@ export function Sidebar({
           </div>
         )}
 
+        <div className="nav-scroll" data-testid="nav-scroll">
         {sections.map((s) => (
           <SectionRow
             key={s.id}
@@ -163,6 +164,7 @@ export function Sidebar({
           {location.itemId === 'messages' && <span className="nav-active-bar" aria-hidden="true" />}
         </button>
 
+        </div>
         <div className="spacer" />
         {!collapsed && footer}
         <button className="nav-collapse" onClick={onToggleCollapsed} aria-label={collapsed ? t('navsec.expand') : t('navsec.collapse')} title={collapsed ? t('navsec.expand') : t('navsec.collapse')}>

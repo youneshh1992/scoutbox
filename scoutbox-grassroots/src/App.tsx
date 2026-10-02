@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ThemeToggle, useTheme, type Theme } from '../../design-system/theme';
+import { useTheme, type Theme } from '../../design-system/theme';
 import { AuthField, AuthNote, AuthPage, AuthRow, AuthTabs, PasswordInput } from '../../design-system/AuthShell';
 import { initials } from '../../design-system/text';
 import { Icon } from './icons';
@@ -164,10 +164,10 @@ export default function App() {
   const { theme, toggle: toggleTheme } = useTheme('grass');
   return session
     ? <Workspace session={session} onLogout={logout} theme={theme} onToggleTheme={toggleTheme} />
-    : <Login onLogin={login} theme={theme} onToggleTheme={toggleTheme} />;
+    : <Login onLogin={login} />;
 }
 
-function Login({ onLogin, theme, onToggleTheme }: { onLogin: (s: Session) => void; theme: Theme; onToggleTheme: () => void }) {
+function Login({ onLogin }: { onLogin: (s: Session) => void }) {
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [scoutName, setScoutName] = useState('');
@@ -221,7 +221,6 @@ function Login({ onLogin, theme, onToggleTheme }: { onLogin: (s: Session) => voi
         'Every action attributed to a named person.',
         'No unsolicited contact.',
       ]}
-      toolbar={<ThemeToggle theme={theme} onToggle={onToggleTheme} labels={{ aria: t('theme.aria'), light: t('theme.light'), dark: t('theme.dark') }} />}
       aside={DEMO_MODE ? <AuthNote>Self-contained demo — no server needed.</AuthNote> : undefined}
     >
       <AuthTabs tabs={[{ id: 'signin', label: 'Sign in' }, { id: 'register', label: 'Register club' }] as const} value={mode} onChange={(m) => { setError(null); setMode(m); }} label="Sign in or register your club" />
@@ -576,7 +575,9 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
                   <option value="fr">Français (trad. automatique)</option>
                 </select>
               </label>
-              <button onClick={onLogout}><Icon name="log-out" size={14} />Switch org</button>
+              {/* M24E — the way out of the session, in the account block where the person is named. */}
+              <button data-exit="switch-org" data-testid="switch-org" onClick={onLogout} aria-label={t('common.switchOrg')}><Icon name="arrow-right" size={14} />{t('common.switchOrg')}</button>
+              <button data-exit="sign-out" data-testid="sign-out" onClick={onLogout} aria-label={t('common.signOut')}><Icon name="log-out" size={14} />{t('common.signOut')}</button>
             </div>
           </div>
         }

@@ -32,7 +32,7 @@ const en = {
   'common.back': 'Back', 'common.confirm': 'Confirm',
   'common.conflict': 'Someone else changed this while you were working on it. Reload to see their change, then apply yours — nothing of theirs was overwritten.',
   'common.unsaved': 'You have unsaved changes. Leave without saving?',
-  'common.switchOrg': 'Switch organisation', 'common.status': 'Status', 'common.since': 'since', 'common.until': 'until',
+  'common.signOut': 'Sign out', 'common.switchOrg': 'Switch profile', 'common.status': 'Status', 'common.since': 'since', 'common.until': 'until',
   'common.yes': 'Yes', 'common.no': 'No',
   // ---- http (read by httpState.ts)
   'http.sessionExpired': 'Your session has ended. Sign in again to continue.',
@@ -362,7 +362,7 @@ const fr: typeof en = {
   'common.back': 'Retour', 'common.confirm': 'Confirmer',
   'common.conflict': 'Quelqu’un d’autre a modifié cet élément pendant que vous y travailliez. Rechargez pour voir sa modification, puis appliquez la vôtre — rien de son travail n’a été écrasé.',
   'common.unsaved': 'Vous avez des modifications non enregistrées. Quitter sans enregistrer ?',
-  'common.switchOrg': 'Changer d’organisation', 'common.status': 'Statut', 'common.since': 'depuis', 'common.until': 'jusqu’au',
+  'common.signOut': 'Se déconnecter', 'common.switchOrg': 'Changer de profil', 'common.status': 'Statut', 'common.since': 'depuis', 'common.until': 'jusqu’au',
   'common.yes': 'Oui', 'common.no': 'Non',
   'http.sessionExpired': 'Votre session est terminée. Reconnectez-vous pour continuer.',
   'http.forbidden': 'Vous n’avez pas l’autorisation de faire cela dans cette agence.',

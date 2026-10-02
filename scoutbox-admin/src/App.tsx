@@ -155,6 +155,21 @@ export default function App() {
   const say = (text: string) => { setToast(text); setTimeout(() => setToast(null), 3500); };
   // M24A — one appearance for Trust & Safety, persisted under its own key.
   const { theme, toggle: toggleTheme } = useTheme('safety');
+  // M24E — at ≤ 900px the sidebar is a drawer (platform.css); the top bar
+  // opens it, choosing a section or Escape closes it. Without this the
+  // console had no navigation and no Sign out on a phone or in landscape.
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  useEffect(() => {
+    if (!drawerOpen) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setDrawerOpen(false);
+      (document.querySelector('.nav-hamburger') as HTMLElement | null)?.focus();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [drawerOpen]);
+  const pick = (next: Tab) => { setTab(next); setDrawerOpen(false); };
 
   const load = useCallback(async () => {
     setError(null);
@@ -183,6 +198,13 @@ export default function App() {
   }, [key]);
 
   useEffect(() => { if (entered) void load(); }, [entered, load]);
+  // M24E — the way out: forget the key and everything it loaded, back to the
+  // key screen. There is no server session to revoke — the key is sent with
+  // every request and nothing is stored on the server for it.
+  const signOut = () => {
+    setEntered(false); setKey(''); setError(null); setToast(null); setTab('overview');
+    setOverview(null); setReports([]); setClubs([]); setGuardians([]); setIdvQueue([]); setBlocks([]); setModeration([]); setThreads([]); setOutbox([]); setInvoices([]);
+  };
 
   const resolveReport = async (r: Report, action: 'none' | 'warning' | 'suspend_org' | 'dismiss') => {
     const outcome = outcomeDrafts[r.id]?.trim();
@@ -247,7 +269,6 @@ export default function App() {
           'Club verification, guardian ID checks and safeguarding records.',
           'Moderation and the append-only audit of every action.',
         ]}
-        toolbar={<ThemeToggle theme={theme} onToggle={toggleTheme} labels={THEME_LABELS} />}
       >
         <form className="auth-signin" onSubmit={(e) => { e.preventDefault(); if (key) setEntered(true); }} aria-label="Sign in" noValidate>
           <div className="enter-row">
@@ -265,31 +286,38 @@ export default function App() {
 
   return (
     <div className="shell">
-      <nav className="sidebar" aria-label="Main navigation">
+      {drawerOpen && <div className="drawer-veil nav-drawer-veil" onClick={() => setDrawerOpen(false)} />}
+      <nav id="app-sidebar" className={`sidebar ${drawerOpen ? 'drawer-open' : ''}`} aria-label="Main navigation">
         <div className="brand" title="ScoutBox Trust &amp; Safety"><span className="wordmark">ScoutBox</span><sup className="tm" aria-label="trademark">TM</sup><span className="brand-sub">Trust &amp; Safety</span></div>
         <div className="p-org" aria-label="Safety workspace">
           <span className="p-avatar club" aria-hidden="true">TS</span>
           <span><strong>Safety workspace</strong><small>{DEMO ? 'Demo data' : 'Live console'}</small></span>
         </div>
-        <span className="nav-group-label" aria-hidden="true">Review workspace</span>
-        {NAV_GROUPS.map((g) => {
-          const active = groupOfTab(tab).id === g.id;
-          const pending = g.id === 'cases' ? reports.filter((r) => r.status === 'pending_review').length : 0;
-          return (
-            <button key={g.id} className={`nav-section ${active ? 'active' : ''}`} onClick={() => setTab(g.tabs[0])} style={{ position: 'relative' }} aria-current={active ? 'page' : undefined}>
-              <Icon name={GROUP_ICON[g.id] ?? 'folders'} />
-              <span className="grow">{g.label}</span>
-              {pending > 0 && <span className="nav-badge">{pending}</span>}
-            </button>
-          );
-        })}
-        <div className="spacer" />
+        {/* M24E — the sections scroll on their own; the account block with Sign out stays on screen. */}
+        <div className="nav-scroll" data-testid="nav-scroll">
+          <span className="nav-group-label" aria-hidden="true">Review workspace</span>
+          {NAV_GROUPS.map((g) => {
+            const active = groupOfTab(tab).id === g.id;
+            const pending = g.id === 'cases' ? reports.filter((r) => r.status === 'pending_review').length : 0;
+            return (
+              <button key={g.id} className={`nav-section ${active ? 'active' : ''}`} onClick={() => pick(g.tabs[0])} style={{ position: 'relative' }} aria-current={active ? 'page' : undefined}>
+                <Icon name={GROUP_ICON[g.id] ?? 'folders'} />
+                <span className="grow">{g.label}</span>
+                {pending > 0 && <span className="nav-badge">{pending}</span>}
+              </button>
+            );
+          })}
+        </div>
         <div className="p-account">
           <div className="p-who"><span className="p-avatar" aria-hidden="true">TS</span><div><strong>Safety staff</strong><small>{DEMO ? 'Demo mode' : 'Live'}</small></div></div>
+          <div className="p-links">
+            <button data-exit="sign-out" data-testid="sign-out" onClick={signOut} aria-label="Sign out"><Icon name="log-out" size={14} />Sign out</button>
+          </div>
         </div>
       </nav>
       <div className="main">
         <div className="topbar">
+          <button className="nav-hamburger" aria-label="Open navigation" aria-expanded={drawerOpen} aria-controls="app-sidebar" onClick={() => setDrawerOpen(true)}><Icon name="menu" /></button>
           <h2>
             <span className="crumb">Trust &amp; Safety</span><span className="crumb-sep" aria-hidden="true"> / </span>
             {groupOfTab(tab).tabs.length > 1 && <><span className="crumb">{groupOfTab(tab).label}</span><span className="crumb-sep" aria-hidden="true"> / </span></>}

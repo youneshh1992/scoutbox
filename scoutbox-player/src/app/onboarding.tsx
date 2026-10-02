@@ -2,8 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from '../components/Text';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ThemeSwitch } from '../components/ThemeSwitch';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { client, ClientError, type DemoIdentity } from '../data/client';
 import { adultAgeFor, ageOn, SAFEGUARDING_PROMISES, U18_PROMISES } from '../domain/safeguarding';
 import { POSITIONS } from '../domain/types';
@@ -79,7 +78,9 @@ export default function Onboarding() {
   const styles = useMemo(() => makeStyles(AUTH_PANEL), []);
   const router = useRouter();
   const { loginPlayer, loginGuardian, mode } = useSession();
-  const [step, setStep] = useState<Step>('welcome');
+  // M24E — "Switch account" lands on Sign in; everything else on Sign up.
+  const params = useLocalSearchParams<{ mode?: string }>();
+  const [step, setStep] = useState<Step>(params.mode === 'signin' ? 'signin' : 'welcome');
   const [identities, setIdentities] = useState<DemoIdentity[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -335,7 +336,6 @@ export default function Onboarding() {
             <Wordmark size={26} color={AUTH_PAGE.white} tmColor={AUTH_PAGE.soft} label="ScoutBox Player" />
             <Text style={styles.product}>Player</Text>
           </View>
-          <ThemeSwitch />
         </View>
 
         {entry && (
