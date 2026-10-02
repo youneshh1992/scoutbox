@@ -90,26 +90,24 @@ values; colours come from the active palette so light and dark both match):
 ## 3. Authentication (all applications)
 
 `design-system/AuthShell.tsx` + the `.login.auth-page` block in
-`design-system/platform.css`. **M24C.2 palette** (the `--auth-*` tokens;
-`AUTH_PANEL` / `AUTH_PAGE` on the Player) — ScoutBox's own pair of greens,
-chosen to stand apart from any other brand's green-on-black: the ScoutBox
-green `#00E676` for the introduction, the submit, links and focus, and the
-darker **ScoutBox pitch green `#0F5F36`** that accompanies it for the form
-panel, with the page one step darker on the same hue (`#0B4A2B`, also the
-text on bright green and the pressed state). Pale supporting surfaces are
-`#E5F5E9`; text on the dark greens is white with `#D2ECD9` for supporting
-copy and placeholders; underlines are `#D2ECD9` at 40 %; focus is `#00E676`.
-The introduction carries the pitch **embossed** into the bright green
-(boundary, halfway line, centre circle and spot, one penalty area: a dark
-groove `rgba(8,60,32,.14)` with a light edge `rgba(255,255,255,.26)` one
-pixel beside it — CSS pseudo-elements on the portals, plain Views on the
-Player). Behind the card the same motif in white at 9 % with grain and
-mowing bands under 2 %, oversized on desktop, upright and cropped on a
-phone, never in front of a tap or in the accessibility tree, never moving.
-The wordmark reads **ScoutBox▪™** on every entry screen (`<sup class="tm">`
-/ a small `TM` Text, labelled "trademark"). One centred card of at most
-1000 px (introduction ≈45 %, form ≈55 %, 14 px radius, soft shadow, 44 px
-padding, form content 360 px wide), the product identity beside the
+`design-system/platform.css`. **M24C.3 palette** (the `--auth-*` tokens;
+`AUTH_PANEL` / `AUTH_PAGE` on the Player): the page and the form are the
+dark football green `#173B27`, the introduction is the ScoutBox green
+`#00E676` with `#113822` text, the submit is `#00E676` with `#113822` text
+(pressed `#113822`), pale supporting surfaces are `#E5F5E9`, text on dark
+green is white with `#CFDFD0` for supporting copy and placeholders,
+underlines are `#CFDFD0` at 35 %, focus is `#00E676`. Behind the card the
+pitch motif in white at 8 % with grain and mowing bands under 2 %, oversized
+on desktop, upright and cropped on a phone, never in front of a tap or in
+the accessibility tree, never moving; no embossing on the panels.
+**Grassroots** gives its bright introduction the turf — blades and mowing
+bands in the deep green, no lines. **Agent** builds its entry screen from
+the Agent application's own two backgrounds — the sidebar surface for the
+introduction and the workspace for the form and the page — so it follows the
+saved cream / dark appearance, with the gold label on its cream badge. The
+wordmark reads **ScoutBox▪™** on every entry screen. One centred card of at
+most 1000 px (introduction ≈45 %, form ≈55 %, 14 px radius, soft shadow,
+44 px padding, form content 360 px wide), the product identity beside the
 wordmark, `AuthTabs` only where sign-up exists, `AuthField` labelled
 underlined inputs, `PasswordInput` with show / hide, and the compact rounded
 submit. Under 720 px the panels stack. The theme toggle stays on the page (its stored choice is restored in

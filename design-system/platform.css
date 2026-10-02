@@ -517,18 +517,16 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
    The pitch is two pseudo-elements: pointer-events none, outside the
    accessibility tree, behind the opaque card, no animation. */
 .login.auth-page {
-  --auth-green: #00e676;        /* ScoutBox green: the introduction, the submit, focus */
-  --auth-pitch-green: #0f5f36;  /* ScoutBox pitch green — the darker green that accompanies it: the form panel */
-  --auth-turf: #0b4a2b;         /* the page behind the card, one step darker on the same hue; also text on the bright green and pressed states */
+  --auth-green: #00e676;        /* bright brand green: the introduction, the submit, focus */
+  --auth-dark: #173b27;         /* dark football green: the page and the form panel */
+  --auth-deep: #113822;         /* deep green: text on bright / pale green, pressed states */
   --auth-pale: #e5f5e9;         /* pale supporting surfaces */
-  --auth-ink: #ffffff;          /* main text on the dark greens */
-  --auth-soft: #d2ecd9;         /* supporting text on the dark greens */
-  --auth-dark: var(--auth-turf); --auth-deep: var(--auth-turf);
-  --auth-promo: var(--auth-green); --auth-panel: var(--auth-pitch-green); --auth-promo-ink: var(--auth-turf);
-  --auth-line: rgba(210, 236, 217, 0.4); --auth-line-strong: rgba(210, 236, 217, 0.65); --auth-focus: var(--auth-green);
-  --auth-pitch: rgba(255, 255, 255, 0.09); --auth-grain: rgba(255, 255, 255, 0.016); --auth-band: rgba(255, 255, 255, 0.012);
-  /* the embossed pitch on the bright-green panel: a dark groove with a light edge */
-  --auth-emboss-dark: rgba(8, 60, 32, 0.14); --auth-emboss-light: rgba(255, 255, 255, 0.26);
+  --auth-ink: #ffffff;          /* main text on dark green */
+  --auth-soft: #cfdfd0;         /* supporting text on dark green */
+  --auth-promo: var(--auth-green); --auth-panel: var(--auth-dark); --auth-promo-ink: var(--auth-deep);
+  --auth-line: rgba(207, 223, 208, 0.35); --auth-line-strong: rgba(207, 223, 208, 0.6); --auth-focus: var(--auth-green);
+  --auth-pitch: rgba(255, 255, 255, 0.08); --auth-grain: rgba(255, 255, 255, 0.016); --auth-band: rgba(255, 255, 255, 0.012);
+  --auth-card-edge: rgba(255, 255, 255, 0.1); --auth-submit: var(--auth-green); --auth-submit-ink: var(--auth-deep);
   position: relative; isolation: isolate; overflow-x: hidden;
   background-color: var(--auth-dark);
   background-image:
@@ -550,27 +548,9 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .auth-page .login-toolbar { top: 14px; right: 16px; z-index: 2; }
 .auth-card {
   position: relative; z-index: 1; display: grid; grid-template-columns: 45fr 55fr; width: 100%; max-width: 1000px;
-  border-radius: 14px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.12); box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3), 0 2px 6px rgba(0, 0, 0, 0.18);
+  border-radius: 14px; overflow: hidden; border: 1px solid var(--auth-card-edge); box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3), 0 2px 6px rgba(0, 0, 0, 0.18);
 }
-.auth-promo { position: relative; isolation: isolate; overflow: hidden; background: var(--auth-promo); color: var(--auth-promo-ink); padding: 44px 40px; display: flex; flex-direction: column; justify-content: center; gap: 22px; }
-.auth-promo > * { position: relative; z-index: 1; }
-/* the pitch embossed into the bright green: boundary, halfway line, centre circle and spot (::before), one penalty area (::after) */
-.auth-promo::before {
-  content: ''; position: absolute; pointer-events: none; z-index: 0; inset: 22px 22px; border-radius: 3px;
-  border: 1px solid var(--auth-emboss-dark); box-shadow: inset 1px 1px 0 var(--auth-emboss-light), 1px 1px 0 var(--auth-emboss-light);
-  background-image:
-    linear-gradient(var(--auth-emboss-dark), var(--auth-emboss-dark)), linear-gradient(var(--auth-emboss-light), var(--auth-emboss-light)),
-    radial-gradient(circle at center, transparent 0 58px, var(--auth-emboss-dark) 58px 59px, transparent 59px),
-    radial-gradient(circle at calc(50% + 1px) calc(50% + 1px), transparent 0 58px, var(--auth-emboss-light) 58px 59px, transparent 59px),
-    radial-gradient(circle at center, var(--auth-emboss-dark) 0 2.5px, transparent 2.5px),
-    radial-gradient(circle at calc(50% + 1px) calc(50% + 1px), var(--auth-emboss-light) 0 2.5px, transparent 2.5px);
-  background-size: 100% 1px, 100% 1px, 100% 100%, 100% 100%, 100% 100%, 100% 100%;
-  background-position: 0 calc(50% - 0.5px), 0 calc(50% + 0.5px), center, center, center, center; background-repeat: no-repeat;
-}
-.auth-promo::after {
-  content: ''; position: absolute; pointer-events: none; z-index: 0; left: 30%; right: 30%; top: 22px; height: 64px; border-radius: 0 0 3px 3px;
-  border: 1px solid var(--auth-emboss-dark); border-top: 0; box-shadow: inset 1px 1px 0 var(--auth-emboss-light), 1px 1px 0 var(--auth-emboss-light);
-}
+.auth-promo { position: relative; background: var(--auth-promo); color: var(--auth-promo-ink); padding: 44px 40px; display: flex; flex-direction: column; justify-content: center; gap: 22px; }
 .auth-promo h2 { font-size: 30px; line-height: 1.12; letter-spacing: -0.9px; font-weight: 700; text-wrap: balance; color: var(--auth-promo-ink); }
 .auth-points { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 11px; font-size: 14px; line-height: 1.5; max-width: 34ch; color: var(--auth-promo-ink); }
 .auth-points li { display: flex; gap: 10px; align-items: flex-start; }
@@ -620,7 +600,7 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .auth-form button.auth-eye:hover { filter: none; color: var(--auth-ink); }
 .auth-form button.primary, .auth-form .enter-row button.primary, .auth-form .reg-grid button.primary {
   align-self: flex-start; width: auto; max-width: none; min-height: 42px; padding: 10px 26px; border-radius: 999px;
-  background: var(--auth-green); border-color: var(--auth-green); color: var(--auth-deep); font-size: 13px; font-weight: 700; box-shadow: none; margin-top: 4px;
+  background: var(--auth-submit); border-color: var(--auth-submit); color: var(--auth-submit-ink); font-size: 13px; font-weight: 700; box-shadow: none; margin-top: 4px;
 }
 .auth-form button.primary:hover { filter: brightness(0.94); }
 .auth-form button.primary:active { background: var(--auth-deep); border-color: var(--auth-deep); color: var(--auth-ink); filter: none; }
@@ -636,6 +616,38 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .auth-form .login-signature { color: var(--auth-soft); margin-top: 8px; }
 .auth-form .login-signature span { color: var(--auth-ink); }
 .auth-form .wordmark { color: var(--auth-ink); }
+/* Grassroots: the bright introduction carries the turf — blades of grass and
+   broad mowing bands in the deep green, the same geometry as the Grassroots
+   workspace texture, no lines. */
+:root[data-app="grass"] .auth-promo {
+  background-color: var(--auth-promo);
+  background-image:
+    repeating-linear-gradient(103deg, transparent 0 3px, rgba(17, 56, 34, 0.09) 3px 4px, transparent 4px 9px),
+    repeating-linear-gradient(97deg, transparent 0 5px, rgba(17, 56, 34, 0.05) 5px 6px, transparent 6px 13px),
+    repeating-linear-gradient(90deg, transparent 0 56px, rgba(17, 56, 34, 0.06) 56px 112px);
+}
+/* Agent: the two background colours of the Agent application itself — the
+   sidebar surface for the introduction, the workspace for the form and the
+   page — so the entry screen follows the saved cream / dark appearance. */
+:root[data-app="agent"] .login.auth-page {
+  --auth-promo: var(--sb-surface); --auth-panel: var(--sb-paper); --auth-dark: var(--sb-paper);
+  --auth-ink: var(--sb-ink); --auth-soft: var(--sb-quiet); --auth-promo-ink: var(--sb-ink);
+  --auth-line: var(--sb-input-border, var(--sb-rule)); --auth-line-strong: var(--sb-quiet); --auth-card-edge: var(--sb-rule);
+  --auth-pale: var(--sb-white); --auth-deep: var(--sb-ink); --auth-submit: var(--sb-green); --auth-submit-ink: var(--sb-green-ink);
+  --auth-pitch: rgba(48, 45, 37, 0.1); --auth-grain: rgba(48, 45, 37, 0.02); --auth-band: rgba(48, 45, 37, 0.012);
+  background-color: var(--sb-paper);
+}
+:root[data-app="agent"][data-theme="dark"] .login.auth-page { --auth-pitch: rgba(255, 255, 255, 0.08); --auth-grain: rgba(255, 255, 255, 0.016); --auth-band: rgba(255, 255, 255, 0.012); }
+:root[data-app="agent"] .auth-promo { border-right: 1px solid var(--sb-rule); }
+:root[data-app="agent"] .auth-card { box-shadow: 0 24px 60px rgba(48, 45, 37, 0.14), 0 2px 6px rgba(48, 45, 37, 0.08); }
+:root[data-app="agent"][data-theme="dark"] .auth-card { box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.2); }
+:root[data-app="agent"] .auth-form .org-card { background: var(--sb-white); }
+:root[data-app="agent"] .auth-form .org-card .pill, :root[data-app="agent"] .auth-form .demo-identities .pill { background: var(--sb-paper); color: var(--sb-quiet); border-color: var(--sb-rule); }
+:root[data-app="agent"] .auth-form .notice { background: var(--sb-danger-bg); border-color: var(--sb-urgent); color: var(--sb-urgent-ink); }
+:root[data-app="agent"] .auth-form select { color-scheme: light; }
+:root[data-app="agent"][data-theme="dark"] .auth-form select { color-scheme: dark; }
+:root[data-app="agent"] .auth-form select option { background: var(--sb-white); color: var(--sb-ink); }
+:root[data-app="agent"] .auth-promo .pill { background: var(--sb-paper); border-color: var(--sb-rule); color: var(--sb-quiet); }
 @media (max-width: 720px) {
   .login.auth-page { padding: 64px 12px 24px; justify-content: flex-start; }
   /* the pitch stands upright on a phone and crops naturally */
@@ -643,8 +655,9 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
   .login.auth-page::after { left: 28%; width: 44%; top: 54px; height: 90px; border: 1px solid var(--auth-pitch); border-top: 0; border-radius: 0 0 2px 2px; }
   .auth-card { grid-template-columns: 1fr; border-radius: 12px; }
   .auth-promo { padding: 24px 20px; gap: 14px; }
-  .auth-promo::before { inset: 14px 14px; background-image: linear-gradient(var(--auth-emboss-dark), var(--auth-emboss-dark)), linear-gradient(var(--auth-emboss-light), var(--auth-emboss-light)), radial-gradient(circle at center, transparent 0 40px, var(--auth-emboss-dark) 40px 41px, transparent 41px), radial-gradient(circle at calc(50% + 1px) calc(50% + 1px), transparent 0 40px, var(--auth-emboss-light) 40px 41px, transparent 41px), radial-gradient(circle at center, var(--auth-emboss-dark) 0 2px, transparent 2px), radial-gradient(circle at calc(50% + 1px) calc(50% + 1px), var(--auth-emboss-light) 0 2px, transparent 2px); background-size: 1px 100%, 1px 100%, 100% 100%, 100% 100%, 100% 100%, 100% 100%; background-position: calc(50% - 0.5px) 0, calc(50% + 0.5px) 0, center, center, center, center; }
-  .auth-promo::after { left: 14px; right: auto; width: 56px; top: 30%; bottom: 30%; height: auto; border: 1px solid var(--auth-emboss-dark); border-left: 0; border-radius: 0 3px 3px 0; }
+  :root[data-app="agent"] .auth-promo { border-right: 0; border-bottom: 1px solid var(--sb-rule); }
+  .auth-card { grid-template-columns: 1fr; border-radius: 12px; }
+  .auth-promo { padding: 24px 20px; gap: 14px; }
   .auth-promo h2 { font-size: 23px; }
   .auth-points { font-size: 13px; }
   .auth-form { padding: 24px 20px 22px; gap: 14px; }

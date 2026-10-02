@@ -47,32 +47,6 @@ function RoleCard({ icon, title, subtitle, accent, onPress }: {
   );
 }
 
-/** M24C.2 — the pitch embossed into the bright-green introduction: each
- *  line is a dark groove with a light edge one pixel beside it. Plain Views,
- *  so iOS, Android and the web draw it alike; behind the copy, never in front
- *  of a tap, hidden from assistive technology. */
-function EmbossedPitch() {
-  const dark = AUTH_PAGE.embossDark, light = AUTH_PAGE.embossLight;
-  const line = (extra: object) => [{ position: 'absolute' as const }, extra];
-  return (
-    <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden style={[StyleSheet.absoluteFill, { overflow: 'hidden', zIndex: 0 }]}>
-      {/* boundary: light edge then the dark groove */}
-      <View style={line({ top: 13, left: 13, right: 11, bottom: 11, borderWidth: 1, borderColor: light, borderRadius: 3 })} />
-      <View style={line({ top: 12, left: 12, right: 12, bottom: 12, borderWidth: 1, borderColor: dark, borderRadius: 3 })} />
-      {/* halfway line */}
-      <View style={line({ left: 12, right: 12, top: '50%', marginTop: 0.5, borderTopWidth: 1, borderColor: light })} />
-      <View style={line({ left: 12, right: 12, top: '50%', marginTop: -0.5, borderTopWidth: 1, borderColor: dark })} />
-      {/* centre circle and spot */}
-      <View style={line({ left: '50%', top: '50%', width: 60, height: 60, marginLeft: -29, marginTop: -29, borderRadius: 30, borderWidth: 1, borderColor: light })} />
-      <View style={line({ left: '50%', top: '50%', width: 60, height: 60, marginLeft: -30, marginTop: -30, borderRadius: 30, borderWidth: 1, borderColor: dark })} />
-      <View style={line({ left: '50%', top: '50%', width: 4, height: 4, marginLeft: -2, marginTop: -2, borderRadius: 2, backgroundColor: dark })} />
-      {/* one penalty area, left end */}
-      <View style={line({ left: 13, top: '30%', bottom: '30%', width: 44, borderWidth: 1, borderLeftWidth: 0, borderColor: light, borderTopRightRadius: 3, borderBottomRightRadius: 3 })} />
-      <View style={line({ left: 12, top: '30%', bottom: '30%', width: 44, borderWidth: 1, borderLeftWidth: 0, borderColor: dark, borderTopRightRadius: 3, borderBottomRightRadius: 3 })} />
-    </View>
-  );
-}
-
 function StepDots({ current }: { current: number }) {
   const colors = useColors();
   const styles = useStyles(makeStyles);
@@ -392,8 +366,7 @@ export default function Onboarding() {
 
         {entry && (
           <View style={styles.intro} testID="auth-intro">
-            <EmbossedPitch />
-            <Text style={[styles.introTitle, { zIndex: 1 }]}>Your football. Your next opportunity.</Text>
+            <Text style={styles.introTitle}>Your football. Your next opportunity.</Text>
             <View style={{ gap: 6 }}>
               {[
                 'A verified Football Passport that clubs can read.',

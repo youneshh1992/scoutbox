@@ -169,26 +169,22 @@ export const useTheme = () => useContext(ThemeContext);
  *  moment the person is signed in. */
 export const AUTH_PANEL: Palette = {
   ...palettes.dark,
-  // M24C.2 — the ScoutBox green (#00E676) and the darker ScoutBox pitch
-  // green that accompanies it (#0F5F36), one step darker on the same hue for
-  // the page and pressed states (#0B4A2B); white and #D2ECD9 for the text.
-  bg: '#0f5f36', bg2: '#0b4a2b', panel: '#0b4a2b', panel2: '#146b3f', line: 'rgba(210,236,217,0.4)',
-  text: '#ffffff', muted: '#d2ecd9',
-  accent: '#00e676', accentInk: '#0b4a2b', accentText: '#00e676', accent2: '#00e676',
-  tabActive: '#ffffff', tabActiveBg: '#0b4a2b', tabInactive: '#d2ecd9',
-  iconBg: '#0b4a2b', iconFg: '#00e676', greenBg: '#0b4a2b', greenInk: '#e5f5e9', infoBg: '#0b4a2b', infoInk: '#e5f5e9',
-  goldBg: '#0b4a2b', goldInk: '#f3dca3',
+  // M24C.3 — the entry palette: the dark football green of the Football
+  // Passport card for the surfaces, white and #CFDFD0 for the text, the
+  // bright brand green for the primary action, links and focus.
+  bg: '#173b27', bg2: '#113822', panel: '#113822', panel2: '#1d4a33', line: 'rgba(207,223,208,0.35)',
+  text: '#ffffff', muted: '#cfdfd0',
+  accent: '#00e676', accentInk: '#113822', accentText: '#00e676', accent2: '#00e676',
+  tabActive: '#ffffff', tabActiveBg: '#113822', tabInactive: '#cfdfd0',
+  iconBg: '#113822', iconFg: '#00e676', greenBg: '#113822', greenInk: '#e5f5e9', infoBg: '#113822', infoInk: '#e5f5e9',
+  goldBg: '#113822', goldInk: '#f3dca3',
   // errors keep their own hue so a refusal never reads as success
-  danger: '#ffb3a8', dangerBg: '#5a2b27', dangerInk: '#ffd4cc', knob: '#ffffff', track: 'rgba(210,236,217,0.4)',
-  frame: '#0b4a2b', frameLine: '#0b4a2b',
-  // the pitch behind the entry screen: white lines at 9%, grain under 2%
-  pitch: 'rgba(255,255,255,0.09)', grain: 'rgba(255,255,255,0.016)', band: 'rgba(255,255,255,0.012)',
+  danger: '#ffb3a8', dangerBg: '#4a2b27', dangerInk: '#ffd4cc', knob: '#ffffff', track: 'rgba(207,223,208,0.35)',
+  frame: '#173b27', frameLine: '#173b27',
+  // the pitch behind the entry screen: white lines at 8%, grain under 2%
+  pitch: 'rgba(255,255,255,0.08)', grain: 'rgba(255,255,255,0.016)', band: 'rgba(255,255,255,0.012)',
 };
-export const AUTH_PAGE = {
-  page: '#0b4a2b', panel: '#0f5f36', green: '#00e676', ink: '#0b4a2b', white: '#ffffff', soft: '#d2ecd9', pale: '#e5f5e9', panelLine: 'rgba(255,255,255,0.14)',
-  // the pitch embossed into the bright green: a dark groove with a light edge
-  embossDark: 'rgba(8,60,32,0.14)', embossLight: 'rgba(255,255,255,0.26)',
-} as const;
+export const AUTH_PAGE = { page: '#173b27', panel: '#173b27', green: '#00e676', ink: '#113822', white: '#ffffff', soft: '#cfdfd0', pale: '#e5f5e9', panelLine: 'rgba(255,255,255,0.14)' } as const;
 
 export function ThemeOverride({ colors, children }: { colors: Palette; children: ReactNode }) {
   const base = useContext(ThemeContext);
