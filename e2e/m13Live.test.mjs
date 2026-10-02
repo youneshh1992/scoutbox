@@ -113,8 +113,10 @@ await playerCategory(player, 'journey', 'Board'); // M24D: the board is My journ
 await player.waitForSelector('text=Opportunity board', { timeout: 20000 });
 await player.locator('div', { hasText: 'First-team look — wide forwards' }).locator('text=Apply').last().click();
 await player.waitForSelector('text=Application submitted', { timeout: 10000 });
-// board reloads on apply; the fit section (Board › Fit check) fetches its own copy
-await playerSub(player, 'Fit check');
+// board reloads on apply; the fit section fetches its own copy when the page
+// mounts (M24D: it sits on the same Board page), so leave and return to it
+await playerSub(player, 'Overview');
+await playerSub(player, 'Board');
 await player.waitForSelector('text=Opportunity fit', { timeout: 20000 });
 await player.locator('text=Check fit').first().click();
 await player.waitForSelector('text=travel time unavailable', { timeout: 15000 });

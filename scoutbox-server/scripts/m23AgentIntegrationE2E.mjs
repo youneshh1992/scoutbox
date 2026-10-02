@@ -825,7 +825,9 @@ section('AJ/AK/AL/AM — the client surfaces, checked as artefacts');
   ok(/data-testid="handoff-section"/.test(decision) && /handoff-blocker-\$\{b\}/.test(decision), 'AK5 the handoff section names every blocker as its own element, so a refusal is readable and testable');
   // The component's own body, not everything after it: the file goes on to render
   // the decision itself, where reason codes belong.
-  const handoffBody = (decision.split('function HandoffSection')[1] ?? '').split(/\nfunction /)[0];
+  // (M24B placed `export function DecisionCard` right after it; the cut stops
+  // at the next top-level declaration whether or not it is exported.)
+  const handoffBody = (decision.split('function HandoffSection')[1] ?? '').split(/\n(?:export )?(?:function|const) /)[0];
   neg(!/\bd\.note|decision\.note|rationale|reasonCodes|assessmentSummary|evidenceRefs/.test(handoffBody), 'O3 and the handoff component never touches the decision\'s note, rationale, reason codes or evidence');
   const agentScreens = read('agentScreens');
   ok(/data-testid="client-contacts"/.test(agentScreens) && /data-testid="client-trials"/.test(agentScreens), 'AK6 the agent app has both new read surfaces');

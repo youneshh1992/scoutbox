@@ -306,7 +306,7 @@ await grass.waitForSelector('.player-card:has-text("Guni Adebayo")', { timeout: 
   await admin.fill('input[type="password"]', 'scoutbox-admin');
   await admin.click('button:has-text("Enter")');
   await admin.waitForSelector('nav.sidebar', { timeout: 20000 });
-  await admin.click('nav.sidebar button:has-text("Cases")');
+  await admin.click('nav.sidebar button:has-text("Evidence")'); // M24D: Passport, Box Cam and Trust left Cases for Evidence
   await admin.click('nav.subnav button:has-text("Passport")');
   await admin.waitForSelector('text=Correction requests', { timeout: 15000 });
   await admin.waitForSelector('text=Joined in August', { timeout: 15000 });

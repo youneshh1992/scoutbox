@@ -156,7 +156,7 @@ await admin.goto('http://localhost:8594/');
 await admin.fill('input[type="password"]', 'scoutbox-admin');
 await admin.click('button:has-text("Enter")');
 await admin.waitForSelector('nav.sidebar', { timeout: 20000 });
-await admin.click('nav.sidebar button:has-text("Cases")');
+await admin.click('nav.sidebar button:has-text("Evidence")'); // M24D: Passport, Box Cam and Trust left Cases for Evidence
 await admin.click('nav.subnav button:has-text("Box Cam")');
 await admin.waitForSelector('text=Box Cam disputes', { timeout: 15000 });
 const adminBody = await admin.locator('body').innerText();

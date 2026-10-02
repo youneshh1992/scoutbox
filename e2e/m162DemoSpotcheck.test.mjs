@@ -132,7 +132,7 @@ await grass.close();
 // ============================================== T&S demo: derivation only
 const admin = await page(`${demo.host}/admin/`);
 await admin.waitForSelector('text=Report queue', { timeout: 20000 });
-await admin.click('nav.sidebar button:has-text("Cases")');
+await admin.click('nav.sidebar button:has-text("Evidence")'); // M24D: Passport, Box Cam and Trust left Cases for Evidence
 await admin.click('nav.subnav button:has-text("Trust")');
 await admin.waitForSelector('text=ScoutBox Trust Score', { timeout: 15000 });
 {

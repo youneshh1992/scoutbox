@@ -666,7 +666,12 @@ section('Z — the boundaries, read from the source: one writer per truth, no au
   neg(/ROOM_NOT_REOPENABLE/.test(src('m17/rooms.mjs')) && /namingActions/.test(src('m17/rooms.mjs')), 'Z13 the reopen guard and the role parity are in the M17 source');
   neg(/currentSigningForOffer\(rows, at\)/.test(src('m29/index.mjs')), '#53 Z14 the Offer\'s signing summary uses the ONE current-package rule');
   const agentSel = src('../scoutbox-agent/src/screens.tsx');
-  neg(/forOffer\.find\(\(g\) => !g\.terminal\) \?\? forOffer\.find\(\(g\) => g\.status === 'COMPLETED'\)/.test(agentSel), 'Z15 the agent app keeps the live → completed → latest preference');
+  // M24B moved the agent's signings off the Offer row: the Signings page lists
+  // every package the server marks live or COMPLETED and History the terminal
+  // ones, by the server's own flags — the agent app no longer chooses a
+  // package per Offer, so it can hold no preference of its own (M24D: the
+  // check follows the M24B shape; the ONE current-package rule is Z14's).
+  neg(/filter\(\(g\) => !g\.terminal \|\| g\.status === 'COMPLETED'\)/.test(agentSel) && /filter\(\(g\) => g\.terminal\)/.test(agentSel) && !/forOffer\[forOffer\.length - 1\]|\.sort\([^)]*createdAt[^)]*\)\[0\]/.test(agentSel), 'Z15 the agent app renders packages by the server\'s live / completed / terminal flags and keeps no preference of its own');
   neg(!/nextAction\s*[:=]\s*\{/.test(strip(src('../scoutbox-club/src/journeyStrip.tsx'))) && !/nextAction\s*[:=]\s*\{/.test(strip(src('../scoutbox-club/src/roomsScreens.tsx'))), '#7 Z16 the club app never manufactures a next action');
 }
 
