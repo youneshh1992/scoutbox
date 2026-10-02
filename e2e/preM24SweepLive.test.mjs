@@ -213,13 +213,13 @@ console.log('\n— S5: Player session —');
   const q = await enterPlayer(ctx, 'Kola Adeyemi', 'kola2');
   const tok2 = await q.evaluate(() => { try { return JSON.parse(localStorage.getItem('scoutbox-player-tokens-v1') ?? '{}')['pl-adeyemi'] ?? null; } catch { return null; } });
   await q.goto(`http://localhost:${PORTS.player}/you?tab=account`);
-  const signOut = q.locator('text=/^Log out$/').last();
+  const signOut = q.locator('text=/^Sign out$/').last(); // M24E: the Player's exit is "Sign out"
   await signOut.waitFor({ timeout: 20000 });
   await signOut.click();
   const gone = await waitFor(() => q.evaluate(() => { try { return !('pl-adeyemi' in JSON.parse(localStorage.getItem('scoutbox-player-tokens-v1') ?? '{}')); } catch { return false; } }), 8000);
   await sleep(800);
   const refused = (await j('GET', '/player/me', undefined, tok2)).status === 401;
-  neg(!!tok2 && gone && refused, `S5b the Player's Log out forgets the token on the device and revokes it on the server (forgotten ${gone}, refused ${refused}) (PM-4)`);
+  neg(!!tok2 && gone && refused, `S5b the Player's Sign out forgets the token on the device and revokes it on the server (forgotten ${gone}, refused ${refused}) (PM-4)`);
   await ctx.close();
 }
 

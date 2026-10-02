@@ -101,7 +101,8 @@ const HELPERS = `
 
 async function portalAudit(page, app, width) {
   await page.addScriptTag({ content: HELPERS });
-  const r = await page.evaluate((w) => {
+  const r = await page.evaluate(async (w) => {
+    await document.fonts.ready; await Promise.all(['400 14px Inter', '600 14px Inter', 'italic 400 14px Inter'].map((f) => document.fonts.load(f).catch(() => null)));
     const q = (s) => [...document.querySelectorAll(s)];
     const visible = (el) => { const b = el.getBoundingClientRect(); return b.width > 0 && b.height > 0 && getComputedStyle(el).display !== 'none'; };
     const card = document.querySelector('.auth-card');
@@ -122,7 +123,9 @@ async function portalAudit(page, app, width) {
       form: !!document.querySelector('.auth-form form[aria-label]'), eye: q('.auth-eye').map((b) => ({ label: b.getAttribute('aria-label'), pressed: b.getAttribute('aria-pressed') })),
       rows: q('.auth-form button.org-card, .auth-form .auth-row').map((b) => { const r = b.getBoundingClientRect(); const n = b.querySelector('.org-name')?.getBoundingClientRect(); const a = b.querySelector('.auth-row-arrow')?.getBoundingClientRect(); return { tag: b.tagName, pressed: b.getAttribute('aria-pressed'), name: __sb.name(b), oneLine: !!n && !!a && a.left > n.right && Math.abs((a.top + a.bottom) / 2 - (r.top + r.bottom) / 2) < r.height / 2 && n.left - r.left < 8 }; }),
       tabs: q('[role="tablist"] [role="tab"]').map((t) => t.getAttribute('aria-selected')),
-      low, toggle: !!document.querySelector('[data-theme-toggle][aria-label]'),
+      low, toggle: !!document.querySelector('[data-theme-toggle], .p-theme-toggle, [role="switch"]'),
+      authBg: getComputedStyle(document.querySelector('.auth-form')).backgroundColor, pageBg: getComputedStyle(document.querySelector('.login.auth-page')).backgroundColor,
+      fonts: { label: getComputedStyle(document.querySelector('.auth-label') ?? document.body).fontFamily, button: getComputedStyle(document.querySelector('.auth-form button.primary')).fontFamily, headline: getComputedStyle(document.querySelector('.auth-promo h2')).fontFamily, wordmark: getComputedStyle(document.querySelector('.auth-form h1 .wordmark')).fontFamily, interLoaded: document.fonts.check('600 14px Inter') && document.fonts.check('italic 400 14px Inter') },
       signature: !!document.querySelector('[data-testid="login-signature"]'), wordmark: !!document.querySelector('.auth-form h1 .wordmark') && !!document.querySelector('.auth-form h1 .tm'),
       innerPad: card ? Math.round(parseFloat(getComputedStyle(document.querySelector('.auth-form')).paddingLeft)) : null,
     };
@@ -136,7 +139,12 @@ async function portalAudit(page, app, width) {
   if (width <= 720 ? r.pointsShown : !r.pointsShown) fail(`${tag}: the introduction points are ${r.pointsShown ? 'shown' : 'hidden'} (phone hides them, desktop shows them)`);
   if (!r.h2 || !r.summary) fail(`${tag}: the introduction keeps its headline and one sentence`);
   if (r.pills || r.emoji || r.circles) fail(`${tag}: pills ${r.pills}, emoji ${r.emoji}, icon circles ${r.circles} — the entry screen must have none`);
-  if (!r.form || !r.toggle || !r.signature || !r.wordmark) fail(`${tag}: roles / landmarks (form ${r.form}, toggle ${r.toggle}, signature ${r.signature}, wordmark+tm ${r.wordmark})`);
+  if (!r.form || !r.signature || !r.wordmark) fail(`${tag}: roles / landmarks (form ${r.form}, signature ${r.signature}, wordmark+tm ${r.wordmark})`);
+  // M24E — ONE fixed appearance on every entry screen: no theme control before sign-in.
+  if (r.toggle) fail(`${tag}: an appearance toggle is rendered on the entry screen`);
+  // M24E — Inter on the product text; the wordmark alone keeps the brand face.
+  if (!/^(")?Inter\b/.test(r.fonts.label) || !/^(")?Inter\b/.test(r.fonts.button) || !/^(")?Inter\b/.test(r.fonts.headline) || !r.fonts.interLoaded) fail(`${tag}: Inter must resolve on labels, buttons and the headline (${JSON.stringify(r.fonts)})`);
+  if (!/Albert Sans/.test(r.fonts.wordmark)) fail(`${tag}: the wordmark keeps Albert Sans (${r.fonts.wordmark})`);
   if (r.eye.some((e) => !e.label || !['true', 'false'].includes(e.pressed))) fail(`${tag}: the password reveal must carry aria-label and aria-pressed (${JSON.stringify(r.eye)})`);
   if (r.rows.some((x) => x.tag !== 'BUTTON' || !x.name || !x.oneLine)) fail(`${tag}: choice rows must be named buttons with the name at the left and the arrow at the right on one line (${JSON.stringify(r.rows)})`);
   if (r.tabs.length && !r.tabs.every((t) => t === 'true' || t === 'false')) fail(`${tag}: tabs must carry aria-selected`);
@@ -212,6 +220,75 @@ for (const [app, port, kb] of PORTAL) {
   say(`${app}: responsive and accessible at ${WIDTHS.length} widths (card ${summary.join(' ')})`);
 }
 
+// ================================== M24E — one fixed appearance, and the way out
+console.log('\n— M24E: fixed entry appearance, sign out, switch organisation —');
+const THEME_KEY = { Pro: 'sb-theme:pro', Grassroots: 'sb-theme:grass', Agent: 'sb-theme:agent', 'Trust & Safety': 'sb-theme:safety' };
+for (const [app, port] of [['Pro', PORTS.club], ['Grassroots', PORTS.grassroots], ['Agent', PORTS.agent], ['Trust & Safety', PORTS.admin]]) {
+  const ctx = await ctxFor(1280);
+  const page = await ctx.newPage(); page.on('pageerror', (e) => errors.push(`${app} fixed-mode: ${e}`));
+  const seen = {};
+  for (const saved of ['dark', 'light']) {
+    await page.goto(`http://localhost:${port}/`); await page.waitForSelector('.auth-card', { timeout: 25000 });
+    await page.evaluate(([k, v]) => localStorage.setItem(k, v), [THEME_KEY[app], saved]);
+    await page.reload(); await page.waitForSelector('.auth-card', { timeout: 25000 }); await sleep(300);
+    seen[saved] = await page.evaluate(() => ({ page: getComputedStyle(document.querySelector('.login.auth-page')).backgroundColor, form: getComputedStyle(document.querySelector('.auth-form')).backgroundColor, promo: getComputedStyle(document.querySelector('.auth-promo')).backgroundColor, ink: getComputedStyle(document.querySelector('.auth-label') ?? document.querySelector('.auth-form h1')).color, stamped: document.documentElement.getAttribute('data-theme') }));
+  }
+  ok(seen.dark.page === seen.light.page && seen.dark.form === seen.light.form && seen.dark.promo === seen.light.promo && seen.dark.ink === seen.light.ink, `${app}: the entry screen renders the same whether the saved workspace theme is dark or light (${seen.dark.page} / ${seen.dark.form} / ${seen.dark.promo})`);
+  ok((await page.locator('[data-theme-toggle], .p-theme-toggle').count()) === 0, `${app}: no appearance control before sign-in`);
+  await ctx.close();
+}
+{
+  // Pro: theme persists inside, survives sign-out, and comes back after sign-in.
+  const ctx = await ctxFor(1280);
+  const page = await ctx.newPage(); page.on('pageerror', (e) => errors.push(`Pro exit: ${e}`));
+  const enterPro = async () => { await page.waitForSelector('.org-card', { timeout: 25000 }); await page.click('.org-card:has-text("Eastport FC")'); await page.fill('.enter-row input', 'Maria Keane'); await page.selectOption('.enter-row select', 'Head of Recruitment'); await page.click('button.primary'); await page.waitForSelector('nav.sidebar', { timeout: 25000 }); await sleep(500); };
+  await page.goto(`http://localhost:${PORTS.club}/`); await page.evaluate(() => localStorage.removeItem('sb-theme:pro')); await enterPro();
+  ok((await page.locator('[data-theme-toggle]').count()) === 1, 'Pro: the appearance toggle is still there once signed in');
+  await page.click('[data-theme-toggle]'); await sleep(200);
+  ok((await page.evaluate(() => document.documentElement.getAttribute('data-theme'))) === 'dark', 'Pro: toggled to dark inside the workspace');
+  await page.reload(); await page.waitForSelector('nav.sidebar', { timeout: 25000 }); await sleep(400);
+  ok((await page.evaluate(() => document.documentElement.getAttribute('data-theme'))) === 'dark', 'Pro: dark persists across a reload');
+  const exits = await page.evaluate(() => [...document.querySelectorAll('.p-account [data-exit]')].map((b) => ({ exit: b.getAttribute('data-exit'), name: b.getAttribute('aria-label') || b.textContent.trim(), h: Math.round(b.getBoundingClientRect().height), inside: b.getBoundingClientRect().bottom <= innerHeight + 0.5, green: /0, 230, 118/.test(getComputedStyle(b).backgroundColor) })));
+  ok(exits.map((x) => x.exit).sort().join() === 'sign-out,switch-org' && exits.every((x) => x.name && x.inside && !x.green), `Pro: Sign out and Switch organisation sit in the account block, named, on screen, not a bright button (${exits.map((x) => x.name).join(' · ')})`);
+  const token = await page.evaluate(() => { try { return JSON.parse(localStorage.getItem('scoutbox-club-session') ?? 'null')?.token ?? null; } catch { return null; } });
+  await page.click('[data-testid="sign-out"]'); await page.waitForSelector('.auth-card', { timeout: 15000 }); await sleep(300);
+  ok((await page.locator('nav.sidebar').count()) === 0 && (await page.locator('.auth-card').count()) === 1, 'Pro: Sign out lands on the entry screen');
+  const refused = (await fetch(`${API}/org/notifications`, { headers: { authorization: `Bearer ${token}` } })).status;
+  ok(!!token && refused === 401, `Pro: the signed-out token is refused by the server (${refused})`);
+  const fixedAfter = await page.evaluate(() => ({ bg: getComputedStyle(document.querySelector('.auth-form')).backgroundColor, saved: localStorage.getItem('sb-theme:pro') }));
+  ok(fixedAfter.bg === 'rgb(23, 59, 39)' && fixedAfter.saved === 'dark', `Pro: after sign-out the entry screen is the fixed appearance (${fixedAfter.bg}) while the saved dark preference is kept`);
+  await page.goBack().catch(() => {}); await sleep(500);
+  ok((await page.locator('nav.sidebar').count()) === 0, 'Pro: Back after sign-out shows no workspace');
+  await page.goto(`http://localhost:${PORTS.club}/#/recruitment`); await sleep(800);
+  ok((await page.locator('nav.sidebar').count()) === 0 && (await page.locator('.auth-card').count()) === 1, 'Pro: a protected deep link after sign-out stops at the entry screen');
+  await enterPro();
+  ok((await page.evaluate(() => document.documentElement.getAttribute('data-theme'))) === 'dark', 'Pro: signing back in restores the saved dark theme');
+  await page.click('[data-testid="switch-org"]'); await page.waitForSelector('.auth-card', { timeout: 15000 });
+  ok((await page.locator('.org-card').count()) >= 2 && (await page.locator('nav.sidebar').count()) === 0, 'Pro: Switch organisation returns to the organisation rows');
+  await page.evaluate(() => localStorage.removeItem('sb-theme:pro'));
+  await ctx.close();
+}
+{
+  // Grassroots: Switch club; Agent: Switch profile; Trust & Safety: Sign out clears the key.
+  const ctx = await ctxFor(1280);
+  const g = await ctx.newPage(); g.on('pageerror', (e) => errors.push(`Grassroots exit: ${e}`));
+  await g.goto(`http://localhost:${PORTS.grassroots}/`); await g.waitForSelector('.org-card', { timeout: 25000 }); await g.click('.org-card:has-text("Hackney Marsh")'); await g.fill('.enter-row input', 'Sam Tully'); await g.click('button.primary'); await g.waitForSelector('nav.sidebar', { timeout: 25000 });
+  await g.click('[data-testid="switch-org"]'); await g.waitForSelector('.auth-card', { timeout: 15000 });
+  ok((await g.locator('.org-card').count()) >= 2 && (await g.locator('[data-testid="auth-tab-signin"]').count()) === 1, 'Grassroots: Switch club returns to the club rows with Sign in / Register club');
+  const a = await ctx.newPage(); a.on('pageerror', (e) => errors.push(`Agent exit: ${e}`));
+  await a.goto(`http://localhost:${PORTS.agent}/`); await a.waitForSelector('.auth-card', { timeout: 25000 }); await a.fill('.enter-row input', 'Ana Costa'); await a.click('button.primary'); await a.waitForSelector('nav.sidebar', { timeout: 25000 });
+  const atok = await a.evaluate(() => { try { return JSON.parse(localStorage.getItem('scoutbox-agent-session') ?? 'null')?.token ?? null; } catch { return null; } });
+  await a.click('[data-testid="switch-org"]'); await a.waitForSelector('.auth-card', { timeout: 15000 }); await sleep(300);
+  const aref = atok ? (await fetch(`${API}/org/agent/clients`, { headers: { authorization: `Bearer ${atok}` } })).status : null;
+  ok((await a.locator('nav.sidebar').count()) === 0 && (await a.locator('#agent-org-label').count()) === 1 && (aref === null || aref === 401), `Agent: Switch profile returns to the agency screen and the old token is refused (${aref})`);
+  ok((await a.evaluate(() => getComputedStyle(document.querySelector('.auth-form')).backgroundColor)) === 'rgb(32, 34, 35)', 'Agent: the entry screen is the fixed dark appearance');
+  const ts = await ctx.newPage(); ts.on('pageerror', (e) => errors.push(`T&S exit: ${e}`));
+  await ts.goto(`http://localhost:${PORTS.admin}/`); await ts.waitForSelector('.auth-card', { timeout: 25000 }); await ts.fill('input[type="password"]', 'scoutbox-admin'); await ts.click('button.primary'); await ts.waitForSelector('nav.sidebar', { timeout: 25000 });
+  await ts.click('[data-testid="sign-out"]'); await ts.waitForSelector('.auth-card', { timeout: 15000 });
+  ok((await ts.locator('nav.sidebar').count()) === 0 && (await ts.inputValue('input[type="password"]')) === '', 'Trust & Safety: Sign out returns to the key screen with the key cleared');
+  await ctx.close();
+}
+
 // ======================================================= Agent demo roster
 console.log('\n— Agent (demo roster) —');
 for (const width of [390, 1440]) {
@@ -251,7 +328,7 @@ for (const width of [320, 360, 390, 430, 1024, 1440]) {
       tabs: q('[role="tab"]').map((t) => t.getAttribute('aria-selected')), unnamed: buttons.filter((b) => !__sb.name(b)).length,
       promises: document.body.innerText.includes('Our promises to every player'), subtle: document.body.innerText.includes('You never pay to be seen.'),
       low, wordmark: !!q('[role="heading"]').find((h) => /ScoutBox/.test(h.textContent)), signature: !!document.querySelector('[data-testid="login-signature"]'),
-      bottomNav: !!document.querySelector('[role="tablist"] a[href="/discover"], a[href="/you"]'),
+      bottomNav: !!document.querySelector('[role="tablist"] a[href="/discover"], a[href^="/you"]'),
     };
   });
   const tag = `Player ${width}px`;
@@ -288,6 +365,25 @@ for (const width of [320, 360, 390, 430, 1024, 1440]) {
   await ctx.close();
 }
 say('Player: responsive and accessible at 320 / 360 / 390 / 430 / 1024 / 1440');
+{
+  const ctx = await ctxFor(390);
+  const page = await ctx.newPage(); page.on('pageerror', (e) => errors.push(`player exit: ${e}`));
+  await page.goto(`http://localhost:${PORTS.player}/`); await page.waitForSelector('text=Our promises to every player', { timeout: 40000 });
+  ok((await page.locator('[role="switch"]').count()) === 0, 'Player: no appearance switch on the entry screen');
+  const ff = await page.evaluate(async () => { await document.fonts.ready; await document.fonts.load('600 14px Inter').catch(() => null); const el = [...document.querySelectorAll('[data-testid="auth-welcome"] div')].find((d) => d.textContent.trim() === 'Player'); return { font: el ? getComputedStyle(el).fontFamily : null, loaded: document.fonts.check('600 14px Inter'), warned: false }; });
+  ok(/Inter/.test(ff.font ?? '') && ff.loaded, `Player: Inter resolves on the entry rows (${ff.font})`);
+  await page.locator('text=Enter').nth(0).click(); await page.waitForSelector('text=Your visibility right now', { timeout: 30000 });
+  ok((await page.locator('[role="switch"]').count()) >= 1, 'Player: the appearance switch is there once signed in');
+  await page.goto(`http://localhost:${PORTS.player}/you?tab=account`); await page.waitForSelector('[data-testid="sign-out"]', { timeout: 30000 });
+  const exits = await page.evaluate(() => [...document.querySelectorAll('[data-testid="sign-out"], [data-testid="switch-account"]')].map((b) => ({ id: b.getAttribute('data-testid'), name: b.getAttribute('aria-label'), green: /0, 230, 118/.test(getComputedStyle(b).backgroundColor) })));
+  ok(exits.length === 2 && exits.every((x) => x.name && !x.green), `Player: Sign out and Switch account on the account tab, named, not bright (${exits.map((x) => x.name).join(' · ')})`);
+  await page.click('[data-testid="switch-account"]'); await page.waitForSelector('[data-testid="auth-signin"]', { timeout: 20000 });
+  ok((await page.evaluate(() => localStorage.getItem('scoutbox-player-session'))) === null, 'Player: Switch account ends the identity and opens the entry screen on Sign in');
+  await page.goto(`http://localhost:${PORTS.player}/you`); await page.waitForSelector('[data-testid="auth-screen"]', { timeout: 20000 });
+  ok((await page.locator('a[href^="/you"]').count()) === 0, 'Player: a protected route after the exit stops at the entry screen');
+  await ctx.close();
+}
+
 
 ok(errors.length === 0, `no page errors in any context (${errors.length ? errors.join(' | ') : 'clean'})`);
 console.log(`\nm24dAuthLive: ${passed} checks passed`);
