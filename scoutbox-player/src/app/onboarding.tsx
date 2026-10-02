@@ -756,7 +756,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 48 },
   brand: { flexDirection: 'row', alignItems: 'baseline', gap: 7, flexShrink: 1 },
   logo: { color: AUTH_PAGE.white, fontSize: 26, fontWeight: '800', letterSpacing: -1.1 },
-  tm: { color: AUTH_PAGE.soft, fontSize: 8, fontWeight: '700', letterSpacing: 0.6, lineHeight: 10, alignSelf: 'flex-start', marginTop: 2, marginLeft: -4, marginRight: 2 },
+  tm: { color: AUTH_PAGE.soft, fontSize: 8, fontWeight: '700', letterSpacing: 0.4, lineHeight: 10, alignSelf: 'flex-start', marginTop: 2, marginLeft: -7, marginRight: 2 },
   product: { color: AUTH_PAGE.soft, fontSize: 12, fontWeight: '600' },
   intro: { backgroundColor: AUTH_PAGE.green, borderRadius: 14, padding: 18, gap: 12, overflow: 'hidden' },
   introTitle: { color: AUTH_PAGE.ink, fontSize: 22, fontWeight: '700', letterSpacing: -0.5, lineHeight: 27 },

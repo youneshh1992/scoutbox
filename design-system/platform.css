@@ -560,7 +560,7 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .auth-form > * { width: 100%; max-width: 360px; align-self: center; }
 .auth-form h1 { font-size: 30px; font-weight: 800; letter-spacing: -1.3px; line-height: 1; display: inline-flex; align-items: baseline; gap: 7px; flex-wrap: wrap; justify-content: flex-start; color: var(--auth-ink); margin-bottom: 4px; }
 .auth-form h1 .wordmark::after { background: var(--auth-green); }
-.auth-form h1 .tm { font-size: 9px; font-weight: 700; letter-spacing: 0.6px; line-height: 1; color: var(--auth-soft); align-self: flex-start; margin: 2px 2px 0 0; }
+.auth-form h1 .tm { font-size: 9px; font-weight: 700; letter-spacing: 0.4px; line-height: 1; color: var(--auth-soft); align-self: flex-start; margin: 1px 2px 0 -6px; }
 .auth-form h1 .brand-sub { color: var(--auth-soft); font-size: 13px !important; font-weight: 500; }
 :root[data-app="agent"] .auth-form h1 .brand-sub { color: var(--sb-gold, #a67c2e); background: #fbf4e4; font-weight: 700; padding: 3px 7px; border-radius: 5px; letter-spacing: 0; }
 :root[data-app="agent"][data-theme="dark"] .auth-form h1 .brand-sub { color: #a67c2e; }
