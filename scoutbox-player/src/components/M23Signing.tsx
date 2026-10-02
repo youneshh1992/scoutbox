@@ -64,7 +64,7 @@ export function SigningSection({ actor, view = 'all' }: { actor: Actor; view?: S
   const show = (...views: SigningView[]) => view === 'all' || views.includes(view);
   if (items.length === 0) {
     if (view === 'all') return null;
-    return <Card testID="signing-section"><SectionTitle>✍️ {pt('signingTitle')}</SectionTitle><Muted size={12.5}>{pt('signingNoneYet')}</Muted></Card>;
+    return <Card testID="signing-section"><SectionTitle>{pt('signingTitle')}</SectionTitle><Muted size={12.5}>{pt('signingNoneYet')}</Muted></Card>;
   }
 
   const confirm = async (s: FamilySigning) => {
@@ -91,7 +91,7 @@ export function SigningSection({ actor, view = 'all' }: { actor: Actor; view?: S
 
   return (
     <Card testID="signing-section">
-      <SectionTitle>✍️ {pt('signingTitle')}</SectionTitle>
+      <SectionTitle>{pt('signingTitle')}</SectionTitle>
       <Muted size={12.5}>{pt('signingHint')}</Muted>
       {items.map((s) => {
         const cur = s.currentRevision;

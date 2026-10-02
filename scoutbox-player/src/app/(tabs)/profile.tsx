@@ -95,26 +95,24 @@ export function ProfileBody() {
             <Text style={styles.avatarNumber}>{me.squadNumber ?? ''}</Text>
             <Text style={styles.avatarInitials}>{initials}</Text>
             <View style={styles.cameraBadge}>
-              <Text style={{ fontSize: 13 }}>📷</Text>
             </View>
           </View>
           <View style={{ flex: 1, gap: 4 }}>
             <Row>
               <Text style={styles.name}>{me.name}</Text>
-              {me.identityVerified && <Text style={{ color: colors.accentText, fontSize: 18 }}>✔</Text>}
-            </Row>
+                          </Row>
             <Text style={styles.subline}>
               {me.position ?? '—'} · {me.age} · {me.foot ? `${me.foot[0].toUpperCase()}${me.foot.slice(1)} Foot` : '—'} {flagEmoji(me.country)}
             </Text>
             {!isMinor && !!(me.city || me.country) && (
-              <Muted size={14}>📍 {me.city ? `${me.city}, ` : ''}{me.country}</Muted>
+              <Muted size={14}>{me.city ? `${me.city}, ` : ''}{me.country}</Muted>
             )}
-            {isMinor && <Muted size={14}>📍 {me.country} — exact location never shown</Muted>}
+            {isMinor && <Muted size={14}>{me.country} — exact location never shown</Muted>}
             {(me.heightCm || me.weightKg) && (
               <Muted size={14}>{me.heightCm ? `${me.heightCm} cm` : ''}{me.heightCm && me.weightKg ? '  ·  ' : ''}{me.weightKg ? `${me.weightKg} kg` : ''}</Muted>
             )}
             <Row style={{ marginTop: 4 }}>
-              {me.identityVerified && <Pill label="🛡 Identity verified" tone="green" />}
+              {me.identityVerified && <Pill label="Identity verified" tone="green" />}
               {isMinor && <Pill label="Guardian-managed" tone="blue" />}
               {me.badges.map((b) => <Pill key={b} label={b} tone="gold" />)}
             </Row>
@@ -124,7 +122,7 @@ export function ProfileBody() {
         {/* aging up: an 18th birthday hands the account to the player */}
         {me.agingUp?.eligible && (
           <Card>
-            <SectionTitle>🎂 You&apos;re 18 — this account can become fully yours</SectionTitle>
+            <SectionTitle>You&apos;re 18 — this account can become fully yours</SectionTitle>
             <Muted size={13}>
               Your parent/guardian has kept this account safe until now. Completing the handover moves
               availability, medical sharing and club contact to you. Your history — clips, reports,
@@ -143,7 +141,6 @@ export function ProfileBody() {
         <Card>
           <Row style={{ justifyContent: 'space-between' }}>
             <SectionTitle>Profile completeness</SectionTitle>
-            <Text style={{ fontSize: 22 }}>🛡</Text>
           </Row>
           <Row style={{ alignItems: 'flex-end' }}>
             <Text style={styles.trustBig}>{me.trustScore}</Text>
@@ -158,7 +155,7 @@ export function ProfileBody() {
           <Row style={{ justifyContent: 'space-between' }}>
             <Text style={styles.standing}>{completenessLabel(me.trustScore)}</Text>
             {me.tier && <Pill label={`Tier: ${me.tier}`} tone="green" />}
-            {typeof me.streak === 'number' && me.streak > 0 && <Pill label={`🔥 ${me.streak}-day streak`} tone="gold" />}
+            {typeof me.streak === 'number' && me.streak > 0 && <Pill label={`${me.streak}-day streak`} tone="gold" />}
           </Row>
           <Muted size={12.5}>
             Base {me.trust.base}  ·  Identity +{me.trust.identityVerified}  ·  Attendance +{me.trust.verifiedAttendance}  ·  Trial Reports +{me.trust.trialReports}  ·  Media +{me.trust.media}  ·  Profile +{me.trust.profileComplete}
@@ -175,21 +172,21 @@ export function ProfileBody() {
         {me.stats && (
           <Card>
             <Row style={{ justifyContent: 'space-between' }}>
-              <SectionTitle>📈 Season output</SectionTitle>
+              <SectionTitle>Season output</SectionTitle>
               <Pill label="This Season ▾" />
             </Row>
             <Row>
-              <StatTile icon="👕" v={String(me.stats.appearances)} k="Apps" />
+              <StatTile v={String(me.stats.appearances)} k="Apps" />
               {me.position === 'GK' ? (
-                <StatTile icon="🧤" v={String(me.stats.cleanSheets ?? 0)} k="Clean Sheets" />
+                <StatTile v={String(me.stats.cleanSheets ?? 0)} k="Clean Sheets" />
               ) : (
                 <>
-                  <StatTile icon="⚽" v={String(me.stats.goals)} k="Goals" />
-                  <StatTile icon="🥾" v={String(me.stats.assists)} k="Assists" />
+                  <StatTile v={String(me.stats.goals)} k="Goals" />
+                  <StatTile v={String(me.stats.assists)} k="Assists" />
                 </>
               )}
-              {me.stats.paceKmh != null && <StatTile icon="⚡" v={`${me.stats.paceKmh}`} k="km/h Top Speed" />}
-              {me.stats.passCompletionPct != null && <StatTile icon="🎯" v={`${me.stats.passCompletionPct}%`} k="Pass Accuracy" />}
+              {me.stats.paceKmh != null && <StatTile v={`${me.stats.paceKmh}`} k="km/h Top Speed" />}
+              {me.stats.passCompletionPct != null && <StatTile v={`${me.stats.passCompletionPct}%`} k="Pass Accuracy" />}
             </Row>
             {(me.seasonHistory?.length ?? 0) > 0 && (() => {
               // Progress over time: history (oldest → newest) plus this season.
@@ -229,7 +226,7 @@ export function ProfileBody() {
         {/* availability */}
         {!isMinor ? (
           <Card>
-            <SectionTitle>🗓 Availability</SectionTitle>
+            <SectionTitle>Availability</SectionTitle>
             <Row>
               {(Object.keys(AVAILABILITY_LABELS) as Availability[]).map((a) => (
                 <Button key={a} small primary={me.availability === a} label={AVAILABILITY_LABELS[a]}
@@ -240,7 +237,7 @@ export function ProfileBody() {
               <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 10, marginTop: 4 }}>
                 <Row style={{ justifyContent: 'space-between' }}>
                   <View style={{ flex: 1, paddingRight: 10 }}>
-                    <Text style={{ color: colors.text, fontSize: 14, fontWeight: '700' }}>🔎 Looking for my first team</Text>
+                    <Text style={{ color: colors.text, fontSize: 14, fontWeight: '700' }}>Looking for my first team</Text>
                     <Muted size={12}>
                       First Team Seekers surface first to local grassroots clubs. Need-based, free, never
                       purchasable — switch it off any time.
@@ -276,7 +273,7 @@ export function ProfileBody() {
           </Card>
         ) : (
           <Card>
-            <SectionTitle>🗓 Availability</SectionTitle>
+            <SectionTitle>Availability</SectionTitle>
             <Muted size={13}>
               Availability and club interactions are managed by your parent or guardian. You focus on
               playing — uploads, stats and drills are all yours.
@@ -289,7 +286,7 @@ export function ProfileBody() {
           <Card>
             <Row style={{ justifyContent: 'space-between' }}>
               <View style={{ flex: 1, paddingRight: 10 }}>
-                <SectionTitle>🎓 Academy+</SectionTitle>
+                <SectionTitle>Academy+</SectionTitle>
                 <Muted size={12.5}>
                   Opt-in cohort for released and late-developing players — a fresh start, surfaced first
                   in club searches.
@@ -303,7 +300,6 @@ export function ProfileBody() {
               />
             </Row>
             <View style={styles.subRow}>
-              <Text style={{ fontSize: 14 }}>👤</Text>
               <View style={{ flex: 1 }}>
                 <Text style={{ color: colors.text, fontSize: 13.5, fontWeight: '600' }}>Player-controlled.</Text>
                 <Muted size={12.5}>You can switch this off any time.</Muted>
@@ -316,7 +312,7 @@ export function ProfileBody() {
         {/* contract status card */}
         {(me.contractUntil || me.marketValueRange || me.agentName) && (
           <Card>
-            <SectionTitle>📄 Contract status</SectionTitle>
+            <SectionTitle>Contract status</SectionTitle>
             <Row style={{ alignItems: 'stretch' }}>
               <View style={{ flex: 1, gap: 10 }}>
                 {me.contractUntil && (
@@ -336,13 +332,12 @@ export function ProfileBody() {
                 )}
                 {me.agentName && (
                   <View>
-                    <Muted size={12}>🕴 Agent</Muted>
+                    <Muted size={12}>Agent</Muted>
                     <Text style={styles.contractV}>{me.agentName}</Text>
                   </View>
                 )}
               </View>
               <View style={styles.jersey}>
-                <Text style={{ fontSize: 44 }}>👕</Text>
                 <Text style={styles.jerseyNumber}>{me.squadNumber ?? ''}</Text>
               </View>
             </Row>
@@ -353,7 +348,7 @@ export function ProfileBody() {
 
         {benchmarks && (benchmarks.drills.length > 0 || benchmarks.stats.length > 0) && (
           <Card>
-            <SectionTitle>📊 Where you stand — your cohort, not the pros</SectionTitle>
+            <SectionTitle>Where you stand — your cohort, not the pros</SectionTitle>
             <Muted size={12}>{benchmarks.note}</Muted>
             {benchmarks.stats.map((b) => (
               <Row key={b.stat} style={{ justifyContent: 'space-between' }}>
@@ -463,8 +458,8 @@ export function ProfileBody() {
                   accel {r.acceleration}/10 · {r.sprintSpeedKmh} km/h · {r.distanceKm} km · pass {r.passCompletionPct}% ·
                   duels {r.duelSuccessPct}% · coach {r.coachRating}/10
                 </Muted>
-                {r.strengthNote ? <Muted size={12.5}>💪 Strength: {r.strengthNote}</Muted> : null}
-                {r.focusNote ? <Muted size={12.5}>🎯 Work on: {r.focusNote}</Muted> : null}
+                {r.strengthNote ? <Muted size={12.5}>Strength: {r.strengthNote}</Muted> : null}
+                {r.focusNote ? <Muted size={12.5}>Work on: {r.focusNote}</Muted> : null}
               </View>
             ))}
             <Muted size={12.5}>Filed by clubs after your trials — mandatory, and they raise your Trust Score.</Muted>
@@ -507,10 +502,10 @@ export function ProfileBody() {
 
         {(me.drillResults?.length ?? 0) > 0 && (
           <Card>
-            <SectionTitle>🏟 At-home combine</SectionTitle>
+            <SectionTitle>At-home combine</SectionTitle>
             {me.drillResults!.map((r) => (
               <Row key={r.id}>
-                <Pill label={r.verified ? '🎥 verified' : 'self-reported'} tone={r.verified ? 'green' : 'blue'} />
+                <Pill label={r.verified ? 'verified' : 'self-reported'} tone={r.verified ? 'green' : 'blue'} />
                 <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>{r.drillName}</Text>
                 <Muted size={12}>{r.metric}: {r.value}{r.unit}</Muted>
               </Row>
@@ -522,7 +517,7 @@ export function ProfileBody() {
         <Card>
           <Row style={{ justifyContent: 'space-between' }}>
             <View style={{ flex: 1, paddingRight: 10 }}>
-              <SectionTitle>📄 Your verified sports CV</SectionTitle>
+              <SectionTitle>Your verified sports CV</SectionTitle>
               <Muted size={12.5}>
                 Your whole verified record — attendance, trial reports, combine numbers, trust — as a
                 portable CV you own. ScoutBox never locks your history in.
@@ -570,12 +565,11 @@ export function ProfileBody() {
   );
 }
 
-function StatTile({ icon, v, k }: { icon: string; v: string; k: string }) {
+function StatTile({ v, k }: { v: string; k: string }) {
   const colors = useColors();
   const styles = useStyles(makeStyles);
   return (
     <View style={styles.statTile}>
-      <Text style={{ fontSize: 20 }}>{icon}</Text>
       <Text style={styles.statValue}>{v}</Text>
       <Muted size={11}>{k}</Muted>
     </View>

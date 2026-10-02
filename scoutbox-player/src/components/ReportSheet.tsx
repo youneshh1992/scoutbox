@@ -1,4 +1,4 @@
-// One-click reporting + blocking, reachable from EVERY screen via the ⚑
+// One-click reporting + blocking, reachable from EVERY screen via the 
 // button in each tab header. Works for both player and guardian sessions.
 // An urgent report immediately suspends communication pending review.
 

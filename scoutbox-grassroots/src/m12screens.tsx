@@ -143,7 +143,7 @@ export function AssessmentsScreen({ session, tick, notify }: ScreenProps) {
                 <button aria-label={`${t('assess.publish')} for ${a.playerName}`} onClick={async () => {
                   const text = window.prompt('Feedback the player/guardian will actually see (this is the ONLY thing that leaves the club):');
                   if (!text) return;
-                  try { await m12.publishFeedback(session, a.id, text); notify('📋 Feedback published to the player side.'); reload(); }
+                  try { await m12.publishFeedback(session, a.id, text); notify('Feedback published to the player side.'); reload(); }
                   catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
                 }}>{t('assess.publish')}</button>
               )}
@@ -230,7 +230,7 @@ function AssessmentEditor({ session, assessment, notify, onClose }: { session: S
     <div className="section" role="form" aria-label={`Assessment of ${assessment.playerName}`}>
       <h3>{assessment.playerName} <span className="dim">template v{assessment.templateVersion}</span>
         <span className="pill" style={{ marginLeft: 8 }} aria-live="polite">
-          {saveState === 'local' ? `💾 ${t('assess.draftSaved')} · ${t('assess.pendingSync')}` : saveState === 'synced' ? `✓ ${t('assess.synced')}` : t('assess.draft')}
+          {saveState === 'local' ? `${t('assess.draftSaved')} · ${t('assess.pendingSync')}` : saveState === 'synced' ? `✓ ${t('assess.synced')}` : t('assess.draft')}
         </span>
         <button onClick={onClose} style={{ float: 'right' }}>{t('common.close')}</button>
       </h3>
@@ -697,7 +697,7 @@ function SharedObjectives({ session, tick, notify }: { session: Session; tick: n
               const note = window.prompt('Reassessment outcome (point at the evidence):');
               if (!note) return;
               try { await m12.reassessmentOutcome(session, r.id, note); notify('Outcome recorded and sent.'); } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
-            }}>🔁 record reassessment</button>
+            }}>record reassessment</button>
           ))}
         </div>
       ))}
@@ -829,7 +829,7 @@ export function CoachesScreen({ session, tick, notify }: ScreenProps) {
             if (!pid) return;
             try {
               const r = await m12.inviteToSquad(session, pid, 'Join our squad list');
-              notify(r.status === 'pending_guardian' ? '📨 Sent to the guardian for approval.' : '📨 Sent to the player for approval.');
+              notify(r.status === 'pending_guardian' ? 'Sent to the guardian for approval.' : 'Sent to the player for approval.');
             } catch (err) { notify(err instanceof Error ? err.message : 'Failed', true); }
             e.target.value = '';
           }}>

@@ -164,12 +164,12 @@ export default function GuardianDashboard() {
 
         {digest && digest.children.length > 0 && (
           <Card>
-            <SectionTitle>📬 This week&apos;s digest</SectionTitle>
+            <SectionTitle>This week&apos;s digest</SectionTitle>
             {digest.children.map((c) => (
               <Muted key={c.id} size={13}>
                 <Text style={{ color: colors.text, fontWeight: '700' }}>{c.name}:</Text> {c.views} club view{c.views === 1 ? '' : 's'},{' '}
                 {c.newRequests} new request{c.newRequests === 1 ? '' : 's'}, {c.activityThisWeek} training activit{c.activityThisWeek === 1 ? 'y' : 'ies'}
-                {c.streak > 0 ? ` · 🔥 ${c.streak}-day streak` : ''}{c.weeklyGoal.met ? ' · weekly goal met ✓' : ''}
+                {c.streak > 0 ? ` · ${c.streak}-day streak` : ''}{c.weeklyGoal.met ? ' · weekly goal met ✓' : ''}
               </Muted>
             ))}
             <Muted size={11.5}>{digest.note}</Muted>
@@ -307,7 +307,7 @@ export default function GuardianDashboard() {
               </Muted>
               {ins && (
                 <Muted size={12.5}>
-                  👁 {ins.thisMonth.views} profile view{ins.thisMonth.views === 1 ? '' : 's'} this month
+                  {ins.thisMonth.views} profile view{ins.thisMonth.views === 1 ? '' : 's'} this month
                   {ins.byOrg.length > 0 ? ` — most recently ${ins.byOrg[0].orgName}` : ''}. Only verified clubs can look.
                 </Muted>
               )}
@@ -361,7 +361,7 @@ export default function GuardianDashboard() {
                 </Row>
                 {(openDays[c.id]?.length ?? 0) > 0 && (
                   <View style={{ gap: 6 }}>
-                    <Muted size={12.5}>📅 Open days near {c.name.split(' ')[0]} — verified local clubs only. You register; they play.</Muted>
+                    <Muted size={12.5}>Open days near {c.name.split(' ')[0]} — verified local clubs only. You register; they play.</Muted>
                     {openDays[c.id]!.map((t) => (
                       <Row key={t.id} style={{ justifyContent: 'space-between' }}>
                         <View style={{ flex: 1 }}>
@@ -384,7 +384,7 @@ export default function GuardianDashboard() {
                 <Row style={{ justifyContent: 'space-between' }}>
                   <View style={{ flex: 1, paddingRight: 10 }}>
                     <Muted size={12.5}>
-                      🔎 First Team Seeker {c.firstTeamSeeker ? 'ON' : 'OFF'} — surfaces {c.name.split(' ')[0]} first to
+                      First Team Seeker {c.firstTeamSeeker ? 'ON' : 'OFF'} — surfaces {c.name.split(' ')[0]} first to
                       local verified clubs looking for new players. Your call, free, reversible.
                     </Muted>
                   </View>

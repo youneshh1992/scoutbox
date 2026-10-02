@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ThemeToggle, useTheme, type Theme } from '../../design-system/theme';
-import { AuthAccessNote, AuthField, AuthPage, PasswordInput } from '../../design-system/AuthShell';
+import { AuthAccessNote, AuthField, AuthNote, AuthPage, AuthRow, PasswordInput } from '../../design-system/AuthShell';
 import { initials } from '../../design-system/text';
 import { Icon } from './icons';
 import { api, ApiError, DEMO_MODE, revokeSession, type Channel, type Notification, type Org, type Session } from './api';
@@ -202,30 +202,22 @@ function Login({ onLogin, theme, onToggleTheme }: { onLogin: (s: Session) => voi
       app="pro"
       product="Pro"
       heading="A clearer view of your next signing."
+      summary="Evidence, assessments and one attributed decision per case."
       points={[
-        'Recruitment Rooms: evidence, assessments and one attributed decision per case.',
-        'Contact, trials, Offers and signings on one canonical journey.',
-        'No unsolicited contact — every approach is a request the player answers.',
+        'Recruitment Rooms for every case.',
+        'Contact, trials, Offers and signings on one journey.',
+        'No unsolicited contact: every approach is a request the player answers.',
       ]}
       toolbar={<ThemeToggle theme={theme} onToggle={onToggleTheme} labels={{ aria: t('theme.aria'), light: t('theme.light'), dark: t('theme.dark') }} />}
-      aside={DEMO_MODE ? <div className="pill blue">Self-contained demo — no server needed</div> : undefined}
+      aside={DEMO_MODE ? <AuthNote>Self-contained demo — no server needed.</AuthNote> : undefined}
     >
       <form className="auth-signin" onSubmit={(e) => { e.preventDefault(); void enter(); }} aria-label="Sign in" noValidate>
         <div className="auth-field" role="group" aria-labelledby="pro-org-label">
           <span className="auth-label" id="pro-org-label">Organisation</span>
           <div className="org-grid">
             {orgs.map((o) => (
-              <button type="button" key={o.id} className={`org-card ${selected === o.id ? 'selected' : ''}`} aria-pressed={selected === o.id} onClick={() => setSelected(o.id)}>
-                <span className="org-name">{o.name}</span>
-                <span>
-                  <span className={`pill ${o.type === 'agency' ? 'red' : 'blue'}`}>{o.type}</span>{' '}
-                  <span className="pill">{o.plan}</span>{' '}
-                  {o.trustedPartner && <span className="pill gold">Trusted Partner</span>}{' '}
-                  {o.type === 'club' && (o.verified
-                    ? <span className="pill green">Verified</span>
-                    : <span className="pill">verification pending</span>)}
-                </span>
-              </button>
+              <AuthRow key={o.id} label={o.name} selected={selected === o.id} onClick={() => setSelected(o.id)}
+                meta={[o.type, o.plan, o.trustedPartner ? 'Trusted Partner' : null, o.type === 'club' ? (o.verified ? 'Verified' : 'verification pending') : null].filter(Boolean).join(' · ')} />
             ))}
           </div>
         </div>
@@ -504,7 +496,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
     }
     const fresh = notifications.filter((n) => !n.read && !seenNotifIds.current!.has(n.id));
     for (const n of notifications) seenNotifIds.current.add(n.id);
-    if (fresh.length > 0) notify(`🔔 ${fresh[0].text}${fresh.length > 1 ? ` (+${fresh.length - 1} more)` : ''}`);
+    if (fresh.length > 0) notify(`${fresh[0].text}${fresh.length > 1 ? ` (+${fresh.length - 1} more)` : ''}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notifications]);
 

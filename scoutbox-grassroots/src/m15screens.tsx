@@ -189,7 +189,7 @@ export function FootballPassportPanel({ session, playerId, notify }: { session: 
   return (
     <div className="section" aria-label={t('fp.title')}>
       <h4>
-        🛂 {t('fp.title')}{' '}
+        {t('fp.title')}{' '}
         <button style={{ marginLeft: 8 }} onClick={() => setOpen((x) => !x)}>{open ? t('fp.hide') : t('fp.show')}</button>
       </h4>
       {open && err && <div className="notice block">{err}</div>}
@@ -240,7 +240,7 @@ export function SharedPassportOpener({ session, notify }: { session: Session; no
   const [err, setErr] = useState<string | null>(null);
   return (
     <div className="section" aria-label={t('fp.shareOpen')}>
-      <h4>🔗 {t('fp.shareOpen')}</h4>
+      <h4>{t('fp.shareOpen')}</h4>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 6 }}>{t('fp.shareOpenNote')}</div>
       <div style={{ display: 'flex', gap: 8 }}>
         <input style={{ flex: 1 }} placeholder={t('fp.sharePlaceholder')} value={input} onChange={(e) => setInput(e.target.value)} aria-label={t('fp.sharePlaceholder')} />

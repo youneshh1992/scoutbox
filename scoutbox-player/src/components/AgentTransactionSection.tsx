@@ -84,7 +84,7 @@ export function AgentTransactionSection({ playerId, isMinor }: { playerId: strin
 
   return (
     <Card testID="agent-transactions">
-      <SectionTitle>🤝 {pt('m26title')}</SectionTitle>
+      <SectionTitle>{pt('m26title')}</SectionTitle>
       <Muted size={12}>{pt('m26intro')}</Muted>
       {err && <Muted size={12}>{err}</Muted>}
       {items.map((tx) => {

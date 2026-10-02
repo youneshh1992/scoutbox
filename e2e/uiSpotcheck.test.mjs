@@ -74,7 +74,7 @@ const freshPage = async () => {
 // ---- new guardian: password + email code (DEMO42) gates, then IDV
 {
   const page = await freshPage();
-  await page.click('text=I\'m a parent / guardian');
+  await page.click('[data-testid="auth-choice-parent"]'); // M24D: the entry rows are Player · Parent · Guardian · Use an invitation code
   await page.fill('input[placeholder="Your full name"]', 'Nadia Test');
   await page.fill('input[placeholder="Your email"]', 'nadia@testfamily.co.uk');
   await page.fill('input[placeholder="Password (required, 8+ characters)"]', 'longenough1');
@@ -101,7 +101,7 @@ const freshPage = async () => {
   say(`guardian pairing code generated: ${code}`);
 
   const c = await freshPage();
-  await c.click('text=I have a code from my parent/guardian');
+  await c.click('text=Use an invitation code'); // M24D: the entry rows are Player · Parent · Guardian · Use an invitation code
   await c.fill('input[placeholder="XXXXXX"]', code);
   await c.click('text=Pair and enter');
   await c.waitForSelector('text=Your visibility right now', { timeout: 20000 });

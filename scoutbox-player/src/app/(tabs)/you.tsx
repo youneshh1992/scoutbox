@@ -128,7 +128,7 @@ export default function You() {
                 <SectionTitle>Your guardian-managed account</SectionTitle>
                 <Muted size={13}>
                   Your parent or guardian owns this account and handles everything club-related. If anything
-                  on ScoutBox ever makes you uncomfortable, use the ⚑ Report button — it&apos;s on every
+                  on ScoutBox ever makes you uncomfortable, use the Report button — it&apos;s on every
                   screen — or tell your guardian.
                 </Muted>
               </Card>
@@ -152,7 +152,7 @@ export default function You() {
             {me?.pathway && (
               <Card>
                 <Row style={{ justifyContent: 'space-between' }}>
-                  <SectionTitle>🎉 Your season wrap</SectionTitle>
+                  <SectionTitle>Your season wrap</SectionTitle>
                   <Button small primary label={wrap ? 'Refresh' : 'Show my season'} onPress={async () => {
                     try { setWrap(await client.getSeasonWrap(playerId!)); } catch { /* stays hidden */ }
                   }} />
@@ -163,12 +163,12 @@ export default function You() {
                       {wrap.player.name} — {wrap.player.level === 'semi_pro' ? 'Semi-pro' : 'Amateur'} {wrap.player.position ?? ''}
                     </Text>
                     <Row>
-                      {wrap.season && <Pill label={`⚽ ${wrap.season.goals} goals`} tone="gold" />}
-                      {wrap.season && <Pill label={`👕 ${wrap.season.appearances} apps`} />}
-                      <Pill label={`📍 ${wrap.verifiedAttendances} verified matches`} tone="green" />
-                      <Pill label={`🎬 ${wrap.verifiedClips} verified clips`} />
-                      <Pill label={`🔥 best streak ${wrap.bestStreak}`} />
-                      <Pill label={`👁 ${wrap.scoutViews} scout views`} tone="blue" />
+                      {wrap.season && <Pill label={`${wrap.season.goals} goals`} tone="gold" />}
+                      {wrap.season && <Pill label={`${wrap.season.appearances} apps`} />}
+                      <Pill label={`${wrap.verifiedAttendances} verified matches`} tone="green" />
+                      <Pill label={`${wrap.verifiedClips} verified clips`} />
+                      <Pill label={`best streak ${wrap.bestStreak}`} />
+                      <Pill label={`${wrap.scoutViews} scout views`} tone="blue" />
                       {wrap.coachVouches > 0 && <Pill label={`⭐ ${wrap.coachVouches} coach reference${wrap.coachVouches === 1 ? '' : 's'}`} tone="gold" />}
                     </Row>
                     {wrap.combineBests.length > 0 && (

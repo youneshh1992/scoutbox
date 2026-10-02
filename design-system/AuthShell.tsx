@@ -15,12 +15,14 @@ import { useId, useState, type ReactNode } from 'react';
 
 export type AuthApp = 'pro' | 'grass' | 'agent' | 'safety';
 
-export function AuthPage({ app, product, heading, points, toolbar, children, aside }: {
+export function AuthPage({ app, product, heading, summary, points, toolbar, children, aside }: {
   app: AuthApp;
   /** The product identity beside the wordmark: Pro, Grassroots, Agent, Trust & Safety. */
   product: string;
   heading: string;
-  /** At most three short, factual lines about what exists. */
+  /** M24D — one sentence under the headline; the only introduction a phone shows. */
+  summary?: string;
+  /** At most three short, factual lines about what exists (desktop only). */
   points: readonly string[];
   toolbar?: ReactNode;
   children: ReactNode;
@@ -34,6 +36,7 @@ export function AuthPage({ app, product, heading, points, toolbar, children, asi
       <div className="auth-card">
         <section className="auth-promo" aria-labelledby={hid}>
           <h2 id={hid}>{heading}</h2>
+          {summary ? <p className="auth-summary">{summary}</p> : null}
           <ul className="auth-points">
             {points.slice(0, 3).map((p) => <li key={p.slice(0, 24)}>{p}</li>)}
           </ul>
@@ -83,6 +86,34 @@ export function PasswordInput({ className, ...rest }: React.InputHTMLAttributes<
       <button type="button" className="auth-eye" onClick={() => setShown((x) => !x)} aria-label={shown ? 'Hide password' : 'Show password'} aria-pressed={shown}>{shown ? 'Hide' : 'Show'}</button>
     </span>
   );
+}
+
+/** M24D — a choice presented as a row: a name, one quiet line, an arrow.
+ *  Keeps `.org-card` / `.org-name` so the browser suites still find it. A row
+ *  that selects (organisation) carries aria-pressed; a row that acts (a demo
+ *  identity) does not. */
+export function AuthRow({ label, meta, selected, onClick, testId, title }: {
+  label: string; meta?: string; selected?: boolean; onClick: () => void; testId?: string; title?: string;
+}) {
+  return (
+    <button type="button" className={`org-card auth-row ${selected ? 'selected' : ''}`} aria-pressed={selected} onClick={onClick} data-testid={testId} title={title}>
+      <span className="auth-row-text">
+        <span className="org-name">{label}</span>
+        {meta ? <span className="auth-row-meta">{meta}</span> : null}
+      </span>
+      <span className="auth-row-arrow" aria-hidden="true">→</span>
+    </button>
+  );
+}
+
+/** M24D — a small uppercase label over a block of the form ("AGENCY", "Organisation"). */
+export function AuthSectionLabel({ children, id }: { children: ReactNode; id?: string }) {
+  return <span className="auth-label" id={id}>{children}</span>;
+}
+
+/** M24D — a quiet one-line note (demo mode, access). */
+export function AuthNote({ children, testId }: { children: ReactNode; testId?: string }) {
+  return <p className="auth-note" data-testid={testId}>{children}</p>;
 }
 
 /** The access note shown instead of a public sign-up. */

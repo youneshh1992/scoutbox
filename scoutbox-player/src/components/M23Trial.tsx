@@ -43,7 +43,7 @@ export function TrialWorkflowSection({ actor, standalone = false }: { actor: Act
   }, [actor.id, actor.kind, tick]);
   if (!trials) return null;
   const withWorkflow = trials.filter((t) => t.workflow);
-  if (withWorkflow.length === 0) return standalone ? <Card testID="trial-workflow"><SectionTitle>📅 {pt('trialWf')}</SectionTitle><Muted size={12.5}>{pt('trialWfNone')}</Muted></Card> : null;
+  if (withWorkflow.length === 0) return standalone ? <Card testID="trial-workflow"><SectionTitle>{pt('trialWf')}</SectionTitle><Muted size={12.5}>{pt('trialWfNone')}</Muted></Card> : null;
 
   const act = async (t: FamilyTrial, what: 'confirm' | 'decline' | 'cancel') => {
     if (busy) return;
@@ -66,7 +66,7 @@ export function TrialWorkflowSection({ actor, standalone = false }: { actor: Act
 
   return (
     <Card testID="trial-workflow">
-      <SectionTitle>📅 {pt('trialWf')}</SectionTitle>
+      <SectionTitle>{pt('trialWf')}</SectionTitle>
       <Muted size={12.5}>{pt('trialWfHint')}</Muted>
       {withWorkflow.map((t) => {
         const w = t.workflow!;
@@ -93,7 +93,7 @@ export function TrialWorkflowSection({ actor, standalone = false }: { actor: Act
                 {wf.schedule.sessions.map((s) => (
                   <View key={s.id} style={{ marginTop: 4, backgroundColor: colors.panel2, borderRadius: 8, padding: 8 }}>
                     <Text style={{ color: colors.text, fontSize: 13 }}>{fmtIn(s.startsAt, zone)} – {fmtEnd(s.endsAt, zone)} · {s.kind.replace(/_/g, ' ')}</Text>
-                    {s.venue && <Muted size={12}>📍 {s.venue.name}{s.venue.town ? `, ${s.venue.town}` : ''}</Muted>}
+                    {s.venue && <Muted size={12}>{s.venue.name}{s.venue.town ? `, ${s.venue.town}` : ''}</Muted>}
                     {s.venue?.address ? <Muted size={12}>{pt('trialWfAddress')}: {s.venue.address}</Muted> : null}
                     {s.instructions ? <Muted size={12}>{pt('trialWfInstructions')}: {s.instructions}</Muted> : null}
                     {s.attendance.state !== 'not_recorded' && <Muted size={12}>{attLabel(s.attendance.state)}</Muted>}
@@ -147,7 +147,7 @@ export function TrialSlotChips({ slots, chosenDay, onPick }: { slots: { id: stri
             >
               {active ? '● ' : '○ '}{fmtIn(sl.startsAt, sl.timezone)} – {fmtEnd(sl.endsAt, sl.timezone)} <Text style={{ color: colors.muted }}>({sl.timezone}){sl.kind ? ` · ${sl.kind.replace(/_/g, ' ')}` : ''}</Text>
             </Text>
-            {sl.venue && <Muted size={12}>📍 {sl.venue.name}{sl.venue.town ? `, ${sl.venue.town}` : ''}</Muted>}
+            {sl.venue && <Muted size={12}>{sl.venue.name}{sl.venue.town ? `, ${sl.venue.town}` : ''}</Muted>}
           </View>
         );
       })}

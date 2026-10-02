@@ -178,13 +178,12 @@ export function Threads({ channels, onSend, onOpen, onTyping, attachableClips, e
           {error && <Text style={{ color: colors.danger, fontSize: 12.5 }}>{error}</Text>}
           {attachableClips && attachableClips.length > 0 && (
             <Row style={{ marginTop: 8 }}>
-              <Muted size={12}>📎</Muted>
               {attachableClips.slice(0, 3).map((m) => (
                 <Button
                   key={m.id}
                   small
                   primary={attachId === m.id}
-                  label={`🎬 ${m.title.slice(0, 18)}${m.verifiedClip ? ' ✅' : ''}`}
+                  label={`${m.title.slice(0, 18)}${m.verifiedClip ? ' ✅' : ''}`}
                   onPress={() => setAttachId(attachId === m.id ? null : m.id)}
                 />
               ))}
@@ -217,7 +216,7 @@ function Attachment({ attachment }: { attachment?: MessageAttachment | null }) {
     return (
       <View style={{ gap: 4, marginTop: 4 }}>
         <Row>
-          <Pill label={`🎬 ${attachment.title ?? 'clip'}`} tone="blue" />
+          <Pill label={`${attachment.title ?? 'clip'}`} tone="blue" />
           {attachment.verifiedClip && <Pill label="✅ Verified Clip" tone="green" />}
         </Row>
         {src && <WebVideo src={src} />}
@@ -226,7 +225,7 @@ function Attachment({ attachment }: { attachment?: MessageAttachment | null }) {
   }
   return (
     <View style={{ gap: 2, marginTop: 4 }}>
-      <Pill label={`📊 Trial report — ${attachment.orgName ?? ''}`} tone="gold" />
+      <Pill label={`Trial report — ${attachment.orgName ?? ''}`} tone="gold" />
       {attachment.summary && <Muted size={11.5}>{attachment.summary}</Muted>}
     </View>
   );

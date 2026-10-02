@@ -707,7 +707,7 @@ function PassportPanel({ session, room, notify }: PanelProps) {
   }
   return (
     <div className="section" aria-label={t('rm.tab.passport')}>
-      <h4>🛂 {t('rm.tab.passport')}</h4>
+      <h4>{t('rm.tab.passport')}</h4>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 6 }}>{t('rm.passportNote')}</div>
       <PassportBody session={session} p={room.passport} notify={notify} />
     </div>

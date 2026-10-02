@@ -47,7 +47,7 @@ export function PassportSection({ actor }: { actor: Actor }) {
   if (!pp) return null;
   return (
     <Card>
-      <SectionTitle>🛂 {pt('passport')}</SectionTitle>
+      <SectionTitle>{pt('passport')}</SectionTitle>
       <Muted size={12}>{pt('provenance')}</Muted>
       {pp.summary.insufficient && (
         <View style={{ backgroundColor: colors.panel2, borderRadius: 8, padding: 8, marginTop: 6 }}>
@@ -108,7 +108,7 @@ export function BoardSection({ actor }: { actor: Actor }) {
   if (!board) return null;
   return (
     <Card>
-      <SectionTitle>📋 {pt('board')}</SectionTitle>
+      <SectionTitle>{pt('board')}</SectionTitle>
       {board.note && <Muted size={12}>{board.note}</Muted>}
       {board.items.map((o: BoardItem) => (
         <View key={o.id} style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }}>
@@ -144,7 +144,7 @@ export function BoardSection({ actor }: { actor: Actor }) {
       ))}
       {board.items.length === 0 && <Muted size={12}>Nothing open near you right now.</Muted>}
       {msg && <View accessibilityLiveRegion="polite"><Muted size={12}>{msg}</Muted></View>}
-      {actor.kind === 'player' && board.minor && <Muted size={12}>👨‍👩‍👧 {pt('guardianApplies')}</Muted>}
+      {actor.kind === 'player' && board.minor && <Muted size={12}>{pt('guardianApplies')}</Muted>}
     </Card>
   );
 }
@@ -160,7 +160,7 @@ export function CampaignsSection({ actor, mediaOptions }: { actor: Actor; mediaO
   if (!camps || camps.length === 0) return null;
   return (
     <Card>
-      <SectionTitle>🎬 {pt('campaigns')}</SectionTitle>
+      <SectionTitle>{pt('campaigns')}</SectionTitle>
       <Muted size={12}>{pt('fileVsHuman')}</Muted>
       {camps.map((c) => (
         <View key={c.id} style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }}>
@@ -169,7 +169,7 @@ export function CampaignsSection({ actor, mediaOptions }: { actor: Actor; mediaO
           {c.drills.map((d, i) => (
             <View key={i} style={{ marginTop: 6 }}>
               <Text style={{ color: colors.text, fontSize: 12.5 }}>{d.name}: {d.instructions}</Text>
-              <Muted size={11.5}>📹 {pt('recording')}: {Object.values(d.recording).join(' · ')}</Muted>
+              <Muted size={11.5}>{pt('recording')}: {Object.values(d.recording).join(' · ')}</Muted>
             </View>
           ))}
           {(c.mySubmission?.attempts ?? []).map((a) => (
@@ -192,7 +192,7 @@ function AttemptForm({ actor, campaign, mediaOptions, onDone }: { actor: Actor; 
   return (
     <Row style={{ marginTop: 6, flexWrap: 'wrap' }}>
       {mediaOptions.slice(0, 3).map((m) => (
-        <Button key={m.id} small primary={mediaId === m.id} label={`📎 ${m.title.slice(0, 18)}`} onPress={() => setMediaId(m.id)} />
+        <Button key={m.id} small primary={mediaId === m.id} label={`${m.title.slice(0, 18)}`} onPress={() => setMediaId(m.id)} />
       ))}
       <Button small primary label={pt('submitAttempt')} onPress={async () => {
         try {
@@ -222,7 +222,7 @@ export function FeedbackDevSection({ actor }: { actor: Actor }) {
   const say = (m: string) => setMsg(m);
   return (
     <Card>
-      <SectionTitle>📋 {pt('feedback')} & {pt('objectives')}</SectionTitle>
+      <SectionTitle>{pt('feedback')} & {pt('objectives')}</SectionTitle>
       {fb?.guardianManaged ? (
         <Muted size={12}>Your parent/guardian holds {fb.count} published feedback note{(fb.count ?? 0) === 1 ? '' : 's'} from clubs — ask them to go through it with you.</Muted>
       ) : (
@@ -246,10 +246,10 @@ export function FeedbackDevSection({ actor }: { actor: Actor }) {
       )}
       {(objectives ?? []).map((o) => (
         <View key={o.id} style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }}>
-          {o.objectives.map((x) => <Text key={x.id} style={{ color: colors.text, fontWeight: '600', fontSize: 13 }}>🎯 {x.text}</Text>)}
+          {o.objectives.map((x) => <Text key={x.id} style={{ color: colors.text, fontWeight: '600', fontSize: 13 }}>{x.text}</Text>)}
           <Muted size={12}>with {o.reviewer.name}{o.reviewer.orgName ? ` · ${o.reviewer.orgName}` : ''} · {o.progress.length} progress entries</Muted>
           {o.reassessments.map((r) => (
-            <Muted key={r.id} size={12}>🔁 reassessment {r.status}{r.outcome ? ` — ${r.outcome.note}` : ''}</Muted>
+            <Muted key={r.id} size={12}>reassessment {r.status}{r.outcome ? ` — ${r.outcome.note}` : ''}</Muted>
           ))}
           <Row style={{ marginTop: 6, flexWrap: 'wrap' }}>
             <TextInput style={[inputStyle(colors), { flex: 1, minWidth: 120 }]} placeholder={pt('logProgress')} placeholderTextColor={colors.muted}
@@ -305,7 +305,7 @@ export function TrialSafetySection({ actor }: { actor: Actor }) {
   const scope = actor.kind === 'player' ? 'player_event_consent' : 'guardian_event_consent';
   return (
     <Card>
-      <SectionTitle>🛡️ {pt('trialDay')}</SectionTitle>
+      <SectionTitle>{pt('trialDay')}</SectionTitle>
       {trials.map((tr) => (
         <View key={tr.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }}>
           <Row><Text style={{ color: colors.text, fontWeight: '700', fontSize: 13.5, flex: 1 }}>{tr.orgName ?? tr.playerName}</Text>
@@ -314,7 +314,7 @@ export function TrialSafetySection({ actor }: { actor: Actor }) {
             <Row key={i}><Muted size={12}>{s.name} · {s.role}</Muted>
               <Pill label={s.check.status === 'reviewed' ? 'check reviewed' : `check ${s.check.status}`} tone={s.check.status === 'reviewed' ? 'green' : 'gold'} /></Row>
           ))}
-          {tr.arrival?.address && <Muted size={12}>📍 {tr.arrival.time ?? ''} · {tr.arrival.address}</Muted>}
+          {tr.arrival?.address && <Muted size={12}>{tr.arrival.time ?? ''} · {tr.arrival.address}</Muted>}
           <Row style={{ marginTop: 6, flexWrap: 'wrap' }}>
             {tr.consents.some((c) => c.scope === scope)
               ? <Pill label={pt('consented')} tone="green" />
@@ -350,7 +350,7 @@ export function TrialSafetySection({ actor }: { actor: Actor }) {
             <Button small label="✕" onPress={() => setPackView(null)} /></Row>
           <Muted size={12}>{packView.pack.headline}</Muted>
           <Muted size={12}>{packView.pack.checksExplained}</Muted>
-          {packView.pack.collection && <Muted size={12}>🚸 {packView.pack.collection.policy}</Muted>}
+          {packView.pack.collection && <Muted size={12}>{packView.pack.collection.policy}</Muted>}
           <Muted size={12}>{packView.pack.reportRoute}</Muted>
           {packView.pack.feedbackDue && <Muted size={12}>Club feedback due by {packView.pack.feedbackDue} — it is mandatory.</Muted>}
         </View>
@@ -370,7 +370,7 @@ export function SquadInvitesSection({ actor }: { actor: Actor }) {
   if (!invites || invites.length === 0) return null;
   return (
     <Card>
-      <SectionTitle>🏟️ {pt('squadInvites')}</SectionTitle>
+      <SectionTitle>{pt('squadInvites')}</SectionTitle>
       {invites.map((i) => (
         <View key={i.id} style={{ marginTop: 6 }}>
           <Text style={{ color: colors.text, fontSize: 13 }}>{i.orgName} invites {actor.kind === 'guardian' ? i.playerName : 'you'} to their squad list{i.note ? ` — “${i.note}”` : ''}.</Text>
@@ -403,7 +403,7 @@ export function FollowUpsSection({ actor }: { actor: Actor }) {
   if (answerable.length === 0) return null;
   return (
     <Card>
-      <SectionTitle>📈 {pt('followUps')}</SectionTitle>
+      <SectionTitle>{pt('followUps')}</SectionTitle>
       {answerable.map((f) => (
         <View key={f.id} style={{ marginTop: 6 }}>
           <Text style={{ color: colors.text, fontSize: 13 }}>
@@ -438,7 +438,7 @@ export function AccessSection({ playerId, mediaOptions, isMinor }: { playerId: s
   const [vtt, setVtt] = useState('');
   return (
     <Card>
-      <SectionTitle>♿ Access & language</SectionTitle>
+      <SectionTitle>Access & language</SectionTitle>
       <Row>
         <Text style={{ color: colors.text, fontSize: 13, flex: 1 }}>{pt('language')}</Text>
         <Button small primary={lang === 'en'} label="EN" onPress={() => { setPLang('en'); setLangState('en'); }} />

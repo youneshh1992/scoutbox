@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ThemeToggle, useTheme, type Theme } from '../../design-system/theme';
-import { AuthAccessNote, AuthField, AuthPage, PasswordInput } from '../../design-system/AuthShell';
+import { AuthAccessNote, AuthField, AuthNote, AuthPage, AuthRow, PasswordInput } from '../../design-system/AuthShell';
 import { initials } from '../../design-system/text';
 import { Icon } from './icons';
 import { api, ApiError, DEMO_MODE, revokeSession, type Notification, type Org, type Session } from './api';
@@ -126,45 +126,46 @@ function Login({ onLogin, theme, onToggleTheme }: { onLogin: (s: Session) => voi
       app="agent"
       product="Agent"
       heading="Represent players. Manage opportunities."
+      summary="Client-confirmed relationships, shared journeys and transaction workspaces."
       points={[
-        'Client-confirmed relationships — nothing is active until the player confirms.',
-        'Shared journeys, Offers and signings, each refused on its own terms.',
-        'Transaction workspaces with parties, compliance and documents.',
+        'Nothing is active until the player confirms.',
+        'Offers and signings, each refused on their own terms.',
+        'Parties, compliance and documents in one workspace.',
       ]}
       toolbar={<ThemeToggle theme={theme} onToggle={onToggleTheme} labels={{ aria: t('theme.aria'), light: t('theme.light'), dark: t('theme.dark') }} />}
-      aside={DEMO_MODE ? <div className="pill blue">{t('login.demo')}</div> : undefined}
+      aside={DEMO_MODE ? <AuthNote>{t('login.demo')}.</AuthNote> : undefined}
     >
       <form className="auth-signin" onSubmit={(e) => { e.preventDefault(); void enter(); }} aria-label="Sign in" noValidate>
-        <div className="auth-field" role="group" aria-labelledby="agent-org-label">
+        {/* M24D — one agency is named, several are chosen from; no badges either way. */}
+        <div className="auth-block" role="group" aria-labelledby="agent-org-label">
           <span className="auth-label" id="agent-org-label">Agency</span>
-          <div className="org-grid">
-            {orgs.map((o) => (
-              <button type="button" key={o.id} className={`org-card ${selected === o.id ? 'selected' : ''}`} aria-pressed={selected === o.id} onClick={() => setSelected(o.id)}>
-                <span className="org-name">{o.name}</span>
-                <span><span className="pill red">{o.type}</span> <span className="pill">{o.plan}</span></span>
-              </button>
-            ))}
-          </div>
+          {orgs.length === 1 && selected ? (
+            <p className="auth-agency-name org-card" data-org={selected}>{orgs[0].name}</p>
+          ) : (
+            <div className="org-grid">
+              {orgs.map((o) => (
+                <AuthRow key={o.id} label={o.name} meta={o.plan} selected={selected === o.id} onClick={() => setSelected(o.id)} />
+              ))}
+            </div>
+          )}
         </div>
         {DEMO_MODE && demoIdentities.length > 0 && (
           // The demo's roster, offered rather than guessed. A name that is not on
           // it is refused AGENCY_MEMBERSHIP_REQUIRED — correctly, because only an
           // administrator adds a member — and in a demo there is no administrator
           // to ask, so an unlisted name used to be a dead end.
-          <div className="demo-identities" data-testid="demo-identities">
-            <p className="tagline" style={{ maxWidth: 560, textAlign: 'center', fontSize: 12.5, margin: '0 0 10px' }}>{t('login.demoWho')}</p>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          <div className="auth-block">
+            <p className="auth-lead">{t('login.chooseProfile')}</p>
+            <div className="demo-identities" data-testid="demo-identities">
               {demoIdentities.map((d) => (
-                <button
-                  type="button"
+                <AuthRow
                   key={d.name}
-                  className="secondary"
-                  data-testid={`demo-as-${d.tier}`}
-                  onClick={() => { setScoutName(d.name); setRole(d.role); void enter(d.name, d.role); }}
+                  label={d.name}
+                  meta={t(`tier.${d.tier}` as Parameters<typeof t>[0])}
+                  testId={`demo-as-${d.tier}`}
                   title={t('login.demoAs').replace('{name}', d.name)}
-                >
-                  {d.name} <span className="pill">{d.tier.replace(/_/g, ' ')}</span>
-                </button>
+                  onClick={() => { setScoutName(d.name); setRole(d.role); void enter(d.name, d.role); }}
+                />
               ))}
             </div>
           </div>
@@ -402,7 +403,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
     if (seenNotifIds.current === null) { seenNotifIds.current = new Set(notifications.map((n) => n.id)); return; }
     const fresh = notifications.filter((n) => !n.read && !seenNotifIds.current!.has(n.id));
     for (const n of notifications) seenNotifIds.current.add(n.id);
-    if (fresh.length > 0) notify(`🔔 ${fresh[0].text}${fresh.length > 1 ? ` (+${fresh.length - 1})` : ''}`);
+    if (fresh.length > 0) notify(`${fresh[0].text}${fresh.length > 1 ? ` (+${fresh.length - 1})` : ''}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notifications]);
   const openBell = async () => {

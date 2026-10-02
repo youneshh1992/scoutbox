@@ -207,12 +207,12 @@ export function SigningWorkflow({ session, room, notify, reload }: Props) {
             <div style={{ marginTop: 8 }} data-testid="signing-document">
               {cur.document ? (
                 <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <span>📄 {cur.document.label ?? cur.document.filename ?? t('sg.document')}</span>
+                  <span>{cur.document.label ?? cur.document.filename ?? t('sg.document')}</span>
                   <code aria-label={t('sg.digest')} title={cur.document.sha256 ?? ''} data-testid="signing-digest" data-sha256={cur.document.sha256 ?? ''} style={{ fontSize: 11.5 }}>{shortDigest(cur.document.sha256)}</code>
                   <button disabled={busy} onClick={() => openDoc('document')} data-testid="signing-open-document">{t('sg.open')}</button>
                 </div>
               ) : <div className="dim" data-testid="signing-no-document">{t('sg.noDocument')}</div>}
-              {cur.executedDocument && <div className="dim" style={{ fontSize: 12.5 }} data-testid="signing-executed">🗂 {t('sg.executedOnFile')} <code>{shortDigest(cur.executedDocument.sha256)}</code> <button disabled={busy} onClick={() => openDoc('executed')}>{t('sg.open')}</button></div>}
+              {cur.executedDocument && <div className="dim" style={{ fontSize: 12.5 }} data-testid="signing-executed">{t('sg.executedOnFile')} <code>{shortDigest(cur.executedDocument.sha256)}</code> <button disabled={busy} onClick={() => openDoc('executed')}>{t('sg.open')}</button></div>}
             </div>
 
             {/* ---- parties ---- */}

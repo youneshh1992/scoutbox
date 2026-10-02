@@ -92,7 +92,7 @@ function ClaimRow({ claim, session, notify, onChange }: { claim: SubjectClaim; s
         <span>
           <input aria-label={t('m14.claim.disputeReason')} placeholder={t('m14.claim.disputeReason')} value={reason} onChange={(e) => setReason(e.target.value)} style={{ width: 170 }} />
           <button onClick={async () => {
-            try { const r = await m14.disputeClaim(session, claim.id, reason); notify(`⚖️ ${r.note}`); setReason(''); onChange(); }
+            try { const r = await m14.disputeClaim(session, claim.id, reason); notify(`${r.note}`); setReason(''); onChange(); }
             catch (e) { notify(e instanceof Error ? e.message : 'failed', true); }
           }}>{t('m14.claim.dispute')}</button>
         </span>
@@ -171,15 +171,15 @@ function MeTab({ session, notify, me, reloadMe }: { session: Session; notify: Sc
         <h3>{t('m14.me.start')}</h3>
         <div className="list-row">
           <span className="grow">{t('m14.me.startIdentity')}</span>
-          <button onClick={() => act(() => m14.startIdentity(session), '🪪 ' + t('m14.me.identityStarted'))}>{t('m14.me.startBtn')}</button>
+          <button onClick={() => act(() => m14.startIdentity(session), t('m14.me.identityStarted'))}>{t('m14.me.startBtn')}</button>
         </div>
         <div className="list-row">
           <input aria-label={t('m14.me.role')} placeholder={t('m14.me.role')} value={role} onChange={(e) => setRole(e.target.value)} />
-          <button onClick={() => act(() => m14.requestAffiliation(session, role), '📨 ' + t('m14.me.affiliationRequested'))}>{t('m14.me.requestAffiliation')}</button>
+          <button onClick={() => act(() => m14.requestAffiliation(session, role), t('m14.me.affiliationRequested'))}>{t('m14.me.requestAffiliation')}</button>
         </div>
         <div className="list-row">
           <input aria-label={t('m14.me.workEmail')} placeholder={t('m14.me.workEmail')} value={email} onChange={(e) => setEmail(e.target.value)} />
-          <button onClick={() => act(() => m14.sendWorkEmail(session, email), '✉️ ' + t('m14.me.codeSent'))}>{t('m14.me.sendCode')}</button>
+          <button onClick={() => act(() => m14.sendWorkEmail(session, email), t('m14.me.codeSent'))}>{t('m14.me.sendCode')}</button>
           <input aria-label={t('m14.me.code')} placeholder={t('m14.me.code')} value={code} onChange={(e) => setCode(e.target.value)} style={{ width: 130 }} />
           <button onClick={() => act(() => m14.confirmWorkEmail(session, code), '✅ ' + t('m14.me.emailProved'))}>{t('m14.me.confirmCode')}</button>
         </div>
@@ -193,7 +193,7 @@ function MeTab({ session, notify, me, reloadMe }: { session: Session; notify: Sc
           <input aria-label={t('m14.lic.type')} placeholder={t('m14.lic.type')} value={lic.licenceType} onChange={(e) => setLic({ ...lic, licenceType: e.target.value })} />
           <input aria-label={t('m14.lic.issuer')} placeholder={t('m14.lic.issuer')} value={lic.issuer} onChange={(e) => setLic({ ...lic, issuer: e.target.value })} />
           <input aria-label={t('m14.lic.identifier')} placeholder={t('m14.lic.identifier')} value={lic.identifier} onChange={(e) => setLic({ ...lic, identifier: e.target.value })} />
-          <button onClick={() => act(() => m14.submitLicence(session, lic), '📄 ' + t('m14.lic.submitted'))}>{t('m14.lic.submit')}</button>
+          <button onClick={() => act(() => m14.submitLicence(session, lic), t('m14.lic.submitted'))}>{t('m14.lic.submit')}</button>
         </div>
         <div className="dim" style={{ fontSize: 12 }}>
           {t('m14.lic.providers')}: {(providers?.providers ?? []).map((p) => `${p.name} — ${t(`m14.provider.${p.state}`, p.state.replace(/_/g, ' '))}`).join(' · ')}
@@ -265,7 +265,7 @@ function StaffTab({ session, notify }: { session: Session; notify: ScreenProps['
           </span>
           {r.current && r.status === 'verified' && (
             <button onClick={async () => {
-              try { const out = await m14.markDeparted(session, r.person.id); notify(`👋 ${out.note}`); reload(); }
+              try { const out = await m14.markDeparted(session, r.person.id); notify(`${out.note}`); reload(); }
               catch (e) { notify(e instanceof Error ? e.message : 'failed', true); }
             }}>{t('m14.staff.markDeparted')}</button>
           )}
@@ -308,7 +308,7 @@ function DomainsTab({ session, notify }: { session: Session; notify: ScreenProps
         <input aria-label={t('m14.dom.domain')} placeholder="club-domain.com" value={domain} onChange={(e) => setDomain(e.target.value)} />
         <input aria-label={t('m14.dom.challengeEmail')} placeholder={t('m14.dom.challengeEmail')} value={challengeEmail} onChange={(e) => setChallengeEmail(e.target.value)} />
         <button onClick={async () => {
-          try { const r = await m14.addDomain(session, domain, challengeEmail); notify(`🌐 ${r.note}`); setDomain(''); reload(); }
+          try { const r = await m14.addDomain(session, domain, challengeEmail); notify(`${r.note}`); setDomain(''); reload(); }
           catch (e) { notify(e instanceof Error ? e.message : 'failed', true); }
         }}>{t('m14.dom.add')}</button>
       </div>
@@ -328,7 +328,7 @@ function AdminsTab({ session, notify }: { session: Session; notify: ScreenProps[
         <div key={a.id} className="list-row">
           <span className="grow"><b>{a.person.name}</b> <span className="pill blue">{a.level.replace(/_/g, ' ')}</span></span>
           <button onClick={async () => {
-            try { const r = await m14.revokeAdmin(session, a.id, 'revoked from console'); notify(`🛑 ${r.note}`); reload(); }
+            try { const r = await m14.revokeAdmin(session, a.id, 'revoked from console'); notify(`${r.note}`); reload(); }
             catch (e) { notify(e instanceof Error ? e.message : 'failed', true); }
           }}>{t('m14.adm.revoke')}</button>
         </div>
@@ -379,7 +379,7 @@ function MoreTab({ session, notify }: { session: Session; notify: ScreenProps['n
           <input aria-label={t('m14.ref.relationship')} placeholder={t('m14.ref.relationship')} value={ref.relationship} onChange={(e) => setRef({ ...ref, relationship: e.target.value })} />
           <input aria-label={t('m14.ref.summary')} placeholder={t('m14.ref.summary')} value={ref.summary} onChange={(e) => setRef({ ...ref, summary: e.target.value })} />
           <button onClick={async () => {
-            try { await m14.createReference(session, ref); notify('📝 ' + t('m14.ref.created')); setRef({ playerId: '', relationship: '', summary: '' }); reloadRefs(); }
+            try { await m14.createReference(session, ref); notify(t('m14.ref.created')); setRef({ playerId: '', relationship: '', summary: '' }); reloadRefs(); }
             catch (e) { notify(e instanceof Error ? e.message : 'failed', true); }
           }}>{t('m14.ref.create')}</button>
         </div>
@@ -397,7 +397,7 @@ function MoreTab({ session, notify }: { session: Session; notify: ScreenProps['n
           <input aria-label={t('m14.inv.name')} placeholder={t('m14.inv.name')} value={inv.name} onChange={(e) => setInv({ ...inv, name: e.target.value })} />
           <input aria-label={t('m14.inv.squad')} placeholder={t('m14.inv.squad')} value={inv.squad} onChange={(e) => setInv({ ...inv, squad: e.target.value })} style={{ width: 90 }} />
           <button onClick={async () => {
-            try { const r = await m14.createPlayerInvite(session, inv.name, inv.squad); notify(`🎟️ ${t('m14.inv.created')}${r.code ? ` — ${t('m14.inv.code')}: ${r.code}` : ''}`); setInv({ name: '', squad: '' }); reloadInv(); }
+            try { const r = await m14.createPlayerInvite(session, inv.name, inv.squad); notify(`${t('m14.inv.created')}${r.code ? ` — ${t('m14.inv.code')}: ${r.code}` : ''}`); setInv({ name: '', squad: '' }); reloadInv(); }
             catch (e) { notify(e instanceof Error ? e.message : 'failed', true); }
           }}>{t('m14.inv.send')}</button>
         </div>
@@ -416,7 +416,7 @@ function MoreTab({ session, notify }: { session: Session; notify: ScreenProps['n
           <input aria-label={t('m14.coi.subject')} placeholder={t('m14.coi.subject')} value={coi.subject} onChange={(e) => setCoi({ ...coi, subject: e.target.value })} />
           <input aria-label={t('m14.coi.noteField')} placeholder={t('m14.coi.noteField')} value={coi.note} onChange={(e) => setCoi({ ...coi, note: e.target.value })} />
           <button onClick={async () => {
-            try { await m14.declareConflict(session, coi.kind, coi.subject, coi.note); notify('🤝 ' + t('m14.coi.declared')); setCoi({ kind: 'family_relationship', subject: '', note: '' }); reloadCoi(); }
+            try { await m14.declareConflict(session, coi.kind, coi.subject, coi.note); notify(t('m14.coi.declared')); setCoi({ kind: 'family_relationship', subject: '', note: '' }); reloadCoi(); }
             catch (e) { notify(e instanceof Error ? e.message : 'failed', true); }
           }}>{t('m14.coi.declare')}</button>
         </div>

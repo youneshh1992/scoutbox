@@ -153,7 +153,7 @@ export function M15Panel({ adminKey, say }: { tab: M15Tab; adminKey: string; say
           <h3 style={{ marginTop: 8 }}>{graph.player.name} <span className="dim">({graph.player.id})</span></h3>
           {graph.conflicts.map((cf) => (
             <div key={cf.code + (cf.submitted.orgName ?? '')} className="notice" style={{ fontSize: 12.5 }}>
-              ⚖ {cf.code}: authoritative “{cf.authoritative.orgName}” vs player-submitted “{cf.submitted.orgName}” — a correction flag, never an automatic fraud accusation.
+              {cf.code}: authoritative “{cf.authoritative.orgName}” vs player-submitted “{cf.submitted.orgName}” — a correction flag, never an automatic fraud accusation.
             </div>
           ))}
           {graph.temporalConflicts.map((tc, i) => (

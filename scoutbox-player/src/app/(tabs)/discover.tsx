@@ -122,7 +122,7 @@ export default function Discover() {
           <Card>
             <Row style={{ justifyContent: 'space-between' }}>
               <SectionTitle>Your weekly scout report</SectionTitle>
-              {weekly.report.streak > 0 && <Pill label={`🔥 ${weekly.report.streak}-day streak`} tone="gold" />}
+              {weekly.report.streak > 0 && <Pill label={`${weekly.report.streak}-day streak`} tone="gold" />}
             </Row>
             <Muted size={13.5}>
               {weekly.report.views} profile view{weekly.report.views === 1 ? '' : 's'} and {weekly.report.shortlists} shortlist{weekly.report.shortlists === 1 ? '' : 's'} this week.
@@ -182,7 +182,7 @@ export default function Discover() {
                   <Row>
                     <Pill label={`${c.distanceKm} km`} tone="blue" />
                     {c.verified && <Pill label="Verified" tone="green" />}
-                    {c.pathwayClub && <Pill label={`🌱 Pathway Club · ${c.progressed} moved up`} tone="gold" />}
+                    {c.pathwayClub && <Pill label={`Pathway Club · ${c.progressed} moved up`} tone="gold" />}
                   </Row>
                 </Row>
                 {c.lookingFor.length > 0 && (
@@ -194,7 +194,7 @@ export default function Discover() {
                 {c.openTrials.map((t) => (
                   <Row key={t.id} style={{ justifyContent: 'space-between' }}>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ color: colors.text, fontSize: 13 }}>📅 {t.title} · {t.date}</Text>
+                      <Text style={{ color: colors.text, fontSize: 13 }}>{t.title} · {t.date}</Text>
                       <Muted size={11.5}>{t.venue}</Muted>
                     </View>
                     {t.registered ? (
@@ -316,8 +316,8 @@ export default function Discover() {
                   <Row>
                     {d.verified ? <Pill label="Verified" tone="green" /> : <Pill label="unverified" tone="red" />}
                     {d.trustedPartner && <Pill label="Trusted Partner" tone="gold" />}
-                    {d.safeguardingCertified && <Pill label="🛡 Safeguarding certified" tone="green" />}
-                    {d.pathwayClub && <Pill label="🌱 Pathway Club" tone="gold" />}
+                    {d.safeguardingCertified && <Pill label="Safeguarding certified" tone="green" />}
+                    {d.pathwayClub && <Pill label="Pathway Club" tone="gold" />}
                   </Row>
                 </Row>
                 <Muted size={12.5}>

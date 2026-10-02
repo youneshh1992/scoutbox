@@ -532,10 +532,10 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
       </div>
       <div className="filters" style={{ marginTop: -8 }}>
         <input type="text" placeholder="Save this search as… (alerts on new matches)" value={saveName} onChange={(e) => setSaveName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && saveCurrent()} />
-        <button onClick={saveCurrent}>💾 Save search</button>
+        <button onClick={saveCurrent}>Save search</button>
         {saved.map((s) => (
           <span key={s.id} className="pill blue" style={{ cursor: 'pointer' }} title={`by ${s.scoutName}`}>
-            <button className="linklike" onClick={() => setFilters(s.filters)}>🔔 {s.name}</button>{' '}
+            <button className="linklike" onClick={() => setFilters(s.filters)}>{s.name}</button>{' '}
             <button
               className="linklike"
               aria-label={`${t('confirm.deleteSavedSearch').replace('{name}', s.name)}`}
@@ -545,7 +545,7 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
           </span>
         ))}
         {compareIds.length >= 2 && (
-          <button className="primary" onClick={() => setComparing(true)}>⚖ Compare {compareIds.length}</button>
+          <button className="primary" onClick={() => setComparing(true)}>Compare {compareIds.length}</button>
         )}
       </div>
       {error && <div className="notice block">{error}</div>}
@@ -562,7 +562,7 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
               <span className="name">{p.name}</span>
               <span style={{ display: 'flex', gap: 6, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
                 <label className="chk" title="Select to compare">
-                  <input type="checkbox" checked={compareIds.includes(p.id)} onChange={() => toggleCompare(p.id)} /> ⚖
+                  <input type="checkbox" checked={compareIds.includes(p.id)} onChange={() => toggleCompare(p.id)} /> 
                 </label>
                 <span className="pill blue">{p.position}</span>
               </span>
@@ -754,14 +754,14 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
                     {m.text}
                     {m.attachment?.kind === 'clip' && (
                       <div style={{ marginTop: 6 }}>
-                        <span className="pill blue">🎬 {m.attachment.title}</span>{' '}
+                        <span className="pill blue">{m.attachment.title}</span>{' '}
                         {m.attachment.verifiedClip && <span className="pill green">✅ Verified Clip</span>}
                         {api.mediaUrl(m.attachment.url) && <video className="clip" style={{ marginTop: 6 }} controls preload="metadata" src={api.mediaUrl(m.attachment.url)!} />}
                       </div>
                     )}
                     {m.attachment?.kind === 'trial_report' && (
                       <div style={{ marginTop: 6 }}>
-                        <span className="pill gold">📊 Trial report — {m.attachment.orgName}</span>
+                        <span className="pill gold">Trial report — {m.attachment.orgName}</span>
                         <div className="dim" style={{ fontSize: 12 }}>{m.attachment.summary}</div>
                       </div>
                     )}
@@ -790,9 +790,9 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
             <div style={{ display: 'flex', gap: 10, opacity: open.closed ? 0.5 : 1, pointerEvents: open.closed ? 'none' : 'auto' }}>
               {openPlayerReports.length > 0 && (
                 <select value={attachReportId} onChange={(e) => setAttachReportId(e.target.value)} title="Attach a filed trial report">
-                  <option value="">📎 no attachment</option>
+                  <option value="">no attachment</option>
                   {openPlayerReports.map((r) => (
-                    <option key={r.id} value={r.id}>📊 trial report ({fmtDate(r.filedAt)})</option>
+                    <option key={r.id} value={r.id}>trial report ({fmtDate(r.filedAt)})</option>
                   ))}
                 </select>
               )}
@@ -873,7 +873,7 @@ export function TrialsScreen({ session, tick, notify }: ScreenProps) {
                 </div>
               </span>
               {api.trialIcsUrl(session, t.id) && (
-                <a className="pill blue" style={{ textDecoration: 'none' }} href={api.trialIcsUrl(session, t.id)!} download={`scoutbox-trial-${t.id}.ics`}>📅 .ics</a>
+                <a className="pill blue" style={{ textDecoration: 'none' }} href={api.trialIcsUrl(session, t.id)!} download={`scoutbox-trial-${t.id}.ics`}>.ics</a>
               )}
               {t.workflowState && t.workflowState !== 'legacy_accepted' && (
                 <span className={`pill ${t.workflowState === 'scheduled' ? 'blue' : t.workflowState === 'completed' ? 'green' : t.workflowState === 'cancelled' ? 'red' : 'gold'}`} data-workflow-state={t.workflowState}>{tt(`tr.state.${t.workflowState}`, t.workflowState)}</span>
@@ -1281,7 +1281,7 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
               <button onClick={() => act('shortlist')}>Shortlist</button>
               {onOpenRoom && (
                 <button className="primary" disabled={openingRoom} onClick={addToRoom} title={t('rm.privacy')}>
-                  🗂 {t('rm.addRoom')}
+                  {t('rm.addRoom')}
                 </button>
               )}
               {player.guardianManaged ? (
@@ -1302,11 +1302,11 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                   if (!confirmDestructive({ ...DESTRUCTIVE_ACTIONS.recordSigning, name: player.name })) return;
                   try {
                     const s = await api.recordSigning(session, playerId);
-                    notify(`🎉 Signing recorded${s.insideAttributionWindow ? ' — inside the attribution window' : ''}. Timeline updated.`);
+                    notify(`Signing recorded${s.insideAttributionWindow ? ' — inside the attribution window' : ''}. Timeline updated.`);
                   } catch (e) { notify(errMsg(e), true); }
-                }}>✍ Record signing</button>
+                }}>Record signing</button>
               )}
-              <button onClick={() => setReporting(true)}>⚑ Report</button>
+              <button onClick={() => setReporting(true)}>Report</button>
             </div>
 
             {moreLike && (
@@ -1496,7 +1496,7 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                 <div className="list-rows">
                   {player.drillResults!.map((r) => (
                     <div key={r.id} className="list-row">
-                      {r.verified ? <span className="pill green">🎥 verified</span> : <span className="pill">self-reported</span>}
+                      {r.verified ? <span className="pill green">verified</span> : <span className="pill">self-reported</span>}
                       <span className="grow">{r.drillName}</span>
                       <span className="dim">{r.metric}: <b style={{ color: 'var(--text)' }}>{r.value}{r.unit}</b> · {fmtDate(r.ts)}</span>
                     </div>

@@ -96,7 +96,7 @@ export function OfferSection({ actor, view = 'all' }: { actor: Actor; view?: Off
 
   return (
     <Card testID="offer-section">
-      <SectionTitle>📄 {pt('offersTitle')}</SectionTitle>
+      <SectionTitle>{pt('offersTitle')}</SectionTitle>
       <Muted size={12.5}>{actor.kind === 'guardian' ? pt('offersGuardianHint') : pt('offersHint')}</Muted>
       {offers.length === 0 && <View style={{ marginTop: 6 }}><Muted size={12.5}>{pt('offersNone')}</Muted></View>}
       {offers.map((o) => {

@@ -56,9 +56,9 @@ export function PreferencesSection({ actor, isMinor }: { actor: Actor; isMinor: 
   };
   return (
     <Card>
-      <SectionTitle>🎛 {pt('m13prefs')}</SectionTitle>
+      <SectionTitle>{pt('m13prefs')}</SectionTitle>
       <Muted size={12}>{pt('m13prefsPrivate')}</Muted>
-      {readOnly && <Muted size={12}>👨‍👩‍👧 {pt('m13prefsGuardian')}</Muted>}
+      {readOnly && <Muted size={12}>{pt('m13prefsGuardian')}</Muted>}
       <Muted size={12.5}>
         {pt('m13commitments')}: {p.commitments.length ? p.commitments.map((c) => `${c.label ?? c.day} ${c.day} ${c.start}–${c.end}`).join(' · ') : '—'}
       </Muted>
@@ -97,7 +97,7 @@ export function OpportunityFitSection({ actor }: { actor: Actor }) {
   if (!board?.items.length) return null;
   return (
     <Card>
-      <SectionTitle>🧭 {pt('m13fit')}</SectionTitle>
+      <SectionTitle>{pt('m13fit')}</SectionTitle>
       <Muted size={12}>{pt('m13fitNote')}</Muted>
       {board.items.filter((o) => o.via !== 'open_trial').slice(0, 4).map((o) => (
         <View key={o.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6 }}>
@@ -152,8 +152,8 @@ export function TransitionsSection({ actor, isMinor, mediaOptions }: { actor: Ac
   if (actor.kind === 'player' && isMinor) {
     return (
       <Card>
-        <SectionTitle>🔁 {pt('m13trn')}</SectionTitle>
-        <Muted size={12}>👨‍👩‍👧 {pt('m13trnGuardian')}</Muted>
+        <SectionTitle>{pt('m13trn')}</SectionTitle>
+        <Muted size={12}>{pt('m13trnGuardian')}</Muted>
       </Card>
     );
   }
@@ -161,7 +161,7 @@ export function TransitionsSection({ actor, isMinor, mediaOptions }: { actor: Ac
     fn().then(() => { setMsg(done); reload(); }).catch((e) => setMsg(e instanceof Error ? e.message : 'failed'));
   return (
     <Card>
-      <SectionTitle>🔁 {pt('m13trn')}</SectionTitle>
+      <SectionTitle>{pt('m13trn')}</SectionTitle>
       <Muted size={12}>{pt('m13trnNote')}</Muted>
       {(cases ?? []).map((c) => (
         <View key={c.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6 }}>
@@ -220,7 +220,7 @@ export function RepresentationSection({ playerId, isMinor }: { playerId: string;
   if (isMinor) return null; // structurally absent for under-18s — nothing to render
   return (
     <Card>
-      <SectionTitle>🤝 {pt('m13rep')}</SectionTitle>
+      <SectionTitle>{pt('m13rep')}</SectionTitle>
       {err && <Muted size={12}>{err}</Muted>}
       {(items ?? []).map((r) => (
         <View key={r.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6 }}>
@@ -229,7 +229,7 @@ export function RepresentationSection({ playerId, isMinor }: { playerId: string;
             <Pill label={r.status} tone={r.status === 'active' ? 'green' : r.status === 'withdrawn' || r.status === 'disputed' ? 'red' : 'blue'} />
           </Row>
           <Muted size={12}>{r.representativeName} · {r.scope.replace(/_/g, ' ')}</Muted>
-          {r.credential && <Muted size={11.5}>📄 {r.credential.note} — {r.credential.reviewStatus.replace(/_/g, ' ')}. {r.credential.honest}</Muted>}
+          {r.credential && <Muted size={11.5}>{r.credential.note} — {r.credential.reviewStatus.replace(/_/g, ' ')}. {r.credential.honest}</Muted>}
           <Row style={{ marginTop: 6 }}>
             {r.status === 'proposed' && <Button small primary label={pt('m13repConfirm')} onPress={async () => { await m13.actRepresentation(playerId, r.id, 'confirm'); setMsg(pt('m13repConfirmed')); reload(); }} />}
             {['proposed', 'active'].includes(r.status) && <Button small label={pt('m13repWithdraw')} onPress={async () => { await m13.actRepresentation(playerId, r.id, 'withdraw'); setMsg(pt('m13repWithdrawn')); reload(); }} />}
@@ -250,7 +250,7 @@ export function ExposureSection({ playerId }: { playerId: string }) {
   if (!exp) return null;
   return (
     <Card>
-      <SectionTitle>👀 {pt('m13exposure')}</SectionTitle>
+      <SectionTitle>{pt('m13exposure')}</SectionTitle>
       <Muted size={12.5}>{pt('m13expSearches')}: <Text style={{ color: colors.text, fontWeight: '700' }}>{exp.appearedInSearches}</Text> · {pt('m13expProfiles')}: <Text style={{ color: colors.text, fontWeight: '700' }}>{exp.profileViews}</Text> · {pt('m13expClubs')}: <Text style={{ color: colors.text, fontWeight: '700' }}>{exp.clubs}</Text></Muted>
       <Muted size={11.5}>{exp.note}</Muted>
     </Card>

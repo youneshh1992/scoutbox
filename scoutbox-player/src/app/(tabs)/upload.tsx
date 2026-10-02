@@ -140,7 +140,7 @@ export default function Upload() {
         <Card>
           <SectionTitle>Add match footage</SectionTitle>
           <Row>
-            <Button small label={pickedFile ? `🎬 ${pickedFile.name.slice(0, 28)}` : '🎬 Choose video file'} onPress={chooseFile} />
+            <Button small label={pickedFile ? `${pickedFile.name.slice(0, 28)}` : 'Choose video file'} onPress={chooseFile} />
             {pickedFile && <Pill label="ready" tone="green" />}
           </Row>
           <TextInput
@@ -227,7 +227,7 @@ export default function Upload() {
 
         {programme && (
           <Card>
-            <SectionTitle>🎓 Your training programme</SectionTitle>
+            <SectionTitle>Your training programme</SectionTitle>
             {!programme.current ? (
               <>
                 <Muted size={12.5}>
@@ -287,7 +287,7 @@ export default function Upload() {
         )}
 
         <Card>
-          <SectionTitle>🏟 At-home combine</SectionTitle>
+          <SectionTitle>At-home combine</SectionTitle>
           <Muted size={12.5}>
             Standardised drills with a measurable number. Record it on video and the result is
             <Text style={{ color: colors.accentText }}> combine-verified</Text> — real numbers clubs can trust,
@@ -298,7 +298,7 @@ export default function Upload() {
               <Row style={{ justifyContent: 'space-between' }}>
                 <Text style={{ color: colors.text, fontSize: 13.5, fontWeight: '600', flex: 1 }}>{d.name}</Text>
                 {d.best
-                  ? <Pill label={`best ${d.best.value}${d.unit}${d.best.verified ? ' 🎥' : ''}`} tone="green" />
+                  ? <Pill label={`best ${d.best.value}${d.unit}${d.best.verified ? ' ' : ''}`} tone="green" />
                   : d.completed ? <Pill label="done ✓" tone="blue" /> : null}
               </Row>
               <Muted size={11.5}>{d.metric} · benchmark {d.benchmark}{d.unit}</Muted>
@@ -311,7 +311,7 @@ export default function Upload() {
                   value={drillValues[d.id] ?? ''}
                   onChangeText={(v) => setDrillValues({ ...drillValues, [d.id]: v })}
                 />
-                <Button small label={drillVideos[d.id] ? '🎥 ✓' : '🎥 attach'} onPress={async () => {
+                <Button small label={drillVideos[d.id] ? '✓' : 'attach'} onPress={async () => {
                   const picked = await pickVideoFile();
                   if (picked && !picked.name.startsWith('TOO_LARGE:')) {
                     setDrillVideos({ ...drillVideos, [d.id]: picked.dataUrl });
@@ -329,7 +329,7 @@ export default function Upload() {
                     setDrillVideos({ ...drillVideos, [d.id]: '' });
                     setDrills(await client.getDrills(playerId));
                     await refresh();
-                    say(drillVideos[d.id] ? '🎥 Combine-verified result logged.' : 'Result logged (attach video next time to verify it).');
+                    say(drillVideos[d.id] ? 'Combine-verified result logged.' : 'Result logged (attach video next time to verify it).');
                   } catch (e) {
                     say(e instanceof Error ? e.message : 'Could not log drill', true);
                   }

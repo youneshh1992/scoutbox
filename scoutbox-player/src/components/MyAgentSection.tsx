@@ -85,7 +85,7 @@ export function MyAgentSection({ playerId, isMinor }: { playerId: string; isMino
   const items = data?.items ?? [];
   return (
     <Card testID="my-agent">
-      <SectionTitle>🤝 {pt('m24title')}</SectionTitle>
+      <SectionTitle>{pt('m24title')}</SectionTitle>
       <Muted size={12}>{pt('m24intro')}</Muted>
       {err && <Muted size={12}>{err}</Muted>}
       {items.map((r) => (
@@ -193,7 +193,7 @@ export function AgentSharedOpportunities({ playerId, isMinor }: { playerId: stri
   if (!items.length) return null;
   return (
     <Card testID="agent-shared-opportunities">
-      <SectionTitle>📣 {pt('m27sTitle')}</SectionTitle>
+      <SectionTitle>{pt('m27sTitle')}</SectionTitle>
       <Muted size={12}>{pt('m27sIntro')}</Muted>
       {err && <Muted size={12}>{err}</Muted>}
       {items.map((s) => (

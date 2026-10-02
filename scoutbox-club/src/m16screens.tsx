@@ -63,7 +63,7 @@ export function BoxTrainingPanel({ session, playerId, notify }: { session: Sessi
 
   return (
     <div className="section" aria-label={t('bt.title')}>
-      <h4>🎥 {t('bt.title')} <button style={{ marginLeft: 8 }} onClick={() => setOpen((x) => !x)}>{open ? t('bt.hide') : t('bt.show')}</button></h4>
+      <h4>{t('bt.title')} <button style={{ marginLeft: 8 }} onClick={() => setOpen((x) => !x)}>{open ? t('bt.hide') : t('bt.show')}</button></h4>
       {open && err && <div className="notice block">{err}</div>}
       {open && data && (
         <>

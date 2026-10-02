@@ -73,7 +73,7 @@ export function AgentConsentSection({ playerId, isMinor }: { playerId: string; i
 
   return (
     <Card testID="agent-consent">
-      <SectionTitle>📝 {pt('m25title')}</SectionTitle>
+      <SectionTitle>{pt('m25title')}</SectionTitle>
       <Muted size={12}>{pt('m25intro')}</Muted>
       {err && <Muted size={12}>{err}</Muted>}
       {items.map((k) => {

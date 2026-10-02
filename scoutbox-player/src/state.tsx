@@ -98,7 +98,7 @@ export function SessionProvider({ children: kids }: { children: ReactNode }) {
     const fresh = notifs.filter((n) => !n.read && !seenNotifIds.current!.has(n.id));
     for (const n of notifs) seenNotifIds.current.add(n.id);
     if (fresh.length > 0) {
-      setPopup(`🔔 ${fresh[0].text}${fresh.length > 1 ? ` (+${fresh.length - 1} more)` : ''}`);
+      setPopup(`${fresh[0].text}${fresh.length > 1 ? ` (+${fresh.length - 1} more)` : ''}`);
       if (popupTimer.current) clearTimeout(popupTimer.current);
       popupTimer.current = setTimeout(() => setPopup(null), 5000);
     }

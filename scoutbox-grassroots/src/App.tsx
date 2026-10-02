@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ThemeToggle, useTheme, type Theme } from '../../design-system/theme';
-import { AuthField, AuthPage, AuthTabs, PasswordInput } from '../../design-system/AuthShell';
+import { AuthField, AuthNote, AuthPage, AuthRow, AuthTabs, PasswordInput } from '../../design-system/AuthShell';
 import { initials } from '../../design-system/text';
 import { Icon } from './icons';
 import { api, ApiError, DEMO_MODE, revokeSession, type Channel, type Notification, type Org, type Session } from './api';
@@ -215,13 +215,14 @@ function Login({ onLogin, theme, onToggleTheme }: { onLogin: (s: Session) => voi
       app="grass"
       product="Grassroots"
       heading="Your club. Your community. Your next player."
+      summary="Federation-registered grassroots clubs, scouting within 50 km of their ground."
       points={[
-        'Federation-registered grassroots clubs scouting within 50 km of their ground.',
         'Adults are visible at once; under-18s only after verification and the safeguarding contract.',
-        'Every action attributed to a named person. No unsolicited contact.',
+        'Every action attributed to a named person.',
+        'No unsolicited contact.',
       ]}
       toolbar={<ThemeToggle theme={theme} onToggle={onToggleTheme} labels={{ aria: t('theme.aria'), light: t('theme.light'), dark: t('theme.dark') }} />}
-      aside={DEMO_MODE ? <div className="pill blue">Self-contained demo — no server needed</div> : undefined}
+      aside={DEMO_MODE ? <AuthNote>Self-contained demo — no server needed.</AuthNote> : undefined}
     >
       <AuthTabs tabs={[{ id: 'signin', label: 'Sign in' }, { id: 'register', label: 'Register club' }] as const} value={mode} onChange={(m) => { setError(null); setMode(m); }} label="Sign in or register your club" />
       {mode === 'signin' && (
@@ -230,17 +231,8 @@ function Login({ onLogin, theme, onToggleTheme }: { onLogin: (s: Session) => voi
             <span className="auth-label" id="grass-org-label">Club</span>
             <div className="org-grid">
               {orgs.map((o) => (
-                <button type="button" key={o.id} className={`org-card ${selected === o.id ? 'selected' : ''}`} aria-pressed={selected === o.id} onClick={() => setSelected(o.id)}>
-                  <span className="org-name">{o.name}</span>
-                  <span>
-                    <span className={`pill ${o.type === 'agency' ? 'red' : 'blue'}`}>{o.type}</span>{' '}
-                    <span className="pill">{o.plan}</span>{' '}
-                    {o.trustedPartner && <span className="pill gold">Trusted Partner</span>}{' '}
-                    {o.type === 'club' && (o.verified
-                      ? <span className="pill green">Verified</span>
-                      : <span className="pill">verification pending</span>)}
-                  </span>
-                </button>
+                <AuthRow key={o.id} label={o.name} selected={selected === o.id} onClick={() => setSelected(o.id)}
+                  meta={[o.type, o.plan, o.trustedPartner ? 'Trusted Partner' : null, o.type === 'club' ? (o.verified ? 'Verified' : 'verification pending') : null].filter(Boolean).join(' · ')} />
               ))}
             </div>
           </div>
@@ -275,12 +267,7 @@ function Login({ onLogin, theme, onToggleTheme }: { onLogin: (s: Session) => voi
       )}
       {mode === 'register' && (
         <form className="register-box" onSubmit={(e) => { e.preventDefault(); void register(); }} aria-label="Register your club" noValidate>
-          <h3>Register your club</h3>
-          <p className="dim" style={{ margin: '4px 0 10px', fontSize: 13 }}>
-            ScoutBox Grassroots is for federation-registered semi-pro and amateur clubs only. Scouting is
-            limited to players within 50km of your ground; adults are visible immediately, under-18s only
-            after verification and the safeguarding contract.
-          </p>
+          <p className="auth-lead">For federation-registered semi-pro and amateur clubs. Scouting stays within 50 km of your ground; under-18s appear only after verification and the safeguarding contract.</p>
           <div className="reg-grid">
             <AuthField label="Club name"><input placeholder="Club name" value={reg.name} onChange={(e) => setReg({ ...reg, name: e.target.value })} autoComplete="organization" /></AuthField>
             <AuthField label="Federation"><input placeholder="Federation (e.g. The FA — England)" value={reg.federation} onChange={(e) => setReg({ ...reg, federation: e.target.value })} /></AuthField>
@@ -536,7 +523,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
     }
     const fresh = notifications.filter((n) => !n.read && !seenNotifIds.current!.has(n.id));
     for (const n of notifications) seenNotifIds.current.add(n.id);
-    if (fresh.length > 0) notify(`🔔 ${fresh[0].text}${fresh.length > 1 ? ` (+${fresh.length - 1} more)` : ''}`);
+    if (fresh.length > 0) notify(`${fresh[0].text}${fresh.length > 1 ? ` (+${fresh.length - 1} more)` : ''}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notifications]);
 
