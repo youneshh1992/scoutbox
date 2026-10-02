@@ -47,6 +47,32 @@ function RoleCard({ icon, title, subtitle, accent, onPress }: {
   );
 }
 
+/** M24C.2 — the pitch embossed into the bright-green introduction: each
+ *  line is a dark groove with a light edge one pixel beside it. Plain Views,
+ *  so iOS, Android and the web draw it alike; behind the copy, never in front
+ *  of a tap, hidden from assistive technology. */
+function EmbossedPitch() {
+  const dark = AUTH_PAGE.embossDark, light = AUTH_PAGE.embossLight;
+  const line = (extra: object) => [{ position: 'absolute' as const }, extra];
+  return (
+    <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden style={[StyleSheet.absoluteFill, { overflow: 'hidden', zIndex: 0 }]}>
+      {/* boundary: light edge then the dark groove */}
+      <View style={line({ top: 13, left: 13, right: 11, bottom: 11, borderWidth: 1, borderColor: light, borderRadius: 3 })} />
+      <View style={line({ top: 12, left: 12, right: 12, bottom: 12, borderWidth: 1, borderColor: dark, borderRadius: 3 })} />
+      {/* halfway line */}
+      <View style={line({ left: 12, right: 12, top: '50%', marginTop: 0.5, borderTopWidth: 1, borderColor: light })} />
+      <View style={line({ left: 12, right: 12, top: '50%', marginTop: -0.5, borderTopWidth: 1, borderColor: dark })} />
+      {/* centre circle and spot */}
+      <View style={line({ left: '50%', top: '50%', width: 60, height: 60, marginLeft: -29, marginTop: -29, borderRadius: 30, borderWidth: 1, borderColor: light })} />
+      <View style={line({ left: '50%', top: '50%', width: 60, height: 60, marginLeft: -30, marginTop: -30, borderRadius: 30, borderWidth: 1, borderColor: dark })} />
+      <View style={line({ left: '50%', top: '50%', width: 4, height: 4, marginLeft: -2, marginTop: -2, borderRadius: 2, backgroundColor: dark })} />
+      {/* one penalty area, left end */}
+      <View style={line({ left: 13, top: '30%', bottom: '30%', width: 44, borderWidth: 1, borderLeftWidth: 0, borderColor: light, borderTopRightRadius: 3, borderBottomRightRadius: 3 })} />
+      <View style={line({ left: 12, top: '30%', bottom: '30%', width: 44, borderWidth: 1, borderLeftWidth: 0, borderColor: dark, borderTopRightRadius: 3, borderBottomRightRadius: 3 })} />
+    </View>
+  );
+}
+
 function StepDots({ current }: { current: number }) {
   const colors = useColors();
   const styles = useStyles(makeStyles);
@@ -358,6 +384,7 @@ export default function Onboarding() {
         <View style={styles.topRow}>
           <View style={styles.brand} accessibilityRole="header" aria-level={1} accessibilityLabel="ScoutBox Player">
             <Text style={styles.logo}>ScoutBox<Text style={{ color: AUTH_PAGE.green }}>▪</Text></Text>
+            <Text style={styles.tm} accessibilityLabel="trademark">TM</Text>
             <Text style={styles.product}>Player</Text>
           </View>
           <ThemeSwitch />
@@ -365,7 +392,8 @@ export default function Onboarding() {
 
         {entry && (
           <View style={styles.intro} testID="auth-intro">
-            <Text style={styles.introTitle}>Your football. Your next opportunity.</Text>
+            <EmbossedPitch />
+            <Text style={[styles.introTitle, { zIndex: 1 }]}>Your football. Your next opportunity.</Text>
             <View style={{ gap: 6 }}>
               {[
                 'A verified Football Passport that clubs can read.',
@@ -753,14 +781,15 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: AUTH_PAGE.page },
   scroll: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 28, gap: 14 },
   topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 48 },
-  brand: { flexDirection: 'row', alignItems: 'baseline', gap: 7 },
+  brand: { flexDirection: 'row', alignItems: 'baseline', gap: 7, flexShrink: 1 },
   logo: { color: AUTH_PAGE.white, fontSize: 26, fontWeight: '800', letterSpacing: -1.1 },
+  tm: { color: AUTH_PAGE.soft, fontSize: 8, fontWeight: '700', letterSpacing: 0.6, lineHeight: 10, alignSelf: 'flex-start', marginTop: 2, marginLeft: -4, marginRight: 2 },
   product: { color: AUTH_PAGE.soft, fontSize: 12, fontWeight: '600' },
-  intro: { backgroundColor: AUTH_PAGE.green, borderRadius: 14, padding: 18, gap: 12 },
+  intro: { backgroundColor: AUTH_PAGE.green, borderRadius: 14, padding: 18, gap: 12, overflow: 'hidden' },
   introTitle: { color: AUTH_PAGE.ink, fontSize: 22, fontWeight: '700', letterSpacing: -0.5, lineHeight: 27 },
   introMark: { color: AUTH_PAGE.ink, fontSize: 13, fontWeight: '800', lineHeight: 19 },
   introLine: { color: AUTH_PAGE.ink, fontSize: 13, lineHeight: 19, flex: 1 },
-  panel: { backgroundColor: AUTH_PANEL.bg, borderRadius: 14, padding: 18, gap: 12, borderWidth: 1, borderColor: AUTH_PAGE.panelLine, shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 18, shadowOffset: { width: 0, height: 8 } },
+  panel: { backgroundColor: AUTH_PAGE.panel, borderRadius: 14, padding: 18, gap: 12, borderWidth: 1, borderColor: AUTH_PAGE.panelLine, shadowColor: '#000', shadowOpacity: 0.28, shadowRadius: 18, shadowOffset: { width: 0, height: 8 } },
   authTabs: { flexDirection: 'row', alignItems: 'center', gap: 2, marginBottom: 4 },
   authTab: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingRight: 8, minHeight: 44 },
   authTabText: { color: AUTH_PANEL.muted, fontSize: 15, fontWeight: '500' },

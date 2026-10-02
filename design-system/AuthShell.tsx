@@ -40,7 +40,7 @@ export function AuthPage({ app, product, heading, points, toolbar, children, asi
           {aside}
         </section>
         <section className="auth-form" aria-label={`ScoutBox ${product} — sign in`}>
-          <h1><span className="wordmark">ScoutBox</span><span className="brand-sub">{product}</span></h1>
+          <h1><span className="wordmark">ScoutBox</span><sup className="tm" aria-label="trademark">TM</sup><span className="brand-sub">{product}</span></h1>
           {children}
           <div className="login-signature" data-testid="login-signature">Built by <span>Guni &amp; Younes</span></div>
         </section>
