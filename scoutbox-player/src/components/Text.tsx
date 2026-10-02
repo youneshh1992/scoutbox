@@ -1,41 +1,41 @@
-// M24A — Albert Sans on every piece of text, on every platform.
+// M24E — Inter on every piece of text, on every platform.
 //
 // React Native has no document-wide default font, so the app's own `Text`
-// and `TextInput` wrap the React Native ones and resolve the requested weight
-// to the bundled static face (assets/fonts, SIL OFL). The weight then travels
-// as the family name — `fontWeight` is dropped so neither platform
-// synthesises a second emboldening on top of a face that is already bold.
+// and `TextInput` wrap the React Native ones and set the family. Two
+// variable files (assets/fonts, SIL OFL — see Inter-OFL.txt) carry every
+// weight 100–900 and the real italic:
+//   • web — `_layout.tsx` registers both files as ONE family "Inter" with a
+//     100–900 weight range and the italic style, so `fontWeight: '600'`
+//     picks the real semibold and `fontStyle: 'italic'` the real italic,
+//     never a synthesised one;
+//   • iOS / Android — expo-font registers the upright file as "Inter" and the
+//     italic file as "Inter-Italic"; the weight travels as `fontWeight` and the
+//     italic as the family, so the platform never obliques an upright face.
+// The ScoutBox wordmark alone keeps Albert Sans ExtraBold (the brand mark —
+// see Wordmark.tsx); `brand` asks for it.
 import { forwardRef } from 'react';
-import { StyleSheet, Text as RNText, TextInput as RNTextInput, type StyleProp, type TextInputProps, type TextProps, type TextStyle } from 'react-native';
+import { Platform, StyleSheet, Text as RNText, TextInput as RNTextInput, type StyleProp, type TextInputProps, type TextProps, type TextStyle } from 'react-native';
 
 export const FONT_FILES = {
-  'AlbertSans-Regular': require('../../assets/fonts/AlbertSans-Regular.ttf'),
-  'AlbertSans-Medium': require('../../assets/fonts/AlbertSans-Medium.ttf'),
-  'AlbertSans-SemiBold': require('../../assets/fonts/AlbertSans-SemiBold.ttf'),
-  'AlbertSans-Bold': require('../../assets/fonts/AlbertSans-Bold.ttf'),
+  Inter: require('../../assets/fonts/Inter-VariableFont_opsz,wght.ttf'),
+  'Inter-Italic': require('../../assets/fonts/Inter-Italic-VariableFont_opsz,wght.ttf'),
   'AlbertSans-ExtraBold': require('../../assets/fonts/AlbertSans-ExtraBold.ttf'),
-  'AlbertSans-RegularItalic': require('../../assets/fonts/AlbertSans-RegularItalic.ttf'),
-  'AlbertSans-MediumItalic': require('../../assets/fonts/AlbertSans-MediumItalic.ttf'),
-  'AlbertSans-SemiBoldItalic': require('../../assets/fonts/AlbertSans-SemiBoldItalic.ttf'),
-  'AlbertSans-BoldItalic': require('../../assets/fonts/AlbertSans-BoldItalic.ttf'),
-  'AlbertSans-ExtraBoldItalic': require('../../assets/fonts/AlbertSans-ExtraBoldItalic.ttf'),
 };
 
-const faceFor = (weight: TextStyle['fontWeight'], italic: boolean): string => {
-  const w = typeof weight === 'number' ? weight : weight === 'bold' ? 700 : weight === 'normal' || weight === undefined ? 400 : Number(weight);
-  const name = w >= 800 ? 'ExtraBold' : w >= 700 ? 'Bold' : w >= 600 ? 'SemiBold' : w >= 500 ? 'Medium' : 'Regular';
-  return `AlbertSans-${name}${italic ? 'Italic' : ''}`;
-};
+export const BRAND_FONT = 'AlbertSans-ExtraBold';
 
-/** The resolved style: Albert Sans face for the requested weight, weight and style removed. */
-export function withFont(style: StyleProp<TextStyle>): TextStyle {
+/** The resolved style: the Inter family for the requested weight and style. */
+export function withFont(style: StyleProp<TextStyle>, brand = false): TextStyle {
   const flat = (StyleSheet.flatten(style) ?? {}) as TextStyle;
-  const { fontWeight, fontStyle, ...rest } = flat;
-  return { ...rest, fontFamily: faceFor(fontWeight, fontStyle === 'italic') };
+  if (flat.fontFamily && flat.fontFamily !== 'Inter' && flat.fontFamily !== 'Inter-Italic') return flat; // monospace etc. stays as asked
+  if (brand) { const { fontWeight, fontStyle, ...rest } = flat; return { ...rest, fontFamily: BRAND_FONT }; }
+  if (Platform.OS === 'web') return { ...flat, fontFamily: 'Inter' };
+  const { fontStyle, ...rest } = flat;
+  return { ...rest, fontFamily: fontStyle === 'italic' ? 'Inter-Italic' : 'Inter' };
 }
 
-export const Text = forwardRef<RNText, TextProps>(function Text({ style, ...props }, ref) {
-  return <RNText ref={ref} {...props} style={withFont(style)} />;
+export const Text = forwardRef<RNText, TextProps & { brand?: boolean }>(function Text({ style, brand, ...props }, ref) {
+  return <RNText ref={ref} {...props} style={withFont(style, brand)} />;
 });
 
 export const TextInput = forwardRef<RNTextInput, TextInputProps>(function TextInput({ style, ...props }, ref) {

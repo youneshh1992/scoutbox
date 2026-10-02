@@ -15,7 +15,8 @@
 :root {
   color-scheme: light;
   /* type */
-  --sb-font: 'Albert Sans', -apple-system, system-ui, 'Segoe UI', sans-serif;
+  --sb-font: 'Inter', -apple-system, system-ui, 'Segoe UI', sans-serif;          /* M24E — the product typeface */
+  --sb-font-brand: 'Albert Sans', 'Inter', -apple-system, system-ui, sans-serif;  /* the ScoutBox wordmark only */
   /* surfaces */
   --sb-paper: #f6f7f3;      /* workspace */
   --sb-white: #ffffff;      /* panels, cards, ledgers */

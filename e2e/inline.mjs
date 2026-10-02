@@ -30,6 +30,16 @@ html = html.replace(/"(\/?assets\/[^"]+\.(ttf|woff2|otf))"/g, (m, ref, ext) => {
   return `"data:${mime};base64,${fs.readFileSync(file).toString('base64')}"`;
 });
 
+// M24E — the Inter variable faces (880 / 910 KB) are above Vite's inline
+// limit, so the portal CSS refers to them as url(/assets/Inter-…ttf) (unquoted);
+// the same data: URI treatment applies to those references.
+html = html.replace(/url\((["']?)(\/?assets\/[^)"']+\.(ttf|woff2|otf))\1\)/g, (m, q, ref, ext) => {
+  const file = path.join(distDir, ref.replace(/^\//, ''));
+  if (!fs.existsSync(file)) return m;
+  const mime = ext === 'woff2' ? 'font/woff2' : ext === 'otf' ? 'font/otf' : 'font/ttf';
+  return `url("data:${mime};base64,${fs.readFileSync(file).toString('base64')}")`;
+});
+
 // Strip favicon links (the artifact host provides its own) and preloads.
 html = html.replace(/<link[^>]*rel="(icon|shortcut icon|modulepreload|preload)"[^>]*>/g, '');
 

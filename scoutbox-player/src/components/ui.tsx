@@ -1,5 +1,5 @@
 // The Player's primitives. M24A: every colour comes from the active
-// palette (theme.ts) and every glyph of text is Albert Sans (Text.tsx); the
+// palette (theme.ts) and every glyph of text is Inter (Text.tsx); the
 // shapes are the reference's phone components — 12px cards on a hairline
 // rule, soft 5px chips, a full-width lime primary action with dark-green
 // text, and headings that read as headings rather than uppercase labels.

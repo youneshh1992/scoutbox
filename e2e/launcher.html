@@ -1,10 +1,12 @@
 <title>ScoutBox — App Launcher</title>
 <style>
-  /* M24A — the launcher wears the platform design: Albert Sans, the paper ground, hairline panels, the brand green. */
+  /* M24A — the launcher wears the platform design: the paper ground, hairline panels, the brand green; M24E — Inter for the text, Albert Sans for the wordmark alone. */
   :root { --ground: #f6f7f3; --panel: #ffffff; --panel-2: #edf1e9; --line: #e1e6df; --ink: #1e2923; --dim: #677268; --green: #00e676; --green-ink: #113822; --green-text: #007f42; --gold: #a67c2e; --leaf: #007f42; --orange: #b47a2f; color-scheme: light; }
   @media (prefers-color-scheme: dark) { :root { --ground: #202223; --panel: #272a2b; --panel-2: #2a2d2e; --line: #393c3d; --ink: #ffffff; --dim: #ffffff; --gold: #d9b76b; --leaf: #00e676; --green-text: #00e676; color-scheme: dark; } }
+  @font-face { font-family: 'Inter'; font-style: normal; font-weight: 100 900; font-display: swap; src: url('../design-system/fonts/Inter-VariableFont_opsz,wght.ttf') format('truetype'); }
   @font-face { font-family: 'Albert Sans'; font-style: normal; font-weight: 100 900; font-display: swap; src: url('../design-system/fonts/AlbertSans-normal.woff2') format('woff2'); }
-  body { background: var(--ground); color: var(--ink); font: 14px/1.6 'Albert Sans', -apple-system, system-ui, 'Segoe UI', sans-serif; padding: 0 20px 56px; margin: 0; }
+  body { background: var(--ground); color: var(--ink); font: 14px/1.6 'Inter', -apple-system, system-ui, 'Segoe UI', sans-serif; padding: 0 20px 56px; margin: 0; }
+  .wordmark { font-family: 'Albert Sans', 'Inter', sans-serif; }
   .wrap { max-width: 780px; margin: 0 auto; }
   header { padding: 44px 0 8px; }
   .mark { font-weight: 800; font-size: 32px; letter-spacing: -1.4px; line-height: 1; display: inline-flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
@@ -48,7 +50,7 @@
   <header>
     <div class="mark"><span class="box">ScoutBox</span><small>App Launcher</small></div>
     <p class="sub">One bookmark for every ScoutBox app. Each tile opens an interactive demo of the actual current interface — the approved M24A design on the real product — running entirely in your browser on synthetic sample data. Every app carries its own light / dark switch in the header.</p>
-    <span class="buildchip"><span class="dot"></span>Source version <code>M24A</code> · design implementation · Albert Sans · five applications</span>
+    <span class="buildchip"><span class="dot"></span>Source version <code>M24E</code> · Inter typography · one fixed entry appearance · Sign out / Switch organisation everywhere · scrollable in every orientation · five applications</span>
   </header>
 
   <div class="grid">
