@@ -271,7 +271,7 @@ export default function App() {
   return (
     <div className="shell">
       <nav className="sidebar" aria-label="Main navigation">
-        <div className="brand" title="ScoutBox Trust &amp; Safety"><span className="wordmark">ScoutBox</span><span className="brand-sub">Trust &amp; Safety</span></div>
+        <div className="brand" title="ScoutBox Trust &amp; Safety"><span className="wordmark">ScoutBox</span><sup className="tm" aria-label="trademark">TM</sup><span className="brand-sub">Trust &amp; Safety</span></div>
         <div className="p-org" aria-label="Safety workspace">
           <span className="p-avatar club" aria-hidden="true">TS</span>
           <span><strong>Safety workspace</strong><small>{DEMO ? 'Demo data' : 'Live console'}</small></span>

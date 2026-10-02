@@ -104,7 +104,7 @@ export function Sidebar({
       <nav ref={navRef} id="app-sidebar" className={`sidebar ${collapsed ? 'collapsed' : ''} ${drawerOpen ? 'drawer-open' : ''}`} aria-label="Main navigation">
         {/* M24A — the reference wordmark: one ink, a green square, the edition beside it. */}
         <div className="brand" title={`ScoutBox ${brand.long}`}>
-          {collapsed ? <span className="wordmark" aria-label={`ScoutBox ${brand.long}`}>S</span> : <><span className="wordmark">ScoutBox</span><span className="brand-sub">{brand.long}</span></>}
+          {collapsed ? <span className="wordmark" aria-label={`ScoutBox ${brand.long}`}>S</span> : <><span className="wordmark">ScoutBox</span><sup className="tm" aria-label="trademark">TM</sup><span className="brand-sub">{brand.long}</span></>}
         </div>
         {org && (
           <div className="p-org" aria-label={org.name}>

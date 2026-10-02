@@ -10,6 +10,7 @@ import { POSITIONS } from '../domain/types';
 import { useSession } from '../state';
 import { AUTH_PAGE, AUTH_PANEL, ThemeOverride, useColors, useStyles, type Palette } from '../theme';
 import { PitchBackdrop } from '../components/PitchBackdrop';
+import { Wordmark } from '../components/Wordmark';
 import { Button, Card, Muted, Row, SectionTitle } from '../components/ui';
 
 const COUNTRIES = ['GB', 'PT', 'FR', 'SE', 'PL', 'NG', 'GH', 'AR', 'JP', 'KR', 'TH', 'SG', 'US'];
@@ -356,9 +357,8 @@ export default function Onboarding() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <View style={styles.topRow}>
-          <View style={styles.brand} accessibilityRole="header" aria-level={1} accessibilityLabel="ScoutBox Player">
-            <Text style={styles.logo}>ScoutBox<Text style={{ color: AUTH_PAGE.green }}>▪</Text></Text>
-            <Text style={styles.tm} accessibilityLabel="trademark">TM</Text>
+          <View style={styles.brand}>
+            <Wordmark size={26} color={AUTH_PAGE.white} tmColor={AUTH_PAGE.soft} label="ScoutBox Player" />
             <Text style={styles.product}>Player</Text>
           </View>
           <ThemeSwitch />
@@ -755,8 +755,6 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   scroll: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 28, gap: 14 },
   topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 48 },
   brand: { flexDirection: 'row', alignItems: 'baseline', gap: 7, flexShrink: 1 },
-  logo: { color: AUTH_PAGE.white, fontSize: 26, fontWeight: '800', letterSpacing: -1.1 },
-  tm: { color: AUTH_PAGE.soft, fontSize: 8, fontWeight: '700', letterSpacing: 0.4, lineHeight: 10, alignSelf: 'flex-start', marginTop: 2, marginLeft: -7, marginRight: 2 },
   product: { color: AUTH_PAGE.soft, fontSize: 12, fontWeight: '600' },
   intro: { backgroundColor: AUTH_PAGE.green, borderRadius: 14, padding: 18, gap: 12, overflow: 'hidden' },
   introTitle: { color: AUTH_PAGE.ink, fontSize: 22, fontWeight: '700', letterSpacing: -0.5, lineHeight: 27 },

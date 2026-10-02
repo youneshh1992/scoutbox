@@ -19,6 +19,7 @@ import { pt } from '../i18n';
 import { NotificationBell } from './NotificationBell';
 import { ReportButton } from './ReportSheet';
 import { ThemeSwitch } from './ThemeSwitch';
+import { Wordmark } from './Wordmark';
 
 export function PageHeader({ title, back, action, hint, wordmark }: { title: string; back?: boolean; action?: ReactNode; hint?: string; wordmark?: boolean }) {
   const router = useRouter();
@@ -34,9 +35,7 @@ export function PageHeader({ title, back, action, hint, wordmark }: { title: str
             </Pressable>
           )}
           {wordmark ? (
-            <View style={styles.wordmarkRow} accessibilityRole="header" aria-level={1} accessibilityLabel={title}>
-              <Text style={styles.wordmark}>ScoutBox</Text><View style={[styles.square, { backgroundColor: colors.accent }]} />
-            </View>
+            <Wordmark size={24} label={title} />
           ) : (
             <Text role="heading" aria-level={1} style={styles.h1} numberOfLines={1}>{title}</Text>
           )}
@@ -89,9 +88,6 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 0 },
   h1: { color: colors.text, fontSize: 16, fontWeight: '600', flexShrink: 1 },
-  wordmarkRow: { flexDirection: 'row', alignItems: 'baseline' },
-  wordmark: { color: colors.text, fontSize: 24, fontWeight: '800', letterSpacing: -1.1, lineHeight: 26 },
-  square: { width: 6, height: 6, borderRadius: 1, marginLeft: 3 },
   hint: { color: colors.muted, fontSize: 12.5, lineHeight: 18 },
   actionRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 4 },
   back: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', marginLeft: -6 },
