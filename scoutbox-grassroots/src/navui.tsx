@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { ScreenId } from './App';
 import {
-  INBOX_ITEM, MAX_SHORTCUTS, type NavContext, type NavItem, type NavLocation, type NavSection,
+  INBOX_ITEM, MAX_SHORTCUTS, type NavContext, type NavGroupView, type NavItem, type NavLocation, type NavSection,
   allItems, filterSections, groupedChildren, searchNav, stripLayout,
 } from './nav';
 import { Icon } from './icons';
@@ -77,8 +77,11 @@ export function Sidebar({
   // Any navigation re-opens the destination's section — including a page
   // inside a section the person had folded, so the active page is never
   // hidden in a closed accordion.
+  // M24D — and only that section: arriving somewhere folds the sections the
+  // person had opened on the way, so the sidebar shows one expanded section
+  // (its one open group) rather than everything they passed through.
   useEffect(() => {
-    if (location.sectionId) setOpen((prev) => (prev.has(location.sectionId!) ? prev : new Set(prev).add(location.sectionId!)));
+    if (location.sectionId) setOpen((prev) => (prev.size === 1 && prev.has(location.sectionId!) ? prev : new Set([location.sectionId!])));
   }, [location.sectionId, location.itemId]);
   const toggle = (id: string) => setOpen((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
@@ -197,24 +200,61 @@ function SectionRow({ section: s, active, activeItemId, expanded, onToggle, coll
     if (flyoutOpen) flyRef.current?.querySelector<HTMLButtonElement>('button[role="menuitem"]')?.focus();
   }, [flyoutOpen]);
 
+  // M24D — the groups inside an expanded section are an accordion of their
+  // own: ONE group open at a time, the group holding the current page by
+  // default (the first group when the current page is elsewhere), so the
+  // sidebar never lists every page of Recruitment at once. The person may open
+  // another group (the open one folds) or fold the open one; any navigation
+  // returns to following the current page. Nothing is persisted. The rail's
+  // flyout and a section with no groups keep every page visible.
+  const activeGroupId = groups.find((g) => g.children.some((c) => c.id === activeItemId))?.id ?? null;
+  const [chosenGroup, setChosenGroup] = useState<string | null | undefined>(undefined);
+  useEffect(() => { setChosenGroup(undefined); }, [activeItemId]);
+  const openGroup = chosenGroup === undefined ? (activeGroupId ?? groups[0]?.id ?? null) : chosenGroup;
+
   // A group is a labelled container, not a destination: role="group" with its
-  // name, and a plain (non-interactive) heading — never a button or a link.
-  const children = (role: 'menuitem' | undefined) => groups.map((g) => (
-    <div key={g.id ?? 'all'} className="nav-group" role={g.labelKey ? 'group' : undefined} aria-label={g.labelKey ? tr(g.labelKey) : undefined}>
-      {g.labelKey && <div className="nav-group-label" aria-hidden="true">{tr(g.labelKey)}</div>}
-      {g.children.map((c) => (
-        <button
-          key={c.id}
-          role={role}
-          className={`nav-child ${activeItemId === c.id ? 'active' : ''}`}
-          aria-current={activeItemId === c.id ? 'page' : undefined}
-          onClick={() => onNavigate(c.id)}
-        >
-          {tr(c.labelKey)}
-        </button>
-      ))}
-    </div>
+  // name. In the accordion its heading is a disclosure button (aria-expanded,
+  // aria-controls) that never navigates; in the flyout menu it is plain text.
+  const pages = (g: NavGroupView, role: 'menuitem' | undefined) => g.children.map((c) => (
+    <button
+      key={c.id}
+      role={role}
+      className={`nav-child ${activeItemId === c.id ? 'active' : ''}`}
+      aria-current={activeItemId === c.id ? 'page' : undefined}
+      onClick={() => onNavigate(c.id)}
+    >
+      {tr(c.labelKey)}
+    </button>
   ));
+  const children = (role: 'menuitem' | undefined, accordion: boolean) => groups.map((g) => {
+    if (!g.labelKey) return <div key="all" className="nav-group">{pages(g, role)}</div>;
+    const name = tr(g.labelKey);
+    if (!accordion) {
+      return (
+        <div key={g.id} className="nav-group" role="group" aria-label={name}>
+          <div className="nav-group-label" aria-hidden="true">{name}</div>
+          {pages(g, role)}
+        </div>
+      );
+    }
+    const isOpen = openGroup === g.id;
+    const gid = `${panelId}-${g.id}`;
+    return (
+      <div key={g.id} className={`nav-group ${isOpen ? 'open' : ''} ${activeGroupId === g.id ? 'has-active' : ''}`} role="group" aria-label={name}>
+        <button
+          type="button"
+          className="nav-group-label"
+          aria-expanded={isOpen}
+          aria-controls={gid}
+          onClick={() => setChosenGroup(isOpen ? null : g.id)}
+        >
+          <span className="grow">{name}</span>
+          <Icon name="chevron" size={11} />
+        </button>
+        {isOpen && <div id={gid} className="nav-group-pages">{pages(g, role)}</div>}
+      </div>
+    );
+  });
 
   if (collapsed) {
     // Rail: a single-child section navigates; a multi-child one opens a menu.
@@ -238,7 +278,7 @@ function SectionRow({ section: s, active, activeItemId, expanded, onToggle, coll
         {multi && flyoutOpen && (
           <div ref={flyRef} className="nav-flyout" role="menu" aria-label={label} onKeyDown={onFlyKey}>
             <div className="nav-flyout-title" aria-hidden="true">{label}</div>
-            {children('menuitem')}
+            {children('menuitem', false)}
           </div>
         )}
       </div>
@@ -275,7 +315,7 @@ function SectionRow({ section: s, active, activeItemId, expanded, onToggle, coll
       </div>
       {multi && expanded && (
         <div id={panelId} className="nav-children" aria-label={`${t('navsec.pagesIn')} ${label}`}>
-          {children(undefined)}
+          {children(undefined, true)}
         </div>
       )}
     </div>
@@ -443,16 +483,14 @@ export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOp
  *  repeated on every page, to the account block, where the organisation is
  *  named. Same pills, same wording. */
 export function OrgChips({ org }: { org: { type: string; trustedPartner?: boolean; safeguardingCertified?: boolean; verified?: boolean } }) {
-  return (
-    <div className="org-chips" aria-label={t('navsec.orgStatus')}>
-      {org.trustedPartner && <span className="pill gold">Trusted Partner</span>}
-      {org.safeguardingCertified && <span className="pill green">🛡 Safeguarding Certified</span>}
-      {org.type === 'club' && (org.verified
-        ? <span className="pill outline-green">Verified club</span>
-        : <span className="pill">verification pending — U18 hidden</span>)}
-      <span className={`pill ${org.type === 'agency' ? 'red' : 'blue'}`}>{org.type}</span>
-    </div>
-  );
+  // M24D — one quiet line of standing, not a row of badges: the same facts, as text.
+  const facts = [
+    org.type,
+    org.type === 'club' ? (org.verified ? 'Verified club' : 'verification pending — U18 hidden') : null,
+    org.trustedPartner ? 'Trusted Partner' : null,
+    org.safeguardingCertified ? 'Safeguarding Certified' : null,
+  ].filter(Boolean);
+  return <div className="org-chips org-standing" aria-label={t('navsec.orgStatus')}>{facts.join(' · ')}</div>;
 }
 
 // ---------------------------------------------------------- CommandPalette

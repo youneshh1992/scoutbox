@@ -36,7 +36,7 @@ export const clientTab = (page, subId) => openSub(page, subId, { nav: '[data-cas
 /** The agent's transaction workspace, by sub id (overview, parties, compliance, documents, messages, timeline). */
 export const txTab = (page, subId) => openSub(page, subId, { nav: '[data-casenav="transaction"]', prefix: 'tx' });
 
-/** The player app (web): open Opportunities, pick a category by id (journey, contact, trial, offer, signing, board) and optionally a page by its label. */
+/** The player app (web): open Opportunities, pick a category by id (journey, contact, trial, offer, signing) and optionally a page by its label. */
 export async function playerCategory(page, cat, subLabel = null) {
   await page.click('a[href^="/opportunities"]').catch(() => {});
   await page.waitForTimeout(600);

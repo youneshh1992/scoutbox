@@ -20,7 +20,7 @@ import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
 type Actor = { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string };
 export type JourneyView = 'overview' | 'stage' | 'tasks' | 'activity';
 
-const GLYPH: Record<PlayerJourneyStage, string> = { contacted: '✉', trial_invited: '➤', trial_scheduled: '📅', trial_completed: '✓', offer_received: '➤', offer_accepted: '✓', offer_declined: '✕', signing: '✍', signed: '✓', none: '○' };
+const GLYPH: Record<PlayerJourneyStage, string> = { contacted: '', trial_invited: '➤', trial_scheduled: '', trial_completed: '✓', offer_received: '➤', offer_accepted: '✓', offer_declined: '✕', signing: '', signed: '✓', none: '○' };
 const tone = (s: PlayerJourneyStage) => (s === 'signed' || s === 'offer_accepted' || s === 'trial_completed' ? 'green' : s === 'offer_received' || s === 'trial_invited' || s === 'signing' ? 'gold' : s === 'offer_declined' ? 'red' : 'default');
 const stLabel = (s: PlayerJourneyStage) => { const key = `jnSt_${s}` as Parameters<typeof pt>[0]; try { return pt(key) ?? s; } catch { return s; } };
 const nextLabel = (code: string) => { const key = `jnNext_${code}` as Parameters<typeof pt>[0]; try { return pt(key) ?? ''; } catch { return ''; } };
@@ -114,6 +114,10 @@ export function JourneySection({ actor, view = 'overview', onGo }: { actor: Acto
       </Card></View>
     );
   }
+  // M24D — the Overview carries what the Current stage and Tasks pages
+  // carried: per club, the stage, what the club has shared, and the next
+  // action with its "Go" where one exists.
+  const todo = items.filter((j) => j.journey.nextAction.code !== 'NONE');
   return (
     <View testID="journey-section"><Card>
       <SectionTitle>{pt('jnTitle')}</SectionTitle>
@@ -127,12 +131,29 @@ export function JourneySection({ actor, view = 'overview', onGo }: { actor: Acto
             ) : (
               <Muted size={12.5}>{pt('jnNothingToDo')}</Muted>
             )}
+            {j.shared.length > 0 ? (
+              <Muted size={12}>{pt('jnSharedTitle')} · {j.shared.map((s) => `${sharedLabel(s.kind)}${s.status ? ` (${String(s.status).replace(/_/g, ' ').toLowerCase()})` : ''}`).join(' · ')}</Muted>
+            ) : null}
             {j.journey.timeline.length > 0 ? (
               <Muted size={11.5}>{pt('jnLast')} {evLabel(j.journey.timeline[j.journey.timeline.length - 1].kind)} · {new Date(j.journey.timeline[j.journey.timeline.length - 1].at).toLocaleDateString()}</Muted>
             ) : null}
           </View>
         ))}
       </View>
+      {todo.length > 0 && onGo ? (
+        <View style={{ gap: 8, marginTop: 10 }} testID="journey-tasks">
+          <SectionTitle>{pt('jnTasksTitle')}</SectionTitle>
+          {todo.map((j) => {
+            const cat = CATEGORY_FOR_ACTION[j.journey.nextAction.code] ?? null;
+            return (
+              <View key={j.club.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 }} testID={`journey-task-${j.club.id}`}>
+                <Text style={{ color: colors.text, fontSize: 13, flex: 1 }}>{j.club.name ?? pt('jnClub')} · {nextLabel(j.journey.nextAction.code)}</Text>
+                {cat ? <Button small primary label={pt('jnGo')} onPress={() => onGo(cat)} testID={`journey-go-${j.club.id}`} /> : null}
+              </View>
+            );
+          })}
+        </View>
+      ) : null}
     </Card></View>
   );
 }

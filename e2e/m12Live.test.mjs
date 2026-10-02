@@ -104,7 +104,7 @@ await player.goto('http://localhost:8281/');
 await player.waitForSelector('text=Our promises to every player', { timeout: 30000 });
 await player.locator('text=Enter').nth(0).click(); // Kola (dev login, live server)
 await player.waitForSelector('text=Your visibility right now', { timeout: 20000 });
-await playerCategory(player, 'board'); // M24B: the board is the Board category of Opportunities
+await playerCategory(player, 'journey', 'Board'); // M24D: the board is My journey › Board
 await player.waitForSelector('text=Opportunity board', { timeout: 20000 });
 await player.waitForSelector('text=U23 look — pressing forwards', { timeout: 15000 });
 say('E1: the opportunity reached the player’s board in his own context');

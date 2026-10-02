@@ -74,7 +74,7 @@ await player.getByRole('tab', { name: 'Clubs' }).click();
 await player.waitForSelector('text=Suitability preferences', { timeout: 20000 });
 await player.waitForSelector('text=NOT an independently verified licence', { timeout: 15000 });
 say('player demo: preferences + representation (honest credential label) render on You');
-await playerCategory(player, 'board', 'Fit check'); // M24B: Board › Fit check
+await playerCategory(player, 'journey', 'Board'); // M24D: the fit section sits on My journey › Board
 await player.waitForSelector('text=Opportunity fit', { timeout: 20000 });
 say('player demo: opportunity fit section renders on Opportunities');
 await player.close();
@@ -82,7 +82,7 @@ await player.close();
 // ---- Trust & Safety demo: M13 tabs
 const admin = await page(`${demo.host}/admin/`);
 await admin.waitForSelector('text=Report queue', { timeout: 20000 });
-await admin.click('nav.sidebar button:has-text("Operations")');
+await admin.click('nav.sidebar button:has-text("Delivery & Billing")'); // M24D: Delivery centre sits in Delivery & Billing (Operations split so no group lists more than five)
 await admin.click('nav.subnav button:has-text("Delivery centre")');
 await admin.waitForSelector('text=no message leaves this machine', { timeout: 10000 });
 await admin.click('nav.sidebar button:has-text("Cases")');

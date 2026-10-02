@@ -19,14 +19,16 @@ export interface PlayerCaseLocation { category: string; sub: string }
 
 export const PLAYER_NAV: PlayerCaseNav = {
   id: 'player',
+  // M24D — five categories, none wider than three pages. The Board (open
+  // roles, fit, squad invites, follow-ups) is one page of the journey, and
+  // the former Current stage / Tasks pages are part of the Overview.
   categories: [
     {
       id: 'journey', labelKey: 'catJourney',
       subs: [
         { id: 'overview', labelKey: 'subOverview' },
-        { id: 'stage', labelKey: 'subStage' },
-        { id: 'tasks', labelKey: 'subTasks' },
         { id: 'activity', labelKey: 'subActivity' },
+        { id: 'board', labelKey: 'catBoard' },
       ],
     },
     {
@@ -60,19 +62,16 @@ export const PLAYER_NAV: PlayerCaseNav = {
         { id: 'signing-contract', labelKey: 'subContract' },
       ],
     },
-    {
-      // The opportunities board the screen always carried: not recruitment
-      // journey records, kept reachable in one category of its own.
-      id: 'board', labelKey: 'catBoard',
-      subs: [
-        { id: 'board-open', labelKey: 'subBoard' },
-        { id: 'board-fit', labelKey: 'subFit' },
-        { id: 'board-invites', labelKey: 'subInvites' },
-        { id: 'board-followups', labelKey: 'subFollowUps' },
-      ],
-    },
   ],
 };
+
+/** M24D — links written before the Board became a page of the journey, and
+ *  before Current stage and Tasks folded into the Overview, still land. */
+export const PLAYER_LEGACY_SUBS: Readonly<Record<string, string>> = {
+  stage: 'overview', tasks: 'overview',
+  'board-open': 'board', 'board-fit': 'board', 'board-invites': 'board', 'board-followups': 'board',
+};
+const PLAYER_LEGACY_CATS: Readonly<Record<string, PlayerCaseLocation>> = { board: { category: 'journey', sub: 'board' } };
 
 export function playerDefaultLocation(model: PlayerCaseNav = PLAYER_NAV): PlayerCaseLocation {
   const c = model.categories[0];
@@ -81,8 +80,11 @@ export function playerDefaultLocation(model: PlayerCaseNav = PLAYER_NAV): Player
 
 /** `?cat=&tab=` → a location, falling back category-first then to the default. Unknown values never throw. */
 export function playerLocation(cat: string | string[] | undefined, tab: string | string[] | undefined, model: PlayerCaseNav = PLAYER_NAV): PlayerCaseLocation {
-  const c = Array.isArray(cat) ? cat[0] : cat;
-  const s = Array.isArray(tab) ? tab[0] : tab;
+  const rawC = Array.isArray(cat) ? cat[0] : cat;
+  const rawS = Array.isArray(tab) ? tab[0] : tab;
+  const legacyCat = rawC ? PLAYER_LEGACY_CATS[rawC] : undefined;
+  const c = legacyCat ? legacyCat.category : rawC;
+  const s = rawS && PLAYER_LEGACY_SUBS[rawS] ? PLAYER_LEGACY_SUBS[rawS] : (rawS ?? legacyCat?.sub);
   const category = model.categories.find((x) => x.id === c) ?? null;
   if (category) {
     const sub = category.subs.find((x) => x.id === s) ?? category.subs[0];

@@ -43,7 +43,16 @@ export interface NavGroup {
   id: string;
   labelKey: string;
   items: ScreenId[];
+  /** M24D — how many of this group's pages fit one phone-width strip row
+   *  (default `STRIP_MAX_VISIBLE`). Presentation only: a group whose names
+   *  are long shows its `primary` pages and puts the rest behind More. */
+  stripMax?: number;
 }
+
+/** M24D — no navigation category may hold more than five entries: a section's
+ *  groups, a group's pages, and an ungrouped section's pages all obey it
+ *  (`validateNavConfig` reports a breach; `navConfig` asserts it). */
+export const NAV_MAX_PER_CATEGORY = 5;
 
 export interface NavSection {
   id: 'home' | 'recruitment' | 'planning' | 'network' | 'organisation';
@@ -110,7 +119,7 @@ export const NAV_SECTIONS: NavSection[] = [
       // of these is a ranking, and none of them earns a sidebar section.
       { id: 'briefs', labelKey: 'nav2.briefs', primary: true, shortKey: 'navshort.briefs', aliases: ['recruitment briefs', 'brief', 'briefs', 'criteria', 'cahier des charges', 'briefs de recrutement'] },
       { id: 'matching', labelKey: 'nav2.matching', primary: true, shortKey: 'navshort.matching', aliases: ['player matching', 'explainable matching', 'match criteria', 'who matches', 'why this player matches', 'correspondance', 'critères de correspondance'] },
-      { id: 'watchlists', labelKey: 'nav2.watchlists', shortKey: 'navshort.watchlists', aliases: ['dynamic watchlists', 'dynamic watchlist', 'saved criteria', 'listes dynamiques', 'critères enregistrés'] },
+      { id: 'watchlists', labelKey: 'nav2.watchlists', primary: true, shortKey: 'navshort.watchlists', aliases: ['dynamic watchlists', 'dynamic watchlist', 'saved criteria', 'listes dynamiques', 'critères enregistrés'] },
       { id: 'secondlook', labelKey: 'nav2.secondlook', aliases: ['second look', 'worth another look', 'evidence changed', 'reconsider', 'second regard', 'nouveau regard'] },
       { id: 'nobodymissed', labelKey: 'nav2.nobodymissed', shortKey: 'navshort.nobodymissed', aliases: ['nobody missed', 'evaluation coverage', 'coverage gaps', 'not yet evaluated', 'couverture d’évaluation'] },
       // — Analytics: the process measured. M20's Director Dashboard measures
@@ -120,11 +129,21 @@ export const NAV_SECTIONS: NavSection[] = [
       { id: 'funnel', labelKey: 'nav.funnel', aliases: ['recruitment funnel', 'entonnoir'] },
       { id: 'ledger', labelKey: 'nav.ledger', shortKey: 'navshort.ledger', aliases: ['discovery ledger', 'audit trail', 'registre'] },
     ],
+    // M24D — the Recruitment IA. Seven groups of at most four pages, in the
+    // order the work happens: find → progress → reach out → evaluate →
+    // intelligence → outcomes → measure. Every id below is a destination that
+    // already exists; nothing was invented to fill a heading (Contacts, Offers,
+    // Completed Cases and Position Needs have no screen and are not listed).
+    // Squad Planner, Coverage, Calibration and Fixtures stay in Squad &
+    // Planning, the section that already holds them.
     groups: [
       { id: 'discover', labelKey: 'navgrp.discover', items: ['search', 'shortlist', 'filmroom', 'insight'] },
-      { id: 'pipeline', labelKey: 'navgrp.pipeline', items: ['recruitment', 'rooms', 'requests', 'opportunities', 'campaigns', 'outcomes'] },
-      { id: 'evidence', labelKey: 'navgrp.evidence', items: ['assessments', 'video', 'trials', 'trialdays'] },
-      { id: 'intelligence', labelKey: 'navgrp.intelligence', items: ['briefs', 'matching', 'watchlists', 'secondlook', 'nobodymissed'] },
+      { id: 'pipeline', labelKey: 'navgrp.pipeline', items: ['recruitment', 'rooms', 'requests', 'opportunities'] },
+      { id: 'outreach', labelKey: 'navgrp.outreach', items: ['campaigns', 'briefs'] },
+      { id: 'evaluation', labelKey: 'navgrp.evaluation', items: ['assessments', 'video', 'trials', 'trialdays'] },
+      // The four Intelligence names fit a 360px row only two at a time.
+      { id: 'intelligence', labelKey: 'navgrp.intelligence', items: ['matching', 'watchlists', 'secondlook', 'nobodymissed'], stripMax: 3 },
+      { id: 'outcomes', labelKey: 'navgrp.outcomes', items: ['outcomes'] },
       { id: 'analytics', labelKey: 'navgrp.analytics', items: ['dashboard', 'funnel', 'ledger'] },
     ],
   },
@@ -156,6 +175,11 @@ export const NAV_SECTIONS: NavSection[] = [
       { id: 'budgets', labelKey: 'nav2.budgets', aliases: ['finance', 'deal budgets', 'budgeting', 'budgets'], visible: (c) => isLeadRole(c.role) },
       { id: 'plan', labelKey: 'nav.plan', shortKey: 'navshort.plan', aliases: ['billing', 'compliance', 'subscription', 'abonnement'], visible: (c) => isLeadRole(c.role) },
       { id: 'reputation', labelKey: 'nav.reputation', aliases: ['standing', 'réputation'] },
+    ],
+    // M24D — six administrative pages were one flat list; two groups of three.
+    groups: [
+      { id: 'administration', labelKey: 'navgrp.administration', items: ['organisation', 'verification', 'reputation'] },
+      { id: 'operations', labelKey: 'navgrp.operations', items: ['imports', 'budgets', 'plan'] },
     ],
   },
 ];
@@ -192,7 +216,7 @@ export function allItems(): { section: NavSection; item: NavItem }[] {
 }
 
 // ------------------------------------------------------------------ groups
-export interface NavGroupView { id: string | null; labelKey: string | null; children: NavItem[] }
+export interface NavGroupView { id: string | null; labelKey: string | null; children: NavItem[]; stripMax?: number }
 
 /**
  * A section's children arranged by group, in group order. Works on a section
@@ -204,7 +228,7 @@ export function groupedChildren(section: NavSection): NavGroupView[] {
   if (!section.groups || section.groups.length === 0) return [{ id: null, labelKey: null, children: section.children }];
   const byId = new Map(section.children.map((c) => [c.id, c] as const));
   return section.groups
-    .map((g) => ({ id: g.id, labelKey: g.labelKey, children: g.items.map((id) => byId.get(id)).filter((c): c is NavItem => !!c) }))
+    .map((g) => ({ id: g.id, labelKey: g.labelKey, stripMax: g.stripMax, children: g.items.map((id) => byId.get(id)).filter((c): c is NavItem => !!c) }))
     .filter((g) => g.children.length > 0);
 }
 
@@ -227,7 +251,10 @@ export const STRIP_MAX_VISIBLE = 4;
 export interface StripLayout { visible: NavItem[]; overflow: NavItem[]; activeInOverflow: NavItem | null }
 export function stripLayout(section: NavSection, itemId: ScreenId | null, max: number = STRIP_MAX_VISIBLE): StripLayout {
   const items = groupSiblings(section, itemId);
-  if (items.length <= max) return { visible: items, overflow: [], activeInOverflow: null };
+  const hit = groupedChildren(section).find((g) => g.children.some((c) => c.id === itemId));
+  const stripMax = hit?.stripMax ?? max;
+  if (items.length <= stripMax) return { visible: items, overflow: [], activeInOverflow: null };
+  max = stripMax;
   const flagged = items.filter((c) => c.primary);
   const visible = flagged.length > 0 ? flagged.slice(0, max - 1) : items.slice(0, max - 1);
   const overflow = items.filter((c) => !visible.includes(c));
@@ -249,11 +276,14 @@ export function groupOf(section: NavSection, itemId: ScreenId | null): NavGroupV
 export function validateNavConfig(sections: NavSection[] = NAV_SECTIONS): string[] {
   const problems: string[] = [];
   for (const s of sections) {
+    // M24D — the five rule, at every level that is a list of choices.
+    if (!s.groups && s.children.length > NAV_MAX_PER_CATEGORY) problems.push(`${s.id}: ${s.children.length} pages in an ungrouped section (max ${NAV_MAX_PER_CATEGORY})`);
     if (!s.groups) continue;
     const ids = s.children.map((c) => c.id);
     const seen = new Map<string, number>();
     for (const g of s.groups) {
       if (g.items.length === 0) problems.push(`${s.id}/${g.id}: empty group`);
+      if (g.items.length > NAV_MAX_PER_CATEGORY) problems.push(`${s.id}/${g.id}: ${g.items.length} pages (max ${NAV_MAX_PER_CATEGORY})`);
       for (const id of g.items) {
         seen.set(id, (seen.get(id) ?? 0) + 1);
         if (!ids.includes(id)) problems.push(`${s.id}/${g.id}: "${id}" is not a child of ${s.id}`);

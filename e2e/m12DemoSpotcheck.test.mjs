@@ -82,7 +82,7 @@ await mob.waitForSelector('text=Our promises to every player', { timeout: 30000 
 await mob.getByText('Enter', { exact: true }).first().click();
 await mob.waitForSelector('text=Your visibility right now', { timeout: 20000 });
 // P2.5: the board lives on the Opportunities tab.
-await playerCategory(mob, 'board'); // M24B: Board › Open roles
+await playerCategory(mob, 'journey', 'Board'); // M24D: the board is My journey › Board
 await mob.waitForSelector('text=Opportunity board', { timeout: 20000 });
 await mob.waitForSelector('text=U23 open trial — attackers', { timeout: 10000 });
 say('Player demo: opportunity board populated');
@@ -96,7 +96,7 @@ await mob.waitForSelector('text=pressing triggers', { timeout: 20000 });
 await mob.getByRole('tab', { name: 'Account' }).click();
 await mob.waitForSelector('text=Access & language', { timeout: 10000 });
 say('Player demo: feedback loop + access settings');
-await playerCategory(mob, 'board', 'Squad invites'); // M24B: Board › Squad invites
+await playerCategory(mob, 'journey', 'Board'); // M24D: squad invites sit on My journey › Board
 await mob.waitForSelector('text=Squad invitations', { timeout: 20000 });
 await playerCategory(mob, 'trial', 'Details'); // M24B: the trial-day safety pack is Trial › Details
 await mob.waitForSelector('text=safety pack', { timeout: 10000 });

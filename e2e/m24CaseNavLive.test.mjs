@@ -363,8 +363,8 @@ for (const width of [390, 360]) {
   const kola = await enterPlayer(ctx, 'Kola Adeyemi', `kola${width}`);
   await playerCategory(kola, 'journey');
   const cats = await kola.evaluate(() => [...document.querySelectorAll('[data-testid^="cat-"]')].map((e) => e.getAttribute('data-testid').slice(4)));
-  ok(cats.join(',') === 'journey,contact,trial,offer,signing,board', `P1 ${width}: categories My journey · Club contact · Trial · Offer · Signing · Board`);
-  const PAGES = { journey: ['Overview', 'Current stage', 'Tasks', 'Activity'], contact: ['Messages', 'Contact'], trial: ['Invitation', 'Schedule', 'Details'], offer: ['Offer', 'Documents', 'Response'], signing: ['Signing', 'Documents', 'Contract'], board: ['Open roles', 'Fit check', 'Squad invites', 'Follow-ups'] };
+  ok(cats.join(',') === 'journey,contact,trial,offer,signing', `P1 ${width}: five categories — My journey · Club contact · Trial · Offer · Signing (M24D: the Board is a page of the journey)`);
+  const PAGES = { journey: ['Overview', 'Activity', 'Board'], contact: ['Messages', 'Contact'], trial: ['Invitation', 'Schedule', 'Details'], offer: ['Offer', 'Documents', 'Response'], signing: ['Signing', 'Documents', 'Contract'] };
   let visited = 0;
   for (const cat of cats) {
     await playerCategory(kola, cat);
@@ -393,6 +393,10 @@ for (const width of [390, 360]) {
   await kola.goto(`http://localhost:${PORTS.player}/opportunities?cat=signing&tab=signing-contract`);
   await kola.waitForSelector('[data-testid="case-panel-signing-contract"]', { timeout: 30000 });
   ok((await playerTabs(kola).getByRole('tab', { selected: true }).allInnerTexts()).join() === 'Contract', `P4 ${width}: "?cat=signing&tab=signing-contract" lands on Signing › Contract`);
+  // M24D — a link written for the old Board category still lands.
+  await kola.goto(`http://localhost:${PORTS.player}/opportunities?cat=board&tab=board-invites`);
+  await kola.waitForSelector('[data-testid="case-panel-board"]', { timeout: 30000 });
+  ok((await playerTabs(kola).getByRole('tab', { selected: true }).allInnerTexts()).join() === 'Board' && (await kola.evaluate(() => document.querySelector('[data-testid="cat-journey"]')?.getAttribute('aria-selected'))) === 'true', `P5 ${width}: "?cat=board&tab=board-invites" (pre-M24D) lands on My journey › Board`);
   await ctx.close();
 }
 

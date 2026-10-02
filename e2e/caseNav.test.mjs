@@ -127,7 +127,12 @@ for (const [app, expectCats] of [['scoutbox-club', ['overview', 'player', 'evalu
   for (const p of problems) console.error(`   ${p}`);
   ok(problems.length === 0, 'the model is structurally sound');
   ok(ds.widestCategory(model) <= MAX, `no category holds more than ${MAX} subcategories (widest: ${ds.widestCategory(model)})`);
-  ok(model.categories.map((c) => c.id).join(',') === 'journey,contact,trial,offer,signing,board', 'categories: My journey · Club contact · Trial · Offer · Signing · Board');
+  ok(model.categories.map((c) => c.id).join(',') === 'journey,contact,trial,offer,signing', 'M24D: five categories — My journey · Club contact · Trial · Offer · Signing (the Board is a page of the journey)');
+  ok(model.categories.length <= 5, `M24D: the player's recruitment navigation has at most five categories (${model.categories.length})`);
+  ok(model.categories.find((c) => c.id === 'journey').subs.map((s) => s.id).join(',') === 'overview,activity,board', 'M24D: My journey is Overview · Activity · Board');
+  ok(m.playerLocation('board', undefined).category === 'journey' && m.playerLocation('board', undefined).sub === 'board', 'M24D: a link to the old Board category opens My journey › Board');
+  ok(m.playerLocation('board', 'board-invites').sub === 'board' && m.playerLocation(undefined, 'board-fit').sub === 'board', 'M24D: links to the old Board pages land on the Board page');
+  ok(m.playerLocation('journey', 'stage').sub === 'overview' && m.playerLocation('journey', 'tasks').sub === 'overview', 'M24D: links to Current stage and Tasks land on the Overview that now carries them');
   const subs = new Set(ds.allSubs(model));
   for (const forbidden of ['watchlist', 'priority', 'assessments', 'decision', 'discussion', 'secondlook', 'shortlist', 'notes', 'evidence']) if (subs.has(forbidden)) fail(`the player model carries a club-private page: ${forbidden}`); else passed++;
   console.log('✓ no club-private page (watchlist, priority, assessment, decision, discussion, Second Look, shortlist, notes, evidence) exists in the player model (9 folded)');

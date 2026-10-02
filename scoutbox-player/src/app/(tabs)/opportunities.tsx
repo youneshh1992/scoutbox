@@ -2,8 +2,9 @@
 // club has put in front of them.
 //
 // M24B — the recruitment experience is CATEGORY → SUBCATEGORY: My journey,
-// Club contact, Trial, Offer, Signing, and the Board the screen always
-// carried. Only the chosen page renders; `?cat=&tab=` deep-links it and a
+// Club contact, Trial, Offer, Signing. M24D — five categories: the Board the
+// screen always carried is a page of the journey, and Current stage and Tasks
+// are part of the Overview. Only the chosen page renders; `?cat=&tab=` deep-links it and a
 // notification opens the category that holds its record. A category is UI
 // organisation only — the stage a club is at comes from the server's journey
 // projection and nothing here knows a club's private state.
@@ -54,9 +55,7 @@ export default function Opportunities() {
         <CaseCategories model={PLAYER_NAV} value={category.id} onChange={goCategory} />
         <PageTabs tabs={tabs} value={sub} onChange={(k) => go({ category: category.id, sub: k })} />
         <View testID={`case-panel-${sub}`} style={styles.panel} accessibilityLabel={pt(category.labelKey as Parameters<typeof pt>[0])}>
-          {actor && sub === 'overview' ? <JourneySection actor={actor} view="overview" /> : null}
-          {actor && sub === 'stage' ? <JourneySection actor={actor} view="stage" /> : null}
-          {actor && sub === 'tasks' ? <JourneySection actor={actor} view="tasks" onGo={goCategory} /> : null}
+          {actor && sub === 'overview' ? <JourneySection actor={actor} view="overview" onGo={goCategory} /> : null}
           {actor && sub === 'activity' ? <JourneySection actor={actor} view="activity" /> : null}
           {sub === 'messages' ? <MessagesSummarySection /> : null}
           {sub === 'requests' ? <ContactRequestsSection kind="contact" /> : null}
@@ -69,10 +68,14 @@ export default function Opportunities() {
           {actor && sub === 'signing-status' ? <SigningSection actor={actor} view="signing" /> : null}
           {actor && sub === 'signing-documents' ? <SigningSection actor={actor} view="documents" /> : null}
           {actor && sub === 'signing-contract' ? <SigningSection actor={actor} view="contract" /> : null}
-          {actor && sub === 'board-open' ? <BoardSection actor={actor} /> : null}
-          {actor && sub === 'board-fit' ? <OpportunityFitSection actor={actor} /> : null}
-          {actor && sub === 'board-invites' ? <SquadInvitesSection actor={actor} /> : null}
-          {actor && sub === 'board-followups' ? <FollowUpsSection actor={actor} /> : null}
+          {actor && sub === 'board' ? (
+            <>
+              <BoardSection actor={actor} />
+              <OpportunityFitSection actor={actor} />
+              <SquadInvitesSection actor={actor} />
+              <FollowUpsSection actor={actor} />
+            </>
+          ) : null}
         </View>
       </ScrollView>
     </SafeAreaView>

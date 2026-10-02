@@ -39,8 +39,10 @@ visibility, routes or permissions; `groupedChildren()` arranges whatever
 drawn. That single configuration drives the sidebar accordion, the
 collapsed-rail flyouts, the phone strip, the command palette (which shows
 section › group › page), `resolveNavigationLocation()` and pinned
-shortcuts. The T&S console keeps a smaller local `NAV_GROUPS` table in its
-`App.tsx` (same principle, single source; unchanged by P2.5).
+shortcuts. The T&S console keeps its own table in `navGroups.ts` (same
+principle, single source). M24D: no group, section or category lists more
+than five entries, and the sidebar opens one section and one group at a
+time — see `M24D_NAVIGATION_IA.md`.
 
 ## 3. ScoutBox Pro — five sections, Recruitment grouped
 
@@ -48,13 +50,16 @@ shortcuts. The T&S console keeps a smaller local `NAV_GROUPS` table in its
 |---|---|---|
 | Home | — | Home `feed` |
 | Recruitment | Discover | Players `search` · Shortlist `shortlist` · Film Room `filmroom` · Scouting Insight `insight` |
-| | Pipeline | Cases `recruitment` (labelled "Pipeline" until the P2.5 closure) · Recruitment Rooms `rooms` · Player Requests `requests` · Opportunities `opportunities` · Campaigns `campaigns` · Signings & Outcomes `outcomes` |
-| | Evidence | Assessments `assessments` · Evidence & Video `video` · Trials & Reports `trials` · Trial Days `trialdays` |
-| | Intelligence | Recruitment Briefs `briefs` · Player Matching `matching` · Dynamic Watchlists `watchlists` · Second Look `secondlook` · Nobody Missed `nobodymissed` |
+| | Pipeline | Cases `recruitment` · Recruitment Rooms `rooms` · Player Requests `requests` · Opportunities `opportunities` |
+| | Outreach (M24D) | Campaigns `campaigns` · Recruitment Briefs `briefs` |
+| | Evaluation (was Evidence) | Assessments `assessments` · Evidence & Video `video` · Trials & Reports `trials` · Trial Days `trialdays` |
+| | Intelligence | Player Matching `matching` · Dynamic Watchlists `watchlists` · Second Look `secondlook` · Nobody Missed `nobodymissed` |
+| | Outcomes (M24D) | Signings & Outcomes `outcomes` |
 | | Analytics | Director Dashboard `dashboard` · Funnel `funnel` · Discovery Ledger `ledger` |
 | Squad & Planning | — | Squad Planner `planner` · Coverage `coverage` · Calibration `calibration` · Fixtures `fixtures` |
 | Network | — | Clubs & Groups `network` · Representation `representation` |
-| Organisation | — | Staff & Security `organisation` · Verification `verification` · Integrations `imports` · Finance `budgets` · Plan & Compliance `plan` · Reputation `reputation` |
+| Organisation | Administration (M24D) | Staff & Security `organisation` · Verification `verification` · Reputation `reputation` |
+| | Operations (M24D) | Integrations `imports` · Finance `budgets` · Plan & Compliance `plan` |
 | Inbox (utility) | — | Messages `messages` |
 
 The former **Discover** section folded into Recruitment as its first group,
@@ -76,7 +81,7 @@ is named.
 |---|---|---|
 | Home | — | `feed` |
 | Players | — | Squad & Match Days `squad` · Coaches `coaches` · Friendlies `friendlies` · Fixtures `fixtures` |
-| Recruitment | Discover / Pipeline (+ Open Days `opendays`) / Evidence / Intelligence / Analytics / Planning (Coverage `coverage` · Calibration `calibration`) | as Pro, minus Pro-only pages |
+| Recruitment | Discover / Pipeline / Outreach (+ Open Days `opendays`) / Evaluation / Intelligence / Outcomes / Analytics / Planning (Coverage `coverage` · Calibration `calibration`) | as Pro, minus Pro-only pages (M24D: no group holds more than four pages) |
 | Club | — | Clubs & Groups `network` (everyone) · Staff & Security · Verification (lead or verification authority) · Integrations · Plan & Compliance (lead) |
 | Inbox | — | `messages` |
 
@@ -104,15 +109,20 @@ set is identical for every player kind; what differs inside each tab is
 driven by `isMinor` and enforced by the server, exactly as before. Guardian
 accounts never reach the tabs (`index.tsx` redirects them first).
 
-## 6. Trust & Safety (22 tabs → 6 groups) — unchanged by P2.5
+## 6. Trust & Safety (22+ tabs → 9 groups, none wider than five — M24D)
+
+The table is `scoutbox-admin/src/navGroups.ts` (plain data; `validateAdminNav`).
 
 | Group | Tabs |
 |---|---|
 | Home | Overview |
 | Cases | Report queue · Evidence disputes · Ver. disputes · Support desk |
+| Evidence | Passport · Box Cam · Trust |
 | Verification | Verification · Club verification · Guardian IDV · Staff checks · Coach affiliations |
 | Safety | Suspensions · Moderation log · Thread audit · Drill guidance |
-| Operations | Outcome tracking · Representation · Federation groups · Delivery centre · Mail outbox · Billing |
+| Operations | Outcome tracking · Representation · Federation groups |
+| Delivery & Billing | Delivery centre · Mail outbox · Billing |
+| Agents | Agent compliance review · Jurisdiction policy · Reviewer identities · Agent transactions |
 | System | Service health · Backups |
 
 The pending-reports badge sits on **Cases**. All 22 legacy tabs remain

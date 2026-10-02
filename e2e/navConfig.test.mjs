@@ -91,7 +91,12 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   const rec = nav.NAV_SECTIONS.find((s) => s.id === 'recruitment');
   ok(!!rec?.groups && rec.groups.length >= 5, `Recruitment is grouped (${rec?.groups?.length ?? 0} groups)`);
   const views = nav.groupedChildren(rec);
-  ok(views.every((g) => g.children.length <= 7), `no group has more than 7 pages (max ${Math.max(...views.map((g) => g.children.length))})`);
+  // M24D — the five rule: no group lists more than five pages (three to four is the target).
+  ok(views.every((g) => g.children.length <= nav.NAV_MAX_PER_CATEGORY), `no group has more than ${nav.NAV_MAX_PER_CATEGORY} pages (max ${Math.max(...views.map((g) => g.children.length))})`);
+  ok(views.every((g) => g.children.length <= 4), `M24D: every Recruitment group holds four pages or fewer (${views.map((g) => `${g.id} ${g.children.length}`).join(', ')})`);
+  ok(views.map((g) => g.id).join(',') === (app === 'scoutbox-club' ? 'discover,pipeline,outreach,evaluation,intelligence,outcomes,analytics' : 'discover,pipeline,outreach,evaluation,intelligence,outcomes,analytics,planning'), `M24D: the Recruitment groups are Discover · Pipeline · Outreach · Evaluation · Intelligence · Outcomes · Analytics${app === 'scoutbox-club' ? '' : ' · Planning'} (${views.map((g) => g.id).join(',')})`);
+  ok(nav.groupOf(rec, 'briefs')?.id === 'outreach' && nav.groupOf(rec, 'campaigns')?.id === 'outreach', 'M24D: Campaigns and Recruitment Briefs are Outreach');
+  ok(nav.groupOf(rec, 'outcomes')?.id === 'outcomes' && nav.groupOf(rec, 'trialdays')?.id === 'evaluation' && nav.groupOf(rec, 'matching')?.id === 'intelligence', 'M24D: Signings & Outcomes are Outcomes, Trial Days are Evaluation, Player Matching is Intelligence');
   ok(views.reduce((n, g) => n + g.children.length, 0) === rec.children.length, 'the grouped view shows every child exactly once');
   const disc = views[0];
   ok(disc.id === 'discover' && disc.children[0].id === 'search', 'Recruitment opens on Discover → Players, so the most-used page is still first');
@@ -158,14 +163,40 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
     ok(over.length === 0, `every phone strip fits a 360px row by label budget (${over.join('; ') || 'all ≤ 34 chars'})`);
   }
   const pipe = nav.stripLayout(rec, 'rooms');
-  ok(pipe.visible.map((c) => c.id).join() === 'recruitment,rooms,requests', `Pipeline primaries are Cases, Rooms, Requests (${pipe.visible.map((c) => c.id)})`);
-  ok(pipe.overflow.length >= 3 && pipe.overflow.every((c) => !c.primary), `Pipeline secondaries sit behind More (${pipe.overflow.map((c) => c.id)})`);
-  ok(pipe.activeInOverflow === null && nav.stripLayout(rec, 'campaigns').activeInOverflow?.id === 'campaigns', 'active-state mapping: Rooms is a visible tab, Campaigns is marked on More');
+  // M24D — Pipeline is four pages and shows whole on a phone; the More
+  // mechanism now serves Intelligence, whose four names fit a row only two at a time.
+  ok(pipe.visible.map((c) => c.id).join() === 'recruitment,rooms,requests,opportunities' && pipe.overflow.length === 0, `M24D: Pipeline (Cases, Rooms, Requests, Opportunities) shows whole — no More (${pipe.visible.map((c) => c.id)})`);
+  const intel = nav.stripLayout(rec, 'secondlook');
+  ok(intel.visible.map((c) => c.id).join() === 'matching,watchlists' && intel.overflow.map((c) => c.id).join() === 'secondlook,nobodymissed' && intel.overflow.every((c) => !c.primary), `Intelligence: Matching and Watchlists visible; Second Look and Nobody Missed behind More (${intel.visible.map((c) => c.id)} | ${intel.overflow.map((c) => c.id)})`);
+  ok(nav.stripLayout(rec, 'matching').activeInOverflow === null && intel.activeInOverflow?.id === 'secondlook', 'active-state mapping: Matching is a visible tab, Second Look is marked on More');
   ok(nav.stripLayout(rec, 'search').overflow.length === 0 && nav.stripLayout(rec, 'search').visible.length === 4, 'a group of four shows whole — no More for Discover');
-  ok(nav.stripLayout(rec, 'secondlook').activeInOverflow?.id === 'secondlook' && nav.stripLayout(rec, 'secondlook').visible.map((c) => c.id).join() === 'briefs,matching', 'Intelligence: Briefs and Matching visible; Watchlists, Second Look and Nobody Missed through More (the longer names fit 360px only there)');
+  ok(nav.stripLayout(rec, 'trials').overflow.length === 0 && nav.stripLayout(rec, 'trials').visible.length === 4, 'a group of four shows whole — no More for Evaluation');
   // A scout and a lead see the same Pipeline strip (no role-dependent pages in it).
   const scoutRec = nav.filterSections(SCOUT).find((s) => s.id === 'recruitment');
   ok(JSON.stringify(nav.stripLayout(scoutRec, 'rooms').visible.map((c) => c.id)) === JSON.stringify(pipe.visible.map((c) => c.id)), 'role visibility: the scout strip matches the lead strip for Pipeline');
+
+  section(`${app} — M24D: no navigation category holds more than five entries`);
+  // Every section's groups, every group's pages, every ungrouped section's
+  // pages, for every role: the configuration itself (`validateNavConfig`
+  // reports a breach) and the filtered views the sidebar draws.
+  for (const sec of nav.NAV_SECTIONS) {
+    const lists = sec.groups ? sec.groups.map((g) => [`${sec.id}/${g.id}`, g.items.length]) : [[sec.id, sec.children.length]];
+    for (const [name, n] of lists) if (n > nav.NAV_MAX_PER_CATEGORY) fail(`${name} lists ${n} pages (max ${nav.NAV_MAX_PER_CATEGORY})`); else passed++;
+  }
+  console.log(`✓ every group and every ungrouped section of ${app} lists ≤ ${nav.NAV_MAX_PER_CATEGORY} pages (${nav.NAV_SECTIONS.flatMap((s) => s.groups ? s.groups.map((g) => `${s.id}/${g.id} ${g.items.length}`) : [`${s.id} ${s.children.length}`]).join(', ')})`);
+  for (const [who, ctx] of [['scout', SCOUT], ['lead', LEAD], ['reviewer', REVIEWER]]) {
+    for (const sec of nav.filterSections(ctx)) for (const g of nav.groupedChildren(sec)) if (g.children.length > nav.NAV_MAX_PER_CATEGORY) fail(`${who}: ${sec.id}/${g.id ?? '-'} draws ${g.children.length} pages`); else passed++;
+  }
+  console.log('✓ for every role, every group the sidebar draws holds ≤ 5 pages (folded)');
+  {
+    const wide = [{ ...rec, groups: rec.groups.map((g, i) => (i === 0 ? { ...g, items: [...g.items, 'rooms', 'requests'] } : g)) }];
+    ok(nav.validateNavConfig(wide).some((p) => /6 pages \(max 5\)/.test(p)), 'a group widened to six pages is reported by the validator');
+    const flat = [{ ...rec, groups: undefined }];
+    ok(nav.validateNavConfig(flat).some((p) => /pages in an ungrouped section/.test(p)), 'an ungrouped section with more than five pages is reported by the validator');
+  }
+  const orgSec = nav.NAV_SECTIONS.find((s) => s.id === 'organisation');
+  if (app === 'scoutbox-club') ok(!!orgSec.groups && orgSec.groups.length === 2 && orgSec.groups.every((g) => g.items.length === 3), 'M24D: Pro Organisation (six pages) is two groups of three — Administration and Operations');
+  else ok(!orgSec.groups && orgSec.children.length <= 5, `M24D: Grassroots Club lists ${orgSec.children.length} pages, within five, ungrouped`);
   ok(tr(rec.children.find((c) => c.id === 'recruitment').labelKey) === 'Cases' || dictionaries(app).en.has('nav2.recruitment'), 'the Cases page no longer shares its name with the Pipeline group');
   for (const c of rec.children) if (c.shortKey && !c.shortKey.startsWith('navshort.')) fail(`${c.id}: short label key must be a navshort.* key`);
   ok(true, 'short strip labels are i18n keys (checked against both dictionaries below)');
@@ -430,6 +461,56 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   ok(nav.loadShortcuts('org1', 'u1', LICENSED).length === 0, 'malformed stored shortcuts → empty, no crash');
   store.set('sb-agent-shortcuts:org1:u1', JSON.stringify(['ghost', 42, 'agency']));
   ok(nav.loadShortcuts('org1', 'u1', LICENSED).join(',') === 'agency', 'invalid ids and types filtered out');
+}
+
+// ---------------------------------------------------------------- M24D
+// The five rule across the remaining applications: the Agent's sections,
+// the Trust & Safety console's groups, the Player's bottom navigation and
+// recruitment categories. Every list of choices a person is shown holds at
+// most five entries — the brief's rule, asserted on the real configuration.
+section('M24D — the five rule in every application');
+{
+  const agent = await loadNav('scoutbox-agent');
+  for (const sec of agent.NAV_SECTIONS) if (sec.children.length > 5) fail(`agent ${sec.id}: ${sec.children.length} pages`); else passed++;
+  ok(agent.NAV_SECTIONS.length <= 5, `Agent: ${agent.NAV_SECTIONS.length} sections, each listing ≤ 5 pages (${agent.NAV_SECTIONS.map((s) => `${s.id} ${s.children.length}`).join(', ')})`);
+  ok(agent.validateNavConfig().length === 0, 'Agent: the validator reports no breach');
+
+  const admin = await (async () => {
+    const out = path.join(mkdtempSync(path.join(tmpdir(), 'sbx-nav-')), 'navGroups.mjs');
+    const bundle = await rolldown({ input: path.join(ROOT, 'scoutbox-admin', 'src', 'navGroups.ts'), logLevel: 'silent' });
+    await bundle.write({ file: out, format: 'esm' });
+    await bundle.close();
+    return import(pathToFileURL(out).href);
+  })();
+  const adminProblems = admin.validateAdminNav();
+  for (const p of adminProblems) console.error(`   ${p}`);
+  ok(adminProblems.length === 0, 'Trust & Safety: every tab is in exactly one group and no group lists more than five');
+  ok(admin.ADMIN_NAV_GROUPS.every((g) => g.tabs.length <= 5), `Trust & Safety: ${admin.ADMIN_NAV_GROUPS.length} groups, the widest ${Math.max(...admin.ADMIN_NAV_GROUPS.map((g) => g.tabs.length))} (${admin.ADMIN_NAV_GROUPS.map((g) => `${g.id} ${g.tabs.length}`).join(', ')})`);
+  ok(admin.ADMIN_NAV_GROUPS.map((g) => g.id).join(',') === 'home,cases,evidence,verification,safety,operations,delivery,agents,system', 'Trust & Safety: Cases (7) became Cases + Evidence, Operations (6) became Operations + Delivery & Billing');
+  const adminSrc = readFileSync(path.join(ROOT, 'scoutbox-admin', 'src', 'App.tsx'), 'utf8');
+  const tabType = adminSrc.match(/type Tab = ([^;]+);/)[1];
+  const literalTabs = [...tabType.matchAll(/'([a-z]+)'/g)].map((m) => m[1]);
+  const inGroups = new Set(admin.ADMIN_NAV_GROUPS.flatMap((g) => g.tabs));
+  for (const t of literalTabs) if (!inGroups.has(t)) fail(`Trust & Safety: tab "${t}" is in no group`); else passed++;
+  for (const f of ['m12tabs', 'm13tabs', 'm14tabs', 'm15tabs', 'm16tabs', 'm162tabs', 'm25tabs']) {
+    const src = readFileSync(path.join(ROOT, 'scoutbox-admin', 'src', `${f}.tsx`), 'utf8');
+    for (const m of src.matchAll(/\{ id: '([a-z]+)', label: '[^']+' \}/g)) if (!inGroups.has(m[1])) fail(`Trust & Safety: ${f} tab "${m[1]}" is in no group`); else passed++;
+  }
+  console.log(`✓ Trust & Safety: every tab the console defines (${inGroups.size} ids) is reachable through a group (folded)`);
+  ok(admin.validateAdminNav([{ id: 'x', label: 'X', tabs: ['a', 'b', 'c', 'd', 'e', 'f'] }]).some((p) => /6 pages \(max 5\)/.test(p)), 'Trust & Safety: a six-tab group is reported by the validator');
+
+  const layout = readFileSync(path.join(ROOT, 'scoutbox-player', 'src', 'app', '(tabs)', '_layout.tsx'), 'utf8');
+  const tabs = [...layout.matchAll(/\{ name: '([a-z]+)', titleKey: '[A-Za-z]+', icon: '[a-z-]+'(, hidden: true)? \}/g)];
+  const onBar = tabs.filter((m) => !m[2]).map((m) => m[1]);
+  ok(tabs.length >= 5 && onBar.length <= 5, `Player: the bottom navigation shows ${onBar.length} destinations (${onBar.join(' · ')}); ${tabs.length - onBar.length} routes stay off the bar`);
+  const player = await (async () => {
+    const out = path.join(mkdtempSync(path.join(tmpdir(), 'sbx-nav-')), 'caseNav.mjs');
+    const bundle = await rolldown({ input: path.join(ROOT, 'scoutbox-player', 'src', 'caseNav.ts'), logLevel: 'silent' });
+    await bundle.write({ file: out, format: 'esm' });
+    await bundle.close();
+    return import(pathToFileURL(out).href);
+  })();
+  ok(player.PLAYER_NAV.categories.length <= 5 && player.PLAYER_NAV.categories.every((c) => c.subs.length <= 5), `Player: ${player.PLAYER_NAV.categories.length} recruitment categories, the widest ${Math.max(...player.PLAYER_NAV.categories.map((c) => c.subs.length))} pages`);
 }
 
 console.log(`\nnavConfig: ${passed} checks passed${process.exitCode ? ' (WITH FAILURES)' : ''}`);

@@ -15,6 +15,7 @@ import { M15Panel, M15_TABS, type M15Tab } from './m15tabs';
 import { M16Panel, M16_TABS, type M16Tab } from './m16tabs';
 import { M162Panel, M162_TABS, type M162Tab } from './m162tabs';
 import { M25Panel, M25_TABS, type M25Tab } from './m25tabs';
+import { ADMIN_NAV_GROUPS, type AdminNavTab } from './navGroups';
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000';
 const DEMO = import.meta.env.VITE_DEMO === '1';
@@ -97,26 +98,19 @@ async function call<T>(key: string, path: string, init?: RequestInit): Promise<T
 }
 
 type Tab = 'overview' | 'reports' | 'clubs' | 'guardians' | 'blocks' | 'moderation' | 'threads' | 'outbox' | 'billing' | M12Tab | M13Tab | M14Tab | M15Tab | M16Tab | M162Tab | M25Tab;
-// M15-Nav: the flat 22-tab sidebar becomes six grouped destinations with a
-// page-level tab row. Every legacy tab id stays a live destination — the
-// groups are presentation only; the admin key + server rules still gate all
-// data.
-const NAV_GROUPS: { id: string; label: string; tabs: Tab[] }[] = [
-  { id: 'home', label: 'Home', tabs: ['overview'] },
-  { id: 'cases', label: 'Cases', tabs: ['reports', 'disputes', 'verdisputes', 'passport', 'boxcam', 'trust', 'supportdesk'] },
-  { id: 'verification', label: 'Verification', tabs: ['verification', 'clubs', 'guardians', 'staffchecks', 'coaches'] },
-  { id: 'safety', label: 'Safety', tabs: ['blocks', 'moderation', 'threads', 'drillguide'] },
-  { id: 'operations', label: 'Operations', tabs: ['outcomes', 'representation', 'groups', 'deliverycentre', 'outbox', 'billing'] },
-  // M23 P5.6C: the attributed compliance lane. Its own credentialed sign-in —
-  // the admin key that opens this console is not a reviewer identity (G-C0).
-  // M23 P5.6D adds the transaction READ to the same lane: same reviewer gate,
-  // states and party roles only, and no action on a transaction at all.
-  { id: 'agents', label: 'Agents', tabs: ['agentreview', 'agentpolicy', 'agentreviewers', 'agenttransactions'] },
-  { id: 'system', label: 'System', tabs: ['servicehealth', 'backups'] },
-];
+// M15-Nav: the flat 22-tab sidebar became grouped destinations with a
+// page-level tab row; M24D keeps every group at five pages or fewer. The
+// configuration lives in navGroups.ts (plain data the navigation suite reads);
+// the groups are presentation only — the admin key + server rules still gate
+// all data.
+const NAV_GROUPS: { id: string; label: string; tabs: Tab[] }[] = ADMIN_NAV_GROUPS.map((g) => ({ id: g.id, label: g.label, tabs: [...g.tabs] }));
+// Every configured tab id must be a real Tab (checked at compile time).
+type AdminTabsAreTabs = AdminNavTab extends Tab ? true : never;
+const ADMIN_TABS_ARE_TABS: AdminTabsAreTabs = true;
+void ADMIN_TABS_ARE_TABS;
 const groupOfTab = (tab: Tab) => NAV_GROUPS.find((g) => g.tabs.includes(tab)) ?? NAV_GROUPS[0];
 // M24A — the platform icon for each destination group (lucide names).
-const GROUP_ICON: Record<string, string> = { home: 'layout-dashboard', cases: 'inbox', verification: 'badge-check', safety: 'shield-check', operations: 'folders', agents: 'users', system: 'settings-2' };
+const GROUP_ICON: Record<string, string> = { home: 'layout-dashboard', cases: 'inbox', evidence: 'file-check-2', verification: 'badge-check', safety: 'shield-check', operations: 'folders', delivery: 'mail', agents: 'users', system: 'settings-2' };
 const THEME_LABELS = { aria: 'Dark theme', light: 'Light', dark: 'Dark' };
 
 const TABS: { id: Tab; label: string }[] = [
@@ -247,6 +241,7 @@ export default function App() {
         app="safety"
         product="Trust & Safety"
         heading="Protect the people behind the game."
+        summary="Report review, verification and the audit of every action."
         points={[
           'Report review with an attributed outcome the reporter reads.',
           'Club verification, guardian ID checks and safeguarding records.',
@@ -302,7 +297,7 @@ export default function App() {
           </h2>
           <div className="p-toolbar">
             <ThemeToggle theme={theme} onToggle={toggleTheme} labels={THEME_LABELS} />
-            {DEMO && <span className="pill blue">demo data</span>}
+            {DEMO && <span className="p-note" data-testid="demo-note">Demo data</span>}
             <button onClick={() => void load()} title="Refresh"><Icon name="refresh-cw" size={18} /> Refresh</button>
           </div>
         </div>
@@ -401,7 +396,7 @@ export default function App() {
                     <b>{c.name}</b> <span className="dim">({c.type} · {c.plan}{c.verifiedDomain ? ` · @${c.verifiedDomain}` : ''})</span>
                   </span>
                   {c.suspended && <span className="pill red">suspended</span>}
-                  {c.safeguardingCertified && <span className="pill green">🛡 certified</span>}
+                  {c.safeguardingCertified && <span className="pill green">certified</span>}
                   <label className="chk"><input type="checkbox" checked={c.verified} onChange={(e) => setClubVerification(c, { verified: e.target.checked })} /> verified</label>
                   <label className="chk"><input type="checkbox" checked={c.safeguardingContractSigned} onChange={(e) => setClubVerification(c, { safeguardingContractSigned: e.target.checked })} /> contract</label>
                   <label className="chk"><input type="checkbox" checked={!!c.suspended} onChange={(e) => setClubVerification(c, { suspended: e.target.checked })} /> suspend</label>

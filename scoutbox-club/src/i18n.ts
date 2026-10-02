@@ -99,8 +99,9 @@ const en = {
   'navsec.home': 'Home', 'navsec.recruitment': 'Recruitment',
   'navsec.planning': 'Squad & Planning', 'navsec.network': 'Network', 'navsec.organisation': 'Organisation',
   // P2.5: the groups inside Recruitment, and the shell's own labels.
-  'navgrp.discover': 'Discover', 'navgrp.pipeline': 'Pipeline', 'navgrp.evidence': 'Evidence',
-  'navgrp.intelligence': 'Intelligence', 'navgrp.analytics': 'Analytics', 'navgrp.planning': 'Planning',
+  'navgrp.discover': 'Discover', 'navgrp.pipeline': 'Pipeline', 'navgrp.outreach': 'Outreach', 'navgrp.evaluation': 'Evaluation',
+  'navgrp.intelligence': 'Intelligence', 'navgrp.outcomes': 'Outcomes', 'navgrp.analytics': 'Analytics', 'navgrp.planning': 'Planning',
+  'navgrp.administration': 'Administration', 'navgrp.operations': 'Operations',
   'navsec.toggle': 'Show or hide the pages in', 'navsec.pagesIn': 'Pages in', 'navsec.inThisArea': 'In this area',
   'navsec.more': 'More', 'navsec.moreAria': 'More pages in this area', 'navsec.moreMenu': 'More pages',
   'navshort.rooms': 'Rooms', 'navshort.requests': 'Requests', 'navshort.insight': 'Insight', 'navshort.video': 'Video',
@@ -1819,8 +1820,9 @@ const fr: typeof en = {
   'navsec.home': 'Accueil', 'navsec.recruitment': 'Recrutement',
   'navsec.planning': 'Effectif et planification', 'navsec.network': 'R\u00e9seau', 'navsec.organisation': 'Organisation',
   // P2.5 (FR)
-  'navgrp.discover': 'D\u00e9couvrir', 'navgrp.pipeline': 'Pipeline', 'navgrp.evidence': 'Preuves',
-  'navgrp.intelligence': 'Analyse', 'navgrp.analytics': 'Statistiques', 'navgrp.planning': 'Planification',
+  'navgrp.discover': 'D\u00e9couvrir', 'navgrp.pipeline': 'Pipeline', 'navgrp.outreach': 'Prospection', 'navgrp.evaluation': '\u00c9valuation',
+  'navgrp.intelligence': 'Analyse', 'navgrp.outcomes': 'R\u00e9sultats', 'navgrp.analytics': 'Statistiques', 'navgrp.planning': 'Planification',
+  'navgrp.administration': 'Administration', 'navgrp.operations': 'Op\u00e9rations',
   'navsec.toggle': 'Afficher ou masquer les pages de', 'navsec.pagesIn': 'Pages de', 'navsec.inThisArea': 'Dans cette zone',
   'navsec.more': 'Plus', 'navsec.moreAria': 'Autres pages de cette zone', 'navsec.moreMenu': 'Autres pages',
   'navshort.rooms': 'Salles', 'navshort.requests': 'Demandes', 'navshort.insight': 'Analyse', 'navshort.video': 'Vid\u00e9o',
