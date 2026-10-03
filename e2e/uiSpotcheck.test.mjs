@@ -63,6 +63,7 @@ const freshPage = async () => {
   await page.click('a[href="/you"]');
   await page.getByRole('tab', { name: 'Account' }).click();
   await page.waitForSelector('text=School-hours mute', { timeout: 15000 });
+  await page.click('[data-testid="account-privacy"]'); // M24F: export and delete sit under "Privacy and your data"
   await page.waitForSelector('text=Preview my data export');
   await page.waitForSelector('text=Delete my account');
   await page.click('text=Preview my data export');

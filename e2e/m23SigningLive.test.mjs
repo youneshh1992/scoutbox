@@ -539,7 +539,7 @@ const scout = await enterClub(ctxScout, 'Eastport FC', 'Tom Field', 'First-Team 
   const txt = await sw(scout.page).innerText();
   ok(/Signing completed/.test(txt) && /sit with the room lead and the recruitment lead/.test(txt), 'N2: a scout reads the completed signing (club memory) and is told the act is not theirs');
   neg((await sw(scout.page).locator('[data-testid="signing-start"]').count()) === 0 && (await sw(scout.page).locator('[data-testid="signing-cancel"]').count()) === 0 && (await sw(scout.page).locator('[data-testid="signing-complete"]').count()) === 0 && (await sw(scout.page).locator('[data-testid="signing-club-sign"]').count()) === 0, 'N2b: no start, cancel, complete or club-sign control for a scout');
-  ok(/🔒|PRIVATE_SIGNING_NOTE_SENTINEL_8841/.test(txt) || true, 'N2c: (club memory) the note is the club\'s own — never asserted absent for club staff');
+  ok(/PRIVATE_SIGNING_NOTE_SENTINEL_8841/.test(txt) || true, 'N2c: (club memory) the note is the club\'s own — never asserted absent for club staff');
   ok(await scout.page.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth + 1), 'N13c: 1024px: no horizontal scroll');
   expect(await j('POST', `/org/offers/${OFFER_M}/signing`, { clientKey: 'live-scout' }, scout.token), 403, 'SIGNING_NOT_PERMITTED', 'N2d: and the server refuses a scout opening a signing');
   const rita = (await j('POST', '/auth/org/login', { orgId: 'org-harbour', scoutName: 'Rita Vale', role: 'Head of Recruitment' })).body;

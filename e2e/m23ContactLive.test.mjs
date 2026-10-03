@@ -365,7 +365,7 @@ const amara = await enterPlayer(ctxAmara, 'Amara Adebayo', 'amara', 'text=Guardi
 await amara.waitForSelector('text=About Guni — U15 development group', { timeout: 25000 });
 {
   const txt = await bodyText(amara);
-  ok(/about Guni/.test(txt) && /U15 development group/.test(txt), 'M4: the guardian sees the message, about her child, at 390px');
+  ok(/(about|For) Guni/.test(txt) && /U15 development group/.test(txt), 'M4: the guardian sees the message, about her child, at 390px'); // M24F: the record says "For Guni Adebayo"
   ok(/routed to you because the player is under age/.test(txt), 'M4b: and is told why it reached her and not the child');
   ok(/Your reply \(optional\)/.test(txt), 'M4c: with a reply field');
 }
@@ -380,7 +380,7 @@ const guni = await enterPlayer(ctxGuni, 'Guni Adebayo', 'guni', 'a[href="/inbox"
 await openInbox(guni);
 {
   const txt = await bodyText(guni);
-  ok(/guardian-managed/.test(txt) && /Eastport FC/.test(txt), 'M6: the child\'s Updates show a guardian-managed item from the club');
+  ok(/guardian-managed/i.test(txt) && /Eastport FC/.test(txt), 'M6: the child\'s Updates show a guardian-managed item from the club');
   neg(!/U15 development group/.test(txt) && !/About Guni/.test(txt), 'M6b: the message body and subject never reach the child');
   neg(!/Your reply/.test(txt) && !(await guni.locator('[aria-label="Your reply (optional)"]').count()), 'M6c: and there is no reply field on the child\'s screen');
 }

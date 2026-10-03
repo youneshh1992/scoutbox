@@ -70,6 +70,7 @@ if (!/nothing here can resolve it/.test(await text(agent))) fail('agent demo: th
 say('agent demo: a disputed client says access is suspended and nothing here can resolve it');
 await agent.evaluate(() => { location.hash = '#/clients/rep-d1/opportunities'; });
 await agent.waitForSelector('[data-testid="client-opps"]', { timeout: 15000 });
+await agent.waitForSelector('[data-testid^="opp-wrap-"]', { timeout: 15000 }); // the container renders before the rows arrive
 if (!/Open trial — forwards/.test(await text(agent))) fail('agent demo: the client board is empty');
 say('agent demo: an active client\'s Opportunities tab shows the client\'s board');
 await agent.evaluate(() => { location.hash = '#/agency/team'; });
@@ -91,7 +92,7 @@ await agent.waitForSelector('[data-testid="provider-status"]', { timeout: 15000 
   if ((await agent.locator('[data-testid="provider-status"]').getAttribute('data-live')) !== '0') fail('agent demo: the provider must declare that no live register is connected');
   const pol = await agent.locator('[data-testid="policies-section"]').innerText();
   if (!/jp-fifa-2025-1/.test(pol) || !/jp-eng-2026-27-1/.test(pol)) fail('agent demo: the policy versions in effect are missing');
-  if (!/pathway not enabled/.test(await agent.locator('[data-testid="minors-section"]').innerText())) fail('agent demo: the minors pathway must read as not enabled');
+  if (!/pathway not enabled/i.test(await agent.locator('[data-testid="minors-section"]').innerText())) fail('agent demo: the minors pathway must read as not enabled');
   say('agent demo: Compliance shows the honest provider, the policy versions and a closed minors pathway');
 }
 {
@@ -222,7 +223,7 @@ await ts.click('nav.sidebar button:has-text("Agents")');
 await ts.waitForSelector('[data-testid="reviewer-who"]', { timeout: 20000 });
 {
   const who = await ts.locator('[data-testid="reviewer-who"]').innerText();
-  if (!/authenticated reviewer/.test(who)) fail('admin demo: the console must name the authenticated reviewer');
+  if (!/authenticated reviewer/i.test(who)) fail('admin demo: the console must name the authenticated reviewer');
   const queue = await text(ts);
   if (!/resolves missing or uncertain/.test(queue)) fail('admin demo: the reviewer\'s remit must be stated');
   if (!/never rewrites policy/.test(queue)) fail('admin demo: the limit on a reviewer\'s power must be stated');
@@ -241,7 +242,7 @@ await ts.waitForSelector('[data-testid="policy-jp-eng-2026-27-1"]', { timeout: 1
 {
   const pol = await text(ts);
   if (!/one\s+administrator proposes it, a different one approves it/.test(pol)) fail('admin demo: dual control must be stated');
-  if (!/under legal review/.test(pol)) fail('admin demo: a rule whose operative status is contested must show it');
+  if (!/under legal review/i.test(pol)) fail('admin demo: a rule whose operative status is contested must show it');
   if ((await ts.locator('[data-testid="approve-jp-eng-2026-27-2"]').count()) === 0) fail('admin demo: a proposed version should offer approval to an administrator');
   say('admin demo: policy versions show each rule\'s operative status, and publication is dual-controlled');
 }

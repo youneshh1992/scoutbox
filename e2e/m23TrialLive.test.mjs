@@ -458,7 +458,7 @@ const guni = await enterPlayer(ctxGuni, 'Guni Adebayo', 'guni', 'a[href="/inbox"
 await goTab(guni, '/inbox');
 {
   const txt = await bodyText(guni);
-  ok(/guardian-managed/.test(txt) && /Eastport FC/.test(txt), 'N12: the child\'s Updates show a guardian-managed item from the club');
+  ok(/guardian-managed/i.test(txt) && /Eastport FC/.test(txt), 'N12: the child\'s Updates show a guardian-managed item from the club');
   neg(!/U14 training session/.test(txt) && !/Gate B/.test(txt) && !(await guni.locator('[data-testid^="trial-slot-"]').count()), 'N12b: never the message, the address or a slot to pick');
 }
 await playerCategory(guni, 'trial', 'Schedule');

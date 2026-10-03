@@ -215,7 +215,7 @@ say('A5: Agency › Team opens by deep link');
   await tomas.page.click('button:has-text("Add member")');
   ok(await waitText(tomas.page, /Ana Costa/), 'A6: Ana Costa is added to the team as a licensed agent');
   const row = tomas.page.locator('[data-testid="team-rows"] .list-row:has-text("Ana Costa")');
-  ok(/no profile/.test(await row.innerText()), 'A7: her row says "no profile" — the role is agency governance, not a licence');
+  ok(/no profile/i.test(await row.innerText()), 'A7: her row says "no profile" — the role is agency governance, not a licence');
 }
 
 // ================================================================== B — AGENT

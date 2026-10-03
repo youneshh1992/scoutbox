@@ -129,7 +129,7 @@ const watch = (page, who) => {
 // section TITLE (a second "Development" text beside the page tab), whatever
 // the state.
 const waitDev = (p) => p.waitForFunction(
-  () => [...document.querySelectorAll('div')].filter((d) => d.children.length === 0 && d.textContent.trim() === 'Development').length >= 2,
+  () => [...document.querySelectorAll('div, h1, h2, h3')].filter((d) => d.children.length === 0 && d.textContent.trim() === 'Development').length >= 2, // M24F: section titles are real headings (role="heading")
   null, { timeout: 30000 },
 );
 // ---------------------------------------------------------------- the player

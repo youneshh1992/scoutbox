@@ -236,7 +236,7 @@ const gNote = await guardian.locator('body').innerText();
 if (!gNote.includes('accepted by you, the guardian')) fail('guardian invite section missing the guardian-only wording');
 await guardian.locator('input[placeholder="Invitation code"]').first().fill(inv.body.code);
 await guardian.getByText('Accept', { exact: true }).locator('visible=true').first().click();
-await guardian.waitForSelector('text=✅', { timeout: 15000 });
+await guardian.waitForSelector('text=Joining links nothing else', { timeout: 15000 }); // M24F: the server's acceptance note, no pictograph prefix
 say('L6: guardian accepted the squad invitation for the minor (child never in the loop)');
 
 // Verified professionals still cannot bypass safeguarding — live negatives.

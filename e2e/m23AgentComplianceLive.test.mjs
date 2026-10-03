@@ -220,7 +220,7 @@ say('A3: Conflicts & compliance opens by deep link');
   const fresh = ana.locator('[data-testid="freshness-section"]');
   ok(/FIFA licence/.test(await fresh.innerText()) && /National registration/.test(await fresh.innerText()), 'A7: her verification is shown facet by facet with its re-check window');
   const minors = ana.locator('[data-testid="minors-section"]');
-  ok(/pathway not enabled/.test(await minors.innerText()), 'A8: the minors pathway is shown as NOT enabled, and readiness is evaluated against no subject');
+  ok(/pathway not enabled/i.test(await minors.innerText()), 'A8: the minors pathway is shown as NOT enabled, and readiness is evaluated against no subject');
 }
 
 // ============================================================== B — a context
@@ -290,7 +290,7 @@ ts.on('dialog', (d) => d.accept());
   await ts.click('[data-testid="reviewer-signin-go"]');
   ok(await waitFor(async () => (await ts.locator('[data-testid="reviewer-who"]').count()) > 0, 20000), 'C3: Marcus signs in with his own credentials');
   const who = await ts.locator('[data-testid="reviewer-who"]').innerText();
-  ok(/Marcus Bell/.test(who) && /authenticated reviewer/.test(who), 'C3b: the console names the authenticated reviewer whose identity every decision will carry');
+  ok(/Marcus Bell/.test(who) && /authenticated reviewer/i.test(who), 'C3b: the console names the authenticated reviewer whose identity every decision will carry');
   ok(await waitFor(async () => (await ts.locator(`[data-testid="review-${REVIEW_ID}"]`).count()) > 0, 20000), 'C4: the pending item raised by Ana\'s declaration is in his queue');
   await ts.click(`[data-testid="open-${REVIEW_ID}"]`);
   await ts.waitForSelector('[data-testid="review-detail"]', { timeout: 15000 });
@@ -298,7 +298,7 @@ ts.on('dialog', (d) => d.accept());
   ok(/engaging_entity/.test(subject) && /employment_contract/.test(subject), 'C5: he sees exactly what the review needs: the context, its type and the party role');
   neg(!/dob|date of birth|email|phone/i.test(subject), 'C5b: …and no personal data of the individual beyond the review\'s need');
   await ts.click('[data-testid="start"]');
-  ok(await waitFor(async () => (await ts.locator('[data-testid="open-status"]').innerText({ timeout: 1500 }).catch(() => '')) === 'in review'), 'C6: starting the review attributes it to him');
+  ok(await waitFor(async () => (await ts.locator('[data-testid="open-status"]').innerText({ timeout: 1500 }).catch(() => '')).toLowerCase() === 'in review'), 'C6: starting the review attributes it to him');
   neg(/Marcus Bell/.test(await ts.locator('[data-testid="review-detail"]').innerText()), 'C6b: the item he started names him — an in-flight review is never anonymous');
 }
 {

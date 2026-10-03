@@ -304,7 +304,7 @@ await offerTab(lead.page, ROOM_A);
   neg((await ow(lead.page).locator('[data-testid="offer-draft"]').count()) === 0 && (await ow(lead.page).locator('[data-testid="offer-issue"]').count()) === 0, 'A7e: the editor is gone — issued terms are immutable');
   const hist = await ow(lead.page).locator('[data-testid="offer-history"]').innerText();
   ok(/Issued/.test(hist) && /Draft opened/.test(hist) && /Draft edited/.test(hist), 'A7f: history: draft opened, edited, issued');
-  ok(/🔒 PRIVATE_OFFER_NOTE_SENTINEL_7731/.test(await ow(lead.page).locator('[data-testid="offer-revisions"]').innerText()), 'A7g: the club reads its own internal note on the revision');
+  ok(/PRIVATE_OFFER_NOTE_SENTINEL_7731/.test(await ow(lead.page).locator('[data-testid="offer-revisions"]').innerText()), 'A7g: the club reads its own internal note on the revision');
   ok((await ow(lead.page).locator('[data-testid="offer-withdraw"]').count()) === 1 && (await ow(lead.page).locator('[data-testid="offer-revise"]').count()) === 1, 'A7h: withdraw and new-revision controls are offered to the lead');
   expect(await lifecycle(ROOM_A, 'recordOfferAccepted', LEAD), 422, 'LIFECYCLE_EVIDENCE_REQUIRED', 'N12: the club naming recordOfferAccepted by hand is refused — only the recipient\'s answer is evidence');
 }

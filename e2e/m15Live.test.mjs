@@ -144,7 +144,7 @@ await player.waitForSelector('text=Football Passport', { timeout: 20000 });
   say('P1: self passport renders with honest identity assurance and the no-rating note');
   await player.fill('input[placeholder="Achievement (e.g. League top scorer 2025)"]', 'County Cup Winner 2024');
   await player.getByText('Add', { exact: true }).nth(0).click();
-  await player.waitForSelector('text=🏅 County Cup Winner 2024', { timeout: 15000 });
+  await player.waitForSelector('text=County Cup Winner 2024', { timeout: 15000 }); // M24F: the achievement carries a trophy icon, not a pictograph
   say('P1: achievement added (player-submitted until a club confirms it)');
   await player.fill('input[placeholder="Club name"]', 'Sunday Kings FC');
   await player.fill('input[placeholder="From (e.g. 2019)"]', '2018');
