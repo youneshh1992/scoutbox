@@ -101,8 +101,9 @@ await player.goto('http://localhost:8291/');
 await player.waitForSelector('text=Our promises to every player', { timeout: 30000 });
 await player.locator('text=Enter').nth(0).click(); // Kola (adult, dev login)
 await player.waitForSelector('text=Your visibility right now', { timeout: 20000 });
-await player.click('a[href="/you"]');
-await player.getByRole('tab', { name: 'Clubs' }).click();
+await player.click('a[href^="/you"]');
+await player.getByRole('tab', { name: 'Account' }).click(); // M24F.2: suitability preferences are Account › Preferences
+await player.click('[data-testid="account-cat-preferences"]');
 await player.waitForSelector('text=Suitability preferences', { timeout: 20000 });
 await player.fill('input[aria-label="Travel limit"]', '40');
 await player.locator('text=Save travel limit').click();
@@ -178,7 +179,7 @@ await guardian.waitForSelector('text=Saved — private to you', { timeout: 10000
 say('L3: guardian set the child’s preferences (relocation never collected for minors)');
 
 // ============================================================ L4 transition
-await player.click('a[href="/you"]');
+await player.click('a[href^="/you"]');
 await player.getByRole('tab', { name: 'Clubs' }).click();
 await player.waitForSelector('text=Club transition', { timeout: 20000 });
 await player.locator('text=Open a transition case').click();

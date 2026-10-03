@@ -173,7 +173,7 @@ async function enterPlayer(ctx, rowText, who) {
   await page.waitForSelector('text=Our promises to every player', { timeout: 40000 });
   const row = page.locator('div', { hasText: rowText }).filter({ has: page.locator('text=Enter') }).last();
   await row.locator('text=Enter').last().click();
-  await page.waitForSelector('a[href="/you"]', { timeout: 30000 });
+  await page.waitForSelector('a[href^="/you"]', { timeout: 30000 });
   return page;
 }
 async function myAgentCard(page, re = /Ana Costa/) {
@@ -304,12 +304,14 @@ say('C1: Kola signs in to the player app');
   const card = await myAgentCard(kola);
   const txt = await card.innerText();
   ok(/Ana Costa/.test(txt) && /North Star Sports Agency/.test(txt) && /Awaiting your answer/.test(txt), 'C2: My Agent shows Ana\'s request from North Star, awaiting his answer');
-  ok(/FIFA licence: verified/i.test(txt) && /check the provenance/i.test(txt), 'C3: the card shows the licence STATE with an honest caveat');
+  // M24F.2 — the licence is stated as a fact; the caveat sentence is reserved for an UNVERIFIED licence.
+  ok(/FIFA licence: verified/i.test(txt) && !/check the provenance/i.test(txt) && !/NOT verified/i.test(txt), 'C3: the card shows the licence STATE as one fact (the caveat is reserved for an unverified licence)');
   neg(!/TEST-VERIFIED|FIFA-2024/.test(txt), 'C4: no reference or licence number reaches the player');
   if (!/employment,\s*transfer/.test(txt) || !/18\s*months/.test(txt)) console.error('   card text:', JSON.stringify(txt).slice(0, 600));
   ok(/employment,\s*transfer/.test(txt) && /18\s*months/.test(txt), 'C5: scope and term are stated');
   await card.locator('text="Confirm"').first().click();
   for (let i = 0; i < 40; i++) { if (/Confirmed — active from now/.test(await card.innerText())) break; await sleep(250); }
+  if (!/Confirmed — active from now/.test(await card.innerText())) console.error('   card text after Confirm:', JSON.stringify(await card.innerText()).slice(0, 700));
   ok(/Confirmed — active from now/.test(await card.innerText()) && /\bActive\b/.test(await card.innerText()), 'C6: Kola CONFIRMS — the relationship is active from now');
   ok(/End relationship/.test(await card.innerText()) && !/Confirm\b(?! )/.test('x'), 'C7: the card now offers End relationship (and Dispute), not Confirm');
 }

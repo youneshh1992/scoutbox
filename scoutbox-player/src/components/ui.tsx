@@ -134,6 +134,20 @@ export function ListRow({ label, value, onPress, testID, icon, right, danger }: 
   );
 }
 
+/** M24F.2 — a fact row: a label (and an optional quiet line) on the left, the value on the right, a hairline below. The settings and the Clubs categories are made of these. */
+export function FactRow({ k, v, sub, testID }: { k: string; v?: string; sub?: string | null; testID?: string }) {
+  const styles = useStyles(makeStyles);
+  return (
+    <View style={styles.fact} testID={testID}>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.factKey}>{k}</Text>
+        {sub ? <Text style={styles.factSub}>{sub}</Text> : null}
+      </View>
+      {v ? <Text style={styles.factValue}>{v}</Text> : null}
+    </View>
+  );
+}
+
 /** M24F — progressive disclosure: a row that opens its detail under it. Nothing is hidden for good; it is one tap away. */
 export function Disclosure({ label, children, testID, open: initial = false, hint }: { label: string; children: ReactNode; testID?: string; open?: boolean; hint?: string }) {
   const colors = useColors();
@@ -160,6 +174,10 @@ export function Kicker({ children, tone }: { children: ReactNode; tone?: 'urgent
 }
 
 const makeStyles = (colors: Palette) => StyleSheet.create({
+  fact: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: colors.line },
+  factKey: { color: colors.text, fontSize: 14.5, fontWeight: '500', flexShrink: 1 },
+  factValue: { color: colors.text, fontSize: 14.5, fontWeight: '600', textAlign: 'right', flexShrink: 1, maxWidth: '55%' },
+  factSub: { color: colors.muted, fontSize: 12.5, lineHeight: 17, marginTop: 2 },
   section: {
     borderTopWidth: 1,
     borderTopColor: colors.line,

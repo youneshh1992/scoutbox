@@ -69,10 +69,12 @@ const player = await page(`${demo.host}/player/`);
 await player.waitForSelector('text=Our promises to every player', { timeout: 30000 });
 await player.locator('text=Enter').nth(0).click();
 await player.waitForSelector('text=Your visibility right now', { timeout: 20000 });
-await player.click('a[href="/you"]');
-await player.getByRole('tab', { name: 'Clubs' }).click();
-await player.waitForSelector('text=Suitability preferences', { timeout: 20000 });
+await player.click('a[href^="/you"]');
+await player.getByRole('tab', { name: 'Clubs' }).click(); // M24F.2: representation is Clubs › Current; suitability moved to Account › Preferences
 await player.waitForSelector('text=NOT an independently verified licence', { timeout: 15000 });
+await player.getByRole('tab', { name: 'Account' }).click();
+await player.click('[data-testid="account-cat-preferences"]');
+await player.waitForSelector('text=Suitability preferences', { timeout: 20000 });
 say('player demo: preferences + representation (honest credential label) render on You');
 await playerCategory(player, 'journey', 'Board'); // M24D: the fit section sits on My journey › Board
 await player.waitForSelector('text=Opportunity fit', { timeout: 20000 });

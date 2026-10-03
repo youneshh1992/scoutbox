@@ -65,8 +65,13 @@ const freshPage = async () => {
 
   await page.click('a[href^="/you"]');
   await page.getByRole('tab', { name: 'Account' }).click();
+  // M24F.2 — Account is categories: Preferences holds the notifications, Privacy holds your data
+  await page.click('[data-testid="account-cat-preferences"]');
+  await page.click('[data-testid="account-notifications"]');
   await page.waitForSelector('text=School-hours mute', { timeout: 15000 });
-  await page.click('[data-testid="account-privacy"]'); // M24F: export and delete sit under "Privacy and your data"
+  await page.click('[data-testid="account-back"]');
+  await page.click('[data-testid="account-cat-privacy"]');
+  await page.click('[data-testid="account-privacy"]'); // "Your data": export and delete
   await page.waitForSelector('text=Preview my data export');
   await page.waitForSelector('text=Delete my account');
   await page.click('text=Preview my data export');

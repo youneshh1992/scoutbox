@@ -201,7 +201,7 @@ const player = await page(`${demo.host}/player/`);
 await player.waitForSelector('text=Our promises to every player', { timeout: 30000 });
 await player.locator('text=Enter').nth(0).click();
 await player.waitForSelector('text=Your visibility right now', { timeout: 20000 });
-await player.click('a[href="/you"]');
+await player.click('a[href^="/you"]');
 await player.getByRole('tab', { name: 'Clubs' }).click();
 await player.waitForSelector('[data-testid="my-agent"]', { timeout: 30000 });
 const card = player.locator('[data-testid="my-agent"]');

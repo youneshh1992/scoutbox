@@ -483,7 +483,7 @@ function EvidenceSection({ me, playerId, isMinor, refresh, onUpload, onBoxCam }:
             </View>
           ))}
           {!isMinor && (
-            <Disclosure label="Request a coach reference" hint="Your coach confirms by email" testID="evidence-request-reference">
+            <Disclosure label="Request a coach reference" testID="evidence-request-reference">
               <TextInput style={styles.input} placeholder="Coach name" placeholderTextColor={colors.muted} value={vouchCoach} onChangeText={setVouchCoach} accessibilityLabel="Coach name" />
               <TextInput style={styles.input} placeholder="Coach email" placeholderTextColor={colors.muted} value={vouchEmail} onChangeText={setVouchEmail} autoCapitalize="none" accessibilityLabel="Coach email" />
               <Row>
@@ -508,10 +508,10 @@ function EvidenceSection({ me, playerId, isMinor, refresh, onUpload, onBoxCam }:
 
       <View style={styles.block}>
         <ListRow label="Box Cam" value="Sessions and observations" onPress={onBoxCam} testID="evidence-boxcam-link" />
-        <Disclosure label="Verified sports CV" hint="Your whole verified record, portable" testID="evidence-cv">
+        <Disclosure label="Verified sports CV" testID="evidence-cv">
           <CvBlock playerId={playerId} />
         </Disclosure>
-        <Disclosure label={`Profile ${me.trustScore}% complete`} hint="What would add evidence" testID="evidence-completeness">
+        <Disclosure label={`Profile ${me.trustScore}% complete`} testID="evidence-completeness">
           <Muted size={12.5}>Base {me.trust.base} · Identity +{me.trust.identityVerified} · Attendance +{me.trust.verifiedAttendance} · Trial reports +{me.trust.trialReports} · Media +{me.trust.media} · Profile +{me.trust.profileComplete}</Muted>
           {(me.nextActions ?? []).map((a) => <Muted key={a.id} size={12.5}>{a.label}{a.gain ? ` (+${a.gain})` : ''}</Muted>)}
           <Muted size={12}>How complete your profile is. It is not a rating of you as a player and it never moves through payments.</Muted>
@@ -570,6 +570,10 @@ function JourneyTimeline({ journeys, requests, earlier, onExplore }: { journeys:
  * the calls and the rules are the ones they always had.
  */
 export function ProfileSettings() {
+  return (<><AvailabilitySettings /><MedicalSettings /></>);
+}
+
+export function AvailabilitySettings() {
   const colors = useColors();
   const styles = useStyles(makeStyles);
   const { playerId, me, isMinor, refresh } = useSession();
@@ -624,7 +628,17 @@ export function ProfileSettings() {
           </>
         )}
       </Disclosure>
+    </>
+  );
+}
 
+export function MedicalSettings() {
+  const colors = useColors();
+  const { playerId, me, isMinor, refresh } = useSession();
+  if (!playerId || !me) return null;
+  const set = async (fn: () => Promise<unknown>) => { try { await fn(); await refresh(); } catch { /* surfaced through unrefreshed UI */ } };
+  return (
+    <>
       <Disclosure label="Medical sharing" hint={me.medical.shared ? 'On — visible to organisations' : 'Off — invisible to every organisation'} testID="account-medical">
         <Row style={{ justifyContent: 'space-between' }}>
           <View style={{ flex: 1, paddingRight: 10 }}>

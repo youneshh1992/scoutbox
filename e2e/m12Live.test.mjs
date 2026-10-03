@@ -129,6 +129,9 @@ await j(`/org/assessments/${assId}/submit`, { method: 'POST', body: JSON.stringi
 await j(`/org/assessments/${assId}/publish-feedback`, { method: 'POST', body: JSON.stringify({ text: 'Great pressing angles this month — next: recovery runs after losing it.' }) }, bearer(MARIA));
 await player.click('a[href^="/you"]');
 await player.getByRole('tab', { name: 'Clubs' }).click();
+await player.getByRole('tab', { name: 'Development' }).click(); // M24F.2: feedback is Clubs › Development, the full text behind View details
+await player.waitForSelector('[data-testid^="clubs-dev-details-"]', { timeout: 20000 });
+await player.locator('[data-testid^="clubs-dev-details-"] [role="button"]').first().click();
 await player.waitForSelector('text=Great pressing angles this month', { timeout: 20000 });
 say('E2: published feedback reached the player’s You tab');
 const pageText = await player.locator('body').innerText();

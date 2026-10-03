@@ -225,7 +225,7 @@ async function enterPlayer(ctx, rowText, who, viewport) {
   await page.waitForSelector('text=Our promises to every player', { timeout: 40000 });
   const row = page.locator('div', { hasText: rowText }).filter({ has: page.locator('text=Enter') }).last();
   await row.locator('text=Enter').last().click();
-  await page.waitForSelector('a[href="/you"]', { timeout: 30000 });
+  await page.waitForSelector('a[href^="/you"]', { timeout: 30000 });
   return page;
 }
 const myAgentCard = async (page) => {
@@ -262,7 +262,8 @@ say('A1: Kola signs in to the real player app on a 390-wide screen');
   for (const k of ['clubPresence', 'contactRouting', 'trialVisibility']) {
     ok((await card.locator(`[data-testid="my-agent-d-${k}"]`).count()) === 1, `A5 ${k}: it is its own row with its own control, so one choice cannot be made by making another`);
   }
-  ok(/on or off/i.test(dTxt) || /any time/i.test(dTxt), 'A6: and the section says each can be turned off again at any time');
+  // M24F.2 — no intro sentence; each row carries its state word and its own "Turn on" / "Turn off" control, which is the statement.
+  ok((dTxt.match(/Turn (on|off)/gi) ?? []).length === 3, 'A6: each choice carries its own Turn on / Turn off control — it can be turned off again at any time');
   neg(!/fee|commission|salary/i.test(stripHonest(dTxt)), 'A7: nothing here mentions a fee, a commission or a salary');
   ok(await noSideScroll(kola), 'A8: the section fits 390 with no horizontal scroll');
   // He turns two of the three on, one request each.
@@ -372,7 +373,8 @@ say('C1: Ana signs in to the real Agent client');
   // And the client sees it on his own phone, named to the agent who shared it.
   const shared = await j('GET', '/player/agent/shared-opportunities', undefined, kolaApi.token);
   ok(shared.status === 200 && (shared.body?.items ?? []).length === 1, 'D14: it reaches the client\'s own surface');
-  await kola.goto(`http://localhost:${PLAYER_PORT}/you?tab=clubs`);
+  // M24F.2 — the opportunities an agent shared sit under Clubs › Requests.
+  await kola.goto(`http://localhost:${PLAYER_PORT}/you?tab=clubs&section=requests`);
   ok(await waitFor(async () => (await kola.locator('[data-testid="agent-shared-opportunities"]').count()) > 0, 30000), 'D15: and his app shows it in its own card');
   const card = await kola.locator('[data-testid="agent-shared-opportunities"]').innerText();
   ok(/Ana Costa/.test(card), 'D16: named to the agent who shared it, so he knows who is suggesting what');

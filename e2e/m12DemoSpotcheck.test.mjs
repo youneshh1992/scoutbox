@@ -93,8 +93,12 @@ await mob.waitForSelector('text=club assessed', { timeout: 10000 });
 say('Player demo: evidence passport with honest tiers');
 await mob.click('a[href^="/you"]');
 await mob.getByRole('tab', { name: 'Clubs' }).click();
+await mob.getByRole('tab', { name: 'Development' }).click(); // M24F.2: feedback lives in Clubs › Development, the full text behind View details
+await mob.waitForSelector('[data-testid^="clubs-dev-details-"]', { timeout: 20000 });
+await mob.locator('[data-testid^="clubs-dev-details-"] [role="button"]').first().click();
 await mob.waitForSelector('text=pressing triggers', { timeout: 20000 });
 await mob.getByRole('tab', { name: 'Account' }).click();
+await mob.click('[data-testid="account-cat-preferences"]'); // M24F.2: Access & language is a Preferences setting
 await mob.waitForSelector('text=Access & language', { timeout: 10000 });
 say('Player demo: feedback loop + access settings');
 await playerCategory(mob, 'journey', 'Board'); // M24D: squad invites sit on My journey › Board

@@ -80,8 +80,9 @@ const player = await page(`${demo.host}/player/`);
 await player.waitForSelector('text=Our promises to every player', { timeout: 30000 });
 await player.locator('text=Enter').nth(0).click();
 await player.waitForSelector('text=Your visibility right now', { timeout: 20000 });
-await player.click('a[href="/you"]');
+await player.click('a[href^="/you"]');
 await player.getByRole('tab', { name: 'Clubs' }).click();
+await player.getByRole('tab', { name: 'History' }).click(); // M24F.2: references sit in Clubs › History
 await player.waitForSelector('text=Coach references', { timeout: 20000 });
 await player.waitForSelector('text=Coach affiliation was verified when this reference was submitted.', { timeout: 10000 });
 const pText = await player.locator('body').innerText();

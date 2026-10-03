@@ -342,7 +342,7 @@ const kola = watch(await ctxKola.newPage(), 'kola');
   await kola.waitForSelector('text=Our promises to every player', { timeout: 45000 });
   const row = kola.locator('div', { hasText: 'Kola Adeyemi' }).filter({ has: kola.locator('text=Enter') }).last();
   await row.locator('text=Enter').last().click();
-  await kola.waitForSelector('a[href="/you"]', { timeout: 30000 });
+  await kola.waitForSelector('a[href^="/you"]', { timeout: 30000 });
   await kola.goto(`http://localhost:${PLAYER_PORT}/you?tab=clubs`);
   await kola.waitForSelector('[data-testid="agent-consent"]', { timeout: 30000 });
   const card = kola.locator('[data-testid="agent-consent"]');

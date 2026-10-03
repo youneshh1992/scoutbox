@@ -175,8 +175,9 @@ await player.waitForSelector('text=Football Passport', { timeout: 20000 });
   await j(`/org/verification/staff/${sam.userId}/departed`, { method: 'POST', body: JSON.stringify({}) }, bearer(maria.token));
   await player.reload();
   // P2.5: coach references (M14) live on You › Clubs.
-  await player.click('a[href="/you"]').catch(() => {});
+  await player.click('a[href^="/you"]').catch(() => {});
   await player.getByRole('tab', { name: 'Clubs' }).click();
+  await player.getByRole('tab', { name: 'History' }).click(); // M24F.2: references sit in Clubs › History
   await player.waitForSelector('text=Coach references', { timeout: 25000 });
   await player.waitForSelector('text=Coach affiliation was verified when this reference was submitted.', { timeout: 15000 });
   say('P4: after the coach departs, the reference shows its SNAPSHOT provenance — historical truth never rewritten');
