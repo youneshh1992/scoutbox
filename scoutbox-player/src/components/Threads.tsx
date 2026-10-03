@@ -9,7 +9,7 @@ import { Text, TextInput } from './Text';
 import { client, type Channel, type MessageAttachment } from '../data/client';
 import type { MediaItem } from '../domain/types';
 import { useColors, useStyles, type Palette } from '../theme';
-import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
+import { Button, Muted, Row, SectionTitle } from './ui';
 import { WebVideo } from './WebVideo';
 import { Icon } from './Icon';
 import { pt } from '../i18n';
@@ -96,11 +96,7 @@ export function Threads({ channels, onSend, onOpen, onTyping, attachableClips, e
   };
 
   if (channels.length === 0) {
-    return (
-      <Card>
-        <Muted size={13.5}>{emptyText}</Muted>
-      </Card>
-    );
+    return <View style={{ paddingVertical: 12 }}><Muted size={13.5}>{emptyText}</Muted></View>;
   }
 
   // M24C — the reference Messages screen: thread rows with the club's
@@ -119,16 +115,13 @@ export function Threads({ channels, onSend, onOpen, onTyping, attachableClips, e
         <Pressable key={c.id} onPress={() => setOpenId(c.id)} accessibilityRole="button" accessibilityLabel={`${pt('chatOpen')} ${c.orgName}`} testID={`thread-${c.id}`} style={({ pressed }) => [styles.threadRow, pressed && { opacity: 0.75 }]}>
           <View style={styles.clubAvatar}><Text style={{ color: colors.iconFg, fontSize: 12, fontWeight: '600' }}>{initialsOf(c.orgName)}</Text></View>
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Row style={{ justifyContent: 'space-between', flexWrap: 'nowrap' }}>
-              <Text style={styles.org} numberOfLines={1}>{c.orgName}</Text>
-              {c.orgVerified && <Pill label="Verified" tone="green" />}
-            </Row>
-            <Muted size={11}>
-              {c.scoutName} · {c.scoutRole}{c.counterparty === 'guardian' ? ` · about ${c.playerName}` : ''} · {c.messages.length} {pt('chatMessages')}
+            <Text style={styles.org} numberOfLines={1}>{c.orgName}</Text>
+            <Muted size={12.5}>
+              {c.scoutName} · {c.scoutRole}{c.orgVerified ? ' · Verified' : ''}{c.counterparty === 'guardian' ? ` · about ${c.playerName}` : ''} · {c.messages.length} {pt('chatMessages')}
             </Muted>
           </View>
-          <Text style={{ color: colors.accent2, fontSize: 12, fontWeight: '500' }}>{pt('chatOpen')}</Text>
-          <Icon name="chevron-right" size={15} color={colors.muted} />
+          <Text style={{ color: colors.accent2, fontSize: 12.5, fontWeight: '500' }}>{pt('chatOpen')}</Text>
+          <Icon name="chevron-right" size={16} color={colors.muted} />
         </Pressable>
       ))}
       {open && (
@@ -183,7 +176,7 @@ export function Threads({ channels, onSend, onOpen, onTyping, attachableClips, e
                   key={m.id}
                   small
                   primary={attachId === m.id}
-                  label={`${m.title.slice(0, 18)}${m.verifiedClip ? ' ✅' : ''}`}
+                  label={m.title.slice(0, 18)}
                   onPress={() => setAttachId(attachId === m.id ? null : m.id)}
                 />
               ))}
@@ -215,17 +208,14 @@ function Attachment({ attachment }: { attachment?: MessageAttachment | null }) {
     const src = client.mediaUrl(attachment.url);
     return (
       <View style={{ gap: 4, marginTop: 4 }}>
-        <Row>
-          <Pill label={`${attachment.title ?? 'clip'}`} tone="blue" />
-          {attachment.verifiedClip && <Pill label="✅ Verified Clip" tone="green" />}
-        </Row>
+        <Muted size={12}>{attachment.title ?? 'clip'}{attachment.verifiedClip ? ' · Verified Clip' : ''}</Muted>
         {src && <WebVideo src={src} />}
       </View>
     );
   }
   return (
     <View style={{ gap: 2, marginTop: 4 }}>
-      <Pill label={`Trial report — ${attachment.orgName ?? ''}`} tone="gold" />
+      <Muted size={12}>Trial report — {attachment.orgName ?? ''}</Muted>
       {attachment.summary && <Muted size={11.5}>{attachment.summary}</Muted>}
     </View>
   );
@@ -239,13 +229,14 @@ export function ThreadsHeader() {
 const makeStyles = (colors: Palette) => StyleSheet.create({
   pending: { opacity: 0.65 },
   failed: { borderWidth: 1, borderColor: colors.danger },
-  org: { color: colors.text, fontSize: 13, fontWeight: '600', flexShrink: 1 },
-  threadRow: { flexDirection: 'row', alignItems: 'center', gap: 11, backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.line, paddingVertical: 14, paddingHorizontal: 12, borderRadius: 11 },
-  clubAvatar: { width: 34, height: 34, borderRadius: 8, backgroundColor: colors.panel2, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  org: { color: colors.text, fontSize: 15, fontWeight: '600', flexShrink: 1 },
+  // M24F — a thread is a row on a hairline, like every messaging product; no box
+  threadRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.line },
+  clubAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.panel2, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   person: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingTop: 4, paddingBottom: 17 },
   personName: { color: colors.text, fontSize: 17, fontWeight: '600', letterSpacing: -0.3 },
   backBtn: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingVertical: 8, paddingHorizontal: 6, minHeight: 36 },
-  safety: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.safety, borderRadius: 8, padding: 11 },
+  safety: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.line },
   date: { textAlign: 'center', color: colors.chatDate, fontSize: 11, marginVertical: 22 },
   thread: { maxHeight: 420 },
   bubble: { maxWidth: '90%', borderRadius: 13, padding: 13, marginVertical: 7.5, gap: 2 },

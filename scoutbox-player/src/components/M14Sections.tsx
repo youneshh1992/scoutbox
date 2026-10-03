@@ -95,9 +95,9 @@ export function InviteCodeSection({ actor }: { actor: { kind: 'player'; id: stri
               const r = actor.kind === 'guardian'
                 ? await m14.gAcceptInvite(actor.id, actor.childId, code)
                 : await m14.acceptInvite(actor.id, code);
-              setMsg(`✅ ${r.note}`);
+              setMsg(`${r.note}`);
               setCode('');
-            } catch (e) { setMsg(`⚠️ ${e instanceof Error ? e.message : 'failed'}`); }
+            } catch (e) { setMsg(`${e instanceof Error ? e.message : 'failed'}`); }
           }}
         />
       </Row>

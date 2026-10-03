@@ -8,7 +8,6 @@ import { adultAgeFor, ageOn, SAFEGUARDING_PROMISES, U18_PROMISES } from '../doma
 import { POSITIONS } from '../domain/types';
 import { useSession } from '../state';
 import { AUTH_PAGE, AUTH_PANEL, ThemeOverride, useColors, useStyles, type Palette } from '../theme';
-import { PitchBackdrop } from '../components/PitchBackdrop';
 import { Wordmark } from '../components/Wordmark';
 import { Button, Muted, Row, SectionTitle } from '../components/ui';
 
@@ -328,7 +327,6 @@ export default function Onboarding() {
       {/* M24C.1 — the approved pitch behind the entry screen, in the
           authentication palette (white lines at 8%), behind every surface,
           never in front of a tap, hidden from assistive technology. */}
-      <ThemeOverride colors={AUTH_PANEL}><PitchBackdrop height={760} top={64} /></ThemeOverride>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <View style={styles.topRow}>

@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from '../../components/Text';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { PitchBackdrop } from '../../components/PitchBackdrop';
 import { client, type ProgrammeInfo } from '../../data/client';
 import type { Drill } from '../../domain/types';
 import { useSession } from '../../state';
@@ -95,7 +94,7 @@ export default function Upload() {
       setLinkAttendanceId(null);
       await refresh();
       say(verified
-        ? '✅ Verified Clip uploaded — provably filmed at a confirmed fixture. Clubs see the seal.'
+        ? 'Verified Clip uploaded — provably filmed at a confirmed fixture. Clubs see the seal.'
         : pickedFile ? 'Video uploaded — clubs can watch it now, and it nudges your Trust Score.' : 'Added — attach a video file next time so clubs can watch it.');
     } catch (e) {
       say(e instanceof Error ? e.message : 'Upload failed', true);
@@ -123,7 +122,6 @@ export default function Upload() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-        <PitchBackdrop />
       <ScrollView contentContainerStyle={styles.scroll}>
         <PageHeader title={pt('tabUpload')} back />
         <Muted>
@@ -141,7 +139,7 @@ export default function Upload() {
           <SectionTitle>Add match footage</SectionTitle>
           <Row>
             <Button small label={pickedFile ? `${pickedFile.name.slice(0, 28)}` : 'Choose video file'} onPress={chooseFile} />
-            {pickedFile && <Pill label="ready" tone="green" />}
+            {pickedFile && <Pill label="Ready" tone="green" />}
           </Row>
           <TextInput
             style={styles.input}
@@ -153,7 +151,7 @@ export default function Upload() {
           {pickedFile && (me?.attendance.length ?? 0) > 0 && (
             <>
               <Muted size={12.5}>
-                ✅ Claim the Verified Clip seal: link this footage to the confirmed fixture it was filmed at.
+                Claim the Verified Clip seal: link this footage to the confirmed fixture it was filmed at.
               </Muted>
               <Row>
                 {me!.attendance.map((a) => (
@@ -168,7 +166,7 @@ export default function Upload() {
               </Row>
             </>
           )}
-          <Button primary label={linkAttendanceId ? 'Upload as ✅ Verified Clip' : 'Upload clip'} onPress={uploadMedia} />
+          <Button primary label={linkAttendanceId ? 'Upload as Verified Clip' : 'Upload clip'} onPress={uploadMedia} />
           {me && <Muted size={12.5}>{me.media.length} clip{me.media.length === 1 ? '' : 's'} on your profile. Titles are screened — no contact details.</Muted>}
         </Card>
 
@@ -265,7 +263,7 @@ export default function Upload() {
                   <Row key={sesh.id} style={{ justifyContent: 'space-between' }}>
                     <View style={{ flex: 1 }}>
                       <Text style={{ color: sesh.done ? colors.muted : colors.text, fontSize: 13.5 }}>
-                        {sesh.done ? '✅ ' : ''}{sesh.day} — {sesh.title}
+                        {sesh.done ? 'Done · ' : ''}{sesh.day} — {sesh.title}
                       </Text>
                     </View>
                     {!sesh.done && (
@@ -299,7 +297,7 @@ export default function Upload() {
                 <Text style={{ color: colors.text, fontSize: 13.5, fontWeight: '600', flex: 1 }}>{d.name}</Text>
                 {d.best
                   ? <Pill label={`best ${d.best.value}${d.unit}${d.best.verified ? ' ' : ''}`} tone="green" />
-                  : d.completed ? <Pill label="done ✓" tone="blue" /> : null}
+                  : d.completed ? <Pill label="Done ✓" tone="blue" /> : null}
               </Row>
               <Muted size={11.5}>{d.metric} · benchmark {d.benchmark}{d.unit}</Muted>
               <Row>
@@ -364,7 +362,7 @@ export default function Upload() {
 
 const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  scroll: { paddingHorizontal: 18, paddingTop: 12, paddingBottom: 24, gap: 10 },
+  scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 32, gap: 0 },
   input: {
     backgroundColor: colors.bg2,
     borderColor: colors.line,

@@ -1057,7 +1057,7 @@ export const mockClient: PlayerClient = {
       vouch.status = 'published';
       vouch.text = `${p.name.split(' ')[0]} trained with me — reliable, coachable, and improving every month.`;
       vouch.seasons = '2024–2026';
-      pushNotification('player', playerId, 'vouch', `⭐ ${coachName} published a coach reference on your profile.`);
+      pushNotification('player', playerId, 'vouch', `${coachName} published a coach reference on your profile.`);
       emit();
     }, 8000);
     emit();

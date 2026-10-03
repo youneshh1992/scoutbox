@@ -27,7 +27,7 @@ const TABS: readonly TabDef[] = [
 function TabItem({ icon, label, focused, badge }: { icon: string; label: string; focused: boolean; badge: number }) {
   const colors = useColors();
   return (
-    <View style={{ alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 4, paddingHorizontal: 6, minHeight: 43, minWidth: 58, borderRadius: 9, backgroundColor: focused ? colors.tabActiveBg : 'transparent' }}>
+    <View style={{ alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 4, paddingHorizontal: 6, minHeight: 43, minWidth: 58, borderRadius: 9 }}>
       <View>
         <Icon name={icon} size={20} color={focused ? colors.tabActive : colors.tabInactive} />
         {badge > 0 && (

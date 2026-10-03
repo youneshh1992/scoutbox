@@ -15,11 +15,11 @@ import { Text } from './Text';
 import { m12, type FamilySigning, type FamilySigningParty, type SigningPartyType, type SigningStatus } from '../data/m12client';
 import { useColors } from '../theme';
 import { pt } from '../i18n';
-import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
+import { Button, Card, Muted, Row, SectionTitle } from './ui';
 
 type Actor = { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string };
 
-const GLYPH: Record<SigningStatus, string> = { DRAFT: '○', READY: '➤', IN_PROGRESS: '◐', COMPLETED: '✓', CANCELLED: '⊘', VOIDED: '⊗', EXPIRED: '⌛', SUPERSEDED: '↻' };
+const GLYPH: Record<SigningStatus, string> = { DRAFT: '○', READY: '➤', IN_PROGRESS: '◐', COMPLETED: '✓', CANCELLED: '⊘', VOIDED: '⊗', EXPIRED: '◷', SUPERSEDED: '↻' };
 const tone = (s: SigningStatus | null) => (s === 'READY' || s === 'IN_PROGRESS' ? 'gold' : s === 'COMPLETED' ? 'green' : s === 'CANCELLED' || s === 'VOIDED' || s === 'EXPIRED' ? 'red' : 'default');
 const stLabel = (s: SigningStatus | null) => {
   if (!s) return '';
@@ -101,11 +101,11 @@ export function SigningSection({ actor, view = 'all' }: { actor: Actor; view?: S
         return (
           <View key={s.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }} testID={`signing-${s.id}`} accessibilityLabel={`${pt('signingTitle')} ${s.club.name ?? ''}`}>
             <Row>
-              <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13.5, flex: 1 }}>{s.club.name ?? '—'}</Text>
-              <Pill label={stLabel(s.status)} tone={tone(s.status)} />
+              <Text style={{ color: colors.text, fontWeight: '600', fontSize: 15, flex: 1 }}>{s.club.name ?? '—'}</Text>
+              <Text style={{ color: tone(s.status) === 'red' ? colors.danger : tone(s.status) === 'gold' ? colors.gold : tone(s.status) === 'green' ? colors.accentText : colors.muted, fontSize: 12.5, fontWeight: '600' }}>{stLabel(s.status)}</Text>
             </Row>
             {cur && (
-              <View style={{ marginTop: 4, backgroundColor: colors.panel2, borderRadius: 8, padding: 8 }} testID={`signing-revision-${cur.id}`}>
+              <View style={{ marginTop: 4, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }} testID={`signing-revision-${cur.id}`}>
                 <Muted size={12}>{pt('signingRevision')} {cur.revisionNumber} · {pt('signingPresentedAt')} {fmt(cur.readyAt)}{s.expiresAt ? ` · ${pt('signingExpires')} ${fmt(s.expiresAt)}` : ''}</Muted>
                 {show('contract') && cur.contract && <Text style={{ color: colors.text, fontSize: 13, marginTop: 4 }}>{pt('signingStart')}: {cur.contract.startDate ?? '—'}{cur.contract.endDate ? ` · ${pt('signingEnd')}: ${cur.contract.endDate}` : ''}</Text>}
                 {view === 'contract' && !cur.contract && <Muted size={12.5}>{pt('signingContractNone')}</Muted>}
@@ -138,7 +138,7 @@ export function SigningSection({ actor, view = 'all' }: { actor: Actor; view?: S
               </Row>
             )}
             {show('signing') && live && arm === s.id && cur && s.nextAction && (
-              <View style={{ marginTop: 6, borderRadius: 8, borderWidth: 1, borderColor: colors.gold, padding: 8 }} accessibilityRole="alert" testID={`signing-confirm-${s.id}`}>
+              <View style={{ marginTop: 6, borderLeftWidth: 2, borderLeftColor: colors.gold, paddingLeft: 10, paddingVertical: 4 }} accessibilityRole="alert" testID={`signing-confirm-${s.id}`}>
                 <Text style={{ color: colors.text, fontSize: 13 }}>{pt('signingConfirmWarn').replace('{n}', String(cur.revisionNumber)).replace('{club}', s.club.name ?? '—')}</Text>
                 <Muted size={11.5}>{pt('signingDigest')}: {shortSha(s.nextAction.documentSha256)}</Muted>
                 <Muted size={12}>{s.honest}</Muted>

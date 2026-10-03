@@ -144,7 +144,7 @@ function CapturePanel({ actor, drill, target, assignmentId, challengeEntryId, on
       {phase === 'setup' ? <Muted>{pt('m16checking')}</Muted> : null}
 
       {phase === 'error' ? (
-        <View><Muted>⚠️ {msg}</Muted><Row style={{ marginTop: 8 }}><Button small label={pt('m16retry')} onPress={() => void readyCheck()} /><Button small label={pt('m16close')} onPress={cancel} /></Row></View>
+        <View><Muted>{msg}</Muted><Row style={{ marginTop: 8 }}><Button small label={pt('m16retry')} onPress={() => void readyCheck()} /><Button small label={pt('m16close')} onPress={cancel} /></Row></View>
       ) : null}
 
       {phase === 'ready' ? (

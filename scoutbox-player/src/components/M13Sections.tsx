@@ -194,7 +194,7 @@ export function TransitionsSection({ actor, isMinor, mediaOptions }: { actor: Ac
               )}
             </Row>
           )}
-          {c.placement && <Muted size={12}>✅ {pt('m13trnPlacedAt')} {c.placement.orgName}</Muted>}
+          {c.placement && <Muted size={12}>{pt('m13trnPlacedAt')} {c.placement.orgName}</Muted>}
         </View>
       ))}
       {(cases ?? []).length === 0 && !err && (
@@ -226,7 +226,7 @@ export function RepresentationSection({ playerId, isMinor }: { playerId: string;
         <View key={r.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6 }}>
           <Row>
             <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, flex: 1 }}>{r.agencyName}</Text>
-            <Pill label={r.status} tone={r.status === 'active' ? 'green' : r.status === 'withdrawn' || r.status === 'disputed' ? 'red' : 'blue'} />
+            <Pill label={r.status.charAt(0).toUpperCase() + r.status.slice(1)} tone={r.status === 'active' ? 'green' : r.status === 'withdrawn' || r.status === 'disputed' ? 'red' : 'blue'} />
           </Row>
           <Muted size={12}>{r.representativeName} · {r.scope.replace(/_/g, ' ')}</Muted>
           {r.credential && <Muted size={11.5}>{r.credential.note} — {r.credential.reviewStatus.replace(/_/g, ' ')}. {r.credential.honest}</Muted>}
@@ -267,7 +267,7 @@ export function AckSection({ actor }: { actor: Actor }) {
   if (!pending.length) return null;
   return (
     <Card>
-      <SectionTitle>⚠️ {pt('m13ack')}</SectionTitle>
+      <SectionTitle>{pt('m13ack')}</SectionTitle>
       {pending.map((nn) => (
         <View key={nn.id} style={{ marginTop: 6 }}>
           <Muted size={12.5}>{nn.text}</Muted>

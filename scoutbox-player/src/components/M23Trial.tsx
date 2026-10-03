@@ -8,7 +8,7 @@ import { Text, TextInput } from './Text';
 import { m12, isOutcomeLine, type FamilyTrial, type FamilyTrialWorkflow } from '../data/m12client';
 import { useColors } from '../theme';
 import { pt } from '../i18n';
-import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
+import { Button, Card, Muted, Row, SectionTitle } from './ui';
 
 type Actor = { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string };
 
@@ -73,7 +73,7 @@ export function TrialWorkflowSection({ actor, standalone = false }: { actor: Act
         if (isOutcomeLine(w)) {
           return (
             <View key={t.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }} testID={`trial-wf-${t.id}`}>
-              <Row><Text style={{ color: colors.text, fontWeight: '700', fontSize: 13.5, flex: 1 }}>{w.orgName ?? t.orgName}</Text><Pill label={stateLabel(w.workflowState)} tone={tone(w.workflowState)} /></Row>
+              <Row><Text style={{ color: colors.text, fontWeight: '600', fontSize: 15, flex: 1 }}>{w.orgName ?? t.orgName}</Text><Text style={{ color: tone(w.workflowState) === 'red' ? colors.danger : tone(w.workflowState) === 'gold' ? colors.gold : tone(w.workflowState) === 'green' ? colors.accentText : colors.muted, fontSize: 12.5, fontWeight: '600' }}>{stateLabel(w.workflowState)}</Text></Row>
               <Muted size={12}>{pt('trialWfOutcomeOnly')}</Muted>
             </View>
           );
@@ -84,14 +84,14 @@ export function TrialWorkflowSection({ actor, standalone = false }: { actor: Act
         return (
           <View key={t.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }} testID={`trial-wf-${t.id}`} accessibilityLabel={`${pt('trialWf')} ${wf.orgName ?? t.orgName}`}>
             <Row>
-              <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13.5, flex: 1 }}>{wf.orgName ?? t.orgName}{actor.kind === 'guardian' ? ` · ${t.playerName}` : ''}</Text>
-              <Pill label={stateLabel(wf.workflowState)} tone={tone(wf.workflowState)} />
+              <Text style={{ color: colors.text, fontWeight: '600', fontSize: 15, flex: 1 }}>{wf.orgName ?? t.orgName}{actor.kind === 'guardian' ? ` · ${t.playerName}` : ''}</Text>
+              <Text style={{ color: tone(wf.workflowState) === 'red' ? colors.danger : tone(wf.workflowState) === 'gold' ? colors.gold : tone(wf.workflowState) === 'green' ? colors.accentText : colors.muted, fontSize: 12.5, fontWeight: '600' }}>{stateLabel(wf.workflowState)}</Text>
             </Row>
             {wf.schedule && !wf.schedule.legacy && (
               <View style={{ marginTop: 4 }}>
                 <Muted size={12}>{pt('trialWfSessions')} · {pt('trialWfRevision')} {wf.schedule.revision}{zone ? ` · ${zone}` : ''}</Muted>
                 {wf.schedule.sessions.map((s) => (
-                  <View key={s.id} style={{ marginTop: 4, backgroundColor: colors.panel2, borderRadius: 8, padding: 8 }}>
+                  <View key={s.id} style={{ marginTop: 4, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }}>
                     <Text style={{ color: colors.text, fontSize: 13 }}>{fmtIn(s.startsAt, zone)} – {fmtEnd(s.endsAt, zone)} · {s.kind.replace(/_/g, ' ')}</Text>
                     {s.venue && <Muted size={12}>{s.venue.name}{s.venue.town ? `, ${s.venue.town}` : ''}</Muted>}
                     {s.venue?.address ? <Muted size={12}>{pt('trialWfAddress')}: {s.venue.address}</Muted> : null}
@@ -109,7 +109,7 @@ export function TrialWorkflowSection({ actor, standalone = false }: { actor: Act
                 <Text style={{ color: colors.gold, fontSize: 13, fontWeight: '700' }}>{pt('trialWfAwaiting')}</Text>
                 <Row style={{ marginTop: 6, flexWrap: 'wrap' }}>
                   <Button small primary label={pt('trialWfConfirm')} onPress={() => act(t, 'confirm')} />
-                  <Button small label={pt('trialWfDeclineSchedule')} onPress={() => act(t, 'decline')} />
+                  <Button small tertiary label={pt('trialWfDeclineSchedule')} onPress={() => act(t, 'decline')} />
                 </Row>
               </View>
             )}
@@ -120,7 +120,7 @@ export function TrialWorkflowSection({ actor, standalone = false }: { actor: Act
                   placeholder={pt('trialWfReason')} placeholderTextColor={colors.muted} accessibilityLabel={pt('trialWfReason')}
                   value={reason[t.id] ?? ''} onChangeText={(v) => setReason((s) => ({ ...s, [t.id]: v.slice(0, 300) }))} maxLength={300}
                 />
-                <Button small danger label={pt('trialWfCancel')} onPress={() => act(t, 'cancel')} />
+                <Button small tertiary danger label={pt('trialWfCancel')} onPress={() => act(t, 'cancel')} />
               </Row>
             )}
           </View>

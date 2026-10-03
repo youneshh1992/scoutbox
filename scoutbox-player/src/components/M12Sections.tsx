@@ -12,6 +12,9 @@ import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
 import { m12, type BoardItem, type FeedbackItem, type CampaignView, type FamilyTrial, type FollowUpView, type ObjectiveRec, type PassportView, type SafetyPack, type SquadInvite, type UploadSession } from '../data/m12client';
 import { getDataSaver, getPLang, pFmtDate, pt, setDataSaver, setPLang } from '../i18n';
 
+// M24F — presentation casing for status labels; the data value is never changed.
+const cap = (v: string | null | undefined) => (v ? v.charAt(0).toUpperCase() + v.slice(1).replace(/_/g, ' ') : '');
+
 export type Actor = { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string };
 
 const toneFor = (tier: string): 'green' | 'blue' | 'gold' | 'default' =>
@@ -51,7 +54,7 @@ export function PassportSection({ actor }: { actor: Actor }) {
       <Muted size={12}>{pt('provenance')}</Muted>
       {pp.summary.insufficient && (
         <View style={{ backgroundColor: colors.panel2, borderRadius: 8, padding: 8, marginTop: 6 }}>
-          <Muted size={12}>⚠️ {pt('insufficient')}</Muted>
+          <Muted size={12}>{pt('insufficient')}</Muted>
         </View>
       )}
       {pp.records.map((r) => (
@@ -60,7 +63,7 @@ export function PassportSection({ actor }: { actor: Actor }) {
             <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13, flex: 1 }}>
               {r.label}{r.value != null ? ` — ${r.value}${r.units ? ` ${r.units}` : ''}` : ''}
             </Text>
-            <Pill label={r.verification.status.replace('_', ' ')} tone={toneFor(r.verification.status)} />
+            <Pill label={cap(r.verification.status)} tone={toneFor(r.verification.status)} />
           </Row>
           <Muted size={11.5}>
             {r.verification.method ?? ''}{r.verification.reviewerName ? ` · ${r.verification.reviewerName}` : ''}
@@ -70,8 +73,8 @@ export function PassportSection({ actor }: { actor: Actor }) {
       ))}
       {pp.legacy.map((l, i) => (
         <View key={i} style={{ marginTop: 8 }}>
-          <Row><Text style={{ color: colors.text, fontSize: 13, flex: 1 }}>{l.label}</Text><Pill label={l.tier.replace('_', ' ')} tone={toneFor(l.tier)} /></Row>
-          {l.caveat && <Muted size={11.5}>⚠︎ {l.caveat}</Muted>}
+          <Row><Text style={{ color: colors.text, fontSize: 13, flex: 1 }}>{l.label}</Text><Pill label={cap(l.tier)} tone={toneFor(l.tier)} /></Row>
+          {l.caveat && <Muted size={11.5}>{l.caveat}</Muted>}
         </View>
       ))}
       <View style={{ marginTop: 10, gap: 6 }}>
@@ -114,7 +117,7 @@ export function BoardSection({ actor }: { actor: Actor }) {
         <View key={o.id} style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }}>
           <Row style={{ flexWrap: 'wrap' }}>
             <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13.5, flex: 1 }}>{o.title}</Text>
-            <Pill label={o.type.replace('_', ' ')} tone="blue" />
+            <Pill label={cap(o.type)} tone="blue" />
           </Row>
           <Muted size={12}>{o.orgName} · deadline {o.deadline}{o.distance ? ` · ${o.distance}` : ''}{o.schedule ? ` · ${o.schedule}` : ''}</Muted>
           {o.description && <Muted size={12}>{o.description}</Muted>}
@@ -122,7 +125,7 @@ export function BoardSection({ actor }: { actor: Actor }) {
           <Row style={{ marginTop: 6 }}>
             {o.applied ? (
               <>
-                <Pill label={`${pt('applied')}: ${o.applied.status}`} tone={o.applied.status === 'accepted' ? 'green' : 'default'} />
+                <Pill label={`${pt('applied')}: ${cap(o.applied.status)}`} tone={o.applied.status === 'accepted' ? 'green' : 'default'} />
                 {o.applied.status === 'submitted' && o.applied.id && actor.kind === 'player' && (
                   <Button small label={pt('withdraw')} onPress={async () => { await m12.withdrawApplication(actor.id, o.applied!.id!); reload(); }} />
                 )}
@@ -174,9 +177,9 @@ export function CampaignsSection({ actor, mediaOptions }: { actor: Actor; mediaO
           ))}
           {(c.mySubmission?.attempts ?? []).map((a) => (
             <View key={a.id} style={{ marginTop: 6 }}>
-              <Row><Muted size={12}>{a.drillName}</Muted><Pill label={a.status.replace('_', ' ')} tone={a.status === 'accepted' ? 'green' : a.status === 'returned' || a.status === 'failed_checks' ? 'red' : 'blue'} /></Row>
+              <Row><Muted size={12}>{a.drillName}</Muted><Pill label={cap(a.status)} tone={a.status === 'accepted' ? 'green' : a.status === 'returned' || a.status === 'failed_checks' ? 'red' : 'blue'} /></Row>
               {!a.fileChecks.passed && <Muted size={11.5}>File check: {a.fileChecks.issues.join('; ')}</Muted>}
-              {a.review?.reasons && <Muted size={11.5}>↩️ Coach: {a.review.reasons}</Muted>}
+              {a.review?.reasons && <Muted size={11.5}>Coach: {a.review.reasons}</Muted>}
             </View>
           ))}
           <AttemptForm actor={actor} campaign={c} mediaOptions={mediaOptions} onDone={(m) => { setMsg(m); reload(); }} />
@@ -199,7 +202,7 @@ function AttemptForm({ actor, campaign, mediaOptions, onDone }: { actor: Actor; 
           const r = actor.kind === 'player'
             ? await m12.submitCampaignAttempt(actor.id, campaign.id, mediaId, campaign.drills[0]?.name ?? 'drill')
             : await m12.gSubmitCampaignAttempt(actor.id, actor.childId, campaign.id, mediaId, campaign.drills[0]?.name ?? 'drill');
-          onDone(r.status === 'submitted' ? '✅ File checks passed — now waiting for a HUMAN coach review.' : `File checks failed: ${r.issues.join('; ')}`);
+          onDone(r.status === 'submitted' ? 'File checks passed — now waiting for a HUMAN coach review.' : `File checks failed: ${r.issues.join('; ')}`);
         } catch (e) { onDone(e instanceof Error ? e.message : 'Failed'); }
       }} />
     </Row>
@@ -309,10 +312,10 @@ export function TrialSafetySection({ actor }: { actor: Actor }) {
       {trials.map((tr) => (
         <View key={tr.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }}>
           <Row><Text style={{ color: colors.text, fontWeight: '700', fontSize: 13.5, flex: 1 }}>{tr.orgName ?? tr.playerName}</Text>
-            {tr.cancelled ? <Pill label="cancelled" tone="red" /> : <Pill label={tr.proposedDate ?? 'TBC'} />}</Row>
+            {tr.cancelled ? <Pill label="Cancelled" tone="red" /> : <Pill label={tr.proposedDate ?? 'TBC'} />}</Row>
           {tr.staff.map((s, i) => (
             <Row key={i}><Muted size={12}>{s.name} · {s.role}</Muted>
-              <Pill label={s.check.status === 'reviewed' ? 'check reviewed' : `check ${s.check.status}`} tone={s.check.status === 'reviewed' ? 'green' : 'gold'} /></Row>
+              <Pill label={s.check.status === 'reviewed' ? 'Check reviewed' : `Check ${s.check.status}`} tone={s.check.status === 'reviewed' ? 'green' : 'gold'} /></Row>
           ))}
           {tr.arrival?.address && <Muted size={12}>{tr.arrival.time ?? ''} · {tr.arrival.address}</Muted>}
           <Row style={{ marginTop: 6, flexWrap: 'wrap' }}>
@@ -492,7 +495,7 @@ export function ResumableUploadCard({ playerId, onDone }: { playerId: string; on
       setProgress(Math.round(((i + 1) / up.totalChunks) * 100));
     }
     const r = await m12.finaliseUpload(playerId, up.id);
-    setStatus(`✅ Upload finalised — media ${r.mediaId}. (Success is only reported AFTER integrity checks.)`);
+    setStatus(`Upload finalised — media ${r.mediaId}. (Success is only reported AFTER integrity checks.)`);
     setSession(null); setPending(null); onDone();
   }, [playerId, onDone]);
 
@@ -501,11 +504,11 @@ export function ResumableUploadCard({ playerId, onDone }: { playerId: string; on
   pausedRef.current = paused;
 
   if (Platform.OS !== 'web') {
-    return <Card><SectionTitle>⤴️ {pt('uploadLarge')}</SectionTitle><Muted size={12}>Resumable uploads are verified on web; native file access ships with the store builds.</Muted></Card>;
+    return <Card><SectionTitle>{pt('uploadLarge')}</SectionTitle><Muted size={12}>Resumable uploads are verified on web; native file access ships with the store builds.</Muted></Card>;
   }
   return (
     <Card>
-      <SectionTitle>⤴️ {pt('uploadLarge')}</SectionTitle>
+      <SectionTitle>{pt('uploadLarge')}</SectionTitle>
       <Muted size={12}>Chunked with integrity checks: interruptions resume without duplicates, and nothing counts as uploaded until finalisation passes.</Muted>
       {!session && (
         // eslint-disable-next-line react/no-unknown-property

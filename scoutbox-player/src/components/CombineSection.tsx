@@ -224,7 +224,7 @@ function CombineCapturePanel({ playerId, protocol, requestId, onDone, onClose }:
       {phase === 'setup' ? <Muted>{pt('cmbChecking')}</Muted> : null}
 
       {phase === 'error' ? (
-        <View><Muted size={13}>⚠ {msg}</Muted><Row style={{ marginTop: 8 }}><Button small label={pt('cmbRetry')} onPress={() => void readyCheck()} /><Button small label={pt('cmbClose')} onPress={cancel} /></Row></View>
+        <View><Muted size={13}>{msg}</Muted><Row style={{ marginTop: 8 }}><Button small label={pt('cmbRetry')} onPress={() => void readyCheck()} /><Button small label={pt('cmbClose')} onPress={cancel} /></Row></View>
       ) : null}
 
       {phase === 'ready' ? (

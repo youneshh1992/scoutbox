@@ -99,8 +99,8 @@ export function AgentConsentSection({ playerId, isMinor }: { playerId: string; i
               <>
                 <Muted size={11.5}>{pt('m25beforeYouAnswer')}</Muted>
                 <View style={{ marginTop: 6, gap: 4 }}>
-                  <Button small={true} label={`${a.particulars ? '☑' : '☐'} ${pt('m25ackParticulars')}`} onPress={() => toggle(k.id, 'particulars')} />
-                  <Button small={true} label={`${a.legalAdvice ? '☑' : '☐'} ${pt('m25ackLegalAdvice')}`} onPress={() => toggle(k.id, 'legalAdvice')} />
+                  <Button small={true} label={`${a.particulars ? 'Acknowledged · ' : ''}${pt('m25ackParticulars')}`} onPress={() => toggle(k.id, 'particulars')} />
+                  <Button small={true} label={`${a.legalAdvice ? 'Acknowledged · ' : ''}${pt('m25ackLegalAdvice')}`} onPress={() => toggle(k.id, 'legalAdvice')} />
                 </View>
                 <Row style={{ marginTop: 6 }}>
                   <Button small primary disabled={busy || !a.particulars || !a.legalAdvice} label={pt('m25grant')} onPress={() => answer(k, 'grant', 'm25grantedMsg')} />

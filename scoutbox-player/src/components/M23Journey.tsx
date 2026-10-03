@@ -15,7 +15,7 @@ import { Text } from './Text';
 import { m12, type PlayerJourney, type PlayerJourneyStage, type PlayerNextActionCode } from '../data/m12client';
 import { useColors } from '../theme';
 import { pt } from '../i18n';
-import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
+import { Button, Card, Muted, Row, SectionTitle } from './ui';
 
 type Actor = { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string };
 export type JourneyView = 'overview' | 'stage' | 'tasks' | 'activity';
@@ -31,7 +31,7 @@ export const CATEGORY_FOR_ACTION: Record<PlayerNextActionCode, string | null> = 
   RESPOND_TO_CONTACT: 'contact', RESPOND_TO_TRIAL_INVITATION: 'trial', CONFIRM_TRIAL_SCHEDULE: 'trial', RESPOND_TO_OFFER: 'offer', SIGN: 'signing', NONE: null,
 };
 
-export function JourneySection({ actor, view = 'overview', onGo }: { actor: Actor; view?: JourneyView; onGo?: (category: string) => void }) {
+export function JourneySection({ actor, view = 'overview', onGo, emptyLine }: { actor: Actor; view?: JourneyView; onGo?: (category: string) => void; /** M24F — say so when nothing is in motion instead of rendering nothing */ emptyLine?: boolean }) {
   const colors = useColors();
   const [items, setItems] = useState<PlayerJourney[] | null>(null);
   // Every return to the tab re-reads: a club may have moved while the person was elsewhere (§55).
@@ -44,13 +44,13 @@ export function JourneySection({ actor, view = 'overview', onGo }: { actor: Acto
   }, [actor.id, actor.kind, focusTick]);
   if (!items) return null;
   if (items.length === 0) {
-    if (view === 'overview') return null;
+    if (view === 'overview') return emptyLine ? <View testID="journey-empty"><Muted size={13}>{pt('jnNone')}</Muted></View> : null;
     return <View testID="journey-empty"><Card><SectionTitle>{pt('jnTitle')}</SectionTitle><Muted size={12.5}>{pt('jnNone')}</Muted></Card></View>;
   }
   const clubRow = (j: PlayerJourney) => (
     <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
       <Text style={{ color: colors.text, fontWeight: '700', fontSize: 14.5 }}>{j.club.name ?? pt('jnClub')}</Text>
-      <Pill label={`${GLYPH[j.journey.stage] ?? ''} ${stLabel(j.journey.stage)}`} tone={tone(j.journey.stage)} />
+      <Text style={{ color: tone(j.journey.stage) === 'red' ? colors.danger : tone(j.journey.stage) === 'gold' ? colors.gold : tone(j.journey.stage) === 'green' ? colors.accentText : colors.muted, fontSize: 12.5, fontWeight: '600' }}>{`${GLYPH[j.journey.stage] ?? ''} ${stLabel(j.journey.stage)}`.trim()}</Text>
     </Row>
   );
   const sep = { borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8, gap: 4 } as const;

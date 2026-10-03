@@ -7,7 +7,6 @@ import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { Text, TextInput } from '../../components/Text';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { PitchBackdrop } from '../../components/PitchBackdrop';
 import { client, type PlayerCV, type Benchmarks } from '../../data/client';
 import {
   AVAILABILITY_LABELS, CONTRACT_LABELS,
@@ -46,7 +45,6 @@ export default function Profile() {
   const styles = useStyles(makeStyles);
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-        <PitchBackdrop />
       <ScrollView contentContainerStyle={styles.scroll}>
         <PageHeader title={pt('tabProfile')} back />
         <ProfileBody />
@@ -357,7 +355,7 @@ export function ProfileBody() {
                   <Muted size={12.5}>{b.value}</Muted>
                   {b.percentile !== null
                     ? <Pill label={`top ${Math.max(1, 100 - b.percentile)}%`} tone={b.percentile >= 75 ? 'gold' : 'blue'} />
-                    : <Pill label="cohort too small" />}
+                    : <Pill label="Cohort too small" />}
                 </Row>
               </Row>
             ))}
@@ -368,7 +366,7 @@ export function ProfileBody() {
                   <Muted size={12.5}>{b.value}{b.unit}</Muted>
                   {b.percentile !== null
                     ? <Pill label={`top ${Math.max(1, 100 - b.percentile)}%`} tone={b.percentile >= 75 ? 'gold' : 'blue'} />
-                    : <Pill label="cohort too small" />}
+                    : <Pill label="Cohort too small" />}
                 </Row>
               </Row>
             ))}
@@ -377,7 +375,7 @@ export function ProfileBody() {
 
         {me.pathway && (
           <Card>
-            <SectionTitle>⭐ Coach references</SectionTitle>
+            <SectionTitle>Coach references</SectionTitle>
             {(me.vouches ?? []).length === 0 && (
               <Muted size={12.5}>
                 A named coach vouching for you is the strongest credential an amateur can hold. Ask yours —
@@ -485,7 +483,7 @@ export function ProfileBody() {
             return (
               <View key={m.id} style={{ gap: 6 }}>
                 <Row>
-                  {m.verifiedClip ? <Pill label="✅ Verified Clip" tone="green" /> : <Pill label={m.kind} tone="blue" />}
+                  {m.verifiedClip ? <Pill label="Verified Clip" tone="green" /> : <Pill label={m.kind.charAt(0).toUpperCase() + m.kind.slice(1)} tone="blue" />}
                   <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>{m.title}</Text>
                   <Muted size={12}>{m.views ?? 0} view{(m.views ?? 0) === 1 ? '' : 's'}</Muted>
                 </Row>

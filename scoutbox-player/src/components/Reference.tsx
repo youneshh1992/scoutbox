@@ -151,16 +151,12 @@ export function HistoryList({ rows, testID }: { rows: { index: string; title: st
   );
 }
 
-/** `.p-training-visual` — the Box Cam hero: faint pitch, a glyph in a disc, a title and a line. */
+/** `.p-training-visual` — the Box Cam hero: a glyph in a disc, a title and a line on the soft green (M24F: no pitch drawing). */
 export function TrainingVisual({ title, sub }: { title: string; sub: string }) {
   const s = useStyles(makeStyles);
   const c = useColors();
   return (
     <View style={s.training} testID="boxcam-visual">
-      <View pointerEvents="none" aria-hidden style={s.pitch}>
-        <View style={s.pitchHalf} />
-        <View style={s.pitchCircle} />
-      </View>
       <View style={s.trainingDisc}><Icon name="scan-line" size={18} color={c.iconFg} /></View>
       <Text style={[s.rowTitle, { backgroundColor: c.training, paddingHorizontal: 5 }]}>{title}</Text>
       <Text style={[s.sub, { fontSize: 12, backgroundColor: c.training, paddingHorizontal: 5 }]}>{sub}</Text>
@@ -209,25 +205,26 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   greeting: { marginBottom: 22, gap: 0 },
   kicker: { color: c.muted, fontSize: 12, lineHeight: 19 },
   h1: { color: c.text, fontSize: 25, fontWeight: '700', letterSpacing: -0.6, lineHeight: 30, marginVertical: 6 },
-  h2: { color: c.text, fontSize: 17, fontWeight: '600', letterSpacing: -0.3, lineHeight: 22, flexShrink: 1 },
+  h2: { color: c.text, fontSize: 19, fontWeight: '600', letterSpacing: -0.4, lineHeight: 24, flexShrink: 1 },
   sub: { color: c.muted, fontSize: 13, lineHeight: 20 },
-  section: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 25, marginBottom: 12 },
+  section: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 30, marginBottom: 8 },
   count: { width: 22, height: 22, borderRadius: 11, backgroundColor: c.count, alignItems: 'center', justifyContent: 'center' },
   countText: { color: c.text, fontSize: 11 },
-  iconTile: { backgroundColor: c.iconBg, borderRadius: 9, padding: 10, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 11, width: '100%', backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, paddingVertical: 14, paddingHorizontal: 12, borderRadius: 11, marginTop: 9 },
-  rowTitle: { color: c.text, fontSize: 13, fontWeight: '600', lineHeight: 18 },
-  rowSub: { color: c.muted, fontSize: 11, lineHeight: 15, marginTop: 5 },
+  iconTile: { borderRadius: 9, padding: 2, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  // M24F — an attention row is a row, not a card: hairline-separated, full width
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, width: '100%', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: c.line },
+  rowTitle: { color: c.text, fontSize: 14.5, fontWeight: '600', lineHeight: 19 },
+  rowSub: { color: c.muted, fontSize: 12.5, lineHeight: 17, marginTop: 3 },
   passport: { backgroundColor: c.passport, borderRadius: 15, padding: 18, overflow: 'hidden' },
   passportAvatar: { width: 41, height: 41, borderRadius: 21, backgroundColor: c.accent, alignItems: 'center', justifyContent: 'center' },
   passportLabel: { backgroundColor: 'rgba(255,255,255,0.09)', borderRadius: 5, paddingVertical: 5, paddingHorizontal: 8 },
   passportName: { color: '#ffffff', fontSize: 24, fontWeight: '600', letterSpacing: -0.5, lineHeight: 29, marginTop: 19 },
   passportLine: { color: c.passportText, fontSize: 12, lineHeight: 18, marginTop: 6 },
   passportLink: { marginTop: 18, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.15)', width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  card: { backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, borderRadius: 12, padding: 16 },
+  card: { paddingVertical: 14, borderTopWidth: 1, borderTopColor: c.line },
   intro: { alignItems: 'center', paddingTop: 4, paddingBottom: 19 },
   avatarLarge: { width: 68, height: 68, borderRadius: 34, backgroundColor: c.iconBg, borderWidth: 4, borderColor: c.panel, alignItems: 'center', justifyContent: 'center', shadowColor: c.line, shadowOpacity: 1, shadowRadius: 0, shadowOffset: { width: 0, height: 0 } },
-  history: { backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, borderRadius: 12, paddingHorizontal: 14 },
+  history: { borderTopWidth: 1, borderTopColor: c.line },
   record: { flexDirection: 'row', gap: 9, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: c.line },
   index: { width: 24, color: c.accentText, fontSize: 11, fontWeight: '600', paddingTop: 3 },
   recordTitle: { color: c.text, fontSize: 14, fontWeight: '600', lineHeight: 19 },

@@ -19,7 +19,7 @@ export function WebVideo({ src }: { src: string }) {
   }
   return (
     <View style={{ padding: 10, borderWidth: 1, borderColor: colors.line, borderRadius: 10 }}>
-      <Text style={{ color: colors.muted, fontSize: 12.5 }}>▶ Video available — playback on web (native playback ships with expo-av).</Text>
+      <Text style={{ color: colors.muted, fontSize: 12.5 }}>Video available — playback on web (native playback ships with expo-av).</Text>
     </View>
   );
 }

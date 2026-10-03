@@ -67,7 +67,7 @@ function eventLabel(e: PassportEvent): string {
     role_or_squad_changed: `${pt('m15evRole')}${org ? ` — ${org}` : ''}`,
     representation_started: `${pt('m15evRepStart')} — ${org}`,
     representation_ended: `${pt('m15evRepEnd')} — ${org}`,
-    achievement: `🏅 ${(e.title as { label?: string }).label ?? ''}`,
+    achievement: `${(e.title as { label?: string }).label ?? ''}`,
     position_change: `${pt('m15evPosition')}: ${(e.title as { primary?: string }).primary ?? ''}`,
   };
   return map[e.type] ?? e.type.replace(/_/g, ' ');
@@ -135,7 +135,7 @@ function SharesPanel({ actor }: { actor: PassportActor }) {
             : <Button small label={pt('m15shareRevoke')} onPress={async () => { try { await m15.revokeShare(actor, s.id); reload(); } catch { /* shown on reload */ } }} />}
         </Row>
       ))}
-      {msg ? <Muted size={12}>⚠️ {msg}</Muted> : null}
+      {msg ? <Muted size={12}>{msg}</Muted> : null}
     </View>
   );
 }
@@ -151,12 +151,12 @@ export function FootballPassportSection({ actor, isMinor, childName }: { actor: 
   const [achTitle, setAchTitle] = useState('');
   const [corrReason, setCorrReason] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
-  if (err) return <Card><SectionTitle>{pt('m15title')}</SectionTitle><Muted>⚠️ {err}</Muted></Card>;
+  if (err) return <Card><SectionTitle>{pt('m15title')}</SectionTitle><Muted>{err}</Muted></Card>;
   if (!p) return null;
   const events = showAll ? p.timeline : p.timeline.slice(0, 6);
   const canShare = actor.kind === 'guardian' || !isMinor;
   const act = async (fn: () => Promise<unknown>, okMsg: string) => {
-    try { await fn(); setMsg(okMsg); reload(); } catch (e) { setMsg(`⚠️ ${e instanceof Error ? e.message : 'failed'}`); }
+    try { await fn(); setMsg(okMsg); reload(); } catch (e) { setMsg(`${e instanceof Error ? e.message : 'failed'}`); }
   };
   return (
     <Card>
@@ -183,7 +183,7 @@ export function FootballPassportSection({ actor, isMinor, childName }: { actor: 
         </View>
       ))}
       {p.temporalConflicts.length > 0 ? (
-        <Muted size={12}>⏱ {pt('m15temporal')}</Muted>
+        <Muted size={12}>{pt('m15temporal')}</Muted>
       ) : null}
 
       {/* Evidence coverage + gaps (non-shaming) */}
@@ -231,7 +231,7 @@ export function FootballPassportSection({ actor, isMinor, childName }: { actor: 
         <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{pt('m15achievements')}</Text>
         {p.achievements.map((a) => (
           <Row key={a.id} style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6, marginTop: 6 }}>
-            <Text style={{ color: colors.text, fontSize: 13, flexShrink: 1 }}>🏅 {a.title}{a.when ? ` (${a.when})` : ''}</Text>
+            <Text style={{ color: colors.text, fontSize: 13, flexShrink: 1 }}>{a.title}{a.when ? ` (${a.when})` : ''}</Text>
             <ProvPill provenance={a.provenance} />
             {a.confirmedBy ? <Muted size={11.5}>{pt('m15confirmedBy')} {a.confirmedBy}</Muted> : null}
             {actor.kind === 'player' && a.withdrawable ? (

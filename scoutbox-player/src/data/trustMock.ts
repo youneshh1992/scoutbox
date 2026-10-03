@@ -1,6 +1,6 @@
 // M16.2 demo mirror — a SELF-CONTAINED ScoutBox Trust Profile fixture.
 //
-// ⚠ Circular-import discipline (this bit shipped broken in M16.1): the only
+// NOTE — circular-import discipline (this bit shipped broken in M16.1): the only
 // thing this module takes from ./trustClient is TYPES (`import type`, erased at
 // build time). It never imports a runtime binding from the module that imports
 // it, and it never calls an imported value at module-load time. Every constant

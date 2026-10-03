@@ -12,11 +12,11 @@ import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { PitchBackdrop } from '../../components/PitchBackdrop';
 import { useSession } from '../../state';
 import { useStyles, type Palette } from '../../theme';
 import { pt } from '../../i18n';
 import { PageHeader, PageTabs } from '../../components/PageChrome';
+import { ListRow, SectionTitle } from '../../components/ui';
 import { CaseCategories } from '../../components/CaseNav';
 import { PLAYER_NAV, playerLocation, type PlayerCaseLocation } from '../../caseNav';
 import { BoardSection, FollowUpsSection, SquadInvitesSection, TrialSafetySection } from '../../components/M12Sections';
@@ -49,13 +49,23 @@ export default function Opportunities() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-        <PitchBackdrop />
       <ScrollView contentContainerStyle={styles.scroll}>
         <PageHeader title={pt('tabOpportunities')} hint={pt('opportunitiesHint')} />
         <CaseCategories model={PLAYER_NAV} value={category.id} onChange={goCategory} />
         <PageTabs tabs={tabs} value={sub} onChange={(k) => go({ category: category.id, sub: k })} />
         <View testID={`case-panel-${sub}`} style={styles.panel} accessibilityLabel={pt(category.labelKey as Parameters<typeof pt>[0])}>
-          {actor && sub === 'overview' ? <JourneySection actor={actor} view="overview" onGo={goCategory} /> : null}
+          {/* M24F — the Overview reads Current (what clubs have put in motion), then Upcoming (open roles, fit, invitations, follow-ups), with History one tab away. */}
+          {actor && sub === 'overview' ? (
+            <>
+              <SectionTitle testID="opp-current">Current</SectionTitle>
+              <JourneySection actor={actor} view="overview" onGo={goCategory} emptyLine />
+              <BoardSection actor={actor} />
+              <OpportunityFitSection actor={actor} />
+              <SquadInvitesSection actor={actor} />
+              <FollowUpsSection actor={actor} />
+              <View style={{ marginTop: 8 }}><ListRow label="History" value="Every step a club has taken with you, in order" onPress={() => go({ category: 'journey', sub: 'activity' })} /></View>
+            </>
+          ) : null}
           {actor && sub === 'activity' ? <JourneySection actor={actor} view="activity" /> : null}
           {sub === 'messages' ? <MessagesSummarySection /> : null}
           {sub === 'requests' ? <ContactRequestsSection kind="contact" /> : null}
@@ -84,6 +94,6 @@ export default function Opportunities() {
 
 const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  scroll: { paddingHorizontal: 18, paddingTop: 12, paddingBottom: 24, gap: 10 },
+  scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 32, gap: 0 },
   panel: { gap: 10 },
 });

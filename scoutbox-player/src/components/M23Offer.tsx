@@ -14,11 +14,11 @@ import { Text, TextInput } from './Text';
 import { m12, type FamilyOffer, type FamilyOfferRevision, type OfferStatus } from '../data/m12client';
 import { useColors } from '../theme';
 import { pt } from '../i18n';
-import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
+import { Button, Card, Muted, Row, SectionTitle } from './ui';
 
 type Actor = { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string };
 
-const GLYPH: Record<OfferStatus, string> = { DRAFT: '○', ISSUED: '➤', ACCEPTED: '✓', DECLINED: '✕', WITHDRAWN: '⊘', EXPIRED: '⌛', SUPERSEDED: '↻' };
+const GLYPH: Record<OfferStatus, string> = { DRAFT: '○', ISSUED: '➤', ACCEPTED: '✓', DECLINED: '✕', WITHDRAWN: '⊘', EXPIRED: '◷', SUPERSEDED: '↻' };
 const tone = (s: OfferStatus | null) => (s === 'ISSUED' ? 'gold' : s === 'ACCEPTED' ? 'green' : s === 'DECLINED' || s === 'WITHDRAWN' || s === 'EXPIRED' ? 'red' : 'default');
 const stLabel = (s: OfferStatus | null) => {
   if (!s) return '';
@@ -107,11 +107,11 @@ export function OfferSection({ actor, view = 'all' }: { actor: Actor; view?: Off
         return (
           <View key={o.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }} testID={`offer-${o.id}`} accessibilityLabel={`${pt('offersTitle')} ${o.club.name ?? ''}`}>
             <Row>
-              <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13.5, flex: 1 }}>{o.club.name ?? '—'}{actor.kind === 'guardian' && o.playerName ? ` · ${o.playerName}` : ''}</Text>
-              <Pill label={stLabel(o.status)} tone={tone(o.status)} />
+              <Text style={{ color: colors.text, fontWeight: '600', fontSize: 15, flex: 1 }}>{o.club.name ?? '—'}{actor.kind === 'guardian' && o.playerName ? ` · ${o.playerName}` : ''}</Text>
+              <Text style={{ color: tone(o.status) === 'red' ? colors.danger : tone(o.status) === 'gold' ? colors.gold : tone(o.status) === 'green' ? colors.accentText : colors.muted, fontSize: 12.5, fontWeight: '600' }}>{stLabel(o.status)}</Text>
             </Row>
             {cur && (
-              <View style={{ marginTop: 4, backgroundColor: colors.panel2, borderRadius: 8, padding: 8 }} testID={`offer-revision-${cur.id}`}>
+              <View style={{ marginTop: 4, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }} testID={`offer-revision-${cur.id}`}>
                 <Muted size={12}>{pt('offerRevision')} {cur.revisionNumber} · {cur.status === 'EXPIRED' ? pt('offerExpired') : pt('offerExpires')} {fmt(cur.expiresAt)}</Muted>
                 {show('offer') && <Text style={{ color: colors.text, fontSize: 13, marginTop: 4 }}>{pt('offerRole')}: {cur.terms.role ?? '—'}{cur.terms.squad ? ` · ${pt('offerSquad')}: ${cur.terms.squad}` : ''}</Text>}
                 {show('offer') && <Text style={{ color: colors.text, fontSize: 13 }}>{pt('offerStart')}: {cur.terms.startDate ?? '—'}{cur.terms.endDate ? ` · ${pt('offerEnd')}: ${cur.terms.endDate}` : ''}</Text>}
@@ -138,11 +138,11 @@ export function OfferSection({ actor, view = 'all' }: { actor: Actor; view?: Off
             {show('offer') && live && !arm && (
               <Row style={{ marginTop: 6, flexWrap: 'wrap' }}>
                 <Button small primary label={pt('offerAccept')} onPress={() => setArm({ id: o.id, what: 'accept' })} testID={`offer-accept-${o.id}`} />
-                <Button small label={pt('offerDecline')} onPress={() => setArm({ id: o.id, what: 'decline' })} testID={`offer-decline-${o.id}`} />
+                <Button small tertiary label={pt('offerDecline')} onPress={() => setArm({ id: o.id, what: 'decline' })} testID={`offer-decline-${o.id}`} />
               </Row>
             )}
             {show('offer') && live && arm?.id === o.id && cur && (
-              <View style={{ marginTop: 6, borderRadius: 8, borderWidth: 1, borderColor: colors.gold, padding: 8 }} accessibilityRole="alert" testID={`offer-confirm-${o.id}`}>
+              <View style={{ marginTop: 6, borderLeftWidth: 2, borderLeftColor: colors.gold, paddingLeft: 10, paddingVertical: 4 }} accessibilityRole="alert" testID={`offer-confirm-${o.id}`}>
                 <Text style={{ color: colors.text, fontSize: 13 }}>{(arm.what === 'accept' ? pt('offerAcceptWarn') : pt('offerDeclineWarn')).replace('{n}', String(cur.revisionNumber))}</Text>
                 {arm.what === 'decline' && (
                   <TextInput
@@ -153,7 +153,7 @@ export function OfferSection({ actor, view = 'all' }: { actor: Actor; view?: Off
                 )}
                 <Row style={{ marginTop: 6, flexWrap: 'wrap' }}>
                   <Button small primary={arm.what === 'accept'} danger={arm.what === 'decline'} label={(arm.what === 'accept' ? pt('offerConfirmAccept') : pt('offerConfirmDecline')).replace('{n}', String(cur.revisionNumber))} onPress={() => answer(o, cur, arm.what)} disabled={busy === o.id} testID={`offer-confirm-${arm.what}-${o.id}`} />
-                  <Button small label={pt('offerCancel')} onPress={() => setArm(null)} testID={`offer-cancel-${o.id}`} />
+                  <Button small tertiary label={pt('offerCancel')} onPress={() => setArm(null)} testID={`offer-cancel-${o.id}`} />
                 </Row>
                 <Muted size={12}>{pt('offerNotSigning')}</Muted>
               </View>

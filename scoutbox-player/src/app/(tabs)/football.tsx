@@ -6,7 +6,6 @@ import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet } from 'react-native';
 import { Text } from '../../components/Text';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { PitchBackdrop } from '../../components/PitchBackdrop';
 import { Link, useLocalSearchParams } from 'expo-router';
 import { useSession } from '../../state';
 import { useColors, useStyles, type Palette } from '../../theme';
@@ -37,7 +36,6 @@ export default function Football() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-        <PitchBackdrop />
       <ScrollView contentContainerStyle={styles.scroll}>
         <PageHeader
           title={pt('tabFootball')}
@@ -74,7 +72,7 @@ export default function Football() {
 
 const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  scroll: { paddingHorizontal: 18, paddingTop: 12, paddingBottom: 24, gap: 10 },
+  scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 32, gap: 0 },
   primary: { backgroundColor: colors.accent, borderRadius: 10, paddingVertical: 7, paddingHorizontal: 12 },
   primaryText: { color: colors.accentInk, fontWeight: '700', fontSize: 13 },
 });

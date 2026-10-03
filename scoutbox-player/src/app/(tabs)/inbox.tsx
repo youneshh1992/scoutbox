@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native';
 import { Text, TextInput } from '../../components/Text';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { PitchBackdrop } from '../../components/PitchBackdrop';
 import { client } from '../../data/client';
 import type { Channel } from '../../data/types';
 import type { ChildInboxItem, InboxRequest } from '../../domain/types';
@@ -61,7 +60,6 @@ export default function Inbox() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-        <PitchBackdrop />
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
@@ -102,7 +100,7 @@ export default function Inbox() {
                 <Text style={styles.org}>{r.orgName}</Text>
                 <Row>
                   {r.orgVerified && <Pill label="Verified club" tone="green" />}
-                  <Pill label="guardian-managed" />
+                  <Pill label="Guardian-managed" />
                 </Row>
               </Row>
               <Muted size={13.5}>{r.note}</Muted>
@@ -119,7 +117,7 @@ export default function Inbox() {
                 <Text style={styles.org}>{r.orgName}</Text>
                 <Row>
                   {r.orgVerified && <Pill label="Verified" tone="green" />}
-                  <Pill label={r.type === 'trial' ? 'trial request' : 'contact request'} tone={r.type === 'trial' ? 'gold' : 'blue'} />
+                  <Pill label={r.type === 'trial' ? 'Trial request' : 'Contact request'} tone={r.type === 'trial' ? 'gold' : 'blue'} />
                   {r.trustedPartner && <Pill label="Trusted Partner" tone="gold" />}
                 </Row>
               </Row>
@@ -175,12 +173,12 @@ export default function Inbox() {
                   )}
                   <Row>
                     <Button small primary label={r.type === 'trial' ? 'Accept trial' : pt('ctAccept')} onPress={() => respond(r.id, true, r.type === 'contact')} />
-                    <Button small danger label={pt('decline')} onPress={() => respond(r.id, false, r.type === 'contact')} />
+                    <Button small tertiary danger label={pt('decline')} onPress={() => respond(r.id, false, r.type === 'contact')} />
                   </Row>
                 </>
               ) : (
                 <Row>
-                  <Pill label={r.status} tone={r.status === 'accepted' ? 'green' : 'red'} />
+                  <Pill label={r.status.charAt(0).toUpperCase() + r.status.slice(1)} tone={r.status === 'accepted' ? 'green' : 'red'} />
                   {r.type === 'contact' && (r.status === 'accepted' || r.status === 'declined') && (
                     <Muted size={12.5}>{r.status === 'accepted' ? pt('ctRespondedAccepted') : pt('ctRespondedDeclined')}</Muted>
                   )}
@@ -216,7 +214,7 @@ export default function Inbox() {
 
 const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  scroll: { paddingHorizontal: 18, paddingTop: 12, paddingBottom: 24, gap: 10 },
+  scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 32, gap: 0 },
   org: { color: colors.text, fontSize: 16, fontWeight: '700' },
   subject: { color: colors.text, fontSize: 15, fontWeight: '700' },
   msg: { color: colors.text, fontSize: 14, fontStyle: 'italic', lineHeight: 20 },

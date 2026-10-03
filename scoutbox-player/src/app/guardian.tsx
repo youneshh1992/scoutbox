@@ -6,7 +6,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { Text, TextInput } from '../components/Text';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { PitchBackdrop } from '../components/PitchBackdrop';
 import { Redirect, useRouter } from 'expo-router';
 import { client, type Channel, type FiledReport, type GuardianDigest, type Insights } from '../data/client';
 import type { NotificationPrefs, GuardianOpenTrial } from '../data/types';
@@ -22,7 +21,7 @@ import { FootballPassportSection } from '../components/M15Sections';
 import { BoxTrainingSection } from '../components/M16Sections';
 import { DevelopmentHubSection } from '../components/M21Sections';
 import { useColors, useStyles, type Palette } from '../theme';
-import { Button, Card, Muted, Pill, Row, SectionTitle, TrustBar } from '../components/ui';
+import { Button, Card, Disclosure, Kicker, ListRow, Muted, Pill, Row, SectionTitle, TrustBar } from '../components/ui';
 import { ReportButton } from '../components/ReportSheet';
 import { NotificationBell } from '../components/NotificationBell';
 import { ThemeSwitch } from '../components/ThemeSwitch';
@@ -147,7 +146,6 @@ export default function GuardianDashboard() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-        <PitchBackdrop />
       <PopupBanner />
       <ScrollView
         contentContainerStyle={styles.scroll}
@@ -162,27 +160,36 @@ export default function GuardianDashboard() {
           </Row>
         </Row>
 
+        {/* M24F — who you are, as one quiet line; standing that is not in order is said in words, in the danger colour. */}
+        <View style={styles.who}>
+          <Text style={styles.whoName}>{guardian?.name}</Text>
+          <Text style={[styles.whoLine, !(guardian?.idVerified && guardian?.disclaimerAccepted) && { color: colors.danger }]}>
+            {guardian?.email}{guardian?.idVerified ? ' · ID verified' : ' · ID not yet verified'}{guardian?.disclaimerAccepted ? '' : ' · Disclaimer pending'}
+          </Text>
+        </View>
+
         {digest && digest.children.length > 0 && (
-          <Card>
-            <SectionTitle>This week&apos;s digest</SectionTitle>
+          <View style={styles.digest} testID="guardian-digest">
+            <SectionTitle>This week</SectionTitle>
             {digest.children.map((c) => (
-              <Muted key={c.id} size={13}>
-                <Text style={{ color: colors.text, fontWeight: '700' }}>{c.name}:</Text> {c.views} club view{c.views === 1 ? '' : 's'},{' '}
-                {c.newRequests} new request{c.newRequests === 1 ? '' : 's'}, {c.activityThisWeek} training activit{c.activityThisWeek === 1 ? 'y' : 'ies'}
-                {c.streak > 0 ? ` · ${c.streak}-day streak` : ''}{c.weeklyGoal.met ? ' · weekly goal met ✓' : ''}
-              </Muted>
+              <Text key={c.id} style={styles.digestLine}>
+                <Text style={{ fontWeight: '600' }}>{c.name}</Text>: {c.views} club view{c.views === 1 ? '' : 's'}, {c.newRequests} new request{c.newRequests === 1 ? '' : 's'}, {c.activityThisWeek} training activit{c.activityThisWeek === 1 ? 'y' : 'ies'}
+                {c.streak > 0 ? ` · ${c.streak}-day streak` : ''}{c.weeklyGoal.met ? ' · weekly goal met' : ''}.
+              </Text>
             ))}
-            <Muted size={11.5}>{digest.note}</Muted>
-          </Card>
+            <Row style={{ justifyContent: 'space-between' }}>
+              <Muted size={11.5}>{digest.note}</Muted>
+              <Button small tertiary label={showLog ? 'Hide activity' : 'View activity'} onPress={() => setShowLog(!showLog)} />
+            </Row>
+            {showLog && log.map((l) => (
+              <View key={l.id} style={styles.logRow}>
+                <Text style={styles.logWhen}>{new Date(l.ts).toLocaleDateString()}</Text>
+                <Text style={styles.logText}>{l.type.replace(/_/g, ' ')} — {l.orgName}{l.scoutName ? ` (${l.scoutName})` : ''}</Text>
+              </View>
+            ))}
+            {showLog && log.length === 0 && <Muted size={12.5}>Nothing logged yet.</Muted>}
+          </View>
         )}
-        <Muted>
-          {guardian?.name} · {guardian?.email}
-        </Muted>
-        <Row>
-          <Pill label={guardian?.idVerified ? 'ID verified' : 'ID unverified'} tone={guardian?.idVerified ? 'green' : 'red'} />
-          <Pill label={guardian?.disclaimerAccepted ? 'Disclaimer accepted' : 'Disclaimer pending'} tone={guardian?.disclaimerAccepted ? 'green' : 'red'} />
-          <Pill label={mode === 'live' ? 'Live sync' : 'Demo mode'} tone={mode === 'live' ? 'green' : 'blue'} />
-        </Row>
 
         {error && (
           <Card style={{ borderColor: colors.danger }}>
@@ -190,36 +197,26 @@ export default function GuardianDashboard() {
           </Card>
         )}
 
-        <SectionTitle>Club requests — you decide, never your child</SectionTitle>
+        <SectionTitle testID="guardian-requests">Club requests</SectionTitle>
+        <Muted size={12.5}>You decide, never your child. The conversation happens between adults.</Muted>
         {guardianInbox.length === 0 && (
-          <Card>
-            <Muted size={13.5}>
-              No requests yet. When a verified club wants to talk about your child, it appears here as
-              e.g. “Eastport FC has requested to discuss a trial.” The conversation happens between adults.
-            </Muted>
-          </Card>
+          <Muted size={13.5}>
+            No requests yet. When a verified club wants to talk about your child, it appears here as
+            e.g. “Eastport FC has requested to discuss a trial.”
+          </Muted>
         )}
         {guardianInbox.map((r) => (
-          <Card key={r.id} style={r.status === 'pending' ? { borderColor: colors.accent2 } : undefined}>
-            <Row style={{ justifyContent: 'space-between' }}>
-              <Text style={styles.org}>{r.orgName}</Text>
-              <Row>
-                {r.orgVerified && <Pill label="Verified" tone="green" />}
-                <Pill label={r.type === 'trial' ? 'trial invitation' : 'conversation request'} tone={r.type === 'trial' ? 'gold' : 'blue'} />
-              </Row>
-            </Row>
-            <Muted size={13}>
-              {r.scoutRole ?? 'Scout'} — {r.scoutName} · about {r.playerName ?? r.playerId} · {new Date(r.createdAt).toLocaleString()}
+          <Card key={r.id} testID={`guardian-request-${r.id}`}>
+            {/* M24F — progressive: who, what, for whom, where; the dates and the decision; everything else under View details. */}
+            <Kicker tone={r.status === 'pending' ? 'accent' : undefined}>{r.type === 'trial' ? 'Trial invitation' : 'Conversation request'}{r.status !== 'pending' ? ` · ${r.status.charAt(0).toUpperCase()}${r.status.slice(1)}` : ''}</Kicker>
+            <Text style={styles.org}>{r.orgName}{r.orgVerified ? '' : ' (unverified)'}</Text>
+            <Muted size={13.5}>
+              For {r.playerName ?? r.playerId}{r.type === 'trial' && r.trialDetails?.venue ? ` · ${r.trialDetails.venue}` : ''}
             </Muted>
             {r.subject ? <Text style={styles.subject} testID={`req-subject-${r.id}`}>{r.subject}</Text> : null}
-            {r.message ? <Text style={styles.msg} testID={`req-message-${r.id}`}>“{r.message}”</Text> : null}
-            {r.type === 'contact' && <Muted size={12}>{pt('ctGuardianNote')}</Muted>}
-            {r.type === 'trial' && r.trialDetails && (
-              <Muted size={12.5}>
-                {r.trialDetails.venue ? `Venue: ${r.trialDetails.venue}. ` : ''}
-                {r.trialDetails.notes}
-              </Muted>
-            )}
+            {/* while the request is open, what the guardian decides on — the club's words and the trial's slot notes — is in view; the rest is one tap away */}
+            {r.status === 'pending' && r.message ? <Text style={styles.msg} testID={`req-message-${r.id}`}>“{r.message}”</Text> : null}
+            {r.status === 'pending' && r.type === 'trial' && r.trialDetails?.notes ? <Muted size={12.5}>{r.trialDetails.notes}</Muted> : null}
             {r.status === 'pending' && r.type === 'trial' && r.trialDetails?.proposedDate && (
               <>
                 <Muted size={12.5}>{pt('trialSlotPickGuardian')}</Muted>
@@ -244,6 +241,7 @@ export default function GuardianDashboard() {
               <>
                 {r.type === 'contact' && (
                   <>
+                    <Muted size={12}>{pt('ctGuardianNote')}</Muted>
                     <Text style={styles.label} nativeID={`reply-label-${r.id}`}>{pt('ctReply')}</Text>
                     <TextInput
                       style={styles.input}
@@ -257,23 +255,28 @@ export default function GuardianDashboard() {
                       multiline
                       maxLength={500}
                     />
-                    <Muted size={12}>{pt('ctReplyNote')}</Muted>
                   </>
                 )}
-                <Row>
-                  <Button small primary label={r.type === 'trial' ? 'Accept trial' : pt('ctAcceptGuardian')} onPress={() => respond(r.id, true, r.type === 'contact')} />
-                  <Button small danger label={pt('decline')} onPress={() => respond(r.id, false, r.type === 'contact')} />
+                <Row style={{ marginTop: 4 }}>
+                  <Button primary label={r.type === 'trial' ? 'Accept trial' : pt('ctAcceptGuardian')} onPress={() => respond(r.id, true, r.type === 'contact')} />
+                  <Button tertiary danger label={pt('decline')} onPress={() => respond(r.id, false, r.type === 'contact')} />
                 </Row>
               </>
             ) : (
-              <Row>
-                <Pill label={r.status} tone={r.status === 'accepted' ? 'green' : 'red'} />
+              <>
                 {r.type === 'contact' && (r.status === 'accepted' || r.status === 'declined') && (
                   <Muted size={12.5}>{r.status === 'accepted' ? pt('ctRespondedAccepted') : pt('ctRespondedDeclined')}</Muted>
                 )}
-                {r.status === 'accepted' && r.contactChannel && <Pill label={`adult-to-adult channel: ${r.contactChannel}`} />}
-              </Row>
+                {r.status === 'accepted' && r.contactChannel && <Muted size={12.5}>Adult-to-adult channel: {r.contactChannel}</Muted>}
+              </>
             )}
+            <Disclosure label="View details" testID={`req-details-${r.id}`}>
+              <Muted size={13}>{r.scoutRole ?? 'Scout'} — {r.scoutName} · {new Date(r.createdAt).toLocaleString()}</Muted>
+              {r.status !== 'pending' && r.message ? <Text style={styles.msg} testID={`req-message-${r.id}`}>“{r.message}”</Text> : null}
+              {r.status !== 'pending' && r.type === 'trial' && r.trialDetails?.notes ? <Muted size={12.5}>{r.trialDetails.notes}</Muted> : null}
+              {r.type === 'contact' && r.status !== 'pending' && <Muted size={12}>{pt('ctGuardianNote')}</Muted>}
+              {r.type === 'contact' && r.status === 'pending' && <Muted size={12}>{pt('ctReplyNote')}</Muted>}
+            </Disclosure>
           </Card>
         ))}
 
@@ -368,7 +371,7 @@ export default function GuardianDashboard() {
                           <Text style={{ color: colors.text, fontSize: 13 }}>{t.orgName}: {t.title} · {t.date}</Text>
                           <Muted size={11.5}>{t.venue} · {t.distanceKm} km away</Muted>
                         </View>
-                        {t.registered ? <Pill label="registered ✓" tone="green" /> : (
+                        {t.registered ? <Pill label="Registered ✓" tone="green" /> : (
                           <Button small primary label="Register" onPress={async () => {
                             try {
                               await client.guardianRegisterOpenTrial(guardianId!, t.id, c.id);
@@ -399,7 +402,7 @@ export default function GuardianDashboard() {
                   />
                 </Row>
                 <View style={{ gap: 6 }}>
-                  <Muted size={12.5}>⭐ Request a coach reference for {c.name.split(' ')[0]} — the coach confirms by email.</Muted>
+                  <Muted size={12.5}>Request a coach reference for {c.name.split(' ')[0]} — the coach confirms by email.</Muted>
                   <Row>
                     <TextInput
                       style={[styles.input, { flex: 1 }]}
@@ -462,7 +465,7 @@ export default function GuardianDashboard() {
           </Muted>
           {(guardian as (typeof guardian & { coGuardians?: { id: string; name: string; email: string }[] }) | null)?.coGuardians?.map((co) => (
             <Row key={co.id}>
-              <Pill label="co-guardian" tone="blue" />
+              <Pill label="Co-guardian" tone="blue" />
               <Text style={{ color: colors.text, fontSize: 13.5 }}>{co.name} · {co.email}</Text>
             </Row>
           ))}
@@ -549,36 +552,31 @@ export default function GuardianDashboard() {
           {exportPreview && <Text style={styles.exportPreview} numberOfLines={30}>{exportPreview}…</Text>}
         </Card>
 
-        <SectionTitle>Communications log</SectionTitle>
-        <Card>
-          <Muted size={13}>Every scouting action around your children is logged and visible to you.</Muted>
-          <Button small label={showLog ? 'Hide log' : `Show log`} onPress={() => setShowLog(!showLog)} />
-          {showLog && log.map((l) => (
-            <Row key={l.id}>
-              <Pill label={new Date(l.ts).toLocaleDateString()} />
-              <Text style={{ color: colors.text, fontSize: 12.5, flex: 1 }}>
-                {l.type.replace(/_/g, ' ')} — {l.orgName}{l.scoutName ? ` (${l.scoutName})` : ''}
-              </Text>
-            </Row>
-          ))}
-          {showLog && log.length === 0 && <Muted size={12.5}>Nothing logged yet.</Muted>}
-        </Card>
+        {!(digest && digest.children.length > 0) && (
+          <Disclosure label="Communications log" hint="Every scouting action around your children, logged and visible to you" testID="guardian-log">
+            {log.map((l) => (
+              <View key={l.id} style={styles.logRow}>
+                <Text style={styles.logWhen}>{new Date(l.ts).toLocaleDateString()}</Text>
+                <Text style={styles.logText}>{l.type.replace(/_/g, ' ')} — {l.orgName}{l.scoutName ? ` (${l.scoutName})` : ''}</Text>
+              </View>
+            ))}
+            {log.length === 0 && <Muted size={12.5}>Nothing logged yet.</Muted>}
+          </Disclosure>
+        )}
 
-        <SectionTitle>The rules that protect your child</SectionTitle>
-        {U18_PROMISES.map((p) => (
-          <Card key={p.slice(0, 20)}>
-            <Muted size={13}>{p}</Muted>
-          </Card>
-        ))}
+        <Disclosure label="The rules that protect your child" hint="Our promises to every under-18" testID="guardian-rules">
+          {U18_PROMISES.map((p) => <Muted key={p.slice(0, 20)} size={13}>{p}</Muted>)}
+        </Disclosure>
 
         {/* M24E — the way out. Sign out ends this identity's session on the
             server and on the device and returns to the entry screen; Switch
             account does the same and opens the entry screen on Sign in, so the
             next person signs in as themselves — no identity carries over. */}
-        <View style={{ gap: 8, marginTop: 8 }}>
-          <Button label="Sign out" testID="sign-out" onPress={() => { logout(); router.replace('/onboarding'); }} />
-          <Button label="Switch account" testID="switch-account" onPress={() => { logout(); router.replace('/onboarding?mode=signin'); }} />
+        <View style={{ marginTop: 18 }}>
+          <ListRow label="Switch account" value="Sign in as someone else on this device" icon="users" testID="switch-account" onPress={() => { logout(); router.replace('/onboarding?mode=signin'); }} />
+          <ListRow label="Sign out" icon="log-out" testID="sign-out" onPress={() => { logout(); router.replace('/onboarding'); }} />
         </View>
+        <Text style={styles.env}>{mode === 'live' ? 'Live — connected to scoutbox-server' : 'Demo — self-contained sample data'}</Text>
 
         {guardianId ? (
           <>
@@ -617,9 +615,18 @@ export default function GuardianDashboard() {
 
 const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  scroll: { paddingHorizontal: 18, paddingTop: 12, paddingBottom: 24, gap: 10 },
-  h1: { color: colors.text, fontSize: 26, fontWeight: '800', marginTop: 6 },
-  org: { color: colors.text, fontSize: 16, fontWeight: '700' },
+  scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 32, gap: 0 },
+  h1: { color: colors.text, fontSize: 26, fontWeight: '700', letterSpacing: -0.6, marginTop: 6 },
+  who: { paddingTop: 10, paddingBottom: 6, gap: 2 },
+  whoName: { color: colors.text, fontSize: 22, fontWeight: '700', letterSpacing: -0.5 },
+  whoLine: { color: colors.muted, fontSize: 13, lineHeight: 19 },
+  digest: { gap: 6 },
+  digestLine: { color: colors.text, fontSize: 14, lineHeight: 21 },
+  logRow: { flexDirection: 'row', gap: 12, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.line },
+  logWhen: { width: 80, color: colors.muted, fontSize: 12, lineHeight: 18 },
+  logText: { flex: 1, color: colors.muted, fontSize: 13, lineHeight: 18 },
+  env: { color: colors.muted, fontSize: 11.5, marginTop: 24, textAlign: 'center' },
+  org: { color: colors.text, fontSize: 19, fontWeight: '600', letterSpacing: -0.4 },
   subject: { color: colors.text, fontSize: 15, fontWeight: '700' },
   msg: { color: colors.text, fontSize: 14, fontStyle: 'italic', lineHeight: 20 },
   label: { color: colors.text, fontSize: 13, fontWeight: '600' },

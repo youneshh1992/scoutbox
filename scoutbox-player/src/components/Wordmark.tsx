@@ -1,7 +1,7 @@
 // The one ScoutBox wordmark: "ScoutBox" in Albert Sans ExtraBold (the brand
 // mark — M24E keeps it when everything else moved to Inter), the brand green
-// square drawn as a box on the baseline (never the ▪ glyph, which the font
-// centres on the x-height), and the ™ raised beside it. Used by the Player's
+// square drawn as a box on the baseline (never the small-square glyph, which the font
+// centres on the x-height), and the TM raised beside it. Used by the Player's
 // Home header and its entry screen; the portals draw the same mark in CSS
 // (`.wordmark` on `--sb-font-brand`, `.wordmark::after` + `.tm`).
 import { StyleSheet, View } from 'react-native';
