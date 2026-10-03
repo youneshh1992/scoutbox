@@ -107,7 +107,7 @@ export function M13Panel({ tab, adminKey, say }: { tab: M13Tab; adminKey: string
         {reps.map((r) => (
           <div key={r.id} className="list-row">
             <span className="grow">
-              <b>{r.playerName}</b> ↔ {r.agencyName} <span className="dim">({r.representativeName} · {r.scope.replace(/_/g, ' ')})</span>
+              <b>{r.playerName}</b> — {r.agencyName} <span className="dim">({r.representativeName} · {r.scope.replace(/_/g, ' ')})</span>
               {r.credential && <div className="dim" style={{ fontSize: 12 }}>{r.credential.note} — {r.credential.reviewStatus.replace(/_/g, ' ')}. {r.credential.honest}</div>}
             </span>
             <span className={`pill ${r.status === 'active' ? 'green' : r.status === 'disputed' || r.status === 'withdrawn' ? 'red' : ''}`}>{r.status}</span>

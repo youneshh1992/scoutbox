@@ -1,6 +1,6 @@
 // M16.2 demo mirror (org side) — a SELF-CONTAINED Trust Profile fixture.
 //
-// ⚠ Circular-import discipline (the exact bug that crashed the M16.1 bundle):
+// NOTE — circular-import discipline (the exact bug that crashed the M16.1 bundle):
 // trustApi imports this module, so this module takes only TYPES from trustApi
 // (`import type`, erased at build time). It never reads a runtime binding from
 // trustApi, and it never calls an imported value at module-load time. Every

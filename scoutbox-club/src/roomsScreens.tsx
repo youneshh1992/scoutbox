@@ -16,6 +16,7 @@
 //     is a word, a missing measurement is blank and never zero, and a decision
 //     is a human judgement recorded with structured reasons.
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Icon } from '../../design-system/icons';
 import { ApiError, type Session } from './api';
 import { ConflictNotice, conflictOf, type Conflict } from './conflict';
 import { confirmDestructive, DESTRUCTIVE_ACTIONS } from './confirmAction';
@@ -184,7 +185,7 @@ function RoomsList({ session, tick, onOpenRoom }: RoomsScreenProps) {
   return (
     <div>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 4 }}>{t('rm.intro')}</div>
-      <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}>🔒 {t('rm.privacy')}</div>
+      <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}><Icon name="lock-keyhole" size={13} /> {t('rm.privacy')}</div>
 
       {/* Funnel strip — your organisation's own activity, no league table. */}
       <div className="stat-grid" aria-label={t('rm.funnel')} style={{ marginBottom: 10 }}>
@@ -405,7 +406,7 @@ function RoomBody({ session, room, tick, notify, reload, staff, openPlayer, tab,
         {tab === 'past-signings' && <PastSigningsPanel {...casePanel} />}
       </div>
 
-      <div className="dim" style={{ fontSize: 12, marginTop: 10 }}>🔒 {room.privacyNote}</div>
+      <div className="dim" style={{ fontSize: 12, marginTop: 10 }}><Icon name="lock-keyhole" size={13} /> {room.privacyNote}</div>
     </div>
   );
 }

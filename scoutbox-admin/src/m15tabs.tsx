@@ -4,6 +4,7 @@
 // instantly), and the source-graph inspector that shows exactly which
 // underlying record produced each passport item.
 import { useCallback, useEffect, useState } from 'react';
+import { Icon } from '../../design-system/icons';
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000';
 const DEMO = import.meta.env.VITE_DEMO === '1';
@@ -130,7 +131,7 @@ export function M15Panel({ adminKey, say }: { tab: M15Tab; adminKey: string; say
             <span className="dim"> by {s.createdBy} · {s.views} views · expires {new Date(s.expiresAt).toLocaleDateString()}</span>
           </span>
           {s.revokedAt
-            ? <span className="pill red">revoked</span>
+            ? <span className="pill red">Revoked</span>
             : <button onClick={() => act(() => post(adminKey, `/admin/passport/shares/${s.id}/revoke`, {}), 'Share revoked — the link is dead now.')}>Kill link</button>}
         </div>
       ))}
@@ -157,7 +158,7 @@ export function M15Panel({ adminKey, say }: { tab: M15Tab; adminKey: string; say
             </div>
           ))}
           {graph.temporalConflicts.map((tc, i) => (
-            <div key={i} className="notice" style={{ fontSize: 12.5 }}>⏱ {tc.code} · {tc.kind} · {tc.eventId ?? tc.key ?? ''}</div>
+            <div key={i} className="notice" style={{ fontSize: 12.5 }}><Icon name="timer" size={13} /> {tc.code} · {tc.kind} · {tc.eventId ?? tc.key ?? ''}</div>
           ))}
           {graph.graph.map((g) => (
             <div key={g.id} className="list-row">

@@ -1,7 +1,7 @@
 // M18 demo mirror (org side) — a SELF-CONTAINED Second Look / Nobody Missed /
 // Recruitment Briefs fixture.
 //
-// ⚠ Circular-import discipline (the exact bug that crashed the M16.1 bundle):
+// NOTE — circular-import discipline (the exact bug that crashed the M16.1 bundle):
 // m18Api imports this module, so this module takes only TYPES from m18Api
 // (`import type`, erased at build time). It never reads a runtime binding from
 // m18Api, and it never calls an imported value at module-load time. Every

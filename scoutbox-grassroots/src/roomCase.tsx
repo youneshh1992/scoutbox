@@ -7,6 +7,7 @@
 // document is listed where it lives, a previous Offer is the Offer record
 // read back, the timeline is the server's journey history.
 import { useCallback, useEffect, useState, type DependencyList } from 'react';
+import { Icon } from '../../design-system/icons';
 import { ApiError, api, type Session, type Channel } from './api';
 import {
   rooms, ROOM_TASK_STATES,
@@ -154,7 +155,7 @@ export function TasksPanel({ session, room, notify, reload, staff, journey, open
           <div className="list-rows">
             <div className="list-row" style={{ flexWrap: 'wrap' }} data-next={na.code} data-kind={na.kind}>
               <span className="grow">
-                {na.kind === 'await' && <span aria-hidden="true">⏳ </span>}
+                {na.kind === 'await' && <Icon name="clock" size={13} label="waiting" />}
                 {na.kind === 'none' && <span aria-hidden="true">■ </span>}
                 <b>{nextActionLabel(na.code)}</b>
                 {na.kind === 'await' && <span className="dim"> · {t('rm.tasksAwait')}</span>}

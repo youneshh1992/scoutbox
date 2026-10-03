@@ -12,6 +12,7 @@
 // What never appears here: an "accept for the player" control, a signing
 // control, a fee, a negotiation, the decision's rationale, an assessment.
 import { useCallback, useEffect, useState } from 'react';
+import { Icon } from '../../design-system/icons';
 import { ApiError, type Session } from './api';
 import { confirmDestructive, DESTRUCTIVE_ACTIONS } from './confirmAction';
 import { rooms, type Room, type OfferSurface, type OfferClubView, type OfferRevisionView, type OfferStatus, type OfferHistoryItem } from './roomsApi';
@@ -26,7 +27,7 @@ interface Props {
 
 const statusLabel = (s: string) => t(`rm.st.${s}`, s.replace(/_/g, ' '));
 /** Text + a glyph for every Offer status — never colour alone (§44). */
-export const OFFER_GLYPH: Record<OfferStatus, string> = { DRAFT: '○', ISSUED: '➤', ACCEPTED: '✓', DECLINED: '✕', WITHDRAWN: '⊘', EXPIRED: '⌛', SUPERSEDED: '↻' };
+export const OFFER_GLYPH: Record<OfferStatus, string> = { DRAFT: '○', ISSUED: '➤', ACCEPTED: '✓', DECLINED: '✕', WITHDRAWN: '⊘', EXPIRED: '◷', SUPERSEDED: '↻' };
 export const offerStatusLabel = (s: OfferStatus | null) => (s ? `${OFFER_GLYPH[s] ?? ''} ${t(`of.st.${s}`, s)}` : '');
 
 export function offerErrMessage(e: unknown): string {
@@ -292,9 +293,9 @@ function RevisionCard({ r, responses }: { r: OfferRevisionView; responses: Offer
       {r.terms.conditions && <div className="dim" style={{ fontSize: 12.5 }}>{r.terms.conditions}</div>}
       <div className="dim" style={{ fontSize: 12.5 }}>{t('of.expires')}: {r.expiresAt ? fmtDateTime(r.expiresAt) : t('of.noExpiry')}{r.documents.length ? ` · ${t('of.documents').replace('{n}', String(r.documents.length))}` : ''}</div>
       {r.recipientMessage && <div className="dim" style={{ fontSize: 12.5 }}>“{r.recipientMessage}”</div>}
-      {r.internalNote && <div className="dim" style={{ fontSize: 12.5 }} data-testid="offer-note">🔒 {r.internalNote}</div>}
+      {r.internalNote && <div className="dim" style={{ fontSize: 12.5 }} data-testid="offer-note"><Icon name="lock-keyhole" size={13} /> {r.internalNote}</div>}
       {resp && <div style={{ fontSize: 12.5, marginTop: 4 }} data-testid="offer-response">{resp.responseType === 'accepted' ? t('of.respAccepted') : t('of.respDeclined')} · {t(`of.who.${resp.actorType}`)} · {fmtDateTime(resp.occurredAt)}{resp.reason ? ` · “${resp.reason}”` : ''}</div>}
-      {r.withdrawnAt && <div className="dim" style={{ fontSize: 12.5 }}>{t('of.withdrawnAt')} {fmtDateTime(r.withdrawnAt)}{r.withdrawReason ? ` · 🔒 ${r.withdrawReason}` : ''}</div>}
+      {r.withdrawnAt && <div className="dim" style={{ fontSize: 12.5 }}>{t('of.withdrawnAt')} {fmtDateTime(r.withdrawnAt)}{r.withdrawReason ? ` · ${r.withdrawReason}` : ''}</div>}
       {r.supersededByRevisionId && <div className="dim" style={{ fontSize: 12 }}>{t('of.supersededBy')}</div>}
       {r.readiness && <div className="dim" style={{ fontSize: 12 }}>{t('of.transactionChecked')}</div>}
     </div>

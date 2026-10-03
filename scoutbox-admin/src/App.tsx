@@ -17,6 +17,9 @@ import { M162Panel, M162_TABS, type M162Tab } from './m162tabs';
 import { M25Panel, M25_TABS, type M25Tab } from './m25tabs';
 import { ADMIN_NAV_GROUPS, type AdminNavTab } from './navGroups';
 
+// M24F — presentation casing for status labels; the data value is never changed.
+const cap = (v: string | null | undefined) => (v ? v.charAt(0).toUpperCase() + v.slice(1).replace(/_/g, ' ') : '');
+
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000';
 const DEMO = import.meta.env.VITE_DEMO === '1';
 
@@ -387,10 +390,10 @@ export default function App() {
                 <div key={r.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
                   <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                     {r.urgent && <span className="pill red">URGENT — comms suspended</span>}
-                    <span className="pill">{r.targetKind}</span>
+                    <span className="pill">{cap(r.targetKind)}</span>
                     <span className="grow"><b>{r.reason}</b></span>
                     <span className="dim">by {r.by} · {new Date(r.ts).toLocaleString()}</span>
-                    <span className={`pill ${r.status === 'pending_review' ? 'gold' : 'green'}`}>{r.status === 'pending_review' ? 'awaiting review' : 'resolved'}</span>
+                    <span className={`pill ${r.status === 'pending_review' ? 'gold' : 'green'}`}>{r.status === 'pending_review' ? 'Awaiting review' : 'Resolved'}</span>
                   </div>
                   <div className="dim">
                     target: {r.targetOrgId ?? r.targetPlayerId ?? '—'}{r.targetScoutName ? ` · scout: ${r.targetScoutName}` : ''}
@@ -423,8 +426,8 @@ export default function App() {
                   <span className="grow">
                     <b>{c.name}</b> <span className="dim">({c.type} · {c.plan}{c.verifiedDomain ? ` · @${c.verifiedDomain}` : ''})</span>
                   </span>
-                  {c.suspended && <span className="pill red">suspended</span>}
-                  {c.safeguardingCertified && <span className="pill green">certified</span>}
+                  {c.suspended && <span className="pill red">Suspended</span>}
+                  {c.safeguardingCertified && <span className="pill green">Certified</span>}
                   <label className="chk"><input type="checkbox" checked={c.verified} onChange={(e) => setClubVerification(c, { verified: e.target.checked })} /> verified</label>
                   <label className="chk"><input type="checkbox" checked={c.safeguardingContractSigned} onChange={(e) => setClubVerification(c, { safeguardingContractSigned: e.target.checked })} /> contract</label>
                   <label className="chk"><input type="checkbox" checked={!!c.suspended} onChange={(e) => setClubVerification(c, { suspended: e.target.checked })} /> suspend</label>
@@ -440,7 +443,7 @@ export default function App() {
                 {guardians.map((g) => (
                   <div key={g.id} className="list-row">
                     <span className="grow"><b>{g.name}</b> <span className="dim">{g.email} · {g.childIds.length} child{g.childIds.length === 1 ? '' : 'ren'}</span></span>
-                    <span className={`pill ${g.idVerified ? 'green' : 'red'}`}>{g.idVerified ? 'ID verified' : 'unverified'}</span>
+                    <span className={`pill ${g.idVerified ? 'green' : 'red'}`}>{g.idVerified ? 'ID verified' : 'Unverified'}</span>
                     <button onClick={() => setIdv(g, !g.idVerified)}>{g.idVerified ? 'Revoke' : 'Approve'}</button>
                   </div>
                 ))}
@@ -462,7 +465,7 @@ export default function App() {
               {blocks.length === 0 && <div className="notice">No active blocks or suspensions.</div>}
               {blocks.map((b) => (
                 <div key={b.id} className="list-row">
-                  <span className="pill red">{b.reason === 'suspended_pending_review' ? 'suspension' : 'block'}</span>
+                  <span className="pill red">{b.reason === 'suspended_pending_review' ? 'Suspension' : 'Block'}</span>
                   <span className="grow">{b.orgId} → {b.playerId}</span>
                   <span className="dim">by {b.by} · {new Date(b.ts).toLocaleString()}</span>
                   <button onClick={() => liftBlock(b)}>Lift</button>
@@ -479,8 +482,8 @@ export default function App() {
                   <tr key={m.id}>
                     <td>{new Date(m.ts).toLocaleString()}</td>
                     <td>{m.context?.kind ?? '—'}</td>
-                    <td>{m.severity === 'grooming' ? <span className="pill red">GROOMING — escalated</span> : <span className="pill">{m.severity ?? 'contact'}</span>}</td>
-                    <td>{m.flags.map((f) => <span key={f} className="pill red" style={{ marginRight: 4 }}>{f.replace(/_/g, ' ')}</span>)}</td>
+                    <td>{m.severity === 'grooming' ? <span className="pill red">GROOMING — escalated</span> : <span className="pill">{cap(m.severity ?? 'contact')}</span>}</td>
+                    <td>{m.flags.map((f) => <span key={f} className="pill red" style={{ marginRight: 4 }}>{cap(f)}</span>)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -496,7 +499,7 @@ export default function App() {
                   <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                     <span className="grow"><b>{m.subject}</b></span>
                     <span className="dim">to {m.to}</span>
-                    <span className={`pill ${m.delivered ? 'green' : 'gold'}`}>{m.delivered ? 'delivered' : m.transport}</span>
+                    <span className={`pill ${m.delivered ? 'green' : 'gold'}`}>{m.delivered ? 'Delivered' : cap(m.transport)}</span>
                     <span className="dim">{new Date(m.ts).toLocaleString()}</span>
                   </div>
                   <div className="dim" style={{ whiteSpace: 'pre-wrap' }}>{m.text}</div>
@@ -513,7 +516,7 @@ export default function App() {
                 <div key={i.id} className="list-row">
                   <span className="grow"><b>{i.orgName ?? ''}</b> <span className="dim">{i.description}</span></span>
                   <span className="pill gold">€{i.amount}</span>
-                  <span className="pill">{i.status}</span>
+                  <span className="pill">{cap(i.status)}</span>
                   <span className="pill blue">{i.provider}</span>
                   <span className="dim">{new Date(i.ts).toLocaleDateString()}</span>
                 </div>
@@ -527,7 +530,7 @@ export default function App() {
               {threads.map((t) => (
                 <div key={t.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
                   <div style={{ display: 'flex', gap: 10, alignItems: 'center', cursor: 'pointer' }} role="button" tabIndex={0} aria-expanded={openThread === t.id} onClick={() => setOpenThread(openThread === t.id ? null : t.id)} onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setOpenThread(openThread === t.id ? null : t.id); } }} /* PRE-M24 (PM-14): keyboard-operable */>
-                    <span className="grow"><b>{t.orgName}</b> ↔ {t.counterparty === 'guardian' ? `guardian of ${t.playerName}` : t.playerName}</span>
+                    <span className="grow"><b>{t.orgName}</b> — {t.counterparty === 'guardian' ? `guardian of ${t.playerName}` : t.playerName}</span>
                     <span className="dim">{t.scoutRole} — {t.scoutName}</span>
                     <span className="pill">{t.messages.length} msg</span>
                   </div>

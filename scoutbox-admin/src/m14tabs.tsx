@@ -4,6 +4,7 @@
 // decision requires a written reason (audited server-side). VITE_DEMO=1 runs
 // on canned rows that mirror the honest server labels.
 import { useCallback, useEffect, useState } from 'react';
+import { Icon } from '../../design-system/icons';
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000';
 const DEMO = import.meta.env.VITE_DEMO === '1';
@@ -103,7 +104,7 @@ export function M14Panel({ tab, adminKey, say }: { tab: M14Tab; adminKey: string
             <span className="grow">
               <b>{c.subject.name}</b> — {c.claimType.replace(/_/g, ' ').toLowerCase()}{c.role ? ` (${c.role})` : ''}
               {c.organisation && <span className="dim"> · {c.organisation.name} [{c.organisation.status}]</span>}
-              <div className="dim" style={{ fontSize: 12 }}>why human: {c.reviewReasons.join(', ') || '—'}{c.riskFlags.length > 0 && <> · ⚠ {c.riskFlags.join(', ')} (signals, not fraud)</>}</div>
+              <div className="dim" style={{ fontSize: 12 }}>why human: {c.reviewReasons.join(', ') || '—'}{c.riskFlags.length > 0 && <> · <Icon name="triangle-alert" size={12} /> {c.riskFlags.join(', ')} (signals, not fraud)</>}</div>
             </span>
             <ReasonButton primary label="Approve" prompt="Reason for approval (audited):" onGo={(reason) => act(() => post(adminKey, `/admin/verification/claims/${c.id}/approve`, { reason }), 'Approved with reason.')} />
             <ReasonButton label="More evidence" prompt="What additional evidence is needed?" onGo={(reason) => act(() => post(adminKey, `/admin/verification/claims/${c.id}/request-info`, { reason }), 'Evidence requested.')} />
@@ -124,7 +125,7 @@ export function M14Panel({ tab, adminKey, say }: { tab: M14Tab; adminKey: string
               <b>{r.orgName}</b> <span className="pill blue">{r.orgType}</span> <span className="dim">{r.country} · {r.website}</span>
               <div className="dim" style={{ fontSize: 12 }}>applicant: {r.applicantName} ({r.applicantRole}) · {r.workEmail} {r.emailProved ? '✓ mailbox proved' : '○ mailbox unproved'}{r.federation ? ` · federation: ${r.federation}` : ''}</div>
               <div className="dim" style={{ fontSize: 12 }}>checks: {Object.entries(r.checks).map(([k, v]) => `${k}=${v}`).join(' · ')}</div>
-              {r.riskFlags.length > 0 && <div className="dim" style={{ fontSize: 12 }}>⚠ {r.riskFlags.join(', ')} (signals)</div>}
+              {r.riskFlags.length > 0 && <div className="dim" style={{ fontSize: 12 }}><Icon name="triangle-alert" size={12} /> {r.riskFlags.join(', ')} (signals)</div>}
             </span>
             {r.status === 'requires_human_review' && (
               <>
@@ -148,7 +149,7 @@ export function M14Panel({ tab, adminKey, say }: { tab: M14Tab; adminKey: string
         {queue.suspended.length > 0 && <h3>Suspended claims ({queue.suspended.length})</h3>}
         {queue.suspended.map((c) => (
           <div key={c.id} className="list-row">
-            <span className="grow"><b>{c.subject.name}</b> — {c.claimType.replace(/_/g, ' ').toLowerCase()} <span className="pill red">suspended</span></span>
+            <span className="grow"><b>{c.subject.name}</b> — {c.claimType.replace(/_/g, ' ').toLowerCase()} <span className="pill red">Suspended</span></span>
             <ReasonButton label="Reinstate" prompt="Reason for reinstatement:" onGo={(reason) => act(() => post(adminKey, `/admin/verification/claims/${c.id}/reinstate`, { reason }), 'Reinstated.')} />
             <ReasonButton label="Revoke" prompt="Reason for revocation:" onGo={(reason) => act(() => post(adminKey, `/admin/verification/claims/${c.id}/revoke`, { reason }), 'Revoked (history preserved).')} />
           </div>
@@ -160,7 +161,7 @@ export function M14Panel({ tab, adminKey, say }: { tab: M14Tab; adminKey: string
         ))}
         {queue.recentlyRevoked.length > 0 && <h3>Recently revoked ({queue.recentlyRevoked.length})</h3>}
         {queue.recentlyRevoked.map((c) => (
-          <div key={c.id} className="list-row"><span className="grow"><b>{c.subject.name}</b> — {c.claimType.replace(/_/g, ' ').toLowerCase()} <span className="pill red">revoked</span></span></div>
+          <div key={c.id} className="list-row"><span className="grow"><b>{c.subject.name}</b> — {c.claimType.replace(/_/g, ' ').toLowerCase()} <span className="pill red">Revoked</span></span></div>
         ))}
       </div>
     );

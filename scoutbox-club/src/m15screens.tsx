@@ -5,6 +5,7 @@
 // grassroots radius, blocks). A share link locates a passport; it never
 // authorises — the same gates run again on resolution.
 import { useEffect, useState } from 'react';
+import { Icon } from '../../design-system/icons';
 import { ApiError, type Session } from './api';
 import { m15, shareTokenFrom, type FpEvent, type FpSummary, type RecruitmentPassport } from './m15api';
 import { t } from './i18n';
@@ -50,7 +51,7 @@ function eventLine(e: FpEvent): string {
     case 'role_or_squad_changed': return `${t('fp.evRole')}${org ? ` — ${org}` : ''}`;
     case 'representation_started': return `${t('fp.evRepStart')} — ${org}`;
     case 'representation_ended': return `${t('fp.evRepEnd')} — ${org}`;
-    case 'achievement': return `🏅 ${(e.title as { label?: string }).label ?? ''}`;
+    case 'achievement': return `${(e.title as { label?: string }).label ?? ''}`;
     case 'position_change': return `${t('fp.evPosition')}: ${(e.title as { primary?: string }).primary ?? ''}`;
     default: return e.type.replace(/_/g, ' ');
   }
@@ -134,7 +135,7 @@ export function PassportBody({ session, p, notify, reload }: { session: Session;
           <div className="list-rows">
             {p.achievements.map((a) => (
               <div key={a.id} className="list-row">
-                <span className="grow">🏅 {a.title}{a.when ? ` (${a.when})` : ''}</span>
+                <span className="grow"><Icon name="trophy" size={13} /> {a.title}{a.when ? ` (${a.when})` : ''}</span>
                 <ProvPill provenance={a.provenance} copy={a.provenanceCopy} />
                 {!a.confirmedBy && reload && (
                   <button aria-label={`${t('fp.confirm')} ${a.title}`} onClick={async () => {

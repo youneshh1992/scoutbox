@@ -354,7 +354,7 @@ export function M25Panel({ tab, say }: { tab: M25Tab; adminKey: string; say: (t:
   const who = (
     <div className="list-row" data-testid="reviewer-who">
       <span className="grow"><b>{me.name}</b> <span className="dim">· {ROLE_LABEL[me.role]} · {me.id}</span></span>
-      <span className="pill green">authenticated reviewer</span>
+      <span className="pill green">Authenticated reviewer</span>
       <button onClick={signOut}>Sign out</button>
     </div>
   );

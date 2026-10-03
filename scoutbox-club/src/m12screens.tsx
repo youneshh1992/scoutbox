@@ -4,6 +4,7 @@
 // Accessibility: every interactive control carries a label, status changes
 // announce via aria-live, and everything operates by keyboard.
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Icon } from '../../design-system/icons';
 import { api, type Session } from './api';
 import {
   m12, type Assessment, type AssessmentRating, type CaseRec, type Campaign,
@@ -39,16 +40,16 @@ export function PassportPanel({ session, playerId, notify }: { session: Session;
     <div className="section" aria-label={t('passport.title')}>
       <h3>{t('passport.title')}</h3>
       <div className="notice" style={{ fontSize: 12.5 }}>{pp.summary.note}</div>
-      {pp.summary.insufficient && <div className="notice block">⚠️ {t('passport.insufficient')}</div>}
+      {pp.summary.insufficient && <div className="notice block"><Icon name="triangle-alert" size={14} /> {t('passport.insufficient')}</div>}
       <div className="list-rows">
         {pp.records.map((r) => (
           <div key={r.id} className="list-row" style={{ opacity: r.superseded ? 0.55 : 1 }}>
             <span className="grow">
               <b>{r.label}</b>{r.value != null && <> — {String(r.value)}{r.units ? ` ${r.units}` : ''}</>}
               {r.season && <span className="dim"> · {r.season}</span>}
-              {r.superseded && <span className="pill red" style={{ marginLeft: 6 }}>superseded</span>}
-              {r.correctionOf && <span className="pill" style={{ marginLeft: 6 }}>correction</span>}
-              {(r.openDisputes ?? 0) > 0 && <span className="pill red" style={{ marginLeft: 6 }}>disputed</span>}
+              {r.superseded && <span className="pill red" style={{ marginLeft: 6 }}>Superseded</span>}
+              {r.correctionOf && <span className="pill" style={{ marginLeft: 6 }}>Correction</span>}
+              {(r.openDisputes ?? 0) > 0 && <span className="pill red" style={{ marginLeft: 6 }}>Disputed</span>}
               <div className="dim">
                 {r.verification.status.replace('_', ' ')}{r.verification.method ? ` · ${r.verification.method}` : ''}
                 {r.verification.reviewerName ? ` · by ${r.verification.reviewerName}` : ''} · {r.freshness?.ageDays ?? 0}d old
@@ -56,7 +57,7 @@ export function PassportPanel({ session, playerId, notify }: { session: Session;
             </span>
             {!r.superseded && r.verification.status === 'self_reported' && (
               <button aria-label={`${t('passport.corroborate')} ${r.label}`} onClick={async () => {
-                try { await m12.corroborateEvidence(session, r.id); notify('✅ Corroborated — tier upgraded.'); reload(); }
+                try { await m12.corroborateEvidence(session, r.id); notify('Corroborated — tier upgraded.'); reload(); }
                 catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
               }}>{t('passport.corroborate')}</button>
             )}
@@ -76,7 +77,7 @@ export function PassportPanel({ session, playerId, notify }: { session: Session;
             <span className="grow">
               {l.label}
               {l.conflictOfInterest && <div className="dim">Declared: {l.conflictOfInterest}</div>}
-              {l.caveat && <div className="dim">⚠︎ {l.caveat}</div>}
+              {l.caveat && <div className="dim"><Icon name="triangle-alert" size={12} /> {l.caveat}</div>}
             </span>
             <span className={`pill ${tierPill(l.tier)}`}>{l.tier.replace('_', ' ')}</span>
           </div>
@@ -135,7 +136,7 @@ export function AssessmentsScreen({ session, tick, notify }: ScreenProps) {
                 <div className="dim">{a.context.fixture ?? '—'} · {a.context.viewing ?? ''} {a.context.minutesWatched ? `· ${a.context.minutesWatched} min` : ''}</div>
               </span>
               {draft && a.state === 'draft' && <span className="pill gold">{t('assess.draftSaved')} · {t('assess.pendingSync')}</span>}
-              {a.publishedFeedback && <span className="pill green">feedback published</span>}
+              {a.publishedFeedback && <span className="pill green">Feedback published</span>}
               <span className={`pill ${a.state === 'draft' ? '' : 'blue'}`}>{a.state}</span>
               {a.state === 'draft' ? (
                 <button onClick={() => openEditor(a)}>Edit</button>
@@ -219,7 +220,7 @@ function AssessmentEditor({ session, assessment, notify, onClose }: { session: S
       if (submit) await m12.submitAssessment(session, assessment.id);
       try { localStorage.removeItem(draftKey(session, assessment.id)); } catch { /* fine */ }
       setSaveState('synced');
-      notify(submit ? '✅ Assessment submitted — it is now immutable.' : 'Saved to the server.');
+      notify(submit ? 'Assessment submitted — it is now immutable.' : 'Saved to the server.');
       if (submit) onClose();
     } catch (e) {
       notify(`${e instanceof Error ? e.message : 'Failed'} — ${t('assess.draftSaved')}.`, true);
@@ -234,7 +235,7 @@ function AssessmentEditor({ session, assessment, notify, onClose }: { session: S
         </span>
         <button onClick={onClose} style={{ float: 'right' }}>{t('common.close')}</button>
       </h3>
-      {conflict && <div className="notice block">⚠️ {t('assess.conflict')}</div>}
+      {conflict && <div className="notice block"><Icon name="triangle-alert" size={14} /> {t('assess.conflict')}</div>}
       {assessment.attributesSnapshot.map((attr) => {
         const r = ratings.find((x) => x.attrId === attr.id)!;
         return (
@@ -303,8 +304,8 @@ export function RecruitmentScreen({ session, tick, notify, openPlayer }: ScreenP
         <div className="list-rows">
           {(staff ?? []).map((u) => (
             <div key={u.id} className="list-row">
-              <span className="grow"><b>{u.name}</b> · {u.role} {u.lead && <span className="pill gold">lead</span>}</span>
-              {u.removedAt ? <span className="pill red">access removed {fmtDate(u.removedAt)}</span> : u.id !== session.userId && (
+              <span className="grow"><b>{u.name}</b> · {u.role} {u.lead && <span className="pill gold">Lead</span>}</span>
+              {u.removedAt ? <span className="pill red">Access removed {fmtDate(u.removedAt)}</span> : u.id !== session.userId && (
                 <button aria-label={`${t('cases.removeStaff')}: ${u.name}`} onClick={() => confirmDestructive({ ...DESTRUCTIVE_ACTIONS.removeStaff, name: u.name }) && act(() => m12.removeStaff(session, u.id), 'Access revoked — sessions, events and media links are dead.')}>{t('cases.removeStaff')}</button>
               )}
             </div>
@@ -351,7 +352,7 @@ function CaseCard({ c, stages, session, staff, act, openPlayer }: { c: CaseRec; 
           {c.assignments.length > 0 && <div className="dim" style={{ marginTop: 6 }}>{c.assignments.map((a) => `${a.name}: ${a.task}`).join(' · ')}</div>}
           {c.approvals.filter((a) => a.status === 'pending').map((a) => (
             <div key={a.id} className="list-row">
-              <span className="grow">⏳ {a.requestedBy.name} requests <b>{a.decision.outcome}</b>: {a.decision.reasons}</span>
+              <span className="grow"><Icon name="clock" size={13} /> {a.requestedBy.name} requests <b>{a.decision.outcome}</b>: {a.decision.reasons}</span>
               <button onClick={() => act(() => m12.approveCase(session, c.id, a.id, true), 'Approved.')}>Approve</button>
               <button onClick={() => act(() => m12.approveCase(session, c.id, a.id, false), 'Rejected.')}>Reject</button>
             </div>
@@ -409,7 +410,7 @@ export function SquadPlannerScreen({ session, tick, notify }: ScreenProps) {
               <div key={c.playerId} className="list-row" style={{ alignItems: 'flex-start' }}>
                 <span className="grow">
                   <b>{c.name}</b> <span className="dim">{c.position} · {c.age}</span>
-                  {c.caseId && <span className="pill blue" style={{ marginLeft: 6 }}>case open</span>}
+                  {c.caseId && <span className="pill blue" style={{ marginLeft: 6 }}>Case open</span>}
                   <div style={{ fontSize: 12.5, marginTop: 4 }}>
                     {[...c.required, ...c.preferred].map((cr, i) => (
                       <span key={i} className={`pill ${cr.verdict === 'met' ? 'green' : cr.verdict === 'not_met' ? 'red' : ''}`} style={{ marginRight: 4 }} title={cr.source}>
@@ -562,7 +563,7 @@ export function CampaignsScreen({ session, tick, notify }: ScreenProps) {
                   <b>{q.playerName}</b> · {q.attempt.drillName}
                   <div className="dim">{q.attempt.fileChecks.kind}: {q.attempt.fileChecks.passed ? 'passed (file only — drill unvalidated)' : q.attempt.fileChecks.issues.join('; ')}</div>
                 </span>
-                {q.attempt.mediaUrl && api.mediaUrl(q.attempt.mediaUrl) && <a href={api.mediaUrl(q.attempt.mediaUrl)!} target="_blank" rel="noreferrer">▶ view</a>}
+                {q.attempt.mediaUrl && api.mediaUrl(q.attempt.mediaUrl) && <a href={api.mediaUrl(q.attempt.mediaUrl)!} target="_blank" rel="noreferrer">View clip</a>}
                 <button onClick={() => act(() => m12.reviewAttempt(session, q.attempt.id, 'accepted', undefined, 'Meets the rubric.'), 'Accepted.')}>{t('camp.accept')}</button>
                 <button onClick={() => {
                   const reasons = window.prompt('What must they fix, and how do they resubmit?');
@@ -614,7 +615,7 @@ export function VideoScreen({ session, tick, notify, openPlayer }: ScreenProps) 
                 <div className="dim">{s.labels.map((l) => `#${l}`).join(' ')} · {s.createdBy.name} · {fmtDate(s.createdAt)}</div>
               </span>
               <button onClick={() => openPlayer(s.playerId)}>profile</button>
-              <button onClick={() => setPlaying(s)}>▶ play</button>
+              <button onClick={() => setPlaying(s)}>Play</button>
               <select aria-label="Add to playlist" defaultValue="" onChange={async (e) => {
                 if (!e.target.value) return;
                 await m12.addToPlaylist(session, e.target.value, s.id);
@@ -742,7 +743,7 @@ export function TrialDaysScreen({ session, tick, notify }: ScreenProps) {
       </div>
       {day && (
         <div className="section" aria-live="polite">
-          <h3>{day.playerName} · {day.proposedDate ?? 'TBC'} {day.cancelled && <span className="pill red">cancelled</span>}
+          <h3>{day.playerName} · {day.proposedDate ?? 'TBC'} {day.cancelled && <span className="pill red">Cancelled</span>}
             <button style={{ float: 'right' }} onClick={() => setDay(null)}>{t('common.close')}</button></h3>
           <b style={{ fontSize: 13 }}>{t('day.staff')}</b>
           <div className="list-rows">
@@ -765,7 +766,7 @@ export function TrialDaysScreen({ session, tick, notify }: ScreenProps) {
               const address = window.prompt('Arrival address / gate:', day.arrival?.address ?? '');
               if (address != null) act(() => m12.setArrival(session, day.id, { address, time: day.arrival?.time ?? '09:30' }), 'Arrival details published to the family.');
             }}>{t('day.arrival')}</button>
-            <button className="primary" onClick={() => act(() => m12.checkinTrial(session, day.id), '✅ Checked in — attendance recorded once, coach-signed.')}>{t('day.checkin')}</button>
+            <button className="primary" onClick={() => act(() => m12.checkinTrial(session, day.id), 'Checked in — attendance recorded once, coach-signed.')}>{t('day.checkin')}</button>
             <button onClick={() => {
               const reason = window.prompt('Reason (families are notified):');
               const newDate = reason && window.prompt('New date (YYYY-MM-DD):');

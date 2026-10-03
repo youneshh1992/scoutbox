@@ -27,7 +27,7 @@ interface Props {
 
 const statusLabel = (s: string) => t(`rm.st.${s}`, s.replace(/_/g, ' '));
 /** Text + a glyph for every signing status — never colour alone (§96). */
-export const SIGNING_GLYPH: Record<SigningStatus, string> = { DRAFT: '○', READY: '➤', IN_PROGRESS: '◐', COMPLETED: '✓', CANCELLED: '⊘', VOIDED: '⊘', EXPIRED: '⌛', SUPERSEDED: '↻' };
+export const SIGNING_GLYPH: Record<SigningStatus, string> = { DRAFT: '○', READY: '➤', IN_PROGRESS: '◐', COMPLETED: '✓', CANCELLED: '⊘', VOIDED: '⊘', EXPIRED: '◷', SUPERSEDED: '↻' };
 export const signingStatusLabel = (s: SigningStatus | null) => (s ? `${SIGNING_GLYPH[s] ?? ''} ${t(`sg.st.${s}`, s)}` : '');
 
 export function signingErrMessage(e: unknown): string {

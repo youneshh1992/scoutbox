@@ -5,6 +5,7 @@
 // Same conventions as m12screens: labelled controls, honest empty/error
 // states, live/demo through the m13 client.
 import { useEffect, useState } from 'react';
+import { Icon } from '../../design-system/icons';
 import type { Session } from './api';
 import {
   m13, type CalibrationSession, type CoverageAssignment, type EvidenceGap,
@@ -61,7 +62,7 @@ export function ImportsScreen({ session, notify }: ScreenProps) {
             <b>{t('m13.import.dryRunResult')}:</b> {dryRun.batch.summary.creatable} {t('m13.import.creatable')} · {dryRun.batch.summary.errors} {t('m13.import.errors')} · {dryRun.batch.summary.duplicatesInFile + dryRun.batch.summary.alreadyImported} {t('m13.import.duplicates')} · {dryRun.batch.summary.ambiguous} {t('m13.import.ambiguous')}
             {dryRun.batch.rows?.filter((r) => r.errors.length).slice(0, 3).map((r) => <div key={r.row} className="dim">Row {r.row}: {r.errors.join('; ')}</div>)}
             <div><button onClick={async () => {
-              try { const c = await m13.commitImport(session, dryRun.batch.id); notify(`✅ Imported ${c.created} prospects · ${c.reviewsQueued} identity review(s) queued.`); setDryRun(null); reload(); reloadReviews(); }
+              try { const c = await m13.commitImport(session, dryRun.batch.id); notify(`Imported ${c.created} prospects · ${c.reviewsQueued} identity review(s) queued.`); setDryRun(null); reload(); reloadReviews(); }
               catch (e) { notify(e instanceof Error ? e.message : 'failed', true); }
             }}>{t('m13.import.commit')}</button></div>
           </div>
@@ -70,7 +71,7 @@ export function ImportsScreen({ session, notify }: ScreenProps) {
           {(batches ?? []).map((b) => (
             <div key={b.id} className="list-row">
               <span className="grow"><b>{b.id}</b> <span className={`pill ${b.status === 'committed' ? 'green' : b.status === 'reversed' ? 'red' : 'blue'}`}>{b.status}</span> <span className="dim">{b.summary.total} rows · by {b.createdByName} · {fmtDate(b.createdAt)}</span></span>
-              {b.status === 'committed' && <button onClick={async () => { const r = await m13.reverseImport(session, b.id); notify(`↩️ Reversed ${r.removed}; kept ${r.kept.length} changed record(s).`); reload(); }}>{t('m13.import.reverse')}</button>}
+              {b.status === 'committed' && <button onClick={async () => { const r = await m13.reverseImport(session, b.id); notify(`Reversed ${r.removed}; kept ${r.kept.length} changed record(s).`); reload(); }}>{t('m13.import.reverse')}</button>}
             </div>
           ))}
         </div>
@@ -94,7 +95,7 @@ export function ImportsScreen({ session, notify }: ScreenProps) {
         {newKey && <div className="notice block"><code>{newKey}</code> — {t('m13.keys.once')}</div>}
         {(keys?.items ?? []).map((k) => (
           <div key={k.id} className="list-row">
-            <span className="grow"><b>{k.label}</b> <span className="dim">{k.scopes.join(', ')}</span> {k.revokedAt ? <span className="pill red">revoked</span> : <span className="pill green">active</span>}</span>
+            <span className="grow"><b>{k.label}</b> <span className="dim">{k.scopes.join(', ')}</span> {k.revokedAt ? <span className="pill red">Revoked</span> : <span className="pill green">Active</span>}</span>
             {!k.revokedAt && <button onClick={async () => { await m13.revokeApiKey(session, k.id); notify('Key revoked.'); reloadKeys(); }}>{t('m13.keys.revoke')}</button>}
           </div>
         ))}
@@ -114,7 +115,7 @@ export function ImportsScreen({ session, notify }: ScreenProps) {
         <div className="enter-row">
           <input aria-label="Webhook URL" placeholder="https://your-endpoint.example/hook" value={hookUrl} onChange={(e) => setHookUrl(e.target.value)} />
           <button onClick={async () => {
-            try { const r = await m13.createWebhook(session, hookUrl, ['import.committed', 'identity.resolved', 'transition.granted', 'transition.revoked']); setHookSecret(r.endpoint.secret ?? null); setHookUrl(''); reloadHooks(); notify('✅ Endpoint registered.'); }
+            try { const r = await m13.createWebhook(session, hookUrl, ['import.committed', 'identity.resolved', 'transition.granted', 'transition.revoked']); setHookSecret(r.endpoint.secret ?? null); setHookUrl(''); reloadHooks(); notify('Endpoint registered.'); }
             catch (e) { notify(e instanceof Error ? e.message : 'rejected', true); }
           }}>{t('m13.hooks.add')}</button>
         </div>
@@ -151,7 +152,7 @@ export function CoverageScreen({ session, notify }: ScreenProps) {
           <div key={p.id} className="list-row"><span className="grow"><b>{p.label}</b> <span className="dim">{p.competition ?? 'all'} · {p.windowDays}d window</span></span>
             <span className={`pill ${p.progress?.complete ? 'green' : 'blue'}`}>{p.progress?.done ?? 0}/{p.goalObservations}</span></div>
         ))}
-        <button onClick={async () => { await m13.createPlan(session, { label: 'New coverage plan', goalObservations: 5, windowDays: 60 }); reloadPlans(); notify('✅ Plan created.'); }}>{t('m13.cov.newPlan')}</button>
+        <button onClick={async () => { await m13.createPlan(session, { label: 'New coverage plan', goalObservations: 5, windowDays: 60 }); reloadPlans(); notify('Plan created.'); }}>{t('m13.cov.newPlan')}</button>
       </div>
       <div className="section">
         <h3>{t('m13.cov.fixtures')}</h3>
@@ -165,7 +166,7 @@ export function CoverageScreen({ session, notify }: ScreenProps) {
           <input aria-label="Away" placeholder="Away" value={form.away} onChange={(e) => setForm({ ...form, away: e.target.value })} />
           <input aria-label="Date" type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
           <button onClick={async () => {
-            try { await m13.createFixture(session, form); setForm({ home: '', away: '', date: '', competition: '' }); reloadFx(); notify('✅ Fixture added.'); }
+            try { await m13.createFixture(session, form); setForm({ home: '', away: '', date: '', competition: '' }); reloadFx(); notify('Fixture added.'); }
             catch (e) { notify(e instanceof Error ? e.message : 'failed', true); }
           }}>{t('common.create')}</button>
         </div>
@@ -176,12 +177,12 @@ export function CoverageScreen({ session, notify }: ScreenProps) {
           <div key={a.id} className="list-row">
             <span className="grow">
               <b>{a.fixtureLabel}</b> <span className="dim">{a.fixtureDate} · {a.scoutName} · {a.targetPlayerIds.length} target(s){a.travelBudget ? ` · budget ${money(a.travelBudget.amountMinor, a.travelBudget.currency)} (user-entered)` : ''}</span>
-              {a.warnings.map((w) => <div key={w} className="pill red" style={{ marginTop: 4 }}>⚠️ {w}</div>)}
+              {a.warnings.map((w) => <div key={w} className="pill red" style={{ marginTop: 4 }}><Icon name="triangle-alert" size={14} /> {w}</div>)}
               <div className="dim" style={{ fontSize: 11.5 }}>{a.travelNote}</div>
             </span>
             {a.observedAt
-              ? <span className="pill green">observed {fmtDate(a.observedAt)}</span>
-              : <button onClick={async () => { await m13.completeAssignment(session, a.id); reloadAsg(); reloadPlans(); notify('✅ Observation recorded — coverage updated.'); }}>{t('m13.cov.complete')}</button>}
+              ? <span className="pill green">Observed {fmtDate(a.observedAt)}</span>
+              : <button onClick={async () => { await m13.completeAssignment(session, a.id); reloadAsg(); reloadPlans(); notify('Observation recorded — coverage updated.'); }}>{t('m13.cov.complete')}</button>}
           </div>
         ))}
         <div className="enter-row">
@@ -196,7 +197,7 @@ export function CoverageScreen({ session, notify }: ScreenProps) {
           <button onClick={async () => {
             try {
               const r = await m13.createAssignment(session, { fixtureId: asgFixture, scoutUserId: asgScout });
-              notify(r.warnings.length ? `⚠️ ${r.warnings[0]}` : '✅ Assigned.'); reloadAsg();
+              notify(r.warnings.length ? `${r.warnings[0]}` : 'Assigned.'); reloadAsg();
             } catch (e) { notify(e instanceof Error ? e.message : 'failed', true); }
           }}>{t('m13.cov.assign')}</button>
         </div>
@@ -205,7 +206,7 @@ export function CoverageScreen({ session, notify }: ScreenProps) {
         <h3>{t('m13.cov.suggestions')}</h3>
         <div className="notice" style={{ fontSize: 12.5 }}>{suggestions?.note}</div>
         {(suggestions?.items ?? []).map((sg) => (
-          <div key={sg.fixture.id} className="list-row"><span className="grow"><b>{sg.fixture.home} v {sg.fixture.away}</b> <span className="dim">{sg.fixture.date} — {sg.rationale}: {sg.nearbyTargets.map((p) => p.name).join(', ')}</span></span>{sg.alreadyCovered && <span className="pill">covered</span>}</div>
+          <div key={sg.fixture.id} className="list-row"><span className="grow"><b>{sg.fixture.home} v {sg.fixture.away}</b> <span className="dim">{sg.fixture.date} — {sg.rationale}: {sg.nearbyTargets.map((p) => p.name).join(', ')}</span></span>{sg.alreadyCovered && <span className="pill">Covered</span>}</div>
         ))}
         {suggestions?.items.length === 0 && <div className="dim">{t('common.none')}</div>}
       </div>
@@ -243,9 +244,9 @@ export function CalibrationScreen({ session, notify }: ScreenProps) {
       </div>
       {sess && (
         <div className="section" aria-live="polite">
-          <h3>{sess.title} <span className="pill">rubric v{sess.templateVersion} (pinned)</span></h3>
+          <h3>{sess.title} <span className="pill">Rubric v{sess.templateVersion} (pinned)</span></h3>
           {sess.blind && <div className="notice block">{t('m13.cal.blindNote')}</div>}
-          {sess.footageNote && <div className="notice block">⚠️ {sess.footageNote}</div>}
+          {sess.footageNote && <div className="notice block"><Icon name="triangle-alert" size={14} /> {sess.footageNote}</div>}
           {sess.blind ? (
             <div>
               {sess.attributesSnapshot.map((a) => (
@@ -261,7 +262,7 @@ export function CalibrationScreen({ session, notify }: ScreenProps) {
                 try {
                   const rs = Object.entries(ratings).map(([attrId, r]) => ({ attrId, ...r }));
                   if (!rs.length) return notify('Rate at least one attribute.', true);
-                  await m13.submitCalibration(session, sess.id, rs, 'medium'); reloadSess(); notify('✅ Submitted — comparison unlocked for you.');
+                  await m13.submitCalibration(session, sess.id, rs, 'medium'); reloadSess(); notify('Submitted — comparison unlocked for you.');
                 } catch (e) { notify(e instanceof Error ? e.message : 'failed', true); }
               }}>{t('m13.cal.submit')}</button>
             </div>
@@ -313,9 +314,9 @@ export function InsightScreen({ session, notify, openPlayer }: ScreenProps) {
           </div>
           <h3 style={{ marginTop: 12 }}>{t('m13.exp.birthQ')}</h3>
           {report.birthQuarter.suppressed
-            ? <div className="notice block">🔒 {t('m13.exp.suppressed')}</div>
+            ? <div className="notice block"><Icon name="lock-keyhole" size={13} /> {t('m13.exp.suppressed')}</div>
             : <div><div className="list-rows">{Object.entries(report.birthQuarter.quarters ?? {}).map(([q, c]) => <div key={q} className="list-row"><span className="grow">{q}</span><b>{c}</b></div>)}</div><div className="dim" style={{ fontSize: 12 }}>{report.birthQuarter.note}</div></div>}
-          <div className="notice block" style={{ marginTop: 8 }}>ℹ️ {report.absentEvidence.note}</div>
+          <div className="notice block" style={{ marginTop: 8 }}><Icon name="info" size={14} /> {report.absentEvidence.note}</div>
         </div>
       ) : <div className="notice">{t('m13.exp.leadOnly')}</div>}
       <div className="section">
@@ -324,11 +325,11 @@ export function InsightScreen({ session, notify, openPlayer }: ScreenProps) {
           <div key={q.player.id} className="list-row">
             <span className="grow"><b>{q.player.name}</b> <span className="dim">{q.player.position ?? ''} · first seen {q.firstSeenDaysAgo}d ago · no assessment yet</span></span>
             <button onClick={() => openPlayer(q.player.id)}>{t('m13.exp.open')}</button>
-            <button onClick={async () => { await m13.deferReview(session, q.player.id, 7); reloadQueue(); notify('⏰ Deferred 7 days — you will be reminded.'); }}>{t('m13.exp.later')}</button>
+            <button onClick={async () => { await m13.deferReview(session, q.player.id, 7); reloadQueue(); notify('Deferred 7 days — you will be reminded.'); }}>{t('m13.exp.later')}</button>
           </div>
         ))}
         {(queue?.deferred ?? []).map((q) => <div key={q.player.id} className="list-row dim"><span className="grow">{q.player.name} — deferred until {fmtDate(q.deferredUntil)}</span></div>)}
-        {(queue?.staleEvaluations ?? []).map((sEv) => <div key={sEv.playerId} className="list-row"><span className="grow"><b>{sEv.playerName}</b> <span className="pill red">stale</span> <span className="dim">{sEv.note}</span></span></div>)}
+        {(queue?.staleEvaluations ?? []).map((sEv) => <div key={sEv.playerId} className="list-row"><span className="grow"><b>{sEv.playerName}</b> <span className="pill red">Stale</span> <span className="dim">{sEv.note}</span></span></div>)}
       </div>
       <div className="section">
         <h3>{t('m13.exp.rotation')}</h3>
@@ -381,11 +382,11 @@ export function NetworkScreen({ session, notify }: ScreenProps) {
         <h3>{t('m13.grp.title')}</h3>
         {(groups?.invites ?? []).map((iv) => (
           <div key={iv.groupId} className="list-row"><span className="grow">{t('m13.grp.invitedTo')} <b>{iv.name}</b></span>
-            <button onClick={async () => { await m13.acceptGroup(session, iv.groupId); reloadGroups(); notify('✅ Joined — nothing is shared until a specific grant.'); }}>{t('m13.grp.accept')}</button></div>
+            <button onClick={async () => { await m13.acceptGroup(session, iv.groupId); reloadGroups(); notify('Joined — nothing is shared until a specific grant.'); }}>{t('m13.grp.accept')}</button></div>
         ))}
         {(groups?.items ?? []).map((g) => (
           <div key={g.id} className="section" style={{ marginTop: 8 }}>
-            <b>{g.name}</b> {g.youAdmin && <span className="pill gold">admin</span>}
+            <b>{g.name}</b> {g.youAdmin && <span className="pill gold">Admin</span>}
             <div className="dim" style={{ fontSize: 12.5 }}>{g.members.map((mm) => mm.name).join(' · ')}</div>
             {g.programmes.map((p) => <div key={p.id} className="dim" style={{ fontSize: 12.5 }}>{p.name} {p.region ? `(${p.region})` : ''}</div>)}
             <div className="notice" style={{ fontSize: 12, marginTop: 6 }}>{t('m13.grp.isolatedNote')}</div>
@@ -419,7 +420,7 @@ export function NetworkScreen({ session, notify }: ScreenProps) {
         <h3>{t('m13.grp.grants')}</h3>
         {(grants?.given ?? []).map((g) => (
           <div key={g.id} className="list-row">
-            <span className="grow">→ {g.resourceKind} to {g.toOrgIds?.join(', ')} <span className="dim">until {fmtDate(g.expiresAt)}</span> {g.revokedAt ? <span className="pill red">revoked</span> : <span className="pill green">live</span>}</span>
+            <span className="grow">→ {g.resourceKind} to {g.toOrgIds?.join(', ')} <span className="dim">until {fmtDate(g.expiresAt)}</span> {g.revokedAt ? <span className="pill red">Revoked</span> : <span className="pill green">Live</span>}</span>
             {!g.revokedAt && <button onClick={async () => { await m13.revokeGrant(session, g.id); reloadGrants(); notify('Revoked — effective on the very next read.'); }}>{t('m13.grp.revoke')}</button>}
           </div>
         ))}
@@ -487,17 +488,17 @@ export function BudgetsScreen({ session, notify }: ScreenProps) {
               label: 'New scenario', currency: 'GBP', termMonths: 12,
               lines: [{ kind: 'wage', label: 'Weekly wage', amountMinor: 80000, currency: 'GBP', schedule: 'weekly', confirmed: false, conditional: null }],
             });
-            reloadBudget(); notify('✅ Scenario created with a starter wage line — edit the figures.');
+            reloadBudget(); notify('Scenario created with a starter wage line — edit the figures.');
           } catch (e) { notify(e instanceof Error ? e.message : 'failed', true); }
         }}>{t('m13.bud.new')}</button>}
       </div>
-      {budgetErr && <div className="notice block">🔒 {budgetErr}</div>}
+      {budgetErr && <div className="notice block"><Icon name="lock-keyhole" size={13} /> {budgetErr}</div>}
       {(budget?.scenarios ?? []).map((scn: Scenario) => (
         <div key={scn.id} className="section">
           <h3>{scn.label} <span className="pill">v{scn.version}</span> <span className="dim" style={{ fontWeight: 400 }}>{scn.termMonths} months · {scn.currency}</span></h3>
           {scn.lines.map((l) => (
             <div key={l.id ?? l.label} className="list-row">
-              <span className="grow">{l.label} <span className="pill">{l.kind}</span> <span className="dim">{l.schedule.replace('_', ' ')}</span>{l.conditional && <span className="pill" style={{ marginLeft: 4 }}>conditional: {l.conditional.assumption}</span>}</span>
+              <span className="grow">{l.label} <span className="pill">{l.kind}</span> <span className="dim">{l.schedule.replace('_', ' ')}</span>{l.conditional && <span className="pill" style={{ marginLeft: 4 }}>Conditional: {l.conditional.assumption}</span>}</span>
               <b>{money(l.amountMinor, l.currency)}</b>
               <span className={`pill ${l.confirmed ? 'green' : ''}`}>{l.confirmed ? t('m13.bud.confirmed') : t('m13.bud.estimated')}</span>
             </div>
@@ -514,7 +515,7 @@ export function BudgetsScreen({ session, notify }: ScreenProps) {
           <div>
             {scn.approval
               ? <span className={`pill ${scn.approval.superseded ? 'red' : 'green'}`}>{scn.approval.superseded ? t('m13.bud.superseded') : `${t('m13.bud.approvedBy')} ${scn.approval.by} (v${scn.approval.version})`}</span>
-              : <button onClick={async () => { try { await m13.approveScenario(session, caseId, scn.id); reloadBudget(); notify('✅ Approved — attributable to you, for this version only.'); } catch (e) { notify(e instanceof Error ? e.message : 'lead required', true); } }}>{t('m13.bud.approve')}</button>}
+              : <button onClick={async () => { try { await m13.approveScenario(session, caseId, scn.id); reloadBudget(); notify('Approved — attributable to you, for this version only.'); } catch (e) { notify(e instanceof Error ? e.message : 'lead required', true); } }}>{t('m13.bud.approve')}</button>}
             {scn.actuals.length > 0 && <span className="dim" style={{ marginLeft: 8 }}>{scn.actuals.length} actual(s) recorded</span>}
           </div>
         </div>
@@ -575,11 +576,11 @@ export function OrganisationScreen({ session, notify }: ScreenProps) {
       <AuditLogPanel session={session} />
       {awaitingAck.length > 0 && (
         <div className="section" style={{ borderColor: 'var(--red, #c33)' }}>
-          <h3>⚠️ {t('m13.org.needsAck')}</h3>
+          <h3><Icon name="triangle-alert" size={14} /> {t('m13.org.needsAck')}</h3>
           {awaitingAck.map((nn) => (
             <div key={nn.id} className="list-row">
               <span className="grow">{nn.text}{nn.actionRequired?.deadline && <div className="dim" style={{ fontSize: 12 }}>{t('m13.org.ackBy')} {fmtDateTime(nn.actionRequired.deadline)}</div>}</span>
-              <button onClick={async () => { await m13.ackNotification(session, nn.id); reloadNotifs(); notify('✅ Acknowledged.'); }}>{t('m13.org.ack')}</button>
+              <button onClick={async () => { await m13.ackNotification(session, nn.id); reloadNotifs(); notify('Acknowledged.'); }}>{t('m13.org.ack')}</button>
             </div>
           ))}
         </div>
@@ -589,7 +590,7 @@ export function OrganisationScreen({ session, notify }: ScreenProps) {
         <div className="dim" style={{ fontSize: 12.5 }}>{ob?.roleHelp}</div>
         {(ob?.tasks ?? []).map((task) => (
           <div key={task.id} className="list-row">
-            <span className="grow">{task.done ? '✅' : '⬜'} {task.label}<div className="dim" style={{ fontSize: 12 }}>{task.help}</div></span>
+            <span className="grow"><Icon name={task.done ? 'circle-check' : 'clock'} size={13} label={task.done ? 'done' : 'to do'} /> {task.label}<div className="dim" style={{ fontSize: 12 }}>{task.help}</div></span>
           </div>
         ))}
       </div>
@@ -615,7 +616,7 @@ export function OrganisationScreen({ session, notify }: ScreenProps) {
             <div className="enter-row">
               <input aria-label="MFA code" placeholder="123456" value={mfaCode} onChange={(e) => setMfaCode(e.target.value)} maxLength={6} />
               <button onClick={async () => {
-                try { const r = await m13.mfaVerify(session, mfaCode); setRecovery(r.recoveryCodes); notify('✅ MFA enabled.'); }
+                try { const r = await m13.mfaVerify(session, mfaCode); setRecovery(r.recoveryCodes); notify('MFA enabled.'); }
                 catch { notify('That code is not valid.', true); }
               }}>{t('m13.org.verify')}</button>
             </div>
@@ -631,7 +632,7 @@ export function OrganisationScreen({ session, notify }: ScreenProps) {
         <h3>{t('m13.org.sessions')}</h3>
         {(sessions ?? []).map((sr) => (
           <div key={sr.sid} className="list-row">
-            <span className="grow"><code>{sr.sid}</code> <span className="dim">since {fmtDateTime(sr.createdAt)} · via {sr.via}</span> {sr.current && <span className="pill green">this device</span>}</span>
+            <span className="grow"><code>{sr.sid}</code> <span className="dim">since {fmtDateTime(sr.createdAt)} · via {sr.via}</span> {sr.current && <span className="pill green">This device</span>}</span>
             {!sr.current && <button onClick={async () => { await m13.revokeSession(session, sr.sid); reloadSess(); notify('Session revoked.'); }}>{t('m13.org.revoke')}</button>}
           </div>
         ))}
@@ -640,7 +641,7 @@ export function OrganisationScreen({ session, notify }: ScreenProps) {
         <h3>{t('m13.org.sso')}</h3>
         <div className="notice" style={{ fontSize: 12.5 }}>{sso?.config ? `Configured: ${sso.config.issuer} (client ${sso.config.clientId})` : sso?.note}</div>
         {!sso?.config && sso?.available.includes('local-test-idp') && (
-          <button onClick={async () => { try { await m13.setSso(session, 'local-test-idp'); notify('✅ Local TEST IdP configured — this is not a corporate provider.'); } catch (e) { notify(e instanceof Error ? e.message : 'lead required', true); } }}>{t('m13.org.enableTestSso')}</button>
+          <button onClick={async () => { try { await m13.setSso(session, 'local-test-idp'); notify('Local TEST IdP configured — this is not a corporate provider.'); } catch (e) { notify(e instanceof Error ? e.message : 'lead required', true); } }}>{t('m13.org.enableTestSso')}</button>
         )}
       </div>
       <div className="section">

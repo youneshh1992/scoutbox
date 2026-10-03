@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Icon } from '../../design-system/icons';
 import { pressable, useDialog } from './dialog';
 import {
   api, ApiError,
@@ -245,14 +246,12 @@ export function FeedScreen({ session, tick, openPlayer }: ScreenProps) {
       <div className="list-rows">
         {items.map((it, i) => (
           <div key={i} className="list-row" style={{ cursor: 'pointer' }} {...pressable(() => openPlayer(it.playerId))}>
-            <span className={`pill ${it.type === 'report_due' ? 'red' : it.type === 'shortlist_new_clip' ? 'gold' : it.type === 'new_player' ? 'green' : 'blue'}`}>
-              {FEED_LABELS[it.type]}
-            </span>
+            <span className={`feed-kind ${it.type === 'report_due' ? 'urgent' : ''}`}>{FEED_LABELS[it.type]}</span>
             <span className="grow">
               <b>{it.playerName}</b>
               {it.type === 'new_player' && <span className="dim"> — {it.position}, {it.age}{it.guardianManaged ? ' · U18 (guardian-managed)' : ''}</span>}
               {(it.type === 'new_clip' || it.type === 'shortlist_new_clip') && (
-                <span className="dim"> — “{it.title}”{it.verifiedClip ? ' · ✅ Verified Clip' : ''}{it.hasVideo ? ' · playable' : ''}</span>
+                <span className="dim"> — “{it.title}”{it.verifiedClip ? ' · Verified Clip' : ''}{it.hasVideo ? ' · Playable' : ''}</span>
               )}
               {it.type === 'report_due' && <span className="dim"> — mandatory trial report due {it.dueAt ? fmtDate(it.dueAt) : 'soon'}</span>}
             </span>
@@ -329,7 +328,7 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
                 <span className="pill blue">{current.player.position}</span>
                 <span className="pill">{current.player.age}</span>
                 {current.player.guardianManaged && <span className="pill red">U18</span>}
-                {current.media.verifiedClip && <span className="pill green">✅ Verified Clip — filmed at a confirmed fixture</span>}
+                {current.media.verifiedClip && <span className="pill green">Verified Clip — filmed at a confirmed fixture</span>}
               </div>
               <div className="dim">“{current.media.title}” · {current.media.views} view{current.media.views === 1 ? '' : 's'} · {t('term.profileSignal')} {current.player.trustScore}%</div>
               <div className="filmroom-tags">
@@ -572,7 +571,7 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
               {p.guardianManaged && <span className="pill red">U18 · guardian-managed</span>}
               {p.firstTeamSeeker && <span className="pill gold">First Team Seeker</span>}
               {typeof p.distanceKm === 'number' && <span className="pill blue">{p.distanceKm} km away</span>}
-              {p.level === 'semi_pro' && <span className="pill gold">semi-pro</span>}
+              {p.level === 'semi_pro' && <span className="pill gold">Semi-pro</span>}
               {p.identityVerified && <span className="pill outline-green">ID ✓</span>}
               <span className="pill">{AVAILABILITY_LABELS[p.availability] ?? p.availability}</span>
               <span className="pill">{CONTRACT_LABELS[p.contractStatus] ?? p.contractStatus}</span>
@@ -628,7 +627,7 @@ export function RequestsScreen({ session, tick, openPlayer }: ScreenProps) {
             <span className={`pill ${r.status === 'accepted' ? 'green' : r.status === 'declined' || r.status === 'suspended' ? 'red' : ''}`}>
               {r.status === 'pending' && r.routedTo === 'guardian' ? 'awaiting guardian' : r.status}
             </span>
-            {r.status === 'accepted' && r.contactChannel && <span className="pill outline-green">channel open: {r.contactChannel}</span>}
+            {r.status === 'accepted' && r.contactChannel && <span className="pill outline-green">Channel open: {r.contactChannel}</span>}
           </div>
         ))}
       </div>
@@ -728,7 +727,7 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
               {...pressable(() => setOpenId(c.id))}
             >
               <span className="grow">
-                <b>{c.playerName}</b>{c.closed && <span className="pill red" style={{ marginLeft: 6 }}>closed</span>}
+                <b>{c.playerName}</b>{c.closed && <span className="pill red" style={{ marginLeft: 6 }}>Closed</span>}
                 <div className="dim">{c.counterparty === 'guardian' ? 'via guardian' : 'direct'} · {c.messages.length} msg</div>
               </span>
             </div>
@@ -739,7 +738,7 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
             <div className="list-row">
               <span className="grow">
                 <b>{open.playerName}</b>{' '}
-                {open.counterparty === 'guardian' && <span className="pill red">thread is with the guardian</span>}
+                {open.counterparty === 'guardian' && <span className="pill red">Thread is with the guardian</span>}
               </span>
               <span className="dim">opened {fmtDate(open.createdAt)}</span>
             </div>
@@ -755,7 +754,7 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
                     {m.attachment?.kind === 'clip' && (
                       <div style={{ marginTop: 6 }}>
                         <span className="pill blue">{m.attachment.title}</span>{' '}
-                        {m.attachment.verifiedClip && <span className="pill green">✅ Verified Clip</span>}
+                        {m.attachment.verifiedClip && <span className="pill green">Verified Clip</span>}
                         {api.mediaUrl(m.attachment.url) && <video className="clip" style={{ marginTop: 6 }} controls preload="metadata" src={api.mediaUrl(m.attachment.url)!} />}
                       </div>
                     )}
@@ -866,7 +865,7 @@ export function TrialsScreen({ session, tick, notify }: ScreenProps) {
             <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
               <span className="grow">
                 <b>{t.playerName}</b> <span className="dim">requested by {t.scoutName}</span>
-                {t.guardianApproved && <span className="pill red" style={{ marginLeft: 8 }}>guardian approved</span>}
+                {t.guardianApproved && <span className="pill red" style={{ marginLeft: 8 }}>Guardian approved</span>}
                 <div className="dim">
                   {t.proposedDate ? `${t.proposedDate}` : 'date TBC'}{t.venue ? ` · ${t.venue}` : ''}{t.notes ? ` · ${t.notes}` : ''}
                   {t.status === 'awaiting_report' && t.reportDueAt ? ` · report due ${fmtDate(t.reportDueAt)}` : ''}
@@ -1131,8 +1130,8 @@ export function OpenDaysScreen({ session, tick, notify }: ScreenProps) {
                 <div key={r.id} className="list-row" style={{ flexWrap: 'wrap' }}>
                   <span className="grow"><b>{r.playerName}</b> <span className="dim">{r.position ?? ''}{r.age ? ` · ${r.age}` : ''}</span></span>
                   {r.guardianManaged && <span className="pill red">U18 · guardian-managed</span>}
-                  {r.byGuardian && <span className="pill blue">registered by guardian</span>}
-                  {typeof r.trustScore === 'number' && <span className="pill">trust {r.trustScore}</span>}
+                  {r.byGuardian && <span className="pill blue">Registered by guardian</span>}
+                  {typeof r.trustScore === 'number' && <span className="pill">Trust {r.trustScore}</span>}
                   <span className="dim">{fmtDate(r.ts)}</span>
                   {r.outcome ? (
                     <span className={`pill ${r.outcome === 'invite_trial' ? 'green' : ''}`}>
@@ -1213,8 +1212,8 @@ export function SquadScreen({ session, tick, notify, openPlayer }: ScreenProps) 
                   : <b>{e.name}</b>}{' '}
                 <span className="dim">{e.position ?? '—'}</span>
               </span>
-              {e.source === 'signing' && <span className="pill green">signed via ScoutBox</span>}
-              {e.onPlatform ? <span className="pill blue">on platform{typeof e.trustScore === 'number' ? ` · trust ${e.trustScore}` : ''}</span> : <span className="pill">off-platform</span>}
+              {e.source === 'signing' && <span className="pill green">Signed via ScoutBox</span>}
+              {e.onPlatform ? <span className="pill blue">On platform{typeof e.trustScore === 'number' ? ` · trust ${e.trustScore}` : ''}</span> : <span className="pill">Off-platform</span>}
               {releasing === e.id ? (
                 <span style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                   {e.onPlatform && (
@@ -1361,7 +1360,7 @@ export function FriendliesScreen({ session, tick, notify }: ScreenProps) {
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <h4 style={{ margin: 0, flex: 1 }}>{f.orgName} — {f.date}{f.venue ? ` · ${f.venue}` : ''}</h4>
             <span className="pill blue">{f.ageGroup}</span>
-            {f.mine ? <span className="pill gold">your post</span> : <span className="pill">{f.distanceKm} km away</span>}
+            {f.mine ? <span className="pill gold">Your post</span> : <span className="pill">{f.distanceKm} km away</span>}
             <span className="pill">{f.responses.length} response{f.responses.length === 1 ? '' : 's'}</span>
           </div>
           {f.notes && <div className="dim" style={{ marginTop: 6, fontSize: 13 }}>{f.notes}</div>}
@@ -1438,7 +1437,7 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
       )}
       {!session.org.verified && (
         <div className="section">
-          <h4>Federation-route verification {fedFiled ? '— ⏳ with Trust & Safety' : ''}</h4>
+          <h4>Federation-route verification {fedFiled ? '— with Trust & Safety' : ''}</h4>
           {fedFiled ? (
             <div className="notice">
               Filed. Trust & Safety cross-checks the registration with your federation; verification (and,
@@ -1651,13 +1650,13 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
 
             {(player.vouches?.length ?? 0) > 0 && (
               <div className="section">
-                <h4>⭐ Coach references — named, email-verified</h4>
+                <h4>Coach references — named, email-verified</h4>
                 <div className="list-rows">
                   {player.vouches!.map((v) => (
                     <div key={v.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
                       <div style={{ display: 'flex', gap: 10 }}>
                         <span className="grow"><b>{v.coachName}</b> <span className="dim">{v.role}{v.seasons ? ` · ${v.seasons}` : ''}</span></span>
-                        <span className="pill green">verified</span>
+                        <span className="pill green">Verified</span>
                       </div>
                       {v.text && <div className="dim">“{v.text}”</div>}
                     </div>
@@ -1882,7 +1881,7 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                 </div>
               ) : (
                 <div className="notice">
-                  🔒 Medical data is player-controlled under data-protection law. This player has not switched
+                  <Icon name="lock-keyhole" size={13} /> Medical data is player-controlled under data-protection law. This player has not switched
                   sharing on, so nothing is visible to any organisation — including yours.
                 </div>
               )}
@@ -1894,7 +1893,7 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                 <div className="list-rows">
                   {player.drillResults!.map((r) => (
                     <div key={r.id} className="list-row">
-                      {r.verified ? <span className="pill green">verified</span> : <span className="pill">self-reported</span>}
+                      {r.verified ? <span className="pill green">Verified</span> : <span className="pill">Self-reported</span>}
                       <span className="grow">{r.drillName}</span>
                       <span className="dim">{r.metric}: <b style={{ color: 'var(--text)' }}>{r.value}{r.unit}</b> · {fmtDate(r.ts)}</span>
                     </div>
@@ -1920,7 +1919,7 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                   <div key={m.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
                     <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                       <span className="pill blue">{m.kind}</span>
-                      {m.verifiedClip && <span className="pill green">✅ Verified Clip — confirmed fixture</span>}
+                      {m.verifiedClip && <span className="pill green">Verified Clip — confirmed fixture</span>}
                       <span className="grow">{m.title}</span>
                       <span className="dim">{m.views ?? 0} view{(m.views ?? 0) === 1 ? '' : 's'} · {fmtDate(m.uploadedAt)}</span>
                     </div>
@@ -1940,7 +1939,7 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
               <div className="list-rows">
                 {player.similarPlayers.archetypes.map((a) => (
                   <div key={a.archetypeId} className="list-row">
-                    <span className="pill gold">archetype</span>
+                    <span className="pill gold">Archetype</span>
                     <span className="grow">{a.label}</span>
                     <span className="dim">{a.score}% match</span>
                   </div>

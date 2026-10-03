@@ -375,7 +375,7 @@ function ClientList({ rows, onOpen }: { rows: ClientRow[]; onOpen: (id: string) 
         <Section title={t('clients.summaryList')}>
           <div className="list-rows" data-testid="clients-summary">
             {shared.map((r) => (
-              <div key={r.id} className="list-row"><span className="grow"><b>{r.client.name ?? r.clientId}</b>{r.legacy ? <span className="pill" style={{ marginLeft: 8 }}>legacy</span> : null}</span><StatusPill status={r.status} /><button onClick={() => onOpen(r.id)}>{t('clients.open')}</button></div>
+              <div key={r.id} className="list-row"><span className="grow"><b>{r.client.name ?? r.clientId}</b>{r.legacy ? <span className="pill" style={{ marginLeft: 8 }}>Legacy</span> : null}</span><StatusPill status={r.status} /><button onClick={() => onOpen(r.id)}>{t('clients.open')}</button></div>
             ))}
           </div>
         </Section>
@@ -852,7 +852,7 @@ function OppRow({ o }: { o: Opportunity }) {
     <div className="list-row" data-testid={`opp-${o.id}`}>
       <span className="grow"><b>{o.title}</b> <span className="dim">· {o.orgName} · {o.type.replace(/_/g, ' ')}{o.category ? ` · ${o.category}` : ''}{o.distance ? ` · ${o.distance}` : ''}</span>{o.clientName ? <span className="dim"> · {t('opps.client')}: {o.clientName}</span> : null}</span>
       <span className="dim">{t('opps.deadline')} {o.deadline}</span>
-      {o.applied ? <span className="pill green">applied</span> : null}
+      {o.applied ? <span className="pill green">Applied</span> : null}
     </div>
   );
 }

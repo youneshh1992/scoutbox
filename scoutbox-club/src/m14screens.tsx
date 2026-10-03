@@ -6,6 +6,7 @@
 // Academy Scout"), never a bare "Verified", and never implies endorsement.
 // Badge state never relies on colour alone: every pill carries text.
 import { useEffect, useState } from 'react';
+import { Icon } from '../../design-system/icons';
 import type { Session } from './api';
 import {
   m14, type MyVerification, type PublicVerProfile, type SubjectClaim, type VerBadge, type ClubConsentRequest,
@@ -181,7 +182,7 @@ function MeTab({ session, notify, me, reloadMe }: { session: Session; notify: Sc
           <input aria-label={t('m14.me.workEmail')} placeholder={t('m14.me.workEmail')} value={email} onChange={(e) => setEmail(e.target.value)} />
           <button onClick={() => act(() => m14.sendWorkEmail(session, email), t('m14.me.codeSent'))}>{t('m14.me.sendCode')}</button>
           <input aria-label={t('m14.me.code')} placeholder={t('m14.me.code')} value={code} onChange={(e) => setCode(e.target.value)} style={{ width: 130 }} />
-          <button onClick={() => act(() => m14.confirmWorkEmail(session, code), '✅ ' + t('m14.me.emailProved'))}>{t('m14.me.confirmCode')}</button>
+          <button onClick={() => act(() => m14.confirmWorkEmail(session, code), t('m14.me.emailProved'))}>{t('m14.me.confirmCode')}</button>
         </div>
         <div className="dim" style={{ fontSize: 12 }}>{t('m14.me.emailNote')}</div>
       </div>
@@ -207,7 +208,7 @@ function RequestsTab({ session, notify }: { session: Session; notify: ScreenProp
   const [data, reload] = useAsync(() => m14.listRequests(session), [session]);
   const [roleEdit, setRoleEdit] = useState<Record<string, string>>({});
   const decide = async (claimId: string, action: string, opts?: Record<string, unknown>) => {
-    try { await m14.decideRequest(session, claimId, action, opts as never); notify(`✅ ${t('m14.req.decided')}: ${action}`); reload(); }
+    try { await m14.decideRequest(session, claimId, action, opts as never); notify(`${t('m14.req.decided')}: ${action}`); reload(); }
     catch (e) { notify(e instanceof Error ? e.message : 'failed', true); }
   };
   const rows = data?.items ?? [];
@@ -228,7 +229,7 @@ function RequestsTab({ session, notify }: { session: Session; notify: ScreenProp
               <b>{roleRow.person.name}</b> — {roleRow.claimedRole ?? t('m14.req.affiliationOnly')}
               <div className="dim" style={{ fontSize: 12 }}>
                 {t('m14.req.identity')}: {roleRow.identityStatus} · {t('m14.req.email')}: {t(`m14.email.${roleRow.emailStatus}`, roleRow.emailStatus.replace(/_/g, ' '))} · {fmtDate(roleRow.requestedAt)}
-                {roleRow.riskFlags.length > 0 && <span> · ⚠ {roleRow.riskFlags.join(', ')} <i>({t('m14.req.flagsNote')})</i></span>}
+                {roleRow.riskFlags.length > 0 && <span> · <Icon name="triangle-alert" size={12} /> {roleRow.riskFlags.join(', ')} <i>({t('m14.req.flagsNote')})</i></span>}
               </div>
               {roleRow.priorClaims.length > 0 && <div className="dim" style={{ fontSize: 12 }}>{t('m14.req.prior')}: {roleRow.priorClaims.map((p) => `${p.role ?? p.claimType}${p.current ? '' : ` (${t('m14.staff.former')})`}`).join(', ')}</div>}
             </span>
@@ -297,7 +298,7 @@ function DomainsTab({ session, notify }: { session: Session; notify: ScreenProps
             <span>
               <input aria-label={t('m14.me.code')} placeholder={t('m14.me.code')} value={codes[r.id] ?? ''} onChange={(e) => setCodes({ ...codes, [r.id]: e.target.value })} style={{ width: 130 }} />
               <button onClick={async () => {
-                try { await m14.confirmDomain(session, r.id, codes[r.id] ?? ''); notify('✅ ' + t('m14.dom.confirmed')); reload(); }
+                try { await m14.confirmDomain(session, r.id, codes[r.id] ?? ''); notify(t('m14.dom.confirmed')); reload(); }
                 catch (e) { notify(e instanceof Error ? e.message : 'failed', true); }
               }}>{t('m14.me.confirmCode')}</button>
             </span>
@@ -335,9 +336,9 @@ function AdminsTab({ session, notify }: { session: Session; notify: ScreenProps[
       ))}
       {(data?.transfers ?? []).filter((tr) => tr.status === 'pending').map((tr) => (
         <div key={tr.id} className="list-row">
-          <span className="grow">⏳ {t('m14.adm.pendingTransfer')} → {tr.toUserId}</span>
+          <span className="grow"><Icon name="clock" size={13} /> {t('m14.adm.pendingTransfer')} → {tr.toUserId}</span>
           <button onClick={async () => {
-            try { await m14.approveTransfer(session, tr.id); notify('✅ ' + t('m14.adm.transferApproved')); reload(); }
+            try { await m14.approveTransfer(session, tr.id); notify(t('m14.adm.transferApproved')); reload(); }
             catch (e) { notify(e instanceof Error ? e.message : 'failed', true); }
           }}>{t('m14.adm.approveTransfer')}</button>
         </div>
@@ -348,7 +349,7 @@ function AdminsTab({ session, notify }: { session: Session; notify: ScreenProps[
           {['verification_viewer', 'verification_reviewer', 'verification_admin', 'verification_root_admin'].map((l) => <option key={l} value={l}>{l.replace(/_/g, ' ')}</option>)}
         </select>
         <button onClick={async () => {
-          try { const r = await m14.grantAdmin(session, userId, level); notify(r.transfer ? `⏳ ${r.note ?? t('m14.adm.transferPending')}` : '✅ ' + t('m14.adm.granted')); setUserId(''); reload(); }
+          try { const r = await m14.grantAdmin(session, userId, level); notify(r.transfer ? `${r.note ?? t('m14.adm.transferPending')}` : t('m14.adm.granted')); setUserId(''); reload(); }
           catch (e) { notify(e instanceof Error ? e.message : 'failed', true); }
         }}>{t('m14.adm.grant')}</button>
       </div>
@@ -371,7 +372,7 @@ function MoreTab({ session, notify }: { session: Session; notify: ScreenProps['n
         {(refs?.items ?? []).map((r) => (
           <div key={r.id} className="list-row">
             <span className="grow"><b>{r.playerName ?? r.playerId}</b> — {r.structured.summary} <span className="dim" style={{ fontSize: 12 }}>v{r.version} · {r.status} · {r.coachName} ({r.roleAtTime})</span></span>
-            {r.status === 'active' && <button onClick={async () => { try { await m14.withdrawReference(session, r.id, 'withdrawn from console'); notify('↩️ ' + t('m14.ref.withdrawn')); reloadRefs(); } catch (e) { notify(e instanceof Error ? e.message : 'failed', true); } }}>{t('m14.ref.withdraw')}</button>}
+            {r.status === 'active' && <button onClick={async () => { try { await m14.withdrawReference(session, r.id, 'withdrawn from console'); notify(t('m14.ref.withdrawn')); reloadRefs(); } catch (e) { notify(e instanceof Error ? e.message : 'failed', true); } }}>{t('m14.ref.withdraw')}</button>}
           </div>
         ))}
         <div className="list-row" style={{ flexWrap: 'wrap' }}>

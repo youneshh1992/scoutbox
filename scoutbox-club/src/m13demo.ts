@@ -198,7 +198,7 @@ const TICKETS: SupportTicket[] = [{
 }];
 const ORG_NOTIFS: OrgNotification[] = [
   { id: 'ntf-d90', ts: NOW - 3600e3, type: 'transition', text: 'A transition evidence pack shared with Eastport Academy was withdrawn. Platform access has ended; anything your staff already downloaded is outside the platform and cannot be remotely erased — please delete local copies.', read: false, actionRequired: { deadline: NOW + 6 * DAY, ackedAt: null } },
-  { id: 'ntf-d91', ts: NOW - 2 * 3600e3, type: 'group', text: '📂 Hackney Marsh Rovers shared an assessment with your club in “North West Development Group”.', read: true, actionRequired: null },
+  { id: 'ntf-d91', ts: NOW - 2 * 3600e3, type: 'group', text: 'Hackney Marsh Rovers shared an assessment with your club in “North West Development Group”.', read: true, actionRequired: null },
 ];
 const SUITABILITY: Record<string, SuitabilitySummary | null> = {
   'apl-d1': { approvedAt: NOW - DAY, approvedBy: 'player', verdicts: [{ dimension: 'schedule', verdict: 'compatible' }, { dimension: 'travel', verdict: 'compatible' }, { dimension: 'relocation', verdict: 'compatible' }, { dimension: 'compensation', verdict: 'unknown' }, { dimension: 'environment', verdict: 'compatible' }, { dimension: 'accessibility', verdict: 'compatible' }] },

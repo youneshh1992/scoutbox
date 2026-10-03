@@ -2,6 +2,7 @@
 // trial-day staff-check review, post-signing outcome aggregates, and
 // drill-guidance coach review. VITE_DEMO=1 runs on canned synthetic rows.
 import { useCallback, useEffect, useState } from 'react';
+import { Icon } from '../../design-system/icons';
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000';
 const DEMO = import.meta.env.VITE_DEMO === '1';
@@ -154,10 +155,10 @@ export function M12Panel({ tab, adminKey, say }: { tab: M12Tab; adminKey: string
             <div className="grow">
               <b>{o.orgName}</b>
               {o.suppressed
-                ? <div className="notice">🔒 {o.note}</div>
+                ? <div className="notice"><Icon name="lock-keyhole" size={13} /> {o.note}</div>
                 : <div className="notice">{o.signings} signings · {o.followUpsDue} due · {o.confirmed} confirmed · {o.disputed} disputed · {o.unknown} unknown · {o.retained} retained<br />{o.denominator}</div>}
             </div>
-            {o.suppressed && <span className="pill">suppressed</span>}
+            {o.suppressed && <span className="pill">Suppressed</span>}
           </div>
         ))}
       </div>

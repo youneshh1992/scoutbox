@@ -1,6 +1,6 @@
 // M17 demo mirror (org side) — a SELF-CONTAINED Recruitment Room fixture.
 //
-// ⚠ Circular-import discipline (the exact bug that crashed the M16.1 bundle):
+// NOTE — circular-import discipline (the exact bug that crashed the M16.1 bundle):
 // roomsApi imports this module, so this module takes only TYPES from roomsApi
 // (`import type`, erased at build time). It never reads a runtime binding from
 // roomsApi, and it never calls an imported value at module-load time. Every

@@ -1,7 +1,7 @@
 // M19 demo mirror (org side) — a SELF-CONTAINED Explainable Matching and
 // Dynamic Watchlists fixture.
 //
-// ⚠ Circular-import discipline (the exact bug that crashed the M16.1 bundle):
+// NOTE — circular-import discipline (the exact bug that crashed the M16.1 bundle):
 // m19Api imports this module, so this module takes only TYPES from m19Api
 // (`import type`, erased at build time). It never reads a runtime binding from
 // m19Api and never calls an imported value at module-load time.

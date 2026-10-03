@@ -11,6 +11,7 @@
 // (409 / 422 / 403 from the server) the strip says so in one sentence and
 // refreshes rather than failing silently or overwriting anything.
 import { useCallback, useEffect, useState } from 'react';
+import { Icon } from '../../design-system/icons';
 import { ApiError, type Session } from './api';
 import { rooms, type Room, type RoomJourney, type JourneyTab, type JourneyStage } from './roomsApi';
 import { t, fmtDateTime } from './i18n';
@@ -103,7 +104,7 @@ export function JourneyStrip({ session, room, journey, notify, reload, onTab, bu
       <div className="journey-next" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
         <span className="pill blue">{t('jn.nextLabel')}</span>
         <span className="grow" data-testid="journey-next-action">
-          {na.kind === 'await' && <span aria-hidden="true">⏳ </span>}
+          {na.kind === 'await' && <Icon name="clock" size={13} label="waiting" />}
           {na.kind === 'none' && <span aria-hidden="true">■ </span>}
           {nextActionLabel(na.code)}
         </span>

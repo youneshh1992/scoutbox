@@ -146,8 +146,8 @@ export function M162Panel({ adminKey, say }: { tab: M162Tab; adminKey: string; s
             <span style={{ fontSize: 26, fontWeight: 800 }}>{data.trust.score}</span>
             <span className="dim">/ 100</span>
             <span className="pill blue">{data.trust.bandLabel}</span>
-            <span className="pill">policy v{data.trust.policyVersion}</span>
-            {data.trust.simulatedEvidenceIncluded && <span className="pill gold">simulated evidence included</span>}
+            <span className="pill">Policy v{data.trust.policyVersion}</span>
+            {data.trust.simulatedEvidenceIncluded && <span className="pill gold">Simulated evidence included</span>}
           </div>
           <div className="dim" style={{ fontSize: 12.5 }}>{data.trust.disclaimer || DISCLAIMER}</div>
 
