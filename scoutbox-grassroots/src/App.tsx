@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTheme, type Theme } from '../../design-system/theme';
-import { AuthField, AuthNote, AuthPage, AuthRow, AuthTabs, PasswordInput } from '../../design-system/AuthShell';
+import { AuthField, AuthPage, AuthRow, AuthTabs, PasswordInput } from '../../design-system/AuthShell';
 import { initials } from '../../design-system/text';
 import { Icon } from './icons';
 import { api, ApiError, DEMO_MODE, revokeSession, type Channel, type Notification, type Org, type Session } from './api';
 import {
-  FeedScreen, FilmRoomScreen, SearchScreen, ShortlistScreen, RequestsScreen, MessagesScreen,
+  FilmRoomScreen, SearchScreen, ShortlistScreen, RequestsScreen, MessagesScreen,
   TrialsScreen, OpenDaysScreen, SquadScreen, FriendliesScreen, FixturesScreen, LedgerScreen, FunnelScreen, PlanScreen,
   PlayerDrawer, Toast, SafetyModal,
 } from './screens';
@@ -31,7 +31,8 @@ import {
   saveCollapsed, saveShortcuts, screenFromHash, watchlistFromHash,
   NAV_SECTIONS, type NavContext,
 } from './nav';
-import { CommandPalette, NeedsAttention, OrgChips, Sidebar, SecondaryNav, TopBar, useNavSections, usePaletteHotkey } from './navui';
+import { CommandPalette, OrgChips, Sidebar, SecondaryNav, TopBar, useNavSections, usePaletteHotkey } from './navui';
+import { HomeScreen } from './homeScreen';
 import { fmtStamp, getLang, setLang, t } from './i18n';
 import { confirmLeave, guardHashChange, installDirtyGuard, noteNavigated } from './dirtyGuard';
 
@@ -219,12 +220,8 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
       product="Grassroots"
       heading="Your club. Your community. Your next player."
       summary="Federation-registered grassroots clubs, scouting within 50 km of their ground."
-      points={[
-        'Adults are visible at once; under-18s only after verification and the safeguarding contract.',
-        'Every action attributed to a named person.',
-        'No unsolicited contact.',
-      ]}
-      aside={DEMO_MODE ? <AuthNote>Self-contained demo — no server needed.</AuthNote> : undefined}
+      points={[]}
+      aside={DEMO_MODE ? <span className="auth-env" data-testid="auth-env">Demo environment</span> : undefined}
     >
       <AuthTabs tabs={[{ id: 'signin', label: 'Sign in' }, { id: 'register', label: 'Register club' }] as const} value={mode} onChange={(m) => { setError(null); setMode(m); }} label="Sign in or register your club" />
       {mode === 'signin' && (
@@ -627,10 +624,8 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
         <div className="content">
           {/* M24A — the reference page heading; the top bar keeps the document <h1>. */}
           <div className="f-heading"><p className="f-display" aria-hidden="true">{screenLabel}</p></div>
-          {screen === 'feed' && (
-            <NeedsAttention session={session} tick={tick} unreadMessages={unreadMessages} verLevel={verLevel} onNavigate={setScreen} />
-          )}
-          {screen === 'feed' && <FeedScreen {...props} />}
+          {/* M24F.2 — the Home: welcome, one primary action, counts, attention, club progress, activity, quick actions. */}
+          {screen === 'feed' && <HomeScreen {...props} unreadMessages={unreadMessages} verLevel={verLevel} onNavigate={setScreen} />}
           {screen === 'filmroom' && <FilmRoomScreen {...props} />}
           {screen === 'opendays' && <OpenDaysScreen {...props} />}
           {screen === 'squad' && <SquadScreen {...props} />}

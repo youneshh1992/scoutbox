@@ -5,3 +5,42 @@
    app-specific rules (if any) below the import. */
 @import '../../design-system/platform.css';
 
+/* M24F.2 — the real-grass photograph is the LEFT panel of the Grassroots
+   sign-in / sign-up screen and nothing else in ScoutBox (this file is the
+   one only the Grassroots bundle carries). Over the grass, one large,
+   low-contrast centre circle and halfway line — felt, not screamed. */
+:root[data-app="grass"] .auth-promo {
+  background-image:
+    radial-gradient(circle at 50% 52%, transparent 0 calc(36% - 1px), rgba(255, 255, 255, 0.16) calc(36% - 1px) calc(36% + 1px), transparent calc(36% + 1px)),
+    linear-gradient(rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.13)),
+    linear-gradient(180deg, rgba(20, 38, 28, 0.08) 0%, rgba(20, 38, 28, 0.02) 40%, rgba(16, 32, 23, 0.62) 100%),
+    url('../../design-system/assets/grassroots-auth-grass.jpg');
+  background-size: 100% 100%, 1px 100%, cover, cover;
+  background-position: center, center top, center, center 60%;
+  background-repeat: no-repeat;
+}
+
+
+/* M24F.2 — the Home: welcome, one primary action, counts, progress, activity, quick actions. */
+.home-welcome { font-size: 15px; color: var(--sb-ink); margin: -10px 0 18px; }
+.home-welcome .dim { margin-left: 6px; }
+.home-primary { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 22px; }
+.home-primary .dim { font-size: 13px; }
+.home-summary { display: flex; flex-wrap: wrap; gap: 0; border-top: 1px solid var(--sb-rule); border-bottom: 1px solid var(--sb-rule); margin-bottom: 22px; }
+.home-sum { display: inline-flex; align-items: baseline; gap: 6px; padding: 10px 18px 10px 0; margin-right: 18px; background: none; border: 0; box-shadow: none; color: var(--sb-quiet); font-size: 12.5px; border-radius: 0; }
+.home-sum:hover { background: none; color: var(--sb-ink); filter: none; }
+.home-sum b { font-size: 18px; font-weight: 650; color: var(--sb-ink); letter-spacing: -0.3px; }
+.home-section { margin-bottom: 26px; }
+.home-section .attn-title { margin-bottom: 4px; }
+.home-row { width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--sb-rule); box-shadow: none; border-radius: 0; color: var(--sb-ink); font-weight: 500; padding: 10px 4px; }
+.home-row:hover { background: var(--sb-wash); filter: none; }
+.home-state { width: 18px; height: 18px; display: inline-grid; place-items: center; color: var(--sb-quiet); }
+.home-state.done { color: var(--sb-green-text); }
+.home-ok { color: var(--sb-green-text); font-size: 12.5px; }
+.home-more { font-size: 12.5px; margin-top: 8px; }
+.home-quick { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.home-quick .f-textbtn { display: inline-flex; align-items: center; gap: 6px; }
+@media (max-width: 640px) {
+  .home-sum { padding-right: 12px; margin-right: 10px; }
+  .home-primary .dim { flex-basis: 100%; }
+}

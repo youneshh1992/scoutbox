@@ -118,10 +118,11 @@ for (const w of WIDTHS) {
     r.pitchRule = r.rules.some((t) => /\.login\.auth-page::before/.test(t) && !/data-app="grass"/.test(t));
     r.pitchHidden = r.rules.some((t) => /data-app="grass"\] \.login\.auth-page::before/.test(t));
     const tag = `Grassroots entry ${w}px (${saved} saved)`;
-    ok(!r.photo && !r.formHasImage, `${tag}: no photograph anywhere on the entry (reverted)`);
-    ok(r.blades, `${tag}: the introduction carries the M24E blade-of-grass bands`);
+    // M24F.2 — the real-grass photograph on the introduction panel ONLY (never the form), and no diagonal bands at all.
+    ok(r.photo && !r.formHasImage, `${tag}: the introduction carries the grass photograph; the form carries no image`);
+    ok(!r.blades, `${tag}: no blade-of-grass bands (removed, not faded)`);
     ok(w >= 721 ? r.promoLeftOfForm : r.promoAboveForm, `${tag}: the introduction is ${w >= 721 ? 'the LEFT panel' : 'stacked above the form'}`);
-    ok(r.formBg === proRef.formBg && r.pageBg === proRef.pageBg && r.promoBg === proRef.promoBg, `${tag}: the shared M24E entry scheme, same as Pro (${r.formBg} / ${r.pageBg} / ${r.promoBg})`);
+    ok(r.formBg === proRef.formBg && r.pageBg === proRef.pageBg, `${tag}: the shared M24E entry scheme on the page and the form, same as Pro (${r.formBg} / ${r.pageBg}); the introduction is the photograph`);
     ok(r.formBg !== 'rgb(246, 248, 244)' && r.pageBg !== 'rgb(47, 59, 52)', `${tag}: the M24F Sage entry colours are gone`);
     ok(r.toggle === 0, `${tag}: no theme control`);
     ok(/^(")?Inter\b/.test(r.sub) && r.subStyle === 'normal', `${tag}: "Grassroots" is set in Inter, upright (${r.sub.split(',')[0]}) — the serif is reverted`);
@@ -152,10 +153,11 @@ for (const w of [390, 1024, 1440]) {
     return { markings: rules.some((t) => t === ':root[data-app="grass"] .content::before') && rules.some((t) => t === ':root[data-app="grass"] .content::after'), theme: document.documentElement.getAttribute('data-theme'), content: cs(content).backgroundColor, contentImage: cs(content).backgroundImage, before: cs(content, '::before').content, sidebar: cs(document.querySelector('nav.sidebar')).backgroundColor, ink: cs(document.querySelector('.content')).color, serif: cs(document.querySelector('nav.sidebar .brand-sub') ?? document.querySelector('.crumb')).fontFamily, grass: [...document.styleSheets].some((s) => { try { return [...s.cssRules].some((r) => /grassroots-auth-grass/.test(r.cssText) && !/auth-promo/.test(r.selectorText ?? '')); } catch { return false; } }) };
   });
   const tag = `Grassroots light ${w}px`;
-  ok(r.content === 'rgb(229, 245, 233)' && r.sidebar === 'rgb(255, 255, 255)', `${tag}: the M24E mint canvas and white sidebar (${r.content} / ${r.sidebar}) — Sage reverted`);
-  ok(/repeating-linear-gradient/.test(r.contentImage) && !/url\(/.test(r.contentImage) && r.markings, `${tag}: the turf grain and the pitch-marking rules are back behind the workspace, no photograph (${r.contentImage.slice(0, 40)}…)`);
-  ok(r.ink === 'rgb(30, 41, 35)', `${tag}: the M24E ink (${r.ink})`);
-  ok(!r.grass, `${tag}: no stylesheet rule puts a photograph anywhere`);
+  // M24F.2 — the light workspace follows the Founder's dashboard reference: cool canvas, navy sidebar, no pitch lines, no photograph.
+  ok(r.content === 'rgb(247, 249, 252)' && r.sidebar === 'rgb(6, 56, 86)', `${tag}: the cool canvas and the navy sidebar (${r.content} / ${r.sidebar})`);
+  ok(r.contentImage === 'none' && !r.markings, `${tag}: no turf grain and no pitch-marking rule behind the light workspace (${r.contentImage.slice(0, 40)})`);
+  ok(r.ink === 'rgb(11, 28, 45)', `${tag}: the deep navy ink (${r.ink})`);
+  ok(!r.grass, `${tag}: no stylesheet rule puts the photograph anywhere but the entry introduction`);
   if (w === 1440) ok(/^(")?Inter\b/.test(r.serif), `${tag}: the sidebar's "Grassroots" is Inter (serif reverted)`);
   // the Coaches page: an editorial page, not six boxes
   if (w === 390) await page.click('.nav-hamburger').catch(() => {});
@@ -259,8 +261,8 @@ for (const w of [390, 430]) {
   ok(inbox.accepts >= 1 && inbox.declines >= 1 && /rgba\(0, 0, 0, 0\)|transparent/.test(inbox.declineBg ?? ''), `${tag} Inbox: Accept is the primary, Decline a text action (${inbox.accepts} accept, ${inbox.declines} decline, decline bg ${inbox.declineBg})`);
   await page.goto(`${origin(PORTS.player)}/`); await page.waitForSelector('text=Your visibility right now', { timeout: 30000 }); await sleep(400);
   await page.click('a[href^="/you"]'); await sleep(600); await page.getByRole('tab', { name: /^Account$/ }).click(); await sleep(700);
-  const acc = await page.evaluate(() => ({ rows: document.querySelectorAll('[data-testid="account-privacy"], [data-testid="account-notifications"], [data-testid="account-appearance"], [data-testid="account-rules"]').length, exits: [document.querySelector('[data-testid="sign-out"]'), document.querySelector('[data-testid="switch-account"]')].every((e) => e && e.getBoundingClientRect().height > 0), names: [document.querySelector('[data-testid="sign-out"]')?.getAttribute('aria-label'), document.querySelector('[data-testid="switch-account"]')?.getAttribute('aria-label')] }));
-  ok(acc.rows === 4 && acc.exits, `${tag} Account: list rows (privacy, notifications, appearance, rules) and the two exits (${acc.names.join(' · ')})`);
+  const acc = await page.evaluate(() => ({ rows: document.querySelectorAll('[data-testid="account-cat-profile"], [data-testid="account-cat-privacy"], [data-testid="account-cat-preferences"], [data-testid="account-cat-appearance"]').length, exits: [document.querySelector('[data-testid="sign-out"]'), document.querySelector('[data-testid="switch-account"]')].every((e) => e && e.getBoundingClientRect().height > 0), names: [document.querySelector('[data-testid="sign-out"]')?.getAttribute('aria-label'), document.querySelector('[data-testid="switch-account"]')?.getAttribute('aria-label')] }));
+  ok(acc.rows === 4 && acc.exits, `${tag} Account: the four category rows (Profile, Privacy, Preferences, Appearance) and the two exits (${acc.names.join(' · ')})`);
   await ctx.close();
 }
 {

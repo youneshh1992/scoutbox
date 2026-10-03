@@ -77,15 +77,27 @@ ok(!fs.existsSync(path.join(ROOT, 'design-system/fonts/InstrumentSerif-OFL.txt')
 // ------------------------------------------------------------ 3. Grassroots tokens (the M24E scheme, restored)
 const grassBlock = tokens.match(/:root\[data-app="grass"\] \{([\s\S]*?)\n\}/);
 const darkBlock = tokens.match(/:root\[data-app="grass"\]\[data-theme="dark"\] \{([\s\S]*?)\n\}/);
-ok(!!grassBlock && /--sb-workspace: #e5f5e9/.test(grassBlock[1]) && /--grass-line: rgba\(255, 255, 255, 0\.52\)/.test(grassBlock[1]) && /--grass-grain/.test(grassBlock[1]) && /--grass-band/.test(grassBlock[1]), 'Grassroots light: the M24E workspace (#E5F5E9) and its turf tokens — the Sage palette is reverted');
-ok(!/--grass-sage|--sb-font-grass|:root\[data-app="grass"\]:not\(\[data-theme="dark"\]\)/.test(tokens), 'Grassroots light: no Sage token and no Sage override block remains');
+// M24F.2 — the Grassroots LIGHT workspace follows the Founder's dashboard
+// reference: cool canvas, deep navy sidebar, white surfaces, the ScoutBox
+// green for the primary action. The base grass block keeps the M24E turf
+// tokens (they drive the DARK theme, which is unchanged).
+const grassLight = tokens.match(/:root\[data-app="grass"\]:not\(\[data-theme="dark"\]\) \{([\s\S]*?)\n\}/);
+ok(!!grassLight && /--sb-workspace: #f7f9fc/.test(grassLight[1]) && /--sb-surface: #063856/.test(grassLight[1]) && /--sb-white: #ffffff/.test(grassLight[1]) && /--sb-green: #33ee7c/.test(grassLight[1]) && /--sb-ink: #0b1c2d/.test(grassLight[1]), 'Grassroots light (M24F.2): cool canvas #F7F9FC, navy sidebar #063856, white surfaces, ScoutBox green #33EE7C, ink #0B1C2D');
+ok(!!grassBlock && /--grass-line: rgba\(255, 255, 255, 0\.52\)/.test(grassBlock[1]) && /--grass-grain/.test(grassBlock[1]) && /--grass-band/.test(grassBlock[1]), 'Grassroots base block: the M24E turf tokens remain for the dark workspace');
+ok(!/--grass-sage|--sb-font-grass/.test(tokens), 'Grassroots: no Sage token and no serif token remains');
 ok(!!darkBlock && /--sb-workspace: #252e26/.test(darkBlock[1]) && /--grass-line: rgba\(255, 255, 255, 0\.10\)/.test(darkBlock[1]) && darkBlock[1].trim().split('\n').length === 4, 'Grassroots dark: the M24E declarations (workspace green and the three turf tokens) — the shared dark palette is unchanged');
 const frozen = JSON.parse(read('e2e/fixtures/m24e-grassroots-dark-tokens.json'));
 ok(frozen.tokens['--sb-workspace'] === '#252e26' && frozen.computed.content.bg === 'rgb(37, 46, 38)' && frozen.computed.sidebar.bg === 'rgb(18, 20, 21)', 'the frozen M24E dark values are on file for the live comparison (workspace #252e26, sidebar #121415)');
 
 // ------------------------------------------------------------ 4. the Grassroots turf and pitch (M24E, restored)
-ok(/:root\[data-app="grass"\] \.content \{[^}]*--grass-grain/.test(platform) && /:root\[data-app="grass"\] \.content::before \{/.test(platform) && /:root\[data-app="grass"\] \.content::after \{/.test(platform), 'the Grassroots turf grain and pitch markings stand behind the workspace again (M24E)');
-ok(/:root\[data-app="grass"\] \.auth-promo \{[^}]*repeating-linear-gradient\(103deg/.test(platform), 'the Grassroots entry introduction carries the blade-of-grass bands again (M24E)');
+// M24F.2 — the turf grain and pitch markings are DARK-only; the light
+// workspace is a plain cool canvas (no pitch lines, no photograph).
+ok(/:root\[data-app="grass"\]\[data-theme="dark"\] \.content \{[^}]*--grass-grain/.test(platform) && /:root\[data-app="grass"\]\[data-theme="dark"\] \.content::before \{/.test(platform) && /:root\[data-app="grass"\]\[data-theme="dark"\] \.content::after \{/.test(platform), 'the Grassroots turf grain and pitch markings stand behind the DARK workspace only (M24E dark unchanged)');
+ok(!/:root\[data-app="grass"\] \.content \{[^}]*--grass-grain/.test(platform) && !/:root\[data-app="grass"\] \.content::before \{/.test(platform), 'the Grassroots LIGHT workspace carries no turf grain and no pitch markings (M24F.2)');
+const grassPromo = [...platform.matchAll(/:root\[data-app="grass"\] \.auth-promo \{([^}]*)\}/g)].map((m) => m[1]).join(' ');
+ok(grassPromo.length > 0 && !/repeating-linear-gradient/.test(grassPromo) && !/\d+deg/.test(grassPromo), 'the Grassroots entry introduction has NO diagonal bands (M24F.2: removed, not faded)');
+const grassCss = read('scoutbox-grassroots/src/styles.css');
+ok(/:root\[data-app="grass"\] \.auth-promo \{[^}]*radial-gradient\(circle at 50% 52%[^}]*grassroots-auth-grass\.jpg/.test(grassCss) && !/repeating-linear-gradient[^}]*auth-promo|auth-promo[^}]*repeating-linear-gradient/.test(grassCss), 'the Grassroots entry introduction: the real-grass photograph with one subtle centre-circle / halfway-line motif, declared in the Grassroots stylesheet only');
 ok(!/:root\[data-app="grass"\] \.login\.auth-page \{/.test(platform) && !/:root\[data-app="grass"\] \.login\.auth-page::before/.test(platform) && !/:root\[data-app="grass"\] \.brand-sub/.test(platform), 'no M24F Grassroots entry override remains (no Sage page, no hidden pitch, no serif)');
 ok(!fs.existsSync(path.join(ROOT, 'scoutbox-player/src/components/PitchBackdrop.tsx')) && !/PitchBackdrop/.test(read('scoutbox-player/src/app/onboarding.tsx')), 'the Player draws no pitch backdrop');
 
@@ -100,10 +112,16 @@ function walkRefs(d) {
   }
 }
 for (const r of ['scoutbox-club', 'scoutbox-grassroots', 'scoutbox-agent', 'scoutbox-admin', 'scoutbox-player', 'design-system', 'e2e']) walkRefs(path.join(ROOT, r));
+// M24F.2 — the photograph is permitted in ONE place: the Grassroots entry's
+// left panel. It is on disk with its licence, referenced by the Grassroots
+// stylesheet alone (so no other bundle carries its bytes), and never by the
+// shared platform.css, the tokens or any other application.
 const codeRefs = refs.filter((p) => !/\.(md|txt)$/.test(p) && !/^e2e\//.test(p));
-ok(codeRefs.length === 0 && !fs.existsSync(path.join(ROOT, 'design-system/assets/grassroots-auth-grass.jpg')), `the grass photograph is gone: no asset on disk and no stylesheet or source reference (${codeRefs.join(', ') || 'none'})`);
-ok(!/grassroots-auth-grass/.test(platform + tokens + read('scoutbox-grassroots/src/styles.css')), 'no stylesheet references the photograph');
+ok(fs.existsSync(path.join(ROOT, 'design-system/assets/grassroots-auth-grass.jpg')) && fs.existsSync(path.join(ROOT, 'design-system/assets/GRASS-PHOTO-LICENCE.txt')), 'the grass photograph is on disk with its licence');
+ok(codeRefs.length === 1 && codeRefs[0] === 'scoutbox-grassroots/src/styles.css', `the photograph is referenced by the Grassroots stylesheet only (${codeRefs.join(', ') || 'none'})`);
+ok(!/grassroots-auth-grass/.test(platform + tokens), 'neither platform.css nor tokens.css references the photograph');
 ok(!/grassroots-auth-grass/.test(read('scoutbox-player/src/app/onboarding.tsx') + read('scoutbox-club/src/App.tsx') + read('scoutbox-agent/src/App.tsx') + read('scoutbox-admin/src/App.tsx')), 'no other application references the photograph');
+ok(/\.auth-promo/.test(grassCss.split('grassroots-auth-grass.jpg')[0].split('\n').slice(-6).join('\n')), 'the photograph rule is scoped to the entry introduction (.auth-promo), never the authenticated workspace');
 
 // ------------------------------------------------------------ 6. Agent entry fixed light
 const agentBlock = platform.match(/:root\[data-app="agent"\] \.login\.auth-page \{([\s\S]*?)\n\}/);

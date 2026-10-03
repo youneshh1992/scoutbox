@@ -136,7 +136,9 @@ async function portalAudit(page, app, width) {
   if (r.primaries < 1 || !r.primaryInside || r.primaryH < 40) fail(`${tag}: the primary action (${r.primaries}) must be visible, inside the viewport and ≥40px (${r.primaryH})`);
   if (r.unlabelled.length) fail(`${tag}: unlabelled fields: ${r.unlabelled.join(', ')}`);
   if (r.unnamed) fail(`${tag}: ${r.unnamed} button(s) without an accessible name`);
-  if (width <= 720 ? r.pointsShown : !r.pointsShown) fail(`${tag}: the introduction points are ${r.pointsShown ? 'shown' : 'hidden'} (phone hides them, desktop shows them)`);
+  // M24F.2 — the Grassroots introduction is the headline and one sentence only (no points at any width).
+  const grass = /^Grassroots/.test(app);
+  if (grass ? r.pointsShown : (width <= 720 ? r.pointsShown : !r.pointsShown)) fail(`${tag}: the introduction points are ${r.pointsShown ? 'shown' : 'hidden'} (${grass ? 'Grassroots has none' : 'phone hides them, desktop shows them'})`);
   if (!r.h2 || !r.summary) fail(`${tag}: the introduction keeps its headline and one sentence`);
   if (r.pills || r.emoji || r.circles) fail(`${tag}: pills ${r.pills}, emoji ${r.emoji}, icon circles ${r.circles} — the entry screen must have none`);
   if (!r.form || !r.signature || !r.wordmark) fail(`${tag}: roles / landmarks (form ${r.form}, signature ${r.signature}, wordmark+tm ${r.wordmark})`);

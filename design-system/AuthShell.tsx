@@ -22,7 +22,7 @@ export function AuthPage({ app, product, heading, summary, points, toolbar, chil
   heading: string;
   /** M24D — one sentence under the headline; the only introduction a phone shows. */
   summary?: string;
-  /** At most three short, factual lines about what exists (desktop only). */
+  /** At most three short, factual lines about what exists (desktop only). M24F.2 — an empty list renders nothing (Grassroots keeps its introduction to the headline and one sentence). */
   points: readonly string[];
   toolbar?: ReactNode;
   children: ReactNode;
@@ -37,9 +37,11 @@ export function AuthPage({ app, product, heading, summary, points, toolbar, chil
         <section className="auth-promo" aria-labelledby={hid}>
           <h2 id={hid}>{heading}</h2>
           {summary ? <p className="auth-summary">{summary}</p> : null}
-          <ul className="auth-points">
-            {points.slice(0, 3).map((p) => <li key={p.slice(0, 24)}>{p}</li>)}
-          </ul>
+          {points.length ? (
+            <ul className="auth-points">
+              {points.slice(0, 3).map((p) => <li key={p.slice(0, 24)}>{p}</li>)}
+            </ul>
+          ) : null}
           {aside}
         </section>
         <section className="auth-form" aria-label={`ScoutBox ${product} — sign in`}>

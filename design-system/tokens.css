@@ -177,8 +177,9 @@
   --sb-navlabel: #615a49;
   --sb-crumb: #615a49;
   --sb-tool: #615a49;
-  --sb-nav-active-bg: #f5efdf;
-  --sb-nav-active-fg: #373e2d;
+  --sb-nav-active-bg: #f7f1e3;
+  --sb-nav-active-fg: #7a5a1c;   /* M24F.2 — the active destination reads in the Agent's gold */
+  --sb-nav-active-icon: #a67c2e;
   --sb-filter-active-bg: #f5efdf;
   --sb-filter-active-fg: #373e2d;
   --sb-filter-active-border: #e7ddc8;
@@ -193,7 +194,37 @@
   --sb-shadow-panel: inset 0 1px 0 #fff9, 0 2px 5px #705b3710;
 }
 
-/* ---------------------------------------- Grassroots: workspace surfaces */
+/* M24F.2 — Agent dark: the gold active destination (champagne on the embossed dark) */
+:root[data-app="agent"][data-theme="dark"] {
+  --sb-nav-active-bg: rgba(199, 169, 107, 0.14);
+  --sb-nav-active-fg: #d0b57b;
+  --sb-nav-active-icon: #c7a96b;
+}
+
+/* ---------------------------------------- Grassroots: workspace surfaces
+   M24F.2 — the LIGHT mode follows the Founder's ScoutBox Grassroots
+   reference: a deep navy sidebar (platform.css re-declares the sidebar's
+   tokens), a very light cool canvas, white surfaces, light blue / green
+   secondary surfaces, deep navy type, the ScoutBox green #33EE7C on the
+   primary action. The DARK mode is unchanged (M24A values, frozen in
+   e2e/fixtures). */
+:root[data-app="grass"]:not([data-theme="dark"]) {
+  --sb-paper: #f7f9fc; --sb-workspace: #f7f9fc;
+  --sb-white: #ffffff; --sb-surface: #063856; --sb-topbar: #ffffff;
+  --sb-wash: #eef4fb; --sb-org: #f3f7fb; --sb-th: #f1f5f9; --sb-note: #eaf8f0; --sb-note-ink: #14532d;
+  --sb-input: #ffffff; --sb-input-border: #cfd9e3;
+  --sb-ink: #0b1c2d; --sb-quiet: #5b6b7a; --sb-rule: #e3e9f0; --sb-panel-border: #e3e9f0;
+  --sb-nav: #3f5062; --sb-navlabel: #6d7f91; --sb-crumb: #1f3448; --sb-tool: #3f5062;
+  --sb-green: #33ee7c; --sb-green-ink: #0b2a18; --sb-green-deep: #0b1c2d; --sb-green-text: #0f7a44; --sb-link: #1b6f49; --sb-focus: #0f7a44;
+  --sb-nav-active-bg: #eaf8f0; --sb-nav-active-fg: #0b1c2d; --sb-nav-active-icon: #0f7a44;
+  --sb-candidate-bg: #eef4fb; --sb-candidate-fg: #1f3448;
+  --sb-tab-active: #0b1c2d; --sb-tab-line: #33ee7c;
+  --sb-filter-active-bg: #eef4fb; --sb-filter-active-fg: #1f3448; --sb-filter-active-border: #c9d8e8;
+  --sb-mine: #eaf8f0; --sb-avatar-bg: #eef4fb; --sb-avatar-fg: #1f3448; --sb-count-bg: #eef4fb;
+  --sb-ok: #0f7a44; --sb-ok-ink: #14532d; --sb-outline-border: #cfd9e3; --sb-outline-fg: #1f3448;
+  --sb-kbd-border: #cfd9e3; --sb-kbd-fg: #5b6b7a; --sb-track: #cfd9e3; --sb-knob: #ffffff;
+  --sb-veil: rgba(11, 28, 45, 0.42); --sb-shadow-pop: 0 12px 40px rgba(11, 28, 45, 0.14);
+}
 :root[data-app="grass"] {
   --sb-workspace: #e5f5e9;
   --grass-line: rgba(255, 255, 255, 0.52);
