@@ -39,6 +39,20 @@ every colour, size and weight below is the reference's computed value.
   `components/Icon.tsx` on `react-native-svg` from the same lucide data, and
   the pitch is `components/PitchBackdrop.tsx`.
 
+## Supporting copy is exceptional, not default (M24F.2)
+
+A row is a label and, where there is one, a value. A sub-note under a row is
+the exception, earned only when it carries something the label and value do
+not: a safeguarding or privacy fact, a legal boundary, a state the person
+must know before acting. Across any screen, 70–80 % of rows carry no
+sub-note. Where several rows would each need the same explanation, the
+screen carries ONE section-level line instead. "Manage your…", "Here you
+can…", "Use this to…", "Control how…" and "Choose whether…" never appear:
+the control says what it does. Safeguarding information is never hidden to
+meet the ratio — it is relocated (to the section line, to the detail a row
+opens, or to the moment the action is taken). The audit of every note that
+was kept, removed or moved is `M24F2_SUBNOTE_AUDIT.md`.
+
 ## Theme switching
 
 Every application shows the switch in its header (portals: the top bar and the

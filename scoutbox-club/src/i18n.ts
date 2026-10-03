@@ -1446,7 +1446,7 @@ const en = {
   'm19.err.notFound': 'That watchlist does not exist for your organisation.',
   'm19.err.limit': 'You have reached the watchlist limit. Archive one before creating another.',
   'm19.err.nameRequired': 'Give this watchlist a name your colleagues will recognise.',
-  'm19.err.modeRequired': 'Choose whether this watchlist follows the Recruitment Brief or keeps its own saved criteria.',
+  'm19.err.modeRequired': 'A watchlist either follows the Recruitment Brief or keeps its own saved criteria — pick one.',
   'm19.err.modeInvalid': 'Only a watchlist linked to a Recruitment Brief can follow it live.',
   'm19.err.liveLinked': 'This watchlist follows its Recruitment Brief. Change the brief, or switch the watchlist to its own saved criteria.',
   'm19.err.archived': 'An archived watchlist keeps its history and is not reopened.',

@@ -564,7 +564,7 @@ export default function GuardianDashboard() {
           </Disclosure>
         )}
 
-        <Disclosure label="The rules that protect your child" hint="Our promises to every under-18" testID="guardian-rules">
+        <Disclosure label="The rules that protect your child" testID="guardian-rules">
           {U18_PROMISES.map((p) => <Muted key={p.slice(0, 20)} size={13}>{p}</Muted>)}
         </Disclosure>
 

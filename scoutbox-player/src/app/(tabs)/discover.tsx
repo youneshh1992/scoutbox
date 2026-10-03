@@ -261,7 +261,7 @@ export default function Discover() {
             )}
           </Disclosure>
         )}
-        <Disclosure label="Club directory" hint="How clubs actually behave: trials run, reports filed, how fast" testID="home-directory">
+        <Disclosure label="Club directory" testID="home-directory">
           {directory.length > 0 ? directory.map((d) => (
             <View key={d.id} style={styles.dirRow}>
               <Text style={styles.clubName}>{d.name}</Text>

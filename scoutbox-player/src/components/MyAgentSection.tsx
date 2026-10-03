@@ -95,11 +95,12 @@ export function MyAgentSection({ playerId, isMinor }: { playerId: string; isMino
             <Pill label={pt(statusKey(r.status))} tone={tone(r.status)} />
           </Row>
           <Muted size={12}>{pt('m24agency')}: {r.agent.agency?.name ?? '—'} · {pt('m24scope')}: {r.scope.map((s) => s.replace(/_/g, ' ')).join(', ')}{r.termMonths ? ` · ${pt('m24term')}: ${r.termMonths} ${pt('m24months')}` : ''}{r.endAt ? ` · ${pt('m24ends')} ${fmt(r.endAt)}` : ''}</Muted>
+          {/* M24F.2 — the licence is one fact; only an UNVERIFIED licence earns its warning sentence. */}
           {r.legacy ? (
             <Muted size={11.5}>{pt('m24legacy')}</Muted>
           ) : (
             <Muted size={11.5}>
-              {pt('m24licence')}: {(r.agent.verification?.fifaLicence ?? 'UNVERIFIED').replace(/_/g, ' ').toLowerCase()} — {r.agent.verification?.fifaLicence === 'VERIFIED' ? pt('m24honestVerified') : pt('m24honestUnverified')}
+              {pt('m24licence')}: {(r.agent.verification?.fifaLicence ?? 'UNVERIFIED').replace(/_/g, ' ').toLowerCase()}{r.agent.verification?.fifaLicence === 'VERIFIED' ? '' : ` — ${pt('m24honestUnverified')}`}
             </Muted>
           )}
           {r.status === 'disputed' && <Muted size={11.5}>{pt('m24disputedMsg')}</Muted>}
@@ -139,7 +140,6 @@ export function MyAgentSection({ playerId, isMinor }: { playerId: string; isMino
               {r.status === 'active' && (
                 <View style={{ marginTop: 8 }} testID={`my-agent-disclosure-${r.id}`}>
                   <Text style={{ color: colors.text, fontWeight: '700', fontSize: 12.5 }}>{pt('m27dTitle')}</Text>
-                  <Muted size={11}>{pt('m27dIntro')}</Muted>
                   {DISCLOSURES.map((d) => {
                     const on = r.disclosure?.[d.key] === true;
                     return (
@@ -161,15 +161,15 @@ export function MyAgentSection({ playerId, isMinor }: { playerId: string; isMino
                       </View>
                     );
                   })}
-                  <Muted size={11}>{pt('m27dHonest')}</Muted>
                 </View>
               )}
             </>
           )}
-          <Muted size={11}>{pt('m24whatIs')}</Muted>
         </View>
       ))}
       {items.length === 0 && !err && <Muted size={12}>{pt('m24none')}</Muted>}
+      {/* M24F.2 — one section-level line, not one per relationship. */}
+      {items.length > 0 && <Muted size={11}>{pt('m24whatIs')}</Muted>}
       {msg && <View accessibilityLiveRegion="polite"><Muted size={12}>{msg}</Muted></View>}
     </Card>
   );
@@ -194,7 +194,6 @@ export function AgentSharedOpportunities({ playerId, isMinor }: { playerId: stri
   return (
     <Card testID="agent-shared-opportunities">
       <SectionTitle>{pt('m27sTitle')}</SectionTitle>
-      <Muted size={12}>{pt('m27sIntro')}</Muted>
       {err && <Muted size={12}>{err}</Muted>}
       {items.map((s) => (
         <View key={s.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6 }} testID={`agent-shared-${s.id}`}>
@@ -204,7 +203,6 @@ export function AgentSharedOpportunities({ playerId, isMinor }: { playerId: stri
           </Row>
           <Muted size={12}>{s.orgName ?? '—'} · {pt('m27sSharedBy')} {s.sharedByName ?? '—'} · {fmt(s.sharedAt)}</Muted>
           {s.note && <Text style={{ color: colors.text, fontSize: 12.5, marginTop: 4 }}>{s.note}</Text>}
-          <Muted size={11}>{pt('m27sYours')}</Muted>
         </View>
       ))}
       <Muted size={11}>{pt('m27sHonest')}</Muted>

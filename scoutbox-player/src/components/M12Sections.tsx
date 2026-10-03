@@ -447,7 +447,8 @@ export function AccessSection({ playerId, mediaOptions, isMinor }: { playerId: s
         <Button small primary={lang === 'en'} label="EN" onPress={() => { setPLang('en'); setLangState('en'); }} />
         <Button small primary={lang === 'fr'} label="FR" onPress={() => { setPLang('fr'); setLangState('fr'); }} />
       </Row>
-      <Muted size={11.5}>{pt('machineNote')}</Muted>
+      {/* M24F.2 — the machine-translation note only once French is the chosen language. */}
+      {lang === 'fr' && <Muted size={11.5}>{pt('machineNote')}</Muted>}
       <Row style={{ marginTop: 8 }}>
         <Text style={{ color: colors.text, fontSize: 13, flex: 1 }}>{pt('dataSaver')}</Text>
         <Switch accessibilityLabel={pt('dataSaver')} value={saver} onValueChange={(v) => { setDataSaver(v); setSaver(v); }} />
