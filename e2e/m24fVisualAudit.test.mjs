@@ -10,7 +10,7 @@
 //  3. Grassroots DARK tokens unchanged (tokens.css declares only the
 //     workspace green for dark, the light block is the Sage palette);
 //  4. no pitch-line / turf background implementation remains;
-//  5. the grass photograph is referenced ONLY by the Grassroots
+//  5. the grass photograph is gone (reverted with the Grassroots scheme)
 //     unauthenticated entry composition;
 //  6. the Agent entry is fixed LIGHT and ignores data-theme;
 //  7. the Player bottom navigation has at most five destinations;
@@ -61,24 +61,21 @@ ok(foreign.length === 0, `platform.css: every font-family is Inter, the wordmark
 ok(!/Arial|Helvetica/.test(platform + tokens + fontsCss), 'no Arial / Helvetica anywhere in the design system');
 const playerText = read('scoutbox-player/src/components/Text.tsx');
 ok(/Inter-VariableFont_opsz,wght\.ttf/.test(playerText) && /fontFamily: 'Inter'/.test(playerText), 'Player: Text resolves to the bundled Inter');
-ok(fs.existsSync(path.join(ROOT, 'design-system/fonts/InstrumentSerif-OFL.txt')) && /Instrument Serif/.test(fontsCss), 'the Grassroots serif (Instrument Serif) is bundled with its OFL licence');
-ok(/:root\[data-app="grass"\] \.brand-sub, :root\[data-app="grass"\] \.auth-form h1 \.brand-sub \{ font-family: var\(--sb-font-grass/.test(platform), 'the serif is applied to the word "Grassroots" only (the brand-sub of the Grassroots app)');
+ok(!fs.existsSync(path.join(ROOT, 'design-system/fonts/InstrumentSerif-OFL.txt')) && !/Instrument Serif/.test(fontsCss) && !/--sb-font-grass/.test(tokens + platform), 'no editorial serif: "Grassroots" is set in Inter like every other word (the M24F serif was reverted at the Founder\'s direction)');
 
-// ------------------------------------------------------------ 3. Grassroots tokens
-const lightBlock = tokens.match(/:root\[data-app="grass"\]:not\(\[data-theme="dark"\]\) \{([\s\S]*?)\n\}/);
+// ------------------------------------------------------------ 3. Grassroots tokens (the M24E scheme, restored)
+const grassBlock = tokens.match(/:root\[data-app="grass"\] \{([\s\S]*?)\n\}/);
 const darkBlock = tokens.match(/:root\[data-app="grass"\]\[data-theme="dark"\] \{([\s\S]*?)\n\}/);
-ok(!!lightBlock && /--sb-surface: #eaefe8/.test(lightBlock[1]) && /--sb-ink: #1f2a24/.test(lightBlock[1]) && /--sb-green: #33ee7c/.test(lightBlock[1]) && /--sb-tab-line: #7c957b/.test(lightBlock[1]), 'Grassroots light: the Sage palette (sage surfaces, deep desaturated ink, #33EE7C action)');
-ok(/--grass-sage: #7c957b/.test(tokens) && /--grass-sage-2: #8ca08b/.test(tokens) && /--grass-sage-light: #b7c4b5/.test(tokens) && /--grass-deep: #516058/.test(tokens), 'Grassroots light: the four Sage reference values are the named tokens');
-ok(!!darkBlock && darkBlock[1].trim() === '--sb-workspace: #252e26;', 'Grassroots dark: only the workspace green is declared — the shared dark palette is unchanged');
+ok(!!grassBlock && /--sb-workspace: #e5f5e9/.test(grassBlock[1]) && /--grass-line: rgba\(255, 255, 255, 0\.52\)/.test(grassBlock[1]) && /--grass-grain/.test(grassBlock[1]) && /--grass-band/.test(grassBlock[1]), 'Grassroots light: the M24E workspace (#E5F5E9) and its turf tokens — the Sage palette is reverted');
+ok(!/--grass-sage|--sb-font-grass|:root\[data-app="grass"\]:not\(\[data-theme="dark"\]\)/.test(tokens), 'Grassroots light: no Sage token and no Sage override block remains');
+ok(!!darkBlock && /--sb-workspace: #252e26/.test(darkBlock[1]) && /--grass-line: rgba\(255, 255, 255, 0\.10\)/.test(darkBlock[1]) && darkBlock[1].trim().split('\n').length === 4, 'Grassroots dark: the M24E declarations (workspace green and the three turf tokens) — the shared dark palette is unchanged');
 const frozen = JSON.parse(read('e2e/fixtures/m24e-grassroots-dark-tokens.json'));
 ok(frozen.tokens['--sb-workspace'] === '#252e26' && frozen.computed.content.bg === 'rgb(37, 46, 38)' && frozen.computed.sidebar.bg === 'rgb(18, 20, 21)', 'the frozen M24E dark values are on file for the live comparison (workspace #252e26, sidebar #121415)');
 
-// ------------------------------------------------------------ 4. no pitch lines
-ok(!/grass-line|grass-grain|grass-band/.test(tokens + platform), 'no Grassroots turf / pitch-line token remains');
-ok(!/:root\[data-app="grass"\] \.content::before|:root\[data-app="grass"\] \.content::after/.test(platform), 'no pitch markings drawn behind the Grassroots workspace');
-const grassRulesAll = [...platform.matchAll(/^[^\n{]*data-app="grass"[^\n{]*\{[^}]*\}/gm)].map((m) => m[0]);
-ok(grassRulesAll.length > 0 && grassRulesAll.every((r) => !/repeating-linear-gradient|--grass-line|--auth-pitch/.test(r)), 'no blade-of-grass gradient or pitch token inside any Grassroots rule');
-ok(/:root\[data-app="grass"\] \.login\.auth-page::before, :root\[data-app="grass"\] \.login\.auth-page::after \{ display: none; \}/.test(platform) && /:root\[data-app="grass"\] \.login\.auth-page \{[^}]*background-image: none/.test(platform), 'the Grassroots entry page draws no pitch motif and no grain');
+// ------------------------------------------------------------ 4. the Grassroots turf and pitch (M24E, restored)
+ok(/:root\[data-app="grass"\] \.content \{[^}]*--grass-grain/.test(platform) && /:root\[data-app="grass"\] \.content::before \{/.test(platform) && /:root\[data-app="grass"\] \.content::after \{/.test(platform), 'the Grassroots turf grain and pitch markings stand behind the workspace again (M24E)');
+ok(/:root\[data-app="grass"\] \.auth-promo \{[^}]*repeating-linear-gradient\(103deg/.test(platform), 'the Grassroots entry introduction carries the blade-of-grass bands again (M24E)');
+ok(!/:root\[data-app="grass"\] \.login\.auth-page \{/.test(platform) && !/:root\[data-app="grass"\] \.login\.auth-page::before/.test(platform) && !/:root\[data-app="grass"\] \.brand-sub/.test(platform), 'no M24F Grassroots entry override remains (no Sage page, no hidden pitch, no serif)');
 ok(!fs.existsSync(path.join(ROOT, 'scoutbox-player/src/components/PitchBackdrop.tsx')) && !/PitchBackdrop/.test(read('scoutbox-player/src/app/onboarding.tsx')), 'the Player draws no pitch backdrop');
 
 // ------------------------------------------------------------ 5. grass photograph scope
@@ -93,13 +90,9 @@ function walkRefs(d) {
 }
 for (const r of ['scoutbox-club', 'scoutbox-grassroots', 'scoutbox-agent', 'scoutbox-admin', 'scoutbox-player', 'design-system', 'e2e']) walkRefs(path.join(ROOT, r));
 const codeRefs = refs.filter((p) => !/\.(md|txt)$/.test(p) && !/^e2e\//.test(p));
-ok(codeRefs.length === 1 && codeRefs[0] === 'scoutbox-grassroots/src/styles.css', `the grass photograph is referenced by one stylesheet only, the one only the Grassroots bundle carries (${codeRefs.join(', ')})`);
-const grassCss = read('scoutbox-grassroots/src/styles.css');
-const grassRules = [...grassCss.matchAll(/^([^\n{]*)\{[^}]*grassroots-auth-grass[^}]*\}/gm)].map((m) => m[1].trim());
-ok(grassRules.length === 1 && grassRules[0] === ':root[data-app="grass"] .auth-promo', `…and by one rule: the Grassroots entry's introduction panel (${grassRules.join(' | ')})`);
-ok(!/grassroots-auth-grass/.test(platform) && !/grassroots-auth-grass/.test(read('design-system/tokens.css')), 'the shared stylesheets (platform.css, tokens.css) never reference the photograph — Pro, Agent and Trust & Safety ship none of its bytes');
+ok(codeRefs.length === 0 && !fs.existsSync(path.join(ROOT, 'design-system/assets/grassroots-auth-grass.jpg')), `the grass photograph is gone: no asset on disk and no stylesheet or source reference (${codeRefs.join(', ') || 'none'})`);
+ok(!/grassroots-auth-grass/.test(platform + tokens + read('scoutbox-grassroots/src/styles.css')), 'no stylesheet references the photograph');
 ok(!/grassroots-auth-grass/.test(read('scoutbox-player/src/app/onboarding.tsx') + read('scoutbox-club/src/App.tsx') + read('scoutbox-agent/src/App.tsx') + read('scoutbox-admin/src/App.tsx')), 'no other application references the photograph');
-ok(fs.existsSync(path.join(ROOT, 'design-system/assets/GRASS-PHOTO-LICENCE.txt')), 'the photograph ships with its licence note');
 
 // ------------------------------------------------------------ 6. Agent entry fixed light
 const agentBlock = platform.match(/:root\[data-app="agent"\] \.login\.auth-page \{([\s\S]*?)\n\}/);

@@ -1,7 +1,8 @@
 // M24F — live visual-quality journeys, in a real browser against the real
-// bundles and a live scoutbox-server: the Grassroots entry (photograph on the
-// left, serif "Grassroots", row hover, title-cased metadata), the Grassroots
-// LIGHT workspace in Sage with no pitch lines, the Grassroots DARK workspace
+// bundles and a live scoutbox-server: the Grassroots entry (its M24E scheme —
+// the blade-banded introduction, Inter, row hover, title-cased metadata), the
+// Grassroots LIGHT workspace (M24E: #E5F5E9, turf grain, pitch markings — the
+// M24F Sage palette was reverted at the Founder's direction), the Grassroots DARK workspace
 // unchanged against the frozen M24E values, the Agent entry fixed LIGHT with
 // the saved dark theme restored after sign-in, the Player's major routes and
 // the guardian's requests in their M24F composition, and the de-boxed Pro /
@@ -80,40 +81,54 @@ async function enter(ctx, port, org, name, role, who) {
 
 // ================================================================== G — the Grassroots entry
 console.log('\n— G: the Grassroots entry —');
+// the Pro entry is the shared M24C/M24E scheme (brand-green page, soft-green introduction, deep-green form); Grassroots must match it again
+const proRef = await (async () => {
+  const ctx = await ctxFor(1440); const page = watch(await ctx.newPage(), 'pro entry reference');
+  await page.goto(`${origin(PORTS.club)}/`); await page.waitForSelector('.org-card', { timeout: 25000 });
+  const r = await page.evaluate(() => { const cs = (el) => getComputedStyle(el); return { formBg: cs(document.querySelector('.auth-form')).backgroundColor, pageBg: cs(document.querySelector('.login.auth-page')).backgroundColor, promoBg: cs(document.querySelector('.auth-promo')).backgroundColor, pitch: (() => { const b = cs(document.querySelector('.login.auth-page'), '::before'); return b.display === 'none' || b.content === 'none' || b.content === 'normal' ? 'none' : `${b.display}/${b.content}`; })() }; });
+  await ctx.close(); return r;
+})();
 for (const w of WIDTHS) {
   for (const saved of ['light', 'dark']) {
     const ctx = await ctxFor(w, undefined, { [origin(PORTS.grassroots)]: { 'sb-theme:grass': saved } });
     const page = watch(await ctx.newPage(), `grassroots entry ${w} ${saved}`);
     await page.goto(`${origin(PORTS.grassroots)}/`); await page.waitForSelector('.org-card', { timeout: 25000 });
     const r = await page.evaluate(async () => {
-      await document.fonts.ready; await Promise.all(['italic 400 24px "Instrument Serif"', '400 14px Inter'].map((f) => document.fonts.load(f).catch(() => null)));
+      await document.fonts.ready; await document.fonts.load('400 14px Inter').catch(() => null);
       const promo = document.querySelector('.auth-promo'); const form = document.querySelector('.auth-form'); const card = document.querySelector('.auth-card');
       const cs = (el) => getComputedStyle(el);
       const pr = promo.getBoundingClientRect(); const fr = form.getBoundingClientRect();
       return {
-        photo: /grassroots-auth-grass/.test(cs(promo).backgroundImage),
+        photo: /url\(/.test(cs(promo).backgroundImage) || /url\(/.test(cs(form).backgroundImage) || /url\(/.test(cs(document.querySelector('.login.auth-page')).backgroundImage),
+        blades: /repeating-linear-gradient/.test(cs(promo).backgroundImage),
         formHasImage: cs(form).backgroundImage !== 'none',
-        formBg: cs(form).backgroundColor, pageBg: cs(document.querySelector('.login.auth-page')).backgroundColor,
-        promoLeftOfForm: Math.round(pr.right) <= Math.round(fr.left) + 1, promoAboveForm: Math.round(pr.bottom) <= Math.round(fr.top) + 1, promoH: Math.round(pr.height),
+        formBg: cs(form).backgroundColor, pageBg: cs(document.querySelector('.login.auth-page')).backgroundColor, promoBg: cs(promo).backgroundColor,
+        promoLeftOfForm: Math.round(pr.right) <= Math.round(fr.left) + 1, promoAboveForm: Math.round(pr.bottom) <= Math.round(fr.top) + 1,
         toggle: document.querySelectorAll('[data-theme-toggle], .p-theme-toggle, [role="switch"]').length,
-        serif: cs(document.querySelector('.auth-form h1 .brand-sub')).fontFamily, serifLoaded: document.fonts.check('italic 400 24px "Instrument Serif"'),
+        sub: cs(document.querySelector('.auth-form h1 .brand-sub')).fontFamily, subStyle: cs(document.querySelector('.auth-form h1 .brand-sub')).fontStyle,
         ui: cs(document.querySelector('.auth-label')).fontFamily,
         meta: [...document.querySelectorAll('.auth-row-meta')].map((m) => m.textContent.trim()),
         rowBg: cs(document.querySelector('.org-card')).backgroundColor, rowRadius: cs(document.querySelector('.org-card')).borderRadius,
         pitch: (() => { const b = cs(document.querySelector('.login.auth-page'), '::before'); return b.display === 'none' || b.content === 'none' || b.content === 'normal' ? 'none' : `${b.display}/${b.content}`; })(),
-        promoAria: promo.getAttribute('aria-hidden'), cardW: Math.round(card.getBoundingClientRect().width),
+        cardW: Math.round(card.getBoundingClientRect().width),
+        // the live bundle's computed ::before is not observable here (a known limitation); prove the pitch by the rules in force instead
+        rules: (() => { const sel = []; for (const ss of document.styleSheets) { try { for (const r of ss.cssRules) if (r.selectorText) sel.push(r.selectorText); } catch {} } return sel; })(),
       };
     });
+    r.pitchRule = r.rules.some((t) => /\.login\.auth-page::before/.test(t) && !/data-app="grass"/.test(t));
+    r.pitchHidden = r.rules.some((t) => /data-app="grass"\] \.login\.auth-page::before/.test(t));
     const tag = `Grassroots entry ${w}px (${saved} saved)`;
-    ok(r.photo && !r.formHasImage, `${tag}: the photograph is the introduction panel's background and never behind the form`);
-    ok(w >= 721 ? r.promoLeftOfForm : r.promoAboveForm && r.promoH <= 220, `${tag}: ${w >= 721 ? 'the photograph is the LEFT panel' : `the photograph is a short masthead above the form (${r.promoH}px)`}`);
-    ok(r.formBg === 'rgb(246, 248, 244)' && r.pageBg === 'rgb(47, 59, 52)', `${tag}: fixed appearance — off-white form on the deep sage page (${r.formBg} / ${r.pageBg})`);
+    ok(!r.photo && !r.formHasImage, `${tag}: no photograph anywhere on the entry (reverted)`);
+    ok(r.blades, `${tag}: the introduction carries the M24E blade-of-grass bands`);
+    ok(w >= 721 ? r.promoLeftOfForm : r.promoAboveForm, `${tag}: the introduction is ${w >= 721 ? 'the LEFT panel' : 'stacked above the form'}`);
+    ok(r.formBg === proRef.formBg && r.pageBg === proRef.pageBg && r.promoBg === proRef.promoBg, `${tag}: the shared M24E entry scheme, same as Pro (${r.formBg} / ${r.pageBg} / ${r.promoBg})`);
+    ok(r.formBg !== 'rgb(246, 248, 244)' && r.pageBg !== 'rgb(47, 59, 52)', `${tag}: the M24F Sage entry colours are gone`);
     ok(r.toggle === 0, `${tag}: no theme control`);
-    ok(/Instrument Serif/.test(r.serif) && r.serifLoaded, `${tag}: "Grassroots" is set in the editorial serif (${r.serif.split(',')[0]})`);
-    ok(/^(")?Inter\b/.test(r.ui), `${tag}: the form labels stay Inter`);
+    ok(/^(")?Inter\b/.test(r.sub) && r.subStyle === 'normal', `${tag}: "Grassroots" is set in Inter, upright (${r.sub.split(',')[0]}) — the serif is reverted`);
+    ok(/^(")?Inter\b/.test(r.ui), `${tag}: the form labels are Inter`);
     ok(r.meta.length >= 2 && r.meta.every((m) => /^Club · Grassroots · (Verified|Verification Pending)/.test(m)), `${tag}: metadata reads "Club · Grassroots · Verified / Verification Pending" (${r.meta[0]})`);
     ok(/rgba\(0, 0, 0, 0\)|transparent/.test(r.rowBg) && r.rowRadius === '0px', `${tag}: the club rows are a list, not grey boxes`);
-    ok(r.pitch === 'none', `${tag}: no pitch motif behind the card (${r.pitch})`);
+    ok(r.pitchRule && !r.pitchHidden && r.pitch === proRef.pitch, `${tag}: the shared pitch motif rule is in force and no Grassroots rule hides it — the same motif as Pro (${r.pitch} / ${proRef.pitch})`);
     if (w >= 1024) {
       // hover is the text and the arrow, never a box
       const before = await page.evaluate(() => { const c = document.querySelector('.org-card'); return { name: getComputedStyle(c.querySelector('.org-name')).color, arrow: getComputedStyle(c.querySelector('.auth-row-arrow')).transform, bg: getComputedStyle(c).backgroundColor }; });
@@ -133,14 +148,15 @@ for (const w of [390, 1024, 1440]) {
   const r = await page.evaluate(() => {
     const cs = (el) => getComputedStyle(el);
     const content = document.querySelector('.content');
-    return { theme: document.documentElement.getAttribute('data-theme'), content: cs(content).backgroundColor, contentImage: cs(content).backgroundImage, before: cs(content, '::before').content, sidebar: cs(document.querySelector('nav.sidebar')).backgroundColor, ink: cs(document.querySelector('.content')).color, serif: cs(document.querySelector('nav.sidebar .brand-sub') ?? document.querySelector('.crumb')).fontFamily, grass: [...document.styleSheets].some((s) => { try { return [...s.cssRules].some((r) => /grassroots-auth-grass/.test(r.cssText) && !/auth-promo/.test(r.selectorText ?? '')); } catch { return false; } }) };
+    const rules = (() => { const sel = []; for (const ss of document.styleSheets) { try { for (const r of ss.cssRules) if (r.selectorText) sel.push(r.selectorText); } catch {} } return sel; })();
+    return { markings: rules.some((t) => t === ':root[data-app="grass"] .content::before') && rules.some((t) => t === ':root[data-app="grass"] .content::after'), theme: document.documentElement.getAttribute('data-theme'), content: cs(content).backgroundColor, contentImage: cs(content).backgroundImage, before: cs(content, '::before').content, sidebar: cs(document.querySelector('nav.sidebar')).backgroundColor, ink: cs(document.querySelector('.content')).color, serif: cs(document.querySelector('nav.sidebar .brand-sub') ?? document.querySelector('.crumb')).fontFamily, grass: [...document.styleSheets].some((s) => { try { return [...s.cssRules].some((r) => /grassroots-auth-grass/.test(r.cssText) && !/auth-promo/.test(r.selectorText ?? '')); } catch { return false; } }) };
   });
   const tag = `Grassroots light ${w}px`;
-  ok(r.content === 'rgb(243, 245, 241)' && r.sidebar === 'rgb(234, 239, 232)', `${tag}: Sage canvas and sidebar (${r.content} / ${r.sidebar})`);
-  ok(r.contentImage === 'none' && (r.before === 'none' || r.before === 'normal'), `${tag}: no pitch lines, no grain, no photograph behind the workspace`);
-  ok(r.ink === 'rgb(31, 42, 36)', `${tag}: deep desaturated green ink (${r.ink})`);
-  ok(!r.grass, `${tag}: no stylesheet rule puts the photograph anywhere but the entry panel`);
-  if (w === 1440) ok(/Instrument Serif/.test(r.serif), `${tag}: the sidebar's "Grassroots" is the editorial serif`);
+  ok(r.content === 'rgb(229, 245, 233)' && r.sidebar === 'rgb(255, 255, 255)', `${tag}: the M24E mint canvas and white sidebar (${r.content} / ${r.sidebar}) — Sage reverted`);
+  ok(/repeating-linear-gradient/.test(r.contentImage) && !/url\(/.test(r.contentImage) && r.markings, `${tag}: the turf grain and the pitch-marking rules are back behind the workspace, no photograph (${r.contentImage.slice(0, 40)}…)`);
+  ok(r.ink === 'rgb(30, 41, 35)', `${tag}: the M24E ink (${r.ink})`);
+  ok(!r.grass, `${tag}: no stylesheet rule puts a photograph anywhere`);
+  if (w === 1440) ok(/^(")?Inter\b/.test(r.serif), `${tag}: the sidebar's "Grassroots" is Inter (serif reverted)`);
   // the Coaches page: an editorial page, not six boxes
   if (w === 390) await page.click('.nav-hamburger').catch(() => {});
   await page.evaluate(() => { location.hash = '#/coaches'; }); await sleep(900);
@@ -177,7 +193,7 @@ for (const w of [390, 1024, 1440]) {
   ok(r.theme === 'dark' && diff.length === 0, `Grassroots dark: every one of the ${Object.keys(frozen.tokens).length} M24E tokens is unchanged${diff.length ? ` (changed: ${diff.map((k) => `${k} ${frozen.tokens[k]} → ${r.tokens[k]}`).join(', ')})` : ''}`);
   const same = ['content', 'sidebar', 'topbar', 'body', 'navActive'].every((k) => JSON.stringify(frozen.computed[k]) === JSON.stringify(r.computed[k]));
   ok(same, `Grassroots dark: the workspace, sidebar, top bar, body and active navigation render the M24E colours (${r.computed.content.bg} / ${r.computed.sidebar.bg})`);
-  ok(r.image === 'none', 'Grassroots dark: no photograph, no texture');
+  ok(!/url\(/.test(r.image) && /repeating-linear-gradient/.test(r.image), 'Grassroots dark: no photograph; the M24E grain stays');
   await ctx.close();
 }
 

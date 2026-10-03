@@ -25,23 +25,6 @@
   font-display: swap;
   src: url('./fonts/Inter-Italic-VariableFont_opsz,wght.ttf') format('truetype');
 }
-/* M24F — Instrument Serif (SIL OFL 1.1, fonts/InstrumentSerif-OFL.txt): the
-   editorial display face for the word "Grassroots" on the Grassroots entry
-   screen and sidebar identity. Nothing else in the product is set in it. */
-@font-face {
-  font-family: 'Instrument Serif';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('./fonts/InstrumentSerif-Regular.ttf') format('truetype');
-}
-@font-face {
-  font-family: 'Instrument Serif';
-  font-style: italic;
-  font-weight: 400;
-  font-display: swap;
-  src: url('./fonts/InstrumentSerif-Italic.ttf') format('truetype');
-}
 @font-face {
   font-family: 'Albert Sans';
   font-style: normal;

@@ -1,3 +1,16 @@
+> **Reverted (Founder's direction, after the M24F review).** The Grassroots
+> colour scheme and typography described below were rolled back to their
+> M24E state in the same session: the `#E5F5E9` light workspace with its
+> turf grain and pitch markings, the `#252E26` dark workspace, the shared
+> M24C/M24E entry scheme (brand-green page, blade-banded introduction,
+> deep-green form) and Inter for the word "Grassroots". The real-grass
+> photograph and Instrument Serif are removed from the repository. What
+> remains of M24F in Grassroots is structural, not chromatic: the club rows
+> as a hairline list with text / arrow hover, the title-cased metadata, the
+> editorial Coaches page, ruled rows and the emoji removal. The gates
+> (`m24fVisualAudit`, `m24fVisualLive`) now assert the restored M24E scheme.
+> The text below is kept as the record of what was tried.
+
 # M24F — The Grassroots visual system
 
 **The grass photograph is used only on the Grassroots unauthenticated

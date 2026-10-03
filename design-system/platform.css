@@ -439,7 +439,23 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .palette-row:hover .palette-pin, .palette-row.selected .palette-pin, .palette-pin.pinned { opacity: 1; }
 .palette-pin.pinned { color: var(--sb-gold); }
 
-/* M24F — no turf, no pitch markings: the Grassroots workspace is the plain Sage canvas (tokens.css). */
+/* ---------- Grassroots turf: barely visible grain and pitch markings ---------- */
+:root[data-app="grass"] .content {
+  background-color: var(--sb-workspace);
+  background-image:
+    repeating-linear-gradient(103deg, transparent 0px, transparent 3px, var(--grass-grain) 3px, var(--grass-grain) 4px, transparent 4px, transparent 9px),
+    repeating-linear-gradient(90deg, transparent 0px, transparent 110px, var(--grass-band) 110px, var(--grass-band) 220px);
+}
+:root[data-app="grass"] .content::before {
+  content: ''; position: absolute; pointer-events: none; z-index: -1; top: 105px; left: 4%; right: 4%; height: 400px;
+  border: 1px solid var(--grass-line); border-radius: 2px;
+  background-image: linear-gradient(var(--grass-line), var(--grass-line)), radial-gradient(circle at center, transparent 0 66px, var(--grass-line) 66px 67px, transparent 67px), radial-gradient(circle at center, var(--grass-line) 0 2px, transparent 2px);
+  background-size: 1px 100%, 100% 100%, 100% 100%; background-position: center; background-repeat: no-repeat;
+}
+:root[data-app="grass"] .content::after {
+  content: ''; position: absolute; pointer-events: none; z-index: -1; top: 205px; left: 4%; width: 12%; height: 200px;
+  border: 1px solid var(--grass-line); border-left: 0;
+}
 
 /* ---------- M24F editorial page structure ----------
    A card is not the default primitive. These classes compose a page from
@@ -529,6 +545,8 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
   .f-strip > div, .stat { padding: 12px; }
   .f-strip .f-big-number, .stat .v { font-size: 28px; }
   .f-display { font-size: 27px; }
+  :root[data-app="grass"] .content::before { top: 130px; height: 480px; background-size: 100% 1px, 100% 100%, 100% 100%; }
+  :root[data-app="grass"] .content::after { top: 130px; left: 30%; width: 40%; height: 75px; border: 1px solid var(--grass-line); border-top: 0; }
 }
 @media (max-width: 860px) {
   .filters input[type='text'], .filters input:not([type]) { width: 100%; flex: 1 1 100%; }
@@ -702,70 +720,30 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .auth-form .login-signature { color: var(--auth-soft); margin-top: 8px; }
 .auth-form .login-signature span { color: var(--auth-ink); }
 .auth-form .wordmark { color: var(--auth-ink); }
-/* ------------------------------------------------------------- M24F Grassroots entry
-   ONE fixed appearance, the Sage direction: a deep desaturated green page, a
-   quiet off-white form panel with deep green text, the ScoutBox green only
-   on the submit. No pitch motif, no grain. The introduction panel on the
-   left IS the real grass photograph (design-system/assets, CC0, tinted
-   toward the ScoutBox green) — the only place in ScoutBox that
-   uses it: never a texture, never behind a form, never on an authenticated
-   page. The photograph is decorative (a CSS background on a panel whose
-   text is the heading), so it is outside the accessibility tree. The url()
-   itself lives in scoutbox-grassroots/src/styles.css, the one stylesheet
-   only the Grassroots bundle carries, so no other application ships the
-   bytes; this shared file sets the panel's colour, the gradient and the
-   geometry. */
-:root[data-app="grass"] .login.auth-page {
-  --auth-promo: #2f3b34; --auth-panel: #f6f8f4; --auth-dark: #2f3b34; --auth-deep: #1f2a24;
-  --auth-ink: #1f2a24; --auth-soft: #5a6961; --auth-promo-ink: #ffffff; --auth-pale: #e4ebe1;
-  --auth-line: rgba(31, 42, 36, 0.18); --auth-line-strong: rgba(31, 42, 36, 0.4); --auth-focus: #2d7a4b;
-  --auth-card-edge: rgba(255, 255, 255, 0.12); --auth-submit: #33ee7c; --auth-submit-ink: #10331f; --auth-green: #2a6f45;
-  background-color: #2f3b34; background-image: none; color-scheme: light;
-}
-:root[data-app="grass"] .login.auth-page::before, :root[data-app="grass"] .login.auth-page::after { display: none; }
-:root[data-app="grass"] .auth-card { box-shadow: 0 30px 70px rgba(10, 18, 14, 0.45), 0 2px 6px rgba(10, 18, 14, 0.25); border-color: rgba(255, 255, 255, 0.14); }
+/* Grassroots: the bright introduction carries the turf — blades of grass and
+   broad mowing bands in the deep green, the same geometry as the Grassroots
+   workspace texture, no lines. */
 :root[data-app="grass"] .auth-promo {
-  background-color: #244a33;
-  background-image: linear-gradient(180deg, rgba(20, 38, 28, 0.08) 0%, rgba(20, 38, 28, 0.02) 40%, rgba(16, 32, 23, 0.62) 100%);
-  background-size: cover, cover; background-position: center, center 60%; background-repeat: no-repeat;
-  justify-content: flex-end; padding: 48px 40px 44px; min-height: 100%;
+  background-color: var(--auth-promo);
+  background-image:
+    repeating-linear-gradient(103deg, transparent 0 3px, rgba(17, 56, 34, 0.09) 3px 4px, transparent 4px 9px),
+    repeating-linear-gradient(97deg, transparent 0 5px, rgba(17, 56, 34, 0.05) 5px 6px, transparent 6px 13px),
+    repeating-linear-gradient(90deg, transparent 0 56px, rgba(17, 56, 34, 0.06) 56px 112px);
 }
-:root[data-app="grass"] .auth-promo h2, :root[data-app="grass"] .auth-summary, :root[data-app="grass"] .auth-points, :root[data-app="grass"] .auth-note { color: #ffffff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.25); }
-:root[data-app="grass"] .auth-promo h2 { font-size: 34px; letter-spacing: -1px; }
-:root[data-app="grass"] .auth-points li::before { background: #ffffff; }
-:root[data-app="grass"] .auth-promo .auth-note { opacity: 0.9; }
-:root[data-app="grass"] .auth-form .wordmark { color: var(--auth-ink); }
-:root[data-app="grass"] .auth-form h1 .wordmark::after { background: #33ee7c; }
-:root[data-app="grass"] .auth-form h1 .tm { color: var(--auth-soft); }
-/* the word "Grassroots": the editorial serif (Instrument Serif, OFL) — the one deliberate serif in the product */
-:root[data-app="grass"] .brand-sub, :root[data-app="grass"] .auth-form h1 .brand-sub { font-family: var(--sb-font-grass, Georgia, serif); font-style: italic; font-weight: 400; letter-spacing: 0; text-transform: none; }
-:root[data-app="grass"] .auth-form h1 .brand-sub { font-size: 24px !important; color: var(--auth-ink); line-height: 1; transform: translateY(1px); }
-:root[data-app="grass"] .sidebar .brand .brand-sub { font-size: 19px; color: var(--sb-ink); line-height: 1; }
-:root[data-app="grass"] .auth-form .org-card .org-name { color: var(--auth-ink); }
-:root[data-app="grass"] .auth-form .org-card:hover .org-name, :root[data-app="grass"] .auth-form .org-card.selected .org-name { color: var(--auth-green); }
-:root[data-app="grass"] .auth-form .org-card:hover .auth-row-arrow, :root[data-app="grass"] .auth-form .org-card.selected .auth-row-arrow { color: var(--auth-green); }
-:root[data-app="grass"] .auth-form select { color-scheme: light; }
-:root[data-app="grass"] .auth-form select option { background: #ffffff; color: var(--auth-ink); }
-:root[data-app="grass"] .auth-form .notice { background: #fbe4e1; border-color: #e8b3ab; color: #913b32; }
-:root[data-app="grass"] .auth-form button.primary:active { background: var(--auth-deep); color: #ffffff; }
-:root[data-app="grass"] .auth-form .login-signature span { color: var(--auth-ink); }
-/* M24F — the two LIGHT entry screens (Grassroots, Agent) ignore the saved dark
-   theme: the shared dark-theme control rules must not paint their tabs, rows
-   and fields. These win on specificity over the generic dark rules. */
-:root[data-theme="dark"] .login.auth-page[data-auth-app="grass"] :is(.auth-tab, .org-card, .auth-row, button.auth-eye, button:not(.primary)),
+/* M24F — the Grassroots club rows are a list whatever theme the person saved:
+   the shared dark-theme control rules must not box them. Colour and type
+   follow the M24E scheme untouched. */
+:root[data-theme="dark"] .login.auth-page[data-auth-app="grass"] :is(.org-card, .auth-row) { background: none; box-shadow: none; border-color: transparent; border-bottom-color: var(--auth-line); }
+/* M24F — the LIGHT Agent entry ignores the saved dark theme: the shared
+   dark-theme control rules must not paint its tabs, rows and fields. These
+   win on specificity over the generic dark rules. */
 :root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] :is(.auth-tab, .org-card, .auth-row, button.auth-eye, button:not(.primary)) { background: none; box-shadow: none; color: var(--auth-ink); border-color: var(--auth-line-strong); }
-:root[data-theme="dark"] .login.auth-page[data-auth-app="grass"] :is(.auth-tab, button.auth-eye, .org-card, .auth-row),
 :root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] :is(.auth-tab, button.auth-eye, .org-card, .auth-row) { border-color: transparent; }
-:root[data-theme="dark"] .login.auth-page[data-auth-app="grass"] :is(.org-card, .auth-row),
 :root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] :is(.org-card, .auth-row) { border-bottom-color: var(--auth-line); }
-:root[data-theme="dark"] .login.auth-page[data-auth-app="grass"] .auth-form :is(input, select, textarea),
 :root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] .auth-form :is(input, select, textarea) { background: transparent; color: var(--auth-ink); border-color: var(--auth-line); box-shadow: none; }
-:root[data-theme="dark"] .login.auth-page[data-auth-app="grass"] .auth-form :is(input, textarea)::placeholder,
 :root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] .auth-form :is(input, textarea)::placeholder { color: var(--auth-soft); }
-:root[data-theme="dark"] .login.auth-page[data-auth-app="grass"] .auth-form .org-name, :root[data-theme="dark"] .login.auth-page[data-auth-app="grass"] .auth-form .auth-row-meta, :root[data-theme="dark"] .login.auth-page[data-auth-app="grass"] .auth-form .auth-label, :root[data-theme="dark"] .login.auth-page[data-auth-app="grass"] .auth-form h1,
 :root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] .auth-form .org-name, :root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] .auth-form .auth-row-meta, :root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] .auth-form .auth-label, :root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] .auth-form h1 { color: inherit; }
-:root[data-theme="dark"] .login.auth-page[data-auth-app="grass"] .auth-form .auth-row-meta, :root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] .auth-form .auth-row-meta { color: var(--auth-soft); }
-:root[data-theme="dark"] .login.auth-page[data-auth-app="grass"] .auth-form :is(.org-card:hover, .auth-row:hover, .org-card.selected) :is(.org-name, .auth-row-arrow),
+:root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] .auth-form .auth-row-meta { color: var(--auth-soft); }
 :root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] .auth-form :is(.org-card:hover, .auth-row:hover, .org-card.selected) :is(.org-name, .auth-row-arrow) { color: var(--auth-green); }
 
 /* ---------------------------------------------------------------- M24F Agent entry
@@ -803,11 +781,6 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
   .login.auth-page::after { left: 28%; width: 44%; top: 54px; height: 90px; border: 1px solid var(--auth-pitch); border-top: 0; border-radius: 0 0 2px 2px; }
   .auth-card { grid-template-columns: 1fr; border-radius: 12px; }
   :root[data-app="agent"] .auth-promo { border-right: 0; border-bottom: 1px solid rgba(48, 45, 37, 0.08); }
-  /* M24F — on a phone the Grassroots photograph is a short masthead above the form (the headline over it); the form stays on its clean surface */
-  :root[data-app="grass"] .auth-promo { min-height: 0; height: 200px; padding: 20px 22px 18px; justify-content: flex-end; gap: 6px; background-position: center, center 55%; }
-  :root[data-app="grass"] .auth-promo h2 { font-size: 22px; }
-  :root[data-app="grass"] .auth-summary { font-size: 13px; }
-  :root[data-app="grass"] .auth-promo .auth-note { display: none; }
   .auth-card { grid-template-columns: 1fr; border-radius: 12px; }
   /* M24D — a phone shows the headline and one sentence; the points are desktop reading. */
   .auth-promo { padding: 28px 24px; gap: 10px; }
