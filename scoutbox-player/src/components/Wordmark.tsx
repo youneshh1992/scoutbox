@@ -12,15 +12,22 @@ export function Wordmark({ size = 24, color, tmColor, label }: { size?: number; 
   const c = useColors();
   const ink = color ?? c.text;
   const square = Math.max(5, Math.round(size * 0.25));
+  const lineHeight = Math.round(size * 1.08);
+  const tmSize = Math.max(7, Math.round(size * 0.3));
+  // M24F.2 — the ™ rides above the green square, tight to the final "x": one
+  // column after the letters (2px gap), the square on the baseline, the ™ at
+  // the top. The mark reads as one word.
   return (
     <View style={styles.row} accessibilityRole="header" aria-level={1} accessibilityLabel={label ?? 'ScoutBox'}>
-      <Text brand style={{ color: ink, fontSize: size, fontWeight: '800', letterSpacing: -size * 0.046, lineHeight: Math.round(size * 1.08) }}>ScoutBox</Text>
-      <View style={{ width: square, height: square, borderRadius: 1, marginLeft: 3, backgroundColor: c.accent }} />
-      <Text style={{ color: tmColor ?? c.muted, fontSize: Math.max(7, Math.round(size * 0.33)), fontWeight: '700', letterSpacing: 0.4, lineHeight: Math.max(9, Math.round(size * 0.42)), alignSelf: 'flex-start', marginLeft: 1 }} accessibilityLabel="trademark">TM</Text>
+      <Text brand style={{ color: ink, fontSize: size, fontWeight: '800', letterSpacing: -size * 0.046, lineHeight }}>ScoutBox</Text>
+      <View style={{ marginLeft: 2, height: lineHeight, justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: Math.round(size * 0.06), paddingBottom: Math.round(size * 0.17) }} testID="wordmark-mark">
+        <Text style={{ color: tmColor ?? c.muted, fontSize: tmSize, fontWeight: '700', letterSpacing: 0.3, lineHeight: tmSize + 1 }} accessibilityLabel="trademark">TM</Text>
+        <View style={{ width: square, height: square, borderRadius: 1, backgroundColor: c.accent }} />
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'baseline' },
+  row: { flexDirection: 'row', alignItems: 'flex-end' },
 });
