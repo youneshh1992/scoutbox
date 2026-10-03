@@ -167,6 +167,9 @@ export default function App() {
     : <Login onLogin={login} />;
 }
 
+// M24F — presentation casing for the organisation metadata line ("Club · Grassroots · Verified"); the data value stays as it is.
+const orgTypeLabel = (type: string) => type === 'club' ? 'Club' : type === 'academy' ? 'Academy' : type === 'agency' ? 'Agency' : type.charAt(0).toUpperCase() + type.slice(1);
+
 function Login({ onLogin }: { onLogin: (s: Session) => void }) {
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -231,7 +234,7 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
             <div className="org-grid">
               {orgs.map((o) => (
                 <AuthRow key={o.id} label={o.name} selected={selected === o.id} onClick={() => setSelected(o.id)}
-                  meta={[o.type, o.plan, o.trustedPartner ? 'Trusted Partner' : null, o.type === 'club' ? (o.verified ? 'Verified' : 'verification pending') : null].filter(Boolean).join(' · ')} />
+                  meta={[orgTypeLabel(o.type), o.plan, o.trustedPartner ? 'Trusted Partner' : null, o.type === 'club' ? (o.verified ? 'Verified' : 'Verification Pending') : null].filter(Boolean).join(' · ')} />
               ))}
             </div>
           </div>

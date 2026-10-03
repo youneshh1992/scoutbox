@@ -26,7 +26,7 @@ dashboard).
   `.login.auth-page` never read `data-theme`; the page declares
   `color-scheme: dark` so native controls (select, scrollbars) match
   whatever the document attribute says.
-- **Agent**: its own dark personality, fixed — `#121415` introduction,
+- **Agent** (superseded by M24F — the Agent entry is now the fixed LIGHT cream presentation: `#F3EEE3` introduction, `#FDFAF4` form, dark ink, the gold held back for the label; still one fixed appearance, still no toggle, still ignoring the saved theme, which is restored after sign-in. The M24E paragraph is kept for the record.) Previously: its own dark personality, fixed — `#121415` introduction,
   `#202223` form, cream `#FDFAF4` ink, the muted gold `Agent` label on its
   cream badge. The previous rule that mapped the entry screen onto the
   saved cream / dark workspace tokens is gone; nothing on the Agent entry

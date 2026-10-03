@@ -193,16 +193,71 @@
   --sb-shadow-panel: inset 0 1px 0 #fff9, 0 2px 5px #705b3710;
 }
 
-/* ---------------------------------------- Grassroots: workspace surfaces */
+/* ---------------------------------------- Grassroots: the Sage light palette (M24F)
+   Calm sage greens, an off-white canvas, deep desaturated green text; the
+   ScoutBox green (#33EE7C) only for the primary action, the important
+   active state and the ScoutBox marker. Sampled from the Founder's Sage
+   reference: #7C957B, #8CA08B, #B7C4B5, #516058. No texture, no pitch
+   lines, no photograph on any authenticated surface. */
 :root[data-app="grass"] {
-  --sb-workspace: #e5f5e9;
-  --grass-line: rgba(255, 255, 255, 0.52);
-  --grass-grain: rgba(36, 59, 44, 0.018);
-  --grass-band: rgba(36, 59, 44, 0.009);
+  --grass-sage: #7c957b;
+  --grass-sage-2: #8ca08b;
+  --grass-sage-light: #b7c4b5;
+  --grass-deep: #516058;
+  --sb-font-grass: 'Instrument Serif', 'Iowan Old Style', Georgia, serif;  /* the word "Grassroots" only */
 }
+:root[data-app="grass"]:not([data-theme="dark"]) {
+  --sb-workspace: #f3f5f1;
+  --sb-paper: #f3f5f1;
+  --sb-white: #fbfcfa;
+  --sb-surface: #eaefe8;
+  --sb-topbar: #f7f9f6;
+  --sb-wash: #e2e9e0;
+  --sb-org: #f1f4ef;
+  --sb-th: #eef2ec;
+  --sb-note: #e8ede6;
+  --sb-note-ink: #3f4d45;
+  --sb-input: #fbfcfa;
+  --sb-input-border: #c6d1c4;
+  --sb-ink: #1f2a24;
+  --sb-quiet: #5a6961;
+  --sb-rule: #d8e0d5;
+  --sb-panel-border: #d8e0d5;
+  --sb-nav: #516058;
+  --sb-navlabel: #6d7d72;
+  --sb-crumb: #3a4840;
+  --sb-tool: #516058;
+  --sb-green: #33ee7c;
+  --sb-green-ink: #10331f;
+  --sb-green-deep: #3a4a41;
+  --sb-green-text: #2a6f45;
+  --sb-link: #2f6b47;
+  --sb-focus: #2d7a4b;
+  --sb-nav-active-bg: #d9e3d7;
+  --sb-nav-active-fg: #1f2a24;
+  --sb-nav-active-icon: #516058;
+  --sb-candidate-bg: #e4ebe1;
+  --sb-candidate-fg: #2b3a31;
+  --sb-tab-active: #1f2a24;
+  --sb-tab-line: #7c957b;
+  --sb-filter-active-bg: #dfe8dc;
+  --sb-filter-active-fg: #2b3a31;
+  --sb-filter-active-border: #b7c4b5;
+  --sb-mine: #e4ebe1;
+  --sb-avatar-bg: #d9e3d7;
+  --sb-avatar-fg: #3f4d45;
+  --sb-count-bg: #dfe6dc;
+  --sb-ok: #2a6f45;  --sb-ok-ink: #3f4d45;
+  --sb-outline-border: #c6d1c4;
+  --sb-outline-fg: #3f4d45;
+  --sb-kbd-border: #c6d1c4; --sb-kbd-fg: #5a6961;
+  --sb-track: #b7c4b5;
+  --sb-knob: #fbfcfa;
+  --sb-veil: rgba(31, 42, 36, 0.42);
+  --sb-shadow-pop: 0 12px 40px rgba(31, 42, 36, 0.14);
+}
+/* the Grassroots DARK theme is the shared dark palette with its own workspace
+   green — unchanged since M24A (M24F regression: e2e/fixtures/m24e-grassroots-dark-tokens.json) */
 :root[data-app="grass"][data-theme="dark"] {
   --sb-workspace: #252e26;
-  --grass-line: rgba(255, 255, 255, 0.10);
-  --grass-grain: rgba(255, 255, 255, 0.012);
-  --grass-band: rgba(255, 255, 255, 0.009);
 }

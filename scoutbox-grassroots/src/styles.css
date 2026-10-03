@@ -4,3 +4,11 @@
    data-app="grass" and data-theme select this application's palette. Keep
    app-specific rules (if any) below the import. */
 @import '../../design-system/platform.css';
+
+/* M24F — the real-grass photograph, the LEFT panel of the Grassroots sign-in /
+   sign-up screen and nothing else in ScoutBox. The rule is here, not in the
+   shared platform.css, so only the Grassroots bundle carries the bytes; the
+   shared file sets the panel's colour, gradient and geometry. */
+:root[data-app="grass"] .auth-promo {
+  background-image: linear-gradient(180deg, rgba(20, 38, 28, 0.08) 0%, rgba(20, 38, 28, 0.02) 40%, rgba(16, 32, 23, 0.62) 100%), url('../../design-system/assets/grassroots-auth-grass.jpg');
+}

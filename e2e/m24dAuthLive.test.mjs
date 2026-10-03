@@ -281,7 +281,7 @@ for (const [app, port] of [['Pro', PORTS.club], ['Grassroots', PORTS.grassroots]
   await a.click('[data-testid="switch-org"]'); await a.waitForSelector('.auth-card', { timeout: 15000 }); await sleep(300);
   const aref = atok ? (await fetch(`${API}/org/agent/clients`, { headers: { authorization: `Bearer ${atok}` } })).status : null;
   ok((await a.locator('nav.sidebar').count()) === 0 && (await a.locator('#agent-org-label').count()) === 1 && (aref === null || aref === 401), `Agent: Switch profile returns to the agency screen and the old token is refused (${aref})`);
-  ok((await a.evaluate(() => getComputedStyle(document.querySelector('.auth-form')).backgroundColor)) === 'rgb(32, 34, 35)', 'Agent: the entry screen is the fixed dark appearance');
+  ok((await a.evaluate(() => getComputedStyle(document.querySelector('.auth-form')).backgroundColor)) === 'rgb(253, 250, 244)', 'Agent: the entry screen is the fixed LIGHT cream appearance (M24F)');
   const ts = await ctx.newPage(); ts.on('pageerror', (e) => errors.push(`T&S exit: ${e}`));
   await ts.goto(`http://localhost:${PORTS.admin}/`); await ts.waitForSelector('.auth-card', { timeout: 25000 }); await ts.fill('input[type="password"]', 'scoutbox-admin'); await ts.click('button.primary'); await ts.waitForSelector('nav.sidebar', { timeout: 25000 });
   await ts.click('[data-testid="sign-out"]'); await ts.waitForSelector('.auth-card', { timeout: 15000 });

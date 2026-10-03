@@ -486,9 +486,10 @@ export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOp
  *  named. Same pills, same wording. */
 export function OrgChips({ org }: { org: { type: string; trustedPartner?: boolean; safeguardingCertified?: boolean; verified?: boolean } }) {
   // M24D — one quiet line of standing, not a row of badges: the same facts, as text.
+  // M24F — presentation casing: "Club · Verified · Safeguarding Certified"; the data values stay as they are.
   const facts = [
-    org.type,
-    org.type === 'club' ? (org.verified ? 'Verified club' : 'verification pending — U18 hidden') : null,
+    org.type === 'club' ? 'Club' : org.type === 'academy' ? 'Academy' : org.type.charAt(0).toUpperCase() + org.type.slice(1),
+    org.type === 'club' ? (org.verified ? 'Verified' : 'Verification Pending · U18 hidden') : null,
     org.trustedPartner ? 'Trusted Partner' : null,
     org.safeguardingCertified ? 'Safeguarding Certified' : null,
   ].filter(Boolean);

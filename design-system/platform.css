@@ -259,7 +259,10 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px
 :root[data-theme="dark"] .f-textbtn { background: none; border: 0; box-shadow: none; }
 
 /* pills → the reference's soft chips and dot statuses */
-.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; border-radius: 5px; padding: 3px 8px; border: 1px solid var(--sb-rule); color: var(--sb-quiet); background: var(--sb-white); white-space: nowrap; line-height: 1.4; }
+.pill { display: inline-block; vertical-align: middle; font-size: 11px; font-weight: 600; border-radius: 5px; padding: 3px 8px; border: 1px solid transparent; color: var(--sb-quiet); background: var(--sb-wash); white-space: nowrap; line-height: 1.4; }
+/* M24F — a pill is a label: its first letter is presented in upper case whatever the stored value; sentences are never title-cased */
+.pill::first-letter { text-transform: uppercase; }
+.pill svg { vertical-align: -2px; margin-right: 4px; }
 .pill.green { color: var(--sb-filter-active-fg); background: var(--sb-filter-active-bg); border-color: var(--sb-filter-active-border); }
 .pill.blue { color: var(--sb-info-ink); background: var(--sb-info-bg); border-color: transparent; }
 .pill.gold { color: var(--sb-gold-ink); background: var(--sb-gold-bg); border-color: transparent; }
@@ -270,26 +273,39 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px
 .f-status.pending { color: var(--sb-pending-ink); } .f-status.pending::before { background: var(--sb-pending); }
 .f-status.urgent { color: var(--sb-urgent-ink); } .f-status.urgent::before { background: var(--sb-urgent); }
 
-/* panels, rows, stats, tables */
-.ag-panel, .f-ruledaside, .stat, .list-row, .player-card, .attn-card, .f-ledger, .thread, .register-box {
+/* panels, rows, stats, tables
+   M24F — a card is not the default primitive: rows, stats, the attention
+   block and the filter bar are ruled by hairlines, not boxed. Panels that
+   genuinely hold a workspace (.ag-panel, the ledger, a thread, a player
+   card) keep their surface. */
+.ag-panel, .f-ruledaside, .player-card, .f-ledger, .thread, .register-box {
   background: var(--sb-white); border: 1px solid var(--sb-panel-border); box-shadow: var(--sb-shadow-panel);
 }
 .ag-panel, .f-ruledaside { border-radius: var(--sb-radius-panel); padding: 20px; min-width: 0; }
 .ag-panel h2 { margin-bottom: 10px; }
 .f-two { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 22px; }
 .f-strip, .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin: 0 0 20px; }
-.f-strip > div, .stat { padding: 18px; border-radius: 10px; }
+.f-strip > div, .stat { padding: 14px 0 12px; border-top: 2px solid var(--sb-rule); border-radius: 0; background: none; }
 .f-strip .f-big-number, .stat .v { display: block; font-size: 32px; font-weight: 650; letter-spacing: -1px; line-height: 1.1; margin-bottom: 7px; }
 .f-strip .f-kicker, .stat .k { font-size: 11px; letter-spacing: 0; text-transform: none; font-weight: 400; color: var(--sb-quiet); }
-.stat.warn { border-color: var(--sb-pending); }
+.stat.warn { border-top-color: var(--sb-pending); }
+/* a stat that is also a filter (the Rooms funnel strip) is the same ruled figure, not a button box */
+button.stat { background: none; border: 0; border-top: 2px solid var(--sb-rule); border-radius: 0; box-shadow: none; display: block; width: 100%; min-height: 0; color: var(--sb-ink); }
+button.stat:hover { filter: none; border-top-color: var(--sb-tab-line); }
+button.stat[aria-current="true"] { border-top-color: var(--sb-green-text); }
+:root[data-theme="dark"] button.stat { background: none; box-shadow: none; }
 .stat.warn .k { color: var(--sb-pending-ink); }
-.list-rows { display: flex; flex-direction: column; gap: 8px; }
-.list-row { border-radius: 10px; padding: 12px 14px; display: flex; gap: 12px; align-items: center; font-size: 13px; }
+.list-rows { display: flex; flex-direction: column; gap: 0; border-top: 1px solid var(--sb-rule); }
+.list-row { border-radius: 0; border-bottom: 1px solid var(--sb-rule); padding: 14px 4px; display: flex; gap: 14px; align-items: center; font-size: 13px; }
 .list-row .dim { color: var(--sb-quiet); font-size: 12px; }
+.list-row .list-rows { border-top: 0; }
+.list-row > button.grow { justify-content: flex-start; text-align: left; }
 .list-row[role="button"], .list-row[style*="cursor: pointer"] { cursor: pointer; }
-.list-row[role="button"]:hover { border-color: var(--sb-tab-line); }
-.notice { background: var(--sb-note); border: 0; color: var(--sb-note-ink); border-radius: 8px; padding: 14px; font-size: 12.5px; line-height: 1.6; }
-:root[data-theme="dark"] .notice { box-shadow: inset 0 1px 2px #00000025, 0 1px 0 #ffffff06; }
+.list-row[role="button"]:hover, .list-row[style*="cursor: pointer"]:hover { background: var(--sb-wash); }
+.list-row[role="button"]:hover b, .list-row[style*="cursor: pointer"]:hover b { color: var(--sb-link); }
+.notice { background: none; border: 0; border-left: 2px solid var(--sb-rule); color: var(--sb-quiet); border-radius: 0; padding: 2px 0 2px 14px; font-size: 12.5px; line-height: 1.6; max-width: 72ch; }
+:root[data-theme="dark"] .notice { box-shadow: none; }
+.notice.warn, .notice.block { border-left: 0; border-radius: 8px; padding: 12px 14px; max-width: none; }
 .notice.warn { background: var(--sb-gold-bg); color: var(--sb-gold-ink); }
 .notice.block { background: var(--sb-danger-bg); color: var(--sb-urgent-ink); }
 .f-note { padding: 14px; border-radius: 8px; background: var(--sb-note); color: var(--sb-note-ink); font-size: 12px; line-height: 1.7; }
@@ -310,7 +326,7 @@ table.data tbody tr:last-child td, .f-ledger tbody tr:last-child td { border-bot
 td small { display: block; font-size: 11px; color: var(--sb-quiet); margin-top: 4px; }
 .form-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 12px 0; }
 .form-grid label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 500; color: var(--sb-ink); }
-.filters { display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; align-items: center; background: var(--sb-white); border: 1px solid var(--sb-panel-border); border-radius: 9px; padding: 12px 14px; box-shadow: var(--sb-shadow-panel); }
+.filters { display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; align-items: center; background: none; border: 0; border-bottom: 1px solid var(--sb-rule); border-radius: 0; padding: 0 0 14px; box-shadow: none; }
 .filters input[type='text'] { width: 260px; }
 .filters label.chk { display: flex; align-items: center; gap: 6px; color: var(--sb-quiet); font-size: 13px; }
 .ag-tabs { display: flex; gap: 18px; flex-wrap: wrap; border-bottom: 1px solid var(--sb-rule); margin-bottom: 23px; }
@@ -361,7 +377,7 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .wall { background: var(--sb-danger-bg); border: 1px solid var(--sb-urgent); border-radius: 12px; padding: 18px 20px; margin-bottom: 18px; color: var(--sb-ink); }
 .wall b { color: var(--sb-urgent-ink); }
 .wall p { color: var(--sb-quiet); font-size: 13px; margin-top: 6px; }
-.attn-card { border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; }
+.attn-card { border-radius: 0; padding: 0 0 10px; margin-bottom: 22px; border-bottom: 1px solid var(--sb-rule); background: none; }
 .attn-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 650; color: var(--sb-navlabel); margin-bottom: 6px; }
 .attn-row { display: flex; align-items: center; gap: 10px; width: 100%; background: none; border: none; box-shadow: none; text-align: left; padding: 8px 4px; color: var(--sb-ink); border-radius: 8px; font-weight: 500; justify-content: flex-start; }
 .attn-row:hover { background: var(--sb-wash); filter: none; }
@@ -423,23 +439,43 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .palette-row:hover .palette-pin, .palette-row.selected .palette-pin, .palette-pin.pinned { opacity: 1; }
 .palette-pin.pinned { color: var(--sb-gold); }
 
-/* ---------- Grassroots turf: barely visible grain and pitch markings ---------- */
-:root[data-app="grass"] .content {
-  background-color: var(--sb-workspace);
-  background-image:
-    repeating-linear-gradient(103deg, transparent 0px, transparent 3px, var(--grass-grain) 3px, var(--grass-grain) 4px, transparent 4px, transparent 9px),
-    repeating-linear-gradient(90deg, transparent 0px, transparent 110px, var(--grass-band) 110px, var(--grass-band) 220px);
+/* M24F — no turf, no pitch markings: the Grassroots workspace is the plain Sage canvas (tokens.css). */
+
+/* ---------- M24F editorial page structure ----------
+   A card is not the default primitive. These classes compose a page from
+   headings, one supporting sentence, underlined fields in a row, hairline
+   records and text actions — whitespace and typography do the grouping. */
+.ed-page { max-width: 880px; display: flex; flex-direction: column; gap: 40px; }
+.ed-section { display: flex; flex-direction: column; gap: 14px; }
+.ed-h { font-size: 20px; font-weight: 650; letter-spacing: -0.5px; line-height: 1.2; color: var(--sb-ink); margin: 0; }
+.ed-lead { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--sb-quiet); max-width: 64ch; }
+.ed-lead.ed-more { color: var(--sb-ink); }
+.ed-disclose { font-size: inherit; color: var(--sb-link); padding: 0; }
+.ed-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 18px 24px; padding: 10px 0 6px; }
+.ed-field { display: flex; flex-direction: column; gap: 4px; min-width: 180px; flex: 1 1 180px; }
+.ed-field-wide { flex: 2 1 280px; }
+.ed-label { font-size: 11px; font-weight: 650; letter-spacing: 0.7px; text-transform: uppercase; color: var(--sb-navlabel); }
+.ed-form input, .ed-form select { width: 100%; max-width: none; background: transparent; border: 0; border-bottom: 1px solid var(--sb-input-border); border-radius: 0; padding: 8px 0; min-height: 38px; box-shadow: none; color: var(--sb-ink); }
+.ed-form input:focus, .ed-form select:focus { border-bottom-color: var(--sb-focus); outline: none; }
+.ed-form input:focus-visible, .ed-form select:focus-visible { outline: 2px solid var(--sb-focus); outline-offset: 3px; border-radius: 2px; }
+.ed-form button.primary { align-self: flex-end; flex: 0 0 auto; }
+.ed-records { display: flex; flex-direction: column; border-top: 1px solid var(--sb-rule); margin-top: 6px; }
+.ed-record { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) auto; gap: 8px 24px; align-items: center; padding: 16px 0; border-bottom: 1px solid var(--sb-rule); }
+.ed-record-name { font-size: 15px; font-weight: 600; letter-spacing: -0.2px; color: var(--sb-ink); }
+.ed-record-meta, .ed-record-by { font-size: 12.5px; color: var(--sb-quiet); line-height: 1.5; margin-top: 2px; }
+.ed-record-state { display: flex; flex-direction: column; gap: 3px; }
+.ed-record-actions { display: flex; gap: 16px; align-items: center; white-space: nowrap; }
+.f-textbtn.danger { color: var(--sb-urgent); }
+/* the feed: the kind of item is a quiet kicker, not a coloured pill */
+.feed-kind { flex: 0 0 112px; font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: var(--sb-quiet); }
+.feed-kind.urgent { color: var(--sb-urgent-ink); }
+@media (max-width: 640px) { .feed-kind { flex-basis: 100%; } }
+.ed-empty { margin: 0; padding: 16px 0; font-size: 13px; color: var(--sb-quiet); }
+@media (max-width: 720px) {
+  .ed-record { grid-template-columns: 1fr; gap: 6px; }
+  .ed-record-actions { justify-content: flex-start; }
 }
-:root[data-app="grass"] .content::before {
-  content: ''; position: absolute; pointer-events: none; z-index: -1; top: 105px; left: 4%; right: 4%; height: 400px;
-  border: 1px solid var(--grass-line); border-radius: 2px;
-  background-image: linear-gradient(var(--grass-line), var(--grass-line)), radial-gradient(circle at center, transparent 0 66px, var(--grass-line) 66px 67px, transparent 67px), radial-gradient(circle at center, var(--grass-line) 0 2px, transparent 2px);
-  background-size: 1px 100%, 100% 100%, 100% 100%; background-position: center; background-repeat: no-repeat;
-}
-:root[data-app="grass"] .content::after {
-  content: ''; position: absolute; pointer-events: none; z-index: -1; top: 205px; left: 4%; width: 12%; height: 200px;
-  border: 1px solid var(--grass-line); border-left: 0;
-}
+:root[data-theme="dark"] .ed-form input, :root[data-theme="dark"] .ed-form select { background: transparent; box-shadow: none; }
 
 
 /* ghost controls keep no fill in the dark theme (the generic dark button
@@ -493,8 +529,6 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
   .f-strip > div, .stat { padding: 12px; }
   .f-strip .f-big-number, .stat .v { font-size: 28px; }
   .f-display { font-size: 27px; }
-  :root[data-app="grass"] .content::before { top: 130px; height: 480px; background-size: 100% 1px, 100% 100%, 100% 100%; }
-  :root[data-app="grass"] .content::after { top: 130px; left: 30%; width: 40%; height: 75px; border: 1px solid var(--grass-line); border-top: 0; }
 }
 @media (max-width: 860px) {
   .filters input[type='text'], .filters input:not([type]) { width: 100%; flex: 1 1 100%; }
@@ -603,7 +637,6 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .auth-form h1 .tm { font-size: 9px; color: var(--auth-soft); }
 .auth-form h1 .brand-sub { color: var(--auth-soft); font-size: 13px !important; font-weight: 500; }
 :root[data-app="agent"] .auth-form h1 .brand-sub { color: var(--sb-gold, #a67c2e); background: #fbf4e4; font-weight: 700; padding: 3px 7px; border-radius: 5px; letter-spacing: 0; }
-:root[data-app="agent"][data-theme="dark"] .auth-form h1 .brand-sub { color: #a67c2e; }
 .auth-form .tagline, .auth-form .dim { color: var(--auth-soft); }
 .auth-tabs { display: flex; align-items: center; gap: 8px; margin: 2px 0 2px; }
 .auth-tab-wrap { display: inline-flex; align-items: center; gap: 8px; }
@@ -618,6 +651,10 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .auth-form .org-card, .auth-form .auth-row { width: 100%; display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 14px; padding: 13px 2px; min-height: 52px; border: 0; border-bottom: 1px solid var(--auth-line); border-radius: 0; background: none; color: var(--auth-ink); box-shadow: none; text-align: left; filter: none; }
 .auth-form .org-card:hover, .auth-form .auth-row:hover { filter: none; background: none; }
 .auth-form .org-card:hover .org-name, .auth-form .auth-row:hover .org-name, .auth-form .org-card:hover .auth-row-arrow, .auth-form .auth-row:hover .auth-row-arrow { color: var(--auth-green); }
+/* M24F — hover is the text and the arrow, never a box: the name brightens, the arrow moves 3px */
+.auth-row-arrow { transition: transform 0.12s ease, color 0.12s ease; }
+.auth-form .org-card:hover .auth-row-arrow, .auth-form .auth-row:hover .auth-row-arrow { transform: translateX(3px); }
+@media (prefers-reduced-motion: reduce) { .auth-row-arrow { transition: none; } .auth-form .org-card:hover .auth-row-arrow, .auth-form .auth-row:hover .auth-row-arrow { transform: none; } }
 .auth-form .org-card.selected { background: none; box-shadow: none; border-color: var(--auth-line); }
 .auth-form .org-card.selected .org-name, .auth-form .org-card.selected .auth-row-arrow { color: var(--auth-green); }
 .auth-form .org-card.selected .org-name::after { content: ' ✓'; font-weight: 700; }
@@ -665,40 +702,112 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .auth-form .login-signature { color: var(--auth-soft); margin-top: 8px; }
 .auth-form .login-signature span { color: var(--auth-ink); }
 .auth-form .wordmark { color: var(--auth-ink); }
-/* Grassroots: the bright introduction carries the turf — blades of grass and
-   broad mowing bands in the deep green, the same geometry as the Grassroots
-   workspace texture, no lines. */
+/* ------------------------------------------------------------- M24F Grassroots entry
+   ONE fixed appearance, the Sage direction: a deep desaturated green page, a
+   quiet off-white form panel with deep green text, the ScoutBox green only
+   on the submit. No pitch motif, no grain. The introduction panel on the
+   left IS the real grass photograph (design-system/assets, CC0, tinted
+   toward the ScoutBox green) — the only place in ScoutBox that
+   uses it: never a texture, never behind a form, never on an authenticated
+   page. The photograph is decorative (a CSS background on a panel whose
+   text is the heading), so it is outside the accessibility tree. The url()
+   itself lives in scoutbox-grassroots/src/styles.css, the one stylesheet
+   only the Grassroots bundle carries, so no other application ships the
+   bytes; this shared file sets the panel's colour, the gradient and the
+   geometry. */
+:root[data-app="grass"] .login.auth-page {
+  --auth-promo: #2f3b34; --auth-panel: #f6f8f4; --auth-dark: #2f3b34; --auth-deep: #1f2a24;
+  --auth-ink: #1f2a24; --auth-soft: #5a6961; --auth-promo-ink: #ffffff; --auth-pale: #e4ebe1;
+  --auth-line: rgba(31, 42, 36, 0.18); --auth-line-strong: rgba(31, 42, 36, 0.4); --auth-focus: #2d7a4b;
+  --auth-card-edge: rgba(255, 255, 255, 0.12); --auth-submit: #33ee7c; --auth-submit-ink: #10331f; --auth-green: #2a6f45;
+  background-color: #2f3b34; background-image: none; color-scheme: light;
+}
+:root[data-app="grass"] .login.auth-page::before, :root[data-app="grass"] .login.auth-page::after { display: none; }
+:root[data-app="grass"] .auth-card { box-shadow: 0 30px 70px rgba(10, 18, 14, 0.45), 0 2px 6px rgba(10, 18, 14, 0.25); border-color: rgba(255, 255, 255, 0.14); }
 :root[data-app="grass"] .auth-promo {
-  background-color: var(--auth-promo);
-  background-image:
-    repeating-linear-gradient(103deg, transparent 0 3px, rgba(17, 56, 34, 0.09) 3px 4px, transparent 4px 9px),
-    repeating-linear-gradient(97deg, transparent 0 5px, rgba(17, 56, 34, 0.05) 5px 6px, transparent 6px 13px),
-    repeating-linear-gradient(90deg, transparent 0 56px, rgba(17, 56, 34, 0.06) 56px 112px);
+  background-color: #244a33;
+  background-image: linear-gradient(180deg, rgba(20, 38, 28, 0.08) 0%, rgba(20, 38, 28, 0.02) 40%, rgba(16, 32, 23, 0.62) 100%);
+  background-size: cover, cover; background-position: center, center 60%; background-repeat: no-repeat;
+  justify-content: flex-end; padding: 48px 40px 44px; min-height: 100%;
 }
-/* Agent: ONE fixed appearance — the Agent application's dark personality
-   (#121415 sidebar surface for the introduction, #202223 workspace for the
-   form, cream ink, the gold label) — whatever appearance the person saved
-   inside the workspace. M24E: no token here follows data-theme. */
+:root[data-app="grass"] .auth-promo h2, :root[data-app="grass"] .auth-summary, :root[data-app="grass"] .auth-points, :root[data-app="grass"] .auth-note { color: #ffffff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.25); }
+:root[data-app="grass"] .auth-promo h2 { font-size: 34px; letter-spacing: -1px; }
+:root[data-app="grass"] .auth-points li::before { background: #ffffff; }
+:root[data-app="grass"] .auth-promo .auth-note { opacity: 0.9; }
+:root[data-app="grass"] .auth-form .wordmark { color: var(--auth-ink); }
+:root[data-app="grass"] .auth-form h1 .wordmark::after { background: #33ee7c; }
+:root[data-app="grass"] .auth-form h1 .tm { color: var(--auth-soft); }
+/* the word "Grassroots": the editorial serif (Instrument Serif, OFL) — the one deliberate serif in the product */
+:root[data-app="grass"] .brand-sub, :root[data-app="grass"] .auth-form h1 .brand-sub { font-family: var(--sb-font-grass, Georgia, serif); font-style: italic; font-weight: 400; letter-spacing: 0; text-transform: none; }
+:root[data-app="grass"] .auth-form h1 .brand-sub { font-size: 24px !important; color: var(--auth-ink); line-height: 1; transform: translateY(1px); }
+:root[data-app="grass"] .sidebar .brand .brand-sub { font-size: 19px; color: var(--sb-ink); line-height: 1; }
+:root[data-app="grass"] .auth-form .org-card .org-name { color: var(--auth-ink); }
+:root[data-app="grass"] .auth-form .org-card:hover .org-name, :root[data-app="grass"] .auth-form .org-card.selected .org-name { color: var(--auth-green); }
+:root[data-app="grass"] .auth-form .org-card:hover .auth-row-arrow, :root[data-app="grass"] .auth-form .org-card.selected .auth-row-arrow { color: var(--auth-green); }
+:root[data-app="grass"] .auth-form select { color-scheme: light; }
+:root[data-app="grass"] .auth-form select option { background: #ffffff; color: var(--auth-ink); }
+:root[data-app="grass"] .auth-form .notice { background: #fbe4e1; border-color: #e8b3ab; color: #913b32; }
+:root[data-app="grass"] .auth-form button.primary:active { background: var(--auth-deep); color: #ffffff; }
+:root[data-app="grass"] .auth-form .login-signature span { color: var(--auth-ink); }
+/* M24F — the two LIGHT entry screens (Grassroots, Agent) ignore the saved dark
+   theme: the shared dark-theme control rules must not paint their tabs, rows
+   and fields. These win on specificity over the generic dark rules. */
+:root[data-theme="dark"] .login.auth-page[data-auth-app="grass"] :is(.auth-tab, .org-card, .auth-row, button.auth-eye, button:not(.primary)),
+:root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] :is(.auth-tab, .org-card, .auth-row, button.auth-eye, button:not(.primary)) { background: none; box-shadow: none; color: var(--auth-ink); border-color: var(--auth-line-strong); }
+:root[data-theme="dark"] .login.auth-page[data-auth-app="grass"] :is(.auth-tab, button.auth-eye, .org-card, .auth-row),
+:root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] :is(.auth-tab, button.auth-eye, .org-card, .auth-row) { border-color: transparent; }
+:root[data-theme="dark"] .login.auth-page[data-auth-app="grass"] :is(.org-card, .auth-row),
+:root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] :is(.org-card, .auth-row) { border-bottom-color: var(--auth-line); }
+:root[data-theme="dark"] .login.auth-page[data-auth-app="grass"] .auth-form :is(input, select, textarea),
+:root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] .auth-form :is(input, select, textarea) { background: transparent; color: var(--auth-ink); border-color: var(--auth-line); box-shadow: none; }
+:root[data-theme="dark"] .login.auth-page[data-auth-app="grass"] .auth-form :is(input, textarea)::placeholder,
+:root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] .auth-form :is(input, textarea)::placeholder { color: var(--auth-soft); }
+:root[data-theme="dark"] .login.auth-page[data-auth-app="grass"] .auth-form .org-name, :root[data-theme="dark"] .login.auth-page[data-auth-app="grass"] .auth-form .auth-row-meta, :root[data-theme="dark"] .login.auth-page[data-auth-app="grass"] .auth-form .auth-label, :root[data-theme="dark"] .login.auth-page[data-auth-app="grass"] .auth-form h1,
+:root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] .auth-form .org-name, :root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] .auth-form .auth-row-meta, :root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] .auth-form .auth-label, :root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] .auth-form h1 { color: inherit; }
+:root[data-theme="dark"] .login.auth-page[data-auth-app="grass"] .auth-form .auth-row-meta, :root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] .auth-form .auth-row-meta { color: var(--auth-soft); }
+:root[data-theme="dark"] .login.auth-page[data-auth-app="grass"] .auth-form :is(.org-card:hover, .auth-row:hover, .org-card.selected) :is(.org-name, .auth-row-arrow),
+:root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] .auth-form :is(.org-card:hover, .auth-row:hover, .org-card.selected) :is(.org-name, .auth-row-arrow) { color: var(--auth-green); }
+
+/* ---------------------------------------------------------------- M24F Agent entry
+   ONE fixed LIGHT appearance — the warm cream of the Agent workspace
+   (#FDFAF4 / #F9F6EF), dark readable type, the gold held back for the
+   label and the focus ring — whatever appearance the person saved inside
+   the workspace (the saved theme is restored after sign-in). No token here
+   follows data-theme; no pitch motif. */
 :root[data-app="agent"] .login.auth-page {
-  --auth-promo: #121415; --auth-panel: #202223; --auth-dark: #202223;
-  --auth-ink: #fdfaf4; --auth-soft: #cfc9bc; --auth-promo-ink: #fdfaf4;
-  --auth-line: rgba(253, 250, 244, 0.18); --auth-line-strong: rgba(253, 250, 244, 0.42); --auth-card-edge: rgba(255, 255, 255, 0.1);
-  --auth-pale: #fdfaf4; --auth-deep: #121415; --auth-submit: #00e676; --auth-submit-ink: #113822;
-  --auth-pitch: rgba(255, 255, 255, 0.08); --auth-grain: rgba(255, 255, 255, 0.016); --auth-band: rgba(255, 255, 255, 0.012);
-  background-color: #202223;
+  --auth-promo: #f3eee3; --auth-panel: #fdfaf4; --auth-dark: #f9f6ef; --auth-deep: #302d25;
+  --auth-ink: #302d25; --auth-soft: #696151; --auth-promo-ink: #302d25; --auth-pale: #f5efdf;
+  --auth-line: rgba(48, 45, 37, 0.16); --auth-line-strong: rgba(48, 45, 37, 0.38); --auth-focus: #a67c2e;
+  --auth-card-edge: rgba(48, 45, 37, 0.1); --auth-submit: #302d25; --auth-submit-ink: #fdfaf4; --auth-green: #a67c2e;
+  background-color: #f9f6ef; background-image: none; color-scheme: light;
 }
-:root[data-app="agent"] .auth-promo { border-right: 1px solid rgba(255, 255, 255, 0.08); }
-:root[data-app="agent"] .auth-card { box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.2); }
-:root[data-app="agent"] .auth-form .org-card { background: none; }
-:root[data-app="agent"] .auth-form select option { background: #202223; color: #fdfaf4; }
+:root[data-app="agent"] .login.auth-page::before, :root[data-app="agent"] .login.auth-page::after { display: none; }
+:root[data-app="agent"] .auth-card { box-shadow: 0 24px 60px rgba(80, 60, 20, 0.14), 0 2px 6px rgba(80, 60, 20, 0.08); }
+:root[data-app="agent"] .auth-promo { border-right: 1px solid rgba(48, 45, 37, 0.08); }
+:root[data-app="agent"] .auth-points li::before { background: #a67c2e; }
+:root[data-app="agent"] .auth-form .wordmark { color: var(--auth-ink); }
+:root[data-app="agent"] .auth-form h1 .wordmark::after { background: #00e676; }
 :root[data-app="agent"] .auth-form h1 .brand-sub { color: #a67c2e; background: #fbf4e4; }
+:root[data-app="agent"] .auth-form .org-card { background: none; }
+:root[data-app="agent"] .auth-form .org-card .org-name { color: var(--auth-ink); }
+:root[data-app="agent"] .auth-form select { color-scheme: light; }
+:root[data-app="agent"] .auth-form select option { background: #fdfaf4; color: #302d25; }
+:root[data-app="agent"] .auth-form .notice { background: #fbe4e1; border-color: #e8b3ab; color: #913b32; }
+:root[data-app="agent"] .auth-form button.primary:hover { filter: none; background: #4a4537; border-color: #4a4537; }
+:root[data-app="agent"] .auth-form button.primary:active { background: #a67c2e; border-color: #a67c2e; color: #fdfaf4; }
+:root[data-app="agent"] .auth-form .login-signature span { color: var(--auth-ink); }
 @media (max-width: 720px) {
   .login.auth-page { padding: 24px 12px; justify-content: flex-start; }
   /* the pitch stands upright on a phone and crops naturally */
   .login.auth-page::before { left: 6%; right: 6%; width: auto; top: 54px; height: 150vh; transform: none; background-image: linear-gradient(var(--auth-pitch), var(--auth-pitch)), radial-gradient(circle at center, transparent 0 56px, var(--auth-pitch) 56px 57px, transparent 57px), radial-gradient(circle at center, var(--auth-pitch) 0 2px, transparent 2px); background-size: 100% 1px, 100% 100%, 100% 100%; }
   .login.auth-page::after { left: 28%; width: 44%; top: 54px; height: 90px; border: 1px solid var(--auth-pitch); border-top: 0; border-radius: 0 0 2px 2px; }
   .auth-card { grid-template-columns: 1fr; border-radius: 12px; }
-  :root[data-app="agent"] .auth-promo { border-right: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+  :root[data-app="agent"] .auth-promo { border-right: 0; border-bottom: 1px solid rgba(48, 45, 37, 0.08); }
+  /* M24F — on a phone the Grassroots photograph is a short masthead above the form (the headline over it); the form stays on its clean surface */
+  :root[data-app="grass"] .auth-promo { min-height: 0; height: 200px; padding: 20px 22px 18px; justify-content: flex-end; gap: 6px; background-position: center, center 55%; }
+  :root[data-app="grass"] .auth-promo h2 { font-size: 22px; }
+  :root[data-app="grass"] .auth-summary { font-size: 13px; }
+  :root[data-app="grass"] .auth-promo .auth-note { display: none; }
   .auth-card { grid-template-columns: 1fr; border-radius: 12px; }
   /* M24D — a phone shows the headline and one sentence; the points are desktop reading. */
   .auth-promo { padding: 28px 24px; gap: 10px; }
