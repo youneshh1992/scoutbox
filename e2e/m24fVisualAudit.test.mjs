@@ -48,6 +48,17 @@ function scan(p) {
 for (const r of PRODUCT_ROOTS) { const p = path.join(ROOT, r); if (fs.statSync(p).isDirectory()) walk(p); else scan(p); }
 ok(hits.length === 0, `emoji gate: 0 hardcoded product emoji in UI source (found ${hits.length}${hits.length ? ': ' + hits.slice(0, 5).join(' | ') : ''})`);
 
+// M24F.1 — a pictograph built at runtime (the old profile's country flag was
+// String.fromCodePoint over regional-indicator code points) is an emoji the
+// literal scan cannot see; forbid the construction in product UI source.
+{
+  const built = [];
+  const scanBuilt = (p) => { const text = fs.readFileSync(p, 'utf8'); if (/fromCodePoint\([^)]*0x1f1[a-f0-9]{2}/i.test(text) || /0x1f1a5|0x1f1e6/i.test(text)) built.push(path.relative(ROOT, p)); };
+  const walkBuilt = (d) => { for (const f of fs.readdirSync(d)) { const q = path.join(d, f); if (fs.statSync(q).isDirectory()) { if (!SKIP_DIR.test(f)) walkBuilt(q); } else if (/\.(ts|tsx|js|jsx)$/.test(f)) scanBuilt(q); } };
+  for (const r of PRODUCT_ROOTS) { const q = path.join(ROOT, r); if (fs.statSync(q).isDirectory()) walkBuilt(q); }
+  ok(built.length === 0, `no product source builds a flag or pictograph from code points (${built.join(', ') || 'none'})`);
+}
+
 // ------------------------------------------------------------ 2. Inter
 const tokens = read('design-system/tokens.css');
 const platform = read('design-system/platform.css');

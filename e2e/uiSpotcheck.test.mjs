@@ -53,14 +53,17 @@ const freshPage = async () => {
   await page.waitForSelector('text=this week', { timeout: 10000 });
   say('training programme: track selected, weekly sessions render');
 
-  await page.click('a[href="/you"]'); // P2.5: Profile is the first page tab of You
-  await page.waitForSelector('text=season by season', { timeout: 15000 });
-  say('season history + goals trend renders on profile');
-  await page.waitForSelector('text=Coach references', { timeout: 10000 });
+  await page.click('a[href^="/you"]'); // P2.5: Profile is the first page tab of You
+  // M24F.1 — the profile has four sections; the season and the cohort are Performance, the references are Evidence
+  await page.getByRole('tab', { name: 'Performance' }).click();
+  await page.waitForSelector('text=Season by season', { timeout: 15000 });
+  say('season history renders on the profile\'s Performance section');
   await page.waitForSelector('text=your cohort, not the pros', { timeout: 10000 });
-  say('coach references + cohort benchmarks render on profile');
+  await page.getByRole('tab', { name: 'Evidence' }).click();
+  await page.waitForSelector('text=Coach references', { timeout: 10000 });
+  say('cohort benchmarks (Performance) + coach references (Evidence) render on the profile');
 
-  await page.click('a[href="/you"]');
+  await page.click('a[href^="/you"]');
   await page.getByRole('tab', { name: 'Account' }).click();
   await page.waitForSelector('text=School-hours mute', { timeout: 15000 });
   await page.click('[data-testid="account-privacy"]'); // M24F: export and delete sit under "Privacy and your data"

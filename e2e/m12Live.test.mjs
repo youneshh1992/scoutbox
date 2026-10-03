@@ -127,7 +127,7 @@ const assId = r.body.assessment.id;
 await j(`/org/assessments/${assId}`, { method: 'PUT', body: JSON.stringify({ ratings: [{ attrId: 'finishing', rating: 4, confidence: 'high' }], recommendation: { verdict: 'monitor', reasons: 'live test' } }) }, bearer(MARIA));
 await j(`/org/assessments/${assId}/submit`, { method: 'POST', body: JSON.stringify({}) }, bearer(MARIA));
 await j(`/org/assessments/${assId}/publish-feedback`, { method: 'POST', body: JSON.stringify({ text: 'Great pressing angles this month — next: recovery runs after losing it.' }) }, bearer(MARIA));
-await player.click('a[href="/you"]');
+await player.click('a[href^="/you"]');
 await player.getByRole('tab', { name: 'Clubs' }).click();
 await player.waitForSelector('text=Great pressing angles this month', { timeout: 20000 });
 say('E2: published feedback reached the player’s You tab');
@@ -136,8 +136,9 @@ if (pageText.includes('live test') || pageText.includes('monitor')) fail('raw as
 say('E2: the raw report (recommendation, reasons) is NOT in the player view');
 
 // ---- E3: evidence claim logged through the passport UI, visible to the org
-await player.click('a[href="/you"]');
+await player.click('a[href^="/you"]');
 await player.getByRole('tab', { name: 'Profile' }).click(); // P2.5: the passport sits on You › Profile (Clubs was left selected above)
+await player.getByRole('tab', { name: 'Evidence' }).click(); // M24F.1: on the profile's Evidence section
 await player.waitForSelector('text=Evidence passport', { timeout: 20000 });
 await player.fill('input[aria-label="Evidence claim label"]', 'Assists 2025/26');
 await player.fill('input[aria-label="Evidence value"]', '7');

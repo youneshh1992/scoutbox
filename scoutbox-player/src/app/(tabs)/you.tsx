@@ -24,7 +24,7 @@ import { InviteCodeSection, ReferencesSection } from '../../components/M14Sectio
 import { AgentSharedOpportunities, MyAgentSection } from '../../components/MyAgentSection';
 import { AgentConsentSection } from '../../components/AgentConsentSection';
 import { AgentTransactionSection } from '../../components/AgentTransactionSection';
-import { ProfileBody } from './profile';
+import { ProfileBody, ProfileSettings } from './profile';
 
 export default function You() {
   const colors = useColors();
@@ -111,7 +111,7 @@ export default function You() {
               <Muted size={13}>{me ? `${me.country}${me.city ? ` · ${me.city}` : ''} · born ${me.dob}` : ''}</Muted>
             </View>
 
-            <ListRow label={pt('segProfile')} value="Name, position, availability, media" onPress={() => setTab('profile')} icon="user-round" />
+            <ListRow label={pt('segProfile')} value="Who you are, your performance, evidence and journey" onPress={() => setTab('profile')} icon="user-round" />
             <ListRow label={pt('segClubs')} value="What clubs and agents can see and share" onPress={() => setTab('clubs')} icon="building-2" />
 
             <Disclosure label="Privacy and your data" hint="Export everything; delete your account" testID="account-privacy">
@@ -187,6 +187,9 @@ export default function You() {
               </Row>
               {prefsNote && <Muted size={12.5}>{prefsNote}</Muted>}
             </Disclosure>
+
+            {/* M24F.1 — the profile's controls (availability, contract status, Academy+, medical sharing) are settings; the profile is a presentation surface. */}
+            <ProfileSettings />
 
             <ListRow label="Appearance" value="Light or dark, for this app" right={<ThemeSwitch />} testID="account-appearance" />
 

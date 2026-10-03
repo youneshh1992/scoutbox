@@ -1,45 +1,83 @@
-// Profile — layout matches the approved design mock: avatar card with squad
-// number, verified name header, trust score card with breakdown bar, season
-// output tiles, availability chips, Academy+ card, contract status card.
-// All functionality from Milestone 2 is preserved below the fold.
-
-import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Switch, View } from 'react-native';
+// Profile — M24F.1. Important information first, secondary information in
+// separate sections. The page is the player: a plain avatar, the name as
+// the strongest element, position · place, the availability word, Verified,
+// View Passport. Then four local sections — Overview, Performance, Evidence,
+// Journey — deep-linked by `?section=` (the same `?tab=`-style parameter the
+// other Player pages use, so back / forward and links keep working).
+//
+// Overview shows ONE current action (the server's next action, a pending
+// request, a scheduled trial, or the account handover — in that order, never
+// two), four or five essentials, and four recent activities. Everything else
+// the old profile showed is one tap away in its section, or in You › Account
+// when it is a control. Every value is read from the session and the client
+// calls the previous profile, Home and Football already made — nothing is
+// invented (see M24F_PLAYER_PROFILE_DATA_MAP.md).
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Image, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { Text, TextInput } from '../../components/Text';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { client, type PlayerCV, type Benchmarks } from '../../data/client';
-import {
-  AVAILABILITY_LABELS, CONTRACT_LABELS,
-  type Availability, type ContractStatus,
-} from '../../domain/types';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { client, type PlayerCV, type Benchmarks, type PlayerFeedItem } from '../../data/client';
+import { m12, type FamilyTrial, type PlayerJourney, type PlayerNextActionCode } from '../../data/m12client';
+import { m15 } from '../../data/m15client';
+import { AVAILABILITY_LABELS, CONTRACT_LABELS, type Availability, type ContractStatus, type InboxRequest } from '../../domain/types';
 import { useSession } from '../../state';
 import { useColors, useStyles, type Palette } from '../../theme';
 import { pt } from '../../i18n';
-import { Button, Card, Muted, Pill, Row, SectionTitle, TrustBar } from '../../components/ui';
-import { PageHeader } from '../../components/PageChrome';
+import { Button, Disclosure, Kicker, ListRow, Muted, Row, SectionTitle } from '../../components/ui';
+import { PageHeader, PageTabs, pickTab } from '../../components/PageChrome';
 import { WebVideo } from '../../components/WebVideo';
 import { PassportSection } from '../../components/M12Sections';
+import { CATEGORY_FOR_ACTION } from '../../components/M23Journey';
+import { initialsOf, TextButton } from '../../components/Reference';
 
-function flagEmoji(country: string): string {
-  if (!/^[A-Z]{2}$/i.test(country)) return '';
-  return String.fromCodePoint(...[...country.toUpperCase()].map((c) => 0x1f1a5 + c.charCodeAt(0)));
-}
+type SectionKey = 'overview' | 'performance' | 'evidence' | 'journey';
+const SECTION_KEYS: SectionKey[] = ['overview', 'performance', 'evidence', 'journey'];
+
+const EVENT_LABELS: Record<string, string> = {
+  view: 'viewed your profile',
+  save: 'saved you',
+  shortlist: 'shortlisted you',
+  contact_request: 'requested contact',
+  trial_request: 'requested a trial',
+  contact_request_to_guardian: 'contacted your guardian',
+  trial_request_to_guardian: 'sent your guardian a trial invite',
+};
+const evLabel = (kind: string) => { const key = `jnEv_${kind}` as Parameters<typeof pt>[0]; try { return pt(key) ?? kind.replace(/_/g, ' '); } catch { return kind.replace(/_/g, ' '); } };
+const stLabel = (s: string) => { const key = `jnSt_${s}` as Parameters<typeof pt>[0]; try { return pt(key) ?? s; } catch { return s; } };
+const nextLabel = (code: string) => { const key = `jnNext_${code}` as Parameters<typeof pt>[0]; try { return pt(key) ?? ''; } catch { return ''; } };
+const cap = (v: string) => v.charAt(0).toUpperCase() + v.slice(1);
+const dayLabel = (ts: number) => new Date(ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }).toUpperCase();
+const when = (ts: number) => {
+  const d = new Date(ts); const days = Math.floor((Date.now() - ts) / 86400000);
+  if (days <= 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return d.toLocaleDateString(undefined, { weekday: 'short' });
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+};
+const dateOnly = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric', ...(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? { timeZone: 'UTC' } : {}) });
+const sessionLine = (startsAt: number, venue?: string | null) => `${new Date(startsAt).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })} · ${new Date(startsAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}${venue ? ` · ${venue}` : ''}`;
+
+const isRequest = (r: unknown): r is InboxRequest => !!r && typeof r === 'object' && 'createdAt' in (r as object) && 'orgName' in (r as object);
+const upcomingSession = (t: FamilyTrial | undefined) => {
+  const wf = t?.workflow;
+  if (!wf || !('schedule' in wf) || !wf.schedule) return null;
+  return wf.schedule.sessions.find((s) => s.startsAt >= Date.now() - 3600e3) ?? wf.schedule.sessions[0] ?? null;
+};
+
+/** The Explore page a next-action code opens (M24B categories and their first useful page). */
+const ROUTE_FOR_ACTION: Record<PlayerNextActionCode, { cta: string; tab: string } | null> = {
+  RESPOND_TO_CONTACT: { cta: 'View request', tab: 'requests' },
+  RESPOND_TO_TRIAL_INVITATION: { cta: 'View trial', tab: 'invitation' },
+  CONFIRM_TRIAL_SCHEDULE: { cta: 'View trial', tab: 'schedule' },
+  RESPOND_TO_OFFER: { cta: 'View offer', tab: 'offer-terms' },
+  SIGN: { cta: 'View signing', tab: 'signing-status' },
+  NONE: null,
+};
 
 /**
- * M18.1 — this describes PROFILE COMPLETENESS, not trustworthiness. It used to
- * read "Building trust" / "Good standing", which put a second, unrelated
- * meaning on the word the ScoutBox Trust Score already owns on the You tab.
- */
-function completenessLabel(score: number): string {
-  if (score >= 75) return 'Profile well filled in';
-  if (score >= 50) return 'Profile coming along';
-  return 'Profile still to fill in';
-}
-
-/**
- * M23 P2.5 — the Profile route stays (`/profile` deep links and the back
- * control still work); its body is also the first page tab of You, so the
- * player's own record is one tap from the bar rather than a fifth tab.
+ * The Profile route stays (`/profile?section=…` deep links and the back
+ * control still work); its body is also the first page tab of You.
  */
 export default function Profile() {
   const styles = useStyles(makeStyles);
@@ -56,205 +94,511 @@ export default function Profile() {
 export function ProfileBody() {
   const colors = useColors();
   const styles = useStyles(makeStyles);
-  const { playerId, me, isMinor, refresh } = useSession();
-  const [cvOpen, setCvOpen] = useState(false);
-  const [cv, setCv] = useState<PlayerCV | null>(null);
-  const [benchmarks, setBenchmarks] = useState<Benchmarks | null>(null);
-  const [vouchCoach, setVouchCoach] = useState('');
-  const [vouchEmail, setVouchEmail] = useState('');
-  const [vouchNote, setVouchNote] = useState<string | null>(null);
+  const router = useRouter();
+  const { playerId, me, isMinor, refresh, inbox, notifications } = useSession();
+  const params = useLocalSearchParams<{ section?: string }>();
+  const SECTIONS = useMemo(() => [
+    { key: 'overview', label: pt('profOverview') },
+    { key: 'performance', label: pt('profPerformance') },
+    { key: 'evidence', label: pt('profEvidence') },
+    { key: 'journey', label: pt('profJourney') },
+  ], []);
+  // the section is derived: the URL's `?section=` when it names one, else the last tap — no effect, no cascading render
+  const [chosen, setChosen] = useState<SectionKey | null>(null);
+  const fromParams = params.section && SECTION_KEYS.includes(pickTab(SECTIONS, params.section) as SectionKey) && params.section === pickTab(SECTIONS, params.section) ? (params.section as SectionKey) : null;
+  const section: SectionKey = chosen ?? fromParams ?? 'overview';
+  const go = (k: string) => {
+    const key = SECTION_KEYS.includes(k as SectionKey) ? (k as SectionKey) : 'overview';
+    setChosen(key);
+    try { router.setParams({ section: key }); } catch { /* the parameter is a convenience for links; the state is already set */ }
+  };
+  // a new deep link wins over an earlier tap
+  const [seenParam, setSeenParam] = useState(params.section);
+  if (params.section !== seenParam) { setSeenParam(params.section); if (fromParams) setChosen(fromParams); }
 
+  const [journeys, setJourneys] = useState<PlayerJourney[] | null>(null);
+  const [trials, setTrials] = useState<FamilyTrial[]>([]);
+  const [feed, setFeed] = useState<PlayerFeedItem[]>([]);
+  const [currentClub, setCurrentClub] = useState<string | null>(null);
+  const [benchmarks, setBenchmarks] = useState<Benchmarks | null>(null);
+  const [tick, setTick] = useState(0);
+  useFocusEffect(useCallback(() => { setTick((x) => x + 1); }, []));
+  useEffect(() => {
+    if (!playerId) return;
+    let on = true;
+    m12.getJourneys(playerId).then((x) => on && setJourneys(x)).catch(() => on && setJourneys([]));
+    m12.getTrials(playerId).then((x) => on && setTrials(x)).catch(() => on && setTrials([]));
+    client.getFeed(playerId).then((x) => on && setFeed(x)).catch(() => {});
+    m15.passport({ kind: 'player', id: playerId }).then((p) => on && setCurrentClub(p.status.currentClub?.orgName ?? null)).catch(() => {});
+    return () => { on = false; };
+  }, [playerId, tick, notifications]);
   useEffect(() => {
     if (playerId && me?.pathway) client.getBenchmarks(playerId).then(setBenchmarks).catch(() => setBenchmarks(null));
   }, [playerId, me?.pathway]);
 
-  useEffect(() => {
-    if (cvOpen && playerId) client.getCv(playerId).then(setCv).catch(() => {});
-  }, [cvOpen, playerId, me]);
+  if (!playerId) return null;
+  if (!me) return <ProfileLoading onRetry={() => void refresh()} />;
 
-  if (!playerId || !me) return null;
+  const act = async (fn: () => Promise<unknown>) => { try { await fn(); await refresh(); } catch { /* surfaced through unrefreshed UI */ } };
+  const availability = pt(`avail_${me.availability}` as Parameters<typeof pt>[0]);
+  const place = isMinor ? me.country : (me.city || me.country);
+  const summary = [me.position ?? pt('fbNoPosition'), place].filter(Boolean).join(' · ');
 
-  const set = async (fn: () => Promise<unknown>) => {
-    try {
-      await fn();
-      await refresh();
-    } catch {
-      /* surfaced through unrefreshed UI */
+  // ---- ONE current action, in priority order; never two.
+  type Next = { club: string | null; title: string; line?: string | null; cta: string; onPress: () => void };
+  const next: Next | null = (() => {
+    const j = (journeys ?? []).find((x) => x.journey.nextAction.code !== 'NONE');
+    if (j) {
+      const route = ROUTE_FOR_ACTION[j.journey.nextAction.code];
+      const cat = CATEGORY_FOR_ACTION[j.journey.nextAction.code];
+      const session = upcomingSession(trials.find((t) => t.orgName === j.club.name));
+      const invite = inbox.filter(isRequest).find((r) => r.status === 'pending' && r.orgName === j.club.name && r.type === 'trial');
+      const line = session ? sessionLine(session.startsAt, session.venue?.name) : invite?.trialDetails?.proposedDate ? `${invite.trialDetails.proposedDate}${invite.trialDetails.venue ? ` · ${invite.trialDetails.venue}` : ''}` : null;
+      return { club: j.club.name, title: stLabel(j.journey.stage), line: line ?? nextLabel(j.journey.nextAction.code), cta: route?.cta ?? 'View', onPress: () => router.push(cat ? `/opportunities?cat=${cat}&tab=${route?.tab ?? ''}` : '/opportunities') };
     }
-  };
+    const pending = inbox.filter(isRequest).filter((r) => r.status === 'pending').sort((a, b) => (a.type === b.type ? b.createdAt - a.createdAt : a.type === 'trial' ? -1 : 1))[0];
+    if (pending) {
+      const d = pending.trialDetails;
+      return { club: pending.orgName, title: pending.type === 'trial' ? 'Trial invitation' : 'Contact request', line: d?.proposedDate ? `${d.proposedDate}${d.venue ? ` · ${d.venue}` : ''}` : pending.subject ?? null, cta: pending.type === 'trial' ? 'View invitation' : 'View request', onPress: () => router.push('/inbox') };
+    }
+    const scheduled = (journeys ?? []).find((x) => x.journey.stage === 'trial_scheduled');
+    if (scheduled) {
+      const session = upcomingSession(trials.find((t) => t.orgName === scheduled.club.name));
+      return { club: scheduled.club.name, title: stLabel('trial_scheduled'), line: session ? sessionLine(session.startsAt, session.venue?.name) : null, cta: 'View trial', onPress: () => router.push('/opportunities?cat=trial&tab=schedule') };
+    }
+    if (me.agingUp?.eligible) {
+      return { club: null, title: 'Your account can become fully yours', line: 'You are 18: completing the handover moves availability, medical sharing and club contact to you. Your history stays as it is.', cta: 'Complete the handover', onPress: () => void act(() => client.agingUpComplete(playerId)) };
+    }
+    return null;
+  })();
 
-  const initials = me.name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+  // ---- recent activity: the scouting feed and the journeys' events, newest first, four at most.
+  const activity = [
+    ...feed.filter((i): i is Extract<PlayerFeedItem, { type: 'scouting_event' }> => i.type === 'scouting_event').map((i) => ({ ts: i.ts, text: `${i.orgName} ${EVENT_LABELS[i.eventType] ?? i.eventType.replace(/_/g, ' ')}` })),
+    ...(journeys ?? []).flatMap((j) => j.journey.timeline.map((e) => ({ ts: e.at, text: `${j.club.name ?? pt('jnClub')} · ${cap(evLabel(e.kind))}` }))),
+  ].sort((a, b) => b.ts - a.ts).slice(0, 4);
+
+  const essentials: [string, string][] = [];
+  essentials.push(['Age', String(me.age)]);
+  if (me.position) essentials.push(['Position', me.position]);
+  if (me.foot) essentials.push(['Preferred foot', cap(me.foot)]);
+  if (place) essentials.push(['Location', isMinor ? me.country : [me.city, me.country].filter(Boolean).join(', ')]);
+  if (currentClub) essentials.push(['Current club', currentClub]);
 
   return (
     <>
-        {/* identity block: avatar card + details */}
-        <View style={styles.identityRow}>
-          <View style={styles.avatarCard}>
-            <Text style={styles.avatarNumber}>{me.squadNumber ?? ''}</Text>
-            <Text style={styles.avatarInitials}>{initials}</Text>
-            <View style={styles.cameraBadge}>
-            </View>
+      {/* ---- identity: the subject of the page, not a record on it */}
+      <View style={styles.header} testID="profile-header">
+        <Avatar name={me.name} />
+        <Text role="heading" aria-level={1} style={styles.name} testID="profile-name">{me.name}</Text>
+        <Text style={styles.summary} testID="profile-line">{summary}</Text>
+        <Text style={styles.availability} testID="profile-availability">{availability}</Text>
+        <View style={styles.headerRow}>
+          <View style={styles.verified} testID="profile-verified" accessibilityLabel={me.identityVerified ? 'Identity verified' : 'Identity not verified'}>
+            <View style={[styles.marker, !me.identityVerified && { backgroundColor: colors.line }]} />
+            <Text style={[styles.verifiedText, !me.identityVerified && { color: colors.muted }]}>{me.identityVerified ? 'Verified' : 'Not verified'}</Text>
+            {isMinor ? <Text style={styles.quietWord}>· Guardian-managed</Text> : null}
           </View>
-          <View style={{ flex: 1, gap: 4 }}>
-            <Row>
-              <Text style={styles.name}>{me.name}</Text>
-                          </Row>
-            <Text style={styles.subline}>
-              {me.position ?? '—'} · {me.age} · {me.foot ? `${me.foot[0].toUpperCase()}${me.foot.slice(1)} Foot` : '—'} {flagEmoji(me.country)}
-            </Text>
-            {!isMinor && !!(me.city || me.country) && (
-              <Muted size={14}>{me.city ? `${me.city}, ` : ''}{me.country}</Muted>
-            )}
-            {isMinor && <Muted size={14}>{me.country} — exact location never shown</Muted>}
-            {(me.heightCm || me.weightKg) && (
-              <Muted size={14}>{me.heightCm ? `${me.heightCm} cm` : ''}{me.heightCm && me.weightKg ? '  ·  ' : ''}{me.weightKg ? `${me.weightKg} kg` : ''}</Muted>
-            )}
-            <Row style={{ marginTop: 4 }}>
-              {me.identityVerified && <Pill label="Identity verified" tone="green" />}
-              {isMinor && <Pill label="Guardian-managed" tone="blue" />}
-              {me.badges.map((b) => <Pill key={b} label={b} tone="gold" />)}
-            </Row>
-          </View>
+          <TextButton label={pt('profViewPassport')} onPress={() => router.push('/football?tab=passport')} testID="profile-passport-link" size={13} />
         </View>
+      </View>
 
-        {/* aging up: an 18th birthday hands the account to the player */}
-        {me.agingUp?.eligible && (
-          <Card>
-            <SectionTitle>You&apos;re 18 — this account can become fully yours</SectionTitle>
-            <Muted size={13}>
-              Your parent/guardian has kept this account safe until now. Completing the handover moves
-              availability, medical sharing and club contact to you. Your history — clips, reports,
-              trust — stays exactly as it is.
-            </Muted>
-            <Row>
-              <Button
-                small primary label="Complete the handover"
-                onPress={() => set(() => client.agingUpComplete(playerId))}
-              />
-            </Row>
-          </Card>
-        )}
+      <View testID="profile-tabs">
+        <PageTabs tabs={SECTIONS} value={section} onChange={go} />
+      </View>
 
-        {/* trust score */}
-        <Card>
-          <Row style={{ justifyContent: 'space-between' }}>
-            <SectionTitle>Profile completeness</SectionTitle>
-          </Row>
-          <Row style={{ alignItems: 'flex-end' }}>
-            <Text style={styles.trustBig}>{me.trustScore}</Text>
-            <Text style={styles.trustDenom}>/100</Text>
-            <View style={{ flex: 1, marginLeft: 12, marginBottom: 10 }}>
-              <View style={styles.trustTrack}>
-                <View style={[styles.trustFill, { width: `${me.trustScore}%` }]} />
-                <View style={[styles.trustKnob, { left: `${Math.min(me.trustScore, 97)}%` }]} />
+      {section === 'overview' && (
+        <View testID="profile-section-overview" style={styles.body}>
+          {/* ONE current action — a subtle contained surface, the only object on the page */}
+          {next ? (
+            <View style={styles.next} testID="profile-next">
+              <Kicker tone="accent">{pt('profNext')}</Kicker>
+              {next.club ? <Text style={styles.nextClub}>{next.club}</Text> : null}
+              <Text style={[styles.nextTitle, !next.club && { fontSize: 17 }]}>{next.title}</Text>
+              {next.line ? <Text style={styles.nextLine}>{next.line}</Text> : null}
+              <View style={{ marginTop: 10, alignSelf: 'flex-start' }}>
+                <Button primary small label={next.cta} onPress={next.onPress} testID="profile-next-cta" />
               </View>
             </View>
-          </Row>
-          <Row style={{ justifyContent: 'space-between' }}>
-            <Text style={styles.standing}>{completenessLabel(me.trustScore)}</Text>
-            {me.tier && <Pill label={`Tier: ${me.tier}`} tone="green" />}
-            {typeof me.streak === 'number' && me.streak > 0 && <Pill label={`${me.streak}-day streak`} tone="gold" />}
-          </Row>
-          <Muted size={12.5}>
-            Base {me.trust.base}  ·  Identity +{me.trust.identityVerified}  ·  Attendance +{me.trust.verifiedAttendance}  ·  Trial Reports +{me.trust.trialReports}  ·  Media +{me.trust.media}  ·  Profile +{me.trust.profileComplete}
-          </Muted>
-          <Muted size={12.5}>
-            How complete your profile is — identity, recorded attendance, clubs&apos; filed trial
-            reports, clips and profile details. It is not the ScoutBox Trust Score (that is on
-            You), and it is not a rating of you as a player. It never moves through payments, and
-            sharing medical data has no effect either way.
-          </Muted>
-        </Card>
+          ) : (
+            <View style={styles.calm} testID="profile-up-to-date">
+              <Text style={styles.calmText}>{pt('profUpToDate')}</Text>
+            </View>
+          )}
 
-        {/* season output */}
-        {me.stats && (
-          <Card>
-            <Row style={{ justifyContent: 'space-between' }}>
-              <SectionTitle>Season output</SectionTitle>
-              <Pill label="This Season ▾" />
-            </Row>
-            <Row>
-              <StatTile v={String(me.stats.appearances)} k="Apps" />
-              {me.position === 'GK' ? (
-                <StatTile v={String(me.stats.cleanSheets ?? 0)} k="Clean Sheets" />
-              ) : (
-                <>
-                  <StatTile v={String(me.stats.goals)} k="Goals" />
-                  <StatTile v={String(me.stats.assists)} k="Assists" />
-                </>
-              )}
-              {me.stats.paceKmh != null && <StatTile v={`${me.stats.paceKmh}`} k="km/h Top Speed" />}
-              {me.stats.passCompletionPct != null && <StatTile v={`${me.stats.passCompletionPct}%`} k="Pass Accuracy" />}
-            </Row>
-            {(me.seasonHistory?.length ?? 0) > 0 && (() => {
-              // Progress over time: history (oldest → newest) plus this season.
-              const series = [...me.seasonHistory!].reverse().concat([
-                { season: 'Now', appearances: me.stats?.appearances ?? 0, goals: me.stats?.goals ?? 0, assists: me.stats?.assists ?? 0 },
-              ]);
-              const maxGoals = Math.max(...series.map((s) => s.goals), 1);
-              return (
-                <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8, gap: 6 }}>
-                  <Muted size={12}>Your career, season by season — goals trend</Muted>
-                  <Row style={{ alignItems: 'flex-end', height: 56, gap: 8 }}>
-                    {series.map((s) => (
-                      <View key={s.season} style={{ flex: 1, alignItems: 'center', gap: 2 }}>
-                        <Text style={{ color: colors.text, fontSize: 11, fontWeight: '700' }}>{s.goals}</Text>
-                        <View style={{
-                          alignSelf: 'stretch',
-                          height: Math.max(4, (s.goals / maxGoals) * 34),
-                          borderRadius: 3,
-                          backgroundColor: s.season === 'Now' ? colors.accent : colors.panel2,
-                        }} />
-                        <Muted size={9.5}>{s.season}</Muted>
-                      </View>
-                    ))}
-                  </Row>
-                  {me.seasonHistory!.map((s) => (
-                    <Row key={s.season} style={{ justifyContent: 'space-between' }}>
-                      <Pill label={s.season} />
-                      <Muted size={12.5}>{s.appearances} apps · {s.goals} goals · {s.assists} assists</Muted>
-                    </Row>
-                  ))}
-                </View>
-              );
-            })()}
-          </Card>
-        )}
+          {/* essentials — a short list, no box, no icon, no pill */}
+          <View style={styles.block} testID="profile-essentials">
+            {essentials.map(([k, v]) => (
+              <View key={k} style={styles.fact}>
+                <Text style={styles.factKey}>{k}</Text>
+                <Text style={styles.factValue}>{v}</Text>
+              </View>
+            ))}
+          </View>
 
-        {/* availability */}
-        {!isMinor ? (
-          <Card>
-            <SectionTitle>Availability</SectionTitle>
+          {/* recent activity — a short preview; the fuller timeline is Journey */}
+          <View style={styles.block} testID="profile-activity">
+            <SectionTitle>{pt('profRecentActivity')}</SectionTitle>
+            {activity.length === 0 ? <Muted size={13.5}>{pt('profNoActivity')}</Muted> : activity.map((a, i) => (
+              <View key={`${a.ts}-${i}`} style={styles.activityRow}>
+                <Text style={styles.activityText}>{a.text}</Text>
+                <Text style={styles.activityWhen}>{when(a.ts)}</Text>
+              </View>
+            ))}
+            <TextButton label={pt('profViewActivity')} onPress={() => router.push('/opportunities?cat=journey&tab=activity')} testID="profile-activity-link" size={13} />
+          </View>
+        </View>
+      )}
+
+      {section === 'performance' && (
+        <View testID="profile-section-performance" style={styles.body}>
+          <PerformanceSection me={me} benchmarks={benchmarks} onCombine={() => router.push('/football?tab=combine')} />
+        </View>
+      )}
+
+      {section === 'evidence' && (
+        <View testID="profile-section-evidence" style={styles.body}>
+          <EvidenceSection me={me} playerId={playerId} isMinor={isMinor} refresh={refresh} onUpload={() => router.push('/upload')} onBoxCam={() => router.push('/football?tab=boxcam')} />
+        </View>
+      )}
+
+      {section === 'journey' && (
+        <View testID="profile-section-journey" style={styles.body}>
+          <JourneyTimeline journeys={journeys ?? []} requests={inbox.filter(isRequest)} earlier={me.timeline} onExplore={() => router.push('/opportunities?cat=journey&tab=activity')} />
+        </View>
+      )}
+    </>
+  );
+}
+
+/**
+ * Loading: the composition's own shapes — an avatar disc, a name bar, a line —
+ * never a grid of grey cards. After a few seconds without a profile the same
+ * place says so and offers a retry; a phone is never left blank.
+ */
+function ProfileLoading({ onRetry }: { onRetry: () => void }) {
+  const colors = useColors();
+  const styles = useStyles(makeStyles);
+  const [slow, setSlow] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setSlow(true), 6000); return () => clearTimeout(t); }, []);
+  if (slow) {
+    return (
+      <View style={styles.header} testID="profile-error">
+        <Text style={styles.calmText}>Your profile could not be loaded.</Text>
+        <Muted size={13.5}>Check your connection and try again.</Muted>
+        <View style={{ marginTop: 10, alignSelf: 'flex-start' }}><Button small primary label="Retry" onPress={onRetry} /></View>
+      </View>
+    );
+  }
+  return (
+    <View style={styles.header} testID="profile-loading" accessibilityLabel="Loading your profile" accessible>
+      <View style={[styles.avatar, { backgroundColor: colors.panel2 }]} />
+      <View style={{ width: '62%', height: 24, borderRadius: 6, backgroundColor: colors.panel2, marginTop: 4 }} />
+      <View style={{ width: '40%', height: 14, borderRadius: 6, backgroundColor: colors.panel2, marginTop: 10 }} />
+      <View style={{ width: '30%', height: 12, borderRadius: 6, backgroundColor: colors.panel2, marginTop: 10 }} />
+    </View>
+  );
+}
+
+/** A plain 72px avatar: the photograph when one exists, otherwise initials — never a broken image, never a layout shift. */
+function Avatar({ name, photoUrl }: { name: string; photoUrl?: string | null }) {
+  const styles = useStyles(makeStyles);
+  const [broken, setBroken] = useState(false);
+  if (photoUrl && !broken) {
+    return <Image source={{ uri: photoUrl }} onError={() => setBroken(true)} style={styles.avatar} accessibilityLabel={name} accessible />;
+  }
+  return (
+    <View style={styles.avatar} testID="profile-avatar" accessibilityLabel={name} accessible>
+      <Text style={styles.avatarText}>{initialsOf(name)}</Text>
+    </View>
+  );
+}
+
+function FactRow({ k, v, sub }: { k: string; v: string; sub?: string | null }) {
+  const styles = useStyles(makeStyles);
+  return (
+    <View style={styles.fact}>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.factKey}>{k}</Text>
+        {sub ? <Text style={styles.factSub}>{sub}</Text> : null}
+      </View>
+      <Text style={styles.factValue}>{v}</Text>
+    </View>
+  );
+}
+
+function PerformanceSection({ me, benchmarks, onCombine }: { me: NonNullable<ReturnType<typeof useSession>['me']>; benchmarks: Benchmarks | null; onCombine: () => void }) {
+  const styles = useStyles(makeStyles);
+  const drills = me.drillResults ?? [];
+  const hasStats = !!me.stats;
+  const hasBench = !!benchmarks && (benchmarks.drills.length > 0 || benchmarks.stats.length > 0);
+  const empty = drills.length === 0 && !hasStats && !me.heightCm && !me.weightKg && !hasBench && me.trialReports.length === 0;
+  if (empty) {
+    return (
+      <View style={styles.block} testID="perf-empty">
+        <Text style={styles.calmText}>{pt('profNoPerformance')}</Text>
+        <Muted size={13.5}>{pt('profNoPerformanceHint')}</Muted>
+        <TextButton label={pt('profViewCombine')} onPress={onCombine} size={13} />
+      </View>
+    );
+  }
+  return (
+    <>
+      <View style={styles.block} testID="perf-combine">
+        <SectionTitle>{pt('profCombine')}</SectionTitle>
+        {drills.length === 0 ? <Muted size={13.5}>{pt('profNoCombine')}</Muted> : drills.map((r) => (
+          <FactRow key={r.id} k={r.drillName} sub={`${r.metric} · ${r.verified ? 'Verified' : 'Self-reported'}`} v={`${r.value}${r.unit}`} />
+        ))}
+        <TextButton label={pt('profViewCombine')} onPress={onCombine} size={13} testID="perf-combine-link" />
+      </View>
+
+      {hasStats && (
+        <View style={styles.block} testID="perf-season">
+          <SectionTitle>{pt('profSeason')}</SectionTitle>
+          <FactRow k="Appearances" v={String(me.stats!.appearances)} />
+          {me.position === 'GK'
+            ? <FactRow k="Clean sheets" v={String(me.stats!.cleanSheets ?? 0)} />
+            : (<><FactRow k="Goals" v={String(me.stats!.goals)} /><FactRow k="Assists" v={String(me.stats!.assists)} /></>)}
+          {me.stats!.paceKmh != null && <FactRow k="Top speed" v={`${me.stats!.paceKmh} km/h`} />}
+          {me.stats!.passCompletionPct != null && <FactRow k="Pass accuracy" v={`${me.stats!.passCompletionPct}%`} />}
+          {me.stats!.duelSuccessPct != null && <FactRow k="Duels won" v={`${me.stats!.duelSuccessPct}%`} />}
+          {(me.seasonHistory?.length ?? 0) > 0 && (
+            <View style={{ marginTop: 14, gap: 0 }}>
+              <Text style={styles.subhead}>Season by season</Text>
+              {me.seasonHistory!.map((s) => <FactRow key={s.season} k={s.season} sub={`${s.appearances} appearances`} v={`${s.goals} goals · ${s.assists} assists`} />)}
+            </View>
+          )}
+        </View>
+      )}
+
+      {(me.heightCm || me.weightKg) ? (
+        <View style={styles.block} testID="perf-physical">
+          <SectionTitle>{pt('profPhysical')}</SectionTitle>
+          {me.heightCm ? <FactRow k="Height" v={`${me.heightCm} cm`} /> : null}
+          {me.weightKg ? <FactRow k="Weight" v={`${me.weightKg} kg`} /> : null}
+        </View>
+      ) : null}
+
+      {hasBench && (
+        <View style={styles.block} testID="perf-benchmarks">
+          <SectionTitle>Where you stand — your cohort, not the pros</SectionTitle>
+          <Muted size={12.5}>{benchmarks!.note}</Muted>
+          {benchmarks!.stats.map((b) => (
+            <FactRow key={b.stat} k={b.stat.replace(/Pct$/, ' %').replace(/([A-Z])/g, ' $1').toLowerCase().replace(/^./, (c) => c.toUpperCase())} v={String(b.value)} sub={b.percentile !== null ? `Top ${Math.max(1, 100 - b.percentile)}%` : 'Cohort too small'} />
+          ))}
+          {benchmarks!.drills.map((b) => (
+            <FactRow key={b.drillId} k={b.name} v={`${b.value}${b.unit}`} sub={b.percentile !== null ? `Top ${Math.max(1, 100 - b.percentile)}%` : 'Cohort too small'} />
+          ))}
+        </View>
+      )}
+
+      {me.trialReports.length > 0 && (
+        <View style={styles.block} testID="perf-reports">
+          <SectionTitle>{pt('profTrialReports')}</SectionTitle>
+          {me.trialReports.map((r) => (
+            <View key={r.id} style={styles.fact}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={styles.factKey}>{r.orgName}</Text>
+                <Text style={styles.factSub}>{`Acceleration ${r.acceleration}/10 · ${r.sprintSpeedKmh} km/h · ${r.distanceKm} km · passing ${r.passCompletionPct}% · duels ${r.duelSuccessPct}%`}</Text>
+                {r.strengthNote ? <Text style={styles.factSub}>Strength: {r.strengthNote}</Text> : null}
+                {r.focusNote ? <Text style={styles.factSub}>Work on: {r.focusNote}</Text> : null}
+              </View>
+              <Text style={styles.factValue}>{`Coach ${r.coachRating}/10`}</Text>
+            </View>
+          ))}
+          <Muted size={12.5}>Filed by clubs after your trials.</Muted>
+        </View>
+      )}
+    </>
+  );
+}
+
+function CvBlock({ playerId }: { playerId: string }) {
+  const styles = useStyles(makeStyles);
+  const [cv, setCv] = useState<PlayerCV | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => { client.getCv(playerId).then(setCv).catch((e) => setErr(e instanceof Error ? e.message : 'Could not load')); }, [playerId]);
+  if (err) return <Muted size={13}>{err}</Muted>;
+  if (!cv) return <Muted size={13}>Loading…</Muted>;
+  return (
+    <View style={{ gap: 6 }} testID="profile-cv">
+      <Text style={styles.subhead}>{cv.player.name} — Verified Sports CV</Text>
+      <Muted size={12.5}>{cv.player.position ?? '—'} · {cv.player.age} · {cv.player.foot ?? '—'} foot · {cv.player.country}{cv.player.identityVerified ? ' · identity verified' : ''}</Muted>
+      <Muted size={12.5}>Evidence confidence {cv.trust.score}/100 ({cv.trust.tier}) — not a rating of you as a player</Muted>
+      {cv.seasonStats && <Muted size={12.5}>Season: {cv.seasonStats.appearances} apps · {cv.seasonStats.goals} goals · {cv.seasonStats.assists} assists</Muted>}
+      <Muted size={12.5}>Verified attendance ({cv.verifiedAttendance.length}): {cv.verifiedAttendance.map((a) => `${a.fixture} (${a.date})`).join(' · ') || '—'}</Muted>
+      <Muted size={12.5}>Verified clips: {cv.verifiedClips.map((c) => c.title).join(' · ') || '—'}</Muted>
+      <Muted size={12.5}>Trial reports ({cv.trialReports.length}): {cv.trialReports.map((r) => `${r.orgName} — coach ${r.coachRating}/10`).join(' · ') || '—'}</Muted>
+      {cv.combine.length > 0 && <Muted size={12.5}>Combine: {cv.combine.map((r) => `${r.metric} ${r.value}${r.unit}${r.verified ? ' (verified)' : ''}`).join(' · ')}</Muted>}
+      <Muted size={11.5}>{cv.note}</Muted>
+    </View>
+  );
+}
+
+function EvidenceSection({ me, playerId, isMinor, refresh, onUpload, onBoxCam }: { me: NonNullable<ReturnType<typeof useSession>['me']>; playerId: string; isMinor: boolean; refresh: () => Promise<unknown>; onUpload: () => void; onBoxCam: () => void }) {
+  const colors = useColors();
+  const styles = useStyles(makeStyles);
+  const [vouchCoach, setVouchCoach] = useState('');
+  const [vouchEmail, setVouchEmail] = useState('');
+  const [vouchNote, setVouchNote] = useState<string | null>(null);
+  return (
+    <>
+      <View style={styles.block} testID="evidence-footage">
+        <SectionTitle>{pt('profFootage')}</SectionTitle>
+        {me.media.length === 0 ? <Muted size={13.5}>{pt('profNoEvidence')}</Muted> : me.media.map((m) => {
+          const src = client.mediaUrl(m.url);
+          const tags = Object.entries(m.tags ?? {}).map(([t, n]) => `${t.replace(/_/g, ' ')} ×${n}`).join(' · ');
+          return (
+            <View key={m.id} style={styles.clip} testID={`evidence-clip-${m.id}`}>
+              {src ? <WebVideo src={src} /> : null}
+              <Text style={styles.factKey}>{m.title}</Text>
+              <Text style={styles.factSub}>{[dateOnly(m.uploadedAt), m.verifiedClip ? 'Verified clip' : cap(m.kind), `${m.views ?? 0} view${(m.views ?? 0) === 1 ? '' : 's'}`].join(' · ')}</Text>
+              {tags ? <Text style={styles.factSub}>Scouts noticed: {tags}</Text> : null}
+            </View>
+          );
+        })}
+        <TextButton label={pt('profAddEvidence')} onPress={onUpload} size={13} testID="evidence-upload-link" />
+      </View>
+
+      {me.attendance.length > 0 && (
+        <View style={styles.block} testID="evidence-attendance">
+          <SectionTitle>{pt('profAttendance')}</SectionTitle>
+          {me.attendance.map((a) => (
+            <FactRow key={a.id} k={a.fixture} sub={`${a.venue} · ${a.date}${a.corroboratedBy ? ` · coach-signed by ${a.corroboratedBy}` : a.gps ? ' · GPS' : ''}`} v={a.verified ? 'Verified' : 'Logged'} />
+          ))}
+        </View>
+      )}
+
+      {me.pathway && (
+        <View style={styles.block} testID="evidence-references">
+          <SectionTitle>{pt('profReferences')}</SectionTitle>
+          {(me.vouches ?? []).length === 0 && <Muted size={13.5}>{isMinor ? 'Your parent or guardian requests references for you.' : 'A named coach vouching for you is the strongest credential an amateur can hold.'}</Muted>}
+          {(me.vouches ?? []).map((v) => (
+            <View key={v.id} style={styles.fact}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={styles.factKey}>{v.coachName} · {v.role}</Text>
+                {v.text ? <Text style={styles.factSub}>“{v.text}”{v.seasons ? ` — ${v.seasons}` : ''}</Text> : null}
+              </View>
+              <Text style={[styles.factValue, v.status === 'published' && { color: colors.accentText }]}>{v.status === 'published' ? 'Verified' : cap(v.status)}</Text>
+            </View>
+          ))}
+          {!isMinor && (
+            <Disclosure label="Request a coach reference" hint="Your coach confirms by email" testID="evidence-request-reference">
+              <TextInput style={styles.input} placeholder="Coach name" placeholderTextColor={colors.muted} value={vouchCoach} onChangeText={setVouchCoach} accessibilityLabel="Coach name" />
+              <TextInput style={styles.input} placeholder="Coach email" placeholderTextColor={colors.muted} value={vouchEmail} onChangeText={setVouchEmail} autoCapitalize="none" accessibilityLabel="Coach email" />
+              <Row>
+                <Button small primary label="Request reference" onPress={async () => {
+                  try {
+                    await client.requestVouch(playerId, vouchCoach.trim(), vouchEmail.trim(), 'Coach');
+                    setVouchCoach(''); setVouchEmail(''); setVouchNote('Sent — your coach gets an email with a one-time code.');
+                    await refresh();
+                  } catch (e) { setVouchNote(e instanceof Error ? e.message : 'Could not send'); }
+                }} />
+              </Row>
+              {vouchNote && <Muted size={12.5}>{vouchNote}</Muted>}
+            </Disclosure>
+          )}
+        </View>
+      )}
+
+      {/* the evidence record itself (M12): tiers, records, the add-evidence form — unchanged */}
+      <View style={styles.block} testID="evidence-passport">
+        <PassportSection actor={{ kind: 'player', id: playerId }} />
+      </View>
+
+      <View style={styles.block}>
+        <ListRow label="Box Cam" value="Sessions and observations" onPress={onBoxCam} testID="evidence-boxcam-link" />
+        <Disclosure label="Verified sports CV" hint="Your whole verified record, portable" testID="evidence-cv">
+          <CvBlock playerId={playerId} />
+        </Disclosure>
+        <Disclosure label={`Profile ${me.trustScore}% complete`} hint="What would add evidence" testID="evidence-completeness">
+          <Muted size={12.5}>Base {me.trust.base} · Identity +{me.trust.identityVerified} · Attendance +{me.trust.verifiedAttendance} · Trial reports +{me.trust.trialReports} · Media +{me.trust.media} · Profile +{me.trust.profileComplete}</Muted>
+          {(me.nextActions ?? []).map((a) => <Muted key={a.id} size={12.5}>{a.label}{a.gain ? ` (+${a.gain})` : ''}</Muted>)}
+          <Muted size={12}>How complete your profile is. It is not a rating of you as a player and it never moves through payments.</Muted>
+        </Disclosure>
+      </View>
+    </>
+  );
+}
+
+function JourneyTimeline({ journeys, requests, earlier, onExplore }: { journeys: PlayerJourney[]; requests: InboxRequest[]; earlier: { year: string; event: string }[]; onExplore: () => void }) {
+  const styles = useStyles(makeStyles);
+  // the server's journey events (one line per club, only what reached this person) plus the
+  // requests in the Inbox — received, and answered when they were — newest first
+  const events = [
+    ...journeys.flatMap((j) => j.journey.timeline.map((e) => ({ at: e.at, label: cap(evLabel(e.kind)), club: j.club.name ?? pt('jnClub') }))),
+    ...requests.flatMap((r) => [
+      { at: r.createdAt, label: r.type === 'trial' ? 'Trial invitation received' : 'Contact request received', club: r.orgName },
+      ...(r.respondedAt && (r.status === 'accepted' || r.status === 'declined') ? [{ at: r.respondedAt, label: r.status === 'accepted' ? (r.type === 'trial' ? 'Trial invitation accepted' : 'Contact accepted') : (r.type === 'trial' ? 'Trial invitation declined' : 'Contact declined'), club: r.orgName }] : []),
+    ]),
+  ].sort((a, b) => b.at - a.at);
+  const stages = journeys.filter((j) => j.journey.stage !== 'none');
+  return (
+    <>
+      {stages.length > 0 && (
+        <View style={styles.block} testID="journey-current">
+          {stages.map((j) => <FactRow key={j.club.id} k={j.club.name ?? pt('jnClub')} v={stLabel(j.journey.stage)} />)}
+        </View>
+      )}
+      <View style={styles.block} testID="journey-events">
+        {events.length === 0 ? <Text style={styles.calmText}>{pt('profNoJourney')}</Text> : events.map((e, i) => {
+          const showDay = i === 0 || dayLabel(events[i - 1].at) !== dayLabel(e.at);
+          return (
+            <View key={`${e.at}-${e.label}-${i}`} style={styles.event} testID="journey-event">
+              {showDay ? <Kicker>{dayLabel(e.at)}</Kicker> : null}
+              <Text style={styles.factKey}>{e.club}</Text>
+              <Text style={styles.factSub}>{e.label}</Text>
+            </View>
+          );
+        })}
+        {(journeys.length > 0 || requests.length > 0) && <TextButton label={pt('profOpenExplore')} onPress={onExplore} size={13} testID="journey-explore-link" />}
+      </View>
+      {earlier.length > 0 && (
+        <View style={styles.block} testID="journey-earlier">
+          <SectionTitle>{pt('profEarlier')}</SectionTitle>
+          {earlier.map((t, i) => <FactRow key={`${t.year}-${i}`} k={t.event} v={t.year} />)}
+        </View>
+      )}
+    </>
+  );
+}
+
+/**
+ * The controls that used to sit on the profile: availability, first-team
+ * seeker, contract status, Academy+, the contract facts and medical sharing.
+ * They live in You › Account now (M24F.1 §52, §16 of the audit); the words,
+ * the calls and the rules are the ones they always had.
+ */
+export function ProfileSettings() {
+  const colors = useColors();
+  const styles = useStyles(makeStyles);
+  const { playerId, me, isMinor, refresh } = useSession();
+  if (!playerId || !me) return null;
+  const set = async (fn: () => Promise<unknown>) => { try { await fn(); await refresh(); } catch { /* surfaced through unrefreshed UI */ } };
+  return (
+    <>
+      <Disclosure label="Availability and status" hint={`${pt(`avail_${me.availability}` as Parameters<typeof pt>[0])} · ${CONTRACT_LABELS[me.contractStatus]}`} testID="account-availability">
+        {isMinor ? (
+          <Muted size={13}>Availability and club interactions are managed by your parent or guardian. You focus on playing — uploads, stats and drills are all yours.</Muted>
+        ) : (
+          <>
+            <Text style={styles.subhead}>Availability</Text>
             <Row>
               {(Object.keys(AVAILABILITY_LABELS) as Availability[]).map((a) => (
-                <Button key={a} small primary={me.availability === a} label={AVAILABILITY_LABELS[a]}
-                  onPress={() => set(() => client.setAvailability(playerId, a, undefined))} />
+                <Button key={a} small primary={me.availability === a} label={AVAILABILITY_LABELS[a]} onPress={() => set(() => client.setAvailability(playerId, a, undefined))} />
               ))}
             </Row>
             {me.pathway && (
-              <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 10, marginTop: 4 }}>
-                <Row style={{ justifyContent: 'space-between' }}>
-                  <View style={{ flex: 1, paddingRight: 10 }}>
-                    <Text style={{ color: colors.text, fontSize: 14, fontWeight: '700' }}>Looking for my first team</Text>
-                    <Muted size={12}>
-                      First Team Seekers surface first to local grassroots clubs. Need-based, free, never
-                      purchasable — switch it off any time.
-                    </Muted>
-                  </View>
-                  <Switch
-                    value={!!me.firstTeamSeeker}
-                    onValueChange={(v) => set(() => client.setFirstTeamSeeker(playerId, v))}
-                    trackColor={{ true: colors.accent, false: colors.line }}
-                    thumbColor="#fff"
-                  />
-                </Row>
-              </View>
+              <Row style={{ justifyContent: 'space-between', marginTop: 6 }}>
+                <View style={{ flex: 1, paddingRight: 10 }}>
+                  <Text style={styles.factKey}>Looking for my first team</Text>
+                  <Muted size={12}>First Team Seekers surface first to local grassroots clubs. Need-based, free, never purchasable.</Muted>
+                </View>
+                <Switch value={!!me.firstTeamSeeker} onValueChange={(v) => set(() => client.setFirstTeamSeeker(playerId, v))} trackColor={{ true: colors.accent, false: colors.line }} thumbColor="#fff" />
+              </Row>
             )}
-            <SectionTitle>Contract status</SectionTitle>
-            {/* M23 P8 §26 — "Under contract" is recorded by a signing completed in
-                ScoutBox and cannot be declared here; while that contract stands the
-                other words are read-only too. The server refuses either way; this
-                only stops the tap from being offered. */}
+            <Text style={[styles.subhead, { marginTop: 10 }]}>Contract status</Text>
+            {/* M23 P8 §26 — "Under contract" is recorded by a signing completed in ScoutBox and cannot be declared here. */}
             {me.contractStatus === 'under_contract' ? (
               <View testID="contract-status-canonical">
                 <Row><Button small primary label={CONTRACT_LABELS.under_contract} onPress={() => undefined} /></Row>
@@ -263,413 +607,75 @@ export function ProfileBody() {
             ) : (
               <Row>
                 {(Object.keys(CONTRACT_LABELS) as ContractStatus[]).filter((c) => c !== 'unknown' && c !== 'under_contract').map((c) => (
-                  <Button key={c} small primary={me.contractStatus === c} label={CONTRACT_LABELS[c]}
-                    onPress={() => set(() => client.setAvailability(playerId, undefined, c))} />
+                  <Button key={c} small primary={me.contractStatus === c} label={CONTRACT_LABELS[c]} onPress={() => set(() => client.setAvailability(playerId, undefined, c))} />
                 ))}
               </Row>
             )}
-          </Card>
-        ) : (
-          <Card>
-            <SectionTitle>Availability</SectionTitle>
-            <Muted size={13}>
-              Availability and club interactions are managed by your parent or guardian. You focus on
-              playing — uploads, stats and drills are all yours.
-            </Muted>
-          </Card>
-        )}
-
-        {/* academy+ */}
-        {!isMinor && (
-          <Card>
-            <Row style={{ justifyContent: 'space-between' }}>
+            <Row style={{ justifyContent: 'space-between', marginTop: 10 }}>
               <View style={{ flex: 1, paddingRight: 10 }}>
-                <SectionTitle>Academy+</SectionTitle>
-                <Muted size={12.5}>
-                  Opt-in cohort for released and late-developing players — a fresh start, surfaced first
-                  in club searches.
-                </Muted>
+                <Text style={styles.factKey}>Academy+</Text>
+                <Muted size={12}>Opt-in cohort for released and late-developing players — surfaced first in club searches. Player-controlled.</Muted>
               </View>
-              <Switch
-                value={me.academyPlus}
-                onValueChange={(v) => set(() => client.setAcademyPlus(playerId, v))}
-                trackColor={{ true: colors.accent, false: colors.line }}
-                thumbColor="#fff"
-              />
+              <Switch value={me.academyPlus} onValueChange={(v) => set(() => client.setAcademyPlus(playerId, v))} trackColor={{ true: colors.accent, false: colors.line }} thumbColor="#fff" />
             </Row>
-            <View style={styles.subRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: colors.text, fontSize: 13.5, fontWeight: '600' }}>Player-controlled.</Text>
-                <Muted size={12.5}>You can switch this off any time.</Muted>
-              </View>
-              <Text style={{ color: colors.muted, fontSize: 18 }}>›</Text>
-            </View>
-          </Card>
+            {me.contractUntil ? <FactRow k="Contracted until" v={dateOnly(me.contractUntil)} /> : null}
+            {me.marketValueRange ? <FactRow k="Market value range" v={me.marketValueRange} /> : null}
+            {me.agentName ? <FactRow k="Agent" v={me.agentName} /> : null}
+          </>
         )}
+      </Disclosure>
 
-        {/* contract status card */}
-        {(me.contractUntil || me.marketValueRange || me.agentName) && (
-          <Card>
-            <SectionTitle>Contract status</SectionTitle>
-            <Row style={{ alignItems: 'stretch' }}>
-              <View style={{ flex: 1, gap: 10 }}>
-                {me.contractUntil && (
-                  <View>
-                    <Muted size={12}>Contracted until</Muted>
-                    <Text style={styles.contractV}>
-                      {/* M23 P5.7 (§6): a calendar day renders as that day in every zone */}
-                      {new Date(me.contractUntil).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', ...(/^\d{4}-\d{2}-\d{2}$/.test(String(me.contractUntil)) ? { timeZone: 'UTC' } : {}) })}
-                    </Text>
-                  </View>
-                )}
-                {me.marketValueRange && (
-                  <View>
-                    <Muted size={12}>Market Value</Muted>
-                    <Text style={styles.contractV}>{me.marketValueRange}</Text>
-                  </View>
-                )}
-                {me.agentName && (
-                  <View>
-                    <Muted size={12}>Agent</Muted>
-                    <Text style={styles.contractV}>{me.agentName}</Text>
-                  </View>
-                )}
-              </View>
-              <View style={styles.jersey}>
-                <Text style={styles.jerseyNumber}>{me.squadNumber ?? ''}</Text>
-              </View>
-            </Row>
-          </Card>
-        )}
-
-        {/* ---- everything below keeps Milestone 2 functionality ---- */}
-
-        {benchmarks && (benchmarks.drills.length > 0 || benchmarks.stats.length > 0) && (
-          <Card>
-            <SectionTitle>Where you stand — your cohort, not the pros</SectionTitle>
-            <Muted size={12}>{benchmarks.note}</Muted>
-            {benchmarks.stats.map((b) => (
-              <Row key={b.stat} style={{ justifyContent: 'space-between' }}>
-                <Text style={{ color: colors.text, fontSize: 13.5 }}>{b.stat.replace(/Pct$/, ' %').replace(/([A-Z])/g, ' $1').toLowerCase()}</Text>
-                <Row>
-                  <Muted size={12.5}>{b.value}</Muted>
-                  {b.percentile !== null
-                    ? <Pill label={`top ${Math.max(1, 100 - b.percentile)}%`} tone={b.percentile >= 75 ? 'gold' : 'blue'} />
-                    : <Pill label="Cohort too small" />}
-                </Row>
-              </Row>
-            ))}
-            {benchmarks.drills.map((b) => (
-              <Row key={b.drillId} style={{ justifyContent: 'space-between' }}>
-                <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>{b.name}</Text>
-                <Row>
-                  <Muted size={12.5}>{b.value}{b.unit}</Muted>
-                  {b.percentile !== null
-                    ? <Pill label={`top ${Math.max(1, 100 - b.percentile)}%`} tone={b.percentile >= 75 ? 'gold' : 'blue'} />
-                    : <Pill label="Cohort too small" />}
-                </Row>
-              </Row>
-            ))}
-          </Card>
-        )}
-
-        {me.pathway && (
-          <Card>
-            <SectionTitle>Coach references</SectionTitle>
-            {(me.vouches ?? []).length === 0 && (
-              <Muted size={12.5}>
-                A named coach vouching for you is the strongest credential an amateur can hold. Ask yours —
-                they confirm by email, and the reference appears here for every club to see.
-              </Muted>
-            )}
-            {(me.vouches ?? []).map((v) => (
-              <View key={v.id} style={{ gap: 2 }}>
-                <Row style={{ justifyContent: 'space-between' }}>
-                  <Text style={{ color: colors.text, fontSize: 13.5, fontWeight: '700' }}>{v.coachName} · {v.role}</Text>
-                  <Pill label={v.status === 'published' ? 'verified ✓' : v.status} tone={v.status === 'published' ? 'green' : 'blue'} />
-                </Row>
-                {v.text && <Muted size={12.5}>“{v.text}”{v.seasons ? ` — ${v.seasons}` : ''}</Muted>}
-              </View>
-            ))}
-            {!isMinor && (
-              <View style={{ gap: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 10 }}>
-                <TextInput style={styles.vouchInput} placeholder="Coach name" placeholderTextColor={colors.muted} value={vouchCoach} onChangeText={setVouchCoach} />
-                <TextInput style={styles.vouchInput} placeholder="Coach email" placeholderTextColor={colors.muted} value={vouchEmail} onChangeText={setVouchEmail} autoCapitalize="none" />
-                <Button
-                  small primary label="Request reference"
-                  onPress={async () => {
-                    try {
-                      await client.requestVouch(playerId, vouchCoach.trim(), vouchEmail.trim(), 'Coach');
-                      setVouchCoach(''); setVouchEmail('');
-                      setVouchNote('Sent — your coach gets an email with a one-time code.');
-                      await refresh();
-                    } catch (e) {
-                      setVouchNote(e instanceof Error ? e.message : 'Could not send');
-                    }
-                  }}
-                />
-                {vouchNote && <Muted size={12}>{vouchNote}</Muted>}
-              </View>
-            )}
-            {isMinor && <Muted size={12}>Your parent/guardian requests references for you.</Muted>}
-          </Card>
-        )}
-
-        <Card style={me.medical.shared ? { borderColor: colors.gold } : undefined}>
-          <Row style={{ justifyContent: 'space-between' }}>
-            <View style={{ flex: 1, paddingRight: 10 }}>
-              <SectionTitle>Medical sharing {me.medical.shared ? '— ON' : '— OFF'}</SectionTitle>
-              <Muted size={12.5}>
-                {isMinor
-                  ? 'Your parent or guardian controls this. Nothing is visible to any organisation unless they switch it on.'
-                  : 'Your medical history is invisible to every organisation unless you switch this on. Sharing never changes your Trust Score.'}
-              </Muted>
-            </View>
-            {!isMinor && (
-              <Switch
-                value={me.medical.shared}
-                onValueChange={(v) => set(() => client.setMedicalShared(playerId, v))}
-                trackColor={{ true: colors.gold, false: colors.line }}
-                thumbColor="#fff"
-              />
-            )}
-          </Row>
-          {me.medical.records.map((r) => (
-            <Row key={r.id}>
-              <Pill label={r.type} />
-              <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>{r.title}</Text>
-              <Muted size={12}>
-                {r.date}{r.layoffWeeks ? ` · ${r.layoffWeeks} wks` : ''}{r.cleared ? ' · cleared' : ''}
-              </Muted>
-            </Row>
-          ))}
-          {me.medical.records.length === 0 && <Muted size={12.5}>No records logged.</Muted>}
-        </Card>
-
-        {me.trialReports.length > 0 && (
-          <Card>
-            <SectionTitle>Trial performance reports</SectionTitle>
-            {me.trialReports.map((r) => (
-              <View key={r.id} style={{ gap: 2 }}>
-                <Text style={{ color: colors.text, fontSize: 15, fontWeight: '700' }}>{r.orgName}</Text>
-                <Muted size={12.5}>
-                  accel {r.acceleration}/10 · {r.sprintSpeedKmh} km/h · {r.distanceKm} km · pass {r.passCompletionPct}% ·
-                  duels {r.duelSuccessPct}% · coach {r.coachRating}/10
-                </Muted>
-                {r.strengthNote ? <Muted size={12.5}>Strength: {r.strengthNote}</Muted> : null}
-                {r.focusNote ? <Muted size={12.5}>Work on: {r.focusNote}</Muted> : null}
-              </View>
-            ))}
-            <Muted size={12.5}>Filed by clubs after your trials — mandatory, and they raise your Trust Score.</Muted>
-          </Card>
-        )}
-
-        <Card>
-          <SectionTitle>Transfer timeline</SectionTitle>
-          {me.timeline.length === 0 && <Muted size={13}>No milestones yet.</Muted>}
-          {me.timeline.map((t, i) => (
-            <Row key={i}>
-              <Pill label={t.year} />
-              <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>{t.event}</Text>
-            </Row>
-          ))}
-        </Card>
-
-        <Card>
-          <SectionTitle>Match footage</SectionTitle>
-          {me.media.length === 0 && <Muted size={13}>No clips yet — upload from the Upload tab.</Muted>}
-          {me.media.map((m) => {
-            const src = client.mediaUrl(m.url);
-            return (
-              <View key={m.id} style={{ gap: 6 }}>
-                <Row>
-                  {m.verifiedClip ? <Pill label="Verified Clip" tone="green" /> : <Pill label={m.kind.charAt(0).toUpperCase() + m.kind.slice(1)} tone="blue" />}
-                  <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>{m.title}</Text>
-                  <Muted size={12}>{m.views ?? 0} view{(m.views ?? 0) === 1 ? '' : 's'}</Muted>
-                </Row>
-                {Object.keys(m.tags ?? {}).length > 0 && (
-                  <Row>
-                    {Object.entries(m.tags!).map(([t, n]) => <Pill key={t} label={`${t.replace(/_/g, ' ')} ×${n}`} tone="gold" />)}
-                  </Row>
-                )}
-                {src && <WebVideo src={src} />}
-              </View>
-            );
-          })}
-        </Card>
-
-        {(me.drillResults?.length ?? 0) > 0 && (
-          <Card>
-            <SectionTitle>At-home combine</SectionTitle>
-            {me.drillResults!.map((r) => (
-              <Row key={r.id}>
-                <Pill label={r.verified ? 'verified' : 'self-reported'} tone={r.verified ? 'green' : 'blue'} />
-                <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>{r.drillName}</Text>
-                <Muted size={12}>{r.metric}: {r.value}{r.unit}</Muted>
-              </Row>
-            ))}
-            <Muted size={12.5}>Video-backed results are combine-verified and visible to clubs.</Muted>
-          </Card>
-        )}
-
-        <Card>
-          <Row style={{ justifyContent: 'space-between' }}>
-            <View style={{ flex: 1, paddingRight: 10 }}>
-              <SectionTitle>Your verified sports CV</SectionTitle>
-              <Muted size={12.5}>
-                Your whole verified record — attendance, trial reports, combine numbers, trust — as a
-                portable CV you own. ScoutBox never locks your history in.
-              </Muted>
-            </View>
-            <Button small primary label={cvOpen ? 'Hide' : 'View CV'} onPress={() => setCvOpen(!cvOpen)} />
-          </Row>
-          {cvOpen && cv && (
-            <View style={{ gap: 6, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 10 }}>
-              <Text style={{ color: colors.text, fontSize: 17, fontWeight: '800' }}>{cv.player.name} — Verified Sports CV</Text>
-              <Muted size={12.5}>
-                {cv.player.position ?? '—'} · {cv.player.age} · {cv.player.foot ?? '—'} foot · {cv.player.country}
-                {cv.player.identityVerified ? ' · identity verified' : ''}
-              </Muted>
-              <Muted size={12.5}>Trust {cv.trust.score}/100 ({cv.trust.tier})</Muted>
-              {cv.seasonStats && <Muted size={12.5}>Season: {cv.seasonStats.appearances} apps · {cv.seasonStats.goals} goals · {cv.seasonStats.assists} assists</Muted>}
-              <Muted size={12.5}>Verified attendance ({cv.verifiedAttendance.length}): {cv.verifiedAttendance.map((a) => `${a.fixture} (${a.date})`).join(' · ') || '—'}</Muted>
-              <Muted size={12.5}>Verified clips: {cv.verifiedClips.map((c) => c.title).join(' · ') || '—'}</Muted>
-              <Muted size={12.5}>
-                Trial reports ({cv.trialReports.length}): {cv.trialReports.map((r) => `${r.orgName} — coach ${r.coachRating}/10`).join(' · ') || '—'}
-              </Muted>
-              {cv.combine.length > 0 && (
-                <Muted size={12.5}>Combine: {cv.combine.map((r) => `${r.metric} ${r.value}${r.unit}${r.verified ? ' ✓' : ''}`).join(' · ')}</Muted>
-              )}
-              <Muted size={11.5}>{cv.note}</Muted>
-            </View>
-          )}
-        </Card>
-
-        <Card>
-          <SectionTitle>Verified match attendance</SectionTitle>
-          {me.attendance.length === 0 && <Muted size={13}>None yet — log one from the Upload tab.</Muted>}
-          {me.attendance.map((a) => (
-            <Row key={a.id}>
-              {a.corroboratedBy
-                ? <Pill label={`coach-signed · ${a.corroboratedBy}`} tone="gold" />
-                : <Pill label="GPS ✓" tone="green" />}
-              <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>{a.fixture}</Text>
-              <Muted size={12}>{a.venue} · {a.date}</Muted>
-            </Row>
-          ))}
-        </Card>
-        {playerId ? <PassportSection actor={{ kind: 'player', id: playerId }} /> : null}
+      <Disclosure label="Medical sharing" hint={me.medical.shared ? 'On — visible to organisations' : 'Off — invisible to every organisation'} testID="account-medical">
+        <Row style={{ justifyContent: 'space-between' }}>
+          <View style={{ flex: 1, paddingRight: 10 }}>
+            <Muted size={13}>
+              {isMinor
+                ? 'Your parent or guardian controls this. Nothing is visible to any organisation unless they switch it on.'
+                : 'Your medical history is invisible to every organisation unless you switch this on. Sharing never changes your Trust Score.'}
+            </Muted>
+          </View>
+          {!isMinor && <Switch value={me.medical.shared} onValueChange={(v) => set(() => client.setMedicalShared(playerId, v))} trackColor={{ true: colors.gold, false: colors.line }} thumbColor="#fff" />}
+        </Row>
+        {me.medical.records.map((r) => <FactRow key={r.id} k={r.title} sub={`${cap(r.type)} · ${r.date}${r.layoffWeeks ? ` · ${r.layoffWeeks} wks` : ''}`} v={r.cleared ? 'Cleared' : ''} />)}
+        {me.medical.records.length === 0 && <Muted size={12.5}>No records logged.</Muted>}
+      </Disclosure>
     </>
-  );
-}
-
-function StatTile({ v, k }: { v: string; k: string }) {
-  const colors = useColors();
-  const styles = useStyles(makeStyles);
-  return (
-    <View style={styles.statTile}>
-      <Text style={styles.statValue}>{v}</Text>
-      <Muted size={11}>{k}</Muted>
-    </View>
   );
 }
 
 const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  scroll: { paddingHorizontal: 18, paddingTop: 12, paddingBottom: 24, gap: 12 },
-  identityRow: { flexDirection: 'row', gap: 16, alignItems: 'flex-start' },
-  avatarCard: {
-    width: 128,
-    height: 128,
-    borderRadius: 22,
-    borderWidth: 1.5,
-    borderColor: colors.line,
-    backgroundColor: colors.panel,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: colors.accent,
-    shadowOpacity: 0.6,
-    shadowRadius: 12,
-    overflow: 'visible',
-  },
-  avatarNumber: {
-    position: 'absolute',
-    top: 2,
-    right: 8,
-    fontSize: 56,
-    fontWeight: '800',
-    color: 'rgba(53, 208, 127, 0.18)',
-  },
-  avatarInitials: { color: colors.text, fontSize: 40, fontWeight: '800' },
-  cameraBadge: {
-    position: 'absolute',
-    bottom: -8,
-    right: -8,
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: colors.panel2,
-    borderWidth: 1,
-    borderColor: colors.line,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  name: { color: colors.text, fontSize: 27, fontWeight: '800' },
-  subline: { color: colors.text, fontSize: 16.5, fontWeight: '600' },
-  trustBig: { color: colors.accentText, fontSize: 54, fontWeight: '800', lineHeight: 56 },
-  trustDenom: { color: colors.muted, fontSize: 18, fontWeight: '700', marginBottom: 8 },
-  standing: { color: colors.accentText, fontSize: 14.5, fontWeight: '600' },
-  trustTrack: { height: 8, borderRadius: 4, backgroundColor: colors.bg, overflow: 'visible' },
-  trustFill: { height: '100%', borderRadius: 4, backgroundColor: colors.accent },
-  trustKnob: {
-    position: 'absolute',
-    top: -3,
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: colors.accent,
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-  statTile: {
-    flexGrow: 1,
-    minWidth: 86,
-    backgroundColor: colors.bg2,
-    borderColor: colors.line,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    alignItems: 'center',
-    gap: 3,
-  },
-  statValue: { color: colors.text, fontSize: 21, fontWeight: '800' },
-  subRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: colors.bg2,
-    borderColor: colors.line,
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
-    marginTop: 8,
-  },
-  contractV: { color: colors.text, fontSize: 17, fontWeight: '800' },
-  vouchInput: {
-    backgroundColor: colors.bg2, borderColor: colors.line, borderWidth: 1, borderRadius: 10,
-    color: colors.text, paddingHorizontal: 12, paddingVertical: 8, fontSize: 14,
-  },
-  jersey: {
-    width: 96,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  jerseyNumber: {
-    position: 'absolute',
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '800',
-    marginTop: 2,
-  },
+  scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 32, gap: 0 },
+  // identity
+  header: { paddingTop: 10, paddingBottom: 18, gap: 4 },
+  avatar: { width: 72, height: 72, borderRadius: 36, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  avatarText: { color: colors.accentInk, fontSize: 24, fontWeight: '700', letterSpacing: -0.5 },
+  name: { color: colors.text, fontSize: 28, fontWeight: '700', letterSpacing: -0.8, lineHeight: 33 },
+  summary: { color: colors.text, fontSize: 15.5, fontWeight: '500', marginTop: 2 },
+  availability: { color: colors.muted, fontSize: 14, marginTop: 6 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, marginTop: 8 },
+  verified: { flexDirection: 'row', alignItems: 'center', gap: 7, minHeight: 32 },
+  marker: { width: 8, height: 8, backgroundColor: colors.accent },
+  verifiedText: { color: colors.safetyText, fontSize: 13, fontWeight: '600' },
+  quietWord: { color: colors.muted, fontSize: 13 },
+  // sections
+  body: { paddingTop: 22, gap: 34 },
+  block: { gap: 0 },
+  next: { backgroundColor: colors.panel, borderRadius: 14, padding: 18, gap: 4, borderWidth: 1, borderColor: colors.line },
+  nextClub: { color: colors.text, fontSize: 19, fontWeight: '700', letterSpacing: -0.4, marginTop: 6 },
+  nextTitle: { color: colors.text, fontSize: 15, fontWeight: '500' },
+  nextLine: { color: colors.muted, fontSize: 13.5, lineHeight: 19, marginTop: 2 },
+  calm: { paddingVertical: 4 },
+  calmText: { color: colors.text, fontSize: 16, fontWeight: '500' },
+  fact: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: colors.line },
+  factKey: { color: colors.text, fontSize: 14.5, fontWeight: '500', flexShrink: 1 },
+  factValue: { color: colors.text, fontSize: 14.5, fontWeight: '600', textAlign: 'right', flexShrink: 1, maxWidth: '55%' },
+  factSub: { color: colors.muted, fontSize: 12.5, lineHeight: 17, marginTop: 2 },
+  subhead: { color: colors.text, fontSize: 14, fontWeight: '600', paddingBottom: 4 },
+  activityRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: colors.line },
+  activityText: { color: colors.text, fontSize: 14, flex: 1, lineHeight: 19 },
+  activityWhen: { color: colors.muted, fontSize: 12.5, paddingTop: 2 },
+  clip: { gap: 4, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.line },
+  event: { gap: 2, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.line },
+  input: { borderWidth: 1, borderColor: colors.line, borderRadius: 10, color: colors.text, backgroundColor: colors.bg2, paddingHorizontal: 12, paddingVertical: 9, fontSize: 14, marginTop: 8 },
 });

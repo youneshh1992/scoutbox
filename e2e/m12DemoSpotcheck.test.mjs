@@ -86,11 +86,12 @@ await playerCategory(mob, 'journey', 'Board'); // M24D: the board is My journey 
 await mob.waitForSelector('text=Opportunity board', { timeout: 20000 });
 await mob.waitForSelector('text=U23 open trial — attackers', { timeout: 10000 });
 say('Player demo: opportunity board populated');
-await mob.click('a[href="/you"]'); // P2.5: Profile is the first page tab of You
+await mob.click('a[href^="/you"]'); // P2.5: Profile is the first page tab of You
+await mob.getByRole('tab', { name: 'Evidence' }).click(); // M24F.1: the evidence passport is the profile's Evidence section
 await mob.waitForSelector('text=Evidence passport', { timeout: 20000 });
 await mob.waitForSelector('text=club assessed', { timeout: 10000 });
 say('Player demo: evidence passport with honest tiers');
-await mob.click('a[href="/you"]');
+await mob.click('a[href^="/you"]');
 await mob.getByRole('tab', { name: 'Clubs' }).click();
 await mob.waitForSelector('text=pressing triggers', { timeout: 20000 });
 await mob.getByRole('tab', { name: 'Account' }).click();

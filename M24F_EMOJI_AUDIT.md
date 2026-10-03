@@ -49,3 +49,13 @@ now plain text.
 
 `node e2e/m24fVisualAudit.test.mjs` — "emoji gate: 0 hardcoded product
 emoji in UI source". It names the file, line and code point of any hit.
+
+## M24F.1 addendum — one the literal scan could not see
+
+The old Player profile drew a country flag with
+`String.fromCodePoint(0x1f1a5 + …)` over the two letters of the country
+code — a pictograph assembled at runtime, invisible to a scan for literal
+`Extended_Pictographic` characters. It rendered as 🇬🇧 beside "Right Foot"
+on the profile. Removed with the profile redesign (M24F.1); the gate now
+also fails on any product source that builds a flag or pictograph from
+regional-indicator code points.

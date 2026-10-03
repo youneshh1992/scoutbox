@@ -143,3 +143,5 @@ Current then the board, Inbox's Decline is a text action, the Account rows
 and the two exits, the guardian's digest / kicker / primary / disclosure.
 `m24dAuthLive`, `m24eScrollLive`, `preM24SweepLive` and the M12–M23 Player
 journeys keep their coverage of behaviour.
+
+**M24F.1** — the profile under You › Profile was recomposed afterwards into a football-first header and four sections; see `M24F_PLAYER_PROFILE_REDESIGN.md`, `M24F_PLAYER_PROFILE_CONTENT_AUDIT.md` and `M24F_PLAYER_PROFILE_DATA_MAP.md`.
