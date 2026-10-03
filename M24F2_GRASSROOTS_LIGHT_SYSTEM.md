@@ -72,22 +72,17 @@ is a card; nothing is a filled tile.
 
 ## 3. The entry (sign-in) left panel
 
-- **All diagonal lines removed** from the introduction panel — not faded.
-  The M24E blade bands (`repeating-linear-gradient(103deg …)`) are gone
-  from `platform.css`.
-- **The real-grass photograph** (`design-system/assets/grassroots-auth-grass.jpg`,
-  licence beside it) is permitted here and nowhere else. The rule lives in
-  `scoutbox-grassroots/src/styles.css`, so no other bundle carries the
-  bytes and no authenticated screen can reach it.
-- **One very subtle centre-circle and halfway-line motif** over the
-  photograph: a 2 px ring at 36 % of the panel in white at 16 % and a 1 px
-  vertical line at 13 %, drawn as CSS gradients (decorative; the panel's
-  accessible name is its headline).
-- **Restrained copy**: the headline "Your club. Your community. Your next
-  player.", one sentence ("Federation-registered grassroots clubs, scouting
-  within 50 km of their ground."), no bullet points at any width. The demo
-  build shows "DEMO ENVIRONMENT" as a small uppercase line, not a notice.
-  `AuthPage` renders no list when `points` is empty.
+**Restored at the Founder's direction after the M24F.2 pass**: the left
+panel is the M24E green introduction again, exactly as at `e5fe716` — the
+soft green `--auth-promo` with its blade-and-band texture. The photograph
+and the centre-circle motif that M24F.2 R3 had introduced were removed in
+full: no asset on disk, no stylesheet rule, nowhere in any application.
+
+- **Restrained copy** (kept): the headline "Your club. Your community. Your
+  next player.", one sentence ("Federation-registered grassroots clubs,
+  scouting within 50 km of their ground."), no bullet points at any width.
+  The demo build shows "DEMO ENVIRONMENT" as a small uppercase line, not a
+  notice. `AuthPage` renders no list when `points` is empty.
 
 ## 4. Agent — active navigation in gold
 

@@ -15,7 +15,7 @@ export and the five demo bundles). No server file was touched.
 
 ## New gates
 
-### `e2e/m24f2DensityAudit.test.mjs` — 38 static checks, 0 failed
+### `e2e/m24f2DensityAudit.test.mjs` — 37 static checks, 0 failed
 
 Player › Clubs and › Account are four categories each (≤ 5) with the agreed
 names; the section is derived from `?section=` and every change is a
@@ -23,10 +23,10 @@ history entry; Suitability preferences render under Account › Preferences
 and not under Clubs; Development holds the feedback behind "View details";
 the Account root rows carry no sub-note and the category pages a back
 control. Grassroots: no diagonal gradient on the entry introduction in
-`platform.css`; the centre-circle motif over the photograph is declared in
-the Grassroots stylesheet only; no other stylesheet references the
-photograph; it never reaches an authenticated surface; the entry has no
-bullet points and no demo notice; pitch markings are dark-only; the navy
+`platform.css`; no stylesheet carries a photograph or a centre-circle motif and the
+asset is not on disk; the entry has no bullet points and no demo notice;
+pitch markings are dark-only; the navy
+
 sidebar keeps a readable Sign out. Agent: the active-navigation tokens are
 gold in both themes, no green, with the inset bar. The M24F.1 profile keeps
 its four sections and its header / current action. Sign out in all six
@@ -45,7 +45,7 @@ action and no percentage; it replaces the bare feed.
 |---|---|
 | Player 390×844, 640×360, 1024×700, 1440×900 | the Wordmark's mark column starts 2–6 px after the word, the TM raised and small, announced "trademark"; Clubs: four categories in a tablist, one selected, ≥ 40 px targets, Current default; Clubs root ≤ 2700 px of scroll (M24F.1: 4450); Requests / Development / History reachable with `?section=`; no horizontal overflow on any category; browser back → Development, forward → History; Enter on the focused Current tab opens it and keeps focus; `/you?tab=clubs&section=development` opens Development and a refresh keeps it; Account: the root list of four, no sub-note under a category row, Switch account and Sign out beneath, root ≤ 1100 px (M24F.1: 1280); each category opens with `?section=`, no overflow, back control returns to the root; `/you?tab=account&section=privacy` opens Privacy with the safeguarding rules in reach; browser back returns to the root |
 | Player demo | Development shows a "View details" per club; opening it reveals the feedback texts with Log progress as the one primary inside |
-| Grassroots entry, four viewports | the photograph on the introduction, no diagonal, the centre-circle gradient, the headline and one sentence (no points, no notice), decorative CSS only (no `img`), the panel named by its headline, the form without an image, no overflow, the ™ geometry |
+| Grassroots entry, four viewports | the M24E green introduction (restored at the Founder's direction: no photograph, no centre-circle motif), the headline and one sentence (no points, no notice), no `img`, the panel named by its headline, the form without an image, no overflow, the ™ geometry |
 | Grassroots light 390 / 1024 / 1440 | canvas `rgb(247,249,252)` with no background image and navy ink; sidebar `rgb(6,56,86)`, active destination white on the green wash with an inset bar, Sign out `rgb(255,180,168)`, the sidebar ™; Home: exactly one primary action, the six parts in order, Club progress ≥ 4 facts with no percentage, ≤ 8 activity rows, 4 quick actions, no overflow, a progress row navigates |
 | Grassroots dark 1440 | the frozen M24E tokens unchanged, the computed workspace / sidebar / top bar / body / active colours identical, the grain present and no photograph |
 | Agent dark and light 1440 | the active destination's text is gold (`rgb(208,181,123)` / `rgb(122,90,28)`), the inset bar gold (`rgb(199,169,107)` / `rgb(166,124,46)`), no green anywhere on it, the icon gold, on Home, Clients, Transactions and Inbox; the sidebar ™ |
@@ -64,8 +64,8 @@ action and no percentage; it replaces the bare feed.
 
 | Suite | Change |
 |---|---|
-| `m24fVisualAudit` | 50 checks: the Grassroots LIGHT tokens (cool canvas, navy sidebar, white surfaces, green, ink), the base turf tokens for dark, grain and markings dark-only, no diagonal bands, the centre-circle rule in the Grassroots stylesheet, the photograph on disk with its licence and referenced by that stylesheet alone, scoped to `.auth-promo` |
-| `m24fVisualLive` | 182 checks: the entry carries the photograph (never the form) and no bands; the page and form keep the shared scheme; the light workspace is the cool canvas with the navy sidebar, no grain, no markings, navy ink |
+| `m24fVisualAudit` | 48 checks: the Grassroots LIGHT tokens (cool canvas, navy sidebar, white surfaces, green, ink), the base turf tokens for dark, grain and markings dark-only, the M24E green entry panel restored, no photograph or centre-circle rule anywhere, no asset on disk |
+| `m24fVisualLive` | 182 checks: the entry is the M24E green panel with its bands and no photograph; the page and form keep the shared scheme; the light workspace is the cool canvas with the navy sidebar, no grain, no markings, navy ink |
 | `m24dAuthLive` | 112 checks: Grassroots exempt from "desktop shows the points" (it has none) |
 | `m23AgentLive`, `m23AgentIntegrationLive` | the licence is one fact (the caveat only when unverified); each disclosure row's Turn on / Turn off control is the statement |
 | `m12DemoSpotcheck`, `m12Live`, `m13DemoSpotcheck`, `m13Live`, `m14DemoSpotcheck`, `m15Live`, `uiSpotcheck` | re-pointed at Clubs › Current / Development / History and Account › Preferences / Privacy; the You link matched by prefix |

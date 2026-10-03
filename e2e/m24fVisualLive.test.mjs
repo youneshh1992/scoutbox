@@ -118,11 +118,11 @@ for (const w of WIDTHS) {
     r.pitchRule = r.rules.some((t) => /\.login\.auth-page::before/.test(t) && !/data-app="grass"/.test(t));
     r.pitchHidden = r.rules.some((t) => /data-app="grass"\] \.login\.auth-page::before/.test(t));
     const tag = `Grassroots entry ${w}px (${saved} saved)`;
-    // M24F.2 — the real-grass photograph on the introduction panel ONLY (never the form), and no diagonal bands at all.
-    ok(r.photo && !r.formHasImage, `${tag}: the introduction carries the grass photograph; the form carries no image`);
-    ok(!r.blades, `${tag}: no blade-of-grass bands (removed, not faded)`);
+    // The Founder's direction after M24F.2: the M24E green introduction again — no photograph anywhere.
+    ok(!r.photo && !r.formHasImage, `${tag}: no photograph anywhere on the entry (restored)`);
+    ok(r.blades, `${tag}: the introduction carries the M24E blade-of-grass bands`);
     ok(w >= 721 ? r.promoLeftOfForm : r.promoAboveForm, `${tag}: the introduction is ${w >= 721 ? 'the LEFT panel' : 'stacked above the form'}`);
-    ok(r.formBg === proRef.formBg && r.pageBg === proRef.pageBg, `${tag}: the shared M24E entry scheme on the page and the form, same as Pro (${r.formBg} / ${r.pageBg}); the introduction is the photograph`);
+    ok(r.formBg === proRef.formBg && r.pageBg === proRef.pageBg && r.promoBg === proRef.promoBg, `${tag}: the shared M24E entry scheme, same as Pro (${r.formBg} / ${r.pageBg} / ${r.promoBg})`);
     ok(r.formBg !== 'rgb(246, 248, 244)' && r.pageBg !== 'rgb(47, 59, 52)', `${tag}: the M24F Sage entry colours are gone`);
     ok(r.toggle === 0, `${tag}: no theme control`);
     ok(/^(")?Inter\b/.test(r.sub) && r.subStyle === 'normal', `${tag}: "Grassroots" is set in Inter, upright (${r.sub.split(',')[0]}) — the serif is reverted`);

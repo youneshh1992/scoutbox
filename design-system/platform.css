@@ -747,22 +747,20 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .auth-form .login-signature { color: var(--auth-soft); margin-top: 8px; }
 .auth-form .login-signature span { color: var(--auth-ink); }
 .auth-form .wordmark { color: var(--auth-ink); }
-/* M24F.2 — the Grassroots entry introduction: the real-grass photograph with
-   one subtle centre-circle / halfway-line (declared in the Grassroots app's
-   own stylesheet, so no other bundle carries the photograph). No diagonal
-   bands, no texture. White type over the grass; restrained copy. */
-:root[data-app="grass"] .auth-promo { background-color: #244a33; justify-content: flex-end; padding: 48px 40px 44px; min-height: 100%; }
-:root[data-app="grass"] .auth-promo h2, :root[data-app="grass"] .auth-summary, :root[data-app="grass"] .auth-points, :root[data-app="grass"] .auth-note { color: #ffffff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.25); }
-:root[data-app="grass"] .auth-promo h2 { font-size: 34px; letter-spacing: -1px; }
+/* Grassroots: the bright introduction carries the turf — blades of grass and
+   broad mowing bands in the deep green, the same geometry as the Grassroots
+   workspace texture, no lines. (Restored to the M24E state at the Founder's
+   direction: no photograph, no centre circle.) */
+:root[data-app="grass"] .auth-promo {
+  background-color: var(--auth-promo);
+  background-image:
+    repeating-linear-gradient(103deg, transparent 0 3px, rgba(17, 56, 34, 0.09) 3px 4px, transparent 4px 9px),
+    repeating-linear-gradient(97deg, transparent 0 5px, rgba(17, 56, 34, 0.05) 5px 6px, transparent 6px 13px),
+    repeating-linear-gradient(90deg, transparent 0 56px, rgba(17, 56, 34, 0.06) 56px 112px);
+}
 :root[data-app="grass"] .auth-points:empty { display: none; }
 /* The environment indicator: a quiet line, not a notice. */
-:root[data-app="grass"] .auth-promo .auth-env { font-size: 11.5px; letter-spacing: 0.4px; text-transform: uppercase; color: rgba(255, 255, 255, 0.78); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35); margin-top: 18px; }
-@media (max-width: 720px) {
-  :root[data-app="grass"] .auth-promo { min-height: 0; height: 200px; padding: 20px 22px 18px; justify-content: flex-end; gap: 6px; }
-  :root[data-app="grass"] .auth-promo h2 { font-size: 22px; }
-  :root[data-app="grass"] .auth-summary { font-size: 13px; }
-  :root[data-app="grass"] .auth-promo .auth-env { margin-top: 6px; }
-}
+:root[data-app="grass"] .auth-promo .auth-env { font-size: 11.5px; letter-spacing: 0.4px; text-transform: uppercase; color: var(--auth-promo-ink); opacity: 0.7; margin-top: 18px; }
 /* M24F — the Grassroots club rows are a list whatever theme the person saved:
    the shared dark-theme control rules must not box them. Colour and type
    follow the M24E scheme untouched. */

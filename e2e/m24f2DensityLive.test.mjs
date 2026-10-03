@@ -187,10 +187,10 @@ for (const [w, h] of VIEWS) {
   await page.goto(`${origin(PORTS.grassroots)}/`); await page.waitForSelector('.org-card', { timeout: 25000 }); await sleep(400);
   const r = await page.evaluate(() => { const cs = (el) => getComputedStyle(el); const promo = document.querySelector('.auth-promo'); const bg = cs(promo).backgroundImage; return { photo: /url\(/.test(bg), circle: /radial-gradient/.test(bg), diagonal: /repeating-linear-gradient/.test(bg) || /linear-gradient\((?!180deg)\s*\d+deg/.test(bg), points: document.querySelectorAll('.auth-points li').length, notes: document.querySelectorAll('.auth-promo .auth-note').length, h2: document.querySelector('.auth-promo h2')?.textContent.trim(), summary: !!document.querySelector('.auth-summary'), img: document.querySelectorAll('.auth-promo img').length, labelled: !!promo.getAttribute('aria-labelledby'), formImage: cs(document.querySelector('.auth-form')).backgroundImage }; });
   const tag = `Grassroots entry ${w}×${h}`;
-  ok(r.photo && !r.diagonal, `${tag}: the grass photograph on the introduction, no diagonal line`);
-  ok(r.circle, `${tag}: the subtle centre-circle motif is drawn over the photograph`);
+  // The Founder's direction after M24F.2: the M24E green introduction — no photograph, no centre circle.
+  ok(!r.photo && !r.circle, `${tag}: no photograph and no centre-circle motif on the introduction (the green panel, restored)`);
   ok(r.points === 0 && r.notes === 0 && r.h2 === 'Your club. Your community. Your next player.' && r.summary, `${tag}: the headline and one sentence — no bullet points, no demo notice`);
-  ok(r.img === 0 && r.labelled && r.formImage === 'none', `${tag}: the motif is decorative CSS (no img), the panel is named by its headline, the form carries no image`);
+  ok(r.img === 0 && r.labelled && r.formImage === 'none', `${tag}: no img, the panel is named by its headline, the form carries no image`);
   ok(!(await page.evaluate(OVERFLOW)), `${tag}: no horizontal overflow`);
   checkTm(`${tag} ™`, await page.evaluate(TM('.auth-form h1')));
   await ctx.close();

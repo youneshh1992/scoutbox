@@ -94,10 +94,10 @@ ok(frozen.tokens['--sb-workspace'] === '#252e26' && frozen.computed.content.bg =
 // workspace is a plain cool canvas (no pitch lines, no photograph).
 ok(/:root\[data-app="grass"\]\[data-theme="dark"\] \.content \{[^}]*--grass-grain/.test(platform) && /:root\[data-app="grass"\]\[data-theme="dark"\] \.content::before \{/.test(platform) && /:root\[data-app="grass"\]\[data-theme="dark"\] \.content::after \{/.test(platform), 'the Grassroots turf grain and pitch markings stand behind the DARK workspace only (M24E dark unchanged)');
 ok(!/:root\[data-app="grass"\] \.content \{[^}]*--grass-grain/.test(platform) && !/:root\[data-app="grass"\] \.content::before \{/.test(platform), 'the Grassroots LIGHT workspace carries no turf grain and no pitch markings (M24F.2)');
-const grassPromo = [...platform.matchAll(/:root\[data-app="grass"\] \.auth-promo \{([^}]*)\}/g)].map((m) => m[1]).join(' ');
-ok(grassPromo.length > 0 && !/repeating-linear-gradient/.test(grassPromo) && !/\d+deg/.test(grassPromo), 'the Grassroots entry introduction has NO diagonal bands (M24F.2: removed, not faded)');
+// The Founder's direction after M24F.2: the entry introduction is the M24E green panel again — no photograph, no centre circle.
+ok(/:root\[data-app="grass"\] \.auth-promo \{[^}]*background-color: var\(--auth-promo\)[^}]*repeating-linear-gradient\(103deg/.test(platform), 'the Grassroots entry introduction is the M24E green panel (restored at the Founder\'s direction)');
 const grassCss = read('scoutbox-grassroots/src/styles.css');
-ok(/:root\[data-app="grass"\] \.auth-promo \{[^}]*radial-gradient\(circle at 50% 52%[^}]*grassroots-auth-grass\.jpg/.test(grassCss) && !/repeating-linear-gradient[^}]*auth-promo|auth-promo[^}]*repeating-linear-gradient/.test(grassCss), 'the Grassroots entry introduction: the real-grass photograph with one subtle centre-circle / halfway-line motif, declared in the Grassroots stylesheet only');
+ok(!/auth-promo/.test(grassCss) && !/radial-gradient\(circle at 50% 52%/.test(grassCss), 'the Grassroots stylesheet carries no photograph and no centre-circle rule');
 ok(!/:root\[data-app="grass"\] \.login\.auth-page \{/.test(platform) && !/:root\[data-app="grass"\] \.login\.auth-page::before/.test(platform) && !/:root\[data-app="grass"\] \.brand-sub/.test(platform), 'no M24F Grassroots entry override remains (no Sage page, no hidden pitch, no serif)');
 ok(!fs.existsSync(path.join(ROOT, 'scoutbox-player/src/components/PitchBackdrop.tsx')) && !/PitchBackdrop/.test(read('scoutbox-player/src/app/onboarding.tsx')), 'the Player draws no pitch backdrop');
 
@@ -117,11 +117,9 @@ for (const r of ['scoutbox-club', 'scoutbox-grassroots', 'scoutbox-agent', 'scou
 // stylesheet alone (so no other bundle carries its bytes), and never by the
 // shared platform.css, the tokens or any other application.
 const codeRefs = refs.filter((p) => !/\.(md|txt)$/.test(p) && !/^e2e\//.test(p));
-ok(fs.existsSync(path.join(ROOT, 'design-system/assets/grassroots-auth-grass.jpg')) && fs.existsSync(path.join(ROOT, 'design-system/assets/GRASS-PHOTO-LICENCE.txt')), 'the grass photograph is on disk with its licence');
-ok(codeRefs.length === 1 && codeRefs[0] === 'scoutbox-grassroots/src/styles.css', `the photograph is referenced by the Grassroots stylesheet only (${codeRefs.join(', ') || 'none'})`);
-ok(!/grassroots-auth-grass/.test(platform + tokens), 'neither platform.css nor tokens.css references the photograph');
+ok(codeRefs.length === 0 && !fs.existsSync(path.join(ROOT, 'design-system/assets/grassroots-auth-grass.jpg')), `the grass photograph is gone: no asset on disk and no stylesheet or source reference (${codeRefs.join(', ') || 'none'})`);
+ok(!/grassroots-auth-grass/.test(platform + tokens + grassCss), 'no stylesheet references the photograph');
 ok(!/grassroots-auth-grass/.test(read('scoutbox-player/src/app/onboarding.tsx') + read('scoutbox-club/src/App.tsx') + read('scoutbox-agent/src/App.tsx') + read('scoutbox-admin/src/App.tsx')), 'no other application references the photograph');
-ok(/\.auth-promo/.test(grassCss.split('grassroots-auth-grass.jpg')[0].split('\n').slice(-6).join('\n')), 'the photograph rule is scoped to the entry introduction (.auth-promo), never the authenticated workspace');
 
 // ------------------------------------------------------------ 6. Agent entry fixed light
 const agentBlock = platform.match(/:root\[data-app="agent"\] \.login\.auth-page \{([\s\S]*?)\n\}/);

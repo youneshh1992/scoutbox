@@ -37,12 +37,10 @@ ok(/testID="account-back"/.test(you) && /chevron-left/.test(you), 'Account categ
 // ------------------------------------------------------------ 2. Grassroots entry
 const platform = read('design-system/platform.css');
 const grassCss = read('scoutbox-grassroots/src/styles.css');
-const grassPromo = [...platform.matchAll(/:root\[data-app="grass"\] \.auth-promo \{([^}]*)\}/g)].map((m) => m[1]).join(' ');
-ok(grassPromo.length > 0 && !/repeating-linear-gradient|linear-gradient\(\s*\d+deg/.test(grassPromo), 'Grassroots entry: no diagonal gradient on the introduction in platform.css');
-const promoRule = grassCss.match(/:root\[data-app="grass"\] \.auth-promo \{([^}]*)\}/);
-ok(!!promoRule && /radial-gradient\(circle at 50% 52%/.test(promoRule[1]) && /grassroots-auth-grass\.jpg/.test(promoRule[1]) && !/repeating-linear-gradient|\d+deg/.test(promoRule[1].replace(/180deg/, '')), 'Grassroots entry: the centre-circle motif over the photograph, no diagonal, in the Grassroots stylesheet');
-ok(!/grassroots-auth-grass/.test(platform + read('design-system/tokens.css') + read('scoutbox-club/src/styles.css') + read('scoutbox-agent/src/styles.css') + read('scoutbox-admin/src/styles.css')), 'the grass photograph is referenced by no other stylesheet');
-ok(!/\.content[^{]*\{[^}]*grassroots-auth-grass/.test(grassCss) && !/data-theme/.test(promoRule?.[0] ?? ''), 'the photograph never reaches an authenticated surface');
+// The Founder's direction after M24F.2: the entry introduction is the M24E green panel again — no photograph, no centre circle, anywhere.
+ok(/:root\[data-app="grass"\] \.auth-promo \{[^}]*background-color: var\(--auth-promo\)/.test(platform), 'Grassroots entry: the M24E green introduction panel (restored)');
+ok(!/grassroots-auth-grass|radial-gradient\(circle at 50% 52%/.test(platform + grassCss + read('design-system/tokens.css') + read('scoutbox-club/src/styles.css') + read('scoutbox-agent/src/styles.css') + read('scoutbox-admin/src/styles.css')), 'no stylesheet carries the photograph or the centre-circle motif');
+ok(!fs.existsSync(path.join(ROOT, 'design-system/assets/grassroots-auth-grass.jpg')), 'the grass photograph asset is not on disk');
 const grassApp = read('scoutbox-grassroots/src/App.tsx');
 ok(/points=\{\[\]\}/.test(grassApp) && !/Adults are visible at once|No unsolicited contact|Self-contained demo/.test(grassApp) && /className="auth-env"/.test(grassApp), 'Grassroots entry: no bullet points, no demo marketing note; "Demo environment" as a quiet indicator');
 ok(/points\.length \? \(/.test(read('design-system/AuthShell.tsx')), 'AuthShell renders no list for an empty points array');
