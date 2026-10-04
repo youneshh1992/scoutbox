@@ -823,3 +823,19 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
   .auth-form h1 { font-size: 26px; }
   .auth-form button.primary, .auth-form .enter-row button.primary { width: 100%; align-self: stretch; }
 }
+
+/* M24F.3 — progressive disclosure for explanatory copy: an "About" row that
+   opens the paragraph. Native <details>, keyboard and screen-reader ready. */
+.f-about { margin: 2px 0 10px; }
+.f-about > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; color: var(--sb-link); font-size: 12.5px; font-weight: 500; padding: 4px 0; }
+.f-about > summary::-webkit-details-marker { display: none; }
+.f-about > summary::after { content: ''; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); margin-left: 2px; transition: transform 120ms; }
+.f-about[open] > summary::after { transform: rotate(45deg); }
+.f-about > summary:focus-visible { outline: 2px solid var(--sb-focus); outline-offset: 2px; border-radius: 4px; }
+.f-about > .notice, .f-about > .dim, .f-about > .pagehint { margin: 6px 0 0; }
+/* a conversation / request row in the portals: identity, one line, time */
+.f-preview { display: flex; align-items: center; gap: 12px; padding: 11px 4px; border-bottom: 1px solid var(--sb-rule); }
+.f-preview .f-preview-line { color: var(--sb-quiet); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.f-preview .f-preview-time { color: var(--sb-quiet); font-size: 12px; margin-left: auto; white-space: nowrap; }
+.f-preview.trial { box-shadow: inset 3px 0 0 var(--sb-trial); }
+.f-label-trial { display: inline-block; font-size: 10.5px; font-weight: 600; letter-spacing: 0.3px; border-radius: 4px; padding: 1px 6px; background: var(--sb-trial-bg); color: var(--sb-trial-ink); }

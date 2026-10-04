@@ -66,6 +66,10 @@
   --sb-urgent: #ab4736; --sb-urgent-ink: #913b32;
   --sb-info-bg: #e6eef8; --sb-info-ink: #1e4a7a;
   --sb-gold-bg: #f7efd6; --sb-gold-ink: #7a5a12;
+  /* M24F.3 — the special message states (shared with the Player): trial warm gold, offer blue-green, signing confirmed green */
+  --sb-trial: #c9a227; --sb-trial-bg: #fbf4dc; --sb-trial-ink: #6e5410;
+  --sb-offer: #1b6f6a; --sb-offer-bg: #e2f2f0; --sb-offer-ink: #145450;
+  --sb-signing: #007f42; --sb-signing-bg: #e1f2e5; --sb-signing-ink: #215b38;
   --sb-danger-bg: #fbe4e1;
   --sb-outline-border: #d8e0d4;
   --sb-outline-fg: #314736;
@@ -145,6 +149,9 @@
   --sb-urgent: #ff8e80; --sb-urgent-ink: #ffffff;
   --sb-info-bg: #2c3c31; --sb-info-ink: #ffffff;
   --sb-gold-bg: #3a3527; --sb-gold-ink: #ffffff;
+  --sb-trial: #e9c46a; --sb-trial-bg: #3a3527; --sb-trial-ink: #f3dca3;
+  --sb-offer: #6fd3cc; --sb-offer-bg: #213736; --sb-offer-ink: #bfe9e5;
+  --sb-signing: #00e676; --sb-signing-bg: #2c3c31; --sb-signing-ink: #d6f5df;
   --sb-danger-bg: #3c2a2a;
   --sb-outline-border: #51595a;
   --sb-outline-fg: #ffffff;

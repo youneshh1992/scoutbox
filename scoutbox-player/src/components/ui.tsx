@@ -167,6 +167,70 @@ export function Disclosure({ label, children, testID, open: initial = false, hin
   );
 }
 
+/** M24F.3 — the one-line rule, as a component. A preview row shows an
+ *  identity (initials), ONE primary line, ONE optional secondary line, a
+ *  time and an essential state — nothing else; everything else is behind
+ *  the row (it opens). `accent` is the special-message treatment: a thin
+ *  coloured edge and a small label (never colour alone). */
+export type RowAccent = 'trial' | 'offer' | 'signing' | 'request' | null;
+export function PreviewRow({ title, line, time, unread, accent, accentLabel, initials, onPress, testID }: {
+  title: string; line?: string | null; time?: string | null; unread?: boolean; accent?: RowAccent; accentLabel?: string; initials?: string; onPress?: () => void; testID?: string;
+}) {
+  const colors = useColors();
+  const styles = useStyles(makeStyles);
+  const accentColor = accent === 'trial' ? colors.trial : accent === 'offer' ? colors.offer : accent === 'signing' ? colors.signing : accent === 'request' ? colors.infoInk : null;
+  const accentInk = accent === 'trial' ? colors.trialInk : accent === 'offer' ? colors.offerInk : accent === 'signing' ? colors.signingInk : colors.infoInk;
+  const accentBg = accent === 'trial' ? colors.trialBg : accent === 'offer' ? colors.offerBg : accent === 'signing' ? colors.signingBg : colors.infoBg;
+  const a11y = [title, line, accentLabel, unread ? 'unread' : null, time].filter(Boolean).join('. ');
+  return (
+    <Pressable onPress={onPress} disabled={!onPress} accessibilityRole={onPress ? 'button' : undefined} accessibilityLabel={a11y} testID={testID} style={({ pressed }) => [styles.preview, pressed && { opacity: 0.75 }]}>
+      {accentColor ? <View style={[styles.previewEdge, { backgroundColor: accentColor }]} testID={accent ? `row-accent-${accent}` : undefined} /> : null}
+      {initials !== undefined ? <View style={styles.previewAvatar}><Text style={{ color: colors.iconFg, fontSize: 12.5, fontWeight: '600' }}>{initials}</Text></View> : null}
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Text style={[styles.previewTitle, unread && { fontWeight: '700' }]} numberOfLines={1}>{title}</Text>
+          {accentLabel ? <View style={[styles.previewLabel, { backgroundColor: accentBg }]}><Text style={{ color: accentInk, fontSize: 10.5, fontWeight: '600', letterSpacing: 0.3 }}>{accentLabel}</Text></View> : null}
+        </View>
+        {line ? <Text style={[styles.previewLine, unread && { color: colors.text, fontWeight: '500' }]} numberOfLines={1}>{line}</Text> : null}
+      </View>
+      <View style={{ alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
+        {time ? <Text style={styles.previewTime}>{time}</Text> : null}
+        {unread ? <View style={styles.unreadDot} accessibilityLabel="unread" testID="row-unread" /> : null}
+      </View>
+    </Pressable>
+  );
+}
+
+/** M24F.3 — the one way to say "there is more": a quiet text link with a chevron. */
+export function DetailLink({ label, onPress, testID }: { label: string; onPress: () => void; testID?: string }) {
+  const colors = useColors();
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} testID={testID} hitSlop={6} style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: 3, paddingVertical: 8, alignSelf: 'flex-start' }, pressed && { opacity: 0.7 }]}>
+      <Text style={{ color: colors.accent2, fontSize: 13, fontWeight: '500' }}>{label}</Text>
+      <Icon name="chevron-right" size={14} color={colors.accent2} />
+    </Pressable>
+  );
+}
+
+/** M24F.3 — a compact timeline row: a date, one label, a chevron; the provenance is behind it. */
+export function EventRow({ date, label, onPress, testID, children, open: initial = false }: { date: string; label: string; onPress?: () => void; testID?: string; children?: ReactNode; open?: boolean }) {
+  const colors = useColors();
+  const styles = useStyles(makeStyles);
+  const [open, setOpen] = useState(initial);
+  const expandable = !!children;
+  const press = expandable ? () => setOpen((v) => !v) : onPress;
+  return (
+    <View testID={testID}>
+      <Pressable onPress={press} disabled={!press} accessibilityRole={press ? 'button' : undefined} accessibilityLabel={`${label}. ${date}`} accessibilityState={expandable ? { expanded: open } : undefined} style={({ pressed }) => [styles.event, pressed && { opacity: 0.7 }]}>
+        <Text style={styles.eventDate}>{date}</Text>
+        <Text style={styles.eventLabel} numberOfLines={2}>{label}</Text>
+        {press ? <Icon name={expandable && open ? 'chevron-down' : 'chevron-right'} size={14} color={colors.muted} /> : null}
+      </Pressable>
+      {expandable && open ? <View style={styles.eventBody}>{children}</View> : null}
+    </View>
+  );
+}
+
 /** M24F — a small uppercase kicker: the kind of a thing, where a pill would be noise. */
 export function Kicker({ children, tone }: { children: ReactNode; tone?: 'urgent' | 'accent' }) {
   const colors = useColors();
@@ -237,4 +301,16 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   rowLabel: { color: colors.text, fontSize: 15, fontWeight: '500', lineHeight: 20 },
   rowValue: { color: colors.muted, fontSize: 12.5, lineHeight: 17, marginTop: 2 },
   disclosureBody: { paddingTop: 10, paddingBottom: 14, gap: 8, borderBottomWidth: 1, borderBottomColor: colors.line },
+  preview: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 60, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.line, position: 'relative' },
+  previewEdge: { width: 3, alignSelf: 'stretch', borderRadius: 2, marginLeft: -2 },
+  previewAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.iconBg, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  previewTitle: { color: colors.text, fontSize: 15, fontWeight: '600', lineHeight: 20, flexShrink: 1 },
+  previewLine: { color: colors.muted, fontSize: 13, lineHeight: 18, marginTop: 2 },
+  previewTime: { color: colors.muted, fontSize: 12 },
+  previewLabel: { borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
+  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.accent },
+  event: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: colors.line },
+  eventDate: { color: colors.muted, fontSize: 12.5, minWidth: 82 },
+  eventLabel: { color: colors.text, fontSize: 14, flex: 1, lineHeight: 19 },
+  eventBody: { paddingVertical: 10, paddingLeft: 94, gap: 4, borderBottomWidth: 1, borderBottomColor: colors.line },
 });

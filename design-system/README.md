@@ -75,3 +75,12 @@ directory (`expo-file-system`) and applies it as soon as the app starts.
 | Ink | `#1e2923` (Agent `#302d25`) | `#ffffff` |
 | Primary action | `#00e676` with `#113822` text | same |
 | Agent label | `#a67c2e`, solid, weight 700, 12px | same |
+
+## One line per fact (M24F.3)
+
+A root screen shows one primary line per item, at most one secondary line, and a
+"View details" control when there is more. Explanations, policy, provenance and
+disclaimers render behind `About` / `Hint` (`design-system/About.tsx`) in the portals
+and behind `Disclosure` in the Player — never as a paragraph on the root. Times are
+human (`design-system/time.ts`: "3 Oct · 20:45"); seconds never appear. Rules and
+exceptions: `M24F3_MINIMALISM_RULES.md`.

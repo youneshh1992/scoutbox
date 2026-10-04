@@ -48,6 +48,12 @@ export const palettes = {
     infoBg: '#e6eef8', infoInk: '#1e4a7a',
     goldBg: '#f7efd6', goldInk: '#7a5a12',
     dangerBg: '#fbe4e1', dangerInk: '#913b32',
+    // M24F.3 — the special message states: a trial is warm gold (important,
+    // positive, never a warning); an offer the premium blue-green; a signing
+    // the confirmed green. Each has an accent (bar / dot), a tint and an ink.
+    trial: '#b08a1c', trialBg: '#fbf4dc', trialInk: '#6e5410',
+    offer: '#1b6f6a', offerBg: '#e2f2f0', offerInk: '#145450',
+    signing: '#007f42', signingBg: '#e1f2e5', signingInk: '#215b38',
     pitch: 'rgba(255,255,255,0.8)',
     grain: 'rgba(36,59,44,0.018)',
     band: 'rgba(36,59,44,0.009)',
@@ -91,6 +97,9 @@ export const palettes = {
     infoBg: '#2c3c31', infoInk: '#ffffff',
     goldBg: '#3a3527', goldInk: '#ffffff',
     dangerBg: '#3c2a2a', dangerInk: '#ffffff',
+    trial: '#e9c46a', trialBg: '#3a3527', trialInk: '#f3dca3',
+    offer: '#6fd3cc', offerBg: '#213736', offerInk: '#bfe9e5',
+    signing: '#00e676', signingBg: '#2c3c31', signingInk: '#d6f5df',
     pitch: 'rgba(255,255,255,0.075)',
     grain: 'rgba(255,255,255,0.012)',
     band: 'rgba(255,255,255,0.009)',
@@ -178,6 +187,7 @@ export const AUTH_PANEL: Palette = {
   tabActive: '#ffffff', tabActiveBg: '#113822', tabInactive: '#cfdfd0',
   iconBg: '#113822', iconFg: '#00e676', greenBg: '#113822', greenInk: '#e5f5e9', infoBg: '#113822', infoInk: '#e5f5e9',
   goldBg: '#113822', goldInk: '#f3dca3',
+  trial: '#e9c46a', trialBg: '#113822', trialInk: '#f3dca3', offer: '#6fd3cc', offerBg: '#113822', offerInk: '#bfe9e5', signing: '#00e676', signingBg: '#113822', signingInk: '#d6f5df',
   // errors keep their own hue so a refusal never reads as success
   danger: '#ffb3a8', dangerBg: '#4a2b27', dangerInk: '#ffd4cc', knob: '#ffffff', track: 'rgba(207,223,208,0.35)',
   frame: '#173b27', frameLine: '#173b27',
