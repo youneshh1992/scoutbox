@@ -566,6 +566,14 @@ function ReviewChangesView({ session, item, onBack }: { session: Session; item: 
 }
 
 // ========================================================== NOBODY MISSED
+//
+// M24F.4 — a coverage tool, not a report. The root is the three counts, a
+// ring drawn from the same canonical numbers, and compact player rows
+// grouped by their state. Every reason, the evidence confidence, the last
+// evidence and the actions open behind the row. The one sentence that must
+// stay on screen — coverage is workflow coverage, never a score — stays.
+const initialsOf = (name: string | null | undefined) => (name ?? '').split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase() || '·';
+
 export function NobodyMissedScreen({
   session, tick, notify, openPlayer, onOpenRoom,
 }: M18ScreenProps & { onOpenRoom?: (roomId: string) => void }) {
@@ -604,29 +612,30 @@ export function NobodyMissedScreen({
     catch (e) { notify(errMessage(e), true); }
   };
 
-  return (
-    <div>
-      <div className="dim" style={{ fontSize: 12.5, marginBottom: 4 }}>{t('m18.nm.intro')}</div>
-      <div className="notice block" style={{ marginBottom: 10, fontSize: 12.5 }}>{t('m18.nm.notQuality')}</div>
+  const groups = data ? [
+    { key: 'open', label: t('m18.nm.groupNeedsReview', 'Needs review'), items: data.items.filter((c) => c.state === 'open') },
+    { key: 'reviewed', label: t('m18.nm.groupReviewed', 'Reviewed, no action yet'), items: data.items.filter((c) => c.state === 'reviewed') },
+    { key: 'other', label: t('m18.nm.groupOther', 'Other'), items: data.items.filter((c) => c.state !== 'open' && c.state !== 'reviewed') },
+  ].filter((g) => g.items.length > 0) : [];
 
-      <div className="section" aria-label={t('m18.nm.briefPickerLabel')}>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          <label style={{ fontSize: 13 }}>
-            {t('m18.nm.brief')}{' '}
-            <select aria-label={t('m18.nm.brief')} value={briefId} onChange={(e) => setBriefId(e.target.value)}>
-              {(briefs?.items ?? []).map((b) => (
-                <option key={b.id} value={b.id}>{b.title} — {briefStatusLabel(b.status)} (v{b.version})</option>
-              ))}
-            </select>
-          </label>
-          <label style={{ fontSize: 13 }}>
-            {t('m18.nm.sort')}{' '}
-            <select aria-label={t('m18.nm.sort')} value={sort} onChange={(e) => setSort(e.target.value)}>
-              {(data?.sorts ?? NOBODY_MISSED_SORTS).map((s) => <option key={s} value={s}>{sortLabel(s)}</option>)}
-            </select>
-          </label>
-        </div>
-        <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{t('m18.nm.noRank')}</div>
+  return (
+    <div data-screen="nobody-missed">
+      <div className="nm-controls" aria-label={t('m18.nm.briefPickerLabel')}>
+        <label>
+          {t('m18.nm.brief')}{' '}
+          <select aria-label={t('m18.nm.brief')} value={briefId} onChange={(e) => setBriefId(e.target.value)}>
+            {(briefs?.items ?? []).map((b) => (
+              <option key={b.id} value={b.id}>{b.title} — {briefStatusLabel(b.status)} (v{b.version})</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          {t('m18.nm.sort')}{' '}
+          <select aria-label={t('m18.nm.sort')} value={sort} onChange={(e) => setSort(e.target.value)}>
+            {(data?.sorts ?? NOBODY_MISSED_SORTS).map((s) => <option key={s} value={s}>{sortLabel(s)}</option>)}
+          </select>
+        </label>
+        <span className="dim" style={{ fontSize: 12 }}>{t('m18.nm.noRank')}</span>
       </div>
 
       {err && <LoadError message={err} onRetry={reload} />}
@@ -635,10 +644,10 @@ export function NobodyMissedScreen({
 
       {data && (
         <>
-          <CoveragePanel coverage={data.coverage} live={data.live} note={data.note} brief={data.brief} />
+          <CoveragePanel coverage={data.coverage} live={data.live} note={data.note} brief={data.brief} needsReview={data.items.filter((c) => c.state === 'open').length} />
 
           {data.evaluationPolicy && (
-            <details className="section">
+            <details className="f-about" style={{ marginBottom: 18 }}>
               <summary>{t('m18.nm.policyTitle')} (v{data.evaluationPolicy.version})</summary>
               <div style={{ fontSize: 13, marginTop: 6 }}>
                 <b>{t('m18.nm.counts')}</b>
@@ -652,6 +661,8 @@ export function NobodyMissedScreen({
                 <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
                   {t('m18.nm.recentDays', 'A player decided on recently is not surfaced here.')} ({data.evaluationPolicy.recentDecisionDays})
                 </div>
+                {data.coverage && <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{data.coverage.note}</div>}
+                <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{data.note}</div>
               </div>
             </details>
           )}
@@ -660,24 +671,30 @@ export function NobodyMissedScreen({
             <h4>{t('m18.nm.candidates')} ({data.total})</h4>
             {!data.live && <div className="notice block">{data.note}</div>}
             {data.live && data.items.length === 0 && <div className="dim">{t('m18.nm.empty')}</div>}
-            {data.items.map((c) => (
-              <CandidateCard
-                key={c.playerId}
-                item={c}
-                openPlayer={openPlayer}
-                onReview={() => act(() => m18.reviewCandidate(session, { briefId: c.briefId, playerId: c.playerId }), t('m18.nm.reviewed'))}
-                onDismiss={(reason) => act(() => m18.dismissCandidate(session, { briefId: c.briefId, playerId: c.playerId, reason }), t('m18.nm.dismissed'))}
-                onAdd={async () => {
-                  try {
-                    const out = await m18.addCandidateToRoom(session, { briefId: c.briefId, playerId: c.playerId });
-                    notify(t('m18.nm.addedToRoom'));
-                    reload();
-                    if (out.roomId) onOpenRoom?.(out.roomId);
-                  } catch (e) { notify(errMessage(e), true); }
-                }}
-              />
+            {groups.map((g) => (
+              <div key={g.key} className="nm-group" data-group={g.key}>
+                <div className="nm-group-label">{g.label} · {g.items.length}</div>
+                <div className="list-rows">
+                  {g.items.map((c) => (
+                    <CandidateRow
+                      key={c.playerId}
+                      item={c}
+                      openPlayer={openPlayer}
+                      onReview={() => act(() => m18.reviewCandidate(session, { briefId: c.briefId, playerId: c.playerId }), t('m18.nm.reviewed'))}
+                      onDismiss={(reason) => act(() => m18.dismissCandidate(session, { briefId: c.briefId, playerId: c.playerId, reason }), t('m18.nm.dismissed'))}
+                      onAdd={async () => {
+                        try {
+                          const out = await m18.addCandidateToRoom(session, { briefId: c.briefId, playerId: c.playerId });
+                          notify(t('m18.nm.addedToRoom'));
+                          reload();
+                          if (out.roomId) onOpenRoom?.(out.roomId);
+                        } catch (e) { notify(errMessage(e), true); }
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
             ))}
-            <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>{data.note}</div>
           </div>
         </>
       )}
@@ -685,14 +702,27 @@ export function NobodyMissedScreen({
   );
 }
 
+/** A ring drawn from the canonical counts — evaluated over eligible. Never a score; the percent is the server's. */
+function CoverageRing({ percent, label }: { percent: number | null; label: string }) {
+  const r = 15.9155; // circumference 100
+  const pct = percent == null ? 0 : Math.max(0, Math.min(100, percent));
+  return (
+    <svg className="nm-ring" viewBox="0 0 36 36" width="96" height="96" role="img" aria-label={label}>
+      <circle cx="18" cy="18" r={r} fill="none" stroke="var(--sb-wash)" strokeWidth="3.2" />
+      <circle cx="18" cy="18" r={r} fill="none" stroke="var(--sb-green-text)" strokeWidth="3.2" strokeLinecap="round" strokeDasharray={`${pct} ${100 - pct}`} strokeDashoffset="25" />
+      <text x="18" y="19.6" textAnchor="middle" fontSize="7.5" fontWeight="650" fill="currentColor">{percent == null ? '—' : `${percent}%`}</text>
+    </svg>
+  );
+}
+
 /** Evaluation Coverage — a count over a declared denominator. Never a score. */
 function CoveragePanel({
-  coverage, live, note, brief,
-}: { coverage: EvaluationCoverage | null; live: boolean; note: string; brief: RecruitmentBrief }) {
+  coverage, live, note, brief, needsReview,
+}: { coverage: EvaluationCoverage | null; live: boolean; note: string; brief: RecruitmentBrief; needsReview: number }) {
   return (
-    <div className="section" aria-label={t('m18.nm.coverageLabel')}>
+    <div className="section nm-coverage" aria-label={t('m18.nm.coverageLabel')}>
       <h4>{t('m18.nm.coverage')}</h4>
-      <div className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>
+      <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}>
         {brief.title} · v{brief.version} · {briefStatusLabel(brief.status)}
       </div>
 
@@ -702,22 +732,25 @@ function CoveragePanel({
       {live && coverage?.suppressed && <div className="notice block">{coverage.note}</div>}
 
       {live && coverage && !coverage.suppressed && (
-        <div className="stat-grid">
-          <div className="stat">
-            <div className="v">{coverage.eligible}</div>
-            <div className="k">{t('m18.nm.eligible')}</div>
-          </div>
-          <div className="stat">
-            <div className="v">{coverage.evaluated ?? '—'}</div>
-            <div className="k">{t('m18.nm.evaluated')}</div>
-          </div>
-          <div className="stat">
-            <div className="v">{coverage.notYetEvaluated ?? '—'}</div>
-            <div className="k">{t('m18.nm.notYet')}</div>
-          </div>
-          <div className="stat">
-            <div className="v">{coverage.coveragePercent == null ? '—' : `${coverage.coveragePercent}%`}</div>
-            <div className="k">{t('m18.nm.percent')}</div>
+        <div className="nm-coverage-body">
+          <CoverageRing percent={coverage.coveragePercent} label={`${t('m18.nm.percent')} ${coverage.coveragePercent == null ? '—' : `${coverage.coveragePercent}%`}`} />
+          <div className="stat-grid nm-stats">
+            <div className="stat">
+              <div className="v">{coverage.eligible}</div>
+              <div className="k">{t('m18.nm.eligible')}</div>
+            </div>
+            <div className="stat">
+              <div className="v">{coverage.evaluated ?? '—'}</div>
+              <div className="k">{t('m18.nm.evaluated')}</div>
+            </div>
+            <div className={`stat${needsReview > 0 ? ' warn' : ''}`}>
+              <div className="v">{coverage.notYetEvaluated ?? '—'}</div>
+              <div className="k">{t('m18.nm.notYet')}</div>
+            </div>
+            <div className="stat">
+              <div className="v">{coverage.coveragePercent == null ? '—' : `${coverage.coveragePercent}%`}</div>
+              <div className="k">{t('m18.nm.percent')}</div>
+            </div>
           </div>
         </div>
       )}
@@ -725,13 +758,13 @@ function CoveragePanel({
       {live && coverage && !coverage.suppressed && coverage.complete && (
         <div className="dim" style={{ fontSize: 13, marginTop: 6 }}>{t('m18.nm.complete')}</div>
       )}
-      {coverage && <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{coverage.note}</div>}
-      <div className="dim" style={{ fontSize: 12 }}>{t('m18.nm.notQuality')}</div>
+      <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>{t('m18.nm.notQuality')}</div>
     </div>
   );
 }
 
-function CandidateCard({
+/** One candidate as a row: initials, the name, one line; everything else opens under it. */
+function CandidateRow({
   item, openPlayer, onReview, onDismiss, onAdd,
 }: {
   item: NobodyMissedItem;
@@ -740,70 +773,72 @@ function CandidateCard({
   onDismiss: (reason: string) => void;
   onAdd: () => void;
 }) {
+  const [open, setOpen] = useState(false);
   const [dismissOpen, setDismissOpen] = useState(false);
   const [reason, setReason] = useState<string>(NOBODY_MISSED_DISMISS_REASONS[0]);
+  const name = item.name ?? item.playerId;
+  const line = [item.position ?? '—', item.age != null ? String(item.age) : null, item.distanceKm != null ? `${item.distanceKm} km` : null].filter(Boolean).join(' · ');
+  const met = item.reasons.filter((r) => r.met).length;
 
   return (
-    <article className="section" aria-label={`${t('m18.nm.cardLabel')}: ${item.name ?? item.playerId}`}>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'baseline' }}>
-        <h4 style={{ margin: 0 }}>{item.name ?? item.playerId}</h4>
-        <span className="dim">
-          {item.position ?? '—'} · {item.age ?? '—'}
-          {item.distanceKm != null && <> · {item.distanceKm} km</>}
+    <article className="nm-row" aria-label={`${t('m18.nm.cardLabel')}: ${name}`} data-state={item.state}>
+      <button type="button" className="nm-row-head" aria-expanded={open} data-testid="nm-row-toggle" onClick={() => setOpen((v) => !v)}>
+        <span className="p-avatar" aria-hidden="true">{initialsOf(item.name)}</span>
+        <span className="nm-row-main">
+          <b>{name}</b>
+          <span className="dim">{line}{item.reasons.length ? ` · ${met}/${item.reasons.length} ${t('m18.nm.criteriaMet', 'criteria met')}` : ''}</span>
         </span>
-        <span className="pill">{t('m18.nm.state')}: {t(`m18.nm.st.${item.state}`, item.state.replace(/_/g, ' '))}</span>
-        <button onClick={() => openPlayer(item.playerId)}>{t('m18.sl.openProfile')}</button>
-      </div>
+        {item.lastEvidenceAt && <span className="dim nm-row-when">{fmtDate(item.lastEvidenceAt)}</span>}
+        <span className="dim" aria-hidden="true">{open ? '⌄' : '›'}</span>
+      </button>
 
-      <div style={{ marginTop: 6, fontSize: 13 }} title={item.trustNote ?? t('m18.trustNote')}>
-        <span className="dim">{t('m18.nm.confidence')}:</span>{' '}
-        <span className="pill">{bandLabel(item.trustBand)}</span>
-        <TrustNote note={item.trustNote} />
-      </div>
-
-      {/* "Why is this player here?" — every criterion the club typed in. */}
-      <div style={{ marginTop: 8 }}>
-        <b style={{ fontSize: 13 }}>{t('m18.nm.whyShown')}</b>
-        <ul style={{ margin: '4px 0 0', paddingInlineStart: 20 }}>
-          {item.reasons.map((r) => (
-            <li key={r.key} style={{ fontSize: 13 }}>
-              <Mark met={r.met} />
-              {r.text}
-              <span className="dim"> — {r.met ? t('m18.nm.met') : t('m18.nm.notMet')}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      {item.lastEvidenceAt && (
-        <div className="dim" style={{ fontSize: 12.5, marginTop: 6 }}>
-          {t('m18.nm.lastEvidence')}: {fmtDate(item.lastEvidenceAt)}
-        </div>
-      )}
-
-      <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button onClick={onReview}>{t('m18.nm.reviewPlayer')}</button>
-        <button className="primary" onClick={onAdd}>{t('m18.nm.addToRoom')}</button>
-        <button onClick={() => setDismissOpen((v) => !v)} aria-expanded={dismissOpen}>{t('m18.nm.dismissForBrief')}</button>
-      </div>
-
-      {dismissOpen && (
-        <div className="section" style={{ marginTop: 8 }} aria-label={t('m18.nm.dismissPanel')}>
-          <label style={{ fontSize: 13 }}>
-            {t('m18.nm.dismissReason')}{' '}
-            <select aria-label={t('m18.nm.dismissReason')} value={reason} onChange={(e) => setReason(e.target.value)}>
-              {NOBODY_MISSED_DISMISS_REASONS.map((r) => <option key={r} value={r}>{nmDismissLabel(r)}</option>)}
-            </select>
-          </label>
-          <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button onClick={() => { setDismissOpen(false); onDismiss(reason); }}>{t('m18.nm.confirmDismiss')}</button>
-            <button onClick={() => setDismissOpen(false)}>{t('common.cancel')}</button>
+      {open && (
+        <div className="nm-row-detail">
+          {/* "Why is this player here?" — every criterion the club typed in. */}
+          <b style={{ fontSize: 13 }}>{t('m18.nm.whyShown')}</b>
+          <ul style={{ margin: '4px 0 0', paddingInlineStart: 20 }}>
+            {item.reasons.map((r) => (
+              <li key={r.key} style={{ fontSize: 13 }}>
+                <Mark met={r.met} />
+                {r.text}
+                <span className="dim"> — {r.met ? t('m18.nm.met') : t('m18.nm.notMet')}</span>
+              </li>
+            ))}
+          </ul>
+          <div style={{ marginTop: 8, fontSize: 13 }} title={item.trustNote ?? t('m18.trustNote')}>
+            <span className="dim">{t('m18.nm.confidence')}:</span>{' '}
+            <span className="pill">{bandLabel(item.trustBand)}</span>
+            <TrustNote note={item.trustNote} />
           </div>
-          <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{t('m18.nm.dismissNote')}</div>
+          {item.lastEvidenceAt && (
+            <div className="dim" style={{ fontSize: 12.5, marginTop: 6 }}>
+              {t('m18.nm.lastEvidence')}: {fmtDate(item.lastEvidenceAt)} · {t('m18.nm.state')}: {t(`m18.nm.st.${item.state}`, item.state.replace(/_/g, ' '))}
+            </div>
+          )}
+          <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="primary" onClick={onAdd}>{t('m18.nm.addToRoom')}</button>
+            <button onClick={onReview}>{t('m18.nm.reviewPlayer')}</button>
+            <button className="linklike" onClick={() => openPlayer(item.playerId)}>{t('m18.sl.openProfile')}</button>
+            <button className="linklike" onClick={() => setDismissOpen((v) => !v)} aria-expanded={dismissOpen}>{t('m18.nm.dismissForBrief')}</button>
+          </div>
+          {dismissOpen && (
+            <div style={{ marginTop: 10 }} aria-label={t('m18.nm.dismissPanel')}>
+              <label style={{ fontSize: 13 }}>
+                {t('m18.nm.dismissReason')}{' '}
+                <select aria-label={t('m18.nm.dismissReason')} value={reason} onChange={(e) => setReason(e.target.value)}>
+                  {NOBODY_MISSED_DISMISS_REASONS.map((r) => <option key={r} value={r}>{nmDismissLabel(r)}</option>)}
+                </select>
+              </label>
+              <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button onClick={() => { setDismissOpen(false); onDismiss(reason); }}>{t('m18.nm.confirmDismiss')}</button>
+                <button className="linklike" onClick={() => setDismissOpen(false)}>{t('common.cancel')}</button>
+              </div>
+              <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{t('m18.nm.dismissNote')}</div>
+            </div>
+          )}
+          {item.note && <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>{item.note}</div>}
         </div>
       )}
-
-      {item.note && <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>{item.note}</div>}
     </article>
   );
 }

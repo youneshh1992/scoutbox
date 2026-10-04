@@ -31,6 +31,7 @@ import {
 } from './m20Api';
 import { t, fmtDate, fmtDateTime } from './i18n';
 import { httpState } from './httpState';
+import { hashForRoom } from './nav';
 
 export interface M20ScreenProps {
   session: Session;
@@ -110,7 +111,7 @@ const Limitation = ({ text }: { text: string }) => (
 function Panel({ metric, children }: { metric: Metric | undefined; children: ReactNode }) {
   if (!metric) return null;
   return (
-    <section className="card" data-metric={metric.id}>
+    <section className="card dash-panel" data-metric={metric.id}>
       <h3>{metricName(metric.id, metric.name)}</h3>
       <p className="muted small">{t(`m20.semantics.${metric.semantics}`, metric.semantics.replace(/_/g, ' '))}</p>
       {children}
@@ -352,7 +353,7 @@ function AgingPanels({ f, onDrill }: { f: Family; onDrill: (metric: string) => v
           <ul className="plain small">
             {rows.slice(0, 5).map((r) => (
               <li key={r.roomId}>
-                {r.playerName ?? t('m20.playerWithheld')} — {statusLabel(r.status)} · {t('m20.stalled.idle').replace('{n}', String(r.idleDays))}
+                <a href={hashForRoom(r.roomId)}>{r.playerName ?? t('m20.playerWithheld')}</a> — {statusLabel(r.status)} · {t('m20.stalled.idle').replace('{n}', String(r.idleDays))}
               </li>
             ))}
           </ul>
@@ -526,6 +527,131 @@ const FAMILY_RENDERERS: Record<string, (p: { f: Family; onDrill: (metric: string
   watchlist: ({ f }) => <WatchlistPanels f={f} />,
 };
 
+// ---------------------------------------------------------- executive layer
+//
+// M24F.4 — the top of the page is a director's view: four counts, the
+// funnel as bars, time by stage as bars, coverage as a ring, and the five
+// things that need attention. Every number is one the server already sent;
+// nothing here is recomputed, rated or ranked. The seven families follow as
+// the detail, each panel with its own limitation as before.
+
+/** Clean horizontal bars from a list of counts. The longest bar is the largest count; the label and the number are always printed. */
+function Bars({ rows, unit, testID }: { rows: { key: string; label: string; value: number | null; words?: string; attrs?: Record<string, string> }[]; unit?: string; testID?: string }) {
+  const max = Math.max(1, ...rows.map((r) => r.value ?? 0));
+  return (
+    <div className="dash-bars" data-testid={testID}>
+      {rows.map((r) => (
+        <div key={r.key} className="dash-bar" {...(r.attrs ?? {})}>
+          <span className="dash-bar-label">{r.label}</span>
+          <span className="dash-bar-track" aria-hidden="true"><span className="dash-bar-fill" style={{ width: `${r.value == null ? 0 : Math.round(((r.value) / max) * 100)}%` }} /></span>
+          <span className="dash-bar-value">{r.value == null ? '—' : r.value}{r.value != null && unit ? ` ${unit}` : ''}{r.words ? <span className="muted small"> {r.words}</span> : null}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** A ring from a server rate. A withheld or empty rate draws nothing and says so beside it. */
+function Ring({ f, label }: { f: Figure | undefined; label: string }) {
+  const pct = f && !f.empty && !f.suppressed ? Math.round((f.value ?? 0) * 100) : null;
+  const r = 15.9155;
+  return (
+    <div className="dash-ring-wrap">
+      <svg className="dash-ring" viewBox="0 0 36 36" width="92" height="92" role="img" aria-label={`${label} ${pct == null ? figureWords(f) : `${pct}%`}`}>
+        <circle cx="18" cy="18" r={r} fill="none" stroke="var(--sb-wash)" strokeWidth="3.2" />
+        {pct != null && <circle cx="18" cy="18" r={r} fill="none" stroke="var(--sb-green-text)" strokeWidth="3.2" strokeLinecap="round" strokeDasharray={`${pct} ${100 - pct}`} strokeDashoffset="25" />}
+        <text x="18" y="19.6" textAnchor="middle" fontSize="7.5" fontWeight="650" fill="currentColor">{pct == null ? '—' : `${pct}%`}</text>
+      </svg>
+      <div>
+        <div className="dash-ring-label">{label}</div>
+        <div className="muted small">{figureWords(f)}</div>
+      </div>
+    </div>
+  );
+}
+
+const sumRows = (rows: { value: number }[]) => rows.reduce((a, r) => a + (r.value || 0), 0);
+
+function Executive({ dash, onDrill }: { dash: Dashboard; onDrill: (metric: string) => void }) {
+  const pipeline = dash.data.pipeline?.metrics ?? {};
+  const duration = dash.data.duration?.metrics ?? {};
+  const aging = dash.data.aging?.metrics ?? {};
+  const coverage = dash.data.coverage?.metrics ?? {};
+  const stageRows = (pipeline.pipeline_stage_counts?.rows ?? []) as { status: string; terminal: boolean; value: number }[];
+  const funnelRows = (pipeline.funnel_progression?.rows ?? []) as { stage: string; value: number; share: Figure }[];
+  const trialSteps = (pipeline.trial_process?.steps ?? {}) as Record<string, Figure>;
+  const jfRows = (pipeline.journey_evidence_funnel?.rows ?? []) as { stage: string; value: number }[];
+  const timeRows = (duration.time_in_stage?.rows ?? []) as ({ status: string } & Distribution)[];
+  const stalledRows = (aging.stalled_rooms?.rows ?? []) as { roomId: string; status: string; idleDays: number; playerName: string | null }[];
+  const openCases = stageRows.length ? sumRows(stageRows.filter((r) => !r.terminal)) : null;
+  const trials = trialSteps.completed ? trialSteps.completed.value ?? 0 : null;
+  const offers = jfRows.find((r) => r.stage === 'offer_issued')?.value ?? (stageRows.length ? sumRows(stageRows.filter((r) => /^offer_/.test(r.status))) : null);
+  const signed = jfRows.find((r) => r.stage === 'signed')?.value ?? stageRows.find((r) => r.status === 'signed')?.value ?? null;
+  const kpis: { id: string; label: string; value: number | null }[] = [
+    { id: 'open_cases', label: t('m20.kpi.open', 'Open cases'), value: openCases },
+    { id: 'trials', label: t('m20.kpi.trials', 'Trials completed'), value: trials },
+    { id: 'offers', label: t('m20.kpi.offers', 'Offers issued'), value: offers },
+    { id: 'signed', label: t('m20.kpi.signed', 'Signed'), value: signed },
+  ];
+  const attention: { key: string; text: string; href?: string; metric?: string }[] = [
+    ...stalledRows.slice(0, 3).map((r) => ({ key: r.roomId, text: `${r.playerName ?? t('m20.playerWithheld')} — ${statusLabel(r.status)} · ${t('m20.stalled.idle').replace('{n}', String(r.idleDays))}`, href: hashForRoom(r.roomId) })),
+    ...((aging.overdue_trial_reports?.value as number | undefined) ? [{ key: 'overdue', text: `${aging.overdue_trial_reports?.value} ${t('m20.overdue.of').replace('{n}', String((aging.overdue_trial_reports?.awaitingReport as Figure | undefined)?.value ?? 0))}`, metric: 'overdue_trial_reports' }] : []),
+    ...((aging.decision_outstanding?.value as number | undefined) ? [{ key: 'outstanding', text: `${aging.decision_outstanding?.value} ${t('m20.outstanding.of').replace('{n}', String((aging.decision_outstanding?.atOfferStage as Figure | undefined)?.value ?? 0))}`, metric: 'decision_outstanding' }] : []),
+  ].slice(0, 5);
+  const medians = timeRows.filter((r) => !r.empty && !r.suppressed && r.median != null);
+  return (
+    <section className="dash-exec" data-executive="true" aria-label={t('m20.exec.label', 'At a glance')}>
+      <div className="stat-grid dash-kpis" data-kpis="true">
+        {kpis.map((k) => (
+          <div key={k.id} className="stat" data-kpi={k.id}>
+            <div className="v">{k.value == null ? '—' : k.value}</div>
+            <div className="k">{k.label}</div>
+          </div>
+        ))}
+      </div>
+      <div className="dash-grid">
+        <div className="dash-visual" data-visual="funnel">
+          <h3>{t('m20.exec.funnel', 'Recruitment funnel')}</h3>
+          {funnelRows.filter((r) => r.value > 0).length === 0
+            ? <p className="muted small">{t('m20.fig.empty')}</p>
+            : <Bars rows={funnelRows.filter((r) => r.value > 0).map((r) => ({ key: r.stage, label: statusLabel(r.stage), value: r.value, attrs: { 'data-funnel-stage': r.stage } }))} testID="dash-funnel" />}
+          <p className="muted small">{t('m20.exec.funnelNote', 'Rooms that ever reached each stage, in this period.')}</p>
+        </div>
+        <div className="dash-visual" data-visual="time">
+          <h3>{t('m20.exec.time', 'Time by stage')}</h3>
+          {medians.length === 0
+            ? <p className="muted small">{timeRows.length ? t('m20.fig.tooFewMedian').replace('{n}', String(timeRows[0]?.n ?? 0)).replace('{min}', String(timeRows[0]?.minimum ?? 5)) : t('m20.fig.empty')}</p>
+            : <Bars rows={medians.map((r) => ({ key: r.status, label: statusLabel(r.status), value: r.median, attrs: { 'data-time-stage': r.status } }))} unit={t('m20.unit.days')} testID="dash-time" />}
+          <p className="muted small">{t('m20.exec.timeNote', 'Typical days a room spends in a stage before leaving it.')}</p>
+        </div>
+        <div className="dash-visual" data-visual="coverage">
+          <h3>{t('m20.exec.coverage', 'Coverage')}</h3>
+          <Ring f={coverage.nobody_missed_review_rate as unknown as Figure | undefined} label={metricName('nobody_missed_review_rate', 'Eligible players reviewed')} />
+          <p className="muted small">
+            <b>{coverage.briefs_live?.value ?? 0}</b> {t('m20.briefs.live').replace('{total}', String((coverage.briefs_live?.total as Figure | undefined)?.value ?? 0))}
+            {' · '}
+            <b>{coverage.nobody_missed_backlog?.value ?? 0}</b> {t('m20.exec.unreviewed', 'unreviewed')}
+          </p>
+        </div>
+        <div className="dash-visual" data-visual="attention">
+          <h3>{t('m20.exec.attention', 'Needs attention')}</h3>
+          {attention.length === 0 ? <p className="muted small">{t('m20.exec.nothing', 'Nothing is waiting on you.')}</p> : (
+            <ul className="plain small dash-attention" data-attention="true">
+              {attention.map((a) => (
+                <li key={a.key}>
+                  {a.href
+                    ? <a href={a.href}>{a.text}</a>
+                    : <button type="button" className="linklike" onClick={() => a.metric && onDrill(a.metric)}>{a.text}</button>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ---------------------------------------------------------------- the screen
 
 export function DirectorDashboardScreen({ session, tick, notify, filters, onFilters }: M20ScreenProps) {
@@ -566,13 +692,11 @@ export function DirectorDashboardScreen({ session, tick, notify, filters, onFilt
   const set = (patch: DashboardFilters) => onFilters({ ...filters, ...patch });
 
   return (
-    <div className="screen" data-screen="director-dashboard">
-      <p className="muted">{t('m20.subtitle')}</p>
-
-      {/* The governing sentence, from the server, above every number. */}
+    <div className="screen dash" data-screen="director-dashboard">
+      {/* The governing sentence, from the server, above every number — the one line of prose the root carries. */}
       {dash && <p className="notice" data-principle="true">{dash.note}</p>}
 
-      <section className="card" aria-label={t('m20.filters')}>
+      <section className="card dash-filters" aria-label={t('m20.filters')}>
         <div className="row wrap">
           <label>
             {t('m20.filter.window')}
@@ -621,7 +745,7 @@ export function DirectorDashboardScreen({ session, tick, notify, filters, onFilt
 
       {dash && (
         <>
-          <p className="muted small" data-window={`${dash.window.from}..${dash.window.to}`}>
+          <p className="muted small dash-window" data-window={`${dash.window.from}..${dash.window.to}`}>
             {t('m20.windowLabel').replace('{from}', fmtDate(Date.parse(`${dash.window.from}T00:00:00Z`))).replace('{to}', fmtDate(Date.parse(`${dash.window.to}T00:00:00Z`)))}
             {' · '}
             {t('m20.smallN').replace('{min}', String(dash.smallNMinimum))}
@@ -632,8 +756,10 @@ export function DirectorDashboardScreen({ session, tick, notify, filters, onFilt
             </span>
           </p>
 
+          <Executive dash={dash} onDrill={openDrill} />
+
           {dash.trend && (
-            <section className="card" data-trend-strip="true">
+            <section className="card dash-trend" data-trend-strip="true">
               <h3>{t('m20.trend.title')}</h3>
               <p className="muted small">
                 {t('m20.trend.against')
@@ -655,12 +781,13 @@ export function DirectorDashboardScreen({ session, tick, notify, filters, onFilt
             </p>
           )}
 
+          <h3 className="section dash-detail-head">{t('m20.exec.detail', 'Detail')}</h3>
           {dash.families.map((id) => {
             const fam = dash.data[id];
             if (!fam) return null;
             const Render = FAMILY_RENDERERS[id];
             return (
-              <section key={id} data-family={id}>
+              <section key={id} data-family={id} className="dash-family">
                 <h3 className="section">{familyLabel(id, fam.label)}</h3>
                 {fam.error ? (
                   <div className="card warn" role="status" data-family-error={fam.error}>
@@ -673,7 +800,9 @@ export function DirectorDashboardScreen({ session, tick, notify, filters, onFilt
                         {t('m20.filterNotApplied').replace('{filters}', (fam.filtersNotApplicable ?? []).join(', '))}
                       </p>
                     )}
-                    {Render && <Render f={fam} onDrill={openDrill} />}
+                    <div className="dash-panels">
+                      {Render && <Render f={fam} onDrill={openDrill} />}
+                    </div>
                   </>
                 )}
               </section>
@@ -683,7 +812,7 @@ export function DirectorDashboardScreen({ session, tick, notify, filters, onFilt
       )}
 
       {drill && (
-        <section className="card" data-drilldown={drill.metric}>
+        <section className="card dash-panel" data-drilldown={drill.metric}>
           <h3>{metricName(drill.metric, drill.metric)}</h3>
           <p className="muted small">{t('m20.rows.count').replace('{n}', String(drill.total))}</p>
           <div className="table-scroll">
@@ -720,7 +849,7 @@ export function DirectorDashboardScreen({ session, tick, notify, filters, onFilt
       )}
 
       {catalogue && (
-        <details className="card" data-never-built="true">
+        <details className="card f-about" data-never-built="true">
           <summary>{t('m20.neverBuilt.title')}</summary>
           <p>{catalogue.neverBuilt.reason}</p>
           <p className="muted small">{catalogue.neverBuilt.names.join(' · ')}</p>

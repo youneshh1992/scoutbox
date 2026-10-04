@@ -386,6 +386,8 @@ const queue = (await j('GET', `/org/nobody-missed?briefId=${BRIEF_ID}`, undefine
 const CAND = queue.items?.[0];
 if (!CAND) fail('M5: the fixture produced no Nobody Missed candidate');
 {
+  await scout.locator(`[aria-label="Candidate: ${CAND.name}"] [data-testid="nm-row-toggle"]`).click(); // M24F.4 — the reasons and the actions open behind the row
+  await scout.waitForTimeout(300);
   const card = await scout.locator(`[aria-label="Candidate: ${CAND.name}"]`).innerText();
   if (!/Why shown/.test(card)) fail('M5: the candidate cannot say why it is here');
   if (!/met/.test(card)) fail('M5: the candidate explanation has no met/not met reasons');

@@ -119,6 +119,7 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
   //    Missed always has a candidate in the demo, and reviewing one toasts.
   await p.evaluate(() => { window.location.hash = '#/recruitment/nobody-missed'; });
   await p.waitForTimeout(1400);
+  { const toggle = p.locator('[data-testid="nm-row-toggle"]').first(); if (await toggle.count()) { await toggle.click(); await p.waitForTimeout(300); } } // M24F.4 — actions sit behind the row
   {
     const review = p.locator('button:has-text("Review player")').first();
     if (await review.count()) {

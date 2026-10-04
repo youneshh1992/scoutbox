@@ -103,6 +103,8 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
   // Nobody Missed: coverage arithmetic and the "Why shown" block.
   await p.evaluate(() => { window.location.hash = '#/recruitment/nobody-missed'; });
   await p.waitForTimeout(1200);
+  // M24F.4 — the rows are compact; the "Why shown" block opens behind the first row.
+  { const toggle = p.locator('[data-testid="nm-row-toggle"]').first(); if (await toggle.count()) { await toggle.click(); await p.waitForTimeout(300); } }
   body = (await p.textContent('body')) ?? '';
   ok(/Evaluation Coverage/.test(body), `${name} Nobody Missed shows Evaluation Coverage`);
   const stats = await p.$$eval('[aria-label="Evaluation Coverage"] .stat .v', (els) => els.map((e) => e.textContent.trim()));

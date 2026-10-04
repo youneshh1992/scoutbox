@@ -1114,6 +1114,7 @@ const en = {
   'm18.nm.empty': 'No candidates under this brief right now.',
   'm18.nm.cardLabel': 'Candidate',
   'm18.nm.state': 'State',
+  'm18.nm.groupNeedsReview': 'Needs review', 'm18.nm.groupReviewed': 'Reviewed, no action yet', 'm18.nm.groupOther': 'Other', 'm18.nm.criteriaMet': 'criteria met',
   'm18.nm.st.open': 'Open', 'm18.nm.st.reviewed': 'Reviewed',
   'm18.nm.st.added_to_room': 'Added to a room', 'm18.nm.st.dismissed': 'Dismissed',
   'm18.nm.confidence': 'Evidence confidence',
@@ -1362,6 +1363,8 @@ const en = {
   // measures a player, and none of them measures a colleague.
   'nav2.dashboard': 'Director Dashboard',
   'm20.title': 'Director Dashboard',
+  'm20.kpi.open': 'Open cases', 'm20.kpi.trials': 'Trials completed', 'm20.kpi.offers': 'Offers issued', 'm20.kpi.signed': 'Signed',
+  'm20.exec.label': 'At a glance', 'm20.exec.funnel': 'Recruitment funnel', 'm20.exec.funnelNote': 'Rooms that ever reached each stage, in this period.', 'm20.exec.time': 'Time by stage', 'm20.exec.timeNote': 'Typical days a room spends in a stage before leaving it.', 'm20.exec.coverage': 'Coverage', 'm20.exec.unreviewed': 'unreviewed', 'm20.exec.attention': 'Needs attention', 'm20.exec.nothing': 'Nothing is waiting on you.', 'm20.exec.detail': 'Detail',
   'm20.subtitle': 'How your recruitment work moves: what is in flight, what has stopped, how long each step takes, and whether the demand you wrote down is being covered.',
   'm20.filters': 'Filters',
   'm20.filter.window': 'Period',
@@ -2720,6 +2723,7 @@ const fr: typeof en = {
   'm18.nm.empty': 'Aucun candidat selon ce brief pour l’instant.',
   'm18.nm.cardLabel': 'Candidat',
   'm18.nm.state': 'État',
+  'm18.nm.groupNeedsReview': 'À examiner', 'm18.nm.groupReviewed': 'Examinés, sans suite', 'm18.nm.groupOther': 'Autres', 'm18.nm.criteriaMet': 'critères remplis',
   'm18.nm.st.open': 'Ouvert', 'm18.nm.st.reviewed': 'Examiné',
   'm18.nm.st.added_to_room': 'Ajouté à une salle', 'm18.nm.st.dismissed': 'Écarté',
   'm18.nm.confidence': 'Confiance dans les preuves',
@@ -2958,6 +2962,8 @@ const fr: typeof en = {
   // ---------------------------------------------------------------- M20
   'nav2.dashboard': 'Tableau de bord du directeur',
   'm20.title': 'Tableau de bord du directeur',
+  'm20.kpi.open': 'Dossiers ouverts', 'm20.kpi.trials': 'Essais terminés', 'm20.kpi.offers': 'Offres émises', 'm20.kpi.signed': 'Signés',
+  'm20.exec.label': 'En un coup d’œil', 'm20.exec.funnel': 'Entonnoir de recrutement', 'm20.exec.funnelNote': 'Dossiers ayant atteint chaque étape sur la période.', 'm20.exec.time': 'Temps par étape', 'm20.exec.timeNote': 'Jours typiques passés par un dossier dans une étape avant d’en sortir.', 'm20.exec.coverage': 'Couverture', 'm20.exec.unreviewed': 'non examinés', 'm20.exec.attention': 'À traiter', 'm20.exec.nothing': 'Rien n’attend votre action.', 'm20.exec.detail': 'Détail',
   'm20.subtitle': 'Comment avance votre travail de recrutement : ce qui est en cours, ce qui s’est arrêté, le temps que prend chaque étape, et si la demande que vous avez écrite est couverte.',
   'm20.filters': 'Filtres',
   'm20.filter.window': 'Période',
