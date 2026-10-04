@@ -339,6 +339,8 @@ let OID_K = null; let R1_K = null;
   expect(await j('POST', `/player/offers/${OID_K}/accept`, { revisionId: R1_K, clientKey: key() }, KOLA), 409, 'OFFER_SUPERSEDED', 'S3d: the API says OFFER_SUPERSEDED');
   const sec2 = await refreshOffers(kola);
   ok(await waitIn(sec2, /Revision 2/), 'S3e: after a reload the app shows revision 2');
+  // M24F.4 — earlier revisions sit behind "View terms"; open it, then read the same section.
+  await sec2.locator(`[data-testid="offer-terms-${OID_K}"] > [role="button"]`).first().click().catch(() => {}); await kola.waitForTimeout(400);
   const txt = await sec2.innerText();
   ok(/First team/.test(txt) && /Revision 1 · ↻ Replaced by a newer revision/.test(txt), 'S3f: revision 2\'s terms, and revision 1 listed as replaced');
   neg(((await getOffer(OID_K, LEAD)).body.offer.responses.length) === 0, 'S3g: no response row was written by the refused attempt');

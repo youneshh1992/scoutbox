@@ -90,7 +90,7 @@ row), `passport-history` (now the row), `passport-history-list`,
 | uiSpotcheck | opens "Manage …'s profile" before the pairing code |
 | m12Live, m12DemoSpotcheck | open the "Evidence record" row before reading the evidence passport |
 | m21DemoSpotcheck | reads the root, the Goals page (with each "About this target" opened) and the Feedback page |
-| m23OfferHardeningLive | opens "View terms" before reading the club's message on an expired Offer |
+| m23OfferHardeningLive | opens "View terms" before reading the club's message on an expired Offer (S2e) and the replaced revision 1 (S3f) |
 | m24eScrollLive | scrolls to the end when a page needs scrolling and has not moved |
 | uiSpotcheck | waits for "Your journey" on Home |
 

@@ -1035,7 +1035,7 @@ const en = {
   'confirm.pauseWatchlist': 'Pause “{name}”?',
   'confirm.pauseWatchlistBody': 'Membership is still shown when you open it; change notifications stop until you resume.',
   'discover.ordering': 'Ordered by Academy+ opt-in, then profile completeness, then player id — not ability, not the Trust Score (Evidence confidence).',
-  'discover.orderingGrassroots': 'Ordered by First Team Seekers, then distance, then profile completeness, then player id — not ability, not the Trust Score.',
+  'discover.orderingGrassroots': 'Ordered by First Team Seekers, then distance, then profile completeness, then player id — not ability, not the Trust Score (Evidence confidence).',
   'brief.unsaved': 'You have unsaved changes to this Recruitment Brief. Leave without saving?',
   'common.conflict': 'Someone else changed this while you were working on it. Reload to see their change, then apply yours — nothing of theirs was overwritten.',
   // M23 P5.7 — the platform's temporal refusals, in the person's language.
@@ -2646,7 +2646,7 @@ const fr: typeof en = {
   'confirm.pauseWatchlist': 'Mettre « {name} » en pause ?',
   'confirm.pauseWatchlistBody': 'L’appartenance reste affichée à l’ouverture ; les notifications de changement s’arrêtent jusqu’à la reprise.',
   'discover.ordering': 'Trié par adhésion Academy+, puis complétude du profil, puis identifiant — pas les qualités, pas le Trust Score (confiance dans les preuves).',
-  'discover.orderingGrassroots': 'Trié par First Team Seekers, puis distance, puis complétude du profil, puis identifiant — pas les qualités, pas le Trust Score.',
+  'discover.orderingGrassroots': 'Trié par First Team Seekers, puis distance, puis complétude du profil, puis identifiant — pas les qualités, pas le Trust Score (confiance dans les preuves).',
   'brief.unsaved': 'Vous avez des modifications non enregistrées sur ce brief de recrutement. Quitter sans enregistrer ?',
   'common.conflict': 'Quelqu’un d’autre a modifié cet élément pendant que vous y travailliez. Rechargez pour voir sa modification, puis appliquez la vôtre — rien de son travail n’a été écrasé.',
   'err.DATE_INVALID': 'Ce n’est pas un jour du calendrier. Écrivez-le sous la forme AAAA-MM-JJ.',
