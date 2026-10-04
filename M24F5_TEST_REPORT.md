@@ -112,6 +112,28 @@ m24f5PortalVisualLive (262 ✓), m24f4PortalMinimalLive (316 ✓), m24eScrollLiv
 - **Evidence:** 20/20 sequential runs of the whole suite before the fix (idle
   machine), 20/20 after.
 
-## 7. Known flakes
+## 7. Freeze closure — final demo asset crawl
+
+Every final bundle (Launcher, Pro, Grassroots, Agent, Trust & Safety, Player,
+Connected) was served locally and walked through its approved M24F.5 screens with
+every request, response, failed request, console message and page error recorded.
+Single-file bundles request nothing from the host but the document itself.
+
+The first crawl found two demo-chrome defects (no product code involved):
+
+- **Connected demo switcher emoji** — the host switcher read "⚽ Player · 🔭 Pro ·
+  🌱 Grassroots". Now plain text (`e2e/buildConnectedDemo.mjs`).
+- **Favicon 404** — no bundle declared an icon, so a browser serving one from a
+  root asked the host for `/favicon.ico`. `e2e/buildDemos.mjs` now stamps an
+  inline ScoutBox icon (the launcher carries the same).
+
+Inter: in each app two faces register, the used one loads, zero face errors,
+`document.fonts.check('16px Inter')` true, computed face Inter on every crawled
+screen. In the Connected demo the hidden portal frames load Inter on demand when
+shown (verified by requesting it: loaded, no error). The Grassroots entry panel
+uses the CSS turf texture; no photograph exists in any bundle (removed at the
+Founder's direction in M24F.2 R5, `f221c90`).
+
+## 8. Known flakes
 
 - None unexplained. `m23OfferLive` A6 (since M24F.2) passed in every M24F.5 run.

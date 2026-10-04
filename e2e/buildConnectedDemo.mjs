@@ -82,9 +82,9 @@ const SHELL = `
   #sb-guide .dim { color: #8fa3c8; }
 </style>
 <div id="sb-bar">
-  <button id="sb-b-player" class="on">⚽ Player</button>
-  <button id="sb-b-pro">🔭 Pro</button>
-  <button id="sb-b-grassroots">🌱 Grassroots</button>
+  <button id="sb-b-player" class="on">Player</button>
+  <button id="sb-b-pro">Pro</button>
+  <button id="sb-b-grassroots">Grassroots</button>
   <button id="sb-b-guide" title="How to run the demo">?</button>
   <span class="sb-note"><b>Shared simulation — no live backend.</b><br>One synthetic dataset · build ${sha} · ${built}</span>
 </div>

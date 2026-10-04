@@ -78,11 +78,14 @@ for (const f of ['scoutbox-club-demo.html', 'scoutbox-admin-demo.html', 'scoutbo
 // built from (content hash, not a timestamp) and the build commit.
 // `demoFreshness.test.mjs` recomputes the fingerprint from the working tree
 // and fails when a bundle is stale.
+// The ScoutBox mark: a dark tile with the green full stop of the wordmark.
+const ICON = `<link rel="icon" data-sb-icon type="image/svg+xml" href="data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#18201b"/><rect x="18" y="18" width="7" height="7" rx="1.5" fill="#00e676"/></svg>')}">`;
 for (const [f, { app, extra }] of Object.entries(DEMO_APPS)) {
   const p = path.join(OUT, f);
   let doc = fs.readFileSync(p, 'utf8');
-  doc = doc.replace(/<meta name="sb-source-fingerprint" content="[^"]*">/g, '').replace(/<meta name="sb-build-sha" content="[^"]*">/g, '');
-  const stamp = `<meta name="sb-source-fingerprint" content="${sourceFingerprint(app, extra)}"><meta name="sb-build-sha" content="${sha}">`;
+  doc = doc.replace(/<meta name="sb-source-fingerprint" content="[^"]*">/g, '').replace(/<meta name="sb-build-sha" content="[^"]*">/g, '').replace(/<link rel="icon" data-sb-icon[^>]*>/g, '');
+  // M24F.5 freeze — an inline icon, so a browser serving the single-file bundle never asks the host for /favicon.ico (no 404).
+  const stamp = `<meta name="sb-source-fingerprint" content="${sourceFingerprint(app, extra)}"><meta name="sb-build-sha" content="${sha}">${ICON}`;
   doc = doc.includes('<head>') ? doc.replace('<head>', `<head>${stamp}`) : stamp + doc;
   fs.writeFileSync(p, doc);
 }
