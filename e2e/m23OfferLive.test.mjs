@@ -318,8 +318,9 @@ const kola = await enterPlayer(ctxKola, 'Kola Adeyemi', 'kola', 'text=Your visib
   const sec = kola.locator('[data-testid="offer-section"]');
   await sec.waitFor({ timeout: 20000 });
   ok(await waitIn(sec, /Offers/i), 'B1: Kola\'s Opportunities carries the Offers section at 390px');
+  await sec.locator('[data-testid^="offer-terms-"]').first().click().catch(() => {}); // M24F.4 — conditions, the club's message and the documents sit behind "View terms"
   const txt = await sec.innerText();
-  ok(/Eastport FC/.test(txt) && /Awaiting your answer/.test(txt) && /Revision 1/.test(txt) && /Central midfielder/.test(txt) && /Under-23s/.test(txt) && /2027-07-01/.test(txt) && /Expires/.test(txt), 'B2: the exact revision: club, revision 1, terms, expiry');
+  ok(/Eastport FC/.test(txt) && /Awaiting your answer/.test(txt) && /Revision 1/.test(txt) && /Central midfielder/.test(txt) && /Under-23s/.test(txt) && /1 Jul 2027|2027-07-01/.test(txt) && /Expires/.test(txt), 'B2: the exact revision: club, revision 1, terms, expiry');
   ok(txt.includes(S_MSG), 'B2b: the club\'s message reaches the player');
   neg(!txt.includes(S_NOTE) && !txt.includes(S_DEC) && !/internal note|decision/i.test(txt), 'B2c: the internal note and the decision never reach the player');
   ok(await kola.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth + 1), 'N13a: 390px: no horizontal scroll');

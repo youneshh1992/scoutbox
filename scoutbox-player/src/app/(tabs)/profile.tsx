@@ -12,8 +12,8 @@
 // when it is a control. Every value is read from the session and the client
 // calls the previous profile, Home and Football already made — nothing is
 // invented (see M24F_PLAYER_PROFILE_DATA_MAP.md).
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Image, ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { createElement, useCallback, useEffect, useMemo, useState } from 'react';
+import { Image, Platform, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { Text, TextInput } from '../../components/Text';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
@@ -25,6 +25,8 @@ import { useSession } from '../../state';
 import { useColors, useStyles, type Palette } from '../../theme';
 import { pt } from '../../i18n';
 import { Button, Disclosure, Kicker, ListRow, Muted, Row, SectionTitle } from '../../components/ui';
+import { Icon } from '../../components/Icon';
+import { combine } from '../../data/combineClient';
 import { PageHeader, PageTabs, pickTab } from '../../components/PageChrome';
 import { WebVideo } from '../../components/WebVideo';
 import { PassportSection } from '../../components/M12Sections';
@@ -258,7 +260,7 @@ export function ProfileBody() {
 
       {section === 'evidence' && (
         <View testID="profile-section-evidence" style={styles.body}>
-          <EvidenceSection me={me} playerId={playerId} isMinor={isMinor} refresh={refresh} onUpload={() => router.push('/upload')} onBoxCam={() => router.push('/football?tab=boxcam')} />
+          <EvidenceSection me={me} playerId={playerId} isMinor={isMinor} refresh={refresh} onUpload={() => router.push('/upload')} onBoxCam={() => router.push('/football?tab=boxcam')} onCombine={() => router.push('/football?tab=combine')} />
         </View>
       )}
 
@@ -435,17 +437,47 @@ function CvBlock({ playerId }: { playerId: string }) {
   );
 }
 
-function EvidenceSection({ me, playerId, isMinor, refresh, onUpload, onBoxCam }: { me: NonNullable<ReturnType<typeof useSession>['me']>; playerId: string; isMinor: boolean; refresh: () => Promise<unknown>; onUpload: () => void; onBoxCam: () => void }) {
+/** M24F.4 — a clip as a picture, not a player: the browser's first frame, no controls, tap to open. */
+function ClipThumb({ src, onPress, testID }: { src: string | null; onPress?: () => void; testID?: string }) {
+  const colors = useColors();
+  // No playable file (the demo's sample clips carry none): a quiet frame with the
+  // video mark, never a stock picture.
+  const frame = src && Platform.OS === 'web'
+    ? createElement('video', { src, muted: true, playsInline: true, preload: 'metadata', 'aria-hidden': true, tabIndex: -1, style: { width: '100%', height: 200, objectFit: 'cover', borderRadius: 14, background: colors.panel2, display: 'block', pointerEvents: 'none' } })
+    : <View style={{ width: '100%', height: src ? 200 : 132, borderRadius: 14, backgroundColor: colors.training, alignItems: 'center', justifyContent: 'center' }}><View style={{ backgroundColor: colors.trainingDisc, borderRadius: 999, padding: 12 }}><Icon name="video" size={22} color={colors.iconFg} /></View></View>;
+  return <Pressable onPress={onPress} disabled={!onPress} accessibilityRole={onPress ? 'button' : undefined} testID={testID} style={({ pressed }) => [{ borderRadius: 14, overflow: 'hidden' }, pressed && { opacity: 0.85 }]}>{frame}</Pressable>;
+}
+
+function EvidenceSection({ me, playerId, isMinor, refresh, onUpload, onBoxCam, onCombine }: { me: NonNullable<ReturnType<typeof useSession>['me']>; playerId: string; isMinor: boolean; refresh: () => Promise<unknown>; onUpload: () => void; onBoxCam: () => void; onCombine: () => void }) {
   const colors = useColors();
   const styles = useStyles(makeStyles);
   const [vouchCoach, setVouchCoach] = useState('');
   const [vouchEmail, setVouchEmail] = useState('');
   const [vouchNote, setVouchNote] = useState<string | null>(null);
-  return (
-    <>
+  const [page, setPage] = useState<'video' | 'references' | 'attendance' | 'record' | null>(null);
+  // The Combine count is the server's (verified results); read once, never derived.
+  const [combineCount, setCombineCount] = useState<number | null>(null);
+  useEffect(() => { let on = true; combine.overview({ kind: 'player', id: playerId }).then((o) => on && setCombineCount(o.verifiedResults.length)).catch(() => on && setCombineCount(null)); return () => { on = false; }; }, [playerId]);
+
+  // M24F.4 — the root is visual: the latest clip as a picture, then one row
+  // per kind of evidence with its count. The clips, the references, the
+  // attendance and the record itself each open one tap deep.
+  const clips = [...me.media].sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+  const latest = clips.find((m) => !!client.mediaUrl(m.url)) ?? clips[0] ?? null;
+  const latestSrc = latest ? client.mediaUrl(latest.url) : null;
+  const vouches = me.vouches ?? [];
+  const back = (label: string) => (
+    <Pressable onPress={() => setPage(null)} accessibilityRole="button" accessibilityLabel={pt('evBack')} testID="evidence-back" hitSlop={8} style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 8, alignSelf: 'flex-start' }, pressed && { opacity: 0.7 }]}>
+      <Icon name="chevron-left" size={16} color={colors.accent2} /><Text style={{ color: colors.accent2, fontSize: 13, fontWeight: '500' }}>{label}</Text>
+    </Pressable>
+  );
+
+  if (page === 'video') {
+    return (
       <View style={styles.block} testID="evidence-footage">
+        {back(pt('evBack'))}
         <SectionTitle>{pt('profFootage')}</SectionTitle>
-        {me.media.length === 0 ? <Muted size={13.5}>{pt('profNoEvidence')}</Muted> : me.media.map((m) => {
+        {clips.length === 0 ? <Muted size={13.5}>{pt('profNoEvidence')}</Muted> : clips.map((m) => {
           const src = client.mediaUrl(m.url);
           const tags = Object.entries(m.tags ?? {}).map(([t, n]) => `${t.replace(/_/g, ' ')} ×${n}`).join(' · ');
           return (
@@ -459,55 +491,62 @@ function EvidenceSection({ me, playerId, isMinor, refresh, onUpload, onBoxCam }:
         })}
         <TextButton label={pt('profAddEvidence')} onPress={onUpload} size={13} testID="evidence-upload-link" />
       </View>
-
-      {me.attendance.length > 0 && (
-        <View style={styles.block} testID="evidence-attendance">
-          <SectionTitle>{pt('profAttendance')}</SectionTitle>
-          {me.attendance.map((a) => (
-            <FactRow key={a.id} k={a.fixture} sub={`${a.venue} · ${a.date}${a.corroboratedBy ? ` · coach-signed by ${a.corroboratedBy}` : a.gps ? ' · GPS' : ''}`} v={a.verified ? 'Verified' : 'Logged'} />
-          ))}
-        </View>
-      )}
-
-      {me.pathway && (
-        <View style={styles.block} testID="evidence-references">
-          <SectionTitle>{pt('profReferences')}</SectionTitle>
-          {(me.vouches ?? []).length === 0 && <Muted size={13.5}>{isMinor ? 'Your parent or guardian requests references for you.' : 'A named coach vouching for you is the strongest credential an amateur can hold.'}</Muted>}
-          {(me.vouches ?? []).map((v) => (
-            <View key={v.id} style={styles.fact}>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={styles.factKey}>{v.coachName} · {v.role}</Text>
-                {v.text ? <Text style={styles.factSub}>“{v.text}”{v.seasons ? ` — ${v.seasons}` : ''}</Text> : null}
-              </View>
-              <Text style={[styles.factValue, v.status === 'published' && { color: colors.accentText }]}>{v.status === 'published' ? 'Verified' : cap(v.status)}</Text>
-            </View>
-          ))}
-          {!isMinor && (
-            <Disclosure label="Request a coach reference" testID="evidence-request-reference">
-              <TextInput style={styles.input} placeholder="Coach name" placeholderTextColor={colors.muted} value={vouchCoach} onChangeText={setVouchCoach} accessibilityLabel="Coach name" />
-              <TextInput style={styles.input} placeholder="Coach email" placeholderTextColor={colors.muted} value={vouchEmail} onChangeText={setVouchEmail} autoCapitalize="none" accessibilityLabel="Coach email" />
-              <Row>
-                <Button small primary label="Request reference" onPress={async () => {
-                  try {
-                    await client.requestVouch(playerId, vouchCoach.trim(), vouchEmail.trim(), 'Coach');
-                    setVouchCoach(''); setVouchEmail(''); setVouchNote('Sent — your coach gets an email with a one-time code.');
-                    await refresh();
-                  } catch (e) { setVouchNote(e instanceof Error ? e.message : 'Could not send'); }
-                }} />
-              </Row>
-              {vouchNote && <Muted size={12.5}>{vouchNote}</Muted>}
-            </Disclosure>
-          )}
-        </View>
-      )}
-
-      {/* the evidence record itself (M12): tiers, records, the add-evidence form — unchanged */}
-      <View style={styles.block} testID="evidence-passport">
-        <PassportSection actor={{ kind: 'player', id: playerId }} />
+    );
+  }
+  if (page === 'attendance') {
+    return (
+      <View style={styles.block} testID="evidence-attendance">
+        {back(pt('evBack'))}
+        <SectionTitle>{pt('profAttendance')}</SectionTitle>
+        {me.attendance.map((a) => (
+          <FactRow key={a.id} k={a.fixture} sub={`${a.venue} · ${dateOnly(a.date)}${a.corroboratedBy ? ` · coach-signed by ${a.corroboratedBy}` : a.gps ? ' · GPS' : ''}`} v={a.verified ? 'Verified' : 'Logged'} />
+        ))}
       </View>
-
-      <View style={styles.block}>
-        <ListRow label="Box Cam" value="Sessions and observations" onPress={onBoxCam} testID="evidence-boxcam-link" />
+    );
+  }
+  if (page === 'references') {
+    return (
+      <View style={styles.block} testID="evidence-references">
+        {back(pt('evBack'))}
+        <SectionTitle>{pt('profReferences')}</SectionTitle>
+        {vouches.length === 0 && <Muted size={13.5}>{isMinor ? 'Your parent or guardian requests references for you.' : 'A named coach vouching for you is the strongest credential an amateur can hold.'}</Muted>}
+        {vouches.map((v) => (
+          <View key={v.id} style={styles.fact}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.factKey}>{v.coachName} · {v.role}</Text>
+              {v.text ? <Text style={styles.factSub}>“{v.text}”{v.seasons ? ` — ${v.seasons}` : ''}</Text> : null}
+            </View>
+            <Text style={[styles.factValue, v.status === 'published' && { color: colors.accentText }]}>{v.status === 'published' ? 'Verified' : cap(v.status)}</Text>
+          </View>
+        ))}
+        {!isMinor && (
+          <Disclosure label="Request a coach reference" testID="evidence-request-reference">
+            <TextInput style={styles.input} placeholder="Coach name" placeholderTextColor={colors.muted} value={vouchCoach} onChangeText={setVouchCoach} accessibilityLabel="Coach name" />
+            <TextInput style={styles.input} placeholder="Coach email" placeholderTextColor={colors.muted} value={vouchEmail} onChangeText={setVouchEmail} autoCapitalize="none" accessibilityLabel="Coach email" />
+            <Row>
+              <Button small primary label="Request reference" onPress={async () => {
+                try {
+                  await client.requestVouch(playerId, vouchCoach.trim(), vouchEmail.trim(), 'Coach');
+                  setVouchCoach(''); setVouchEmail(''); setVouchNote('Sent — your coach gets an email with a one-time code.');
+                  await refresh();
+                } catch (e) { setVouchNote(e instanceof Error ? e.message : 'Could not send'); }
+              }} />
+            </Row>
+            {vouchNote && <Muted size={12.5}>{vouchNote}</Muted>}
+          </Disclosure>
+        )}
+      </View>
+    );
+  }
+  if (page === 'record') {
+    return (
+      <View style={styles.block} testID="evidence-record">
+        {back(pt('evBack'))}
+        <SectionTitle>{pt('evRecord')}</SectionTitle>
+        {/* the evidence record itself (M12): tiers, records, the add-evidence form — unchanged */}
+        <View style={styles.block} testID="evidence-passport">
+          <PassportSection actor={{ kind: 'player', id: playerId }} />
+        </View>
         <Disclosure label="Verified sports CV" testID="evidence-cv">
           <CvBlock playerId={playerId} />
         </Disclosure>
@@ -517,7 +556,27 @@ function EvidenceSection({ me, playerId, isMinor, refresh, onUpload, onBoxCam }:
           <Muted size={12}>How complete your profile is. It is not a rating of you as a player and it never moves through payments.</Muted>
         </Disclosure>
       </View>
-    </>
+    );
+  }
+
+  return (
+    <View style={styles.block} testID="evidence-root">
+      {latest ? (
+        <View style={{ marginBottom: 6 }} testID="evidence-latest">
+          <ClipThumb src={latestSrc} onPress={() => setPage('video')} testID="evidence-latest-thumb" />
+          <ListRow label={latest.title} value={[dateOnly(latest.uploadedAt), latest.verifiedClip ? 'Verified clip' : cap(latest.kind)].join(' · ')} onPress={() => setPage('video')} testID="evidence-latest-row" />
+        </View>
+      ) : (
+        <View style={{ paddingVertical: 12 }}><Muted size={13.5}>{pt('evNoClips')}</Muted></View>
+      )}
+      <ListRow label={pt('evVideo')} value={String(clips.length)} onPress={() => setPage('video')} testID="evidence-video-row" />
+      <ListRow label={pt('evCombine')} value={combineCount == null ? undefined : String(combineCount)} onPress={onCombine} testID="evidence-combine-row" />
+      {me.pathway ? <ListRow label={pt('profReferences')} value={String(vouches.length)} onPress={() => setPage('references')} testID="evidence-references-row" /> : null}
+      {me.attendance.length > 0 ? <ListRow label={pt('profAttendance')} value={String(me.attendance.length)} onPress={() => setPage('attendance')} testID="evidence-attendance-row" /> : null}
+      <ListRow label={pt('evBoxCam')} onPress={onBoxCam} testID="evidence-boxcam-link" />
+      <ListRow label={pt('evRecord')} onPress={() => setPage('record')} testID="evidence-record-row" />
+      <TextButton label={pt('profAddEvidence')} onPress={onUpload} size={13} testID="evidence-upload-link" />
+    </View>
   );
 }
 

@@ -14,7 +14,8 @@ import { Text, TextInput } from './Text';
 import { m12, type FamilyOffer, type FamilyOfferRevision, type OfferStatus } from '../data/m12client';
 import { useColors } from '../theme';
 import { pt } from '../i18n';
-import { Button, Card, Muted, Row, SectionTitle, Disclosure } from './ui';
+import { fmtDayTime, humanDate } from '../time';
+import { Button, Card, Disclosure, FactRow, Kicker, Muted, Row, SectionTitle } from './ui';
 
 type Actor = { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string };
 
@@ -25,7 +26,7 @@ const stLabel = (s: OfferStatus | null) => {
   const key = `offerSt_${s}` as Parameters<typeof pt>[0];
   try { return `${GLYPH[s]} ${pt(key) ?? s}`; } catch { return s; }
 };
-const fmt = (ms: number | null) => (ms ? new Date(ms).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
+const fmt = (ms: number | null) => (ms ? fmtDayTime(ms) : '—');
 const errMsg = (e: unknown) => {
   const code = (e as { code?: string } | null)?.code ?? (e instanceof Error ? e.message : '');
   const key = `offerErr_${code}` as Parameters<typeof pt>[0];
@@ -94,6 +95,13 @@ export function OfferSection({ actor, view = 'all' }: { actor: Actor; view?: Off
     finally { setBusy(null); }
   };
 
+  // M24F.4 — the Offer reads like a document, not a form: the kicker, the
+  // club large, the role, the dates, the status, then Accept / Decline. Every
+  // condition, message, document, earlier revision and the agent sharing sit
+  // behind "View terms" (the Documents and Response views still show their
+  // own part directly, as the case navigation expects). One quiet line says
+  // what accepting is not.
+  const statusColor = (st: OfferStatus | null) => (tone(st) === 'red' ? colors.danger : tone(st) === 'gold' ? colors.gold : tone(st) === 'green' ? colors.accentText : colors.muted);
   return (
     <Card testID="offer-section">
       <SectionTitle>{pt('offersTitle')}</SectionTitle>
@@ -103,25 +111,26 @@ export function OfferSection({ actor, view = 'all' }: { actor: Actor; view?: Off
         const live = o.status === 'ISSUED' && o.awaitingYourResponse && !!cur;
         const older = o.revisions.filter((r) => r.id !== cur?.id);
         const mine = o.responses.find((x) => x.revisionId === cur?.id) ?? null;
+        const dates = cur ? `${pt('offerStart')} ${cur.terms.startDate ? humanDate(cur.terms.startDate) : '—'}${cur.terms.endDate ? ` · ${pt('offerEnd')} ${humanDate(cur.terms.endDate)}` : ''}` : '';
         return (
-          <View key={o.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }} testID={`offer-${o.id}`} accessibilityLabel={`${pt('offersTitle')} ${o.club.name ?? ''}`}>
-            <Row>
-              <Text style={{ color: colors.text, fontWeight: '600', fontSize: 15, flex: 1 }}>{o.club.name ?? '—'}{actor.kind === 'guardian' && o.playerName ? ` · ${o.playerName}` : ''}</Text>
-              <Text style={{ color: tone(o.status) === 'red' ? colors.danger : tone(o.status) === 'gold' ? colors.gold : tone(o.status) === 'green' ? colors.accentText : colors.muted, fontSize: 12.5, fontWeight: '600' }}>{stLabel(o.status)}</Text>
-            </Row>
+          <View key={o.id} style={{ marginTop: 10, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.line }} testID={`offer-${o.id}`} accessibilityLabel={`${pt('offersTitle')} ${o.club.name ?? ''}`}>
+            <Kicker>{pt('offerKicker')}</Kicker>
+            <Text style={{ color: colors.text, fontWeight: '600', fontSize: 22, lineHeight: 28, letterSpacing: -0.4, marginTop: 6 }}>{o.club.name ?? '—'}{actor.kind === 'guardian' && o.playerName ? ` · ${o.playerName}` : ''}</Text>
+            {cur && show('offer') ? (
+              <View style={{ marginTop: 4 }}>
+                <Text style={{ color: colors.text, fontSize: 15, lineHeight: 22 }}>{cur.terms.role ?? '—'}{cur.terms.squad ? ` · ${cur.terms.squad}` : ''}</Text>
+                <Text style={{ color: colors.muted, fontSize: 13.5, lineHeight: 20 }}>{dates}</Text>
+              </View>
+            ) : null}
             {cur && (
-              <View style={{ marginTop: 4, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }} testID={`offer-revision-${cur.id}`}>
-                <Muted size={12}>{pt('offerRevision')} {cur.revisionNumber} · {cur.status === 'EXPIRED' ? pt('offerExpired') : pt('offerExpires')} {fmt(cur.expiresAt)}</Muted>
-                {show('offer') && <Text style={{ color: colors.text, fontSize: 13, marginTop: 4 }}>{pt('offerRole')}: {cur.terms.role ?? '—'}{cur.terms.squad ? ` · ${pt('offerSquad')}: ${cur.terms.squad}` : ''}</Text>}
-                {show('offer') && <Text style={{ color: colors.text, fontSize: 13 }}>{pt('offerStart')}: {cur.terms.startDate ?? '—'}{cur.terms.endDate ? ` · ${pt('offerEnd')}: ${cur.terms.endDate}` : ''}</Text>}
-                {show('offer') && cur.terms.conditions ? <Muted size={12.5}>{pt('offerConditions')}: {cur.terms.conditions}</Muted> : null}
-                {show('offer') && cur.recipientMessage ? <Muted size={12.5}>{pt('offerMessage')}: “{cur.recipientMessage}”</Muted> : null}
-                {show('documents') && cur.documents.length > 0 && (
-                  <View style={{ marginTop: 4 }}>
+              <View style={{ marginTop: 12 }} testID={`offer-revision-${cur.id}`}>
+                <FactRow k={pt('offerStatus')} v={stLabel(o.status)} sub={`${pt('offerRevision')} ${cur.revisionNumber} · ${cur.status === 'EXPIRED' ? pt('offerExpired') : pt('offerExpires')} ${fmt(cur.expiresAt)}`} />
+                {show('documents') && !show('offer') && cur.documents.length > 0 && (
+                  <View style={{ marginTop: 8 }}>
                     <Muted size={12}>{pt('offerDocuments')}</Muted>
                     {cur.documents.map((d) => (
                       <Row key={d.id} style={{ marginTop: 2 }}>
-                        <Text style={{ color: colors.text, fontSize: 12.5, flex: 1 }}>{d.label ?? d.id}</Text>
+                        <Text style={{ color: colors.text, fontSize: 13, flex: 1 }}>{d.label ?? d.id}</Text>
                         <Button small label={pt('offerOpenDocument')} onPress={() => openDoc(o, d.id)} testID={`offer-doc-${d.id}`} />
                       </Row>
                     ))}
@@ -130,51 +139,79 @@ export function OfferSection({ actor, view = 'all' }: { actor: Actor; view?: Off
                 {view === 'documents' && cur.documents.length === 0 && <Muted size={12.5}>{pt('offerNoDocuments')}</Muted>}
               </View>
             )}
-            {show('offer', 'response') && o.status === 'ACCEPTED' && <View style={{ marginTop: 6 }} testID={`offer-signing-pending-${o.id}`}><Text style={{ color: colors.accentText, fontSize: 13, fontWeight: '700' }}>{pt('offerSigningPending')}</Text></View>}
-            {show('offer') && o.status === 'ISSUED' && o.notAnswerableReason === 'CASE_PAUSED' && <View style={{ marginTop: 6 }} testID={`offer-paused-${o.id}`} accessibilityRole="text"><Muted size={12.5}>{pt('offerPaused')}</Muted></View>}
-            {show('offer', 'response') && mine && <Muted size={12}>{mine.actorType === 'guardian' && actor.kind === 'player' ? pt('offerAnsweredByGuardian') : `${pt('offerAnsweredAt')} ${fmt(mine.occurredAt)}`}</Muted>}
+            {show('offer', 'response') && o.status === 'ACCEPTED' && <View style={{ marginTop: 10 }} testID={`offer-signing-pending-${o.id}`}><Text style={{ color: colors.accentText, fontSize: 13, fontWeight: '600' }}>{pt('offerSigningPending')}</Text></View>}
+            {show('offer') && o.status === 'ISSUED' && o.notAnswerableReason === 'CASE_PAUSED' && <View style={{ marginTop: 10 }} testID={`offer-paused-${o.id}`} accessibilityRole="text"><Muted size={12.5}>{pt('offerPaused')}</Muted></View>}
+            {show('offer', 'response') && mine && <View style={{ marginTop: 8 }}><Muted size={12}>{mine.actorType === 'guardian' && actor.kind === 'player' ? pt('offerAnsweredByGuardian') : `${pt('offerAnsweredAt')} ${fmt(mine.occurredAt)}`}</Muted></View>}
             {view === 'response' && !mine && live && <Muted size={12.5}>{pt('offerAwaitingYou')}</Muted>}
             {show('offer') && live && !arm && (
-              <Row style={{ marginTop: 6, flexWrap: 'wrap' }}>
-                <Button small primary label={pt('offerAccept')} onPress={() => setArm({ id: o.id, what: 'accept' })} testID={`offer-accept-${o.id}`} />
-                <Button small tertiary label={pt('offerDecline')} onPress={() => setArm({ id: o.id, what: 'decline' })} testID={`offer-decline-${o.id}`} />
+              <Row style={{ marginTop: 16, flexWrap: 'wrap' }}>
+                <Button primary label={pt('offerAccept')} onPress={() => setArm({ id: o.id, what: 'accept' })} testID={`offer-accept-${o.id}`} />
+                <Button tertiary label={pt('offerDecline')} onPress={() => setArm({ id: o.id, what: 'decline' })} testID={`offer-decline-${o.id}`} />
               </Row>
             )}
             {show('offer') && live && arm?.id === o.id && cur && (
-              <View style={{ marginTop: 6, borderLeftWidth: 2, borderLeftColor: colors.gold, paddingLeft: 10, paddingVertical: 4 }} accessibilityRole="alert" testID={`offer-confirm-${o.id}`}>
-                <Text style={{ color: colors.text, fontSize: 13 }}>{(arm.what === 'accept' ? pt('offerAcceptWarn') : pt('offerDeclineWarn')).replace('{n}', String(cur.revisionNumber))}</Text>
+              <View style={{ marginTop: 14, borderLeftWidth: 2, borderLeftColor: colors.gold, paddingLeft: 12, paddingVertical: 4 }} accessibilityRole="alert" testID={`offer-confirm-${o.id}`}>
+                <Text style={{ color: colors.text, fontSize: 13.5, lineHeight: 20 }}>{(arm.what === 'accept' ? pt('offerAcceptWarn') : pt('offerDeclineWarn')).replace('{n}', String(cur.revisionNumber))}</Text>
                 {arm.what === 'decline' && (
                   <TextInput
-                    style={{ marginTop: 6, backgroundColor: colors.panel2, color: colors.text, borderRadius: 8, padding: 8, fontSize: 13 }}
+                    style={{ marginTop: 8, backgroundColor: colors.panel2, color: colors.text, borderRadius: 8, padding: 10, fontSize: 13 }}
                     placeholder={pt('offerDeclineReason')} placeholderTextColor={colors.muted} accessibilityLabel={pt('offerDeclineReason')}
                     value={reason[o.id] ?? ''} onChangeText={(v) => setReason((s) => ({ ...s, [o.id]: v.slice(0, 400) }))} maxLength={400}
                   />
                 )}
-                <Row style={{ marginTop: 6, flexWrap: 'wrap' }}>
+                <Row style={{ marginTop: 10, flexWrap: 'wrap' }}>
                   <Button small primary={arm.what === 'accept'} danger={arm.what === 'decline'} label={(arm.what === 'accept' ? pt('offerConfirmAccept') : pt('offerConfirmDecline')).replace('{n}', String(cur.revisionNumber))} onPress={() => answer(o, cur, arm.what)} disabled={busy === o.id} testID={`offer-confirm-${arm.what}-${o.id}`} />
                   <Button small tertiary label={pt('offerCancel')} onPress={() => setArm(null)} testID={`offer-cancel-${o.id}`} />
                 </Row>
                 <Muted size={12}>{pt('offerNotSigning')}</Muted>
               </View>
             )}
-            {show('response') && actor.kind === 'player' && o.status !== 'DRAFT' && (
-              <Row style={{ marginTop: 6, flexWrap: 'wrap' }}>
+            {show('offer') && cur && (
+              <View style={{ marginTop: 12 }}>
+                <Disclosure label={pt('offerViewTerms')} testID={`offer-terms-${o.id}`}>
+                  {cur.terms.conditions ? <Muted size={13}>{pt('offerConditions')}: {cur.terms.conditions}</Muted> : null}
+                  {cur.recipientMessage ? <Muted size={13}>{pt('offerMessage')}: “{cur.recipientMessage}”</Muted> : null}
+                  {cur.documents.length > 0 ? (
+                    <View style={{ marginTop: 6 }}>
+                      <Muted size={12}>{pt('offerDocuments')}</Muted>
+                      {cur.documents.map((d) => (
+                        <Row key={d.id} style={{ marginTop: 2 }}>
+                          <Text style={{ color: colors.text, fontSize: 13, flex: 1 }}>{d.label ?? d.id}</Text>
+                          <Button small label={pt('offerOpenDocument')} onPress={() => openDoc(o, d.id)} testID={`offer-doc-${d.id}`} />
+                        </Row>
+                      ))}
+                    </View>
+                  ) : <Muted size={12.5}>{pt('offerNoDocuments')}</Muted>}
+                  {older.length > 0 ? (
+                    <View style={{ marginTop: 6 }}>
+                      <Muted size={12}>{pt('offerOlderRevisions')}</Muted>
+                      {older.map((r) => <Muted key={r.id} size={12}>{pt('offerRevision')} {r.revisionNumber} · {stLabel(r.status)} · {r.terms.role ?? '—'} · {r.terms.startDate ?? '—'}</Muted>)}
+                    </View>
+                  ) : null}
+                  {view !== 'response' && actor.kind === 'player' && o.status !== 'DRAFT' ? (
+                    <View style={{ marginTop: 8 }}>
+                      <Muted size={12}>{pt('offerSharing')}</Muted>
+                      <Row style={{ marginTop: 4, flexWrap: 'wrap' }}>
+                        <Button small label={o.agentShared ? pt('offerAgentUnshare') : pt('offerAgentShare')} onPress={() => share(o)} disabled={busy === o.id} testID={`offer-share-${o.id}`} />
+                        <Muted size={12}>{o.agentShared ? pt('offerAgentShared') : pt('offerAgentShareHint')}</Muted>
+                      </Row>
+                    </View>
+                  ) : null}
+                </Disclosure>
+                <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 17, marginTop: 10 }} testID={`offer-not-signature-${o.id}`}>{pt('offerNotSignature')}</Text>
+              </View>
+            )}
+            {view === 'response' && actor.kind === 'player' && o.status !== 'DRAFT' && (
+              <Row style={{ marginTop: 10, flexWrap: 'wrap' }}>
                 <Button small label={o.agentShared ? pt('offerAgentUnshare') : pt('offerAgentShare')} onPress={() => share(o)} disabled={busy === o.id} testID={`offer-share-${o.id}`} />
                 <Muted size={12}>{o.agentShared ? pt('offerAgentShared') : pt('offerAgentShareHint')}</Muted>
               </Row>
             )}
-            {show('offer') && older.length > 0 && (
-              <View style={{ marginTop: 6 }}>
-                <Muted size={12}>{pt('offerOlderRevisions')}</Muted>
-                {older.map((r) => <Muted key={r.id} size={12}>{pt('offerRevision')} {r.revisionNumber} · {stLabel(r.status)} · {r.terms.role ?? '—'} · {r.terms.startDate ?? '—'}</Muted>)}
-              </View>
-            )}
-            {show('offer') && <Muted size={12}>{pt('offerNotSigning')}</Muted>}
           </View>
         );
       })}
-      {msg && <View accessibilityLiveRegion="polite" style={{ marginTop: 6 }} testID="offer-message"><Muted size={12}>{msg}</Muted></View>}
-      <Disclosure label="About offers" testID="about-offers"><Muted size={12.5}>{actor.kind === 'guardian' ? pt('offersGuardianHint') : pt('offersHint')}</Muted></Disclosure>
+      {msg && <View accessibilityLiveRegion="polite" style={{ marginTop: 10 }} testID="offer-message"><Muted size={12.5}>{msg}</Muted></View>}
+      <View style={{ marginTop: 8 }}><Disclosure label="About offers" testID="about-offers"><Muted size={12.5}>{actor.kind === 'guardian' ? pt('offersGuardianHint') : pt('offersHint')}</Muted></Disclosure></View>
     </Card>
   );
 }
