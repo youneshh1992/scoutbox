@@ -350,10 +350,10 @@ export function ComplianceScreen({ session, tick, notify, me, contextId, onOpenC
 
           <Section title={t('cx.policies')} testId="policies-section">
             <div className="list-rows">
-              {o.policies.inEffect.map((p) => <div key={p.id} className="list-row" data-testid={`policy-${p.id}`}><span className="grow"><b>{p.id}</b> <span className="dim">· {p.regulator} · {p.jurisdiction}</span></span><span className="dim">{t('cx.effectiveFrom')} {p.effectiveFrom}</span></div>)}
+              {o.policies.inEffect.map((p) => <div key={p.id} className="list-row" data-testid={`policy-${p.id}`}><span className="grow"><b>{p.id}</b> <span className="dim">· {p.regulator} · {p.jurisdiction}</span></span><span className="dim">{t('cx.effectiveFrom')} {/^\d{4}-\d{2}-\d{2}$/.test(p.effectiveFrom) ? fmtDate(Date.parse(`${p.effectiveFrom}T00:00:00Z`)) : p.effectiveFrom}</span></div>)}
               {o.policies.missing.length > 0 && <div className="notice warn" data-testid="policies-missing">{t('cx.policiesMissing')}: {o.policies.missing.join(', ')}</div>}
             </div>
-            <div className="dim" style={{ fontSize: 12.5, marginTop: 6 }}>{t('cx.policiesNote')}</div>
+            <Hint className="dim" style={{ fontSize: 12.5, marginTop: 6 }}>{t('cx.policiesNote')}</Hint>
           </Section>
 
           <Section title={t('cx.freshness')} testId="freshness-section">
@@ -362,7 +362,7 @@ export function ComplianceScreen({ session, tick, notify, me, contextId, onOpenC
           </Section>
 
           <Section title={t('cx.contexts')} testId="contexts-section">
-            <div className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>{t('cx.contextsIntro')}</div>
+            <Hint className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>{t('cx.contextsIntro')}</Hint>
             {canWrite && !showNew && <div style={{ marginBottom: 10 }}><button className="primary" onClick={() => setShowNew(true)} data-testid="open-new-context">{t('cx.new')}</button></div>}
             {canWrite && showNew && <div style={{ marginBottom: 12 }}><NewContextForm session={session} notify={notify} onCreated={(id) => { setShowNew(false); onOpenContext(id); }} /></div>}
             <div className="list-rows" data-testid="context-rows">
@@ -384,7 +384,7 @@ export function ComplianceScreen({ session, tick, notify, me, contextId, onOpenC
               {o.consents.map((k) => <ConsentRow key={k.id} k={k} onOpenContext={onOpenContext} />)}
               {o.consents.length === 0 && <div className="notice">{t('cx.noConsents')}</div>}
             </div>
-            <div className="dim" style={{ fontSize: 12.5, marginTop: 6 }}>{t('cx.consentsNote')}</div>
+            <Hint className="dim" style={{ fontSize: 12.5, marginTop: 6 }}>{t('cx.consentsNote')}</Hint>
           </Section>
 
           <Section title={t('cx.reviews')} testId="reviews-section">
@@ -392,7 +392,7 @@ export function ComplianceScreen({ session, tick, notify, me, contextId, onOpenC
               {o.reviews.map((r) => <ReviewRow key={r.id} r={r} onOpenContext={onOpenContext} />)}
               {o.reviews.length === 0 && <div className="notice">{t('cx.noReviews')}</div>}
             </div>
-            <div className="dim" style={{ fontSize: 12.5, marginTop: 6 }}>{t('cx.reviewsNote')}</div>
+            <Hint className="dim" style={{ fontSize: 12.5, marginTop: 6 }}>{t('cx.reviewsNote')}</Hint>
           </Section>
 
           <Section title={t('cx.minors')} testId="minors-section">

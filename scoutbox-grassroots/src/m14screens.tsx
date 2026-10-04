@@ -74,10 +74,11 @@ const statusPill = (status: string) => {
 
 function ClaimRow({ claim, session, notify, onChange }: { claim: SubjectClaim; session: Session; notify: ScreenProps['notify']; onChange: () => void }) {
   const [reason, setReason] = useState('');
+  const [disputing, setDisputing] = useState(false);
   return (
     <div className="list-row" style={{ flexWrap: 'wrap' }}>
       <span className="grow">
-        <b>{t(`m14.claim.${claim.claimType}`, claim.claimType.replace(/_/g, ' ').toLowerCase())}</b>
+        <b>{(() => { const l = t(`m14.claim.${claim.claimType}`, claim.claimType.replace(/_/g, ' ').toLowerCase()); return l.charAt(0).toUpperCase() + l.slice(1); })()}</b>
         {claim.role ? ` — ${claim.role}` : ''} {statusPill(claim.status)}
         {claim.organisation && <span className="dim"> · {claim.organisation.name}</span>}
         {claim.current === false && claim.validUntil && <span className="dim"> · {new Date(claim.validFrom ?? 0).getFullYear()}–{new Date(claim.validUntil).getFullYear()}</span>}
@@ -90,14 +91,17 @@ function ClaimRow({ claim, session, notify, onChange }: { claim: SubjectClaim; s
           </div>
         )}
       </span>
+      {/* M24F.5 — disputing is a rare act: one quiet link, and the reason field only once asked for. */}
       {['verified', 'suspended', 'revoked', 'expired'].includes(claim.status) && !claim.disputedAt && (
-        <span>
-          <input aria-label={t('m14.claim.disputeReason')} placeholder={t('m14.claim.disputeReason')} value={reason} onChange={(e) => setReason(e.target.value)} style={{ width: 170 }} />
-          <button onClick={async () => {
-            try { const r = await m14.disputeClaim(session, claim.id, reason); notify(`${r.note}`); setReason(''); onChange(); }
-            catch (e) { notify(e instanceof Error ? e.message : 'failed', true); }
-          }}>{t('m14.claim.dispute')}</button>
-        </span>
+        disputing ? (
+          <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input aria-label={t('m14.claim.disputeReason')} placeholder={t('m14.claim.disputeReason')} value={reason} onChange={(e) => setReason(e.target.value)} style={{ width: 200 }} />
+            <button data-testid="claim-dispute-send" onClick={async () => {
+              try { const r = await m14.disputeClaim(session, claim.id, reason); notify(`${r.note}`); setReason(''); setDisputing(false); onChange(); }
+              catch (e) { notify(e instanceof Error ? e.message : 'failed', true); }
+            }}>{t('m14.claim.dispute')}</button>
+          </span>
+        ) : <button className="linklike" data-testid="claim-dispute-open" onClick={() => setDisputing(true)}>{t('m14.claim.disputeOpen')}</button>
       )}
     </div>
   );
@@ -134,6 +138,7 @@ function MeTab({ session, notify, me, reloadMe }: { session: Session; notify: Sc
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [lic, setLic] = useState({ licenceType: '', issuer: '', identifier: '' });
+  const allStepsDone = !!me && me.steps.length > 0 && me.steps.every((s) => s.done);
   const [providers] = useAsync(() => m14.licenceProviders(session), [session]);
   const act = async (fn: () => Promise<{ note?: string } | unknown>, done: string) => {
     try { const r: any = await fn(); notify(`${done}${r?.note ? ` — ${r.note}` : ''}`); reloadMe(); }
@@ -166,6 +171,29 @@ function MeTab({ session, notify, me, reloadMe }: { session: Session; notify: Sc
         {!me?.claims.length && <div className="dim">{t('m14.me.noClaims')}</div>}
       </div>
 
+      {/* M24F.5 — once every step is done the start forms fold into one row; anyone still verifying sees them open. */}
+      {allStepsDone ? (
+        <details className="settings-row" data-testid="verify-start-more">
+          <summary><span className="settings-row-title">{t('m14.me.start')}</span></summary>
+          <div className="settings-row-body">
+        <div className="list-row">
+          <span className="grow">{t('m14.me.startIdentity')}</span>
+          <button onClick={() => act(() => m14.startIdentity(session), t('m14.me.identityStarted'))}>{t('m14.me.startBtn')}</button>
+        </div>
+        <div className="list-row">
+          <input aria-label={t('m14.me.role')} placeholder={t('m14.me.role')} value={role} onChange={(e) => setRole(e.target.value)} />
+          <button onClick={() => act(() => m14.requestAffiliation(session, role), t('m14.me.affiliationRequested'))}>{t('m14.me.requestAffiliation')}</button>
+        </div>
+        <div className="list-row">
+          <input aria-label={t('m14.me.workEmail')} placeholder={t('m14.me.workEmail')} value={email} onChange={(e) => setEmail(e.target.value)} />
+          <button onClick={() => act(() => m14.sendWorkEmail(session, email), t('m14.me.codeSent'))}>{t('m14.me.sendCode')}</button>
+          <input aria-label={t('m14.me.code')} placeholder={t('m14.me.code')} value={code} onChange={(e) => setCode(e.target.value)} style={{ width: 130 }} />
+          <button onClick={() => act(() => m14.confirmWorkEmail(session, code), t('m14.me.emailProved'))}>{t('m14.me.confirmCode')}</button>
+        </div>
+        <Hint className="dim" style={{ fontSize: 12 }}>{t('m14.me.emailNote')}</Hint>
+          </div>
+        </details>
+      ) : (
       <div className="section">
         <h3>{t('m14.me.start')}</h3>
         <div className="list-row">
@@ -184,16 +212,20 @@ function MeTab({ session, notify, me, reloadMe }: { session: Session; notify: Sc
         </div>
         <Hint className="dim" style={{ fontSize: 12 }}>{t('m14.me.emailNote')}</Hint>
       </div>
+      )}
 
       <div className="section">
         <h3>{t('m14.lic.title')}</h3>
         <Hint className="notice" style={{ fontSize: 12.5 }}>{t('m14.lic.honesty')}</Hint>
+        <details className="settings-row" data-testid="verify-credential-add">
+          <summary><span className="settings-row-title" style={{ color: 'var(--sb-link)', fontWeight: 500 }}>{t('m14.lic.add')}</span></summary>
         <div className="list-row" style={{ flexWrap: 'wrap' }}>
           <input aria-label={t('m14.lic.type')} placeholder={t('m14.lic.type')} value={lic.licenceType} onChange={(e) => setLic({ ...lic, licenceType: e.target.value })} />
           <input aria-label={t('m14.lic.issuer')} placeholder={t('m14.lic.issuer')} value={lic.issuer} onChange={(e) => setLic({ ...lic, issuer: e.target.value })} />
           <input aria-label={t('m14.lic.identifier')} placeholder={t('m14.lic.identifier')} value={lic.identifier} onChange={(e) => setLic({ ...lic, identifier: e.target.value })} />
           <button onClick={() => act(() => m14.submitLicence(session, lic), t('m14.lic.submitted'))}>{t('m14.lic.submit')}</button>
         </div>
+        </details>
         <div className="dim" style={{ fontSize: 12 }}>
           {t('m14.lic.providers')}: {(providers?.providers ?? []).map((p) => `${p.name} — ${t(`m14.provider.${p.state}`, p.state.replace(/_/g, ' '))}`).join(' · ')}
         </div>
@@ -373,6 +405,8 @@ function MoreTab({ session, notify }: { session: Session; notify: ScreenProps['n
             {r.status === 'active' && <button onClick={async () => { try { await m14.withdrawReference(session, r.id, 'withdrawn from console'); notify(t('m14.ref.withdrawn')); reloadRefs(); } catch (e) { notify(e instanceof Error ? e.message : 'failed', true); } }}>{t('m14.ref.withdraw')}</button>}
           </div>
         ))}
+        <details className="settings-row" data-testid="refs-ref-add">
+          <summary><span className="settings-row-title" style={{ color: 'var(--sb-link)', fontWeight: 500 }}>{t('m14.ref.add')}</span></summary>
         <div className="list-row" style={{ flexWrap: 'wrap' }}>
           <input aria-label={t('m14.ref.playerId')} placeholder={t('m14.ref.playerId')} value={ref.playerId} onChange={(e) => setRef({ ...ref, playerId: e.target.value })} style={{ width: 110 }} />
           <input aria-label={t('m14.ref.relationship')} placeholder={t('m14.ref.relationship')} value={ref.relationship} onChange={(e) => setRef({ ...ref, relationship: e.target.value })} />
@@ -382,6 +416,7 @@ function MoreTab({ session, notify }: { session: Session; notify: ScreenProps['n
             catch (e) { notify(e instanceof Error ? e.message : 'failed', true); }
           }}>{t('m14.ref.create')}</button>
         </div>
+        </details>
       </div>
 
       <div className="section">
@@ -392,6 +427,8 @@ function MoreTab({ session, notify }: { session: Session; notify: ScreenProps['n
             <span className="grow"><b>{i.name}</b> {i.squad && <span className="dim">· {i.squad}</span>} {statusPill(i.status)} {i.guardianApproved && <span className="pill green">✓ {t('m14.inv.guardianApproved')}</span>}</span>
           </div>
         ))}
+        <details className="settings-row" data-testid="refs-inv-add">
+          <summary><span className="settings-row-title" style={{ color: 'var(--sb-link)', fontWeight: 500 }}>{t('m14.inv.add')}</span></summary>
         <div className="list-row" style={{ flexWrap: 'wrap' }}>
           <input aria-label={t('m14.inv.name')} placeholder={t('m14.inv.name')} value={inv.name} onChange={(e) => setInv({ ...inv, name: e.target.value })} />
           <input aria-label={t('m14.inv.squad')} placeholder={t('m14.inv.squad')} value={inv.squad} onChange={(e) => setInv({ ...inv, squad: e.target.value })} style={{ width: 90 }} />
@@ -400,14 +437,17 @@ function MoreTab({ session, notify }: { session: Session; notify: ScreenProps['n
             catch (e) { notify(e instanceof Error ? e.message : 'failed', true); }
           }}>{t('m14.inv.send')}</button>
         </div>
+        </details>
       </div>
 
       <div className="section">
         <h3>{t('m14.coi.title')}</h3>
         <div className="dim" style={{ fontSize: 12.5 }}>{t('m14.coi.note')}</div>
         {(conflicts?.items ?? []).filter((c) => !c.withdrawnAt).map((c) => (
-          <div key={c.id} className="list-row"><span className="grow"><b>{c.kind.replace(/_/g, ' ')}</b> — {c.subject} <span className="dim" style={{ fontSize: 12 }}>{c.note}</span></span></div>
+          <div key={c.id} className="list-row"><span className="grow"><b>{((k) => k.charAt(0).toUpperCase() + k.slice(1))(c.kind.replace(/_/g, ' '))}</b> — {c.subject} <span className="dim" style={{ fontSize: 12 }}>{c.note}</span></span></div>
         ))}
+        <details className="settings-row" data-testid="refs-coi-add">
+          <summary><span className="settings-row-title" style={{ color: 'var(--sb-link)', fontWeight: 500 }}>{t('m14.coi.add')}</span></summary>
         <div className="list-row" style={{ flexWrap: 'wrap' }}>
           <select aria-label={t('m14.coi.kind')} value={coi.kind} onChange={(e) => setCoi({ ...coi, kind: e.target.value })}>
             {['family_relationship', 'agent_relationship', 'financial_interest', 'coaching_relationship', 'other'].map((k) => <option key={k} value={k}>{k.replace(/_/g, ' ')}</option>)}
@@ -419,6 +459,7 @@ function MoreTab({ session, notify }: { session: Session; notify: ScreenProps['n
             catch (e) { notify(e instanceof Error ? e.message : 'failed', true); }
           }}>{t('m14.coi.declare')}</button>
         </div>
+        </details>
       </div>
     </div>
   );

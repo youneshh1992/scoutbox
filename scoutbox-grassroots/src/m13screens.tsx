@@ -5,7 +5,7 @@
 // Same conventions as m12screens: labelled controls, honest empty/error
 // states, live/demo through the m13 client.
 import { Hint } from '../../design-system/About';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Icon } from '../../design-system/icons';
 import type { Session } from './api';
 import {
@@ -80,10 +80,10 @@ export function ImportsScreen({ session, notify }: ScreenProps) {
 
       <div className="section">
         <h3>{t('m13.identity.title')} {reviews?.length ? <span className="pill red">{reviews.length}</span> : <span className="pill green">0 open</span>}</h3>
-        <div className="notice" style={{ fontSize: 12.5 }}>{t('m13.identity.note')}</div>
+        <details className="f-about"><summary>About</summary><div className="notice" style={{ fontSize: 12.5 }}>{t('m13.identity.note')}</div></details>
         {(reviews ?? []).map((r) => (
           <div key={r.id} className="list-row">
-            <span className="grow"><b>{r.record.name}</b> <span className="dim">{r.record.provider}:{r.record.externalId} · dob {r.record.dob} · row {r.row} — matches platform player {r.candidatePlayerId}</span></span>
+            <span className="grow"><b>{r.record.name}</b> <span className="dim">{r.record.provider} {r.record.externalId} · born {/^\d{4}-\d{2}-\d{2}$/.test(r.record.dob ?? '') ? fmtDate(r.record.dob as string) : r.record.dob} · row {r.row} · may be the same player as one on ScoutBox</span></span>
             <button onClick={async () => { await m13.resolveIdentity(session, r.id, 'link'); notify('Linked.'); reloadReviews(); }}>{t('m13.identity.link')}</button>
             <button onClick={async () => { await m13.resolveIdentity(session, r.id, 'separate'); notify('Kept separate.'); reloadReviews(); }}>{t('m13.identity.separate')}</button>
           </div>
@@ -105,7 +105,7 @@ export function ImportsScreen({ session, notify }: ScreenProps) {
 
       <div className="section">
         <h3>{t('m13.hooks.title')}</h3>
-        <div className="notice" style={{ fontSize: 12.5 }}>{webhooks?.guidance}</div>
+        <details className="f-about"><summary>How to verify deliveries</summary><div className="notice" style={{ fontSize: 12.5 }}>{webhooks?.guidance}</div></details>
         {hookSecret && <div className="notice block">{t('m13.hooks.secret')}: <code>{hookSecret}</code></div>}
         {(webhooks?.items ?? []).map((w) => (
           <div key={w.id} className="list-row">
@@ -556,6 +556,16 @@ export function RepresentationScreen({ session, notify }: ScreenProps) {
 }
 
 // ==================================================== F12+F11 Organisation
+/** M24F.5 — a settings section as one row: its name and a short state; the controls are one tap deeper. */
+function SettingsRow({ id, title, value, children }: { id: string; title: string; value?: string; children: ReactNode }) {
+  return (
+    <details className="settings-row" data-testid={`org-row-${id}`}>
+      <summary><span className="settings-row-title">{title}</span>{value ? <span className="settings-row-value">{value}</span> : null}</summary>
+      <div className="settings-row-body">{children}</div>
+    </details>
+  );
+}
+
 export function OrganisationScreen({ session, notify }: ScreenProps) {
   const [ob] = useAsync(() => m13.onboarding(session), [session]);
   const [invites, reloadInv] = useAsync(() => m13.listInvites(session), [session]);
@@ -572,9 +582,7 @@ export function OrganisationScreen({ session, notify }: ScreenProps) {
   const awaitingAck = (notifs ?? []).filter((nn) => nn.actionRequired && !nn.actionRequired.ackedAt);
 
   return (
-    <div>
-      <NotificationPreferencesPanel session={session} notify={notify} />
-      <AuditLogPanel session={session} />
+    <div className="settings-list">
       {awaitingAck.length > 0 && (
         <div className="section" style={{ borderColor: 'var(--red, #c33)' }}>
           <h3><Icon name="triangle-alert" size={14} /> {t('m13.org.needsAck')}</h3>
@@ -586,17 +594,21 @@ export function OrganisationScreen({ session, notify }: ScreenProps) {
           ))}
         </div>
       )}
-      <div className="section">
-        <h3>{t('m13.org.onboarding')}</h3>
+      <SettingsRow id="notifications" title={t('m13.org.notifications')}>
+        <NotificationPreferencesPanel session={session} notify={notify} />
+      </SettingsRow>
+      <SettingsRow id="activity" title={t('m13.org.activity')}>
+        <AuditLogPanel session={session} />
+      </SettingsRow>
+      <SettingsRow id="onboarding" title={t('m13.org.onboarding')} value={ob ? `${(ob.tasks ?? []).filter((x) => x.done).length} of ${(ob.tasks ?? []).length} done` : undefined}>
         <div className="dim" style={{ fontSize: 12.5 }}>{ob?.roleHelp}</div>
         {(ob?.tasks ?? []).map((task) => (
           <div key={task.id} className="list-row">
             <span className="grow"><Icon name={task.done ? 'circle-check' : 'clock'} size={13} label={task.done ? 'done' : 'to do'} /> {task.label}<div className="dim" style={{ fontSize: 12 }}>{task.help}</div></span>
           </div>
         ))}
-      </div>
-      <div className="section">
-        <h3>{t('m13.org.staff')}</h3>
+      </SettingsRow>
+      <SettingsRow id="staff" title={t('m13.org.staff')} value={invites ? String(invites.length) : undefined}>
         {(invites ?? []).map((iv) => <div key={iv.id} className="list-row"><span className="grow">{iv.name} <span className="dim">{iv.email} · {iv.role}</span></span><span className={`pill ${iv.status === 'accepted' ? 'green' : ''}`}>{iv.status}</span></div>)}
         <div className="enter-row">
           <input aria-label="Email" placeholder="email@club.example" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} />
@@ -606,9 +618,8 @@ export function OrganisationScreen({ session, notify }: ScreenProps) {
             catch (e) { notify(e instanceof Error ? e.message : 'lead required', true); }
           }}>{t('m13.org.invite')}</button>
         </div>
-      </div>
-      <div className="section">
-        <h3>{t('m13.org.mfa')}</h3>
+      </SettingsRow>
+      <SettingsRow id="mfa" title={t('m13.org.mfa')}>
         {recovery ? (
           <div className="notice block">{t('m13.org.recoveryNote')}<br />{recovery.map((c) => <code key={c} style={{ marginRight: 8 }}>{c}</code>)}</div>
         ) : mfa ? (
@@ -628,25 +639,22 @@ export function OrganisationScreen({ session, notify }: ScreenProps) {
             catch (e) { notify(e instanceof Error ? e.message : 'already enabled', true); }
           }}>{t('m13.org.enableMfa')}</button>
         )}
-      </div>
-      <div className="section">
-        <h3>{t('m13.org.sessions')}</h3>
+      </SettingsRow>
+      <SettingsRow id="sessions" title={t('m13.org.sessions')} value={sessions ? String(sessions.length) : undefined}>
         {(sessions ?? []).map((sr) => (
           <div key={sr.sid} className="list-row">
             <span className="grow"><code>{sr.sid}</code> <span className="dim">since {fmtDateTime(sr.createdAt)} · via {sr.via}</span> {sr.current && <span className="pill green">This device</span>}</span>
             {!sr.current && <button onClick={async () => { await m13.revokeSession(session, sr.sid); reloadSess(); notify('Session revoked.'); }}>{t('m13.org.revoke')}</button>}
           </div>
         ))}
-      </div>
-      <div className="section">
-        <h3>{t('m13.org.sso')}</h3>
+      </SettingsRow>
+      <SettingsRow id="sso" title={t('m13.org.sso')} value={sso?.config ? 'Configured' : undefined}>
         <Hint className="notice" style={{ fontSize: 12.5 }}>{sso?.config ? `Configured: ${sso.config.issuer} (client ${sso.config.clientId})` : sso?.note}</Hint>
         {!sso?.config && sso?.available.includes('local-test-idp') && (
           <button onClick={async () => { try { await m13.setSso(session, 'local-test-idp'); notify('Local TEST IdP configured — this is not a corporate provider.'); } catch (e) { notify(e instanceof Error ? e.message : 'lead required', true); } }}>{t('m13.org.enableTestSso')}</button>
         )}
-      </div>
-      <div className="section">
-        <h3>{t('m13.org.support')}</h3>
+      </SettingsRow>
+      <SettingsRow id="support" title={t('m13.org.support')} value={tickets ? String(tickets.length) : undefined}>
         {(tickets ?? []).map((tk) => (
           <div key={tk.id} className="list-row">
             <span className="grow"><b>{tk.subject}</b> <span className="dim">{tk.refs.map((r) => `${r.kind}:${r.id}`).join(', ')}</span>
@@ -660,12 +668,11 @@ export function OrganisationScreen({ session, notify }: ScreenProps) {
           </div>
         ))}
         <button onClick={async () => { await m13.createSupport(session, 'Question from the workspace', 'Raised from the Organisation screen.', []); reloadTickets(); notify('Ticket created — records referenced by id only.'); }}>{t('m13.org.newTicket')}</button>
-      </div>
-      <div className="section">
-        <h3>{t('m13.org.delivery')}</h3>
+      </SettingsRow>
+      <SettingsRow id="delivery" title={t('m13.org.delivery')}>
         <Hint className="notice" style={{ fontSize: 12.5 }}>{t('m13.org.deliveryNote')}</Hint>
         <button onClick={async () => { await m13.setDeliveryPrefs(session, { quietStart: '21:00', quietEnd: '07:30', email: true }); notify('Quiet hours 21:00–07:30 saved.'); }}>{t('m13.org.quietHours')}</button>
-      </div>
+      </SettingsRow>
     </div>
   );
 }

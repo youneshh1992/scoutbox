@@ -105,7 +105,7 @@ export function JourneyPanel({ journey, openSub }: CasePanelProps) {
             {resources.map(([k, v]) => (
               <div key={k} className="list-row" style={{ flexWrap: 'wrap' }}>
                 <span className="grow">{t(`rm.jnRes.${k}`, k.replace(/Id$/, '').replace(/([A-Z])/g, ' $1').toLowerCase())}</span>
-                <span className="dim" style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{v}</span>
+                <span className="dim" style={{ fontSize: 12 }}>{v}</span>
                 {RESOURCE_SUB[k] && <button onClick={() => openSub(RESOURCE_SUB[k])}>{t('rm.jnOpen')} {subLabel(RESOURCE_SUB[k])}</button>}
               </div>
             ))}
@@ -296,7 +296,7 @@ export function DocumentsPanel({ session, room, notify, openSub }: CasePanelProp
         {signingDocs.map(({ pkg, revision, doc, kind }) => (
           <div key={`s-${revision.id}-${kind}`} className="list-row" style={{ flexWrap: 'wrap' }} data-document={doc.id ?? revision.id} data-source="signing">
             <span className="grow"><b>{doc.label ?? doc.filename ?? t('sg.document', 'Document')}</b>{kind === 'executed' ? <span className="dim"> · {t('rm.docsExecuted')}</span> : null} <span className="dim">· {t('rm.docsSigning')} {revision.revisionNumber} · {signingStatusLabel(revision.status)}</span></span>
-            <span className="dim" style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }} title={doc.sha256 ?? undefined}>{t('rm.docsDigest')} {shortSha(doc.sha256)}</span>
+            <span className="dim" style={{ fontSize: 12 }} title={doc.sha256 ?? undefined}>{t('rm.docsDigest')} {shortSha(doc.sha256)}</span>
             {revision.id === pkg.currentRevisionId
               ? <button disabled={busy} onClick={() => open(pkg, kind)}>{t('rm.docsOpen')}</button>
               : <button onClick={() => openSub('signing')}>{t('rm.jnOpen')} {subLabel('signing')}</button>}

@@ -11,7 +11,7 @@ import {
   type Funnel, type Invoice, type OpenTrial,
   type Squad, type Matchday, type PathwayRecord, type Friendly,
 } from './api';
-import { FootballPassportPanel, SharedPassportOpener, SummaryChips, usePassportSummaries } from './m15screens';
+import { FootballPassportPanel, SharedPassportOpener, usePassportSummaries } from './m15screens';
 import { BoxTrainingPanel } from './m16screens';
 import { DevelopmentPanel } from './m21Screens';
 import { CombinePanel } from './combineScreens';
@@ -323,7 +323,7 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
             <video key={current.media.id} className="filmroom-video" src={api.mediaUrl(current.media.url)!} controls autoPlay muted loop />
             <div className="filmroom-overlay">
               <div className="row1">
-                <a style={{ color: 'var(--text)', fontWeight: 700, fontSize: 18, cursor: 'pointer' }} {...pressable(() => openPlayer(current.player.id))}>
+                <a style={{ color: '#fff', fontWeight: 700, fontSize: 18, cursor: 'pointer' }} {...pressable(() => openPlayer(current.player.id))}>
                   {current.player.name}
                 </a>
                 <span className="pill blue">{current.player.position}</span>
@@ -331,24 +331,28 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
                 {current.player.guardianManaged && <span className="pill red">U18</span>}
                 {current.media.verifiedClip && <span className="pill green">Verified Clip — filmed at a confirmed fixture</span>}
               </div>
-              <div className="dim">“{current.media.title}” · {current.media.views} view{current.media.views === 1 ? '' : 's'} · {t('term.profileSignal')} {current.player.trustScore}%</div>
-              <div className="filmroom-tags">
-                {tagOptions.map((t) => (
-                  <button
-                    key={t}
-                    className={pendingTags.includes(t) ? 'primary' : ''}
-                    style={{ padding: '4px 10px', fontSize: 12 }}
-                    onClick={() => setPendingTags((p) => (p.includes(t) ? p.filter((x) => x !== t) : [...p, t]))}
-                  >
-                    {TAG_LABELS[t] ?? t}
-                  </button>
-                ))}
-                {pendingTags.length > 0 && <button className="primary" style={{ padding: '4px 12px', fontSize: 12 }} onClick={submitTags}>Save tags</button>}
-              </div>
             </div>
           </>
         )}
       </div>
+      {/* M24F.5 — the caption sits under the clip, clear of the video controls. */}
+      {current && <div className="dim filmroom-caption" data-testid="filmroom-caption">“{current.media.title}” · {current.media.views} view{current.media.views === 1 ? '' : 's'} · {t('term.profileSignal')} {current.player.trustScore}%</div>}
+      {/* M24F.5 — the tags sit under the clip, never over the picture or the player's name. */}
+      {current && (
+        <div className="filmroom-tags" aria-label="Tag what you saw">
+          {tagOptions.map((t) => (
+            <button
+              key={t}
+              className={pendingTags.includes(t) ? 'primary' : ''}
+              style={{ padding: '4px 10px', fontSize: 12 }}
+              onClick={() => setPendingTags((p) => (p.includes(t) ? p.filter((x) => x !== t) : [...p, t]))}
+            >
+              {TAG_LABELS[t] ?? t}
+            </button>
+          ))}
+          {pendingTags.length > 0 && <button className="primary" style={{ padding: '4px 12px', fontSize: 12 }} onClick={submitTags}>Save tags</button>}
+        </div>
+      )}
       <div className="filmroom-controls">
         <button onClick={() => step(-1)} disabled={index === 0}>↑ Previous</button>
         <span className="pill">{index + 1} / {deck.length}</span>
@@ -572,13 +576,9 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
               {p.firstTeamSeeker && <span className="pill gold">First Team Seeker</span>}
               <span className="pill">{AVAILABILITY_LABELS[p.availability] ?? p.availability}</span>
             </div>
-            <div className="badges badges-quiet">
-              {typeof p.distanceKm === 'number' && <span className="pill blue">{p.distanceKm} km away</span>}
-              {p.level === 'semi_pro' && <span className="pill gold">Semi-pro</span>}
-              {p.identityVerified && <span className="pill outline-green">ID ✓</span>}
-              <span className="pill">{CONTRACT_LABELS[p.contractStatus] ?? p.contractStatus}</span>
-              {p.badges.map((b) => <span key={b} className="pill gold">{b}</span>)}
-              <SummaryChips s={fpSummaries.get(p.id)} />
+            {/* M24F.5 — one quiet line: distance, level, identity check, contract, current club. Badges and evidence detail are one tap deeper. */}
+            <div className="meta player-quiet">
+              {[typeof p.distanceKm === 'number' ? `${p.distanceKm} km away` : null, p.level === 'semi_pro' ? 'Semi-pro' : null, p.identityVerified ? 'ID ✓' : null, CONTRACT_LABELS[p.contractStatus] ?? p.contractStatus, fpSummaries.get(p.id)?.currentClub?.name ?? null, fpSummaries.get(p.id) ? `${t('fp.coverage')}: ${t(`fp.cov.${fpSummaries.get(p.id)!.evidenceCoverage}`)}` : null].filter(Boolean).join(' · ')}
             </div>
             <TrustBar score={p.trustScore} />
           </div>
@@ -1053,6 +1053,7 @@ export function FunnelScreen({ session, tick }: ScreenProps) {
 
 export function OpenDaysScreen({ session, tick, notify }: ScreenProps) {
   const [trials, setTrials] = useState<OpenTrial[]>([]);
+  const [showPost, setShowPost] = useState(false);
   const [form, setForm] = useState({ title: '', date: '', venue: '', ageGroup: 'open', positions: '' as string, notes: '' });
   const [lookingFor, setLookingFor] = useState<string>((session.org.lookingFor ?? []).join(', '));
   const [savedLookingFor, setSavedLookingFor] = useState<string[]>(session.org.lookingFor ?? []);
@@ -1097,11 +1098,15 @@ export function OpenDaysScreen({ session, tick, notify }: ScreenProps) {
         ) : (
           <p className="radar-line" data-testid="radar-read" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', fontSize: 14 }}>
             <span>{savedLookingFor.length ? <>Looking for <b>{savedLookingFor.join(' · ')}</b></> : 'Not looking for anyone right now'}</span>
-            <button className="linklike" data-testid="radar-edit-link" onClick={() => setEditingRadar(true)}>Edit</button>
+            <button className="linklike" style={{ color: 'var(--sb-link)' }} data-testid="radar-edit-link" onClick={() => setEditingRadar(true)}>Edit</button>
           </p>
         )}
       </div>
-      <div className="section">
+      {/* M24F.5 — the form opens when a manager means to post; the list is the page. */}
+      {!showPost ? (
+        <div style={{ margin: '4px 0 14px' }}><button className="primary" data-testid="openday-post-toggle" onClick={() => setShowPost(true)}>Post an open day</button></div>
+      ) : (
+      <div className="section" data-testid="openday-post">
         <h4>Post an open day</h4>
         <div className="filters" style={{ flexWrap: 'wrap' }}>
           <input placeholder="Title (e.g. U15 open morning)" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
@@ -1124,19 +1129,21 @@ export function OpenDaysScreen({ session, tick, notify }: ScreenProps) {
               });
               setForm({ title: '', date: '', venue: '', ageGroup: 'open', positions: '', notes: '' });
               notify('Open day posted — local players can register now.');
+              setShowPost(false);
               load();
             } catch (e) { notify(e instanceof Error ? e.message : 'Could not post', true); }
           }}>Post open day</button>
+          <button className="linklike" onClick={() => setShowPost(false)}>Cancel</button>
         </div>
       </div>
+      )}
       {trials.length === 0 && <div className="notice">No open days yet — post one above.</div>}
       {trials.map((t) => (
         <div key={t.id} className="section">
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <h4 style={{ margin: 0, flex: 1 }}>{t.title} — {t.date} · {t.venue}</h4>
-            <span className="pill blue">{t.ageGroup}</span>
-            {t.positions.map((p) => <span key={p} className="pill">{p}</span>)}
-            <span className="pill gold">{t.registrations.length} registered</span>
+            <h4 style={{ margin: 0, flex: 1 }}>{t.title} — {/^\d{4}-\d{2}-\d{2}$/.test(t.date) ? fmtDate(t.date) : t.date} · {t.venue}</h4>
+            {/* M24F.5 — age group, positions and the count as one quiet line, not a row of pills. */}
+            <span className="dim" data-testid={`openday-meta-${t.id}`}>{[({ u16: 'U16', u18: 'U18', '18-21': '18–21', senior: 'Senior', open: 'Open age' } as Record<string, string>)[t.ageGroup] ?? t.ageGroup, ...t.positions, `${t.registrations.length} registered`].filter(Boolean).join(' · ')}</span>
             <button onClick={async () => { try { await api.deleteOpenTrial(session, t.id); load(); } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); } }}>Remove</button>
           </div>
           {t.registrations.length > 0 && (
@@ -1145,8 +1152,8 @@ export function OpenDaysScreen({ session, tick, notify }: ScreenProps) {
                 <div key={r.id} className="list-row" style={{ flexWrap: 'wrap' }}>
                   <span className="grow"><b>{r.playerName}</b> <span className="dim">{r.position ?? ''}{r.age ? ` · ${r.age}` : ''}</span></span>
                   {r.guardianManaged && <span className="pill red">U18 · guardian-managed</span>}
-                  {r.byGuardian && <span className="pill blue">Registered by guardian</span>}
-                  {typeof r.trustScore === 'number' && <span className="pill">Trust {r.trustScore}</span>}
+                  {r.byGuardian && <span className="dim">Registered by guardian</span>}
+                  {typeof r.trustScore === 'number' && <span className="dim">Trust {r.trustScore}</span>}
                   <span className="dim">{fmtDate(r.ts)}</span>
                   {r.outcome ? (
                     <span className={`pill ${r.outcome === 'invite_trial' ? 'green' : ''}`}>
@@ -1206,6 +1213,7 @@ export function SquadScreen({ session, tick, notify, openPlayer }: ScreenProps) 
           <span>Thin cover: <b>{squad.gaps.join(' · ')}</b></span>
           <button
             className="linklike"
+            style={{ color: 'var(--sb-link)', fontWeight: 550 }}
             data-testid="squad-gap-radar"
             onClick={async () => {
               try {
@@ -1296,10 +1304,10 @@ export function SquadScreen({ session, tick, notify, openPlayer }: ScreenProps) 
       </div>
       <div className="section">
         <h4>Log a match day</h4>
-        <div className="notice" style={{ marginBottom: 10 }}>
+        <details className="f-about" style={{ marginBottom: 10 }}><summary>About</summary><div className="notice">
           Tick who played and every rostered ScoutBox player gets <b>verified attendance, corroborated by
           your club</b> — the strongest trust signal a grassroots player can carry.
-        </div>
+        </div></details>
         <div className="filters" style={{ flexWrap: 'wrap' }}>
           <input placeholder="Fixture (e.g. vs Clapton Community)" value={md.fixture} onChange={(e) => setMd({ ...md, fixture: e.target.value })} />
           <input type="date" value={md.date} onChange={(e) => setMd({ ...md, date: e.target.value })} />
@@ -1460,7 +1468,7 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
             <div className="stat"><div className="v">{record.openDaysRun}</div><div className="k">open days run</div></div>
             <div className="stat"><div className="v">{record.matchdaysLogged}</div><div className="k">match days logged</div></div>
           </div>
-          <div className="notice">{record.note}</div>
+          <details className="f-about"><summary>About</summary><div className="notice">{record.note}</div></details>
         </div>
       )}
       {!session.org.verified && (

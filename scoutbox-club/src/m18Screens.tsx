@@ -24,6 +24,7 @@
 // recorded prints "Previous detail unavailable", never a fabricated figure and
 // never 0.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { humanText } from '../../design-system/humanize';
 import { ApiError, type Session } from './api';
 import {
   m18, BRIEF_EVIDENCE_REQUIREMENTS, BRIEF_FEET, BRIEF_LEVELS, BRIEF_POSITIONS,
@@ -209,8 +210,8 @@ export function SecondLookScreen({ session, tick, notify, openPlayer }: M18Scree
 
   return (
     <div>
-      <div className="dim" style={{ fontSize: 12.5, marginBottom: 4 }}>{t('m18.sl.intro')}</div>
-      <div className="notice block" style={{ marginBottom: 10, fontSize: 12.5 }}>
+      {/* M24F.5 — the governing sentence once, as a quiet statement (it is not an error); the intro and the closing repeat are gone. */}
+      <div className="notice" style={{ marginBottom: 12, fontSize: 12.5 }} data-sl-disclaimer="true">
         {data?.disclaimer ?? t('m18.sl.disclaimer')}
       </div>
 
@@ -258,7 +259,6 @@ export function SecondLookScreen({ session, tick, notify, openPlayer }: M18Scree
         ))}
       </div>
 
-      <div className="dim" style={{ fontSize: 12, marginTop: 10 }}>{data?.note ?? t('m18.sl.note')}</div>
     </div>
   );
 }
@@ -349,7 +349,7 @@ function SecondLookCard({
       {/* Reasons the club gave that NOTHING in a player's record can resolve.
           Printed so the card can never imply a club-side reason went away. */}
       {unresolvedCodes.length > 0 && (
-        <div className="notice block" style={{ marginTop: 10, fontSize: 13 }}>
+        <div className="sl-still" style={{ marginTop: 12, fontSize: 13 }}>
           <b>{t('m18.sl.stillStands')}</b>
           <ul style={{ margin: '4px 0 0', paddingInlineStart: 20 }}>
             {unresolvedCodes.map((c) => <li key={c}>{reasonLabel(c)}</li>)}
@@ -548,7 +548,7 @@ function ReviewChangesView({ session, item, onBack }: { session: Session; item: 
           <TrustMovementList movement={data.trustMovement ?? []} />
 
           {(data.unresolvedReasonCodes ?? []).length > 0 && (
-            <div className="notice block" style={{ marginTop: 10, fontSize: 13 }}>
+            <div className="sl-still" style={{ marginTop: 12, fontSize: 13 }}>
               <b>{t('m18.sl.stillStands')}</b>
               <ul style={{ margin: '4px 0 0', paddingInlineStart: 20 }}>
                 {(data.unresolvedReasonCodes ?? []).map((c) => <li key={c}>{reasonLabel(c)}</li>)}
@@ -668,7 +668,7 @@ export function NobodyMissedScreen({
           )}
 
           <div className="section" aria-label={t('m18.nm.listLabel')}>
-            <h4>{t('m18.nm.candidates')} ({data.total})</h4>
+            {/* M24F.5 — the groups below name themselves with their counts; no second heading above them. */}
             {!data.live && <div className="notice block">{data.note}</div>}
             {data.live && data.items.length === 0 && <div className="dim">{t('m18.nm.empty')}</div>}
             {groups.map((g) => (
@@ -935,7 +935,7 @@ function BriefList({ session, tick, notify, onOpenBrief }: BriefsScreenProps) {
                   <td style={{ fontSize: 12.5 }}>
                     {b.criteriaExplained.length === 0
                       ? <span className="dim">{t('m18.br.noCriteria')}</span>
-                      : b.criteriaExplained.map((c) => `${c.label}: ${c.value}`).join(' · ')}
+                      : b.criteriaExplained.map((c) => `${c.label}: ${humanText(c.value)}`).join(' · ')}
                   </td>
                   <td>{fmtDate(b.updatedAt)}</td>
                   <td>

@@ -163,7 +163,7 @@ export function M15Panel({ adminKey, say }: { tab: M15Tab; adminKey: string; say
           ))}
           {graph.graph.map((g) => (
             <div key={g.id} className="list-row">
-              <span className="grow" style={{ fontFamily: 'monospace', fontSize: 12 }}>{g.id}</span>
+              <span className="grow" style={{ fontSize: 12 }}>{g.id}</span>
               <span className="dim" style={{ fontSize: 12 }}>{g.source.type}:{g.source.id}</span>
               <span className="pill">{g.provenance}</span>
               <span className="pill blue">{g.visibility}</span>

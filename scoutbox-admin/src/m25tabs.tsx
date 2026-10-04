@@ -14,6 +14,7 @@ import { fmtClock, fmtStamp } from '../../design-system/time';
 // would override a prohibition an ACTIVE rule states, and refuses a policy
 // approval by the same administrator who proposed it (dual control).
 import { useCallback, useEffect, useState } from 'react';
+import { humanCode } from './humanize';
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000';
 const DEMO = import.meta.env.VITE_DEMO === '1';
@@ -525,11 +526,11 @@ export function M25Panel({ tab, say }: { tab: M25Tab; adminKey: string; say: (t:
     return (
       <div className="list-rows" data-testid="ts-transactions">
         {who}
-        <div className="notice">
+        <details className="f-about"><summary>About</summary><div className="notice">
           Agent transaction workspaces, as states and party <b>roles</b>. The parties' documents, notes, conversations and working
           particulars are theirs and are not shown here. Nothing on this tab changes a transaction: a compliance question is answered in
           the review queue, by a named reviewer, against cited evidence.
-        </div>
+        </div></details>
         {error && <div className="notice block" role="alert" data-testid="tx-error">{error}</div>}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <label htmlFor="tx-status">Status</label>
@@ -555,7 +556,7 @@ export function M25Panel({ tab, say }: { tab: M25Tab; adminKey: string; say: (t:
         {txs.length === 0 && <div className="notice" data-testid="tx-empty">No transaction matches.</div>}
         {txs.map((x) => {
           const c = x.compliance;
-          const word = !c ? 'not evaluated' : c.blocked ? 'blocked by policy' : c.stale ? 'needs re-checking' : c.clear ? 'clear' : (c.pendingReason ?? 'pending');
+          const word = !c ? 'not evaluated' : c.blocked ? 'blocked by policy' : c.stale ? 'needs re-checking' : c.clear ? 'clear' : (c.pendingReason ? humanCode(c.pendingReason).toLowerCase() : 'pending');
           const cls = !c ? '' : c.blocked ? 'red' : c.clear && !c.stale ? 'green' : 'gold';
           return (
             <div key={x.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }} data-testid={`ts-tx-${x.id}`} data-status={x.status}>
@@ -565,20 +566,20 @@ export function M25Panel({ tab, say }: { tab: M25Tab; adminKey: string; say: (t:
                 <span className={`pill ${cls}`}>{word}</span>
               </div>
               <div className="dim">
-                parties: {x.parties.map((pt) => `${pt.partyRole.replace(/_/g, ' ')} (${pt.subjectKind}${pt.removed ? ', removed' : pt.confirmed ? ', confirmed' : ', unconfirmed'})`).join(' · ') || 'none'}
+                Parties: {x.parties.map((pt) => `${pt.partyRole.replace(/_/g, ' ')} (${pt.subjectKind}${pt.removed ? ', removed' : pt.confirmed ? ', confirmed' : ', unconfirmed'})`).join(' · ') || 'none'}
               </div>
               <div className="dim">
-                representation: {x.representations.map((r) => `${r.partyRole.replace(/_/g, ' ')} — ${r.status}${r.declaredOnly ? ' (declared, not yet reviewed)' : ''}`).join(' · ') || 'none attached'}
+                Representation: {x.representations.map((r) => `${r.partyRole.replace(/_/g, ' ')} — ${humanCode(r.status).toLowerCase()}${r.declaredOnly ? ' (declared, not yet reviewed)' : ''}`).join(' · ') || 'none attached'}
               </div>
               {c && (
                 <div className="dim">
-                  {c.outcome ?? 'no outcome'}{c.reasonCodes.length ? ` · ${c.reasonCodes.join(', ')}` : ''}
+                  {c.outcome ? humanCode(c.outcome) : 'No outcome'}{((rs) => rs.length ? ` · ${rs.join(', ')}` : '')(c.reasonCodes.map(humanCode).filter((r) => !humanCode(c.outcome).toLowerCase().includes(r.toLowerCase())))}
                   {c.policyVersions.length ? ` · policy ${c.policyVersions.join(', ')}` : ''}
                   {c.evaluatedAt ? ` · evaluated ${when(c.evaluatedAt)}` : ''}{c.stale ? ` · snapshot stale (${c.stale})` : ''}
                 </div>
               )}
               {x.reviews.length > 0 && (
-                <div className="dim">open review: {x.reviews.map((r) => `${r.id} (${KIND_LABEL[r.kind] ?? r.kind}, ${r.status})`).join(' · ')}</div>
+                <div className="dim">Open review: {x.reviews.map((r) => `${r.id} (${KIND_LABEL[r.kind] ?? r.kind}, ${humanCode(r.status).toLowerCase()})`).join(' · ')}</div>
               )}
               <div className="dim" style={{ fontSize: 12 }}>
                 {x.documentCount} document{x.documentCount === 1 ? '' : 's'} · {x.noteCount} note{x.noteCount === 1 ? '' : 's'} ·

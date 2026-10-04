@@ -185,7 +185,8 @@ function RoomsList({ session, tick, onOpenRoom }: RoomsScreenProps) {
 
   return (
     <div>
-      <Hint className="dim" style={{ fontSize: 12.5, marginBottom: 4 }}>{t('rm.intro')}</Hint>
+      {/* M24F.5 — one About for every explanation on this list; the privacy line stays on screen. */}
+      <details className="f-about" data-testid="rooms-about"><summary>About</summary><div className="dim" style={{ fontSize: 12.5 }}><p>{t('rm.intro')}</p>{funnel && <p>{funnel.note}</p>}<p>{t('rm.attentionNote')}</p></div></details>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}><Icon name="lock-keyhole" size={13} /> {t('rm.privacy')}</div>
 
       {/* Funnel strip — your organisation's own activity, no league table. */}
@@ -204,7 +205,6 @@ function RoomsList({ session, tick, onOpenRoom }: RoomsScreenProps) {
           </button>
         ))}
       </div>
-      {funnel && <Hint className="dim" style={{ fontSize: 12, marginBottom: 10 }}>{funnel.note}</Hint>}
 
       {/* Saved views + search */}
       <div role="tablist" aria-label={t('rm.views')} style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
@@ -240,7 +240,6 @@ function RoomsList({ session, tick, onOpenRoom }: RoomsScreenProps) {
             </div>
           ))}
         </div>
-        <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>{t('rm.attentionNote')}</div>
       </div>
 
       {/* Rooms table — ordered by recent activity, never by Trust Score. */}
@@ -250,8 +249,6 @@ function RoomsList({ session, tick, onOpenRoom }: RoomsScreenProps) {
             <thead>
               <tr>
                 <th>{t('rm.col.player')}</th>
-                <th>{t('rm.col.position')}</th>
-                <th>{t('rm.col.age')}</th>
                 <th>{t('rm.col.club')}</th>
                 <th>
                   {t('rm.col.trust')}
@@ -271,10 +268,9 @@ function RoomsList({ session, tick, onOpenRoom }: RoomsScreenProps) {
                     {r.playerAvailable
                       ? <b>{r.playerName}</b>
                       : <span className="dim">{t('rm.playerWithheld')}</span>}
-                    {r.tags.length > 0 && <div>{r.tags.map((tag) => <span key={tag} className="pill" style={{ marginRight: 4 }}>{tag}</span>)}</div>}
+                    {(r.position || r.age) && <div className="dim" style={{ fontSize: 12 }}>{[r.position, r.age].filter((x) => x != null && x !== '').join(' · ')}</div>}
+                    {r.tags.length > 0 && <div className="dim" style={{ fontSize: 12 }}>{r.tags.join(' · ')}</div>}
                   </td>
-                  <td>{r.position ?? <span className="dim">—</span>}</td>
-                  <td>{r.age ?? <span className="dim">—</span>}</td>
                   <td>{r.currentClub ?? <span className="dim">—</span>}</td>
                   <td title={r.trust?.note ?? t('rm.trustNote')}>
                     <TrustValue trust={r.trust} playerAvailable={r.playerAvailable} compact />
@@ -283,7 +279,7 @@ function RoomsList({ session, tick, onOpenRoom }: RoomsScreenProps) {
                   <td>{r.ownerName ?? <span className="dim">—</span>}</td>
                   <td>{r.openTasks}</td>
                   <td>{r.lastActivityAt ? fmtDate(r.lastActivityAt) : <span className="dim">—</span>}</td>
-                  <td><button className="linklike" onClick={() => open(r.roomId)} aria-label={`${t('rm.open')} ${r.playerName ?? r.roomId}`}>{t('rm.open')}</button></td>
+                  <td style={{ whiteSpace: 'nowrap' }}><button className="linklike" style={{ color: 'var(--sb-link)' }} onClick={() => open(r.roomId)} aria-label={`${t('rm.open')} ${r.playerName ?? r.roomId}`}>{t('rm.open')}</button></td>
                 </tr>
               ))}
             </tbody>

@@ -19,6 +19,7 @@
 // this build, so the screen says when it was last derived instead of implying
 // a background process that does not exist.
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { humanText } from '../../design-system/humanize';
 import { ApiError, type Session } from './api';
 import {
   m19, encodeCriteria, decodeCriteria,
@@ -319,13 +320,14 @@ function CriteriaClassEditor({
 }) {
   const errFor = (i: number) => errors.find((e) => e.class === cls && e.index === i)?.error;
   return (
+    // M24F.5 — a titled group on the page, not a browser fieldset box.
     <fieldset
       disabled={disabled}
-      style={{ border: '1px solid var(--line, #ccc)', borderRadius: 6, marginBottom: 10 }}
+      className="m19-criteria"
       data-criteria-class={cls}
     >
-      <legend style={{ fontSize: 13 }}>
-        <b>{cls === 'required' ? t('m19.cr.required') : t('m19.cr.preferred')}</b>
+      <legend className="m19-criteria-title">
+        {cls === 'required' ? t('m19.cr.required') : t('m19.cr.preferred')}
       </legend>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 6 }}>
         {cls === 'required' ? t('m19.cr.requiredNote') : t('m19.cr.preferredNote')}
@@ -540,8 +542,8 @@ export function MatchingScreen({
 
   return (
     <div>
-      <div className="dim" style={{ fontSize: 12.5, marginBottom: 4 }}>{t('m19.intro')}</div>
-      <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}>{t('m19.noScore')}</div>
+      <div className="dim" style={{ fontSize: 12.5, marginBottom: 4 }}>{t('m19.noScore')}</div>
+      <details className="f-about" style={{ marginBottom: 10 }} data-testid="matching-about"><summary>About</summary><div className="dim" style={{ fontSize: 12.5 }}>{t('m19.intro')}</div></details>
 
       {loadErr && <LoadError message={loadErr} onRetry={() => setBump((b) => b + 1)} />}
 
@@ -667,7 +669,7 @@ function MatchResults({
           <span className="pill">{sortLabel(result.sort)}</span>
         </div>
         <div className="dim" style={{ fontSize: 12.5 }}>
-          {t('m19.criteriaRun')}: {[...result.criteria.required, ...result.criteria.preferred].join(' · ') || t('m19.cr.none')}
+          {t('m19.criteriaRun')}: {[...result.criteria.required, ...result.criteria.preferred].map(humanText).join(' · ') || t('m19.cr.none')}
         </div>
         <div className="dim" style={{ fontSize: 12 }}>{result.note}</div>
         <div className="dim" style={{ fontSize: 12 }}>{result.scoreNote}</div>
@@ -683,8 +685,8 @@ function MatchResults({
                 {t('m19.wl.name')}{' '}
                 <input aria-label={t('m19.wl.name')} value={name} onChange={(e) => setName(e.target.value)} style={{ width: 260 }} />
               </label>
-              <fieldset style={{ border: '1px solid var(--line, #ccc)', borderRadius: 6, marginBottom: 8 }}>
-                <legend style={{ fontSize: 13 }}>{t('m19.wl.modeLegend')}</legend>
+              <fieldset className="m19-criteria">
+                <legend className="m19-criteria-title">{t('m19.wl.modeLegend')}</legend>
                 {source === 'brief' && (
                   <label style={{ fontSize: 13, display: 'block' }}>
                     <input type="radio" name="m19-mode" checked={mode === 'live_linked'} onChange={() => setMode('live_linked')} />{' '}
@@ -748,8 +750,7 @@ function WatchlistList({ session, tick, onOpenWatchlist, onNewWatchlist }: Watch
 
   return (
     <div>
-      <div className="dim" style={{ fontSize: 12.5, marginBottom: 4 }}>{t('m19.wl.intro')}</div>
-      <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}>{t('m19.wl.derivedNote')}</div>
+      <details className="f-about" style={{ marginBottom: 10 }} data-testid="watchlists-about"><summary>About</summary><div className="dim" style={{ fontSize: 12.5 }}><p>{t('m19.wl.intro')}</p><p>{t('m19.wl.derivedNote')}</p></div></details>
 
       {err && <LoadError message={err} onRetry={() => setBump((b) => b + 1)} />}
 
@@ -789,7 +790,7 @@ function WatchlistList({ session, tick, onOpenWatchlist, onNewWatchlist }: Watch
                     <td><span className="pill">{wlStatusLabel(w.status)}</span></td>
                     <td><span className="pill">{modeLabel(w.mode)}</span></td>
                     <td style={{ fontSize: 12.5 }}>
-                      {[...w.criteria.required, ...w.criteria.preferred].join(' · ') || <span className="dim">{t('m19.cr.none')}</span>}
+                      {[...w.criteria.required, ...w.criteria.preferred].map(humanText).join(' · ') || <span className="dim">{t('m19.cr.none')}</span>}
                     </td>
                     <td>{w.lastReconciledAt ? fmtDate(w.lastReconciledAt) : <span className="dim">{t('m19.wl.neverDerived')}</span>}</td>
                     <td>
@@ -909,7 +910,7 @@ function WatchlistDetailView({
           {w.notify ? <span className="pill outline-green">{t('m19.wl.notifyOn')}</span> : <span className="pill">{t('m19.wl.notifyOff')}</span>}
         </div>
         <div className="dim" style={{ fontSize: 12.5, marginTop: 4 }}>
-          {t('m19.wl.criteria')}: {[...w.criteria.required, ...w.criteria.preferred].join(' · ') || t('m19.cr.none')}
+          {t('m19.wl.criteria')}: {[...w.criteria.required, ...w.criteria.preferred].map(humanText).join(' · ') || t('m19.cr.none')}
         </div>
         <div className="dim" style={{ fontSize: 12 }}>
           {w.createdBy && <>{t('m19.wl.createdBy')}: {w.createdBy} · </>}

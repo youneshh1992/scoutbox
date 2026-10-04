@@ -175,7 +175,7 @@ export function M162Panel({ adminKey, say }: { tab: M162Tab; adminKey: string; s
             </div>
           )}
 
-          <div className="dim" style={{ fontSize: 11.5, fontFamily: 'monospace' }}>
+          <div className="dim" style={{ fontSize: 11.5 }}>
             snapshot: score={data.snapshot.score} · band={data.snapshot.band} · policy=v{data.snapshot.policyVersion} · hash={data.snapshot.hash.slice(0, 24)}…
           </div>
           <div className="dim" style={{ fontSize: 12.5 }}>{data.note}</div>
@@ -199,12 +199,16 @@ export function M162Panel({ adminKey, say }: { tab: M162Tab; adminKey: string; s
           <div className="dim" style={{ fontSize: 12.5 }}>
             Bands: {policy.bands.map((b) => `${b.label} ${b.min}–${b.max}`).join(' · ')}
           </div>
-          <div className="dim" style={{ fontSize: 11.5, fontFamily: 'monospace' }}>
-            sub-caps: {Object.entries(policy.subCaps).map(([k, v]) => `${k}=${v}bp`).join(' · ')}
-          </div>
-          <div className="dim" style={{ fontSize: 11.5, fontFamily: 'monospace' }}>
-            curves: {Object.entries(policy.curves).map(([k, v]) => `${k}=[${(v ?? []).join(',')}]`).join(' · ')}
-          </div>
+          {/* M24F.5 — the engine's parameters stay available to staff, one tap deeper, in the product face. */}
+          <details className="f-about" data-testid="trust-policy-params">
+            <summary>Technical parameters</summary>
+            <div className="dim" style={{ fontSize: 11.5 }}>
+              sub-caps: {Object.entries(policy.subCaps).map(([k, v]) => `${k}=${v}bp`).join(' · ')}
+            </div>
+            <div className="dim" style={{ fontSize: 11.5 }}>
+              curves: {Object.entries(policy.curves).map(([k, v]) => `${k}=[${(v ?? []).join(',')}]`).join(' · ')}
+            </div>
+          </details>
         </>
       ) : <div className="dim">Policy not loaded.</div>}
     </div>

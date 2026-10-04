@@ -20,6 +20,8 @@ h2 { font-size: 20px; font-weight: 600; letter-spacing: -0.45px; line-height: 1.
 h3 { font-size: 16px; font-weight: 600; line-height: 1.35; letter-spacing: -0.25px; }
 em { font-style: normal; }
 svg { flex-shrink: 0; }
+/* M24F.5 — Inter everywhere: keys, digests, ids and the error boundary read in the product face (tabular figures keep them legible). */
+code, pre, samp { font-family: var(--sb-font); font-variant-numeric: tabular-nums; font-size: 0.95em; }
 kbd { font-family: var(--sb-font); font-size: 11px; padding: 2px 4px; border: 1px solid var(--sb-kbd-border); border-radius: 3px; color: var(--sb-kbd-fg); background: var(--sb-white); }
 
 /* ---------- controls ---------- */
@@ -434,9 +436,11 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .filmroom { display: flex; flex-direction: column; align-items: center; gap: 14px; }
 .filmroom-stage { position: relative; width: min(420px, 90vw); aspect-ratio: 9 / 16; max-height: calc(100vh - 220px); background: #000; border-radius: 18px; border: 1px solid var(--sb-rule); overflow: hidden; }
 .filmroom-video { width: 100%; height: 100%; object-fit: cover; }
-.filmroom-overlay { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px; background: linear-gradient(transparent, rgba(3, 8, 18, 0.92)); display: flex; flex-direction: column; gap: 8px; color: #fff; }
+.filmroom-overlay { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 14px 56px; pointer-events: none; background: linear-gradient(transparent, rgba(3, 8, 18, 0.92)); display: flex; flex-direction: column; gap: 8px; color: #fff; }
+.filmroom-overlay a { pointer-events: auto; }
+.filmroom-caption { font-size: 13px; text-align: center; max-width: min(520px, 92vw); }
 .filmroom-overlay .row1 { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.filmroom-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.filmroom-tags { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; max-width: min(520px, 92vw); }
 .filmroom-controls { display: flex; gap: 12px; align-items: center; }
 
 /* ---------- phone strip, palette, drawer ---------- */
@@ -861,6 +865,35 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 
 /* ---------------------------------------------------------------- M24F.4 — Director Dashboard, executive layer */
 .dash .notice[data-principle] { margin-bottom: 16px; }
+.m19-criteria { border: 0; border-top: 1px solid var(--sb-rule); padding: 12px 0 4px; margin: 0 0 12px; min-width: 0; }
+.m19-criteria-title { padding: 0; font-size: 14px; font-weight: 600; color: var(--sb-ink); margin-bottom: 4px; }
+.sl-still { border-left: 2px solid var(--sb-pending); padding: 2px 0 2px 14px; color: var(--sb-ink); }
+.sl-still ul { margin: 4px 0 0; padding-left: 18px; }
+.settings-list { display: flex; flex-direction: column; max-width: 920px; }
+.settings-row { border-bottom: 1px solid var(--sb-rule); }
+.settings-row > summary { display: flex; align-items: center; gap: 12px; padding: 15px 2px; cursor: pointer; list-style: none; font-size: 14.5px; font-weight: 550; color: var(--sb-ink); }
+.settings-row > summary::-webkit-details-marker { display: none; }
+.settings-row-title { flex: 1; min-width: 0; }
+.settings-row > summary::after { content: '›'; color: var(--sb-quiet); font-size: 18px; transition: transform .15s; }
+.settings-row[open] > summary::after { transform: rotate(90deg); }
+.settings-row-value { color: var(--sb-quiet); font-weight: 400; font-size: 13px; }
+.settings-row-body { padding: 0 2px 16px; }
+.settings-row-body > .section:first-child, .settings-row-body > div > .section:first-child { margin-top: 0; }
+.dash-head { display: flex; align-items: flex-end; gap: 18px; flex-wrap: wrap; margin: -4px 0 22px; }
+.dash-period { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--sb-quiet); }
+.dash-period select { min-width: 160px; }
+.dash-toggle { font-size: 13px; padding: 0 0 9px; color: var(--sb-link); font-weight: 550; }
+.dash-about { margin: 0 0 20px; max-width: 760px; }
+.dash-about .notice { margin-bottom: 6px; }
+.dash-detail-toggle { display: inline-flex; align-items: center; gap: 6px; margin: 4px 0 22px; background: none; border: 1px solid var(--sb-rule); border-radius: 999px; padding: 7px 16px; font-size: 13px; font-weight: 550; color: var(--sb-ink); box-shadow: none; }
+.dash-detail-toggle:hover { border-color: var(--sb-tab-line); filter: none; }
+.dash-detail { border-top: 1px solid var(--sb-rule); padding-top: 18px; }
+.dash-bar-label { display: block; }
+.dash-bar-label::first-letter { text-transform: uppercase; }
+.dash-grid > [data-visual="funnel"] { grid-column: 1 / -1; }
+.dash-grid > [data-visual="funnel"] .dash-bar { grid-template-columns: minmax(120px, 200px) 1fr 48px; font-size: 13.5px; }
+.dash-grid > [data-visual="funnel"] .dash-bar-track { height: 16px; border-radius: 8px; }
+.dash-grid > [data-visual="funnel"] .dash-bar-fill { border-radius: 8px; }
 .dash-filters { margin-bottom: 14px; }
 .dash-filters .row.wrap { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; }
 .dash-filters label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--sb-quiet); }
@@ -907,3 +940,14 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .player-card .badges-quiet { gap: 0; margin-top: 4px; }
 .player-card .badges-quiet .pill { background: none; border: 0; padding: 0; color: var(--sb-quiet); font-weight: 500; }
 .player-card .badges-quiet .pill:not(:last-child)::after { content: ' · '; }
+
+/* M24F.5 — at desktop width the three secondary visuals sit side by side under the full-width funnel. */
+@media (min-width: 1180px) { .dash .dash-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+/* M24F.5 — a bare link in page content reads in the link colour, never the browser's default blue and underline.
+   Zero specificity: any styled link keeps its own treatment. */
+:where(.content a:not([class])) { color: var(--sb-link); text-decoration: none; }
+:where(.content a:not([class])):hover { text-decoration: underline; }
+
+/* M24F.5 — a folded row followed by a new section keeps the section rhythm. */
+.settings-row + .section { margin-top: 22px; }

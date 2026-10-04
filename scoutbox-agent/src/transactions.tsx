@@ -491,7 +491,7 @@ function OverviewTab({ s, tx, reload }: { s: Session; tx: Transaction; reload: (
   useEffect(() => { setReasonCode(reasonCodes[0] ?? ''); }, [reasonCodes.join(',')]);
   return (
     <>
-      <div className="stats" data-testid="tx-stats">
+      <div className="stat-grid stats" data-testid="tx-stats">
         <Stat v={<TxStatusPill status={tx.status} />} k={t('tx.status')} testId="stat-status" />
         <Stat v={tr(`txType.${tx.type}`, tx.type)} k={t('tx.type')} testId="stat-type" />
         <Stat v={tx.parties.filter((p) => !p.removed && p.confirmedAt).length} k={t('tx.confirmedParties')} testId="stat-confirmed" />
@@ -655,8 +655,7 @@ export function TransactionsScreen({ session, me, transactionId, transactionTab,
   const rows = l.items.filter((tx) => !filter || tx.status === filter);
   return (
     <div className="screen" data-testid="transactions-screen">
-      <h3>{t('nav.transactions')}</h3>
-      <div className="stats" data-testid="tx-counts">
+      <div className="stat-grid stats" data-testid="tx-counts">
         <Stat v={l.counts.live} k={t('tx.countLive')} testId="count-live" />
         <Stat v={l.counts.ready} k={t('tx.countReady')} testId="count-ready" />
         <Stat v={l.counts.pending} k={t('tx.countPending')} testId="count-pending" />

@@ -254,7 +254,7 @@ function PipelinePanels({ f }: { f: Family }) {
                   <td>{t(`m20.jf.${r.stage}`, r.stage.replace(/_/g, ' '))}</td>
                   <td data-count={r.value}>{r.value}</td>
                   <td className="muted">{r.historyOnly}</td>
-                  <td className="muted"><code>{r.source}</code></td>
+                  <td className="muted">{r.source}</td>
                 </tr>
               ))}
             </tbody>
@@ -615,14 +615,12 @@ function Executive({ dash, onDrill }: { dash: Dashboard; onDrill: (metric: strin
           {funnelRows.filter((r) => r.value > 0).length === 0
             ? <p className="muted small">{t('m20.fig.empty')}</p>
             : <Bars rows={funnelRows.filter((r) => r.value > 0).map((r) => ({ key: r.stage, label: statusLabel(r.stage), value: r.value, attrs: { 'data-funnel-stage': r.stage } }))} testID="dash-funnel" />}
-          <p className="muted small">{t('m20.exec.funnelNote', 'Rooms that ever reached each stage, in this period.')}</p>
         </div>
         <div className="dash-visual" data-visual="time">
           <h3>{t('m20.exec.time', 'Time by stage')}</h3>
           {medians.length === 0
             ? <p className="muted small">{timeRows.length ? t('m20.fig.tooFewMedian').replace('{n}', String(timeRows[0]?.n ?? 0)).replace('{min}', String(timeRows[0]?.minimum ?? 5)) : t('m20.fig.empty')}</p>
             : <Bars rows={medians.map((r) => ({ key: r.status, label: statusLabel(r.status), value: r.median, attrs: { 'data-time-stage': r.status } }))} unit={t('m20.unit.days')} testID="dash-time" />}
-          <p className="muted small">{t('m20.exec.timeNote', 'Typical days a room spends in a stage before leaving it.')}</p>
         </div>
         <div className="dash-visual" data-visual="coverage">
           <h3>{t('m20.exec.coverage', 'Coverage')}</h3>
@@ -661,6 +659,9 @@ export function DirectorDashboardScreen({ session, tick, notify, filters, onFilt
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [drill, setDrill] = useState<Drilldown | null>(null);
+  const [showFilters, setShowFilters] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
+  const [showDetail, setShowDetail] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -693,45 +694,69 @@ export function DirectorDashboardScreen({ session, tick, notify, filters, onFilt
 
   return (
     <div className="screen dash" data-screen="director-dashboard">
-      {/* The governing sentence, from the server, above every number — the one line of prose the root carries. */}
-      {dash && <p className="notice" data-principle="true">{dash.note}</p>}
+      {/* M24F.5 — one line of controls: the period, then two quiet ways in. The
+          principle, the window and the other filters are one tap away; nothing
+          explanatory sits above the numbers until it is asked for. */}
+      <div className="dash-head" data-dash-head="true">
+        <label className="dash-period">
+          {t('m20.filter.window')}
+          <select
+            aria-label={t('m20.filter.window')}
+            value={filters.window ?? DEFAULT_WINDOW}
+            onChange={(e) => set({ window: e.target.value, from: undefined, to: undefined })}
+          >
+            {WINDOW_PRESETS.map((w) => <option key={w} value={w}>{t(`m20.window.${w}`, w.replace(/_/g, ' '))}</option>)}
+          </select>
+        </label>
+        <button type="button" className="linklike dash-toggle" aria-expanded={showFilters} onClick={() => setShowFilters((v) => !v)} data-testid="dash-more-filters">{t('m20.exec.moreFilters', 'More filters')}</button>
+        <button type="button" className="linklike dash-toggle" aria-expanded={showAbout} onClick={() => setShowAbout((v) => !v)} data-testid="dash-about-toggle">{t('m20.exec.about', 'About these figures')}</button>
+      </div>
 
-      <section className="card dash-filters" aria-label={t('m20.filters')}>
-        <div className="row wrap">
-          <label>
-            {t('m20.filter.window')}
-            <select
-              aria-label={t('m20.filter.window')}
-              value={filters.window ?? DEFAULT_WINDOW}
-              onChange={(e) => set({ window: e.target.value, from: undefined, to: undefined })}
-            >
-              {WINDOW_PRESETS.map((w) => <option key={w} value={w}>{t(`m20.window.${w}`, w.replace(/_/g, ' '))}</option>)}
-            </select>
-          </label>
-          <label>
-            {t('m20.filter.source')}
-            <select aria-label={t('m20.filter.source')} value={filters.source ?? ''} onChange={(e) => set({ source: e.target.value || undefined })}>
-              <option value="">{t('m20.filter.any')}</option>
-              {(catalogue?.sourceContexts ?? []).map((s) => <option key={s} value={s}>{sourceLabel(s)}</option>)}
-            </select>
-          </label>
-          <label>
-            {t('m20.filter.priority')}
-            <select aria-label={t('m20.filter.priority')} value={filters.priority ?? ''} onChange={(e) => set({ priority: e.target.value || undefined })}>
-              <option value="">{t('m20.filter.any')}</option>
-              {(catalogue?.priorities ?? []).map((p) => <option key={p} value={p}>{t(`m17.priority.${p}`, p)}</option>)}
-            </select>
-          </label>
-          <label>
-            {t('m20.filter.stall')}
-            <select aria-label={t('m20.filter.stall')} value={String(filters.stallDays ?? 30)} onChange={(e) => set({ stallDays: Number(e.target.value) })}>
-              {STALL_THRESHOLDS.map((d) => <option key={d} value={d}>{t('m20.filter.stallDays').replace('{n}', String(d))}</option>)}
-            </select>
-          </label>
-        </div>
-        {/* There is no scout filter, and saying so is part of the product. */}
-        <p className="muted small" data-no-person-filter="true">{t('m20.filter.noPerson')}</p>
-      </section>
+      {showFilters && (
+        <section className="dash-filters" aria-label={t('m20.filters')} data-testid="dash-filters">
+          <div className="row wrap">
+            <label>
+              {t('m20.filter.source')}
+              <select aria-label={t('m20.filter.source')} value={filters.source ?? ''} onChange={(e) => set({ source: e.target.value || undefined })}>
+                <option value="">{t('m20.filter.any')}</option>
+                {(catalogue?.sourceContexts ?? []).map((s) => <option key={s} value={s}>{sourceLabel(s)}</option>)}
+              </select>
+            </label>
+            <label>
+              {t('m20.filter.priority')}
+              <select aria-label={t('m20.filter.priority')} value={filters.priority ?? ''} onChange={(e) => set({ priority: e.target.value || undefined })}>
+                <option value="">{t('m20.filter.any')}</option>
+                {(catalogue?.priorities ?? []).map((p) => <option key={p} value={p}>{t(`m17.priority.${p}`, p)}</option>)}
+              </select>
+            </label>
+            <label>
+              {t('m20.filter.stall')}
+              <select aria-label={t('m20.filter.stall')} value={String(filters.stallDays ?? 30)} onChange={(e) => set({ stallDays: Number(e.target.value) })}>
+                {STALL_THRESHOLDS.map((d) => <option key={d} value={d}>{t('m20.filter.stallDays').replace('{n}', String(d))}</option>)}
+              </select>
+            </label>
+          </div>
+          {/* There is no scout filter, and saying so is part of the product. */}
+          <p className="muted small" data-no-person-filter="true">{t('m20.filter.noPerson')}</p>
+        </section>
+      )}
+
+      {showAbout && dash && (
+        <section className="dash-about" data-testid="dash-about">
+          {/* The governing sentence, from the server, above every number. */}
+          <p className="notice" data-principle="true">{dash.note}</p>
+          <p className="muted small dash-window" data-window={`${dash.window.from}..${dash.window.to}`}>
+            {t('m20.windowLabel').replace('{from}', fmtDate(Date.parse(`${dash.window.from}T00:00:00Z`))).replace('{to}', fmtDate(Date.parse(`${dash.window.to}T00:00:00Z`)))}
+            {' · '}
+            {t('m20.smallN').replace('{min}', String(dash.smallNMinimum))}
+            {' · '}
+            {/* Read-time projection: say when, rather than imply a live feed. */}
+            <span data-calculated-at={String(dash.calculatedAt)}>
+              {t('m20.calculatedAt').replace('{when}', fmtDateTime(dash.calculatedAt))}
+            </span>
+          </p>
+        </section>
+      )}
 
       {busy && !dash && <p className="muted">{t('common.loading')}</p>}
       {error && <p className="error" role="alert">{error}</p>}
@@ -745,69 +770,65 @@ export function DirectorDashboardScreen({ session, tick, notify, filters, onFilt
 
       {dash && (
         <>
-          <p className="muted small dash-window" data-window={`${dash.window.from}..${dash.window.to}`}>
-            {t('m20.windowLabel').replace('{from}', fmtDate(Date.parse(`${dash.window.from}T00:00:00Z`))).replace('{to}', fmtDate(Date.parse(`${dash.window.to}T00:00:00Z`)))}
-            {' · '}
-            {t('m20.smallN').replace('{min}', String(dash.smallNMinimum))}
-            {' · '}
-            {/* Read-time projection: say when, rather than imply a live feed. */}
-            <span data-calculated-at={String(dash.calculatedAt)}>
-              {t('m20.calculatedAt').replace('{when}', fmtDateTime(dash.calculatedAt))}
-            </span>
-          </p>
-
-          <Executive dash={dash} onDrill={openDrill} />
-
-          {dash.trend && (
-            <section className="card dash-trend" data-trend-strip="true">
-              <h3>{t('m20.trend.title')}</h3>
-              <p className="muted small">
-                {t('m20.trend.against')
-                  .replace('{from}', fmtDate(Date.parse(`${dash.trend.previousWindow.from}T00:00:00Z`)))
-                  .replace('{to}', fmtDate(Date.parse(`${dash.trend.previousWindow.to}T00:00:00Z`)))}
-              </p>
-              <div className="row wrap">
-                <TrendCell label={t('m20.trend.opened')} c={dash.trend.rooms_opened} />
-                <TrendCell label={t('m20.trend.ended')} c={dash.trend.rooms_ended} />
-                <TrendCell label={t('m20.trend.decided')} c={dash.trend.decisions_recorded} />
-              </div>
-              <p className="muted small">{dash.trend.note}</p>
-            </section>
-          )}
-
+          {/* A partial answer is error recovery: it stays above the numbers. */}
           {dash.partial && (
             <p className="warn" role="status" data-partial="true">
               {t('m20.partial').replace('{families}', dash.unavailable.map((u) => familyLabel(u, u)).join(', '))}
             </p>
           )}
+          <Executive dash={dash} onDrill={openDrill} />
 
-          <h3 className="section dash-detail-head">{t('m20.exec.detail', 'Detail')}</h3>
-          {dash.families.map((id) => {
-            const fam = dash.data[id];
-            if (!fam) return null;
-            const Render = FAMILY_RENDERERS[id];
-            return (
-              <section key={id} data-family={id} className="dash-family">
-                <h3 className="section">{familyLabel(id, fam.label)}</h3>
-                {fam.error ? (
-                  <div className="card warn" role="status" data-family-error={fam.error}>
-                    <p>{t('m20.familyUnavailable').replace('{family}', familyLabel(id, fam.label))}</p>
+          <button type="button" className="dash-detail-toggle" aria-expanded={showDetail} onClick={() => setShowDetail((v) => !v)} data-testid="dash-detail-toggle">
+            {showDetail ? t('m20.exec.hideAll', 'Hide all figures') : t('m20.exec.showAll', 'Show all figures')}
+          </button>
+          {/* M24F.5 — every panel, its limitation printed beside its number, one tap deeper. Rendered only when opened (not hidden). */}
+          {showDetail && (
+            <div className="dash-detail" data-testid="dash-detail">
+              {dash.trend && (
+                <section className="card dash-trend" data-trend-strip="true">
+                  <h3>{t('m20.trend.title')}</h3>
+                  <p className="muted small">
+                    {t('m20.trend.against')
+                      .replace('{from}', fmtDate(Date.parse(`${dash.trend.previousWindow.from}T00:00:00Z`)))
+                      .replace('{to}', fmtDate(Date.parse(`${dash.trend.previousWindow.to}T00:00:00Z`)))}
+                  </p>
+                  <div className="row wrap">
+                    <TrendCell label={t('m20.trend.opened')} c={dash.trend.rooms_opened} />
+                    <TrendCell label={t('m20.trend.ended')} c={dash.trend.rooms_ended} />
+                    <TrendCell label={t('m20.trend.decided')} c={dash.trend.decisions_recorded} />
                   </div>
-                ) : (
-                  <>
-                    {(fam.filtersNotApplicable ?? []).length > 0 && (
-                      <p className="muted small" data-filters-not-applicable={(fam.filtersNotApplicable ?? []).join(',')}>
-                        {t('m20.filterNotApplied').replace('{filters}', (fam.filtersNotApplicable ?? []).join(', '))}
-                      </p>
+                  <p className="muted small">{dash.trend.note}</p>
+                </section>
+              )}
+
+              {dash.families.map((id) => {
+                const fam = dash.data[id];
+                if (!fam) return null;
+                const Render = FAMILY_RENDERERS[id];
+                return (
+                  <section key={id} data-family={id} className="dash-family">
+                    <h3 className="section">{familyLabel(id, fam.label)}</h3>
+                    {fam.error ? (
+                      <div className="card warn" role="status" data-family-error={fam.error}>
+                        <p>{t('m20.familyUnavailable').replace('{family}', familyLabel(id, fam.label))}</p>
+                      </div>
+                    ) : (
+                      <>
+                        {(fam.filtersNotApplicable ?? []).length > 0 && (
+                          <p className="muted small" data-filters-not-applicable={(fam.filtersNotApplicable ?? []).join(',')}>
+                            {t('m20.filterNotApplied').replace('{filters}', (fam.filtersNotApplicable ?? []).join(', '))}
+                          </p>
+                        )}
+                        <div className="dash-panels">
+                          {Render && <Render f={fam} onDrill={openDrill} />}
+                        </div>
+                      </>
                     )}
-                    <div className="dash-panels">
-                      {Render && <Render f={fam} onDrill={openDrill} />}
-                    </div>
-                  </>
-                )}
-              </section>
-            );
-          })}
+                  </section>
+                );
+              })}
+            </div>
+          )}
         </>
       )}
 
@@ -848,7 +869,7 @@ export function DirectorDashboardScreen({ session, tick, notify, filters, onFilt
         </section>
       )}
 
-      {catalogue && (
+      {catalogue && showDetail && (
         <details className="card f-about" data-never-built="true">
           <summary>{t('m20.neverBuilt.title')}</summary>
           <p>{catalogue.neverBuilt.reason}</p>

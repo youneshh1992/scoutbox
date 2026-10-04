@@ -74,10 +74,10 @@ export function M16Panel({ adminKey, say }: { tab: M16Tab; adminKey: string; say
               </>
             ) : <span className={`pill ${d.resolution?.outcome === 'stands' ? 'green' : 'red'}`}>{d.resolution?.outcome}</span>}
           </div>
-          <div className="dim" style={{ fontSize: 12.5, marginTop: 6, fontFamily: 'monospace' }}>
+          <div className="dim" style={{ fontSize: 12.5, marginTop: 6 }}>
             {d.session.drillTitle} · state={d.session.verificationState} · verified={d.session.verifiedReps != null ? `${d.session.verifiedReps} reps` : fmt(d.session.verifiedActiveMs)} · session={fmt(d.session.sessionDurationMs)} · provider={d.session.provider}@{d.session.providerVersion}{d.session.simulated ? ' (simulated)' : ''}
           </div>
-          {d.session.resultHash && <div className="dim" style={{ fontSize: 11, fontFamily: 'monospace' }}>hash={d.session.resultHash.slice(0, 24)}… · seq={d.session.lastSeq} · batches={d.session.batches} · reasons={(d.session.verificationReasons ?? []).join(', ') || '—'}</div>}
+          {d.session.resultHash && <div className="dim" style={{ fontSize: 11 }}>hash={d.session.resultHash.slice(0, 24)}… · seq={d.session.lastSeq} · batches={d.session.batches} · reasons={(d.session.verificationReasons ?? []).join(', ') || '—'}</div>}
           {d.status !== 'open' && d.session.verificationState === 'invalidated' && (
             <div style={{ marginTop: 6 }}>
               <ReasonButton label="Restore result" prompt="Reason for restoring the original result:" onGo={(reason) => act(() => post(adminKey, `/admin/box-cam/sessions/${d.sessionId}/restore`, { reason }), 'Result restored (history preserved).')} />

@@ -488,7 +488,7 @@ export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOp
 export function OrgChips({ org }: { org: { type: string; trustedPartner?: boolean; safeguardingCertified?: boolean; verified?: boolean } }) {
   // M24D — one quiet line of standing, not a row of badges: the same facts, as text.
   const facts = [
-    org.type,
+    org.type ? org.type.charAt(0).toUpperCase() + org.type.slice(1) : null,
     org.type === 'club' ? (org.verified ? 'Verified club' : 'verification pending — U18 hidden') : null,
     org.trustedPartner ? 'Trusted Partner' : null,
     org.safeguardingCertified ? 'Safeguarding Certified' : null,

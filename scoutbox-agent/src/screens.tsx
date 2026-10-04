@@ -107,7 +107,8 @@ export function HomeScreen({ session, tick, onNavigate }: ScreenProps & { onNavi
   const h = home.data as Home | null;
   return (
     <div data-testid="agent-home">
-      <Hint>{h?.regulatoryNotice ?? ''}</Hint>
+      {/* M24F.5 — one way in to every explanation on Home: what the workspace is, and the regulatory notice. */}
+      <Hint>{[t('home.whatThisIsBody'), h?.regulatoryNotice ?? ''].filter(Boolean).join(' ')}</Hint>
       <ErrorLine error={home.error} onRetry={home.reload} />
       {home.loading && !h && <Loading />}
       {h && (
@@ -124,9 +125,6 @@ export function HomeScreen({ session, tick, onNavigate }: ScreenProps & { onNavi
           <Section title={t('home.tiers')}>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{h.tiers.map((x) => <span key={x} className="pill blue">{tr(`tier.${x}`)}</span>)}</div>
           </Section>
-          <Section title={t('home.whatThisIs')}>
-            <details className="f-about"><summary>About</summary><div className="notice">{t('home.whatThisIsBody')}</div></details>
-          </Section>
         </>
       )}
     </div>
@@ -138,10 +136,11 @@ function FacetCard({ title, facet, ma, testProvider, onSubmit, note }: { title: 
   const [ref, setRef] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
+  const [editing, setEditing] = useState(false);
   const state = facet?.state ?? 'UNVERIFIED';
   const submit = async () => {
     setBusy(true); setErr(null);
-    try { await onSubmit(ref.trim(), ma); setRef(''); markClean(); } catch (e) { setErr(e); } finally { setBusy(false); }
+    try { await onSubmit(ref.trim(), ma); setRef(''); setEditing(false); markClean(); } catch (e) { setErr(e); } finally { setBusy(false); }
   };
   return (
     <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }} data-testid={`facet-${title.toLowerCase().replace(/[^a-z]+/g, '-')}${ma ? `-${ma.toLowerCase()}` : ''}`}>
@@ -157,14 +156,17 @@ function FacetCard({ title, facet, ma, testProvider, onSubmit, note }: { title: 
         </div>
       )}
       {facet?.note && <div className="dim" style={{ fontSize: 12.5 }}>{facet.note}</div>}
-      {note && <div className="dim" style={{ fontSize: 12.5 }}>{note}</div>}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+      {note && <Hint className="dim" style={{ fontSize: 12.5 }}>{note}</Hint>}
+      {/* M24F.5 — a verified facet keeps its reference form one tap away; an unverified one shows it. */}
+      {state === 'VERIFIED' && !editing ? (
+        <div><button type="button" className="linklike" style={{ color: 'var(--sb-link)' }} onClick={() => setEditing(true)} data-testid="facet-new-reference">{t('profile.newReference')}</button></div>
+      ) : <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12.5, color: 'var(--muted)', flex: '1 1 220px' }}>
           {t('profile.submitRef')}
           <input value={ref} onChange={(e) => { setRef(e.target.value); markDirty(); }} placeholder={testProvider ? 'TEST-VERIFIED-…' : ''} />
         </label>
         <button className="primary" disabled={busy || !ref.trim()} onClick={submit}>{t('profile.submit')}</button>
-      </div>
+      </div>}
       <ErrorLine error={err} />
     </div>
   );
@@ -253,7 +255,7 @@ export function ProfileScreen({ session, tick, notify, me }: ScreenProps & { me:
               <Section title={t('profile.history')}>
                 <div className="list-rows">
                   {p.history.slice().reverse().slice(0, 12).map((h) => (
-                    <div key={h.id} className="list-row"><span className="grow">{h.action.replace(/_/g, ' ')}{h.detail?.facet ? ` · ${String(h.detail.facet)}${h.detail.memberAssociation ? ` (${String(h.detail.memberAssociation)})` : ''}` : ''}{h.detail?.to ? ` → ${String(h.detail.to)}` : ''}</span><span className="dim">{fmtStamp(h.at)}</span></div>
+                    <div key={h.id} className="list-row"><span className="grow">{(() => { const a = h.action.replace(/^agent_/, '').replace(/_/g, ' '); return a.charAt(0).toUpperCase() + a.slice(1); })()}{h.detail?.facet ? ` · ${tr(`facet.${String(h.detail.facet)}`)}${h.detail.memberAssociation ? ` (${String(h.detail.memberAssociation)})` : ''}` : ''}{h.detail?.to ? ` → ${tr(`state.${String(h.detail.to)}`)}` : ''}</span><span className="dim">{fmtStamp(h.at)}</span></div>
                   ))}
                 </div>
               </Section>

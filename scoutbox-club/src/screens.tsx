@@ -10,7 +10,7 @@ import {
   type FeedItem, type FilmRoomItem, type FixtureGroup, type SavedSearch, type OrgNote,
   type Funnel, type Invoice,
 } from './api';
-import { FootballPassportPanel, SharedPassportOpener, SummaryChips, usePassportSummaries } from './m15screens';
+import { FootballPassportPanel, SharedPassportOpener, usePassportSummaries } from './m15screens';
 import { BoxTrainingPanel } from './m16screens';
 import { DevelopmentPanel } from './m21Screens';
 import { CombinePanel } from './combineScreens';
@@ -322,7 +322,7 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
             <video key={current.media.id} className="filmroom-video" src={api.mediaUrl(current.media.url)!} controls autoPlay muted loop />
             <div className="filmroom-overlay">
               <div className="row1">
-                <a style={{ color: 'var(--text)', fontWeight: 700, fontSize: 18, cursor: 'pointer' }} {...pressable(() => openPlayer(current.player.id))}>
+                <a style={{ color: '#fff', fontWeight: 700, fontSize: 18, cursor: 'pointer' }} {...pressable(() => openPlayer(current.player.id))}>
                   {current.player.name}
                 </a>
                 <span className="pill blue">{current.player.position}</span>
@@ -330,24 +330,28 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
                 {current.player.guardianManaged && <span className="pill red">U18</span>}
                 {current.media.verifiedClip && <span className="pill green">Verified Clip — filmed at a confirmed fixture</span>}
               </div>
-              <div className="dim">“{current.media.title}” · {current.media.views} view{current.media.views === 1 ? '' : 's'} · {t('term.profileSignal')} {current.player.trustScore}%</div>
-              <div className="filmroom-tags">
-                {tagOptions.map((t) => (
-                  <button
-                    key={t}
-                    className={pendingTags.includes(t) ? 'primary' : ''}
-                    style={{ padding: '4px 10px', fontSize: 12 }}
-                    onClick={() => setPendingTags((p) => (p.includes(t) ? p.filter((x) => x !== t) : [...p, t]))}
-                  >
-                    {TAG_LABELS[t] ?? t}
-                  </button>
-                ))}
-                {pendingTags.length > 0 && <button className="primary" style={{ padding: '4px 12px', fontSize: 12 }} onClick={submitTags}>Save tags</button>}
-              </div>
             </div>
           </>
         )}
       </div>
+      {/* M24F.5 — the caption sits under the clip, clear of the video controls. */}
+      {current && <div className="dim filmroom-caption" data-testid="filmroom-caption">“{current.media.title}” · {current.media.views} view{current.media.views === 1 ? '' : 's'} · {t('term.profileSignal')} {current.player.trustScore}%</div>}
+      {/* M24F.5 — the tags sit under the clip, never over the picture or the player's name. */}
+      {current && (
+        <div className="filmroom-tags" aria-label="Tag what you saw">
+          {tagOptions.map((t) => (
+            <button
+              key={t}
+              className={pendingTags.includes(t) ? 'primary' : ''}
+              style={{ padding: '4px 10px', fontSize: 12 }}
+              onClick={() => setPendingTags((p) => (p.includes(t) ? p.filter((x) => x !== t) : [...p, t]))}
+            >
+              {TAG_LABELS[t] ?? t}
+            </button>
+          ))}
+          {pendingTags.length > 0 && <button className="primary" style={{ padding: '4px 12px', fontSize: 12 }} onClick={submitTags}>Save tags</button>}
+        </div>
+      )}
       <div className="filmroom-controls">
         <button onClick={() => step(-1)} disabled={index === 0}>↑ Previous</button>
         <span className="pill">{index + 1} / {deck.length}</span>
@@ -574,11 +578,9 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
               {p.academyPlus && <span className="pill green">Academy+</span>}
               <span className="pill">{AVAILABILITY_LABELS[p.availability] ?? p.availability}</span>
             </div>
-            <div className="badges badges-quiet">
-              {p.identityVerified && <span className="pill outline-green">ID ✓</span>}
-              <span className="pill">{CONTRACT_LABELS[p.contractStatus] ?? p.contractStatus}</span>
-              {p.badges.map((b) => <span key={b} className="pill gold">{b}</span>)}
-              <SummaryChips s={fpSummaries.get(p.id)} />
+            {/* M24F.5 — one quiet line: identity check, contract, current club. Badges and evidence detail are one tap deeper, on the profile. */}
+            <div className="meta player-quiet">
+              {[p.identityVerified ? 'ID ✓' : null, CONTRACT_LABELS[p.contractStatus] ?? p.contractStatus, fpSummaries.get(p.id)?.currentClub?.name ?? null, fpSummaries.get(p.id) ? `${t('fp.coverage')}: ${t(`fp.cov.${fpSummaries.get(p.id)!.evidenceCoverage}`)}` : null].filter(Boolean).join(' · ')}
             </div>
             <TrustBar score={p.trustScore} />
           </div>
