@@ -23,7 +23,7 @@ const SCOUT_TAGS = [
 ];
 
 const ORGS: Org[] = [
-  { id: 'org-hackneymarsh', name: 'Hackney Marsh Rovers', type: 'club', plan: 'Grassroots', trustedPartner: false, verified: true, safeguardingCertified: true },
+  { id: 'org-hackneymarsh', name: 'Hackney Marsh Rovers', type: 'club', plan: 'Grassroots', trustedPartner: false, verified: true, safeguardingCertified: true, lookingFor: ['GK', 'CDM', 'CM', 'ST', 'CF'] }, // demo fixture: the positions the club told the local radar
   { id: 'org-mossside', name: 'Moss Side Athletic', type: 'club', plan: 'Grassroots', trustedPartner: false, verified: false, safeguardingCertified: false },
 ];
 

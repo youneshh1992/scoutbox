@@ -1054,6 +1054,8 @@ export function OpenDaysScreen({ session, tick, notify }: ScreenProps) {
   const [trials, setTrials] = useState<OpenTrial[]>([]);
   const [form, setForm] = useState({ title: '', date: '', venue: '', ageGroup: 'open', positions: '' as string, notes: '' });
   const [lookingFor, setLookingFor] = useState<string>((session.org.lookingFor ?? []).join(', '));
+  const [savedLookingFor, setSavedLookingFor] = useState<string[]>(session.org.lookingFor ?? []);
+  const [editingRadar, setEditingRadar] = useState(false);
   const [outcomeNotes, setOutcomeNotes] = useState<Record<string, string>>({});
   const load = useCallback(() => { api.getOpenTrials(session).then(setTrials).catch(() => {}); }, [session]);
   useEffect(load, [load, tick]);
@@ -1075,17 +1077,28 @@ export function OpenDaysScreen({ session, tick, notify }: ScreenProps) {
           for an answer. Every registrant gets an invite or a kind no before you can post the next one.
         </div>
       )}
-      <div className="section">
-        <h4>What are you looking for? (shows on local players' radar)</h4>
-        <div className="filters">
-          <input style={{ flex: 1 }} placeholder="Positions, comma-separated (e.g. ST, CDM)" value={lookingFor} onChange={(e) => setLookingFor(e.target.value)} />
-          <button onClick={async () => {
-            try {
-              await api.setLookingFor(session, lookingFor.split(',').map((x) => x.trim().toUpperCase()).filter(Boolean));
-              notify('Saved — local players in those positions see your club highlighted.');
-            } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
-          }}>Save</button>
-        </div>
+      {/* M24F.4 — the local radar reads as a line; the input appears only while editing. */}
+      <div className="section" data-testid="radar">
+        <h4>Local radar</h4>
+        {editingRadar ? (
+          <div className="filters" data-testid="radar-edit">
+            <input style={{ flex: 1 }} autoFocus aria-label="Positions you are looking for" placeholder="Positions, comma-separated (e.g. ST, CDM)" value={lookingFor} onChange={(e) => setLookingFor(e.target.value)} />
+            <button className="primary" onClick={async () => {
+              try {
+                const positions = lookingFor.split(',').map((x) => x.trim().toUpperCase()).filter(Boolean);
+                await api.setLookingFor(session, positions);
+                setSavedLookingFor(positions); setEditingRadar(false);
+                notify('Saved — local players in those positions see your club highlighted.');
+              } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
+            }}>Save</button>
+            <button className="linklike" onClick={() => { setLookingFor(savedLookingFor.join(', ')); setEditingRadar(false); }}>Cancel</button>
+          </div>
+        ) : (
+          <p className="radar-line" data-testid="radar-read" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', fontSize: 14 }}>
+            <span>{savedLookingFor.length ? <>Looking for <b>{savedLookingFor.join(' · ')}</b></> : 'Not looking for anyone right now'}</span>
+            <button className="linklike" data-testid="radar-edit-link" onClick={() => setEditingRadar(true)}>Edit</button>
+          </p>
+        )}
       </div>
       <div className="section">
         <h4>Post an open day</h4>
@@ -1188,10 +1201,11 @@ export function SquadScreen({ session, tick, notify, openPlayer }: ScreenProps) 
         ))}
       </div>
       {squad.gaps.length > 0 && (
-        <div className="notice" style={{ marginBottom: 16 }}>
-          Gap analysis: you have fewer than two players covering <b>{squad.gaps.join(', ')}</b>.{' '}
+        <p className="squad-gap" data-testid="squad-gap" style={{ margin: '0 0 16px', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', fontSize: 14 }}>
+          <span>Thin cover: <b>{squad.gaps.join(' · ')}</b></span>
           <button
-            style={{ color: 'var(--accent-2)', padding: 0 }}
+            className="linklike"
+            data-testid="squad-gap-radar"
             onClick={async () => {
               try {
                 await api.setLookingFor(session, squad.suggestedLookingFor);
@@ -1199,22 +1213,29 @@ export function SquadScreen({ session, tick, notify, openPlayer }: ScreenProps) 
               } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
             }}
           >Tell the local radar you're looking for {squad.suggestedLookingFor.join(', ')}</button>
-        </div>
+        </p>
       )}
       <div className="section">
-        <h4>Squad list — {squad.entries.length} players</h4>
+        <h4>Squad · {squad.entries.length} players</h4>
         {squad.entries.length === 0 && <div className="notice">Nobody rostered yet. Signings land here automatically; add the rest of your Sunday squad below.</div>}
-        <div className="list-rows">
+        {/* M24F.4 — flat rows: initials, the name, the position; the row itself opens an on-platform player. No bordered name chip, no state pills. */}
+        <div className="list-rows" data-testid="squad-list">
           {squad.entries.map((e) => (
-            <div key={e.id} className="list-row" style={{ flexWrap: 'wrap' }}>
-              <span className="grow">
-                {e.onPlatform && e.playerId
-                  ? <button style={{ padding: 0, color: 'var(--accent-2)', fontWeight: 600 }} onClick={() => openPlayer(e.playerId!)}>{e.name}</button>
-                  : <b>{e.name}</b>}{' '}
-                <span className="dim">{e.position ?? '—'}</span>
+            <div
+              key={e.id}
+              className="list-row squad-row"
+              data-testid={`squad-row-${e.id}`}
+              role={e.onPlatform && e.playerId ? 'button' : undefined}
+              tabIndex={e.onPlatform && e.playerId ? 0 : undefined}
+              onClick={e.onPlatform && e.playerId ? () => openPlayer(e.playerId!) : undefined}
+              onKeyDown={e.onPlatform && e.playerId ? (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openPlayer(e.playerId!); } } : undefined}
+              style={{ flexWrap: 'wrap' }}
+            >
+              <span className="p-avatar" aria-hidden="true">{e.name.split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()}</span>
+              <span className="grow" style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                <b className="squad-name">{e.name}</b>
+                <span className="dim">{e.position ?? '—'}{e.source === 'signing' ? ' · Signed via ScoutBox' : !e.onPlatform ? ' · Off-platform' : ''}</span>
               </span>
-              {e.source === 'signing' && <span className="pill green">Signed via ScoutBox</span>}
-              {e.onPlatform ? <span className="pill blue">On platform{typeof e.trustScore === 'number' ? ` · trust ${e.trustScore}` : ''}</span> : <span className="pill">Off-platform</span>}
               {releasing === e.id ? (
                 <span style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                   {e.onPlatform && (
@@ -1222,10 +1243,12 @@ export function SquadScreen({ session, tick, notify, openPlayer }: ScreenProps) 
                       placeholder="Optional reference — published on their profile"
                       value={refText}
                       onChange={(ev) => setRefText(ev.target.value)}
+                      onClick={(ev) => ev.stopPropagation()}
                       style={{ minWidth: 260 }}
                     />
                   )}
-                  <button className="primary" onClick={async () => {
+                  <button className="primary" onClick={async (ev) => {
+                    ev.stopPropagation();
                     try {
                       setSquad(await api.releaseSquadEntry(session, e.id, refText.trim() || undefined));
                       setReleasing(null); setRefText('');
@@ -1234,10 +1257,13 @@ export function SquadScreen({ session, tick, notify, openPlayer }: ScreenProps) 
                         : `${e.name} removed from the squad list.`);
                     } catch (err) { notify(err instanceof Error ? err.message : 'Failed', true); }
                   }}>Confirm release</button>
-                  <button onClick={() => { setReleasing(null); setRefText(''); }}>Cancel</button>
+                  <button className="linklike" onClick={(ev) => { ev.stopPropagation(); setReleasing(null); setRefText(''); }}>Cancel</button>
                 </span>
               ) : (
-                <button onClick={() => { setReleasing(e.id); setRefText(''); }}>Release</button>
+                <>
+                  <button className="linklike" data-testid={`squad-release-${e.id}`} onClick={(ev) => { ev.stopPropagation(); setReleasing(e.id); setRefText(''); }}>Release</button>
+                  {e.onPlatform && e.playerId ? <span className="dim" aria-hidden="true">›</span> : null}
+                </>
               )}
             </div>
           ))}
