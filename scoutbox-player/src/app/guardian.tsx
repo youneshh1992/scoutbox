@@ -320,6 +320,10 @@ export default function GuardianDashboard() {
                   />
                 ))}
               </Row>
+              {/* M24F.4 — the switches, pairing, open days, references and the
+                  deletion sit behind one row; the card itself is the child, the
+                  completeness, the evidence counts and the availability. */}
+              <Disclosure label={`Manage ${c.name.split(' ')[0]}'s profile`} hint={`Medical sharing ${c.medical.shared ? 'on' : 'off'} · First Team Seeker ${c.firstTeamSeeker ? 'on' : 'off'}${(openDays[c.id]?.length ?? 0) > 0 ? ` · ${openDays[c.id]!.length} open day${openDays[c.id]!.length === 1 ? '' : 's'} nearby` : ''}`} testID={`guardian-manage-${c.id}`}>
               <Row style={{ justifyContent: 'space-between' }}>
                 <View style={{ flex: 1, paddingRight: 10 }}>
                   <Muted size={12.5}>
@@ -444,13 +448,12 @@ export default function GuardianDashboard() {
                   </Row>
                 )}
               </View>
+              </Disclosure>
             </Card>
           );
         })}
 
-        <SectionTitle>Co-guardian</SectionTitle>
-        <Card>
-          <Muted size={13}>A second parent or guardian gets their own account for the same children.</Muted>
+        <Disclosure label="Co-guardian" hint="A second parent or guardian, same children" testID="guardian-coguardian">
           {(guardian as (typeof guardian & { coGuardians?: { id: string; name: string; email: string }[] }) | null)?.coGuardians?.map((co) => (
             <Row key={co.id}>
               <Pill label="Co-guardian" tone="blue" />
@@ -471,7 +474,7 @@ export default function GuardianDashboard() {
               }
             }} />
           </Row>
-        </Card>
+        </Disclosure>
 
         {myReports.length > 0 && (
           <>
@@ -488,8 +491,7 @@ export default function GuardianDashboard() {
           </>
         )}
 
-        <SectionTitle>Notifications</SectionTitle>
-        <Card>
+        <Disclosure label="Notifications" hint={prefs.quietStart && prefs.quietEnd ? `Quiet ${prefs.quietStart}–${prefs.quietEnd}` : 'Quiet hours off'} testID="guardian-notifications">
           <Muted size={13}>Quiet hours pause push notifications overnight; everything still lands in the app.</Muted>
           <Row>
             <Muted size={13}>Quiet from</Muted>
@@ -512,11 +514,9 @@ export default function GuardianDashboard() {
             />
           </Row>
           {prefsNote && <Muted size={12.5}>{prefsNote}</Muted>}
-        </Card>
+        </Disclosure>
 
-        <SectionTitle>Your family&apos;s data</SectionTitle>
-        <Card>
-          <Muted size={13}>Everything in one bundle, yours to take any time.</Muted>
+        <Disclosure label="Your family's data" hint="One bundle, yours to take any time" testID="guardian-data">
           <Row>
             <Button
               small label="Preview data export"
@@ -532,7 +532,7 @@ export default function GuardianDashboard() {
             {exportPreview && <Button small label="Hide preview" onPress={() => setExportPreview(null)} />}
           </Row>
           {exportPreview && <Text style={styles.exportPreview} numberOfLines={30}>{exportPreview}…</Text>}
-        </Card>
+        </Disclosure>
 
         {!(digest && digest.children.length > 0) && (
           <Disclosure label="Communications log" hint="Every scouting action around your children, logged and visible to you" testID="guardian-log">

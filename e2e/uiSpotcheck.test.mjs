@@ -108,6 +108,7 @@ const freshPage = async () => {
   await g.waitForSelector('text=Club requests', { timeout: 20000 });
   await g.waitForSelector('[data-testid^="trial-slot-"], [data-testid^="alt-slot-"]', { timeout: 10000 }); // M24F.3 — the slots are the picker
   say('guardian slot picker renders');
+  await g.locator('[data-testid^="guardian-manage-"]').first().click(); // M24F.4 — pairing sits behind "Manage …'s profile"
   await g.click('text=Generate pairing code');
   await g.waitForSelector('text=Code: ', { timeout: 8000 });
   const code = (await g.locator('text=Code: ').first().innerText()).replace('Code: ', '').trim();

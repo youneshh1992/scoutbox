@@ -372,10 +372,8 @@ export function FixturesScreen({ session, tick, openPlayer }: ScreenProps) {
           return (
             <div key={key} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
               <div style={{ display: 'flex', gap: 12, alignItems: 'center', cursor: 'pointer' }} {...pressable(() => setOpenKey(openKey === key ? null : key))}>
-                <span className="pill green">GPS ✓</span>
                 <span className="grow"><b>{f.fixture}</b> <span className="dim">— {f.venue}</span></span>
-                <span className="dim">{f.date}</span>
-                <span className="pill">{f.players.length} player{f.players.length === 1 ? '' : 's'}</span>
+                <span className="dim">GPS ✓ · {f.players.length} player{f.players.length === 1 ? '' : 's'} · {f.date}</span>
               </div>
               {openKey === key && (
                 <div className="list-rows" style={{ marginTop: 8 }}>
@@ -568,13 +566,16 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
             <div className="meta">
               {p.age} · {p.foot} foot · {p.city ? `${p.city}, ` : ''}{p.country} · {p.heightCm} cm
             </div>
+            {/* M24F.4 — at most three pills (the safeguarding state, First Team Seeker, the availability); everything else is one quiet line. */}
             <div className="badges">
               {p.guardianManaged && <span className="pill red">U18 · guardian-managed</span>}
               {p.firstTeamSeeker && <span className="pill gold">First Team Seeker</span>}
+              <span className="pill">{AVAILABILITY_LABELS[p.availability] ?? p.availability}</span>
+            </div>
+            <div className="badges badges-quiet">
               {typeof p.distanceKm === 'number' && <span className="pill blue">{p.distanceKm} km away</span>}
               {p.level === 'semi_pro' && <span className="pill gold">Semi-pro</span>}
               {p.identityVerified && <span className="pill outline-green">ID ✓</span>}
-              <span className="pill">{AVAILABILITY_LABELS[p.availability] ?? p.availability}</span>
               <span className="pill">{CONTRACT_LABELS[p.contractStatus] ?? p.contractStatus}</span>
               {p.badges.map((b) => <span key={b} className="pill gold">{b}</span>)}
               <SummaryChips s={fpSummaries.get(p.id)} />

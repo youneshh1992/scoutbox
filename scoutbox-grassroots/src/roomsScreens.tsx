@@ -187,7 +187,7 @@ function RoomsList({ session, tick, onOpenRoom }: RoomsScreenProps) {
 
   return (
     <div>
-      <div className="dim" style={{ fontSize: 12.5, marginBottom: 4 }}>{t('rm.intro')}</div>
+      <Hint className="dim" style={{ fontSize: 12.5, marginBottom: 4 }}>{t('rm.intro')}</Hint>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}><Icon name="lock-keyhole" size={13} /> {t('rm.privacy')}</div>
 
       {/* Funnel strip — your organisation's own activity, no league table. */}
@@ -238,7 +238,7 @@ function RoomsList({ session, tick, onOpenRoom }: RoomsScreenProps) {
             <div key={a.roomId} className="list-row" style={{ flexWrap: 'wrap' }}>
               <span className="grow"><b>{a.playerName ?? t('rm.playerWithheld')}</b> <span className="pill">{statusLabel(a.status)}</span></span>
               <span className="dim" style={{ fontSize: 12.5 }}>{a.reasons.map((r) => r.text).join(' ')}</span>
-              <button onClick={() => open(a.roomId)}>{t('rm.open')}</button>
+              <button className="linklike" onClick={() => open(a.roomId)}>{t('rm.open')}</button>
             </div>
           ))}
         </div>
@@ -285,7 +285,7 @@ function RoomsList({ session, tick, onOpenRoom }: RoomsScreenProps) {
                   <td>{r.ownerName ?? <span className="dim">—</span>}</td>
                   <td>{r.openTasks}</td>
                   <td>{r.lastActivityAt ? fmtDate(r.lastActivityAt) : <span className="dim">—</span>}</td>
-                  <td><button onClick={() => open(r.roomId)} aria-label={`${t('rm.open')} ${r.playerName ?? r.roomId}`}>{t('rm.open')}</button></td>
+                  <td><button className="linklike" onClick={() => open(r.roomId)} aria-label={`${t('rm.open')} ${r.playerName ?? r.roomId}`}>{t('rm.open')}</button></td>
                 </tr>
               ))}
             </tbody>
@@ -293,8 +293,7 @@ function RoomsList({ session, tick, onOpenRoom }: RoomsScreenProps) {
         </div>
         {data && data.items.length === 0 && <div className="dim" style={{ marginTop: 8 }}>{t('rm.empty')}</div>}
         {!data && !err && <div className="dim" style={{ marginTop: 8 }}>{t('rm.loading')}</div>}
-        <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{data?.note ?? t('rm.noSort')}</div>
-        <div className="dim" style={{ fontSize: 12 }}>{t('rm.noSort')}</div>
+        <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{t('rm.noSort')}</div>
       </div>
     </div>
   );
