@@ -216,9 +216,9 @@ async function selectPlan(p, title) {
   await player.getByText('Start a plan', { exact: true }).click();
   await player.locator('[data-testid="dev-root"]').waitFor({ timeout: 20000 }); // M24F.4 — the four-row root
   say('H1: the player starts a plan from the empty state');
-  await player.getByText('About these counts', { exact: true }).first().click().catch(() => {}); // M24F.3 — the denial of a headline number sits behind About
+  await player.locator('[data-testid="dev-about"] > [role="button"]').first().click().catch(() => {}); // M24F.5 — the counts' note sits in the root's one "About this plan"
   const body = await seeDev(player);
-  ok(/Active goals/.test(body) && /no overall figure/i.test(body),
+  ok(/active goals?/i.test(body) && /no overall figure/i.test(body),
     'H1: the overview shows counts, and says out loud that there is no overall figure');
   await openGoals(player); // M24F.4 — the plan and its goals sit behind "Current focus"
   await player.waitForSelector('text=/My development plan/', { timeout: 20000 });
@@ -562,7 +562,7 @@ let clubPlanId = null; let clubGoalId = null;
   await small.waitForTimeout(600);
   const body = `${rootText}\n${goalsText}\n${await small.locator('body').innerText()}`;
   if (!/actions completed/.test(body)) console.error('   phone section:', (await devText(small)).slice(0, 700));
-  ok(/Active goals/.test(body) && /actions completed/.test(body) && /Match understanding|Technical/.test(body),
+  ok(/active goals?/i.test(body) && /actions completed/.test(body) && /Match understanding|Technical/.test(body),
     'H12: the plan, its goals and their counts are readable at 390px');
   ok(/Plan created|Goal created|Action completed/.test(body), 'H12: …and so is the development history');
   const overflow = await small.evaluate(() => Math.max(

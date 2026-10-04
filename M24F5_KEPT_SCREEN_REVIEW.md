@@ -1,0 +1,60 @@
+# M24F.5 — Kept-screen review
+
+The 50 screens M24F.4 accepted with a reason (`M24F4_ALL_APP_SCREEN_AUDIT.md`, rows marked → ACCEPTED) were captured again on the M24F.4 tree, looked at one by one, and given a visual verdict. The verdict is the state as found at the start of M24F.5; the change column says what M24F.5 did; the last column is why the final state is acceptable. Captures: `design-system/screenshots/m24f5-kept-*.png` (final tree).
+
+Verdicts as found: GOOD 7 · NEEDS VISUAL RECOMPOSITION 7 · NEEDS SIMPLIFICATION 36. After M24F.5 every row is GOOD or kept for a stated legal, consent, safeguarding or contract reason; none is open.
+
+Words = visible UI words on the screen at 1280 (portals) or 390 (Player): M24F.4 audit figure where it recorded one → M24F.5 final capture.
+
+| App | Route | Previous reason (M24F.4) | Verdict | Change in M24F.5 | Final state / reason | Words |
+| --- | --- | --- | --- | --- | --- | --- |
+| Pro | `#/search` | Search grid; cards carry at most three pills | GOOD | None | A results grid is the right form for scanning players; one card per player, three pills at most, no paragraphs | 346 → 368 |
+| Pro | `#/filmroom` | Clip grid; a tile is the clip | NEEDS VISUAL RECOMPOSITION | Tags moved under the clip; caption moved under the stage; overlay lifted 56 px clear of the video controls | The 13 tag chips no longer cover the picture or the name, and nothing collides with the native controls | — → 49 |
+| Pro | `#/rooms` | Filter chips and table rules | NEEDS SIMPLIFICATION | Intro, funnel note and attention note behind About; position and age inside the player cell; tags as one dim line; Open room one line in link colour | Table fits at 1280 with no clipped column; the never-ranked footer stays (invariant) | — → 216 |
+| Pro | `#/briefs` | A brief row prints the club's own criteria | NEEDS SIMPLIFICATION | Criteria values humanised (semi_pro → semi-pro, developing_evidence → developing evidence) | Criteria are the content; the no-hidden-criteria line is the M19 honesty statement | — → 153 |
+| Pro | `#/recruitment/matching` | M19 honesty statement; one instruction line | NEEDS SIMPLIFICATION | Fieldset boxes replaced by plain criteria groups; the extra guidance behind About; the no-score line stays visible | One governing line, two criteria groups, one action | — → 120 |
+| Pro | `#/recruitment/watchlists` | M19 derived-on-open line | NEEDS SIMPLIFICATION | Definition shown once (the second behind About); raw slug combine-box-touch-60 humanised | One table row per watchlist, one honesty line | — → 72 |
+| Pro | `#/recruitment/second-look` | Tested M18 governing sentence | NEEDS SIMPLIFICATION | Governing sentence once (was three times, one as a red alert); intro and footer note removed; pink boxes replaced by a neutral rule | One disclaimer, one item, its actions | — → 189 |
+| Pro | `#/recruitment/second-look` › Evidence Changed | Same sentence, filtered tab | NEEDS SIMPLIFICATION | Same as the Worth Another Look tab | Same | — → 138 |
+| Pro | `#/recruitment/second-look` › Reviewed | Same, filtered tab | NEEDS SIMPLIFICATION | Same | Same | — → 142 |
+| Pro | `#/recruitment/second-look` › Dismissed | Same; the server's own reasons | NEEDS SIMPLIFICATION | Same | Same; the dismissal reason is one dim line | — → 168 |
+| Pro | `#/recruitment/nobody-missed` | Coverage tool; tested honesty sentence | NEEDS SIMPLIFICATION | Duplicate heading removed ("Not yet evaluated (3)" above "Needs review · 3") | Ring, four counts, one honesty line, compact rows | 515 → 152 |
+| Pro | `#/recruitment/dashboard` | Executive layer; the detail below is the m20 contract | NEEDS VISUAL RECOMPOSITION | Root is the executive layer only: Period, 4 KPIs, funnel, time by stage, coverage, needs attention; filters, the principle and the 30 detail tables behind More filters / About these figures / Show all figures; captions and <code> removed | Every m20 contract still renders one click away; nothing invented | 2 600 → 118 |
+| Pro | `#/organisation` | Staff list: 26 rows of people | NEEDS VISUAL RECOMPOSITION | Nine settings rows (Notifications, Activity, Onboarding, Staff, Two-factor, Sessions, Single sign-on, Support, Delivery), each with its state; the acknowledgement stays open | A settings index, not a 12-section form | 382 → 69 |
+| Pro | `#/verification` | Five step chips; dispute inputs are forms | NEEDS SIMPLIFICATION | Claim labels capitalised; the dispute input opens from "Dispute this…"; the start forms fold into one row once every step is done; the credential form behind "Add a credential" | Anyone still verifying sees the forms open; a verified administrator sees status, not forms | — → 160 |
+| Pro | `#/verification` › Agent consents | Consent wording must be read in full | GOOD | None | Legal consent text is the exception the rules allow; both confirmations sit beside the decision | — → 175 |
+| Pro | `#/verification` › Transactions | The party statement is a legal line | NEEDS SIMPLIFICATION | The two-line tab intro moved behind About | The legal line beside "Confirm this club's participation" stays (Offer ≠ signing) | — → 109 |
+| Pro | `#/verification` › References & more | Under-18 invitation rule is safeguarding wording | NEEDS SIMPLIFICATION | The three always-open forms fold behind "Add a reference", "Invite a player", "Declare a conflict"; conflict kind capitalised | Each section is its one rule line, its records and one add row; safeguarding wording stays | — → 128 |
+| Pro | `#/imports` | Integrations settings page | NEEDS SIMPLIFICATION | Webhook verification guidance behind "How to verify deliveries"; identity-review line humanised (born 14 Mar 2004); "Download template" in link colour | A technical settings page; one row per connector | — → 153 |
+| Pro | `#/plan` | Attribution clause is contract wording | GOOD | None | Four plan figures, the clause, About rows | — → 78 |
+| Grassroots | `#/filmroom` | Same clip grid | NEEDS VISUAL RECOMPOSITION | Same as Pro (shared change) | Same | — → 49 |
+| Grassroots | `#/rooms` | Same | NEEDS SIMPLIFICATION | Same as Pro | Same | — → 213 |
+| Grassroots | `#/opendays` | No-ghosting rule is safeguarding | NEEDS SIMPLIFICATION | Post form behind "Post an open day"; human date in each heading; age group, positions and count as one quiet line (was five pills, raw u16 / open); "Registered by guardian" and Trust as dim text; radar Edit in link colour | The no-ghosting rule stays (safeguarding); each registrant is one row with Invite / Kind no | — → 164 |
+| Grassroots | `#/briefs` | Same | NEEDS SIMPLIFICATION | Same as Pro | Same | — → 153 |
+| Grassroots | `#/recruitment/matching` | Same | NEEDS SIMPLIFICATION | Same as Pro | Same | — → 120 |
+| Grassroots | `#/recruitment/watchlists` | Same | NEEDS SIMPLIFICATION | Same as Pro | Same | — → 72 |
+| Grassroots | `#/recruitment/second-look` | Same contract | NEEDS SIMPLIFICATION | Same as Pro | Same | — → 189 |
+| Grassroots | `#/recruitment/second-look` › Evidence Changed | Same, filtered tab | NEEDS SIMPLIFICATION | Same as Pro | Same | — → 138 |
+| Grassroots | `#/recruitment/second-look` › Reviewed | Same, filtered tab | NEEDS SIMPLIFICATION | Same as Pro | Same | — → 142 |
+| Grassroots | `#/recruitment/second-look` › Dismissed | Same, filtered tab | NEEDS SIMPLIFICATION | Same as Pro | Same | — → 168 |
+| Grassroots | `#/recruitment/nobody-missed` | Tested honesty sentence | NEEDS SIMPLIFICATION | Same as Pro | Same | 515 → 152 |
+| Grassroots | `#/recruitment/dashboard` | Detail is the contract | NEEDS VISUAL RECOMPOSITION | Same as Pro | Same | 2 600 → 118 |
+| Grassroots | `#/organisation` | Same | NEEDS VISUAL RECOMPOSITION | Same as Pro | Same | 382 → 69 |
+| Grassroots | `#/verification` | Same | NEEDS SIMPLIFICATION | Same as Pro | Same | — → 159 |
+| Grassroots | `#/verification` › References & more | Same safeguarding wording | NEEDS SIMPLIFICATION | Same as Pro | Same | — → 125 |
+| Grassroots | `#/imports` | Same settings page | NEEDS SIMPLIFICATION | Same as Pro | Same | — → 153 |
+| Grassroots | `#/plan` | Contract wording; fee protection behind About | NEEDS SIMPLIFICATION | The "Progressed =" definition blockquote behind About | Pathway figures read as figures; the definition one tap away | — → 92 |
+| Agent | `#/profile` | Development-build provider notice (m23AgentLive B8) | NEEDS SIMPLIFICATION | "Verification, facet by facet" → "Verification"; a verified facet hides its form behind "Submit a new reference" (link colour); the facet note through Hint; history humanised | Dev-only provider notice stays (contract); unverified facets keep their reference input | — → 193 |
+| Agent | `#/compliance` | Policy results are the content | NEEDS SIMPLIFICATION | Explanatory notes behind About; effective dates humanised; "Your verification, facet by facet" → "Your verification" | Policy rows, verification rows, minors readiness (safeguarding) stay | — → 180 |
+| Agent | `#/inbox` | A notification body is content | GOOD | None | One intro line, requests, notices as rows | — → 92 |
+| Trust & Safety | `Evidence › Trust` | Policy statement is the page's content | NEEDS SIMPLIFICATION | Monospace sub-cap / curve dump behind "Technical parameters" | Weights table plus bands; the not-a-talent-score statement stays (Trust Score ≠ talent) | — → 89 |
+| Trust & Safety | `Verification › Verification` | Review queue controls | NEEDS SIMPLIFICATION | Machine codes read as words (DOCUMENT_AUTHENTICITY_UNCONFIRMED → Document authenticity unconfirmed; emailDomainAlignment=passed → Email domain alignment: passed; acronyms kept: DNS) | A dense review queue, every row one decision | — → 146 |
+| Trust & Safety | `Agents › Agent transactions` | Audit console; every note a server reason | NEEDS SIMPLIFICATION | Outcome, reason codes, pending reason and review status humanised; row labels capitalised; intro behind About | An audit console stays dense but reads in words; "counts only" kept | 413 → 391 |
+| Player | `/opportunities` | Founder: Explore is good | GOOD | Preserved (Founder direction) | Category chips, one-line rows | — → 198 |
+| Player | `/opportunities?cat=journey` | Same screen | GOOD | Preserved (Founder direction) | Same | — → 198 |
+| Player | `/opportunities?cat=journey&tab=board` | One-line rows | GOOD | The empty double rule under the tabs removed (the first section's rule now sits on the tab line) | One rule under the tabs, one-line rows | — → 186 |
+| Player | `/opportunities?cat=trial` | Action screen; borders are its controls | NEEDS SIMPLIFICATION | US date (10/4/2026) → 4 Oct 2026; lowercase status words through the locale table; the empty double rule under the tabs removed | Invitation, its state, one action | — → 119 |
+| Player | `/you?tab=clubs&section=current` | Consent actions on relationships | NEEDS SIMPLIFICATION | "since 2026-05" → since May 2026; the raw club-id value became a placeholder; status words capitalised; dates through the device locale | Confirm / Decline / Dispute stay beside each relationship (consent) | 230 → 328 |
+| Player | `/you?tab=clubs&section=requests` | Dual-representation consent read in full | NEEDS SIMPLIFICATION | A settled consent folds its legal wording behind "About this consent"; the open consent keeps it in full; dates through the device locale | Consent text only where a decision is pending | 392 → 397 |
+| Player | `/you?tab=clubs&section=history` | Party confirmation is a consent statement | NEEDS SIMPLIFICATION | Each transaction is a summary line, its confirm action and one Details row (was a wall of facts); dates through the device locale | The confirmation statement stays beside its action | 416 → 350 |
+| Guardian | `/guardian` | Management forms behind rows; child sections open | NEEDS VISUAL RECOMPOSITION | The twelve child sections (evidence, board, campaigns, feedback, preferences, fit, transition, references, development, Box Cam, passport, invite code) are rows under the child's name | Page height 6 938 → 3 507 px; open actions (invitations, trials, safety pack, check-ins) stay visible | 869 → 372 |

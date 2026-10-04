@@ -223,7 +223,8 @@ await club.waitForSelector('nav.sidebar', { timeout: 20000 });
 await club.evaluate(() => { location.hash = '#/search'; });
 await club.waitForSelector('.player-card:has-text("Kola Adeyemi")', { timeout: 20000 });
 {
-  await club.waitForSelector('.player-card:has-text("Kola Adeyemi") .pill:has-text("Evidence:")', { timeout: 15000 });
+  // M24F.5 — the batch summary reads in the card's one quiet line, not as pills.
+  await club.waitForSelector('.player-card:has-text("Kola Adeyemi") .player-quiet:has-text("Evidence:")', { timeout: 15000 });
   say('P2: search cards carry batch passport summary chips (one batch call, no N+1)');
   await club.click('.player-card:has-text("Kola Adeyemi")');
   await club.waitForSelector('[aria-label="Football Passport"]', { timeout: 15000 });
@@ -246,6 +247,9 @@ await guardian.goto('http://localhost:8491/');
 await guardian.waitForSelector('text=Our promises to every player', { timeout: 30000 });
 await guardian.locator('text=Enter').last().click(); // Amara (guardian, dev login)
 await guardian.waitForSelector('text=Guardian', { timeout: 20000 });
+// M24F.5 — the child's sections are rows on the guardian dashboard; open them before reading or acting inside.
+await guardian.waitForSelector('[data-testid^="guardian-child-"] > [role="button"]', { timeout: 25000 });
+{ const closed = guardian.locator('[data-testid^="guardian-child-"] > [role="button"][aria-expanded="false"]'); for (let i = 0; i < 40 && (await closed.count()) > 0; i++) { await closed.first().click().catch(() => {}); await guardian.waitForTimeout(150); } }
 let guniRecSecret = null;
 {
   await guardian.waitForSelector('text=Football Passport — Guni Adebayo', { timeout: 25000 });

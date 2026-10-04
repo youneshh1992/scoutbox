@@ -95,6 +95,8 @@ for (const [w, h] of [[1024, 768], [1280, 800], [1440, 900]]) {
     const kpis = p.locator('[data-kpis] [data-kpi]');
     ok((await kpis.count()) === 4, `${tag} ${app} Dashboard: four counts`);
     ok((await p.locator('[data-visual="funnel"] .dash-bar').count()) >= 1 && (await p.locator('[data-visual="time"]').count()) === 1 && (await p.locator('[data-visual="coverage"] .dash-ring').count()) === 1 && (await p.locator('[data-visual="attention"]').count()) === 1, `${tag} ${app} Dashboard: funnel bars, time by stage, coverage ring, needs attention`);
+    // M24F.5 — the governing sentence and the panels are one tap deeper; open both, then compare.
+    for (const id of ['dash-about-toggle', 'dash-detail-toggle']) { const b = p.locator(`[data-testid="${id}"][aria-expanded="false"]`); if (await b.count()) { await b.first().click(); await sleep(300); } }
     const funnelVals = await p.locator('[data-visual="funnel"] .dash-bar-value').allInnerTexts();
     const tableVals = await p.locator('[data-metric="funnel_progression"] tbody tr td:nth-child(2)').allInnerTexts();
     ok(funnelVals.length && funnelVals.every((v, i) => Number(v.trim().split(' ')[0]) === Number(tableVals[i])), `${tag} ${app} Dashboard: the funnel bars carry the same counts as the detail table (${funnelVals.join(', ')})`);

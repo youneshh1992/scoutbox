@@ -148,7 +148,9 @@ for (const [w, h] of [[320, 690], [360, 780], [390, 844], [430, 932], [640, 360]
     const m = await measure(page); check(tag, 'Offer', m, 110);
     const sec = page.locator('[data-testid="offer-section"]');
     const t0 = await txt(sec);
-    ok(/Eastport FC/.test(t0) && /Status/.test(t0) && /Accept/.test(t0) && /Decline/.test(t0) && /View terms/.test(t0), `${tag} Offer: club, status, Accept / Decline, "View terms"`);
+    // M24F.5 — the status is its own line (no "Status" fact label); it carries the accessible label "Status: …".
+    const hasStatus = (await sec.locator('[aria-label^="Status:"]').count()) >= 1;
+    ok(/Eastport FC/.test(t0) && hasStatus && /Accept/.test(t0) && /Decline/.test(t0) && /View terms/.test(t0), `${tag} Offer: club, status, Accept / Decline, "View terms"`);
     ok(/Offer acceptance is not a signature\./.test(t0), `${tag} Offer: the one quiet line`);
     ok(!/Conditions:/.test(t0) && !/Message from the club/.test(t0) && !/Earlier revisions/.test(t0), `${tag} Offer root: no conditions, message or history on the root`);
     ok(!/\d{4}-\d{2}-\d{2}/.test(t0), `${tag} Offer root: dates read as days, not ISO`);

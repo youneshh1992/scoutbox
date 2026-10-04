@@ -76,6 +76,7 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
 
   // Organisation: the two panels
   await p.evaluate(() => { window.location.hash = '#/organisation'; });
+  for (let i = 0; i < 20 && !(await p.locator('details.settings-row').count()); i++) await p.waitForTimeout(250); await p.evaluate(() => document.querySelectorAll('details.settings-row').forEach((d) => { d.open = true; })); // M24F.5 — Staff & Security sections are rows; open them, then assert the same
   await p.waitForTimeout(1400);
   const prefs = await p.locator('[data-panel="notification-preferences"]').count();
   const audit = await p.locator('[data-panel="audit-log"]').count();
@@ -121,6 +122,7 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
   // 390px: the new panels
   await p.setViewportSize({ width: 390, height: 844 });
   await p.evaluate(() => { window.location.hash = '#/organisation'; });
+  for (let i = 0; i < 20 && !(await p.locator('details.settings-row').count()); i++) await p.waitForTimeout(250); await p.evaluate(() => document.querySelectorAll('details.settings-row').forEach((d) => { d.open = true; })); // M24F.5 — Staff & Security sections are rows; open them, then assert the same
   await p.waitForTimeout(1200);
   const overflow = await p.evaluate(() => Math.max(
     document.documentElement.scrollWidth - document.documentElement.clientWidth,

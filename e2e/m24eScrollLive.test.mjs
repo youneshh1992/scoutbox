@@ -248,7 +248,11 @@ for (const [who, port, org, name, role, hash, lastSel] of [
   for (const [w, h] of [[640, 360], [1024, 600], [1440, 700]]) {
     const ctx = await ctxFor(w, h);
     const page = await enter(ctx, port, org, name, role, `${who} page@${w}x${h}`);
-    if (hash) { await page.evaluate((x) => { location.hash = x; }, hash); await sleep(600); }
+    if (hash) {
+      await page.evaluate((x) => { location.hash = x; }, hash); await sleep(600);
+      // M24F.5 — Staff & Security sections are rows; open every row so the true last control (and the taller page) is what gets audited.
+      await page.evaluate(() => document.querySelectorAll('.content details.settings-row').forEach((d) => { d.open = true; })); await sleep(300);
+    }
     else {
       // Trust // Trust & Safety has no hash router Safety has no hash router: pick the section in the sidebar (a drawer at ≤ 900px, opened from the top bar).
       if (w <= 900) {

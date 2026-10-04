@@ -61,6 +61,7 @@ await grass.waitForSelector('.topbar', { timeout: 20000 });
 await grass.evaluate(() => { location.hash = '#/coverage'; }); // M15-Nav deep link (Coverage)
 await grass.waitForSelector('text=Travel time/route estimates unavailable', { timeout: 15000 });
 await grass.evaluate(() => { location.hash = '#/organisation'; }); // M15-Nav deep link (Organisation)
+for (let i = 0; i < 20 && !(await grass.locator('details.settings-row').count()); i++) await grass.waitForTimeout(250); await grass.evaluate(() => document.querySelectorAll('details.settings-row').forEach((d) => { d.open = true; })); // M24F.5 — Staff & Security sections are rows; open them, then assert the same
 await grass.waitForSelector('text=Onboarding checklist', { timeout: 10000 });
 say('grassroots demo: coverage (honest travel note) + onboarding render');
 await grass.close();

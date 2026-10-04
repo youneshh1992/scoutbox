@@ -74,6 +74,7 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
 
   // ---- the Dynamic Watchlists destination and the demo story
   await goHash(p, '#/recruitment/watchlists');
+  await p.locator('[data-testid="watchlists-about"] summary').click().catch(() => {}); // M24F.5 — the definition sits behind About
   let body = (await p.locator('body').innerText()) ?? '';
   ok(/Dynamic Watchlists/.test(body), `${name} the Dynamic Watchlists destination exists in the bundle`);
   ok(/2027 Defensive Midfielders/.test(body), `${name} the demo story watchlist is pre-seeded`);

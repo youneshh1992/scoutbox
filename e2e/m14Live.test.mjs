@@ -150,6 +150,8 @@ if (!prov.includes('Organisation confirmation')) fail('verification steps missin
 say('L1: scout profile shows “Role verified: Academy Scout” with admin-confirmation provenance');
 
 // ================================================================ L4
+// M24F.5 — the credential form sits behind "Add a credential"; open it first.
+await scout.click('[data-testid="verify-credential-add"] > summary');
 await scout.fill('input[aria-label="Licence type"]', 'UEFA B Licence');
 await scout.fill('input[aria-label="Issuing body"]', 'UEFA');
 await scout.click('button:has-text("Submit credential")');
@@ -205,7 +207,7 @@ await admin.click('button:has-text("Enter")');
 await admin.getByRole('button', { name: 'Verification', exact: true }).click();
 await admin.waitForSelector('text=Riverton Athletic FC', { timeout: 15000 });
 const caseText = await admin.locator('.list-row', { hasText: 'Riverton Athletic FC' }).innerText();
-if (!caseText.includes('mailbox proved') || !caseText.includes('dnsOwnership=not_configured')) fail('prepared case missing honest check results');
+if (!caseText.includes('mailbox proved') || !caseText.includes('DNS ownership: not configured')) fail('prepared case missing honest check results');
 await admin.locator('.list-row', { hasText: 'Riverton Athletic FC' }).locator('button:has-text("Approve org + root admin")').click();
 await admin.waitForSelector('text=Organisation verified; root administrator established.', { timeout: 15000 });
 r = await j('/orgs?platform=main');
@@ -213,8 +215,9 @@ if (!r.body.some((o) => o.name === 'Riverton Athletic FC' && o.verified)) fail('
 say('L3: Trust & Safety approved the prepared case — organisation + first root admin established');
 
 // ================================================================ L5
+await scout.locator('[data-testid="claim-dispute-open"]').first().click(); // M24F.5 — the reason field opens from a quiet link
 await scout.locator('input[aria-label="Dispute reason"]').first().fill('My departure date is wrong — I worked through July.');
-await scout.locator('button:has-text("Dispute")').first().click();
+await scout.locator('[data-testid="claim-dispute-send"]').first().click();
 await scout.waitForSelector('text=Trust & Safety reviews the dispute', { timeout: 15000 });
 await admin.click('nav.sidebar button:has-text("Cases")');
 await admin.click('nav.subnav button:has-text("Ver. disputes")');
@@ -231,6 +234,9 @@ await guardian.goto('http://localhost:8391/');
 await guardian.waitForSelector('text=Our promises to every player', { timeout: 30000 });
 await guardian.locator('text=Enter').last().click();
 await guardian.waitForSelector('text=Guardian', { timeout: 20000 });
+// M24F.5 — the child's sections are rows on the guardian dashboard; open them before reading or acting inside.
+await guardian.waitForSelector('[data-testid^="guardian-child-"] > [role="button"]', { timeout: 25000 });
+{ const closed = guardian.locator('[data-testid^="guardian-child-"] > [role="button"][aria-expanded="false"]'); for (let i = 0; i < 40 && (await closed.count()) > 0; i++) { await closed.first().click().catch(() => {}); await guardian.waitForTimeout(150); } }
 await guardian.waitForSelector('text=Join a club squad', { timeout: 25000 });
 const gNote = await guardian.locator('body').innerText();
 if (!gNote.includes('accepted by you, the guardian')) fail('guardian invite section missing the guardian-only wording');

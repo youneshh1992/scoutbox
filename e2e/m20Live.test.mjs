@@ -133,6 +133,16 @@ async function enterClub(ctx, org, name, role) {
 const tokenOf = (page) => page.evaluate(() => {
   try { return JSON.parse(localStorage.getItem('scoutbox-club-session') ?? 'null')?.token ?? null; } catch { return null; }
 });
+// M24F.5 — the dashboard root is the executive layer; the filters, the governing
+// sentence with the window, and every panel are one tap deeper. Open all three,
+// then assert exactly what M20 asserted.
+async function openDash(page) {
+  await page.waitForTimeout(500);
+  for (const id of ['dash-more-filters', 'dash-about-toggle', 'dash-detail-toggle']) {
+    const b = page.locator(`[data-testid="${id}"][aria-expanded="false"]`);
+    if (await b.count()) { await b.first().click(); await page.waitForTimeout(300); }
+  }
+}
 async function goto(page, hash, selector) {
   await page.evaluate((h) => { window.location.hash = h; }, hash);
   if (selector) {
@@ -141,6 +151,7 @@ async function goto(page, hash, selector) {
       const text = (await page.locator('body').innerText().catch(() => '')).replace(/\n/g, ' ').slice(0, 400);
       fail(`navigation to ${hash} never showed ${selector} (now at ${where}): ${text}`);
     });
+    if (/director-dashboard/.test(selector)) await openDash(page);
   }
   await page.waitForTimeout(500);
 }
@@ -234,6 +245,7 @@ await goto(maria, DASH, '[data-screen="director-dashboard"]');
   await maria.reload();
   await maria.waitForSelector('[data-screen="director-dashboard"]', { timeout: 25000 });
   await maria.waitForTimeout(1200);
+  await openDash(maria);
   const after = await maria.evaluate(() => location.hash);
   const selected = await maria.locator('select[aria-label="Period"]').inputValue();
   ok(after === hash && selected === 'last_30_days', 'D3 refresh reproduces exactly the view that was shared');

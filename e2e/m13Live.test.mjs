@@ -172,6 +172,9 @@ await guardian.goto('http://localhost:8291/');
 await guardian.waitForSelector('text=Our promises to every player', { timeout: 30000 });
 await guardian.locator('text=Enter').last().click(); // Amara (guardian, dev login)
 await guardian.waitForSelector('text=Guardian', { timeout: 20000 });
+// M24F.5 — the child's sections are rows on the guardian dashboard; open them before reading or acting inside.
+await guardian.waitForSelector('[data-testid^="guardian-child-"] > [role="button"]', { timeout: 25000 });
+{ const closed = guardian.locator('[data-testid^="guardian-child-"] > [role="button"][aria-expanded="false"]'); for (let i = 0; i < 40 && (await closed.count()) > 0; i++) { await closed.first().click().catch(() => {}); await guardian.waitForTimeout(150); } }
 await guardian.waitForSelector('text=Suitability preferences', { timeout: 25000 });
 const gText = await guardian.locator('body').innerText();
 if (gText.includes('Relocation:')) fail('relocation preference rendered for a minor');
@@ -228,6 +231,7 @@ await grass.waitForSelector('text=Not yet assessed', { timeout: 15000 });
 await grass.evaluate(() => { location.hash = '#/network'; }); // M15-Nav deep link (Club Network)
 await grass.waitForSelector('text=No group memberships', { timeout: 15000 });
 await grass.evaluate(() => { location.hash = '#/organisation'; }); // M15-Nav deep link (Organisation)
+for (let i = 0; i < 20 && !(await grass.locator('details.settings-row').count()); i++) await grass.waitForTimeout(250); await grass.evaluate(() => document.querySelectorAll('details.settings-row').forEach((d) => { d.open = true; })); // M24F.5 — Staff & Security sections are rows; open them, then assert the same
 await grass.waitForSelector('text=Onboarding checklist', { timeout: 15000 });
 say('L4b: grassroots context renders its M13 screens — isolated by default, no shares, own onboarding');
 

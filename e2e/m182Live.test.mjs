@@ -117,6 +117,7 @@ const tokenOf = (page) => page.evaluate(() => {
 });
 async function goto(page, hash, selector) {
   await page.evaluate((h) => { window.location.hash = h; }, hash);
+  if (hash === '#/organisation') { for (let i = 0; i < 20 && !(await page.locator('details.settings-row').count()); i++) await page.waitForTimeout(250); await page.evaluate(() => document.querySelectorAll('details.settings-row').forEach((d) => { d.open = true; })); } // M24F.5 — Staff & Security sections are rows; open them, then assert the same
   if (selector) {
     await page.waitForSelector(selector, { timeout: 25000 }).catch(async (e) => {
       const where = await page.evaluate(() => location.hash);
@@ -417,6 +418,7 @@ await goto(scout, ORG, '[data-panel="notification-preferences"]');
   await p.click('button:has-text("Enter workspace")');
   await p.waitForSelector('.topbar', { timeout: 30000 });
   await p.evaluate((h) => { window.location.hash = h; }, ORG);
+  for (let i = 0; i < 20 && !(await p.locator('details.settings-row').count()); i++) await p.waitForTimeout(250); await p.evaluate(() => document.querySelectorAll('details.settings-row').forEach((d) => { d.open = true; })); // M24F.5 — Staff & Security sections are rows; open them, then assert the same
   await p.waitForSelector('[data-panel="notification-preferences"]', { timeout: 20000 });
   await p.waitForTimeout(1200);
   const overflow = await p.evaluate(() => Math.max(

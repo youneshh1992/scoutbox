@@ -71,6 +71,13 @@ async function login(p) {
 const goHash = async (p, hash, wait = 1400) => {
   await p.evaluate((h) => { window.location.hash = h; }, hash);
   await p.waitForTimeout(wait);
+  // M24F.5 — the root is the executive layer; filters, the governing sentence and every panel are one tap deeper. Open them, then assert the same.
+  if (hash.startsWith('#/recruitment/dashboard')) {
+    for (const id of ['dash-more-filters', 'dash-about-toggle', 'dash-detail-toggle']) {
+      const b = p.locator(`[data-testid="${id}"][aria-expanded="false"]`);
+      if (await b.count()) { await b.first().click(); await p.waitForTimeout(250); }
+    }
+  }
 };
 
 const DASH = '#/recruitment/dashboard';

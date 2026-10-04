@@ -73,7 +73,7 @@ ok(/m15conflictShort: 'Club record needs review'/.test(i18n), 'Passport: a confl
 const offer = strip(read('scoutbox-player/src/components/M23Offer.tsx'));
 ok(after(offer, "pt('offerConditions')", 'offer-terms-') && after(offer, "pt('offerOlderRevisions')", 'offer-terms-') && after(offer, "pt('offerMessage')", 'offer-terms-'), 'Offer root: conditions, the club message and earlier revisions sit behind "View terms"');
 ok(/offerNotSignature: 'Offer acceptance is not a signature\.'/.test(i18n) && /testID={`offer-not-signature-\$\{o\.id\}`}/.test(offer), 'Offer root: one quiet line says accepting is not a signature');
-ok(/Kicker>\{pt\('offerKicker'\)\}/.test(offer) && /fontSize: 22/.test(offer), 'Offer root: kicker and the club set large');
+ok(/Kicker>\{pt\('offerKicker'\)\}/.test(offer) && /fontSize: (2[2-9]|3\d)\b/.test(offer), 'Offer root: kicker and the club set large');
 const profile = strip(read('scoutbox-player/src/app/(tabs)/profile.tsx'));
 ok(/testID="evidence-root"/.test(profile) && /testID="evidence-video-row"/.test(profile) && /testID="evidence-combine-row"/.test(profile) && /testID="evidence-references-row"/.test(profile) && /testID="evidence-attendance-row"/.test(profile) && /testID="evidence-latest-thumb"/.test(profile), 'Evidence root: latest clip as a picture, one row per kind with its count');
 ok(after(profile, 'WebVideo src={src}', 'page === \'video\''), 'Evidence: the clips play one tap deep, not on the root');

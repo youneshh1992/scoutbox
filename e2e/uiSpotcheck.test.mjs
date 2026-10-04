@@ -35,7 +35,7 @@ const freshPage = async () => {
 
   // M9: pathway + opportunity radar on Home
   await page.waitForSelector('text=Your journey', { timeout: 10000 }); // M24F.4 — the Home's journey section
-  await page.waitForSelector('text=Clubs within reach', { timeout: 10000 });
+  await page.waitForSelector('text=/clubs? within 50 km/', { timeout: 10000 }); // M24F.5 — the row names its count in words
   await page.waitForSelector('text=Moss Side Athletic', { timeout: 5000 });
   say('pathway + opportunity radar render on Home');
 

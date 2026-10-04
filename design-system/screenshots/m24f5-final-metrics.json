@@ -1,0 +1,333 @@
+{
+ "metrics": {
+  "home-320x700": {
+   "words": 80,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 0,
+   "bordered": 1,
+   "height": 1023,
+   "fonts": {
+    "AlbertSans-ExtraBold": 1,
+    "Inter": 51
+   }
+  },
+  "home-430x932": {
+   "words": 80,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 0,
+   "bordered": 1,
+   "height": 1003,
+   "fonts": {
+    "AlbertSans-ExtraBold": 1,
+    "Inter": 51
+   }
+  },
+  "home-640x360": {
+   "words": 80,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 0,
+   "bordered": 1,
+   "height": 1003,
+   "fonts": {
+    "AlbertSans-ExtraBold": 1,
+    "Inter": 51
+   }
+  },
+  "home-390": {
+   "words": 80,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 0,
+   "bordered": 1,
+   "height": 1003,
+   "fonts": {
+    "AlbertSans-ExtraBold": 1,
+    "Inter": 51
+   }
+  },
+  "home-fold-390": {
+   "words": 80,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 0,
+   "bordered": 1,
+   "height": 1003,
+   "fonts": {
+    "AlbertSans-ExtraBold": 1,
+    "Inter": 51
+   }
+  },
+  "activity-390": {
+   "words": 56,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 0,
+   "bordered": 0,
+   "height": 844,
+   "fonts": {
+    "Inter": 35
+   }
+  },
+  "passport-390": {
+   "words": 89,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 1,
+   "bordered": 1,
+   "height": 1187,
+   "fonts": {
+    "Inter": 50
+   }
+  },
+  "trust-390": {
+   "words": 11,
+   "text": "ScoutBox Trust Score\nStrong evidence\nEvidence confidence only\n79/100\nView breakdown"
+  },
+  "development-390": {
+   "words": 53,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 1,
+   "bordered": 1,
+   "height": 1003,
+   "fonts": {
+    "Inter": 35
+   }
+  },
+  "boxcam-390": {
+   "words": 76,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 1,
+   "bordered": 2,
+   "height": 1048,
+   "fonts": {
+    "Inter": 37
+   }
+  },
+  "combine-390": {
+   "words": 57,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 1,
+   "bordered": 1,
+   "height": 1003,
+   "fonts": {
+    "Inter": 37
+   }
+  },
+  "evidence-390": {
+   "words": 59,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 0,
+   "bordered": 0,
+   "height": 1073,
+   "fonts": {
+    "Inter": 44
+   }
+  },
+  "offer-390": {
+   "words": 61,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 0,
+   "bordered": 7,
+   "height": 1073,
+   "fonts": {
+    "Inter": 35
+   }
+  },
+  "inbox-390": {
+   "words": 56,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 0,
+   "bordered": 0,
+   "height": 1073,
+   "fonts": {
+    "Inter": 35
+   }
+  },
+  "trial-390": {
+   "words": 35,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 2,
+   "bordered": 4,
+   "height": 1073,
+   "fonts": {
+    "Inter": 23
+   }
+  },
+  "grassroots-home-1440": {
+   "words": 154,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 1,
+   "bordered": 1,
+   "height": 900,
+   "fonts": {
+    "Inter": 61
+   }
+  },
+  "grassroots-home-full-1440": {
+   "words": 154,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 1,
+   "bordered": 1,
+   "height": 900,
+   "fonts": {
+    "Inter": 61
+   }
+  },
+  "grassroots-radar-1280": {
+   "words": 163,
+   "paragraphs": 1,
+   "cards": 0,
+   "pills": 0,
+   "bordered": 10,
+   "height": 900,
+   "fonts": {
+    "Inter": 43
+   }
+  },
+  "grassroots-squad-1280": {
+   "words": 84,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 0,
+   "bordered": 3,
+   "height": 915,
+   "fonts": {
+    "Inter": 42
+   }
+  },
+  "nobody-missed-1280": {
+   "words": 118,
+   "paragraphs": 1,
+   "cards": 0,
+   "pills": 0,
+   "bordered": 0,
+   "height": 800,
+   "fonts": {
+    "Inter": 32
+   }
+  },
+  "director-dashboard-1440": {
+   "words": 101,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 0,
+   "bordered": 1,
+   "height": 900,
+   "fonts": {
+    "Inter": 53
+   }
+  },
+  "director-dashboard-fold-1440": {
+   "words": 101,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 0,
+   "bordered": 1,
+   "height": 900,
+   "fonts": {
+    "Inter": 53
+   }
+  },
+  "director-dashboard-1024": {
+   "words": 101,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 0,
+   "bordered": 1,
+   "height": 1000,
+   "fonts": {
+    "Inter": 53
+   }
+  },
+  "director-dashboard-fold-1024": {
+   "words": 101,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 0,
+   "bordered": 1,
+   "height": 1000,
+   "fonts": {
+    "Inter": 53
+   }
+  },
+  "agent-home-1280": {
+   "words": 49,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 4,
+   "bordered": 2,
+   "height": 800,
+   "fonts": {
+    "Inter": 26
+   }
+  },
+  "agent-clients-1280": {
+   "words": 93,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 0,
+   "bordered": 11,
+   "height": 800,
+   "fonts": {
+    "Inter": 30
+   }
+  },
+  "agent-transactions-1280": {
+   "words": 149,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 0,
+   "bordered": 15,
+   "height": 862,
+   "fonts": {
+    "Inter": 62
+   }
+  },
+  "agent-compliance-1280": {
+   "words": 179,
+   "paragraphs": 2,
+   "cards": 2,
+   "pills": 0,
+   "bordered": 7,
+   "height": 1276,
+   "fonts": {
+    "Inter": 57
+   }
+  },
+  "admin-home-1280": {
+   "words": 74,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 0,
+   "bordered": 15,
+   "height": 800,
+   "fonts": {
+    "Inter": 33
+   }
+  },
+  "admin-verification-1280": {
+   "words": 158,
+   "paragraphs": 0,
+   "cards": 0,
+   "pills": 0,
+   "bordered": 16,
+   "height": 800,
+   "fonts": {
+    "Inter": 41
+   }
+  }
+ },
+ "errors": []
+}

@@ -96,7 +96,8 @@ await admin.waitForSelector('text=Report queue', { timeout: 20000 });
 await admin.getByRole('button', { name: 'Verification', exact: true }).click();
 await admin.waitForSelector('text=Riverton Athletic FC', { timeout: 10000 });
 await admin.waitForSelector('text=Marsh Lane Juniors', { timeout: 10000 });
-await admin.waitForSelector('text=dnsOwnership=not_configured', { timeout: 10000 });
+// M24F.5 — the check reads in words (the machine code stays in the element's title).
+await admin.waitForSelector('text=DNS ownership: not configured', { timeout: 10000 });
 await admin.waitForSelector('text=signals, not fraud', { timeout: 10000 }).catch(() => {});
 say('T&S demo: root request (pro) + grassroots request awaiting review, honest check labels');
 await admin.click('nav.sidebar button:has-text("Cases")');
