@@ -11,7 +11,7 @@ import { createElement, useEffect, useRef, useState } from 'react';
 import { Platform, View } from 'react-native';
 import { Text, TextInput } from './Text';
 import { useColors, type Palette } from '../theme';
-import { Button, Card, Muted, Pill, Row } from './ui';
+import { Button, Card, Muted, Pill, Row, Disclosure } from './ui';
 import { m16, type BoxActor, type BoxAssignment, type BoxChallenge, type BoxDashboard, type BoxDrill, type BoxSession, type BoxTarget, type DevelopmentPlan, type BoxPrefs } from '../data/m16client';
 import { pt } from '../i18n';
 import { M22BoxCamCv } from './M22BoxCamCv';
@@ -282,7 +282,8 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
       <TrainingVisual title={next?.title ?? pt('m16trainInBox')} sub={targetFact || pt('m16tagline')} />
       <SectionHead title={next?.title ?? pt('m16trainInBox')} />
       <View style={{ marginTop: -8, marginBottom: 10, flexDirection: 'row' }}><LightLabel label={pt('bcPractice')} /></View>
-      <Muted size={13}>{next?.setup?.space ? `${next.summary} ${pt('bcSetupHint')}` : pt('bcSetupHint')}</Muted>
+      <Muted size={13}>{pt('bcSetupHint')}</Muted>
+      {next?.setup?.space ? <Disclosure label="About this drill"><Muted size={12}>{next.summary}</Muted></Disclosure> : null}
       {next ? <SessionFacts facts={[{ icon: 'timer', label: targetFact }, { icon: 'circle-check', label: next.setup?.equipment?.[0] ?? pt('bcOneBall') }]} /> : null}
 
       {cv ? (
@@ -384,9 +385,10 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
               <Row><Text style={{ color: colors.text, fontSize: 13, flexShrink: 1 }}>{c.title}</Text>
                 {c.entry ? <Pill label={c.entry.status === 'completed' ? pt('m16completed') : `${c.entry.progress}/${c.targetTotal}`} tone={c.entry.status === 'completed' ? 'green' : 'default'} /> : <Button small label={pt('m16join')} onPress={async () => { try { await m16.joinChallenge(actor, c.id); reloadChallenges(); } catch (e) { setMsg(e instanceof Error ? e.message : 'failed'); } }} />}
               </Row>
-              <Muted size={11}>{c.publisher.kind === 'org' ? `${pt('m16by')} ${c.publisher.orgName}` : pt('m16byScoutbox')} · {c.disclaimer}</Muted>
+              <Muted size={11}>{c.publisher.kind === 'org' ? `${pt('m16by')} ${c.publisher.orgName}` : pt('m16byScoutbox')}</Muted>
             </View>
           ))}
+          {challenges[0]?.disclaimer ? <Disclosure label="About Box Challenges" testID="boxchallenge-about"><Muted size={12}>{challenges[0].disclaimer}</Muted></Disclosure> : null}
         </View>
       ) : null}
 
@@ -404,7 +406,7 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
         </View>
       ) : null}
 
-      {drillData?.providers.some((p) => p.id === 'production_cv') ? <Muted size={11}>{pt('m16providerNote')}</Muted> : null}
+      {drillData?.providers.some((p) => p.id === 'production_cv') ? <Disclosure label="About Box Cam checks" testID="boxcam-about"><Muted size={12}>{pt('m16providerNote')}</Muted></Disclosure> : null}
       {msg ? <Muted size={12}>{msg}</Muted> : null}
       </RefCard>
     </View>

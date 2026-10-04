@@ -4,14 +4,21 @@
 // summary, references, achievements, the non-shaming gap list, corrections
 // and revocable sharing. Adults manage their own shares; a minor's shares
 // are guardian-managed — the SERVER enforces all of it, this is only UI.
+//
+// M24F.3 — the root is the essentials: the verified status, the current
+// club, the availability, the evidence in one word, a short timeline. The
+// disclaimer sits behind "About Passport", a conflict behind "Review", the
+// counts behind "View evidence", provenance behind each event, and the three
+// forms (career, correction, sharing) behind their own rows. Nothing is gone.
 import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { Text, TextInput } from './Text';
 import { useColors, type Palette } from '../theme';
-import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
+import { Button, Card, Disclosure, EventRow, FactRow, Muted, Row, SectionTitle } from './ui';
 import { HistoryList, SectionHead } from './Reference';
 import { m15, type FootballPassport, type PassportActor, type PassportEvent, type PassportShare } from '../data/m15client';
 import { pt } from '../i18n';
+import { humanDate } from '../time';
 
 function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): [T | null, () => void, string | null] {
   const [v, setV] = useState<T | null>(null);
@@ -19,8 +26,7 @@ function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): [T | null, () => voi
   const [tick, setTick] = useState(0);
   useEffect(() => {
     let ok = true;
-    setErr(null);
-    fn().then((x) => ok && setV(x)).catch((e) => ok && setErr(e instanceof Error ? e.message : 'failed'));
+    fn().then((x) => { if (ok) { setV(x); setErr(null); } }).catch((e) => ok && setErr(e instanceof Error ? e.message : 'failed'));
     return () => { ok = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, tick]);
@@ -32,19 +38,12 @@ const inputStyle = (colors: Palette) => ({
   paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, borderWidth: 1, borderColor: colors.line,
 } as const);
 
-// Short provenance chips; the long honest copy comes from the server.
-const PROV_TONE: Record<string, 'green' | 'blue' | 'gold' | 'default'> = {
-  verified_club_confirmed: 'green', authoritative_registry: 'green',
-  verified_coach_confirmed: 'blue', scoutbox_reviewed: 'gold',
-};
-function ProvPill({ provenance }: { provenance: string }) {
+/** The provenance as one short phrase ("Verified by club"), never a raw identifier. */
+export function provWord(provenance: string): string {
   const key = `m15prov_${provenance}` as Parameters<typeof pt>[0];
   let label: string | undefined;
   try { label = pt(key); } catch { label = undefined; }
-  // An unrecognised provenance used to render its raw identifier at the
-  // player ("box_cam_observed"). It now says, in words, that ScoutBox cannot
-  // classify the source — never a guess at which one it is.
-  return <Pill label={label ?? pt('m15prov_unknown')} tone={PROV_TONE[provenance] ?? 'default'} />;
+  return label ?? pt('m15prov_unknown');
 }
 
 function eventLabel(e: PassportEvent): string {
@@ -53,9 +52,9 @@ function eventLabel(e: PassportEvent): string {
     club_joined: `${pt('m15evJoined')} ${org}`,
     club_left: `${pt('m15evLeft')} ${org}`,
     club_affiliation_verified: `${pt('m15evAffVerified')} — ${org}`,
-    trial_attended: `${pt('m15evTrial')} — ${org}`,
-    trial_outcome: `${pt('m15evTrialOutcome')} — ${org}`,
-    assessment_completed: `${pt('m15evAssessment')} — ${org}`,
+    trial_attended: `${pt('m15evTrial')} · ${org}`,
+    trial_outcome: `${pt('m15evTrialOutcome')} · ${org}`,
+    assessment_completed: `${pt('m15evAssessment')} · ${org}`,
     reference_received: `${pt('m15evReference')}${(e.title as { coach?: string }).coach ? ` — ${(e.title as { coach?: string }).coach}` : ''}`,
     evidence_added: `${pt('m15evEvidence')}: ${(e.title as { label?: string }).label ?? ''}`,
     development_objective_created: pt('m15evObjective'),
@@ -73,22 +72,13 @@ function eventLabel(e: PassportEvent): string {
   return map[e.type] ?? e.type.replace(/_/g, ' ');
 }
 
+/** A timeline event: the date and the label; the source and its plain-language copy behind the row. */
 function TimelineRow({ e }: { e: PassportEvent }) {
-  const colors = useColors();
-  const [open, setOpen] = useState(false);
   return (
-    <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6, marginTop: 6 }}>
-      <Row>
-        <Text style={{ color: colors.muted, fontSize: 12, minWidth: 74 }}>{e.when.display}</Text>
-        <Text style={{ color: colors.text, fontSize: 13, flexShrink: 1 }}>{eventLabel(e)}</Text>
-        <ProvPill provenance={e.provenance} />
-      </Row>
-      {e.provenanceCopy ? (
-        <Text onPress={() => setOpen((x) => !x)} style={{ color: colors.muted, fontSize: 11.5, marginTop: 2 }} accessibilityRole="button">
-          {open ? e.provenanceCopy : pt('m15whyTap')}
-        </Text>
-      ) : null}
-    </View>
+    <EventRow date={e.when.display} label={eventLabel(e)} testID={`passport-event-${e.id}`}>
+      <Muted size={12.5}>{pt('m15source')}: {provWord(e.provenance)}</Muted>
+      {e.provenanceCopy ? <Muted size={12.5}>{e.provenanceCopy}</Muted> : null}
+    </EventRow>
   );
 }
 
@@ -113,25 +103,23 @@ function SharesPanel({ actor }: { actor: PassportActor }) {
     } catch (e) { setMsg(e instanceof Error ? e.message : 'failed'); }
   };
   return (
-    <View style={{ marginTop: 8 }}>
-      <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{pt('m15shareTitle')}</Text>
-      <Muted size={12}>{actor.kind === 'guardian' ? pt('m15shareGuardianNote') : pt('m15shareNote')}</Muted>
-      <Row style={{ marginTop: 6 }}>
+    <View style={{ gap: 6 }}>
+      <Muted size={12.5}>{actor.kind === 'guardian' ? pt('m15shareGuardianNote') : pt('m15shareNote')}</Muted>
+      <Row>
         <Button small label={pt('m15sharePublic')} onPress={() => void create('public')} />
         <Button small label={pt('m15shareRecruitment')} onPress={() => void create('recruitment')} />
       </Row>
       {minted ? (
-        <View style={{ marginTop: 6, backgroundColor: colors.panel2, borderRadius: 8, padding: 8 }}>
+        <View style={{ backgroundColor: colors.panel2, borderRadius: 8, padding: 8 }}>
           <Text selectable style={{ color: colors.text, fontSize: 12, fontFamily: 'monospace' }}>{minted.url}</Text>
           <Muted size={11.5}>{pt('m15shareOnce')} {minted.note}</Muted>
         </View>
       ) : null}
       {(shares ?? []).map((s) => (
-        <Row key={s.id} style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6, marginTop: 6 }}>
-          <Pill label={s.mode === 'public' ? pt('m15sharePublicPill') : pt('m15shareRecruitmentPill')} tone={s.mode === 'public' ? 'blue' : 'gold'} />
-          <Muted size={12}>{pt('m15shareViews')}: {s.views}</Muted>
+        <Row key={s.id} style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6 }}>
+          <Text style={{ color: colors.text, fontSize: 13 }}>{s.mode === 'public' ? pt('m15sharePublicPill') : pt('m15shareRecruitmentPill')} · {pt('m15shareViews')} {s.views}</Text>
           {s.revokedAt
-            ? <Pill label={pt('m15shareRevoked')} tone="red" />
+            ? <Muted size={12}>{pt('m15shareRevoked')}</Muted>
             : <Button small label={pt('m15shareRevoke')} onPress={async () => { try { await m15.revokeShare(actor, s.id); reload(); } catch { /* shown on reload */ } }} />}
         </Row>
       ))}
@@ -140,7 +128,7 @@ function SharesPanel({ actor }: { actor: PassportActor }) {
   );
 }
 
-/** The full Passport section for the You tab (player) and guardian child view. */
+/** The full Passport section for the Football tab (player) and guardian child view. */
 export function FootballPassportSection({ actor, isMinor, childName }: { actor: PassportActor; isMinor?: boolean; childName?: string }) {
   const colors = useColors();
   const [p, reload, err] = useLoad<FootballPassport>(() => m15.passport(actor), [actor.id, actor.kind === 'guardian' ? actor.childId : '']);
@@ -153,55 +141,58 @@ export function FootballPassportSection({ actor, isMinor, childName }: { actor: 
   const [msg, setMsg] = useState<string | null>(null);
   if (err) return <Card><SectionTitle>{pt('m15title')}</SectionTitle><Muted>{err}</Muted></Card>;
   if (!p) return null;
-  const events = showAll ? p.timeline : p.timeline.slice(0, 6);
+  const events = showAll ? p.timeline : p.timeline.slice(0, 4);
   const canShare = actor.kind === 'guardian' || !isMinor;
   const act = async (fn: () => Promise<unknown>, okMsg: string) => {
     try { await fn(); setMsg(okMsg); reload(); } catch (e) { setMsg(`${e instanceof Error ? e.message : 'failed'}`); }
   };
+  const coverage = pt(`m15cov_${p.completeness.evidenceCoverage}` as Parameters<typeof pt>[0]);
+  const club = p.status.currentClub;
   return (
-    <Card>
+    <Card testID="passport-root">
       <SectionTitle>{pt('m15title')}{childName ? ` — ${childName}` : ''}</SectionTitle>
-      <Muted size={12}>{p.note}</Muted>
+      <Muted size={13}>{p.identity?.label ?? pt('m15verifiedRecord')}</Muted>
 
-      {/* Current status */}
-      <Row style={{ marginTop: 6 }}>
-        {p.identity ? <Pill label={p.identity.label} tone="gold" /> : null}
-        {p.status.currentClub
-          ? <Pill label={`${p.status.currentClub.orgName}${p.status.currentClub.since ? ` · ${pt('m15since')} ${p.status.currentClub.since}` : ''}`} tone={PROV_TONE[p.status.currentClub.provenance] ?? 'default'} />
-          : <Pill label={pt('m15noClub')} />}
-        {p.status.availability ? <Pill label={pt(`m15avail_${p.status.availability}` as Parameters<typeof pt>[0])} tone="blue" /> : null}
-      </Row>
+      {/* LEVEL 1 — the facts */}
+      <View>
+        <FactRow k={pt('m15currentClub')} v={club?.orgName ?? pt('m15noClub')} sub={club ? `${club.since ? `${pt('m15since')} ${humanDate(club.since)} · ` : ''}${provWord(club.provenance)}` : null} testID="passport-club" />
+        {p.status.availability ? <FactRow k={pt('m15availability')} v={pt(`m15avail_${p.status.availability}` as Parameters<typeof pt>[0])} testID="passport-availability" /> : null}
+        <FactRow k={pt('m15evidence')} v={pt('m15coverageWord').replace('{cov}', coverage)} testID="passport-evidence" />
+      </View>
 
-      {/* Conflicts are explained to the player, never silently resolved */}
+      {/* a conflict is one line and a Review; the full explanation is behind it */}
       {p.conflicts.map((c) => (
-        <View key={c.code + (c.submitted.orgName ?? '')} style={{ backgroundColor: colors.panel2, borderRadius: 8, padding: 8, marginTop: 6 }}>
-          <Text style={{ color: colors.text, fontSize: 12.5 }}>
-            {pt('m15conflict')
-              .replace('{auth}', c.authoritative.orgName ?? '?')
-              .replace('{self}', c.submitted.orgName ?? '?')}
-          </Text>
-        </View>
+        <Disclosure key={c.code + (c.submitted.orgName ?? '')} label={pt('m15conflictShort')} hint={pt('m15conflictLine')} testID="passport-conflict">
+          <Muted size={13}>
+            {pt('m15conflict').replace('{auth}', c.authoritative.orgName ?? '?').replace('{self}', c.submitted.orgName ?? '?')}
+          </Muted>
+        </Disclosure>
       ))}
-      {p.temporalConflicts.length > 0 ? (
-        <Muted size={12}>{pt('m15temporal')}</Muted>
-      ) : null}
+      {p.temporalConflicts.length > 0 ? <Muted size={12.5}>{pt('m15temporal')}</Muted> : null}
 
-      {/* Evidence coverage + gaps (non-shaming) */}
-      <Row style={{ marginTop: 6 }}>
-        <Pill label={`${pt('m15coverage')}: ${pt(`m15cov_${p.completeness.evidenceCoverage}` as Parameters<typeof pt>[0])}`} tone={p.completeness.evidenceCoverage === 'strong' ? 'green' : 'default'} />
-        <Muted size={12}>{pt('m15checks').replace('{n}', String(p.completeness.eligibility.satisfied)).replace('{total}', String(p.completeness.eligibility.total))}</Muted>
-      </Row>
-      <Muted size={12}>
-        {pt('m15evidenceLine')
-          .replace('{matches}', String(p.evidence.fullMatches)).replace('{clips}', String(p.evidence.clips))
-          .replace('{refs}', String(p.evidence.references))}
-      </Muted>
-      {p.completeness.gaps.slice(0, 4).map((g) => (
-        <Muted key={g.id} size={12}>· {pt(GAP_LABEL[g.id] ?? 'm15gapCareer')}</Muted>
-      ))}
+      {/* LEVEL 2 — the evidence counts and the gaps */}
+      <Disclosure label={pt('m15viewEvidence')} testID="passport-evidence-detail">
+        <Muted size={13}>{pt('m15checks').replace('{n}', String(p.completeness.eligibility.satisfied)).replace('{total}', String(p.completeness.eligibility.total))}</Muted>
+        <Muted size={13}>
+          {pt('m15evidenceLine')
+            .replace('{matches}', String(p.evidence.fullMatches)).replace('{clips}', String(p.evidence.clips))
+            .replace('{refs}', String(p.evidence.references))}
+        </Muted>
+        {p.completeness.gaps.slice(0, 4).map((g) => (
+          <Muted key={g.id} size={12.5}>· {pt(GAP_LABEL[g.id] ?? 'm15gapCareer')}</Muted>
+        ))}
+      </Disclosure>
 
-      {/* Club history — provenance per row, trials never appear here.
-          M24C: the reference's numbered record list. */}
+      {/* Timeline — date and label; the source behind each row */}
+      <View style={{ marginTop: 10 }} testID="passport-timeline">
+        <SectionHead title={pt('m15timeline')} />
+        {events.map((e) => <TimelineRow key={e.id} e={e} />)}
+        {p.timeline.length > 4 ? (
+          <Row style={{ marginTop: 6 }}><Button small tertiary label={showAll ? pt('m15less') : pt('m15showAll').replace('{n}', String(p.timeline.length))} onPress={() => setShowAll((x) => !x)} testID="passport-timeline-more" /></Row>
+        ) : null}
+      </View>
+
+      {/* Club history — trials never appear here */}
       {p.clubHistory.length > 0 ? (
         <View style={{ marginTop: 4 }}>
           <SectionHead title={pt('m15history')} />
@@ -210,75 +201,68 @@ export function FootballPassportSection({ actor, isMinor, childName }: { actor: 
             rows={p.clubHistory.map((r2, i) => ({
               index: String(i + 1).padStart(2, '0'),
               title: `${r2.orgName}${r2.role ? ` · ${r2.role}` : ''}`,
-              sub: `${r2.from ?? '—'} → ${r2.current ? pt('m15now') : r2.to ?? '—'}`,
-              right: <ProvPill provenance={r2.provenance} />,
+              sub: `${r2.from ?? '—'} → ${r2.current ? pt('m15now') : r2.to ?? '—'} · ${provWord(r2.provenance)}`,
             }))}
           />
         </View>
       ) : null}
 
-      {/* Timeline */}
-      <View style={{ marginTop: 8 }}>
-        <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{pt('m15timeline')}</Text>
-        {events.map((e) => <TimelineRow key={e.id} e={e} />)}
-        {p.timeline.length > 6 ? (
-          <Row style={{ marginTop: 6 }}><Button small label={showAll ? pt('m15less') : pt('m15more').replace('{n}', String(p.timeline.length))} onPress={() => setShowAll((x) => !x)} /></Row>
-        ) : null}
-      </View>
+      {/* Achievements — simple rows; the source and the withdrawal behind each */}
+      {p.achievements.length > 0 ? (
+        <View style={{ marginTop: 4 }} testID="passport-achievements">
+          <SectionHead title={pt('m15achievements')} />
+          {p.achievements.map((a) => (
+            <EventRow key={a.id} date={a.when ?? ''} label={a.title} testID={`passport-achievement-${a.id}`}>
+              <Muted size={12.5}>{pt('m15source')}: {provWord(a.provenance)}{a.confirmedBy ? ` · ${pt('m15confirmedBy')} ${a.confirmedBy}` : ''}</Muted>
+              {actor.kind === 'player' && a.withdrawable ? (
+                <Row><Button small tertiary label={pt('m15withdraw')} onPress={() => void act(() => m15.withdrawAchievement(actor.id, a.id), pt('m15withdrawn'))} /></Row>
+              ) : null}
+            </EventRow>
+          ))}
+        </View>
+      ) : null}
 
-      {/* Achievements */}
-      <View style={{ marginTop: 8 }}>
-        <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{pt('m15achievements')}</Text>
-        {p.achievements.map((a) => (
-          <Row key={a.id} style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6, marginTop: 6 }}>
-            <Text style={{ color: colors.text, fontSize: 13, flexShrink: 1 }}>{a.title}{a.when ? ` (${a.when})` : ''}</Text>
-            <ProvPill provenance={a.provenance} />
-            {a.confirmedBy ? <Muted size={11.5}>{pt('m15confirmedBy')} {a.confirmedBy}</Muted> : null}
-            {actor.kind === 'player' && a.withdrawable ? (
-              <Button small label={pt('m15withdraw')} onPress={() => void act(() => m15.withdrawAchievement(actor.id, a.id), pt('m15withdrawn'))} />
-            ) : null}
+      {/* LEVEL 3 — the forms, each behind its own row */}
+      <View style={{ marginTop: 10 }}>
+        <Disclosure label={pt('m15addAchievement')} testID="passport-add-achievement">
+          <Row>
+            <TextInput style={[inputStyle(colors), { flex: 1 }]} value={achTitle} onChangeText={setAchTitle} placeholder={pt('m15achPlaceholder')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15achPlaceholder')} />
+            <Button small label={pt('m15add')} onPress={() => { if (achTitle.trim()) void act(async () => { await m15.addAchievement(actor, { title: achTitle.trim() }); setAchTitle(''); }, pt('m15achAdded')); }} />
           </Row>
-        ))}
-        <Row style={{ marginTop: 6 }}>
-          <TextInput style={[inputStyle(colors), { flex: 1 }]} value={achTitle} onChangeText={setAchTitle} placeholder={pt('m15achPlaceholder')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15achPlaceholder')} />
-          <Button small label={pt('m15add')} onPress={() => { if (achTitle.trim()) void act(async () => { await m15.addAchievement(actor, { title: achTitle.trim() }); setAchTitle(''); }, pt('m15achAdded')); }} />
-        </Row>
+        </Disclosure>
+        <Disclosure label={pt('m15careerTitle')} testID="passport-add-career">
+          <Muted size={12.5}>{pt('m15careerNote')}</Muted>
+          <Row>
+            <TextInput style={[inputStyle(colors), { flex: 2, minWidth: 120 }]} value={careerOrg} onChangeText={setCareerOrg} placeholder={pt('m15careerOrg')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15careerOrg')} />
+            <TextInput style={[inputStyle(colors), { flex: 1, minWidth: 70 }]} value={careerFrom} onChangeText={setCareerFrom} placeholder={pt('m15careerFrom')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15careerFrom')} />
+            <TextInput style={[inputStyle(colors), { flex: 1, minWidth: 70 }]} value={careerTo} onChangeText={setCareerTo} placeholder={pt('m15careerTo')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15careerTo')} />
+            <Button small label={pt('m15add')} onPress={() => {
+              if (!careerOrg.trim() || !careerFrom.trim()) { setMsg(pt('m15careerNeedYear')); return; }
+              void act(async () => {
+                const r = await m15.addCareer(actor, { orgName: careerOrg.trim(), from: careerFrom.trim(), to: careerTo.trim() || undefined });
+                setCareerOrg(''); setCareerFrom(''); setCareerTo('');
+                if (r.note) setMsg(r.note);
+              }, pt('m15careerAdded'));
+            }} />
+          </Row>
+        </Disclosure>
+        <Disclosure label={pt('m15corrTitle')} testID="passport-correction">
+          <Muted size={12.5}>{pt('m15corrNote')}</Muted>
+          <Row>
+            <TextInput style={[inputStyle(colors), { flex: 1 }]} value={corrReason} onChangeText={setCorrReason} placeholder={pt('m15corrPlaceholder')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15corrPlaceholder')} />
+            <Button small label={pt('m15corrFile')} onPress={() => {
+              if (corrReason.trim()) void act(async () => { const r = await m15.fileCorrection(actor, { targetType: 'club_history', reason: corrReason.trim() }); setCorrReason(''); setMsg(r.note); }, pt('m15corrFiled'));
+            }} />
+          </Row>
+        </Disclosure>
+        {canShare ? (
+          <Disclosure label={pt('m15shareTitle')} testID="passport-share"><SharesPanel actor={actor} /></Disclosure>
+        ) : <Muted size={12.5}>{pt('m15shareMinor')}</Muted>}
+        <Disclosure label={pt('m15about')} testID="passport-about">
+          <Muted size={13}>{p.note}</Muted>
+        </Disclosure>
       </View>
-
-      {/* Self-submitted career history */}
-      <View style={{ marginTop: 8 }}>
-        <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{pt('m15careerTitle')}</Text>
-        <Muted size={12}>{pt('m15careerNote')}</Muted>
-        <Row style={{ marginTop: 6 }}>
-          <TextInput style={[inputStyle(colors), { flex: 2, minWidth: 120 }]} value={careerOrg} onChangeText={setCareerOrg} placeholder={pt('m15careerOrg')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15careerOrg')} />
-          <TextInput style={[inputStyle(colors), { flex: 1, minWidth: 70 }]} value={careerFrom} onChangeText={setCareerFrom} placeholder={pt('m15careerFrom')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15careerFrom')} />
-          <TextInput style={[inputStyle(colors), { flex: 1, minWidth: 70 }]} value={careerTo} onChangeText={setCareerTo} placeholder={pt('m15careerTo')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15careerTo')} />
-          <Button small label={pt('m15add')} onPress={() => {
-            if (!careerOrg.trim() || !careerFrom.trim()) { setMsg(pt('m15careerNeedYear')); return; }
-            void act(async () => {
-              const r = await m15.addCareer(actor, { orgName: careerOrg.trim(), from: careerFrom.trim(), to: careerTo.trim() || undefined });
-              setCareerOrg(''); setCareerFrom(''); setCareerTo('');
-              if (r.note) setMsg(r.note);
-            }, pt('m15careerAdded'));
-          }} />
-        </Row>
-      </View>
-
-      {/* Corrections — the record is never edited directly */}
-      <View style={{ marginTop: 8 }}>
-        <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{pt('m15corrTitle')}</Text>
-        <Muted size={12}>{pt('m15corrNote')}</Muted>
-        <Row style={{ marginTop: 6 }}>
-          <TextInput style={[inputStyle(colors), { flex: 1 }]} value={corrReason} onChangeText={setCorrReason} placeholder={pt('m15corrPlaceholder')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15corrPlaceholder')} />
-          <Button small label={pt('m15corrFile')} onPress={() => {
-            if (corrReason.trim()) void act(async () => { const r = await m15.fileCorrection(actor, { targetType: 'club_history', reason: corrReason.trim() }); setCorrReason(''); setMsg(r.note); }, pt('m15corrFiled'));
-          }} />
-        </Row>
-      </View>
-
-      {/* Sharing */}
-      {canShare ? <SharesPanel actor={actor} /> : <Muted size={12}>{pt('m15shareMinor')}</Muted>}
-      {msg ? <Muted size={12}>{msg}</Muted> : null}
+      {msg ? <View accessibilityLiveRegion="polite"><Muted size={12.5}>{msg}</Muted></View> : null}
     </Card>
   );
 }

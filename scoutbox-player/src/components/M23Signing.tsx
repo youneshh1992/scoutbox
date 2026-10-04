@@ -15,7 +15,7 @@ import { Text } from './Text';
 import { m12, type FamilySigning, type FamilySigningParty, type SigningPartyType, type SigningStatus } from '../data/m12client';
 import { useColors } from '../theme';
 import { pt } from '../i18n';
-import { Button, Card, Muted, Row, SectionTitle } from './ui';
+import { Button, Card, Muted, Row, SectionTitle, Disclosure } from './ui';
 
 type Actor = { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string };
 
@@ -92,7 +92,6 @@ export function SigningSection({ actor, view = 'all' }: { actor: Actor; view?: S
   return (
     <Card testID="signing-section">
       <SectionTitle>{pt('signingTitle')}</SectionTitle>
-      <Muted size={12.5}>{pt('signingHint')}</Muted>
       {items.map((s) => {
         const cur = s.currentRevision;
         const live = !!s.nextAction && !!cur && (s.status === 'READY' || s.status === 'IN_PROGRESS');
@@ -159,6 +158,7 @@ export function SigningSection({ actor, view = 'all' }: { actor: Actor; view?: S
         );
       })}
       {msg && <View accessibilityLiveRegion="polite" style={{ marginTop: 6 }} testID="signing-message"><Muted size={12}>{msg}</Muted></View>}
+      <Disclosure label="About signing" testID="about-signing"><Muted size={12.5}>{pt('signingHint')}</Muted></Disclosure>
     </Card>
   );
 }

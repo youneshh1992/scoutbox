@@ -50,7 +50,7 @@ export default function Opportunities() {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <PageHeader title={pt('tabOpportunities')} hint={pt('opportunitiesHint')} />
+        <PageHeader title={pt('tabOpportunities')} />
         <CaseCategories model={PLAYER_NAV} value={category.id} onChange={goCategory} />
         <PageTabs tabs={tabs} value={sub} onChange={(k) => go({ category: category.id, sub: k })} />
         <View testID={`case-panel-${sub}`} style={styles.panel} accessibilityLabel={pt(category.labelKey as Parameters<typeof pt>[0])}>
@@ -63,7 +63,7 @@ export default function Opportunities() {
               <OpportunityFitSection actor={actor} />
               <SquadInvitesSection actor={actor} />
               <FollowUpsSection actor={actor} />
-              <View style={{ marginTop: 8 }}><ListRow label="History" value="Every step a club has taken with you, in order" onPress={() => go({ category: 'journey', sub: 'activity' })} /></View>
+              <View style={{ marginTop: 8 }}><ListRow label="History" onPress={() => go({ category: 'journey', sub: 'activity' })} /></View>
             </>
           ) : null}
           {actor && sub === 'activity' ? <JourneySection actor={actor} view="activity" /> : null}

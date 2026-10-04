@@ -15,7 +15,7 @@ import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { Text } from './Text';
 import { useColors } from '../theme';
-import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
+import { Button, Card, Disclosure, Muted, Pill, Row, SectionTitle } from './ui';
 import { m26, type PlayerTransaction, type TxTimelineEntry } from '../data/m26client';
 import { pt } from '../i18n';
 
@@ -85,7 +85,7 @@ export function AgentTransactionSection({ playerId, isMinor }: { playerId: strin
   return (
     <Card testID="agent-transactions">
       <SectionTitle>{pt('m26title')}</SectionTitle>
-      <Muted size={12}>{pt('m26intro')}</Muted>
+      <Disclosure label="About transactions"><Muted size={12}>{pt('m26intro')}</Muted></Disclosure>
       {err && <Muted size={12}>{err}</Muted>}
       {items.map((tx) => {
         const mine = tx.parties.find((p) => p.subjectKind === 'player' && p.subjectId === playerId);

@@ -8,6 +8,7 @@ import { Text, TextInput } from './Text';
 import { m12, isOutcomeLine, type FamilyTrial, type FamilyTrialWorkflow } from '../data/m12client';
 import { useColors } from '../theme';
 import { pt } from '../i18n';
+import { fmtClock, fmtDayTime } from '../time';
 import { Button, Card, Muted, Row, SectionTitle } from './ui';
 
 type Actor = { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string };
@@ -22,10 +23,10 @@ const attLabel = (s: string) => {
   try { return pt(key) ?? s; } catch { return s; }
 };
 const fmtIn = (ms: number, zone: string | null) => {
-  try { return new Date(ms).toLocaleString(undefined, { timeZone: zone ?? undefined, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return new Date(ms).toLocaleString(); }
+  try { return new Date(ms).toLocaleString(undefined, { timeZone: zone ?? undefined, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return fmtDayTime(ms); }
 };
 const fmtEnd = (ms: number, zone: string | null) => {
-  try { return new Date(ms).toLocaleTimeString(undefined, { timeZone: zone ?? undefined, hour: '2-digit', minute: '2-digit' }); } catch { return new Date(ms).toLocaleTimeString(); }
+  try { return new Date(ms).toLocaleTimeString(undefined, { timeZone: zone ?? undefined, hour: '2-digit', minute: '2-digit' }); } catch { return fmtClock(ms); }
 };
 
 // M24B — `standalone`: on its own page the section shows an honest empty state instead of vanishing.

@@ -8,9 +8,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { Platform, Switch, View } from 'react-native';
 import { Text, TextInput } from './Text';
 import { useColors, type Palette } from '../theme';
-import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
+import { Button, Card, Disclosure, Muted, Pill, Row, SectionTitle } from './ui';
 import { m12, type BoardItem, type FeedbackItem, type CampaignView, type FamilyTrial, type FollowUpView, type ObjectiveRec, type PassportView, type SafetyPack, type SquadInvite, type UploadSession } from '../data/m12client';
 import { getDataSaver, getPLang, pFmtDate, pt, setDataSaver, setPLang } from '../i18n';
+import { humanDate } from '../time';
 
 // M24F — presentation casing for status labels; the data value is never changed.
 const cap = (v: string | null | undefined) => (v ? v.charAt(0).toUpperCase() + v.slice(1).replace(/_/g, ' ') : '');
@@ -109,45 +110,47 @@ export function BoardSection({ actor }: { actor: Actor }) {
   );
   const [msg, setMsg] = useState<string | null>(null);
   if (!board) return null;
+  // M24F.3 — one row per opportunity: the title, then club · date · distance,
+  // and the one state word. The description, the schedule, what to bring and
+  // the actions sit behind "View".
+  const appliedWord = (s: string) => (s === 'accepted' ? pt('boardAccepted') : s === 'declined' || s === 'rejected' ? pt('boardDeclinedApp') : s === 'withdrawn' ? pt('boardWithdrawn') : pt('boardApplied'));
   return (
-    <Card>
+    <Card testID="board">
       <SectionTitle>{pt('board')}</SectionTitle>
-      {board.note && <Muted size={12}>{board.note}</Muted>}
       {board.items.map((o: BoardItem) => (
-        <View key={o.id} style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }}>
-          <Row style={{ flexWrap: 'wrap' }}>
-            <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13.5, flex: 1 }}>{o.title}</Text>
-            <Pill label={cap(o.type)} tone="blue" />
-          </Row>
-          <Muted size={12}>{o.orgName} · deadline {o.deadline}{o.distance ? ` · ${o.distance}` : ''}{o.schedule ? ` · ${o.schedule}` : ''}</Muted>
-          {o.description && <Muted size={12}>{o.description}</Muted>}
-          {(o.requirements ?? []).length > 0 && <Muted size={11.5}>Bring: {o.requirements!.join(' · ')}</Muted>}
-          <Row style={{ marginTop: 6 }}>
-            {o.applied ? (
-              <>
-                <Pill label={`${pt('applied')}: ${cap(o.applied.status)}`} tone={o.applied.status === 'accepted' ? 'green' : 'default'} />
-                {o.applied.status === 'submitted' && o.applied.id && actor.kind === 'player' && (
-                  <Button small label={pt('withdraw')} onPress={async () => { await m12.withdrawApplication(actor.id, o.applied!.id!); reload(); }} />
-                )}
-              </>
-            ) : o.via === 'open_trial' ? (
-              <Muted size={12}>Register through Open days on your Home tab.</Muted>
-            ) : (
-              <Button small primary label={pt('apply')} onPress={async () => {
-                try {
-                  if (actor.kind === 'player') await m12.applyToOpportunity(actor.id, o.id);
-                  else await m12.gApply(actor.id, actor.childId, o.id);
-                  setMsg('Application submitted — the club must answer it.');
-                  reload();
-                } catch (e) { setMsg(e instanceof Error ? e.message : 'Not eligible'); }
-              }} />
-            )}
-          </Row>
+        <View key={o.id} testID={`board-item-${o.id}`}>
+          <Disclosure label={o.title} hint={`${o.orgName} · ${humanDate(o.deadline)}${o.distance ? ` · ${o.distance}` : ''}${o.applied ? ` · ${appliedWord(o.applied.status)}` : ''}`} testID={`board-view-${o.id}`}>
+            <Row><Text style={{ color: colors.muted, fontSize: 12.5 }}>{cap(o.type)}</Text>{o.schedule ? <Muted size={12.5}>· {o.schedule}</Muted> : null}</Row>
+            {o.description && <Text style={{ color: colors.text, fontSize: 13.5, lineHeight: 20 }}>{o.description}</Text>}
+            {(o.requirements ?? []).length > 0 && <Muted size={12.5}>{pt('boardRequirements')}: {o.requirements!.join(' · ')}</Muted>}
+            <Row style={{ marginTop: 4 }}>
+              {o.applied ? (
+                <>
+                  <Text style={{ color: o.applied.status === 'accepted' ? colors.accentText : colors.text, fontSize: 13.5, fontWeight: '600' }} testID={`board-status-${o.id}`}>{appliedWord(o.applied.status)}</Text>
+                  {o.applied.status === 'submitted' && o.applied.id && actor.kind === 'player' && (
+                    <Button small tertiary label={pt('withdraw')} onPress={async () => { await m12.withdrawApplication(actor.id, o.applied!.id!); reload(); }} />
+                  )}
+                </>
+              ) : o.via === 'open_trial' ? (
+                <Muted size={12.5}>{pt('boardOpenDay')}</Muted>
+              ) : (
+                <Button small primary label={pt('apply')} testID={`board-apply-${o.id}`} onPress={async () => {
+                  try {
+                    if (actor.kind === 'player') await m12.applyToOpportunity(actor.id, o.id);
+                    else await m12.gApply(actor.id, actor.childId, o.id);
+                    setMsg('Application submitted — the club must answer it.');
+                    reload();
+                  } catch (e) { setMsg(e instanceof Error ? e.message : 'Not eligible'); }
+                }} />
+              )}
+            </Row>
+          </Disclosure>
         </View>
       ))}
-      {board.items.length === 0 && <Muted size={12}>Nothing open near you right now.</Muted>}
-      {msg && <View accessibilityLiveRegion="polite"><Muted size={12}>{msg}</Muted></View>}
-      {actor.kind === 'player' && board.minor && <Muted size={12}>{pt('guardianApplies')}</Muted>}
+      {board.items.length === 0 && <Muted size={13}>Nothing open near you right now.</Muted>}
+      {msg && <View accessibilityLiveRegion="polite"><Muted size={12.5}>{msg}</Muted></View>}
+      {actor.kind === 'player' && board.minor && <Muted size={12.5}>{pt('guardianApplies')}</Muted>}
+      {board.note ? <Disclosure label={pt('boardAbout')} testID="board-note"><Muted size={12.5}>{board.note}</Muted></Disclosure> : null}
     </Card>
   );
 }

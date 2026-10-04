@@ -18,7 +18,7 @@ import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { Text, TextInput } from './Text';
 import { useColors, type Palette } from '../theme';
-import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
+import { Button, Card, Disclosure, Muted, Pill, Row, SectionTitle } from './ui';
 import {
   m21, type DevActor, type DevelopmentPlanView, type GoalView, type ActionView,
   type EvidenceView, type ReviewView, type TargetView, type DevelopmentCatalogue,
@@ -85,8 +85,7 @@ function TargetBlock({ t }: { t: TargetView }) {
       {t.measured ? (
         <Muted size={12}>{pt('m21measured')}: {t.measured.value} {t.metricUnit}</Muted>
       ) : null}
-      <Muted size={12}>{t.note}</Muted>
-      <Muted size={11}>{t.limitation}</Muted>
+      <Disclosure label="About this target"><Muted size={12}>{t.note}</Muted><Muted size={12}>{t.limitation}</Muted></Disclosure>
     </View>
   );
 }
@@ -377,8 +376,7 @@ export function DevelopmentHubSection({ actor }: { actor: DevActor }) {
         </Row>
         <Muted size={13}>{pt('m21linkedEvidence')}: {s.linkedEvidenceAvailable}</Muted>
         {/* Said out loud where a headline number would otherwise sit. */}
-        <Muted size={11.5}>{s.note}</Muted>
-        {cat ? <Muted size={11}>{cat.reminders.note}</Muted> : null}
+        <Disclosure label="About these counts"><Muted size={12}>{s.note}</Muted>{cat ? <Muted size={12}>{cat.reminders.note}</Muted> : null}</Disclosure>
         {list && list.items.length > 1 ? (
           <Row>
             {list.items.map((p) => (
@@ -468,7 +466,7 @@ export function DevelopmentHubSection({ actor }: { actor: DevActor }) {
         </Card>
       ) : null}
 
-      <Muted size={11}>{view.limitation}</Muted>
+      <Disclosure label="About this plan"><Muted size={12}>{view.limitation}</Muted></Disclosure>
       <Muted size={11}>{view.neverBuilt.note}</Muted>
     </View>
   );

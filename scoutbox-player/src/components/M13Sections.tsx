@@ -6,7 +6,8 @@ import { useState } from 'react';
 import { View } from 'react-native';
 import { Text, TextInput } from './Text';
 import { useColors, type Palette } from '../theme';
-import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
+import { Button, Card, Disclosure, Muted, Pill, Row, SectionTitle } from './ui';
+const cap = (v: string | null | undefined) => (v ? v.charAt(0).toUpperCase() + v.slice(1).replace(/_/g, ' ') : '');
 import { m13, type AckNotification, type Preferences, type RepresentationView, type TransitionCase, type Verdict } from '../data/m13client';
 import { m12, type BoardItem } from '../data/m12client';
 import { pt } from '../i18n';
@@ -95,15 +96,18 @@ export function OpportunityFitSection({ actor }: { actor: Actor }) {
   const [fit, setFit] = useState<{ oppId: string; verdicts: Verdict[]; note?: string } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   if (!board?.items.length) return null;
+  // M24F.3 — the root is one line and a "Check fit" per opportunity; the
+  // verdicts are words per dimension, and the reasons are behind "Why".
+  const toneColor = (v: string) => (fitTone(v) === 'green' ? colors.accentText : fitTone(v) === 'red' ? colors.danger : colors.text);
   return (
-    <Card>
+    <Card testID="fit">
       <SectionTitle>{pt('m13fit')}</SectionTitle>
-      <Muted size={12}>{pt('m13fitNote')}</Muted>
+      <Muted size={13}>{pt('m13fitLine')}</Muted>
       {board.items.filter((o) => o.via !== 'open_trial').slice(0, 4).map((o) => (
-        <View key={o.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6 }}>
+        <View key={o.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }} testID={`fit-${o.id}`}>
           <Row>
-            <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, flex: 1 }}>{o.title}</Text>
-            <Button small label={openId === o.id ? pt('m13hideFit') : pt('m13checkFit')} onPress={async () => {
+            <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14, flex: 1 }}>{o.title}</Text>
+            <Button small tertiary label={openId === o.id ? pt('m13hideFit') : pt('m13checkFit')} testID={`fit-check-${o.id}`} onPress={async () => {
               if (openId === o.id) { setOpenId(null); setFit(null); return; }
               reloadBoard(); // pick up a just-submitted application so the share control appears
               try {
@@ -114,28 +118,31 @@ export function OpportunityFitSection({ actor }: { actor: Actor }) {
             }} />
           </Row>
           {openId === o.id && fit?.oppId === o.id && (
-            <View>
+            <View testID={`fit-result-${o.id}`}>
               {fit.verdicts.map((v) => (
-                <Row key={v.dimension} style={{ marginTop: 4, alignItems: 'flex-start' }}>
-                  <Pill label={`${v.dimension}: ${v.verdict}`} tone={fitTone(v.verdict)} />
-                  <View style={{ flex: 1, marginLeft: 6 }}><Muted size={11.5}>{v.reason} ({v.source})</Muted></View>
+                <Row key={v.dimension} style={{ marginTop: 4, justifyContent: 'space-between' }}>
+                  <Text style={{ color: colors.text, fontSize: 13.5 }}>{cap(v.dimension)}</Text>
+                  <Text style={{ color: toneColor(v.verdict), fontSize: 13.5, fontWeight: '600' }}>{cap(v.verdict)}</Text>
                 </Row>
               ))}
-              {fit.note && <Muted size={11.5}>{fit.note}</Muted>}
+              <Disclosure label={pt('m13fitWhy')} testID={`fit-why-${o.id}`}>
+                {fit.verdicts.map((v) => <Muted key={v.dimension} size={12.5}>{cap(v.dimension)}: {v.reason} ({v.source})</Muted>)}
+                {fit.note && <Muted size={12.5}>{fit.note}</Muted>}
+              </Disclosure>
               {o.applied?.id && (
-                <Button small label={pt('m13shareFit')} onPress={async () => {
+                <Row><Button small tertiary label={pt('m13shareFit')} onPress={async () => {
                   try {
                     if (actor.kind === 'player') await m13.shareSuitability(actor.id, o.applied!.id!, true);
                     else await m13.gShareSuitability(actor.id, actor.childId, o.applied!.id!, true);
                     setMsg(pt('m13sharedFit'));
                   } catch (e) { setMsg(e instanceof Error ? e.message : 'failed'); }
-                }} />
+                }} /></Row>
               )}
             </View>
           )}
         </View>
       ))}
-      {msg && <View accessibilityLiveRegion="polite"><Muted size={12}>{msg}</Muted></View>}
+      {msg && <View accessibilityLiveRegion="polite"><Muted size={12.5}>{msg}</Muted></View>}
     </Card>
   );
 }
@@ -252,7 +259,7 @@ export function ExposureSection({ playerId }: { playerId: string }) {
     <Card>
       <SectionTitle>{pt('m13exposure')}</SectionTitle>
       <Muted size={12.5}>{pt('m13expSearches')}: <Text style={{ color: colors.text, fontWeight: '700' }}>{exp.appearedInSearches}</Text> · {pt('m13expProfiles')}: <Text style={{ color: colors.text, fontWeight: '700' }}>{exp.profileViews}</Text> · {pt('m13expClubs')}: <Text style={{ color: colors.text, fontWeight: '700' }}>{exp.clubs}</Text></Muted>
-      <Muted size={11.5}>{exp.note}</Muted>
+      <Disclosure label="About these figures"><Muted size={12}>{exp.note}</Muted></Disclosure>
     </Card>
   );
 }
@@ -269,13 +276,14 @@ export function AckSection({ actor }: { actor: Actor }) {
     <Card>
       <SectionTitle>{pt('m13ack')}</SectionTitle>
       {pending.map((nn) => (
-        <View key={nn.id} style={{ marginTop: 6 }}>
+        // M24F.3 — one line per notice; the full text and the action sit behind it.
+        <Disclosure key={nn.id} label={nn.text.split(/[.;—]\s/)[0].slice(0, 64)} testID={`ack-${nn.id}`}>
           <Muted size={12.5}>{nn.text}</Muted>
-          <Button small primary label={pt('m13ackBtn')} onPress={async () => {
+          <Button small primary label={pt('m13ackBtn')} testID={`ack-confirm-${nn.id}`} onPress={async () => {
             if (actor.kind === 'player') await m13.ack(actor.id, nn.id); else await m13.gAck(actor.id, nn.id);
             reload();
           }} />
-        </View>
+        </Disclosure>
       ))}
     </Card>
   );

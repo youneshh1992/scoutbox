@@ -14,7 +14,7 @@ import { Text, TextInput } from './Text';
 import { m12, type FamilyOffer, type FamilyOfferRevision, type OfferStatus } from '../data/m12client';
 import { useColors } from '../theme';
 import { pt } from '../i18n';
-import { Button, Card, Muted, Row, SectionTitle } from './ui';
+import { Button, Card, Muted, Row, SectionTitle, Disclosure } from './ui';
 
 type Actor = { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string };
 
@@ -97,7 +97,6 @@ export function OfferSection({ actor, view = 'all' }: { actor: Actor; view?: Off
   return (
     <Card testID="offer-section">
       <SectionTitle>{pt('offersTitle')}</SectionTitle>
-      <Muted size={12.5}>{actor.kind === 'guardian' ? pt('offersGuardianHint') : pt('offersHint')}</Muted>
       {offers.length === 0 && <View style={{ marginTop: 6 }}><Muted size={12.5}>{pt('offersNone')}</Muted></View>}
       {offers.map((o) => {
         const cur = o.currentRevision;
@@ -175,6 +174,7 @@ export function OfferSection({ actor, view = 'all' }: { actor: Actor; view?: Off
         );
       })}
       {msg && <View accessibilityLiveRegion="polite" style={{ marginTop: 6 }} testID="offer-message"><Muted size={12}>{msg}</Muted></View>}
+      <Disclosure label="About offers" testID="about-offers"><Muted size={12.5}>{actor.kind === 'guardian' ? pt('offersGuardianHint') : pt('offersHint')}</Muted></Disclosure>
     </Card>
   );
 }

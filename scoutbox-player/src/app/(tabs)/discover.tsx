@@ -190,7 +190,7 @@ export default function Discover() {
         )) : <Muted size={13}>No scouting activity yet — it shows here the moment it happens.</Muted>}
         {insights && (
           <Text style={styles.activityFoot}>
-            {insights.thisMonth.views} view{insights.thisMonth.views === 1 ? '' : 's'} and {insights.thisMonth.shortlists} shortlist{insights.thisMonth.shortlists === 1 ? '' : 's'} this month. Every action is on the ledger — this is your side of it.
+            {insights.thisMonth.views} view{insights.thisMonth.views === 1 ? '' : 's'} and {insights.thisMonth.shortlists} shortlist{insights.thisMonth.shortlists === 1 ? '' : 's'} this month.
           </Text>
         )}
         {noticed && (

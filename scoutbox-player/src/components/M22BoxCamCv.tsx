@@ -23,7 +23,7 @@
 import { createElement, useCallback, useEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { Text } from './Text';
-import { Button, Card, Muted, Pill, Row } from './ui';
+import { Button, Card, Muted, Pill, Row, Disclosure } from './ui';
 import { useColors } from '../theme';
 import { pt } from '../i18n';
 import { m22, captureGray8, releaseCaptureSurface } from '../data/m22client';
@@ -364,7 +364,7 @@ export function M22BoxCamCv({
                     <Pill label={pt('m22experimentalPill')} tone="gold" />
                   </Row>
                   <Muted size={12}>{pt('m22experimentalCount')}: {outcome.result.experimental.exactCount}</Muted>
-                  <Muted size={11.5}>{pt('m22experimentalNote')}</Muted>
+                  <Disclosure label="About this figure"><Muted size={12}>{pt('m22experimentalNote')}</Muted></Disclosure>
                 </View>
               ) : null}
             </View>

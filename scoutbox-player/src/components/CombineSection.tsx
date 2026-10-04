@@ -13,7 +13,7 @@ import { createElement, useEffect, useRef, useState } from 'react';
 import { Platform, View } from 'react-native';
 import { Text } from './Text';
 import { useColors } from '../theme';
-import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
+import { Button, Card, Disclosure, Muted, Pill, Row, SectionTitle } from './ui';
 import {
   combine, type CombineActor, type CombineAttempt, type CombineCard,
   type CombineOverview, type CombineProtocol, type CombineRequest,
@@ -368,7 +368,7 @@ export function CombineSection({ actor, childName }: { actor: CombineActor; chil
               {card.results.some((r) => r.combineVerified) ? (
                 <Muted size={11.5}>{pt('trsCombineVerifiedLine')}</Muted>
               ) : null}
-              <Muted size={11}>{card.note}</Muted>
+              <Disclosure label="About this result"><Muted size={12}>{card.note}</Muted></Disclosure>
             </View>
           ) : null}
 
@@ -437,7 +437,7 @@ function RequestRow({ r, protocols, onStart, canStart }: { r: CombineRequest; pr
           </Row>
         );
       })}
-      {r.note ? <Muted size={11}>{r.note}</Muted> : null}
+      {r.note ? <Disclosure label="About this request"><Muted size={12}>{r.note}</Muted></Disclosure> : null}
     </View>
   );
 }
