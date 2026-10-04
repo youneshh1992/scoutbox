@@ -34,7 +34,7 @@ const freshPage = async () => {
   say(`directory card renders: ${await page.locator('text=Eastport FC').first().isVisible()}`);
 
   // M9: pathway + opportunity radar on Home
-  await page.waitForSelector('text=Your pathway', { timeout: 10000 });
+  await page.waitForSelector('text=Your journey', { timeout: 10000 }); // M24F.4 — the Home's journey section
   await page.waitForSelector('text=Clubs within reach', { timeout: 10000 });
   await page.waitForSelector('text=Moss Side Athletic', { timeout: 5000 });
   say('pathway + opportunity radar render on Home');

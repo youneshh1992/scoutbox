@@ -34,7 +34,7 @@ export default function Activity() {
     client.getFeed(playerId).then(setFeed).catch(() => {});
   }, [playerId, notifications]);
 
-  const now = Date.now();
+  const [now] = useState(() => Date.now()); // read once per mount: the grouping must not drift between renders
   const events = [
     ...(insights?.recent ?? []).map((e) => ({ ts: e.ts, text: `${e.orgName} ${EVENT_LABELS[e.type] ?? e.type}`, org: e.orgName })),
     ...feed.filter((i): i is Extract<PlayerFeedItem, { type: 'scouting_event' }> => i.type === 'scouting_event').map((i) => ({ ts: i.ts, text: `${i.orgName} ${EVENT_LABELS[i.eventType] ?? i.eventType.replace(/_/g, ' ')}`, org: i.orgName })),

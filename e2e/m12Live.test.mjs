@@ -143,6 +143,7 @@ say('E2: the raw report (recommendation, reasons) is NOT in the player view');
 await player.click('a[href^="/you"]');
 await player.getByRole('tab', { name: 'Profile' }).click(); // P2.5: the passport sits on You › Profile (Clubs was left selected above)
 await player.getByRole('tab', { name: 'Evidence' }).click(); // M24F.1: on the profile's Evidence section
+await player.locator('[data-testid="evidence-record-row"]').click(); // M24F.4 — the record sits behind the Evidence record row
 await player.waitForSelector('text=Evidence passport', { timeout: 20000 });
 await player.fill('input[aria-label="Evidence claim label"]', 'Assists 2025/26');
 await player.fill('input[aria-label="Evidence value"]', '7');

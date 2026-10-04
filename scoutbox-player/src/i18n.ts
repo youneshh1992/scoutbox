@@ -302,7 +302,7 @@ const en = {
   // M23 P2.5 — navigation. Tab titles and page tabs were string literals.
   // M24C — the approved Player screens (Home, Football Passport, Box Cam, Messages).
   // M24F.4 — Home, Activity, Development, Box Cam, Combine, Passport root labels
-  homeNext: 'Next', homeRecent: 'Recent', homeViewAllActivity: 'View all activity', homeJoined: 'Joined {when}', homeClubsWithinReach: 'Clubs within reach', homeNoActivity: 'No activity yet.', homeNothingNext: 'Nothing waiting on you',
+  homeNext: 'Next', homeRecent: 'Recent', homeViewAllActivity: 'View all activity', homeJoined: 'Joined {when}', homeClubsWithinReach: 'Clubs within reach', homeNoActivity: 'No activity yet.', homeNothingNext: 'Nothing waiting on you', homeExploreClubs: 'Explore clubs',
   activityTitle: 'Activity', activityToday: 'Today', activityThisWeek: 'This week', activityEarlier: 'Earlier', activityThisWeekDigest: 'This week',
   devCurrentFocus: 'Current focus', devLatestFeedback: 'Latest feedback', devProgress: 'Progress', devHistory: 'History', devEntries: '{n} entries', devNone: 'None yet', devGoalsTitle: 'Goals', devBack: 'Development',
   bcLatest: 'Latest', bcHowItWorks: 'How Box Cam works', bcStartSession: 'Start session', bcMoreTitle: 'Training record',
@@ -333,7 +333,7 @@ const en = {
   inboxTrialInvitation: 'Trial invitation', inboxContactRequest: 'Contact request', inboxWantsContact: 'Would like to contact you',
   inboxTrialLabel: 'Trial', inboxRequestLabel: 'Request', inboxOfferLabel: 'Offer', inboxSigningLabel: 'Signing',
   inboxOfferReceived: 'Offer received', inboxViewOffer: 'View offer', inboxSigningAction: 'Signing action required', inboxViewSigning: 'View signing',
-  inboxAccepted: 'Accepted', inboxDeclined: 'Declined', inboxWithGuardian: 'With your guardian', inboxSuspended: 'Suspended',
+  inboxAccepted: 'Accepted', inboxDeclined: 'Declined', inboxWithGuardian: 'With your guardian', inboxGuardianManaged: 'Guardian-managed', inboxSuspended: 'Suspended',
   inboxFrom: 'From', inboxViewFullMessage: 'View full message', inboxViewTrial: 'View trial', inboxOpenConversation: 'Open conversation',
   inboxAddReply: 'Add a reply (optional)', inboxReportNote: 'The club files a full performance report after your trial; it goes on your profile.',
   inboxVerifiedClub: 'Verified club', inboxTrustedPartner: 'Trusted partner', inboxDateTbc: 'Date to be confirmed',
@@ -749,7 +749,7 @@ const fr: typeof en = {
   m22reason_INSUFFICIENT_LIGHT: 'La lumi\u00e8re est insuffisante.',
   m22reason_UNSUPPORTED_PROTOCOL: 'Cette activit\u00e9 n\u2019est pas encore prise en charge.',
 
-  homeNext: 'À suivre', homeRecent: 'Récent', homeViewAllActivity: 'Toute l’activité', homeJoined: 'Membre depuis {when}', homeClubsWithinReach: 'Clubs à portée', homeNoActivity: 'Pas encore d’activité.', homeNothingNext: 'Rien en attente',
+  homeNext: 'À suivre', homeRecent: 'Récent', homeViewAllActivity: 'Toute l’activité', homeJoined: 'Membre depuis {when}', homeClubsWithinReach: 'Clubs à portée', homeNoActivity: 'Pas encore d’activité.', homeNothingNext: 'Rien en attente', homeExploreClubs: 'Explorer les clubs',
   activityTitle: 'Activité', activityToday: 'Aujourd’hui', activityThisWeek: 'Cette semaine', activityEarlier: 'Plus tôt', activityThisWeekDigest: 'Cette semaine',
   devCurrentFocus: 'Objectif actuel', devLatestFeedback: 'Dernier retour', devProgress: 'Progression', devHistory: 'Historique', devEntries: '{n} entrées', devNone: 'Rien pour l’instant', devGoalsTitle: 'Objectifs', devBack: 'Développement',
   bcLatest: 'Dernière', bcHowItWorks: 'Comment fonctionne Box Cam', bcStartSession: 'Démarrer une session', bcMoreTitle: 'Carnet d’entraînement',
@@ -779,7 +779,7 @@ const fr: typeof en = {
   inboxTrialInvitation: 'Invitation \u00e0 un essai', inboxContactRequest: 'Demande de contact', inboxWantsContact: 'Souhaite vous contacter',
   inboxTrialLabel: 'Essai', inboxRequestLabel: 'Demande', inboxOfferLabel: 'Offre', inboxSigningLabel: 'Signature',
   inboxOfferReceived: 'Offre re\u00e7ue', inboxViewOffer: 'Voir l\u2019offre', inboxSigningAction: 'Signature \u00e0 traiter', inboxViewSigning: 'Voir la signature',
-  inboxAccepted: 'Accept\u00e9e', inboxDeclined: 'Refus\u00e9e', inboxWithGuardian: 'Chez votre tuteur', inboxSuspended: 'Suspendue',
+  inboxAccepted: 'Accept\u00e9e', inboxDeclined: 'Refus\u00e9e', inboxWithGuardian: 'Chez votre tuteur', inboxGuardianManaged: 'G\u00e9r\u00e9 par votre tuteur', inboxSuspended: 'Suspendue',
   inboxFrom: 'De', inboxViewFullMessage: 'Voir le message complet', inboxViewTrial: 'Voir l\u2019essai', inboxOpenConversation: 'Ouvrir la conversation',
   inboxAddReply: 'Ajouter une r\u00e9ponse (facultatif)', inboxReportNote: 'Le club d\u00e9pose un rapport complet apr\u00e8s votre essai ; il figure sur votre profil.',
   inboxVerifiedClub: 'Club v\u00e9rifi\u00e9', inboxTrustedPartner: 'Partenaire de confiance', inboxDateTbc: 'Date \u00e0 confirmer',

@@ -228,6 +228,10 @@ const pageAudit = async (page, tag, lastSel) => {
     const needs = content.scrollHeight > content.clientHeight + 1;
     const last = [...document.querySelectorAll(lastSel)].pop();
     const reach = last ? __sc.reach(last) : null;
+    // M24F.4 — a page whose last control already fits the first screen (flat rows
+    // are shorter) still has to move when it is taller than the viewport: scroll
+    // it to the end, the way the entry audit does, and report where it landed.
+    if (needs && content.scrollTop === 0) content.scrollTop = content.scrollHeight;
     return { needs, reach, hOk: __sc.noHOverflow(), scrolled: content.scrollTop, main: Math.round(document.querySelector('.main').getBoundingClientRect().height), ih: innerHeight };
   }, lastSel);
   if (!r.hOk) fail(`${tag}: horizontal page overflow`);

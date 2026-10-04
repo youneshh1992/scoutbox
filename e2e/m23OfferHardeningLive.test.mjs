@@ -309,7 +309,10 @@ const ctxMat = await browser.newContext({ viewport: { width: 390, height: 844 },
   neg(/◷ Expired/.test(txt) && !/Awaiting your answer/.test(txt), 'S2b: it reads ◷ Expired — derived at read time, no status was ever written');
   neg((await sec.locator(`[data-testid="offer-accept-${X.OID}"]`).count()) === 0 && (await sec.locator(`[data-testid="offer-decline-${X.OID}"]`).count()) === 0, 'S2c: no accept or decline control on an expired Offer');
   expect(await j('POST', `/player/offers/${X.OID}/accept`, { revisionId: X.R, clientKey: key() }, MAT), 409, 'OFFER_EXPIRED', 'S2d: forcing the request is refused OFFER_EXPIRED');
-  ok(txt.includes(S_MSG) && !txt.includes(S_NOTE) && !txt.includes(S_DEC), 'S2e: the message is his to read; the note and the decision never are');
+  // M24F.4 — the club's message sits behind "View terms"; open it, then read the same section.
+  await sec.locator(`[data-testid="offer-terms-${X.OID}"] > [role="button"]`).first().click().catch(() => {}); await mat.waitForTimeout(400);
+  const txtTerms = await sec.innerText();
+  ok(txtTerms.includes(S_MSG) && !txtTerms.includes(S_NOTE) && !txtTerms.includes(S_DEC), 'S2e: the message is his to read; the note and the decision never are');
   ok(await noHScroll(mat), 'W: 390px: no horizontal scroll in the player app');
   neg(((await getOffer(X.OID, LEAD)).body.offer.currentRevision.storedStatus) === 'ISSUED', 'S2f: the stored status is still ISSUED (lazy expiry)');
 }

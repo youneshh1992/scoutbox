@@ -167,7 +167,7 @@ export default function Inbox() {
                   return <PreviewRow key={e.id} initials={initialsOf(e.note.text.split(/\s[—·-]\s|:/)[0] || (offer ? 'O' : 'S'))} title={offer ? pt('inboxOfferReceived') : pt('inboxSigningAction')} line={offer ? pt('inboxViewOffer') : pt('inboxViewSigning')} time={relTime(e.ts)} unread={!e.note.read} accent={offer ? 'offer' : 'signing'} accentLabel={offer ? pt('inboxOfferLabel') : pt('inboxSigningLabel')} onPress={() => openEntry(e)} testID={`inbox-event-${e.note.id}`} />;
                 }
                 const it = e.item;
-                return <PreviewRow key={e.id} initials={initialsOf(it.orgName)} title={it.orgName} line={it.status === 'pending' ? pt('inboxWithGuardian') : statusWord(it.status)} unread={it.status === 'pending'} accent={it.type === 'trial' ? 'trial' : null} accentLabel={it.type === 'trial' ? pt('inboxTrialLabel') : undefined} onPress={() => openEntry(e)} testID={`inbox-child-${it.id}`} />;
+                return <PreviewRow key={e.id} initials={initialsOf(it.orgName)} title={it.orgName} line={it.status === 'pending' ? pt('inboxWithGuardian') : [statusWord(it.status), pt('inboxGuardianManaged')].filter(Boolean).join(' · ')} unread={it.status === 'pending'} accent={it.type === 'trial' ? 'trial' : null} accentLabel={it.type === 'trial' ? pt('inboxTrialLabel') : undefined} onPress={() => openEntry(e)} testID={`inbox-child-${it.id}`} />;
               })}
             </View>
             {playerId ? <AckSection actor={{ kind: 'player', id: playerId }} /> : null}

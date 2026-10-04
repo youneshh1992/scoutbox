@@ -121,7 +121,13 @@ export default function Discover() {
               </View>
             </>
           ) : (
-            <Text style={styles.primarySub}>{pt('homeNothingNext')}</Text>
+            <>
+              <Text style={styles.primarySub}>{pt('homeNothingNext')}</Text>
+              {/* Nothing is waiting: the one action is to look outward. */}
+              <View style={{ marginTop: 12, alignSelf: 'flex-start' }}>
+                <Button primary label={pt('homeExploreClubs')} onPress={() => router.push('/opportunities')} testID="home-primary-cta" />
+              </View>
+            </>
           )}
         </View>
 

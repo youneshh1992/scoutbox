@@ -88,6 +88,7 @@ await mob.waitForSelector('text=U23 open trial — attackers', { timeout: 10000 
 say('Player demo: opportunity board populated');
 await mob.click('a[href^="/you"]'); // P2.5: Profile is the first page tab of You
 await mob.getByRole('tab', { name: 'Evidence' }).click(); // M24F.1: the evidence passport is the profile's Evidence section
+await mob.locator('[data-testid="evidence-record-row"]').click(); // M24F.4 — the record sits behind the Evidence record row
 await mob.waitForSelector('text=Evidence passport', { timeout: 20000 });
 await mob.waitForSelector('text=club assessed', { timeout: 10000 });
 say('Player demo: evidence passport with honest tiers');

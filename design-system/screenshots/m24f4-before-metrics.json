@@ -1,0 +1,46 @@
+{
+ "metrics": {
+  "grassroots-radar-1280": {
+   "words": 154,
+   "paragraphs": 1,
+   "cards": 1,
+   "bordered": 18,
+   "height": 800,
+   "fonts": {
+    "Inter": 52
+   }
+  },
+  "grassroots-squad-1280": {
+   "words": 117,
+   "paragraphs": 1,
+   "cards": 0,
+   "bordered": 12,
+   "height": 800,
+   "fonts": {
+    "Inter": 45
+   }
+  },
+  "nobody-missed-1280": {
+   "words": 492,
+   "paragraphs": 4,
+   "cards": 0,
+   "bordered": 18,
+   "height": 800,
+   "fonts": {
+    "Inter": 102
+   }
+  },
+  "director-dashboard-1280": {
+   "words": 2512,
+   "paragraphs": 19,
+   "cards": 0,
+   "bordered": 3,
+   "height": 800,
+   "fonts": {
+    "Inter": 387,
+    "monospace": 13
+   }
+  }
+ },
+ "errors": []
+}

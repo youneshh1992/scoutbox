@@ -191,7 +191,12 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
   if (await enter.count()) { await enter.click(); await p.waitForTimeout(1500); }
   const you = p.locator('a[href="/football"]');
   if (await you.count()) { await you.click(); await p.getByRole('tab', { name: 'Development' }).click(); await p.waitForTimeout(2000); }
-  const body = await p.evaluate(() => document.body.innerText ?? '');
+  // M24F.4 — the root is four rows; the plan, its goals and the reviews are one tap deep. Read root, Goals and Feedback.
+  const readPage = async (row) => { const r = p.locator(`[data-testid="${row}"]`); if (!(await r.count())) return ''; await r.first().click(); await p.waitForTimeout(900); for (const d of await p.locator('[role="button"][aria-label="About this target"]').all()) { await d.click(); await p.waitForTimeout(150); } const t = await p.evaluate(() => document.body.innerText ?? ''); const back = p.locator('[data-testid="dev-back"]'); if (await back.count()) { await back.first().click(); await p.waitForTimeout(500); } return t; };
+  const bodyRoot = await p.evaluate(() => document.body.innerText ?? '');
+  const bodyGoals = await readPage('dev-focus');
+  const bodyFeedback = await readPage('dev-feedback');
+  const body = `${bodyRoot}\n${bodyGoals}\n${bodyFeedback}`;
 
   ok(/Development/i.test(body), 'the player bundle carries a Development section');
   ok(/Pre-season Development Plan/.test(body), 'with the demo plan');
@@ -204,7 +209,7 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
 
   // The internal note is ABSENT from the player bundle, not hidden by CSS.
   ok(!/Not ready for the first team/.test(body), 'the club’s internal note appears nowhere in the player bundle');
-  const html = await p.content();
+  const html = await p.content() + (await (async () => { const r = p.locator('[data-testid="dev-feedback"]'); if (!(await r.count())) return ''; await r.first().click(); await p.waitForTimeout(700); const h = await p.content(); const back = p.locator('[data-testid="dev-back"]'); if (await back.count()) { await back.first().click(); await p.waitForTimeout(300); } return h; })());
   ok(!/Not ready for the first team/.test(html), '…and is not in the DOM either — it is absent, not hidden');
   ok(/notes kept inside the club/i.test(body), 'but the existence of a club note is acknowledged');
 
