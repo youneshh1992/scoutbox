@@ -8,7 +8,7 @@ import { Text, TextInput } from './Text';
 import { m12, isOutcomeLine, type FamilyTrial, type FamilyTrialWorkflow } from '../data/m12client';
 import { useColors } from '../theme';
 import { pt } from '../i18n';
-import { fmtClock, fmtDayTime } from '../time';
+import { fmtClock, fmtDayTime, uiLocale } from '../time';
 import { Button, Card, Muted, Row, SectionTitle } from './ui';
 
 type Actor = { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string };
@@ -23,10 +23,10 @@ const attLabel = (s: string) => {
   try { return pt(key) ?? s; } catch { return s; }
 };
 const fmtIn = (ms: number, zone: string | null) => {
-  try { return new Date(ms).toLocaleString(undefined, { timeZone: zone ?? undefined, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return fmtDayTime(ms); }
+  try { return new Date(ms).toLocaleString(uiLocale(), { timeZone: zone ?? undefined, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }); } catch { return fmtDayTime(ms); }
 };
 const fmtEnd = (ms: number, zone: string | null) => {
-  try { return new Date(ms).toLocaleTimeString(undefined, { timeZone: zone ?? undefined, hour: '2-digit', minute: '2-digit' }); } catch { return fmtClock(ms); }
+  try { return new Date(ms).toLocaleTimeString(uiLocale(), { timeZone: zone ?? undefined, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }); } catch { return fmtClock(ms); }
 };
 
 // M24B — `standalone`: on its own page the section shows an honest empty state instead of vanishing.
@@ -146,9 +146,8 @@ export function TrialSlotChips({ slots, chosenDay, onPick }: { slots: { id: stri
               onPress={() => onPick(sl.day)} style={{ color: colors.text, fontSize: 13, fontWeight: active ? '700' : '400' }}
               testID={`trial-slot-${sl.id}`}
             >
-              {active ? '● ' : '○ '}{fmtIn(sl.startsAt, sl.timezone)} – {fmtEnd(sl.endsAt, sl.timezone)} <Text style={{ color: colors.muted }}>({sl.timezone}){sl.kind ? ` · ${sl.kind.replace(/_/g, ' ')}` : ''}</Text>
+              {active ? '● ' : '○ '}{fmtIn(sl.startsAt, sl.timezone)}–{fmtEnd(sl.endsAt, sl.timezone)}{sl.kind ? <Text style={{ color: colors.muted }}> · {sl.kind.replace(/_/g, ' ')}</Text> : null}
             </Text>
-            {sl.venue && <Muted size={12}>{sl.venue.name}{sl.venue.town ? `, ${sl.venue.town}` : ''}</Muted>}
           </View>
         );
       })}

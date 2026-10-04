@@ -112,7 +112,8 @@ say('L1: adult player saved a private preference through his own screen');
 
 await playerCategory(player, 'journey', 'Board'); // M24D: the board is My journey › Board
 await player.waitForSelector('text=Opportunity board', { timeout: 20000 });
-await player.locator('div', { hasText: 'First-team look — wide forwards' }).locator('text=Apply').last().click();
+await player.locator('[data-testid^="board-view-"]').filter({ hasText: 'First-team look — wide forwards' }).first().click(); // M24F.3 — the row opens its details
+await player.locator('[data-testid^="board-apply-"]').first().click();
 await player.waitForSelector('text=Application submitted', { timeout: 10000 });
 // board reloads on apply; the fit section fetches its own copy when the page
 // mounts (M24D: it sits on the same Board page), so leave and return to it
@@ -120,6 +121,7 @@ await playerSub(player, 'Overview');
 await playerSub(player, 'Board');
 await player.waitForSelector('text=Opportunity fit', { timeout: 20000 });
 await player.locator('text=Check fit').first().click();
+await player.waitForSelector('[data-testid^="fit-why-"]', { timeout: 15000 }); await player.locator('[data-testid^="fit-why-"]').first().click(); // M24F.3 — reasons behind Why
 await player.waitForSelector('text=travel time unavailable', { timeout: 15000 });
 say('L1: fit verdicts render with the honest “travel time unavailable” line');
 await player.locator('text=Share summary with this club').first().click();

@@ -298,7 +298,7 @@ await kola.waitForSelector('text=one session to start', { timeout: 20000 });
 {
   const txt = await bodyText(kola);
   ok(/Eastport FC/.test(txt) && /Maria Keane/.test(txt), 'A7: the player sees the invitation attributed to a named person at a named organisation');
-  ok(/Europe\/London/.test(txt) && /Eastport Dome/.test(txt), 'A7b: the slot shows its time in the organiser zone and the venue name');
+  ok(/\d{2}:\d{2}–\d{2}:\d{2}/.test(txt) && /Eastport Dome/.test(txt), 'A7b: the slot shows its time (organiser zone applied, M24F.3 one-line chip) and the venue name is on the card');
   neg(!/Gate B/.test(txt) && !/Ask for Priya/.test(txt), 'A7c: not the address, not the instructions');
   ok(/Trial invitation/i.test(txt) && (await kola.locator('[data-testid^="trial-slot-"]').count()) >= 1, 'A7d: the invitation names itself and offers its date to pick — accepting confirms the trial');
   const noScroll = await kola.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth + 1);
@@ -435,10 +435,11 @@ ok(await waitLive(lead.page, /Invitation sent\. Case moved to Trial requested\./
 
 const ctxAmara = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 const amara = await enterPlayer(ctxAmara, 'Amara Adebayo', 'amara', 'text=Guardian');
+await amara.waitForSelector('[data-testid^="req-details-"]', { timeout: 25000 }); await amara.locator('[data-testid^="req-details-"]').first().click(); // M24F.3 — the message sits behind View full message
 await amara.waitForSelector('text=U14 training session', { timeout: 25000 });
 {
   const txt = await bodyText(amara);
-  ok(/U14 training session/.test(txt) && /Europe\/London/.test(txt), 'M4: the guardian sees the invitation with its slot and zone at 390px');
+  ok(/U14 training session/.test(txt) && /\d{2}:\d{2}–\d{2}:\d{2}/.test(txt), 'M4: the guardian sees the invitation with its slot (organiser zone applied) at 390px');
   neg(!/Gate B/.test(txt), 'M4b: not yet the address');
   ok((await amara.locator('[data-testid^="trial-slot-"]').count()) === 1, 'M4c: one slot chip');
 }

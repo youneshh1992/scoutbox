@@ -3,6 +3,7 @@
 // day, and a precise moment shows the day and the minute — never seconds.
 import { getPLang } from './i18n';
 
+export const uiLocale = () => locale();
 const locale = () => (getPLang() === 'fr' ? 'fr-FR' : 'en-GB');
 const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
 

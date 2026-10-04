@@ -440,7 +440,8 @@ let TX = null;
   ok(apiHof.length === 1 && apiHof[0].recruitmentCaseId === RID, 'F2b: while the case reference itself reaches the WORKSPACE, so the transaction she opens can cite the invitation it answers (§36)');
   const swept = stripHonest(txt);
   neg(!/progress|reject|hold|rationale|assessment|reason code/i.test(swept), 'F3: and nothing of the club\'s recruitment decision — not its outcome, not its reasons (§34)');
-  ok(/not an offer/i.test(txt), 'F4: it says on her side too that an invitation is not an offer');
+  await hofs.locator('.f-about > summary').first().click().catch(() => {}); // M24F.3 — the honest line sits behind About
+  ok(/not an offer/i.test(await hofs.innerText()), 'F4: it says on her side too that an invitation is not an offer');
   // The agent's own row is not told "you represent this client" — she knows, and
   // the row instead carries the agreement it was derived from, so the workspace
   // she opens is bound to the mandate the server checked, not to her word for it.

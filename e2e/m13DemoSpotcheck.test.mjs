@@ -39,6 +39,7 @@ await club.waitForSelector('text=Identity reviews', { timeout: 10000 });
 await club.waitForSelector('text=not configured', { timeout: 10000 });
 say('pro demo: imports + honest not-configured connectors');
 await club.evaluate(() => { location.hash = '#/budgets'; }); // M15-Nav deep link (Deal Budgets)
+await club.waitForSelector('.f-about > summary', { timeout: 10000 }); await club.click('.f-about > summary'); // M24F.3 — the note sits behind About
 await club.waitForSelector('text=no market values, no resale projections', { timeout: 10000 });
 say('pro demo: budgets screen carries the no-invented-values note');
 await club.evaluate(() => { location.hash = '#/network'; }); // M15-Nav deep link (Club Network)
@@ -89,9 +90,11 @@ await admin.click('nav.subnav button:has-text("Delivery centre")');
 await admin.waitForSelector('text=no message leaves this machine', { timeout: 10000 });
 await admin.click('nav.sidebar button:has-text("Cases")');
 await admin.click('nav.subnav button:has-text("Support desk")');
+await admin.waitForSelector('.f-about > summary', { timeout: 10000 }); await admin.locator('.f-about > summary').first().click(); // M24F.3 — the notice sits behind About
 await admin.waitForSelector('text=no silent impersonation path', { timeout: 10000 });
 await admin.click('nav.sidebar button:has-text("System")');
 await admin.click('nav.subnav button:has-text("Backups")');
+await admin.waitForSelector('.f-about > summary', { timeout: 10000 }); await admin.locator('.f-about > summary').first().click(); // M24F.3 — the notice sits behind About
 await admin.waitForSelector('text=never over the live database', { timeout: 10000 });
 say('admin demo: delivery centre, support desk and backups tabs render honestly');
 await admin.close();

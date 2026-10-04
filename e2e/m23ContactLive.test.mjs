@@ -288,7 +288,7 @@ const kola = await enterPlayer(ctxKola, 'Kola Adeyemi', 'kola', 'text=Your visib
 await openInbox(kola);
 {
   const txt = await bodyText(kola);
-  neg(/No requests yet/.test(txt) && !/U21s/.test(txt), 'A5e: at 390px the player\'s Inbox shows no request and none of the draft\'s words');
+  neg(/No requests|No messages|Nothing (here )?yet/i.test(txt) && !/U21s/.test(txt), 'A5e: at 390px the player\'s Inbox shows no request and none of the draft\'s words');
 }
 
 // Send the existing draft from its history row.
@@ -367,10 +367,11 @@ const ctxAmara = await browser.newContext({ viewport: { width: 390, height: 844 
 const amara = await enterPlayer(ctxAmara, 'Amara Adebayo', 'amara', 'text=Guardian');
 await amara.waitForSelector('text=About Guni — U15 development group', { timeout: 25000 });
 {
+  await amara.locator('[data-testid^="req-details-"]').first().click().catch(() => {}); // M24F.3 — message and routing note behind View full message
   const txt = await bodyText(amara);
   ok(/(about|For) Guni/.test(txt) && /U15 development group/.test(txt), 'M4: the guardian sees the message, about her child, at 390px'); // M24F: the record says "For Guni Adebayo"
   ok(/routed to you because the player is under age/.test(txt), 'M4b: and is told why it reached her and not the child');
-  ok(/Your reply \(optional\)/.test(txt), 'M4c: with a reply field');
+  ok((await amara.locator('[data-testid^="req-reply-"], input[placeholder*="reply" i]').count()) > 0, 'M4c: with a reply field (inside View full message, M24F.3)');
 }
 await amara.locator('[aria-label="Your reply (optional)"]').first().fill('Thank you, not this season — Guni is settled where he is.');
 await amara.getByText('Decline', { exact: true }).first().click();

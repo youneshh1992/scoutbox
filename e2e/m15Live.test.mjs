@@ -137,21 +137,24 @@ await player.waitForSelector('text=Your visibility right now', { timeout: 20000 
 await player.click('a[href="/football"]');
 await player.waitForSelector('text=Football Passport', { timeout: 20000 });
 {
+  await player.locator('[data-testid="passport-about"]').first().click().catch(() => {}); // M24F.3 — the self-description sits behind About Passport
   const body = await player.locator('body').innerText();
   if (!body.includes('Identity confirmed by ScoutBox review')) fail('P1: honest identity assurance missing');
   if (body.includes('Government identity verified')) fail('P1: over-claimed identity');
   if (!body.includes('not a rating of football ability')) fail('P1: passport self-description missing');
   say('P1: self passport renders with honest identity assurance and the no-rating note');
+  await player.locator('[data-testid="passport-add-achievement"]').first().click(); // M24F.3 — the form sits behind a Disclosure
   await player.fill('input[placeholder="Achievement (e.g. League top scorer 2025)"]', 'County Cup Winner 2024');
   await player.getByText('Add', { exact: true }).nth(0).click();
   await player.waitForSelector('text=County Cup Winner 2024', { timeout: 15000 }); // M24F: the achievement carries a trophy icon, not a pictograph
   say('P1: achievement added (player-submitted until a club confirms it)');
+  await player.locator('[data-testid="passport-add-career"]').first().click(); // M24F.3 — the form sits behind a Disclosure
   await player.fill('input[placeholder="Club name"]', 'Sunday Kings FC');
   await player.fill('input[placeholder="From (e.g. 2019)"]', '2018');
   await player.getByText('Add', { exact: true }).nth(1).click();
   await player.waitForSelector('text=Sunday Kings FC', { timeout: 15000 });
   const after = await player.locator('body').innerText();
-  if (!after.includes('Provided by player')) fail('P1: player-provided provenance chip missing');
+  if (!/Provided by player|Player supplied/.test(after)) fail('P1: player-provided provenance chip missing'); // M24F.3 — provenance words without glyphs
   say('P1: year-only career entry lands in club history with "Provided by player" provenance');
 }
 
@@ -164,6 +167,7 @@ await player.waitForSelector('text=Football Passport', { timeout: 20000 });
   await player.waitForSelector('text=Our promises to every player', { timeout: 30000 }).catch(() => {});
   await player.click('a[href="/football"]').catch(() => {});
   await player.waitForSelector('text=Football Passport', { timeout: 25000 });
+  await player.waitForSelector('[data-testid="passport-conflict"]', { timeout: 15000 }); await player.locator('[data-testid="passport-conflict"]').first().click(); // M24F.3 — the conflict is one line; the full text opens behind Review
   await player.waitForSelector('text=confirmed as your current club', { timeout: 15000 });
   const body = await player.locator('body').innerText();
   if (!body.includes('Eastport FC')) fail('P5: authoritative current club not displayed');
@@ -189,6 +193,7 @@ let kolaShareUrl = null;
   // P2.5: sharing lives on the Football Passport; P4 left the page on You › Clubs.
   await player.click('a[href="/football"]');
   await player.waitForSelector('text=Football Passport', { timeout: 25000 });
+  await player.locator('[data-testid="passport-share"]').first().click().catch(() => {}); // M24F.3 — sharing sits behind a Disclosure
   await player.getByText('Create public link', { exact: true }).click();
   await player.waitForSelector('text=/\\/passport\\/shared\\//', { timeout: 15000 });
   kolaShareUrl = (await player.locator('text=/\\/passport\\/shared\\//').first().innerText()).trim();
@@ -242,6 +247,7 @@ await guardian.waitForSelector('text=Guardian', { timeout: 20000 });
 let guniRecSecret = null;
 {
   await guardian.waitForSelector('text=Football Passport — Guni Adebayo', { timeout: 25000 });
+  for (const t of ['passport-share', 'passport-about']) await guardian.locator(`[data-testid="${t}"]`).first().click().catch(() => {}); // M24F.3 — sharing and its wording sit behind Disclosures
   const gbody = await guardian.locator('body').innerText();
   if (!gbody.includes('controlled by you, the guardian')) fail('P3: guardian-controlled sharing wording missing');
   say("P3: guardian sees the child's passport; sharing is explicitly guardian-controlled");

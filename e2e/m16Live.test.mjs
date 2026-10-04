@@ -159,6 +159,7 @@ await admin.waitForSelector('nav.sidebar', { timeout: 20000 });
 await admin.click('nav.sidebar button:has-text("Evidence")'); // M24D: Passport, Box Cam and Trust left Cases for Evidence
 await admin.click('nav.subnav button:has-text("Box Cam")');
 await admin.waitForSelector('text=Box Cam disputes', { timeout: 15000 });
+await admin.locator('.f-about > summary').first().click().catch(() => {}); // M24F.3 — the statement sits behind About
 const adminBody = await admin.locator('body').innerText();
 if (!adminBody.includes('never fabricates')) fail('B12-live: T&S Box Cam tab must state results are never fabricated');
 say('B12-live: T&S Box Cam case tab reachable and states results are server-derived, never fabricated');

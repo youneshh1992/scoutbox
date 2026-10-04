@@ -17,7 +17,7 @@ import type { AppNotification, Channel } from '../../data/types';
 import type { ChildInboxItem, InboxRequest } from '../../domain/types';
 import { useSession } from '../../state';
 import { useColors, useStyles, type Palette } from '../../theme';
-import { Button, DetailLink, Disclosure, Kicker, Muted, PreviewRow, Row, type RowAccent } from '../../components/ui';
+import { Button, DetailLink, Disclosure, Kicker, Muted, PreviewRow, Row } from '../../components/ui';
 import { pt } from '../../i18n';
 import { PageHeader, PageTabs } from '../../components/PageChrome';
 import { Threads, threadPreview } from '../../components/Threads';
@@ -206,7 +206,7 @@ function RequestDetail({ r, onBack, onRespond, onOpenThread, channels, error }: 
         {pending && trial && slots.length === 0 && altSlots.length > 0 ? (
           <Row style={{ flexWrap: 'wrap' }}>
             {[r.trialDetails?.proposedDate, ...altSlots].filter((s): s is string => !!s).map((s) => (
-              <Pressable key={s} onPress={() => setSlot(s)} accessibilityRole="button" accessibilityState={{ selected: slot === s }} accessibilityLabel={s} style={[styles.slot, slot === s && { borderColor: colors.accent, backgroundColor: colors.panel2 }]}><Text style={{ color: colors.text, fontSize: 13, fontWeight: slot === s ? '700' : '400' }}>{humanDate(s)}</Text></Pressable>
+              <Pressable key={s} onPress={() => setSlot(s)} accessibilityRole="button" accessibilityState={{ selected: slot === s }} accessibilityLabel={s} testID={`alt-slot-${s}`} style={[styles.slot, slot === s && { borderColor: colors.accent, backgroundColor: colors.panel2 }]}><Text style={{ color: colors.text, fontSize: 13, fontWeight: slot === s ? '700' : '400' }}>{humanDate(s)}</Text></Pressable>
             ))}
           </Row>
         ) : null}

@@ -50,6 +50,7 @@ await agent.click('button:has-text("Enter workspace")');
 await agent.waitForSelector('[data-testid="agent-home"]', { timeout: 20000 });
 await agent.waitForSelector('[data-testid="home-active"]', { timeout: 15000 });
 if ((await agent.locator('[data-testid="home-active"] .v').innerText()) !== '2') fail('agent demo: Home should count two active clients');
+await agent.locator('.f-about > summary').first().click().catch(() => {}); // M24F.3 — the notice sits behind About
 if (!/adjudicates no conflicts/.test(await text(agent))) fail('agent demo: the regulatory notice is missing');
 say('agent demo: Home renders counts, tiers and the regulatory notice');
 await agent.evaluate(() => { location.hash = '#/profile'; });
@@ -78,7 +79,7 @@ await agent.waitForSelector('[data-testid="team-rows"]', { timeout: 15000 });
 if ((await agent.locator('[data-testid="add-member"]').count()) !== 0) fail('agent demo: a licensed agent must not see the add-member form');
 say('agent demo: Team is read-only for a licensed agent');
 await agent.evaluate(() => { location.hash = '#/agency/compliance'; });
-await agent.waitForSelector('[data-testid="compliance-honest"]', { timeout: 15000 });
+await agent.waitForSelector('[data-testid="compliance-honest"]', { state: 'attached', timeout: 15000 }); await agent.locator('.f-about > summary').first().click().catch(() => {}); // M24F.3 — behind About
 if (!/Informational only/.test(await text(agent))) fail('agent demo: compliance must be informational');
 say('agent demo: Compliance is informational');
 // ---- M23 P5.6C: the compliance surface in the demo artifact
@@ -87,6 +88,7 @@ await agent.waitForSelector('[data-testid="agent-compliance"]', { timeout: 15000
 // The screen mounts before its projection arrives; wait for the data, not the frame.
 await agent.waitForSelector('[data-testid="provider-status"]', { timeout: 15000 });
 {
+  for (const sm of await agent.locator('.f-about > summary').all()) await sm.click().catch(() => {}); // M24F.3 — honest lines sit behind About
   const body = await text(agent);
   if (!/not statements of legal validity/.test(body)) fail('agent demo: the compliance screen must say a policy result is not a statement of legal validity');
   if ((await agent.locator('[data-testid="provider-status"]').getAttribute('data-live')) !== '0') fail('agent demo: the provider must declare that no live register is connected');
@@ -111,6 +113,7 @@ await agent.waitForSelector('[data-testid="provider-status"]', { timeout: 15000 
   await agent.waitForSelector('[data-testid="refusal"]', { timeout: 15000 });
   const refusal = await agent.locator('[data-testid="refusal"]').innerText();
   if (!/attributed review/i.test(refusal)) fail('agent demo: declaring an entity with no agreement must say it needs attributed review');
+  for (const sm of await agent.locator('.f-about > summary').all()) await sm.click().catch(() => {}); // M24F.3 — honest lines sit behind About
   if (!/not a Transaction Room/i.test(await text(agent))) fail('agent demo: the context must say what it is not');
   say('agent demo: a context evaluates CLEAR, one party is recorded, and the club declaration is refused into attributed review');
 }
@@ -125,6 +128,7 @@ await agent.waitForSelector('[data-testid="tx-list"]', { timeout: 15000 });
   for (const want of ['READY', 'COMPLIANCE_PENDING', 'COMPLIANCE_BLOCKED', 'ON_HOLD', 'CANCELLED']) {
     if (!states.includes(want)) fail(`agent demo: no ${want} example in the demo transactions (${states.join(', ')})`);
   }
+  for (const sm of await agent.locator('.f-about > summary').all()) await sm.click().catch(() => {}); // M24F.3 — honest lines sit behind About
   const body = await text(agent);
   if (!/not a statement of legal validity|no governing body has approved/i.test(body)) fail('agent demo: the transaction list must say what a ScoutBox state is not');
   say(`agent demo: Transactions shows the six synthetic examples, covering ${new Set(states).size} states, with the honest wording`);
@@ -132,8 +136,9 @@ await agent.waitForSelector('[data-testid="tx-list"]', { timeout: 15000 });
 {
   await agent.locator('[data-testid="tx-open"]').first().click();
   await agent.waitForSelector('[data-testid="transaction-detail"]', { timeout: 15000 });
+  for (const sm of await agent.locator('.f-about > summary').all()) await sm.click().catch(() => {}); // M24F.3 — honest lines sit behind About
   const body = await text(agent);
-  if (!/no offer exists|nothing has been signed/i.test(body)) fail('agent demo: an open transaction must say no offer exists and nothing has been signed');
+    if (!/no offer exists|nothing has been signed/i.test(body)) fail('agent demo: an open transaction must say no offer exists and nothing has been signed');
   await agent.click('[data-testid="tx-tab-compliance"]');
   await agent.waitForSelector('[data-testid="tx-offer-boundary"]', { timeout: 15000 });
   if ((await agent.locator('[data-testid="tx-offer-blockers"]').count()) === 0 && (await agent.locator('[data-testid="tx-offer-boundary"]').getAttribute('data-ready')) !== '1') {
@@ -159,7 +164,7 @@ await agent.waitForSelector('[data-testid="tx-list"]', { timeout: 15000 });
   say('agent demo: no demo surface implies that minors are enabled');
 }
 await agent.evaluate(() => { location.hash = '#/agency/compliance'; });
-await agent.waitForSelector('[data-testid="compliance-honest"]', { timeout: 15000 });
+await agent.waitForSelector('[data-testid="compliance-honest"]', { state: 'attached', timeout: 15000 }); await agent.locator('.f-about > summary').first().click().catch(() => {}); // M24F.3 — behind About
 await agent.selectOption('nav.sidebar select[aria-label="Language"]', 'fr');
 await agent.waitForTimeout(400);
 if (!/Agence/.test(await agent.locator('nav.sidebar').innerText())) fail('agent demo: FR sidebar');
@@ -249,6 +254,7 @@ await ts.waitForSelector('[data-testid="policy-jp-eng-2026-27-1"]', { timeout: 1
 await ts.click('nav.subnav button:has-text("Reviewer identities")');
 await ts.waitForSelector('[data-testid="decision-audit"]', { timeout: 15000 });
 {
+  for (const sm of await ts.locator('.f-about > summary').all()) await sm.click().catch(() => {}); // M24F.3 — the statement sits behind About
   const body = await text(ts);
   if (!/at least one administrator must remain/i.test(body)) fail('admin demo: the last-administrator floor must be stated');
   if (!/Marcus Bell/.test(await ts.locator('[data-testid="decision-audit"]').innerText())) fail('admin demo: the decision record must name the reviewer');

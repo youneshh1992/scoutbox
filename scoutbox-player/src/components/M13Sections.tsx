@@ -2,17 +2,17 @@
 // suitability preferences + opportunity fit (You / Home), transitions (You,
 // adults; guardian panel for minors), representation (You, adults only),
 // coarse exposure (You), and action-required acknowledgements (Inbox).
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { Text, TextInput } from './Text';
 import { useColors, type Palette } from '../theme';
 import { Button, Card, Disclosure, Muted, Pill, Row, SectionTitle } from './ui';
-const cap = (v: string | null | undefined) => (v ? v.charAt(0).toUpperCase() + v.slice(1).replace(/_/g, ' ') : '');
 import { m13, type AckNotification, type Preferences, type RepresentationView, type TransitionCase, type Verdict } from '../data/m13client';
 import { m12, type BoardItem } from '../data/m12client';
 import { pt } from '../i18n';
 import type { Actor } from './M12Sections';
-import { useEffect } from 'react';
+
+const cap = (v: string | null | undefined) => (v ? v.charAt(0).toUpperCase() + v.slice(1).replace(/_/g, ' ') : '');
 
 function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): [T | null, () => void, string | null] {
   const [v, setV] = useState<T | null>(null);

@@ -232,6 +232,7 @@ await go(ana, '#/transactions');
 await ana.waitForSelector('[data-testid="transactions-screen"]', { timeout: 20000 });
 say('A3: Transactions opens by deep link');
 {
+  await ana.locator('[data-testid="transactions-screen"] .f-about > summary').first().click().catch(() => {}); // M24F.3 — the honest line sits behind About
   const honest = await ana.locator('[data-testid="tx-list-honest"]').innerText();
   ok(/not/i.test(honest) && /(legal|valid|approv)/i.test(honest), 'A4: the list states what a ScoutBox state is not — no claim of legal validity or approval (§17/§77)');
   ok((await ana.locator('[data-testid="tx-counts"]').count()) === 1, 'A5: the list opens on counts, not on a guess about what needs attention');
@@ -291,7 +292,7 @@ const kola = watch(await ctxKola.newPage(), 'kola');
   const row = kola.locator('div', { hasText: 'Kola Adeyemi' }).filter({ has: kola.locator('text=Enter') }).last();
   await row.locator('text=Enter').last().click();
   await kola.waitForSelector('a[href^="/you"]', { timeout: 30000 });
-  await kola.goto(`http://localhost:${PLAYER_PORT}/you?tab=clubs`);
+  await kola.goto(`http://localhost:${PLAYER_PORT}/you?tab=clubs&section=history`); // M24F.2 — transactions live under Clubs › History
   await kola.waitForSelector('[data-testid="agent-transactions"]', { timeout: 30000 });
   const card = kola.locator('[data-testid="agent-transactions"]');
   ok(await waitFor(async () => (await kola.locator(`[data-testid="agent-transaction-${TX}"]`).count()) > 0, 20000), 'D1: Kola sees his own side of the transaction on his phone');
@@ -457,6 +458,7 @@ const ts = watch(await ctxTs.newPage(), 'trust-safety');
     // the detail behind, not keep it on screen (D12).
     ok(await waitFor(async () => (await ana.locator(`[data-testid="${sel}"]`).count()) > 0, 15000), `N0 ${h} renders its own screen, and only that one`);
     await sleep(500);
+    for (const sm of await ana.locator('.f-about > summary').all()) await sm.click().catch(() => {}); // M24F.3 — honest lines sit behind About
     screens.push(await bodyText(ana));
   }
   const txt = stripHonest(screens.join('\n'));

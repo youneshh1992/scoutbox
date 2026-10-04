@@ -205,6 +205,7 @@ async function selectPlan(p, title) {
   await player.getByText('Start a plan', { exact: true }).click();
   await player.waitForSelector('text=/My development plan/', { timeout: 20000 });
   say('H1: the player starts a plan from the empty state');
+  await player.getByText('About these counts', { exact: true }).first().click().catch(() => {}); // M24F.3 — the denial of a headline number sits behind About
   const body = await seeDev(player);
   ok(/Active goals/.test(body) && /no overall figure/i.test(body),
     'H1: the overview shows counts, and says out loud that there is no overall figure');
@@ -277,7 +278,8 @@ async function selectPlan(p, title) {
   ok(/Box Control 60 ≥ 30 seconds/.test(body), 'H7: the objective target states itself in words');
   ok(/No current valid measurement/.test(body),
     'H7: a simulated 42s does not satisfy a production target of ≥30s');
-  ok(/simulated or test result cannot satisfy a target/i.test(body), 'H7: and the screen says exactly why');
+  await player.getByText('About this target', { exact: true }).first().click().catch(() => {}); // M24F.3 — the explanation sits behind About
+  ok(/simulated or test result cannot satisfy a target/i.test(await player.locator('body').innerText()), 'H7: and the screen says exactly why');
   ok(!FORBIDDEN.some((re) => re.test(denials(body))), 'H7: no Development Score appears anywhere on the player screen');
 }
 

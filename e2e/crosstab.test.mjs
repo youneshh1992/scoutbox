@@ -59,8 +59,9 @@ await club.waitForSelector('.toast', { timeout: 15000 });
 say('club: acceptance toast appeared');
 
 // player → message (open the thread, then write)
-await player.getByText('Open', { exact: true }).first().click();
-await player.fill('input[placeholder="Write a message (no personal contact details)"]', 'Thanks — happy to talk this week.');
+await player.locator('[data-testid="detail-back"]').first().click().catch(() => {}); // M24F.3 — leave the request detail
+await player.locator('[data-testid^="thread-"]').first().click(); // a conversation row
+await player.fill('input[placeholder="Message…"]', 'Thanks — happy to talk this week.');
 await player.keyboard.press('Enter');
 say('player: message sent');
 

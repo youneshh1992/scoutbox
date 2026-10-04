@@ -108,7 +108,8 @@ await playerCategory(player, 'journey', 'Board'); // M24D: the board is My journ
 await player.waitForSelector('text=Opportunity board', { timeout: 20000 });
 await player.waitForSelector('text=U23 look — pressing forwards', { timeout: 15000 });
 say('E1: the opportunity reached the player’s board in his own context');
-await player.locator('div', { hasText: 'U23 look — pressing forwards' }).locator('text=Apply').last().click();
+await player.locator('[data-testid^="board-view-"]').filter({ hasText: 'U23 look — pressing forwards' }).first().click(); // M24F.3 — the row opens its details
+await player.locator('[data-testid^="board-apply-"]').first().click();
 await player.waitForSelector('text=Application submitted', { timeout: 10000 });
 say('E1: player applied from the board');
 

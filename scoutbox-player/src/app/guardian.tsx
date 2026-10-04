@@ -3,7 +3,7 @@
 // declines, and the full communications log is always visible.
 
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { Text, TextInput } from '../components/Text';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, useRouter } from 'expo-router';
@@ -28,7 +28,7 @@ import { ThemeSwitch } from '../components/ThemeSwitch';
 import { Threads } from '../components/Threads';
 import { PopupBanner } from '../components/PopupBanner';
 import { pt } from '../i18n';
-import { fmtDay, fmtDayTime } from '../time';
+import { fmtDay, fmtDayTime, humanDate } from '../time';
 
 const CHILD_AVAILABILITY = [
   { value: 'available_now', label: 'Open to trials' },
@@ -219,9 +219,7 @@ export default function GuardianDashboard() {
                     {[r.trialDetails.proposedDate, ...(r.trialDetails.altSlots ?? [])].map((slot) => {
                       const active = (chosenSlots[r.id] ?? r.trialDetails?.proposedDate) === slot;
                       return (
-                        <Pressable key={slot} onPress={() => setChosenSlots((s) => ({ ...s, [r.id]: slot }))}>
-                          <Pill label={slot} tone={active ? 'green' : undefined} />
-                        </Pressable>
+                        <Button key={slot} small label={humanDate(slot)} primary={active} tertiary={!active} onPress={() => setChosenSlots((s) => ({ ...s, [r.id]: slot }))} testID={`alt-slot-${slot}`} />
                       );
                     })}
                   </Row>

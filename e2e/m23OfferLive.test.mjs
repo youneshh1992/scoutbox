@@ -437,6 +437,7 @@ const ana = await enterAgent(ctxAna, 'Ana Agent', 'Agent', 'ana');
   const amara = await enterPlayer(ctxAmara, 'Amara Adebayo', 'amara', 'text=Guardian');
   const gsec = amara.locator('[data-testid="offer-section"]');
   await gsec.waitFor({ timeout: 20000 });
+  await gsec.locator('[data-testid="about-offers"]').first().click().catch(() => {}); // M24F.3 — the guardian wording sits behind About offers
   ok(await waitIn(gsec, /Offers addressed to you as the guardian/), 'F2: Amara\'s guardian screen carries the Offers section with the guardian wording');
   const txt = await gsec.innerText();
   neg(/No Offers right now/.test(txt) && !/Winger|Central midfielder|Eastport FC/.test(txt), 'F2b: and lists no Offer — none was issued to a minor');

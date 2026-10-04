@@ -198,6 +198,7 @@ say('A1: the seeded agency Director signs in through the real Agent client (plat
   // and Fees are still nobody's destination, which is what this guards.
   neg(!/Offer|Negotiat|Fees?\b|Signing/i.test(nav), 'A2c: no Offers, Negotiation, Fees or Signings destination exists');
   await tomas.page.waitForSelector('[data-testid="agent-home"]', { timeout: 15000 });
+  await tomas.page.locator('.f-about > summary').first().click().catch(() => {}); // M24F.3 — the notice sits behind About
   ok(await waitText(tomas.page, /adjudicates no conflicts/), 'A3: Home carries the regulatory notice — ScoutBox adjudicates nothing');
   ok(/Agency administrator/.test(await tomas.page.locator('[data-testid="my-tiers"]').innerText()), 'A4: the account block shows the migrated role: Agency administrator');
   neg(!/Licensed agent/.test(await tomas.page.locator('[data-testid="my-tiers"]').innerText()), 'A4b: a self-typed "Director" made nobody a licensed agent');
@@ -333,6 +334,7 @@ say('C1: Kola signs in to the player app');
   ok(/Confirmed by client/.test(await ana.page.locator('[data-testid="client-activity"]').innerText()), 'D5: Activity shows "Confirmed by client"');
   await go(ana.page, '#/opportunities');
   await ana.page.waitForSelector('[data-testid="agent-opportunities"]', { timeout: 15000 });
+  await ana.page.locator('[data-testid="agent-opportunities"] .f-about > summary').first().click().catch(() => {}); // M24F.3 — the scope line sits behind About
   ok(/Only opportunities legitimately visible to a confirmed client/.test(await bodyText(ana.page)), 'D6: the aggregate Opportunities board carries the honest scope line');
   await go(ana.page, '#/home');
   await ana.page.waitForSelector('[data-testid="home-active"]', { timeout: 15000 });
@@ -404,7 +406,7 @@ say('C1: Kola signs in to the player app');
   await ana.page.waitForSelector('[data-testid="agent-clients"]', { timeout: 15000 });
   const all = [];
   for (const h of ['#/home', '#/profile', '#/clients', `#/clients/${REL}`, '#/opportunities', '#/inbox', '#/agency', '#/agency/team', '#/agency/compliance', '#/agency/settings']) {
-    await go(ana.page, h); await sleep(700); all.push(await bodyText(ana.page));
+    await go(ana.page, h); await sleep(700); for (const sm of await ana.page.locator('.f-about > summary').all()) await sm.click().catch(() => {}); all.push(await bodyText(ana.page)); // M24F.3 — the honesty sentences sit behind About
   }
   // The workspace may SAY there is no offer / negotiation / fee here; it may not offer one. Strip the honesty sentences, then sweep.
   const honest = /[^.\n]*(not part of this workspace|no offer, negotiation, fee or contract|no transaction room|aucune offre|ne font pas partie)[^.\n]*[.\n]/gi;

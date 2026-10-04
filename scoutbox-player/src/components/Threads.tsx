@@ -135,7 +135,7 @@ export function Threads({ channels, onSend, onOpen, onTyping, attachableClips, e
       {open && (
         <View testID={`thread-open-${open.id}`}>
           <View style={styles.person}>
-            <Pressable onPress={() => setOpenId(null)} accessibilityRole="button" accessibilityLabel={pt('chatBack')} hitSlop={8} style={({ pressed }) => [styles.backBtn, pressed && { opacity: 0.7 }]}>
+            <Pressable onPress={() => setOpenId(null)} accessibilityRole="button" accessibilityLabel={pt('chatBack')} testID="thread-back" hitSlop={8} style={({ pressed }) => [styles.backBtn, pressed && { opacity: 0.7 }]}>
               <Icon name="chevron-left" size={18} color={colors.text} />
             </Pressable>
             <View style={styles.clubAvatar}><Text style={{ color: colors.iconFg, fontSize: 12, fontWeight: '600' }}>{initialsOf(open.orgName)}</Text></View>
