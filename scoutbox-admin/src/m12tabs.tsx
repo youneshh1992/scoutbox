@@ -167,7 +167,7 @@ export function M12Panel({ tab, adminKey, say }: { tab: M12Tab; adminKey: string
   // drillguide
   return (
     <div>
-      <p className="notice">Instructional content is labelled honestly: “unreviewed” until a named person reviews it. No professional validation is claimed where none happened.</p>
+      <details className="f-about"><summary>About</summary><p className="notice">Instructional content is labelled honestly: “unreviewed” until a named person reviews it. No professional validation is claimed where none happened.</p></details>
       {guide.map((g) => (
         <div className="list-row" key={g.drillId}>
           <div className="grow">

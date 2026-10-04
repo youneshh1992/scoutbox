@@ -92,11 +92,11 @@ export function M14Panel({ tab, adminKey, say }: { tab: M14Tab; adminKey: string
     if (!queue) return <div className="dim">Loading…</div>;
     return (
       <div className="list-rows">
-        <div className="notice">
+        {queue.queueOldestMs > 0 && <div className="dim">Oldest waiting: {Math.round(queue.queueOldestMs / 3600e3)}h</div>}
+        <details className="f-about"><summary>About</summary><div className="notice">
           Human review is the LAST step: every case below already passed the deterministic checks and carries exact reason codes.
           Risk flags are signals, never conclusions. Consequential decisions require a written reason and are audited.
-          {queue.queueOldestMs > 0 && <> · Oldest waiting: {Math.round(queue.queueOldestMs / 3600e3)}h</>}
-        </div>
+        </div></details>
 
         <h3>Human review queue ({queue.humanReview.length})</h3>
         {queue.humanReview.map((c) => (
@@ -115,10 +115,10 @@ export function M14Panel({ tab, adminKey, say }: { tab: M14Tab; adminKey: string
         {queue.humanReview.length === 0 && <div className="dim">Queue clear.</div>}
 
         <h3>Root organisation requests ({queue.rootRequests.length})</h3>
-        <div className="notice" style={{ fontSize: 12.5 }}>
+        <details className="f-about"><summary>About</summary><div className="notice" style={{ fontSize: 12.5 }}>
           Bootstrapping trust: domain-email control is evidence of mailbox control, never of the organisation itself.
           The first administrator of an organisation is ALWAYS a human decision.
-        </div>
+        </div></details>
         {queue.rootRequests.map((r) => (
           <div key={r.id} className="list-row" style={{ flexWrap: 'wrap' }}>
             <span className="grow">

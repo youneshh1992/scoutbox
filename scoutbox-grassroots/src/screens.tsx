@@ -1,3 +1,4 @@
+import { Hint } from '../../design-system/About';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Icon } from '../../design-system/icons';
 import { pressable, useDialog } from './dialog';
@@ -545,7 +546,7 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
         )}
       </div>
       {error && <div className="notice block">{error}</div>}
-      <p className="pagehint">Amateur and semi-pro players within 50 km of your ground, nearest first. The radius is a platform rule enforced by the server.</p>
+      <Hint>Amateur and semi-pro players within 50 km of your ground, nearest first. The radius is a platform rule enforced by the server.</Hint>
       {comparing && <CompareModal session={session} playerIds={compareIds} onClose={() => setComparing(false)} />}
       {/* M18.2 — the ordering is stated, not inferred. It is deliberately not
           a ranking, and the sentence says what the figure is not. */}
@@ -612,7 +613,7 @@ export function RequestsScreen({ session, tick, openPlayer }: ScreenProps) {
   useEffect(() => { api.getRequests(session).then(setRequests).catch(() => {}); }, [session, tick]);
   return (
     <>
-      <p className="pagehint">No direct message channel: you file a request and contact unlocks only on acceptance. For under-18s the request goes to the parent or guardian, never the child.</p>
+      <Hint>No direct message channel: you file a request and contact unlocks only on acceptance. For under-18s the request goes to the parent or guardian, never the child.</Hint>
       <div className="list-rows">
         {requests.length === 0 && <div className="notice">No requests sent yet.</div>}
         {requests.map((r) => (
@@ -715,7 +716,7 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
 
   return (
     <>
-      <p className="pagehint">Threads open on acceptance, stay on-platform, and are moderated and logged. For under-18s you are talking to the parent or guardian, never the child.</p>
+      <Hint>Threads open on acceptance, stay on-platform, and are moderated and logged. For under-18s you are talking to the parent or guardian, never the child.</Hint>
       {channels.length === 0 && <div className="notice">No open threads. Send a request; a thread opens when it's accepted.</div>}
       <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 14 }}>
         <div className="list-rows">
@@ -942,7 +943,7 @@ export function LedgerScreen({ session, tick, openPlayer }: ScreenProps) {
   useEffect(() => { api.getLedger(session).then(setRows).catch(() => {}); }, [session, tick]);
   return (
     <>
-      <p className="pagehint">Append-only: every action is timestamped to a named scout and cannot be edited or purged.</p>
+      <Hint>Append-only: every action is timestamped to a named scout and cannot be edited or purged.</Hint>
       <div style={{ overflowX: 'auto' }}>
         <table className="data">
           <thead><tr><th>When</th><th>Action</th><th>Player</th><th>By</th></tr></thead>
@@ -1067,7 +1068,7 @@ export function OpenDaysScreen({ session, tick, notify }: ScreenProps) {
   };
   return (
     <>
-      <p className="pagehint">Local players and guardians see open days in their app and register. Under-18 registrations reach you once your club is verified.</p>
+      <Hint>Local players and guardians see open days in their app and register. Under-18 registrations reach you once your club is verified.</Hint>
       {outstanding > 0 && (
         <div className="notice block" style={{ marginBottom: 16 }}>
           <b>The no-ghosting rule:</b> {outstanding} player(s) from your past open day(s) are still waiting
@@ -1331,7 +1332,7 @@ export function FriendliesScreen({ session, tick, notify }: ScreenProps) {
   useEffect(load, [load, tick]);
   return (
     <>
-      <p className="pagehint">Every club within 50 km sees a posted friendly. Messages are screened and the game gets arranged here.</p>
+      <Hint>Every club within 50 km sees a posted friendly. Messages are screened and the game gets arranged here.</Hint>
       <div className="section">
         <h4>Post a friendly</h4>
         <div className="filters" style={{ flexWrap: 'wrap' }}>
@@ -1439,17 +1440,18 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
         <div className="section">
           <h4>Federation-route verification {fedFiled ? '— with Trust & Safety' : ''}</h4>
           {fedFiled ? (
-            <div className="notice">
-              Filed. Trust & Safety cross-checks the registration with your federation; verification (and,
+            <div><div className="notice">Filed with Trust & Safety.</div>
+            <details className="f-about"><summary>About</summary><div className="notice">
+              Trust & Safety cross-checks the registration with your federation; verification (and,
               with the safeguarding contract, under-18 visibility) follows their approval.
-            </div>
+            </div></details></div>
           ) : (
             <>
-              <div className="notice" style={{ marginBottom: 10 }}>
+              <details className="f-about"><summary>About</summary><div className="notice" style={{ marginBottom: 10 }}>
                 Sunday-league clubs run on free email — that's fine here. Verify through your federation
                 registration instead: Trust & Safety checks the record, and a free-mail contact address is
                 accepted on this route.
-              </div>
+              </div></details>
               <div className="filters" style={{ flexWrap: 'wrap' }}>
                 <input placeholder="Federation (e.g. Manchester FA)" value={fed.federation} onChange={(e) => setFed({ ...fed, federation: e.target.value })} />
                 <input placeholder="Registration id" value={fed.registrationId} onChange={(e) => setFed({ ...fed, registrationId: e.target.value })} />
@@ -1475,10 +1477,10 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
           </div>
         ) : (
           <>
-            <div className="notice" style={{ marginBottom: 10 }}>
+            <details className="f-about" style={{ marginBottom: 10 }}><summary>About</summary><div className="notice">
               Prove control of a company mailbox — free email providers are refused. A code lands in the
               mailbox; entering it here confirms the domain.
-            </div>
+            </div></details>
             <div className="filters">
               <input type="text" placeholder="recruitment@yourclub.com" value={verifyEmail} onChange={(e) => setVerifyEmail(e.target.value)} />
               <button onClick={async () => {
@@ -1523,7 +1525,7 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
       </div>
       <div className="section">
         <h4>Fee protection</h4>
-        <div className="notice">{info.compliance.feeProtection}</div>
+        <Hint className="notice">{info.compliance.feeProtection}</Hint>
       </div>
       <div className="section">
         <h4>Anti-circumvention terms</h4>
@@ -1531,10 +1533,10 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
       </div>
       <div className="section">
         <h4>Accountability</h4>
-        <div className="notice">
+        <details className="f-about"><summary>About</summary><div className="notice">
           Every seat is a named individual. The API refuses any request that is not attributed to a person —
           shared logins do not exist on ScoutBox.
-        </div>
+        </div></details>
       </div>
     </>
   );

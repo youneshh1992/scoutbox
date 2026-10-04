@@ -7,6 +7,7 @@
 // outcome, a rule status or a consent's sufficiency; a refusal is shown with
 // the codes the server returned and the shared HTTP reading. This is NOT a
 // transaction room: no offer, no terms, no fee and no negotiation exist here.
+import { Hint } from '../../design-system/About';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ApiError, type Session } from './api';
 import {
@@ -145,7 +146,7 @@ function MinorReadinessRow({ m }: { m: MinorReadiness }) {
         <span className={`pill ${m.agentReady ? 'green' : 'gold'}`}>{m.agentReady ? t('cx.agentReady') : t('cx.agentNotReady')}</span>
       </div>
       {m.gaps.length > 0 && <div className="dim" style={{ fontSize: 12.5 }}>{t('cx.gaps')}: {m.gaps.map((g) => `${tr(`facet.${g.facet}`)}${g.memberAssociation ? ` (${g.memberAssociation})` : ''}: ${tr(`state.${g.state}`)}`).join(' · ')}</div>}
-      <div className="dim" style={{ fontSize: 12.5 }}>{m.honest}</div>
+      <Hint className="dim" style={{ fontSize: 12.5 }}>{m.honest}</Hint>
     </div>
   );
 }
@@ -248,7 +249,7 @@ function ContextDetail({ session, tick, notify, me, id, onBack, onOpenClient }: 
         <span className={`pill ${c.status === 'open' ? 'green' : ''}`}>{c.status === 'open' ? t('cx.open') : t('cx.closed')}</span>
         <span className="dim">{c.id}</span>
       </div>
-      <div className="notice" data-testid="context-honest">{c.honest}</div>
+      <Hint className="notice" testID="context-honest">{c.honest}</Hint>
       {conflict ? <ConflictNotice conflict={conflict} onReload={() => { setErr(null); d.reload(); }} /> : <Refusal error={err} />}
 
       <Section title={t('cx.clearance')} testId="clearance-section">
@@ -331,7 +332,7 @@ export function ComplianceScreen({ session, tick, notify, me, contextId, onOpenC
   };
   return (
     <div data-testid="agent-compliance">
-      <p className="pagehint">{o?.honest ?? t('cx.intro')}</p>
+      <Hint>{o?.honest ?? t('cx.intro')}</Hint>
       <Refusal error={ov.error} onRetry={ov.reload} />
       {ov.loading && !o && <Loading />}
       {o && (

@@ -15,6 +15,7 @@
 //   • No invented numbers: decision readiness is counts plus words, room health
 //     is a word, a missing measurement is blank and never zero, and a decision
 //     is a human judgement recorded with structured reasons.
+import { Hint } from '../../design-system/About';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Icon } from '../../design-system/icons';
 import { ApiError, type Session } from './api';
@@ -203,7 +204,7 @@ function RoomsList({ session, tick, onOpenRoom }: RoomsScreenProps) {
           </button>
         ))}
       </div>
-      {funnel && <div className="dim" style={{ fontSize: 12, marginBottom: 10 }}>{funnel.note}</div>}
+      {funnel && <Hint className="dim" style={{ fontSize: 12, marginBottom: 10 }}>{funnel.note}</Hint>}
 
       {/* Saved views + search */}
       <div role="tablist" aria-label={t('rm.views')} style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
@@ -654,7 +655,7 @@ function ReadinessBlock({ readiness }: { readiness: RoomReadiness | null }) {
           </div>
         </div>
       )}
-      <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>{readiness.note}</div>
+      <Hint className="dim" style={{ fontSize: 12, marginTop: 4 }}>{readiness.note}</Hint>
     </>
   );
 }

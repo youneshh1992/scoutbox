@@ -3,6 +3,7 @@
 // Trial Days — plus the Evidence Passport panel.
 // Accessibility: every interactive control carries a label, status changes
 // announce via aria-live, and everything operates by keyboard.
+import { Hint } from '../../design-system/About';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Icon } from '../../design-system/icons';
 import { api, type Session } from './api';
@@ -382,7 +383,7 @@ export function SquadPlannerScreen({ session, tick, notify }: ScreenProps) {
 
   return (
     <div>
-      <p className="pagehint">{t('planner.noScores')}</p>
+      <Hint>{t('planner.noScores')}</Hint>
       <div className="stat-grid">
         <div className="stat"><b>{planner?.formation ?? '—'}</b><span>{t('planner.formation')}</span></div>
         <div className="stat"><b>{planner?.roles.length ?? 0}</b><span>{t('planner.roles')}</span></div>
@@ -522,7 +523,7 @@ export function CampaignsScreen({ session, tick, notify }: ScreenProps) {
 
   return (
     <div>
-      <p className="pagehint">{t('camp.fileVsHuman')}</p>
+      <Hint>{t('camp.fileVsHuman')}</Hint>
       <div className="filters">
         <input aria-label="Campaign title" placeholder="Title (e.g. Remote sprint assessment)" value={title} onChange={(e) => setTitle(e.target.value)} style={{ flex: 1 }} />
         <input aria-label={t('common.deadline')} type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
@@ -577,7 +578,7 @@ export function VideoScreen({ session, tick, notify, openPlayer }: ScreenProps) 
 
   return (
     <div>
-      <p className="pagehint">Annotations are private club workflow records stored against the source footage — never public comments, never a channel to a player. Mark segments from any profile's footage (open a player → their clips).</p>
+      <Hint>Annotations are private club workflow records stored against the source footage — never public comments, never a channel to a player. Mark segments from any profile's footage (open a player → their clips).</Hint>
       {playing && (
         <div className="section">
           <h3>{playing.note ?? playing.labels.join(', ')} <span className="dim">{playing.startS}s → {playing.endS}s</span>
@@ -639,7 +640,7 @@ export function OutcomesScreen({ session, tick, notify }: ScreenProps) {
   const stateClass = (s: string) => s === 'confirmed' ? 'green' : s === 'disputed' ? 'red' : s === 'unknown_pending' ? 'gold' : '';
   return (
     <div>
-      <p className="pagehint">Follow-ups are scheduled records that survive restarts. Reported ≠ confirmed: the player/guardian answers back, and "unknown" is counted as unknown.</p>
+      <Hint>Follow-ups are scheduled records that survive restarts. Reported ≠ confirmed: the player/guardian answers back, and "unknown" is counted as unknown.</Hint>
       <div className="list-rows">
         {(list ?? []).map((f) => (
           <div key={f.id} className="list-row">
@@ -720,7 +721,7 @@ export function TrialDaysScreen({ session, tick, notify }: ScreenProps) {
 
   return (
     <div>
-      <p className="pagehint">{t('day.gateNote')}</p>
+      <Hint>{t('day.gateNote')}</Hint>
       <div className="list-rows">
         {trials.map((tr) => (
           <div key={tr.id} className="list-row">

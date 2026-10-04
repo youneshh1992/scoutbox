@@ -2,6 +2,7 @@
 // The coach assigns supported drills, sees Box Cam results (never footage),
 // and can publish Box Challenges. Honest wall copy when the standing gates
 // refuse (agency excluded, unverified/suspended orgs, radius, blocks).
+import { Hint } from '../../design-system/About';
 import { useEffect, useState } from 'react';
 import { ApiError, type Session } from './api';
 import { m16, type BoxAssignments, type BoxDrill } from './m16api';
@@ -67,7 +68,7 @@ export function BoxTrainingPanel({ session, playerId, notify }: { session: Sessi
       {open && err && <div className="notice block">{err}</div>}
       {open && data && (
         <>
-          <div className="dim" style={{ fontSize: 12.5 }}>{data.note}</div>
+          <Hint className="dim" style={{ fontSize: 12.5 }}>{data.note}</Hint>
           <div className="list-rows" style={{ marginTop: 8 }}>
             {data.items.length === 0 && <div className="dim">{t('bt.none')}</div>}
             {data.items.map((a) => (

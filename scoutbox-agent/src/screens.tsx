@@ -1,3 +1,5 @@
+import { Hint } from '../../design-system/About';
+import { fmtClock } from '../../design-system/time';
 // ScoutBox Agent — the screens. Every screen reads one server projection and
 // renders what it says; nothing here derives access, status or a
 // verification state on its own. A refusal is shown as the shared HTTP
@@ -105,7 +107,7 @@ export function HomeScreen({ session, tick, onNavigate }: ScreenProps & { onNavi
   const h = home.data as Home | null;
   return (
     <div data-testid="agent-home">
-      <p className="pagehint">{h?.regulatoryNotice ?? ''}</p>
+      <Hint>{h?.regulatoryNotice ?? ''}</Hint>
       <ErrorLine error={home.error} onRetry={home.reload} />
       {home.loading && !h && <Loading />}
       {h && (
@@ -123,7 +125,7 @@ export function HomeScreen({ session, tick, onNavigate }: ScreenProps & { onNavi
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{h.tiers.map((x) => <span key={x} className="pill blue">{tr(`tier.${x}`)}</span>)}</div>
           </Section>
           <Section title={t('home.whatThisIs')}>
-            <div className="notice">{t('home.whatThisIsBody')}</div>
+            <details className="f-about"><summary>About</summary><div className="notice">{t('home.whatThisIsBody')}</div></details>
           </Section>
         </>
       )}
@@ -195,7 +197,7 @@ export function ProfileScreen({ session, tick, notify, me }: ScreenProps & { me:
   const toggleJ = (j: string) => { setJuris((cur) => (cur.includes(j) ? cur.filter((x) => x !== j) : [...cur, j])); markDirty(); };
   return (
     <div data-testid="agent-profile">
-      <p className="pagehint">{p?.honest ?? t('profile.declaredNote')}</p>
+      <Hint>{p?.honest ?? t('profile.declaredNote')}</Hint>
       <ErrorLine error={prof.error} onRetry={prof.reload} />
       {prof.loading && !prof.data && <Loading />}
       {prof.data && (
@@ -215,7 +217,7 @@ export function ProfileScreen({ session, tick, notify, me }: ScreenProps & { me:
                   </div>
                 </div>
               </div>
-              <div className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>{t('profile.declaredNote')} {p?.facets.fifa_licence?.state === 'VERIFIED' ? t('profile.resetWarning') : ''}</div>
+              <Hint className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>{t('profile.declaredNote')} {p?.facets.fifa_licence?.state === 'VERIFIED' ? t('profile.resetWarning') : ''}</Hint>
               {conflict ? <ConflictNotice conflict={conflict} onReload={() => { setErr(null); prof.reload(); }} /> : <ErrorLine error={err} />}
               {canWrite && <button className="primary" disabled={busy || !name.trim()} onClick={save} data-testid="profile-save">{p ? t('common.save') : t('profile.create')}</button>}
             </Section>
@@ -543,7 +545,7 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
           {sub === 'journey' && (det.access ? <ClientJourneyLine session={session} id={id} tick={tick} /> : noAccess('journey-no-access'))}
           {sub === 'tasks' && (
             <Section title={t('clients.tasksTitle')}>
-              <p className="pagehint">{t('clients.tasksNote')}</p>
+              <Hint>{t('clients.tasksNote')}</Hint>
               {!det.access ? noAccess('tasks-no-access') : (() => {
                 const rows: { key: string; text: string; sub: string }[] = [];
                 for (const x of offers.data?.items ?? []) if (x.awaitingClientResponse) rows.push({ key: `o-${x.id}`, text: `${t('clients.taskOffer')} · ${x.club.name ?? '—'}`, sub: 'offers' });
@@ -587,7 +589,7 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
               <div className="list-row"><span className="grow">{t('clients.startedAt')} / {t('clients.endsAt')}</span><span className="dim">{r.startAt ? fmtDate(r.startAt) : '—'} → {r.endAt ? fmtDate(r.endAt) : '—'}</span></div>
               <div className="list-row"><span className="grow">{r.shareWithAgencyStaff ? t('clients.sharing') : t('clients.notShared')}</span></div>
             </div>
-            <div className="dim" style={{ fontSize: 12.5, marginTop: 8 }}>{r.honest}</div>
+            <Hint className="dim" style={{ fontSize: 12.5, marginTop: 8 }}>{r.honest}</Hint>
             {conflict ? <ConflictNotice conflict={conflict} onReload={() => { setErr(null); d.reload(); }} /> : <ErrorLine error={err} />}
             {(r.status === 'proposed' || r.status === 'active') && !r.legacy && (
               <div style={{ marginTop: 10 }}><button disabled={busy} onClick={end} data-testid="terminate">{r.status === 'proposed' ? t('clients.withdraw') : t('clients.terminate')}</button></div>
@@ -595,7 +597,7 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
           </>)}
           {sub === 'compliance' && (
             <Section title={t('clients.tab.compliance')}>
-              <p className="pagehint">{t('clients.complianceNote')}</p>
+              <Hint>{t('clients.complianceNote')}</Hint>
               <ErrorLine error={contexts.error} onRetry={contexts.reload} />
               {contexts.data && (() => {
                 const mine = contexts.data.items.filter((cx) => cx.parties.some((pa) => pa.subjectKind === 'player' && pa.subjectId === r.clientId && !pa.removed));
@@ -616,7 +618,7 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
             {!det.access && <div className="notice warn" data-testid="opps-no-access">{t('clients.noAccessOpps')}</div>}
             {det.access && (
               <>
-                <p className="pagehint">{opps.data?.note ?? t('clients.oppsNote')}</p>
+                <Hint>{opps.data?.note ?? t('clients.oppsNote')}</Hint>
                 <ErrorLine error={opps.error} onRetry={opps.reload} />
                 {opps.data && opps.data.items.length === 0 && <div className="notice">{t('clients.noOpps')}</div>}
                 <div className="list-rows" data-testid="client-opps">{(opps.data?.items ?? []).map((o) => {
@@ -663,7 +665,7 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
             {!det.access && <div className="notice warn" data-testid="contacts-no-access">{t('clients.noAccessOpps')}</div>}
             {det.access && (
               <>
-                <p className="pagehint">{contacts.data?.note ?? t('contacts.intro')}</p>
+                <Hint>{contacts.data?.note ?? t('contacts.intro')}</Hint>
                 <ErrorLine error={contacts.error} onRetry={contacts.reload} />
                 {contacts.data && contacts.data.items.length === 0 && <div className="notice" data-testid="contacts-none">{t('contacts.none')}</div>}
                 <div className="list-rows" data-testid="client-contacts">
@@ -690,7 +692,7 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
             {!det.access && <div className="notice warn" data-testid="trials-no-access">{t('clients.noAccessOpps')}</div>}
             {det.access && (
               <>
-                <p className="pagehint">{trials.data?.note ?? t('trials.intro')}</p>
+                <Hint>{trials.data?.note ?? t('trials.intro')}</Hint>
                 <ErrorLine error={trials.error} onRetry={trials.reload} />
                 {trials.data && trials.data.items.length === 0 && <div className="notice" data-testid="trials-none">{t('trials.none')}</div>}
                 <div className="list-rows" data-testid="client-trials">
@@ -703,7 +705,7 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
                       </div>
                       {(x.schedule?.sessions ?? []).map((ss) => (
                         <div key={ss.id} className="dim" style={{ fontSize: 12.5 }}>
-                          {fmtStamp(ss.startsAt)} → {new Date(ss.endsAt).toLocaleTimeString()} · {ss.venue?.name ?? '—'}{ss.venue?.town ? `, ${ss.venue.town}` : ''} · {tr(`attendance.${ss.attendance.state}`) === `attendance.${ss.attendance.state}` ? ss.attendance.state.replace(/_/g, ' ') : tr(`attendance.${ss.attendance.state}`)}
+                          {fmtStamp(ss.startsAt)} → {fmtClock(ss.endsAt)} · {ss.venue?.name ?? '—'}{ss.venue?.town ? `, ${ss.venue.town}` : ''} · {tr(`attendance.${ss.attendance.state}`) === `attendance.${ss.attendance.state}` ? ss.attendance.state.replace(/_/g, ' ') : tr(`attendance.${ss.attendance.state}`)}
                         </div>
                       ))}
                       {x.reportObligation && <div className="dim" style={{ fontSize: 12 }}>{t(x.reportObligation === 'outstanding' ? 'trials.reportOutstanding' : 'trials.reportFiled')}</div>}
@@ -718,7 +720,7 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
             {!det.access && <div className="notice warn" data-testid="offers-no-access">{t('clients.noAccessOpps')}</div>}
             {det.access && (
               <>
-                <p className="pagehint">{t('offers.intro')}</p>
+                <Hint>{t('offers.intro')}</Hint>
                 <ErrorLine error={offers.error} onRetry={offers.reload} />
                 {offers.data && offers.data.items.length === 0 && <div className="notice" data-testid="offers-none">{t('offers.none')}</div>}
                 <div className="list-rows" data-testid="client-offers">
@@ -753,7 +755,7 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
               {!det.access && noAccess('signings-no-access')}
               {det.access && (
                 <>
-                  <p className="pagehint">{t('signing.honest')}</p>
+                  <Hint>{t('signing.honest')}</Hint>
                   {signings.data?.refused && <div className="notice warn" data-testid="client-signings-withheld">{t('signing.withheld')}</div>}
                   {signings.data && !signings.data.refused && signings.data.items.filter((g) => !g.terminal || g.status === 'COMPLETED').length === 0 && <div className="notice" data-testid="signings-none">{t('clients.pastSigningsNone')}</div>}
                   <div className="list-rows" data-testid="client-signings">{(signings.data?.items ?? []).filter((g) => !g.terminal || g.status === 'COMPLETED').map(signingRow)}</div>
@@ -764,7 +766,7 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
           )}
           {sub === 'documents' && (
             <Section title={t('clients.tab.documents')}>
-              <p className="pagehint">{t('clients.documentsNote')}</p>
+              <Hint>{t('clients.documentsNote')}</Hint>
               <ErrorLine error={txs.error} onRetry={txs.reload} />
               {txs.data && (() => {
                 const mine = txs.data.items.filter((tx) => tx.playerId === r.clientId);
@@ -783,7 +785,7 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
           )}
           {sub === 'timeline' && (
             <Section title={t('clients.tab.timeline')}>
-              <p className="pagehint">{t('clients.timelineNote')}</p>
+              <Hint>{t('clients.timelineNote')}</Hint>
               {!det.access && noAccess('timeline-no-access')}
               <ErrorLine error={timeline.error} onRetry={timeline.reload} />
               {timeline.data && timeline.data.items.every((it) => it.journey.timeline.length === 0) && <div className="notice" data-testid="client-timeline-none">{t('clients.timelineNone')}</div>}
@@ -799,7 +801,7 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
           )}
           {sub === 'past-offers' && (
             <Section title={t('clients.tab.past-offers')}>
-              <p className="pagehint">{t('clients.historyNote')}</p>
+              <Hint>{t('clients.historyNote')}</Hint>
               {!det.access && noAccess('past-offers-no-access')}
               <ErrorLine error={offers.error} onRetry={offers.reload} />
               {offers.data && offers.data.items.filter((x) => PAST_OFFER.has(x.status ?? '')).length === 0 && <div className="notice" data-testid="past-offers-none">{t('clients.pastOffersNone')}</div>}
@@ -816,7 +818,7 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
           )}
           {sub === 'past-signings' && (
             <Section title={t('clients.tab.past-signings')}>
-              <p className="pagehint">{t('clients.historyNote')}</p>
+              <Hint>{t('clients.historyNote')}</Hint>
               {!det.access && noAccess('past-signings-no-access')}
               {signings.data?.refused && <div className="notice warn">{t('signing.withheld')}</div>}
               {signings.data && !signings.data.refused && signings.data.items.filter((g) => g.terminal).length === 0 && <div className="notice" data-testid="past-signings-none">{t('clients.pastSigningsNone')}</div>}
@@ -836,7 +838,7 @@ export function ClientsScreen({ session, tick, notify, me, clientId, clientTab, 
   if (clientId) return <ClientDetailView session={session} id={clientId} tab={clientTab} onTab={onClientTab} onBack={onCloseClient} notify={notify} tick={tick} />;
   return (
     <div data-testid="agent-clients">
-      <p className="pagehint">{t('clients.intro')}</p>
+      <Hint>{t('clients.intro')}</Hint>
       {canRequest && !showForm && <div style={{ marginBottom: 12 }}><button className="primary" onClick={() => setShowForm(true)} data-testid="open-request">{t('clients.request')}</button></div>}
       {canRequest && showForm && <div style={{ marginBottom: 14 }}><RequestForm session={session} notify={notify} onDone={() => { setShowForm(false); list.reload(); }} /></div>}
       <ErrorLine error={list.error} onRetry={list.reload} />
@@ -861,7 +863,7 @@ export function OpportunitiesScreen({ session, tick, me }: ScreenProps & { me: M
   const data = useLoad(() => (licensed ? agent.opportunities(session) : Promise.resolve(null)), [session, tick, licensed]);
   return (
     <div data-testid="agent-opportunities">
-      <p className="pagehint">{t('opps.intro')}</p>
+      <Hint>{t('opps.intro')}</Hint>
       {!licensed && <div className="notice warn">{t('opps.notLicensed')}</div>}
       <ErrorLine error={data.error} onRetry={data.reload} />
       {licensed && data.loading && !data.data && <Loading />}
@@ -877,7 +879,7 @@ export function InboxScreen({ session, tick, notify, onOpenClient }: ScreenProps
   const markRead = async () => { try { await api.markNotificationsRead(session); data.reload(); } catch (e) { notify(httpState(e).message, true); } };
   return (
     <div data-testid="agent-inbox">
-      <p className="pagehint">{t('inbox.intro')}</p>
+      <Hint>{t('inbox.intro')}</Hint>
       <ErrorLine error={data.error} onRetry={data.reload} />
       {data.loading && !data.data && <Loading />}
       {data.data && (
@@ -938,7 +940,7 @@ function TeamTab({ session, tick, notify, me }: ScreenProps & { me: Me | null })
   const conflict = conflictOf(err);
   return (
     <>
-      <p className="pagehint">{t('agency.teamIntro')}</p>
+      <Hint>{t('agency.teamIntro')}</Hint>
       {!canWrite && <div className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>{t('agency.readOnly')}</div>}
       {conflict ? <ConflictNotice conflict={conflict} onReload={() => { setErr(null); team.reload(); }} /> : <ErrorLine error={err} />}
       <ErrorLine error={team.error} onRetry={team.reload} />
@@ -984,11 +986,11 @@ function ComplianceTab({ session, tick }: ScreenProps) {
   const data = useLoad(() => agent.compliance(session), [session, tick]);
   return (
     <>
-      <p className="pagehint">{t('agency.complianceIntro')}</p>
+      <Hint>{t('agency.complianceIntro')}</Hint>
       <ErrorLine error={data.error} onRetry={data.reload} />
       {data.data && (
         <>
-          <div className="notice" style={{ marginBottom: 10 }} data-testid="compliance-honest">{data.data.honest}</div>
+          <Hint className="notice" style={{ marginBottom: 10 }} testID="compliance-honest">{data.data.honest}</Hint>
           <div className="list-rows" data-testid="compliance-rows">
             {data.data.agents.map((a: ComplianceRow) => (
               <div key={a.userId} className="list-row"><span className="grow"><b>{a.name}</b>{!a.hasProfile && <span className="dim"> · {t('agency.noProfile')}</span>}{a.jurisdictions.map((j) => <span key={j.memberAssociation} className="dim"> · {j.memberAssociation}: <StatePill state={j.nationalRegistration} /></span>)}</span><StatePill state={a.fifaLicence} /></div>
@@ -1021,7 +1023,7 @@ function SettingsTab({ session, tick, notify, me, overview }: ScreenProps & { me
   };
   return (
     <>
-      <p className="pagehint">{t('agency.settingsIntro')}</p>
+      <Hint>{t('agency.settingsIntro')}</Hint>
       <div className="form-grid" data-testid="agency-settings">
         <label>{t('agency.description')}<input value={desc} onChange={(e) => { setDesc(e.target.value); markDirty(); }} disabled={!canWrite} /></label>
         <div>
@@ -1033,7 +1035,7 @@ function SettingsTab({ session, tick, notify, me, overview }: ScreenProps & { me
       {canWrite ? <button className="primary" onClick={save}>{t('common.save')}</button> : <div className="dim" style={{ fontSize: 12.5 }}>{t('agency.readOnly')}</div>}
       {canAudit && (
         <Section title={t('agency.audit')}>
-          <p className="pagehint">{t('agency.auditIntro')}</p>
+          <Hint>{t('agency.auditIntro')}</Hint>
           <ErrorLine error={auditErr} />
           <div className="list-rows" data-testid="audit-rows">
             {rows.map((r) => (
@@ -1055,7 +1057,7 @@ export function AgencyScreen({ session, tick, notify, me, tab, onTab }: ScreenPr
   const tabs = useMemo(() => AGENCY_TABS.filter((x) => x !== 'compliance' || canCompliance), [canCompliance]);
   return (
     <div data-testid="agent-agency">
-      <p className="pagehint">{o?.honest ?? t('agency.honest')}</p>
+      <Hint>{o?.honest ?? t('agency.honest')}</Hint>
       <Tabs tabs={tabs} active={tab} onChange={onTab} label={t('agency.title')} labelFor={labelFor} />
       {tab === 'overview' && (
         <Panel id="overview" label={labelFor('overview')}>
@@ -1105,7 +1107,7 @@ export function SafetyModal({ session, notify, onClose }: { session: Session; no
       <div className="drawer-veil" onClick={onClose} />
       <div className="drawer" ref={dialogRef} role="dialog" aria-modal="true" aria-label={t('report.title')} tabIndex={-1} style={{ width: 'min(520px, 92vw)' }}>
         <div className="head"><h3>{t('report.title')}</h3><button className="close" onClick={onClose} aria-label={t('common.close')}>✕</button></div>
-        <p className="pagehint">{t('report.body')}</p>
+        <Hint>{t('report.body')}</Hint>
         <div className="form-grid" style={{ gridTemplateColumns: '1fr' }}>
           <label>{t('report.target')}<input value={target} onChange={(e) => setTarget(e.target.value)} /></label>
           <label>{t('report.reason')}<input value={reason} onChange={(e) => setReason(e.target.value)} /></label>

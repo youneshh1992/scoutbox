@@ -4,6 +4,7 @@
 // wall messages when the standing gates refuse access (agency/minor wall,
 // grassroots radius, blocks). A share link locates a passport; it never
 // authorises — the same gates run again on resolution.
+import { Hint } from '../../design-system/About';
 import { useEffect, useState } from 'react';
 import { Icon } from '../../design-system/icons';
 import { ApiError, type Session } from './api';
@@ -71,7 +72,7 @@ export function PassportBody({ session, p, notify, reload }: { session: Session;
         {p.availability && <span className="pill blue">{p.availability.replace(/_/g, ' ')}</span>}
         {p.representation && <span className="pill gold">{t('fp.represented')}: {p.representation.agencyName}</span>}
       </div>
-      <div className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>{p.note}</div>
+      <Hint className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>{p.note}</Hint>
 
       <div className="stat-grid" aria-label={t('fp.evidence')}>
         <div className="stat"><div className="v">{p.evidence.fullMatches}</div><div className="k">{t('fp.fullMatches')}</div></div>
@@ -242,7 +243,7 @@ export function SharedPassportOpener({ session, notify }: { session: Session; no
   return (
     <div className="section" aria-label={t('fp.shareOpen')}>
       <h4>{t('fp.shareOpen')}</h4>
-      <div className="dim" style={{ fontSize: 12.5, marginBottom: 6 }}>{t('fp.shareOpenNote')}</div>
+      <Hint className="dim" style={{ fontSize: 12.5, marginBottom: 6 }}>{t('fp.shareOpenNote')}</Hint>
       <div style={{ display: 'flex', gap: 8 }}>
         <input style={{ flex: 1 }} placeholder={t('fp.sharePlaceholder')} value={input} onChange={(e) => setInput(e.target.value)} aria-label={t('fp.sharePlaceholder')} />
         <button className="primary" onClick={async () => {

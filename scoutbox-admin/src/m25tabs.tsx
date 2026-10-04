@@ -1,3 +1,5 @@
+import { Hint } from '../../design-system/About';
+import { fmtClock, fmtStamp } from '../../design-system/time';
 // M23 P5.6C — the attributed compliance review console (gate G-C0).
 //
 // The whole point of this panel: an authoritative compliance decision is made
@@ -99,7 +101,7 @@ const KIND_LABEL: Record<string, string> = {
   conflict_evaluation: 'Conflict evaluation',
 };
 const ROLE_LABEL: Record<string, string> = { trust_safety_reviewer: 'Reviewer', trust_safety_admin: 'Administrator' };
-const when = (ts: number | null | undefined) => (ts ? new Date(ts).toLocaleString() : '—');
+const when = (ts: number | null | undefined) => (ts ? fmtStamp(ts) : '—');
 
 // ------------------------------------------------------------------ demo
 const NOW = Date.now();
@@ -343,10 +345,10 @@ export function M25Panel({ tab, say }: { tab: M25Tab; adminKey: string; say: (t:
           <button className="primary" onClick={signIn} data-testid="reviewer-signin-go">Sign in</button>
         </div>
         {authError && <div className="notice block" role="alert" data-testid="reviewer-auth-error">{authError}</div>}
-        <div className="notice">
+        <details className="f-about"><summary>About</summary><div className="notice">
           Reviewer identities are provisioned by a Trust &amp; Safety administrator, or in production by the operator bootstrap
           (TS_REVIEWER_BOOTSTRAP_*). Development builds seed three named reviewers so this lane can be exercised.
-        </div>
+        </div></details>
       </div>
     );
   }
@@ -461,7 +463,7 @@ export function M25Panel({ tab, say }: { tab: M25Tab; adminKey: string; say: (t:
             <div className="dim">{r.reasons.map((x) => `${x.code}${x.ruleId ? ` (${x.ruleId}: ${x.ruleStatus})` : ''}`).join(' · ') || '—'}</div>
           </div>
         ))}
-        {metrics && <div className="notice" data-testid="metrics-note">{metrics.note}</div>}
+        {metrics && <Hint className="notice" testID="metrics-note">{metrics.note}</Hint>}
       </div>
     );
   }
@@ -594,10 +596,10 @@ export function M25Panel({ tab, say }: { tab: M25Tab; adminKey: string; say: (t:
   return (
     <div className="list-rows">
       {who}
-      <div className="notice">
+      <details className="f-about"><summary>About</summary><div className="notice">
         Reviewer identities and the decision record. Only an administrator provisions or revokes one, at least one administrator must
         remain, and revoking ends that reviewer's sessions immediately. Decisions made before a revocation keep their attribution.
-      </div>
+      </div></details>
       {error && <div className="notice block" role="alert" data-testid="reviewers-error">{error}</div>}
       {reviewers.map((r) => (
         <div key={r.id} className="list-row" data-testid={`reviewer-${r.id}`} data-status={r.status}>

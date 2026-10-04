@@ -1,3 +1,4 @@
+import { fmtClock, fmtStamp } from '../../design-system/time';
 // M15 Trust & Safety additions — the Football Passport back office:
 // the correction queue (records are never silently edited; every resolution
 // carries a written reason), the share registry (any link can be killed
@@ -98,11 +99,11 @@ export function M15Panel({ adminKey, say }: { tab: M15Tab; adminKey: string; say
 
   return (
     <div className="list-rows">
-      <div className="notice">
+      <details className="f-about"><summary>About</summary><div className="notice">
         The Football Passport is a projection over source records — nothing here edits a source directly.
         A correction resolution documents what happened; claim-level changes go through the M14 verification
         tools, evidence changes through the M12 evidence tools.
-      </div>
+      </div></details>
 
       <h3>Correction requests ({corrections.filter((c) => c.status === 'open').length} open)
         {' '}<button onClick={() => setShowResolved((x) => !x)}>{showResolved ? 'Open only' : 'Include resolved'}</button>
@@ -111,7 +112,7 @@ export function M15Panel({ adminKey, say }: { tab: M15Tab; adminKey: string; say
         <div key={c.id} className="list-row" style={{ flexWrap: 'wrap' }}>
           <span className="grow">
             <b>{c.by.name}</b> <span className="pill blue">{c.by.kind}</span> on <b>{c.playerId}</b> · {c.targetType}{c.targetId ? ` (${c.targetId})` : ''}
-            <div className="dim" style={{ fontSize: 12.5 }}>“{c.reason}” · {new Date(c.createdAt).toLocaleString()}</div>
+            <div className="dim" style={{ fontSize: 12.5 }}>“{c.reason}” · {fmtStamp(c.createdAt)}</div>
             {c.resolution && <div className="dim" style={{ fontSize: 12 }}>→ {c.resolution.outcome}: {c.resolution.reason}</div>}
           </span>
           {c.status === 'open' ? resolveBtns(c) : <span className="pill green">{c.status}</span>}
@@ -120,10 +121,10 @@ export function M15Panel({ adminKey, say }: { tab: M15Tab; adminKey: string; say
       {corrections.length === 0 && <div className="dim">No correction requests.</div>}
 
       <h3>Share registry ({shares.filter((s) => !s.revokedAt).length} active)</h3>
-      <div className="notice" style={{ fontSize: 12.5 }}>
+      <details className="f-about"><summary>About</summary><div className="notice" style={{ fontSize: 12.5 }}>
         Tokens are stored hashed — nobody, including this console, can recover a link. Revocation is
         immediate, and a dead link is indistinguishable from an unknown one.
-      </div>
+      </div></details>
       {shares.map((s) => (
         <div key={s.id} className="list-row">
           <span className="grow">
@@ -138,10 +139,10 @@ export function M15Panel({ adminKey, say }: { tab: M15Tab; adminKey: string; say
       {shares.length === 0 && <div className="dim">No shares minted.</div>}
 
       <h3>Source graph inspector</h3>
-      <div className="notice" style={{ fontSize: 12.5 }}>
+      <details className="f-about"><summary>About</summary><div className="notice" style={{ fontSize: 12.5 }}>
         The full projection for one player: every event with its source record, provenance and visibility —
         plus any flagged conflicts. This is the T&amp;S view; players and clubs never see this level of detail.
-      </div>
+      </div></details>
       <div style={{ display: 'flex', gap: 8 }}>
         <input style={{ flex: 1 }} placeholder="Player id (e.g. pl-adeyemi)" value={graphId} onChange={(e) => setGraphId(e.target.value)} />
         <button className="primary" onClick={async () => {

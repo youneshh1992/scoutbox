@@ -4,6 +4,7 @@
 // Organisation (onboarding, MFA, SSO, sessions, support, delivery).
 // Same conventions as m12screens: labelled controls, honest empty/error
 // states, live/demo through the m13 client.
+import { Hint } from '../../design-system/About';
 import { useEffect, useState } from 'react';
 import { Icon } from '../../design-system/icons';
 import type { Session } from './api';
@@ -204,7 +205,7 @@ export function CoverageScreen({ session, notify }: ScreenProps) {
       </div>
       <div className="section">
         <h3>{t('m13.cov.suggestions')}</h3>
-        <div className="notice" style={{ fontSize: 12.5 }}>{suggestions?.note}</div>
+        <Hint className="notice" style={{ fontSize: 12.5 }}>{suggestions?.note}</Hint>
         {(suggestions?.items ?? []).map((sg) => (
           <div key={sg.fixture.id} className="list-row"><span className="grow"><b>{sg.fixture.home} v {sg.fixture.away}</b> <span className="dim">{sg.fixture.date} — {sg.rationale}: {sg.nearbyTargets.map((p) => p.name).join(', ')}</span></span>{sg.alreadyCovered && <span className="pill">Covered</span>}</div>
         ))}
@@ -282,7 +283,7 @@ export function CalibrationScreen({ session, notify }: ScreenProps) {
       {review && (
         <div className="section">
           <h3>{t('m13.cal.review')}</h3>
-          <div className="notice" style={{ fontSize: 12.5 }}>{review.disclaimer}</div>
+          <Hint className="notice" style={{ fontSize: 12.5 }}>{review.disclaimer}</Hint>
           {review.items.map((i) => (
             <div key={i.assessmentId} className="list-row"><span className="grow"><b>{i.playerName}</b> <span className="dim">{i.scoutName} recommended “{i.recommendation.verdict}” — since then: {i.since.signedSomewhere ? 'signed somewhere' : 'no signing'}, {i.since.furtherAssessments} further assessment(s)</span></span></div>
           ))}
@@ -315,7 +316,7 @@ export function InsightScreen({ session, notify, openPlayer }: ScreenProps) {
           <h3 style={{ marginTop: 12 }}>{t('m13.exp.birthQ')}</h3>
           {report.birthQuarter.suppressed
             ? <div className="notice block"><Icon name="lock-keyhole" size={13} /> {t('m13.exp.suppressed')}</div>
-            : <div><div className="list-rows">{Object.entries(report.birthQuarter.quarters ?? {}).map(([q, c]) => <div key={q} className="list-row"><span className="grow">{q}</span><b>{c}</b></div>)}</div><div className="dim" style={{ fontSize: 12 }}>{report.birthQuarter.note}</div></div>}
+            : <div><div className="list-rows">{Object.entries(report.birthQuarter.quarters ?? {}).map(([q, c]) => <div key={q} className="list-row"><span className="grow">{q}</span><b>{c}</b></div>)}</div><Hint className="dim" style={{ fontSize: 12 }}>{report.birthQuarter.note}</Hint></div>}
           <div className="notice block" style={{ marginTop: 8 }}><Icon name="info" size={14} /> {report.absentEvidence.note}</div>
         </div>
       ) : <div className="notice">{t('m13.exp.leadOnly')}</div>}
@@ -333,7 +334,7 @@ export function InsightScreen({ session, notify, openPlayer }: ScreenProps) {
       </div>
       <div className="section">
         <h3>{t('m13.exp.rotation')}</h3>
-        <div className="notice" style={{ fontSize: 12.5 }}>{rotation?.note}</div>
+        <Hint className="notice" style={{ fontSize: 12.5 }}>{rotation?.note}</Hint>
         <div className="list-rows">
           {(rotation?.items ?? []).map((p) => <div key={p.id} className="list-row"><span className="grow"><b>{p.name}</b> <span className="dim">{p.position ?? ''}</span></span><button onClick={() => openPlayer(p.id)}>{t('m13.exp.open')}</button></div>)}
         </div>
@@ -389,7 +390,7 @@ export function NetworkScreen({ session, notify }: ScreenProps) {
             <b>{g.name}</b> {g.youAdmin && <span className="pill gold">Admin</span>}
             <div className="dim" style={{ fontSize: 12.5 }}>{g.members.map((mm) => mm.name).join(' · ')}</div>
             {g.programmes.map((p) => <div key={p.id} className="dim" style={{ fontSize: 12.5 }}>{p.name} {p.region ? `(${p.region})` : ''}</div>)}
-            <div className="notice" style={{ fontSize: 12, marginTop: 6 }}>{t('m13.grp.isolatedNote')}</div>
+            <Hint className="notice" style={{ fontSize: 12, marginTop: 6 }}>{t('m13.grp.isolatedNote')}</Hint>
             <div style={{ marginTop: 6 }}>
               <button onClick={async () => {
                 try {
@@ -444,7 +445,7 @@ export function NetworkScreen({ session, notify }: ScreenProps) {
       </div>
       <div className="section">
         <h3>{t('m13.trn.title')}</h3>
-        <div className="notice" style={{ fontSize: 12.5 }}>{transitions?.note}</div>
+        <Hint className="notice" style={{ fontSize: 12.5 }}>{transitions?.note}</Hint>
         {(transitions?.items ?? []).map((tr) => (
           <div key={tr.id} className="list-row">
             <span className="grow"><b>{tr.playerName}</b> <span className="dim">{tr.note ?? ''} · access until {fmtDate(tr.expiresAt)}</span></span>
@@ -476,7 +477,7 @@ export function BudgetsScreen({ session, notify }: ScreenProps) {
 
   return (
     <div>
-      <p className="pagehint">{t('m13.bud.note')}</p>
+      <Hint>{t('m13.bud.note')}</Hint>
       <div className="enter-row">
         <select aria-label="Case" value={caseId} onChange={(e) => setCaseId(e.target.value)}>
           <option value="">{t('m13.bud.pickCase')}</option>
@@ -639,7 +640,7 @@ export function OrganisationScreen({ session, notify }: ScreenProps) {
       </div>
       <div className="section">
         <h3>{t('m13.org.sso')}</h3>
-        <div className="notice" style={{ fontSize: 12.5 }}>{sso?.config ? `Configured: ${sso.config.issuer} (client ${sso.config.clientId})` : sso?.note}</div>
+        <Hint className="notice" style={{ fontSize: 12.5 }}>{sso?.config ? `Configured: ${sso.config.issuer} (client ${sso.config.clientId})` : sso?.note}</Hint>
         {!sso?.config && sso?.available.includes('local-test-idp') && (
           <button onClick={async () => { try { await m13.setSso(session, 'local-test-idp'); notify('Local TEST IdP configured — this is not a corporate provider.'); } catch (e) { notify(e instanceof Error ? e.message : 'lead required', true); } }}>{t('m13.org.enableTestSso')}</button>
         )}
@@ -662,7 +663,7 @@ export function OrganisationScreen({ session, notify }: ScreenProps) {
       </div>
       <div className="section">
         <h3>{t('m13.org.delivery')}</h3>
-        <div className="notice" style={{ fontSize: 12.5 }}>{t('m13.org.deliveryNote')}</div>
+        <Hint className="notice" style={{ fontSize: 12.5 }}>{t('m13.org.deliveryNote')}</Hint>
         <button onClick={async () => { await m13.setDeliveryPrefs(session, { quietStart: '21:00', quietEnd: '07:30', email: true }); notify('Quiet hours 21:00–07:30 saved.'); }}>{t('m13.org.quietHours')}</button>
       </div>
     </div>

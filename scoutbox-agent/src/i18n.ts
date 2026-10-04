@@ -61,7 +61,7 @@ const en = {
   'confirm.endMember': 'End {name}’s membership of the agency?',
   'confirm.endMemberBody': 'Their sessions end now. Their agent profile and every past attribution stay exactly as they are.',
   // ---- login
-  'login.tagline': 'The workspace for licensed agents and their agencies. Every action attributed. Nothing is active until the client confirms it.',
+  'login.tagline': 'The workspace for licensed agents and their agencies.',
   'login.demo': 'Self-contained demo — no server needed',
   'login.name': 'Your name (agent / agency staff)', 'login.password': 'Agency password (if provisioned)',
   'login.enter': 'Enter workspace', 'login.pickOrg': 'Pick an agency.', 'login.nameRequired': 'Enter your name — every session is attributed to a named individual.',
@@ -387,7 +387,7 @@ const fr: typeof en = {
   'confirm.withdrawBody': 'Le client est informé du retrait. Vous ne pourrez pas solliciter ce joueur à nouveau pendant 30 jours.',
   'confirm.endMember': 'Mettre fin à l’adhésion de {name} à l’agence ?',
   'confirm.endMemberBody': 'Ses sessions prennent fin maintenant. Son profil d’agent et chaque attribution passée restent inchangés.',
-  'login.tagline': 'L’espace de travail des agents licenciés et de leurs agences. Chaque action est attribuée. Rien n’est actif tant que le client ne l’a pas confirmé.',
+  'login.tagline': 'L’espace de travail des agents licenciés et de leurs agences.',
   'login.demo': 'Démo autonome — aucun serveur nécessaire',
   'login.name': 'Votre nom (agent / personnel d’agence)', 'login.password': 'Mot de passe de l’agence (si provisionné)',
   'login.enter': 'Entrer dans l’espace de travail', 'login.pickOrg': 'Choisissez une agence.', 'login.nameRequired': 'Saisissez votre nom — chaque session est attribuée à une personne nommée.',

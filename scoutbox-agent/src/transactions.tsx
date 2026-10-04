@@ -12,6 +12,7 @@
 //
 // There is no offer here and no way to make one: the offer seam is a readiness
 // boolean with its blockers, shown read-only.
+import { Hint } from '../../design-system/About';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ApiError, type Session } from './api';
 import {
@@ -113,7 +114,7 @@ function ComplianceBox({ tx, onEvaluate, busy }: { tx: Transaction; onEvaluate: 
       <div className="row gap" style={{ marginTop: 8 }}>
         <button onClick={onEvaluate} disabled={busy} data-testid="tx-evaluate">{t('tx.reEvaluate')}</button>
       </div>
-      <p className="dim" style={{ marginTop: 6 }} data-testid="tx-compliance-honest">{c.honest}</p>
+      <Hint className="dim" style={{ marginTop: 6 }} testID="tx-compliance-honest">{c.honest}</Hint>
     </div>
   );
 }
@@ -134,7 +135,7 @@ function OfferBoundaryBox({ tx }: { tx: Transaction }) {
           {b.blockers.map((x) => <li key={x} data-blocker={x}>{tr(`txBlocker.${x}`, x.replace(/_/g, ' ').toLowerCase())}</li>)}
         </ul>
       )}
-      <p className="dim" style={{ marginTop: 6 }}>{b.honest}</p>
+      <Hint className="dim" style={{ marginTop: 6 }}>{b.honest}</Hint>
     </div>
   );
 }
@@ -496,7 +497,7 @@ function OverviewTab({ s, tx, reload }: { s: Session; tx: Transaction; reload: (
         <Stat v={tx.parties.filter((p) => !p.removed && p.confirmedAt).length} k={t('tx.confirmedParties')} testId="stat-confirmed" />
         <Stat v={tx.representations.filter((r) => r.status !== 'withdrawn').length} k={t('tx.bindings')} testId="stat-bindings" />
       </div>
-      <p className="dim" data-testid="tx-honest">{tx.honest}</p>
+      <Hint className="dim" testID="tx-honest">{tx.honest}</Hint>
       <ComplianceBox tx={tx} busy={busy} onEvaluate={() => act(() => agent.evaluateTransaction(s, tx.id))} />
       {tx.hold && (
         <div className="notice block" data-testid="tx-hold">
@@ -662,7 +663,7 @@ export function TransactionsScreen({ session, me, transactionId, transactionTab,
         <Stat v={l.counts.blocked} k={t('tx.countBlocked')} testId="count-blocked" />
         <Stat v={l.counts.awaitingConfirmation} k={t('tx.countAwaiting')} testId="count-awaiting" />
       </div>
-      <p className="dim" data-testid="tx-list-honest">{l.honest}</p>
+      <Hint className="dim" testID="tx-list-honest">{l.honest}</Hint>
       {(handoffs?.items.length ?? 0) > 0 && (
         <section data-testid="tx-handoffs" style={{ margin: '12px 0' }}>
           <h4 style={{ margin: '0 0 4px' }}>{t('handoff.title')}</h4>
@@ -675,7 +676,7 @@ export function TransactionsScreen({ session, me, transactionId, transactionTab,
               </div>
             ))}
           </div>
-          <p className="dim" style={{ fontSize: 12.5 }}>{t('handoff.honest')}</p>
+          <Hint className="dim" style={{ fontSize: 12.5 }}>{t('handoff.honest')}</Hint>
         </section>
       )}
       <div className="row wrap gap">

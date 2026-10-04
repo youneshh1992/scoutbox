@@ -5,6 +5,7 @@
 // Copy rules (§65): a badge always names the verified FACT ("Role verified:
 // Academy Scout"), never a bare "Verified", and never implies endorsement.
 // Badge state never relies on colour alone: every pill carries text.
+import { Hint } from '../../design-system/About';
 import { useEffect, useState } from 'react';
 import { Icon } from '../../design-system/icons';
 import type { Session } from './api';
@@ -81,7 +82,7 @@ function ClaimRow({ claim, session, notify, onChange }: { claim: SubjectClaim; s
         {claim.organisation && <span className="dim"> · {claim.organisation.name}</span>}
         {claim.current === false && claim.validUntil && <span className="dim"> · {new Date(claim.validFrom ?? 0).getFullYear()}–{new Date(claim.validUntil).getFullYear()}</span>}
         {claim.provenance && <div className="dim" style={{ fontSize: 12 }}>{claim.provenance}</div>}
-        {claim.humanReviewNote && <div className="notice" style={{ fontSize: 12 }}>{claim.humanReviewNote}</div>}
+        {claim.humanReviewNote && <Hint className="notice" style={{ fontSize: 12 }}>{claim.humanReviewNote}</Hint>}
         {claim.revocationReason && <div className="dim" style={{ fontSize: 12 }}>{t('m14.claim.revokedBecause')}: {claim.revocationReason}</div>}
         {claim.evidence.length > 0 && (
           <div className="dim" style={{ fontSize: 12 }}>
@@ -113,7 +114,7 @@ export function VerificationScreen({ session, notify, tick }: ScreenProps) {
   ];
   return (
     <div>
-      <div className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>{t('m14.intro')}</div>
+      <Hint className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>{t('m14.intro')}</Hint>
       <div role="tablist" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
         {TABS.map(([id, label]) => (
           <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'primary' : ''} onClick={() => setTab(id)}>{label}</button>
@@ -184,12 +185,12 @@ function MeTab({ session, notify, me, reloadMe }: { session: Session; notify: Sc
           <input aria-label={t('m14.me.code')} placeholder={t('m14.me.code')} value={code} onChange={(e) => setCode(e.target.value)} style={{ width: 130 }} />
           <button onClick={() => act(() => m14.confirmWorkEmail(session, code), t('m14.me.emailProved'))}>{t('m14.me.confirmCode')}</button>
         </div>
-        <div className="dim" style={{ fontSize: 12 }}>{t('m14.me.emailNote')}</div>
+        <Hint className="dim" style={{ fontSize: 12 }}>{t('m14.me.emailNote')}</Hint>
       </div>
 
       <div className="section">
         <h3>{t('m14.lic.title')}</h3>
-        <div className="notice" style={{ fontSize: 12.5 }}>{t('m14.lic.honesty')}</div>
+        <Hint className="notice" style={{ fontSize: 12.5 }}>{t('m14.lic.honesty')}</Hint>
         <div className="list-row" style={{ flexWrap: 'wrap' }}>
           <input aria-label={t('m14.lic.type')} placeholder={t('m14.lic.type')} value={lic.licenceType} onChange={(e) => setLic({ ...lic, licenceType: e.target.value })} />
           <input aria-label={t('m14.lic.issuer')} placeholder={t('m14.lic.issuer')} value={lic.issuer} onChange={(e) => setLic({ ...lic, issuer: e.target.value })} />
@@ -220,7 +221,7 @@ function RequestsTab({ session, notify }: { session: Session; notify: ScreenProp
   return (
     <div className="section">
       <h3>{t('m14.req.title')} {rows.length ? <span className="pill blue">{pairs.size}</span> : <span className="pill green">0</span>}</h3>
-      <div className="dim" style={{ fontSize: 12.5 }}>{data?.note}</div>
+      <Hint className="dim" style={{ fontSize: 12.5 }}>{data?.note}</Hint>
       {[...pairs.values()].map((group) => {
         const roleRow = group.find((g) => g.claimedRole) ?? group[0];
         return (
@@ -500,7 +501,7 @@ function AgentConsentsTab({ session, notify, tick }: { session: Session; notify:
                   <span className="dim" style={{ fontSize: 12 }}>{t('m25.revokeNote')}</span>
                 </div>
               )}
-              <div className="dim" style={{ fontSize: 12 }}>{k.honest}</div>
+              <Hint className="dim" style={{ fontSize: 12 }}>{k.honest}</Hint>
             </div>
           );
         })}
@@ -543,7 +544,7 @@ function AgentTransactionsTab({ session, notify, tick }: { session: Session; not
           />
         ))}
       </div>
-      {data?.honest && <div className="dim" style={{ fontSize: 12, marginTop: 10 }}>{data.honest}</div>}
+      {data?.honest && <Hint className="dim" style={{ fontSize: 12, marginTop: 10 }}>{data.honest}</Hint>}
     </div>
   );
 }
@@ -639,7 +640,7 @@ function ClubTransactionRow({ tx, session, notify, reload, signatory, expanded, 
 
           <section aria-label={t('m26.compliance')}>
             <h4 style={{ margin: '0 0 4px' }}>{t('m26.compliance')}</h4>
-            <div className="dim" style={{ fontSize: 12.5 }}>{tx.compliance.honest}</div>
+            <Hint className="dim" style={{ fontSize: 12.5 }}>{tx.compliance.honest}</Hint>
             {tx.consents.length > 0 && (
               <ul style={{ margin: '4px 0 0', paddingLeft: 18, fontSize: 12.5 }}>
                 {tx.consents.map((c, i) => (
@@ -703,7 +704,7 @@ function ClubTransactionRow({ tx, session, notify, reload, signatory, expanded, 
           </section>
 
           <div className="dim" style={{ fontSize: 12 }} data-testid={`tx-offer-boundary-${tx.id}`}>{tx.offerBoundary.honest}</div>
-          <div className="dim" style={{ fontSize: 12 }}>{tx.honest}</div>
+          <Hint className="dim" style={{ fontSize: 12 }}>{tx.honest}</Hint>
         </div>
       )}
     </div>

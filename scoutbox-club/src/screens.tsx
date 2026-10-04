@@ -1,3 +1,4 @@
+import { Hint } from '../../design-system/About';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Icon } from '../../design-system/icons';
 import { pressable, useDialog } from './dialog';
@@ -612,7 +613,7 @@ export function RequestsScreen({ session, tick, openPlayer }: ScreenProps) {
   useEffect(() => { api.getRequests(session).then(setRequests).catch(() => {}); }, [session, tick]);
   return (
     <>
-      <p className="pagehint">No direct message channel: you file a request and contact unlocks only on acceptance. For under-18s the request goes to the parent or guardian, never the child.</p>
+      <Hint>No direct message channel: you file a request and contact unlocks only on acceptance. For under-18s the request goes to the parent or guardian, never the child.</Hint>
       <div className="list-rows">
         {requests.length === 0 && <div className="notice">No requests sent yet.</div>}
         {requests.map((r) => (
@@ -715,7 +716,7 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
 
   return (
     <>
-      <p className="pagehint">Threads open on acceptance, stay on-platform, and are moderated and logged. For under-18s you are talking to the parent or guardian, never the child.</p>
+      <Hint>Threads open on acceptance, stay on-platform, and are moderated and logged. For under-18s you are talking to the parent or guardian, never the child.</Hint>
       {channels.length === 0 && <div className="notice">No open threads. Send a request; a thread opens when it's accepted.</div>}
       <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 14 }}>
         <div className="list-rows">
@@ -942,7 +943,7 @@ export function LedgerScreen({ session, tick, openPlayer }: ScreenProps) {
   useEffect(() => { api.getLedger(session).then(setRows).catch(() => {}); }, [session, tick]);
   return (
     <>
-      <p className="pagehint">Append-only: every action is timestamped to a named scout and cannot be edited or purged.</p>
+      <Hint>Append-only: every action is timestamped to a named scout and cannot be edited or purged.</Hint>
       <div style={{ overflowX: 'auto' }}>
         <table className="data">
           <thead><tr><th>When</th><th>Action</th><th>Player</th><th>By</th></tr></thead>
@@ -1077,10 +1078,10 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
           </div>
         ) : (
           <>
-            <div className="notice" style={{ marginBottom: 10 }}>
+            <details className="f-about" style={{ marginBottom: 10 }}><summary>About</summary><div className="notice">
               Prove control of a company mailbox — free email providers are refused. A code lands in the
               mailbox; entering it here confirms the domain.
-            </div>
+            </div></details>
             <div className="filters">
               <input type="text" placeholder="recruitment@yourclub.com" value={verifyEmail} onChange={(e) => setVerifyEmail(e.target.value)} />
               <button onClick={async () => {
@@ -1125,7 +1126,7 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
       </div>
       <div className="section">
         <h4>Fee protection</h4>
-        <div className="notice">{info.compliance.feeProtection}</div>
+        <Hint className="notice">{info.compliance.feeProtection}</Hint>
       </div>
       <div className="section">
         <h4>Anti-circumvention terms</h4>
@@ -1133,10 +1134,10 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
       </div>
       <div className="section">
         <h4>Accountability</h4>
-        <div className="notice">
+        <details className="f-about"><summary>About</summary><div className="notice">
           Every seat is a named individual. The API refuses any request that is not attributed to a person —
           shared logins do not exist on ScoutBox.
-        </div>
+        </div></details>
       </div>
     </>
   );

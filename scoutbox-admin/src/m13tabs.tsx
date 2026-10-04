@@ -1,3 +1,5 @@
+import { Hint } from '../../design-system/About';
+import { fmtClock, fmtStamp } from '../../design-system/time';
 // M13 Trust & Safety additions: representation review, federation groups,
 // support desk (with the explicit time-limited access flow), the delivery
 // centre, service metrics and backups. VITE_DEMO=1 runs on canned rows.
@@ -103,7 +105,7 @@ export function M13Panel({ tab, adminKey, say }: { tab: M13Tab; adminKey: string
   if (tab === 'representation') {
     return (
       <div className="list-rows">
-        <div className="notice">Adult-only representation relationships. Age is DOB-evaluated on every request; an uploaded credential is a document review at best — no licence-register integration exists.</div>
+        <details className="f-about"><summary>About</summary><div className="notice">Adult-only representation relationships. Age is DOB-evaluated on every request; an uploaded credential is a document review at best — no licence-register integration exists.</div></details>
         {reps.map((r) => (
           <div key={r.id} className="list-row">
             <span className="grow">
@@ -124,7 +126,7 @@ export function M13Panel({ tab, adminKey, say }: { tab: M13Tab; adminKey: string
   if (tab === 'groups') {
     return (
       <div className="list-rows">
-        <div className="notice">Federation/group workspaces. Membership shares nothing; grants are explicit and expiring, and no grant overrides under-18 or grassroots rules.</div>
+        <details className="f-about"><summary>About</summary><div className="notice">Federation/group workspaces. Membership shares nothing; grants are explicit and expiring, and no grant overrides under-18 or grassroots rules.</div></details>
         {groups.map((g) => (
           <div key={g.id} className="list-row">
             <span className="grow"><b>{g.name}</b> <span className="dim">{g.memberOrgIds.length} member(s) · admin: {g.adminOrgIds.join(', ')}{g.pendingInvites.length ? ` · ${g.pendingInvites.length} pending invite(s)` : ''}</span></span>
@@ -138,14 +140,14 @@ export function M13Panel({ tab, adminKey, say }: { tab: M13Tab; adminKey: string
   if (tab === 'supportdesk') {
     return (
       <div className="list-rows">
-        <div className="notice">Tickets reference records by id — nothing is copied. Reading an org's records needs an org-lead-approved, time-limited grant; every read is logged. There is no silent impersonation path.</div>
+        <details className="f-about"><summary>About</summary><div className="notice">Tickets reference records by id — nothing is copied. Reading an org's records needs an org-lead-approved, time-limited grant; every read is logged. There is no silent impersonation path.</div></details>
         {tickets.map((tk) => {
           const g = grants.find((x) => x.ticketId === tk.id);
           return (
             <div key={tk.id} className="list-row">
               <span className="grow">
                 <b>{tk.subject}</b> <span className="dim">{tk.byName} · {tk.orgId} · refs: {tk.refs.map((r) => `${r.kind}:${r.id}`).join(', ') || '—'}</span>
-                {g && <div className="dim" style={{ fontSize: 12 }}>access: {g.status}{g.status === 'active' && g.expiresAt ? ` until ${new Date(g.expiresAt).toLocaleTimeString()}` : ''} · {g.accessLog.length} logged read(s)</div>}
+                {g && <div className="dim" style={{ fontSize: 12 }}>access: {g.status}{g.status === 'active' && g.expiresAt ? ` until ${fmtClock(g.expiresAt)}` : ''} · {g.accessLog.length} logged read(s)</div>}
               </span>
               <span className={`pill ${tk.status === 'open' ? 'blue' : ''}`}>{tk.status}</span>
               <button onClick={() => act(() => call(adminKey, `/admin/support/${tk.id}/reply`, { method: 'POST', body: JSON.stringify({ text: 'We are looking into this now.' }) }), 'Replied.')}>Reply</button>
@@ -169,7 +171,7 @@ export function M13Panel({ tab, adminKey, say }: { tab: M13Tab; adminKey: string
           ))}
           <div className="stat"><b style={{ fontSize: 18 }}>{delivery.awaitingAck}</b><div className="dim">awaiting acknowledgement</div></div>
         </div>
-        <div className="notice" style={{ fontSize: 12.5 }}>Status ladder is forward-only: queued → accepted → delivered (confirmed only) → opened (measured only) → actioned. Email acceptance is never reported as read.</div>
+        <details className="f-about"><summary>About</summary><div className="notice" style={{ fontSize: 12.5 }}>Status ladder is forward-only: queued → accepted → delivered (confirmed only) → opened (measured only) → actioned. Email acceptance is never reported as read.</div></details>
         <div className="list-rows">
           {delivery.recent.slice(0, 25).map((d) => (
             <div key={d.id} className="list-row">
@@ -186,7 +188,7 @@ export function M13Panel({ tab, adminKey, say }: { tab: M13Tab; adminKey: string
   if (tab === 'servicehealth' && metrics) {
     return (
       <div>
-        <div className="notice">{metrics.note}</div>
+        <Hint className="notice">{metrics.note}</Hint>
         <div className="stats-row" style={{ display: 'flex', gap: 12, flexWrap: 'wrap', margin: '10px 0' }}>
           <div className="stat"><b style={{ fontSize: 18 }}>{metrics.requests}</b><div className="dim">requests</div></div>
           <div className="stat"><b style={{ fontSize: 18 }}>{metrics.status5xx}</b><div className="dim">5xx</div></div>
@@ -198,7 +200,7 @@ export function M13Panel({ tab, adminKey, say }: { tab: M13Tab; adminKey: string
         </div>
         <div className="list-rows">
           {metrics.opsEvents.slice(0, 15).map((e, i) => (
-            <div key={i} className="list-row"><span className="grow">{e.kind.replace(/_/g, ' ')}</span><span className="dim">{new Date(e.at).toLocaleString()}</span></div>
+            <div key={i} className="list-row"><span className="grow">{e.kind.replace(/_/g, ' ')}</span><span className="dim">{fmtStamp(e.at)}</span></div>
           ))}
         </div>
       </div>
@@ -208,7 +210,7 @@ export function M13Panel({ tab, adminKey, say }: { tab: M13Tab; adminKey: string
   if (tab === 'backups') {
     return (
       <div className="list-rows">
-        <div className="notice">Backups carry a checksummed manifest. Restores go into a SEPARATE empty directory — never over the live database. The m13 test suite runs a full backup → isolated-restore → smoke-test cycle.</div>
+        <details className="f-about"><summary>About</summary><div className="notice">Backups carry a checksummed manifest. Restores go into a SEPARATE empty directory — never over the live database. The m13 test suite runs a full backup → isolated-restore → smoke-test cycle.</div></details>
         {backups.map((b) => (
           <div key={b.dir} className="list-row">
             <span className="grow">

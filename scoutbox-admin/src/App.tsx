@@ -1,3 +1,4 @@
+import { fmtClock, fmtStamp } from '../../design-system/time';
 // ScoutBox Trust & Safety console — the human back-office behind the
 // product's promises: report review, club verification, guardian IDV audit,
 // suspension management, moderation log and thread audit.
@@ -392,7 +393,7 @@ export default function App() {
                     {r.urgent && <span className="pill red">URGENT — comms suspended</span>}
                     <span className="pill">{cap(r.targetKind)}</span>
                     <span className="grow"><b>{r.reason}</b></span>
-                    <span className="dim">by {r.by} · {new Date(r.ts).toLocaleString()}</span>
+                    <span className="dim">by {r.by} · {fmtStamp(r.ts)}</span>
                     <span className={`pill ${r.status === 'pending_review' ? 'gold' : 'green'}`}>{r.status === 'pending_review' ? 'Awaiting review' : 'Resolved'}</span>
                   </div>
                   <div className="dim">
@@ -467,7 +468,7 @@ export default function App() {
                 <div key={b.id} className="list-row">
                   <span className="pill red">{b.reason === 'suspended_pending_review' ? 'Suspension' : 'Block'}</span>
                   <span className="grow">{b.orgId} → {b.playerId}</span>
-                  <span className="dim">by {b.by} · {new Date(b.ts).toLocaleString()}</span>
+                  <span className="dim">by {b.by} · {fmtStamp(b.ts)}</span>
                   <button onClick={() => liftBlock(b)}>Lift</button>
                 </div>
               ))}
@@ -480,7 +481,7 @@ export default function App() {
               <tbody>
                 {moderation.map((m) => (
                   <tr key={m.id}>
-                    <td>{new Date(m.ts).toLocaleString()}</td>
+                    <td>{fmtStamp(m.ts)}</td>
                     <td>{m.context?.kind ?? '—'}</td>
                     <td>{m.severity === 'grooming' ? <span className="pill red">GROOMING — escalated</span> : <span className="pill">{cap(m.severity ?? 'contact')}</span>}</td>
                     <td>{m.flags.map((f) => <span key={f} className="pill red" style={{ marginRight: 4 }}>{cap(f)}</span>)}</td>
@@ -492,7 +493,7 @@ export default function App() {
 
           {tab === 'outbox' && (
             <div className="list-rows">
-              <div className="notice">Dev mail transport: everything the platform "sends" lands here. Set SENDGRID_API_KEY on the server to deliver for real — this view then becomes the delivery audit.</div>
+              <details className="f-about"><summary>About</summary><div className="notice">Dev mail transport: everything the platform "sends" lands here. Set SENDGRID_API_KEY on the server to deliver for real — this view then becomes the delivery audit.</div></details>
               {outbox.length === 0 && <div className="notice">No mail yet.</div>}
               {outbox.map((m) => (
                 <div key={m.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
@@ -500,7 +501,7 @@ export default function App() {
                     <span className="grow"><b>{m.subject}</b></span>
                     <span className="dim">to {m.to}</span>
                     <span className={`pill ${m.delivered ? 'green' : 'gold'}`}>{m.delivered ? 'Delivered' : cap(m.transport)}</span>
-                    <span className="dim">{new Date(m.ts).toLocaleString()}</span>
+                    <span className="dim">{fmtStamp(m.ts)}</span>
                   </div>
                   <div className="dim" style={{ whiteSpace: 'pre-wrap' }}>{m.text}</div>
                 </div>
@@ -510,7 +511,7 @@ export default function App() {
 
           {tab === 'billing' && (
             <div className="list-rows">
-              <div className="notice">Success fees issued by the billing adapter (dev ledger; Stripe when STRIPE_SECRET_KEY is set). A signing inside the attribution window invoices automatically.</div>
+              <details className="f-about"><summary>About</summary><div className="notice">Success fees issued by the billing adapter (dev ledger; Stripe when STRIPE_SECRET_KEY is set). A signing inside the attribution window invoices automatically.</div></details>
               {invoices.length === 0 && <div className="notice">No invoices yet.</div>}
               {invoices.map((i) => (
                 <div key={i.id} className="list-row">
@@ -538,7 +539,7 @@ export default function App() {
                     <div className="thread" style={{ maxHeight: 260 }}>
                       {t.messages.map((m) => (
                         <div key={m.id} className="bubble theirs">
-                          <div className="who">{m.sender.name} · {new Date(m.ts).toLocaleString()}</div>
+                          <div className="who">{m.sender.name} · {fmtStamp(m.ts)}</div>
                           {m.text}
                         </div>
                       ))}
