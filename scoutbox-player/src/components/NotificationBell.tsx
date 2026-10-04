@@ -1,3 +1,4 @@
+import { relTime } from '../time';
 import { useState } from 'react';
 import { playerCategoryFor } from '../caseNav';
 import { useRouter } from 'expo-router';
@@ -60,7 +61,7 @@ export function NotificationBell() {
                     <Card key={n.id}>
                       <Text style={{ color: colors.text, fontSize: 13.5, lineHeight: 19 }}>{n.text}</Text>
                       <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Muted size={11.5}>{new Date(n.ts).toLocaleString()}</Muted>
+                        <Muted size={11.5}>{relTime(n.ts)}</Muted>
                         {dest ? <Button small label="Open" testID="notification-open" onPress={() => { setOpen(false); router.push(dest as never); }} /> : null}
                       </Row>
                     </Card>

@@ -291,20 +291,23 @@ neg(!JSON.stringify(INV).includes('Gate B') && !JSON.stringify(INV).includes('As
 const ctxKola = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 const kola = await enterPlayer(ctxKola, 'Kola Adeyemi', 'kola', 'text=Your visibility right now');
 await goTab(kola, '/inbox');
+// M24F.3 — open the trial row, then the words behind "View full message"
+await kola.locator('[data-testid^="inbox-request-"]').first().click();
+await kola.locator('[data-testid^="req-details-"]').first().click();
 await kola.waitForSelector('text=one session to start', { timeout: 20000 });
 {
   const txt = await bodyText(kola);
   ok(/Eastport FC/.test(txt) && /Maria Keane/.test(txt), 'A7: the player sees the invitation attributed to a named person at a named organisation');
   ok(/Europe\/London/.test(txt) && /Eastport Dome/.test(txt), 'A7b: the slot shows its time in the organiser zone and the venue name');
   neg(!/Gate B/.test(txt) && !/Ask for Priya/.test(txt), 'A7c: not the address, not the instructions');
-  ok(/Pick the date that works — accepting it confirms the trial/.test(txt), 'A7d: and is asked to pick the date — accepting it confirms the trial');
+  ok(/Trial invitation/i.test(txt) && (await kola.locator('[data-testid^="trial-slot-"]').count()) >= 1, 'A7d: the invitation names itself and offers its date to pick — accepting confirms the trial');
   const noScroll = await kola.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth + 1);
   ok(noScroll, 'A7e: 390px: no horizontal scroll');
   ok((await kola.locator('[data-testid^="trial-slot-"]').count()) === 1, 'A7f: exactly one slot chip');
 }
 await kola.locator('[data-testid^="trial-slot-"]').first().click();
-await kola.getByText('Accept trial', { exact: true }).click();
-await kola.waitForSelector('text=Trial accepted', { timeout: 20000 });
+await kola.getByRole('button', { name: 'Accept', exact: true }).click();
+await kola.waitForSelector('[data-testid^="req-status-"]:has-text("Accepted")', { timeout: 20000 });
 say('A8: the player accepts the slot');
 {
   const t = (await j('GET', `/org/rooms/${ROOM_A}/trials`, undefined, LEAD)).body;
@@ -440,7 +443,7 @@ await amara.waitForSelector('text=U14 training session', { timeout: 25000 });
   ok((await amara.locator('[data-testid^="trial-slot-"]').count()) === 1, 'M4c: one slot chip');
 }
 await amara.locator('[data-testid^="trial-slot-"]').first().click();
-await amara.getByText('Accept trial', { exact: true }).first().click();
+await amara.getByRole('button', { name: 'Accept', exact: true }).first().click();
 await amara.waitForSelector('text=Trial accepted', { timeout: 20000 });
 say('M5: the guardian accepts the slot');
 {

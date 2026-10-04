@@ -28,6 +28,7 @@ import { ThemeSwitch } from '../components/ThemeSwitch';
 import { Threads } from '../components/Threads';
 import { PopupBanner } from '../components/PopupBanner';
 import { pt } from '../i18n';
+import { fmtDay, fmtDayTime } from '../time';
 
 const CHILD_AVAILABILITY = [
   { value: 'available_now', label: 'Open to trials' },
@@ -183,7 +184,7 @@ export default function GuardianDashboard() {
             </Row>
             {showLog && log.map((l) => (
               <View key={l.id} style={styles.logRow}>
-                <Text style={styles.logWhen}>{new Date(l.ts).toLocaleDateString()}</Text>
+                <Text style={styles.logWhen}>{fmtDay(l.ts)}</Text>
                 <Text style={styles.logText}>{l.type.replace(/_/g, ' ')} — {l.orgName}{l.scoutName ? ` (${l.scoutName})` : ''}</Text>
               </View>
             ))}
@@ -198,13 +199,7 @@ export default function GuardianDashboard() {
         )}
 
         <SectionTitle testID="guardian-requests">Club requests</SectionTitle>
-        <Muted size={12.5}>You decide, never your child. The conversation happens between adults.</Muted>
-        {guardianInbox.length === 0 && (
-          <Muted size={13.5}>
-            No requests yet. When a verified club wants to talk about your child, it appears here as
-            e.g. “Eastport FC has requested to discuss a trial.”
-          </Muted>
-        )}
+        {guardianInbox.length === 0 && <Muted size={13.5}>No requests yet.</Muted>}
         {guardianInbox.map((r) => (
           <Card key={r.id} testID={`guardian-request-${r.id}`}>
             {/* M24F — progressive: who, what, for whom, where; the dates and the decision; everything else under View details. */}
@@ -214,12 +209,9 @@ export default function GuardianDashboard() {
               For {r.playerName ?? r.playerId}{r.type === 'trial' && r.trialDetails?.venue ? ` · ${r.trialDetails.venue}` : ''}
             </Muted>
             {r.subject ? <Text style={styles.subject} testID={`req-subject-${r.id}`}>{r.subject}</Text> : null}
-            {/* while the request is open, what the guardian decides on — the club's words and the trial's slot notes — is in view; the rest is one tap away */}
-            {r.status === 'pending' && r.message ? <Text style={styles.msg} testID={`req-message-${r.id}`}>“{r.message}”</Text> : null}
-            {r.status === 'pending' && r.type === 'trial' && r.trialDetails?.notes ? <Muted size={12.5}>{r.trialDetails.notes}</Muted> : null}
+            {/* M24F.3 — one-line rule: who, what, for whom, where, the dates and the decision in view; the club's words, the notes and the scout line behind View details */}
             {r.status === 'pending' && r.type === 'trial' && r.trialDetails?.proposedDate && (
               <>
-                <Muted size={12.5}>{pt('trialSlotPickGuardian')}</Muted>
                 {r.trialDetails.slots && r.trialDetails.slots.length > 0 ? (
                   <TrialSlotChips slots={r.trialDetails.slots} chosenDay={chosenSlots[r.id] ?? r.trialDetails.proposedDate} onPick={(day) => setChosenSlots((s) => ({ ...s, [r.id]: day }))} />
                 ) : (
@@ -239,27 +231,9 @@ export default function GuardianDashboard() {
             {r.status === 'accepted' && r.type === 'trial' && r.trialId && <Muted size={12.5}>{pt('trialAcceptedGuardian')}</Muted>}
             {r.status === 'pending' ? (
               <>
-                {r.type === 'contact' && (
-                  <>
-                    <Muted size={12}>{pt('ctGuardianNote')}</Muted>
-                    <Text style={styles.label} nativeID={`reply-label-${r.id}`}>{pt('ctReply')}</Text>
-                    <TextInput
-                      style={styles.input}
-                      testID={`req-reply-${r.id}`}
-                      accessibilityLabel={pt('ctReply')}
-                      accessibilityLabelledBy={`reply-label-${r.id}`}
-                      placeholder={pt('ctReplyHint')}
-                      placeholderTextColor={colors.muted}
-                      value={replies[r.id] ?? ''}
-                      onChangeText={(v) => setReplies((s) => ({ ...s, [r.id]: v.slice(0, 500) }))}
-                      multiline
-                      maxLength={500}
-                    />
-                  </>
-                )}
                 <Row style={{ marginTop: 4 }}>
-                  <Button primary label={r.type === 'trial' ? 'Accept trial' : pt('ctAcceptGuardian')} onPress={() => respond(r.id, true, r.type === 'contact')} />
-                  <Button tertiary danger label={pt('decline')} onPress={() => respond(r.id, false, r.type === 'contact')} />
+                  <Button primary label={pt('accept')} onPress={() => respond(r.id, true, r.type === 'contact')} testID={`req-accept-${r.id}`} />
+                  <Button tertiary danger label={pt('decline')} onPress={() => respond(r.id, false, r.type === 'contact')} testID={`req-decline-${r.id}`} />
                 </Row>
               </>
             ) : (
@@ -270,18 +244,35 @@ export default function GuardianDashboard() {
                 {r.status === 'accepted' && r.contactChannel && <Muted size={12.5}>Adult-to-adult channel: {r.contactChannel}</Muted>}
               </>
             )}
-            <Disclosure label="View details" testID={`req-details-${r.id}`}>
-              <Muted size={13}>{r.scoutRole ?? 'Scout'} — {r.scoutName} · {new Date(r.createdAt).toLocaleString()}</Muted>
-              {r.status !== 'pending' && r.message ? <Text style={styles.msg} testID={`req-message-${r.id}`}>“{r.message}”</Text> : null}
-              {r.status !== 'pending' && r.type === 'trial' && r.trialDetails?.notes ? <Muted size={12.5}>{r.trialDetails.notes}</Muted> : null}
-              {r.type === 'contact' && r.status !== 'pending' && <Muted size={12}>{pt('ctGuardianNote')}</Muted>}
-              {r.type === 'contact' && r.status === 'pending' && <Muted size={12}>{pt('ctReplyNote')}</Muted>}
+            <Disclosure label={pt('inboxViewFullMessage')} testID={`req-details-${r.id}`}>
+              {r.message ? <Text style={styles.msg} testID={`req-message-${r.id}`}>“{r.message}”</Text> : null}
+              {r.type === 'trial' && r.trialDetails?.notes ? <Muted size={12.5}>{r.trialDetails.notes}</Muted> : null}
+              <Muted size={13}>{r.scoutRole ?? 'Scout'} — {r.scoutName} · {fmtDayTime(r.createdAt)}</Muted>
+              {r.type === 'contact' && <Muted size={12}>{pt('ctGuardianNote')}</Muted>}
+              {r.type === 'contact' && r.status === 'pending' && (
+                <View style={{ gap: 6, marginTop: 4 }}>
+                  <Text style={styles.label} nativeID={`reply-label-${r.id}`}>{pt('inboxAddReply')}</Text>
+                  <TextInput
+                    style={styles.input}
+                    testID={`req-reply-${r.id}`}
+                    accessibilityLabel={pt('ctReply')}
+                    accessibilityLabelledBy={`reply-label-${r.id}`}
+                    placeholder={pt('ctReplyHint')}
+                    placeholderTextColor={colors.muted}
+                    value={replies[r.id] ?? ''}
+                    onChangeText={(v) => setReplies((s) => ({ ...s, [r.id]: v.slice(0, 500) }))}
+                    multiline
+                    maxLength={500}
+                  />
+                  <Muted size={12}>{pt('ctReplyNote')}</Muted>
+                </View>
+              )}
             </Disclosure>
           </Card>
         ))}
 
         <Row>
-          <SectionTitle>Messages with clubs — adult to adult</SectionTitle>
+          <SectionTitle>Messages</SectionTitle>
           {unreadMsgs > 0 && <Pill label={`${unreadMsgs} new`} tone="red" />}
         </Row>
         <Threads
@@ -341,10 +332,12 @@ export default function GuardianDashboard() {
                 <Switch value={c.medical.shared} onValueChange={(v) => setMedical(c.id, v)} trackColor={{ true: colors.gold, false: colors.line }} thumbColor="#fff" />
               </Row>
               <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8, gap: 6 }}>
-                <Muted size={12.5}>
-                  Pair {c.name.split(' ')[0]}&apos;s device: generate a one-time code (15-minute expiry) and
-                  they enter it on their phone. Their login stays limited — uploads, stats and drills only.
-                </Muted>
+                <Disclosure label="How pairing works">
+                  <Muted size={12.5}>
+                    Pair {c.name.split(' ')[0]}&apos;s device: generate a one-time code (15-minute expiry) and
+                    they enter it on their phone. Their login stays limited — uploads, stats and drills only.
+                  </Muted>
+                </Disclosure>
                 <Row>
                   <Button
                     small
@@ -459,10 +452,7 @@ export default function GuardianDashboard() {
 
         <SectionTitle>Co-guardian</SectionTitle>
         <Card>
-          <Muted size={13}>
-            Add a second parent or guardian. They get their own account for the same children — and must
-            pass ID verification and accept the disclaimer before they can act.
-          </Muted>
+          <Muted size={13}>A second parent or guardian gets their own account for the same children.</Muted>
           {(guardian as (typeof guardian & { coGuardians?: { id: string; name: string; email: string }[] }) | null)?.coGuardians?.map((co) => (
             <Row key={co.id}>
               <Pill label="Co-guardian" tone="blue" />
@@ -502,10 +492,7 @@ export default function GuardianDashboard() {
 
         <SectionTitle>Notifications</SectionTitle>
         <Card>
-          <Muted size={13}>
-            Quiet hours pause push notifications overnight. Everything still lands in your in-app feed —
-            no club contact ever slips past you.
-          </Muted>
+          <Muted size={13}>Quiet hours pause push notifications overnight; everything still lands in the app.</Muted>
           <Row>
             <Muted size={13}>Quiet from</Muted>
             <TextInput
@@ -531,10 +518,7 @@ export default function GuardianDashboard() {
 
         <SectionTitle>Your family&apos;s data</SectionTitle>
         <Card>
-          <Muted size={13}>
-            One bundle with everything: your account, your children&apos;s profiles, every request and
-            every thread. Yours to take, any time.
-          </Muted>
+          <Muted size={13}>Everything in one bundle, yours to take any time.</Muted>
           <Row>
             <Button
               small label="Preview data export"
@@ -556,7 +540,7 @@ export default function GuardianDashboard() {
           <Disclosure label="Communications log" hint="Every scouting action around your children, logged and visible to you" testID="guardian-log">
             {log.map((l) => (
               <View key={l.id} style={styles.logRow}>
-                <Text style={styles.logWhen}>{new Date(l.ts).toLocaleDateString()}</Text>
+                <Text style={styles.logWhen}>{fmtDay(l.ts)}</Text>
                 <Text style={styles.logText}>{l.type.replace(/_/g, ' ')} — {l.orgName}{l.scoutName ? ` (${l.scoutName})` : ''}</Text>
               </View>
             ))}

@@ -312,18 +312,21 @@ if (await kola.locator('text=Our promises to every player').count()) {
   await kola.waitForSelector('text=Your visibility right now', { timeout: 30000 });
 }
 await openInbox(kola);
+// M24F.3 — the Inbox is a list of rows; the request opens to its detail and the words sit behind "View full message"
+await kola.locator('[data-testid^="inbox-request-"]').first().click();
+await kola.locator('[data-testid^="req-details-"]').first().click();
 await kola.waitForSelector('text=Eastport FC — a conversation about a trial', { timeout: 20000 });
 {
   const txt = await bodyText(kola);
   ok(/Eastport FC/.test(txt) && /Maria Keane/.test(txt), 'A7: the player sees the message attributed to a named person at a named organisation');
   ok(/U21s/.test(txt), 'A7b: with the body the lead wrote');
-  ok(/Your reply \(optional\)/.test(txt), 'A7c: and a reply field — the answer belongs to this contact');
+  ok(/Add a reply/.test(txt), 'A7c: and a reply field — the answer belongs to this contact');
   const noScroll = await kola.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth + 1);
   ok(noScroll, 'A7d: 390px: no horizontal scroll');
 }
 await kola.locator('[data-testid^="req-reply-"], [aria-label="Your reply (optional)"]').first().fill('Happy to talk. Evenings are best for me.');
-await kola.getByText('Accept contact', { exact: true }).click();
-await kola.waitForSelector('text=You accepted', { timeout: 20000 });
+await kola.getByRole('button', { name: 'Accept', exact: true }).click();
+await kola.waitForSelector('[data-testid^="req-status-"]:has-text("Accepted")', { timeout: 20000 });
 say('A8: the player replies and accepts');
 
 // The lead sees the response on the Contact — and the case does not move again.

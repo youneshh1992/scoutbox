@@ -120,8 +120,9 @@ await player.locator('text=Enter').nth(0).click(); // Kola (dev login, live serv
 await player.waitForSelector('text=Your visibility right now', { timeout: 20000 });
 await player.click('a[href="/inbox"]');
 await player.waitForSelector('text=Eastport FC', { timeout: 15000 });
-await player.click('text=Accept contact');
-await player.waitForSelector('text=channel open', { timeout: 10000 });
+await player.locator('[data-testid^="inbox-request-"]').first().click();
+await player.getByRole('button', { name: 'Accept', exact: true }).click();
+await player.waitForSelector('[data-testid^="req-status-"]:has-text("Accepted")', { timeout: 10000 });
 say('A: player received the request in his own context and accepted');
 
 // club → player message (arrives over the player's authenticated SSE stream)
@@ -132,14 +133,14 @@ await player.waitForSelector('text=Thursday 6pm at the training ground?', { time
 say('A: club → player message delivered live');
 
 // player → club reply; unread badge counts on the Pro sidebar
-await player.fill('input[placeholder="Write a message (no personal contact details)"]', 'Works for me — see you there.');
+await player.fill('input[placeholder="Message…"]', 'Works for me — see you there.');
 await player.keyboard.press('Enter');
 await club.waitForSelector('text=Works for me — see you there.', { timeout: 15000 });
 say('A: player → club reply delivered live');
 
 // a second thread's unread badge: send another player message while club is elsewhere
 await club.evaluate(() => { location.hash = '#/search'; }); // M15-Nav deep link (Search) // navigate away
-await player.fill('input[placeholder="Write a message (no personal contact details)"]', 'One more thing — boots or trainers?');
+await player.fill('input[placeholder="Message…"]', 'One more thing — boots or trainers?');
 await player.keyboard.press('Enter');
 await club.waitForSelector('nav.sidebar .nav-badge', { timeout: 15000 });
 const badge = await club.locator('nav.sidebar .nav-badge').innerText();
@@ -161,8 +162,9 @@ say('B: Grassroots portal logged in (Moss Side — separate context)');
 await portalRequestContact(grass, 'Kola Adeyemi', 'First-team spot this season if you fancy it.');
 await player.click('a[href="/inbox"]');
 await player.waitForSelector('text=Moss Side Athletic', { timeout: 15000 });
-await player.locator('text=Accept contact').first().click();
-await player.waitForSelector('text=channel open', { timeout: 10000 });
+await player.locator('[data-testid^="inbox-request-"]').first().click();
+await player.getByRole('button', { name: 'Accept', exact: true }).click();
+await player.waitForSelector('[data-testid^="req-status-"]:has-text("Accepted")', { timeout: 10000 });
 await portalOpenThread(grass, 'Kola Adeyemi');
 await portalSend(grass, 'Training is Tuesdays and Thursdays.');
 // RN-web renders buttons as divs — use text locators, and pick the Moss
@@ -170,7 +172,7 @@ await portalSend(grass, 'Training is Tuesdays and Thursdays.');
 await player.getByText('Back', { exact: true }).first().click().catch(() => {});
 await player.getByText('Open', { exact: true }).nth(1).click();
 await player.waitForSelector('text=Training is Tuesdays and Thursdays.', { timeout: 15000 });
-await player.fill('input[placeholder="Write a message (no personal contact details)"]', 'Count me in for Tuesday.');
+await player.fill('input[placeholder="Message…"]', 'Count me in for Tuesday.');
 await player.keyboard.press('Enter');
 await grass.waitForSelector('text=Count me in for Tuesday.', { timeout: 15000 });
 say('B: Grassroots ↔ player two-way conversation over the same backend');
@@ -184,10 +186,10 @@ await guardian.waitForSelector('text=Our promises to every player', { timeout: 3
 await guardian.getByText('Enter', { exact: true }).last().click(); // Amara — always the last demo row
 await guardian.waitForSelector('text=Club requests', { timeout: 20000 });
 await guardian.waitForSelector('text=Eastport FC', { timeout: 15000 });
-await guardian.click('text=Accept conversation');
+await guardian.getByRole('button', { name: 'Accept', exact: true }).first().click();
 say('C: the guardian (own context) received and accepted the request');
-await guardian.getByText('Open', { exact: true }).first().click();
-await guardian.fill('input[placeholder="Write a message (no personal contact details)"]', 'Please send the session details — Amara (Guni\'s mum).');
+await guardian.locator('[data-testid^="thread-"]').first().click();
+await guardian.fill('input[placeholder="Message…"]', 'Please send the session details — Amara (Guni\'s mum).');
 await guardian.keyboard.press('Enter');
 await portalOpenThread(club, 'Guni Adebayo');
 await club.waitForSelector("text=Guni's mum", { timeout: 15000 });
@@ -201,9 +203,9 @@ await portalRequestContact(grass2, 'Guni Adebayo', 'Our U15s train five minutes 
 say('C2: verified local grassroots club sent a guardian-routed request for the minor');
 await guardian.getByText('Back', { exact: true }).first().click().catch(() => {});
 await guardian.waitForSelector('text=Hackney Marsh Rovers', { timeout: 15000 });
-await guardian.getByText('Accept conversation', { exact: true }).first().click();
-await guardian.getByText('Open', { exact: true }).nth(1).click(); // Hackney thread (Eastport's came first)
-await guardian.fill('input[placeholder="Write a message (no personal contact details)"]', 'Guni would love that — which pitch?');
+await guardian.getByRole('button', { name: 'Accept', exact: true }).first().click();
+await guardian.locator('[data-testid^="thread-"]').nth(1).click(); // Hackney thread (Eastport's came first)
+await guardian.fill('input[placeholder="Message…"]', 'Guni would love that — which pitch?');
 await guardian.keyboard.press('Enter');
 await portalOpenThread(grass2, 'Guni Adebayo');
 await grass2.waitForSelector('text=which pitch?', { timeout: 15000 });

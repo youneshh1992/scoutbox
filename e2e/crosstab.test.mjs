@@ -49,9 +49,9 @@ await club.click('.drawer button:has-text("Close")');
 await player.waitForSelector('text=Eastport FC sent you a contact request', { timeout: 15000 });
 say('player: popup banner appeared for incoming request');
 await player.click('a[href="/inbox"]');
-await player.waitForSelector('text=Accept contact', { timeout: 10000 });
-await player.click('text=Accept contact');
-await player.waitForSelector('text=channel open', { timeout: 10000 });
+await player.locator('[data-testid^="inbox-request-"]').first().click();
+await player.getByRole('button', { name: 'Accept', exact: true }).click();
+await player.waitForSelector('[data-testid^="req-status-"]:has-text("Accepted")', { timeout: 10000 });
 say('player: accepted the real request from the club tab');
 
 // club: acceptance toast

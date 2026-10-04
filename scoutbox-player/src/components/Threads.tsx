@@ -2,20 +2,35 @@
 // only because a request was accepted; every message is moderated and logged,
 // and children never appear here at all. Read receipts, typing indicators and
 // clip attachments included.
+//
+// M24F.3 — conversation-first. The list is one PreviewRow per thread (name,
+// one-line preview, time, unread dot); the open thread is a clean header,
+// the stream and a composer. Nothing repeats the identity on every bubble.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from './Text';
 import { client, type Channel, type MessageAttachment } from '../data/client';
 import type { MediaItem } from '../domain/types';
 import { useColors, useStyles, type Palette } from '../theme';
-import { Button, Muted, Row, SectionTitle } from './ui';
+import { Button, Muted, PreviewRow, Row } from './ui';
 import { WebVideo } from './WebVideo';
 import { Icon } from './Icon';
 import { pt } from '../i18n';
 import { initialsOf } from './Reference';
+import { fmtClock, relTime } from '../time';
 
-export function Threads({ channels, onSend, onOpen, onTyping, attachableClips, emptyText, auth }: {
+/** The last message of a thread, the one-line preview and whether it is unread for this side. */
+export function threadPreview(c: Channel): { line: string; time: string; unread: boolean } {
+  const last = c.messages[c.messages.length - 1];
+  if (!last) return { line: `${c.scoutName} · ${c.scoutRole}`, time: relTime(c.createdAt), unread: false };
+  const mine = last.sender.kind !== 'org_user';
+  const text = last.text || (last.attachment ? (last.attachment.kind === 'clip' ? pt('chatClip') : pt('chatReport')) : '');
+  const seen = c.readBy?.counterparty ?? 0;
+  return { line: mine ? `${pt('chatYou')}: ${text}` : text, time: relTime(last.ts), unread: !mine && last.ts > seen };
+}
+
+export function Threads({ channels, onSend, onOpen, onTyping, attachableClips, emptyText, auth, openChannelId, onOpenChange, headerExtra }: {
   channels: Channel[];
   onSend: (channelId: string, text: string, attachMediaId?: string, clientMsgId?: string) => Promise<void>;
   /** Called when a thread is opened — mark it read. */
@@ -27,10 +42,18 @@ export function Threads({ channels, onSend, onOpen, onTyping, attachableClips, e
   emptyText: string;
   /** Identity for the scoped live stream (typing pings). */
   auth?: { kind: 'player' | 'guardian'; id: string };
+  /** M24F.3 — the open thread may be controlled by the screen (the Inbox opens a thread from its own list). */
+  openChannelId?: string | null;
+  onOpenChange?: (id: string | null) => void;
+  /** M24F.3 — a special object at the head of an open thread (the trial invitation card). */
+  headerExtra?: (c: Channel) => ReactNode;
 }) {
   const colors = useColors();
   const styles = useStyles(makeStyles);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const controlled = openChannelId !== undefined;
+  const [ownOpenId, setOwnOpenId] = useState<string | null>(null);
+  const openId = controlled ? openChannelId : ownOpenId;
+  const setOpenId = (id: string | null) => { if (!controlled) setOwnOpenId(id); onOpenChange?.(id); };
   const [draft, setDraft] = useState('');
   const [attachId, setAttachId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -95,72 +118,58 @@ export function Threads({ channels, onSend, onOpen, onTyping, attachableClips, e
     }
   };
 
-  if (channels.length === 0) {
+  if (channels.length === 0 && !open) {
     return <View style={{ paddingVertical: 12 }}><Muted size={13.5}>{emptyText}</Muted></View>;
   }
 
-  // M24C — the reference Messages screen: thread rows with the club's
-  // avatar, and an open thread as a person header, the safety strip, a date
-  // divider, bubbles (theirs on a hairline, mine on the soft green) and the
-  // rounded compose pill. Sending, retries, read receipts, typing pings and
-  // clip attachments are exactly as before.
   const dayLabel = (ts: number) => {
     const d = new Date(ts); const now = new Date();
     return d.toDateString() === now.toDateString() ? pt('chatToday') : d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
   };
-  const timeOf = (ts: number) => new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
   return (
-    <View style={{ gap: 10 }} testID="threads">
-      {!open && channels.map((c) => (
-        <Pressable key={c.id} onPress={() => setOpenId(c.id)} accessibilityRole="button" accessibilityLabel={`${pt('chatOpen')} ${c.orgName}`} testID={`thread-${c.id}`} style={({ pressed }) => [styles.threadRow, pressed && { opacity: 0.75 }]}>
-          <View style={styles.clubAvatar}><Text style={{ color: colors.iconFg, fontSize: 12, fontWeight: '600' }}>{initialsOf(c.orgName)}</Text></View>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={styles.org} numberOfLines={1}>{c.orgName}</Text>
-            <Muted size={12.5}>
-              {c.scoutName} · {c.scoutRole}{c.orgVerified ? ' · Verified' : ''}{c.counterparty === 'guardian' ? ` · about ${c.playerName}` : ''} · {c.messages.length} {pt('chatMessages')}
-            </Muted>
-          </View>
-          <Text style={{ color: colors.accent2, fontSize: 12.5, fontWeight: '500' }}>{pt('chatOpen')}</Text>
-          <Icon name="chevron-right" size={16} color={colors.muted} />
-        </Pressable>
-      ))}
+    <View style={{ gap: 0 }} testID="threads">
+      {!open && channels.map((c) => {
+        const p = threadPreview(c);
+        return <PreviewRow key={c.id} initials={initialsOf(c.orgName)} title={c.orgName} line={c.counterparty === 'guardian' ? `${p.line} · ${c.playerName}` : p.line} time={p.time} unread={p.unread} onPress={() => setOpenId(c.id)} testID={`thread-${c.id}`} />;
+      })}
       {open && (
         <View testID={`thread-open-${open.id}`}>
           <View style={styles.person}>
+            <Pressable onPress={() => setOpenId(null)} accessibilityRole="button" accessibilityLabel={pt('chatBack')} hitSlop={8} style={({ pressed }) => [styles.backBtn, pressed && { opacity: 0.7 }]}>
+              <Icon name="chevron-left" size={18} color={colors.text} />
+            </Pressable>
             <View style={styles.clubAvatar}><Text style={{ color: colors.iconFg, fontSize: 12, fontWeight: '600' }}>{initialsOf(open.orgName)}</Text></View>
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text role="heading" aria-level={2} style={styles.personName}>{open.orgName}</Text>
-              <Muted size={11}>{open.scoutName} · {open.scoutRole}</Muted>
+              <Text role="heading" aria-level={2} style={styles.personName} numberOfLines={1}>{open.orgName}</Text>
+              <Muted size={12}>{open.scoutName} · {open.scoutRole}</Muted>
             </View>
-            <Pressable onPress={() => setOpenId(null)} accessibilityRole="button" accessibilityLabel={pt('chatBack')} hitSlop={8} style={({ pressed }) => [styles.backBtn, pressed && { opacity: 0.7 }]}>
-              <Icon name="chevron-left" size={16} color={colors.text} />
-              <Text style={{ color: colors.text, fontSize: 12, fontWeight: '500' }}>{pt('chatBack')}</Text>
-            </Pressable>
           </View>
           <View style={styles.safety}>
-            <Icon name="shield-check" size={15} color={colors.safetyText} />
-            <Text style={{ color: colors.safetyText, fontSize: 11, flex: 1 }}>{pt('chatAccepted')} · {pt('chatModerated')}</Text>
+            <Icon name="shield-check" size={13} color={colors.safetyText} />
+            <Text style={{ color: colors.safetyText, fontSize: 11 }}>{pt('chatSafetyLine')}</Text>
           </View>
+          {headerExtra ? headerExtra(open) : null}
           <ScrollView ref={scrollRef} style={styles.thread} contentContainerStyle={{ paddingVertical: 4 }}>
             {open.messages.length === 0 && <Muted size={13}>{pt('chatSayHello')}</Muted>}
             {open.messages.map((m, i) => {
               const mine = m.sender.kind !== 'org_user';
+              const isLastMine = mine && !open.messages.slice(i + 1).some((x) => x.sender.kind !== 'org_user');
               const read = mine && open.readBy?.org != null && open.readBy.org >= m.ts;
               const newDay = i === 0 || new Date(open.messages[i - 1].ts).toDateString() !== new Date(m.ts).toDateString();
               return (
                 <View key={m.id}>
                   {newDay ? <Text style={styles.date}>{dayLabel(m.ts)}</Text> : null}
                   <View style={[styles.bubble, mine ? styles.mine : styles.theirs]}>
-                    <Text style={{ color: colors.text, fontSize: 13, lineHeight: 21 }}>{m.text}</Text>
+                    <Text style={{ color: colors.text, fontSize: 14, lineHeight: 20 }}>{m.text}</Text>
                     <Attachment attachment={m.attachment} />
-                    <Text style={styles.meta}>{mine ? pt('chatYou') : m.sender.name.split(' ')[0]} · {timeOf(m.ts)}{mine ? ` · ${read ? pt('chatRead') : pt('chatSent')}` : ''}</Text>
+                    <Text style={styles.meta}>{fmtClock(m.ts)}{isLastMine ? ` · ${read ? pt('chatRead') : pt('chatSent')}` : ''}</Text>
                   </View>
                 </View>
               );
             })}
             {outbox.filter((o) => o.channelId === open.id).map((o) => (
               <View key={o.id} style={[styles.bubble, styles.mine, o.status === 'failed' ? styles.failed : styles.pending]}>
-                <Text style={{ color: colors.text, fontSize: 13, lineHeight: 21 }}>{o.text}</Text>
+                <Text style={{ color: colors.text, fontSize: 14, lineHeight: 20 }}>{o.text}</Text>
                 {o.status === 'failed'
                   ? <Row><Text style={styles.meta}>{pt('chatNotDelivered')}</Text><Button small label={pt('chatRetry')} onPress={() => send(o.id)} /></Row>
                   : <Text style={styles.meta}>{pt('chatSending')}</Text>}
@@ -221,29 +230,21 @@ function Attachment({ attachment }: { attachment?: MessageAttachment | null }) {
   );
 }
 
-export function ThreadsHeader() {
-  const colors = useColors();
-  return <SectionTitle>Messages — on-platform only</SectionTitle>;
-}
-
 const makeStyles = (colors: Palette) => StyleSheet.create({
   pending: { opacity: 0.65 },
   failed: { borderWidth: 1, borderColor: colors.danger },
-  org: { color: colors.text, fontSize: 15, fontWeight: '600', flexShrink: 1 },
-  // M24F — a thread is a row on a hairline, like every messaging product; no box
-  threadRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.line },
-  clubAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.panel2, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  person: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingTop: 4, paddingBottom: 17 },
+  clubAvatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.iconBg, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  person: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 2, paddingBottom: 12 },
   personName: { color: colors.text, fontSize: 17, fontWeight: '600', letterSpacing: -0.3 },
-  backBtn: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingVertical: 8, paddingHorizontal: 6, minHeight: 36 },
-  safety: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.line },
-  date: { textAlign: 'center', color: colors.chatDate, fontSize: 11, marginVertical: 22 },
-  thread: { maxHeight: 420 },
-  bubble: { maxWidth: '90%', borderRadius: 13, padding: 13, marginVertical: 7.5, gap: 2 },
-  mine: { alignSelf: 'flex-end', backgroundColor: colors.mine, borderBottomRightRadius: 3 },
-  theirs: { alignSelf: 'flex-start', backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.line, borderBottomLeftRadius: 3 },
-  meta: { color: colors.bubbleMeta, fontSize: 11, marginTop: 8 },
-  compose: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 7, paddingRight: 7, paddingLeft: 13, backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.line, borderRadius: 22, marginTop: 20 },
-  input: { flex: 1, minWidth: 0, color: colors.text, fontSize: 13, paddingVertical: 6 },
+  backBtn: { paddingVertical: 8, paddingRight: 4, minHeight: 36, justifyContent: 'center' },
+  safety: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.line },
+  date: { textAlign: 'center', color: colors.chatDate, fontSize: 11, marginVertical: 18 },
+  thread: { maxHeight: 440 },
+  bubble: { maxWidth: '86%', borderRadius: 14, paddingVertical: 9, paddingHorizontal: 12, marginVertical: 5, gap: 2 },
+  mine: { alignSelf: 'flex-end', backgroundColor: colors.mine, borderBottomRightRadius: 4 },
+  theirs: { alignSelf: 'flex-start', backgroundColor: colors.panel2, borderBottomLeftRadius: 4 },
+  meta: { color: colors.bubbleMeta, fontSize: 10.5, marginTop: 4, alignSelf: 'flex-end' },
+  compose: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 6, paddingRight: 6, paddingLeft: 14, backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.line, borderRadius: 22, marginTop: 14 },
+  input: { flex: 1, minWidth: 0, color: colors.text, fontSize: 14, paddingVertical: 8 },
   sendBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
 });

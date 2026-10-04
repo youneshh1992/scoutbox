@@ -89,6 +89,7 @@ export function InviteCodeSection({ actor }: { actor: { kind: 'player'; id: stri
           accessibilityLabel={pt('m14invPlaceholder')}
         />
         <Button
+          testID="invite-accept"
           label={pt('m14invAccept')}
           onPress={async () => {
             try {

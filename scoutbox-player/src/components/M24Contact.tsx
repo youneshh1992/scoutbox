@@ -14,6 +14,7 @@ import { useSession } from '../state';
 import { useColors } from '../theme';
 import { pt } from '../i18n';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
+import { relTime } from '../time';
 
 const isChild = (r: InboxRequest | ChildInboxItem): r is ChildInboxItem => 'guardianManaged' in r && r.guardianManaged === true;
 
@@ -71,7 +72,7 @@ export function MessagesSummarySection() {
                   <Text style={{ color: colors.text, fontWeight: '700', fontSize: 14 }}>{c.orgName}</Text>
                   <Muted size={12}>{c.messages.length} {pt('ctxMessagesCount')}</Muted>
                 </Row>
-                <Muted size={12.5}>{c.scoutName}{last ? ` · ${new Date(last.ts).toLocaleString()}` : ''}</Muted>
+                <Muted size={12.5}>{c.scoutName}{last ? ` · ${relTime(last.ts)}` : ''}</Muted>
               </View>
             );
           })}

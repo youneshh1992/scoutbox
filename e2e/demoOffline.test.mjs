@@ -82,8 +82,9 @@ const browser = await chromium.launch({ executablePath: EXE });
   console.log('player demo: logged in from a deep path, discover renders');
   await page.click('a[href="/inbox"]');
   await page.waitForSelector('text=Harbour City FC', { timeout: 15000 });
-  await page.click('text=Accept contact');
-  await page.waitForSelector('text=channel open', { timeout: 10000 });
+  await page.locator('[data-testid^="inbox-request-"]').first().click();
+  await page.getByRole('button', { name: 'Accept', exact: true }).click();
+  await page.waitForSelector('[data-testid^="req-status-"]:has-text("Accepted")', { timeout: 10000 });
   console.log('player demo: inbox accept works offline');
   await page.close();
 }
