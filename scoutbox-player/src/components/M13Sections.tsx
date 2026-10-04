@@ -174,11 +174,11 @@ export function TransitionsSection({ actor, isMinor, mediaOptions }: { actor: Ac
         <View key={c.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6 }}>
           <Row>
             <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, flex: 1 }}>{c.note ?? c.id}</Text>
-            <Pill label={c.status} tone={c.status === 'open' ? 'blue' : c.status === 'placed' ? 'green' : 'default'} />
+            <Pill label={pt(c.status === 'open' ? 'm13trnStOpen' : c.status === 'placed' ? 'm13trnStPlaced' : 'm13trnStClosed')} tone={c.status === 'open' ? 'blue' : c.status === 'placed' ? 'green' : 'default'} />
           </Row>
           {c.recipients.map((r) => (
             <Row key={r.orgId} style={{ marginTop: 4 }}>
-              <View style={{ flex: 1 }}><Muted size={12}>{r.orgName} {r.revokedAt ? `· ${pt('m13trnRevoked')}` : r.viewedAt ? '· viewed' : '· not viewed yet'}</Muted></View>
+              <View style={{ flex: 1 }}><Muted size={12}>{r.orgName} {r.revokedAt ? `· ${pt('m13trnRevoked')}` : r.viewedAt ? `· ${pt('m13trnViewed')}` : `· ${pt('m13trnNotViewed')}`}</Muted></View>
               {!r.revokedAt && c.status === 'open' && (
                 <Button small label={pt('m13trnRevoke')} onPress={() => act(
                   () => (actor.kind === 'player' ? m13.revokeRecipient(actor.id, c.id, r.orgId) : m13.gRevokeRecipient(actor.id, c.id, r.orgId)),
@@ -189,7 +189,7 @@ export function TransitionsSection({ actor, isMinor, mediaOptions }: { actor: Ac
           ))}
           {c.status === 'open' && (
             <Row style={{ marginTop: 6 }}>
-              <TextInput accessibilityLabel="Org id" style={[inputStyle(colors), { flex: 1 }]} placeholder="org-eastport" placeholderTextColor={colors.muted} value={orgInput} onChangeText={setOrgInput} />
+              <TextInput accessibilityLabel="Org id" style={[inputStyle(colors), { flex: 1 }]} placeholder={pt('m13trnClubHint')} placeholderTextColor={colors.muted} value={orgInput} onChangeText={setOrgInput} />
               <Button small label={pt('m13trnGrant')} onPress={() => orgInput && act(
                 () => (actor.kind === 'player' ? m13.addRecipient(actor.id, c.id, orgInput) : m13.gAddRecipient(actor.id, c.id, orgInput)),
                 pt('m13trnGranted')

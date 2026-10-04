@@ -32,6 +32,7 @@ import { WebVideo } from '../../components/WebVideo';
 import { PassportSection } from '../../components/M12Sections';
 import { CATEGORY_FOR_ACTION } from '../../components/M23Journey';
 import { initialsOf, TextButton } from '../../components/Reference';
+import { humanDate, uiLocale } from '../../time';
 
 type SectionKey = 'overview' | 'performance' | 'evidence' | 'journey';
 const SECTION_KEYS: SectionKey[] = ['overview', 'performance', 'evidence', 'journey'];
@@ -49,16 +50,16 @@ const evLabel = (kind: string) => { const key = `jnEv_${kind}` as Parameters<typ
 const stLabel = (s: string) => { const key = `jnSt_${s}` as Parameters<typeof pt>[0]; try { return pt(key) ?? s; } catch { return s; } };
 const nextLabel = (code: string) => { const key = `jnNext_${code}` as Parameters<typeof pt>[0]; try { return pt(key) ?? ''; } catch { return ''; } };
 const cap = (v: string) => v.charAt(0).toUpperCase() + v.slice(1);
-const dayLabel = (ts: number) => new Date(ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }).toUpperCase();
+const dayLabel = (ts: number) => new Date(ts).toLocaleDateString(uiLocale(), { day: 'numeric', month: 'short' }).toUpperCase();
 const when = (ts: number) => {
   const d = new Date(ts); const days = Math.floor((Date.now() - ts) / 86400000);
   if (days <= 0) return 'Today';
   if (days === 1) return 'Yesterday';
-  if (days < 7) return d.toLocaleDateString(undefined, { weekday: 'short' });
-  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  if (days < 7) return d.toLocaleDateString(uiLocale(), { weekday: 'short' });
+  return d.toLocaleDateString(uiLocale(), { day: 'numeric', month: 'short' });
 };
-const dateOnly = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric', ...(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? { timeZone: 'UTC' } : {}) });
-const sessionLine = (startsAt: number, venue?: string | null) => `${new Date(startsAt).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })} · ${new Date(startsAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}${venue ? ` · ${venue}` : ''}`;
+const dateOnly = (iso: string) => new Date(iso).toLocaleDateString(uiLocale(), { day: 'numeric', month: 'short', year: 'numeric', ...(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? { timeZone: 'UTC' } : {}) });
+const sessionLine = (startsAt: number, venue?: string | null) => `${new Date(startsAt).toLocaleDateString(uiLocale(), { day: 'numeric', month: 'long' })} · ${new Date(startsAt).toLocaleTimeString(uiLocale(), { hour: '2-digit', minute: '2-digit' })}${venue ? ` · ${venue}` : ''}`;
 
 const isRequest = (r: unknown): r is InboxRequest => !!r && typeof r === 'object' && 'createdAt' in (r as object) && 'orgName' in (r as object);
 const upcomingSession = (t: FamilyTrial | undefined) => {
@@ -563,16 +564,18 @@ function EvidenceSection({ me, playerId, isMinor, refresh, onUpload, onBoxCam, o
     <View style={styles.block} testID="evidence-root">
       {latest ? (
         <View style={{ marginBottom: 6 }} testID="evidence-latest">
+          <View style={{ marginBottom: 8 }}><Kicker>{pt('evLatest')}</Kicker></View>
           <ClipThumb src={latestSrc} onPress={() => setPage('video')} testID="evidence-latest-thumb" />
-          <ListRow label={latest.title} value={[dateOnly(latest.uploadedAt), latest.verifiedClip ? 'Verified clip' : cap(latest.kind)].join(' · ')} onPress={() => setPage('video')} testID="evidence-latest-row" />
+          <ListRow label={latest.title} value={[humanDate(latest.uploadedAt.slice(0, 10)), latest.verifiedClip ? 'Verified clip' : cap(latest.kind)].join(' · ')} onPress={() => setPage('video')} testID="evidence-latest-row" />
         </View>
       ) : (
         <View style={{ paddingVertical: 12 }}><Muted size={13.5}>{pt('evNoClips')}</Muted></View>
       )}
-      <ListRow label={pt('evVideo')} value={String(clips.length)} onPress={() => setPage('video')} testID="evidence-video-row" />
-      <ListRow label={pt('evCombine')} value={combineCount == null ? undefined : String(combineCount)} onPress={onCombine} testID="evidence-combine-row" />
-      {me.pathway ? <ListRow label={pt('profReferences')} value={String(vouches.length)} onPress={() => setPage('references')} testID="evidence-references-row" /> : null}
-      {me.attendance.length > 0 ? <ListRow label={pt('profAttendance')} value={String(me.attendance.length)} onPress={() => setPage('attendance')} testID="evidence-attendance-row" /> : null}
+      <View style={{ marginTop: 18, marginBottom: 2 }}><Kicker>{pt('evCategories')}</Kicker></View>
+      <ListRow label={pt('evVideo')} count={clips.length} onPress={() => setPage('video')} testID="evidence-video-row" />
+      <ListRow label={pt('evCombine')} count={combineCount == null ? undefined : combineCount} onPress={onCombine} testID="evidence-combine-row" />
+      {me.pathway ? <ListRow label={pt('profReferences')} count={vouches.length} onPress={() => setPage('references')} testID="evidence-references-row" /> : null}
+      {me.attendance.length > 0 ? <ListRow label={pt('profAttendance')} count={me.attendance.length} onPress={() => setPage('attendance')} testID="evidence-attendance-row" /> : null}
       <ListRow label={pt('evBoxCam')} onPress={onBoxCam} testID="evidence-boxcam-link" />
       <ListRow label={pt('evRecord')} onPress={() => setPage('record')} testID="evidence-record-row" />
       <TextButton label={pt('profAddEvidence')} onPress={onUpload} size={13} testID="evidence-upload-link" />

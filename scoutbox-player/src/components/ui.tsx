@@ -112,7 +112,7 @@ export function Row({ children, style }: { children: ReactNode; style?: ViewStyl
 }
 
 /** M24F — a list row: a label, an optional value line, a chevron when it leads somewhere. The Account page is made of these. */
-export function ListRow({ label, value, onPress, testID, icon, right, danger }: { label: string; value?: string; onPress?: () => void; testID?: string; icon?: string; right?: ReactNode; danger?: boolean }) {
+export function ListRow({ label, value, count, onPress, testID, icon, right, danger }: { label: string; value?: string; count?: string | number; onPress?: () => void; testID?: string; icon?: string; right?: ReactNode; danger?: boolean }) {
   const colors = useColors();
   const styles = useStyles(makeStyles);
   const body = (
@@ -122,13 +122,14 @@ export function ListRow({ label, value, onPress, testID, icon, right, danger }: 
         <Text style={[styles.rowLabel, danger && { color: colors.danger }]}>{label}</Text>
         {value ? <Text style={styles.rowValue}>{value}</Text> : null}
       </View>
+      {count != null ? <Text style={styles.rowCount}>{count}</Text> : null}
       {right}
       {onPress && !right ? <Icon name="chevron-right" size={16} color={colors.muted} /> : null}
     </>
   );
   if (!onPress) return <View style={styles.listRow} testID={testID}>{body}</View>;
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={value ? `${label}. ${value}` : label} testID={testID} style={({ pressed }) => [styles.listRow, pressed && { opacity: 0.7 }]}>
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={[label, count != null ? String(count) : null, value].filter(Boolean).join('. ')} testID={testID} style={({ pressed }) => [styles.listRow, pressed && { opacity: 0.7 }]}>
       {body}
     </Pressable>
   );
@@ -155,7 +156,7 @@ export function Disclosure({ label, children, testID, open: initial = false, hin
   const [open, setOpen] = useState(initial);
   return (
     <View testID={testID}>
-      <Pressable onPress={() => setOpen((v) => !v)} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ expanded: open }} style={({ pressed }) => [styles.listRow, pressed && { opacity: 0.7 }]}>
+      <Pressable onPress={() => setOpen((v) => !v)} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ expanded: open }} aria-expanded={open} style={({ pressed }) => [styles.listRow, pressed && { opacity: 0.7 }]}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.rowLabel}>{label}</Text>
           {hint ? <Text style={styles.rowValue}>{hint}</Text> : null}
@@ -231,10 +232,28 @@ export function EventRow({ date, label, onPress, testID, children, open: initial
   );
 }
 
-/** M24F — a small uppercase kicker: the kind of a thing, where a pill would be noise. */
-export function Kicker({ children, tone }: { children: ReactNode; tone?: 'urgent' | 'accent' }) {
+/** M24F.5 — one moment in a timeline: a small dot on a quiet rail, the date
+ *  above, the event below. No columns, no dividers — a rhythm, not a table. */
+export function TimelineItem({ date, children, last, testID }: { date: string; children: ReactNode; last?: boolean; testID?: string }) {
   const colors = useColors();
-  return <Text style={{ color: tone === 'urgent' ? colors.danger : tone === 'accent' ? colors.accentText : colors.muted, fontSize: 11, fontWeight: '600', letterSpacing: 0.6, textTransform: 'uppercase' }}>{children}</Text>;
+  return (
+    <View style={{ flexDirection: 'row', gap: 12 }} testID={testID}>
+      <View style={{ width: 8, alignItems: 'center', paddingTop: 5 }}>
+        <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: colors.accent }} />
+        {last ? null : <View style={{ width: 1, flex: 1, backgroundColor: colors.line, marginTop: 4 }} />}
+      </View>
+      <View style={{ flex: 1, minWidth: 0, paddingBottom: last ? 4 : 16 }}>
+        <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 16 }}>{date}</Text>
+        <Text style={{ color: colors.text, fontSize: 14, lineHeight: 20, marginTop: 1 }}>{children}</Text>
+      </View>
+    </View>
+  );
+}
+
+/** M24F — a small uppercase kicker: the kind of a thing, where a pill would be noise. */
+export function Kicker({ children, tone }: { children: ReactNode; tone?: 'urgent' | 'accent' | 'trial' }) {
+  const colors = useColors();
+  return <Text style={{ color: tone === 'urgent' ? colors.danger : tone === 'accent' ? colors.accentText : tone === 'trial' ? colors.trialInk : colors.muted, fontSize: 11, fontWeight: '600', letterSpacing: 0.6, textTransform: 'uppercase' }}>{children}</Text>;
 }
 
 const makeStyles = (colors: Palette) => StyleSheet.create({
@@ -300,6 +319,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   listRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 52, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.line },
   rowLabel: { color: colors.text, fontSize: 15, fontWeight: '500', lineHeight: 20 },
   rowValue: { color: colors.muted, fontSize: 12.5, lineHeight: 17, marginTop: 2 },
+  rowCount: { color: colors.muted, fontSize: 14, fontVariant: ['tabular-nums'] },
   disclosureBody: { paddingTop: 10, paddingBottom: 14, gap: 8, borderBottomWidth: 1, borderBottomColor: colors.line },
   preview: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 60, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.line, position: 'relative' },
   previewEdge: { width: 3, alignSelf: 'stretch', borderRadius: 2, marginLeft: -2 },

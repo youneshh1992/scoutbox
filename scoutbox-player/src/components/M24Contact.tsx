@@ -14,7 +14,7 @@ import { useSession } from '../state';
 import { useColors } from '../theme';
 import { pt } from '../i18n';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
-import { relTime } from '../time';
+import { relTime, uiLocale } from '../time';
 
 const isChild = (r: InboxRequest | ChildInboxItem): r is ChildInboxItem => 'guardianManaged' in r && r.guardianManaged === true;
 
@@ -33,9 +33,9 @@ export function ContactRequestsSection({ kind }: { kind: 'contact' | 'trial' }) 
         <View key={r.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8, gap: 4 }} testID={`request-${r.id}`}>
           <Row style={{ justifyContent: 'space-between' }}>
             <Text style={{ color: colors.text, fontWeight: '700', fontSize: 14 }}>{r.orgName}</Text>
-            <Pill label={isChild(r) ? (r.status === 'pending' ? pt('ctxWithGuardian') : r.status) : r.status} tone={r.status === 'accepted' ? 'green' : r.status === 'declined' ? 'red' : 'gold'} />
+            <Pill label={isChild(r) && r.status === 'pending' ? pt('ctxWithGuardian') : ({ pending: pt('ctxAwaitingYou'), accepted: pt('inboxAccepted'), declined: pt('inboxDeclined'), suspended: pt('inboxSuspended') } as Record<string, string>)[r.status] ?? r.status} tone={r.status === 'accepted' ? 'green' : r.status === 'declined' ? 'red' : 'gold'} />
           </Row>
-          {!isChild(r) && <Muted size={12.5}>{r.scoutName}{r.scoutRole ? ` (${r.scoutRole})` : ''} · {new Date(r.createdAt).toLocaleDateString()}</Muted>}
+          {!isChild(r) && <Muted size={12.5}>{r.scoutName}{r.scoutRole ? ` (${r.scoutRole})` : ''} · {new Date(r.createdAt).toLocaleDateString(uiLocale(), { day: 'numeric', month: 'short', year: 'numeric' })}</Muted>}
           {!isChild(r) && r.subject ? <Text style={{ color: colors.text, fontSize: 13.5, fontWeight: '600' }}>{r.subject}</Text> : null}
           {isChild(r) ? <Muted size={12.5}>{r.note}</Muted> : null}
         </View>

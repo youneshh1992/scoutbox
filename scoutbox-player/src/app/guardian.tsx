@@ -564,21 +564,44 @@ export default function GuardianDashboard() {
           <>
             {children.map((c) => (
               <View key={c.id}>
-                <Text style={{ color: colors.gold, fontWeight: '700', fontSize: 14, marginTop: 8 }}>{c.name} — development loop</Text>
-                <PassportSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />
-                <BoardSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />
-                <CampaignsSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} mediaOptions={(c.media ?? []).map((m) => ({ id: m.id, title: m.title }))} />
-                <FeedbackDevSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />
-                <PreferencesSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} isMinor />
-                <OpportunityFitSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />
-                <TransitionsSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} isMinor={false} mediaOptions={(c.media ?? []).map((m) => ({ id: m.id, title: m.title }))} />
-                <ChildReferencesSection guardianId={guardianId} childId={c.id} childName={c.name} />
-                {/* M21 — a minor's plan is guardian-managed. The safeguarding model is
-                    unchanged: the child reads it on their own device, the guardian writes it. */}
-                <DevelopmentHubSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />
-                <BoxTrainingSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} isMinor childName={c.name} />
-                <FootballPassportSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} childName={c.name} />
-                <InviteCodeSection actor={{ kind: 'guardian', id: guardianId, childId: c.id, childName: c.name }} />
+                {/* M24F.5 — the child's football, one row each: the dashboard stays a list; every section opens one tap deeper. */}
+                <View style={{ marginTop: 22 }}><SectionTitle testID={`guardian-child-head-${c.id}`}>{c.name}</SectionTitle></View>
+                <Disclosure label={pt('gSec_evidence')} testID={`guardian-child-evidence-${c.id}`}>
+                  <PassportSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />
+                </Disclosure>
+                <Disclosure label={pt('gSec_board')} testID={`guardian-child-board-${c.id}`}>
+                  <BoardSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />
+                </Disclosure>
+                <Disclosure label={pt('gSec_campaigns')} testID={`guardian-child-campaigns-${c.id}`}>
+                  <CampaignsSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} mediaOptions={(c.media ?? []).map((m) => ({ id: m.id, title: m.title }))} />
+                </Disclosure>
+                <Disclosure label={pt('gSec_feedback')} testID={`guardian-child-feedback-${c.id}`}>
+                  <FeedbackDevSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />
+                </Disclosure>
+                <Disclosure label={pt('gSec_preferences')} testID={`guardian-child-preferences-${c.id}`}>
+                  <PreferencesSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} isMinor />
+                </Disclosure>
+                <Disclosure label={pt('gSec_fit')} testID={`guardian-child-fit-${c.id}`}>
+                  <OpportunityFitSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />
+                </Disclosure>
+                <Disclosure label={pt('gSec_transition')} testID={`guardian-child-transition-${c.id}`}>
+                  <TransitionsSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} isMinor={false} mediaOptions={(c.media ?? []).map((m) => ({ id: m.id, title: m.title }))} />
+                </Disclosure>
+                <Disclosure label={pt('gSec_references')} testID={`guardian-child-references-${c.id}`}>
+                  <ChildReferencesSection guardianId={guardianId} childId={c.id} childName={c.name} />
+                </Disclosure>
+                <Disclosure label={pt('gSec_development')} testID={`guardian-child-development-${c.id}`}>
+                  <DevelopmentHubSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />
+                </Disclosure>
+                <Disclosure label={pt('gSec_boxcam')} testID={`guardian-child-boxcam-${c.id}`}>
+                  <BoxTrainingSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} isMinor childName={c.name} />
+                </Disclosure>
+                <Disclosure label={pt('gSec_passport')} testID={`guardian-child-passport-${c.id}`}>
+                  <FootballPassportSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} childName={c.name} />
+                </Disclosure>
+                <Disclosure label={pt('gSec_invite')} testID={`guardian-child-invite-${c.id}`}>
+                  <InviteCodeSection actor={{ kind: 'guardian', id: guardianId, childId: c.id, childName: c.name }} />
+                </Disclosure>
               </View>
             ))}
             <AckSection actor={{ kind: 'guardian', id: guardianId, childId: children[0]?.id ?? '' }} />
@@ -623,7 +646,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     fontSize: 14,
   },
   exportPreview: {
-    color: colors.muted, fontSize: 11, fontFamily: 'monospace', lineHeight: 15,
+    color: colors.muted, fontSize: 11, fontVariant: ['tabular-nums'], lineHeight: 15,
     borderWidth: 1, borderColor: colors.line, borderRadius: 8, padding: 8, marginTop: 6,
   },
 });

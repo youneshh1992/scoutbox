@@ -18,6 +18,7 @@ import { useColors } from '../theme';
 import { Button, Card, Disclosure, Muted, Pill, Row, SectionTitle } from './ui';
 import { m26, type PlayerTransaction, type TxTimelineEntry } from '../data/m26client';
 import { pt } from '../i18n';
+import { uiLocale } from '../time';
 
 function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): [T | null, () => void, string | null] {
   const [v, setV] = useState<T | null>(null);
@@ -40,7 +41,7 @@ const statusKey = (s: string) => `m26status_${s}` as K;
 /** Tone is decoration; the word beside it is the state, so no state is colour-only. */
 const tone = (s: string): 'green' | 'blue' | 'gold' | 'red' | 'default' =>
   (s === 'READY' || s === 'ACTIVE' ? 'green' : s === 'COMPLIANCE_BLOCKED' ? 'red' : s === 'COMPLIANCE_PENDING' || s === 'ON_HOLD' ? 'gold' : s === 'CANCELLED' || s === 'CLOSED' || s === 'ARCHIVED' ? 'default' : 'blue');
-const fmt = (ts: number | null) => (ts ? new Date(ts).toLocaleDateString() : '—');
+const fmt = (ts: number | null) => (ts ? new Date(ts).toLocaleDateString(uiLocale(), { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 
 function Timeline({ playerId, tx }: { playerId: string; tx: PlayerTransaction }) {
   const [data] = useLoad(() => m26.timeline(playerId, tx.id), [playerId, tx.id]);
@@ -97,29 +98,8 @@ export function AgentTransactionSection({ playerId, isMinor }: { playerId: strin
               <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, flex: 1 }}>{pt(typeKey(tx.type))}</Text>
               <Pill label={pt(statusKey(tx.status))} tone={tone(tx.status)} />
             </Row>
-            <Muted size={12}>{pt('m26agency')}: {tx.agency?.name ?? '—'}</Muted>
-            {clubs.map((c) => (
-              <Muted key={c.id} size={12}>{pt(roleKey(c.partyRole))}: {c.name ?? '—'} · {c.confirmedAt ? pt('m26confirmed') : pt('m26awaitingThem')}</Muted>
-            ))}
-            <Muted size={12}>
-              {pt('m26compliance')}: {tx.compliance.blocked ? pt('m26complianceBlocked') : tx.compliance.clear ? pt('m26complianceClear') : pt('m26compliancePending')}
-              {tx.compliance.staleness ? ` · ${pt('m26stale')}` : ''}
-            </Muted>
-            {tx.representations.length > 0 && (
-              <Muted size={12}>{pt('m26actingFor')}: {tx.representations.filter((r) => r.status !== 'withdrawn').map((r) => pt(roleKey(r.partyRole))).join(', ') || '—'}</Muted>
-            )}
-            {myConsent && <Muted size={12}>{pt('m26myConsent')}: {myConsent.status.replace(/_/g, ' ')}</Muted>}
-            {tx.documents.length > 0 && (
-              <View style={{ marginTop: 4 }} testID={`tx-documents-${tx.id}`}>
-                <Muted size={11.5}>{pt('m26sharedDocs')}</Muted>
-                {tx.documents.map((d) => <Muted key={d.id} size={11}>· {d.label} (v{d.version})</Muted>)}
-              </View>
-            )}
-            {tx.notes.length > 0 && (
-              <View style={{ marginTop: 4 }} testID={`tx-notes-${tx.id}`}>
-                {tx.notes.map((n) => <Muted key={n.id} size={11}>· {n.text}</Muted>)}
-              </View>
-            )}
+            {/* M24F.5 — one line: who acts, and the clubs on each side. The rest is one tap deeper. */}
+            <Muted size={12.5}>{[tx.agency?.name ?? '—', clubs.map((c) => c.name ?? '—').join(' · ')].filter(Boolean).join(' · ')}</Muted>
             {mine && !mine.confirmedAt && (
               <View style={{ marginTop: 6 }}>
                 <Muted size={11.5}>{pt('m26confirmWhat')}</Muted>
@@ -127,8 +107,32 @@ export function AgentTransactionSection({ playerId, isMinor }: { playerId: strin
               </View>
             )}
             {mine?.confirmedAt && <Muted size={11.5}>{pt('m26youConfirmedOn')} {fmt(mine.confirmedAt)}</Muted>}
-            <Muted size={11}>{tx.offerBoundary.honest}</Muted>
-            <Timeline playerId={playerId} tx={tx} />
+            <Disclosure label={pt('m26details')} testID={`tx-details-${tx.id}`}>
+              {clubs.map((c) => (
+                <Muted key={c.id} size={12}>{pt(roleKey(c.partyRole))}: {c.name ?? '—'} · {c.confirmedAt ? pt('m26confirmed') : pt('m26awaitingThem')}</Muted>
+              ))}
+              <Muted size={12}>
+                {pt('m26compliance')}: {tx.compliance.blocked ? pt('m26complianceBlocked') : tx.compliance.clear ? pt('m26complianceClear') : pt('m26compliancePending')}
+                {tx.compliance.staleness ? ` · ${pt('m26stale')}` : ''}
+              </Muted>
+              {tx.representations.length > 0 && (
+                <Muted size={12}>{pt('m26actingFor')}: {tx.representations.filter((r) => r.status !== 'withdrawn').map((r) => pt(roleKey(r.partyRole))).join(', ') || '—'}</Muted>
+              )}
+              {myConsent && <Muted size={12}>{pt('m26myConsent')}: {myConsent.status.replace(/_/g, ' ')}</Muted>}
+              {tx.documents.length > 0 && (
+                <View style={{ marginTop: 4 }} testID={`tx-documents-${tx.id}`}>
+                  <Muted size={11.5}>{pt('m26sharedDocs')}</Muted>
+                  {tx.documents.map((d) => <Muted key={d.id} size={11}>· {d.label} (v{d.version})</Muted>)}
+                </View>
+              )}
+              {tx.notes.length > 0 && (
+                <View style={{ marginTop: 4 }} testID={`tx-notes-${tx.id}`}>
+                  {tx.notes.map((n) => <Muted key={n.id} size={11}>· {n.text}</Muted>)}
+                </View>
+              )}
+              <Muted size={11}>{tx.offerBoundary.honest}</Muted>
+              <Timeline playerId={playerId} tx={tx} />
+            </Disclosure>
           </View>
         );
       })}

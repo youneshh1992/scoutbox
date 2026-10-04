@@ -15,7 +15,7 @@ import { m12, type FamilyOffer, type FamilyOfferRevision, type OfferStatus } fro
 import { useColors } from '../theme';
 import { pt } from '../i18n';
 import { fmtDayTime, humanDate } from '../time';
-import { Button, Card, Disclosure, FactRow, Kicker, Muted, Row, SectionTitle } from './ui';
+import { Button, Card, Disclosure, Kicker, Muted, Row, SectionTitle } from './ui';
 
 type Actor = { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string };
 
@@ -103,28 +103,31 @@ export function OfferSection({ actor, view = 'all' }: { actor: Actor; view?: Off
   // what accepting is not.
   const statusColor = (st: OfferStatus | null) => (tone(st) === 'red' ? colors.danger : tone(st) === 'gold' ? colors.gold : tone(st) === 'green' ? colors.accentText : colors.muted);
   return (
-    <Card testID="offer-section">
-      <SectionTitle>{pt('offersTitle')}</SectionTitle>
+    <Card testID="offer-section" flush={offers.length > 0 && view === 'offer'}>
+      {/* M24F.5 — the tab already says Offer and each offer carries its own kicker; the heading only names an empty section. */}
+      {offers.length === 0 || view !== 'offer' ? <SectionTitle>{pt('offersTitle')}</SectionTitle> : null}
       {offers.length === 0 && <View style={{ marginTop: 6 }}><Muted size={12.5}>{pt('offersNone')}</Muted></View>}
       {offers.map((o) => {
         const cur = o.currentRevision;
         const live = o.status === 'ISSUED' && o.awaitingYourResponse && !!cur;
         const older = o.revisions.filter((r) => r.id !== cur?.id);
         const mine = o.responses.find((x) => x.revisionId === cur?.id) ?? null;
-        const dates = cur ? `${pt('offerStart')} ${cur.terms.startDate ? humanDate(cur.terms.startDate) : '—'}${cur.terms.endDate ? ` · ${pt('offerEnd')} ${humanDate(cur.terms.endDate)}` : ''}` : '';
+        const dates = cur ? (cur.terms.startDate && cur.terms.endDate ? `${humanDate(cur.terms.startDate)} – ${humanDate(cur.terms.endDate)}` : cur.terms.startDate ? `${pt('offerStart')} ${humanDate(cur.terms.startDate)}` : cur.terms.endDate ? `${pt('offerEnd')} ${humanDate(cur.terms.endDate)}` : '') : '';
         return (
-          <View key={o.id} style={{ marginTop: 10, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.line }} testID={`offer-${o.id}`} accessibilityLabel={`${pt('offersTitle')} ${o.club.name ?? ''}`}>
+          <View key={o.id} style={{ marginTop: 10, paddingTop: 18 }} testID={`offer-${o.id}`} accessibilityLabel={`${pt('offersTitle')} ${o.club.name ?? ''}`}>
             <Kicker>{pt('offerKicker')}</Kicker>
-            <Text style={{ color: colors.text, fontWeight: '600', fontSize: 22, lineHeight: 28, letterSpacing: -0.4, marginTop: 6 }}>{o.club.name ?? '—'}{actor.kind === 'guardian' && o.playerName ? ` · ${o.playerName}` : ''}</Text>
+            <Text style={{ color: colors.text, fontWeight: '700', fontSize: 26, lineHeight: 32, letterSpacing: -0.6, marginTop: 8 }}>{o.club.name ?? '—'}{actor.kind === 'guardian' && o.playerName ? ` · ${o.playerName}` : ''}</Text>
             {cur && show('offer') ? (
-              <View style={{ marginTop: 4 }}>
-                <Text style={{ color: colors.text, fontSize: 15, lineHeight: 22 }}>{cur.terms.role ?? '—'}{cur.terms.squad ? ` · ${cur.terms.squad}` : ''}</Text>
-                <Text style={{ color: colors.muted, fontSize: 13.5, lineHeight: 20 }}>{dates}</Text>
+              <View style={{ marginTop: 6, gap: 4 }}>
+                <Text style={{ color: colors.text, fontSize: 16, lineHeight: 22 }}>{cur.terms.squad ? `${cur.terms.squad} · ` : ''}{cur.terms.role ?? '—'}</Text>
+                {dates ? <Text style={{ color: colors.muted, fontSize: 14.5, lineHeight: 21 }}>{dates}</Text> : null}
               </View>
             ) : null}
             {cur && (
-              <View style={{ marginTop: 12 }} testID={`offer-revision-${cur.id}`}>
-                <FactRow k={pt('offerStatus')} v={stLabel(o.status)} sub={`${pt('offerRevision')} ${cur.revisionNumber} · ${cur.status === 'EXPIRED' ? pt('offerExpired') : pt('offerExpires')} ${fmt(cur.expiresAt)}`} />
+              <View style={{ marginTop: 18 }} testID={`offer-revision-${cur.id}`}>
+                {/* The status, on its own line; the revision and the expiry, quietly, beneath it. */}
+                <Text style={{ color: statusColor(o.status), fontSize: 16, fontWeight: '600', lineHeight: 22 }} accessibilityLabel={`${pt('offerStatus')}: ${stLabel(o.status)}`}>{stLabel(o.status)}</Text>
+                <Text style={{ color: colors.muted, fontSize: 12.5, lineHeight: 18, marginTop: 2 }}>{`${pt('offerRevision')} ${cur.revisionNumber} · ${cur.status === 'EXPIRED' ? pt('offerExpired') : pt('offerExpires')} ${fmt(cur.expiresAt)}`}</Text>
                 {show('documents') && !show('offer') && cur.documents.length > 0 && (
                   <View style={{ marginTop: 8 }}>
                     <Muted size={12}>{pt('offerDocuments')}</Muted>

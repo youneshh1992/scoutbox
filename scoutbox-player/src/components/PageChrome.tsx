@@ -93,7 +93,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   back: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', marginLeft: -6 },
   tabs: {
     flexDirection: 'row', gap: 7, justifyContent: 'space-between',
-    borderBottomWidth: 1, borderBottomColor: colors.line, marginBottom: 12,
+    borderBottomWidth: 1, borderBottomColor: colors.line, marginBottom: 12, zIndex: 1,
   },
   // M24B — a page tab is a 44px touch target (paddingVertical 13 + the 16px line keeps the underline tight to the text).
   tab: { minHeight: 44, paddingVertical: 13, paddingHorizontal: 4, borderBottomWidth: 2, borderBottomColor: 'transparent', flexGrow: 1, alignItems: 'center', justifyContent: 'center', marginBottom: -1 },

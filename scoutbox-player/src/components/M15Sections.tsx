@@ -111,7 +111,7 @@ function SharesPanel({ actor }: { actor: PassportActor }) {
       </Row>
       {minted ? (
         <View style={{ backgroundColor: colors.panel2, borderRadius: 8, padding: 8 }}>
-          <Text selectable style={{ color: colors.text, fontSize: 12, fontFamily: 'monospace' }}>{minted.url}</Text>
+          <Text selectable style={{ color: colors.text, fontSize: 12 }}>{minted.url}</Text>
           <Muted size={11.5}>{pt('m15shareOnce')} {minted.note}</Muted>
         </View>
       ) : null}
@@ -162,7 +162,7 @@ export function FootballPassportSection({ actor, isMinor, childName }: { actor: 
       <View>
         <FactRow k={pt('m15currentClub')} v={club?.orgName ?? pt('m15noClub')} sub={club ? `${club.since ? `${pt('m15since')} ${humanDate(club.since)} · ` : ''}${provWord(club.provenance)}` : null} testID="passport-club" />
         {p.status.availability ? <FactRow k={pt('m15availability')} v={pt(`m15avail_${p.status.availability}` as Parameters<typeof pt>[0])} testID="passport-availability" /> : null}
-        <FactRow k={pt('m15evidence')} v={pt('m15coverageWord').replace('{cov}', coverage)} testID="passport-evidence" />
+        <FactRow k={pt('m15evidence')} v={((w) => w.charAt(0).toUpperCase() + w.slice(1))(pt('m15coverageWord').replace('{cov}', coverage))} testID="passport-evidence" />
       </View>
 
       {/* a conflict is one line and a Review; the full explanation is behind it */}

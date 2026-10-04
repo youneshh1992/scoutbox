@@ -19,6 +19,7 @@ import { ReferencesSection } from './M14Sections';
 import { AgentSharedOpportunities, MyAgentSection } from './MyAgentSection';
 import { AgentConsentSection } from './AgentConsentSection';
 import { AgentTransactionSection } from './AgentTransactionSection';
+import { humanDate, uiLocale } from '../time';
 
 type Actor = { kind: 'player'; id: string };
 function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): [T | null, () => void, string | null] {
@@ -38,7 +39,7 @@ const inputStyle = (colors: Palette) => ({
   backgroundColor: colors.panel2, color: colors.text, borderRadius: 8,
   paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, borderWidth: 1, borderColor: colors.line,
 } as const);
-const day = (ts: number) => new Date(ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+const day = (ts: number) => new Date(ts).toLocaleDateString(uiLocale(), { day: 'numeric', month: 'short' });
 const firstSentence = (s: string) => (s.split(/(?<=[.!?])\s/)[0] ?? s).trim();
 
 // ------------------------------------------------------------- Current
@@ -50,7 +51,7 @@ export function ClubsCurrent({ actor, isMinor, mediaOptions }: { actor: Actor; i
       <View>
         <SectionTitle>{pt('clubsCurrentClub')}</SectionTitle>
         {club
-          ? <FactRow k={club.orgName ?? pt('clubsCurrentClub')} sub={club.since ? `${pt('m15since')} ${club.since}` : undefined} v={pt('clubsActive')} />
+          ? <FactRow k={club.orgName ?? pt('clubsCurrentClub')} sub={club.since ? `${pt('m15since')} ${humanDate(club.since)}` : undefined} v={pt('clubsActive')} />
           : <Muted size={13.5}>{pt('clubsNoClub')}</Muted>}
       </View>
       <MyAgentSection playerId={actor.id} isMinor={isMinor} />

@@ -15,7 +15,7 @@ import { SAFEGUARDING_PROMISES, U18_PROMISES } from '../../domain/safeguarding';
 import { useSession } from '../../state';
 import { useColors, useStyles, type Palette } from '../../theme';
 import { pt } from '../../i18n';
-import { Button, DetailLink, Disclosure, Kicker, ListRow, Muted } from '../../components/ui';
+import { Button, DetailLink, Disclosure, Kicker, ListRow, Muted, TimelineItem } from '../../components/ui';
 import { PageHeader } from '../../components/PageChrome';
 import { useRouter } from 'expo-router';
 import { initialsOf, SectionHead } from '../../components/Reference';
@@ -116,29 +116,28 @@ export default function Discover() {
             <>
               <Text style={styles.primaryTitle}>{next.club}</Text>
               <Text style={styles.primarySub}>{next.title}{waiting > 1 ? ` · ${waiting - 1} more` : ''}</Text>
-              <View style={{ marginTop: 12, alignSelf: 'flex-start' }}>
-                <Button primary label={next.cta} onPress={next.onPress} testID="home-primary-cta" />
-              </View>
             </>
           ) : (
-            <>
-              <Text style={styles.primarySub}>{pt('homeNothingNext')}</Text>
-              {/* Nothing is waiting: the one action is to look outward. */}
-              <View style={{ marginTop: 12, alignSelf: 'flex-start' }}>
-                <Button primary label={pt('homeExploreClubs')} onPress={() => router.push('/opportunities')} testID="home-primary-cta" />
-              </View>
-            </>
+            // Nothing is waiting: the one action is to look outward.
+            <Text style={styles.primarySub}>{pt('homeNothingNext')}</Text>
           )}
+          {/* One primary action either way: the waiting request, or Explore clubs. */}
+          <View style={{ marginTop: 12, alignSelf: 'flex-start' }}>
+            <Button primary label={next ? next.cta : pt('homeExploreClubs')} onPress={next ? next.onPress : () => router.push('/opportunities')} testID="home-primary-cta" />
+          </View>
         </View>
 
         {/* Recent — three events, then the page that holds all of them. */}
         <SectionHead title={pt('homeRecent')} testID="home-activity" />
-        {recent.length === 0 ? <Muted size={13}>{pt('homeNoActivity')}</Muted> : recent.map((e, i) => (
-          <View key={i} style={styles.activityRow}>
-            <Text style={styles.activityWhen}>{relTime(e.ts)}</Text>
-            <Text style={styles.activityText} numberOfLines={1}><Text style={{ fontWeight: '600', color: colors.text }}>{e.orgName}</Text> {EVENT_LABELS[e.type] ?? e.type}</Text>
+        {recent.length === 0 ? <Muted size={13}>{pt('homeNoActivity')}</Muted> : (
+          <View style={{ marginTop: 4 }}>
+            {recent.map((e, i) => (
+              <TimelineItem key={i} date={relTime(e.ts)} last={i === recent.length - 1} testID="home-recent-row">
+                <Text style={{ fontWeight: '600', color: colors.text }}>{e.orgName}</Text><Text style={{ color: colors.muted }}> {EVENT_LABELS[e.type] ?? e.type}</Text>
+              </TimelineItem>
+            ))}
           </View>
-        ))}
+        )}
         <DetailLink label={pt('homeViewAllActivity')} onPress={() => router.push('/activity')} testID="home-activity-all" />
 
         {/* What is moving — one or two rows, never a wall. */}
@@ -149,7 +148,7 @@ export default function Discover() {
           <ListRow label="Nothing in motion yet" onPress={() => router.push('/opportunities')} />
         )}
         {opportunities && opportunities.clubs.length > 0 ? (
-          <ListRow label={pt('homeClubsWithinReach')} value={`${opportunities.clubs.length} · 50 km`} onPress={() => router.push('/opportunities')} testID="home-clubs" />
+          <ListRow label={pt(opportunities.clubs.length === 1 ? 'homeClubsWithinOne' : 'homeClubsWithinMany').replace('{n}', String(opportunities.clubs.length))} onPress={() => router.push('/opportunities')} testID="home-clubs" />
         ) : null}
 
         {/* Secondary: visibility, the directory and the promises — one tap away each. */}
@@ -210,9 +209,6 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   primary: { paddingVertical: 18, borderTopWidth: 1, borderTopColor: colors.line, gap: 4 },
   primaryTitle: { color: colors.text, fontSize: 21, fontWeight: '600', letterSpacing: -0.5, lineHeight: 27 },
   primarySub: { color: colors.muted, fontSize: 13.5, lineHeight: 20 },
-  activityRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: colors.line },
-  activityWhen: { width: 62, color: colors.muted, fontSize: 12, lineHeight: 19, flexShrink: 0 },
-  activityText: { flex: 1, color: colors.muted, fontSize: 13.5, lineHeight: 19 },
   clubName: { color: colors.text, fontSize: 15, fontWeight: '600', lineHeight: 20 },
   clubMeta: { color: colors.muted, fontSize: 12.5, lineHeight: 18, marginTop: 2 },
   dirRow: { paddingVertical: 8, gap: 2 },

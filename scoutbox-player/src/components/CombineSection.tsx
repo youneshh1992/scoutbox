@@ -418,7 +418,7 @@ export function CombineSection({ actor, childName }: { actor: CombineActor; chil
             {exercises.map((x) => <ListRow key={x.id} label={x.title} onPress={() => setPage({ kind: 'protocol', id: x.id, title: x.title })} testID={`combine-protocol-${x.id}`} />)}
           </View>
           <View style={{ marginTop: 18 }}>
-            {requests.length > 0 ? <ListRow label={pt('cmbRequestsRow')} value={requests.length === 1 ? pt('cmbRequestCount') : pt('cmbRequestsCount').replace('{n}', String(requests.length))} onPress={() => setPage({ kind: 'requests' })} testID="combine-requests-row" /> : null}
+            {requests.length > 0 ? <ListRow label={pt('cmbRequestsRow')} count={requests.length} onPress={() => setPage({ kind: 'requests' })} testID="combine-requests-row" /> : null}
             {isPlayer ? <ListRow label={pt('cmbCardRow')} onPress={() => void openCard()} testID="combine-card-row" /> : null}
             <Disclosure label={pt('cmbAbout')} testID="combine-about">
               <Muted size={12.5}>{pt('cmbTagline')} {pt('cmbSub')} {pt('cmbPoweredBy')}.</Muted>

@@ -26,6 +26,7 @@ import {
   type LinkableEvidence,
 } from '../data/m21client';
 import { pt, pFmtDate } from '../i18n';
+import { fmtShortDay } from '../time';
 
 const inputStyle = (colors: Palette) => ({
   backgroundColor: colors.panel2, color: colors.text, borderRadius: 8,
@@ -504,12 +505,12 @@ export function DevelopmentHubSection({ actor }: { actor: DevActor }) {
     <View style={{ gap: 0 }} accessibilityLabel={pt('m21title')} testID="dev-root">
       <SectionTitle>{pt('m21title')}</SectionTitle>
       <ListRow label={pt('devCurrentFocus')} value={focus ? clip(focus.title, 40) : pt('devNone')} onPress={() => setPage('goals')} testID="dev-focus" />
-      <ListRow label={pt('devLatestFeedback')} value={latestReview ? clip(latestReview.summary ?? label(`m21rev_${latestReview.reviewerKind}`, latestReview.reviewerKind), 40) : pt('devNone')} onPress={() => setPage('feedback')} testID="dev-feedback" />
-      <ListRow label={pt('devProgress')} value={`Active goals ${s.activeGoals} · ${actionsDone}/${actions.length}`} onPress={() => setPage('progress')} testID="dev-progress" />
+      <ListRow label={pt('devLatestFeedback')} value={latestReview ? [latestReview.reviewedByName ?? label(`m21rev_${latestReview.reviewerKind}`, latestReview.reviewerKind), fmtShortDay(latestReview.reviewedAt)].join(' · ') : pt('devNone')} onPress={() => setPage('feedback')} testID="dev-feedback" />
+      <ListRow label={pt('devProgress')} value={pt(s.activeGoals === 1 ? 'devActiveGoal' : 'devActiveGoals').replace('{n}', String(s.activeGoals))} onPress={() => setPage('progress')} testID="dev-progress" />
       <ListRow label={pt('devHistory')} value={pt('devEntries').replace('{n}', String(view.timeline.length))} onPress={() => setPage('history')} testID="dev-history" />
       <View style={{ marginTop: 10 }}>
-        <Disclosure label="About these counts"><Muted size={12}>{s.note}</Muted>{cat ? <Muted size={12}>{cat.reminders.note}</Muted> : null}</Disclosure>
-        <Disclosure label="About this plan"><Muted size={12}>{view.limitation}</Muted><Muted size={12}>{view.neverBuilt.note}</Muted></Disclosure>
+        {/* M24F.5 — one way in to every explanation: the plan's limits and what its counts are. */}
+        <Disclosure label="About this plan" testID="dev-about"><Muted size={12}>{view.limitation}</Muted><Muted size={12}>{view.neverBuilt.note}</Muted><Muted size={12}>{s.note}</Muted>{cat ? <Muted size={12}>{cat.reminders.note}</Muted> : null}</Disclosure>
       </View>
     </View>
   );

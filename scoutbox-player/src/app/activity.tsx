@@ -11,7 +11,7 @@ import { client, type Insights, type PlayerFeedItem } from '../data/client';
 import { useSession } from '../state';
 import { useColors, useStyles, type Palette } from '../theme';
 import { pt } from '../i18n';
-import { Kicker, Muted } from '../components/ui';
+import { Kicker, Muted, TimelineItem } from '../components/ui';
 import { PageHeader } from '../components/PageChrome';
 import { EVENT_LABELS } from './(tabs)/discover';
 import { fmtShortDay, relTime } from '../time';
@@ -60,12 +60,13 @@ export default function Activity() {
         {groups.length === 0 ? <View style={{ paddingVertical: 20 }}><Muted size={14}>{pt('homeNoActivity')}</Muted></View> : groups.map((g) => (
           <View key={g.key} style={{ marginTop: 22 }} testID={`activity-group-${g.key}`}>
             <Kicker>{g.label}</Kicker>
-            {g.items.map((e, i) => (
-              <View key={`${e.ts}-${i}`} style={styles.row} testID="activity-row">
-                <Text style={styles.when}>{g.key === 'earlier' ? fmtShortDay(e.ts) : relTime(e.ts)}</Text>
-                <Text style={styles.text}><Text style={{ fontWeight: '600', color: colors.text }}>{e.org}</Text>{e.text.slice(e.org.length)}</Text>
-              </View>
-            ))}
+            <View style={{ marginTop: 10 }}>
+              {g.items.map((e, i) => (
+                <TimelineItem key={`${e.ts}-${i}`} date={g.key === 'earlier' ? fmtShortDay(e.ts) : relTime(e.ts)} last={i === g.items.length - 1} testID="activity-row">
+                  <Text style={{ fontWeight: '600', color: colors.text }}>{e.org}</Text><Text style={{ color: colors.muted }}>{e.text.slice(e.org.length)}</Text>
+                </TimelineItem>
+              ))}
+            </View>
           </View>
         ))}
         {noticed ? (
@@ -82,7 +83,5 @@ export default function Activity() {
 const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 32 },
-  row: { flexDirection: 'row', alignItems: 'flex-start', gap: 14, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: colors.line },
-  when: { width: 62, color: colors.muted, fontSize: 12, lineHeight: 19, flexShrink: 0 },
   text: { flex: 1, color: colors.muted, fontSize: 13.5, lineHeight: 19 },
 });

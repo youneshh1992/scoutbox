@@ -13,9 +13,10 @@ import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { Text } from './Text';
 import { useColors } from '../theme';
-import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
+import { Button, Card, Disclosure, Muted, Pill, Row, SectionTitle } from './ui';
 import { m25, m25ClientKey, type AgentConsentRequest, type ConsentAction } from '../data/m25client';
 import { pt } from '../i18n';
+import { uiLocale } from '../time';
 
 function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): [T | null, () => void, string | null] {
   const [v, setV] = useState<T | null>(null);
@@ -37,7 +38,7 @@ const statusKey = (s: AgentConsentRequest['status']) => (
 const tone = (s: AgentConsentRequest['status']): 'green' | 'blue' | 'gold' | 'red' | 'default' => (s === 'granted' ? 'green' : s === 'requested' ? 'blue' : s === 'revoked' ? 'red' : 'default');
 const typeKey = (t: string) => (t === 'employment_contract' ? 'm25typeEmployment' : t === 'transfer' ? 'm25typeTransfer' : t === 'loan' ? 'm25typeLoan' : 'm25typeOther') as Parameters<typeof pt>[0];
 const roleKey = (r: string) => (r === 'individual' ? 'm25roleIndividual' : r === 'engaging_entity' ? 'm25roleEngaging' : 'm25roleReleasing') as Parameters<typeof pt>[0];
-const fmt = (ts: number | null) => (ts ? new Date(ts).toLocaleDateString() : '—');
+const fmt = (ts: number | null) => (ts ? new Date(ts).toLocaleDateString(uiLocale(), { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 
 export function AgentConsentSection({ playerId, isMinor }: { playerId: string; isMinor: boolean }) {
   const colors = useColors();
@@ -94,9 +95,9 @@ export function AgentConsentSection({ playerId, isMinor }: { playerId: string; i
             <Muted size={12}>
               {pt('m25alsoActingFor')}: {others.length ? others.map((p) => `${p.name ?? pt(roleKey(p.partyRole))} — ${pt(roleKey(p.partyRole))}`).join(', ') : k.otherPartyRoles.map((r) => pt(roleKey(r))).join(', ')}
             </Muted>
-            <Muted size={11.5}>{pt('m25whatItMeans')}</Muted>
             {k.status === 'requested' && (
               <>
+                <Muted size={11.5}>{pt('m25whatItMeans')}</Muted>
                 <Muted size={11.5}>{pt('m25beforeYouAnswer')}</Muted>
                 <View style={{ marginTop: 6, gap: 4 }}>
                   <Button small={true} label={`${a.particulars ? 'Acknowledged · ' : ''}${pt('m25ackParticulars')}`} onPress={() => toggle(k.id, 'particulars')} />
@@ -113,12 +114,18 @@ export function AgentConsentSection({ playerId, isMinor }: { playerId: string; i
               <View style={{ marginTop: 6 }}>
                 <Muted size={11.5}>{pt('m25grantedOn')} {fmt(k.grantedAt)}</Muted>
                 <Button small danger disabled={busy} label={pt('m25revoke')} onPress={() => answer(k, 'revoke', 'm25revokedMsg')} />
-                <Muted size={11}>{pt('m25revokeNote')}</Muted>
               </View>
             )}
             {k.status === 'declined' && <Muted size={11.5}>{pt('m25declinedNote')}</Muted>}
             {k.status === 'revoked' && <Muted size={11.5}>{pt('m25revokedNote')}</Muted>}
-            <Muted size={11}>{k.honest}</Muted>
+            {/* M24F.5 — a pending consent shows every word before it is given; an answered one keeps its words one tap away. */}
+            {k.status === 'requested' ? <Muted size={11}>{k.honest}</Muted> : (
+              <Disclosure label={pt('m25aboutConsent')} testID={`agent-consent-about-${k.id}`}>
+                <Muted size={11.5}>{pt('m25whatItMeans')}</Muted>
+                {k.status === 'granted' ? <Muted size={11}>{pt('m25revokeNote')}</Muted> : null}
+                <Muted size={11}>{k.honest}</Muted>
+              </Disclosure>
+            )}
           </View>
         );
       })}

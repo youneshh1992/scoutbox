@@ -197,8 +197,8 @@ function RequestDetail({ r, onBack, onRespond, onOpenThread, channels, error }: 
       <Pressable onPress={onBack} accessibilityRole="button" accessibilityLabel={pt('chatBack')} testID="detail-back" style={({ pressed }) => [styles.back, pressed && { opacity: 0.7 }]}>
         <Icon name="chevron-left" size={18} color={colors.text} /><Text style={{ color: colors.text, fontSize: 13, fontWeight: '500' }}>{pt('tabInbox')}</Text>
       </Pressable>
-      <View style={[styles.special, trial && { borderLeftColor: colors.trial, backgroundColor: colors.trialBg }]} testID={trial ? 'trial-card' : 'contact-card'}>
-        <Kicker tone={trial ? undefined : 'accent'}>{trial ? pt('inboxTrialInvitation') : pt('inboxContactRequest')}</Kicker>
+      <View style={[styles.special, trial && { borderLeftColor: colors.trial }]} testID={trial ? 'trial-card' : 'contact-card'}>
+        <Kicker tone={trial ? 'trial' : 'accent'}>{trial ? pt('inboxTrialInvitation') : pt('inboxContactRequest')}</Kicker>
         <Text role="heading" aria-level={2} style={styles.org}>{r.orgName}</Text>
         <Muted size={13.5}>{pt('inboxFrom')} {r.scoutName}{r.scoutRole ? ` · ${r.scoutRole}` : ''}</Muted>
         {trial ? <Muted size={13.5}>{r.trialDetails?.proposedDate ? humanDate(r.trialDetails.proposedDate) : pt('inboxDateTbc')}{r.trialDetails?.venue ? ` · ${r.trialDetails.venue}` : ''}</Muted> : <Muted size={13.5}>{fmtShortDay(r.createdAt)}</Muted>}
@@ -247,7 +247,7 @@ function TrialCard({ r, onView }: { r: InboxRequest; onView: () => void }) {
   const colors = useColors();
   const styles = useStyles(makeStyles);
   return (
-    <View style={[styles.special, { borderLeftColor: colors.trial, backgroundColor: colors.trialBg, marginTop: 10 }]} testID="thread-trial-card">
+    <View style={[styles.special, { borderLeftColor: colors.trial, marginTop: 10 }]} testID="thread-trial-card">
       <Kicker>{pt('inboxTrialInvitation')}</Kicker>
       <Text style={{ color: colors.text, fontSize: 14.5, fontWeight: '600' }}>{r.trialDetails?.proposedDate ? humanDate(r.trialDetails.proposedDate) : pt('inboxDateTbc')}{r.trialDetails?.venue ? ` · ${r.trialDetails.venue}` : ''}</Text>
       <Row><Text style={{ color: colors.accentText, fontSize: 13, fontWeight: '600' }}>{statusWord(r.status)}</Text><DetailLink label={pt('inboxViewTrial')} onPress={onView} /></Row>
@@ -264,7 +264,7 @@ function ChildDetail({ item, onBack }: { item: ChildInboxItem; onBack: () => voi
       <Pressable onPress={onBack} accessibilityRole="button" accessibilityLabel={pt('chatBack')} testID="detail-back" style={({ pressed }) => [styles.back, pressed && { opacity: 0.7 }]}>
         <Icon name="chevron-left" size={18} color={colors.text} /><Text style={{ color: colors.text, fontSize: 13, fontWeight: '500' }}>{pt('tabUpdates')}</Text>
       </Pressable>
-      <View style={[styles.special, item.type === 'trial' && { borderLeftColor: colors.trial, backgroundColor: colors.trialBg }]}>
+      <View style={[styles.special, item.type === 'trial' && { borderLeftColor: colors.trial }]}>
         <Kicker>{item.type === 'trial' ? pt('inboxTrialInvitation') : pt('inboxContactRequest')}</Kicker>
         <Text role="heading" aria-level={2} style={styles.org}>{item.orgName}</Text>
         <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600' }}>{item.status === 'pending' ? pt('inboxWithGuardian') : statusWord(item.status)}</Text>
@@ -282,7 +282,8 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   msg: { color: colors.text, fontSize: 14, fontStyle: 'italic', lineHeight: 20 },
   label: { color: colors.text, fontSize: 13, fontWeight: '600' },
   back: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingVertical: 10, alignSelf: 'flex-start', minHeight: 40 },
-  special: { borderLeftWidth: 3, borderLeftColor: colors.infoInk, backgroundColor: colors.panel2, borderRadius: 10, paddingVertical: 14, paddingHorizontal: 16, gap: 6, marginTop: 4 },
+  // M24F.5 — whitespace and a warm edge, not a filled card: the kicker word names the kind (colour is never the only signal).
+  special: { borderLeftWidth: 3, borderLeftColor: colors.infoInk, paddingVertical: 6, paddingLeft: 14, paddingRight: 4, gap: 6, marginTop: 10 },
   slot: { borderRadius: 10, borderWidth: 1, borderColor: colors.line, paddingVertical: 7, paddingHorizontal: 12 },
   input: {
     backgroundColor: colors.bg2,

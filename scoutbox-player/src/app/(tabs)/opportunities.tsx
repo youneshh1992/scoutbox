@@ -95,5 +95,6 @@ export default function Opportunities() {
 const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 32, gap: 0 },
-  panel: { gap: 10 },
+  // M24F.5 — the first section's rule lands on the tab bar's own line, so a tab that opens on a section shows one rule, not two.
+  panel: { gap: 10, marginTop: -17 },
 });

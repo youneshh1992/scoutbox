@@ -63,11 +63,13 @@ for (const f of ['scoutbox-club-demo.html', 'scoutbox-admin-demo.html', 'scoutbo
 // commit it was built from. Never injected into connected/live builds.
 const sha = execSync('git rev-parse --short HEAD', { cwd: ROOT }).toString().trim();
 const built = new Date().toISOString().slice(0, 10);
-const badge = `<div data-demo-badge style="position:fixed;left:8px;bottom:8px;z-index:2147483000;background:rgba(11,18,32,.85);border:1px solid #263a5e;color:#8fa3c8;font:10.5px/1.4 system-ui,sans-serif;border-radius:8px;padding:3px 8px;pointer-events:none">Interactive demo — sample data · build ${sha} · ${built}</div>`;
+// M24F.5 — Inter like the product; bottom-right, and above the Player tab bar so it never covers a label.
+const badgeFor = (bottom) => `<div data-demo-badge style="position:fixed;right:8px;bottom:${bottom}px;z-index:2147483000;background:rgba(11,18,32,.78);border:1px solid #263a5e;color:#8fa3c8;font:10px/1.4 Inter,system-ui,sans-serif;border-radius:8px;padding:2px 7px;pointer-events:none">Interactive demo — sample data · build ${sha} · ${built}</div>`;
 for (const f of ['scoutbox-club-demo.html', 'scoutbox-admin-demo.html', 'scoutbox-grassroots-demo.html', 'scoutbox-agent-demo.html', 'scoutbox-player-demo.html']) {
   const p = path.join(OUT, f);
   let doc = fs.readFileSync(p, 'utf8');
   doc = doc.replace(/<div data-demo-badge[^>]*>[^<]*<\/div>/, ''); // idempotent
+  const badge = badgeFor(f === 'scoutbox-player-demo.html' ? 74 : 8);
   doc = doc.replace(/<\/body>/i, `${badge}</body>`);
   if (!doc.includes('data-demo-badge')) doc += badge; // no </body> — append
   fs.writeFileSync(p, doc);

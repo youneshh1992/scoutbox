@@ -4,7 +4,7 @@
 // choice; native storage would use AsyncStorage behind the same helper.
 const en = {
   // ---- M23 P5.6C agent consent (multiple representation)
-  m25title: 'Agent consent', m25intro: 'An agent who would act for more than one side of the same transaction needs your written consent first. You may decline, and declining changes nothing else about your relationship.',
+  m25title: 'Agent consent', m25aboutConsent: 'About this consent', m25intro: 'An agent who would act for more than one side of the same transaction needs your written consent first. You may decline, and declining changes nothing else about your relationship.',
   m25pending: 'Awaiting your answer', m25granted: 'You consented', m25declined: 'You declined', m25revoked: 'You revoked your consent',
   m25agency: 'Agency', m25licence: 'FIFA licence in ScoutBox', m25transaction: 'Transaction', m25alsoActingFor: 'They would also act for',
   m25typeEmployment: 'an employment contract', m25typeTransfer: 'a transfer', m25typeLoan: 'a loan', m25typeOther: 'other services',
@@ -66,6 +66,7 @@ const en = {
   m13saveTravel: 'Save travel limit', m13expensesNeedBtn: 'I need expenses covered', m13expensesOkBtn: 'Expenses not needed',
   m13fit: 'Opportunity fit',
   m13checkFit: 'Check fit', m13hideFit: 'Hide', m13shareFit: 'Share summary with this club', m13sharedFit: 'Shared — the club sees verdicts only, never your reasons or commitments.',
+  m13trnStOpen: 'Open', m13trnStPlaced: 'Placed', m13trnStClosed: 'Closed', m13trnViewed: 'viewed', m13trnNotViewed: 'not viewed yet', m13trnClubHint: 'Club ID from the club',
   m13trn: 'Club transition', m13trnGuardian: 'Transition cases for under-18s are opened and controlled by the parent/guardian.',
   m13trnNote: 'You choose the evidence, you choose each club, you can withdraw at any time. There is no public list and no “released” label.',
   m13trnGrant: 'Share with club', m13trnGranted: 'Shared — expiring and revocable.', m13trnRevoke: 'Withdraw',
@@ -302,11 +303,11 @@ const en = {
   // M23 P2.5 — navigation. Tab titles and page tabs were string literals.
   // M24C — the approved Player screens (Home, Football Passport, Box Cam, Messages).
   // M24F.4 — Home, Activity, Development, Box Cam, Combine, Passport root labels
-  homeNext: 'Next', homeRecent: 'Recent', homeViewAllActivity: 'View all activity', homeJoined: 'Joined {when}', homeClubsWithinReach: 'Clubs within reach', homeNoActivity: 'No activity yet.', homeNothingNext: 'Nothing waiting on you', homeExploreClubs: 'Explore clubs',
+  homeNext: 'Next', homeRecent: 'Recent', homeViewAllActivity: 'View all activity', homeJoined: 'Joined {when}', homeClubsWithinReach: 'Clubs within reach', homeClubsWithinOne: '1 club within 50 km', homeClubsWithinMany: '{n} clubs within 50 km', homeNoActivity: 'No activity yet.', homeNothingNext: 'Nothing waiting on you', homeExploreClubs: 'Explore clubs',
   activityTitle: 'Activity', activityToday: 'Today', activityThisWeek: 'This week', activityEarlier: 'Earlier', activityThisWeekDigest: 'This week',
-  devCurrentFocus: 'Current focus', devLatestFeedback: 'Latest feedback', devProgress: 'Progress', devHistory: 'History', devEntries: '{n} entries', devNone: 'None yet', devGoalsTitle: 'Goals', devBack: 'Development',
+  devCurrentFocus: 'Current focus', devLatestFeedback: 'Latest feedback', devProgress: 'Progress', devActiveGoal: '1 active goal', devActiveGoals: '{n} active goals', devHistory: 'History', devEntries: '{n} entries', devNone: 'None yet', devGoalsTitle: 'Goals', devBack: 'Development',
   bcLatest: 'Latest', bcHowItWorks: 'How Box Cam works', bcStartSession: 'Start session', bcMoreTitle: 'Training record',
-  evVideo: 'Video', evCombine: 'Combine', evRecord: 'Evidence record', evBack: 'Evidence', evLatest: 'Latest', evNoClips: 'No footage yet.', evBoxCam: 'Box Cam',
+  evVideo: 'Video', evCombine: 'Combine', evRecord: 'Evidence record', evBack: 'Evidence', evLatest: 'Latest', evCategories: 'Categories', evNoClips: 'No footage yet.', evBoxCam: 'Box Cam',
   bcRecordedOn: 'Recorded {when}', bcSessionDetail: 'Session', bcBack: 'Box Cam', bcSessions: '{n} sessions', bcViewAll: 'View all', bcNoSessions: 'No sessions yet', bcSetupTitle: 'Setup', bcStreakLine: 'Box Streak · {n} weeks',
   cmbExercises: 'Exercises', cmbRequestsRow: 'Club Combine', cmbRequestsCount: '{n} requests', cmbRequestCount: '1 request', cmbCardRow: 'Combine Card', cmbAbout: 'About Combine', cmbVerifiedWord: 'Verified', cmbNotSupportedWord: 'Not supported on this device', cmbAttempts: '{n} attempts', cmbRequests: 'Requests',
   m15clubsCount: '{n} clubs', m15noneYet: 'None yet', m15eventCount: '1 event', m15achievementCount: '1 achievement', m15achievementsCount: '{n} achievements', m15clubCount: '1 club',
@@ -361,7 +362,7 @@ const en = {
   subOverview: 'Overview', subStage: 'Current stage', subTasks: 'Tasks', subActivity: 'Activity', subMessages: 'Messages', subContact: 'Contact', subInvitation: 'Invitation', subSchedule: 'Schedule', subDetails: 'Details', subOffer: 'Offer', subDocuments: 'Documents', subResponse: 'Response', subSigning: 'Signing', subContract: 'Contract', subBoard: 'Open roles', subFit: 'Fit check', subInvites: 'Squad invites', subFollowUps: 'Follow-ups',
   jnNone: 'No club has put anything in front of you yet.', jnSharedTitle: 'Shared with you by this club', jnShared_contact_request: 'contact request', jnShared_trial: 'trial', jnShared_offer: 'Offer', jnShared_signing: 'signing',
   jnTasksTitle: 'What you can do now', jnTasksHint: 'Only what the server says is yours to do. This screen creates nothing.', jnGo: 'Go there', jnActivityTitle: 'Everything that happened', jnActivityHint: 'Each milestone a club put in front of you, oldest first. Read-only.', jnActivityNone: 'Nothing yet.',
-  ctxRequestsTitle: 'Club contact requests', ctxRequestsNone: 'No club has asked to contact you.', ctxTrialReqTitle: 'Trial invitations', ctxTrialReqNone: 'No trial invitation.', ctxAnswerInInbox: 'Answer in your Inbox — nothing reaches you unless you accept.', ctxOpenInbox: 'Open Inbox', ctxWithGuardian: 'with your guardian',
+  ctxRequestsTitle: 'Club contact requests', ctxRequestsNone: 'No club has asked to contact you.', ctxTrialReqTitle: 'Trial invitations', ctxAwaitingYou: 'Awaiting your answer', ctxTrialReqNone: 'No trial invitation.', ctxAnswerInInbox: 'Answer in your Inbox — nothing reaches you unless you accept.', ctxOpenInbox: 'Open Inbox', ctxWithGuardian: 'with your guardian',
   ctxMessagesTitle: 'Messages', ctxMessagesNone: 'No conversation yet. Accept a request in your Inbox and the thread opens there.', ctxMessagesCount: 'messages', ctxMinorMessages: 'Clubs talk to your parent or guardian; the outcome shows in Updates.',
   offerNoDocuments: 'No document on this Offer.', offerAwaitingYou: 'Awaiting your answer — answer it under Offer.', signingNoneYet: 'Nothing to sign right now.', signingContractNone: 'This document names no contract days.',
 
@@ -391,7 +392,7 @@ const en = {
   offerSt_DRAFT: 'Draft', offerSt_ISSUED: 'Awaiting your answer', offerSt_ACCEPTED: 'Accepted — signing pending', offerSt_DECLINED: 'Declined', offerSt_WITHDRAWN: 'Withdrawn by the club', offerSt_EXPIRED: 'Expired', offerSt_SUPERSEDED: 'Replaced by a newer revision',
   offerRevision: 'Revision', offerExpires: 'Expires', offerExpired: 'Expired', offerRole: 'Role', offerSquad: 'Squad', offerStart: 'Starts', offerEnd: 'Ends', offerConditions: 'Conditions', offerMessage: 'Message from the club',
   offerDocuments: 'Documents', offerOpenDocument: 'Open', offerDocumentOpened: 'Document fetched.', offerDocumentFailed: 'That document is not available.',
-  offerAccept: 'Accept this revision', offerDecline: 'Decline this revision', offerConfirmAccept: 'Yes, accept revision {n}', offerConfirmDecline: 'Yes, decline revision {n}', offerCancel: 'Not now',
+  offerAccept: 'Accept', offerDecline: 'Decline', offerConfirmAccept: 'Yes, accept revision {n}', offerConfirmDecline: 'Yes, decline revision {n}', offerCancel: 'Not now',
   offerAcceptWarn: 'You are accepting revision {n} exactly as written. The club is told. This is not a signature and no contract exists until a separate signing.',
   offerDeclineWarn: 'You are declining revision {n}. The club is told. You may add a short reason.',
   offerDeclineReason: 'Reason (optional, the club reads it)',
@@ -440,6 +441,8 @@ const en = {
   offerErr_OFFER_INPUT_INVALID: 'Something in the request was not right. Reload and try again.', offerErr_OFFER_NOT_PERMITTED: 'Only an adult client can share an Offer with an agent.', offerErr_RATE_LIMITED: 'Too many attempts. Wait a little and try again.',
   ctGuardianNote: 'This contact was routed to you because the player is under age. The club sees your answer, never your child’s.',
   // ---- M23 P5.6D transaction workspace (the individual's side)
+  m26details: 'Details',
+  gSec_evidence: 'Evidence passport', gSec_board: 'Opportunity board', gSec_campaigns: 'Club assessment campaigns', gSec_feedback: 'Feedback & objectives', gSec_preferences: 'Suitability preferences', gSec_fit: 'Opportunity fit', gSec_transition: 'Club transition', gSec_references: 'Coach references', gSec_development: 'Development plan', gSec_boxcam: 'Box Cam', gSec_passport: 'Football Passport', gSec_invite: 'Squad invite code',
   m26title: 'My transactions', m26intro: 'A transaction is a shared workspace between you, your agent and the clubs. You see what you are party to and what has been shared with you \u2014 never a club\u2019s private notes, and never a fee.',
   m26honest: 'ScoutBox keeps the record and enforces the permissions. It does not negotiate for you, agree anything on your behalf or sign anything.',
   m26agency: 'Agency', m26compliance: 'ScoutBox compliance', m26complianceClear: 'clear under the encoded rules', m26compliancePending: 'outstanding', m26complianceBlocked: 'blocked by an active rule',
@@ -463,7 +466,7 @@ const en = {
 };
 const fr: typeof en = {
   // ---- M23 P5.6C consentement agent (FR)
-  m25title: 'Consentement \u00e0 l\u2019agent', m25intro: 'Un agent qui agirait pour plus d\u2019une partie \u00e0 la m\u00eame transaction a d\u2019abord besoin de votre consentement \u00e9crit. Vous pouvez refuser, et un refus ne change rien d\u2019autre \u00e0 votre relation.',
+  m25title: 'Consentement \u00e0 l\u2019agent', m25aboutConsent: '\u00c0 propos de ce consentement', m25intro: 'Un agent qui agirait pour plus d\u2019une partie \u00e0 la m\u00eame transaction a d\u2019abord besoin de votre consentement \u00e9crit. Vous pouvez refuser, et un refus ne change rien d\u2019autre \u00e0 votre relation.',
   m25pending: 'En attente de votre r\u00e9ponse', m25granted: 'Vous avez consenti', m25declined: 'Vous avez refus\u00e9', m25revoked: 'Vous avez r\u00e9voqu\u00e9 votre consentement',
   m25agency: 'Agence', m25licence: 'Licence FIFA dans ScoutBox', m25transaction: 'Transaction', m25alsoActingFor: 'Il agirait aussi pour',
   m25typeEmployment: 'un contrat de travail', m25typeTransfer: 'un transfert', m25typeLoan: 'un pr\u00eat', m25typeOther: 'd\u2019autres services',
@@ -525,6 +528,7 @@ const fr: typeof en = {
   m13saveTravel: 'Enregistrer la limite', m13expensesNeedBtn: 'J’ai besoin des frais couverts', m13expensesOkBtn: 'Frais non nécessaires',
   m13fit: 'Compatibilité des opportunités',
   m13checkFit: 'Vérifier', m13hideFit: 'Masquer', m13shareFit: 'Partager la synthèse avec ce club', m13sharedFit: 'Partagé — le club voit les verdicts, jamais vos raisons ni vos engagements.',
+  m13trnStOpen: 'Ouvert', m13trnStPlaced: 'Placé', m13trnStClosed: 'Fermé', m13trnViewed: 'vu', m13trnNotViewed: 'pas encore vu', m13trnClubHint: 'Identifiant fourni par le club',
   m13trn: 'Transition de club', m13trnGuardian: 'Les dossiers de transition des moins de 18 ans sont ouverts et contrôlés par le parent/tuteur.',
   m13trnNote: 'Vous choisissez les preuves, vous choisissez chaque club, vous pouvez retirer à tout moment. Pas de liste publique, pas d’étiquette « libéré ».',
   m13trnGrant: 'Partager avec un club', m13trnGranted: 'Partagé — limité dans le temps et révocable.', m13trnRevoke: 'Retirer',
@@ -749,11 +753,11 @@ const fr: typeof en = {
   m22reason_INSUFFICIENT_LIGHT: 'La lumi\u00e8re est insuffisante.',
   m22reason_UNSUPPORTED_PROTOCOL: 'Cette activit\u00e9 n\u2019est pas encore prise en charge.',
 
-  homeNext: 'À suivre', homeRecent: 'Récent', homeViewAllActivity: 'Toute l’activité', homeJoined: 'Membre depuis {when}', homeClubsWithinReach: 'Clubs à portée', homeNoActivity: 'Pas encore d’activité.', homeNothingNext: 'Rien en attente', homeExploreClubs: 'Explorer les clubs',
+  homeNext: 'À suivre', homeRecent: 'Récent', homeViewAllActivity: 'Toute l’activité', homeJoined: 'Membre depuis {when}', homeClubsWithinReach: 'Clubs à portée', homeClubsWithinOne: '1 club à moins de 50 km', homeClubsWithinMany: '{n} clubs à moins de 50 km', homeNoActivity: 'Pas encore d’activité.', homeNothingNext: 'Rien en attente', homeExploreClubs: 'Explorer les clubs',
   activityTitle: 'Activité', activityToday: 'Aujourd’hui', activityThisWeek: 'Cette semaine', activityEarlier: 'Plus tôt', activityThisWeekDigest: 'Cette semaine',
-  devCurrentFocus: 'Objectif actuel', devLatestFeedback: 'Dernier retour', devProgress: 'Progression', devHistory: 'Historique', devEntries: '{n} entrées', devNone: 'Rien pour l’instant', devGoalsTitle: 'Objectifs', devBack: 'Développement',
+  devCurrentFocus: 'Objectif actuel', devLatestFeedback: 'Dernier retour', devProgress: 'Progression', devActiveGoal: '1 objectif actif', devActiveGoals: '{n} objectifs actifs', devHistory: 'Historique', devEntries: '{n} entrées', devNone: 'Rien pour l’instant', devGoalsTitle: 'Objectifs', devBack: 'Développement',
   bcLatest: 'Dernière', bcHowItWorks: 'Comment fonctionne Box Cam', bcStartSession: 'Démarrer une session', bcMoreTitle: 'Carnet d’entraînement',
-  evVideo: 'Vidéo', evCombine: 'Combine', evRecord: 'Dossier de preuves', evBack: 'Preuves', evLatest: 'Dernière', evNoClips: 'Pas encore de vidéo.', evBoxCam: 'Box Cam',
+  evVideo: 'Vidéo', evCombine: 'Combine', evRecord: 'Dossier de preuves', evBack: 'Preuves', evLatest: 'Dernière', evCategories: 'Catégories', evNoClips: 'Pas encore de vidéo.', evBoxCam: 'Box Cam',
   bcRecordedOn: 'Enregistrée {when}', bcSessionDetail: 'Séance', bcBack: 'Box Cam', bcSessions: '{n} séances', bcViewAll: 'Tout voir', bcNoSessions: 'Pas encore de séance', bcSetupTitle: 'Installation', bcStreakLine: 'Box Streak · {n} semaines',
   cmbExercises: 'Exercices', cmbRequestsRow: 'Club Combine', cmbRequestsCount: '{n} demandes', cmbRequestCount: '1 demande', cmbCardRow: 'Combine Card', cmbAbout: 'À propos du Combine', cmbVerifiedWord: 'Vérifié', cmbNotSupportedWord: 'Non pris en charge sur cet appareil', cmbAttempts: '{n} tentatives', cmbRequests: 'Demandes',
   m15clubsCount: '{n} clubs', m15noneYet: 'Rien pour l’instant', m15eventCount: '1 événement', m15achievementCount: '1 distinction', m15achievementsCount: '{n} distinctions', m15clubCount: '1 club',
@@ -806,7 +810,7 @@ const fr: typeof en = {
   subOverview: 'Vue d’ensemble', subStage: 'Étape actuelle', subTasks: 'Tâches', subActivity: 'Activité', subMessages: 'Messages', subContact: 'Contact', subInvitation: 'Invitation', subSchedule: 'Planning', subDetails: 'Détails', subOffer: 'Offre', subDocuments: 'Documents', subResponse: 'Réponse', subSigning: 'Signature', subContract: 'Contrat', subBoard: 'Postes ouverts', subFit: 'Adéquation', subInvites: 'Invitations d’équipe', subFollowUps: 'Suivis',
   jnNone: 'Aucun club ne vous a encore rien présenté.', jnSharedTitle: 'Partagé avec vous par ce club', jnShared_contact_request: 'demande de contact', jnShared_trial: 'essai', jnShared_offer: 'Offre', jnShared_signing: 'signature',
   jnTasksTitle: 'Ce que vous pouvez faire maintenant', jnTasksHint: 'Uniquement ce que le serveur dit être à vous de faire. Cet écran ne crée rien.', jnGo: 'Y aller', jnActivityTitle: 'Tout ce qui s’est passé', jnActivityHint: 'Chaque jalon qu’un club vous a présenté, du plus ancien au plus récent. Lecture seule.', jnActivityNone: 'Rien pour l’instant.',
-  ctxRequestsTitle: 'Demandes de contact des clubs', ctxRequestsNone: 'Aucun club n’a demandé à vous contacter.', ctxTrialReqTitle: 'Invitations à l’essai', ctxTrialReqNone: 'Aucune invitation à l’essai.', ctxAnswerInInbox: 'Répondez dans votre messagerie — rien ne vous atteint sans votre accord.', ctxOpenInbox: 'Ouvrir la messagerie', ctxWithGuardian: 'chez votre tuteur',
+  ctxRequestsTitle: 'Demandes de contact des clubs', ctxRequestsNone: 'Aucun club n’a demandé à vous contacter.', ctxTrialReqTitle: 'Invitations à l’essai', ctxAwaitingYou: 'En attente de votre réponse', ctxTrialReqNone: 'Aucune invitation à l’essai.', ctxAnswerInInbox: 'Répondez dans votre messagerie — rien ne vous atteint sans votre accord.', ctxOpenInbox: 'Ouvrir la messagerie', ctxWithGuardian: 'chez votre tuteur',
   ctxMessagesTitle: 'Messages', ctxMessagesNone: 'Aucune conversation pour l’instant. Acceptez une demande dans votre messagerie et le fil s’y ouvre.', ctxMessagesCount: 'messages', ctxMinorMessages: 'Les clubs parlent à votre parent ou tuteur ; le résultat apparaît dans Mises à jour.',
   offerNoDocuments: 'Aucun document sur cette Offre.', offerAwaitingYou: 'En attente de votre réponse — répondez sous Offre.', signingNoneYet: 'Rien à signer pour l’instant.', signingContractNone: 'Ce document ne nomme aucune date de contrat.',
 
@@ -835,7 +839,7 @@ const fr: typeof en = {
   offerSt_DRAFT: 'Brouillon', offerSt_ISSUED: 'En attente de votre réponse', offerSt_ACCEPTED: 'Acceptée — signature en attente', offerSt_DECLINED: 'Refusée', offerSt_WITHDRAWN: 'Retirée par le club', offerSt_EXPIRED: 'Expirée', offerSt_SUPERSEDED: 'Remplacée par une révision plus récente',
   offerRevision: 'Révision', offerExpires: 'Expire le', offerExpired: 'Expirée', offerRole: 'Rôle', offerSquad: 'Effectif', offerStart: 'Début', offerEnd: 'Fin', offerConditions: 'Conditions', offerMessage: 'Message du club',
   offerDocuments: 'Documents', offerOpenDocument: 'Ouvrir', offerDocumentOpened: 'Document récupéré.', offerDocumentFailed: 'Ce document n’est pas disponible.',
-  offerAccept: 'Accepter cette révision', offerDecline: 'Refuser cette révision', offerConfirmAccept: 'Oui, accepter la révision {n}', offerConfirmDecline: 'Oui, refuser la révision {n}', offerCancel: 'Pas maintenant',
+  offerAccept: 'Accepter', offerDecline: 'Refuser', offerConfirmAccept: 'Oui, accepter la révision {n}', offerConfirmDecline: 'Oui, refuser la révision {n}', offerCancel: 'Pas maintenant',
   offerAcceptWarn: 'Vous acceptez la révision {n} exactement telle qu’écrite. Le club en est informé. Ce n’est pas une signature et aucun contrat n’existe avant une signature distincte.',
   offerDeclineWarn: 'Vous refusez la révision {n}. Le club en est informé. Vous pouvez ajouter une courte raison.',
   offerDeclineReason: 'Raison (facultative, le club la lit)',
@@ -884,6 +888,8 @@ const fr: typeof en = {
   offerErr_OFFER_INPUT_INVALID: 'Quelque chose n’allait pas dans la demande. Rechargez et réessayez.', offerErr_OFFER_NOT_PERMITTED: 'Seul un client adulte peut partager une Offre avec un agent.', offerErr_RATE_LIMITED: 'Trop de tentatives. Patientez un peu et réessayez.',
   ctGuardianNote: 'Ce contact vous a \u00e9t\u00e9 adress\u00e9 parce que le joueur est mineur. Le club voit votre r\u00e9ponse, jamais celle de votre enfant.',
   // ---- M23 P5.6D espace de transaction (c\u00f4t\u00e9 de la personne, FR)
+  m26details: 'D\u00e9tails',
+  gSec_evidence: 'Passeport de preuves', gSec_board: 'Tableau des opportunit\u00e9s', gSec_campaigns: '\u00c9valuations du club', gSec_feedback: 'Retours et objectifs', gSec_preferences: 'Pr\u00e9f\u00e9rences', gSec_fit: 'Ad\u00e9quation', gSec_transition: 'Changement de club', gSec_references: 'R\u00e9f\u00e9rences d\u2019entra\u00eeneurs', gSec_development: 'Plan de d\u00e9veloppement', gSec_boxcam: 'Box Cam', gSec_passport: 'Football Passport', gSec_invite: 'Code d\u2019invitation',
   m26title: 'Mes transactions', m26intro: 'Une transaction est un espace partag\u00e9 entre vous, votre agent et les clubs. Vous voyez ce dont vous \u00eates partie et ce qui vous a \u00e9t\u00e9 partag\u00e9 \u2014 jamais les notes priv\u00e9es d\u2019un club, ni aucune commission.',
   m26honest: 'ScoutBox tient le registre et applique les permissions. Il ne n\u00e9gocie pas pour vous, n\u2019accepte rien en votre nom et ne signe rien.',
   m26agency: 'Agence', m26compliance: 'Conformit\u00e9 ScoutBox', m26complianceClear: 'd\u00e9gag\u00e9e selon les r\u00e8gles encod\u00e9es', m26compliancePending: 'en attente', m26complianceBlocked: 'bloqu\u00e9e par une r\u00e8gle active',

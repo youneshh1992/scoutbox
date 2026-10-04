@@ -315,7 +315,7 @@ export function TrialSafetySection({ actor }: { actor: Actor }) {
       {trials.map((tr) => (
         <View key={tr.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }}>
           <Row><Text style={{ color: colors.text, fontWeight: '700', fontSize: 13.5, flex: 1 }}>{tr.orgName ?? tr.playerName}</Text>
-            {tr.cancelled ? <Pill label="Cancelled" tone="red" /> : <Pill label={tr.proposedDate ?? 'TBC'} />}</Row>
+            {tr.cancelled ? <Pill label="Cancelled" tone="red" /> : <Pill label={tr.proposedDate ? (/^\d{4}-\d{2}-\d{2}$/.test(tr.proposedDate) ? humanDate(tr.proposedDate) : tr.proposedDate) : 'TBC'} />}</Row>
           {tr.staff.map((s, i) => (
             <Row key={i}><Muted size={12}>{s.name} · {s.role}</Muted>
               <Pill label={s.check.status === 'reviewed' ? 'Check reviewed' : `Check ${s.check.status}`} tone={s.check.status === 'reviewed' ? 'green' : 'gold'} /></Row>

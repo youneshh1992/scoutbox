@@ -18,7 +18,7 @@ import { WebVideo } from './WebVideo';
 import { Icon } from './Icon';
 import { pt } from '../i18n';
 import { initialsOf } from './Reference';
-import { fmtClock, relTime } from '../time';
+import { fmtClock, relTime, uiLocale } from '../time';
 
 /** The last message of a thread, the one-line preview and whether it is unread for this side. */
 export function threadPreview(c: Channel): { line: string; time: string; unread: boolean } {
@@ -124,7 +124,7 @@ export function Threads({ channels, onSend, onOpen, onTyping, attachableClips, e
 
   const dayLabel = (ts: number) => {
     const d = new Date(ts); const now = new Date();
-    return d.toDateString() === now.toDateString() ? pt('chatToday') : d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+    return d.toDateString() === now.toDateString() ? pt('chatToday') : d.toLocaleDateString(uiLocale(), { weekday: 'long', day: 'numeric', month: 'long' });
   };
   return (
     <View style={{ gap: 0 }} testID="threads">

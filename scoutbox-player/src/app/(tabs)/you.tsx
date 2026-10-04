@@ -272,7 +272,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     paddingHorizontal: 10, paddingVertical: 6, fontSize: 13, minWidth: 72, backgroundColor: colors.bg2,
   },
   exportPreview: {
-    color: colors.muted, fontSize: 11, fontFamily: 'monospace', lineHeight: 15,
+    color: colors.muted, fontSize: 11, fontVariant: ['tabular-nums'], lineHeight: 15,
     borderWidth: 1, borderColor: colors.line, borderRadius: 8, padding: 8, marginTop: 6,
   },
 });

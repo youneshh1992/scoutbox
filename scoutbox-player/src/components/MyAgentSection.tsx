@@ -13,6 +13,7 @@ import { useColors } from '../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
 import { m24, m24ClientKey, type AgentAction, type AgentRelationship, type DisclosureKey } from '../data/m24client';
 import { pt } from '../i18n';
+import { uiLocale } from '../time';
 
 /**
  * M23 P5.6E — the three disclosure choices, in the order a player meets them.
@@ -46,7 +47,7 @@ const statusKey = (s: AgentRelationship['status']) => (
   s === 'proposed' ? 'm24pending' : s === 'active' ? 'm24active' : s === 'declined' ? 'm24declined' : s === 'expired' ? 'm24expired' : s === 'disputed' ? 'm24disputed' : 'm24ended'
 ) as Parameters<typeof pt>[0];
 const tone = (s: AgentRelationship['status']): 'green' | 'blue' | 'gold' | 'red' | 'default' => (s === 'active' ? 'green' : s === 'proposed' ? 'blue' : s === 'disputed' ? 'red' : s === 'expired' ? 'gold' : 'default');
-const fmt = (ts: number | null) => (ts ? new Date(ts).toLocaleDateString() : '—');
+const fmt = (ts: number | null) => (ts ? new Date(ts).toLocaleDateString(uiLocale(), { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 
 export function MyAgentSection({ playerId, isMinor }: { playerId: string; isMinor: boolean }) {
   const colors = useColors();

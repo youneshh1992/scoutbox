@@ -3,7 +3,7 @@
 // the You tab; they are page tabs here, and "+ Add evidence" is the primary
 // action (it opens the existing Upload screen, whose route is unchanged).
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text } from '../../components/Text';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link, useLocalSearchParams } from 'expo-router';
@@ -60,7 +60,8 @@ export default function Football() {
         {/* M16.2 — the Passport payload carries no numeric score, so the Trust
             Profile is fetched from its own endpoint and composed at the head of
             the Passport, exactly as before. */}
-        {actor && tab === 'passport' ? <TrustProfileSection actor={actor} /> : null}
+        {/* M24F.5 — the Trust section's rule sits on the tab bar's line: one rule under the tabs, not two. */}
+        {actor && tab === 'passport' ? <View style={{ marginTop: -17 }}><TrustProfileSection actor={actor} /></View> : null}
         {actor && tab === 'passport' ? <FootballPassportSection actor={actor} isMinor={isMinor} /> : null}
         {actor && tab === 'development' ? <DevelopmentHubSection actor={actor} /> : null}
         {actor && tab === 'boxcam' ? <BoxTrainingSection actor={actor} isMinor={isMinor} /> : null}

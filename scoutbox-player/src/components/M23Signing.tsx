@@ -16,6 +16,7 @@ import { m12, type FamilySigning, type FamilySigningParty, type SigningPartyType
 import { useColors } from '../theme';
 import { pt } from '../i18n';
 import { Button, Card, Muted, Row, SectionTitle, Disclosure } from './ui';
+import { uiLocale } from '../time';
 
 type Actor = { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string };
 
@@ -30,7 +31,7 @@ const partyLabel = (p: SigningPartyType) => {
   const key = `signingParty_${p}` as Parameters<typeof pt>[0];
   try { return pt(key) ?? p; } catch { return p; }
 };
-const fmt = (ms: number | null) => (ms ? new Date(ms).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
+const fmt = (ms: number | null) => (ms ? new Date(ms).toLocaleString(uiLocale(), { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
 const shortSha = (sha: string | null) => (sha ? `${sha.slice(0, 12)}…${sha.slice(-8)}` : '—');
 const errMsg = (e: unknown) => {
   const code = (e as { code?: string } | null)?.code ?? (e instanceof Error ? e.message : '');
