@@ -58,7 +58,7 @@ touched).
 | m15Live | OK | ✗ | Same guardian fix; P2 reads the passport summary ("Evidence: strong") in the card's quiet line instead of a pill — the summary is back on the card as text |
 | m23ContactLive / m23DecisionLive / m23TrialLive / m23OfferLive / m23OfferHardeningLive / m23SigningLive / m23SigningHardeningLive | 82 ✓ / 86 ✓ / 122 ✓ / 98 ✓ / 53 ✓ / 134 ✓ / 68 ✓ | same | — |
 | m23RecruitmentJourneyLive / HardeningLive | 85 ✓ / 57 ✓ | same | — |
-| m23AgentLive | 91 ✓ | 1 ✗ (C6) | Timing: the confirmation line arrived before the status pill refreshed. Passed on re-run with no change; no M24F.5 change touches that card |
+| m23AgentLive | 91 ✓ | 1 ✗ (C6) | Harness synchronisation (freeze closure): C6 waited for the success line, then also asserted the status pill, which changes one list re-fetch later. Now waits on the full confirmed state; same assertion. 20/20 sequential passes before the fix, 20/20 after |
 | m23AgentIntegrationLive / AgentGrassrootsLive / AgentTransactionLive / entryCredit | 98 ✓ / 49 ✓ / 116 ✓ / 31 ✓ | same | — |
 
 ## 4. Regression battery — server (14 suites)
@@ -93,8 +93,25 @@ The portal bundles did not change after the previous rebuild, on which
 m24f5PortalVisualLive (262 ✓), m24f4PortalMinimalLive (316 ✓), m24eScrollLive
 (48 ✓), m14DemoSpotcheck and m23AgentLive (91 ✓) passed.
 
-## 6. Known flakes
+## 6. Freeze closure — m23AgentLive C6
 
-- `m23AgentLive` C6: a pill refresh race, seen once in this battery, passed on
-  re-run.
-- `m23OfferLive` A6 (since M24F.2): passed in this battery.
+- **Original failure:** one C6 failure in the M24F.5 browser battery, under full
+  battery load: the card showed "Confirmed — active from now" while the status
+  pill still read "Awaiting your answer".
+- **Cause:** `MyAgentSection` sets the success line when the confirm call
+  returns, then re-fetches the relationship list; the pill follows the re-fetch,
+  one local request later. The server state is already final when the line shows
+  and the card settles within that one fetch. C6 waited only for the line, then
+  asserted both, so a sample under load could fall between the two.
+- **Classification:** harness synchronisation, not a product race (no stale
+  closure, no lost update, the derived status is correct as soon as the list
+  lands).
+- **Fix (test only):** wait on the DOM condition C6 asserts — the line and the
+  Active pill together — with a 10 s ceiling; no guessed sleep, assertion
+  unchanged. No product code changed.
+- **Evidence:** 20/20 sequential runs of the whole suite before the fix (idle
+  machine), 20/20 after.
+
+## 7. Known flakes
+
+- None unexplained. `m23OfferLive` A6 (since M24F.2) passed in every M24F.5 run.

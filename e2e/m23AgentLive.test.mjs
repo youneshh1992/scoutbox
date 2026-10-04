@@ -311,8 +311,13 @@ say('C1: Kola signs in to the player app');
   if (!/employment,\s*transfer/.test(txt) || !/18\s*months/.test(txt)) console.error('   card text:', JSON.stringify(txt).slice(0, 600));
   ok(/employment,\s*transfer/.test(txt) && /18\s*months/.test(txt), 'C5: scope and term are stated');
   await card.locator('text="Confirm"').first().click();
-  for (let i = 0; i < 40; i++) { if (/Confirmed — active from now/.test(await card.innerText())) break; await sleep(250); }
-  if (!/Confirmed — active from now/.test(await card.innerText())) console.error('   card text after Confirm:', JSON.stringify(await card.innerText()).slice(0, 700));
+  // M24F.5 freeze — wait for the state C6 asserts, not only its first half. The
+  // success line renders when the confirm call returns; the status pill changes
+  // when the list re-fetch lands, one request later. Waiting on the line alone let
+  // a sample under load fall between the two (the one C6 failure in M24F.5).
+  const confirmedState = (t) => /Confirmed — active from now/.test(t) && /\bActive\b/.test(t);
+  await card.page().waitForFunction(() => { const t = document.querySelector('[data-testid="my-agent"]')?.innerText ?? ''; return /Confirmed — active from now/.test(t) && /\bActive\b/.test(t); }, null, { timeout: 10000 }).catch(() => {});
+  if (!confirmedState(await card.innerText())) console.error('   card text after Confirm:', JSON.stringify(await card.innerText()).slice(0, 700));
   ok(/Confirmed — active from now/.test(await card.innerText()) && /\bActive\b/.test(await card.innerText()), 'C6: Kola CONFIRMS — the relationship is active from now');
   ok(/End relationship/.test(await card.innerText()) && !/Confirm\b(?! )/.test('x'), 'C7: the card now offers End relationship (and Dispute), not Confirm');
 }
