@@ -141,7 +141,7 @@ async function playerPage({ width = 1280, height = 900 } = {}) {
   // Box Training lives on the You tab, not the landing screen.
   await page.click('a[href="/football"]');
   await page.getByRole('tab', { name: 'Box Cam' }).click();
-  await page.waitForSelector('text=Train in the Box', { timeout: 30000 });
+  await page.waitForSelector('[data-testid="boxcam-start"]', { timeout: 30000 }); // M24F.4 — the session-led root
   return { ctx, page };
 }
 
@@ -270,7 +270,7 @@ let liveResult = null;
   await page.waitForSelector('text=Your visibility right now', { timeout: 30000 });
   await page.click('a[href="/football"]');
   await page.getByRole('tab', { name: 'Box Cam' }).click();
-  await page.waitForSelector('text=Train in the Box', { timeout: 30000 });
+  await page.waitForSelector('[data-testid="boxcam-start"]', { timeout: 30000 }); // M24F.4 — the session-led root
   await openCv(page);
   await page.getByRole('button', { name: /^Start$/ }).first().click();
   await page.waitForSelector('text=Observing', { timeout: 30000 });

@@ -115,7 +115,7 @@ const en = {
   m15prov_box_cam_observed: 'Box Cam observed', m15prov_unknown: 'Source not classified',
   // M24F.3 — the Passport root, one line each
   m15verifiedRecord: 'Verified evidence record', m15currentClub: 'Current club', m15availability: 'Availability', m15evidence: 'Evidence',
-  m15coverageWord: '{cov} coverage', m15conflictShort: 'Club record conflict', m15conflictLine: 'Current club differs from your submitted record',
+  m15coverageWord: '{cov} coverage', m15conflictShort: 'Club record needs review', m15conflictLine: 'Current club differs from your submitted record',
   m15viewEvidence: 'View evidence', m15showAll: 'Show all {n}', m15source: 'Source', m15addAchievement: 'Add an achievement', m15about: 'About Passport',
   trsEvidenceOnly: 'Evidence confidence only', trsBreakdown: 'View breakdown', trsImprove: 'What could improve', trsAbout: 'About Trust Score',
   boardView: 'View', boardApplied: 'Applied', boardAccepted: 'Accepted', boardDeclinedApp: 'Not selected', boardWithdrawn: 'Withdrawn', boardOpenDay: 'Register through Open days', boardRequirements: 'Bring', boardAbout: 'About the board',
@@ -301,6 +301,17 @@ const en = {
 
   // M23 P2.5 — navigation. Tab titles and page tabs were string literals.
   // M24C — the approved Player screens (Home, Football Passport, Box Cam, Messages).
+  // M24F.4 — Home, Activity, Development, Box Cam, Combine, Passport root labels
+  homeNext: 'Next', homeRecent: 'Recent', homeViewAllActivity: 'View all activity', homeJoined: 'Joined {when}', homeClubsWithinReach: 'Clubs within reach', homeNoActivity: 'No activity yet.', homeNothingNext: 'Nothing waiting on you',
+  activityTitle: 'Activity', activityToday: 'Today', activityThisWeek: 'This week', activityEarlier: 'Earlier', activityThisWeekDigest: 'This week',
+  devCurrentFocus: 'Current focus', devLatestFeedback: 'Latest feedback', devProgress: 'Progress', devHistory: 'History', devEntries: '{n} entries', devNone: 'None yet', devGoalsTitle: 'Goals', devBack: 'Development',
+  bcLatest: 'Latest', bcHowItWorks: 'How Box Cam works', bcStartSession: 'Start session', bcMoreTitle: 'Training record',
+  evVideo: 'Video', evCombine: 'Combine', evRecord: 'Evidence record', evBack: 'Evidence', evLatest: 'Latest', evNoClips: 'No footage yet.', evBoxCam: 'Box Cam',
+  bcRecordedOn: 'Recorded {when}', bcSessionDetail: 'Session', bcBack: 'Box Cam', bcSessions: '{n} sessions', bcViewAll: 'View all', bcNoSessions: 'No sessions yet', bcSetupTitle: 'Setup', bcStreakLine: 'Box Streak · {n} weeks',
+  cmbExercises: 'Exercises', cmbRequestsRow: 'Club Combine', cmbRequestsCount: '{n} requests', cmbRequestCount: '1 request', cmbCardRow: 'Combine Card', cmbAbout: 'About Combine', cmbVerifiedWord: 'Verified', cmbNotSupportedWord: 'Not supported on this device', cmbAttempts: '{n} attempts', cmbRequests: 'Requests',
+  m15clubsCount: '{n} clubs', m15noneYet: 'None yet', m15eventCount: '1 event', m15achievementCount: '1 achievement', m15achievementsCount: '{n} achievements', m15clubCount: '1 club',
+  cmbLatestResult: 'Latest result', cmbStatus: 'Status', cmbInstructions: 'Instructions', cmbHistory: 'History', cmbNoResult: 'No result yet', cmbBack: 'Combine',
+  m15timelineRow: 'Timeline', m15achievementsRow: 'Achievements', m15events: '{n} events', m15verifiedRecordLine: 'Verified evidence record',
   homeMorning: 'Good morning, {name}', homeAfternoon: 'Good afternoon, {name}', homeEvening: 'Good evening, {name}',
   homePassportLabel: 'Your Football Passport', homeViewPassport: 'View your Passport', homeAttention: 'Needs your attention', homeNothingPending: 'Nothing is waiting on you right now.',
   homeTrialInvite: 'Trial invitation', homeContactRequest: 'Contact request', homeReplied: '{name} replied', homeNewMessages: '{n} new', homeWithGuardian: 'With your guardian',
@@ -392,6 +403,7 @@ const en = {
   offerAnsweredAt: 'You answered', offerAnsweredByGuardian: 'Answered by your parent or guardian',
   offerAgentShare: 'Share with my agent', offerAgentUnshare: 'Stop sharing with my agent', offerAgentShared: 'Shared with your agent (read-only).', offerAgentShareHint: 'Your agent can read the terms and the status. They cannot answer for you.',
   offerHistory: 'History', offerOlderRevisions: 'Earlier revisions',
+  offerKicker: 'Offer', offerViewTerms: 'View terms', offerNotSignature: 'Offer acceptance is not a signature.', offerStatus: 'Status', offerSharing: 'Agent sharing',
   // M23 P7 — signing
   signingTitle: 'Signing', signingHint: 'A document a club presented to you for signing, exactly as presented. Confirming records your own signature on that exact document. Nothing is signed until every required party has confirmed and the club completes the signing.',
   signingSt_DRAFT: 'Draft', signingSt_READY: 'Presented — awaiting signatures', signingSt_IN_PROGRESS: 'In progress — some signatures recorded', signingSt_COMPLETED: 'Signing completed', signingSt_CANCELLED: 'Cancelled', signingSt_VOIDED: 'Voided', signingSt_EXPIRED: 'Expired — not completed in time', signingSt_SUPERSEDED: 'Superseded by a newer revision',
@@ -561,7 +573,7 @@ const fr: typeof en = {
   m15prov_verified_club_confirmed: 'Vérifié par le club', m15prov_authoritative_registry: 'Registre vérifié',
   m15prov_box_cam_observed: 'Observ\u00e9 par Box Cam', m15prov_unknown: 'Source non class\u00e9e',
   m15verifiedRecord: 'Dossier de preuves vérifié', m15currentClub: 'Club actuel', m15availability: 'Disponibilité', m15evidence: 'Preuves',
-  m15coverageWord: 'Couverture {cov}', m15conflictShort: 'Conflit de dossier club', m15conflictLine: 'Le club actuel diffère de votre saisie',
+  m15coverageWord: 'Couverture {cov}', m15conflictShort: 'Dossier club à vérifier', m15conflictLine: 'Le club actuel diffère de votre saisie',
   m15viewEvidence: 'Voir les preuves', m15showAll: 'Tout voir ({n})', m15source: 'Source', m15addAchievement: 'Ajouter une distinction', m15about: 'À propos du Passeport',
   trsEvidenceOnly: 'Confiance dans les preuves uniquement', trsBreakdown: 'Voir le détail', trsImprove: 'Ce qui pourrait progresser', trsAbout: 'À propos du Trust Score',
   boardView: 'Voir', boardApplied: 'Candidature envoyée', boardAccepted: 'Acceptée', boardDeclinedApp: 'Non retenue', boardWithdrawn: 'Retirée', boardOpenDay: 'Inscription via les journées portes ouvertes', boardRequirements: 'À apporter', boardAbout: 'À propos du tableau',
@@ -737,6 +749,16 @@ const fr: typeof en = {
   m22reason_INSUFFICIENT_LIGHT: 'La lumi\u00e8re est insuffisante.',
   m22reason_UNSUPPORTED_PROTOCOL: 'Cette activit\u00e9 n\u2019est pas encore prise en charge.',
 
+  homeNext: 'À suivre', homeRecent: 'Récent', homeViewAllActivity: 'Toute l’activité', homeJoined: 'Membre depuis {when}', homeClubsWithinReach: 'Clubs à portée', homeNoActivity: 'Pas encore d’activité.', homeNothingNext: 'Rien en attente',
+  activityTitle: 'Activité', activityToday: 'Aujourd’hui', activityThisWeek: 'Cette semaine', activityEarlier: 'Plus tôt', activityThisWeekDigest: 'Cette semaine',
+  devCurrentFocus: 'Objectif actuel', devLatestFeedback: 'Dernier retour', devProgress: 'Progression', devHistory: 'Historique', devEntries: '{n} entrées', devNone: 'Rien pour l’instant', devGoalsTitle: 'Objectifs', devBack: 'Développement',
+  bcLatest: 'Dernière', bcHowItWorks: 'Comment fonctionne Box Cam', bcStartSession: 'Démarrer une session', bcMoreTitle: 'Carnet d’entraînement',
+  evVideo: 'Vidéo', evCombine: 'Combine', evRecord: 'Dossier de preuves', evBack: 'Preuves', evLatest: 'Dernière', evNoClips: 'Pas encore de vidéo.', evBoxCam: 'Box Cam',
+  bcRecordedOn: 'Enregistrée {when}', bcSessionDetail: 'Séance', bcBack: 'Box Cam', bcSessions: '{n} séances', bcViewAll: 'Tout voir', bcNoSessions: 'Pas encore de séance', bcSetupTitle: 'Installation', bcStreakLine: 'Box Streak · {n} semaines',
+  cmbExercises: 'Exercices', cmbRequestsRow: 'Club Combine', cmbRequestsCount: '{n} demandes', cmbRequestCount: '1 demande', cmbCardRow: 'Combine Card', cmbAbout: 'À propos du Combine', cmbVerifiedWord: 'Vérifié', cmbNotSupportedWord: 'Non pris en charge sur cet appareil', cmbAttempts: '{n} tentatives', cmbRequests: 'Demandes',
+  m15clubsCount: '{n} clubs', m15noneYet: 'Rien pour l’instant', m15eventCount: '1 événement', m15achievementCount: '1 distinction', m15achievementsCount: '{n} distinctions', m15clubCount: '1 club',
+  cmbLatestResult: 'Dernier résultat', cmbStatus: 'Statut', cmbInstructions: 'Consignes', cmbHistory: 'Historique', cmbNoResult: 'Pas encore de résultat', cmbBack: 'Combine',
+  m15timelineRow: 'Chronologie', m15achievementsRow: 'Distinctions', m15events: '{n} événements', m15verifiedRecordLine: 'Dossier de preuves vérifié',
   homeMorning: 'Bonjour, {name}', homeAfternoon: 'Bon après-midi, {name}', homeEvening: 'Bonsoir, {name}',
   homePassportLabel: 'Votre Passeport Football', homeViewPassport: 'Voir votre Passeport', homeAttention: 'À traiter', homeNothingPending: 'Rien ne vous attend pour le moment.',
   homeTrialInvite: 'Invitation à un essai', homeContactRequest: 'Demande de contact', homeReplied: '{name} a répondu', homeNewMessages: '{n} nouveau(x)', homeWithGuardian: 'Chez votre tuteur',
@@ -825,6 +847,7 @@ const fr: typeof en = {
   offerAnsweredAt: 'Vous avez répondu', offerAnsweredByGuardian: 'Réponse donnée par votre parent ou tuteur',
   offerAgentShare: 'Partager avec mon agent', offerAgentUnshare: 'Ne plus partager avec mon agent', offerAgentShared: 'Partagée avec votre agent (lecture seule).', offerAgentShareHint: 'Votre agent peut lire les conditions et le statut. Il ne peut pas répondre à votre place.',
   offerHistory: 'Historique', offerOlderRevisions: 'Révisions antérieures',
+  offerKicker: 'Offre', offerViewTerms: 'Voir les conditions', offerNotSignature: 'Accepter une Offre n’est pas une signature.', offerStatus: 'Statut', offerSharing: 'Partage avec l’agent',
   // M23 P7 — signature
   signingTitle: 'Signature', signingHint: 'Un document qu’un club vous a présenté pour signature, tel qu’il a été présenté. Confirmer enregistre votre propre signature sur ce document exact. Rien n’est signé tant que chaque partie requise n’a pas confirmé et que le club n’a pas complété la signature.',
   signingSt_DRAFT: 'Brouillon', signingSt_READY: 'Présentée — en attente des signatures', signingSt_IN_PROGRESS: 'En cours — certaines signatures enregistrées', signingSt_COMPLETED: 'Signature complétée', signingSt_CANCELLED: 'Annulée', signingSt_VOIDED: 'Invalidée', signingSt_EXPIRED: 'Expirée — non complétée à temps', signingSt_SUPERSEDED: 'Remplacée par une révision plus récente',

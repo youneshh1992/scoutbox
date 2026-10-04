@@ -68,6 +68,8 @@ export interface TrialReportOnProfile {
 export interface PlayerProfile {
   id: string;
   name: string;
+  /** When the account was opened (ms). Server records carry it; the demo fixtures set it explicitly. Never derived. */
+  createdAt?: number;
   dob: string;
   country: string;
   city: string;

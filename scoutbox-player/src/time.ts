@@ -43,3 +43,6 @@ export function humanDate(s: string | null | undefined): string {
   if (ym) return new Date(Number(ym[1]), Number(ym[2]) - 1, 1).toLocaleDateString(locale(), { month: 'short', year: 'numeric' });
   return s;
 }
+
+/** "Oct 2026" — a month, for a join date. */
+export const fmtMonthYear = (ts: number | string) => new Date(ts).toLocaleDateString(locale(), { month: 'short', year: 'numeric' });

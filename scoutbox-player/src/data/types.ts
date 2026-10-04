@@ -101,6 +101,8 @@ export interface SignupInput {
 }
 
 export interface Me extends PlayerProfile {
+  /** When the account was opened (the record's own createdAt). Absent in older records: the UI then shows no join date. */
+  createdAt?: number;
   age: number;
   trustScore: number;
   trust: TrustBreakdown;

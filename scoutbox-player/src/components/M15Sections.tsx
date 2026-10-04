@@ -15,7 +15,7 @@ import { View } from 'react-native';
 import { Text, TextInput } from './Text';
 import { useColors, type Palette } from '../theme';
 import { Button, Card, Disclosure, EventRow, FactRow, Muted, Row, SectionTitle } from './ui';
-import { HistoryList, SectionHead } from './Reference';
+import { HistoryList } from './Reference';
 import { m15, type FootballPassport, type PassportActor, type PassportEvent, type PassportShare } from '../data/m15client';
 import { pt } from '../i18n';
 import { humanDate } from '../time';
@@ -148,6 +148,11 @@ export function FootballPassportSection({ actor, isMinor, childName }: { actor: 
   };
   const coverage = pt(`m15cov_${p.completeness.evidenceCoverage}` as Parameters<typeof pt>[0]);
   const club = p.status.currentClub;
+  const count = (n: number, one: Parameters<typeof pt>[0], many: Parameters<typeof pt>[0]) => n === 0 ? pt('m15noneYet') : n === 1 ? pt(one) : pt(many).replace('{n}', String(n));
+  // M24F.4 — the root is seven rows: the record line, three facts, then
+  // Timeline / Club history / Achievements / Share / About as rows that open.
+  // The forms live inside the row they belong to (add an achievement under
+  // Achievements, add a club and file a correction under Club history).
   return (
     <Card testID="passport-root">
       <SectionTitle>{pt('m15title')}{childName ? ` — ${childName}` : ''}</SectionTitle>
@@ -162,7 +167,8 @@ export function FootballPassportSection({ actor, isMinor, childName }: { actor: 
 
       {/* a conflict is one line and a Review; the full explanation is behind it */}
       {p.conflicts.map((c) => (
-        <Disclosure key={c.code + (c.submitted.orgName ?? '')} label={pt('m15conflictShort')} hint={pt('m15conflictLine')} testID="passport-conflict">
+        <Disclosure key={c.code + (c.submitted.orgName ?? '')} label={pt('m15conflictShort')} testID="passport-conflict">
+          <Muted size={13}>{pt('m15conflictLine')}</Muted>
           <Muted size={13}>
             {pt('m15conflict').replace('{auth}', c.authoritative.orgName ?? '?').replace('{self}', c.submitted.orgName ?? '?')}
           </Muted>
@@ -170,47 +176,69 @@ export function FootballPassportSection({ actor, isMinor, childName }: { actor: 
       ))}
       {p.temporalConflicts.length > 0 ? <Muted size={12.5}>{pt('m15temporal')}</Muted> : null}
 
-      {/* LEVEL 2 — the evidence counts and the gaps */}
-      <Disclosure label={pt('m15viewEvidence')} testID="passport-evidence-detail">
-        <Muted size={13}>{pt('m15checks').replace('{n}', String(p.completeness.eligibility.satisfied)).replace('{total}', String(p.completeness.eligibility.total))}</Muted>
-        <Muted size={13}>
-          {pt('m15evidenceLine')
-            .replace('{matches}', String(p.evidence.fullMatches)).replace('{clips}', String(p.evidence.clips))
-            .replace('{refs}', String(p.evidence.references))}
-        </Muted>
-        {p.completeness.gaps.slice(0, 4).map((g) => (
-          <Muted key={g.id} size={12.5}>· {pt(GAP_LABEL[g.id] ?? 'm15gapCareer')}</Muted>
-        ))}
-      </Disclosure>
+      <View style={{ marginTop: 10 }}>
+        {/* LEVEL 2 — the evidence counts and the gaps */}
+        <Disclosure label={pt('m15viewEvidence')} testID="passport-evidence-detail">
+          <Muted size={13}>{pt('m15checks').replace('{n}', String(p.completeness.eligibility.satisfied)).replace('{total}', String(p.completeness.eligibility.total))}</Muted>
+          <Muted size={13}>
+            {pt('m15evidenceLine')
+              .replace('{matches}', String(p.evidence.fullMatches)).replace('{clips}', String(p.evidence.clips))
+              .replace('{refs}', String(p.evidence.references))}
+          </Muted>
+          {p.completeness.gaps.slice(0, 4).map((g) => (
+            <Muted key={g.id} size={12.5}>· {pt(GAP_LABEL[g.id] ?? 'm15gapCareer')}</Muted>
+          ))}
+        </Disclosure>
 
-      {/* Timeline — date and label; the source behind each row */}
-      <View style={{ marginTop: 10 }} testID="passport-timeline">
-        <SectionHead title={pt('m15timeline')} />
-        {events.map((e) => <TimelineRow key={e.id} e={e} />)}
-        {p.timeline.length > 4 ? (
-          <Row style={{ marginTop: 6 }}><Button small tertiary label={showAll ? pt('m15less') : pt('m15showAll').replace('{n}', String(p.timeline.length))} onPress={() => setShowAll((x) => !x)} testID="passport-timeline-more" /></Row>
-        ) : null}
-      </View>
+        {/* Timeline — behind one row with its count; date and label per event, the source behind each */}
+        <Disclosure label={pt('m15timelineRow')} hint={count(p.timeline.length, 'm15eventCount', 'm15events')} testID="passport-timeline">
+          {events.map((e) => <TimelineRow key={e.id} e={e} />)}
+          {p.timeline.length > 4 ? (
+            <Row style={{ marginTop: 6 }}><Button small tertiary label={showAll ? pt('m15less') : pt('m15showAll').replace('{n}', String(p.timeline.length))} onPress={() => setShowAll((x) => !x)} testID="passport-timeline-more" /></Row>
+          ) : null}
+        </Disclosure>
 
-      {/* Club history — trials never appear here */}
-      {p.clubHistory.length > 0 ? (
-        <View style={{ marginTop: 4 }}>
-          <SectionHead title={pt('m15history')} />
-          <HistoryList
-            testID="passport-history"
-            rows={p.clubHistory.map((r2, i) => ({
-              index: String(i + 1).padStart(2, '0'),
-              title: `${r2.orgName}${r2.role ? ` · ${r2.role}` : ''}`,
-              sub: `${r2.from ?? '—'} → ${r2.current ? pt('m15now') : r2.to ?? '—'} · ${provWord(r2.provenance)}`,
-            }))}
-          />
-        </View>
-      ) : null}
+        {/* Club history — trials never appear here; adding a club and filing a correction sit under it */}
+        <Disclosure label={pt('m15history')} hint={count(p.clubHistory.length, 'm15clubCount', 'm15clubsCount')} testID="passport-history">
+          {p.clubHistory.length > 0 ? (
+            <HistoryList
+              testID="passport-history-list"
+              rows={p.clubHistory.map((r2, i) => ({
+                index: String(i + 1).padStart(2, '0'),
+                title: `${r2.orgName}${r2.role ? ` · ${r2.role}` : ''}`,
+                sub: `${r2.from ?? '—'} → ${r2.current ? pt('m15now') : r2.to ?? '—'} · ${provWord(r2.provenance)}`,
+              }))}
+            />
+          ) : null}
+          <Disclosure label={pt('m15careerTitle')} testID="passport-add-career">
+            <Muted size={12.5}>{pt('m15careerNote')}</Muted>
+            <Row>
+              <TextInput style={[inputStyle(colors), { flex: 2, minWidth: 120 }]} value={careerOrg} onChangeText={setCareerOrg} placeholder={pt('m15careerOrg')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15careerOrg')} />
+              <TextInput style={[inputStyle(colors), { flex: 1, minWidth: 70 }]} value={careerFrom} onChangeText={setCareerFrom} placeholder={pt('m15careerFrom')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15careerFrom')} />
+              <TextInput style={[inputStyle(colors), { flex: 1, minWidth: 70 }]} value={careerTo} onChangeText={setCareerTo} placeholder={pt('m15careerTo')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15careerTo')} />
+              <Button small label={pt('m15add')} onPress={() => {
+                if (!careerOrg.trim() || !careerFrom.trim()) { setMsg(pt('m15careerNeedYear')); return; }
+                void act(async () => {
+                  const r = await m15.addCareer(actor, { orgName: careerOrg.trim(), from: careerFrom.trim(), to: careerTo.trim() || undefined });
+                  setCareerOrg(''); setCareerFrom(''); setCareerTo('');
+                  if (r.note) setMsg(r.note);
+                }, pt('m15careerAdded'));
+              }} />
+            </Row>
+          </Disclosure>
+          <Disclosure label={pt('m15corrTitle')} testID="passport-correction">
+            <Muted size={12.5}>{pt('m15corrNote')}</Muted>
+            <Row>
+              <TextInput style={[inputStyle(colors), { flex: 1 }]} value={corrReason} onChangeText={setCorrReason} placeholder={pt('m15corrPlaceholder')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15corrPlaceholder')} />
+              <Button small label={pt('m15corrFile')} onPress={() => {
+                if (corrReason.trim()) void act(async () => { const r = await m15.fileCorrection(actor, { targetType: 'club_history', reason: corrReason.trim() }); setCorrReason(''); setMsg(r.note); }, pt('m15corrFiled'));
+              }} />
+            </Row>
+          </Disclosure>
+        </Disclosure>
 
-      {/* Achievements — simple rows; the source and the withdrawal behind each */}
-      {p.achievements.length > 0 ? (
-        <View style={{ marginTop: 4 }} testID="passport-achievements">
-          <SectionHead title={pt('m15achievements')} />
+        {/* Achievements — simple rows; the source and the withdrawal behind each; adding one under the row */}
+        <Disclosure label={pt('m15achievementsRow')} hint={count(p.achievements.length, 'm15achievementCount', 'm15achievementsCount')} testID="passport-achievements">
           {p.achievements.map((a) => (
             <EventRow key={a.id} date={a.when ?? ''} label={a.title} testID={`passport-achievement-${a.id}`}>
               <Muted size={12.5}>{pt('m15source')}: {provWord(a.provenance)}{a.confirmedBy ? ` · ${pt('m15confirmedBy')} ${a.confirmedBy}` : ''}</Muted>
@@ -219,42 +247,14 @@ export function FootballPassportSection({ actor, isMinor, childName }: { actor: 
               ) : null}
             </EventRow>
           ))}
-        </View>
-      ) : null}
+          <Disclosure label={pt('m15addAchievement')} testID="passport-add-achievement">
+            <Row>
+              <TextInput style={[inputStyle(colors), { flex: 1 }]} value={achTitle} onChangeText={setAchTitle} placeholder={pt('m15achPlaceholder')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15achPlaceholder')} />
+              <Button small label={pt('m15add')} onPress={() => { if (achTitle.trim()) void act(async () => { await m15.addAchievement(actor, { title: achTitle.trim() }); setAchTitle(''); }, pt('m15achAdded')); }} />
+            </Row>
+          </Disclosure>
+        </Disclosure>
 
-      {/* LEVEL 3 — the forms, each behind its own row */}
-      <View style={{ marginTop: 10 }}>
-        <Disclosure label={pt('m15addAchievement')} testID="passport-add-achievement">
-          <Row>
-            <TextInput style={[inputStyle(colors), { flex: 1 }]} value={achTitle} onChangeText={setAchTitle} placeholder={pt('m15achPlaceholder')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15achPlaceholder')} />
-            <Button small label={pt('m15add')} onPress={() => { if (achTitle.trim()) void act(async () => { await m15.addAchievement(actor, { title: achTitle.trim() }); setAchTitle(''); }, pt('m15achAdded')); }} />
-          </Row>
-        </Disclosure>
-        <Disclosure label={pt('m15careerTitle')} testID="passport-add-career">
-          <Muted size={12.5}>{pt('m15careerNote')}</Muted>
-          <Row>
-            <TextInput style={[inputStyle(colors), { flex: 2, minWidth: 120 }]} value={careerOrg} onChangeText={setCareerOrg} placeholder={pt('m15careerOrg')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15careerOrg')} />
-            <TextInput style={[inputStyle(colors), { flex: 1, minWidth: 70 }]} value={careerFrom} onChangeText={setCareerFrom} placeholder={pt('m15careerFrom')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15careerFrom')} />
-            <TextInput style={[inputStyle(colors), { flex: 1, minWidth: 70 }]} value={careerTo} onChangeText={setCareerTo} placeholder={pt('m15careerTo')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15careerTo')} />
-            <Button small label={pt('m15add')} onPress={() => {
-              if (!careerOrg.trim() || !careerFrom.trim()) { setMsg(pt('m15careerNeedYear')); return; }
-              void act(async () => {
-                const r = await m15.addCareer(actor, { orgName: careerOrg.trim(), from: careerFrom.trim(), to: careerTo.trim() || undefined });
-                setCareerOrg(''); setCareerFrom(''); setCareerTo('');
-                if (r.note) setMsg(r.note);
-              }, pt('m15careerAdded'));
-            }} />
-          </Row>
-        </Disclosure>
-        <Disclosure label={pt('m15corrTitle')} testID="passport-correction">
-          <Muted size={12.5}>{pt('m15corrNote')}</Muted>
-          <Row>
-            <TextInput style={[inputStyle(colors), { flex: 1 }]} value={corrReason} onChangeText={setCorrReason} placeholder={pt('m15corrPlaceholder')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15corrPlaceholder')} />
-            <Button small label={pt('m15corrFile')} onPress={() => {
-              if (corrReason.trim()) void act(async () => { const r = await m15.fileCorrection(actor, { targetType: 'club_history', reason: corrReason.trim() }); setCorrReason(''); setMsg(r.note); }, pt('m15corrFiled'));
-            }} />
-          </Row>
-        </Disclosure>
         {canShare ? (
           <Disclosure label={pt('m15shareTitle')} testID="passport-share"><SharesPanel actor={actor} /></Disclosure>
         ) : <Muted size={12.5}>{pt('m15shareMinor')}</Muted>}

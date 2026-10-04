@@ -10,10 +10,13 @@
 // production, tests whose metric the device cannot measure are shown honestly
 // as "Measurement not yet supported on this device" and never estimated.
 import { createElement, useEffect, useRef, useState } from 'react';
-import { Platform, View } from 'react-native';
+import { Platform, Pressable, View } from 'react-native';
 import { Text } from './Text';
 import { useColors } from '../theme';
-import { Button, Card, Disclosure, Muted, Pill, Row, SectionTitle } from './ui';
+import { Button, Card, Disclosure, FactRow, ListRow, Muted, Pill, Row, SectionTitle } from './ui';
+import { Icon } from './Icon';
+import { SectionHead } from './Reference';
+import { fmtShortDay } from '../time';
 import {
   combine, type CombineActor, type CombineAttempt, type CombineCard,
   type CombineOverview, type CombineProtocol, type CombineRequest,
@@ -74,49 +77,6 @@ function StateBadge({ state }: { state: string }) {
 }
 /** True when the recorded number must not be shown as a standing result. */
 const valueStruck = (state: string) => state === 'invalidated' || state === 'protocol_invalid';
-
-// ------------------------------------------------------- verified result row
-function ResultRow({ a }: { a: CombineAttempt }) {
-  const colors = useColors();
-  const [why, setWhy] = useState(false);
-  const verified = a.combineState === 'combine_verified';
-  const partial = a.combineState === 'partially_measured';
-  return (
-    <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6, marginTop: 6 }}>
-      <Row>
-        <Text style={{ color: colors.text, fontSize: 13, flexShrink: 1, fontWeight: '600' }}>{a.protocolTitle}</Text>
-        {a.measuredValue == null ? (
-          <Text style={{ color: colors.muted, fontWeight: '700', fontSize: 13 }}>{pt('cmbNoValue')}</Text>
-        ) : (
-          <Text style={{
-            color: verified ? colors.accent : colors.muted, fontWeight: '800', fontSize: 15,
-            textDecorationLine: valueStruck(a.combineState) ? 'line-through' : 'none',
-          }}>{a.display}<Text style={{ color: colors.muted, fontWeight: '600', fontSize: 12 }}> {a.unit}</Text></Text>
-        )}
-        {verified ? <VerifiedBadge /> : <StateBadge state={a.combineState} />}
-        {a.simulated ? <Pill label={pt('cmbSim')} /> : null}
-      </Row>
-      {partial ? <Muted size={12}>{a.display} {a.unit} — {pt('cmbMeasuredNotVerified')}</Muted> : null}
-      {valueStruck(a.combineState) && a.measuredValue != null ? <Muted size={12}>{pt('cmbValueNotCounted')}</Muted> : null}
-      {/* Every non-verified state carries the server's own sentence for it, so
-          the reason is never left to the badge alone. */}
-      {!verified && !partial && a.stateCopy ? <Muted size={11.5}>{a.stateCopy}</Muted> : null}
-      {verified ? (
-        <View>
-          <Button small label={why ? pt('cmbHideWhy') : pt('cmbWhyVerified')} onPress={() => setWhy((x) => !x)} />
-          {why && a.verificationExplained ? (
-            <View style={{ marginTop: 4, backgroundColor: colors.panel2, borderRadius: 8, padding: 8 }}>
-              {a.verificationExplained.map((c, i) => (
-                <Muted key={i} size={12}>{c.ok ? '✓' : '○'} {c.label}{c.detail ? ` — ${c.detail}` : ''}</Muted>
-              ))}
-              {a.stateCopy ? <Muted size={11.5}>{a.stateCopy}</Muted> : null}
-            </View>
-          ) : null}
-        </View>
-      ) : null}
-    </View>
-  );
-}
 
 // ------------------------------------------------------------- capture panel
 function CombineCapturePanel({ playerId, protocol, requestId, onDone, onClose }: {
@@ -298,6 +258,74 @@ function CombineResultCard({ attempt, onClose }: { attempt: CombineAttempt; onCl
 }
 
 // ------------------------------------------------------------- main section
+/** A back control for the Combine detail pages. */
+function BackRow({ onPress, label }: { onPress: () => void; label: string }) {
+  const colors = useColors();
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} testID="combine-back" style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 8, alignSelf: 'flex-start' }, pressed && { opacity: 0.7 }]}>
+      <Icon name="chevron-left" size={16} color={colors.accent2} /><Text style={{ color: colors.accent2, fontSize: 13, fontWeight: '500' }}>{label}</Text>
+    </Pressable>
+  );
+}
+
+/** One exercise in full: the latest result, its status, the start control,
+ *  the instructions and the history. Nothing of this is on the root. */
+function ProtocolDetail({ protocol, title, attempts, canStart, onStart, onBack }: {
+  protocol: CombineProtocol | null; title: string; attempts: CombineAttempt[]; canStart: boolean; onStart: () => void; onBack: () => void;
+}) {
+  const colors = useColors();
+  const finished = attempts.filter((a) => a.completedAt != null || a.measuredValue != null);
+  const latest = finished[0] ?? null;
+  const verified = latest?.combineState === 'combine_verified';
+  const supported = protocol ? canMeasure(protocol) : false;
+  const statusWord = latest
+    ? verified ? pt('cmbVerifiedWord') : (pt(`cmbState_${latest.combineState}` as Parameters<typeof pt>[0]) ?? latest.combineState)
+    : supported || !protocol ? pt('cmbNoResult') : pt('cmbNotSupportedWord');
+  return (
+    <View testID="combine-detail">
+      <BackRow onPress={onBack} label={pt('cmbBack')} />
+      <SectionHead title={title} />
+      <FactRow k={pt('cmbLatestResult')} v={latest ? (latest.measuredValue == null ? pt('cmbNoValue') : `${latest.display} ${latest.unit}`) : pt('cmbNoResult')} testID="combine-latest" />
+      <FactRow k={pt('cmbStatus')} v={statusWord} testID="combine-status" />
+      {latest?.simulated ? <Muted size={12}>{pt('cmbDemoSim')}</Muted> : null}
+      {latest && valueStruck(latest.combineState) && latest.measuredValue != null ? <Muted size={12}>{pt('cmbValueNotCounted')}</Muted> : null}
+      {latest && latest.combineState === 'partially_measured' ? <Muted size={12}>{pt('cmbMeasuredNotVerified')}</Muted> : null}
+      {latest && !verified && latest.combineState !== 'partially_measured' && latest.stateCopy ? <Muted size={12}>{latest.stateCopy}</Muted> : null}
+      {canStart && protocol ? (
+        <View style={{ marginTop: 14 }}>
+          {supported ? <Button primary label={pt('cmbStart')} onPress={onStart} testID="combine-start" /> : <Muted size={12.5}>{pt('cmbNotSupported')}</Muted>}
+        </View>
+      ) : null}
+      <View style={{ marginTop: 14 }}>
+        {verified && latest?.verificationExplained ? (
+          <Disclosure label={pt('cmbWhyVerified')} testID="combine-why">
+            {latest.verificationExplained.map((c, i) => <Muted key={i} size={12}>{c.ok ? '✓' : '○'} {c.label}{c.detail ? ` — ${c.detail}` : ''}</Muted>)}
+            {latest.stateCopy ? <Muted size={11.5}>{latest.stateCopy}</Muted> : null}
+          </Disclosure>
+        ) : null}
+        {protocol ? (
+          <Disclosure label={pt('cmbInstructions')} testID="combine-instructions">
+            <Muted size={12.5}>{protocol.description}</Muted>
+            <Muted size={12.5}>{pt('cmbSetup')}: {protocol.setupRequirements}</Muted>
+            <Muted size={12.5}>{pt('cmbScoring')}: {protocol.scoringMethod}</Muted>
+            <Muted size={12}>{protocol.safetyNotes}</Muted>
+            {DEMO && supported ? <Muted size={12}>{pt('cmbDemoSim')}</Muted> : null}
+          </Disclosure>
+        ) : null}
+        <Disclosure label={pt('cmbHistory')} hint={pt('cmbAttempts').replace('{n}', String(finished.length))} testID="combine-history">
+          {finished.length === 0 ? <Muted size={12.5}>{pt('cmbNoResult')}</Muted> : finished.map((a) => (
+            <Row key={a.id} style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6, marginTop: 6, justifyContent: 'space-between' }}>
+              <Text style={{ color: colors.muted, fontSize: 12.5 }}>{fmtShortDay(a.completedAt ?? a.createdAt)}</Text>
+              <Text style={{ color: a.combineState === 'combine_verified' ? colors.accentText : colors.text, fontSize: 13, fontWeight: '600', textDecorationLine: valueStruck(a.combineState) ? 'line-through' : 'none' }}>{a.measuredValue == null ? pt('cmbNoValue') : `${a.display} ${a.unit}`}</Text>
+              <Text style={{ color: colors.muted, fontSize: 12 }}>{a.combineState === 'combine_verified' ? pt('cmbVerifiedWord') : (pt(`cmbState_${a.combineState}` as Parameters<typeof pt>[0]) ?? '')}</Text>
+            </Row>
+          ))}
+        </Disclosure>
+      </View>
+    </View>
+  );
+}
+
 export function CombineSection({ actor, childName }: { actor: CombineActor; childName?: string }) {
   const colors = useColors();
   const key = actor.kind === 'guardian' ? actor.childId : actor.id;
@@ -305,115 +333,103 @@ export function CombineSection({ actor, childName }: { actor: CombineActor; chil
   const [overview, reloadOverview] = useLoad<CombineOverview>(() => combine.overview(actor), [key]);
   const [protoData] = useLoad(() => isPlayer ? combine.protocols(actor.id) : Promise.resolve(null), [actor.id]);
   const [card, setCard] = useState<CombineCard | null>(null);
-  const [showCard, setShowCard] = useState(false);
   // M16.2 — the Trust Score shown on the Combine Card comes from its own
   // endpoint and is rendered in a visually separate block, so a Trust Score of
   // 92 can never be misread as a Combine measurement.
   const [trustProfile, setTrustProfile] = useState<TrustSelf | null>(null);
   const [capture, setCapture] = useState<{ protocol: CombineProtocol; requestId?: string } | null>(null);
   const [result, setResult] = useState<CombineAttempt | null>(null);
+  const [page, setPage] = useState<{ kind: 'protocol'; id: string; title: string } | { kind: 'requests' } | { kind: 'card' } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
   const protocols = protoData?.protocols ?? [];
-  const reloadAll = () => { reloadOverview(); if (showCard && isPlayer) combine.card(actor.id).then(setCard).catch(() => {}); };
+  const reloadAll = () => { reloadOverview(); if (page?.kind === 'card' && isPlayer) combine.card(actor.id).then(setCard).catch(() => {}); };
 
   const start = (protocol: CombineProtocol, requestId?: string) => { setResult(null); setCapture({ protocol, requestId }); };
-  async function toggleCard() {
-    if (showCard) { setShowCard(false); return; }
+  async function openCard() {
     if (!card && isPlayer) { try { setCard(await combine.card(actor.id)); } catch (e) { setMsg(e instanceof Error ? e.message : 'failed'); } }
     // The Trust Profile is optional context on this card — if it cannot be
     // read, the Combine results stand entirely on their own.
     if (!trustProfile) { try { setTrustProfile(await trust.profile(actor)); } catch { /* card still valid */ } }
-    setShowCard(true);
+    setPage({ kind: 'card' });
   }
 
-  return (
-    <Card>
-      <SectionTitle>{pt('cmbTitle')}{childName ? ` — ${childName}` : ''}</SectionTitle>
-      <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }}>{pt('cmbTagline')}</Text>
-      <Muted size={12}>{pt('cmbSub')} · {pt('cmbPoweredBy')}</Muted>
+  // M24F.4 — the root names the exercises, and nothing else. A guardian has
+  // no protocol library (attempts start on the player's device), so their
+  // rows are the exercises the child has attempted.
+  const allAttempts = overview ? [...overview.attempts].sort((a, b) => (b.completedAt ?? b.createdAt) - (a.completedAt ?? a.createdAt)) : [];
+  const exercises: { id: string; title: string; protocol: CombineProtocol | null }[] = protocols.length > 0
+    ? protocols.map((p) => ({ id: p.id, title: p.title, protocol: p }))
+    : Array.from(new Map(allAttempts.map((a) => [a.protocolId, { id: a.protocolId, title: a.protocolTitle, protocol: null as CombineProtocol | null }])).values());
+  const requests = overview?.activeRequests ?? [];
 
+  return (
+    <View testID="combine-section">
       {capture && isPlayer ? (
         <CombineCapturePanel playerId={actor.id} protocol={capture.protocol} requestId={capture.requestId}
           onDone={(a) => { setCapture(null); setResult(a); reloadAll(); }} onClose={() => setCapture(null)} />
       ) : result ? (
         <CombineResultCard attempt={result} onClose={() => setResult(null)} />
-      ) : (
-        <>
-          {/* My Combine — verified results + personal bests */}
-          <View style={{ marginTop: 8 }}>
-            <Row>
-              <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{pt('cmbMyCombine')}</Text>
-              {overview ? <Pill label={`${pt('cmbPersonalBests')}: ${overview.personalBests}`} tone="gold" /> : null}
-              {isPlayer ? <Button small label={showCard ? pt('cmbHideCard') : pt('cmbViewCard')} onPress={() => void toggleCard()} /> : null}
-            </Row>
-            {overview && overview.verifiedResults.length > 0 ? (
-              overview.verifiedResults.map((a) => <ResultRow key={a.id} a={a} />)
-            ) : <Muted size={12}>{pt('cmbNoResults')} — —</Muted>}
-            {overview ? <Muted size={11.5}>{overview.capabilityNote}</Muted> : null}
-          </View>
-
-          {/* Combine Card */}
-          {showCard && card ? (
-            <View style={{ marginTop: 8, backgroundColor: colors.panel2, borderRadius: 10, padding: 10 }}>
-              <Text style={{ color: colors.text, fontWeight: '800', fontSize: 14 }}>{pt('cmbCombineCard')}</Text>
-              <Muted size={12}>{card.player.name}{card.player.position ? ` · ${card.player.position}` : ''}{card.player.age != null ? ` · ${card.player.age}` : ''}</Muted>
+      ) : page?.kind === 'protocol' ? (
+        <ProtocolDetail
+          protocol={protocols.find((p) => p.id === page.id) ?? null} title={page.title}
+          attempts={allAttempts.filter((a) => a.protocolId === page.id)} canStart={isPlayer}
+          onStart={() => { const p = protocols.find((x) => x.id === page.id); if (p) start(p); }} onBack={() => setPage(null)} />
+      ) : page?.kind === 'requests' ? (
+        <View testID="combine-requests">
+          <BackRow onPress={() => setPage(null)} label={pt('cmbBack')} />
+          <SectionHead title={pt('cmbClubRequests')} />
+          {requests.map((r) => <RequestRow key={r.id} r={r} protocols={protocols} onStart={start} canStart={isPlayer} />)}
+        </View>
+      ) : page?.kind === 'card' ? (
+        <View testID="combine-card-page">
+          <BackRow onPress={() => setPage(null)} label={pt('cmbBack')} />
+          <SectionHead title={pt('cmbCombineCard')} />
+          {card ? (
+            <View>
+              <Muted size={12.5}>{card.player.name}{card.player.position ? ` · ${card.player.position}` : ''}{card.player.age != null ? ` · ${card.player.age}` : ''}</Muted>
               {card.results.length > 0 ? card.results.map((r) => (
-                <Row key={r.protocolId} style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 4, marginTop: 4 }}>
-                  <Text style={{ color: colors.text, fontSize: 13, flexShrink: 1 }}>{r.protocolTitle}</Text>
-                  <Text style={{ color: colors.accentText, fontWeight: '800' }}>{r.display}<Text style={{ color: colors.muted, fontWeight: '600', fontSize: 12 }}> {r.unit}</Text></Text>
-                  {r.combineVerified ? <VerifiedBadge /> : null}
+                <Row key={r.protocolId} style={{ borderBottomWidth: 1, borderBottomColor: colors.line, paddingVertical: 10, justifyContent: 'space-between' }}>
+                  <Text style={{ color: colors.text, fontSize: 14, flexShrink: 1 }}>{r.protocolTitle}</Text>
+                  <Row><Text style={{ color: colors.accentText, fontWeight: '700' }}>{r.display}<Text style={{ color: colors.muted, fontWeight: '600', fontSize: 12 }}> {r.unit}</Text></Text>{r.combineVerified ? <VerifiedBadge /> : null}</Row>
                 </Row>
-              )) : <Muted size={12}>{pt('cmbNoResults')}</Muted>}
-              {card.results.some((r) => r.combineVerified) ? (
-                <Muted size={11.5}>{pt('trsCombineVerifiedLine')}</Muted>
-              ) : null}
+              )) : <Muted size={12.5}>{pt('cmbNoResults')}</Muted>}
+              {card.results.some((r) => r.combineVerified) ? <Muted size={12}>{pt('trsCombineVerifiedLine')}</Muted> : null}
               <Disclosure label="About this result"><Muted size={12}>{card.note}</Muted></Disclosure>
             </View>
-          ) : null}
-
+          ) : <Muted size={12.5}>{pt('cmbLoading')}</Muted>}
           {/* M16.2 — Trust Score, in its OWN block outside the Combine Card.
-              It is deliberately separated by its own container, heading and
-              spacing so the number is never read as a Combine result, and it
-              never implies that a higher measured value earns more trust. */}
-          {showCard && trustProfile ? (
-            <View style={{ marginTop: 12, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 10, backgroundColor: colors.bg2 }}>
-              <Text style={{ color: colors.text, fontWeight: '800', fontSize: 13.5 }}>{pt('trsCombineBlock')}</Text>
+              It is deliberately separated by its own heading and spacing so
+              the number is never read as a Combine result, and it never
+              implies that a higher measured value earns more trust. */}
+          {trustProfile ? (
+            <View style={{ marginTop: 18, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.line }}>
+              <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13.5 }}>{pt('trsCombineBlock')}</Text>
               <TrustScoreHeader t={trustProfile} compact />
-              <Muted size={11.5}>{pt('trsCombineSeparate')}</Muted>
+              <Disclosure label="About this score"><Muted size={11.5}>{pt('trsCombineSeparate')}</Muted></Disclosure>
             </View>
           ) : null}
-
-          {/* Active Club Combine requests */}
-          {overview && overview.activeRequests.length > 0 ? (
-            <View style={{ marginTop: 10 }}>
-              <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{pt('cmbClubRequests')}</Text>
-              {overview.activeRequests.map((r) => <RequestRow key={r.id} r={r} protocols={protocols} onStart={start} canStart={isPlayer} />)}
-            </View>
-          ) : null}
-
-          {/* Protocol library — honest capability labels */}
-          <View style={{ marginTop: 10 }}>
-            <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{pt('cmbProtocols')}</Text>
-            {protocols.length === 0 ? <Muted size={12}>{isPlayer ? pt('cmbLoading') : pt('cmbProtocolsPlayerOnly')}</Muted> : null}
-            {protocols.map((p) => (
-              <View key={p.id} style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6, marginTop: 6 }}>
-                <Row>
-                  <Text style={{ color: colors.text, fontSize: 13, flexShrink: 1, fontWeight: '600' }}>{p.title}</Text>
-                  <Muted size={11}>{p.metricUnit}</Muted>
-                  {canMeasure(p) ? <Button small primary label={pt('cmbStart')} onPress={() => start(p)} /> : <Pill label={pt('cmbNotSupportedShort')} />}
-                </Row>
-                <Muted size={12}>{p.description}</Muted>
-                {!canMeasure(p) ? <Muted size={11.5}>{pt('cmbNotSupported')}</Muted> : null}
-                {DEMO && canMeasure(p) ? <Muted size={11.5}>{pt('cmbDemoSim')}</Muted> : null}
-              </View>
-            ))}
+        </View>
+      ) : (
+        <>
+          <SectionTitle>{pt('cmbTitle')}{childName ? ` — ${childName}` : ''}</SectionTitle>
+          <View testID="combine-exercises">
+            {exercises.length === 0 ? <Muted size={12.5}>{isPlayer ? pt('cmbLoading') : pt('cmbNoResults')}</Muted> : null}
+            {exercises.map((x) => <ListRow key={x.id} label={x.title} onPress={() => setPage({ kind: 'protocol', id: x.id, title: x.title })} testID={`combine-protocol-${x.id}`} />)}
+          </View>
+          <View style={{ marginTop: 18 }}>
+            {requests.length > 0 ? <ListRow label={pt('cmbRequestsRow')} value={requests.length === 1 ? pt('cmbRequestCount') : pt('cmbRequestsCount').replace('{n}', String(requests.length))} onPress={() => setPage({ kind: 'requests' })} testID="combine-requests-row" /> : null}
+            {isPlayer ? <ListRow label={pt('cmbCardRow')} onPress={() => void openCard()} testID="combine-card-row" /> : null}
+            <Disclosure label={pt('cmbAbout')} testID="combine-about">
+              <Muted size={12.5}>{pt('cmbTagline')} {pt('cmbSub')} {pt('cmbPoweredBy')}.</Muted>
+              {overview ? <Muted size={12.5}>{overview.capabilityNote}</Muted> : null}
+              {!isPlayer ? <Muted size={12.5}>{pt('cmbProtocolsPlayerOnly')}</Muted> : null}
+            </Disclosure>
           </View>
         </>
       )}
-
       {msg ? <Muted size={12}>{msg}</Muted> : null}
-    </Card>
+    </View>
   );
 }
 

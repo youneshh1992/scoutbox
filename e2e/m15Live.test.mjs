@@ -143,15 +143,17 @@ await player.waitForSelector('text=Football Passport', { timeout: 20000 });
   if (body.includes('Government identity verified')) fail('P1: over-claimed identity');
   if (!body.includes('not a rating of football ability')) fail('P1: passport self-description missing');
   say('P1: self passport renders with honest identity assurance and the no-rating note');
+  await player.locator('[data-testid="passport-achievements"] > [role="button"]').first().click(); // M24F.4 — Achievements is a row that opens
   await player.locator('[data-testid="passport-add-achievement"]').first().click(); // M24F.3 — the form sits behind a Disclosure
   await player.fill('input[placeholder="Achievement (e.g. League top scorer 2025)"]', 'County Cup Winner 2024');
-  await player.getByText('Add', { exact: true }).nth(0).click();
+  await player.locator('[data-testid="passport-add-achievement"]').getByText('Add', { exact: true }).click(); // M24F.4 — the Add inside its own row
   await player.waitForSelector('text=County Cup Winner 2024', { timeout: 15000 }); // M24F: the achievement carries a trophy icon, not a pictograph
   say('P1: achievement added (player-submitted until a club confirms it)');
+  await player.locator('[data-testid="passport-history"] > [role="button"]').first().click(); // M24F.4 — Club history is a row that opens
   await player.locator('[data-testid="passport-add-career"]').first().click(); // M24F.3 — the form sits behind a Disclosure
   await player.fill('input[placeholder="Club name"]', 'Sunday Kings FC');
   await player.fill('input[placeholder="From (e.g. 2019)"]', '2018');
-  await player.getByText('Add', { exact: true }).nth(1).click();
+  await player.locator('[data-testid="passport-add-career"]').getByText('Add', { exact: true }).click(); // M24F.4 — the Add inside its own row
   await player.waitForSelector('text=Sunday Kings FC', { timeout: 15000 });
   const after = await player.locator('body').innerText();
   if (!/Provided by player|Player supplied/.test(after)) fail('P1: player-provided provenance chip missing'); // M24F.3 — provenance words without glyphs

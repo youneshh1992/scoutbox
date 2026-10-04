@@ -104,7 +104,9 @@ for (const [w, h] of [[390, 844], [430, 932], [1024, 768]]) {
   const before = await chars(page); await about.click(); await sleep(400); const after = await chars(page);
   ok(after > before + 40, `${tag} Passport: About opens (${before} → ${after} characters)`);
   await about.click(); await sleep(300);
-  // Timeline
+  // Timeline — M24F.4: one root row ("Timeline · n events") opens the preview
+  ok((await page.locator('[data-testid^="passport-event-"]').count()) === 0, `${tag} Timeline: no event rows on the root`);
+  await page.locator('[data-testid="passport-timeline"] > [role="button"]').first().click(); await sleep(400);
   const events = page.locator('[data-testid^="passport-event-"]');
   const n = await events.count();
   ok(n > 0 && n <= 4, `${tag} Timeline: ${n} rows in the preview (≤ 4)`);

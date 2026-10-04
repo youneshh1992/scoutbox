@@ -171,7 +171,17 @@ async function reopenYou(p) {
   await p.waitForTimeout(1200);
 }
 
-const devText = (p) => p.locator('[aria-label="Development"]').first().innerText().catch(() => '');
+// M24F.4 — the Development root is four rows; the goal cards, the plan
+// switcher and the forms live on the Goals page behind "Current focus".
+const devText = (p) => p.locator('[data-testid="dev-page-goals"], [aria-label="Development"]').first().innerText().catch(() => '');
+async function openGoals(p) {
+  const focus = p.locator('[data-testid="dev-focus"]');
+  if (await focus.count()) { await focus.first().click(); await p.locator('[data-testid="dev-page-goals"]').waitFor({ timeout: 20000 }); await p.waitForTimeout(400); }
+}
+async function backToRoot(p) {
+  const back = p.locator('[data-testid="dev-back"]');
+  if (await back.count()) { await back.first().click(); await p.locator('[data-testid="dev-root"]').waitFor({ timeout: 20000 }); await p.waitForTimeout(300); }
+}
 
 /**
  * Switch the Development section to a named plan.
@@ -183,7 +193,8 @@ const devText = (p) => p.locator('[aria-label="Development"]').first().innerText
  * switcher.
  */
 async function selectPlan(p, title) {
-  const section = p.locator('[aria-label="Development"]').first();
+  await openGoals(p); // M24F.4 — the switcher sits on the Goals page
+  const section = p.locator('[data-testid="dev-page-goals"]').first();
   await section.waitFor({ timeout: 30000 });
   for (let i = 0; i < 30; i++) {
     const txt = await section.innerText().catch(() => '');
@@ -193,9 +204,9 @@ async function selectPlan(p, title) {
   await section.getByRole('button', { name: title, exact: true }).first().click();
   for (let i = 0; i < 25; i++) {
     await p.waitForTimeout(400);
-    const txt = (await section.innerText().catch(() => '')).trimStart();
-    // M24A: section headings are sentence case now ("Development", not "DEVELOPMENT"); the plan name must still lead the section.
-    if (txt.toUpperCase().startsWith(`DEVELOPMENT\n${title.toUpperCase()}`)) return true;
+    const lines = (await section.innerText().catch(() => '')).trimStart().toUpperCase().split('\n').map((l) => l.trim());
+    // M24A: section headings are sentence case now; M24F.4: the page reads back-link, "My goals", then the plan name — the plan name must still lead the page.
+    if (lines.slice(0, 4).includes(title.toUpperCase())) return true;
   }
   return false;
 }
@@ -203,12 +214,14 @@ async function selectPlan(p, title) {
 // ---------------------------------------------------------------------- H1
 {
   await player.getByText('Start a plan', { exact: true }).click();
-  await player.waitForSelector('text=/My development plan/', { timeout: 20000 });
+  await player.locator('[data-testid="dev-root"]').waitFor({ timeout: 20000 }); // M24F.4 — the four-row root
   say('H1: the player starts a plan from the empty state');
   await player.getByText('About these counts', { exact: true }).first().click().catch(() => {}); // M24F.3 — the denial of a headline number sits behind About
   const body = await seeDev(player);
   ok(/Active goals/.test(body) && /no overall figure/i.test(body),
     'H1: the overview shows counts, and says out loud that there is no overall figure');
+  await openGoals(player); // M24F.4 — the plan and its goals sit behind "Current focus"
+  await player.waitForSelector('text=/My development plan/', { timeout: 20000 });
 
   await player.fill('[aria-label="What do you want to work on?"]', 'Improve weak-foot passing consistency');
   await player.getByText('Add goal', { exact: true }).click();
@@ -216,12 +229,14 @@ async function selectPlan(p, title) {
   say('H1: the player adds a goal');
 
   await reopenYou(player);
+  await openGoals(player); // M24F.4 — the root names the current focus only; every goal is on the Goals page
   await player.waitForSelector('text=Improve weak-foot passing consistency', { timeout: 30000 });
   say('H1: after a reload the plan and its goal are still there — this is server state, not a draft');
 }
 
 // ---------------------------------------------------------------------- H2
 {
+  await openGoals(player); // M24F.4
   await player.getByText('Add action', { exact: true }).first().click();
   await player.fill('[aria-label="What is the next concrete step?"]', 'Two weak-foot passing sessions');
   await player.getByText('Add', { exact: true }).first().click();
@@ -254,6 +269,7 @@ async function selectPlan(p, title) {
   await j('POST', `/player/combine/attempts/${attempt.id}/complete`, { nonce }, KOLA);
 
   await reopenYou(player);
+  await openGoals(player); // M24F.4
   await player.getByText('Link evidence', { exact: true }).first().click();
   await player.waitForSelector('text=Link', { timeout: 20000 });
   await player.getByText('Link', { exact: true }).first().click();
@@ -274,6 +290,7 @@ async function selectPlan(p, title) {
     target: { sourceType: 'combine_attempt', protocolId: 'combine-box-control-60', operator: 'gte', value: 30 },
   }, KOLA);
   await reopenYou(player);
+  await openGoals(player); // M24F.4
   const body = await seeDev(player);
   ok(/Box Control 60 ≥ 30 seconds/.test(body), 'H7: the objective target states itself in words');
   ok(/No current valid measurement/.test(body),
@@ -429,6 +446,7 @@ let clubPlanId = null; let clubGoalId = null;
   ok(!/\bmeasured\b.*\d/i.test(clubPanel.split('Evidence unavailable')[1] ?? ''), 'H8: the withdrawn citation carries no measurement');
 
   await reopenYou(player);
+  await openGoals(player); // M24F.4
   const body = await player.locator('body').innerText();
   ok(/Evidence unavailable|Not available/.test(body), 'H8: and the player sees the same, on the plan the club shared with them');
   ok(!FORBIDDEN.some((re) => re.test(denials(body))), 'H8: still no score anywhere');
@@ -530,12 +548,19 @@ let clubPlanId = null; let clubGoalId = null;
   // Wait for the section to finish loading before judging what it shows.
   for (let i = 0; i < 40; i++) {
     const txt = await devText(small);
-    if (txt && !/Loading your development plan/.test(txt) && /MY GOALS|No development plan/.test(txt)) break;
+    if (txt && !/Loading your development plan/.test(txt) && /Current focus|MY GOALS|No development plan/i.test(txt)) break;
     await small.waitForTimeout(500);
   }
+  // M24F.4 — the root is four rows; the goals and the history are each one tap deep. Read all three.
+  const rootText = await small.locator('body').innerText();
+  await openGoals(small);
+  const goalsText = await small.locator('body').innerText();
+  await backToRoot(small);
+  const hist = small.locator('[data-testid="dev-history"]');
+  if (await hist.count()) { await hist.first().click(); await small.waitForTimeout(800); }
   await small.getByText('Show development history', { exact: true }).first().click().catch(() => {});
-  await small.waitForTimeout(1200);
-  const body = await small.locator('body').innerText();
+  await small.waitForTimeout(600);
+  const body = `${rootText}\n${goalsText}\n${await small.locator('body').innerText()}`;
   if (!/actions completed/.test(body)) console.error('   phone section:', (await devText(small)).slice(0, 700));
   ok(/Active goals/.test(body) && /actions completed/.test(body) && /Match understanding|Technical/.test(body),
     'H12: the plan, its goals and their counts are readable at 390px');

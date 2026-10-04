@@ -79,10 +79,10 @@ await player.locator('text=Enter').nth(0).click();          // Kola (adult)
 await player.waitForSelector('text=Your visibility right now', { timeout: 20000 });
 await player.click('a[href="/football"]');
 await player.getByRole('tab', { name: 'Box Cam' }).click();
-await player.waitForSelector('text=Train in the Box', { timeout: 20000 });
-say('B-live: player Football tab shows Box Training — "Train in the Box"');
+await player.waitForSelector('[data-testid="boxcam-start"]', { timeout: 20000 }); // M24F.4 — the root is session-led: the hero, one row, Start session
+say('B-live: player Football tab shows Box Cam with its Start session action');
 {
-  await player.getByText('Start Box Cam', { exact: true }).click();
+  await player.getByText('Start session', { exact: true }).click(); // M24F.4 — the primary action reads "Start session"
   // Box Cam Ready Check against the fake camera, then start.
   await player.waitForSelector('text=Box Cam Ready Check', { timeout: 20000 });
   say('B-live: Box Cam Ready Check runs against the (fake) camera');

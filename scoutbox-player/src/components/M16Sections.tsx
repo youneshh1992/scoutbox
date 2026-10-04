@@ -8,14 +8,16 @@
 // mode) it uses the honest web-limited provider (presence + active duration
 // only); the demo uses a clearly-labelled simulated provider.
 import { createElement, useEffect, useRef, useState } from 'react';
-import { Platform, View } from 'react-native';
+import { Platform, Pressable, View } from 'react-native';
 import { Text, TextInput } from './Text';
 import { useColors, type Palette } from '../theme';
-import { Button, Card, Muted, Pill, Row, Disclosure } from './ui';
+import { Button, Card, DetailLink, Disclosure, FactRow, ListRow, Muted, Pill, Row } from './ui';
+import { Icon } from './Icon';
+import { fmtShortDay } from '../time';
 import { m16, type BoxActor, type BoxAssignment, type BoxChallenge, type BoxDashboard, type BoxDrill, type BoxSession, type BoxTarget, type DevelopmentPlan, type BoxPrefs } from '../data/m16client';
 import { pt } from '../i18n';
 import { M22BoxCamCv } from './M22BoxCamCv';
-import { Footnote, Greeting, HistoryList, LightLabel, RefCard, SessionFacts, SectionHead, TrainingVisual } from './Reference';
+import { SessionFacts, SectionHead, TrainingVisual } from './Reference';
 
 const DEMO = process.env.EXPO_PUBLIC_DEMO === '1';
 const WEB = Platform.OS === 'web';
@@ -209,6 +211,29 @@ function ResultCard({ actor, session, onClose, reload }: { actor: BoxActor; sess
 }
 
 // ------------------------------------------------------------ main section
+/** One recorded session, in full: the drill, the day, the verified time or
+ *  reps, the server's state word and sentence, the provenance. Opened from the
+ *  latest-session row or a Recent row; nothing here is on the root. */
+function SessionDetail({ s, onBack }: { s: BoxSession; onBack: () => void }) {
+  const colors = useColors();
+  const when = s.endedAt ?? s.createdAt;
+  return (
+    <View testID="boxcam-session-detail">
+      <Pressable onPress={onBack} accessibilityRole="button" accessibilityLabel={pt('bcBack')} testID="boxcam-back" style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 8, alignSelf: 'flex-start' }, pressed && { opacity: 0.7 }]}>
+        <Icon name="chevron-left" size={16} color={colors.accent2} /><Text style={{ color: colors.accent2, fontSize: 13, fontWeight: '500' }}>{pt('bcBack')}</Text>
+      </Pressable>
+      <SectionHead title={s.drillTitle} />
+      <FactRow k={pt('bcRecorded')} v={fmtShortDay(when)} />
+      <FactRow k={pt('m16boxVerified')} v={s.verifiedReps != null ? `${s.verifiedReps} reps` : fmt(s.verifiedActiveMs ?? 0)} />
+      <FactRow k={pt('m16session')} v={fmt(s.sessionDurationMs ?? 0)} />
+      <FactRow k={pt('m16target')} v={s.target.type === 'duration' ? fmt(s.target.value) : `${s.target.value}`} />
+      <View style={{ marginTop: 12 }}><Row><StatePill state={s.verificationState} />{s.simulated ? <Pill label={pt('m16sim')} /> : null}</Row></View>
+      {s.stateCopy ? <Muted size={12.5}>{s.stateCopy}</Muted> : null}
+      {s.provenanceDetail ? <Disclosure label={s.provenanceLabel ?? pt('m15source')}><Muted size={12.5}>{s.provenanceDetail}</Muted></Disclosure> : null}
+    </View>
+  );
+}
+
 export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxActor; isMinor?: boolean; childName?: string }) {
   const colors = useColors();
   // M22 §55 — the live server-side CV path, alongside the existing M16
@@ -224,6 +249,7 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
   const [capture, setCapture] = useState<{ drill: BoxDrill; target: BoxTarget; assignmentId?: string; challengeEntryId?: string } | null>(null);
   const [result, setResult] = useState<BoxSession | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [detail, setDetail] = useState<BoxSession | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [cv, setCv] = useState<{ sessionId: string; nonce: string; protocolId: string } | null>(null);
   const [cvStarting, setCvStarting] = useState(false);
@@ -263,10 +289,12 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
     setCapture({ drill, target, assignmentId, challengeEntryId });
   };
 
-  // M24C — the reference Box Cam page: the next session as a hero, the drill
-  // as a heading with its target facts, the lime primary action, then the
-  // recent sessions as numbered records. The drill, target and sessions are
-  // the server's; the rest of Box Training follows underneath unchanged.
+  // M24F.4 — the root is session-led: the latest session as the hero, one
+  // row naming it with its day, the one primary action, the recent sessions
+  // as rows (title · day · state word), and two rows that open everything
+  // else — how Box Cam works (setup, drill, checks) and the training record
+  // (activity, assignments, bests, challenges, sharing). The drill, target
+  // and sessions are the server's; this screen never asserts a result.
   const next = drills[0] ?? null;
   const nextTarget: BoxTarget | null = next ? (next.targetTypes[0] === 'repetitions' ? { type: 'repetitions', value: 100 } : { type: 'duration', value: 20 * 60000 }) : null;
   const targetFact = nextTarget
@@ -274,17 +302,21 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
       : nextTarget.value >= 60000 ? pt('bcPracticeMin').replace('{n}', String(Math.round(nextTarget.value / 60000)))
         : pt('bcPracticeLen').replace('{n}', String(Math.round(nextTarget.value / 1000)))
     : '';
-  const dayOf = (ts: number | null) => (ts ? String(new Date(ts).getDate()).padStart(2, '0') : '—');
-  const dateOf = (ts: number | null) => (ts ? new Date(ts).toLocaleDateString(undefined, { day: 'numeric', month: 'long' }) : '');
+  const latest = dash?.recent[0] ?? null;
+  const stateWord = (s2: BoxSession) => (s2.verificationState ? pt(`m16state_${s2.verificationState}` as Parameters<typeof pt>[0]) : undefined) ?? pt('bcRecorded');
+  const recentRows = dash ? (expanded ? dash.recent : dash.recent.slice(0, 3)) : [];
+
+  if (detail) return <View testID="boxcam-section"><SessionDetail s={detail} onBack={() => setDetail(null)} /></View>;
+
   return (
     <View style={{ gap: 0 }} testID="boxcam-section">
-      <Greeting kicker={`${pt('tabFootball')} / ${pt('segBoxCam')}${childName ? ` — ${childName}` : ''}`} title={pt('bcNextSession')} />
-      <TrainingVisual title={next?.title ?? pt('m16trainInBox')} sub={targetFact || pt('m16tagline')} />
-      <SectionHead title={next?.title ?? pt('m16trainInBox')} />
-      <View style={{ marginTop: -8, marginBottom: 10, flexDirection: 'row' }}><LightLabel label={pt('bcPractice')} /></View>
-      <Muted size={13}>{pt('bcSetupHint')}</Muted>
-      {next?.setup?.space ? <Disclosure label="About this drill"><Muted size={12}>{next.summary}</Muted></Disclosure> : null}
-      {next ? <SessionFacts facts={[{ icon: 'timer', label: targetFact }, { icon: 'circle-check', label: next.setup?.equipment?.[0] ?? pt('bcOneBall') }]} /> : null}
+      {childName ? <Muted size={12}>{childName}</Muted> : null}
+      <TrainingVisual bare title={latest?.drillTitle ?? next?.title ?? pt('m16trainInBox')} sub={targetFact} />
+      {latest ? (
+        <ListRow label={latest.drillTitle} value={`${pt('bcRecordedOn').replace('{when}', fmtShortDay(latest.endedAt ?? latest.createdAt))} · ${stateWord(latest)}`} onPress={() => setDetail(latest)} testID="boxcam-latest" />
+      ) : next ? (
+        <ListRow label={next.title} value={targetFact} testID="boxcam-latest" />
+      ) : null}
 
       {cv ? (
         <M22BoxCamCv
@@ -300,115 +332,96 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
       ) : result ? (
         <ResultCard actor={actor} session={result} onClose={() => setResult(null)} reload={reloadAll} />
       ) : (
-        <View style={{ gap: 8 }}>
-          <Button primary label={pt('m16startBoxCam')} onPress={() => drills[0] && startDrill(drills[0])} />
+        <View style={{ marginTop: 14 }}>
+          <Button primary label={pt('bcStartSession')} onPress={() => drills[0] && startDrill(drills[0])} testID="boxcam-start" />
           {actor.kind === 'player' ? (
-            <Button
-              label={cvStarting ? pt('m22checking') : pt('m22startObservation')}
-              disabled={cvStarting}
-              onPress={() => void startCv()}
-            />
+            <ListRow label={cvStarting ? pt('m22checking') : pt('m22startObservation')} onPress={cvStarting ? undefined : () => void startCv()} testID="boxcam-observe" />
           ) : null}
-          {dash ? <Row><Pill label={`${pt('m16streak')}: ${dash.streakWeeks}`} tone="gold" /></Row> : null}
         </View>
       )}
 
-      {/* Recent sessions — the reference's numbered records (server sessions, verbatim). */}
+      {/* Recent — one row per session: the drill, the day and the server's state word. */}
       {dash && dash.recent.length > 0 ? (
-        <>
+        <View style={{ marginTop: 10 }}>
           <SectionHead title={pt('bcRecent')} />
-          <HistoryList
-            testID="boxcam-recent"
-            rows={(expanded ? dash.recent : dash.recent.slice(0, 4)).map((s2) => ({
-              index: dayOf(s2.endedAt ?? s2.createdAt),
-              title: s2.drillTitle,
-              sub: `${dateOf(s2.endedAt ?? s2.createdAt)} · ${s2.verifiedReps != null ? `${s2.verifiedReps} reps` : fmt(s2.verifiedActiveMs ?? 0)} · ${s2.stateCopy ?? pt('bcRecorded')}${s2.simulated ? ` · ${pt('m16sim')}` : ''}`,
-            }))}
-          />
-          {dash.recent.length > 4 ? <Row style={{ marginTop: 8 }}><Button small label={expanded ? pt('m16less') : pt('m16more')} onPress={() => setExpanded((x) => !x)} /></Row> : null}
-        </>
-      ) : null}
-      <Footnote>{pt('bcSeparate')}</Footnote>
-
-      <SectionHead title={pt('bcMore')} />
-      <RefCard>
-      <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{pt('m16title')} · {pt('m16trainInBox')}</Text>
-      <Muted size={12}>{pt('m16tagline')}</Muted>
-
-      {/* Development activity — evidence of training, never a rating */}
-      {plan ? (
-        <View style={{ marginTop: 10 }}>
-          <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{pt('m16devActivity')} ({plan.activity.days}d)</Text>
-          <Muted size={12}>{pt('m16sessionsLabel')}: {plan.activity.boxSessions} · {pt('m16verifiedTraining')}: {fmt(plan.activity.verifiedActiveMs)} · {pt('m16assigned')}: {plan.activity.assignedCompleted}/{plan.activity.assigned}</Muted>
-          <Muted size={11.5}>{plan.activity.note}</Muted>
+          <View testID="boxcam-recent">
+            {recentRows.map((s2) => (
+              <ListRow key={s2.id} label={s2.drillTitle} value={`${fmtShortDay(s2.endedAt ?? s2.createdAt)} · ${stateWord(s2)}${s2.simulated ? ` · ${pt('m16sim')}` : ''}`} onPress={() => setDetail(s2)} testID={`boxcam-session-${s2.id}`} />
+            ))}
+          </View>
+          {dash.recent.length > 3 ? <DetailLink label={expanded ? pt('m16less') : `${pt('bcViewAll')} · ${pt('bcSessions').replace('{n}', String(dash.recent.length))}`} onPress={() => setExpanded((x) => !x)} testID="boxcam-recent-all" /> : null}
         </View>
       ) : null}
 
-      {/* Assignments */}
-      {plan && plan.assignments.length > 0 ? (
-        <View style={{ marginTop: 10 }}>
-          <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{pt('m16assignments')}</Text>
-          {plan.assignments.map((a) => (
-            <AssignmentRow key={a.id} a={a} drills={drills} onStart={startDrill} onAccept={async () => { try { await m16.acceptAssignment(actor, a.id); reloadAll(); } catch (e) { setMsg(e instanceof Error ? e.message : 'failed'); } }} />
-          ))}
-        </View>
-      ) : null}
+      <View style={{ marginTop: 14 }}>
+        {/* How Box Cam works — the setup, the drill, the facts, the demo note, the checks. */}
+        <Disclosure label={pt('bcHowItWorks')} testID="boxcam-how">
+          <Muted size={13}>{pt('bcSetupHint')}</Muted>
+          {next ? <SessionFacts facts={[{ icon: 'timer', label: targetFact }, { icon: 'circle-check', label: next.setup?.equipment?.[0] ?? pt('bcOneBall') }]} /> : null}
+          {next?.summary ? <Muted size={12.5}>{next.summary}</Muted> : null}
+          {next?.setup?.space ? <Muted size={12.5}>{pt('m16setup')}: {next.setup.space} · {next.setup.framing}</Muted> : null}
+          <Muted size={12.5}>{pt('bcSeparate')}</Muted>
+          {DEMO ? <Muted size={12.5}>{pt('m16demoSim')}</Muted> : null}
+          {drillData?.providers.some((p) => p.id === 'production_cv') ? <Disclosure label="About Box Cam checks" testID="boxcam-about"><Muted size={12}>{pt('m16providerNote')}</Muted></Disclosure> : null}
+        </Disclosure>
 
-      {/* Verification state per recent session (the reference list above shows the record; this shows the server's state word). */}
-      {dash && dash.recent.length > 0 ? (
-        <View style={{ marginTop: 10 }}>
-          <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{pt('m16myTraining')}</Text>
-          {dash.recent.slice(0, expanded ? undefined : 4).map((s) => (
-            <Row key={s.id} style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6, marginTop: 6 }}>
-              <Text style={{ color: colors.text, fontSize: 13, flexShrink: 1 }}>{s.drillTitle}</Text>
-              <StatePill state={s.verificationState} />
-            </Row>
-          ))}
-        </View>
-      ) : null}
-
-      {/* Best */}
-      {dash && dash.bests.length > 0 ? (
-        <View style={{ marginTop: 8 }}>
-          <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{pt('m16boxBest')}</Text>
-          {dash.bests.map((b) => <Muted key={`${b.drillId}${b.drillVersion}`} size={12}>{b.drillId} — {b.bestReps != null ? `${b.bestReps} reps` : b.bestActive}</Muted>)}
-          <Muted size={11}>{dash.streakNote}</Muted>
-        </View>
-      ) : null}
-
-      {/* Challenges */}
-      {challenges && challenges.length > 0 ? (
-        <View style={{ marginTop: 10 }}>
-          <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{pt('m16challenges')}</Text>
-          {challenges.map((c) => (
-            <View key={c.id} style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6, marginTop: 6 }}>
-              <Row><Text style={{ color: colors.text, fontSize: 13, flexShrink: 1 }}>{c.title}</Text>
-                {c.entry ? <Pill label={c.entry.status === 'completed' ? pt('m16completed') : `${c.entry.progress}/${c.targetTotal}`} tone={c.entry.status === 'completed' ? 'green' : 'default'} /> : <Button small label={pt('m16join')} onPress={async () => { try { await m16.joinChallenge(actor, c.id); reloadChallenges(); } catch (e) { setMsg(e instanceof Error ? e.message : 'failed'); } }} />}
-              </Row>
-              <Muted size={11}>{c.publisher.kind === 'org' ? `${pt('m16by')} ${c.publisher.orgName}` : pt('m16byScoutbox')}</Muted>
+        {/* Training record — activity, assignments, state per session, bests, challenges, sharing. */}
+        <Disclosure label={pt('bcMoreTitle')} testID="boxcam-record" hint={dash ? pt('bcStreakLine').replace('{n}', String(dash.streakWeeks)) : undefined}>
+          {plan ? (
+            <View>
+              <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 }}>{pt('m16devActivity')} ({plan.activity.days}d)</Text>
+              <Muted size={12}>{pt('m16sessionsLabel')}: {plan.activity.boxSessions} · {pt('m16verifiedTraining')}: {fmt(plan.activity.verifiedActiveMs)} · {pt('m16assigned')}: {plan.activity.assignedCompleted}/{plan.activity.assigned}</Muted>
+              <Disclosure label="About these figures"><Muted size={11.5}>{plan.activity.note}</Muted></Disclosure>
             </View>
-          ))}
-          {challenges[0]?.disclaimer ? <Disclosure label="About Box Challenges" testID="boxchallenge-about"><Muted size={12}>{challenges[0].disclaimer}</Muted></Disclosure> : null}
-        </View>
-      ) : null}
+          ) : null}
 
-      {/* Sharing / privacy */}
-      {prefs ? (
-        <View style={{ marginTop: 10 }}>
-          <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{pt('m16sharing')}</Text>
-          {canManageSharing ? (
-            <Row style={{ marginTop: 4 }}>
-              <Button small label={prefs.shareDevelopmentActivity === 'recruitment' ? `✓ ${pt('m16shareRec')}` : pt('m16shareRec')}
-                onPress={async () => { try { await m16.setPrefs(actor, { shareDevelopmentActivity: prefs.shareDevelopmentActivity === 'recruitment' ? 'private' : 'recruitment' }); reloadPrefs(); } catch (e) { setMsg(e instanceof Error ? e.message : 'failed'); } }} />
-            </Row>
-          ) : <Muted size={12}>{pt('m16shareMinor')}</Muted>}
-          <Muted size={11}>{pt('m16shareNote')}</Muted>
-        </View>
-      ) : null}
+          {plan && plan.assignments.length > 0 ? (
+            <View style={{ marginTop: 10 }}>
+              <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 }}>{pt('m16assignments')}</Text>
+              {plan.assignments.map((a) => (
+                <AssignmentRow key={a.id} a={a} drills={drills} onStart={startDrill} onAccept={async () => { try { await m16.acceptAssignment(actor, a.id); reloadAll(); } catch (e) { setMsg(e instanceof Error ? e.message : 'failed'); } }} />
+              ))}
+            </View>
+          ) : null}
 
-      {drillData?.providers.some((p) => p.id === 'production_cv') ? <Disclosure label="About Box Cam checks" testID="boxcam-about"><Muted size={12}>{pt('m16providerNote')}</Muted></Disclosure> : null}
-      {msg ? <Muted size={12}>{msg}</Muted> : null}
-      </RefCard>
+          {dash && dash.bests.length > 0 ? (
+            <View style={{ marginTop: 10 }}>
+              <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 }}>{pt('m16boxBest')}</Text>
+              {dash.bests.map((b) => <Muted key={`${b.drillId}${b.drillVersion}`} size={12}>{b.drillId} — {b.bestReps != null ? `${b.bestReps} reps` : b.bestActive}</Muted>)}
+              <Disclosure label="About the streak"><Muted size={11.5}>{dash.streakNote}</Muted></Disclosure>
+            </View>
+          ) : null}
+
+          {challenges && challenges.length > 0 ? (
+            <View style={{ marginTop: 10 }}>
+              <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 }}>{pt('m16challenges')}</Text>
+              {challenges.map((c) => (
+                <View key={c.id} style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6, marginTop: 6 }}>
+                  <Row><Text style={{ color: colors.text, fontSize: 13, flexShrink: 1 }}>{c.title}</Text>
+                    {c.entry ? <Pill label={c.entry.status === 'completed' ? pt('m16completed') : `${c.entry.progress}/${c.targetTotal}`} tone={c.entry.status === 'completed' ? 'green' : 'default'} /> : <Button small label={pt('m16join')} onPress={async () => { try { await m16.joinChallenge(actor, c.id); reloadChallenges(); } catch (e) { setMsg(e instanceof Error ? e.message : 'failed'); } }} />}
+                  </Row>
+                  <Muted size={11}>{c.publisher.kind === 'org' ? `${pt('m16by')} ${c.publisher.orgName}` : pt('m16byScoutbox')}</Muted>
+                </View>
+              ))}
+              {challenges[0]?.disclaimer ? <Disclosure label="About Box Challenges" testID="boxchallenge-about"><Muted size={12}>{challenges[0].disclaimer}</Muted></Disclosure> : null}
+            </View>
+          ) : null}
+
+          {prefs ? (
+            <View style={{ marginTop: 10 }}>
+              <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 }}>{pt('m16sharing')}</Text>
+              {canManageSharing ? (
+                <Row style={{ marginTop: 4 }}>
+                  <Button small label={prefs.shareDevelopmentActivity === 'recruitment' ? `✓ ${pt('m16shareRec')}` : pt('m16shareRec')}
+                    onPress={async () => { try { await m16.setPrefs(actor, { shareDevelopmentActivity: prefs.shareDevelopmentActivity === 'recruitment' ? 'private' : 'recruitment' }); reloadPrefs(); } catch (e) { setMsg(e instanceof Error ? e.message : 'failed'); } }} />
+                </Row>
+              ) : <Muted size={12}>{pt('m16shareMinor')}</Muted>}
+              <Disclosure label="About sharing"><Muted size={11.5}>{pt('m16shareNote')}</Muted></Disclosure>
+            </View>
+          ) : null}
+          {msg ? <Muted size={12}>{msg}</Muted> : null}
+        </Disclosure>
+      </View>
     </View>
   );
 }

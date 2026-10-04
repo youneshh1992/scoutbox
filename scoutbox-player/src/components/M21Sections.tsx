@@ -15,10 +15,11 @@
 //   • a club's internal review note. It is not in the payload — the screen
 //     shows that the club wrote one, which is different from showing it.
 import { useEffect, useState } from 'react';
-import { View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { Text, TextInput } from './Text';
 import { useColors, type Palette } from '../theme';
-import { Button, Card, Disclosure, Muted, Pill, Row, SectionTitle } from './ui';
+import { Button, Card, Disclosure, ListRow, Muted, Pill, Row, SectionTitle } from './ui';
+import { Icon } from './Icon';
 import {
   m21, type DevActor, type DevelopmentPlanView, type GoalView, type ActionView,
   type EvidenceView, type ReviewView, type TargetView, type DevelopmentCatalogue,
@@ -292,7 +293,8 @@ export function DevelopmentHubSection({ actor }: { actor: DevActor }) {
   const [view, reloadPlan, err] = useLoad<DevelopmentPlanView | null>(
     async () => (planId ? m21.plan(actor, planId) : null), [actor.id, planId],
   );
-  const [showHistory, setShowHistory] = useState(false);
+  // M24F.4 — the root is four rows; each opens its own page-local detail.
+  const [page, setPage] = useState<'goals' | 'feedback' | 'progress' | 'history' | null>(null);
   const [reflection, setReflection] = useState('');
   const [newGoal, setNewGoal] = useState('');
   const [busy, setBusy] = useState(false);
@@ -335,7 +337,7 @@ export function DevelopmentHubSection({ actor }: { actor: DevActor }) {
               })}
             />
           </Row>
-          {cat ? <Muted size={11}>{cat.goalLibrary.note}</Muted> : null}
+          {cat ? <Disclosure label="About goals"><Muted size={12}>{cat.goalLibrary.note}</Muted></Disclosure> : null}
         </Card>
       </View>
     );
@@ -351,32 +353,30 @@ export function DevelopmentHubSection({ actor }: { actor: DevActor }) {
   }
 
   const s = view.summary;
+  const focus = view.goals.find((g) => g.status === 'in_progress') ?? view.goals.find((g) => g.status !== 'achieved') ?? view.goals[0] ?? null;
+  const latestReview = [...view.reviews].sort((a, b) => b.reviewedAt - a.reviewedAt)[0] ?? null;
+  const actions = view.goals.flatMap((g) => g.actions);
+  const actionsDone = actions.filter((a) => a.status === 'done').length;
+  const clip = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t);
+  const back = (
+    <Pressable onPress={() => setPage(null)} accessibilityRole="button" accessibilityLabel={pt('devBack')} testID="dev-back" hitSlop={8} style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 8, alignSelf: 'flex-start' }, pressed && { opacity: 0.7 }]}>
+      <Icon name="chevron-left" size={16} color={colors.accent2} />
+      <Text style={{ color: colors.accent2, fontSize: 13, fontWeight: '500' }}>{pt('devBack')}</Text>
+    </Pressable>
+  );
 
-  return (
-    <View style={{ gap: 8 }} accessibilityLabel={pt('m21title')}>
-      <SectionTitle>{pt('m21title')}</SectionTitle>
-
-      {/* ---- Overview */}
-      <Card>
+  // ---- Goals: the plan, every goal with its actions, evidence and the add form
+  if (page === 'goals') {
+    return (
+      <View style={{ gap: 8 }} accessibilityLabel={pt('m21goals')} testID="dev-page-goals">
+        {back}
+        <SectionTitle>{pt('m21goals')}</SectionTitle>
         <Row>
-          <Text style={{ color: colors.text, fontSize: 16, fontWeight: '700', flexShrink: 1 }}>{view.plan.title}</Text>
+          <Text style={{ color: colors.text, fontSize: 15, fontWeight: '700', flexShrink: 1 }}>{view.plan.title}</Text>
           <Pill label={label(`m21plan_${view.plan.status}`, view.plan.status)} tone={view.plan.status === 'active' ? 'green' : 'default'} />
           <Pill label={label(`m21vis_${view.plan.visibility}`, view.plan.visibility)} />
         </Row>
         {view.plan.owner.kind === 'org' ? <Muted size={12}>{pt('m21clubPlan')} — {view.plan.owner.orgName}</Muted> : null}
-        <Row>
-          <Muted size={13}>{pt('m21activeGoals')}: {s.activeGoals}</Muted>
-          <Muted size={13}>· {pt('m21actionsDue')}: {s.actionsDue}</Muted>
-          {s.actionsOverdue ? <Pill label={`${s.actionsOverdue} ${pt('m21overdue')}`} tone="gold" /> : null}
-        </Row>
-        <Row>
-          <Muted size={13}>{pt('m21lastReview')}: {s.lastReviewAt ? pFmtDate(s.lastReviewAt) : pt('m21none')}</Muted>
-          <Muted size={13}>· {pt('m21nextReview')}: {s.nextReviewAt ? pFmtDate(s.nextReviewAt) : pt('m21none')}</Muted>
-          {s.reviewDue.state === 'review_overdue' ? <Pill label={pt('m21reviewOverdue')} tone="gold" /> : null}
-        </Row>
-        <Muted size={13}>{pt('m21linkedEvidence')}: {s.linkedEvidenceAvailable}</Muted>
-        {/* Said out loud where a headline number would otherwise sit. */}
-        <Disclosure label="About these counts"><Muted size={12}>{s.note}</Muted>{cat ? <Muted size={12}>{cat.reminders.note}</Muted> : null}</Disclosure>
         {list && list.items.length > 1 ? (
           <Row>
             {list.items.map((p) => (
@@ -384,90 +384,133 @@ export function DevelopmentHubSection({ actor }: { actor: DevActor }) {
             ))}
           </Row>
         ) : null}
-      </Card>
-
-      {/* ---- Goals (with their actions and evidence) */}
-      <SectionTitle>{pt('m21goals')}</SectionTitle>
-      {view.goals.length === 0 ? <Card><Muted>{pt('m21noGoals')}</Muted></Card> : null}
-      {view.goals.map((g) => <GoalCard key={g.id} g={g} view={view} actor={actor} reload={reload} />)}
-
-      {view.access.writeGoals ? (
-        <Card>
-          <TextInput
-            style={inputStyle(colors)}
-            value={newGoal}
-            onChangeText={setNewGoal}
-            placeholder={pt('m21goalTitle')}
-            placeholderTextColor={colors.muted}
-            accessibilityLabel={pt('m21goalTitle')}
-          />
-          <Row>
-            <Button small primary label={pt('m21addGoal')} disabled={busy || !newGoal.trim()} onPress={() => run(async () => {
-              await m21.addGoal(actor, view.plan.id, { title: newGoal.trim(), category: 'technical' });
-              setNewGoal('');
-            })} />
-          </Row>
-          {cat ? (
-            <View style={{ gap: 4 }}>
-              <Muted size={11}>{cat.goalLibrary.note}</Muted>
-              <Row>
-                {cat.goalLibrary.items.slice(0, 4).map((i) => (
-                  <Button key={i.id} small label={i.title} onPress={() => setNewGoal(i.title)} />
-                ))}
-              </Row>
-            </View>
-          ) : null}
-        </Card>
-      ) : null}
-
-      {/* ---- Reviews */}
-      <SectionTitle>{pt('m21reviews')}</SectionTitle>
-      {view.reviews.length === 0 ? <Card><Muted>{pt('m21noReviews')}</Muted></Card> : null}
-      {view.reviews.map((r) => <ReviewCard key={r.id} r={r} />)}
-
-      {view.access.reflect ? (
-        <Card>
-          <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600' }}>{pt('m21addReflection')}</Text>
-          {/* A reflection is never presented as an assessment. */}
-          <Muted size={12}>{pt('m21reflectionNote')}</Muted>
-          <TextInput
-            style={[inputStyle(colors), { minHeight: 64 }]}
-            multiline
-            value={reflection}
-            onChangeText={setReflection}
-            placeholder={pt('m21reflectionPlaceholder')}
-            placeholderTextColor={colors.muted}
-            accessibilityLabel={pt('m21addReflection')}
-          />
-          <Row>
-            <Button small primary label={pt('m21submit')} disabled={busy || !reflection.trim()} onPress={() => run(async () => {
-              await m21.addReflection(actor, view.plan.id, { summary: reflection.trim() });
-              setReflection('');
-            })} />
-          </Row>
-        </Card>
-      ) : null}
-
-      {/* ---- History */}
-      <Row>
-        <Button small label={showHistory ? pt('m21hideHistory') : pt('m21showHistory')} onPress={() => setShowHistory((x) => !x)} />
-      </Row>
-      {showHistory ? (
-        <Card>
-          {view.timeline.length === 0 ? <Muted>{pt('m21noHistory')}</Muted> : null}
-          {view.timeline.map((h) => (
-            <Row key={h.id}>
-              <Muted size={12}>{pFmtDate(h.at)}</Muted>
-              <Text style={{ color: colors.text, fontSize: 12.5, flexShrink: 1 }}>{h.label}</Text>
-              {h.subject.title ? <Muted size={12}>— {h.subject.title}</Muted> : null}
-              {h.byName ? <Muted size={11}>· {h.byName}</Muted> : null}
+        {view.goals.length === 0 ? <Card><Muted>{pt('m21noGoals')}</Muted></Card> : null}
+        {view.goals.map((g) => <GoalCard key={g.id} g={g} view={view} actor={actor} reload={reload} />)}
+        {view.access.writeGoals ? (
+          <Card>
+            <TextInput
+              style={inputStyle(colors)}
+              value={newGoal}
+              onChangeText={setNewGoal}
+              placeholder={pt('m21goalTitle')}
+              placeholderTextColor={colors.muted}
+              accessibilityLabel={pt('m21goalTitle')}
+            />
+            <Row>
+              <Button small primary label={pt('m21addGoal')} disabled={busy || !newGoal.trim()} onPress={() => run(async () => {
+                await m21.addGoal(actor, view.plan.id, { title: newGoal.trim(), category: 'technical' });
+                setNewGoal('');
+              })} />
             </Row>
-          ))}
-        </Card>
-      ) : null}
+            {cat ? (
+              <View style={{ gap: 4 }}>
+                <Row>
+                  {cat.goalLibrary.items.slice(0, 4).map((i) => (
+                    <Button key={i.id} small label={i.title} onPress={() => setNewGoal(i.title)} />
+                  ))}
+                </Row>
+                <Disclosure label="About goals"><Muted size={12}>{cat.goalLibrary.note}</Muted></Disclosure>
+              </View>
+            ) : null}
+          </Card>
+        ) : null}
+      </View>
+    );
+  }
 
-      <Disclosure label="About this plan"><Muted size={12}>{view.limitation}</Muted></Disclosure>
-      <Muted size={11}>{view.neverBuilt.note}</Muted>
+  // ---- Feedback: every review, newest first, then the reflection form
+  if (page === 'feedback') {
+    return (
+      <View style={{ gap: 8 }} accessibilityLabel={pt('m21reviews')} testID="dev-page-feedback">
+        {back}
+        <SectionTitle>{pt('m21reviews')}</SectionTitle>
+        {view.reviews.length === 0 ? <Card><Muted>{pt('m21noReviews')}</Muted></Card> : null}
+        {[...view.reviews].sort((a, b) => b.reviewedAt - a.reviewedAt).map((r) => <ReviewCard key={r.id} r={r} />)}
+        {view.access.reflect ? (
+          <Card>
+            <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600' }}>{pt('m21addReflection')}</Text>
+            {/* A reflection is never presented as an assessment. */}
+            <Muted size={12}>{pt('m21reflectionNote')}</Muted>
+            <TextInput
+              style={[inputStyle(colors), { minHeight: 64 }]}
+              multiline
+              value={reflection}
+              onChangeText={setReflection}
+              placeholder={pt('m21reflectionPlaceholder')}
+              placeholderTextColor={colors.muted}
+              accessibilityLabel={pt('m21addReflection')}
+            />
+            <Row>
+              <Button small primary label={pt('m21submit')} disabled={busy || !reflection.trim()} onPress={() => run(async () => {
+                await m21.addReflection(actor, view.plan.id, { summary: reflection.trim() });
+                setReflection('');
+              })} />
+            </Row>
+          </Card>
+        ) : null}
+      </View>
+    );
+  }
+
+  // ---- Progress: the actions across every goal, each with its state word
+  if (page === 'progress') {
+    return (
+      <View style={{ gap: 8 }} accessibilityLabel={pt('devProgress')} testID="dev-page-progress">
+        {back}
+        <SectionTitle>{pt('devProgress')}</SectionTitle>
+        <Muted size={13}>Active goals {s.activeGoals} · {pt('m21actionsDue')} {s.actionsDue}{s.actionsOverdue ? ` · ${s.actionsOverdue} ${pt('m21overdue')}` : ''}</Muted>
+        <Muted size={13}>{pt('m21lastReview')}: {s.lastReviewAt ? pFmtDate(s.lastReviewAt) : pt('m21none')} · {pt('m21nextReview')}: {s.nextReviewAt ? pFmtDate(s.nextReviewAt) : pt('m21none')}</Muted>
+        {view.goals.map((g) => (
+          <View key={g.id} style={{ gap: 2, paddingTop: 8 }}>
+            <Row><Text style={{ color: colors.text, fontSize: 14, fontWeight: '600', flexShrink: 1 }}>{g.title}</Text><Pill label={goalStatusLabel(g.status)} tone={GOAL_TONE[g.status] ?? 'default'} /></Row>
+            <Muted size={12.5}>{g.completion.phrase}</Muted>
+            {g.actions.map((a) => (
+              <ActionRow
+                key={a.id}
+                a={a}
+                canWrite={!!view.access.writeGoals || a.assignee?.kind === 'player'}
+                onSet={(status) => run(() => m21.updateAction(actor, a.id, { status }))}
+              />
+            ))}
+          </View>
+        ))}
+        <Disclosure label="About these counts"><Muted size={12}>{s.note}</Muted>{cat ? <Muted size={12}>{cat.reminders.note}</Muted> : null}</Disclosure>
+      </View>
+    );
+  }
+
+  // ---- History: the plan's timeline
+  if (page === 'history') {
+    return (
+      <View style={{ gap: 8 }} accessibilityLabel={pt('devHistory')} testID="dev-page-history">
+        {back}
+        <SectionTitle>{pt('devHistory')}</SectionTitle>
+        {view.timeline.length === 0 ? <Muted>{pt('m21noHistory')}</Muted> : null}
+        {view.timeline.map((h) => (
+          <View key={h.id} style={{ flexDirection: 'row', gap: 12, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: colors.line }}>
+            <Text style={{ width: 62, color: colors.muted, fontSize: 12, lineHeight: 18 }}>{pFmtDate(h.at)}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.text, fontSize: 13.5, lineHeight: 18 }}>{h.label}{h.subject.title ? ` — ${h.subject.title}` : ''}</Text>
+              {h.byName ? <Muted size={11.5}>{h.byName}</Muted> : null}
+            </View>
+          </View>
+        ))}
+      </View>
+    );
+  }
+
+  // ---- Root: four rows, each one line, each a way in
+  return (
+    <View style={{ gap: 0 }} accessibilityLabel={pt('m21title')} testID="dev-root">
+      <SectionTitle>{pt('m21title')}</SectionTitle>
+      <ListRow label={pt('devCurrentFocus')} value={focus ? clip(focus.title, 40) : pt('devNone')} onPress={() => setPage('goals')} testID="dev-focus" />
+      <ListRow label={pt('devLatestFeedback')} value={latestReview ? clip(latestReview.summary ?? label(`m21rev_${latestReview.reviewerKind}`, latestReview.reviewerKind), 40) : pt('devNone')} onPress={() => setPage('feedback')} testID="dev-feedback" />
+      <ListRow label={pt('devProgress')} value={`Active goals ${s.activeGoals} · ${actionsDone}/${actions.length}`} onPress={() => setPage('progress')} testID="dev-progress" />
+      <ListRow label={pt('devHistory')} value={pt('devEntries').replace('{n}', String(view.timeline.length))} onPress={() => setPage('history')} testID="dev-history" />
+      <View style={{ marginTop: 10 }}>
+        <Disclosure label="About these counts"><Muted size={12}>{s.note}</Muted>{cat ? <Muted size={12}>{cat.reminders.note}</Muted> : null}</Disclosure>
+        <Disclosure label="About this plan"><Muted size={12}>{view.limitation}</Muted><Muted size={12}>{view.neverBuilt.note}</Muted></Disclosure>
+      </View>
     </View>
   );
 }

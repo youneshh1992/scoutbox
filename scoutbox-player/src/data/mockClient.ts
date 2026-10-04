@@ -364,6 +364,7 @@ function seedDemoPlayer(): PlayerProfile {
   return {
     id: 'pl-adeyemi',
     name: 'Kola Adeyemi',
+    createdAt: Date.UTC(2026, 3, 12), // demo fixture: the account opened in April 2026
     dob: '2004-03-14',
     country: 'GB',
     city: 'Manchester',
@@ -419,6 +420,7 @@ function seedDemoChild(): PlayerProfile {
   return {
     id: 'pl-guni',
     name: 'Guni Adebayo',
+    createdAt: Date.UTC(2026, 7, 30), // demo fixture: the account opened in August 2026
     dob: '2012-02-10',
     country: 'GB',
     city: 'London',

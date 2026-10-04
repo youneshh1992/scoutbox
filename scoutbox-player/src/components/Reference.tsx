@@ -152,14 +152,14 @@ export function HistoryList({ rows, testID }: { rows: { index: string; title: st
 }
 
 /** `.p-training-visual` — the Box Cam hero: a glyph in a disc, a title and a line on the soft green (M24F: no pitch drawing). */
-export function TrainingVisual({ title, sub }: { title: string; sub: string }) {
+export function TrainingVisual({ title, sub, bare }: { title: string; sub: string; /** M24F.4 — the visual alone; the row under it carries the words */ bare?: boolean }) {
   const s = useStyles(makeStyles);
   const c = useColors();
   return (
     <View style={s.training} testID="boxcam-visual">
-      <View style={s.trainingDisc}><Icon name="scan-line" size={18} color={c.iconFg} /></View>
-      <Text style={[s.rowTitle, { backgroundColor: c.training, paddingHorizontal: 5 }]}>{title}</Text>
-      <Text style={[s.sub, { fontSize: 12, backgroundColor: c.training, paddingHorizontal: 5 }]}>{sub}</Text>
+      <View style={s.trainingDisc}><Icon name="scan-line" size={bare ? 26 : 18} color={c.iconFg} /></View>
+      {bare ? null : <Text style={[s.rowTitle, { backgroundColor: c.training, paddingHorizontal: 5 }]}>{title}</Text>}
+      {bare ? null : <Text style={[s.sub, { fontSize: 12, backgroundColor: c.training, paddingHorizontal: 5 }]}>{sub}</Text>}
     </View>
   );
 }
