@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { Text, TextInput } from '../components/Text';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { PlayerScreen as SafeAreaView } from '../components/Vivid';
 import { Redirect, useRouter } from 'expo-router';
 import { client, type Channel, type FiledReport, type GuardianDigest, type Insights } from '../data/client';
 import type { NotificationPrefs, GuardianOpenTrial } from '../data/types';
@@ -366,7 +366,7 @@ export default function GuardianDashboard() {
                           <Text style={{ color: colors.text, fontSize: 13 }}>{t.orgName}: {t.title} · {t.date}</Text>
                           <Muted size={11.5}>{t.venue} · {t.distanceKm} km away</Muted>
                         </View>
-                        {t.registered ? <Pill label="Registered ✓" tone="green" /> : (
+                        {t.registered ? <Pill label="Registered" tone="green" /> : (
                           <Button small primary label="Register" onPress={async () => {
                             try {
                               await client.guardianRegisterOpenTrial(guardianId!, t.id, c.id);

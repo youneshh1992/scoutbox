@@ -353,7 +353,7 @@ export function TrialSafetySection({ actor }: { actor: Actor }) {
       {packView && (
         <View style={{ marginTop: 10, backgroundColor: colors.panel2, borderRadius: 10, padding: 10 }}>
           <Row><Text style={{ color: colors.gold, fontWeight: '700', fontSize: 13, flex: 1 }}>Safety pack</Text>
-            <Button small label="✕" onPress={() => setPackView(null)} /></Row>
+            <Button small label="Close" onPress={() => setPackView(null)} /></Row>
           <Muted size={12}>{packView.pack.headline}</Muted>
           <Muted size={12}>{packView.pack.checksExplained}</Muted>
           {packView.pack.collection && <Muted size={12}>{packView.pack.collection.policy}</Muted>}

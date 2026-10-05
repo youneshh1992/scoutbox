@@ -15,7 +15,7 @@
 import { createElement, useCallback, useEffect, useMemo, useState } from 'react';
 import { Image, Platform, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { Text, TextInput } from '../../components/Text';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { PlayerScreen as SafeAreaView } from '../../components/Vivid';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { client, type PlayerCV, type Benchmarks, type PlayerFeedItem } from '../../data/client';
 import { m12, type FamilyTrial, type PlayerJourney, type PlayerNextActionCode } from '../../data/m12client';
@@ -25,6 +25,8 @@ import { useSession } from '../../state';
 import { useColors, useStyles, type Palette } from '../../theme';
 import { pt } from '../../i18n';
 import { Button, Disclosure, Kicker, ListRow, Muted, Row, SectionTitle } from '../../components/ui';
+import { SeasonChart } from '../../components/SeasonChart';
+import { ColorAvatar } from '../../components/Vivid';
 import { Icon } from '../../components/Icon';
 import { combine } from '../../data/combineClient';
 import { PageHeader, PageTabs, pickTab } from '../../components/PageChrome';
@@ -156,13 +158,13 @@ export function ProfileBody() {
       const cat = CATEGORY_FOR_ACTION[j.journey.nextAction.code];
       const session = upcomingSession(trials.find((t) => t.orgName === j.club.name));
       const invite = inbox.filter(isRequest).find((r) => r.status === 'pending' && r.orgName === j.club.name && r.type === 'trial');
-      const line = session ? sessionLine(session.startsAt, session.venue?.name) : invite?.trialDetails?.proposedDate ? `${invite.trialDetails.proposedDate}${invite.trialDetails.venue ? ` · ${invite.trialDetails.venue}` : ''}` : null;
+      const line = session ? sessionLine(session.startsAt, session.venue?.name) : invite?.trialDetails?.proposedDate ? `${humanDate(invite.trialDetails.proposedDate)}${invite.trialDetails.venue ? ` · ${invite.trialDetails.venue}` : ''}` : null;
       return { club: j.club.name, title: stLabel(j.journey.stage), line: line ?? nextLabel(j.journey.nextAction.code), cta: route?.cta ?? 'View', onPress: () => router.push(cat ? `/opportunities?cat=${cat}&tab=${route?.tab ?? ''}` : '/opportunities') };
     }
     const pending = inbox.filter(isRequest).filter((r) => r.status === 'pending').sort((a, b) => (a.type === b.type ? b.createdAt - a.createdAt : a.type === 'trial' ? -1 : 1))[0];
     if (pending) {
       const d = pending.trialDetails;
-      return { club: pending.orgName, title: pending.type === 'trial' ? 'Trial invitation' : 'Contact request', line: d?.proposedDate ? `${d.proposedDate}${d.venue ? ` · ${d.venue}` : ''}` : pending.subject ?? null, cta: pending.type === 'trial' ? 'View invitation' : 'View request', onPress: () => router.push('/inbox') };
+      return { club: pending.orgName, title: pending.type === 'trial' ? 'Trial invitation' : 'Contact request', line: d?.proposedDate ? `${humanDate(d.proposedDate)}${d.venue ? ` · ${d.venue}` : ''}` : pending.subject ?? null, cta: pending.type === 'trial' ? 'View invitation' : 'View request', onPress: () => router.push('/inbox') };
     }
     const scheduled = (journeys ?? []).find((x) => x.journey.stage === 'trial_scheduled');
     if (scheduled) {
@@ -198,7 +200,7 @@ export function ProfileBody() {
         <Text style={styles.availability} testID="profile-availability">{availability}</Text>
         <View style={styles.headerRow}>
           <View style={styles.verified} testID="profile-verified" accessibilityLabel={me.identityVerified ? 'Identity verified' : 'Identity not verified'}>
-            <View style={[styles.marker, !me.identityVerified && { backgroundColor: colors.line }]} />
+            <Icon name={me.identityVerified ? "badge-check" : "shield"} size={22} color={me.identityVerified ? colors.accentText : colors.muted} />
             <Text style={[styles.verifiedText, !me.identityVerified && { color: colors.muted }]}>{me.identityVerified ? 'Verified' : 'Not verified'}</Text>
             {isMinor ? <Text style={styles.quietWord}>· Guardian-managed</Text> : null}
           </View>
@@ -311,9 +313,7 @@ function Avatar({ name, photoUrl }: { name: string; photoUrl?: string | null }) 
     return <Image source={{ uri: photoUrl }} onError={() => setBroken(true)} style={styles.avatar} accessibilityLabel={name} accessible />;
   }
   return (
-    <View style={styles.avatar} testID="profile-avatar" accessibilityLabel={name} accessible>
-      <Text style={styles.avatarText}>{initialsOf(name)}</Text>
-    </View>
+    <ColorAvatar initials={initialsOf(name)} size={96} index={0} />
   );
 }
 
@@ -347,6 +347,7 @@ function PerformanceSection({ me, benchmarks, onCombine }: { me: NonNullable<Ret
   }
   return (
     <>
+      {me.stats && me.position !== 'GK' ? <SeasonChart current={me.stats} history={me.seasonHistory ?? []} /> : null}
       <View style={styles.block} testID="perf-combine">
         <SectionTitle>{pt('profCombine')}</SectionTitle>
         {drills.length === 0 ? <Muted size={13.5}>{pt('profNoCombine')}</Muted> : drills.map((r) => (
@@ -723,8 +724,8 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 32, gap: 0 },
   // identity
-  header: { paddingTop: 10, paddingBottom: 18, gap: 4 },
-  avatar: { width: 72, height: 72, borderRadius: 36, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  header: { paddingTop: 22, paddingBottom: 24, gap: 4, alignItems: 'center' },
+  avatar: { width: 96, height: 96, borderRadius: 48, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
   avatarText: { color: colors.accentInk, fontSize: 24, fontWeight: '700', letterSpacing: -0.5 },
   name: { color: colors.text, fontSize: 28, fontWeight: '700', letterSpacing: -0.8, lineHeight: 33 },
   summary: { color: colors.text, fontSize: 15.5, fontWeight: '500', marginTop: 2 },
@@ -736,8 +737,8 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   quietWord: { color: colors.muted, fontSize: 13 },
   // sections
   body: { paddingTop: 22, gap: 34 },
-  block: { gap: 0 },
-  next: { backgroundColor: colors.panel, borderRadius: 14, padding: 18, gap: 4, borderWidth: 1, borderColor: colors.line },
+  block: { gap: 0, backgroundColor: colors.panel, borderRadius: 24, padding: 18 },
+  next: { backgroundColor: colors.panel, borderRadius: 24, padding: 18, gap: 4, borderWidth: 1, borderColor: colors.line },
   nextClub: { color: colors.text, fontSize: 19, fontWeight: '700', letterSpacing: -0.4, marginTop: 6 },
   nextTitle: { color: colors.text, fontSize: 15, fontWeight: '500' },
   nextLine: { color: colors.muted, fontSize: 13.5, lineHeight: 19, marginTop: 2 },

@@ -27,7 +27,7 @@ import type { ClientOffer, ClientSigning } from './agentApi';
 import { fmtDate, fmtStamp, t } from './i18n';
 import { AGENCY_TABS, hashForTransaction, hashForContext, type AgencyTab, type ClientTab } from './nav';
 // M24B — the client case as category → subcategory.
-import { CaseNav, CaseCrumb, casePanelProps } from '../../design-system/CaseNav';
+import { CaseNav, CaseCrumb, casePanelProps } from '../../design-system/CaseNavigation';
 import { defaultLocation, locate } from '../../design-system/caseNav';
 import { CLIENT_NAV } from './caseNav';
 

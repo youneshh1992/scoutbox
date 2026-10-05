@@ -21,7 +21,7 @@ import {
   type Transaction, type TransactionList, type TransactionStatus, type TransactionType, type TxDocument, type TxTimelineEntry,
 } from './agentApi';
 import { httpState } from './httpState';
-import { CaseNav, casePanelProps } from '../../design-system/CaseNav';
+import { CaseNav, casePanelProps } from '../../design-system/CaseNavigation';
 import { defaultLocation, locate } from '../../design-system/caseNav';
 import { TRANSACTION_NAV } from './caseNav';
 import type { TransactionTab } from './nav';

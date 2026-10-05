@@ -152,9 +152,9 @@ function CapturePanel({ actor, drill, target, assignmentId, challengeEntryId, on
       {phase === 'ready' ? (
         <View>
           <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, marginTop: 6 }}>{pt('m16readyCheck')}</Text>
-          <Muted size={12}>✓ {pt('m16chkCamera')}</Muted>
-          <Muted size={12}>○ {pt('m16chkFraming')} — {pt('m16unableAuto')}</Muted>
-          <Muted size={12}>○ {pt('m16chkSpace')} — {pt('m16unableAuto')}</Muted>
+          <Muted size={12}>{pt('m16chkCamera')}</Muted>
+          <Muted size={12}>{pt('m16chkFraming')} — {pt('m16unableAuto')}</Muted>
+          <Muted size={12}>{pt('m16chkSpace')} — {pt('m16unableAuto')}</Muted>
           <View style={{ marginTop: 8, backgroundColor: colors.panel2, borderRadius: 8, padding: 8 }}>
             <Muted size={12}>{pt('m16liveness')}: {pt(`m16live_${liveness}` as Parameters<typeof pt>[0])}</Muted>
             <Muted size={11.5}>{pt('m16livenessNote')}</Muted>
@@ -412,7 +412,7 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
               <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 }}>{pt('m16sharing')}</Text>
               {canManageSharing ? (
                 <Row style={{ marginTop: 4 }}>
-                  <Button small label={prefs.shareDevelopmentActivity === 'recruitment' ? `✓ ${pt('m16shareRec')}` : pt('m16shareRec')}
+                  <Button small label={prefs.shareDevelopmentActivity === 'recruitment' ? `${pt('m16shareRec')} · Selected` : pt('m16shareRec')}
                     onPress={async () => { try { await m16.setPrefs(actor, { shareDevelopmentActivity: prefs.shareDevelopmentActivity === 'recruitment' ? 'private' : 'recruitment' }); reloadPrefs(); } catch (e) { setMsg(e instanceof Error ? e.message : 'failed'); } }} />
                 </Row>
               ) : <Muted size={12}>{pt('m16shareMinor')}</Muted>}

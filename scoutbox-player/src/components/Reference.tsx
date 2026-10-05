@@ -7,6 +7,7 @@
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
 import { Text } from './Text';
+import { Gradient, ColorAvatar } from './Vivid';
 import { Icon } from './Icon';
 import { useColors, useStyles, type Palette } from '../theme';
 
@@ -46,11 +47,11 @@ export function TextButton({ label, onPress, size = 12, testID }: { label: strin
   );
 }
 
-/** `.p-mobile-icon` — the soft green tile behind a lucide glyph. */
+/** `.p-mobile-icon` — the themed tile behind a Phosphor icon. */
 export function IconTile({ name, size = 18 }: { name: string; size?: number }) {
   const s = useStyles(makeStyles);
   const c = useColors();
-  return <View style={s.iconTile}><Icon name={name} size={size} color={c.iconFg} /></View>;
+  return <View style={s.iconTile}><Icon name={name} size={size} color="#8ffff0" /></View>;
 }
 
 /** `.p-mobile-row` — an attention row: icon tile, two lines, chevron. */
@@ -124,7 +125,7 @@ export function ProfileIntro({ name, line, status }: { name: string; line: strin
   const c = useColors();
   return (
     <View style={s.intro} testID="passport-intro">
-      <View style={s.avatarLarge}><Text style={{ color: c.iconFg, fontSize: 23, fontWeight: '600' }}>{initialsOf(name)}</Text></View>
+      <ColorAvatar initials={initialsOf(name)} size={88} index={0} />
       <Text role="heading" aria-level={1} style={[s.h1, { fontSize: 24, marginTop: 13 }]}>{name}</Text>
       <Text style={s.sub}>{line}</Text>
       {status ? <View style={{ marginTop: 10 }}><StatusDot label={status} /></View> : null}
@@ -156,8 +157,8 @@ export function TrainingVisual({ title, sub, bare }: { title: string; sub: strin
   const s = useStyles(makeStyles);
   const c = useColors();
   return (
-    <View style={s.training} testID="boxcam-visual">
-      <View style={s.trainingDisc}><Icon name="scan-line" size={bare ? 26 : 18} color={c.iconFg} /></View>
+    <View style={s.training} testID="boxcam-visual"><Gradient colors={['#075d52', '#393892', '#b42d96']} />
+      <View style={s.trainingDisc}><Icon name="scan-line" size={bare ? 42 : 28} color="#8ffff0" /></View>
       {bare ? null : <Text style={[s.rowTitle, { backgroundColor: c.training, paddingHorizontal: 5 }]}>{title}</Text>}
       {bare ? null : <Text style={[s.sub, { fontSize: 12, backgroundColor: c.training, paddingHorizontal: 5 }]}>{sub}</Text>}
     </View>
@@ -210,25 +211,25 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   section: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 30, marginBottom: 8 },
   count: { width: 22, height: 22, borderRadius: 11, backgroundColor: c.count, alignItems: 'center', justifyContent: 'center' },
   countText: { color: c.text, fontSize: 11 },
-  iconTile: { borderRadius: 9, padding: 2, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  iconTile: { backgroundColor: c.iconBg, borderRadius: 16, padding: 10, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   // M24F — an attention row is a row, not a card: hairline-separated, full width
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, width: '100%', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: c.line },
   rowTitle: { color: c.text, fontSize: 14.5, fontWeight: '600', lineHeight: 19 },
   rowSub: { color: c.muted, fontSize: 12.5, lineHeight: 17, marginTop: 3 },
-  passport: { backgroundColor: c.passport, borderRadius: 15, padding: 18, overflow: 'hidden' },
+  passport: { backgroundColor: c.passport, borderRadius: 24, padding: 22, overflow: 'hidden' },
   passportAvatar: { width: 41, height: 41, borderRadius: 21, backgroundColor: c.accent, alignItems: 'center', justifyContent: 'center' },
   passportLabel: { backgroundColor: 'rgba(255,255,255,0.09)', borderRadius: 5, paddingVertical: 5, paddingHorizontal: 8 },
   passportName: { color: '#ffffff', fontSize: 24, fontWeight: '600', letterSpacing: -0.5, lineHeight: 29, marginTop: 19 },
   passportLine: { color: c.passportText, fontSize: 12, lineHeight: 18, marginTop: 6 },
   passportLink: { marginTop: 18, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.15)', width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  card: { paddingVertical: 14, borderTopWidth: 1, borderTopColor: c.line },
+  card: { padding: 18, borderRadius: 24, backgroundColor: c.panel, marginVertical: 6 },
   intro: { alignItems: 'center', paddingTop: 4, paddingBottom: 19 },
-  avatarLarge: { width: 68, height: 68, borderRadius: 34, backgroundColor: c.iconBg, borderWidth: 4, borderColor: c.panel, alignItems: 'center', justifyContent: 'center', shadowColor: c.line, shadowOpacity: 1, shadowRadius: 0, shadowOffset: { width: 0, height: 0 } },
+  avatarLarge: { width: 88, height: 88, borderRadius: 44, backgroundColor: c.iconBg, borderWidth: 4, borderColor: c.panel, alignItems: 'center', justifyContent: 'center', shadowColor: c.line, shadowOpacity: 1, shadowRadius: 0, shadowOffset: { width: 0, height: 0 } },
   history: { borderTopWidth: 1, borderTopColor: c.line },
   record: { flexDirection: 'row', gap: 9, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: c.line },
   index: { width: 24, color: c.accentText, fontSize: 11, fontWeight: '600', paddingTop: 3 },
   recordTitle: { color: c.text, fontSize: 14, fontWeight: '600', lineHeight: 19 },
-  training: { backgroundColor: c.training, height: 170, borderRadius: 14, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', gap: 7 },
+  training: { backgroundColor: c.training, height: 190, borderRadius: 24, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', gap: 7 },
   trainingDisc: { backgroundColor: c.trainingDisc, borderRadius: 999, padding: 10 },
   pitch: { position: 'absolute', top: 15, bottom: 15, left: 20, right: 20, borderWidth: 1, borderColor: c.trainingLine, opacity: 0.35 },
   pitchHalf: { position: 'absolute', top: 0, bottom: 0, left: '50%', borderLeftWidth: 1, borderColor: c.trainingLine },

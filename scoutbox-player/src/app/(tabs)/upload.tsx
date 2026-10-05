@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from '../../components/Text';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { PlayerScreen as SafeAreaView } from '../../components/Vivid';
 import { client, type ProgrammeInfo } from '../../data/client';
 import type { Drill } from '../../domain/types';
 import { useSession } from '../../state';
@@ -297,7 +297,7 @@ export default function Upload() {
                 <Text style={{ color: colors.text, fontSize: 13.5, fontWeight: '600', flex: 1 }}>{d.name}</Text>
                 {d.best
                   ? <Pill label={`best ${d.best.value}${d.unit}${d.best.verified ? ' ' : ''}`} tone="green" />
-                  : d.completed ? <Pill label="Done ✓" tone="blue" /> : null}
+                  : d.completed ? <Pill label="Done" tone="blue" /> : null}
               </Row>
               <Muted size={11.5}>{d.metric} · benchmark {d.benchmark}{d.unit}</Muted>
               <Row>
@@ -309,7 +309,7 @@ export default function Upload() {
                   value={drillValues[d.id] ?? ''}
                   onChangeText={(v) => setDrillValues({ ...drillValues, [d.id]: v })}
                 />
-                <Button small label={drillVideos[d.id] ? '✓' : 'attach'} onPress={async () => {
+                <Button small label={drillVideos[d.id] ? 'Attached' : 'Attach'} onPress={async () => {
                   const picked = await pickVideoFile();
                   if (picked && !picked.name.startsWith('TOO_LARGE:')) {
                     setDrillVideos({ ...drillVideos, [d.id]: picked.dataUrl });
@@ -347,7 +347,7 @@ export default function Upload() {
           <TextInput style={styles.input} placeholder="Venue" placeholderTextColor={colors.muted} value={venue} onChangeText={setVenue} />
           <TextInput style={styles.input} placeholder="Date (YYYY-MM-DD)" placeholderTextColor={colors.muted} value={date} onChangeText={setDate} />
           <Row>
-            <Button small label={gps ? 'GPS + device captured ✓' : 'Capture GPS + device'} onPress={captureGps} />
+            <Button small label={gps ? 'GPS + device captured' : 'Capture GPS + device'} onPress={captureGps} />
             {gps && <Pill label={`${gps.lat.toFixed(3)}, ${gps.lng.toFixed(3)}`} tone="green" />}
           </Row>
           <Button primary label="Log attendance" onPress={logAttendance} />

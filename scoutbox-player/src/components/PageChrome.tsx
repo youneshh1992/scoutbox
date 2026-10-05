@@ -9,10 +9,11 @@
 // PageTabs: the "functions of one destination" control — the reference's
 // underline tabs. Rendered as a real tablist so a screen reader, a keyboard
 // and a test all see the same thing.
-import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { useEffect, useRef, type ReactNode } from 'react';
+import { Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Text } from './Text';
+import { Gradient } from './Vivid';
 import { Icon } from './Icon';
 import { useColors, useStyles, type Palette } from '../theme';
 import { pt } from '../i18n';
@@ -21,7 +22,8 @@ import { ReportButton } from './ReportSheet';
 import { ThemeSwitch } from './ThemeSwitch';
 import { Wordmark } from './Wordmark';
 
-export function PageHeader({ title, back, action, hint, wordmark }: { title: string; back?: boolean; action?: ReactNode; hint?: string; wordmark?: boolean }) {
+export function PageHeader({ title, back, action, hint, wordmark, prominent, accessory }: { title: string; back?: boolean; action?: ReactNode; hint?: string; wordmark?: boolean; prominent?: boolean; accessory?: ReactNode }) {
+  const { width } = useWindowDimensions();
   const router = useRouter();
   const colors = useColors();
   const styles = useStyles(makeStyles);
@@ -37,11 +39,11 @@ export function PageHeader({ title, back, action, hint, wordmark }: { title: str
           {wordmark ? (
             <Wordmark size={24} label={title} />
           ) : (
-            <Text role="heading" aria-level={1} style={styles.h1} numberOfLines={1}>{title}</Text>
+            <Text role="heading" aria-level={1} style={[styles.h1, prominent && { fontSize: width < 360 ? 22 : 28, fontWeight: '800', letterSpacing: -1 }]} numberOfLines={prominent ? 2 : 1}>{title}</Text>
           )}
         </View>
         <View style={styles.actions}>
-          <ThemeSwitch />
+          {accessory ?? <ThemeSwitch />}
           <NotificationBell />
           <ReportButton />
         </View>
@@ -56,22 +58,28 @@ export interface PageTab { key: string; label: string }
 
 export function PageTabs({ tabs, value, onChange }: { tabs: PageTab[]; value: string; onChange: (key: string) => void }) {
   const styles = useStyles(makeStyles);
+  const scroll = useRef<ScrollView>(null);
+  const positions = useRef<Record<string, number>>({});
+  useEffect(() => { scroll.current?.scrollTo({ x: Math.max(0, (positions.current[value] ?? 0) - 12), animated: false }); }, [value]);
   return (
     <View role="tablist" aria-label={pt('sectionsOf')} style={styles.tabs}>
+      <ScrollView horizontal ref={scroll} showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1, gap: 2 }}>
       {tabs.map((t) => {
         const selected = t.key === value;
         return (
           <Pressable
             key={t.key}
+            onLayout={(e) => { positions.current[t.key] = e.nativeEvent.layout.x; }}
             role="tab"
             aria-selected={selected}
             onPress={() => onChange(t.key)}
-            style={({ pressed }) => [styles.tab, selected && styles.tabOn, pressed && { opacity: 0.7 }]}
+            style={({ pressed }) => [styles.tab, { minWidth: Math.max(66, t.label.length * 7 + 24) }, selected && styles.tabOn, pressed && { opacity: 0.7 }]}
           >
-            <Text style={[styles.tabText, selected && styles.tabTextOn]}>{t.label}</Text>
+            {selected && <Gradient />}<Text style={[styles.tabText, selected && styles.tabTextOn]}>{t.label}</Text>
           </Pressable>
         );
       })}
+      </ScrollView>
     </View>
   );
 }
@@ -86,18 +94,18 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   header: { gap: 6, marginBottom: 6 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, minHeight: 48 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 0 },
-  h1: { color: colors.text, fontSize: 16, fontWeight: '600', flexShrink: 1 },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 0 },
+  h1: { color: colors.text, fontSize: 24, fontWeight: '800', flexShrink: 1 },
   hint: { color: colors.muted, fontSize: 12.5, lineHeight: 18 },
   actionRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 4 },
-  back: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', marginLeft: -6 },
+  back: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginLeft: -6 },
   tabs: {
-    flexDirection: 'row', gap: 7, justifyContent: 'space-between',
-    borderBottomWidth: 1, borderBottomColor: colors.line, marginBottom: 12, zIndex: 1,
+    flexDirection: 'row', gap: 2, justifyContent: 'space-between',
+    backgroundColor: colors.panel2, borderRadius: 18, padding: 4, marginBottom: 16, zIndex: 1,
   },
   // M24B — a page tab is a 44px touch target (paddingVertical 13 + the 16px line keeps the underline tight to the text).
-  tab: { minHeight: 44, paddingVertical: 13, paddingHorizontal: 4, borderBottomWidth: 2, borderBottomColor: 'transparent', flexGrow: 1, alignItems: 'center', justifyContent: 'center', marginBottom: -1 },
-  tabOn: { borderBottomColor: colors.accent },
+  tab: { minHeight: 44, paddingVertical: 13, paddingHorizontal: 4, overflow: 'hidden', borderRadius: 14, flexGrow: 1, alignItems: 'center', justifyContent: 'center', marginBottom: -1 },
+  tabOn: { backgroundColor: colors.tabActiveBg },
   tabText: { color: colors.tabInactive, fontSize: 12, fontWeight: '500' },
-  tabTextOn: { color: colors.tabActive, fontWeight: '600' },
+  tabTextOn: { color: colors.accentInk, fontWeight: '600' },
 });

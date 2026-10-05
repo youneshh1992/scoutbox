@@ -1,4 +1,4 @@
-// Home — M24F.4 hard reset. The player, one thing to do, three recent events,
+// Home — M24F.4 hard reset. The player, one thing to do, recent events on demand,
 // one content section, then everything else one tap away. No greeting, no
 // date, no sentence about who can see you: the identity header is the name,
 // the football line, the availability word and the month the account was
@@ -6,16 +6,19 @@
 // before; nothing is fabricated, and nothing the old Home said is lost — the
 // weekly figures and the scouting stream moved to the Activity page.
 import { useCallback, useEffect, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { Text } from '../../components/Text';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { PlayerScreen as SafeAreaView } from '../../components/Vivid';
 import { client, type Insights, type PlayerFeedItem } from '../../data/client';
 import type { Channel, DirectoryClub, Opportunities } from '../../data/types';
 import { SAFEGUARDING_PROMISES, U18_PROMISES } from '../../domain/safeguarding';
 import { useSession } from '../../state';
 import { useColors, useStyles, type Palette } from '../../theme';
 import { pt } from '../../i18n';
-import { Button, DetailLink, Disclosure, Kicker, ListRow, Muted, TimelineItem } from '../../components/ui';
+import { DetailLink, Disclosure, ListRow, Muted, TimelineItem } from '../../components/ui';
+import { Gradient } from '../../components/Vivid';
+import { SeasonChart } from '../../components/SeasonChart';
+import { Icon } from '../../components/Icon';
 import { PageHeader } from '../../components/PageChrome';
 import { useRouter } from 'expo-router';
 import { initialsOf, SectionHead } from '../../components/Reference';
@@ -99,11 +102,13 @@ export default function Discover() {
         {/* Identity — the player is the subject of the page, not a record on it. */}
         {me && (
           <View style={styles.identity} testID="home-identity">
-            <View style={styles.avatar} accessibilityLabel={me.name}><Text style={styles.avatarText}>{initialsOf(me.name)}</Text></View>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text role="heading" aria-level={1} style={styles.name}>{me.name}</Text>
+            <View style={styles.identityTop}>
               <Text style={styles.identityLine}>{footballLine}</Text>
-              {availKey ? <Text style={styles.availability} testID="home-availability">{pt(availKey)}</Text> : null}
+              <View style={styles.avatar} accessibilityLabel={me.name}><Text style={styles.avatarText}>{initialsOf(me.name)}</Text></View>
+            </View>
+            <Text role="heading" aria-level={1} style={styles.name}>{me.name}</Text>
+            <View style={styles.identityMeta}>
+              {availKey ? <View style={styles.status}><View style={styles.statusDot} /><Text style={styles.availability} testID="home-availability">{pt(availKey)}</Text></View> : null}
               {joined ? <Text style={styles.joined} testID="home-joined">{pt('homeJoined').replace('{when}', joined)}</Text> : null}
             </View>
           </View>
@@ -111,39 +116,57 @@ export default function Discover() {
 
         {/* The one thing to do now. */}
         <View style={styles.primary} testID="home-primary">
-          <Kicker tone="accent">{pt('homeNext')}</Kicker>
+          <Gradient colors={['#006451', '#086b9c', '#6922bd']} />
+          <View pointerEvents="none" accessible={false} aria-hidden style={styles.pitchArt}>
+            <View style={styles.pitchBox} /><View style={styles.pitchCircle} /><View style={styles.pitchLine} />
+          </View>
+          <View style={styles.primaryTop}>
+            <Text style={styles.primaryKicker}>{pt('homeNext')}</Text>
+            <Icon name="arrow-up-right" size={22} color={colors.accent} />
+          </View>
           {next ? (
             <>
               <Text style={styles.primaryTitle}>{next.club}</Text>
               <Text style={styles.primarySub}>{next.title}{waiting > 1 ? ` · ${waiting - 1} more` : ''}</Text>
             </>
           ) : (
-            // Nothing is waiting: the one action is to look outward.
-            <Text style={styles.primarySub}>{pt('homeNothingNext')}</Text>
+            <Text style={styles.primaryTitle}>{pt('homeNothingNext')}</Text>
           )}
-          {/* One primary action either way: the waiting request, or Explore clubs. */}
-          <View style={{ marginTop: 12, alignSelf: 'flex-start' }}>
-            <Button primary label={next ? next.cta : pt('homeExploreClubs')} onPress={next ? next.onPress : () => router.push('/opportunities')} testID="home-primary-cta" />
-          </View>
+          <Pressable accessibilityRole="button" accessibilityLabel={next ? next.cta : pt('homeExploreClubs')} onPress={next ? next.onPress : () => router.push('/opportunities')} testID="home-primary-cta" style={({ pressed }) => [styles.primaryAction, pressed && { opacity: 0.75 }]}>
+            <Gradient /><Text style={styles.primaryActionText}>{next ? next.cta : pt('homeExploreClubs')}</Text>
+            <Icon name="arrow-right" size={20} color={colors.accentInk} />
+          </Pressable>
         </View>
 
-        {/* Recent — three events, then the page that holds all of them. */}
-        <SectionHead title={pt('homeRecent')} testID="home-activity" />
-        {recent.length === 0 ? <Muted size={13}>{pt('homeNoActivity')}</Muted> : (
-          <View style={{ marginTop: 4 }}>
-            {recent.map((e, i) => (
-              <TimelineItem key={i} date={relTime(e.ts)} last={i === recent.length - 1} testID="home-recent-row">
-                <Text style={{ fontWeight: '600', color: colors.text }}>{e.orgName}</Text><Text style={{ color: colors.muted }}> {EVENT_LABELS[e.type] ?? e.type}</Text>
-              </TimelineItem>
-            ))}
-          </View>
-        )}
-        <DetailLink label={pt('homeViewAllActivity')} onPress={() => router.push('/activity')} testID="home-activity-all" />
+        {me?.stats && me.position !== 'GK' ? <SeasonChart current={me.stats} history={me.seasonHistory ?? []} compact /> : null}
+
+        {/* Recent stays one tap away so the journey is visible sooner on mobile. */}
+        <View style={{ marginTop: 18 }}>
+          <Disclosure label={pt('homeRecent')} testID="home-activity">
+            {recent.length === 0 ? <Muted size={13}>{pt('homeNoActivity')}</Muted> : (
+              <View style={{ marginTop: 4 }}>
+                {recent.map((e, i) => (
+                  <TimelineItem key={i} date={relTime(e.ts)} last={i === recent.length - 1} testID="home-recent-row">
+                    <Text style={{ fontWeight: '600', color: colors.text }}>{e.orgName}</Text><Text style={{ color: colors.muted }}> {EVENT_LABELS[e.type] ?? e.type}</Text>
+                  </TimelineItem>
+                ))}
+              </View>
+            )}
+            <DetailLink label={pt('homeViewAllActivity')} onPress={() => router.push('/activity')} testID="home-activity-all" />
+          </Disclosure>
+        </View>
 
         {/* What is moving — one or two rows, never a wall. */}
         <SectionHead title="Your journey" testID="home-journey" />
         {openTrials.length > 0 ? openTrials.slice(0, 2).map((t) => (
-          <ListRow key={t.id} label={`${t.club} · ${t.title}`} value={`${humanDate(t.date)}${t.registered ? ' · Registered' : ''}`} onPress={() => router.push('/opportunities')} />
+          <Pressable key={t.id} accessibilityRole="button" accessibilityLabel={`${t.club}. ${t.title}. ${humanDate(t.date)}${t.registered ? '. Registered' : ''}`} onPress={() => router.push('/opportunities')} style={({ pressed }) => [styles.fixture, pressed && { opacity: 0.7 }]}>
+            <View style={styles.fixtureDate}><Text style={styles.fixtureDateText}>{humanDate(t.date)}</Text></View>
+            <View style={styles.fixtureInfo}>
+              <Text style={styles.fixtureClub}>{t.club}</Text>
+              <Text style={styles.fixtureTitle}>{t.title}{t.registered ? ' · Registered' : ''}</Text>
+            </View>
+            <Icon name="arrow-up-right" size={19} color={colors.accentText} />
+          </Pressable>
         )) : (
           <ListRow label="Nothing in motion yet" onPress={() => router.push('/opportunities')} />
         )}
@@ -199,16 +222,34 @@ export default function Discover() {
 const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 32, gap: 0 },
-  identity: { flexDirection: 'row', alignItems: 'flex-start', gap: 16, paddingTop: 12, paddingBottom: 24 },
-  avatar: { width: 64, height: 64, borderRadius: 32, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center', marginTop: 2 },
-  avatarText: { color: colors.accentInk, fontSize: 22, fontWeight: '700', letterSpacing: -0.5 },
-  name: { color: colors.text, fontSize: 28, fontWeight: '700', letterSpacing: -0.8, lineHeight: 33 },
-  identityLine: { color: colors.text, fontSize: 14.5, fontWeight: '500', lineHeight: 20, marginTop: 4 },
-  availability: { color: colors.safetyText, fontSize: 13, lineHeight: 18, marginTop: 3 },
-  joined: { color: colors.muted, fontSize: 12.5, lineHeight: 18, marginTop: 6 },
-  primary: { paddingVertical: 18, borderTopWidth: 1, borderTopColor: colors.line, gap: 4 },
-  primaryTitle: { color: colors.text, fontSize: 21, fontWeight: '600', letterSpacing: -0.5, lineHeight: 27 },
-  primarySub: { color: colors.muted, fontSize: 13.5, lineHeight: 20 },
+  identity: { paddingTop: 20, paddingBottom: 26, gap: 12 },
+  identityTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  avatar: { width: 34, height: 34, borderRadius: 8, backgroundColor: colors.panel2, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { color: colors.text, fontSize: 12, fontWeight: '700' },
+  name: { color: colors.text, fontSize: 38, fontWeight: '800', letterSpacing: -1.7, lineHeight: 42 },
+  identityLine: { flex: 1, color: colors.muted, fontSize: 12, fontWeight: '600', lineHeight: 18, letterSpacing: 0.4 },
+  identityMeta: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  status: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  statusDot: { width: 5, height: 5, backgroundColor: colors.accentText },
+  availability: { color: colors.safetyText, fontSize: 12, lineHeight: 18 },
+  joined: { color: colors.muted, fontSize: 11, lineHeight: 18 },
+  primary: { padding: 20, backgroundColor: colors.passport, borderRadius: 18, overflow: 'hidden', gap: 8 },
+  primaryTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  primaryKicker: { color: colors.accent, fontSize: 10, fontWeight: '700', letterSpacing: 2, textTransform: 'uppercase' },
+  primaryTitle: { color: '#ffffff', fontSize: 30, fontWeight: '700', letterSpacing: -1, lineHeight: 35 },
+  primarySub: { color: colors.passportText, fontSize: 13, lineHeight: 20 },
+  primaryAction: { overflow: 'hidden', marginTop: 12, minHeight: 48, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 8, backgroundColor: colors.accent, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  primaryActionText: { color: colors.accentInk, fontSize: 14, fontWeight: '700', flexShrink: 1 },
+  pitchArt: { position: 'absolute', right: -35, top: -30, width: 170, height: 180, opacity: 0.13 },
+  pitchBox: { position: 'absolute', top: 0, right: 0, width: 140, height: 160, borderWidth: 1, borderColor: colors.passportText },
+  pitchCircle: { position: 'absolute', top: 43, left: 0, width: 74, height: 74, borderRadius: 37, borderWidth: 1, borderColor: colors.passportText },
+  pitchLine: { position: 'absolute', top: 0, left: 37, height: 160, width: 1, backgroundColor: colors.passportText },
+  fixture: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14 },
+  fixtureDate: { width: 58, minHeight: 62, backgroundColor: colors.panel2, borderRadius: 8, alignItems: 'center', justifyContent: 'center', padding: 8, borderTopWidth: 3, borderTopColor: colors.accent },
+  fixtureDateText: { color: colors.text, fontSize: 17, lineHeight: 22, fontWeight: '700', textAlign: 'center' },
+  fixtureInfo: { flex: 1, minWidth: 0, gap: 4 },
+  fixtureClub: { color: colors.text, fontSize: 15, fontWeight: '700', lineHeight: 21 },
+  fixtureTitle: { color: colors.muted, fontSize: 12, lineHeight: 18 },
   clubName: { color: colors.text, fontSize: 15, fontWeight: '600', lineHeight: 20 },
   clubMeta: { color: colors.muted, fontSize: 12.5, lineHeight: 18, marginTop: 2 },
   dirRow: { paddingVertical: 8, gap: 2 },

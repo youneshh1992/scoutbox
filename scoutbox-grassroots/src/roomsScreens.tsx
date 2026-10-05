@@ -38,7 +38,7 @@ import { OfferWorkflow } from './offerPanel';
 import { SigningWorkflow } from './signingPanel';
 import { JourneyStrip, useRoomJourney } from './journeyStrip';
 // M24B — category → subcategory navigation and the read-oriented panels.
-import { CaseNav, CaseCrumb, casePanelProps } from '../../design-system/CaseNav';
+import { CaseNav, CaseCrumb, casePanelProps } from '../../design-system/CaseNavigation';
 import { defaultLocation, locate, resolveTab } from '../../design-system/caseNav';
 import { ROOM_NAV } from './caseNav';
 import { DocumentsPanel, InboxPanel, JourneyPanel, PastDecisionsPanel, PastOffersPanel, PastSigningsPanel, PastTrialsPanel, SecondLookPanel, TasksPanel, TimelinePanel } from './roomCase';

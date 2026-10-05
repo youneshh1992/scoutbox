@@ -20,12 +20,11 @@ import { uiLocale } from '../time';
 
 type Actor = { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string };
 
-const GLYPH: Record<SigningStatus, string> = { DRAFT: '○', READY: '➤', IN_PROGRESS: '◐', COMPLETED: '✓', CANCELLED: '⊘', VOIDED: '⊗', EXPIRED: '◷', SUPERSEDED: '↻' };
 const tone = (s: SigningStatus | null) => (s === 'READY' || s === 'IN_PROGRESS' ? 'gold' : s === 'COMPLETED' ? 'green' : s === 'CANCELLED' || s === 'VOIDED' || s === 'EXPIRED' ? 'red' : 'default');
 const stLabel = (s: SigningStatus | null) => {
   if (!s) return '';
   const key = `signingSt_${s}` as Parameters<typeof pt>[0];
-  try { return `${GLYPH[s]} ${pt(key) ?? s}`; } catch { return s; }
+  try { return pt(key) ?? s; } catch { return s; }
 };
 const partyLabel = (p: SigningPartyType) => {
   const key = `signingParty_${p}` as Parameters<typeof pt>[0];
@@ -120,7 +119,7 @@ export function SigningSection({ actor, view = 'all' }: { actor: Actor; view?: S
                 ) : <Muted size={12.5}>{pt('signingNoDocument')}</Muted>)}
                 {show('signing') && <View style={{ marginTop: 4 }} testID={`signing-parties-${cur.id}`}>
                   {cur.requiredParties.map((p) => (
-                    <Muted key={p.partyType} size={12}>{p.status === 'COMPLETED' ? '✓' : '○'} {partyLabel(p.partyType)} · {p.status === 'COMPLETED' ? `${pt('signingPartyDone')} ${fmt(p.completedAt)}` : pt('signingPartyPending')}</Muted>
+                    <Muted key={p.partyType} size={12}>{partyLabel(p.partyType)} · {p.status === 'COMPLETED' ? `${pt('signingPartyDone')} ${fmt(p.completedAt)}` : pt('signingPartyPending')}</Muted>
                   ))}
                 </View>}
               </View>

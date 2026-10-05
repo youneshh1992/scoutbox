@@ -190,9 +190,9 @@ function CombineCapturePanel({ playerId, protocol, requestId, onDone, onClose }:
       {phase === 'ready' ? (
         <View>
           <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, marginTop: 6 }}>{pt('cmbReadyCheck')}</Text>
-          <Muted size={12}>✓ {pt('cmbChkCamera')}</Muted>
-          <Muted size={12}>○ {pt('cmbChkFraming')} — {pt('cmbUnableAuto')}</Muted>
-          <Muted size={12}>○ {pt('cmbChkSpace')} — {pt('cmbUnableAuto')}</Muted>
+          <Muted size={12}>{pt('cmbChkCamera')}</Muted>
+          <Muted size={12}>{pt('cmbChkFraming')} — {pt('cmbUnableAuto')}</Muted>
+          <Muted size={12}>{pt('cmbChkSpace')} — {pt('cmbUnableAuto')}</Muted>
           <View style={{ marginTop: 8, backgroundColor: colors.panel2, borderRadius: 8, padding: 8 }}>
             <Muted size={12}>{pt('cmbLiveness')}: {liveness || 'show_ball'}</Muted>
             <Muted size={11.5}>{pt('cmbLivenessNote')}</Muted>
@@ -249,7 +249,7 @@ function CombineResultCard({ attempt, onClose }: { attempt: CombineAttempt; onCl
       {verified && attempt.verificationExplained ? (
         <View style={{ marginTop: 6, backgroundColor: colors.panel2, borderRadius: 8, padding: 8 }}>
           <Text style={{ color: colors.text, fontWeight: '700', fontSize: 12 }}>{pt('cmbWhyVerified')}</Text>
-          {attempt.verificationExplained.map((c, i) => <Muted key={i} size={12}>{c.ok ? '✓' : '○'} {c.label}{c.detail ? ` — ${c.detail}` : ''}</Muted>)}
+          {attempt.verificationExplained.map((c, i) => <Muted key={i} size={12}>{c.ok ? 'Confirmed · ' : 'Not confirmed · '}{c.label}{c.detail ? ` — ${c.detail}` : ''}</Muted>)}
         </View>
       ) : null}
       <Row style={{ marginTop: 8 }}><Button label={pt('cmbDone')} onPress={onClose} /></Row>
@@ -299,7 +299,7 @@ function ProtocolDetail({ protocol, title, attempts, canStart, onStart, onBack }
       <View style={{ marginTop: 14 }}>
         {verified && latest?.verificationExplained ? (
           <Disclosure label={pt('cmbWhyVerified')} testID="combine-why">
-            {latest.verificationExplained.map((c, i) => <Muted key={i} size={12}>{c.ok ? '✓' : '○'} {c.label}{c.detail ? ` — ${c.detail}` : ''}</Muted>)}
+            {latest.verificationExplained.map((c, i) => <Muted key={i} size={12}>{c.ok ? 'Confirmed · ' : 'Not confirmed · '}{c.label}{c.detail ? ` — ${c.detail}` : ''}</Muted>)}
             {latest.stateCopy ? <Muted size={11.5}>{latest.stateCopy}</Muted> : null}
           </Disclosure>
         ) : null}
@@ -447,7 +447,7 @@ function RequestRow({ r, protocols, onStart, canStart }: { r: CombineRequest; pr
         const proto = protocols.find((p) => p.id === rp.protocolId);
         return (
           <Row key={rp.protocolId} style={{ marginTop: 4 }}>
-            <Text style={{ color: colors.text, fontSize: 12.5, flexShrink: 1 }}>{rp.completed ? '✓' : '○'} {rp.protocolTitle}</Text>
+            <Text style={{ color: colors.text, fontSize: 12.5, flexShrink: 1 }}>{rp.completed ? 'Completed · ' : 'Pending · '}{rp.protocolTitle}</Text>
             {!rp.completed && canStart && proto && canMeasure(proto) ? <Button small primary label={pt('cmbStart')} onPress={() => onStart(proto, r.id)} /> : null}
             {!rp.completed && proto && !canMeasure(proto) ? <Pill label={pt('cmbNotSupportedShort')} /> : null}
           </Row>

@@ -21,7 +21,6 @@ import { Button, Card, Muted, Row, SectionTitle } from './ui';
 type Actor = { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string };
 export type JourneyView = 'overview' | 'stage' | 'tasks' | 'activity';
 
-const GLYPH: Record<PlayerJourneyStage, string> = { contacted: '', trial_invited: '➤', trial_scheduled: '', trial_completed: '✓', offer_received: '➤', offer_accepted: '✓', offer_declined: '✕', signing: '', signed: '✓', none: '○' };
 const tone = (s: PlayerJourneyStage) => (s === 'signed' || s === 'offer_accepted' || s === 'trial_completed' ? 'green' : s === 'offer_received' || s === 'trial_invited' || s === 'signing' ? 'gold' : s === 'offer_declined' ? 'red' : 'default');
 const stLabel = (s: PlayerJourneyStage) => { const key = `jnSt_${s}` as Parameters<typeof pt>[0]; try { return pt(key) ?? s; } catch { return s; } };
 const nextLabel = (code: string) => { const key = `jnNext_${code}` as Parameters<typeof pt>[0]; try { return pt(key) ?? ''; } catch { return ''; } };
@@ -51,7 +50,7 @@ export function JourneySection({ actor, view = 'overview', onGo, emptyLine }: { 
   const clubRow = (j: PlayerJourney) => (
     <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
       <Text style={{ color: colors.text, fontWeight: '700', fontSize: 14.5 }}>{j.club.name ?? pt('jnClub')}</Text>
-      <Text style={{ color: tone(j.journey.stage) === 'red' ? colors.danger : tone(j.journey.stage) === 'gold' ? colors.gold : tone(j.journey.stage) === 'green' ? colors.accentText : colors.muted, fontSize: 12.5, fontWeight: '600' }}>{`${GLYPH[j.journey.stage] ?? ''} ${stLabel(j.journey.stage)}`.trim()}</Text>
+      <Text style={{ color: tone(j.journey.stage) === 'red' ? colors.danger : tone(j.journey.stage) === 'gold' ? colors.gold : tone(j.journey.stage) === 'green' ? colors.accentText : colors.muted, fontSize: 12.5, fontWeight: '600' }}>{stLabel(j.journey.stage)}</Text>
     </Row>
   );
   const sep = { borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8, gap: 4 } as const;

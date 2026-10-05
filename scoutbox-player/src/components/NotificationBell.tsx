@@ -38,7 +38,7 @@ export function NotificationBell() {
     <>
       {/* M24A — the reference bell: a round hairline button with a green dot while something is unread. */}
       <Pressable onPress={openPanel} style={styles.bell} accessibilityRole="button" accessibilityLabel="Notifications" accessibilityValue={unread > 0 ? { text: `${unread} unread` } : undefined}>
-        <Icon name="bell" size={16} color={colors.text} />
+        <Icon name="bell" size={22} color={colors.gold} />
         {unread > 0 && <View style={styles.dot} accessibilityElementsHidden />}
       </Pressable>
       {open && (
@@ -78,10 +78,10 @@ export function NotificationBell() {
 
 const makeStyles = (colors: Palette) => StyleSheet.create({
   bell: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 0,
     borderColor: colors.line,
     backgroundColor: colors.bg2,
     alignItems: 'center',
@@ -93,7 +93,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     backgroundColor: colors.bg,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
-    borderWidth: 1,
+    borderWidth: 0,
     borderColor: colors.line,
     padding: 18,
     maxHeight: '80%',

@@ -41,7 +41,7 @@ function ReferenceCard({ r }: { r: PlayerReference }) {
       <Text style={{ color: colors.text, fontSize: 13, marginTop: 4 }}>{r.structured.summary}</Text>
       {r.structured.strengths ? <View><Muted>{pt('m14refStrengths')}: {r.structured.strengths}</Muted></View> : null}
       {r.structured.development ? <View><Muted>{pt('m14refDevelopment')}: {r.structured.development}</Muted></View> : null}
-      <View style={{ marginTop: 4 }}><Muted>✓ {r.provenance} · {pFmtDate(r.createdAt)}</Muted></View>
+      <View style={{ marginTop: 4 }}><Muted>{r.provenance} · {pFmtDate(r.createdAt)}</Muted></View>
     </View>
   );
 }

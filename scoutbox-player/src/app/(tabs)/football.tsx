@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text } from '../../components/Text';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { PlayerScreen as SafeAreaView } from '../../components/Vivid';
 import { Link, useLocalSearchParams } from 'expo-router';
 import { useSession } from '../../state';
 import { useColors, useStyles, type Palette } from '../../theme';
@@ -61,7 +61,7 @@ export default function Football() {
             Profile is fetched from its own endpoint and composed at the head of
             the Passport, exactly as before. */}
         {/* M24F.5 — the Trust section's rule sits on the tab bar's line: one rule under the tabs, not two. */}
-        {actor && tab === 'passport' ? <View style={{ marginTop: -17 }}><TrustProfileSection actor={actor} /></View> : null}
+        {actor && tab === 'passport' ? <View style={{ marginTop: 0 }}><TrustProfileSection actor={actor} /></View> : null}
         {actor && tab === 'passport' ? <FootballPassportSection actor={actor} isMinor={isMinor} /> : null}
         {actor && tab === 'development' ? <DevelopmentHubSection actor={actor} /> : null}
         {actor && tab === 'boxcam' ? <BoxTrainingSection actor={actor} isMinor={isMinor} /> : null}
@@ -74,6 +74,6 @@ export default function Football() {
 const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 32, gap: 0 },
-  primary: { backgroundColor: colors.accent, borderRadius: 10, paddingVertical: 7, paddingHorizontal: 12 },
+  primary: { backgroundColor: colors.accent, minHeight: 44, justifyContent: 'center', borderRadius: 22, paddingVertical: 11, paddingHorizontal: 12 },
   primaryText: { color: colors.accentInk, fontWeight: '700', fontSize: 13 },
 });

@@ -1,5 +1,10 @@
 # ScoutBox — repository handoff (to Codex)
 
+> Historical handoff, 4 October 2026. For the subsequent Founder-approved
+> vivid Player UI and current rebuild instructions, read `HANDOFF_CLAUDE_UI.md`
+> and `BRAND_RULES.md` first. The minimalism/freeze statements below describe
+> the previous baseline, not the current approved Player design.
+
 Prepared 2026-10-04 on branch `handoff/codex-m24f5`, built on the last
 implementation commit `d39754ba17b23c96ca9b69d9964188f2f367d2fc` of
 `claude/desktop-project-migration-wyk3ec` (GitHub still holds that branch at

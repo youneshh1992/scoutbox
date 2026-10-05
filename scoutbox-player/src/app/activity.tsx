@@ -5,7 +5,7 @@
 // because the stream carries no private detail — the event is the record.
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { PlayerScreen as SafeAreaView } from '../components/Vivid';
 import { Text } from '../components/Text';
 import { client, type Insights, type PlayerFeedItem } from '../data/client';
 import { useSession } from '../state';

@@ -10,7 +10,7 @@
 // projection and nothing here knows a club's private state.
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { PlayerScreen as SafeAreaView } from '../../components/Vivid';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSession } from '../../state';
 import { useStyles, type Palette } from '../../theme';
@@ -96,5 +96,5 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 32, gap: 0 },
   // M24F.5 — the first section's rule lands on the tab bar's own line, so a tab that opens on a section shows one rule, not two.
-  panel: { gap: 10, marginTop: -17 },
+  panel: { gap: 10, marginTop: 0 },
 });

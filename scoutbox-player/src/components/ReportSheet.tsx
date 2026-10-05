@@ -24,7 +24,7 @@ export function ReportButton() {
   return (
     <>
       <Pressable onPress={() => setOpen(true)} style={styles.flagBtn} accessibilityRole="button" accessibilityLabel="Report or block" testID="report-button">
-        <Icon name="flag" size={16} color={colors.danger} />
+        <Icon name="flag" size={22} color={colors.danger} />
       </Pressable>
       {open && <ReportSheet onClose={() => setOpen(false)} />}
     </>
@@ -147,7 +147,7 @@ export function ReportSheet({ onClose }: { onClose: () => void }) {
 }
 
 const makeStyles = (colors: Palette) => StyleSheet.create({
-  flagBtn: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.bg2, alignItems: 'center', justifyContent: 'center' },
+  flagBtn: { width: 44, height: 44, borderRadius: 22, borderWidth: 0, borderColor: colors.line, backgroundColor: colors.bg2, alignItems: 'center', justifyContent: 'center' },
   veil: { flex: 1, backgroundColor: 'rgba(3,8,18,0.7)', justifyContent: 'flex-end' },
   sheet: {
     backgroundColor: colors.bg2,

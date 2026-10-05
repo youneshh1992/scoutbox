@@ -39,5 +39,5 @@ export const Text = forwardRef<RNText, TextProps & { brand?: boolean }>(function
 });
 
 export const TextInput = forwardRef<RNTextInput, TextInputProps>(function TextInput({ style, ...props }, ref) {
-  return <RNTextInput ref={ref} {...props} style={withFont(style)} />;
+  return <RNTextInput ref={ref} {...props} style={withFont([{ minHeight: 44, borderRadius: 14, fontSize: 16 }, style])} />;
 });

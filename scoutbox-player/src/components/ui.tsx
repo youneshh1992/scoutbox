@@ -1,21 +1,19 @@
 // The Player's primitives. M24A: every colour comes from the active
 // palette (theme.ts) and every glyph of text is Inter (Text.tsx).
 //
-// M24F — a card is not the default primitive. `Card` is now a SECTION: a
-// hairline-ruled block of content with vertical breathing room and no box
-// around it (whitespace and typography do the grouping). The few surfaces
-// that genuinely are objects (a hero, a sheet) opt in with `raised`. Pills
-// are quiet chips for real state; buttons have one primary, quiet
-// secondaries, text tertiaries and a plainly destructive style.
+// Player refresh: grouped surfaces, rounded controls and semantic colours.
+// Domain states retain their existing labels and actions.
 import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
 import { useState, type ReactNode } from 'react';
 import { Text } from './Text';
 import { Icon } from './Icon';
+import { sectionIcon } from './sectionIcon';
+import { Gradient, ColorAvatar } from './Vivid';
 import { useColors, useStyles, type Palette } from '../theme';
 
 export function Card({ children, style, testID, raised, flush }: { children: ReactNode; style?: ViewStyle; testID?: string; /** a real surface (hero, sheet) */ raised?: boolean; /** no top rule (first section under a heading) */ flush?: boolean }) {
   const styles = useStyles(makeStyles);
-  return <View style={[styles.section, raised && styles.raised, flush && { borderTopWidth: 0, paddingTop: 0 }, style]} testID={testID}>{children}</View>;
+  return <View style={[styles.section, raised && styles.raised, flush && { marginTop: 0 }, style]} testID={testID}>{children}</View>;
 }
 
 export function Pill({ label, tone = 'default' }: { label: string; tone?: 'default' | 'green' | 'blue' | 'gold' | 'red' }) {
@@ -35,9 +33,10 @@ export function Pill({ label, tone = 'default' }: { label: string; tone?: 'defau
   );
 }
 
-export function Button({ label, onPress, primary, danger, disabled, small, pill, tertiary, testID }: {
+export function Button({ label, onPress, primary, danger, disabled, small, pill, tertiary, testID, selected }: {
   label: string;
   onPress: () => void;
+  selected?: boolean;
   primary?: boolean;
   danger?: boolean;
   disabled?: boolean;
@@ -65,16 +64,19 @@ export function Button({ label, onPress, primary, danger, disabled, small, pill,
       // incidentally, by a test that drives the real interface.
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled: !!disabled, selected }}
+      aria-pressed={selected}
       style={({ pressed }) => [
         styles.btn,
-        small && { paddingVertical: 7, paddingHorizontal: 12, minHeight: 34 },
+        small && { paddingVertical: 9, paddingHorizontal: 12, minHeight: 44 },
         pill && { borderRadius: 999, paddingHorizontal: 24, alignSelf: 'flex-start', minHeight: 42 },
         primary && { backgroundColor: colors.accent, borderColor: colors.accent },
         danger && { backgroundColor: 'transparent', borderColor: colors.dangerBg },
-        tertiary && { backgroundColor: 'transparent', borderColor: 'transparent', paddingHorizontal: 4, minHeight: small ? 30 : 38 },
+        tertiary && { backgroundColor: 'transparent', borderColor: 'transparent', paddingHorizontal: 4, minHeight: 44 },
         (pressed || disabled) && { opacity: 0.6 },
       ]}
     >
+      {primary && <Gradient />}
       <Text style={{ color: primary ? colors.accentInk : danger ? colors.danger : tertiary ? colors.accent2 : colors.text, fontWeight: '600', fontSize: small ? 12.5 : 13.5 }}>{label}</Text>
     </Pressable>
   );
@@ -82,7 +84,8 @@ export function Button({ label, onPress, primary, danger, disabled, small, pill,
 
 export function SectionTitle({ children, testID }: { children: ReactNode; testID?: string }) {
   const styles = useStyles(makeStyles);
-  return <Text role="heading" aria-level={2} style={styles.sectionTitle} testID={testID}>{children}</Text>;
+  const colors = useColors();
+  return <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14, marginBottom: 8 }}><Icon name={sectionIcon(typeof children === 'string' ? children : '')} size={25} color={colors.iconFg} /><Text role="heading" aria-level={2} style={[styles.sectionTitle, { marginTop: 0, marginBottom: 0, flex: 1 }]} testID={testID}>{children}</Text></View>;
 }
 
 export function Muted({ children, size = 13 }: { children: ReactNode; size?: number }) {
@@ -115,9 +118,10 @@ export function Row({ children, style }: { children: ReactNode; style?: ViewStyl
 export function ListRow({ label, value, count, onPress, testID, icon, right, danger }: { label: string; value?: string; count?: string | number; onPress?: () => void; testID?: string; icon?: string; right?: ReactNode; danger?: boolean }) {
   const colors = useColors();
   const styles = useStyles(makeStyles);
+  icon = icon ?? sectionIcon(label);
   const body = (
     <>
-      {icon ? <Icon name={icon} size={18} color={danger ? colors.danger : colors.muted} /> : null}
+      {icon ? <View style={{ width: 40, height: 40, borderRadius: 14, backgroundColor: danger ? colors.dangerBg : colors.iconBg, alignItems: 'center', justifyContent: 'center' }}><Icon name={icon} size={23} color={danger ? colors.danger : colors.iconFg} /></View> : null}
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={[styles.rowLabel, danger && { color: colors.danger }]}>{label}</Text>
         {value ? <Text style={styles.rowValue}>{value}</Text> : null}
@@ -157,6 +161,7 @@ export function Disclosure({ label, children, testID, open: initial = false, hin
   return (
     <View testID={testID}>
       <Pressable onPress={() => setOpen((v) => !v)} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ expanded: open }} aria-expanded={open} style={({ pressed }) => [styles.listRow, pressed && { opacity: 0.7 }]}>
+        <View style={{ width: 34, height: 34, borderRadius: 12, backgroundColor: colors.iconBg, alignItems: 'center', justifyContent: 'center' }}><Icon name={sectionIcon(label)} size={21} color={colors.iconFg} /></View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.rowLabel}>{label}</Text>
           {hint ? <Text style={styles.rowValue}>{hint}</Text> : null}
@@ -186,11 +191,11 @@ export function PreviewRow({ title, line, time, unread, accent, accentLabel, ini
   return (
     <Pressable onPress={onPress} disabled={!onPress} accessibilityRole={onPress ? 'button' : undefined} accessibilityLabel={a11y} testID={testID} style={({ pressed }) => [styles.preview, pressed && { opacity: 0.75 }]}>
       {accentColor ? <View style={[styles.previewEdge, { backgroundColor: accentColor }]} testID={accent ? `row-accent-${accent}` : undefined} /> : null}
-      {initials !== undefined ? <View style={styles.previewAvatar}><Text style={{ color: colors.iconFg, fontSize: 12.5, fontWeight: '600' }}>{initials}</Text></View> : null}
+      {initials !== undefined ? <ColorAvatar initials={initials} index={Array.from(title).reduce((n,c)=>n+c.charCodeAt(0),0)} /> : null}
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Text style={[styles.previewTitle, unread && { fontWeight: '700' }]} numberOfLines={1}>{title}</Text>
-          {accentLabel ? <View style={[styles.previewLabel, { backgroundColor: accentBg }]}><Text style={{ color: accentInk, fontSize: 10.5, fontWeight: '600', letterSpacing: 0.3 }}>{accentLabel}</Text></View> : null}
+          <Text style={[styles.previewTitle, unread && { fontWeight: '700' }]} numberOfLines={2}>{title}</Text>
+          {accentLabel ? <View style={[styles.previewLabel, { backgroundColor: accentBg, flexShrink: 0 }]}><Text style={{ color: accentInk, fontSize: 10.5, fontWeight: '600', letterSpacing: 0.3 }}>{accentLabel}</Text></View> : null}
         </View>
         {line ? <Text style={[styles.previewLine, unread && { color: colors.text, fontWeight: '500' }]} numberOfLines={1}>{line}</Text> : null}
       </View>
@@ -262,37 +267,38 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   factValue: { color: colors.text, fontSize: 14.5, fontWeight: '600', textAlign: 'right', flexShrink: 1, maxWidth: '55%' },
   factSub: { color: colors.muted, fontSize: 12.5, lineHeight: 17, marginTop: 2 },
   section: {
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
-    paddingTop: 18,
-    paddingBottom: 6,
-    marginTop: 4,
+    backgroundColor: colors.panel,
+    borderWidth: 1, borderColor: colors.line,
+    borderRadius: 24,
+    padding: 18,
+    marginTop: 8,
     gap: 10,
   },
   raised: {
     backgroundColor: colors.panel,
     borderWidth: 1,
     borderColor: colors.line,
-    borderRadius: 14,
+    borderRadius: 24,
     padding: 18,
     paddingTop: 18,
     paddingBottom: 18,
     marginTop: 8,
   },
   pill: {
-    borderRadius: 5,
+    borderRadius: 999,
     paddingHorizontal: 7,
     paddingVertical: 3,
     alignSelf: 'flex-start',
   },
   btn: {
-    backgroundColor: 'transparent',
-    borderColor: colors.line,
+    backgroundColor: colors.panel2,
+    borderColor: colors.panel2,
     borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: 16,
     paddingVertical: 11,
     paddingHorizontal: 16,
     minHeight: 44,
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -321,11 +327,11 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   rowValue: { color: colors.muted, fontSize: 12.5, lineHeight: 17, marginTop: 2 },
   rowCount: { color: colors.muted, fontSize: 14, fontVariant: ['tabular-nums'] },
   disclosureBody: { paddingTop: 10, paddingBottom: 14, gap: 8, borderBottomWidth: 1, borderBottomColor: colors.line },
-  preview: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 60, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.line, position: 'relative' },
-  previewEdge: { width: 3, alignSelf: 'stretch', borderRadius: 2, marginLeft: -2 },
-  previewAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.iconBg, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  previewTitle: { color: colors.text, fontSize: 15, fontWeight: '600', lineHeight: 20, flexShrink: 1 },
-  previewLine: { color: colors.muted, fontSize: 13, lineHeight: 18, marginTop: 2 },
+  preview: { flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 88, paddingVertical: 16, position: 'relative', borderBottomWidth: 1, borderBottomColor: colors.line },
+  previewEdge: { position: 'absolute', left: -7, top: 28, width: 3, height: 28, borderRadius: 2 },
+  previewAvatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: colors.iconBg, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  previewTitle: { color: colors.text, fontSize: 16, fontWeight: '600', lineHeight: 22, flexShrink: 1 },
+  previewLine: { color: colors.muted, fontSize: 13, lineHeight: 19, marginTop: 4 },
   previewTime: { color: colors.muted, fontSize: 12 },
   previewLabel: { borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
   unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.accent },

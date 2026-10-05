@@ -47,7 +47,7 @@ function reasonLabel(code: string | null): string {
   if (!code) return '';
   return pt(`m22reason_${code}` as Parameters<typeof pt>[0]) || code;
 }
-const stateGlyph = (s: ReadyCheckItem['state']) => (s === 'pass' ? '✓' : s === 'fail' ? '✗' : '○');
+const stateGlyph = (s: ReadyCheckItem['state']) => (s === 'pass' ? 'Ready ·' : s === 'fail' ? 'Needs attention ·' : 'Unchecked ·');
 
 export function M22BoxCamCv({
   playerId, sessionId, nonce, protocolId, onClose,

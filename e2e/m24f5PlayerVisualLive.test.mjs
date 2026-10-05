@@ -29,7 +29,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 if (!fs.existsSync(BUNDLE)) { console.error('missing demo bundle — run node buildDemos.mjs'); process.exit(1); }
 try { execSync(`fuser -k ${PORT}/tcp`, { stdio: 'ignore' }); } catch { /* free */ }
 const server = http.createServer((q, r) => { r.writeHead(200, { 'content-type': 'text/html' }); fs.createReadStream(BUNDLE).pipe(r); }).listen(PORT);
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium' });
 
 const MEASURE = `(() => {
   const root = document.querySelector('[data-testid="mobile-viewport"]') ?? document.body;
@@ -78,7 +78,14 @@ for (const [w, h] of [[320, 690], [360, 780], [390, 844], [430, 932], [640, 360]
   ok(!/View (your )?Passport|Verified clubs can see you/.test(header), `${tag} Home: no "View Passport", no verified sentence`);
   ok(/^Joined [A-Z][a-z]+ \d{4}$/.test((await p.locator('[data-testid="home-joined"]').innerText()).trim()), `${tag} Home: "Joined <Month Year>" from the record`);
   const recent = p.locator('[data-testid="home-recent-row"]');
+  const recentToggle = p.locator('[data-testid="home-activity"] [role="button"]').first();
+  ok(await recentToggle.getAttribute('aria-expanded') === 'false' && await recent.count() === 0, `${tag} Home: Recent starts collapsed`);
+  await recentToggle.click();
+  ok(await recentToggle.getAttribute('aria-expanded') === 'true', `${tag} Home: Recent opens accessibly`);
   ok((await recent.count()) >= 1 && (await recent.count()) <= 3, `${tag} Home: Recent is a short timeline (${await recent.count()} items)`);
+  await recentToggle.click();
+  ok(await recentToggle.getAttribute('aria-expanded') === 'false' && await recent.count() === 0, `${tag} Home: Recent collapses again`);
+  await recentToggle.click();
 
   // Activity
   await p.locator('[data-testid="home-activity-all"]').click(); await p.waitForSelector('[data-testid="activity-page"]', { timeout: 15000 }); await sleep(600);

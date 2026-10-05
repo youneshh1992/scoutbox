@@ -4,6 +4,7 @@ import { useSession } from '../../state';
 import { useColors } from '../../theme';
 import { pt } from '../../i18n';
 import { Text } from '../../components/Text';
+import { Gradient } from '../../components/Vivid';
 import { Icon } from '../../components/Icon';
 import { PopupBanner } from '../../components/PopupBanner';
 
@@ -11,12 +12,12 @@ import { PopupBanner } from '../../components/PopupBanner';
 // Profile and Upload keep their routes (deep links, back navigation, tests)
 // but no longer occupy a bar slot: Profile is the first page tab of You, and
 // Upload is the "+ Add evidence" action on Football.
-// M24A — the reference bottom navigation: lucide icons over 11px labels, the
+// M24A — the Player navigation: Phosphor icons over 11px labels, the
 // active destination on a soft green pill.
 type TabDef = { name: string; titleKey: 'tabHome' | 'tabFootball' | 'tabOpportunities' | 'tabInbox' | 'tabYou' | 'tabProfile' | 'tabUpload'; icon: string; hidden?: boolean };
 const TABS: readonly TabDef[] = [
   { name: 'discover', titleKey: 'tabHome', icon: 'house' },
-  { name: 'football', titleKey: 'tabFootball', icon: 'circle-user-round' },
+  { name: 'football', titleKey: 'tabFootball', icon: 'soccer-ball' },
   { name: 'opportunities', titleKey: 'tabOpportunities', icon: 'compass' },
   { name: 'inbox', titleKey: 'tabInbox', icon: 'message-circle' },
   { name: 'you', titleKey: 'tabYou', icon: 'user-round' },
@@ -28,10 +29,10 @@ function TabItem({ icon, label, focused, badge }: { icon: string; label: string;
   const colors = useColors();
   return (
     <View style={{ alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 4, paddingHorizontal: 6, minHeight: 43, minWidth: 58, borderRadius: 9 }}>
-      <View>
-        <Icon name={icon} size={20} color={focused ? colors.tabActive : colors.tabInactive} />
+      <View style={{ width: 48, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: focused ? colors.tabActiveBg : 'transparent' }}>
+        {focused && <Gradient radius={16} />}<Icon name={icon} active={focused} size={25} color={focused ? colors.accentInk : colors.tabInactive} />
         {badge > 0 && (
-          <View style={{ position: 'absolute', top: -5, right: -9, minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 4, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
+          <View style={{ position: 'absolute', zIndex: 2, top: -5, right: -9, minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 4, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
             <Text style={{ color: colors.accentInk, fontSize: 10, fontWeight: '700' }}>{badge}</Text>
           </View>
         )}
@@ -54,14 +55,14 @@ export default function TabsLayout() {
       <PopupBanner />
       {mode === 'live' && !liveConnected && (
         <View style={{ backgroundColor: colors.dangerBg, paddingVertical: 4, alignItems: 'center' }}>
-          <Text style={{ color: colors.dangerInk, fontSize: 12 }}>○ reconnecting — updates resume automatically</Text>
+          <Text style={{ color: colors.dangerInk, fontSize: 12 }}>Reconnecting — updates resume automatically</Text>
         </View>
       )}
       <Tabs
         screenOptions={{
           headerShown: false,
           sceneStyle: { backgroundColor: colors.bg },
-          tabBarStyle: { backgroundColor: colors.bg2, borderTopColor: colors.line, borderTopWidth: 1, height: 75, paddingTop: 11, paddingBottom: 17, paddingHorizontal: 10 },
+          tabBarStyle: { backgroundColor: colors.bg2, borderTopColor: colors.line, borderTopWidth: 1, height: 82, paddingTop: 9, paddingBottom: 15, paddingHorizontal: 10 },
           tabBarItemStyle: { paddingVertical: 0 },
           tabBarShowLabel: false,
           tabBarActiveTintColor: colors.tabActive,

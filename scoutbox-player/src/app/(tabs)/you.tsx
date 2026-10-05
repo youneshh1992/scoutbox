@@ -9,7 +9,7 @@
 import { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from '../../components/Text';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { PlayerScreen as SafeAreaView } from '../../components/Vivid';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { client, type FiledReport, type SeasonWrap } from '../../data/client';
 import type { InboxRequest } from '../../domain/types';
@@ -117,15 +117,15 @@ export default function You() {
         {tab === 'profile' && <ProfileBody />}
 
         {tab === 'account' && accountSection === '' && (
-          <View testID="account-root">
+          <View testID="account-root" style={{ backgroundColor: colors.panel, borderRadius: 26, padding: 18 }}>
             <View style={styles.who}>
               <Text style={styles.whoName}>{me?.name ?? '—'}</Text>
               <Muted size={13}>{me ? [me.city, me.country].filter(Boolean).join(', ') : ''}</Muted>
             </View>
-            <ListRow label={pt('accProfile')} onPress={() => go('profile')} testID="account-cat-profile" />
-            <ListRow label={pt('accPrivacy')} onPress={() => go('privacy')} testID="account-cat-privacy" />
-            <ListRow label={pt('accPreferences')} onPress={() => go('preferences')} testID="account-cat-preferences" />
-            <ListRow label={pt('accAppearance')} onPress={() => go('appearance')} testID="account-cat-appearance" />
+            <ListRow label={pt('accProfile')} icon="user-round" onPress={() => go('profile')} testID="account-cat-profile" />
+            <ListRow label={pt('accPrivacy')} icon="shield-check" onPress={() => go('privacy')} testID="account-cat-privacy" />
+            <ListRow label={pt('accPreferences')} icon="settings-2" onPress={() => go('preferences')} testID="account-cat-preferences" />
+            <ListRow label={pt('accAppearance')} icon="sun" onPress={() => go('appearance')} testID="account-cat-appearance" />
             {/* M24E — the way out: Sign out ends this identity's session on the server and on the device; Switch account does the same and opens the entry screen on Sign in. */}
             <View style={{ marginTop: 26 }}>
               <ListRow label="Switch account" icon="users" testID="switch-account" onPress={() => { logout(); router.replace('/onboarding?mode=signin'); }} />
@@ -261,7 +261,7 @@ export default function You() {
 const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 32, gap: 0 },
-  who: { paddingTop: 6, paddingBottom: 16, gap: 2 },
+  who: { backgroundColor: colors.iconBg, borderRadius: 20, padding: 18, marginBottom: 14, gap: 4 },
   whoName: { color: colors.text, fontSize: 24, fontWeight: '700', letterSpacing: -0.6 },
   section: { paddingTop: 18 },
   back: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingVertical: 8, alignSelf: 'flex-start' },

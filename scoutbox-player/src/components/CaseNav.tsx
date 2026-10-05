@@ -5,6 +5,8 @@
 // into view so it is never off screen at 360px.
 import { useEffect, useRef } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Icon } from './Icon';
+import { Gradient } from './Vivid';
 import { Text } from './Text';
 import { useColors, useStyles, type Palette } from '../theme';
 import { pt } from '../i18n';
@@ -36,7 +38,7 @@ export function CaseCategories({ model, value, onChange }: { model: PlayerCaseNa
               style={({ pressed }) => [styles.pill, active && styles.pillOn, pressed && { opacity: 0.75 }]}
               testID={`cat-${c.id}`}
             >
-              {active && <View style={[styles.dot, { backgroundColor: colors.accent }]} />}
+              {active && <Gradient />}<Icon name={({ journey: 'route', contact: 'message-circle', trial: 'calendar-days', offer: 'file-text', signing: 'file-check-2' } as Record<string, string>)[c.id] ?? 'compass'} size={20} color={active ? colors.accentInk : colors.iconFg} />
               <Text style={[styles.text, active && styles.textOn]} numberOfLines={1}>{pt(c.labelKey as Parameters<typeof pt>[0])}</Text>
             </Pressable>
           );
@@ -49,9 +51,9 @@ export function CaseCategories({ model, value, onChange }: { model: PlayerCaseNa
 const makeStyles = (colors: Palette) => StyleSheet.create({
   wrap: { marginHorizontal: -18 },
   row: { paddingHorizontal: 18, gap: 6, paddingVertical: 2 },
-  pill: { minHeight: 44, paddingHorizontal: 14, borderRadius: 999, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.panel, flexDirection: 'row', alignItems: 'center', gap: 7 },
+  pill: { overflow: 'hidden', minHeight: 44, paddingHorizontal: 14, borderRadius: 999, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.panel, flexDirection: 'row', alignItems: 'center', gap: 7 },
   pillOn: { backgroundColor: colors.tabActiveBg, borderColor: colors.tabActiveBg },
   dot: { width: 6, height: 6, borderRadius: 3 },
   text: { color: colors.muted, fontSize: 13.5, fontWeight: '500' },
-  textOn: { color: colors.tabActive, fontWeight: '700' },
+  textOn: { color: colors.accentInk, fontWeight: '700' },
 });

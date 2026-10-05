@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import { seasonChartData } from '../scoutbox-player/src/components/seasonChartData.ts';
+const current = { goals: 22, assists: 6, appearances: 31 };
+const history = [{season:'2024/25',goals:17,assists:5,appearances:28},{season:'2022/23',goals:8,assists:3,appearances:20},{season:'2023/24',goals:11,assists:4,appearances:24}];
+const original = structuredClone(history);
+const data = seasonChartData(current, history);
+assert.deepEqual(data.rows.map(s=>s.season), ['2023/24','2024/25','Now']);
+assert.deepEqual(data.rows.map(s=>[s.goals,s.assists]),[[11,4],[17,5],[22,6]]);
+assert.equal(data.max,22);
+assert.deepEqual(history,original);
+assert.equal(seasonChartData({...current,goals:NaN}),null);
+assert.equal(seasonChartData({...current,assists:-1}),null);
+assert.equal(seasonChartData({goals:0,assists:0,appearances:0}).max,1);
+assert.equal(seasonChartData(current,[{...history[0],goals:Infinity}]).rows.length,1);
+assert.equal(seasonChartData({...current,assists:30}).max,30);
+console.log('Season chart: 9 checks passed (real values, ordering, scale, zero/invalid data, immutability).');

@@ -23,6 +23,7 @@ import { Text } from './Text';
 import { useColors } from '../theme';
 import { Disclosure, Muted } from './ui';
 import { RefCard } from './Reference';
+import { ScoreRing } from './Vivid';
 import { Icon } from './Icon';
 import { trust, type TrustActor, type TrustSelf } from '../data/trustClient';
 import { pt } from '../i18n';
@@ -85,9 +86,7 @@ export function TrustProfileSection({ actor, childName }: { actor: TrustActor; c
           {t ? <Muted size={12.5}>{pt('trsEvidenceOnly')}</Muted> : null}
         </View>
         {t ? (
-          <Text style={{ color: colors.text, fontSize: 32, fontWeight: '700', letterSpacing: -1, lineHeight: 38 }} testID="trust-score">
-            {t.score}<Text style={{ color: colors.muted, fontSize: 11, fontWeight: '400', letterSpacing: 0 }}>/100</Text>
-          </Text>
+          <View testID="trust-score"><ScoreRing value={t.score} label={pt('trsTitle')} /></View>
         ) : null}
       </View>
 

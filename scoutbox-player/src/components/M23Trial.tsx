@@ -146,7 +146,7 @@ export function TrialSlotChips({ slots, chosenDay, onPick }: { slots: { id: stri
               onPress={() => onPick(sl.day)} style={{ color: colors.text, fontSize: 13, fontWeight: active ? '700' : '400' }}
               testID={`trial-slot-${sl.id}`}
             >
-              {active ? '● ' : '○ '}{fmtIn(sl.startsAt, sl.timezone)}–{fmtEnd(sl.endsAt, sl.timezone)}{sl.kind ? <Text style={{ color: colors.muted }}> · {sl.kind.replace(/_/g, ' ')}</Text> : null}
+              {active ? 'Selected · ' : ''}{fmtIn(sl.startsAt, sl.timezone)}–{fmtEnd(sl.endsAt, sl.timezone)}{sl.kind ? <Text style={{ color: colors.muted }}> · {sl.kind.replace(/_/g, ' ')}</Text> : null}
             </Text>
           </View>
         );

@@ -18,16 +18,14 @@ export function ThemeSwitch() {
       testID="theme-switch"
       style={({ pressed }) => [styles.btn, { backgroundColor: colors.bg2, borderColor: colors.line }, pressed && { opacity: 0.8 }]}
     >
-      <Icon name={dark ? 'moon' : 'sun'} size={15} color={colors.text} />
-      <View style={[styles.track, { backgroundColor: dark ? colors.accent : colors.track }]}>
-        <View style={[styles.knob, { backgroundColor: dark ? colors.accentInk : colors.knob, transform: [{ translateX: dark ? 11 : 0 }] }]} />
-      </View>
+      <Icon name={dark ? 'moon' : 'sun'} size={22} color={colors.iconFg} />
+
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  btn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 7, paddingHorizontal: 6, minHeight: 36, borderWidth: 1, borderRadius: 8 },
+  btn: { alignItems: 'center', justifyContent: 'center', width: 44, height: 44, borderRadius: 22 },
   track: { width: 27, height: 16, padding: 2, borderRadius: 12 },
   knob: { width: 12, height: 12, borderRadius: 6, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 1, shadowOffset: { width: 0, height: 1 } },
 });

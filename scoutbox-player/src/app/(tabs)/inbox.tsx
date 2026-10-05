@@ -8,10 +8,10 @@
 // and the metadata sit behind "View full message". Nothing here changes
 // who may contact whom — the same client calls answer the same requests.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Text, TextInput } from '../../components/Text';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { PlayerScreen as SafeAreaView } from '../../components/Vivid';
 import { client } from '../../data/client';
 import type { AppNotification, Channel } from '../../data/types';
 import type { ChildInboxItem, InboxRequest } from '../../domain/types';
@@ -19,7 +19,8 @@ import { useSession } from '../../state';
 import { useColors, useStyles, type Palette } from '../../theme';
 import { Button, DetailLink, Disclosure, Kicker, Muted, PreviewRow, Row } from '../../components/ui';
 import { pt } from '../../i18n';
-import { PageHeader, PageTabs } from '../../components/PageChrome';
+import { ColorAvatar, Gradient } from '../../components/Vivid';
+import { PageHeader } from '../../components/PageChrome';
 import { Threads, threadPreview } from '../../components/Threads';
 import { AckSection } from '../../components/M13Sections';
 import { TrialSlotChips } from '../../components/M23Trial';
@@ -44,6 +45,8 @@ export default function Inbox() {
   const styles = useStyles(makeStyles);
   const router = useRouter();
   const { playerId, inbox, isMinor, me, refresh, notifications } = useSession();
+  const [query, setQuery] = useState('');
+  const [searchExpanded, setSearchExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -84,7 +87,11 @@ export default function Inbox() {
 
   const isUnread = (e: Entry) => (e.kind === 'request' ? e.req.status === 'pending' : e.kind === 'thread' ? threadPreview(e.channel).unread : e.kind === 'event' ? !e.note.read : e.item.status === 'pending');
   const isRequest = (e: Entry) => e.kind === 'request' || e.kind === 'child' || e.kind === 'event';
-  const shown = entries.filter((e) => (tab === 'unread' ? isUnread(e) : tab === 'requests' ? isRequest(e) : true));
+  const shown = entries.filter((e) => {
+    if (!(tab === 'unread' ? isUnread(e) : tab === 'requests' ? isRequest(e) : true)) return false;
+    const searchable = e.kind === 'request' ? `${e.req.orgName} ${e.req.scoutName}` : e.kind === 'thread' ? `${e.channel.orgName} ${threadPreview(e.channel).line}` : e.kind === 'child' ? e.item.orgName : e.note.text;
+    return searchable.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
+  });
   const unreadCount = entries.filter(isUnread).length;
 
   const respond = async (requestId: string, accept: boolean, isContact: boolean, slot?: string, reply?: string) => {
@@ -116,19 +123,9 @@ export default function Inbox() {
     { key: 'requests', label: pt('inboxRequests') },
   ];
 
-  return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
-      >
-        {request ? (
-          <RequestDetail r={request} onBack={() => setOpenRequest(null)} onRespond={respond} onOpenThread={(c) => { setOpenRequest(null); setOpenThread(c); }} channels={channels} error={error} />
-        ) : child ? (
-          <ChildDetail item={child} onBack={() => setOpenChild(null)} />
-        ) : openThread && playerId ? (
-          <View testID="inbox-thread">
-            <Threads
+  if (openThread && playerId && !request && !child) return <SafeAreaView style={styles.safe} edges={['top']}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} testID="inbox-thread" style={{ flex: 1, padding: 18 }}>
+            <Threads fullHeight
               channels={channels}
               openChannelId={openThread}
               onOpenChange={(id) => setOpenThread(id)}
@@ -140,17 +137,43 @@ export default function Inbox() {
               emptyText={pt('inboxEmpty')}
               headerExtra={(c) => { const t = trialOf(c); return t ? <TrialCard r={t} onView={() => router.push('/opportunities?cat=trial&tab=schedule')} /> : null; }}
             />
-          </View>
+          </KeyboardAvoidingView>
+</SafeAreaView>;
+
+  return (
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
+      >
+        {request ? (
+          <RequestDetail r={request} onBack={() => setOpenRequest(null)} onRespond={respond} onOpenThread={(c) => { setOpenRequest(null); setOpenThread(c); }} channels={channels} error={error} />
+        ) : child ? (
+          <ChildDetail item={child} onBack={() => setOpenChild(null)} />
+
         ) : (
           <>
-            <PageHeader title={isMinor ? pt('tabUpdates') : pt('tabInbox')} />
+            <PageHeader title={isMinor ? pt('tabUpdates') : pt('tabInbox')} prominent accessory={<Pressable accessibilityRole="button" accessibilityLabel={searchExpanded ? pt('inboxCloseSearch') : pt('inboxSearch')} onPress={() => { setSearchExpanded(!searchExpanded); setQuery(''); }} style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.panel, alignItems: 'center', justifyContent: 'center' }}><Icon name={searchExpanded ? 'x' : 'search'} size={22} color={colors.iconFg} /></Pressable>} />
+            {!isMinor ? <View role="tablist" aria-label={pt('inboxFilter')} style={styles.filters}>
+              {tabs.map((item) => <Pressable key={item.key} role="tab" aria-selected={tab === item.key} onPress={() => setTab(item.key as typeof tab)} style={[styles.filter, tab === item.key && { backgroundColor: colors.accent }]}>
+                {tab === item.key && <Gradient />}<Text style={{ color: tab === item.key ? colors.accentInk : colors.muted, fontSize: 13, fontWeight: '600' }}>{item.label}</Text>
+              </Pressable>)}
+            </View> : null}
+            {entries.length > 0 && !query.trim() ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 18, paddingVertical: 18 }} accessibilityLabel="Inbox shortcuts">
+              {me && <Pressable accessibilityRole="button" accessibilityLabel="Your profile" onPress={() => router.push('/you')} style={{ alignItems: 'center', width: 68, gap: 7 }}><ColorAvatar initials={initialsOf(me.name)} size={60} index={0} /><Text style={{ color: colors.text, fontSize: 10, fontWeight: '600' }}>You</Text></Pressable>}
+              {entries.filter(e => e.kind !== 'event').slice(0, 8).map((e, i) => { const name = e.kind === 'request' ? e.req.orgName : e.kind === 'thread' ? e.channel.orgName : e.kind === 'child' ? e.item.orgName : ''; return <Pressable key={e.id} accessibilityRole="button" accessibilityLabel={`Open ${name}`} onPress={() => openEntry(e)} style={{ alignItems: 'center', width: 68, gap: 7 }}><ColorAvatar initials={initialsOf(name)} size={60} index={Array.from(name).reduce((n,c)=>n+c.charCodeAt(0),0)} /><Text numberOfLines={1} style={{ color: colors.text, fontSize: 10, fontWeight: '600', width: 68, textAlign: 'center' }}>{name}</Text></Pressable>; })}
+            </ScrollView> : null}
+            {searchExpanded && <View style={styles.search}>
+              <Icon name="search" size={20} color={colors.muted} />
+              <TextInput accessibilityLabel={pt('inboxSearch')} placeholder={pt('inboxSearch')} placeholderTextColor={colors.muted} value={query} onChangeText={setQuery} style={styles.searchInput} />
+              {query ? <Pressable accessibilityRole="button" accessibilityLabel={pt('inboxClearSearch')} onPress={() => setQuery('')} style={styles.clearSearch}><Icon name="x" size={18} color={colors.text} /></Pressable> : null}
+            </View>}
             <Disclosure label={isMinor ? pt('inboxMinorLine') : pt('inboxSafety')} testID="inbox-safety">
               <Muted size={13}>{isMinor ? pt('inboxMinorFull') : pt('inboxSafetyFull')}</Muted>
             </Disclosure>
-            {!isMinor ? <PageTabs tabs={tabs} value={tab} onChange={(k) => setTab(k as typeof tab)} /> : null}
             {error ? <Text style={{ color: colors.danger, fontSize: 13, marginTop: 8 }}>{error}</Text> : null}
-            <View testID="inbox-list">
-              {shown.length === 0 ? <View style={{ paddingVertical: 24 }}><Muted size={14}>{tab === 'unread' ? pt('inboxEmptyUnread') : tab === 'requests' ? pt('inboxEmptyRequests') : pt('inboxEmpty')}</Muted></View> : null}
+            <View testID="inbox-list" style={{ paddingHorizontal: 2 }}>
+              {shown.length === 0 ? <View style={{ paddingVertical: 24 }}><Muted size={14}>{query.trim() ? pt('inboxNoMatches') : tab === 'unread' ? pt('inboxEmptyUnread') : tab === 'requests' ? pt('inboxEmptyRequests') : pt('inboxEmpty')}</Muted></View> : null}
               {shown.map((e) => {
                 if (e.kind === 'request') {
                   const r = e.req; const trial = r.type === 'trial';
@@ -277,6 +300,11 @@ function ChildDetail({ item, onBack }: { item: ChildInboxItem; onBack: () => voi
 const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 32, gap: 0 },
+  search: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.line, borderRadius: 20, paddingLeft: 14, paddingRight: 6, minHeight: 48, marginTop: 0, marginBottom: 6 },
+  searchInput: { flex: 1, minWidth: 0, color: colors.text, fontSize: 14, paddingVertical: 12 },
+  clearSearch: { width: 40, height: 44, alignItems: 'center', justifyContent: 'center' },
+  filters: { flexDirection: 'row', gap: 4, marginTop: 12, padding: 4, borderRadius: 18, backgroundColor: colors.panel },
+  filter: { flex: 1, alignItems: 'center', minHeight: 44, paddingHorizontal: 10, paddingVertical: 12, borderRadius: 14, overflow: 'hidden', justifyContent: 'center', backgroundColor: colors.panel2 },
   org: { color: colors.text, fontSize: 20, fontWeight: '700', letterSpacing: -0.4 },
   subject: { color: colors.text, fontSize: 15, fontWeight: '600' },
   msg: { color: colors.text, fontSize: 14, fontStyle: 'italic', lineHeight: 20 },

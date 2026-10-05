@@ -19,12 +19,11 @@ import { Button, Card, Disclosure, Kicker, Muted, Row, SectionTitle } from './ui
 
 type Actor = { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string };
 
-const GLYPH: Record<OfferStatus, string> = { DRAFT: '○', ISSUED: '➤', ACCEPTED: '✓', DECLINED: '✕', WITHDRAWN: '⊘', EXPIRED: '◷', SUPERSEDED: '↻' };
 const tone = (s: OfferStatus | null) => (s === 'ISSUED' ? 'gold' : s === 'ACCEPTED' ? 'green' : s === 'DECLINED' || s === 'WITHDRAWN' || s === 'EXPIRED' ? 'red' : 'default');
 const stLabel = (s: OfferStatus | null) => {
   if (!s) return '';
   const key = `offerSt_${s}` as Parameters<typeof pt>[0];
-  try { return `${GLYPH[s]} ${pt(key) ?? s}`; } catch { return s; }
+  try { return pt(key) ?? s; } catch { return s; }
 };
 const fmt = (ms: number | null) => (ms ? fmtDayTime(ms) : '—');
 const errMsg = (e: unknown) => {
