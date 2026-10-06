@@ -1,3 +1,4 @@
+import { DetailItems } from './RecordDetails';
 import { Hint } from '../../design-system/About';
 import { ProChart } from './proDesign';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -556,7 +557,7 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
             </div>
             {/* M24F.5 — one quiet line: identity check, contract, current club. Badges and evidence detail are one tap deeper, on the profile. */}
             <div className="meta player-quiet">
-              {[p.identityVerified ? 'ID ✓' : null, CONTRACT_LABELS[p.contractStatus] ?? p.contractStatus, fpSummaries.get(p.id)?.currentClub?.name ?? null, fpSummaries.get(p.id) ? `${t('fp.coverage')}: ${t(`fp.cov.${fpSummaries.get(p.id)!.evidenceCoverage}`)}` : null].filter(Boolean).join(' · ')}
+              <DetailItems items={[p.identityVerified ? 'ID verified' : null, CONTRACT_LABELS[p.contractStatus] ?? p.contractStatus, fpSummaries.get(p.id)?.currentClub?.name ?? null, fpSummaries.get(p.id) ? `${t('fp.coverage')}: ${t(`fp.cov.${fpSummaries.get(p.id)!.evidenceCoverage}`)}` : null].filter(Boolean)}/>
             </div>
             <TrustBar score={p.trustScore} />
           </div>

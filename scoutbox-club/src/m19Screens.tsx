@@ -1,3 +1,4 @@
+import { RecordFacts, DetailItems, sentenceCase } from './RecordDetails';
 // M19 org screens — Player Matching and Dynamic Watchlists.
 //
 // The three rules this file keeps visible, because they are the product:
@@ -326,13 +327,12 @@ function CriteriaClassEditor({
       className="m19-criteria"
       data-criteria-class={cls}
     >
-      <legend className="m19-criteria-title">
-        {cls === 'required' ? t('m19.cr.required') : t('m19.cr.preferred')}
-      </legend>
+      <legend className="sr-only">{cls === 'required' ? t('m19.cr.required') : t('m19.cr.preferred')}</legend>
+      <div className="criteria-panel-heading"><div><span className="suite-eyebrow">{cls === 'required' ? 'Must be present' : 'Useful context'}</span><h3>{cls === 'required' ? t('m19.cr.required') : t('m19.cr.preferred')}</h3></div><span className="criteria-count">{rows.length}</span></div>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 6 }}>
         {cls === 'required' ? t('m19.cr.requiredNote') : t('m19.cr.preferredNote')}
       </div>
-      {rows.length === 0 && <div className="dim" style={{ fontSize: 13 }}>{t('m19.cr.none')}</div>}
+      {rows.length === 0 && <div className="criteria-empty"><span aria-hidden="true">{cls === 'required' ? '+' : '◇'}</span><b>{cls === 'required' ? 'Define your essentials' : 'Add a little more context'}</b><p>{cls === 'required' ? 'Start with a position, age range or another recorded fact.' : 'Optional details help you read each result. They never exclude a player.'}</p></div>}
       {rows.map((c, i) => (
         <CriterionRow
           key={`${cls}-${i}`}
@@ -406,7 +406,7 @@ function MatchCardView({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="section" data-match-card={card.playerId} style={{ marginBottom: 10 }}>
+    <div className="section matching-result" data-match-card={card.playerId} style={{ marginBottom: 10 }}>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'baseline' }}>
         <b style={{ fontSize: 15 }}>{card.name}</b>
         {card.position && <span className="pill blue">{card.position}</span>}
@@ -541,24 +541,20 @@ export function MatchingScreen({
   const canRun = source === 'brief' ? !!briefId : criteria.required.length > 0;
 
   return (
-    <div>
-      <div className="dim" style={{ fontSize: 12.5, marginBottom: 4 }}>{t('m19.noScore')}</div>
+    <div className="matching-workspace">
+      <p className="matching-principle">{t('m19.noScore')}</p>
       <details className="f-about" style={{ marginBottom: 10 }} data-testid="matching-about"><summary>About</summary><div className="dim" style={{ fontSize: 12.5 }}>{t('m19.intro')}</div></details>
 
       {loadErr && <LoadError message={loadErr} onRetry={() => setBump((b) => b + 1)} />}
 
-      <div className="section" aria-label={t('m19.criteriaLabel')}>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 8 }}>
-          <label style={{ fontSize: 13 }}>
-            <input type="radio" name="m19-source" checked={source === 'criteria'} onChange={() => setSource('criteria')} /> {t('m19.srcCriteria')}
-          </label>
-          <label style={{ fontSize: 13 }}>
-            <input type="radio" name="m19-source" checked={source === 'brief'} onChange={() => setSource('brief')} /> {t('m19.srcBrief')}
-          </label>
+      <div className="match-builder" aria-label={t('m19.criteriaLabel')}>
+        <div className="matching-source" role="radiogroup" aria-label="Choose your search source">
+          <label className={source==='criteria'?'selected':''}><input type="radio" name="m19-source" checked={source==='criteria'} onChange={()=>setSource('criteria')}/><span className="source-symbol" aria-hidden="true">01</span><span><strong>{t('m19.srcCriteria')}</strong><small>Build a search for today’s requirements</small></span></label>
+          <label className={source==='brief'?'selected':''}><input type="radio" name="m19-source" checked={source==='brief'} onChange={()=>setSource('brief')}/><span className="source-symbol" aria-hidden="true">02</span><span><strong>{t('m19.srcBrief')}</strong><small>Start from an existing recruitment brief</small></span></label>
         </div>
 
         {source === 'brief' ? (
-          <div>
+          <div className="match-brief-source">
             <label style={{ fontSize: 13 }}>
               {t('m19.pickBrief')}{' '}
               <select aria-label={t('m19.pickBrief')} value={briefId} onChange={(e) => setBriefId(e.target.value)}>
@@ -569,7 +565,7 @@ export function MatchingScreen({
             <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{t('m19.briefAllRequired')}</div>
           </div>
         ) : (
-          <>
+          <div className="matching-criteria-grid">
             <CriteriaClassEditor
               cls="required"
               rows={criteria.required}
@@ -584,12 +580,12 @@ export function MatchingScreen({
               errors={details}
               onChange={(rows) => setCriteria((c) => ({ ...c, preferred: rows }))}
             />
-          </>
+          </div>
         )}
 
         {message && <div className="notice block" role="alert">{message}</div>}
 
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div className="matching-runbar">
           <button className="primary" disabled={busy || !canRun} onClick={() => run()}>{t('m19.run')}</button>
           {vocab && <SortPicker sorts={vocab.sorts} value={sort} onChange={(s) => { setSort(s); if (result) void run(s); }} />}
         </div>
@@ -668,9 +664,7 @@ function MatchResults({
           </b>
           <span className="pill">{sortLabel(result.sort)}</span>
         </div>
-        <div className="dim" style={{ fontSize: 12.5 }}>
-          {t('m19.criteriaRun')}: {[...result.criteria.required, ...result.criteria.preferred].map(humanText).join(' · ') || t('m19.cr.none')}
-        </div>
+        <div aria-label={t('m19.criteriaRun')}><CriteriaSummary criteria={result.criteria} /></div>
         <div className="dim" style={{ fontSize: 12 }}>{result.note}</div>
         <div className="dim" style={{ fontSize: 12 }}>{result.scoreNote}</div>
         <div className="dim" style={{ fontSize: 12 }}>{t('m19.evaluatedAt')}: {fmtDateTime(result.evaluatedAt)}</div>
@@ -711,7 +705,7 @@ function MatchResults({
       {result.items.length === 0 && (
         <div className="notice block">{t('m19.emptyMatches')}</div>
       )}
-      {result.items.map((c) => <MatchCardView key={c.playerId} card={c} openPlayer={openPlayer} />)}
+      <div className="matching-results-list">{result.items.map((c) => <MatchCardView key={c.playerId} card={c} openPlayer={openPlayer} />)}</div>
     </div>
   );
 }
@@ -771,35 +765,15 @@ function WatchlistList({ session, tick, onOpenWatchlist, onNewWatchlist }: Watch
         {!items && !err && <div className="dim">{t('m18.loading')}</div>}
         {items && items.length === 0 && <div className="dim">{t('m19.wl.empty')}</div>}
         {items && items.length > 0 && (
-          <div style={{ overflowX: 'auto' }}>
-            <table className="data">
-              <thead>
-                <tr>
-                  <th>{t('m19.wl.name')}</th>
-                  <th>{t('common.status')}</th>
-                  <th>{t('m19.wl.mode')}</th>
-                  <th>{t('m19.wl.criteria')}</th>
-                  <th>{t('m19.wl.lastDerived')}</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((w) => (
-                  <tr key={w.id}>
-                    <td><b>{w.name}</b></td>
-                    <td><span className="pill">{wlStatusLabel(w.status)}</span></td>
-                    <td><span className="pill">{modeLabel(w.mode)}</span></td>
-                    <td style={{ fontSize: 12.5 }}>
-                      {[...w.criteria.required, ...w.criteria.preferred].map(humanText).join(' · ') || <span className="dim">{t('m19.cr.none')}</span>}
-                    </td>
-                    <td>{w.lastReconciledAt ? fmtDate(w.lastReconciledAt) : <span className="dim">{t('m19.wl.neverDerived')}</span>}</td>
-                    <td>
-                      <button onClick={() => onOpenWatchlist(w.id)} aria-label={`${t('m19.wl.open')} ${w.name}`}>{t('m19.wl.open')}</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="watchlist-register">
+            {items.map(w => <article key={w.id} className="watchlist-record">
+              <header className="watchlist-record-heading"><div><span className="suite-eyebrow">{t('m19.wl.criteria')}</span><h3>{w.name}</h3></div><span className="pill">{wlStatusLabel(w.status)}</span><button onClick={() => onOpenWatchlist(w.id)} aria-label={`${t('m19.wl.open')} ${w.name}`}>{t('m19.wl.open')} <span aria-hidden="true">↗</span></button></header>
+              <CriteriaSummary criteria={w.criteria} />
+              <RecordFacts items={[
+                {label: t('m19.wl.mode'), value: modeLabel(w.mode)},
+                {label: t('m19.wl.lastDerived'), value: w.lastReconciledAt ? fmtDate(w.lastReconciledAt) : t('m19.wl.neverDerived')},
+              ]} />
+            </article>)}
           </div>
         )}
         {note && <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>{note}</div>}
@@ -909,13 +883,11 @@ function WatchlistDetailView({
           <span className="pill">{modeLabel(w.mode)}</span>
           {w.notify ? <span className="pill outline-green">{t('m19.wl.notifyOn')}</span> : <span className="pill">{t('m19.wl.notifyOff')}</span>}
         </div>
-        <div className="dim" style={{ fontSize: 12.5, marginTop: 4 }}>
-          {t('m19.wl.criteria')}: {[...w.criteria.required, ...w.criteria.preferred].map(humanText).join(' · ') || t('m19.cr.none')}
-        </div>
-        <div className="dim" style={{ fontSize: 12 }}>
-          {w.createdBy && <>{t('m19.wl.createdBy')}: {w.createdBy} · </>}
-          {t('m19.wl.lastDerived')}: {data.evaluatedAt ? fmtDateTime(data.evaluatedAt) : t('m19.wl.neverDerived')}
-        </div>
+        <CriteriaSummary criteria={w.criteria} />
+        <RecordFacts items={[
+          ...(w.createdBy ? [{label: t('m19.wl.createdBy'), value: w.createdBy}] : []),
+          {label: t('m19.wl.lastDerived'), value: data.evaluatedAt ? fmtDateTime(data.evaluatedAt) : t('m19.wl.neverDerived')},
+        ]} />
         <div className="dim" style={{ fontSize: 12 }}>{data.refreshNote}</div>
 
         {(blocked.blocked || blocked.paused) && (
@@ -1028,4 +1000,13 @@ function WatchlistHistory({ session, watchlistId, tick }: { session: Session; wa
       {note && <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>{note}</div>}
     </div>
   );
+}
+
+function CriteriaSummary({ criteria }: { criteria: { required: string[]; preferred: string[] } }) {
+  return <div className="saved-criteria-grid">{(['required', 'preferred'] as const).map(kind =>
+    <section key={kind} className="saved-criteria-group" aria-label={t(`m19.cr.${kind}`)}>
+      <header><span>{t(`m19.cr.${kind}`)}</span><b>{criteria[kind].length}</b></header>
+      {criteria[kind].length ? <DetailItems items={criteria[kind].map(value => sentenceCase(humanText(value)))} /> : <p className="criteria-empty">{t('m19.cr.none')}</p>}
+    </section>
+  )}</div>;
 }

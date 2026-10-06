@@ -13,7 +13,8 @@
 //   • the top bar is one row: the page `<h1>`, a live-state dot, the bell and
 //     Report / Block. Organisation badges moved to the account block, where
 //     the organisation is named.
-// This file is byte-identical in Pro and Grassroots; the brand is a prop.
+// Pro uses workspace tiles and a focused page index. The collapsed rail
+// retains the shared navigation model and keyboard-operable flyouts.
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { ScreenId } from './App';
 import {
@@ -116,13 +117,19 @@ export function Sidebar({
         )}
 
         <div className="nav-scroll" data-testid="nav-scroll">
-        {sections.map((s) => (
+        {!collapsed && <div className="pro-workspace-switcher" aria-label="Workspaces">
+          {sections.map(s=><button key={s.id} className={location.sectionId===s.id?'selected':''} aria-label={tr(s.labelKey)} aria-current={location.sectionId===s.id?'page':undefined} onClick={() => { if (phone && s.children.length > 1) onNavigate(s.children[0].id); else go(s.children[0].id); }}><Icon name={s.icon} size={21}/><span>{tr(s.labelKey)}</span>{!!badges[s.id] && <b>{badges[s.id]}</b>}</button>)}
+          <button className={location.itemId==='messages'?'selected':''} aria-label={t('nav.messages')} aria-current={location.itemId==='messages'?'page':undefined} onClick={()=>go('messages')}><Icon name="messages-square" size={21}/><span>{t('nav.messages')}</span>{unreadMessages>0&&<b>{unreadMessages}</b>}</button>
+        </div>}
+        {!collapsed && location.sectionId && <div className="pro-nav-caption">{location.sectionId && sections.find(s=>s.id===location.sectionId)?.children.length !== 1 ? 'Workspace pages' : 'Quick access'}</div>}
+        {!collapsed && location.sectionId==='home' && <div className="pro-home-nav">{sections.flatMap(s=>s.children).filter(c=>['search','filmroom','dashboard','briefs'].includes(c.id)).map(c=><button key={c.id} onClick={()=>go(c.id)}><span>{tr(c.labelKey)}</span><Icon name="arrow-up-right" size={14}/></button>)}</div>}
+        <div className="pro-context-nav">{sections.filter(s=>collapsed || (s.id===location.sectionId && s.children.length>1)).map((s) => (
           <SectionRow
             key={s.id}
             section={s}
             active={location.sectionId === s.id}
             activeItemId={location.itemId}
-            expanded={open.has(s.id)}
+            expanded={collapsed ? open.has(s.id) : true}
             onToggle={() => toggle(s.id)}
             collapsed={collapsed}
             flyoutOpen={flyout === s.id}
@@ -131,7 +138,7 @@ export function Sidebar({
             onNavigate={go}
             expandOnSelect={phone && drawerOpen}
           />
-        ))}
+        ))}</div>
 
         {shortcuts.length > 0 && !collapsed && (
           <div className="nav-shortcuts">
@@ -150,7 +157,7 @@ export function Sidebar({
           </div>
         )}
 
-        <div className="nav-divider" role="separator" />
+        {collapsed && <><div className="nav-divider" role="separator" />
         <button
           className={`nav-section ${location.itemId === 'messages' ? 'active' : ''}`}
           aria-current={location.itemId === 'messages' ? 'page' : undefined}
@@ -162,7 +169,7 @@ export function Sidebar({
           {!collapsed && <span className="grow">{t('nav.messages')}</span>}
           {unreadMessages > 0 && <span className="nav-badge">{unreadMessages}</span>}
           {location.itemId === 'messages' && <span className="nav-active-bar" aria-hidden="true" />}
-        </button>
+        </button></>}
 
         </div>
         <div className="spacer" />
@@ -493,7 +500,7 @@ export function OrgChips({ org }: { org: { type: string; trustedPartner?: boolea
     org.trustedPartner ? 'Trusted Partner' : null,
     org.safeguardingCertified ? 'Safeguarding Certified' : null,
   ].filter(Boolean);
-  return <div className="org-chips org-standing" aria-label={t('navsec.orgStatus')}>{facts.join(' · ')}</div>;
+  return <div className="org-chips org-standing" aria-label={t('navsec.orgStatus')}>{facts.map((fact,i)=><span key={i}>{fact}</span>)}</div>;
 }
 
 // ---------------------------------------------------------- CommandPalette

@@ -1,3 +1,4 @@
+import { RecordFacts, DetailItems, sentenceCase } from './RecordDetails';
 // M12 org screens: Assessments (with offline drafts), Recruitment cases,
 // Squad Planner, Opportunities, Campaigns, Video Workspace, Outcomes,
 // Trial Days — plus the Evidence Passport panel.
@@ -350,7 +351,7 @@ function CaseCard({ c, stages, session, staff, act, openPlayer }: { c: CaseRec; 
               }, 'Decision recorded.');
             }}>{t('cases.decision')}</button>
           )}
-          {c.assignments.length > 0 && <div className="dim" style={{ marginTop: 6 }}>{c.assignments.map((a) => `${a.name}: ${a.task}`).join(' · ')}</div>}
+          {c.assignments.length > 0 && <div className="dim" style={{ marginTop: 6 }}><DetailItems items={c.assignments.map(a=>`${a.name}: ${a.task}`)}/></div>}
           {c.approvals.filter((a) => a.status === 'pending').map((a) => (
             <div key={a.id} className="list-row">
               <span className="grow"><Icon name="clock" size={13} /> {a.requestedBy.name} requests <b>{a.decision.outcome}</b>: {a.decision.reasons}</span>
@@ -419,7 +420,7 @@ export function SquadPlannerScreen({ session, tick, notify }: ScreenProps) {
                       </span>
                     ))}
                   </div>
-                  <div className="dim" style={{ fontSize: 11.5 }}>{c.required.map((cr) => `${cr.key}: ${cr.source}`).join(' · ')}</div>
+                  <div className="dim" style={{ fontSize: 11.5 }}><DetailItems items={c.required.map(cr=>`${cr.key}: ${cr.source}`)}/></div>
                 </span>
                 <span className="pill">{c.requiredMet}/{c.requiredTotal} required</span>
                 <button onClick={async () => { try { await m12.addShadow(session, c.playerId); notify('Added to shadow squad.'); reload(); } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); } }}>+ {t('planner.shadow')}</button>
@@ -546,7 +547,7 @@ export function CampaignsScreen({ session, tick, notify }: ScreenProps) {
       <div className="list-rows">
         {(list ?? []).map((c) => (
           <div key={c.id} className="list-row">
-            <span className="grow"><b>{c.title}</b><div className="dim">{c.drills.map((d) => d.name).join(' · ')} · {t('common.deadline')} {c.deadline} · {c.attemptsAllowed} attempts</div></span>
+            <span className="grow"><b>{c.title}</b><div className="dim"><DetailItems items={c.drills.map(d=>d.name)}/><RecordFacts items={[{label:t('common.deadline'),value:c.deadline},{label:'Attempts',value:c.attemptsAllowed}]}/></div></span>
             <span className="pill">{c.submissions ?? 0} submissions</span>
             {(c.awaitingReview ?? 0) > 0 && <span className="pill gold">{c.awaitingReview} awaiting human review</span>}
             <button onClick={async () => setQueue({ camp: c, rows: (await m12.reviewQueue(session, c.id)).queue })}>{t('camp.queue')}</button>
@@ -609,20 +610,20 @@ export function VideoScreen({ session, tick, notify, openPlayer }: ScreenProps) 
         <h3>{t('video.segments')}</h3>
         <div className="list-rows">
           {(segments ?? []).map((s) => (
-            <div key={s.id} className="list-row">
-              <span className="grow">
-                <b>{s.eventType ?? s.labels[0] ?? 'segment'}</b> · {s.startS}s → {s.endS}s
-                {s.note && <span className="dim"> · “{s.note}”</span>}
+            <div key={s.id} className="list-row suite-segment">
+              <span className="suite-segment-time"><Icon name="video" size={20}/><b>{s.endS-s.startS}s</b><small>{s.startS}s – {s.endS}s</small></span><span className="grow">
+                <b>{sentenceCase(s.eventType ?? s.labels[0] ?? 'Segment')}</b>
+                {s.note && <p className="dim">{s.note}</p>}
                 <div className="dim">{s.labels.map((l) => `#${l}`).join(' ')} · {s.createdBy.name} · {fmtDate(s.createdAt)}</div>
               </span>
-              <button onClick={() => openPlayer(s.playerId)}>profile</button>
+              <button onClick={() => openPlayer(s.playerId)}>Open profile</button>
               <button onClick={() => setPlaying(s)}>Play</button>
               <select aria-label="Add to playlist" defaultValue="" onChange={async (e) => {
                 if (!e.target.value) return;
                 await m12.addToPlaylist(session, e.target.value, s.id);
                 notify('Added to playlist.'); reloadPl(); e.target.value = '';
               }}>
-                <option value="">+ playlist…</option>
+                <option value="">Add to playlist…</option>
                 {(playlists ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </div>
@@ -656,8 +657,8 @@ export function OutcomesScreen({ session, tick, notify }: ScreenProps) {
         {(list ?? []).map((f) => (
           <div key={f.id} className="list-row">
             <span className="grow">
-              <b>{f.playerName}</b> · {f.milestone} check-in · {t('out.due')} {fmtDate(f.dueAt)}
-              {f.report && <div className="dim">{f.report.registrationStatus}{f.report.matchesPlayed != null ? ` · ${f.report.matchesPlayed} matches` : ''}{f.report.progression ? ` · ${f.report.progression}` : ''}</div>}
+              <b className="desk-outcome-player">{f.playerName}</b><span className="desk-outcome-meta">{f.milestone} check-in <span>{t('out.due')} {fmtDate(f.dueAt)}</span></span>
+              {f.report && <div className="dim"><RecordFacts items={[{label: 'Registration', value: sentenceCase(f.report.registrationStatus)}, ...(f.report.matchesPlayed != null ? [{label: 'Matches played', value: f.report.matchesPlayed}] : []), ...(f.report.progression ? [{label: 'Progression', value: f.report.progression}] : [])]} /></div>}
             </span>
             <span className={`pill ${stateClass(f.outcomeState)}`}>{f.outcomeState.replace('_', ' ')}</span>
             {!f.report && f.status !== 'scheduled' && (
@@ -702,15 +703,15 @@ function SharedObjectives({ session, tick, notify }: { session: Session; tick: n
       {rows.map(({ player, obj }) => (
         <div key={obj.id} className="list-row">
           <span className="grow">
-            <b>{player}</b>: {obj.objectives.map((o) => o.text).join(' · ')}
-            <div className="dim">{obj.progress.length} progress entries · shared by the player/guardian (they can turn this off)</div>
+            <b>{player}</b><DetailItems items={obj.objectives.map(o => o.text)} />
+            <div className="dim">{obj.progress.length} progress {obj.progress.length===1?'entry':'entries'} · Shared by the player or guardian; sharing can be withdrawn</div>
           </span>
           {obj.reassessments.filter((r) => r.status === 'requested').map((r) => (
             <button key={r.id} onClick={async () => {
               const note = window.prompt('Reassessment outcome (point at the evidence):');
               if (!note) return;
               try { await m12.reassessmentOutcome(session, r.id, note); notify('Outcome recorded and sent.'); } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
-            }}>record reassessment</button>
+            }}>Record reassessment</button>
           ))}
         </div>
       ))}

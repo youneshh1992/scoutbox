@@ -9,7 +9,7 @@ They explicitly included the Pro sign-in/access screen in the redesign scope.
 
 ## Implementation
 
-- Pro-only graphite and midnight surfaces, ivory text and champagne accents.
+- Pro-only graphite and midnight surfaces, ivory text and ScoutBox green accents.
   Preserve the ScoutBox wordmark and its green square; primary actions use
   `#00e676`.
 - A recruitment overview with links to real workflows, actual account counts,
@@ -26,8 +26,28 @@ They explicitly included the Pro sign-in/access screen in the redesign scope.
   are retained. The dedicated Pro palette has no workspace theme toggle.
 
 The implementation lives in `scoutbox-club/src/proExecutive.css`,
-`proDesign.tsx`, and the existing Pro screen components. Other apps and the
+`proRefinements.css`, `proDesign.tsx`, and the existing Pro screen components. Other apps and the
 shared design system are unchanged.
+
+## Refinement after Founder review
+
+The Founder requested a tighter ScoutBox Pro wordmark, a sidebar structurally
+distinct from Grassroots, and the same readability corrections applied to Pro.
+The Pro label now sits next to the wordmark. Six compact workspace tiles switch
+the navigation context; the page index shows the selected workspace. The
+account area keeps Alex and the role visible, with organisation status inside
+Account settings. Collapsed navigation retains its keyboard-operable flyouts.
+
+Saved criteria are separated into required and preferred groups. Matching has
+a two-column criteria editor. Nobody Missed starts with a labelled brief/sort
+panel. Second Look separates the original decision, new evidence, club
+circumstances and confidence context. Recruitment briefs, observations,
+objectives, network shares and decision reviews use distinct facts and dates.
+Integrations has a horizontal tool selector, with each existing workflow kept
+in its own panel. Labels, errors and status wording use consistent sentence case.
+
+This changes only Pro presentation. API payloads, access rules, evidence
+semantics and the approved Grassroots/Player sources remain unchanged.
 
 ## References
 
@@ -45,9 +65,12 @@ the data displayed by ScoutBox.
 
 TypeScript and the production build pass. Navigation configuration passes 504
 checks, case navigation passes 127, and icon parity passes. An AST comparison
-preserves all 363 existing API calls in modified Pro screens. Browser checks
+preserves all 367 existing API calls in modified Pro files. Browser checks
 cover entry, overview, discovery, Film Room, chart switching, membership and
-390px mobile layouts. The inspected preview has no console errors.
+390px mobile layouts. Refinement checks also cover matching a position,
+watchlist criteria, Second Look, Nobody Missed, integrations tool switching,
+collapsed navigation and the mobile workspace drawer. The inspected preview
+has no console errors.
 
 Build distributable artifacts with `node e2e/buildDemos.mjs`, then run
 `node e2e/demoFreshness.test.mjs`. The Pro artifact is

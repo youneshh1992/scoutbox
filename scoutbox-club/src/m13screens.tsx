@@ -1,3 +1,4 @@
+import { RecordFacts, DetailItems, sentenceCase } from './RecordDetails';
 import { ProChart } from './proDesign';
 // M13 org screens: Imports & Integrations, Coverage, Calibration, Scouting
 // Insight (exposure + review queue + evidence gaps), Club Network (groups +
@@ -39,6 +40,7 @@ const verdictPill = (v: string) => (v === 'compatible' || v === 'delivered' || v
 // ================================================ F1 Imports & Integrations
 export function ImportsScreen({ session, notify }: ScreenProps) {
   const [csv, setCsv] = useState('');
+  const [importTab,setImportTab] = useState('imports');
   const [batches, reload] = useAsync<ImportBatch[]>(() => m13.listImports(session), [session]);
   const [reviews, reloadReviews] = useAsync(() => m13.listIdentityReviews(session), [session]);
   const [keys, reloadKeys] = useAsync(() => m13.listApiKeys(session), [session]);
@@ -50,18 +52,20 @@ export function ImportsScreen({ session, notify }: ScreenProps) {
   const [hookSecret, setHookSecret] = useState<string | null>(null);
 
   return (
-    <div>
-      <div className="section">
+    <div className="integration-suite">
+      <div className="integration-shell"><nav className="integration-nav" aria-label="Integration tools">{[['imports','Import records','upload',batches?.length],['identity','Identity reviews','scan-line',reviews?.length],['keys','Export access','key-round',keys?.items.filter(k=>!k.revokedAt).length],['hooks','Event delivery','network',webhooks?.items.filter(w=>w.active).length],['connectors','Provider directory','globe',connectors?.length]].map(([id,label,icon,count])=><button key={String(id)} aria-pressed={importTab===id} onClick={()=>setImportTab(String(id))}><Icon name={String(icon)} size={18}/><span>{label}</span><b>{count??'—'}</b></button>)}<p>Manage each connection independently. Access and delivery status come from your club’s records.</p></nav><div className="integration-content">
+      <div className="section" hidden={importTab!=='imports'}>
         <h3>{t('m13.import.title')}</h3>
         <div className="notice" style={{ fontSize: 12.5 }}>{t('m13.import.note')} <a href={m13.importTemplateUrl()} download="scoutbox-prospects-template.csv">{t('m13.import.template')}</a></div>
-        <textarea aria-label="CSV content" rows={5} style={{ width: '100%' }} placeholder="name,dob,position,foot,heightCm,provider,externalId,notes" value={csv} onChange={(e) => setCsv(e.target.value)} />
+        <div className="import-steps"><span><b>01</b> Prepare your file</span><span><b>02</b> Check the records</span><span><b>03</b> Confirm the import</span></div>
+        <label className="suite-field">Paste CSV records<textarea aria-label="CSV content" rows={5} style={{ width: '100%' }} placeholder="name,dob,position,foot,heightCm,provider,externalId,notes" value={csv} onChange={(e) => setCsv(e.target.value)} /></label>
         <button onClick={async () => {
           try { const r = await m13.createImport(session, csv); setDryRun(r); reload(); notify('Dry run complete — nothing written yet.'); }
           catch (e) { notify(e instanceof Error ? e.message : 'failed', true); }
         }}>{t('m13.import.dryRun')}</button>
         {dryRun && (
           <div className="notice block" aria-live="polite">
-            <b>{t('m13.import.dryRunResult')}:</b> {dryRun.batch.summary.creatable} {t('m13.import.creatable')} · {dryRun.batch.summary.errors} {t('m13.import.errors')} · {dryRun.batch.summary.duplicatesInFile + dryRun.batch.summary.alreadyImported} {t('m13.import.duplicates')} · {dryRun.batch.summary.ambiguous} {t('m13.import.ambiguous')}
+            <b>{t('m13.import.dryRunResult')}</b><RecordFacts items={[{label: t('m13.import.creatable'), value: dryRun.batch.summary.creatable}, {label: t('m13.import.errors'), value: dryRun.batch.summary.errors}, {label: t('m13.import.duplicates'), value: dryRun.batch.summary.duplicatesInFile + dryRun.batch.summary.alreadyImported}, {label: t('m13.import.ambiguous'), value: dryRun.batch.summary.ambiguous}]} />
             {dryRun.batch.rows?.filter((r) => r.errors.length).slice(0, 3).map((r) => <div key={r.row} className="dim">Row {r.row}: {r.errors.join('; ')}</div>)}
             <div><button onClick={async () => {
               try { const c = await m13.commitImport(session, dryRun.batch.id); notify(`Imported ${c.created} prospects · ${c.reviewsQueued} identity review(s) queued.`); setDryRun(null); reload(); reloadReviews(); }
@@ -72,26 +76,26 @@ export function ImportsScreen({ session, notify }: ScreenProps) {
         <div className="list-rows">
           {(batches ?? []).map((b) => (
             <div key={b.id} className="list-row">
-              <span className="grow"><b>{b.id}</b> <span className={`pill ${b.status === 'committed' ? 'green' : b.status === 'reversed' ? 'red' : 'blue'}`}>{b.status}</span> <span className="dim">{b.summary.total} rows · by {b.createdByName} · {fmtDate(b.createdAt)}</span></span>
+              <span className="grow"><b>{b.id}</b> <span className={`pill ${b.status === 'committed' ? 'green' : b.status === 'reversed' ? 'red' : 'blue'}`}>{sentenceCase(b.status)}</span> <span className="dim"><RecordFacts items={[{label: 'Rows', value: b.summary.total}, {label: 'Imported by', value: b.createdByName}, {label: 'Created', value: fmtDate(b.createdAt)}]} /></span></span>
               {b.status === 'committed' && <button onClick={async () => { const r = await m13.reverseImport(session, b.id); notify(`Reversed ${r.removed}; kept ${r.kept.length} changed record(s).`); reload(); }}>{t('m13.import.reverse')}</button>}
             </div>
           ))}
         </div>
       </div>
 
-      <div className="section">
+      <div className="section" hidden={importTab!=='identity'}>
         <h3>{t('m13.identity.title')} {reviews?.length ? <span className="pill red">{reviews.length}</span> : <span className="pill green">0 open</span>}</h3>
         <details className="f-about"><summary>About</summary><div className="notice" style={{ fontSize: 12.5 }}>{t('m13.identity.note')}</div></details>
         {(reviews ?? []).map((r) => (
           <div key={r.id} className="list-row">
-            <span className="grow"><b>{r.record.name}</b> <span className="dim">{r.record.provider} {r.record.externalId} · born {/^\d{4}-\d{2}-\d{2}$/.test(r.record.dob ?? '') ? fmtDate(r.record.dob as string) : r.record.dob} · row {r.row} · may be the same player as one on ScoutBox</span></span>
+            <span className="grow"><b>{r.record.name}</b> <span className="dim"><RecordFacts items={[{label: 'Provider', value: r.record.provider}, {label: 'External ID', value: r.record.externalId}, {label: 'Date of birth', value: /^\d{4}-\d{2}-\d{2}$/.test(r.record.dob ?? '') ? fmtDate(r.record.dob as string) : r.record.dob}, {label: 'Import row', value: r.row}]} /><span className="record-note">May be the same player as one on ScoutBox</span></span></span>
             <button onClick={async () => { await m13.resolveIdentity(session, r.id, 'link'); notify('Linked.'); reloadReviews(); }}>{t('m13.identity.link')}</button>
             <button onClick={async () => { await m13.resolveIdentity(session, r.id, 'separate'); notify('Kept separate.'); reloadReviews(); }}>{t('m13.identity.separate')}</button>
           </div>
         ))}
       </div>
 
-      <div className="section">
+      <div className="section" hidden={importTab!=='keys'}>
         <h3>{t('m13.keys.title')}</h3>
         <div className="dim" style={{ fontSize: 12.5 }}>Export contract: {keys?.contractVersion}</div>
         {newKey && <div className="notice block"><code>{newKey}</code> — {t('m13.keys.once')}</div>}
@@ -104,13 +108,13 @@ export function ImportsScreen({ session, notify }: ScreenProps) {
         <button onClick={async () => { const r = await m13.createApiKey(session, ['export:shortlist'], 'Shortlist export'); setNewKey(r.plaintext); reloadKeys(); }}>{t('m13.keys.new')}</button>
       </div>
 
-      <div className="section">
+      <div className="section" hidden={importTab!=='hooks'}>
         <h3>{t('m13.hooks.title')}</h3>
         <details className="f-about"><summary>How to verify deliveries</summary><div className="notice" style={{ fontSize: 12.5 }}>{webhooks?.guidance}</div></details>
         {hookSecret && <div className="notice block">{t('m13.hooks.secret')}: <code>{hookSecret}</code></div>}
         {(webhooks?.items ?? []).map((w) => (
           <div key={w.id} className="list-row">
-            <span className="grow"><b>{w.url}</b> <span className="dim">{w.events.join(', ')}</span> <span className={`pill ${w.active ? 'green' : 'red'}`}>{w.active ? 'active' : 'off'}</span></span>
+            <span className="grow"><b>{w.url}</b> <span className="dim">{w.events.join(', ')}</span> <span className={`pill ${w.active ? 'green' : 'red'}`}>{w.active ? 'Active' : 'Off'}</span></span>
             <button onClick={async () => { const e2 = await m13.rotateWebhook(session, w.id); setHookSecret(e2.secret ?? null); notify('Secret rotated (old one valid 24h).'); }}>{t('m13.hooks.rotate')}</button>
           </div>
         ))}
@@ -123,14 +127,15 @@ export function ImportsScreen({ session, notify }: ScreenProps) {
         </div>
       </div>
 
-      <div className="section">
+      <div className="section" hidden={importTab!=='connectors'}>
         <h3>{t('m13.connectors.title')}</h3>
         {(connectors ?? []).map((c) => (
           <div key={c.id} className="list-row">
-            <span className="grow"><b>{c.name}</b> <span className="pill">{c.status.replace('_', ' ')}</span><div className="dim" style={{ fontSize: 12 }}>{c.note}</div></span>
+            <span className="grow"><b>{c.name}</b> <span className="pill">{sentenceCase(c.status)}</span><div className="dim" style={{ fontSize: 12 }}>{c.note}</div></span>
           </div>
         ))}
       </div>
+      </div></div>
     </div>
   );
 }
@@ -160,7 +165,7 @@ export function CoverageScreen({ session, notify }: ScreenProps) {
         <h3>{t('m13.cov.fixtures')}</h3>
         <div className="list-rows">
           {(fixtures ?? []).map((f) => (
-            <div key={f.id} className="list-row"><span className="grow"><b>{f.home} v {f.away}</b> <span className="dim">{f.date} · {f.competition ?? '—'} · {f.location?.city ?? 'no location'}</span> <span className="pill">{f.source.replace('_', ' ')}</span></span></div>
+            <div key={f.id} className="list-row"><span className="grow"><b>{f.home} v {f.away}</b> <span className="dim"><RecordFacts items={[{label: 'Date', value: f.date}, {label: 'Competition', value: f.competition}, {label: 'Location', value: f.location?.city ?? 'Not recorded'}]} /></span> <span className="pill">{f.source.replace('_', ' ')}</span></span></div>
           ))}
         </div>
         <div className="enter-row">
@@ -176,9 +181,9 @@ export function CoverageScreen({ session, notify }: ScreenProps) {
       <div className="section">
         <h3>{t('m13.cov.assignments')}</h3>
         {(assignments ?? []).map((a) => (
-          <div key={a.id} className="list-row">
-            <span className="grow">
-              <b>{a.fixtureLabel}</b> <span className="dim">{a.fixtureDate} · {a.scoutName} · {a.targetPlayerIds.length} target(s){a.travelBudget ? ` · budget ${money(a.travelBudget.amountMinor, a.travelBudget.currency)} (user-entered)` : ''}</span>
+          <div key={a.id} className="list-row coverage-mission">
+            <span className="mission-date"><Icon name="calendar-days" size={20}/><b>{fmtDate(a.fixtureDate)}</b></span><span className="grow">
+              <b>{a.fixtureLabel}</b><span className="mission-facts"><span><small>Assigned scout</small>{a.scoutName}</span><span><small>Players to observe</small>{a.targetPlayerIds.length}</span>{a.travelBudget && <span><small>Entered budget</small>{money(a.travelBudget.amountMinor,a.travelBudget.currency)}</span>}</span>
               {a.warnings.map((w) => <div key={w} className="pill red" style={{ marginTop: 4 }}><Icon name="triangle-alert" size={14} /> {w}</div>)}
               <div className="dim" style={{ fontSize: 11.5 }}>{a.travelNote}</div>
             </span>
@@ -208,7 +213,7 @@ export function CoverageScreen({ session, notify }: ScreenProps) {
         <h3>{t('m13.cov.suggestions')}</h3>
         <Hint className="notice" style={{ fontSize: 12.5 }}>{suggestions?.note}</Hint>
         {(suggestions?.items ?? []).map((sg) => (
-          <div key={sg.fixture.id} className="list-row"><span className="grow"><b>{sg.fixture.home} v {sg.fixture.away}</b> <span className="dim">{sg.fixture.date} — {sg.rationale}: {sg.nearbyTargets.map((p) => p.name).join(', ')}</span></span>{sg.alreadyCovered && <span className="pill">Covered</span>}</div>
+          <div key={sg.fixture.id} className="list-row"><span className="grow"><b>{sg.fixture.home}{sg.fixture.away ? ` v ${sg.fixture.away}` : ""}</b><RecordFacts items={[{label: "Fixture date", value: fmtDate(sg.fixture.date)}, {label: "Players nearby", value: <DetailItems items={sg.nearbyTargets.map(p => p.name)} />}]} /><span className="record-note">{sg.rationale}</span></span>{sg.alreadyCovered && <span className="pill">Covered</span>}</div>
         ))}
         {suggestions?.items.length === 0 && <div className="dim">{t('common.none')}</div>}
       </div>
@@ -232,7 +237,7 @@ export function CalibrationScreen({ session, notify }: ScreenProps) {
         <h3>{t('m13.cal.sessions')}</h3>
         {(list ?? []).map((c) => (
           <div key={c.id} className="list-row">
-            <span className="grow"><b>{c.title}</b> <span className="dim">{c.submitted}/{c.participants} submitted</span> <span className={`pill ${c.status === 'open' ? 'blue' : ''}`}>{c.status}</span></span>
+            <span className="grow"><b>{c.title}</b> <span className="dim">{c.submitted}/{c.participants} submitted</span> <span className={`pill ${c.status === 'open' ? 'blue' : ''}`}>{sentenceCase(c.status)}</span></span>
             <button onClick={() => { setOpenId(c.id); setRatings({}); }}>{t('common.close') === 'Close' ? 'Open' : 'Ouvrir'}</button>
           </div>
         ))}
@@ -273,7 +278,7 @@ export function CalibrationScreen({ session, notify }: ScreenProps) {
               <div className="notice" style={{ fontSize: 12.5 }}>{sess.comparison.confidenceNote}</div>
               {sess.comparison.rows.map((r) => (
                 <div key={r.attrId} className="list-row">
-                  <span className="grow"><b>{r.label}</b> <span className="dim">values {r.values.join(' · ') || '—'} · {r.notObserved} not observed</span></span>
+                  <span className="grow"><b>{r.label}</b> <span className="dim"><DetailItems items={r.values.map((value, i) => `Observation ${i + 1}: ${value}`)} /><span className="record-note">{r.notObserved} not observed</span></span></span>
                   <span className={`pill ${verdictPill(r.disagreement)}`}>{r.disagreement}{r.range !== null ? ` (range ${r.range})` : ''}</span>
                 </div>
               ))}
@@ -286,7 +291,7 @@ export function CalibrationScreen({ session, notify }: ScreenProps) {
           <h3>{t('m13.cal.review')}</h3>
           <Hint className="notice" style={{ fontSize: 12.5 }}>{review.disclaimer}</Hint>
           {review.items.map((i) => (
-            <div key={i.assessmentId} className="list-row"><span className="grow"><b>{i.playerName}</b> <span className="dim">{i.scoutName} recommended “{i.recommendation.verdict}” — since then: {i.since.signedSomewhere ? 'signed somewhere' : 'no signing'}, {i.since.furtherAssessments} further assessment(s)</span></span></div>
+            <article key={i.assessmentId} className="decision-review"><header><span className="suite-monogram">{i.playerName.split(' ').map(n=>n[0]).slice(0,2).join('')}</span><div><h4>{i.playerName}</h4><p>Assessment by {i.scoutName}</p></div></header><dl><div><dt>Recorded recommendation</dt><dd>{sentenceCase(i.recommendation.verdict)}</dd></div><div><dt>Signing since assessment</dt><dd>{i.since.signedSomewhere ? 'Signing recorded' : 'No signing recorded'}</dd></div><div><dt>Further assessments</dt><dd>{i.since.furtherAssessments}</dd></div></dl></article>
           ))}
         </div>
       )}
@@ -384,7 +389,7 @@ export function NetworkScreen({ session, notify }: ScreenProps) {
         {(groups?.items ?? []).map((g) => (
           <div key={g.id} className="section" style={{ marginTop: 8 }}>
             <b>{g.name}</b> {g.youAdmin && <span className="pill gold">Admin</span>}
-            <div className="dim" style={{ fontSize: 12.5 }}>{g.members.map((mm) => mm.name).join(' · ')}</div>
+            <div className="dim" style={{ fontSize: 12.5 }}><DetailItems items={g.members.map(mm => mm.name)} /></div>
             {g.programmes.map((p) => <div key={p.id} className="dim" style={{ fontSize: 12.5 }}>{p.name} {p.region ? `(${p.region})` : ''}</div>)}
             <Hint className="notice" style={{ fontSize: 12, marginTop: 6 }}>{t('m13.grp.isolatedNote')}</Hint>
             <div style={{ marginTop: 6 }}>
@@ -417,13 +422,13 @@ export function NetworkScreen({ session, notify }: ScreenProps) {
         <h3>{t('m13.grp.grants')}</h3>
         {(grants?.given ?? []).map((g) => (
           <div key={g.id} className="list-row">
-            <span className="grow">→ {g.resourceKind} to {g.toOrgIds?.join(', ')} <span className="dim">until {fmtDate(g.expiresAt)}</span> {g.revokedAt ? <span className="pill red">Revoked</span> : <span className="pill green">Live</span>}</span>
+            <span className="share-direction"><Icon name="arrow-up-right" size={20}/></span><span className="grow"><b>{sentenceCase(g.resourceKind)} shared by your club</b><span className="dim">Recipient: {g.toOrgIds?.map(id=>groups?.items.flatMap(group=>group.members).find(org=>org.id===id)?.name??id).join(', ')}</span><small className="share-expiry">Access until {fmtDate(g.expiresAt)}</small> {g.revokedAt ? <span className="pill red">Revoked</span> : <span className="pill green">Live</span>}</span>
             {!g.revokedAt && <button onClick={async () => { await m13.revokeGrant(session, g.id); reloadGrants(); notify('Revoked — effective on the very next read.'); }}>{t('m13.grp.revoke')}</button>}
           </div>
         ))}
         {(grants?.received ?? []).map((g) => (
           <div key={g.id} className="list-row">
-            <span className="grow">← {g.resourceKind} from <b>{g.fromOrgName}</b> <span className="dim">until {fmtDate(g.expiresAt)}</span></span>
+            <span className="share-direction"><Icon name="folder-open" size={20}/></span><span className="grow"><b>{sentenceCase(g.resourceKind)} shared with your club</b><span className="dim">From {g.fromOrgName}</span><small className="share-expiry">Access until {fmtDate(g.expiresAt)}</small></span>
             <button onClick={async () => {
               try { setShared(await m13.readShared(session, g.id)); }
               catch { notify('This share was revoked or expired.', true); }
@@ -433,7 +438,7 @@ export function NetworkScreen({ session, notify }: ScreenProps) {
         {shared && (
           <div className="notice block">
             <b>{shared.from}</b> — {shared.resource.kind}
-            {shared.resource.players?.map((p) => <div key={p.id}>{p.name} · {p.position} · {p.level}</div>)}
+            {shared.resource.players?.map((p) => <div key={p.id}><b>{p.name}</b><RecordFacts items={[{label: 'Position', value: p.position}, {label: 'Level', value: sentenceCase(p.level)}]} /></div>)}
             {shared.resource.withheldNote && <div className="dim" style={{ fontSize: 12 }}>{shared.resource.withheldNote}</div>}
             {!!shared.resource.assessment && <div className="dim">{JSON.stringify(shared.resource.assessment)}</div>}
           </div>
@@ -444,7 +449,7 @@ export function NetworkScreen({ session, notify }: ScreenProps) {
         <Hint className="notice" style={{ fontSize: 12.5 }}>{transitions?.note}</Hint>
         {(transitions?.items ?? []).map((tr) => (
           <div key={tr.id} className="list-row">
-            <span className="grow"><b>{tr.playerName}</b> <span className="dim">{tr.note ?? ''} · access until {fmtDate(tr.expiresAt)}</span></span>
+            <span className="share-direction"><Icon name="files" size={22}/></span><span className="grow"><b>{tr.playerName}</b><p className="dim">{tr.note ?? 'Player transition pack'}</p><small className="share-expiry">Access until {fmtDate(tr.expiresAt)}</small></span>
             <button onClick={async () => {
               try { setPack(await m13.transitionPack(session, tr.id)); }
               catch { notify('Access to this pack was withdrawn.', true); }

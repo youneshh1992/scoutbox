@@ -1,3 +1,4 @@
+import { RecordFacts, DetailItems, sentenceCase } from './RecordDetails';
 // M18 org screens — Second Look, Nobody Missed, Recruitment Briefs.
 //
 // Three rules this file keeps visible at all times:
@@ -292,82 +293,30 @@ function SecondLookCard({
   const open = item.status === 'open';
 
   return (
-    <article className="section" aria-label={`${t('m18.sl.cardLabel')}: ${item.playerName ?? t('m18.sl.playerWithheld')}`}>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'baseline' }}>
-        <h3 style={{ margin: 0 }}>{item.playerName ?? t('m18.sl.playerWithheld')}</h3>
-        {item.kindLabel && <span className="pill blue">{item.kindLabel}</span>}
-        <span className="pill">{statusLabel(item.status)}</span>
-        {item.playerName && (
-          <button onClick={() => openPlayer(item.playerId)}>{t('m18.sl.openProfile')}</button>
-        )}
+    <article className="section desk-secondlook" aria-label={`${t('m18.sl.cardLabel')}: ${item.playerName ?? t('m18.sl.playerWithheld')}`}>
+      <header className="review-dossier-head">
+        <span className="review-monogram" aria-hidden="true">{item.playerName ? item.playerName.split(' ').map(n=>n[0]).slice(0,2).join('') : '—'}</span>
+        <div><span className="suite-eyebrow">Second Look · decision review</span><h3>{item.playerName ?? t('m18.sl.playerWithheld')}</h3><div className="review-statuses">{item.kindLabel && <span>{item.kindLabel}</span>}<span className="pill">{statusLabel(item.status)}</span></div></div>
+        {item.playerName && <button onClick={() => openPlayer(item.playerId)}>{t('m18.sl.openProfile')} <span aria-hidden="true">↗</span></button>}
+      </header>
+      {item.playerAvailable === false && <div className="notice block">{t('m18.sl.playerUnavailable')}</div>}
+      {item.summary && <p className="review-summary">{item.summary}</p>}
+      <div className="review-dossier-grid">
+        <aside className="review-original"><span className="suite-eyebrow">01 · Original decision</span><dl>
+          <div><dt>{t('m18.sl.archivedOn')}</dt><dd>{item.decisionAt ? fmtDate(item.decisionAt) : '—'}</dd></div>
+          {item.archivedStatus && <div><dt>Recorded status</dt><dd>{archivedLabel(item.archivedStatus)}</dd></div>}
+          <div><dt>{t('m18.sl.originalReason')}</dt><dd>{(item.archiveReasonCodes ?? []).length ? <ul>{item.archiveReasonCodes!.map(code=><li key={code}>{reasonLabel(code)}</li>)}</ul> : t('m18.sl.noReasonRecorded')}</dd></div>
+        </dl></aside>
+        <section className="review-new"><div className="review-new-title"><div><span className="suite-eyebrow">02 · Evidence update</span><h4>{t('m18.sl.newSince')}</h4></div><b>{changes.length}</b></div>
+          {changes.length === 0 && <p className="dim">{t('m18.sl.noChanges')}</p>}
+          <ol className="review-evidence-list">{changes.map((c,i)=><li key={c.fingerprint ?? `${c.type}-${i}`}>
+            <span className={`review-event-mark ${c.negative?'reduced':''}`} aria-hidden="true">{c.negative?'−':'+'}</span>
+            <div><time>{fmtDate(c.occurredAt)}</time><p>{c.text}</p>{c.negative && <span className="pill">{t('m18.sl.reducesEvidence')}</span>}{(c.relatesTo??[]).length>0&&<small>{t('m18.sl.relatesTo')}: {c.relatesTo!.map(reasonLabel).join(', ')}</small>}</div>
+          </li>)}</ol>
+        </section>
+        {unresolvedCodes.length > 0 && <aside className="review-standing"><span className="suite-eyebrow">Club circumstances</span><h4>{t('m18.sl.stillStands')}</h4><ul>{unresolvedCodes.map(c=><li key={c}>{reasonLabel(c)}</li>)}</ul><p>{t('m18.sl.stillStandsNote')}</p></aside>}
+        <section className="review-context"><TrustMovementList movement={item.trustMovement ?? []}/>{item.currentTrust && <div className="review-confidence" title={item.currentTrust.note ?? t('m18.trustNote')}><span>{t('m18.sl.currentTrust')}</span><strong>{item.currentTrust.score}</strong><span className="pill">{item.currentTrust.bandLabel ?? bandLabel(item.currentTrust.band)}</span><TrustNote note={item.currentTrust.note}/></div>}</section>
       </div>
-
-      {item.playerAvailable === false && (
-        <div className="notice block" style={{ marginTop: 8 }}>{t('m18.sl.playerUnavailable')}</div>
-      )}
-
-      {/* What this club decided, and when. Stated, never judged. */}
-      <div style={{ marginTop: 8, fontSize: 13 }}>
-        <div>
-          <b>{t('m18.sl.archivedOn')}:</b>{' '}
-          {item.decisionAt ? fmtDate(item.decisionAt) : <span className="dim">—</span>}
-          {item.archivedStatus && <> · <span className="pill">{archivedLabel(item.archivedStatus)}</span></>}
-        </div>
-        <div style={{ marginTop: 4 }}>
-          <b>{t('m18.sl.originalReason')}:</b>{' '}
-          {(item.archiveReasonCodes ?? []).length > 0
-            ? (item.archiveReasonCodes ?? []).map(reasonLabel).join(' · ')
-            : <span className="dim">{t('m18.sl.noReasonRecorded')}</span>}
-        </div>
-      </div>
-
-      {item.summary && <div style={{ marginTop: 8, fontSize: 13.5 }}>{item.summary}</div>}
-
-      {/* Every change, with a tick each. A change that REDUCES the evidence is
-          marked as such in words — it is never framed as wrongdoing. */}
-      <div style={{ marginTop: 10 }}>
-        <b style={{ fontSize: 13 }}>{t('m18.sl.newSince')}</b>
-        {changes.length === 0 && <div className="dim" style={{ fontSize: 13 }}>{t('m18.sl.noChanges')}</div>}
-        <ul style={{ margin: '4px 0 0', paddingInlineStart: 20 }}>
-          {changes.map((c, i) => (
-            <li key={c.fingerprint ?? `${c.type}-${i}`} style={{ fontSize: 13, marginBottom: 3 }}>
-              <Mark met={!c.negative} />
-              {c.text}
-              {c.negative && <> <span className="pill">{t('m18.sl.reducesEvidence')}</span></>}
-              {' '}
-              <span className="dim">{fmtDate(c.occurredAt)}</span>
-              {(c.relatesTo ?? []).length > 0 && (
-                <div className="dim" style={{ fontSize: 12 }}>
-                  {t('m18.sl.relatesTo')}: {(c.relatesTo ?? []).map(reasonLabel).join(', ')}
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      {/* Reasons the club gave that NOTHING in a player's record can resolve.
-          Printed so the card can never imply a club-side reason went away. */}
-      {unresolvedCodes.length > 0 && (
-        <div className="sl-still" style={{ marginTop: 12, fontSize: 13 }}>
-          <b>{t('m18.sl.stillStands')}</b>
-          <ul style={{ margin: '4px 0 0', paddingInlineStart: 20 }}>
-            {unresolvedCodes.map((c) => <li key={c}>{reasonLabel(c)}</li>)}
-          </ul>
-          <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>{t('m18.sl.stillStandsNote')}</div>
-        </div>
-      )}
-
-      <TrustMovementList movement={item.trustMovement ?? []} />
-
-      {item.currentTrust && (
-        <div style={{ marginTop: 8 }} title={item.currentTrust.note ?? t('m18.trustNote')}>
-          <span className="dim" style={{ fontSize: 13 }}>{t('m18.sl.currentTrust')}:</span>{' '}
-          <b>{item.currentTrust.score}</b>{' '}
-          <span className="pill">{item.currentTrust.bandLabel ?? bandLabel(item.currentTrust.band)}</span>
-          <TrustNote note={item.currentTrust.note} />
-        </div>
-      )}
 
       {item.status === 'reviewed' && item.reviewedAt && (
         <div className="dim" style={{ fontSize: 12.5, marginTop: 8 }}>{t('m18.sl.reviewedOn')}: {fmtDateTime(item.reviewedAt)}</div>
@@ -383,7 +332,7 @@ function SecondLookCard({
       )}
 
       {/* CTAs. Reopening a room happens ONLY because a recruiter clicked. */}
-      <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      <div className="review-dossier-actions">
         <button onClick={onReviewChanges}>{t('m18.sl.reviewChanges')}</button>
         {open && (
           <button disabled={busy} onClick={() => act(() => m18.reviewSecondLook(session, item.id), t('m18.sl.markedReviewed'))}>
@@ -480,7 +429,7 @@ function ReviewChangesView({ session, item, onBack }: { session: Session; item: 
   const rows: ComparisonRow[] = (data?.comparison?.rows ?? []).filter((r) => r.changed === true || r.available === false);
 
   return (
-    <div>
+    <div className="review-comparison">
       <button onClick={onBack}>← {t('m18.sl.back')}</button>
       <h2 style={{ marginTop: 10 }}>{t('m18.sl.compareTitle')}</h2>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>
@@ -493,13 +442,13 @@ function ReviewChangesView({ session, item, onBack }: { session: Session; item: 
       {data?.unavailableNote && <div className="notice block">{data.unavailableNote}</div>}
 
       {data && !data.unavailableNote && (
-        <div className="section" aria-label={t('m18.sl.comparePanel')}>
+        <div className="section review-comparison-body" aria-label={t('m18.sl.comparePanel')}>
           <div style={{ fontSize: 13, marginBottom: 8 }}>
             <b>{t('m18.sl.previousReview')}:</b>{' '}
             {data.previous?.at ? fmtDate(data.previous.at) : <span className="dim">—</span>}
             {data.previous?.recommendation && <> · {t(`rm.rec.${data.previous.recommendation}`, data.previous.recommendation.replace(/_/g, ' '))}</>}
             {(data.previous?.reasonCodes ?? []).length > 0 && (
-              <div className="dim">{t('m18.sl.originalReason')}: {(data.previous?.reasonCodes ?? []).map(reasonLabel).join(' · ')}</div>
+              <div className="dim">{t('m18.sl.originalReason')}: <DetailItems items={(data.previous?.reasonCodes ?? []).map(reasonLabel)} /></div>
             )}
             {data.previous?.note && <div className="dim">{data.previous.note}</div>}
           </div>
@@ -619,8 +568,10 @@ export function NobodyMissedScreen({
   ].filter((g) => g.items.length > 0) : [];
 
   return (
-    <div data-screen="nobody-missed">
-      <div className="nm-controls" aria-label={t('m18.nm.briefPickerLabel')}>
+    <div data-screen="nobody-missed" className="coverage-workspace">
+      <section className="nm-briefbar" aria-label={t('m18.nm.briefPickerLabel')}>
+        <div className="nm-briefbar-title"><span className="discovery-step">01</span><div><h3>Set your discovery scope</h3><p>Choose a recruitment brief, then arrange the review queue.</p></div></div>
+        <div className="nm-controls">
         <label>
           {t('m18.nm.brief')}{' '}
           <select aria-label={t('m18.nm.brief')} value={briefId} onChange={(e) => setBriefId(e.target.value)}>
@@ -635,8 +586,8 @@ export function NobodyMissedScreen({
             {(data?.sorts ?? NOBODY_MISSED_SORTS).map((s) => <option key={s} value={s}>{sortLabel(s)}</option>)}
           </select>
         </label>
-        <span className="dim" style={{ fontSize: 12 }}>{t('m18.nm.noRank')}</span>
-      </div>
+        </div><p className="discovery-method">{t('m18.nm.noRank')}</p>
+      </section>
 
       {err && <LoadError message={err} onRetry={reload} />}
       {!data && !err && briefId && <div className="dim">{t('m18.loading')}</div>}
@@ -777,7 +728,6 @@ function CandidateRow({
   const [dismissOpen, setDismissOpen] = useState(false);
   const [reason, setReason] = useState<string>(NOBODY_MISSED_DISMISS_REASONS[0]);
   const name = item.name ?? item.playerId;
-  const line = [item.position ?? '—', item.age != null ? String(item.age) : null, item.distanceKm != null ? `${item.distanceKm} km` : null].filter(Boolean).join(' · ');
   const met = item.reasons.filter((r) => r.met).length;
 
   return (
@@ -786,7 +736,7 @@ function CandidateRow({
         <span className="p-avatar" aria-hidden="true">{initialsOf(item.name)}</span>
         <span className="nm-row-main">
           <b>{name}</b>
-          <span className="dim">{line}{item.reasons.length ? ` · ${met}/${item.reasons.length} ${t('m18.nm.criteriaMet', 'criteria met')}` : ''}</span>
+          <RecordFacts items={[{label: 'Position', value: item.position}, {label: 'Age', value: item.age}, ...(item.distanceKm != null ? [{label: 'Distance', value: `${item.distanceKm} km`}] : []), ...(item.reasons.length ? [{label: t('m18.nm.criteriaMet', 'Criteria met'), value: `${met}/${item.reasons.length}`}] : [])]} />
         </span>
         {item.lastEvidenceAt && <span className="dim nm-row-when">{fmtDate(item.lastEvidenceAt)}</span>}
         <span className="dim" aria-hidden="true">{open ? '⌄' : '›'}</span>
@@ -914,40 +864,7 @@ function BriefList({ session, tick, notify, onOpenBrief }: BriefsScreenProps) {
       <div className="section" aria-label={t('m18.br.listLabel')}>
         {!data && !err && <div className="dim">{t('m18.loading')}</div>}
         {data && data.items.length === 0 && <div className="dim">{t('m18.br.empty')}</div>}
-        <div style={{ overflowX: 'auto' }}>
-          <table className="data">
-            <thead>
-              <tr>
-                <th>{t('m18.br.colTitle')}</th>
-                <th>{t('common.status')}</th>
-                <th>{t('m18.br.version')}</th>
-                <th>{t('m18.br.criteria')}</th>
-                <th>{t('m18.br.updated')}</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {(data?.items ?? []).map((b) => (
-                <tr key={b.id}>
-                  <td><b>{b.title}</b></td>
-                  <td><span className="pill">{briefStatusLabel(b.status)}</span></td>
-                  <td>v{b.version}</td>
-                  <td style={{ fontSize: 12.5 }}>
-                    {b.criteriaExplained.length === 0
-                      ? <span className="dim">{t('m18.br.noCriteria')}</span>
-                      : b.criteriaExplained.map((c) => `${c.label}: ${humanText(c.value)}`).join(' · ')}
-                  </td>
-                  <td>{fmtDate(b.updatedAt)}</td>
-                  <td>
-                    <button onClick={() => onOpenBrief?.(b.id)} aria-label={`${t('m18.br.open')} ${b.title}`}>
-                      {t('m18.br.open')}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <div className="brief-dossiers">{(data?.items??[]).map(b=><article key={b.id} className="brief-dossier"><header><span className="pill">{briefStatusLabel(b.status)}</span><small>Version {b.version}</small><h3>{b.title}</h3></header><dl>{b.criteriaExplained.map((c,i)=><div key={`${c.key}-${i}`}><dt>{c.label}</dt><dd>{sentenceCase(humanText(c.value))}</dd></div>)}</dl>{!b.criteriaExplained.length&&<p>{t('m18.br.noCriteria')}</p>}<footer><span>Updated {fmtDate(b.updatedAt)}</span><button onClick={()=>onOpenBrief?.(b.id)} aria-label={`${t('m18.br.open')} ${b.title}`}>Open brief <span aria-hidden="true">↗</span></button></footer></article>)}</div>
       </div>
     </div>
   );

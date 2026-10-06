@@ -33,7 +33,7 @@ export function ProChart({ title, note, items }: { title: string; note?: string;
   const max = Math.max(1, ...items.map(x => x.value));
   const total = items.reduce((n, x) => n + x.value, 0);
   let start = 0;
-  const colors = ['#ceb891', '#819bb6', '#75b7ab', '#aaa0c5', '#d09279', '#c0c7cf'];
+  const colors = ['#00e676', '#8bdbb5', '#4e9f86', '#b5cac2', '#589cad', '#80968d'];
   const segments = items.map((x, i) => { const from = start; start += total ? x.value / total * 100 : 0; return `${colors[i % colors.length]} ${from}% ${start}%`; });
   return <section className="pro-chart" aria-label={title}>
     <header><div><span className="pro-eyebrow">Recorded activity</span><h3>{title}</h3></div><div className="pro-chart-modes" role="group" aria-label={`${title} chart style`}><button aria-pressed={mode === 'bars'} onClick={() => setMode('bars')} aria-label="Bar chart"><Icon name="signal" size={15}/></button><button aria-pressed={mode === 'ring'} onClick={() => setMode('ring')} aria-label="Ring chart"><Icon name="target" size={15}/></button></div></header>
