@@ -1,6 +1,7 @@
 import { Hint } from '../../design-system/About';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Icon } from '../../design-system/icons';
+import { initials } from '../../design-system/text';
 import { pressable, useDialog } from './dialog';
 import {
   api, ApiError,
@@ -529,7 +530,7 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
         </label>
         <span className="pill">{players.length} players</span>
       </div>
-      <div className="filters" style={{ marginTop: -8 }}>
+      <div className="filters club-saved-search" style={{ marginTop: -8 }}>
         <input type="text" placeholder="Save this search as… (alerts on new matches)" value={saveName} onChange={(e) => setSaveName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && saveCurrent()} />
         <button onClick={saveCurrent}>Save search</button>
         {saved.map((s) => (
@@ -552,23 +553,23 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
       {comparing && <CompareModal session={session} playerIds={compareIds} onClose={() => setComparing(false)} />}
       {/* M18.2 — the ordering is stated, not inferred. It is deliberately not
           a ranking, and the sentence says what the figure is not. */}
-      <div className="dim" style={{ fontSize: 12, marginBottom: 8 }} data-ordering>
+      <div className="dim club-search-order" style={{ fontSize: 12, marginBottom: 8 }} data-ordering>
         {t('discover.orderingGrassroots')}
       </div>
       <div className="player-grid">
         {players.map((p) => (
           <div key={p.id} className="player-card" {...pressable(() => openPlayer(p.id))}>
             <div className="row1">
-              <span className="name">{p.name}</span>
+              <span className="club-player-identity"><span className="club-player-avatar" aria-hidden="true">{initials(p.name)}</span><span className="name">{p.name}</span></span>
               <span style={{ display: 'flex', gap: 6, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
                 <label className="chk" title="Select to compare">
-                  <input type="checkbox" checked={compareIds.includes(p.id)} onChange={() => toggleCompare(p.id)} /> 
+                  <input aria-label={`Compare ${p.name}`} type="checkbox" checked={compareIds.includes(p.id)} onChange={() => toggleCompare(p.id)} />
                 </label>
                 <span className="pill blue">{p.position}</span>
               </span>
             </div>
             <div className="meta">
-              {p.age} · {p.foot} foot · {p.city ? `${p.city}, ` : ''}{p.country} · {p.heightCm} cm
+              <span className="club-player-location"><Icon name="map-pin" size={14} />{p.city ? `${p.city}, ` : ''}{p.country}</span><span className="club-player-facts">{p.age} years <span /> {p.foot} foot <span /> {p.heightCm} cm</span>
             </div>
             {/* M24F.4 — at most three pills (the safeguarding state, First Team Seeker, the availability); everything else is one quiet line. */}
             <div className="badges">
@@ -599,7 +600,7 @@ export function ShortlistScreen({ session, tick, openPlayer }: ScreenProps) {
     <div className="player-grid">
       {players.map((p) => (
         <div key={p.id} className="player-card" {...pressable(() => openPlayer(p.id))}>
-          <div className="row1"><span className="name">{p.name}</span><span className="pill blue">{p.position}</span></div>
+          <div className="row1"><span className="club-player-identity"><span className="club-player-avatar" aria-hidden="true">{initials(p.name)}</span><span className="name">{p.name}</span></span><span className="pill blue">{p.position}</span></div>
           <TrustBar score={p.trustScore} />
         </div>
       ))}
@@ -718,17 +719,17 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
   return (
     <>
       <Hint>Threads open on acceptance, stay on-platform, and are moderated and logged. For under-18s you are talking to the parent or guardian, never the child.</Hint>
-      {channels.length === 0 && <div className="notice">No open threads. Send a request; a thread opens when it's accepted.</div>}
-      <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 14 }}>
-        <div className="list-rows">
+      {channels.length === 0 && <div className="club-message-empty"><span className="club-empty-icon"><Icon name="messages-square" size={35} /></span><h3>Your club conversations</h3><p>No open threads. Send a request; a thread opens when it's accepted.</p></div>}
+      <div className="club-messages">
+        <div className="list-rows club-channel-list">
           {channels.map((c) => (
             <div
               key={c.id}
-              className="list-row"
-              style={{ cursor: 'pointer', borderColor: openId === c.id ? 'var(--accent-2)' : undefined }}
+              className={`list-row club-channel ${openId === c.id ? 'selected' : ''}`}
+              style={{ cursor: 'pointer' }}
               {...pressable(() => setOpenId(c.id))}
             >
-              <span className="grow">
+              <span className="club-player-avatar" aria-hidden="true">{initials(c.playerName)}</span><span className="grow">
                 <b>{c.playerName}</b>{c.closed && <span className="pill red" style={{ marginLeft: 6 }}>Closed</span>}
                 <div className="dim">{c.counterparty === 'guardian' ? 'via guardian' : 'direct'} · {c.messages.length} msg</div>
               </span>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useTheme, type Theme } from '../../design-system/theme';
+import { useTheme } from '../../design-system/theme';
 import { AuthField, AuthPage, AuthRow, AuthTabs, PasswordInput } from '../../design-system/AuthShell';
 import { initials } from '../../design-system/text';
 import { Icon } from './icons';
@@ -162,9 +162,9 @@ export default function App() {
   }, []);
 
   // M24A — one appearance per application, persisted under its own key.
-  const { theme, toggle: toggleTheme } = useTheme('grass');
+  useTheme('grass'); // Preserve the entry-page preference; the workspace owns its clubhouse palette.
   return session
-    ? <Workspace session={session} onLogout={logout} theme={theme} onToggleTheme={toggleTheme} />
+    ? <Workspace session={session} onLogout={logout} />
     : <Login onLogin={login} />;
 }
 
@@ -284,7 +284,7 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
   );
 }
 
-function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Session; onLogout: () => void; theme: Theme; onToggleTheme: () => void }) {
+function Workspace({ session, onLogout }: { session: Session; onLogout: () => void }) {
   // Deep links: the hash IS the screen id ("#/verification"). Unknown or
   // absent hashes land on Home without highlighting a wrong section.
   const [screen, setScreenState] = useState<ScreenId>(() => screenFromHash(window.location.hash) ?? 'feed');
@@ -547,7 +547,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
   const screenLabel = t((loc.itemId ? (NAV_SECTIONS.flatMap((s) => s.children).find((c) => c.id === screen)?.labelKey ?? `nav.${screen}`) : `nav.${screen}`) as Parameters<typeof t>[0]);
 
   return (
-    <div className={`shell ${collapsed ? 'nav-collapsed' : ''}`}>
+    <div className={`shell grass-workspace ${collapsed ? 'nav-collapsed' : ''}`}>
       <Sidebar
         sections={sections}
         location={loc}
@@ -591,8 +591,6 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
           bellOpen={bellOpen}
           drawerOpen={drawerOpen}
           edition="Grassroots"
-          theme={theme}
-          onToggleTheme={onToggleTheme}
           onOpenPalette={() => setPaletteOpen(true)}
           onToggleBell={openBell}
           onReport={() => setSafetyOpen(true)}
@@ -621,7 +619,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
           </div>
         )}
         {activeSection && <SecondaryNav section={activeSection} activeItemId={loc.itemId} onNavigate={setScreen} />}
-        <div className="content">
+        <div className={`content grass-content ${screen === 'feed' ? 'grass-home-content' : ''}`}>
           {/* M24A — the reference page heading; the top bar keeps the document <h1>. */}
           <div className="f-heading"><p className="f-display" aria-hidden="true">{screenLabel}</p></div>
           {/* M24F.2 — the Home: welcome, one primary action, counts, attention, club progress, activity, quick actions. */}

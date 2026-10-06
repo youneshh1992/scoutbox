@@ -13,7 +13,7 @@
 //   • the top bar is one row: the page `<h1>`, a live-state dot, the bell and
 //     Report / Block. Organisation badges moved to the account block, where
 //     the organisation is named.
-// This file is byte-identical in Pro and Grassroots; the brand is a prop.
+// Grassroots has its own clubhouse presentation; navigation and permissions stay shared in structure.
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { ScreenId } from './App';
 import {
@@ -21,7 +21,6 @@ import {
   allItems, filterSections, groupedChildren, searchNav, stripLayout,
 } from './nav';
 import { Icon } from './icons';
-import { ThemeToggle, type Theme } from '../../design-system/theme';
 import { t } from './i18n';
 
 type TKey = Parameters<typeof t>[0];
@@ -435,9 +434,9 @@ export function SecondaryNav({ section, activeItemId, onNavigate }: {
  * is never hidden (§33): under 640px it shrinks to its glyph with the same
  * accessible name.
  */
-export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOpen = false, theme, onToggleTheme, onOpenPalette, onToggleBell, onReport, onOpenDrawer }: {
+export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOpen = false, onOpenPalette, onToggleBell, onReport, onOpenDrawer }: {
   title: string; crumb?: string | null; edition?: string; live: boolean; unread: number; bellOpen: boolean; drawerOpen?: boolean;
-  theme: Theme; onToggleTheme: () => void; onOpenPalette: () => void;
+  onOpenPalette: () => void;
   onToggleBell: () => void; onReport: () => void; onOpenDrawer: () => void;
 }) {
   const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform ?? '');
@@ -455,7 +454,6 @@ export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOp
         </h1>
       </div>
       <div className="p-toolbar">
-        <ThemeToggle theme={theme} onToggle={onToggleTheme} labels={{ aria: t('theme.aria'), light: t('theme.light'), dark: t('theme.dark') }} />
         <button className="p-top-search" onClick={onOpenPalette} aria-label={t('navsec.searchAria')} title={t('navsec.searchAria')}>
           <Icon name="search" size={18} />
           <span>{t('navsec.searchWorkspace')}</span>

@@ -67,3 +67,15 @@ The dark-only change does not alter Grassroots. The Founder will start that
 project separately. The cloud-only badge fix 9c6249f must be preserved when
 merging this branch into Claude’s existing workspace; it was not on GitHub
 when the dark-only update was prepared.
+
+## Grassroots Clubhouse — new makeover
+
+The Founder has now started the separate Grassroots redesign, with full creative
+control except the logo and brand colours, and an explicit requirement to leave
+sign-in/sign-up as they are. Read `GRASSROOTS_CLUBHOUSE.md` before Grassroots UI
+work. The current implementation uses an earthy forest workspace, green gradients
+and glows, a clubhouse Home and consistent player/club/recruitment screens. This
+supersedes earlier Grassroots light/flat/minimalist presentation instructions;
+it does not alter the approved Player baseline or protected business rules.
+Keep the new styling scoped to authenticated Grassroots. Preserve the existing
+authentication pages and exact ScoutBox logo and #00e676 brand green.

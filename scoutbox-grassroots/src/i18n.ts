@@ -126,6 +126,9 @@ const en = {
   'nav2.budgets': 'Finance',
   'navsec.attnTitle': 'Needs your attention', 'navsec.attnMessages': 'Unread player & guardian messages', 'navsec.attnVerification': 'Verification requests awaiting a decision',
   // M24F.2 — the Home (EN)
+  'home.clubhouse': 'The clubhouse', 'home.localGame': 'Your club. Your community.',
+  'home.localRoots': 'Local roots.', 'home.bigAmbitions': 'Big ambitions.',
+  'home.groundUp': 'Built from the ground up', 'home.touchline': 'Around the touchline', 'home.foundations': 'Strong foundations',
   'home.welcome': 'Welcome back, {name}.',
   'home.fileReport': 'File the trial report', 'home.fileReportWhy': '{n} trial awaiting its mandatory report',
   'home.openInbox': 'Open your inbox', 'home.openInboxWhy': '{n} unread from players and guardians',
@@ -1753,6 +1756,9 @@ const fr: typeof en = {
   'nav2.budgets': 'Finances',
   'navsec.attnTitle': 'Requiert votre attention', 'navsec.attnMessages': 'Messages joueurs et tuteurs non lus', 'navsec.attnVerification': 'Demandes de v\u00e9rification en attente de d\u00e9cision',
   // M24F.2 \u2014 l\u2019accueil (FR)
+  'home.clubhouse': 'La maison du club', 'home.localGame': 'Votre club. Votre communauté.',
+  'home.localRoots': 'Racines locales.', 'home.bigAmbitions': 'Grandes ambitions.',
+  'home.groundUp': 'Construit sur le terrain', 'home.touchline': 'Au bord du terrain', 'home.foundations': 'Des bases solides',
   'home.welcome': 'Bon retour, {name}.',
   'home.fileReport': 'R\u00e9diger le rapport d\u2019essai', 'home.fileReportWhy': '{n} essai en attente de son rapport obligatoire',
   'home.openInbox': 'Ouvrir la messagerie', 'home.openInboxWhy': '{n} non lu(s) de joueurs et tuteurs',

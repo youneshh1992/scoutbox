@@ -1,11 +1,13 @@
-// M24F.2 — the Grassroots Home, recomposed.
+// Grassroots Clubhouse — Home with live club facts.
 //
-// Hierarchy (§36): a welcome line, ONE primary action, a small row of
+// Hierarchy: a welcome, one primary action, a row of
 // counts, Needs your attention, Club progress, Recent activity, Quick
 // actions. Every number is read from the workspace's own endpoints
 // (shortlist, requests, trials, squad, feed); nothing is estimated, no
 // percentage is invented, and a count the server refuses is simply absent.
 import { useEffect, useState } from 'react';
+import { ClubGround } from './ClubGround';
+import { initials } from '../../design-system/text';
 import { Icon } from '../../design-system/icons';
 import { api, type FeedItem, type OrgRequest, type Player, type Session, type Squad, type Trial } from './api';
 import { pressable } from './dialog';
@@ -102,39 +104,37 @@ export function HomeScreen({ session, tick, openPlayer, unreadMessages, verLevel
   return (
     <div className="home" data-testid="grass-home">
       <AgencyWall session={session} />
-      <p className="home-welcome" data-testid="home-welcome">{t('home.welcome').replace('{name}', firstName)} <span className="dim">{org.name} · {session.role}</span></p>
-      <div className="home-primary" data-testid="home-primary">
-        <button className="primary" onClick={() => onNavigate(primary.target)}>{primary.label}</button>
-        <span className="dim">{primary.why}</span>
+      <div className="club-welcome">
+        <div><span className="club-eyebrow">{t('home.clubhouse')}</span><p className="home-welcome" data-testid="home-welcome">{t('home.welcome').replace('{name}', firstName)}</p></div>
+        <span className="club-identity"><Icon name="map-pin" size={15} />{org.name}<span className="club-role">{session.role}</span></span>
       </div>
+      <section className="club-hero" aria-labelledby="club-hero-title">
+        <div className="club-hero-copy"><span className="club-eyebrow">{t('home.localGame')}</span>
+          <h2 id="club-hero-title">{t('home.localRoots')}<br /><span>{t('home.bigAmbitions')}</span></h2>
+          <div className="home-primary" data-testid="home-primary"><p>{primary.why}</p><button className="primary" onClick={() => onNavigate(primary.target)}>{primary.label}<Icon name="arrow-right" size={18} /></button></div>
+        </div>
+        <ClubGround />
+        <span className="club-hero-caption"><span />{t('home.groundUp')}</span>
+      </section>
       {summary.length > 0 && (
         <div className="home-summary" data-testid="home-summary" role="list">
           {summary.map((s) => (
-            <button key={s.key} role="listitem" className="home-sum" onClick={() => onNavigate(s.target)}>
-              <b>{s.n}</b><span>{s.label}</span>
-            </button>
+            <div key={s.key} role="listitem"><button className="home-sum" onClick={() => onNavigate(s.target)}>
+              <span className="home-sum-top"><Icon name={({ shortlist: 'list-checks', requests: 'mail', trials: 'clipboard', squad: 'users' } as Record<string, string>)[s.key]} size={19} /><Icon name="arrow-up-right" size={15} /></span><b>{s.n}</b><span>{s.label}</span>
+            </button></div>
           ))}
         </div>
       )}
+      <div className="club-dashboard">
+      <div className="club-main-column">
       <NeedsAttention session={session} tick={tick} unreadMessages={unreadMessages} verLevel={verLevel} onNavigate={onNavigate} />
-      <section className="home-section" aria-labelledby="home-progress-title" data-testid="home-progress">
-        <div className="attn-title" id="home-progress-title">{t('home.progressTitle')}</div>
-        <div className="list-rows">
-          {progress.map((p) => (
-            <button key={p.key} className="list-row home-row" onClick={() => onNavigate(p.target)}>
-              <span className={`home-state ${p.done ? 'done' : ''}`} aria-hidden="true"><Icon name={p.done ? 'check' : 'chevron-right'} size={12} /></span>
-              <span className="grow">{p.label}</span>
-              <span className={p.done ? 'home-ok' : 'dim'}>{p.state}</span>
-            </button>
-          ))}
-        </div>
-      </section>
       <section className="home-section" aria-labelledby="home-activity-title" data-testid="home-activity">
-        <div className="attn-title" id="home-activity-title">{t('home.activityTitle')}</div>
+        <div className="club-section-heading"><div><span className="club-eyebrow">{t('home.touchline')}</span><h3 id="home-activity-title">{t('home.activityTitle')}</h3></div><Icon name="activity" size={21} /></div>
         {feed.length === 0 && <div className="notice">{t('home.quiet')}</div>}
         <div className="list-rows">
           {feed.slice(0, 8).map((it, i) => (
-            <div key={i} className="list-row home-row" style={{ cursor: 'pointer' }} {...pressable(() => openPlayer(it.playerId))}>
+            <div key={i} className="list-row home-row club-feed-row" style={{ cursor: 'pointer' }} {...pressable(() => openPlayer(it.playerId))}>
+              <span className="club-feed-avatar" aria-hidden="true">{initials(it.playerName)}</span>
               <span className={`feed-kind ${it.type === 'report_due' ? 'urgent' : ''}`}>{FEED_LABELS[it.type]}</span>
               <span className="grow">
                 <b>{it.playerName}</b>
@@ -150,12 +150,27 @@ export function HomeScreen({ session, tick, openPlayer, unreadMessages, verLevel
         </div>
         {feed.length > 8 && <p className="dim home-more">{t('home.more').replace('{n}', String(feed.length - 8))}</p>}
       </section>
+      </div>
+      <aside className="club-side-column">
+      <section className="home-section" aria-labelledby="home-progress-title" data-testid="home-progress">
+        <div className="club-section-heading"><div><span className="club-eyebrow">{t('home.foundations')}</span><h3 id="home-progress-title">{t('home.progressTitle')}</h3></div><Icon name="shield-check" size={22} /></div>
+        <div className="list-rows">
+          {progress.map((p) => (
+            <button key={p.key} className="list-row home-row" onClick={() => onNavigate(p.target)}>
+              <span className={`home-state ${p.done ? 'done' : ''}`} aria-hidden="true"><Icon name={p.done ? 'check' : 'chevron-right'} size={12} /></span>
+              <span className="grow">{p.label}</span>
+              <span className={p.done ? 'home-ok' : 'dim'}>{p.state}</span>
+            </button>
+          ))}
+        </div>
+      </section>
       <section className="home-section" aria-labelledby="home-quick-title" data-testid="home-quick">
-        <div className="attn-title" id="home-quick-title">{t('home.quickTitle')}</div>
+        <h3 id="home-quick-title">{t('home.quickTitle')}</h3>
         <div className="home-quick">
           {quick.map((q) => <button key={q.target} className="f-textbtn" onClick={() => onNavigate(q.target)}>{q.label}<Icon name="arrow-right" size={12} /></button>)}
         </div>
       </section>
+      </aside></div>
     </div>
   );
 }
