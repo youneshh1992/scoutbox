@@ -446,12 +446,9 @@ export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOp
       <button className="nav-hamburger" aria-label={t('navsec.openMenu')} aria-expanded={drawerOpen} aria-controls="app-sidebar" onClick={onOpenDrawer}><Icon name="menu" /></button>
       {/* M24A — the reference breadcrumb: edition / section / page. The page
           name stays the document's <h1>; the parts before it are its path. */}
-      <div className="p-breadcrumb">
-        {edition && <span className="crumb crumb-edition" aria-hidden="true">{edition}<span className="crumb-sep"> / </span></span>}
-        <h1 className="page-title" tabIndex={-1}>
-          {crumb && <><span className="crumb">{crumb}</span><span className="crumb-sep"> / </span></>}
-          {title}
-        </h1>
+      <div className="p-breadcrumb suite-breadcrumb">
+        <span className="suite-breadcrumb-context">{edition}{crumb ? ` / ${crumb}` : ''}</span>
+        <h1 className="page-title" tabIndex={-1}>{title}</h1>
       </div>
       <div className="p-toolbar">
         <button className="p-top-search" onClick={onOpenPalette} aria-label={t('navsec.searchAria')} title={t('navsec.searchAria')}>

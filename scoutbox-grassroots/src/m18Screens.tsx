@@ -1,3 +1,4 @@
+import { sentenceCase } from './presentation';
 import { CountChart, countBy } from './ScoutVisuals';
 // M18 org screens — Second Look, Nobody Missed, Recruitment Briefs.
 //
@@ -920,40 +921,7 @@ function BriefList({ session, tick, notify, onOpenBrief }: BriefsScreenProps) {
       <div className="section" aria-label={t('m18.br.listLabel')}>
         {!data && !err && <div className="dim">{t('m18.loading')}</div>}
         {data && data.items.length === 0 && <div className="dim">{t('m18.br.empty')}</div>}
-        <div style={{ overflowX: 'auto' }}>
-          <table className="data">
-            <thead>
-              <tr>
-                <th>{t('m18.br.colTitle')}</th>
-                <th>{t('common.status')}</th>
-                <th>{t('m18.br.version')}</th>
-                <th>{t('m18.br.criteria')}</th>
-                <th>{t('m18.br.updated')}</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {(data?.items ?? []).map((b) => (
-                <tr key={b.id}>
-                  <td><b>{b.title}</b></td>
-                  <td><span className="pill">{briefStatusLabel(b.status)}</span></td>
-                  <td>v{b.version}</td>
-                  <td style={{ fontSize: 12.5 }}>
-                    {b.criteriaExplained.length === 0
-                      ? <span className="dim">{t('m18.br.noCriteria')}</span>
-                      : b.criteriaExplained.map((c) => `${c.label}: ${humanText(c.value)}`).join(' · ')}
-                  </td>
-                  <td>{fmtDate(b.updatedAt)}</td>
-                  <td>
-                    <button onClick={() => onOpenBrief?.(b.id)} aria-label={`${t('m18.br.open')} ${b.title}`}>
-                      {t('m18.br.open')}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <div className="brief-dossiers">{(data?.items??[]).map(b=><article key={b.id} className="brief-dossier"><header><span className="pill">{briefStatusLabel(b.status)}</span><small>Version {b.version}</small><h3>{b.title}</h3></header><dl>{b.criteriaExplained.map((c,i)=><div key={`${c.key}-${i}`}><dt>{c.label}</dt><dd>{sentenceCase(humanText(c.value))}</dd></div>)}</dl>{!b.criteriaExplained.length&&<p>{t('m18.br.noCriteria')}</p>}<footer><span>Updated {fmtDate(b.updatedAt)}</span><button onClick={()=>onOpenBrief?.(b.id)} aria-label={`${t('m18.br.open')} ${b.title}`}>Open brief <span aria-hidden="true">↗</span></button></footer></article>)}</div>
       </div>
     </div>
   );

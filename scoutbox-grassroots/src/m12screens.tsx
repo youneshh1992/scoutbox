@@ -1,3 +1,4 @@
+import { sentenceCase } from './presentation';
 import { CountChart, countBy } from './ScoutVisuals';
 // M12 org screens: Assessments (with offline drafts), Recruitment cases,
 // Squad Planner, Opportunities, Campaigns, Video Workspace, Outcomes,
@@ -232,7 +233,7 @@ function AssessmentEditor({ session, assessment, notify, onClose }: { session: S
 
   return (
     <div className="section" role="form" aria-label={`Assessment of ${assessment.playerName}`}>
-      <h3>{assessment.playerName} <span className="dim">template v{assessment.templateVersion}</span>
+      <h3>{assessment.playerName} <span className="dim">Template v{assessment.templateVersion}</span>
         <span className="pill" style={{ marginLeft: 8 }} aria-live="polite">
           {saveState === 'local' ? `${t('assess.draftSaved')} · ${t('assess.pendingSync')}` : saveState === 'synced' ? `✓ ${t('assess.synced')}` : t('assess.draft')}
         </span>
@@ -399,7 +400,7 @@ export function SquadPlannerScreen({ session, tick, notify }: ScreenProps) {
           {(vacancies ?? []).map((v) => (
             <div key={v.id} className="list-row">
               <span className="grow"><b>{v.roleName}</b>{v.notes && <span className="dim"> · {v.notes}</span>}</span>
-              <span className={`pill ${v.status === 'open' ? 'green' : ''}`}>{v.status}</span>
+              <span className={`pill ${v.status === 'open' ? 'green' : ''}`}>{sentenceCase(v.status)}</span>
               <button onClick={() => showCandidates(v)}>{t('planner.candidates')}</button>
             </div>
           ))}
@@ -437,7 +438,7 @@ export function SquadPlannerScreen({ session, tick, notify }: ScreenProps) {
           {(planner?.current ?? []).map((p) => (
             <div key={p.playerId} className="list-row">
               <span className="grow"><b>{p.name}</b> <span className="dim">{p.position ?? ''}</span></span>
-              {p.contractUntil && <span className={`pill ${new Date(p.contractUntil).getTime() < Date.now() + 180 * 86400000 ? 'red' : ''}`}>contract to {p.contractUntil}</span>}
+              {p.contractUntil && <span className={`pill ${new Date(p.contractUntil).getTime() < Date.now() + 180 * 86400000 ? 'red' : ''}`}>Contract to {p.contractUntil}</span>}
               <span className="pill">{p.source}</span>
             </div>
           ))}
@@ -465,11 +466,11 @@ export function OpportunitiesScreen({ session, tick, notify }: ScreenProps) {
   return (
     <div>
       <CountChart title="Opportunity status" note="Current states of the records shown below." unit="opportunities" distribution items={list ? countBy(list, r => r.status) : null} />
-      <div className="filters">
-        <input aria-label="Opportunity title" placeholder="Title (e.g. U23 open trial — attackers)" value={title} onChange={(e) => setTitle(e.target.value)} style={{ flex: 1 }} />
-        <input aria-label={t('common.deadline')} type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
+      <details className="suite-compose"><summary>Publish an opportunity</summary><div className="filters">
+        <label className="wide">Opportunity title<input aria-label="Opportunity title" placeholder="Title (e.g. U23 open trial — attackers)" value={title} onChange={(e) => setTitle(e.target.value)} style={{ flex: 1 }} /></label>
+        <label>Application deadline<input aria-label={t('common.deadline')} type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} /></label>
         <button className="primary" onClick={() => title && deadline && act(async () => { await m12.createOpportunity(session, { title, type: 'trial', deadline }); setTitle(''); }, 'Opportunity published.')}>{t('opp.new')}</button>
-      </div>
+      </div></details>
       <div className="list-rows">
         {(list ?? []).map((o) => (
           <div key={o.id} className="list-row">
@@ -477,7 +478,7 @@ export function OpportunitiesScreen({ session, tick, notify }: ScreenProps) {
               <b>{o.title}</b> <span className="pill">{o.type}</span> <span className="pill">{o.category}</span>
               <div className="dim">{t('common.deadline')} {o.deadline} · {o.applications ?? 0} {t('opp.applications').toLowerCase()} · {o.outstanding ?? 0} outstanding</div>
             </span>
-            <span className={`pill ${o.status === 'published' ? 'green' : ''}`}>{o.status}</span>
+            <span className={`pill ${o.status === 'published' ? 'green' : ''}`}>{sentenceCase(o.status)}</span>
             <button onClick={async () => setApps({ opp: o, items: await m12.listApplications(session, o.id) })}>{t('opp.applications')}</button>
             {o.status === 'published' && <button onClick={() => act(() => m12.closeOpportunity(session, o.id), 'Closed.')}>{t('opp.close')}</button>}
           </div>
@@ -495,7 +496,7 @@ export function OpportunitiesScreen({ session, tick, notify }: ScreenProps) {
                   {a.note && <div className="dim">“{a.note}”</div>}
                   {a.outcome && <div className="dim">{a.outcome.decision} — {a.outcome.byName}{a.outcome.note ? `: ${a.outcome.note}` : ''}</div>}
                 </span>
-                <span className={`pill ${a.status === 'accepted' ? 'green' : a.status === 'declined' ? 'red' : ''}`}>{a.status}</span>
+                <span className={`pill ${a.status === 'accepted' ? 'green' : a.status === 'declined' ? 'red' : ''}`}>{sentenceCase(a.status)}</span>
                 {a.status === 'submitted' && <>
                   <button onClick={() => act(() => m12.resolveApplication(session, a.id, 'accepted', 'See you there.'), 'Accepted.')}>{t('opp.accept')}</button>
                   <button onClick={() => {
@@ -604,13 +605,13 @@ export function VideoScreen({ session, tick, notify, openPlayer }: ScreenProps) 
         <h3>{t('video.segments')}</h3>
         <div className="list-rows">
           {(segments ?? []).map((s) => (
-            <div key={s.id} className="list-row">
-              <span className="grow">
-                <b>{s.eventType ?? s.labels[0] ?? 'segment'}</b> · {s.startS}s → {s.endS}s
-                {s.note && <span className="dim"> · “{s.note}”</span>}
+            <div key={s.id} className="list-row suite-segment">
+              <span className="suite-segment-time"><Icon name="video" size={20}/><b>{s.endS-s.startS}s</b><small>{s.startS}s – {s.endS}s</small></span><span className="grow">
+                <b>{sentenceCase(s.eventType ?? s.labels[0] ?? 'Segment')}</b>
+                {s.note && <p className="dim">{s.note}</p>}
                 <div className="dim">{s.labels.map((l) => `#${l}`).join(' ')} · {s.createdBy.name} · {fmtDate(s.createdAt)}</div>
               </span>
-              <button onClick={() => openPlayer(s.playerId)}>profile</button>
+              <button onClick={() => openPlayer(s.playerId)}>Open profile</button>
               <button onClick={() => setPlaying(s)}>Play</button>
               <select aria-label="Add to playlist" defaultValue="" onChange={async (e) => {
                 if (!e.target.value) return;
@@ -698,15 +699,15 @@ function SharedObjectives({ session, tick, notify }: { session: Session; tick: n
       {rows.map(({ player, obj }) => (
         <div key={obj.id} className="list-row">
           <span className="grow">
-            <b>{player}</b>: {obj.objectives.map((o) => o.text).join(' · ')}
-            <div className="dim">{obj.progress.length} progress entries · shared by the player/guardian (they can turn this off)</div>
+            <b>{player}</b><p className="objective-copy">{obj.objectives.map((o) => o.text).join(' · ')}</p>
+            <div className="dim">{obj.progress.length} progress {obj.progress.length===1?'entry':'entries'} · Shared by the player or guardian; sharing can be withdrawn</div>
           </span>
           {obj.reassessments.filter((r) => r.status === 'requested').map((r) => (
             <button key={r.id} onClick={async () => {
               const note = window.prompt('Reassessment outcome (point at the evidence):');
               if (!note) return;
               try { await m12.reassessmentOutcome(session, r.id, note); notify('Outcome recorded and sent.'); } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
-            }}>record reassessment</button>
+            }}>Record reassessment</button>
           ))}
         </div>
       ))}
@@ -818,13 +819,13 @@ export function CoachesScreen({ session, tick, notify }: ScreenProps) {
           <button type="button" className="linklike ed-disclose" aria-expanded={showRule} onClick={() => setShowRule((v) => !v)}>{showRule ? 'Less' : 'What it does not grant'}</button>
         </p>
         {showRule && <p className="ed-lead ed-more">It never grants discovery access, data editing, or contact with minors. Ending an affiliation keeps its history attributed; revoking removes current privileges immediately.</p>}
-        <form className="ed-form" onSubmit={(e) => { e.preventDefault(); void confirm(); }} aria-label="Confirm a coach affiliation">
+        <details className="suite-compose"><summary>Add a coach affiliation</summary><form className="ed-form" onSubmit={(e) => { e.preventDefault(); void confirm(); }} aria-label="Confirm a coach affiliation">
           <label className="ed-field"><span className="ed-label">Coach name</span><input aria-label="Coach name" value={name} onChange={(e) => setName(e.target.value)} /></label>
           <label className="ed-field"><span className="ed-label">Role</span><input aria-label="Coach role" value={role} onChange={(e) => setRole(e.target.value)} /></label>
           <label className="ed-field ed-field-wide"><span className="ed-label">Conflict declaration</span><input aria-label="Conflict of interest declaration" placeholder="None declared, or e.g. parent of a player" value={conflict} onChange={(e) => setConflict(e.target.value)} /></label>
           <button type="submit" className="primary" disabled={!name.trim()}>Confirm affiliation</button>
-        </form>
-        <div className="ed-records" data-testid="affiliations">
+        </form></details>
+        <div className="ed-records coach-roster" data-testid="affiliations">
           {(coaches ?? []).map((a) => (
             <div key={a.id} className="ed-record">
               <div className="ed-record-main">

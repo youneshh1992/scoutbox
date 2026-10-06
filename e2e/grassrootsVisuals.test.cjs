@@ -12,7 +12,10 @@ const { renderToStaticMarkup } = req('react-dom/server');
 const source = fs.readFileSync(path.resolve(__dirname, '../scoutbox-grassroots/src/ScoutVisuals.tsx'), 'utf8');
 const output = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
 const exportsObject = {};
-vm.runInNewContext(output, { exports: exportsObject, require: name => name === '../../design-system/icons' ? { Icon: () => null } : req(name) });
+const presentationSource = fs.readFileSync(path.resolve(__dirname, '../scoutbox-grassroots/src/presentation.ts'), 'utf8');
+const presentation = {};
+vm.runInNewContext(ts.transpileModule(presentationSource, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { exports: presentation });
+vm.runInNewContext(output, { exports: exportsObject, require: name => name === '../../design-system/icons' ? { Icon: () => null } : name === './presentation' ? presentation : req(name) });
 const { countBy, CountChart } = exportsObject;
 const render = props => renderToStaticMarkup(React.createElement(CountChart, { title: 'Queue', note: 'Loaded records only.', unit: 'records', ...props }));
 
@@ -42,4 +45,11 @@ test('ring control is offered only for a declared distribution', () => {
   const items=[{label:'Open',value:2}];
   assert.doesNotMatch(render({items}),/Ring chart/);
   assert.match(render({items,distribution:true}),/Ring chart/);
+});
+
+test('presentation labels use sentence case without changing names or acronyms', () => {
+  assert.equal(presentation.sentenceCase('under_review'), 'Under review');
+  assert.equal(presentation.sentenceCase('UEFA licence'), 'UEFA licence');
+  assert.equal(presentation.sentenceCase('Dee Mensah'), 'Dee Mensah');
+  assert.equal(presentation.sentenceCase(null), 'Not recorded');
 });

@@ -593,8 +593,8 @@ function Executive({ dash, onDrill }: { dash: Dashboard; onDrill: (metric: strin
     { id: 'offers', label: t('m20.kpi.offers', 'Offers issued'), value: offers },
     { id: 'signed', label: t('m20.kpi.signed', 'Signed'), value: signed },
   ];
-  const attention: { key: string; text: string; href?: string; metric?: string }[] = [
-    ...stalledRows.slice(0, 3).map((r) => ({ key: r.roomId, text: `${r.playerName ?? t('m20.playerWithheld')} — ${statusLabel(r.status)} · ${t('m20.stalled.idle').replace('{n}', String(r.idleDays))}`, href: hashForRoom(r.roomId) })),
+  const attention: { key: string; text: string; detail?: string; href?: string; metric?: string }[] = [
+    ...stalledRows.slice(0, 3).map((r) => ({ key: r.roomId, text: r.playerName ?? t('m20.playerWithheld'), detail: `${statusLabel(r.status)} · ${t('m20.stalled.idle').replace('{n}', String(r.idleDays))}`, href: hashForRoom(r.roomId) })),
     ...((aging.overdue_trial_reports?.value as number | undefined) ? [{ key: 'overdue', text: `${aging.overdue_trial_reports?.value} ${t('m20.overdue.of').replace('{n}', String((aging.overdue_trial_reports?.awaitingReport as Figure | undefined)?.value ?? 0))}`, metric: 'overdue_trial_reports' }] : []),
     ...((aging.decision_outstanding?.value as number | undefined) ? [{ key: 'outstanding', text: `${aging.decision_outstanding?.value} ${t('m20.outstanding.of').replace('{n}', String((aging.decision_outstanding?.atOfferStage as Figure | undefined)?.value ?? 0))}`, metric: 'decision_outstanding' }] : []),
   ].slice(0, 5);
@@ -638,7 +638,7 @@ function Executive({ dash, onDrill }: { dash: Dashboard; onDrill: (metric: strin
               {attention.map((a) => (
                 <li key={a.key}>
                   {a.href
-                    ? <a href={a.href}>{a.text}</a>
+                    ? <a href={a.href}><strong>{a.text}</strong>{a.detail && <span>{a.detail}</span>}</a>
                     : <button type="button" className="linklike" onClick={() => a.metric && onDrill(a.metric)}>{a.text}</button>}
                 </li>
               ))}

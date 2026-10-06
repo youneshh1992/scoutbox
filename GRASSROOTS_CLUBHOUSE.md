@@ -86,3 +86,56 @@ production build, navigation/case/icon checks and four chart-data tests pass.
 The 420 existing API calls across ten interaction files are unchanged and Login
 is byte-for-byte unchanged. This is a demo-data UI audit, not a claim to have
 exercised all backend permissions or failure states.
+
+
+## Production suite refinement — 6 October 2026
+
+The Founder rejected the repeated green heading bars, generic mastheads, wide
+form strips and sentence-packed records shown in the 7:30–7:37 screenshots.
+This update supersedes those earlier visual patterns. It is a new implementation
+for review, not a claim that the Founder has approved the result.
+
+`scoutSuite.css` follows `scoutCharacter.css` and remains scoped to authenticated
+Grassroots. Keep the original logo and brand green, forest palette, restrained
+gradients and reduced-motion support. Sign-in/sign-up and all other apps remain
+unchanged.
+
+- Film Room is a production workspace with a searchable footage library, actual
+  media thumbnails, a central source viewer and a player/observation inspector.
+  Playback speed, looping, seeking, focus mode and clip navigation operate on
+  the existing footage. The review timeline uses actual media duration. Markers
+  are session-only and clearly labelled; observation tags still save through the
+  existing API and contribute anonymously to the player's feedback. Do not
+  imply editing/exporting footage, persistent markers or private notes.
+- Scouting Insight separates discovery activity, review priorities and evidence
+  gaps. The funnel columns use returned player counts, keep denominator labels
+  and the reporting window, and retain the definition. The birth-quarter chart
+  respects suppression and its explanatory note. First assessments, deferred
+  reviews, stale evaluations and discovery rotation keep their existing actions.
+- Integrations is a workbench with five tools: imports, identity reviews, export
+  access, event delivery and provider directory. Counts reflect loaded records;
+  disconnected providers remain disconnected. Import review/confirmation and
+  credential handling keep the original behaviour.
+- Squad, match-day, coaching, friendly and opportunity creation use compact
+  disclosures with labelled fields. Briefs use structured dossiers. Coverage,
+  decision reviews, video segments, shared resources and dashboard attention
+  separate identity, status, dates and actions into readable records.
+- Player discovery uses distinct dossier rows with aligned football facts,
+  availability, evidence and comparison. It remains unranked by ability or
+  evidence confidence. Plan/compliance uses bounded sections with visible
+  controls and preserved policy copy.
+- Use sentence case for interface labels and readable status values, preserving
+  proper nouns/acronyms. `presentation.ts` formats display text only. Never apply
+  it to stored enum values, option values, translation keys, IDs or API payloads.
+
+Validation: all 36 navigation destinations reviewed at 1440px; representative
+layouts checked at 900px and 390px without document overflow, including expanded
+match-day fields. Film Room clip search, switching, playback/pause, speed,
+seeking, markers, focus mode and observation selection were exercised. Insight
+views and all five Integration tools were opened. Existing API calls and auth
+source were compared with the preceding commit. TypeScript, production build,
+chart/presentation tests and navigation/case/icon checks pass. This is a demo-data
+visual and interaction review, not a claim that all backend permission, empty or
+error states have been tested. Rebuild canonical demos after committing and run
+the freshness check before replacing the served preview. No push or deployment
+is authorized by these instructions.

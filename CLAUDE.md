@@ -93,3 +93,16 @@ mastheads, position coverage on a pitch, count charts with optional bar/ring
 views, fixture columns and reduced-motion-aware animation. Preserve truthful
 count scopes and distinct loading/empty states; never manufacture scores or
 verification. See `GRASSROOTS_CLUBHOUSE.md` for the durable design rules.
+
+
+The subsequent 6 October studio refinement supersedes the green-edged generic
+mastheads, ruled section headings and broad green form strips above. Load
+`scoutSuite.css` after `scoutCharacter.css`. Preserve the three-panel Film Room
+(clip library, viewer/timeline, player observations), the Scouting Insight
+activity/review/evidence views, and the Integrations workbench. Use labelled
+creation disclosures, brief dossiers and structured operational records rather
+than sentence-packed rows. English interface copy uses sentence case; stored
+enums, IDs, translation keys, names and user-authored content stay unchanged.
+Film Room timeline markers are explicitly session-only; observation tags use
+the existing persistence and anonymity rules. Read the latest section of
+`GRASSROOTS_CLUBHOUSE.md` before making further presentation changes.

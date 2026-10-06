@@ -1,3 +1,4 @@
+import { sentenceCase } from './presentation';
 import { CountChart } from './ScoutVisuals';
 // M14 org screens: the Verification workspace — your own verification, the
 // organisation console (requests, staff, domains, administrators), licences,
@@ -403,7 +404,7 @@ function MoreTab({ session, notify }: { session: Session; notify: ScreenProps['n
         <div className="dim" style={{ fontSize: 12.5 }}>{t('m14.ref.note')}</div>
         {(refs?.items ?? []).map((r) => (
           <div key={r.id} className="list-row">
-            <span className="grow"><b>{r.playerName ?? r.playerId}</b> — {r.structured.summary} <span className="dim" style={{ fontSize: 12 }}>v{r.version} · {r.status} · {r.coachName} ({r.roleAtTime})</span></span>
+            <span className="grow"><b>{r.playerName ?? r.playerId}</b> — {r.structured.summary} <span className="dim" style={{ fontSize: 12 }}>v{r.version} · {sentenceCase(r.status)} · {r.coachName} ({r.roleAtTime})</span></span>
             {r.status === 'active' && <button onClick={async () => { try { await m14.withdrawReference(session, r.id, 'withdrawn from console'); notify(t('m14.ref.withdrawn')); reloadRefs(); } catch (e) { notify(e instanceof Error ? e.message : 'failed', true); } }}>{t('m14.ref.withdraw')}</button>}
           </div>
         ))}

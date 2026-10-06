@@ -1,3 +1,4 @@
+import { sentenceCase } from './presentation';
 import { CountChart, SquadCoverage, countBy } from './ScoutVisuals';
 import { Hint } from '../../design-system/About';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -270,15 +271,31 @@ export function FeedScreen({ session, tick, openPlayer }: ScreenProps) {
 
 export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
   const [deck, setDeck] = useState<FilmRoomItem[]>([]);
+  const [libraryLoading,setLibraryLoading] = useState(true);
+  const [libraryError,setLibraryError] = useState(false);
+  const [libraryReload,setLibraryReload] = useState(0);
   const [index, setIndex] = useState(0);
   const [tagOptions, setTagOptions] = useState<string[]>([]);
   const [pendingTags, setPendingTags] = useState<string[]>([]);
   const viewed = useRef(new Set<string>());
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [clipSearch,setClipSearch] = useState('');
+  const [focus,setFocus] = useState(false);
+  const [playhead,setPlayhead] = useState(0);
+  const [duration,setDuration] = useState(0);
+  const [speed,setSpeed] = useState(1);
+  const [playing,setPlaying] = useState(false);
+  const [loop,setLoop] = useState(true);
+  const [mediaError,setMediaError] = useState(false);
+  const [markers,setMarkers] = useState<Record<string,number[]>>({});
+  const timecode = (seconds:number) => `${Math.floor(seconds/60).toString().padStart(2,'0')}:${Math.floor(seconds%60).toString().padStart(2,'0')}`;
+  const seek = (seconds:number) => { if(videoRef.current && duration) { videoRef.current.currentTime=Math.max(0,Math.min(duration,seconds));setPlayhead(videoRef.current.currentTime); } };
 
   useEffect(() => {
-    api.getFilmRoom(session).then(setDeck).catch(() => {});
+    setLibraryLoading(true); setLibraryError(false);
+    api.getFilmRoom(session).then(items=>{setDeck(items);setIndex(i=>Math.min(i,Math.max(0,items.length-1)));setLibraryLoading(false);}).catch(()=>{setLibraryError(true);setLibraryLoading(false);});
     api.getScoutTags(session).then(setTagOptions).catch(() => {});
-  }, [session]);
+  }, [session,libraryReload]);
 
   const current = deck[index] ?? null;
 
@@ -288,7 +305,7 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
       viewed.current.add(current.media.id);
       api.recordClipView(session, current.player.id, current.media.id).catch(() => {});
     }
-    setPendingTags([]);
+    setPendingTags([]); setDuration(0); setPlayhead(0); setMediaError(false);
   }, [current, session]);
 
   const step = useCallback((dir: number) => {
@@ -297,8 +314,9 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowDown' || e.key === 'ArrowRight') step(1);
-      if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') step(-1);
+      if ((e.target as HTMLElement)?.closest('input,textarea,select,button,video,[contenteditable="true"]') || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowRight') { e.preventDefault(); step(1); }
+      if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -313,53 +331,32 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
     } catch (e) { notify(errMsg(e), true); }
   };
 
+  if (libraryLoading) return <div className="suite-protected" role="status"><Icon name="video" size={32}/><p>Loading your clip library…</p></div>;
+  if (libraryError) return <div className="suite-protected" role="alert"><Icon name="video" size={32}/><p>The clip library could not be loaded.</p><button onClick={()=>setLibraryReload(v=>v+1)}>Try again</button></div>;
   if (deck.length === 0) {
     return <div className="notice">No playable footage yet. Clips appear here the moment players upload them — Verified Clips first.</div>;
   }
 
   return (
-    <div className="filmroom desk-film-workspace">
-      <div className="filmroom-stage">
-        {current && <video key={current.media.id} className="filmroom-video" src={api.mediaUrl(current.media.url)!} controls autoPlay muted loop />}
-      </div>
-      <aside className="desk-film-notes">
-        <span className="club-eyebrow">Footage review</span>
-        {current && (
-            <div className="desk-film-identity">
-              <div className="row1">
-                <a style={{ color: '#fff', fontWeight: 700, fontSize: 18, cursor: 'pointer' }} {...pressable(() => openPlayer(current.player.id))}>
-                  {current.player.name}
-                </a>
-                <span className="pill blue">{current.player.position}</span>
-                <span className="pill">{current.player.age}</span>
-                {current.player.guardianManaged && <span className="pill red">U18</span>}
-                {current.media.verifiedClip && <span className="pill green">Verified Clip — filmed at a confirmed fixture</span>}
-              </div>
-            </div>
-        )}
-      {/* The caption remains separate from the video and its playback controls. */}
-      {current && <div className="dim filmroom-caption" data-testid="filmroom-caption">“{current.media.title}” · {current.media.views} view{current.media.views === 1 ? '' : 's'} · {t('term.profileSignal')} {current.player.trustScore}%</div>}
-      <h3 className="desk-film-label">Tag your observations</h3>
-      {current && (
-        <div className="filmroom-tags" aria-label="Tag what you saw">
-          {tagOptions.map((t) => (
-            <button
-              key={t}
-              className={pendingTags.includes(t) ? 'primary' : ''}
-              style={{ padding: '4px 10px', fontSize: 12 }}
-              onClick={() => setPendingTags((p) => (p.includes(t) ? p.filter((x) => x !== t) : [...p, t]))}
-            >
-              {TAG_LABELS[t] ?? t}
-            </button>
-          ))}
-          {pendingTags.length > 0 && <button className="primary" style={{ padding: '4px 12px', fontSize: 12 }} onClick={submitTags}>Save tags</button>}
-        </div>
-      )}
-      <div className="filmroom-controls">
-        <button onClick={() => step(-1)} disabled={index === 0}>↑ Previous</button>
-        <span className="pill">{index + 1} / {deck.length}</span>
-        <button className="primary" onClick={() => step(1)} disabled={index >= deck.length - 1}>↓ Next clip</button>
-      </div>
+    <div className={`studio ${focus ? 'studio-focus' : ''}`}>
+      <header className="studio-bar"><div><Icon name="video" size={21} /><strong>Film Room</strong><span>ScoutBox studio</span></div><button aria-pressed={focus} onClick={()=>setFocus(!focus)}><Icon name="scan-line" size={16}/>{focus ? 'Show workspace' : 'Focus on footage'}</button></header>
+      <aside className="studio-library">
+        <div className="studio-panel-title"><h2>Clip library</h2><span>{deck.length}</span></div>
+        <label className="studio-search"><Icon name="search" size={15}/><input aria-label="Search clip library" placeholder="Find a player or clip" value={clipSearch} onChange={e=>setClipSearch(e.target.value)}/></label>
+        <div className="studio-clip-list">{deck.map((item,i)=>({item,i})).filter(({item})=>`${item.player.name} ${item.media.title}`.toLowerCase().includes(clipSearch.toLowerCase())).map(({item,i})=><button key={item.media.id} className={`studio-clip ${i===index?'selected':''}`} aria-current={i===index?'true':undefined} onClick={()=>setIndex(i)}><span className="studio-thumbnail"><video src={api.mediaUrl(item.media.url)!} muted playsInline preload="metadata" aria-hidden="true" tabIndex={-1}/><small>{String(i+1).padStart(2,'0')}</small></span><span><b>{item.player.name}</b><small>{item.media.title}</small><em>{item.player.position}{item.media.verifiedClip?' · Verified clip':''}</em></span></button>)}</div>
+        {!deck.some(item=>`${item.player.name} ${item.media.title}`.toLowerCase().includes(clipSearch.toLowerCase())) && <p className="studio-empty">No matching clips.</p>}
+        <p className="studio-library-note">Select a clip to review.<br/>Use ← and → to move through the library.</p>
+      </aside>
+      <main className="studio-viewer">
+        <div className="studio-viewer-heading"><span><i/> Source viewer</span><b>{index+1} / {deck.length}</b></div>
+        <div className="studio-screen">{current && <video ref={videoRef} key={current.media.id} src={api.mediaUrl(current.media.url)!} controls autoPlay muted loop={loop} onLoadedMetadata={e=>{setDuration(Number.isFinite(e.currentTarget.duration)?e.currentTarget.duration:0);e.currentTarget.playbackRate=speed;}} onTimeUpdate={e=>setPlayhead(e.currentTarget.currentTime)} onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)} onError={()=>setMediaError(true)}/>}{mediaError && <div className="studio-media-error">This clip could not be loaded. Select another clip or try again later.</div>}</div>
+        <div className="studio-transport"><div><button aria-label="Previous clip" disabled={index===0} onClick={()=>step(-1)}><Icon name="chevron-left" size={18}/></button><button onClick={()=>seek(playhead-5)} disabled={!duration} aria-label="Back five seconds">−5s</button><button className="studio-play" onClick={()=>{const v=videoRef.current;if(v){if(v.paused)v.play().catch(()=>notify('Use the video controls to start playback.',true));else v.pause();}}} aria-label={playing?'Pause footage':'Play footage'}>{playing?<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 4h3v12H5zm7 0h3v12h-3z"/></svg>:<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 3 11 7-11 7z"/></svg>}</button><button onClick={()=>seek(playhead+5)} disabled={!duration} aria-label="Forward five seconds">+5s</button><button aria-label="Next clip" disabled={index===deck.length-1} onClick={()=>step(1)}><Icon name="chevron-right" size={18}/></button></div><output>{timecode(playhead)} <span>/ {timecode(duration)}</span></output><div><select aria-label="Playback speed" value={speed} onChange={e=>{const v=Number(e.target.value);setSpeed(v);if(videoRef.current)videoRef.current.playbackRate=v;}}>{[.25,.5,1,1.5,2].map(s=><option value={s} key={s}>{s}×</option>)}</select><button aria-pressed={loop} onClick={()=>setLoop(!loop)} title="Loop footage"><Icon name="refresh-cw" size={15}/></button></div></div>
+        <div className="studio-timeline"><div className="studio-panel-title"><h2>Review timeline</h2><button disabled={!duration} onClick={()=>setMarkers(m=>({...m,[current!.media.id]:[...(m[current!.media.id]??[]),playhead]}))}><Icon name="pin" size={13}/> Mark moment</button></div><div className="studio-ruler" aria-hidden="true">{[0,.25,.5,.75,1].map(f=><span key={f}>{timecode(duration*f)}</span>)}</div><input aria-label="Playback position" type="range" min="0" max={duration||1} step="0.1" value={Math.min(playhead,duration||1)} disabled={!duration} onChange={e=>seek(Number(e.target.value))}/><div className="studio-track" aria-label="Session markers">{(markers[current!.media.id]??[]).map((time,i)=><button key={i} style={{left:`${duration?Math.min(97,time/duration*100):0}%`}} onClick={()=>seek(time)} title={`Go to marker ${i+1} at ${timecode(time)}`} aria-label={`Go to marker ${i+1} at ${timecode(time)}`}><Icon name="pin" size={13}/></button>)}</div><p>Markers are for this review session. Saved observation tags are separate.</p></div>
+      </main>
+      <aside className="studio-inspector">
+        <div className="studio-panel-title"><h2>Player & observations</h2><Icon name="clipboard-list" size={17}/></div>
+        {current && <><div className="studio-player"><span className="studio-position">{current.player.position}</span><div><button onClick={()=>openPlayer(current.player.id)}>{current.player.name}<Icon name="arrow-up-right" size={15}/></button><span>{current.player.age} years{current.player.guardianManaged?' · Guardian-managed':''}</span></div></div><p className="studio-source-title" data-testid="filmroom-caption">{current.media.title}</p><dl className="studio-facts"><div><dt>Views</dt><dd>{current.media.views}</dd></div><div><dt>{t('term.profileSignal')}</dt><dd>{current.player.trustScore}%</dd></div></dl>{current.media.verifiedClip && <p className="studio-verified"><Icon name="badge-check" size={15}/> Filmed at a confirmed fixture</p>}</>}
+        <div className="studio-observations"><h3>What did you notice?</h3><p>Select the qualities you observed in this clip.</p><div className="studio-tags" aria-label="Tag what you saw">{tagOptions.map(tag=><button key={tag} aria-pressed={pendingTags.includes(tag)} onClick={()=>setPendingTags(p=>p.includes(tag)?p.filter(x=>x!==tag):[...p,tag])}><span>{TAG_LABELS[tag]??tag}</span>{pendingTags.includes(tag)&&<Icon name="check" size={13}/>}</button>)}</div><button className="primary studio-save" disabled={!pendingTags.length} onClick={submitTags}>Save observations{pendingTags.length?` (${pendingTags.length})`:''}</button><small>Tags contribute anonymously to what scouts noticed. They are not private notes.</small></div>
       </aside>
     </div>
   );
@@ -564,8 +561,8 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
         {players.map((p) => (
           <article key={p.id} className={`desk-player-record ${compareIds.includes(p.id) ? 'is-compared' : ''}`}>
             <button className="desk-player-open" onClick={() => openPlayer(p.id)} aria-label={`Open ${p.name}'s profile`}>
-              <span className="desk-player-person"><span className="desk-position" aria-hidden="true">{p.position}</span><span><strong>{p.name}{p.identityVerified && <Icon name="badge-check" size={15} label="Identity verified" />}</strong><span className="desk-record-sub">{p.city ? `${p.city}, ` : ''}{p.country}{typeof p.distanceKm === 'number' ? ` · ${p.distanceKm} km` : ''}</span>{p.guardianManaged && <span className="desk-safeguarding">U18 · guardian-managed</span>}{p.firstTeamSeeker && <span className="desk-seeker">First Team Seeker</span>}</span></span>
-              <span className="desk-player-spec"><b>{p.position} <span> / {p.age} years</span></b><span className="desk-record-sub">{p.foot} foot · {p.heightCm} cm</span>{p.level === 'semi_pro' && <span className="desk-record-sub">Semi-pro</span>}</span>
+              <span className="desk-player-person"><span className="desk-position" aria-hidden="true">{p.position}</span><span><strong>{p.name}{p.identityVerified && <Icon name="badge-check" size={15} label="Identity verified" />}</strong><span className="desk-record-sub">{p.city ? `${p.city}, ` : ''}{p.country}{typeof p.distanceKm === 'number' ? ` · ${p.distanceKm} km` : ''}</span>{p.guardianManaged && <span className="desk-safeguarding">U18 · guardian-managed</span>}{p.firstTeamSeeker && <span className="desk-seeker">First-team seeker</span>}</span></span>
+              <span className="desk-player-spec"><b>{p.position} <span> / {p.age} years</span></b><span className="desk-record-sub">{sentenceCase(p.foot)} foot · {p.heightCm} cm</span>{p.level === 'semi_pro' && <span className="desk-record-sub">Semi-pro</span>}</span>
               <span className="desk-player-status"><span className={`desk-availability ${p.availability === 'available_now' ? 'available' : ''}`}>{AVAILABILITY_LABELS[p.availability] ?? p.availability}</span><span className="desk-record-sub">{CONTRACT_LABELS[p.contractStatus] ?? p.contractStatus}</span>{fpSummaries.get(p.id)?.currentClub?.name && <span className="desk-record-sub">{fpSummaries.get(p.id)!.currentClub!.name}</span>}</span>
               <span className="desk-player-evidence">{fpSummaries.get(p.id) && <span className="desk-evidence-label">{t('fp.coverage')}: <b>{t(`fp.cov.${fpSummaries.get(p.id)!.evidenceCoverage}`)}</b></span>}<TrustBar score={p.trustScore} /></span>
             </button>
@@ -766,7 +763,7 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
                   {o.text}
                   <div className="who" style={{ textAlign: 'right', marginTop: 2 }}>
                     {o.status === 'failed'
-                      ? <>not delivered — <button style={{ padding: 0, color: 'var(--danger)' }} onClick={() => send(o.id)}>retry</button></>
+                      ? <>Not delivered — <button style={{ padding: 0, color: 'var(--danger)' }} onClick={() => send(o.id)}>Retry</button></>
                       : '… sending'}
                   </div>
                 </div>
@@ -782,9 +779,9 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
             <div style={{ display: 'flex', gap: 10, opacity: open.closed ? 0.5 : 1, pointerEvents: open.closed ? 'none' : 'auto' }}>
               {openPlayerReports.length > 0 && (
                 <select value={attachReportId} onChange={(e) => setAttachReportId(e.target.value)} title="Attach a filed trial report">
-                  <option value="">no attachment</option>
+                  <option value="">No attachment</option>
                   {openPlayerReports.map((r) => (
-                    <option key={r.id} value={r.id}>trial report ({fmtDate(r.filedAt)})</option>
+                    <option key={r.id} value={r.id}>Trial report ({fmtDate(r.filedAt)})</option>
                   ))}
                 </select>
               )}
@@ -858,7 +855,7 @@ export function TrialsScreen({ session, tick, notify }: ScreenProps) {
           <div key={t.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
               <span className="grow">
-                <b>{t.playerName}</b> <span className="dim">requested by {t.scoutName}</span>
+                <b>{t.playerName}</b> <span className="dim">Requested by {t.scoutName}</span>
                 {t.guardianApproved && <span className="pill red" style={{ marginLeft: 8 }}>Guardian approved</span>}
                 <div className="dim">
                   {t.proposedDate ? `${t.proposedDate}` : 'date TBC'}{t.venue ? ` · ${t.venue}` : ''}{t.notes ? ` · ${t.notes}` : ''}
@@ -1263,13 +1260,13 @@ export function SquadScreen({ session, tick, notify, openPlayer }: ScreenProps) 
             </div>
           ))}
         </div>
-        <div className="filters" style={{ marginTop: 12, flexWrap: 'wrap' }}>
-          <input placeholder="Player name" value={add.name} onChange={(e) => setAdd({ ...add, name: e.target.value })} />
-          <select value={add.position} onChange={(e) => setAdd({ ...add, position: e.target.value })}>
+        <details className="suite-compose"><summary>Add a player</summary><div className="filters" style={{ marginTop: 12, flexWrap: 'wrap' }}>
+          <label>Player name<input placeholder="Full name" value={add.name} onChange={(e) => setAdd({ ...add, name: e.target.value })} /></label>
+          <label>Position<select value={add.position} onChange={(e) => setAdd({ ...add, position: e.target.value })}>
             <option value="">Position…</option>
             {POSITIONS.map((p) => <option key={p}>{p}</option>)}
-          </select>
-          <select
+          </select></label>
+          <label>ScoutBox profile<select
             value={add.playerId}
             onChange={(e) => {
               const p = visible.find((x) => x.id === e.target.value);
@@ -1278,7 +1275,7 @@ export function SquadScreen({ session, tick, notify, openPlayer }: ScreenProps) 
           >
             <option value="">Off-platform (name only)</option>
             {visible.map((p) => <option key={p.id} value={p.id}>{p.name} — {p.position}</option>)}
-          </select>
+          </select></label>
           <button className="primary" onClick={async () => {
             try {
               setSquad(await api.addSquadEntry(session, { name: add.name.trim(), position: add.position || undefined, playerId: add.playerId || undefined }));
@@ -1286,19 +1283,18 @@ export function SquadScreen({ session, tick, notify, openPlayer }: ScreenProps) 
               notify('Added to the squad list.');
             } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
           }}>Add to squad</button>
-        </div>
+        </div></details>
       </div>
-      <div className="section">
-        <h4>Log a match day</h4>
+      <details className="suite-compose"><summary>Log a match day</summary>
         <details className="f-about" style={{ marginBottom: 10 }}><summary>About</summary><div className="notice">
           Tick who played and every rostered ScoutBox player gets <b>verified attendance, corroborated by
           your club</b> — the strongest trust signal a grassroots player can carry.
         </div></details>
         <div className="filters" style={{ flexWrap: 'wrap' }}>
-          <input placeholder="Fixture (e.g. vs Clapton Community)" value={md.fixture} onChange={(e) => setMd({ ...md, fixture: e.target.value })} />
-          <input type="date" value={md.date} onChange={(e) => setMd({ ...md, date: e.target.value })} />
-          <input placeholder="Venue" value={md.venue} onChange={(e) => setMd({ ...md, venue: e.target.value })} />
-          <input placeholder="Result (e.g. 2-1)" value={md.result} onChange={(e) => setMd({ ...md, result: e.target.value })} style={{ maxWidth: 120 }} />
+          <label>Fixture<input placeholder="Fixture (e.g. vs Clapton Community)" value={md.fixture} onChange={(e) => setMd({ ...md, fixture: e.target.value })} /></label>
+          <label>Date<input type="date" value={md.date} onChange={(e) => setMd({ ...md, date: e.target.value })} /></label>
+          <label>Venue<input placeholder="Venue" value={md.venue} onChange={(e) => setMd({ ...md, venue: e.target.value })} /></label>
+          <label>Result<input placeholder="Result (e.g. 2-1)" value={md.result} onChange={(e) => setMd({ ...md, result: e.target.value })} style={{ maxWidth: 120 }} /></label>
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', margin: '10px 0' }}>
           {platformEntries.length === 0 && <span className="dim">No platform players on the squad yet — sign or roster them first.</span>}
@@ -1327,7 +1323,7 @@ export function SquadScreen({ session, tick, notify, openPlayer }: ScreenProps) 
             load();
           } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
         }}>Log match day</button>
-      </div>
+      </details>
       {matchdays.length > 0 && (
         <div className="section">
           <h4>Match-day history</h4>
@@ -1355,18 +1351,17 @@ export function FriendliesScreen({ session, tick, notify }: ScreenProps) {
     <>
       <CountChart title="On the local board" note="Posted friendlies by age group, within your club’s local area." unit="friendlies" distribution items={countBy(friendlies, f => f.ageGroup)} />
       <Hint>Every club within 50 km sees a posted friendly. Messages are screened and the game gets arranged here.</Hint>
-      <div className="section">
-        <h4>Post a friendly</h4>
+      <details className="suite-compose"><summary>Arrange a friendly</summary>
         <div className="filters" style={{ flexWrap: 'wrap' }}>
-          <select value={form.ageGroup} onChange={(e) => setForm({ ...form, ageGroup: e.target.value })}>
+          <label>Age group<select value={form.ageGroup} onChange={(e) => setForm({ ...form, ageGroup: e.target.value })}>
             <option value="open">Open age</option>
             <option value="u16">Under 16</option>
             <option value="u18">Under 18</option>
             <option value="senior">Senior</option>
-          </select>
-          <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
-          <input placeholder="Venue" value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} />
-          <input style={{ flex: 1 }} placeholder="Notes (standard, referee, screened — no contact details)" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          </select></label>
+          <label>Match date<input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></label>
+          <label>Ground<input placeholder="Venue" value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} /></label>
+          <label>Match details<input style={{ flex: 1 }} placeholder="Notes (standard, referee, screened — no contact details)" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
           <button className="primary" onClick={async () => {
             try {
               await api.postFriendly(session, { ageGroup: form.ageGroup, date: form.date, venue: form.venue.trim() || undefined, notes: form.notes.trim() || undefined });
@@ -1376,13 +1371,13 @@ export function FriendliesScreen({ session, tick, notify }: ScreenProps) {
             } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
           }}>Post friendly</button>
         </div>
-      </div>
+      </details>
       {friendlies.length === 0 && <div className="notice">No friendlies on the local board yet — post the first one.</div>}
       {friendlies.map((f) => (
-        <div key={f.id} className="section">
+        <article key={f.id} className="section friendly-board-post">
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <div className="scout-friendly-identity"><span className="scout-match-date"><Icon name="calendar-days" size={17} />{f.date}</span><h4>{f.orgName}</h4>{f.venue && <span className="dim"><Icon name="map-pin" size={13} /> {f.venue}</span>}</div>
-            <span className="pill blue">{f.ageGroup}</span>
+            <span className="pill blue">{f.ageGroup==='open'?'Open age':f.ageGroup==='senior'?'Senior':f.ageGroup.toUpperCase()}</span>
             {f.mine ? <span className="pill gold">Your post</span> : <span className="pill">{f.distanceKm} km away</span>}
             <span className="pill">{f.responses.length} response{f.responses.length === 1 ? '' : 's'}</span>
           </div>
@@ -1418,7 +1413,7 @@ export function FriendliesScreen({ session, tick, notify }: ScreenProps) {
               </div>
             )
           )}
-        </div>
+        </article>
       ))}
     </>
   );
@@ -1443,17 +1438,17 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
     <>
       <div className="stat-grid" style={{ marginBottom: 22 }}>
         <div className="stat"><div className="v">{info.plan.name}</div><div className="k">Plan</div></div>
-        <div className="stat"><div className="v">£{info.plan.pricePerMonthGBP}</div><div className="k">per month</div></div>
-        <div className="stat"><div className="v">{info.plan.seats}</div><div className="k">named seats</div></div>
-        <div className="stat"><div className="v">{info.plan.attributionWindowMonths} mo</div><div className="k">attribution window</div></div>
+        <div className="stat"><div className="v">£{info.plan.pricePerMonthGBP}</div><div className="k">Per month</div></div>
+        <div className="stat"><div className="v">{info.plan.seats}</div><div className="k">Named seats</div></div>
+        <div className="stat"><div className="v">{info.plan.attributionWindowMonths} mo</div><div className="k">Attribution window</div></div>
       </div>
       {record && (
         <div className="section">
           <h4>Pathway Club record {record.pathwayClub && <span className="pill green">Pathway Club</span>}</h4>
           <div className="stat-grid" style={{ marginBottom: 10 }}>
-            <div className="stat"><div className="v">{record.progressed}</div><div className="k">players progressed upward</div></div>
-            <div className="stat"><div className="v">{record.openDaysRun}</div><div className="k">open days run</div></div>
-            <div className="stat"><div className="v">{record.matchdaysLogged}</div><div className="k">match days logged</div></div>
+            <div className="stat"><div className="v">{record.progressed}</div><div className="k">Players progressed upward</div></div>
+            <div className="stat"><div className="v">{record.openDaysRun}</div><div className="k">Open days run</div></div>
+            <div className="stat"><div className="v">{record.matchdaysLogged}</div><div className="k">Match days logged</div></div>
           </div>
           <details className="f-about"><summary>About</summary><div className="notice">{record.note}</div></details>
         </div>
@@ -1491,7 +1486,7 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
         </div>
       )}
       <div className="section">
-        <h4>Company email verification {session.org.emailDomainVerified ? '— ✓ verified' : ''}</h4>
+        <h4>Company email verification {session.org.emailDomainVerified ? '— verified' : ''}</h4>
         {session.org.emailDomainVerified ? (
           <div className="notice">
             Domain control confirmed{session.org.emailDomain ? ` for @${session.org.emailDomain}` : ''}. This is one of the
@@ -1504,7 +1499,7 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
               mailbox; entering it here confirms the domain.
             </div></details>
             <div className="filters">
-              <input type="text" placeholder="recruitment@yourclub.com" value={verifyEmail} onChange={(e) => setVerifyEmail(e.target.value)} />
+              <label className="suite-field">Company email<input type="email" placeholder="recruitment@yourclub.com" value={verifyEmail} onChange={(e) => setVerifyEmail(e.target.value)} /></label>
               <button onClick={async () => {
                 try {
                   await api.requestEmailVerification(session, verifyEmail.trim());
@@ -1516,7 +1511,7 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
               }}>Send code</button>
               {codeSent && (
                 <>
-                  <input type="text" placeholder="6-char code" value={verifyCode} onChange={(e) => setVerifyCode(e.target.value)} style={{ maxWidth: 140 }} />
+                  <label className="suite-field">Verification code<input type="text" placeholder="6-character code" value={verifyCode} onChange={(e) => setVerifyCode(e.target.value)} style={{ maxWidth: 160 }} /></label>
                   <button className="primary" onClick={async () => {
                     try {
                       const r = await api.confirmEmailVerification(session, verifyCode.trim());
@@ -1540,7 +1535,7 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
           <div key={inv.id} className="list-row">
             <span>{inv.description}</span>
             <span className="pill gold">€{inv.amount}</span>
-            <span className="pill">{inv.status}</span>
+            <span className="pill">{sentenceCase(inv.status)}</span>
             <span className="pill blue">{fmtDate(inv.ts)}</span>
           </div>
         ))}
@@ -1660,7 +1655,7 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                 <dl className="desk-dossier-facts">
                   <div><dt>Position</dt><dd>{player.position}</dd></div>
                   <div><dt>Age</dt><dd>{player.age}</dd></div>
-                  <div><dt>Foot</dt><dd>{player.foot}</dd></div>
+                  <div><dt>Foot</dt><dd>{sentenceCase(player.foot)}</dd></div>
                   <div><dt>Height</dt><dd>{player.heightCm} cm</dd></div>
                   <div><dt>Weight</dt><dd>{player.weightKg} kg</dd></div>
                 </dl>

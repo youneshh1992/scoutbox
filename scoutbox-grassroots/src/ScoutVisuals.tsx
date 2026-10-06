@@ -1,3 +1,4 @@
+import { sentenceCase } from './presentation';
 import { useId, useState, type CSSProperties } from 'react';
 import { Icon } from '../../design-system/icons';
 import type { Squad } from './api';
@@ -28,7 +29,7 @@ export function CountChart({ title, note, items, unit = 'records', distribution 
       <div className="scout-chart-plot">
         {!ring && <div className="scout-chart-scale" aria-hidden="true"><span>{variant === 'columns' ? `${unit} · scale 0–${max}` : '0'}</span>{variant !== 'columns' && <span>{max} · {unit}</span>}</div>}
         <ul className="scout-chart-values">{rows.map((r,i) => <li key={r.label} title={`${r.label}: ${r.value} ${unit}`} style={{ '--chart-colour': COLOURS[i % COLOURS.length], '--chart-size': `${r.value / max * 100}%`, '--chart-delay': `${Math.min(i,8)*55}ms` } as CSSProperties}>
-          <span className="scout-chart-label">{r.label}</span><span className="scout-chart-track" aria-hidden="true"><span /></span><b>{r.value}</b>
+          <span className="scout-chart-label">{sentenceCase(r.label)}</span><span className="scout-chart-track" aria-hidden="true"><span /></span><b>{r.value}</b>
         </li>)}</ul>
       </div>
     </div>}

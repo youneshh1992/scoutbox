@@ -41,7 +41,7 @@
 :root[data-app="grass"] .grass-workspace .scout-chart-scale { display: flex; justify-content: space-between; padding-left: 125px; padding-right: 35px; margin-bottom: 12px; font-size: 10px; color: #8ca993; font-variant-numeric: tabular-nums; }
 :root[data-app="grass"] .grass-workspace .scout-chart-values { list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }
 :root[data-app="grass"] .grass-workspace .scout-chart-values li { display: grid; grid-template-columns: 115px minmax(0,1fr) 26px; align-items: center; gap: 10px; min-width: 0; }
-:root[data-app="grass"] .grass-workspace .scout-chart-label { font-size: 11px; line-height: 1.45; color: #c7d6c4; text-transform: capitalize; overflow-wrap: anywhere; }
+:root[data-app="grass"] .grass-workspace .scout-chart-label { font-size: 11px; line-height: 1.45; color: #c7d6c4; text-transform: none; overflow-wrap: anywhere; }
 :root[data-app="grass"] .grass-workspace .scout-chart-values b { font-size: 17px; color: #e8f4df; font-variant-numeric: tabular-nums; text-align: right; }
 :root[data-app="grass"] .grass-workspace .scout-chart-track { height: 10px; background: repeating-linear-gradient(90deg,#54775d30 0 1px,transparent 1px 25%),#0f2116; border-radius: 2px; overflow: hidden; }
 :root[data-app="grass"] .grass-workspace .scout-chart-track > span { display: block; width: var(--chart-size); height: 100%; border-radius: 2px; background: linear-gradient(90deg,color-mix(in srgb,#00e676 45%,#183422),#00e676); box-shadow: 0 0 12px color-mix(in srgb,var(--chart-colour) 28%,transparent); transform-origin: left; animation: scout-bar-in .7s cubic-bezier(.2,.8,.2,1) both; animation-delay: var(--chart-delay); }
