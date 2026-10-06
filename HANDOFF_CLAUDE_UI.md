@@ -68,3 +68,13 @@ versus assessment, evidence-confidence semantics, five-category navigation,
 and zero authored emoji. Do not expose internal club notes or infer presence,
 verification or success from decorative icons. No backend changes are part
 of this design checkpoint.
+
+## Open the local project in Claude Desktop
+
+On macOS, double-click `Open ScoutBox in Claude.command`. It opens the Code
+composer with this checkout selected and a prompt to read the persistent
+project instructions. It does not submit the prompt. Claude requires folder
+confirmation for every folder supplied by a deep link; confirm it in Claude.
+No permissions are bypassed and no web-app filesystem bridge is installed.
+The shortcut requires Node.js and Claude Desktop. Its folder resolves relative
+to the checkout, so it continues to work when the repository is moved.
