@@ -566,3 +566,25 @@
 @media (max-width: 700px) {
   :root[data-app="grass"] .grass-workspace .nm-row-main .record-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* Compact clubhouse identity; keep the navigation as the sidebar's main content. */
+:root[data-app="grass"] .grass-workspace .p-account { margin-top: 7px; padding: 9px 10px 5px; }
+:root[data-app="grass"] .grass-workspace .p-account .p-who { gap: 8px; margin-bottom: 8px; }
+:root[data-app="grass"] .grass-workspace .p-account .p-avatar { width: 29px; height: 29px; font-size: 11px; }
+:root[data-app="grass"] .grass-workspace .p-account .p-who strong { font-size: 12px; }
+:root[data-app="grass"] .grass-workspace .p-account .p-who small { margin-top: 1px; font-size: 10px; }
+:root[data-app="grass"] .grass-workspace .scout-org-status { padding: 7px 0; gap: 5px; }
+:root[data-app="grass"] .grass-workspace .scout-org-status b { padding: 2px 4px; }
+:root[data-app="grass"] .grass-workspace .scout-account-links { margin-top: 3px; }
+:root[data-app="grass"] .grass-workspace .scout-account-links > button { padding: 5px 0; min-height: 28px; }
+:root[data-app="grass"] .grass-workspace .scout-account-menu summary { padding: 6px 0 3px; min-height: 28px; box-sizing: border-box; }
+:root[data-app="grass"] .grass-workspace .club-hero { border-radius: 12px; background: linear-gradient(110deg,#162f21,#10261b); border-color: #375841; }
+:root[data-app="grass"] .grass-workspace .club-ground { width: 55%; height: 100%; right: 0; top: 0; transform: none; object-fit: cover; }
+:root[data-app="grass"] .grass-workspace .club-hero-copy { width: 52%; padding: 32px; background: linear-gradient(90deg,#162f21 85%,#162f2100); }
+:root[data-app="grass"] .grass-workspace .club-hero h2 { font-size: clamp(34px,3.2vw,48px); }
+:root[data-app="grass"] .grass-workspace .club-hero::after { display: none; }
+@media (max-width: 700px) {
+  :root[data-app="grass"] .grass-workspace .club-hero { padding-bottom: 200px; }
+  :root[data-app="grass"] .grass-workspace .club-hero-copy { width: 100%; padding: 25px; background: none; }
+  :root[data-app="grass"] .grass-workspace .club-ground { width: 100%; height: 220px; top: auto; bottom: 0; right: 0; opacity: 1; }
+}

@@ -120,8 +120,6 @@
 :root[data-app="grass"] .grass-workspace .home-primary .primary { padding: 11px 16px; border-radius: 9px; font-size: 12px; }
 :root[data-app="grass"] .grass-workspace .home-primary .primary svg { margin-left: 17px; }
 :root[data-app="grass"] .grass-workspace .club-ground { position: absolute; right: -1%; width: 48%; top: 50%; transform: translateY(-50%); pointer-events: none; }
-:root[data-app="grass"] .grass-workspace .club-hero-caption { position: absolute; bottom: 18px; right: 30px; display: flex; align-items: center; gap: 7px; color: #aac39d; font-size: 8px; text-transform: uppercase; letter-spacing: 1.7px; }
-:root[data-app="grass"] .grass-workspace .club-hero-caption span { width: 5px; height: 5px; border-radius: 50%; background: #00e676; box-shadow: 0 0 10px #00e67688; }
 /* The figures are endpoint counts, never fabricated progress or growth. */
 :root[data-app="grass"] .grass-workspace .home-summary { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 14px; border: 0; margin: 20px 0 26px; }
 :root[data-app="grass"] .grass-workspace .home-sum { position: relative; display: flex; flex-direction: column; align-items: flex-start; padding: 16px 20px; margin: 0; background: var(--club-panel); border: 1px solid #354435; border-radius: 14px; text-align: left; gap: 0; overflow: hidden; }
@@ -222,7 +220,6 @@
   :root[data-app="grass"] .grass-workspace .club-hero-copy { width: 100%; padding: 25px; }
   :root[data-app="grass"] .grass-workspace .club-hero h2 { font-size: 38px; letter-spacing: -1.5px; }
   :root[data-app="grass"] .grass-workspace .club-ground { width: 210px; right: -30px; top: auto; bottom: -20px; transform: none; opacity: .55; }
-  :root[data-app="grass"] .grass-workspace .club-hero-caption { bottom: 18px; left: 25px; right: auto; font-size: 7px; }
   :root[data-app="grass"] .grass-workspace .home-summary { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin: 14px 0 20px; }
   :root[data-app="grass"] .grass-workspace .home-sum { padding: 15px; }
   :root[data-app="grass"] .grass-workspace .club-side-column { display: flex; }

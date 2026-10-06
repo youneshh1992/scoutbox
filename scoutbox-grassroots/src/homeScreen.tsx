@@ -123,7 +123,6 @@ export function HomeScreen({ session, tick, openPlayer, unreadMessages, verLevel
           <div className="home-primary" data-testid="home-primary"><p>{primary.why}</p><button className="primary" onClick={() => onNavigate(primary.target)}>{primary.label}<Icon name="arrow-right" size={18} /></button></div>
         </div>
         <ClubGround />
-        <span className="club-hero-caption"><span />{t('home.groundUp')}</span>
       </section>
       {summary.length > 0 && (
         <div className="home-summary" data-testid="home-summary" role="list">

@@ -124,3 +124,8 @@ across Grassroots. Preserve the grouped required/preferred criteria in watchlist
 list/detail and matching results, and the labelled facts/separate list entries
 provided by local `RecordDetails.tsx`. Do not restore wrapping mixed-data
 paragraphs. See the latest readable-record rules in `GRASSROOTS_CLUBHOUSE.md`.
+
+Preserve the compact Grassroots account panel and custom touchline Home scene
+from the latest section of `GRASSROOTS_CLUBHOUSE.md`. The Founder requested more
+navigation room and rejected the floating pitch and “Built from the ground up”
+caption. Keep the smaller panel, readable controls and football-ground artwork.

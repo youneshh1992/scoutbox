@@ -193,3 +193,21 @@ the local demo; watchlist details and matching from a recruitment brief exercise
 responsive checks on the affected record layouts. Production build, TypeScript,
 navigation and presentation checks pass. All 385 existing direct API calls are
 preserved. Demo coverage does not assert that every server state was exercised.
+
+## Compact account panel and touchline artwork — 6 October 2026
+
+The Founder likes the Alex/Manager account treatment but wants it smaller so it
+leaves room for navigation. Preserve the compact spacing, 29px avatar and clear
+club/safeguarding states; all verification and account controls remain reachable.
+The closed panel is approximately 22% shorter than its previous 245px layout.
+
+The Founder rejected the floating pitch illustration and the caption “Built from
+the ground up.” The Home now has a custom SVG scene from the touchline: a small
+covered stand, floodlights, fence, goal netting, worn turf, green corner flag and
+football. This is decorative, not the user's actual stadium or a live formation.
+Do not restore the caption, contour rings or floating pitch tile. Preserve exact
+brand assets and the existing logo. At narrow widths the scene sits below the
+Home action, without obstructing text or controls.
+
+Checked at 1440px, a 1280×720 window with account settings expanded, and 390px.
+Navigation and the account panel do not overlap; Home has no horizontal overflow.
