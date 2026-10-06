@@ -2,7 +2,7 @@ import { GuidanceNote } from '../../components/InformationRows';
 import { PolicyList } from '../../components/InformationRows';
 // You — M24F.2. Three page tabs (Profile, Account, Clubs), each a page that
 // fits a phone. Profile is the M24F.1 composition. Account is a short list
-// of categories — Profile, Privacy, Preferences, Appearance — with Switch
+// of categories — Profile, Privacy, Preferences — with Switch
 // account and Sign out beneath it; a category opens its own settings, and
 // `?section=` deep-links it. Clubs is four categories — Current, Requests,
 // Development, History — on the same `?section=` parameter. Nothing the
@@ -21,7 +21,6 @@ import { useSession } from '../../state';
 import { useColors, useStyles, type Palette } from '../../theme';
 import { pt } from '../../i18n';
 import { Button, Disclosure, ListRow, Muted, Pill, Row } from '../../components/ui';
-import { ThemeSwitch } from '../../components/ThemeSwitch';
 import { PageHeader, PageTabs, pickTab } from '../../components/PageChrome';
 import { Icon } from '../../components/Icon';
 import { AccessSection } from '../../components/M12Sections';
@@ -58,7 +57,6 @@ export default function You() {
     { key: 'profile', label: pt('accProfile') },
     { key: 'privacy', label: pt('accPrivacy') },
     { key: 'preferences', label: pt('accPreferences') },
-    { key: 'appearance', label: pt('accAppearance') },
   ];
   const CLUBS = [
     { key: 'current', label: pt('clubsCurrent') },
@@ -127,7 +125,7 @@ export default function You() {
             <ListRow label={pt('accProfile')} icon="user-round" onPress={() => go('profile')} testID="account-cat-profile" />
             <ListRow label={pt('accPrivacy')} icon="shield-check" onPress={() => go('privacy')} testID="account-cat-privacy" />
             <ListRow label={pt('accPreferences')} icon="settings-2" onPress={() => go('preferences')} testID="account-cat-preferences" />
-            <ListRow label={pt('accAppearance')} icon="sun" onPress={() => go('appearance')} testID="account-cat-appearance" />
+
             {/* M24E — the way out: Sign out ends this identity's session on the server and on the device; Switch account does the same and opens the entry screen on Sign in. */}
             <View style={{ marginTop: 26 }}>
               <ListRow label="Switch account" icon="users" testID="switch-account" onPress={() => { logout(); router.replace('/onboarding?mode=signin'); }} />
@@ -235,10 +233,6 @@ export default function You() {
                     </Disclosure>
                   ) : null}
                 </>
-              )}
-
-              {accountSection === 'appearance' && (
-                <ListRow label={pt('accAppearance')} value="Light or dark" right={<ThemeSwitch />} testID="account-appearance" />
               )}
             </View>
           </View>

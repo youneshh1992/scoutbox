@@ -12,14 +12,14 @@ import { MobileViewport } from '../components/MobileViewport';
 
 // Root error boundary: a runtime failure renders a recoverable screen, never
 // a silent white page. Server data is untouched — reloading is always safe.
-// (A class component cannot read the theme hook; the light palette is a safe
+// (A class component cannot read the theme hook; the dark palette is the approved
 // fallback for a screen that exists only to recover.)
 class Boundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
   static getDerivedStateFromError(error: Error) { return { error }; }
   render() {
     if (this.state.error) {
-      const colors = palettes.light;
+      const colors = palettes.dark;
       return (
         <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 }}>
           <Text style={{ color: colors.text, fontSize: 20, fontWeight: '700' }}>Something broke in the app</Text>
@@ -45,10 +45,10 @@ class Boundary extends Component<{ children: ReactNode }, { error: Error | null 
 
 /** Inside the theme: the status bar and the navigator background follow the appearance. */
 function Themed() {
-  const { scheme, colors } = useTheme();
+  const { colors } = useTheme();
   return (
     <>
-      <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
+      <StatusBar style="light" />
       {/* M24C — every route, its header and its bottom navigation render
           inside the phone viewport; a wide browser only adds the surround. */}
       <MobileViewport>
@@ -71,6 +71,7 @@ function registerWebFaces() {
   const uri = (mod: number) => Asset.fromModule(mod).uri;
   const css = `
 @font-face { font-family: 'AlbertSans-ExtraBold'; font-style: normal; font-weight: 800; font-display: swap; src: url("${uri(FONT_FILES['AlbertSans-ExtraBold'])}") format('truetype'); }
+html, body { background-color: ${palettes.dark.frame}; color-scheme: dark; }
 html, body, input, textarea, button { font-family: ${WEB_UI_FONT}; font-optical-sizing: auto; }`;
   const style = document.createElement('style');
   style.setAttribute('data-sb-fonts', 'system-ui');

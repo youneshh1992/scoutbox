@@ -3,7 +3,7 @@
 // PageHeader: the reference's 64px phone header. Home carries the wordmark;
 // every other page carries a back chevron (when it is not a tab root) and
 // its title. On the right, in the reference's order: the page's own primary
-// action, the appearance switch, the notification bell, and the Report
+// action, the notification bell, and the Report
 // control that every screen keeps (§33).
 //
 // PageTabs: the "functions of one destination" control — the reference's
@@ -19,7 +19,6 @@ import { useColors, useStyles, type Palette } from '../theme';
 import { pt } from '../i18n';
 import { NotificationBell } from './NotificationBell';
 import { ReportButton } from './ReportSheet';
-import { ThemeSwitch } from './ThemeSwitch';
 import { Wordmark } from './Wordmark';
 
 export function PageHeader({ title, back, action, hint, wordmark, prominent, accessory }: { title: string; back?: boolean; action?: ReactNode; hint?: string; wordmark?: boolean; prominent?: boolean; accessory?: ReactNode }) {
@@ -43,7 +42,7 @@ export function PageHeader({ title, back, action, hint, wordmark, prominent, acc
           )}
         </View>
         <View style={styles.actions}>
-          {accessory ?? <ThemeSwitch />}
+          {accessory}
           <NotificationBell />
           <ReportButton />
         </View>

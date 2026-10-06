@@ -12,10 +12,10 @@ The neutral sb-app alone is available for utility pages. No embossed pitch patte
 Use sb-app sb-canvas together on the page shell for the multicolour background.
 The neutral sb-app alone is available for utility pages. No embossed pitch pattern.
 Load theme.js in the document head before theme.css (non-deferred script).
-Use <html class="light"> or <html class="dark"> for explicit CSS-only control.
-Without an explicit choice the CSS/JS kit follows the system preference.
-ScoutBoxTheme.set('light' | 'dark' | 'system') sets a persisted preference.
-The existing Player app retains its saved preference and dark initial default.
+Player is dark-only. CSS paints dark even without JavaScript; theme.js fixes
+browser form controls to dark. Saved light preferences and OS mode are ignored.
+ScoutBoxTheme.getPreference() returns 'dark'; there is no theme setter or toggle.
+Do not add an appearance selector. This applies to Player only.
 
 <button type="button" class="sb-button">Continue</button>
 <nav aria-label="Main"><a href="/discover" class="sb-pill" aria-current="page">Home</a></nav>
@@ -60,12 +60,10 @@ focus-visible:outline-3 with focus-visible:outline-[3px]. The v3 config also
 provides bg-sb-action and bg-sb-progress shortcuts.
 
 CONTRAST:
-The raw gradient uses exact 135-degree #00E676 → #0088FF stops in light mode
-and #00E676 → #12161A in dark mode. Cyan #00C8FF is the supporting accent.
-Dark controls add a 55% black scrim for white-label contrast; raw unlabelled
-progress graphics retain the unmodified stops. Text on the light gradient is
-#081419. The light canvas blends green, teal, blue and a restrained sand edge.
-Dark mode retains carbon surfaces and subtle green/cyan glows; no purple or pitch pattern.
+The approved dark gradient uses exact 135-degree #00E676 → #12161A stops.
+Cyan #00C8FF is the supporting accent. Dark controls add a 55% black scrim
+for white-label contrast; raw unlabelled progress graphics retain their stops.
+Keep carbon surfaces and subtle green/cyan glows, without a pitch pattern.
 
 Official Tailwind references:
 https://tailwindcss.com/docs/dark-mode

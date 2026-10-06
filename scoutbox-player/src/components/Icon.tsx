@@ -1,12 +1,12 @@
 // Local Phosphor 2.1.1 (MIT), with ScoutBox-specific passport, board, medical and chat vectors.
-import { useColors, useTheme } from '../theme';
+import { useColors } from '../theme';
 import Svg, { Path } from 'react-native-svg';
 import icons from './scoutbox-icon-variants.json';
 type Shape = { d: string; opacity: number };
 const paths = icons as Record<string, Record<'duotone' | 'fill', Shape[]>>;
 export function Icon({ name, size = 20, color = 'currentColor', label, active = false }: { name: string; size?: number; color?: string; strokeWidth?: number; label?: string; active?: boolean }) {
-  const c = useColors(); const { scheme } = useTheme();
-  const hues = scheme === 'dark' ? ['#00e676','#00c8ff','#68b8ff','#e7b35b'] : ['#007c60','#007b96','#005ca8','#945916'];
+  const c = useColors();
+  const hues = ['#00e676','#00c8ff','#68b8ff','#e7b35b'];
   const vibrant = color === c.iconFg || color === c.muted || color === c.tabInactive;
   const ink = vibrant ? hues[Array.from(name).reduce((n, x) => n + x.charCodeAt(0), 0) % hues.length] : color;
   if (['passport', 'opportunity-board', 'chat-bubble', 'medical'].includes(name)) {

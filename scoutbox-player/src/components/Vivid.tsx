@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { AccessibilityInfo, Animated, StyleSheet, View } from 'react-native';
 import { SafeAreaView, type SafeAreaViewProps } from 'react-native-safe-area-context';
 import Svg, { Defs, LinearGradient, RadialGradient, Stop, Rect, Circle, Path } from 'react-native-svg';
-import { useColors, useTheme } from '../theme';
+import { useColors } from '../theme';
 import { Text } from './Text';
 import { Icon } from './Icon';
 
@@ -16,30 +16,20 @@ export function Gradient({ colors, diagonal = true, radius = 0, contrast = true,
   return <View onLayout={({ nativeEvent: { layout } }) => setBox({ width: layout.width, height: layout.height })} pointerEvents="none" aria-hidden accessible={false} style={[StyleSheet.absoluteFill, { borderRadius: radius, overflow: 'hidden', backgroundColor: softControl ? c.panel : 'transparent' }]}><Svg width="100%" height="100%" opacity={opacity * (softControl ? 0.7 : 1)}><Defs><LinearGradient id={id} gradientUnits="userSpaceOnUse" x1={diagonal ? box.width / 2 - reach : 0} y1={diagonal ? box.height / 2 - reach : 0} x2={diagonal ? box.width / 2 + reach : 0} y2={diagonal ? box.height / 2 + reach : box.height}>{stops.map((color, i) => <Stop key={i} offset={i / Math.max(1, stops.length - 1)} stopColor={color} />)}</LinearGradient></Defs><Rect width="100%" height="100%" fill={`url(#${id})`} />{contrast && <Rect width="100%" height="100%" fill={c.gradientShade} />}</Svg></View>;
 }
 
-/** Stationary emerald, teal and blue colour with a restrained warm edge. A neutral top-left pocket protects the logo. */
+/** Approved dark carbon canvas with stationary green and cyan glows. */
 export function Atmosphere() {
-  const c = useColors(); const { scheme } = useTheme(); const dark = scheme === 'dark';
+  const c = useColors();
   const id = useId().replace(/:/g, '');
   return <View pointerEvents="none" accessible={false} aria-hidden style={[StyleSheet.absoluteFill, { backgroundColor: c.bg, overflow: 'hidden' }]}>
     <Svg width="100%" height="100%" viewBox="0 0 430 900" preserveAspectRatio="xMidYMin slice">
       <Defs>
-        <LinearGradient id={`${id}base`} x1="0%" y1="0%" x2="90%" y2="100%">
-          <Stop offset="0" stopColor="#effaf4" /><Stop offset="0.32" stopColor="#e5f5ef" /><Stop offset="0.68" stopColor="#e3edf5" /><Stop offset="1" stopColor="#eeeae1" />
-        </LinearGradient>
-        <RadialGradient id={`${id}green`}><Stop offset="0" stopColor="#00e676" stopOpacity={dark ? 0.16 : 0.36} /><Stop offset="1" stopColor="#00e676" stopOpacity="0" /></RadialGradient>
-        <RadialGradient id={`${id}cyan`}><Stop offset="0" stopColor="#00c8ff" stopOpacity={dark ? 0.12 : 0.18} /><Stop offset="1" stopColor="#00c8ff" stopOpacity="0" /></RadialGradient>
-        <RadialGradient id={`${id}blue`}><Stop offset="0" stopColor="#176cc4" stopOpacity="0.24" /><Stop offset="1" stopColor="#176cc4" stopOpacity="0" /></RadialGradient>
-        <RadialGradient id={`${id}warm`}><Stop offset="0" stopColor="#c39754" stopOpacity="0.17" /><Stop offset="1" stopColor="#c39754" stopOpacity="0" /></RadialGradient>
-        <RadialGradient id={`${id}logo`}><Stop offset="0" stopColor={dark ? c.bg : '#ffffff'} stopOpacity="1" /><Stop offset="0.55" stopColor={dark ? c.bg : '#ffffff'} stopOpacity="0.96" /><Stop offset="1" stopColor={dark ? c.bg : '#ffffff'} stopOpacity="0" /></RadialGradient>
+        <RadialGradient id={`${id}green`}><Stop offset="0" stopColor="#00e676" stopOpacity={0.16} /><Stop offset="1" stopColor="#00e676" stopOpacity="0" /></RadialGradient>
+        <RadialGradient id={`${id}cyan`}><Stop offset="0" stopColor="#00c8ff" stopOpacity={0.12} /><Stop offset="1" stopColor="#00c8ff" stopOpacity="0" /></RadialGradient>
+        <RadialGradient id={`${id}logo`}><Stop offset="0" stopColor={c.bg} stopOpacity="1" /><Stop offset="0.55" stopColor={c.bg} stopOpacity="0.96" /><Stop offset="1" stopColor={c.bg} stopOpacity="0" /></RadialGradient>
       </Defs>
-      <Rect width="430" height="900" fill={dark ? c.bg : `url(#${id}base)`} />
+      <Rect width="430" height="900" fill={c.bg} />
       <Circle cx="430" cy="260" r="245" fill={`url(#${id}cyan)`} />
       <Circle cx="-35" cy="680" r="310" fill={`url(#${id}green)`} />
-      {!dark && <>
-        <Circle cx="410" cy="620" r="310" fill={`url(#${id}blue)`} />
-        <Circle cx="345" cy="940" r="260" fill={`url(#${id}warm)`} />
-        <Circle cx="0" cy="155" r="230" fill={`url(#${id}green)`} />
-      </>}
       <Circle cx="70" cy="20" r="190" fill={`url(#${id}logo)`} />
     </Svg>
   </View>;
