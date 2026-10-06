@@ -437,8 +437,8 @@ export function SecondaryNav({ section, activeItemId, onNavigate }: {
 /** Grassroots toolbar artwork: local to this workspace, with labelled controls. */
 function WorkspaceGlyph({ kind }: { kind: 'search' | 'bell' | 'safety' }) {
   return <svg className={`workspace-glyph glyph-${kind}`} viewBox="0 0 28 28" width="26" height="26" fill="none" aria-hidden="true">
-    {kind === 'search' ? <><path d="M4 10V4h6M18 4h6v6M4 18v6h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><circle cx="13" cy="13" r="6" fill="currentColor" fillOpacity=".18" stroke="currentColor" strokeWidth="2"/><path d="m18 18 6 6" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/><path d="M13 10v6m-3-3h6" stroke="currentColor" strokeWidth="1.4"/></>
-    : kind === 'bell' ? <><path d="M7 12a7 7 0 0 1 14 0v5l2 3H5l2-3z" fill="currentColor" fillOpacity=".2" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round"/><path d="M11 24h6M14 3V1" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="m3 8 2-3m18 0 2 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></>
+    {kind === 'search' ? <><circle cx="12" cy="12" r="7.5" stroke="currentColor" strokeWidth="1.8"/><path d="m17.5 17.5 6 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/></>
+    : kind === 'bell' ? <><path d="M7 12a7 7 0 0 1 14 0v4c0 2 1 3 2 4H5c1-1 2-2 2-4z" fill="#00e676" fillOpacity=".07" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round"/><path d="M14 5V3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/><path d="M11.5 23a2.7 2.7 0 0 0 5 0" stroke="#00e676" strokeWidth="1.8" strokeLinecap="round"/></>
     : <><path d="m14 3 10 4v7c0 5-5 9-10 11C9 23 4 19 4 14V7z" fill="currentColor" fillOpacity=".17" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round"/><path d="M14 9v6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/><circle cx="14" cy="19" r="1.3" fill="currentColor"/></>}
   </svg>;
 }
@@ -462,7 +462,7 @@ export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOp
       <div className="p-toolbar">
         <button className="p-top-search" onClick={onOpenPalette} aria-label={t('navsec.searchAria')} title={t('navsec.searchAria')}>
           <WorkspaceGlyph kind="search" />
-          <span className="workspace-search-copy"><small>ScoutBox finder</small><strong>{t('navsec.searchWorkspace')}</strong></span>
+          <span className="workspace-search-copy">{t('navsec.searchWorkspace')}</span>
           <kbd>{isMac ? '⌘ K' : 'Ctrl K'}</kbd>
         </button>
         {live
@@ -475,7 +475,7 @@ export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOp
           aria-label={`Notifications${unread > 0 ? ` — ${unread} unread` : ''}`}
           aria-expanded={bellOpen}
         >
-          <WorkspaceGlyph kind="bell" /><span className="workspace-control-label">Updates</span>{unread > 0 && <span className="bell-badge" aria-hidden="true">{unread}</span>}
+          <WorkspaceGlyph kind="bell" />{unread > 0 && <span className="bell-badge" aria-hidden="true">{unread}</span>}
         </button>
         <button className="topbar-safety" onClick={onReport} title={t('navsec.reportAria')} aria-label={t('navsec.reportAria')}>
           <WorkspaceGlyph kind="safety" /> <span className="safety-long"><small>Safety centre</small><strong>{t('navsec.report')}</strong></span>

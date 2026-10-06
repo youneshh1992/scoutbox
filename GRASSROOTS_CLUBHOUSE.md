@@ -152,8 +152,13 @@ record separating the original decision, dated evidence changes, unresolved
 club circumstances and evidence-confidence context. Do not remove warnings or
 infer that a new record resolves a club-side constraint.
 
-The Grassroots toolbar now uses local `WorkspaceGlyph` SVG artwork, a Finder
-control, a notification tile and a shield-based safety control. Keep their
+The Grassroots toolbar uses local `WorkspaceGlyph` SVG artwork and a
+shield-based safety control. The Founder subsequently requested a more
+traditional search and bell: preserve the wide single-line rounded search
+field with a classic magnifier, subtle green border and keyboard shortcut,
+and the simple outlined bell in a compact circular forest button with a green
+clapper accent. The earlier two-line Finder tile and labelled Updates tile
+are superseded. Keep their
 accessible names, live status, unread count and original handlers. These replace
 the old magnifier/bell/flag presentation at the Founder's explicit request; they
 are scoped to Grassroots and do not change the shared logo/icon library or auth.

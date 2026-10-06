@@ -113,3 +113,8 @@ Preserve the subsequent discovery/toolbar correction in
 criteria workbench, the structured Second Look dossier, and the custom local
 search/bell/safety SVG controls. The Founder explicitly rejected the preceding
 layouts and toolbar icons.
+
+The Founder then refined the toolbar again: search should look like a traditional
+search bar, and notifications like a traditional bell, with restrained ScoutBox
+green accents. Preserve the single-line search field and circular bell control;
+do not restore the two-line Finder or labelled Updates tiles.

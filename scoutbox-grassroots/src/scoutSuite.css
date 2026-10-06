@@ -349,14 +349,13 @@
 }
 /* Bespoke discovery controls and ScoutBox workspace tools. */
 :root[data-app="grass"] .grass-workspace .topbar .p-toolbar { gap:10px; align-items:center; }
-:root[data-app="grass"] .grass-workspace .topbar .p-toolbar .p-top-search { display:flex; gap:12px; border:0; border-bottom:2px solid #00e67688; border-radius:8px 8px 2px 2px; padding:10px 14px; min-height:52px; background:linear-gradient(115deg,#294333,#1a3023); }
+:root[data-app="grass"] .grass-workspace .topbar .p-toolbar .p-top-search { display:flex; align-items:center; gap:11px; width:clamp(240px,25vw,350px); min-height:44px; padding:10px 15px; border:1px solid #00e67638; border-radius:24px; background:linear-gradient(105deg,#142d20,#14251c); box-shadow:inset 0 1px 3px #0003,0 0 18px #00e67605; }
 :root[data-app="grass"] .grass-workspace .workspace-glyph { color:#00e676; flex-shrink:0; }
-:root[data-app="grass"] .grass-workspace .workspace-search-copy { display:flex; flex-direction:column; gap:4px; text-align:left; }
+:root[data-app="grass"] .grass-workspace .workspace-search-copy { display:block; flex:1; text-align:left; font-size:13px; font-weight:400; color:#b7cbbb; white-space:nowrap; }
 :root[data-app="grass"] .grass-workspace .workspace-search-copy small, :root[data-app="grass"] .grass-workspace .safety-long small { font-size:9px; color:#91ad99; font-weight:500; }
 :root[data-app="grass"] .grass-workspace .workspace-search-copy strong, :root[data-app="grass"] .grass-workspace .safety-long strong { font-size:11px; color:#ebf2e6; font-weight:550; }
-:root[data-app="grass"] .grass-workspace .topbar .p-toolbar .p-top-search kbd { font-size:10px; margin-left:15px; border:0; background:#101f17; padding:6px; border-radius:4px; }
-:root[data-app="grass"] .grass-workspace .topbar .p-toolbar .topbar-bell { width:65px; height:54px; display:flex; flex-direction:column; gap:4px; justify-content:center; border:1px solid #456b4e; border-radius:9px; background:linear-gradient(135deg,#24452e,#15271d); }
-:root[data-app="grass"] .grass-workspace .workspace-control-label { font-size:9px; color:#c2d5c7; }
+:root[data-app="grass"] .grass-workspace .topbar .p-toolbar .p-top-search kbd { font-size:10px; margin-left:auto; border:1px solid #48614a66; background:#1b3224; color:#99b29f; padding:4px 6px; border-radius:5px; }
+:root[data-app="grass"] .grass-workspace .topbar .p-toolbar .topbar-bell { width:44px; height:44px; padding:9px; display:grid; place-items:center; border:1px solid #00e67638; border-radius:50%; background:radial-gradient(circle at 35% 20%,#284332,#16291e); color:#ccddce; box-shadow:inset 0 1px #b0d6b50a; }
 :root[data-app="grass"] .grass-workspace .topbar .p-toolbar .topbar-bell[aria-expanded="true"] { border-color:#00e676; box-shadow:0 0 18px #00e67618; }
 :root[data-app="grass"] .grass-workspace .topbar .p-toolbar .topbar-safety { display:flex; gap:10px; padding:9px 13px; min-height:54px; border-left:1px solid #4d684466; border-radius:0; background:none; }
 :root[data-app="grass"] .grass-workspace .safety-long { display:flex; flex-direction:column; gap:4px; align-items:flex-start; }
@@ -497,3 +496,15 @@
 :root[data-app="grass"] .grass-workspace .review-comparison table td:last-child { color:#c4ebd0; font-weight:550; background:#00e67608; }
 :root[data-app="grass"] .grass-workspace .review-comparison ul { padding-left:18px!important; line-height:1.9; }
 :root[data-app="grass"] .grass-workspace .review-comparison .sl-still { padding:18px; border:1px solid #83764c66; border-radius:8px; background:#64552b22; }
+
+/* Familiar controls, with ScoutBox colour in the lens, clapper and focus ring. */
+:root[data-app="grass"] .grass-workspace .topbar .p-toolbar .p-top-search .workspace-glyph { width:21px; height:21px; color:#00e676; }
+:root[data-app="grass"] .grass-workspace .topbar .p-toolbar .topbar-bell .workspace-glyph { width:23px; height:23px; color:#ccddce; }
+:root[data-app="grass"] .grass-workspace .topbar .p-toolbar :is(.p-top-search,.topbar-bell):hover { transform:none; border-color:#00e67688; box-shadow:0 0 15px #00e67612; }
+:root[data-app="grass"] .grass-workspace .topbar .p-toolbar :is(.p-top-search,.topbar-bell):focus-visible { outline:2px solid #00e676; outline-offset:3px; }
+@media(max-width:1100px) and (min-width:651px) {
+ :root[data-app="grass"] .grass-workspace .topbar .p-toolbar .p-top-search { width:240px; }
+}
+@media(max-width:650px) {
+ :root[data-app="grass"] .grass-workspace .topbar .p-toolbar .p-top-search { min-width:0; }
+}
