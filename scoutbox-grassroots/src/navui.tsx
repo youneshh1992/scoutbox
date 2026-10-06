@@ -623,12 +623,12 @@ export function NeedsAttention({ session, tick, unreadMessages, verLevel, onNavi
   if (rows.length === 0) return null;
   return (
     <div className="attn-card" role="region" aria-label={t('navsec.attnTitle')}>
-      <div className="attn-title"><Icon name="flag" size={18} /><span>{t('navsec.attnTitle')}</span></div>
+      <h3 className="attn-title">{t('navsec.attnTitle')}</h3>
       {rows.map((r) => (
         <button key={r.key} className="attn-row" onClick={() => onNavigate(r.target)}>
           <span className="attn-count">{r.count}</span>
           <span className="grow">{r.label}</span>
-          <span className="desk-review-label">{t('desk.review')}</span><Icon name="arrow-right" size={15} />
+          <span className="attn-action"><span>{t('desk.review')}</span><Icon name="arrow-right" size={15} /></span>
         </button>
       ))}
     </div>

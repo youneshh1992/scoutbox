@@ -228,3 +228,10 @@ entire banner more subtly. The pitch now spans the full banner with a 12px
 boundary inset, a circular centre mark and responsive edge markings. Line alpha
 is .10 (previously .23), with a lighter shadow and 1px strokes. Keep the texture
 quiet behind both headline and action at every width.
+
+Home's attention queue uses a separate compact heading and individual green-toned
+action rows, with a small count badge and Review arrow. Keep the count and label
+together, without the previous gold flag, warning border or divided title column.
+Rows stack naturally when both inbox and verification need attention; preserve
+the existing permission checks, live counts, navigation and zero-count hiding.
+The row was checked at 1440px and 390px; Review opens verification.
