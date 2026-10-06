@@ -205,7 +205,7 @@ The Founder rejected both the floating pitch and its replacement touchline
 illustration, asking for a simple, professional ScoutBox presentation. The latest
 Home banner contains only the headline, a subtle forest gradient, ScoutBox green
 accent text and the existing contextual primary action. Do not restore scenery,
-pitch diagrams, decorative terrain or the “Built from the ground up” caption.
+freestanding pitch illustrations, decorative terrain or the “Built from the ground up” caption.
 `ClubGround.tsx` was removed. Keep the original logo and existing brand colours.
 The banner stacks its headline and action on narrow screens without an empty
 illustration area. This supersedes all earlier Home artwork directions above.
@@ -216,3 +216,9 @@ The contextual primary action retains its existing navigation and priority rules
 The sidebar wordmark and Grassroots edition label form a compact left-aligned
 lockup: 3px row gap, no extra top margin on the edition, and a 1px optical text
 inset. Preserve the actual wordmark, trademark and green brand square.
+
+The Founder subsequently requested texture or embossed pitch lines on the simple
+banner. Preserve the faint diagonal turf texture and low-contrast pitch markings
+as a decorative background layer. Keep the same banner layout, headline and
+action; the markings must not intercept clicks or reduce text readability. This
+is a restrained surface detail, not a return to the rejected illustrated scenes.

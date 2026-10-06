@@ -117,6 +117,14 @@ export function HomeScreen({ session, tick, openPlayer, unreadMessages, verLevel
         <span className="club-identity"><Icon name="map-pin" size={15} />{org.name}<span className="club-role">{session.role}</span></span>
       </div>
       <section className="club-hero" aria-labelledby="club-hero-title">
+        <svg className="hero-pitch-emboss" viewBox="0 0 440 240" aria-hidden="true" focusable="false">
+          <g fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M12 12H428V228H12Z M220 12V228 M12 62H76V178H12 M428 62H364V178H428 M12 91H35V149H12 M428 91H405V149H428" />
+            <circle cx="220" cy="120" r="39" />
+            <path d="M76 95A32 32 0 0 1 76 145 M364 95A32 32 0 0 0 364 145" />
+          </g>
+          <circle cx="220" cy="120" r="2" fill="currentColor" />
+        </svg>
         <div className="club-hero-copy"><span className="club-eyebrow">{t('home.localGame')}</span>
           <h2 id="club-hero-title">{t('home.localRoots')}<br /><span>{t('home.bigAmbitions')}</span></h2>
         </div>

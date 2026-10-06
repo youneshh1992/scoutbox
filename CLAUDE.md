@@ -130,3 +130,7 @@ in the latest section of `GRASSROOTS_CLUBHOUSE.md`. The Founder rejected both
 pitch illustrations. Home now uses only its headline, subtle forest background,
 ScoutBox green and the contextual primary action. Do not restore scenery or the
 “Built from the ground up” caption. Keep the smaller account panel.
+
+The latest Home refinement adds a faint turf texture and embossed pitch-line
+background at the Founder's request. Keep it subtle behind the existing content;
+retain the simple layout and avoid restoring the rejected scenic illustrations.

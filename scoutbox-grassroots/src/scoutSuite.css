@@ -600,3 +600,19 @@
 /* Treat the wordmark and edition name as one compact, left-aligned lockup. */
 :root[data-app="grass"] .grass-workspace .sidebar:not(.collapsed) .brand { row-gap: 3px; padding-bottom: 18px; align-content: flex-start; }
 :root[data-app="grass"] .grass-workspace .sidebar .brand-sub { margin-top: 0; padding-left: 1px; box-sizing: border-box; letter-spacing: 1.3px; line-height: 1; }
+
+/* Tonal pitch markings pressed into the banner, behind its readable content. */
+:root[data-app="grass"] .grass-workspace .club-hero { position: relative; overflow: hidden; isolation: isolate; }
+:root[data-app="grass"] .grass-workspace .club-hero::before {
+  content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: repeating-linear-gradient(115deg,rgba(183,209,175,.018) 0 1px,transparent 1px 4px);
+}
+:root[data-app="grass"] .grass-workspace .hero-pitch-emboss {
+  position: absolute; z-index: -1; pointer-events: none; width: 46%; height: calc(100% - 16px);
+  left: 55%; top: 8px; transform: translateX(-50%); color: rgba(137,186,151,.23);
+  filter: drop-shadow(0 -1px 0 rgba(2,15,8,.65));
+  mask-image: linear-gradient(90deg,transparent,black 22%,black 76%,transparent);
+}
+@media (max-width: 700px) {
+  :root[data-app="grass"] .grass-workspace .hero-pitch-emboss { width: 100%; left: 84%; height: 85%; top: 8%; opacity: .65; }
+}
