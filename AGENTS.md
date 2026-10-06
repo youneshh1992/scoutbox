@@ -1,7 +1,7 @@
 # ScoutBox project instructions
 
 Read `CLAUDE.md` before changing UI. It contains the persistent Founder approvals
-for Player and Grassroots; preserve subsequent explicitly authorized changes.
+for Pro, Player and Grassroots; preserve subsequent explicitly authorized changes.
 
 For Grassroots, read `GRASSROOTS_CLUBHOUSE.md` first. The Founder approved the UI
 at `5a3e7b0` on `design/grassroots-clubhouse` on 6 October 2026 and requested it be
@@ -19,6 +19,10 @@ Preserve authentication, permissions, safeguarding, privacy, data provenance,
 and working navigation/actions. Do not restyle other apps during Grassroots work.
 User authorization in the current session takes precedence over these guidelines.
 
-For the Pro flagship redesign, read `PRO_EXECUTIVE.md`. The Founder explicitly
-authorized a distinct premium Pro identity including its entry screen. This
-work does not reopen the approved Player or Grassroots designs.
+For Pro, read `PRO_EXECUTIVE.md` first. The Founder approved `f87f61d` on
+`design/pro-executive` on 6 October 2026 and requested this as the permanent Pro
+UI. Preserve the implementation, bright aligned Pro lockup, correspondence desk,
+player dossiers, football entry and workspace tools. New features must fit it;
+redesign only on explicit Founder request. The Pro artifact is
+`e2e/dist/scoutbox-club-demo.html`, rebuilt and freshness-checked as above.
+This does not reopen the approved Player or Grassroots designs.

@@ -1,11 +1,19 @@
-# ScoutBox — approved Player and Grassroots UI
+# ScoutBox — approved Pro, Player and Grassroots UI
 
-## Pro redesign in review — 6 October 2026
+## Latest approval — Pro, 6 October 2026
 
-The Founder requested a distinct luxury identity for the paid Pro flagship and
-explicitly included its sign-in/access screen. See `PRO_EXECUTIVE.md` and the
-implementation on `design/pro-executive`. This is a proposal awaiting review,
-not a new approval for Player or Grassroots and not authorization to publish.
+The Founder approved ScoutBox Pro at `f87f61d` on `design/pro-executive` and
+requested a GitHub push and preservation as the permanent Pro baseline.
+Read `PRO_EXECUTIVE.md` before changing Pro. Preserve its actual implementation,
+including the football entry screen, shared bright Pro lockup, workspace tools,
+player dossiers and correspondence desk. Do not reconstruct older screenshots
+or restore rejected generic layouts. New features must fit the approved UI.
+
+Use `e2e/dist/scoutbox-club-demo.html`, built with `node e2e/buildDemos.mjs` and
+verified with `node e2e/demoFreshness.test.mjs`, for the Pro artifact. A separate
+Claude artifact requires rebuilding or replacing its bundle; a source push alone
+does not update it. This approval does not change Player or Grassroots.
+The current Pro push is authorized, not a merge, deployment or future push.
 
 ## Latest approval — Grassroots, 6 October 2026
 

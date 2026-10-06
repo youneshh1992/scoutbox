@@ -1,7 +1,57 @@
-# ScoutBox Pro — executive design direction
+# ScoutBox Pro — approved UI and artifact baseline
 
-Implemented on `design/pro-executive`, 6 October 2026. This is a reviewable
-design proposal, not a recorded Founder approval or authorization to publish.
+## Founder approval — 6 October 2026
+
+The Founder approved the finished Pro result and explicitly requested that it
+be pushed to GitHub and made the permanent Pro baseline.
+
+- Approved implementation: `f87f61d` on `design/pro-executive`.
+- Source of truth: the actual `scoutbox-club` implementation at this checkpoint
+  and subsequent authorized changes. Earlier screenshots, generated HTML and
+  exploratory descriptions are not alternative baselines.
+- Preserve the charcoal and pitch-green professional workspace, ScoutBox green,
+  compact workspace navigation, football sign-in screen and its access flow.
+- Preserve the shared ScoutBox Pro lockup: trademark tucked above the green
+  square, aligned outlined Pro badge with its brighter green border and lettering.
+- Messages retains the compact correspondence log, conversation filters,
+  expandable football context panel, multiline composer and editable reply
+  starters. Do not restore the rejected bulky bubble-chat layout.
+- Keep the traditional typeable search field, bell/Alerts control and separate
+  red report tool; warnings use readable red treatments.
+- Preserve the player discovery cards and centred dossier with Overview,
+  Footage, Evidence and Club notes tabs. Verification uses the existing seal
+  shape in ScoutBox green. Keep the Film Room tools and refined category layouts.
+- Responsive layouts, reduced motion, authentication, permissions, safeguarding,
+  privacy, provenance and working actions remain protected. Demo conversations
+  and sample context stay explicitly labelled and isolated from real messaging.
+- New Pro features must fit this approved design. Redesign only when explicitly
+  requested by the Founder. Player and Grassroots approvals remain unchanged.
+
+### Artifact handoff
+
+Build from this branch or a descendant containing the approved implementation:
+
+```sh
+node e2e/buildDemos.mjs
+node e2e/demoFreshness.test.mjs
+```
+
+Use `e2e/dist/scoutbox-club-demo.html` for the Pro artifact. This self-contained
+bundle is generated and intentionally ignored by Git; its build ID and source
+fingerprint identify the source. Serve it over HTTP(S). Build `scoutbox-club`
+without `VITE_DEMO=1` for production.
+
+A separate artifact host, including Claude, must rebuild or replace its Pro
+bundle from these sources. A GitHub push alone does not update a separately
+published artifact. Verify the displayed build ID before claiming it refreshed.
+
+This approval authorizes the requested Pro branch push, not an automatic merge,
+production deployment or standing authorization for future publishing.
+
+The sections below are implementation history. This approval and the final
+implementation supersede earlier references to a proposal awaiting review.
+
+## Original executive design direction
 
 The Founder requested a luxury identity for the paid flagship, clearly distinct
 from Grassroots, with visual data, restrained animation and usable workflows.
