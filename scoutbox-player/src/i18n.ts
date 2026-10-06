@@ -358,7 +358,6 @@ const en = {
   accProfile: 'Profile', accPrivacy: 'Privacy', accPreferences: 'Preferences', accAppearance: 'Appearance', accBack: 'Account',
   accPrivacyIntro: 'Choose what ScoutBox may share with authorised football organisations.',
   addEvidence: '+ Add evidence', back: 'Back', sectionsOf: 'Sections of this page',
-  themeAria: 'Dark theme', themeLight: 'Light', themeDark: 'Dark',
   footballHint: 'Your football record — what clubs see, and what you are working on.',
   opportunitiesHint: 'Everything you can pursue, and everything a club has offered you.',
   // M24B — the recruitment experience as category → subcategory.
@@ -811,7 +810,6 @@ const fr: typeof en = {
   accProfile: 'Profil', accPrivacy: 'Confidentialit\u00e9', accPreferences: 'Pr\u00e9f\u00e9rences', accAppearance: 'Apparence', accBack: 'Compte',
   accPrivacyIntro: 'Choisissez ce que ScoutBox peut partager avec les organisations de football autoris\u00e9es.',
   addEvidence: '+ Ajouter une preuve', back: 'Retour', sectionsOf: 'Sections de cette page',
-  themeAria: 'Thème sombre', themeLight: 'Clair', themeDark: 'Sombre',
   footballHint: 'Votre dossier football \u2014 ce que voient les clubs, et ce sur quoi vous travaillez.',
   opportunitiesHint: 'Tout ce que vous pouvez viser, et tout ce qu\u2019un club vous a propos\u00e9.',
   caseAreas: 'Zones de votre recrutement', catJourney: 'Mon parcours', catContact: 'Contact club', catTrial: 'Essai', catOffer: 'Offre', catSigning: 'Signature', catBoard: 'Tableau',

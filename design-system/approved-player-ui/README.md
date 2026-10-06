@@ -11,3 +11,8 @@ not a complete catalogue of every application state.
 The current implementation and final approval in `BRAND_RULES.md` take
 precedence wherever an older image differs. Do not restore superseded
 vertical metadata, larger verification badges or opaque selected controls.
+
+
+Latest decision: Player is dark-only. The light captures are historical and
+must not be used to restore light mode. Current dark captures omit the removed
+appearance switch; the approved palette and other styling remain unchanged.

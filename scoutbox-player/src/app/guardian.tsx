@@ -28,7 +28,6 @@ import { useColors, useStyles, type Palette } from '../theme';
 import { Button, Card, Disclosure, Kicker, ListRow, Muted, Pill, Row, SectionTitle, TrustBar } from '../components/ui';
 import { ReportButton } from '../components/ReportSheet';
 import { NotificationBell } from '../components/NotificationBell';
-import { ThemeSwitch } from '../components/ThemeSwitch';
 import { Threads } from '../components/Threads';
 import { PopupBanner } from '../components/PopupBanner';
 import { pt } from '../i18n';
@@ -159,7 +158,6 @@ export default function GuardianDashboard() {
         <Row style={{ justifyContent: 'space-between' }}>
           <Text style={styles.h1}>Guardian</Text>
           <Row>
-            <ThemeSwitch />
             <NotificationBell />
             <ReportButton />
           </Row>

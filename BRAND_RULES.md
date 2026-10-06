@@ -102,3 +102,20 @@ permanent. This section resolves earlier conflicting exploratory instructions:
 
 This approval is for saving the application locally. It does not authorize a
 push, merge or deployment. See `HANDOFF_CLAUDE_UI.md` for rebuild instructions.
+
+
+## Player dark-only — latest Founder instruction, 5 October 2026
+
+“Get rid of light mode. Dark is PERFECT and will remain the main theme.”
+Player now has one supported appearance: the existing approved dark design.
+This supersedes every earlier requirement to retain or test light mode.
+Remove theme switches and the Account Appearance category. Ignore previous
+light preferences and OS appearance on web, iOS and Android. Keep the dark
+palette, icon colours, carbon canvas and gradient opacities exactly as approved,
+including Home hero .49, Home CTA .56 and other gradient controls .70.
+Authentication keeps its approved dark green brand surfaces. Error recovery
+and browser/native chrome also use dark appearance. Preserve all behaviour.
+
+This change is permanent in the Player source and its reusable theme kit.
+Grassroots and all other portal themes are outside this change. Earlier light
+screenshots are historical references only, not an instruction to restore them.

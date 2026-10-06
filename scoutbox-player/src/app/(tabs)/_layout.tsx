@@ -1,7 +1,7 @@
 import { Redirect, Tabs } from 'expo-router';
 import { View } from 'react-native';
 import { useSession } from '../../state';
-import { useColors, useTheme } from '../../theme';
+import { useColors } from '../../theme';
 import { pt } from '../../i18n';
 import { Text } from '../../components/Text';
 import { Gradient } from '../../components/Vivid';
@@ -27,10 +27,9 @@ const TABS: readonly TabDef[] = [
 
 function TabItem({ icon, label, focused, badge }: { icon: string; label: string; focused: boolean; badge: number }) {
   const colors = useColors();
-  const { scheme } = useTheme();
   return (
     <View style={{ alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 4, paddingHorizontal: 6, minHeight: 43, minWidth: 58, borderRadius: 9 }}>
-      <View style={{ width: 48, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: focused && icon !== 'chat-bubble' ? (scheme === 'light' ? colors.bg2 : colors.tabActiveBg) : 'transparent' }}>
+      <View style={{ width: 48, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: focused && icon !== 'chat-bubble' ? colors.tabActiveBg : 'transparent' }}>
         {focused && icon !== 'chat-bubble' && <Gradient radius={16} control />}<View style={{ width: 30, height: 30, alignItems: 'center', justifyContent: 'center' }}><Icon name={icon} active={focused} size={icon === 'chat-bubble' ? 29 : 25} color={icon === 'chat-bubble' ? colors.text : focused ? colors.gradientInk : colors.tabInactive} />
         {badge > 0 && (
           <View style={{ position: 'absolute', zIndex: 2, top: -5, right: -7, minWidth: 19, height: 19, borderRadius: 10, paddingHorizontal: 4, backgroundColor: '#dc1748', alignItems: 'center', justifyContent: 'center' }}>

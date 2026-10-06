@@ -14,7 +14,7 @@ import { client, type Insights, type PlayerFeedItem } from '../../data/client';
 import type { Channel, DirectoryClub, Opportunities } from '../../data/types';
 import { SAFEGUARDING_PROMISES, U18_PROMISES } from '../../domain/safeguarding';
 import { useSession } from '../../state';
-import { useColors, useStyles, useTheme, type Palette } from '../../theme';
+import { useColors, useStyles, type Palette } from '../../theme';
 import { pt } from '../../i18n';
 import { GuidanceNote, StatusRow, PolicyList } from '../../components/InformationRows';
 import { MetricTiles, RecordPanel, Pill, Row, DetailLink, Disclosure, ListRow, Muted, TimelineItem } from '../../components/ui';
@@ -46,7 +46,6 @@ const ORGS = [
 
 export default function Discover() {
   const colors = useColors();
-  const { scheme } = useTheme();
   const styles = useStyles(makeStyles);
   const { me, isMinor, playerId, notifications, refresh, inbox, channels } = useSession();
   const router = useRouter();
@@ -119,7 +118,7 @@ export default function Discover() {
 
         {/* The one thing to do now. */}
         <View style={styles.primary} testID="home-primary">
-          <Gradient opacity={scheme === 'dark' ? 0.49 : 0.7} />
+          <Gradient opacity={0.49} />
           <View pointerEvents="none" accessible={false} aria-hidden style={styles.pitchArt}>
             <PitchArt color={colors.gradientInk} />
           </View>

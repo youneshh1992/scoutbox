@@ -9,8 +9,9 @@ This final approval supersedes earlier exploratory design directions.
 
 Read the final approval section in `BRAND_RULES.md`. Preserve the exact
 ScoutBox logo and #00e676 green. Player uses system UI typography (SF Pro
-on Apple), semantic icons, the approved light/dark canvases and translucent
-gradient controls. Keep the Instagram-style inbox, connected green timelines,
+on Apple), semantic icons, the approved dark canvas and translucent
+gradient controls. Player is now dark-only: the latest Founder instruction in
+BRAND_RULES.md supersedes all older light/dark requirements. Keep the Instagram-style inbox, connected green timelines,
 structured invitations, goals and reviews, and flat agent/club/consent records.
 
 Location precedes the bordered position badge on the same row; availability
@@ -78,3 +79,21 @@ confirmation for every folder supplied by a deep link; confirm it in Claude.
 No permissions are bypassed and no web-app filesystem bridge is installed.
 The shortcut requires Node.js and Claude Desktop. Its folder resolves relative
 to the checkout, so it continues to work when the repository is moved.
+
+
+## Dark-only update and the cloud badge fix
+
+The latest Player change removes light mode, theme controls and the Account
+Appearance category, ignores stored light preferences, and sets native UI to
+dark. The approved dark colours and gradient strengths remain unchanged.
+Theme regression tests cover web/iOS/Android providers, saved preferences,
+OS appearance and inaccessible storage. Other portals are unchanged.
+
+The reported badge correction `9c6249f0ec2a3aba4e51a03e75328168488bf0a1`
+existed only in Claude’s cloud checkout when this update was prepared. The
+GitHub branch still ended at `7638a3d`. This update deliberately leaves
+PlayerIdentity.tsx and profile.tsx unchanged. In that cloud checkout, fetch
+and merge the new remote branch into the branch carrying the badge fix;
+do not reset it to the remote tip and lose the unpushed correction. Rebuild
+the existing artifact from the combined source. Mac launchers are unnecessary
+in the cloud. Updating GitHub or the local preview does not update that artifact.
