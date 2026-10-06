@@ -164,14 +164,11 @@
 @media(pointer:coarse){:root[data-app="agent"] button { min-height:44px; }:root[data-app="agent"] .a-login input,:root[data-app="agent"] .a-login select { font-size:16px; }}
 
 @media(max-width:1050px){.a-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); }}
-/* Agent identity: a directional signature, distinct from Pro's framed badge. */
-.a-brand-independent { gap:10px;align-items:center; }
-.a-agent-signature { display:inline-flex;align-items:center;gap:3px;padding:0 0 0 9px;border-left:1px solid #b798dd40;color:#dfcaff; }
-.a-agent-signature svg { width:24px;height:27px;overflow:visible;fill:none;stroke:#c79bff;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round; }
-.a-agent-signature svg circle { fill:#00e676;stroke:none; }
-.a-agent-signature>span { font-size:15px;letter-spacing:-.6px;font-weight:550;font-style:italic; }
-.a-brand-independent .a-word { white-space:nowrap; }
-.a-login .a-brand-independent { gap:15px; }.a-login .a-agent-signature { padding-left:13px; }.a-login .a-agent-signature>span { font-size:22px; }.a-login .a-agent-signature svg { width:30px;height:32px; }
+/* Agent uses a typographic signature: the ScoutBox mark over a violet edition line. */
+.a-brand-editorial { display:inline-flex;flex-direction:column;align-items:flex-start;gap:7px;line-height:1; }
+.a-agent-title { display:flex;align-items:center;gap:11px;width:100%;font-size:11px;line-height:1;font-weight:700;letter-spacing:3.6px;color:#dbbfff; }
+.a-agent-title>span { height:2px;flex:1;min-width:12px;background:linear-gradient(90deg,#bd86ff,#bd86ff00); }
+.a-login .a-brand-editorial { gap:10px; }.a-login .a-agent-title { font-size:12px;letter-spacing:5px; }
 .a-login-map { flex:0 0 auto;min-height:0; }.a-world-map { aspect-ratio:720 / 380;object-fit:contain; }.a-login-map .a-world-map { display:block;height:auto!important;width:100%; }
 /* Desks share a quiet navigation rail and spacious, labelled records. */
 :root[data-app="agent"] .agent-finance .a-desk-tabs { display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:7px;background:#0b081480;border:1px solid #d9baff14;border-radius:12px;margin:24px 0; }
@@ -240,3 +237,24 @@
 :root[data-app="agent"] [data-testid=agency-settings] { grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:28px;padding:25px;background:linear-gradient(120deg,#2b2237,#211a2c);border-radius:12px;margin:20px 0; }
 :root[data-app="agent"] [data-testid=profile-form] { gap:24px;grid-template-columns:repeat(2,minmax(0,1fr)); }.a-history-ledger { padding-left:15px; }.a-history-ledger>.list-row { position:relative;border-left:1px solid #a78cc340;border-bottom:0!important;padding:20px 0 20px 23px!important; }.a-history-ledger>.list-row::before { content:'';position:absolute;width:6px;height:6px;background:#c1a0ef;border:3px solid #2b2039;border-radius:50%;left:-6px;top:24px; }.a-history-ledger .grow { font-size:12px;line-height:1.8; }.a-history-ledger .dim { font-size:10px; }
 @media(max-width:650px){:root[data-app="agent"] [data-testid=agency-settings],:root[data-app="agent"] [data-testid=profile-form] { grid-template-columns:1fr; }.a-standing-card { flex-wrap:wrap; }.a-standing-fact { flex-wrap:wrap; }.a-licence-status { align-items:flex-start; }.a-history-ledger>.list-row { flex-wrap:wrap; }}
+
+/* Agency tools: a quiet search line and labelled utility controls. */
+:root[data-app="agent"] .agent-finance .topbar .a-workspace-tools { gap:0;min-width:0; }
+:root[data-app="agent"] .agent-finance .a-workspace-tools .a-global-search { width:clamp(180px,22vw,300px);max-width:300px;border:0;border-bottom:1px solid #bca0de47;border-radius:0;background:linear-gradient(0deg,#ac7dec0a,transparent);padding:0 4px;margin-right:23px;gap:11px;height:38px;transition:border-color .2s,background .2s; }
+:root[data-app="agent"] .agent-finance .a-workspace-tools .a-global-search:focus-within { border-bottom-color:#c098ff;background:linear-gradient(0deg,#b482ff18,transparent); }
+:root[data-app="agent"] .agent-finance .a-workspace-tools .a-global-search input { font-size:12px;padding:8px 0;color:#ece3f9;outline:none;min-width:0; }
+:root[data-app="agent"] .agent-finance .a-workspace-tools .a-global-search input::placeholder { color:#b7a6ca; }
+:root[data-app="agent"] .agent-finance .a-workspace-tools .a-global-search>svg { flex:none;color:#c4a6e8; }
+:root[data-app="agent"] .agent-finance .a-workspace-tools .a-global-search button { height:36px;min-width:29px;padding:0;display:grid;place-items:center;border:0;background:none; }
+:root[data-app="agent"] .agent-finance .a-workspace-tools kbd { font:10px var(--sb-font);border:0;box-shadow:none;background:none;padding:0;color:#89799c; }
+:root[data-app="agent"][data-theme="dark"] .agent-finance .topbar .a-workspace-tools button.a-tool-button { display:flex;align-items:center;justify-content:center;gap:8px;width:auto;min-width:38px;height:36px;min-height:36px;padding:0 12px;border:0;border-radius:4px;background:transparent;box-shadow:none;color:#c3b0d7;transition:color .2s,background .2s; }
+:root[data-app="agent"] .agent-finance .topbar .a-workspace-tools button.a-tool-button .a-tool-label { display:block;font-size:11px;font-weight:500; }
+:root[data-app="agent"][data-theme="dark"] .agent-finance .topbar .a-workspace-tools button.a-updates-tool { border-right:1px solid #c3a7e12b;border-radius:0;padding-right:18px; }
+:root[data-app="agent"][data-theme="dark"] .agent-finance .topbar .a-workspace-tools button.a-report-tool { margin-left:7px; }
+:root[data-app="agent"][data-theme="dark"] .agent-finance .topbar .a-workspace-tools button.a-tool-button:hover,:root[data-app="agent"][data-theme="dark"] .agent-finance .topbar .a-workspace-tools button.a-tool-button[aria-expanded=true] { color:#ecdfff;background:#b285e319; }
+:root[data-app="agent"][data-theme="dark"] .agent-finance .topbar .a-workspace-tools button.a-report-tool:hover { color:#ffb3c0;background:#ec829713; }
+.a-update-count { display:grid;place-items:center;width:18px;height:18px;font-size:10px;font-weight:600;border-radius:4px;color:#1c0c30;background:linear-gradient(120deg,#d9baff,#a27de7); }
+.a-sync-status { position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap; }
+@media(max-width:1100px){:root[data-app="agent"] .agent-finance .a-workspace-tools .a-global-search { width:190px;margin-right:12px; }}
+@media(max-width:850px){:root[data-app="agent"] .agent-finance .topbar .a-workspace-tools button.a-tool-button .a-tool-label { display:none; }}
+@media(max-width:650px){:root[data-app="agent"] .agent-finance .a-workspace-tools .a-global-search { width:38px;height:44px;min-width:38px;margin-right:3px;padding:0;border:0;background:none; }:root[data-app="agent"] .agent-finance .a-workspace-tools .a-global-search button { height:44px;width:38px; }:root[data-app="agent"] .agent-finance .a-workspace-tools .a-global-search>svg { display:none; }:root[data-app="agent"][data-theme="dark"] .agent-finance .topbar .a-workspace-tools button.a-tool-button { height:44px;min-height:44px;padding:0 8px;gap:5px; }:root[data-app="agent"][data-theme="dark"] .agent-finance .topbar .a-workspace-tools button.a-updates-tool { padding-right:10px; }:root[data-app="agent"][data-theme="dark"] .agent-finance .topbar .a-workspace-tools button.a-report-tool { margin-left:2px; }.a-update-count { width:15px;height:15px;font-size:9px; }}

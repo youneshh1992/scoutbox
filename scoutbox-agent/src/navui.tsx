@@ -431,7 +431,7 @@ export function SecondaryNav({ section, activeItemId, onNavigate }: {
 // ------------------------------------------------------------------ TopBar
 /**
  * One row. The page title is the page's `<h1>` (§47); the crumb inside it is
- * the owning section, muted. Live state is a dot while healthy and a red
+ * the owning section, muted. Live state is announced while healthy and a red
  * pill while reconnecting — the one state a user must act on. Report / Block
  * is never hidden (§33): under 640px it shrinks to its glyph with the same
  * accessible name.
@@ -456,22 +456,22 @@ export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOp
           {title}
         </h1>
       </div>
-      <div className="p-toolbar">
-        <form className="a-global-search" role="search" onSubmit={e=>{e.preventDefault();onOpenPalette(searchText);setSearchText('')}}><Icon name="search" size={17}/><input type="search" aria-label="Search Agent workspace" placeholder="Search workspace" value={searchText} onChange={e=>setSearchText(e.target.value)}/><button aria-label="Open workspace search" type="submit"><kbd>{isMac?'⌘ K':'Ctrl K'}</kbd><Icon name="search" size={17}/></button></form>
+      <div className="p-toolbar a-workspace-tools">
+        <form className="a-global-search" role="search" onSubmit={e=>{e.preventDefault();onOpenPalette(searchText);setSearchText('')}}><svg className="a-tool-search" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 6 6"/></svg><input type="search" aria-label="Search Agent workspace" placeholder="Find a page…" value={searchText} onChange={e=>setSearchText(e.target.value)}/><button aria-label="Open workspace search" type="submit"><kbd>{isMac?'⌘ K':'Ctrl K'}</kbd><Icon name="search" size={17}/></button></form>
         {live
-          ? <span className="live-dot on" role="status" aria-label={t('navsec.liveOk')} title={t('navsec.liveOk')} />
+          ? <span className="a-sync-status" role="status" aria-label={t('navsec.liveOk')} title={t('navsec.liveOk')} />
           : <span className="pill red" role="status">○ {t('navsec.liveOff')}</span>}
         <button
-          className="topbar-bell"
+          className="topbar-bell a-tool-button a-updates-tool"
           onClick={onToggleBell}
           title="Notifications"
           aria-label={`Notifications${unread > 0 ? ` — ${unread} unread` : ''}`}
           aria-expanded={bellOpen}
         >
-          <Icon name="bell" size={18} />{unread > 0 && <span className="bell-badge" aria-hidden="true">{unread}</span>}
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 11v9H4V4h9M8 9h4m-4 5h8"/><circle cx="19" cy="5" r="3"/></svg><span className="a-tool-label">Updates</span>{unread > 0 && <span className="a-update-count" aria-hidden="true">{unread}</span>}
         </button>
-        <button className="topbar-safety" onClick={onReport} title={t('navsec.reportAria')} aria-label={t('navsec.reportAria')}>
-          <Icon name="flag" size={18} /> <span className="safety-long">{t('navsec.report')}</span>
+        <button className="topbar-safety a-tool-button a-report-tool" onClick={onReport} title={t('navsec.reportAria')} aria-label={t('navsec.reportAria')}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m12 3 8 3v6c0 4-4 7-8 9-4-2-8-5-8-9V6l8-3Z"/><path d="M12 8v5m0 3h.01"/></svg><span className="a-tool-label">Report</span>
         </button>
       </div>
     </header>

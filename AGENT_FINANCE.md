@@ -33,7 +33,9 @@ sources remain unchanged. Do not replace approved app designs with this theme.
 
 ## Latest refinement
 
-Agent now has an unboxed directional signature alongside the ScoutBox wordmark.
+Agent now has a stacked typographic signature: the ScoutBox wordmark above a
+spaced violet AGENT edition line. The top toolbar uses an understated search line,
+a labelled updates control and a shield-shaped report tool.
 Opportunities use a searchable, filterable deadline board. Agency views include
 member cards, credential records, operating settings and an audit timeline.
 Profile work is divided into identity, credentials, authorisations and activity;
