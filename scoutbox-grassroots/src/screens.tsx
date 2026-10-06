@@ -317,12 +317,14 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
   }
 
   return (
-    <div className="filmroom">
+    <div className="filmroom desk-film-workspace">
       <div className="filmroom-stage">
+        {current && <video key={current.media.id} className="filmroom-video" src={api.mediaUrl(current.media.url)!} controls autoPlay muted loop />}
+      </div>
+      <aside className="desk-film-notes">
+        <span className="club-eyebrow">Footage review</span>
         {current && (
-          <>
-            <video key={current.media.id} className="filmroom-video" src={api.mediaUrl(current.media.url)!} controls autoPlay muted loop />
-            <div className="filmroom-overlay">
+            <div className="desk-film-identity">
               <div className="row1">
                 <a style={{ color: '#fff', fontWeight: 700, fontSize: 18, cursor: 'pointer' }} {...pressable(() => openPlayer(current.player.id))}>
                   {current.player.name}
@@ -333,12 +335,10 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
                 {current.media.verifiedClip && <span className="pill green">Verified Clip — filmed at a confirmed fixture</span>}
               </div>
             </div>
-          </>
         )}
-      </div>
-      {/* M24F.5 — the caption sits under the clip, clear of the video controls. */}
+      {/* The caption remains separate from the video and its playback controls. */}
       {current && <div className="dim filmroom-caption" data-testid="filmroom-caption">“{current.media.title}” · {current.media.views} view{current.media.views === 1 ? '' : 's'} · {t('term.profileSignal')} {current.player.trustScore}%</div>}
-      {/* M24F.5 — the tags sit under the clip, never over the picture or the player's name. */}
+      <h3 className="desk-film-label">Tag your observations</h3>
       {current && (
         <div className="filmroom-tags" aria-label="Tag what you saw">
           {tagOptions.map((t) => (
@@ -359,6 +359,7 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
         <span className="pill">{index + 1} / {deck.length}</span>
         <button className="primary" onClick={() => step(1)} disabled={index >= deck.length - 1}>↓ Next clip</button>
       </div>
+      </aside>
     </div>
   );
 }
@@ -376,10 +377,12 @@ export function FixturesScreen({ session, tick, openPlayer }: ScreenProps) {
           const key = `${f.fixture}|${f.date}`;
           return (
             <div key={key} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-              <div style={{ display: 'flex', gap: 12, alignItems: 'center', cursor: 'pointer' }} {...pressable(() => setOpenKey(openKey === key ? null : key))}>
-                <span className="grow"><b>{f.fixture}</b> <span className="dim">— {f.venue}</span></span>
-                <span className="dim">GPS ✓ · {f.players.length} player{f.players.length === 1 ? '' : 's'} · {f.date}</span>
-              </div>
+              <button className="desk-fixture" aria-expanded={openKey === key} onClick={() => setOpenKey(openKey === key ? null : key)}>
+                <span className="desk-fixture-date"><Icon name="calendar-days" size={18} /><time>{f.date}</time></span>
+                <span className="desk-fixture-title"><b>{f.fixture}</b><span className="dim">{f.venue}</span></span>
+                <span className="desk-fixture-count"><b>{f.players.length}</b> player{f.players.length === 1 ? '' : 's'}<small>GPS confirmed</small></span>
+                <Icon name="chevron-down" size={16} />
+              </button>
               {openKey === key && (
                 <div className="list-rows" style={{ marginTop: 8 }}>
                   {f.players.map((p) => (
@@ -498,29 +501,31 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
   return (
     <>
       <AgencyWall session={session} />
-      <div className="filters">
+      <div className="desk-search-toolbar"><div className="desk-search-field"><Icon name="search" size={20} />
         <input
           type="text"
-          placeholder="Search name, city, country…"
+          aria-label="Search players" placeholder="Search players by name or location"
           value={filters.q ?? ''}
           onChange={(e) => setFilters({ ...filters, q: e.target.value || undefined })}
         />
-        <select value={filters.position ?? ''} onChange={(e) => setFilters({ ...filters, position: e.target.value || undefined })}>
+      </div><span className="desk-search-count"><b>{players.length}</b> players</span></div>
+      <div className="desk-search-filters" aria-label="Player filters">
+        <select aria-label="Position" value={filters.position ?? ''} onChange={(e) => setFilters({ ...filters, position: e.target.value || undefined })}>
           <option value="">Any position</option>
           {POSITIONS.map((p) => <option key={p}>{p}</option>)}
         </select>
-        <select value={filters.availability ?? ''} onChange={(e) => setFilters({ ...filters, availability: e.target.value || undefined })}>
+        <select aria-label="Availability" value={filters.availability ?? ''} onChange={(e) => setFilters({ ...filters, availability: e.target.value || undefined })}>
           <option value="">Any availability</option>
           {Object.entries(AVAILABILITY_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
-        <select value={filters.ageGroup ?? ''} onChange={(e) => setFilters({ ...filters, ageGroup: (e.target.value || undefined) as SearchFilters['ageGroup'] })}>
+        <select aria-label="Age group" value={filters.ageGroup ?? ''} onChange={(e) => setFilters({ ...filters, ageGroup: (e.target.value || undefined) as SearchFilters['ageGroup'] })}>
           <option value="">Any age group</option>
           <option value="u16">U16</option>
           <option value="u18">U18</option>
           <option value="18-21">18–21</option>
           <option value="senior">22+</option>
         </select>
-        <select value={filters.country ?? ''} onChange={(e) => setFilters({ ...filters, country: e.target.value || undefined })}>
+        <select aria-label="Country" value={filters.country ?? ''} onChange={(e) => setFilters({ ...filters, country: e.target.value || undefined })}>
           <option value="">Any country</option>
           {['GB', 'PT', 'FR', 'SE', 'PL', 'NG', 'GH', 'AR', 'JP', 'KR'].map((c) => <option key={c}>{c}</option>)}
         </select>
@@ -528,9 +533,9 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
           <input type="checkbox" checked={!!filters.newDays} onChange={(e) => setFilters({ ...filters, newDays: e.target.checked ? 7 : undefined })} />
           New this week
         </label>
-        <span className="pill">{players.length} players</span>
+        {Object.values(filters).some(Boolean) && <button className="f-textbtn" onClick={() => setFilters({})}>Clear filters</button>}
       </div>
-      <div className="filters club-saved-search" style={{ marginTop: -8 }}>
+      <div className="desk-search-options"><details className="desk-save-search"><summary><Icon name="list-checks" size={16} /> Save & manage searches</summary><div className="filters club-saved-search">
         <input type="text" placeholder="Save this search as… (alerts on new matches)" value={saveName} onChange={(e) => setSaveName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && saveCurrent()} />
         <button onClick={saveCurrent}>Save search</button>
         {saved.map((s) => (
@@ -544,46 +549,28 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
             >✕</button>
           </span>
         ))}
+      </div></details>
         {compareIds.length >= 2 && (
           <button className="primary" onClick={() => setComparing(true)}>Compare {compareIds.length}</button>
         )}
       </div>
       {error && <div className="notice block">{error}</div>}
-      <Hint>Amateur and semi-pro players within 50 km of your ground, nearest first. The radius is a platform rule enforced by the server.</Hint>
+      <div className="desk-search-context"><span><Icon name="map-pin" size={14} /> Local scouting · within 50 km</span><details><summary>Discovery criteria <Icon name="chevron-down" size={12} /></summary><p>Amateur and semi-pro players within 50 km of your ground. The radius is enforced by the server.</p><p data-ordering>{t('discover.orderingGrassroots')}</p></details></div>
       {comparing && <CompareModal session={session} playerIds={compareIds} onClose={() => setComparing(false)} />}
-      {/* M18.2 — the ordering is stated, not inferred. It is deliberately not
-          a ranking, and the sentence says what the figure is not. */}
-      <div className="dim club-search-order" style={{ fontSize: 12, marginBottom: 8 }} data-ordering>
-        {t('discover.orderingGrassroots')}
-      </div>
-      <div className="player-grid">
+      <div className="desk-player-register">
+        <div className="desk-register-columns" aria-hidden="true"><span>Player / location</span><span>Football profile</span><span>Availability / contract</span><span>Evidence</span><span>Compare</span></div>
         {players.map((p) => (
-          <div key={p.id} className="player-card" {...pressable(() => openPlayer(p.id))}>
-            <div className="row1">
-              <span className="club-player-identity"><span className="club-player-avatar" aria-hidden="true">{initials(p.name)}</span><span className="name">{p.name}</span></span>
-              <span style={{ display: 'flex', gap: 6, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
-                <label className="chk" title="Select to compare">
-                  <input aria-label={`Compare ${p.name}`} type="checkbox" checked={compareIds.includes(p.id)} onChange={() => toggleCompare(p.id)} />
-                </label>
-                <span className="pill blue">{p.position}</span>
-              </span>
-            </div>
-            <div className="meta">
-              <span className="club-player-location"><Icon name="map-pin" size={14} />{p.city ? `${p.city}, ` : ''}{p.country}</span><span className="club-player-facts">{p.age} years <span /> {p.foot} foot <span /> {p.heightCm} cm</span>
-            </div>
-            {/* M24F.4 — at most three pills (the safeguarding state, First Team Seeker, the availability); everything else is one quiet line. */}
-            <div className="badges">
-              {p.guardianManaged && <span className="pill red">U18 · guardian-managed</span>}
-              {p.firstTeamSeeker && <span className="pill gold">First Team Seeker</span>}
-              <span className="pill">{AVAILABILITY_LABELS[p.availability] ?? p.availability}</span>
-            </div>
-            {/* M24F.5 — one quiet line: distance, level, identity check, contract, current club. Badges and evidence detail are one tap deeper. */}
-            <div className="meta player-quiet">
-              {[typeof p.distanceKm === 'number' ? `${p.distanceKm} km away` : null, p.level === 'semi_pro' ? 'Semi-pro' : null, p.identityVerified ? 'ID ✓' : null, CONTRACT_LABELS[p.contractStatus] ?? p.contractStatus, fpSummaries.get(p.id)?.currentClub?.name ?? null, fpSummaries.get(p.id) ? `${t('fp.coverage')}: ${t(`fp.cov.${fpSummaries.get(p.id)!.evidenceCoverage}`)}` : null].filter(Boolean).join(' · ')}
-            </div>
-            <TrustBar score={p.trustScore} />
-          </div>
+          <article key={p.id} className={`desk-player-record ${compareIds.includes(p.id) ? 'is-compared' : ''}`}>
+            <button className="desk-player-open" onClick={() => openPlayer(p.id)} aria-label={`Open ${p.name}'s profile`}>
+              <span className="desk-player-person"><span className="desk-position" aria-hidden="true">{p.position}</span><span><strong>{p.name}{p.identityVerified && <Icon name="badge-check" size={15} label="Identity verified" />}</strong><span className="desk-record-sub">{p.city ? `${p.city}, ` : ''}{p.country}{typeof p.distanceKm === 'number' ? ` · ${p.distanceKm} km` : ''}</span>{p.guardianManaged && <span className="desk-safeguarding">U18 · guardian-managed</span>}{p.firstTeamSeeker && <span className="desk-seeker">First Team Seeker</span>}</span></span>
+              <span className="desk-player-spec"><b>{p.position} <span> / {p.age} years</span></b><span className="desk-record-sub">{p.foot} foot · {p.heightCm} cm</span>{p.level === 'semi_pro' && <span className="desk-record-sub">Semi-pro</span>}</span>
+              <span className="desk-player-status"><span className={`desk-availability ${p.availability === 'available_now' ? 'available' : ''}`}>{AVAILABILITY_LABELS[p.availability] ?? p.availability}</span><span className="desk-record-sub">{CONTRACT_LABELS[p.contractStatus] ?? p.contractStatus}</span>{fpSummaries.get(p.id)?.currentClub?.name && <span className="desk-record-sub">{fpSummaries.get(p.id)!.currentClub!.name}</span>}</span>
+              <span className="desk-player-evidence">{fpSummaries.get(p.id) && <span className="desk-evidence-label">{t('fp.coverage')}: <b>{t(`fp.cov.${fpSummaries.get(p.id)!.evidenceCoverage}`)}</b></span>}<TrustBar score={p.trustScore} /></span>
+            </button>
+            <label className="desk-compare"><input aria-label={`Compare ${p.name}`} type="checkbox" checked={compareIds.includes(p.id)} onChange={() => toggleCompare(p.id)} /><span>Compare</span></label>
+          </article>
         ))}
+        {!players.length && !error && <div className="desk-empty">No players match these filters. Adjust your search to see more local players.</div>}
       </div>
       <SharedPassportOpener session={session} notify={notify} />
     </>
@@ -1668,10 +1655,16 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
           <>
             <div className="head">
               <div>
+                <span className="club-eyebrow">Player dossier</span>
                 <h3>{player.name}</h3>
-                <div className="sub">
-                  {player.position} · {player.age} · {player.foot} foot · {player.city ? `${player.city}, ` : ''}{player.country} · {player.heightCm} cm / {player.weightKg} kg
-                </div>
+                <div className="desk-dossier-location"><Icon name="map-pin" size={14} />{player.city ? `${player.city}, ` : ''}{player.country}</div>
+                <dl className="desk-dossier-facts">
+                  <div><dt>Position</dt><dd>{player.position}</dd></div>
+                  <div><dt>Age</dt><dd>{player.age}</dd></div>
+                  <div><dt>Foot</dt><dd>{player.foot}</dd></div>
+                  <div><dt>Height</dt><dd>{player.heightCm} cm</dd></div>
+                  <div><dt>Weight</dt><dd>{player.weightKg} kg</dd></div>
+                </dl>
                 <div className="badges" style={{ marginTop: 8 }}>
                   {player.guardianManaged && <span className="pill red">U18 · guardian-managed</span>}
                   {typeof player.distanceKm === 'number' && <span className="pill blue">{player.distanceKm} km from your ground</span>}

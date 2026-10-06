@@ -645,7 +645,7 @@ export function OutcomesScreen({ session, tick, notify }: ScreenProps) {
         {(list ?? []).map((f) => (
           <div key={f.id} className="list-row">
             <span className="grow">
-              <b>{f.playerName}</b> · {f.milestone} check-in · {t('out.due')} {fmtDate(f.dueAt)}
+              <b className="desk-outcome-player">{f.playerName}</b><span className="desk-outcome-meta">{f.milestone} check-in <span>{t('out.due')} {fmtDate(f.dueAt)}</span></span>
               {f.report && <div className="dim">{f.report.registrationStatus}{f.report.matchesPlayed != null ? ` · ${f.report.matchesPlayed} matches` : ''}{f.report.progression ? ` · ${f.report.progression}` : ''}</div>}
             </span>
             <span className={`pill ${stateClass(f.outcomeState)}`}>{f.outcomeState.replace('_', ' ')}</span>

@@ -10,7 +10,6 @@ import { ClubGround } from './ClubGround';
 import { initials } from '../../design-system/text';
 import { Icon } from '../../design-system/icons';
 import { api, type FeedItem, type OrgRequest, type Player, type Session, type Squad, type Trial } from './api';
-import { pressable } from './dialog';
 import { fmtDate, t } from './i18n';
 import { NeedsAttention } from './navui';
 import type { ScreenId } from './App';
@@ -49,6 +48,8 @@ export function HomeScreen({ session, tick, openPlayer, unreadMessages, verLevel
   session: Session; tick: number; openPlayer: (id: string) => void;
   unreadMessages: number; verLevel: string | null; onNavigate: (id: ScreenId) => void;
 }) {
+  const [activityFilter, setActivityFilter] = useState<'all' | 'footage' | 'players' | 'reports'>('all');
+  const [showAllActivity, setShowAllActivity] = useState(false);
   const [facts, setFacts] = useState<Facts | null>(null);
   useEffect(() => {
     let gone = false;
@@ -96,6 +97,14 @@ export function HomeScreen({ session, tick, openPlayer, unreadMessages, verLevel
   if (facts.squad) progress.push({ key: 'coverage', label: t('home.progCoverage'), state: facts.squad.gaps.length ? `${t('home.stateThin')} ${facts.squad.gaps.join(', ')}` : t('home.stateCovered'), done: facts.squad.gaps.length === 0, target: 'squad' });
 
   const feed = facts.feed ?? [];
+  const activityGroups = [
+    { id: 'all' as const, label: t('desk.all'), items: feed },
+    { id: 'footage' as const, label: t('desk.footage'), items: feed.filter(x => x.type === 'new_clip' || x.type === 'shortlist_new_clip') },
+    { id: 'players' as const, label: t('desk.newPlayers'), items: feed.filter(x => x.type === 'new_player') },
+    { id: 'reports' as const, label: t('desk.reports'), items: feed.filter(x => x.type === 'report_due') },
+  ];
+  const filteredActivity = activityGroups.find(x => x.id === activityFilter)!.items;
+  const visibleActivity = showAllActivity ? filteredActivity : filteredActivity.slice(0, 8);
   const quick: { label: string; target: ScreenId }[] = [
     { label: t('home.quickSearch'), target: 'search' }, { label: t('home.quickOpenDays'), target: 'opendays' },
     { label: t('home.quickSquad'), target: 'squad' }, { label: t('home.quickShortlist'), target: 'shortlist' },
@@ -125,38 +134,39 @@ export function HomeScreen({ session, tick, openPlayer, unreadMessages, verLevel
           ))}
         </div>
       )}
-      <div className="club-dashboard">
-      <div className="club-main-column">
+      <div className="desk-lower">
       <NeedsAttention session={session} tick={tick} unreadMessages={unreadMessages} verLevel={verLevel} onNavigate={onNavigate} />
-      <section className="home-section" aria-labelledby="home-activity-title" data-testid="home-activity">
-        <div className="club-section-heading"><div><span className="club-eyebrow">{t('home.touchline')}</span><h3 id="home-activity-title">{t('home.activityTitle')}</h3></div><Icon name="activity" size={21} /></div>
-        {feed.length === 0 && <div className="notice">{t('home.quiet')}</div>}
-        <div className="list-rows">
-          {feed.slice(0, 8).map((it, i) => (
-            <div key={i} className="list-row home-row club-feed-row" style={{ cursor: 'pointer' }} {...pressable(() => openPlayer(it.playerId))}>
-              <span className="club-feed-avatar" aria-hidden="true">{initials(it.playerName)}</span>
-              <span className={`feed-kind ${it.type === 'report_due' ? 'urgent' : ''}`}>{FEED_LABELS[it.type]}</span>
-              <span className="grow">
-                <b>{it.playerName}</b>
-                {it.type === 'new_player' && <span className="dim"> — {it.position}, {it.age}{it.guardianManaged ? ' · U18 (guardian-managed)' : ''}</span>}
-                {(it.type === 'new_clip' || it.type === 'shortlist_new_clip') && (
-                  <span className="dim"> — “{it.title}”{it.verifiedClip ? ' · Verified Clip' : ''}{it.hasVideo ? ' · Playable' : ''}</span>
-                )}
-                {it.type === 'report_due' && <span className="dim"> — mandatory trial report due {it.dueAt ? fmtDate(it.dueAt) : 'soon'}</span>}
-              </span>
-              <span className="dim">{fmtDate(it.ts)}</span>
-            </div>
-          ))}
+      <div className="club-dashboard desk-dashboard">
+      <div className="club-main-column">
+      <section className="home-section desk-activity" aria-labelledby="home-activity-title" data-testid="home-activity">
+        <div className="desk-panel-heading"><div><span className="club-eyebrow">{t('desk.scouting')}</span><h3 id="home-activity-title">{t('desk.activity')}</h3></div><Icon name="activity" size={20} /></div>
+        <div className="desk-feed-filters" role="group" aria-label={t('desk.filterActivity')}>
+          {activityGroups.map(g => <button key={g.id} aria-pressed={activityFilter === g.id} onClick={() => { setActivityFilter(g.id); setShowAllActivity(false); }}>{g.label}<span>{g.items.length}</span></button>)}
         </div>
-        {feed.length > 8 && <p className="dim home-more">{t('home.more').replace('{n}', String(feed.length - 8))}</p>}
+        <div className="desk-feed-columns" aria-hidden="true"><span>{t('desk.player')}</span><span>{t('desk.update')}</span><span>{t('desk.logged')}</span><span /></div>
+        <div className="desk-feed-records" aria-live="polite">
+          {visibleActivity.map((it, i) => (
+            <button key={`${it.playerId}-${it.type}-${it.ts}-${i}`} className="desk-feed-record" onClick={() => openPlayer(it.playerId)}>
+              <span className="desk-feed-person"><span className="club-feed-avatar" aria-hidden="true">{initials(it.playerName)}</span><b>{it.playerName}</b></span>
+              <span className="desk-feed-update"><span className={`desk-event-kind ${it.type === 'report_due' ? 'urgent' : ''}`}><Icon name={it.type === 'new_player' ? 'user-plus' : it.type === 'report_due' ? 'clipboard' : 'video'} size={13} />{FEED_LABELS[it.type]}</span>
+                {it.type === 'new_player' && <span className="desk-feed-detail">{it.position} · {it.age}{it.guardianManaged ? ' · U18 (guardian-managed)' : ''}</span>}
+                {(it.type === 'new_clip' || it.type === 'shortlist_new_clip') && <><span className="desk-feed-detail">{it.title}</span><span className="desk-feed-evidence">{it.verifiedClip && <span><Icon name="badge-check" size={12} />Verified Clip</span>}{it.hasVideo && <span>Playable</span>}</span></>}
+                {it.type === 'report_due' && <span className="desk-feed-detail">Mandatory report · due {it.dueAt ? fmtDate(it.dueAt) : 'soon'}</span>}
+              </span>
+              <span className="desk-feed-date">{fmtDate(it.ts)}</span><Icon name="arrow-up-right" size={16} />
+            </button>
+          ))}
+          {filteredActivity.length === 0 && <p className="desk-empty">{t('desk.noActivity')}</p>}
+        </div>
+        {filteredActivity.length > 8 && <button className="desk-show-more" onClick={() => setShowAllActivity(!showAllActivity)}>{showAllActivity ? t('desk.showLess') : t('desk.showAll')}</button>}
       </section>
       </div>
       <aside className="club-side-column">
-      <section className="home-section" aria-labelledby="home-progress-title" data-testid="home-progress">
-        <div className="club-section-heading"><div><span className="club-eyebrow">{t('home.foundations')}</span><h3 id="home-progress-title">{t('home.progressTitle')}</h3></div><Icon name="shield-check" size={22} /></div>
+      <section className="home-section desk-readiness" aria-labelledby="home-progress-title" data-testid="home-progress">
+        <div className="desk-panel-heading"><div><span className="club-eyebrow">{t('desk.operations')}</span><h3 id="home-progress-title">{t('desk.readiness')}</h3></div><Icon name="shield-check" size={20} /></div>
         <div className="list-rows">
           {progress.map((p) => (
-            <button key={p.key} className="list-row home-row" onClick={() => onNavigate(p.target)}>
+            <button key={p.key} className="list-row home-row desk-readiness-row" onClick={() => onNavigate(p.target)}>
               <span className={`home-state ${p.done ? 'done' : ''}`} aria-hidden="true"><Icon name={p.done ? 'check' : 'chevron-right'} size={12} /></span>
               <span className="grow">{p.label}</span>
               <span className={p.done ? 'home-ok' : 'dim'}>{p.state}</span>
@@ -164,13 +174,13 @@ export function HomeScreen({ session, tick, openPlayer, unreadMessages, verLevel
           ))}
         </div>
       </section>
-      <section className="home-section" aria-labelledby="home-quick-title" data-testid="home-quick">
-        <h3 id="home-quick-title">{t('home.quickTitle')}</h3>
+      <section className="home-section desk-tools" aria-labelledby="home-quick-title" data-testid="home-quick">
+        <div className="desk-panel-heading"><h3 id="home-quick-title">{t('desk.tools')}</h3><Icon name="compass" size={20} /></div>
         <div className="home-quick">
-          {quick.map((q) => <button key={q.target} className="f-textbtn" onClick={() => onNavigate(q.target)}>{q.label}<Icon name="arrow-right" size={12} /></button>)}
+          {quick.map((q) => <button key={q.target} className="f-textbtn" onClick={() => onNavigate(q.target)}><Icon name={({ search: 'search', opendays: 'calendar-days', squad: 'users', shortlist: 'list-checks' } as Record<string, string>)[q.target]} size={18} /><span>{q.label}</span><Icon name="arrow-up-right" size={14} /></button>)}
         </div>
       </section>
-      </aside></div>
+      </aside></div></div>
     </div>
   );
 }

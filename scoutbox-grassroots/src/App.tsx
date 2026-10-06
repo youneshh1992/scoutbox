@@ -619,7 +619,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
           </div>
         )}
         {activeSection && <SecondaryNav section={activeSection} activeItemId={loc.itemId} onNavigate={setScreen} />}
-        <div className={`content grass-content ${screen === 'feed' ? 'grass-home-content' : ''}`}>
+        <div data-screen={screen} className={`content grass-content ${screen === 'feed' ? 'grass-home-content' : ''}`}>
           {/* M24A — the reference page heading; the top bar keeps the document <h1>. */}
           <div className="f-heading"><p className="f-display" aria-hidden="true">{screenLabel}</p></div>
           {/* M24F.2 — the Home: welcome, one primary action, counts, attention, club progress, activity, quick actions. */}

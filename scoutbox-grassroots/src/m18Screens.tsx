@@ -299,8 +299,8 @@ function SecondLookCard({
   const open = item.status === 'open';
 
   return (
-    <article className="section" aria-label={`${t('m18.sl.cardLabel')}: ${item.playerName ?? t('m18.sl.playerWithheld')}`}>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'baseline' }}>
+    <article className="section desk-secondlook" aria-label={`${t('m18.sl.cardLabel')}: ${item.playerName ?? t('m18.sl.playerWithheld')}`}>
+      <div className="desk-review-head">
         <h3 style={{ margin: 0 }}>{item.playerName ?? t('m18.sl.playerWithheld')}</h3>
         {item.kindLabel && <span className="pill blue">{item.kindLabel}</span>}
         <span className="pill">{statusLabel(item.status)}</span>
@@ -313,27 +313,23 @@ function SecondLookCard({
         <div className="notice block" style={{ marginTop: 8 }}>{t('m18.sl.playerUnavailable')}</div>
       )}
 
-      {/* What this club decided, and when. Stated, never judged. */}
-      <div style={{ marginTop: 8, fontSize: 13 }}>
-        <div>
-          <b>{t('m18.sl.archivedOn')}:</b>{' '}
-          {item.decisionAt ? fmtDate(item.decisionAt) : <span className="dim">—</span>}
+      <dl className="desk-review-history">
+        <div><dt>{t('m18.sl.archivedOn')}</dt><dd>{item.decisionAt ? fmtDate(item.decisionAt) : '—'}
           {item.archivedStatus && <> · <span className="pill">{archivedLabel(item.archivedStatus)}</span></>}
-        </div>
-        <div style={{ marginTop: 4 }}>
-          <b>{t('m18.sl.originalReason')}:</b>{' '}
+        </dd></div>
+        <div><dt>{t('m18.sl.originalReason')}</dt><dd>
           {(item.archiveReasonCodes ?? []).length > 0
             ? (item.archiveReasonCodes ?? []).map(reasonLabel).join(' · ')
             : <span className="dim">{t('m18.sl.noReasonRecorded')}</span>}
-        </div>
-      </div>
+        </dd></div>
+      </dl>
 
       {item.summary && <div style={{ marginTop: 8, fontSize: 13.5 }}>{item.summary}</div>}
 
       {/* Every change, with a tick each. A change that REDUCES the evidence is
           marked as such in words — it is never framed as wrongdoing. */}
-      <div style={{ marginTop: 10 }}>
-        <b style={{ fontSize: 13 }}>{t('m18.sl.newSince')}</b>
+      <div className="desk-review-changes">
+        <h4>{t('m18.sl.newSince')}</h4>
         {changes.length === 0 && <div className="dim" style={{ fontSize: 13 }}>{t('m18.sl.noChanges')}</div>}
         <ul style={{ margin: '4px 0 0', paddingInlineStart: 20 }}>
           {changes.map((c, i) => (

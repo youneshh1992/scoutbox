@@ -79,3 +79,10 @@ supersedes earlier Grassroots light/flat/minimalist presentation instructions;
 it does not alter the approved Player baseline or protected business rules.
 Keep the new styling scoped to authenticated Grassroots. Preserve the existing
 authentication pages and exact ScoutBox logo and #00e676 brand green.
+
+The follow-up Grassroots refinement uses `scoutDesk.css` after `clubhouse.css`:
+professional scouting registers, compact operational sections, a desktop Film
+Room and structured player dossiers. Preserve this direction across every
+workspace page; avoid reintroducing repeated rounded cards around paragraphs.
+The Clubhouse hero and earthy ScoutBox green identity remain. See the refinement
+and validation scope in `GRASSROOTS_CLUBHOUSE.md`.
