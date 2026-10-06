@@ -1,3 +1,4 @@
+import { ProSquadBoard } from './proExperience';
 import { RecordFacts, DetailItems, sentenceCase } from './RecordDetails';
 // M12 org screens: Assessments (with offline drafts), Recruitment cases,
 // Squad Planner, Opportunities, Campaigns, Video Workspace, Outcomes,
@@ -6,7 +7,7 @@ import { RecordFacts, DetailItems, sentenceCase } from './RecordDetails';
 // announce via aria-live, and everything operates by keyboard.
 import { Hint } from '../../design-system/About';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Icon } from '../../design-system/icons';
+import { ProGlyph as Icon } from './proExperience';
 import { api, type Session } from './api';
 import {
   m12, type Assessment, type AssessmentRating, type CaseRec, type Campaign,
@@ -385,6 +386,7 @@ export function SquadPlannerScreen({ session, tick, notify }: ScreenProps) {
   return (
     <div>
       <Hint>{t('planner.noScores')}</Hint>
+      {planner && <ProSquadBoard formation={planner.formation} roles={planner.roles}/>}
       <div className="stat-grid">
         <div className="stat"><b>{planner?.formation ?? '—'}</b><span>{t('planner.formation')}</span></div>
         <div className="stat"><b>{planner?.roles.length ?? 0}</b><span>{t('planner.roles')}</span></div>

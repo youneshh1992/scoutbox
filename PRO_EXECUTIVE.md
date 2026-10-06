@@ -46,8 +46,9 @@ objectives, network shares and decision reviews use distinct facts and dates.
 Integrations has a horizontal tool selector, with each existing workflow kept
 in its own panel. Labels, errors and status wording use consistent sentence case.
 
-This changes only Pro presentation. API payloads, access rules, evidence
-semantics and the approved Grassroots/Player sources remain unchanged.
+These presentation refinements preserve API payloads, access rules, evidence
+semantics and the approved Grassroots/Player sources. The additional Pro tools
+below use existing endpoints and permissions.
 
 ## References
 
@@ -76,3 +77,49 @@ Build distributable artifacts with `node e2e/buildDemos.mjs`, then run
 `node e2e/demoFreshness.test.mjs`. The Pro artifact is
 `e2e/dist/scoutbox-club-demo.html`. Generated HTML is not the source of truth.
 Publishing a source commit does not update an external Claude artifact.
+
+
+## Pro workspace tools and presentation — 6 October follow-up
+
+The Founder requested a deeper Pro redesign and features exclusive to this app.
+The new Pro layer uses graphite and blue-slate surfaces, ScoutBox green actions,
+original two-tone navigation glyphs, a shield-shaped club identity, a compact
+account footer and category selectors with descriptive page entries. The
+workspace tiles stay visible while the page index scrolls. Traditional search,
+notification and reporting actions retain their existing behaviour.
+
+- Film Room adds an in/out timeline, range looping, 0.04-second precision steps,
+  J/K/L and I/O shortcuts, event labels, private notes, saved segment recall and
+  existing-playlist assignment. Segments save through the existing M12 API and
+  appear in Evidence & Video. Range validation respects the ten-minute limit;
+  precision steps are time increments, not guaranteed source-frame steps.
+- Discovery offers dossier and list views plus CSV export of the visible,
+  permitted player fields. Spreadsheet formula prefixes are escaped.
+- Analytics offers bar and table modes, CSV export, and ring views for additive
+  categories. Funnel stages do not use a ring or a summed total, because the
+  same players can appear at multiple stages. Small-group suppression remains.
+- Squad Planner has an interactive pitch of recorded role groups and an
+  inspector for required/preferred facts. It does not invent a starting XI.
+- Network separates relationships, shared access and transition packs. Its
+  selectable diagram uses recorded group members, not geographic or inferred
+  links. Existing grant, revocation and transition-access controls remain.
+
+The additional files are `proExperience.tsx`, `proExperience.css`,
+`proClipTools.tsx`, `proClipModel.ts` and `proExport.ts`. These are Pro app
+features; Grassroots and Player sources are unchanged. Server authorization
+remains authoritative. No new subscription-billing rules are introduced.
+The demo stores annotations in tab memory and now resolves each source clip to
+its actual player and media URL instead of hard-coding the first player.
+
+Additional workflow references: [Linear's design refresh](https://linear.app/now/behind-the-latest-design-refresh),
+[Stripe's dashboard](https://stripe.com/blog/dashboard-updates-oct-2020), and
+[DaVinci Resolve's editing workspace](https://www.blackmagicdesign.com/products/davinciresolve/edit/).
+These informed hierarchy, focused tools and visual organisation, not copied
+branding or claims of integration.
+
+Validation for this follow-up: TypeScript, production/demo build, 504 navigation
+checks, 127 case-navigation checks, icon parity and 18 Pro utility checks.
+Browser checks cover saved segments on a second player and their linked profile,
+playlist assignment, chart modes, dossier/list switching, role selection,
+network tabs, desktop and 390px layouts. The Pro preview remains a local design
+proposal until the Founder approves it.

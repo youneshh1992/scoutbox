@@ -540,9 +540,9 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
         brand={{ short: 'P', long: 'Pro' }}
         org={{ initials: initials(session.org.name), name: session.org.name, line: session.org.plan }}
         footer={
-          <div className="p-account">
+          <div className="p-account"><span className="pro-account-caption">Your account</span>
             <div className="p-who"><span className="p-avatar" aria-hidden="true">{initials(session.scoutName)}</span><div><strong>{session.scoutName}</strong><small>{session.role}</small></div></div>
-            <details className="pro-account-settings"><summary>Account settings <Icon name="chevron-right" size={13}/></summary><OrgChips org={session.org} /><div className="p-links">
+            <details className="pro-account-settings"><summary><Icon name="settings-2" size={15}/><span>Manage account</span><Icon name="chevron-right" size={12}/></summary><OrgChips org={session.org} /><div className="p-links">
               <button onClick={() => setScreen('verification')}><Icon name="badge-check" size={14} />{t('navsec.myVerification')}</button>
               <label title={t('common.machineTranslated')}>
                 {t('common.language')}:{' '}

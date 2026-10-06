@@ -1,4 +1,5 @@
 import { RecordFacts, DetailItems, sentenceCase } from './RecordDetails';
+import { ProNetworkMap } from './proExperience';
 import { ProChart } from './proDesign';
 // M13 org screens: Imports & Integrations, Coverage, Calibration, Scouting
 // Insight (exposure + review queue + evidence gaps), Club Network (groups +
@@ -8,7 +9,7 @@ import { ProChart } from './proDesign';
 // states, live/demo through the m13 client.
 import { Hint } from '../../design-system/About';
 import { useEffect, useState, type ReactNode } from 'react';
-import { Icon } from '../../design-system/icons';
+import { ProGlyph as Icon } from './proExperience';
 import type { Session } from './api';
 import {
   m13, type CalibrationSession, type CoverageAssignment, type EvidenceGap,
@@ -313,7 +314,7 @@ export function InsightScreen({ session, notify, openPlayer }: ScreenProps) {
       {report ? (
         <div className="pro-insight-analysis">
           <div className="pro-insight-charts">
-            <ProChart title={`${t('m13.exp.funnel')} · ${report.funnel.windowDays} days`} items={report.funnel.stages.map(st=>({label:st.key.replace(/_/g,' ').replace(/^./,c=>c.toUpperCase())+(st.of!==undefined ? ` (of ${st.of})` : ''),value:st.players}))} note={report.funnel.definition}/>
+            <ProChart additive={false} title={`${t('m13.exp.funnel')} · ${report.funnel.windowDays} days`} items={report.funnel.stages.map(st=>({label:st.key.replace(/_/g,' ').replace(/^./,c=>c.toUpperCase())+(st.of!==undefined ? ` (of ${st.of})` : ''),value:st.players}))} note={report.funnel.definition}/>
             {report.birthQuarter.suppressed
               ? <section className="pro-chart"><h3>{t('m13.exp.birthQ')}</h3><div className="notice block"><Icon name="lock-keyhole" size={13} /> {t('m13.exp.suppressed')}</div></section>
               : <ProChart title={t('m13.exp.birthQ')} items={Object.entries(report.birthQuarter.quarters ?? {}).map(([label,value])=>({label,value}))} note={report.birthQuarter.note}/>}
@@ -375,19 +376,23 @@ export function NetworkScreen({ session, notify }: ScreenProps) {
   const [groups, reloadGroups] = useAsync(() => m13.listGroups(session), [session]);
   const [grants, reloadGrants] = useAsync(() => m13.listGrants(session), [session]);
   const [transitions] = useAsync(() => m13.listTransitions(session), [session]);
+  const [networkTab, setNetworkTab] = useState('relationships');
+  const members = [...new Map((groups?.items ?? []).flatMap(g=>g.members).filter(m=>m.id!==session.org.id).map(m=>[m.id,m])).values()];
   const [pack, setPack] = useState<Awaited<ReturnType<typeof m13.transitionPack>> | null>(null);
   const [shared, setShared] = useState<{ from: string; resource: SharedResource } | null>(null);
 
   return (
-    <div>
-      <div className="section">
+    <div className="pro-network-workspace">
+      <div className="pro-workflow-tabs" role="group" aria-label="Network views">{[['relationships','Relationships',groups?.items.length],['access','Shared access',(grants?.given.length??0)+(grants?.received.length??0)],['transitions','Transition packs',transitions?.items.length]].map(([id,label,count])=><button key={String(id)} aria-pressed={networkTab===id} onClick={()=>setNetworkTab(String(id))}><span>{label}</span><b>{count??'—'}</b></button>)}</div>
+      {networkTab==='relationships'&&groups&&<ProNetworkMap club={session.org.name} members={members}/>}
+      <div className="section pro-network-groups" hidden={networkTab!=='relationships'}>
         <h3>{t('m13.grp.title')}</h3>
         {(groups?.invites ?? []).map((iv) => (
           <div key={iv.groupId} className="list-row"><span className="grow">{t('m13.grp.invitedTo')} <b>{iv.name}</b></span>
             <button onClick={async () => { await m13.acceptGroup(session, iv.groupId); reloadGroups(); notify('Joined — nothing is shared until a specific grant.'); }}>{t('m13.grp.accept')}</button></div>
         ))}
         {(groups?.items ?? []).map((g) => (
-          <div key={g.id} className="section" style={{ marginTop: 8 }}>
+          <div key={g.id} className="pro-network-group">
             <b>{g.name}</b> {g.youAdmin && <span className="pill gold">Admin</span>}
             <div className="dim" style={{ fontSize: 12.5 }}><DetailItems items={g.members.map(mm => mm.name)} /></div>
             {g.programmes.map((p) => <div key={p.id} className="dim" style={{ fontSize: 12.5 }}>{p.name} {p.region ? `(${p.region})` : ''}</div>)}
@@ -418,7 +423,7 @@ export function NetworkScreen({ session, notify }: ScreenProps) {
         ))}
         {groups?.items.length === 0 && <div className="dim">{t('m13.grp.none')}</div>}
       </div>
-      <div className="section">
+      <div className="section" hidden={networkTab!=='access'}>
         <h3>{t('m13.grp.grants')}</h3>
         {(grants?.given ?? []).map((g) => (
           <div key={g.id} className="list-row">
@@ -444,7 +449,7 @@ export function NetworkScreen({ session, notify }: ScreenProps) {
           </div>
         )}
       </div>
-      <div className="section">
+      <div className="section" hidden={networkTab!=='transitions'}>
         <h3>{t('m13.trn.title')}</h3>
         <Hint className="notice" style={{ fontSize: 12.5 }}>{transitions?.note}</Hint>
         {(transitions?.items ?? []).map((tr) => (

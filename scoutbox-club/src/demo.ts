@@ -322,6 +322,15 @@ function similarity(a: Player, b: Player): number {
   return Math.round(Math.min(score, 100));
 }
 
+/** Resolve a permitted source for demo annotations without inventing an owner. */
+export function demoAnnotationSource(session: Session, mediaId: string, note?: string) {
+  const owner = PLAYERS.find(p => p.media.some(m => m.id === mediaId));
+  if (!owner) throw new Error('Source footage was not found.');
+  if (!canSee(owner, session.org)) throw new Error('This source is not available to your organisation.');
+  if (note && MOD_RES.some(re => re.test(note))) throw new Error('Please remove contact details or unsafe content from the note.');
+  return { playerId: owner.id, mediaUrl: owner.media.find(m => m.id === mediaId)?.url ?? undefined };
+}
+
 export const demoApi: ScoutboxApi = {
   listOrgs: () => delay(ORGS),
 

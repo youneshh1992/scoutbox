@@ -21,7 +21,7 @@ import {
   INBOX_ITEM, MAX_SHORTCUTS, type NavContext, type NavGroupView, type NavItem, type NavLocation, type NavSection,
   allItems, filterSections, groupedChildren, searchNav, stripLayout,
 } from './nav';
-import { Icon } from './icons';
+import { ProGlyph as Icon, ClubCrest, PRO_PAGE_META } from './proExperience';
 import { type Theme } from '../../design-system/theme';
 import { t } from './i18n';
 
@@ -111,16 +111,16 @@ export function Sidebar({
         </div>
         {org && (
           <div className="p-org" aria-label={org.name}>
-            <span className="p-avatar club" aria-hidden="true">{org.initials}</span>
-            <span><strong>{org.name}</strong>{org.line && <small>{org.line}</small>}</span>
+            <ClubCrest initials={org.initials}/>
+            <span className="pro-club-identity"><small>Club workspace</small><strong>{org.name}</strong>{org.line && <em>{org.line} membership</em>}</span>
           </div>
         )}
 
-        <div className="nav-scroll" data-testid="nav-scroll">
         {!collapsed && <div className="pro-workspace-switcher" aria-label="Workspaces">
           {sections.map(s=><button key={s.id} className={location.sectionId===s.id?'selected':''} aria-label={tr(s.labelKey)} aria-current={location.sectionId===s.id?'page':undefined} onClick={() => { if (phone && s.children.length > 1) onNavigate(s.children[0].id); else go(s.children[0].id); }}><Icon name={s.icon} size={21}/><span>{tr(s.labelKey)}</span>{!!badges[s.id] && <b>{badges[s.id]}</b>}</button>)}
           <button className={location.itemId==='messages'?'selected':''} aria-label={t('nav.messages')} aria-current={location.itemId==='messages'?'page':undefined} onClick={()=>go('messages')}><Icon name="messages-square" size={21}/><span>{t('nav.messages')}</span>{unreadMessages>0&&<b>{unreadMessages}</b>}</button>
         </div>}
+        <div className="nav-scroll" data-testid="nav-scroll">
         {!collapsed && location.sectionId && <div className="pro-nav-caption">{location.sectionId && sections.find(s=>s.id===location.sectionId)?.children.length !== 1 ? 'Workspace pages' : 'Quick access'}</div>}
         {!collapsed && location.sectionId==='home' && <div className="pro-home-nav">{sections.flatMap(s=>s.children).filter(c=>['search','filmroom','dashboard','briefs'].includes(c.id)).map(c=><button key={c.id} onClick={()=>go(c.id)}><span>{tr(c.labelKey)}</span><Icon name="arrow-up-right" size={14}/></button>)}</div>}
         <div className="pro-context-nav">{sections.filter(s=>collapsed || (s.id===location.sectionId && s.children.length>1)).map((s) => (
@@ -232,7 +232,7 @@ function SectionRow({ section: s, active, activeItemId, expanded, onToggle, coll
       aria-current={activeItemId === c.id ? 'page' : undefined}
       onClick={() => onNavigate(c.id)}
     >
-      {tr(c.labelKey)}
+      <Icon name={PRO_PAGE_META[c.id]?.icon ?? "files"} size={18}/><span><strong>{tr(c.labelKey)}</strong><small>{PRO_PAGE_META[c.id]?.note}</small></span><span className="pro-page-arrow" aria-hidden="true">↗</span>
     </button>
   ));
   const children = (role: 'menuitem' | undefined, accordion: boolean) => groups.map((g) => {
@@ -324,7 +324,10 @@ function SectionRow({ section: s, active, activeItemId, expanded, onToggle, coll
       </div>
       {multi && expanded && (
         <div id={panelId} className="nav-children" aria-label={`${t('navsec.pagesIn')} ${label}`}>
-          {children(undefined, true)}
+          {groups.some(g => g.labelKey) ? <>
+            <div className="pro-category-selector" role="group" aria-label={`${label} categories`}>{groups.map((g,i)=><button key={g.id} aria-pressed={openGroup===g.id} aria-controls={`${panelId}-selected`} onClick={()=>setChosenGroup(g.id)}><span>{String(i+1).padStart(2,'0')}</span>{g.labelKey ? tr(g.labelKey) : label}</button>)}</div>
+            <div id={`${panelId}-selected`} className="pro-category-pages">{groups.filter(g=>g.id===openGroup).map(g=><div key={g.id} role="group" aria-label={g.labelKey ? tr(g.labelKey) : label}><header><strong>{g.labelKey ? tr(g.labelKey) : label}</strong><span>{g.children.length} tools</span></header>{pages(g,undefined)}</div>)}</div>
+          </> : <div className="pro-category-pages">{children(undefined,false)}</div>}
         </div>
       )}
     </div>
@@ -461,11 +464,11 @@ export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOp
           {title}
         </h1>
       </div>
-      <div className="p-toolbar">
+      <div className="p-toolbar"><span className="pro-toolbar-label">Workspace tools</span>
 
         <button className="p-top-search" onClick={onOpenPalette} aria-label={t('navsec.searchAria')} title={t('navsec.searchAria')}>
           <Icon name="search" size={18} />
-          <span>{t('navsec.searchWorkspace')}</span>
+          <span>Search ScoutBox Pro</span>
           <kbd>{isMac ? '⌘ K' : 'Ctrl K'}</kbd>
         </button>
         {live
@@ -481,7 +484,7 @@ export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOp
           <Icon name="bell" size={18} />{unread > 0 && <span className="bell-badge" aria-hidden="true">{unread}</span>}
         </button>
         <button className="topbar-safety" onClick={onReport} title={t('navsec.reportAria')} aria-label={t('navsec.reportAria')}>
-          <Icon name="flag" size={18} /> <span className="safety-long">{t('navsec.report')}</span>
+          <Icon name="flag" size={18} /> <span className="safety-long">Report / Block</span>
         </button>
       </div>
     </header>

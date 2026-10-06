@@ -2,6 +2,7 @@
 // Populated with realistic synthetic examples of every feature so the demo
 // artifact SHOWS the real screens working; state lives in this tab's memory.
 import type { Session } from './api';
+import { demoAnnotationSource } from './demo';
 import type {
   M12Api, Passport, Assessment, AssessmentRating, CompareResult, Segment, Playlist,
   CaseRec, StaffRow, Tactical, Vacancy, Candidate, Opportunity, Application,
@@ -333,7 +334,9 @@ export const demoM12: M12Api = {
 
   listSegments: async (_s, playerId) => delay(SEGMENTS.filter((x) => !playerId || x.playerId === playerId)),
   createSegment: async (s, mediaId, input) => {
-    const seg: Segment = { id: id('seg'), mediaId, playerId: 'pl-adeyemi', startS: input.startS, endS: input.endS, labels: input.labels, eventType: input.eventType ?? null, note: input.note ?? null, createdBy: { name: s.scoutName }, createdAt: Date.now() };
+    if (!(input.startS >= 0) || !(input.endS > input.startS) || input.endS - input.startS > 600) throw new Error('Choose a valid segment of up to 10 minutes.');
+    const source = demoAnnotationSource(s, mediaId, input.note);
+    const seg: Segment = { id: id('seg'), mediaId, ...source, startS: input.startS, endS: input.endS, labels: input.labels, eventType: input.eventType ?? null, note: input.note?.slice(0, 300) ?? null, createdBy: { name: s.scoutName }, createdAt: Date.now() };
     SEGMENTS.push(seg);
     return delay(seg);
   },

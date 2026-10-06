@@ -1,8 +1,10 @@
+import { exportCsv } from './proExport';
+import { ProClipTools } from './proClipTools';
 import { DetailItems } from './RecordDetails';
 import { Hint } from '../../design-system/About';
 import { ProChart } from './proDesign';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Icon } from '../../design-system/icons';
+import { ProGlyph as Icon } from './proExperience';
 import { pressable, useDialog } from './dialog';
 import {
   api, ApiError,
@@ -301,17 +303,6 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
     setIndex((i) => Math.min(Math.max(i + dir, 0), Math.max(deck.length - 1, 0)));
   }, [deck.length]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLElement && (e.target.closest('input,select,textarea,button,video') || e.target.isContentEditable)) return;
-      if (['ArrowDown','ArrowRight','ArrowUp','ArrowLeft'].includes(e.key)) e.preventDefault();
-      if (e.key === 'ArrowDown' || e.key === 'ArrowRight') step(1);
-      if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') step(-1);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [step]);
-
   const submitTags = async () => {
     if (!current || pendingTags.length === 0) return;
     try {
@@ -330,8 +321,9 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
     <section className="pro-film-viewer"><header><span><Icon name="video" size={16}/> Screening room</span><span className="pro-film-counter">{String(index+1).padStart(2,'0')} / {String(deck.length).padStart(2,'0')}</span></header>
       <div className="filmroom-stage"><video ref={videoRef} key={current.media.id} className="filmroom-video" src={api.mediaUrl(current.media.url)!} controls playsInline onTimeUpdate={e=>setPlayhead(e.currentTarget.currentTime)} onLoadedMetadata={e=>{setDuration(Number.isFinite(e.currentTarget.duration)?e.currentTarget.duration:0);e.currentTarget.playbackRate=speed;}} /></div>
       <div className="pro-film-transport"><span>{timecode(playhead)}</span><input type="range" aria-label="Seek footage" min={0} max={duration || 0} step={.1} value={Math.min(playhead,duration)} disabled={!duration} onChange={e=>{if(videoRef.current){videoRef.current.currentTime=Number(e.target.value);setPlayhead(Number(e.target.value));}}}/><span>{timecode(duration)}</span><select aria-label="Playback speed" value={speed} onChange={e=>{const value=Number(e.target.value);setSpeed(value);if(videoRef.current)videoRef.current.playbackRate=value;}}>{[.5,.75,1,1.5,2].map(x=><option key={x} value={x}>{x}×</option>)}</select></div>
+      <ProClipTools session={session} mediaId={current.media.id} playerId={current.player.id} videoRef={videoRef} duration={duration} playhead={playhead} notify={notify} onStep={step}/>
       <div className="pro-film-caption" data-testid="filmroom-caption"><h3>{current.media.title}</h3><p>{current.media.views} views · {t('term.profileSignal')} {current.player.trustScore}%</p>{current.media.verifiedClip && <span className="pill green">Verified Clip — filmed at a confirmed fixture</span>}</div>
-      <div className="filmroom-controls"><button onClick={()=>step(-1)} disabled={index===0}><Icon name="chevron-left" size={15}/> Previous</button><span className="dim">Use arrow keys to move between clips</span><button onClick={()=>step(1)} disabled={index>=deck.length-1}>Next clip <Icon name="arrow-right" size={15}/></button></div>
+      <div className="filmroom-controls"><button onClick={()=>step(-1)} disabled={index===0}><Icon name="chevron-left" size={15}/> Previous</button><span className="dim">↑ / ↓ to change clips · Space to play</span><button onClick={()=>step(1)} disabled={index>=deck.length-1}>Next clip <Icon name="arrow-right" size={15}/></button></div>
     </section>
     <aside className="pro-film-inspector"><span className="pro-eyebrow">Player dossier</span><button className="pro-film-player" onClick={()=>openPlayer(current.player.id)}><strong>{current.player.name}</strong><Icon name="arrow-up-right" size={17}/></button><div className="pro-film-player-meta"><span>{current.player.position}</span><span>{current.player.age} years</span>{current.player.guardianManaged && <span className="pill red">U18 · guardian-managed</span>}</div><h4>What did you notice?</h4><p>Select the qualities you observed in this clip.</p><div className="filmroom-tags" aria-label="Tag what you saw">{tagOptions.map(tag=><button key={tag} aria-pressed={pendingTags.includes(tag)} onClick={()=>setPendingTags(p=>p.includes(tag)?p.filter(x=>x!==tag):[...p,tag])}>{TAG_LABELS[tag]??tag}</button>)}</div><button className="primary" disabled={!pendingTags.length} onClick={submitTags}>Save {pendingTags.length || ''} {pendingTags.length === 1 ? 'observation' : 'observations'}</button><p className="pro-data-note">Observations are aggregated anonymously into the player’s “what scouts noticed”.</p></aside>
   </div>;
@@ -436,6 +428,7 @@ export function CompareModal({ session, playerIds, onClose }: {
 /* ------------------------------------------------------------- Search */
 
 export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps) {
+  const [view, setView] = useState<'dossiers'|'list'>('dossiers');
   const [filters, setFilters] = useState<SearchFilters>({});
   const [players, setPlayers] = useState<Player[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -533,11 +526,13 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
       <div className="dim" style={{ fontSize: 12, marginBottom: 8 }} data-ordering>
         {t('discover.ordering')}
       </div>
-      <div className="player-grid">
+      <div className="pro-results-toolbar"><div><strong>{players.length}</strong><span>Players in this view</span></div><div role="group" aria-label="Player presentation"><button aria-pressed={view==='dossiers'} onClick={()=>setView('dossiers')}>Dossiers</button><button aria-pressed={view==='list'} onClick={()=>setView('list')}>List</button><button disabled={!players.length} onClick={()=>exportCsv('scoutbox-pro-visible-players.csv',['Player','Position','Age','Country','Preferred foot','Height (cm)','Availability'],players.map(p=>[p.name,p.position,p.age,p.country,p.foot,p.heightCm,AVAILABILITY_LABELS[p.availability]??p.availability]))}><Icon name="download" size={15}/> Export view</button></div></div>
+      <div className={`player-grid pro-player-results ${view}`}>
         {players.map((p) => (
           <div key={p.id} className="player-card" {...pressable(() => openPlayer(p.id))}>
+            <div className="pro-dossier-top"><span className="pro-dossier-position">{p.position}</span><span>Player dossier</span>{p.identityVerified&&<Icon name="badge-check" size={18}/>}</div>
             <div className="row1">
-              <span className="name">{p.name}</span>
+              <span className="name">{p.name}<small>{p.city ? `${p.city}, ` : ""}{p.country}</small></span>
               <span style={{ display: 'flex', gap: 6, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
                 <label className="chk" title="Select to compare">
                   <input type="checkbox" checked={compareIds.includes(p.id)} onChange={() => toggleCompare(p.id)} /> 
@@ -1001,7 +996,7 @@ export function FunnelScreen({ session, tick }: ScreenProps) {
   };
   return (
     <>
-      <ProChart title="Recruitment activity by stage" items={funnel.stages.map(s=>({label:s.label,value:s.count}))} note="Recorded activity counts. A player may appear at more than one stage; these are not player ratings."/>
+      <ProChart additive={false} title="Recruitment activity by stage" items={funnel.stages.map(s=>({label:s.label,value:s.count}))} note="Recorded activity counts. A player may appear at more than one stage; these are not player ratings."/>
       <div className="pro-stage-ratios">{funnel.stages.map((s,i)=>pct(i)!==null && <span key={s.key}>{s.label}: <b>{pct(i)}%</b> of preceding stage</span>)}</div>
       {funnel.byScout.length > 0 && (
         <div className="section">
