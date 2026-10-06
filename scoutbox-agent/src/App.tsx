@@ -435,9 +435,8 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
         footer={
           <div className="p-account">
             <div className="p-who"><span className="p-avatar" aria-hidden="true">{initials(session.scoutName)}</span><div><strong>{session.scoutName}</strong><small>{session.role}</small></div></div>
-            <OrgChips org={session.org} />
             {me && <div className="org-chips" data-testid="my-tiers">{me.affiliation.tiers.map((x) => <span key={x} className="pill blue">{t(`tier.${x}` as Parameters<typeof t>[0])}</span>)}</div>}
-            <details className="a-account-menu"><summary>Account settings <Icon name="chevron" size={13}/></summary><div className="p-links">
+            <details className="a-account-menu"><summary>Account settings <Icon name="chevron" size={13}/></summary><div className="p-links"><OrgChips org={session.org} />
               <label title={t('common.machineTranslated')}>
                 {t('common.language')}:{' '}
                 <select aria-label={t('common.language')} value={lang} onChange={(e) => { setLang(e.target.value as 'en' | 'fr'); setLangTick((x) => x + 1); }}>
