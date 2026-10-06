@@ -447,9 +447,10 @@ export function SecondaryNav({ section, activeItemId, onNavigate }: {
  */
 export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOpen = false, theme, onToggleTheme, onOpenPalette, onToggleBell, onReport, onOpenDrawer }: {
   title: string; crumb?: string | null; edition?: string; live: boolean; unread: number; bellOpen: boolean; drawerOpen?: boolean;
-  theme: Theme; onToggleTheme: () => void; onOpenPalette: () => void;
+  theme: Theme; onToggleTheme: () => void; onOpenPalette: (query?: string) => void;
   onToggleBell: () => void; onReport: () => void; onOpenDrawer: () => void;
 }) {
+  const [toolbarQuery, setToolbarQuery] = useState('');
   const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform ?? '');
   return (
     <header className="topbar">
@@ -466,11 +467,10 @@ export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOp
       </div>
       <div className="p-toolbar"><span className="pro-toolbar-label">Workspace tools</span>
 
-        <button className="p-top-search" onClick={onOpenPalette} aria-label={t('navsec.searchAria')} title={t('navsec.searchAria')}>
-          <Icon name="search" size={18} />
-          <span>Search the workspace</span>
-          <kbd>{isMac ? '⌘ K' : 'Ctrl K'}</kbd>
-        </button>
+        <form className="pro-search-field" role="search" onSubmit={e=>{e.preventDefault();onOpenPalette(toolbarQuery);setToolbarQuery('')}}>
+          <Icon name="search" size={20}/><input type="search" aria-label="Search workspace tools" placeholder="Search ScoutBox Pro" value={toolbarQuery} onChange={e=>setToolbarQuery(e.target.value)}/>
+          <button type="submit" aria-label="Open workspace search" title={t('navsec.searchAria')}><span>{isMac ? '⌘ K' : 'Ctrl K'}</span><Icon name="arrow-right" size={16}/><span className="pro-mobile-search"><Icon name="search" size={20}/></span></button>
+        </form>
         {live
           ? <span className="live-dot on" role="status" aria-label={t('navsec.liveOk')} title={t('navsec.liveOk')} />
           : <span className="pill red" role="status">○ {t('navsec.liveOff')}</span>}
@@ -481,10 +481,10 @@ export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOp
           aria-label={`Notifications${unread > 0 ? ` — ${unread} unread` : ''}`}
           aria-expanded={bellOpen}
         >
-          <Icon name="bell" size={18} />{unread > 0 && <span className="bell-badge" aria-hidden="true">{unread}</span>}
+          <Icon name="bell" size={22} /><span className="pro-alert-label">Alerts</span>{unread > 0 && <span className="bell-badge" aria-hidden="true">{unread}</span>}
         </button>
         <button className="topbar-safety" onClick={onReport} title={t('navsec.reportAria')} aria-label={t('navsec.reportAria')}>
-          <Icon name="flag" size={18} /> <span className="safety-long">Report or block</span>
+          <Icon name="shield-alert" size={22} /> <span className="safety-long">Report / block</span>
         </button>
       </div>
     </header>
@@ -507,9 +507,10 @@ export function OrgChips({ org }: { org: { type: string; trustedPartner?: boolea
 }
 
 // ---------------------------------------------------------- CommandPalette
-export function CommandPalette({ ctx, open, onClose, onNavigate, shortcuts, onTogglePin }: {
+export function CommandPalette({ ctx, open, initialQuery = '', onClose, onNavigate, shortcuts, onTogglePin }: {
   ctx: NavContext;
   open: boolean;
+  initialQuery?: string;
   onClose: () => void;
   onNavigate: (id: ScreenId) => void;
   shortcuts: ScreenId[];
@@ -518,7 +519,7 @@ export function CommandPalette({ ctx, open, onClose, onNavigate, shortcuts, onTo
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => { if (open) { setQ(''); setSel(0); setTimeout(() => inputRef.current?.focus(), 0); } }, [open]);
+  useEffect(() => { if (open) { setQ(initialQuery); setSel(0); setTimeout(() => inputRef.current?.focus(), 0); } }, [open, initialQuery]);
   if (!open) return null;
   const results = searchNav(q, ctx, tr);
   const go = (itemId: ScreenId) => { onNavigate(itemId); onClose(); };

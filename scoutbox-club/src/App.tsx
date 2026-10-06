@@ -398,6 +398,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
   const toggleCollapsed = useCallback(() => setCollapsed((c) => { saveCollapsed(!c); return !c; }), []);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState('');
   usePaletteHotkey(useCallback(() => setPaletteOpen(true), []));
 
   const [openPlayerId, setOpenPlayerId] = useState<string | null>(null);
@@ -510,7 +511,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
         shortcuts={shortcuts}
         onTogglePin={togglePin}
         unreadMessages={unreadMessages}
-        onOpenPalette={() => setPaletteOpen(true)}
+        onOpenPalette={(query?: string) => {setPaletteQuery(query??'');setPaletteOpen(true)}}
         drawerOpen={drawerOpen}
         onCloseDrawer={() => setDrawerOpen(false)}
         brand={{ short: 'P', long: 'Pro' }}
@@ -544,13 +545,13 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
           edition="Pro"
           theme={theme}
           onToggleTheme={onToggleTheme}
-          onOpenPalette={() => setPaletteOpen(true)}
+          onOpenPalette={(query?: string) => {setPaletteQuery(query??'');setPaletteOpen(true)}}
           onToggleBell={openBell}
           onReport={() => setSafetyOpen(true)}
           onOpenDrawer={() => setDrawerOpen(true)}
         />
         {bellOpen && (
-          <div className="bell-panel">
+          <div className="bell-panel" aria-label="Notifications"><div className="pro-alert-heading"><h3>Notifications</h3><button aria-label="Close notifications" onClick={() => setBellOpen(false)}><Icon name="x" size={17}/></button></div>
             {notifications.length === 0 && <div className="notice">Nothing yet — you'll hear the moment a player or guardian responds.</div>}
             {bellRows(notifications).slice(0, 20).map(({ n, count, unread }) => {
               // M23 P8 — the server resolved the CURRENT resource this row
@@ -651,7 +652,8 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
       <CommandPalette
         ctx={navCtx}
         open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
+        initialQuery={paletteQuery}
+        onClose={() => {setPaletteOpen(false);setPaletteQuery('')}}
         onNavigate={setScreen}
         shortcuts={shortcuts}
         onTogglePin={togglePin}

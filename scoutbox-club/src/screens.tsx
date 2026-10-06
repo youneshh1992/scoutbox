@@ -3,11 +3,11 @@ import { ProClipTools } from './proClipTools';
 import { DetailItems } from './RecordDetails';
 import { Hint } from '../../design-system/About';
 import { ProChart } from './proDesign';
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ProGlyph as Icon } from './proExperience';
 import { pressable, useDialog } from './dialog';
 import {
-  api, ApiError,
+  api, ApiError, DEMO_MODE,
   type Session, type Player, type PlayerDetail, type OrgRequest, type Trial,
   type LedgerEntry, type ProofPack, type PlanInfo, type Reputation, type SearchFilters,
   type Channel, type FiledReport, type TrialDetails,
@@ -106,24 +106,24 @@ function AgencyWall({ session }: { session: Session }) {
   if (session.org.type === 'agency') {
     return (
       <div className="wall">
-        <b>The under-18 wall is active for this account.</b>
+        <Icon name="shield-alert" size={25}/><div><b>Under-18 access is restricted</b>
         <p>
-          Under-18 players are on ScoutBox now — and agency accounts can never list, view or contact
-          any of them. The API refuses on every endpoint, regardless of what this interface asks for.
-          Under-18 representation rules apply: no agent access, no exceptions.
+          Agency accounts can only access adult players. Under-18 profiles, contact and representation are unavailable to this account.
         </p>
+      </div>
       </div>
     );
   }
   if (session.org.type === 'club' && !session.org.verified) {
     return (
       <div className="wall">
-        <b>Club verification pending — under-18 profiles are hidden.</b>
+        <Icon name="shield-alert" size={25}/><div><b>Club verification required</b>
         <p>
           Only verified clubs can search or view under-18 players. Verification requires a company
           email domain and a signed safeguarding contract; until it clears, this workspace sees the
           adult pool only.
         </p>
+      </div>
       </div>
     );
   }
@@ -170,10 +170,10 @@ export function SafetyModal({ session, notify, onClose, presetPlayerId }: {
   return (
     <>
       <div className="drawer-veil" onClick={onClose} />
-      <div className="drawer" ref={dialogRef} role="dialog" aria-modal="true" aria-label="Report & block" tabIndex={-1} style={{ width: 'min(520px, 92vw)' }}>
+      <div className="drawer pro-safety-panel" ref={dialogRef} role="dialog" aria-modal="true" aria-label="Report & block" tabIndex={-1} style={{ width: 'min(520px, 92vw)' }}>
         <div className="head">
           <div>
-            <h3>Report &amp; block</h3>
+            <span className="pro-safety-kicker"><Icon name="shield-alert" size={18} /> Trust &amp; safety</span><h3>Report &amp; block</h3>
             <div className="sub">All reports are reviewed. Urgent reports suspend communication immediately.</div>
           </div>
           <button className="close" onClick={onClose}>Close</button>
@@ -182,25 +182,25 @@ export function SafetyModal({ session, notify, onClose, presetPlayerId }: {
           <h4>What are you reporting?</h4>
           <div style={{ display: 'flex', gap: 8 }}>
             {(['player', 'scout', 'club'] as const).map((k) => (
-              <button key={k} className={targetKind === k ? 'primary' : ''} onClick={() => setTargetKind(k)}>
-                Report {k === 'player' ? 'User' : k === 'scout' ? 'Scout' : 'Club'}
+              <button key={k} className={targetKind === k ? 'selected' : ''} aria-pressed={targetKind === k} onClick={() => setTargetKind(k)}>
+                {k === 'player' ? 'Player' : k === 'scout' ? 'Scout' : 'Club'}
               </button>
             ))}
           </div>
         </div>
         <div className="section">
           <h4>{targetKind === 'player' ? 'Player id' : targetKind === 'scout' ? 'Scout name' : 'Club / org id'}</h4>
-          <input style={{ width: '100%' }} value={target} onChange={(e) => setTarget(e.target.value)}
+          <input aria-label="Report subject" style={{ width: '100%' }} value={target} onChange={(e) => setTarget(e.target.value)}
             placeholder={targetKind === 'player' ? 'e.g. pl-adeyemi' : targetKind === 'scout' ? 'e.g. the name shown on the request' : 'e.g. org-northstar'} />
         </div>
         <div className="section">
           <h4>What happened?</h4>
-          <input style={{ width: '100%' }} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Describe the behaviour" />
+          <textarea aria-label="What happened?" rows={4} style={{ width: '100%' }} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Describe the behaviour and include any relevant details." />
         </div>
         <div className="section">
-          <label className="chk" style={{ display: 'flex', gap: 8, color: 'var(--muted)' }}>
+          <label className="chk pro-safety-urgent">
             <input type="checkbox" checked={urgent} onChange={(e) => setUrgent(e.target.checked)} />
-            Urgent — suspend communication immediately pending review
+            <span><strong>Urgent report</strong><small>Suspend communication immediately while this report is reviewed.</small></span>
           </label>
         </div>
         <button className="primary" onClick={submit}>Submit report</button>
@@ -465,7 +465,7 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
   return (
     <>
       <AgencyWall session={session} />
-      <div className="filters pro-discovery-filters">
+      <div className="filters pro-discovery-filters pro-market-filters"><div className="pro-market-search"><Icon name="search" size={21}/>
         <input
           type="search"
           aria-label="Search players"
@@ -473,7 +473,7 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
           value={filters.q ?? ''}
           onChange={(e) => setFilters({ ...filters, q: e.target.value || undefined })}
         />
-        <select aria-label="Position" value={filters.position ?? ''} onChange={(e) => setFilters({ ...filters, position: e.target.value || undefined })}>
+        </div><div className="pro-market-controls"><span className="pro-filter-label">Refine search</span><select aria-label="Position" value={filters.position ?? ''} onChange={(e) => setFilters({ ...filters, position: e.target.value || undefined })}>
           <option value="">Any position</option>
           {POSITIONS.map((p) => <option key={p}>{p}</option>)}
         </select>
@@ -502,7 +502,7 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
         </label>
 
       </div>
-      <details className="pro-saved-search"><summary><Icon name="clipboard" size={16}/> Saved searches <span>{saved.length}</span></summary><div className="filters">
+      </div><details className="pro-saved-search"><summary><Icon name="clipboard" size={16}/> Saved searches <span>{saved.length}</span></summary><div className="filters">
         <input type="text" placeholder="Name this search to receive new-match alerts" value={saveName} onChange={(e) => setSaveName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && saveCurrent()} />
         <button onClick={saveCurrent}>Save search</button>
         {saved.map((s) => (
@@ -527,25 +527,13 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
       <div className={`player-grid pro-player-results ${view}`}>
         {players.map((p) => (
           <div key={p.id} className="player-card" {...pressable(() => openPlayer(p.id))}>
-            <div className="pro-dossier-top"><span className="pro-dossier-position">{p.position}</span><span>Scouting profile</span>{p.identityVerified&&<Icon name="badge-check" size={18}/>}</div>
-            <div className="row1">
-              <span className="name">{p.name}<small>{p.city ? `${p.city}, ` : ""}{p.country}</small></span>
-              <span style={{ display: 'flex', gap: 6, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
-                <label className="chk" title="Select to compare">
-                  <input type="checkbox" aria-label={`Compare ${p.name}`} checked={compareIds.includes(p.id)} onChange={() => toggleCompare(p.id)} />
-                </label>
-
-              </span>
-            </div>
-            <div className="meta">
-              <Icon name="map-pin" size={13}/> {p.city ? `${p.city}, ` : ''}{p.country}
-            </div>
+            <div className="pro-player-identity"><span className="pro-player-kit" aria-hidden="true">{p.position}</span><div><span className="pro-card-location">{p.city ? `${p.city}, ` : ''}{p.country}</span><span className="name">{p.name}{p.identityVerified&&<Icon name="badge-check" size={21} label="Identity verified"/>}</span><span className="pro-card-position">{p.position} <i/> {AVAILABILITY_LABELS[p.availability] ?? p.availability}</span></div><label className="pro-compare-pick" onClick={e=>e.stopPropagation()}><input type="checkbox" aria-label={`Compare ${p.name}`} checked={compareIds.includes(p.id)} onChange={()=>toggleCompare(p.id)}/><span>Compare</span></label></div>
             <dl className="pro-player-facts"><div><dt>Age</dt><dd>{p.age} years</dd></div><div><dt>Preferred foot</dt><dd>{p.foot.charAt(0).toUpperCase()+p.foot.slice(1)}</dd></div><div><dt>Height</dt><dd>{p.heightCm} cm</dd></div></dl>
             {/* M24F.4 — at most three pills (the safeguarding state, Academy+, the availability); everything else is one quiet line. */}
             <div className="badges">
               {p.guardianManaged && <span className="pill red">U18 · guardian-managed</span>}
               {p.academyPlus && <span className="pill green">Academy+</span>}
-              <span className="pill">{AVAILABILITY_LABELS[p.availability] ?? p.availability}</span>
+
             </div>
             {/* M24F.5 — one quiet line: identity check, contract, current club. Badges and evidence detail are one tap deeper, on the profile. */}
             <div className="meta player-quiet">
@@ -614,7 +602,15 @@ export function RequestsScreen({ session, tick, openPlayer }: ScreenProps) {
 // with the guardian; the header says so. Every message is moderated + logged.
 export function MessagesScreen({ session, tick, notify }: ScreenProps) {
   const [channels, setChannels] = useState<Channel[]>([]);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(DEMO_MODE ? 'pro-sample-conversation' : null);
+  const [threadSearch, setThreadSearch] = useState('');
+  const [sample, setSample] = useState<Channel>(()=>({id:'pro-sample-conversation',requestId:'sample',playerId:'sample-adult',playerName:'Jordan Ellis',orgName:session.org.name,scoutName:session.scoutName,scoutRole:session.role,counterparty:'player',createdAt:Date.UTC(2026,9,6,13),messages:[
+    {id:'sample-1',ts:Date.UTC(2026,9,6,13,10),sender:{kind:'org_user',id:'sample-scout',name:session.scoutName},text:'Hi Jordan, thanks for accepting our request. We enjoyed watching your recent match footage, especially your movement between the lines.'},
+    {id:'sample-2',ts:Date.UTC(2026,9,6,13,14),sender:{kind:'player',id:'sample-adult',name:'Jordan Ellis'},text:'Thanks for getting in touch. I’m pleased to hear that. Happy to talk about the role and what you’re looking for.'},
+    {id:'sample-3',ts:Date.UTC(2026,9,6,13,18),sender:{kind:'org_user',id:'sample-scout',name:session.scoutName},text:'We’re looking for a forward who can lead the press and link play. Would you be available for a training visit next Tuesday?'},
+    {id:'sample-4',ts:Date.UTC(2026,9,6,13,22),sender:{kind:'player',id:'sample-adult',name:'Jordan Ellis'},text:'Tuesday works for me. Could you send the session details through ScoutBox so I can check everything beforehand?'},
+    {id:'sample-5',ts:Date.UTC(2026,9,6,13,25),sender:{kind:'org_user',id:'sample-scout',name:session.scoutName},text:'Absolutely. We’ll send a trial invitation with the time, venue and what to bring. Looking forward to meeting you.'}
+  ]}));
   const [draft, setDraft] = useState('');
   const [attachReportId, setAttachReportId] = useState('');
   const [trials, setTrials] = useState<Trial[]>([]);
@@ -625,14 +621,16 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
 
   useEffect(() => { api.getChannels(session).then(setChannels).catch(() => {}); }, [session, tick]);
   useEffect(() => { api.getTrials(session).then(setTrials).catch(() => {}); }, [session, tick]);
-  useEffect(() => { threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight }); }, [channels, openId]);
+  useEffect(() => { threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight }); }, [channels, openId, sample]);
 
-  const open = channels.find((c) => c.id === openId) ?? null;
+  const visibleChannels = DEMO_MODE ? [sample,...channels] : channels;
+  const open = visibleChannels.find((c) => c.id === openId) ?? null;
+  const isSample = DEMO_MODE && openId === sample.id;
 
   // Read receipts: opening a thread marks it read for our side.
   useEffect(() => {
-    if (openId) api.markChannelRead(session, openId).catch(() => {});
-  }, [openId, session]);
+    if (openId && !isSample) api.markChannelRead(session, openId).catch(() => {});
+  }, [openId, session, isSample]);
 
   // Typing indicator: listen for the counterparty's typing pings.
   useEffect(() => {
@@ -648,7 +646,7 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
   const onDraftChange = (v: string) => {
     setDraft(v);
     // throttle our own typing pings
-    if (open && Date.now() - lastTyped.current > 2000) {
+    if (open && !isSample && Date.now() - lastTyped.current > 2000) {
       lastTyped.current = Date.now();
       api.sendTyping(session, open.id).catch(() => {});
     }
@@ -666,7 +664,8 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
     const entry = retryId ? outbox.find((o) => o.id === retryId) : null;
     const text = entry ? entry.text : draft.trim();
     const channelId = entry ? entry.channelId : open?.id;
-    if (!channelId || !text) return;
+    if (!channelId || !text || open?.closed) return;
+    if (DEMO_MODE && channelId===sample.id) {setSample(c=>({...c,messages:[...c.messages,{id:`sample-${Date.now()}`,ts:Date.now(),sender:{kind:'org_user',id:'sample-scout',name:session.scoutName},text}]}));setDraft('');notify('Added to the sample conversation. No message was sent.');return;}
     const cid = entry ? entry.id : `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const attach = entry ? entry.attach : (attachReportId || undefined);
     if (entry) {
@@ -689,40 +688,40 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
   return (
     <>
       <Hint>Threads open on acceptance, stay on-platform, and are moderated and logged. For under-18s you are talking to the parent or guardian, never the child.</Hint>
-      {channels.length === 0 && <div className="notice">No open threads. Send a request; a thread opens when it's accepted.</div>}
-      <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 14 }}>
-        <div className="list-rows">
-          {channels.map((c) => (
+      <div className={`pro-messenger ${open?'has-thread':''}`}>
+        <aside className="pro-inbox"><header><div><strong>Inbox</strong><span>{visibleChannels.length}</span></div><label><Icon name="search" size={17}/><input type="search" aria-label="Find a conversation" placeholder="Find a conversation" value={threadSearch} onChange={e=>setThreadSearch(e.target.value)}/></label></header>
+          {visibleChannels.filter(c=>c.playerName.toLowerCase().includes(threadSearch.toLowerCase())).map((c) => (
             <div
               key={c.id}
-              className="list-row"
+              className={`pro-inbox-thread ${openId===c.id?'selected':''}`}
               style={{ cursor: 'pointer', borderColor: openId === c.id ? 'var(--accent-2)' : undefined }}
               {...pressable(() => setOpenId(c.id))}
             >
-              <span className="grow">
+              <span className="pro-message-avatar" aria-hidden="true">{c.playerName.split(' ').map(n=>n[0]).slice(0,2).join('')}</span><span className="grow">
                 <b>{c.playerName}</b>{c.closed && <span className="pill red" style={{ marginLeft: 6 }}>Closed</span>}
-                <div className="dim">{c.counterparty === 'guardian' ? 'via guardian' : 'direct'} · {c.messages.length} msg</div>
+                <span className="pro-thread-preview">{c.messages.at(-1)?.text ?? 'Your conversation is ready'}</span><small>{DEMO_MODE&&c.id===sample.id?'Sample conversation':c.counterparty==='guardian'?'With parent or guardian':'Player conversation'}</small>
               </span>
             </div>
           ))}
-        </div>
+          {visibleChannels.length===0&&<p className="pro-inbox-empty">Accepted requests appear here.</p>}
+        </aside>
         {open ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div className="list-row">
+          <section className="pro-conversation">
+            <header className="pro-conversation-header"><button className="pro-message-back" onClick={()=>setOpenId(null)} aria-label="Back to inbox"><Icon name="chevron-left" size={18}/></button><span className="pro-message-avatar" aria-hidden="true">{open.playerName.split(' ').map(n=>n[0]).slice(0,2).join('')}</span>
               <span className="grow">
                 <b>{open.playerName}</b>{' '}
                 {open.counterparty === 'guardian' && <span className="pill red">Thread is with the guardian</span>}
               </span>
-              <span className="dim">opened {fmtDate(open.createdAt)}</span>
-            </div>
+              <span className="pro-conversation-status"><Icon name="lock-keyhole" size={14}/>{isSample?'Sample thread':'On-platform conversation'}</span>
+            </header>{isSample&&<div className="pro-sample-notice">Demo conversation · Jordan is a fictional adult player. Replies stay in this preview.</div>}
             <div className="thread" ref={threadRef}>
               {open.messages.length === 0 && <div className="notice">Say hello — they accepted your request.</div>}
-              {open.messages.map((m) => {
+              {open.messages.map((m, index) => {
                 const mine = m.sender.kind === 'org_user';
                 const read = mine && open.readBy?.counterparty != null && open.readBy.counterparty >= m.ts;
                 return (
-                  <div key={m.id} className={`bubble ${mine ? 'mine' : 'theirs'}`}>
-                    <div className="who">{m.sender.name} · {fmtStamp(m.ts)}</div>
+                  <Fragment key={m.id}>{(index===0||new Date(open.messages[index-1].ts).toDateString()!==new Date(m.ts).toDateString())&&<div className="pro-message-day">{fmtDate(m.ts)}</div>}<div className={`bubble ${mine ? 'mine' : 'theirs'}`}>
+                    <div className="who"><strong>{m.sender.name}</strong><time>{new Date(m.ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</time></div>
                     {m.text}
                     {m.attachment?.kind === 'clip' && (
                       <div style={{ marginTop: 6 }}>
@@ -737,8 +736,8 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
                         <div className="dim" style={{ fontSize: 12 }}>{m.attachment.summary}</div>
                       </div>
                     )}
-                    {mine && <div className="who" style={{ textAlign: 'right', marginTop: 2 }}>{read ? '✓✓ read' : '✓ sent'}</div>}
-                  </div>
+                    {mine && <div className="who" style={{ textAlign: 'right', marginTop: 2 }}>{isSample?'Sample message':read ? 'Read' : 'Sent'}</div>}
+                  </div></Fragment>
                 );
               })}
               {outbox.filter((o) => o.channelId === open.id).map((o) => (
@@ -759,9 +758,9 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
                 suspension, or a platform change). The history stays for audit; nothing new can be sent.
               </div>
             )}
-            <div style={{ display: 'flex', gap: 10, opacity: open.closed ? 0.5 : 1, pointerEvents: open.closed ? 'none' : 'auto' }}>
+            <div className="pro-message-composer">
               {openPlayerReports.length > 0 && (
-                <select value={attachReportId} onChange={(e) => setAttachReportId(e.target.value)} title="Attach a filed trial report">
+                <select value={attachReportId} onChange={(e) => setAttachReportId(e.target.value)} title="Attach a filed trial report" disabled={open.closed}>
                   <option value="">no attachment</option>
                   {openPlayerReports.map((r) => (
                     <option key={r.id} value={r.id}>trial report ({fmtDate(r.filedAt)})</option>
@@ -769,17 +768,17 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
                 </select>
               )}
               <input
-                style={{ flex: 1 }}
-                placeholder="Write a message (moderated — no personal contact details)"
+                aria-label="Message" disabled={open.closed}
+                placeholder={isSample?'Try a reply in this preview…':'Write your message…'}
                 value={draft}
                 onChange={(e) => onDraftChange(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && send()}
               />
-              <button className="primary" onClick={() => send()}>Send</button>
+              <button className="primary" disabled={open.closed||!draft.trim()} onClick={() => send()}><Icon name="send" size={17}/>{isSample?'Preview reply':'Send'}</button>
             </div>
-          </div>
+          </section>
         ) : (
-          channels.length > 0 && <div className="notice">Pick a thread.</div>
+          <div className="pro-inbox-welcome"><Icon name="messages-square" size={42}/><h3>Your next conversation starts here.</h3><p>{channels.length?'Select a conversation from your inbox.':'A conversation opens when a player or guardian accepts your request.'}</p></div>
         )}
       </div>
     </>
@@ -1109,11 +1108,14 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
    *  decision layer). Absent in surfaces that cannot navigate. */
   onOpenRoom?: (roomId: string) => void;
 }) {
+  const [profileTab, setProfileTab] = useState<'overview'|'footage'|'evidence'|'club'>('overview');
   const dialogRef = useDialog<HTMLDivElement>(onClose); // PRE-M24 (PM-8)
   const [player, setPlayer] = useState<PlayerDetail | null>(null);
+  const requestRef = useRef<HTMLDivElement>(null);
   const [proof, setProof] = useState<ProofPack | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [requestType, setRequestType] = useState<'contact' | 'trial' | null>(null);
+  useEffect(()=>{if(requestType) requestRef.current?.scrollIntoView({block:'center'});},[requestType]);
   const [message, setMessage] = useState('');
   const [trialDetails, setTrialDetails] = useState<TrialDetails>({});
   const [reporting, setReporting] = useState(false);
@@ -1121,7 +1123,7 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
   const [moreLike, setMoreLike] = useState<(Player & { similarity: number })[] | null>(null);
 
   useEffect(() => {
-    setPlayer(null); setProof(null); setError(null);
+    setPlayer(null); setProof(null); setError(null); setProfileTab('overview'); setRequestType(null);
     api.getPlayer(session, playerId).then(setPlayer).catch((e) => {
       setError(
         e instanceof ApiError && e.code === 'UNDER_18_WALL'
@@ -1182,30 +1184,52 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
   return (
     <>
       <div className="drawer-veil" onClick={onClose} />
-      <div className="drawer" ref={dialogRef} role="dialog" aria-modal="true" aria-label={player?.name ?? 'Player'} tabIndex={-1}>
+      <div className="drawer pro-player-dossier" ref={dialogRef} role="dialog" aria-modal="true" aria-label={player?.name ?? 'Player'} tabIndex={-1}>
         {error && <><div className="notice block">{error}</div><div style={{ marginTop: 14 }}><button onClick={onClose}>Close</button></div></>}
         {player && (
           <>
-            <div className="head">
-              <div>
-                <h3>{player.name}</h3>
-                <div className="sub">
-                  {player.position} · {player.age} · {player.foot} foot · {player.city ? `${player.city}, ` : ''}{player.country} · {player.heightCm} cm / {player.weightKg} kg
-                </div>
-                <div className="badges" style={{ marginTop: 8 }}>
-                  {player.guardianManaged && <span className="pill red">U18 · guardian-managed</span>}
-                  {player.academyPlus && <span className="pill green">Academy+ — fresh start cohort</span>}
-                  {player.identityVerified && <span className="pill outline-green">Identity verified</span>}
-                  <span className="pill">{AVAILABILITY_LABELS[player.availability] ?? player.availability}</span>
-                  <span className="pill">{CONTRACT_LABELS[player.contractStatus] ?? player.contractStatus}</span>
-                  {player.badges.map((b) => <span key={b} className="pill gold">{b}</span>)}
-                </div>
-              </div>
-              <button className="close" onClick={onClose}>Close</button>
-            </div>
-
+            <header className="pro-profile-header"><div className="pro-profile-topline"><span>SCOUTBOX PRO / PLAYER DOSSIER</span><button className="close" onClick={onClose}><Icon name="x" size={16}/> Close profile</button></div><div className="pro-profile-identity"><span className="pro-profile-kit" aria-hidden="true">{player.position}</span><div><span className="pro-eyebrow">{player.city ? `${player.city}, ` : ''}{player.country}</span><h3>{player.name}{player.identityVerified&&<Icon name="badge-check" size={27} label="Identity verified"/>}</h3><div className="badges">{player.guardianManaged&&<span className="pill red">Under 18 · guardian-managed</span>}{player.academyPlus&&<span className="pill green">Academy+</span>}<span className="pill">{AVAILABILITY_LABELS[player.availability]??player.availability}</span><span className="pill">{CONTRACT_LABELS[player.contractStatus]??player.contractStatus}</span></div></div></div><dl className="pro-profile-facts"><div><dt>Position</dt><dd>{player.position}</dd></div><div><dt>Age</dt><dd>{player.age} <small>years</small></dd></div><div><dt>Preferred foot</dt><dd>{player.foot}</dd></div><div><dt>Height</dt><dd>{player.heightCm} <small>cm</small></dd></div><div><dt>Weight</dt><dd>{player.weightKg} <small>kg</small></dd></div></dl></header>
             <TrustBar score={player.trustScore} />
 
+            <div className="actions pro-profile-actions">
+              <button onClick={() => act('save')}>Save</button>
+              <button onClick={() => act('shortlist')}>Shortlist</button>
+              {onOpenRoom && (
+                <button className="primary" disabled={openingRoom} onClick={addToRoom} title={t('rm.privacy')}>
+                  {t('rm.addRoom')}
+                </button>
+              )}
+              {player.guardianManaged ? (
+                <>
+                  <button className="primary" onClick={() => setRequestType('contact')}>Contact Guardian</button>
+                  <button onClick={() => setRequestType('trial')}>Invite to trial (via guardian)</button>
+                </>
+              ) : (
+                <>
+                  <button className="primary" onClick={() => setRequestType('contact')}>Request contact</button>
+                  <button onClick={() => setRequestType('trial')}>Request trial</button>
+                </>
+              )}
+              <details className="pro-profile-more"><summary>More actions</summary><div><button onClick={loadProof}>Proof Pack</button>
+              <button onClick={() => api.moreLikeThis(session, playerId).then((r) => setMoreLike(r.players)).catch((e) => notify(errMsg(e), true))}>Similar players</button>
+              {!player.guardianManaged && (
+                <button onClick={async () => {
+                  if (!confirmDestructive({ ...DESTRUCTIVE_ACTIONS.recordSigning, name: player.name })) return;
+                  try {
+                    const s = await api.recordSigning(session, playerId);
+                    notify(`Signing recorded${s.insideAttributionWindow ? ' — inside the attribution window' : ''}. Timeline updated.`);
+                  } catch (e) { notify(errMsg(e), true); }
+                }}>Record signing</button>
+              )}
+              <button onClick={() => setReporting(true)}>Report</button></div></details>
+            </div>
+
+            <nav className="pro-profile-tabs" aria-label="Player dossier sections">{(['overview','footage','evidence','club'] as const).map(tab=><button key={tab} aria-pressed={profileTab===tab} onClick={()=>setProfileTab(tab)}>{({overview:'Overview',footage:'Footage',evidence:'Evidence',club:'Club notes'})[tab]}</button>)}</nav>
+            {profileTab==='evidence' && <>
+            <FootballPassportPanel session={session} playerId={playerId} notify={notify} />
+            <BoxTrainingPanel session={session} playerId={playerId} notify={notify} />
+            <CombinePanel session={session} playerId={playerId} notify={notify} />
+            <TrustPanel session={session} playerId={playerId} />
             {(player.vouches?.length ?? 0) > 0 && (
               <div className="section">
                 <h4>Coach references — named, email-verified</h4>
@@ -1223,6 +1247,7 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
               </div>
             )}
 
+            </>}
             {player.guardianManaged && (
               <div className="notice warn" style={{ marginTop: 12 }}>
                 This player is under 18. Their account is owned by a parent/guardian: you cannot message
@@ -1230,39 +1255,6 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                 your verified role ({session.role}).
               </div>
             )}
-
-            <div className="actions">
-              <button onClick={() => act('save')}>Save</button>
-              <button onClick={() => act('shortlist')}>Shortlist</button>
-              {onOpenRoom && (
-                <button className="primary" disabled={openingRoom} onClick={addToRoom} title={t('rm.privacy')}>
-                  {t('rm.addRoom')}
-                </button>
-              )}
-              {player.guardianManaged ? (
-                <>
-                  <button className="primary" onClick={() => setRequestType('contact')}>Contact Guardian</button>
-                  <button className="primary" onClick={() => setRequestType('trial')}>Invite to trial (via guardian)</button>
-                </>
-              ) : (
-                <>
-                  <button className="primary" onClick={() => setRequestType('contact')}>Request contact</button>
-                  <button className="primary" onClick={() => setRequestType('trial')}>Request trial</button>
-                </>
-              )}
-              <button onClick={loadProof}>Proof Pack</button>
-              <button onClick={() => api.moreLikeThis(session, playerId).then((r) => setMoreLike(r.players)).catch((e) => notify(errMsg(e), true))}>≈ More like this</button>
-              {!player.guardianManaged && (
-                <button onClick={async () => {
-                  if (!confirmDestructive({ ...DESTRUCTIVE_ACTIONS.recordSigning, name: player.name })) return;
-                  try {
-                    const s = await api.recordSigning(session, playerId);
-                    notify(`Signing recorded${s.insideAttributionWindow ? ' — inside the attribution window' : ''}. Timeline updated.`);
-                  } catch (e) { notify(errMsg(e), true); }
-                }}>Record signing</button>
-              )}
-              <button onClick={() => setReporting(true)}>Report</button>
-            </div>
 
             {moreLike && (
               <div className="section">
@@ -1272,15 +1264,16 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                     <div key={m.id} className="list-row" style={{ cursor: 'pointer' }}>
                       <span className="pill blue">{m.position}</span>
                       <span className="grow">{m.name}</span>
-                      <span className="dim">{m.similarity}% similar · trust {m.trustScore}</span>
+                      <span className="dim">{m.similarity}% similar · profile completeness {m.trustScore}%</span>
                     </div>
                   ))}
                 </div>
               </div>
             )}
 
+            {profileTab==='club' && <>
             <div className="section">
-              <h4>Internal notes — your org only, never visible to the player</h4>
+              <h4>Private club notes</h4><p className="pro-private-note"><Icon name="lock-keyhole" size={14}/> Visible only to your organisation.</p>
               <div style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
                 <input style={{ flex: 1 }} placeholder='e.g. "Watched live 12/8 — second viewing needed"' value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} />
                 <button onClick={async () => {
@@ -1305,13 +1298,11 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
             {/* M21 — Development sits inside the player, which is where a
                 development plan belongs. It adds no top-level destination. */}
             <DevelopmentPanel session={session} playerId={playerId} notify={notify} />
-            <FootballPassportPanel session={session} playerId={playerId} notify={notify} />
-            <BoxTrainingPanel session={session} playerId={playerId} notify={notify} />
-            <CombinePanel session={session} playerId={playerId} notify={notify} />
-            <TrustPanel session={session} playerId={playerId} />
 
+
+            </>}
             {requestType && (
-              <div className="section">
+              <div className="section pro-request-panel" ref={requestRef}>
                 <h4>
                   {player.guardianManaged
                     ? `${requestType === 'trial' ? 'Trial invitation' : 'Conversation request'} — goes to the parent/guardian`
@@ -1368,6 +1359,8 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
               </div>
             )}
 
+            {profileTab==='overview' && <>
+            {player.badges.length>0&&<div className="pro-profile-styles"><span>Playing styles</span><DetailItems items={player.badges}/></div>}
             {player.stats && (
               <div className="section">
                 <h4>Season output</h4>
@@ -1387,13 +1380,15 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
               <div className="section">
                 <h4>Contract</h4>
                 <div className="stat-grid">
-                  {player.contractUntil && <Stat v={player.contractUntil} k="Contracted until" />}
+                  {player.contractUntil && <Stat v={fmtDate(player.contractUntil)} k="Contracted until" />}
                   {player.marketValueRange && <Stat v={player.marketValueRange} k="Market value" />}
                   {player.agentName && <Stat v={player.agentName} k="Agent" />}
                 </div>
               </div>
             )}
 
+            </>}
+            {profileTab==='evidence' && <>
             <div className="section">
               <h4>Verified match attendance</h4>
               {player.attendance.length === 0 && <div className="notice">No verified attendances yet.</div>}
@@ -1424,6 +1419,8 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
               </div>
             )}
 
+            </>}
+            {profileTab==='overview' && <>
             <div className="section">
               <h4>Medical</h4>
               {player.medical.shared ? (
@@ -1445,6 +1442,8 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
               )}
             </div>
 
+            </>}
+            {profileTab==='evidence' && <>
             {(player.drillResults?.length ?? 0) > 0 && (
               <div className="section">
                 <h4>At-home combine (video-verified drills)</h4>
@@ -1460,6 +1459,8 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
               </div>
             )}
 
+            </>}
+            {profileTab==='overview' && <>
             <div className="section">
               <h4>Transfer timeline</h4>
               <div className="list-rows">
@@ -1469,6 +1470,8 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
               </div>
             </div>
 
+            </>}
+            {profileTab==='footage' && <>
             <div className="section">
               <h4>Media</h4>
               {player.media.length === 0 && <div className="notice">No uploads yet.</div>}
@@ -1492,6 +1495,8 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
               </div>
             </div>
 
+            </>}
+            {profileTab==='overview' && <>
             <div className="section">
               <h4>Similar players — {player.similarPlayers.note}</h4>
               <div className="list-rows">
@@ -1511,6 +1516,7 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                 ))}
               </div>
             </div>
+            </>}
           </>
         )}
       </div>

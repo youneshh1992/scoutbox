@@ -6,6 +6,7 @@ import './proExecutive.css';
 import './proRefinements.css';
 import './proExperience.css';
 import './proFootball.css';
+import './proDossier.css';
 
 // Root error boundary: a runtime failure renders a recoverable screen, never
 // a silent white page.

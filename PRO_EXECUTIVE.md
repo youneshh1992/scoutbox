@@ -162,3 +162,32 @@ comparison, campaign review, club setup, squad records, chart/table switching,
 Film Room and the mobile navigation/discovery layout at 390px. The inspected
 browser session reports no console errors. Canonical demos must still be built
 from the committed source and pass freshness verification before delivery.
+
+## Dossiers, messaging and utility tools — 6 October detail review
+
+The header now has a typeable workspace search field, a traditional bell with an
+Alerts label, and a separate red report control. The notifications panel and
+report form share the Pro treatment. Reports retain their existing review and
+urgent communication-suspension behaviour.
+
+Discovery uses a compact search/filter bar and player identity cards with shirt
+position markers, structured facts and comparison controls. Player profiles open
+as centred dossiers with Overview, Footage, Evidence and Club notes tabs. Existing
+profile actions remain available, with secondary actions grouped in a menu.
+Verification keeps the existing badge geometry and uses ScoutBox green #00e676.
+Access warnings now use dark red surfaces, a red edge and readable light text.
+
+Messages uses a responsive inbox and conversation view. Demo builds include an
+explicitly labelled fictional adult conversation with Jordan Ellis. Preview
+replies remain in component memory: they do not create requests, send messages,
+mark actual channels read, or appear in connected production builds. Real threads
+retain the existing messaging API, attachments, moderation and guardian rules.
+
+Validation: TypeScript and production build; 504 navigation, 127 case-navigation,
+18 Pro utility checks and icon parity. AST comparison confirms all 371 existing
+API calls and their arguments are preserved. Browser checks cover search,
+notifications, report form, comparison selection, all dossier tabs, contact-form
+opening/cancellation, the green verification colour, sample replies, and desktop
+and 390px layouts. No external reports or messages were submitted. Canonical
+artifacts are rebuilt from the local commit and checked for freshness before
+preview delivery. Grassroots and Player source are unchanged; no publishing.

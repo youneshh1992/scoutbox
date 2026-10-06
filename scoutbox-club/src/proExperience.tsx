@@ -16,14 +16,15 @@ export function ProGlyph({ name, size = 20, label, style }: {name: string; size?
     'credit-card': <><rect className="glyph-fill" x="2" y="5" width="20" height="14" rx="2"/><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/></>,
     download: <><path className="glyph-fill" d="M3 15h18v6H3Z"/><path d="M12 3v12m-5-5 5 5 5-5M3 16v5h18v-5"/></>,
     search: <><circle className="glyph-fill" cx="10.5" cy="10.5" r="6.5"/><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></>,
-    bell: <><path className="glyph-fill" d="M5 17h14l-2-4V9a5 5 0 0 0-10 0v4Z"/><path d="M5 17h14l-2-4V9a5 5 0 0 0-10 0v4ZM10 21h4M12 2v2"/></>,
+    bell: <><path d="M5 17c2-2 2-3 2-7a5 5 0 0 1 10 0c0 4 0 5 2 7H5Z" fill="currentColor" fillOpacity=".2"/><path d="M5 17c2-2 2-3 2-7a5 5 0 0 1 10 0c0 4 0 5 2 7H5Zm5 3a2 2 0 0 0 4 0M12 2v3"/></>,
+    'shield-alert': <><path d="m12 2 8 3v7c0 5-8 10-8 10S4 17 4 12V5Z" fill="currentColor" fillOpacity=".1"/><path d="m12 2 8 3v7c0 5-8 10-8 10S4 17 4 12V5Zm0 5v6m0 3v.1"/></>,
     flag: <><path className="glyph-fill" d="M5 4h6l3 3h6v10h-6l-3-3H5Z"/><path d="M5 22V3m0 1h6l3 3h6v10h-6l-3-3H5"/></>,
     video: <><rect className="glyph-fill" x="3" y="5" width="18" height="14" rx="2"/><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3Zm-7 0h3m12 0h3M3 15h3m12 0h3"/></>,
     signal: <><path className="glyph-fill" d="M3 15h4v6H3Zm7-6h4v12h-4Zm7-6h4v18h-4Z"/><path d="M5 18v3m7-9v9m7-15v15M2 22h20"/></>,
     'settings-2': <><path className="glyph-fill" d="M3 6h18v12H3Z"/><path d="M3 6h18M3 12h18M3 18h18M8 3v6m8 0v6m-6 0v6"/></>,
   };
   const content = paths[name];
-  if (!content) return <BaseIcon name={name} size={size} label={label} style={style}/>;
+  if (!content) return <BaseIcon name={name} size={size} label={label} style={name==='badge-check'?{...style,color:'#00e676'}:style}/>;
   return <svg className="pro-glyph" viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden={label ? undefined : true} role={label ? 'img' : undefined} aria-label={label} style={style}>{content}</svg>;
 }
 
