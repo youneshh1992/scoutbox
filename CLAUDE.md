@@ -125,7 +125,8 @@ list/detail and matching results, and the labelled facts/separate list entries
 provided by local `RecordDetails.tsx`. Do not restore wrapping mixed-data
 paragraphs. See the latest readable-record rules in `GRASSROOTS_CLUBHOUSE.md`.
 
-Preserve the compact Grassroots account panel and custom touchline Home scene
-from the latest section of `GRASSROOTS_CLUBHOUSE.md`. The Founder requested more
-navigation room and rejected the floating pitch and “Built from the ground up”
-caption. Keep the smaller panel, readable controls and football-ground artwork.
+Preserve the compact Grassroots account panel and simple Home banner described
+in the latest section of `GRASSROOTS_CLUBHOUSE.md`. The Founder rejected both
+pitch illustrations. Home now uses only its headline, subtle forest background,
+ScoutBox green and the contextual primary action. Do not restore scenery or the
+“Built from the ground up” caption. Keep the smaller account panel.

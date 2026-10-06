@@ -109,17 +109,6 @@
 :root[data-app="grass"] .grass-workspace .club-identity { display: inline-flex; gap: 8px; align-items: center; color: #b7c6ae; font-size: 11px; }
 :root[data-app="grass"] .grass-workspace .club-identity svg { color: #00e676; }
 :root[data-app="grass"] .grass-workspace .club-role { padding-left: 12px; margin-left: 3px; border-left: 1px solid #52664a; font-size: 10px; color: #a6b496; }
-:root[data-app="grass"] .grass-workspace .club-hero { position: relative; min-height: 265px; overflow: hidden; border-radius: 20px; border: 1px solid #42724a; background: radial-gradient(ellipse at 6% 120%,#00e67632,transparent 65%),linear-gradient(110deg,#25412a,#172c1c 55%,#102519); box-shadow: 0 10px 55px #00e67608, inset 0 1px 0 #97b98a24; }
-:root[data-app="grass"] .grass-workspace .club-hero::after { content: ''; position: absolute; pointer-events: none; bottom: 0; left: 0; width: 80%; height: 1px; background: linear-gradient(90deg,transparent,#00e676aa,transparent); }
-:root[data-app="grass"] .grass-workspace .club-hero-copy { position: relative; z-index: 1; padding: 30px 36px; width: 57%; }
-:root[data-app="grass"] .grass-workspace .club-hero-copy > .club-eyebrow { color: #c4d7b5; }
-:root[data-app="grass"] .grass-workspace .club-hero h2 { font-size: clamp(34px,3.6vw,52px); letter-spacing: -2.1px; line-height: 1.06; font-weight: 650; margin-top: 15px; color: #f3efda; }
-:root[data-app="grass"] .grass-workspace .club-hero h2 span { color: #00e676; }
-:root[data-app="grass"] .grass-workspace .home-primary { display: flex; align-items: flex-start; flex-direction: column; gap: 14px; margin: 13px 0 0; }
-:root[data-app="grass"] .grass-workspace .home-primary p { color: #c0ceb2; font-size: 12px; line-height: 1.6; }
-:root[data-app="grass"] .grass-workspace .home-primary .primary { padding: 11px 16px; border-radius: 9px; font-size: 12px; }
-:root[data-app="grass"] .grass-workspace .home-primary .primary svg { margin-left: 17px; }
-:root[data-app="grass"] .grass-workspace .club-ground { position: absolute; right: -1%; width: 48%; top: 50%; transform: translateY(-50%); pointer-events: none; }
 /* The figures are endpoint counts, never fabricated progress or growth. */
 :root[data-app="grass"] .grass-workspace .home-summary { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 14px; border: 0; margin: 20px 0 26px; }
 :root[data-app="grass"] .grass-workspace .home-sum { position: relative; display: flex; flex-direction: column; align-items: flex-start; padding: 16px 20px; margin: 0; background: var(--club-panel); border: 1px solid #354435; border-radius: 14px; text-align: left; gap: 0; overflow: hidden; }
@@ -190,7 +179,6 @@
 :root[data-app="grass"] .grass-workspace .notice.block { color: #ffcec0; background: #412924; }
 :root[data-app="grass"] .grass-workspace .notice.warn { color: #ecdcba; background: #3b3425; }
 @media (prefers-reduced-motion: no-preference) {
-  :root[data-app="grass"] .grass-workspace .club-hero { animation: club-arrive 420ms ease-out both; }
   @keyframes club-arrive { from { opacity: .65; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 }
 @media (min-width: 1680px) {
@@ -216,10 +204,6 @@
   :root[data-app="grass"] .grass-workspace .topbar { padding: 0 16px; }
   :root[data-app="grass"] .grass-workspace .topbar .p-toolbar { gap: 13px; }
   :root[data-app="grass"] .grass-workspace .home-welcome { font-size: 24px; }
-  :root[data-app="grass"] .grass-workspace .club-hero { min-height: 360px; }
-  :root[data-app="grass"] .grass-workspace .club-hero-copy { width: 100%; padding: 25px; }
-  :root[data-app="grass"] .grass-workspace .club-hero h2 { font-size: 38px; letter-spacing: -1.5px; }
-  :root[data-app="grass"] .grass-workspace .club-ground { width: 210px; right: -30px; top: auto; bottom: -20px; transform: none; opacity: .55; }
   :root[data-app="grass"] .grass-workspace .home-summary { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin: 14px 0 20px; }
   :root[data-app="grass"] .grass-workspace .home-sum { padding: 15px; }
   :root[data-app="grass"] .grass-workspace .club-side-column { display: flex; }

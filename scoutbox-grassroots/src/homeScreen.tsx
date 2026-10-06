@@ -6,7 +6,6 @@
 // (shortlist, requests, trials, squad, feed); nothing is estimated, no
 // percentage is invented, and a count the server refuses is simply absent.
 import { useEffect, useState } from 'react';
-import { ClubGround } from './ClubGround';
 import { initials } from '../../design-system/text';
 import { Icon } from '../../design-system/icons';
 import { api, type FeedItem, type OrgRequest, type Player, type Session, type Squad, type Trial } from './api';
@@ -120,9 +119,8 @@ export function HomeScreen({ session, tick, openPlayer, unreadMessages, verLevel
       <section className="club-hero" aria-labelledby="club-hero-title">
         <div className="club-hero-copy"><span className="club-eyebrow">{t('home.localGame')}</span>
           <h2 id="club-hero-title">{t('home.localRoots')}<br /><span>{t('home.bigAmbitions')}</span></h2>
-          <div className="home-primary" data-testid="home-primary"><p>{primary.why}</p><button className="primary" onClick={() => onNavigate(primary.target)}>{primary.label}<Icon name="arrow-right" size={18} /></button></div>
         </div>
-        <ClubGround />
+        <div className="home-primary" data-testid="home-primary"><p>{primary.why}</p><button className="primary" onClick={() => onNavigate(primary.target)}>{primary.label}<Icon name="arrow-right" size={18} /></button></div>
       </section>
       {summary.length > 0 && (
         <div className="home-summary" data-testid="home-summary" role="list">

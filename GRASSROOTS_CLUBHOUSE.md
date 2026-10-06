@@ -194,20 +194,25 @@ responsive checks on the affected record layouts. Production build, TypeScript,
 navigation and presentation checks pass. All 385 existing direct API calls are
 preserved. Demo coverage does not assert that every server state was exercised.
 
-## Compact account panel and touchline artwork — 6 October 2026
+## Compact account panel and simple Home banner — 6 October 2026
 
 The Founder likes the Alex/Manager account treatment but wants it smaller so it
 leaves room for navigation. Preserve the compact spacing, 29px avatar and clear
 club/safeguarding states; all verification and account controls remain reachable.
 The closed panel is approximately 22% shorter than its previous 245px layout.
 
-The Founder rejected the floating pitch illustration and the caption “Built from
-the ground up.” The Home now has a custom SVG scene from the touchline: a small
-covered stand, floodlights, fence, goal netting, worn turf, green corner flag and
-football. This is decorative, not the user's actual stadium or a live formation.
-Do not restore the caption, contour rings or floating pitch tile. Preserve exact
-brand assets and the existing logo. At narrow widths the scene sits below the
-Home action, without obstructing text or controls.
+The Founder rejected both the floating pitch and its replacement touchline
+illustration, asking for a simple, professional ScoutBox presentation. The latest
+Home banner contains only the headline, a subtle forest gradient, ScoutBox green
+accent text and the existing contextual primary action. Do not restore scenery,
+pitch diagrams, decorative terrain or the “Built from the ground up” caption.
+`ClubGround.tsx` was removed. Keep the original logo and existing brand colours.
+The banner stacks its headline and action on narrow screens without an empty
+illustration area. This supersedes all earlier Home artwork directions above.
 
-Checked at 1440px, a 1280×720 window with account settings expanded, and 390px.
-Navigation and the account panel do not overlap; Home has no horizontal overflow.
+The compact sidebar and simple banner were checked on desktop and at 390px.
+The contextual primary action retains its existing navigation and priority rules.
+
+The sidebar wordmark and Grassroots edition label form a compact left-aligned
+lockup: 3px row gap, no extra top margin on the edition, and a 1px optical text
+inset. Preserve the actual wordmark, trademark and green brand square.

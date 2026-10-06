@@ -578,13 +578,25 @@
 :root[data-app="grass"] .grass-workspace .scout-account-links { margin-top: 3px; }
 :root[data-app="grass"] .grass-workspace .scout-account-links > button { padding: 5px 0; min-height: 28px; }
 :root[data-app="grass"] .grass-workspace .scout-account-menu summary { padding: 6px 0 3px; min-height: 28px; box-sizing: border-box; }
-:root[data-app="grass"] .grass-workspace .club-hero { border-radius: 12px; background: linear-gradient(110deg,#162f21,#10261b); border-color: #375841; }
-:root[data-app="grass"] .grass-workspace .club-ground { width: 55%; height: 100%; right: 0; top: 0; transform: none; object-fit: cover; }
-:root[data-app="grass"] .grass-workspace .club-hero-copy { width: 52%; padding: 32px; background: linear-gradient(90deg,#162f21 85%,#162f2100); }
-:root[data-app="grass"] .grass-workspace .club-hero h2 { font-size: clamp(34px,3.2vw,48px); }
-:root[data-app="grass"] .grass-workspace .club-hero::after { display: none; }
-@media (max-width: 700px) {
-  :root[data-app="grass"] .grass-workspace .club-hero { padding-bottom: 200px; }
-  :root[data-app="grass"] .grass-workspace .club-hero-copy { width: 100%; padding: 25px; background: none; }
-  :root[data-app="grass"] .grass-workspace .club-ground { width: 100%; height: 220px; top: auto; bottom: 0; right: 0; opacity: 1; }
+/* Home is a quiet branded introduction with a useful next action. */
+:root[data-app="grass"] .grass-workspace .club-hero {
+  display: flex; align-items: center; justify-content: space-between; gap: 40px;
+  padding: 30px 34px; min-height: 180px; box-sizing: border-box;
+  border: 1px solid #314e3b; border-radius: 10px;
+  background: linear-gradient(110deg,#193626 0%,#14271d 65%,#13251c 100%);
 }
+:root[data-app="grass"] .grass-workspace .club-hero-copy { min-width: 0; }
+:root[data-app="grass"] .grass-workspace .club-hero-copy > .club-eyebrow { color: #a9bdae; font-size: 10px; letter-spacing: 1px; }
+:root[data-app="grass"] .grass-workspace .club-hero h2 { margin: 12px 0 0; font-size: clamp(30px,2.8vw,40px); line-height: 1.12; letter-spacing: -1.3px; font-weight: 650; color: #eff1e8; }
+:root[data-app="grass"] .grass-workspace .club-hero h2 span { color: #00e676; }
+:root[data-app="grass"] .grass-workspace .home-primary { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; margin: 0; max-width: 310px; flex-shrink: 0; }
+:root[data-app="grass"] .grass-workspace .home-primary p { color: #bacbbd; font-size: 13px; line-height: 1.6; margin: 0; }
+:root[data-app="grass"] .grass-workspace .home-primary .primary { display: inline-flex; align-items: center; gap: 18px; padding: 11px 16px; font-size: 12px; border-radius: 7px; }
+@media (max-width: 700px) {
+  :root[data-app="grass"] .grass-workspace .club-hero { align-items: flex-start; flex-direction: column; gap: 24px; min-height: 0; padding: 24px; }
+  :root[data-app="grass"] .grass-workspace .home-primary { max-width: 100%; flex-shrink: 1; }
+}
+
+/* Treat the wordmark and edition name as one compact, left-aligned lockup. */
+:root[data-app="grass"] .grass-workspace .sidebar:not(.collapsed) .brand { row-gap: 3px; padding-bottom: 18px; align-content: flex-start; }
+:root[data-app="grass"] .grass-workspace .sidebar .brand-sub { margin-top: 0; padding-left: 1px; box-sizing: border-box; letter-spacing: 1.3px; line-height: 1; }
