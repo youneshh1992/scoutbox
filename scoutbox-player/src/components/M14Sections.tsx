@@ -1,3 +1,5 @@
+import { RecordIdentity, DetailFact } from './RecordDetails';
+import { GuidanceNote } from './InformationRows';
 // M14 player/guardian sections: structured coach references (with honest
 // verification provenance) and squad-invitation acceptance. Verification is
 // display-only here — it changes nothing about who may see or contact whom.
@@ -31,17 +33,14 @@ const inputStyle = (colors: Palette) => ({
 function ReferenceCard({ r }: { r: PlayerReference }) {
   const colors = useColors();
   return (
-    <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8, marginTop: 8 }}>
-      <Row>
-        <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{r.coachName}</Text>
-        <Pill label={`${r.roleAtTime ?? pt('m14refCoach')} · ${r.orgName}`} tone="green" />
-        {r.status === 'withdrawn' ? <Pill label={pt('m14refWithdrawn')} tone="red" /> : null}
-      </Row>
-      <View><Muted>{r.relationship}{r.capacity ? ` · ${r.capacity}` : ''}{r.fromYear ? ` · ${r.fromYear}–${r.toYear ?? ''}` : ''}</Muted></View>
-      <Text style={{ color: colors.text, fontSize: 13, marginTop: 4 }}>{r.structured.summary}</Text>
-      {r.structured.strengths ? <View><Muted>{pt('m14refStrengths')}: {r.structured.strengths}</Muted></View> : null}
-      {r.structured.development ? <View><Muted>{pt('m14refDevelopment')}: {r.structured.development}</Muted></View> : null}
-      <View style={{ marginTop: 4 }}><Muted>{r.provenance} · {pFmtDate(r.createdAt)}</Muted></View>
+    <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 18, marginTop: 8, gap: 14 }}>
+      <RecordIdentity name={r.coachName} subtitle={`${r.roleAtTime ?? pt('m14refCoach')} · ${r.orgName}`} status={r.status === 'withdrawn' ? <Pill label={pt('m14refWithdrawn')} tone="red" /> : undefined} />
+      <DetailFact label="Relationship" value={`${r.relationship}${r.capacity ? ` · ${r.capacity}` : ''}${r.fromYear ? ` · ${r.fromYear}–${r.toYear ?? ''}` : ''}`} icon="users" />
+      <View style={{ borderLeftWidth: 3, borderLeftColor: colors.accent, paddingLeft: 12 }}><Text style={{ color: colors.text, fontSize: 14, lineHeight: 22 }}>{r.structured.summary}</Text></View>
+      {r.structured.strengths ? <View style={{ gap: 6 }}><Text style={{ color: colors.accentText, fontSize: 12, fontWeight: '600' }}>{pt('m14refStrengths')}</Text><Text style={{ color: colors.text, fontSize: 13, lineHeight: 20 }}>{r.structured.strengths}</Text></View> : null}
+      {r.structured.development ? <View style={{ gap: 6 }}><Text style={{ color: colors.iconFg, fontSize: 12, fontWeight: '600' }}>{pt('m14refDevelopment')}</Text><Text style={{ color: colors.text, fontSize: 13, lineHeight: 20 }}>{r.structured.development}</Text></View> : null}
+      <DetailFact label="Recorded" value={pFmtDate(r.createdAt)} icon="calendar-days" />
+      <GuidanceNote title="Reference provenance" icon="shield">{r.provenance}</GuidanceNote>
     </View>
   );
 }

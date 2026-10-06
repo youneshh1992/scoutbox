@@ -1,3 +1,7 @@
+import { PlayerMeta, PlayerName } from '../../components/PlayerIdentity';
+import { Pill } from '../../components/ui';
+import { MetricTiles, RecordPanel, DetailFact } from '../../components/RecordDetails';
+import { GuidanceNote, StatusRow } from '../../components/InformationRows';
 // Profile — M24F.1. Important information first, secondary information in
 // separate sections. The page is the player: a plain avatar, the name as
 // the strongest element, position · place, the availability word, Verified,
@@ -24,7 +28,7 @@ import { AVAILABILITY_LABELS, CONTRACT_LABELS, type Availability, type ContractS
 import { useSession } from '../../state';
 import { useColors, useStyles, type Palette } from '../../theme';
 import { pt } from '../../i18n';
-import { Button, Disclosure, Kicker, ListRow, Muted, Row, SectionTitle } from '../../components/ui';
+import { TimelineItem, Button, Disclosure, Kicker, ListRow, Muted, Row, SectionTitle } from '../../components/ui';
 import { SeasonChart } from '../../components/SeasonChart';
 import { ColorAvatar } from '../../components/Vivid';
 import { Icon } from '../../components/Icon';
@@ -195,15 +199,11 @@ export function ProfileBody() {
       {/* ---- identity: the subject of the page, not a record on it */}
       <View style={styles.header} testID="profile-header">
         <Avatar name={me.name} />
-        <Text role="heading" aria-level={1} style={styles.name} testID="profile-name">{me.name}</Text>
-        <Text style={styles.summary} testID="profile-line">{summary}</Text>
-        <Text style={styles.availability} testID="profile-availability">{availability}</Text>
+        <PlayerName name={me.name} verified={me.identityVerified} style={styles.name} testID="profile-name" badgeTestID="profile-verified" />
+        <View style={{ marginTop: 10 }}><PlayerMeta position={me.position ?? pt('fbNoPosition')} location={place} availability={availability} testID="profile-line" availabilityTestID="profile-availability" centered /></View>
         <View style={styles.headerRow}>
-          <View style={styles.verified} testID="profile-verified" accessibilityLabel={me.identityVerified ? 'Identity verified' : 'Identity not verified'}>
-            <Icon name={me.identityVerified ? "badge-check" : "shield"} size={22} color={me.identityVerified ? colors.accentText : colors.muted} />
-            <Text style={[styles.verifiedText, !me.identityVerified && { color: colors.muted }]}>{me.identityVerified ? 'Verified' : 'Not verified'}</Text>
-            {isMinor ? <Text style={styles.quietWord}>· Guardian-managed</Text> : null}
-          </View>
+          {!me.identityVerified && <Text style={styles.quietWord} testID="profile-verified" accessibilityLabel="Identity not verified">Not verified</Text>}
+          {isMinor && <Text style={styles.quietWord}>Guardian-managed</Text>}
           <TextButton label={pt('profViewPassport')} onPress={() => router.push('/football?tab=passport')} testID="profile-passport-link" size={13} />
         </View>
       </View>
@@ -245,10 +245,7 @@ export function ProfileBody() {
           <View style={styles.block} testID="profile-activity">
             <SectionTitle>{pt('profRecentActivity')}</SectionTitle>
             {activity.length === 0 ? <Muted size={13.5}>{pt('profNoActivity')}</Muted> : activity.map((a, i) => (
-              <View key={`${a.ts}-${i}`} style={styles.activityRow}>
-                <Text style={styles.activityText}>{a.text}</Text>
-                <Text style={styles.activityWhen}>{when(a.ts)}</Text>
-              </View>
+              <TimelineItem key={`${a.ts}-${i}`} date={when(a.ts)} last={i === activity.length - 1}>{a.text}</TimelineItem>
             ))}
             <TextButton label={pt('profViewActivity')} onPress={() => router.push('/opportunities?cat=journey&tab=activity')} testID="profile-activity-link" size={13} />
           </View>
@@ -425,16 +422,18 @@ function CvBlock({ playerId }: { playerId: string }) {
   if (err) return <Muted size={13}>{err}</Muted>;
   if (!cv) return <Muted size={13}>Loading…</Muted>;
   return (
-    <View style={{ gap: 6 }} testID="profile-cv">
-      <Text style={styles.subhead}>{cv.player.name} — Verified Sports CV</Text>
-      <Muted size={12.5}>{cv.player.position ?? '—'} · {cv.player.age} · {cv.player.foot ?? '—'} foot · {cv.player.country}{cv.player.identityVerified ? ' · identity verified' : ''}</Muted>
-      <Muted size={12.5}>Evidence confidence {cv.trust.score}/100 ({cv.trust.tier}) — not a rating of you as a player</Muted>
-      {cv.seasonStats && <Muted size={12.5}>Season: {cv.seasonStats.appearances} apps · {cv.seasonStats.goals} goals · {cv.seasonStats.assists} assists</Muted>}
-      <Muted size={12.5}>Verified attendance ({cv.verifiedAttendance.length}): {cv.verifiedAttendance.map((a) => `${a.fixture} (${a.date})`).join(' · ') || '—'}</Muted>
-      <Muted size={12.5}>Verified clips: {cv.verifiedClips.map((c) => c.title).join(' · ') || '—'}</Muted>
-      <Muted size={12.5}>Trial reports ({cv.trialReports.length}): {cv.trialReports.map((r) => `${r.orgName} — coach ${r.coachRating}/10`).join(' · ') || '—'}</Muted>
-      {cv.combine.length > 0 && <Muted size={12.5}>Combine: {cv.combine.map((r) => `${r.metric} ${r.value}${r.unit}${r.verified ? ' (verified)' : ''}`).join(' · ')}</Muted>}
-      <Muted size={11.5}>{cv.note}</Muted>
+    <View style={{ gap: 12 }} testID="profile-cv">
+      <RecordPanel title={cv.player.name} subtitle="Verified Sports CV" icon="passport">
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 18 }}><DetailFact label="Position" value={cv.player.position ?? '—'} /><DetailFact label="Age" value={cv.player.age} /><DetailFact label="Preferred foot" value={cv.player.foot ?? '—'} /><DetailFact label="Country" value={cv.player.country} /></View>
+        {cv.player.identityVerified && <Pill label="Identity verified" tone="green" />}
+      </RecordPanel>
+      <StatusRow title="Evidence confidence" value={`${cv.trust.score}/100 · ${cv.trust.tier}`} icon="shield-check" description="Verification and evidence confidence only. Not a rating of you as a player." />
+      {cv.seasonStats && <MetricTiles items={[{ label: 'Appearances', value: cv.seasonStats.appearances, icon: 'football-pitch' }, { label: 'Goals', value: cv.seasonStats.goals, icon: 'soccer-ball' }, { label: 'Assists', value: cv.seasonStats.assists, icon: 'football-boot' }]} />}
+      <RecordPanel title={`Verified attendance · ${cv.verifiedAttendance.length}`} icon="calendar-days">{cv.verifiedAttendance.length ? cv.verifiedAttendance.map((a, i) => <DetailFact key={i} label={a.date} value={a.fixture} icon="calendar-days" />) : <Muted>—</Muted>}</RecordPanel>
+      <RecordPanel title="Verified clips" icon="video">{cv.verifiedClips.length ? cv.verifiedClips.map((c, i) => <DetailFact key={i} label="Clip" value={c.title} icon="video" />) : <Muted>—</Muted>}</RecordPanel>
+      <RecordPanel title={`Trial reports · ${cv.trialReports.length}`} icon="file-check-2">{cv.trialReports.length ? cv.trialReports.map((report, i) => <DetailFact key={i} label={report.orgName} value={`Coach rating ${report.coachRating}/10`} icon="file-text" />) : <Muted>—</Muted>}</RecordPanel>
+      {cv.combine.length > 0 && <RecordPanel title="Combine" icon="activity">{cv.combine.map((result, i) => <DetailFact key={i} label={`${result.metric}${result.verified ? ' · Verified' : ''}`} value={`${result.value}${result.unit}`} icon="activity" />)}</RecordPanel>}
+      <GuidanceNote title="About this CV" icon="passport">{cv.note}</GuidanceNote>
     </View>
   );
 }
@@ -534,7 +533,7 @@ function EvidenceSection({ me, playerId, isMinor, refresh, onUpload, onBoxCam, o
                 } catch (e) { setVouchNote(e instanceof Error ? e.message : 'Could not send'); }
               }} />
             </Row>
-            {vouchNote && <Muted size={12.5}>{vouchNote}</Muted>}
+            {vouchNote && <GuidanceNote size={12.5}>{vouchNote}</GuidanceNote>}
           </Disclosure>
         )}
       </View>
@@ -553,9 +552,9 @@ function EvidenceSection({ me, playerId, isMinor, refresh, onUpload, onBoxCam, o
           <CvBlock playerId={playerId} />
         </Disclosure>
         <Disclosure label={`Profile ${me.trustScore}% complete`} testID="evidence-completeness">
-          <Muted size={12.5}>Base {me.trust.base} · Identity +{me.trust.identityVerified} · Attendance +{me.trust.verifiedAttendance} · Trial reports +{me.trust.trialReports} · Media +{me.trust.media} · Profile +{me.trust.profileComplete}</Muted>
-          {(me.nextActions ?? []).map((a) => <Muted key={a.id} size={12.5}>{a.label}{a.gain ? ` (+${a.gain})` : ''}</Muted>)}
-          <Muted size={12}>How complete your profile is. It is not a rating of you as a player and it never moves through payments.</Muted>
+          <MetricTiles items={[{label:'Base',value:me.trust.base,icon:'user-round'},{label:'Identity',value:me.trust.identityVerified,icon:'badge-check'},{label:'Attendance',value:me.trust.verifiedAttendance,icon:'calendar-days'},{label:'Trial reports',value:me.trust.trialReports,icon:'file-check-2'},{label:'Media',value:me.trust.media,icon:'video'},{label:'Profile',value:me.trust.profileComplete,icon:'user-round'}]} />
+          {(me.nextActions ?? []).map((a) => <GuidanceNote key={a.id} size={12.5}>{a.label}{a.gain ? ` (+${a.gain})` : ''}</GuidanceNote>)}
+          <GuidanceNote size={12}>How complete your profile is. It is not a rating of you as a player and it never moves through payments.</GuidanceNote>
         </Disclosure>
       </View>
     );
@@ -604,22 +603,17 @@ function JourneyTimeline({ journeys, requests, earlier, onExplore }: { journeys:
         </View>
       )}
       <View style={styles.block} testID="journey-events">
-        {events.length === 0 ? <Text style={styles.calmText}>{pt('profNoJourney')}</Text> : events.map((e, i) => {
-          const showDay = i === 0 || dayLabel(events[i - 1].at) !== dayLabel(e.at);
-          return (
-            <View key={`${e.at}-${e.label}-${i}`} style={styles.event} testID="journey-event">
-              {showDay ? <Kicker>{dayLabel(e.at)}</Kicker> : null}
-              <Text style={styles.factKey}>{e.club}</Text>
-              <Text style={styles.factSub}>{e.label}</Text>
-            </View>
-          );
-        })}
+        {events.length === 0 ? <Text style={styles.calmText}>{pt('profNoJourney')}</Text> : events.map((e, i) => (
+          <TimelineItem key={`${e.at}-${e.label}-${i}`} date={dayLabel(e.at)} last={i === events.length - 1} testID="journey-event">
+            <Text style={styles.factKey}>{e.club}</Text><Text style={styles.factSub}>{e.label}</Text>
+          </TimelineItem>
+        ))}
         {(journeys.length > 0 || requests.length > 0) && <TextButton label={pt('profOpenExplore')} onPress={onExplore} size={13} testID="journey-explore-link" />}
       </View>
       {earlier.length > 0 && (
         <View style={styles.block} testID="journey-earlier">
           <SectionTitle>{pt('profEarlier')}</SectionTitle>
-          {earlier.map((t, i) => <FactRow key={`${t.year}-${i}`} k={t.event} v={t.year} />)}
+          {earlier.map((t, i) => <TimelineItem key={`${t.year}-${i}`} date={t.year} last={i === earlier.length - 1}>{t.event}</TimelineItem>)}
         </View>
       )}
     </>
@@ -646,7 +640,7 @@ export function AvailabilitySettings() {
     <>
       <Disclosure label="Availability and status" hint={`${pt(`avail_${me.availability}` as Parameters<typeof pt>[0])} · ${CONTRACT_LABELS[me.contractStatus]}`} testID="account-availability">
         {isMinor ? (
-          <Muted size={13}>Availability and club interactions are managed by your parent or guardian. You focus on playing — uploads, stats and drills are all yours.</Muted>
+          <GuidanceNote title="Guardian controls" icon="users" size={13}>Availability and club interactions are managed by your parent or guardian. You focus on playing — uploads, stats and drills are all yours.</GuidanceNote>
         ) : (
           <>
             <Text style={styles.subhead}>Availability</Text>
@@ -669,7 +663,7 @@ export function AvailabilitySettings() {
             {me.contractStatus === 'under_contract' ? (
               <View testID="contract-status-canonical">
                 <Row><Button small primary label={CONTRACT_LABELS.under_contract} onPress={() => undefined} /></Row>
-                <Muted size={12}>Recorded when your signing completed in ScoutBox. It updates from your contract, not from this screen.</Muted>
+                <GuidanceNote size={12}>Recorded when your signing completed in ScoutBox. It updates from your contract, not from this screen.</GuidanceNote>
               </View>
             ) : (
               <Row>
@@ -714,7 +708,7 @@ export function MedicalSettings() {
           {!isMinor && <Switch value={me.medical.shared} onValueChange={(v) => set(() => client.setMedicalShared(playerId, v))} trackColor={{ true: colors.gold, false: colors.line }} thumbColor="#fff" />}
         </Row>
         {me.medical.records.map((r) => <FactRow key={r.id} k={r.title} sub={`${cap(r.type)} · ${r.date}${r.layoffWeeks ? ` · ${r.layoffWeeks} wks` : ''}`} v={r.cleared ? 'Cleared' : ''} />)}
-        {me.medical.records.length === 0 && <Muted size={12.5}>No records logged.</Muted>}
+        {me.medical.records.length === 0 && <GuidanceNote size={12.5}>No records logged.</GuidanceNote>}
       </Disclosure>
     </>
   );

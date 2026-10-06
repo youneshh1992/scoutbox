@@ -1,3 +1,4 @@
+import { GuidanceNote } from './InformationRows';
 // M12 player/guardian sections, dropped into the existing tabs:
 // passport (Profile), opportunity board (Home), campaigns + resumable upload
 // (Upload), feedback→objectives + follow-ups + access settings (You),
@@ -8,9 +9,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { Platform, Switch, View } from 'react-native';
 import { Text, TextInput } from './Text';
 import { useColors, type Palette } from '../theme';
-import { Button, Card, Disclosure, Muted, Pill, Row, SectionTitle } from './ui';
+import { RecordPanel, DetailFact, InfoNote, TimelineItem, Button, Card, Disclosure, Muted, Pill, Row, SectionTitle } from './ui';
 import { m12, type BoardItem, type FeedbackItem, type CampaignView, type FamilyTrial, type FollowUpView, type ObjectiveRec, type PassportView, type SafetyPack, type SquadInvite, type UploadSession } from '../data/m12client';
 import { getDataSaver, getPLang, pFmtDate, pt, setDataSaver, setPLang } from '../i18n';
+import { InvitationCard, InvitationDetail } from './InvitationCard';
 import { humanDate } from '../time';
 
 // M24F — presentation casing for status labels; the data value is never changed.
@@ -59,24 +61,18 @@ export function PassportSection({ actor }: { actor: Actor }) {
         </View>
       )}
       {pp.records.map((r) => (
-        <View key={r.id} style={{ marginTop: 8, opacity: r.superseded ? 0.5 : 1 }}>
-          <Row style={{ flexWrap: 'wrap' }}>
-            <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13, flex: 1 }}>
-              {r.label}{r.value != null ? ` — ${r.value}${r.units ? ` ${r.units}` : ''}` : ''}
-            </Text>
-            <Pill label={cap(r.verification.status)} tone={toneFor(r.verification.status)} />
-          </Row>
-          <Muted size={11.5}>
-            {r.verification.method ?? ''}{r.verification.reviewerName ? ` · ${r.verification.reviewerName}` : ''}
-            {r.superseded ? ' · superseded' : ''}{r.correctionOf ? ' · correction' : ''} · {pFmtDate(r.recordedAt)}
-          </Muted>
-        </View>
+        <RecordPanel key={r.id} title={r.label} subtitle={pFmtDate(r.recordedAt)} icon="file-check-2" badge={<Pill label={cap(r.verification.status)} tone={toneFor(r.verification.status)} />}>
+          {r.value != null && <Text style={{ color: colors.text, fontWeight: '600', fontSize: 20 }}>{r.value}{r.units ? ` ${r.units}` : ''}</Text>}
+          {r.verification.method && <DetailFact label="Verification method" value={r.verification.method} icon="shield-check" />}
+          {r.verification.reviewerName && <DetailFact label="Reviewed by" value={r.verification.reviewerName} icon="user-round" />}
+          {r.superseded && <InfoNote>Superseded</InfoNote>}
+          {r.correctionOf && <InfoNote>Correction</InfoNote>}
+        </RecordPanel>
       ))}
       {pp.legacy.map((l, i) => (
-        <View key={i} style={{ marginTop: 8 }}>
-          <Row><Text style={{ color: colors.text, fontSize: 13, flex: 1 }}>{l.label}</Text><Pill label={cap(l.tier)} tone={toneFor(l.tier)} /></Row>
-          {l.caveat && <Muted size={11.5}>{l.caveat}</Muted>}
-        </View>
+        <RecordPanel key={i} title={l.label} badge={<Pill label={cap(l.tier)} tone={toneFor(l.tier)} />}>
+          {l.caveat && <InfoNote>{l.caveat}</InfoNote>}
+        </RecordPanel>
       ))}
       <View style={{ marginTop: 10, gap: 6 }}>
         <TextInput style={inputStyle(colors)} placeholder="Claim (e.g. Assists this season)" placeholderTextColor={colors.muted}
@@ -116,13 +112,13 @@ export function BoardSection({ actor }: { actor: Actor }) {
   const appliedWord = (s: string) => (s === 'accepted' ? pt('boardAccepted') : s === 'declined' || s === 'rejected' ? pt('boardDeclinedApp') : s === 'withdrawn' ? pt('boardWithdrawn') : pt('boardApplied'));
   return (
     <Card testID="board">
-      <SectionTitle>{pt('board')}</SectionTitle>
+      <SectionTitle icon="opportunity-board">{pt('board')}</SectionTitle>
       {board.items.map((o: BoardItem) => (
         <View key={o.id} testID={`board-item-${o.id}`}>
           <Disclosure label={o.title} hint={`${o.orgName} · ${humanDate(o.deadline)}${o.distance ? ` · ${o.distance}` : ''}${o.applied ? ` · ${appliedWord(o.applied.status)}` : ''}`} testID={`board-view-${o.id}`}>
             <Row><Text style={{ color: colors.muted, fontSize: 12.5 }}>{cap(o.type)}</Text>{o.schedule ? <Muted size={12.5}>· {o.schedule}</Muted> : null}</Row>
             {o.description && <Text style={{ color: colors.text, fontSize: 13.5, lineHeight: 20 }}>{o.description}</Text>}
-            {(o.requirements ?? []).length > 0 && <Muted size={12.5}>{pt('boardRequirements')}: {o.requirements!.join(' · ')}</Muted>}
+            {(o.requirements ?? []).length > 0 && <RecordPanel title={pt('boardRequirements')} icon="list-checks">{o.requirements!.map((requirement, i) => <DetailFact key={i} label={`${i + 1}`} value={requirement} icon="list-checks" />)}</RecordPanel>}
             <Row style={{ marginTop: 4 }}>
               {o.applied ? (
                 <>
@@ -147,10 +143,10 @@ export function BoardSection({ actor }: { actor: Actor }) {
           </Disclosure>
         </View>
       ))}
-      {board.items.length === 0 && <Muted size={13}>Nothing open near you right now.</Muted>}
+      {board.items.length === 0 && <GuidanceNote icon="info" size={13}>Nothing open near you right now.</GuidanceNote>}
       {msg && <View accessibilityLiveRegion="polite"><Muted size={12.5}>{msg}</Muted></View>}
-      {actor.kind === 'player' && board.minor && <Muted size={12.5}>{pt('guardianApplies')}</Muted>}
-      {board.note ? <Disclosure label={pt('boardAbout')} testID="board-note"><Muted size={12.5}>{board.note}</Muted></Disclosure> : null}
+      {actor.kind === 'player' && board.minor && <GuidanceNote icon="users" size={12.5}>{pt('guardianApplies')}</GuidanceNote>}
+      {board.note ? <Disclosure label={pt('boardAbout')} testID="board-note"><GuidanceNote size={12.5}>{board.note}</GuidanceNote></Disclosure> : null}
     </Card>
   );
 }
@@ -181,8 +177,8 @@ export function CampaignsSection({ actor, mediaOptions }: { actor: Actor; mediaO
           {(c.mySubmission?.attempts ?? []).map((a) => (
             <View key={a.id} style={{ marginTop: 6 }}>
               <Row><Muted size={12}>{a.drillName}</Muted><Pill label={cap(a.status)} tone={a.status === 'accepted' ? 'green' : a.status === 'returned' || a.status === 'failed_checks' ? 'red' : 'blue'} /></Row>
-              {!a.fileChecks.passed && <Muted size={11.5}>File check: {a.fileChecks.issues.join('; ')}</Muted>}
-              {a.review?.reasons && <Muted size={11.5}>Coach: {a.review.reasons}</Muted>}
+              {!a.fileChecks.passed && <GuidanceNote icon="info" size={11.5}>File check: {a.fileChecks.issues.join('; ')}</GuidanceNote>}
+              {a.review?.reasons && <GuidanceNote icon="info" size={11.5}>Coach: {a.review.reasons}</GuidanceNote>}
             </View>
           ))}
           <AttemptForm actor={actor} campaign={c} mediaOptions={mediaOptions} onDone={(m) => { setMsg(m); reload(); }} />
@@ -233,8 +229,8 @@ export function FeedbackDevSection({ actor }: { actor: Actor }) {
         <Muted size={12}>Your parent/guardian holds {fb.count} published feedback note{(fb.count ?? 0) === 1 ? '' : 's'} from clubs — ask them to go through it with you.</Muted>
       ) : (
         (fb?.items ?? []).map((f) => (
-          <View key={f.id} style={{ marginTop: 8 }}>
-            <Muted size={12}>{f.orgName} · {f.byName} · {pFmtDate(f.at)}</Muted>
+          <RecordPanel key={f.id} title={f.orgName} subtitle={`${f.byName} · ${pFmtDate(f.at)}`} icon="message-circle">
+
             <Text style={{ color: colors.text, fontSize: 13 }}>{f.text}</Text>
             {!(objectives ?? []).some((o) => o.objectives.length) && (
               <Button small label={pt('makeObjective')} onPress={async () => {
@@ -247,15 +243,15 @@ export function FeedbackDevSection({ actor }: { actor: Actor }) {
                 } catch (e) { say(e instanceof Error ? e.message : 'Failed'); }
               }} />
             )}
-          </View>
+          </RecordPanel>
         ))
       )}
       {(objectives ?? []).map((o) => (
-        <View key={o.id} style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }}>
+        <RecordPanel key={o.id} icon="target">
           {o.objectives.map((x) => <Text key={x.id} style={{ color: colors.text, fontWeight: '600', fontSize: 13 }}>{x.text}</Text>)}
           <Muted size={12}>with {o.reviewer.name}{o.reviewer.orgName ? ` · ${o.reviewer.orgName}` : ''} · {o.progress.length} progress entries</Muted>
           {o.reassessments.map((r) => (
-            <Muted key={r.id} size={12}>reassessment {r.status}{r.outcome ? ` — ${r.outcome.note}` : ''}</Muted>
+            <InfoNote key={r.id}>{pt('reassess')}: {cap(r.status)}{r.outcome ? ` — ${r.outcome.note}` : ''}</InfoNote>
           ))}
           <Row style={{ marginTop: 6, flexWrap: 'wrap' }}>
             <TextInput style={[inputStyle(colors), { flex: 1, minWidth: 120 }]} placeholder={pt('logProgress')} placeholderTextColor={colors.muted}
@@ -289,7 +285,7 @@ export function FeedbackDevSection({ actor }: { actor: Actor }) {
               }} />
             )}
           </Row>
-        </View>
+        </RecordPanel>
       ))}
       {msg && <View accessibilityLiveRegion="polite"><Muted size={12}>{msg}</Muted></View>}
     </Card>
@@ -313,14 +309,7 @@ export function TrialSafetySection({ actor }: { actor: Actor }) {
     <Card>
       <SectionTitle>{pt('trialDay')}</SectionTitle>
       {trials.map((tr) => (
-        <View key={tr.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }}>
-          <Row><Text style={{ color: colors.text, fontWeight: '700', fontSize: 13.5, flex: 1 }}>{tr.orgName ?? tr.playerName}</Text>
-            {tr.cancelled ? <Pill label="Cancelled" tone="red" /> : <Pill label={tr.proposedDate ? (/^\d{4}-\d{2}-\d{2}$/.test(tr.proposedDate) ? humanDate(tr.proposedDate) : tr.proposedDate) : 'TBC'} />}</Row>
-          {tr.staff.map((s, i) => (
-            <Row key={i}><Muted size={12}>{s.name} · {s.role}</Muted>
-              <Pill label={s.check.status === 'reviewed' ? 'Check reviewed' : `Check ${s.check.status}`} tone={s.check.status === 'reviewed' ? 'green' : 'gold'} /></Row>
-          ))}
-          {tr.arrival?.address && <Muted size={12}>{tr.arrival.time ?? ''} · {tr.arrival.address}</Muted>}
+        <InvitationCard key={tr.id} title={tr.orgName ?? tr.playerName} subtitle={pt('trialDay')} date={tr.proposedDate ?? null} actions={<>
           <Row style={{ marginTop: 6, flexWrap: 'wrap' }}>
             {tr.consents.some((c) => c.scope === scope)
               ? <Pill label={pt('consented')} tone="green" />
@@ -348,17 +337,24 @@ export function TrialSafetySection({ actor }: { actor: Actor }) {
               } catch (e) { setMsg(e instanceof Error ? e.message : 'Failed'); }
             }} />
           </Row>
-        </View>
+        </>}>
+          {tr.cancelled && <Pill label="Cancelled" tone="red" />}
+          {tr.staff.map((s, i) => (
+            <Row key={i}><View style={{ flex: 1 }}><DetailFact label={s.role} value={s.name} icon="users" /></View>
+              <Pill label={s.check.status === 'reviewed' ? 'Check reviewed' : `Check ${s.check.status}`} tone={s.check.status === 'reviewed' ? 'green' : 'gold'} /></Row>
+          ))}
+          {tr.arrival?.address && <InvitationDetail icon="map-pin" title={pt('invBeforeArrival')}>{[tr.arrival.time, tr.arrival.address].filter(Boolean).join(' · ')}</InvitationDetail>}
+        </InvitationCard>
       ))}
       {packView && (
         <View style={{ marginTop: 10, backgroundColor: colors.panel2, borderRadius: 10, padding: 10 }}>
           <Row><Text style={{ color: colors.gold, fontWeight: '700', fontSize: 13, flex: 1 }}>Safety pack</Text>
             <Button small label="Close" onPress={() => setPackView(null)} /></Row>
-          <Muted size={12}>{packView.pack.headline}</Muted>
-          <Muted size={12}>{packView.pack.checksExplained}</Muted>
-          {packView.pack.collection && <Muted size={12}>{packView.pack.collection.policy}</Muted>}
-          <Muted size={12}>{packView.pack.reportRoute}</Muted>
-          {packView.pack.feedbackDue && <Muted size={12}>Club feedback due by {packView.pack.feedbackDue} — it is mandatory.</Muted>}
+          <GuidanceNote title="Event overview" icon="calendar-days">{packView.pack.headline}</GuidanceNote>
+          <GuidanceNote title="Staff checks" icon="shield-check">{packView.pack.checksExplained}</GuidanceNote>
+          {packView.pack.collection && <GuidanceNote title="Collection arrangements" icon="users">{packView.pack.collection.policy}</GuidanceNote>}
+          <GuidanceNote title="Reporting a concern" icon="flag">{packView.pack.reportRoute}</GuidanceNote>
+          {packView.pack.feedbackDue && <DetailFact label="Mandatory club feedback due" value={packView.pack.feedbackDue} icon="calendar-days" />}
         </View>
       )}
       {msg && <View accessibilityLiveRegion="polite"><Muted size={12}>{msg}</Muted></View>}
@@ -378,21 +374,21 @@ export function SquadInvitesSection({ actor }: { actor: Actor }) {
     <Card>
       <SectionTitle>{pt('squadInvites')}</SectionTitle>
       {invites.map((i) => (
-        <View key={i.id} style={{ marginTop: 6 }}>
-          <Text style={{ color: colors.text, fontSize: 13 }}>{i.orgName} invites {actor.kind === 'guardian' ? i.playerName : 'you'} to their squad list{i.note ? ` — “${i.note}”` : ''}.</Text>
-          <Row style={{ marginTop: 4 }}>
-            <Button small primary label={pt('accept')} onPress={async () => {
+        <InvitationCard key={i.id} title={i.orgName} subtitle={pt('detailInviteTo')} icon="users" testID={`squad-invite-${i.id}`} actions={<Row>
+            <Button grow primary label={pt('accept')} onPress={async () => {
               if (actor.kind === 'player') await m12.respondSquadInvite(actor.id, i.id, true);
               else await m12.gRespondSquadInvite(actor.id, i.id, true);
               reload();
             }} />
-            <Button small label={pt('decline')} onPress={async () => {
+            <Button grow label={pt('decline')} onPress={async () => {
               if (actor.kind === 'player') await m12.respondSquadInvite(actor.id, i.id, false);
               else await m12.gRespondSquadInvite(actor.id, i.id, false);
               reload();
             }} />
-          </Row>
-        </View>
+          </Row>}>
+          {actor.kind === 'guardian' && <DetailFact label={pt('detailInvitePlayer')} value={i.playerName} />}
+          {i.note && <InvitationDetail icon="users" title={pt('detailSquad')}>{i.note}</InvitationDetail>}
+        </InvitationCard>
       ))}
     </Card>
   );
@@ -411,11 +407,7 @@ export function FollowUpsSection({ actor }: { actor: Actor }) {
     <Card>
       <SectionTitle>{pt('followUps')}</SectionTitle>
       {answerable.map((f) => (
-        <View key={f.id} style={{ marginTop: 6 }}>
-          <Text style={{ color: colors.text, fontSize: 13 }}>
-            {f.orgName ?? 'The club'} · {f.milestone}: “{f.report!.registrationStatus}{f.report!.progression ? ` — ${f.report!.progression}` : ''}”
-          </Text>
-          {f.outcomeState === 'reported' ? (
+        <RecordPanel key={f.id} title={f.orgName ?? 'The club'} icon="clipboard-list" testID={`placement-checkin-${f.id}`} actions={f.outcomeState === 'reported' ? (
             <Row style={{ marginTop: 4 }}>
               <Button small primary label={pt('confirm')} onPress={async () => {
                 if (actor.kind === 'player') await m12.respondFollowUp(actor.id, f.id, true, undefined, 4);
@@ -428,8 +420,11 @@ export function FollowUpsSection({ actor }: { actor: Actor }) {
                 reload();
               }} />
             </Row>
-          ) : <Pill label={f.outcomeState} tone={f.outcomeState === 'confirmed' ? 'green' : 'red'} />}
-        </View>
+          ) : <Pill label={cap(f.outcomeState)} tone={f.outcomeState === 'confirmed' ? 'green' : 'red'} />}>
+          <DetailFact label={pt('detailMilestone')} value={/^\d+m$/.test(f.milestone) ? `${parseInt(f.milestone, 10)} ${getPLang() === 'fr' ? 'mois' : 'months'}` : f.milestone} icon="calendar-days" />
+          <DetailFact label={pt('detailRegistration')} value={cap(f.report!.registrationStatus)} icon="file-check-2" />
+          {f.report!.progression && <DetailFact label={pt('detailProgression')} value={f.report!.progression} icon="activity" />}
+        </RecordPanel>
       ))}
     </Card>
   );

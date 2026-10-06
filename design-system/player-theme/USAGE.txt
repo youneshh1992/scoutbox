@@ -1,0 +1,72 @@
+SCOUTBOX THEME KIT
+
+The Player app uses React Native SVG and its existing theme provider. Its
+implementation is updated separately; do not insert these browser styles or
+theme.js into the native app. These files are reusable web equivalents.
+The logo font is untouched. UI text uses the system font stack: SF Pro on Apple
+and native sans elsewhere. Do not bundle Apple font files. Retain the wordmark.
+
+CSS:
+Use sb-app sb-canvas together on the page shell for the multicolour background.
+The neutral sb-app alone is available for utility pages. No embossed pitch pattern.
+Use sb-app sb-canvas together on the page shell for the multicolour background.
+The neutral sb-app alone is available for utility pages. No embossed pitch pattern.
+Load theme.js in the document head before theme.css (non-deferred script).
+Use <html class="light"> or <html class="dark"> for explicit CSS-only control.
+Without an explicit choice the CSS/JS kit follows the system preference.
+ScoutBoxTheme.set('light' | 'dark' | 'system') sets a persisted preference.
+The existing Player app retains its saved preference and dark initial default.
+
+<button type="button" class="sb-button">Continue</button>
+<nav aria-label="Main"><a href="/discover" class="sb-pill" aria-current="page">Home</a></nav>
+<div class="sb-progress" role="progressbar" aria-label="Profile completion"
+     aria-valuemin="0" aria-valuemax="100" aria-valuenow="64">
+  <span class="sb-progress__fill" style="--progress:64%"></span>
+</div>
+
+Update the visible width and aria-valuenow together using finite values 0–100.
+Never use a decorative stat animation to fabricate a real progress measure.
+Use native disabled on buttons; aria-disabled alone does not disable actions.
+For tabs, implement the proper tablist/panel relationships and keyboard behaviour.
+
+TAILWIND v4:
+Use tailwind-v4.css as your compiled entry stylesheet. No JS config is required.
+Canvas: text-ink [background:var(--sb-canvas)]
+Canvas: text-ink [background:var(--sb-canvas)]
+Equivalent button utilities:
+inline-flex min-h-11 items-center justify-center gap-2 rounded-[.875rem]
+border border-edge px-[1.1rem] py-[.7rem] font-semibold text-action-ink
+[background:var(--sb-control)] focus-visible:outline-3
+focus-visible:outline-focus focus-visible:outline-offset-3
+transition-transform duration-150 enabled:active:translate-y-px
+disabled:opacity-50 disabled:cursor-not-allowed motion-reduce:transition-none
+motion-reduce:transform-none
+
+Navigation pill:
+inline-flex min-h-11 items-center rounded-full border border-edge px-4 py-2
+bg-surface text-ink aria-[current=page]:[background:var(--sb-control)]
+aria-[current=page]:text-action-ink focus-visible:outline-3
+focus-visible:outline-focus focus-visible:outline-offset-3
+
+Progress track: h-3 overflow-hidden rounded-full [background:var(--sb-track)]
+Progress fill: block h-full rounded-full [width:clamp(0%,var(--progress,0%),100%)]
+[background:var(--sb-gradient)] transition-[width] duration-300
+motion-reduce:transition-none
+
+TAILWIND v3:
+Use tailwind-v3.config.cjs with your existing Tailwind directives, then import
+(or link) theme.css. The same arbitrary-value examples work; replace
+focus-visible:outline-3 with focus-visible:outline-[3px]. The v3 config also
+provides bg-sb-action and bg-sb-progress shortcuts.
+
+CONTRAST:
+The raw gradient uses exact 135-degree #00E676 → #0088FF stops in light mode
+and #00E676 → #12161A in dark mode. Cyan #00C8FF is the supporting accent.
+Dark controls add a 55% black scrim for white-label contrast; raw unlabelled
+progress graphics retain the unmodified stops. Text on the light gradient is
+#081419. The light canvas blends green, teal, blue and a restrained sand edge.
+Dark mode retains carbon surfaces and subtle green/cyan glows; no purple or pitch pattern.
+
+Official Tailwind references:
+https://tailwindcss.com/docs/dark-mode
+https://tailwindcss.com/docs/theme

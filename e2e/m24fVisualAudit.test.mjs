@@ -71,7 +71,7 @@ const foreign = familiesInPlatform.filter((f) => !/var\(--sb-font\)|var\(--sb-fo
 ok(foreign.length === 0, `platform.css: every font-family is Inter, the wordmark face, the Grassroots serif or monospace (foreign: ${foreign.join(' | ') || 'none'})`);
 ok(!/Arial|Helvetica/.test(platform + tokens + fontsCss), 'no Arial / Helvetica anywhere in the design system');
 const playerText = read('scoutbox-player/src/components/Text.tsx');
-ok(/Inter-VariableFont_opsz,wght\.ttf/.test(playerText) && /fontFamily: 'Inter'/.test(playerText), 'Player: Text resolves to the bundled Inter');
+ok(/-apple-system, BlinkMacSystemFont, system-ui/.test(playerText) && /fontFamily: UI_FONT/.test(playerText) && !/Inter-VariableFont/.test(playerText), 'Player: system UI typography, with no bundled Apple font');
 ok(!fs.existsSync(path.join(ROOT, 'design-system/fonts/InstrumentSerif-OFL.txt')) && !/Instrument Serif/.test(fontsCss) && !/--sb-font-grass/.test(tokens + platform), 'no editorial serif: "Grassroots" is set in Inter like every other word (the M24F serif was reverted at the Founder\'s direction)');
 
 // ------------------------------------------------------------ 3. Grassroots tokens (the M24E scheme, restored)

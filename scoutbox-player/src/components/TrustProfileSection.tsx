@@ -1,3 +1,4 @@
+import { GuidanceNote } from './InformationRows';
 // M16.2 — the ScoutBox Trust Score surface for the player/guardian app.
 //
 // The score answers one question: how strongly is this player's football
@@ -21,7 +22,7 @@ import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { Text } from './Text';
 import { useColors } from '../theme';
-import { Disclosure, Muted } from './ui';
+import { InfoNote, RecordPanel, DetailFact, Disclosure, Muted } from './ui';
 import { RefCard } from './Reference';
 import { ScoreRing } from './Vivid';
 import { Icon } from './Icon';
@@ -92,7 +93,7 @@ export function TrustProfileSection({ actor, childName }: { actor: TrustActor; c
 
       {t ? (
         <Disclosure label={pt('trsBreakdown')} testID="trust-why">
-          <Muted size={12}>{trustDisclaimer(t)}</Muted>
+          <GuidanceNote size={12}>{trustDisclaimer(t)}</GuidanceNote>
           {/* the derivation: one row per component, the level as a word, the reasons behind a tap */}
           <View style={{ marginTop: 4 }} testID="trust-breakdown">
             {t.explanations.map((e) => {
@@ -109,24 +110,25 @@ export function TrustProfileSection({ actor, childName }: { actor: TrustActor; c
           {t.gaps.length > 0 ? (
             <View style={{ marginTop: 10, gap: 4 }} testID="trust-gaps">
               <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13.5 }}>{pt('trsImprove')}</Text>
-              {t.gaps.slice(0, 3).map((g, i) => <Muted key={`${g.code}-${i}`} size={12.5}>· {g.text}</Muted>)}
+              {t.gaps.slice(0, 3).map((g, i) => <InfoNote key={`${g.code}-${i}`} icon="circle-help">{g.text}</InfoNote>)}
             </View>
           ) : null}
           {t.strengths.length > 0 ? (
             <Disclosure label={pt('trsStrengths')} testID="trust-strengths">
-              {t.strengths.map((s, i) => <Muted key={`${s.code}-${i}`} size={12.5}>· {s.text}</Muted>)}
+              {t.strengths.map((s, i) => <InfoNote key={`${s.code}-${i}`} icon="shield-check">{s.text}</InfoNote>)}
             </Disclosure>
           ) : null}
           <Disclosure label={pt('trsAbout')} testID="trust-about">
             {t.explanations.map((e) => (
-              <View key={e.component} style={{ gap: 2 }}>
-                <Muted size={12}>{componentLabel(e.component)} · {e.coverage}% · {pt('trsWeight')} {e.weight}</Muted>
-                {e.reasons.map((r, i) => <Muted key={i} size={12}>{r}</Muted>)}
-              </View>
+              <RecordPanel key={e.component} title={componentLabel(e.component)} icon="shield-check">
+                <DetailFact label={pt('trsWeight')} value={e.weight} />
+                <Text style={{ color: colors.muted, fontSize: 12 }}>{e.coverage}%</Text>
+                {e.reasons.map((r, i) => <InfoNote key={i}>{r}</InfoNote>)}
+              </RecordPanel>
             ))}
-            {t.context.adultOnlyFacetsExcluded.length > 0 ? <Muted size={12}>{pt('trsAdultOnly')}</Muted> : null}
-            <Muted size={11.5}>{pt('trsPolicy')} {t.policyVersion}</Muted>
-            {t.simulatedEvidenceIncluded ? <Muted size={11.5}>{pt('trsDemoSim')}</Muted> : null}
+            {t.context.adultOnlyFacetsExcluded.length > 0 ? <GuidanceNote size={12}>{pt('trsAdultOnly')}</GuidanceNote> : null}
+            <GuidanceNote title="Policy version" icon="file-text" size={11.5}>{pt('trsPolicy')} {t.policyVersion}</GuidanceNote>
+            {t.simulatedEvidenceIncluded ? <GuidanceNote title="Demo information" icon="info" size={11.5}>{pt('trsDemoSim')}</GuidanceNote> : null}
           </Disclosure>
         </Disclosure>
       ) : null}

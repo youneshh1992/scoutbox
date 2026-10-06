@@ -1,20 +1,40 @@
-/** Meaningful visual cues shared by destinations and disclosure rows. */
+/** Specific concepts win before broader words; English and French share semantics. */
 export function sectionIcon(label: string): string {
-  if (/privacy|medical|protect|safety|trust|verified|identity/i.test(label)) return 'shield-check';
-  if (/clip|video|footage|box cam/i.test(label)) return 'video';
-  if (/goal|focus|fit|target/i.test(label)) return 'target';
-  if (/combine|performance|progress|stat|season/i.test(label)) return 'activity';
-  if (/training|development|plan|session/i.test(label)) return 'soccer-ball';
-  if (/history|recent|timeline|earlier/i.test(label)) return 'history';
-  if (/club|squad|agent|representation/i.test(label)) return 'building-2';
-  if (/trial|schedule|calendar|attendance/i.test(label)) return 'calendar-days';
-  if (/sign|contract|document|evidence|passport/i.test(label)) return 'file-check-2';
-  if (/message|contact|feedback|request/i.test(label)) return 'message-circle';
-  if (/notification|alert/i.test(label)) return 'bell';
-  if (/appearance|theme/i.test(label)) return 'sun';
-  if (/language|access/i.test(label)) return 'globe';
-  if (/profile|account|you/i.test(label)) return 'user-round';
-  if (/achievement|badge/i.test(label)) return 'trophy';
-  if (/how|about|help/i.test(label)) return 'circle-help';
-  return 'layers';
+  if (/passport|passeport|sports cv|cv sportif/i.test(label)) return 'passport';
+  if (/opportunit.*board|tableau.*opportun|opportunity board/i.test(label)) return 'opportunity-board';
+  if (/visibility|visibilité|discovery|découverte|profile view|vues du profil/i.test(label)) return 'eye';
+  if (/medical|médical/i.test(label)) return 'medical';
+  if (/privacy|private|confidential|sharing|partage/i.test(label)) return 'lock-keyhole';
+  if (/protect|safety|safeguard|sécurité|trust|confiance|verified|identity|identité/i.test(label)) return 'shield-check';
+  if (/assessment|évaluation|campaign|campagne/i.test(label)) return 'clipboard-list';
+  if (/preferences|préférences/i.test(label)) return 'sliders-horizontal';
+  if (/availability|disponibilité/i.test(label)) return 'calendar-days';
+  if (/shortlist|présélection/i.test(label)) return 'clipboard-list';
+  if (/squad|effectif|co-guardian|tuteur|parent|family|famille/i.test(label)) return 'users';
+  if (/agent|representation|représentation/i.test(label)) return 'user-round';
+  if (/clip|video|vidéo|footage|box cam/i.test(label)) return 'video';
+  if (/goal|focus|fit|target|objectif|cible|adéquation/i.test(label)) return 'target';
+  if (/combine|performance|progress|stat|season|saison/i.test(label)) return 'activity';
+  if (/training|development|développement|entraînement/i.test(label)) return 'soccer-ball';
+  if (/history|recent|timeline|earlier|historique|récent|chronologie/i.test(label)) return 'history';
+  if (/trial|schedule|calendar|attendance|session|essai|calendrier|présence/i.test(label)) return 'calendar-days';
+  if (/offer|offre/i.test(label)) return 'file-text';
+  if (/sign|contract|contrat/i.test(label)) return 'file-check-2';
+  if (/document|evidence|preuve|pièce|record|dossier/i.test(label)) return 'folder-open';
+  if (/message|contact|feedback|request|conversation|retour|demande/i.test(label)) return 'chat-bubble';
+  if (/notification|alert|alerte/i.test(label)) return 'bell';
+  if (/appearance|theme|apparence|thème/i.test(label)) return 'sun';
+  if (/language|langue/i.test(label)) return 'languages';
+  if (/access|accès/i.test(label)) return 'key-round';
+  if (/club|directory|annuaire/i.test(label)) return 'building-2';
+  if (/profile|profil|account|compte/i.test(label)) return 'user-round';
+  if (/achievement|badge|réussite|distinction/i.test(label)) return 'trophy';
+  if (/check-in|checkin|suivi/i.test(label)) return 'clipboard-list';
+  if (/reference|référence/i.test(label)) return 'badge-check';
+  if (/data|données|export/i.test(label)) return 'files';
+  if (/journey|parcours|transition/i.test(label)) return 'route';
+  if (/board|tableau/i.test(label)) return 'opportunity-board';
+  if (/plan|instruction|setup|configuration/i.test(label)) return 'list-checks';
+  if (/how|about|help|comment|propos|aide/i.test(label)) return 'circle-help';
+  return 'info';
 }

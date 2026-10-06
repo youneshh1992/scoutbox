@@ -1,0 +1,15 @@
+/* Tailwind v4 entry stylesheet; includes the same canonical tokens/classes. */
+@import "tailwindcss";
+@import "./theme.css";
+@custom-variant dark (&:where(.dark, .dark *, [data-theme="dark"], [data-theme="dark"] *));
+@theme inline {
+  --font-ui: var(--sb-font-ui);
+  --color-scoutbox: var(--sb-green);
+  --color-canvas: var(--sb-bg);
+  --color-surface: var(--sb-surface);
+  --color-ink: var(--sb-text);
+  --color-muted: var(--sb-muted);
+  --color-edge: var(--sb-border);
+  --color-focus: var(--sb-focus);
+  --color-action-ink: var(--sb-on-gradient);
+}

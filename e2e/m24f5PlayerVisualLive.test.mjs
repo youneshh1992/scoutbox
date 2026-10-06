@@ -3,7 +3,7 @@
 // 640×360: Home, Activity, Development, Box Cam, Combine, Evidence, Passport,
 // Trust Score, Messages, Trial and Offer.
 // For each screen: a word budget, no paragraph over 140 characters on a root,
-// no horizontal overflow, Inter as the computed face, zero emoji, no seconds.
+// no horizontal overflow, system UI as the computed family, zero emoji, no seconds.
 // Per screen: Home has no greeting, day or date line, no "View your Passport" and
 // no "Verified clubs can see you", and a "Joined" line from the record; Activity
 // is a timeline (dot + date + event) grouped Today / This week / Earlier; the
@@ -49,13 +49,13 @@ const MEASURE = `(() => {
 const measure = (p) => p.evaluate(MEASURE);
 const txt = async (loc) => (await loc.innerText()).replace(/\s+/g, ' ');
 const tab = async (p, name) => { const t = p.getByRole('tab', { name, exact: true }); const n = await t.count(); if (!n) return false; await t.nth(n - 1).click(); await sleep(600); return true; };
-// Inter everywhere; the wordmark (Albert Sans) is the one allowed exception.
-const interOnly = (m) => Object.keys(m.fonts).every((f) => /^Inter|^AlbertSans|^Albert Sans/.test(f)) && /^Inter/.test(Object.entries(m.fonts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '');
+// System UI everywhere; the wordmark (Albert Sans) is the one allowed exception.
+const systemOnly = (m) => Object.keys(m.fonts).every((f) => /^-apple-system|^AlbertSans|^Albert Sans/.test(f)) && /^-apple-system/.test(Object.entries(m.fonts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '');
 const check = (tag, screen, m, budget, allowPara = 0) => {
   ok(m.words <= budget, `${tag} ${screen}: ${m.words} words (budget ${budget})`);
   ok(m.paragraphs <= allowPara, `${tag} ${screen}: ${m.paragraphs} paragraph(s) over 140 characters${m.sample ? ` ("${m.sample}…")` : ''}`);
   ok(!m.overflow, `${tag} ${screen}: no horizontal overflow`);
-  ok(interOnly(m), `${tag} ${screen}: Inter computed (${Object.keys(m.fonts).join(', ')})`);
+  ok(systemOnly(m), `${tag} ${screen}: system UI computed (${Object.keys(m.fonts).join(', ')})`);
   ok(m.emoji === 0, `${tag} ${screen}: zero emoji`);
   ok(m.seconds === 0, `${tag} ${screen}: no seconds`);
 };

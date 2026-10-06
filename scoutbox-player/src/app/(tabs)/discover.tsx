@@ -1,3 +1,4 @@
+import { PlayerMeta, AvailabilityBadge, PlayerName } from '../../components/PlayerIdentity';
 // Home — M24F.4 hard reset. The player, one thing to do, recent events on demand,
 // one content section, then everything else one tap away. No greeting, no
 // date, no sentence about who can see you: the identity header is the name,
@@ -13,10 +14,11 @@ import { client, type Insights, type PlayerFeedItem } from '../../data/client';
 import type { Channel, DirectoryClub, Opportunities } from '../../data/types';
 import { SAFEGUARDING_PROMISES, U18_PROMISES } from '../../domain/safeguarding';
 import { useSession } from '../../state';
-import { useColors, useStyles, type Palette } from '../../theme';
+import { useColors, useStyles, useTheme, type Palette } from '../../theme';
 import { pt } from '../../i18n';
-import { DetailLink, Disclosure, ListRow, Muted, TimelineItem } from '../../components/ui';
-import { Gradient } from '../../components/Vivid';
+import { GuidanceNote, StatusRow, PolicyList } from '../../components/InformationRows';
+import { MetricTiles, RecordPanel, Pill, Row, DetailLink, Disclosure, ListRow, Muted, TimelineItem } from '../../components/ui';
+import { Gradient, PitchArt } from '../../components/Vivid';
 import { SeasonChart } from '../../components/SeasonChart';
 import { Icon } from '../../components/Icon';
 import { PageHeader } from '../../components/PageChrome';
@@ -44,6 +46,7 @@ const ORGS = [
 
 export default function Discover() {
   const colors = useColors();
+  const { scheme } = useTheme();
   const styles = useStyles(makeStyles);
   const { me, isMinor, playerId, notifications, refresh, inbox, channels } = useSession();
   const router = useRouter();
@@ -103,12 +106,12 @@ export default function Discover() {
         {me && (
           <View style={styles.identity} testID="home-identity">
             <View style={styles.identityTop}>
-              <Text style={styles.identityLine}>{footballLine}</Text>
+              <View style={{ flex: 1 }}><PlayerMeta position={me.position ?? pt('fbNoPosition')} location={me.city} /></View>
               <View style={styles.avatar} accessibilityLabel={me.name}><Text style={styles.avatarText}>{initialsOf(me.name)}</Text></View>
             </View>
-            <Text role="heading" aria-level={1} style={styles.name}>{me.name}</Text>
+            <PlayerName name={me.name} verified={me.identityVerified} style={styles.name} />
             <View style={styles.identityMeta}>
-              {availKey ? <View style={styles.status}><View style={styles.statusDot} /><Text style={styles.availability} testID="home-availability">{pt(availKey)}</Text></View> : null}
+              {availKey ? <AvailabilityBadge label={pt(availKey)} testID="home-availability" /> : null}
               {joined ? <Text style={styles.joined} testID="home-joined">{pt('homeJoined').replace('{when}', joined)}</Text> : null}
             </View>
           </View>
@@ -116,13 +119,12 @@ export default function Discover() {
 
         {/* The one thing to do now. */}
         <View style={styles.primary} testID="home-primary">
-          <Gradient colors={['#006451', '#086b9c', '#6922bd']} />
+          <Gradient opacity={scheme === 'dark' ? 0.49 : 0.7} />
           <View pointerEvents="none" accessible={false} aria-hidden style={styles.pitchArt}>
-            <View style={styles.pitchBox} /><View style={styles.pitchCircle} /><View style={styles.pitchLine} />
+            <PitchArt color={colors.gradientInk} />
           </View>
           <View style={styles.primaryTop}>
             <Text style={styles.primaryKicker}>{pt('homeNext')}</Text>
-            <Icon name="arrow-up-right" size={22} color={colors.accent} />
           </View>
           {next ? (
             <>
@@ -133,8 +135,8 @@ export default function Discover() {
             <Text style={styles.primaryTitle}>{pt('homeNothingNext')}</Text>
           )}
           <Pressable accessibilityRole="button" accessibilityLabel={next ? next.cta : pt('homeExploreClubs')} onPress={next ? next.onPress : () => router.push('/opportunities')} testID="home-primary-cta" style={({ pressed }) => [styles.primaryAction, pressed && { opacity: 0.75 }]}>
-            <Gradient /><Text style={styles.primaryActionText}>{next ? next.cta : pt('homeExploreClubs')}</Text>
-            <Icon name="arrow-right" size={20} color={colors.accentInk} />
+            <Gradient opacity={0.8} control /><Text style={styles.primaryActionText}>{next ? next.cta : pt('homeExploreClubs')}</Text>
+            <Icon name="arrow-right" size={20} color={colors.gradientInk} />
           </Pressable>
         </View>
 
@@ -143,7 +145,7 @@ export default function Discover() {
         {/* Recent stays one tap away so the journey is visible sooner on mobile. */}
         <View style={{ marginTop: 18 }}>
           <Disclosure label={pt('homeRecent')} testID="home-activity">
-            {recent.length === 0 ? <Muted size={13}>{pt('homeNoActivity')}</Muted> : (
+            {recent.length === 0 ? <GuidanceNote size={13}>{pt('homeNoActivity')}</GuidanceNote> : (
               <View style={{ marginTop: 4 }}>
                 {recent.map((e, i) => (
                   <TimelineItem key={i} date={relTime(e.ts)} last={i === recent.length - 1} testID="home-recent-row">
@@ -178,40 +180,27 @@ export default function Discover() {
         <View style={{ marginTop: 26 }}>
           {me && (
             <Disclosure label="Your visibility right now" testID="home-visibility">
-              {isMinor ? (
-                <>
-                  <Muted size={13}>Only verified clubs inside ScoutBox can see your profile. It is hidden from public browsing, search engines and every agency — and clubs can only talk to your guardian.</Muted>
-                  <Muted size={13}>Your medical data is {me.medical.shared ? 'shared by your guardian.' : 'private — no organisation can see any of it.'}</Muted>
-                </>
-              ) : (
-                <>
-                  <Muted size={13}>Verified clubs can see you. {me.academyPlus ? 'Academy+ is on: you surface in the boosted fresh-start cohort at the top of club searches.' : 'Academy+ is off. Turn it on in Account to join the boosted fresh-start cohort.'}</Muted>
-                  <Muted size={13}>Your medical data is {me.medical.shared ? 'shared — organisations can see your records.' : 'private — no organisation can see any of it.'}</Muted>
-                </>
-              )}
-              {weekly ? <Muted size={13}>This week: {weekly.report.views} profile view{weekly.report.views === 1 ? '' : 's'}, {weekly.report.shortlists} shortlist{weekly.report.shortlists === 1 ? '' : 's'}.</Muted> : null}
+              <StatusRow title="Profile visibility" value="Verified clubs" icon="eye" description={isMinor ? 'Visible inside ScoutBox only. Hidden from public browsing, search engines and agencies.' : 'Verified clubs can discover your profile inside ScoutBox.'} />
+              {isMinor ? <StatusRow title="Club conversations" value="Guardian managed" icon="users" description="Clubs contact your parent or guardian. You never receive direct club messages." /> : <StatusRow title="Academy+" value={me.academyPlus ? 'On' : 'Off'} positive={me.academyPlus} icon="target" description={me.academyPlus ? 'Included in the boosted fresh-start cohort at the top of club searches.' : 'Turn on Academy+ in Account to join the boosted fresh-start cohort.'} />}
+              <StatusRow title="Medical information" value={me.medical.shared ? 'Shared' : 'Private'} positive={!me.medical.shared} icon="medical" description={me.medical.shared ? (isMinor ? 'Your guardian has enabled medical sharing.' : 'Organisations can see your medical records.') : 'No organisation can see your medical records.'} />
+              {weekly ? <View style={{ gap: 9 }}><Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>This week</Text><MetricTiles items={[{ label: 'Profile views', value: weekly.report.views, icon: 'eye' }, { label: 'Shortlists', value: weekly.report.shortlists, icon: 'clipboard-list' }]} /></View> : null}
             </Disclosure>
           )}
           <Disclosure label="Club directory" testID="home-directory">
             {directory.length > 0 ? directory.map((d) => (
-              <View key={d.id} style={styles.dirRow}>
-                <Text style={styles.clubName}>{d.name}</Text>
-                <Text style={styles.clubMeta}>
-                  {[d.verified ? 'Verified' : 'Unverified', d.trustedPartner ? 'Trusted Partner' : null, d.safeguardingCertified ? 'Safeguarding certified' : null, d.pathwayClub ? 'Pathway club' : null].filter(Boolean).join(' · ')}
-                </Text>
-                <Text style={styles.clubMeta}>
-                  {d.trialsRun} trial{d.trialsRun === 1 ? '' : 's'} run · {d.reportsFiled} report{d.reportsFiled === 1 ? '' : 's'} filed{d.avgReportDays != null ? ` · ${d.avgReportDays} day${d.avgReportDays === 1 ? '' : 's'} to file on average` : ''}
-                </Text>
-              </View>
+              <RecordPanel key={d.id} title={d.name} icon="building-2">
+                <Row><Pill label={d.verified ? 'Verified' : 'Unverified'} tone={d.verified ? 'green' : 'default'} />{d.trustedPartner && <Pill label="Trusted partner" />}{d.safeguardingCertified && <Pill label="Safeguarding certified" />}{d.pathwayClub && <Pill label="Pathway club" />}</Row>
+                <MetricTiles items={[{ label: 'Trials run', value: d.trialsRun, icon: 'calendar-days' }, { label: 'Reports filed', value: d.reportsFiled, icon: 'file-check-2' }]} />
+                {d.avgReportDays != null && <StatusRow title="Average report time" value={`${d.avgReportDays} days`} icon="clock" />}
+              </RecordPanel>
             )) : ORGS.map((o) => (
-              <View key={o.name} style={styles.dirRow}>
-                <Text style={styles.clubName}>{o.name}</Text>
-                <Text style={styles.clubMeta}>{o.type === 'agency' ? 'Agency' : 'Club'}{o.trustedPartner ? ' · Trusted Partner' : ''} · {o.blurb}</Text>
-              </View>
+              <RecordPanel key={o.name} title={o.name} subtitle={o.type === 'agency' ? 'Agency' : 'Club'} icon="building-2">
+                {o.trustedPartner && <Pill label="Trusted partner" />}<GuidanceNote icon="building-2">{o.blurb}</GuidanceNote>
+              </RecordPanel>
             ))}
           </Disclosure>
           <Disclosure label="How discovery works" testID="home-promises">
-            {(isMinor ? U18_PROMISES : SAFEGUARDING_PROMISES).map((p) => <Muted key={p.slice(0, 20)} size={13}>{p}</Muted>)}
+            <PolicyList minor={isMinor} />
           </Disclosure>
         </View>
       </ScrollView>
@@ -226,24 +215,21 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   identityTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   avatar: { width: 34, height: 34, borderRadius: 8, backgroundColor: colors.panel2, alignItems: 'center', justifyContent: 'center' },
   avatarText: { color: colors.text, fontSize: 12, fontWeight: '700' },
-  name: { color: colors.text, fontSize: 38, fontWeight: '800', letterSpacing: -1.7, lineHeight: 42 },
+  name: { color: colors.text, fontSize: 38, fontWeight: '700', letterSpacing: -1.7, lineHeight: 42 },
   identityLine: { flex: 1, color: colors.muted, fontSize: 12, fontWeight: '600', lineHeight: 18, letterSpacing: 0.4 },
   identityMeta: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   status: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   statusDot: { width: 5, height: 5, backgroundColor: colors.accentText },
   availability: { color: colors.safetyText, fontSize: 12, lineHeight: 18 },
   joined: { color: colors.muted, fontSize: 11, lineHeight: 18 },
-  primary: { padding: 20, backgroundColor: colors.passport, borderRadius: 18, overflow: 'hidden', gap: 8 },
+  primary: { padding: 20, backgroundColor: colors.panel, borderRadius: 18, overflow: 'hidden', gap: 8 },
   primaryTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  primaryKicker: { color: colors.accent, fontSize: 10, fontWeight: '700', letterSpacing: 2, textTransform: 'uppercase' },
-  primaryTitle: { color: '#ffffff', fontSize: 30, fontWeight: '700', letterSpacing: -1, lineHeight: 35 },
-  primarySub: { color: colors.passportText, fontSize: 13, lineHeight: 20 },
-  primaryAction: { overflow: 'hidden', marginTop: 12, minHeight: 48, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 8, backgroundColor: colors.accent, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  primaryActionText: { color: colors.accentInk, fontSize: 14, fontWeight: '700', flexShrink: 1 },
-  pitchArt: { position: 'absolute', right: -35, top: -30, width: 170, height: 180, opacity: 0.13 },
-  pitchBox: { position: 'absolute', top: 0, right: 0, width: 140, height: 160, borderWidth: 1, borderColor: colors.passportText },
-  pitchCircle: { position: 'absolute', top: 43, left: 0, width: 74, height: 74, borderRadius: 37, borderWidth: 1, borderColor: colors.passportText },
-  pitchLine: { position: 'absolute', top: 0, left: 37, height: 160, width: 1, backgroundColor: colors.passportText },
+  primaryKicker: { color: colors.gradientInk, fontSize: 10, fontWeight: '700', letterSpacing: 2, textTransform: 'uppercase' },
+  primaryTitle: { color: colors.gradientInk, fontSize: 30, fontWeight: '700', letterSpacing: -1, lineHeight: 35 },
+  primarySub: { color: colors.gradientInk, fontSize: 13, lineHeight: 20 },
+  primaryAction: { overflow: 'hidden', marginTop: 12, minHeight: 48, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 8, backgroundColor: colors.panel, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  primaryActionText: { color: colors.gradientInk, fontSize: 14, fontWeight: '700', flexShrink: 1 },
+  pitchArt: { position: 'absolute', right: 12, top: 12, width: 110, height: 70, opacity: 0.18 },
   fixture: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14 },
   fixtureDate: { width: 58, minHeight: 62, backgroundColor: colors.panel2, borderRadius: 8, alignItems: 'center', justifyContent: 'center', padding: 8, borderTopWidth: 3, borderTopColor: colors.accent },
   fixtureDateText: { color: colors.text, fontSize: 17, lineHeight: 22, fontWeight: '700', textAlign: 'center' },

@@ -1,3 +1,5 @@
+import { RecordIdentity, MetricTiles } from './RecordDetails';
+import { GuidanceNote } from './InformationRows';
 // M13 player/guardian sections, dropped into the existing tabs:
 // suitability preferences + opportunity fit (You / Home), transitions (You,
 // adults; guardian panel for minors), representation (You, adults only),
@@ -6,7 +8,7 @@ import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { Text, TextInput } from './Text';
 import { useColors, type Palette } from '../theme';
-import { Button, Card, Disclosure, Muted, Pill, Row, SectionTitle } from './ui';
+import { RecordPanel, DetailFact, InfoNote, Button, Card, Disclosure, Muted, Pill, Row, SectionTitle } from './ui';
 import { m13, type AckNotification, type Preferences, type RepresentationView, type TransitionCase, type Verdict } from '../data/m13client';
 import { m12, type BoardItem } from '../data/m12client';
 import { pt } from '../i18n';
@@ -58,17 +60,11 @@ export function PreferencesSection({ actor, isMinor }: { actor: Actor; isMinor: 
   return (
     <Card>
       <SectionTitle>{pt('m13prefs')}</SectionTitle>
-      <Muted size={12}>{pt('m13prefsPrivate')}</Muted>
-      {readOnly && <Muted size={12}>{pt('m13prefsGuardian')}</Muted>}
-      <Muted size={12.5}>
-        {pt('m13commitments')}: {p.commitments.length ? p.commitments.map((c) => `${c.label ?? c.day} ${c.day} ${c.start}–${c.end}`).join(' · ') : '—'}
-      </Muted>
-      <Muted size={12.5}>{pt('m13available')}: {p.availableSlots.length ? p.availableSlots.map((c) => `${c.day} ${c.start}–${c.end}`).join(' · ') : '—'}</Muted>
-      <Muted size={12.5}>
-        {pt('m13travel')}: {p.travelLimitKm != null ? `${p.travelLimitKm} km` : '—'} · {pt('m13transport')}: {p.transport ?? '—'}
-        {actor.kind === 'player' && !isMinor && ` · ${pt('m13relocation')}: ${p.relocation ?? '—'}`}
-      </Muted>
-      <Muted size={12.5}>{pt('m13expenses')}: {p.compensation.expensesNeeded ? pt('m13expensesNeeded') : pt('m13expensesOk')}</Muted>
+      <GuidanceNote icon="info" size={12}>{pt('m13prefsPrivate')}</GuidanceNote>
+      {readOnly && <GuidanceNote icon="users" size={12}>{pt('m13prefsGuardian')}</GuidanceNote>}
+      <RecordPanel title={pt('m13commitments')} icon="calendar-days">{p.commitments.length ? p.commitments.map((c, i) => <DetailFact key={i} label={c.label ?? c.day} value={`${c.day} ${c.start}–${c.end}`} icon="clock" />) : <Muted>—</Muted>}</RecordPanel>
+      <RecordPanel title={pt('m13available')} icon="calendar-days">{p.availableSlots.length ? p.availableSlots.map((c, i) => <DetailFact key={i} label={c.day} value={`${c.start}–${c.end}`} icon="clock" />) : <Muted>—</Muted>}</RecordPanel>
+      <RecordPanel title={pt('m13travel')} icon="map-pin"><DetailFact label={pt('m13travel')} value={p.travelLimitKm != null ? `${p.travelLimitKm} km` : '—'} icon="map-pin" /><DetailFact label={pt('m13transport')} value={p.transport ?? '—'} icon="route" />{actor.kind === 'player' && !isMinor && <DetailFact label={pt('m13relocation')} value={p.relocation ?? '—'} icon="globe" />}<DetailFact label={pt('m13expenses')} value={p.compensation.expensesNeeded ? pt('m13expensesNeeded') : pt('m13expensesOk')} icon="file-text" /></RecordPanel>
       {!readOnly && (
         <Row style={{ marginTop: 8 }}>
           <TextInput
@@ -126,8 +122,8 @@ export function OpportunityFitSection({ actor }: { actor: Actor }) {
                 </Row>
               ))}
               <Disclosure label={pt('m13fitWhy')} testID={`fit-why-${o.id}`}>
-                {fit.verdicts.map((v) => <Muted key={v.dimension} size={12.5}>{cap(v.dimension)}: {v.reason} ({v.source})</Muted>)}
-                {fit.note && <Muted size={12.5}>{fit.note}</Muted>}
+                {fit.verdicts.map((v) => <RecordPanel key={v.dimension} title={cap(v.dimension)} subtitle={v.source} icon="clipboard-list"><GuidanceNote size={13}>{v.reason}</GuidanceNote></RecordPanel>)}
+                {fit.note && <GuidanceNote size={12.5}>{fit.note}</GuidanceNote>}
               </Disclosure>
               {o.applied?.id && (
                 <Row><Button small tertiary label={pt('m13shareFit')} onPress={async () => {
@@ -169,16 +165,13 @@ export function TransitionsSection({ actor, isMinor, mediaOptions }: { actor: Ac
   return (
     <Card>
       <SectionTitle>{pt('m13trn')}</SectionTitle>
-      <Muted size={12}>{pt('m13trnNote')}</Muted>
+      <GuidanceNote title="Your transition pack" icon="folder-open">{pt('m13trnNote')}</GuidanceNote>
       {(cases ?? []).map((c) => (
-        <View key={c.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6 }}>
-          <Row>
-            <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, flex: 1 }}>{c.note ?? c.id}</Text>
-            <Pill label={pt(c.status === 'open' ? 'm13trnStOpen' : c.status === 'placed' ? 'm13trnStPlaced' : 'm13trnStClosed')} tone={c.status === 'open' ? 'blue' : c.status === 'placed' ? 'green' : 'default'} />
-          </Row>
+        <View key={c.id} style={{ marginTop: 8, gap: 14, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 16 }}>
+          <RecordIdentity name={c.note ?? c.id} icon="route" status={<Pill label={pt(c.status === 'open' ? 'm13trnStOpen' : c.status === 'placed' ? 'm13trnStPlaced' : 'm13trnStClosed')} tone={c.status === 'open' ? 'blue' : c.status === 'placed' ? 'green' : 'default'} />} />
           {c.recipients.map((r) => (
             <Row key={r.orgId} style={{ marginTop: 4 }}>
-              <View style={{ flex: 1 }}><Muted size={12}>{r.orgName} {r.revokedAt ? `· ${pt('m13trnRevoked')}` : r.viewedAt ? `· ${pt('m13trnViewed')}` : `· ${pt('m13trnNotViewed')}`}</Muted></View>
+              <View style={{ flex: 1, gap: 5 }}><Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>{r.orgName}</Text><Muted size={11.5}>{r.revokedAt ? pt('m13trnRevoked') : r.viewedAt ? pt('m13trnViewed') : pt('m13trnNotViewed')}</Muted></View>
               {!r.revokedAt && c.status === 'open' && (
                 <Button small label={pt('m13trnRevoke')} onPress={() => act(
                   () => (actor.kind === 'player' ? m13.revokeRecipient(actor.id, c.id, r.orgId) : m13.gRevokeRecipient(actor.id, c.id, r.orgId)),
@@ -230,13 +223,10 @@ export function RepresentationSection({ playerId, isMinor }: { playerId: string;
       <SectionTitle>{pt('m13rep')}</SectionTitle>
       {err && <Muted size={12}>{err}</Muted>}
       {(items ?? []).map((r) => (
-        <View key={r.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6 }}>
-          <Row>
-            <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, flex: 1 }}>{r.agencyName}</Text>
-            <Pill label={r.status.charAt(0).toUpperCase() + r.status.slice(1)} tone={r.status === 'active' ? 'green' : r.status === 'withdrawn' || r.status === 'disputed' ? 'red' : 'blue'} />
-          </Row>
-          <Muted size={12}>{r.representativeName} · {r.scope.replace(/_/g, ' ')}</Muted>
-          {r.credential && <Muted size={11.5}>{r.credential.note} — {r.credential.reviewStatus.replace(/_/g, ' ')}. {r.credential.honest}</Muted>}
+        <View key={r.id} style={{ marginTop: 8, gap: 14, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 16 }}>
+          <RecordIdentity name={r.agencyName} subtitle={r.representativeName} icon="building-2" status={<Pill label={r.status.charAt(0).toUpperCase() + r.status.slice(1)} tone={r.status === 'active' ? 'green' : r.status === 'withdrawn' || r.status === 'disputed' ? 'red' : 'blue'} />} />
+          <DetailFact label="Scope" value={r.scope.replace(/_/g, ' ')} icon="file-text" />
+          {r.credential && <GuidanceNote title="Credential review" icon="shield">{r.credential.note} — {r.credential.reviewStatus.replace(/_/g, ' ')}. {r.credential.honest}</GuidanceNote>}
           <Row style={{ marginTop: 6 }}>
             {r.status === 'proposed' && <Button small primary label={pt('m13repConfirm')} onPress={async () => { await m13.actRepresentation(playerId, r.id, 'confirm'); setMsg(pt('m13repConfirmed')); reload(); }} />}
             {['proposed', 'active'].includes(r.status) && <Button small label={pt('m13repWithdraw')} onPress={async () => { await m13.actRepresentation(playerId, r.id, 'withdraw'); setMsg(pt('m13repWithdrawn')); reload(); }} />}
@@ -244,7 +234,7 @@ export function RepresentationSection({ playerId, isMinor }: { playerId: string;
           </Row>
         </View>
       ))}
-      {(items ?? []).length === 0 && !err && <Muted size={12}>{pt('m13repNone')}</Muted>}
+      {(items ?? []).length === 0 && !err && <GuidanceNote icon="info" size={12}>{pt('m13repNone')}</GuidanceNote>}
       {msg && <View accessibilityLiveRegion="polite"><Muted size={12}>{msg}</Muted></View>}
     </Card>
   );
@@ -258,8 +248,8 @@ export function ExposureSection({ playerId }: { playerId: string }) {
   return (
     <Card>
       <SectionTitle>{pt('m13exposure')}</SectionTitle>
-      <Muted size={12.5}>{pt('m13expSearches')}: <Text style={{ color: colors.text, fontWeight: '700' }}>{exp.appearedInSearches}</Text> · {pt('m13expProfiles')}: <Text style={{ color: colors.text, fontWeight: '700' }}>{exp.profileViews}</Text> · {pt('m13expClubs')}: <Text style={{ color: colors.text, fontWeight: '700' }}>{exp.clubs}</Text></Muted>
-      <Disclosure label="About these figures"><Muted size={12}>{exp.note}</Muted></Disclosure>
+      <MetricTiles items={[{ label: pt('m13expSearches'), value: exp.appearedInSearches, icon: 'search' }, { label: pt('m13expProfiles'), value: exp.profileViews, icon: 'eye' }, { label: pt('m13expClubs'), value: exp.clubs, icon: 'building-2' }]} />
+      <Disclosure label="About these figures"><GuidanceNote size={12}>{exp.note}</GuidanceNote></Disclosure>
     </Card>
   );
 }
@@ -278,7 +268,7 @@ export function AckSection({ actor }: { actor: Actor }) {
       {pending.map((nn) => (
         // M24F.3 — one line per notice; the full text and the action sit behind it.
         <Disclosure key={nn.id} label={nn.text.split(/[.;—]\s/)[0].slice(0, 64)} testID={`ack-${nn.id}`}>
-          <Muted size={12.5}>{nn.text}</Muted>
+          <GuidanceNote size={12.5}>{nn.text}</GuidanceNote>
           <Button small primary label={pt('m13ackBtn')} testID={`ack-confirm-${nn.id}`} onPress={async () => {
             if (actor.kind === 'player') await m13.ack(actor.id, nn.id); else await m13.gAck(actor.id, nn.id);
             reload();

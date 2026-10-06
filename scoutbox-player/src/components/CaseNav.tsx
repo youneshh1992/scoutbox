@@ -38,7 +38,7 @@ export function CaseCategories({ model, value, onChange }: { model: PlayerCaseNa
               style={({ pressed }) => [styles.pill, active && styles.pillOn, pressed && { opacity: 0.75 }]}
               testID={`cat-${c.id}`}
             >
-              {active && <Gradient />}<Icon name={({ journey: 'route', contact: 'message-circle', trial: 'calendar-days', offer: 'file-text', signing: 'file-check-2' } as Record<string, string>)[c.id] ?? 'compass'} size={20} color={active ? colors.accentInk : colors.iconFg} />
+              {active && <Gradient control />}<Icon name={({ journey: 'route', contact: 'message-circle', trial: 'calendar-days', offer: 'file-text', signing: 'file-check-2' } as Record<string, string>)[c.id] ?? 'compass'} size={20} color={active ? colors.gradientInk : colors.iconFg} />
               <Text style={[styles.text, active && styles.textOn]} numberOfLines={1}>{pt(c.labelKey as Parameters<typeof pt>[0])}</Text>
             </Pressable>
           );
@@ -55,5 +55,5 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   pillOn: { backgroundColor: colors.tabActiveBg, borderColor: colors.tabActiveBg },
   dot: { width: 6, height: 6, borderRadius: 3 },
   text: { color: colors.muted, fontSize: 13.5, fontWeight: '500' },
-  textOn: { color: colors.accentInk, fontWeight: '700' },
+  textOn: { color: colors.gradientInk, fontWeight: '700' },
 });

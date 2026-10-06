@@ -163,19 +163,22 @@ export function Threads({ channels, onSend, onOpen, onTyping, attachableClips, e
               const newDay = i === 0 || new Date(open.messages[i - 1].ts).toDateString() !== new Date(m.ts).toDateString();
               return (
                 <View key={m.id}>
-                  {newDay ? <Text style={styles.date}>{dayLabel(m.ts)}</Text> : null}
+                  {newDay ? <View style={styles.dayDivider}><View style={styles.dayRule} /><Text style={styles.date}>{dayLabel(m.ts)}</Text><View style={styles.dayRule} /></View> : null}
+                  <View style={[styles.messageRow, mine && { justifyContent: 'flex-end' }]}>
+                    {!mine && <ColorAvatar initials={initialsOf(open.orgName)} size={28} index={1} />}
                   <View style={[styles.bubble, mine ? styles.mine : styles.theirs]}>
                     {mine && <Gradient />}
-                    <Text style={{ color: mine ? '#062d20' : colors.text, fontSize: 14, lineHeight: 20, fontWeight: mine ? '500' : '400' }}>{m.text}</Text>
-                    <ThemeOverride colors={mine ? { ...colors, text: '#062d20', muted: '#174c37' } : colors}><Attachment attachment={m.attachment} /></ThemeOverride>
-                    <Text style={[styles.meta, mine && { color: '#174c37' }]}>{fmtClock(m.ts)}{isLastMine ? ` · ${read ? pt('chatRead') : pt('chatSent')}` : ''}</Text>
+                    <Text style={{ color: mine ? colors.gradientInk : colors.text, fontSize: 15, lineHeight: 22, fontWeight: mine ? '500' : '400' }}>{m.text}</Text>
+                    <ThemeOverride colors={mine ? { ...colors, text: colors.gradientInk, muted: colors.gradientInk } : colors}><Attachment attachment={m.attachment} /></ThemeOverride>
+                    <Text style={[styles.meta, mine && { color: colors.gradientInk }]}>{fmtClock(m.ts)}{isLastMine ? ` · ${read ? pt('chatRead') : pt('chatSent')}` : ''}</Text>
+                  </View>
                   </View>
                 </View>
               );
             })}
             {outbox.filter((o) => o.channelId === open.id).map((o) => (
               <View key={o.id} style={[styles.bubble, styles.mine, o.status === 'failed' ? styles.failed : styles.pending]}>
-                <Gradient /><Text style={{ color: '#062d20', fontSize: 14, lineHeight: 20 }}>{o.text}</Text>
+                <Gradient /><Text style={{ color: colors.gradientInk, fontSize: 14, lineHeight: 20 }}>{o.text}</Text>
                 {o.status === 'failed'
                   ? <Row><Text style={styles.meta}>{pt('chatNotDelivered')}</Text><Button small label={pt('chatRetry')} onPress={() => send(o.id)} /></Row>
                   : <Text style={styles.meta}>{pt('chatSending')}</Text>}
@@ -210,7 +213,7 @@ export function Threads({ channels, onSend, onOpen, onTyping, attachableClips, e
               onSubmitEditing={() => send()}
             />
             <Pressable disabled={!draft.trim()} accessibilityState={{ disabled: !draft.trim() }} onPress={() => send()} accessibilityRole="button" accessibilityLabel={pt('chatSend')} testID="thread-send" style={({ pressed }) => [styles.sendBtn, !draft.trim() && { opacity: 0.45 }, pressed && { opacity: 0.8 }]}>
-              <Gradient /><Icon name="arrow-up" size={22} active color={colors.accentInk} />
+              <Gradient control /><Icon name="arrow-up" size={22} active color={colors.gradientInk} />
             </Pressable>
           </View>
         </View>
@@ -244,13 +247,16 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   clubAvatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.iconBg, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   person: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 2, paddingBottom: 12 },
   personName: { color: colors.text, fontSize: 17, fontWeight: '600', letterSpacing: -0.3 },
-  backBtn: { paddingVertical: 8, paddingRight: 4, minWidth: 36, minHeight: 44, justifyContent: 'center' },
+  backBtn: { width: 40, height: 44, borderRadius: 22, backgroundColor: colors.panel2, alignItems: 'center', justifyContent: 'center' },
   safety: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 9, paddingHorizontal: 12, borderRadius: 12, backgroundColor: colors.safety },
-  date: { textAlign: 'center', color: colors.chatDate, fontSize: 11, marginVertical: 18 },
+  date: { textAlign: 'center', color: colors.chatDate, fontSize: 11 },
+  dayDivider: { flexDirection: 'row', alignItems: 'center', gap: 12, marginVertical: 22 },
+  dayRule: { flex: 1, height: 1, backgroundColor: colors.line },
+  messageRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginVertical: 3 },
   thread: { maxHeight: 440 },
-  bubble: { maxWidth: '86%', overflow: 'hidden', borderRadius: 22, paddingVertical: 14, paddingHorizontal: 16, marginVertical: 4, gap: 2 },
+  bubble: { maxWidth: '84%', flexShrink: 1, overflow: 'hidden', borderRadius: 22, paddingVertical: 11, paddingHorizontal: 15, marginVertical: 3, gap: 2 },
   mine: { alignSelf: 'flex-end', backgroundColor: colors.mine, borderBottomRightRadius: 6 },
-  theirs: { alignSelf: 'flex-start', backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.line, borderBottomLeftRadius: 6 },
+  theirs: { alignSelf: 'flex-start', backgroundColor: colors.panel2, borderBottomLeftRadius: 7 },
   meta: { color: colors.bubbleMeta, fontSize: 10.5, marginTop: 4, alignSelf: 'flex-end' },
   compose: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 6, paddingRight: 6, paddingLeft: 14, backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.line, borderRadius: 28, marginTop: 14 },
   input: { flex: 1, minWidth: 0, color: colors.text, fontSize: 14, paddingVertical: 8 },

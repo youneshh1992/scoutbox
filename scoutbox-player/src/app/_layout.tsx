@@ -7,7 +7,7 @@ import { Asset } from 'expo-asset';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { SessionProvider } from '../state';
 import { palettes, ThemeProvider, useTheme } from '../theme';
-import { Text, FONT_FILES } from '../components/Text';
+import { Text, FONT_FILES, WEB_UI_FONT } from '../components/Text';
 import { MobileViewport } from '../components/MobileViewport';
 
 // Root error boundary: a runtime failure renders a recoverable screen, never
@@ -63,33 +63,24 @@ function Themed() {
   );
 }
 
-// M24E — on the web the two Inter variable files are ONE family with a weight
-// range and a real italic, declared here (expo-font would register each file
-// as a single-weight face and the browser would then synthesise the rest).
-// The wordmark's Albert Sans ExtraBold rides along. Registered once, before
-// the first text draws; the browser swaps the faces in as they load.
+// Only the permanent wordmark is bundled; UI typography comes from the OS.
 let webFacesRegistered = false;
 function registerWebFaces() {
   if (Platform.OS !== 'web' || typeof document === 'undefined' || webFacesRegistered) return;
   webFacesRegistered = true;
   const uri = (mod: number) => Asset.fromModule(mod).uri;
   const css = `
-@font-face { font-family: 'Inter'; font-style: normal; font-weight: 100 900; font-display: swap; src: url("${uri(FONT_FILES.Inter)}") format('truetype'); }
-@font-face { font-family: 'Inter'; font-style: italic; font-weight: 100 900; font-display: swap; src: url("${uri(FONT_FILES['Inter-Italic'])}") format('truetype'); }
 @font-face { font-family: 'AlbertSans-ExtraBold'; font-style: normal; font-weight: 800; font-display: swap; src: url("${uri(FONT_FILES['AlbertSans-ExtraBold'])}") format('truetype'); }
-html, body, input, textarea, button { font-family: 'Inter', -apple-system, system-ui, 'Segoe UI', sans-serif; font-optical-sizing: auto; }`;
+html, body, input, textarea, button { font-family: ${WEB_UI_FONT}; font-optical-sizing: auto; }`;
   const style = document.createElement('style');
-  style.setAttribute('data-sb-fonts', 'inter');
+  style.setAttribute('data-sb-fonts', 'system-ui');
   style.textContent = css;
   document.head.appendChild(style);
 }
 registerWebFaces();
 
 export default function RootLayout() {
-  // M24E — Inter (bundled, SIL OFL). On iOS and Android the faces must be
-  // registered before any text draws; on the web the @font-face rules above
-  // do the registering and the browser swaps them in as they load, so the
-  // first paint is never blocked.
+  // Native only needs to load the unchanged wordmark face.
   const [fontsReady] = useFonts(Platform.OS === 'web' ? {} : FONT_FILES);
   if (!fontsReady && Platform.OS !== 'web') return null;
   return (

@@ -1,3 +1,4 @@
+import { GuidanceNote } from './InformationRows';
 // M24F.2 — the Clubs page in four categories: Current, Requests, Development,
 // History. Each category composes the sections the page already had (the same
 // clients, the same rules) so nothing is lost — it is grouped. Development is
@@ -5,7 +6,9 @@
 // progress count up front, the full text and the actions behind "View
 // details". Supporting copy is exceptional here, not default.
 import { useEffect, useState } from 'react';
-import { View } from 'react-native';
+import { Pressable, View } from 'react-native';
+import { Icon } from './Icon';
+import { RecordIdentity } from './RecordDetails';
 import { Text, TextInput } from './Text';
 import { useRouter } from 'expo-router';
 import { m12, type FeedbackItem, type ObjectiveRec } from '../data/m12client';
@@ -13,7 +16,7 @@ import { m15 } from '../data/m15client';
 import type { InboxRequest } from '../domain/types';
 import { useColors, type Palette } from '../theme';
 import { pt } from '../i18n';
-import { Button, Disclosure, FactRow, ListRow, Muted, Row, SectionTitle } from './ui';
+import { TimelineItem, RecordPanel, DetailFact, InfoNote, Button, Disclosure, FactRow, ListRow, Muted, Row, SectionTitle } from './ui';
 import { AckSection, ExposureSection, RepresentationSection, TransitionsSection } from './M13Sections';
 import { ReferencesSection } from './M14Sections';
 import { AgentSharedOpportunities, MyAgentSection } from './MyAgentSection';
@@ -65,13 +68,17 @@ export function ClubsCurrent({ actor, isMinor, mediaOptions }: { actor: Actor; i
 // ------------------------------------------------------------- Requests
 export function ClubsRequests({ actor, isMinor, requests }: { actor: Actor; isMinor: boolean; requests: InboxRequest[] }) {
   const router = useRouter();
+  const colors = useColors();
   const pending = requests.filter((r) => r.status === 'pending').sort((a, b) => b.createdAt - a.createdAt);
   return (
     <View testID="clubs-requests" style={{ gap: 26 }}>
       <View>
         <SectionTitle>{pt('clubsOpenRequests')}</SectionTitle>
         {pending.length === 0 ? <Muted size={13.5}>{pt('clubsNoRequests')}</Muted> : pending.map((r) => (
-          <ListRow key={r.id} label={r.orgName} value={`${r.type === 'trial' ? pt('clubsTrialInvitation') : pt('clubsContactRequest')} · ${day(r.createdAt)}`} onPress={() => router.push('/inbox')} testID={`clubs-request-${r.id}`} />
+          <Pressable key={r.id} accessibilityRole="button" accessibilityLabel={`${r.orgName}. ${r.type === 'trial' ? pt('clubsTrialInvitation') : pt('clubsContactRequest')}`} onPress={() => router.push('/inbox')} testID={`clubs-request-${r.id}`} style={({ pressed }) => ({ paddingVertical: 16, gap: 10, borderBottomWidth: 1, borderBottomColor: colors.line, opacity: pressed ? 0.7 : 1 })}>
+            <RecordIdentity name={r.orgName} subtitle={r.type === 'trial' ? pt('clubsTrialInvitation') : pt('clubsContactRequest')} icon={r.type === 'trial' ? 'calendar-days' : 'chat-bubble'} />
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 53 }}><Muted size={11.5}>{day(r.createdAt)}</Muted><Icon name="arrow-right" size={18} color={colors.accentText} /></View>
+          </Pressable>
         ))}
       </View>
       <AgentConsentSection playerId={actor.id} isMinor={isMinor} />
@@ -134,17 +141,14 @@ export function ClubsDevelopment({ actor }: { actor: Actor }) {
             )}
             <Disclosure label={pt('clubsViewDetails')} testID={`clubs-dev-details-${org.replace(/\s+/g, '-').toLowerCase()}`}>
               {feedback.map((f) => (
-                <View key={f.id} style={{ marginBottom: 10 }}>
-                  <Muted size={12}>{f.byName} · {day(f.at)}</Muted>
-                  <Text style={{ color: colors.text, fontSize: 13.5, lineHeight: 19 }}>{f.text}</Text>
-                </View>
+                <RecordPanel key={f.id} title={f.byName} subtitle={day(f.at)} icon="message-circle"><Text style={{ color: colors.text, fontSize: 13.5, lineHeight: 20 }}>{f.text}</Text></RecordPanel>
               ))}
               {mine.map((o) => (
-                <View key={o.id} style={{ gap: 6, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 10 }} testID={`objective-${o.id}`}>
+                <RecordPanel key={o.id} testID={`objective-${o.id}`}>
                   {o.objectives.map((x) => <Text key={x.id} style={{ color: colors.text, fontWeight: '600', fontSize: 14 }}>{x.text}</Text>)}
-                  <Muted size={12}>{o.reviewer.name}{o.reviewer.orgName ? ` · ${o.reviewer.orgName}` : ''} · {o.progress.length} {pt('clubsProgressEntries').toLowerCase()}{o.sharing.orgIds.length ? ` · ${pt('clubsSharedWithClub')}` : ''}</Muted>
+                  <GuidanceNote size={12}>{o.reviewer.name}{o.reviewer.orgName ? ` · ${o.reviewer.orgName}` : ''} · {o.progress.length} {pt('clubsProgressEntries').toLowerCase()}{o.sharing.orgIds.length ? ` · ${pt('clubsSharedWithClub')}` : ''}</GuidanceNote>
                   {o.reassessments.map((r) => (
-                    <Muted key={r.id} size={12}>{pt('reassess')}: {r.status}{r.outcome ? ` — ${r.outcome.note}` : ''}</Muted>
+                    <InfoNote key={r.id}>{pt('reassess')}: {r.status}{r.outcome ? ` — ${r.outcome.note}` : ''}</InfoNote>
                   ))}
                   <Row style={{ flexWrap: 'wrap' }}>
                     <TextInput style={[inputStyle(colors), { flex: 1, minWidth: 140 }]} placeholder={pt('logProgress')} placeholderTextColor={colors.muted}
@@ -168,7 +172,7 @@ export function ClubsDevelopment({ actor }: { actor: Actor }) {
                       catch (e) { setMsg(e instanceof Error ? e.message : 'Failed'); }
                     }} />
                   </Row>
-                </View>
+                </RecordPanel>
               ))}
             </Disclosure>
           </View>
@@ -181,6 +185,7 @@ export function ClubsDevelopment({ actor }: { actor: Actor }) {
 
 // -------------------------------------------------------------- History
 export function ClubsHistory({ actor, isMinor, requests }: { actor: Actor; isMinor: boolean; requests: InboxRequest[] }) {
+  const colors = useColors();
   const [objectives] = useLoad<ObjectiveRec[]>(() => m12.getObjectives(actor.id), [actor.id]);
   const answered = requests.filter((r) => r.status !== 'pending').map((r) => ({
     at: r.respondedAt ?? r.createdAt,
@@ -194,7 +199,7 @@ export function ClubsHistory({ actor, isMinor, requests }: { actor: Actor; isMin
       <View>
         <SectionTitle>{pt('clubsHistory')}</SectionTitle>
         {rows.length === 0 ? <Muted size={13.5}>{pt('clubsNoHistory')}</Muted> : rows.map((r, i) => (
-          <FactRow key={`${r.label}-${i}`} k={r.label} sub={r.sub} v={r.at ? day(r.at) : ''} />
+          <TimelineItem key={`${r.label}-${i}`} date={r.at ? day(r.at) : ''} last={i === rows.length - 1}><Text style={{ color: colors.text, fontSize: 14, fontWeight: '600', lineHeight: 21 }}>{r.label}</Text><Text style={{ color: colors.muted, fontSize: 12.5, lineHeight: 20 }}>{r.sub}</Text></TimelineItem>
         ))}
       </View>
       <ReferencesSection playerId={actor.id} />

@@ -1,3 +1,4 @@
+import { GuidanceNote } from './InformationRows';
 // M23 P8 — the player's (or guardian's) recruitment journeys: one line per
 // club, derived on the server only from records that reached this person —
 // a contact, a trial invitation, a schedule, an Offer, a signing. The stage
@@ -16,7 +17,7 @@ import { m12, type PlayerJourney, type PlayerJourneyStage, type PlayerNextAction
 import { useColors } from '../theme';
 import { pt } from '../i18n';
 import { fmtDay } from '../time';
-import { Button, Card, Muted, Row, SectionTitle } from './ui';
+import { TimelineItem, RecordPanel, DetailFact, Button, Card, Muted, Row, SectionTitle } from './ui';
 
 type Actor = { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string };
 export type JourneyView = 'overview' | 'stage' | 'tasks' | 'activity';
@@ -63,9 +64,9 @@ export function JourneySection({ actor, view = 'overview', onGo, emptyLine }: { 
           {items.map((j) => (
             <View key={j.club.id} style={sep} testID={`journey-stage-${j.club.id}`}>
               {clubRow(j)}
-              <Muted size={12}>{pt('jnSharedTitle')}</Muted>
-              {j.shared.length === 0 ? <Muted size={12}>—</Muted> : j.shared.map((s) => (
-                <Text key={`${s.kind}-${s.id}`} style={{ color: colors.text, fontSize: 13 }}>• {sharedLabel(s.kind)}{s.status ? ` · ${String(s.status).replace(/_/g, ' ').toLowerCase()}` : ''}{s.at ? ` · ${fmtDay(s.at)}` : ''}</Text>
+              <GuidanceNote icon="info" size={12}>{pt('jnSharedTitle')}</GuidanceNote>
+              {j.shared.length === 0 ? <GuidanceNote icon="info" size={12}>—</GuidanceNote> : j.shared.map((s) => (
+                <RecordPanel key={`${s.kind}-${s.id}`} title={sharedLabel(s.kind)} subtitle={s.at ? fmtDay(s.at) : undefined}><Muted>{s.status ? String(s.status).replace(/_/g, ' ').toLowerCase() : '—'}</Muted></RecordPanel>
               ))}
             </View>
           ))}
@@ -102,9 +103,9 @@ export function JourneySection({ actor, view = 'overview', onGo, emptyLine }: { 
           {items.map((j) => (
             <View key={j.club.id} style={sep} testID={`journey-activity-${j.club.id}`}>
               {clubRow(j)}
-              {j.journey.timeline.length === 0 ? <Muted size={12}>{pt('jnActivityNone')}</Muted> : j.journey.timeline.map((e, i) => (
-                <Text key={`${e.kind}-${e.at}-${i}`} style={{ color: colors.text, fontSize: 13 }}>{fmtDay(e.at)} · {evLabel(e.kind)}</Text>
-              ))}
+              {j.journey.timeline.length === 0 ? <Muted size={12}>{pt('jnActivityNone')}</Muted> : <View>{j.journey.timeline.map((e, i) => (
+                <TimelineItem key={`${e.kind}-${e.at}-${i}`} date={fmtDay(e.at)} last={i === j.journey.timeline.length - 1}>{evLabel(e.kind)}</TimelineItem>
+              ))}</View>}
             </View>
           ))}
         </View>
@@ -125,13 +126,13 @@ export function JourneySection({ actor, view = 'overview', onGo, emptyLine }: { 
             {j.journey.nextAction.code !== 'NONE' ? (
               <Text style={{ color: colors.accentText, fontSize: 13 }} testID="journey-next">{nextLabel(j.journey.nextAction.code)}</Text>
             ) : (
-              <Muted size={12.5}>{pt('jnNothingToDo')}</Muted>
+              <GuidanceNote icon="info" size={12.5}>{pt('jnNothingToDo')}</GuidanceNote>
             )}
             {j.shared.length > 0 ? (
-              <Muted size={12}>{pt('jnSharedTitle')} · {j.shared.map((s) => `${sharedLabel(s.kind)}${s.status ? ` (${String(s.status).replace(/_/g, ' ').toLowerCase()})` : ''}`).join(' · ')}</Muted>
+              <View style={{ gap: 10 }}>{j.shared.map(s => <DetailFact key={`${s.kind}-${s.id}`} label={sharedLabel(s.kind)} value={s.status ? String(s.status).replace(/_/g, ' ').toLowerCase() : '—'} />)}</View>
             ) : null}
             {j.journey.timeline.length > 0 ? (
-              <Muted size={11.5}>{pt('jnLast')} {evLabel(j.journey.timeline[j.journey.timeline.length - 1].kind)} · {fmtDay(j.journey.timeline[j.journey.timeline.length - 1].at)}</Muted>
+              <GuidanceNote icon="info" size={11.5}>{pt('jnLast')} {evLabel(j.journey.timeline[j.journey.timeline.length - 1].kind)} · {fmtDay(j.journey.timeline[j.journey.timeline.length - 1].at)}</GuidanceNote>
             ) : null}
           </View>
         ))}

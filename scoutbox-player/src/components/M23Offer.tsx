@@ -1,3 +1,4 @@
+import { GuidanceNote } from './InformationRows';
 // M23 P6 — the recipient's Offers: a club's proposal, exactly as issued, with
 // its revision number, its expiry and its documents. Accepting or declining
 // is the recipient's own act, behind a second explicit step so it cannot be
@@ -15,7 +16,7 @@ import { m12, type FamilyOffer, type FamilyOfferRevision, type OfferStatus } fro
 import { useColors } from '../theme';
 import { pt } from '../i18n';
 import { fmtDayTime, humanDate } from '../time';
-import { Button, Card, Disclosure, Kicker, Muted, Row, SectionTitle } from './ui';
+import { TimelineItem, DetailFact, Button, Card, Disclosure, Kicker, Muted, Row, SectionTitle } from './ui';
 
 type Actor = { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string };
 
@@ -171,11 +172,11 @@ export function OfferSection({ actor, view = 'all' }: { actor: Actor; view?: Off
             {show('offer') && cur && (
               <View style={{ marginTop: 12 }}>
                 <Disclosure label={pt('offerViewTerms')} testID={`offer-terms-${o.id}`}>
-                  {cur.terms.conditions ? <Muted size={13}>{pt('offerConditions')}: {cur.terms.conditions}</Muted> : null}
-                  {cur.recipientMessage ? <Muted size={13}>{pt('offerMessage')}: “{cur.recipientMessage}”</Muted> : null}
+                  {cur.terms.conditions ? <GuidanceNote title={pt('offerConditions')} icon="list-checks">{cur.terms.conditions}</GuidanceNote> : null}
+                  {cur.recipientMessage ? <GuidanceNote title={pt('offerMessage')} icon="chat-bubble">{cur.recipientMessage}</GuidanceNote> : null}
                   {cur.documents.length > 0 ? (
                     <View style={{ marginTop: 6 }}>
-                      <Muted size={12}>{pt('offerDocuments')}</Muted>
+                      <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>{pt('offerDocuments')}</Text>
                       {cur.documents.map((d) => (
                         <Row key={d.id} style={{ marginTop: 2 }}>
                           <Text style={{ color: colors.text, fontSize: 13, flex: 1 }}>{d.label ?? d.id}</Text>
@@ -183,16 +184,16 @@ export function OfferSection({ actor, view = 'all' }: { actor: Actor; view?: Off
                         </Row>
                       ))}
                     </View>
-                  ) : <Muted size={12.5}>{pt('offerNoDocuments')}</Muted>}
+                  ) : <GuidanceNote size={12.5}>{pt('offerNoDocuments')}</GuidanceNote>}
                   {older.length > 0 ? (
                     <View style={{ marginTop: 6 }}>
-                      <Muted size={12}>{pt('offerOlderRevisions')}</Muted>
-                      {older.map((r) => <Muted key={r.id} size={12}>{pt('offerRevision')} {r.revisionNumber} · {stLabel(r.status)} · {r.terms.role ?? '—'} · {r.terms.startDate ?? '—'}</Muted>)}
+                      <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>{pt('offerOlderRevisions')}</Text>
+                      <View style={{ marginTop: 10 }}>{older.map((r, i) => <TimelineItem key={r.id} date={`${pt('offerRevision')} ${r.revisionNumber}`} last={i === older.length - 1}><DetailFact label={stLabel(r.status)} value={r.terms.role ?? '—'} /><DetailFact label="Start date" value={r.terms.startDate ?? '—'} icon="calendar-days" /></TimelineItem>)}</View>
                     </View>
                   ) : null}
                   {view !== 'response' && actor.kind === 'player' && o.status !== 'DRAFT' ? (
                     <View style={{ marginTop: 8 }}>
-                      <Muted size={12}>{pt('offerSharing')}</Muted>
+                      <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>{pt('offerSharing')}</Text>
                       <Row style={{ marginTop: 4, flexWrap: 'wrap' }}>
                         <Button small label={o.agentShared ? pt('offerAgentUnshare') : pt('offerAgentShare')} onPress={() => share(o)} disabled={busy === o.id} testID={`offer-share-${o.id}`} />
                         <Muted size={12}>{o.agentShared ? pt('offerAgentShared') : pt('offerAgentShareHint')}</Muted>
@@ -213,7 +214,7 @@ export function OfferSection({ actor, view = 'all' }: { actor: Actor; view?: Off
         );
       })}
       {msg && <View accessibilityLiveRegion="polite" style={{ marginTop: 10 }} testID="offer-message"><Muted size={12.5}>{msg}</Muted></View>}
-      <View style={{ marginTop: 8 }}><Disclosure label="About offers" testID="about-offers"><Muted size={12.5}>{actor.kind === 'guardian' ? pt('offersGuardianHint') : pt('offersHint')}</Muted></Disclosure></View>
+      <View style={{ marginTop: 8 }}><Disclosure label="About offers" testID="about-offers"><GuidanceNote title="How offers work" icon="file-text" size={12.5}>{actor.kind === 'guardian' ? pt('offersGuardianHint') : pt('offersHint')}</GuidanceNote></Disclosure></View>
     </Card>
   );
 }

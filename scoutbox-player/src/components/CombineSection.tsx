@@ -1,3 +1,4 @@
+import { GuidanceNote } from './InformationRows';
 // M16.1 — At-Home Combine, the player/guardian surface.
 //   Record it. Prove it. — Real numbers. Real evidence. From anywhere.
 //
@@ -13,7 +14,7 @@ import { createElement, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, View } from 'react-native';
 import { Text } from './Text';
 import { useColors } from '../theme';
-import { Button, Card, Disclosure, FactRow, ListRow, Muted, Pill, Row, SectionTitle } from './ui';
+import { RecordPanel, DetailFact, TimelineItem, InfoNote, Button, Card, Disclosure, FactRow, ListRow, Muted, Pill, Row, SectionTitle } from './ui';
 import { Icon } from './Icon';
 import { SectionHead } from './Reference';
 import { fmtShortDay } from '../time';
@@ -176,8 +177,8 @@ function CombineCapturePanel({ playerId, protocol, requestId, onDone, onClose }:
   return (
     <Card>
       <Row><Text style={{ color: colors.text, fontWeight: '800', fontSize: 16 }}>{pt('cmbAttempt')}</Text><Pill label={protocol.title} tone="blue" /></Row>
-      <Muted size={12}>{pt('cmbPoweredBy')}</Muted>
-      {DEMO ? <Muted size={12}>{pt('cmbDemoSim')}</Muted> : null}
+      <GuidanceNote icon="info" size={12}>{pt('cmbPoweredBy')}</GuidanceNote>
+      {DEMO ? <GuidanceNote icon="info" size={12}>{pt('cmbDemoSim')}</GuidanceNote> : null}
 
       {WEB && !DEMO && phase !== 'error' ? createElement('video', { ref: videoRef, muted: true, playsInline: true, style: { width: '100%', maxHeight: 220, borderRadius: 10, background: '#000', transform: 'scaleX(-1)' } }) : null}
 
@@ -190,16 +191,16 @@ function CombineCapturePanel({ playerId, protocol, requestId, onDone, onClose }:
       {phase === 'ready' ? (
         <View>
           <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, marginTop: 6 }}>{pt('cmbReadyCheck')}</Text>
-          <Muted size={12}>{pt('cmbChkCamera')}</Muted>
-          <Muted size={12}>{pt('cmbChkFraming')} — {pt('cmbUnableAuto')}</Muted>
-          <Muted size={12}>{pt('cmbChkSpace')} — {pt('cmbUnableAuto')}</Muted>
+          <GuidanceNote icon="camera" size={12}>{pt('cmbChkCamera')}</GuidanceNote>
+          <GuidanceNote icon="camera" size={12}>{pt('cmbChkFraming')} — {pt('cmbUnableAuto')}</GuidanceNote>
+          <GuidanceNote icon="info" size={12}>{pt('cmbChkSpace')} — {pt('cmbUnableAuto')}</GuidanceNote>
           <View style={{ marginTop: 8, backgroundColor: colors.panel2, borderRadius: 8, padding: 8 }}>
-            <Muted size={12}>{pt('cmbLiveness')}: {liveness || 'show_ball'}</Muted>
-            <Muted size={11.5}>{pt('cmbLivenessNote')}</Muted>
+            <GuidanceNote icon="info" size={12}>{pt('cmbLiveness')}: {liveness || 'show_ball'}</GuidanceNote>
+            <GuidanceNote icon="info" size={11.5}>{pt('cmbLivenessNote')}</GuidanceNote>
           </View>
-          <Muted size={12}>{pt('cmbSetup')}: {protocol.setupRequirements}</Muted>
-          <Muted size={12}>{pt('cmbScoring')}: {protocol.scoringMethod}</Muted>
-          <Muted size={11.5}>{protocol.safetyNotes}</Muted>
+          <GuidanceNote title="Setup" icon="camera">{protocol.setupRequirements}</GuidanceNote>
+          <GuidanceNote icon="activity" size={12}>{protocol.scoringMethod}</GuidanceNote>
+          <GuidanceNote icon="shield-check" size={11.5}>{protocol.safetyNotes}</GuidanceNote>
           <Row style={{ marginTop: 8 }}><Button primary label={pt('cmbBegin')} onPress={() => void begin()} /><Button small label={pt('cmbCancel')} onPress={cancel} /></Row>
         </View>
       ) : null}
@@ -241,15 +242,15 @@ function CombineResultCard({ attempt, onClose }: { attempt: CombineAttempt; onCl
           </>
         )}
       </Row>
-      {valueStruck(attempt.combineState) && attempt.measuredValue != null ? <Muted size={12}>{pt('cmbValueNotCounted')}</Muted> : null}
+      {valueStruck(attempt.combineState) && attempt.measuredValue != null ? <GuidanceNote icon="info" size={12}>{pt('cmbValueNotCounted')}</GuidanceNote> : null}
       {verified ? <Text style={{ color: colors.accentText, fontWeight: '800', fontSize: 15 }}>{pt('cmbWorkCounts')}</Text> : null}
-      {verified ? <Muted size={12}>{pt('cmbRecordProve')}</Muted> : null}
-      {partial ? <Muted size={12}>{pt('cmbMeasuredNotVerified')}</Muted> : null}
-      {attempt.stateCopy ? <Muted size={12}>{attempt.stateCopy}</Muted> : null}
+      {verified ? <GuidanceNote icon="info" size={12}>{pt('cmbRecordProve')}</GuidanceNote> : null}
+      {partial ? <GuidanceNote icon="activity" size={12}>{pt('cmbMeasuredNotVerified')}</GuidanceNote> : null}
+      {attempt.stateCopy ? <GuidanceNote icon="info" size={12}>{attempt.stateCopy}</GuidanceNote> : null}
       {verified && attempt.verificationExplained ? (
         <View style={{ marginTop: 6, backgroundColor: colors.panel2, borderRadius: 8, padding: 8 }}>
           <Text style={{ color: colors.text, fontWeight: '700', fontSize: 12 }}>{pt('cmbWhyVerified')}</Text>
-          {attempt.verificationExplained.map((c, i) => <Muted key={i} size={12}>{c.ok ? 'Confirmed · ' : 'Not confirmed · '}{c.label}{c.detail ? ` — ${c.detail}` : ''}</Muted>)}
+          {attempt.verificationExplained.map((c, i) => <InfoNote key={i} icon={c.ok ? 'circle-check' : 'circle-help'}>{c.ok ? 'Confirmed · ' : 'Not confirmed · '}{c.label}{c.detail ? ` — ${c.detail}` : ''}</InfoNote>)}
         </View>
       ) : null}
       <Row style={{ marginTop: 8 }}><Button label={pt('cmbDone')} onPress={onClose} /></Row>
@@ -287,10 +288,10 @@ function ProtocolDetail({ protocol, title, attempts, canStart, onStart, onBack }
       <SectionHead title={title} />
       <FactRow k={pt('cmbLatestResult')} v={latest ? (latest.measuredValue == null ? pt('cmbNoValue') : `${latest.display} ${latest.unit}`) : pt('cmbNoResult')} testID="combine-latest" />
       <FactRow k={pt('cmbStatus')} v={statusWord} testID="combine-status" />
-      {latest?.simulated ? <Muted size={12}>{pt('cmbDemoSim')}</Muted> : null}
-      {latest && valueStruck(latest.combineState) && latest.measuredValue != null ? <Muted size={12}>{pt('cmbValueNotCounted')}</Muted> : null}
-      {latest && latest.combineState === 'partially_measured' ? <Muted size={12}>{pt('cmbMeasuredNotVerified')}</Muted> : null}
-      {latest && !verified && latest.combineState !== 'partially_measured' && latest.stateCopy ? <Muted size={12}>{latest.stateCopy}</Muted> : null}
+      {latest?.simulated ? <GuidanceNote icon="info" size={12}>{pt('cmbDemoSim')}</GuidanceNote> : null}
+      {latest && valueStruck(latest.combineState) && latest.measuredValue != null ? <GuidanceNote icon="info" size={12}>{pt('cmbValueNotCounted')}</GuidanceNote> : null}
+      {latest && latest.combineState === 'partially_measured' ? <GuidanceNote icon="activity" size={12}>{pt('cmbMeasuredNotVerified')}</GuidanceNote> : null}
+      {latest && !verified && latest.combineState !== 'partially_measured' && latest.stateCopy ? <GuidanceNote icon="info" size={12}>{latest.stateCopy}</GuidanceNote> : null}
       {canStart && protocol ? (
         <View style={{ marginTop: 14 }}>
           {supported ? <Button primary label={pt('cmbStart')} onPress={onStart} testID="combine-start" /> : <Muted size={12.5}>{pt('cmbNotSupported')}</Muted>}
@@ -299,27 +300,26 @@ function ProtocolDetail({ protocol, title, attempts, canStart, onStart, onBack }
       <View style={{ marginTop: 14 }}>
         {verified && latest?.verificationExplained ? (
           <Disclosure label={pt('cmbWhyVerified')} testID="combine-why">
-            {latest.verificationExplained.map((c, i) => <Muted key={i} size={12}>{c.ok ? 'Confirmed · ' : 'Not confirmed · '}{c.label}{c.detail ? ` — ${c.detail}` : ''}</Muted>)}
-            {latest.stateCopy ? <Muted size={11.5}>{latest.stateCopy}</Muted> : null}
+            {latest.verificationExplained.map((c, i) => <InfoNote key={i} icon={c.ok ? 'circle-check' : 'circle-help'}>{c.ok ? 'Confirmed · ' : 'Not confirmed · '}{c.label}{c.detail ? ` — ${c.detail}` : ''}</InfoNote>)}
+            {latest.stateCopy ? <GuidanceNote title="Current status" icon="info" size={11.5}>{latest.stateCopy}</GuidanceNote> : null}
           </Disclosure>
         ) : null}
         {protocol ? (
           <Disclosure label={pt('cmbInstructions')} testID="combine-instructions">
-            <Muted size={12.5}>{protocol.description}</Muted>
-            <Muted size={12.5}>{pt('cmbSetup')}: {protocol.setupRequirements}</Muted>
-            <Muted size={12.5}>{pt('cmbScoring')}: {protocol.scoringMethod}</Muted>
-            <Muted size={12}>{protocol.safetyNotes}</Muted>
-            {DEMO && supported ? <Muted size={12}>{pt('cmbDemoSim')}</Muted> : null}
+            <GuidanceNote title="The exercise" icon="soccer-ball" size={12.5}>{protocol.description}</GuidanceNote>
+            <GuidanceNote title="Setup" icon="camera" size={12.5}>{protocol.setupRequirements}</GuidanceNote>
+            <GuidanceNote title="How it is measured" icon="activity" size={12.5}>{protocol.scoringMethod}</GuidanceNote>
+            <GuidanceNote title="Safety" icon="shield-check" size={12}>{protocol.safetyNotes}</GuidanceNote>
+            {DEMO && supported ? <GuidanceNote title="Demo information" icon="info" size={12}>{pt('cmbDemoSim')}</GuidanceNote> : null}
           </Disclosure>
         ) : null}
         <Disclosure label={pt('cmbHistory')} hint={pt('cmbAttempts').replace('{n}', String(finished.length))} testID="combine-history">
-          {finished.length === 0 ? <Muted size={12.5}>{pt('cmbNoResult')}</Muted> : finished.map((a) => (
-            <Row key={a.id} style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6, marginTop: 6, justifyContent: 'space-between' }}>
-              <Text style={{ color: colors.muted, fontSize: 12.5 }}>{fmtShortDay(a.completedAt ?? a.createdAt)}</Text>
+          {finished.length === 0 ? <GuidanceNote size={12.5}>{pt('cmbNoResult')}</GuidanceNote> : <View>{finished.map((a, i) => (
+            <TimelineItem key={a.id} date={fmtShortDay(a.completedAt ?? a.createdAt)} last={i === finished.length - 1}>
               <Text style={{ color: a.combineState === 'combine_verified' ? colors.accentText : colors.text, fontSize: 13, fontWeight: '600', textDecorationLine: valueStruck(a.combineState) ? 'line-through' : 'none' }}>{a.measuredValue == null ? pt('cmbNoValue') : `${a.display} ${a.unit}`}</Text>
               <Text style={{ color: colors.muted, fontSize: 12 }}>{a.combineState === 'combine_verified' ? pt('cmbVerifiedWord') : (pt(`cmbState_${a.combineState}` as Parameters<typeof pt>[0]) ?? '')}</Text>
-            </Row>
-          ))}
+            </TimelineItem>
+          ))}</View>}
         </Disclosure>
       </View>
     </View>
@@ -387,15 +387,15 @@ export function CombineSection({ actor, childName }: { actor: CombineActor; chil
           <SectionHead title={pt('cmbCombineCard')} />
           {card ? (
             <View>
-              <Muted size={12.5}>{card.player.name}{card.player.position ? ` · ${card.player.position}` : ''}{card.player.age != null ? ` · ${card.player.age}` : ''}</Muted>
+              <GuidanceNote icon="info" size={12.5}>{card.player.name}{card.player.position ? ` · ${card.player.position}` : ''}{card.player.age != null ? ` · ${card.player.age}` : ''}</GuidanceNote>
               {card.results.length > 0 ? card.results.map((r) => (
                 <Row key={r.protocolId} style={{ borderBottomWidth: 1, borderBottomColor: colors.line, paddingVertical: 10, justifyContent: 'space-between' }}>
                   <Text style={{ color: colors.text, fontSize: 14, flexShrink: 1 }}>{r.protocolTitle}</Text>
                   <Row><Text style={{ color: colors.accentText, fontWeight: '700' }}>{r.display}<Text style={{ color: colors.muted, fontWeight: '600', fontSize: 12 }}> {r.unit}</Text></Text>{r.combineVerified ? <VerifiedBadge /> : null}</Row>
                 </Row>
-              )) : <Muted size={12.5}>{pt('cmbNoResults')}</Muted>}
-              {card.results.some((r) => r.combineVerified) ? <Muted size={12}>{pt('trsCombineVerifiedLine')}</Muted> : null}
-              <Disclosure label="About this result"><Muted size={12}>{card.note}</Muted></Disclosure>
+              )) : <GuidanceNote icon="activity" size={12.5}>{pt('cmbNoResults')}</GuidanceNote>}
+              {card.results.some((r) => r.combineVerified) ? <GuidanceNote icon="info" size={12}>{pt('trsCombineVerifiedLine')}</GuidanceNote> : null}
+              <Disclosure label="About this result"><GuidanceNote size={12}>{card.note}</GuidanceNote></Disclosure>
             </View>
           ) : <Muted size={12.5}>{pt('cmbLoading')}</Muted>}
           {/* M16.2 — Trust Score, in its OWN block outside the Combine Card.
@@ -406,7 +406,7 @@ export function CombineSection({ actor, childName }: { actor: CombineActor; chil
             <View style={{ marginTop: 18, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.line }}>
               <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13.5 }}>{pt('trsCombineBlock')}</Text>
               <TrustScoreHeader t={trustProfile} compact />
-              <Disclosure label="About this score"><Muted size={11.5}>{pt('trsCombineSeparate')}</Muted></Disclosure>
+              <Disclosure label="About this score"><GuidanceNote title="What this means" icon="info" size={11.5}>{pt('trsCombineSeparate')}</GuidanceNote></Disclosure>
             </View>
           ) : null}
         </View>
@@ -421,9 +421,9 @@ export function CombineSection({ actor, childName }: { actor: CombineActor; chil
             {requests.length > 0 ? <ListRow label={pt('cmbRequestsRow')} count={requests.length} onPress={() => setPage({ kind: 'requests' })} testID="combine-requests-row" /> : null}
             {isPlayer ? <ListRow label={pt('cmbCardRow')} onPress={() => void openCard()} testID="combine-card-row" /> : null}
             <Disclosure label={pt('cmbAbout')} testID="combine-about">
-              <Muted size={12.5}>{pt('cmbTagline')} {pt('cmbSub')} {pt('cmbPoweredBy')}.</Muted>
-              {overview ? <Muted size={12.5}>{overview.capabilityNote}</Muted> : null}
-              {!isPlayer ? <Muted size={12.5}>{pt('cmbProtocolsPlayerOnly')}</Muted> : null}
+              <GuidanceNote size={12.5}>{pt('cmbTagline')} {pt('cmbSub')} {pt('cmbPoweredBy')}.</GuidanceNote>
+              {overview ? <GuidanceNote title="Device support" icon="camera" size={12.5}>{overview.capabilityNote}</GuidanceNote> : null}
+              {!isPlayer ? <GuidanceNote size={12.5}>{pt('cmbProtocolsPlayerOnly')}</GuidanceNote> : null}
             </Disclosure>
           </View>
         </>
@@ -436,13 +436,12 @@ export function CombineSection({ actor, childName }: { actor: CombineActor; chil
 function RequestRow({ r, protocols, onStart, canStart }: { r: CombineRequest; protocols: CombineProtocol[]; onStart: (p: CombineProtocol, requestId?: string) => void; canStart: boolean }) {
   const colors = useColors();
   return (
-    <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6, marginTop: 6 }}>
+    <RecordPanel title={r.title || pt('cmbClubRequests')} subtitle={`${pt('cmbRequestFrom')} ${r.orgName}`} icon="clipboard-list">
       <Row>
-        <Text style={{ color: colors.text, fontSize: 13, flexShrink: 1, fontWeight: '600' }}>{r.title || pt('cmbClubRequests')}</Text>
         <Pill label={`${r.completedCount}/${r.requiredCount}`} tone={r.completedCount >= r.requiredCount ? 'green' : 'default'} />
       </Row>
-      <Muted size={12}>{pt('cmbRequestFrom')} {r.orgName}{r.deadline ? ` · ${pt('cmbDeadline')}: ${r.deadline}` : ''}</Muted>
-      {r.instructions ? <Muted size={12}>“{r.instructions}”</Muted> : null}
+      {r.deadline && <DetailFact label={pt('cmbDeadline')} value={r.deadline} icon="calendar-days" />}
+      {r.instructions ? <InfoNote icon="clipboard-list">{r.instructions}</InfoNote> : null}
       {r.protocols.map((rp) => {
         const proto = protocols.find((p) => p.id === rp.protocolId);
         return (
@@ -453,7 +452,7 @@ function RequestRow({ r, protocols, onStart, canStart }: { r: CombineRequest; pr
           </Row>
         );
       })}
-      {r.note ? <Disclosure label="About this request"><Muted size={12}>{r.note}</Muted></Disclosure> : null}
-    </View>
+      {r.note ? <Disclosure label="About this request"><GuidanceNote size={12}>{r.note}</GuidanceNote></Disclosure> : null}
+    </RecordPanel>
   );
 }

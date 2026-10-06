@@ -1,3 +1,5 @@
+import { RecordIdentity } from './RecordDetails';
+import { GuidanceNote } from './InformationRows';
 // M23 P5.6B — "My Agent": the player's side of agent representation.
 //
 // The client's confirmation is the root of every relationship. This card
@@ -10,7 +12,7 @@ import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { Text, TextInput } from './Text';
 import { useColors } from '../theme';
-import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
+import { DetailFact, RecordPanel, Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
 import { m24, m24ClientKey, type AgentAction, type AgentRelationship, type DisclosureKey } from '../data/m24client';
 import { pt } from '../i18n';
 import { uiLocale } from '../time';
@@ -87,24 +89,25 @@ export function MyAgentSection({ playerId, isMinor }: { playerId: string; isMino
   return (
     <Card testID="my-agent">
       <SectionTitle>{pt('m24title')}</SectionTitle>
-      <Muted size={12}>{pt('m24intro')}</Muted>
+      <GuidanceNote title="Your choice" icon="shield-check">{pt('m24intro')}</GuidanceNote>
       {err && <Muted size={12}>{err}</Muted>}
       {items.map((r) => (
-        <View key={r.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6 }} testID={`my-agent-${r.id}`}>
-          <Row>
-            <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, flex: 1 }}>{r.agent.displayName ?? '—'}</Text>
-            <Pill label={pt(statusKey(r.status))} tone={tone(r.status)} />
-          </Row>
-          <Muted size={12}>{pt('m24agency')}: {r.agent.agency?.name ?? '—'} · {pt('m24scope')}: {r.scope.map((s) => s.replace(/_/g, ' ')).join(', ')}{r.termMonths ? ` · ${pt('m24term')}: ${r.termMonths} ${pt('m24months')}` : ''}{r.endAt ? ` · ${pt('m24ends')} ${fmt(r.endAt)}` : ''}</Muted>
+        <View key={r.id} style={{ marginTop: 8, gap: 12, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 18 }} testID={`my-agent-${r.id}`}>
+          <RecordIdentity name={r.agent.displayName ?? '—'} subtitle={r.agent.agency?.name ?? '—'} status={<Pill label={pt(statusKey(r.status))} tone={tone(r.status)} />} />
+          <View style={{ gap: 6 }}>
+            <DetailFact label={pt('m24scope')} value={r.scope.map(s => s.replace(/_/g, ' ')).join(', ')} icon="file-text" />
+            {r.termMonths ? <DetailFact label={pt('m24term')} value={`${r.termMonths} ${pt('m24months')}`} icon="calendar-days" /> : null}
+            {r.endAt ? <DetailFact label={pt('m24ends')} value={fmt(r.endAt)} icon="clock" /> : null}
+          </View>
           {/* M24F.2 — the licence is one fact; only an UNVERIFIED licence earns its warning sentence. */}
           {r.legacy ? (
-            <Muted size={11.5}>{pt('m24legacy')}</Muted>
+            <GuidanceNote icon="info" size={11.5}>{pt('m24legacy')}</GuidanceNote>
           ) : (
-            <Muted size={11.5}>
+            <GuidanceNote icon="shield" title="Licence status">
               {pt('m24licence')}: {(r.agent.verification?.fifaLicence ?? 'UNVERIFIED').replace(/_/g, ' ').toLowerCase()}{r.agent.verification?.fifaLicence === 'VERIFIED' ? '' : ` — ${pt('m24honestUnverified')}`}
-            </Muted>
+            </GuidanceNote>
           )}
-          {r.status === 'disputed' && <Muted size={11.5}>{pt('m24disputedMsg')}</Muted>}
+          {r.status === 'disputed' && <GuidanceNote icon="info" size={11.5}>{pt('m24disputedMsg')}</GuidanceNote>}
           {!r.legacy && (
             <>
               <Row style={{ marginTop: 6 }}>
@@ -168,9 +171,9 @@ export function MyAgentSection({ playerId, isMinor }: { playerId: string; isMino
           )}
         </View>
       ))}
-      {items.length === 0 && !err && <Muted size={12}>{pt('m24none')}</Muted>}
+      {items.length === 0 && !err && <GuidanceNote icon="info" size={12}>{pt('m24none')}</GuidanceNote>}
       {/* M24F.2 — one section-level line, not one per relationship. */}
-      {items.length > 0 && <Muted size={11}>{pt('m24whatIs')}</Muted>}
+      {items.length > 0 && <GuidanceNote icon="info" size={11}>{pt('m24whatIs')}</GuidanceNote>}
       {msg && <View accessibilityLiveRegion="polite"><Muted size={12}>{msg}</Muted></View>}
     </Card>
   );
@@ -206,7 +209,7 @@ export function AgentSharedOpportunities({ playerId, isMinor }: { playerId: stri
           {s.note && <Text style={{ color: colors.text, fontSize: 12.5, marginTop: 4 }}>{s.note}</Text>}
         </View>
       ))}
-      <Muted size={11}>{pt('m27sHonest')}</Muted>
+      <GuidanceNote icon="info" size={11}>{pt('m27sHonest')}</GuidanceNote>
     </Card>
   );
 }

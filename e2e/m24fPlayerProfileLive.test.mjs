@@ -10,7 +10,7 @@
 // covering the last content; no horizontal overflow; deep links and
 // back/forward; the long name wraps without overflow; the initials avatar
 // when there is no photograph; the one current action and the calm
-// no-action state; Inter on every profile text; no pictograph; and the
+// no-action state; system UI on every profile text; no pictograph; and the
 // Journey never carries a club's private words.
 //
 // Run from e2e/: node m24fPlayerProfileLive.test.mjs   (KEEP_DIST=1 reuses bundles)
@@ -116,7 +116,7 @@ for (const [w, h] of VIEWPORTS) {
     };
   });
   ok(hdr.name === me.name && hdr.heading && hdr.nameSize >= 26 && Number(hdr.nameWeight) >= 700, `${tag}: the name is the heading, ${hdr.nameSize}px / ${hdr.nameWeight} (${hdr.name})`);
-  ok(/^(")?Inter\b/.test(hdr.nameFont) && /^(")?Inter\b/.test(hdr.lineFont) && hdr.tabs.every((t) => /^(")?Inter\b/.test(t.font)), `${tag}: Inter on the name, the line and the tabs`);
+  ok(/^(")?-apple-system\b/.test(hdr.nameFont) && /^(")?-apple-system\b/.test(hdr.lineFont) && hdr.tabs.every((t) => /^(")?-apple-system\b/.test(t.font)), `${tag}: system UI on the name, the line and the tabs`);
   ok(hdr.line === `${me.position ?? 'Position not set'} · ${me.city || me.country}`, `${tag}: the summary line is the server's position and place (${hdr.line})`);
   ok(hdr.avail === AVAIL[me.availability], `${tag}: the availability word is the server's state (${hdr.avail})`);
   ok(/^(Verified|Not verified)/.test(hdr.verified ?? '') && (hdr.verified.startsWith('Verified') === !!me.identityVerified), `${tag}: verification as one word, matching the server (${hdr.verified})`);

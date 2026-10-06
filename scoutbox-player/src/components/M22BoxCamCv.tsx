@@ -1,3 +1,4 @@
+import { GuidanceNote } from './InformationRows';
 // M22 — Box Cam CV: Ready Check, live attempt, result (§76–§84).
 //
 // THE COPY DECISION THIS COMPONENT IS BUILT AROUND
@@ -238,8 +239,8 @@ export function M22BoxCamCv({
       </Row>
       {!available ? (
         <>
-          <Muted size={12}>{reason?.short ?? pt('m22combineUnavailable')}</Muted>
-          <Muted size={11.5}>{reason?.detail ?? pt('m22validationPending')}</Muted>
+          <GuidanceNote icon="info" size={12}>{reason?.short ?? pt('m22combineUnavailable')}</GuidanceNote>
+          <GuidanceNote icon="info" size={11.5}>{reason?.detail ?? pt('m22validationPending')}</GuidanceNote>
         </>
       ) : null}
     </View>
@@ -321,8 +322,8 @@ export function M22BoxCamCv({
               tone={captureState === 'degraded' ? 'gold' : 'green'}
             />
           </Row>
-          <Muted size={12}>{pt('m22noLiveCount')}</Muted>
-          {dropped > 0 ? <Muted size={11.5}>{pt('m22someFramesDropped')}</Muted> : null}
+          <GuidanceNote icon="info" size={12}>{pt('m22noLiveCount')}</GuidanceNote>
+          {dropped > 0 ? <GuidanceNote icon="info" size={11.5}>{pt('m22someFramesDropped')}</GuidanceNote> : null}
           <Row style={{ marginTop: 10 }}>
             <Button primary label={pt('m22finish')} onPress={() => void finish()} />
             <Button small label={pt('m22cancel')} onPress={() => void cancel()} />
@@ -364,7 +365,7 @@ export function M22BoxCamCv({
                     <Pill label={pt('m22experimentalPill')} tone="gold" />
                   </Row>
                   <Muted size={12}>{pt('m22experimentalCount')}: {outcome.result.experimental.exactCount}</Muted>
-                  <Disclosure label="About this figure"><Muted size={12}>{pt('m22experimentalNote')}</Muted></Disclosure>
+                  <Disclosure label="About this figure"><GuidanceNote title="Demo information" icon="info" size={12}>{pt('m22experimentalNote')}</GuidanceNote></Disclosure>
                 </View>
               ) : null}
             </View>
@@ -382,8 +383,8 @@ export function M22BoxCamCv({
             <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }}>{pt('m22couldNotVerify')}</Text>
             <Pill label={pt('m22tryAgain')} tone="gold" />
           </Row>
-          <Muted size={12}>{reasonLabel(outcome.result.refusalReason)}</Muted>
-          <Muted size={11.5}>{pt('m22refusalReassure')}</Muted>
+          <GuidanceNote icon="activity" size={12}>{reasonLabel(outcome.result.refusalReason)}</GuidanceNote>
+          <GuidanceNote icon="info" size={11.5}>{pt('m22refusalReassure')}</GuidanceNote>
 
           {/* The Combine notice belongs here too, and a live journey found
               that it was missing. Without it a refused attempt reads as "try

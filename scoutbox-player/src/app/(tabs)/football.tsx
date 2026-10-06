@@ -51,7 +51,9 @@ export default function Football() {
         {me ? (
           <ProfileIntro
             name={me.name}
-            line={[me.position ?? pt('fbNoPosition'), me.city].filter(Boolean).join(' · ')}
+            verified={me.identityVerified}
+            position={me.position ?? pt('fbNoPosition')}
+            location={me.city}
             status={pt(`avail_${me.availability}` as Parameters<typeof pt>[0])}
           />
         ) : null}

@@ -45,26 +45,27 @@ export function NotificationBell() {
         <Modal transparent animationType="slide" onRequestClose={() => setOpen(false)}>
           <View style={styles.veil}>
             <View style={styles.sheet}>
-              <Row style={{ justifyContent: 'space-between', marginBottom: 8 }}>
+              <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: colors.line, alignSelf: 'center', marginBottom: 18 }} />
+              <Row style={{ justifyContent: 'space-between', marginBottom: 20 }}>
                 <Text style={styles.title}>Notifications</Text>
-                <Button small label="Close" onPress={() => setOpen(false)} />
+                <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={() => setOpen(false)} style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.panel2 }}><Icon name="x" size={21} color={colors.text} /></Pressable>
               </Row>
               <ScrollView contentContainerStyle={{ gap: 8 }}>
                 {notifications.length === 0 && (
-                  <Card>
-                    <Muted size={13.5}>Nothing yet — you&apos;ll hear the moment something happens.</Muted>
-                  </Card>
+                  <View style={{ alignItems: 'center', paddingVertical: 28, paddingHorizontal: 24, gap: 12 }}>
+                    <View style={{ width: 70, height: 70, borderRadius: 35, backgroundColor: colors.greenBg, alignItems: 'center', justifyContent: 'center', marginBottom: 5 }}><Icon name="bell" size={33} color={colors.accentText} /></View>
+                    <Text style={{ color: colors.text, fontSize: 20, fontWeight: '600' }}>You’re all caught up</Text>
+                    <Text style={{ color: colors.muted, fontSize: 13, lineHeight: 21, textAlign: 'center' }}>Your club updates and account activity will appear here.</Text>
+                  </View>
                 )}
                 {notifications.slice(0, 30).map((n) => {
                   const dest = destinationFor(n.target);
                   return (
-                    <Card key={n.id}>
-                      <Text style={{ color: colors.text, fontSize: 13.5, lineHeight: 19 }}>{n.text}</Text>
-                      <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Muted size={11.5}>{relTime(n.ts)}</Muted>
-                        {dest ? <Button small label="Open" testID="notification-open" onPress={() => { setOpen(false); router.push(dest as never); }} /> : null}
-                      </Row>
-                    </Card>
+                    <Pressable key={n.id} disabled={!dest} accessibilityRole={dest ? 'button' : undefined} accessibilityLabel={dest ? `Open notification: ${n.text}` : undefined} testID={dest ? 'notification-open' : undefined} onPress={() => { if (dest) { setOpen(false); router.push(dest as never); } }} style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingVertical: 17, borderBottomWidth: 1, borderBottomColor: colors.line, opacity: pressed ? 0.7 : 1 })}>
+                      <View style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.greenBg }}><Icon name={n.target?.kind === 'inbox' ? 'chat-bubble' : n.target?.kind === 'trial' ? 'calendar-days' : n.target?.kind === 'offer' ? 'file-text' : n.target?.kind === 'signing' ? 'file-check-2' : 'bell'} size={20} color={colors.accentText} /></View>
+                      <View style={{ flex: 1, gap: 7 }}><Text style={{ color: colors.text, fontSize: 13.5, lineHeight: 20 }}>{n.text}</Text><Muted size={11.5}>{relTime(n.ts)}</Muted></View>
+                      {dest && <Icon name="chevron-right" size={17} color={colors.muted} />}
+                    </Pressable>
                   );
                 })}
               </ScrollView>
@@ -90,12 +91,12 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   dot: { position: 'absolute', top: 7, right: 8, width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent },
   veil: { flex: 1, backgroundColor: colors.veil, justifyContent: 'flex-end' },
   sheet: {
-    backgroundColor: colors.bg,
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
+    backgroundColor: colors.panel,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     borderWidth: 0,
     borderColor: colors.line,
-    padding: 18,
+    padding: 22,
     maxHeight: '80%',
     // M24C — the sheet keeps the phone's width even when a wide browser
     // hosts the viewport (a Modal renders outside the frame on the web).

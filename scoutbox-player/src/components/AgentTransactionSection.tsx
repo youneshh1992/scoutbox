@@ -1,3 +1,5 @@
+import { RecordIdentity } from './RecordDetails';
+import { GuidanceNote } from './InformationRows';
 // M23 P5.6D — "My transactions": the individual's side of a multi-party
 // transaction workspace.
 //
@@ -15,7 +17,7 @@ import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { Text } from './Text';
 import { useColors } from '../theme';
-import { Button, Card, Disclosure, Muted, Pill, Row, SectionTitle } from './ui';
+import { TimelineItem, DetailFact, InfoNote, RecordPanel, Button, Card, Disclosure, Muted, Pill, Row, SectionTitle } from './ui';
 import { m26, type PlayerTransaction, type TxTimelineEntry } from '../data/m26client';
 import { pt } from '../i18n';
 import { uiLocale } from '../time';
@@ -44,17 +46,19 @@ const tone = (s: string): 'green' | 'blue' | 'gold' | 'red' | 'default' =>
 const fmt = (ts: number | null) => (ts ? new Date(ts).toLocaleDateString(uiLocale(), { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 
 function Timeline({ playerId, tx }: { playerId: string; tx: PlayerTransaction }) {
+  const colors = useColors();
   const [data] = useLoad(() => m26.timeline(playerId, tx.id), [playerId, tx.id]);
   const items = data?.items ?? [];
   if (items.length === 0) return null;
   return (
     <View style={{ marginTop: 6 }} testID={`tx-timeline-${tx.id}`}>
       <Muted size={11.5}>{pt('m26timeline')}</Muted>
-      {items.slice(0, 6).map((e: TxTimelineEntry) => (
-        <Muted key={e.id} size={11}>
-          · {pt(`m26action_${e.action}` as K)} — {e.actor?.label ?? '—'} · {fmt(e.at)}
-        </Muted>
-      ))}
+      <View style={{ marginTop: 12 }}>{items.slice(0, 6).map((e: TxTimelineEntry, i) => (
+        <TimelineItem key={e.id} date={fmt(e.at)} last={i === Math.min(items.length, 6) - 1}>
+          <Text style={{ color: colors.text, fontSize: 14, lineHeight: 21, fontWeight: '500' }}>{pt(`m26action_${e.action}` as K)}</Text>
+          <Muted size={12}>{e.actor?.label ?? '—'}</Muted>
+        </TimelineItem>
+      ))}</View>
     </View>
   );
 }
@@ -86,58 +90,49 @@ export function AgentTransactionSection({ playerId, isMinor }: { playerId: strin
   return (
     <Card testID="agent-transactions">
       <SectionTitle>{pt('m26title')}</SectionTitle>
-      <Disclosure label="About transactions"><Muted size={12}>{pt('m26intro')}</Muted></Disclosure>
+      <Disclosure label="About transactions"><GuidanceNote size={12}>{pt('m26intro')}</GuidanceNote></Disclosure>
       {err && <Muted size={12}>{err}</Muted>}
       {items.map((tx) => {
         const mine = tx.parties.find((p) => p.subjectKind === 'player' && p.subjectId === playerId);
         const clubs = tx.parties.filter((p) => p.subjectKind === 'club' && !p.removed);
         const myConsent = tx.consents.find((c) => c.mine);
         return (
-          <View key={tx.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6 }} testID={`agent-transaction-${tx.id}`}>
-            <Row>
-              <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, flex: 1 }}>{pt(typeKey(tx.type))}</Text>
-              <Pill label={pt(statusKey(tx.status))} tone={tone(tx.status)} />
-            </Row>
-            {/* M24F.5 — one line: who acts, and the clubs on each side. The rest is one tap deeper. */}
-            <Muted size={12.5}>{[tx.agency?.name ?? '—', clubs.map((c) => c.name ?? '—').join(' · ')].filter(Boolean).join(' · ')}</Muted>
+          <View key={tx.id} style={{ marginTop: 8, gap: 12, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 18 }} testID={`agent-transaction-${tx.id}`}>
+            <RecordIdentity name={pt(typeKey(tx.type))} subtitle={tx.agency?.name ?? '—'} icon="file-text" status={<Pill label={pt(statusKey(tx.status))} tone={tone(tx.status)} />} />
+            {clubs.length > 0 && <DetailFact label="Clubs involved" value={clubs.map(c => c.name ?? '—').join(', ')} icon="building-2" />}
             {mine && !mine.confirmedAt && (
               <View style={{ marginTop: 6 }}>
                 <Muted size={11.5}>{pt('m26confirmWhat')}</Muted>
                 <Button small primary disabled={busy} label={pt('m26confirm')} onPress={() => confirm(tx)} />
               </View>
             )}
-            {mine?.confirmedAt && <Muted size={11.5}>{pt('m26youConfirmedOn')} {fmt(mine.confirmedAt)}</Muted>}
+            {mine?.confirmedAt && <GuidanceNote icon="info" size={11.5}>{pt('m26youConfirmedOn')} {fmt(mine.confirmedAt)}</GuidanceNote>}
             <Disclosure label={pt('m26details')} testID={`tx-details-${tx.id}`}>
               {clubs.map((c) => (
-                <Muted key={c.id} size={12}>{pt(roleKey(c.partyRole))}: {c.name ?? '—'} · {c.confirmedAt ? pt('m26confirmed') : pt('m26awaitingThem')}</Muted>
+                <RecordPanel key={c.id} title={c.name ?? '—'} subtitle={pt(roleKey(c.partyRole))} icon="building-2"><DetailFact label="Confirmation" value={c.confirmedAt ? pt('m26confirmed') : pt('m26awaitingThem')} icon="circle-check" /></RecordPanel>
               ))}
-              <Muted size={12}>
-                {pt('m26compliance')}: {tx.compliance.blocked ? pt('m26complianceBlocked') : tx.compliance.clear ? pt('m26complianceClear') : pt('m26compliancePending')}
-                {tx.compliance.staleness ? ` · ${pt('m26stale')}` : ''}
-              </Muted>
-              {tx.representations.length > 0 && (
-                <Muted size={12}>{pt('m26actingFor')}: {tx.representations.filter((r) => r.status !== 'withdrawn').map((r) => pt(roleKey(r.partyRole))).join(', ') || '—'}</Muted>
-              )}
-              {myConsent && <Muted size={12}>{pt('m26myConsent')}: {myConsent.status.replace(/_/g, ' ')}</Muted>}
+              <DetailFact label={pt('m26compliance')} value={`${tx.compliance.blocked ? pt('m26complianceBlocked') : tx.compliance.clear ? pt('m26complianceClear') : pt('m26compliancePending')}${tx.compliance.staleness ? ` · ${pt('m26stale')}` : ''}`} icon="shield-check" />
+              {tx.representations.length > 0 && <DetailFact label={pt('m26actingFor')} value={tx.representations.filter((r) => r.status !== 'withdrawn').map((r) => pt(roleKey(r.partyRole))).join(', ') || '—'} icon="users" />}
+              {myConsent && <DetailFact label={pt('m26myConsent')} value={myConsent.status.replace(/_/g, ' ')} icon="file-check-2" />}
               {tx.documents.length > 0 && (
                 <View style={{ marginTop: 4 }} testID={`tx-documents-${tx.id}`}>
-                  <Muted size={11.5}>{pt('m26sharedDocs')}</Muted>
-                  {tx.documents.map((d) => <Muted key={d.id} size={11}>· {d.label} (v{d.version})</Muted>)}
+                  <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 }}>{pt('m26sharedDocs')}</Text>
+                  {tx.documents.map((d) => <DetailFact key={d.id} label={`v${d.version}`} value={d.label} icon="file-text" />)}
                 </View>
               )}
               {tx.notes.length > 0 && (
                 <View style={{ marginTop: 4 }} testID={`tx-notes-${tx.id}`}>
-                  {tx.notes.map((n) => <Muted key={n.id} size={11}>· {n.text}</Muted>)}
+                  {tx.notes.map((n) => <InfoNote key={n.id} icon="message-circle">{n.text}</InfoNote>)}
                 </View>
               )}
-              <Muted size={11}>{tx.offerBoundary.honest}</Muted>
+              <GuidanceNote size={11}>{tx.offerBoundary.honest}</GuidanceNote>
               <Timeline playerId={playerId} tx={tx} />
             </Disclosure>
           </View>
         );
       })}
       {msg && <View accessibilityLiveRegion="polite"><Muted size={12}>{msg}</Muted></View>}
-      <Muted size={11}>{pt('m26honest')}</Muted>
+      <GuidanceNote icon="info" size={11}>{pt('m26honest')}</GuidanceNote>
     </Card>
   );
 }

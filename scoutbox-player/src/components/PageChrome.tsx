@@ -75,7 +75,7 @@ export function PageTabs({ tabs, value, onChange }: { tabs: PageTab[]; value: st
             onPress={() => onChange(t.key)}
             style={({ pressed }) => [styles.tab, { minWidth: Math.max(66, t.label.length * 7 + 24) }, selected && styles.tabOn, pressed && { opacity: 0.7 }]}
           >
-            {selected && <Gradient />}<Text style={[styles.tabText, selected && styles.tabTextOn]}>{t.label}</Text>
+            {selected && <Gradient control />}<Text style={[styles.tabText, selected && styles.tabTextOn]}>{t.label}</Text>
           </Pressable>
         );
       })}
@@ -107,5 +107,5 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   tab: { minHeight: 44, paddingVertical: 13, paddingHorizontal: 4, overflow: 'hidden', borderRadius: 14, flexGrow: 1, alignItems: 'center', justifyContent: 'center', marginBottom: -1 },
   tabOn: { backgroundColor: colors.tabActiveBg },
   tabText: { color: colors.tabInactive, fontSize: 12, fontWeight: '500' },
-  tabTextOn: { color: colors.accentInk, fontWeight: '600' },
+  tabTextOn: { color: colors.gradientInk, fontWeight: '600' },
 });

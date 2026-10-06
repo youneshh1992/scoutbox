@@ -1,3 +1,4 @@
+import { GuidanceNote } from './InformationRows';
 // M23 P7 — the player's signing: the document the club presented, exactly as
 // presented, identified by its SHA-256 digest; who still has to sign; and the
 // player's own act, behind a second explicit step that names the revision
@@ -15,7 +16,7 @@ import { Text } from './Text';
 import { m12, type FamilySigning, type FamilySigningParty, type SigningPartyType, type SigningStatus } from '../data/m12client';
 import { useColors } from '../theme';
 import { pt } from '../i18n';
-import { Button, Card, Muted, Row, SectionTitle, Disclosure } from './ui';
+import { TimelineItem, Button, Card, Muted, Row, SectionTitle, Disclosure } from './ui';
 import { uiLocale } from '../time';
 
 type Actor = { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string };
@@ -105,9 +106,9 @@ export function SigningSection({ actor, view = 'all' }: { actor: Actor; view?: S
             </Row>
             {cur && (
               <View style={{ marginTop: 4, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }} testID={`signing-revision-${cur.id}`}>
-                <Muted size={12}>{pt('signingRevision')} {cur.revisionNumber} · {pt('signingPresentedAt')} {fmt(cur.readyAt)}{s.expiresAt ? ` · ${pt('signingExpires')} ${fmt(s.expiresAt)}` : ''}</Muted>
+                <GuidanceNote icon="info" size={12}>{pt('signingRevision')} {cur.revisionNumber} · {pt('signingPresentedAt')} {fmt(cur.readyAt)}{s.expiresAt ? ` · ${pt('signingExpires')} ${fmt(s.expiresAt)}` : ''}</GuidanceNote>
                 {show('contract') && cur.contract && <Text style={{ color: colors.text, fontSize: 13, marginTop: 4 }}>{pt('signingStart')}: {cur.contract.startDate ?? '—'}{cur.contract.endDate ? ` · ${pt('signingEnd')}: ${cur.contract.endDate}` : ''}</Text>}
-                {view === 'contract' && !cur.contract && <Muted size={12.5}>{pt('signingContractNone')}</Muted>}
+                {view === 'contract' && !cur.contract && <GuidanceNote icon="info" size={12.5}>{pt('signingContractNone')}</GuidanceNote>}
                 {show('documents') && (cur.document ? (
                   <View style={{ marginTop: 4 }} testID={`signing-document-${cur.id}`}>
                     <Row>
@@ -116,7 +117,7 @@ export function SigningSection({ actor, view = 'all' }: { actor: Actor; view?: S
                     </Row>
                     <Muted size={11.5}>{pt('signingDigest')}: <Text testID={`signing-digest-${cur.id}`} accessibilityLabel={cur.document.sha256 ?? undefined}>{shortSha(cur.document.sha256)}</Text></Muted>
                   </View>
-                ) : <Muted size={12.5}>{pt('signingNoDocument')}</Muted>)}
+                ) : <GuidanceNote icon="info" size={12.5}>{pt('signingNoDocument')}</GuidanceNote>)}
                 {show('signing') && <View style={{ marginTop: 4 }} testID={`signing-parties-${cur.id}`}>
                   {cur.requiredParties.map((p) => (
                     <Muted key={p.partyType} size={12}>{partyLabel(p.partyType)} · {p.status === 'COMPLETED' ? `${pt('signingPartyDone')} ${fmt(p.completedAt)}` : pt('signingPartyPending')}</Muted>
@@ -139,8 +140,8 @@ export function SigningSection({ actor, view = 'all' }: { actor: Actor; view?: S
             {show('signing') && live && arm === s.id && cur && s.nextAction && (
               <View style={{ marginTop: 6, borderLeftWidth: 2, borderLeftColor: colors.gold, paddingLeft: 10, paddingVertical: 4 }} accessibilityRole="alert" testID={`signing-confirm-${s.id}`}>
                 <Text style={{ color: colors.text, fontSize: 13 }}>{pt('signingConfirmWarn').replace('{n}', String(cur.revisionNumber)).replace('{club}', s.club.name ?? '—')}</Text>
-                <Muted size={11.5}>{pt('signingDigest')}: {shortSha(s.nextAction.documentSha256)}</Muted>
-                <Muted size={12}>{s.honest}</Muted>
+                <GuidanceNote icon="info" size={11.5}>{pt('signingDigest')}: {shortSha(s.nextAction.documentSha256)}</GuidanceNote>
+                <GuidanceNote icon="info" size={12}>{s.honest}</GuidanceNote>
                 <Row style={{ marginTop: 6, flexWrap: 'wrap' }}>
                   <Button small primary label={pt('signingConfirmSign').replace('{n}', String(cur.revisionNumber))} onPress={() => confirm(s)} disabled={busy === s.id} testID={`signing-confirm-sign-${s.id}`} />
                   <Button small label={pt('signingCancel')} onPress={() => setArm(null)} testID={`signing-cancel-${s.id}`} />
@@ -150,7 +151,7 @@ export function SigningSection({ actor, view = 'all' }: { actor: Actor; view?: S
             {show('signing') && older.length > 0 && (
               <View style={{ marginTop: 6 }}>
                 <Muted size={12}>{pt('signingOlderRevisions')}</Muted>
-                {older.map((r) => <Muted key={r.id} size={12}>{pt('signingRevision')} {r.revisionNumber} · {stLabel(r.status)} · {shortSha(r.document?.sha256 ?? null)}</Muted>)}
+                <View>{older.map((r, i) => <TimelineItem key={r.id} date={`${pt('signingRevision')} ${r.revisionNumber}`} last={i === older.length - 1}><Muted>{stLabel(r.status)} · {shortSha(r.document?.sha256 ?? null)}</Muted></TimelineItem>)}</View>
               </View>
             )}
             {show('signing', 'contract') && s.status !== 'COMPLETED' && <Muted size={12}>{pt('signingNotYetSigned')}</Muted>}
@@ -158,7 +159,7 @@ export function SigningSection({ actor, view = 'all' }: { actor: Actor; view?: S
         );
       })}
       {msg && <View accessibilityLiveRegion="polite" style={{ marginTop: 6 }} testID="signing-message"><Muted size={12}>{msg}</Muted></View>}
-      <Disclosure label="About signing" testID="about-signing"><Muted size={12.5}>{pt('signingHint')}</Muted></Disclosure>
+      <Disclosure label="About signing" testID="about-signing"><GuidanceNote size={12.5}>{pt('signingHint')}</GuidanceNote></Disclosure>
     </Card>
   );
 }

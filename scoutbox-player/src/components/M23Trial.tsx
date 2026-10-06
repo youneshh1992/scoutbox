@@ -1,15 +1,18 @@
+import { GuidanceNote } from './InformationRows';
 // M23 P4B — the family's Trial workflow: what has been agreed, session by
 // session. The player or guardian confirms or declines a proposed schedule
 // and may cancel; nothing here is a judgement. A minor's own device shows the
 // guardian-managed outcome line only.
 import { useEffect, useState } from 'react';
-import { View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { Text, TextInput } from './Text';
 import { m12, isOutcomeLine, type FamilyTrial, type FamilyTrialWorkflow } from '../data/m12client';
+import { DateTile, InvitationDetail } from './InvitationCard';
+import { Icon } from './Icon';
 import { useColors } from '../theme';
 import { pt } from '../i18n';
 import { fmtClock, fmtDayTime, uiLocale } from '../time';
-import { Button, Card, Muted, Row, SectionTitle } from './ui';
+import { Button, Card, DetailFact, Muted, RecordPanel, Row, SectionTitle } from './ui';
 
 type Actor = { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string };
 
@@ -92,19 +95,17 @@ export function TrialWorkflowSection({ actor, standalone = false }: { actor: Act
               <View style={{ marginTop: 4 }}>
                 <Muted size={12}>{pt('trialWfSessions')} · {pt('trialWfRevision')} {wf.schedule.revision}{zone ? ` · ${zone}` : ''}</Muted>
                 {wf.schedule.sessions.map((s) => (
-                  <View key={s.id} style={{ marginTop: 4, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }}>
-                    <Text style={{ color: colors.text, fontSize: 13 }}>{fmtIn(s.startsAt, zone)} – {fmtEnd(s.endsAt, zone)} · {s.kind.replace(/_/g, ' ')}</Text>
-                    {s.venue && <Muted size={12}>{s.venue.name}{s.venue.town ? `, ${s.venue.town}` : ''}</Muted>}
-                    {s.venue?.address ? <Muted size={12}>{pt('trialWfAddress')}: {s.venue.address}</Muted> : null}
-                    {s.instructions ? <Muted size={12}>{pt('trialWfInstructions')}: {s.instructions}</Muted> : null}
+                  <RecordPanel key={s.id} icon="calendar-days" title={s.kind.replace(/_/g, ' ')} subtitle={`${fmtIn(s.startsAt, zone)} – ${fmtEnd(s.endsAt, zone)}`}>
+                    {s.venue && <DetailFact icon="map-pin" label={pt('trialWfAddress')} value={`${s.venue.name}${s.venue.town ? `, ${s.venue.town}` : ''}${s.venue.address ? ` · ${s.venue.address}` : ''}`} />}
+                    {s.instructions ? <InvitationDetail icon="clipboard-list" title={pt('trialWfInstructions')}>{s.instructions}</InvitationDetail> : null}
                     {s.attendance.state !== 'not_recorded' && <Muted size={12}>{attLabel(s.attendance.state)}</Muted>}
-                  </View>
+                  </RecordPanel>
                 ))}
               </View>
             )}
-            {wf.schedule?.legacy && <Muted size={12}>{wf.proposedDate ?? ''}{wf.venue ? ` · ${wf.venue}` : ''}</Muted>}
-            {wf.completion?.state === 'completed' && <Muted size={12}>{pt('trialWfCompleted')}</Muted>}
-            {wf.completion?.state === 'cancelled' && <Muted size={12}>{pt('trialWfCancelledBy')}{wf.completion.reason ? ` — ${wf.completion.reason}` : ''}</Muted>}
+            {wf.schedule?.legacy && <GuidanceNote icon="info" size={12}>{wf.proposedDate ?? ''}{wf.venue ? ` · ${wf.venue}` : ''}</GuidanceNote>}
+            {wf.completion?.state === 'completed' && <GuidanceNote icon="info" size={12}>{pt('trialWfCompleted')}</GuidanceNote>}
+            {wf.completion?.state === 'cancelled' && <GuidanceNote icon="info" size={12}>{pt('trialWfCancelledBy')}{wf.completion.reason ? ` — ${wf.completion.reason}` : ''}</GuidanceNote>}
             {open && wf.awaitingYourConfirmation && (
               <View style={{ marginTop: 6 }} testID={`trial-wf-awaiting-${t.id}`}>
                 <Text style={{ color: colors.gold, fontSize: 13, fontWeight: '700' }}>{pt('trialWfAwaiting')}</Text>
@@ -135,22 +136,15 @@ export function TrialWorkflowSection({ actor, standalone = false }: { actor: Act
 /** The slot chips of a P4B invitation: day + times in the organiser zone + venue. Picking one is choosing the DAY the server accepts. */
 export function TrialSlotChips({ slots, chosenDay, onPick }: { slots: { id: string; day: string; kind: string | null; startsAt: number; endsAt: number; timezone: string; venue: { name: string; town: string | null } | null }[]; chosenDay: string; onPick: (day: string) => void }) {
   const colors = useColors();
-  return (
-    <View style={{ gap: 6, marginTop: 4 }}>
-      {slots.map((sl) => {
-        const active = chosenDay === sl.day;
-        return (
-          <View key={sl.id} style={{ borderRadius: 10, borderWidth: 1, borderColor: active ? colors.accent : colors.line, padding: 8, backgroundColor: active ? colors.panel2 : 'transparent' }}>
-            <Text
-              accessibilityRole="button" accessibilityState={{ selected: active }} accessibilityLabel={`${sl.day} ${fmtIn(sl.startsAt, sl.timezone)}`}
-              onPress={() => onPick(sl.day)} style={{ color: colors.text, fontSize: 13, fontWeight: active ? '700' : '400' }}
-              testID={`trial-slot-${sl.id}`}
-            >
-              {active ? 'Selected · ' : ''}{fmtIn(sl.startsAt, sl.timezone)}–{fmtEnd(sl.endsAt, sl.timezone)}{sl.kind ? <Text style={{ color: colors.muted }}> · {sl.kind.replace(/_/g, ' ')}</Text> : null}
-            </Text>
-          </View>
-        );
-      })}
-    </View>
-  );
+  return <View style={{ gap: 9 }}>
+    <Text style={{ color: colors.text, fontSize: 12.5, fontWeight: '600' }}>{pt('invChooseDate')}</Text>
+    {slots.map(sl => {
+      const active = chosenDay === sl.day;
+      return <Pressable key={sl.id} testID={`trial-slot-${sl.id}`} accessibilityRole="button" accessibilityState={{ selected: active }} aria-pressed={active} accessibilityLabel={`${sl.day} ${fmtIn(sl.startsAt, sl.timezone)}`} onPress={() => onPick(sl.day)} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 16, borderWidth: 1, borderColor: active ? colors.accentText : colors.line, padding: 10, backgroundColor: active ? colors.tabActiveBg : colors.panel }}>
+        <DateTile value={sl.day} />
+        <View style={{ flex: 1, gap: 4 }}><Text style={{ color: colors.text, fontSize: 14, fontWeight: '600' }}>{fmtEnd(sl.startsAt, sl.timezone)} – {fmtEnd(sl.endsAt, sl.timezone)}</Text><Text style={{ color: colors.muted, fontSize: 10.5 }}>{sl.timezone}</Text>{sl.kind && <Text style={{ color: colors.muted, fontSize: 12 }}>{sl.kind.replace(/_/g, ' ')}</Text>}{sl.venue && <Text style={{ color: colors.muted, fontSize: 12 }}>{sl.venue.name}{sl.venue.town ? ` · ${sl.venue.town}` : ''}</Text>}</View>
+        <View style={{ width: 20, height: 20, borderRadius: 10, borderWidth: 1, borderColor: active ? colors.accentText : colors.line, alignItems: 'center', justifyContent: 'center' }}>{active && <Icon name="check" size={14} color={colors.accentText} />}</View>
+      </Pressable>;
+    })}
+  </View>;
 }

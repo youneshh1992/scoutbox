@@ -1,3 +1,5 @@
+import { DetailFact, RecordIdentity } from './RecordDetails';
+import { GuidanceNote } from './InformationRows';
 // M23 P5.6C — "Agent consent": the player's decision about an agent who would
 // act for more than one party in the same transaction.
 //
@@ -10,7 +12,8 @@
 // No fee, no contract terms and no legal advice appear here. ScoutBox records
 // the answer; it does not advise the player.
 import { useEffect, useState } from 'react';
-import { View } from 'react-native';
+import { Pressable, View } from 'react-native';
+import { Icon } from './Icon';
 import { Text } from './Text';
 import { useColors } from '../theme';
 import { Button, Card, Disclosure, Muted, Pill, Row, SectionTitle } from './ui';
@@ -39,6 +42,14 @@ const tone = (s: AgentConsentRequest['status']): 'green' | 'blue' | 'gold' | 're
 const typeKey = (t: string) => (t === 'employment_contract' ? 'm25typeEmployment' : t === 'transfer' ? 'm25typeTransfer' : t === 'loan' ? 'm25typeLoan' : 'm25typeOther') as Parameters<typeof pt>[0];
 const roleKey = (r: string) => (r === 'individual' ? 'm25roleIndividual' : r === 'engaging_entity' ? 'm25roleEngaging' : 'm25roleReleasing') as Parameters<typeof pt>[0];
 const fmt = (ts: number | null) => (ts ? new Date(ts).toLocaleDateString(uiLocale(), { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
+
+function ConsentCheck({ label, checked, onPress }: { label: string; checked: boolean; onPress: () => void }) {
+  const c = useColors();
+  return <Pressable accessibilityRole="checkbox" accessibilityState={{ checked }} accessibilityLabel={label} onPress={onPress} style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 13, minHeight: 48, opacity: pressed ? 0.65 : 1 })}>
+    <View style={{ width: 23, height: 23, borderRadius: 6, borderWidth: 1.5, borderColor: checked ? c.accentText : c.muted, backgroundColor: checked ? c.greenBg : 'transparent', alignItems: 'center', justifyContent: 'center' }}>{checked && <Icon name="check" size={17} color={c.accentText} />}</View>
+    <Text style={{ flex: 1, color: c.text, fontSize: 13, lineHeight: 20 }}>{label}</Text>
+  </Pressable>;
+}
 
 export function AgentConsentSection({ playerId, isMinor }: { playerId: string; isMinor: boolean }) {
   const colors = useColors();
@@ -75,39 +86,30 @@ export function AgentConsentSection({ playerId, isMinor }: { playerId: string; i
   return (
     <Card testID="agent-consent">
       <SectionTitle>{pt('m25title')}</SectionTitle>
-      <Muted size={12}>{pt('m25intro')}</Muted>
+      <GuidanceNote title="Your permission comes first" icon="shield-check">{pt('m25intro')}</GuidanceNote>
       {err && <Muted size={12}>{err}</Muted>}
       {items.map((k) => {
         const a = ack[k.id] ?? { particulars: false, legalAdvice: false };
         const others = (k.context?.parties ?? []).filter((p) => k.otherPartyRoles.includes(p.partyRole));
         return (
-          <View key={k.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6 }} testID={`agent-consent-${k.id}`}>
-            <Row>
-              <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, flex: 1 }}>{k.agent.displayName ?? '—'}</Text>
-              <Pill label={pt(statusKey(k.status))} tone={tone(k.status)} />
-            </Row>
-            <Muted size={12}>
-              {pt('m25agency')}: {k.agent.agency ?? '—'} · {pt('m25licence')}: {k.agent.licence.replace(/_/g, ' ').toLowerCase()}
-            </Muted>
-            <Muted size={12}>
-              {pt('m25transaction')}: {pt(typeKey(k.context?.type ?? ''))}{k.context?.jurisdictions?.length ? ` (${k.context.jurisdictions.join(', ')})` : ''}
-            </Muted>
-            <Muted size={12}>
-              {pt('m25alsoActingFor')}: {others.length ? others.map((p) => `${p.name ?? pt(roleKey(p.partyRole))} — ${pt(roleKey(p.partyRole))}`).join(', ') : k.otherPartyRoles.map((r) => pt(roleKey(r))).join(', ')}
-            </Muted>
+          <View key={k.id} style={{ marginTop: 8, gap: 14, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 18 }} testID={`agent-consent-${k.id}`}>
+            <RecordIdentity name={k.agent.displayName ?? '—'} subtitle={k.agent.agency ?? '—'} status={<Pill label={pt(statusKey(k.status))} tone={tone(k.status)} />} />
+            <DetailFact label={pt('m25licence')} value={k.agent.licence.replace(/_/g, ' ').toLowerCase()} icon="badge-check" />
+            <DetailFact label={pt('m25transaction')} value={`${pt(typeKey(k.context?.type ?? ''))}${k.context?.jurisdictions?.length ? ` (${k.context.jurisdictions.join(', ')})` : ''}`} icon="file-text" />
+            <DetailFact label={pt('m25alsoActingFor')} value={others.length ? others.map((p) => `${p.name ?? pt(roleKey(p.partyRole))} — ${pt(roleKey(p.partyRole))}`).join(', ') : k.otherPartyRoles.map((r) => pt(roleKey(r))).join(', ')} icon="users" />
             {k.status === 'requested' && (
               <>
-                <Muted size={11.5}>{pt('m25whatItMeans')}</Muted>
-                <Muted size={11.5}>{pt('m25beforeYouAnswer')}</Muted>
-                <View style={{ marginTop: 6, gap: 4 }}>
-                  <Button small={true} label={`${a.particulars ? 'Acknowledged · ' : ''}${pt('m25ackParticulars')}`} onPress={() => toggle(k.id, 'particulars')} />
-                  <Button small={true} label={`${a.legalAdvice ? 'Acknowledged · ' : ''}${pt('m25ackLegalAdvice')}`} onPress={() => toggle(k.id, 'legalAdvice')} />
+                <GuidanceNote title="1. Understand the arrangement" icon="users">{pt('m25whatItMeans')}</GuidanceNote>
+                <GuidanceNote title="2. Before you decide" icon="file-text">{pt('m25beforeYouAnswer')}</GuidanceNote>
+                <View style={{ borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.line }}>
+                  <ConsentCheck label={pt('m25ackParticulars')} checked={a.particulars} onPress={() => toggle(k.id, 'particulars')} />
+                  <ConsentCheck label={pt('m25ackLegalAdvice')} checked={a.legalAdvice} onPress={() => toggle(k.id, 'legalAdvice')} />
                 </View>
                 <Row style={{ marginTop: 6 }}>
                   <Button small primary disabled={busy || !a.particulars || !a.legalAdvice} label={pt('m25grant')} onPress={() => answer(k, 'grant', 'm25grantedMsg')} />
                   <Button small disabled={busy} label={pt('m25decline')} onPress={() => answer(k, 'decline', 'm25declinedMsg')} />
                 </Row>
-                {(!a.particulars || !a.legalAdvice) && <Muted size={11}>{pt('m25needAck')}</Muted>}
+                {(!a.particulars || !a.legalAdvice) && <GuidanceNote icon="info" size={11}>{pt('m25needAck')}</GuidanceNote>}
               </>
             )}
             {k.status === 'granted' && (
@@ -116,14 +118,14 @@ export function AgentConsentSection({ playerId, isMinor }: { playerId: string; i
                 <Button small danger disabled={busy} label={pt('m25revoke')} onPress={() => answer(k, 'revoke', 'm25revokedMsg')} />
               </View>
             )}
-            {k.status === 'declined' && <Muted size={11.5}>{pt('m25declinedNote')}</Muted>}
-            {k.status === 'revoked' && <Muted size={11.5}>{pt('m25revokedNote')}</Muted>}
+            {k.status === 'declined' && <GuidanceNote icon="info" size={11.5}>{pt('m25declinedNote')}</GuidanceNote>}
+            {k.status === 'revoked' && <GuidanceNote icon="info" size={11.5}>{pt('m25revokedNote')}</GuidanceNote>}
             {/* M24F.5 — a pending consent shows every word before it is given; an answered one keeps its words one tap away. */}
-            {k.status === 'requested' ? <Muted size={11}>{k.honest}</Muted> : (
+            {k.status === 'requested' ? <GuidanceNote icon="info" size={11}>{k.honest}</GuidanceNote> : (
               <Disclosure label={pt('m25aboutConsent')} testID={`agent-consent-about-${k.id}`}>
-                <Muted size={11.5}>{pt('m25whatItMeans')}</Muted>
-                {k.status === 'granted' ? <Muted size={11}>{pt('m25revokeNote')}</Muted> : null}
-                <Muted size={11}>{k.honest}</Muted>
+                <GuidanceNote size={11.5}>{pt('m25whatItMeans')}</GuidanceNote>
+                {k.status === 'granted' ? <GuidanceNote size={11}>{pt('m25revokeNote')}</GuidanceNote> : null}
+                <GuidanceNote size={11}>{k.honest}</GuidanceNote>
               </Disclosure>
             )}
           </View>

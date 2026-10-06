@@ -1,3 +1,4 @@
+import { GuidanceNote } from './InformationRows';
 // M16 — Box Training, the player/guardian Box Cam surface.
 //   Train. Record. Prove. — Don't just say you trained. Box it.
 //
@@ -11,7 +12,7 @@ import { createElement, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, View } from 'react-native';
 import { Text, TextInput } from './Text';
 import { useColors, type Palette } from '../theme';
-import { Button, Card, DetailLink, Disclosure, FactRow, ListRow, Muted, Pill, Row } from './ui';
+import { InfoNote, EventRow, MetricTiles, DetailFact, RecordPanel, Button, Card, DetailLink, Disclosure, FactRow, ListRow, Muted, Pill, Row } from './ui';
 import { Icon } from './Icon';
 import { fmtShortDay } from '../time';
 import { m16, type BoxActor, type BoxAssignment, type BoxChallenge, type BoxDashboard, type BoxDrill, type BoxSession, type BoxTarget, type DevelopmentPlan, type BoxPrefs } from '../data/m16client';
@@ -139,7 +140,7 @@ function CapturePanel({ actor, drill, target, assignmentId, challengeEntryId, on
   return (
     <Card>
       <Row><Text style={{ color: colors.text, fontWeight: '800', fontSize: 16 }}>{pt('m16boxCam')}</Text><Pill label={drill.title} tone="blue" /></Row>
-      {DEMO ? <Muted size={12}>{pt('m16demoSim')}</Muted> : null}
+      {DEMO ? <GuidanceNote icon="info" size={12}>{pt('m16demoSim')}</GuidanceNote> : null}
 
       {WEB && !DEMO && phase !== 'error' ? createElement('video', { ref: videoRef, muted: true, playsInline: true, style: { width: '100%', maxHeight: 220, borderRadius: 10, background: '#000', transform: 'scaleX(-1)' } }) : null}
 
@@ -152,15 +153,15 @@ function CapturePanel({ actor, drill, target, assignmentId, challengeEntryId, on
       {phase === 'ready' ? (
         <View>
           <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, marginTop: 6 }}>{pt('m16readyCheck')}</Text>
-          <Muted size={12}>{pt('m16chkCamera')}</Muted>
-          <Muted size={12}>{pt('m16chkFraming')} — {pt('m16unableAuto')}</Muted>
-          <Muted size={12}>{pt('m16chkSpace')} — {pt('m16unableAuto')}</Muted>
+          <GuidanceNote icon="camera" size={12}>{pt('m16chkCamera')}</GuidanceNote>
+          <GuidanceNote icon="camera" size={12}>{pt('m16chkFraming')} — {pt('m16unableAuto')}</GuidanceNote>
+          <GuidanceNote icon="info" size={12}>{pt('m16chkSpace')} — {pt('m16unableAuto')}</GuidanceNote>
           <View style={{ marginTop: 8, backgroundColor: colors.panel2, borderRadius: 8, padding: 8 }}>
-            <Muted size={12}>{pt('m16liveness')}: {pt(`m16live_${liveness}` as Parameters<typeof pt>[0])}</Muted>
-            <Muted size={11.5}>{pt('m16livenessNote')}</Muted>
+            <GuidanceNote icon="info" size={12}>{pt('m16liveness')}: {pt(`m16live_${liveness}` as Parameters<typeof pt>[0])}</GuidanceNote>
+            <GuidanceNote icon="info" size={11.5}>{pt('m16livenessNote')}</GuidanceNote>
           </View>
-          <Muted size={12}>{pt('m16setup')}: {drill.setup.space} · {drill.setup.framing}</Muted>
-          {drill.repSupport === 'not_configured' ? <Muted size={12}>ⓘ {drill.repSupportNote}</Muted> : null}
+          <GuidanceNote icon="camera" size={12}>{pt('m16setup')}: {drill.setup.space} · {drill.setup.framing}</GuidanceNote>
+          {drill.repSupport === 'not_configured' ? <GuidanceNote icon="info" size={12}>{drill.repSupportNote}</GuidanceNote> : null}
           <Row style={{ marginTop: 8 }}><Button primary label={pt('m16boxIt')} onPress={() => void begin()} /><Button small label={pt('m16cancel')} onPress={cancel} /></Row>
         </View>
       ) : null}
@@ -195,15 +196,15 @@ function ResultCard({ actor, session, onClose, reload }: { actor: BoxActor; sess
         <View style={{ flex: 1 }}><Muted size={11}>{pt('m16boxVerified')}</Muted><Text style={{ color: colors.accentText, fontWeight: '800' }}>{session.verifiedReps != null ? `${session.verifiedReps}` : fmt(session.verifiedActiveMs ?? 0)}{session.target.type !== 'duration' && session.verifiedReps != null ? ` / ${session.target.value}` : ''}</Text></View>
         <View style={{ flex: 1 }}><Muted size={11}>{pt('m16session')}</Muted><Text style={{ color: colors.text, fontWeight: '700' }}>{fmt(session.sessionDurationMs ?? 0)}</Text></View>
       </Row>
-      {session.stateCopy ? <Muted size={12}>{session.stateCopy}</Muted> : null}
+      {session.stateCopy ? <GuidanceNote icon="info" size={12}>{session.stateCopy}</GuidanceNote> : null}
       {verified ? <Text style={{ color: colors.accentText, fontWeight: '800', fontSize: 15, marginTop: 6 }}>{pt('m16workCounts')}</Text> : null}
-      {verified ? <Muted size={12}>{fmt(session.verifiedActiveMs ?? 0)} {pt('m16willRecord')}</Muted> : null}
+      {verified ? <GuidanceNote icon="info" size={12}>{fmt(session.verifiedActiveMs ?? 0)} {pt('m16willRecord')}</GuidanceNote> : null}
       {session.provenanceDetail ? <View style={{ marginTop: 6, backgroundColor: colors.panel2, borderRadius: 8, padding: 8 }}><Muted size={11.5}>{session.provenanceLabel} — {session.provenanceDetail}</Muted></View> : null}
       <Row style={{ marginTop: 8 }}>
         <TextInput style={[inputStyle(colors), { flex: 1 }]} value={note} onChangeText={setNote} placeholder={pt('m16notePlaceholder')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m16notePlaceholder')} />
         <Button small label={pt('m16addNote')} onPress={async () => { if (note.trim()) { try { await m16.addNote(actor.id, session.id, note.trim()); setMsg(pt('m16noteSaved')); } catch (e) { setMsg(e instanceof Error ? e.message : 'failed'); } } }} />
       </Row>
-      <Muted size={11}>{pt('m16noteProvenance')}</Muted>
+      <GuidanceNote icon="info" size={11}>{pt('m16noteProvenance')}</GuidanceNote>
       {msg ? <Muted size={12}>{msg}</Muted> : null}
       <Row style={{ marginTop: 6 }}><Button label={pt('m16done')} onPress={() => { reload(); onClose(); }} /></Row>
     </Card>
@@ -229,7 +230,7 @@ function SessionDetail({ s, onBack }: { s: BoxSession; onBack: () => void }) {
       <FactRow k={pt('m16target')} v={s.target.type === 'duration' ? fmt(s.target.value) : `${s.target.value}`} />
       <View style={{ marginTop: 12 }}><Row><StatePill state={s.verificationState} />{s.simulated ? <Pill label={pt('m16sim')} /> : null}</Row></View>
       {s.stateCopy ? <Muted size={12.5}>{s.stateCopy}</Muted> : null}
-      {s.provenanceDetail ? <Disclosure label={s.provenanceLabel ?? pt('m15source')}><Muted size={12.5}>{s.provenanceDetail}</Muted></Disclosure> : null}
+      {s.provenanceDetail ? <Disclosure label={s.provenanceLabel ?? pt('m15source')}><GuidanceNote size={12.5}>{s.provenanceDetail}</GuidanceNote></Disclosure> : null}
     </View>
   );
 }
@@ -345,8 +346,8 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
         <View style={{ marginTop: 10 }}>
           <SectionHead title={pt('bcRecent')} />
           <View testID="boxcam-recent">
-            {recentRows.map((s2) => (
-              <ListRow key={s2.id} label={s2.drillTitle} value={`${fmtShortDay(s2.endedAt ?? s2.createdAt)} · ${stateWord(s2)}${s2.simulated ? ` · ${pt('m16sim')}` : ''}`} onPress={() => setDetail(s2)} testID={`boxcam-session-${s2.id}`} />
+            {recentRows.map((s2, i) => (
+              <EventRow key={s2.id} last={i === recentRows.length - 1} label={`${s2.drillTitle} · ${stateWord(s2)}${s2.simulated ? ` · ${pt('m16sim')}` : ''}`} date={fmtShortDay(s2.endedAt ?? s2.createdAt)} onPress={() => setDetail(s2)} testID={`boxcam-session-${s2.id}`} />
             ))}
           </View>
           {dash.recent.length > 3 ? <DetailLink label={expanded ? pt('m16less') : `${pt('bcViewAll')} · ${pt('bcSessions').replace('{n}', String(dash.recent.length))}`} onPress={() => setExpanded((x) => !x)} testID="boxcam-recent-all" /> : null}
@@ -356,13 +357,13 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
       <View style={{ marginTop: 14 }}>
         {/* How Box Cam works — the setup, the drill, the facts, the demo note, the checks. */}
         <Disclosure label={pt('bcHowItWorks')} testID="boxcam-how">
-          <Muted size={13}>{pt('bcSetupHint')}</Muted>
+          <GuidanceNote title="Setup" icon="camera" size={13}>{pt('bcSetupHint')}</GuidanceNote>
           {next ? <SessionFacts facts={[{ icon: 'timer', label: targetFact }, { icon: 'circle-check', label: next.setup?.equipment?.[0] ?? pt('bcOneBall') }]} /> : null}
-          {next?.summary ? <Muted size={12.5}>{next.summary}</Muted> : null}
-          {next?.setup?.space ? <Muted size={12.5}>{pt('m16setup')}: {next.setup.space} · {next.setup.framing}</Muted> : null}
-          <Muted size={12.5}>{pt('bcSeparate')}</Muted>
-          {DEMO ? <Muted size={12.5}>{pt('m16demoSim')}</Muted> : null}
-          {drillData?.providers.some((p) => p.id === 'production_cv') ? <Disclosure label="About Box Cam checks" testID="boxcam-about"><Muted size={12}>{pt('m16providerNote')}</Muted></Disclosure> : null}
+          {next?.summary ? <GuidanceNote title="The drill" icon="soccer-ball" size={12.5}>{next.summary}</GuidanceNote> : null}
+          {next?.setup?.space ? <GuidanceNote title="Space and equipment" icon="soccer-ball" size={12.5}>{pt('m16setup')}: {next.setup.space} · {next.setup.framing}</GuidanceNote> : null}
+          <GuidanceNote title="What this means" icon="info" size={12.5}>{pt('bcSeparate')}</GuidanceNote>
+          {DEMO ? <GuidanceNote title="Demo information" icon="info" size={12.5}>{pt('m16demoSim')}</GuidanceNote> : null}
+          {drillData?.providers.some((p) => p.id === 'production_cv') ? <Disclosure label="About Box Cam checks" testID="boxcam-about"><GuidanceNote title="Demo information" icon="info" size={12}>{pt('m16providerNote')}</GuidanceNote></Disclosure> : null}
         </Disclosure>
 
         {/* Training record — activity, assignments, state per session, bests, challenges, sharing. */}
@@ -370,8 +371,8 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
           {plan ? (
             <View>
               <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 }}>{pt('m16devActivity')} ({plan.activity.days}d)</Text>
-              <Muted size={12}>{pt('m16sessionsLabel')}: {plan.activity.boxSessions} · {pt('m16verifiedTraining')}: {fmt(plan.activity.verifiedActiveMs)} · {pt('m16assigned')}: {plan.activity.assignedCompleted}/{plan.activity.assigned}</Muted>
-              <Disclosure label="About these figures"><Muted size={11.5}>{plan.activity.note}</Muted></Disclosure>
+              <View style={{ marginTop: 12 }}><MetricTiles items={[{ label: pt('m16sessionsLabel'), value: plan.activity.boxSessions, icon: 'video' }, { label: pt('m16verifiedTraining'), value: fmt(plan.activity.verifiedActiveMs), icon: 'timer' }, { label: pt('m16assigned'), value: `${plan.activity.assignedCompleted}/${plan.activity.assigned}`, icon: 'clipboard-list' }]} /></View>
+              <Disclosure label="About these figures"><GuidanceNote size={11.5}>{plan.activity.note}</GuidanceNote></Disclosure>
             </View>
           ) : null}
 
@@ -387,8 +388,8 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
           {dash && dash.bests.length > 0 ? (
             <View style={{ marginTop: 10 }}>
               <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 }}>{pt('m16boxBest')}</Text>
-              {dash.bests.map((b) => <Muted key={`${b.drillId}${b.drillVersion}`} size={12}>{b.drillId} — {b.bestReps != null ? `${b.bestReps} reps` : b.bestActive}</Muted>)}
-              <Disclosure label="About the streak"><Muted size={11.5}>{dash.streakNote}</Muted></Disclosure>
+              {dash.bests.map((b) => <RecordPanel key={`${b.drillId}${b.drillVersion}`} title={drills.find(d => d.id === b.drillId)?.title ?? b.drillId} icon="activity"><Text style={{ color: colors.text, fontSize: 18, fontWeight: '600' }}>{b.bestReps != null ? `${b.bestReps} reps` : b.bestActive}</Text></RecordPanel>)}
+              <Disclosure label="About the streak"><GuidanceNote size={11.5}>{dash.streakNote}</GuidanceNote></Disclosure>
             </View>
           ) : null}
 
@@ -400,10 +401,10 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
                   <Row><Text style={{ color: colors.text, fontSize: 13, flexShrink: 1 }}>{c.title}</Text>
                     {c.entry ? <Pill label={c.entry.status === 'completed' ? pt('m16completed') : `${c.entry.progress}/${c.targetTotal}`} tone={c.entry.status === 'completed' ? 'green' : 'default'} /> : <Button small label={pt('m16join')} onPress={async () => { try { await m16.joinChallenge(actor, c.id); reloadChallenges(); } catch (e) { setMsg(e instanceof Error ? e.message : 'failed'); } }} />}
                   </Row>
-                  <Muted size={11}>{c.publisher.kind === 'org' ? `${pt('m16by')} ${c.publisher.orgName}` : pt('m16byScoutbox')}</Muted>
+                  <GuidanceNote size={11}>{c.publisher.kind === 'org' ? `${pt('m16by')} ${c.publisher.orgName}` : pt('m16byScoutbox')}</GuidanceNote>
                 </View>
               ))}
-              {challenges[0]?.disclaimer ? <Disclosure label="About Box Challenges" testID="boxchallenge-about"><Muted size={12}>{challenges[0].disclaimer}</Muted></Disclosure> : null}
+              {challenges[0]?.disclaimer ? <Disclosure label="About Box Challenges" testID="boxchallenge-about"><GuidanceNote size={12}>{challenges[0].disclaimer}</GuidanceNote></Disclosure> : null}
             </View>
           ) : null}
 
@@ -415,11 +416,11 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
                   <Button small label={prefs.shareDevelopmentActivity === 'recruitment' ? `${pt('m16shareRec')} · Selected` : pt('m16shareRec')}
                     onPress={async () => { try { await m16.setPrefs(actor, { shareDevelopmentActivity: prefs.shareDevelopmentActivity === 'recruitment' ? 'private' : 'recruitment' }); reloadPrefs(); } catch (e) { setMsg(e instanceof Error ? e.message : 'failed'); } }} />
                 </Row>
-              ) : <Muted size={12}>{pt('m16shareMinor')}</Muted>}
-              <Disclosure label="About sharing"><Muted size={11.5}>{pt('m16shareNote')}</Muted></Disclosure>
+              ) : <GuidanceNote size={12}>{pt('m16shareMinor')}</GuidanceNote>}
+              <Disclosure label="About sharing"><GuidanceNote title="Sharing controls" icon="lock-keyhole" size={11.5}>{pt('m16shareNote')}</GuidanceNote></Disclosure>
             </View>
           ) : null}
-          {msg ? <Muted size={12}>{msg}</Muted> : null}
+          {msg ? <GuidanceNote size={12}>{msg}</GuidanceNote> : null}
         </Disclosure>
       </View>
     </View>
@@ -430,17 +431,17 @@ function AssignmentRow({ a, drills, onStart, onAccept }: { a: BoxAssignment; dri
   const colors = useColors();
   const drill = drills.find((d) => d.id === a.drillId);
   return (
-    <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6, marginTop: 6 }}>
+    <RecordPanel title={a.drillTitle} subtitle={a.orgName} icon="activity">
       <Row>
-        <Text style={{ color: colors.text, fontSize: 13, flexShrink: 1 }}>{a.drillTitle} · {a.target.type === 'duration' ? fmt(a.target.value) : `${a.target.value}`}{a.frequencyPerWeek ? ` ×${a.frequencyPerWeek}/wk` : ''}</Text>
+        <Text style={{ color: colors.text, fontSize: 13, flexShrink: 1 }}>{a.target.type === 'duration' ? fmt(a.target.value) : `${a.target.value}`}{a.frequencyPerWeek ? ` ×${a.frequencyPerWeek}/wk` : ''}</Text>
         <Pill label={pt(`m16astate_${a.state}` as Parameters<typeof pt>[0])} tone={a.state === 'completed' ? 'green' : a.state === 'partially_completed' ? 'gold' : 'default'} />
       </Row>
-      {a.instructions ? <Muted size={12}>{a.orgName}: “{a.instructions}”</Muted> : <Muted size={12}>{a.orgName}</Muted>}
+      {a.instructions ? <InfoNote icon="clipboard-list">{a.instructions}</InfoNote> : null}
       {a.lastResult ? <Muted size={12}>{pt('m16lastResult')}: {a.lastResult.verifiedReps != null ? `${a.lastResult.verifiedReps}` : a.lastResult.verifiedActive} — {a.lastResult.statusLabel}</Muted> : null}
       <Row style={{ marginTop: 4 }}>
         {a.state === 'assigned' ? <Button small label={pt('m16accept')} onPress={onAccept} /> : null}
         {drill ? <Button small primary label={pt('m16boxIt')} onPress={() => onStart(drill, a.id)} /> : null}
       </Row>
-    </View>
+    </RecordPanel>
   );
 }

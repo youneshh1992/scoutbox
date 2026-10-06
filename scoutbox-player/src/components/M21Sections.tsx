@@ -1,3 +1,4 @@
+import { GuidanceNote } from './InformationRows';
 // M21 — Development Hub, player and guardian surface.
 //
 // Six sections: Overview, Goals, Actions, Evidence, Reviews, History. Every
@@ -18,7 +19,7 @@ import { useEffect, useState } from 'react';
 import { Pressable, View } from 'react-native';
 import { Text, TextInput } from './Text';
 import { useColors, type Palette } from '../theme';
-import { Button, Card, Disclosure, ListRow, Muted, Pill, Row, SectionTitle } from './ui';
+import { TimelineItem, RecordPanel, DetailFact, MetricTiles, Button, Card, Disclosure, ListRow, Muted, Pill, Row, SectionTitle } from './ui';
 import { Icon } from './Icon';
 import {
   m21, type DevActor, type DevelopmentPlanView, type GoalView, type ActionView,
@@ -87,7 +88,7 @@ function TargetBlock({ t }: { t: TargetView }) {
       {t.measured ? (
         <Muted size={12}>{pt('m21measured')}: {t.measured.value} {t.metricUnit}</Muted>
       ) : null}
-      <Disclosure label="About this target"><Muted size={12}>{t.note}</Muted><Muted size={12}>{t.limitation}</Muted></Disclosure>
+      <Disclosure label="About this target"><GuidanceNote size={12}>{t.note}</GuidanceNote><GuidanceNote title="Limits" icon="info" size={12}>{t.limitation}</GuidanceNote></Disclosure>
     </View>
   );
 }
@@ -95,46 +96,53 @@ function TargetBlock({ t }: { t: TargetView }) {
 function EvidenceRow({ e }: { e: EvidenceView }) {
   const colors = useColors();
   return (
-    <View style={{ gap: 3, paddingVertical: 4 }}>
-      <Row>
-        <Text style={{ color: e.available ? colors.text : colors.muted, fontSize: 13 }}>
-          {e.available ? (e.title ?? e.sourceLabel) : pt('m21evUnavailable')}
-        </Text>
-        <Pill label={e.sourceLabel} />
-        {e.simulated ? <Pill label={pt('m21simulated')} tone="gold" /> : null}
-        {!e.available ? <Pill label={pt('m21evGone')} tone="default" /> : null}
-      </Row>
-      {e.available && e.measuredValue != null ? (
-        <Muted size={12}>{e.measuredValue} {e.metricUnit}</Muted>
-      ) : null}
-      {e.note ? <Muted size={11}>{e.note}</Muted> : null}
-      {e.occurredAt ? <Muted size={11}>{pFmtDate(e.occurredAt)}</Muted> : null}
+    <View style={{ gap: 9, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.panel2 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
+        <Icon name={e.available ? 'file-check-2' : 'file-text'} size={19} color={colors.iconFg} />
+        <Text style={{ color: e.available ? colors.text : colors.muted, fontSize: 13, fontWeight: '500', lineHeight: 19, flex: 1 }}>{e.available ? (e.title ?? e.sourceLabel) : pt('m21evUnavailable')}</Text>
+      </View>
+      <Row><Pill label={e.sourceLabel} />{e.simulated ? <Pill label={pt('m21simulated')} tone="gold" /> : null}{!e.available ? <Pill label={pt('m21evGone')} /> : null}</Row>
+      {e.available && e.measuredValue != null ? <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600' }}>{e.measuredValue} {e.metricUnit}</Text> : null}
+      {e.note ? <Text style={{ color: colors.muted, fontSize: 11.5, lineHeight: 18 }}>{e.note}</Text> : null}
+      {e.occurredAt ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}><Icon name="calendar-days" size={13} color={colors.muted} /><Text style={{ color: colors.muted, fontSize: 11 }}>{pFmtDate(e.occurredAt)}</Text></View> : null}
     </View>
   );
 }
 
-function ActionRow({ a, onSet, canWrite }: { a: ActionView; onSet: (status: string) => void; canWrite: boolean }) {
+const ACTION_ICON: Record<string, string> = {
+  training: 'soccer-ball', assessment: 'clipboard-list', video_review: 'video',
+  match_objective: 'football-pitch', coach_review: 'chat-bubble', combine: 'activity',
+  box_cam: 'video', evidence_request: 'folder-open', custom: 'list-checks',
+};
+
+function ActionRow({ a, onSet, canWrite, busy = false }: { a: ActionView; onSet: (status: string) => void; canWrite: boolean; busy?: boolean }) {
   const colors = useColors();
   const due = dueLabel(a.due);
+  const done = a.status === 'done';
   return (
-    <View style={{ gap: 4, paddingVertical: 6, borderTopWidth: 1, borderTopColor: colors.line }}>
-      <Row>
-        <Text style={{ color: colors.text, fontSize: 13.5, flexShrink: 1 }}>{a.title}</Text>
-        <Pill label={actionStatusLabel(a.status)} tone={ACTION_TONE[a.status] ?? 'default'} />
-        {due ? <Pill label={due} tone={a.due.state === 'overdue' ? 'gold' : 'default'} /> : null}
-      </Row>
-      <Row>
-        <Muted size={11}>{label(`m21type_${a.type}`, a.type.replace(/_/g, ' '))}</Muted>
-        {a.assignee ? <Muted size={11}>· {a.assignee.name}</Muted> : null}
-      </Row>
-      {canWrite && a.status !== 'cancelled' ? (
-        <Row>
-          {a.status !== 'done'
-            ? <Button small label={pt('m21markDone')} onPress={() => onSet('done')} />
-            : <Button small label={pt('m21reopen')} onPress={() => onSet('in_progress')} />}
-        </Row>
-      ) : null}
-      {a.evidence.length ? a.evidence.map((e) => <EvidenceRow key={e.linkId} e={e} />) : null}
+    <View testID={`dev-action-${a.id}`} style={{ gap: 12, padding: 14, borderRadius: 18, backgroundColor: colors.panel2, borderWidth: 1, borderColor: colors.line }}>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 11 }}>
+        <View style={{ width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: done ? colors.greenBg : colors.panel }}>
+          <Icon name={done ? 'check' : ACTION_ICON[a.type] ?? 'list-checks'} size={20} color={done ? colors.greenInk : colors.iconFg} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0, gap: 5 }}>
+          <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600', lineHeight: 20 }}>{a.title}</Text>
+          <Text style={{ color: colors.muted, fontSize: 11.5, lineHeight: 17 }}>{label(`m21type_${a.type}`, a.type.replace(/_/g, ' '))}{a.assignee?.name ? ` · ${a.assignee.name}` : ''}</Text>
+        </View>
+      </View>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 9 }}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, flexShrink: 1 }}>
+          <Pill label={actionStatusLabel(a.status)} tone={ACTION_TONE[a.status] ?? 'default'} />
+          {due ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><Icon name="calendar-days" size={13} color={a.due.state === 'overdue' ? colors.goldInk : colors.muted} /><Text style={{ fontSize: 11, color: a.due.state === 'overdue' ? colors.goldInk : colors.muted }}>{due}</Text></View> : null}
+        </View>
+        {canWrite && a.status !== 'cancelled' ? (
+          <Pressable disabled={busy} accessibilityRole="button" accessibilityLabel={`${done ? pt('m21reopen') : pt('m21markDone')}: ${a.title}`} onPress={() => onSet(done ? 'in_progress' : 'done')} style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 44, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.panel, opacity: busy || pressed ? 0.6 : 1 })}>
+            <Icon name={done ? 'refresh-cw' : 'check'} size={15} color={colors.accentText} />
+            <Text style={{ color: colors.accentText, fontSize: 12, fontWeight: '600' }}>{done ? pt('m21reopen') : pt('m21markDone')}</Text>
+          </Pressable>
+        ) : null}
+      </View>
+      {a.evidence.length ? <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8, gap: 6 }}>{a.evidence.map((e) => <EvidenceRow key={e.linkId} e={e} />)}</View> : null}
     </View>
   );
 }
@@ -155,34 +163,41 @@ function GoalCard({ g, view, actor, reload }: { g: GoalView; view: DevelopmentPl
   };
 
   return (
-    <Card>
-      <Row>
-        <Text style={{ color: colors.text, fontSize: 15, fontWeight: '700', flexShrink: 1 }}>{g.title}</Text>
-        <Pill label={g.categoryLabel} />
-        <Pill label={goalStatusLabel(g.status)} tone={GOAL_TONE[g.status] ?? 'default'} />
-      </Row>
-      {g.description ? <Muted size={12.5}>{g.description}</Muted> : null}
+    <Card testID={`dev-goal-${g.id}`} style={{ padding: 16, gap: 14, borderRadius: 24 }}>
+      <View style={{ gap: 12 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 }}>
+            <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: colors.greenBg, alignItems: 'center', justifyContent: 'center' }}><Icon name="target" size={20} color={colors.accentText} /></View>
+            <Text style={{ color: colors.muted, fontSize: 11, fontWeight: '600', letterSpacing: 0.6, flexShrink: 1 }}>{g.categoryLabel}</Text>
+          </View>
+          <Pill label={goalStatusLabel(g.status)} tone={GOAL_TONE[g.status] ?? 'default'} />
+        </View>
+        <Text style={{ color: colors.text, fontSize: 20, fontWeight: '600', lineHeight: 27, letterSpacing: -0.4 }}>{g.title}</Text>
+        {g.description ? <Text style={{ color: colors.muted, fontSize: 13, lineHeight: 20 }}>{g.description}</Text> : null}
+      </View>
       {/* The word never travels without the sentence. */}
-      {g.statusMeaning ? <Muted size={11.5}>{g.statusMeaning}</Muted> : null}
+      {g.statusMeaning ? <GuidanceNote icon="info" size={11.5}>{g.statusMeaning}</GuidanceNote> : null}
       {g.status === 'blocked' ? (
-        <Muted size={12}>
+        <GuidanceNote icon="info" size={12}>
           {pt('m21blocked')}: {label(`m21block_${g.blockReason}`, String(g.blockReason ?? '').replace(/_/g, ' '))}
           {g.blockNote ? ` — ${g.blockNote}` : ''}
-        </Muted>
+        </GuidanceNote>
       ) : null}
 
       {g.targetState ? <TargetBlock t={g.targetState} /> : null}
 
       {/* Counts, and a sentence made of counts. Never a bar. */}
-      <Row>
-        <Text style={{ color: colors.text, fontSize: 13 }}>{g.completion.phrase}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.line }}>
+        <Icon name="list-checks" size={20} color={colors.accentText} />
+        <Text style={{ flex: 1, color: colors.text, fontSize: 12.5, fontWeight: '600' }}>{g.completion.phrase}</Text>
         {g.actionCounts.overdue ? <Pill label={`${g.actionCounts.overdue} ${pt('m21overdue')}`} tone="gold" /> : null}
-      </Row>
+      </View>
 
       {g.actions.map((a) => (
         <ActionRow
           key={a.id}
           a={a}
+          busy={busy}
           canWrite={canWrite || a.assignee?.kind === 'player'}
           onSet={(status) => run(() => m21.updateAction(actor, a.id, { status }))}
         />
@@ -211,12 +226,10 @@ function GoalCard({ g, view, actor, reload }: { g: GoalView; view: DevelopmentPl
       ) : null}
 
       {g.evidence.length ? (
-        <View style={{ gap: 2 }}>
-          <SectionTitle>{pt('m21evidence')}</SectionTitle>
+        <Disclosure label={pt('m21evidence')} icon="folder-open" hint={g.evidenceSummary.note}>
           {g.evidence.map((e) => <EvidenceRow key={e.linkId} e={e} />)}
-          <Muted size={11}>{g.evidenceSummary.note}</Muted>
-        </View>
-      ) : <Muted size={12}>{pt('m21noEvidence')}</Muted>}
+        </Disclosure>
+      ) : <GuidanceNote icon="info" size={12}>{pt('m21noEvidence')}</GuidanceNote>}
 
       {/* Linking stores a reference. What it points at is read live, every
           time, so nothing is copied into the plan. */}
@@ -260,26 +273,39 @@ function GoalCard({ g, view, actor, reload }: { g: GoalView; view: DevelopmentPl
 
 function ReviewCard({ r }: { r: ReviewView }) {
   const colors = useColors();
+  const coach = r.reviewerKind === 'coach_review';
+  const kind = label(`m21rev_${r.reviewerKind}`, r.reviewerKind.replace(/_/g, ' '));
+  const author = r.reviewedByName || kind;
+  const initials = author.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
   return (
-    <Card>
-      <Row>
-        <Pill label={label(`m21rev_${r.reviewerKind}`, r.reviewerKind.replace(/_/g, ' '))} tone={r.reviewerKind === 'coach_review' ? 'blue' : 'default'} />
-        <Muted size={12}>{r.reviewedByName} · {pFmtDate(r.reviewedAt)}</Muted>
-        {r.supersededBy ? <Pill label={pt('m21superseded')} tone="gold" /> : null}
-        {r.supersedes ? <Pill label={pt('m21correction')} /> : null}
-      </Row>
-      {r.summary ? <Text style={{ color: colors.text, fontSize: 13.5, lineHeight: 19 }}>{r.summary}</Text> : <Muted size={12}>{pt('m21noSummary')}</Muted>}
-      {/* Existence acknowledged, content absent. */}
-      {r.internalNoteNote ? <Muted size={11.5}>{r.internalNoteNote}</Muted> : null}
-      {r.goalSnapshots.length ? (
-        <View style={{ gap: 2 }}>
-          <SectionTitle>{pt('m21atReview')}</SectionTitle>
-          {r.goalSnapshots.map((s) => (
-            <Muted key={s.goalId} size={12}>{s.title} — {goalStatusLabel(s.status)} · {s.completion.phrase}</Muted>
-          ))}
+    <Card testID={`dev-review-${r.id}`} style={{ padding: 16, gap: 15, borderRadius: 24 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>
+        <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: coach ? colors.infoBg : colors.greenBg, alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ fontSize: 14, fontWeight: '700', color: coach ? colors.infoInk : colors.greenInk }}>{initials}</Text>
         </View>
+        <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+          <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600' }}>{author}</Text>
+          <Text style={{ color: colors.muted, fontSize: 11.5 }}>{kind}</Text>
+        </View>
+        <Text style={{ color: colors.muted, fontSize: 11.5 }}>{pFmtDate(r.reviewedAt)}</Text>
+      </View>
+      {r.supersededBy || r.supersedes ? <Row>{r.supersededBy ? <Pill label={pt('m21superseded')} tone="gold" /> : null}{r.supersedes ? <Pill label={pt('m21correction')} /> : null}</Row> : null}
+      <View style={{ borderLeftWidth: 3, borderLeftColor: coach ? colors.infoInk : colors.accent, paddingLeft: 13, paddingVertical: 2 }}>
+        <Text style={{ color: colors.text, fontSize: 14, lineHeight: 22 }}>{r.summary || pt('m21noSummary')}</Text>
+      </View>
+      {/* Only acknowledge that an internal note exists. Never render its content. */}
+      {r.internalNoteNote ? <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.line }}><Icon name="lock-keyhole" size={16} color={colors.muted} /><Text style={{ flex: 1, color: colors.muted, fontSize: 11.5, lineHeight: 18 }}>{r.internalNoteNote}</Text></View> : null}
+      {r.goalSnapshots.length ? (
+        <Disclosure label={pt('m21atReview')} icon="target">
+          {r.goalSnapshots.map((s) => (
+            <View key={s.goalId} style={{ gap: 8, padding: 12, borderRadius: 14, backgroundColor: colors.panel2 }}>
+              <Text style={{ color: colors.text, fontSize: 13, fontWeight: '500', lineHeight: 19 }}>{s.title}</Text>
+              <Row><Pill label={goalStatusLabel(s.status)} tone={GOAL_TONE[s.status] ?? 'default'} /><Muted size={11.5}>{s.completion.phrase}</Muted></Row>
+            </View>
+          ))}
+        </Disclosure>
       ) : null}
-      {r.nextReviewAt ? <Muted size={12}>{pt('m21nextReview')}: {pFmtDate(r.nextReviewAt)}</Muted> : null}
+      {r.nextReviewAt ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 11, borderRadius: 12, backgroundColor: colors.panel2 }}><Icon name="calendar-days" size={18} color={colors.iconFg} /><Text style={{ flex: 1, color: colors.muted, fontSize: 12 }}>{pt('m21nextReview')}</Text><Text style={{ color: colors.text, fontWeight: '600', fontSize: 12 }}>{pFmtDate(r.nextReviewAt)}</Text></View> : null}
     </Card>
   );
 }
@@ -338,7 +364,7 @@ export function DevelopmentHubSection({ actor }: { actor: DevActor }) {
               })}
             />
           </Row>
-          {cat ? <Disclosure label="About goals"><Muted size={12}>{cat.goalLibrary.note}</Muted></Disclosure> : null}
+          {cat ? <Disclosure label="About goals"><GuidanceNote title="Goal guidance" icon="target" size={12}>{cat.goalLibrary.note}</GuidanceNote></Disclosure> : null}
         </Card>
       </View>
     );
@@ -410,7 +436,7 @@ export function DevelopmentHubSection({ actor }: { actor: DevActor }) {
                     <Button key={i.id} small label={i.title} onPress={() => setNewGoal(i.title)} />
                   ))}
                 </Row>
-                <Disclosure label="About goals"><Muted size={12}>{cat.goalLibrary.note}</Muted></Disclosure>
+                <Disclosure label="About goals"><GuidanceNote title="Goal guidance" icon="target" size={12}>{cat.goalLibrary.note}</GuidanceNote></Disclosure>
               </View>
             ) : null}
           </Card>
@@ -424,12 +450,12 @@ export function DevelopmentHubSection({ actor }: { actor: DevActor }) {
     return (
       <View style={{ gap: 8 }} accessibilityLabel={pt('m21reviews')} testID="dev-page-feedback">
         {back}
-        <SectionTitle>{pt('m21reviews')}</SectionTitle>
+        <SectionTitle icon="chat-bubble">{pt('m21reviews')}</SectionTitle>
         {view.reviews.length === 0 ? <Card><Muted>{pt('m21noReviews')}</Muted></Card> : null}
         {[...view.reviews].sort((a, b) => b.reviewedAt - a.reviewedAt).map((r) => <ReviewCard key={r.id} r={r} />)}
         {view.access.reflect ? (
-          <Card>
-            <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600' }}>{pt('m21addReflection')}</Text>
+          <Card style={{ padding: 16, gap: 12, borderRadius: 24 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}><Icon name="file-text" size={20} color={colors.accentText} /><Text style={{ color: colors.text, fontSize: 15, fontWeight: '600' }}>{pt('m21addReflection')}</Text></View>
             {/* A reflection is never presented as an assessment. */}
             <Muted size={12}>{pt('m21reflectionNote')}</Muted>
             <TextInput
@@ -459,23 +485,24 @@ export function DevelopmentHubSection({ actor }: { actor: DevActor }) {
       <View style={{ gap: 8 }} accessibilityLabel={pt('devProgress')} testID="dev-page-progress">
         {back}
         <SectionTitle>{pt('devProgress')}</SectionTitle>
-        <Muted size={13}>Active goals {s.activeGoals} · {pt('m21actionsDue')} {s.actionsDue}{s.actionsOverdue ? ` · ${s.actionsOverdue} ${pt('m21overdue')}` : ''}</Muted>
-        <Muted size={13}>{pt('m21lastReview')}: {s.lastReviewAt ? pFmtDate(s.lastReviewAt) : pt('m21none')} · {pt('m21nextReview')}: {s.nextReviewAt ? pFmtDate(s.nextReviewAt) : pt('m21none')}</Muted>
+        <MetricTiles items={[{ label: 'Active goals', value: s.activeGoals, icon: 'target' }, { label: pt('m21actionsDue'), value: s.actionsDue, icon: 'clipboard-list' }, { label: pt('m21overdue'), value: s.actionsOverdue, icon: 'timer' }]} />
+        <RecordPanel><DetailFact label={pt('m21lastReview')} value={s.lastReviewAt ? pFmtDate(s.lastReviewAt) : pt('m21none')} /><DetailFact label={pt('m21nextReview')} value={s.nextReviewAt ? pFmtDate(s.nextReviewAt) : pt('m21none')} /></RecordPanel>
         {view.goals.map((g) => (
-          <View key={g.id} style={{ gap: 2, paddingTop: 8 }}>
+          <View key={g.id} style={{ gap: 12, paddingTop: 8 }}>
             <Row><Text style={{ color: colors.text, fontSize: 14, fontWeight: '600', flexShrink: 1 }}>{g.title}</Text><Pill label={goalStatusLabel(g.status)} tone={GOAL_TONE[g.status] ?? 'default'} /></Row>
             <Muted size={12.5}>{g.completion.phrase}</Muted>
             {g.actions.map((a) => (
               <ActionRow
                 key={a.id}
                 a={a}
+                busy={busy}
                 canWrite={!!view.access.writeGoals || a.assignee?.kind === 'player'}
                 onSet={(status) => run(() => m21.updateAction(actor, a.id, { status }))}
               />
             ))}
           </View>
         ))}
-        <Disclosure label="About these counts"><Muted size={12}>{s.note}</Muted>{cat ? <Muted size={12}>{cat.reminders.note}</Muted> : null}</Disclosure>
+        <Disclosure label="About these counts"><GuidanceNote size={12}>{s.note}</GuidanceNote>{cat ? <GuidanceNote title="Reminders" icon="bell" size={12}>{cat.reminders.note}</GuidanceNote> : null}</Disclosure>
       </View>
     );
   }
@@ -487,15 +514,12 @@ export function DevelopmentHubSection({ actor }: { actor: DevActor }) {
         {back}
         <SectionTitle>{pt('devHistory')}</SectionTitle>
         {view.timeline.length === 0 ? <Muted>{pt('m21noHistory')}</Muted> : null}
-        {view.timeline.map((h) => (
-          <View key={h.id} style={{ flexDirection: 'row', gap: 12, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: colors.line }}>
-            <Text style={{ width: 62, color: colors.muted, fontSize: 12, lineHeight: 18 }}>{pFmtDate(h.at)}</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: colors.text, fontSize: 13.5, lineHeight: 18 }}>{h.label}{h.subject.title ? ` — ${h.subject.title}` : ''}</Text>
-              {h.byName ? <Muted size={11.5}>{h.byName}</Muted> : null}
-            </View>
-          </View>
-        ))}
+        <View>{view.timeline.map((h, i) => (
+          <TimelineItem key={h.id} date={pFmtDate(h.at)} last={i === view.timeline.length - 1}>
+            <Text style={{ color: colors.text, fontSize: 14, fontWeight: '500', lineHeight: 21 }}>{h.label}{h.subject.title ? ` — ${h.subject.title}` : ''}</Text>
+            {h.byName ? <Muted size={12}>{h.byName}</Muted> : null}
+          </TimelineItem>
+        ))}</View>
       </View>
     );
   }
@@ -510,7 +534,7 @@ export function DevelopmentHubSection({ actor }: { actor: DevActor }) {
       <ListRow label={pt('devHistory')} value={pt('devEntries').replace('{n}', String(view.timeline.length))} onPress={() => setPage('history')} testID="dev-history" />
       <View style={{ marginTop: 10 }}>
         {/* M24F.5 — one way in to every explanation: the plan's limits and what its counts are. */}
-        <Disclosure label="About this plan" testID="dev-about"><Muted size={12}>{view.limitation}</Muted><Muted size={12}>{view.neverBuilt.note}</Muted><Muted size={12}>{s.note}</Muted>{cat ? <Muted size={12}>{cat.reminders.note}</Muted> : null}</Disclosure>
+        <Disclosure label="About this plan" testID="dev-about"><GuidanceNote title="Limits" icon="info" size={12}>{view.limitation}</GuidanceNote><GuidanceNote title="Not included" icon="eye-off" size={12}>{view.neverBuilt.note}</GuidanceNote><GuidanceNote size={12}>{s.note}</GuidanceNote>{cat ? <GuidanceNote title="Reminders" icon="bell" size={12}>{cat.reminders.note}</GuidanceNote> : null}</Disclosure>
       </View>
     </View>
   );

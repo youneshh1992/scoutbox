@@ -1,3 +1,4 @@
+import { GuidanceNote } from './InformationRows';
 // M15 — the Football Passport, player/guardian surface.
 // One server-built projection renders here: status with provenance, the
 // career timeline, club history (trials are never employment), evidence
@@ -14,7 +15,7 @@ import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { Text, TextInput } from './Text';
 import { useColors, type Palette } from '../theme';
-import { Button, Card, Disclosure, EventRow, FactRow, Muted, Row, SectionTitle } from './ui';
+import { RecordPanel, DetailFact, InfoNote, MetricTiles, Button, Card, Disclosure, EventRow, FactRow, Muted, Row, SectionTitle } from './ui';
 import { HistoryList } from './Reference';
 import { m15, type FootballPassport, type PassportActor, type PassportEvent, type PassportShare } from '../data/m15client';
 import { pt } from '../i18n';
@@ -73,11 +74,11 @@ function eventLabel(e: PassportEvent): string {
 }
 
 /** A timeline event: the date and the label; the source and its plain-language copy behind the row. */
-function TimelineRow({ e }: { e: PassportEvent }) {
+function TimelineRow({ e, last }: { e: PassportEvent; last: boolean }) {
   return (
-    <EventRow date={e.when.display} label={eventLabel(e)} testID={`passport-event-${e.id}`}>
-      <Muted size={12.5}>{pt('m15source')}: {provWord(e.provenance)}</Muted>
-      {e.provenanceCopy ? <Muted size={12.5}>{e.provenanceCopy}</Muted> : null}
+    <EventRow last={last} date={/^\d{4}-\d{2}-\d{2}$/.test(e.when.display) ? humanDate(e.when.display) : e.when.display} label={eventLabel(e)} testID={`passport-event-${e.id}`}>
+      <GuidanceNote icon="info" size={12.5}>{pt('m15source')}: {provWord(e.provenance)}</GuidanceNote>
+      {e.provenanceCopy ? <GuidanceNote icon="info" size={12.5}>{e.provenanceCopy}</GuidanceNote> : null}
     </EventRow>
   );
 }
@@ -104,7 +105,7 @@ function SharesPanel({ actor }: { actor: PassportActor }) {
   };
   return (
     <View style={{ gap: 6 }}>
-      <Muted size={12.5}>{actor.kind === 'guardian' ? pt('m15shareGuardianNote') : pt('m15shareNote')}</Muted>
+      <GuidanceNote icon="users" size={12.5}>{actor.kind === 'guardian' ? pt('m15shareGuardianNote') : pt('m15shareNote')}</GuidanceNote>
       <Row>
         <Button small label={pt('m15sharePublic')} onPress={() => void create('public')} />
         <Button small label={pt('m15shareRecruitment')} onPress={() => void create('recruitment')} />
@@ -116,12 +117,12 @@ function SharesPanel({ actor }: { actor: PassportActor }) {
         </View>
       ) : null}
       {(shares ?? []).map((s) => (
-        <Row key={s.id} style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6 }}>
-          <Text style={{ color: colors.text, fontSize: 13 }}>{s.mode === 'public' ? pt('m15sharePublicPill') : pt('m15shareRecruitmentPill')} · {pt('m15shareViews')} {s.views}</Text>
+        <RecordPanel key={s.id} icon="network" title={s.mode === 'public' ? pt('m15sharePublicPill') : pt('m15shareRecruitmentPill')}>
+          <DetailFact label={pt('m15shareViews')} value={s.views} />
           {s.revokedAt
             ? <Muted size={12}>{pt('m15shareRevoked')}</Muted>
             : <Button small label={pt('m15shareRevoke')} onPress={async () => { try { await m15.revokeShare(actor, s.id); reload(); } catch { /* shown on reload */ } }} />}
-        </Row>
+        </RecordPanel>
       ))}
       {msg ? <Muted size={12}>{msg}</Muted> : null}
     </View>
@@ -139,7 +140,7 @@ export function FootballPassportSection({ actor, isMinor, childName }: { actor: 
   const [achTitle, setAchTitle] = useState('');
   const [corrReason, setCorrReason] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
-  if (err) return <Card><SectionTitle>{pt('m15title')}</SectionTitle><Muted>{err}</Muted></Card>;
+  if (err) return <Card><SectionTitle icon="passport">{pt('m15title')}</SectionTitle><Muted>{err}</Muted></Card>;
   if (!p) return null;
   const events = showAll ? p.timeline : p.timeline.slice(0, 4);
   const canShare = actor.kind === 'guardian' || !isMinor;
@@ -155,8 +156,8 @@ export function FootballPassportSection({ actor, isMinor, childName }: { actor: 
   // Achievements, add a club and file a correction under Club history).
   return (
     <Card testID="passport-root">
-      <SectionTitle>{pt('m15title')}{childName ? ` — ${childName}` : ''}</SectionTitle>
-      <Muted size={13}>{p.identity?.label ?? pt('m15verifiedRecord')}</Muted>
+      <SectionTitle icon="passport">{pt('m15title')}{childName ? ` — ${childName}` : ''}</SectionTitle>
+      <GuidanceNote icon="info" size={13}>{p.identity?.label ?? pt('m15verifiedRecord')}</GuidanceNote>
 
       {/* LEVEL 1 — the facts */}
       <View>
@@ -168,31 +169,31 @@ export function FootballPassportSection({ actor, isMinor, childName }: { actor: 
       {/* a conflict is one line and a Review; the full explanation is behind it */}
       {p.conflicts.map((c) => (
         <Disclosure key={c.code + (c.submitted.orgName ?? '')} label={pt('m15conflictShort')} testID="passport-conflict">
-          <Muted size={13}>{pt('m15conflictLine')}</Muted>
-          <Muted size={13}>
+          <GuidanceNote size={13}>{pt('m15conflictLine')}</GuidanceNote>
+          <GuidanceNote size={13}>
             {pt('m15conflict').replace('{auth}', c.authoritative.orgName ?? '?').replace('{self}', c.submitted.orgName ?? '?')}
-          </Muted>
+          </GuidanceNote>
         </Disclosure>
       ))}
-      {p.temporalConflicts.length > 0 ? <Muted size={12.5}>{pt('m15temporal')}</Muted> : null}
+      {p.temporalConflicts.length > 0 ? <GuidanceNote icon="info" size={12.5}>{pt('m15temporal')}</GuidanceNote> : null}
 
       <View style={{ marginTop: 10 }}>
         {/* LEVEL 2 — the evidence counts and the gaps */}
         <Disclosure label={pt('m15viewEvidence')} testID="passport-evidence-detail">
-          <Muted size={13}>{pt('m15checks').replace('{n}', String(p.completeness.eligibility.satisfied)).replace('{total}', String(p.completeness.eligibility.total))}</Muted>
-          <Muted size={13}>
-            {pt('m15evidenceLine')
-              .replace('{matches}', String(p.evidence.fullMatches)).replace('{clips}', String(p.evidence.clips))
-              .replace('{refs}', String(p.evidence.references))}
-          </Muted>
+          <InfoNote icon="badge-check">{pt('m15checks').replace('{n}', String(p.completeness.eligibility.satisfied)).replace('{total}', String(p.completeness.eligibility.total))}</InfoNote>
+          <MetricTiles items={[
+            { label: pt('detailFullMatches'), value: p.evidence.fullMatches, icon: 'video' },
+            { label: pt('detailClips'), value: p.evidence.clips, icon: 'video' },
+            { label: pt('detailReferences'), value: p.evidence.references, icon: 'badge-check' },
+          ]} />
           {p.completeness.gaps.slice(0, 4).map((g) => (
-            <Muted key={g.id} size={12.5}>· {pt(GAP_LABEL[g.id] ?? 'm15gapCareer')}</Muted>
+            <InfoNote key={g.id} icon="circle-help">{pt(GAP_LABEL[g.id] ?? 'm15gapCareer')}</InfoNote>
           ))}
         </Disclosure>
 
         {/* Timeline — behind one row with its count; date and label per event, the source behind each */}
         <Disclosure label={pt('m15timelineRow')} hint={count(p.timeline.length, 'm15eventCount', 'm15events')} testID="passport-timeline">
-          {events.map((e) => <TimelineRow key={e.id} e={e} />)}
+          <View>{events.map((e, i) => <TimelineRow key={e.id} e={e} last={i === events.length - 1} />)}</View>
           {p.timeline.length > 4 ? (
             <Row style={{ marginTop: 6 }}><Button small tertiary label={showAll ? pt('m15less') : pt('m15showAll').replace('{n}', String(p.timeline.length))} onPress={() => setShowAll((x) => !x)} testID="passport-timeline-more" /></Row>
           ) : null}
@@ -211,7 +212,7 @@ export function FootballPassportSection({ actor, isMinor, childName }: { actor: 
             />
           ) : null}
           <Disclosure label={pt('m15careerTitle')} testID="passport-add-career">
-            <Muted size={12.5}>{pt('m15careerNote')}</Muted>
+            <GuidanceNote size={12.5}>{pt('m15careerNote')}</GuidanceNote>
             <Row>
               <TextInput style={[inputStyle(colors), { flex: 2, minWidth: 120 }]} value={careerOrg} onChangeText={setCareerOrg} placeholder={pt('m15careerOrg')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15careerOrg')} />
               <TextInput style={[inputStyle(colors), { flex: 1, minWidth: 70 }]} value={careerFrom} onChangeText={setCareerFrom} placeholder={pt('m15careerFrom')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15careerFrom')} />
@@ -227,7 +228,7 @@ export function FootballPassportSection({ actor, isMinor, childName }: { actor: 
             </Row>
           </Disclosure>
           <Disclosure label={pt('m15corrTitle')} testID="passport-correction">
-            <Muted size={12.5}>{pt('m15corrNote')}</Muted>
+            <GuidanceNote size={12.5}>{pt('m15corrNote')}</GuidanceNote>
             <Row>
               <TextInput style={[inputStyle(colors), { flex: 1 }]} value={corrReason} onChangeText={setCorrReason} placeholder={pt('m15corrPlaceholder')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15corrPlaceholder')} />
               <Button small label={pt('m15corrFile')} onPress={() => {
@@ -239,14 +240,14 @@ export function FootballPassportSection({ actor, isMinor, childName }: { actor: 
 
         {/* Achievements — simple rows; the source and the withdrawal behind each; adding one under the row */}
         <Disclosure label={pt('m15achievementsRow')} hint={count(p.achievements.length, 'm15achievementCount', 'm15achievementsCount')} testID="passport-achievements">
-          {p.achievements.map((a) => (
-            <EventRow key={a.id} date={a.when ?? ''} label={a.title} testID={`passport-achievement-${a.id}`}>
-              <Muted size={12.5}>{pt('m15source')}: {provWord(a.provenance)}{a.confirmedBy ? ` · ${pt('m15confirmedBy')} ${a.confirmedBy}` : ''}</Muted>
+          <View>{p.achievements.map((a, i) => (
+            <EventRow last={i === p.achievements.length - 1} key={a.id} date={a.when ?? ''} label={a.title} testID={`passport-achievement-${a.id}`}>
+              <GuidanceNote size={12.5}>{pt('m15source')}: {provWord(a.provenance)}{a.confirmedBy ? ` · ${pt('m15confirmedBy')} ${a.confirmedBy}` : ''}</GuidanceNote>
               {actor.kind === 'player' && a.withdrawable ? (
                 <Row><Button small tertiary label={pt('m15withdraw')} onPress={() => void act(() => m15.withdrawAchievement(actor.id, a.id), pt('m15withdrawn'))} /></Row>
               ) : null}
             </EventRow>
-          ))}
+          ))}</View>
           <Disclosure label={pt('m15addAchievement')} testID="passport-add-achievement">
             <Row>
               <TextInput style={[inputStyle(colors), { flex: 1 }]} value={achTitle} onChangeText={setAchTitle} placeholder={pt('m15achPlaceholder')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15achPlaceholder')} />
@@ -259,7 +260,7 @@ export function FootballPassportSection({ actor, isMinor, childName }: { actor: 
           <Disclosure label={pt('m15shareTitle')} testID="passport-share"><SharesPanel actor={actor} /></Disclosure>
         ) : <Muted size={12.5}>{pt('m15shareMinor')}</Muted>}
         <Disclosure label={pt('m15about')} testID="passport-about">
-          <Muted size={13}>{p.note}</Muted>
+          <GuidanceNote size={13}>{p.note}</GuidanceNote>
         </Disclosure>
       </View>
       {msg ? <View accessibilityLiveRegion="polite"><Muted size={12.5}>{msg}</Muted></View> : null}

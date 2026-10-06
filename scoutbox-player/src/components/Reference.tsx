@@ -7,8 +7,10 @@
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
 import { Text } from './Text';
+import { TimelineItem } from './Timeline';
 import { Gradient, ColorAvatar } from './Vivid';
 import { Icon } from './Icon';
+import { PlayerMeta, PlayerName } from './PlayerIdentity';
 import { useColors, useStyles, type Palette } from '../theme';
 
 export const initialsOf = (name: string) => name.split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
@@ -120,33 +122,28 @@ export function StatusDot({ label, tone = 'ok' }: { label: string; tone?: 'ok' |
 }
 
 /** `.p-profile-intro` — large avatar, name, one line, status. */
-export function ProfileIntro({ name, line, status }: { name: string; line: string; status?: string }) {
+export function ProfileIntro({ name, position, location, status, verified = false }: { name: string; position: string; location?: string; status?: string; verified?: boolean }) {
   const s = useStyles(makeStyles);
   const c = useColors();
   return (
     <View style={s.intro} testID="passport-intro">
       <ColorAvatar initials={initialsOf(name)} size={88} index={0} />
-      <Text role="heading" aria-level={1} style={[s.h1, { fontSize: 24, marginTop: 13 }]}>{name}</Text>
-      <Text style={s.sub}>{line}</Text>
-      {status ? <View style={{ marginTop: 10 }}><StatusDot label={status} /></View> : null}
+      <View style={{ marginTop: 13 }}><PlayerName name={name} verified={verified} centered style={[s.h1, { fontSize: 24 }]} /></View>
+      <View style={{ marginTop: 10 }}><PlayerMeta position={position} location={location} availability={status} centered /></View>
     </View>
   );
 }
 
-/** `.p-history` + `.f-record` — numbered records in one card. */
+/** Club records follow the shared connected chronology. */
 export function HistoryList({ rows, testID }: { rows: { index: string; title: string; sub: string; right?: ReactNode }[]; testID?: string }) {
   const s = useStyles(makeStyles);
   return (
     <View style={s.history} testID={testID}>
       {rows.map((r, i) => (
-        <View key={`${r.index}-${i}`} style={[s.record, i === rows.length - 1 && { borderBottomWidth: 0 }]}>
-          <Text style={s.index}>{r.index}</Text>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={s.recordTitle}>{r.title}</Text>
-            <Text style={[s.sub, { fontSize: 12, marginTop: 2 }]}>{r.sub}</Text>
-            {r.right ? <View style={{ marginTop: 6 }}>{r.right}</View> : null}
-          </View>
-        </View>
+        <TimelineItem key={`${r.index}-${i}`} date={r.sub} last={i === rows.length - 1}>
+          <Text style={s.recordTitle}>{r.title}</Text>
+          {r.right ? <View style={{ marginTop: 6 }}>{r.right}</View> : null}
+        </TimelineItem>
       ))}
     </View>
   );
@@ -157,8 +154,8 @@ export function TrainingVisual({ title, sub, bare }: { title: string; sub: strin
   const s = useStyles(makeStyles);
   const c = useColors();
   return (
-    <View style={s.training} testID="boxcam-visual"><Gradient colors={['#075d52', '#393892', '#b42d96']} />
-      <View style={s.trainingDisc}><Icon name="scan-line" size={bare ? 42 : 28} color="#8ffff0" /></View>
+    <View style={s.training} testID="boxcam-visual"><Gradient />
+      <View style={s.trainingDisc}><Icon name="scan-line" size={bare ? 42 : 28} color={c.accentText} /></View>
       {bare ? null : <Text style={[s.rowTitle, { backgroundColor: c.training, paddingHorizontal: 5 }]}>{title}</Text>}
       {bare ? null : <Text style={[s.sub, { fontSize: 12, backgroundColor: c.training, paddingHorizontal: 5 }]}>{sub}</Text>}
     </View>
@@ -225,7 +222,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   card: { padding: 18, borderRadius: 24, backgroundColor: c.panel, marginVertical: 6 },
   intro: { alignItems: 'center', paddingTop: 4, paddingBottom: 19 },
   avatarLarge: { width: 88, height: 88, borderRadius: 44, backgroundColor: c.iconBg, borderWidth: 4, borderColor: c.panel, alignItems: 'center', justifyContent: 'center', shadowColor: c.line, shadowOpacity: 1, shadowRadius: 0, shadowOffset: { width: 0, height: 0 } },
-  history: { borderTopWidth: 1, borderTopColor: c.line },
+  history: { paddingTop: 4 },
   record: { flexDirection: 'row', gap: 9, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: c.line },
   index: { width: 24, color: c.accentText, fontSize: 11, fontWeight: '600', paddingTop: 3 },
   recordTitle: { color: c.text, fontSize: 14, fontWeight: '600', lineHeight: 19 },

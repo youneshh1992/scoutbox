@@ -1,12 +1,7 @@
-// M24F.3 — the Inbox, conversation-first.
-//
-// One list: every request and every thread as a PreviewRow (identity, one
-// line, time, unread). A trial invitation carries the warm trial accent and
-// the word "Trial"; a contact request the quiet "Request" label; an offer or
-// a signing event is a row that opens its own workflow. Opening a row shows
-// the detail: the actions stay visible, the full message, the venue notes
-// and the metadata sit behind "View full message". Nothing here changes
-// who may contact whom — the same client calls answer the same requests.
+import { GuidanceNote } from '../../components/InformationRows';
+// Social inbox: avatar shortcuts, compact previews and tap-to-open messages.
+// Request decisions and trial scheduling stay inside the opened conversation.
+// Contact, trial, offer and signing retain their distinct routing and permissions.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -19,14 +14,16 @@ import { useSession } from '../../state';
 import { useColors, useStyles, type Palette } from '../../theme';
 import { Button, DetailLink, Disclosure, Kicker, Muted, PreviewRow, Row } from '../../components/ui';
 import { pt } from '../../i18n';
-import { ColorAvatar, Gradient } from '../../components/Vivid';
+import { ColorAvatar } from '../../components/Vivid';
+import { ReportButton } from '../../components/ReportSheet';
 import { PageHeader } from '../../components/PageChrome';
 import { Threads, threadPreview } from '../../components/Threads';
 import { AckSection } from '../../components/M13Sections';
+import { InvitationCard, InvitationDetail, DateOptions } from '../../components/InvitationCard';
 import { TrialSlotChips } from '../../components/M23Trial';
 import { Icon } from '../../components/Icon';
 import { initialsOf } from '../../components/Reference';
-import { fmtShortDay, humanDate, relTime } from '../../time';
+import { fmtClock, fmtShortDay, humanDate, relTime } from '../../time';
 
 function isChildItem(r: InboxRequest | ChildInboxItem): r is ChildInboxItem {
   return 'guardianManaged' in r && r.guardianManaged === true;
@@ -46,7 +43,6 @@ export default function Inbox() {
   const router = useRouter();
   const { playerId, inbox, isMinor, me, refresh, notifications } = useSession();
   const [query, setQuery] = useState('');
-  const [searchExpanded, setSearchExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -89,7 +85,7 @@ export default function Inbox() {
   const isRequest = (e: Entry) => e.kind === 'request' || e.kind === 'child' || e.kind === 'event';
   const shown = entries.filter((e) => {
     if (!(tab === 'unread' ? isUnread(e) : tab === 'requests' ? isRequest(e) : true)) return false;
-    const searchable = e.kind === 'request' ? `${e.req.orgName} ${e.req.scoutName}` : e.kind === 'thread' ? `${e.channel.orgName} ${threadPreview(e.channel).line}` : e.kind === 'child' ? e.item.orgName : e.note.text;
+    const searchable = e.kind === 'request' ? `${e.req.orgName} ${e.req.scoutName} ${e.req.message ?? ''}` : e.kind === 'thread' ? `${e.channel.orgName} ${threadPreview(e.channel).line}` : e.kind === 'child' ? e.item.orgName : e.note.text;
     return searchable.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
   });
   const unreadCount = entries.filter(isUnread).length;
@@ -153,24 +149,21 @@ export default function Inbox() {
 
         ) : (
           <>
-            <PageHeader title={isMinor ? pt('tabUpdates') : pt('tabInbox')} prominent accessory={<Pressable accessibilityRole="button" accessibilityLabel={searchExpanded ? pt('inboxCloseSearch') : pt('inboxSearch')} onPress={() => { setSearchExpanded(!searchExpanded); setQuery(''); }} style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.panel, alignItems: 'center', justifyContent: 'center' }}><Icon name={searchExpanded ? 'x' : 'search'} size={22} color={colors.iconFg} /></Pressable>} />
-            {!isMinor ? <View role="tablist" aria-label={pt('inboxFilter')} style={styles.filters}>
-              {tabs.map((item) => <Pressable key={item.key} role="tab" aria-selected={tab === item.key} onPress={() => setTab(item.key as typeof tab)} style={[styles.filter, tab === item.key && { backgroundColor: colors.accent }]}>
-                {tab === item.key && <Gradient />}<Text style={{ color: tab === item.key ? colors.accentInk : colors.muted, fontSize: 13, fontWeight: '600' }}>{item.label}</Text>
-              </Pressable>)}
-            </View> : null}
-            {entries.length > 0 && !query.trim() ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 18, paddingVertical: 18 }} accessibilityLabel="Inbox shortcuts">
-              {me && <Pressable accessibilityRole="button" accessibilityLabel="Your profile" onPress={() => router.push('/you')} style={{ alignItems: 'center', width: 68, gap: 7 }}><ColorAvatar initials={initialsOf(me.name)} size={60} index={0} /><Text style={{ color: colors.text, fontSize: 10, fontWeight: '600' }}>You</Text></Pressable>}
-              {entries.filter(e => e.kind !== 'event').slice(0, 8).map((e, i) => { const name = e.kind === 'request' ? e.req.orgName : e.kind === 'thread' ? e.channel.orgName : e.kind === 'child' ? e.item.orgName : ''; return <Pressable key={e.id} accessibilityRole="button" accessibilityLabel={`Open ${name}`} onPress={() => openEntry(e)} style={{ alignItems: 'center', width: 68, gap: 7 }}><ColorAvatar initials={initialsOf(name)} size={60} index={Array.from(name).reduce((n,c)=>n+c.charCodeAt(0),0)} /><Text numberOfLines={1} style={{ color: colors.text, fontSize: 10, fontWeight: '600', width: 68, textAlign: 'center' }}>{name}</Text></Pressable>; })}
-            </ScrollView> : null}
-            {searchExpanded && <View style={styles.search}>
-              <Icon name="search" size={20} color={colors.muted} />
+            <PageHeader title={isMinor ? pt('tabUpdates') : pt('tabInbox')} />
+            <View style={styles.search}>
+              <Icon name="search" size={21} color={colors.muted} />
               <TextInput accessibilityLabel={pt('inboxSearch')} placeholder={pt('inboxSearch')} placeholderTextColor={colors.muted} value={query} onChangeText={setQuery} style={styles.searchInput} />
               {query ? <Pressable accessibilityRole="button" accessibilityLabel={pt('inboxClearSearch')} onPress={() => setQuery('')} style={styles.clearSearch}><Icon name="x" size={18} color={colors.text} /></Pressable> : null}
-            </View>}
-            <Disclosure label={isMinor ? pt('inboxMinorLine') : pt('inboxSafety')} testID="inbox-safety">
-              <Muted size={13}>{isMinor ? pt('inboxMinorFull') : pt('inboxSafetyFull')}</Muted>
-            </Disclosure>
+            </View>
+            {entries.length > 0 && !query.trim() ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 17, paddingVertical: 18 }} accessibilityLabel={pt('inboxShortcuts')}>
+              {me && <Pressable accessibilityRole="button" accessibilityLabel={pt('inboxYourProfile')} onPress={() => router.push('/you')} style={styles.shortcut}><ColorAvatar initials={initialsOf(me.name)} size={66} index={0} /><Text numberOfLines={1} style={styles.shortcutName}>{pt('tabYou')}</Text></Pressable>}
+              {entries.filter(e => e.kind !== 'event').slice(0, 8).map((e) => { const name = e.kind === 'request' ? e.req.orgName : e.kind === 'thread' ? e.channel.orgName : e.kind === 'child' ? e.item.orgName : ''; return <Pressable key={e.id} accessibilityRole="button" accessibilityLabel={name} onPress={() => openEntry(e)} style={styles.shortcut}><ColorAvatar initials={initialsOf(name)} size={66} index={Array.from(name).reduce((n,c)=>n+c.charCodeAt(0),0)} /><Text numberOfLines={1} style={styles.shortcutName}>{name}</Text></Pressable>; })}
+            </ScrollView> : null}
+            {!isMinor ? <View role="tablist" aria-label={pt('inboxFilter')} style={styles.filters}>
+              {tabs.map((item) => <Pressable key={item.key} role="tab" aria-selected={tab === item.key} onPress={() => setTab(item.key as typeof tab)} style={[styles.filter, tab === item.key && { backgroundColor: colors.tabActiveBg, borderColor: colors.accentText }]}>
+                <Text style={{ color: tab === item.key ? colors.accentText : colors.text, fontSize: 13, fontWeight: '600' }}>{item.label}</Text>
+              </Pressable>)}
+            </View> : null}
             {error ? <Text style={{ color: colors.danger, fontSize: 13, marginTop: 8 }}>{error}</Text> : null}
             <View testID="inbox-list" style={{ paddingHorizontal: 2 }}>
               {shown.length === 0 ? <View style={{ paddingVertical: 24 }}><Muted size={14}>{query.trim() ? pt('inboxNoMatches') : tab === 'unread' ? pt('inboxEmptyUnread') : tab === 'requests' ? pt('inboxEmptyRequests') : pt('inboxEmpty')}</Muted></View> : null}
@@ -179,7 +172,7 @@ export default function Inbox() {
                   const r = e.req; const trial = r.type === 'trial';
                   const when = trial && r.trialDetails?.proposedDate ? humanDate(r.trialDetails.proposedDate) : null;
                   const line = r.status === 'pending' ? (trial ? `${pt('inboxTrialInvitation')}${when ? ` · ${when}` : ''}` : pt('inboxWantsContact')) : `${trial ? pt('inboxTrialInvitation') : pt('inboxContactRequest')} · ${statusWord(r.status)}`;
-                  return <PreviewRow key={e.id} initials={initialsOf(r.orgName)} title={r.orgName} line={line} time={relTime(e.ts)} unread={r.status === 'pending'} accent={trial ? 'trial' : r.status === 'pending' ? 'request' : null} accentLabel={trial ? pt('inboxTrialLabel') : r.status === 'pending' ? pt('inboxRequestLabel') : undefined} onPress={() => openEntry(e)} testID={`inbox-request-${r.id}`} />;
+                  return <PreviewRow key={e.id} initials={initialsOf(r.orgName)} title={r.orgName} line={r.message || line} time={relTime(e.ts)} unread={r.status === 'pending'} accent={trial ? 'trial' : r.status === 'pending' ? 'request' : null} accentLabel={[trial ? pt('inboxTrialLabel') : pt('inboxRequestLabel'), statusWord(r.status)].filter(Boolean).join(' · ')} onPress={() => openEntry(e)} testID={`inbox-request-${r.id}`} />;
                 }
                 if (e.kind === 'thread') {
                   const p = threadPreview(e.channel); const t = trialOf(e.channel);
@@ -193,6 +186,9 @@ export default function Inbox() {
                 return <PreviewRow key={e.id} initials={initialsOf(it.orgName)} title={it.orgName} line={it.status === 'pending' ? pt('inboxWithGuardian') : [statusWord(it.status), pt('inboxGuardianManaged')].filter(Boolean).join(' · ')} unread={it.status === 'pending'} accent={it.type === 'trial' ? 'trial' : null} accentLabel={it.type === 'trial' ? pt('inboxTrialLabel') : undefined} onPress={() => openEntry(e)} testID={`inbox-child-${it.id}`} />;
               })}
             </View>
+            <Disclosure label={isMinor ? pt('inboxMinorLine') : pt('inboxSafety')} testID="inbox-safety">
+              <GuidanceNote size={13}>{isMinor ? pt('inboxMinorFull') : pt('inboxSafetyFull')}</GuidanceNote>
+            </Disclosure>
             {playerId ? <AckSection actor={{ kind: 'player', id: playerId }} /> : null}
           </>
         )}
@@ -201,7 +197,7 @@ export default function Inbox() {
   );
 }
 
-/** The opened request: the kind, the club, who, when and where, the decision, and the words behind one tap. */
+/** A request opens as a message, with its existing decision and scheduling controls below. */
 function RequestDetail({ r, onBack, onRespond, onOpenThread, channels, error }: { r: InboxRequest; onBack: () => void; onRespond: (id: string, accept: boolean, isContact: boolean, slot?: string, reply?: string) => Promise<void>; onOpenThread: (channelId: string) => void; channels: Channel[]; error: string | null }) {
   const colors = useColors();
   const styles = useStyles(makeStyles);
@@ -217,50 +213,53 @@ function RequestDetail({ r, onBack, onRespond, onOpenThread, channels, error }: 
   const answer = async (accept: boolean) => { setBusy(true); try { await onRespond(r.id, accept, !trial, slot, reply.trim() || undefined); } finally { setBusy(false); } };
   return (
     <View testID={`request-detail-${r.id}`}>
-      <Pressable onPress={onBack} accessibilityRole="button" accessibilityLabel={pt('chatBack')} testID="detail-back" style={({ pressed }) => [styles.back, pressed && { opacity: 0.7 }]}>
-        <Icon name="chevron-left" size={18} color={colors.text} /><Text style={{ color: colors.text, fontSize: 13, fontWeight: '500' }}>{pt('tabInbox')}</Text>
-      </Pressable>
-      <View style={[styles.special, trial && { borderLeftColor: colors.trial }]} testID={trial ? 'trial-card' : 'contact-card'}>
-        <Kicker tone={trial ? 'trial' : 'accent'}>{trial ? pt('inboxTrialInvitation') : pt('inboxContactRequest')}</Kicker>
-        <Text role="heading" aria-level={2} style={styles.org}>{r.orgName}</Text>
-        <Muted size={13.5}>{pt('inboxFrom')} {r.scoutName}{r.scoutRole ? ` · ${r.scoutRole}` : ''}</Muted>
-        {trial ? <Muted size={13.5}>{r.trialDetails?.proposedDate ? humanDate(r.trialDetails.proposedDate) : pt('inboxDateTbc')}{r.trialDetails?.venue ? ` · ${r.trialDetails.venue}` : ''}</Muted> : <Muted size={13.5}>{fmtShortDay(r.createdAt)}</Muted>}
-        {pending && trial && slots.length > 0 ? <TrialSlotChips slots={slots} chosenDay={slot ?? r.trialDetails?.proposedDate ?? ''} onPick={setSlot} /> : null}
-        {pending && trial && slots.length === 0 && altSlots.length > 0 ? (
-          <Row style={{ flexWrap: 'wrap' }}>
-            {[r.trialDetails?.proposedDate, ...altSlots].filter((s): s is string => !!s).map((s) => (
-              <Pressable key={s} onPress={() => setSlot(s)} accessibilityRole="button" accessibilityState={{ selected: slot === s }} accessibilityLabel={s} testID={`alt-slot-${s}`} style={[styles.slot, slot === s && { borderColor: colors.accent, backgroundColor: colors.panel2 }]}><Text style={{ color: colors.text, fontSize: 13, fontWeight: slot === s ? '700' : '400' }}>{humanDate(s)}</Text></Pressable>
-            ))}
-          </Row>
-        ) : null}
-        {pending ? (
-          <Row style={{ marginTop: 8 }}>
-            <Button primary disabled={busy} label={pt('accept')} onPress={() => void answer(true)} testID={`req-accept-${r.id}`} />
-            <Button tertiary danger disabled={busy} label={pt('decline')} onPress={() => void answer(false)} testID={`req-decline-${r.id}`} />
-          </Row>
-        ) : (
-          <Row style={{ marginTop: 6 }}>
+      <View style={styles.conversationHeader}>
+        <Pressable onPress={onBack} accessibilityRole="button" accessibilityLabel={pt('chatBack')} testID="detail-back" style={styles.backCircle}>
+          <Icon name="chevron-left" size={22} color={colors.text} />
+        </Pressable>
+        <ColorAvatar initials={initialsOf(r.orgName)} size={44} index={1} />
+        <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+          <Text role="heading" aria-level={2} style={styles.org}>{r.orgName}</Text>
+          <Muted size={12}>{r.scoutName}{r.scoutRole ? ` · ${r.scoutRole}` : ''}</Muted>
+        </View>
+        <ReportButton />
+      </View>
+      <View style={styles.safetyLine}><Icon name="shield-check" size={14} color={colors.safetyText} /><Text style={{ color: colors.safetyText, fontSize: 11 }}>{pt('chatSafetyLine')}</Text></View>
+      <Text style={styles.date}>{fmtShortDay(r.createdAt)}</Text>
+      <View style={styles.messageRow} testID={`req-details-${r.id}`}>
+        <ColorAvatar initials={initialsOf(r.orgName)} size={28} index={1} />
+        <View style={styles.messageBubble}>
+          {r.subject ? <Text style={styles.subject} testID={`req-subject-${r.id}`}>{r.subject}</Text> : null}
+          {r.message ? <Text style={styles.msg} testID={`req-message-${r.id}`}>{r.message}</Text> : null}
+          <Text style={styles.messageTime}>{fmtClock(r.createdAt)}</Text>
+        </View>
+      </View>
+      <InvitationCard title={trial ? pt('inboxTrialInvitation') : pt('inboxContactRequest')} subtitle={r.orgName} icon="message-circle" date={trial ? (pending ? slot : r.trialDetails?.proposedDate) ?? null : undefined} venue={trial ? r.trialDetails?.venue : undefined} badge={[r.orgVerified ? pt('inboxVerifiedClub') : null, r.trustedPartner ? pt('inboxTrustedPartner') : null].filter(Boolean).join(' · ')} testID={trial ? 'trial-card' : 'contact-card'} actions={
+        <>
+          {pending && trial && slots.length > 0 ? <TrialSlotChips slots={slots} chosenDay={slot ?? r.trialDetails?.proposedDate ?? ''} onPick={setSlot} /> : null}
+          {pending && trial && slots.length === 0 && altSlots.length > 0 ? <DateOptions days={[r.trialDetails?.proposedDate, ...altSlots].filter((s): s is string => !!s)} selected={slot} onSelect={setSlot} /> : null}
+          {pending ? <Row>
+            <Button grow primary disabled={busy} label={pt('accept')} onPress={() => void answer(true)} testID={`req-accept-${r.id}`} />
+            <Button grow disabled={busy} label={pt('decline')} onPress={() => void answer(false)} testID={`req-decline-${r.id}`} />
+          </Row> : <Row>
             <Text style={{ color: r.status === 'accepted' ? colors.accentText : colors.danger, fontSize: 14, fontWeight: '600' }} testID={`req-status-${r.id}`}>{statusWord(r.status)}</Text>
             {r.status === 'accepted' && trial ? <DetailLink label={pt('inboxViewTrial')} onPress={() => router.push('/opportunities?cat=trial&tab=schedule')} testID="req-view-trial" /> : null}
             {r.status === 'accepted' && !trial && thread ? <DetailLink label={pt('inboxOpenConversation')} onPress={() => onOpenThread(thread.id)} testID="req-open-thread" /> : null}
-          </Row>
-        )}
-        {error ? <Text style={{ color: colors.danger, fontSize: 13 }}>{error}</Text> : null}
-      </View>
-      <Disclosure label={pt('inboxViewFullMessage')} testID={`req-details-${r.id}`}>
-        {r.subject ? <Text style={styles.subject} testID={`req-subject-${r.id}`}>{r.subject}</Text> : null}
-        {r.message ? <Text style={styles.msg} testID={`req-message-${r.id}`}>“{r.message}”</Text> : null}
-        {trial && r.trialDetails?.notes ? <Muted size={13}>{r.trialDetails.notes}</Muted> : null}
-        <Muted size={12.5}>{[r.orgVerified ? pt('inboxVerifiedClub') : null, r.trustedPartner ? pt('inboxTrustedPartner') : null, relTime(r.createdAt)].filter(Boolean).join(' · ')}</Muted>
-        {trial ? <Muted size={12.5}>{pt('inboxReportNote')}</Muted> : null}
+          </Row>}
+          {error ? <Text style={{ color: colors.danger, fontSize: 13 }}>{error}</Text> : null}
+        </>
+      }>
+        {trial && r.trialDetails?.notes ? <InvitationDetail icon="clipboard-list" title={pt('invBeforeArrival')}>{r.trialDetails.notes}</InvitationDetail> : null}
+        {trial ? <InvitationDetail icon="file-check-2" title={pt('invReport')}>{pt('invReportSummary')}</InvitationDetail> : null}
         {pending && !trial ? (
-          <View style={{ gap: 6, marginTop: 4 }}>
+          <View style={{ gap: 6 }}>
             <Text style={styles.label} nativeID={`reply-label-${r.id}`}>{pt('inboxAddReply')}</Text>
             <TextInput style={styles.input} testID={`req-reply-${r.id}`} accessibilityLabel={pt('ctReply')} accessibilityLabelledBy={`reply-label-${r.id}`} placeholder={pt('ctReplyHint')} placeholderTextColor={colors.muted} value={reply} onChangeText={(v) => setReply(v.slice(0, 500))} multiline maxLength={500} />
             <Muted size={12}>{pt('ctReplyNote')}</Muted>
           </View>
         ) : null}
-      </Disclosure>
+      </InvitationCard>
+
     </View>
   );
 }
@@ -270,11 +269,7 @@ function TrialCard({ r, onView }: { r: InboxRequest; onView: () => void }) {
   const colors = useColors();
   const styles = useStyles(makeStyles);
   return (
-    <View style={[styles.special, { borderLeftColor: colors.trial, marginTop: 10 }]} testID="thread-trial-card">
-      <Kicker>{pt('inboxTrialInvitation')}</Kicker>
-      <Text style={{ color: colors.text, fontSize: 14.5, fontWeight: '600' }}>{r.trialDetails?.proposedDate ? humanDate(r.trialDetails.proposedDate) : pt('inboxDateTbc')}{r.trialDetails?.venue ? ` · ${r.trialDetails.venue}` : ''}</Text>
-      <Row><Text style={{ color: colors.accentText, fontSize: 13, fontWeight: '600' }}>{statusWord(r.status)}</Text><DetailLink label={pt('inboxViewTrial')} onPress={onView} /></Row>
-    </View>
+    <InvitationCard title={pt('inboxTrialInvitation')} subtitle={r.orgName} date={r.trialDetails?.proposedDate ?? null} venue={r.trialDetails?.venue} testID="thread-trial-card" actions={<Row><Text style={{ color: colors.accentText, fontSize: 13, fontWeight: '600' }}>{statusWord(r.status)}</Text><DetailLink label={pt('inboxViewTrial')} onPress={onView} /></Row>} />
   );
 }
 
@@ -287,31 +282,42 @@ function ChildDetail({ item, onBack }: { item: ChildInboxItem; onBack: () => voi
       <Pressable onPress={onBack} accessibilityRole="button" accessibilityLabel={pt('chatBack')} testID="detail-back" style={({ pressed }) => [styles.back, pressed && { opacity: 0.7 }]}>
         <Icon name="chevron-left" size={18} color={colors.text} /><Text style={{ color: colors.text, fontSize: 13, fontWeight: '500' }}>{pt('tabUpdates')}</Text>
       </Pressable>
-      <View style={[styles.special, item.type === 'trial' && { borderLeftColor: colors.trial }]}>
+      <View style={styles.conversationHeader}><ColorAvatar initials={initialsOf(item.orgName)} size={44} index={1} /><Text role="heading" aria-level={2} style={[styles.org, { flex: 1 }]}>{item.orgName}</Text><ReportButton /></View>
+      <View style={styles.special}>
         <Kicker>{item.type === 'trial' ? pt('inboxTrialInvitation') : pt('inboxContactRequest')}</Kicker>
-        <Text role="heading" aria-level={2} style={styles.org}>{item.orgName}</Text>
         <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600' }}>{item.status === 'pending' ? pt('inboxWithGuardian') : statusWord(item.status)}</Text>
-        <Muted size={13}>{item.note}</Muted>
+        <Muted size={12}>{pt('inboxGuardianManaged')}</Muted>
+      </View>
+      <View style={[styles.messageRow, { marginTop: 18 }]}><ColorAvatar initials={initialsOf(item.orgName)} size={28} index={1} /><View style={styles.messageBubble}><Text style={styles.msg}>{item.note}</Text></View>
       </View>
     </View>
   );
 }
 
 const makeStyles = (colors: Palette) => StyleSheet.create({
+  shortcut: { alignItems: 'center', width: 70, gap: 8 },
+  shortcutName: { color: colors.muted, fontSize: 11, width: 70, textAlign: 'center' },
+  conversationHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
+  backCircle: { width: 40, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, backgroundColor: colors.panel2 },
+  safetyLine: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 8 },
+  date: { textAlign: 'center', color: colors.muted, fontSize: 11, marginVertical: 22 },
+  messageRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
+  messageBubble: { flexShrink: 1, maxWidth: '86%', borderRadius: 22, borderBottomLeftRadius: 7, padding: 15, gap: 6, backgroundColor: colors.panel2 },
+  messageTime: { color: colors.muted, fontSize: 10, alignSelf: 'flex-end', marginTop: 3 },
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 32, gap: 0 },
-  search: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.line, borderRadius: 20, paddingLeft: 14, paddingRight: 6, minHeight: 48, marginTop: 0, marginBottom: 6 },
+  search: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.panel2, borderWidth: 1, borderColor: colors.line, borderRadius: 26, paddingLeft: 14, paddingRight: 6, minHeight: 48, marginTop: 0, marginBottom: 6 },
   searchInput: { flex: 1, minWidth: 0, color: colors.text, fontSize: 14, paddingVertical: 12 },
   clearSearch: { width: 40, height: 44, alignItems: 'center', justifyContent: 'center' },
-  filters: { flexDirection: 'row', gap: 4, marginTop: 12, padding: 4, borderRadius: 18, backgroundColor: colors.panel },
-  filter: { flex: 1, alignItems: 'center', minHeight: 44, paddingHorizontal: 10, paddingVertical: 12, borderRadius: 14, overflow: 'hidden', justifyContent: 'center', backgroundColor: colors.panel2 },
-  org: { color: colors.text, fontSize: 20, fontWeight: '700', letterSpacing: -0.4 },
+  filters: { flexDirection: 'row', gap: 8, marginTop: 2, marginBottom: 10 },
+  filter: { alignItems: 'center', minHeight: 40, paddingHorizontal: 17, paddingVertical: 9, borderRadius: 22, borderWidth: 1, borderColor: colors.line, justifyContent: 'center' },
+  org: { color: colors.text, fontSize: 16, fontWeight: '600', letterSpacing: -0.2 },
   subject: { color: colors.text, fontSize: 15, fontWeight: '600' },
-  msg: { color: colors.text, fontSize: 14, fontStyle: 'italic', lineHeight: 20 },
+  msg: { color: colors.text, fontSize: 15, lineHeight: 22 },
   label: { color: colors.text, fontSize: 13, fontWeight: '600' },
   back: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingVertical: 10, alignSelf: 'flex-start', minHeight: 40 },
-  // M24F.5 — whitespace and a warm edge, not a filled card: the kicker word names the kind (colour is never the only signal).
-  special: { borderLeftWidth: 3, borderLeftColor: colors.infoInk, paddingVertical: 6, paddingLeft: 14, paddingRight: 4, gap: 6, marginTop: 10 },
+  // Workflow details remain distinct from the conversational message bubble.
+  special: { backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.line, padding: 16, borderRadius: 20, gap: 10, marginTop: 18 },
   slot: { borderRadius: 10, borderWidth: 1, borderColor: colors.line, paddingVertical: 7, paddingHorizontal: 12 },
   input: {
     backgroundColor: colors.bg2,

@@ -1,3 +1,5 @@
+import { GuidanceNote } from '../../components/InformationRows';
+import { PolicyList } from '../../components/InformationRows';
 // You — M24F.2. Three page tabs (Profile, Account, Clubs), each a page that
 // fits a phone. Profile is the M24F.1 composition. Account is a short list
 // of categories — Profile, Privacy, Preferences, Appearance — with Switch
@@ -153,10 +155,10 @@ export default function You() {
                       {wrap && (
                         <View style={{ gap: 6 }}>
                           <Text style={{ color: colors.text, fontSize: 17, fontWeight: '700' }}>{wrap.player.name} — {wrap.player.level === 'semi_pro' ? 'Semi-pro' : 'Amateur'} {wrap.player.position ?? ''}</Text>
-                          <Muted size={13}>{[wrap.season ? `${wrap.season.goals} goals` : null, wrap.season ? `${wrap.season.appearances} appearances` : null, `${wrap.verifiedAttendances} verified matches`, `${wrap.verifiedClips} verified clips`, `best streak ${wrap.bestStreak}`, `${wrap.scoutViews} scout views`, wrap.coachVouches > 0 ? `${wrap.coachVouches} coach reference${wrap.coachVouches === 1 ? '' : 's'}` : null].filter(Boolean).join(' · ')}</Muted>
-                          {wrap.combineBests.length > 0 && <Muted size={12.5}>Combine bests: {wrap.combineBests.map((b) => `${b.metric} ${b.value}${b.unit}`).join(' · ')}</Muted>}
-                          {wrap.badges.length > 0 && <Muted size={12.5}>{wrap.badges.join(' · ')}</Muted>}
-                          <Muted size={11.5}>{wrap.note}</Muted>
+                          <GuidanceNote size={13}>{[wrap.season ? `${wrap.season.goals} goals` : null, wrap.season ? `${wrap.season.appearances} appearances` : null, `${wrap.verifiedAttendances} verified matches`, `${wrap.verifiedClips} verified clips`, `best streak ${wrap.bestStreak}`, `${wrap.scoutViews} scout views`, wrap.coachVouches > 0 ? `${wrap.coachVouches} coach reference${wrap.coachVouches === 1 ? '' : 's'}` : null].filter(Boolean).join(' · ')}</GuidanceNote>
+                          {wrap.combineBests.length > 0 && <GuidanceNote size={12.5}>Combine bests: {wrap.combineBests.map((b) => `${b.metric} ${b.value}${b.unit}`).join(' · ')}</GuidanceNote>}
+                          {wrap.badges.length > 0 && <GuidanceNote size={12.5}>{wrap.badges.join(' · ')}</GuidanceNote>}
+                          <GuidanceNote size={11.5}>{wrap.note}</GuidanceNote>
                         </View>
                       )}
                     </Disclosure>
@@ -172,7 +174,7 @@ export default function You() {
                   <View style={{ height: 10 }} />
                   <MedicalSettings />
                   <Disclosure label="Your data" testID="account-privacy">
-                    {isMinor && <Muted size={13}>Your parent or guardian owns this account and handles everything club-related. If anything on ScoutBox ever makes you uncomfortable, use the Report button or tell your guardian.</Muted>}
+                    {isMinor && <GuidanceNote title="Guardian controls" icon="users" size={13}>Your parent or guardian owns this account and handles everything club-related. If anything on ScoutBox ever makes you uncomfortable, use the Report button or tell your guardian.</GuidanceNote>}
                     <Row>
                       <Button small label="Preview my data export" onPress={doExport} />
                       {exportPreview && <Button small tertiary label="Hide preview" onPress={() => setExportPreview(null)} />}
@@ -180,7 +182,7 @@ export default function You() {
                     {exportPreview && <Text style={styles.exportPreview} numberOfLines={30}>{exportPreview}…</Text>}
                     {!isMinor && (
                       <View style={{ gap: 8, marginTop: 6 }}>
-                        <Muted size={13}>Deleting removes your profile, media and threads. The safety ledger keeps its append-only record (ids only).</Muted>
+                        <GuidanceNote title="Account deletion" icon="shield-alert" size={13}>Deleting removes your profile, media and threads. The safety ledger keeps its append-only record (ids only).</GuidanceNote>
                         {!confirmDelete ? (
                           <Row><Button small danger label="Delete my account" onPress={() => setConfirmDelete(true)} /></Row>
                         ) : (
@@ -201,13 +203,13 @@ export default function You() {
                             <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>{r.reason}</Text>
                             <Pill label={r.status === 'resolved' ? 'Reviewed' : 'In review'} tone={r.status === 'resolved' ? 'green' : 'gold'} />
                           </Row>
-                          {r.outcome && <Muted size={12.5}>{r.outcome}</Muted>}
+                          {r.outcome && <GuidanceNote size={12.5}>{r.outcome}</GuidanceNote>}
                         </View>
                       ))}
                     </Disclosure>
                   )}
                   <Disclosure label="The rules that protect you" testID="account-rules">
-                    {(isMinor ? U18_PROMISES : SAFEGUARDING_PROMISES).map((p) => <Muted key={p.slice(0, 20)} size={13}>{p}</Muted>)}
+                    <PolicyList minor={isMinor} />
                   </Disclosure>
                 </>
               )}
@@ -225,7 +227,7 @@ export default function You() {
                     <Row>
                       <Button small primary={schoolMute} label={`School-hours mute: ${schoolMute ? 'on' : 'off'}`} onPress={() => savePrefs({ schoolHoursMute: !schoolMute })} />
                     </Row>
-                    {prefsNote && <Muted size={12.5}>{prefsNote}</Muted>}
+                    {prefsNote && <GuidanceNote size={12.5}>{prefsNote}</GuidanceNote>}
                   </Disclosure>
                   {playerId ? (
                     <Disclosure label="Access & language" testID="account-access">

@@ -1,69 +1,70 @@
 # Approved ScoutBox Player UI handoff
 
-Branch: `handoff/codex-player-vivid-ui`.
-Base: `f483b6d5155aab8ff0381b272259c3525eef6202`.
+The Founder approved the complete Player design on 5 October 2026 and asked
+for it to be made permanent. The implementation is saved in application
+source on `handoff/codex-player-vivid-ui`; it is not a browser-only override.
+This final approval supersedes earlier exploratory design directions.
 
-The Founder explicitly approved this vivid Player implementation on 5 October
-2026 and authorized pushing this dedicated handoff branch. This supersedes
-the older restrained Player direction. Read `BRAND_RULES.md`; retain the exact
-ScoutBox logo and #00e676 green. Keep the emerald/cyan/violet/magenta canvas,
-gradient sent messages and controls, colourful Phosphor icons, and animated
-season charts. Reference captures are in `design-system/approved-player-ui/`.
+## Approved baseline
 
-## Update the existing artifact
+Read the final approval section in `BRAND_RULES.md`. Preserve the exact
+ScoutBox logo and #00e676 green. Player uses system UI typography (SF Pro
+on Apple), semantic icons, the approved light/dark canvases and translucent
+gradient controls. Keep the Instagram-style inbox, connected green timelines,
+structured invitations, goals and reviews, and flat agent/club/consent records.
 
-Fetch and check out this branch in a clean checkout; preserve unrelated local
-work. Verify the checked-out SHA against this branch on GitHub. Rebuild the
-artifact from these sources and replace its existing contents. Merely pulling
-GitHub does not update an already-created Claude artifact. Do not regenerate
-the design from a description or reuse an earlier cached demo bundle.
+Location precedes the bordered position badge on the same row; availability
+keeps its bordered pill beneath. Profile and Football centre this group below
+the name. Home retains its original metadata placement. The blue verification
+seal follows the name at 20.9px, with a 6px gap and 1px optical downward offset;
+it only appears for an identity verified by the existing data.
 
-Install dependencies from each application's existing lockfile with `npm ci`
-(Node 22+), plus `e2e/`. The canonical multi-app artifact build is:
+Current reference captures and their scope are documented in
+`design-system/approved-player-ui/README.md`. Do not reconstruct the design
+from old screenshots or reuse a cached demo bundle.
+
+## Rebuild from source
+
+Install dependencies with each application's existing lockfile (`npm ci`,
+Node 22+), plus `e2e/`. Build the self-contained demo artifacts with:
 
 ```sh
-cd e2e
-node buildDemos.mjs
-node buildConnectedDemo.mjs
-node demoFreshness.test.mjs
+node e2e/buildDemos.mjs
+node e2e/demoFreshness.test.mjs
 ```
 
-Use the newly generated `e2e/dist/scoutbox-player-demo.html` for the Player
-artifact. `buildDemos.mjs` includes bundled fonts, the Expo Router history
-shim, sandboxed-storage fallback and build identity. Player needs HTTP(S),
-not a file URL. Test in the actual artifact host after replacing its contents;
-that host has not been tested by Codex. An old published artifact stays old
-until explicitly rebuilt/replaced there.
+Use `e2e/dist/scoutbox-player-demo.html` over HTTP(S). The canonical build
+includes the history shim, guarded storage, an explicit sample-data badge,
+a source fingerprint and the build commit. A published artifact only changes
+when its contents are explicitly replaced. No push, merge or deployment is
+authorized by this handoff.
 
-For a Player-only build/type check:
+For the real Player app, build without the demo environment flag:
 
 ```sh
 cd scoutbox-player
 npx tsc --noEmit -p .
-EXPO_PUBLIC_DEMO=1 npx expo export --platform web --output-dir dist-demo
+npx expo export --platform web --output-dir dist-ci
 ```
 
-## Scope and validation
+## Validation and boundaries
 
-The Player screen canvas and shared controls carry the approved treatment
-through Home, Football, Explore, Messages, profile, Account, Development,
-Box Cam, Combine, Upload, Activity and shared Guardian surfaces. Charts use
-existing records and respect reduced motion. Identity rings do not claim
-verification or online presence. Shared portal icons and softer message
-bubbles are included. `CaseNavigation.tsx` replaces `CaseNav.tsx` to avoid
-colliding with `caseNav.ts` on case-insensitive filesystems.
+The final source passed Player TypeScript, production web export, theme
+checks, season-chart checks, icon parity and semantic-icon audits. An AST
+comparison confirmed 235 existing client calls unchanged across 38 modified
+Player components. Light/dark previews and the final badge geometry were
+checked in the local browser. Earlier interaction checks exercised inbox,
+goal completion/reopening and the two independent consent acknowledgements.
 
-Player TypeScript and Expo web export passed. Navigation (504), source visual
-acceptance (63), chart-data (9) and icon coverage/parity checks passed. Mobile
-web was reviewed at 320, 390 and 430px, with dark/light screenshots. Inbox
-search, identity shortcuts, synthetic request acceptance, clip selection,
-send, reply/read receipt and empty-send disabling were exercised locally.
-Native keyboard/camera/GPS, every role/state permutation and the Claude
-artifact sandbox were not tested. Historical live visual tests may encode
-superseded minimalism; assess failures against current Founder instructions.
+Native device features, all role/state permutations and the external artifact
+host have not been retested. Historical M24 live visual suites include old
+minimalism and profile-layout expectations; they are not acceptance evidence
+for this approved redesign. They remain historical rather than being silently
+weakened. The CI Player checks are TypeScript and a production web export.
 
-Preserve safeguarding, guardian-controlled minor contact, auth, tenant
-isolation, lifecycle rules, Offer acceptance versus signing, Box Cam versus
-assessment, evidence-confidence semantics, five-category navigation, Inter
-UI fonts and zero authored emoji. No backend changes are part of this handoff.
-This handoff authorizes no merge, deployment or further push.
+Preserve safeguarding, guardian-managed minor contact, authentication,
+tenant isolation, lifecycle rules, Offer acceptance versus signing, Box Cam
+versus assessment, evidence-confidence semantics, five-category navigation,
+and zero authored emoji. Do not expose internal club notes or infer presence,
+verification or success from decorative icons. No backend changes are part
+of this design checkpoint.

@@ -1,3 +1,4 @@
+import { GuidanceNote } from '../../components/InformationRows';
 import { useEffect, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from '../../components/Text';
@@ -150,9 +151,9 @@ export default function Upload() {
           />
           {pickedFile && (me?.attendance.length ?? 0) > 0 && (
             <>
-              <Muted size={12.5}>
+              <GuidanceNote icon="info" size={12.5}>
                 Claim the Verified Clip seal: link this footage to the confirmed fixture it was filmed at.
-              </Muted>
+              </GuidanceNote>
               <Row>
                 {me!.attendance.map((a) => (
                   <Button
@@ -167,7 +168,7 @@ export default function Upload() {
             </>
           )}
           <Button primary label={linkAttendanceId ? 'Upload as Verified Clip' : 'Upload clip'} onPress={uploadMedia} />
-          {me && <Muted size={12.5}>{me.media.length} clip{me.media.length === 1 ? '' : 's'} on your profile. Titles are screened — no contact details.</Muted>}
+          {me && <GuidanceNote icon="info" size={12.5}>{me.media.length} clip{me.media.length === 1 ? '' : 's'} on your profile. Titles are screened — no contact details.</GuidanceNote>}
         </Card>
 
         <Card>
@@ -228,10 +229,10 @@ export default function Upload() {
             <SectionTitle>Your training programme</SectionTitle>
             {!programme.current ? (
               <>
-                <Muted size={12.5}>
+                <GuidanceNote icon="info" size={12.5}>
                   Academy players get coaches — you get this. Free, position-specific, and every session
                   feeds your streak and weekly goal. Pick your track:
-                </Muted>
+                </GuidanceNote>
                 <Row>
                   {programme.tracks.map((t) => (
                     <Button
@@ -278,7 +279,7 @@ export default function Upload() {
                     )}
                   </Row>
                 ))}
-                <Muted size={11.5}>Sessions with a matching drill count double when you record the drill below with video.</Muted>
+                <GuidanceNote icon="info" size={11.5}>Sessions with a matching drill count double when you record the drill below with video.</GuidanceNote>
               </>
             )}
           </Card>

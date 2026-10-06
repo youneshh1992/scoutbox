@@ -1,3 +1,4 @@
+import { GuidanceNote } from './InformationRows';
 // M24B — the Club contact and Trial › Invitation views: the person's own
 // requests and threads, read from the session's inbox and channels exactly as
 // the Inbox tab shows them. Answering stays in the Inbox — the one place the
@@ -35,9 +36,9 @@ export function ContactRequestsSection({ kind }: { kind: 'contact' | 'trial' }) 
             <Text style={{ color: colors.text, fontWeight: '700', fontSize: 14 }}>{r.orgName}</Text>
             <Pill label={isChild(r) && r.status === 'pending' ? pt('ctxWithGuardian') : ({ pending: pt('ctxAwaitingYou'), accepted: pt('inboxAccepted'), declined: pt('inboxDeclined'), suspended: pt('inboxSuspended') } as Record<string, string>)[r.status] ?? r.status} tone={r.status === 'accepted' ? 'green' : r.status === 'declined' ? 'red' : 'gold'} />
           </Row>
-          {!isChild(r) && <Muted size={12.5}>{r.scoutName}{r.scoutRole ? ` (${r.scoutRole})` : ''} · {new Date(r.createdAt).toLocaleDateString(uiLocale(), { day: 'numeric', month: 'short', year: 'numeric' })}</Muted>}
+          {!isChild(r) && <GuidanceNote icon="info" size={12.5}>{r.scoutName}{r.scoutRole ? ` (${r.scoutRole})` : ''} · {new Date(r.createdAt).toLocaleDateString(uiLocale(), { day: 'numeric', month: 'short', year: 'numeric' })}</GuidanceNote>}
           {!isChild(r) && r.subject ? <Text style={{ color: colors.text, fontSize: 13.5, fontWeight: '600' }}>{r.subject}</Text> : null}
-          {isChild(r) ? <Muted size={12.5}>{r.note}</Muted> : null}
+          {isChild(r) ? <GuidanceNote icon="info" size={12.5}>{r.note}</GuidanceNote> : null}
         </View>
       ))}
       <Row style={{ marginTop: 10 }}>
@@ -61,9 +62,9 @@ export function MessagesSummarySection() {
   return (
     <Card testID="messages-summary">
       <SectionTitle>{pt('ctxMessagesTitle')}</SectionTitle>
-      {isMinor ? <Muted size={12.5}>{pt('ctxMinorMessages')}</Muted> : (
+      {isMinor ? <GuidanceNote icon="info" size={12.5}>{pt('ctxMinorMessages')}</GuidanceNote> : (
         <>
-          {channels && channels.length === 0 && <Muted size={12.5}>{pt('ctxMessagesNone')}</Muted>}
+          {channels && channels.length === 0 && <GuidanceNote icon="info" size={12.5}>{pt('ctxMessagesNone')}</GuidanceNote>}
           {(channels ?? []).map((c) => {
             const last = c.messages[c.messages.length - 1];
             return (

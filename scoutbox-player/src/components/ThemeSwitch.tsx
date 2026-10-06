@@ -18,7 +18,7 @@ export function ThemeSwitch() {
       testID="theme-switch"
       style={({ pressed }) => [styles.btn, { backgroundColor: colors.bg2, borderColor: colors.line }, pressed && { opacity: 0.8 }]}
     >
-      <Icon name={dark ? 'moon' : 'sun'} size={22} color={colors.iconFg} />
+      <Icon name={dark ? 'moon' : 'sun'} size={22} color={dark ? colors.iconFg : '#b88600'} />
 
     </Pressable>
   );
