@@ -165,10 +165,11 @@
 
 @media(max-width:1050px){.a-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); }}
 /* Agent uses a typographic signature: the ScoutBox mark over a violet edition line. */
-.a-brand-editorial { display:inline-flex;flex-direction:column;align-items:flex-start;gap:7px;line-height:1; }
-.a-agent-title { display:flex;align-items:center;gap:11px;width:100%;font-size:11px;line-height:1;font-weight:700;letter-spacing:3.6px;color:#dbbfff; }
-.a-agent-title>span { height:2px;flex:1;min-width:12px;background:linear-gradient(90deg,#bd86ff,#bd86ff00); }
-.a-login .a-brand-editorial { gap:10px; }.a-login .a-agent-title { font-size:12px;letter-spacing:5px; }
+.a-brand-editorial { display:inline-grid;grid-template-columns:max-content;justify-items:start;row-gap:8px;line-height:1; }
+.a-agent-title { display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;column-gap:9px;width:100%;box-sizing:border-box;padding-left:1px;font-size:10px;line-height:1;font-weight:700;letter-spacing:3.2px;color:#dbbfff; }
+.a-agent-label { margin-right:-3.2px; }
+.a-agent-rule { display:block;height:1px;min-width:12px;transform:translateY(-.5px);background:linear-gradient(90deg,#bd86ff,#bd86ff00); }
+.a-login .a-brand-editorial { row-gap:9px; }.a-login .a-agent-title { font-size:11px;letter-spacing:3.8px;column-gap:11px; }.a-login .a-agent-label { margin-right:-3.8px; }
 .a-login-map { flex:0 0 auto;min-height:0; }.a-world-map { aspect-ratio:720 / 380;object-fit:contain; }.a-login-map .a-world-map { display:block;height:auto!important;width:100%; }
 /* Desks share a quiet navigation rail and spacious, labelled records. */
 :root[data-app="agent"] .agent-finance .a-desk-tabs { display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:7px;background:#0b081480;border:1px solid #d9baff14;border-radius:12px;margin:24px 0; }
