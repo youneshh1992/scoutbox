@@ -1,3 +1,4 @@
+import { RecordFacts, DetailItems } from './RecordDetails';
 // M23 P6 — the canonical Offer, inside the Room's Offer tab.
 //
 //   Recruitment Decision ≠ Offer ≠ Offer Acceptance ≠ Signing
@@ -175,10 +176,10 @@ export function OfferWorkflow({ session, room, notify, reload }: Props) {
         <div className="list-rows">
           <div className="list-row"><span className="grow">{t('of.caseStatus')}</span><span className="pill" data-testid="offer-case-status">{statusLabel(req.status ?? '')}</span></div>
           {!offer && (
-            <div className="list-row"><span className="grow">{t('of.canDraft')}</span><span className="pill" data-testid="offer-draft-availability" data-possible={req.draftBlockers.length === 0 ? '1' : '0'}>{req.draftBlockers.length === 0 ? `✓ ${t('of.possible')}` : `○ ${req.draftBlockers.map((b) => t(`of.b.${b}`, b)).join(' · ')}`}</span></div>
+            <div className="list-row"><span className="grow">{t('of.canDraft')}</span><span className="pill" data-testid="offer-draft-availability" data-possible={req.draftBlockers.length === 0 ? '1' : '0'}>{req.draftBlockers.length === 0 ? `✓ ${t('of.possible')}` : <DetailItems items={req.draftBlockers.map(b => t(`of.b.${b}`, b))} />}</span></div>
           )}
           {offer && isDraft && (
-            <div className="list-row"><span className="grow">{t('of.canIssue')}</span><span className="pill" data-testid="offer-issue-availability" data-possible={issueBlocked ? '0' : '1'}>{issueBlocked ? `○ ${req.issueBlockers.map((b) => t(`of.b.${b}`, b)).join(' · ')}` : `✓ ${t('of.possible')}`}</span></div>
+            <div className="list-row"><span className="grow">{t('of.canIssue')}</span><span className="pill" data-testid="offer-issue-availability" data-possible={issueBlocked ? '0' : '1'}>{issueBlocked ? <DetailItems items={req.issueBlockers.map(b => t(`of.b.${b}`, b))} /> : `✓ ${t('of.possible')}`}</span></div>
           )}
         </div>
         <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>{t('of.readinessNote')}</div>
@@ -288,13 +289,13 @@ function RevisionCard({ r, responses }: { r: OfferRevisionView; responses: Offer
         <span className="pill" data-status={r.status}>{offerStatusLabel(r.status)}</span>
       </div>
       <div style={{ fontSize: 12.5, marginTop: 4 }}>
-        {r.terms.role ?? '—'}{r.terms.squad ? ` · ${r.terms.squad}` : ''} · {r.terms.startDate ? `${t('of.f.startDate')} ${r.terms.startDate}` : t('of.noStart')}{r.terms.endDate ? ` → ${r.terms.endDate}` : ''}
+        <RecordFacts items={[{label: t('of.f.role'), value: r.terms.role}, {label: t('of.f.squad'), value: r.terms.squad}, {label: t('of.f.startDate'), value: r.terms.startDate ?? t('of.noStart')}, ...(r.terms.endDate ? [{label: t('of.f.endDate'), value: r.terms.endDate}] : [])]} />
       </div>
       {r.terms.conditions && <div className="dim" style={{ fontSize: 12.5 }}>{r.terms.conditions}</div>}
       <div className="dim" style={{ fontSize: 12.5 }}>{t('of.expires')}: {r.expiresAt ? fmtDateTime(r.expiresAt) : t('of.noExpiry')}{r.documents.length ? ` · ${t('of.documents').replace('{n}', String(r.documents.length))}` : ''}</div>
       {r.recipientMessage && <div className="dim" style={{ fontSize: 12.5 }}>“{r.recipientMessage}”</div>}
       {r.internalNote && <div className="dim" style={{ fontSize: 12.5 }} data-testid="offer-note"><Icon name="lock-keyhole" size={13} /> {r.internalNote}</div>}
-      {resp && <div style={{ fontSize: 12.5, marginTop: 4 }} data-testid="offer-response">{resp.responseType === 'accepted' ? t('of.respAccepted') : t('of.respDeclined')} · {t(`of.who.${resp.actorType}`)} · {fmtDateTime(resp.occurredAt)}{resp.reason ? ` · “${resp.reason}”` : ''}</div>}
+      {resp && <div style={{ fontSize: 12.5, marginTop: 4 }} data-testid="offer-response"><RecordFacts items={[{label: 'Response', value: resp.responseType === 'accepted' ? t('of.respAccepted') : t('of.respDeclined')}, {label: 'Responded by', value: t(`of.who.${resp.actorType}`)}, {label: 'Recorded', value: fmtDateTime(resp.occurredAt)}, ...(resp.reason ? [{label: 'Reason', value: resp.reason}] : [])]} /></div>}
       {r.withdrawnAt && <div className="dim" style={{ fontSize: 12.5 }}>{t('of.withdrawnAt')} {fmtDateTime(r.withdrawnAt)}{r.withdrawReason ? ` · ${r.withdrawReason}` : ''}</div>}
       {r.supersededByRevisionId && <div className="dim" style={{ fontSize: 12 }}>{t('of.supersededBy')}</div>}
       {r.readiness && <div className="dim" style={{ fontSize: 12 }}>{t('of.transactionChecked')}</div>}

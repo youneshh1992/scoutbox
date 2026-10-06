@@ -1,3 +1,4 @@
+import { RecordFacts, DetailItems } from './RecordDetails';
 import { CountChart, countBy } from './ScoutVisuals';
 // M17 org screens — Recruitment Rooms.
 //
@@ -273,7 +274,7 @@ function RoomsList({ session, tick, onOpenRoom }: RoomsScreenProps) {
                       ? <b>{r.playerName}</b>
                       : <span className="dim">{t('rm.playerWithheld')}</span>}
                     {(r.position || r.age) && <div className="dim" style={{ fontSize: 12 }}>{[r.position, r.age].filter((x) => x != null && x !== '').join(' · ')}</div>}
-                    {r.tags.length > 0 && <div className="dim" style={{ fontSize: 12 }}>{r.tags.join(' · ')}</div>}
+                    {r.tags.length > 0 && <div className="dim" style={{ fontSize: 12 }}><DetailItems items={r.tags} /></div>}
                   </td>
                   <td>{r.currentClub ?? <span className="dim">—</span>}</td>
                   <td title={r.trust?.note ?? t('rm.trustNote')}>
@@ -476,8 +477,7 @@ function RoomHeader({ session, room, notify, reload, staff, openPlayer }: PanelP
           <h3 style={{ margin: 0 }}>{room.playerAvailable ? room.playerName : t('rm.playerWithheld')}</h3>
           {room.playerAvailable && (
             <span className="dim">
-              {(room.passport?.player.position ?? '—')} · {room.passport?.player.age ?? '—'}
-              {room.passport?.status.currentClub?.orgName ? ` · ${room.passport.status.currentClub.orgName}` : ` · ${t('rm.noClub')}`}
+              <RecordFacts items={[{label: 'Position', value: room.passport?.player.position}, {label: 'Age', value: room.passport?.player.age}, {label: 'Current club', value: room.passport?.status.currentClub?.orgName ?? t('rm.noClub')}]} />
             </span>
           )}
           <div className="badges">

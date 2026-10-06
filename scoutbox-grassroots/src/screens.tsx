@@ -1,3 +1,4 @@
+import { RecordFacts } from './RecordDetails';
 import { sentenceCase } from './presentation';
 import { CountChart, SquadCoverage, countBy } from './ScoutVisuals';
 import { Hint } from '../../design-system/About';
@@ -858,8 +859,7 @@ export function TrialsScreen({ session, tick, notify }: ScreenProps) {
                 <b>{t.playerName}</b> <span className="dim">Requested by {t.scoutName}</span>
                 {t.guardianApproved && <span className="pill red" style={{ marginLeft: 8 }}>Guardian approved</span>}
                 <div className="dim">
-                  {t.proposedDate ? `${t.proposedDate}` : 'date TBC'}{t.venue ? ` · ${t.venue}` : ''}{t.notes ? ` · ${t.notes}` : ''}
-                  {t.status === 'awaiting_report' && t.reportDueAt ? ` · report due ${fmtDate(t.reportDueAt)}` : ''}
+                  <RecordFacts items={[{label: 'Date', value: t.proposedDate ?? 'To be confirmed'}, {label: 'Venue', value: t.venue}, ...(t.status === 'awaiting_report' && t.reportDueAt ? [{label: 'Report due', value: fmtDate(t.reportDueAt)}] : [])]} />{t.notes && <p className="record-note">{t.notes}</p>}
                 </div>
               </span>
               {api.trialIcsUrl(session, t.id) && (
@@ -878,8 +878,7 @@ export function TrialsScreen({ session, tick, notify }: ScreenProps) {
             </div>
             {t.status === 'reported' && t.report && (
               <div className="dim" style={{ marginTop: 6 }}>
-                accel {t.report.acceleration}/10 · {t.report.sprintSpeedKmh} km/h · {t.report.distanceKm} km ·
-                pass {t.report.passCompletionPct}% · duels {t.report.duelSuccessPct}% · coach {t.report.coachRating}/10
+                <RecordFacts items={[{label: 'Acceleration', value: `${t.report.acceleration}/10`}, {label: 'Sprint speed', value: `${t.report.sprintSpeedKmh} km/h`}, {label: 'Distance', value: `${t.report.distanceKm} km`}, {label: 'Pass completion', value: `${t.report.passCompletionPct}%`}, {label: 'Duels won', value: `${t.report.duelSuccessPct}%`}, {label: 'Coach rating', value: `${t.report.coachRating}/10`}]} />
               </div>
             )}
             {filing === t.id && (
@@ -1131,11 +1130,10 @@ export function OpenDaysScreen({ session, tick, notify }: ScreenProps) {
       {trials.map((t) => (
         <div key={t.id} className="section">
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <h4 style={{ margin: 0, flex: 1 }}>{t.title} — {/^\d{4}-\d{2}-\d{2}$/.test(t.date) ? fmtDate(t.date) : t.date} · {t.venue}</h4>
-            {/* M24F.5 — age group, positions and the count as one quiet line, not a row of pills. */}
-            <span className="dim" data-testid={`openday-meta-${t.id}`}>{[({ u16: 'U16', u18: 'U18', '18-21': '18–21', senior: 'Senior', open: 'Open age' } as Record<string, string>)[t.ageGroup] ?? t.ageGroup, ...t.positions, `${t.registrations.length} registered`].filter(Boolean).join(' · ')}</span>
+            <h4 style={{ margin: 0, flex: 1 }}>{t.title}</h4>
             <button onClick={async () => { try { await api.deleteOpenTrial(session, t.id); load(); } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); } }}>Remove</button>
           </div>
+          <span className="dim" data-testid={`openday-meta-${t.id}`}><RecordFacts items={[{label: 'Date', value: /^\d{4}-\d{2}-\d{2}$/.test(t.date) ? fmtDate(t.date) : t.date}, {label: 'Venue', value: t.venue}, {label: 'Age group', value: ({ u16: 'U16', u18: 'U18', '18-21': '18–21', senior: 'Senior', open: 'Open age' } as Record<string, string>)[t.ageGroup] ?? t.ageGroup}, {label: 'Positions', value: t.positions.join(', ') || '—'}, {label: 'Registered', value: t.registrations.length}]} /></span>
           {t.registrations.length > 0 && (
             <div className="list-rows" style={{ marginTop: 8 }}>
               {t.registrations.map((r) => (
@@ -1880,11 +1878,11 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                 <h4>Trial performance reports (institutional corroboration)</h4>
                 <div className="list-rows">
                   {player.trialReports.map((r) => (
-                    <div key={r.id} className="list-row">
-                      <span className="grow">{r.orgName} <span className="dim">· {r.scoutName}</span></span>
-                      <span className="dim">
-                        accel {r.acceleration}/10 · {r.sprintSpeedKmh} km/h · {r.distanceKm} km · pass {r.passCompletionPct}% · duels {r.duelSuccessPct}% · coach {r.coachRating}/10
-                      </span>
+                    <div key={r.id} className="list-row record-report">
+                      <span className="grow"><b>{r.orgName}</b><span className="record-note">{r.scoutName}</span></span>
+                      <div>
+                        <RecordFacts items={[{label: 'Acceleration', value: `${r.acceleration}/10`}, {label: 'Sprint speed', value: `${r.sprintSpeedKmh} km/h`}, {label: 'Distance', value: `${r.distanceKm} km`}, {label: 'Pass completion', value: `${r.passCompletionPct}%`}, {label: 'Duels won', value: `${r.duelSuccessPct}%`}, {label: 'Coach rating', value: `${r.coachRating}/10`}]} />
+                      </div>
                     </div>
                   ))}
                 </div>

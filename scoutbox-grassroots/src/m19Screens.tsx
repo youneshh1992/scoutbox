@@ -1,3 +1,5 @@
+import { sentenceCase } from './presentation';
+import { RecordFacts, DetailItems } from './RecordDetails';
 import { CountChart, countBy } from './ScoutVisuals';
 // M19 org screens — Player Matching and Dynamic Watchlists.
 //
@@ -104,6 +106,15 @@ function LoadError({ message, onRetry }: { message: string; onRetry?: () => void
       {onRetry && <> <button onClick={onRetry} style={{ marginInlineStart: 8 }}>{t('common.retry')}</button></>}
     </div>
   );
+}
+
+function CriteriaSummary({ criteria }: { criteria: { required: string[]; preferred: string[] } }) {
+  return <div className="saved-criteria-grid">{(['required', 'preferred'] as const).map(kind =>
+    <section key={kind} className="saved-criteria-group" aria-label={t(`m19.cr.${kind}`)}>
+      <header><span>{t(`m19.cr.${kind}`)}</span><b>{criteria[kind].length}</b></header>
+      {criteria[kind].length ? <DetailItems items={criteria[kind].map(value => sentenceCase(humanText(value)))} /> : <p className="criteria-empty">{t('m19.cr.none')}</p>}
+    </section>
+  )}</div>;
 }
 
 // ------------------------------------------------------------ criteria rows
@@ -665,9 +676,7 @@ function MatchResults({
           </b>
           <span className="pill">{sortLabel(result.sort)}</span>
         </div>
-        <div className="dim" style={{ fontSize: 12.5 }}>
-          {t('m19.criteriaRun')}: {[...result.criteria.required, ...result.criteria.preferred].map(humanText).join(' · ') || t('m19.cr.none')}
-        </div>
+        <div aria-label={t('m19.criteriaRun')}><CriteriaSummary criteria={result.criteria} /></div>
         <div className="dim" style={{ fontSize: 12 }}>{result.note}</div>
         <div className="dim" style={{ fontSize: 12 }}>{result.scoreNote}</div>
         <div className="dim" style={{ fontSize: 12 }}>{t('m19.evaluatedAt')}: {fmtDateTime(result.evaluatedAt)}</div>
@@ -769,35 +778,15 @@ function WatchlistList({ session, tick, onOpenWatchlist, onNewWatchlist }: Watch
         {!items && !err && <div className="dim">{t('m18.loading')}</div>}
         {items && items.length === 0 && <div className="dim">{t('m19.wl.empty')}</div>}
         {items && items.length > 0 && (
-          <div style={{ overflowX: 'auto' }}>
-            <table className="data">
-              <thead>
-                <tr>
-                  <th>{t('m19.wl.name')}</th>
-                  <th>{t('common.status')}</th>
-                  <th>{t('m19.wl.mode')}</th>
-                  <th>{t('m19.wl.criteria')}</th>
-                  <th>{t('m19.wl.lastDerived')}</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((w) => (
-                  <tr key={w.id}>
-                    <td><b>{w.name}</b></td>
-                    <td><span className="pill">{wlStatusLabel(w.status)}</span></td>
-                    <td><span className="pill">{modeLabel(w.mode)}</span></td>
-                    <td style={{ fontSize: 12.5 }}>
-                      {[...w.criteria.required, ...w.criteria.preferred].map(humanText).join(' · ') || <span className="dim">{t('m19.cr.none')}</span>}
-                    </td>
-                    <td>{w.lastReconciledAt ? fmtDate(w.lastReconciledAt) : <span className="dim">{t('m19.wl.neverDerived')}</span>}</td>
-                    <td>
-                      <button onClick={() => onOpenWatchlist(w.id)} aria-label={`${t('m19.wl.open')} ${w.name}`}>{t('m19.wl.open')}</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="watchlist-register">
+            {items.map(w => <article key={w.id} className="watchlist-record">
+              <header className="watchlist-record-heading"><div><span className="suite-eyebrow">{t('m19.wl.criteria')}</span><h3>{w.name}</h3></div><span className="pill">{wlStatusLabel(w.status)}</span><button onClick={() => onOpenWatchlist(w.id)} aria-label={`${t('m19.wl.open')} ${w.name}`}>{t('m19.wl.open')} <span aria-hidden="true">↗</span></button></header>
+              <CriteriaSummary criteria={w.criteria} />
+              <RecordFacts items={[
+                {label: t('m19.wl.mode'), value: modeLabel(w.mode)},
+                {label: t('m19.wl.lastDerived'), value: w.lastReconciledAt ? fmtDate(w.lastReconciledAt) : t('m19.wl.neverDerived')},
+              ]} />
+            </article>)}
           </div>
         )}
         {note && <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>{note}</div>}
@@ -907,13 +896,11 @@ function WatchlistDetailView({
           <span className="pill">{modeLabel(w.mode)}</span>
           {w.notify ? <span className="pill outline-green">{t('m19.wl.notifyOn')}</span> : <span className="pill">{t('m19.wl.notifyOff')}</span>}
         </div>
-        <div className="dim" style={{ fontSize: 12.5, marginTop: 4 }}>
-          {t('m19.wl.criteria')}: {[...w.criteria.required, ...w.criteria.preferred].map(humanText).join(' · ') || t('m19.cr.none')}
-        </div>
-        <div className="dim" style={{ fontSize: 12 }}>
-          {w.createdBy && <>{t('m19.wl.createdBy')}: {w.createdBy} · </>}
-          {t('m19.wl.lastDerived')}: {data.evaluatedAt ? fmtDateTime(data.evaluatedAt) : t('m19.wl.neverDerived')}
-        </div>
+        <CriteriaSummary criteria={w.criteria} />
+        <RecordFacts items={[
+          ...(w.createdBy ? [{label: t('m19.wl.createdBy'), value: w.createdBy}] : []),
+          {label: t('m19.wl.lastDerived'), value: data.evaluatedAt ? fmtDateTime(data.evaluatedAt) : t('m19.wl.neverDerived')},
+        ]} />
         <div className="dim" style={{ fontSize: 12 }}>{data.refreshNote}</div>
 
         {(blocked.blocked || blocked.paused) && (

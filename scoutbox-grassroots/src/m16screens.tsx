@@ -1,3 +1,4 @@
+import { RecordFacts } from './RecordDetails';
 // M16 org screens — coach-assigned Box Training in the player drawer.
 // The coach assigns supported drills, sees Box Cam results (never footage),
 // and can publish Box Challenges. Honest wall copy when the standing gates
@@ -81,7 +82,7 @@ export function BoxTrainingPanel({ session, playerId, notify }: { session: Sessi
               </div>
             ))}
           </div>
-          <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{t('bt.summary')}: {data.summary.completed}✓ · {data.summary.partial} {t('bt.partial')} · {data.summary.notStarted} {t('bt.notStarted')}</div>
+          <div className="dim" style={{ fontSize: 12, marginTop: 6 }}><RecordFacts items={[{label: 'Completed', value: data.summary.completed}, {label: t('bt.partial'), value: data.summary.partial}, {label: t('bt.notStarted'), value: data.summary.notStarted}]} /></div>
 
           <div style={{ marginTop: 10, borderTop: '1px solid var(--line)', paddingTop: 8 }}>
             <h4 style={{ margin: '0 0 6px' }}>{t('bt.assign')}</h4>

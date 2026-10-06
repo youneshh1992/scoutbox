@@ -1,3 +1,4 @@
+import { RecordFacts, DetailItems } from './RecordDetails';
 import { sentenceCase } from './presentation';
 import { CountChart, countBy } from './ScoutVisuals';
 // M13 org screens: Imports & Integrations, Coverage, Calibration, Scouting
@@ -66,7 +67,7 @@ export function ImportsScreen({ session, notify }: ScreenProps) {
         }}>{t('m13.import.dryRun')}</button>
         {dryRun && (
           <div className="notice block" aria-live="polite">
-            <b>{t('m13.import.dryRunResult')}:</b> {dryRun.batch.summary.creatable} {t('m13.import.creatable')} · {dryRun.batch.summary.errors} {t('m13.import.errors')} · {dryRun.batch.summary.duplicatesInFile + dryRun.batch.summary.alreadyImported} {t('m13.import.duplicates')} · {dryRun.batch.summary.ambiguous} {t('m13.import.ambiguous')}
+            <b>{t('m13.import.dryRunResult')}</b><RecordFacts items={[{label: t('m13.import.creatable'), value: dryRun.batch.summary.creatable}, {label: t('m13.import.errors'), value: dryRun.batch.summary.errors}, {label: t('m13.import.duplicates'), value: dryRun.batch.summary.duplicatesInFile + dryRun.batch.summary.alreadyImported}, {label: t('m13.import.ambiguous'), value: dryRun.batch.summary.ambiguous}]} />
             {dryRun.batch.rows?.filter((r) => r.errors.length).slice(0, 3).map((r) => <div key={r.row} className="dim">Row {r.row}: {r.errors.join('; ')}</div>)}
             <div><button onClick={async () => {
               try { const c = await m13.commitImport(session, dryRun.batch.id); notify(`Imported ${c.created} prospects · ${c.reviewsQueued} identity review(s) queued.`); setDryRun(null); reload(); reloadReviews(); }
@@ -77,7 +78,7 @@ export function ImportsScreen({ session, notify }: ScreenProps) {
         <div className="list-rows">
           {(batches ?? []).map((b) => (
             <div key={b.id} className="list-row">
-              <span className="grow"><b>{b.id}</b> <span className={`pill ${b.status === 'committed' ? 'green' : b.status === 'reversed' ? 'red' : 'blue'}`}>{sentenceCase(b.status)}</span> <span className="dim">{b.summary.total} rows · by {b.createdByName} · {fmtDate(b.createdAt)}</span></span>
+              <span className="grow"><b>{b.id}</b> <span className={`pill ${b.status === 'committed' ? 'green' : b.status === 'reversed' ? 'red' : 'blue'}`}>{sentenceCase(b.status)}</span> <span className="dim"><RecordFacts items={[{label: 'Rows', value: b.summary.total}, {label: 'Imported by', value: b.createdByName}, {label: 'Created', value: fmtDate(b.createdAt)}]} /></span></span>
               {b.status === 'committed' && <button onClick={async () => { const r = await m13.reverseImport(session, b.id); notify(`Reversed ${r.removed}; kept ${r.kept.length} changed record(s).`); reload(); }}>{t('m13.import.reverse')}</button>}
             </div>
           ))}
@@ -89,7 +90,7 @@ export function ImportsScreen({ session, notify }: ScreenProps) {
         <details className="f-about"><summary>About</summary><div className="notice" style={{ fontSize: 12.5 }}>{t('m13.identity.note')}</div></details>
         {(reviews ?? []).map((r) => (
           <div key={r.id} className="list-row">
-            <span className="grow"><b>{r.record.name}</b> <span className="dim">{r.record.provider} {r.record.externalId} · born {/^\d{4}-\d{2}-\d{2}$/.test(r.record.dob ?? '') ? fmtDate(r.record.dob as string) : r.record.dob} · row {r.row} · may be the same player as one on ScoutBox</span></span>
+            <span className="grow"><b>{r.record.name}</b> <span className="dim"><RecordFacts items={[{label: 'Provider', value: r.record.provider}, {label: 'External ID', value: r.record.externalId}, {label: 'Date of birth', value: /^\d{4}-\d{2}-\d{2}$/.test(r.record.dob ?? '') ? fmtDate(r.record.dob as string) : r.record.dob}, {label: 'Import row', value: r.row}]} /><span className="record-note">May be the same player as one on ScoutBox</span></span></span>
             <button onClick={async () => { await m13.resolveIdentity(session, r.id, 'link'); notify('Linked.'); reloadReviews(); }}>{t('m13.identity.link')}</button>
             <button onClick={async () => { await m13.resolveIdentity(session, r.id, 'separate'); notify('Kept separate.'); reloadReviews(); }}>{t('m13.identity.separate')}</button>
           </div>
@@ -167,7 +168,7 @@ export function CoverageScreen({ session, notify }: ScreenProps) {
         <h3>{t('m13.cov.fixtures')}</h3>
         <div className="list-rows">
           {(fixtures ?? []).map((f) => (
-            <div key={f.id} className="list-row"><span className="grow"><b>{f.home} v {f.away}</b> <span className="dim">{f.date} · {f.competition ?? '—'} · {f.location?.city ?? 'no location'}</span> <span className="pill">{f.source.replace('_', ' ')}</span></span></div>
+            <div key={f.id} className="list-row"><span className="grow"><b>{f.home} v {f.away}</b> <span className="dim"><RecordFacts items={[{label: 'Date', value: f.date}, {label: 'Competition', value: f.competition}, {label: 'Location', value: f.location?.city ?? 'Not recorded'}]} /></span> <span className="pill">{f.source.replace('_', ' ')}</span></span></div>
           ))}
         </div>
         <div className="enter-row">
@@ -280,7 +281,7 @@ export function CalibrationScreen({ session, notify }: ScreenProps) {
               <div className="notice" style={{ fontSize: 12.5 }}>{sess.comparison.confidenceNote}</div>
               {sess.comparison.rows.map((r) => (
                 <div key={r.attrId} className="list-row">
-                  <span className="grow"><b>{r.label}</b> <span className="dim">Values {r.values.join(' · ') || '—'} · {r.notObserved} not observed</span></span>
+                  <span className="grow"><b>{r.label}</b> <span className="dim"><DetailItems items={r.values.map((value, i) => `Observation ${i + 1}: ${value}`)} /><span className="record-note">{r.notObserved} not observed</span></span></span>
                   <span className={`pill ${verdictPill(r.disagreement)}`}>{r.disagreement}{r.range !== null ? ` (range ${r.range})` : ''}</span>
                 </div>
               ))}
@@ -329,7 +330,7 @@ export function InsightScreen({ session, notify, openPlayer }: ScreenProps) {
               <div key={g.id} className="list-row">
                 <span className="grow">
                   <b>{g.explanation}</b>
-                  <div className="dim" style={{ fontSize: 12 }}>Rule {g.ruleId} v{g.ruleVersion} · {g.records.length} supporting record(s) · {g.action}</div>
+                  <div className="dim" style={{ fontSize: 12 }}><RecordFacts items={[{label: 'Rule', value: `${g.ruleId} v${g.ruleVersion}`}, {label: 'Supporting records', value: g.records.length}, {label: 'Action', value: sentenceCase(g.action)}]} /></div>
                 </span>
                 <span className={`pill ${g.status === 'supplied' ? 'green' : g.status === 'requested' ? 'blue' : ''}`}>{sentenceCase(g.status)}</span>
                 {g.status === 'suggested' && <button onClick={async () => {
@@ -366,7 +367,7 @@ export function NetworkScreen({ session, notify }: ScreenProps) {
         {(groups?.items ?? []).map((g) => (
           <div key={g.id} className="section" style={{ marginTop: 8 }}>
             <b>{g.name}</b> {g.youAdmin && <span className="pill gold">Admin</span>}
-            <div className="dim" style={{ fontSize: 12.5 }}>{g.members.map((mm) => mm.name).join(' · ')}</div>
+            <div className="dim" style={{ fontSize: 12.5 }}><DetailItems items={g.members.map(mm => mm.name)} /></div>
             {g.programmes.map((p) => <div key={p.id} className="dim" style={{ fontSize: 12.5 }}>{p.name} {p.region ? `(${p.region})` : ''}</div>)}
             <Hint className="notice" style={{ fontSize: 12, marginTop: 6 }}>{t('m13.grp.isolatedNote')}</Hint>
             <div style={{ marginTop: 6 }}>
@@ -415,7 +416,7 @@ export function NetworkScreen({ session, notify }: ScreenProps) {
         {shared && (
           <div className="notice block">
             <b>{shared.from}</b> — {shared.resource.kind}
-            {shared.resource.players?.map((p) => <div key={p.id}>{p.name} · {p.position} · {p.level}</div>)}
+            {shared.resource.players?.map((p) => <div key={p.id}><b>{p.name}</b><RecordFacts items={[{label: 'Position', value: p.position}, {label: 'Level', value: sentenceCase(p.level)}]} /></div>)}
             {shared.resource.withheldNote && <div className="dim" style={{ fontSize: 12 }}>{shared.resource.withheldNote}</div>}
             {!!shared.resource.assessment && <div className="dim">{JSON.stringify(shared.resource.assessment)}</div>}
           </div>
@@ -485,7 +486,7 @@ export function BudgetsScreen({ session, notify }: ScreenProps) {
           {scn.totals && (
             <div className="notice block">
               {Object.entries(scn.totals.perCurrency).map(([cur, tt]) => (
-                <div key={cur}><b>{cur}</b>: {money(tt.confirmedMinor, cur)} {t('m13.bud.confirmed')} · {money(tt.estimatedMinor, cur)} {t('m13.bud.estimated')}{tt.conditionalCount > 0 && ` · ${tt.conditionalCount} conditional excluded`}</div>
+                <div key={cur}><b>{cur}</b><RecordFacts items={[{label: t('m13.bud.confirmed'), value: money(tt.confirmedMinor, cur)}, {label: t('m13.bud.estimated'), value: money(tt.estimatedMinor, cur)}, ...(tt.conditionalCount > 0 ? [{label: 'Conditional excluded', value: tt.conditionalCount}] : [])]} /></div>
               ))}
               {scn.totals.combined && 'unavailable' in (scn.totals.combined) && scn.totals.combined.unavailable && <div className="dim">{scn.totals.combined.reason}</div>}
               <div className="dim" style={{ fontSize: 12 }}>{scn.totals.conditionalNote}</div>
@@ -516,7 +517,7 @@ export function RepresentationScreen({ session, notify }: ScreenProps) {
       {(data?.items ?? []).map((r) => (
         <div key={r.id} className="section">
           <b>{r.playerName}</b> <span className={`pill ${r.status === 'active' ? 'green' : r.status === 'withdrawn' || r.status === 'disputed' ? 'red' : 'blue'}`}>{sentenceCase(r.status)}</span>
-          <div className="dim" style={{ fontSize: 12.5 }}>{r.representativeName} · {r.scope.replace(/_/g, ' ')} · {r.endAt ? `until ${fmtDate(r.endAt)}` : 'open-ended'}</div>
+          <div className="dim" style={{ fontSize: 12.5 }}><RecordFacts items={[{label: 'Representative', value: r.representativeName}, {label: 'Scope', value: sentenceCase(r.scope)}, {label: 'Ends', value: r.endAt ? fmtDate(r.endAt) : 'Open-ended'}]} /></div>
           {r.credential && <div className="notice" style={{ fontSize: 12 }}>{r.credential.note} — <b>{r.credential.reviewStatus.replace(/_/g, ' ')}</b>. {r.credential.honest}</div>}
           <div className="dim" style={{ fontSize: 11.5 }}>{r.history.map((h) => `${h.action} (${h.byName})`).join(' → ')}</div>
         </div>

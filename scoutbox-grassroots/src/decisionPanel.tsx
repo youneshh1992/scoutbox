@@ -1,3 +1,4 @@
+import { RecordFacts } from './RecordDetails';
 // M23 P5 — the formal recruitment decision, inside the Room's Decision tab.
 //
 // Evidence informs assessment; assessment informs discussion; discussion
@@ -174,7 +175,7 @@ export function DecisionWorkflow({ session, room, notify, reload }: Props) {
                 <span className="pill" data-verdict={a.verdict ?? 'none'}>{verdictLabel(a.verdict)}</span>
               </div>
               <div className="dim" style={{ fontSize: 12 }}>
-                {t('dc.rated').replace('{n}', String(a.rated))} · {t('dc.notObserved').replace('{n}', String(a.notObserved))} · {t('dc.confidence')}: {a.confidence.high}/{a.confidence.medium}/{a.confidence.low} · {t('dc.refs').replace('{n}', String(a.evidenceRefs))}
+                <RecordFacts items={[{label: 'Rated', value: a.rated}, {label: 'Not observed', value: a.notObserved}, {label: 'High confidence', value: a.confidence.high}, {label: 'Medium confidence', value: a.confidence.medium}, {label: 'Low confidence', value: a.confidence.low}, {label: 'Evidence references', value: a.evidenceRefs}]} />
               </div>
             </div>
           ))}

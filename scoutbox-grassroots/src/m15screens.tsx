@@ -1,3 +1,4 @@
+import { RecordFacts } from './RecordDetails';
 // M15 org screens — the recruitment Football Passport.
 // Everything rendered here is the SERVER's projection for this organisation:
 // own-org assessments/trials only, provenance on every item, and honest
@@ -119,7 +120,7 @@ export function PassportBody({ session, p, notify, reload }: { session: Session;
             {p.references.map((r) => (
               <div key={r.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <span className="grow"><b>{r.coachName}</b> <span className="dim">{r.roleAtTime ?? ''} · {r.orgName}{r.fromYear ? ` · ${r.fromYear}–${r.toYear ?? ''}` : ''}</span></span>
+                  <span className="grow"><b>{r.coachName}</b> <span className="dim"><RecordFacts items={[{label: 'Role at the time', value: r.roleAtTime}, {label: 'Club', value: r.orgName}, ...(r.fromYear ? [{label: 'Period', value: `${r.fromYear}–${r.toYear ?? ''}`}] : [])]} /></span></span>
                   <span className="pill blue" title={r.provenanceCopy}>{t('fp.provCoach')}</span>
                 </div>
                 {r.structured && <div className="dim" style={{ fontSize: 12.5 }}>“{r.structured.summary}”</div>}

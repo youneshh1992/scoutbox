@@ -118,3 +118,9 @@ The Founder then refined the toolbar again: search should look like a traditiona
 search bar, and notifications like a traditional bell, with restrained ScoutBox
 green accents. Preserve the single-line search field and circular bell control;
 do not restore the two-line Finder or labelled Updates tiles.
+
+The Founder also rejected dense, dot-separated criteria and record summaries
+across Grassroots. Preserve the grouped required/preferred criteria in watchlist
+list/detail and matching results, and the labelled facts/separate list entries
+provided by local `RecordDetails.tsx`. Do not restore wrapping mixed-data
+paragraphs. See the latest readable-record rules in `GRASSROOTS_CLUBHOUSE.md`.

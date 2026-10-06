@@ -1,3 +1,5 @@
+import { sentenceCase } from './presentation';
+import { RecordFacts } from './RecordDetails';
 // M18.2 — two administrative panels under Organisation.
 //
 // Notification preferences: every non-critical category can be turned off,
@@ -146,18 +148,19 @@ interface AuditEntry {
 
 const actionLabel = (a: string) => t(`audit.action.${a}`, a.replace(/_/g, ' '));
 
-function describe(e: AuditEntry): string {
+function describe(e: AuditEntry) {
   const who = e.actor?.name ?? t('audit.system');
   const what = actionLabel(e.action);
   const target = e.target.playerName ? ` — ${e.target.playerName}` : e.target.title ? ` — ${e.target.title}` : '';
   const d = e.detail ?? {};
-  const bits: string[] = [];
-  if (typeof d.from === 'string' && typeof d.to === 'string') bits.push(`${d.from} → ${d.to}`);
-  if (typeof d.recommendation === 'string') bits.push(String(d.recommendation).replace(/_/g, ' '));
-  if (Array.isArray(d.reasonCodes) && d.reasonCodes.length) bits.push((d.reasonCodes as string[]).map((c) => c.replace(/_/g, ' ')).join(', '));
-  if (typeof d.priority === 'string') bits.push(String(d.priority));
-  if (d.hadNote === true) bits.push(t('audit.hadNote'));
-  return `${who}: ${what}${target}${bits.length ? ` (${bits.join(' · ')})` : ''}`;
+  return <><strong>{who}: {what}{target}</strong><RecordFacts items={[
+    ...(typeof d.from === 'string' && typeof d.to === 'string' ? [{label: 'Status change', value: `${sentenceCase(d.from)} → ${sentenceCase(d.to)}`}] : []),
+    ...(typeof d.recommendation === 'string' ? [{label: 'Recommendation', value: sentenceCase(d.recommendation)}] : []),
+    ...(Array.isArray(d.reasonCodes) ? d.reasonCodes.map((code, i) => ({label: `Reason ${i + 1}`, value: sentenceCase(String(code))})) : []),
+    ...(typeof d.priority === 'string' ? [{label: 'Priority', value: sentenceCase(d.priority)}] : []),
+    ...(d.hadNote === true ? [{label: 'Note', value: sentenceCase(t('audit.hadNote'))}] : []),
+  ]} /></>;
+
 }
 
 export function AuditLogPanel({ session }: { session: Session }) {

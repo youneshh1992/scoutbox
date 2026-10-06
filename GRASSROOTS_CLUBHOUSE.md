@@ -168,3 +168,28 @@ and results, recruitment-brief matching, Nobody Missed ordering, Second Look
 comparison navigation, notifications and the report dialog. No reports or
 recruitment decisions were submitted during review. All 385 existing direct API
 calls remain unchanged. The repository build, types and existing UI checks pass.
+
+## Readable criteria and record facts — 6 October 2026
+
+The Founder rejected the dense, dot-separated Saved criteria paragraph and asked
+for that format to be replaced throughout Grassroots. Do not concatenate mixed
+record properties, criteria or measurements into a wrapping sentence.
+
+- Dynamic Watchlists use individual dossiers with separate Required criteria and
+  Preferred criteria lists, preserving every server-provided criterion and its
+  group. The same grouping applies to watchlist details and matching results.
+  Do not infer criterion types by parsing the server's display strings.
+- Use the local `RecordDetails.tsx` components for labelled facts and separate
+  list entries. This applies to recruitment, assignments, assessments, trials,
+  offers, signing blockers, outcomes, training, verification, imports, groups,
+  insight breakdowns and audit records. Keep zero values and missing facts clear.
+- Retain short metadata pairs, compact position lists and existing dropdown
+  labels where they remain readable. Do not rewrite names or user-authored text.
+- Keep the familiar ScoutBox search bar and bell, exact branding and protected
+  authentication screens unchanged. These components remain Grassroots-only.
+
+Validation for this refinement: all 36 main navigation destinations reviewed in
+the local demo; watchlist details and matching from a recruitment brief exercised;
+responsive checks on the affected record layouts. Production build, TypeScript,
+navigation and presentation checks pass. All 385 existing direct API calls are
+preserved. Demo coverage does not assert that every server state was exercised.

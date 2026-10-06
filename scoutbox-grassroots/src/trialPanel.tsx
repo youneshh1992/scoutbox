@@ -1,3 +1,4 @@
+import { RecordFacts, DetailItems } from './RecordDetails';
 // M23 P4B — the Trial tab of a Recruitment Room.
 //
 // One operational workflow, rendered as the server holds it: an invitation
@@ -195,7 +196,7 @@ export function TrialPanel({ session, room, notify, reload }: TrialPanelProps) {
           <div className="notice block" role="status" aria-label={t('tr.invitationPending')} style={{ marginBottom: 8 }}>
             <b>{t('tr.invitationPending')}</b> <span className="dim">{fmtDateTime(pending.createdAt)}</span>
             <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
-              {pending.slots.map((sl) => <li key={sl.id}>{kindLabel(sl.kind)} · {fmtRange(sl, sl.timezone)} <span className="dim">({sl.timezone})</span>{sl.venue ? ` · ${sl.venue.name}${sl.venue.town ? `, ${sl.venue.town}` : ''}` : ''}</li>)}
+              {pending.slots.map((sl) => <li key={sl.id}><RecordFacts items={[{label: 'Session', value: kindLabel(sl.kind)}, {label: 'Time', value: fmtRange(sl, sl.timezone)}, {label: 'Time zone', value: sl.timezone}, ...(sl.venue ? [{label: 'Venue', value: `${sl.venue.name}${sl.venue.town ? `, ${sl.venue.town}` : ''}`}] : [])]} /></li>)}
             </ul>
             <div className="dim" style={{ fontSize: 12 }}>{t('tr.invitationNote')}</div>
           </div>
@@ -441,7 +442,7 @@ function TrialCard({ session, room, list, trial: tr, busy, run }: { session: Ses
         <summary>{t('tr.assessments')} ({detail?.assessments.length ?? 0})</summary>
         <div className="dim" style={{ fontSize: 12.5, margin: '4px 0' }}>{t('tr.assessmentsNote')}</div>
         {(detail?.assessments ?? []).map((a) => (
-          <div key={a.id} style={{ fontSize: 12.5 }}>{a.scoutName} · <span className="pill">{a.state}</span>{a.published ? ` · ${t('tr.feedbackPublished')}` : ''}{a.submittedAt ? ` · ${fmtDateTime(a.submittedAt)}` : ''}</div>
+          <div key={a.id} style={{ fontSize: 12.5 }}><b>{a.scoutName}</b><RecordFacts items={[{label: 'Status', value: a.state}, ...(a.published ? [{label: 'Feedback', value: t('tr.feedbackPublished')}] : []), ...(a.submittedAt ? [{label: 'Submitted', value: fmtDateTime(a.submittedAt)}] : [])]} /></div>
         ))}
         {list.canAssess && !tr.subjectRemovedAt && !list.blocked && <button style={{ marginTop: 6 }} disabled={busy} onClick={openAssessment}>{t('tr.openAssessment')}</button>}
       </details>
@@ -449,7 +450,7 @@ function TrialCard({ session, room, list, trial: tr, busy, run }: { session: Ses
       {canWrite && open && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 }}>
           <button className="primary" disabled={busy || completeBlockers.length > 0} title={completeBlockers.length ? completeBlockers.map((r) => t(`tr.reason.${r}`, r)).join(' · ') : undefined} onClick={complete}>{t('tr.complete')}</button>
-          {completeBlockers.length > 0 && <span className="dim" style={{ fontSize: 12 }}>{completeBlockers.map((r) => t(`tr.reason.${r}`, r)).join(' · ')}</span>}
+          {completeBlockers.length > 0 && <DetailItems items={completeBlockers.map(r => t(`tr.reason.${r}`, r))} />}
         </div>
       )}
       {(canWrite || (list.blocked && list.canWrite)) && open && !tr.subjectRemovedAt && (

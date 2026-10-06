@@ -1,3 +1,4 @@
+import { RecordFacts, DetailItems } from './RecordDetails';
 import { sentenceCase } from './presentation';
 import { CountChart } from './ScoutVisuals';
 // M14 org screens: the Verification workspace — your own verification, the
@@ -47,9 +48,7 @@ export function VerificationBadge({ badge }: { badge: VerBadge }) {
         {glyph} {badge.label}
       </summary>
       <div className="notice" style={{ fontSize: 12, maxWidth: 380 }}>
-        {badge.provenance}
-        {badge.period?.from ? ` · ${badge.period.from}–${badge.period.to ?? t('m14.badge.present')}` : ''}
-        {badge.verifiedAt ? ` · ${t('m14.badge.verifiedOn')} ${fmtDate(badge.verifiedAt)}` : ''}
+        {badge.provenance}<RecordFacts items={[...(badge.period?.from ? [{label: 'Period', value: `${badge.period.from}–${badge.period.to ?? t('m14.badge.present')}`}] : []), ...(badge.verifiedAt ? [{label: t('m14.badge.verifiedOn'), value: fmtDate(badge.verifiedAt)}] : [])]} />
         <div className="dim">{t('m14.badge.meaningNote')}</div>
       </div>
     </details>
@@ -230,7 +229,7 @@ function MeTab({ session, notify, me, reloadMe }: { session: Session; notify: Sc
         </div>
         </details>
         <div className="dim" style={{ fontSize: 12 }}>
-          {t('m14.lic.providers')}: {(providers?.providers ?? []).map((p) => `${p.name} — ${t(`m14.provider.${p.state}`, p.state.replace(/_/g, ' '))}`).join(' · ')}
+          <b>{t('m14.lic.providers')}</b><RecordFacts items={(providers?.providers ?? []).map(p => ({label: p.name, value: t(`m14.provider.${p.state}`, p.state.replace(/_/g, ' '))}))} />
         </div>
       </div>
     </div>
@@ -261,8 +260,8 @@ function RequestsTab({ session, notify }: { session: Session; notify: ScreenProp
             <span className="grow">
               <b>{roleRow.person.name}</b> — {roleRow.claimedRole ?? t('m14.req.affiliationOnly')}
               <div className="dim" style={{ fontSize: 12 }}>
-                {t('m14.req.identity')}: {roleRow.identityStatus} · {t('m14.req.email')}: {t(`m14.email.${roleRow.emailStatus}`, roleRow.emailStatus.replace(/_/g, ' '))} · {fmtDate(roleRow.requestedAt)}
-                {roleRow.riskFlags.length > 0 && <span> · <Icon name="triangle-alert" size={12} /> {roleRow.riskFlags.join(', ')} <i>({t('m14.req.flagsNote')})</i></span>}
+                <RecordFacts items={[{label: t('m14.req.identity'), value: sentenceCase(roleRow.identityStatus)}, {label: t('m14.req.email'), value: t(`m14.email.${roleRow.emailStatus}`, roleRow.emailStatus.replace(/_/g, ' '))}, {label: 'Requested', value: fmtDate(roleRow.requestedAt)}]} />
+                {roleRow.riskFlags.length > 0 && <span><Icon name="triangle-alert" size={12} /><DetailItems items={roleRow.riskFlags} /><i>({t('m14.req.flagsNote')})</i></span>}
               </div>
               {roleRow.priorClaims.length > 0 && <div className="dim" style={{ fontSize: 12 }}>{t('m14.req.prior')}: {roleRow.priorClaims.map((p) => `${p.role ?? p.claimType}${p.current ? '' : ` (${t('m14.staff.former')})`}`).join(', ')}</div>}
             </span>
@@ -404,7 +403,7 @@ function MoreTab({ session, notify }: { session: Session; notify: ScreenProps['n
         <div className="dim" style={{ fontSize: 12.5 }}>{t('m14.ref.note')}</div>
         {(refs?.items ?? []).map((r) => (
           <div key={r.id} className="list-row">
-            <span className="grow"><b>{r.playerName ?? r.playerId}</b> — {r.structured.summary} <span className="dim" style={{ fontSize: 12 }}>v{r.version} · {sentenceCase(r.status)} · {r.coachName} ({r.roleAtTime})</span></span>
+            <span className="grow"><b>{r.playerName ?? r.playerId}</b> — {r.structured.summary} <span className="dim" style={{ fontSize: 12 }}><RecordFacts items={[{label: 'Version', value: r.version}, {label: 'Status', value: sentenceCase(r.status)}, {label: 'Coach', value: r.coachName}, {label: 'Role at the time', value: r.roleAtTime}]} /></span></span>
             {r.status === 'active' && <button onClick={async () => { try { await m14.withdrawReference(session, r.id, 'withdrawn from console'); notify(t('m14.ref.withdrawn')); reloadRefs(); } catch (e) { notify(e instanceof Error ? e.message : 'failed', true); } }}>{t('m14.ref.withdraw')}</button>}
           </div>
         ))}

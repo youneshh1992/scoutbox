@@ -1,3 +1,4 @@
+import { DetailItems } from './RecordDetails';
 // M23 P7 — Signing & Contract Completion, inside the Room's Signing tab.
 //
 //   Offer accepted ≠ Signing ≠ Contract effective
@@ -172,7 +173,7 @@ export function SigningWorkflow({ session, room, notify, reload }: Props) {
           <div data-testid="signing-none">
             <div className="dim">{t('sg.none')}</div>
             <div data-testid="signing-start-availability" data-possible={canStart ? '1' : '0'} className="dim" style={{ fontSize: 12.5, marginTop: 6 }}>
-              {canStart ? t('sg.canStart') : `${t('sg.cannotStart')} ${req.startBlockers.map((b) => t(`sg.b.${b}`, b)).join(' · ')}`}
+              {canStart ? t('sg.canStart') : <>{t('sg.cannotStart')}<DetailItems items={req.startBlockers.map(b => t(`sg.b.${b}`, b))} /></>}
             </div>
             {canStart && <button className="primary" disabled={busy} onClick={start} data-testid="signing-start" aria-describedby="sg-start-note">{t('sg.start')}</button>}
             <p id="sg-start-note" className="dim" style={{ fontSize: 12 }}>{t('sg.startNote')}</p>

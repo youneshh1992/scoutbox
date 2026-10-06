@@ -1,3 +1,4 @@
+import { RecordFacts, DetailItems } from './RecordDetails';
 // M20 org screen — the Director Dashboard.
 //
 // One sentence governs every pixel below:
@@ -202,9 +203,7 @@ function PipelinePanels({ f }: { f: Family }) {
           </table>
         </div>
         {codes.length > 0 && (
-          <p className="muted small">
-            {t('m20.mix.codes')}: {codes.map((c) => `${reasonLabel(c.code)} (${c.value})`).join(' · ')}
-          </p>
+          <div aria-label={t('m20.mix.codes')}><RecordFacts items={codes.map(c => ({label: reasonLabel(c.code), value: c.value}))} /></div>
         )}
       </Panel>
 
@@ -346,9 +345,7 @@ function AgingPanels({ f, onDrill }: { f: Family; onDrill: (metric: string) => v
           <b data-stalled={String(stalled?.value ?? 0)}>{stalled?.value ?? 0}</b>{' '}
           {t('m20.stalled.of').replace('{open}', String((stalled?.openRooms as Figure | undefined)?.value ?? 0)).replace('{days}', String(stalled?.thresholdDays ?? 30))}
         </p>
-        <p className="muted small">
-          {thresholds.map((th) => `${th.days}d: ${th.value}`).join(' · ')}
-        </p>
+        <RecordFacts items={thresholds.map(th => ({label: `${th.days} days`, value: th.value}))} />
         {rows.length > 0 && (
           <ul className="plain small">
             {rows.slice(0, 5).map((r) => (
@@ -394,7 +391,7 @@ function DecisionPanels({ f }: { f: Family }) {
         <p>{figureWords(m.evidence_limited_exits as unknown as Figure)}</p>
         <p className="muted small">{t('m20.evidence.why')}</p>
         {evRows.some((r) => r.value > 0) && (
-          <p className="muted small">{evRows.filter((r) => r.value > 0).map((r) => `${reasonLabel(r.code)} (${r.value})`).join(' · ')}</p>
+          <RecordFacts items={evRows.filter(r => r.value > 0).map(r => ({label: reasonLabel(r.code), value: r.value}))} />
         )}
       </Panel>
     </>
@@ -873,7 +870,7 @@ export function DirectorDashboardScreen({ session, tick, notify, filters, onFilt
         <details className="card f-about" data-never-built="true">
           <summary>{t('m20.neverBuilt.title')}</summary>
           <p>{catalogue.neverBuilt.reason}</p>
-          <p className="muted small">{catalogue.neverBuilt.names.join(' · ')}</p>
+          <p className="muted small"><DetailItems items={catalogue.neverBuilt.names} /></p>
         </details>
       )}
     </div>

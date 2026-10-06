@@ -1,3 +1,4 @@
+import { RecordFacts, DetailItems } from './RecordDetails';
 import { sentenceCase } from './presentation';
 import { CountChart, countBy } from './ScoutVisuals';
 // M18 org screens — Second Look, Nobody Missed, Recruitment Briefs.
@@ -457,7 +458,7 @@ function ReviewChangesView({ session, item, onBack }: { session: Session; item: 
             {data.previous?.at ? fmtDate(data.previous.at) : <span className="dim">—</span>}
             {data.previous?.recommendation && <> · {t(`rm.rec.${data.previous.recommendation}`, data.previous.recommendation.replace(/_/g, ' '))}</>}
             {(data.previous?.reasonCodes ?? []).length > 0 && (
-              <div className="dim">{t('m18.sl.originalReason')}: {(data.previous?.reasonCodes ?? []).map(reasonLabel).join(' · ')}</div>
+              <div className="dim">{t('m18.sl.originalReason')}: <DetailItems items={(data.previous?.reasonCodes ?? []).map(reasonLabel)} /></div>
             )}
             {data.previous?.note && <div className="dim">{data.previous.note}</div>}
           </div>
@@ -738,7 +739,6 @@ function CandidateRow({
   const [dismissOpen, setDismissOpen] = useState(false);
   const [reason, setReason] = useState<string>(NOBODY_MISSED_DISMISS_REASONS[0]);
   const name = item.name ?? item.playerId;
-  const line = [item.position ?? '—', item.age != null ? String(item.age) : null, item.distanceKm != null ? `${item.distanceKm} km` : null].filter(Boolean).join(' · ');
   const met = item.reasons.filter((r) => r.met).length;
 
   return (
@@ -747,7 +747,7 @@ function CandidateRow({
         <span className="p-avatar" aria-hidden="true">{initialsOf(item.name)}</span>
         <span className="nm-row-main">
           <b>{name}</b>
-          <span className="dim">{line}{item.reasons.length ? ` · ${met}/${item.reasons.length} ${t('m18.nm.criteriaMet', 'criteria met')}` : ''}</span>
+          <RecordFacts items={[{label: 'Position', value: item.position}, {label: 'Age', value: item.age}, ...(item.distanceKm != null ? [{label: 'Distance', value: `${item.distanceKm} km`}] : []), ...(item.reasons.length ? [{label: t('m18.nm.criteriaMet', 'Criteria met'), value: `${met}/${item.reasons.length}`}] : [])]} />
         </span>
         {item.lastEvidenceAt && <span className="dim nm-row-when">{fmtDate(item.lastEvidenceAt)}</span>}
         <span className="dim" aria-hidden="true">{open ? '⌄' : '›'}</span>

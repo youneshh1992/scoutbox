@@ -1,3 +1,4 @@
+import { RecordFacts } from './RecordDetails';
 // M21 — the Development Hub, inside a player.
 //
 // It is reached from a player, which is where a development plan belongs, and
@@ -397,10 +398,11 @@ export function DevelopmentPanel({ session, playerId, notify }: {
               <span>{t('m21.linkedEvidence')}: <b>{view.summary.linkedEvidenceAvailable}</b></span>
             </div>
             <div className="dim" style={{ fontSize: 12.5, marginTop: 4 }}>
-              {t('m21.lastReview')}: {view.summary.lastReviewAt ? fmtDate(view.summary.lastReviewAt) : t('m21.none')}
-              {' · '}
-              {t('m21.nextReview')}: {view.summary.nextReviewAt ? fmtDate(view.summary.nextReviewAt) : t('m21.none')}
-              {view.summary.reviewDue.state === 'review_overdue' ? ` · ${t('m21.reviewOverdue')}` : ''}
+              <RecordFacts items={[
+                {label: t('m21.lastReview'), value: view.summary.lastReviewAt ? fmtDate(view.summary.lastReviewAt) : t('m21.none')},
+                {label: t('m21.nextReview'), value: view.summary.nextReviewAt ? fmtDate(view.summary.nextReviewAt) : t('m21.none')},
+              ]} />
+              {view.summary.reviewDue.state === 'review_overdue' && <Pill tone="gold">{t('m21.reviewOverdue')}</Pill>}
             </div>
             {/* Said out loud exactly where a headline number would sit. */}
             <div className="dim" style={{ fontSize: 11.5, marginTop: 6 }} data-no-score>{view.summary.note}</div>
