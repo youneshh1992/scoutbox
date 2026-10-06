@@ -12,6 +12,8 @@ black/purple financial software, lavender/pink gradient light, maps and charts.
   compact navigation, search and tools, ledgers, category navigation and forms.
 - `AgentVisuals.tsx`: shared Agent brand, headings, interactive world map, real
   permitted-record counts, portfolio distribution, activity chart and register.
+- `AgentExperience.tsx`: viewport-triggered reveal motion with reduced-motion support,
+  keyboard-accessible desk tabs, and notification presentation.
 - `App.tsx`, `navui.tsx`, `screens.tsx`, `transactions.tsx`: entry/access, workspace,
   client search/filter, record headers, transaction register and correspondence.
 - `assets/worldCountries.json`: bundled Natural Earth country outlines; public
@@ -29,6 +31,16 @@ consents and provenance continue to reflect server answers.
 All styling is local to Agent. Pro, Grassroots, Player, shared styling and backend
 sources remain unchanged. Do not replace approved app designs with this theme.
 
+## Latest refinement
+
+Agent now has an unboxed directional signature alongside the ScoutBox wordmark.
+Opportunities use a searchable, filterable deadline board. Agency views include
+member cards, credential records, operating settings and an audit timeline.
+Profile work is divided into identity, credentials, authorisations and activity;
+compliance into standing, conflict checks, consents and reviews/access. Notifications
+use an independently scrolling journal. The world map uses Natural Earth I with
+uniform scaling. Cards, maps and charts begin their reveal when entering view.
+
 ## Artifact
 
 Run `node e2e/buildDemos.mjs`, then `node e2e/demoFreshness.test.mjs`.
@@ -39,6 +51,6 @@ and permanent-baseline approval have not been requested yet.
 ## Verification
 
 TypeScript, production and demo builds; existing navigation/category and icon
-checks; AST comparison of all 79 existing Agent API calls; browser inspection of
+checks; AST comparison of all 81 existing Agent API calls; browser inspection of
 the eight primary screens, client/transaction records, search, map filters,
 notifications, report tool, access screen and responsive layout.

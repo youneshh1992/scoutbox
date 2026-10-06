@@ -7,6 +7,8 @@
 // outcome, a rule status or a consent's sufficiency; a refusal is shown with
 // the codes the server returned and the shared HTTP reading. This is NOT a
 // transaction room: no offer, no terms, no fee and no negotiation exist here.
+import { AgentTabs, AgentPanel, DeskIntro } from './AgentExperience';
+import { Icon } from './icons';
 import { Hint } from '../../design-system/About';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ApiError, type Session } from './api';
@@ -319,6 +321,7 @@ function ContextDetail({ session, tick, notify, me, id, onBack, onOpenClient }: 
 
 // ------------------------------------------------------------ the screen
 export function ComplianceScreen({ session, tick, notify, me, contextId, onOpenContext, onOpenClient }: ScreenProps & { me: Me | null; contextId: string | null; onOpenContext: (id: string | null) => void; onOpenClient: (id: string) => void }) {
+  const [deskTab,setDeskTab]=useState('standing');
   const ov = useLoad(() => agent.complianceOverview(session), [session, tick]);
   const o = ov.data as ComplianceOverview | null;
   const canWrite = !!me?.capabilities.includes('compliance.contexts.write');
@@ -331,7 +334,7 @@ export function ComplianceScreen({ session, tick, notify, me, contextId, onOpenC
     try { const r = await agent.recheckFacet(session, facet, ma ?? undefined); notify(`${t('cx.rechecked')} ${tr(`state.${r.facet.state}`)}`); ov.reload(); } catch (e) { setErr(e); } finally { setBusy(false); }
   };
   return (
-    <div data-testid="agent-compliance">
+    <div className="a-compliance-desk" data-testid="agent-compliance">
       <Hint>{o?.honest ?? t('cx.intro')}</Hint>
       <Refusal error={ov.error} onRetry={ov.reload} />
       {ov.loading && !o && <Loading />}
@@ -348,6 +351,14 @@ export function ComplianceScreen({ session, tick, notify, me, contextId, onOpenC
           </div>
           <Refusal error={err} />
 
+          <AgentTabs scope="compliance" value={deskTab} onChange={setDeskTab} items={[
+            {id:'standing',label:'Standing',icon:'shield-check'},
+            {id:'cases',label:'Conflict checks',icon:'briefcase',count:o.counts.contextsOpen},
+            {id:'consents',label:'Consents',icon:'clipboard',count:o.counts.consentsOutstanding},
+            {id:'reviews',label:'Reviews & access',icon:'badge-check',count:o.counts.reviewsPending},
+          ]}/>
+          <AgentPanel scope="compliance" id="standing" active={deskTab}>
+          <DeskIntro eyebrow="REGULATORY STANDING" title="A clear view of your obligations" description="Policy versions and credential checks, with the status of each record." icon="shield-check"/>
           <Section title={t('cx.policies')} testId="policies-section">
             <div className="list-rows">
               {o.policies.inEffect.map((p) => <div key={p.id} className="list-row" data-testid={`policy-${p.id}`}><span className="grow"><b>{p.id}</b> <span className="dim">· {p.regulator} · {p.jurisdiction}</span></span><span className="dim">{t('cx.effectiveFrom')} {/^\d{4}-\d{2}-\d{2}$/.test(p.effectiveFrom) ? fmtDate(Date.parse(`${p.effectiveFrom}T00:00:00Z`)) : p.effectiveFrom}</span></div>)}
@@ -361,6 +372,9 @@ export function ComplianceScreen({ session, tick, notify, me, contextId, onOpenC
             <div className="list-rows">{o.freshness.map((f) => <FreshnessRow key={`${f.facet}-${f.memberAssociation ?? ''}`} f={f} canRecheck={canWrite} onRecheck={recheck} busy={busy} />)}</div>
           </Section>
 
+          </AgentPanel>
+          <AgentPanel scope="compliance" id="cases" active={deskTab}>
+          <DeskIntro eyebrow="COMPLIANCE DESK" title="Review the parties. Record the outcome." description="Create a context to review representation conflicts and track its clearance." icon="briefcase"/>
           <Section title={t('cx.contexts')} testId="contexts-section">
             <Hint className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>{t('cx.contextsIntro')}</Hint>
             {canWrite && !showNew && <div style={{ marginBottom: 10 }}><button className="primary" onClick={() => setShowNew(true)} data-testid="open-new-context">{t('cx.new')}</button></div>}
@@ -375,22 +389,28 @@ export function ComplianceScreen({ session, tick, notify, me, contextId, onOpenC
                   <button onClick={() => onOpenContext(c.id)}>{t('common.open')}</button>
                 </div>
               ))}
-              {o.contexts.length === 0 && <div className="notice">{t('cx.noContexts')}</div>}
+              {o.contexts.length === 0 && <div className="a-empty-state"><Icon name="briefcase" size={30}/><p>{t('cx.noContexts')}</p></div>}
             </div>
           </Section>
 
+          </AgentPanel>
+          <AgentPanel scope="compliance" id="consents" active={deskTab}>
+          <DeskIntro eyebrow="COMPLIANCE DESK" title="Every consent, in one ledger" description="Track each party’s consent, its status and the context it belongs to." icon="clipboard"/>
           <Section title={t('cx.consents')} testId="consents-section">
             <div className="list-rows">
               {o.consents.map((k) => <ConsentRow key={k.id} k={k} onOpenContext={onOpenContext} />)}
-              {o.consents.length === 0 && <div className="notice">{t('cx.noConsents')}</div>}
+              {o.consents.length === 0 && <div className="a-empty-state"><Icon name="clipboard" size={30}/><p>{t('cx.noConsents')}</p></div>}
             </div>
             <Hint className="dim" style={{ fontSize: 12.5, marginTop: 6 }}>{t('cx.consentsNote')}</Hint>
           </Section>
 
+          </AgentPanel>
+          <AgentPanel scope="compliance" id="reviews" active={deskTab}>
+          <DeskIntro eyebrow="COMPLIANCE DESK" title="Reviews and restricted access" description="Review decisions, outstanding items and jurisdiction-specific access requirements." icon="badge-check"/>
           <Section title={t('cx.reviews')} testId="reviews-section">
             <div className="list-rows">
               {o.reviews.map((r) => <ReviewRow key={r.id} r={r} onOpenContext={onOpenContext} />)}
-              {o.reviews.length === 0 && <div className="notice">{t('cx.noReviews')}</div>}
+              {o.reviews.length === 0 && <div className="a-empty-state"><Icon name="badge-check" size={30}/><p>{t('cx.noReviews')}</p></div>}
             </div>
             <Hint className="dim" style={{ fontSize: 12.5, marginTop: 6 }}>{t('cx.reviewsNote')}</Hint>
           </Section>
@@ -399,6 +419,7 @@ export function ComplianceScreen({ session, tick, notify, me, contextId, onOpenC
             <div className="notice warn" style={{ marginBottom: 8 }} data-testid="minors-closed">{t('cx.minorsNote')}</div>
             <div className="list-rows">{o.minorReadiness.map((m) => <MinorReadinessRow key={m.memberAssociation} m={m} />)}</div>
           </Section>
+          </AgentPanel>
         </>
       )}
     </div>

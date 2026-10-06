@@ -1,3 +1,4 @@
+import { AgentMotion, notificationPresentation } from './AgentExperience';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { applyTheme } from '../../design-system/theme';
 import { AuthAccessNote, AuthField, AuthRow, PasswordInput } from '../../design-system/AuthShell';
@@ -97,9 +98,7 @@ export default function App() {
   }, []);
   // Agent uses its dedicated black / violet appearance throughout.
   useEffect(()=>{applyTheme('agent','dark')},[]);
-  return session
-    ? <Workspace session={session} onLogout={logout} />
-    : <Login onLogin={login} />;
+  return <><AgentMotion/>{session ? <Workspace session={session} onLogout={logout} /> : <Login onLogin={login} />}</>;
 }
 
 function Login({ onLogin }: { onLogin: (s: Session) => void }) {
@@ -239,6 +238,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   const openTarget = useCallback(async (n: Notification) => {
     const target = n.target ?? null;
     const dest = NOTIFICATION_SCREEN[n.type];
+              const presentation=notificationPresentation(n.type);
     if (target?.kind === 'client' && session) {
       try {
         const list = await agent.clients(session);
@@ -466,19 +466,18 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
           onOpenDrawer={() => setDrawerOpen(true)}
         />
         {bellOpen && (
-          <div className="bell-panel">
-            {notifications.length === 0 && <div className="notice">{t('inbox.empty')}</div>}
+          <section className="bell-panel a-notification-centre" aria-label="Notifications"><header><div><span className="a-overline">AGENCY UPDATES</span><h3>Notifications <small>{notifications.length}</small></h3></div><button aria-label="Close notifications" onClick={()=>setBellOpen(false)}><Icon name="x" size={18}/></button></header>
+            <div className="a-notification-list">{notifications.length === 0 && <div className="notice">{t('inbox.empty')}</div>}
             {bellRows(notifications).slice(0, 20).map(({ n, count, unread: u }) => {
               const dest = NOTIFICATION_SCREEN[n.type];
+              const presentation=notificationPresentation(n.type);
               return (
-                <div key={n.id} className="list-row" style={{ opacity: u ? 1 : 0.7 }}>
-                  <span className="grow" style={{ fontSize: 13 }}>{n.text}{count > 1 && <span className="pill" style={{ marginLeft: 6 }}>×{count}</span>}</span>
-                  {(dest || n.target?.kind === 'client') && <button onClick={() => { void openTarget(n); setBellOpen(false); }}>{t('common.open')}</button>}
-                  <span className="dim">{fmtStamp(n.ts)}</span>
-                </div>
+                <article key={n.id} className={`a-bell-item ${presentation.tone} ${u?'unread':''}`}>
+                  <span className="a-bell-symbol"><Icon name={presentation.icon} size={19}/></span><div><header><strong>{presentation.title}</strong><time>{fmtStamp(n.ts)}</time></header><p>{n.text}</p><footer>{u&&<span className="a-unread-label">Unread</span>}{count>1&&<span className="pill">×{count}</span>}{(dest || n.target?.kind === 'client') && <button onClick={() => { void openTarget(n); setBellOpen(false); }}>View record <Icon name="arrow-up-right" size={13}/></button>}</footer></div>
+                </article>
               );
             })}
-          </div>
+          </div><footer className="a-bell-footer"><button onClick={()=>{setScreen('inbox');setBellOpen(false)}}>Open correspondence <Icon name="arrow-up-right" size={14}/></button></footer></section>
         )}
         {activeSection && <SecondaryNav section={activeSection} activeItemId={loc.itemId} onNavigate={setScreen} />}
         <div className="content" data-screen={screen}>
@@ -497,7 +496,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
           {screen === 'clients' && (
             <ClientsScreen {...props} me={me} clientId={client?.id ?? null} clientTab={client?.tab ?? 'overview'} onOpenClient={openClient} onClientTab={clientTab} onCloseClient={closeClient} />
           )}
-          {screen === 'opportunities' && <OpportunitiesScreen {...props} me={me} />}
+          {screen === 'opportunities' && <OpportunitiesScreen {...props} me={me} onOpenClient={id=>openClient(id,'opportunities')} />}
           {screen === 'inbox' && <InboxScreen {...props} onOpenClient={openClient} />}
           {screen === 'agency' && <AgencyScreen {...props} me={me} tab={agencyTab} onTab={selectAgencyTab} />}
         </div>

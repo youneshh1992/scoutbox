@@ -1,3 +1,4 @@
+import { AgentTabs, AgentPanel, DeskIntro } from './AgentExperience';
 import { Icon } from './icons';
 import { AgentDashboard } from './AgentVisuals';
 import type { ScreenId } from './App';
@@ -140,9 +141,9 @@ function FacetCard({ title, facet, ma, testProvider, onSubmit, note }: { title: 
     try { await onSubmit(ref.trim(), ma); setRef(''); setEditing(false); markClean(); } catch (e) { setErr(e); } finally { setBusy(false); }
   };
   return (
-    <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }} data-testid={`facet-${title.toLowerCase().replace(/[^a-z]+/g, '-')}${ma ? `-${ma.toLowerCase()}` : ''}`}>
+    <div className="list-row a-credential-card" data-state={state} style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }} data-testid={`facet-${title.toLowerCase().replace(/[^a-z]+/g, '-')}${ma ? `-${ma.toLowerCase()}` : ''}`}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <b className="grow">{title}{ma ? ` · ${ma}` : ''}</b>
+        <span className={`a-credential-symbol ${state==='VERIFIED'?'verified':''}`}><Icon name={state==='VERIFIED'?'badge-check':'shield-check'} size={23}/></span><b className="grow">{title}{ma ? ` · ${ma}` : ''}</b>
         <StatePill state={state} />
       </div>
       {facet?.provenance && (
@@ -175,6 +176,7 @@ export function ProfileScreen({ session, tick, notify, me }: ScreenProps & { me:
   const canWrite = !!me?.capabilities.includes('profile.write.own');
   const testProvider = !!me?.platform.testVerificationProvider;
   const [name, setName] = useState('');
+  const [profileTab,setProfileTab]=useState('identity');
   const [licence, setLicence] = useState('');
   const [juris, setJuris] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -200,12 +202,13 @@ export function ProfileScreen({ session, tick, notify, me }: ScreenProps & { me:
       <Hint>{p?.honest ?? t('profile.declaredNote')}</Hint>
       <ErrorLine error={prof.error} onRetry={prof.reload} />
       {prof.loading && !prof.data && <Loading />}
+      <AgentTabs scope="profile" value={profileTab} onChange={setProfileTab} items={[{id:'identity',label:'Identity',icon:'user'},...(p?[{id:'credentials',label:'Credentials',icon:'badge-check'},{id:'permissions',label:'Authorisations',icon:'shield-check'},{id:'history',label:'Activity',icon:'calendar-days'}]:[])]}/>
       {prof.data && (
         <>
           {!p && !canWrite && <div className="notice">{t('profile.none')}</div>}
           {(p || canWrite) && (
-            <Section title={p ? t('profile.title') : t('profile.create')}>
-              <div className="form-grid" data-testid="profile-form">
+            <AgentPanel scope="profile" id="identity" active={profileTab}><Section title={p ? t('profile.title') : t('profile.create')}>
+              <DeskIntro eyebrow="PERSONAL DETAILS" title="Your professional identity" description="Manage the details clients see and the jurisdictions you declare." icon="user"/><div className="form-grid" data-testid="profile-form">
                 <label>{t('profile.displayName')}<input value={name} onChange={(e) => { setName(e.target.value); markDirty(); }} disabled={!canWrite} /></label>
                 <label>{t('profile.licenceNumber')}<input value={licence} onChange={(e) => { setLicence(e.target.value); markDirty(); }} disabled={!canWrite} /></label>
                 <div>
@@ -220,13 +223,13 @@ export function ProfileScreen({ session, tick, notify, me }: ScreenProps & { me:
               <Hint className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>{t('profile.declaredNote')} {p?.facets.fifa_licence?.state === 'VERIFIED' ? t('profile.resetWarning') : ''}</Hint>
               {conflict ? <ConflictNotice conflict={conflict} onReload={() => { setErr(null); prof.reload(); }} /> : <ErrorLine error={err} />}
               {canWrite && <button className="primary" disabled={busy || !name.trim()} onClick={save} data-testid="profile-save">{p ? t('common.save') : t('profile.create')}</button>}
-            </Section>
+            </Section></AgentPanel>
           )}
           {p && (
             <>
-              <Section title={t('profile.facets')}>
+              <AgentPanel scope="profile" id="credentials" active={profileTab}><Section title={t('profile.facets')}>
                 <div className="notice" style={{ marginBottom: 10 }} data-testid="provider-note">{testProvider ? t('profile.testProvider') : t('profile.noProvider')}</div>
-                <div className="list-rows">
+                <div className="a-credentials-grid">
                   <FacetCard title={t('profile.fifa')} facet={p.facets.fifa_licence} testProvider={testProvider} onSubmit={submitFacet('fifa_licence')} />
                   {(juris.length ? juris : ['ENG']).map((ma) => (
                     <FacetCard key={`nr-${ma}`} title={t('profile.national')} ma={ma} facet={p.facets.national_registration[ma] ?? null} testProvider={testProvider} onSubmit={submitFacet('national_registration')} />
@@ -238,9 +241,9 @@ export function ProfileScreen({ session, tick, notify, me }: ScreenProps & { me:
                     <FacetCard key={`mn-${ma}`} title={t('profile.minors')} ma={ma} facet={p.facets.minors_authorisation[ma] ?? null} testProvider={testProvider} onSubmit={submitFacet('minors_authorisation')} note={t('profile.minorsNote')} />
                   ))}
                 </div>
-              </Section>
-              <Section title={t('profile.regulated')}>
-                <div className="list-rows" data-testid="regulatory-state">
+              </Section></AgentPanel>
+              <AgentPanel scope="profile" id="permissions" active={profileTab}><Section title={t('profile.regulated')}>
+                <DeskIntro eyebrow="OPERATING PERMISSIONS" title="Where you can act" description="Current authorisations, shown separately for each jurisdiction." icon="shield-check"/><div className="list-rows a-permissions-grid" data-testid="regulatory-state">
                   <div className="list-row"><span className="grow">FIFA · INT</span>{p.regulatoryState.fifaLicence === 'VERIFIED' ? <span className="pill green">{t('profile.regulated')}</span> : <span className="pill red">{t('profile.notRegulated')}</span>}</div>
                   {p.regulatoryState.jurisdictions.map((j) => (
                     <div key={j.memberAssociation} className="list-row">
@@ -249,14 +252,14 @@ export function ProfileScreen({ session, tick, notify, me }: ScreenProps & { me:
                     </div>
                   ))}
                 </div>
-              </Section>
-              <Section title={t('profile.history')}>
-                <div className="list-rows">
+              </Section></AgentPanel>
+              <AgentPanel scope="profile" id="history" active={profileTab}><Section title={t('profile.history')}><DeskIntro eyebrow="YOUR RECORD" title="Credential activity" description="An attributed record of submissions and changes." icon="calendar-days"/>
+                <div className="list-rows a-history-ledger">
                   {p.history.slice().reverse().slice(0, 12).map((h) => (
                     <div key={h.id} className="list-row"><span className="grow">{(() => { const a = h.action.replace(/^agent_/, '').replace(/_/g, ' '); return a.charAt(0).toUpperCase() + a.slice(1); })()}{h.detail?.facet ? ` · ${tr(`facet.${String(h.detail.facet)}`)}${h.detail.memberAssociation ? ` (${String(h.detail.memberAssociation)})` : ''}` : ''}{h.detail?.to ? ` → ${tr(`state.${String(h.detail.to)}`)}` : ''}</span><span className="dim">{fmtStamp(h.at)}</span></div>
                   ))}
                 </div>
-              </Section>
+              </Section></AgentPanel>
             </>
           )}
         </>
@@ -851,28 +854,34 @@ export function ClientsScreen({ session, tick, notify, me, clientId, clientTab, 
 }
 
 // ============================================================ Opportunities
-function OppRow({ o }: { o: Opportunity }) {
-  return (
-    <div className="list-row a-opportunity" data-testid={`opp-${o.id}`}><span className="a-opportunity-icon"><Icon name="briefcase" size={22}/></span>
-      <span className="grow"><b>{o.title}</b> <span className="dim">· {o.orgName} · {o.type.replace(/_/g, ' ')}{o.category ? ` · ${o.category}` : ''}{o.distance ? ` · ${o.distance}` : ''}</span>{o.clientName ? <span className="dim"> · {t('opps.client')}: {o.clientName}</span> : null}</span>
-      <span className="dim">{t('opps.deadline')} {new Date(o.deadline).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'})}</span>
-      {o.applied ? <span className="pill green">Applied</span> : null}
-    </div>
-  );
+function OppRow({o,onOpenClient}:{o:Opportunity;onOpenClient?:(id:string)=>void}) {
+ const date=new Date(o.deadline);const valid=Number.isFinite(date.getTime());
+ return <article className="a-opportunity-v2" data-testid={`opp-${o.id}`}>
+   <header><span className="a-org-seal">{o.orgName.split(' ').map(n=>n[0]).slice(0,2).join('')}</span><div><strong>{o.orgName}</strong><span>{o.type.replace(/_/g,' ')}</span></div><span className="a-deadline"><b>{valid?date.getUTCDate():'—'}</b><span>{valid?date.toLocaleDateString('en-GB',{month:'short',timeZone:'UTC'}):'No date'}</span></span></header>
+   <h3>{o.title}</h3><div className="a-opportunity-tags">{o.category&&<span>{o.category}</span>}{o.distance&&<span><Icon name="globe" size={12}/>{o.distance}</span>}<span>{o.applied?'Applied':'Available on client board'}</span></div>
+   <footer><div><span className="a-overline">CLIENT</span><strong>{o.clientName??'Client record'}</strong></div>{o.agreementId&&onOpenClient&&<button aria-label={`View ${o.clientName??'client'} opportunities`} onClick={()=>onOpenClient(o.agreementId!)}>Client board <Icon name="arrow-up-right" size={15}/></button>}</footer>
+   <div className="a-opportunity-date">Deadline {valid?date.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'}):o.deadline}</div>
+ </article>;
 }
-export function OpportunitiesScreen({ session, tick, me }: ScreenProps & { me: Me | null }) {
+export function OpportunitiesScreen({ session, tick, me, onOpenClient }: ScreenProps & { me: Me | null;onOpenClient:(id:string)=>void }) {
   const licensed = !!me?.capabilities.includes('clients.opportunities.read');
   const data = useLoad(() => (licensed ? agent.opportunities(session) : Promise.resolve(null)), [session, tick, licensed]);
-  return (
-    <div data-testid="agent-opportunities">
-      <Hint>{t('opps.intro')}</Hint>
-      {!licensed && <div className="notice warn">{t('opps.notLicensed')}</div>}
-      <ErrorLine error={data.error} onRetry={data.reload} />
-      {licensed && data.loading && !data.data && <Loading />}
-      {data.data && data.data.items.length === 0 && <div className="notice">{t('opps.empty')}</div>}
-      <div className="a-opportunity-grid">{(data.data?.items ?? []).map((o) => <OppRow key={`${o.clientId}-${o.id}`} o={o} />)}</div>
-    </div>
-  );
+  const [query,setQuery]=useState(''),[type,setType]=useState('all'),[order,setOrder]=useState('deadline');
+  const items=data.data?.items??[];
+  const types=[...new Set(items.map(o=>o.type))];
+  const shown=items.filter(o=>(type==='all'||o.type===type)&&`${o.title} ${o.orgName} ${o.clientName??''}`.toLowerCase().includes(query.toLowerCase())).sort((a,b)=>order==='deadline'?a.deadline.localeCompare(b.deadline):a.orgName.localeCompare(b.orgName));
+  return <div data-testid="agent-opportunities">
+    <Hint>{t('opps.intro')}</Hint>
+    {!licensed && <div className="notice warn">{t('opps.notLicensed')}</div>}
+    <ErrorLine error={data.error} onRetry={data.reload}/>
+    {licensed&&data.loading&&!data.data&&<Loading/>}
+    {data.data&&<><div className="a-business-hero a-market-hero"><div><span className="a-overline">THE OPPORTUNITY BOARD</span><h3>Find the next opening.</h3><p>Opportunities visible to your confirmed clients, ready for a closer look.</p></div><div className="a-business-total"><strong>{items.length.toString().padStart(2,'0')}</strong><span>visible opportunities</span></div></div>
+      <div className="a-opportunity-controls"><label className="a-inline-search"><Icon name="search" size={17}/><input aria-label="Search opportunities" placeholder="Search opportunity, club or client" value={query} onChange={e=>setQuery(e.target.value)}/></label><select aria-label="Sort opportunities" value={order} onChange={e=>setOrder(e.target.value)}><option value="deadline">Closing soonest</option><option value="club">Club name</option></select></div>
+      <div className="a-filter-pills" aria-label="Opportunity type"><button aria-pressed={type==='all'} onClick={()=>setType('all')}>All opportunities <b>{items.length}</b></button>{types.map(x=><button key={x} aria-pressed={type===x} onClick={()=>setType(x)}>{x.replace(/_/g,' ')} <b>{items.filter(o=>o.type===x).length}</b></button>)}<span>{shown.length} in this view</span></div>
+      <div className="a-opportunity-board">{shown.map(o=><OppRow key={`${o.clientId}-${o.id}`} o={o} onOpenClient={onOpenClient}/>)}</div>
+      {!shown.length&&<div className="a-empty-state"><Icon name="search" size={30}/><h3>{items.length?'No matching opportunities':'Your board is clear'}</h3><p>{items.length?'Try another name or opportunity type.':t('opps.empty')}</p></div>}
+    </>}
+  </div>;
 }
 
 // ============================================================ Inbox
@@ -942,22 +951,22 @@ function TeamTab({ session, tick, notify, me }: ScreenProps & { me: Me | null })
   const conflict = conflictOf(err);
   return (
     <>
-      <Hint>{t('agency.teamIntro')}</Hint>
+      <DeskIntro eyebrow="PEOPLE & ACCESS" title="The people behind your agency" description="A named account for every member, with a clear role and access record." icon="users"/><Hint>{t('agency.teamIntro')}</Hint>
       {!canWrite && <div className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>{t('agency.readOnly')}</div>}
       {conflict ? <ConflictNotice conflict={conflict} onReload={() => { setErr(null); team.reload(); }} /> : <ErrorLine error={err} />}
       <ErrorLine error={team.error} onRetry={team.reload} />
       {team.data && (
-        <div className="list-rows" data-testid="team-rows">
+        <div className="a-team-grid" data-testid="team-rows">
           {team.data.members.map((m) => (
-            <div key={m.affiliationId} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }} data-testid={`member-${m.userId}`} data-active={m.active ? '1' : '0'}>
+            <div key={m.affiliationId} className="list-row a-person-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }} data-testid={`member-${m.userId}`} data-active={m.active ? '1' : '0'}>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                <span className="grow"><b>{m.name}</b> <span className="dim">· {m.role}{!m.active ? ` · ${t('agency.ended')}${m.endedAt ? ` ${fmtDate(m.endedAt)}` : ''}` : ''}</span></span>
+                <span className="a-member-avatar">{(m.name??'').split(' ').map(n=>n[0]).slice(0,2).join('')}</span><span className="grow"><b>{m.name}</b> <span className="dim">· {m.role}{!m.active ? ` · ${t('agency.ended')}${m.endedAt ? ` ${fmtDate(m.endedAt)}` : ''}` : ''}</span></span>
                 {m.licensed ? <StatePill state={m.fifaLicence ?? 'UNVERIFIED'} /> : <span className="pill">{t('agency.noProfile')}</span>}
               </div>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                {TIERS.map((x) => (
-                  <label key={x} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, color: 'var(--muted)' }} title={tr(`tierNote.${x}`)}>
-                    <input type="checkbox" checked={(edits[m.userId] ?? m.tiers).includes(x)} disabled={!canWrite || !m.active} onChange={() => setEdits((c) => ({ ...c, [m.userId]: toggle(c[m.userId] ?? m.tiers, x) }))} /> {tr(`tier.${x}`)}
+                {(canWrite&&m.active?TIERS:m.tiers).map((x) => (
+                  <label className={`a-role-chip ${(edits[m.userId]??m.tiers).includes(x)?'selected':''}`} key={x} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, color: 'var(--muted)' }} title={tr(`tierNote.${x}`)}>
+                    {canWrite&&m.active?<input type="checkbox" checked={(edits[m.userId] ?? m.tiers).includes(x)} onChange={() => setEdits((c) => ({ ...c, [m.userId]: toggle(c[m.userId] ?? m.tiers, x) }))} />:<Icon name="badge-check" size={12}/>} {tr(`tier.${x}`)}
                   </label>
                 ))}
                 {canWrite && m.active && edits[m.userId] && <button className="primary" disabled={busy} onClick={() => saveTiers(m)}>{t('agency.saveTiers')}</button>}
@@ -993,9 +1002,9 @@ function ComplianceTab({ session, tick }: ScreenProps) {
       {data.data && (
         <>
           <Hint className="notice" style={{ marginBottom: 10 }} testID="compliance-honest">{data.data.honest}</Hint>
-          <div className="list-rows" data-testid="compliance-rows">
+          <DeskIntro eyebrow="AGENCY CREDENTIALS" title="Your team’s professional standing" description="Individual credentials and jurisdiction records, kept separate from agency membership." icon="shield-check"/><div className="a-agency-credentials" data-testid="compliance-rows">
             {data.data.agents.map((a: ComplianceRow) => (
-              <div key={a.userId} className="list-row"><span className="grow"><b>{a.name}</b>{!a.hasProfile && <span className="dim"> · {t('agency.noProfile')}</span>}{a.jurisdictions.map((j) => <span key={j.memberAssociation} className="dim"> · {j.memberAssociation}: <StatePill state={j.nationalRegistration} /></span>)}</span><StatePill state={a.fifaLicence} /></div>
+              <div key={a.userId} className="list-row a-person-card"><span className="a-member-avatar">{(a.name??'').split(' ').map(n=>n[0]).slice(0,2).join('')}</span><span className="grow"><b>{a.name}</b>{!a.hasProfile && <span className="dim"> · {t('agency.noProfile')}</span>}{a.jurisdictions.map((j) => <span key={j.memberAssociation} className="a-standing-fact"><span>{j.memberAssociation} registration</span><StatePill state={j.nationalRegistration} /></span>)}</span><div className="a-licence-status"><span>FIFA licence</span><StatePill state={a.fifaLicence} /></div></div>
             ))}
             {data.data.agents.length === 0 && <div className="notice">{t('common.none')}</div>}
           </div>
@@ -1025,12 +1034,12 @@ function SettingsTab({ session, tick, notify, me, overview }: ScreenProps & { me
   };
   return (
     <>
-      <Hint>{t('agency.settingsIntro')}</Hint>
+      <DeskIntro eyebrow="AGENCY PREFERENCES" title="Your operating profile" description="Keep your agency description and declared markets up to date." icon="building"/><Hint>{t('agency.settingsIntro')}</Hint>
       <div className="form-grid" data-testid="agency-settings">
-        <label>{t('agency.description')}<input value={desc} onChange={(e) => { setDesc(e.target.value); markDirty(); }} disabled={!canWrite} /></label>
+        <label>{t('agency.description')}{canWrite?<textarea rows={4} value={desc} onChange={(e) => { setDesc(e.target.value); markDirty(); }} />:<p className="a-readonly-value">{desc||'No description recorded.'}</p>}</label>
         <div>
           <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 4 }}>{t('agency.jurisdictions')}</div>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>{JURISDICTIONS.map((j) => <label key={j} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}><input type="checkbox" checked={juris.includes(j)} disabled={!canWrite} onChange={() => { setJuris((c) => (c.includes(j) ? c.filter((x) => x !== j) : [...c, j])); markDirty(); }} /> {j}</label>)}</div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>{(canWrite?JURISDICTIONS:juris).map((j) => <label className={"a-role-chip "+(juris.includes(j)?'selected':'')} key={j} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>{canWrite&&<input type="checkbox" checked={juris.includes(j)} onChange={() => { setJuris((c) => (c.includes(j) ? c.filter((x) => x !== j) : [...c, j])); markDirty(); }} />} {j}</label>)}</div>
         </div>
       </div>
       <ErrorLine error={err} />
@@ -1039,7 +1048,7 @@ function SettingsTab({ session, tick, notify, me, overview }: ScreenProps & { me
         <Section title={t('agency.audit')}>
           <Hint>{t('agency.auditIntro')}</Hint>
           <ErrorLine error={auditErr} />
-          <div className="list-rows" data-testid="audit-rows">
+          <div className="list-rows a-history-ledger" data-testid="audit-rows">
             {rows.map((r) => (
               <div key={r.id} className="list-row"><span className="grow">{r.action.replace(/_/g, ' ')}{r.actor?.name ? ` · ${r.actor.name}` : ''}{typeof r.target.playerName === 'string' ? ` · ${r.target.playerName}` : ''}</span><span className="pill">{r.domain}</span><span className="dim">{fmtStamp(r.at)}</span></div>
             ))}
@@ -1060,14 +1069,14 @@ export function AgencyScreen({ session, tick, notify, me, tab, onTab }: ScreenPr
   return (
     <div data-testid="agent-agency">
       <Hint>{o?.honest ?? t('agency.honest')}</Hint>
-      <Tabs tabs={tabs} active={tab} onChange={onTab} label={t('agency.title')} labelFor={labelFor} />
+      <AgentTabs scope="agency" value={tab} onChange={onTab} items={tabs.map(id=>({id,label:labelFor(id),icon:id==='overview'?'pie-chart':id==='team'?'users':id==='compliance'?'shield-check':'building'}))}/>
       {tab === 'overview' && (
-        <Panel id="overview" label={labelFor('overview')}>
+        <AgentPanel scope="agency" active={tab} id="overview">
           <ErrorLine error={ov.error} onRetry={ov.reload} />
           {ov.loading && !o && <Loading />}
           {o && (
             <>
-              <h3 style={{ margin: '0 0 10px' }}>{o.org.name}</h3>
+              <div className="a-business-hero"><span className="a-agency-emblem"><Icon name="building" size={36}/></span><div><span className="a-overline">YOUR AGENCY</span><h3>{o.org.name}</h3><p>{o.settings.description||'Your people, relationships and permissions.'}</p><div className="a-jurisdiction-chips">{o.settings.jurisdictions.map(j=><span key={j}>{j}</span>)}</div></div></div>
               <div className="stat-grid" data-testid="agency-stats">
                 <Stat v={o.members.active} k={t('agency.members')} />
                 <Stat v={o.members.admins} k={t('agency.admins')} />
@@ -1077,15 +1086,15 @@ export function AgencyScreen({ session, tick, notify, me, tab, onTab }: ScreenPr
                 <Stat v={o.relationships.legacy} k={t('agency.relLegacy')} />
               </div>
               <Section title={t('agency.roles')}>
-                <div className="list-rows">{o.tiers.map((x) => <div key={x} className="list-row"><span className="grow"><b>{tr(`tier.${x}`)}</b> <span className="dim">· {tr(`tierNote.${x}`)}</span></span><span className="dim">{(Object.entries(o.permissions).filter(([, v]) => v.includes(x)).map(([k]) => k)).length} permissions</span></div>)}</div>
+                <div className="list-rows">{o.tiers.map((x) => <div key={x} className="list-row a-permission-row"><span className="a-role-symbol"><Icon name={x==='licensed_agent'?'badge-check':x==='agency_admin'?'building':'user'} size={19}/></span><span className="grow"><b>{tr(`tier.${x}`)}</b> <span className="dim">· {tr(`tierNote.${x}`)}</span></span><span className="dim">{(Object.entries(o.permissions).filter(([, v]) => v.includes(x)).map(([k]) => k)).length} permissions</span></div>)}</div>
               </Section>
             </>
           )}
-        </Panel>
+        </AgentPanel>
       )}
-      {tab === 'team' && <Panel id="team" label={labelFor('team')}><TeamTab session={session} tick={tick} notify={notify} me={me} /></Panel>}
-      {tab === 'compliance' && canCompliance && <Panel id="compliance" label={labelFor('compliance')}><ComplianceTab session={session} tick={tick} notify={notify} /></Panel>}
-      {tab === 'settings' && <Panel id="settings" label={labelFor('settings')}><SettingsTab session={session} tick={tick} notify={notify} me={me} overview={o} /></Panel>}
+      {tab === 'team' && <AgentPanel scope="agency" active={tab} id="team"><TeamTab session={session} tick={tick} notify={notify} me={me} /></AgentPanel>}
+      {tab === 'compliance' && canCompliance && <AgentPanel scope="agency" active={tab} id="compliance"><ComplianceTab session={session} tick={tick} notify={notify} /></AgentPanel>}
+      {tab === 'settings' && <AgentPanel scope="agency" active={tab} id="settings"><SettingsTab session={session} tick={tick} notify={notify} me={me} overview={o} /></AgentPanel>}
     </div>
   );
 }
