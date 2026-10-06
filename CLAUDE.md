@@ -86,3 +86,10 @@ Room and structured player dossiers. Preserve this direction across every
 workspace page; avoid reintroducing repeated rounded cards around paragraphs.
 The Clubhouse hero and earthy ScoutBox green identity remain. See the refinement
 and validation scope in `GRASSROOTS_CLUBHOUSE.md`.
+
+The 6 October Grassroots refinement adds `ScoutVisuals.tsx` and the scoped
+`scoutCharacter.css`: a compact account/club-standing panel, semantic page
+mastheads, position coverage on a pitch, count charts with optional bar/ring
+views, fixture columns and reduced-motion-aware animation. Preserve truthful
+count scopes and distinct loading/empty states; never manufacture scores or
+verification. See `GRASSROOTS_CLUBHOUSE.md` for the durable design rules.

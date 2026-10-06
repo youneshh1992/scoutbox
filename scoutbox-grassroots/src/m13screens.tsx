@@ -1,3 +1,4 @@
+import { CountChart, countBy } from './ScoutVisuals';
 // M13 org screens: Imports & Integrations, Coverage, Calibration, Scouting
 // Insight (exposure + review queue + evidence gaps), Club Network (groups +
 // transition packs), Deal Budgets, Representation (agency lane) and
@@ -147,6 +148,7 @@ export function CoverageScreen({ session, notify }: ScreenProps) {
 
   return (
     <div>
+      <CountChart title="Scout assignments" note="Recorded assignments, split by whether a scouting observation has been logged." unit="assignments" distribution items={assignments ? countBy(assignments, a => a.observedAt ? 'Observed' : 'Assigned') : null} />
       <div className="section">
         <h3>{t('m13.cov.plans')}</h3>
         {(plans ?? []).map((p) => (
@@ -308,6 +310,7 @@ export function InsightScreen({ session, notify, openPlayer }: ScreenProps) {
         <div className="section">
           <h3>{t('m13.exp.funnel')} <span className="dim" style={{ fontWeight: 400 }}>({report.funnel.windowDays}d)</span></h3>
           <div className="notice" style={{ fontSize: 12.5 }}>{report.funnel.definition}</div>
+          <CountChart title="Discovery activity" note={report.funnel.definition} unit="players" items={report.funnel.stages.map(st => ({label: st.key.replace(/_/g, ' '), value: st.players}))} />
           <div className="list-rows">
             {report.funnel.stages.map((st) => (
               <div key={st.key} className="list-row"><span className="grow">{st.key.replace(/_/g, ' ')}</span><b>{st.players}</b>{st.of !== undefined && <span className="dim">of {st.of}</span>}</div>
@@ -379,6 +382,7 @@ export function NetworkScreen({ session, notify }: ScreenProps) {
 
   return (
     <div>
+      <CountChart title="Your club network" note="Member organisations in each workspace you belong to. A club may belong to several workspaces." unit="clubs" items={groups ? groups.items.map(g => ({ label: g.name, value: g.members.length })) : null} />
       <div className="section">
         <h3>{t('m13.grp.title')}</h3>
         {(groups?.invites ?? []).map((iv) => (
@@ -583,6 +587,7 @@ export function OrganisationScreen({ session, notify }: ScreenProps) {
 
   return (
     <div className="settings-list">
+      {ob && <CountChart title="Workspace setup" note="Completed setup tasks. This tracks configuration, not a security score." unit="tasks" distribution items={[{label:'Complete',value:ob.tasks.filter(t => t.done).length},{label:'To complete',value:ob.tasks.filter(t => !t.done).length}]} />}
       {awaitingAck.length > 0 && (
         <div className="section" style={{ borderColor: 'var(--red, #c33)' }}>
           <h3><Icon name="triangle-alert" size={14} /> {t('m13.org.needsAck')}</h3>

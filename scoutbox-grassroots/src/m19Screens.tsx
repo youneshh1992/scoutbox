@@ -1,3 +1,4 @@
+import { CountChart, countBy } from './ScoutVisuals';
 // M19 org screens — Player Matching and Dynamic Watchlists.
 //
 // The three rules this file keeps visible, because they are the product:
@@ -750,6 +751,7 @@ function WatchlistList({ session, tick, onOpenWatchlist, onNewWatchlist }: Watch
 
   return (
     <div>
+      <CountChart title="Watchlist activity" note="Watchlists in the current status filter." unit="watchlists" distribution items={items ? countBy(items,w=>w.status) : null} />
       <details className="f-about" style={{ marginBottom: 10 }} data-testid="watchlists-about"><summary>About</summary><div className="dim" style={{ fontSize: 12.5 }}><p>{t('m19.wl.intro')}</p><p>{t('m19.wl.derivedNote')}</p></div></details>
 
       {err && <LoadError message={err} onRetry={() => setBump((b) => b + 1)} />}

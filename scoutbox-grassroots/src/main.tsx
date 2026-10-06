@@ -4,6 +4,7 @@ import App from './App';
 import './styles.css';
 import './clubhouse.css';
 import './scoutDesk.css';
+import './scoutCharacter.css';
 
 // Root error boundary: a runtime failure renders a recoverable screen, never
 // a silent white page.

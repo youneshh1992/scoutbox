@@ -51,3 +51,38 @@ Browser review covered all 36 navigation destinations at 1440px: Home, Squad & M
 Deeper review covered all 20 recruitment-room panels, player dossier/Passport/Box Training/Combine/Trust/Development, comparison, Second Look review changes, the nine Staff & Security disclosures, verification tabs and the notification popover. Home filters and two-player comparison were exercised. Home, Players, Squad, Film Room, Rooms, Matching and Verification were checked at 900px and 390px with no document-level horizontal overflow. This is a demo-data visual and navigation audit, not a claim that every permission, backend, empty or error state was exercised.
 
 TypeScript, production build, navigation/case-navigation/icon checks and API-call preservation checks pass. Login remains byte-for-byte unchanged; no shared design-system or other app source changes. Build the canonical demos and run the freshness check after committing so the preview identifies the actual saved source.
+
+## Visual scouting tools — 6 October 2026
+
+The Founder requested stronger character across Squad & Match Days, Coaches,
+Friendlies, Fixtures, Recruitment, Clubs & Groups, Staff & Security and
+Verification, including animations and truthful data visualisations.
+
+`scoutCharacter.css` now follows `scoutDesk.css`, scoped to the authenticated
+Grassroots workspace. Preserve the compact sidebar identity panel: personal
+role, organisation verification and safeguarding are separate facts. Language,
+club switching and sign-out live in the accessible Account settings disclosure.
+
+Use the green-edged page mastheads and semantic icons, forest work surfaces,
+clear section rules and restrained glow. Position coverage uses a pitch diagram
+of actual roster counts, explicitly not a formation. Fixture participation uses
+columns. Recruitment, coaching, evidence, clubs and setup use labelled count
+charts; mutually exclusive groups can switch between bars and a ring. Counts
+must come from the existing returned records, with the scope stated beside the
+chart. Repeated players across fixtures and clubs across groups are not unique
+population totals. Never invent performance, rankings, verification or security
+scores. Empty and loading states are distinct; retain zero-valued categories.
+
+Bar entrances, page transitions, hover feedback and slow icon glows respect
+prefers-reduced-motion. Labels and values remain readable without animation.
+Sign-in/sign-up, logos, Player and all other apps remain outside this styling.
+
+Validation for this update: all 36 destinations reviewed at 1440px, representative
+Squad/Fixtures/Rooms/Second Look/Clubs/Staff/Verification layouts at 390px and
+900px, with no document-level horizontal overflow. Verification tabs, all nine
+Staff & Security disclosures, Account settings and bar/ring controls were
+exercised. Ring segments were checked against the loaded counts. TypeScript,
+production build, navigation/case/icon checks and four chart-data tests pass.
+The 420 existing API calls across ten interaction files are unchanged and Login
+is byte-for-byte unchanged. This is a demo-data UI audit, not a claim to have
+exercised all backend permissions or failure states.

@@ -1,3 +1,4 @@
+import { CountChart, SquadCoverage, countBy } from './ScoutVisuals';
 import { Hint } from '../../design-system/About';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Icon } from '../../design-system/icons';
@@ -372,6 +373,7 @@ export function FixturesScreen({ session, tick, openPlayer }: ScreenProps) {
   useEffect(() => { api.getFixtures(session).then(setFixtures).catch(() => {}); }, [session, tick]);
   return (
     <>
+      <CountChart title="Recorded participation" note="Players with recorded attendance at each listed fixture. A player can appear in more than one fixture." unit="players" variant="columns" items={fixtures.map(f => ({ label: `${f.date} · ${f.fixture}`, value: f.players.length }))} />
       <div className="list-rows">
         {fixtures.map((f) => {
           const key = `${f.fixture}|${f.date}`;
@@ -602,6 +604,7 @@ export function RequestsScreen({ session, tick, openPlayer }: ScreenProps) {
   useEffect(() => { api.getRequests(session).then(setRequests).catch(() => {}); }, [session, tick]);
   return (
     <>
+      <CountChart title="Request responses" note="Current status of your club’s requests. Contact opens only after acceptance." unit="requests" distribution items={countBy(requests, r => r.status)} />
       <Hint>No direct message channel: you file a request and contact unlocks only on acceptance. For under-18s the request goes to the parent or guardian, never the child.</Hint>
       <div className="list-rows">
         {requests.length === 0 && <div className="notice">No requests sent yet.</div>}
@@ -842,6 +845,7 @@ export function TrialsScreen({ session, tick, notify }: ScreenProps) {
 
   return (
     <>
+      <CountChart title="Your trial programme" note="Current workflow states of your club’s recorded trials." unit="trials" distribution items={countBy(trials, r => r.status)} />
       {awaiting.length > 0 && (
         <div className="notice warn" style={{ marginBottom: 16 }}>
           {awaiting.length} trial{awaiting.length > 1 ? 's' : ''} awaiting a mandatory performance report.
@@ -1060,6 +1064,7 @@ export function OpenDaysScreen({ session, tick, notify }: ScreenProps) {
   };
   return (
     <>
+      <CountChart title="Open-day registrations" note="Registrations per event. A player may register for more than one event." unit="registrations" items={trials.map(t=>({label:`${t.date} · ${t.title}`,value:t.registrations.length}))} />
       <Hint>Local players and guardians see open days in their app and register. Under-18 registrations reach you once your club is verified.</Hint>
       {outstanding > 0 && (
         <div className="notice block" style={{ marginBottom: 16 }}>
@@ -1188,14 +1193,7 @@ export function SquadScreen({ session, tick, notify, openPlayer }: ScreenProps) 
   const platformEntries = squad.entries.filter((e) => e.playerId && e.onPlatform);
   return (
     <>
-      <div className="stat-grid" style={{ marginBottom: 18 }}>
-        {Object.entries(squad.coverage).map(([group, n]) => (
-          <div key={group} className={`stat ${squad.gaps.includes(group) ? 'warn' : ''}`}>
-            <div className="v">{n}</div>
-            <div className="k">{group}{squad.gaps.includes(group) ? ' — thin' : ''}</div>
-          </div>
-        ))}
-      </div>
+      <SquadCoverage squad={squad} />
       {squad.gaps.length > 0 && (
         <p className="squad-gap" data-testid="squad-gap" style={{ margin: '0 0 16px', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', fontSize: 14 }}>
           <span>Thin cover: <b>{squad.gaps.join(' · ')}</b></span>
@@ -1355,6 +1353,7 @@ export function FriendliesScreen({ session, tick, notify }: ScreenProps) {
   useEffect(load, [load, tick]);
   return (
     <>
+      <CountChart title="On the local board" note="Posted friendlies by age group, within your club’s local area." unit="friendlies" distribution items={countBy(friendlies, f => f.ageGroup)} />
       <Hint>Every club within 50 km sees a posted friendly. Messages are screened and the game gets arranged here.</Hint>
       <div className="section">
         <h4>Post a friendly</h4>
@@ -1382,7 +1381,7 @@ export function FriendliesScreen({ session, tick, notify }: ScreenProps) {
       {friendlies.map((f) => (
         <div key={f.id} className="section">
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <h4 style={{ margin: 0, flex: 1 }}>{f.orgName} — {f.date}{f.venue ? ` · ${f.venue}` : ''}</h4>
+            <div className="scout-friendly-identity"><span className="scout-match-date"><Icon name="calendar-days" size={17} />{f.date}</span><h4>{f.orgName}</h4>{f.venue && <span className="dim"><Icon name="map-pin" size={13} /> {f.venue}</span>}</div>
             <span className="pill blue">{f.ageGroup}</span>
             {f.mine ? <span className="pill gold">Your post</span> : <span className="pill">{f.distanceKm} km away</span>}
             <span className="pill">{f.responses.length} response{f.responses.length === 1 ? '' : 's'}</span>

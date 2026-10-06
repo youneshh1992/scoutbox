@@ -481,17 +481,15 @@ export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOp
 
 /** The organisation's standing badges — moved out of the top bar, where they
  *  repeated on every page, to the account block, where the organisation is
- *  named. Same pills, same wording. */
+ *  named. Personal role and organisation standing remain separate facts. */
 export function OrgChips({ org }: { org: { type: string; trustedPartner?: boolean; safeguardingCertified?: boolean; verified?: boolean } }) {
-  // M24D — one quiet line of standing, not a row of badges: the same facts, as text.
-  // M24F — presentation casing: "Club · Verified · Safeguarding Certified"; the data values stay as they are.
-  const facts = [
-    org.type === 'club' ? 'Club' : org.type === 'academy' ? 'Academy' : org.type.charAt(0).toUpperCase() + org.type.slice(1),
-    org.type === 'club' ? (org.verified ? 'Verified' : 'Verification Pending · U18 hidden') : null,
-    org.trustedPartner ? 'Trusted Partner' : null,
-    org.safeguardingCertified ? 'Safeguarding Certified' : null,
-  ].filter(Boolean);
-  return <div className="org-chips org-standing" aria-label={t('navsec.orgStatus')}>{facts.join(' · ')}</div>;
+  const kind = org.type === 'club' ? 'Club' : org.type === 'academy' ? 'Academy' : org.type.charAt(0).toUpperCase() + org.type.slice(1);
+  return <div className="org-chips scout-org-status" aria-label={t('navsec.orgStatus')}>
+    <div><Icon name="building-2" size={14} /><span>{kind}</span>{org.type === 'club' && <b className={org.verified ? 'confirmed' : 'pending'}>{org.verified ? 'Verified' : 'Pending'}</b>}</div>
+    {org.type === 'club' && !org.verified && <small>Under-18 profiles hidden</small>}
+    {org.safeguardingCertified && <div><Icon name="shield-check" size={14} /><span>Safeguarding</span><b className="confirmed">Certified</b></div>}
+    {org.trustedPartner && <div><Icon name="users" size={14} /><span>Trusted partner</span></div>}
+  </div>;
 }
 
 // ---------------------------------------------------------- CommandPalette

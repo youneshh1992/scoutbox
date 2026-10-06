@@ -1,3 +1,4 @@
+import { CountChart, countBy } from './ScoutVisuals';
 // M17 org screens — Recruitment Rooms.
 //
 // A Recruitment Room is the CLUB's private decision layer over one player:
@@ -187,6 +188,7 @@ function RoomsList({ session, tick, onOpenRoom }: RoomsScreenProps) {
 
   return (
     <div>
+      <CountChart title="Rooms in this view" note="Current states of the rooms returned by your selected view and search." unit="rooms" distribution items={data ? countBy(data.items, r => r.status) : null} />
       {/* M24F.5 — one About for every explanation on this list; the privacy line stays on screen. */}
       <details className="f-about" data-testid="rooms-about"><summary>About</summary><div className="dim" style={{ fontSize: 12.5 }}><p>{t('rm.intro')}</p>{funnel && <p>{funnel.note}</p>}<p>{t('rm.attentionNote')}</p></div></details>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}><Icon name="lock-keyhole" size={13} /> {t('rm.privacy')}</div>

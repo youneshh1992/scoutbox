@@ -1,3 +1,4 @@
+import { CountChart, countBy } from './ScoutVisuals';
 // M18 org screens — Second Look, Nobody Missed, Recruitment Briefs.
 //
 // Three rules this file keeps visible at all times:
@@ -217,6 +218,7 @@ export function SecondLookScreen({ session, tick, notify, openPlayer }: M18Scree
 
   return (
     <div>
+      <CountChart title="Second Look queue" note="Workflow states across the loaded queue. Evidence changes do not override a club decision." unit="records" distribution items={data ? [{label:"Worth revisiting",value:buckets.worth.length},{label:"Evidence changed",value:buckets.changed.length},{label:"Reviewed",value:buckets.reviewed.length},{label:"Dismissed",value:buckets.dismissed.length}] : null} />
       {/* M24F.5 — the governing sentence once, as a quiet statement (it is not an error); the intro and the closing repeat are gone. */}
       <div className="notice" style={{ marginBottom: 12, fontSize: 12.5 }} data-sl-disclaimer="true">
         {data?.disclaimer ?? t('m18.sl.disclaimer')}
@@ -885,6 +887,7 @@ function BriefList({ session, tick, notify, onOpenBrief }: BriefsScreenProps) {
 
   return (
     <div>
+      <CountChart title="Recruitment briefs" note="Status of the briefs returned for this workspace." unit="briefs" distribution items={data ? countBy(data.items,b=>b.status) : null} />
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 4 }}>{t('m18.br.intro')}</div>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}>{t('m18.br.noHidden')}</div>
 

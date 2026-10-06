@@ -1,3 +1,4 @@
+import { CountChart, countBy } from './ScoutVisuals';
 // M12 org screens: Assessments (with offline drafts), Recruitment cases,
 // Squad Planner, Opportunities, Campaigns, Video Workspace, Outcomes,
 // Trial Days — plus the Evidence Passport panel.
@@ -114,6 +115,7 @@ export function AssessmentsScreen({ session, tick, notify }: ScreenProps) {
 
   return (
     <div>
+      <CountChart title="Assessment workflow" note="Current states of the records shown below." unit="assessments" distribution items={list ? countBy(list, r => r.state) : null} />
       <div className="filters" role="toolbar" aria-label="Assessment filters">
         <select aria-label="Player" value={playerId} onChange={(e) => { setPlayerId(e.target.value); setCompare(null); }}>
           <option value="">All players</option>
@@ -287,6 +289,7 @@ export function RecruitmentScreen({ session, tick, notify, openPlayer }: ScreenP
 
   return (
     <div>
+      <CountChart title="Your recruitment pipeline" note="Cases grouped by current stage. These are workflow counts, not player rankings." unit="cases" distribution items={data ? countBy(data.items, c => c.stage) : null} />
       <div className="filters">
         <select aria-label="Player for new case" value={newPlayer} onChange={(e) => setNewPlayer(e.target.value)}>
           <option value="">Player…</option>
@@ -461,6 +464,7 @@ export function OpportunitiesScreen({ session, tick, notify }: ScreenProps) {
 
   return (
     <div>
+      <CountChart title="Opportunity status" note="Current states of the records shown below." unit="opportunities" distribution items={list ? countBy(list, r => r.status) : null} />
       <div className="filters">
         <input aria-label="Opportunity title" placeholder="Title (e.g. U23 open trial — attackers)" value={title} onChange={(e) => setTitle(e.target.value)} style={{ flex: 1 }} />
         <input aria-label={t('common.deadline')} type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
@@ -523,6 +527,7 @@ export function CampaignsScreen({ session, tick, notify }: ScreenProps) {
 
   return (
     <div>
+      <CountChart title="Campaign status" note="Current states of the records shown below." unit="campaigns" distribution items={list ? countBy(list, r => r.status) : null} />
       <Hint>{t('camp.fileVsHuman')}</Hint>
       <div className="filters">
         <input aria-label="Campaign title" placeholder="Title (e.g. Remote sprint assessment)" value={title} onChange={(e) => setTitle(e.target.value)} style={{ flex: 1 }} />
@@ -578,6 +583,7 @@ export function VideoScreen({ session, tick, notify, openPlayer }: ScreenProps) 
 
   return (
     <div>
+      <CountChart title="Annotated footage" note="Saved segments by recorded event type. These are footage counts, not player ratings." unit="segments" distribution items={segments ? countBy(segments,s=>s.eventType) : null} />
       <Hint>Annotations are private club workflow records stored against the source footage — never public comments, never a channel to a player. Mark segments from any profile's footage (open a player → their clips).</Hint>
       {playing && (
         <div className="section">
@@ -640,6 +646,7 @@ export function OutcomesScreen({ session, tick, notify }: ScreenProps) {
   const stateClass = (s: string) => s === 'confirmed' ? 'green' : s === 'disputed' ? 'red' : s === 'unknown_pending' ? 'gold' : '';
   return (
     <div>
+      <CountChart title="Placement follow-ups" note="Current states of the records shown below." unit="follow-ups" distribution items={list ? countBy(list, r => r.outcomeState) : null} />
       <Hint>Follow-ups are scheduled records that survive restarts. Reported ≠ confirmed: the player/guardian answers back, and "unknown" is counted as unknown.</Hint>
       <div className="list-rows">
         {(list ?? []).map((f) => (
@@ -803,6 +810,7 @@ export function CoachesScreen({ session, tick, notify }: ScreenProps) {
   };
   return (
     <div className="ed-page" data-testid="coaches-page">
+      <CountChart title="Coaching team" note="Confirmed affiliations and your club’s retained affiliation history." unit="coaches" distribution items={coaches ? countBy(coaches, c => c.current ? 'Current' : 'Past affiliation') : null} />
       <section className="ed-section">
         <h3 className="ed-h">Coach affiliation</h3>
         <p className="ed-lead">

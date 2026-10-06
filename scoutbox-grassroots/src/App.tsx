@@ -1,3 +1,4 @@
+import { ScoutPageHeading } from './ScoutVisuals';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTheme } from '../../design-system/theme';
 import { AuthField, AuthPage, AuthRow, AuthTabs, PasswordInput } from '../../design-system/AuthShell';
@@ -566,8 +567,9 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
           <div className="p-account">
             <div className="p-who"><span className="p-avatar" aria-hidden="true">{initials(session.scoutName)}</span><div><strong>{session.scoutName}</strong><small>{session.role}</small></div></div>
             <OrgChips org={session.org} />
-            <div className="p-links">
+            <div className="p-links scout-account-links">
               <button onClick={() => setScreen('verification')}><Icon name="badge-check" size={14} />{t('navsec.myVerification')}</button>
+              <details className="scout-account-menu"><summary><Icon name="settings-2" size={14} /><span>Account settings</span><Icon name="chevron-down" size={12} /></summary>
               <label title={t('common.machineTranslated')}>
                 {t('common.language')}:{' '}
                 <select aria-label={t('common.language')} value={lang} onChange={(e) => { setLang(e.target.value as 'en' | 'fr'); setLangTick((x) => x + 1); }}>
@@ -578,6 +580,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
               {/* M24E — the way out of the session, in the account block where the person is named. */}
               <button data-exit="switch-org" data-testid="switch-org" onClick={onLogout} aria-label={t('common.switchOrg')}><Icon name="arrow-right" size={14} />{t('common.switchOrg')}</button>
               <button data-exit="sign-out" data-testid="sign-out" onClick={onLogout} aria-label={t('common.signOut')}><Icon name="log-out" size={14} />{t('common.signOut')}</button>
+              </details>
             </div>
           </div>
         }
@@ -621,7 +624,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
         {activeSection && <SecondaryNav section={activeSection} activeItemId={loc.itemId} onNavigate={setScreen} />}
         <div data-screen={screen} className={`content grass-content ${screen === 'feed' ? 'grass-home-content' : ''}`}>
           {/* M24A — the reference page heading; the top bar keeps the document <h1>. */}
-          <div className="f-heading"><p className="f-display" aria-hidden="true">{screenLabel}</p></div>
+          <ScoutPageHeading screen={screen} title={screenLabel} />
           {/* M24F.2 — the Home: welcome, one primary action, counts, attention, club progress, activity, quick actions. */}
           {screen === 'feed' && <HomeScreen {...props} unreadMessages={unreadMessages} verLevel={verLevel} onNavigate={setScreen} />}
           {screen === 'filmroom' && <FilmRoomScreen {...props} />}

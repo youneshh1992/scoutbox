@@ -1,3 +1,4 @@
+import { CountChart } from './ScoutVisuals';
 // M14 org screens: the Verification workspace — your own verification, the
 // organisation console (requests, staff, domains, administrators), licences,
 // references, squad invitations and conflict declarations.
@@ -146,6 +147,7 @@ function MeTab({ session, notify, me, reloadMe }: { session: Session; notify: Sc
   };
   return (
     <div>
+      <CountChart title="Your verification steps" note="Completed checks in the verification process. This does not award or replace any verification status." unit="steps" distribution items={me ? [{label:'Complete',value:me.steps.filter(s=>s.done).length},{label:'Remaining',value:me.steps.filter(s=>!s.done).length}] : null} />
       <div className="section">
         <h3>{t('m14.me.steps')}</h3>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
