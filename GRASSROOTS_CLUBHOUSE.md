@@ -222,3 +222,9 @@ banner. Preserve the faint diagonal turf texture and low-contrast pitch markings
 as a decorative background layer. Keep the same banner layout, headline and
 action; the markings must not intercept clicks or reduce text readability. This
 is a restrained surface detail, not a return to the rejected illustrated scenes.
+
+The Founder approved the embossed treatment and requested that it cover the
+entire banner more subtly. The pitch now spans the full banner with a 12px
+boundary inset, a circular centre mark and responsive edge markings. Line alpha
+is .10 (previously .23), with a lighter shadow and 1px strokes. Keep the texture
+quiet behind both headline and action at every width.
