@@ -106,3 +106,10 @@ enums, IDs, translation keys, names and user-authored content stay unchanged.
 Film Room timeline markers are explicitly session-only; observation tags use
 the existing persistence and anonymity rules. Read the latest section of
 `GRASSROOTS_CLUBHOUSE.md` before making further presentation changes.
+
+
+Preserve the subsequent discovery/toolbar correction in
+`GRASSROOTS_CLUBHOUSE.md`: Nobody Missed's brief desk, Player Matching's two-part
+criteria workbench, the structured Second Look dossier, and the custom local
+search/bell/safety SVG controls. The Founder explicitly rejected the preceding
+layouts and toolbar icons.

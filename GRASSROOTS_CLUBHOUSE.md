@@ -139,3 +139,27 @@ visual and interaction review, not a claim that all backend permission, empty or
 error states have been tested. Rebuild canonical demos after committing and run
 the freshness check before replacing the served preview. No push or deployment
 is authorized by these instructions.
+
+
+## Discovery and toolbar correction — 6 October 2026
+
+The Founder explicitly requested further changes to Nobody Missed, Diego Alonso's
+Second Look presentation, Player Matching, and the search/notification/report
+controls. Preserve the new discovery desk with labelled brief/order controls;
+the matching workbench with selectable sources, adjacent required/preferred
+editors, position chips and explained result dossiers; and the Second Look
+record separating the original decision, dated evidence changes, unresolved
+club circumstances and evidence-confidence context. Do not remove warnings or
+infer that a new record resolves a club-side constraint.
+
+The Grassroots toolbar now uses local `WorkspaceGlyph` SVG artwork, a Finder
+control, a notification tile and a shield-based safety control. Keep their
+accessible names, live status, unread count and original handlers. These replace
+the old magnifier/bell/flag presentation at the Founder's explicit request; they
+are scoped to Grassroots and do not change the shared logo/icon library or auth.
+
+Validation includes desktop, 900px and 390px layouts, populated matching criteria
+and results, recruitment-brief matching, Nobody Missed ordering, Second Look
+comparison navigation, notifications and the report dialog. No reports or
+recruitment decisions were submitted during review. All 385 existing direct API
+calls remain unchanged. The repository build, types and existing UI checks pass.

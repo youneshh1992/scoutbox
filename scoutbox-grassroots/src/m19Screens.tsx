@@ -150,7 +150,7 @@ function CriterionRow({
   const protocols = vocab?.combineProtocols ?? [];
 
   return (
-    <div className="list-row" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start', paddingBlock: 8 }}>
+    <div className="list-row matching-criterion">
       <label style={{ fontSize: 13 }}>
         <span className="dim" style={{ display: 'block', fontSize: 11 }}>{t('m19.cr.type')}</span>
         <select
@@ -171,7 +171,7 @@ function CriterionRow({
         </select>
       </label>
 
-      <div style={{ flex: '1 1 240px', minWidth: 200 }}>
+      <div className="criterion-values" style={{ flex: '1 1 240px', minWidth: 200 }}>
         <span className="dim" style={{ display: 'block', fontSize: 11 }}>{t('m19.cr.value')}</span>
 
         {criterion.type === 'position' && (
@@ -327,13 +327,12 @@ function CriteriaClassEditor({
       className="m19-criteria"
       data-criteria-class={cls}
     >
-      <legend className="m19-criteria-title">
-        {cls === 'required' ? t('m19.cr.required') : t('m19.cr.preferred')}
-      </legend>
+      <legend className="sr-only">{cls === 'required' ? t('m19.cr.required') : t('m19.cr.preferred')}</legend>
+      <div className="criteria-panel-heading"><div><span className="suite-eyebrow">{cls === 'required' ? 'Must be present' : 'Useful context'}</span><h3>{cls === 'required' ? t('m19.cr.required') : t('m19.cr.preferred')}</h3></div><span className="criteria-count">{rows.length}</span></div>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 6 }}>
         {cls === 'required' ? t('m19.cr.requiredNote') : t('m19.cr.preferredNote')}
       </div>
-      {rows.length === 0 && <div className="dim" style={{ fontSize: 13 }}>{t('m19.cr.none')}</div>}
+      {rows.length === 0 && <div className="criteria-empty"><span aria-hidden="true">{cls === 'required' ? '+' : '◇'}</span><b>{cls === 'required' ? 'Define your essentials' : 'Add a little more context'}</b><p>{cls === 'required' ? 'Start with a position, age range or another recorded fact.' : 'Optional details help you read each result. They never exclude a player.'}</p></div>}
       {rows.map((c, i) => (
         <CriterionRow
           key={`${cls}-${i}`}
@@ -407,7 +406,7 @@ function MatchCardView({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="section" data-match-card={card.playerId} style={{ marginBottom: 10 }}>
+    <div className="section matching-result" data-match-card={card.playerId} style={{ marginBottom: 10 }}>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'baseline' }}>
         <b style={{ fontSize: 15 }}>{card.name}</b>
         {card.position && <span className="pill blue">{card.position}</span>}
@@ -542,24 +541,21 @@ export function MatchingScreen({
   const canRun = source === 'brief' ? !!briefId : criteria.required.length > 0;
 
   return (
-    <div>
-      <div className="dim" style={{ fontSize: 12.5, marginBottom: 4 }}>{t('m19.noScore')}</div>
+    <div className="matching-workspace">
+      <header className="discovery-heading"><div><span className="suite-eyebrow">The recruitment workbench</span><h2>Build your player search.</h2><p>Turn your club’s requirements into a clear set of recorded facts.</p></div><div className="discovery-heading-note"><span>Player matching</span><strong>Your criteria. Explained results.</strong></div></header>
+      <p className="matching-principle">{t('m19.noScore')}</p>
       <details className="f-about" style={{ marginBottom: 10 }} data-testid="matching-about"><summary>About</summary><div className="dim" style={{ fontSize: 12.5 }}>{t('m19.intro')}</div></details>
 
       {loadErr && <LoadError message={loadErr} onRetry={() => setBump((b) => b + 1)} />}
 
-      <div className="section" aria-label={t('m19.criteriaLabel')}>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 8 }}>
-          <label style={{ fontSize: 13 }}>
-            <input type="radio" name="m19-source" checked={source === 'criteria'} onChange={() => setSource('criteria')} /> {t('m19.srcCriteria')}
-          </label>
-          <label style={{ fontSize: 13 }}>
-            <input type="radio" name="m19-source" checked={source === 'brief'} onChange={() => setSource('brief')} /> {t('m19.srcBrief')}
-          </label>
+      <div className="match-builder" aria-label={t('m19.criteriaLabel')}>
+        <div className="matching-source" role="radiogroup" aria-label="Choose your search source">
+          <label className={source==='criteria'?'selected':''}><input type="radio" name="m19-source" checked={source==='criteria'} onChange={()=>setSource('criteria')}/><span className="source-symbol" aria-hidden="true">01</span><span><strong>{t('m19.srcCriteria')}</strong><small>Build a search for today’s requirements</small></span></label>
+          <label className={source==='brief'?'selected':''}><input type="radio" name="m19-source" checked={source==='brief'} onChange={()=>setSource('brief')}/><span className="source-symbol" aria-hidden="true">02</span><span><strong>{t('m19.srcBrief')}</strong><small>Start from an existing recruitment brief</small></span></label>
         </div>
 
         {source === 'brief' ? (
-          <div>
+          <div className="match-brief-source">
             <label style={{ fontSize: 13 }}>
               {t('m19.pickBrief')}{' '}
               <select aria-label={t('m19.pickBrief')} value={briefId} onChange={(e) => setBriefId(e.target.value)}>
@@ -570,7 +566,7 @@ export function MatchingScreen({
             <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{t('m19.briefAllRequired')}</div>
           </div>
         ) : (
-          <>
+          <div className="matching-criteria-grid">
             <CriteriaClassEditor
               cls="required"
               rows={criteria.required}
@@ -585,12 +581,12 @@ export function MatchingScreen({
               errors={details}
               onChange={(rows) => setCriteria((c) => ({ ...c, preferred: rows }))}
             />
-          </>
+          </div>
         )}
 
         {message && <div className="notice block" role="alert">{message}</div>}
 
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div className="matching-runbar">
           <button className="primary" disabled={busy || !canRun} onClick={() => run()}>{t('m19.run')}</button>
           {vocab && <SortPicker sorts={vocab.sorts} value={sort} onChange={(s) => { setSort(s); if (result) void run(s); }} />}
         </div>
@@ -712,7 +708,7 @@ function MatchResults({
       {result.items.length === 0 && (
         <div className="notice block">{t('m19.emptyMatches')}</div>
       )}
-      {result.items.map((c) => <MatchCardView key={c.playerId} card={c} openPlayer={openPlayer} />)}
+      <div className="matching-results-list">{result.items.map((c) => <MatchCardView key={c.playerId} card={c} openPlayer={openPlayer} />)}</div>
     </div>
   );
 }
