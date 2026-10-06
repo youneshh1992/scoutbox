@@ -21,7 +21,7 @@ import {
   INBOX_ITEM, MAX_SHORTCUTS, type NavContext, type NavGroupView, type NavItem, type NavLocation, type NavSection,
   allItems, filterSections, groupedChildren, searchNav, stripLayout,
 } from './nav';
-import { ProGlyph as Icon, ClubCrest, PRO_PAGE_META } from './proExperience';
+import { ProGlyph as Icon, ClubCrest, ProBrand, PRO_PAGE_META } from './proExperience';
 import { type Theme } from '../../design-system/theme';
 import { t } from './i18n';
 
@@ -107,7 +107,7 @@ export function Sidebar({
       <nav ref={navRef} id="app-sidebar" className={`sidebar ${collapsed ? 'collapsed' : ''} ${drawerOpen ? 'drawer-open' : ''}`} aria-label="Main navigation">
         {/* M24A — the reference wordmark: one ink, a green square, the edition beside it. */}
         <div className="brand" title={`ScoutBox ${brand.long}`}>
-          {collapsed ? <span className="wordmark" aria-label={`ScoutBox ${brand.long}`}>S</span> : <><span className="wordmark">ScoutBox</span><sup className="tm" aria-label="trademark">TM</sup><span className="brand-sub">{brand.long}</span></>}
+          {collapsed ? <span className="wordmark" aria-label={`ScoutBox ${brand.long}`}>S</span> : <ProBrand/>}
         </div>
         {org && (
           <div className="p-org" aria-label={org.name}>

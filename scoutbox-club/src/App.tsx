@@ -4,7 +4,7 @@ import { AuthField, PasswordInput } from '../../design-system/AuthShell';
 import { initials } from '../../design-system/text';
 import { Icon } from './icons';
 import stadiumImage from './assets/pro-stadium.jpg';
-import { ClubCrest } from './proExperience';
+import { ClubCrest, ProBrand } from './proExperience';
 import { ProMasthead, ProOverview } from './proDesign';
 import { api, ApiError, DEMO_MODE, revokeSession, type Channel, type Notification, type Org, type Session } from './api';
 import {
@@ -209,7 +209,7 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
   return <main className="login pro-entry">
     <section className="pro-entry-story" aria-label="ScoutBox Pro football workspace">
       <img src={stadiumImage} alt="An empty floodlit football stadium seen from the players’ tunnel"/>
-      <div className="pro-entry-brand"><span className="wordmark">ScoutBox</span><sup className="tm">TM</sup><span className="brand-sub">PRO</span></div>
+      <div className="pro-entry-brand"><ProBrand/></div>
       <div className="pro-entry-copy"><span className="pro-entry-kicker">For the people who build the team</span><h1>See the game.<br/>Shape the<br/><em>next chapter.</em></h1><p>The football workspace for discovery,<br/>analysis and recruitment.</p></div>
       <footer><span>SCOUTBOX / PROFESSIONAL</span><span>Discover <i/> Assess <i/> Decide</span></footer>
     </section>
@@ -578,7 +578,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
         {activeSection && <SecondaryNav section={activeSection} activeItemId={loc.itemId} onNavigate={setScreen} />}
         <div className="content pro-content" data-screen={screen}>
           {/* M24A — the reference page heading; the top bar keeps the document <h1>. */}
-          <div key={screen} className="pro-page-entry">{screen !== 'feed' && <ProMasthead screen={screen} title={screenLabel} section={breadcrumbSection ? t(breadcrumbSection.labelKey as Parameters<typeof t>[0]) : null}/>}</div>
+          <div key={screen} className="pro-page-entry">{screen !== 'feed' && screen !== 'messages' && <ProMasthead screen={screen} title={screenLabel} section={breadcrumbSection ? t(breadcrumbSection.labelKey as Parameters<typeof t>[0]) : null}/>}</div>
           {screen === 'feed' && <ProOverview session={session} tick={tick} navigate={setScreen} />}
           {screen === 'feed' && (
             <NeedsAttention session={session} tick={tick} unreadMessages={unreadMessages} verLevel={verLevel} onNavigate={setScreen} />

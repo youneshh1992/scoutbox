@@ -191,3 +191,26 @@ opening/cancellation, the green verification colour, sample replies, and desktop
 and 390px layouts. No external reports or messages were submitted. Canonical
 artifacts are rebuilt from the local commit and checked for freshness before
 preview delivery. Grassroots and Player source are unchanged; no publishing.
+
+## Correspondence desk and Pro lockup — 6 October follow-up
+
+The Founder rejected the generic bubble-chat presentation. Messages now uses a
+compact correspondence log with author markers and time stamps, a narrow inbox,
+conversation filters, an expandable context file and a multiline composer.
+Availability and training-visit starters fill an editable draft; they never send
+a message automatically. Ctrl/Cmd+Enter submits, while Enter adds a new line.
+The fictional demo conversation remains clearly labelled and isolated from real
+channels; its football position visual and visit context are sample-only.
+The real messaging, attachments, receipts, moderation and guardian rules remain.
+
+A shared ProBrand lockup now serves the sign-in page and both navigation layouts.
+The trademark sits above the wordmark's green square. The existing outlined Pro
+badge uses a #00e676 border and brighter lettering, including the separate club
+access badge. This supersedes the muted badge colours in earlier style layers.
+
+Validation: TypeScript, production build, 504 navigation checks, icon parity and
+18 Pro utility checks. All 371 existing API calls retain their arguments. Browser
+review covers desktop/mobile Messages, draft starters, local sample replies,
+conversation search and details, sign-in branding, badge colours and overflow.
+The inspected session has no console errors. Build canonical demos and verify
+freshness after this commit. This remains local Pro review work, not publishing.

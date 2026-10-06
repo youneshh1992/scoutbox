@@ -604,6 +604,8 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [openId, setOpenId] = useState<string | null>(DEMO_MODE ? 'pro-sample-conversation' : null);
   const [threadSearch, setThreadSearch] = useState('');
+  const [showDetails, setShowDetails] = useState(()=>window.matchMedia('(min-width:1251px)').matches);
+  const [inboxFilter, setInboxFilter] = useState<'all'|'open'>('all');
   const [sample, setSample] = useState<Channel>(()=>({id:'pro-sample-conversation',requestId:'sample',playerId:'sample-adult',playerName:'Jordan Ellis',orgName:session.org.name,scoutName:session.scoutName,scoutRole:session.role,counterparty:'player',createdAt:Date.UTC(2026,9,6,13),messages:[
     {id:'sample-1',ts:Date.UTC(2026,9,6,13,10),sender:{kind:'org_user',id:'sample-scout',name:session.scoutName},text:'Hi Jordan, thanks for accepting our request. We enjoyed watching your recent match footage, especially your movement between the lines.'},
     {id:'sample-2',ts:Date.UTC(2026,9,6,13,14),sender:{kind:'player',id:'sample-adult',name:'Jordan Ellis'},text:'Thanks for getting in touch. I’m pleased to hear that. Happy to talk about the role and what you’re looking for.'},
@@ -626,6 +628,8 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
   const visibleChannels = DEMO_MODE ? [sample,...channels] : channels;
   const open = visibleChannels.find((c) => c.id === openId) ?? null;
   const isSample = DEMO_MODE && openId === sample.id;
+  const filteredChannels = visibleChannels.filter(c=>(inboxFilter==='all'||!c.closed)&&c.playerName.toLowerCase().includes(threadSearch.toLowerCase()));
+  useEffect(()=>{setDraft('');setAttachReportId('');setTyping(false);},[openId]);
 
   // Read receipts: opening a thread marks it read for our side.
   useEffect(() => {
@@ -687,41 +691,41 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
 
   return (
     <>
-      <Hint>Threads open on acceptance, stay on-platform, and are moderated and logged. For under-18s you are talking to the parent or guardian, never the child.</Hint>
-      <div className={`pro-messenger ${open?'has-thread':''}`}>
-        <aside className="pro-inbox"><header><div><strong>Inbox</strong><span>{visibleChannels.length}</span></div><label><Icon name="search" size={17}/><input type="search" aria-label="Find a conversation" placeholder="Find a conversation" value={threadSearch} onChange={e=>setThreadSearch(e.target.value)}/></label></header>
-          {visibleChannels.filter(c=>c.playerName.toLowerCase().includes(threadSearch.toLowerCase())).map((c) => (
+      <header className="pro-correspondence-heading"><div><span>SCOUTBOX / CORRESPONDENCE</span><h2>Messages<span className="pro-communications-mark" aria-hidden="true">↗</span></h2></div><p><Icon name="lock-keyhole" size={14}/> Your conversations. One private workspace.</p></header>
+      <div className={`pro-messenger pro-correspondence ${open?'has-thread':''} ${showDetails&&open?'with-details':''}`}>
+        <aside className="pro-inbox"><header><div><strong>Conversations</strong><span>{visibleChannels.length.toString().padStart(2,'0')}</span></div><label><Icon name="search" size={16}/><input type="search" aria-label="Find a conversation" placeholder="Search conversations" value={threadSearch} onChange={e=>setThreadSearch(e.target.value)}/></label><nav aria-label="Conversation filters"><button aria-pressed={inboxFilter==='all'} onClick={()=>setInboxFilter('all')}>All</button><button aria-pressed={inboxFilter==='open'} onClick={()=>setInboxFilter('open')}>Open</button></nav></header>
+          {filteredChannels.map((c) => (
             <div
               key={c.id}
               className={`pro-inbox-thread ${openId===c.id?'selected':''}`}
-              style={{ cursor: 'pointer', borderColor: openId === c.id ? 'var(--accent-2)' : undefined }}
+              style={{ cursor: 'pointer' }}
               {...pressable(() => setOpenId(c.id))}
             >
               <span className="pro-message-avatar" aria-hidden="true">{c.playerName.split(' ').map(n=>n[0]).slice(0,2).join('')}</span><span className="grow">
-                <b>{c.playerName}</b>{c.closed && <span className="pill red" style={{ marginLeft: 6 }}>Closed</span>}
+                <b>{c.playerName}<span aria-hidden="true">↗</span></b>{c.closed && <span className="pill red" style={{ marginLeft: 6 }}>Closed</span>}
                 <span className="pro-thread-preview">{c.messages.at(-1)?.text ?? 'Your conversation is ready'}</span><small>{DEMO_MODE&&c.id===sample.id?'Sample conversation':c.counterparty==='guardian'?'With parent or guardian':'Player conversation'}</small>
               </span>
             </div>
           ))}
-          {visibleChannels.length===0&&<p className="pro-inbox-empty">Accepted requests appear here.</p>}
+          {filteredChannels.length===0&&<p className="pro-inbox-empty">{visibleChannels.length?'No conversations match your search.':'Accepted requests appear here.'}</p>}<footer className="pro-inbox-footer"><span className="pro-correspondence-lines" aria-hidden="true"/><span>SCOUTBOX PRO<small>Every conversation moves football forward.</small></span></footer>
         </aside>
         {open ? (
           <section className="pro-conversation">
             <header className="pro-conversation-header"><button className="pro-message-back" onClick={()=>setOpenId(null)} aria-label="Back to inbox"><Icon name="chevron-left" size={18}/></button><span className="pro-message-avatar" aria-hidden="true">{open.playerName.split(' ').map(n=>n[0]).slice(0,2).join('')}</span>
               <span className="grow">
-                <b>{open.playerName}</b>{' '}
+                <small className="pro-thread-kicker">{isSample?'RECRUITMENT CONVERSATION':open.counterparty==='guardian'?'GUARDIAN CONVERSATION':'PLAYER CONVERSATION'}</small><b>{open.playerName}</b>{' '}
                 {open.counterparty === 'guardian' && <span className="pill red">Thread is with the guardian</span>}
               </span>
-              <span className="pro-conversation-status"><Icon name="lock-keyhole" size={14}/>{isSample?'Sample thread':'On-platform conversation'}</span>
-            </header>{isSample&&<div className="pro-sample-notice">Demo conversation · Jordan is a fictional adult player. Replies stay in this preview.</div>}
+              <button className="pro-thread-details-toggle" aria-label="Conversation details" aria-expanded={showDetails} onClick={()=>setShowDetails(v=>!v)}><Icon name="panel-left-close" size={17}/><span>Details</span></button>
+            </header>{isSample&&<div className="pro-sample-notice"><span>DEMO</span> Fictional adult player. Replies stay in this preview.</div>}
             <div className="thread" ref={threadRef}>
               {open.messages.length === 0 && <div className="notice">Say hello — they accepted your request.</div>}
               {open.messages.map((m, index) => {
                 const mine = m.sender.kind === 'org_user';
                 const read = mine && open.readBy?.counterparty != null && open.readBy.counterparty >= m.ts;
                 return (
-                  <Fragment key={m.id}>{(index===0||new Date(open.messages[index-1].ts).toDateString()!==new Date(m.ts).toDateString())&&<div className="pro-message-day">{fmtDate(m.ts)}</div>}<div className={`bubble ${mine ? 'mine' : 'theirs'}`}>
-                    <div className="who"><strong>{m.sender.name}</strong><time>{new Date(m.ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</time></div>
+                  <Fragment key={m.id}>{(index===0||new Date(open.messages[index-1].ts).toDateString()!==new Date(m.ts).toDateString())&&<div className="pro-message-day">{fmtDate(m.ts)}</div>}<div className={`bubble ${mine ? 'mine' : 'theirs'}`}><span className="pro-dispatch-avatar" aria-hidden="true">{m.sender.name.split(' ').map(n=>n[0]).slice(0,2).join('')}</span>
+                    <div className="who"><strong>{m.sender.name}<small>{mine?'Your organisation':open.counterparty==='guardian'?'Parent / guardian':'Player'}</small></strong><time>{new Date(m.ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</time></div>
                     {m.text}
                     {m.attachment?.kind === 'clip' && (
                       <div style={{ marginTop: 6 }}>
@@ -736,7 +740,7 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
                         <div className="dim" style={{ fontSize: 12 }}>{m.attachment.summary}</div>
                       </div>
                     )}
-                    {mine && <div className="who" style={{ textAlign: 'right', marginTop: 2 }}>{isSample?'Sample message':read ? 'Read' : 'Sent'}</div>}
+                    {mine && <div className="who" style={{ textAlign: 'right', marginTop: 2 }}>{isSample?'Preview':read ? 'Read' : 'Sent'}</div>}
                   </div></Fragment>
                 );
               })}
@@ -758,7 +762,7 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
                 suspension, or a platform change). The history stays for audit; nothing new can be sent.
               </div>
             )}
-            <div className="pro-message-composer">
+            <div className="pro-compose-area">{!open.closed&&<div className="pro-reply-starters"><span>START A REPLY</span><button onClick={()=>onDraftChange('Could you share your availability for a conversation this week?')}>Availability <span>↗</span></button><button onClick={()=>onDraftChange('We would like to discuss a training visit. Which dates would work for you?')}>Training visit <span>↗</span></button></div>}<div className="pro-message-composer">
               {openPlayerReports.length > 0 && (
                 <select value={attachReportId} onChange={(e) => setAttachReportId(e.target.value)} title="Attach a filed trial report" disabled={open.closed}>
                   <option value="">no attachment</option>
@@ -767,19 +771,20 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
                   ))}
                 </select>
               )}
-              <input
+              <textarea rows={2}
                 aria-label="Message" disabled={open.closed}
                 placeholder={isSample?'Try a reply in this preview…':'Write your message…'}
                 value={draft}
                 onChange={(e) => onDraftChange(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && send()}
+                onKeyDown={(e) => {if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)){e.preventDefault();send();}}}
               />
               <button className="primary" disabled={open.closed||!draft.trim()} onClick={() => send()}><Icon name="send" size={17}/>{isSample?'Preview reply':'Send'}</button>
-            </div>
+            </div><div className="pro-compose-caption"><span>{isSample?'Preview mode · nothing is sent':'Messages stay on ScoutBox'}</span><span>⌘ / Ctrl + Enter</span></div></div>
           </section>
         ) : (
           <div className="pro-inbox-welcome"><Icon name="messages-square" size={42}/><h3>Your next conversation starts here.</h3><p>{channels.length?'Select a conversation from your inbox.':'A conversation opens when a player or guardian accepts your request.'}</p></div>
         )}
+        {open&&showDetails&&<aside className="pro-correspondence-context"><header><span>CONVERSATION FILE</span><button aria-label="Close conversation details" onClick={()=>setShowDetails(false)}><Icon name="x" size={16}/></button></header><div className="pro-contact-number" aria-hidden="true">{isSample?'09':open.playerName.split(' ').map(n=>n[0]).slice(0,2).join('')}</div><h3>{open.playerName}</h3><p>{isSample?'Fictional adult forward':open.counterparty==='guardian'?'Conversation with parent or guardian':'Player conversation'}</p>{isSample&&<div className="pro-contact-pitch" aria-label="Sample player role: centre forward"><svg viewBox="0 0 200 120" fill="none" aria-hidden="true"><path d="M1 1h198v118H1zM100 1v118M1 30h30v60H1m198-60h-30v60h30M1 45h10v30H1m198-30h-10v30h10"/><circle cx="100" cy="60" r="22"/><circle className="pro-position-point" cx="155" cy="60" r="6"/></svg><span>CF / FORWARD</span></div>}<dl><dt>Opened</dt><dd>{fmtDate(open.createdAt)}</dd><dt>Organisation</dt><dd>{open.orgName}</dd><dt>Conversation</dt><dd>{open.closed?'Closed':isSample?'Demo preview':'Open'}</dd></dl>{isSample&&<div className="pro-next-conversation"><Icon name="calendar-days" size={18}/><strong>Discussing a training visit</strong><p>Date, venue and invitation still to be agreed in this example.</p></div>}<Hint>Threads open on acceptance, stay on-platform, and are moderated and logged. For under-18s you are talking to the parent or guardian, never the child.</Hint></aside>}
       </div>
     </>
   );

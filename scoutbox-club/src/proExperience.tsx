@@ -3,6 +3,11 @@ import { Icon as BaseIcon } from '../../design-system/icons';
 import type { TacticalRole } from './m12api';
 import type { ScreenId } from './App';
 
+/** One lockup for Pro entry, desktop navigation and the mobile drawer. */
+export function ProBrand() {
+  return <span className="pro-brand-lockup"><span className="pro-wordmark-group"><span className="wordmark">ScoutBox</span><sup className="tm" aria-label="trademark">TM</sup></span><span className="brand-sub">PRO</span></span>;
+}
+
 /** Pro's compact, two-tone glyphs. Existing icon names retain a shared fallback. */
 export function ProGlyph({ name, size = 20, label, style }: {name: string; size?: number; label?: string; style?: CSSProperties}) {
   const paths: Record<string, ReactNode> = {
