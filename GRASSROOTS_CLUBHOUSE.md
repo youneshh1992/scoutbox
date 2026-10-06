@@ -224,8 +224,10 @@ action; the markings must not intercept clicks or reduce text readability. This
 is a restrained surface detail, not a return to the rejected illustrated scenes.
 
 The Founder approved the embossed treatment and requested that it cover the
-entire banner more subtly. The pitch now spans the full banner with a 12px
-boundary inset, a circular centre mark and responsive edge markings. Line alpha
+entire banner more subtly. The pitch spans the full banner, using the banner
+border itself as the pitch boundary, with a circular centre mark and responsive
+edge markings. The later request removed the separate 12px inset perimeter;
+the halfway line and penalty areas now meet the banner edge. Line alpha
 is .10 (previously .23), with a lighter shadow and 1px strokes. Keep the texture
 quiet behind both headline and action at every width.
 
@@ -235,3 +237,11 @@ together, without the previous gold flag, warning border or divided title column
 Rows stack naturally when both inbox and verification need attention; preserve
 the existing permission checks, live counts, navigation and zero-count hiding.
 The row was checked at 1440px and 390px; Review opens verification.
+
+Club readiness uses compact check rows with explicit status badges, followed by
+recruiting position tags and squad coverage. Keep real statuses and existing
+verification/squad destinations. The sidebar club identity is a flat nameplate
+with a compact initials crest and a quiet edition label, without the large
+rounded gradient container. It remains informational, not a fake switch button.
+Checked desktop, narrow, and collapsed navigation; phone side panels stretch
+to the available width.

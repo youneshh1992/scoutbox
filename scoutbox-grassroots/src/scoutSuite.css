@@ -612,3 +612,11 @@
   width: 100%; height: 100%; color: rgba(137,186,151,.10);
   filter: drop-shadow(0 -1px 0 rgba(2,15,8,.25));
 }
+
+/* Club identity belongs to the navigation, with the same quiet surface. */
+:root[data-app="grass"] .grass-workspace .sidebar .p-org { padding: 12px 4px 17px; gap: 10px; margin-bottom: 16px; border: 0; border-bottom: 1px solid #8fa88d26; border-radius: 0; background: none; box-shadow: none; align-items: center; }
+:root[data-app="grass"] .grass-workspace .sidebar .p-org .p-avatar.club { flex: 0 0 34px; width: 34px; height: 38px; border: 1px solid #4f765a; border-radius: 5px 5px 10px 10px; background: #1b3927; box-shadow: inset 0 0 0 3px #142b1d; color: #bde8c8; font-size: 12px; font-weight: 650; }
+:root[data-app="grass"] .grass-workspace .sidebar .p-org > span:last-child { min-width: 0; }
+:root[data-app="grass"] .grass-workspace .sidebar .p-org strong { font-size: 12px; line-height: 1.35; font-weight: 600; overflow-wrap: anywhere; }
+:root[data-app="grass"] .grass-workspace .sidebar .p-org small { margin-top: 4px; font-size: 10px; color: #96af9b; }
+:root[data-app="grass"] .grass-workspace .sidebar.collapsed .p-org { padding: 4px 0 12px; justify-content: center; }

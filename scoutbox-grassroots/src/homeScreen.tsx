@@ -119,13 +119,12 @@ export function HomeScreen({ session, tick, openPlayer, unreadMessages, verLevel
       <section className="club-hero" aria-labelledby="club-hero-title">
         <svg className="hero-pitch-emboss" aria-hidden="true" focusable="false">
           <g fill="none" stroke="currentColor" strokeWidth="1">
-            <rect x="12" y="12" width="calc(100% - 24px)" height="calc(100% - 24px)" />
-            <line x1="50%" y1="12" x2="50%" y2="calc(100% - 12px)" />
+            <line x1="50%" y1="0" x2="50%" y2="100%" />
             <circle cx="50%" cy="50%" r="39" />
-            <rect x="12" y="calc(50% - 52px)" width="64" height="104" />
-            <rect x="calc(100% - 76px)" y="calc(50% - 52px)" width="64" height="104" />
-            <rect x="12" y="calc(50% - 25px)" width="24" height="50" />
-            <rect x="calc(100% - 36px)" y="calc(50% - 25px)" width="24" height="50" />
+            <rect x="0" y="calc(50% - 52px)" width="64" height="104" />
+            <rect x="calc(100% - 64px)" y="calc(50% - 52px)" width="64" height="104" />
+            <rect x="0" y="calc(50% - 25px)" width="24" height="50" />
+            <rect x="calc(100% - 24px)" y="calc(50% - 25px)" width="24" height="50" />
           </g>
           <circle cx="50%" cy="50%" r="2" fill="currentColor" />
         </svg>
@@ -172,13 +171,17 @@ export function HomeScreen({ session, tick, openPlayer, unreadMessages, verLevel
       </div>
       <aside className="club-side-column">
       <section className="home-section desk-readiness" aria-labelledby="home-progress-title" data-testid="home-progress">
-        <div className="desk-panel-heading"><div><span className="club-eyebrow">{t('desk.operations')}</span><h3 id="home-progress-title">{t('desk.readiness')}</h3></div><Icon name="shield-check" size={20} /></div>
+        <div className="desk-panel-heading"><h3 id="home-progress-title">{t('desk.readiness')}</h3></div>
         <div className="list-rows">
           {progress.map((p) => (
-            <button key={p.key} className="list-row home-row desk-readiness-row" onClick={() => onNavigate(p.target)}>
-              <span className={`home-state ${p.done ? 'done' : ''}`} aria-hidden="true"><Icon name={p.done ? 'check' : 'chevron-right'} size={12} /></span>
-              <span className="grow">{p.label}</span>
-              <span className={p.done ? 'home-ok' : 'dim'}>{p.state}</span>
+            <button key={p.key} className={`desk-readiness-row ${p.key === 'lookingFor' || p.key === 'coverage' ? 'readiness-football' : 'readiness-check'} ${p.done ? 'is-complete' : ''}`} onClick={() => onNavigate(p.target)}>
+              <span className="readiness-label">{p.label}</span>
+              {p.key === 'lookingFor' && org.lookingFor?.length ? (
+                <span className="readiness-positions">{org.lookingFor.map(position => <span key={position}>{position}</span>)}</span>
+              ) : (
+                <span className="readiness-state">{p.key !== 'lookingFor' && p.key !== 'coverage' && p.done && <Icon name="check" size={12} />}{p.state}</span>
+              )}
+              <span className="readiness-arrow" aria-hidden="true"><Icon name="chevron-right" size={14} /></span>
             </button>
           ))}
         </div>
