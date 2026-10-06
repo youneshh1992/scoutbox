@@ -70,7 +70,7 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    id: 'opportunities', labelKey: 'navsec.opportunities', icon: 'target',
+    id: 'opportunities', labelKey: 'navsec.opportunities', icon: 'globe',
     // The board reads only through an active relationship, which only a
     // licensed agent can hold. Convenience filter; the server refuses the rest.
     visible: licensed,

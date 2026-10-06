@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useTheme, type Theme } from '../../design-system/theme';
-import { AuthAccessNote, AuthField, AuthNote, AuthPage, AuthRow, PasswordInput } from '../../design-system/AuthShell';
+import { applyTheme } from '../../design-system/theme';
+import { AuthAccessNote, AuthField, AuthRow, PasswordInput } from '../../design-system/AuthShell';
+import { AgentBrand, AgentMap, AgentHeading } from './AgentVisuals';
 import { initials } from '../../design-system/text';
 import { Icon } from './icons';
 import { api, ApiError, DEMO_MODE, revokeSession, type Notification, type Org, type Session } from './api';
@@ -94,10 +95,10 @@ export default function App() {
     api.getNotifications(restored).catch((e) => { if (e instanceof ApiError && e.status === 401) logout(); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // M24A — one appearance per application, persisted under its own key.
-  const { theme, toggle: toggleTheme } = useTheme('agent');
+  // Agent uses its dedicated black / violet appearance throughout.
+  useEffect(()=>{applyTheme('agent','dark')},[]);
   return session
-    ? <Workspace session={session} onLogout={logout} theme={theme} onToggleTheme={toggleTheme} />
+    ? <Workspace session={session} onLogout={logout} />
     : <Login onLogin={login} />;
 }
 
@@ -109,6 +110,7 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
   const [role, setRole] = useState(ROLES[0]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [accessHelp,setAccessHelp]=useState(false);
   useEffect(() => {
     api.listOrgs().then((list) => { setOrgs(list); if (list.length === 1) setSelected(list[0].id); }).catch(() => setError(t('login.unreachable')));
   }, []);
@@ -122,18 +124,7 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
   // M24C — invitation-only: an agency's administrator adds its members, so
   // there is no public sign-up control here, only the access note.
   return (
-    <AuthPage
-      app="agent"
-      product="Agent"
-      heading="Represent players. Manage opportunities."
-      summary="Client-confirmed relationships, shared journeys and transaction workspaces."
-      points={[
-        'Nothing is active until the player confirms.',
-        'Offers and signings, each refused on their own terms.',
-        'Parties, compliance and documents in one workspace.',
-      ]}
-      aside={DEMO_MODE ? <AuthNote>{t('login.demo')}.</AuthNote> : undefined}
-    >
+    <main className="a-login"><section className="a-login-story"><AgentBrand/><div className="a-login-copy"><span>THE BUSINESS BEHIND THE GAME</span><h1>Talent has potential.<br/><em>You build<br/>the future.</em></h1><p>The professional workspace for representation,<br/>relationships and the next opportunity.</p></div><div className="a-login-map"><AgentMap decorative/></div><footer><span>SCOUTBOX / AGENT</span><span>Represent. Connect. Progress.</span></footer></section><section className="a-login-form"><header><span>AGENCY ACCESS</span><span className="a-access-dot">Private workspace</span></header><h2>{accessHelp?'Join your agency.':'Welcome back.'}</h2><p>{accessHelp?'A personal account. One connected team.':'Sign in to your professional workspace.'}</p><nav className="a-access-tabs"><button aria-pressed={!accessHelp} onClick={()=>setAccessHelp(false)}>Sign in</button><button aria-pressed={accessHelp} onClick={()=>setAccessHelp(true)}>Get access</button></nav>{accessHelp?<div className="a-access-guide"><h3>Your agency manages access.</h3><ol><li><b>Contact your administrator</b><p>Ask to be added to your agency’s ScoutBox workspace.</p></li><li><b>Confirm your role</b><p>Your administrator assigns the permissions for your work.</p></li><li><b>Sign in with your details</b><p>Use your own account so your work is attributed to you.</p></li></ol><button className="primary" onClick={()=>setAccessHelp(false)}>Back to sign in</button></div>:<>
       <form className="auth-signin" onSubmit={(e) => { e.preventDefault(); void enter(); }} aria-label="Sign in" noValidate>
         {/* M24D — one agency is named, several are chosen from; no badges either way. */}
         <div className="auth-block" role="group" aria-labelledby="agent-org-label">
@@ -176,7 +167,7 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
           <AuthField label={t('login.password')}>
             <PasswordInput placeholder={t('login.password')} value={password} onChange={(e) => setPassword(e.target.value)} className="login-pw" aria-label={t('login.password')} autoComplete="current-password" />
           </AuthField>
-          <AuthField label="Role" hint={t('login.roleNote')}>
+          <AuthField label="Role" hint="Your agency sets permissions. Regulated actions require verified credentials.">
             <select value={role} onChange={(e) => setRole(e.target.value)} aria-label="Role">{ROLES.map((r) => <option key={r}>{r}</option>)}</select>
           </AuthField>
           <button type="submit" className="primary" disabled={busy} aria-busy={busy}>{busy ? '…' : t('login.enter')}</button>
@@ -184,11 +175,11 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
       </form>
       {error && <div className="notice block" role="alert">{error}</div>}
       <AuthAccessNote>Agency access is granted by your agency’s administrator. There is no public sign-up.</AuthAccessNote>
-    </AuthPage>
+      </>}<footer className="a-login-footer"><span>{DEMO_MODE?'Interactive demo · sample records':'ScoutBox Agent'}</span><span className="login-signature" data-testid="login-signature">Built by <b>Guni &amp; Younes</b></span></footer></section></main>
   );
 }
 
-function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Session; onLogout: () => void; theme: Theme; onToggleTheme: () => void }) {
+function Workspace({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const [screen, setScreenState] = useState<ScreenId>(() => screenFromHash(window.location.hash) ?? 'home');
   const [client, setClient] = useState<{ id: string; tab: ClientTab } | null>(() => clientFromHash(window.location.hash));
   const [agencyTab, setAgencyTab] = useState<AgencyTab>(() => agencyTabFromHash(window.location.hash) ?? 'overview');
@@ -345,6 +336,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
   const toggleCollapsed = useCallback(() => setCollapsed((c) => { saveCollapsed(!c); return !c; }), []);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteQuery,setPaletteQuery]=useState('');
   usePaletteHotkey(useCallback(() => setPaletteOpen(true), []));
 
   const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(null);
@@ -425,7 +417,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
   const screenLabel = t((NAV_SECTIONS.flatMap((s) => s.children).find((c) => c.id === screen)?.labelKey ?? `nav.${screen}`) as Parameters<typeof t>[0]);
 
   return (
-    <div className={`shell ${collapsed ? 'nav-collapsed' : ''}`}>
+    <div className={`shell agent-finance ${collapsed ? 'nav-collapsed' : ''}`}>
       <Sidebar
         sections={sections}
         location={loc}
@@ -435,7 +427,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
         shortcuts={shortcuts}
         onTogglePin={togglePin}
         unreadMessages={unread}
-        onOpenPalette={() => setPaletteOpen(true)}
+        onOpenPalette={(query?:string) => {setPaletteQuery(query??'');setPaletteOpen(true)}}
         drawerOpen={drawerOpen}
         onCloseDrawer={() => setDrawerOpen(false)}
         brand={{ short: 'A', long: 'Agent' }}
@@ -445,7 +437,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
             <div className="p-who"><span className="p-avatar" aria-hidden="true">{initials(session.scoutName)}</span><div><strong>{session.scoutName}</strong><small>{session.role}</small></div></div>
             <OrgChips org={session.org} />
             {me && <div className="org-chips" data-testid="my-tiers">{me.affiliation.tiers.map((x) => <span key={x} className="pill blue">{t(`tier.${x}` as Parameters<typeof t>[0])}</span>)}</div>}
-            <div className="p-links">
+            <details className="a-account-menu"><summary>Account settings <Icon name="chevron" size={13}/></summary><div className="p-links">
               <label title={t('common.machineTranslated')}>
                 {t('common.language')}:{' '}
                 <select aria-label={t('common.language')} value={lang} onChange={(e) => { setLang(e.target.value as 'en' | 'fr'); setLangTick((x) => x + 1); }}>
@@ -456,7 +448,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
               {/* M24E — the way out of the session: back to the agency / profile screen. */}
               <button data-exit="switch-org" data-testid="switch-org" onClick={onLogout} aria-label={t('common.switchOrg')}><Icon name="arrow-right" size={14} />{t('common.switchOrg')}</button>
               <button data-exit="sign-out" data-testid="sign-out" onClick={onLogout} aria-label={t('common.signOut')}><Icon name="log-out" size={14} />{t('common.signOut')}</button>
-            </div>
+            </div></details>
           </div>
         }
       />
@@ -469,9 +461,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
           bellOpen={bellOpen}
           drawerOpen={drawerOpen}
           edition="Agent"
-          theme={theme}
-          onToggleTheme={onToggleTheme}
-          onOpenPalette={() => setPaletteOpen(true)}
+          onOpenPalette={(query?:string) => {setPaletteQuery(query??'');setPaletteOpen(true)}}
           onToggleBell={openBell}
           onReport={() => setSafetyOpen(true)}
           onOpenDrawer={() => setDrawerOpen(true)}
@@ -492,9 +482,9 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
           </div>
         )}
         {activeSection && <SecondaryNav section={activeSection} activeItemId={loc.itemId} onNavigate={setScreen} />}
-        <div className="content">
+        <div className="content" data-screen={screen}>
           {/* M24A — the reference page heading; the top bar keeps the document <h1>. */}
-          <div className="f-heading"><p className="f-display" aria-hidden="true">{screenLabel}</p></div>
+          <AgentHeading screen={screen}/>
           {meError && <div className="notice block" role="alert" data-testid="me-error">{meError}</div>}
           {screen === 'home' && homeCounts && (
             <NeedsAttention unread={unread} pending={homeCounts.pending} disputed={homeCounts.disputed} expiringSoon={homeCounts.expiringSoon} verificationGap={homeCounts.gap} onNavigate={setScreen} />
@@ -514,7 +504,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
         </div>
       </div>
       {safetyOpen && <SafetyModal session={session} notify={notify} onClose={() => setSafetyOpen(false)} />}
-      <CommandPalette ctx={navCtx} open={paletteOpen} onClose={() => setPaletteOpen(false)} onNavigate={setScreen} shortcuts={shortcuts} onTogglePin={togglePin} />
+      <CommandPalette ctx={navCtx} initialQuery={paletteQuery} open={paletteOpen} onClose={() => {setPaletteOpen(false);setPaletteQuery('')}} onNavigate={setScreen} shortcuts={shortcuts} onTogglePin={togglePin} />
       {toast && <Toast text={toast.text} error={toast.error} />}
     </div>
   );

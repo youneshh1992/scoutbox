@@ -1,3 +1,6 @@
+import { Icon } from './icons';
+import { AgentDashboard } from './AgentVisuals';
+import type { ScreenId } from './App';
 import { Hint } from '../../design-system/About';
 import { fmtClock } from '../../design-system/time';
 // ScoutBox Agent — the screens. Every screen reads one server projection and
@@ -94,7 +97,7 @@ const Panel = ({ id, label, children }: { id: string; label: string; children: R
 );
 
 const Section = ({ title, children }: { title: string; children: ReactNode }) => (
-  <div className="section"><h4>{title}</h4>{children}</div>
+  <section className="section a-section"><h4>{title}</h4>{children}</section>
 );
 
 const Stat = ({ v, k, testId }: { v: ReactNode; k: string; testId?: string }) => (
@@ -102,7 +105,7 @@ const Stat = ({ v, k, testId }: { v: ReactNode; k: string; testId?: string }) =>
 );
 
 // ============================================================ Home
-export function HomeScreen({ session, tick, onNavigate }: ScreenProps & { onNavigate: (id: 'profile' | 'clients' | 'inbox') => void }) {
+export function HomeScreen({ session, tick, onNavigate }: ScreenProps & { onNavigate: (id: ScreenId) => void }) {
   const home = useLoad(() => agent.home(session), [session, tick]);
   const h = home.data as Home | null;
   return (
@@ -113,14 +116,8 @@ export function HomeScreen({ session, tick, onNavigate }: ScreenProps & { onNavi
       {home.loading && !h && <Loading />}
       {h && (
         <>
-          <div className="stat-grid" style={{ marginBottom: 18 }}>
-            <Stat v={h.counts.active} k={t('home.active')} testId="home-active" />
-            <Stat v={h.counts.pending} k={t('home.pending')} testId="home-pending" />
-            <Stat v={h.counts.expiringSoon} k={t('home.expiring')} />
-            <Stat v={h.counts.disputed} k={t('home.disputed')} />
-            <Stat v={h.counts.expired} k={t('home.expired')} />
-            <Stat v={<StatePill state={h.profileState} />} k={t('home.verificationState')} testId="home-state" />
-          </div>
+          <AgentDashboard session={session} tick={tick} home={h} onNavigate={onNavigate}/>
+          <div className="a-standing-summary"><span>Professional standing</span><span data-testid="home-state"><StatePill state={h.profileState}/></span><button onClick={()=>onNavigate('profile')}>Manage credentials</button></div>
           {!h.hasProfile && <div className="notice warn" style={{ marginBottom: 12 }}>{t('home.noProfile')} <button onClick={() => onNavigate('profile')} style={{ marginLeft: 8 }}>{t('common.open')}</button></div>}
           <Section title={t('home.tiers')}>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{h.tiers.map((x) => <span key={x} className="pill blue">{tr(`tier.${x}`)}</span>)}</div>
@@ -199,6 +196,7 @@ export function ProfileScreen({ session, tick, notify, me }: ScreenProps & { me:
   const toggleJ = (j: string) => { setJuris((cur) => (cur.includes(j) ? cur.filter((x) => x !== j) : [...cur, j])); markDirty(); };
   return (
     <div data-testid="agent-profile">
+      <div className="a-profile-identity"><span className="a-profile-monogram">{(p?.displayName??me?.user.name??'').split(' ').map(n=>n[0]).slice(0,2).join('')}</span><div><span className="a-overline">YOUR PROFESSIONAL IDENTITY</span><h3>{p?.displayName??me?.user.name}</h3><p>Agent credentials &amp; operating permissions</p></div><Icon name={p?.facets.fifa_licence?.state==='VERIFIED'?'badge-check':'user'} size={32}/></div>
       <Hint>{p?.honest ?? t('profile.declaredNote')}</Hint>
       <ErrorLine error={prof.error} onRetry={prof.reload} />
       {prof.loading && !prof.data && <Loading />}
@@ -358,10 +356,10 @@ function ClientList({ rows, onOpen }: { rows: ClientRow[]; onOpen: (id: string) 
     <Section title={title}>
       <div className="list-rows" data-testid={testId}>
         {items.map((r) => (
-          <div key={r.id} className="list-row" data-testid={`client-row-${r.id}`}>
+          <div key={r.id} className="list-row a-client-row" data-testid={`client-row-${r.id}`}><span className="a-client-avatar" aria-hidden="true">{(r.client?.name??'').split(' ').map(n=>n[0]).slice(0,2).join('')}</span>
             <span className="grow">
               <b>{r.client?.name ?? (r.client?.removed ? '—' : r.clientId)}</b>
-              <span className="dim" style={{ marginLeft: 8 }}>{scopeLabel(r.scope)}{r.termMonths ? ` · ${r.termMonths} mo` : ''}{r.jurisdiction ? ` · ${r.jurisdiction}` : ''}</span>
+              <span className="a-client-facts"><span>{scopeLabel(r.scope)}</span>{r.termMonths&&<span>{r.termMonths} months</span>}{r.jurisdiction&&<span>{r.jurisdiction}</span>}</span>
             </span>
             <StatusPill status={r.status} />
             <button onClick={() => onOpen(r.id)}>{t('clients.open')}</button>
@@ -507,7 +505,7 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
   return (
     <div data-testid="client-detail" data-status={r.status}>
       <button onClick={onBack}>← {t('clients.back')}</button>
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', margin: '12px 0 6px' }}>
+      <div className="a-client-heading"><span className="a-client-avatar" aria-hidden="true">{(c.name??'').split(' ').map(n=>n[0]).slice(0,2).join('')}</span>
         <h3 style={{ margin: 0 }}>{c.name ?? (c.removed ? '—' : r.clientId)}</h3>
         <StatusPill status={r.status} />
         {r.shareWithAgencyStaff && <span className="pill">{t('clients.sharing')}</span>}
@@ -836,7 +834,9 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
 export function ClientsScreen({ session, tick, notify, me, clientId, clientTab, onOpenClient, onClientTab, onCloseClient }: ScreenProps & { me: Me | null; clientId: string | null; clientTab: ClientTab; onOpenClient: (id: string) => void; onClientTab: (t: ClientTab) => void; onCloseClient: () => void }) {
   const list = useLoad(() => agent.clients(session), [session, tick]);
   const [showForm, setShowForm] = useState(false);
+  const [clientQuery,setClientQuery]=useState(''),[clientStatus,setClientStatus]=useState('');
   const canRequest = !!me?.capabilities.includes('clients.request');
+  const visibleClients=(list.data?.items??[]).filter(r=>(r.client?.name??'').toLowerCase().includes(clientQuery.toLowerCase())&&(!clientStatus||r.status===clientStatus));
   if (clientId) return <ClientDetailView session={session} id={clientId} tab={clientTab} onTab={onClientTab} onBack={onCloseClient} notify={notify} tick={tick} />;
   return (
     <div data-testid="agent-clients">
@@ -845,7 +845,7 @@ export function ClientsScreen({ session, tick, notify, me, clientId, clientTab, 
       {canRequest && showForm && <div style={{ marginBottom: 14 }}><RequestForm session={session} notify={notify} onDone={() => { setShowForm(false); list.reload(); }} /></div>}
       <ErrorLine error={list.error} onRetry={list.reload} />
       {list.loading && !list.data && <Loading />}
-      {list.data && <ClientList rows={list.data.items} onOpen={onOpenClient} />}
+      {list.data && <><div className="a-record-toolbar"><label className="a-inline-search"><Icon name="search" size={17}/><input aria-label="Search client portfolio" placeholder="Find a client" value={clientQuery} onChange={e=>setClientQuery(e.target.value)}/></label><select aria-label="Client status" value={clientStatus} onChange={e=>setClientStatus(e.target.value)}><option value="">All relationships</option>{['active','proposed','disputed','expired','declined','terminated_by_client','terminated_by_agent'].map(st=><option key={st} value={st}>{tr(`status.${st}`)}</option>)}</select><span>{visibleClients.length} of {list.data.items.length} records</span></div><ClientList rows={visibleClients} onOpen={onOpenClient} /></>}
     </div>
   );
 }
@@ -853,9 +853,9 @@ export function ClientsScreen({ session, tick, notify, me, clientId, clientTab, 
 // ============================================================ Opportunities
 function OppRow({ o }: { o: Opportunity }) {
   return (
-    <div className="list-row" data-testid={`opp-${o.id}`}>
+    <div className="list-row a-opportunity" data-testid={`opp-${o.id}`}><span className="a-opportunity-icon"><Icon name="briefcase" size={22}/></span>
       <span className="grow"><b>{o.title}</b> <span className="dim">· {o.orgName} · {o.type.replace(/_/g, ' ')}{o.category ? ` · ${o.category}` : ''}{o.distance ? ` · ${o.distance}` : ''}</span>{o.clientName ? <span className="dim"> · {t('opps.client')}: {o.clientName}</span> : null}</span>
-      <span className="dim">{t('opps.deadline')} {o.deadline}</span>
+      <span className="dim">{t('opps.deadline')} {new Date(o.deadline).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'})}</span>
       {o.applied ? <span className="pill green">Applied</span> : null}
     </div>
   );
@@ -870,7 +870,7 @@ export function OpportunitiesScreen({ session, tick, me }: ScreenProps & { me: M
       <ErrorLine error={data.error} onRetry={data.reload} />
       {licensed && data.loading && !data.data && <Loading />}
       {data.data && data.data.items.length === 0 && <div className="notice">{t('opps.empty')}</div>}
-      <div className="list-rows">{(data.data?.items ?? []).map((o) => <OppRow key={`${o.clientId}-${o.id}`} o={o} />)}</div>
+      <div className="a-opportunity-grid">{(data.data?.items ?? []).map((o) => <OppRow key={`${o.clientId}-${o.id}`} o={o} />)}</div>
     </div>
   );
 }
@@ -880,12 +880,12 @@ export function InboxScreen({ session, tick, notify, onOpenClient }: ScreenProps
   const data = useLoad(() => agent.inbox(session), [session, tick]);
   const markRead = async () => { try { await api.markNotificationsRead(session); data.reload(); } catch (e) { notify(httpState(e).message, true); } };
   return (
-    <div data-testid="agent-inbox">
+    <div className="a-correspondence" data-testid="agent-inbox">
       <Hint>{t('inbox.intro')}</Hint>
       <ErrorLine error={data.error} onRetry={data.reload} />
       {data.loading && !data.data && <Loading />}
       {data.data && (
-        <>
+        <div className="a-inbox-layout"><aside className="a-inbox-summary"><Icon name="inbox" size={27}/><span className="a-overline">CORRESPONDENCE</span><h3>Your agency desk.</h3><p>Every request and update, connected to its client record.</p><div><strong>{data.data.notifications.filter(n=>!n.read).length}</strong><span>{data.data.notifications.filter(n=>!n.read).length===1?'Unread notice':'Unread notices'}</span></div><div><strong>{data.data.pending.length}</strong><span>{data.data.pending.length===1?'Pending client decision':'Pending client decisions'}</span></div></aside><div>
           {data.data.pending.length > 0 && (
             <Section title={t('inbox.pending')}>
               <div className="list-rows">
@@ -900,7 +900,7 @@ export function InboxScreen({ session, tick, notify, onOpenClient }: ScreenProps
             {data.data.notifications.some((n) => !n.read) && <div style={{ marginBottom: 8 }}><button onClick={markRead}>{t('inbox.markRead')}</button></div>}
             <div className="list-rows" data-testid="inbox-notices">
               {data.data.notifications.map((n: Notification) => (
-                <div key={n.id} className="list-row" style={{ opacity: n.read ? 0.7 : 1 }} data-type={n.type}>
+                <div key={n.id} className="list-row" style={{ opacity: n.read ? 0.7 : 1 }} data-type={n.type}><span className={`a-notice-marker ${n.read?'read':''}`}><Icon name="bell" size={17}/></span>
                   <span className="grow">{n.text}{(n.repeatCount ?? 1) > 1 && <span className="pill" style={{ marginLeft: 6 }}>×{n.repeatCount}</span>}</span>
                   {n.refId && /^rep-/.test(n.refId) && <button onClick={() => onOpenClient(n.refId!)}>{t('common.open')}</button>}
                   <span className="dim">{fmtStamp(n.ts)}</span>
@@ -908,7 +908,7 @@ export function InboxScreen({ session, tick, notify, onOpenClient }: ScreenProps
               ))}
             </div>
           </Section>
-        </>
+        </div></div>
       )}
     </div>
   );
@@ -1077,7 +1077,7 @@ export function AgencyScreen({ session, tick, notify, me, tab, onTab }: ScreenPr
                 <Stat v={o.relationships.legacy} k={t('agency.relLegacy')} />
               </div>
               <Section title={t('agency.roles')}>
-                <div className="list-rows">{o.tiers.map((x) => <div key={x} className="list-row"><span className="grow"><b>{tr(`tier.${x}`)}</b> <span className="dim">· {tr(`tierNote.${x}`)}</span></span><span className="dim">{(Object.entries(o.permissions).filter(([, v]) => v.includes(x)).map(([k]) => k)).length} caps</span></div>)}</div>
+                <div className="list-rows">{o.tiers.map((x) => <div key={x} className="list-row"><span className="grow"><b>{tr(`tier.${x}`)}</b> <span className="dim">· {tr(`tierNote.${x}`)}</span></span><span className="dim">{(Object.entries(o.permissions).filter(([, v]) => v.includes(x)).map(([k]) => k)).length} permissions</span></div>)}</div>
               </Section>
             </>
           )}

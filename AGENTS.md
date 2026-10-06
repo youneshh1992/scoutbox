@@ -26,3 +26,7 @@ player dossiers, football entry and workspace tools. New features must fit it;
 redesign only on explicit Founder request. The Pro artifact is
 `e2e/dist/scoutbox-club-demo.html`, rebuilt and freshness-checked as above.
 This does not reopen the approved Player or Grassroots designs.
+
+For Agent's current design work, read `AGENT_FINANCE.md`. The black/violet
+business-workspace redesign is a reviewable proposal on `design/agent-finance`,
+not yet a permanent UI approval. Keep the ScoutBox wordmark and green identity.

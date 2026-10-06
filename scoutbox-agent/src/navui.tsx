@@ -1,3 +1,4 @@
+import { AgentBrand } from './AgentVisuals';
 // M15-Nav / P2.5 — navigation UI. All structure comes from nav.ts; nothing
 // here keeps its own list of destinations. Visibility filtering is
 // convenience — the server stays authoritative for every route.
@@ -22,7 +23,6 @@ import {
   allItems, filterSections, groupedChildren, searchNav, stripLayout,
 } from './nav';
 import { Icon } from './icons';
-import { ThemeToggle, type Theme } from '../../design-system/theme';
 import { t } from './i18n';
 
 type TKey = Parameters<typeof t>[0];
@@ -60,7 +60,7 @@ export function Sidebar({
   onTogglePin: (id: ScreenId) => void;
   unreadMessages: number;
   badges?: Partial<Record<NavSection['id'], number>>;
-  onOpenPalette: () => void;
+  onOpenPalette: (query?:string) => void;
   drawerOpen: boolean;
   onCloseDrawer: () => void;
   footer: ReactNode;
@@ -107,7 +107,7 @@ export function Sidebar({
       <nav ref={navRef} id="app-sidebar" className={`sidebar ${collapsed ? 'collapsed' : ''} ${drawerOpen ? 'drawer-open' : ''}`} aria-label="Main navigation">
         {/* M24A — the reference wordmark: one ink, a green square, the edition beside it. */}
         <div className="brand" title={`ScoutBox ${brand.long}`}>
-          {collapsed ? <span className="wordmark" aria-label={`ScoutBox ${brand.long}`}>S</span> : <><span className="wordmark">ScoutBox</span><sup className="tm" aria-label="trademark">TM</sup><span className="brand-sub">{brand.long}</span></>}
+          {collapsed ? <span className="wordmark" aria-label={`ScoutBox ${brand.long}`}>S</span> : <AgentBrand/>}
         </div>
         {org && (
           <div className="p-org" aria-label={org.name}>
@@ -436,11 +436,12 @@ export function SecondaryNav({ section, activeItemId, onNavigate }: {
  * is never hidden (§33): under 640px it shrinks to its glyph with the same
  * accessible name.
  */
-export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOpen = false, theme, onToggleTheme, onOpenPalette, onToggleBell, onReport, onOpenDrawer }: {
+export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOpen = false, onOpenPalette, onToggleBell, onReport, onOpenDrawer }: {
   title: string; crumb?: string | null; edition?: string; live: boolean; unread: number; bellOpen: boolean; drawerOpen?: boolean;
-  theme: Theme; onToggleTheme: () => void; onOpenPalette: () => void;
+  onOpenPalette: (query?:string) => void;
   onToggleBell: () => void; onReport: () => void; onOpenDrawer: () => void;
 }) {
+  const [searchText,setSearchText]=useState('');
   const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform ?? '');
   return (
     <header className="topbar">
@@ -456,12 +457,7 @@ export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOp
         </h1>
       </div>
       <div className="p-toolbar">
-        <ThemeToggle theme={theme} onToggle={onToggleTheme} labels={{ aria: t('theme.aria'), light: t('theme.light'), dark: t('theme.dark') }} />
-        <button className="p-top-search" onClick={onOpenPalette} aria-label={t('navsec.searchAria')} title={t('navsec.searchAria')}>
-          <Icon name="search" size={18} />
-          <span>{t('navsec.searchWorkspace')}</span>
-          <kbd>{isMac ? '⌘ K' : 'Ctrl K'}</kbd>
-        </button>
+        <form className="a-global-search" role="search" onSubmit={e=>{e.preventDefault();onOpenPalette(searchText);setSearchText('')}}><Icon name="search" size={17}/><input type="search" aria-label="Search Agent workspace" placeholder="Search workspace" value={searchText} onChange={e=>setSearchText(e.target.value)}/><button aria-label="Open workspace search" type="submit"><kbd>{isMac?'⌘ K':'Ctrl K'}</kbd><Icon name="search" size={17}/></button></form>
         {live
           ? <span className="live-dot on" role="status" aria-label={t('navsec.liveOk')} title={t('navsec.liveOk')} />
           : <span className="pill red" role="status">○ {t('navsec.liveOff')}</span>}
@@ -497,8 +493,9 @@ export function OrgChips({ org }: { org: { type: string; trustedPartner?: boolea
 }
 
 // ---------------------------------------------------------- CommandPalette
-export function CommandPalette({ ctx, open, onClose, onNavigate, shortcuts, onTogglePin }: {
+export function CommandPalette({ ctx, initialQuery='', open, onClose, onNavigate, shortcuts, onTogglePin }: {
   ctx: NavContext;
+  initialQuery?:string;
   open: boolean;
   onClose: () => void;
   onNavigate: (id: ScreenId) => void;
@@ -508,7 +505,7 @@ export function CommandPalette({ ctx, open, onClose, onNavigate, shortcuts, onTo
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => { if (open) { setQ(''); setSel(0); setTimeout(() => inputRef.current?.focus(), 0); } }, [open]);
+  useEffect(() => { if (open) { setQ(initialQuery); setSel(0); setTimeout(() => inputRef.current?.focus(), 0); } }, [open,initialQuery]);
   if (!open) return null;
   const results = searchNav(q, ctx, tr);
   const go = (itemId: ScreenId) => { onNavigate(itemId); onClose(); };

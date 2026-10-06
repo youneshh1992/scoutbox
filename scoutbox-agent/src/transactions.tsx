@@ -146,7 +146,7 @@ function TransactionRow({ tx, onOpen }: { tx: Transaction; onOpen: (id: string) 
   const engaging = tx.parties.find((p) => p.partyRole === 'engaging_entity' && !p.removed);
   const releasing = tx.parties.find((p) => p.partyRole === 'releasing_entity' && !p.removed);
   return (
-    <div className="list-row" data-testid="tx-row" data-tx={tx.id} data-status={tx.status}>
+    <div className="list-row a-transaction-row" data-testid="tx-row" data-tx={tx.id} data-status={tx.status}><span className="a-client-avatar" aria-hidden="true">{(individual?.name??'').split(' ').map(n=>n[0]).slice(0,2).join('')}</span>
       <span className="grow">
         <b>{individual?.name ?? t('tx.partyUnnamed')}</b>
         <span className="dim"> · {tr(`txType.${tx.type}`, tx.type.replace(/_/g, ' '))}</span>
@@ -687,10 +687,10 @@ export function TransactionsScreen({ session, me, transactionId, transactionTab,
         </label>
         {canWrite && <NewTransactionForm s={s} clubs={clubs ?? []} onCreated={(id) => { reloadList(); onOpenTransaction(id); }} />}
       </div>
-      <div className="list-rows" style={{ marginTop: 8 }} data-testid="tx-list">
+      <div className="a-ledger"><header><span className="a-overline">TRANSACTION REGISTER</span><span>{rows.length} records in this view</span></header><div className="list-rows" style={{ marginTop: 8 }} data-testid="tx-list">
         {rows.map((tx) => <TransactionRow key={tx.id} tx={tx} onOpen={onOpenTransaction} />)}
       </div>
-      {rows.length === 0 && <div className="notice" data-testid="tx-list-empty">{l.items.length === 0 ? t('tx.noneYet') : t('tx.noneMatch')}</div>}
+      {rows.length === 0 && <div className="notice" data-testid="tx-list-empty">{l.items.length === 0 ? t('tx.noneYet') : t('tx.noneMatch')}</div>}</div>
     </div>
   );
 }
