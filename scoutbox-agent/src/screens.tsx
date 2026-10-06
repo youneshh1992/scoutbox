@@ -365,28 +365,28 @@ function ClientList({ rows, onOpen }: { rows: ClientRow[]; onOpen: (id: string) 
               <span className="a-client-facts"><span>{scopeLabel(r.scope)}</span>{r.termMonths&&<span>{r.termMonths} months</span>}{r.jurisdiction&&<span>{r.jurisdiction}</span>}</span>
             </span>
             <StatusPill status={r.status} />
-            <button onClick={() => onOpen(r.id)}>{t('clients.open')}</button>
+            <button className="a-open-record" onClick={() => onOpen(r.id)}>View record<Icon name="arrow-up-right" size={15}/></button>
           </div>
         ))}
       </div>
     </Section>
   );
   return (
-    <>
+    <div className="a-portfolio-records">
       {group(t('clients.pending'), own.filter((r) => r.status === 'proposed'), 'clients-pending')}
       {group(t('clients.activeList'), own.filter((r) => r.status === 'active'), 'clients-active')}
       {group(t('clients.ended'), own.filter((r) => !['proposed', 'active'].includes(r.status)), 'clients-ended')}
       {shared.length > 0 && (
-        <Section title={t('clients.summaryList')}>
+        <Section title="Shared client records"><div className="a-shared-explainer"><Icon name="shield-check" size={15}/><span>Summary access · shared with agency staff</span></div>
           <div className="list-rows" data-testid="clients-summary">
             {shared.map((r) => (
-              <div key={r.id} className="list-row"><span className="grow"><b>{r.client.name ?? r.clientId}</b>{r.legacy ? <span className="pill" style={{ marginLeft: 8 }}>Legacy</span> : null}</span><StatusPill status={r.status} /><button onClick={() => onOpen(r.id)}>{t('clients.open')}</button></div>
+              <div key={r.id} className="list-row a-client-row a-shared-client"><span className="a-client-avatar" aria-hidden="true">{(r.client.name??'').split(' ').map(n=>n[0]).slice(0,2).join('')}</span><span className="grow"><span className="a-record-caption">SHARED CLIENT</span><b>{r.client.name ?? r.clientId}</b>{r.legacy ? <span className="pill" style={{ marginLeft: 8 }}>Legacy</span> : null}</span><StatusPill status={r.status} /><button className="a-open-record" onClick={() => onOpen(r.id)}>View record<Icon name="arrow-up-right" size={15}/></button></div>
             ))}
           </div>
         </Section>
       )}
       {rows.length === 0 && <div className="notice">{t('clients.empty')}</div>}
-    </>
+    </div>
   );
 }
 
@@ -848,7 +848,7 @@ export function ClientsScreen({ session, tick, notify, me, clientId, clientTab, 
       {canRequest && showForm && <div style={{ marginBottom: 14 }}><RequestForm session={session} notify={notify} onDone={() => { setShowForm(false); list.reload(); }} /></div>}
       <ErrorLine error={list.error} onRetry={list.reload} />
       {list.loading && !list.data && <Loading />}
-      {list.data && <><div className="a-record-toolbar"><label className="a-inline-search"><Icon name="search" size={17}/><input aria-label="Search client portfolio" placeholder="Find a client" value={clientQuery} onChange={e=>setClientQuery(e.target.value)}/></label><select aria-label="Client status" value={clientStatus} onChange={e=>setClientStatus(e.target.value)}><option value="">All relationships</option>{['active','proposed','disputed','expired','declined','terminated_by_client','terminated_by_agent'].map(st=><option key={st} value={st}>{tr(`status.${st}`)}</option>)}</select><span>{visibleClients.length} of {list.data.items.length} records</span></div><ClientList rows={visibleClients} onOpen={onOpenClient} /></>}
+      {list.data && <><div className="a-record-toolbar a-portfolio-toolbar"><label className="a-inline-search"><Icon name="search" size={17}/><input aria-label="Search client portfolio" placeholder="Find a client" value={clientQuery} onChange={e=>setClientQuery(e.target.value)}/></label><select aria-label="Client status" value={clientStatus} onChange={e=>setClientStatus(e.target.value)}><option value="">All relationships</option>{['active','proposed','disputed','expired','declined','terminated_by_client','terminated_by_agent'].map(st=><option key={st} value={st}>{tr(`status.${st}`)}</option>)}</select><span>{visibleClients.length} of {list.data.items.length} {list.data.items.length===1?'record':'records'}</span></div>{!visibleClients.length&&list.data.items.length>0?<div className="a-empty-state"><Icon name="search" size={26}/><h3>No matching records</h3><p>Try a different name or relationship status.</p><button onClick={()=>{setClientQuery('');setClientStatus('');}}>Clear filters</button></div>:<ClientList rows={visibleClients} onOpen={onOpenClient} />}</>}
     </div>
   );
 }
@@ -956,23 +956,13 @@ function TeamTab({ session, tick, notify, me }: ScreenProps & { me: Me | null })
       {conflict ? <ConflictNotice conflict={conflict} onReload={() => { setErr(null); team.reload(); }} /> : <ErrorLine error={err} />}
       <ErrorLine error={team.error} onRetry={team.reload} />
       {team.data && (
-        <div className="a-team-grid" data-testid="team-rows">
+        <div className="a-team-directory" data-testid="team-rows">
           {team.data.members.map((m) => (
-            <div key={m.affiliationId} className="list-row a-person-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }} data-testid={`member-${m.userId}`} data-active={m.active ? '1' : '0'}>
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                <span className="a-member-avatar">{(m.name??'').split(' ').map(n=>n[0]).slice(0,2).join('')}</span><span className="grow"><b>{m.name}</b> <span className="dim">· {m.role}{!m.active ? ` · ${t('agency.ended')}${m.endedAt ? ` ${fmtDate(m.endedAt)}` : ''}` : ''}</span></span>
-                {m.licensed ? <StatePill state={m.fifaLicence ?? 'UNVERIFIED'} /> : <span className="pill">{t('agency.noProfile')}</span>}
-              </div>
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                {(canWrite&&m.active?TIERS:m.tiers).map((x) => (
-                  <label className={`a-role-chip ${(edits[m.userId]??m.tiers).includes(x)?'selected':''}`} key={x} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, color: 'var(--muted)' }} title={tr(`tierNote.${x}`)}>
-                    {canWrite&&m.active?<input type="checkbox" checked={(edits[m.userId] ?? m.tiers).includes(x)} onChange={() => setEdits((c) => ({ ...c, [m.userId]: toggle(c[m.userId] ?? m.tiers, x) }))} />:<Icon name="badge-check" size={12}/>} {tr(`tier.${x}`)}
-                  </label>
-                ))}
-                {canWrite && m.active && edits[m.userId] && <button className="primary" disabled={busy} onClick={() => saveTiers(m)}>{t('agency.saveTiers')}</button>}
-                {canWrite && m.active && <button disabled={busy} onClick={() => end(m)} data-testid={`end-${m.userId}`}>{t('agency.endMember')}</button>}
-              </div>
-            </div>
+            <article key={m.affiliationId} className="a-member-record" data-testid={`member-${m.userId}`} data-active={m.active?'1':'0'}>
+              <header><span className="a-member-avatar">{(m.name??'').split(' ').map(n=>n[0]).slice(0,2).join('')}</span><div className="a-member-identity"><h4>{m.name}</h4><span>{m.role}{!m.active?` · ${t('agency.ended')}${m.endedAt?` ${fmtDate(m.endedAt)}`:''}`:''}</span></div><div className="a-member-standing"><span>Agent credential</span>{m.licensed?<StatePill state={m.fifaLicence??'UNVERIFIED'}/>:<span className="a-unregistered">No agent profile</span>}</div></header>
+              <div className="a-member-assignment"><span className="a-record-caption">ASSIGNED ACCESS</span><div>{m.tiers.map(x=><span key={x} title={tr(`tierNote.${x}`)}>{tr(`tier.${x}`)}</span>)}</div></div>
+              {canWrite&&m.active&&<details className="a-access-editor"><summary aria-label={`Manage access for ${m.name}`}><Icon name="sliders-horizontal" size={15}/>Manage access<Icon name="chevron-down" size={14}/></summary><div className="a-access-editor-body"><p>Select the permissions this member needs.</p><div className="a-access-options">{TIERS.map(x=><label key={x} className="a-access-option"><input type="checkbox" checked={(edits[m.userId]??m.tiers).includes(x)} onChange={()=>setEdits(c=>({...c,[m.userId]:toggle(c[m.userId]??m.tiers,x)}))}/><span><b>{tr(`tier.${x}`)}</b><small>{tr(`tierNote.${x}`)}</small></span></label>)}</div><footer>{edits[m.userId]&&<><button className="primary" disabled={busy} onClick={()=>saveTiers(m)}>{t('agency.saveTiers')}</button><button disabled={busy} onClick={()=>setEdits(c=>{const next={...c};delete next[m.userId];return next;})}>Discard changes</button></>}<button className="a-end-membership" disabled={busy} onClick={()=>end(m)} data-testid={`end-${m.userId}`}>{t('agency.endMember')}</button></footer></div></details>}
+            </article>
           ))}
         </div>
       )}
@@ -1004,7 +994,7 @@ function ComplianceTab({ session, tick }: ScreenProps) {
           <Hint className="notice" style={{ marginBottom: 10 }} testID="compliance-honest">{data.data.honest}</Hint>
           <DeskIntro eyebrow="AGENCY CREDENTIALS" title="Your team’s professional standing" description="Individual credentials and jurisdiction records, kept separate from agency membership." icon="shield-check"/><div className="a-agency-credentials" data-testid="compliance-rows">
             {data.data.agents.map((a: ComplianceRow) => (
-              <div key={a.userId} className="list-row a-person-card"><span className="a-member-avatar">{(a.name??'').split(' ').map(n=>n[0]).slice(0,2).join('')}</span><span className="grow"><b>{a.name}</b>{!a.hasProfile && <span className="dim"> · {t('agency.noProfile')}</span>}{a.jurisdictions.map((j) => <span key={j.memberAssociation} className="a-standing-fact"><span>{j.memberAssociation} registration</span><StatePill state={j.nationalRegistration} /></span>)}</span><div className="a-licence-status"><span>FIFA licence</span><StatePill state={a.fifaLicence} /></div></div>
+              <article key={a.userId} className="a-standing-record"><header><span className="a-member-avatar">{(a.name??'').split(' ').map(n=>n[0]).slice(0,2).join('')}</span><div><span className="a-record-caption">PROFESSIONAL RECORD</span><h4>{a.name}</h4>{!a.hasProfile&&<small>{t('agency.noProfile')}</small>}</div></header><div className="a-standing-facets"><div><Icon name="badge-check" size={20}/><span><small>INTERNATIONAL</small><b>FIFA licence</b></span><StatePill state={a.fifaLicence}/></div>{a.jurisdictions.map(j=><div key={j.memberAssociation}><Icon name="globe" size={20}/><span><small>{j.memberAssociation}</small><b>National registration</b></span><StatePill state={j.nationalRegistration}/></div>)}</div></article>
             ))}
             {data.data.agents.length === 0 && <div className="notice">{t('common.none')}</div>}
           </div>
@@ -1035,15 +1025,11 @@ function SettingsTab({ session, tick, notify, me, overview }: ScreenProps & { me
   return (
     <>
       <DeskIntro eyebrow="AGENCY PREFERENCES" title="Your operating profile" description="Keep your agency description and declared markets up to date." icon="building"/><Hint>{t('agency.settingsIntro')}</Hint>
-      <div className="form-grid" data-testid="agency-settings">
-        <label>{t('agency.description')}{canWrite?<textarea rows={4} value={desc} onChange={(e) => { setDesc(e.target.value); markDirty(); }} />:<p className="a-readonly-value">{desc||'No description recorded.'}</p>}</label>
-        <div>
-          <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 4 }}>{t('agency.jurisdictions')}</div>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>{(canWrite?JURISDICTIONS:juris).map((j) => <label className={"a-role-chip "+(juris.includes(j)?'selected':'')} key={j} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>{canWrite&&<input type="checkbox" checked={juris.includes(j)} onChange={() => { setJuris((c) => (c.includes(j) ? c.filter((x) => x !== j) : [...c, j])); markDirty(); }} />} {j}</label>)}</div>
-        </div>
+      <div className="a-settings-desk" data-testid="agency-settings">
+        <section className="a-settings-description"><header><span className="a-record-caption">01 / AGENCY PROFILE</span><h4>Describe your agency</h4><p>A short introduction to your work and representation.</p></header><label className="a-field-label">{t('agency.description')}{canWrite?<textarea rows={5} value={desc} onChange={e=>{setDesc(e.target.value);markDirty();}}/>:<p className="a-readonly-value">{desc||'No description recorded.'}</p>}</label></section>
+        <section className="a-settings-markets"><header><span className="a-record-caption">02 / OPERATING MARKETS</span><h4>Member associations</h4><p>Your agency’s declared jurisdictions.</p></header><div className="a-market-options">{(canWrite?JURISDICTIONS:juris).map(j=><label key={j} className={`a-market-option ${juris.includes(j)?'selected':''}`}><span className="a-market-code">{j}</span><span><b>{j==='INT'?'International':j==='ENG'?'England':j==='USA'?'United States':j}</b><small>{juris.includes(j)?'Declared market':'Not selected'}</small></span>{canWrite&&<input type="checkbox" aria-label={j} checked={juris.includes(j)} onChange={()=>{setJuris(c=>c.includes(j)?c.filter(x=>x!==j):[...c,j]);markDirty();}}/>}</label>)}</div></section>
+        <footer className="a-settings-save"><span><Icon name="building" size={15}/>{overview?.org.name}</span><ErrorLine error={err}/>{canWrite?<button className="primary" onClick={save}>Save agency settings<Icon name="arrow-right" size={15}/></button>:<span>{t('agency.readOnly')}</span>}</footer>
       </div>
-      <ErrorLine error={err} />
-      {canWrite ? <button className="primary" onClick={save}>{t('common.save')}</button> : <div className="dim" style={{ fontSize: 12.5 }}>{t('agency.readOnly')}</div>}
       {canAudit && (
         <Section title={t('agency.audit')}>
           <Hint>{t('agency.auditIntro')}</Hint>

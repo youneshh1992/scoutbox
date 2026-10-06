@@ -20,7 +20,7 @@ export function AgentMotion() {
         });
       }, {threshold:0.08, rootMargin:'0px 0px -24px 0px'});
       const scan = () => {
-        document.querySelectorAll('.a-card,.a-kpi,.agent-finance .stat,.a-section,.a-opportunity-v2,.a-person-card,.a-credential-card,.a-business-hero,.a-login-map,.a-bell-item,.a-compliance-desk .section').forEach(el => {
+        document.querySelectorAll('.a-member-record,.a-standing-record,.a-settings-desk,.a-card,.a-kpi,.agent-finance .stat,.a-section,.a-opportunity-v2,.a-person-card,.a-credential-card,.a-business-hero,.a-login-map,.a-bell-item,.a-compliance-desk .section').forEach(el => {
           if (tracked.has(el)) return;
           tracked.add(el);
           el.classList.add('a-motion-pending');

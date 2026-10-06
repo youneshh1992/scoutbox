@@ -37,7 +37,10 @@ Agent now has a stacked typographic signature: the ScoutBox wordmark above a
 spaced violet AGENT edition line. The top toolbar uses an understated search line,
 a labelled updates control and a shield-shaped report tool.
 Opportunities use a searchable, filterable deadline board. Agency views include
-member cards, credential records, operating settings and an audit timeline.
+a compact member directory with on-demand access editing, aligned credential
+records, an operating profile with market toggles and an audit timeline. Client
+registers distinguish shared summaries from own relationships, with explicit
+filtered-empty states. The account area integrates identity and assigned access.
 Profile work is divided into identity, credentials, authorisations and activity;
 compliance into standing, conflict checks, consents and reviews/access. Notifications
 use an independently scrolling journal. The world map uses Natural Earth I with
