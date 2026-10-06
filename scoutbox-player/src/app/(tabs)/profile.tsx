@@ -199,7 +199,7 @@ export function ProfileBody() {
       {/* ---- identity: the subject of the page, not a record on it */}
       <View style={styles.header} testID="profile-header">
         <Avatar name={me.name} />
-        <PlayerName name={me.name} verified={me.identityVerified} style={styles.name} testID="profile-name" badgeTestID="profile-verified" />
+        <PlayerName name={me.name} verified={me.identityVerified} style={styles.name} testID="profile-name" badgeTestID="profile-verified" centered />
         <View style={{ marginTop: 10 }}><PlayerMeta position={me.position ?? pt('fbNoPosition')} location={place} availability={availability} testID="profile-line" availabilityTestID="profile-availability" centered /></View>
         <View style={styles.headerRow}>
           {!me.identityVerified && <Text style={styles.quietWord} testID="profile-verified" accessibilityLabel="Identity not verified">Not verified</Text>}
