@@ -1,5 +1,9 @@
 # ScoutBox — repository handoff (to Codex)
 
+> Latest Grassroots approval: read `GRASSROOTS_CLUBHOUSE.md` and `CLAUDE.md`.
+> The Founder approved `5a3e7b0` on `design/grassroots-clubhouse` on 6 October
+> 2026 as the permanent baseline for future Grassroots artifact builds.
+>
 > Historical handoff, 4 October 2026. For the subsequent Founder-approved
 > vivid Player UI and current rebuild instructions, read `HANDOFF_CLAUDE_UI.md`
 > and `BRAND_RULES.md` first. The minimalism/freeze statements below describe

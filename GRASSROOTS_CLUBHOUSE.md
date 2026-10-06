@@ -1,6 +1,50 @@
-# Grassroots Clubhouse design
+# Grassroots — approved UI and artifact baseline
 
-Implemented for the Founder's 5 October 2026 request for a complete Grassroots desktop makeover: an earthy football feel with gradients and glows, led by ScoutBox green. This is the new implementation for review; it is not a claim of subsequent visual approval.
+## Founder approval — 6 October 2026
+
+The Founder explicitly approved the finished result and requested a GitHub push
+and preservation as the Grassroots artifact UI going forward.
+
+- Approved implementation: `5a3e7b0` on `design/grassroots-clubhouse`.
+- Source of truth: the actual `scoutbox-grassroots` implementation on this branch,
+  including its subsequent authorized changes. Earlier screenshots, demo HTML,
+  and exploratory descriptions below are not alternative baselines.
+- Preserve the exact ScoutBox logo and green, dark forest workspace, compact
+  sidebar identity/account panels, traditional ScoutBox search and bell, and
+  professional scouting records throughout the app.
+- Home retains its simple banner with very subtle pitch lines. The banner's
+  outer border is the pitch boundary: no second inset perimeter, scenery,
+  floating pitch illustration, or “Built from the ground up” caption.
+- Preserve the compact attention queue, club readiness status badges and
+  recruiting tags, and the flat club nameplate with its initials crest.
+- Preserve the Film Room studio, Scouting Insight views, integrations workbench,
+  structured criteria/records and responsive layouts already implemented.
+- Authentication, other apps, access rules, data provenance and existing action
+  handlers remain protected. New features must fit this UI; redesign only when
+  the Founder explicitly requests it.
+
+### Artifact handoff
+
+Build from this branch (or a descendant containing this approved implementation):
+
+```sh
+node e2e/buildDemos.mjs
+node e2e/demoFreshness.test.mjs
+```
+
+Use `e2e/dist/scoutbox-grassroots-demo.html` as the Grassroots artifact. It is a
+self-contained generated bundle, intentionally ignored by Git; the build embeds
+its source revision and fingerprint. Serve it over HTTP(S). For production,
+build `scoutbox-grassroots` without `VITE_DEMO=1`.
+
+If a separate artifact host is being updated, replace its Grassroots bundle with
+this freshly built file and verify the displayed build ID. A GitHub source push
+does not automatically replace a separately published Claude artifact. Never
+reuse an older bundle or claim an external artifact was refreshed without checking.
+
+The sections below record the implementation history. The final approved
+implementation and the latest refinement rules take precedence over superseded
+artwork, headers, controls and earlier validation scope.
 
 ## Scope and source
 

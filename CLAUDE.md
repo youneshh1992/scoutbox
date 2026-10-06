@@ -1,4 +1,18 @@
-# ScoutBox — permanent approved Player design
+# ScoutBox — approved Player and Grassroots UI
+
+## Latest approval — Grassroots, 6 October 2026
+
+The Founder explicitly approved the Grassroots UI at commit `5a3e7b0` on
+`design/grassroots-clubhouse` and requested that it be pushed to GitHub and used
+for the Grassroots artifact going forward. This is the approved baseline, not
+an unfinished redesign. Preserve the actual implementation and subsequent
+authorized changes; do not rebuild it from a screenshot or restore older demo
+HTML. Read the approval at the top of `GRASSROOTS_CLUBHOUSE.md` before changing
+Grassroots. Its final decisions supersede earlier exploratory design directions.
+
+Build the Grassroots artifact from these sources using the canonical demo builder
+and freshness check. The GitHub push is authorized for this approval; this is not
+standing permission for future pushes, merges, or deployments.
 
 The Founder approved the current Player design and explicitly asked Claude to
 preserve it going forward. These are persistent project instructions. A later
