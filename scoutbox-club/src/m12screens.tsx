@@ -384,7 +384,7 @@ export function SquadPlannerScreen({ session, tick, notify }: ScreenProps) {
   };
 
   return (
-    <div>
+    <div className="pro-squad-workspace">
       <Hint>{t('planner.noScores')}</Hint>
       {planner && <ProSquadBoard formation={planner.formation} roles={planner.roles}/>}
       <div className="stat-grid">
@@ -393,12 +393,12 @@ export function SquadPlannerScreen({ session, tick, notify }: ScreenProps) {
         <div className="stat"><b>{(vacancies ?? []).filter((v) => v.status === 'open').length}</b><span>{t('planner.vacancies')}</span></div>
         <div className="stat"><b>{planner?.shadow.length ?? 0}</b><span>{t('planner.shadow')}</span></div>
       </div>
-      <div className="section">
-        <h3>{t('planner.vacancies')}</h3>
+      <div className="section pro-vacancies">
+        <h3>Recruitment needs <span>{(vacancies??[]).length}</span></h3>
         <div className="list-rows">
           {(vacancies ?? []).map((v) => (
-            <div key={v.id} className="list-row">
-              <span className="grow"><b>{v.roleName}</b>{v.notes && <span className="dim"> · {v.notes}</span>}</span>
+            <div key={v.id} className="list-row"><span className="pro-vacancy-marker"><Icon name="target" size={22}/></span>
+              <span className="grow"><b>{v.roleName}</b>{v.notes && <span className="dim">{v.notes}</span>}</span>
               <span className={`pill ${v.status === 'open' ? 'green' : ''}`}>{v.status}</span>
               <button onClick={() => showCandidates(v)}>{t('planner.candidates')}</button>
             </div>
@@ -431,24 +431,10 @@ export function SquadPlannerScreen({ session, tick, notify }: ScreenProps) {
           </div>
         </div>
       )}
-      <div className="section">
-        <h3>Squad & contracts</h3>
-        <div className="list-rows">
-          {(planner?.current ?? []).map((p) => (
-            <div key={p.playerId} className="list-row">
-              <span className="grow"><b>{p.name}</b> <span className="dim">{p.position ?? ''}</span></span>
-              {p.contractUntil && <span className={`pill ${new Date(p.contractUntil).getTime() < Date.now() + 180 * 86400000 ? 'red' : ''}`}>contract to {p.contractUntil}</span>}
-              <span className="pill">{p.source}</span>
-            </div>
-          ))}
-          {(planner?.shadow ?? []).map((p) => (
-            <div key={p.playerId} className="list-row" style={{ opacity: 0.85 }}>
-              <span className="grow"><b>{p.name}</b> <span className="dim">{p.position ?? ''}</span></span>
-              <span className="pill gold">{t('planner.shadow')}</span>
-            </div>
-          ))}
-        </div>
-      </div>
+      <section className="pro-roster"><header><div><span className="pro-eyebrow">Personnel register</span><h3>Squad & contracts</h3></div><span>{planner?.current.length??0} in squad · {planner?.shadow.length??0} in shadow squad</span></header><div className="pro-roster-table"><table><thead><tr><th>Player</th><th>Position</th><th>Contract ends</th><th>Record</th></tr></thead><tbody>
+          {(planner?.current??[]).map(p=><tr key={p.playerId}><td><span className="pro-roster-initials">{p.name.split(' ').map(n=>n[0]).slice(0,2).join('')}</span><strong>{p.name}</strong></td><td>{p.position??'—'}</td><td><span className={p.contractUntil&&new Date(p.contractUntil).getTime()<Date.now()+180*86400000?'contract-soon':''}>{p.contractUntil?fmtDate(p.contractUntil):'Not recorded'}</span></td><td>{sentenceCase(p.source)}</td></tr>)}
+          {(planner?.shadow??[]).map(p=><tr key={p.playerId}><td><span className="pro-roster-initials">{p.name.split(' ').map(n=>n[0]).slice(0,2).join('')}</span><strong>{p.name}</strong></td><td>{p.position??'—'}</td><td>—</td><td>Shadow squad</td></tr>)}
+        </tbody></table></div></section>
     </div>
   );
 }
@@ -536,24 +522,24 @@ export function CampaignsScreen({ session, tick, notify }: ScreenProps) {
   }).catch((e) => notify(e instanceof Error ? e.message : 'Failed', true));
 
   return (
-    <div>
+    <div className="pro-campaigns">
       <Hint>{t('camp.fileVsHuman')}</Hint>
-      <div className="filters">
-        <input aria-label="Campaign title" placeholder="Title (e.g. Remote sprint assessment)" value={title} onChange={(e) => setTitle(e.target.value)} style={{ flex: 1 }} />
-        <input aria-label={t('common.deadline')} type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
-        <button className="primary" onClick={() => title && deadline && act(async () => {
+      <div className="pro-campaign-create"><header><span className="pro-eyebrow">Campaign studio</span><h3>Set the next challenge.</h3><p>Publish a remote assessment and review each submission against your rubric.</p></header><div className="filters">
+        <label>Campaign title<input aria-label="Campaign title" placeholder="Title (e.g. Remote sprint assessment)" value={title} onChange={(e) => setTitle(e.target.value)} style={{ flex: 1 }} /></label>
+        <label>Submission deadline<input aria-label={t('common.deadline')} type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} /></label>
+        <button className="primary" disabled={!title.trim()||!deadline} onClick={() => title.trim() && deadline && act(async () => {
           await m12.createCampaign(session, { title, deadline, drills: [{ name: '30m sprint', instructions: 'Two cones 30m apart, one run per clip.', recording: { equipment: 'Any phone ≥720p', distance: 'Full run in frame', surface: 'Flat grass', camera: 'Fixed, side-on' } }], rubric: [{ criterion: 'Full run visible', guidance: 'Start and finish cones in frame' }] });
           setTitle('');
         }, 'Campaign published.')}>{t('camp.new')}</button>
       </div>
-      <div className="list-rows">
+      </div><div className="pro-campaign-list">
         {(list ?? []).map((c) => (
-          <div key={c.id} className="list-row">
-            <span className="grow"><b>{c.title}</b><div className="dim"><DetailItems items={c.drills.map(d=>d.name)}/><RecordFacts items={[{label:t('common.deadline'),value:c.deadline},{label:'Attempts',value:c.attemptsAllowed}]}/></div></span>
-            <span className="pill">{c.submissions ?? 0} submissions</span>
-            {(c.awaitingReview ?? 0) > 0 && <span className="pill gold">{c.awaitingReview} awaiting human review</span>}
-            <button onClick={async () => setQueue({ camp: c, rows: (await m12.reviewQueue(session, c.id)).queue })}>{t('camp.queue')}</button>
-          </div>
+          <article key={c.id} className="pro-campaign-card">
+            <header><span className="pro-campaign-symbol"><Icon name="target" size={26}/></span><span className="pro-eyebrow">Remote assessment</span><span className="pro-campaign-deadline">Closes {fmtDate(c.deadline)}</span></header>
+            <h3>{c.title}</h3><div className="pro-campaign-drills"><DetailItems items={c.drills.map(d=>d.name.replace(/(\d+)m\b/g,'$1 m'))}/></div>
+            <dl><div><dt>Submissions</dt><dd>{c.submissions??0}</dd></div><div><dt>Awaiting review</dt><dd>{c.awaitingReview??0}</dd></div><div><dt>Attempts allowed</dt><dd>{c.attemptsAllowed}</dd></div></dl>
+            <footer><span>Club review queue</span><button onClick={async () => setQueue({ camp: c, rows: (await m12.reviewQueue(session, c.id)).queue })}>Review submissions <Icon name="arrow-right" size={16}/></button></footer>
+          </article>
         ))}
         {(list ?? []).length === 0 && <div className="notice">{t('common.none')}</div>}
       </div>
@@ -564,8 +550,8 @@ export function CampaignsScreen({ session, tick, notify }: ScreenProps) {
             {queue.rows.map((q) => (
               <div key={q.attempt.id} className="list-row">
                 <span className="grow">
-                  <b>{q.playerName}</b> · {q.attempt.drillName}
-                  <div className="dim">{q.attempt.fileChecks.kind}: {q.attempt.fileChecks.passed ? 'passed (file only — drill unvalidated)' : q.attempt.fileChecks.issues.join('; ')}</div>
+                  <b>{q.playerName}</b><span className="dim"> — {q.attempt.drillName.replace(/(\d+)m\b/g, '$1 m')}</span>
+                  <div className="dim">{q.attempt.fileChecks.passed ? 'Video upload checked. The drill is awaiting your review.' : `Upload needs attention: ${q.attempt.fileChecks.issues.join('; ')}`}</div>
                 </span>
                 {q.attempt.mediaUrl && api.mediaUrl(q.attempt.mediaUrl) && <a href={api.mediaUrl(q.attempt.mediaUrl)!} target="_blank" rel="noreferrer">View clip</a>}
                 <button onClick={() => act(() => m12.reviewAttempt(session, q.attempt.id, 'accepted', undefined, 'Meets the rubric.'), 'Accepted.')}>{t('camp.accept')}</button>
@@ -640,7 +626,7 @@ export function VideoScreen({ session, tick, notify, openPlayer }: ScreenProps) 
         }}>+ {t('common.create')}</button></h3>
         <div className="list-rows">
           {(playlists ?? []).map((p) => (
-            <div key={p.id} className="list-row"><span className="grow"><b>{p.name}</b></span><span className="pill">{p.segmentIds.length} segments</span></div>
+            <div key={p.id} className="list-row"><span className="grow"><b>{p.name}</b></span><span className="pill">{p.segmentIds.length} {p.segmentIds.length===1?'segment':'segments'}</span></div>
           ))}
         </div>
       </div>

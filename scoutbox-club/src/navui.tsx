@@ -468,7 +468,7 @@ export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOp
 
         <button className="p-top-search" onClick={onOpenPalette} aria-label={t('navsec.searchAria')} title={t('navsec.searchAria')}>
           <Icon name="search" size={18} />
-          <span>Search ScoutBox Pro</span>
+          <span>Search the workspace</span>
           <kbd>{isMac ? '⌘ K' : 'Ctrl K'}</kbd>
         </button>
         {live
@@ -484,7 +484,7 @@ export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOp
           <Icon name="bell" size={18} />{unread > 0 && <span className="bell-badge" aria-hidden="true">{unread}</span>}
         </button>
         <button className="topbar-safety" onClick={onReport} title={t('navsec.reportAria')} aria-label={t('navsec.reportAria')}>
-          <Icon name="flag" size={18} /> <span className="safety-long">Report / Block</span>
+          <Icon name="flag" size={18} /> <span className="safety-long">Report or block</span>
         </button>
       </div>
     </header>
@@ -631,12 +631,12 @@ export function NeedsAttention({ session, tick, unreadMessages, verLevel, onNavi
   if (rows.length === 0) return null;
   return (
     <div className="attn-card" role="region" aria-label={t('navsec.attnTitle')}>
-      <div className="attn-title">{t('navsec.attnTitle')}</div>
+      <div className="attn-title"><Icon name="flag" size={17}/><span>Action required</span></div>
       {rows.map((r) => (
         <button key={r.key} className="attn-row" onClick={() => onNavigate(r.target)}>
           <span className="attn-count">{r.count}</span>
           <span className="grow">{r.label}</span>
-          <Icon name="chevron" size={12} />
+          <span className="pro-attn-action">Review <Icon name="arrow-right" size={16}/></span>
         </button>
       ))}
     </div>

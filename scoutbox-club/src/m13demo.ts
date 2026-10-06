@@ -181,11 +181,11 @@ const ONBOARDING: OnboardingState = {
     { id: 'verify_org', label: 'Verify your organisation (company email domain)', done: true, help: 'Trust & Safety reviews verification — required before any under-18 visibility.' },
     { id: 'safeguarding', label: 'Sign the safeguarding contract', done: true, help: 'Required for under-18 access.' },
     { id: 'invite_staff', label: 'Invite your staff', done: true, help: 'Each person works under their own named account.' },
-    { id: 'mfa_leads', label: 'Enable MFA for privileged accounts', done: false, help: 'Leads approve signings and manage staff — protect those accounts first.' },
-    { id: 'first_import', label: 'Import or add your player records', done: true, help: 'CSV import with dry-run preview.' },
-    { id: 'coverage_plan', label: 'Set up a coverage plan', done: true, help: 'Fixtures, assignments and observation tracking live under Coverage.' },
+    { id: 'mfa_leads', label: 'Enable two-factor authentication for team leads', done: false, help: 'Leads approve signings and manage staff — protect those accounts first.' },
+    { id: 'first_import', label: 'Import or add your player records', done: true, help: 'Preview your CSV records before importing them.' },
+    { id: 'coverage_plan', label: 'Set up a coverage plan', done: true, help: 'Manage fixtures, scout assignments and observations in Coverage.' },
   ],
-  complete: false, roleHelp: 'As a lead you approve signings, manage staff and see restricted cases.',
+  complete: false, roleHelp: 'As a recruitment lead, you approve signings, manage staff and access restricted cases.',
 };
 const INVITES: InviteRow[] = [{ id: 'inv-d1', email: 'nina@eastport-example.club', name: 'Nina Invitee', role: 'Scout', status: 'accepted', createdAt: NOW - 6 * DAY }];
 const SESSIONS: SessionRow[] = [

@@ -9,7 +9,7 @@ They explicitly included the Pro sign-in/access screen in the redesign scope.
 
 ## Implementation
 
-- Pro-only graphite and midnight surfaces, ivory text and ScoutBox green accents.
+- Pro-only charcoal surfaces, ivory text and ScoutBox green accents.
   Preserve the ScoutBox wordmark and its green square; primary actions use
   `#00e676`.
 - A recruitment overview with links to real workflows, actual account counts,
@@ -123,3 +123,42 @@ Browser checks cover saved segments on a second player and their linked profile,
 playlist assignment, chart modes, dossier/list switching, role selection,
 network tabs, desktop and 390px layouts. The Pro preview remains a local design
 proposal until the Founder approves it.
+
+## Football identity and category layouts — 6 October review
+
+The latest Founder feedback requested a stronger football identity, a substantial
+entry-screen redesign, cleaner categories, and a grammar/alignment pass. This
+iteration supersedes the blue-slate presentation above. It remains a local
+review proposal; Pro publishing has not been requested.
+
+- `proFootball.css` is the final Pro-only presentation layer: charcoal, muted
+  pitch-green surfaces, ivory typography, square controls and restrained green
+  accents. Traditional search, notification and report controls remain active.
+- The entry screen uses `src/assets/pro-stadium.jpg`, an original AI-generated
+  stadium image, with a shorter named-user sign-in form. Organisation selection,
+  password reveal, validation, loading state and the existing login API remain.
+  “Get access” explains the existing administrator invitation/provisioning flow;
+  it does not claim to create accounts or introduce public registration.
+- Discovery aligns filters, collapses optional saved-search and ordering details,
+  retains visible comparison actions, and removes duplicate position badges.
+- The activity feed separates event type, player, context and date. Attention
+  requests use a compact action rail. Repeated page-signature ornaments are
+  replaced by a small football stripe motif.
+- Campaigns separate creation, deadlines, submission counts and review actions.
+  Review copy describes upload checks without exposing internal enum names.
+- Squad contracts use a full-width personnel register and readable dates.
+  Club setup shows actual completion progress and a two-column task board.
+- Analytics tables fill their panel; empty charts explain the lack of recorded
+  activity without manufacturing sample results. The compact account control
+  keeps status, language and session actions inside its expandable menu.
+- Native dark form controls also work for previously saved light-mode sessions.
+  Desktop and narrow layouts, reduced motion and keyboard focus are retained.
+
+Validation: TypeScript and production build; 504 navigation, 127 case-navigation,
+18 Pro utility checks and icon parity. AST comparison confirms all 371 existing
+API calls are preserved with unchanged arguments. Browser checks cover entry
+validation, organisation selection, password reveal, access guidance, player
+comparison, campaign review, club setup, squad records, chart/table switching,
+Film Room and the mobile navigation/discovery layout at 390px. The inspected
+browser session reports no console errors. Canonical demos must still be built
+from the committed source and pass freshness verification before delivery.

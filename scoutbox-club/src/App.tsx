@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTheme, type Theme } from '../../design-system/theme';
-import { AuthAccessNote, AuthField, AuthNote, AuthPage, AuthRow, PasswordInput } from '../../design-system/AuthShell';
+import { AuthField, PasswordInput } from '../../design-system/AuthShell';
 import { initials } from '../../design-system/text';
 import { Icon } from './icons';
+import stadiumImage from './assets/pro-stadium.jpg';
+import { ClubCrest } from './proExperience';
 import { ProMasthead, ProOverview } from './proDesign';
 import { api, ApiError, DEMO_MODE, revokeSession, type Channel, type Notification, type Org, type Session } from './api';
 import {
@@ -182,16 +184,18 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
   const [role, setRole] = useState(ROLES[0]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [accessHelp, setAccessHelp] = useState(false);
+  const [orgPickerOpen, setOrgPickerOpen] = useState(true);
 
   useEffect(() => {
-    api.listOrgs().then(setOrgs).catch(() => setError('Cannot reach scoutbox-server on localhost:4000 — start it first.'));
+    api.listOrgs().then(setOrgs).catch(() => setError('We couldn’t load the available organisations. Please try again shortly.'));
   }, []);
 
   // M24C — one submission at a time; a refusal keeps the name, organisation
   // and role so only the password needs retyping.
   const enter = async () => {
     if (busy) return;
-    if (!selected) return setError('Pick an organisation.');
+    if (!selected) return setError('Choose your organisation to continue.');
     if (!scoutName.trim()) return setError('Enter your name — every session is attributed to a named individual.');
     setBusy(true);
     try {
@@ -201,61 +205,33 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
     } finally { setBusy(false); }
   };
 
-  return (
-    <AuthPage
-      app="pro"
-      product="Pro"
-      heading="Your next signing starts here."
-      summary="The professional workspace for a more considered recruitment decision."
-      points={[
-        'Discover. Observe. Decide.',
-        'A complete view of your recruitment journey.',
-        'No unsolicited contact: every approach is a request the player answers.',
-      ]}
-      aside={DEMO_MODE ? <AuthNote>Self-contained demo — no server needed.</AuthNote> : undefined}
-    >
-      <form className="auth-signin" onSubmit={(e) => { e.preventDefault(); void enter(); }} aria-label="Sign in" noValidate>
-        <div className="auth-field" role="group" aria-labelledby="pro-org-label">
-          <span className="auth-label" id="pro-org-label">Organisation</span>
-          <div className="org-grid">
-            {orgs.map((o) => (
-              <AuthRow key={o.id} label={o.name} selected={selected === o.id} onClick={() => setSelected(o.id)}
-                meta={[orgTypeLabel(o.type), o.plan, o.trustedPartner ? 'Trusted Partner' : null, o.type === 'club' ? (o.verified ? 'Verified' : 'Verification Pending') : null].filter(Boolean).join(' · ')} />
-            ))}
+  const activeOrg = orgs.find(o => o.id === selected);
+  return <main className="login pro-entry">
+    <section className="pro-entry-story" aria-label="ScoutBox Pro football workspace">
+      <img src={stadiumImage} alt="An empty floodlit football stadium seen from the players’ tunnel"/>
+      <div className="pro-entry-brand"><span className="wordmark">ScoutBox</span><sup className="tm">TM</sup><span className="brand-sub">PRO</span></div>
+      <div className="pro-entry-copy"><span className="pro-entry-kicker">For the people who build the team</span><h1>See the game.<br/>Shape the<br/><em>next chapter.</em></h1><p>The football workspace for discovery,<br/>analysis and recruitment.</p></div>
+      <footer><span>SCOUTBOX / PROFESSIONAL</span><span>Discover <i/> Assess <i/> Decide</span></footer>
+    </section>
+    <section className="pro-entry-panel" aria-label="ScoutBox Pro — sign in">
+      <div className="pro-entry-form-wrap"><div className="pro-entry-top"><span>CLUB ACCESS</span><span className="pro-entry-pro">PRO</span></div>
+        <h2>{accessHelp ? 'Join the workspace.' : 'Welcome to the club.'}</h2><p className="pro-entry-description">{accessHelp ? 'Your club administrator manages invitations and access.' : 'Sign in to your club’s professional workspace.'}</p>
+        <div className="pro-entry-tabs" role="group" aria-label="Account access"><button type="button" aria-pressed={!accessHelp} onClick={()=>setAccessHelp(false)}>Sign in</button><button type="button" aria-pressed={accessHelp} onClick={()=>setAccessHelp(true)}>Get access</button></div>
+        {accessHelp ? <div className="pro-access-guide"><h3>One club. Your own account.</h3><ol><li><b>Speak to your club administrator</b><span>Ask for an invitation to your organisation’s ScoutBox workspace.</span></li><li><b>Receive your access details</b><span>Your administrator will confirm your role and the sign-in details you need.</span></li><li><b>Start working with your team</b><span>Use your own name so observations and decisions are attributed correctly.</span></li></ol><p>New organisations are set up directly by ScoutBox. Public registration is not available yet.</p><button className="primary" onClick={()=>setAccessHelp(false)}>Back to sign in <Icon name="arrow-right" size={17}/></button></div> : <>
+        <form className="auth-signin" onSubmit={e=>{e.preventDefault();void enter()}} aria-label="Sign in" noValidate>
+          <div className="pro-entry-club"><span className="auth-label">Your organisation</span><details open={orgPickerOpen} onToggle={e=>setOrgPickerOpen(e.currentTarget.open)}><summary><ClubCrest initials={activeOrg ? initials(activeOrg.name) : 'SB'}/><span><strong>{activeOrg?.name ?? 'Choose your organisation'}</strong><small>{activeOrg ? `${orgTypeLabel(activeOrg.type)} workspace` : 'Select a club, academy or agency'}</small></span><Icon name="chevron-down" size={16}/></summary><div className="org-grid">{orgs.map(o=><button key={o.id} type="button" className={`org-card ${selected===o.id?'selected':''}`} aria-pressed={selected===o.id} onClick={()=>{setSelected(o.id);setOrgPickerOpen(false);setError(null)}}><span className="org-name">{o.name}</span><small>{o.type==='club' ? (o.verified?'Verified club':'Verification pending') : orgTypeLabel(o.type)}</small><Icon name="arrow-right" size={14}/></button>)}</div></details></div>
+          <div className="enter-row">
+            <AuthField label="Your name"><input placeholder="Full name" value={scoutName} onChange={e=>{setScoutName(e.target.value);setError(null)}} autoComplete="name" aria-label="Your name"/></AuthField>
+            <AuthField label="Role"><select value={role} onChange={e=>setRole(e.target.value)} aria-label="Role">{ROLES.map(r=><option key={r}>{r}</option>)}</select></AuthField>
+            <AuthField label="Club password" hint={DEMO_MODE ? 'No password is needed for the interactive demo.' : 'Use the password supplied by your organisation, if required.'}><PasswordInput placeholder="Enter your password" value={password} onChange={e=>{setPassword(e.target.value);setError(null)}} className="login-pw" autoComplete="current-password" aria-label="Club password"/></AuthField>
+            {error&&<div className="notice block" role="alert">{error}</div>}
+            <button type="submit" className="primary" disabled={busy} aria-busy={busy}>{busy?'Signing in…':'Enter workspace'}<Icon name="arrow-right" size={18}/></button>
           </div>
-        </div>
-        <div className="enter-row">
-          <AuthField label="Your name">
-            <input
-              placeholder="Your name (scout / coach / agent)"
-              value={scoutName}
-              onChange={(e) => setScoutName(e.target.value)}
-              autoComplete="name"
-              aria-label="Your name"
-            />
-          </AuthField>
-          <AuthField label="Club password" hint="Only if your organisation was provisioned with one.">
-            <PasswordInput
-              placeholder="Club password (if provisioned)"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="login-pw"
-              autoComplete="current-password"
-              aria-label="Club password"
-            />
-          </AuthField>
-          <AuthField label="Role">
-            <select value={role} onChange={(e) => setRole(e.target.value)} aria-label="Role">
-              {ROLES.map((r) => <option key={r}>{r}</option>)}
-            </select>
-          </AuthField>
-          <button type="submit" className="primary" disabled={busy} aria-busy={busy}>{busy ? 'Entering…' : 'Enter workspace'}</button>
-        </div>
-      </form>
-      {error && <div className="notice block" role="alert">{error}</div>}
-      <AuthAccessNote>Club access is provisioned by ScoutBox for your organisation. There is no public sign-up.</AuthAccessNote>
-    </AuthPage>
-  );
+        </form><p className="pro-entry-access" data-testid="auth-access">Access is managed by your organisation. Need an invitation? <button onClick={()=>setAccessHelp(true)}>Get access</button></p></>}
+      </div><footer className="pro-entry-bottom"><span>{DEMO_MODE ? 'Interactive demo · sample club records' : 'ScoutBox Pro · Club workspace'}</span><span className="login-signature" data-testid="login-signature">Built by <b>Guni &amp; Younes</b></span></footer>
+    </section>
+  </main>;
+
 }
 
 function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Session; onLogout: () => void; theme: Theme; onToggleTheme: () => void }) {
@@ -540,9 +516,8 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
         brand={{ short: 'P', long: 'Pro' }}
         org={{ initials: initials(session.org.name), name: session.org.name, line: session.org.plan }}
         footer={
-          <div className="p-account"><span className="pro-account-caption">Your account</span>
-            <div className="p-who"><span className="p-avatar" aria-hidden="true">{initials(session.scoutName)}</span><div><strong>{session.scoutName}</strong><small>{session.role}</small></div></div>
-            <details className="pro-account-settings"><summary><Icon name="settings-2" size={15}/><span>Manage account</span><Icon name="chevron-right" size={12}/></summary><OrgChips org={session.org} /><div className="p-links">
+          <div className="p-account">
+            <details className="pro-account-settings"><summary aria-label="Manage account"><span className="p-avatar" aria-hidden="true">{initials(session.scoutName)}</span><span className="pro-account-identity"><strong>{session.scoutName}</strong><small>{session.role}</small></span><Icon name="chevron-down" size={14}/></summary><OrgChips org={session.org} /><div className="p-links">
               <button onClick={() => setScreen('verification')}><Icon name="badge-check" size={14} />{t('navsec.myVerification')}</button>
               <label title={t('common.machineTranslated')}>
                 {t('common.language')}:{' '}

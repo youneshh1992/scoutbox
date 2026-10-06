@@ -248,17 +248,17 @@ export function FeedScreen({ session, tick, openPlayer }: ScreenProps) {
     <>
       <AgencyWall session={session} />
       {items.length === 0 && <div className="notice">Quiet fortnight — nothing new yet.</div>}
-      <section className="pro-feed"><header><div><span className="pro-eyebrow">From your scouting network</span><h3>Latest intelligence</h3></div><div className="pro-feed-tabs" role="group" aria-label="Filter activity">{[['all','All activity'],['footage','Footage'],['players','Players'],['reports','Reports']].map(([id,label])=><button key={id} aria-pressed={filter === id} onClick={()=>setFilter(id)}>{label}</button>)}</div></header><div className="list-rows">
+      <section className="pro-feed"><header><div><span className="pro-eyebrow">The latest from your network</span><h3>Scouting wire</h3></div><div className="pro-feed-tabs" role="group" aria-label="Filter activity">{[['all','All activity'],['footage','Footage'],['players','Players'],['reports','Reports']].map(([id,label])=><button key={id} aria-pressed={filter === id} onClick={()=>setFilter(id)}>{label}</button>)}</div></header><div className="list-rows">
         {items.filter(it => filter === 'all' || (filter === 'footage' && (it.type === 'new_clip' || it.type === 'shortlist_new_clip')) || (filter === 'players' && it.type === 'new_player') || (filter === 'reports' && it.type === 'report_due')).map((it, i) => (
           <div key={i} className="list-row" style={{ cursor: 'pointer' }} {...pressable(() => openPlayer(it.playerId))}>
-            <span className={`feed-kind ${it.type === 'report_due' ? 'urgent' : ''}`}>{FEED_LABELS[it.type]}</span>
+            <span className={`feed-kind ${it.type === 'report_due' ? 'urgent' : ''}`}><Icon name={it.type==='new_player'?'user':it.type==='report_due'?'clipboard':'video'} size={22}/><small>{FEED_LABELS[it.type]}</small></span>
             <span className="grow">
               <b>{it.playerName}</b>
-              {it.type === 'new_player' && <span className="dim"> — {it.position}, {it.age}{it.guardianManaged ? ' · U18 (guardian-managed)' : ''}</span>}
+              {it.type === 'new_player' && <span className="dim"> {it.position} · {it.age} years{it.guardianManaged ? ' · U18 (guardian-managed)' : ''}</span>}
               {(it.type === 'new_clip' || it.type === 'shortlist_new_clip') && (
-                <span className="dim"> — “{it.title}”{it.verifiedClip ? ' · Verified Clip' : ''}{it.hasVideo ? ' · Playable' : ''}</span>
+                <span className="dim"> {it.title}{it.verifiedClip ? ' · Verified footage' : ''}</span>
               )}
-              {it.type === 'report_due' && <span className="dim"> — mandatory trial report due {it.dueAt ? fmtDate(it.dueAt) : 'soon'}</span>}
+              {it.type === 'report_due' && <span className="dim"> Trial report due {it.dueAt ? fmtDate(it.dueAt) : 'soon'}</span>}
             </span>
             <span className="dim">{fmtDate(it.ts)}</span>
           </div>
@@ -465,29 +465,30 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
   return (
     <>
       <AgencyWall session={session} />
-      <div className="filters">
+      <div className="filters pro-discovery-filters">
         <input
-          type="text"
-          placeholder="Search name, city, country…"
+          type="search"
+          aria-label="Search players"
+          placeholder="Search players, city or country"
           value={filters.q ?? ''}
           onChange={(e) => setFilters({ ...filters, q: e.target.value || undefined })}
         />
-        <select value={filters.position ?? ''} onChange={(e) => setFilters({ ...filters, position: e.target.value || undefined })}>
+        <select aria-label="Position" value={filters.position ?? ''} onChange={(e) => setFilters({ ...filters, position: e.target.value || undefined })}>
           <option value="">Any position</option>
           {POSITIONS.map((p) => <option key={p}>{p}</option>)}
         </select>
-        <select value={filters.availability ?? ''} onChange={(e) => setFilters({ ...filters, availability: e.target.value || undefined })}>
+        <select aria-label="Availability" value={filters.availability ?? ''} onChange={(e) => setFilters({ ...filters, availability: e.target.value || undefined })}>
           <option value="">Any availability</option>
           {Object.entries(AVAILABILITY_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
-        <select value={filters.ageGroup ?? ''} onChange={(e) => setFilters({ ...filters, ageGroup: (e.target.value || undefined) as SearchFilters['ageGroup'] })}>
+        <select aria-label="Age group" value={filters.ageGroup ?? ''} onChange={(e) => setFilters({ ...filters, ageGroup: (e.target.value || undefined) as SearchFilters['ageGroup'] })}>
           <option value="">Any age group</option>
           <option value="u16">U16</option>
           <option value="u18">U18</option>
           <option value="18-21">18–21</option>
           <option value="senior">22+</option>
         </select>
-        <select value={filters.country ?? ''} onChange={(e) => setFilters({ ...filters, country: e.target.value || undefined })}>
+        <select aria-label="Country" value={filters.country ?? ''} onChange={(e) => setFilters({ ...filters, country: e.target.value || undefined })}>
           <option value="">Any country</option>
           {['GB', 'PT', 'FR', 'SE', 'PL', 'NG', 'GH', 'AR', 'JP', 'KR'].map((c) => <option key={c}>{c}</option>)}
         </select>
@@ -499,10 +500,10 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
           <input type="checkbox" checked={!!filters.newDays} onChange={(e) => setFilters({ ...filters, newDays: e.target.checked ? 7 : undefined })} />
           New this week
         </label>
-        <span className="pill">{players.length} players</span>
+
       </div>
-      <div className="filters" style={{ marginTop: -8 }}>
-        <input type="text" placeholder="Save this search as… (alerts on new matches)" value={saveName} onChange={(e) => setSaveName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && saveCurrent()} />
+      <details className="pro-saved-search"><summary><Icon name="clipboard" size={16}/> Saved searches <span>{saved.length}</span></summary><div className="filters">
+        <input type="text" placeholder="Name this search to receive new-match alerts" value={saveName} onChange={(e) => setSaveName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && saveCurrent()} />
         <button onClick={saveCurrent}>Save search</button>
         {saved.map((s) => (
           <span key={s.id} className="pill blue" style={{ cursor: 'pointer' }} title={`by ${s.scoutName}`}>
@@ -515,29 +516,25 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
             >✕</button>
           </span>
         ))}
-        {compareIds.length >= 2 && (
-          <button className="primary" onClick={() => setComparing(true)}>Compare {compareIds.length}</button>
-        )}
       </div>
+      </details>
       {error && <div className="notice block">{error}</div>}
       {comparing && <CompareModal session={session} playerIds={compareIds} onClose={() => setComparing(false)} />}
       {/* M18.2 — the ordering is stated, not inferred. It is deliberately not
           a ranking, and the sentence says what the figure is not. */}
-      <div className="dim" style={{ fontSize: 12, marginBottom: 8 }} data-ordering>
-        {t('discover.ordering')}
-      </div>
-      <div className="pro-results-toolbar"><div><strong>{players.length}</strong><span>Players in this view</span></div><div role="group" aria-label="Player presentation"><button aria-pressed={view==='dossiers'} onClick={()=>setView('dossiers')}>Dossiers</button><button aria-pressed={view==='list'} onClick={()=>setView('list')}>List</button><button disabled={!players.length} onClick={()=>exportCsv('scoutbox-pro-visible-players.csv',['Player','Position','Age','Country','Preferred foot','Height (cm)','Availability'],players.map(p=>[p.name,p.position,p.age,p.country,p.foot,p.heightCm,AVAILABILITY_LABELS[p.availability]??p.availability]))}><Icon name="download" size={15}/> Export view</button></div></div>
+      <details className="pro-ordering" data-ordering><summary>How results are ordered</summary><p>{t('discover.ordering')}</p></details>
+      <div className="pro-results-toolbar"><div><strong>{players.length}</strong><span>{players.length===1?'player':'players'} in this view</span></div><div role="group" aria-label="Player presentation">{compareIds.length >= 2 && <button className="primary" onClick={() => setComparing(true)}>Compare {compareIds.length}</button>}<button aria-pressed={view==='dossiers'} onClick={()=>setView('dossiers')}>Dossiers</button><button aria-pressed={view==='list'} onClick={()=>setView('list')}>List</button><button disabled={!players.length} onClick={()=>exportCsv('scoutbox-pro-visible-players.csv',['Player','Position','Age','Country','Preferred foot','Height (cm)','Availability'],players.map(p=>[p.name,p.position,p.age,p.country,p.foot,p.heightCm,AVAILABILITY_LABELS[p.availability]??p.availability]))}><Icon name="download" size={15}/> Export view</button></div></div>
       <div className={`player-grid pro-player-results ${view}`}>
         {players.map((p) => (
           <div key={p.id} className="player-card" {...pressable(() => openPlayer(p.id))}>
-            <div className="pro-dossier-top"><span className="pro-dossier-position">{p.position}</span><span>Player dossier</span>{p.identityVerified&&<Icon name="badge-check" size={18}/>}</div>
+            <div className="pro-dossier-top"><span className="pro-dossier-position">{p.position}</span><span>Scouting profile</span>{p.identityVerified&&<Icon name="badge-check" size={18}/>}</div>
             <div className="row1">
               <span className="name">{p.name}<small>{p.city ? `${p.city}, ` : ""}{p.country}</small></span>
               <span style={{ display: 'flex', gap: 6, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
                 <label className="chk" title="Select to compare">
-                  <input type="checkbox" checked={compareIds.includes(p.id)} onChange={() => toggleCompare(p.id)} /> 
+                  <input type="checkbox" aria-label={`Compare ${p.name}`} checked={compareIds.includes(p.id)} onChange={() => toggleCompare(p.id)} />
                 </label>
-                <span className="pill blue">{p.position}</span>
+
               </span>
             </div>
             <div className="meta">
@@ -573,7 +570,7 @@ export function ShortlistScreen({ session, tick, openPlayer }: ScreenProps) {
     <div className="player-grid">
       {players.map((p) => (
         <div key={p.id} className="player-card" {...pressable(() => openPlayer(p.id))}>
-          <div className="row1"><span className="name">{p.name}</span><span className="pill blue">{p.position}</span></div>
+          <div className="row1"><span className="name">{p.name}</span></div>
           <TrustBar score={p.trustScore} />
         </div>
       ))}

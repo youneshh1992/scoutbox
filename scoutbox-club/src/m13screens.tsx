@@ -566,7 +566,7 @@ export function RepresentationScreen({ session, notify }: ScreenProps) {
 function SettingsRow({ id, title, value, children }: { id: string; title: string; value?: string; children: ReactNode }) {
   return (
     <details className="settings-row" data-testid={`org-row-${id}`}>
-      <summary><span className="settings-row-title">{title}</span>{value ? <span className="settings-row-value">{value}</span> : null}</summary>
+      <summary><span className="pro-setting-icon"><Icon name={id==='onboarding'?'clipboard':id==='staff'?'users':id==='activity'?'activity':id==='notifications'?'bell':id==='sessions'?'clipboard':'shield-check'} size={21}/></span><span className="settings-row-title">{title}</span>{value ? <span className="settings-row-value">{value}</span> : null}</summary>
       <div className="settings-row-body">{children}</div>
     </details>
   );
@@ -607,12 +607,7 @@ export function OrganisationScreen({ session, notify }: ScreenProps) {
         <AuditLogPanel session={session} />
       </SettingsRow>
       <SettingsRow id="onboarding" title={t('m13.org.onboarding')} value={ob ? `${(ob.tasks ?? []).filter((x) => x.done).length} of ${(ob.tasks ?? []).length} done` : undefined}>
-        <div className="dim" style={{ fontSize: 12.5 }}>{ob?.roleHelp}</div>
-        {(ob?.tasks ?? []).map((task) => (
-          <div key={task.id} className="list-row">
-            <span className="grow"><Icon name={task.done ? 'circle-check' : 'clock'} size={13} label={task.done ? 'done' : 'to do'} /> {task.label}<div className="dim" style={{ fontSize: 12 }}>{task.help}</div></span>
-          </div>
-        ))}
+        <div className="pro-setup"><header><div><span className="pro-eyebrow">Club setup</span><h3>Prepare for the season.</h3><p>{ob?.roleHelp}</p></div><div className="pro-setup-score"><strong>{(ob?.tasks??[]).filter(t=>t.done).length}<small> / {ob?.tasks.length??0}</small></strong><span>Steps complete</span></div></header><div className="pro-setup-progress" role="progressbar" aria-label="Club setup completion" aria-valuemin={0} aria-valuemax={ob?.tasks.length||1} aria-valuenow={(ob?.tasks??[]).filter(t=>t.done).length}><span style={{width:`${ob?.tasks.length ? ob.tasks.filter(t=>t.done).length/ob.tasks.length*100 : 0}%`}}/></div><ol>{(ob?.tasks??[]).map((task,i)=><li key={task.id} className={task.done?'complete':'pending'}><span className="pro-setup-number">{task.done?<Icon name="check" size={16}/>:String(i+1).padStart(2,'0')}</span><div><strong>{task.label}</strong><p>{task.help}</p></div><span className="pro-setup-status">{task.done?'Complete':'To do'}</span></li>)}</ol></div>
       </SettingsRow>
       <SettingsRow id="staff" title={t('m13.org.staff')} value={invites ? String(invites.length) : undefined}>
         {(invites ?? []).map((iv) => <div key={iv.id} className="list-row"><span className="grow">{iv.name} <span className="dim">{iv.email} · {iv.role}</span></span><span className={`pill ${iv.status === 'accepted' ? 'green' : ''}`}>{iv.status}</span></div>)}
