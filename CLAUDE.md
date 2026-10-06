@@ -1,4 +1,22 @@
-# ScoutBox — approved Pro, Player and Grassroots UI
+# ScoutBox — approved Agent, Pro, Player and Grassroots UI
+
+## Latest approval — Agent, 6 October 2026
+
+The Founder approved the finished ScoutBox Agent UI at `7ee9ecb` on
+`design/agent-finance` and requested a GitHub push and an artifact ready for
+Claude. Read `AGENT_FINANCE.md` and `HANDOFF_CLAUDE_AGENT.md` before Agent work.
+Preserve the actual approved implementation: black/violet business workspace,
+lavender gradients, stacked ScoutBox/AGENT identity, brand-green accents,
+world maps, viewport-triggered motion, compact utility toolbar, refined agency
+directory, credential records, operating profile and client portfolio.
+
+Rebuild with `node e2e/buildDemos.mjs`, check with
+`node e2e/demoFreshness.test.mjs`, and use `e2e/dist/scoutbox-agent-demo.html`.
+A GitHub push does not replace a separate Claude artifact. Replace or rebuild
+that artifact explicitly and verify its displayed build ID. Preserve existing
+permissions, safeguarding, provenance and all other approved app designs.
+This authorizes the requested Agent branch push; it does not authorize a merge
+to the default branch, production deployment or future unrelated pushes.
 
 ## Latest approval — Pro, 6 October 2026
 

@@ -1,7 +1,20 @@
 # ScoutBox Agent — black and violet business workspace
 
+## Founder approval — 6 October 2026
+
+The Founder approved the finished implementation at `7ee9ecb` on
+`design/agent-finance`: “This is good to go and ready to push for github and
+ready for claude to use as an artifact”. This is the approved Agent baseline.
+Preserve the committed components/styles and subsequent authorized changes;
+do not reconstruct earlier screenshots or restore rejected generic layouts.
+New features must fit this design. Redesign only on an explicit Founder request.
+Read `HANDOFF_CLAUDE_AGENT.md` for artifact delivery and integration instructions.
+This approval authorizes the current branch push and handoff, not a default-branch
+merge, production deployment or standing permission for future publishing.
+
+## Original direction
+
 Design request dated 6 October 2026. Branch: `design/agent-finance`.
-This is a reviewable implementation, not yet a Founder-approved permanent baseline.
 The request covers all Agent screens and sign-in/access, while retaining the
 ScoutBox wordmark, close trademark and signature green. References call for
 black/purple financial software, lavender/pink gradient light, maps and charts.
@@ -50,8 +63,11 @@ uniform scaling. Cards, maps and charts begin their reveal when entering view.
 
 Run `node e2e/buildDemos.mjs`, then `node e2e/demoFreshness.test.mjs`.
 The self-contained Agent artifact is `e2e/dist/scoutbox-agent-demo.html`.
-A Git push does not replace a separately hosted Claude artifact. Agent publication
-and permanent-baseline approval have not been requested yet.
+A Git push does not replace a separately hosted Claude artifact. The Founder has
+approved this design and requested the branch push and Claude-ready handoff.
+The generated HTML is intentionally ignored by Git; rebuild it from the approved
+branch or use the separately supplied self-contained handoff bundle. Serve over
+HTTP(S) and verify the build ID before claiming the artifact was updated.
 
 ## Verification
 
