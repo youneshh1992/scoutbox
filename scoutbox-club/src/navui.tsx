@@ -21,7 +21,7 @@ import {
   allItems, filterSections, groupedChildren, searchNav, stripLayout,
 } from './nav';
 import { Icon } from './icons';
-import { ThemeToggle, type Theme } from '../../design-system/theme';
+import { type Theme } from '../../design-system/theme';
 import { t } from './i18n';
 
 type TKey = Parameters<typeof t>[0];
@@ -455,7 +455,7 @@ export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOp
         </h1>
       </div>
       <div className="p-toolbar">
-        <ThemeToggle theme={theme} onToggle={onToggleTheme} labels={{ aria: t('theme.aria'), light: t('theme.light'), dark: t('theme.dark') }} />
+
         <button className="p-top-search" onClick={onOpenPalette} aria-label={t('navsec.searchAria')} title={t('navsec.searchAria')}>
           <Icon name="search" size={18} />
           <span>{t('navsec.searchWorkspace')}</span>

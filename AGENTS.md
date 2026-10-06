@@ -18,3 +18,7 @@ external artifact update.
 Preserve authentication, permissions, safeguarding, privacy, data provenance,
 and working navigation/actions. Do not restyle other apps during Grassroots work.
 User authorization in the current session takes precedence over these guidelines.
+
+For the Pro flagship redesign, read `PRO_EXECUTIVE.md`. The Founder explicitly
+authorized a distinct premium Pro identity including its entry screen. This
+work does not reopen the approved Player or Grassroots designs.

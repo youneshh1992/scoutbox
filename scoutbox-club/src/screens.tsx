@@ -1,4 +1,5 @@
 import { Hint } from '../../design-system/About';
+import { ProChart } from './proDesign';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Icon } from '../../design-system/icons';
 import { pressable, useDialog } from './dialog';
@@ -232,6 +233,7 @@ const FEED_LABELS: Record<FeedItem['type'], string> = {
 };
 
 export function FeedScreen({ session, tick, openPlayer }: ScreenProps) {
+  const [filter, setFilter] = useState('all');
   const [items, setItems] = useState<FeedItem[] | null>(null);
   useEffect(() => { api.getFeed(session).then(setItems).catch(() => setItems([])); }, [session, tick]);
 
@@ -243,8 +245,8 @@ export function FeedScreen({ session, tick, openPlayer }: ScreenProps) {
     <>
       <AgencyWall session={session} />
       {items.length === 0 && <div className="notice">Quiet fortnight — nothing new yet.</div>}
-      <div className="list-rows">
-        {items.map((it, i) => (
+      <section className="pro-feed"><header><div><span className="pro-eyebrow">From your scouting network</span><h3>Latest intelligence</h3></div><div className="pro-feed-tabs" role="group" aria-label="Filter activity">{[['all','All activity'],['footage','Footage'],['players','Players'],['reports','Reports']].map(([id,label])=><button key={id} aria-pressed={filter === id} onClick={()=>setFilter(id)}>{label}</button>)}</div></header><div className="list-rows">
+        {items.filter(it => filter === 'all' || (filter === 'footage' && (it.type === 'new_clip' || it.type === 'shortlist_new_clip')) || (filter === 'players' && it.type === 'new_player') || (filter === 'reports' && it.type === 'report_due')).map((it, i) => (
           <div key={i} className="list-row" style={{ cursor: 'pointer' }} {...pressable(() => openPlayer(it.playerId))}>
             <span className={`feed-kind ${it.type === 'report_due' ? 'urgent' : ''}`}>{FEED_LABELS[it.type]}</span>
             <span className="grow">
@@ -258,7 +260,7 @@ export function FeedScreen({ session, tick, openPlayer }: ScreenProps) {
             <span className="dim">{fmtDate(it.ts)}</span>
           </div>
         ))}
-      </div>
+      </div>{!items.some(it => filter === 'all' || (filter === 'footage' && (it.type === 'new_clip' || it.type === 'shortlist_new_clip')) || (filter === 'players' && it.type === 'new_player') || (filter === 'reports' && it.type === 'report_due')) && <p className="pro-data-note" style={{padding:'0 23px 20px'}}>No activity in this view.</p>}</section>
     </>
   );
 }
@@ -271,9 +273,15 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
   const [tagOptions, setTagOptions] = useState<string[]>([]);
   const [pendingTags, setPendingTags] = useState<string[]>([]);
   const viewed = useRef(new Set<string>());
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [playhead, setPlayhead] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [speed, setSpeed] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   useEffect(() => {
-    api.getFilmRoom(session).then(setDeck).catch(() => {});
+    api.getFilmRoom(session).then(setDeck).catch(() => setLoadFailed(true)).finally(() => setLoading(false));
     api.getScoutTags(session).then(setTagOptions).catch(() => {});
   }, [session]);
 
@@ -285,7 +293,7 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
       viewed.current.add(current.media.id);
       api.recordClipView(session, current.player.id, current.media.id).catch(() => {});
     }
-    setPendingTags([]);
+    setPendingTags([]); setPlayhead(0); setDuration(0);
   }, [current, session]);
 
   const step = useCallback((dir: number) => {
@@ -294,6 +302,8 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLElement && (e.target.closest('input,select,textarea,button,video') || e.target.isContentEditable)) return;
+      if (['ArrowDown','ArrowRight','ArrowUp','ArrowLeft'].includes(e.key)) e.preventDefault();
       if (e.key === 'ArrowDown' || e.key === 'ArrowRight') step(1);
       if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') step(-1);
     };
@@ -310,55 +320,20 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
     } catch (e) { notify(errMsg(e), true); }
   };
 
-  if (deck.length === 0) {
-    return <div className="notice">No playable footage yet. Clips appear here the moment players upload them — Verified Clips first.</div>;
-  }
-
-  return (
-    <div className="filmroom">
-      <div className="filmroom-stage">
-        {current && (
-          <>
-            <video key={current.media.id} className="filmroom-video" src={api.mediaUrl(current.media.url)!} controls autoPlay muted loop />
-            <div className="filmroom-overlay">
-              <div className="row1">
-                <a style={{ color: '#fff', fontWeight: 700, fontSize: 18, cursor: 'pointer' }} {...pressable(() => openPlayer(current.player.id))}>
-                  {current.player.name}
-                </a>
-                <span className="pill blue">{current.player.position}</span>
-                <span className="pill">{current.player.age}</span>
-                {current.player.guardianManaged && <span className="pill red">U18</span>}
-                {current.media.verifiedClip && <span className="pill green">Verified Clip — filmed at a confirmed fixture</span>}
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-      {/* M24F.5 — the caption sits under the clip, clear of the video controls. */}
-      {current && <div className="dim filmroom-caption" data-testid="filmroom-caption">“{current.media.title}” · {current.media.views} view{current.media.views === 1 ? '' : 's'} · {t('term.profileSignal')} {current.player.trustScore}%</div>}
-      {/* M24F.5 — the tags sit under the clip, never over the picture or the player's name. */}
-      {current && (
-        <div className="filmroom-tags" aria-label="Tag what you saw">
-          {tagOptions.map((t) => (
-            <button
-              key={t}
-              className={pendingTags.includes(t) ? 'primary' : ''}
-              style={{ padding: '4px 10px', fontSize: 12 }}
-              onClick={() => setPendingTags((p) => (p.includes(t) ? p.filter((x) => x !== t) : [...p, t]))}
-            >
-              {TAG_LABELS[t] ?? t}
-            </button>
-          ))}
-          {pendingTags.length > 0 && <button className="primary" style={{ padding: '4px 12px', fontSize: 12 }} onClick={submitTags}>Save tags</button>}
-        </div>
-      )}
-      <div className="filmroom-controls">
-        <button onClick={() => step(-1)} disabled={index === 0}>↑ Previous</button>
-        <span className="pill">{index + 1} / {deck.length}</span>
-        <button className="primary" onClick={() => step(1)} disabled={index >= deck.length - 1}>↓ Next clip</button>
-      </div>
-    </div>
-  );
+  if (loading) return <div className="notice" aria-busy="true">Loading the screening room…</div>;
+  if (loadFailed) return <div className="notice block">The footage library could not be loaded. Please refresh to try again.</div>;
+  if (!current) return <div className="notice">No playable footage yet. Clips appear here when players upload them — Verified Clips first.</div>;
+  const timecode = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+  return <div className="pro-studio">
+    <aside className="pro-film-library"><header><span className="pro-eyebrow">Review library</span><h3>{deck.length} clips</h3></header>{deck.map((clip,i)=><button key={clip.media.id} aria-pressed={i===index} onClick={()=>setIndex(i)}><span className="pro-film-number">{String(i+1).padStart(2,'0')}</span><span><strong>{clip.player.name}</strong><small>{clip.media.title}</small><em>{clip.player.position}{clip.media.verifiedClip ? ' / Verified clip' : ''}</em></span><Icon name={i===index?'eye':'video'} size={14}/></button>)}</aside>
+    <section className="pro-film-viewer"><header><span><Icon name="video" size={16}/> Screening room</span><span className="pro-film-counter">{String(index+1).padStart(2,'0')} / {String(deck.length).padStart(2,'0')}</span></header>
+      <div className="filmroom-stage"><video ref={videoRef} key={current.media.id} className="filmroom-video" src={api.mediaUrl(current.media.url)!} controls playsInline onTimeUpdate={e=>setPlayhead(e.currentTarget.currentTime)} onLoadedMetadata={e=>{setDuration(Number.isFinite(e.currentTarget.duration)?e.currentTarget.duration:0);e.currentTarget.playbackRate=speed;}} /></div>
+      <div className="pro-film-transport"><span>{timecode(playhead)}</span><input type="range" aria-label="Seek footage" min={0} max={duration || 0} step={.1} value={Math.min(playhead,duration)} disabled={!duration} onChange={e=>{if(videoRef.current){videoRef.current.currentTime=Number(e.target.value);setPlayhead(Number(e.target.value));}}}/><span>{timecode(duration)}</span><select aria-label="Playback speed" value={speed} onChange={e=>{const value=Number(e.target.value);setSpeed(value);if(videoRef.current)videoRef.current.playbackRate=value;}}>{[.5,.75,1,1.5,2].map(x=><option key={x} value={x}>{x}×</option>)}</select></div>
+      <div className="pro-film-caption" data-testid="filmroom-caption"><h3>{current.media.title}</h3><p>{current.media.views} views · {t('term.profileSignal')} {current.player.trustScore}%</p>{current.media.verifiedClip && <span className="pill green">Verified Clip — filmed at a confirmed fixture</span>}</div>
+      <div className="filmroom-controls"><button onClick={()=>step(-1)} disabled={index===0}><Icon name="chevron-left" size={15}/> Previous</button><span className="dim">Use arrow keys to move between clips</span><button onClick={()=>step(1)} disabled={index>=deck.length-1}>Next clip <Icon name="arrow-right" size={15}/></button></div>
+    </section>
+    <aside className="pro-film-inspector"><span className="pro-eyebrow">Player dossier</span><button className="pro-film-player" onClick={()=>openPlayer(current.player.id)}><strong>{current.player.name}</strong><Icon name="arrow-up-right" size={17}/></button><div className="pro-film-player-meta"><span>{current.player.position}</span><span>{current.player.age} years</span>{current.player.guardianManaged && <span className="pill red">U18 · guardian-managed</span>}</div><h4>What did you notice?</h4><p>Select the qualities you observed in this clip.</p><div className="filmroom-tags" aria-label="Tag what you saw">{tagOptions.map(tag=><button key={tag} aria-pressed={pendingTags.includes(tag)} onClick={()=>setPendingTags(p=>p.includes(tag)?p.filter(x=>x!==tag):[...p,tag])}>{TAG_LABELS[tag]??tag}</button>)}</div><button className="primary" disabled={!pendingTags.length} onClick={submitTags}>Save {pendingTags.length || ''} {pendingTags.length === 1 ? 'observation' : 'observations'}</button><p className="pro-data-note">Observations are aggregated anonymously into the player’s “what scouts noticed”.</p></aside>
+  </div>;
 }
 
 /* ------------------------------------------------------------- Fixtures */
@@ -570,8 +545,9 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
               </span>
             </div>
             <div className="meta">
-              {p.age} · {p.foot} foot · {p.city ? `${p.city}, ` : ''}{p.country} · {p.heightCm} cm
+              <Icon name="map-pin" size={13}/> {p.city ? `${p.city}, ` : ''}{p.country}
             </div>
+            <dl className="pro-player-facts"><div><dt>Age</dt><dd>{p.age} years</dd></div><div><dt>Preferred foot</dt><dd>{p.foot.charAt(0).toUpperCase()+p.foot.slice(1)}</dd></div><div><dt>Height</dt><dd>{p.heightCm} cm</dd></div></dl>
             {/* M24F.4 — at most three pills (the safeguarding state, Academy+, the availability); everything else is one quiet line. */}
             <div className="badges">
               {p.guardianManaged && <span className="pill red">U18 · guardian-managed</span>}
@@ -1024,20 +1000,8 @@ export function FunnelScreen({ session, tick }: ScreenProps) {
   };
   return (
     <>
-      <div className="section">
-        {funnel.stages.map((s, i) => (
-          <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
-            <div style={{ width: 150, color: 'var(--muted)', fontSize: 13 }}>{s.label}</div>
-            <div style={{ flex: 1, background: 'var(--panel-2)', borderRadius: 6, overflow: 'hidden', height: 22 }}>
-              <div style={{ width: `${Math.max(2, (s.count / max) * 100)}%`, height: '100%', background: 'var(--accent)', opacity: 0.35 + 0.65 * (1 - i / funnel.stages.length) }} />
-            </div>
-            <div style={{ width: 46, fontWeight: 700, textAlign: 'right' }}>{s.count}</div>
-            <div style={{ width: 70, color: 'var(--muted)', fontSize: 12, textAlign: 'right' }}>
-              {pct(i) !== null ? `${pct(i)}% conv.` : ''}
-            </div>
-          </div>
-        ))}
-      </div>
+      <ProChart title="Recruitment activity by stage" items={funnel.stages.map(s=>({label:s.label,value:s.count}))} note="Recorded activity counts. A player may appear at more than one stage; these are not player ratings."/>
+      <div className="pro-stage-ratios">{funnel.stages.map((s,i)=>pct(i)!==null && <span key={s.key}>{s.label}: <b>{pct(i)}%</b> of preceding stage</span>)}</div>
       {funnel.byScout.length > 0 && (
         <div className="section">
           <h4>Activity by scout</h4>
@@ -1066,12 +1030,7 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
   if (!info) return null;
   return (
     <>
-      <div className="stat-grid" style={{ marginBottom: 22 }}>
-        <div className="stat"><div className="v">{info.plan.name}</div><div className="k">Plan</div></div>
-        <div className="stat"><div className="v">£{info.plan.pricePerMonthGBP}</div><div className="k">per month</div></div>
-        <div className="stat"><div className="v">{info.plan.seats}</div><div className="k">named seats</div></div>
-        <div className="stat"><div className="v">{info.plan.attributionWindowMonths} mo</div><div className="k">attribution window</div></div>
-      </div>
+      <section className="pro-plan-membership"><div><span className="pro-eyebrow">ScoutBox / Your membership</span><h2>{info.plan.name}</h2><p>{session.org.name}</p></div><div className="pro-plan-price">£{info.plan.pricePerMonthGBP}<span>per month · {info.plan.seats} named seats</span><span>{info.plan.attributionWindowMonths}-month attribution window</span></div></section>
       <div className="section">
         <h4>Company email verification {session.org.emailDomainVerified ? '— ✓ verified' : ''}</h4>
         {session.org.emailDomainVerified ? (

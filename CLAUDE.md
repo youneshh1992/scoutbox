@@ -1,5 +1,12 @@
 # ScoutBox — approved Player and Grassroots UI
 
+## Pro redesign in review — 6 October 2026
+
+The Founder requested a distinct luxury identity for the paid Pro flagship and
+explicitly included its sign-in/access screen. See `PRO_EXECUTIVE.md` and the
+implementation on `design/pro-executive`. This is a proposal awaiting review,
+not a new approval for Player or Grassroots and not authorization to publish.
+
 ## Latest approval — Grassroots, 6 October 2026
 
 The Founder explicitly approved the Grassroots UI at commit `5a3e7b0` on

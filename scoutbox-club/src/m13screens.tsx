@@ -1,3 +1,4 @@
+import { ProChart } from './proDesign';
 // M13 org screens: Imports & Integrations, Coverage, Calibration, Scouting
 // Insight (exposure + review queue + evidence gaps), Club Network (groups +
 // transition packs), Deal Budgets, Representation (agency lane) and
@@ -305,19 +306,14 @@ export function InsightScreen({ session, notify, openPlayer }: ScreenProps) {
   return (
     <div>
       {report ? (
-        <div className="section">
-          <h3>{t('m13.exp.funnel')} <span className="dim" style={{ fontWeight: 400 }}>({report.funnel.windowDays}d)</span></h3>
-          <div className="notice" style={{ fontSize: 12.5 }}>{report.funnel.definition}</div>
-          <div className="list-rows">
-            {report.funnel.stages.map((st) => (
-              <div key={st.key} className="list-row"><span className="grow">{st.key.replace(/_/g, ' ')}</span><b>{st.players}</b>{st.of !== undefined && <span className="dim">of {st.of}</span>}</div>
-            ))}
+        <div className="pro-insight-analysis">
+          <div className="pro-insight-charts">
+            <ProChart title={`${t('m13.exp.funnel')} · ${report.funnel.windowDays} days`} items={report.funnel.stages.map(st=>({label:st.key.replace(/_/g,' ').replace(/^./,c=>c.toUpperCase())+(st.of!==undefined ? ` (of ${st.of})` : ''),value:st.players}))} note={report.funnel.definition}/>
+            {report.birthQuarter.suppressed
+              ? <section className="pro-chart"><h3>{t('m13.exp.birthQ')}</h3><div className="notice block"><Icon name="lock-keyhole" size={13} /> {t('m13.exp.suppressed')}</div></section>
+              : <ProChart title={t('m13.exp.birthQ')} items={Object.entries(report.birthQuarter.quarters ?? {}).map(([label,value])=>({label,value}))} note={report.birthQuarter.note}/>}
           </div>
-          <h3 style={{ marginTop: 12 }}>{t('m13.exp.birthQ')}</h3>
-          {report.birthQuarter.suppressed
-            ? <div className="notice block"><Icon name="lock-keyhole" size={13} /> {t('m13.exp.suppressed')}</div>
-            : <div><div className="list-rows">{Object.entries(report.birthQuarter.quarters ?? {}).map(([q, c]) => <div key={q} className="list-row"><span className="grow">{q}</span><b>{c}</b></div>)}</div><Hint className="dim" style={{ fontSize: 12 }}>{report.birthQuarter.note}</Hint></div>}
-          <div className="notice block" style={{ marginTop: 8 }}><Icon name="info" size={14} /> {report.absentEvidence.note}</div>
+          <p className="pro-data-note"><Icon name="info" size={14} /> {report.absentEvidence.note}</p>
         </div>
       ) : <div className="notice">{t('m13.exp.leadOnly')}</div>}
       <div className="section">

@@ -3,6 +3,7 @@ import { useTheme, type Theme } from '../../design-system/theme';
 import { AuthAccessNote, AuthField, AuthNote, AuthPage, AuthRow, PasswordInput } from '../../design-system/AuthShell';
 import { initials } from '../../design-system/text';
 import { Icon } from './icons';
+import { ProMasthead, ProOverview } from './proDesign';
 import { api, ApiError, DEMO_MODE, revokeSession, type Channel, type Notification, type Org, type Session } from './api';
 import {
   FeedScreen, FilmRoomScreen, SearchScreen, ShortlistScreen, RequestsScreen, MessagesScreen,
@@ -204,11 +205,11 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
     <AuthPage
       app="pro"
       product="Pro"
-      heading="A clearer view of your next signing."
-      summary="Evidence, assessments and one attributed decision per case."
+      heading="Your next signing starts here."
+      summary="The professional workspace for a more considered recruitment decision."
       points={[
-        'Recruitment Rooms for every case.',
-        'Contact, trials, Offers and signings on one journey.',
+        'Discover. Observe. Decide.',
+        'A complete view of your recruitment journey.',
         'No unsolicited contact: every approach is a request the player answers.',
       ]}
       aside={DEMO_MODE ? <AuthNote>Self-contained demo — no server needed.</AuthNote> : undefined}
@@ -523,7 +524,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
   const screenLabel = t((loc.itemId ? (NAV_SECTIONS.flatMap((s) => s.children).find((c) => c.id === screen)?.labelKey ?? `nav.${screen}`) : `nav.${screen}`) as Parameters<typeof t>[0]);
 
   return (
-    <div className={`shell ${collapsed ? 'nav-collapsed' : ''}`}>
+    <div className={`shell pro-workspace ${collapsed ? 'nav-collapsed' : ''}`}>
       <Sidebar
         sections={sections}
         location={loc}
@@ -542,7 +543,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
           <div className="p-account">
             <div className="p-who"><span className="p-avatar" aria-hidden="true">{initials(session.scoutName)}</span><div><strong>{session.scoutName}</strong><small>{session.role}</small></div></div>
             <OrgChips org={session.org} />
-            <div className="p-links">
+            <details className="pro-account-settings"><summary>Account settings <Icon name="chevron-right" size={13}/></summary><div className="p-links">
               <button onClick={() => setScreen('verification')}><Icon name="badge-check" size={14} />{t('navsec.myVerification')}</button>
               <label title={t('common.machineTranslated')}>
                 {t('common.language')}:{' '}
@@ -554,7 +555,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
               {/* M24E — the way out of the session, in the account block where the person is named. */}
               <button data-exit="switch-org" data-testid="switch-org" onClick={onLogout} aria-label={t('common.switchOrg')}><Icon name="arrow-right" size={14} />{t('common.switchOrg')}</button>
               <button data-exit="sign-out" data-testid="sign-out" onClick={onLogout} aria-label={t('common.signOut')}><Icon name="log-out" size={14} />{t('common.signOut')}</button>
-            </div>
+            </div></details>
           </div>
         }
       />
@@ -600,9 +601,10 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
           </div>
         )}
         {activeSection && <SecondaryNav section={activeSection} activeItemId={loc.itemId} onNavigate={setScreen} />}
-        <div className="content">
+        <div className="content pro-content" data-screen={screen}>
           {/* M24A — the reference page heading; the top bar keeps the document <h1>. */}
-          <div className="f-heading"><p className="f-display" aria-hidden="true">{screenLabel}</p></div>
+          <div key={screen} className="pro-page-entry">{screen !== 'feed' && <ProMasthead screen={screen} title={screenLabel} section={breadcrumbSection ? t(breadcrumbSection.labelKey as Parameters<typeof t>[0]) : null}/>}</div>
+          {screen === 'feed' && <ProOverview session={session} tick={tick} navigate={setScreen} />}
           {screen === 'feed' && (
             <NeedsAttention session={session} tick={tick} unreadMessages={unreadMessages} verLevel={verLevel} onNavigate={setScreen} />
           )}

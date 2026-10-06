@@ -2,6 +2,7 @@ import { Component, StrictMode, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import './styles.css';
+import './proExecutive.css';
 
 // Root error boundary: a runtime failure renders a recoverable screen, never
 // a silent white page.
