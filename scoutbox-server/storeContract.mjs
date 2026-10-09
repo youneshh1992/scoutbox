@@ -175,7 +175,7 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   transitionCases: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   trials: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   uploadSessions: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
-  users: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
+  users: { guarantee: 'migration', owner: 'core', reason: 'staff accounts. Guaranteed by the migration registry in memory; since the data layer the rows live in the org_users table (repositories/users.mjs) and db.users is the repository\'s read-only view after attachDataLayer' },
   vacancies: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   verAdmins: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },
   verClaims: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },

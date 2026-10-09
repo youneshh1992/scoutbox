@@ -48,7 +48,7 @@ export function lookupCredential({ providerId, identifier, holderName }) {
 
 export function registerVerificationReview(ctx) {
   const {
-    db, orgRouter, adminRouter, nextId, persist, persistNow, notify, idx,
+    db, users, orgRouter, adminRouter, nextId, persist, persistNow, notify, idx,
     verEvent, createClaim, transition, addEvidence, storeEvidenceFile,
     effectiveStatus, vmetric, requireVer, hasVerLevel,
   } = ctx;
@@ -426,11 +426,10 @@ export function registerVerificationReview(ctx) {
       });
     }
     if (!user) {
-      user = { id: nextId('usr'), orgId: org.id, name: r.applicantName, role: r.applicantRole, email: r.workEmail, createdAt: Date.now() };
-      db.users.push(user);
+      user = users.insert({ orgId: org.id, name: r.applicantName, role: r.applicantRole, email: r.workEmail });
       identityLink ??= 'provisioned_new_user';
     }
-    user.email ??= r.workEmail;
+    if (!user.email) users.update(user.id, { email: r.workEmail });
     r.identityLink = identityLink;
     // …organisation identity claim: established by Trust & Safety review.
     createClaim({

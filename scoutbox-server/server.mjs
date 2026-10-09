@@ -25,6 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildSeed } from './seed.mjs';
 import { openStore } from './store.mjs';
+import { attachDataLayer, TABLE_BACKED } from './repositories/index.mjs';
 import { registerM12 } from './m12/index.mjs';
 import { registerM13 } from './m13/index.mjs';
 import { registerM14 } from './m14/index.mjs';
@@ -122,7 +123,7 @@ const db = buildSeed();
 const DATA_DIR = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
-const store = openStore(DATA_DIR);
+const store = openStore(DATA_DIR, { tableBacked: TABLE_BACKED });
 let snapshotLoaded = false;
 let snapshotIdCounter = 0; // applied when the id counter initialises below
 
@@ -187,6 +188,17 @@ if (integrity.violations.length) console.error(`INTEGRITY ${integrity.violations
 if (!integrity.stores.ok) {
   console.error(`INTEGRITY STORE_MISSING ${integrity.stores.missing.join(', ')} — required collection(s) absent after migration; nothing was repaired.`);
 }
+// The relational data layer (repositories/): table migrations, then each migrated
+// domain's repository takes over its collection. From here on `db.users` is
+// the staff repository's read-only view; writes go through `users`. The id
+// generator is passed lazily because it is initialised further down.
+const dataLayer = attachDataLayer({
+  db, store, persist,
+  nextId: (prefix) => nextId(prefix),
+  log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
+});
+const { users } = dataLayer;
+if (dataLayer.boot.users.imported) console.log(`data layer: ${dataLayer.boot.users.imported} staff record(s) moved into org_users`);
 for (const sess of db.sessions) sess.sid ??= crypto.randomBytes(6).toString('hex');
 
 // Normalise media items (older shapes) + load the seeded sample clips.
@@ -1720,8 +1732,7 @@ app.post('/auth/org/register-grassroots', (req, res) => {
     ...(password ? { password: hashPassword(String(password)) } : {}),
   };
   db.orgs.push(org);
-  const user = { id: nextId('usr'), orgId: org.id, name: scoutName.trim(), role: (role || 'Manager').trim(), createdAt: Date.now() };
-  db.users.push(user);
+  const user = users.insert({ orgId: org.id, name: scoutName.trim(), role: (role || 'Manager').trim() });
   persist();
   broadcast('orgs');
   res.status(201).json({
@@ -1765,7 +1776,7 @@ app.post('/auth/org/login', (req, res) => {
   } else if (!DEV_LOGINS) {
     return devLoginRefused(res);
   }
-  let user = db.users.find((u) => u.orgId === orgId && u.name.toLowerCase() === scoutName.trim().toLowerCase());
+  let user = users.byOrgAndName(orgId, scoutName);
   if (user?.removedAt) {
     // Departed staff don't come back by typing their old name.
     return res.status(403).json({ error: 'USER_REMOVED', message: 'This staff member\'s access was removed by the organisation.' });
@@ -1782,7 +1793,10 @@ app.post('/auth/org/login', (req, res) => {
     else if (recoveryCode) {
       const hash = crypto.createHash('sha256').update(String(recoveryCode)).digest('hex');
       const idx = user.mfa.recoveryHashes.indexOf(hash);
-      if (idx >= 0) { user.mfa.recoveryHashes.splice(idx, 1); second = true; } // each code works exactly once
+      if (idx >= 0) { // each code works exactly once
+        users.update(user.id, { mfa: { ...user.mfa, recoveryHashes: user.mfa.recoveryHashes.filter((_, i) => i !== idx) } });
+        second = true;
+      }
     }
     if (!second) {
       if (mfaCode || recoveryCode) m13Ctx?.mfaGuards?.mfaFail(user.id);
@@ -1812,7 +1826,7 @@ app.post('/auth/org/login', (req, res) => {
   let roleNote;
   if (!user) {
     if (credentialed) {
-      const staff = db.users.filter((u) => u.orgId === orgId && !u.removedAt);
+      const staff = users.listByOrg(orgId).filter((u) => !u.removedAt);
       if (staff.length) {
         return res.status(403).json({
           error: 'STAFF_NOT_PROVISIONED',
@@ -1822,23 +1836,21 @@ app.post('/auth/org/login', (req, res) => {
       // First account on a credentialed organisation: the administrator. A
       // lead-tier role is required so the organisation can invite its staff.
       const requested = (role || '').trim();
-      user = {
-        id: nextId('usr'), orgId, name: scoutName.trim(),
+      user = users.insert({
+        orgId, name: scoutName.trim(),
         role: isLeadRole(requested) ? requested : 'Manager',
-        createdAt: Date.now(), provenance: 'org_password_bootstrap',
-      };
-      db.users.push(user);
+        provenance: 'org_password_bootstrap',
+      });
       db.opsEvents.push({ id: nextId('ops'), at: Date.now(), kind: 'staff_bootstrapped', detail: { orgId: org.id, userId: user.id, by: user.name } });
       persist();
     } else {
-      user = { id: nextId('usr'), orgId, name: scoutName.trim(), role: (role || 'Scout').trim(), createdAt: Date.now() };
-      db.users.push(user);
+      user = users.insert({ orgId, name: scoutName.trim(), role: (role || 'Scout').trim() });
     }
   } else if (role && role.trim() && role.trim() !== user.role) {
     if (credentialed) {
       roleNote = 'Roles are assigned by your organisation; the role entered at sign-in was not applied.';
     } else {
-      user.role = role.trim(); // development shortcut only — see above
+      users.update(user.id, { role: role.trim() }); // development shortcut only — see above
     }
   }
   res.json({
@@ -1860,8 +1872,8 @@ function orgAuth(req, res, next) {
   if (session?.kind !== 'org') return res.status(401).json({ error: 'ORG_AUTH_REQUIRED', message: 'Log in again — this session is no longer valid.' });
   const org = db.orgs.find((o) => o.id === session.refId);
   if (!org) return res.status(401).json({ error: 'ORG_AUTH_REQUIRED' });
-  const user = db.users.find((u) => u.id === session.userId && u.orgId === org.id);
-  if (!user) return res.status(401).json({ error: 'USER_UNKNOWN' });
+  const user = users.byId(session.userId);
+  if (!user || user.orgId !== org.id) return res.status(401).json({ error: 'USER_UNKNOWN' });
   if (user.removedAt) return res.status(401).json({ error: 'USER_REMOVED', message: 'Your access to this organisation has been removed.' });
   if (org.suspended) {
     return res.status(403).json({ error: 'ORG_SUSPENDED', message: 'This organisation is suspended pending a safety review.' });
@@ -4294,7 +4306,7 @@ function revokeOrgUserAccess(userId) {
 }
 
 registerM12({
-  db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, users, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
@@ -4306,7 +4318,7 @@ registerM12({
 // Same module pattern under m13/. registerM13 returns the enriched context so
 // the login path above can reach the MFA rate-limit guards.
 const m13Ctx = registerM13({
-  db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, users, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
@@ -4320,7 +4332,7 @@ const m13Ctx = registerM13({
 // under m14/. Returns its context so the legacy admin verification route can
 // keep claim provenance in sync.
 const m14Ctx = registerM14({
-  db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, users, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
@@ -4453,6 +4465,7 @@ const m18Ctx = registerM18({
 // deliberately no second matching engine and no second Room-creation path.
 const m19Ctx = {
   ...m18Ctx,
+  users,
   combineProtocolIds: () => COMBINE_PROTOCOLS.map((p) => p.id),
 };
 registerMatching(m19Ctx);
@@ -4689,6 +4702,7 @@ app.get('/capabilities', (_req, res) => {
     // M18.2 — states only, as before. Counts are counts, never subjects.
     extra: {
       schema: schemaReport(db),
+      dataLayer: { ...dataLayer.report(), note: 'Collections that have moved from the snapshot blob into tables of their own. Counts are counts, never subjects.' },
       integrity: { ...integritySummary(integrity), note: 'Checked once at boot; violations are reported, never repaired.' },
       events: {
         registered: EVENT_NAMES.length,

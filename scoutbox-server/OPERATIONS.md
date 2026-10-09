@@ -19,6 +19,19 @@ only), `M13_QUIET_LOGS=1` (suppresses per-request log lines),
 fixture / simulates its outage — test environments only; production registers
 are `not_configured`), `ALLOW_DEV_LOGINS` / `NODE_ENV` (see M11).
 
+## Data layer
+`DATA_DIR/scoutbox.db` holds two kinds of data. Collections that have not yet
+moved are stored as one JSON blob each in the `collections` table, saved as a
+whole on a debounce. Collections that have moved to the relational data layer
+(`scoutbox-server/repositories/`) are real tables, written one row at a time
+inside a transaction the moment a change happens, and recorded in
+`data_migrations`. `GET /capabilities` lists them under `dataLayer`. Moved so
+far: staff accounts (`users` → `org_users`). A first boot after a move imports
+the old blob into the table and deletes the blob on the next save; a backup
+`db.json` restores through the same path. Tools that read or write the file as
+one snapshot (`openStore(dir)` without options) see every collection in the
+shape the server sees, tables included.
+
 ## Reverse proxy and client addresses
 Per-IP controls (the `/auth` brute-force limiter, sharing-link limits, request
 logs) key on the client address. Behind a platform proxy (Fly, Render, a load

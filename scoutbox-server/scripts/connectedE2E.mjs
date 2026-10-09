@@ -224,6 +224,10 @@ ok(resyncEvents.some((e) => e.event === 'resync'), 'a cursor beyond the buffer (
 // ---- 7. durability: a SIGKILL right after a send loses nothing
 await j(`/player/channels/${chan.id}/messages`, { method: 'POST', body: JSON.stringify({ text: 'This message must survive a crash.' }) }, bearer(KOLA));
 await j(`/org/channels/${chan.id}/read`, { method: 'POST' }, bearer(EASTPORT));
+// A staff record is a table row written at once, not a blob written on a
+// debounce: created in the last instant before the crash, it is still there.
+r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Crash Survivor', role: 'Scout' }) });
+ok(r.status === 200 && r.body.userId, 'a staff account is created in the last instant before the crash');
 child.kill('SIGKILL'); // no graceful shutdown hook — the debounce never fires
 await new Promise((res) => setTimeout(res, 300));
 await startServer();
@@ -232,6 +236,9 @@ channels = await j('/player/channels', {}, bearer(KOLA2));
 const revived = channels.body.find((c) => c.id === chan.id);
 ok(revived?.messages.some((m) => m.text === 'This message must survive a crash.'), 'messages survive an abrupt SIGKILL restart');
 ok(revived?.readBy?.org != null, 'read state survives the crash too');
+const EASTPORT2 = (await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane' }) })).body.token;
+r = await j('/org/staff', {}, bearer(EASTPORT2));
+ok(r.status === 200 && r.body.some((u) => u.name === 'Crash Survivor'), 'the staff account created in the last instant before the crash survives it — rows are written immediately, never on a debounce');
 
 // ---- 8. production gate: seeded shortcuts refuse outside development
 child.kill('SIGKILL');
@@ -287,7 +294,7 @@ ok(r.status === 403 && r.body.error === 'STAFF_NOT_PROVISIONED', 'the bootstrap 
 r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Someone New', role: 'Head of Recruitment', password: 'eastport-secret-1' }) });
 ok(r.status === 403 && r.body.error === 'STAFF_NOT_PROVISIONED', 'the organisation password does not create staff accounts, whatever role is claimed');
 r = await j('/org/staff', {}, bearer(MARIA_PROD));
-ok(r.status === 200 && r.body.length === 1 && r.body[0].name === 'Maria Keane', 'the refused login left no staff record behind');
+ok(r.status === 200 && r.body.some((u) => u.name === 'Maria Keane') && !r.body.some((u) => u.name === 'Someone New'), 'the refused login left no staff record behind');
 r = await j('/org/invites', { method: 'POST', body: JSON.stringify({ email: 'someone.new@eastport.example', name: 'Someone New', role: 'Scout' }) }, bearer(MARIA_PROD));
 ok(r.status === 201 && r.body.invite.role === 'Scout', 'a lead invites staff with the role the organisation chose');
 r = await j('/admin/outbox', {}, prodAdmin);

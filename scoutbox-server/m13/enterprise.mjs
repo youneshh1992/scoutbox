@@ -61,7 +61,7 @@ export function requestInstrumentation() {
 
 export function registerEnterprise(ctx) {
   const {
-    db, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
+    db, users, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
     mailer, requireLead, isLead, paginate, histAppend, timingSafeEq, signBody,
     storage, DATA_DIR,
   } = ctx;
@@ -111,11 +111,8 @@ export function registerEnterprise(ctx) {
     const org = db.orgs.find((o) => o.id === inv.orgId);
     if (!org || org.suspended) return res.status(403).json({ error: 'ORG_UNAVAILABLE' });
     let user = db.users.find((u) => u.orgId === org.id && u.name.toLowerCase() === inv.name.toLowerCase() && !u.removedAt);
-    if (!user) {
-      user = { id: nextId('usr'), orgId: org.id, name: scoutName?.trim() || inv.name, role: inv.role, createdAt: Date.now() };
-      db.users.push(user);
-    }
-    user.email = inv.email; // email is bound by the invite — the basis for SSO linking
+    if (!user) user = users.insert({ orgId: org.id, name: scoutName?.trim() || inv.name, role: inv.role });
+    users.update(user.id, { email: inv.email }); // email is bound by the invite — the basis for SSO linking
     inv.status = 'accepted';
     inv.acceptedAt = Date.now();
     inv.userId = user.id;
@@ -164,7 +161,7 @@ export function registerEnterprise(ctx) {
   orgRouter.post('/mfa/setup', (req, res) => {
     if (req.orgUser.mfa?.enabledAt) return res.status(409).json({ error: 'MFA_ALREADY_ENABLED' });
     const secretB32 = b32encode(crypto.randomBytes(20));
-    req.orgUser.mfa = { secretB32, enabledAt: null, recoveryHashes: [] };
+    users.update(req.orgUser.id, { mfa: { secretB32, enabledAt: null, recoveryHashes: [] } });
     persistNow();
     res.json({
       secret: secretB32,
@@ -178,9 +175,8 @@ export function registerEnterprise(ctx) {
     if (!m?.secretB32 || m.enabledAt) return res.status(409).json({ error: 'MFA_NOT_PENDING' });
     if (mfaLocked(req.orgUser.id)) return res.status(429).json({ error: 'MFA_LOCKED', message: 'Too many wrong codes — try again in a few minutes.' });
     if (!totpValid(m.secretB32, req.body?.code)) { mfaFail(req.orgUser.id); return res.status(401).json({ error: 'MFA_CODE_WRONG' }); }
-    m.enabledAt = Date.now();
     const plain = Array.from({ length: 10 }, () => crypto.randomBytes(5).toString('hex'));
-    m.recoveryHashes = plain.map((c) => crypto.createHash('sha256').update(c).digest('hex'));
+    users.update(req.orgUser.id, { mfa: { ...m, enabledAt: Date.now(), recoveryHashes: plain.map((c) => crypto.createHash('sha256').update(c).digest('hex')) } });
     persistNow();
     res.json({ enabled: true, recoveryCodes: plain, note: 'Store these recovery codes now — each works once and they are never shown again.' });
   });
@@ -190,7 +186,7 @@ export function registerEnterprise(ctx) {
     const m = req.orgUser.mfa;
     if (!m?.enabledAt) return res.status(409).json({ error: 'MFA_NOT_ENABLED' });
     if (!totpValid(m.secretB32, req.body?.code)) return res.status(401).json({ error: 'MFA_CODE_WRONG' });
-    req.orgUser.mfa = null;
+    users.update(req.orgUser.id, { mfa: null });
     persistNow();
     res.json({ enabled: false });
   });
@@ -315,7 +311,7 @@ export function registerEnterprise(ctx) {
     if (!user) {
       return res.status(403).json({ error: 'SSO_NOT_LINKED', message: 'No staff account with this email exists in the organisation. Ask a lead for an invitation — SSO never creates accounts by itself.' });
     }
-    user.ssoSubject = tok.sub; // link (or confirm) sub ↔ user
+    users.update(user.id, { ssoSubject: tok.sub }); // link (or confirm) sub ↔ user
     // SSO group claims NEVER grant ScoutBox privileges: role, verification and
     // safeguarding approval only change through ScoutBox's own flows.
     persistNow();

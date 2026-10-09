@@ -39,7 +39,7 @@ import {
 export function registerAgent(rawCtx) {
   const ctx = { ...rawCtx, ...buildShared(rawCtx) };
   const {
-    db, orgRouter, playerRouter, adminRouter, nextId, persistNow, notify, broadcast,
+    db, users, orgRouter, playerRouter, adminRouter, nextId, persistNow, notify, broadcast,
     findPlayer, isBlocked, playerViewForOrg, orgSafe, revokeOrgUserAccess, rateLimit, isAdult,
     orgCanSee, checkEligibility, distanceBand, moderateOrRefuse, verificationProvider,
   } = ctx;
@@ -369,10 +369,7 @@ export function registerAgent(rawCtx) {
     }
     let user = db.users.find((u) => u.orgId === req.org.id && u.name.toLowerCase() === name.toLowerCase());
     if (user?.removedAt) return sendAgentError(res, { error: 'AGENT_ACTION_NOT_PERMITTED', message: 'This person\'s access was removed; removal is not undone from the team page.' }, 'team');
-    if (!user) {
-      user = { id: nextId('usr'), orgId: req.org.id, name, role: String(req.body?.role ?? 'Agency staff').trim().slice(0, 60) || 'Agency staff', createdAt: now() };
-      db.users.push(user);
-    }
+    if (!user) user = users.insert({ orgId: req.org.id, name, role: String(req.body?.role ?? 'Agency staff').trim().slice(0, 60) || 'Agency staff', createdAt: now() });
     if (activeAffiliationOf(user.id, req.org.id)) return sendAgentError(res, { error: 'MEMBER_ALREADY_AFFILIATED' }, 'team');
     const aff = {
       id: nextId('aff'), agencyOrgId: req.org.id, userId: user.id, tiers, startedAt: now(), endedAt: null, endedReason: null,
@@ -421,7 +418,7 @@ export function registerAgent(rawCtx) {
     // Current agency access ends now; the person's agent profile and every
     // historical attribution stay exactly as they are.
     const user = db.users.find((u) => u.id === aff.userId);
-    if (user && !user.removedAt) user.removedAt = now();
+    if (user && !user.removedAt) users.update(user.id, { removedAt: now() });
     revokeOrgUserAccess?.(aff.userId);
     persistNow();
     broadcast('agency_affiliation_ended', { orgId: req.org.id, userId: aff.userId });

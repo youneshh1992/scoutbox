@@ -31,10 +31,15 @@ and design changes the Founder explicitly requests.
 
 - No new top-level `db.<collection>` arrays and no new `migrateMxx` collection
   lines. New persistent state is a table owned by a domain repository under
-  `scoutbox-server/data/`, created by a versioned migration there, written
-  per row inside a transaction. Route handlers never touch a migrated domain's
-  `db.<collection>` directly; they call its repository. Unmigrated domains
-  keep working as they are until their turn.
+  `scoutbox-server/repositories/`, created by a versioned migration in
+  `repositories/migrations/`, written per row inside a transaction. Every
+  write to a migrated domain goes through its repository; the old
+  `db.<collection>` is that repository's read-only view (a direct write
+  throws), which existing readers may keep using until the domain's readers
+  move to repository queries. Unmigrated domains keep working as they are
+  until their turn. Migrated so far: `users` (staff accounts, `org_users`).
+  The runtime data directory is `scoutbox-server/data/` and is never a
+  source directory.
 - No new milestone-named modules (`m30/…`). New server code lives in a
   directory named after its domain (`scoutbox-server/domains/<domain>/`), and
   moving code out of a milestone directory happens with the domain migration.
