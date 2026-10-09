@@ -267,6 +267,45 @@ ok(r.status === 200, 'T&S provisions credentials for a Pro club');
 r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane', password: 'eastport-secret-1' }) });
 ok(r.status === 200 && r.body.token && !('password' in r.body.org), 'the provisioned Pro club logs in with its password in production (hash never echoed)');
 
+// ---- 9. roles are assigned by the organisation, never by the person logging in
+// Maria's account was created in the development section above (role Head of
+// Recruitment); the credentialed login answers with that stored role.
+const MARIA_PROD = r.body.token;
+ok(r.body.role === 'Head of Recruitment', 'a credentialed login answers with the stored role');
+r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Scout', password: 'eastport-secret-1' }) });
+ok(r.status === 200 && r.body.role === 'Head of Recruitment' && /assigned by your organisation/.test(r.body.roleNote ?? ''), 'a role sent at login does not change the stored role on a credentialed organisation');
+r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Managing Director', password: 'eastport-secret-1' }) });
+ok(r.status === 200 && r.body.role === 'Head of Recruitment', 'nor does a grander one');
+// Northstar has credentials and no staff yet: the first login bootstraps the
+// administrator account, in the lead tier whatever role was typed.
+r = await j('/admin/clubs/org-northstar/credentials', { method: 'POST', body: JSON.stringify({ password: 'northstar-secret-1' }) }, prodAdmin);
+ok(r.status === 200, 'T&S provisions credentials for a second club with no staff');
+r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-northstar', scoutName: 'Nadia Okafor', role: 'Scout', password: 'northstar-secret-1' }) });
+ok(r.status === 200 && r.body.role === 'Manager', 'the first login on a credentialed organisation with no staff bootstraps the administrator account in the lead tier');
+r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-northstar', scoutName: 'Second Person', role: 'Director', password: 'northstar-secret-1' }) });
+ok(r.status === 403 && r.body.error === 'STAFF_NOT_PROVISIONED', 'the bootstrap happens exactly once');
+r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Someone New', role: 'Head of Recruitment', password: 'eastport-secret-1' }) });
+ok(r.status === 403 && r.body.error === 'STAFF_NOT_PROVISIONED', 'the organisation password does not create staff accounts, whatever role is claimed');
+r = await j('/org/staff', {}, bearer(MARIA_PROD));
+ok(r.status === 200 && r.body.length === 1 && r.body[0].name === 'Maria Keane', 'the refused login left no staff record behind');
+r = await j('/org/invites', { method: 'POST', body: JSON.stringify({ email: 'someone.new@eastport.example', name: 'Someone New', role: 'Scout' }) }, bearer(MARIA_PROD));
+ok(r.status === 201 && r.body.invite.role === 'Scout', 'a lead invites staff with the role the organisation chose');
+r = await j('/admin/outbox', {}, prodAdmin);
+const inviteCode = r.body.find((m) => m.to === 'someone.new@eastport.example')?.text.match(/invite code: ([a-f0-9]+)/)?.[1];
+ok(!!inviteCode, 'the invitation code went to the local outbox');
+r = await j('/auth/org/accept-invite', { method: 'POST', body: JSON.stringify({ token: inviteCode }) });
+ok(r.status === 201 && r.body.role === 'Scout', 'accepting the invitation creates the account with the invited role');
+r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Someone New', role: 'Managing Director', password: 'eastport-secret-1' }) });
+ok(r.status === 200 && r.body.role === 'Scout', 'the invited scout logs in as a scout no matter what role they type');
+r = await j('/org/tactical', { method: 'POST', body: JSON.stringify({}) }, bearer(r.body.token));
+ok(r.status === 403 && r.body.error === 'LEAD_REQUIRED', 'and holds no lead powers');
+r = await j('/auth/sso/start', { method: 'POST', body: JSON.stringify({ orgId: 'org-eastport' }) });
+ok(r.status === 403 && r.body.error === 'SSO_PROVIDER_UNAVAILABLE', 'SSO start is refused in production: the only issuer is the local test provider');
+r = await j('/auth/sso/callback', { method: 'POST', body: JSON.stringify({ code: 'x.y', state: 'z' }) });
+ok(r.status === 403 && r.body.error === 'SSO_PROVIDER_UNAVAILABLE', 'SSO callback is refused in production before any token is examined');
+r = await j('/capabilities');
+ok(r.body.capabilities.staff_sso?.state === 'not_configured' && r.body.capabilities.proxy_trust?.state === 'not_configured', 'the capability report states that no staff SSO and no proxy trust are configured');
+
 child.kill('SIGKILL');
 child = null;
 console.log(`\n${passed} connected-mode checks passed`);

@@ -3,6 +3,7 @@
 // deleted; every helper enforces at the server, never in a client.
 import crypto from 'node:crypto';
 import { isAdult, ageOn, adultAgeFor, visibleToOrg, haversineKm } from '../domain.mjs';
+import { isLeadUser } from '../roles.mjs';
 
 // ------------------------------------------------------------- migrations
 export function migrateM13(db) {
@@ -207,8 +208,8 @@ export function buildSharedM13(ctx) {
     record.history.push({ id: nextId('aud'), at: Date.now(), byKind, byId, byName, action, detail });
   };
 
-  // Lead tier — identical rule to m12 (documented role heuristic).
-  const isLead = (user) => /head|director|lead|manager|owner|chief/i.test(user?.role ?? '');
+  // Lead tier — the same rule as m12, from the one definition in roles.mjs.
+  const isLead = isLeadUser;
   const requireLead = (req, res) => {
     if (isLead(req.orgUser)) return true;
     res.status(403).json({ error: 'LEAD_REQUIRED', message: 'This action needs a recruitment lead (role containing Head/Director/Lead/Manager).' });

@@ -1,6 +1,7 @@
 // M12 shared: additive migrations + helpers used by every feature module.
 import { isAdult, visibleToOrg, haversineKm } from '../domain.mjs';
 import { ageOrNull } from '../temporal.mjs';
+import { isLeadUser } from '../roles.mjs';
 
 // ------------------------------------------------------------- migrations
 // Same non-destructive convention as server.mjs: every new collection is
@@ -46,8 +47,9 @@ export function buildShared(ctx) {
   const { db, nextId } = ctx;
 
   // Lead = the privileged org role tier for approvals, staff management and
-  // restricted cases. Rule-based on the stated role (documented, not hidden).
-  const isLead = (user) => /head|director|lead|manager|owner|chief/i.test(user?.role ?? '');
+  // restricted cases. Rule-based on the stated role (documented, not hidden);
+  // the one definition lives in roles.mjs.
+  const isLead = isLeadUser;
   const requireLead = (req, res) => {
     if (isLead(req.orgUser)) return true;
     res.status(403).json({ error: 'LEAD_REQUIRED', message: 'This action needs a recruitment lead (role containing Head/Director/Lead/Manager).' });

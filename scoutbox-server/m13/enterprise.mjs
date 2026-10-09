@@ -244,7 +244,12 @@ export function registerEnterprise(ctx) {
     res.json({ config: cfg });
   });
 
-  const IDP_SECRET = process.env.TEST_IDP_SECRET || 'local-test-idp-secret';
+  // The local test IdP signs its codes with TEST_IDP_SECRET. There is no
+  // fallback value any more: with the variable unset a fresh random secret is
+  // drawn at boot, so a code minted against a publicly known string never
+  // verifies anywhere. The callback below is also refused outside
+  // development, because the test IdP is the only issuer that exists.
+  const IDP_SECRET = process.env.TEST_IDP_SECRET || crypto.randomBytes(32).toString('hex');
   const signToken = (payload) => {
     const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
     const sig = crypto.createHmac('sha256', IDP_SECRET).update(body).digest('base64url');
@@ -259,7 +264,14 @@ export function registerEnterprise(ctx) {
   };
 
   // Start: mint state+nonce, hand back the authorisation URL.
+  const testIdpOnly = (res) => {
+    if (DEV) return false;
+    res.status(403).json({ error: 'SSO_PROVIDER_UNAVAILABLE', message: 'Only the local test identity provider exists, and it is disabled outside development. Staff sign in with their organisation credentials.' });
+    return true;
+  };
+
   app.post('/auth/sso/start', (req, res) => {
+    if (testIdpOnly(res)) return;
     const org = db.orgs.find((o) => o.id === req.body?.orgId);
     const cfg = org && db.ssoConfigs.find((c) => c.orgId === org.id);
     if (!cfg) return res.status(404).json({ error: 'SSO_NOT_CONFIGURED', message: 'This organisation has no identity provider configured.' });
@@ -284,6 +296,7 @@ export function registerEnterprise(ctx) {
   }
 
   app.post('/auth/sso/callback', (req, res) => {
+    if (testIdpOnly(res)) return;
     const { code, state } = req.body ?? {};
     const st = db.ssoStates.find((s) => s.state === String(state ?? ''));
     if (!st || st.usedAt || st.expiresAt < Date.now()) {

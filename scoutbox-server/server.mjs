@@ -51,6 +51,8 @@ import { registerSourceChanges } from './m181/sourceChanges.mjs';
 import { audienceFor, EVENT_AUDIENCE } from './m181/eventAudience.mjs';
 import { createRateLimiter, rateLimitedBody, RATE_LIMIT_POLICY } from './m181/rateLimit.mjs';
 import { buildCapabilityReport, productionConfigProblems } from './m181/capabilities.mjs';
+import { isLeadRole } from './roles.mjs';
+import { parseTrustProxy } from './httpTrust.mjs';
 import { minimizePayload, assertEventRegistry, EVENT_NAMES } from './m182/eventRegistry.mjs';
 import { runMigrations, schemaReport, SCHEMA_VERSION } from './m182/migrations.mjs';
 import { registerNotificationPrefs } from './m182/notificationPrefs.mjs';
@@ -257,6 +259,14 @@ if (!snapshotLoaded) {
 }
 
 const app = express();
+
+// Reverse-proxy trust is explicit and per deployment (see httpTrust.mjs).
+// Without it a server behind a platform proxy keys every per-IP limit on the
+// proxy's own address; with it set carelessly a direct client could pick its
+// own. The parsed setting is reported in /capabilities and an invalid value
+// refuses to boot in production.
+const TRUST_PROXY = parseTrustProxy(process.env.SCOUTBOX_TRUST_PROXY);
+app.set('trust proxy', TRUST_PROXY.setting);
 
 // M18.1 — CORS is an allowlist, not a wildcard.
 //
@@ -1783,19 +1793,62 @@ app.post('/auth/org/login', (req, res) => {
     }
     m13Ctx?.mfaGuards?.clear(user.id);
   }
+  // Roles are assigned by the organisation, never by the person logging in.
+  //
+  // An organisation that holds real credentials (its password was set at
+  // registration or provisioned by Trust & Safety) gets staff accounts only
+  // through server-controlled flows: the registering administrator, a lead's
+  // invitation, or — exactly once — the first login with the organisation
+  // password, which bootstraps the administrator account for organisations
+  // provisioned without one. The role sent with a login is ignored on such an
+  // organisation; the stored role answers. Anyone else typing a new name with
+  // the shared password used to become staff with whatever role they chose,
+  // and anyone typing an existing name used to overwrite that person's role.
+  //
+  // Unprovisioned (seeded demo) organisations keep the development shortcut:
+  // a login names its own role. That path is refused outside development
+  // above (`devLoginRefused`), so it is never reachable in production.
+  const credentialed = !!org.password;
+  let roleNote;
   if (!user) {
-    user = { id: nextId('usr'), orgId, name: scoutName.trim(), role: (role || 'Scout').trim(), createdAt: Date.now() };
-    db.users.push(user);
-  } else if (role) {
-    user.role = role.trim();
+    if (credentialed) {
+      const staff = db.users.filter((u) => u.orgId === orgId && !u.removedAt);
+      if (staff.length) {
+        return res.status(403).json({
+          error: 'STAFF_NOT_PROVISIONED',
+          message: 'No staff account with this name exists in the organisation. Ask a lead for an invitation — the organisation password does not create accounts.',
+        });
+      }
+      // First account on a credentialed organisation: the administrator. A
+      // lead-tier role is required so the organisation can invite its staff.
+      const requested = (role || '').trim();
+      user = {
+        id: nextId('usr'), orgId, name: scoutName.trim(),
+        role: isLeadRole(requested) ? requested : 'Manager',
+        createdAt: Date.now(), provenance: 'org_password_bootstrap',
+      };
+      db.users.push(user);
+      db.opsEvents.push({ id: nextId('ops'), at: Date.now(), kind: 'staff_bootstrapped', detail: { orgId: org.id, userId: user.id, by: user.name } });
+      persist();
+    } else {
+      user = { id: nextId('usr'), orgId, name: scoutName.trim(), role: (role || 'Scout').trim(), createdAt: Date.now() };
+      db.users.push(user);
+    }
+  } else if (role && role.trim() && role.trim() !== user.role) {
+    if (credentialed) {
+      roleNote = 'Roles are assigned by your organisation; the role entered at sign-in was not applied.';
+    } else {
+      user.role = role.trim(); // development shortcut only — see above
+    }
   }
   res.json({
     userId: user.id, role: user.role,
     org: { ...orgSafe(org), safeguardingCertified: safeguardingCertified(org) },
     token: createSession('org', org.id, { userId: user.id }),
+    ...(roleNote ? { roleNote } : {}),
     // Organisation policy nudge, never a lockout: existing users keep access
     // and are steered through MFA setup.
-    mfaSetupRequired: !!(org.mfaRequiredForLeads && user && /head|director|lead|manager|owner|chief/i.test(user.role ?? '') && !user.mfa?.enabledAt) || undefined,
+    mfaSetupRequired: !!(org.mfaRequiredForLeads && user && isLeadRole(user.role) && !user.mfa?.enabledAt) || undefined,
   });
 });
 
@@ -2531,7 +2584,7 @@ orgRouter.post('/players/:id/signing', (req, res) => {
   // An agency has no squad to sign a player into, and a scout could not
   // complete the canonical workflow either; the same authority applies here.
   if (req.org.type === 'agency' || req.org.level === 'agent') return res.status(403).json({ error: 'SIGNING_NOT_PERMITTED', message: 'Only a club records a signing.' });
-  if (!/head|director|lead|manager|owner|chief/i.test(req.orgUser?.role ?? '')) return res.status(403).json({ error: 'LEAD_REQUIRED', message: 'Only recruitment leads and directors can record a signing.' });
+  if (!isLeadRole(req.orgUser?.role)) return res.status(403).json({ error: 'LEAD_REQUIRED', message: 'Only recruitment leads and directors can record a signing.' });
   const p = findPlayer(req.params.id);
   if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
   if (!visibleToOrg(p, req.org)) return res.status(403).json({ error: 'UNDER_18_WALL' });
@@ -4290,7 +4343,7 @@ m182Ctx = {
   // The same standing-gate composition M12's shared helpers use.
   orgCanSee: (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id),
   requireLead: (req, res) => {
-    if (/head|director|lead|manager|owner|chief/i.test(req.orgUser?.role ?? '')) return true;
+    if (isLeadRole(req.orgUser?.role)) return true;
     res.status(403).json({ error: 'LEAD_REQUIRED', message: 'Only recruitment leads and directors can do this.' });
     return false;
   },
@@ -4632,6 +4685,7 @@ app.get('/capabilities', (_req, res) => {
   res.json(buildCapabilityReport({
     rateLimit,
     providers: m16Ctx.providerStatus?.() ?? [],
+    trustProxy: TRUST_PROXY,
     // M18.2 — states only, as before. Counts are counts, never subjects.
     extra: {
       schema: schemaReport(db),
