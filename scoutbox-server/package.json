@@ -6,7 +6,7 @@
   "main": "server.mjs",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node scripts/testTrust.mjs",
+    "test": "node scripts/testTrust.mjs && node scripts/testIdentity.mjs && node scripts/testDataLayer.mjs",
     "e2e": "node scripts/apiE2E.mjs"
   },
   "dependencies": {

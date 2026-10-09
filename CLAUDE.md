@@ -1,5 +1,78 @@
 # ScoutBox — approved Agent, Pro, Player and Grassroots UI
 
+## Architecture rules — 9 October 2026
+
+These rules follow the Founder's acceptance of the October 2026 architecture
+review. They apply to every tool and person working in this repository and sit
+alongside the design approvals below, which they do not change.
+
+### Trunk, branches and approvals
+
+- `main` is the trunk and is always the current product. Every change branches
+  from `main`, is named after the change (`fix/org-login-roles`,
+  `refactor/data-layer-users`), merges back through a pull request with green
+  CI, and is deleted afterwards. Nobody continues another tool's branch; the
+  pull request is the handoff.
+- Approved baselines are annotated tags (`<app>-ui-approved-<date>`,
+  `<app>-baseline-<date>`), not commit hashes in prose. Pushes, merges to
+  `main`, tags and deployments happen only on the Founder's explicit
+  instruction, and never with a force-push.
+- Scratch files, backups and generated bundles stay out of Git. Do not add new
+  top-level milestone report files; record durable decisions in the relevant
+  README, `scoutbox-server/OPERATIONS.md` or this file.
+
+### Feature freeze
+
+Until the data-layer rebuild below is complete, no new product features are
+started. Work in scope: defects, security, the rebuild itself, test coverage,
+and design changes the Founder explicitly requests.
+
+### Server structure
+
+- No new top-level `db.<collection>` arrays and no new `migrateMxx` collection
+  lines. New persistent state is a table owned by a domain repository under
+  `scoutbox-server/repositories/`, created by a versioned migration in
+  `repositories/migrations/`, written per row inside a transaction. Every
+  write to a migrated domain goes through its repository; the old
+  `db.<collection>` is that repository's read-only view (a direct write
+  throws), which existing readers may keep using until the domain's readers
+  move to repository queries. Unmigrated domains keep working as they are
+  until their turn. Migrated so far: `users` (staff accounts, `org_users`).
+  The runtime data directory is `scoutbox-server/data/` and is never a
+  source directory.
+- No new milestone-named modules (`m30/…`). New server code lives in a
+  directory named after its domain (`scoutbox-server/domains/<domain>/`), and
+  moving code out of a milestone directory happens with the domain migration.
+- One definition per rule. Shared rules (`roles.mjs`, `domain.mjs`,
+  `temporal.mjs`) are imported, never copied. If a check is needed in a second
+  place, export it from the first.
+- Every environment-driven setting is registered in
+  `scoutbox-server/m181/capabilities.mjs` (capability state and, where unsafe,
+  a production boot refusal) and documented in `OPERATIONS.md`. Secrets have no
+  default values.
+- Responses are built from explicit allowlists of fields, never by spreading a
+  stored record.
+
+### Shared code
+
+- Do not add another copy of an API type or client to an app. The server is
+  the source of truth for shapes; a shared types and API-client package is the
+  next structural step after the data layer, and new client code should be
+  written so it can move there.
+- `scoutbox-club` and `scoutbox-grassroots` share their business logic; a fix
+  in one is a fix in both until they are merged.
+
+### Tests and CI
+
+- Every server change ships with a test: unit tests in
+  `scoutbox-server/scripts/test*.mjs` (run by `npm test`) and, for route
+  behaviour, the matching end-to-end script. The existing end-to-end scripts
+  are the behavioural specification for the rebuild; a migrated domain must
+  pass them unchanged, apart from assertions that exist only to describe the
+  old storage.
+- CI must be green on `main`. A red step is a defect to fix, not a step to
+  skip.
+
 ## Latest approval — Agent, 6 October 2026
 
 The Founder approved the finished ScoutBox Agent UI at `7ee9ecb` on

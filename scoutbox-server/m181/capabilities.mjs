@@ -13,12 +13,16 @@
  */
 
 import { combineVerifiedProtocols } from '../m22/eligibility.mjs';
+import { parseTrustProxy } from '../httpTrust.mjs';
 export const CAPABILITY_STATES = ['configured', 'not_configured', 'test_only'];
 
 // M22: the Combine gate is read here, not restated. If eligibility ever
 // changes it changes in one place and every surface follows.
-export function buildCapabilityReport({ env = process.env, rateLimit = null, providers = [], extra = {} } = {}) {
+export function buildCapabilityReport({ env = process.env, rateLimit = null, providers = [], trustProxy = null, extra = {} } = {}) {
   const flag = (v) => !!v && String(v).trim() !== '';
+  const proxy = trustProxy ?? parseTrustProxy(env.SCOUTBOX_TRUST_PROXY);
+  const production = env.NODE_ENV === 'production';
+  const devLogins = !production || env.ALLOW_DEV_LOGINS === '1';
 
   // "Production CV" means a provider that can genuinely OBSERVE — classify
   // technique, count repetitions. `web_client` is deliberately `limited`: it
@@ -85,6 +89,20 @@ export function buildCapabilityReport({ env = process.env, rateLimit = null, pro
         state: env.BOX_CAM_TEST_PROVIDER === '1' ? 'test_only' : 'not_configured',
         note: 'The clearly-labelled simulated observer. Its results never count as production evidence.',
       },
+      // Staff single sign-on: the only issuer that exists is the local test
+      // identity provider, which is reachable in development only. No
+      // corporate provider can be configured yet, so production reports
+      // not_configured and the SSO routes refuse there.
+      staff_sso: {
+        state: devLogins ? 'test_only' : 'not_configured',
+        note: devLogins
+          ? 'Only the local test identity provider is available; it exercises the relying-party logic and never links an account that was not invited.'
+          : 'No staff identity provider is configured; staff sign in with organisation credentials. The local test provider is disabled outside development.',
+      },
+      // How the server learns a client's address. Per-IP limits (login
+      // attempts, sharing links) key on it, so a deployment behind a proxy
+      // that leaves this unset has effectively one shared client.
+      proxy_trust: { state: proxy.state, note: proxy.note },
     },
     ...extra,
     note: 'Capability states only. This report contains no keys, hostnames or connection details.',
@@ -99,6 +117,7 @@ export function buildCapabilityReport({ env = process.env, rateLimit = null, pro
 export function productionConfigProblems({ env = process.env, trustWeightsTotal = null } = {}) {
   const problems = [];
   const production = env.NODE_ENV === 'production';
+  const flagged = (v) => v != null && String(v).trim() !== '';
 
   if (trustWeightsTotal != null && trustWeightsTotal !== 100) {
     problems.push({
@@ -157,6 +176,26 @@ export function productionConfigProblems({ env = process.env, trustWeightsTotal 
     problems.push({
       code: 'AGENT_TEST_PROVIDER_IN_PRODUCTION',
       message: 'AGENT_VERIFICATION_TEST_PROVIDER=1 enables the synthetic licence register, which verifies any TEST-VERIFIED reference.',
+      fatal: true,
+    });
+  }
+  // The local test identity provider is a development instrument, like the
+  // fault layer above. Its routes already refuse outside development; a
+  // signing secret for it on a production instance means a development
+  // environment file was copied, and that is refused rather than ignored.
+  if (production && flagged(env.TEST_IDP_SECRET)) {
+    problems.push({
+      code: 'TEST_IDP_IN_PRODUCTION',
+      message: 'TEST_IDP_SECRET is set. The local test identity provider must never be configured on a production instance.',
+      fatal: true,
+    });
+  }
+  // A proxy-trust value that does not parse silently leaves every per-IP
+  // limit keyed on the proxy's own address. Production refuses to guess.
+  if (production && parseTrustProxy(env.SCOUTBOX_TRUST_PROXY).state === 'invalid') {
+    problems.push({
+      code: 'TRUST_PROXY_INVALID',
+      message: `SCOUTBOX_TRUST_PROXY=${JSON.stringify(String(env.SCOUTBOX_TRUST_PROXY))} is not a hop count, true/false, or a list of addresses and subnets.`,
       fatal: true,
     });
   }

@@ -4,7 +4,10 @@
 Secrets live in the **environment**, never in the database or backups:
 - `ADMIN_KEY` — Trust & Safety console key (dev default `scoutbox-admin`; set a real one in production).
 - `DELIVERY_CALLBACK_SECRET` — HMAC secret for provider delivery callbacks (dev default `local-fake-callback-secret`).
-- `TEST_IDP_SECRET` — local test IdP signing secret (dev only; the test IdP is disabled outside dev).
+- `TEST_IDP_SECRET` — local test IdP signing secret. Development only: unset,
+  a random secret is drawn per boot (there is no fixed default); the SSO routes
+  refuse outside development; and setting it on a production instance refuses
+  to boot (`TEST_IDP_IN_PRODUCTION`).
 - Media-URL signing keys are generated per boot (M11).
 Webhook endpoint secrets and API-key hashes are tenant data and DO live in the
 database; API keys themselves are stored as SHA-256 hashes and shown once.
@@ -15,6 +18,43 @@ only), `M13_QUIET_LOGS=1` (suppresses per-request log lines),
 `TEST_LICENCE_REGISTRY=1|down` (enables the LOCAL licence-register test
 fixture / simulates its outage — test environments only; production registers
 are `not_configured`), `ALLOW_DEV_LOGINS` / `NODE_ENV` (see M11).
+
+## Data layer
+`DATA_DIR/scoutbox.db` holds two kinds of data. Collections that have not yet
+moved are stored as one JSON blob each in the `collections` table, saved as a
+whole on a debounce. Collections that have moved to the relational data layer
+(`scoutbox-server/repositories/`) are real tables, written one row at a time
+inside a transaction the moment a change happens, and recorded in
+`data_migrations`. `GET /capabilities` lists them under `dataLayer`. Moved so
+far: staff accounts (`users` → `org_users`). A first boot after a move imports
+the old blob into the table and deletes the blob on the next save; a backup
+`db.json` restores through the same path. Tools that read or write the file as
+one snapshot (`openStore(dir)` without options) see every collection in the
+shape the server sees, tables included.
+
+## Reverse proxy and client addresses
+Per-IP controls (the `/auth` brute-force limiter, sharing-link limits, request
+logs) key on the client address. Behind a platform proxy (Fly, Render, a load
+balancer) the server must be told how many hops to trust, or every client shares
+the proxy's address and the 40-requests-a-minute login limit becomes global:
+
+- `SCOUTBOX_TRUST_PROXY` — unset / `0` trusts nothing (direct deployments and
+  development); `1` (or `2`, …) trusts that many hops; `loopback, 10.0.0.0/8`
+  trusts listed addresses/subnets; `true` trusts every hop (only safe when the
+  proxy strips the inbound `X-Forwarded-For`). `GET /capabilities` reports the
+  resulting state under `proxy_trust`; an unparseable value refuses to boot in
+  production (`TRUST_PROXY_INVALID`).
+
+## Staff accounts and roles
+Roles are assigned by the organisation, never by the person logging in. On an
+organisation that holds credentials (password set at registration or provisioned
+by Trust & Safety) a login finds an existing staff account and answers with its
+stored role; a name with no account is refused (`STAFF_NOT_PROVISIONED`) and must
+be invited by a lead (`POST /org/invites`). The one exception is the first login
+on a credentialed organisation that has no staff yet, which bootstraps the
+administrator account in the lead tier (recorded as `staff_bootstrapped`).
+Unprovisioned seeded organisations keep the development shortcut, which is
+refused outside development. The lead tier is `isLeadRole` in `roles.mjs`.
 
 ## Structured logs & correlation
 Every request logs one JSON line `{t,id,m,p,s,ms}` — correlation id (accepts
