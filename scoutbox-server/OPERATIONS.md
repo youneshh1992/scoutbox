@@ -25,18 +25,20 @@ moved are stored as one JSON blob each in the `collections` table, saved as a
 whole on a debounce. Collections that have moved to the relational data layer
 (`scoutbox-server/repositories/`) are real tables, written one row at a time
 inside a transaction the moment a change happens, and recorded in
-`data_migrations`. `GET /capabilities` lists them under `dataLayer`. Moved so
-far: staff accounts (`users` → `org_users`). A first boot after a move imports
-the old blob into the table and deletes the blob on the next save; a backup
-`db.json` restores through the same path. Tools that read or write the file as
-one snapshot (`openStore(dir)` without options) see every collection in the
-shape the server sees, tables included.
+`data_migrations`. `GET /capabilities` lists them under `dataLayer` (`tables`,
+`migrations`, `domains`). Moved so far: staff accounts (`users` → `org_users`,
+migration `0001`) and sessions (`sessions`, migration `0003`, see "Sessions"
+below). A first boot after a move imports the old blob into the table and
+retires the blob; a backup `db.json` restores through the same path. Tools that
+read or write the file as one snapshot (`openStore(dir)` without options) see
+every collection in the shape the server sees, tables included.
 
 A third kind exists during the migration: *shadow* tables (`orgs`, `guardians`,
-`players`, `guardian_children`, `sessions` since migration `0002`). The blob is
-still the source of truth for these and nothing reads the tables yet. They are
-filled by a *projection* that rewrites all five from the snapshot, and that
-projection is **off by default**: a normal save never touches them.
+`players`, `guardian_children` since migration `0002`). The blob is still the
+source of truth for these and nothing reads the tables yet. They are filled by
+a *projection* that rewrites all four from the snapshot, and that projection is
+**off by default**: a normal save never touches them. The projection never
+writes or deletes the live `sessions` table, whether or not it is switched on.
 
 - `SCOUTBOX_SHADOW_VALIDATION=1` switches the projection on. It then runs inside
   every save transaction, in its own savepoint; a projection failure is counted
@@ -68,8 +70,66 @@ projection is **off by default**: a normal save never touches them.
   reconciled. Counts and statuses only are public; `GET /admin/data-layer`
   (admin key) adds the refused row ids, the adjusted relationships and the last
   error text.
-- Session tokens are stored in these tables only as hashes; no report carries a
-  token, a password hash or a code.
+- No report carries a token, a password hash or a code.
+
+### Sessions (live since migration `0003`)
+Sessions are rows of the `sessions` table, owned by
+`repositories/sessions.mjs`. A bearer token is returned to the client once and
+stored only as its SHA-256 (`token_hash`); every lookup is by hash on the
+primary key. Nothing in the file, the logs, `GET /capabilities`,
+`GET /admin/data-layer`, `GET /org/sessions` or a snapshot export carries a
+plain token. Existing tokens and session ids (`sid`, used in signed media links
+and event-stream tickets) stay valid across the cutover and every restart.
+
+- **Lifetime.** `SESSION_TTL_DAYS` (default 30). A session is live while less
+  than that has passed since it was created, judged against the value configured
+  *now*: changing the variable and restarting applies the new lifetime to every
+  existing session at once (shortening it can sign users out; extending it
+  revives none that were already deleted). The boot log records the change
+  (`sessions: the configured lifetime changed …`), and `GET /capabilities` shows
+  it under `dataLayer.domains.sessions.lifetimeMs`.
+- **S2 cutover (first boot of this build on an older file).** The boot
+  validates every entry of the old `sessions` blob and imports it with hashed
+  tokens, retires the blob and records `0003_sessions_live`, all in one
+  transaction. On a pre-S0 file (staff still in the `users` blob) it imports
+  that blob into `org_users` first, in the same transaction. If any entry is
+  unsupported (no token, unknown kind, no refId, bad creation time, an org
+  session without a known staff row, an unknown field, a duplicate token or
+  sid) the boot **refuses** with `SESSIONS_CUTOVER_BLOCKED` and lists each
+  `sid` with its reason; the file is unchanged and the previous build still
+  runs it. Nothing is dropped, repaired or revoked automatically. Dry-run first:
+  copy the data directory (server stopped, or from a backup), boot this build
+  with `DATA_DIR=<copy>` and read the log; the real directory is not touched.
+  If it refuses, resolve each listed `sid` on the previous build with the
+  server stopped (an unsupported entry cannot authenticate, so removing it
+  changes nothing a user can observe), repeat the dry run, then upgrade.
+- **After the cutover boot.** The plain tokens the blob once held are gone
+  from every active row but may remain *physically* in free pages and in the
+  WAL until, with the server stopped:
+  `sqlite3 DATA_DIR/scoutbox.db "PRAGMA wal_checkpoint(TRUNCATE); VACUUM;"`
+  (or the same two statements from `node -e` with `node:sqlite`). Every backup
+  taken before the cutover still holds plain tokens and remains a usable
+  credential store until `SESSION_TTL_DAYS` have passed since it was taken:
+  keep such backups under the same controls as the live directory, or rotate
+  them once a post-cutover backup exists. No tool deletes a backup for you.
+- **Rollback to the previous build.** Do not restore a pre-cutover backup: it
+  would revive every session revoked since and discard every later write. Run
+  `node scripts/sessionsRollback.mjs <data-dir> <out-dir>` (server stopped):
+  it copies the current file read-only into `<out-dir>`, removes the cutover
+  record, empties the table and writes an empty legacy `sessions` blob, keeping
+  every other collection as it is now; the source is never modified. Start the
+  previous build on `<out-dir>`: every user signs in again (hashes cannot be
+  turned back into tokens) and no revoked session can come back. The tool
+  refuses (exit 4, no output file) a database that carries a later migration
+  than `0003`, and refuses an output directory that already holds a database.
+- **Concurrency.** Every connection the store opens sets
+  `PRAGMA busy_timeout = 5000`, so a save meeting another writer (a backup
+  tool, a second process) waits up to five seconds instead of failing.
+- **Snapshot tools and backups.** In snapshot mode (`openStore(dir)` without
+  options) `db.sessions` is the table's rows with `tokenHash`, never `token`;
+  saving writes them back by hash. Writing the `users` collection back upserts
+  staff rows and deletes only ids absent from the snapshot, so a restore cannot
+  cascade-delete valid sessions through `sessions.org_user_id`.
 
 The design and the cutover order are in `docs/architecture/sqlite-schema.md`
 and `docs/architecture/sqlite-migration-plan.md`.

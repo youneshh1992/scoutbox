@@ -6,7 +6,7 @@
   "main": "server.mjs",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node scripts/testTrust.mjs && node scripts/testIdentity.mjs && node scripts/testDataLayer.mjs && node scripts/testCoreSchema.mjs && node scripts/testSchemaDdl.mjs",
+    "test": "node scripts/testTrust.mjs && node scripts/testIdentity.mjs && node scripts/testDataLayer.mjs && node scripts/testCoreSchema.mjs && node scripts/testSessions.mjs && node scripts/testSchemaDdl.mjs",
     "perf:data-layer": "node scripts/dataLayerPerf.mjs",
     "validate:shadow": "node scripts/validateShadow.mjs",
     "e2e": "node scripts/apiE2E.mjs"

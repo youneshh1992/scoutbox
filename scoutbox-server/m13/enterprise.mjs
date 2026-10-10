@@ -61,7 +61,7 @@ export function requestInstrumentation() {
 
 export function registerEnterprise(ctx) {
   const {
-    db, users, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
+    db, users, sessions, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
     mailer, requireLead, isLead, paginate, histAppend, timingSafeEq, signBody,
     storage, DATA_DIR,
   } = ctx;
@@ -199,18 +199,19 @@ export function registerEnterprise(ctx) {
   });
 
   // Session/device management (own sessions only).
+  // S2: sessions are table-backed and hold token hashes; "current" is decided
+  // by hashing the presented bearer token, never by comparing stored tokens.
   orgRouter.get('/sessions', (req, res) => {
-    const mine = db.sessions.filter((s) => s.kind === 'org' && s.userId === req.orgUser.id);
+    const mine = sessions.listOrgUser(req.orgUser.id);
     const currentToken = (req.headers.authorization ?? '').slice(7);
-    res.json({ items: mine.map((s) => ({ sid: s.sid, createdAt: s.createdAt, current: s.token === currentToken, via: s.via ?? 'password' })) });
+    res.json({ items: mine.map((s) => ({ sid: s.sid, createdAt: s.createdAt, current: sessions.isCurrent(s, currentToken), via: s.via ?? 'password' })) });
   });
 
   orgRouter.post('/sessions/revoke', (req, res) => {
     const sid = String(req.body?.sid ?? '');
-    const before = db.sessions.length;
-    db.sessions = db.sessions.filter((s) => !(s.kind === 'org' && s.userId === req.orgUser.id && s.sid === sid));
-    persistNow();
-    res.json({ revoked: before - db.sessions.length });
+    // Own sessions only: the delete is scoped to this staff member's id.
+    const revoked = sid ? sessions.revokeOwn(req.orgUser.id, sid) : 0;
+    res.json({ revoked });
   });
 
   // ================================================== B2. SSO (local test IdP)

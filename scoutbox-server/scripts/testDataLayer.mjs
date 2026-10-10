@@ -63,6 +63,7 @@ test('schema report: names tables and counts, never rows', () => {
   // core identity shadow tables); the report must list exactly what exists.
   assert.deepEqual(report, {
     engine: 'sqlite', migrationsApplied: DATA_MIGRATIONS.length, migrationsKnown: DATA_MIGRATIONS.length,
+    migrations: ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live'],
     tables: ['guardian_children', 'guardians', 'org_users', 'orgs', 'players', 'sessions'],
   });
   assert.deepEqual(dataSchemaReport(null, DATA_MIGRATIONS), { engine: 'memory', migrationsApplied: 0, migrationsKnown: DATA_MIGRATIONS.length, tables: [] });
@@ -175,9 +176,21 @@ test('repository: the legacy blob array is imported once, with every field kept,
   assert.deepEqual(JSON.parse(JSON.stringify(repo.view[0])), legacy[0]);
   assert.deepEqual(JSON.parse(JSON.stringify(repo.view[1])), legacy[1]);
   assert.equal(s.prepare('SELECT extra_json FROM org_users WHERE id = ?').get('usr-1').extra_json, '{"oddField":{"kept":true}}');
-  const again = createUsersRepository({ sqlite: s, nextId, persist: () => {}, warn: (m) => warnings.push(m) });
+  // A blob whose rows the table already holds is superseded (S2's cutover
+  // imports it into the table a moment before attach): a log line, no warning.
+  const logs = [];
+  const again = createUsersRepository({ sqlite: s, nextId, persist: () => {}, warn: (m) => warnings.push(m), log: (m) => logs.push(m) });
   assert.deepEqual(again.attach(legacy), { engine: 'sqlite', loaded: 2, imported: 0 });
-  assert.ok(warnings.some((w) => /stale users blob/.test(w)));
+  assert.ok(!warnings.some((w) => /stale users blob/.test(w)), 'a superseded blob is not stale');
+  assert.ok(logs.some((m) => /superseded by the table/.test(m)));
+  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 2);
+  // A blob naming a row the table does not hold is stale: it is warned about,
+  // never imported over the table.
+  const third = createUsersRepository({ sqlite: s, nextId, persist: () => {}, warn: (m) => warnings.push(m) });
+  assert.deepEqual(third.attach([...legacy, { id: 'usr-ghost', orgId: 'o', name: 'Ghost', role: 'Scout', createdAt: 1 }]), { engine: 'sqlite', loaded: 2, imported: 0 });
+  assert.ok(warnings.some((w) => /stale users blob with 1 row\(s\)/.test(w)));
+  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 2);
+  assert.equal(third.byId('usr-ghost'), null);
 });
 test('repository: without sqlite the same API runs in memory and asks the snapshot to persist', () => {
   let persisted = 0;
@@ -260,7 +273,14 @@ test('store (snapshot mode): before any boot there is no table, so a fixture is 
   const server = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = { ...server.load().db };
   const layer = attachDataLayer({ db, store: server, nextId, persist: () => {} });
-  assert.deepEqual(layer.boot.users, { engine: 'sqlite', loaded: 1, imported: 1 });
+  // Since S2 the sessions cutover migration imports the users blob into the
+  // table inside its own transaction (org sessions reference staff rows), so by
+  // the time the repository attaches the table already holds the row and the
+  // blob is retired: loaded from the table, nothing left to import.
+  assert.deepEqual(layer.boot.users, { engine: 'sqlite', loaded: 1, imported: 0 });
+  assert.equal(server.sqlite.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 1);
+  assert.equal(server.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'users'").get().n, 0);
+  assert.equal(db.users[0].name, 'A');
   server.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 

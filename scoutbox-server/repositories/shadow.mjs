@@ -38,7 +38,10 @@
  */
 import crypto from 'node:crypto';
 
-export const CORE_SHADOW_TABLES = Object.freeze(['orgs', 'guardians', 'players', 'guardian_children', 'sessions']);
+// `sessions` left this list at S2: it is a live table owned by
+// repositories/sessions.mjs and the projection never writes or deletes it,
+// whether or not validation is switched on.
+export const CORE_SHADOW_TABLES = Object.freeze(['orgs', 'guardians', 'players', 'guardian_children']);
 
 /** Report statuses, from "nothing to say" to "the tables match the last save". */
 export const SHADOW_STATUS = Object.freeze({
@@ -57,7 +60,7 @@ const real = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const text = (v) => (typeof v === 'string' ? v : v === null || v === undefined ? null : String(v));
 const reason = (err) => String(err?.message ?? err).replace(/^SQLITE_\w+:\s*/, '').slice(0, 160);
 
-export function createCoreIdentityShadow({ sqlite, sessionTtlMs = 30 * 24 * 3600 * 1000, now = Date.now }) {
+export function createCoreIdentityShadow({ sqlite, now = Date.now }) {
   // The store owns `meta`; the shadow records its counts-only summary there so a
   // restarted process (or a tool reading the file) can tell fresh from stale.
   sqlite.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);');
@@ -83,13 +86,10 @@ export function createCoreIdentityShadow({ sqlite, sessionTtlMs = 30 * 24 * 3600
       @stats_duel_success_pct, @stats_clean_sheets, @medical_shared, @medical_condition_status, @prefs_quiet_start, @prefs_quiet_end,
       @prefs_school_hours_mute, @prefs_timezone, @programme_track, @programme_started_at, @password_hash, @created_at)`),
     guardian_children: sqlite.prepare('INSERT INTO guardian_children (guardian_id, player_id, role) VALUES (@guardian_id, @player_id, @role)'),
-    sessions: sqlite.prepare(`INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, via, created_at, expires_at)
-      VALUES (@token_hash, @sid, @kind, @ref_id, @org_user_id, @via, @created_at, @expires_at)`),
   };
   const linkCoGuardian = sqlite.prepare('UPDATE guardians SET co_guardian_of = ? WHERE id = ?');
   const del = Object.fromEntries(CORE_SHADOW_TABLES.map((t) => [t, sqlite.prepare(`DELETE FROM ${t}`)]));
   const count = Object.fromEntries(CORE_SHADOW_TABLES.map((t) => [t, sqlite.prepare(`SELECT COUNT(*) AS n FROM ${t}`)]));
-  const orgUserExists = sqlite.prepare('SELECT 1 FROM org_users WHERE id = ?');
   const metaGet = sqlite.prepare('SELECT value FROM meta WHERE key = ?');
   const metaPut = sqlite.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
 
@@ -163,7 +163,8 @@ export function createCoreIdentityShadow({ sqlite, sessionTtlMs = 30 * 24 * 3600
     };
     try {
       // Children first, parents last: foreign keys are enforced on every statement.
-      for (const t of ['sessions', 'guardian_children', 'players', 'guardians', 'orgs']) del[t].run();
+      // (`sessions` is live and is never touched here; see CORE_SHADOW_TABLES.)
+      for (const t of ['guardian_children', 'players', 'guardians', 'orgs']) del[t].run();
 
       for (const o of rows(db, 'orgs')) {
         table('orgs').source += 1;
@@ -219,18 +220,6 @@ export function createCoreIdentityShadow({ sqlite, sessionTtlMs = 30 * 24 * 3600
           if (!playerIds.has(childId)) { table('guardian_children').skipped.push({ id: `${g.id}/${childId}`, reason: 'child player does not exist' }); continue; }
           attempt('guardian_children', { guardian_id: g.id, player_id: childId, role: primaryGuardianOf.get(childId) === g.id ? 'primary' : 'co' }, `${g.id}/${childId}`);
         }
-      }
-
-      for (const s of rows(db, 'sessions')) {
-        table('sessions').source += 1;
-        if (!s || typeof s !== 'object' || !s.token) { table('sessions').skipped.push({ id: s?.sid ?? null, reason: 'no token' }); continue; }
-        const createdAt = int(s.createdAt);
-        const orgUserId = s.kind === 'org' ? text(s.userId) : null;
-        if (orgUserId && !orgUserExists.get(orgUserId)) { table('sessions').skipped.push({ id: s.sid, reason: `org user ${orgUserId} does not exist` }); continue; }
-        attempt('sessions', {
-          token_hash: sha256(s.token), sid: text(s.sid) ?? sha256(`sid:${s.token}`).slice(0, 12), kind: text(s.kind), ref_id: text(s.refId),
-          org_user_id: orgUserId, via: text(s.via), created_at: createdAt, expires_at: createdAt === null ? null : createdAt + sessionTtlMs,
-        }, s.sid);
       }
 
       result.durationMs = now() - startedAt;

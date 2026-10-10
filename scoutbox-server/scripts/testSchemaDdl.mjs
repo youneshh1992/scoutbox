@@ -1,8 +1,8 @@
 // The target schema in docs/architecture/sql/*.sql must stay executable: this
 // loads every file, in order, into an in-memory SQLite database with foreign
 // keys on, then checks that every FOREIGN KEY names an existing table and that
-// the identity section of 01_identity.sql matches migration 0002 column for
-// column (the migration copies that DDL; the two must not drift).
+// the identity section of 01_identity.sql matches migrations 0001–0003 column for
+// column (the migrations copy that DDL; the two must not drift).
 // Run with: npm test
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -10,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { DATA_MIGRATIONS } from '../repositories/index.mjs';
+import { runDataMigrations } from '../repositories/database.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SQL_DIR = path.join(ROOT, 'docs', 'architecture', 'sql');
@@ -57,11 +58,15 @@ test('every index references an existing table', () => {
   assert.deepEqual(bad, []);
 });
 
-// The migration that implements step S1 must match the documented DDL.
-test('migration 0002 matches the identity section of 01_identity.sql column for column', () => {
+// The migrations that implement steps S0–S2 must match the documented DDL.
+// They are applied by the real runner (which owns `meta` and `data_migrations`),
+// exactly as a boot applies them, so a migration that needs the runner's
+// bookkeeping tables is exercised the way it runs in production.
+test('migrations 0001–0003 match the identity section of 01_identity.sql column for column', () => {
   const mig = new DatabaseSync(':memory:');
   mig.exec('PRAGMA foreign_keys = ON;');
-  for (const m of DATA_MIGRATIONS) m.up(mig);
+  runDataMigrations(mig, DATA_MIGRATIONS, { log: () => {} });
+  assert.equal(mig.prepare('SELECT COUNT(*) AS n FROM data_migrations').get().n, DATA_MIGRATIONS.length);
   for (const t of ['orgs', 'guardians', 'players', 'guardian_children', 'sessions', 'org_users']) {
     const cols = (d) => d.prepare(`PRAGMA table_info(${t})`).all().map((c) => `${c.name}:${c.type}:${c.notnull}:${c.pk}:${c.dflt_value ?? ''}`);
     assert.deepEqual(cols(mig), cols(docs), `${t} columns`);

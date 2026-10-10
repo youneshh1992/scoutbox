@@ -6,10 +6,11 @@
  * snapshot until its domain moves here.
  *
  * Two kinds of table exist today (docs/architecture/sqlite-migration-plan.md):
- *   - LIVE tables, owned by a repository: org_users (step S0). Writes go
- *     through the repository and the blob is never written again.
- *   - SHADOW tables (step S1): orgs, guardians, players, guardian_children,
- *     sessions. The blob stays the source of truth. The projection that
+ *   - LIVE tables, owned by a repository: org_users (step S0) and sessions
+ *     (step S2, hashed tokens). Writes go through the repository and the
+ *     blob is never written again.
+ *   - SHADOW tables (step S1): orgs, guardians, players, guardian_children.
+ *     The blob stays the source of truth. The projection that
  *     fills them from the snapshot is OFF by default; with
  *     `shadowValidation: true` (SCOUTBOX_SHADOW_VALIDATION=1) the store
  *     re-projects them inside every save, and the report shows what the
@@ -26,13 +27,17 @@
  */
 import { runDataMigrations, dataSchemaReport } from './database.mjs';
 import { createUsersRepository, USERS_TABLE } from './users.mjs';
+import { createSessionsRepository, SESSIONS_TABLE } from './sessions.mjs';
 import { createCoreIdentityShadow, CORE_SHADOW_TABLES } from './shadow.mjs';
 import * as m0001 from './migrations/0001_org_users.mjs';
 import * as m0002 from './migrations/0002_core_identity_shadow.mjs';
+import * as m0003 from './migrations/0003_sessions_live.mjs';
 
-export const DATA_MIGRATIONS = Object.freeze([m0001, m0002]);
+export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003]);
 
-const TABLES = Object.freeze([USERS_TABLE]);
+// Order matters for snapshot writes: staff first (sessions reference them),
+// then sessions.
+const TABLES = Object.freeze([USERS_TABLE, SESSIONS_TABLE]);
 
 /** Collections the data layer owns; the server's store never writes these blobs again. */
 export const TABLE_BACKED = Object.freeze(TABLES.map((t) => t.name));
@@ -58,22 +63,31 @@ export function readTableBacked(sqlite) {
   }
   return out;
 }
-export function writeTableBacked(sqlite, db) {
+export function writeTableBacked(sqlite, db, { warn } = {}) {
   const written = [];
   for (const table of TABLES) {
     if (!Array.isArray(db?.[table.name])) continue;
-    if (table.replace(sqlite, db[table.name])) written.push(table.name);
+    if (table.replace(sqlite, db[table.name], { warn })) written.push(table.name);
   }
   return written;
 }
 
 export function attachDataLayer({ db, store, nextId, persist, sessionTtlMs, shadowValidation = false, log = () => {}, warn = (m) => console.warn(m) }) {
   const sqlite = store.sqlite ?? null;
-  const migrations = sqlite ? runDataMigrations(sqlite, DATA_MIGRATIONS, { log }) : { ran: [], applied: 0, known: DATA_MIGRATIONS.length };
+  const migrations = sqlite
+    ? runDataMigrations(sqlite, DATA_MIGRATIONS, { log, context: { sessionTtlMs } })
+    : { ran: [], applied: 0, known: DATA_MIGRATIONS.length };
 
   const users = createUsersRepository({ sqlite, nextId, persist, log, warn });
   const usersBoot = users.attach(db.users);
   Object.defineProperty(db, 'users', { value: users.view, writable: false, configurable: false, enumerable: true });
+
+  // Sessions (S2): live table, hashed tokens. The in-memory blob copy loaded
+  // before the migrations ran is discarded here; the migration imported the
+  // authoritative blob from the file inside its own transaction.
+  const sessions = createSessionsRepository({ sqlite, sessionTtlMs, log });
+  const sessionsBoot = sessions.attach();
+  Object.defineProperty(db, 'sessions', { value: sessions.view, writable: false, configurable: false, enumerable: true });
 
   // The shadow exists only on the SQLite engine (nothing to project into on
   // the JSON fallback), and projects during saves only when validation is
@@ -87,13 +101,17 @@ export function attachDataLayer({ db, store, nextId, persist, sessionTtlMs, shad
 
   return {
     users,
+    sessions,
     shadow,
     migrations,
-    boot: { users: usersBoot },
+    boot: { users: usersBoot, sessions: sessionsBoot },
     /** `details: true` adds row ids, refusal reasons and error text — admin and tooling only. */
     report: ({ details = false } = {}) => ({
       ...dataSchemaReport(sqlite, DATA_MIGRATIONS),
-      domains: { users: { rows: users.count(), mode: 'live' } },
+      domains: {
+        users: { rows: users.count(), mode: 'live' },
+        sessions: { rows: sqlite ? sessions.count() : 0, mode: 'live', lifetimeMs: sessions.ttlMs },
+      },
       shadow: shadow
         ? { ...shadow.report(db, { enabled: shadowEnabled, details }), store: publicStoreState(store.projectionState?.(), details) }
         : { mode: 'unavailable', note: 'The JSON fallback engine has no tables.' },

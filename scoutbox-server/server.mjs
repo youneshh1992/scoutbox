@@ -201,9 +201,10 @@ const dataLayer = attachDataLayer({
   shadowValidation: process.env.SCOUTBOX_SHADOW_VALIDATION === '1',
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
-const { users } = dataLayer;
+const { users, sessions } = dataLayer;
 if (dataLayer.boot.users.imported) console.log(`data layer: ${dataLayer.boot.users.imported} staff record(s) moved into org_users`);
-for (const sess of db.sessions) sess.sid ??= crypto.randomBytes(6).toString('hex');
+// Sessions are table-backed (S2): rows carry hashed tokens and a sid; there is
+// nothing to backfill on the in-memory copy, which is a read-only view now.
 
 // Normalise media items (older shapes) + load the seeded sample clips.
 for (const p of db.players) {
@@ -219,7 +220,7 @@ for (const p of db.players) {
 db.savedSearches ??= [];
 db.signings ??= [];
 db.pairingCodes ??= [];
-db.sessions ??= [];        // bearer-token sessions (all roles)
+db.sessions ??= [];        // bearer-token sessions (all roles): already the data layer's read-only view since S2, so this never assigns; kept as the store's inventory line
 db.outbox ??= [];          // mailer dev transport (+ delivery audit when live)
 db.pushLog ??= [];         // push dev transport (+ delivery audit when live)
 db.pushTokens ??= [];      // device push tokens, registered per user
@@ -540,7 +541,8 @@ app.post('/events/ticket', (req, res) => {
   if (!sseIdentityFor(session)) return res.status(401).json({ error: 'AUTH_REQUIRED', message: 'Log in first — live sync is scoped to your account.' });
   for (const [t, v] of sseTickets) if (v.expiresAt < Date.now()) sseTickets.delete(t);
   const ticket = newToken();
-  sseTickets.set(ticket, { token: session.token, expiresAt: Date.now() + SSE_TICKET_TTL_MS });
+  // The ticket names the session by its sid; no bearer token is held anywhere.
+  sseTickets.set(ticket, { sid: session.sid, expiresAt: Date.now() + SSE_TICKET_TTL_MS });
   res.json({ ticket, expiresInMs: SSE_TICKET_TTL_MS });
 });
 
@@ -551,8 +553,7 @@ app.get('/events', (req, res) => {
   }
   // Identity resolves at connect time from the live session, so logout or
   // suspension invalidates streams even inside a ticket's lifetime.
-  const found = db.sessions.find((s) => s.token === t.token);
-  const session = sessionLive(found) ? found : null;
+  const session = sessions.bySid(t.sid); // live sessions only; a revoked or expired one yields null
   const identity = sseIdentityFor(session);
   if (!identity) return res.status(401).json({ error: 'SESSION_INVALID', message: 'Log in again — this session is no longer valid.' });
   res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
@@ -640,42 +641,30 @@ function canonicalContractFor(playerId, now = Date.now(), { exceptOrgId = null }
 // in ONE place (`sessionLive`) and applied wherever a session is resolved:
 // the bearer lookup, the event-stream connect and a signed media link. A
 // session with no valid creation time is treated as expired (fail closed).
-const SESSION_TTL_MS = (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000;
-function sessionLive(s, now = Date.now()) {
-  if (!s) return false;
-  const born = Number(s.createdAt);
-  return Number.isFinite(born) && born > 0 && now - born < SESSION_TTL_MS;
-}
-function pruneExpiredSessions(now = Date.now()) {
-  const before = db.sessions.length;
-  db.sessions = db.sessions.filter((x) => sessionLive(x, now));
-  return before - db.sessions.length;
-}
+// S2: sessions live in the `sessions` table (repositories/sessions.mjs). The
+// lifetime rule is unchanged and lives in the repository; the bearer token is
+// never stored — the table holds its hash and `sessionFor` hashes what the
+// client presents. `createSession` is the only place a token exists server
+// side, and only as the value it returns to the login handler.
+const SESSION_TTL_MS = sessions.ttlMs;
+function sessionLive(s, now = Date.now()) { return sessions.isLive(s, now); }
+function pruneExpiredSessions(now = Date.now()) { return sessions.prune(now); }
 function createSession(kind, refId, extra = {}) {
-  pruneExpiredSessions();
-  const token = newToken();
   // sid: a non-secret session identifier that media URLs are bound to — the
   // URL dies with the session (logout) and is re-checked against the
   // session's CURRENT entitlement on every fetch.
-  db.sessions.push({ token, sid: crypto.randomBytes(6).toString('hex'), kind, refId, ...extra, createdAt: Date.now() });
-  persist();
-  return token;
+  return sessions.create(kind, refId, extra).token;
 }
 
 function sessionFor(req) {
   const header = req.headers.authorization ?? '';
   if (!header.startsWith('Bearer ')) return null;
-  const found = db.sessions.find((s) => s.token === header.slice(7)) ?? null;
-  if (found && !sessionLive(found)) { db.sessions = db.sessions.filter((s) => s !== found); persist(); return null; }
-  return found;
+  return sessions.byToken(header.slice(7));
 }
 
 app.post('/auth/logout', (req, res) => {
   const session = sessionFor(req);
-  if (session) {
-    db.sessions = db.sessions.filter((s) => s !== session);
-    persist();
-  }
+  if (session) sessions.revokeSid(session.sid);
   res.json({ ok: true });
 });
 
@@ -3984,7 +3973,7 @@ function deletePlayerData(playerId) {
   if (!p) return false;
   const at = Date.now();
   for (const m of p.media) storage.delete(m.id);
-  db.sessions = db.sessions.filter((s) => !(s.kind === 'player' && s.refId === playerId));
+  sessions.revokeFor('player', playerId);
   db.players = db.players.filter((x) => x.id !== playerId);
   // M23 P4A-D14: requests and trials become id-only tombstones rather than
   // vanishing. A recruitment case that reached a trial keeps the record that
@@ -4146,7 +4135,7 @@ adminRouter.get('/overview', (_req, res) => {
     invoices: db.invoices.length,
     emailsSent: db.outbox.length,
     pushesSent: db.pushLog.length,
-    sessions: db.sessions.length,
+    sessions: sessions.count(),
     storageEngine: store.engine,
     groomingEscalations: db.moderationLog.filter((m) => m.severity === 'grooming').length,
     persisted: snapshotLoaded,
@@ -4284,8 +4273,7 @@ app.get('/media/:id', (req, res) => {
   const sid = String(req.query.v ?? '');
   let session = null;
   if (sid && exp > Date.now() && String(req.query.s ?? '') === mediaSig(id, exp, sid)) {
-    session = db.sessions.find((x) => x.sid === sid) ?? null;
-    if (!sessionLive(session)) session = null;
+    session = sessions.bySid(sid); // null unless the session still exists and is live
   }
   // Path 2: a direct bearer fetch (native clients, tests).
   session ??= sessionFor(req);
@@ -4306,7 +4294,7 @@ function revokeOrgUserAccess(userId) {
   // Immediate, structural: sessions die (API + media on the next byte) and
   // any open SSE stream for that user goes silent via shouldDeliver's live
   // user check. The user ROW is kept (removedAt) so history stays attributed.
-  db.sessions = db.sessions.filter((s) => !(s.kind === 'org' && s.userId === userId));
+  sessions.revokeOrgUser(userId);
   for (const client of [...sseClients]) {
     if (client.identity?.kind === 'org' && client.identity.userId === userId) {
       try { client.res.end(); } catch { /* already gone */ }
@@ -4329,7 +4317,7 @@ registerM12({
 // Same module pattern under m13/. registerM13 returns the enriched context so
 // the login path above can reach the MFA rate-limit guards.
 const m13Ctx = registerM13({
-  db, users, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, users, sessions, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
@@ -4584,7 +4572,7 @@ m24Ctx = registerAgent({
 m25Ctx = registerCompliance({
   ...m19Ctx,
   isAdult, tsRouter, verificationProvider,
-  hashPassword, verifyPassword, createSession, sessionFor, devLogins: DEV_LOGINS,
+  hashPassword, verifyPassword, createSession, sessionFor, sessions, devLogins: DEV_LOGINS,
   agent: m24Ctx,
 });
 // The Agent core's hooks into the compliance lane (review items for

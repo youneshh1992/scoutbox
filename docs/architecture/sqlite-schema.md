@@ -1,8 +1,9 @@
 # ScoutBox relational SQLite schema
 
-Status: design proposed, executable DDL in `docs/architecture/sql/`, first implementation
-step (S1, core identity shadow) implemented and corrected after acceptance review (§5.0
-says exactly which parts are implemented, proposed, or waiting on a decision). Companion
+Status: design proposed, executable DDL in `docs/architecture/sql/`, implementation steps
+S0 (staff), S1 (core identity shadow, corrected after acceptance review) and S2 (sessions
+live, hashed tokens) done (§5.0 says exactly which parts are implemented, proposed, or
+waiting on a decision). Companion
 document: [`sqlite-migration-plan.md`](./sqlite-migration-plan.md). Written 10 October
 2026 on branch `feat/sqlite-schema`.
 
@@ -76,7 +77,7 @@ other worktrees (`/home/user/scoutbox` on `claude/desktop-project-migration-wyk3
 | All data in one in-memory object; SQLite used as a file (1)                | TRUE    | `store.mjs:59-110`; `collections(name, value)` |
 | Every save writes everything; chat send calls `persistNow()` (1)           | TRUE    | `store.mjs save()`; `server.mjs:521` broadcast → `persistNow()` after `postMessage` (`server.mjs:884-915`) |
 | Unbounded growth, e.g. profile views appended to the ledger (1)            | TRUE    | `ledgerAppend` `server.mjs:595-602`; ledger is never pruned; `exposureEvents` capped at 50k, `sourceChanges` at 20k, most audit arrays uncapped |
-| No indexes; session lookup scans the sessions array (1)                    | TRUE    | `sessionFor` `server.mjs:661-667` (`db.sessions.find`) |
+| No indexes; session lookup scans the sessions array (1)                    | TRUE at review; FIXED by S2 | was `sessionFor` (`db.sessions.find`); now `sessions.byToken` → `WHERE token_hash = ?` on the primary key (`repositories/sessions.mjs`) |
 | ~130 collections created with `db.x ??= []`, untyped nested records (1)    | TRUE    | 136 in `storeContract.mjs`; `server.mjs:202-235` and each module's `migrateMxx` |
 | Migration registry migrates JSON shapes, not tables (1)                    | TRUE    | `m182/migrations.mjs:83-622`; now complemented by `repositories/database.mjs` which migrates tables |
 | Fresh install starts with seeded demo data (1)                             | TRUE    | `server.mjs:115` `buildSeed()`; plan step S13 separates production init from demo seeding |
@@ -86,7 +87,7 @@ other worktrees (`/home/user/scoutbox` on `claude/desktop-project-migration-wyk3
 | SSO test IdP secret defaulted and registered in production (5)             | FIXED   | `3fe242b`: random per-boot secret, routes refused outside dev, `TEST_IDP_IN_PRODUCTION` boot refusal |
 | `trust proxy` not set (5)                                                   | FIXED   | `3fe242b`: `httpTrust.mjs`, `SCOUTBOX_TRUST_PROXY`, capability `proxy_trust` |
 | Identity verification always approves (5)                                   | TRUE    | `adapters.mjs:130-149` returns `approved: true` whatever the key; out of scope here (schema records provenance so a real provider can be plugged in, §9.5) |
-| Session tokens stored in plain text (5)                                     | TRUE today; schema fixes | `createSession` `server.mjs:650-659` stores the 48-hex token; target `sessions.token_hash` (S1 shadow already stores only the hash; S2 cuts over) |
+| Session tokens stored in plain text (5)                                     | TRUE at review; FIXED by S2 | was `createSession` storing the 48-hex token in the blob; now `sessions.create` stores `sha256(token)` only and returns the token once; the blob is retired by migration `0003` (plan S2 states the remaining *physical* remnants: free pages until `VACUUM`, WAL until checkpoint, pre-S2 backups) |
 | Responses filter by blocklist (`playerViewForOrg`) (6)                      | TRUE    | `server.mjs:1052` spreads the record then deletes fields; the schema cannot fix this, the repository layer's row-to-view mapping (S4) is where the allowlist goes |
 | No request validation library (6)                                           | TRUE    | `optText`/`reqText` helpers; STRICT tables and CHECK constraints give the storage layer its own validation |
 
@@ -115,7 +116,7 @@ them.
 | `orgs` | persistent | 01 (+04, 05) | `orgs`; nested `tactical` → `org_tactical_setups/roles/role_criteria/windows`, `squad[]` → `org_squad_members`, `lookingFor[]` → `org_looking_for`, `federationCheck` → `org_federation_checks` (04); `verification.domains[]` → `org_verified_domains` (05); `verification.revokedAt/orgType` → columns on `orgs`; `agencySettings` → 06 | S3 (scalars), S9/S10/S11 (nested) |
 | `guardians` | persistent | 01 | `guardians`; `childIds[]` → `guardian_children`; `coGuardians[]` derived from `co_guardian_of` | S4 (shadow since S1) |
 | `players` | persistent | 01 | `players` (scalars, `stats`, `medical.shared/conditionStatus`, `notificationPrefs`, `programme.track/startedAt`, `location`); `seasonHistory[]`, `badges[]`, `drills[]`, `attendance[]`, `timeline[]`, `media[]` (+`media[].tags` → `player_media_tags`), `medical.records[]`, `drillResults[]`, `activityLog[]`, `externalIds[]`, `programme.completed[]` → twelve `player_*` tables; `trialReports[]` derived (copy of `trials.report`) | S4 (scalars, shadow since S1), S5 (sub-records) |
-| `sessions` | temporary | 01 | `sessions` (token stored as `token_hash`) | S2 (shadow since S1) |
+| `sessions` | temporary | 01 | `sessions` (token stored as `token_hash`) | **S2 done** (live; blob retired by migration `0003`) |
 | `requests` | persistent | 02 | `recruitment_requests`, `request_trial_slots`; `keys` → `idempotency_keys` | S8 |
 | `trials` | persistent | 02 | `trials`, `trial_schedule_sessions`, `trial_session_evidence`, `trial_schedule_revisions`, `trial_attendance`, `trial_reminders`, `trial_day_staff`, `trial_day_consents`, `trial_day_checkins`, `trial_day_status_events`, `trial_reports` (the one copy; `players[].trialReports` is derived from it), `trial_history`; `keys` → `idempotency_keys` | S8 |
 | `recruitmentCases` | persistent | 02 | `recruitment_cases` (room columns), `case_tags`, `case_assignments`, `case_tasks`, `case_approvals`, `case_history`, `case_request_links`, `case_trial_links`, `case_decision_drafts`, `case_transaction_handoffs`, `case_budget_scenarios`, `case_budget_lines`, `case_budget_fx_assumptions`, `case_budget_actuals` | S8 |
@@ -387,8 +388,8 @@ this branch: 13 checks passed.
 
 | State | Tables | Where |
 |---|---|---|
-| **Implemented, live** (a repository owns the rows; the blob is gone) | 1: `org_users` | migration `0001` (S0) |
-| **Implemented, shadow** (tables exist with their final constraints; filled only when validation is switched on; nothing reads them) | 5: `orgs`, `guardians`, `players`, `guardian_children`, `sessions` | migration `0002` (S1) |
+| **Implemented, live** (a repository owns the rows; the blob is gone) | 2: `org_users`, `sessions` (`token_hash` only; the table was created by `0002` and became live, with the legacy blob imported and retired, in `0003`) | migrations `0001` (S0), `0003` (S2) |
+| **Implemented, shadow** (tables exist with their final constraints; filled only when validation is switched on; nothing reads them) | 4: `orgs`, `guardians`, `players`, `guardian_children` | migration `0002` (S1) |
 | **Proposed** (executable DDL, asserted to load, no migration, no repository) | 314 | files 01 (12 `player_*`), 02–08 |
 | Of the proposed, **blocked on an unresolved decision** | file 02 (55 tables): every `player_id` lacks a foreign key until the tombstone decision O1 is implemented at S4, and `org_id RESTRICT` depends on O2; `webhook_endpoints.secret` and `org_users.mfa_json` depend on O3; `exposure_events`, `webhook_deliveries`, `dispatches`, `outbox` retention depends on O4; `assessments` depends on O6; `second_look_items` key on O7; `representations` on O8; `agent_profile_facets.member_association` sentinel on O10 | §10, §12 |
 
@@ -615,10 +616,10 @@ DECISIONs, some already in force:
   file. The server has exactly one connection (`store.mjs`), set on open. Every tool that opens
   the file (`openStore` in persistence suites, the DDL test, the perf harness) sets it too,
   and `testCoreSchema.mjs` asserts that cascades actually fire so a missing pragma is caught.
-- **Busy timeout.** OPEN today: `store.mjs` does not set `PRAGMA busy_timeout`. With one
-  connection in one process it cannot matter, but the backup tool and the persistence suites
-  open a second connection on the same file. Plan step S2 adds `PRAGMA busy_timeout = 5000`
-  on open so a concurrent reader waits instead of failing with `SQLITE_BUSY`.
+- **Busy timeout.** DONE at S2: `store.mjs` sets `PRAGMA busy_timeout = 5000` on every
+  connection it opens, so a save that meets a writer in another connection or process waits
+  up to five seconds instead of failing with `SQLITE_BUSY`. `testSessions.mjs` proves it with
+  a second process holding a write transaction, and proves the failure without the pragma.
 - **Prepared statements.** Every repository prepares its statements once at construction
   (`repositories/users.mjs`, `repositories/shadow.mjs`) and binds parameters by name; no SQL is
   built from strings at request time. Table names in `DELETE FROM ${t}` in `shadow.mjs` come

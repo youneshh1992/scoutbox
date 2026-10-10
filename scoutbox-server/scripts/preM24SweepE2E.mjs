@@ -10,6 +10,7 @@
 //   P  production configuration (PM-1, PM-2) is proved in m181E2E §48; here a
 //      real production boot is refused without its own admin key.
 import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -78,10 +79,16 @@ const tFresh = await orgLogin();
 const ticket = (await j('POST', '/events/ticket', {}, tExpired)).body?.ticket;
 ok(!!ticket, 'setup: a ticket minted while the session was still live');
 await stop(S);
+// S2 of the data-layer plan: the snapshot's sessions carry a token HASH, never
+// the token, so the planted rows are found by hash. A row whose creation time
+// is missing or malformed cannot be represented in the sessions table at all;
+// the snapshot tool reports and skips it, which is the same fail-closed
+// outcome the bearer path must show (401) and the store must show (absent).
+const sessionHash = (token) => crypto.createHash('sha256').update(token).digest('hex');
 {
   const store = openStore(DATA); const snap = store.load();
-  const e = snap.db.sessions.find((x) => x.token === tExpired); e.createdAt = Date.now() - 31 * DAY;
-  const n = snap.db.sessions.find((x) => x.token === tNoBirth); delete n.createdAt;
+  const e = snap.db.sessions.find((x) => x.tokenHash === sessionHash(tExpired)); e.createdAt = Date.now() - 31 * DAY;
+  const n = snap.db.sessions.find((x) => x.tokenHash === sessionHash(tNoBirth)); delete n.createdAt;
   snap.db.sessions.push({ token: 'tok-garbage-birth', sid: 'sidgarbage01', kind: 'org', refId: 'org-eastport', userId: 'usr-1', createdAt: 'yesterday' });
   store.save(snap);
 }
@@ -103,8 +110,8 @@ ok(S.up, 'setup: rebooted on the planted store (an expired session, one with no 
 await stop(S);
 {
   const db = openStore(DATA).load().db;
-  neg(!db.sessions.some((x) => x.token === tExpired) && !db.sessions.some((x) => x.token === tNoBirth) && !db.sessions.some((x) => x.token === 'tok-garbage-birth'),
-    'S7 each expired session was removed from the store when it was presented');
+  neg(!db.sessions.some((x) => x.tokenHash === sessionHash(tExpired)) && !db.sessions.some((x) => x.tokenHash === sessionHash(tNoBirth)) && !db.sessions.some((x) => x.tokenHash === sessionHash('tok-garbage-birth')),
+    'S7 each expired session was removed from the store when it was presented (or could never be stored)');
 }
 // S8: an expired session nobody presents is pruned at the next login.
 {
@@ -117,13 +124,13 @@ await playerLogin('pl-kim');
 await stop(S);
 {
   const db = openStore(DATA).load().db;
-  neg(!db.sessions.some((x) => x.token === 'tok-stale-unused'), 'S8 an expired session nobody presents is pruned at the next login');
-  ok(db.sessions.some((x) => x.token === tFresh), 'S8b a live session survives the prune');
+  neg(!db.sessions.some((x) => x.tokenHash === sessionHash('tok-stale-unused')), 'S8 an expired session nobody presents is pruned at the next login');
+  ok(db.sessions.some((x) => x.tokenHash === sessionHash(tFresh)), 'S8b a live session survives the prune');
 }
 // S9: the lifetime is configurable; a short lifetime expires a session that is only hours old.
 {
   const store = openStore(DATA); const snap = store.load();
-  const f = snap.db.sessions.find((x) => x.token === tFresh); f.createdAt = Date.now() - 2 * DAY;
+  const f = snap.db.sessions.find((x) => x.tokenHash === sessionHash(tFresh)); f.createdAt = Date.now() - 2 * DAY;
   store.save(snap);
 }
 S = await boot({ SESSION_TTL_DAYS: '1' });

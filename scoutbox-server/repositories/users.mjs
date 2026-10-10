@@ -72,16 +72,29 @@ export const USERS_TABLE = {
     if (!tableExists(sqlite)) return null;
     return sqlite.prepare(`${SELECT} ORDER BY rowid`).all().map(toRow);
   },
-  /** Replace the table's contents with `rows`; the caller owns the transaction. */
+  /**
+   * Make the table's contents equal to `rows`; the caller owns the transaction.
+   * Rows are upserted in place and only ids absent from `rows` are deleted:
+   * `sessions.org_user_id` cascades on delete, so a blanket DELETE + INSERT
+   * would silently destroy every staff session whenever a snapshot tool wrote
+   * the users collection back. A staff member who is genuinely gone from the
+   * snapshot still takes their sessions with them, which is the intent.
+   */
   replace(sqlite, rows) {
     if (!tableExists(sqlite)) return false;
-    sqlite.exec('DELETE FROM org_users');
-    const insert = sqlite.prepare(`INSERT INTO org_users (id, org_id, name, role, email, sso_subject, created_at, removed_at, removed_by, provenance, mfa_json, delivery_prefs_json, extra_json)
-      VALUES (@id, @org_id, @name, @role, @email, @sso_subject, @created_at, @removed_at, @removed_by, @provenance, @mfa_json, @delivery_prefs_json, @extra_json)`);
+    const keep = [];
+    const upsert = sqlite.prepare(`INSERT INTO org_users (id, org_id, name, role, email, sso_subject, created_at, removed_at, removed_by, provenance, mfa_json, delivery_prefs_json, extra_json)
+      VALUES (@id, @org_id, @name, @role, @email, @sso_subject, @created_at, @removed_at, @removed_by, @provenance, @mfa_json, @delivery_prefs_json, @extra_json)
+      ON CONFLICT(id) DO UPDATE SET org_id = excluded.org_id, name = excluded.name, role = excluded.role, email = excluded.email, sso_subject = excluded.sso_subject,
+        created_at = excluded.created_at, removed_at = excluded.removed_at, removed_by = excluded.removed_by, provenance = excluded.provenance,
+        mfa_json = excluded.mfa_json, delivery_prefs_json = excluded.delivery_prefs_json, extra_json = excluded.extra_json`);
     for (const row of Array.isArray(rows) ? rows : []) {
       if (!isStaffRow(row)) continue;
-      insert.run(toParams(clone(row)));
+      upsert.run(toParams(clone(row)));
+      keep.push(row.id);
     }
+    const del = sqlite.prepare('DELETE FROM org_users WHERE id = ?');
+    for (const r of sqlite.prepare('SELECT id FROM org_users').all()) if (!keep.includes(r.id)) del.run(r.id);
     return true;
   },
 };
@@ -180,7 +193,15 @@ export function createUsersRepository({ sqlite, nextId, persist, log = () => {},
         for (const u of sqlite.prepare(`${SELECT} ORDER BY rowid`).all()) remember(toRow(u));
         return { engine: 'sqlite', loaded: rows.length, imported: legacy.length };
       }
-      if (stored.length && legacy.length) warn(`org_users: the table holds ${stored.length} row(s); a stale users blob with ${legacy.length} row(s) was ignored and will be deleted on the next save`);
+      if (stored.length && legacy.length) {
+        // The in-memory array may be the blob a data migration imported into
+        // the table a moment ago (S2 does this on a legacy upgrade): then it is
+        // superseded, not stale. Only rows the table does not hold are stale.
+        const ids = new Set(stored.map((r) => r.id));
+        const unknown = legacy.filter((u) => !ids.has(u.id)).length;
+        if (unknown) warn(`org_users: the table holds ${stored.length} row(s); a stale users blob with ${unknown} row(s) the table does not hold was ignored and will be deleted on the next save`);
+        else log(`org_users: the users blob (${legacy.length} row(s)) is superseded by the table`);
+      }
       for (const u of stored) remember(toRow(u));
       return { engine: 'sqlite', loaded: rows.length, imported: 0 };
     },

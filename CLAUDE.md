@@ -37,10 +37,14 @@ and design changes the Founder explicitly requests.
   `db.<collection>` is that repository's read-only view (a direct write
   throws), which existing readers may keep using until the domain's readers
   move to repository queries. Unmigrated domains keep working as they are
-  until their turn. Migrated so far: `users` (staff accounts, `org_users`);
-  `orgs`, `guardians`, `players`, `guardian_children` and `sessions` exist as a
-  shadow (blob still authoritative; the projection that fills them is off
-  unless `SCOUTBOX_SHADOW_VALIDATION=1`). Never put a whole-collection
+  until their turn. Migrated so far: `users` (staff accounts, `org_users`) and
+  `sessions` (`repositories/sessions.mjs`: tokens stored only as `token_hash`,
+  returned to the client once; every session read, creation and revocation
+  goes through the repository, never through `db.sessions`); `orgs`,
+  `guardians`, `players` and `guardian_children` exist as a shadow (blob still
+  authoritative; the projection that fills them is off unless
+  `SCOUTBOX_SHADOW_VALIDATION=1` and never touches live tables). Never log,
+  report or export a plain bearer token. Never put a whole-collection
   re-projection in the default save path. The target schema and the step
   order are `docs/architecture/sqlite-schema.md` and
   `docs/architecture/sqlite-migration-plan.md`; a new table must appear in the

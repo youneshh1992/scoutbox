@@ -54,7 +54,10 @@ function build() {
     const kind = pick(['player', 'org', 'guardian'], i);
     return { token: crypto.randomBytes(24).toString('hex'), sid: crypto.randomBytes(6).toString('hex'), kind, refId: kind === 'player' ? `pl-${i % PLAYERS}` : kind === 'org' ? `org-${i % ORGS}` : `gd-${i % GUARDIANS}`, ...(kind === 'org' ? { userId: `usr-${i % (ORGS * 3)}` } : {}), createdAt: now - (i % 20) * DAY };
   });
-  return { orgs, users, guardians, players, sessions, ledger: [], notifications: [] };
+  // `sessions_legacy` is the plain-token array the blob store used to hold; it
+  // is kept out of the saved snapshot (not a collection) and used only to time
+  // the old linear scan against the table lookup.
+  return { orgs, users, guardians, players, sessions: [], ledger: [], notifications: [], sessions_legacy: sessions };
 }
 
 const timed = (fn) => { const t = process.hrtime.bigint(); const out = fn(); return { ms: Number(process.hrtime.bigint() - t) / 1e6, out }; };
@@ -76,11 +79,13 @@ const withShadow = median(() => store.save(snapshot()));
 const projectionOnly = layer.shadow.last().durationMs;
 store.setProjection(null);
 
-const wanted = db.sessions[Math.floor(SESSIONS / 2)].token;
-const hash = crypto.createHash('sha256').update(wanted).digest('hex');
-const scan = median(() => db.sessions.find((s) => s.token === wanted), 50);
-const stmt = store.sqlite.prepare('SELECT kind, ref_id FROM sessions WHERE token_hash = ?');
-const lookup = median(() => stmt.get(hash), 50);
+// Sessions are live (S2): mint them through the repository (hashed in the
+// table) and compare the indexed lookup with the array scan the blob store did.
+const legacyArray = db.sessions_legacy; // the synthetic plain-token array (never stored)
+const minted = legacyArray.map((s) => layer.sessions.create(s.kind, s.refId, s.kind === 'org' ? { userId: s.userId } : {}).token);
+const wanted = minted[Math.floor(minted.length / 2)];
+const scan = median(() => legacyArray.find((s) => s.token === wanted), 50);
+const lookup = median(() => layer.sessions.byToken(wanted), 50);
 
 const report = layer.shadow.report(db, { enabled: false });
 console.log(`synthetic snapshot: ${ORGS} orgs, ${ORGS * 3} staff, ${GUARDIANS} guardians, ${PLAYERS} players, ${SESSIONS} sessions, ${(blobBytes / 1e6).toFixed(1)} MB of JSON`);

@@ -16,8 +16,9 @@
  * the database untouched.
  */
 
-export function runDataMigrations(sqlite, migrations, { now = Date.now(), log = () => {} } = {}) {
+export function runDataMigrations(sqlite, migrations, { now = Date.now(), log = () => {}, context = {} } = {}) {
   sqlite.exec('CREATE TABLE IF NOT EXISTS data_migrations (id TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);');
+  sqlite.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);');
   const applied = new Set(sqlite.prepare('SELECT id FROM data_migrations').all().map((r) => r.id));
   const ran = [];
   const sorted = [...migrations].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -25,7 +26,9 @@ export function runDataMigrations(sqlite, migrations, { now = Date.now(), log = 
     if (applied.has(step.id)) continue;
     sqlite.exec('BEGIN');
     try {
-      step.up(sqlite);
+      // `context` carries runtime configuration a data migration needs (the
+      // session lifetime, the clock); a migration never reads env itself.
+      step.up(sqlite, { now, ...context });
       sqlite.prepare('INSERT INTO data_migrations (id, applied_at) VALUES (?, ?)').run(step.id, now);
       sqlite.exec('COMMIT');
     } catch (err) {
@@ -56,5 +59,6 @@ export function dataSchemaReport(sqlite, migrations) {
   if (!sqlite) return { engine: 'memory', migrationsApplied: 0, migrationsKnown: migrations.length, tables: [] };
   const applied = sqlite.prepare('SELECT COUNT(*) AS n FROM data_migrations').get()?.n ?? 0;
   const tables = sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('collections', 'meta', 'data_migrations') AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((r) => r.name);
-  return { engine: 'sqlite', migrationsApplied: applied, migrationsKnown: migrations.length, tables };
+  const appliedIds = sqlite.prepare('SELECT id FROM data_migrations ORDER BY id').all().map((r) => r.id);
+  return { engine: 'sqlite', migrationsApplied: applied, migrationsKnown: migrations.length, migrations: appliedIds, tables };
 }
