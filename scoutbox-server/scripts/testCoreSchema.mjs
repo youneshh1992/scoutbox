@@ -477,6 +477,52 @@ test('validateShadow.mjs: runs the projection on a copy, reports every refused r
   assert.equal(again.sqlite.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0);
   again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
+test('regression: strict validation accepts a clean backup from before the save-revision field, refuses an invalid one, and never touches the source', () => {
+  const script = path.join(path.dirname(fileURLToPath(import.meta.url)), 'validateShadow.mjs');
+  const run = (dir, ...flags) => {
+    try { return { code: 0, out: execFileSync(process.execPath, [script, dir, '--json', ...flags], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) }; }
+    catch (err) { return { code: err.status, out: err.stdout }; }
+  };
+  const fixture = (mutate) => {
+    const dir = tempDir('shadow-legacy');
+    const store = openStore(dir, { tableBacked: TABLE_BACKED });
+    const db = { orgs: [{ id: 'org-a', name: 'A', type: 'club', level: 'pro', plan: 'Pro', country: 'GB' }], guardians: [], players: [], sessions: [], users: [] };
+    attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+    mutate?.(db);
+    store.save({ savedAt: 1, idCounter: 1000, db });
+    return { dir, store };
+  };
+  const digest = (dir) => { const s = openStore(dir, { tableBacked: TABLE_BACKED }); s.sqlite.exec('PRAGMA wal_checkpoint(TRUNCATE)'); s.sqlite.close(); return sha256(fs.readFileSync(path.join(dir, 'scoutbox.db'))); };
+  // 1. A clean legacy backup: no meta.saveSeq (saved by a build before the revision field).
+  const legacy = fixture();
+  legacy.store.sqlite.exec("DELETE FROM meta WHERE key = 'saveSeq'"); legacy.store.sqlite.close();
+  const before = digest(legacy.dir);
+  const r1 = run(legacy.dir, '--strict');
+  const j1 = JSON.parse(r1.out);
+  assert.equal(r1.code, 0, 'a clean legacy backup passes the strict gate');
+  assert.equal(j1.report.status, SHADOW_STATUS.COMPLETE); assert.equal(j1.legacyRevisionInitialised, true);
+  assert.equal(digest(legacy.dir), before, 'the source is byte-identical');
+  const src = openStore(legacy.dir, { tableBacked: TABLE_BACKED });
+  assert.equal(src.sqlite.prepare("SELECT COUNT(*) AS n FROM meta WHERE key = 'saveSeq'").get().n, 0, 'the revision was initialised on the copy only');
+  src.sqlite.close();
+  // 2. An invalid legacy backup (a refused row) still fails the strict gate.
+  const bad = fixture((db) => db.orgs.push({ id: 'org-bad', name: 'B', type: 'club', level: 'agent', plan: 'Pro', country: 'GB' }));
+  bad.store.sqlite.exec("DELETE FROM meta WHERE key = 'saveSeq'"); bad.store.sqlite.close();
+  const r2 = run(bad.dir, '--strict');
+  assert.equal(r2.code, 3); assert.equal(JSON.parse(r2.out).report.status, SHADOW_STATUS.PARTIAL);
+  assert.equal(JSON.parse(r2.out).report.skipped, 1);
+  // 3. A current backup (revision present) passes without any initialisation.
+  const current = fixture(); current.store.sqlite.close();
+  const r3 = run(current.dir, '--strict');
+  assert.equal(r3.code, 0); assert.equal(JSON.parse(r3.out).legacyRevisionInitialised, false); assert.equal(JSON.parse(r3.out).report.status, SHADOW_STATUS.COMPLETE);
+  // 4. The running server's own report keeps calling a revision-less file stale: no weakening of live freshness.
+  const live = fixture(); live.store.sqlite.exec("DELETE FROM meta WHERE key = 'saveSeq'");
+  const liveShadow = createCoreIdentityShadow({ sqlite: live.store.sqlite, sessionTtlMs: TTL });
+  live.store.sqlite.exec("INSERT INTO meta (key, value) VALUES ('shadowSummary', '{\"at\":1,\"savedAt\":1,\"saveSeq\":null,\"durationMs\":0,\"tables\":{}}')");
+  assert.notEqual(liveShadow.report({ orgs: [] }).status, SHADOW_STATUS.COMPLETE);
+  live.store.sqlite.close();
+  for (const d of [legacy.dir, bad.dir, current.dir, live.dir]) fs.rmSync(d, { recursive: true, force: true });
+});
 test('the shadow table list and the store contract agree on what is shadowed', () => {
   assert.deepEqual([...CORE_SHADOW_TABLES], ['orgs', 'guardians', 'players', 'guardian_children', 'sessions']);
 });
