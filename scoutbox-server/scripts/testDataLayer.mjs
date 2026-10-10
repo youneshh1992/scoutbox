@@ -66,7 +66,8 @@ test('schema report: names tables and counts, never rows', () => {
     migrations: ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live'],
     tables: ['guardian_children', 'guardians', 'org_users', 'orgs', 'players', 'sessions'],
   });
-  assert.deepEqual(dataSchemaReport(null, DATA_MIGRATIONS), { engine: 'memory', migrationsApplied: 0, migrationsKnown: DATA_MIGRATIONS.length, tables: [] });
+  // There is no in-memory engine to report on: a missing connection is a programming error, not a mode.
+  assert.throws(() => dataSchemaReport(null, DATA_MIGRATIONS), /needs a SQLite connection/);
 });
 
 // --------------------------------------------------------- read-only views
@@ -192,14 +193,12 @@ test('repository: the legacy blob array is imported once, with every field kept,
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 2);
   assert.equal(third.byId('usr-ghost'), null);
 });
-test('repository: without sqlite the same API runs in memory and asks the snapshot to persist', () => {
-  let persisted = 0;
-  const repo = createUsersRepository({ sqlite: null, nextId, persist: () => { persisted++; } });
-  assert.deepEqual(repo.attach([{ id: 'usr-9', orgId: 'o', name: 'Z', role: 'Scout', createdAt: 1 }]), { engine: 'memory', loaded: 1, imported: 0 });
-  const u = repo.insert({ orgId: 'o', name: 'Y', role: 'Scout' });
-  repo.update(u.id, { role: 'Manager' });
-  assert.equal(persisted, 2);
-  assert.equal(repo.byId('usr-9').name, 'Z');
+test('repository: without sqlite there is no in-memory mode — construction refuses with a clear error before any data is touched', () => {
+  // S2 removed the JSON/in-memory fallback: sessions cannot be kept outside a
+  // table without storing plain tokens again, so the whole data layer requires
+  // node:sqlite and says so (store.mjs refuses to open at all without it).
+  assert.throws(() => createUsersRepository({ sqlite: null, nextId }), /needs a SQLite connection/);
+  assert.throws(() => attachDataLayer({ db: { users: [] }, store: { sqlite: null }, nextId, sessionTtlMs: 1000 }), /needs a store with a SQLite connection/);
 });
 
 // ------------------------------------------------------ attach + store

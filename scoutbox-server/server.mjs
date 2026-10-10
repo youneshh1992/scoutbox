@@ -137,6 +137,9 @@ function loadSnapshot() {
     snapshotLoaded = true;
     console.log(`snapshot loaded (${store.engine}): ${db.players.length} players, ${db.ledger.length} ledger rows`);
   } catch (err) {
+    // A legacy db.json that could not be imported is a snapshot that exists
+    // and must not be overwritten by a seed save on first boot: stop here.
+    if (err?.code === 'LEGACY_IMPORT_FAILED') throw err;
     console.error('snapshot load failed — running from seed:', err.message);
   }
 }

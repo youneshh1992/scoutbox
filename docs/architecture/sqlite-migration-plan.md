@@ -423,7 +423,61 @@ performance, existing tests, what this plan is not).
   collection saves as before.
 - **Commit boundary.** `abc0f6a` (S1 compatibility correction: strict validation of
   pre-revision backups) then one commit for S2 (migration, repository, call sites, rollback
-  tool, tests, perf harness, documentation).
+  tool, tests, perf harness, documentation), then one correction commit after the
+  independent review of `6dca457` (below).
+- **Review corrections after `6dca457`** (each reproduced by the reviewer, each with a
+  regression test that failed on `6dca457` first; `scripts/testSessions.mjs` now has 22
+  checks):
+  1. *Snapshot tools promoted the S1 shadow table.* `SESSIONS_TABLE.read/replace` checked
+     only that the `sessions` table existed, which it has since migration `0002`; on an S1
+     file a snapshot tool read the empty shadow instead of the blob and its save deleted the
+     blob with no cutover record. Now `repositories/database.mjs` `migrationApplied()` is the
+     one authority: `read` returns null and `replace` returns false until
+     `0003_sessions_live` is recorded (`USERS_TABLE` keys on `0001_org_users` the same way),
+     so before the cutover the blob is read and written and the table is left alone whatever
+     it holds, and the rollback copy (record removed, empty blob) reads and writes the blob
+     until the S2 build re-upgrades it. Tested for an empty shadow, a stale populated shadow,
+     a valid blob, the cutover, and rollback output before and after re-upgrade.
+  2. *Legacy `db.json` import lost sessions.* In server mode `store.load()` imported
+     `db.json` through the server-mode save, which skips table-backed collections, so the
+     sessions (and staff) never reached the file that migration `0003` reads; the migration
+     recorded an empty cutover and the valid token stopped resolving while `db.json` had been
+     renamed. Now the import writes every collection with snapshot semantics (a blob for a
+     domain not yet cut over, its table otherwise) and commits before the rename, so the
+     cutover's authoritative input holds everything the JSON held; a failed import throws
+     `LEGACY_IMPORT_FAILED`, leaves `db.json` in place and is fatal in `server.mjs` (never
+     "run from seed"). Tested from a real `db.json` at the store + data-layer level (player
+     and org sessions, staff import, unsupported row → abort with every row preserved in the
+     file and in `db.json.migrated`, identical abort on retry, success once resolved) and
+     through the spawned server.
+  3. *Snapshot saves silently dropped invalid sessions.* `replace` deleted the rows, skipped
+     validation failures and swallowed insert errors; the count it returned was discarded.
+     Now every row is validated first (shape, duplicate sid, duplicate token) and the first
+     problem throws, naming the sid and reason and never a token; a foreign-key failure at
+     insert throws too; the store's transaction rolls back, so the stored sessions and every
+     unrelated change in the same save are untouched. The former "junk is skipped" test was
+     replaced; new tests cover malformed rows, duplicate ids and hashes, a staff relationship
+     the snapshot itself breaks, and a valid hashed round trip. Removal is explicit only.
+  4. *The SQLite-unavailable path was broken.* `createSessionsRepository({ sqlite: null })`
+     attached as `memory` and crashed on `create`; the store's JSON fallback would have kept
+     plain tokens. Decision: node:sqlite is **required**. `openStore` throws
+     `SQLITE_REQUIRED` before touching the data directory (the process stops at startup),
+     the repositories and `attachDataLayer` refuse a missing connection, `package.json`
+     declares `engines.node >= 22.5.0`, and `OPERATIONS.md` says so. Tested by starting the
+     store and the server with `--no-experimental-sqlite`.
+  Two consequences the strict saves surfaced in the battery, fixed in the same commit:
+  `POST /admin/backup` exported the hash-free `db.sessions` view, so restoring a backup into an
+  empty directory now aborted the cutover ("no token" on every row) where it used to lose the
+  sessions silently; the backup now writes `sessions.exportRows()` (hashes, never tokens) and a
+  restore keeps every session (tested through the real server: backup → copy → boot → both
+  tokens 200). `preM24SweepE2E` planted sessions with a missing or malformed creation time
+  through a snapshot save and relied on the skip; its S4/S7 checks now assert that such a save is
+  refused whole, names the sid and never the token, leaves the stored sessions intact and
+  honoured, and that the never-stored token answers 401 (40 checks, up from 36).
+  Verification fixes in the same commit: the busy-timeout test runs under the asynchronous
+  harness (its check counts only after the assertions pass); the server test carries a
+  deterministic media fixture and requires the signed link, a 200 with the fixture bytes, a
+  401 for a re-pointed sid and a 401 after logout.
 
 ### S3 — Organisations cut over (+ `org_users` rebuild with FK, org tombstone)
 

@@ -437,10 +437,10 @@ ok(r.body.find((f) => f.id === friendlyId)?.responses.some((x) => /happy to trav
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(SERVER_DIR, 'data');
 let stored = false;
 for (let i = 0; i < 20 && !stored; i++) {
-  stored = fs.existsSync(path.join(DATA_DIR, 'scoutbox.db')) || fs.existsSync(path.join(DATA_DIR, 'db.json'));
+  stored = fs.existsSync(path.join(DATA_DIR, 'scoutbox.db'));
   if (!stored) await new Promise((res) => setTimeout(res, 500));
 }
-ok(stored, 'snapshot persisted (SQLite, or JSON fallback on old Node)');
+ok(stored, 'snapshot persisted to scoutbox.db (node:sqlite is required; there is no JSON fallback)');
 ok(fs.existsSync(path.join(DATA_DIR, 'media')), 'media blobs live on object storage (disk), outside the database');
 
 console.log(`\n${passed} API checks passed`);

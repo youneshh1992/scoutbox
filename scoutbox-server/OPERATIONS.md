@@ -19,6 +19,14 @@ only), `M13_QUIET_LOGS=1` (suppresses per-request log lines),
 fixture / simulates its outage — test environments only; production registers
 are `not_configured`), `ALLOW_DEV_LOGINS` / `NODE_ENV` (see M11).
 
+## Runtime requirement: node:sqlite
+The server needs Node.js 22.5 or later with the built-in `node:sqlite` module
+(on by default; `package.json` declares `engines.node >= 22.5.0`). There is
+**no JSON or in-memory fallback**: without the module the process stops at
+startup with `SQLITE_REQUIRED` before opening or writing anything in
+`DATA_DIR`. Sessions are stored only as token hashes in a table, which a JSON
+snapshot could not hold without keeping plain tokens again.
+
 ## Data layer
 `DATA_DIR/scoutbox.db` holds two kinds of data. Collections that have not yet
 moved are stored as one JSON blob each in the `collections` table, saved as a
@@ -29,9 +37,30 @@ inside a transaction the moment a change happens, and recorded in
 `migrations`, `domains`). Moved so far: staff accounts (`users` → `org_users`,
 migration `0001`) and sessions (`sessions`, migration `0003`, see "Sessions"
 below). A first boot after a move imports the old blob into the table and
-retires the blob; a backup `db.json` restores through the same path. Tools that
-read or write the file as one snapshot (`openStore(dir)` without options) see
-every collection in the shape the server sees, tables included.
+retires the blob. Tools that read or write the file as one snapshot
+(`openStore(dir)` without options) see every collection in the shape the
+server sees, tables included. Whether such a tool reads a collection from its
+table or from its blob is decided by the domain's record in `data_migrations`,
+never by whether the table exists or has rows: before the record the blob is
+authoritative and the table is left alone (it may be an S1 shadow or a
+rollback copy's emptied table); after it the blob is gone.
+
+- **Legacy `db.json`.** A pre-SQLite snapshot found in `DATA_DIR` with an
+  empty database is imported on the first boot: every collection it holds is
+  written into the database first (table-backed collections as blobs when
+  their domain has not cut over yet, so the cutover migrations import them
+  from the file; into their tables when it has), and only after that commit is
+  the file renamed `db.json.migrated`. If the import fails the boot stops with
+  `LEGACY_IMPORT_FAILED`, `db.json` stays in place and nothing is written; the
+  server never starts from seed over a snapshot it could not import.
+- **Snapshot saves are strict.** A tool writing a snapshot back (restore,
+  fixture) has every table-backed row validated first. One invalid or
+  conflicting row (malformed session, duplicate session id or token, a staff
+  relationship the snapshot itself breaks) rejects the **whole save**: the
+  transaction rolls back and every collection, sessions included, stays as it
+  was. Nothing is coerced, repaired or dropped; the error names the session id
+  and the reason, never a token. Removing a session is an explicit act (sign
+  out, revocation, or a snapshot that no longer lists it).
 
 A third kind exists during the migration: *shadow* tables (`orgs`, `guardians`,
 `players`, `guardian_children` since migration `0002`). The blob is still the
@@ -126,10 +155,22 @@ and event-stream tickets) stay valid across the cutover and every restart.
   `PRAGMA busy_timeout = 5000`, so a save meeting another writer (a backup
   tool, a second process) waits up to five seconds instead of failing.
 - **Snapshot tools and backups.** In snapshot mode (`openStore(dir)` without
-  options) `db.sessions` is the table's rows with `tokenHash`, never `token`;
-  saving writes them back by hash. Writing the `users` collection back upserts
-  staff rows and deletes only ids absent from the snapshot, so a restore cannot
-  cascade-delete valid sessions through `sessions.org_user_id`.
+  options) `db.sessions` is the table's rows with `tokenHash`, never `token`,
+  once the cutover record `0003_sessions_live` exists; before it (an S1 file,
+  or a rollback copy before re-upgrade) the tool reads and writes the legacy
+  `sessions` blob and ignores the table. Saving writes hashed rows back by
+  hash and rejects the whole save on any invalid or conflicting row (see
+  "Snapshot saves are strict" above). Writing the `users` collection back
+  upserts staff rows and deletes only ids absent from the snapshot, so a
+  restore cannot cascade-delete valid sessions through `sessions.org_user_id`;
+  a snapshot that lists a session for a staff member it no longer contains is
+  rejected as a whole.
+- **Admin backups (`POST /admin/backup`).** The backup's `db.json` carries the
+  sessions in their stored form, token hashes only (the hash-free in-memory
+  view could not be restored), so a restore into an empty directory keeps
+  every session alive exactly as a copy of the database file would. Before S2
+  the same file carried plain tokens; a backup still deserves the same care as
+  the live directory, as its manifest says.
 
 The design and the cutover order are in `docs/architecture/sqlite-schema.md`
 and `docs/architecture/sqlite-migration-plan.md`.

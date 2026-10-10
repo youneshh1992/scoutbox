@@ -18,13 +18,24 @@
  * blob store did, where the TTL was read at boot and applied to every lookup.
  *
  * Rows that cannot be represented (no token, unknown kind, non-integer
- * creation time, an org session without a staff row) are refused: by the
- * cutover migration with an abort (repositories/migrations/0003_sessions_live.mjs)
- * and by the snapshot tooling with a skip it reports. The server itself never
- * creates such a row.
+ * creation time, an org session without a staff row, a duplicate sid or
+ * token) are refused: by the cutover migration with an abort
+ * (repositories/migrations/0003_sessions_live.mjs) and by the snapshot tooling
+ * with an error that rolls the whole save back. Nothing is coerced, repaired
+ * or dropped. The server itself never creates such a row.
+ *
+ * Whether the table is authoritative is decided by the cutover record in
+ * `data_migrations`, never by the table's existence or contents: the S1
+ * shadow created the table (migration 0002) long before S2 (0003) made it the
+ * source of truth, and a rollback copy has the table but not the record.
+ *
+ * node:sqlite is required; there is no in-memory or JSON fallback for
+ * sessions (one would have to keep plain tokens somewhere, which is the very
+ * thing S2 removes).
  */
 import crypto from 'node:crypto';
 import { readonlyView } from './readonly.mjs';
+import { migrationApplied } from './database.mjs';
 
 export const SESSION_KINDS = Object.freeze(['player', 'guardian', 'org', 'ts_reviewer']);
 export const SESSION_VIAS = Object.freeze(['sso']);
@@ -74,46 +85,69 @@ const toRow = (r) => {
   if (r.via != null) row.via = r.via;
   return row;
 };
-const tableExists = (sqlite) => !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sessions'").get();
+/** The table is the source of truth only once the cutover migration is recorded. */
+const cutOver = (sqlite) => migrationApplied(sqlite, SESSIONS_CUTOVER_MIGRATION);
 const readTtl = (sqlite) => Number(sqlite.prepare("SELECT value FROM meta WHERE key = 'sessionTtlMs'").get()?.value) || DEFAULT_SESSION_TTL_MS;
+const label = (raw, i) => (raw && typeof raw === 'object' && typeof raw.sid === 'string' ? `sid ${raw.sid}` : `entry #${i}`);
 
 /**
  * Whole-table access for tools that treat the file as one snapshot (backups,
- * restores, the persistence suites). Rows carry `tokenHash`, never a token: a
- * hash cannot be turned back into a bearer token, so a snapshot that is
- * written back keeps exactly the sessions it read. A tool may also supply a
- * plain `token` on a row it fabricates (test fixtures); it is hashed on the
- * way in and never stored.
+ * restores, the persistence suites). Before the cutover record exists both
+ * methods decline (`null` / `false`) so the caller keeps reading and writing
+ * the legacy `sessions` blob, which is still authoritative then — whatever an
+ * S1 shadow projection may have left in the table. Afterwards rows carry
+ * `tokenHash`, never a token: a hash cannot be turned back into a bearer
+ * token, so a snapshot that is written back keeps exactly the sessions it
+ * read. A tool may also supply a plain `token` on a row it fabricates (test
+ * fixtures); it is hashed on the way in and never stored.
  */
 export const SESSIONS_TABLE = {
   name: 'sessions',
   read(sqlite) {
-    if (!tableExists(sqlite)) return null;
+    if (!cutOver(sqlite)) return null;
     return sqlite.prepare('SELECT token_hash, sid, kind, ref_id, org_user_id, via, created_at, expires_at FROM sessions ORDER BY created_at, sid').all()
       .map((r) => ({ ...toRow(r), tokenHash: r.token_hash }));
   },
-  /** Replace the table's contents with `rows`; the caller owns the transaction. Unrepresentable rows are skipped and counted. */
-  replace(sqlite, rows, { warn = () => {} } = {}) {
-    if (!tableExists(sqlite)) return false;
+  /**
+   * Make the table's contents equal to `rows`; the caller owns the transaction.
+   * Every row is validated first and the first problem (an unrepresentable
+   * row, a duplicate sid or token, a staff relationship the snapshot itself
+   * breaks) THROWS, naming the sid and the reason and never a token, so the
+   * caller's transaction rolls back and the sessions already stored, and every
+   * other collection in the same save, stay exactly as they were. Removing a
+   * session is an explicit act (the repository's revoke methods, or a snapshot
+   * that simply no longer lists it), never a side effect of a bad row.
+   */
+  replace(sqlite, rows) {
+    if (!cutOver(sqlite)) return false;
+    if (!Array.isArray(rows)) throw new TypeError('sessions: the snapshot "sessions" collection is not an array');
     const ttl = readTtl(sqlite);
     const orgUserExists = (id) => !!sqlite.prepare('SELECT 1 FROM org_users WHERE id = ?').get(id);
+    const valid = [];
+    const seenHash = new Set();
+    const seenSid = new Set();
+    rows.forEach((raw, i) => {
+      const v = validateSessionRow(raw, { orgUserExists });
+      if (!v.ok) throw new Error(`sessions: snapshot row ${label(raw, i)} was refused (${v.reason}); the save was rolled back and no session was changed`);
+      if (seenHash.has(v.row.tokenHash)) throw new Error(`sessions: snapshot row ${label(raw, i)} was refused (duplicate token); the save was rolled back and no session was changed`);
+      if (seenSid.has(v.row.sid)) throw new Error(`sessions: snapshot row ${label(raw, i)} was refused (duplicate sid); the save was rolled back and no session was changed`);
+      seenHash.add(v.row.tokenHash); seenSid.add(v.row.sid);
+      valid.push(v.row);
+    });
     sqlite.exec('DELETE FROM sessions');
     const insert = sqlite.prepare('INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, via, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-    let skipped = 0;
-    for (const raw of Array.isArray(rows) ? rows : []) {
-      const v = validateSessionRow(raw, { orgUserExists });
-      if (!v.ok) { skipped += 1; warn(`sessions: a snapshot row was not written (${v.reason})`); continue; }
-      const r = v.row;
+    for (const r of valid) {
       try { insert.run(r.tokenHash, r.sid, r.kind, r.refId, r.userId, r.via, r.createdAt, r.createdAt + ttl); }
-      catch (err) { skipped += 1; warn(`sessions: a snapshot row was not written (${String(err?.message ?? err).replace(/^SQLITE_\w+:\s*/, '')})`); }
+      catch (err) { throw new Error(`sessions: snapshot row sid ${r.sid} could not be stored (${String(err?.message ?? err).replace(/^SQLITE_\w+:\s*/, '')}); the save was rolled back and no session was changed`); }
     }
-    return { written: true, skipped };
+    return true;
   },
 };
 
 export function createSessionsRepository({ sqlite, sessionTtlMs = DEFAULT_SESSION_TTL_MS, now = Date.now, newToken = () => crypto.randomBytes(24).toString('hex'), newSid = () => crypto.randomBytes(6).toString('hex'), log = () => {} }) {
+  if (!sqlite) throw new TypeError('the sessions repository needs a SQLite connection (node:sqlite); sessions have no in-memory or JSON fallback');
   if (!Number.isFinite(sessionTtlMs) || sessionTtlMs <= 0) throw new TypeError('sessionTtlMs must be a positive number of milliseconds');
-  const stmt = sqlite ? {
+  const stmt = {
     byHash: sqlite.prepare(`${SELECT} WHERE token_hash = ?`),
     bySid: sqlite.prepare(`${SELECT} WHERE sid = ?`),
     insert: sqlite.prepare('INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, via, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
@@ -131,7 +165,7 @@ export function createSessionsRepository({ sqlite, sessionTtlMs = DEFAULT_SESSIO
     metaGet: sqlite.prepare('SELECT value FROM meta WHERE key = ?'),
     metaPut: sqlite.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
     cutover: sqlite.prepare('SELECT 1 FROM data_migrations WHERE id = ?'),
-  } : null;
+  };
 
   const live = (row, at = now()) => !!row && Number.isInteger(row.createdAt) && row.createdAt > 0 && at - row.createdAt < sessionTtlMs;
 
@@ -140,7 +174,6 @@ export function createSessionsRepository({ sqlite, sessionTtlMs = DEFAULT_SESSIO
   // this exists so snapshot contracts and any straggling reader keep working.
   const mirror = [];
   const refresh = () => {
-    if (!stmt) return;
     let rows;
     try { rows = stmt.all.all(); } catch { return; } // connection closed (a tool serialising after close): keep the last rows
     mirror.length = 0;
@@ -155,7 +188,6 @@ export function createSessionsRepository({ sqlite, sessionTtlMs = DEFAULT_SESSIO
 
     /** Boot: refuse to run without the cutover record; align expires_at with the configured lifetime. */
     attach() {
-      if (!stmt) return { engine: 'memory', rows: 0 };
       if (!stmt.cutover.get(SESSIONS_CUTOVER_MIGRATION)) throw new Error(`sessions: the cutover record ${SESSIONS_CUTOVER_MIGRATION} is missing from data_migrations; the table cannot be trusted as the source of truth`);
       const stored = Number(stmt.metaGet.get('sessionTtlMs')?.value) || null;
       if (stored !== sessionTtlMs) {
@@ -205,6 +237,13 @@ export function createSessionsRepository({ sqlite, sessionTtlMs = DEFAULT_SESSIO
     listFor: (kind, refId) => stmt.listFor.all(kind, refId).map(toRow),
     listOrgUser: (userId) => stmt.listOrgUser.all(userId).map(toRow),
     count: () => stmt.count.get().n,
+    /**
+     * Every stored row in snapshot form (with `tokenHash`, never a token), for
+     * the admin backup: a restore of that snapshot keeps the sessions alive
+     * exactly as a copy of the database file would. The hash-free `view` is
+     * for routes and reports; it cannot round-trip, so it must not be exported.
+     */
+    exportRows: () => SESSIONS_TABLE.read(sqlite) ?? [],
 
     revokeSid: (sid) => stmt.delSid.run(sid).changes,
     revokeToken: (token) => (typeof token === 'string' && token ? stmt.delHash.run(sha256(token)).changes : 0),

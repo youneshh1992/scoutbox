@@ -435,7 +435,11 @@ export function registerEnterprise(ctx) {
     //    DATA_DIR at a copy of this directory".
     persistNow();
     const snapshotPath = path.join(dir, 'db.json');
-    fs.writeFileSync(snapshotPath, JSON.stringify({ savedAt: Date.now(), idCounter: ctx.currentIdCounter(), db }));
+    // Sessions are exported in their stored form (token hashes, never tokens):
+    // the in-memory `db.sessions` view is hash-free by design and could not be
+    // restored, so a restore would have refused or lost every session. The
+    // hashes are exactly what the database file holds, under the same care.
+    fs.writeFileSync(snapshotPath, JSON.stringify({ savedAt: Date.now(), idCounter: ctx.currentIdCounter(), db: { ...db, sessions: sessions.exportRows() } }));
     // 2. Media files.
     const mediaSrc = path.join(DATA_DIR, 'media');
     const mediaDst = path.join(dir, 'media');

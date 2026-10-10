@@ -8,12 +8,12 @@
  * the exact row shapes routes have always seen: a field that is unset is
  * absent, not null, so no response changes shape.
  *
- * Without node:sqlite (the JSON fallback engine) the repository keeps the
- * same API over the snapshot store, so behaviour is identical and only
- * durability differs.
+ * node:sqlite is required: the repository has no in-memory engine, and
+ * `createUsersRepository` refuses a missing connection (store.mjs refuses to
+ * open at all without node:sqlite, before any data is touched).
  */
 import { readonlyView } from './readonly.mjs';
-import { transaction } from './database.mjs';
+import { transaction, migrationApplied } from './database.mjs';
 
 /** Fields with a column of their own; everything else is kept in extra_json. */
 const COLUMNS = {
@@ -59,17 +59,18 @@ const clone = (v) => (v === null || typeof v !== 'object' ? v : JSON.parse(JSON.
 /** A staff row from a snapshot is one with an id, an organisation and a name; anything else is not a staff row. */
 const isStaffRow = (u) => !!u && typeof u === 'object' && typeof u.id === 'string' && u.id && typeof u.orgId === 'string' && u.orgId && typeof u.name === 'string' && u.name;
 
-const tableExists = (sqlite) => !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'org_users'").get();
+/** The table is authoritative once migration 0001 is recorded (it created the table and cut the domain over in one step). */
+const cutOver = (sqlite) => migrationApplied(sqlite, '0001_org_users');
 
 /**
  * Whole-table access for tools that treat the database file as one snapshot
- * (backups, restores, the persistence suites' fixtures). Returns null when the
- * table does not exist yet, so a caller can fall back to the blob.
+ * (backups, restores, the persistence suites' fixtures). Returns null before
+ * the cutover record exists, so a caller keeps using the blob.
  */
 export const USERS_TABLE = {
   name: 'users',
   read(sqlite) {
-    if (!tableExists(sqlite)) return null;
+    if (!cutOver(sqlite)) return null;
     return sqlite.prepare(`${SELECT} ORDER BY rowid`).all().map(toRow);
   },
   /**
@@ -81,7 +82,7 @@ export const USERS_TABLE = {
    * snapshot still takes their sessions with them, which is the intent.
    */
   replace(sqlite, rows) {
-    if (!tableExists(sqlite)) return false;
+    if (!cutOver(sqlite)) return false;
     const keep = [];
     const upsert = sqlite.prepare(`INSERT INTO org_users (id, org_id, name, role, email, sso_subject, created_at, removed_at, removed_by, provenance, mfa_json, delivery_prefs_json, extra_json)
       VALUES (@id, @org_id, @name, @role, @email, @sso_subject, @created_at, @removed_at, @removed_by, @provenance, @mfa_json, @delivery_prefs_json, @extra_json)
@@ -99,14 +100,15 @@ export const USERS_TABLE = {
   },
 };
 
-export function createUsersRepository({ sqlite, nextId, persist, log = () => {}, warn = () => {} }) {
+export function createUsersRepository({ sqlite, nextId, log = () => {}, warn = () => {} }) {
+  if (!sqlite) throw new TypeError('the staff repository needs a SQLite connection (node:sqlite); the data layer has no in-memory fallback');
   const rows = [];                 // plain targets, insertion order
   const byIdMap = new Map();       // id → plain target
   const view = readonlyView(rows, 'a staff record');
 
-  const insertStmt = sqlite && sqlite.prepare(`INSERT INTO org_users (id, org_id, name, role, email, sso_subject, created_at, removed_at, removed_by, provenance, mfa_json, delivery_prefs_json, extra_json)
+  const insertStmt = sqlite.prepare(`INSERT INTO org_users (id, org_id, name, role, email, sso_subject, created_at, removed_at, removed_by, provenance, mfa_json, delivery_prefs_json, extra_json)
     VALUES (@id, @org_id, @name, @role, @email, @sso_subject, @created_at, @removed_at, @removed_by, @provenance, @mfa_json, @delivery_prefs_json, @extra_json)`);
-  const updateStmt = sqlite && sqlite.prepare(`UPDATE org_users SET org_id = @org_id, name = @name, role = @role, email = @email, sso_subject = @sso_subject, created_at = @created_at,
+  const updateStmt = sqlite.prepare(`UPDATE org_users SET org_id = @org_id, name = @name, role = @role, email = @email, sso_subject = @sso_subject, created_at = @created_at,
     removed_at = @removed_at, removed_by = @removed_by, provenance = @provenance, mfa_json = @mfa_json, delivery_prefs_json = @delivery_prefs_json, extra_json = @extra_json WHERE id = @id`);
 
   const remember = (target) => { rows.push(target); byIdMap.set(target.id, target); return readonlyView(target, 'a staff record'); };
@@ -147,7 +149,7 @@ export function createUsersRepository({ sqlite, nextId, persist, log = () => {},
       let id = nextId('usr');
       while (byIdMap.has(id)) id = nextId('usr');
       target.id = id;
-      if (insertStmt) insertStmt.run(toParams(target)); else persist();
+      insertStmt.run(toParams(target));
       return remember(target);
     },
 
@@ -166,10 +168,9 @@ export function createUsersRepository({ sqlite, nextId, persist, log = () => {},
         if (value === null) delete next[key]; else next[key] = clone(value);
       }
       validate(next);
-      if (updateStmt) updateStmt.run(toParams(next));
+      updateStmt.run(toParams(next));
       for (const key of Object.keys(target)) if (!(key in next)) delete target[key];
       Object.assign(target, next);
-      if (!updateStmt) persist();
       return readonlyView(target, 'a staff record');
     },
 
@@ -182,10 +183,6 @@ export function createUsersRepository({ sqlite, nextId, persist, log = () => {},
       const given = Array.isArray(legacyRows) ? legacyRows : [];
       const legacy = given.filter(isStaffRow);
       if (legacy.length !== given.length) warn(`org_users: ${given.length - legacy.length} entry(ies) in the users blob are not staff rows (no id, organisation or name) and were not imported`);
-      if (!sqlite) {
-        for (const u of legacy) remember(clone(u));
-        return { engine: 'memory', loaded: rows.length, imported: 0 };
-      }
       const stored = sqlite.prepare(`${SELECT} ORDER BY rowid`).all();
       if (stored.length === 0 && legacy.length) {
         transaction(sqlite, () => { for (const u of legacy) insertStmt.run(toParams(clone(u))); });

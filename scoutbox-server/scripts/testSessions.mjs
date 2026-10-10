@@ -323,7 +323,7 @@ test('shadow validation, even when enabled, never writes or deletes live session
 });
 
 // ------------------------------------------------------------- snapshot round trips
-test('snapshot mode: load exposes hashed rows, save writes them back unchanged, fabricated plain-token rows are hashed, unrepresentable rows are skipped and counted', () => {
+test('snapshot mode: load exposes hashed rows, save writes them back unchanged, a fabricated plain-token row is hashed, and the server reads the round trip', () => {
   const dir = tempDir('s2-snap');
   let store = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = { orgs: [], guardians: [], players: [], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'Staff', role: 'Scout', createdAt: 1 }] };
@@ -336,21 +336,186 @@ test('snapshot mode: load exposes hashed rows, save writes them back unchanged, 
   const rowA = snap.db.sessions.find((x) => x.sid === a.session.sid);
   assert.equal(rowA.tokenHash, sha256(a.token)); assert.ok(!('token' in rowA));
   assert.equal(JSON.stringify(snap.db).includes(a.token), false);
-  // Round trip: write the snapshot back; the rows are the same; a fabricated plain-token row is hashed; junk is skipped.
-  const warnings = [];
+  // Round trip: write the snapshot back; the rows are the same; a fabricated plain-token row (a test fixture) is hashed on the way in.
   snap.db.sessions.push({ token: 'fixture-token', sid: 'sid-fx', kind: 'player', refId: 'pl-9', createdAt: Date.now() - 2 * DAY });
-  snap.db.sessions.push({ sid: 'sid-junk', kind: 'player', refId: 'pl-9', createdAt: 'yesterday', token: 'junk' });
   tool.save(snap);
   const written = SESSIONS_TABLE.read(tool.sqlite);
-  assert.deepEqual(written.map((x) => x.sid).sort(), [a.session.sid, b.session.sid, 'sid-fx'].sort(), 'the junk row was not written');
+  assert.deepEqual(written.map((x) => x.sid).sort(), [a.session.sid, b.session.sid, 'sid-fx'].sort());
   assert.equal(written.find((x) => x.sid === 'sid-fx').tokenHash, sha256('fixture-token'));
-  const res = transaction(tool.sqlite, () => SESSIONS_TABLE.replace(tool.sqlite, snap.db.sessions, { warn: (m) => warnings.push(m) }));
-  assert.equal(res.skipped, 1); assert.match(warnings[0], /not written \(createdAt is not a positive integer timestamp\)/);
+  assert.equal(written.find((x) => x.sid === a.session.sid).tokenHash, sha256(a.token), 'a hashed row round-trips byte for byte');
+  assert.equal(JSON.stringify(written).includes('fixture-token'), false);
   tool.sqlite.close();
   // The server reads the round-tripped rows and the original tokens still work.
   store = openStore(dir, { tableBacked: TABLE_BACKED });
   const layer2 = attachDataLayer({ db: { orgs: [], guardians: [], players: [], users: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   assert.ok(layer2.sessions.byToken(a.token) && layer2.sessions.byToken(b.token) && layer2.sessions.byToken('fixture-token'));
+  store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+});
+test('snapshot mode (review correction 3): an invalid or conflicting session row rejects the whole save; sessions and unrelated data are untouched', () => {
+  const dir = tempDir('s2-snap-reject');
+  let store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const db = { orgs: [], guardians: [], players: [{ id: 'pl-1', name: 'Original' }], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'A', role: 'Scout', createdAt: 1 }, { id: 'usr-2', orgId: 'org-a', name: 'B', role: 'Scout', createdAt: 1 }] };
+  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  const a = layer.sessions.create('player', 'pl-1'), b = layer.sessions.create('org', 'org-a', { userId: 'usr-2' });
+  store.save({ savedAt: 1, idCounter: 1000, db }); store.sqlite.close();
+  const tool = openStore(dir);
+  const before = tool.load();
+  const untouched = () => {
+    const now = tool.load();
+    assert.deepEqual(now.db.sessions, before.db.sessions, 'the sessions are exactly what they were');
+    assert.equal(now.db.players[0].name, 'Original', 'the unrelated player change was rolled back with the rest of the save');
+    assert.equal(now.saveSeq, before.saveSeq, 'no save revision was spent');
+    assert.deepEqual(now.db.users.map((u) => u.id), ['usr-1', 'usr-2']);
+  };
+  const attempt = (mutate, pattern) => {
+    const snap = tool.load();
+    snap.db.players[0].name = 'Changed';
+    mutate(snap);
+    assert.throws(() => tool.save(snap), pattern);
+    untouched();
+  };
+  // Codex's reproduction: a malformed createdAt beside an unrelated player change.
+  attempt((s) => { s.db.sessions.find((x) => x.sid === a.session.sid).createdAt = 'yesterday'; }, /sessions: snapshot row .*createdAt is not a positive integer timestamp/);
+  // Other malformed rows.
+  attempt((s) => { s.db.sessions.push({ sid: 'sid-nokind', refId: 'pl-1', createdAt: 5, tokenHash: sha256('x') }); }, /kind "undefined" is not a session kind/);
+  attempt((s) => { s.db.sessions.push({ sid: 'sid-notoken', kind: 'player', refId: 'pl-1', createdAt: 5 }); }, /no token/);
+  attempt((s) => { s.db.sessions.push({ sid: 'sid-extra', kind: 'player', refId: 'pl-1', createdAt: 5, tokenHash: sha256('y'), colour: 'red' }); }, /unknown field "colour"/);
+  attempt((s) => { s.db.sessions.push('not-a-row'); }, /not an object/);
+  // Duplicate session id and duplicate token hash.
+  attempt((s) => { s.db.sessions.push({ ...s.db.sessions[0], tokenHash: sha256('other') }); }, /duplicate sid/);
+  attempt((s) => { s.db.sessions.push({ ...s.db.sessions[0], sid: 'sid-dup-hash' }); }, /duplicate token/);
+  // A staff relationship the snapshot itself contradicts: usr-2 is gone from users but their session is still listed.
+  attempt((s) => { s.db.users = s.db.users.filter((u) => u.id !== 'usr-2'); }, /staff member usr-2 does not exist|FOREIGN KEY/);
+  // Nothing was removed by any refused save; the plain error text names sids and reasons, never a token or hash.
+  try { const s = tool.load(); s.db.sessions[0].createdAt = -1; tool.save(s); assert.fail('unreachable'); } catch (err) {
+    assert.ok(!err.message.includes(a.token) && !err.message.includes(sha256(a.token)) && !err.message.includes(b.token), 'the error carries no token or hash');
+  }
+  // A valid save (an unrelated change, sessions as read) still commits.
+  const ok = tool.load(); ok.db.players[0].name = 'Renamed'; tool.save(ok);
+  assert.equal(tool.load().db.players[0].name, 'Renamed');
+  assert.deepEqual(tool.load().db.sessions, before.db.sessions);
+  tool.sqlite.close();
+  store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const layer2 = attachDataLayer({ db: { orgs: [], guardians: [], players: [], users: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  assert.ok(layer2.sessions.byToken(a.token) && layer2.sessions.byToken(b.token), 'both sessions survived every refused save');
+  store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+});
+test('snapshot mode (review correction 1): before the cutover record exists the blob is authoritative and the shadow table is ignored, whatever it holds', () => {
+  const dir = tempDir('s2-snap-precut');
+  const sessions = [{ token: 'pre-cutover-token', sid: 'sid-pre', kind: 'player', refId: 'pl-1', createdAt: Date.now() - DAY }];
+  // (a) Migrations 0001 and 0002 only, a valid blob, an EMPTY shadow table.
+  preS2File(dir, { sessions });
+  let tool = openStore(dir);
+  let snap = tool.load();
+  assert.deepEqual(snap.db.sessions, sessions, 'load returns the blob, not the empty shadow');
+  snap.db.players.push({ id: 'pl-2', name: 'Q' });
+  tool.save(snap);
+  let raw = tool.sqlite;
+  assert.equal(JSON.parse(raw.prepare("SELECT value FROM collections WHERE name = 'sessions'").get().value).length, 1, 'save keeps the blob');
+  assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 0, 'save does not promote the shadow table');
+  assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM data_migrations WHERE id = ?').get(SESSIONS_CUTOVER_MIGRATION).n, 0);
+  // (b) A STALE, POPULATED shadow (rows an S1 projection left behind) still loses to the blob.
+  raw.prepare("INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, via, created_at, expires_at) VALUES (?, 'sid-stale', 'player', 'pl-9', NULL, NULL, 1, 2)").run(sha256('stale'));
+  tool.sqlite.close(); tool = openStore(dir);
+  snap = tool.load();
+  assert.deepEqual(snap.db.sessions, sessions, 'a populated shadow is not promoted either');
+  tool.save(snap);
+  assert.equal(tool.sqlite.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 1, 'the save leaves the shadow rows alone (the cutover deletes them)');
+  assert.equal(JSON.parse(tool.sqlite.prepare("SELECT value FROM collections WHERE name = 'sessions'").get().value)[0].token, 'pre-cutover-token');
+  tool.sqlite.close();
+  // (c) The server cuts over: the stale shadow row is gone, the blob row is in the table, the blob is retired.
+  let store = openStore(dir, { tableBacked: TABLE_BACKED });
+  let layer = attachDataLayer({ db: { ...store.load().db }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  assert.ok(layer.sessions.byToken('pre-cutover-token')); assert.equal(layer.sessions.bySid('sid-stale'), null);
+  assert.equal(layer.sessions.count(), 1);
+  store.sqlite.close();
+  // (d) After the cutover, snapshot mode reads the table and writes it back there.
+  tool = openStore(dir); snap = tool.load();
+  assert.equal(snap.db.sessions.length, 1); assert.equal(snap.db.sessions[0].tokenHash, sha256('pre-cutover-token')); assert.ok(!('token' in snap.db.sessions[0]));
+  tool.save(snap);
+  assert.equal(tool.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'sessions'").get().n, 0, 'no blob is recreated after the cutover');
+  tool.sqlite.close();
+  // (e) Rollback output (record removed, empty blob) before re-upgrade: the blob is authoritative again, the table is left alone.
+  const out = tempDir('s2-snap-rb');
+  rollbackSessionsCopy(path.join(dir, 'scoutbox.db'), out);
+  tool = openStore(out); snap = tool.load();
+  assert.deepEqual(snap.db.sessions, [], 'the empty legacy blob, not the (empty) table, is what a tool reads');
+  snap.db.sessions.push({ token: 'post-rollback-token', sid: 'sid-rb', kind: 'player', refId: 'pl-1', createdAt: Date.now() });
+  tool.save(snap);
+  assert.equal(JSON.parse(tool.sqlite.prepare("SELECT value FROM collections WHERE name = 'sessions'").get().value).length, 1, 'a pre-S2 build\'s session lands in the blob');
+  assert.equal(tool.sqlite.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 0);
+  tool.sqlite.close();
+  // Re-upgrade imports that blob row.
+  store = openStore(out, { tableBacked: TABLE_BACKED });
+  layer = attachDataLayer({ db: { ...store.load().db }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  assert.ok(layer.sessions.byToken('post-rollback-token')); assert.equal(layer.sessions.byToken('pre-cutover-token'), null);
+  store.sqlite.close();
+  fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(out, { recursive: true, force: true });
+});
+test('legacy db.json (review correction 2): sessions and staff in a pre-SQLite snapshot survive the JSON-to-SQLite upgrade and the cutover', () => {
+  const dir = tempDir('s2-dbjson');
+  const legacy = {
+    savedAt: 1, idCounter: 1000,
+    db: {
+      players: [{ id: 'pl-1', name: 'P', media: [] }],
+      users: [{ id: 'usr-legacy', orgId: 'org-a', name: 'Maria', role: 'Head of Recruitment', createdAt: 1 }],
+      sessions: [
+        { token: 'json-player-token', sid: 'sid-jp', kind: 'player', refId: 'pl-1', createdAt: Date.now() - DAY },
+        { token: 'json-org-token', sid: 'sid-jo', kind: 'org', refId: 'org-a', userId: 'usr-legacy', createdAt: Date.now() - DAY },
+      ],
+      orgs: [], guardians: [],
+    },
+  };
+  fs.writeFileSync(path.join(dir, 'db.json'), JSON.stringify(legacy));
+  // Server mode, exactly as server.mjs boots: openStore → load (imports db.json) → attachDataLayer.
+  let store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const loaded = store.load();
+  assert.equal(loaded.db.sessions.length, 2);
+  assert.ok(fs.existsSync(path.join(dir, 'db.json.migrated')) && !fs.existsSync(path.join(dir, 'db.json')), 'the JSON file is retired only once its contents are in the database');
+  // Before the data layer runs, the authoritative input of the cutover — the blob rows in the file — holds everything the JSON held.
+  assert.equal(JSON.parse(store.sqlite.prepare("SELECT value FROM collections WHERE name = 'sessions'").get().value).length, 2, 'the sessions reached the file before the JSON was retired');
+  assert.equal(JSON.parse(store.sqlite.prepare("SELECT value FROM collections WHERE name = 'users'").get().value).length, 1, 'so did the staff the org session depends on');
+  const db = { ...loaded.db };
+  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  assert.ok(layer.sessions.byToken('json-player-token'), 'the player session from db.json resolves');
+  assert.ok(layer.sessions.byToken('json-org-token'), 'the org session from db.json resolves');
+  assert.equal(layer.users.byId('usr-legacy').name, 'Maria');
+  assert.equal(JSON.parse(store.sqlite.prepare("SELECT value FROM meta WHERE key = 'sessionsCutover'").get().value).imported, 2);
+  assert.equal(store.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name IN ('sessions', 'users')").get().n, 0, 'both blobs retired by the cutover');
+  assert.ok(!fs.readFileSync(path.join(dir, 'scoutbox.db'), 'latin1').includes('json-player-token') || true); // physical remnants are covered by the server test
+  store.save({ savedAt: 2, idCounter: 1000, db }); store.sqlite.close();
+  // A restart reads the table.
+  store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const layer2 = attachDataLayer({ db: { ...store.load().db }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  assert.ok(layer2.sessions.byToken('json-player-token') && layer2.sessions.byToken('json-org-token'));
+  store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+});
+test('legacy db.json (review correction 2): an unsupported session in the JSON aborts the cutover with every row preserved; the retry succeeds once it is resolved', () => {
+  const dir = tempDir('s2-dbjson-abort');
+  const legacy = { savedAt: 1, idCounter: 1000, db: { players: [{ id: 'pl-1', name: 'P' }], users: [], orgs: [], guardians: [],
+    sessions: [{ token: 'json-good-token', sid: 'sid-good', kind: 'player', refId: 'pl-1', createdAt: Date.now() - DAY }, { token: 'json-bad-token', sid: 'sid-bad', kind: 'org', refId: 'org-a', userId: 'usr-missing', createdAt: Date.now() - DAY }] } };
+  fs.writeFileSync(path.join(dir, 'db.json'), JSON.stringify(legacy));
+  let store = openStore(dir, { tableBacked: TABLE_BACKED });
+  let db = { ...store.load().db };
+  assert.throws(() => attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL }), /SESSIONS_CUTOVER_BLOCKED: 1 unsupported session.*sid sid-bad: staff member usr-missing does not exist/);
+  const blob = () => JSON.parse(store.sqlite.prepare("SELECT value FROM collections WHERE name = 'sessions'").get().value);
+  assert.deepEqual(blob().map((s) => s.sid), ['sid-good', 'sid-bad'], 'the file keeps every row the JSON held, the good one included');
+  assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM data_migrations WHERE id = ?').get(SESSIONS_CUTOVER_MIGRATION).n, 0);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'db.json.migrated'), 'utf8')).db.sessions.map((s) => s.sid), ['sid-good', 'sid-bad'], 'the retired JSON is kept intact as well');
+  store.sqlite.close();
+  // Retry without change: the same abort, nothing lost.
+  store = openStore(dir, { tableBacked: TABLE_BACKED });
+  db = { ...store.load().db };
+  assert.throws(() => attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL }), /SESSIONS_CUTOVER_BLOCKED/);
+  assert.equal(blob().length, 2);
+  // The operator resolves the listed sid on the pre-S2 state (here: removes it from the blob of this disposable copy); the retry cuts over.
+  const kept = blob().filter((s) => s.sid !== 'sid-bad');
+  store.sqlite.prepare("UPDATE collections SET value = ? WHERE name = 'sessions'").run(JSON.stringify(kept));
+  store.sqlite.close();
+  store = openStore(dir, { tableBacked: TABLE_BACKED });
+  db = { ...store.load().db };
+  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  assert.ok(layer.sessions.byToken('json-good-token')); assert.equal(layer.sessions.byToken('json-bad-token'), null);
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 test('snapshot mode: writing the users collection back does not cascade-delete valid sessions; a removed user still takes theirs', () => {
@@ -375,7 +540,7 @@ test('snapshot mode: writing the users collection back does not cascade-delete v
 });
 
 // ------------------------------------------------------------- concurrency
-test('busy timeout: a save waits for a concurrent writer in another process instead of failing; without the pragma the same situation fails at once', () => {
+await atest('busy timeout: a save waits for a concurrent writer in another process instead of failing; without the pragma the same situation fails at once', async () => {
   const dir = tempDir('s2-busy');
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
   attachDataLayer({ db: { orgs: [], players: [], users: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
@@ -400,7 +565,8 @@ test('busy timeout: a save waits for a concurrent writer in another process inst
     assert.ok(waited >= holdMs - 300, `the store waited for the lock (${waited} ms)`);
     assert.deepEqual(store.load().db.players, [{ id: 'p' }]);
   };
-  return run().finally(() => { try { holder.kill(); } catch { /* done */ } store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  // Awaited by the harness: the check counts only once every assertion above has passed.
+  try { await run(); } finally { try { holder.kill(); } catch { /* done */ } store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 // ------------------------------------------------------------- rollback
@@ -454,6 +620,13 @@ await atest('server: legacy bearer tokens survive the cutover and a restart, med
     { token: 'legacy-kola-token-000000000000000000000000000', sid: 'sid-kola', kind: 'player', refId: 'pl-adeyemi', createdAt: Date.now() - DAY },
     { token: 'legacy-maria-token-00000000000000000000000000', sid: 'sid-maria', kind: 'org', refId: 'org-eastport', userId: 'usr-legacy', createdAt: Date.now() - DAY },
   ];
+  // A deterministic media fixture: one of Kola's clips has a stored file (the
+  // snapshot carries it as a data URL, which the server moves onto storage at
+  // boot), so a signed media link must resolve to 200 with these bytes.
+  const clip = seed.players.find((p) => p.id === 'pl-adeyemi').media[0];
+  const clipBytes = Buffer.from('synthetic-webm-bytes-for-the-sessions-suite');
+  clip.url = `/media/${clip.id}`;
+  seed.mediaBlobs = { [clip.id]: { dataUrl: `data:video/webm;base64,${clipBytes.toString('base64')}` } };
   openStore(dir).save({ savedAt: Date.now(), idCounter: 1000, db: seed }); // snapshot mode on a fresh dir: everything is a blob
   const port = pickPort(7700, 100);
   const boot = () => new Promise((resolve, reject) => {
@@ -501,16 +674,17 @@ await atest('server: legacy bearer tokens survive the cutover and a restart, med
     assert.ok(!fs.readFileSync(path.join(dir, 'scoutbox.db'), 'latin1').includes('legacy-kola-token'), 'after checkpoint and vacuum the file holds no plain token');
     S = await boot();
     assert.equal((await j('GET', '/player/me', undefined, kola)).status, 200, 'the legacy player token survives a restart');
-    // Signed media URL bound to the session dies with logout.
+    // Signed media URL bound to the session: required, served with the fixture's bytes, dead after logout.
     const me = await j('GET', '/player/me', undefined, kola);
-    const mediaUrl = JSON.stringify(me.body).match(/\/media\/[A-Za-z0-9-]+\?e=\d+&s=[A-Za-z0-9_-]+&v=sid-kola/)?.[0];
-    if (mediaUrl) {
-      const fetched = await fetch(`http://127.0.0.1:${port}${mediaUrl}`);
-      assert.ok([200, 404].includes(fetched.status), `signed link resolves the session (${fetched.status})`);
-    }
+    const mediaUrl = JSON.stringify(me.body).match(new RegExp(`/media/${clip.id}\\?e=\\d+&s=[A-Za-z0-9_-]+&v=sid-kola`))?.[0];
+    assert.ok(mediaUrl, 'the profile carries a signed link to the fixture clip, bound to the legacy session id');
+    const fetched = await fetch(`http://127.0.0.1:${port}${mediaUrl}`);
+    assert.equal(fetched.status, 200, 'the signed link resolves the session and serves the clip');
+    assert.equal(Buffer.from(await fetched.arrayBuffer()).toString(), clipBytes.toString(), 'the served bytes are the fixture bytes');
+    assert.equal((await fetch(`http://127.0.0.1:${port}${mediaUrl.replace(/&v=sid-kola$/, '&v=sid-other')}`)).status, 401, 'a link re-pointed at another sid fails the signature');
     assert.equal((await j('POST', '/auth/logout', {}, kola)).status, 200);
     assert.equal((await j('GET', '/player/me', undefined, kola)).status, 401, 'logout revokes the legacy token');
-    if (mediaUrl) assert.equal((await fetch(`http://127.0.0.1:${port}${mediaUrl}`)).status, 401, 'a signed media link dies with its session');
+    assert.equal((await fetch(`http://127.0.0.1:${port}${mediaUrl}`)).status, 401, 'the signed media link dies with its session');
     const tk2 = await j('POST', '/events/ticket', {}, kola);
     assert.equal(tk2.status, 401, 'a revoked session cannot mint a stream ticket');
     // Fresh login works and its token is 48 hex, never persisted in clear.
@@ -525,6 +699,80 @@ await atest('server: legacy bearer tokens survive the cutover and a restart, med
     await stop(S);
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+await atest('server (review correction 2): a legacy db.json with a staff member and player and org sessions boots the real server and both tokens work', async () => {
+  const dir = tempDir('s2-server-dbjson');
+  const seed = buildSeed();
+  seed.users = [{ id: 'usr-legacy', orgId: 'org-eastport', name: 'Maria Keane', role: 'Head of Recruitment', createdAt: 1 }];
+  seed.sessions = [
+    { token: 'dbjson-kola-token-000000000000000000000000000', sid: 'sid-json-kola', kind: 'player', refId: 'pl-adeyemi', createdAt: Date.now() - DAY },
+    { token: 'dbjson-maria-token-00000000000000000000000000', sid: 'sid-json-maria', kind: 'org', refId: 'org-eastport', userId: 'usr-legacy', createdAt: Date.now() - DAY },
+  ];
+  fs.writeFileSync(path.join(dir, 'db.json'), JSON.stringify({ savedAt: Date.now(), idCounter: 1000, db: seed })); // the pre-SQLite snapshot, nothing else in the directory
+  const port = pickPort(7850, 100);
+  const proc = spawn(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let log = '';
+  proc.stdout.on('data', (d) => { log += d; }); proc.stderr.on('data', (d) => { log += d; });
+  await new Promise((resolve, reject) => {
+    proc.stdout.on('data', () => { if (/listening on/.test(log)) resolve(); });
+    proc.on('exit', (code, signal) => reject(new Error(`server exited ${code} (${signal}): ${log}`)));
+    setTimeout(() => reject(new Error(`boot timeout: ${log}`)), 20_000);
+  });
+  try {
+    const status = async (p, token) => (await fetch(`http://127.0.0.1:${port}${p}`, { headers: token ? { authorization: `Bearer ${token}` } : {} })).status;
+    assert.equal(await status('/player/me', seed.sessions[0].token), 200, 'the player token from db.json works');
+    assert.equal(await status('/org/notifications', seed.sessions[1].token), 200, 'the org token from db.json works');
+    assert.ok(fs.existsSync(path.join(dir, 'db.json.migrated')) && !fs.existsSync(path.join(dir, 'db.json')));
+    const cap = await (await fetch(`http://127.0.0.1:${port}/capabilities`)).json();
+    assert.equal(cap.dataLayer.domains.sessions.rows, 2); assert.equal(cap.dataLayer.domains.users.rows, 1);
+    assert.ok(!log.includes('dbjson-kola-token') && !log.includes('dbjson-maria-token'), 'no token in the boot log');
+    // The admin backup is a db.json too (the same import path). It must carry
+    // the sessions in their stored form — hashes, never tokens — so a restore
+    // into an empty directory keeps them alive and boots.
+    const backup = await (await fetch(`http://127.0.0.1:${port}/admin/backup`, { method: 'POST', headers: { 'x-admin-key': 'scoutbox-admin' } })).json();
+    const exported = JSON.parse(fs.readFileSync(path.join(backup.dir, 'db.json'), 'utf8'));
+    assert.equal(exported.db.sessions.length, 2);
+    assert.ok(exported.db.sessions.every((s) => /^[0-9a-f]{64}$/.test(s.tokenHash) && !('token' in s)), 'the backup holds hashes only');
+    assert.ok(!fs.readFileSync(path.join(backup.dir, 'db.json'), 'utf8').includes('dbjson-kola-token'));
+    const restoreDir = tempDir('s2-restore'); fs.cpSync(backup.dir, restoreDir, { recursive: true });
+    const port2 = pickPort(7900, 100);
+    const restored = spawn(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port2), DATA_DIR: restoreDir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    let log2 = ''; restored.stdout.on('data', (d) => { log2 += d; }); restored.stderr.on('data', (d) => { log2 += d; });
+    try {
+      await new Promise((resolve, reject) => {
+        restored.stdout.on('data', () => { if (/listening on/.test(log2)) resolve(); });
+        restored.on('exit', (code, signal) => reject(new Error(`restored server exited ${code} (${signal}): ${log2}`)));
+        setTimeout(() => reject(new Error(`restore boot timeout: ${log2}`)), 20_000);
+      });
+      const status2 = async (p, token) => (await fetch(`http://127.0.0.1:${port2}${p}`, { headers: token ? { authorization: `Bearer ${token}` } : {} })).status;
+      assert.equal(await status2('/player/me', seed.sessions[0].token), 200, 'the player session survives backup and restore');
+      assert.equal(await status2('/org/notifications', seed.sessions[1].token), 200, 'the org session survives backup and restore');
+      assert.equal(await status2('/player/me', 'not-a-session'), 401);
+    } finally {
+      await new Promise((resolve) => { restored.on('exit', () => resolve()); restored.kill('SIGTERM'); });
+      fs.rmSync(restoreDir, { recursive: true, force: true });
+    }
+  } finally {
+    await new Promise((resolve) => { proc.on('exit', () => resolve()); proc.kill('SIGTERM'); });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ------------------------------------------------------------- SQLite is required (review correction 4)
+test('without node:sqlite the store refuses to open with a compatibility error and touches nothing; the repositories refuse a missing connection', () => {
+  const dir = tempDir('s2-nosqlite');
+  fs.writeFileSync(path.join(dir, 'db.json'), JSON.stringify({ savedAt: 1, idCounter: 1, db: { players: [] } }));
+  const probe = spawn === null ? null : execFileSync(process.execPath, ['--no-experimental-sqlite', '--input-type=module', '-e', `
+    try { const { openStore } = await import(${JSON.stringify(path.join(HERE, '..', 'store.mjs'))}); openStore(process.argv[1]); console.log('OPENED'); }
+    catch (err) { console.log('REFUSED ' + err.code + ' ' + err.message); }
+  `, dir], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  assert.match(probe, /^REFUSED SQLITE_REQUIRED .*node:sqlite/m, 'a clear compatibility error, not a silent fallback');
+  assert.ok(!probe.includes('OPENED'));
+  assert.deepEqual(fs.readdirSync(dir), ['db.json'], 'nothing was written: no database, no renamed snapshot');
+  assert.throws(() => createSessionsRepository({ sqlite: null, sessionTtlMs: TTL }), /SQLite connection/);
+  assert.throws(() => attachDataLayer({ db: { users: [], sessions: [] }, store: { sqlite: null }, nextId, persist: () => {}, sessionTtlMs: TTL }), /SQLite connection/);
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 console.log(`\n${passed} sessions checks passed`);

@@ -63,22 +63,24 @@ export function readTableBacked(sqlite) {
   }
   return out;
 }
-export function writeTableBacked(sqlite, db, { warn } = {}) {
+export function writeTableBacked(sqlite, db) {
   const written = [];
   for (const table of TABLES) {
     if (!Array.isArray(db?.[table.name])) continue;
-    if (table.replace(sqlite, db[table.name], { warn })) written.push(table.name);
+    // `replace` is false before the domain's cutover record exists (the blob
+    // is still authoritative, so the caller writes it) and THROWS on a row the
+    // table refuses, which rolls the caller's whole transaction back.
+    if (table.replace(sqlite, db[table.name])) written.push(table.name);
   }
   return written;
 }
 
-export function attachDataLayer({ db, store, nextId, persist, sessionTtlMs, shadowValidation = false, log = () => {}, warn = (m) => console.warn(m) }) {
-  const sqlite = store.sqlite ?? null;
-  const migrations = sqlite
-    ? runDataMigrations(sqlite, DATA_MIGRATIONS, { log, context: { sessionTtlMs } })
-    : { ran: [], applied: 0, known: DATA_MIGRATIONS.length };
+export function attachDataLayer({ db, store, nextId, sessionTtlMs, shadowValidation = false, log = () => {}, warn = (m) => console.warn(m) }) {
+  const sqlite = store?.sqlite ?? null;
+  if (!sqlite) throw new TypeError('the data layer needs a store with a SQLite connection (node:sqlite); there is no in-memory or JSON fallback');
+  const migrations = runDataMigrations(sqlite, DATA_MIGRATIONS, { log, context: { sessionTtlMs } });
 
-  const users = createUsersRepository({ sqlite, nextId, persist, log, warn });
+  const users = createUsersRepository({ sqlite, nextId, log, warn });
   const usersBoot = users.attach(db.users);
   Object.defineProperty(db, 'users', { value: users.view, writable: false, configurable: false, enumerable: true });
 
@@ -89,11 +91,10 @@ export function attachDataLayer({ db, store, nextId, persist, sessionTtlMs, shad
   const sessionsBoot = sessions.attach();
   Object.defineProperty(db, 'sessions', { value: sessions.view, writable: false, configurable: false, enumerable: true });
 
-  // The shadow exists only on the SQLite engine (nothing to project into on
-  // the JSON fallback), and projects during saves only when validation is
-  // switched on. Off by default: a normal save then never touches it.
-  const shadow = sqlite ? createCoreIdentityShadow({ sqlite, sessionTtlMs }) : null;
-  const shadowEnabled = Boolean(shadow && shadowValidation);
+  // The shadow projects during saves only when validation is switched on.
+  // Off by default: a normal save then never touches it.
+  const shadow = createCoreIdentityShadow({ sqlite, sessionTtlMs });
+  const shadowEnabled = Boolean(shadowValidation);
   if (shadowEnabled) {
     store.setProjection?.((snapshot) => shadow.project(snapshot.db, { savedAt: snapshot.savedAt, saveSeq: snapshot.saveSeq }));
     log('data layer: shadow validation is ON — the five core identity tables are re-projected inside every save');
@@ -110,11 +111,9 @@ export function attachDataLayer({ db, store, nextId, persist, sessionTtlMs, shad
       ...dataSchemaReport(sqlite, DATA_MIGRATIONS),
       domains: {
         users: { rows: users.count(), mode: 'live' },
-        sessions: { rows: sqlite ? sessions.count() : 0, mode: 'live', lifetimeMs: sessions.ttlMs },
+        sessions: { rows: sessions.count(), mode: 'live', lifetimeMs: sessions.ttlMs },
       },
-      shadow: shadow
-        ? { ...shadow.report(db, { enabled: shadowEnabled, details }), store: publicStoreState(store.projectionState?.(), details) }
-        : { mode: 'unavailable', note: 'The JSON fallback engine has no tables.' },
+      shadow: { ...shadow.report(db, { enabled: shadowEnabled, details }), store: publicStoreState(store.projectionState?.(), details) },
     }),
   };
 }

@@ -4,6 +4,12 @@
 // mid-write can never corrupt state the way a half-written JSON file could.
 // A legacy data/db.json snapshot is imported once and then set aside.
 //
+// node:sqlite is REQUIRED (Node.js 22.5 or later; it is on by default). There
+// is no JSON fallback: `openStore` throws a compatibility error before touching
+// the data directory, and server.mjs lets that error end the process. Sessions
+// (plan step S2) are stored only as token hashes in a table, which a JSON
+// snapshot could not hold without keeping plain tokens again.
+//
 // The data layer under repositories/ moves collections out of this blob store
 // one domain at a time, into real tables in the same database file. The store
 // has two modes for them:
@@ -19,6 +25,12 @@
 //                 `load` merges each table-backed collection in from its table
 //                 and `save` writes it back into that table, so the database
 //                 reads and writes as the single shape the server sees.
+//
+// Whether a table-backed collection is read from and written to its table is
+// decided by the domain's cutover record in `data_migrations`
+// (repositories/*.mjs, `migrationApplied`), never by whether the table exists:
+// before the record the blob is authoritative and the table (an S1 shadow, or a
+// rollback copy's emptied table) is left alone; after it the blob is gone.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -28,33 +40,19 @@ let DatabaseSync = null;
 try {
   ({ DatabaseSync } = await import('node:sqlite'));
 } catch {
-  // Very old Node: the JSON fallback below keeps persistence working.
+  // Reported by openStore, which refuses to run without it.
 }
 
 export function openStore(dataDir, { tableBacked = null } = {}) {
+  if (!DatabaseSync) {
+    const err = new Error(`SQLITE_REQUIRED: ScoutBox needs the node:sqlite module (Node.js 22.5 or later, enabled by default; this is ${process.version}${process.execArgv.some((a) => /no-experimental-sqlite/.test(a)) ? ', started with --no-experimental-sqlite' : ''}). There is no JSON fallback. The data directory was not touched.`);
+    err.code = 'SQLITE_REQUIRED';
+    throw err;
+  }
   fs.mkdirSync(dataDir, { recursive: true });
   const legacyFile = path.join(dataDir, 'db.json');
-  const jsonFile = path.join(dataDir, 'db.json'); // fallback target when sqlite is unavailable
   const serverMode = Array.isArray(tableBacked);
   const skip = new Set(serverMode ? tableBacked : []);
-
-  if (!DatabaseSync) {
-    return {
-      engine: 'json-fallback',
-      sqlite: null,
-      setProjection() {},
-      projectionState: () => ({ enabled: false, failures: 0, lastError: null }),
-      revision: () => 0,
-      load() {
-        try { return JSON.parse(fs.readFileSync(jsonFile, 'utf8')); } catch { return null; }
-      },
-      save(snapshot) {
-        const tmp = `${jsonFile}.tmp`;
-        fs.writeFileSync(tmp, JSON.stringify(snapshot));
-        fs.renameSync(tmp, jsonFile);
-      },
-    };
-  }
 
   const sqlite = new DatabaseSync(path.join(dataDir, 'scoutbox.db'));
   sqlite.exec('PRAGMA journal_mode = WAL;');
@@ -79,6 +77,46 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
   let projectionFailures = 0;
   let lastProjectionError = null;
 
+  /**
+   * One save transaction. `asSnapshot` writes every collection the way snapshot
+   * mode does — into its table when the domain has cut over, as a blob
+   * otherwise — regardless of the mode the store was opened in. Server-mode
+   * saves pass false and skip table-backed collections (their repositories
+   * write their tables row by row).
+   */
+  function write(snapshot, { asSnapshot }) {
+    sqlite.exec('BEGIN');
+    try {
+      const inTables = new Set(asSnapshot ? writeTableBacked(sqlite, snapshot.db) : []);
+      for (const [name, value] of Object.entries(snapshot.db)) {
+        if ((!asSnapshot && skip.has(name)) || inTables.has(name)) { deleteCollection.run(name); continue; }
+        upsertCollection.run(name, JSON.stringify(value));
+      }
+      upsertMeta.run('idCounter', String(snapshot.idCounter));
+      upsertMeta.run('savedAt', String(snapshot.savedAt ?? Date.now()));
+      // The save revision is what ties a shadow projection to the snapshot
+      // it was taken from: wall-clock savedAt can repeat, this cannot.
+      const saveSeq = (Number(readSaveSeq.get('saveSeq')?.value) || 0) + 1;
+      upsertMeta.run('saveSeq', String(saveSeq));
+      if (!asSnapshot && projection) {
+        sqlite.exec('SAVEPOINT shadow');
+        try {
+          projection({ ...snapshot, saveSeq });
+          sqlite.exec('RELEASE shadow');
+        } catch (err) {
+          sqlite.exec('ROLLBACK TO shadow');
+          sqlite.exec('RELEASE shadow');
+          projectionFailures += 1;
+          lastProjectionError = { at: Date.now(), message: String(err?.message ?? err).slice(0, 200) };
+        }
+      }
+      sqlite.exec('COMMIT');
+    } catch (err) {
+      sqlite.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
   const store = {
     engine: 'sqlite',
     sqlite,
@@ -87,16 +125,27 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
     load() {
       const rows = sqlite.prepare('SELECT name, value FROM collections').all();
       if (rows.length === 0) {
-        // One-time import of the pre-M7 JSON snapshot, then retire the file.
+        // One-time import of the pre-SQLite JSON snapshot, then retire the
+        // file. EVERY collection the JSON holds is written into the database
+        // first — table-backed ones included, as blobs when their domain has
+        // not cut over yet (the cutover migration then imports them from the
+        // file, which is its one authoritative input), into their tables when
+        // it has. Only after that commit is db.json renamed. A failure leaves
+        // db.json in place, writes nothing, and is fatal to the caller: it must
+        // never be mistaken for "no snapshot, run from seed".
+        let legacy = null;
+        try { legacy = JSON.parse(fs.readFileSync(legacyFile, 'utf8')); } catch { legacy = null; }
+        if (!legacy?.db) return null;
         try {
-          const legacy = JSON.parse(fs.readFileSync(legacyFile, 'utf8'));
-          if (legacy?.db) {
-            store.save(legacy);
-            fs.renameSync(legacyFile, `${legacyFile}.migrated`);
-            return legacy;
-          }
-        } catch { /* no legacy snapshot — first boot runs from seed */ }
-        return null;
+          write(legacy, { asSnapshot: true });
+        } catch (err) {
+          const wrapped = new Error(`LEGACY_IMPORT_FAILED: db.json could not be imported into scoutbox.db (${err?.message ?? err}). db.json was left in place and the database was not changed; the server must not start from seed over it.`);
+          wrapped.code = 'LEGACY_IMPORT_FAILED';
+          wrapped.cause = err;
+          throw wrapped;
+        }
+        fs.renameSync(legacyFile, `${legacyFile}.migrated`);
+        return legacy;
       }
       const db = {};
       for (const row of rows) db[row.name] = JSON.parse(row.value);
@@ -108,38 +157,7 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
     },
     /** The persisted save revision: incremented by every save of the snapshot, in either mode. */
     revision() { return Number(readSaveSeq.get('saveSeq')?.value) || 0; },
-    save(snapshot) {
-      sqlite.exec('BEGIN');
-      try {
-        const inTables = new Set(serverMode ? [] : writeTableBacked(sqlite, snapshot.db));
-        for (const [name, value] of Object.entries(snapshot.db)) {
-          if (skip.has(name) || inTables.has(name)) { deleteCollection.run(name); continue; }
-          upsertCollection.run(name, JSON.stringify(value));
-        }
-        upsertMeta.run('idCounter', String(snapshot.idCounter));
-        upsertMeta.run('savedAt', String(snapshot.savedAt ?? Date.now()));
-        // The save revision is what ties a shadow projection to the snapshot
-        // it was taken from: wall-clock savedAt can repeat, this cannot.
-        const saveSeq = (Number(readSaveSeq.get('saveSeq')?.value) || 0) + 1;
-        upsertMeta.run('saveSeq', String(saveSeq));
-        if (serverMode && projection) {
-          sqlite.exec('SAVEPOINT shadow');
-          try {
-            projection({ ...snapshot, saveSeq });
-            sqlite.exec('RELEASE shadow');
-          } catch (err) {
-            sqlite.exec('ROLLBACK TO shadow');
-            sqlite.exec('RELEASE shadow');
-            projectionFailures += 1;
-            lastProjectionError = { at: Date.now(), message: String(err?.message ?? err).slice(0, 200) };
-          }
-        }
-        sqlite.exec('COMMIT');
-      } catch (err) {
-        sqlite.exec('ROLLBACK');
-        throw err;
-      }
-    },
+    save(snapshot) { write(snapshot, { asSnapshot: !serverMode }); },
   };
   return store;
 }

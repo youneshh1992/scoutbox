@@ -4,6 +4,9 @@
   "description": "ScoutBox sync backend — enforces all deck rules server-side.",
   "type": "module",
   "main": "server.mjs",
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "scripts": {
     "start": "node server.mjs",
     "test": "node scripts/testTrust.mjs && node scripts/testIdentity.mjs && node scripts/testDataLayer.mjs && node scripts/testCoreSchema.mjs && node scripts/testSessions.mjs && node scripts/testSchemaDdl.mjs",

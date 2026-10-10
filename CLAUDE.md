@@ -44,7 +44,11 @@ and design changes the Founder explicitly requests.
   `guardians`, `players` and `guardian_children` exist as a shadow (blob still
   authoritative; the projection that fills them is off unless
   `SCOUTBOX_SHADOW_VALIDATION=1` and never touches live tables). Never log,
-  report or export a plain bearer token. Never put a whole-collection
+  report or export a plain bearer token. `node:sqlite` is required (Node 22.5+);
+  there is no JSON or in-memory fallback, and whether a table is authoritative
+  is decided by its record in `data_migrations`, never by the table existing.
+  Snapshot writes validate every table-backed row and reject the whole save on
+  the first problem. Never put a whole-collection
   re-projection in the default save path. The target schema and the step
   order are `docs/architecture/sqlite-schema.md` and
   `docs/architecture/sqlite-migration-plan.md`; a new table must appear in the

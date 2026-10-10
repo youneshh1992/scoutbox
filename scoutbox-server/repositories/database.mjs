@@ -54,9 +54,20 @@ export function transaction(sqlite, fn) {
   }
 }
 
+/**
+ * Has this migration been recorded as applied? False when the bookkeeping
+ * table does not exist yet. This is the ONLY way to tell whether a domain has
+ * cut over: a table's existence or occupancy says nothing (the S1 shadow
+ * created `sessions` long before S2 made it authoritative).
+ */
+export function migrationApplied(sqlite, id) {
+  if (!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'data_migrations'").get()) return false;
+  return !!sqlite.prepare('SELECT 1 FROM data_migrations WHERE id = ?').get(id);
+}
+
 /** Operator-facing view of the table schema: ids and counts only. */
 export function dataSchemaReport(sqlite, migrations) {
-  if (!sqlite) return { engine: 'memory', migrationsApplied: 0, migrationsKnown: migrations.length, tables: [] };
+  if (!sqlite) throw new TypeError('dataSchemaReport needs a SQLite connection; the data layer has no in-memory engine');
   const applied = sqlite.prepare('SELECT COUNT(*) AS n FROM data_migrations').get()?.n ?? 0;
   const tables = sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('collections', 'meta', 'data_migrations') AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((r) => r.name);
   const appliedIds = sqlite.prepare('SELECT id FROM data_migrations ORDER BY id').all().map((r) => r.id);
