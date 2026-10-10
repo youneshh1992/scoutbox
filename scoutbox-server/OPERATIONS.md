@@ -48,15 +48,26 @@ projection is **off by default**: a normal save never touches them.
   a copy of a database (the source is opened read-only and copied with
   `VACUUM INTO`; the copy is deleted afterwards) and prints the reconciliation
   with every refused row and its reason. Use it on a backup or on a copy of a
-  running data directory; it never modifies the file it is pointed at.
-- Freshness is recorded in the file: the projection stores the `savedAt` of the
-  save it ran in. `GET /capabilities` → `dataLayer.shadow` reports `enabled`,
-  `status` (`never`, `stale`, `failed`, `partial`, `complete`), `reconciled`
-  (true only for `complete`), and per table the rows in the snapshot now, in the
-  table now, and seen / refused / adjusted by the last projection. Rows from a
-  projection that is older than the last save are reported as `stale`, never as
+  running data directory; it never modifies the file it is pointed at. Without
+  flags it is informational (exit 0 whether the result is `complete` or
+  `partial`; exit 2 if the projection itself failed). With `--strict` it is the
+  migration-readiness gate: exit 3 unless the result is `complete`, that is, no
+  refused row and no adjusted relationship. Run the strict form before any
+  cutover and treat a non-zero exit as "not ready".
+- Freshness is a persisted save revision, not a timestamp. Every save of the
+  snapshot advances `meta.saveSeq` (whether or not the projection ran); the
+  projection records the revision it ran in. `GET /capabilities` →
+  `dataLayer.shadow` reports `enabled`, `status` (`never`, `stale`, `failed`,
+  `partial`, `complete`), `reconciled` (true only for `complete`), the totals
+  `skipped` (rows the schema refused) and `findings` (relationships written as
+  NULL because their target was missing: these also keep the result `partial`),
+  `snapshotRevision` versus `lastProjectionRevision`, and per table the rows in
+  the snapshot now, in the table now, and seen / refused / adjusted by the last
+  projection. Any save made after the last projection, including one made with
+  the switch off or one whose projection failed, makes the shadow `stale`, never
   reconciled. Counts and statuses only are public; `GET /admin/data-layer`
-  (admin key) adds the refused row ids, reasons and the last error text.
+  (admin key) adds the refused row ids, the adjusted relationships and the last
+  error text.
 - Session tokens are stored in these tables only as hashes; no report carries a
   token, a password hash or a code.
 

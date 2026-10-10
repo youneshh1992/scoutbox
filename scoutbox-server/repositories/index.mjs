@@ -81,7 +81,7 @@ export function attachDataLayer({ db, store, nextId, persist, sessionTtlMs, shad
   const shadow = sqlite ? createCoreIdentityShadow({ sqlite, sessionTtlMs }) : null;
   const shadowEnabled = Boolean(shadow && shadowValidation);
   if (shadowEnabled) {
-    store.setProjection?.((snapshot) => shadow.project(snapshot.db, { savedAt: snapshot.savedAt }));
+    store.setProjection?.((snapshot) => shadow.project(snapshot.db, { savedAt: snapshot.savedAt, saveSeq: snapshot.saveSeq }));
     log('data layer: shadow validation is ON — the five core identity tables are re-projected inside every save');
   }
 

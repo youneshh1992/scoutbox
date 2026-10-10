@@ -131,12 +131,32 @@ performance, existing tests, what this plan is not).
   records every SQL statement the store executes). The five tables keep whatever the last
   projection wrote, if any, and the report labels those rows `never` or `stale`, never
   reconciled. `org_users` (S0, live) is unaffected either way.
+- **Second correction (handoff review of `d0d96e6`).** Three gaps were reproduced by an
+  independent review and fixed in the follow-up commit, each with a regression test
+  written to fail first: (1) a player whose `guardianId` named no guardian was written with
+  `guardian_id = NULL` and a finding, but with no refused row the report still said
+  `complete` / `reconciled: true`; findings now keep the result `partial`, the report
+  carries `skipped` and `findings` totals, and the "clean" fixture was corrected (it had two
+  dangling relationships). (2) Guardians were inserted in array order with their
+  `co_guardian_of` link, so a co-guardian listed before their primary was refused by the
+  foreign key; guardians are now inserted in two passes (rows without links, then links
+  once both ends exist), valid links are kept in any order, a target missing from the
+  snapshot or itself refused is an explicit finding, foreign keys stay on. (3) Freshness was
+  keyed on the `savedAt` timestamp, so a later save with the same `savedAt` (which the
+  persistence suites do) left stale shadow rows reported as `complete`; the store now
+  advances a persisted save revision `meta.saveSeq` on every save in every mode, the
+  projection records the revision it ran in, and `current` means equal revisions. Restart,
+  failed projection (summary and revision not written, so stale) and saves while the
+  projection is off are all covered by tests.
 - **How to validate.** Either boot with `SCOUTBOX_SHADOW_VALIDATION=1` for a controlled
   run (the switch is reported under `capabilities.shadow_validation`), or run
   `node scripts/validateShadow.mjs <data-dir>` against a backup or a copy: it opens the
   source read-only, copies it with `VACUUM INTO`, projects on the copy, prints every
-  refused row and reason, and deletes the copy. The source file is byte-identical
-  afterwards (asserted by test).
+  refused row and adjusted relationship, and deletes the copy. The source file is
+  byte-identical afterwards (asserted by test). Without flags the command is
+  informational (exit 0 for `complete` or `partial`, 2 if the projection threw); with
+  `--strict` it is the readiness gate: exit 3 unless `complete`. Every cutover step's
+  "Depends on" uses the strict form.
 - **API compatibility.** No route changes to the product API. `/capabilities.dataLayer`
   gains `shadow` (`enabled`, `status`, `reconciled`, timestamps, per-table `snapshotRows`,
   `tableRows`, `projectedRows`, `skipped`, `findings`, `accountedFor`) and the store's
@@ -144,7 +164,10 @@ performance, existing tests, what this plan is not).
   `GET /admin/data-layer` (admin key) adds `details` per table and `lastError`. No token,
   password hash or one-time code appears in either (asserted).
 - **Tests and acceptance criteria (all met after the correction).**
-  - `node scripts/testCoreSchema.mjs` → **18 checks passed**: migration creates the five
+  - `node scripts/testCoreSchema.mjs` → **21 checks passed** (18 from the first correction
+    plus the three regression tests of the second: findings never complete; guardian order
+    independence with valid links kept and missing or refused targets as findings; revision
+    freshness with same-`savedAt` save, restart and failed projection): migration creates the five
     STRICT tables, records itself once, is idempotent; a failing migration rolls back
     atomically and leaves no record; CHECK constraints refuse bad org level/type/plan, a
     lat without lng, foot `both`, a malformed date, a bad availability, a wrong session kind
@@ -167,7 +190,7 @@ performance, existing tests, what this plan is not).
     leaves the source database byte-identical with no shadow rows in it.
   - `node scripts/testSchemaDdl.mjs` → **13 checks passed** (8 files, 320 tables).
   - `npm test` (full chain) → green: 23 trust/safeguarding, 20 identity, 16 data-layer,
-    18 core-schema, 13 schema-DDL checks (90 in all). The two `testDataLayer.mjs`
+    21 core-schema, 13 schema-DDL checks (93 in all). The two `testDataLayer.mjs`
     assertions rewritten in `ef71f28` still pin exact values: the schema report must equal
     the exact table list and the migration count must equal the registry length, and the
     attached layer's report must list exactly those tables and show the shadow `enabled:
@@ -212,40 +235,102 @@ performance, existing tests, what this plan is not).
   harness) plus one focused follow-up commit (opt-in switch, persisted freshness, report
   statuses and exposure, admin route, validation command, tests, documentation).
 
-### S2 — Sessions cut over (hashed tokens, indexed lookup, expiry, busy timeout)
+### S2 — Sessions cut over (hashed tokens, indexed lookup, expiry, busy timeout) — NOT STARTED
 
 - **Objective.** Make `sessions` live: `createSession`, `sessionFor`, logout, revoke-all,
-  prune and the media-URL `sid` lookup go through a sessions repository; the `sessions` blob
-  is deleted. Plain tokens leave the database.
-- **Depends on.** S1 as corrected (table exists; `node scripts/validateShadow.mjs
-  <backup-dir>` on the target snapshot reports 0 skipped sessions; the S1 projection is
-  off by default and stays off during S2).
+  prune and the media-URL `sid` lookup go through a sessions repository; the `sessions`
+  blob is retired in the same transaction that imports it. Readable plain tokens leave the
+  active tables.
+- **Depends on.** S1 as corrected twice (table exists; the S1 projection is off by default
+  and stays off during S2). **Readiness gate:** `node scripts/validateShadow.mjs
+  <backup-dir> --strict` on a fresh backup of the target data directory exits 0 (status
+  `complete`: zero refused sessions, zero adjusted relationships in any of the five tables;
+  a refused or adjusted row anywhere means the data must be repaired or deliberately
+  revoked first, see "validation and abort" below).
 - **Files / tables.** `repositories/sessions.mjs` (new), `repositories/index.mjs`
-  (`TABLE_BACKED += sessions`; shadow no longer projects `sessions`), `server.mjs` (lines
-  639–669: `createSession`, `sessionFor`, prune; logout 669; `revokeOrgUserAccess` 4294;
-  player deletion 3983; `m13` own-sid revoke 208; `m25` reviewer 150; media sid 356/4276),
-  `store.mjs` (`PRAGMA busy_timeout = 5000` on open; snapshot mode reads/writes `sessions`
-  through the repository's import/export like `org_users`).
-- **Code changes and data transformations.** Migration `0003_sessions_live` (no DDL change;
-  marks the step). First boot: the `sessions` blob is imported through the same mapping as
-  the shadow (skipped rows are logged and dropped: a session without a token is unusable
-  anyway; an org session without a staff row cannot authenticate after `3fe242b`), then the
-  blob is deleted on the first save. `sessionFor(token)` becomes `SELECT ... WHERE token_hash
-  = ?` plus the expiry comparison; the in-memory `db.sessions` view is read-only and backed
-  by a cached query for the few readers that iterate (the capabilities count).
+  (`TABLE_BACKED += sessions`; the shadow no longer projects `sessions`; `domains.sessions`
+  in the report), `repositories/migrations/0003_sessions_live.mjs` (the cutover
+  migration), `server.mjs` (lines 639–669: `createSession`, `sessionFor`, prune; logout 669;
+  `revokeOrgUserAccess` 4294; player deletion 3983; `m13` own-sid revoke 208; `m25` reviewer
+  150; media sid 356/4276), `store.mjs` (`PRAGMA busy_timeout = 5000` on open; snapshot
+  mode reads/writes `sessions` through the repository's import/export like `org_users`),
+  `scripts/sessionsRollback.mjs` (new, see rollback), `OPERATIONS.md`.
+- **Validation and abort behaviour for unsupported records.** A session row is *supported*
+  when it has a string `token`, a `kind` in the CHECK list, a `refId`, a numeric
+  `createdAt`, and, for `kind = 'org'`, a `userId` that exists in `org_users`. Every other
+  row is *unsupported* and is never dropped silently:
+  1. Before the cutover boot the operator runs the strict validation on a backup; an
+     unsupported session appears there with its `sid` and reason.
+  2. Unsupported sessions are resolved on the **pre-S2 build** by an explicit admin action
+     that revokes them (`POST /admin/sessions/revoke-unsupported`, added to the S1 line
+     before S2 ships; it deletes exactly the rows the strict validation lists and records
+     each `sid`, kind and reason in `ops_events` as `session_revoked_unsupported`). A
+     session without a token could never authenticate; an org session without a staff row
+     cannot authenticate since `3fe242b`; revoking them changes nothing a user can observe,
+     but the record of having done so is the audit trail.
+  3. The migration itself re-validates every row inside its transaction. If any row is
+     unsupported, the migration **aborts**: the transaction rolls back, the boot refuses
+     with `SESSIONS_CUTOVER_BLOCKED` and the list of `sid`s and reasons (never tokens), the
+     file is unchanged (the blob is still the source of truth), and the operator goes back
+     to step 2. There is no flag that drops rows during the migration.
+- **Atomic cutover and completion record.** Migration `0003_sessions_live.up(sqlite)` does,
+  in the one transaction `runDataMigrations` opens: read the `sessions` blob directly from
+  `collections`; validate every row (abort as above); `DELETE FROM sessions` (the shadow
+  rows, which are derived); insert one row per session with `token_hash = sha256(token)`,
+  `expires_at = created_at + TTL`; write a `counters` row recording `imported`, and
+  `DELETE FROM collections WHERE name = 'sessions'`. The runner then inserts the
+  `data_migrations` row `0003_sessions_live` and commits. Completion is decided **only** by
+  the presence of that `data_migrations` row: the repository refuses to attach if the row
+  is absent, and the store's `TABLE_BACKED` entry for `sessions` is what stops any later
+  save from recreating the blob. Row counts are reported, never used to infer state. A
+  crash at any point before the commit leaves the pre-S2 file; a crash after it leaves a
+  file that boots as S2.
+- **Code changes.** `sessionFor(token)` becomes `SELECT … WHERE token_hash = ?` plus the
+  expiry comparison; `createSession` inserts one row; logout, revoke-all, staff revocation,
+  player deletion and the reviewer lane delete rows by `sid`, `(kind, ref_id)` or
+  `org_user_id`; prune deletes by `expires_at`; the in-memory `db.sessions` view is read-only
+  and backed by a query for the few readers that iterate (the capabilities count). The
+  `m13` and `m25` call sites listed above move to the repository in the same commit.
 - **API compatibility.** None changed. Existing bearer tokens in clients remain valid
   (looked up by hash). `expires_at` is materialised, so expiry semantics are unchanged
   (`createdAt + TTL`).
-- **Tests and acceptance.** `testSessions.mjs` (unit, temp DB): create/lookup/expire/revoke;
-  no plain token in the file; restart persistence; concurrent second connection waits (busy
-  timeout) instead of failing. Battery: `apiE2E`, `connectedE2E`, `m13*`, `m25*`,
-  `m23*Persistence` suites unchanged. Acceptance: `/capabilities.dataLayer.domains.sessions
-  .mode = 'live'`, no `sessions` row in `collections`, shadow report no longer lists
-  `sessions`.
-- **Rollback.** Restore the pre-S2 backup and run the S1 commit: clients' tokens still match
-  the restored blob. Sessions created after S2 are lost (users log in again); nothing else
-  is affected.
-- **Commit boundary.** One commit.
+- **Tests and acceptance.** `testSessions.mjs` (unit, temp DB): create/lookup/expire/revoke
+  by every path; no plain token in the file; restart persistence; a concurrent second
+  connection waits (busy timeout) instead of failing; the migration imports a valid blob
+  and deletes it in the same transaction; the migration aborts on an unsupported row with
+  the file byte-identical and no `data_migrations` row; the repository refuses to attach
+  without the completion record even when the table has rows; the rollback tool's output
+  boots on the S1 build with every session gone. Battery: `apiE2E`, `connectedE2E`,
+  `m13*`, `m25*`, `m23*Persistence` suites unchanged. Acceptance:
+  `/capabilities.dataLayer.domains.sessions.mode = 'live'`, `data_migrations` contains
+  `0003_sessions_live`, no `sessions` row in `collections`, the shadow report no longer
+  lists `sessions`.
+- **Rollback (corrected).** Restoring the pre-S2 backup is **not** the rollback: the backup
+  holds plain tokens of every session that existed at backup time, so restoring it would
+  revive sessions revoked afterwards (logouts, staff removals, player deletions) and would
+  discard every write made to every other collection since the backup. The rollback is a
+  tool run on a copy: `node scripts/sessionsRollback.mjs <data-dir> <out-dir>` copies the
+  current file (`VACUUM INTO`), deletes the `data_migrations` row `0003_sessions_live`,
+  deletes every row of `sessions`, writes an **empty** `sessions` blob into `collections`,
+  and prints the counts. Starting the S1 build on `<out-dir>` keeps every other
+  collection as it was at rollback time and invalidates every session, so every user
+  signs in again and no revoked session can become usable. The plain tokens cannot be
+  reconstructed from hashes, which is why "all sessions re-login" is the only honest
+  rollback; it is cheap because sessions carry no data of their own.
+- **Removing readable tokens versus removing historical tokens.** After S2 no readable
+  token exists in any *active* table or blob: the `sessions` table holds hashes and the
+  blob row is gone. Historical plain tokens still exist physically in: (a) free pages of
+  `scoutbox.db` until `VACUUM` runs; (b) `scoutbox.db-wal` until `PRAGMA
+  wal_checkpoint(TRUNCATE)` runs; (c) every pre-S2 backup, which is a live credential
+  store until the session TTL (30 days by default) has elapsed from the backup's time or
+  the backup is deleted. The S2 commit adds an operator checklist to `OPERATIONS.md`:
+  checkpoint and vacuum after the cutover boot, then either delete pre-S2 backups or keep
+  them under the same controls as the live directory until the TTL has passed. S2's
+  acceptance includes a test that the vacuumed, checkpointed file contains no plain token
+  string from the fixture; the backup rule is procedural and is stated, not tested.
+- **Commit boundary.** One commit for the pre-S2 admin revocation action on the S1 line;
+  one commit for the cutover (migration, repository, call sites, rollback tool, tests,
+  `OPERATIONS.md`).
 
 ### S3 — Organisations cut over (+ `org_users` rebuild with FK, org tombstone)
 
@@ -570,12 +655,14 @@ performance, existing tests, what this plan is not).
 ### C.3 Backups and dry runs on disposable copies
 
 - Before every cutover boot: `POST /admin/backup` (today's copy of the file and media;
-  from S13 `VACUUM INTO`). The operator then runs the dry run:
-  `node scripts/dataLayerDryRun.mjs <backup-dir>` (added at S2; it copies the backup to a
-  temporary directory, boots the data layer in import mode without the HTTP server, and
-  prints per-table row counts, skipped rows with reasons, findings and timings, then deletes
-  the copy). A cutover is attempted only when the dry run on the latest backup reports zero
-  skipped rows for the domain.
+  from S13 `VACUUM INTO`). The operator then runs the dry run on the backup:
+  `node scripts/validateShadow.mjs <backup-dir> --strict` (exists since S1; it copies the
+  backup with `VACUUM INTO` into a temporary directory, projects there, prints per-table
+  counts, refused rows with reasons and adjusted relationships, deletes the copy, and exits
+  non-zero unless the result is `complete`). Each later step extends the same command to
+  its own domain. A cutover is attempted only when the strict run on the latest backup
+  exits 0; a refused row or an adjusted relationship is repaired or deliberately revoked
+  on the current build first, with the action recorded in `ops_events`.
 - Never restore over a live directory; the restore procedure stays "new empty `DATA_DIR`"
   (`m13/enterprise.mjs:455`).
 

@@ -213,8 +213,9 @@ test('reconciliation report: counts per table, partial vs complete, every projec
   const s = freshDb(); seedOrgUser(s);
   const shadow = createCoreIdentityShadow({ sqlite: s, sessionTtlMs: TTL });
   const db = syntheticSnapshot();
-  s.prepare("INSERT INTO meta (key, value) VALUES ('savedAt', '77')").run(); // the store writes this on every save
-  transaction(s, () => shadow.project(db, { savedAt: 77 }));
+  // The store writes savedAt and the save revision (saveSeq) on every save.
+  s.prepare("INSERT INTO meta (key, value) VALUES ('savedAt', '77'), ('saveSeq', '1')").run();
+  transaction(s, () => shadow.project(db, { savedAt: 77, saveSeq: 1 }));
   const report = shadow.report(db, { enabled: true });
   assert.equal(report.mode, 'shadow'); assert.equal(report.sourceOfTruth, 'snapshot'); assert.equal(report.enabled, true);
   assert.equal(report.status, SHADOW_STATUS.PARTIAL, 'rows were refused, so the result is partial, not complete');
@@ -231,13 +232,24 @@ test('reconciliation report: counts per table, partial vs complete, every projec
   assert.ok(detailedText.includes('gd-dup') && detailedText.includes('UNIQUE'), 'the detailed report names refused rows and reasons');
   assert.equal(detailed.lastError, null);
   for (const leak of ['tok-org', 'tok-player', 'scrypt$', '123456']) assert.ok(!detailedText.includes(leak), `detailed report must not contain ${leak}`);
-  // A clean snapshot reconciles completely.
-  const clean = syntheticSnapshot();
-  clean.orgs = clean.orgs.filter((o) => o.id !== 'org-bad'); clean.guardians = clean.guardians.filter((g) => g.id !== 'gd-dup'); clean.guardians[0].childIds = ['pl-minor'];
-  clean.players = clean.players.filter((p) => p.id !== 'pl-badfoot'); clean.sessions = clean.sessions.filter((x) => x.token && x.sid !== 'sid-n' && x.sid !== 'sid-gh');
-  s.prepare("UPDATE meta SET value = '78' WHERE key = 'savedAt'").run();
-  transaction(s, () => shadow.project(clean, { savedAt: 78 }));
+  assert.equal(report.findings, 2, 'two adjusted relationships in the fixture: pl-orphan.guardianId and gd-3.coGuardianOf');
+  // A snapshot with nothing refused but a dangling relationship is still not complete.
+  const dangling = syntheticSnapshot();
+  dangling.orgs = dangling.orgs.filter((o) => o.id !== 'org-bad'); dangling.guardians = dangling.guardians.filter((g) => g.id !== 'gd-dup'); dangling.guardians[0].childIds = ['pl-minor'];
+  dangling.players = dangling.players.filter((p) => p.id !== 'pl-badfoot'); dangling.sessions = dangling.sessions.filter((x) => x.token && x.sid !== 'sid-n' && x.sid !== 'sid-gh');
+  s.prepare("UPDATE meta SET value = '2' WHERE key = 'saveSeq'").run();
+  transaction(s, () => shadow.project(dangling, { savedAt: 78, saveSeq: 2 }));
+  const notClean = shadow.report(dangling, { enabled: true });
+  assert.equal(notClean.skipped, 0); assert.equal(notClean.findings, 2);
+  assert.equal(notClean.status, SHADOW_STATUS.PARTIAL, 'adjusted relationships keep the result partial'); assert.equal(notClean.reconciled, false);
+  // A genuinely clean snapshot (no refused row, no dangling relationship) reconciles completely.
+  const clean = JSON.parse(JSON.stringify(dangling));
+  clean.players.find((p) => p.id === 'pl-orphan').guardianId = 'gd-1'; clean.guardians[0].childIds = ['pl-minor', 'pl-orphan'];
+  clean.guardians.find((g) => g.id === 'gd-3').coGuardianOf = 'gd-1';
+  s.prepare("UPDATE meta SET value = '3' WHERE key = 'saveSeq'").run();
+  transaction(s, () => shadow.project(clean, { savedAt: 79, saveSeq: 3 }));
   const complete = shadow.report(clean, { enabled: true });
+  assert.equal(complete.skipped, 0); assert.equal(complete.findings, 0);
   assert.equal(complete.status, SHADOW_STATUS.COMPLETE); assert.equal(complete.reconciled, true);
   for (const t of CORE_SHADOW_TABLES) assert.equal(complete.tables[t].tableRows, complete.tables[t].snapshotRows, `${t} fully projected`);
 });
@@ -246,10 +258,10 @@ test('reconciliation report: a projection older than the last save is stale, nev
   const shadow = createCoreIdentityShadow({ sqlite: s, sessionTtlMs: TTL });
   const db = syntheticSnapshot();
   assert.equal(shadow.report(db).status, SHADOW_STATUS.NEVER);
-  s.prepare("INSERT INTO meta (key, value) VALUES ('savedAt', '10')").run();
-  transaction(s, () => shadow.project(db, { savedAt: 10 }));
+  s.prepare("INSERT INTO meta (key, value) VALUES ('savedAt', '10'), ('saveSeq', '4')").run();
+  transaction(s, () => shadow.project(db, { savedAt: 10, saveSeq: 4 }));
   assert.equal(shadow.report(db).status, SHADOW_STATUS.PARTIAL);
-  s.prepare("UPDATE meta SET value = '11' WHERE key = 'savedAt'").run(); // a later save without a projection
+  s.prepare("UPDATE meta SET value = '5' WHERE key = 'saveSeq'").run(); // a later save (same savedAt) without a projection
   const stale = shadow.report(db, { enabled: false });
   assert.equal(stale.status, SHADOW_STATUS.STALE); assert.equal(stale.reconciled, false);
   assert.equal(stale.tables.orgs.tableRows, 3, 'the old rows are still there and are reported as stale, not as current');
@@ -257,12 +269,92 @@ test('reconciliation report: a projection older than the last save is stale, nev
   const broken = syntheticSnapshot();
   let reads = 0;
   Object.defineProperty(broken, 'players', { get() { if (++reads === 1) throw new Error('snapshot unreadable'); return []; } });
-  assert.throws(() => transaction(s, () => shadow.project(broken, { savedAt: 11 })), /snapshot unreadable/);
+  assert.throws(() => transaction(s, () => shadow.project(broken, { savedAt: 11, saveSeq: 5 })), /snapshot unreadable/);
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 3, 'the transaction rollback kept the previous projection');
   const failed = shadow.report(broken, { enabled: true });
   assert.equal(failed.status, SHADOW_STATUS.FAILED); assert.equal(failed.reconciled, false);
   assert.ok(!JSON.stringify(failed).includes('unreadable'), 'error text is not public');
   assert.match(shadow.report(broken, { details: true }).lastError, /snapshot unreadable/);
+});
+
+// ------------------------------------------------------------- regressions found in the handoff review
+test('regression: an adjusted relationship (dangling guardianId) is a finding and is never reported as complete', () => {
+  const s = freshDb(); seedOrgUser(s);
+  const shadow = createCoreIdentityShadow({ sqlite: s, sessionTtlMs: TTL });
+  const db = {
+    orgs: [], guardians: [{ id: 'gd-1', name: 'G', email: 'g@example.com', childIds: [] }],
+    players: [{ id: 'pl-x', name: 'X', dob: '2012-01-01', country: 'GB', guardianId: 'gd-missing', medical: { shared: false, records: [], conditionStatus: 'unknown' } }],
+    sessions: [],
+  };
+  s.prepare("INSERT INTO meta (key, value) VALUES ('savedAt', '5')").run();
+  transaction(s, () => shadow.project(db, { savedAt: 5, saveSeq: 1 }));
+  const r = shadow.report(db, { enabled: true });
+  assert.equal(r.tables.players.findings, 1);
+  assert.equal(r.tables.players.tableRows, 1, 'the player row is written (with guardian_id NULL)');
+  assert.notEqual(r.status, SHADOW_STATUS.COMPLETE, 'an unresolved relationship is not a clean result');
+  assert.equal(r.reconciled, false);
+  assert.equal(r.findings, 1, 'the report totals the findings');
+  assert.deepEqual(shadow.report(db, { details: true }).tables.players.details.findings, [{ id: 'pl-x', finding: 'guardianId gd-missing does not exist; written as NULL' }]);
+});
+test('regression: guardian projection does not depend on array order; a co-guardian listed before their primary keeps the link', () => {
+  const run = (guardians) => {
+    const s = freshDb();
+    const shadow = createCoreIdentityShadow({ sqlite: s, sessionTtlMs: TTL });
+    const db = { orgs: [], guardians, players: [], sessions: [] };
+    const result = transaction(s, () => shadow.project(db));
+    return { s, result };
+  };
+  const primary = { id: 'gd-primary', name: 'Primary', email: 'p@example.com', childIds: [] };
+  const co = { id: 'gd-co', name: 'Co', email: 'c@example.com', coGuardianOf: 'gd-primary', childIds: [] };
+  for (const order of [[co, primary], [primary, co]]) {
+    const { s, result } = run(order);
+    assert.deepEqual(result.tables.guardians.skipped, [], `no guardian is refused for order ${order.map((g) => g.id).join(',')}`);
+    assert.deepEqual(result.tables.guardians.findings, []);
+    assert.equal(s.prepare("SELECT co_guardian_of FROM guardians WHERE id = 'gd-co'").get().co_guardian_of, 'gd-primary', 'the valid link is kept');
+    assert.equal(s.prepare("SELECT co_guardian_of FROM guardians WHERE id = 'gd-primary'").get().co_guardian_of, null);
+    assert.equal(s.prepare('PRAGMA foreign_keys').get().foreign_keys, 1, 'foreign keys stay on');
+  }
+  // A genuinely missing target is an explicit finding, written as NULL, never silently dropped or refused.
+  const { s, result } = run([{ ...co, coGuardianOf: 'gd-nobody' }, primary]);
+  assert.deepEqual(result.tables.guardians.findings, [{ id: 'gd-co', finding: 'coGuardianOf gd-nobody does not exist; written as NULL' }]);
+  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM guardians').get().n, 2);
+  // A target that was itself refused (here: no name, NOT NULL) is reported, not linked to a row that does not exist.
+  const refused = { id: 'gd-refused', name: null, email: 'r@example.com', childIds: [] };
+  const r3 = run([{ ...co, coGuardianOf: 'gd-refused' }, refused, primary]);
+  assert.deepEqual(r3.result.tables.guardians.skipped.map((x) => x.id), ['gd-refused']);
+  assert.deepEqual(r3.result.tables.guardians.findings, [{ id: 'gd-co', finding: 'coGuardianOf gd-refused refers to a guardian that was not written; written as NULL' }]);
+  assert.equal(r3.s.prepare("SELECT co_guardian_of FROM guardians WHERE id = 'gd-co'").get().co_guardian_of, null);
+});
+test('regression: freshness is a persisted save revision, not the savedAt timestamp (same savedAt, different content → stale)', () => {
+  const dir = tempDir('shadow-rev');
+  let store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const db = syntheticSnapshot(); db.users = [];
+  let layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, shadowValidation: true });
+  store.save({ savedAt: 1, idCounter: 1000, db });
+  assert.equal(layer.report().shadow.status, SHADOW_STATUS.PARTIAL, 'projected in this save');
+  assert.equal(store.sqlite.prepare("SELECT name FROM players WHERE id = 'pl-adult'").get().name, 'Adult Player');
+  store.sqlite.close();
+  // Restart with projection off, change a name, save with the SAME savedAt.
+  const db2 = JSON.parse(JSON.stringify(db));
+  db2.players.find((p) => p.id === 'pl-adult').name = 'Renamed Player';
+  store = openStore(dir, { tableBacked: TABLE_BACKED });
+  layer = attachDataLayer({ db: db2, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  store.save({ savedAt: 1, idCounter: 1000, db: db2 });
+  const r = layer.report().shadow;
+  assert.equal(store.sqlite.prepare("SELECT name FROM players WHERE id = 'pl-adult'").get().name, 'Adult Player', 'the shadow still holds the old name');
+  assert.equal(r.status, SHADOW_STATUS.STALE, 'a save made while projection was off makes the shadow stale regardless of savedAt');
+  assert.equal(r.reconciled, false);
+  assert.ok(r.snapshotRevision > r.lastProjectionRevision, 'the file carries a revision the projection has not seen');
+  // A failed projection leaves the revision behind too (a restarted server builds a fresh db object).
+  store.sqlite.close();
+  const db3 = JSON.parse(JSON.stringify(db2));
+  store = openStore(dir, { tableBacked: TABLE_BACKED });
+  layer = attachDataLayer({ db: db3, store, nextId, persist: () => {}, sessionTtlMs: TTL, shadowValidation: true });
+  store.setProjection(() => { throw new Error('boom'); });
+  store.save({ savedAt: 1, idCounter: 1000, db: db3 });
+  assert.notEqual(layer.report().shadow.status, SHADOW_STATUS.COMPLETE);
+  assert.equal(layer.report().shadow.reconciled, false);
+  store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
 // ------------------------------------------------------------- the store

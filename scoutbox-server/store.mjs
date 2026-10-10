@@ -44,6 +44,7 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
       sqlite: null,
       setProjection() {},
       projectionState: () => ({ enabled: false, failures: 0, lastError: null }),
+      revision: () => 0,
       load() {
         try { return JSON.parse(fs.readFileSync(jsonFile, 'utf8')); } catch { return null; }
       },
@@ -63,6 +64,7 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
   const upsertCollection = sqlite.prepare('INSERT INTO collections (name, value) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value');
   const deleteCollection = sqlite.prepare('DELETE FROM collections WHERE name = ?');
   const upsertMeta = sqlite.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+  const readSaveSeq = sqlite.prepare('SELECT value FROM meta WHERE key = ?');
 
   // Server mode only: an optional projection the data layer registers
   // (repositories/shadow.mjs) when shadow validation is enabled. It runs
@@ -97,8 +99,11 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
       if (!serverMode) Object.assign(db, readTableBacked(sqlite));
       const idCounter = Number(sqlite.prepare('SELECT value FROM meta WHERE key = ?').get('idCounter')?.value) || 0;
       const savedAt = Number(sqlite.prepare('SELECT value FROM meta WHERE key = ?').get('savedAt')?.value) || null;
-      return { db, idCounter, savedAt };
+      const saveSeq = Number(sqlite.prepare('SELECT value FROM meta WHERE key = ?').get('saveSeq')?.value) || 0;
+      return { db, idCounter, savedAt, saveSeq };
     },
+    /** The persisted save revision: incremented by every save of the snapshot, in either mode. */
+    revision() { return Number(readSaveSeq.get('saveSeq')?.value) || 0; },
     save(snapshot) {
       sqlite.exec('BEGIN');
       try {
@@ -109,10 +114,14 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
         }
         upsertMeta.run('idCounter', String(snapshot.idCounter));
         upsertMeta.run('savedAt', String(snapshot.savedAt ?? Date.now()));
+        // The save revision is what ties a shadow projection to the snapshot
+        // it was taken from: wall-clock savedAt can repeat, this cannot.
+        const saveSeq = (Number(readSaveSeq.get('saveSeq')?.value) || 0) + 1;
+        upsertMeta.run('saveSeq', String(saveSeq));
         if (serverMode && projection) {
           sqlite.exec('SAVEPOINT shadow');
           try {
-            projection(snapshot);
+            projection({ ...snapshot, saveSeq });
             sqlite.exec('RELEASE shadow');
           } catch (err) {
             sqlite.exec('ROLLBACK TO shadow');

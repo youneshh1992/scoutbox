@@ -50,7 +50,9 @@ other worktrees (`/home/user/scoutbox` on `claude/desktop-project-migration-wyk3
 - `scoutbox-server/store.mjs` opens `DATA_DIR/scoutbox.db` with `node:sqlite`
   (`DatabaseSync`), sets `PRAGMA journal_mode = WAL` and `PRAGMA foreign_keys = ON`
   (`store.mjs:59-60`), and keeps two tables: `collections(name TEXT PRIMARY KEY, value TEXT)`
-  and `meta(key, value)` holding `idCounter` and `savedAt`.
+  and `meta(key, value)` holding `idCounter`, `savedAt` and, since the S1 correction, the
+  save revision `saveSeq` (advanced by every save; the shadow's freshness key) and the
+  shadow's counts-only summary (`shadowSaveSeq`, `shadowProjectedAt`, `shadowSummary`).
 - The whole in-memory `db` object is the database. `save()` serialises every collection to
   JSON and upserts it as one row (`store.mjs:63`, one `INSERT ... ON CONFLICT` per
   collection, in one transaction). `persist()` debounces 2 s (`server.mjs:145-155`);
