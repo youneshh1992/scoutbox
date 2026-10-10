@@ -196,6 +196,9 @@ const dataLayer = attachDataLayer({
   db, store, persist,
   nextId: (prefix) => nextId(prefix),
   sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
+  // Opt-in only: re-projecting the core identity shadow inside every save
+  // costs about ten times the blob save at 10k players (scripts/dataLayerPerf.mjs).
+  shadowValidation: process.env.SCOUTBOX_SHADOW_VALIDATION === '1',
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
 const { users } = dataLayer;
@@ -4122,6 +4125,13 @@ let m28Ctx = null; // M23 P6 — assigned when the Offer module registers, below
 let m29Ctx = null; // M23 P7 — assigned when the Signing module registers, below
 const tsRouter = express.Router();
 app.use('/ts', (req, res, next) => (m25Ctx ? m25Ctx.reviewerAuth(req, res, next) : res.status(503).json({ error: 'REVIEWER_LANE_NOT_READY' })), tsRouter);
+
+// The data-layer report with row-level detail: ids of rows the target schema
+// refused and why, and the last projection error. Public /capabilities carries
+// the counts and statuses only.
+adminRouter.get('/data-layer', (_req, res) => {
+  res.json(dataLayer.report({ details: true }));
+});
 
 adminRouter.get('/overview', (_req, res) => {
   res.json({

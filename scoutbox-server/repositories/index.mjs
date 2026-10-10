@@ -9,8 +9,12 @@
  *   - LIVE tables, owned by a repository: org_users (step S0). Writes go
  *     through the repository and the blob is never written again.
  *   - SHADOW tables (step S1): orgs, guardians, players, guardian_children,
- *     sessions. The blob stays the source of truth; the store re-projects
- *     them on every save and the report shows what the target schema refuses.
+ *     sessions. The blob stays the source of truth. The projection that
+ *     fills them from the snapshot is OFF by default; with
+ *     `shadowValidation: true` (SCOUTBOX_SHADOW_VALIDATION=1) the store
+ *     re-projects them inside every save, and the report shows what the
+ *     target schema refuses. `scripts/validateShadow.mjs` runs the same
+ *     projection against a copy of a database file.
  *
  * Order at boot (server.mjs): seed → loadSnapshot → snapshot migrations →
  * attachDataLayer → module registration → listen. A migrated collection is
@@ -63,7 +67,7 @@ export function writeTableBacked(sqlite, db) {
   return written;
 }
 
-export function attachDataLayer({ db, store, nextId, persist, sessionTtlMs, log = () => {}, warn = (m) => console.warn(m) }) {
+export function attachDataLayer({ db, store, nextId, persist, sessionTtlMs, shadowValidation = false, log = () => {}, warn = (m) => console.warn(m) }) {
   const sqlite = store.sqlite ?? null;
   const migrations = sqlite ? runDataMigrations(sqlite, DATA_MIGRATIONS, { log }) : { ran: [], applied: 0, known: DATA_MIGRATIONS.length };
 
@@ -71,20 +75,34 @@ export function attachDataLayer({ db, store, nextId, persist, sessionTtlMs, log 
   const usersBoot = users.attach(db.users);
   Object.defineProperty(db, 'users', { value: users.view, writable: false, configurable: false, enumerable: true });
 
-  // The shadow runs only on the SQLite engine; it has nothing to project
-  // into on the JSON fallback.
+  // The shadow exists only on the SQLite engine (nothing to project into on
+  // the JSON fallback), and projects during saves only when validation is
+  // switched on. Off by default: a normal save then never touches it.
   const shadow = sqlite ? createCoreIdentityShadow({ sqlite, sessionTtlMs }) : null;
-  if (shadow) store.setProjection?.((snapshotDb) => shadow.project(snapshotDb));
+  const shadowEnabled = Boolean(shadow && shadowValidation);
+  if (shadowEnabled) {
+    store.setProjection?.((snapshot) => shadow.project(snapshot.db, { savedAt: snapshot.savedAt }));
+    log('data layer: shadow validation is ON — the five core identity tables are re-projected inside every save');
+  }
 
   return {
     users,
     shadow,
     migrations,
     boot: { users: usersBoot },
-    report: () => ({
+    /** `details: true` adds row ids, refusal reasons and error text — admin and tooling only. */
+    report: ({ details = false } = {}) => ({
       ...dataSchemaReport(sqlite, DATA_MIGRATIONS),
       domains: { users: { rows: users.count(), mode: 'live' } },
-      shadow: shadow ? { ...shadow.report(db), store: store.projectionState?.() ?? null } : { mode: 'unavailable', note: 'The JSON fallback engine has no tables.' },
+      shadow: shadow
+        ? { ...shadow.report(db, { enabled: shadowEnabled, details }), store: publicStoreState(store.projectionState?.(), details) }
+        : { mode: 'unavailable', note: 'The JSON fallback engine has no tables.' },
     }),
   };
+}
+
+// The store's error text is internal; only the admin report carries it.
+function publicStoreState(state, details) {
+  if (!state) return null;
+  return details ? state : { enabled: state.enabled, failures: state.failures, lastErrorAt: state.lastError?.at ?? null };
 }

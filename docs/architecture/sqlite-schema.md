@@ -1,9 +1,10 @@
 # ScoutBox relational SQLite schema
 
-Status: design complete, executable DDL in `docs/architecture/sql/`, first implementation
-step (S1, core identity shadow) implemented. Companion document:
-[`sqlite-migration-plan.md`](./sqlite-migration-plan.md). Written 10 October 2026 on branch
-`feat/sqlite-schema`.
+Status: design proposed, executable DDL in `docs/architecture/sql/`, first implementation
+step (S1, core identity shadow) implemented and corrected after acceptance review (§5.0
+says exactly which parts are implemented, proposed, or waiting on a decision). Companion
+document: [`sqlite-migration-plan.md`](./sqlite-migration-plan.md). Written 10 October
+2026 on branch `feat/sqlite-schema`.
 
 Every statement in this document is tagged by how much we know:
 
@@ -248,6 +249,11 @@ them.
 Not stores (per `storeContract.mjs NOT_A_STORE`): `schema` (the snapshot migration
 registry's own record; superseded by `data_migrations` at S14) and `json` (a filename).
 
+Coverage check (run for the acceptance review): every one of the 136 names in
+`storeContract.mjs CONTRACT_STORES` appears as a row of the table above, and every table
+in the DDL files carries a `-- source:` header naming the collection or nested path it
+comes from, so the mapping is closed in both directions.
+
 ### 3.2 Nested structures created dynamically
 
 These are the nested arrays and objects that modules add to other modules' records at
@@ -374,6 +380,59 @@ this branch: 13 checks passed.
 | `06_agent_compliance_transactions.sql` | agent profiles, affiliations, representation agreements, reviewers, jurisdiction policies, regulatory reviews and consents, compliance contexts, agent transactions, documents | 61 | S11 |
 | `07_development_boxcam_discovery.sql` | development objectives and plans, drill guidance, Box Cam sessions, challenges, assignments, disputes, Combine, CV results, briefs, Nobody Missed, Second Look, watchlists, exposure, review-later, suggestions, calibration, fixtures, coverage | 57 | S12 |
 | `08_operations_integrations.sql` | API keys, webhooks, invites, SSO, support, imports and prospects, groups, uploads, saved searches, open trials, matchdays, friendlies, invoices, plans, archetypes, reputation seed, callback ids, operational settings | 44 | S13 |
+
+### 5.0 What is implemented, what is proposed, what waits on a decision
+
+| State | Tables | Where |
+|---|---|---|
+| **Implemented, live** (a repository owns the rows; the blob is gone) | 1: `org_users` | migration `0001` (S0) |
+| **Implemented, shadow** (tables exist with their final constraints; filled only when validation is switched on; nothing reads them) | 5: `orgs`, `guardians`, `players`, `guardian_children`, `sessions` | migration `0002` (S1) |
+| **Proposed** (executable DDL, asserted to load, no migration, no repository) | 314 | files 01 (12 `player_*`), 02–08 |
+| Of the proposed, **blocked on an unresolved decision** | file 02 (55 tables): every `player_id` lacks a foreign key until the tombstone decision O1 is implemented at S4, and `org_id RESTRICT` depends on O2; `webhook_endpoints.secret` and `org_users.mfa_json` depend on O3; `exposure_events`, `webhook_deliveries`, `dispatches`, `outbox` retention depends on O4; `assessments` depends on O6; `second_look_items` key on O7; `representations` on O8; `agent_profile_facets.member_association` sentinel on O10 | §10, §12 |
+
+Counts: 6 implemented, 314 proposed, of which 55 (file 02) cannot be cut over until S4
+has shipped the tombstone and the file has been amended with the player foreign keys
+(plan S8 "Depends on"). The remaining open questions change columns or retention rules,
+not table boundaries.
+
+### 5.0.1 Why 320 tables and 388 indexes
+
+The counts follow from the inventory, not from a design preference. Classified by the
+`-- source:` header of each `CREATE TABLE` (script run on the files; `scratchpad` evidence
+reproduced here):
+
+| Origin of the table | Count | Rule that produced it |
+|---|---|---|
+| A top-level collection in `storeContract.mjs` (136 stores, minus `secrets`, `mediaBlobs`, `boxSessionEvents`, `deliveryFailInject`/`deliveryCentreSince` → `ops_settings`, `verMigrated` → `ver_migrations`, and the two `orgs` facets that moved to their own files) | 129 | one table per persistent collection (§4) |
+| A nested array or object inside a record (`players[].media[]`, `trials.schedule.sessions[]`, `groups[].memberOrgIds[]`, …) | 155 | §4: nothing structured that is queried stays in JSON; arrays of rows become child tables with the parent's id; string arrays that are filtered or joined become `(parent_id, value)` tables |
+| An append-only `history[]` array | 35 | §4: every history array becomes `<table>_history` |
+| Shared infrastructure (`idempotency_keys`) | 1 | one implementation of the replay/conflict rule |
+
+The child-table count is the large one. It is driven by the model, not the schema: a
+player record alone carries twelve arrays; a trial carries schedule, revisions, attendance,
+day staff, consents, check-ins, status events, reminders and history; agent transactions
+carry parties, notes, threads and term versions. Keeping these as JSON would have been
+fewer tables and would have kept every per-element query a full-record parse, which is
+the defect the migration exists to remove. Where an array is read only whole and never
+queried per element, it *was* kept as `*_json` with a stated reason (`box_sessions.obs_json`,
+`reason_codes_json`, `trace_json`, rule parameters), so the count is the lower one that the
+read patterns allow.
+
+Indexes (388 = 65 unique + 323 plain):
+
+| Kind | Count | Evidence required |
+|---|---|---|
+| Unique indexes for natural keys the code enforces by scanning today (one open room per org/player, one pending request, one entry per challenge/player, fingerprints, token hashes, e-mail) | 65 | the scan the code performs is cited in the table header; the index is marked "enforced by code today" or "NEW, validate against data first" |
+| Plain indexes for a read the code performs (lookup by org, by player, by status, by token hash, sweep by due time) | 323 | the header's `-- notes:` names the reader (file:line) for the index |
+
+The index headers are the evidence and they are uneven: files 02, 04 and 06 cite the
+reader for every index in the table header (46, 8 and 70 comment lines naming indexes),
+files 01, 03, 05, 07 and 08 cite most and leave some as "natural key of the child table"
+(the `(parent_id)` index on a child table, which every parent read needs). No index was
+added without a named read or a natural key; none was removed for this review. The test
+only proves the indexes reference existing tables; whether an index earns its write cost
+is settled per domain at its step with the perf harness (plan C.7), which is why the plan
+says "indexes are reviewed by hand at the step".
 
 ### 5.1 Identity (file 01) — entities, ownership, lifecycle
 
@@ -537,7 +596,8 @@ of its table. The ones that change behaviour at scale:
 | `api_keys (key_hash)` unique, `ver_tokens (hash)` unique, `passport_shares (token_hash)` unique, `org_invites (token_hash)`, `pairing_codes (code_hash)`, `email_challenges (org_id)` | token lookups |
 
 Indexes without a read pattern were not created; the DDL test only checks that each index
-names an existing table, the review of necessity is by hand.
+names an existing table, the review of necessity is by hand (§5.0.1 gives the counts by
+kind and where the evidence for each sits).
 
 ---
 
@@ -564,10 +624,11 @@ DECISIONs, some already in force:
 - **Transaction boundaries.** Each HTTP mutation that touches more than one table runs inside
   one `transaction(sqlite, fn)` (`repositories/database.mjs`), opened by the route's service
   function, so a failure leaves nothing half-written; reads run outside transactions. During
-  the migration, the snapshot save transaction wraps the shadow projection in a `SAVEPOINT`
-  (`store.mjs`), so a projection failure rolls back only the shadow. Table migrations each run
-  in their own transaction (`runDataMigrations`) and abort the boot on failure with the file
-  untouched.
+  the migration, when shadow validation is switched on, the snapshot save transaction wraps
+  the projection in a `SAVEPOINT` (`store.mjs`), so a projection failure rolls back only the
+  shadow; with validation off (the default) the save transaction is the S0 one. Table
+  migrations each run in their own transaction (`runDataMigrations`) and abort the boot on
+  failure with the file untouched.
 - **Synchronous mode.** Default (`FULL` in WAL mode is `NORMAL` for the WAL file). Keep the
   default; the durability guarantee is "committed transactions survive a process crash", and
   a power loss can lose the last checkpointed transactions only in `NORMAL`. OPEN: set
@@ -684,14 +745,17 @@ DECISIONs:
 - **What survives deletion is listed, not implied.** Each DDL header's `lifecycle` line says
   whether the table is erased, cascaded or retained on subject deletion; the plan's S4
   acceptance test enumerates them and fails if a new table lacks the statement.
-- **One inconsistency to reconcile at S8 (OPEN O9).** File 02 (recruitment) carries no
-  foreign key on any `player_id` because its author designed against today's hard delete
-  (a `SET NULL` FK would erase the id the tombstone exists for); files 03–08 reference
-  `players(id)` with `RESTRICT` or `CASCADE` (48 references), which presumes the tombstone
-  above. Both are documented in the file headers. With the tombstone in place at S4, S8 adds
-  `REFERENCES players(id) ON DELETE RESTRICT` to the recruitment tables so the model is
-  uniform; until then the recruitment repositories check existence in code, as the routes do
-  today.
+- **One unresolved relational-integrity point (OPEN O9), with its resolving step.** File 02
+  (recruitment) carries no foreign key on any `player_id` because its author designed
+  against today's hard delete (a `SET NULL` FK would erase the id the tombstone exists
+  for); files 03–08 reference `players(id)` with `RESTRICT` or `CASCADE` (48 references),
+  which presumes the tombstone above. Both are documented in the file headers. This is not
+  a finished design: the recruitment domain cannot be cut over while its player references
+  are unenforced. Resolution, in order: O1 is decided by the Founder before S4; **S4**
+  implements the tombstone (`players.deleted_at`, erasure of personal columns, the
+  per-table lifecycle statements); **S8a** amends `02_recruitment.sql` to add `REFERENCES
+  players(id) ON DELETE RESTRICT` on every `player_id` and ships it in migration
+  `0009_recruitment`. Until S8a lands, the file 02 DDL is proposed, not accepted.
 - **Guardian and org deletion.** New routes in S4 (guardian: only when no non-deleted child
   remains) and S3 (org: `suspended` plus `deleted_at`; staff and sessions cascade; recruitment
   rows keep the org tombstone). OPEN: the Founder's policy on org deletion with open

@@ -43,7 +43,7 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
       engine: 'json-fallback',
       sqlite: null,
       setProjection() {},
-      projectionState: () => ({ failures: 0, lastError: null }),
+      projectionState: () => ({ enabled: false, failures: 0, lastError: null }),
       load() {
         try { return JSON.parse(fs.readFileSync(jsonFile, 'utf8')); } catch { return null; }
       },
@@ -64,10 +64,11 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
   const deleteCollection = sqlite.prepare('DELETE FROM collections WHERE name = ?');
   const upsertMeta = sqlite.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
 
-  // Server mode only: a projection the data layer registers (repositories/
-  // shadow.mjs). It runs inside every save transaction, in a savepoint of its
-  // own, so a projection failure is recorded and rolled back without touching
-  // the blob save. `projectionFailures` is the count of such failures.
+  // Server mode only: an optional projection the data layer registers
+  // (repositories/shadow.mjs) when shadow validation is enabled. It runs
+  // inside every save transaction, in a savepoint of its own, so a projection
+  // failure is recorded and rolled back without touching the blob save. With
+  // no projection registered (the default) a save is exactly the S0 path.
   let projection = null;
   let projectionFailures = 0;
   let lastProjectionError = null;
@@ -76,7 +77,7 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
     engine: 'sqlite',
     sqlite,
     setProjection(fn) { projection = typeof fn === 'function' ? fn : null; },
-    projectionState: () => ({ failures: projectionFailures, lastError: lastProjectionError }),
+    projectionState: () => ({ enabled: projection !== null, failures: projectionFailures, lastError: lastProjectionError }),
     load() {
       const rows = sqlite.prepare('SELECT name, value FROM collections').all();
       if (rows.length === 0) {
@@ -111,7 +112,7 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
         if (serverMode && projection) {
           sqlite.exec('SAVEPOINT shadow');
           try {
-            projection(snapshot.db);
+            projection(snapshot);
             sqlite.exec('RELEASE shadow');
           } catch (err) {
             sqlite.exec('ROLLBACK TO shadow');

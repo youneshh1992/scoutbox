@@ -200,9 +200,11 @@ test('attachDataLayer: db.users becomes the repository view and cannot be replac
   assert.throws(() => { db.users = []; }, TypeError);
   assert.throws(() => { db.users.push({}); }, /repositories/);
   assert.equal(layer.report().domains.users.rows, 1);
-  // org_users is live; the five core identity tables exist as the S1 shadow.
+  // org_users is live; the five core identity tables exist as the S1 shadow,
+  // whose projection is off unless asked for.
   assert.deepEqual(layer.report().tables, ['guardian_children', 'guardians', 'org_users', 'orgs', 'players', 'sessions']);
-  assert.equal(layer.report().shadow.mode, 'shadow');
+  assert.equal(layer.report().shadow.enabled, false);
+  assert.equal(layer.report().shadow.status, 'never');
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 test('store (server mode): a table-backed collection is never written as a blob again, and a stale blob row is deleted on the next save', () => {

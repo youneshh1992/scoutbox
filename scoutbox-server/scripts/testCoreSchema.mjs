@@ -4,13 +4,15 @@
 // runs on throwaway databases under the OS temp directory; nothing touches
 // DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations, transaction } from '../repositories/database.mjs';
-import { createCoreIdentityShadow, CORE_SHADOW_TABLES } from '../repositories/shadow.mjs';
+import { createCoreIdentityShadow, CORE_SHADOW_TABLES, SHADOW_STATUS } from '../repositories/shadow.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
 import * as m0002 from '../repositories/migrations/0002_core_identity_shadow.mjs';
@@ -207,44 +209,129 @@ test('projection: re-running on a changed snapshot is deterministic (rewrite, no
   assert.equal(s.prepare("SELECT name FROM orgs WHERE id = 'org-a'").get().name, 'Alpha United', 'a changed field is current');
   assert.equal(s.prepare("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'player'").get().n, 0);
 });
-test('reconciliation report: counts per table, refused rows and findings, never a token or a password', () => {
+test('reconciliation report: counts per table, partial vs complete, every projected row accounted for, never a token or a password', () => {
   const s = freshDb(); seedOrgUser(s);
   const shadow = createCoreIdentityShadow({ sqlite: s, sessionTtlMs: TTL });
   const db = syntheticSnapshot();
-  transaction(s, () => shadow.project(db));
-  const report = shadow.report(db);
-  assert.equal(report.mode, 'shadow'); assert.equal(report.sourceOfTruth, 'snapshot');
-  assert.deepEqual(report.tables.orgs, { ...report.tables.orgs, snapshotRows: 4, tableRows: 3, skipped: 1, findings: 0, reconciled: true });
-  assert.deepEqual(report.tables.guardian_children, { ...report.tables.guardian_children, snapshotRows: 3, tableRows: 2, skipped: 1, reconciled: true });
-  assert.deepEqual(report.tables.sessions, { ...report.tables.sessions, snapshotRows: 8, tableRows: 5, skipped: 3, reconciled: true });
-  const text = JSON.stringify(report);
-  assert.ok(!text.includes('tok-org') && !text.includes('scrypt$'), 'the report carries ids and reasons only');
+  s.prepare("INSERT INTO meta (key, value) VALUES ('savedAt', '77')").run(); // the store writes this on every save
+  transaction(s, () => shadow.project(db, { savedAt: 77 }));
+  const report = shadow.report(db, { enabled: true });
+  assert.equal(report.mode, 'shadow'); assert.equal(report.sourceOfTruth, 'snapshot'); assert.equal(report.enabled, true);
+  assert.equal(report.status, SHADOW_STATUS.PARTIAL, 'rows were refused, so the result is partial, not complete');
+  assert.equal(report.reconciled, false);
+  assert.deepEqual(report.tables.orgs, { ...report.tables.orgs, snapshotRows: 4, tableRows: 3, projectedRows: 4, skipped: 1, findings: 0, accountedFor: true });
+  assert.deepEqual(report.tables.guardian_children, { ...report.tables.guardian_children, snapshotRows: 3, tableRows: 2, skipped: 1, accountedFor: true });
+  assert.deepEqual(report.tables.sessions, { ...report.tables.sessions, snapshotRows: 8, tableRows: 5, skipped: 3, accountedFor: true });
+  assert.equal(report.tables.players.findings, 1);
+  // The public report carries no row ids, reasons, tokens or hashes; the detailed one adds ids and reasons only.
+  const publicText = JSON.stringify(report);
+  for (const leak of ['tok-org', 'scrypt$', 'gd-dup', 'sid-gh', 'pl-badfoot', 'details', 'lastError']) assert.ok(!publicText.includes(leak), `public report must not contain ${leak}`);
+  const detailed = shadow.report(db, { enabled: true, details: true });
+  const detailedText = JSON.stringify(detailed);
+  assert.ok(detailedText.includes('gd-dup') && detailedText.includes('UNIQUE'), 'the detailed report names refused rows and reasons');
+  assert.equal(detailed.lastError, null);
+  for (const leak of ['tok-org', 'tok-player', 'scrypt$', '123456']) assert.ok(!detailedText.includes(leak), `detailed report must not contain ${leak}`);
+  // A clean snapshot reconciles completely.
+  const clean = syntheticSnapshot();
+  clean.orgs = clean.orgs.filter((o) => o.id !== 'org-bad'); clean.guardians = clean.guardians.filter((g) => g.id !== 'gd-dup'); clean.guardians[0].childIds = ['pl-minor'];
+  clean.players = clean.players.filter((p) => p.id !== 'pl-badfoot'); clean.sessions = clean.sessions.filter((x) => x.token && x.sid !== 'sid-n' && x.sid !== 'sid-gh');
+  s.prepare("UPDATE meta SET value = '78' WHERE key = 'savedAt'").run();
+  transaction(s, () => shadow.project(clean, { savedAt: 78 }));
+  const complete = shadow.report(clean, { enabled: true });
+  assert.equal(complete.status, SHADOW_STATUS.COMPLETE); assert.equal(complete.reconciled, true);
+  for (const t of CORE_SHADOW_TABLES) assert.equal(complete.tables[t].tableRows, complete.tables[t].snapshotRows, `${t} fully projected`);
+});
+test('reconciliation report: a projection older than the last save is stale, never reconciled; a thrown projection is failed', () => {
+  const s = freshDb(); seedOrgUser(s);
+  const shadow = createCoreIdentityShadow({ sqlite: s, sessionTtlMs: TTL });
+  const db = syntheticSnapshot();
+  assert.equal(shadow.report(db).status, SHADOW_STATUS.NEVER);
+  s.prepare("INSERT INTO meta (key, value) VALUES ('savedAt', '10')").run();
+  transaction(s, () => shadow.project(db, { savedAt: 10 }));
+  assert.equal(shadow.report(db).status, SHADOW_STATUS.PARTIAL);
+  s.prepare("UPDATE meta SET value = '11' WHERE key = 'savedAt'").run(); // a later save without a projection
+  const stale = shadow.report(db, { enabled: false });
+  assert.equal(stale.status, SHADOW_STATUS.STALE); assert.equal(stale.reconciled, false);
+  assert.equal(stale.tables.orgs.tableRows, 3, 'the old rows are still there and are reported as stale, not as current');
+  // A projection that throws part-way: the caller rolls back; the report says failed and names the error only in detail.
+  const broken = syntheticSnapshot();
+  let reads = 0;
+  Object.defineProperty(broken, 'players', { get() { if (++reads === 1) throw new Error('snapshot unreadable'); return []; } });
+  assert.throws(() => transaction(s, () => shadow.project(broken, { savedAt: 11 })), /snapshot unreadable/);
+  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 3, 'the transaction rollback kept the previous projection');
+  const failed = shadow.report(broken, { enabled: true });
+  assert.equal(failed.status, SHADOW_STATUS.FAILED); assert.equal(failed.reconciled, false);
+  assert.ok(!JSON.stringify(failed).includes('unreadable'), 'error text is not public');
+  assert.match(shadow.report(broken, { details: true }).lastError, /snapshot unreadable/);
 });
 
 // ------------------------------------------------------------- the store
-test('store (server mode): the shadow is rewritten inside every save and survives a restart', () => {
-  const dir = tempDir('shadow-store');
-  let store = openStore(dir, { tableBacked: TABLE_BACKED });
+test('attachDataLayer (default): shadow validation is off, a save is the plain blob save and never touches the shadow tables', () => {
+  const dir = tempDir('shadow-off');
+  const store = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = syntheticSnapshot();
   db.users = [{ id: 'usr-9001', orgId: 'org-a', name: 'Maria Keane', role: 'Head of Recruitment', createdAt: 1 }];
   const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  assert.equal(store.projectionState().enabled, false, 'no projection is registered unless asked for');
+  // Count every SQL statement the store executes during a save: no SAVEPOINT, no shadow writes.
+  const exec = store.sqlite.exec.bind(store.sqlite);
+  const seen = [];
+  store.sqlite.exec = (sql) => { seen.push(sql); return exec(sql); };
+  for (let i = 1; i <= 3; i++) store.save({ savedAt: i, idCounter: 1000, db });
+  assert.ok(!seen.some((sql) => /SAVEPOINT|shadow/i.test(sql)), 'no savepoint and no shadow statement in the save path');
+  for (const t of CORE_SHADOW_TABLES) assert.equal(store.sqlite.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n, 0, `${t} untouched`);
+  assert.equal(store.load().db.orgs.length, 4, 'the blob is saved exactly as before');
+  const report = layer.report();
+  assert.equal(report.shadow.enabled, false); assert.equal(report.shadow.status, SHADOW_STATUS.NEVER); assert.equal(report.shadow.reconciled, false);
+  assert.deepEqual(report.shadow.store, { enabled: false, failures: 0, lastErrorAt: null });
+  assert.equal(report.domains.users.mode, 'live', 'the S0 live table is unaffected');
+  store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+});
+test('attachDataLayer (shadowValidation: true): the shadow is rewritten inside every save, survives a restart, and goes stale when validation is switched off', () => {
+  const dir = tempDir('shadow-on');
+  let store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const db = syntheticSnapshot();
+  db.users = [{ id: 'usr-9001', orgId: 'org-a', name: 'Maria Keane', role: 'Head of Recruitment', createdAt: 1 }];
+  let layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, shadowValidation: true });
+  assert.equal(store.projectionState().enabled, true);
   store.save({ savedAt: 1, idCounter: 1000, db });
   assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 3);
   assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 5);
-  const report = layer.report();
-  assert.equal(report.shadow.tables.players.tableRows, 3);
+  let report = layer.report();
+  assert.equal(report.shadow.enabled, true); assert.equal(report.shadow.status, SHADOW_STATUS.PARTIAL);
+  assert.equal(report.shadow.lastProjectionSavedAt, 1); assert.equal(report.shadow.snapshotSavedAt, 1);
   assert.deepEqual(report.tables, ['guardian_children', 'guardians', 'org_users', 'orgs', 'players', 'sessions']);
-  assert.deepEqual(report.shadow.store, { failures: 0, lastError: null });
+  assert.deepEqual(report.shadow.store, { enabled: true, failures: 0, lastErrorAt: null });
+  // Save again with a changed snapshot: rewritten, no duplicates, no stale row.
+  db.players.push({ id: 'pl-new', name: 'New', dob: '2001-01-01', country: 'GB', medical: { shared: false, records: [], conditionStatus: 'unknown' } });
+  db.orgs = db.orgs.filter((o) => o.id !== 'org-c');
+  store.save({ savedAt: 2, idCounter: 1000, db });
+  assert.deepEqual(store.sqlite.prepare('SELECT id FROM players ORDER BY id').all().map((r) => r.id), ['pl-adult', 'pl-minor', 'pl-new', 'pl-orphan']);
+  assert.equal(store.sqlite.prepare("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-c'").get().n, 0, 'a removed org is gone');
   store.sqlite.close();
-  // Restart: the tables are still there, and the blob snapshot still loads without them.
+  // Restart with validation still on: the persisted summary says the tables match the last save.
+  // (A restarted server builds a fresh db object; the old one carries the frozen users view.)
+  const restarted = () => JSON.parse(JSON.stringify(db));
+  let db2 = restarted();
   store = openStore(dir, { tableBacked: TABLE_BACKED });
-  assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM players').get().n, 3, 'rows persist across a restart');
-  const loaded = store.load();
-  assert.equal(loaded.db.orgs.length, 4, 'the blob snapshot is untouched: the snapshot stays the source of truth');
-  assert.equal(loaded.db.users, undefined, 'the live table is not a blob');
+  layer = attachDataLayer({ db: db2, store, nextId, persist: () => {}, sessionTtlMs: TTL, shadowValidation: true });
+  assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM players').get().n, 4, 'rows persist across a restart');
+  report = layer.report();
+  assert.equal(report.shadow.status, SHADOW_STATUS.PARTIAL, 'freshness is known from the file, not from this process');
+  assert.equal(report.shadow.tables.players.accountedFor, true);
+  assert.equal(store.load().db.orgs.length, 3, 'the blob snapshot is untouched: the snapshot stays the source of truth');
+  store.sqlite.close();
+  // Restart with validation off: the next save leaves the tables alone and the report says stale.
+  db2 = restarted();
+  store = openStore(dir, { tableBacked: TABLE_BACKED });
+  layer = attachDataLayer({ db: db2, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  store.save({ savedAt: 3, idCounter: 1000, db: db2 });
+  report = layer.report();
+  assert.equal(report.shadow.enabled, false); assert.equal(report.shadow.status, SHADOW_STATUS.STALE); assert.equal(report.shadow.reconciled, false);
+  assert.equal(report.shadow.tables.players.tableRows, 4, 'old rows remain, labelled stale');
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
-test('store (server mode): a projection failure never blocks the blob save', () => {
+test('store (server mode): a projection failure never blocks the blob save and leaves the previous summary in place', () => {
   const dir = tempDir('shadow-fail');
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
   runDataMigrations(store.sqlite, DATA_MIGRATIONS);
@@ -254,15 +341,16 @@ test('store (server mode): a projection failure never blocks the blob save', () 
   assert.equal(calls, 1);
   assert.deepEqual(store.load().db.players, [{ id: 'p1' }], 'the blob was saved');
   assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0, 'the half-written shadow was rolled back to the savepoint');
+  assert.equal(store.sqlite.prepare("SELECT COUNT(*) AS n FROM meta WHERE key = 'shadowSummary'").get().n, 0, 'no summary is recorded for a failed projection');
   const state = store.projectionState();
-  assert.equal(state.failures, 1); assert.match(state.lastError.message, /projection exploded/);
+  assert.equal(state.enabled, true); assert.equal(state.failures, 1); assert.match(state.lastError.message, /projection exploded/);
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 test('store (snapshot mode): tools reading the file as a snapshot never see the shadow tables as collections', () => {
   const dir = tempDir('shadow-tool');
   let store = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = syntheticSnapshot(); db.users = [];
-  attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, shadowValidation: true });
   store.save({ savedAt: 1, idCounter: 1000, db });
   store.sqlite.close();
   store = openStore(dir);
@@ -271,6 +359,31 @@ test('store (snapshot mode): tools reading the file as a snapshot never see the 
   assert.equal(snap.db.guardian_children, undefined);
   assert.deepEqual(snap.db.users, []);
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+});
+test('validateShadow.mjs: runs the projection on a copy, reports every refused row, and leaves the source file byte-identical', () => {
+  const dir = tempDir('shadow-validate');
+  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const db = syntheticSnapshot(); db.users = [{ id: 'usr-9001', orgId: 'org-a', name: 'Maria Keane', role: 'Head of Recruitment', createdAt: 1 }];
+  attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  store.save({ savedAt: 5, idCounter: 1000, db });
+  store.sqlite.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+  store.sqlite.close();
+  const digest = () => sha256(fs.readFileSync(path.join(dir, 'scoutbox.db')));
+  const before = digest();
+  const out = execFileSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), 'validateShadow.mjs'), dir, '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  const result = JSON.parse(out);
+  assert.equal(digest(), before, 'the source database is untouched');
+  assert.ok(!fs.existsSync(result.work ?? '/nonexistent'), 'the working copy is removed');
+  assert.equal(result.error, null);
+  assert.equal(result.report.status, SHADOW_STATUS.PARTIAL);
+  assert.equal(result.report.tables.orgs.tableRows, 3); assert.equal(result.report.tables.orgs.skipped, 1);
+  assert.deepEqual(result.report.tables.orgs.details.skipped.map((x) => x.id), ['org-bad']);
+  assert.deepEqual(result.report.tables.guardian_children.details.skipped, [{ id: 'gd-1/pl-gone', reason: 'child player does not exist' }]);
+  assert.ok(!out.includes('tok-org') && !out.includes('scrypt$'), 'no token or password hash in the validation output');
+  // The source still has no shadow rows: validation happened on the copy only.
+  const again = openStore(dir, { tableBacked: TABLE_BACKED });
+  assert.equal(again.sqlite.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0);
+  again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 test('the shadow table list and the store contract agree on what is shadowed', () => {
   assert.deepEqual([...CORE_SHADOW_TABLES], ['orgs', 'guardians', 'players', 'guardian_children', 'sessions']);

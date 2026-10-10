@@ -103,6 +103,14 @@ export function buildCapabilityReport({ env = process.env, rateLimit = null, pro
       // attempts, sharing links) key on it, so a deployment behind a proxy
       // that leaves this unset has effectively one shared client.
       proxy_trust: { state: proxy.state, note: proxy.note },
+      // Data-layer migration aid (plan step S1). Off by default because the
+      // projection rewrites five tables inside every snapshot save.
+      shadow_validation: {
+        state: env.SCOUTBOX_SHADOW_VALIDATION === '1' ? 'enabled' : 'disabled',
+        note: env.SCOUTBOX_SHADOW_VALIDATION === '1'
+          ? 'The core identity shadow tables are re-projected from the snapshot inside every save; the snapshot remains the source of truth.'
+          : 'Saves do not touch the core identity shadow tables; run scripts/validateShadow.mjs against a copy of the database for a reconciliation.',
+      },
     },
     ...extra,
     note: 'Capability states only. This report contains no keys, hostnames or connection details.',

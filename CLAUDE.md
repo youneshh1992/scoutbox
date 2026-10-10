@@ -39,7 +39,9 @@ and design changes the Founder explicitly requests.
   move to repository queries. Unmigrated domains keep working as they are
   until their turn. Migrated so far: `users` (staff accounts, `org_users`);
   `orgs`, `guardians`, `players`, `guardian_children` and `sessions` exist as a
-  verified shadow (blob still authoritative). The target schema and the step
+  shadow (blob still authoritative; the projection that fills them is off
+  unless `SCOUTBOX_SHADOW_VALIDATION=1`). Never put a whole-collection
+  re-projection in the default save path. The target schema and the step
   order are `docs/architecture/sqlite-schema.md` and
   `docs/architecture/sqlite-migration-plan.md`; a new table must appear in the
   matching `docs/architecture/sql/*.sql` file as well as in its migration.

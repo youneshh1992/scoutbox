@@ -3,20 +3,22 @@
  * guardian/child links and sessions — created as a VERIFIED SHADOW of the
  * blob snapshot (migration plan step S1, docs/architecture/sqlite-migration-plan.md).
  *
- * The blob snapshot stays the source of truth for these collections. On every
- * snapshot save the server re-projects them into these tables inside the same
- * transaction (repositories/shadow.mjs), so the target constraints — CHECKs,
- * foreign keys, the unique guardian e-mail, hashed session tokens — are
- * exercised against real data on every write, and the reconciliation report
- * (/capabilities → dataLayer.shadow) shows exactly which rows the target
- * schema would refuse and why. Nothing reads these tables yet; steps S2–S4
- * cut the domains over one at a time.
+ * The blob snapshot stays the source of truth for these collections. The
+ * tables are filled by a projection (repositories/shadow.mjs) that is OFF by
+ * default: with SCOUTBOX_SHADOW_VALIDATION=1 the server re-projects them
+ * inside every save transaction, and scripts/validateShadow.mjs runs the same
+ * projection against a copy of a database file. Either way the target
+ * constraints — CHECKs, foreign keys, the unique guardian e-mail, hashed
+ * session tokens — are exercised against real data and the reconciliation
+ * report (/capabilities → dataLayer.shadow, detail on /admin/data-layer)
+ * shows which rows the target schema would refuse and why. Nothing reads
+ * these tables yet; steps S2–S4 cut the domains over one at a time.
  *
  * The DDL is the identity section of docs/architecture/sql/01_identity.sql
  * (the player_* sub-record tables of that file arrive with step S5).
  */
 export const id = '0002_core_identity_shadow';
-export const note = 'orgs, guardians, players, guardian_children and sessions tables, populated as a verified shadow of the snapshot';
+export const note = 'orgs, guardians, players, guardian_children and sessions tables (shadow of the snapshot; projection opt-in)';
 
 export function up(sqlite) {
   sqlite.exec(`

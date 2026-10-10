@@ -2,8 +2,9 @@
  * The verified shadow of the core identity collections (plan step S1).
  *
  * The blob snapshot is still the source of truth for orgs, guardians, players
- * and sessions. On every snapshot save the store calls `project(db)` inside
- * the save transaction, and this module rewrites the five core tables from the
+ * and sessions. When shadow validation is ENABLED (SCOUTBOX_SHADOW_VALIDATION=1,
+ * off by default) the store calls `project(snapshot)` inside each save
+ * transaction and this module rewrites the five core tables from the
  * in-memory collections: a deterministic DELETE + INSERT, row by row, inside a
  * SAVEPOINT the store owns. A row the target schema refuses (a CHECK, a
  * foreign key, the unique e-mail) is skipped and recorded with its reason; a
@@ -11,15 +12,32 @@
  * the adjustment and recorded as a finding. A failure of the projection as a
  * whole rolls back only the savepoint: the blob save always commits.
  *
- * Nothing reads these tables yet. Their value is the report: `report(db)`
- * compares what the snapshot holds with what the tables hold and names every
- * row the target schema would not accept, which is the dry run of steps
- * S2–S4 running continuously against real data. Session tokens are stored
- * only as sha256 hashes here; the plain token never reaches a table.
+ * When validation is disabled (the default) nothing here runs during a save:
+ * the save path is exactly the S0 path. The tables keep whatever the last
+ * projection wrote, and `report()` says so: it never presents disabled or
+ * stale rows as a current reconciliation. The isolated command
+ * `scripts/validateShadow.mjs` runs the same projection against a copy of a
+ * database file.
+ *
+ * What is persisted about a projection: a counts-only summary in the store's
+ * `meta` table (`shadowProjectedAt` = the `savedAt` of the save it ran in,
+ * `shadowSummary` = per-table source/written/skipped/findings counts). Row ids
+ * and refusal reasons are kept in memory only, for the admin report and the
+ * validation command. Session tokens are stored only as sha256 hashes here;
+ * the plain token never reaches a table or a report.
  */
 import crypto from 'node:crypto';
 
 export const CORE_SHADOW_TABLES = Object.freeze(['orgs', 'guardians', 'players', 'guardian_children', 'sessions']);
+
+/** Report statuses, from "nothing to say" to "the tables match the last save". */
+export const SHADOW_STATUS = Object.freeze({
+  NEVER: 'never',       // no projection has ever run against this file
+  FAILED: 'failed',     // the last projection attempt in this process threw; tables hold the previous projection
+  STALE: 'stale',       // the snapshot has been saved since the last projection (or validation is off)
+  PARTIAL: 'partial',   // current, but the target schema refused at least one row
+  COMPLETE: 'complete', // current, every snapshot row is in the tables
+});
 
 const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 const bool = (v) => (v ? 1 : 0);
@@ -30,6 +48,9 @@ const text = (v) => (typeof v === 'string' ? v : v === null || v === undefined ?
 const reason = (err) => String(err?.message ?? err).replace(/^SQLITE_\w+:\s*/, '').slice(0, 160);
 
 export function createCoreIdentityShadow({ sqlite, sessionTtlMs = 30 * 24 * 3600 * 1000, now = Date.now }) {
+  // The store owns `meta`; the shadow records its counts-only summary there so a
+  // restarted process (or a tool reading the file) can tell fresh from stale.
+  sqlite.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);');
   const ins = {
     orgs: sqlite.prepare(`INSERT INTO orgs (id, name, type, level, plan, country, city, lat, lng, federation, federation_registration_id,
       trusted_partner, verified, verified_domain, safeguarding_contract_signed, suspended, password_hash, email_domain, email_domain_verified,
@@ -58,8 +79,10 @@ export function createCoreIdentityShadow({ sqlite, sessionTtlMs = 30 * 24 * 3600
   const del = Object.fromEntries(CORE_SHADOW_TABLES.map((t) => [t, sqlite.prepare(`DELETE FROM ${t}`)]));
   const count = Object.fromEntries(CORE_SHADOW_TABLES.map((t) => [t, sqlite.prepare(`SELECT COUNT(*) AS n FROM ${t}`)]));
   const orgUserExists = sqlite.prepare('SELECT 1 FROM org_users WHERE id = ?');
+  const metaGet = sqlite.prepare('SELECT value FROM meta WHERE key = ?');
+  const metaPut = sqlite.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
 
-  let last = null;
+  let last = null; // this process's last projection attempt, with row ids and reasons
 
   const rows = (db, name) => (Array.isArray(db?.[name]) ? db[name] : []);
 
@@ -101,16 +124,27 @@ export function createCoreIdentityShadow({ sqlite, sessionTtlMs = 30 * 24 * 3600
     };
   }
 
+  const countsOnly = (result) => ({
+    at: result.at,
+    savedAt: result.savedAt,
+    durationMs: result.durationMs,
+    tables: Object.fromEntries(Object.entries(result.tables).map(([t, r]) => [t, { source: r.source, written: r.written, skipped: r.skipped.length, findings: r.findings.length }])),
+  });
+
   /**
    * Rewrite the five tables from the snapshot. Called by the store inside the
-   * save transaction (within its own SAVEPOINT). Returns the per-table result
-   * and remembers it for `report()`. Throws only on a failure that is not a
-   * single row — the store then rolls the savepoint back.
+   * save transaction (within its own SAVEPOINT) when validation is enabled,
+   * and by the validation command. `savedAt` is the save this projection
+   * belongs to; it is what makes the report's freshness decidable later.
+   * Returns the per-table result and remembers it for `report()`. Throws only
+   * on a failure that is not a single row — the store then rolls the
+   * savepoint back, and the persisted summary is not updated.
    */
-  function project(db) {
+  function project(db, { savedAt = null } = {}) {
     const startedAt = now();
-    const result = { at: startedAt, durationMs: 0, error: null, tables: {} };
+    const result = { at: startedAt, savedAt: int(savedAt), durationMs: 0, error: null, tables: {} };
     const table = (name) => (result.tables[name] ??= { source: 0, written: 0, skipped: [], findings: [] });
+    for (const t of CORE_SHADOW_TABLES) table(t);
     const attempt = (name, params, id) => {
       try { ins[name].run(params); table(name).written += 1; return true; } catch (err) { table(name).skipped.push({ id, reason: reason(err) }); return false; }
     };
@@ -125,11 +159,12 @@ export function createCoreIdentityShadow({ sqlite, sessionTtlMs = 30 * 24 * 3600
       }
 
       const guardianIds = new Set();
-      for (const g of rows(db, 'guardians')) {
+      const allGuardians = rows(db, 'guardians');
+      for (const g of allGuardians) {
         table('guardians').source += 1;
         if (!g || typeof g !== 'object') { table('guardians').skipped.push({ id: null, reason: 'not an object' }); continue; }
         const params = guardianParams(g);
-        if (params.co_guardian_of && !rows(db, 'guardians').some((x) => x?.id === params.co_guardian_of)) {
+        if (params.co_guardian_of && !allGuardians.some((x) => x?.id === params.co_guardian_of)) {
           table('guardians').findings.push({ id: g.id, finding: `coGuardianOf ${params.co_guardian_of} does not exist; written as NULL` });
           params.co_guardian_of = null;
         }
@@ -149,7 +184,7 @@ export function createCoreIdentityShadow({ sqlite, sessionTtlMs = 30 * 24 * 3600
         if (attempt('players', playerParams(p, guardianId), p.id)) { playerIds.add(p.id); if (guardianId) primaryGuardianOf.set(p.id, guardianId); }
       }
 
-      for (const g of rows(db, 'guardians')) {
+      for (const g of allGuardians) {
         if (!g || typeof g !== 'object' || !guardianIds.has(g.id)) continue;
         for (const childId of Array.isArray(g.childIds) ? g.childIds : []) {
           table('guardian_children').source += 1;
@@ -169,45 +204,96 @@ export function createCoreIdentityShadow({ sqlite, sessionTtlMs = 30 * 24 * 3600
           org_user_id: orgUserId, via: text(s.via), created_at: createdAt, expires_at: createdAt === null ? null : createdAt + sessionTtlMs,
         }, s.sid);
       }
+
+      result.durationMs = now() - startedAt;
+      // Counts only. Written inside the same savepoint, so a rolled-back
+      // projection leaves the previous summary in place.
+      metaPut.run('shadowProjectedAt', String(result.savedAt ?? ''));
+      metaPut.run('shadowSummary', JSON.stringify(countsOnly(result)));
     } catch (err) {
       result.error = reason(err);
       result.durationMs = now() - startedAt;
       last = result;
       throw err;
     }
-    result.durationMs = now() - startedAt;
     last = result;
     return result;
   }
 
-  /** Reconciliation: snapshot counts against table counts, plus the last projection's findings. */
-  function report(db) {
-    const tables = {};
-    for (const t of CORE_SHADOW_TABLES) {
-      const source = t === 'guardian_children'
-        ? rows(db, 'guardians').reduce((n, g) => n + (Array.isArray(g?.childIds) ? g.childIds.length : 0), 0)
-        : rows(db, t).length;
-      const inTable = count[t].get().n;
-      const lastT = last?.tables?.[t];
-      tables[t] = {
-        snapshotRows: source,
-        tableRows: inTable,
-        skipped: lastT?.skipped.length ?? 0,
-        findings: lastT?.findings.length ?? 0,
-        reconciled: last ? inTable === source - (lastT?.skipped.length ?? 0) : null,
-        details: lastT ? { skipped: lastT.skipped.slice(0, 20), findings: lastT.findings.slice(0, 20) } : null,
-      };
-    }
-    return {
-      mode: 'shadow',
-      sourceOfTruth: 'snapshot',
-      lastProjectionAt: last?.at ?? null,
-      lastProjectionMs: last?.durationMs ?? null,
-      lastError: last?.error ?? null,
-      tables,
-      note: 'Tables are rewritten from the snapshot on every save; the snapshot stays the source of truth until each domain cuts over. Skipped rows are rows the target schema refuses; findings are rows written with an adjustment.',
-    };
+  /** The persisted counts-only summary of the last successful projection, or null. */
+  function persistedSummary() {
+    const raw = metaGet.get('shadowSummary')?.value;
+    if (!raw) return null;
+    try { return JSON.parse(raw); } catch { return null; }
   }
 
-  return { project, report, tables: CORE_SHADOW_TABLES, last: () => last };
+  /**
+   * Reconciliation. `enabled` says whether the store projects on save in this
+   * process. Freshness is decided from the file: the tables are current when
+   * the last projection ran in the save whose `savedAt` the meta table holds.
+   * Without `details` the report carries counts and statuses only (it is
+   * served to anyone on /capabilities); with `details` it adds this process's
+   * row ids, refusal reasons and the last error text (admin and tooling).
+   */
+  function report(db, { enabled = false, details = false } = {}) {
+    const summary = persistedSummary();
+    const savedAt = int(Number(metaGet.get('savedAt')?.value));
+    const projectedAt = int(Number(metaGet.get('shadowProjectedAt')?.value));
+    const current = summary !== null && savedAt !== null && projectedAt === savedAt;
+
+    let status;
+    if (last?.error) status = SHADOW_STATUS.FAILED;
+    else if (!summary) status = SHADOW_STATUS.NEVER;
+    else if (!current) status = SHADOW_STATUS.STALE;
+    else {
+      const totalSkipped = Object.values(summary.tables).reduce((n, t) => n + t.skipped, 0);
+      const allInTables = CORE_SHADOW_TABLES.every((t) => count[t].get().n === summary.tables[t]?.written);
+      status = totalSkipped === 0 && allInTables ? SHADOW_STATUS.COMPLETE : SHADOW_STATUS.PARTIAL;
+    }
+
+    const tables = {};
+    for (const t of CORE_SHADOW_TABLES) {
+      const snapshotRows = t === 'guardian_children'
+        ? rows(db, 'guardians').reduce((n, g) => n + (Array.isArray(g?.childIds) ? g.childIds.length : 0), 0)
+        : rows(db, t).length;
+      const tableRows = count[t].get().n;
+      const s = summary?.tables?.[t] ?? null;
+      tables[t] = {
+        snapshotRows,                                   // in memory now
+        tableRows,                                      // in the file now
+        projectedRows: s?.source ?? null,               // snapshot rows seen by the last projection
+        skipped: s?.skipped ?? null,
+        findings: s?.findings ?? null,
+        // Every projected row is either in the table or named as skipped.
+        accountedFor: s ? tableRows === s.written && s.written + s.skipped === s.source : null,
+      };
+      if (details) {
+        const lastT = last?.tables?.[t];
+        tables[t].details = lastT ? { skipped: lastT.skipped.slice(0, 20), findings: lastT.findings.slice(0, 20) } : null;
+      }
+    }
+
+    const out = {
+      mode: 'shadow',
+      sourceOfTruth: 'snapshot',
+      enabled,
+      status,
+      reconciled: status === SHADOW_STATUS.COMPLETE,
+      lastProjectionAt: summary?.at ?? null,
+      lastProjectionSavedAt: projectedAt,
+      snapshotSavedAt: savedAt,
+      lastProjectionMs: summary?.durationMs ?? null,
+      tables,
+      note: enabled
+        ? 'Shadow validation is on: the five tables are rewritten from the snapshot inside every save. The snapshot stays the source of truth; nothing reads these tables.'
+        : 'Shadow validation is off (default): saves do not touch these tables. Rows shown are from the last projection, if any; run scripts/validateShadow.mjs against a copy for a current reconciliation.',
+    };
+    if (details) {
+      out.lastError = last?.error ?? null;
+      out.detailsNote = last ? 'Row ids and reasons are from the last projection in this process.' : 'No projection has run in this process; row-level details are available from the validation command.';
+    }
+    return out;
+  }
+
+  return { project, report, persistedSummary, tables: CORE_SHADOW_TABLES, last: () => last };
 }

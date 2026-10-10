@@ -34,15 +34,34 @@ shape the server sees, tables included.
 
 A third kind exists during the migration: *shadow* tables (`orgs`, `guardians`,
 `players`, `guardian_children`, `sessions` since migration `0002`). The blob is
-still the source of truth for these; on every save the server rewrites the
-tables from it inside the same transaction and `GET /capabilities` →
-`dataLayer.shadow` reports, per table, how many rows the snapshot holds, how
-many the table accepted, how many the target schema refused and why (the first
-twenty reasons), and whether the last projection failed. A projection failure
-never blocks the save. Session tokens are stored in these tables only as
-hashes. Nothing reads the shadow tables yet; the design and the cutover order
-are in `docs/architecture/sqlite-schema.md` and
-`docs/architecture/sqlite-migration-plan.md`.
+still the source of truth for these and nothing reads the tables yet. They are
+filled by a *projection* that rewrites all five from the snapshot, and that
+projection is **off by default**: a normal save never touches them.
+
+- `SCOUTBOX_SHADOW_VALIDATION=1` switches the projection on. It then runs inside
+  every save transaction, in its own savepoint; a projection failure is counted
+  and rolled back and never blocks the save. Cost: about ten times the blob save
+  at 10k players (`npm run perf:data-layer`), so use it for controlled
+  validation runs, not as a running default. `GET /capabilities` reports the
+  switch under `shadow_validation`.
+- `node scripts/validateShadow.mjs <data-dir>` runs the same projection against
+  a copy of a database (the source is opened read-only and copied with
+  `VACUUM INTO`; the copy is deleted afterwards) and prints the reconciliation
+  with every refused row and its reason. Use it on a backup or on a copy of a
+  running data directory; it never modifies the file it is pointed at.
+- Freshness is recorded in the file: the projection stores the `savedAt` of the
+  save it ran in. `GET /capabilities` → `dataLayer.shadow` reports `enabled`,
+  `status` (`never`, `stale`, `failed`, `partial`, `complete`), `reconciled`
+  (true only for `complete`), and per table the rows in the snapshot now, in the
+  table now, and seen / refused / adjusted by the last projection. Rows from a
+  projection that is older than the last save are reported as `stale`, never as
+  reconciled. Counts and statuses only are public; `GET /admin/data-layer`
+  (admin key) adds the refused row ids, reasons and the last error text.
+- Session tokens are stored in these tables only as hashes; no report carries a
+  token, a password hash or a code.
+
+The design and the cutover order are in `docs/architecture/sqlite-schema.md`
+and `docs/architecture/sqlite-migration-plan.md`.
 
 ## Reverse proxy and client addresses
 Per-IP controls (the `/auth` brute-force limiter, sharing-link limits, request

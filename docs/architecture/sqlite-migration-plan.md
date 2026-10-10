@@ -74,106 +74,152 @@ performance, existing tests, what this plan is not).
 - **Known debt.** `org_users` was created before the STRICT convention and without the FK to
   `orgs` (no `orgs` table yet). S3 rebuilds it.
 
-### S1 — Core identity schema as a verified shadow — DONE (this branch)
+### S1 — Core identity schema as a verified shadow — DONE (`ef71f28`, corrected by the S1 acceptance follow-up commit)
 
 - **Objective.** Create the five core identity tables (`orgs`, `guardians`, `players`,
-  `guardian_children`, `sessions`) with their final constraints, and keep them continuously
-  populated from the blob on every save, so the target constraints are exercised against
-  real data before any cutover and the reconciliation report names every row the target
-  schema would refuse. Store session tokens only as hashes from the start. No cutover: the
-  blob stays the source of truth and nothing reads the tables yet.
+  `guardian_children`, `sessions`) with their final constraints, plus a *projection* that
+  fills them from the blob so the target constraints can be exercised against real data
+  before any cutover, with a reconciliation report that names every row the target schema
+  would refuse. Store session tokens only as hashes from the start. No cutover: the blob
+  stays the source of truth and nothing reads the tables.
 - **Depends on.** S0.
 - **Files / tables.**
   `repositories/migrations/0002_core_identity_shadow.mjs` (DDL identical to the identity
   section of `docs/architecture/sql/01_identity.sql`; asserted by test),
-  `repositories/shadow.mjs` (`createCoreIdentityShadow`: `project(db)`, `report(db)`),
-  `repositories/index.mjs` (registers the projection with the store; `report().shadow`),
-  `store.mjs` (`setProjection`, `projectionState`; the projection runs in a `SAVEPOINT`
-  inside the save transaction, a failure rolls back only the savepoint and is counted),
-  `server.mjs` (passes the session TTL to the data layer; `/capabilities →
-  dataLayer.shadow`), `scripts/testCoreSchema.mjs`, `scripts/testSchemaDdl.mjs`,
-  `scripts/dataLayerPerf.mjs`, `package.json` (`npm test` chain, `perf:data-layer`).
-- **Code changes and data transformations.** On every save: `DELETE` the five tables
-  children-first, then insert `orgs` → `guardians` → `players` → `guardian_children` →
-  `sessions` from the in-memory collections with the mapping of `01_identity.sql`. A row
+  `repositories/shadow.mjs` (`createCoreIdentityShadow`: `project(db, { savedAt })`,
+  `report(db, { enabled, details })`, `SHADOW_STATUS`),
+  `repositories/index.mjs` (`attachDataLayer({ shadowValidation })`; registers the
+  projection with the store only when asked; `report({ details })`),
+  `store.mjs` (`setProjection`, `projectionState`; a registered projection runs in a
+  `SAVEPOINT` inside the save transaction, a failure rolls back only the savepoint and is
+  counted; with none registered the save is the S0 path),
+  `server.mjs` (`SCOUTBOX_SHADOW_VALIDATION=1` → `shadowValidation`; public
+  `/capabilities → dataLayer.shadow` with counts and statuses; `GET /admin/data-layer`
+  with row-level detail behind the admin key), `m181/capabilities.mjs`
+  (`shadow_validation` state), `scripts/validateShadow.mjs` (isolated validation on a
+  copy), `scripts/testCoreSchema.mjs`, `scripts/testSchemaDdl.mjs`,
+  `scripts/dataLayerPerf.mjs`, `package.json` (`npm test` chain, `perf:data-layer`,
+  `validate:shadow`), `OPERATIONS.md`.
+- **What the acceptance review found and corrected.** As committed in `ef71f28` the
+  projection was registered unconditionally, so *every* save (including the `persistNow()`
+  after each chat message and the debounced save after every other write) rewrote the five
+  tables: a storage-layer cost of about ten times the blob save at 10k players, on by
+  default, with no way to turn it off. The public `/capabilities` report also carried the
+  ids of refused rows, the refusal reasons and the last error text to unauthenticated
+  callers, and reported `reconciled: true` per table whenever the counts matched, without
+  saying whether the rows were current. The follow-up commit makes the projection opt-in
+  (off by default), persists the freshness of the last projection in the file, reports
+  `never / stale / failed / partial / complete` with `reconciled` true only for `complete`,
+  limits the public report to counts and statuses, moves ids, reasons and error text to
+  the admin route, and adds the isolated validation command. The statement "runtime
+  persistence unchanged" in the first report was wrong for `ef71f28` and is true only after
+  the correction: the blob was always the source of truth, but the save path did more work.
+- **Code changes and data transformations.** When validation is on, each save: `DELETE`
+  the five tables children-first, then insert `orgs` → `guardians` → `players` →
+  `guardian_children` → `sessions` from the in-memory collections with the mapping of
+  `01_identity.sql`, then record `shadowProjectedAt = savedAt` and a counts-only summary in
+  `meta` (same savepoint, so a rolled-back projection leaves the previous summary). A row
   the schema refuses (CHECK, FK, UNIQUE, STRICT type) is skipped and recorded with its
   reason; a row adjusted to fit (a dangling `guardianId` or `coGuardianOf` written as NULL)
   is recorded as a finding. Session rows carry `token_hash = sha256(token)` and
   `expires_at = created_at + TTL`; a session without a token, or an org session whose
   `userId` is not in `org_users`, is skipped and reported. `deleted_at` is written NULL.
-- **API compatibility.** No route changes. `/capabilities.dataLayer` gains `shadow` with
-  per-table `snapshotRows`, `tableRows`, `skipped`, `findings`, `reconciled`, up to 20
-  details per table, timings and the store's failure count. No token or password appears in
-  the report (asserted).
-- **Tests and acceptance criteria (all met).**
-  - `node scripts/testCoreSchema.mjs` → **15 checks passed**: migration creates the five
-    STRICT tables, records itself once, is idempotent; a failing migration (pre-existing
-    `sessions` table) rolls back atomically and leaves no record; CHECK constraints refuse
-    bad org level/type/plan, a lat without lng, foot `both`, a malformed date, a bad
-    availability, a wrong session kind and an org session without `org_user_id`; STRICT
-    refuses a TEXT in an INTEGER column; guardian e-mail is unique case-insensitively; FK
-    enforcement and cascades (guardian delete → children rows gone, `players.guardian_id`
-    NULL; staff delete → sessions gone); transaction rollback leaves no partial rows;
-    projection counts `{orgs 4→3 (1 refused), guardians 4→3, players 4→3, guardian_children
-    3→2, sessions 8→5 (3 skipped)}` with the expected reasons and findings and exact value
-    preservation; `guardian_children.role` primary/co; tokens absent from the file (no
-    `token` column; lookup by hash works; `expires_at = created_at + TTL`; the plain token
-    string is not found anywhere in the database dump); re-projection is deterministic;
-    report content excludes secrets; the server-mode store runs the projection inside
-    `save()`, the rows survive a close/reopen (restart persistence), the blob is untouched,
-    and the report lists the six tables; a projection failure never blocks the blob save
-    (savepoint rolled back, `failures = 1`, blob saved); snapshot-mode tools do not see
-    shadow tables as collections.
-  - `node scripts/testSchemaDdl.mjs` → **13 checks passed** (8 files, 320 tables): every
-    DDL file executes in order with foreign keys on; all tables STRICT (except `org_users`,
-    documented); every FK target exists; every table has a primary key; every index
-    references an existing table; migrations 0001/0002 equal the documented DDL in columns
-    and indexes.
+  Row ids and reasons live in memory only (admin report, validation command); the file
+  holds counts.
+- **Normal runtime behaviour (default, validation off).** A save is exactly the S0 save:
+  blob upserts, meta, commit; no savepoint, no shadow statement (asserted by a test that
+  records every SQL statement the store executes). The five tables keep whatever the last
+  projection wrote, if any, and the report labels those rows `never` or `stale`, never
+  reconciled. `org_users` (S0, live) is unaffected either way.
+- **How to validate.** Either boot with `SCOUTBOX_SHADOW_VALIDATION=1` for a controlled
+  run (the switch is reported under `capabilities.shadow_validation`), or run
+  `node scripts/validateShadow.mjs <data-dir>` against a backup or a copy: it opens the
+  source read-only, copies it with `VACUUM INTO`, projects on the copy, prints every
+  refused row and reason, and deletes the copy. The source file is byte-identical
+  afterwards (asserted by test).
+- **API compatibility.** No route changes to the product API. `/capabilities.dataLayer`
+  gains `shadow` (`enabled`, `status`, `reconciled`, timestamps, per-table `snapshotRows`,
+  `tableRows`, `projectedRows`, `skipped`, `findings`, `accountedFor`) and the store's
+  `enabled / failures / lastErrorAt`; `capabilities.shadow_validation` names the switch.
+  `GET /admin/data-layer` (admin key) adds `details` per table and `lastError`. No token,
+  password hash or one-time code appears in either (asserted).
+- **Tests and acceptance criteria (all met after the correction).**
+  - `node scripts/testCoreSchema.mjs` → **18 checks passed**: migration creates the five
+    STRICT tables, records itself once, is idempotent; a failing migration rolls back
+    atomically and leaves no record; CHECK constraints refuse bad org level/type/plan, a
+    lat without lng, foot `both`, a malformed date, a bad availability, a wrong session kind
+    and an org session without `org_user_id`; STRICT refuses a TEXT in an INTEGER column;
+    guardian e-mail is unique case-insensitively; FK enforcement and cascades; transaction
+    rollback leaves no partial rows; projection counts `{orgs 4→3 (1 refused), guardians
+    4→3, players 4→3, guardian_children 3→2, sessions 8→5 (3 skipped)}` with the expected
+    reasons and findings and exact value preservation; `guardian_children.role`
+    primary/co; tokens absent from the file and from every report; re-projection is
+    deterministic (no duplicates, removed rows gone, changed fields current); the report
+    distinguishes `partial` (refused rows, `accountedFor` true per table) from `complete`
+    (a clean snapshot), `stale` (a save after the projection) and `failed` (a thrown
+    projection, with the error text only in the detailed report); **default
+    `attachDataLayer` registers no projection, three saves execute no `SAVEPOINT` and leave
+    all five tables empty, the blob is saved as before, the report says `never`**; with
+    `shadowValidation: true` the tables are rewritten in every save, survive a restart with
+    the status read from the file, and go `stale` after a save with validation off; a
+    projection failure never blocks the blob save and records no summary; snapshot-mode
+    tools do not see shadow tables; `validateShadow.mjs` reports every refused row and
+    leaves the source database byte-identical with no shadow rows in it.
+  - `node scripts/testSchemaDdl.mjs` → **13 checks passed** (8 files, 320 tables).
   - `npm test` (full chain) → green: 23 trust/safeguarding, 20 identity, 16 data-layer,
-    15 core-schema, 13 schema-DDL checks (87 in all). Two assertions in
-    `testDataLayer.mjs` that described the old table list (`['org_users']`, one migration)
-    were rewritten to describe the current one; no assertion was removed.
-  - Full server battery (48 suites under `scoutbox-server/scripts/*E2E.mjs` run by the
-    session's `battery.sh` against a temporary `DATA_DIR`) → **47 green; `m182E2E` has 2
-    failing checks that are pre-existing** (Grassroots `desk.*` key and `orgPanels.tsx`
-    client-source checks, identical on untouched `main`; they do not touch the server).
-  - Smoke boot with a fresh temporary `DATA_DIR`: `/capabilities.dataLayer` reports tables
-    `[guardian_children, guardians, org_users, orgs, players, sessions]`, `migrationsApplied:
-    2`, shadow projection 2 ms, rows `orgs 5/5, guardians 2/2, players 14/14,
-    guardian_children 3/3, sessions 1/1`, all reconciled, no failures.
-  - Performance (`npm run perf:data-layer`, synthetic data, throwaway database):
+    18 core-schema, 13 schema-DDL checks (90 in all). The two `testDataLayer.mjs`
+    assertions rewritten in `ef71f28` still pin exact values: the schema report must equal
+    the exact table list and the migration count must equal the registry length, and the
+    attached layer's report must list exactly those tables and show the shadow `enabled:
+    false`, `status: 'never'`; a missing or extra table fails them.
+  - Full server battery (48 suites, `battery.sh`, temporary `DATA_DIR`): see the
+    acceptance follow-up commit message for the run after the correction. The 2 failing
+    checks in `m182E2E` are pre-existing: `✗ [neg] scoutbox-grassroots: no screen asks for
+    a key that does not exist: desk.all, …` and `✗ orgPanels.tsx is byte-identical in club
+    and grassroots`; the same suite run on a detached worktree of `66c095c` (the review's
+    baseline, before S0 and S1) fails exactly those two with 418 passed and exit 1.
+  - Smoke boot on a temporary `DATA_DIR`, default: `capabilities.shadow_validation:
+    disabled`, `shadow.enabled: false`, `status: never`, `reconciled: false`, tables empty,
+    no `details` and no error text in the public body; `GET /admin/data-layer` without the
+    key → `ADMIN_KEY_REQUIRED`. With `SCOUTBOX_SHADOW_VALIDATION=1` and one write:
+    `enabled: true`, `status: complete`, `reconciled: true`, `snapshotSavedAt ==
+    lastProjectionSavedAt`, projection 2 ms, `orgs 5/5, guardians 2/2, players 14/14,
+    guardian_children 3/3, sessions 1/1`.
+  - Performance (`npm run perf:data-layer`, synthetic data in the server's shapes,
+    throwaway database, medians of 5 saves; storage-layer timings only, not request
+    latency):
 
-    | Synthetic size | JSON | blob save alone | blob save + shadow | projection | session scan | session by hash | file |
+    | Synthetic size | JSON | normal save (validation off, default) | save with validation on | projection alone (validation command) | session scan | session by hash | file |
     |---|---|---|---|---|---|---|---|
-    | 1k players, 2k sessions, 50 orgs | 1.4 MB | 8.9 ms | 112.9 ms | 99 ms | 25.0 µs | 3.5 µs | 2.5 MB |
-    | 10k players, 20k sessions, 500 orgs | 14.5 MB | 101.9 ms | 1171.3 ms | 1120 ms | 115.2 µs | 3.4 µs | 23.5 MB |
+    | 1k players, 2k sessions, 50 orgs | 1.4 MB | 8.8 ms | 112.3 ms | 101 ms | 25.0 µs | 3.3 µs | 2.5 MB |
+    | 10k players, 20k sessions, 500 orgs | 14.5 MB | 112.2 ms | 1225.7 ms | 969 ms | 261.8 µs | 3.4 µs | 23.5 MB |
 
-    Reading: the full re-projection costs about ten times the blob save at 10k players,
-    because it rewrites every row on every save. That is acceptable for a shadow at demo and
-    beta-test scale (the 2 s debounce absorbs it; the projection never blocks the blob
-    save) and is the reason S2 onwards write **per row** from the repositories, never by
-    re-projection. The shadow is removed at S4 when the last of the five tables is live.
-    The point lookup by hash is 7–34× faster than the array scan and does not grow with the
-    session count.
-- **Rollback / recovery.** Additive: the tables are rebuilt from the blob on every save, so
-  dropping them (or reverting the commit and restoring the pre-step file) loses nothing.
-  `data_migrations` would still list `0002`; a revert must also delete that row or the
-  previous commit boots without the migration module present and ignores the record
-  (unknown ids are ignored by `runDataMigrations`), which is safe.
-- **Runtime persistence changed?** No. The blob is still the source of truth and every
-  reader still reads the collections; the only runtime effect is the extra work inside each
-  save and the five populated tables in the file.
-- **Commit boundary.** One commit: docs (`sqlite-schema.md`, `sqlite-migration-plan.md`,
-  `sql/*.sql`), migration 0002, `shadow.mjs`, store/index/server wiring, the three scripts,
-  `package.json`.
+    The "normal save" column is the same code path as S0 (and as `ef71f28` with the
+    projection removed), so it is also the "existing save" baseline. Limitations: one
+    machine, synthetic rows of uniform shape, no concurrent requests, no media; the numbers
+    bound the storage cost of the switch and nothing else.
+- **Rollback / recovery.** Additive: the tables are rebuilt from the blob whenever the
+  projection runs, so dropping them (or reverting the commits and restoring the pre-step
+  file) loses nothing. `data_migrations` would still list `0002`; the previous commit boots
+  without the migration module present and ignores the record (unknown ids are ignored by
+  `runDataMigrations`), which is safe.
+- **Runtime persistence changed?** After the correction: no by default. The blob is the
+  source of truth, every reader reads the collections, and a default save executes the same
+  statements as S0. With `SCOUTBOX_SHADOW_VALIDATION=1` each save additionally rewrites the
+  five tables inside its own savepoint. In `ef71f28` alone the answer was "yes, every save
+  did the extra work"; that commit must not be deployed without the follow-up.
+- **Commit boundary.** `ef71f28` (docs, DDL, migration 0002, shadow, wiring, tests, perf
+  harness) plus one focused follow-up commit (opt-in switch, persisted freshness, report
+  statuses and exposure, admin route, validation command, tests, documentation).
 
 ### S2 — Sessions cut over (hashed tokens, indexed lookup, expiry, busy timeout)
 
 - **Objective.** Make `sessions` live: `createSession`, `sessionFor`, logout, revoke-all,
   prune and the media-URL `sid` lookup go through a sessions repository; the `sessions` blob
   is deleted. Plain tokens leave the database.
-- **Depends on.** S1 (table exists, shadow report shows 0 skipped sessions on the target
-  snapshot).
+- **Depends on.** S1 as corrected (table exists; `node scripts/validateShadow.mjs
+  <backup-dir>` on the target snapshot reports 0 skipped sessions; the S1 projection is
+  off by default and stays off during S2).
 - **Files / tables.** `repositories/sessions.mjs` (new), `repositories/index.mjs`
   (`TABLE_BACKED += sessions`; shadow no longer projects `sessions`), `server.mjs` (lines
   639–669: `createSession`, `sessionFor`, prune; logout 669; `revokeOrgUserAccess` 4294;
@@ -336,9 +382,22 @@ performance, existing tests, what this plan is not).
 
 - **Objective.** Requests, trials, cases and rooms, decisions and snapshots, contacts,
   offers, signing packages, signings, follow-ups and outcome reports live; the shared
-  `idempotency_keys` table replaces every `keys{}` structure; `RESTRICT` player references
-  added (schema O9); `players[].trialReports` retired (served from `trial_reports`).
-- **Depends on.** S5, S6 (ledger rows for signings), S7 (contacts' outbox copies).
+  `idempotency_keys` table replaces every `keys{}` structure; `players[].trialReports`
+  retired (served from `trial_reports`).
+- **Depends on.** S5, S6 (ledger rows for signings), S7 (contacts' outbox copies), and
+  the two unresolved relational-integrity decisions below, which must be closed **before
+  S8a's migration is written**, not during it:
+  - *Player tombstone (schema O1, implemented at S4).* `02_recruitment.sql` today declares
+    no foreign key on any `player_id` because `deletePlayerData` hard-deletes the player
+    row. S4 replaces the hard delete with a tombstone row; S8a then amends
+    `02_recruitment.sql` to add `REFERENCES players(id) ON DELETE RESTRICT` on every
+    `player_id` column and ships that DDL in migration `0009_recruitment`. Until S4 has
+    shipped and the file has been amended, the recruitment domain is **not ready to cut
+    over**; the design is unresolved on this point, not finished.
+  - *Org deletion policy (schema O2).* `org_id` columns in file 02 are `RESTRICT` on the
+    assumption that no org deletion route exists; S3 introduces one (`suspended` +
+    `deleted_at`), and the Founder's answer on open recruitment cases decides whether S8
+    keeps `RESTRICT` or adds a tombstone-aware rule.
 - **Files / tables.** `repositories/recruitment/*.mjs` (one module per aggregate), migration
   `0009_recruitment`; `server.mjs` requests/trials routes (2068–2371, 2612), `m12/scouting.mjs`
   cases, `m17/rooms.mjs`, `m23/*` (contacts, trials P4B, decisions, journey), `m27`–`m29`
@@ -490,15 +549,22 @@ performance, existing tests, what this plan is not).
 
 ### C.2 Source of truth during migration, dual read/write, failure and reconciliation
 
-- Per domain, exactly one of three states, recorded in `/capabilities.dataLayer.domains`:
-  `blob` (untouched), `shadow` (blob authoritative; tables rewritten in the save transaction;
-  report compares), `live` (tables authoritative; blob deleted; view read-only).
+- Per domain, exactly one of three states, recorded in `/capabilities.dataLayer`:
+  `blob` (untouched), `shadow` (blob authoritative; tables rewritten in the save
+  transaction only while validation is switched on; report compares), `live` (tables
+  authoritative; blob deleted; view read-only).
 - There is **no dual write by application code**: in `shadow` the projection is derived
   from the blob inside the same transaction, so the two cannot diverge on commit; in `live`
   the blob no longer exists. A projection failure is counted and rolled back in its savepoint
   and the blob save still commits (S1 test "projection failure never blocks the blob save").
-- Reconciliation is the shadow report (`snapshotRows` vs `tableRows`, `skipped` with
-  reasons, `findings`, `reconciled` boolean per table) and, at cutover, the import's findings
+- A shadow is a validation aid, not a running default: it is off unless
+  `SCOUTBOX_SHADOW_VALIDATION=1`, and its report must say `stale` or `never` whenever the
+  tables are not from the last save. The lesson from S1's acceptance review applies to
+  every later shadow (S3 orgs facets, S4): never put a full re-projection in the default
+  write path; per-row repository writes are the only thing that runs on every save.
+- Reconciliation is the shadow report (`status`, `reconciled`, per table `snapshotRows`,
+  `tableRows`, `projectedRows`, `skipped`, `findings`, `accountedFor`; ids and reasons on
+  the admin route and in the validation command) and, at cutover, the import's findings
   list, which the boot prints and stores in `ops_events` (`kind: 'data_import'`).
 
 ### C.3 Backups and dry runs on disposable copies

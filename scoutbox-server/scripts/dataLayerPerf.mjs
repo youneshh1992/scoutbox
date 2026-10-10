@@ -2,10 +2,13 @@
 //
 // Builds a snapshot of N organisations, guardians, players and sessions in
 // the exact shapes the server writes, then measures on a throwaway database:
-//   1. the blob save alone (what every persistNow() costs today),
-//   2. the blob save with the shadow projection inside it (what S1 adds),
-//   3. a point lookup of a session by token hash against the table versus the
+//   1. a normal save (shadow validation off, the default — the S0 path),
+//   2. a save with shadow validation on (SCOUTBOX_SHADOW_VALIDATION=1),
+//   3. the projection alone (what scripts/validateShadow.mjs costs),
+//   4. a point lookup of a session by token hash against the table versus the
 //      linear scan the server does on every request today.
+// These are storage-layer timings on synthetic data; they say nothing about
+// request latency or overall application speed.
 // Usage: node scripts/dataLayerPerf.mjs [players=10000] [sessions=20000]
 // Nothing here touches DATA_DIR.
 import crypto from 'node:crypto';
@@ -64,11 +67,14 @@ const store = openStore(dir, { tableBacked: TABLE_BACKED });
 const layer = attachDataLayer({ db, store, nextId: (p) => `${p}-${Math.random()}`, persist: () => {}, sessionTtlMs: 30 * DAY });
 
 const snapshot = () => ({ savedAt: Date.now(), idCounter: 1000, db });
-store.setProjection(null);
+// 1. default: attachDataLayer registered no projection, so this is the normal save.
+if (store.projectionState().enabled) throw new Error('shadow validation must be off by default');
 const blobOnly = median(() => store.save(snapshot()));
-store.setProjection((d) => layer.shadow.project(d));
+// 2. opt-in: the same registration attachDataLayer performs with shadowValidation: true.
+store.setProjection((snap) => layer.shadow.project(snap.db, { savedAt: snap.savedAt }));
 const withShadow = median(() => store.save(snapshot()));
 const projectionOnly = layer.shadow.last().durationMs;
+store.setProjection(null);
 
 const wanted = db.sessions[Math.floor(SESSIONS / 2)].token;
 const hash = crypto.createHash('sha256').update(wanted).digest('hex');
@@ -76,14 +82,14 @@ const scan = median(() => db.sessions.find((s) => s.token === wanted), 50);
 const stmt = store.sqlite.prepare('SELECT kind, ref_id FROM sessions WHERE token_hash = ?');
 const lookup = median(() => stmt.get(hash), 50);
 
-const report = layer.report().shadow;
+const report = layer.shadow.report(db, { enabled: false });
 console.log(`synthetic snapshot: ${ORGS} orgs, ${ORGS * 3} staff, ${GUARDIANS} guardians, ${PLAYERS} players, ${SESSIONS} sessions, ${(blobBytes / 1e6).toFixed(1)} MB of JSON`);
-console.log(`blob save alone (every persistNow today)      ${blobOnly.toFixed(1)} ms (median of 5)`);
-console.log(`blob save with the S1 shadow projection       ${withShadow.toFixed(1)} ms (median of 5)`);
-console.log(`  of which the projection itself              ${projectionOnly} ms (last run)`);
+console.log(`normal save (shadow validation off, default)  ${blobOnly.toFixed(1)} ms (median of 5)`);
+console.log(`save with SCOUTBOX_SHADOW_VALIDATION=1        ${withShadow.toFixed(1)} ms (median of 5)`);
+console.log(`  projection alone (validateShadow.mjs cost)  ${projectionOnly} ms (last run)`);
 console.log(`session lookup, linear scan over the array    ${(scan * 1000).toFixed(1)} µs`);
 console.log(`session lookup, table by token hash           ${(lookup * 1000).toFixed(1)} µs`);
-console.log(`shadow reconciliation: ${Object.entries(report.tables).map(([t, r]) => `${t} ${r.tableRows}/${r.snapshotRows}${r.skipped ? ` (${r.skipped} refused)` : ''}`).join(', ')}`);
+console.log(`shadow reconciliation (${report.status}): ${Object.entries(report.tables).map(([t, r]) => `${t} ${r.tableRows}/${r.snapshotRows}${r.skipped ? ` (${r.skipped} refused)` : ''}`).join(', ')}`);
 console.log(`database file: ${(fs.statSync(path.join(dir, 'scoutbox.db')).size / 1e6).toFixed(1)} MB`);
 store.sqlite.close();
 fs.rmSync(dir, { recursive: true, force: true });
