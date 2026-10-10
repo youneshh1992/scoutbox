@@ -37,7 +37,12 @@ and design changes the Founder explicitly requests.
   `db.<collection>` is that repository's read-only view (a direct write
   throws), which existing readers may keep using until the domain's readers
   move to repository queries. Unmigrated domains keep working as they are
-  until their turn. Migrated so far: `users` (staff accounts, `org_users`).
+  until their turn. Migrated so far: `users` (staff accounts, `org_users`);
+  `orgs`, `guardians`, `players`, `guardian_children` and `sessions` exist as a
+  verified shadow (blob still authoritative). The target schema and the step
+  order are `docs/architecture/sqlite-schema.md` and
+  `docs/architecture/sqlite-migration-plan.md`; a new table must appear in the
+  matching `docs/architecture/sql/*.sql` file as well as in its migration.
   The runtime data directory is `scoutbox-server/data/` and is never a
   source directory.
 - No new milestone-named modules (`m30/…`). New server code lives in a

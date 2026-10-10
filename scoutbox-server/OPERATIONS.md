@@ -32,6 +32,18 @@ the old blob into the table and deletes the blob on the next save; a backup
 one snapshot (`openStore(dir)` without options) see every collection in the
 shape the server sees, tables included.
 
+A third kind exists during the migration: *shadow* tables (`orgs`, `guardians`,
+`players`, `guardian_children`, `sessions` since migration `0002`). The blob is
+still the source of truth for these; on every save the server rewrites the
+tables from it inside the same transaction and `GET /capabilities` →
+`dataLayer.shadow` reports, per table, how many rows the snapshot holds, how
+many the table accepted, how many the target schema refused and why (the first
+twenty reasons), and whether the last projection failed. A projection failure
+never blocks the save. Session tokens are stored in these tables only as
+hashes. Nothing reads the shadow tables yet; the design and the cutover order
+are in `docs/architecture/sqlite-schema.md` and
+`docs/architecture/sqlite-migration-plan.md`.
+
 ## Reverse proxy and client addresses
 Per-IP controls (the `/auth` brute-force limiter, sharing-link limits, request
 logs) key on the client address. Behind a platform proxy (Fly, Render, a load

@@ -59,8 +59,13 @@ test('schema report: names tables and counts, never rows', () => {
   const s = fresh();
   runDataMigrations(s, DATA_MIGRATIONS);
   const report = dataSchemaReport(s, DATA_MIGRATIONS);
-  assert.deepEqual(report, { engine: 'sqlite', migrationsApplied: 1, migrationsKnown: 1, tables: ['org_users'] });
-  assert.deepEqual(dataSchemaReport(null, DATA_MIGRATIONS), { engine: 'memory', migrationsApplied: 0, migrationsKnown: 1, tables: [] });
+  // The table list grows with every migration (0001 org_users; 0002 the five
+  // core identity shadow tables); the report must list exactly what exists.
+  assert.deepEqual(report, {
+    engine: 'sqlite', migrationsApplied: DATA_MIGRATIONS.length, migrationsKnown: DATA_MIGRATIONS.length,
+    tables: ['guardian_children', 'guardians', 'org_users', 'orgs', 'players', 'sessions'],
+  });
+  assert.deepEqual(dataSchemaReport(null, DATA_MIGRATIONS), { engine: 'memory', migrationsApplied: 0, migrationsKnown: DATA_MIGRATIONS.length, tables: [] });
 });
 
 // --------------------------------------------------------- read-only views
@@ -195,7 +200,9 @@ test('attachDataLayer: db.users becomes the repository view and cannot be replac
   assert.throws(() => { db.users = []; }, TypeError);
   assert.throws(() => { db.users.push({}); }, /repositories/);
   assert.equal(layer.report().domains.users.rows, 1);
-  assert.deepEqual(layer.report().tables, ['org_users']);
+  // org_users is live; the five core identity tables exist as the S1 shadow.
+  assert.deepEqual(layer.report().tables, ['guardian_children', 'guardians', 'org_users', 'orgs', 'players', 'sessions']);
+  assert.equal(layer.report().shadow.mode, 'shadow');
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 test('store (server mode): a table-backed collection is never written as a blob again, and a stale blob row is deleted on the next save', () => {

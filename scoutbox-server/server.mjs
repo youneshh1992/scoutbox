@@ -195,6 +195,7 @@ if (!integrity.stores.ok) {
 const dataLayer = attachDataLayer({
   db, store, persist,
   nextId: (prefix) => nextId(prefix),
+  sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
 const { users } = dataLayer;
