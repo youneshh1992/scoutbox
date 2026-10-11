@@ -383,6 +383,21 @@ mapping they will use and a read-only check of the data exist and are tested:
   `CANDIDATE_DDL` in `repositories/identityPreflight.mjs`, used only to build
   temporary databases in tests; migration 0005 is **not** registered and the
   blob stays authoritative for players and guardians.
+- Three guarantees added after an independent review of the first commit:
+  a reference field (`guardianId`, `coGuardianOf`, a `childIds` entry) is
+  either absent/null (no link) or a non-empty id — an empty string is a
+  present reference that names nobody and is refused by record and field,
+  never trimmed or turned into null, and the candidate writer refuses a
+  malformed row before writing anything; every INTEGER-mapped field (heights,
+  weights, squad numbers, timestamps, the `stats` counters,
+  `programme.startedAt`) must be a safe integer (within ±2^53−1, what
+  `node:sqlite` stores and reads back exactly through Numbers) — out-of-range
+  values are refused, never clamped or rounded, and every complete report is
+  proven to load and round-trip through the intended schema; own JSON
+  properties named like `Object.prototype` members (`constructor`,
+  `toString`, `__proto__`, `hasOwnProperty`) are preserved as data at every
+  level (record, composite remainder, nested items) without touching any
+  prototype, while `__meta` / `__rest` remain the reserved metadata keys.
 - Tests: `scripts/testCoreIdentityMapping.mjs` (part of `npm test`).
 
 The design and the cutover order are in `docs/architecture/sqlite-schema.md`

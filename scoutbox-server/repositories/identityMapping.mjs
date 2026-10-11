@@ -57,6 +57,23 @@ export const RESERVED_KEYS = Object.freeze(['__meta', '__rest']);
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const describe = (v) => (v === null ? 'null' : v === undefined ? 'absent' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : typeof v === 'bigint' ? 'a bigint' : `a ${typeof v}`);
 const absentOrNull = (v) => v === null || v === undefined;
+// A JSON record may carry OWN properties named like Object.prototype members
+// (`constructor`, `toString`, `__proto__`, `hasOwnProperty`): they are data.
+// Every key lookup below is an own-property check and every dynamic key is
+// written as an own data property, so such a key is neither mistaken for a
+// column (an inherited `constructor` is not a spec entry) nor allowed to
+// change an object's prototype (`obj.__proto__ = v` would).
+const hasOwn = (o, k) => Object.hasOwn(o, k);
+const setOwn = (o, k, v) => { Object.defineProperty(o, k, { value: v, writable: true, enumerable: true, configurable: true }); return o; };
+/**
+ * The integer range this code can store and read back EXACTLY: node:sqlite
+ * binds a JavaScript number as a 64-bit integer only when it is an integer
+ * inside the safe range and reads an INTEGER column back as a number, so a
+ * value outside ±(2^53 − 1) would be bound as REAL (refused by the STRICT
+ * column) or read back imprecisely. Nothing is clamped or rounded: such a
+ * value is refused with the field and the value.
+ */
+const isStorableInteger = (v) => typeof v === 'number' && Number.isSafeInteger(v);
 
 // ------------------------------------------------------------------ specs
 // A spec is the one description of a domain's mapping: which record keys are
@@ -137,6 +154,7 @@ function toRowWith(spec, rec) {
     meta.present.push(key);
     meta.sub[key] = Object.keys(v);
     for (const [sub, col] of Object.entries(subs)) {
+      if (!hasOwn(v, sub)) continue; // an inherited `constructor` is not a value of the record
       if (v[sub] === null) meta.nulls.push(`${key}.${sub}`);
       else if (v[sub] !== undefined) p[col] = spec.compositeBooleans.has(`${key}.${sub}`) ? (v[sub] ? 1 : 0) : v[sub];
     }
@@ -146,13 +164,14 @@ function toRowWith(spec, rec) {
   for (const [col, dflt] of Object.entries(spec.defaults)) if (p[col] === null) p[col] = dflt;
   const facets = {};
   for (const key of meta.order) {
-    if (key === 'id' || key in spec.scalars || key in spec.composites || spec.excluded.has(key)) continue;
-    facets[key] = rec[key];
+    if (key === 'id' || hasOwn(spec.scalars, key) || hasOwn(spec.composites, key) || spec.excluded.has(key)) continue;
+    setOwn(facets, key, rec[key]);
   }
   for (const [key, subs] of Object.entries(spec.composites)) {
     const v = rec[key];
     if (!isPlainObject(v)) continue;
-    const rest = Object.fromEntries(Object.entries(v).filter(([sub]) => !(sub in subs)));
+    const rest = {};
+    for (const sub of Object.keys(v)) if (!hasOwn(subs, sub)) setOwn(rest, sub, v[sub]);
     if (Object.keys(rest).length) { facets.__rest ??= {}; facets.__rest[key] = rest; }
   }
   facets.__meta = meta;
@@ -187,14 +206,15 @@ function fromRowWith(spec, r, { extra = {} } = {}) {
     if (order && !order.includes(key)) continue;
     const obj = {};
     const subOrder = meta?.sub?.[key] ?? null;
+    const restOf = hasOwn(rest, key) ? rest[key] : null;
     if (subOrder) {
       for (const sub of subOrder) {
-        if (sub in subs) {
-          if (nulls.has(`${key}.${sub}`)) { obj[sub] = null; continue; }
+        if (hasOwn(subs, sub)) {
+          if (nulls.has(`${key}.${sub}`)) { setOwn(obj, sub, null); continue; }
           const v = r[subs[sub]];
-          if (v !== null && v !== undefined) obj[sub] = spec.compositeBooleans.has(`${key}.${sub}`) ? v === 1 : v;
-        } else if (rest[key] && sub in rest[key]) {
-          obj[sub] = rest[key][sub];
+          if (v !== null && v !== undefined) setOwn(obj, sub, spec.compositeBooleans.has(`${key}.${sub}`) ? v === 1 : v);
+        } else if (restOf && hasOwn(restOf, sub)) {
+          setOwn(obj, sub, restOf[sub]);
         }
       }
       values[key] = obj;
@@ -202,19 +222,19 @@ function fromRowWith(spec, r, { extra = {} } = {}) {
     }
     let any = false;
     for (const [sub, col] of Object.entries(subs)) {
-      if (r[col] !== null && r[col] !== undefined) { obj[sub] = spec.compositeBooleans.has(`${key}.${sub}`) ? r[col] === 1 : r[col]; any = true; }
+      if (r[col] !== null && r[col] !== undefined) { setOwn(obj, sub, spec.compositeBooleans.has(`${key}.${sub}`) ? r[col] === 1 : r[col]); any = true; }
     }
-    if (rest[key]) { Object.assign(obj, rest[key]); any = true; }
+    if (restOf) { for (const sub of Object.keys(restOf)) setOwn(obj, sub, restOf[sub]); any = true; }
     if (any) values[key] = obj;
   }
-  for (const [key, v] of Object.entries(facets)) {
+  for (const key of Object.keys(facets)) {
     if (RESERVED_KEYS.includes(key)) continue;
-    values[key] = v;
+    setOwn(values, key, facets[key]);
   }
-  for (const [key, v] of Object.entries(extra)) if (v !== undefined) values[key] = v;
+  for (const key of Object.keys(extra)) if (extra[key] !== undefined) setOwn(values, key, extra[key]);
   const rec = {};
-  if (order) for (const key of order) if (key in values) rec[key] = values[key];
-  for (const key of Object.keys(values)) if (!(key in rec)) rec[key] = values[key];
+  if (order) for (const key of order) if (hasOwn(values, key)) setOwn(rec, key, values[key]);
+  for (const key of Object.keys(values)) if (!hasOwn(rec, key)) setOwn(rec, key, values[key]);
   return rec;
 }
 
@@ -241,26 +261,34 @@ export function guardianFromRow(row, childIds = []) {
 // `password`, a signed-up player without `drillResults`, a guardian without
 // `createdAt` are all supported shapes.
 
-const checkString = (problems, rec, key, { required = false } = {}) => {
+/**
+ * `required`: must be present, non-null and non-empty. `nonEmpty`: may be
+ * absent or null, but a PRESENT string must not be empty — the shape of a
+ * reference (`guardianId`, `coGuardianOf`): `null`/absent is "no link", `''`
+ * is a present id that names nobody and is refused as such (never trimmed,
+ * never converted to null).
+ */
+const checkString = (problems, rec, key, { required = false, nonEmpty = false } = {}) => {
   const v = rec[key];
   if (v === undefined) { if (required) problems.push(`${key} is absent`); return; }
   if (v === null) { if (required) problems.push(`${key} is null`); return; }
   if (typeof v !== 'string') { problems.push(`${key} is ${describe(v)}, not text`); return; }
-  if (required && v === '') problems.push(`${key} is empty`);
+  if ((required || nonEmpty) && v === '') problems.push(`${key} is empty`);
 };
 const checkBoolean = (problems, obj, key, label = key) => {
   const v = obj[key];
   if (!absentOrNull(v) && typeof v !== 'boolean') problems.push(`${label} is ${describe(v)}, not a boolean`);
 };
+/** INTEGER columns: a safe integer (see `isStorableInteger`), optionally with a lower bound. */
 const checkInteger = (problems, obj, key, label = key, { min = null } = {}) => {
   const v = obj[key];
   if (absentOrNull(v)) return;
-  if (!Number.isInteger(v)) problems.push(`${label} is ${typeof v === 'number' ? v : describe(v)}, not an integer`);
+  if (!isStorableInteger(v)) problems.push(`${label} is ${typeof v === 'number' ? String(v) : describe(v)}, not a safe integer (an integer within ±9007199254740991, which the INTEGER column stores and reads back exactly)`);
   else if (min !== null && v < min) problems.push(`${label} is ${v}, below ${min}`);
 };
 const checkNumber = (problems, obj, key, label = key) => {
   const v = obj[key];
-  if (!absentOrNull(v) && !(typeof v === 'number' && Number.isFinite(v))) problems.push(`${label} is ${describe(v)}, not a finite number`);
+  if (!absentOrNull(v) && !(typeof v === 'number' && Number.isFinite(v))) problems.push(`${label} is ${typeof v === 'number' ? String(v) : describe(v)}, not a finite number`);
 };
 const checkEnum = (problems, rec, key, list, { nullable = true } = {}) => {
   const v = rec[key];
@@ -287,7 +315,7 @@ const checkPrefs = (problems, rec) => {
   for (const k of ['quietStart', 'quietEnd', 'timezone']) if (!absentOrNull(n[k]) && typeof n[k] !== 'string') problems.push(`notificationPrefs.${k} is ${describe(n[k])}, not text`);
   checkBoolean(problems, n, 'schoolHoursMute', 'notificationPrefs.schoolHoursMute');
 };
-const checkReserved = (problems, rec) => { for (const k of RESERVED_KEYS) if (k in rec) problems.push(`the reserved field "${k}" is not allowed on a record`); };
+const checkReserved = (problems, rec) => { for (const k of RESERVED_KEYS) if (hasOwn(rec, k)) problems.push(`the reserved field "${k}" is not allowed on a record`); };
 const checkFacetsSerialisable = (problems, rec, migrated, excluded) => {
   for (const key of Object.keys(rec)) {
     if (migrated.has(key) || excluded.has(key) || RESERVED_KEYS.includes(key)) continue;
@@ -303,7 +331,8 @@ export function validatePlayerRecord(rec) {
   checkString(problems, rec, 'name', { required: true });
   checkDateOnly(problems, rec, 'dob', { required: true });
   checkString(problems, rec, 'country', { required: true });
-  for (const key of ['city', 'marketValueRange', 'agentName', 'footballCategory', 'password', 'guardianId']) checkString(problems, rec, key);
+  for (const key of ['city', 'marketValueRange', 'agentName', 'footballCategory', 'password']) checkString(problems, rec, key);
+  checkString(problems, rec, 'guardianId', { nonEmpty: true });
   checkEnum(problems, rec, 'position', PLAYER_POSITIONS);
   checkEnum(problems, rec, 'foot', PLAYER_FEET);
   checkEnum(problems, rec, 'availability', PLAYER_AVAILABILITY, { nullable: false });
@@ -348,7 +377,8 @@ export function validateGuardianRecord(rec) {
   checkString(problems, rec, 'id', { required: true });
   checkString(problems, rec, 'name', { required: true });
   checkString(problems, rec, 'email', { required: true });
-  for (const key of ['password', 'idvReference', 'coGuardianOf']) checkString(problems, rec, key);
+  for (const key of ['password', 'idvReference']) checkString(problems, rec, key);
+  checkString(problems, rec, 'coGuardianOf', { nonEmpty: true });
   if (!absentOrNull(rec.emailCode) && typeof rec.emailCode !== 'string') problems.push(`emailCode is ${describe(rec.emailCode)}, not text`);
   for (const key of GUARDIAN_SPEC.booleans) checkBoolean(problems, rec, key);
   checkInteger(problems, rec, 'createdAt', 'createdAt', { min: 0 });

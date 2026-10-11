@@ -208,13 +208,13 @@ test('rejection: every unsupported player shape is refused with the field and th
     [{ ...adultSignup(), availability: 'maybe' }, /availability is not one of/],
     [{ ...adultSignup(), contractStatus: 'tbd' }, /contractStatus is not one of/],
     [{ ...adultSignup(), contractUntil: '2026-13-01' }, /contractUntil is not a valid/],
-    [{ ...adultSignup(), heightCm: 180.5 }, /heightCm is 180.5, not an integer/],
-    [{ ...adultSignup(), squadNumber: '22' }, /squadNumber is a string, not an integer/],
+    [{ ...adultSignup(), heightCm: 180.5 }, /heightCm is 180.5, not a safe integer/],
+    [{ ...adultSignup(), squadNumber: '22' }, /squadNumber is a string, not a safe integer/],
     [{ ...adultSignup(), academyPlus: 'yes' }, /academyPlus is a string, not a boolean/],
     [{ ...adultSignup(), createdAt: -1 }, /createdAt is -1, below 0/],
     [{ ...adultSignup(), createdAt: '2026' }, /createdAt is a string/],
     [{ ...adultSignup(), stats: 'none' }, /stats is a string, not an object/],
-    [{ ...adultSignup(), stats: { goals: 2.5 } }, /stats.goals is 2.5, not an integer/],
+    [{ ...adultSignup(), stats: { goals: 2.5 } }, /stats.goals is 2.5, not a safe integer/],
     [{ ...adultSignup(), stats: { paceKmh: 'fast' } }, /stats.paceKmh is a string, not a finite number/],
     [{ ...adultSignup(), location: { lat: 1 } }, /location has one of lat\/lng without the other/],
     [{ ...adultSignup(), location: { lat: 'x', lng: 'y' } }, /location.lat is a string/],
@@ -261,7 +261,7 @@ test('rejection: every unsupported guardian shape is refused with a reason, the 
     [{ ...guardianSignup(), coGuardianOf: ['gd-1'] }, /coGuardianOf is an array/],
     [{ ...guardianSignup(), coGuardians: 'none' }, /coGuardians is a string/],
     [{ ...guardianSignup(), notificationPrefs: 'quiet' }, /notificationPrefs is a string/],
-    [{ ...guardianSignup(), createdAt: 1.5 }, /createdAt is 1.5, not an integer/],
+    [{ ...guardianSignup(), createdAt: 1.5 }, /createdAt is 1.5, not a safe integer/],
     [{ ...guardianSignup(), __rest: {} }, /reserved field "__rest"/],
     [null, /not an object/],
   ];
@@ -523,6 +523,168 @@ test('mapping: the migrated key sets name exactly the columns the schema owns (a
   assert.equal(guardianCols.size, GUARDIAN_COLUMNS.length);
   assert.ok(PLAYER_MIGRATED_KEYS.has('dob') && PLAYER_MIGRATED_KEYS.has('medical') && !PLAYER_MIGRATED_KEYS.has('media'));
   s.close();
+});
+
+// ------------------------------------------------------------------ review corrections (independent review of 041646e)
+/** A complete report must really load and round-trip through the intended schema; returns the records read back. */
+function loadAndReadBack(snap) {
+  const r = validateCoreIdentity(snap, { now: NOW });
+  assert.equal(r.status, PREFLIGHT_STATUS.COMPLETE, `complete expected: ${JSON.stringify(r.refusals)}`);
+  const s = memDb();
+  transaction(s, () => writeCandidate(s, r.candidate));
+  assert.deepEqual(s.prepare('PRAGMA foreign_key_check').all(), []);
+  const prow = s.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players WHERE id = ?`);
+  const grow = s.prepare(`SELECT ${GUARDIAN_COLUMNS.join(', ')} FROM guardians WHERE id = ?`);
+  const kids = s.prepare('SELECT player_id FROM guardian_children WHERE guardian_id = ? ORDER BY rowid');
+  const out = { players: snap.players.map((p) => playerFromRow(prow.get(p.id))), guardians: snap.guardians.map((g) => guardianFromRow(grow.get(g.id), kids.all(g.id).map((k) => k.player_id))) };
+  s.close();
+  snap.players.forEach((p, i) => sameShape(p, out.players[i], `players ${p.id} through SQLite`));
+  snap.guardians.forEach((g, i) => sameShape(g, out.guardians[i], `guardians ${g.id} through SQLite`));
+  return out;
+}
+const invalidWith = (snap, collection, id, re) => {
+  const before = JSON.stringify(snap);
+  const r = validateCoreIdentity(snap, { now: NOW });
+  assert.equal(r.status, PREFLIGHT_STATUS.INVALID, `${id} ${re}: ${JSON.stringify(r.refusals)}`);
+  assert.equal(r.candidate, null, 'no candidate');
+  assert.ok(r.refusals.some((x) => x.collection === collection && x.id === id && re.test(x.reason)), `${collection} ${id} ${re} in ${JSON.stringify(r.refusals)}`);
+  assert.equal(JSON.stringify(snap), before, 'the input is untouched');
+  return r;
+};
+const bare = (extra = {}) => ({ id: 'pl-b', name: 'Bare', dob: '2001-01-01', country: 'GB', ...extra });
+
+test('review 1: an empty relationship id is a present, invalid reference — guardianId "" and coGuardianOf "" are refused by record id and field, no candidate is emitted, the input is untouched; null and absent stay lossless', () => {
+  invalidWith({ players: [bare({ guardianId: '' })], guardians: [] }, 'players', 'pl-b', /guardianId is empty/);
+  invalidWith({ players: [], guardians: [{ id: 'gd-b', name: 'G', email: 'g@example.com', coGuardianOf: '', childIds: [] }] }, 'guardians', 'gd-b', /coGuardianOf is empty/);
+  invalidWith({ players: [], guardians: [{ id: 'gd-b', name: 'G', email: 'g@example.com', childIds: [''] }] }, 'guardians', 'gd-b', /childIds\[0\] is a string, not a player id|childIds\[0\] is empty/);
+  assert.ok(validatePlayerRecord(bare({ guardianId: '' })).problems.some((p) => /guardianId is empty/.test(p)));
+  assert.ok(validateGuardianRecord({ id: 'gd-b', name: 'G', email: 'g@example.com', coGuardianOf: '' }).problems.some((p) => /coGuardianOf is empty/.test(p)));
+  // Not trimmed, not converted: a whitespace id is a present reference that names nobody.
+  invalidWith({ players: [bare({ guardianId: ' ' })], guardians: [] }, 'players', 'pl-b', /guardianId names no record \( \)/);
+  // Legitimate shapes: null, absent, and real primary/co links are lossless through the intended schema.
+  const g = { id: 'gd-ok', name: 'G', email: 'g@example.com', coGuardianOf: null, childIds: ['pl-kid'] };
+  const out = loadAndReadBack({ players: [bare({ guardianId: null }), { ...bare({ id: 'pl-kid', dob: '2014-01-01', guardianId: 'gd-ok' }) }, bare({ id: 'pl-absent' })], guardians: [g, { id: 'gd-co', name: 'Co', email: 'co@example.com', coGuardianOf: 'gd-ok', childIds: ['pl-kid'] }] });
+  assert.equal(out.players[0].guardianId, null); assert.equal('guardianId' in out.players[2], false); assert.equal(out.guardians[0].coGuardianOf, null); assert.equal(out.guardians[1].coGuardianOf, 'gd-ok');
+});
+
+test('review 1: the two-pass candidate writer cannot drop a present co_guardian_of or guardian_id — a malformed candidate row (empty or non-text reference) is refused before anything is written', () => {
+  const good = validateCoreIdentity({ players: [bare()], guardians: [{ id: 'gd-a', name: 'A', email: 'a@example.com', childIds: [] }, { id: 'gd-b', name: 'B', email: 'b@example.com', coGuardianOf: 'gd-a', childIds: [] }] }, { now: NOW }).candidate;
+  for (const [mutate, re] of [
+    [(c) => { c.guardians[1].co_guardian_of = ''; }, /guardians gd-b: co_guardian_of is an empty string/],
+    [(c) => { c.guardians[1].co_guardian_of = 7; }, /guardians gd-b: co_guardian_of is a number/],
+    [(c) => { c.players[0].guardian_id = ''; }, /players pl-b: guardian_id is an empty string/],
+    [(c) => { c.links.push({ guardian_id: '', player_id: 'pl-b', role: 'co' }); }, /links: guardian_id is an empty string/],
+  ]) {
+    const c = JSON.parse(JSON.stringify(good)); mutate(c);
+    const s = memDb();
+    assert.throws(() => transaction(s, () => writeCandidate(s, c)), re);
+    assert.equal(s.prepare('SELECT COUNT(*) AS n FROM guardians').get().n + s.prepare('SELECT COUNT(*) AS n FROM players').get().n, 0, 'nothing written');
+    s.close();
+  }
+  // The genuine candidate writes the link in the second pass and reads it back.
+  const s = memDb(); transaction(s, () => writeCandidate(s, good));
+  assert.equal(s.prepare("SELECT co_guardian_of FROM guardians WHERE id = 'gd-b'").get().co_guardian_of, 'gd-a'); s.close();
+});
+
+test('review 2: every INTEGER-mapped field must be a safe integer (exactly storable and readable through node:sqlite Numbers) — 2^53−1 and −(2^53−1) load and read back exactly, 2^53 and 1e20 are refused by field with no candidate; REAL-mapped fields keep accepting finite numbers', () => {
+  const MAX = Number.MAX_SAFE_INTEGER;
+  // Boundaries: accepted, loaded, read back identical (through the intended STRICT schema).
+  const out = loadAndReadBack({
+    players: [bare({ heightCm: MAX, weightKg: -MAX, squadNumber: 0, createdAt: MAX, stats: { appearances: MAX, goals: -MAX, assists: 1, cleanSheets: MAX, paceKmh: 1e20, passCompletionPct: 0.5, duelSuccessPct: -0 }, programme: { track: 'x', startedAt: MAX, completed: [] } })],
+    guardians: [{ id: 'gd-max', name: 'Max', email: 'max@example.com', createdAt: MAX, childIds: [] }],
+  });
+  assert.equal(out.players[0].heightCm, MAX); assert.equal(out.players[0].weightKg, -MAX); assert.equal(out.players[0].stats.appearances, MAX); assert.equal(out.players[0].stats.paceKmh, 1e20); assert.equal(out.guardians[0].createdAt, MAX);
+  // Outside the supported range: refused with the field, never clamped, rounded or written.
+  const cases = [
+    ['heightCm', 2 ** 53, /heightCm is 9007199254740992, not a safe integer/],
+    ['heightCm', 1e20, /heightCm is 100000000000000000000, not a safe integer/],
+    ['weightKg', -(2 ** 53), /weightKg is -9007199254740992, not a safe integer/],
+    ['squadNumber', 2 ** 60, /squadNumber is .*not a safe integer/],
+    ['createdAt', 2 ** 53, /createdAt is 9007199254740992, not a safe integer/],
+  ];
+  for (const [field, value, re] of cases) invalidWith({ players: [bare({ [field]: value })], guardians: [] }, 'players', 'pl-b', re);
+  invalidWith({ players: [bare({ stats: { goals: 2 ** 53 } })], guardians: [] }, 'players', 'pl-b', /stats.goals is 9007199254740992, not a safe integer/);
+  invalidWith({ players: [bare({ stats: { cleanSheets: 1e20 } })], guardians: [] }, 'players', 'pl-b', /stats.cleanSheets is .*not a safe integer/);
+  invalidWith({ players: [bare({ programme: { startedAt: 2 ** 53 } })], guardians: [] }, 'players', 'pl-b', /programme.startedAt is 9007199254740992, not a safe integer/);
+  invalidWith({ players: [], guardians: [{ id: 'gd-b', name: 'G', email: 'g@example.com', createdAt: 1e20, childIds: [] }] }, 'guardians', 'gd-b', /createdAt is .*not a safe integer/);
+  // Non-integers and NaN/Infinity remain refused as before.
+  invalidWith({ players: [bare({ heightCm: 180.5 })], guardians: [] }, 'players', 'pl-b', /heightCm is 180.5, not a safe integer/);
+  invalidWith({ players: [bare({ heightCm: Infinity })], guardians: [] }, 'players', 'pl-b', /heightCm is Infinity, not a safe integer/);
+  invalidWith({ players: [bare({ stats: { paceKmh: NaN } })], guardians: [] }, 'players', 'pl-b', /stats.paceKmh is NaN, not a finite number/);
+});
+
+test('review 2: every fixture shape that is reported complete really loads and round-trips through the intended schema (the SQL check is part of "complete", not a separate hope)', () => {
+  loadAndReadBack(consistentSnapshot());
+  loadAndReadBack({ players: [adultSignup(), seededAdult(), bare()], guardians: [guardianSignup(), seededGuardian(), coGuardianOf(seededGuardian())].map((g, i) => ({ ...g, childIds: [] })) });
+});
+
+/** A record built the way a snapshot arrives (JSON.parse), with own properties named like Object.prototype members. */
+const protoPlayer = () => JSON.parse('{"id":"pl-proto","name":"Proto","dob":"2001-01-01","country":"GB","constructor":"own-constructor","toString":"own-toString","__proto__":{"polluted":true},"hasOwnProperty":7,"stats":{"goals":1,"constructor":"stats-constructor","__proto__":{"deep":1},"valueOf":null},"medical":{"shared":false,"records":[{"id":"md-p","constructor":"rec-constructor"}],"conditionStatus":"unknown"},"media":[{"id":"m-p","__proto__":{"x":1},"toString":"item"}],"unknownBag":{"__proto__":{"y":2},"constructor":"bag"}}');
+const protoGuardian = () => JSON.parse('{"id":"gd-proto","name":"Proto G","email":"proto@example.com","constructor":"own","__proto__":{"polluted":true},"toString":"t","notificationPrefs":{"timezone":"UTC","constructor":"prefs-constructor","__proto__":{"z":3}},"coGuardians":[{"id":"x","__proto__":{"q":1}}],"childIds":[]}');
+const assertProtoKept = (orig, back, what) => {
+  sameShape(orig, back, what);
+  for (const k of ['constructor', 'toString', '__proto__']) { assert.ok(Object.hasOwn(back, k), `${what}: own ${k}`); assert.deepEqual(back[k], orig[k], `${what}: ${k} value`); }
+  assert.equal(Object.getPrototypeOf(back), Object.prototype, `${what}: the record is an ordinary object`);
+  assert.equal(Object.getPrototypeOf(back.__proto__), Object.prototype, `${what}: the __proto__ VALUE is plain data`);
+};
+const assertPrototypesClean = () => {
+  assert.equal('polluted' in {}, false); assert.equal('deep' in {}, false); assert.equal('y' in {}, false); assert.equal('z' in {}, false);
+  assert.equal(Object.prototype.constructor, Object); assert.equal(typeof Object.prototype.toString, 'function'); assert.equal(typeof Object.prototype.hasOwnProperty, 'function');
+  assert.equal(Object.getPrototypeOf(Object.prototype), null);
+};
+
+test('review 3: own JSON properties named constructor, toString, __proto__ and hasOwnProperty survive the forward and reverse mapping as data — top level, inside a composite (stats), inside a composite remainder and inside S5 items — and no prototype is touched', () => {
+  const p = protoPlayer();
+  const row = playerToRow(p);
+  assert.equal(row.stats_goals, 1, 'the real column sub-key is still mapped');
+  const facets = JSON.parse(row.facets_json);
+  assert.ok(Object.hasOwn(facets, 'constructor') && Object.hasOwn(facets, 'toString') && Object.hasOwn(facets, '__proto__') && Object.hasOwn(facets, 'hasOwnProperty'), 'unknown keys are facets');
+  // (built from JSON: in an object literal `__proto__:` would set the prototype, not an own key)
+  assert.deepEqual(facets.__rest.stats, JSON.parse('{"constructor":"stats-constructor","__proto__":{"deep":1},"valueOf":null}'), 'composite remainders keep them');
+  assert.ok(Object.hasOwn(facets.__rest.stats, '__proto__'));
+  const back = playerFromRow(row);
+  assertProtoKept(p, back, 'player direct');
+  assert.ok(Object.hasOwn(back.stats, 'constructor') && Object.hasOwn(back.stats, '__proto__') && Object.hasOwn(back.stats, 'valueOf')); assert.equal(back.stats.valueOf, null);
+  assert.ok(Object.hasOwn(back.medical.records[0], 'constructor')); assert.ok(Object.hasOwn(back.media[0], '__proto__')); assert.ok(Object.hasOwn(back.unknownBag, '__proto__'));
+  assert.deepEqual(validatePlayerRecord(p), { ok: true });
+  const g = protoGuardian();
+  const gback = guardianFromRow(guardianToRow(g), []);
+  assertProtoKept(g, gback, 'guardian direct');
+  assert.ok(Object.hasOwn(gback.notificationPrefs, 'constructor') && Object.hasOwn(gback.notificationPrefs, '__proto__')); assert.equal(gback.notificationPrefs.timezone, 'UTC');
+  assert.deepEqual(validateGuardianRecord(g), { ok: true });
+  assertPrototypesClean();
+});
+
+test('review 3: the same records through the preflight, real temporary SQLite storage and the read-back are byte-identical with every such key as an own property; prototypes stay clean', () => {
+  const p = protoPlayer(); const g = protoGuardian();
+  const out = loadAndReadBack({ players: [p], guardians: [g] });
+  assertProtoKept(p, out.players[0], 'player via SQLite'); assertProtoKept(g, out.guardians[0], 'guardian via SQLite');
+  assert.ok(Object.hasOwn(out.players[0].stats, 'constructor')); assert.ok(Object.hasOwn(out.guardians[0].notificationPrefs, '__proto__'));
+  assertPrototypesClean();
+});
+
+test('review: the preflight command reports the malformed references and the out-of-range integers as invalid — exit 2, no candidate, reasons by id and field, no record or secret printed', () => {
+  const dir = tempDir('preflight-review');
+  const script = path.join(HERE, 'preflightCoreIdentity.mjs');
+  const run = (name, db) => {
+    const file = path.join(dir, `${name}.json`);
+    fs.writeFileSync(file, JSON.stringify({ db }));
+    const r = spawnSync(process.execPath, [script, file, '--json', '--now', String(NOW)], { encoding: 'utf8' });
+    assert.equal(r.status, 2, `${name}: exit 2 (${r.stdout}${r.stderr})`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.status, 'invalid'); assert.equal(out.candidate, null);
+    for (const secret of ['scrypt$', 'K7Q2ZP', 'example.com']) assert.equal(r.stdout.includes(secret), false, `${name}: ${secret} not printed`);
+    return out;
+  };
+  const a = run('empty-guardian-id', { players: [{ ...adultSignup(), guardianId: '' }], guardians: [guardianSignup()] });
+  assert.ok(a.refusals.some((x) => x.collection === 'players' && x.id === 'pl-9001' && /guardianId is empty/.test(x.reason)), JSON.stringify(a.refusals));
+  const b = run('empty-co-guardian-of', { players: [], guardians: [{ ...guardianSignup(), coGuardianOf: '' }] });
+  assert.ok(b.refusals.some((x) => x.collection === 'guardians' && x.id === 'gd-9001' && /coGuardianOf is empty/.test(x.reason)), JSON.stringify(b.refusals));
+  const c = run('integer-range', { players: [{ ...adultSignup(), heightCm: 1e20, stats: { goals: 2 ** 53 } }], guardians: [{ ...guardianSignup(), createdAt: 2 ** 53 }] });
+  assert.ok(c.refusals.some((x) => x.id === 'pl-9001' && /heightCm is 100000000000000000000, not a safe integer/.test(x.reason)), JSON.stringify(c.refusals));
+  assert.ok(c.refusals.some((x) => x.id === 'pl-9001' && /stats.goals is 9007199254740992, not a safe integer/.test(x.reason)));
+  assert.ok(c.refusals.some((x) => x.id === 'gd-9001' && /createdAt is 9007199254740992, not a safe integer/.test(x.reason)));
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 console.log(`\n${passed} core-identity mapping checks passed`);

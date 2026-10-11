@@ -883,6 +883,12 @@ performance, existing tests, what this plan is not).
 > intended live DDL for temporary test databases, `writeCandidate`), and
 > `scripts/preflightCoreIdentity.mjs` (read-only: copies the file, runs no migration, boots no
 > server; exit 0 complete / 2 invalid / 3 blocked on the §5.5 decision; never an approval).
+> Corrected after an independent review of that commit (regressions in the suite): an empty
+> relationship id is refused as a present invalid reference (never trimmed or nulled; the
+> candidate writer refuses a malformed row before writing); INTEGER-mapped fields must be safe
+> integers so a complete report really loads and round-trips through the intended schema (no
+> clamping, no business limits); own JSON keys named like `Object.prototype` members survive the
+> mapping as data at every level without touching prototypes.
 > Tests: `scripts/testCoreIdentityMapping.mjs`. **Not done, acceptance unchanged:** migration
 > `0005_core_identity_live`, the repositories and their writers, the boot snapshot-presence
 > signal (§7.2), atomic operations inside units of work (§7.4 per operation), the audience

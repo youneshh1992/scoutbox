@@ -166,6 +166,19 @@ export function writeCandidate(sqlite, candidate) {
   if (!candidate || !Array.isArray(candidate.guardians) || !Array.isArray(candidate.players) || !Array.isArray(candidate.links)) {
     throw new TypeError('writeCandidate needs a candidate { guardians, players, links } (a report that is not complete has none)');
   }
+  // The rows must be what `validateCoreIdentity` emits. A reference column is
+  // either null/absent (no link) or a non-empty string; anything else — an
+  // empty string, a number — is a malformed candidate and is refused BEFORE
+  // the first statement, so a present value can never be dropped by the
+  // two-pass write below and nothing is half-written.
+  const describeValue = (v) => (v === null ? 'null' : v === undefined ? 'absent' : v === '' ? 'an empty string' : Array.isArray(v) ? 'an array' : `a ${typeof v}`);
+  const reference = (where, col, v, { required = false } = {}) => {
+    if (v === null || v === undefined) { if (required) throw new TypeError(`writeCandidate: malformed candidate — ${where}: ${col} is ${describeValue(v)}`); return; }
+    if (typeof v !== 'string' || v === '') throw new TypeError(`writeCandidate: malformed candidate — ${where}: ${col} is ${describeValue(v)}, not a non-empty id`);
+  };
+  candidate.guardians.forEach((row, i) => { reference(`guardians ${row?.id ?? `#${i}`}`, 'id', row?.id, { required: true }); reference(`guardians ${row.id}`, 'co_guardian_of', row.co_guardian_of); });
+  candidate.players.forEach((row, i) => { reference(`players ${row?.id ?? `#${i}`}`, 'id', row?.id, { required: true }); reference(`players ${row.id}`, 'guardian_id', row.guardian_id); });
+  candidate.links.forEach((row) => { reference('links', 'guardian_id', row?.guardian_id, { required: true }); reference('links', 'player_id', row?.player_id, { required: true }); if (row.role !== 'primary' && row.role !== 'co') throw new TypeError(`writeCandidate: malformed candidate — links: role ${JSON.stringify(row.role)} is not primary or co`); });
   const insG = sqlite.prepare(insertSql('guardians', GUARDIAN_COLUMNS));
   const linkG = sqlite.prepare('UPDATE guardians SET co_guardian_of = ? WHERE id = ?');
   const insP = sqlite.prepare(insertSql('players', PLAYER_COLUMNS));
@@ -174,9 +187,11 @@ export function writeCandidate(sqlite, candidate) {
   for (const row of candidate.guardians) {
     const { co_guardian_of, ...rest } = row;
     insG.run({ ...rest, co_guardian_of: null });
-    if (co_guardian_of) pending.push([co_guardian_of, row.id]);
+    if (co_guardian_of !== null && co_guardian_of !== undefined) pending.push([co_guardian_of, row.id]);
   }
-  for (const [target, id] of pending) linkG.run(target, id);
+  for (const [target, id] of pending) {
+    if (linkG.run(target, id).changes !== 1) throw new Error(`writeCandidate: co_guardian_of of guardian ${id} was not written`);
+  }
   for (const row of candidate.players) insP.run(row);
   for (const row of candidate.links) insL.run(row);
   const broken = sqlite.prepare('PRAGMA foreign_key_check').all();
@@ -253,8 +268,11 @@ export function validateCoreIdentity(db, { now = Date.now() } = {}) {
 
   const listedBy = new Map(); // playerId → [guardianId] (valid guardians whose childIds list it)
   const links = [];           // { guardian_id, player_id, role } in guardian order, then childIds order
+  // Presence, never truthiness: a reference is checked whenever the record
+  // carries one (validation already refused '' and non-text values).
+  const present = (v) => v !== null && v !== undefined;
   for (const g of validGuardians.values()) {
-    if (g.coGuardianOf) {
+    if (present(g.coGuardianOf)) {
       if (g.coGuardianOf === g.id) refuse('guardians', g.id, 'coGuardianOf names itself');
       else { const why = describeRef(validGuardians, refusedGuardians, g.coGuardianOf); if (why) refuse('guardians', g.id, `coGuardianOf names ${why} (${g.coGuardianOf})`); }
     }
@@ -269,7 +287,7 @@ export function validateCoreIdentity(db, { now = Date.now() } = {}) {
     }
   }
   for (const p of validPlayers.values()) {
-    if (!p.guardianId) continue;
+    if (!present(p.guardianId)) continue;
     const why = describeRef(validGuardians, refusedGuardians, p.guardianId);
     if (why) { refuse('players', p.id, `guardianId names ${why} (${p.guardianId})`); continue; }
     if (!(listedBy.get(p.id) ?? []).includes(p.guardianId)) refuse('players', p.id, `guardianId names ${p.guardianId} but that guardian's childIds does not list the player (the two sides disagree; only the operator can say which is right)`);
@@ -277,7 +295,7 @@ export function validateCoreIdentity(db, { now = Date.now() } = {}) {
   // Roles, counted findings and the undecided rule — on the valid, consistent records.
   let primaryLinks = 0; let coLinks = 0; let adultsStillLinked = 0; let coGuardianArrangements = 0; let minorsCoOnly = 0;
   for (const g of validGuardians.values()) {
-    if (g.coGuardianOf && validGuardians.has(g.coGuardianOf) && g.coGuardianOf !== g.id) { coGuardianArrangements += 1; findings.push({ kind: 'co_guardian_arrangement', id: g.id, detail: `co-guardian of ${g.coGuardianOf}` }); }
+    if (present(g.coGuardianOf) && validGuardians.has(g.coGuardianOf) && g.coGuardianOf !== g.id) { coGuardianArrangements += 1; findings.push({ kind: 'co_guardian_arrangement', id: g.id, detail: `co-guardian of ${g.coGuardianOf}` }); }
     for (const childId of g.childIds ?? []) {
       const child = validPlayers.get(childId);
       if (!child) continue;
@@ -287,11 +305,12 @@ export function validateCoreIdentity(db, { now = Date.now() } = {}) {
     }
   }
   for (const p of validPlayers.values()) {
-    const linked = (listedBy.get(p.id) ?? []).length > 0 || !!p.guardianId;
+    const hasPrimary = present(p.guardianId);
+    const linked = (listedBy.get(p.id) ?? []).length > 0 || hasPrimary;
     const adult = isAdult(p, onDate);
-    if (adult && linked) { adultsStillLinked += 1; findings.push({ kind: 'adult_still_linked', id: p.id, detail: `an adult on the evaluation date, still linked to ${[...new Set([p.guardianId, ...(listedBy.get(p.id) ?? [])].filter(Boolean))].sort(byText).join(', ')}; imported unchanged, no policy implied` }); }
+    if (adult && linked) { adultsStillLinked += 1; findings.push({ kind: 'adult_still_linked', id: p.id, detail: `an adult on the evaluation date, still linked to ${[...new Set([...(hasPrimary ? [p.guardianId] : []), ...(listedBy.get(p.id) ?? [])])].sort(byText).join(', ')}; imported unchanged, no policy implied` }); }
     if (!adult && !linked) decisions.push({ kind: DECISION_MINOR_WITHOUT_LINK, id: p.id });
-    if (!adult && linked && !p.guardianId) { minorsCoOnly += 1; findings.push({ kind: 'minor_with_co_links_only', id: p.id, detail: `a minor with no primary guardian (guardianId empty) listed by ${(listedBy.get(p.id) ?? []).slice().sort(byText).join(', ')}` }); }
+    if (!adult && linked && !hasPrimary) { minorsCoOnly += 1; findings.push({ kind: 'minor_with_co_links_only', id: p.id, detail: `a minor with no primary guardian (guardianId null or absent) listed by ${(listedBy.get(p.id) ?? []).slice().sort(byText).join(', ')}` }); }
   }
 
   // 4. Status and candidate.
