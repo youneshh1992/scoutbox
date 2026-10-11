@@ -248,7 +248,7 @@ test('a process killed at COMMIT (after the DROPs, the live DDL, every insert an
 // ------------------------------------------------------------- the integrated boot (the data layer as production runs it)
 test('integrated boot: 0005 and 0006 are registered, players and guardians are table-backed, a first installation initialises once from the seed (never again), a saved-empty domain stays empty, a stale array or blob never replaces live data, and no identity blob is written again', () => {
   assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', CORE_IDENTITY_LIVE_MIGRATION, '0006_media_deletions']);
-  assert.deepEqual([...TABLE_BACKED], ['orgs', 'players', 'guardians', 'users', 'sessions']);
+  assert.deepEqual([...TABLE_BACKED], ['orgs', 'players', 'guardians', 'users', 'sessions', 'mediaDeletions']);
   assert.equal(m0005.id, CORE_IDENTITY_LIVE_MIGRATION); assert.equal(m0005.foreignKeysOff, true);
   // (a) A genuinely new database: the seed (the in-memory records) is imported once, atomically with the state change.
   const dir = tempDir('s4-boot'); let store = openStore(dir, { tableBacked: TABLE_BACKED });

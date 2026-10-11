@@ -30,7 +30,7 @@ import { createUsersRepository, USERS_TABLE } from './users.mjs';
 import { createSessionsRepository, SESSIONS_TABLE } from './sessions.mjs';
 import { createOrgsRepository, ORGS_TABLE } from './orgs.mjs';
 import { createIdentityRepositories, IDENTITY_SNAPSHOT, IDENTITY_COLLECTIONS } from './identity.mjs';
-import { createMediaDeletionsQueue } from './mediaDeletions.mjs';
+import { createMediaDeletionsQueue, MEDIA_DELETIONS_TABLE, MEDIA_DELETIONS_MIGRATION } from './mediaDeletions.mjs';
 import * as m0001 from './migrations/0001_org_users.mjs';
 import * as m0002 from './migrations/0002_core_identity_shadow.mjs';
 import * as m0003 from './migrations/0003_sessions_live.mjs';
@@ -48,8 +48,14 @@ export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005,
 // staff (see `writeTableBacked`).
 const TABLES = Object.freeze([ORGS_TABLE, USERS_TABLE, SESSIONS_TABLE]);
 
-/** Collections the data layer owns; the server's store never writes these blobs again. */
-export const TABLE_BACKED = Object.freeze(['orgs', ...IDENTITY_COLLECTIONS, 'users', 'sessions']);
+/**
+ * Collections the data layer owns; the server's store never writes these blobs
+ * again. `mediaDeletions` is the media-removal queue: not a record collection
+ * the server holds in memory, but part of every whole-database snapshot
+ * (backups, restores) in its stored row form, so a restored server keeps the
+ * intent to remove a file (review of 9656a4b, finding 2).
+ */
+export const TABLE_BACKED = Object.freeze(['orgs', ...IDENTITY_COLLECTIONS, 'users', 'sessions', MEDIA_DELETIONS_TABLE.name]);
 
 /**
  * Whole-snapshot access for tools that read or write the database file as one
@@ -67,6 +73,8 @@ export function readTableBacked(sqlite) {
   }
   const identity = IDENTITY_SNAPSHOT.read(sqlite);
   if (identity) Object.assign(out, identity);
+  const queue = MEDIA_DELETIONS_TABLE.read(sqlite);
+  if (queue) out[MEDIA_DELETIONS_TABLE.name] = queue;
   return out;
 }
 const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`);
@@ -107,6 +115,8 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   if (present.includes('orgs') && single('orgs').replace(sqlite, db.orgs)) written.push('orgs');
   if (IDENTITY_COLLECTIONS.every((n) => present.includes(n)) && IDENTITY_SNAPSHOT.replace(sqlite, { players: db.players, guardians: db.guardians }, { now })) written.push(...IDENTITY_COLLECTIONS);
   for (const name of ['users', 'sessions']) if (present.includes(name) && single(name).replace(sqlite, db[name])) written.push(name);
+  // The media-removal queue: validated entry by entry and rewritten (false before migration 0006, so the caller writes the blob the migration imports).
+  if (present.includes(MEDIA_DELETIONS_TABLE.name) && MEDIA_DELETIONS_TABLE.replace(sqlite, db[MEDIA_DELETIONS_TABLE.name])) written.push(MEDIA_DELETIONS_TABLE.name);
   // Rows the snapshot no longer lists go last, children before parents, so a
   // parent that is still referenced makes the foreign key refuse the save
   // instead of the row disappearing under its dependants. (The identity pair
@@ -171,6 +181,17 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
   // The media-deletion queue (migration 0006): rows are written inside the
   // deletion's unit of work; the server processes them after commit and at boot.
   const mediaDeletions = createMediaDeletionsQueue({ sqlite, log, warn, now });
+  // The queue is its table and nothing else. A `mediaDeletions` array the
+  // caller holds in memory is either the blob migration 0006 just imported
+  // from the file (a restored backup: the array is dropped, the table is the
+  // queue) or a stale copy (reported, dropped, and its blob row deleted so no
+  // save can bring it back). The queue never imports from memory.
+  if (Object.hasOwn(db, MEDIA_DELETIONS_TABLE.name)) {
+    const given = db[MEDIA_DELETIONS_TABLE.name];
+    if (!migrations.ran.includes(MEDIA_DELETIONS_MIGRATION) && Array.isArray(given) && given.length) warn(`media deletions: an in-memory array with ${given.length} entr${given.length === 1 ? 'y' : 'ies'} was ignored; the media_deletions table is authoritative`);
+    delete db[MEDIA_DELETIONS_TABLE.name];
+    sqlite.prepare('DELETE FROM collections WHERE name = ?').run(MEDIA_DELETIONS_TABLE.name);
+  }
 
   return {
     orgs,

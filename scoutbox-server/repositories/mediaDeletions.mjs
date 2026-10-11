@@ -16,7 +16,85 @@
  * `storage.delete(id)` must resolve the filesystem truthfully: it returns the
  * number of files removed (0 when none existed) and THROWS on any error other
  * than "absent" — a permission problem must keep the row, never clear it.
+ *
+ * Backups and restores (review of 9656a4b, finding 2): the queue lives only in
+ * this table, so a snapshot of the database carries it as the `mediaDeletions`
+ * collection, in the rows' stored form (`pending()`; `MEDIA_DELETIONS_TABLE`
+ * for the snapshot tools). A file whose removal is queued is never copied into
+ * a backup — a backup must not carry a file without the intent to remove it —
+ * and the restored server imports the queue (migration 0006 on a restored
+ * `db.json`, `MEDIA_DELETIONS_TABLE.replace` for a snapshot tool), serves
+ * nothing for those ids and finishes the removal at boot. Every imported entry
+ * is validated (a media id is `[a-z0-9-]+`, so an entry can never name a path
+ * outside the media directory); one invalid entry refuses the whole import.
  */
+import { migrationApplied } from './database.mjs';
+
+export const MEDIA_DELETIONS_MIGRATION = '0006_media_deletions';
+const MEDIA_ID = /^[a-z0-9-]+$/i;
+const ROW_FIELDS = ['media_id', 'player_id', 'queued_at', 'attempts', 'last_attempt_at', 'last_error'];
+
+/** Validate one exported queue entry without coercion: `{ ok: true, row }` or `{ ok: false, reason }`. */
+export function validateMediaDeletionRow(raw) {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, reason: 'not an object' };
+  const unknown = Object.keys(raw).filter((k) => !ROW_FIELDS.includes(k));
+  if (unknown.length) return { ok: false, reason: `unknown field(s) ${unknown.join(', ')}` };
+  const { media_id, player_id = null, queued_at, attempts = 0, last_attempt_at = null, last_error = null } = raw;
+  if (typeof media_id !== 'string' || !MEDIA_ID.test(media_id)) return { ok: false, reason: `${JSON.stringify(media_id)} is not a media id` };
+  if (player_id !== null && typeof player_id !== 'string') return { ok: false, reason: 'player_id must be a string or null' };
+  if (!Number.isSafeInteger(queued_at)) return { ok: false, reason: 'queued_at must be an integer' };
+  if (!Number.isSafeInteger(attempts) || attempts < 0) return { ok: false, reason: 'attempts must be a non-negative integer' };
+  if (last_attempt_at !== null && !Number.isSafeInteger(last_attempt_at)) return { ok: false, reason: 'last_attempt_at must be an integer or null' };
+  if (last_error !== null && typeof last_error !== 'string') return { ok: false, reason: 'last_error must be a string or null' };
+  return { ok: true, row: { media_id, player_id, queued_at, attempts, last_attempt_at, last_error } };
+}
+
+/** Validate a whole exported queue; throws `MEDIA_QUEUE_IMPORT_BLOCKED` naming entries and reasons (ids only, never a file). */
+export function validateMediaDeletionRows(rows, { label = 'the mediaDeletions collection' } = {}) {
+  const blocked = (detail) => { const err = new Error(`MEDIA_QUEUE_IMPORT_BLOCKED: ${detail}; nothing was imported`); err.code = 'MEDIA_QUEUE_IMPORT_BLOCKED'; return err; };
+  if (!Array.isArray(rows)) throw blocked(`${label} must be an array of queue entries (got ${rows === null ? 'null' : typeof rows})`);
+  const out = []; const problems = []; const seen = new Set();
+  rows.forEach((raw, i) => {
+    const v = validateMediaDeletionRow(raw);
+    if (!v.ok) { problems.push(`entry #${i}: ${v.reason}`); return; }
+    if (seen.has(v.row.media_id)) { problems.push(`entry #${i}: duplicate media id`); return; }
+    seen.add(v.row.media_id); out.push(v.row);
+  });
+  if (problems.length) throw blocked(`${problems.length} invalid entr${problems.length === 1 ? 'y' : 'ies'} in ${label} — ${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}`);
+  return out;
+}
+
+/** Rewrite the table from validated rows, inside the caller's transaction. */
+export function writeMediaDeletionRows(sqlite, rows) {
+  sqlite.exec('DELETE FROM media_deletions');
+  const ins = sqlite.prepare('INSERT INTO media_deletions (media_id, player_id, queued_at, attempts, last_attempt_at, last_error) VALUES (@media_id, @player_id, @queued_at, @attempts, @last_attempt_at, @last_error)');
+  for (const r of rows) ins.run(r);
+  return rows.length;
+}
+
+/**
+ * Whole-snapshot access for the tools (backups, restores, the persistence
+ * suites): the queue as rows in their stored form. `read` returns null before
+ * migration 0006 is recorded (the caller keeps whatever blob it holds);
+ * `replace` returns false before it (the caller writes the blob, which the
+ * migration imports on the next boot), otherwise validates every entry and
+ * rewrites the table inside the caller's transaction — one invalid entry
+ * refuses the whole write.
+ */
+export const MEDIA_DELETIONS_TABLE = {
+  name: 'mediaDeletions',
+  read(sqlite) {
+    if (!migrationApplied(sqlite, MEDIA_DELETIONS_MIGRATION)) return null;
+    return sqlite.prepare('SELECT media_id, player_id, queued_at, attempts, last_attempt_at, last_error FROM media_deletions ORDER BY queued_at, media_id').all().map((r) => ({ ...r }));
+  },
+  replace(sqlite, rows) {
+    if (!migrationApplied(sqlite, MEDIA_DELETIONS_MIGRATION)) return false;
+    if (!sqlite.isTransaction) throw new Error('media deletions: replace() runs inside the caller\'s transaction');
+    writeMediaDeletionRows(sqlite, validateMediaDeletionRows(rows));
+    return true;
+  },
+};
+
 export function createMediaDeletionsQueue({ sqlite, log = () => {}, warn = () => {}, now = Date.now }) {
   if (!sqlite) throw new TypeError('the media-deletion queue needs a SQLite connection (node:sqlite)');
   if (!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'media_deletions'").get()) throw new Error('media deletions: the media_deletions table does not exist (migration 0006 has not run)');

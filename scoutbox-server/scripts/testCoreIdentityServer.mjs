@@ -391,4 +391,69 @@ await test('backup/restore through the real admin routes: a backup taken after p
   rm(dir, restored);
 });
 
+// ------------------------------------------------------------- a backup taken while a media removal is pending (review of 9656a4b)
+await test('backup/restore keeps the intent of a pending media removal: a committed queue entry whose file is still on disk is exported with the snapshot and its file is left OUT of the backup (never a file without its removal intent); a live clip is copied; the restored server imports the queue, serves nothing for the id, finishes the removal at boot (a file put back by hand included) and stays clean across a restart; an older backup without the queue still restores; a tampered queue entry refuses the restore', async () => {
+  const dir = tempDir('s4srv-backup-queue');
+  let S = await boot(dir, nextPort());
+  const mk = async (name) => { const r = await S.j('POST', '/auth/player/signup', { name, dob: '2001-01-01', country: 'GB', password: 'backup-pass-1' }); assert.equal(r.status, 201); const m = await S.j('POST', '/player/media', { title: 'Clip', kind: 'video', dataUrl: 'data:video/webm;base64,AAAAAAAA' }, r.body.token); assert.equal(m.status, 201, JSON.stringify(m.body)); return { id: r.body.playerId, token: r.body.token, mediaId: m.body.media.id, file: path.join(dir, 'media', `${m.body.media.id}.webm`) }; };
+  const gone = await mk('Removed Owner'); const live = await mk('Still Here');
+  // The documented interval: the deletion committed (row, links, sessions, queue entry) but the file is still there — here because the unlink failed (a directory in its place), then the file is put back as a real file before the sweep runs again.
+  fs.rmSync(gone.file); fs.mkdirSync(gone.file);
+  assert.equal((await S.j('DELETE', '/player/account', undefined, gone.token)).status, 200);
+  fs.rmdirSync(gone.file); fs.writeFileSync(gone.file, 'synthetic media of a removed owner');
+  assert.deepEqual(qAll(dir, 'SELECT media_id, player_id FROM media_deletions'), [{ media_id: gone.mediaId, player_id: gone.id }], 'the queue entry is committed and the file is present');
+  const pro = await orgLogin(S, 'org-eastport');
+  assert.equal((await S.j('GET', `/media/${gone.mediaId}`, undefined, pro)).status, 404, 'queued: never served');
+  const bk = await S.j('POST', '/admin/backup', {}, null, A);
+  assert.equal(bk.status, 201, JSON.stringify(bk.body));
+  const snapshot = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8'));
+  assert.deepEqual((snapshot.db.mediaDeletions ?? []).map((r) => [r.media_id, r.player_id]), [[gone.mediaId, gone.id]], 'the removal intent travels with the snapshot');
+  assert.equal(fs.existsSync(path.join(bk.body.dir, 'media', `${gone.mediaId}.webm`)), false, 'a queued file is never copied into a backup');
+  assert.equal(fs.existsSync(path.join(bk.body.dir, 'media', `${live.mediaId}.webm`)), true, 'a live clip is');
+  assert.equal(bk.body.manifest.media?.queuedForRemoval, 1, 'the manifest says what was left out and why');
+  assert.ok(!bk.body.manifest.files.some((f) => f.path.includes(gone.mediaId)), 'the manifest lists only what the backup holds');
+  assert.equal((await S.j('POST', '/admin/backup/verify', { dir: path.basename(bk.body.dir) }, null, A)).body.ok, true);
+  await S.stop();
+  // Restore 1: as copied. The queue is imported, the file is absent, the boot sweep clears the entry; nothing is served; a restart stays clean.
+  const restored = tempDir('s4srv-restored-queue'); fs.cpSync(bk.body.dir, restored, { recursive: true });
+  S = await boot(restored, nextPort());
+  assert.equal(fs.existsSync(path.join(restored, 'media', `${gone.mediaId}.webm`)), false);
+  assert.equal(q1(restored, 'SELECT COUNT(*) AS n FROM media_deletions').n, 0, 'the imported entry was cleared at boot because the file is absent');
+  assert.ok(!blobNames(restored).includes('mediaDeletions'), 'the queue is a table, never left as a blob');
+  assert.ok([401, 404].includes((await S.j('GET', `/media/${gone.mediaId}`, undefined, pro)).status), 'the removed owner\'s id is not served on the restored server');
+  assert.equal((await S.j('GET', `/media/${live.mediaId}`, undefined, live.token)).status, 200, 'the live clip is served to its owner (session restored by hash)');
+  assert.equal((await S.j('GET', '/capabilities')).body.dataLayer.mediaDeletions.queued, 0);
+  await S.stop();
+  S = await boot(restored, nextPort());
+  assert.equal(q1(restored, 'SELECT COUNT(*) AS n FROM media_deletions').n, 0); assert.equal(fs.existsSync(path.join(restored, 'media', `${gone.mediaId}.webm`)), false);
+  await S.stop();
+  // Restore 2: an operator copies the removed owner's file back by hand before the first boot. The imported intent removes it at boot.
+  const restored2 = tempDir('s4srv-restored-queue2'); fs.cpSync(bk.body.dir, restored2, { recursive: true });
+  fs.writeFileSync(path.join(restored2, 'media', `${gone.mediaId}.webm`), 'copied back by hand');
+  S = await boot(restored2, nextPort());
+  assert.equal(fs.existsSync(path.join(restored2, 'media', `${gone.mediaId}.webm`)), false, 'the boot sweep removed the file the queue named');
+  assert.equal(q1(restored2, 'SELECT COUNT(*) AS n FROM media_deletions').n, 0);
+  await S.stop();
+  // Restore 3: a backup from a build without the queue (no mediaDeletions key) restores as before.
+  const restored3 = tempDir('s4srv-restored-queue3'); fs.cpSync(bk.body.dir, restored3, { recursive: true });
+  { const legacy = JSON.parse(fs.readFileSync(path.join(restored3, 'db.json'), 'utf8')); delete legacy.db.mediaDeletions; fs.writeFileSync(path.join(restored3, 'db.json'), JSON.stringify(legacy)); }
+  S = await boot(restored3, nextPort());
+  assert.equal(q1(restored3, 'SELECT COUNT(*) AS n FROM media_deletions').n, 0); assert.equal((await S.j('GET', `/media/${live.mediaId}`, undefined, live.token)).status, 200);
+  await S.stop();
+  // Restore 4: a tampered queue entry (an id that is not a media id) refuses the whole restore; db.json stays in place and nothing is removed.
+  const restored4 = tempDir('s4srv-restored-queue4'); fs.cpSync(bk.body.dir, restored4, { recursive: true });
+  { const legacy = JSON.parse(fs.readFileSync(path.join(restored4, 'db.json'), 'utf8')); legacy.db.mediaDeletions = [{ media_id: '../../outside', player_id: null, queued_at: 1 }]; fs.writeFileSync(path.join(restored4, 'db.json'), JSON.stringify(legacy)); }
+  const refused = await bootRefuses(restored4, nextPort());
+  assert.notEqual(refused.code, 0); assert.match(refused.log, /MEDIA_QUEUE_IMPORT_BLOCKED/); assert.match(refused.log, /is not a media id/);
+  // The store imported the snapshot as blobs first (and renamed the file, as for every restore); the migration then refused and rolled back:
+  // the tampered entry sits in the blob, imported by nothing, no queue table or record exists, the live clip is untouched, and the next boot refuses the same way.
+  assert.ok(fs.existsSync(path.join(restored4, 'db.json.migrated')), 'nothing of the snapshot is lost');
+  assert.equal(JSON.parse(q1(restored4, "SELECT value FROM collections WHERE name = 'mediaDeletions'").value)[0].media_id, '../../outside');
+  assert.equal(qAll(restored4, "SELECT name FROM sqlite_master WHERE name = 'media_deletions'").length, 0, 'the migration rolled back whole');
+  assert.equal(qAll(restored4, "SELECT id FROM data_migrations WHERE id = '0006_media_deletions'").length, 0);
+  assert.equal(fs.existsSync(path.join(restored4, 'media', `${live.mediaId}.webm`)), true);
+  assert.match((await bootRefuses(restored4, nextPort())).log, /MEDIA_QUEUE_IMPORT_BLOCKED/, 'the next boot refuses the same way');
+  rm(dir, restored, restored2, restored3, restored4);
+});
+
 console.log(`\n${passed} core-identity server checks passed`);

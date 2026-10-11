@@ -4388,7 +4388,7 @@ registerM12({
 // Same module pattern under m13/. registerM13 returns the enriched context so
 // the login path above can reach the MFA rate-limit guards.
 const m13Ctx = registerM13({
-  db, users, sessions, orgs, players, guardians, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, users, sessions, orgs, players, guardians, mediaDeletions, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,

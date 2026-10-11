@@ -16,7 +16,7 @@ import { createMediaDeletionsQueue } from '../repositories/mediaDeletions.mjs';
 import { rollbackCoreIdentityCopy } from '../repositories/coreIdentityRollback.mjs';
 import { createStorage } from '../adapters.mjs';
 import { openStore } from '../store.mjs';
-import { NOW, TTL, tempDir, adult, s3File, migrate, openRaw } from './coreIdentityTestFixtures.mjs';
+import { NOW, TTL, tempDir, adult, s3File, migrate, openRaw, applied, blob, dump } from './coreIdentityTestFixtures.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -110,6 +110,65 @@ test('rollback tool: a copy whose queue is not empty is refused (MEDIA_QUEUE_PEN
   assert.deepEqual(migrate(o, { now: NOW }).ran, ['0005_core_identity_live', '0006_media_deletions'], 're-upgrade: both steps run again');
   assert.equal(o.prepare('SELECT COUNT(*) AS n FROM media_deletions').get().n, 0);
   o.close(); rm(dir, out1, out2);
+});
+
+test('backup/restore pieces (review of 9656a4b): the queue travels as the mediaDeletions collection — a snapshot tool reads it from the table and writes it back through the table, validated whole (a path instead of an id, an unknown field, a duplicate, a bad time or a non-array refuses the save with nothing written); before migration 0006 the tool writes it as a blob and the migration imports and retires it; a tampered blob aborts the migration whole, keeps the blob, creates nothing and refuses again on the next run; a stale in-memory array at boot is reported, dropped and its blob row deleted — the queue never imports from memory', () => {
+  // (a) A migrated file, snapshot mode: read from the table, written back through it.
+  const dir = tempDir('media-snap'); s3File(dir); { const s = openRaw(dir); migrate(s, { now: NOW }); s.close(); }
+  let tool = openStore(dir);
+  assert.deepEqual(tool.load().db.mediaDeletions, [], 'the collection is present (empty) once 0006 is recorded');
+  { const s = openRaw(dir); transaction(s, () => createMediaDeletionsQueue({ sqlite: s, now: () => NOW }).enqueue(['media-q'], { playerId: 'pl-gone', at: NOW })); s.close(); }
+  tool.sqlite.close(); tool = openStore(dir);
+  let snap = tool.load();
+  assert.deepEqual(snap.db.mediaDeletions, [{ media_id: 'media-q', player_id: 'pl-gone', queued_at: NOW, attempts: 0, last_attempt_at: null, last_error: null }], 'read from the table in its stored form');
+  snap.db.mediaDeletions[0].attempts = 2; snap.db.mediaDeletions.push({ media_id: 'media-r', player_id: null, queued_at: NOW + 1 });
+  tool.save(snap);
+  assert.deepEqual(tool.sqlite.prepare('SELECT media_id, attempts FROM media_deletions ORDER BY queued_at').all().map((r) => [r.media_id, r.attempts]), [['media-q', 2], ['media-r', 0]], 'written back through the table');
+  assert.equal(tool.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'mediaDeletions'").get().n, 0, 'never a blob once the table is live');
+  const before = dump(tool.sqlite); const seq = tool.revision();
+  for (const [label, bad, re] of [
+    ['a path instead of an id', [{ media_id: '../../etc/passwd', queued_at: 1 }], /MEDIA_QUEUE_IMPORT_BLOCKED.*is not a media id/],
+    ['an unknown field', [{ media_id: 'media-x', queued_at: 1, path: '/tmp/x' }], /unknown field\(s\) path/],
+    ['a duplicate', [{ media_id: 'media-q', queued_at: 1 }, { media_id: 'media-q', queued_at: 2 }], /duplicate media id/],
+    ['a non-integer time', [{ media_id: 'media-x', queued_at: 'now' }], /queued_at must be an integer/],
+  ]) {
+    snap = tool.load(); snap.db.mediaDeletions = bad;
+    assert.throws(() => tool.save(snap), re, label);
+    assert.equal(tool.sqlite.isTransaction, false, `${label}: the transaction is closed`); assert.equal(dump(tool.sqlite), before, `${label}: nothing changed`); assert.equal(tool.revision(), seq);
+  }
+  snap = tool.load(); snap.db.mediaDeletions = { media_id: 'media-q' };
+  assert.throws(() => tool.save(snap), /mediaDeletions: the snapshot collection must be an array/); assert.equal(dump(tool.sqlite), before);
+  tool.sqlite.close();
+  // (b) Before 0006 (a restored backup is this path: db.json imported as blobs, then the migrations): the blob, then the import.
+  const pre = tempDir('media-pre'); s3File(pre);
+  tool = openStore(pre); snap = tool.load(); assert.equal(snap.db.mediaDeletions, undefined, 'nothing to read before the record');
+  snap.db.mediaDeletions = [{ media_id: 'media-restored', player_id: 'pl-gone', queued_at: NOW, attempts: 1, last_attempt_at: NOW, last_error: 'EACCES' }];
+  tool.save(snap);
+  assert.deepEqual(blob(tool.sqlite, 'mediaDeletions').map((r) => r.media_id), ['media-restored'], 'written as a blob (no table yet)');
+  tool.sqlite.close();
+  { const s = openRaw(pre); assert.deepEqual(migrate(s, { now: NOW }).ran, ['0005_core_identity_live', '0006_media_deletions']);
+    assert.deepEqual(s.prepare('SELECT media_id, attempts, last_error FROM media_deletions').all().map((r) => ({ ...r })), [{ media_id: 'media-restored', attempts: 1, last_error: 'EACCES' }], 'the migration imported the blob');
+    assert.equal(blob(s, 'mediaDeletions'), undefined, 'and retired it'); s.close(); }
+  // (c) A tampered blob aborts the migration whole; the next run refuses the same way.
+  const bad = tempDir('media-bad'); s3File(bad, { extra: { mediaDeletions: [{ media_id: '../../outside', queued_at: 1 }] } });
+  { const s = openRaw(bad);
+    assert.throws(() => migrate(s, { now: NOW }), /MEDIA_QUEUE_IMPORT_BLOCKED.*is not a media id/);
+    assert.equal(s.isTransaction, false);
+    assert.equal(s.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'media_deletions'").get().n, 0, 'nothing created');
+    assert.deepEqual(applied(s).filter((id) => /^000[56]/.test(id)), ['0005_core_identity_live'], '0005 committed on its own; 0006 did not');
+    assert.deepEqual(blob(s, 'mediaDeletions'), [{ media_id: '../../outside', queued_at: 1 }], 'the blob is kept, imported by nothing');
+    assert.throws(() => migrate(s, { now: NOW }), /MEDIA_QUEUE_IMPORT_BLOCKED/, 'the next run refuses the same way'); s.close(); }
+  // (d) A stale in-memory array at boot (server mode): reported, dropped, its blob row deleted, the table untouched.
+  { const store = openStore(dir, { tableBacked: TABLE_BACKED }); const warnings = [];
+    store.sqlite.prepare("INSERT INTO collections (name, value) VALUES ('mediaDeletions', '[]')").run();
+    const db = { ...store.load().db, players: [], guardians: [], mediaDeletions: [{ media_id: 'media-stale', queued_at: 1 }] };
+    const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
+    assert.ok(warnings.some((w) => /media deletions: an in-memory array with 1 entry was ignored/.test(w)), JSON.stringify(warnings));
+    assert.equal(Object.hasOwn(db, 'mediaDeletions'), false, 'the array is dropped from memory');
+    assert.equal(store.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'mediaDeletions'").get().n, 0, 'the blob row is deleted');
+    assert.deepEqual(layer.mediaDeletions.pending().map((r) => r.media_id), ['media-q', 'media-r'], 'the table is untouched');
+    store.sqlite.close(); }
+  rm(dir, pre, bad);
 });
 
 console.log(`\n${passed} media-deletion checks passed`);

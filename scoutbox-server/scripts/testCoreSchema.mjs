@@ -334,7 +334,7 @@ test('identity snapshot: before the cutover record exists (a pre-S4 file read by
   assert.throws(() => IDENTITY_SNAPSHOT.replace(s, { players: [], guardians: [] }, { now: NOW }), /replace\(\) runs inside the caller's transaction/);
   assert.deepEqual(IDENTITY_SNAPSHOT.read(s), { guardians: [], players: [] });
   s.close();
-  assert.deepEqual([...TABLE_BACKED], ['orgs', 'players', 'guardians', 'users', 'sessions']);
+  assert.deepEqual([...TABLE_BACKED], ['orgs', 'players', 'guardians', 'users', 'sessions', 'mediaDeletions']);
   assert.deepEqual([...IDENTITY_SNAPSHOT.names], ['players', 'guardians']);
 });
 

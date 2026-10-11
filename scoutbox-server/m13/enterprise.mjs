@@ -61,7 +61,7 @@ export function requestInstrumentation() {
 
 export function registerEnterprise(ctx) {
   const {
-    db, users, sessions, orgs, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
+    db, users, sessions, orgs, mediaDeletions, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
     mailer, requireLead, isLead, paginate, histAppend, timingSafeEq, signBody,
     storage, DATA_DIR,
   } = ctx;
@@ -429,38 +429,68 @@ export function registerEnterprise(ctx) {
   adminRouter.post('/backup', (req, res) => {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const dir = path.join(DATA_DIR, 'backups', stamp);
-    fs.mkdirSync(dir, { recursive: true });
-    // 1. A consistent snapshot: the same shape store.load() imports on first
-    //    boot (db.json legacy path) — a restore is simply "point a fresh
-    //    DATA_DIR at a copy of this directory".
-    persistNow();
-    const snapshotPath = path.join(dir, 'db.json');
-    // Sessions are exported in their stored form (token hashes, never tokens):
-    // the in-memory `db.sessions` view is hash-free by design and could not be
-    // restored, so a restore would have refused or lost every session. The
-    // hashes are exactly what the database file holds, under the same care.
-    fs.writeFileSync(snapshotPath, JSON.stringify({ savedAt: Date.now(), idCounter: ctx.currentIdCounter(), db: { ...db, sessions: sessions.exportRows() } }));
-    // 2. Media files.
-    const mediaSrc = path.join(DATA_DIR, 'media');
-    const mediaDst = path.join(dir, 'media');
-    const files = [];
-    if (fs.existsSync(mediaSrc)) {
-      fs.mkdirSync(mediaDst, { recursive: true });
-      for (const f of fs.readdirSync(mediaSrc)) {
-        fs.copyFileSync(path.join(mediaSrc, f), path.join(mediaDst, f));
-        files.push({ path: `media/${f}`, sha256: fileSha256(path.join(mediaDst, f)), bytes: fs.statSync(path.join(mediaDst, f)).size });
+    let manifest;
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      // 1. A consistent snapshot: the same shape store.load() imports on first
+      //    boot (db.json legacy path) — a restore is simply "point a fresh
+      //    DATA_DIR at a copy of this directory".
+      persistNow();
+      const snapshotPath = path.join(dir, 'db.json');
+      // Sessions are exported in their stored form (token hashes, never tokens):
+      // the in-memory `db.sessions` view is hash-free by design and could not be
+      // restored, so a restore would have refused or lost every session. The
+      // hashes are exactly what the database file holds, under the same care.
+      // The media-removal queue (migration 0006) lives only in its table and is
+      // exported the same way, in its stored row form: a restored server imports
+      // it, serves nothing for those ids and finishes the removal at boot. The
+      // queue is read ONCE here and decides both the export and which files are
+      // left out below (review of 9656a4b, finding 2).
+      const queued = mediaDeletions.pending();
+      const queuedIds = new Set(queued.map((r) => r.media_id));
+      fs.writeFileSync(snapshotPath, JSON.stringify({ savedAt: Date.now(), idCounter: ctx.currentIdCounter(), db: { ...db, sessions: sessions.exportRows(), mediaDeletions: queued } }));
+      // 2. Media files — except those whose removal is queued: a backup never
+      //    carries a file without the intent to remove it. Their ids are in
+      //    db.json; on a restored server the entry is cleared once the file is
+      //    confirmed absent, and a file an operator copies back by hand is
+      //    removed by the boot sweep.
+      const mediaSrc = path.join(DATA_DIR, 'media');
+      const mediaDst = path.join(dir, 'media');
+      const files = [];
+      let leftOut = 0;
+      if (fs.existsSync(mediaSrc)) {
+        fs.mkdirSync(mediaDst, { recursive: true });
+        for (const f of fs.readdirSync(mediaSrc)) {
+          if (queuedIds.has(f.replace(/\.[^.]+$/, ''))) { leftOut += 1; continue; }
+          fs.copyFileSync(path.join(mediaSrc, f), path.join(mediaDst, f));
+          files.push({ path: `media/${f}`, sha256: fileSha256(path.join(mediaDst, f)), bytes: fs.statSync(path.join(mediaDst, f)).size });
+        }
       }
+      files.unshift({ path: 'db.json', sha256: fileSha256(snapshotPath), bytes: fs.statSync(snapshotPath).size });
+      manifest = {
+        contract: 'backup.2026-09.v1', createdAt: Date.now(), engine: 'json-snapshot + media files',
+        counts: { players: db.players.length, orgs: db.orgs.length, notifications: db.notifications.length, mediaFiles: files.length - 1 },
+        media: {
+          copied: files.length - 1, queuedForRemoval: leftOut,
+          note: 'Files whose removal was committed but not yet completed are left out on purpose: their queue entries are in db.json, and the restored server serves nothing for them and finishes the removal at boot.',
+        },
+        files,
+        secretsNote: 'Backups contain NO server secrets (ADMIN_KEY, signing secrets live in env, never in the DB). Store backups with the same care as the live data directory.',
+        restore: 'Copy this directory to a NEW empty DATA_DIR and start the server with DATA_DIR pointing at it. Never restore over a live data directory.',
+      };
+      // The manifest is written LAST: a directory without one is not a backup
+      // (/admin/backups shows it with manifest: null; /admin/backup/verify answers 404).
+      fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+    } catch (err) {
+      // Nothing half-made is left behind as if it were usable, and the response
+      // never claims a backup that does not exist.
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+      console.error(`backup failed (${stamp}): ${err?.message ?? err}`);
+      db.opsEvents.push({ id: nextId('ops'), at: Date.now(), kind: 'backup_failed', detail: { dir: stamp, error: String(err?.message ?? err).slice(0, 200) } });
+      persistNow();
+      return res.status(500).json({ error: 'BACKUP_FAILED', message: 'The backup could not be completed; the partial directory was removed.' });
     }
-    files.unshift({ path: 'db.json', sha256: fileSha256(snapshotPath), bytes: fs.statSync(snapshotPath).size });
-    const manifest = {
-      contract: 'backup.2026-09.v1', createdAt: Date.now(), engine: 'json-snapshot + media files',
-      counts: { players: db.players.length, orgs: db.orgs.length, notifications: db.notifications.length },
-      files,
-      secretsNote: 'Backups contain NO server secrets (ADMIN_KEY, signing secrets live in env, never in the DB). Store backups with the same care as the live data directory.',
-      restore: 'Copy this directory to a NEW empty DATA_DIR and start the server with DATA_DIR pointing at it. Never restore over a live data directory.',
-    };
-    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2));
-    db.opsEvents.push({ id: nextId('ops'), at: Date.now(), kind: 'backup_created', detail: { dir: stamp, files: files.length } });
+    db.opsEvents.push({ id: nextId('ops'), at: Date.now(), kind: 'backup_created', detail: { dir: stamp, files: manifest.files.length, queuedForRemoval: manifest.media.queuedForRemoval } });
     persistNow();
     res.status(201).json({ dir, manifest });
   });
