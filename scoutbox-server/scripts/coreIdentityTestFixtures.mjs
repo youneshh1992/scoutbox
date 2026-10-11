@@ -9,7 +9,11 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations } from '../repositories/database.mjs';
 import { DATA_MIGRATIONS } from '../repositories/index.mjs';
-import * as m0005 from '../repositories/migrations/0005_core_identity_live.mjs';
+
+/** The registered steps up to S3 (0001–0004): what an S3-shaped file has applied before migration 0005 runs. */
+export const S3_MIGRATIONS = Object.freeze(DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id)));
+/** The ids 0005 and later add on a cutover, in order. */
+export const S4_MIGRATION_IDS = Object.freeze(DATA_MIGRATIONS.filter((m) => !S3_MIGRATIONS.includes(m)).map((m) => m.id));
 
 export const DAY = 86_400_000;
 export const TTL = 30 * DAY;
@@ -90,7 +94,7 @@ export function s3File(dir, { players = FIXTURE().players, guardians = FIXTURE()
   for (const [name, value] of Object.entries({ users, sessions, orgs, players, guardians, ...extra })) if (!omit.includes(name)) put.run(name, JSON.stringify(value));
   for (const [name, text] of Object.entries(rawBlobs)) s.prepare('INSERT INTO collections (name, value) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value').run(name, text);
   s.prepare("INSERT INTO meta (key, value) VALUES ('idCounter', '1000'), ('savedAt', ?), ('saveSeq', ?)").run(String(T0), String(saveSeq));
-  runDataMigrations(s, DATA_MIGRATIONS, { now: T0, context: { sessionTtlMs: TTL } });
+  runDataMigrations(s, S3_MIGRATIONS, { now: T0, context: { sessionTtlMs: TTL } });
   if (shadowRows) {
     for (const g of shadowRows.guardians ?? []) s.prepare('INSERT INTO guardians (id, name, email) VALUES (?, ?, ?)').run(g.id, g.name, g.email);
     for (const p of shadowRows.players ?? []) s.prepare('INSERT INTO players (id, name, birth_date, country, guardian_id) VALUES (?, ?, ?, ?, ?)').run(p.id, p.name, p.dob, p.country, p.guardianId ?? null);
@@ -104,13 +108,13 @@ export function freshFile(dir) {
   const s = new DatabaseSync(path.join(dir, 'scoutbox.db'));
   s.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
   s.exec(BASE_DDL);
-  runDataMigrations(s, DATA_MIGRATIONS, { now: T0, context: { sessionTtlMs: TTL } });
+  runDataMigrations(s, S3_MIGRATIONS, { now: T0, context: { sessionTtlMs: TTL } });
   s.close();
 }
 
 export const openRaw = (dir) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db')); s.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;'); return s; };
-/** Run the real migration 0005 through the real runner (after 0001–0004, which are already recorded). */
-export const migrate = (sqlite, { now = NOW } = {}) => runDataMigrations(sqlite, [...DATA_MIGRATIONS, m0005], { now, context: { sessionTtlMs: TTL } });
+/** Run the REGISTERED migrations through the real runner: on an S3-shaped file that is 0005 (the cutover) and 0006 (the media-deletion queue). */
+export const migrate = (sqlite, { now = NOW } = {}) => runDataMigrations(sqlite, DATA_MIGRATIONS, { now, context: { sessionTtlMs: TTL } });
 export const applied = (sqlite) => sqlite.prepare('SELECT id FROM data_migrations ORDER BY id').all().map((r) => r.id);
 export const tableCols = (sqlite, t) => sqlite.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name);
 export const isLive = (sqlite, t) => tableCols(sqlite, t).includes('facets_json');

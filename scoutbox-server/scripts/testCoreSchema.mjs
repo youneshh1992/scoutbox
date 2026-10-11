@@ -1,8 +1,10 @@
-// Behavioural tests for migration plan step S1: the core identity schema
-// (orgs, guardians, players, guardian_children, sessions) created by
-// migration 0002 and kept as a verified shadow of the snapshot. Everything
-// runs on throwaway databases under the OS temp directory; nothing touches
-// DATA_DIR. Run with: npm test
+// Behavioural tests for the core identity schema: the five tables created by
+// migration 0002 (plan step S1, as a shadow) and live one domain at a time
+// since — sessions (0003), orgs (0004), players/guardians/guardian_children
+// (0005, S4a) — their constraints, foreign keys and the coupled identity
+// snapshot that tools read and write through the tables. Everything runs on
+// throwaway databases under the OS temp directory; nothing touches DATA_DIR.
+// Run with: npm test
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -12,7 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations, transaction } from '../repositories/database.mjs';
-import { createCoreIdentityShadow, CORE_SHADOW_TABLES, SHADOW_STATUS } from '../repositories/shadow.mjs';
+import { IDENTITY_SNAPSHOT } from '../repositories/identity.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
 import * as m0002 from '../repositories/migrations/0002_core_identity_shadow.mjs';
@@ -25,7 +27,7 @@ const TTL = 30 * DAY;
 let counter = 5000;
 const nextId = (p) => `${p}-${++counter}`;
 
-const freshDb = () => { const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;'); runDataMigrations(s, DATA_MIGRATIONS); return s; };
+const freshDb = () => { const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;'); runDataMigrations(s, DATA_MIGRATIONS, { now: Date.UTC(2026, 9, 11, 12) }); return s; };
 const tempDir = (tag) => fs.mkdtempSync(path.join(os.tmpdir(), `sb-${tag}-`));
 
 /** A synthetic snapshot in the exact shapes the server writes. No real data. */
@@ -65,7 +67,7 @@ function syntheticSnapshot({ orgUserId = 'usr-9001' } = {}) {
 const seedOrgUser = (s, id = 'usr-9001') => { s.prepare("INSERT OR IGNORE INTO orgs (id, name, type, level, plan) VALUES ('org-a', 'Org A', 'club', 'pro', 'Pro')").run(); s.prepare("INSERT INTO org_users (id, org_id, name, role, created_at) VALUES (?, 'org-a', 'Maria Keane', 'Head of Recruitment', ?)").run(id, Date.now()); };
 
 // ------------------------------------------------------------- migration 0002
-test('migration 0002 creates the five core tables as STRICT tables and is recorded once', () => {
+test('the five core identity tables exist as STRICT tables after the registered migrations, and the registry applies nothing twice', () => {
   const s = freshDb();
   const names = s.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name IN ('orgs','guardians','players','guardian_children','sessions') ORDER BY name").all();
   assert.deepEqual(names.map((r) => r.name), ['guardian_children', 'guardians', 'orgs', 'players', 'sessions']);
@@ -139,386 +141,122 @@ test('a failing transaction leaves nothing behind', () => {
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0);
 });
 
-// ------------------------------------------------------------- the projection
-test('projection: every valid row lands, every refused row is named with its reason, and ids are preserved', () => {
-  const s = freshDb(); seedOrgUser(s);
-  const shadow = createCoreIdentityShadow({ sqlite: s, now: () => 1_000 });
-  const db = syntheticSnapshot();
-  const result = transaction(s, () => shadow.project(db));
-  assert.equal(result.error, null);
-  // Sessions are live since S2 and are never projected: the fixture's sessions are ignored here.
-  assert.deepEqual(Object.fromEntries(Object.entries(result.tables).map(([t, r]) => [t, [r.source, r.written, r.skipped.length]])), {
-    guardians: [4, 3, 1], players: [4, 3, 1], guardian_children: [3, 2, 1],
-  });
-  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 0, 'the projection wrote nothing into the live sessions table');
-  assert.ok(!('orgs' in result.tables), 'orgs are live since S3 and are not projected');
-  assert.match(result.tables.guardians.skipped[0].reason, /UNIQUE/); assert.equal(result.tables.guardians.skipped[0].id, 'gd-dup');
-  assert.match(result.tables.players.skipped[0].reason, /CHECK/); assert.equal(result.tables.players.skipped[0].id, 'pl-badfoot');
-  assert.deepEqual(result.tables.guardian_children.skipped, [{ id: 'gd-1/pl-gone', reason: 'child player does not exist' }]);
-  // Findings: rows written with an adjustment.
-  assert.deepEqual(result.tables.players.findings, [{ id: 'pl-orphan', finding: 'guardianId gd-missing does not exist; written as NULL' }]);
-  assert.deepEqual(result.tables.guardians.findings, [{ id: 'gd-3', finding: 'coGuardianOf gd-missing does not exist; written as NULL' }]);
-  // Ids and values are preserved exactly; the live orgs table (seeded with org-a by the helper) is untouched by the projection.
-  assert.deepEqual(s.prepare('SELECT id FROM orgs ORDER BY id').all().map((r) => r.id), ['org-a'], 'the projection never writes or deletes live organisations');
-  const adult = s.prepare("SELECT * FROM players WHERE id = 'pl-adult'").get();
-  assert.equal(adult.birth_date, '2000-01-01'); assert.equal(adult.stats_pace_kmh, 33.4); assert.equal(adult.medical_shared, 1); assert.equal(adult.programme_track, 'ST'); assert.equal(adult.guardian_id, null);
-  const minor = s.prepare("SELECT * FROM players WHERE id = 'pl-minor'").get();
-  assert.equal(minor.guardian_id, 'gd-1'); assert.equal(minor.stats_goals, null); assert.equal(minor.medical_shared, 0);
-});
-test('projection: guardian/child links carry the primary/co role and a guardian sees only their own children', () => {
-  const s = freshDb(); seedOrgUser(s);
-  const shadow = createCoreIdentityShadow({ sqlite: s });
-  transaction(s, () => shadow.project(syntheticSnapshot()));
-  const links = s.prepare('SELECT guardian_id, player_id, role FROM guardian_children ORDER BY guardian_id').all().map((r) => ({ ...r }));
-  assert.deepEqual(links, [{ guardian_id: 'gd-1', player_id: 'pl-minor', role: 'primary' }, { guardian_id: 'gd-2', player_id: 'pl-minor', role: 'co' }]);
-  assert.deepEqual(s.prepare("SELECT player_id FROM guardian_children WHERE guardian_id = 'gd-3'").all(), [], 'a guardian with no children sees none');
-  assert.equal(s.prepare("SELECT COUNT(*) AS n FROM players WHERE guardian_id = 'gd-2'").get().n, 0, 'a co-guardian is not the primary guardian');
-});
-test('projection: the live sessions table is never written or deleted by the shadow, even with rows in it', () => {
-  const s = freshDb(); seedOrgUser(s);
-  s.prepare("INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, created_at, expires_at) VALUES ('h1', 'sid-live', 'org', 'org-a', 'usr-9001', 1, 2)").run();
-  const shadow = createCoreIdentityShadow({ sqlite: s });
-  const db = syntheticSnapshot(); // carries eight legacy-shaped sessions, which the shadow must ignore
-  transaction(s, () => shadow.project(db));
-  transaction(s, () => shadow.project(db));
-  assert.deepEqual(s.prepare('SELECT sid FROM sessions').all().map((r) => r.sid), ['sid-live'], 'the live row is untouched and no fixture session was projected');
-  assert.ok(!('sessions' in shadow.report(db).tables), 'the report no longer lists sessions');
-});
-test('projection: re-running on a changed snapshot is deterministic (rewrite, not append)', () => {
-  const s = freshDb(); seedOrgUser(s);
-  const shadow = createCoreIdentityShadow({ sqlite: s });
-  const db = syntheticSnapshot();
-  transaction(s, () => shadow.project(db));
-  transaction(s, () => shadow.project(db));
-  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM players').get().n, 3, 'projecting twice does not duplicate');
-  db.players = db.players.filter((p) => p.id !== 'pl-adult');
-  db.players.find((p) => p.id === 'pl-minor').name = 'Renamed Minor';
-  transaction(s, () => shadow.project(db));
-  assert.equal(s.prepare("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-adult'").get().n, 0, 'a removed player is gone');
-  assert.equal(s.prepare("SELECT name FROM players WHERE id = 'pl-minor'").get().name, 'Renamed Minor', 'a changed field is current');
-});
-test('reconciliation report: counts per table, partial vs complete, every projected row accounted for, never a token or a password', () => {
-  const s = freshDb(); seedOrgUser(s);
-  const shadow = createCoreIdentityShadow({ sqlite: s });
-  const db = syntheticSnapshot();
-  // The store writes savedAt and the save revision (saveSeq) on every save.
-  s.prepare("INSERT INTO meta (key, value) VALUES ('savedAt', '77'), ('saveSeq', '1')").run();
-  transaction(s, () => shadow.project(db, { savedAt: 77, saveSeq: 1 }));
-  const report = shadow.report(db, { enabled: true });
-  assert.equal(report.mode, 'shadow'); assert.equal(report.sourceOfTruth, 'snapshot'); assert.equal(report.enabled, true);
-  assert.equal(report.status, SHADOW_STATUS.PARTIAL, 'rows were refused, so the result is partial, not complete');
-  assert.equal(report.reconciled, false);
-  assert.deepEqual(report.tables.guardians, { ...report.tables.guardians, snapshotRows: 4, tableRows: 3, projectedRows: 4, skipped: 1, findings: 1, accountedFor: true });
-  assert.ok(!('orgs' in report.tables), 'orgs are live since S3: not in the shadow report');
-  assert.deepEqual(report.tables.guardian_children, { ...report.tables.guardian_children, snapshotRows: 3, tableRows: 2, skipped: 1, accountedFor: true });
-  assert.equal(report.tables.players.findings, 1);
-  // The public report carries no row ids, reasons, tokens or hashes; the detailed one adds ids and reasons only.
-  const publicText = JSON.stringify(report);
-  for (const leak of ['tok-org', 'scrypt$', 'gd-dup', 'sid-gh', 'pl-badfoot', 'details', 'lastError']) assert.ok(!publicText.includes(leak), `public report must not contain ${leak}`);
-  const detailed = shadow.report(db, { enabled: true, details: true });
-  const detailedText = JSON.stringify(detailed);
-  assert.ok(detailedText.includes('gd-dup') && detailedText.includes('UNIQUE'), 'the detailed report names refused rows and reasons');
-  assert.equal(detailed.lastError, null);
-  for (const leak of ['tok-org', 'tok-player', 'scrypt$', '123456']) assert.ok(!detailedText.includes(leak), `detailed report must not contain ${leak}`);
-  assert.equal(report.findings, 2, 'two adjusted relationships in the fixture: pl-orphan.guardianId and gd-3.coGuardianOf');
-  // A snapshot with nothing refused but a dangling relationship is still not complete.
-  const dangling = syntheticSnapshot();
-  dangling.orgs = dangling.orgs.filter((o) => o.id !== 'org-bad'); dangling.guardians = dangling.guardians.filter((g) => g.id !== 'gd-dup'); dangling.guardians[0].childIds = ['pl-minor'];
-  dangling.players = dangling.players.filter((p) => p.id !== 'pl-badfoot'); dangling.sessions = dangling.sessions.filter((x) => x.token && x.sid !== 'sid-n' && x.sid !== 'sid-gh');
-  s.prepare("UPDATE meta SET value = '2' WHERE key = 'saveSeq'").run();
-  transaction(s, () => shadow.project(dangling, { savedAt: 78, saveSeq: 2 }));
-  const notClean = shadow.report(dangling, { enabled: true });
-  assert.equal(notClean.skipped, 0); assert.equal(notClean.findings, 2);
-  assert.equal(notClean.status, SHADOW_STATUS.PARTIAL, 'adjusted relationships keep the result partial'); assert.equal(notClean.reconciled, false);
-  // A genuinely clean snapshot (no refused row, no dangling relationship) reconciles completely.
-  const clean = JSON.parse(JSON.stringify(dangling));
-  clean.players.find((p) => p.id === 'pl-orphan').guardianId = 'gd-1'; clean.guardians[0].childIds = ['pl-minor', 'pl-orphan'];
-  clean.guardians.find((g) => g.id === 'gd-3').coGuardianOf = 'gd-1';
-  s.prepare("UPDATE meta SET value = '3' WHERE key = 'saveSeq'").run();
-  transaction(s, () => shadow.project(clean, { savedAt: 79, saveSeq: 3 }));
-  const complete = shadow.report(clean, { enabled: true });
-  assert.equal(complete.skipped, 0); assert.equal(complete.findings, 0);
-  assert.equal(complete.status, SHADOW_STATUS.COMPLETE); assert.equal(complete.reconciled, true);
-  for (const t of CORE_SHADOW_TABLES) assert.equal(complete.tables[t].tableRows, complete.tables[t].snapshotRows, `${t} fully projected`);
-});
-test('reconciliation report: a projection older than the last save is stale, never reconciled; a thrown projection is failed', () => {
-  const s = freshDb(); seedOrgUser(s);
-  const shadow = createCoreIdentityShadow({ sqlite: s });
-  const db = syntheticSnapshot();
-  assert.equal(shadow.report(db).status, SHADOW_STATUS.NEVER);
-  s.prepare("INSERT INTO meta (key, value) VALUES ('savedAt', '10'), ('saveSeq', '4')").run();
-  transaction(s, () => shadow.project(db, { savedAt: 10, saveSeq: 4 }));
-  assert.equal(shadow.report(db).status, SHADOW_STATUS.PARTIAL);
-  s.prepare("UPDATE meta SET value = '5' WHERE key = 'saveSeq'").run(); // a later save (same savedAt) without a projection
-  const stale = shadow.report(db, { enabled: false });
-  assert.equal(stale.status, SHADOW_STATUS.STALE); assert.equal(stale.reconciled, false);
-  assert.equal(stale.tables.guardians.tableRows, 3, 'the old rows are still there and are reported as stale, not as current');
-  // A projection that throws part-way: the caller rolls back; the report says failed and names the error only in detail.
-  const broken = syntheticSnapshot();
-  let reads = 0;
-  Object.defineProperty(broken, 'players', { get() { if (++reads === 1) throw new Error('snapshot unreadable'); return []; } });
-  assert.throws(() => transaction(s, () => shadow.project(broken, { savedAt: 11, saveSeq: 5 })), /snapshot unreadable/);
-  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM guardians').get().n, 3, 'the transaction rollback kept the previous projection');
-  const failed = shadow.report(broken, { enabled: true });
-  assert.equal(failed.status, SHADOW_STATUS.FAILED); assert.equal(failed.reconciled, false);
-  assert.ok(!JSON.stringify(failed).includes('unreadable'), 'error text is not public');
-  assert.match(shadow.report(broken, { details: true }).lastError, /snapshot unreadable/);
-});
+// ------------------------------------------------------------- the identity snapshot (S4a)
+// Since migration 0005 the players, guardians and guardian_children tables are
+// LIVE. A tool reading the file as one snapshot (backups, restores, the
+// persistence suites) gets both collections from the tables as the records the
+// server sees, and writes them back THROUGH the tables as one coupled
+// operation (repositories/identity.mjs IDENTITY_SNAPSHOT): the links derive
+// from both collections, so a snapshot carries both or neither.
+const PLAYER_ADULT = () => ({ id: 'pl-adult', name: 'Adult Player', dob: '2000-01-01', country: 'GB', city: 'London', position: 'ST', foot: 'right', heightCm: 180, weightKg: 75, stats: { appearances: 20, goals: 9, assists: 3, paceKmh: 33.4, passCompletionPct: 81, duelSuccessPct: 63 }, academyPlus: true, availability: 'available_now', contractStatus: 'free_agent', identityVerified: true, guardianId: null, level: 'semi_pro', location: { lat: 51.5, lng: -0.1 }, medical: { shared: true, records: [], conditionStatus: 'fully_fit' }, notificationPrefs: { quietStart: '22:00', quietEnd: '07:00', schoolHoursMute: null, timezone: null }, programme: { track: 'ST', startedAt: 1_700_000_000_000, completed: [] }, badges: ['Finisher'], createdAt: 1_690_000_000_000, password: 'scrypt$aa$bb' });
+const PLAYER_MINOR = (guardianId = 'gd-1') => ({ id: 'pl-minor', name: 'Minor Player', dob: '2011-06-15', country: 'GB', city: 'London', position: 'CM', foot: 'left', guardianId, stats: null, medical: { shared: false, records: [{ id: 'md-1', type: 'clearance', title: 'ok', date: '2026-01-01', cleared: true }], conditionStatus: 'unknown' }, location: null, createdAt: 1_695_000_000_000 });
+const GUARDIAN_1 = () => ({ id: 'gd-1', name: 'Guardian One', email: 'one@example.com', password: null, emailVerified: true, emailCode: '123456', idVerified: true, disclaimerAccepted: true, childIds: ['pl-minor'], notificationPrefs: { quietStart: '21:00', quietEnd: '07:00', schoolHoursMute: true, timezone: 'Europe/London' } });
+const GUARDIAN_2 = () => ({ id: 'gd-2', name: 'Guardian Two', email: 'two@example.com', coGuardianOf: 'gd-1', childIds: ['pl-minor'] });
+/** A consistent synthetic snapshot: two players, a primary and a co-guardian, three organisations, one staff member. */
+function cleanSnapshot() {
+  const s = syntheticSnapshot();
+  return { orgs: s.orgs.filter((o) => o.id !== 'org-bad'), guardians: [GUARDIAN_1(), GUARDIAN_2()], players: [PLAYER_ADULT(), PLAYER_MINOR()], sessions: [], users: [{ id: 'usr-9001', orgId: 'org-a', name: 'Maria Keane', role: 'Head of Recruitment', createdAt: 1 }], notes: [{ id: 'n1' }] };
+}
+const NOW = Date.UTC(2026, 9, 11, 12);
+const rows = (s, sql) => s.prepare(sql).all().map((r) => ({ ...r }));
+const identityState = (s) => JSON.stringify({ players: rows(s, 'SELECT * FROM players ORDER BY rowid'), guardians: rows(s, 'SELECT * FROM guardians ORDER BY rowid'), links: rows(s, 'SELECT * FROM guardian_children ORDER BY rowid'), blobs: rows(s, 'SELECT name, value FROM collections ORDER BY name') });
 
-// ------------------------------------------------------------- regressions found in the handoff review
-test('regression: an adjusted relationship (dangling guardianId) is a finding and is never reported as complete', () => {
-  const s = freshDb(); seedOrgUser(s);
-  const shadow = createCoreIdentityShadow({ sqlite: s });
-  const db = {
-    orgs: [], guardians: [{ id: 'gd-1', name: 'G', email: 'g@example.com', childIds: [] }],
-    players: [{ id: 'pl-x', name: 'X', dob: '2012-01-01', country: 'GB', guardianId: 'gd-missing', medical: { shared: false, records: [], conditionStatus: 'unknown' } }],
-    sessions: [],
-  };
-  s.prepare("INSERT INTO meta (key, value) VALUES ('savedAt', '5')").run();
-  transaction(s, () => shadow.project(db, { savedAt: 5, saveSeq: 1 }));
-  const r = shadow.report(db, { enabled: true });
-  assert.equal(r.tables.players.findings, 1);
-  assert.equal(r.tables.players.tableRows, 1, 'the player row is written (with guardian_id NULL)');
-  assert.notEqual(r.status, SHADOW_STATUS.COMPLETE, 'an unresolved relationship is not a clean result');
-  assert.equal(r.reconciled, false);
-  assert.equal(r.findings, 1, 'the report totals the findings');
-  assert.deepEqual(shadow.report(db, { details: true }).tables.players.details.findings, [{ id: 'pl-x', finding: 'guardianId gd-missing does not exist; written as NULL' }]);
-});
-test('regression: guardian projection does not depend on array order; a co-guardian listed before their primary keeps the link', () => {
-  const run = (guardians) => {
-    const s = freshDb();
-    const shadow = createCoreIdentityShadow({ sqlite: s });
-    const db = { orgs: [], guardians, players: [], sessions: [] };
-    const result = transaction(s, () => shadow.project(db));
-    return { s, result };
-  };
-  const primary = { id: 'gd-primary', name: 'Primary', email: 'p@example.com', childIds: [] };
-  const co = { id: 'gd-co', name: 'Co', email: 'c@example.com', coGuardianOf: 'gd-primary', childIds: [] };
-  for (const order of [[co, primary], [primary, co]]) {
-    const { s, result } = run(order);
-    assert.deepEqual(result.tables.guardians.skipped, [], `no guardian is refused for order ${order.map((g) => g.id).join(',')}`);
-    assert.deepEqual(result.tables.guardians.findings, []);
-    assert.equal(s.prepare("SELECT co_guardian_of FROM guardians WHERE id = 'gd-co'").get().co_guardian_of, 'gd-primary', 'the valid link is kept');
-    assert.equal(s.prepare("SELECT co_guardian_of FROM guardians WHERE id = 'gd-primary'").get().co_guardian_of, null);
-    assert.equal(s.prepare('PRAGMA foreign_keys').get().foreign_keys, 1, 'foreign keys stay on');
-  }
-  // A genuinely missing target is an explicit finding, written as NULL, never silently dropped or refused.
-  const { s, result } = run([{ ...co, coGuardianOf: 'gd-nobody' }, primary]);
-  assert.deepEqual(result.tables.guardians.findings, [{ id: 'gd-co', finding: 'coGuardianOf gd-nobody does not exist; written as NULL' }]);
-  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM guardians').get().n, 2);
-  // A target that was itself refused (here: no name, NOT NULL) is reported, not linked to a row that does not exist.
-  const refused = { id: 'gd-refused', name: null, email: 'r@example.com', childIds: [] };
-  const r3 = run([{ ...co, coGuardianOf: 'gd-refused' }, refused, primary]);
-  assert.deepEqual(r3.result.tables.guardians.skipped.map((x) => x.id), ['gd-refused']);
-  assert.deepEqual(r3.result.tables.guardians.findings, [{ id: 'gd-co', finding: 'coGuardianOf gd-refused refers to a guardian that was not written; written as NULL' }]);
-  assert.equal(r3.s.prepare("SELECT co_guardian_of FROM guardians WHERE id = 'gd-co'").get().co_guardian_of, null);
-});
-test('regression: freshness is a persisted save revision, not the savedAt timestamp (same savedAt, different content → stale)', () => {
-  const dir = tempDir('shadow-rev');
-  let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = syntheticSnapshot(); db.users = []; db.orgs = db.orgs.filter((o) => o.id !== 'org-bad');
-  let layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, shadowValidation: true });
-  store.save({ savedAt: 1, idCounter: 1000, db });
-  assert.equal(layer.report().shadow.status, SHADOW_STATUS.PARTIAL, 'projected in this save');
-  assert.equal(store.sqlite.prepare("SELECT name FROM players WHERE id = 'pl-adult'").get().name, 'Adult Player');
-  store.sqlite.close();
-  // Restart with projection off, change a name, save with the SAME savedAt.
-  const db2 = JSON.parse(JSON.stringify(db));
-  db2.players.find((p) => p.id === 'pl-adult').name = 'Renamed Player';
-  store = openStore(dir, { tableBacked: TABLE_BACKED });
-  layer = attachDataLayer({ db: db2, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  store.save({ savedAt: 1, idCounter: 1000, db: db2 });
-  const r = layer.report().shadow;
-  assert.equal(store.sqlite.prepare("SELECT name FROM players WHERE id = 'pl-adult'").get().name, 'Adult Player', 'the shadow still holds the old name');
-  assert.equal(r.status, SHADOW_STATUS.STALE, 'a save made while projection was off makes the shadow stale regardless of savedAt');
-  assert.equal(r.reconciled, false);
-  assert.ok(r.snapshotRevision > r.lastProjectionRevision, 'the file carries a revision the projection has not seen');
-  // A failed projection leaves the revision behind too (a restarted server builds a fresh db object).
-  store.sqlite.close();
-  const db3 = JSON.parse(JSON.stringify(db2));
-  store = openStore(dir, { tableBacked: TABLE_BACKED });
-  layer = attachDataLayer({ db: db3, store, nextId, persist: () => {}, sessionTtlMs: TTL, shadowValidation: true });
-  store.setProjection(() => { throw new Error('boom'); });
-  store.save({ savedAt: 1, idCounter: 1000, db: db3 });
-  assert.notEqual(layer.report().shadow.status, SHADOW_STATUS.COMPLETE);
-  assert.equal(layer.report().shadow.reconciled, false);
-  store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-
-// ------------------------------------------------------------- the store
-test('attachDataLayer (default): shadow validation is off, a save is the plain blob save and never touches the shadow tables', () => {
-  const dir = tempDir('shadow-off');
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = syntheticSnapshot();
-  db.orgs = db.orgs.filter((o) => o.id !== 'org-bad'); // orgs are live since S3: an unsupported record is refused at import (testOrgs.mjs), not shadowed
-  db.users = [{ id: 'usr-9001', orgId: 'org-a', name: 'Maria Keane', role: 'Head of Recruitment', createdAt: 1 }];
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  assert.equal(store.projectionState().enabled, false, 'no projection is registered unless asked for');
-  // Count every SQL statement the store executes during a save: no SAVEPOINT, no shadow writes.
-  const exec = store.sqlite.exec.bind(store.sqlite);
-  const seen = [];
-  store.sqlite.exec = (sql) => { seen.push(sql); return exec(sql); };
-  for (let i = 1; i <= 3; i++) store.save({ savedAt: i, idCounter: 1000, db });
-  assert.ok(!seen.some((sql) => /SAVEPOINT|shadow/i.test(sql)), 'no savepoint and no shadow statement in the save path');
-  for (const t of CORE_SHADOW_TABLES) assert.equal(store.sqlite.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n, 0, `${t} untouched`);
-  assert.equal(store.load().db.players.length, db.players.length, 'the blob is saved exactly as before');
-  assert.equal(store.load().db.orgs, undefined, 'orgs are table-backed (S3): no blob');
-  const report = layer.report();
-  assert.equal(report.shadow.enabled, false); assert.equal(report.shadow.status, SHADOW_STATUS.NEVER); assert.equal(report.shadow.reconciled, false);
-  assert.deepEqual(report.shadow.store, { enabled: false, failures: 0, lastErrorAt: null });
-  assert.equal(report.domains.users.mode, 'live', 'the S0 live table is unaffected');
-  store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-test('attachDataLayer (shadowValidation: true): the shadow is rewritten inside every save, survives a restart, and goes stale when validation is switched off', () => {
-  const dir = tempDir('shadow-on');
-  let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = syntheticSnapshot();
-  db.orgs = db.orgs.filter((o) => o.id !== 'org-bad');
-  db.users = [{ id: 'usr-9001', orgId: 'org-a', name: 'Maria Keane', role: 'Head of Recruitment', createdAt: 1 }];
-  let layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, shadowValidation: true });
-  assert.equal(store.projectionState().enabled, true);
-  store.save({ savedAt: 1, idCounter: 1000, db });
-  assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM guardians').get().n, 3);
-  assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 3, 'orgs are live (S3): the three valid records were imported at attach, not projected');
-  assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 0, 'sessions are live (S2): the fixture sessions are not projected');
-  let report = layer.report();
-  assert.equal(report.shadow.enabled, true); assert.equal(report.shadow.status, SHADOW_STATUS.PARTIAL);
-  assert.equal(report.shadow.lastProjectionSavedAt, 1); assert.equal(report.shadow.snapshotSavedAt, 1);
-  assert.deepEqual(report.tables, ['guardian_children', 'guardians', 'org_users', 'orgs', 'players', 'sessions']);
-  assert.deepEqual(report.shadow.store, { enabled: true, failures: 0, lastErrorAt: null });
-  // Save again with a changed snapshot: rewritten, no duplicates, no stale row.
-  db.players.push({ id: 'pl-new', name: 'New', dob: '2001-01-01', country: 'GB', medical: { shared: false, records: [], conditionStatus: 'unknown' } });
-  store.save({ savedAt: 2, idCounter: 1000, db });
-  assert.deepEqual(store.sqlite.prepare('SELECT id FROM players ORDER BY id').all().map((r) => r.id), ['pl-adult', 'pl-minor', 'pl-new', 'pl-orphan']);
-  store.sqlite.close();
-  // Restart with validation still on: the persisted summary says the tables match the last save.
-  // (A restarted server builds a fresh db object; the old one carries the frozen users view.)
-  const restarted = () => JSON.parse(JSON.stringify(db));
-  let db2 = restarted();
-  store = openStore(dir, { tableBacked: TABLE_BACKED });
-  layer = attachDataLayer({ db: db2, store, nextId, persist: () => {}, sessionTtlMs: TTL, shadowValidation: true });
-  assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM players').get().n, 4, 'rows persist across a restart');
-  report = layer.report();
-  assert.equal(report.shadow.status, SHADOW_STATUS.PARTIAL, 'freshness is known from the file, not from this process');
-  assert.equal(report.shadow.tables.players.accountedFor, true);
-  assert.equal(store.load().db.players.length, db.players.length, 'the blob snapshot is untouched: the snapshot stays the source of truth');
-  store.sqlite.close();
-  // Restart with validation off: the next save leaves the tables alone and the report says stale.
-  db2 = restarted();
-  store = openStore(dir, { tableBacked: TABLE_BACKED });
-  layer = attachDataLayer({ db: db2, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  store.save({ savedAt: 3, idCounter: 1000, db: db2 });
-  report = layer.report();
-  assert.equal(report.shadow.enabled, false); assert.equal(report.shadow.status, SHADOW_STATUS.STALE); assert.equal(report.shadow.reconciled, false);
-  assert.equal(report.shadow.tables.players.tableRows, 4, 'old rows remain, labelled stale');
-  store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-test('store (server mode): a projection failure never blocks the blob save and leaves the previous summary in place', () => {
-  const dir = tempDir('shadow-fail');
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  runDataMigrations(store.sqlite, DATA_MIGRATIONS);
-  let calls = 0;
-  store.setProjection(() => { calls += 1; store.sqlite.prepare("INSERT INTO guardians (id, name, email) VALUES ('ghost', 'G', 'ghost@example.com')").run(); throw new Error('projection exploded'); });
-  store.save({ savedAt: 2, idCounter: 1000, db: { players: [{ id: 'p1' }] } });
-  assert.equal(calls, 1);
-  assert.deepEqual(store.load().db.players, [{ id: 'p1' }], 'the blob was saved');
-  assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM guardians').get().n, 0, 'the half-written shadow was rolled back to the savepoint');
-  assert.equal(store.sqlite.prepare("SELECT COUNT(*) AS n FROM meta WHERE key = 'shadowSummary'").get().n, 0, 'no summary is recorded for a failed projection');
-  const state = store.projectionState();
-  assert.equal(state.enabled, true); assert.equal(state.failures, 1); assert.match(state.lastError.message, /projection exploded/);
-  store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-test('store (snapshot mode): tools reading the file as a snapshot never see the shadow tables as collections', () => {
-  const dir = tempDir('shadow-tool');
-  let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = syntheticSnapshot(); db.users = []; db.orgs = db.orgs.filter((o) => o.id !== 'org-bad');
-  attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, shadowValidation: true });
-  store.save({ savedAt: 1, idCounter: 1000, db });
-  store.sqlite.close();
-  store = openStore(dir);
-  const snap = store.load();
-  assert.equal(snap.db.orgs.length, 3, 'the live orgs table, read as a collection (S3)');
-  assert.equal(snap.db.orgs.find((o) => o.id === 'org-a').location.city, 'London', 'a record, not a row');
-  assert.equal(snap.db.guardian_children, undefined);
-  assert.deepEqual(snap.db.users, []);
-  store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-test('validateShadow.mjs: runs the projection on a copy, reports every refused row, and leaves the source file byte-identical', () => {
-  const dir = tempDir('shadow-validate');
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = syntheticSnapshot(); db.users = [{ id: 'usr-9001', orgId: 'org-a', name: 'Maria Keane', role: 'Head of Recruitment', createdAt: 1 }];
-  db.orgs = db.orgs.filter((o) => o.id !== 'org-bad');
-  attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  store.save({ savedAt: 5, idCounter: 1000, db });
-  store.sqlite.exec('PRAGMA wal_checkpoint(TRUNCATE)');
-  store.sqlite.close();
-  const digest = () => sha256(fs.readFileSync(path.join(dir, 'scoutbox.db')));
-  const before = digest();
-  const out = execFileSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), 'validateShadow.mjs'), dir, '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-  const result = JSON.parse(out);
-  assert.equal(digest(), before, 'the source database is untouched');
-  assert.ok(!fs.existsSync(result.work ?? '/nonexistent'), 'the working copy is removed');
-  assert.equal(result.error, null);
-  assert.equal(result.report.status, SHADOW_STATUS.PARTIAL);
-  assert.equal(result.report.tables.guardians.tableRows, 3); assert.equal(result.report.tables.guardians.skipped, 1);
-  assert.deepEqual(result.report.tables.guardians.details.skipped.map((x) => x.id), ['gd-dup']);
-  assert.ok(!('orgs' in result.report.tables), 'orgs are live since S3: not validated by the shadow');
-  assert.deepEqual(result.report.tables.guardian_children.details.skipped, [{ id: 'gd-1/pl-gone', reason: 'child player does not exist' }]);
-  assert.ok(!out.includes('tok-org') && !out.includes('scrypt$'), 'no token or password hash in the validation output');
-  // The source still has no shadow rows: validation happened on the copy only.
+test('identity snapshot (tool mode): a tool reads players and guardians from the live tables as the records the server sees (childIds from the links, in order, roles per side), writes a changed snapshot back through the tables — inserts, updates, link changes and removals — and the next server boot attaches to exactly that', () => {
+  const dir = tempDir('s4-snap');
+  const server = openStore(dir, { tableBacked: TABLE_BACKED });
+  const db = cleanSnapshot();
+  const layer = attachDataLayer({ db, store: server, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW });
+  assert.deepEqual(layer.boot.identity, { engine: 'sqlite', players: 2, guardians: 2, links: 2, imported: 4 }, 'a first installation initialises from the records once (imported counts players and guardians)');
+  server.save({ savedAt: 1, idCounter: 1000, db });
+  assert.deepEqual(rows(server.sqlite, 'SELECT name FROM collections ORDER BY name').map((r) => r.name), ['notes'], 'no identity blob is ever written again');
+  server.sqlite.close();
+  // The tool reads the tables as records.
+  let tool = openStore(dir);
+  const snap = tool.load();
+  assert.deepEqual(snap.db.players.map((p) => p.id), ['pl-adult', 'pl-minor']);
+  assert.deepEqual(snap.db.guardians.map((g) => [g.id, [...g.childIds], g.coGuardianOf ?? null]), [['gd-1', ['pl-minor'], null], ['gd-2', ['pl-minor'], 'gd-1']]);
+  assert.equal(snap.db.players[1].guardianId, 'gd-1'); assert.equal(snap.db.players[1].medical.records[0].id, 'md-1', 'a facet reads back');
+  assert.equal(snap.db.players[0].stats.paceKmh, 33.4); assert.deepEqual([...snap.db.players[0].badges], ['Finisher']);
+  assert.equal(JSON.stringify(snap.db).includes('scrypt$aa$bb'), true, 'the snapshot is the server\'s view: the hash travels with the record (a backup, not an audience response)');
+  // Write a changed snapshot back: an update, a new guardian with a new child, the co-guardian removed, the adult's facet edited.
+  snap.db.players[0].name = 'Adult Renamed'; snap.db.players[0].badges.push('Captain');
+  snap.db.guardians.push({ id: 'gd-3', name: 'Guardian Three', email: 'three@example.com', childIds: ['pl-new'] });
+  snap.db.players.push({ id: 'pl-new', name: 'New Child', dob: '2015-02-02', country: 'GB', guardianId: 'gd-3', stats: null, medical: { shared: false, records: [], conditionStatus: 'unknown' } });
+  snap.db.guardians = snap.db.guardians.filter((g) => g.id !== 'gd-2');
+  tool.save(snap);
+  assert.deepEqual(rows(tool.sqlite, 'SELECT id, name FROM players ORDER BY rowid'), [{ id: 'pl-adult', name: 'Adult Renamed' }, { id: 'pl-minor', name: 'Minor Player' }, { id: 'pl-new', name: 'New Child' }]);
+  assert.deepEqual(rows(tool.sqlite, 'SELECT id FROM guardians ORDER BY rowid').map((r) => r.id), ['gd-1', 'gd-3']);
+  assert.deepEqual(rows(tool.sqlite, 'SELECT guardian_id, player_id, role FROM guardian_children ORDER BY rowid'), [{ guardian_id: 'gd-1', player_id: 'pl-minor', role: 'primary' }, { guardian_id: 'gd-3', player_id: 'pl-new', role: 'primary' }], 'the links are rewritten from the snapshot: the removed co-guardian\'s link is gone');
+  assert.deepEqual(tool.sqlite.prepare('PRAGMA foreign_key_check').all(), []);
+  assert.deepEqual(rows(tool.sqlite, 'SELECT name FROM collections ORDER BY name').map((r) => r.name), ['notes']);
+  tool.sqlite.close();
+  // The server attaches to exactly that; the array in memory (a stale copy) imports nothing.
   const again = openStore(dir, { tableBacked: TABLE_BACKED });
-  assert.equal(again.sqlite.prepare('SELECT COUNT(*) AS n FROM guardians').get().n, 0);
+  const db2 = { ...again.load().db, players: [PLAYER_ADULT()], guardians: [GUARDIAN_1(), GUARDIAN_2()] };
+  const warnings = [];
+  const layer2 = attachDataLayer({ db: db2, store: again, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
+  assert.deepEqual(layer2.boot.identity, { engine: 'sqlite', players: 3, guardians: 2, links: 2, imported: 0 });
+  assert.equal(db2.players.find((p) => p.id === 'pl-adult').name, 'Adult Renamed'); assert.deepEqual([...db2.players.find((p) => p.id === 'pl-adult').badges], ['Finisher', 'Captain']);
+  assert.equal(db2.guardians.find((g) => g.id === 'gd-2'), undefined, 'the stale in-memory guardian was not resurrected');
+  assert.ok(warnings.some((w) => /guardians table holds 2 row\(s\)/.test(w)), `the stale array is reported: ${JSON.stringify(warnings)}`);
   again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
-test('regression: strict validation accepts a clean backup from before the save-revision field, refuses an invalid one, and never touches the source', () => {
-  const script = path.join(path.dirname(fileURLToPath(import.meta.url)), 'validateShadow.mjs');
-  const run = (dir, ...flags) => {
-    try { return { code: 0, out: execFileSync(process.execPath, [script, dir, '--json', ...flags], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) }; }
-    catch (err) { return { code: err.status, out: err.stdout }; }
+
+test('identity snapshot (tool mode): a malformed collection, a refused record, a dangling relationship, a legacy minor without any guardian link, or one collection without the other refuse the WHOLE save — no row, no link, no blob, no meta changes; a snapshot that carries neither collection leaves the tables alone; explicit empty arrays empty them on purpose', () => {
+  const dir = tempDir('s4-snap-refuse');
+  const server = openStore(dir, { tableBacked: TABLE_BACKED });
+  const db = cleanSnapshot();
+  attachDataLayer({ db, store: server, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW });
+  server.save({ savedAt: 1, idCounter: 1000, db });
+  server.sqlite.close();
+  const tool = openStore(dir);
+  const before = identityState(tool.sqlite); const seqBefore = tool.revision();
+  const refuse = (label, mutate, re) => {
+    const snap = tool.load(); mutate(snap.db);
+    assert.throws(() => tool.save(snap), re, label);
+    assert.equal(tool.sqlite.isTransaction, false, `${label}: the transaction is closed`);
+    assert.equal(identityState(tool.sqlite), before, `${label}: nothing changed`);
+    assert.equal(tool.revision(), seqBefore, `${label}: the save revision did not advance`);
   };
-  const fixture = (mutate) => {
-    const dir = tempDir('shadow-legacy');
-    const store = openStore(dir, { tableBacked: TABLE_BACKED });
-    const db = { orgs: [{ id: 'org-a', name: 'A', type: 'club', level: 'pro', plan: 'Pro', country: 'GB' }], guardians: [], players: [], sessions: [], users: [] };
-    attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-    mutate?.(db);
-    store.save({ savedAt: 1, idCounter: 1000, db });
-    return { dir, store };
-  };
-  const digest = (dir) => { const s = openStore(dir, { tableBacked: TABLE_BACKED }); s.sqlite.exec('PRAGMA wal_checkpoint(TRUNCATE)'); s.sqlite.close(); return sha256(fs.readFileSync(path.join(dir, 'scoutbox.db'))); };
-  // 1. A clean legacy backup: no meta.saveSeq (saved by a build before the revision field).
-  const legacy = fixture();
-  legacy.store.sqlite.exec("DELETE FROM meta WHERE key = 'saveSeq'"); legacy.store.sqlite.close();
-  const before = digest(legacy.dir);
-  const r1 = run(legacy.dir, '--strict');
-  const j1 = JSON.parse(r1.out);
-  assert.equal(r1.code, 0, 'a clean legacy backup passes the strict gate');
-  assert.equal(j1.report.status, SHADOW_STATUS.COMPLETE); assert.equal(j1.legacyRevisionInitialised, true);
-  assert.equal(digest(legacy.dir), before, 'the source is byte-identical');
-  const src = openStore(legacy.dir, { tableBacked: TABLE_BACKED });
-  assert.equal(src.sqlite.prepare("SELECT COUNT(*) AS n FROM meta WHERE key = 'saveSeq'").get().n, 0, 'the revision was initialised on the copy only');
-  src.sqlite.close();
-  // 2. An invalid legacy backup (a refused row) still fails the strict gate.
-  // (orgs are live since S3 and cannot carry a refusable row; a duplicate guardian e-mail is the shadow's refusal.)
-  const bad = fixture((db) => db.guardians.push({ id: 'gd-x', name: 'X', email: 'Same@Example.com', childIds: [] }, { id: 'gd-y', name: 'Y', email: 'same@example.com', childIds: [] }));
-  bad.store.sqlite.exec("DELETE FROM meta WHERE key = 'saveSeq'"); bad.store.sqlite.close();
-  const r2 = run(bad.dir, '--strict');
-  assert.equal(r2.code, 3); assert.equal(JSON.parse(r2.out).report.status, SHADOW_STATUS.PARTIAL);
-  assert.equal(JSON.parse(r2.out).report.skipped, 1);
-  // 3. A current backup (revision present) passes without any initialisation.
-  const current = fixture(); current.store.sqlite.close();
-  const r3 = run(current.dir, '--strict');
-  assert.equal(r3.code, 0); assert.equal(JSON.parse(r3.out).legacyRevisionInitialised, false); assert.equal(JSON.parse(r3.out).report.status, SHADOW_STATUS.COMPLETE);
-  // 4. The running server's own report keeps calling a revision-less file stale: no weakening of live freshness.
-  const live = fixture(); live.store.sqlite.exec("DELETE FROM meta WHERE key = 'saveSeq'");
-  const liveShadow = createCoreIdentityShadow({ sqlite: live.store.sqlite });
-  live.store.sqlite.exec("INSERT INTO meta (key, value) VALUES ('shadowSummary', '{\"at\":1,\"savedAt\":1,\"saveSeq\":null,\"durationMs\":0,\"tables\":{}}')");
-  assert.notEqual(liveShadow.report({ guardians: [] }).status, SHADOW_STATUS.COMPLETE);
-  live.store.sqlite.close();
-  for (const d of [legacy.dir, bad.dir, current.dir, live.dir]) fs.rmSync(d, { recursive: true, force: true });
+  refuse('players not an array', (d) => { d.players = { id: 'pl-adult' }; }, /players: the snapshot collection must be an array/);
+  refuse('guardians null', (d) => { d.guardians = null; }, /guardians: the snapshot collection must be an array/);
+  refuse('players without guardians', (d) => { delete d.guardians; }, /players: a snapshot that carries players must carry guardians too/);
+  refuse('guardians without players', (d) => { delete d.players; }, /guardians: a snapshot that carries guardians must carry players too/);
+  refuse('a refused record (foot)', (d) => { d.players[0].foot = 'both'; }, /identity snapshot: 1 record\(s\) or relationship\(s\) were refused \(players pl-adult: foot/);
+  refuse('a refused record (duplicate e-mail)', (d) => { d.guardians.push({ id: 'gd-dup', name: 'Dup', email: 'ONE@example.com', childIds: [] }); }, /guardians gd-1: shares its e-mail/);
+  refuse('a dangling guardianId', (d) => { d.players[1].guardianId = 'gd-missing'; }, /players pl-minor: guardianId names no record \(gd-missing\)/);
+  refuse('a removed guardian still referenced', (d) => { d.guardians = d.guardians.filter((g) => g.id !== 'gd-1'); }, /players pl-minor: guardianId names no record \(gd-1\)/);
+  refuse('a childIds entry naming nobody', (d) => { d.guardians[0].childIds.push('pl-ghost'); }, /guardians gd-1: childIds names no record \(pl-ghost\)/);
+  refuse('a legacy minor without any guardian link (the Founder\'s decision)', (d) => { d.players.push({ id: 'pl-orphan', name: 'Orphan', dob: '2013-04-04', country: 'GB', guardianId: null, medical: { shared: false, records: [], conditionStatus: 'unknown' } }); }, /players pl-orphan: a minor on the evaluation date with no guardian link at all .*Founder's decision/);
+  // Partial snapshot: neither collection → the tables are untouched, other blobs are written.
+  { const snap = tool.load(); delete snap.db.players; delete snap.db.guardians; snap.db.notes = [{ id: 'n2' }]; tool.save(snap); }
+  assert.equal(identityState(tool.sqlite).replace(/"blobs":.*$/, ''), before.replace(/"blobs":.*$/, ''), 'the identity tables are exactly as before');
+  assert.equal(tool.sqlite.prepare("SELECT value FROM collections WHERE name = 'notes'").get().value, '[{"id":"n2"}]');
+  assert.equal(tool.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name IN ('players', 'guardians')").get().n, 0, 'no blob appeared for an omitted table-backed collection');
+  // Explicit empty arrays: intentional, the tables are emptied (players before guardians: no foreign key is left broken).
+  { const snap = tool.load(); snap.db.players = []; snap.db.guardians = []; tool.save(snap); }
+  assert.equal(tool.sqlite.prepare('SELECT COUNT(*) AS n FROM players').get().n + tool.sqlite.prepare('SELECT COUNT(*) AS n FROM guardians').get().n + tool.sqlite.prepare('SELECT COUNT(*) AS n FROM guardian_children').get().n, 0);
+  tool.sqlite.close();
+  const again = openStore(dir, { tableBacked: TABLE_BACKED });
+  const layer = attachDataLayer({ db: { ...again.load().db, players: [PLAYER_ADULT()], guardians: [] }, store: again, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  assert.deepEqual(layer.boot.identity, { engine: 'sqlite', players: 0, guardians: 0, links: 0, imported: 0 }, 'an intentionally emptied domain stays empty: the array in memory is never imported');
+  again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
-test('the shadow table list and the store contract agree on what is shadowed', () => {
-  assert.deepEqual([...CORE_SHADOW_TABLES], ['guardians', 'players', 'guardian_children'], 'sessions left the shadow at S2, orgs at S3');
+
+test('identity snapshot: before the cutover record exists (a pre-S4 file read by a tool) the blobs are authoritative and the tables are ignored; the store contract lists every live collection', () => {
+  const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
+  runDataMigrations(s, DATA_MIGRATIONS.filter((m) => !/^000[56]_/.test(m.id)));
+  assert.equal(IDENTITY_SNAPSHOT.read(s), null, 'nothing to read from the tables before the cutover');
+  assert.equal(transaction(s, () => IDENTITY_SNAPSHOT.replace(s, { players: [PLAYER_ADULT()], guardians: [] }, { now: NOW })), false, 'nothing is written to the tables before the cutover (the caller writes the blob)');
+  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM players').get().n, 0);
+  assert.equal(IDENTITY_SNAPSHOT.replace(s, { players: [], guardians: [] }), false, 'before the cutover the answer is false even outside a transaction (nothing is touched)');
+  // After the cutover (here: a first installation, nothing saved) the dispatcher writes only inside the caller's transaction.
+  runDataMigrations(s, DATA_MIGRATIONS, { now: NOW });
+  assert.throws(() => IDENTITY_SNAPSHOT.replace(s, { players: [], guardians: [] }, { now: NOW }), /replace\(\) runs inside the caller's transaction/);
+  assert.deepEqual(IDENTITY_SNAPSHOT.read(s), { guardians: [], players: [] });
+  s.close();
+  assert.deepEqual([...TABLE_BACKED], ['orgs', 'players', 'guardians', 'users', 'sessions']);
+  assert.deepEqual([...IDENTITY_SNAPSHOT.names], ['players', 'guardians']);
 });
 
 console.log(`\n${passed} core-schema checks passed`);

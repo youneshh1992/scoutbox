@@ -14,12 +14,18 @@ import { createSessionsRepository, validateSessionRow, SESSIONS_TABLE, SESSIONS_
 import { rollbackSessionsCopy } from '../repositories/sessionsRollback.mjs';
 import { ORGS_CUTOVER_MIGRATION } from '../repositories/orgs.mjs';
 import { rollbackOrgsCopy } from '../repositories/orgsRollback.mjs';
-import { createCoreIdentityShadow } from '../repositories/shadow.mjs';
+import { rollbackCoreIdentityCopy } from '../repositories/coreIdentityRollback.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import * as m0001 from '../repositories/migrations/0001_org_users.mjs';
 import * as m0002 from '../repositories/migrations/0002_core_identity_shadow.mjs';
 import * as m0003 from '../repositories/migrations/0003_sessions_live.mjs';
 import { openStore } from '../store.mjs';
+// The checks below that drive the runner on a raw connection are about the S2/S3
+// steps (0001–0004): they run exactly those. The S4a steps that follow them
+// (0005 core identity, 0006 media deletions) have their own suites
+// (testCoreIdentityMigration, testCoreSchema); the full registered list is what
+// attachDataLayer and the real-server checks below run.
+const S3_MIGRATIONS = DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id));
 import { buildSeed } from '../seed.mjs';
 import { pickPort } from './testPort.mjs';
 
@@ -35,6 +41,8 @@ const nextId = (p) => `${p}-${++counter}`;
 const tempDir = (tag) => fs.mkdtempSync(path.join(os.tmpdir(), `sb-${tag}-`));
 const ORG_A = { id: 'org-a', name: 'Org A', type: 'club', level: 'pro', plan: 'Pro', country: 'GB' };
 const ORG_B = { id: 'org-b', name: 'Org B', type: 'club', level: 'pro', plan: 'Pro', country: 'GB' };
+/** A minimal player record migration 0005 accepts (dob and country are required; everything else is optional). */
+const PLAYER_1 = (name = 'P') => ({ id: 'pl-1', name, dob: '2001-01-01', country: 'GB' });
 const seedOrg = (s, id = 'org-a') => s.prepare("INSERT OR IGNORE INTO orgs (id, name, type, level, plan) VALUES (?, 'Org', 'club', 'pro', 'Pro')").run(id);
 const seedUser = (s, id = 'usr-1', org = 'org-a') => { seedOrg(s, org); s.prepare("INSERT INTO org_users (id, org_id, name, role, created_at) VALUES (?, ?, 'Staff', 'Scout', 1)").run(id, org); };
 
@@ -57,7 +65,8 @@ function preS2File(dir, { sessions = legacySessions(), users = [{ id: 'usr-1', o
   const put = s.prepare('INSERT INTO collections (name, value) VALUES (?, ?)');
   put.run('sessions', JSON.stringify(sessions));
   put.run('orgs', JSON.stringify(orgs)); // the staff rows above name these organisations (S3 foreign key)
-  put.run('players', JSON.stringify([{ id: 'pl-1', name: 'P' }]));
+  put.run('players', JSON.stringify([PLAYER_1()]));
+  put.run('guardians', JSON.stringify([]));
   for (const [k, v] of Object.entries(extra)) put.run(k, JSON.stringify(v));
   s.prepare("INSERT INTO meta (key, value) VALUES ('idCounter', '1000'), ('savedAt', '1'), ('saveSeq', '1')").run();
   s.close();
@@ -94,7 +103,7 @@ test('validation: every unsupported shape is refused with a reason and nothing i
 test('cutover: a valid legacy blob is imported with hashed tokens, the blob is retired and completion is recorded, all in one transaction', () => {
   const dir = tempDir('s2-valid'); preS2File(dir);
   const s = openRaw(dir);
-  const r = runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } });
+  const r = runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } });
   assert.deepEqual(r.ran, [SESSIONS_CUTOVER_MIGRATION, ORGS_CUTOVER_MIGRATION]);
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 5);
   assert.equal(s.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'sessions'").get().n, 0, 'the legacy blob is gone');
@@ -114,7 +123,7 @@ test('cutover: a valid legacy blob is imported with hashed tokens, the blob is r
   assert.equal(cut.imported, 5); assert.equal(cut.blobPresent, true);
   assert.equal(s.prepare("SELECT value FROM meta WHERE key = 'sessionTtlMs'").get().value, String(TTL));
   // Re-running is a no-op; a restart sees the same state.
-  assert.deepEqual(runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, []);
+  assert.deepEqual(runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, []);
   s.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 test('cutover: an empty blob, a missing blob (first installation) and a stale populated shadow all cut over to a complete, correct table', () => {
@@ -124,7 +133,7 @@ test('cutover: an empty blob, a missing blob (first installation) and a stale po
     const s = openRaw(dir);
     if (variant === 'missing') s.prepare("DELETE FROM collections WHERE name = 'sessions'").run();
     if (variant === 'shadow') s.prepare("INSERT INTO sessions (token_hash, sid, kind, ref_id, created_at, expires_at) VALUES ('stale', 'sid-stale', 'player', 'pl-1', 1, 2)").run();
-    runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } });
+    runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } });
     assert.equal(s.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 0, `${variant}: no rows, stale shadow rows gone`);
     assert.equal(s.prepare('SELECT COUNT(*) AS n FROM data_migrations WHERE id = ?').get(SESSIONS_CUTOVER_MIGRATION).n, 1, `${variant}: completion recorded`);
     assert.equal(s.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'sessions'").get().n, 0);
@@ -134,7 +143,7 @@ test('cutover: an empty blob, a missing blob (first installation) and a stale po
   }
   // A bare database with no collections table at all (unit tests, a brand-new file).
   const bare = new DatabaseSync(':memory:'); bare.exec('PRAGMA foreign_keys = ON;');
-  runDataMigrations(bare, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } });
+  runDataMigrations(bare, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } });
   assert.equal(JSON.parse(bare.prepare("SELECT value FROM meta WHERE key = 'sessionsCutover'").get().value).blobPresent, false);
 });
 test('cutover: one unsupported row aborts the whole migration, the file is byte-identical, the blob stays authoritative, and a restart aborts the same way', () => {
@@ -144,7 +153,7 @@ test('cutover: one unsupported row aborts the whole migration, the file is byte-
   const before = fileDigest(dir);
   for (let attempt = 1; attempt <= 2; attempt++) {
     const s = openRaw(dir);
-    assert.throws(() => runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } }), (err) => {
+    assert.throws(() => runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }), (err) => {
       assert.match(err.message, /SESSIONS_CUTOVER_BLOCKED/); assert.match(err.message, /sid sid-bad: staff member usr-gone does not exist/);
       assert.ok(!err.message.includes('orphan-org') && !err.message.includes('legacy-org-token'), 'the abort message names sids and reasons, never tokens');
       return true;
@@ -167,7 +176,7 @@ test('cutover: one unsupported row aborts the whole migration, the file is byte-
   for (const [row, re] of cases) {
     const d = tempDir('s2-abort-case'); preS2File(d, { sessions: [...legacySessions(), row] });
     const s = openRaw(d);
-    assert.throws(() => runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } }), re);
+    assert.throws(() => runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }), re);
     assert.equal(s.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'sessions'").get().n, 1);
     s.close(); fs.rmSync(d, { recursive: true, force: true });
   }
@@ -188,7 +197,7 @@ await atest('cutover: a pre-S0 database (staff still in the users blob) cuts ove
   };
   const dir = build(legacySessions());
   const s = openRaw(dir);
-  assert.deepEqual(runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, ['0001_org_users', '0002_core_identity_shadow', SESSIONS_CUTOVER_MIGRATION, ORGS_CUTOVER_MIGRATION]);
+  assert.deepEqual(runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, ['0001_org_users', '0002_core_identity_shadow', SESSIONS_CUTOVER_MIGRATION, ORGS_CUTOVER_MIGRATION]);
   assert.deepEqual(s.prepare('SELECT id FROM org_users').all().map((r) => r.id), ['usr-1'], 'the staff row was imported by the same rule S0 uses; the non-staff entry was not');
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 5);
   assert.deepEqual(s.prepare("SELECT name FROM collections ORDER BY name").all().map((r) => r.name), [], 'both legacy blobs are retired');
@@ -202,7 +211,7 @@ await atest('cutover: a pre-S0 database (staff still in the users blob) cuts ove
   // An org session naming a staff id the blob does not hold aborts, and nothing was imported.
   const dir2 = build([{ token: 'orphan', sid: 'sid-x', kind: 'org', refId: 'org-a', userId: 'usr-ghost', createdAt: 5 }]);
   const s2 = openRaw(dir2);
-  assert.throws(() => runDataMigrations(s2, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } }), /staff member usr-ghost does not exist/);
+  assert.throws(() => runDataMigrations(s2, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }), /staff member usr-ghost does not exist/);
   assert.equal(s2.prepare("SELECT COUNT(*) AS n FROM collections WHERE name IN ('users', 'sessions')").get().n, 2, 'both blobs are still authoritative');
   assert.equal(s2.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'org_users'").get().n, 1, '0001 and 0002 committed on their own; only the cutover rolled back');
   assert.equal(s2.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 0);
@@ -220,7 +229,7 @@ test('cutover: a failure injected after the import but before commit leaves no t
   s.close();
   assert.equal(fileDigest(dir), before, 'nothing of the failed attempt reached the file');
   const again = openRaw(dir);
-  assert.deepEqual(runDataMigrations(again, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, [SESSIONS_CUTOVER_MIGRATION, ORGS_CUTOVER_MIGRATION]);
+  assert.deepEqual(runDataMigrations(again, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, [SESSIONS_CUTOVER_MIGRATION, ORGS_CUTOVER_MIGRATION]);
   assert.equal(again.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 5);
   again.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -228,7 +237,7 @@ test('cutover: a failure injected after the import but before commit leaves no t
 // ------------------------------------------------------------- the repository
 const liveRepo = (opts = {}) => {
   const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
-  runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: opts.sessionTtlMs ?? TTL } });
+  runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: opts.sessionTtlMs ?? TTL } });
   seedUser(s, 'usr-1', 'org-a'); seedUser(s, 'usr-2', 'org-a'); seedUser(s, 'usr-3', 'org-b');
   const repo = createSessionsRepository({ sqlite: s, sessionTtlMs: TTL, ...opts });
   repo.attach();
@@ -267,7 +276,7 @@ test('repository: a non-default lifetime is honoured, and changing it between bo
   let clock = 5_000_000;
   const dir = tempDir('s2-ttl'); preS2File(dir, { sessions: [] });
   const s = openRaw(dir);
-  runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: 7 * DAY } });
+  runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: 7 * DAY } });
   let repo = createSessionsRepository({ sqlite: s, sessionTtlMs: 7 * DAY, now: () => clock }); repo.attach();
   const { token, session } = repo.create('player', 'pl-1');
   assert.equal(session.expiresAt, clock + 7 * DAY);
@@ -313,22 +322,6 @@ test('repository: every revocation path removes exactly its own sessions; users 
   s.close();
 });
 
-// ------------------------------------------------------------- the shadow never touches live sessions
-test('shadow validation, even when enabled, never writes or deletes live sessions', () => {
-  const dir = tempDir('s2-shadow');
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { orgs: [{ id: 'org-a', name: 'A', type: 'club', level: 'pro', plan: 'Pro', country: 'GB' }], guardians: [], players: [], sessions: [{ token: 'ghost', sid: 'ghost', kind: 'player', refId: 'pl-1', createdAt: 1 }], users: [{ id: 'usr-1', orgId: 'org-a', name: 'Staff', role: 'Scout', createdAt: 1 }] };
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, shadowValidation: true });
-  const { token } = layer.sessions.create('org', 'org-a', { userId: db.users[0].id });
-  for (let i = 1; i <= 3; i++) store.save({ savedAt: i, idCounter: 1000, db });
-  assert.ok(layer.sessions.byToken(token), 'the live session survived three projecting saves');
-  assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 1, 'no fixture session was projected, the live row remains');
-  assert.equal(layer.report().shadow.status, 'complete');
-  assert.ok(!('sessions' in layer.report().shadow.tables));
-  assert.deepEqual(layer.report().domains.sessions, { rows: 1, mode: 'live', lifetimeMs: TTL });
-  store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-
 // ------------------------------------------------------------- snapshot round trips
 test('snapshot mode: load exposes hashed rows, save writes them back unchanged, a fabricated plain-token row is hashed, and the server reads the round trip', () => {
   const dir = tempDir('s2-snap');
@@ -361,7 +354,7 @@ test('snapshot mode: load exposes hashed rows, save writes them back unchanged, 
 test('snapshot mode (review correction 3): an invalid or conflicting session row rejects the whole save; sessions and unrelated data are untouched', () => {
   const dir = tempDir('s2-snap-reject');
   let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { orgs: [ORG_A], guardians: [], players: [{ id: 'pl-1', name: 'Original' }], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'A', role: 'Scout', createdAt: 1 }, { id: 'usr-2', orgId: 'org-a', name: 'B', role: 'Scout', createdAt: 1 }] };
+  const db = { orgs: [ORG_A], guardians: [], players: [PLAYER_1('Original')], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'A', role: 'Scout', createdAt: 1 }, { id: 'usr-2', orgId: 'org-a', name: 'B', role: 'Scout', createdAt: 1 }] };
   const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   const a = layer.sessions.create('player', 'pl-1'), b = layer.sessions.create('org', 'org-a', { userId: 'usr-2' });
   store.save({ savedAt: 1, idCounter: 1000, db }); store.sqlite.close();
@@ -415,7 +408,7 @@ test('snapshot mode (review correction 1): before the cutover record exists the 
   let tool = openStore(dir);
   let snap = tool.load();
   assert.deepEqual(snap.db.sessions, sessions, 'load returns the blob, not the empty shadow');
-  snap.db.players.push({ id: 'pl-2', name: 'Q' });
+  snap.db.players.push({ id: 'pl-2', name: 'Q', dob: '2002-02-02', country: 'GB' });
   tool.save(snap);
   let raw = tool.sqlite;
   assert.equal(JSON.parse(raw.prepare("SELECT value FROM collections WHERE name = 'sessions'").get().value).length, 1, 'save keeps the blob');
@@ -444,14 +437,17 @@ test('snapshot mode (review correction 1): before the cutover record exists the 
   tool.sqlite.close();
   // (e) Rollback output (record removed, empty blob) before re-upgrade: the blob is authoritative again, the table is left alone.
   const out = tempDir('s2-snap-rb');
-  // The file is at S3 now: the S2 tool refuses it (a later schema step), and the rollback chain is S3 first, then S2.
-  assert.throws(() => rollbackSessionsCopy(path.join(dir, 'scoutbox.db'), tempDir('s2-snap-rb-refused')), (err) => err.code === 'LATER_SCHEMA' && /0004_orgs_live/.test(err.message));
-  const s2State = tempDir('s2-snap-rb-s2');
-  rollbackOrgsCopy(path.join(dir, 'scoutbox.db'), s2State);
+  // The file is at S4a now: the S2 and S3 tools refuse it (later schema steps), and the rollback chain is S4a first, then S3, then S2.
+  assert.throws(() => rollbackSessionsCopy(path.join(dir, 'scoutbox.db'), tempDir('s2-snap-rb-refused')), (err) => err.code === 'LATER_SCHEMA' && /0004_orgs_live/.test(err.message) && /0005_core_identity_live/.test(err.message));
+  assert.throws(() => rollbackOrgsCopy(path.join(dir, 'scoutbox.db'), tempDir('s2-snap-rb-refused3')), (err) => err.code === 'LATER_SCHEMA' && /0005_core_identity_live, 0006_media_deletions/.test(err.message));
+  const s3State = tempDir('s2-snap-rb-s3'); const s2State = tempDir('s2-snap-rb-s2');
+  rollbackCoreIdentityCopy(path.join(dir, 'scoutbox.db'), s3State);
+  rollbackOrgsCopy(path.join(s3State, 'scoutbox.db'), s2State);
   rollbackSessionsCopy(path.join(s2State, 'scoutbox.db'), out);
   tool = openStore(out); snap = tool.load();
   assert.deepEqual(snap.db.sessions, [], 'the empty legacy blob, not the (empty) table, is what a tool reads');
   assert.deepEqual(snap.db.orgs.map((o) => o.id), ['org-a', 'org-b'], 'the organisations came back as a blob through the S3 rollback');
+  assert.deepEqual(snap.db.players.map((p) => p.id), ['pl-1', 'pl-2'], 'the players came back as a blob through the S4a rollback');
   snap.db.sessions.push({ token: 'post-rollback-token', sid: 'sid-rb', kind: 'player', refId: 'pl-1', createdAt: Date.now() });
   tool.save(snap);
   assert.equal(JSON.parse(tool.sqlite.prepare("SELECT value FROM collections WHERE name = 'sessions'").get().value).length, 1, 'a pre-S2 build\'s session lands in the blob');
@@ -469,7 +465,7 @@ test('legacy db.json (review correction 2): sessions and staff in a pre-SQLite s
   const legacy = {
     savedAt: 1, idCounter: 1000,
     db: {
-      players: [{ id: 'pl-1', name: 'P', media: [] }],
+      players: [{ ...PLAYER_1(), media: [] }],
       users: [{ id: 'usr-legacy', orgId: 'org-a', name: 'Maria', role: 'Head of Recruitment', createdAt: 1 }],
       sessions: [
         { token: 'json-player-token', sid: 'sid-jp', kind: 'player', refId: 'pl-1', createdAt: Date.now() - DAY },
@@ -504,7 +500,7 @@ test('legacy db.json (review correction 2): sessions and staff in a pre-SQLite s
 });
 test('legacy db.json (review correction 2): an unsupported session in the JSON aborts the cutover with every row preserved; the retry succeeds once it is resolved', () => {
   const dir = tempDir('s2-dbjson-abort');
-  const legacy = { savedAt: 1, idCounter: 1000, db: { players: [{ id: 'pl-1', name: 'P' }], users: [], orgs: [], guardians: [],
+  const legacy = { savedAt: 1, idCounter: 1000, db: { players: [PLAYER_1()], users: [], orgs: [], guardians: [],
     sessions: [{ token: 'json-good-token', sid: 'sid-good', kind: 'player', refId: 'pl-1', createdAt: Date.now() - DAY }, { token: 'json-bad-token', sid: 'sid-bad', kind: 'org', refId: 'org-a', userId: 'usr-missing', createdAt: Date.now() - DAY }] } };
   fs.writeFileSync(path.join(dir, 'db.json'), JSON.stringify(legacy));
   let store = openStore(dir, { tableBacked: TABLE_BACKED });
@@ -539,10 +535,10 @@ test('snapshot mode: writing the users collection back does not cascade-delete v
   store.save({ savedAt: 1, idCounter: 1000, db }); store.sqlite.close();
   // A tool writes a snapshot that carries users but no sessions key at all.
   const tool = openStore(dir);
-  tool.save({ savedAt: 2, idCounter: 1000, db: { orgs: [ORG_A], players: [], users: [...db.users].map((u) => ({ ...u })) } });
+  tool.save({ savedAt: 2, idCounter: 1000, db: { orgs: [ORG_A], players: [], guardians: [], users: [...db.users].map((u) => ({ ...u })) } });
   assert.equal(tool.sqlite.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 2, 'both staff sessions survive a users write');
   // A snapshot in which usr-2 no longer exists: only usr-2's session goes.
-  tool.save({ savedAt: 3, idCounter: 1000, db: { orgs: [ORG_A], players: [], users: [{ ...db.users[0] }] } });
+  tool.save({ savedAt: 3, idCounter: 1000, db: { orgs: [ORG_A], players: [], guardians: [], users: [{ ...db.users[0] }] } });
   assert.deepEqual(tool.sqlite.prepare('SELECT sid FROM sessions').all().map((r) => r.sid), [s1.session.sid]);
   tool.sqlite.close();
   store = openStore(dir, { tableBacked: TABLE_BACKED });
@@ -555,8 +551,8 @@ test('snapshot mode: writing the users collection back does not cascade-delete v
 await atest('busy timeout: a save waits for a concurrent writer in another process instead of failing; without the pragma the same situation fails at once', async () => {
   const dir = tempDir('s2-busy');
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  attachDataLayer({ db: { orgs: [ORG_A], players: [], users: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  store.save({ savedAt: 1, idCounter: 1000, db: { orgs: [], players: [] } });
+  attachDataLayer({ db: { orgs: [ORG_A], guardians: [], players: [], users: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  store.save({ savedAt: 1, idCounter: 1000, db: { orgs: [], players: [], guardians: [] } });
   const holdMs = 1200;
   const holder = spawn(process.execPath, ['--input-type=module', '-e', `
     import { DatabaseSync } from 'node:sqlite';
@@ -572,10 +568,10 @@ await atest('busy timeout: a save waits for a concurrent writer in another proce
     assert.throws(() => raw.exec("INSERT INTO meta (key, value) VALUES ('x', '1')"), /SQLITE_BUSY|database is locked/, 'a connection without the pragma fails immediately');
     raw.close();
     const t0 = Date.now();
-    store.save({ savedAt: 2, idCounter: 1000, db: { orgs: [], players: [{ id: 'p' }] } });
+    store.save({ savedAt: 2, idCounter: 1000, db: { orgs: [], players: [], guardians: [], notes: [{ id: 'p' }] } }); // notes: a blob collection (players are table-backed since S4a)
     const waited = Date.now() - t0;
     assert.ok(waited >= holdMs - 300, `the store waited for the lock (${waited} ms)`);
-    assert.deepEqual(store.load().db.players, [{ id: 'p' }]);
+    assert.deepEqual(store.load().db.notes, [{ id: 'p' }]);
   };
   // Awaited by the harness: the check counts only once every assertion above has passed.
   try { await run(); } finally { try { holder.kill(); } catch { /* done */ } store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true }); }
@@ -775,7 +771,7 @@ await atest('server (review correction 2): a legacy db.json with a staff member 
 test('snapshot mode (review correction 5): a table-backed collection that is not an array is refused whole, before and after the cutover; an omitted collection is a partial snapshot', () => {
   const dir = tempDir('s2-shape');
   let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { orgs: [ORG_A], guardians: [], players: [{ id: 'pl-1', name: 'Original' }], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'A', role: 'Scout', createdAt: 1 }] };
+  const db = { orgs: [ORG_A], guardians: [], players: [PLAYER_1('Original')], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'A', role: 'Scout', createdAt: 1 }] };
   const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   const a = layer.sessions.create('player', 'pl-1');
   store.save({ savedAt: 1, idCounter: 1000, db }); store.sqlite.close();
@@ -882,7 +878,7 @@ test('legacy db.json (review correction 6): an unreadable, malformed or structur
     let store = openStore(dir, { tableBacked: TABLE_BACKED });
     assert.throws(() => store.load(), (err) => err.code === 'LEGACY_IMPORT_FAILED');
     store.sqlite.close();
-    fs.writeFileSync(path.join(dir, 'db.json'), JSON.stringify({ savedAt: 1, idCounter: 1, db: { players: [{ id: 'pl-1', name: 'P' }], users: [], orgs: [], guardians: [], sessions: [{ token: 'retry-token', sid: 'sid-r', kind: 'player', refId: 'pl-1', createdAt: Date.now() - DAY }] } }));
+    fs.writeFileSync(path.join(dir, 'db.json'), JSON.stringify({ savedAt: 1, idCounter: 1, db: { players: [PLAYER_1()], users: [], orgs: [], guardians: [], sessions: [{ token: 'retry-token', sid: 'sid-r', kind: 'player', refId: 'pl-1', createdAt: Date.now() - DAY }] } }));
     store = openStore(dir, { tableBacked: TABLE_BACKED });
     const loaded = store.load();
     assert.equal(loaded.db.players[0].name, 'P');

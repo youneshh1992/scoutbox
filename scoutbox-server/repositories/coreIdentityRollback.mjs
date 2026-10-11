@@ -46,15 +46,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { copyDatabaseReadOnly } from './shadowValidate.mjs';
+import { copyDatabaseReadOnly } from './database.mjs';
 import { playerFromRow, guardianFromRow, PLAYER_COLUMNS, GUARDIAN_COLUMNS } from './identityMapping.mjs';
 import { CORE_IDENTITY_LIVE_MIGRATION } from './identityPreflight.mjs';
 import { CORE_IDENTITY_INIT_META } from './identity.mjs';
 import { CORE_IDENTITY_CUTOVER_META, IDENTITY_TABLES } from './migrations/0005_core_identity_live.mjs';
 import { KNOWN_MIGRATIONS as S3_KNOWN_MIGRATIONS } from './orgsRollback.mjs';
 
+/** The media-deletion queue (migration 0006) belongs to the S4a build: removed with the cutover when it is empty, refused while it is not. */
+export const MEDIA_DELETIONS_MIGRATION = '0006_media_deletions';
 /** The schema steps this tool understands; any other recorded id is a later step it must not touch. */
-export const KNOWN_MIGRATIONS = Object.freeze([...S3_KNOWN_MIGRATIONS, CORE_IDENTITY_LIVE_MIGRATION]);
+export const KNOWN_MIGRATIONS = Object.freeze([...S3_KNOWN_MIGRATIONS, CORE_IDENTITY_LIVE_MIGRATION, MEDIA_DELETIONS_MIGRATION]);
 
 /** The S1 shadow definitions of the three tables (migration 0002), which the pre-S4 build expects. `scripts/testCoreIdentityRollback.mjs` asserts they equal migration 0002's column for column. */
 export const S1_IDENTITY_SHADOW_DDL = `
@@ -173,6 +175,14 @@ export function rollbackCoreIdentityCopy(sourceFile, outDir) {
     const initRow = hasTable('meta') ? sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(CORE_IDENTITY_INIT_META) : null;
     if (initRow && initRow.value === 'pending') throw refusal('INIT_PENDING', `the first installation's initialisation has not completed (meta.${CORE_IDENTITY_INIT_META} is pending): the live tables hold no authoritative data yet and a pre-S4 build could not tell this apart from an intentionally empty installation, so no rollback copy is produced. Boot the S4 build once so the initialisation completes (it retries on every boot until it commits), then roll back; or, if the installation is abandoned, start the pre-S4 build on a fresh data directory`);
     if (initRow && initRow.value !== 'done') throw refusal('INIT_STATE_INVALID', `meta.${CORE_IDENTITY_INIT_META} holds ${JSON.stringify(initRow.value)}, which is neither "pending" nor "done"; refusing to guess the initialisation state (nothing is erased)`);
+    // The media-deletion queue: files the S4 build decided to remove but has not
+    // removed yet. A pre-S4 build has no queue and would serve them again, so a
+    // non-empty queue refuses the rollback; an empty one goes with the cutover.
+    const hasQueue = hasTable('media_deletions');
+    if (hasQueue) {
+      const queued = sqlite.prepare('SELECT COUNT(*) AS n FROM media_deletions').get().n;
+      if (queued) throw refusal('MEDIA_QUEUE_PENDING', `${queued} media file(s) are queued for removal and not removed yet (media_deletions); a pre-S4 build would serve them again. Boot the S4 build once so the queue drains (it retries at boot and every minute), then roll back`);
+    }
     const sessionsBefore = hasTable('sessions') ? sqlite.prepare(SESSION_ROWS).all() : null;
 
     sqlite.exec('PRAGMA foreign_keys = OFF;');
@@ -195,7 +205,9 @@ export function rollbackCoreIdentityCopy(sourceFile, outDir) {
       // 2. The S1 shadow definitions, empty.
       for (const t of IDENTITY_TABLES) sqlite.exec(`DROP TABLE ${t};`);
       sqlite.exec(S1_IDENTITY_SHADOW_DDL);
-      // 3. Records and bookkeeping.
+      // 3. Records and bookkeeping (the empty queue and its record go with the cutover).
+      if (hasQueue) sqlite.exec('DROP TABLE media_deletions;');
+      sqlite.prepare('DELETE FROM data_migrations WHERE id = ?').run(MEDIA_DELETIONS_MIGRATION);
       recordRemoved = sqlite.prepare('DELETE FROM data_migrations WHERE id = ?').run(CORE_IDENTITY_LIVE_MIGRATION).changes > 0;
       sqlite.prepare('DELETE FROM meta WHERE key = ?').run(CORE_IDENTITY_CUTOVER_META);
       sqlite.prepare('DELETE FROM meta WHERE key = ?').run(CORE_IDENTITY_INIT_META);
@@ -217,6 +229,7 @@ export function rollbackCoreIdentityCopy(sourceFile, outDir) {
     if (integrity !== 'ok') problems.push(`integrity_check: ${integrity}`);
     if (sqlite.prepare('PRAGMA foreign_key_check').all().length) problems.push('foreign_key_check is not empty');
     if (sqlite.prepare('SELECT 1 FROM data_migrations WHERE id = ?').get(CORE_IDENTITY_LIVE_MIGRATION)) problems.push('the cutover record is still present');
+    if (sqlite.prepare('SELECT 1 FROM data_migrations WHERE id = ?').get(MEDIA_DELETIONS_MIGRATION) || hasTable('media_deletions')) problems.push('the media-deletion queue is still present');
     if (sqlite.prepare('SELECT COUNT(*) AS n FROM meta WHERE key IN (?, ?)').get(CORE_IDENTITY_CUTOVER_META, CORE_IDENTITY_INIT_META).n) problems.push('S4 meta keys are still present');
     for (const [name, expected] of [['players', players.length], ['guardians', guardians.length]]) {
       let parsed = null;

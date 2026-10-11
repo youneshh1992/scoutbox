@@ -2,9 +2,10 @@
 
 Status: design proposed, executable DDL in `docs/architecture/sql/`, implementation steps
 S0 (staff), S1 (core identity shadow, corrected after acceptance review), S2 (sessions
-live, hashed tokens) and S3 (organisations live, `org_users` rebuilt STRICT with its
-foreign key) done (§5.0 says exactly which parts are implemented, proposed, or
-waiting on a decision). Companion
+live, hashed tokens), S3 (organisations live, `org_users` rebuilt STRICT with its
+foreign key) and S4a (players, guardians and `guardian_children` live with the
+transitional `facets_json`; the `media_deletions` queue; the S1 shadow retired) done
+(§5.0 says exactly which parts are implemented, proposed, or waiting on a decision). Companion
 document: [`sqlite-migration-plan.md`](./sqlite-migration-plan.md). Written 10 October
 2026 on branch `feat/sqlite-schema`.
 
@@ -121,7 +122,7 @@ them.
 |---|---|---|---|---|
 | `users` | persistent | 01 | `org_users` (LIVE since migration 0001) | S0 done |
 | `orgs` | persistent | 01 (+04, 05) | `orgs`; nested `tactical` → `org_tactical_setups/roles/role_criteria/windows`, `squad[]` → `org_squad_members`, `lookingFor[]` → `org_looking_for`, `federationCheck` → `org_federation_checks` (04); `verification.domains[]` → `org_verified_domains` (05); `verification.revokedAt/orgType` → columns on `orgs`; `agencySettings` → 06 | **S3 done** (live; scalars and composites are columns, the nested facets ride in `orgs.facets_json` until S9/S10/S11; blob retired by migration `0004`) |
-| `guardians` | persistent | 01 | `guardians`; `childIds[]` → `guardian_children`; `coGuardians[]` derived from `co_guardian_of` | S4 (shadow since S1) |
+| `guardians` | persistent | 01 | `guardians` (LIVE since migration 0005; `coGuardians[]`, `emailCode` and unknown fields in `facets_json`); `childIds[]` → `guardian_children` (LIVE) | **S4a done** (S4b: lifecycle, after O1) |
 | `players` | persistent | 01 | `players` (scalars, `stats`, `medical.shared/conditionStatus`, `notificationPrefs`, `programme.track/startedAt`, `location`); `seasonHistory[]`, `badges[]`, `drills[]`, `attendance[]`, `timeline[]`, `media[]` (+`media[].tags` → `player_media_tags`), `medical.records[]`, `drillResults[]`, `activityLog[]`, `externalIds[]`, `programme.completed[]` → twelve `player_*` tables; `trialReports[]` derived (copy of `trials.report`) | S4 (scalars, shadow since S1), S5 (sub-records) |
 | `sessions` | temporary | 01 | `sessions` (token stored as `token_hash`) | **S2 done** (live; blob retired by migration `0003`) |
 | `requests` | persistent | 02 | `recruitment_requests`, `request_trial_slots`; `keys` → `idempotency_keys` | S8 |
@@ -396,12 +397,12 @@ this branch: 13 checks passed.
 | State | Tables | Where |
 |---|---|---|
 | **Implemented, live** (a repository owns the rows; the blob is gone) | 3: `org_users` (rebuilt STRICT with `org_id REFERENCES orgs(id)` and `json_valid` CHECKs in `0004`), `sessions` (`token_hash` only; the table was created by `0002` and became live, with the legacy blob imported and retired, in `0003`), `orgs` (created live by `0004` with the legacy blob imported and retired; scalars and the `location` / `federationRef` composites are columns, the nested facets ride in `facets_json` until S9–S11) | migrations `0001` (S0), `0003` (S2), `0004` (S3) |
-| **Implemented, shadow** (tables exist with their final constraints; filled only when validation is switched on; nothing reads them) | 3: `guardians`, `players`, `guardian_children` (the S1 `orgs` shadow was dropped and recreated live by `0004`). The S4a migration that makes them live (`0005_core_identity_live`, with `facets_json` on `players` and `guardians`) and its copy-only rollback tool are implemented and tested, but the migration is **not registered**: the blobs stay authoritative | migration `0002` (S1); `0005` written, unregistered |
+| **Implemented, live** (S4a) | 3 + 1: `guardians`, `players` (scalars and the split composites as columns, the S5 arrays and the other nested facets in `facets_json`), `guardian_children` (derived from `childIds`, roles per side) — created live by `0005_core_identity_live` with the two blobs imported through the reviewed preflight and retired; `media_deletions` (the crash-safe media-removal queue, `0006`, file 08). The S1 shadow is retired | migrations `0005`, `0006` (S4a) |
 | **Proposed** (executable DDL, asserted to load, no migration, no repository) | 314 | files 01 (12 `player_*`), 02–08 |
 | Of the proposed, **blocked on an unresolved decision** | file 02 (55 tables): every `player_id` lacks a foreign key until the tombstone decision O1 is implemented at S4, and `org_id RESTRICT` depends on O2; `webhook_endpoints.secret` and `org_users.mfa_json` depend on O3; `exposure_events`, `webhook_deliveries`, `dispatches`, `outbox` retention depends on O4; `assessments` depends on O6; `second_look_items` key on O7; `representations` on O8; `agent_profile_facets.member_association` sentinel on O10 | §10, §12 |
 
-Counts: 6 implemented, 314 proposed, of which 55 (file 02) cannot be cut over until S4
-has shipped the tombstone and the file has been amended with the player foreign keys
+Counts: 7 implemented, 314 proposed, of which 55 (file 02) cannot be cut over until S4b
+has shipped the tombstone (O1) and the file has been amended with the player foreign keys
 (plan S8 "Depends on"). The remaining open questions change columns or retention rules,
 not table boundaries.
 
@@ -659,17 +660,18 @@ DECISIONs, some already in force:
   up to five seconds instead of failing with `SQLITE_BUSY`. `testSessions.mjs` proves it with
   a second process holding a write transaction, and proves the failure without the pragma.
 - **Prepared statements.** Every repository prepares its statements once at construction
-  (`repositories/users.mjs`, `repositories/shadow.mjs`) and binds parameters by name; no SQL is
-  built from strings at request time. Table names in `DELETE FROM ${t}` in `shadow.mjs` come
-  from a frozen constant, never from input.
+  (`repositories/users.mjs`, `repositories/sessions.mjs`, `repositories/orgs.mjs`,
+  `repositories/identity.mjs`, `repositories/mediaDeletions.mjs`) and binds parameters by name;
+  no SQL is built from strings at request time. Column lists come from frozen constants, never
+  from input.
 - **Transaction boundaries.** Each HTTP mutation that touches more than one table runs inside
   one `transaction(sqlite, fn)` (`repositories/database.mjs`), opened by the route's service
   function, so a failure leaves nothing half-written; reads run outside transactions. During
-  the migration, when shadow validation is switched on, the snapshot save transaction wraps
-  the projection in a `SAVEPOINT` (`store.mjs`), so a projection failure rolls back only the
-  shadow; with validation off (the default) the save transaction is the S0 one. Table
-  migrations each run in their own transaction (`runDataMigrations`) and abort the boot on
-  failure with the file untouched.
+  the migration an operation that writes repository rows and blob collections together runs
+  inside `store.unitOfWork` (one transaction, memory restored on failure); the ordinary save
+  transaction flushes pending facets and writes the blobs. The S1 shadow projection and its
+  savepoint are retired (S4a). Table migrations each run in their own transaction
+  (`runDataMigrations`) and abort the boot on failure with the file untouched.
 - **Synchronous mode.** Default (`FULL` in WAL mode is `NORMAL` for the WAL file). Keep the
   default; the durability guarantee is "committed transactions survive a process crash", and
   a power loss can lose the last checkpointed transactions only in `NORMAL`. OPEN: set
@@ -697,7 +699,7 @@ DECISIONs, some already in force:
   export `{ id, note, up(sqlite) }`. Ids sort lexically; a migration runs once, in a
   transaction, and a failure aborts the boot without modifying the file. There is no `down`:
   rollback is restore-from-backup (§ plan, every step records its rollback).
-- **Applied today:** `0001_org_users` (S0), `0002_core_identity_shadow` (S1).
+- **Applied today:** `0001_org_users` (S0), `0002_core_identity_shadow` (S1), `0003_sessions_live` (S2), `0004_orgs_live` (S3), `0005_core_identity_live` and `0006_media_deletions` (S4a).
 - **Rule.** The DDL in `docs/architecture/sql/` is the design; the migration files are what
   runs. `testSchemaDdl.mjs` asserts the two agree for every table a migration has created, so
   the document cannot drift from the code without a failing test.

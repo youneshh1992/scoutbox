@@ -12,6 +12,8 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations } from '../repositories/database.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { createSessionsRepository } from '../repositories/sessions.mjs';
+import { ORGS_TABLE } from '../repositories/orgs.mjs';
 import { createIdentityRepositories, CORE_IDENTITY_INIT_META } from '../repositories/identity.mjs';
 import { CORE_IDENTITY_LIVE_MIGRATION } from '../repositories/identityPreflight.mjs';
 import { rollbackCoreIdentityCopy, KNOWN_MIGRATIONS, S1_IDENTITY_SHADOW_DDL } from '../repositories/coreIdentityRollback.mjs';
@@ -19,7 +21,7 @@ import * as m0002 from '../repositories/migrations/0002_core_identity_shadow.mjs
 import * as m0005 from '../repositories/migrations/0005_core_identity_live.mjs';
 import { openStore } from '../store.mjs';
 import {
-  NOW, DAY, TTL, tempDir, sha256, adult, child, gSignup, FIXTURE, SESSIONS,
+  NOW, DAY, TTL, tempDir, sha256, adult, child, gSignup, FIXTURE, SESSIONS, S3_MIGRATIONS,
   s3File, freshFile, openRaw, migrate, applied, isLive, blob, blobText, meta, sessionRows, links, dump, identityDump, filesDigest,
 } from './coreIdentityTestFixtures.mjs';
 
@@ -58,12 +60,8 @@ function liveDatabaseWithHistory(dir) {
   const s = openRaw(dir); migrate(s, { now: NOW }); s.close();
   const store = openStore(dir, { tableBacked: [...TABLE_BACKED, 'players', 'guardians'] });
   const loaded = store.load(); const db = { ...loaded.db };
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  const identity = createIdentityRepositories({ sqlite: store.sqlite, unit: store.unit, now: () => NOW });
-  identity.attach();
-  Object.defineProperty(db, 'players', { value: identity.players.view, writable: false, configurable: false, enumerable: true });
-  Object.defineProperty(db, 'guardians', { value: identity.guardians.view, writable: false, configurable: false, enumerable: true });
-  store.setSaveHook(identity.saveHook());
+  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW });
+  const identity = layer.identity; // attached by the data layer (S4a): the same participant the server uses
   const snapshot = () => ({ savedAt: NOW + DAY, idCounter: 1200, db });
   // Post-S4 history, standalone and inside a unit of work.
   identity.guardians.insert({ id: 'gd-new', name: 'New Parent', email: 'new@example.test', password: 'scrypt$ee$ff', emailVerified: false, emailCode: 'ZZ9QQ1', idVerified: false, disclaimerAccepted: false, childIds: [] });
@@ -80,7 +78,7 @@ function liveDatabaseWithHistory(dir) {
   store.unitOfWork(() => { identity.players.insert({ ...child('pl-unit', 'gd-primary', '2018-02-02'), name: 'Unit Child' }); db.requests.push({ id: 'req-2', status: 'in-unit' }); }, { snapshot });
   const minted = layer.sessions.create('guardian', 'gd-new');
   store.save(snapshot());
-  const expected = { players: JSON.parse(JSON.stringify(db.players)), guardians: JSON.parse(JSON.stringify(db.guardians)), live: identityDump(store.sqlite), sessions: sessionRows(store.sqlite), minted: minted.token, others: dump(store.sqlite, { except: ['players', 'guardians', 'guardian_children', 'collections', 'meta', 'data_migrations'] }), blobs: Object.fromEntries(['users', 'sessions', 'orgs', 'requests', 'ledger'].map((n) => [n, blobText(store.sqlite, n)])), saveSeq: Number(meta(store.sqlite, 'saveSeq')) };
+  const expected = { players: JSON.parse(JSON.stringify(db.players)), guardians: JSON.parse(JSON.stringify(db.guardians)), live: identityDump(store.sqlite), sessions: sessionRows(store.sqlite), minted: minted.token, others: dump(store.sqlite, { except: ['players', 'guardians', 'guardian_children', 'collections', 'meta', 'data_migrations', 'media_deletions'] }), blobs: Object.fromEntries(['users', 'sessions', 'orgs', 'requests', 'ledger'].map((n) => [n, blobText(store.sqlite, n)])), saveSeq: Number(meta(store.sqlite, 'saveSeq')) };
   store.sqlite.close();
   return expected;
 }
@@ -96,7 +94,7 @@ test('the S1 shadow definitions the tool restores equal migration 0002\'s, colum
     const fks = (d) => d.prepare(`PRAGMA foreign_key_list(${t})`).all().map((f) => `${f.from}->${f.table}.${f.to}:${f.on_delete}`).sort();
     assert.deepEqual(fks(b), fks(a), `${t} foreign keys`);
   }
-  assert.deepEqual([...KNOWN_MIGRATIONS], ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', CORE_IDENTITY_LIVE_MIGRATION]);
+  assert.deepEqual([...KNOWN_MIGRATIONS], ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', CORE_IDENTITY_LIVE_MIGRATION, '0006_media_deletions']);
   a.close(); b.close();
 });
 
@@ -131,22 +129,28 @@ test('rollback: the copy holds every post-S4 player, guardian and link in the tw
   for (const t of ['players', 'guardians', 'guardian_children']) { assert.equal(o.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n, 0, `${t} empty`); assert.equal(isLive(o, t), false, `${t} is the shadow definition`); }
   // Untouched: sessions (the minted one included), staff, organisations, other blobs (the post-S4 blob edit kept).
   assert.deepEqual(sessionRows(o), expected.sessions); assert.ok(o.prepare('SELECT 1 FROM sessions WHERE token_hash = ?').get(sha256(expected.minted)));
-  assert.equal(dump(o, { except: ['players', 'guardians', 'guardian_children', 'collections', 'meta', 'data_migrations'] }), expected.others);
+  assert.equal(dump(o, { except: ['players', 'guardians', 'guardian_children', 'collections', 'meta', 'data_migrations', 'media_deletions'] }), expected.others);
   for (const [n, text] of Object.entries(expected.blobs)) assert.equal(blobText(o, n), text, `${n} blob untouched`);
   assert.equal(blob(o, 'requests')[0].status, 'post-s4'); assert.equal(blob(o, 'requests')[1].id, 'req-2');
   assert.deepEqual(o.prepare('PRAGMA foreign_key_check').all(), []); assert.equal(o.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
   o.close();
-  // The pre-S4 data layer (this build's production path: players and guardians are blobs) reads the copy as a snapshot and attaches.
-  const store = openStore(out, { tableBacked: TABLE_BACKED });
+  // The pre-S4 build's view of the copy: its registered steps (0001–0004) are all recorded (its runner applies nothing),
+  // its sessions repository finds the minted session, and the snapshot store reads players and guardians as the blobs
+  // and writes them back as blobs. (The real pre-S4 build is booted on a rollback copy in the verification evidence.)
+  const pre = openRaw(out);
+  assert.deepEqual(runDataMigrations(pre, S3_MIGRATIONS, { now: NOW + 2 * DAY, context: { sessionTtlMs: TTL } }).ran, [], 'the pre-S4 runner applies nothing to the copy');
+  const sessions = createSessionsRepository({ sqlite: pre, sessionTtlMs: TTL }); sessions.attach();
+  assert.equal(sessions.count(), 4); assert.ok(sessions.byToken(expected.minted), 'the session minted after the cutover works on the pre-S4 build');
+  assert.equal(ORGS_TABLE.read(pre).length, 1);
+  pre.close();
+  const store = openStore(out); // snapshot mode: no cutover record for the identity pair, so the blobs are what it reads and writes
   const loaded = store.load();
   assert.equal(JSON.stringify(loaded.db.players), JSON.stringify(expected.players)); assert.equal(JSON.stringify(loaded.db.guardians), JSON.stringify(expected.guardians));
   const db = { ...loaded.db };
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  assert.deepEqual(layer.report().migrations, DATA_MIGRATIONS.map((m) => m.id)); assert.equal(layer.orgs.count(), 1); assert.equal(layer.sessions.count(), 4);
-  assert.ok(layer.sessions.byToken(expected.minted), 'the session minted after the cutover works on the pre-S4 data layer');
   db.players.push({ ...adult(), id: 'pl-pre-s4', name: 'Added on the pre-S4 build' });
   store.save({ savedAt: NOW + 2 * DAY, idCounter: 1300, db });
   assert.equal(blob(store.sqlite, 'players').at(-1).id, 'pl-pre-s4', 'the pre-S4 build persists players as a blob again');
+  assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM players').get().n, 0, 'and never promotes the shadow table');
   store.sqlite.close();
   rm(src, out);
 });
@@ -166,8 +170,8 @@ test('round trip: the real migration cuts the rollback copy over again and the l
   // A write on the pre-S4 build between rollback and re-upgrade (a new guardian with a child) is imported with everything else.
   const out2 = tempDir('s4-rt-out2');
   rollbackCoreIdentityCopy(dbFile(src), out2);
-  const store = openStore(out2, { tableBacked: TABLE_BACKED });
-  const loaded = store.load(); const db = { ...loaded.db }; attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  const store = openStore(out2); // the pre-S4 build's snapshot store: the blobs are authoritative on the copy
+  const loaded = store.load(); const db = { ...loaded.db };
   db.guardians.push({ ...gSignup(), id: 'gd-pre', email: 'pre@example.test', emailCode: 'PRE123', childIds: ['pl-pre'] });
   db.players.push(child('pl-pre', 'gd-pre', '2016-06-06'));
   db.guardians.find((g) => g.id === 'gd-signup').emailVerified = true; db.guardians.find((g) => g.id === 'gd-signup').emailCode = null; // verified on the pre-S4 build
@@ -248,9 +252,9 @@ test('refusals and failures leave no output and never touch the source: a later 
   const before = filesDigest(src); const sIn = openRaw(src); const logicalBefore = dump(sIn); sIn.close();
   // Later schema.
   const later = tempDir('s4-rb-later'); fs.copyFileSync(dbFile(src), dbFile(later));
-  const l = openRaw(later); l.prepare("INSERT INTO data_migrations (id, applied_at) VALUES ('0006_future_step', 1)").run(); l.close();
+  const l = openRaw(later); l.prepare("INSERT INTO data_migrations (id, applied_at) VALUES ('0007_future_step', 1)").run(); l.close();
   const out1 = tempDir('s4-rb-o1');
-  assert.throws(() => rollbackCoreIdentityCopy(dbFile(later), out1), (err) => err.code === 'LATER_SCHEMA' && /0006_future_step/.test(err.message));
+  assert.throws(() => rollbackCoreIdentityCopy(dbFile(later), out1), (err) => err.code === 'LATER_SCHEMA' && /0007_future_step/.test(err.message));
   assert.deepEqual(fs.readdirSync(out1), [], 'no output');
   // Never cut over (an S3 file).
   const s3 = tempDir('s4-rb-s3'); s3File(s3);

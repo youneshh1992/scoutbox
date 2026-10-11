@@ -9,8 +9,14 @@ are from this commit; `01_identity.sql` and the plan cite lines that have drifte
 places. "Verified" means run on synthetic data (the script is named); everything else is read
 from the code or is a design proposal, and design risks are called design risks.
 
-**Status: preparation only.** Nothing in this document is implemented. Nothing here changes the
-UI, permissions or the deletion policy.
+**Status (updated after the S4a integration commit): S4a is implemented and verified** — the
+migration is registered, the repositories are attached at boot, the writers are converted, the
+operations of §7.4 run in units of work, the §6 allowlists are the responses, the media-deletion
+queue exists and the rollback tool covers the final schema; §9 lists every acceptance item with
+where it is proven. The sections below keep the review's evidence and proposals as written;
+status notes mark what the implementation settled. Nothing here changes the UI or the deletion
+policy (O1 open; S4b not started). Registration in source is development work, not
+authorization for a real-data cutover: the operator procedure is in `OPERATIONS.md`.
 
 **One dependency statement.** S4 is two bounded steps. **S4a** (storage cutover, repositories,
 allowlisted views, rollback tool) does **not** depend on the deletion decision O1: it keeps
@@ -105,6 +111,15 @@ of the live `players` table; "facet" means the transitional `facets_json` on the
 The record view refuses a column-backed assignment, nested values included (S3 correction 2),
 so each becomes a repository call. Facet writers stay as they are. Operations that also change
 other collections are marked **(UoW)** and run inside a unit of work (§7.4).
+
+**Status: done.** Every row of the table below is converted as its last column says (the
+signing completion uses `players.update` for level, contract status and availability inside the
+unit, and the unit's rollback replaces the hand-written restore, so `players.restore` is not
+called by m29); the survey was repeated on the final tree (no direct assignment of a column-backed
+player or guardian field, no `childIds` mutation, outside the repositories).
+`scripts/testCoreIdentityServer.mjs` exercises the converted writers through their real routes and
+after a restart; `m15/passport.mjs` writes passport preference records, not the player, and was
+not changed.
 
 | Writer | Today | S4a |
 |---|---|---|
@@ -399,16 +414,16 @@ collection existed, `pending` only for a never-saved database); delete the two b
 Completion is decided only by the `data_migrations` row. `sessions`, `org_users`, `orgs` are
 not touched by any statement.
 
-**Status: implemented and tested, NOT registered** (`repositories/migrations/0005_core_identity_live.mjs`;
-`scripts/testCoreIdentityMigration.mjs` invokes it through the real runner on temporary S3-shaped
-databases; `DATA_MIGRATIONS` is unchanged and a production guard proves it). Two refinements over
+**Status: implemented, tested and REGISTERED** (`repositories/migrations/0005_core_identity_live.mjs`
+in `DATA_MIGRATIONS`, followed by `0006_media_deletions`; `scripts/testCoreIdentityMigration.mjs`
+invokes it through the real runner on temporary S3-shaped databases and proves the integrated boot). Two refinements over
 the paragraph above, settled while building it: the kind of database is decided from explicit
 state only — a genuinely new database (no collection row, no `saveSeq`, no `savedAt`) cuts over
 empty with `pending`; a saved snapshot must carry BOTH blobs as arrays, and an absent, unparsable
 or non-array collection is a refusal (`CORE_IDENTITY_CUTOVER_BLOCKED`), never an empty import and
 never a first installation; the shadow tables' rows are discarded unread and their counts recorded.
-The migration refuses to run over an initialised live domain. Registering it, and attaching the
-repositories at boot (§7.2), remain open.
+The migration refuses to run over an initialised live domain. It is registered and the
+repositories are attached at boot (§7.2).
 
 ### 7.2 Boot order and the snapshot-presence change
 
@@ -417,11 +432,15 @@ repositories at boot (§7.2), remain open.
 runs after the data layer (S3), so `ROOM_ORPHAN_PLAYER` / `PLAYER_ID_DUPLICATE`
 (`m182/integrity.mjs:48, 64`) keep seeing players; `m182_002` (`db.players ??= []`) creates an
 empty placeholder that `attach()` ignores; no other `m182` step reads players or guardians.
-`loadSnapshot` treats a file without a `players` array as "no snapshot" (S:129–135) and the
-server-mode `store.load()` does not read table-backed collections, so **S4a must give the store a
-snapshot-presence signal that does not depend on a `players` blob** (the cutover record), or
-every boot after the cutover would run from the seed. This is the one boot-path change beyond
-the S3 pattern and the first regression to write.
+`loadSnapshot` treated a file without a `players` array as "no snapshot" (S:129–135) and the
+server-mode `store.load()` does not read table-backed collections, so **S4a had to give the store a
+snapshot-presence signal that does not depend on a `players` blob**, or every boot after the
+cutover would have run from the seed. **Done:** `store.load()` decides "never saved" from the
+absence of blob rows AND of a save record (`meta.savedAt` / `saveSeq`); `loadSnapshot` takes any
+loaded snapshot as a saved file (the log says `players table-backed`), refuses a `players`
+collection that is not an array with `SNAPSHOT_INVALID`, and never seeds over a saved file. The
+regression is in `scripts/testCoreIdentityServer.mjs` (a migrated file without blobs, restarted)
+and `scripts/testCoreIdentityMigration.mjs` (the integrated boot).
 
 ### 7.3 Restart, authority, sessions, failed saves
 
@@ -492,16 +511,30 @@ column writes (availability, Academy+, level, password rehash, consent, location
 keep the S3 immediate model unless the same request also writes a blob, in which case they too
 run inside a unit.
 
-**Media files (filesystem, outside SQLite) — not built in this step.** The design stands:
-the database transaction commits first; file deletion follows through a `media_deletions`
-queue written in the transaction, processed after commit, at boot and on a sweep, removed only
-once the file is gone; a crash after commit leaves orphan files no route can serve
-(`/media/:id` resolves the owner, S:4265) until the sweep; a crash before commit deletes
-nothing. Until it exists, S4a must keep today's order and today's limitation, stated as such.
+**Media files (filesystem, outside SQLite) — built (migration `0006_media_deletions`,
+`repositories/mediaDeletions.mjs`).** The database transaction commits first; the removal of
+each file is queued in `media_deletions` inside the deletion's transaction and processed after
+COMMIT, at boot and once a minute; an entry goes only once storage reports the file removed or
+already absent (a failing removal keeps the entry with the attempt count and the error);
+`/media/:id` answers 404 for a queued id before any authorisation; a crash before COMMIT deletes
+nothing. The rollback tool refuses a non-empty queue (exit 8) and drops the table on an empty
+one. Tests: `scripts/testMediaDeletions.mjs`, the deletion case of `scripts/testCoreIdentityServer.mjs`
+(a stuck file, 404 while queued, the boot retry).
 
 **Session revocation inside a unit.** `sessions.revokeFor` is a plain statement; inside a unit
 it rolls back with the unit, so S4a's deletion revokes sessions *inside* the unit and the
-revocation becomes part of the all-or-nothing (today it is not).
+revocation is part of the all-or-nothing (done: `deletePlayerData`).
+
+**Status of the per-operation units (done):** player and guardian sign-up with the session,
+child creation with its link and saved-search notifications, e-mail verification, the
+co-guardian invitation, aging-up, the admin ID review, the level review with its ledger row, the
+signing completion (the hand-written snapshot/restore replaced by the unit; a refusal inside the
+unit is a `SigningAbort` that rolls back with the route's error code; the success-fee invoice is
+issued after COMMIT, never inside the transaction) and the legacy signing route, and deletion.
+Failure injections: the fault seams `signing.complete.after_row`, `after_lifecycle` and the new
+`at_commit` (the last statement of the unit, just before COMMIT) in `scripts/m23SigningE2E.mjs`;
+the injected COMMIT failure, the caught inner failure and the process killed before COMMIT in
+`scripts/testIdentityRepositories.mjs` and `scripts/testUnitOfWork.mjs`.
 
 **Failure-injection tests S4a adds per operation** (the foundation's suite already covers the
 mechanism with the organisations repository): failure after the row statement, failure at
@@ -524,8 +557,11 @@ in again); delete the `0005` record and the two `meta` keys; advance `meta.saveS
 `foreign_key_check`; VACUUM; verify against the real pre-S4 build (worktree at the S3 commit)
 with synthetic data, as S2 and S3 were.
 
-**Status: implemented and tested** (`repositories/coreIdentityRollback.mjs`,
-`scripts/coreIdentityRollback.mjs`, `scripts/testCoreIdentityRollback.mjs`). As built: the output
+**Status: implemented and tested, valid for the final schema** (`repositories/coreIdentityRollback.mjs`,
+`scripts/coreIdentityRollback.mjs`, `scripts/testCoreIdentityRollback.mjs`; the tool knows
+migration `0006`, refuses a copy whose media-removal queue is not empty — exit 8 — and drops
+`media_deletions` with its record on an empty one; verified against the real previous build at
+`c1d868e` with the final code, log in the handoff). As built: the output
 directory must be empty (exit 1), a recorded 0005 over shadow-shaped tables is refused rather than
 guessed, a first installation whose initialisation has not completed is refused (exit 6: the live
 domain holds no authoritative data yet and the pre-S4 build could not tell that apart from an
@@ -645,6 +681,34 @@ Acceptance (each a test that fails first where applicable):
 15. Battery: unchanged suites green apart from the two baseline `m182E2E` client checks;
     `m23BootContract` green.
 
+**Acceptance status after the integration commit** (every item run on synthetic data; the
+suite named is part of `npm test` unless stated):
+
+| Item | Status | Where |
+|---|---|---|
+| 1 round trip | pass | `testCoreIdentityMapping.mjs`, `testIdentityRepositories.mjs` |
+| 2 validation | pass | `testCoreIdentityMapping.mjs`, `testCoreIdentityMigration.mjs` (seven malformed snapshots, duplicates, references, the legacy-minor rule) |
+| 3 cutover | pass | `testCoreIdentityMigration.mjs`; on the real server `testCoreIdentityServer.mjs` ("previously saved file") |
+| 4 abort cases | pass | `testCoreIdentityMigration.mjs` (four injected failures, a process killed at COMMIT, repair-and-retry); the real server refuses malformed input and the legacy minor twice with the file byte-identical (`testCoreIdentityServer.mjs`) |
+| 5 counted findings | pass | `testCoreIdentityMigration.mjs` (`meta.coreIdentityCutover` findings; minors without a link refuse) |
+| 6 boot | pass | `testCoreIdentityServer.mjs`: new installation, saved file, intentionally empty, interrupted first installation, migrated without blobs, stale blobs — each restarted; `testCoreIdentityMigration.mjs` (integrated boot) |
+| 7 unit of work | pass | deletion / child creation / aging-up / signing: `testCoreIdentityServer.mjs` (routes), `m23SigningE2E.mjs` (fault seams incl. `at_commit`), `testIdentityRepositories.mjs` (COMMIT failure, caught inner failure, SIGKILL; a minor cannot be inserted without its link) |
+| 8 writers | pass | `testCoreIdentityServer.mjs` (every converted writer through its route and after a restart); facet writers and the failed-then-successful save: `testIdentityRepositories.mjs`, `testUnitOfWork.mjs` |
+| 9 guards | pass | `testIdentityRepositories.mjs` |
+| 10 links | pass | `testIdentityRepositories.mjs`; the co-guardian duplicate e-mail: `guardians.insert` refusal (`EMAIL_IN_USE`) |
+| 11 views | pass | `testCoreIdentityServer.mjs` ("allowlists"): club/adult, club/minor, agency, unverified club, grassroots, blocked, guardian, player, Trust & Safety, shortlist after deletion — allowed and forbidden keys asserted on actual responses (a recorded key fixture was not written; the allowlists are asserted directly) |
+| 12 snapshot tools | pass | `testCoreSchema.mjs` (the coupled dispatcher: refusals, partial snapshot, explicit empty arrays, prune order), `testCoreIdentityServer.mjs` (`POST /admin/backup` restored into a fresh directory with every player, guardian, link, code and session hash) |
+| 13 rollback | pass | `testCoreIdentityRollback.mjs` (round trip, exits 4/5/1/6/7), `testMediaDeletions.mjs` (exit 8); the real previous build at `c1d868e`: the copy boots there, sessions and the outstanding code valid, a write made there re-upgraded (handoff evidence `old-build-verification.log`) |
+| 14 media queue | pass | `testMediaDeletions.mjs`; `testCoreIdentityServer.mjs` (a stuck file keeps the entry across a restart, 404 while queued, the rollback refusal, the next boot clears it once the file is absent). A crash injected between COMMIT and the unlink is represented by the stuck-file case (same state: committed row, pending entry) |
+| 15 battery | pass with the stated baseline | 48 suites: 43 green as run; `m182E2E` two baseline client-source checks; `m23RecruitmentJourneyE2E`, `m23SigningE2E`, `m23SigningHardeningE2E` (the `under_contract` drift guards recognise the repository form), `m23RecruitmentJourneyHardeningE2E` (a fixture planting an unreadable date of birth through the snapshot now asserts the refusal) and `m23TemporalIntegrityE2E` (a probe sends `foot: 'right'`; the first battery run crashed before its own checks when `store.load()` returned null after the first boot, not reproduced in two re-runs) adapted and green on re-run; `m23BootContract` green |
+
+Two user-visible changes beyond the §6 privacy fixes, both consequences of the column
+constraints: a sign-up or update with a value the schema refuses (`foot` outside `left`/`right`,
+a `position` outside the list, an unreadable date) answers `400 PLAYER_INVALID` /
+`400 GUARDIAN_INVALID` naming the field instead of storing the value as given; and a snapshot
+write (restore, tool, fixture) that carries an invalid identity record is rejected as a whole
+instead of imported.
+
 **S4b — deletion and guardian lifecycle (one commit, only after O1 is answered).** Implements
 O1 (`players.erase(id)` inside the deletion unit of work: `deleted_at`, the retained columns per
 the decision, every other personal column nulled, the name replaced, owned facets cleared, name
@@ -657,7 +721,8 @@ child. Until then `removedAt`/`deletedAt` remain never-written.
 | Table | State at `0c038ef` | After S4a |
 |---|---|---|
 | `org_users`, `sessions`, `orgs` | live (S0, S2, S3) | unchanged |
-| `guardians`, `players`, `guardian_children` | shadow (S1) | **live**, with `facets_json` on `players` and `guardians`; `email_code_hash` column present but unused until S6 (the code rides in the facets). *Current state: migration 0005 and the rollback tool are implemented and tested but the migration is not registered — the registered state is still the S1 shadow and the blobs are authoritative.* |
+| `guardians`, `players`, `guardian_children` | shadow (S1) | **live** (done: migration 0005 registered, repositories attached at boot), with `facets_json` on `players` and `guardians`; `email_code_hash` column present but unused until S6 (the code rides in the facets) |
+| `media_deletions` | — | **live** (migration 0006, the crash-safe media-removal queue) |
 | `players.deleted_at`, `guardians.deleted_at` | DDL only | still written by nothing (S4b) |
 | twelve `player_*` sub-record tables | proposed DDL | unchanged (S5) |
 | file 02 (recruitment) | proposed; `player_id` without FK pending O1/S8a | unchanged |

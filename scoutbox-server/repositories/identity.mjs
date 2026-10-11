@@ -76,6 +76,8 @@ import { validateCoreIdentity, writeCandidate, publicReport, CORE_IDENTITY_LIVE_
 
 /** `meta` key holding the initialisation state (`pending` | `done`); absent reads as `done`. */
 export const CORE_IDENTITY_INIT_META = 'coreIdentityInit';
+/** The two collections the identity repositories own; coupled through the link rows. */
+export const IDENTITY_COLLECTIONS = Object.freeze(['players', 'guardians']);
 /** Composites whose remainder is a mutable facet: only the column-backed sub-keys are guarded. */
 export const PLAYER_SPLIT_COMPOSITES = Object.freeze(['medical', 'programme']);
 
@@ -89,6 +91,83 @@ const sqlReason = (err) => String(err?.message ?? err).replace(/^SQLITE_\w+:\s*/
 
 const insertSql = (table, columns) => `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${columns.map((c) => `@${c}`).join(', ')})`;
 const updateSql = (table, columns) => `UPDATE ${table} SET ${columns.filter((c) => c !== 'id').map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id`;
+const upsertSql = (table, columns) => `${insertSql(table, columns)} ON CONFLICT(id) DO UPDATE SET ${columns.filter((c) => c !== 'id').map((c) => `${c} = excluded.${c}`).join(', ')}`;
+
+/**
+ * Whole-snapshot access for the tools that read or write the database file as
+ * one unit (backups, restores, the persistence suites): the two collections as
+ * the server sees them, and the inverse — make the three tables equal to the
+ * snapshot's `players` and `guardians`, inside the caller's transaction.
+ *
+ * The collections are COUPLED: the link rows derive from both, so a snapshot
+ * must carry both or neither (`repositories/index.mjs` refuses one without the
+ * other). The whole pair is validated first with the reviewed preflight —
+ * shapes, every record, duplicate ids and e-mails, every reference, both sides
+ * of every link, the Founder's legacy-minor rule, age at `now` — and any
+ * refusal throws before a statement runs, so the caller's transaction rolls
+ * back with nothing changed. An explicitly empty pair is intentional: it
+ * empties the tables. Writes are upserts in id order of the snapshot
+ * (guardians in two passes for `co_guardian_of`, then players), the link rows
+ * are rewritten from the guardians' `childIds` in their order, and rows the
+ * snapshot no longer lists are deleted afterwards — players before guardians,
+ * so a guardian still named by a kept player can never be dropped (validation
+ * already guarantees every `guardianId` names a listed guardian). Unknown JSON
+ * keys, null/absent shape and the outstanding `emailCode` ride in the rows
+ * through the one mapping. Before the cutover record exists both methods
+ * decline (`null` / `false`) and the caller keeps the blobs.
+ */
+export const IDENTITY_SNAPSHOT = {
+  names: IDENTITY_COLLECTIONS,
+  cutOver: (sqlite) => migrationApplied(sqlite, CORE_IDENTITY_LIVE_MIGRATION),
+  read(sqlite) {
+    if (!this.cutOver(sqlite)) return null;
+    const childIds = new Map();
+    for (const l of sqlite.prepare('SELECT guardian_id, player_id FROM guardian_children ORDER BY rowid').all()) {
+      if (!childIds.has(l.guardian_id)) childIds.set(l.guardian_id, []);
+      childIds.get(l.guardian_id).push(l.player_id);
+    }
+    return {
+      guardians: sqlite.prepare(`SELECT ${GUARDIAN_COLUMNS.join(', ')} FROM guardians ORDER BY rowid`).all().map((r) => guardianFromRow(r, childIds.get(r.id) ?? [])),
+      players: sqlite.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players ORDER BY rowid`).all().map((r) => playerFromRow(r)),
+    };
+  },
+  replace(sqlite, { players, guardians }, { now = Date.now() } = {}) {
+    if (!this.cutOver(sqlite)) return false;
+    if (!sqlite.isTransaction) throw new Error('identity snapshot: replace() runs inside the caller\'s transaction');
+    for (const [name, value] of [['players', players], ['guardians', guardians]]) {
+      if (!Array.isArray(value)) throw new TypeError(`${name}: the snapshot collection must be an array of records (got ${value === null ? 'null' : Array.isArray(value) ? 'an array' : typeof value === 'object' ? 'an object' : `a ${typeof value}`}); the save was rolled back and nothing was written`);
+    }
+    const report = validateCoreIdentity({ players, guardians }, { now });
+    if (report.status !== 'complete') {
+      const listed = report.refusals.slice(0, 20).map((r) => `${r.collection} ${r.id ?? '(collection)'}: ${r.reason}`).join('; ');
+      throw new Error(`identity snapshot: ${report.refusals.length} record(s) or relationship(s) were refused (${listed}${report.refusals.length > 20 ? '; …' : ''}); the save was rolled back and no player, guardian or link was changed`);
+    }
+    const { candidate } = report;
+    const upsertG = sqlite.prepare(upsertSql('guardians', GUARDIAN_COLUMNS));
+    const linkG = sqlite.prepare('UPDATE guardians SET co_guardian_of = ? WHERE id = ?');
+    const upsertP = sqlite.prepare(upsertSql('players', PLAYER_COLUMNS));
+    const insL = sqlite.prepare('INSERT INTO guardian_children (guardian_id, player_id, role) VALUES (@guardian_id, @player_id, @role)');
+    // Links are derived: rewritten from the snapshot after the rows, before the pruning.
+    sqlite.exec('DELETE FROM guardian_children');
+    const pending = [];
+    for (const row of candidate.guardians) {
+      const { co_guardian_of, ...rest } = row;
+      upsertG.run({ ...rest, co_guardian_of: null });
+      if (co_guardian_of !== null && co_guardian_of !== undefined) pending.push([co_guardian_of, row.id]);
+    }
+    for (const [target, id] of pending) linkG.run(target, id);
+    for (const row of candidate.players) upsertP.run(row);
+    for (const row of candidate.links) insL.run(row);
+    // Rows the snapshot no longer lists: players first, then guardians.
+    const keepP = new Set(candidate.players.map((r) => r.id)); const keepG = new Set(candidate.guardians.map((r) => r.id));
+    const delP = sqlite.prepare('DELETE FROM players WHERE id = ?'); const delG = sqlite.prepare('DELETE FROM guardians WHERE id = ?');
+    for (const r of sqlite.prepare('SELECT id FROM players').all()) if (!keepP.has(r.id)) delP.run(r.id);
+    for (const r of sqlite.prepare('SELECT id FROM guardians').all()) if (!keepG.has(r.id)) delG.run(r.id);
+    const broken = sqlite.prepare('PRAGMA foreign_key_check').all();
+    if (broken.length) throw new Error(`identity snapshot: foreign_key_check found ${broken.length} broken reference(s) after the write; the save was rolled back`);
+    return true;
+  },
+};
 
 export function createIdentityRepositories({ sqlite, log = () => {}, warn = () => {}, unit = null, now = Date.now }) {
   if (!sqlite) throw new TypeError('the identity repositories need a SQLite connection (node:sqlite); the data layer has no in-memory fallback');

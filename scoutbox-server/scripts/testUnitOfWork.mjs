@@ -31,7 +31,8 @@ const ORGS = () => [
   { id: 'org-grass', name: 'Riverside Juniors', type: 'club', level: 'grassroots', location: { lat: 51.5, lng: -0.1, city: 'London' }, plan: 'Grassroots', trustedPartner: false, country: 'GB', verified: false, safeguardingContractSigned: false, squad: [], lookingFor: ['ST'] },
   { id: 'org-agency', name: 'Northstar Agency', type: 'agency', level: null, plan: 'Pro', trustedPartner: false, country: 'FR', verified: false, agencySettings: { licence: 'FIFA-1' } },
 ];
-const fixtureDb = () => ({ orgs: ORGS(), guardians: [], players: [{ id: 'pl-1', name: 'P' }], sessions: [], users: [{ id: 'usr-1', orgId: 'org-pro', name: 'Maria', role: 'Head of Recruitment', createdAt: 1 }], requests: [{ id: 'req-1', playerId: 'pl-1', status: 'pending', history: [] }] });
+// Since S4a the players and guardians are table-backed too: the fixture player is a valid record (the identity repositories validate it at the first boot's import).
+const fixtureDb = () => ({ orgs: ORGS(), guardians: [], players: [{ id: 'pl-1', name: 'P', dob: '2000-01-01', country: 'GB', medical: { shared: false, records: [], conditionStatus: 'unknown' } }], sessions: [], users: [{ id: 'usr-1', orgId: 'org-pro', name: 'Maria', role: 'Head of Recruitment', createdAt: 1 }], requests: [{ id: 'req-1', playerId: 'pl-1', status: 'pending', history: [] }] });
 
 /** A cut-over store with the fixture saved once; returns everything a test needs. */
 function boot(dir, db = fixtureDb()) {
@@ -57,7 +58,7 @@ function operation(t, { failBlob = false, afterCommit = null } = {}) {
     t.db.channels = [{ id: 'ch-1', playerId: 'pl-1' }];
     token = t.layer.sessions.create('player', 'pl-1').token;
     if (afterCommit) t.store.afterCommit(afterCommit);
-    if (failBlob) t.db.players[0].big = 1n; // JSON cannot serialise it: the blob write fails after the rows and facets were written
+    if (failBlob) t.db.requests[0].big = 1n; // JSON cannot serialise it: the blob write fails after the rows and facets were written
     return 'done';
   });
   return { result, token };
@@ -73,7 +74,8 @@ function assertDatabaseUntouched(t, { unrelatedSaved }) {
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'player'").n, 0, 'no session row');
   const grass = JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-grass'").facets_json);
   assert.deepEqual(grass.lookingFor, unrelatedSaved ? ['GK'] : ['ST']);
-  assert.equal(t.blob('players').length, unrelatedSaved ? 2 : 1);
+  assert.equal(t.blob('players'), undefined, 'players are table-backed since S4a: never a blob');
+  assert.equal(t.blob('requests')[0].note, unrelatedSaved ? 'pending-before' : undefined);
 }
 function assertMemoryRestored(t, refs) {
   const { pro, req1, hist, grass } = refs;
@@ -84,9 +86,8 @@ function assertMemoryRestored(t, refs) {
   assert.equal(t.db.requests[0], req1, 'the same blob record object'); assert.equal(req1.status, 'pending');
   assert.equal(req1.history, hist, 'the same nested array object'); assert.equal(hist.length, 0);
   assert.equal(t.db.requests.length, 1); assert.equal('channels' in t.db, false, 'a key added by the operation is gone');
-  assert.equal(t.db.players[0].big, undefined);
   // Unrelated edits made BEFORE the operation are still in memory and still pending.
-  assert.deepEqual(grass.lookingFor, ['GK']); assert.equal(t.db.players.length, 2);
+  assert.deepEqual(grass.lookingFor, ['GK']); assert.equal(t.db.requests[0].note, 'pending-before');
   assert.equal(t.layer.orgs.uncommitted(), 1, 'the pre-operation facet change is still eligible for the next save');
 }
 function assertOperationPersisted(t, token) {
@@ -102,7 +103,7 @@ function assertOperationPersisted(t, token) {
 }
 const prepare = (t) => {
   const pro = t.db.orgs.find((o) => o.id === 'org-pro'); const grass = t.db.orgs.find((o) => o.id === 'org-grass');
-  grass.lookingFor = ['GK']; t.db.players.push({ id: 'pl-2', name: 'Q' }); // unrelated edits, pending before the operation
+  grass.lookingFor = ['GK']; t.db.requests[0].note = 'pending-before'; // unrelated edits, pending before the operation (players are a repository view since S4a)
   return { pro, grass, req1: t.db.requests[0], hist: t.db.requests[0].history };
 };
 
@@ -196,12 +197,12 @@ await test('ordinary saves keep the S3 contract: a facet change in a FAILED ordi
   const dir = tempDir('uow-s3'); const t = boot(dir);
   const pro = t.db.orgs.find((o) => o.id === 'org-pro');
   pro.squad.push({ id: 'sq-1', name: 'A', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
-  t.db.players[0].big = 1n;
+  t.db.requests[0].big = 1n; // a blob record (players are a repository view since S4a)
   assert.throws(() => t.store.save(t.snapshot()), /BigInt/);
   assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).squad.length, 0);
   assert.equal(pro.squad.length, 1, 'an ordinary save failure does NOT undo memory: memory is the intended state, retried by the next save');
   assert.equal(t.layer.orgs.uncommitted(), 1);
-  delete t.db.players[0].big;
+  delete t.db.requests[0].big;
   t.store.save(t.snapshot());
   assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).squad.length, 1);
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });

@@ -16,7 +16,7 @@ const out = { node: process.version, steps: [], ok: false };
 try {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
   out.steps.push('opened');
-  const db = { orgs: [{ id: 'org-1', name: 'One FC', type: 'club', level: 'grassroots', plan: 'Grassroots', squad: [] }], guardians: [], players: [{ id: 'pl-1', name: 'P' }], sessions: [], users: [] };
+  const db = { orgs: [{ id: 'org-1', name: 'One FC', type: 'club', level: 'grassroots', plan: 'Grassroots', squad: [] }], guardians: [], players: [{ id: 'pl-1', name: 'P', dob: '2001-01-01', country: 'GB' }], sessions: [], users: [] };
   attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: 30 * 86_400_000 });
   store.save({ savedAt: 1, idCounter: 1000, db });
   out.steps.push('saved');

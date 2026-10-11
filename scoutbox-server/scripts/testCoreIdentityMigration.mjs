@@ -1,8 +1,8 @@
 // Behavioural tests for the REAL migration 0005_core_identity_live (plan step
-// S4a), invoked explicitly through the real runner on temporary S3-shaped
-// databases. The module is NOT registered: DATA_MIGRATIONS, TABLE_BACKED,
-// repositories/index.mjs and server boot are unchanged, and a guard below
-// proves it. Synthetic fixtures and throwaway databases only. Run with: npm test
+// S4a), run through the real runner — the REGISTERED list, so 0006 (the
+// media-deletion queue) follows it — on temporary S3-shaped databases, plus
+// the integrated boot (attachDataLayer as production runs it). Synthetic
+// fixtures and throwaway databases only. Run with: npm test
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -16,7 +16,7 @@ import { CANDIDATE_DDL, CORE_IDENTITY_LIVE_MIGRATION, MINOR_WITHOUT_LINK_REASON 
 import * as m0005 from '../repositories/migrations/0005_core_identity_live.mjs';
 import { openStore } from '../store.mjs';
 import {
-  NOW, DAY, TTL, tempDir, clone, adult, child, seeded, gPrimary, gCo, gSignup, FIXTURE, ORGS, USERS, SESSIONS, EXTRA,
+  NOW, DAY, TTL, tempDir, clone, adult, child, seeded, gPrimary, gCo, gSignup, FIXTURE, ORGS, USERS, SESSIONS, EXTRA, S4_MIGRATION_IDS,
   s3File, freshFile, openRaw, migrate, applied, tableCols, isLive, blob, blobText, meta, sessionRows, links, dump, identityDump, filesDigest, failExecOnce, failRunAt,
 } from './coreIdentityTestFixtures.mjs';
 
@@ -42,11 +42,11 @@ function assertUntouched(s, { before, playersText, guardiansText }) {
 test('cutover: an S3 file with every record shape cuts over — three live tables, every field and link (roles per side), blobs retired, coreIdentityInit = done, sessions identical by hash, staff, organisations and other blobs untouched, emailCode byte-identical once, the repositories attach and serve every record byte-identical', () => {
   const dir = tempDir('s4-cutover'); s3File(dir);
   const s = openRaw(dir);
-  const sessionsBefore = sessionRows(s); const othersBefore = dump(s, { except: ['players', 'guardians', 'guardian_children', 'collections', 'meta', 'data_migrations'] });
+  const sessionsBefore = sessionRows(s); const othersBefore = dump(s, { except: ['players', 'guardians', 'guardian_children', 'collections', 'meta', 'data_migrations', 'media_deletions'] });
   const blobsBefore = Object.fromEntries(['users', 'sessions', 'orgs', 'requests', 'ledger'].map((n) => [n, blobText(s, n)]));
   const result = migrate(s, { now: NOW });
-  assert.deepEqual(result.ran, [CORE_IDENTITY_LIVE_MIGRATION]); assert.equal(result.applied, 5);
-  assert.deepEqual(applied(s), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', CORE_IDENTITY_LIVE_MIGRATION]);
+  assert.deepEqual(result.ran, [...S4_MIGRATION_IDS]); assert.deepEqual([...S4_MIGRATION_IDS], [CORE_IDENTITY_LIVE_MIGRATION, '0006_media_deletions']); assert.equal(result.applied, 6);
+  assert.deepEqual(applied(s), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', CORE_IDENTITY_LIVE_MIGRATION, '0006_media_deletions']);
   for (const t of ['players', 'guardians']) assert.ok(isLive(s, t), `${t} has the live definition`);
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM players').get().n, 5); assert.equal(s.prepare('SELECT COUNT(*) AS n FROM guardians').get().n, 3);
   assert.deepEqual(links(s), [
@@ -62,7 +62,7 @@ test('cutover: an S3 file with every record shape cuts over — three live table
   assert.deepEqual(record.blobs, { players: true, guardians: true }); assert.deepEqual(record.shadowRowsDiscarded, { guardian_children: 0, players: 0, guardians: 0 });
   assert.ok(!/@|scrypt|K7Q2ZP/.test(meta(s, m0005.CORE_IDENTITY_CUTOVER_META)), 'the record carries counts, never data');
   // Untouched: sessions (by hash), staff, organisations, the other blobs.
-  assert.deepEqual(sessionRows(s), sessionsBefore); assert.equal(dump(s, { except: ['players', 'guardians', 'guardian_children', 'collections', 'meta', 'data_migrations'] }), othersBefore);
+  assert.deepEqual(sessionRows(s), sessionsBefore); assert.equal(dump(s, { except: ['players', 'guardians', 'guardian_children', 'collections', 'meta', 'data_migrations', 'media_deletions'] }), othersBefore);
   for (const [n, text] of Object.entries(blobsBefore)) assert.equal(blobText(s, n), text, `${n} blob untouched`);
   // The code: plain, once, in the facets; never in a column.
   assert.equal(s.prepare("SELECT facets_json FROM guardians WHERE id = 'gd-signup'").get().facets_json.split('K7Q2ZP').length - 1, 1);
@@ -245,26 +245,54 @@ test('a process killed at COMMIT (after the DROPs, the live DDL, every insert an
   s.close(); rm(dir);
 });
 
-// ------------------------------------------------------------- production stays unchanged
-test('production guard: migration 0005 is implemented but NOT registered — DATA_MIGRATIONS is 0001–0004, TABLE_BACKED is orgs/users/sessions, repositories/index.mjs and server.mjs import neither the migration, the identity repositories nor the rollback tool, and a normal boot leaves the shadow definition with no 0005 record', () => {
-  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live']);
-  assert.deepEqual([...TABLE_BACKED], ['orgs', 'users', 'sessions']);
+// ------------------------------------------------------------- the integrated boot (the data layer as production runs it)
+test('integrated boot: 0005 and 0006 are registered, players and guardians are table-backed, a first installation initialises once from the seed (never again), a saved-empty domain stays empty, a stale array or blob never replaces live data, and no identity blob is written again', () => {
+  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', CORE_IDENTITY_LIVE_MIGRATION, '0006_media_deletions']);
+  assert.deepEqual([...TABLE_BACKED], ['orgs', 'players', 'guardians', 'users', 'sessions']);
   assert.equal(m0005.id, CORE_IDENTITY_LIVE_MIGRATION); assert.equal(m0005.foreignKeysOff, true);
-  const indexSource = fs.readFileSync(path.join(HERE, '..', 'repositories', 'index.mjs'), 'utf8');
-  for (const needle of ['0005', 'core_identity_live', 'identity.mjs', 'createIdentityRepositories', 'coreIdentityRollback']) assert.equal(indexSource.includes(needle), false, `repositories/index.mjs does not mention ${needle}`);
-  const serverSource = fs.readFileSync(path.join(HERE, '..', 'server.mjs'), 'utf8');
-  for (const needle of ['0005_core_identity_live', 'createIdentityRepositories', 'coreIdentityRollback', 'identityLiveTestSchema', 'migrations/0005']) assert.equal(serverSource.includes(needle), false, `server.mjs does not mention ${needle}`);
-  // A normal boot (the data layer as production runs it) on a fresh store.
-  const dir = tempDir('s4-guard'); const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { orgs: ORGS(), users: USERS(), sessions: [], players: [adult()], guardians: [gSignup()], requests: [] };
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  // (a) A genuinely new database: the seed (the in-memory records) is imported once, atomically with the state change.
+  const dir = tempDir('s4-boot'); let store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const seed = () => ({ orgs: ORGS(), users: USERS(), sessions: [], players: [adult(), child('pl-child1', 'gd-primary', '2014-03-03')], guardians: [{ ...gPrimary(), childIds: ['pl-child1'] }, gSignup()], requests: [] });
+  let db = seed();
+  let layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW });
   assert.deepEqual(layer.report().migrations, DATA_MIGRATIONS.map((m) => m.id));
-  assert.equal(migrationApplied(store.sqlite, CORE_IDENTITY_LIVE_MIGRATION), false);
-  assert.equal(isLive(store.sqlite, 'players') || isLive(store.sqlite, 'guardians'), false, 'the S1 shadow definition');
-  assert.equal(Array.isArray(db.players) && db.players[0].id === 'pl-adult', true, 'players stay a plain array (the blob is authoritative)');
+  assert.equal(migrationApplied(store.sqlite, CORE_IDENTITY_LIVE_MIGRATION), true);
+  assert.ok(isLive(store.sqlite, 'players') && isLive(store.sqlite, 'guardians'), 'the live definitions');
+  assert.deepEqual(layer.boot.identity, { engine: 'sqlite', players: 2, guardians: 2, links: 1, imported: 4 });
+  assert.equal(layer.report().identity.initState, 'done');
+  assert.throws(() => { db.players.push({ id: 'x' }); }, /identity repositories/, 'players are a read-only view');
+  assert.throws(() => { db.players = []; }, TypeError);
   store.save({ savedAt: NOW, idCounter: 1000, db });
-  assert.equal(blob(store.sqlite, 'players')[0].id, 'pl-adult', 'and are saved as a blob');
-  store.sqlite.close(); rm(dir);
+  assert.equal(blob(store.sqlite, 'players'), undefined); assert.equal(blob(store.sqlite, 'guardians'), undefined, 'no identity blob is written');
+  assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM guardian_children').get().n, 1);
+  store.sqlite.close();
+  // (b) A restart with the seed in memory again: attached, never imported; a stale extra record is reported and ignored.
+  store = openStore(dir, { tableBacked: TABLE_BACKED });
+  db = { ...store.load().db, ...seed() }; db.players.push({ ...adult(), id: 'pl-stale' });
+  const warnings = [];
+  layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
+  assert.deepEqual(layer.boot.identity, { engine: 'sqlite', players: 2, guardians: 2, links: 1, imported: 0 });
+  assert.equal(db.players.find((p) => p.id === 'pl-stale'), undefined, 'the stale seed record is not resurrected');
+  assert.ok(warnings.some((w) => /players table holds 2 row\(s\).*1 record\(s\) the table does not hold was ignored/.test(w)), JSON.stringify(warnings));
+  store.sqlite.close();
+  // (c) A database whose identity domain was saved EMPTY on purpose stays empty: the seed is never imported into it.
+  const emptyDir = tempDir('s4-boot-empty'); s3File(emptyDir, { players: [], guardians: [] });
+  store = openStore(emptyDir, { tableBacked: TABLE_BACKED });
+  db = { ...store.load().db, players: [adult()], guardians: [gSignup()] };
+  layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  assert.deepEqual(layer.boot.identity, { engine: 'sqlite', players: 0, guardians: 0, links: 0, imported: 0 });
+  assert.equal(layer.report().identity.initState, 'done'); assert.equal(db.players.length, 0);
+  store.sqlite.close();
+  // (d) A migrated database whose blobs are gone (the normal post-cutover file): attach, with the seed in memory, imports nothing.
+  const migratedDir = tempDir('s4-boot-migrated'); s3File(migratedDir);
+  { const s = openRaw(migratedDir); migrate(s, { now: NOW }); assert.equal(blobText(s, 'players'), undefined); s.close(); }
+  store = openStore(migratedDir, { tableBacked: TABLE_BACKED });
+  db = { ...store.load().db, players: [adult()], guardians: [] };
+  layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  assert.deepEqual(layer.boot.identity, { engine: 'sqlite', players: 5, guardians: 3, links: 5, imported: 0 });
+  assert.equal(db.players.find((p) => p.id === 'pl-seeded').name, 'Seeded Adult');
+  store.sqlite.close();
+  rm(dir, emptyDir, migratedDir);
 });
 
 console.log(`\n${passed} core-identity migration checks passed`);

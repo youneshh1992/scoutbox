@@ -56,48 +56,32 @@ test('every index references an existing table', () => {
   assert.deepEqual(bad, []);
 });
 
-// The migrations that implement steps S0–S2 must match the documented DDL.
-// They are applied by the real runner (which owns `meta` and `data_migrations`),
-// exactly as a boot applies them, so a migration that needs the runner's
-// bookkeeping tables is exercised the way it runs in production.
-test('migrations 0001–0003 match the identity section of 01_identity.sql column for column', () => {
+// The registered migrations that implement steps S0–S4a must match the
+// documented DDL column for column and index for index. They are applied by
+// the real runner (which owns `meta` and `data_migrations`), exactly as a boot
+// applies them on a genuinely new database (migration 0005 then finds no saved
+// blobs: a first installation, nothing to import), so a migration that needs
+// the runner's bookkeeping tables is exercised the way it runs in production.
+// players and guardians carry the documented transitional `facets_json`
+// column (S4a); media_deletions (0006) is documented in 08.
+test('the registered migrations 0001–0006 match 01_identity.sql (identity, facets_json included) and 08 (media_deletions) column for column', () => {
   const mig = new DatabaseSync(':memory:');
   mig.exec('PRAGMA foreign_keys = ON;');
-  runDataMigrations(mig, DATA_MIGRATIONS, { log: () => {} });
+  runDataMigrations(mig, DATA_MIGRATIONS, { now: Date.UTC(2026, 9, 11, 12), log: () => {} });
   assert.equal(mig.prepare('SELECT COUNT(*) AS n FROM data_migrations').get().n, DATA_MIGRATIONS.length);
-  for (const t of ['orgs', 'guardians', 'players', 'guardian_children', 'sessions', 'org_users']) {
+  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions']);
+  for (const t of ['orgs', 'guardians', 'players', 'guardian_children', 'sessions', 'org_users', 'media_deletions']) {
     const cols = (d) => d.prepare(`PRAGMA table_info(${t})`).all().map((c) => `${c.name}:${c.type}:${c.notnull}:${c.pk}:${c.dflt_value ?? ''}`);
     assert.deepEqual(cols(mig), cols(docs), `${t} columns`);
-    const idx = (d) => d.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((r) => r.name);
+    const idx = (d) => d.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND name NOT LIKE 'sqlite_%' ORDER BY name").all(t).map((r) => r.name);
     assert.deepEqual(idx(mig), idx(docs), `${t} indexes`);
+    assert.match(mig.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql, /STRICT\s*$/i, `${t} is STRICT in the migrations too`);
   }
-});
-
-// The intended S4a live schema (migration 0005, implemented but NOT registered)
-// is the documented identity DDL plus exactly one transitional column,
-// `facets_json`, on players and guardians — and the registered migrations still
-// leave the three tables as the S1 shadow (no facets_json). Both facts are
-// asserted so the documents, the registered state and the unregistered
-// migration cannot drift apart silently.
-test('migration 0005 (unregistered) matches the identity section of 01_identity.sql plus exactly facets_json on players and guardians; the registered migrations leave the S1 shadow', async () => {
-  const m0005 = await import('../repositories/migrations/0005_core_identity_live.mjs');
-  assert.equal(DATA_MIGRATIONS.includes(m0005), false, 'not registered');
-  const mig = new DatabaseSync(':memory:');
-  mig.exec('PRAGMA foreign_keys = ON;');
-  runDataMigrations(mig, DATA_MIGRATIONS, { log: () => {} });
-  for (const t of ['players', 'guardians']) assert.equal(mig.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === 'facets_json'), false, `${t}: the registered state is the S1 shadow`);
-  runDataMigrations(mig, [...DATA_MIGRATIONS, m0005], { now: Date.UTC(2026, 9, 11, 12), log: () => {} });
-  for (const t of ['guardians', 'players', 'guardian_children']) {
-    const cols = (d) => d.prepare(`PRAGMA table_info(${t})`).all().map((c) => `${c.name}:${c.type}:${c.notnull}:${c.pk}:${c.dflt_value ?? ''}`);
-    const extra = cols(mig).filter((c) => !cols(docs).includes(c));
-    assert.deepEqual(extra, t === 'guardian_children' ? [] : ['facets_json:TEXT:0:0:'], `${t}: the only column the live definition adds`);
-    assert.deepEqual(cols(docs).filter((c) => !cols(mig).includes(c)), [], `${t}: every documented column is present`);
-    const idx = (d) => d.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((r) => r.name);
-    assert.deepEqual(idx(mig), idx(docs), `${t} indexes`);
-  }
-  // The documents say so: the status header names the unregistered migration.
+  for (const t of ['players', 'guardians']) assert.ok(docs.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === 'facets_json'), `${t}: the documented transitional column`);
+  // The documents say so: the status header states that 0005 is registered and the projection retired.
   const header = fs.readFileSync(path.join(SQL_DIR, '01_identity.sql'), 'utf8').split('\n').slice(0, 20).join('\n');
-  assert.match(header, /Migration 0005[\s\S]{0,240}?implemented[\s\S]{0,120}?NOT registered/, 'the status header of 01_identity.sql states that 0005 is implemented but not registered');
+  assert.match(header, /migration 0005[\s\S]{0,160}?REGISTERED/, 'the status header of 01_identity.sql states that 0005 is registered');
+  assert.doesNotMatch(header, /NOT registered/);
 });
 
 console.log(`\n${passed} schema-DDL checks passed (${files.length} files, ${tables.length} tables)`);

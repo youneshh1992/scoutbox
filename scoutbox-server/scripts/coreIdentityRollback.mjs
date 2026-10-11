@@ -28,7 +28,9 @@
 //             6 the first installation's initialisation has not completed (boot
 //               the S4 build once so it completes, or start the pre-S4 build on
 //               a fresh directory — there is no identity data to roll back yet),
-//             7 the initialisation marker is malformed (refused, never guessed).
+//             7 the initialisation marker is malformed (refused, never guessed),
+//             8 media files are still queued for removal (boot the S4 build once so
+//               the queue drains; a pre-S4 build would serve those files again).
 import fs from 'node:fs';
 import path from 'node:path';
 import { rollbackCoreIdentityCopy } from '../repositories/coreIdentityRollback.mjs';
@@ -49,6 +51,7 @@ try {
   if (err?.code === 'NOT_CUT_OVER') { console.error(`refused: ${err.message}`); process.exit(5); }
   if (err?.code === 'INIT_PENDING') { console.error(`refused: ${err.message}`); process.exit(6); }
   if (err?.code === 'INIT_STATE_INVALID') { console.error(`refused: ${err.message}`); process.exit(7); }
+  if (err?.code === 'MEDIA_QUEUE_PENDING') { console.error(`refused: ${err.message}`); process.exit(8); }
   if (err?.code === 'OUTPUT_NOT_EMPTY' || err?.code === 'NO_SOURCE') { console.error(`refused: ${err.message}`); process.exit(1); }
   throw err;
 }

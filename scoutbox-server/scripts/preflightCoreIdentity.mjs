@@ -4,8 +4,8 @@
 // writing the source, or starting a server (migration plan step S4; readiness
 // review §5, §7.1). The source is either a data directory holding scoutbox.db
 // (opened read-only and copied with VACUUM INTO to a temporary file that is
-// deleted afterwards — the established snapshot/tooling contract of
-// scripts/validateShadow.mjs; a read-only open of a WAL-mode file may make
+// deleted afterwards — the established snapshot/tooling contract of the
+// rollback tools; a read-only open of a WAL-mode file may make
 // SQLite create empty -wal/-shm side files next to it, which hold nothing)
 // or a JSON snapshot file ({ db: { players, guardians } } or { players,
 // guardians }) such as a synthetic fixture.
@@ -24,7 +24,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { copyDatabaseReadOnly } from '../repositories/shadowValidate.mjs';
+import { copyDatabaseReadOnly } from '../repositories/database.mjs';
 import { validateCoreIdentity, publicReport, CORE_IDENTITY_LIVE_MIGRATION, PREFLIGHT_STATUS } from '../repositories/identityPreflight.mjs';
 
 const args = process.argv.slice(2);

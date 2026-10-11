@@ -1,9 +1,8 @@
 // S4a, first bounded part: player/guardian mapping, validation and the
 // read-only preflight (repositories/identityMapping.mjs,
 // repositories/identityPreflight.mjs, scripts/preflightCoreIdentity.mjs).
-// Nothing here registers a migration, cuts a collection over, boots a server
-// or touches DATA_DIR: every database is a temporary file or in memory, every
-// record is synthetic. Run with: npm test
+// Nothing here boots a server or touches DATA_DIR: every database is a
+// temporary file or in memory, every record is synthetic. Run with: npm test
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -434,24 +433,21 @@ test('SQL: every player and guardian row of every fixture shape fits the table �
   s.close();
 });
 
-test('SQL: the candidate DDL is the documented identity DDL plus facets_json on players and guardians, nothing else; it is not a registered migration', async () => {
+test('SQL: the candidate DDL (what migration 0005 creates) is exactly the documented identity DDL — facets_json on players and guardians included — and 0005 is the registered cutover', async () => {
   const docs = new DatabaseSync(':memory:');
   docs.exec(fs.readFileSync(path.join(ROOT, 'docs', 'architecture', 'sql', '01_identity.sql'), 'utf8'));
   const cand = memDb();
   const cols = (d, t) => d.prepare(`PRAGMA table_info(${t})`).all().map((c) => `${c.name}:${c.type}:${c.notnull}:${c.pk}:${c.dflt_value ?? ''}`);
   for (const t of ['guardians', 'players', 'guardian_children']) {
     const expected = cols(docs, t); const actual = cols(cand, t);
-    if (t !== 'guardian_children') {
-      assert.equal(actual.at(-1), 'facets_json:TEXT:0:0:', `${t} ends with facets_json`);
-      // players: facets_json sits before the table CHECK in the DDL but is the last column either way.
-      assert.deepEqual(actual.slice(0, -1), expected, `${t} columns`);
-    } else assert.deepEqual(actual, expected);
+    if (t !== 'guardian_children') assert.equal(actual.at(-1), 'facets_json:TEXT:0:0:', `${t} ends with the transitional facets_json column`);
+    assert.deepEqual(actual, expected, `${t} columns`);
     const idx = (d) => d.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND name NOT LIKE 'sqlite_%' ORDER BY name").all(t).map((r) => r.name);
     assert.deepEqual(idx(cand), idx(docs), `${t} indexes`);
     assert.match(cand.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql, /STRICT\s*$/i);
   }
   const { DATA_MIGRATIONS } = await import('../repositories/index.mjs');
-  assert.equal(DATA_MIGRATIONS.some((m) => /0005|core_identity_live/.test(m.id)), false, 'migration 0005 is not registered');
+  assert.equal(DATA_MIGRATIONS.filter((m) => /0005|core_identity_live/.test(m.id)).length, 1, 'migration 0005 is the registered cutover (S4a)');
   assert.throws(() => createCandidateSchema(cand), /already exist/);
   docs.close(); cand.close();
 });

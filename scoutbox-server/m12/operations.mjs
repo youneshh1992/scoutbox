@@ -20,7 +20,7 @@ export function registerOperations(ctx) {
     db, nextId, persist, persistNow, notify, ledgerAppend, broadcast, findPlayer,
     orgRouter, playerRouter, guardianRouter, adminRouter,
     paginate, guardianOwnsChild, orgCanSee, moderateOrRefuse,
-    storage, sessionFor, isBlocked, DATA_DIR,
+    storage, sessionFor, isBlocked, DATA_DIR, players,
   } = ctx;
 
   const usersOf = (orgId) => db.users.filter((u) => u.orgId === orgId && !u.removedAt);
@@ -277,8 +277,8 @@ export function registerOperations(ctx) {
   playerRouter.post('/football-category', (req, res) => {
     const c = req.body?.category;
     if (!['mens', 'womens', 'boys', 'girls', 'mixed', null].includes(c)) return res.status(400).json({ error: 'CATEGORY_INVALID' });
-    req.player.footballCategory = c;
-    persistNow();
+    // S4a: a column-backed field goes through the repository (one row UPDATE, committed before the response).
+    players.update(req.player.id, { footballCategory: c });
     res.json({ footballCategory: c });
   });
 

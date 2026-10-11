@@ -2,15 +2,16 @@
 -- Organisations, staff accounts, guardians, players (with their owned sub-records) and sessions.
 -- Executed first; every other file references these tables. Conventions: docs/architecture/sqlite-schema.md §4.
 -- Status: org_users is LIVE (migration 0001). orgs, guardians, guardian_children, players (scalar part) and
--- sessions are created by migration 0002 as a verified SHADOW of the blob snapshot (plan step S1); sessions is
--- LIVE since migration 0003 (S2) and orgs since 0004 (S3). guardians, players and guardian_children: the
--- REGISTERED state is still the S1 shadow (the blobs are authoritative). Migration 0005 (S4a,
--- repositories/migrations/0005_core_identity_live.mjs) is implemented and tested but NOT registered; it replaces
--- the three shadow definitions with the ones below plus one transitional column on players and guardians,
--- `facets_json TEXT CHECK (json_valid)` (S3's pattern: every field not yet in a column, with the record's shape
--- metadata). That column is added to this file together with the registration, so scripts/testSchemaDdl.mjs keeps
--- matching the registered migrations; until then the test compares 0005 against this file plus exactly that column.
--- The player_* child tables and the remaining columns arrive with step S5.
+-- sessions were created by migration 0002 as a verified SHADOW of the blob snapshot (plan step S1); sessions is
+-- LIVE since migration 0003 (S2), orgs since 0004 (S3), and guardians, players and guardian_children since
+-- migration 0005 (S4a, repositories/migrations/0005_core_identity_live.mjs, REGISTERED: the cutover replaces the
+-- three shadow definitions with the ones below, imports both blobs through the reviewed preflight and retires them;
+-- repositories/identity.mjs owns the rows). players and guardians carry one transitional column, `facets_json TEXT
+-- CHECK (json_valid)` (S3's pattern: every field not yet in a column — the S5 arrays, medical.records,
+-- programme.completed, coGuardians, the outstanding e-mail code, unknown fields — with the record's shape
+-- metadata), shown below and compared with the registered migrations by scripts/testSchemaDdl.mjs. The shadow
+-- projection is retired. The player_* child tables and the remaining columns arrive with step S5, which also
+-- empties facets_json. The media-deletion queue (migration 0006) is in 08_operations_integrations.sql.
 
 -- source: db.orgs  (seed.mjs:15-88; registration server.mjs:1734; T&S org creation m14/review.mjs:382)
 -- owner/writer: server.mjs (core), m14 (verification fields), m13 (mfaRequiredForLeads), m24 (agencySettings → 06)
@@ -122,7 +123,8 @@ CREATE TABLE guardians (
   prefs_school_hours_mute INTEGER CHECK (prefs_school_hours_mute IN (0,1)),
   prefs_timezone          TEXT,
   created_at              INTEGER,
-  deleted_at              INTEGER                         -- new: tombstone (no guardian deletion route exists today)
+  deleted_at              INTEGER,                        -- new: tombstone (no guardian deletion route exists today)
+  facets_json             TEXT CHECK (facets_json IS NULL OR json_valid(facets_json)) -- S4a transitional storage (coGuardians, emailCode, unknown fields, shape metadata)
 ) STRICT;
 CREATE UNIQUE INDEX guardians_email ON guardians (lower(email));   -- new: enforced by code only on signup today
 CREATE INDEX guardians_co_guardian_of ON guardians (co_guardian_of);
@@ -189,6 +191,7 @@ CREATE TABLE players (
   password_hash            TEXT,
   created_at               INTEGER,
   deleted_at               INTEGER,                       -- new: tombstone set by account deletion (see §8 of the schema doc)
+  facets_json              TEXT CHECK (facets_json IS NULL OR json_valid(facets_json)), -- S4a transitional storage (the S5 arrays, medical.records, programme.completed, unknown fields, shape metadata)
   CHECK ((lat IS NULL) = (lng IS NULL))
 ) STRICT;
 CREATE INDEX players_guardian ON players (guardian_id);                      -- guardian child routes (server.mjs:474, 4259)

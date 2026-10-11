@@ -15,6 +15,15 @@
  * inside a transaction, and a failure rolls it back and aborts the boot with
  * the database untouched.
  */
+// node:sqlite is required by the store, which refuses to open without it with
+// a compatibility error (store.mjs, runtime.mjs); this module must stay
+// importable without it so that refusal is what the operator sees.
+let DatabaseSync = null;
+try {
+  ({ DatabaseSync } = await import('node:sqlite'));
+} catch {
+  DatabaseSync = null;
+}
 
 export function runDataMigrations(sqlite, migrations, { now = Date.now(), log = () => {}, context = {} } = {}) {
   sqlite.exec('CREATE TABLE IF NOT EXISTS data_migrations (id TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);');
@@ -54,6 +63,17 @@ export function runDataMigrations(sqlite, migrations, { now = Date.now(), log = 
     log(`data migration applied: ${step.id} — ${step.note}`);
   }
   return { ran, applied: applied.size + ran.length, known: sorted.length };
+}
+
+/**
+ * Open `sourceFile` read-only and write a consistent copy to `targetFile`
+ * (`VACUUM INTO`: whatever the WAL side file holds is in the copy; the source
+ * is never written). Used by every rollback tool and the preflight.
+ */
+export function copyDatabaseReadOnly(sourceFile, targetFile) {
+  if (!DatabaseSync) throw new Error('SQLITE_REQUIRED: node:sqlite is not available in this runtime; nothing was copied');
+  const ro = new DatabaseSync(sourceFile, { readOnly: true });
+  try { ro.exec(`VACUUM INTO '${targetFile.replace(/'/g, "''")}'`); } finally { ro.close(); }
 }
 
 /** Run `fn` inside one transaction; rethrow after rolling back. */

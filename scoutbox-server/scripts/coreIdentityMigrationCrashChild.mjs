@@ -11,6 +11,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations } from '../repositories/database.mjs';
 import { DATA_MIGRATIONS } from '../repositories/index.mjs';
 import * as m0005 from '../repositories/migrations/0005_core_identity_live.mjs';
+// The registered list now includes 0005 (and 0006 after it); the crash is armed on 0005's COMMIT.
 
 const dir = process.argv[2];
 const NOW = Date.UTC(2026, 9, 11, 12);
@@ -28,5 +29,5 @@ sqlite.exec = (sql) => {
   }
   return exec(sql);
 };
-runDataMigrations(sqlite, [...DATA_MIGRATIONS, m0005], { now: NOW, context: { sessionTtlMs: 30 * 86_400_000 } });
+runDataMigrations(sqlite, DATA_MIGRATIONS, { now: NOW, context: { sessionTtlMs: 30 * 86_400_000 } });
 process.stdout.write('SURVIVED\n');

@@ -214,10 +214,18 @@ export function createStorage(dataDir) {
       }
       return null;
     },
+    /**
+     * Remove the file(s) stored under `id`. Returns how many were removed (0:
+     * nothing was there, which the deletion queue treats as done) and THROWS
+     * on any error other than "absent", so a permission or I/O problem keeps
+     * the queue entry and is retried — never cleared by mistake.
+     */
     delete(id) {
+      let removed = 0;
       for (const ext of ['webm', 'mp4', 'bin']) {
-        try { fs.unlinkSync(path.join(mediaDir, `${id}.${ext}`)); } catch { /* absent is fine */ }
+        try { fs.unlinkSync(path.join(mediaDir, `${id}.${ext}`)); removed += 1; } catch (err) { if (err?.code !== 'ENOENT') throw err; }
       }
+      return removed;
     },
   };
 }

@@ -1,9 +1,10 @@
 // The player and guardian repositories (repositories/identity.mjs), exercised
-// against the INTENDED live schema on temporary databases and against the
-// store's real unit of work. Nothing here registers a migration, attaches the
-// repositories to server boot, or touches DATA_DIR: scripts/identityLiveTestSchema.mjs
-// prepares each temporary database the way migration 0005 will. Synthetic
-// records only; the clock is fixed where age matters. Run with: npm test
+// on temporary databases through the real data layer (attachDataLayer runs the
+// registered migrations, 0005 included, and attaches the repositories as the
+// store's unit-of-work participant) and, for the authority checks, on raw
+// connections prepared by scripts/identityLiveTestSchema.mjs. Nothing here
+// touches DATA_DIR. Synthetic records only; the clock is fixed where age
+// matters. Run with: npm test
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -72,35 +73,26 @@ const ORGS = () => [{ id: 'org-pro', name: 'Eastport FC', type: 'club', level: '
 const baseDb = (players, guardians) => ({ orgs: ORGS(), users: [{ id: 'usr-1', orgId: 'org-pro', name: 'Maria', role: 'Head of Recruitment', createdAt: 1 }], sessions: [], players, guardians, requests: [{ id: 'req-1', status: 'pending', history: [] }] });
 
 /**
- * A store in server mode with players and guardians table-backed (the store's generic
- * option, not a change to TABLE_BACKED), the data layer attached, the live identity
- * schema and markers prepared explicitly, and the identity repositories as the
- * store's unit-of-work participant. `init: 'pending'` initialises from the fixture.
+ * A store in server mode on a NEW directory with the data layer attached the way
+ * the server attaches it: the registered migrations run (0005 finds nothing saved:
+ * a first installation, initialisation pending), the identity repositories
+ * initialise from the fixture once and become the store's unit-of-work participant.
  */
-function boot(dir, { players = [], guardians = [], init = 'pending', warnings = [] } = {}) {
+function boot(dir, { players = [], guardians = [], warnings = [] } = {}) {
   const db = baseDb(clone(players), clone(guardians));
-  const store = openStore(dir, { tableBacked: [...TABLE_BACKED, 'players', 'guardians'] });
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  prepareLiveIdentitySchema(store.sqlite, { initState: init, now: NOW });
-  const identity = createIdentityRepositories({ sqlite: store.sqlite, unit: store.unit, now: () => NOW, warn: (m) => warnings.push(m) });
-  const bootResult = init === 'pending' ? identity.initialize({ players: db.players, guardians: db.guardians }, { now: NOW }) : identity.attach(db.players, db.guardians);
-  return wire({ store, layer, identity, db, bootResult, warnings });
+  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
+  return wire({ store, layer, identity: layer.identity, db, bootResult: layer.boot.identity, warnings });
 }
-/** Reopen an existing directory the way a restart would: load blobs, attach the data layer, attach the repositories (never import). */
+/** Reopen an existing directory the way a restart would: load, attach the data layer (the repositories attach to the tables; the arrays in memory are never imported). */
 function reopen(dir, { stalePlayers = null, staleGuardians = null, warnings = [] } = {}) {
-  const store = openStore(dir, { tableBacked: [...TABLE_BACKED, 'players', 'guardians'] });
+  const store = openStore(dir, { tableBacked: TABLE_BACKED });
   const loaded = store.load();
-  const db = { ...loaded.db };
-  if (stalePlayers) db.players = stalePlayers; if (staleGuardians) db.guardians = staleGuardians;
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  const identity = createIdentityRepositories({ sqlite: store.sqlite, unit: store.unit, now: () => NOW, warn: (m) => warnings.push(m) });
-  const bootResult = identity.attach(db.players, db.guardians);
-  return wire({ store, layer, identity, db, bootResult, warnings });
+  const db = { ...loaded.db, players: stalePlayers ?? [], guardians: staleGuardians ?? [] };
+  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
+  return wire({ store, layer, identity: layer.identity, db, bootResult: layer.boot.identity, warnings });
 }
 function wire({ store, layer, identity, db, bootResult, warnings }) {
-  Object.defineProperty(db, 'players', { value: identity.players.view, writable: false, configurable: false, enumerable: true });
-  Object.defineProperty(db, 'guardians', { value: identity.guardians.view, writable: false, configurable: false, enumerable: true });
-  store.setSaveHook(identity.saveHook());
   const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
   store.save(snapshot());
   const raw = (sql, ...p) => store.sqlite.prepare(sql).get(...p);
@@ -116,7 +108,8 @@ function wire({ store, layer, identity, db, bootResult, warnings }) {
   return { store, layer, identity, players: identity.players, guardians: identity.guardians, db, snapshot, raw, all, blob, facets, links, invariantBreaks, bootResult, warnings,
     unit: (fn) => store.unitOfWork(fn, { snapshot }), close: () => store.sqlite.close() };
 }
-const freshShadowDb = () => { const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;'); runDataMigrations(s, DATA_MIGRATIONS); return s; };
+// An S3-shaped in-memory database (migrations 0001–0004: the identity tables are the S1 shadow), for the authority checks.
+const freshShadowDb = () => { const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;'); runDataMigrations(s, DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id))); return s; };
 
 // ------------------------------------------------------------------ authority and initialisation
 test('authority: the repositories attach only behind the cutover record, refuse the S1 shadow tables even with the record, never load at construction, and initialisation is explicit state — pending initialises once and atomically, done attaches and never imports', () => {
@@ -152,7 +145,7 @@ test('authority: the repositories attach only behind the cutover record, refuse 
   assert.ok(warnings.some((w) => /players table holds 4 row\(s\).*1 record\(s\) the table does not hold was ignored/.test(w)), JSON.stringify(warnings));
   s.close();
   // An intentionally empty authoritative domain stays empty: pending + empty initialisation → done; later attaches with stale arrays import nothing.
-  const e = new DatabaseSync(':memory:'); e.exec('PRAGMA foreign_keys = ON;'); runDataMigrations(e, DATA_MIGRATIONS); prepareLiveIdentitySchema(e, { initState: 'pending', now: NOW });
+  const e = freshShadowDb(); prepareLiveIdentitySchema(e, { initState: 'pending', now: NOW });
   const empty = createIdentityRepositories({ sqlite: e, now: () => NOW });
   assert.deepEqual((({ players, guardians, links }) => ({ players, guardians, links }))(empty.initialize({ players: [], guardians: [] }, { now: NOW })), { players: 0, guardians: 0, links: 0 });
   assert.equal(empty.initState(), 'done');
@@ -470,15 +463,24 @@ test('unit of work: a process killed before COMMIT leaves the pre-operation data
   again.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('production stays unchanged: the identity repositories are not created by the data layer, players and guardians are not table-backed, migration 0005 exists but is not registered, and the test schema helper is not a migration module', async () => {
-  assert.equal(TABLE_BACKED.includes('players') || TABLE_BACKED.includes('guardians'), false);
-  assert.equal(DATA_MIGRATIONS.some((m) => /0005|core_identity_live/.test(m.id)), false);
+test('integration: the data layer creates the identity repositories behind the registered migration 0005, players and guardians are table-backed, the test schema helper matches what 0005 leaves behind, and server.mjs reaches the repositories only through the data layer', () => {
+  assert.deepEqual([...TABLE_BACKED], ['orgs', 'players', 'guardians', 'users', 'sessions']);
+  assert.equal(DATA_MIGRATIONS.filter((m) => m.id === CORE_IDENTITY_LIVE_MIGRATION).length, 1);
   const indexSource = fs.readFileSync(path.join(HERE, '..', 'repositories', 'index.mjs'), 'utf8');
-  assert.equal(indexSource.includes('identity.mjs') || indexSource.includes('createIdentityRepositories') || indexSource.includes('0005'), false, 'repositories/index.mjs does not create them and does not register the migration');
+  assert.ok(indexSource.includes('createIdentityRepositories') && indexSource.includes('0005_core_identity_live'), 'repositories/index.mjs creates them and registers the migration');
   const serverSource = fs.readFileSync(path.join(HERE, '..', 'server.mjs'), 'utf8');
-  assert.equal(serverSource.includes('createIdentityRepositories') || serverSource.includes('identityLiveTestSchema') || serverSource.includes('0005_core_identity_live'), false, 'server.mjs does not reach them');
-  // The real migration module exists (scripts/testCoreIdentityMigration.mjs exercises it through the runner) and is reached only by explicit tests.
-  assert.equal(fs.existsSync(path.join(HERE, '..', 'repositories', 'migrations', '0005_core_identity_live.mjs')), true);
+  assert.equal(serverSource.includes('createIdentityRepositories') || serverSource.includes('identityLiveTestSchema'), false, 'server.mjs takes the repositories from the data layer and never reaches the test helper');
+  assert.ok(/const \{[^}]*players, guardians, identity[^}]*\} = dataLayer;/.test(serverSource), 'server.mjs destructures players, guardians and identity from the data layer');
+  // The test helper (used by the raw-connection checks above) leaves the same schema as the real migration on a first installation.
+  const real = new DatabaseSync(':memory:'); real.exec('PRAGMA foreign_keys = ON;'); runDataMigrations(real, DATA_MIGRATIONS, { now: NOW });
+  const helper = freshShadowDb(); prepareLiveIdentitySchema(helper, { initState: 'pending', now: NOW });
+  for (const t of ['guardians', 'players', 'guardian_children']) {
+    const cols = (d) => d.prepare(`PRAGMA table_info(${t})`).all().map((c) => `${c.name}:${c.type}:${c.notnull}:${c.pk}:${c.dflt_value ?? ''}`);
+    assert.deepEqual(cols(helper), cols(real), `${t}: the helper's columns are the migration's`);
+  }
+  assert.equal(real.prepare('SELECT value FROM meta WHERE key = ?').get(CORE_IDENTITY_INIT_META).value, 'pending', 'a first installation is pending until the data layer initialises it');
+  assert.equal(helper.prepare('SELECT value FROM meta WHERE key = ?').get(CORE_IDENTITY_INIT_META).value, 'pending');
+  real.close(); helper.close();
   assert.equal(CORE_IDENTITY_INIT_META, 'coreIdentityInit'); assert.match(MINOR_WITHOUT_LINK_REASON, /Founder's decision/);
 });
 

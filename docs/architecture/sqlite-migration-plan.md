@@ -981,6 +981,57 @@ performance, existing tests, what this plan is not).
 > compares 0005 against the file plus exactly that column), production backup/restore
 > integration (the snapshot dispatcher does not know the two tables), and the media-deletion
 > handling; O1 remains the Founder's decision; S4b and S5 are not started.
+>
+> **S4a, fourth part — the live cutover integrated: DONE (this commit). S4a complete.**
+> Migration `0005_core_identity_live` is **registered** (`DATA_MIGRATIONS` is 0001–0006;
+> `0006_media_deletions` creates the media-removal queue) and `TABLE_BACKED` is `orgs`,
+> `players`, `guardians`, `users`, `sessions`. `attachDataLayer` attaches the identity
+> repositories between the organisations and the staff (initialises from the seed once while
+> `meta.coreIdentityInit` is `pending`, attaches and never imports otherwise), defines the
+> read-only views and registers the save-hook participant; the S1 shadow projection, its
+> store savepoint, `scripts/validateShadow.mjs`, `SCOUTBOX_SHADOW_VALIDATION` and the
+> `shadow` report are removed. The store's snapshot-presence signal is explicit
+> (`meta.savedAt` / `saveSeq`, never a `players` blob), `loadSnapshot` refuses a `players`
+> collection that is not an array (`SNAPSHOT_INVALID`) and never seeds over a saved file. The
+> snapshot dispatcher reads and writes the identity pair as ONE coupled operation
+> (`IDENTITY_SNAPSHOT`: both collections or neither; a malformed collection, an invalid record,
+> a dangling relationship or a legacy minor without a link rejects the whole save; explicit
+> empty arrays are intentional; players are pruned before guardians). Every writer of §2.3 of
+> the readiness review goes through `players.update` / `guardians.update` (server routes, m12's
+> football category, m13's level review, m29's level / contract status / availability) and the
+> multi-collection operations run in `store.unitOfWork` (sign-up with the session, child
+> creation with its link, e-mail verification, the co-guardian invitation, aging-up, the admin
+> ID review, the level review with its ledger row, the signing completion — the hand-written
+> snapshot/restore replaced by the unit, a `SigningAbort` refusal rolls back and the success-fee
+> invoice is issued after COMMIT — and deletion: row, links, every session, the media-removal
+> entries and the blob tombstones). `views/playerViews.mjs` holds the §6 allowlists (clubs,
+> grassroots, guardians, players, Trust & Safety; attendance GPS, other clubs' reports, prefs
+> and import claims never reach a club; the admin guardian response carries no hash and no
+> code; the shortlist reader skips a deleted player). The crash-safe media-deletion queue
+> (`repositories/mediaDeletions.mjs`) is written inside the deletion's transaction, processed
+> after COMMIT, at boot and once a minute, cleared only once the file is gone or absent, and
+> `/media/:id` answers 404 for a queued id; the rollback tool knows migration 0006, refuses a
+> non-empty queue (exit 8) and drops the table on an empty one. `01_identity.sql` carries
+> `facets_json`; `08_operations_integrations.sql` carries `media_deletions`; `testSchemaDdl.mjs`
+> compares every registered migration with the documents. Verified on the real server
+> (`scripts/testCoreIdentityServer.mjs`: a new installation, a previously saved file, an
+> intentionally empty domain, an interrupted first installation, a migrated file without blobs,
+> stale blobs, malformed input and the legacy-minor refusal — each restarted; the writers through
+> their routes and after a restart; the allowlists on actual responses; deletion with a stuck
+> file, 404 while queued, the rollback refusal, the boot retry; `POST /admin/backup` restored
+> into a fresh directory with every link, code and session hash), against the real previous
+> build (detached worktree at `c1d868e`: rollback copy booted there, sessions and the
+> outstanding code valid, a write made there re-upgraded by this build; log in the handoff), by
+> the five independent review scripts unchanged (all pass), by `npm test` on Node 22.22.2 and on
+> the real 22.16.0 binary, and by the 48-suite battery (43 green as run; five suites adapted to
+> the activation — the three `under_contract` drift guards now recognise the repository form, a
+> hardening fixture that planted an unreadable date of birth through the snapshot asserts the
+> refusal instead, a temporal probe sends `foot: 'right'` because a sign-up with a value the
+> column refuses is now `400 PLAYER_INVALID` — all green on re-run; `m182E2E` keeps its two
+> baseline client-source failures). **Not part of S4a and still open:** O1 (`s4-deletion-decision.md`),
+> S4b, the hashing of the e-mail code (S6), S5. No real data was touched; registration in source
+> is development work, not authorization for a real-data cutover (operator procedure:
+> `scoutbox-server/OPERATIONS.md`, "Players and guardians").
 
 - **Objective.** `guardians`, `players` (scalar columns) and `guardian_children` live. The
   player and guardian repositories expose typed reads: by id, by guardian, the paginated

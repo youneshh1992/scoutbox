@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { copyDatabaseReadOnly } from './shadowValidate.mjs';
+import { copyDatabaseReadOnly } from './database.mjs';
 import { SESSIONS_CUTOVER_MIGRATION } from './sessions.mjs';
 
 /** The schema steps this tool understands; any other recorded id is a later step it must not touch. */

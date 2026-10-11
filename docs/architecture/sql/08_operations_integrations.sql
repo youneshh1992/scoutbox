@@ -942,6 +942,25 @@ CREATE TABLE ops_settings (
   updated_at INTEGER NOT NULL
 ) STRICT;
 
+-- ---------------------------------------------------------------------
+-- media_deletions — LIVE since migration 0006 (S4a, repositories/migrations/0006_media_deletions.mjs;
+--   repositories/mediaDeletions.mjs). The crash-safe queue of media FILES to remove after a player deletion
+--   commits: deletePlayerData (server.mjs) queues one row per media id INSIDE the deletion's unit of work, the
+--   server processes the queue after COMMIT, at boot and every sweep; a row goes only once the file was deleted
+--   or was already absent (a failed attempt keeps the row with attempts/last_error). While a row exists the media
+--   id is never served. No foreign key: the player row is gone by the time the queue is read. The S4a rollback
+--   tool refuses a copy whose queue is not empty and drops the table (with this record) when it is.
+-- ---------------------------------------------------------------------
+CREATE TABLE media_deletions (
+  media_id        TEXT PRIMARY KEY,
+  player_id       TEXT,
+  queued_at       INTEGER NOT NULL,
+  attempts        INTEGER NOT NULL DEFAULT 0,
+  last_attempt_at INTEGER,
+  last_error      TEXT
+) STRICT;
+CREATE INDEX media_deletions_queued ON media_deletions (queued_at);
+
 
 -- =====================================================================
 -- not tables:

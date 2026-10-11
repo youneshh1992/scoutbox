@@ -113,14 +113,6 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
   const upsertMeta = sqlite.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
   const readSaveSeq = sqlite.prepare('SELECT value FROM meta WHERE key = ?');
 
-  // Server mode only: an optional projection the data layer registers
-  // (repositories/shadow.mjs) when shadow validation is enabled. It runs
-  // inside every save transaction, in a savepoint of its own, so a projection
-  // failure is recorded and rolled back without touching the blob save. With
-  // no projection registered (the default) a save is exactly the S0 path.
-  let projection = null;
-  let projectionFailures = 0;
-  let lastProjectionError = null;
   // Server mode only: save hooks the data layer registers. `flush` runs inside
   // every save transaction, before the blob rows are written, so a repository
   // that keeps part of its records in memory between saves (the organisations'
@@ -195,18 +187,6 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
     // it was taken from: wall-clock savedAt can repeat, this cannot.
     const saveSeq = (Number(readSaveSeq.get('saveSeq')?.value) || 0) + 1;
     upsertMeta.run('saveSeq', String(saveSeq));
-    if (!asSnapshot && projection) {
-      sqlite.exec('SAVEPOINT shadow');
-      try {
-        projection({ ...snapshot, saveSeq });
-        sqlite.exec('RELEASE shadow');
-      } catch (err) {
-        sqlite.exec('ROLLBACK TO shadow');
-        sqlite.exec('RELEASE shadow');
-        projectionFailures += 1;
-        lastProjectionError = { at: Date.now(), message: String(err?.message ?? err).slice(0, 200) };
-      }
-    }
   }
 
   /**
@@ -362,17 +342,19 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
   const store = {
     engine: 'sqlite',
     sqlite,
-    setProjection(fn) { projection = typeof fn === 'function' ? fn : null; },
     /** Register a save hook `{ flush, commit?, rollback? }` (or a bare flush function) for every server-mode save transaction (see `hooks`). */
     setSaveHook(hook) {
       if (typeof hook === 'function') hooks.push({ flush: hook });
       else if (hook && typeof hook.flush === 'function') hooks.push(hook);
       else throw new TypeError('a save hook is { flush, commit?, rollback? } or a flush function');
     },
-    projectionState: () => ({ enabled: projection !== null, failures: projectionFailures, lastError: lastProjectionError }),
     load() {
       const rows = sqlite.prepare('SELECT name, value FROM collections').all();
-      if (rows.length === 0) {
+      // "Never saved" is the absence of blob rows AND of a save record: since
+      // S4a every core collection can live in a table, so a database whose
+      // only collections are table-backed has no blob row at all yet was saved.
+      const everSaved = !!sqlite.prepare('SELECT 1 FROM meta WHERE key IN (?, ?) LIMIT 1').get('savedAt', 'saveSeq');
+      if (rows.length === 0 && !everSaved) {
         // One-time import of the pre-SQLite JSON snapshot, then retire the
         // file. EVERY collection the JSON holds is written into the database
         // first — table-backed ones included, as blobs when their domain has

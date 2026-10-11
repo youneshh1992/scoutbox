@@ -21,7 +21,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { copyDatabaseReadOnly } from './shadowValidate.mjs';
+import { copyDatabaseReadOnly } from './database.mjs';
 import { ORGS_CUTOVER_MIGRATION, ORGS_INIT_META, fromRow } from './orgs.mjs';
 
 /** The S1 shadow definition of `orgs` (migration 0002), which the pre-S3 build expects. */

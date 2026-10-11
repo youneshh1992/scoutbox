@@ -448,7 +448,8 @@ server = await boot();
 
 section('Q/live — sign-up: every bad date of birth refused at the door, both doors');
 {
-  const signup = (dob) => j('POST', '/auth/player/signup', { name: `Probe ${Math.random().toString(36).slice(2, 6)}`, dob, country: 'GB', position: 'ST', foot: 'Right', password: 'a-long-enough-password' });
+  // (S4a: `foot` is a column with CHECK (left|right|null); a sign-up with any other value is refused 400 PLAYER_INVALID, so the probe sends the valid form.)
+  const signup = (dob) => j('POST', '/auth/player/signup', { name: `Probe ${Math.random().toString(36).slice(2, 6)}`, dob, country: 'GB', position: 'ST', foot: 'right', password: 'a-long-enough-password' });
   for (const dob of ['2000-02-30', '1999-04-31', '1997-02-29', '1998-13-01', '1998-00-10', '1998-01-00', '1998-01-32', '02/03/1998']) neg(expect(await signup(dob), 400, 'DOB_INVALID'), `Q1 self sign-up with dob ${dob} → 400 DOB_INVALID`);
   neg(expect(await signup('2030-01-01'), 400, 'DOB_INVALID'), 'Q1b a date of birth in the future → 400 DOB_INVALID (§24)');
   neg(expect(await signup('1890-01-01'), 400, 'DOB_INVALID'), 'Q1c a 136-year-old → 400 DOB_INVALID (§24)');

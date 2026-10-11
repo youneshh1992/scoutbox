@@ -103,13 +103,13 @@ export function buildCapabilityReport({ env = process.env, rateLimit = null, pro
       // attempts, sharing links) key on it, so a deployment behind a proxy
       // that leaves this unset has effectively one shared client.
       proxy_trust: { state: proxy.state, note: proxy.note },
-      // Data-layer migration aid (plan step S1). Off by default because the
-      // projection rewrites five tables inside every snapshot save.
-      shadow_validation: {
-        state: env.SCOUTBOX_SHADOW_VALIDATION === '1' ? 'enabled' : 'disabled',
-        note: env.SCOUTBOX_SHADOW_VALIDATION === '1'
-          ? 'The core identity shadow tables are re-projected from the snapshot inside every save; the snapshot remains the source of truth.'
-          : 'Saves do not touch the core identity shadow tables; run scripts/validateShadow.mjs against a copy of the database for a reconciliation.',
+      // The data layer (plan steps S0–S4a): staff, sessions, organisations,
+      // players, guardians and their links are live tables owned by
+      // repositories; the S1 shadow projection is retired. Counts and states
+      // are on /capabilities → dataLayer, never subjects.
+      core_identity_storage: {
+        state: 'live',
+        note: 'Players, guardians and guardian–child links are table-backed (migration 0005); writes go through the identity repositories and multi-domain operations run inside the store\'s unit of work. The rollback is scripts/coreIdentityRollback.mjs on a copy.',
       },
     },
     ...extra,

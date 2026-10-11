@@ -789,13 +789,19 @@ section('M — minors through the chain; malformed DOB fails closed (§23, §24)
   neg(s.status === 200 && (gInbox ?? []).some((r) => r.type === 'contact') && !(kInbox ?? []).some((r) => r.orgId === 'org-eastport' && r.type === 'contact' && r.routedTo === 'player'), 'M2 a Contact to a minor routes to the guardian, never to the child');
   const gj = await j('GET', '/guardian/children/pl-guni/journeys', undefined, amara.token);
   neg(gj.status === 200 && !has(gj.body, 'offer') || gj.status === 200, 'M4 the guardian\'s view of the child carries no Offer (none may exist)');
-  // A minor with a malformed DOB is still a minor to every route.
-  await offline((db) => { const p = db.players.find((x) => x.id === 'pl-guni'); p.dob = 'not-a-date'; });
+  // S4a: a malformed DOB can no longer be STORED. Players are table-backed and the snapshot write validates every
+  // record, so the offline edit that used to plant `dob: 'not-a-date'` is refused as a whole (the save rolls back
+  // naming the player and the field; the stored record stays the readable minor it was). The route-level claims
+  // (an unreadable age is never an adult) are kept by the sign-up refusals of §24 and by the wall below.
+  await down(server, 'SIGTERM');
+  let refusal = null;
+  { const store = openStore(DATA_DIR); const snap = store.load(); snap.db.players.find((x) => x.id === 'pl-guni').dob = 'not-a-date'; try { store.save({ ...snap, db: snap.db }); } catch (e) { refusal = e; } store.sqlite.close(); }
+  server = await boot(); await relogin();
+  neg(/players pl-guni: dob is not a valid YYYY-MM-DD date/.test(String(refusal?.message)) && (await j('GET', '/guardian/children', undefined, amara.token)).body.find((k) => k.id === 'pl-guni')?.dob === '2012-02-10', 'M8a (S4a) a malformed DOB cannot be stored: the snapshot save is refused naming the player and the field, the stored date is unchanged');
   const wall2 = await j('GET', '/org/players/pl-guni', undefined, alex.token);
-  neg(wall2.status === 403 && wall2.body?.error === 'UNDER_18_WALL', 'M8 a malformed DOB: still the wall for an agency (unknown is not adult)');
+  neg(wall2.status === 403 && wall2.body?.error === 'UNDER_18_WALL', 'M8 the wall for an agency holds (the minor is still a minor)');
   const av = await j('POST', '/player/availability', { availability: 'available_now' }, P['pl-guni'].token);
-  neg(av.status === 403 || av.status === 401, `M9 a guardian-managed minor with a malformed DOB cannot act as an adult (${av.status})`);
-  await offline((db) => { const p = db.players.find((x) => x.id === 'pl-guni'); p.dob = '2012-02-10'; });
+  neg(av.status === 403 || av.status === 401, `M9 a guardian-managed minor cannot act as an adult (${av.status})`);
   // Guardian block names its child (D-P81-7).
   const wrong = await j('POST', '/guardian/block', { orgId: 'org-harbour', playerId: 'pl-adeyemi' }, amara.token);
   neg(expect(wrong, 404, 'CHILD_NOT_FOUND'), 'M13 a guardian block naming another guardian\'s child: CHILD_NOT_FOUND');

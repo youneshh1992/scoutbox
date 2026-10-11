@@ -63,11 +63,12 @@ test('schema report: names tables and counts, never rows', () => {
   runDataMigrations(s, DATA_MIGRATIONS);
   const report = dataSchemaReport(s, DATA_MIGRATIONS);
   // The table list grows with every migration (0001 org_users; 0002 the five
-  // core identity shadow tables); the report must list exactly what exists.
+  // core identity tables, live one domain at a time; 0006 the media-deletion
+  // queue); the report must list exactly what exists.
   assert.deepEqual(report, {
     engine: 'sqlite', migrationsApplied: DATA_MIGRATIONS.length, migrationsKnown: DATA_MIGRATIONS.length,
-    migrations: ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live'],
-    tables: ['guardian_children', 'guardians', 'org_users', 'orgs', 'players', 'sessions'],
+    migrations: ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions'],
+    tables: ['guardian_children', 'guardians', 'media_deletions', 'org_users', 'orgs', 'players', 'sessions'],
   });
   // There is no in-memory engine to report on: a missing connection is a programming error, not a mode.
   assert.throws(() => dataSchemaReport(null, DATA_MIGRATIONS), /needs a SQLite connection/);
@@ -208,31 +209,37 @@ test('repository: without sqlite there is no in-memory mode — construction ref
 test('attachDataLayer: db.users becomes the repository view and cannot be replaced', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-layer-'));
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { players: [], orgs: [ORG_O], users: [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }] };
+  const db = { players: [], guardians: [], orgs: [ORG_O], users: [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }] };
   const layer = attachDataLayer({ db, store, nextId, persist: () => {} });
   assert.deepEqual(layer.boot.users, { engine: 'sqlite', loaded: 1, imported: 1 });
   assert.equal(db.users.length, 1);
   assert.throws(() => { db.users = []; }, TypeError);
   assert.throws(() => { db.users.push({}); }, /repositories/);
   assert.equal(layer.report().domains.users.rows, 1);
-  // org_users is live; the five core identity tables exist as the S1 shadow,
-  // whose projection is off unless asked for.
-  assert.deepEqual(layer.report().tables, ['guardian_children', 'guardians', 'org_users', 'orgs', 'players', 'sessions']);
-  assert.equal(layer.report().shadow.enabled, false);
-  assert.equal(layer.report().shadow.status, 'never');
+  // Every core identity table is live (S0–S4a) and the media-deletion queue exists; there is no shadow to report.
+  assert.deepEqual(layer.report().tables, ['guardian_children', 'guardians', 'media_deletions', 'org_users', 'orgs', 'players', 'sessions']);
+  assert.equal('shadow' in layer.report(), false, 'the projection is retired');
+  assert.deepEqual(layer.report().identity, { initState: 'done', uncommittedFacets: 0 });
+  assert.deepEqual(layer.report().mediaDeletions, { queued: 0 });
+  for (const name of ['players', 'guardians']) {
+    assert.throws(() => { db[name] = []; }, TypeError, `${name} cannot be replaced`);
+    assert.throws(() => { db[name].push({ id: 'x' }); }, /repositories/, `${name} is a read-only view`);
+  }
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 test('store (server mode): a table-backed collection is never written as a blob again, and a stale blob row is deleted on the next save', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-store-'));
   let store = openStore(dir);
-  store.save({ savedAt: 1, idCounter: 1000, db: { players: [{ id: 'p' }], users: [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }] } });
+  // (A snapshot that carries players carries guardians: the identity pair is coupled, see checkTableBackedShapes.)
+  store.save({ savedAt: 1, idCounter: 1000, db: { players: [{ id: 'p' }], guardians: [], users: [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }] } });
+  assert.throws(() => store.save({ savedAt: 1, idCounter: 1000, db: { players: [{ id: 'p' }], users: [] } }), /players: a snapshot that carries players must carry guardians too/);
   store.sqlite.close();
   store = openStore(dir, { tableBacked: ['users'] });
   const loaded = store.load();
   assert.equal(loaded.db.users.length, 1, 'the old blob is still handed back for the one-time import');
-  store.save({ savedAt: 2, idCounter: 1001, db: { players: [{ id: 'p' }], users: [{ id: 'usr-1' }] } });
+  store.save({ savedAt: 2, idCounter: 1001, db: { players: [{ id: 'p' }], guardians: [], users: [{ id: 'usr-1' }] } });
   const names = store.sqlite.prepare('SELECT name FROM collections ORDER BY name').all().map((r) => r.name);
-  assert.deepEqual(names, ['players']);
+  assert.deepEqual(names, ['guardians', 'players']);
   assert.equal(store.load().db.users, undefined);
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -240,37 +247,41 @@ test('store (snapshot mode): load merges table-backed collections in from their 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-snap-'));
   // A server boot: the table exists and holds one row; the blob is gone.
   const server = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { players: [{ id: 'p' }], orgs: [ORG_O], users: [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }] };
+  const PLAYER = { id: 'p', name: 'P', dob: '2001-01-01', country: 'GB', medical: { shared: false, records: [], conditionStatus: 'unknown' } };
+  const db = { players: [PLAYER], guardians: [], orgs: [ORG_O], users: [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }], notes: [{ id: 'n1' }] };
   attachDataLayer({ db, store: server, nextId, persist: () => {} });
   server.save({ savedAt: 1, idCounter: 1000, db });
   server.sqlite.close();
-  // A tool reading the file as one snapshot sees the staff rows as before.
+  // A tool reading the file as one snapshot sees the staff rows as before, and the players from their table (S4a).
   const tool = openStore(dir);
   const snap = tool.load();
   assert.deepEqual(snap.db.users, [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }]);
-  assert.deepEqual(snap.db.players, [{ id: 'p' }]);
+  assert.deepEqual(snap.db.players, [PLAYER]);
+  assert.deepEqual(snap.db.guardians, []);
   // Writing a changed snapshot lands in the table, not in a blob.
   snap.db.users.push({ id: 'usr-2', orgId: 'o', name: 'B', role: 'Manager', createdAt: 2, mfa: { secretB32: 'S', enabledAt: 3, recoveryHashes: [] } });
   snap.db.users[0].role = 'Director';
   tool.save(snap);
-  assert.deepEqual(tool.sqlite.prepare('SELECT name FROM collections ORDER BY name').all().map((r) => r.name), ['players']);
+  assert.deepEqual(tool.sqlite.prepare('SELECT name FROM collections ORDER BY name').all().map((r) => r.name), ['notes'], 'players, guardians, orgs, users and sessions are tables; only the other collections are blobs');
   assert.deepEqual(tool.sqlite.prepare('SELECT id, role, mfa_json FROM org_users ORDER BY rowid').all().map((r) => ({ ...r })),
     [{ id: 'usr-1', role: 'Director', mfa_json: null }, { id: 'usr-2', role: 'Manager', mfa_json: '{"secretB32":"S","enabledAt":3,"recoveryHashes":[]}' }]);
   tool.sqlite.close();
   // And the next server boot reads exactly that.
   const again = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db2 = { players: [], users: [] };
+  const db2 = { players: [], guardians: [], users: [] };
   const layer = attachDataLayer({ db: db2, store: again, nextId, persist: () => {} });
   assert.deepEqual(layer.boot.users, { engine: 'sqlite', loaded: 2, imported: 0 });
   assert.equal(db2.users[0].role, 'Director');
   assert.equal(db2.users[1].mfa.enabledAt, 3);
+  assert.deepEqual(layer.boot.identity, { engine: 'sqlite', players: 1, guardians: 0, links: 0, imported: 0 }, 'the player row attached from the table; the empty array in memory imported nothing');
+  assert.equal(db2.players[0].name, 'P');
   again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 test('store (snapshot mode): before any boot there is no table, so a fixture is written as a blob and imported by the first boot', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-fixture-'));
   const tool = openStore(dir);
-  tool.save({ savedAt: 1, idCounter: 1000, db: { players: [], orgs: [ORG_O], users: [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }] } });
-  assert.deepEqual(tool.sqlite.prepare('SELECT name FROM collections ORDER BY name').all().map((r) => r.name), ['orgs', 'players', 'users']);
+  tool.save({ savedAt: 1, idCounter: 1000, db: { players: [], guardians: [], orgs: [ORG_O], users: [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }] } });
+  assert.deepEqual(tool.sqlite.prepare('SELECT name FROM collections ORDER BY name').all().map((r) => r.name), ['guardians', 'orgs', 'players', 'users']);
   tool.sqlite.close();
   const server = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = { ...server.load().db };
@@ -283,6 +294,10 @@ test('store (snapshot mode): before any boot there is no table, so a fixture is 
   assert.equal(server.sqlite.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 1);
   assert.equal(server.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'users'").get().n, 0);
   assert.equal(db.users[0].name, 'A');
+  // The saved (empty) players and guardians blobs were cut over by migration 0005 the same way: imported, retired, done.
+  assert.deepEqual(layer.boot.identity, { engine: 'sqlite', players: 0, guardians: 0, links: 0, imported: 0 });
+  assert.equal(layer.report().identity.initState, 'done');
+  assert.equal(server.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name IN ('players', 'guardians')").get().n, 0, 'the blobs are retired');
   server.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 

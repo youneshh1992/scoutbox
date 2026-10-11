@@ -1,25 +1,19 @@
 // Child process for scripts/testIdentityRepositories.mjs: opens the store on
-// <dir> (the parent prepared the live identity schema and markers on it),
-// attaches the identity repositories as a unit-of-work participant, starts a
+// <dir> (a database the parent initialised through the data layer), attaches
+// the data layer (the identity repositories are its unit-of-work participant), starts a
 // unit that inserts a guardian and its child, edits a facet and a blob, then
 // kills itself with SIGKILL BEFORE the commit. The parent reopens the database
 // and expects the pre-operation state everywhere. Synthetic data only.
 //   node scripts/identityCrashChild.mjs <data-dir>
 import { openStore } from '../store.mjs';
 import { attachDataLayer, TABLE_BACKED } from '../repositories/index.mjs';
-import { createIdentityRepositories } from '../repositories/identity.mjs';
 
 const dir = process.argv[2];
 const NOW = Date.UTC(2026, 9, 11, 12);
-const store = openStore(dir, { tableBacked: [...TABLE_BACKED, 'players', 'guardians'] });
+const store = openStore(dir, { tableBacked: TABLE_BACKED });
 const loaded = store.load();
 const db = { ...loaded.db };
-attachDataLayer({ db, store, nextId: (p) => `${p}-crash`, persist: () => {}, sessionTtlMs: 30 * 86_400_000 });
-const identity = createIdentityRepositories({ sqlite: store.sqlite, unit: store.unit, now: () => NOW });
-identity.attach();
-Object.defineProperty(db, 'players', { value: identity.players.view, writable: false, configurable: false, enumerable: true });
-Object.defineProperty(db, 'guardians', { value: identity.guardians.view, writable: false, configurable: false, enumerable: true });
-store.setSaveHook(identity.saveHook());
+const { identity } = attachDataLayer({ db, store, nextId: (p) => `${p}-crash`, persist: () => {}, sessionTtlMs: 30 * 86_400_000, now: () => NOW });
 const snapshot = () => ({ savedAt: NOW, idCounter: loaded.idCounter, db });
 store.unitOfWork(() => {
   identity.guardians.insert({ id: 'gd-crash', name: 'Crash Parent', email: 'crash@example.test', password: null, emailVerified: true, emailCode: null, idVerified: true, disclaimerAccepted: true, childIds: [] });

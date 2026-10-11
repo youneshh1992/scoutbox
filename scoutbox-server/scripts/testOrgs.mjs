@@ -14,13 +14,19 @@ import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations, transaction } from '../repositories/database.mjs';
 import { createOrgsRepository, validateOrgRecord, toRow, fromRow, ORGS_TABLE, ORGS_CUTOVER_MIGRATION, MIGRATED_KEYS } from '../repositories/orgs.mjs';
 import { rollbackOrgsCopy } from '../repositories/orgsRollback.mjs';
-import { createCoreIdentityShadow, CORE_SHADOW_TABLES } from '../repositories/shadow.mjs';
+import { rollbackCoreIdentityCopy } from '../repositories/coreIdentityRollback.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import * as m0001 from '../repositories/migrations/0001_org_users.mjs';
 import * as m0002 from '../repositories/migrations/0002_core_identity_shadow.mjs';
 import * as m0003 from '../repositories/migrations/0003_sessions_live.mjs';
 import * as m0004 from '../repositories/migrations/0004_orgs_live.mjs';
 import { openStore } from '../store.mjs';
+// The checks below that drive the runner on a raw connection are about the S2/S3
+// steps (0001–0004): they run exactly those. The S4a steps that follow them
+// (0005 core identity, 0006 media deletions) have their own suites
+// (testCoreIdentityMigration, testCoreSchema); the full registered list is what
+// attachDataLayer and the real-server checks below run.
+const S3_MIGRATIONS = DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id));
 import { buildSeed } from '../seed.mjs';
 import { pickPort } from './testPort.mjs';
 
@@ -48,6 +54,8 @@ const ORGS = () => [
   // The verification review's shape (m14): level null, location null, a verification facet, unknown fields.
   { id: 'org-agency', name: 'Northstar Agency', type: 'agency', level: null, plan: 'Pro', trustedPartner: false, country: 'FR', verified: false, verifiedDomain: null, safeguardingContractSigned: false, location: null, federationRef: null, verification: { domains: [{ domain: 'northstar.example', status: 'verified', method: 'scoutbox_manual_review', verifiedAt: 7, addedBy: 'trust_safety' }], revokedAt: null, orgType: 'agency' }, agencySettings: { licence: 'FIFA-1' }, somethingNewer: { kept: true }, mfaRequiredForLeads: true, emailDomain: 'northstar.example', emailDomainVerified: true, createdAt: 1700000000000 },
 ];
+/** A minimal player record migration 0005 accepts (dob and country are required; everything else is optional). */
+const PLAYER_1 = (name = 'P') => ({ id: 'pl-1', name, dob: '2001-01-01', country: 'GB', media: [] });
 const legacyUsers = () => [
   { id: 'usr-pro', orgId: 'org-pro', name: 'Maria Keane', role: 'Head of Recruitment', createdAt: 1, mfa: { secretB32: 'S', enabledAt: 7, recoveryHashes: ['h1'] }, deliveryPrefs: { quietStart: '22:00' }, oddField: { kept: true } },
   { id: 'usr-grass', orgId: 'org-grass', name: 'Sam', role: 'Manager', createdAt: 2 },
@@ -68,7 +76,8 @@ function s2File(dir, { orgs = ORGS(), users = legacyUsers(), sessions = legacySe
   put.run('users', JSON.stringify(users));
   put.run('sessions', JSON.stringify(sessions));
   put.run('orgs', JSON.stringify(orgs));
-  put.run('players', JSON.stringify([{ id: 'pl-1', name: 'P', media: [] }]));
+  put.run('players', JSON.stringify([PLAYER_1()]));
+  put.run('guardians', JSON.stringify([]));
   for (const [k, v] of Object.entries(extra)) put.run(k, JSON.stringify(v));
   s.prepare("INSERT INTO meta (key, value) VALUES ('idCounter', '1000'), ('savedAt', '1'), ('saveSeq', '1')").run();
   runDataMigrations(s, [m0001, m0002, m0003], { context: { sessionTtlMs: TTL } }); // S2 state: staff and sessions live, orgs a blob
@@ -129,7 +138,7 @@ test('cutover: the orgs blob is imported with every field preserved, org_users i
   const sessionsBefore = s.prepare('SELECT token_hash, sid, org_user_id FROM sessions ORDER BY sid').all().map((r) => ({ ...r }));
   const before = s.prepare("SELECT sql FROM sqlite_master WHERE name = 'org_users'").get().sql;
   assert.ok(!/STRICT/.test(before) && !/REFERENCES/.test(before), 'the S0 table is not STRICT and has no foreign key');
-  const r = runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } });
+  const r = runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } });
   assert.deepEqual(r.ran, [ORGS_CUTOVER_MIGRATION]);
   // Organisations: every record, every field, in its own shape.
   const stored = ORGS_TABLE.read(s);
@@ -168,7 +177,7 @@ test('cutover: an unsupported record, a duplicate id or a staff row naming a mis
     const before = fileDigest(dir);
     for (let attempt = 0; attempt < 2; attempt++) {
       const s = openRaw(dir);
-      assert.throws(() => runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } }), (err) => /ORGS_CUTOVER_BLOCKED/.test(err.message) && pattern.test(err.message), `${name}: aborts (attempt ${attempt + 1})`);
+      assert.throws(() => runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }), (err) => /ORGS_CUTOVER_BLOCKED/.test(err.message) && pattern.test(err.message), `${name}: aborts (attempt ${attempt + 1})`);
       assert.equal(s.prepare('SELECT COUNT(*) AS n FROM data_migrations WHERE id = ?').get(ORGS_CUTOVER_MIGRATION).n, 0);
       assert.equal(s.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'orgs'").get().n, 1, `${name}: the blob stays authoritative`);
       assert.ok(!/STRICT/.test(s.prepare("SELECT sql FROM sqlite_master WHERE name = 'org_users'").get().sql), `${name}: org_users was not rebuilt`);
@@ -182,11 +191,11 @@ test('cutover: an unsupported record, a duplicate id or a staff row naming a mis
   // Repair, then retry: cuts over.
   const dir = tempDir('s3-retry'); s2File(dir, { orgs: ORGS().map((o) => (o.id === 'org-grass' ? { ...o, level: 'agent' } : o)) });
   let s = openRaw(dir);
-  assert.throws(() => runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } }), /ORGS_CUTOVER_BLOCKED/);
+  assert.throws(() => runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }), /ORGS_CUTOVER_BLOCKED/);
   const fixed = JSON.parse(s.prepare("SELECT value FROM collections WHERE name = 'orgs'").get().value).map((o) => (o.id === 'org-grass' ? { ...o, level: 'grassroots' } : o));
   s.prepare("UPDATE collections SET value = ? WHERE name = 'orgs'").run(JSON.stringify(fixed));
   s.close(); s = openRaw(dir);
-  assert.deepEqual(runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, [ORGS_CUTOVER_MIGRATION]);
+  assert.deepEqual(runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, [ORGS_CUTOVER_MIGRATION]);
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 3);
   s.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -194,7 +203,7 @@ test('cutover: an empty blob, a missing blob (first installation) and a stale po
   for (const [name, setup] of [['empty blob', (dir) => s2File(dir, { orgs: [], users: [], sessions: [] })], ['missing blob', (dir) => { s2File(dir, { orgs: [], users: [], sessions: [] }); const s = openRaw(dir); s.prepare("DELETE FROM collections WHERE name = 'orgs'").run(); s.close(); }]]) {
     const dir = tempDir('s3-empty'); setup(dir);
     const s = openRaw(dir);
-    assert.deepEqual(runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, [ORGS_CUTOVER_MIGRATION], name);
+    assert.deepEqual(runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, [ORGS_CUTOVER_MIGRATION], name);
     assert.equal(s.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0, name);
     assert.equal(s.prepare('SELECT COUNT(*) AS n FROM data_migrations WHERE id = ?').get(ORGS_CUTOVER_MIGRATION).n, 1, `${name}: completion is the record, not the rows`);
     const repo = createOrgsRepository({ sqlite: s }); assert.deepEqual(repo.attach([]), { engine: 'sqlite', loaded: 0, imported: 0 });
@@ -205,7 +214,7 @@ test('cutover: an empty blob, a missing blob (first installation) and a stale po
   let s = openRaw(dir);
   s.prepare("INSERT INTO orgs (id, name, type, level, plan) VALUES ('org-ghost', 'Ghost', 'club', 'pro', 'Pro')").run();
   s.prepare("INSERT INTO orgs (id, name, type, level, plan) VALUES ('org-pro', 'Stale Name', 'club', 'pro', 'Pro')").run();
-  runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } });
+  runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } });
   assert.deepEqual(s.prepare('SELECT id, name FROM orgs ORDER BY id').all().map((r) => [r.id, r.name]), [['org-agency', 'Northstar Agency'], ['org-grass', 'Riverside Juniors'], ['org-pro', 'Eastport FC']], 'the shadow rows are replaced by the blob, the authoritative source');
   s.close(); fs.rmSync(dir, { recursive: true, force: true });
   // Failure injection after the rebuild but before the commit.
@@ -221,7 +230,7 @@ test('cutover: an empty blob, a missing blob (first installation) and a stale po
   s.close();
   assert.equal(fileDigest(dir2), before, 'nothing of the failed attempt reached the file');
   s = openRaw(dir2);
-  assert.deepEqual(runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, [ORGS_CUTOVER_MIGRATION]);
+  assert.deepEqual(runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, [ORGS_CUTOVER_MIGRATION]);
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 3);
   s.close(); fs.rmSync(dir2, { recursive: true, force: true });
 });
@@ -230,7 +239,7 @@ test('cutover: an empty blob, a missing blob (first installation) and a stale po
 test('repository: insert and update write migrated fields immediately; a migrated field on the view throws; facet fields are mutable in place and persisted by flush, atomically with a save', () => {
   const dir = tempDir('s3-repo');
   let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { orgs: ORGS(), guardians: [], players: [{ id: 'pl-1', name: 'P' }], sessions: [], users: [] };
+  const db = { orgs: ORGS(), guardians: [], players: [PLAYER_1()], sessions: [], users: [] };
   let layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', loaded: 3, imported: 3 }, 'a first boot imports the in-memory records (seed / fixture)');
   assert.equal(db.orgs.length, 3);
@@ -290,7 +299,7 @@ test('repository: authority is the cutover record — attach refuses without it;
   const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
   runDataMigrations(s, [m0001, m0002, m0003]);
   assert.throws(() => createOrgsRepository({ sqlite: s }), /cutover record 0004_orgs_live is missing/);
-  runDataMigrations(s, DATA_MIGRATIONS);
+  runDataMigrations(s, S3_MIGRATIONS);
   const warnings = [];
   const repo = createOrgsRepository({ sqlite: s, warn: (m) => warnings.push(m) });
   assert.equal(repo.initState(), 'pending', 'a database nothing was ever saved to is a first installation');
@@ -310,7 +319,7 @@ test('repository: authority is the cutover record — attach refuses without it;
 test('correction 1: facet change tracking reflects committed state only — a save that fails after the flush, inside the flush or at commit leaves every pending change eligible for retry; the retry persists them and a restart reads them', () => {
   const dir = tempDir('s3-c1');
   let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { orgs: ORGS(), guardians: [], players: [{ id: 'pl-1', name: 'P' }], sessions: [], users: [] };
+  const db = { orgs: ORGS(), guardians: [], players: [PLAYER_1()], sessions: [], users: [] };
   attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   store.save({ savedAt: 1, idCounter: 1000, db });
   const facetsOf = (id) => JSON.parse(store.sqlite.prepare('SELECT facets_json FROM orgs WHERE id = ?').get(id).facets_json);
@@ -365,7 +374,7 @@ test('correction 1: facet change tracking reflects committed state only — a sa
 test('correction 2: nested migrated fields are protected — assigning, deleting or defining a property inside location or federationRef throws, the view never diverges from the table, and a repository update of a composite persists across a restart', () => {
   const dir = tempDir('s3-c2');
   let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { orgs: ORGS(), guardians: [], players: [{ id: 'pl-1', name: 'P' }], sessions: [], users: [] };
+  const db = { orgs: ORGS(), guardians: [], players: [PLAYER_1()], sessions: [], users: [] };
   let layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   const pro = db.orgs.find((o) => o.id === 'org-pro');
   const grass = db.orgs.find((o) => o.id === 'org-grass');
@@ -403,7 +412,7 @@ test('correction 3: initialisation is explicit state, never a row count — an e
   // (a) A cut-over database whose table was emptied: a stale array is ignored, nothing is imported.
   const dirA = tempDir('s3-c3a'); s2File(dirA);
   let s = openRaw(dirA);
-  runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } });
+  runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } });
   s.exec('DELETE FROM sessions; DELETE FROM org_users; DELETE FROM orgs;');
   let warnings = [];
   const repo = createOrgsRepository({ sqlite: s, warn: (m) => warnings.push(m) });
@@ -449,7 +458,7 @@ test('correction 3: initialisation is explicit state, never a row count — an e
   store.sqlite.close(); fs.rmSync(dirB, { recursive: true, force: true });
   // (c) Interrupted initialisation: the rows and the state change are one transaction, so the next boot retries.
   s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
-  runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } });
+  runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } });
   let r = createOrgsRepository({ sqlite: s });
   assert.equal(r.initState(), 'pending');
   assert.deepEqual(r.attach(ORGS()), { engine: 'sqlite', loaded: 0, imported: 0 }, 'attach never initialises; the state says pending and the records are reported, not imported');
@@ -470,7 +479,7 @@ test('correction 3: initialisation is explicit state, never a row count — an e
   s.close();
   // (d) An intentionally empty installation: initialising with no records records the decision; a later seed array is ignored.
   s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
-  runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } });
+  runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } });
   r = createOrgsRepository({ sqlite: s });
   assert.deepEqual(r.initialize([]), { engine: 'sqlite', loaded: 0, imported: 0 });
   assert.equal(r.initState(), 'done');
@@ -484,7 +493,7 @@ test('correction 3: initialisation is explicit state, never a row count — an e
 
 test('review (cb1d22b): initialise refuses a collection that is not an array — an object, null, a string, a number or nothing — writing no row, keeping the state pending and the input untouched; an explicitly empty array stays a valid, empty installation and a later valid retry initialises', () => {
   const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
-  runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } });
+  runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } });
   const r = createOrgsRepository({ sqlite: s });
   assert.equal(r.initState(), 'pending');
   const cases = [[{ id: 'synthetic-not-an-array' }, /an object/], [null, /null/], ['orgs', /a string/], [7, /a number/], [undefined, /absent/]];
@@ -502,7 +511,7 @@ test('review (cb1d22b): initialise refuses a collection that is not an array —
   // A valid retry, and an explicitly empty installation, still work.
   assert.deepEqual(r.initialize(ORGS()), { engine: 'sqlite', loaded: 3, imported: 3 }); assert.equal(r.initState(), 'done');
   s.close();
-  const e = new DatabaseSync(':memory:'); e.exec('PRAGMA foreign_keys = ON;'); runDataMigrations(e, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } });
+  const e = new DatabaseSync(':memory:'); e.exec('PRAGMA foreign_keys = ON;'); runDataMigrations(e, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } });
   const re2 = createOrgsRepository({ sqlite: e });
   assert.deepEqual(re2.initialize([]), { engine: 'sqlite', loaded: 0, imported: 0 }); assert.equal(re2.initState(), 'done');
   e.close();
@@ -515,7 +524,7 @@ test('snapshot mode: before the cutover record the orgs blob is authoritative; a
   let tool = openStore(dir);
   let snap = tool.load();
   assert.equal(JSON.stringify(snap.db.orgs), JSON.stringify(ORGS()), 'the blob');
-  snap.db.players.push({ id: 'pl-2', name: 'Q' }); tool.save(snap);
+  snap.db.players.push({ id: 'pl-2', name: 'Q', dob: '2002-02-02', country: 'GB' }); tool.save(snap);
   assert.equal(JSON.parse(tool.sqlite.prepare("SELECT value FROM collections WHERE name = 'orgs'").get().value).length, 3, 'the blob is kept');
   assert.equal(tool.sqlite.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0, 'the shadow table is not promoted');
   tool.sqlite.close();
@@ -569,26 +578,6 @@ test('snapshot mode: before the cutover record the orgs blob is authoritative; a
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-// ------------------------------------------------------------- shadow isolation
-test('shadow validation, even when enabled, never writes or deletes live organisations or sessions', () => {
-  const dir = tempDir('s3-shadow');
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { orgs: ORGS(), guardians: [{ id: 'gd-1', name: 'G', email: 'g@example.com', childIds: [] }], players: [], sessions: [], users: [] };
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, shadowValidation: true });
-  const a = layer.sessions.create('player', 'pl-1');
-  const rowsBefore = store.sqlite.prepare('SELECT * FROM orgs ORDER BY rowid').all().map((r) => ({ ...r }));
-  for (let i = 1; i <= 3; i++) store.save({ savedAt: i, idCounter: 1000, db });
-  assert.deepEqual(store.sqlite.prepare('SELECT * FROM orgs ORDER BY rowid').all().map((r) => ({ ...r })), rowsBefore, 'orgs rows untouched by three projecting saves');
-  assert.ok(layer.sessions.byToken(a.token));
-  assert.deepEqual([...CORE_SHADOW_TABLES], ['guardians', 'players', 'guardian_children']);
-  const report = layer.report();
-  assert.ok(!('orgs' in report.shadow.tables)); assert.equal(report.domains.orgs.mode, 'live'); assert.equal(report.domains.orgs.rows, 3);
-  const shadow = createCoreIdentityShadow({ sqlite: store.sqlite });
-  transaction(store.sqlite, () => shadow.project({ orgs: [], guardians: [], players: [] }));
-  assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 3, 'a direct projection of an empty snapshot deletes no organisation');
-  store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-
 // ------------------------------------------------------------- rollback
 test('rollback: the tool produces a pre-S3 copy — orgs back in the blob with every field, org_users back to the S0 definition with every row, sessions untouched, source unchanged; it refuses a later schema and a file that never cut over', () => {
   const dir = tempDir('s3-rb-src'); s2File(dir, { extra: { notes: [{ id: 'n1' }] } });
@@ -601,7 +590,11 @@ test('rollback: the tool produces a pre-S3 copy — orgs back in the blob with e
   store.save({ savedAt: 2, idCounter: 1000, db }); store.sqlite.close();
   const before = fileDigest(dir);
   const out = tempDir('s3-rb-out');
-  const result = rollbackOrgsCopy(path.join(dir, 'scoutbox.db'), out);
+  // The file is at S4a after the boot: the S3 tool refuses it until the S4a rollback produced the S3-shaped copy it works on.
+  assert.throws(() => rollbackOrgsCopy(path.join(dir, 'scoutbox.db'), tempDir('s3-rb-refused')), (err) => err.code === 'LATER_SCHEMA' && /0005_core_identity_live, 0006_media_deletions/.test(err.message));
+  const s3State = tempDir('s3-rb-s3');
+  rollbackCoreIdentityCopy(path.join(dir, 'scoutbox.db'), s3State);
+  const result = rollbackOrgsCopy(path.join(s3State, 'scoutbox.db'), out);
   assert.equal(fileDigest(dir), before, 'the source is untouched');
   assert.equal(result.organisations, 4); assert.equal(result.staff, 3); assert.equal(result.sessions, 4); assert.equal(result.recordRemoved, true);
   const o = openRaw(out);
@@ -623,9 +616,9 @@ test('rollback: the tool produces a pre-S3 copy — orgs back in the blob with e
   o.close();
   // The S2 data layer (the previous build's repositories: 0001–0003) attaches to the copy and reads the sessions.
   // Refusals: a later schema step, and a file that never cut over.
-  const later = openRaw(dir); later.prepare("INSERT INTO data_migrations (id, applied_at) VALUES ('0005_core_identity_live', 1)").run(); later.close();
+  const later = openRaw(s3State); later.prepare("INSERT INTO data_migrations (id, applied_at) VALUES ('0007_future_step', 1)").run(); later.close();
   const out2 = tempDir('s3-rb-out2');
-  assert.throws(() => rollbackOrgsCopy(path.join(dir, 'scoutbox.db'), out2), (err) => err.code === 'LATER_SCHEMA' && /0005_core_identity_live/.test(err.message));
+  assert.throws(() => rollbackOrgsCopy(path.join(s3State, 'scoutbox.db'), out2), (err) => err.code === 'LATER_SCHEMA' && /0007_future_step/.test(err.message));
   assert.deepEqual(fs.readdirSync(out2), [], 'a refused rollback leaves no output');
   const out3 = tempDir('s3-rb-out3');
   assert.throws(() => rollbackOrgsCopy(path.join(out, 'scoutbox.db'), out3), (err) => err.code === 'NOT_CUT_OVER');
@@ -673,7 +666,7 @@ await atest('server: an S2 database boots and cuts over; registration, settings,
     const maria = seed.sessions[0].token;
     assert.equal((await j('GET', '/org/notifications', undefined, maria)).status, 200, 'the staff session survived the org_users rebuild');
     const cap = await j('GET', '/capabilities');
-    assert.deepEqual(cap.body.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live']);
+    assert.deepEqual(cap.body.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions']);
     assert.equal(cap.body.dataLayer.domains.orgs.mode, 'live'); assert.equal(cap.body.dataLayer.domains.orgs.rows, 5);
     assert.equal(cap.body.integrity.ok, true, `the boot integrity report sees the live organisations: ${JSON.stringify(cap.body.integrity.byCode)}`);
     assert.ok(cap.body.integrity.checked >= 6, 'the report counted the organisations and the Room');

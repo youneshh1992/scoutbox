@@ -55,25 +55,32 @@ and design changes the Founder explicitly requests.
   once from explicit state (`meta.orgsInit`), never inferred from an empty
   table, and `attach` never imports an in-memory array; no org deletion route
   exists and none is to be added before O2 is decided);
-  `guardians`, `players` and `guardian_children` exist as a shadow (blob still
-  authoritative; the projection that fills them is off unless
-  `SCOUTBOX_SHADOW_VALIDATION=1` and never touches live tables); their S4a
-  mapping (`repositories/identityMapping.mjs`) and the read-only preflight
-  (`scripts/preflightCoreIdentity.mjs`, `repositories/identityPreflight.mjs`)
-  are implemented and are the contract the live repositories reuse; the live
-  repositories themselves (`repositories/identity.mjs`: players, guardians,
-  links, unit-of-work participation; every write runs its statements first
-  and its memory bookkeeping only once they committed, joins an open unit
-  through `store.unit.join` so a caught mid-operation failure still poisons
-  the unit, and `initialize()` refuses an absent or malformed collection
-  instead of importing it as empty) are built and tested but **not attached**;
-  the real migration (`repositories/migrations/0005_core_identity_live.mjs`)
-  and the copy-only rollback tool (`scripts/coreIdentityRollback.mjs`) are
-  implemented and tested on temporary databases but the migration is **not
-  registered** — `DATA_MIGRATIONS` is still 0001–0004, server boot does not
-  create the repositories, and a preflight report is never an approval. A legacy minor
-  with no guardian link refuses the cutover until resolved by hand (the
-  Founder's decision). Never log,
+  `players`, `guardians` and `guardian_children` are live since S4a
+  (`repositories/identity.mjs`, migration `0005_core_identity_live`, registered
+  and attached at boot between the organisations and the staff): scalars and
+  the split composites are columns changed only through `players.insert` /
+  `players.update` / `players.ageUp` / `players.remove` and `guardians.insert`
+  / `guardians.update`; `childIds` derives from the link rows; the S5 arrays,
+  `medical.records`, `programme.completed`, `coGuardians`, the outstanding
+  guardian `emailCode` (plain, not hashed until S6) and unknown fields ride in
+  `facets_json` and are still mutated in place on the records `db.players` /
+  `db.guardians` serve; assigning a column-backed field or `childIds` on a
+  view throws. The cutover validates every record and relationship through
+  the reviewed preflight (`repositories/identityPreflight.mjs`) and a legacy
+  minor with no guardian link refuses it until resolved by hand (the Founder's
+  decision); a first installation initialises once from explicit state
+  (`meta.coreIdentityInit`), `attach` never imports an in-memory array, and
+  the S1 shadow projection is retired. Every operation that writes a row and
+  a blob (sign-up, child creation, verification, aging-up, the signing
+  completion, deletion) runs in one unit of work; deletion queues the media
+  removals in `media_deletions` (migration `0006`) inside the same transaction
+  and the files go after COMMIT; player and guardian responses come from the
+  allowlists in `views/playerViews.mjs`; the copy-only rollback tool is
+  `scripts/coreIdentityRollback.mjs` (refuses a pending initialisation and a
+  non-empty media queue). **Registration in source is development work, not
+  authorization for a real-data cutover**: the operator procedure in
+  `scoutbox-server/OPERATIONS.md` ("Players and guardians") is the gate, and
+  a preflight report is never an approval. Never log,
   report or export a plain bearer token. `node:sqlite` with transaction state
   is required (Node 22.16+ on the 22 line, or 24.0+; `runtime.mjs` is the one
   definition, checked before the data directory is touched and refused with
