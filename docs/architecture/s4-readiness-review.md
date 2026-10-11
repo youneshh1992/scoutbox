@@ -2,21 +2,29 @@
 
 Companion to [`sqlite-migration-plan.md`](./sqlite-migration-plan.md) (§S4) and
 [`sqlite-schema.md`](./sqlite-schema.md) (§5.1, §9, §10). Written 11 October 2026 on branch
-`feat/sqlite-schema` at commit `d4ca3f2` (S3 done and reviewed), by reading the code as it is
-today. Every claim below carries a file and line (`S:` is `scoutbox-server/server.mjs`; other
-paths are relative to `scoutbox-server/`). Line numbers are from this commit; `01_identity.sql`
-and the plan cite lines that have drifted by a few places.
+`feat/sqlite-schema` at commit `d4ca3f2` (S3 done and reviewed) and corrected after review at
+`0c038ef`, by reading the code as it is today. Every claim carries a file and line (`S:` is
+`scoutbox-server/server.mjs`; other paths are relative to `scoutbox-server/`). Line numbers
+are from this commit; `01_identity.sql` and the plan cite lines that have drifted by a few
+places. "Verified" means run on synthetic data (the script is named); everything else is read
+from the code or is a design proposal, and design risks are called design risks.
 
-**Status: preparation only.** Nothing in this document is implemented. S4 does not start
-until the Founder has answered the deletion question in
-[`s4-deletion-decision.md`](./s4-deletion-decision.md) (O1), and that answer is taken by S4b
-below, not by S4a. Nothing here changes the UI, permissions or the deletion policy.
+**Status: preparation only.** Nothing in this document is implemented. Nothing here changes the
+UI, permissions or the deletion policy.
+
+**One dependency statement.** S4 is two bounded steps. **S4a** (storage cutover, repositories,
+allowlisted views, rollback tool) does **not** depend on the deletion decision O1: it keeps
+today's deletion behaviour unchanged behind a repository method and takes no deletion-policy
+decision implicitly. **S4b** (tombstone, erasure, guardian lifecycle) depends on O1
+([`s4-deletion-decision.md`](./s4-deletion-decision.md)) and does not start until the Founder
+has answered. Earlier wording that "S4 does not start until O1 is answered" is withdrawn; §9
+lists what each step may proceed with. Neither step has started.
 
 Sections: 1 what S4 is and is not · 2 player fields · 3 guardian fields · 4 what moves, what
 stays nested · 5 relationships, minors, duplicates, inconsistencies, invalid records · 6 views
-per audience (explicit allowlists) · 7 migration, restart, authority, sessions, failed saves ·
-8 rollback · 9 implementation sequence and acceptance tests · 10 implemented versus proposed ·
-11 open points.
+per audience (explicit allowlists, reconciled against the code) · 7 migration, boot, authority,
+sessions, failed saves, **transaction boundaries** · 8 rollback · 9 implementation sequence and
+acceptance tests · 10 implemented versus proposed · 11 open points and the decisions still needed.
 
 ---
 
@@ -24,30 +32,27 @@ per audience (explicit allowlists) · 7 migration, restart, authority, sessions,
 
 - **Is:** `guardians`, `players` and `guardian_children` become live tables owned by
   `repositories/guardians.mjs` and `repositories/players.mjs` (new), created by migration
-  `0005_core_identity_live`, following the S3 pattern exactly: scalar and composite fields in
-  columns, every nested structure that waits for a later step in a transitional `facets_json`
-  column on the same row (byte-for-byte shape preservation through `__meta`), writers of
-  column-backed fields converted to repository calls, in-place facet writers left alone,
-  committed-only change tracking through the store's save hook, explicit initialisation state,
-  `attach()` that never imports, a rollback tool on a copy. The S1 shadow of these three tables
-  is retired (every core identity table is then live). Reads that today scan `db.players` keep
-  working through the read-only view; the org-facing, agency-facing, guardian-facing and admin
-  views are rebuilt from **explicit allowlists** that keep every access rule in `domain.mjs`
-  and the routes as it is.
-- **Is not:** the twelve `player_*` sub-record tables (S5: the arrays stay in `facets_json`),
-  recruitment (S8), any change to who may see what (the allowlists reproduce today's rules; the
-  fields that today leak past a blocklist are listed in §6 so the decision to stop leaking them
-  is explicit), any deletion-policy change (S4a keeps today's hard delete behind a repository
-  method; S4b implements whatever O1 decides), a guardian deletion route (S4b, after O1), the UI.
+  `0005_core_identity_live`, following the S3 pattern: scalar and composite fields in columns,
+  every nested structure that waits for a later step in a transitional `facets_json` column on
+  the same row (byte-for-byte shape preservation through `__meta`), writers of column-backed
+  fields converted to repository calls, in-place facet writers left alone, committed-only change
+  tracking through the store's save hook, explicit initialisation state, `attach()` that never
+  imports, a rollback tool on a copy. The S1 shadow of these three tables is retired. Reads that
+  scan `db.players` keep working through the read-only view; the outward views are rebuilt from
+  **explicit allowlists** reconciled field by field against today's responses (§6), with every
+  access rule left in `domain.mjs` and the routes.
+- **Is not:** the twelve `player_*` sub-record tables (S5), recruitment (S8), any change to who
+  may see what beyond the intentional privacy fixes named in §6, any deletion-policy change
+  (S4a keeps today's hard delete; S4b implements O1), a guardian deletion route (S4b, after O1),
+  the hashing of the guardian e-mail code (S6, see §8.2), the UI.
 
 ## 2. Player fields: current readers and writers, proposed storage
 
 Creation points: seed (`seed.mjs` `player()` 496–522, records 115–421 and 446–462), adult
 signup (S:1144–1178), guardian-created child (S:1386–1418), boot defaults (S:217–226,
 241–244; `m12/shared.mjs:33`; `m13/shared.mjs:47`). The shadow's column mapping
-(`repositories/shadow.mjs:103–118`) already covers every scalar below and is the basis of the
-import. "Column" means a column of the live `players` table; "facet" means the transitional
-`facets_json` on the same row until S5.
+(`repositories/shadow.mjs:103–118`) already covers every scalar below. "Column" means a column
+of the live `players` table; "facet" means the transitional `facets_json` on the same row.
 
 ### 2.1 Scalars
 
@@ -55,7 +60,7 @@ import. "Column" means a column of the live `players` table; "facet" means the t
 |---|---|---|---|---|
 | `id` | `pl-N` | never | everywhere | column, primary key |
 | `name` | string | never (no profile-edit route) | search S:1900; copied into many collections (§2.4) | column |
-| `dob` | `YYYY-MM-DD` | never | `domain.mjs:77`; S:1059, 3114, 3184; `m12/shared.mjs:101`; `m15/passport.mjs:191`; `m16/combine.mjs:48`; `m13/insight.mjs:96`; `m13/imports.mjs:95` | column `birth_date` (NOT NULL, 10 chars) |
+| `dob` | `YYYY-MM-DD`, **declared** at signup or by the guardian, never verified (`identityVerified` is seed-only) | never | `domain.mjs:77`; S:1059, 3114, 3184; `m12/shared.mjs:101`; `m15/passport.mjs:191`; `m16/combine.mjs:48`; `m13/insight.mjs:96`; `m13/imports.mjs:95` | column `birth_date` (NOT NULL, 10 chars) |
 | `country` | ISO‑2 | never | `domain.mjs:78` (age of majority); S:1906, 3184 | column |
 | `city` | string, `''` for guardian-created children | never (blanked only inside the minor org view, S:1078) | S:1900; `m15/passport.mjs:211` | column |
 | `position` | enum or null | never | `domain.mjs:177, 337`; S:1903, 3569, 3648; `m12/scouting.mjs:713` | column (CHECK) |
@@ -65,68 +70,65 @@ import. "Column" means a column of the live `players` table; "facet" means the t
 | `academyPlus` | bool | S:3337 | S:1905, 1933, 2309 | column |
 | `availability` | enum | S:1570 (guardian), 2820 (squad release), 3444; `m29/index.mjs:295` | S:1904, 2394; `m12/scouting.mjs:723` | column (CHECK) |
 | `contractStatus` | enum | S:2821, 3445; `m29/index.mjs:294` | S:3441; `m29/signing.mjs:356` | column (CHECK) |
-| `identityVerified` | bool | never | `domain.mjs:173`; S:3185; `m15/passport.mjs:184`; `m162/trust.mjs:53` | column |
+| `identityVerified` | bool | never (seed only) | `domain.mjs:173`; S:3185; `m15/passport.mjs:184`; `m162/trust.mjs:53` | column |
 | `guardianId` | id/null | S:3140 (aging-up → null) | S:1055 (removed from org view), 3122, 3134, 2579, 2740, 4268; `m23/contact.mjs:276` | column `guardian_id` (FK → guardians, SET NULL); must equal the `role='primary'` link (§5) |
 | `createdAt` | ms | never | S:1913, 2356 | column |
 | `password` | scrypt string/null | S:1195 (rehash on login) | S:1192–1193; removed from every outward view | column `password_hash` |
 | `level` | enum | `m29/index.mjs:278` (signing); `m13/transitions.mjs:202` (admin review) | `domain.mjs:116`; S:952, 1092, 3556, 3836; `grassrootsJourney.mjs:90,125,142`; `m12/shared.mjs:104` | column (CHECK) |
 | `firstTeamSeeker` | bool (boot default S:242) | S:3676, 3837 | S:1089, 1925 | column |
 | `footballCategory` | enum/null, lazily set | `m12/operations.mjs:280` | `m12/scouting.mjs:734`; `m12/shared.mjs:109` | column |
-| `deletedAt`, `removedAt` | **never written** | — | read at `m23/contact.mjs:251`, `m27/index.mjs:183, 597` (dead checks today) | `deleted_at` column exists in the DDL; **set by nothing until O1 is decided (S4b)** |
+| `deletedAt`, `removedAt` | **never written** | — | read at `m23/contact.mjs:251`, `m27/index.mjs:183, 597` (dead checks today) | `deleted_at` exists in the DDL; **written by nothing until O1 is decided (S4b)** |
 
 ### 2.2 Nested objects and arrays
 
 | Field | Shape | Written by | Read by (main) | S4 storage |
 |---|---|---|---|---|
-| `stats` | `{appearances, goals, assists, paceKmh, passCompletionPct, duelSuccessPct, cleanSheets?}` or null | S:3500 (replaced whole) | `domain.mjs:177, 362`; S:3188, 3617; `m12/scouting.mjs:727` | composite → `stats_*` columns (null object → all NULL, presence kept in `__meta`) |
-| `medical` | `{shared, records[], conditionStatus}` | `shared`: S:1618, 3387; `conditionStatus`: S:3399; `records.push`: S:3401 | S:1068–1070 (org redaction), 3404 | **split**: `shared` → `medical_shared`, `conditionStatus` → `medical_condition_status` (columns); `records[]` → facet until S5 (`player_medical_records`) |
-| `location` | `{lat, lng}` or null | S:3414 (replaced whole) | `domain.mjs:117–118`; S:1088, 3634, 3659, 3799; `m12/shared.mjs:113`; `m13/suitability.mjs:133` | composite → `lat, lng` (presence in `__meta`) |
-| `notificationPrefs` | `{quietStart, quietEnd, schoolHoursMute, timezone}` or null | S:3861 (`prefsHandler`, replaced whole) | S:744 (`pushDeferred`) | composite → `prefs_*` columns |
-| `programme` | `{track, startedAt, completed[]}` or null | S:3577 (replaced), 3589 (`completed.push`) | `grassrootsJourney.mjs:71–80`; S:3585 | **split**: `track`, `startedAt` → columns; `completed[]` → facet until S5 |
-| `media[]` | `{id, title, kind, uploadedAt, url, views, tags{}, verifiedClip, captions?, sizeBytes?}` | S:3377; `m12/operations.mjs:224`; in place: S:219–222, 277–278, 2324, 2339–2340; `m12/shared.mjs:33`; `m12/operations.mjs:254` | `domain.mjs:176`; S:2303, 3152, 3190, 4265; `m13/transitions.mjs:29` | facet until S5 (`player_media`, `player_media_tags`); media bytes stay on disk |
+| `stats` | `{appearances, goals, assists, paceKmh, passCompletionPct, duelSuccessPct, cleanSheets?}` or null | S:3500 (replaced whole) | `domain.mjs:177, 362`; S:3188, 3617; `m12/scouting.mjs:727` | composite → `stats_*` columns (null object → all NULL, presence in `__meta`) |
+| `medical` | `{shared, records[], conditionStatus}` | `shared`: S:1618, 3387; `conditionStatus`: S:3399; `records.push`: S:3401 | S:1068–1070 (org redaction), 3404 | **split**: `shared` → `medical_shared`, `conditionStatus` → `medical_condition_status`; `records[]` → facet until S5 |
+| `location` | `{lat, lng}` or null | S:3414 (replaced whole) | `domain.mjs:117–118`; S:1088, 3634, 3659, 3799; `m12/shared.mjs:113`; `m13/suitability.mjs:133` | composite → `lat, lng` |
+| `notificationPrefs` | `{quietStart, quietEnd, schoolHoursMute, timezone}` or null | S:3861 (`prefsHandler`, replaced whole) | S:744 | composite → `prefs_*` columns |
+| `programme` | `{track, startedAt, completed[]}` or null | S:3577 (replaced), 3589 (`completed.push`) | `grassrootsJourney.mjs:71–80`; S:3585 | **split**: `track`, `startedAt` → columns; `completed[]` → facet |
+| `media[]` | `{id, title, kind, uploadedAt, url, views, tags{}, verifiedClip, captions?, sizeBytes?}` | S:3377; `m12/operations.mjs:224`; in place S:219–222, 277–278, 2324, 2339–2340; `m12/shared.mjs:33`; `m12/operations.mjs:254` | `domain.mjs:176`; S:2303, 3152, 3190, 4265 | facet until S5 |
 | `attendance[]` | `{id, fixture, venue, date, gps, deviceConfirmed?, verified, corroboratedBy?, trialId?}` | S:2853, 3463; `m12/journeys.mjs:698` | `domain.mjs:174`; S:2504, 3189, 3372; `m12/passport.mjs:95` | facet until S5 |
 | `timeline[]` | `{year, event}` | S:3141, 3474; `m29/index.mjs:279–296` | S:3197 | facet until S5 |
 | `badges[]` | string[] | S:956, 3338, 3339, 3347 | S:955, 3732 | facet until S5 |
-| `trialReports[]` | full report copies incl. other clubs' `notes` | S:2571 | `domain.mjs:175`; S:3191 | facet until S5/S8 (a copy of `trials.report`) |
+| `trialReports[]` | full report copies incl. other clubs' `notes` | S:2571 | `domain.mjs:175`; S:3191 | facet until S5/S8 |
 | `drills[]` | drill id strings | S:3535 | S:3521 | facet until S5 |
-| `drillResults[]` | `{id, drillId, drillName, metric, unit, value, verified, ts}` | S:3537 | S:3522, 3601, 3723; `m12/passport.mjs:108` | facet until S5. **Defect found:** neither signup path creates it (seed only, `seed.mjs:514`), so S:3522/3537 would throw for a signed-up player; S4 imports an absent array as absent (not invalid) and the fix belongs to the route, not the migration |
-| `activityLog[]` | ms timestamps | S:944–945 (`recordActivity`) | S:953, 1552–1555, 3118, 3716 | facet until S5 (player-private) |
+| `drillResults[]` | `{id, drillId, drillName, metric, unit, value, verified, ts}` | S:3537 | S:3522, 3601, 3723; `m12/passport.mjs:108` | facet until S5. **Defect (read, not reproduced):** neither signup path creates it (seed only, `seed.mjs:514`), so S:3522/3537 would throw for a signed-up player; the import treats an absent array as absent, and the fix belongs to the route |
+| `activityLog[]` | ms timestamps | S:944–945 | S:953, 1552–1555, 3118, 3716 | facet until S5 (player-private) |
 | `externalIds[]` | `{provider, externalId, source, by, at, claim}` | `m13/imports.mjs:221–223` | `m13/imports.mjs:89, 309` | facet until S5 |
-| `seasonHistory[]` | `[{season, …}]` | S:3494–3498 (`Object.assign` in place, sort in place) | S:3504 | facet until S5 |
-| unknown fields | anything a later module added | — | — | facet (never dropped) |
+| `seasonHistory[]` | `[{season, …}]` | S:3494–3498 (in place) | S:3504 | facet until S5 |
+| unknown fields | — | — | — | facet (never dropped) |
 
-### 2.3 Writers that must change in S4 (column-backed fields written in place today)
+### 2.3 Writers that must change in S4a (column-backed fields written in place today)
 
 The record view refuses a column-backed assignment, nested values included (S3 correction 2),
-so each of these becomes a repository call. Facet writers (media, attendance, timeline, badges,
-trialReports, drills, drillResults, activityLog, externalIds, seasonHistory,
-`programme.completed`, `medical.records`) stay as they are.
+so each becomes a repository call. Facet writers stay as they are. Operations that also change
+other collections are marked **(UoW)** and run inside a unit of work (§7.4).
 
-| Writer | Today | S4 |
+| Writer | Today | S4a |
 |---|---|---|
-| Academy+ toggle S:3337 | `req.player.academyPlus = …` | `players.update(id, { academyPlus })` |
-| Availability S:1570, 2820, 3444; `m29/index.mjs:295` | `p.availability = …` | `players.update(id, { availability })` |
-| Contract status S:2821, 3445; `m29/index.mjs:294` | `p.contractStatus = …` | `players.update(id, { contractStatus })` |
-| Level `m29/index.mjs:278`; `m13/transitions.mjs:202` | `p.level = …` | `players.update(id, { level })` |
+| Academy+ S:3337 | assignment | `players.update(id, { academyPlus })` |
+| Availability S:1570, 2820, 3444; `m29/index.mjs:295` | assignment | `players.update(id, { availability })` (`m29` inside the signing UoW) |
+| Contract status S:2821, 3445; `m29/index.mjs:294` | assignment | `players.update(id, { contractStatus })` (`m29` inside the signing UoW) |
+| Level `m29/index.mjs:278`; `m13/transitions.mjs:202` | assignment | `players.update(id, { level })` |
 | First-team seeker S:3676, 3837 | assignment | `players.update(id, { firstTeamSeeker })` |
 | Football category `m12/operations.mjs:280` | assignment | `players.update(id, { footballCategory })` |
-| Password rehash on login S:1195 | assignment | `players.update(id, { password })` (as orgs do, S:1721 area) |
-| Aging-up S:3140 | `p.guardianId = null` | `players.update(id, { guardianId: null })` **and** `guardians.unlink(gid, pid)` in one call (`players.ageUp`) |
-| Medical consent S:1618, 3387; condition S:3399 | `medical.shared = …`, `medical.conditionStatus = …` (nested) | `players.update(id, { medical: { shared, conditionStatus } })`; `records` stays a facet, mutated in place |
-| Location S:3414 | whole replacement | `players.update(id, { location })` |
-| Stats S:3500 | whole replacement | `players.update(id, { stats })` |
-| Notification prefs S:3861 (`prefsHandler`, shared with guardians) | whole replacement | `players.update(id, { notificationPrefs })` / `guardians.update(id, { notificationPrefs })` |
-| Programme start S:3577 | whole replacement | `players.update(id, { programme: { track, startedAt } })`; `completed[]` facet |
-| Signing rollback `m29/index.mjs:620` | `Object.assign(player, JSON.parse(snapshot))` restores the whole record | `players.restore(id, snapshot)`: columns through `update`, facets replaced; one call, documented as the only whole-record writer |
-| Creation S:1144–1178, 1386–1418; `seed.mjs` | `db.players.push(...)` | `players.insert(fields)` (`seed.mjs` stays data; the first-installation initialisation imports it) |
-| Deletion S:3978–4023 | `db.players = db.players.filter(...)` plus the cross-collection work | S4a: `players.remove(id)` performs exactly today's row removal (hard delete) and the route keeps the cross-collection work unchanged; S4b replaces it per O1 |
+| Password rehash S:1195 | assignment | `players.update(id, { password })` |
+| Aging-up S:3135–3141 **(UoW)** | `guardian.childIds.filter`, `p.guardianId = null`, `timeline.push`, ledger, two notifications | `players.ageUp(id)` inside the unit of work with the ledger and notifications |
+| Medical consent S:1618, 3387; condition S:3399 | nested assignment | `players.update(id, { medical: { shared, conditionStatus } })`; `records` stays a facet |
+| Location S:3414; stats S:3500; prefs S:3861; programme start S:3577 | whole replacement | `players.update(id, { … })` |
+| Child creation S:1386–1424 **(UoW)** | `db.players.push`, `childIds.push`, saved-search matches, broadcast | `players.insert` + `guardians.link` inside the unit of work |
+| Signing completion and its rollback `m29/index.mjs:613–620` **(UoW)** | `Object.assign(player, JSON.parse(snapshot.player))` on failure, plus ledger/signings/invoices truncation | `players.restore(id, snapshot)` as the repository's only whole-record writer, inside the signing unit of work |
+| Deletion S:3978–4023 **(UoW)** | `db.players.filter(...)` plus cross-collection work, `persistNow()` | `players.remove(id)` (today's hard delete) inside the unit of work; S4b replaces it per O1 |
+| Creation S:1144–1178; `seed.mjs` | `db.players.push` | `players.insert`; the seed stays data (first-installation initialisation) |
 
-### 2.4 Copies of player data outside the record (survive S4 untouched)
+### 2.4 Copies of player data outside the record
 
 `name` is copied onto `requests`, `trials`, `vouches`, `signings`, `squadInvites`, open-day
 registrations, `orgs[].squad[].name`, `recruitmentCases`, `assessments`, `transitionCases`;
-`deletePlayerData` nulls only some (S:3989–4003). Every collection carrying a `playerId` is
-listed in `s4-deletion-decision.md` §4; none of them is touched by S4a.
+`deletePlayerData` nulls only some (S:3989–4003). The full list of collections carrying a
+player id is in `s4-deletion-decision.md` §5; none is touched by S4a.
 
 ## 3. Guardian fields: current readers and writers, proposed storage
 
@@ -136,408 +138,487 @@ Creation: signup S:1239–1247, co-guardian S:1580–1589 (no password, no `emai
 | Field | Shape | Written after creation by | Read by (main) | S4 storage |
 |---|---|---|---|---|
 | `id` | `gd-N` | never | everywhere | column, PK |
-| `name` | string | never | IDV S:1325, 1333; message sender S:1520; actors in m12/m23; `m21/permissions.mjs:185` | column |
-| `email` | string **as typed** (no trim/lowercase) | never (no change route) | uniqueness S:1235; login S:1285 (case-sensitive); `m13/delivery.mjs:55`; `m23/contactRoutes.mjs:518–522`; `m14/organisations.mjs:763` | column; unique index on `lower(email)` (§5.3 before it can be created) |
-| `password` | scrypt/null; **absent** on co-guardians | S:1297 (legacy upgrade) | S:1290–1297 | column `password_hash` |
-| `emailVerified` | bool; absent on co-guardians (`undefined` passes the `=== false` checks S:1268, 1366) | S:1272 | S:1268, 1366 | column (absent → kept absent via `__meta`, read as today) |
-| `emailCode` | 6 chars **plain**, no expiry, no attempt limit | S:1273 (→ null) | S:1253, 1260, 1269; also inside `outbox` text | **column `email_code_hash` (sha256), as the shadow stores it**; the compare at S:1269 becomes a hash compare; the plain code never reaches the table (S6 adds attempt limits) |
+| `name` | string | never | S:1325, 1333, 1520; `m21/permissions.mjs:185` | column |
+| `email` | string **as typed** | never | S:1235 (uniqueness, lowercased), S:1285 (login, case-sensitive), `m13/delivery.mjs:55`, `m23/contactRoutes.mjs:518–522`, `m14/organisations.mjs:763` | column; unique index on `lower(email)` (§5.3) |
+| `password` | scrypt/null; **absent** on co-guardians | S:1297 | S:1290–1297 | column `password_hash` |
+| `emailVerified` | bool; absent on co-guardians | S:1272 | S:1268, 1366 | column (absent kept absent) |
+| `emailCode` | 6 chars **plain**, no expiry, no attempt limit | S:1273 (→ null) | S:1253, 1260, 1269 | **facet in S4a, unchanged** (plain, as today — no new copy is made); hashing, expiry, attempt limits and a resend route belong to S6 together. Reason: §8.2 |
 | `idVerified` | bool | S:1329; admin S:4234 | S:1369; `m23/contact.mjs:273` | column |
 | `idvReference` | string | S:1330 | shadow only | column |
-| `disclaimerAccepted` | bool (no timestamp) | S:1344 | S:1372; `m23/contact.mjs:273` | column (`disclaimer_accepted_at` stays NULL: no source) |
-| `childIds` | string[] | S:1420 (push), 3137 (filter), 4018 (filter); co-guardian S:1585 copies the primary's list | every `/guardian/children/:id` gate, `guardianOwnsChild` (`m12/shared.mjs:77`, m15, m16, `m162/trust.mjs:30`), m13/m14/m21/m23/m28/m29 | **`guardian_children` rows**; the record view serves `childIds` as a read-only array derived from the table so every reader keeps working; the three writers become `guardians.link(gid, pid, role)` / `guardians.unlink(gid, pid)` |
-| `coGuardianOf` | guardian id on the co record | never after creation | no runtime reader (shadow only) | column `co_guardian_of` (FK, SET NULL) |
-| `coGuardians` | `[{id, name, email}]` on the primary, append-only | S:1589 | only through the `guardianView` spread and admin | facet (a duplicate of `co_guardian_of`; retired when the co-guardian path is redesigned, not in S4) |
-| `notificationPrefs` | `{quietStart, quietEnd, schoolHoursMute, timezone}` | S:3861 | `pushDeferred` S:747 | composite → `prefs_*` columns |
-| `removedAt` | **never written** | — | `m23/contact.mjs:273` | `deleted_at` exists in the DDL; set by nothing until O1/S4b |
-| `createdAt` | **never written for guardians** | — | — | column, NULL for every existing row (import writes what exists; nothing is invented) |
+| `disclaimerAccepted` | bool | S:1344 | S:1372; `m23/contact.mjs:273` | column |
+| `childIds` | string[] | S:1420 (push), 3137 (filter), 4018 (filter); co-guardian S:1585 copies the primary's list | 34 `includes`, 2 `filter`, 2 `map`, 2 `length`, one `[0]` guarded by `length === 1` (S:1630) | **`guardian_children` rows**; the record view serves `childIds` as a read-only array derived from the table; the three writers become `guardians.link` / `guardians.unlink` |
+| `coGuardianOf` | guardian id on the co record | never | shadow only | column `co_guardian_of` (FK, SET NULL) |
+| `coGuardians` | `[{id, name, email}]`, append-only | S:1589 | `guardianView` spread, admin | facet |
+| `notificationPrefs` | `{quietStart, quietEnd, schoolHoursMute, timezone}` | S:3861 | S:747 | composite → `prefs_*` |
+| `removedAt` | **never written** | — | `m23/contact.mjs:273` | `deleted_at` in the DDL; written by nothing until O1/S4b |
+| `createdAt` | **never written** | — | — | column, NULL for every existing row |
 | unknown fields | — | — | — | facet |
 
-Separate collection, unchanged by S4: `db.notificationPrefs` rows keyed
-`{audienceKind: 'guardian', audienceId}` (`m182/notificationPrefs.mjs:262`).
-
-## 4. What moves during S4, and how nested data awaiting S5 remains intact
+## 4. What moves during S4a, and how nested data awaiting S5 remains intact
 
 - **Moves to columns:** every field marked "column" or "composite" in §2–§3, plus the link
-  table. `players.guardian_id` and `guardian_children` are both written, in one transaction,
-  by every link change (`link`, `unlink`, `ageUp`, child creation), so the two can no longer
-  drift (today three places write one side only, §5.2).
-- **Stays nested, intact:** every array and sub-object marked "facet" travels in
-  `facets_json` with the record's key order, explicit nulls and composite presence in `__meta`
-  (the S3 mechanism, `repositories/orgs.mjs toRow/fromRow`), is served on the same record
-  object the routes already hold, is mutated in place by its existing writers, and is flushed
-  by the repository's save hook inside every snapshot save, counted as persisted only once
-  that save committed (S3 correction 1). A record read back is byte-for-byte the record
-  written: the S3 round-trip test is repeated for every player and guardian shape the seed and
-  the signup paths produce (adult, guardian-created child with `city: ''`, co-guardian
-  without password, `stats: null`, `location: null`, `notificationPrefs: null`, absent
-  `drillResults`).
-- **Split composites** (`medical`, `programme`) are the one new mechanism: the column-backed
-  sub-keys (`shared`, `conditionStatus`; `track`, `startedAt`) are guarded like `location`,
-  while `records` / `completed` remain mutable facets. The guard therefore works per sub-key
-  for these two composites; the readiness test asserts that `medical.records.push(...)`
-  succeeds and `medical.shared = true` throws.
-- **Mirror columns:** none proposed for players/guardians (nothing derived needs one).
-- **The S1 shadow** of the three tables is dropped by the migration (its rows are derived and
-  replaceable) and recreated as the live definition with `facets_json` added; `CORE_SHADOW_TABLES`
-  becomes empty and the shadow module is retired with its validation command (the readiness
-  gate for S4 is the migration dry run, as for S2/S3).
+  table. `players.guardian_id` and `guardian_children` are written together by every link
+  change, so the two can no longer drift (§5.2).
+- **Stays nested, intact:** every "facet" travels in `facets_json` with key order, explicit
+  nulls and composite presence in `__meta` (the S3 mechanism), is served on the same record
+  object the routes hold, is mutated in place by its existing writers, and is flushed by the
+  repository's save hook inside every snapshot save, counted as persisted only once that save
+  committed. The round-trip test is repeated for every seed and signup shape (adult,
+  guardian-created child with `city: ''`, co-guardian without password, `stats: null`,
+  `location: null`, `notificationPrefs: null`, absent `drillResults`, `emailCode` present).
+- **Split composites** (`medical`, `programme`): column-backed sub-keys guarded; `records` /
+  `completed` mutable facets; the test asserts `medical.records.push` succeeds and
+  `medical.shared = true` throws.
+- **The S1 shadow** of the three tables is dropped by the migration and recreated live with
+  `facets_json`; `CORE_SHADOW_TABLES` becomes empty and the validation command is retired.
 
 ## 5. Relationships, minors, duplicates, inconsistencies, invalid records
 
 ### 5.1 The relationship model as implemented
 
-- "Primary guardian" means `players[].guardianId`. Channels (S:853), request routing
-  (S:2121, 2740), notifications (about forty sites), media (S:4268), SSE (S:486) and the
-  guardian thread list (S:1506) go to the primary only. Every `/guardian/children/:id` gate
-  checks `childIds` only.
-- "Co-guardian" means a guardian record created by `POST /guardian/coguardian`
-  (S:1576–1591): created immediately, no invitation or acceptance, **no password and no route
-  that ever sets one** (so it cannot log in unless dev logins are on, S:1290, 1298), a copy of
-  the primary's `childIds` at that moment (children added later are never synced), and a
-  `coGuardianOf` back-reference nothing reads. `resolveContactRecipient`
-  (`m23/contact.mjs:263–280`) is the only place that reasons about several guardians: it
-  counts guardians listing the child that are id-verified, disclaimer-accepted and not removed;
-  with more than one it picks `player.guardianId`, otherwise fails closed.
-- No end-to-end test calls `/guardian/coguardian`.
+"Primary guardian" means `players[].guardianId`: channels (S:853), request routing (S:2121,
+2740), notifications, media (S:4268), SSE (S:486) and the guardian thread list (S:1506) go to
+the primary only; every `/guardian/children/:id` gate checks `childIds` only. "Co-guardian"
+(`POST /guardian/coguardian`, S:1576–1591) is created immediately with no invitation, **no
+password and no route that ever sets one** (cannot log in unless dev logins are on, S:1290,
+1298), a copy of the primary's `childIds` at that moment, and a `coGuardianOf` nothing reads.
+`resolveContactRecipient` (`m23/contact.mjs:263–280`) is the only code reasoning about several
+guardians. No end-to-end test calls `/guardian/coguardian`. S4a keeps this model:
+`guardian_children.role` is `primary` where the row matches `players.guardian_id`, `co`
+otherwise (`repositories/shadow.mjs:198`).
 
-S4 keeps this model: `guardian_children.role` is `primary` where the row matches
-`players.guardian_id`, `co` otherwise (the shadow's rule, `repositories/shadow.mjs:198`). It
-does not redesign co-guardianship.
-
-### 5.2 Inconsistent links (one side written without the other)
+### 5.2 Inconsistent links and how the cutover treats each (report, never repair)
 
 | Place | Writes | Not written |
 |---|---|---|
 | child creation S:1392 + 1420 | `p.guardianId`, creator's `childIds` | the creator's co-guardians' `childIds` |
-| co-guardian creation S:1585–1589 | co `childIds` (snapshot), `coGuardianOf`, primary `coGuardians` | `players.guardianId` (correct: the co is not primary) |
-| aging-up S:3135–3140 | primary's `childIds`, `p.guardianId = null` | co-guardians' `childIds` (the adult stays listed) |
+| co-guardian creation S:1585–1589 | co `childIds` (snapshot), `coGuardianOf`, primary `coGuardians` | `players.guardianId` (correct) |
+| aging-up S:3135–3140 | primary's `childIds`, `p.guardianId = null` | co-guardians' `childIds` |
 | `deletePlayerData` S:4018 | every guardian's `childIds` | — |
-| seed `seed.mjs:371–409` | both sides | — (but `pl-imani`, 18, is still in `gd-marek.childIds`) |
+| seed | both | — (`pl-imani`, 18, still in `gd-marek.childIds` — **verified** by running `buildSeed()` through `isAdult`) |
 
-What the migration must therefore expect and **report, never repair**:
-
-| Finding | Detection | S4 treatment |
-|---|---|---|
-| `players.guardianId` names a guardian that does not exist | id lookup | **refuses the cutover** (`CORE_IDENTITY_CUTOVER_BLOCKED`) with the player id: the column has a foreign key and nothing may be written as NULL silently |
-| guardian `childIds` names a player that does not exist | id lookup | refuses the cutover with `guardian/child` |
-| `coGuardianOf` names a missing guardian | id lookup | refuses the cutover |
-| `players.guardianId = G` but `G.childIds` lacks the player ("primary without link") | set comparison | refuses the cutover: the two sides disagree and only the operator can say which is right |
-| `G.childIds` lists a player whose `guardianId` is another guardian or null | set comparison | imported as `role = 'co'` (the shadow's existing rule); counted in the migration log |
-| an adult (by `isAdult`) still linked to a guardian | age at migration time | imported unchanged (today's behaviour: aging-up is player-initiated, S:3132) and counted in the log; no policy is implied |
-| a minor (by `isAdult`) with no guardian link at all | age + links | imported unchanged and counted (today nothing prevents it after aging-up of a mis-dated record); the plan's acceptance test "a minor cannot exist without a `guardian_children` row" is therefore **a rule for new writes**, not an import precondition |
-| a co-guardian with no `password` and no `emailVerified` | field presence | imported as is (absent fields stay absent); the shape is legitimate today |
-
-The dry run on a copy prints every finding with ids (never names or e-mails), exactly as the
-S2/S3 cutovers do; the real directory is untouched.
+| Finding | Treatment |
+|---|---|
+| `players.guardianId` names a missing guardian; `childIds` names a missing player; `coGuardianOf` names a missing guardian | **refuses the cutover** (`CORE_IDENTITY_CUTOVER_BLOCKED`, ids listed) |
+| `players.guardianId = G` but `G.childIds` lacks the player | refuses: the sides disagree and only the operator can say which is right |
+| `G.childIds` lists a player whose `guardianId` is another guardian or null | imported as `role = 'co'`; counted |
+| an adult still linked to a guardian (the seed has one) | imported unchanged; counted; no policy implied |
+| a co-guardian without `password` / `emailVerified` | imported as is |
+| a minor with no guardian link at all | see §5.5 — a discrepancy with the plan, presented, not resolved here |
 
 ### 5.3 Duplicate e-mails
 
-- Signup enforces uniqueness case-insensitively (S:1235). The co-guardian path enforces nothing
-  (S:1576–1590) and can duplicate any address, including the primary's own or a case variant.
-  Login compares case-sensitively (S:1285) and, with duplicates, the first record in array order
-  wins. `m14/organisations.mjs:757, 763` assumes guardian e-mails are verified and unique; false
-  for co-guardians.
-- The target has `UNIQUE INDEX guardians_email ON guardians (lower(email))`. The migration
-  **refuses the cutover** when two guardians share `lower(email)`, listing the guardian ids,
-  because choosing which record keeps the address is an identity decision (which one is the
-  person who signs in?) that must be taken by a person on the pre-S4 build. The S1 strict
-  validation (`node scripts/validateShadow.mjs <dir> --strict`) already reports this today, so
-  the operator can see it before planning the upgrade.
-- After the cutover the co-guardian route must check uniqueness the same way as signup (one
-  shared predicate, `guardians.emailTaken(email)`), or be refused by the index with a clear
-  error; S4a converts the route to the shared check so the index is a backstop, not the
-  user-facing error.
+Signup enforces uniqueness case-insensitively (S:1235); the co-guardian path enforces nothing
+(S:1576–1590); login compares case-sensitively (S:1285) and the first record wins. The migration
+**refuses the cutover** on two guardians sharing `lower(email)` (ids listed): which record is
+the person who signs in is an identity decision for a person on the pre-S4 build. The strict S1
+validation already reports this today. After the cutover the co-guardian route uses the
+signup's predicate (`guardians.emailTaken`), the unique index being a backstop.
 
-### 5.4 Minor protections that S4 must preserve (and may not weaken)
+### 5.4 Minor protections that S4a must preserve
 
-All stay in code and are exercised by the existing suites; S4's views call them, never inline
-them. `isAdult` (`domain.mjs:76–79`: unknown age is **not** adult; threshold `ADULT_AGE` by
-country, default 18, KR 19, TH 20, EG 21, SG 21). `visibleToOrg` (`domain.mjs:110–121`):
-agencies never see a minor, unverified clubs never see a minor, grassroots clubs see only
-non-pro players within 50 km and fail closed without a location. Signup refuses a minor
-(S:1137–1143); child creation requires a minor (S:1383) and an e-mail-verified, id-verified,
-disclaimer-accepted guardian (S:1366–1374). Minor inbox and messaging (S:3206–3230, 3233,
-3284, 3289, 3304, 3314; SSE S:464–465). Medical (S:3386 / 1615), availability (S:3429 / 1564),
-Academy+ (S:3336), first-team seeker (S:3675 / 3833), vouches (S:3741 / 3843), open days
-(S:3655 / 3814–3822). Trial check-in consent (`m12/journeys.mjs:674–678, 726, 731–734`).
-Offers (`m28/index.mjs:443–445`, 792). Signing (`m29/index.mjs:332, 337`; `m29/signing.mjs:50–53,
-159`). Agents (`m24/index.mjs:717, 725, 798`; `m25/index.mjs:799, 803`; `m25/policy.mjs:340–380`;
-`m26/index.mjs:444, 1247`; `m27/*`). School-hours mute (S:745, 752); no external e-mail for
-minors (`m13/delivery.mjs:43–47`). Development plans (`m21/permissions.mjs:91–128`).
+All stay in code and are exercised by the existing suites; S4's views call them. `isAdult`
+(`domain.mjs:76–79`, unknown age is not adult; `ADULT_AGE` by country), `visibleToOrg`
+(`domain.mjs:110–121`), signup/child-creation gates (S:1137–1143, 1383, 1366–1374), minor inbox
+and messaging (S:3206–3230, 3233, 3284, 3289, 3304, 3314; SSE S:464–465), medical (S:3386 /
+1615), availability (S:3429 / 1564), Academy+ (S:3336), first-team seeker (S:3675 / 3833),
+vouches (S:3741 / 3843), open days (S:3655 / 3814–3822), trial consent (`m12/journeys.mjs:674–678,
+726, 731–734`), offers (`m28/index.mjs:443–445`, 792), signing (`m29/index.mjs:332, 337`;
+`m29/signing.mjs:50–53, 159`), agents (`m24`, `m25`, `m26`, `m27`), school-hours mute (S:745,
+752), no external e-mail for minors (`m13/delivery.mjs:43–47`), development plans
+(`m21/permissions.mjs:91–128`). Gaps recorded, not fixed by S4: `/guardian/*` never re-checks
+that the child is still a minor; `GET /player/export` (S:4025) has no minor check and includes
+guardian–club threads; request routing can target a null `guardianId` (S:2120–2129); pairing
+codes (S:3760–3778) can be minted by any guardian listing the child and `/auth/player/pair`
+has no rate limit.
 
-Gaps found (recorded, not fixed by S4): the core `/guardian/*` routes never re-check that the
-child is still a minor; `GET /player/export` (S:4025) has no minor check and `exportPlayer`
-(S:3879) includes guardian–club threads a minor cannot otherwise see; request routing (S:2120–2129,
-2740) sends to a null `guardianId` without a verification check; pairing codes (S:3760–3778) can
-be minted by any guardian listing the child and `/auth/player/pair` has no rate limit.
+### 5.5 Discrepancy with the plan: legacy minors without a guardian link
 
-### 5.5 Invalid records
+The plan's S4 acceptance says "a minor cannot exist without a `guardian_children` row". The
+first draft of this review silently turned that into "count and import". The two are not the
+same, so the discrepancy is stated and a treatment proposed; the Founder confirms it (§11).
 
-The migration validates every record **without coercion** and refuses the cutover on the
-first problem (listing all), as S2/S3 do. Unsupported: a player without a string `id`/`name`,
-a `dob` that `parseStrictDateOnly` rejects (`temporal.mjs:91`), a missing `country`,
-`position`/`foot`/`level`/`availability`/`contractStatus` outside their CHECK lists, a
-non-boolean flag, a non-object `stats`/`medical`/`location`/`notificationPrefs`/`programme`
-where present, `location` with one of `lat`/`lng`, a guardian without `id`/`name`/`email`, a
-`childIds` that is not an array of strings, a reserved `__meta` key. **Absent is not invalid**
-(`drillResults`, `createdAt` on guardians, `password` on co-guardians). The shadow's current
-coercions (`text(p.position) || null`, `?? 'not_seeking'`, `?? 'unknown'`, `?? 'amateur'`,
-`repositories/shadow.mjs:106–117`) are **not** carried into the live import: a value the CHECK
-would refuse is a finding for the operator, because an invented default would change what a
-club sees about a person.
+- **How such a record can exist today:** signup refuses minors (S:1137) and child creation
+  always links (S:1392, 1420), so a minor without a link arises only through a mis-dated record
+  that aged up and was then re-dated (no route does this), through a legacy snapshot, or
+  through a guardian deletion that does not exist. The seed has none (**verified**). Real data
+  may.
+- **Proposed treatment:** the cutover **imports the record unchanged and lists it** (id only) as
+  a finding in the dry run and in `meta.coreIdentityCutover`; it neither invents a link (there
+  is no candidate guardian) nor discards the record (a person's data). The plan's acceptance
+  condition is then stated precisely as a **rule for writes**: after S4a no code path can create
+  a minor without a link (`players.insert` for a minor requires a `guardians.link` in the same
+  unit of work, enforced by the repository), and the dry run shows the count of legacy
+  exceptions.
+- **How those accounts remain protected meanwhile:** `visibleToOrg` hides a minor from agencies
+  and unverified clubs regardless of links; the contact path fails closed with no guardian
+  (`m23/contact.mjs:263–280` → `CONTACT_RECIPIENT_UNAVAILABLE`); the minor inbox and messaging
+  gates do not depend on a link (S:3206–3314); offers are refused for minors (`m28/index.mjs:443`);
+  a pairing code needs a guardian listing the child (S:3760), so nobody can sign in as that
+  minor; request routing would send to `{guardian, null}` (S:2126 — an existing gap, not widened).
+  What the link adds is a *representative*, not a protection; its absence means no one can act
+  for the child, which is the condition the finding reports.
+- **Alternative the Founder may prefer:** refuse the cutover until each such record is resolved
+  on the pre-S4 build (there is no route to resolve it: a guardian would have to be created and
+  linked by hand). Stated so the choice is explicit.
 
-## 6. The exact fields each audience may receive
+### 5.6 Invalid records
 
-Today `playerViewForOrg` (S:1052–1096) **spreads the stored record** and removes a short list,
-so clubs and agencies also receive fields nobody decided to give them: other clubs' trial
-reports with notes, attendance GPS, notification preferences and timezone, external ids with
-import claims, caption text, `createdAt`, `drills`, `drillResults`, `seasonHistory`, `badges`,
-`timeline`, `level`, `identityVerified`, `squadNumber` (schema §11 item 3). S4 builds every
-outward view from the allowlists below. Rows: field names as served today (the shape is
-unchanged for every field that stays). "Rule" cites the existing check the view calls.
+Validation without coercion, refusing the cutover on the first problem (listing all).
+Unsupported: no string `id`/`name`; a `dob` that `parseStrictDateOnly` rejects
+(`temporal.mjs:91`); missing `country`; `position`/`foot`/`level`/`availability`/`contractStatus`
+outside their CHECK lists; a non-boolean flag; a non-object `stats`/`medical`/`location`/
+`notificationPrefs`/`programme` where present; `location` with one of `lat`/`lng`; a guardian
+without `id`/`name`/`email`; `childIds` not an array of strings; a reserved `__meta` key.
+**Absent is not invalid** (`drillResults`, guardian `createdAt`, co-guardian `password`). The
+shadow's coercions (`repositories/shadow.mjs:106–117`) are **not** carried into the live import.
 
-### 6.1 Clubs (verified pro/academy; grassroots) — `playerViewForOrg` replacement
+## 6. The exact fields each audience may receive — reconciled against the code
 
-| Field | Served | Rule / note |
-|---|---|---|
-| `id`, `name`, `position`, `foot`, `heightCm`, `weightKg`, `country`, `level`, `availability`, `contractStatus`, `identityVerified`, `academyPlus`, `footballCategory` | yes | as today |
-| `city` | yes for adults, `''` for minors | S:1078 |
-| `age` | derived from `birth_date` at read | S:1059; `dob` itself never (S:1072) |
-| `squadNumber`, `contractUntil`, `marketValueRange`, `agentName` | pro/academy yes; grassroots no | S:1084–1087 |
-| `firstTeamSeeker`, `distanceKm` | grassroots only | S:1088–1089 |
-| `stats`, `seasonHistory`, `badges`, `timeline`, `media[]` (`id, title, kind, uploadedAt, url, views, tags, verifiedClip`; **not** `captions`, `sizeBytes`), `attendance[]` (`id, fixture, venue, date, verified, corroboratedBy`; **not** `gps`, `deviceConfirmed`, `trialId`), `drills` | yes | football data the club directory exists to show; GPS and device data are the leak the plan closes |
-| `trialReports[]` | **only the viewing org's own reports** | today every club sees every other club's notes (S:1052 spread); `trials.report` is the authoritative copy |
-| `medical` | `{ shared: false }` unless `shared`, then `{ shared, conditionStatus, records }` | S:1068–1070 |
-| `profileSignal`, `trustScore`, `guardianManaged`, `contactPolicy` (`guardian_only` for minors), `vouches` (non-pro), `orgNotes` (own org, `/org/players/:id` only), `similarPlayers` | yes | derived, as today |
-| `guardianId`, `dob`, `password`, `location`, `programme`, `activityLog`, `notificationPrefs`, `externalIds`, `drillResults`, `createdAt` | **never** | the first six as today; the last four are the closed leaks |
+Method: each list below was built by reading the view function and the route and comparing with
+the first draft; every difference is classified **kept** (as today), **intentional privacy fix**
+(the plan already names it as a leak and the e2e privacy suites assert its absence where they
+exist), or **withdrawn** (a change the first draft proposed by mistake). Nested payloads were
+checked item by item. The S4a acceptance test records today's response keys per audience as a
+fixture and fails on any key difference not listed here, so no accidental API change ships.
 
-Visibility: the view is built only after `visibleToOrg(player, org)` and the existing
-block/report checks pass, exactly where they run today; the list above is what passes through
-afterwards.
+### 6.1 Clubs — `playerViewForOrg` (S:1052–1096), used by `/org/players`, `/org/players/:id`, morelike, shortlist, `m12/scouting.mjs:747`, `m13/insight.mjs:131, 168`, `m18/nobodyMissed.mjs:47`, rooms (`m17/rooms.mjs:83` minus `trustScore`/`trust`)
+
+Precondition unchanged: `visibleToOrg(player, org)` and `isBlocked` (S:1053–1054).
+
+| Field | Today | S4a | Classification |
+|---|---|---|---|
+| `id`, `name`, `position`, `foot`, `heightCm`, `weightKg`, `country`, `level`, `availability`, `contractStatus`, `identityVerified`, `footballCategory`, `squadNumber`*, `createdAt`, `firstTeamSeeker` | served (spread) | served | kept (`createdAt` is named a leak by the plan; **kept** here because clients may show "joined"; dropping it is a separate decision, §11) |
+| `academyPlus`, `marketValueRange`, `agentName`, `contractUntil` | served to pro/academy; **deleted for grassroots** (S:1084–1087) | same | kept — the first draft wrongly served `academyPlus` to every club; withdrawn |
+| `firstTeamSeeker` | in the spread for every club; grassroots coerces it to boolean (S:1089) | same | kept (the first draft said "grassroots only"; withdrawn) |
+| `distanceKm` | grassroots only (S:1088) | same | kept |
+| `city` | `''` for minors (S:1078), else served | same | kept |
+| `age`, `profileSignal`, `trustScore`, `guardianManaged` | derived (S:1059–1066) | same | kept |
+| `contactPolicy: 'guardian_only'` | minors only (S:1079) | same | kept |
+| `medical` | shared → the whole `medical` object (`shared`, `records[]`, `conditionStatus`); unshared → **`{ shared: false, records: [], conditionStatus: 'not_shared', note: 'Medical data is player-controlled and has not been shared.' }`** (S:1067–1069) | same object, same `note` text | kept — the first draft's `{ shared: false }` was wrong; withdrawn |
+| `vouches` | non-pro players (S:1092), via `publishedVouchesFor` | same | kept |
+| `orgNotes`, `similarPlayers` | `/org/players/:id` only | same | kept |
+| `stats`, `seasonHistory`, `badges`, `timeline`, `drills` | served | served | kept |
+| `media[]` items | every field (`id, title, kind, uploadedAt, url, views, tags, verifiedClip, captions, sizeBytes`) | same | kept — the first draft dropped `captions`/`sizeBytes`; withdrawn (captions feed the clip player; not personal beyond the clip) |
+| `attendance[]` items | every field incl. `gps`, `deviceConfirmed`, `trialId` | `id, fixture, venue, date, verified, corroboratedBy, deviceConfirmed, trialId` — **`gps` removed** | intentional privacy fix (schema §11 item 3: attendance GPS leaks to clubs; `PRIVACY_HARDENING`) |
+| `trialReports[]` | **every club's** reports incl. `notes`, `strengthNote`, `focusNote`, `scoutName` | only reports whose `orgId` is the viewing org (the authoritative copy is `trials.report`) | intentional privacy fix (schema §11 item 3) |
+| `notificationPrefs` | served | **removed** | intentional privacy fix (quiet hours and timezone are the player's settings) |
+| `externalIds[]` | served incl. `claim` (the import record) | **removed** | intentional privacy fix (another org's import data) |
+| `drillResults[]` | served | **removed** | intentional privacy fix (schema §11 item 3) |
+| `dob`, `location`, `programme`, `guardianId`, `password`, `activityLog` | never (S:1055, 1072, 1094–1095) | never | kept |
+
+\* `squadNumber` is served to grassroots too today (only the four pro-market fields are
+deleted); kept.
+
+Small allowlists that read from this view and are unchanged: film room (S:2303–2309), feed
+(S:2357), fixtures (S:2507), open-day registrations (S:2685–2688), `roomSummary`
+(`m17/shared.mjs:792`), combine card (`m16/combine.mjs:260`), m13 shortlist export
+(`m13/imports.mjs:309`).
 
 ### 6.2 Agencies
 
-Agencies reach players through `visibleToOrg` (never a minor) and the m24 relationship model.
-`clientIdentity` (`m24/index.mjs:150`) serves the full club view (§6.1) when the relationship
-grants access, otherwise `{id, name, position, age, club, country}`; `/org/agent/players`
-(`m24/index.mjs:481`) serves adults only as `{id, name, position, age, club, country}`.
-S4 keeps both lists exactly and makes the minimal one a named allowlist (`AGENT_SUMMARY`).
+`clientIdentity` (`m24/index.mjs:148–158`): a missing player → `{id, name: null, removed: true}`;
+not visible → `{id, name: null, unavailable: true}`; relationship grants access → the full §6.1
+view plus `id`, `name`, `accessBasis: 'active_confirmed_relationship'`; otherwise
+`{id, name, position, age, club, country, accessBasis}` (`club` is always null: not a player
+field). `/org/agent/players` (`m24/index.mjs:481–492`): adults only (`isAdult`, `visibleToOrg`,
+`isBlocked`), `{id, name, position, age, club, country}`. **Kept exactly**; the minimal shape is
+named `AGENT_SUMMARY`. Agencies inherit the §6.1 fixes through the full view.
 
-### 6.3 Guardians (of their own children)
+### 6.3 Guardians
 
-`GET /guardian/children` (S:1360) serves the whole record minus `password` plus `age`,
-`trustScore`, `trust`; `POST /guardian/children` (S:1423) returns the raw record including
-`password: null`. S4 allowlist: every field of §2 except `password` (and `password_hash`), plus
-the three derived values; the creation response uses the same list. Guardians' own view of
-themselves (`guardianView`, S:1348–1351) strips `password` and `emailCode` and spreads the
-rest, including `coGuardians[].email` and `idvReference`; S4 names the list: `id, name, email,
-emailVerified, idVerified, disclaimerAccepted, childIds, coGuardianOf, coGuardians,
-notificationPrefs` — and never `password`, `emailCode` (which no longer exists in plain form)
-or `idvReference` (a provider reference, not the guardian's data to display; flagged for the
-Founder as a change if any client shows it).
+- `GET /guardian/children` (S:1357–1363): the whole player record minus `password`, plus `age`,
+  `trustScore`, `trust`. **Kept** (includes `medical`, `location`, `activityLog`, `dob`: the
+  guardian is the child's representative).
+- `POST /guardian/children` (S:1423): the raw record **including `password: null`**. S4a returns
+  the same allowlist as the list above (no `password` key). Classification: intentional fix of a
+  key that is always null; a client reading `player.password` would get `undefined` instead of
+  `null` — flagged in §11 for confirmation.
+- `guardianView` (S:1348–1351): strips `password` and `emailCode`, spreads the rest —
+  `id, name, email, emailVerified, idVerified, idvReference, disclaimerAccepted, childIds,
+  coGuardianOf, coGuardians[] (id, name, email), notificationPrefs`. **Kept as is**, including
+  `idvReference` and `coGuardians[].email` — the first draft proposed dropping `idvReference`;
+  withdrawn (a change to the guardian's own view is not S4's to make without a decision; listed
+  in §11).
 
 ### 6.4 Players (themselves)
 
-`GET /player/me` (S:3109): the whole record minus `password` plus `age`, `trustScore`,
-`trust`, `tier`, `streak`, `weeklyGoal`, `nextActions`, `agingUp`, `pathway`, `programme`
-progress, `vouches`. S4 allowlist: every field of §2 except `password`, plus those derived
-values (unchanged). `exportPlayer` (S:3879) likewise minus `password`; the included guardian
-threads are a recorded gap (§5.4), unchanged by S4.
+`GET /player/me` (S:3109–3127): the record minus `password` plus `age`, `trustScore`, `trust`,
+`tier`, `streak`, `weeklyGoal`, `nextActions`, `agingUp`, `pathway`, `programme` progress,
+`vouches` (minus `coachEmail`, `code`). Signup response (S:1182–1183): record minus `password`.
+`exportPlayer` (S:3879–3890): profile minus `password` plus requests, threads, notifications,
+insights, ledger events. **All kept.**
 
 ### 6.5 Administrators / Trust & Safety
 
-There is no admin list of players (T&S touches players by id: `m13/transitions.mjs:195`,
-`m15/passport.mjs:544`, `m162/trust.mjs:264`). `/admin/guardians` (S:4227–4229) and
-`/admin/guardians/:id/idv` (S:4238) return **raw rows including the password hash and the
-plain e-mail code** (schema §11 item 4). S4 allowlist for both: `id, name, email,
-emailVerified, idVerified, idvReference, disclaimerAccepted, childIds, coGuardianOf,
-createdAt` plus the `idvQueue` rows as today — never `password_hash`, never `email_code_hash`.
+No admin list of players today (`m13/transitions.mjs:195`, `m15/passport.mjs:544`,
+`m162/trust.mjs:264` by id). `/admin/guardians` (S:4227–4229) returns `{ guardians: db.guardians,
+idvQueue }` **raw**, and `/admin/guardians/:id/idv` (S:4238) returns the raw record: both
+include the password hash and the plain e-mail code (schema §11 item 4). S4a allowlist for both:
+`id, name, email, emailVerified, idVerified, idvReference, disclaimerAccepted, childIds,
+coGuardianOf, coGuardians, notificationPrefs, createdAt` plus `idvQueue` — never
+`password`/`password_hash`, never `emailCode`. Classification: intentional privacy fix (the
+plan's S4 names it).
 
-### 6.6 Other surfaces that carry a guardian id to orgs today (recorded, unchanged by S4)
+### 6.6 Guardian ids on org-facing recruitment payloads (recorded, unchanged by S4)
 
 Raw `/org/requests` (S:2513–2515) includes `guardianId`; raw `/org/trials` (S:2517–2519)
 includes `recipient.guardianId`, `history[].by`, `schedule.confirmedBy`, `day.consents[].by`;
 open-day registrations spread `guardianId` (S:2682–2688); squad invites expose
 `guardianApproved.guardianId` (`m14/organisations.mjs:770`); message senders carry the
-guardian's id and name (S:1520). These are recruitment/messaging payloads (S6–S8), listed so
-the S4 allowlists are not mistaken for a complete audit of guardian-id exposure.
+guardian's id and name (S:1520). S6–S8 surfaces; listed so §6 is not mistaken for a complete
+audit of guardian-id exposure.
 
-## 7. Migration, restart, authority, sessions, failed saves
+## 7. Migration, boot, authority, sessions, failed saves, transaction boundaries
 
-- **Migration `0005_core_identity_live`** (`foreignKeysOff = true`), inside the runner's one
-  transaction: read the `guardians` and `players` blobs from `collections` (JSON and array
-  checks); validate every record (§5.5) and every link (§5.2, §5.3) — abort with
-  `CORE_IDENTITY_CUTOVER_BLOCKED` listing ids and reasons, file byte-identical, same abort on
-  the next boot, no repair, no demo data; `DROP TABLE guardian_children, players, guardians`
-  (the S1 shadow: derived rows) and create the live definitions (`01_identity.sql` + a
-  `facets_json TEXT CHECK (json_valid)` column on `players` and `guardians`); insert guardians
-  (two passes for `co_guardian_of`, as the shadow does), then players, then one
-  `guardian_children` row per `childIds` entry with the role rule; `PRAGMA foreign_key_check`
-  must be empty; write `meta.coreIdentityCutover` (`at, guardians, players, links, findings`
-  counts) and `meta.coreIdentityInit` (`done` when a blob or any saved snapshot existed,
-  `pending` only for a database nothing was ever saved to); delete the two blobs. Completion is
-  decided **only** by the `data_migrations` row. The staff and organisation tables and the
-  `sessions` table are not touched by any statement.
-- **Boot order.** `attachDataLayer` initialises or attaches `guardians` before `players`
-  (the FK), both before `users`; `db.guardians` and `db.players` become read-only views
-  (array methods that mutate throw and name the repository). The integrity report already runs
-  after the data layer attaches (S3), so `ROOM_ORPHAN_PLAYER` / `PLAYER_ID_DUPLICATE`
-  (`m182/integrity.mjs:48, 64`) keep seeing the players. `m182_002_collections_present`
-  (`db.players ??= []`) runs before and creates an empty placeholder that `attach()` ignores
-  (S3 correction 3); no other `m182` step reads players or guardians
-  (`m182/migrations.mjs` grep). `loadSnapshot` still needs a `players` array to treat the file
-  as a snapshot (S:129–135): in server mode `store.load()` does not read table-backed
-  collections, so **S4 must make `store.load()` report that a players table-backed snapshot
-  exists** (a `tables` marker in the loaded envelope, or the server checking the cutover
-  record) or every boot after the cutover would run from the seed. This is the one boot-path
-  change S4 carries beyond the S3 pattern and the first regression test to write.
-- **Restart / retry.** A failed cutover rolls back and the next boot cuts over cleanly (tested
-  with an injected failure after the inserts). An interrupted first-installation initialisation
-  leaves `pending` and is retried. A cut-over database with empty tables is authoritative:
-  `attach()` imports nothing; a stale `players`/`guardians` blob written back into
-  `collections` is ignored and deleted by the next save (the S3 tests, repeated).
-- **Sessions.** Player and guardian sessions carry `kind` and `ref_id` without a foreign key;
-  the migration never writes `sessions`; every existing bearer token and `sid` stays valid
-  (asserted by hash and count, as in S3). Aging-up and child deletion keep revoking exactly as
-  today (`sessions.revokeFor('player', id)`, S:3983).
-- **Failed saves.** Facet changes are tracked as pending until the store reports the commit,
-  flushed again after a rollback (S3 correction 1); the same save hook object serves the three
-  repositories. Column writes commit on their own; `insert`/`update` refuse to run inside an
-  open transaction. The debounce window (2 s) for facets is unchanged and documented.
-- **Runtime.** The S3 runtime contract (`runtime.mjs`, Node 22.16+/24.0+) covers S4 with no
-  change.
+### 7.1 Migration `0005_core_identity_live`
+
+`foreignKeysOff = true`, inside the runner's one transaction: read the `guardians` and
+`players` blobs (JSON and array checks); validate every record (§5.6) and every link (§5.2,
+§5.3) — abort with `CORE_IDENTITY_CUTOVER_BLOCKED` listing ids and reasons, file byte-identical,
+same abort next boot, no repair, no demo data; `DROP TABLE guardian_children, players,
+guardians` (the S1 shadow) and create the live definitions (`01_identity.sql` + `facets_json
+TEXT CHECK (json_valid)` on `players` and `guardians`); insert guardians (two passes for
+`co_guardian_of`), then players, then one `guardian_children` row per `childIds` entry with the
+role rule; `PRAGMA foreign_key_check` must be empty; write `meta.coreIdentityCutover` (counts
+incl. the §5.2/§5.5 findings) and `meta.coreIdentityInit` (`done` when a blob or any saved
+collection existed, `pending` only for a never-saved database); delete the two blobs.
+Completion is decided only by the `data_migrations` row. `sessions`, `org_users`, `orgs` are
+not touched by any statement.
+
+### 7.2 Boot order and the snapshot-presence change
+
+`attachDataLayer` initialises or attaches `guardians` before `players` (the FK), both before
+`users`; `db.guardians` and `db.players` become read-only views. The integrity report already
+runs after the data layer (S3), so `ROOM_ORPHAN_PLAYER` / `PLAYER_ID_DUPLICATE`
+(`m182/integrity.mjs:48, 64`) keep seeing players; `m182_002` (`db.players ??= []`) creates an
+empty placeholder that `attach()` ignores; no other `m182` step reads players or guardians.
+`loadSnapshot` treats a file without a `players` array as "no snapshot" (S:129–135) and the
+server-mode `store.load()` does not read table-backed collections, so **S4a must give the store a
+snapshot-presence signal that does not depend on a `players` blob** (the cutover record), or
+every boot after the cutover would run from the seed. This is the one boot-path change beyond
+the S3 pattern and the first regression to write.
+
+### 7.3 Restart, authority, sessions, failed saves
+
+A failed cutover rolls back and the next boot retries (injected failure after the inserts). An
+interrupted first-installation initialisation leaves `pending` and retries. Cut-over empty
+tables are authoritative: `attach()` imports nothing; a stale blob written back is ignored and
+deleted by the next save. Player and guardian sessions carry `kind`/`ref_id` without a foreign
+key; the migration never writes `sessions`; every token and `sid` stays valid (asserted by hash
+and count). Facet changes are pending until the store reports the commit and are flushed again
+after a rollback (S3 correction 1). The runtime contract (`runtime.mjs`) covers S4 unchanged.
+
+### 7.4 Transaction boundaries for operations spanning several collections
+
+**Today (verified by reading; the mechanism is the store's single save transaction):** every
+collection is in memory; a save writes them all in one SQLite transaction (`store.mjs write()`).
+`deletePlayerData` mutates eleven collections in memory and ends with `persistNow()` (S:4021),
+so either the whole deletion lands or none of it does; the same holds for child creation
+(saved by the next `persist`/`persistNow`), aging-up and the signing unit of work (`m29`
+restores memory on failure, S:613–620, and the next save persists either the completed or the
+restored state). **Existing limitation (since S2/S3, not new):** table-backed domains write
+immediately while blob collections wait for the save, so a crash between a staff/organisation
+row write and the save already leaves, for example, an organisation row without its ledger
+entry. **Existing limitation (media):** files are deleted first (S:3982); a crash before the
+save leaves a player row whose media ids point at deleted files.
+
+**New inconsistency S4a would introduce if player rows were written immediately (design risk,
+not reproduced — nothing is implemented):** `players.remove(id)` as an autocommit `DELETE`
+followed by the blob cleanup in `persistNow()` makes the deletion **partially durable** on a
+crash between the two: the row is gone, the requests/trials still carry the name and id, the
+channels and messages still exist, the guardian still lists the child. The same shape applies to
+child creation (row inserted, link row inserted, ledger/saved-search/notifications not yet
+saved), aging-up (`guardian_id` nulled, link removed, timeline facet and ledger not yet saved)
+and the signing rollback (`restore` committed while `signings`/`ledger`/`invoices` truncation
+waits for the save).
+
+**Mechanism proposed for S4a: a unit of work on the store's save transaction.** `store.unitOfWork(fn)`
+opens the one save transaction, runs `fn`, in which repository row writes are allowed because
+the store owns the transaction (today's "refuse inside an open transaction" guard admits only
+the store's own unit of work), then writes every blob and commits. Repository bookkeeping
+(in-memory records, committed facets, derived `childIds`) is **staged** until `commit()` and
+discarded on `rollback()` — the S3 pending mechanism generalised from facets to rows: the
+repository re-reads the affected rows from the table on rollback, so its view never shows a
+state the database does not hold. In-memory blob mutations made inside `fn` are the caller's and
+stay in memory after a failure exactly as a failed `persistNow()` leaves them today; because the
+row writes are *also* undone, memory is then "intended state not yet durable" (as today for
+blobs), not "half durable". The next save retries the whole set. On a process crash inside the
+unit of work SQLite rolls back; the restart sees the pre-operation state in every collection:
+**not durable rather than partially durable**, which is today's guarantee. The four operations
+of §2.3 marked (UoW) run this way; single-field column writes (availability, Academy+, level,
+password rehash, consent, location, stats, prefs) keep the S3 immediate model unless they also
+write a blob in the same request, in which case they too run inside a unit of work. The route
+ends with `persistNow()` where today it does.
+
+**Media files (filesystem, outside SQLite).** Order is reversed: the database transaction
+commits first; file deletion follows. To make the second step reliable, the transaction writes a
+`media_deletions` queue (the media ids), processed immediately after commit and again at boot
+and on a sweep; an entry is removed only after the file is gone (idempotent). A crash after
+commit leaves files that no row references and no route can serve (`/media/:id` resolves the
+owner, S:4265) until the sweep removes them; a crash before commit deletes nothing. The dangling
+`boxSessions.clipMediaId` references are nulled inside the same transaction.
+
+**Failure-injection tests (S4a acceptance 7 and 14):** for each of the four operations: (a)
+failure injected after the row statement, before the blob writes (an unrelated collection that
+cannot be serialised); (b) failure at `COMMIT` (injected); (c) process killed inside the unit of
+work (child process, `SIGKILL` after a marker). After each: the database holds the pre-operation
+state in **every** collection and table (row present/absent, links, blobs, sessions), the
+repository view equals the table, the next save (a, b) lands the whole operation, and a restart
+(c) shows the pre-operation state everywhere with no dangling id and no half-deleted thread.
+Media: a crash after commit leaves the queue entry and the file; the boot sweep removes both;
+`/media/:id` answers 404 throughout.
 
 ## 8. Rollback design
 
+### 8.1 The tool
+
 `node scripts/coreIdentityRollback.mjs <data-dir> <out-dir>` on a copy (server stopped; the
 source is never modified; refuses a later schema with exit 4, a never-cut-over file with exit 5,
-a non-empty output directory with exit 1), mirroring `orgsRollback.mjs`:
+a non-empty output directory with exit 1): rebuild the `players` blob (columns and facets merged
+through `fromRow`, `guardianId` from the column); rebuild the `guardians` blob (`childIds` from
+`guardian_children` in `rowid` order, `coGuardians` and `emailCode` from the facets); recreate
+the S1 shadow definitions empty; leave `sessions`, `org_users`, `orgs` untouched (nobody signs
+in again); delete the `0005` record and the two `meta` keys; advance `meta.saveSeq`;
+`foreign_key_check`; VACUUM; verify against the real pre-S4 build (worktree at the S3 commit)
+with synthetic data, as S2 and S3 were.
 
-1. Rebuild the `players` blob from the table: columns and facets merged through `fromRow`
-   (`__meta` applied), `guardianId` from the column.
-2. Rebuild the `guardians` blob: columns and facets merged; `childIds` from
-   `guardian_children` for that guardian (primary and co rows, in `rowid` order); `coGuardians`
-   from the facet.
-3. Recreate the S1 shadow definitions of the three tables, empty (the pre-S4 build fills them
-   only when validation is on).
-4. Leave `sessions`, `org_users`, `orgs` untouched (nobody signs in again; no revoked session
-   returns); delete the `0005_core_identity_live` record, `meta.coreIdentityCutover` and
-   `meta.coreIdentityInit`; advance `meta.saveSeq`; `foreign_key_check`; VACUUM.
-5. Verify against the real pre-S4 build (worktree at the S3 commit) with synthetic data, as
-   S2 and S3 were.
+### 8.2 The e-mail verification dead end, resolved
 
-**What is preserved:** every player and guardian created or changed after the cutover, every
-facet change, every link change — because every column and facet has a pre-S4 representation.
+The first draft hashed the guardian e-mail code in S4a (as the S1 shadow does) and admitted that
+a guardian with an outstanding, unverified code could not verify on the pre-S4 build after a
+rollback, because that build compares the plain code (S:1269) and has no resend route. Printing
+the affected ids does not make those accounts recoverable, so that design is withdrawn.
 
-**Unavoidable loss or transformation, stated plainly:**
+**Resolution (S4a): the e-mail code is not hashed by S4a.** `emailCode` stays exactly what it is
+today — the existing plain value on the guardian record — as a transitional facet, like every
+other field S4 does not transform. No new copy is created, nothing is marked verified, nothing
+is read from mail logs. The rollback is then lossless for verification: the pre-S4 build reads
+the same field and the outstanding code still works. Hashing moves to **S6**, together with the
+things that make hashing operable — an expiry, an attempt limit and a resend route — so that a
+rollback from S6 has a recovery path (a guardian requests a new code) rather than a dead end.
+
+**If the Founder nevertheless wants the code hashed in S4a**, the tool refuses to produce a
+rollback copy (exit 6, no output file) while any guardian row has `email_verified = 0` and a
+non-null `email_code_hash`, listing the ids, because the output would not be usable for those
+accounts; the operator's choices are then to wait until those guardians have verified on the S4
+build or to accept the refusal. This is the only honest alternative; it is not the
+recommendation.
+
+### 8.3 What is preserved, what is lost
 
 | Post-S4 state | Pre-S4 representation | Loss |
 |---|---|---|
-| S4a only (no deletion change) | complete | **none** |
-| S4b tombstones (if O1 chooses a tombstone) | the pre-S4 build has no tombstone: a row with `deleted_at` would be served as a live player with the placeholder name | the tool **omits** tombstoned players from the blob (the pre-S4 build hard-deletes; audit rows keep dangling ids as they do today). The erased personal data cannot be restored by any rollback — the deletion is honoured either way. The count of omitted tombstones is printed. |
-| S4b guardian deletion (if added) | none | same treatment as above |
-| a `childIds` order the pre-S4 build produced by `push` | `rowid` order of the link rows | order may differ; no reader depends on it (verified by grep: 34 `includes`, 2 `filter`, 2 `map`, 2 `length`; the one index access, S:1630 `childIds[0]`, runs only when the list has exactly one entry) |
-| `email_code_hash` | the pre-S4 build compares the plain code (S:1269) | a guardian who had an outstanding, unverified code at rollback time cannot verify with it on the pre-S4 build and must request a new one — **there is no resend route today** (§5.3), so this is a real, bounded loss the rollback report must print (ids only). It is avoidable only by keeping the plain code, which S4 refuses to do. |
+| S4a (no deletion change, code not hashed) | complete | **none** — verified at S4a by the rollback test and by the pre-S4-build verification |
+| `childIds` order | `rowid` order of the link rows | may differ; no reader depends on order (§3) |
+| S4b tombstones (if O1 chooses one) | none: a pre-S4 build would serve a tombstone as a live player | the tool **omits** tombstoned players from the blob and prints the count; the erased personal data cannot be restored by any rollback — the deletion is honoured either way |
+| S4b guardian deletion (if added) | none | same |
 
-**Restoring a pre-S4 backup is not a rollback:** it discards every write since the backup across
-every collection (the S2/S3 argument). The tool above is the rollback.
+Restoring a pre-S4 backup is not a rollback: it discards every write since the backup across
+every collection. The tool above is the rollback.
 
 ## 9. Bounded implementation sequence and acceptance tests
 
-**S4a — cutover, repositories, allowlists (one commit).** No deletion-policy change: the
-delete routes call `players.remove(id)` (today's hard delete of the row) and keep the
-cross-collection work unchanged. Files: `repositories/guardians.mjs`, `repositories/players.mjs`
-(new, S3 shape: validation without coercion, `toRow/fromRow` with `__meta`, guarded
-composites incl. the two split composites, `insert/update/link/unlink/ageUp/restore/remove`,
-`flush/commit/rollback/saveHook`, `initState/initialize/attach`, `GUARDIANS_TABLE`/`PLAYERS_TABLE`
-for snapshot tools with `replace`+`prune` and the FK-aware prune order: links, players,
-guardians), `repositories/migrations/0005_core_identity_live.mjs`, `repositories/index.mjs`
-(`TABLES` order and prune order, boot order, report `domains.players/guardians`),
-`repositories/shadow.mjs` (retired) + `scripts/validateShadow.mjs` (retired or reduced to a
-dry-run wrapper), `store.mjs` (snapshot-presence marker, §7), `server.mjs` (the writers of
-§2.3; `childIds` writers; `playerViewForOrg` → `views/playerViews.mjs` allowlists; `/admin/guardians`;
-`guardianView`; the co-guardian uniqueness check), `m12/operations.mjs:280`, `m13/transitions.mjs:202`,
-`m29/index.mjs:278, 294–295, 620`, `seed.mjs` unchanged (data), `scripts/coreIdentityRollback.mjs`
-+ `repositories/coreIdentityRollback.mjs`, `scripts/testPlayers.mjs`, `scripts/testGuardians.mjs`,
-suite fixture updates, `01_identity.sql` (facets columns, lifecycle headers unchanged),
-`sqlite-schema.md` §5.0/§5.1, plan §S4, `OPERATIONS.md`, `CLAUDE.md`.
+**S4a — cutover, repositories, allowlists, unit of work (one commit; independent of O1).**
+Files: `repositories/guardians.mjs`, `repositories/players.mjs` (new, S3 shape plus
+`link/unlink/ageUp/restore/remove`, staged bookkeeping, `GUARDIANS_TABLE`/`PLAYERS_TABLE` with
+FK-aware prune order links → players → guardians), `repositories/migrations/0005_core_identity_live.mjs`,
+`repositories/index.mjs`, `repositories/shadow.mjs` (retired), `scripts/validateShadow.mjs`
+(retired), `store.mjs` (snapshot-presence signal §7.2; `unitOfWork` §7.4; `media_deletions`
+queue), `server.mjs` (writers of §2.3; `childIds` writers; `views/playerViews.mjs` allowlists per
+§6; `/admin/guardians`; the co-guardian uniqueness predicate; the shortlist reader guarded
+against a missing player — the verified defect of `s4-deletion-decision.md` §2 is fixed here
+because the allowlist view is rewritten anyway), `m12/operations.mjs:280`, `m13/transitions.mjs:202`,
+`m29/index.mjs:278, 294–295, 613–620`, `scripts/coreIdentityRollback.mjs` +
+`repositories/coreIdentityRollback.mjs`, `scripts/testPlayers.mjs`, `scripts/testGuardians.mjs`,
+fixtures, `01_identity.sql` (facets columns), `sqlite-schema.md` §5.0/§5.1, plan §S4,
+`OPERATIONS.md`, `CLAUDE.md`. `seed.mjs` unchanged (data).
 
-Acceptance (each a test that fails first on the S3 code where applicable):
+Acceptance (each a test that fails first where applicable):
 
-1. Round trip: every seed and signup shape of player and guardian is byte-identical through
-   `toRow/fromRow`, including absent `drillResults`, co-guardians without `password`,
-   `stats: null`, `location: null`, unknown fields.
-2. Validation: every unsupported shape of §5.5 refused with a reason; nothing coerced; the
-   shadow's defaults are not applied.
-3. Cutover: an S3 file cuts over with every field, every link (roles per §5.1), the three
-   tables live, `foreign_key_check` empty, both blobs retired, `coreIdentityInit = done`,
-   sessions byte-identical by hash; the staff and organisation tables untouched.
-4. Abort cases: missing guardian reference, missing child, dangling `coGuardianOf`, duplicate
-   `lower(email)`, primary-without-link disagreement, a `dob` the parser rejects → the file is
-   byte-identical, the same abort on restart, the repaired file cuts over; an injected failure
-   before commit leaves no trace.
-5. Counted-not-refused findings: `co` roles, adults still linked, minors without a link → cut
-   over, counts in `meta.coreIdentityCutover`, no row changed.
-6. Boot: a cut-over file boots as a snapshot (never from the seed) with no `players` blob; the
-   integrity report sees the players; a first installation initialises once from the seed;
-   interrupted initialisation retries; empty authoritative tables ignore stale arrays and blobs.
-7. Writers: every converted writer of §2.3 persists immediately and survives a restart; every
-   facet writer still works in place and persists on the next save; a failed save followed by a
-   successful one loses nothing (three records, failure after flush / inside flush / at COMMIT).
-8. Guards: assigning any column-backed field on a player or guardian view throws, nested values
-   of `location`, `stats`, `notificationPrefs`, `medical.shared`, `medical.conditionStatus`,
-   `programme.track` included; `medical.records.push` and `programme.completed.push` succeed;
-   `db.players.push`, `db.guardians[0] = …` throw; `childIds.push` throws (derived).
-9. Links: `link`/`unlink`/`ageUp` write both sides in one transaction; `guardian_id` always
-   equals the `primary` row; a second `primary` for one player is refused; the co-guardian route
-   refuses a duplicate e-mail with the signup's error before the index does.
-10. Views: for each audience of §6 the served keys equal the allowlist exactly (a table-driven
-    test over seed players: adult, minor, pro, grassroots viewer, agency viewer, unverified
-    club, blocked org); `visibleToOrg` and the block/report checks are called, not reimplemented;
-    `dob`, `password`, `guardianId`, GPS, prefs, external ids, other clubs' notes never appear in
-    an org view; `/admin/guardians` carries neither hash; the medical join follows `shared`.
-11. Snapshot tools: export/import and `POST /admin/backup` → restore keep every player,
-    guardian, link and session; a snapshot that lists a child for a guardian it no longer
-    contains is rejected as a whole; prune order links → players → guardians.
-12. Rollback: the tool's copy boots on the real S3 build with every post-S4 player, guardian and
-    link; the S4 build re-upgrades it; later schema refused with exit 4, never-cut-over with 5,
-    no output either time.
-13. Battery: unchanged suites (apiE2E, connectedE2E, m12*, m13*, m15*, m18*, m21*, m23*, m29*)
-    green apart from the two baseline `m182E2E` client checks; `m23BootContract` green.
+1. Round trip: every seed and signup shape byte-identical through `toRow/fromRow`, incl. absent
+   `drillResults`, co-guardians without `password`, present `emailCode`, nulls, unknown fields.
+2. Validation: every unsupported shape of §5.6 refused with a reason; nothing coerced.
+3. Cutover: an S3 file cuts over with every field, every link (roles per §5.1), three tables
+   live, `foreign_key_check` empty, blobs retired, `coreIdentityInit = done`, sessions identical
+   by hash, staff and organisation tables untouched, `emailCode` byte-identical.
+4. Abort cases (§5.2, §5.3, §5.6): file byte-identical, same abort on restart, repaired file cuts
+   over; injected failure before commit leaves no trace.
+5. Counted findings (co roles, adults still linked, **minors without a link**): cut over, counts
+   in `meta.coreIdentityCutover`, no row changed; a dry run lists the ids.
+6. Boot: a cut-over file boots as a snapshot with no `players` blob; integrity sees the players;
+   first installation initialises once; interrupted initialisation retries; empty authoritative
+   tables ignore stale arrays and blobs.
+7. Unit of work: for deletion, child creation, aging-up and the signing rollback, the three
+   failure injections of §7.4 leave every collection and table in the pre-operation state, the
+   view equals the table, and the retry lands the whole operation; a minor cannot be inserted
+   without a link in the same unit of work.
+8. Writers: every converted writer persists and survives a restart; every facet writer still
+   works in place; a failed save followed by a successful one loses nothing.
+9. Guards: column-backed assignment on a player or guardian view throws, nested values of
+   `location`, `stats`, `notificationPrefs`, `medical.shared`, `medical.conditionStatus`,
+   `programme.track` included; `medical.records.push`, `programme.completed.push`,
+   `emailCode` assignment (a facet) succeed; array mutation of the views and of `childIds` throws.
+10. Links: `link`/`unlink`/`ageUp` write both sides in one transaction; `guardian_id` always
+    equals the `primary` row; a second `primary` is refused; the co-guardian route refuses a
+    duplicate e-mail with the signup's error.
+11. Views: for each audience of §6 the served keys equal the recorded fixture of today's keys
+    minus exactly the intentional fixes of §6.1/§6.3/§6.5 (table-driven over seed players: adult,
+    minor, pro, grassroots viewer, agency viewer, unverified club, blocked org); `dob`,
+    `password`, `guardianId`, GPS, prefs, external ids, other clubs' reports never in an org
+    view; the unshared `medical` object is byte-identical to today's; `/admin/guardians` carries
+    neither hash nor code; `/org/shortlist` answers 200 after a shortlisted player is deleted.
+12. Snapshot tools: export/import and `POST /admin/backup` → restore keep every player,
+    guardian, link, code and session; a snapshot listing a child for a missing guardian is
+    rejected as a whole; prune order links → players → guardians.
+13. Rollback: lossless copy boots on the real S3 build with every post-S4 player, guardian and
+    link and an outstanding e-mail code that still verifies there; the S4 build re-upgrades it;
+    later schema exit 4, never-cut-over exit 5, no output either time.
+14. Media queue: a crash injected after commit leaves the file and the queue entry; the boot
+    sweep removes both; `/media/:id` answers 404 throughout.
+15. Battery: unchanged suites green apart from the two baseline `m182E2E` client checks;
+    `m23BootContract` green.
 
 **S4b — deletion and guardian lifecycle (one commit, only after O1 is answered).** Implements
-whatever O1 decides for the player tombstone (`players.erase(id)`: `deleted_at`, the retained
-columns per the decision, every other personal column nulled, the name replaced, owned facets
-cleared, name snapshots on retained rows replaced in the same transaction, media files deleted
-as today), the per-table lifecycle statements, and — if the Founder wants it — a guardian
-deletion route limited to guardians with no non-deleted child. Acceptance: the tombstone row
-remains, every retained row still references it, every owned facet and file is gone, a deleted
-player cannot sign in or be paired, the integrity report shows no orphan, the rollback tool omits
-tombstones and prints their count. Until then `removedAt`/`deletedAt` remain never-written and
-the three checks that read them (§2.1) remain dead.
+O1 (`players.erase(id)` inside the deletion unit of work: `deleted_at`, the retained columns per
+the decision, every other personal column nulled, the name replaced, owned facets cleared, name
+snapshots on retained rows replaced, the media queue), the per-table lifecycle statements, and —
+if the Founder wants it — a guardian deletion route limited to guardians with no undeleted
+child. Until then `removedAt`/`deletedAt` remain never-written.
 
 ## 10. Implemented versus proposed
 
-| Table | State at `d4ca3f2` | After S4a |
+| Table | State at `0c038ef` | After S4a |
 |---|---|---|
 | `org_users`, `sessions`, `orgs` | live (S0, S2, S3) | unchanged |
-| `guardians`, `players`, `guardian_children` | shadow (S1; filled only with `SCOUTBOX_SHADOW_VALIDATION=1`; nothing reads them) | **live**, with `facets_json` on `players` and `guardians` |
-| `players.deleted_at`, `guardians.deleted_at` | columns in the DDL, written by nothing | columns exist, **still written by nothing** (S4b) |
-| twelve `player_*` sub-record tables | proposed DDL, no migration | unchanged (S5); their data rides in `facets_json` |
-| file 02 (recruitment, 55 tables) | proposed; `player_id` without FK pending O1/S8a | unchanged |
+| `guardians`, `players`, `guardian_children` | shadow (S1) | **live**, with `facets_json` on `players` and `guardians`; `email_code_hash` column present but unused until S6 (the code rides in the facets) |
+| `players.deleted_at`, `guardians.deleted_at` | DDL only | still written by nothing (S4b) |
+| twelve `player_*` sub-record tables | proposed DDL | unchanged (S5) |
+| file 02 (recruitment) | proposed; `player_id` without FK pending O1/S8a | unchanged |
 | everything else (files 03–08) | proposed | unchanged |
 
-## 11. Open points this review does not decide
+## 11. Open points and the decisions still needed
 
-- **O1** (what the tombstone keeps) — `s4-deletion-decision.md`; S4b waits for it.
-- Whether `idvReference` should keep appearing in the guardian's own view (§6.3); whether the
-  closed org-view leaks (§6.1) need a client change (the clients do not render GPS, prefs or
-  external ids per the M24 privacy suites, but the Founder should confirm before the fields
-  disappear from the payload).
-- The co-guardian design (no login path, no invitation, no sync of later children, no
-  removal) is reproduced faithfully; redesigning it is a product decision outside S4.
-- The `drillResults` signup defect (§2.2) and the export/minor gap (§5.4) are route defects to
-  fix in their own change, not in the migration.
-- The runtime metadata alignment recorded in the plan (§S3 "Runtime contract": `engines.node
-  >=22.16.0` admits Node 23, which the documented contract neither supports nor refuses by
-  version) is independent of S4.
+**Resolved by this review (no decision needed):** the dependency statement (S4a independent of
+O1); the e-mail code dead end (not hashed in S4a); the transaction mechanism (unit of work,
+staged bookkeeping, media queue); the allowlists reconciled against the code (`academyPlus`,
+`firstTeamSeeker`, unshared `medical`, media items, `idvReference` corrected); the shortlist
+defect verified and assigned to S4a; the claim that identifying information disappears
+withdrawn (`s4-deletion-decision.md` §4).
+
+**Decisions still needed, in plain language:**
+
+1. **O1** — what birth information a deleted player's retained record may keep (and whether the
+   country code may stay): `s4-deletion-decision.md` §9. Blocks S4b only.
+2. **Legacy minors without any guardian link** — import them unchanged and list them (proposed,
+   §5.5), or refuse the cutover until each is resolved by hand on the pre-S4 build. Blocks S4a's
+   migration rule, not its design.
+3. **`createdAt` in the club view** — keep it (proposed, for client compatibility) or drop it
+   as the plan's leak list says. Blocks nothing; defaults to keep.
+4. **Two small response changes to confirm** — the child-creation response no longer carries a
+   `password: null` key (§6.3); `idvReference` stays in the guardian's own view (§6.3). Default:
+   as stated.
+
+Recorded, not for decision now: the co-guardian design is reproduced faithfully; the
+`drillResults` signup defect and the export/minor gap are route defects outside S4; the runtime
+metadata alignment (plan §S3) is independent of S4.

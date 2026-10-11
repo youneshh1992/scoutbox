@@ -829,14 +829,26 @@ performance, existing tests, what this plan is not).
 > **Prepared, not started** (11 October 2026). The evidence-based implementation plan —
 > every player and guardian field with its readers, writers and storage; what moves and what
 > stays nested; the relationship, minor, duplicate and inconsistency findings; the per-audience
-> allowlists; migration, restart, authority, session and failed-save behaviour; the rollback
-> design with its stated losses; the bounded sequence (**S4a** cutover with today's deletion
-> behaviour unchanged, **S4b** deletion after O1) and acceptance tests — is
-> [`s4-readiness-review.md`](./s4-readiness-review.md). The unresolved deletion decision O1 is
-> put to the Founder in [`s4-deletion-decision.md`](./s4-deletion-decision.md); S4b waits for
-> the answer, and S4a takes no deletion-policy decision implicitly. The text below is the
-> original step design and is read together with those two documents (where they differ, the
-> readiness review is the current evidence).
+> allowlists reconciled field by field against today's responses; migration, restart,
+> authority, session and failed-save behaviour; the transaction boundaries of the operations
+> that span several collections (a unit of work on the save transaction, staged repository
+> bookkeeping, a media-deletion queue); the rollback design with its stated losses; the bounded
+> sequence (**S4a** cutover with today's deletion behaviour unchanged, **S4b** deletion after
+> O1) and acceptance tests — is [`s4-readiness-review.md`](./s4-readiness-review.md), corrected
+> after an independent review (the guardian e-mail code is **not** hashed in S4a so the rollback
+> stays lossless; the hashing moves to S6 with expiry, attempt limits and a resend route). The
+> unresolved deletion decision O1 is put to the Founder in
+> [`s4-deletion-decision.md`](./s4-deletion-decision.md), which separates demonstrated code
+> dependencies (none for a deleted account) from review purposes and distinguishes status at an
+> incident, at a report and at a moderation decision. **Dependency:** S4a does not depend on
+> O1; S4b does. Two acceptance statements of the text below are superseded by the review:
+> "a minor cannot exist without a `guardian_children` row" is a rule for new writes, and legacy
+> minors without a link are a presented discrepancy (readiness review §5.5) awaiting the
+> Founder's choice; the org view keeps `createdAt` unless the Founder decides otherwise. Where
+> the two documents differ from the text below, the readiness review is the current evidence.
+> Review-only reproduction: `scoutbox-server/scripts/review/reproShortlistAfterDeletion.mjs`
+> (verified: `GET /org/shortlist` answers 500 after a shortlisted player deletes their
+> account; fixed in S4a).
 
 - **Objective.** `guardians`, `players` (scalar columns) and `guardian_children` live. The
   player and guardian repositories expose typed reads: by id, by guardian, the paginated
