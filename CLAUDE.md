@@ -47,8 +47,10 @@ and design changes the Founder explicitly requests.
   report or export a plain bearer token. `node:sqlite` is required (Node 22.5+);
   there is no JSON or in-memory fallback, and whether a table is authoritative
   is decided by its record in `data_migrations`, never by the table existing.
-  Snapshot writes validate every table-backed row and reject the whole save on
-  the first problem. Never put a whole-collection
+  Snapshot writes check every table-backed collection's shape, then every row,
+  and reject the whole save on the first problem; an existing but invalid
+  legacy `db.json` is a fatal import error, never "no snapshot". Never put a
+  whole-collection
   re-projection in the default save path. The target schema and the step
   order are `docs/architecture/sqlite-schema.md` and
   `docs/architecture/sqlite-migration-plan.md`; a new table must appear in the

@@ -759,6 +759,151 @@ await atest('server (review correction 2): a legacy db.json with a staff member 
   }
 });
 
+// ------------------------------------------------------------- collection shape (review correction 5)
+test('snapshot mode (review correction 5): a table-backed collection that is not an array is refused whole, before and after the cutover; an omitted collection is a partial snapshot', () => {
+  const dir = tempDir('s2-shape');
+  let store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const db = { orgs: [], guardians: [], players: [{ id: 'pl-1', name: 'Original' }], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'A', role: 'Scout', createdAt: 1 }] };
+  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  const a = layer.sessions.create('player', 'pl-1');
+  store.save({ savedAt: 1, idCounter: 1000, db }); store.sqlite.close();
+  const tool = openStore(dir);
+  const before = tool.load();
+  const PLAIN = 'synthetic-plaintext-token-that-must-never-be-written';
+  const untouched = () => {
+    const now = tool.load();
+    assert.deepEqual(now.db.sessions, before.db.sessions, 'the stored sessions are exactly what they were');
+    assert.deepEqual(now.db.users, before.db.users);
+    assert.equal(now.db.players[0].name, 'Original', 'the unrelated player change was rolled back');
+    assert.equal(now.saveSeq, before.saveSeq, 'no save revision was spent');
+    assert.equal(tool.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name IN ('sessions', 'users')").get().n, 0, 'no legacy blob was recreated after the cutover');
+    assert.equal(tool.sqlite.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 1, 'the live table still holds the session');
+    tool.sqlite.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    assert.ok(!fs.readFileSync(path.join(dir, 'scoutbox.db'), 'latin1').includes(PLAIN), 'the plaintext token is nowhere in the file');
+  };
+  const attempt = (collection, value, pattern) => {
+    const snap = tool.load();
+    snap.db.players[0].name = 'Changed';
+    snap.db[collection] = value;
+    assert.throws(() => tool.save(snap), pattern);
+    untouched();
+  };
+  // Codex's reproduction: an object carrying a plaintext token in place of the sessions array.
+  attempt('sessions', { token: PLAIN, sid: 'sid-obj', kind: 'player', refId: 'pl-1', createdAt: 5 }, /sessions.*must be an array.*got an object/);
+  attempt('sessions', null, /sessions.*must be an array.*got null/);
+  attempt('sessions', 'not-a-collection', /sessions.*must be an array.*got a string/);
+  attempt('sessions', 42, /sessions.*must be an array.*got a number/);
+  // The same protection for the other migrated collection.
+  attempt('users', { id: 'usr-x', orgId: 'org-a', name: 'X', role: 'Scout' }, /users.*must be an array.*got an object/);
+  attempt('users', null, /users.*must be an array.*got null/);
+  // An omitted collection is a partial snapshot: the save commits and leaves that table alone.
+  const partial = tool.load(); delete partial.db.sessions; delete partial.db.users; partial.db.players[0].name = 'Renamed';
+  tool.save(partial);
+  assert.equal(tool.load().db.players[0].name, 'Renamed');
+  assert.deepEqual(tool.load().db.sessions, before.db.sessions); assert.deepEqual(tool.load().db.users, before.db.users);
+  tool.sqlite.close();
+  // Before the cutover (an S1 file) the blob is authoritative, and a non-array is refused before it could become the blob.
+  const pre = tempDir('s2-shape-pre');
+  preS2File(pre, { sessions: legacySessions() });
+  const pt = openStore(pre);
+  const preBefore = JSON.stringify(pt.load().db.sessions);
+  for (const bad of [{ token: PLAIN }, null, 'x']) {
+    const snap = pt.load(); snap.db.sessions = bad; snap.db.players[0].name = 'Changed';
+    assert.throws(() => pt.save(snap), /sessions.*must be an array/);
+    assert.equal(JSON.stringify(pt.load().db.sessions), preBefore, 'the legacy blob is unchanged');
+    assert.equal(pt.load().db.players[0].name, 'P');
+  }
+  assert.ok(!fs.readFileSync(path.join(pre, 'scoutbox.db'), 'latin1').includes(PLAIN));
+  pt.sqlite.close();
+  // The server still reads the untouched session.
+  store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const layer2 = attachDataLayer({ db: { orgs: [], guardians: [], players: [], users: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  assert.ok(layer2.sessions.byToken(a.token));
+  store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(pre, { recursive: true, force: true });
+});
+
+// ------------------------------------------------------------- legacy envelope (review correction 6)
+test('legacy db.json (review correction 6): an unreadable, malformed or structurally invalid db.json is a fatal import error that preserves the file and the database; only genuine absence means first installation', () => {
+  const cases = [
+    ['truncated JSON', '{"db":', /LEGACY_IMPORT_FAILED.*not valid JSON/],
+    ['empty file', '', /LEGACY_IMPORT_FAILED.*not valid JSON/],
+    ['no db envelope', '{"savedAt":1}', /LEGACY_IMPORT_FAILED.*has no "db" object/],
+    ['db is an array', '{"db":[1,2]}', /LEGACY_IMPORT_FAILED.*has no "db" object/],
+    ['db is a string', '{"db":"players"}', /LEGACY_IMPORT_FAILED.*has no "db" object/],
+    ['top level is an array', '[{"db":{}}]', /LEGACY_IMPORT_FAILED.*not a JSON object/],
+    ['a table-backed collection with the wrong shape', JSON.stringify({ savedAt: 1, idCounter: 1, db: { players: [], sessions: { token: 'plain-token-in-envelope', sid: 's', kind: 'player', refId: 'pl-1', createdAt: 5 } } }), /LEGACY_IMPORT_FAILED.*sessions.*must be an array/],
+    ['players is not an array', JSON.stringify({ savedAt: 1, idCounter: 1, db: { players: 'nope' } }), /LEGACY_IMPORT_FAILED.*"players" must be an array \(got string\)/],
+    ['players is missing', JSON.stringify({ savedAt: 1, idCounter: 1, db: { orgs: [] } }), /LEGACY_IMPORT_FAILED.*"players" must be an array \(got undefined\)/],
+  ];
+  for (const [name, content, pattern] of cases) {
+    const dir = tempDir('s2-envelope');
+    fs.writeFileSync(path.join(dir, 'db.json'), content);
+    const store = openStore(dir, { tableBacked: TABLE_BACKED });
+    assert.throws(() => store.load(), (err) => err.code === 'LEGACY_IMPORT_FAILED' && pattern.test(err.message), `${name}: a fatal import error`);
+    assert.equal(fs.readFileSync(path.join(dir, 'db.json'), 'utf8'), content, `${name}: the source file is preserved byte for byte`);
+    assert.ok(!fs.existsSync(path.join(dir, 'db.json.migrated')), `${name}: nothing was renamed`);
+    assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM collections').get().n, 0, `${name}: nothing was written`);
+    assert.ok(!fs.readFileSync(path.join(dir, 'scoutbox.db'), 'latin1').includes('plain-token-in-envelope'));
+    // Retry without change: the same error, still nothing written. A repaired file then imports.
+    assert.throws(() => store.load(), (err) => err.code === 'LEGACY_IMPORT_FAILED');
+    store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+  }
+  // An unreadable file (a directory in its place) is fatal too, not "absent".
+  {
+    const dir = tempDir('s2-envelope-dir'); fs.mkdirSync(path.join(dir, 'db.json'));
+    const store = openStore(dir, { tableBacked: TABLE_BACKED });
+    assert.throws(() => store.load(), (err) => err.code === 'LEGACY_IMPORT_FAILED' && /could not be read/.test(err.message));
+    store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+  }
+  // Genuine absence: null, nothing written, first-installation behaviour.
+  {
+    const dir = tempDir('s2-envelope-absent');
+    const store = openStore(dir, { tableBacked: TABLE_BACKED });
+    assert.equal(store.load(), null);
+    assert.deepEqual(fs.readdirSync(dir).filter((f) => f.startsWith('db.json')), []);
+    store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+  }
+  // Failure then retry with a repaired file: the import succeeds and the file is retired.
+  {
+    const dir = tempDir('s2-envelope-retry');
+    fs.writeFileSync(path.join(dir, 'db.json'), '{"db":');
+    let store = openStore(dir, { tableBacked: TABLE_BACKED });
+    assert.throws(() => store.load(), (err) => err.code === 'LEGACY_IMPORT_FAILED');
+    store.sqlite.close();
+    fs.writeFileSync(path.join(dir, 'db.json'), JSON.stringify({ savedAt: 1, idCounter: 1, db: { players: [{ id: 'pl-1', name: 'P' }], users: [], orgs: [], guardians: [], sessions: [{ token: 'retry-token', sid: 'sid-r', kind: 'player', refId: 'pl-1', createdAt: Date.now() - DAY }] } }));
+    store = openStore(dir, { tableBacked: TABLE_BACKED });
+    const loaded = store.load();
+    assert.equal(loaded.db.players[0].name, 'P');
+    assert.ok(fs.existsSync(path.join(dir, 'db.json.migrated')) && !fs.existsSync(path.join(dir, 'db.json')));
+    const layer = attachDataLayer({ db: { ...loaded.db }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+    assert.ok(layer.sessions.byToken('retry-token'));
+    store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+await atest('server (review correction 6): a malformed or invalid db.json stops the server before it listens, with the file preserved and no seed data saved', async () => {
+  for (const [name, content] of [['truncated JSON', '{"db":'], ['no db envelope', '{"savedAt":1}'], ['sessions is an object', '{"savedAt":1,"idCounter":1,"db":{"players":[],"sessions":{"token":"plain-token-in-envelope"}}}']]) {
+    const dir = tempDir('s2-server-envelope');
+    fs.writeFileSync(path.join(dir, 'db.json'), content);
+    const port = pickPort(7950, 50);
+    const proc = spawn(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    let log = ''; proc.stdout.on('data', (d) => { log += d; }); proc.stderr.on('data', (d) => { log += d; });
+    const exit = await new Promise((resolve, reject) => {
+      proc.on('exit', (code) => resolve(code));
+      setTimeout(() => { proc.kill('SIGKILL'); reject(new Error(`${name}: the server did not stop: ${log}`)); }, 20_000);
+    });
+    assert.notEqual(exit, 0, `${name}: the process ends with a failure code`);
+    assert.match(log, /LEGACY_IMPORT_FAILED/, `${name}: the failure is the import error`);
+    assert.ok(!/listening on/.test(log), `${name}: it never listened`);
+    assert.equal(fs.readFileSync(path.join(dir, 'db.json'), 'utf8'), content, `${name}: db.json is preserved`);
+    assert.ok(!fs.existsSync(path.join(dir, 'db.json.migrated')));
+    const raw = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true });
+    assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM collections').get().n, 0, `${name}: no seed data was saved`);
+    raw.close();
+    assert.ok(!fs.readFileSync(path.join(dir, 'scoutbox.db'), 'latin1').includes('plain-token-in-envelope'));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ------------------------------------------------------------- SQLite is required (review correction 4)
 test('without node:sqlite the store refuses to open with a compatibility error and touches nothing; the repositories refuse a missing connection', () => {
   const dir = tempDir('s2-nosqlite');

@@ -34,13 +34,49 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { readTableBacked, writeTableBacked } from './repositories/index.mjs';
+import { readTableBacked, writeTableBacked, checkTableBackedShapes } from './repositories/index.mjs';
 
 let DatabaseSync = null;
 try {
   ({ DatabaseSync } = await import('node:sqlite'));
 } catch {
   // Reported by openStore, which refuses to run without it.
+}
+
+function legacyImportError(detail, cause) {
+  const err = new Error(`LEGACY_IMPORT_FAILED: ${detail}. db.json was left in place and the database was not changed; the server must not start from seed over it.`);
+  err.code = 'LEGACY_IMPORT_FAILED';
+  if (cause) err.cause = cause;
+  return err;
+}
+
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * Read and validate a legacy db.json envelope. Returns null only when the file
+ * does not exist. Anything else that stops the file from being imported as it
+ * is — unreadable, not JSON, not an object, no `db` object, a collection that
+ * is neither an array nor an object, a table-backed collection that is not an
+ * array — throws LEGACY_IMPORT_FAILED before a byte is written or renamed.
+ */
+function readLegacySnapshot(legacyFile) {
+  let raw;
+  try { raw = fs.readFileSync(legacyFile, 'utf8'); } catch (err) {
+    if (err?.code === 'ENOENT') return null;
+    throw legacyImportError(`db.json exists but could not be read (${err?.code ?? err?.message ?? err})`, err);
+  }
+  let legacy;
+  try { legacy = JSON.parse(raw); } catch (err) { throw legacyImportError(`db.json is not valid JSON (${err?.message ?? err})`, err); }
+  if (!isPlainObject(legacy)) throw legacyImportError('db.json is not a JSON object (a snapshot is { savedAt, idCounter, db })');
+  if (!isPlainObject(legacy.db)) throw legacyImportError('db.json has no "db" object (a snapshot is { savedAt, idCounter, db: { <collection>: [...] } })');
+  // Every ScoutBox snapshot has had a `players` array since the first
+  // milestone, and server.mjs refuses to run from a snapshot without one; a
+  // file that lacks it is refused here, before it could be imported and then
+  // mistaken for "no snapshot". Other blob collections may hold any JSON value
+  // (modules keep scalars such as a timestamp under their own keys).
+  if (!Array.isArray(legacy.db.players)) throw legacyImportError(`db.json collection "players" must be an array (got ${legacy.db.players === null ? 'null' : Array.isArray(legacy.db.players) ? 'an array' : typeof legacy.db.players})`);
+  try { checkTableBackedShapes(legacy.db); } catch (err) { throw legacyImportError(`db.json ${err.message}`, err); }
+  return legacy;
 }
 
 export function openStore(dataDir, { tableBacked = null } = {}) {
@@ -133,16 +169,18 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
         // it has. Only after that commit is db.json renamed. A failure leaves
         // db.json in place, writes nothing, and is fatal to the caller: it must
         // never be mistaken for "no snapshot, run from seed".
-        let legacy = null;
-        try { legacy = JSON.parse(fs.readFileSync(legacyFile, 'utf8')); } catch { legacy = null; }
-        if (!legacy?.db) return null;
+        //
+        // Only a GENUINELY ABSENT db.json means "first installation". A file
+        // that exists but cannot be read, is not valid JSON, or is not a
+        // snapshot envelope (`{ db: { <collection>: [] | {} } }`) is a snapshot
+        // the operator meant to keep, and it is refused with the same fatal
+        // error — never turned into "no snapshot".
+        const legacy = readLegacySnapshot(legacyFile);
+        if (legacy === null) return null;
         try {
           write(legacy, { asSnapshot: true });
         } catch (err) {
-          const wrapped = new Error(`LEGACY_IMPORT_FAILED: db.json could not be imported into scoutbox.db (${err?.message ?? err}). db.json was left in place and the database was not changed; the server must not start from seed over it.`);
-          wrapped.code = 'LEGACY_IMPORT_FAILED';
-          wrapped.cause = err;
-          throw wrapped;
+          throw legacyImportError(`db.json could not be imported into scoutbox.db (${err?.message ?? err})`, err);
         }
         fs.renameSync(legacyFile, `${legacyFile}.migrated`);
         return legacy;

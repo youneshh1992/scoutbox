@@ -478,6 +478,38 @@ performance, existing tests, what this plan is not).
   harness (its check counts only after the assertions pass); the server test carries a
   deterministic media fixture and requires the signed link, a 200 with the fixture bytes, a
   401 for a re-pointed sid and a 401 after logout.
+- **Review corrections after `8baafde`** (two further defects the reviewer reproduced; each
+  has a regression that failed first; `testSessions.mjs` now has 25 checks):
+  5. *Non-array collections bypassed the strict validation.* `writeTableBacked` skipped any
+     table-backed collection that was not an array, so a snapshot whose `sessions` was an
+     object (carrying a plaintext token) was never validated: the save wrote the object into
+     `collections.sessions` as a new legacy blob, plaintext token included, next to the live
+     table, and committed the unrelated change. Now `checkTableBackedShapes()` runs before
+     anything is dispatched: an absent (or `undefined`) collection is a partial snapshot that
+     leaves its table alone; a present non-array (object, null, string, number) throws, the
+     transaction rolls back, nothing is written to any table or blob, and after a cutover no
+     legacy blob can be recreated whatever the input shape. The same check protects `users`.
+     Tests: Codex's object-with-token case, null, string, number, for both collections;
+     unchanged sessions, users and unrelated records; no plaintext token in the file after a
+     checkpoint; no blob row; an omitted collection commits; the pre-cutover (S1) file refuses
+     the same shapes without touching its blob.
+  6. *Invalid legacy files fell back to seed data.* `store.load()` turned a read or parse
+     error, or an envelope without `db`, into `null`, which `server.mjs` treats as "no
+     snapshot" and runs from seed, persisting demo data next to the untouched invalid file.
+     Now only a genuinely absent `db.json` (ENOENT) returns null. An existing file that cannot
+     be read, is not valid JSON, is not a JSON object, has no `db` object, has no `players`
+     array, or carries a table-backed collection that is not an array throws
+     `LEGACY_IMPORT_FAILED` before a byte is written or renamed; the import failure path from
+     correction 2 is unchanged. Other blob collections may hold any JSON value (modules keep
+     scalars such as `deliveryCentreSince`, which the backup of a running server exports).
+     Tests at the store level: truncated JSON, empty file, `{"savedAt":1}`, `db` as an array
+     or a string, a top-level array, a non-array `sessions`, a non-array or missing `players`,
+     an unreadable path (a directory named `db.json`): each fatal, source byte-identical,
+     nothing renamed, nothing written, same result on retry; genuine absence → null;
+     failure then a repaired file → import and cutover succeed. Through the spawned server:
+     truncated JSON, `{"savedAt":1}` and an object `sessions` each end the process with a
+     non-zero code and `LEGACY_IMPORT_FAILED` before `listening on`, with `db.json`
+     preserved, nothing renamed and zero rows in `collections` (no seed save).
 
 ### S3 — Organisations cut over (+ `org_users` rebuild with FK, org tombstone)
 

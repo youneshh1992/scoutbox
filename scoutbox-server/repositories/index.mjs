@@ -63,14 +63,37 @@ export function readTableBacked(sqlite) {
   }
   return out;
 }
+const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`);
+
+/**
+ * Check the shape of every table-backed collection a snapshot carries, before
+ * anything is dispatched to a table or written as a blob. A collection that
+ * is absent (or `undefined`, which JSON cannot carry) is OMITTED: a partial
+ * snapshot that leaves that domain alone. A collection that is present but
+ * not an array — an object, null, a string, a number — is an explicitly
+ * supplied invalid value and THROWS, so the caller's transaction rolls back
+ * with nothing written: no table row, and no blob that could carry whatever
+ * the value held (a plaintext token, say). Returns the names that are present.
+ */
+export function checkTableBackedShapes(db) {
+  const present = [];
+  for (const table of TABLES) {
+    const value = db?.[table.name];
+    if (value === undefined) continue;
+    if (!Array.isArray(value)) throw new TypeError(`${table.name}: the snapshot collection must be an array of records (got ${describe(value)}); the save was rolled back and nothing was written`);
+    present.push(table.name);
+  }
+  return present;
+}
+
 export function writeTableBacked(sqlite, db) {
   const written = [];
-  for (const table of TABLES) {
-    if (!Array.isArray(db?.[table.name])) continue;
+  for (const name of checkTableBackedShapes(db)) {
+    const table = TABLES.find((t) => t.name === name);
     // `replace` is false before the domain's cutover record exists (the blob
     // is still authoritative, so the caller writes it) and THROWS on a row the
     // table refuses, which rolls the caller's whole transaction back.
-    if (table.replace(sqlite, db[table.name])) written.push(table.name);
+    if (table.replace(sqlite, db[name])) written.push(name);
   }
   return written;
 }

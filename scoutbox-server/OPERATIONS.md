@@ -50,17 +50,28 @@ rollback copy's emptied table); after it the blob is gone.
   written into the database first (table-backed collections as blobs when
   their domain has not cut over yet, so the cutover migrations import them
   from the file; into their tables when it has), and only after that commit is
-  the file renamed `db.json.migrated`. If the import fails the boot stops with
-  `LEGACY_IMPORT_FAILED`, `db.json` stays in place and nothing is written; the
-  server never starts from seed over a snapshot it could not import.
+  the file renamed `db.json.migrated`. Only a **genuinely absent** `db.json`
+  means "first installation, run from seed". A file that exists but cannot be
+  read, is not valid JSON, is not a snapshot envelope (`{ savedAt, idCounter,
+  db: { players: [...], ... } }`), or carries a table-backed collection that is
+  not an array stops the boot with `LEGACY_IMPORT_FAILED` **before it
+  listens**: `db.json` stays in place byte for byte, nothing is written or
+  renamed, and no seed data is saved. The same happens when the content fails
+  the import itself (an unsupported session, say). Fix or move the file, then
+  start again; the retry imports a repaired file.
 - **Snapshot saves are strict.** A tool writing a snapshot back (restore,
-  fixture) has every table-backed row validated first. One invalid or
-  conflicting row (malformed session, duplicate session id or token, a staff
-  relationship the snapshot itself breaks) rejects the **whole save**: the
-  transaction rolls back and every collection, sessions included, stays as it
-  was. Nothing is coerced, repaired or dropped; the error names the session id
-  and the reason, never a token. Removing a session is an explicit act (sign
-  out, revocation, or a snapshot that no longer lists it).
+  fixture) has every table-backed collection checked first. A collection that
+  is present but not an array (an object, `null`, a string, a number) rejects
+  the **whole save** before anything is dispatched to a table or a blob, so
+  nothing it held (a plaintext token, say) can reach the file and no legacy
+  blob is recreated after a cutover; a collection that is simply absent is a
+  partial snapshot and leaves that table alone. Then every row is validated:
+  one invalid or conflicting row (malformed session, duplicate session id or
+  token, a staff relationship the snapshot itself breaks) rejects the whole
+  save the same way. The transaction rolls back and every collection, sessions
+  included, stays as it was. Nothing is coerced, repaired or dropped; the error
+  names the session id and the reason, never a token. Removing a session is an
+  explicit act (sign out, revocation, or a snapshot that no longer lists it).
 
 A third kind exists during the migration: *shadow* tables (`orgs`, `guardians`,
 `players`, `guardian_children` since migration `0002`). The blob is still the
