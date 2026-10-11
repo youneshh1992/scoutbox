@@ -71,10 +71,14 @@ and design changes the Founder explicitly requests.
   decision); a first installation initialises once from explicit state
   (`meta.coreIdentityInit`), `attach` never imports an in-memory array, and
   the S1 shadow projection is retired. Every operation that writes a row and
-  a blob (sign-up, child creation, verification, aging-up, the signing
-  completion, deletion) runs in one unit of work; deletion queues the media
-  removals in `media_deletions` (migration `0006`) inside the same transaction
-  and the files go after COMMIT; player and guardian responses come from the
+  a blob or a facet (sign-up, child creation, verification, aging-up, the
+  signing completion, deletion, a medical record, programme selection,
+  Academy+, stats, squad release) runs in one unit of work; deletion queues
+  the media removals in `media_deletions` (migration `0006`) inside the same
+  transaction and the files go after COMMIT; a backup exports that queue as
+  `mediaDeletions` and never copies a queued file, and a restore imports it
+  (migration `0006`) and finishes the removal at boot; player and guardian
+  responses come from the
   allowlists in `views/playerViews.mjs`; the copy-only rollback tool is
   `scripts/coreIdentityRollback.mjs` (refuses a pending initialisation and a
   non-empty media queue). **Registration in source is development work, not
@@ -93,7 +97,12 @@ and design changes the Founder explicitly requests.
   whole-collection
   re-projection in the default save path. An operation that writes a
   table-backed collection and the blob together runs inside
-  `store.unitOfWork(() => …)`: synchronous work (an `async function` is
+  `store.unitOfWork(() => …)` — and so does a route that changes a column AND
+  a facet of the same record, a blob, an audit entry or another domain (a
+  repository write followed by an in-place edit left to the delayed save is
+  the half-saved operation the review of `9656a4b` reproduced); a provider
+  call is made before the unit, never inside it; a failed unit is answered as
+  a failure (500), never as success. The store's `unitOfWork`: synchronous work (an `async function` is
   refused before it runs; never schedule asynchronous work inside a unit, the
   store cannot cancel a continuation), one transaction, all-or-nothing with the
   in-memory graph restored on failure; a nested unit joins and its failure

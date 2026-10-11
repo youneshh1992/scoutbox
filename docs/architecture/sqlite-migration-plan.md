@@ -982,10 +982,13 @@ performance, existing tests, what this plan is not).
 > integration (the snapshot dispatcher does not know the two tables), and the media-deletion
 > handling; O1 remains the Founder's decision; S4b and S5 are not started.
 >
-> **S4a, fourth part — the live cutover integrated: DONE (this commit). S4a complete.**
+> **S4a, fourth part — the live cutover integrated: implemented (`9656a4b`); review
+> acceptance of S4a is pending the reviewer's re-check of the three corrections of the fifth
+> part below — it is not claimed here.**
 > Migration `0005_core_identity_live` is **registered** (`DATA_MIGRATIONS` is 0001–0006;
 > `0006_media_deletions` creates the media-removal queue) and `TABLE_BACKED` is `orgs`,
-> `players`, `guardians`, `users`, `sessions`. `attachDataLayer` attaches the identity
+> `players`, `guardians`, `users`, `sessions` (and, since the fifth part, `mediaDeletions`,
+> the queue in snapshots). `attachDataLayer` attaches the identity
 > repositories between the organisations and the staff (initialises from the seed once while
 > `meta.coreIdentityInit` is `pending`, attaches and never imports otherwise), defines the
 > read-only views and registers the save-hook participant; the S1 shadow projection, its
@@ -1032,6 +1035,49 @@ performance, existing tests, what this plan is not).
 > S4b, the hashing of the e-mail code (S6), S5. No real data was touched; registration in source
 > is development work, not authorization for a real-data cutover (operator procedure:
 > `scoutbox-server/OPERATIONS.md`, "Players and guardians").
+
+> **S4a, fifth part — the three review findings of `9656a4b`, corrected (failing-first).**
+> (1) *Route transactions finished.* A request that changed a column and something else in the
+> same operation — `POST /player/medical/records` (the condition column, then the record as a
+> facet), guardian ID verification (the column, then the audit-queue entry), programme selection
+> (the track columns, then the reset of the completed sessions), Academy+ (the column, then the
+> badge), stats (the columns, then the activity log), squad release (the organisation's squad
+> facet, the player's columns, the reference, the ledger row, the notifications) — committed the
+> column at once and left the rest to the delayed save, so a crash right after the response
+> kept half of it. Each is now ONE `unit()`; the provider call of the ID verification stays
+> outside the transaction and the unit is entered once it answered; a failed unit answers 500,
+> never success. `scripts/testWriterAtomicity.mjs` proves every one through the real server: a
+> second connection right after the response sees the whole change, a SIGKILL right after it
+> loses nothing, a named seam after the first row write (`internal:<route>.after_row`) and a
+> failure of the REAL SQLite COMMIT (`internal:unit.sqlite_commit` → the store's
+> `failCommitOfOpenTransaction`: a deferred foreign-key violation the engine refuses at the
+> COMMIT statement, not a throw placed before it) each leave nothing in the database or in
+> memory, and the retry lands everything. The server suite's claim that "every writer" was
+> covered is corrected to the writers it names. A composite's remainder (`medical.records`,
+> `programme.completed`, an unknown `stats` sub-key) is now stored under the composite's own key
+> in `facets_json` — `facets_json.medical.records`, as the documents describe — instead of the
+> reserved `__rest`; rows written in the old layout still read back identically. (2) *Pending
+> media removal through backup/restore.* `POST /admin/backup` exports the `media_deletions`
+> rows as the `mediaDeletions` collection and leaves every queued file out of `media/` (the
+> manifest's `media.queuedForRemoval`); `TABLE_BACKED` lists `mediaDeletions`; the snapshot
+> dispatcher reads the queue from the table and writes it back through it, validated whole
+> (`MEDIA_DELETIONS_TABLE`); migration `0006` imports and retires a restored `db.json`'s
+> `mediaDeletions` blob (a tampered entry aborts the migration whole and the next boot refuses
+> the same way; nothing is ever removed on the strength of a file); a stale in-memory array at
+> boot is reported and dropped; the boot sweep clears an imported entry once the file is absent
+> and removes a file copied back by hand; an older backup without the queue restores as before;
+> a backup that fails midway answers `500 BACKUP_FAILED` and leaves no partial directory. The
+> rollback tool's refusal of a non-empty queue is unchanged. (3) *Order-independent snapshot
+> replacement.* `IDENTITY_SNAPSHOT.replace` rewrites the three tables from the validated
+> candidate (links, players, guardians deleted; guardians in two passes, players, links
+> inserted in snapshot order) instead of upserting over obsolete rows, so a replacement
+> guardian may reuse a removed guardian's e-mail, two retained guardians may swap e-mails, a
+> co-guardian may be listed before its primary, and reversed input orders give the same tables;
+> real duplicates, missing references and the legacy-minor rule stay refused; a failure
+> mid-rewrite and a failure of the real COMMIT leave every row, link, facet and other collection
+> intact and a correct retry succeeds. The reviewer's `review-9656a4b-reproductions.mjs` reports
+> 0 of 3 on this tree; the five earlier scripts still pass. **Review acceptance of S4a is the
+> reviewer's to give; O1, S4b, S6 and S5 stay open.**
 
 - **Objective.** `guardians`, `players` (scalar columns) and `guardian_children` live. The
   player and guardian repositories expose typed reads: by id, by guardian, the paginated

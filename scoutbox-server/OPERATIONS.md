@@ -417,7 +417,19 @@ the end of this section is the gate.
   with the attempt count and the error; while an entry exists `/media/:id`
   answers 404 for that id whatever the session. `dataLayer.mediaDeletions.queued`
   on `/capabilities` is the number of pending removals; `queued: 0` is the
-  normal state.
+  normal state. **Backups carry the intent, never the file:** `POST /admin/backup`
+  exports the queue with the snapshot (`db.json` → `mediaDeletions`, the rows in
+  their stored form) and leaves every queued file OUT of `media/` (the
+  manifest's `media.queuedForRemoval` counts them). A restored server imports
+  the queue (migration `0006` reads the `mediaDeletions` collection of a
+  restored `db.json`; a snapshot tool writes it through the table), serves
+  nothing for those ids, clears each entry once the file is confirmed absent,
+  and removes at boot a file an operator copied back by hand. A backup from a
+  build without the queue restores as before. A tampered entry — anything that
+  is not a media id (`[a-z0-9-]+`, so never a path), an unknown field, a bad
+  time, a duplicate — refuses the whole restore: the migration aborts, the
+  blob stays, the next boot refuses the same way, and nothing is removed on
+  the strength of the file.
 - **Rollback to the previous build (S3).** Do not restore a pre-cutover backup
   (it would discard every later write). Run
   `node scripts/coreIdentityRollback.mjs <data-dir> <out-dir> [--json]`
@@ -457,14 +469,19 @@ the end of this section is the gate.
   invalid record, a dangling or disagreeing relationship, or a legacy minor
   without a guardian link rejects the whole save (nothing written, sessions
   and every other collection untouched); a snapshot that carries neither
-  leaves the tables alone; explicit empty arrays empty them on purpose
-  (players before guardians, so no foreign key is left broken). Before the
+  leaves the tables alone; explicit empty arrays empty them on purpose. The
+  write is a **rewrite** of the three tables from the validated snapshot, so
+  it never depends on what the tables held or on the order the collections
+  list their records: a replacement guardian may reuse the e-mail of the one
+  it replaces, two retained guardians may swap e-mails, a co-guardian may be
+  listed before its primary; only the FINAL state is judged. Before the
   record (an S3 file, or a rollback copy) the tool reads and writes the legacy
   blobs and leaves the tables alone. `POST /admin/backup` exports the same
-  shape (`db.json` with the two arrays; sessions as hashes); restoring it
-  into an empty directory imports it as blobs and the first boot cuts them
-  over, so every player, guardian, link, outstanding code and session hash
-  comes back (`scripts/testCoreIdentityServer.mjs` performs the cycle).
+  shape (`db.json` with the two arrays; sessions as hashes; the media-removal
+  queue as `mediaDeletions`, see above); restoring it into an empty directory
+  imports it as blobs and the first boot cuts them over, so every player,
+  guardian, link, outstanding code, session hash and pending removal comes
+  back (`scripts/testCoreIdentityServer.mjs` performs the cycle).
 - **Still not in S4a.** No deletion-policy change (O1 is the Founder's
   decision; S4b), no guardian deletion route, no hashing of the e-mail code
   (S6), no `player_*` sub-record tables (S5), no change to who may see what
@@ -477,11 +494,17 @@ the end of this section is the gate.
   `scripts/testCoreIdentityRollback.mjs` (the tool, the round trip, the WAL,
   every refusal, the CLI), `scripts/testMediaDeletions.mjs` (the queue, the
   storage adapter, transaction coupling, the rollback refusal),
-  `scripts/testCoreSchema.mjs` (the coupled snapshot dispatcher),
+  `scripts/testCoreSchema.mjs` (the coupled snapshot dispatcher, the rewrite's
+  order independence, failures mid-rewrite and of the real COMMIT),
   `scripts/testCoreIdentityServer.mjs` (the real server on temporary
-  directories: every boot case restarted, the converted writers through their
+  directories: every boot case restarted, the writers it names through their
   routes and after a restart, the allowlists on the wire, deletion and the
-  media queue, backup and restore) — all part of `npm test`.
+  media queue, backup and restore, a backup taken while a removal is pending),
+  `scripts/testWriterAtomicity.mjs` (the coupled writers — a column together
+  with a facet, a blob, an audit entry or another domain — through the real
+  server: a second connection right after the response, a SIGKILL, a named
+  failure after the first row write and a failure of the REAL SQLite COMMIT,
+  each answered 500 with nothing kept, and the retry) — all part of `npm test`.
 
 #### Operator procedure for the S4a cutover (not run on real data by this work)
 
@@ -552,14 +575,20 @@ Tokens, auth headers, bodies and emails are never logged.
 ## Backups
 `POST /admin/backup` writes `DATA_DIR/backups/<timestamp>/`:
 - `db.json` — full consistent snapshot (same shape the store imports on first boot),
-- `media/` — media files,
-- `manifest.json` — SHA-256 checksums, sizes, counts, restore instructions.
+- `media/` — media files, **except** those whose removal is queued (a backup
+  never carries a file without the intent to remove it),
+- `manifest.json` — SHA-256 checksums, sizes, counts, `media.queuedForRemoval`
+  (how many files were left out and why), restore instructions.
 `POST /admin/backup/verify {dir}` re-checksums a backup.
 Backups contain no environment secrets, but they contain personal data —
 store them with the same care as the live data directory. Since S4a the
 `db.json` export carries the `players` and `guardians` collections rendered
-from their tables (`childIds` from the links) and sessions as hashes; it is the
-shape the first boot of a restore imports and cuts over again.
+from their tables (`childIds` from the links), sessions as hashes and the
+media-removal queue as `mediaDeletions`; it is the shape the first boot of a
+restore imports and cuts over again. The manifest is written last: a backup
+that fails midway (a write or copy error) answers `500 BACKUP_FAILED`, its
+partial directory is removed, and an `ops` event records the failure — nothing
+half-made is ever listed as a usable backup.
 
 ## Restore (never over a live directory)
 1. Copy the backup directory to a **new, empty** location.

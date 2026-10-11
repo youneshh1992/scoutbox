@@ -9,11 +9,16 @@ are from this commit; `01_identity.sql` and the plan cite lines that have drifte
 places. "Verified" means run on synthetic data (the script is named); everything else is read
 from the code or is a design proposal, and design risks are called design risks.
 
-**Status (updated after the S4a integration commit): S4a is implemented and verified** — the
-migration is registered, the repositories are attached at boot, the writers are converted, the
-operations of §7.4 run in units of work, the §6 allowlists are the responses, the media-deletion
-queue exists and the rollback tool covers the final schema; §9 lists every acceptance item with
-where it is proven. The sections below keep the review's evidence and proposals as written;
+**Status (updated after the S4a integration commit `9656a4b` and the corrections of its
+independent review): S4a is implemented; its review acceptance is pending the reviewer's
+re-check** — the migration is registered, the repositories are attached at boot, the writers are
+converted, the operations of §7.4 AND every route that couples a column with a facet, a blob, an
+audit entry or another domain run in units of work (the review reproduced one that did not; §9
+item 7), the §6 allowlists are the responses, the media-deletion queue exists and travels with
+backups (the review reproduced a backup that lost it; §9 item 14), the whole-domain snapshot
+replacement is order-independent (the review reproduced a valid replacement refused; §9 item 12)
+and the rollback tool covers the final schema; §9 lists every acceptance item with where it is
+proven. The sections below keep the review's evidence and proposals as written;
 status notes mark what the implementation settled. Nothing here changes the UI or the deletion
 policy (O1 open; S4b not started). Registration in source is development work, not
 authorization for a real-data cutover: the operator procedure is in `OPERATIONS.md`.
@@ -531,10 +536,25 @@ co-guardian invitation, aging-up, the admin ID review, the level review with its
 signing completion (the hand-written snapshot/restore replaced by the unit; a refusal inside the
 unit is a `SigningAbort` that rolls back with the route's error code; the success-fee invoice is
 issued after COMMIT, never inside the transaction) and the legacy signing route, and deletion.
-Failure injections: the fault seams `signing.complete.after_row`, `after_lifecycle` and the new
-`at_commit` (the last statement of the unit, just before COMMIT) in `scripts/m23SigningE2E.mjs`;
-the injected COMMIT failure, the caught inner failure and the process killed before COMMIT in
-`scripts/testIdentityRepositories.mjs` and `scripts/testUnitOfWork.mjs`.
+Added after the review of `9656a4b`, which reproduced the medical-record route committing its
+column and leaving its record to the delayed save: the medical record (condition column +
+record), guardian ID verification (the provider is asked before the unit; column + audit-queue
+entry), programme selection (track columns + the reset of completed sessions), Academy+ (column
++ badge), stats (columns + activity log, badges, notifications) and squad release (the
+organisation's squad facet + the player's columns + the reference + the ledger + the
+notifications) — each one `unit()`, answered 500 when the unit fails. The single-column writers
+(availability, location, first-team seeker, preferences, disclaimer, football category, the
+login hash upgrade, medical sharing) are one row UPDATE each and need no unit.
+Failure injections: the fault seams `signing.complete.after_row`, `after_lifecycle` and
+`at_commit` (a named throw at the last statement of the unit, just before COMMIT — not a COMMIT
+failure) in `scripts/m23SigningE2E.mjs`; the injected COMMIT failure, the caught inner failure
+and the process killed before COMMIT in `scripts/testIdentityRepositories.mjs` and
+`scripts/testUnitOfWork.mjs`; for the six routes above, `scripts/testWriterAtomicity.mjs`
+through the real server — `internal:<route>.after_row` (a throw after the first row write) and
+`internal:unit.sqlite_commit` (the store's `failCommitOfOpenTransaction`: a deferred
+foreign-key violation that makes the REAL COMMIT statement fail), each leaving nothing in the
+database (read through a second connection) or in memory, the retry landing everything, and a
+SIGKILL right after the response losing nothing.
 
 **Failure-injection tests S4a adds per operation** (the foundation's suite already covers the
 mechanism with the organisations repository): failure after the row statement, failure at
@@ -681,8 +701,23 @@ Acceptance (each a test that fails first where applicable):
 15. Battery: unchanged suites green apart from the two baseline `m182E2E` client checks;
     `m23BootContract` green.
 
-**Acceptance status after the integration commit** (every item run on synthetic data; the
-suite named is part of `npm test` unless stated):
+**Acceptance status after the integration commit and the review corrections** (every item run
+on synthetic data; the suite named is part of `npm test` unless stated). The independent review
+of the integration commit (`9656a4b`) reproduced three findings against the claims below as they
+then stood, each corrected since with a failing-first regression: (1) a route that changed a
+column and a facet in one request committed the column at once and left the facet to the
+delayed save (`POST /player/medical/records`; the same shape in the guardian ID verification +
+its audit entry, programme selection + the reset of completed sessions, Academy+ + its badge,
+stats + the activity log, squad release + the player columns, the reference and the ledger) — every
+such route is now one unit of work, proven through the real server with a SIGKILL right after
+the response and with two injected failures, one after the first row write and one of the REAL
+SQLite COMMIT; (2) `POST /admin/backup` copied a media file whose removal was committed but not
+yet done, and lost the queue entry — the queue now travels with the snapshot and a queued file is
+never copied; (3) a valid whole-domain snapshot was refused when a replacement guardian reused a
+removed guardian's e-mail — the replacement is now a rewrite from the validated candidate,
+independent of obsolete rows and of input order. **The acceptance below is what the tests
+cover and pass; review acceptance of S4a is the reviewer's to give after re-checking these
+corrections, not claimed here.**
 
 | Item | Status | Where |
 |---|---|---|
@@ -692,14 +727,14 @@ suite named is part of `npm test` unless stated):
 | 4 abort cases | pass | `testCoreIdentityMigration.mjs` (four injected failures, a process killed at COMMIT, repair-and-retry); the real server refuses malformed input and the legacy minor twice with the file byte-identical (`testCoreIdentityServer.mjs`) |
 | 5 counted findings | pass | `testCoreIdentityMigration.mjs` (`meta.coreIdentityCutover` findings; minors without a link refuse) |
 | 6 boot | pass | `testCoreIdentityServer.mjs`: new installation, saved file, intentionally empty, interrupted first installation, migrated without blobs, stale blobs — each restarted; `testCoreIdentityMigration.mjs` (integrated boot) |
-| 7 unit of work | pass | deletion / child creation / aging-up / signing: `testCoreIdentityServer.mjs` (routes), `m23SigningE2E.mjs` (fault seams incl. `at_commit`), `testIdentityRepositories.mjs` (COMMIT failure, caught inner failure, SIGKILL; a minor cannot be inserted without its link) |
-| 8 writers | pass | `testCoreIdentityServer.mjs` (every converted writer through its route and after a restart); facet writers and the failed-then-successful save: `testIdentityRepositories.mjs`, `testUnitOfWork.mjs` |
+| 7 unit of work | pass | deletion / child creation / aging-up / signing: `testCoreIdentityServer.mjs` (routes), `m23SigningE2E.mjs` (fault seams; its `at_commit` is a named throw before the statement), `testIdentityRepositories.mjs` (COMMIT failure, caught inner failure, SIGKILL; a minor cannot be inserted without its link). The six coupled routes of the review (medical record, guardian ID verification, programme selection, Academy+, stats, squad release): `testWriterAtomicity.mjs` — real server, a second connection right after the response, SIGKILL, a named seam after the first row write and the REAL SQLite COMMIT failing (`internal:unit.sqlite_commit`: a deferred foreign-key violation the engine refuses at COMMIT), each answered 500 with nothing in the database or in memory, and the retry landing everything |
+| 8 writers | pass | `testCoreIdentityServer.mjs` covers the writers it names (sign-up, e-mail verification, ID verification, disclaimer, child creation, football category, level review, medical sharing, aging-up) through their routes and after a restart — not every writer; the coupled writers are in `testWriterAtomicity.mjs` (item 7); facet writers and the failed-then-successful save: `testIdentityRepositories.mjs`, `testUnitOfWork.mjs`. Single-column writers (availability, location, first-team seeker, preferences, disclaimer, the login hash upgrade) are one row UPDATE each and need no unit |
 | 9 guards | pass | `testIdentityRepositories.mjs` |
 | 10 links | pass | `testIdentityRepositories.mjs`; the co-guardian duplicate e-mail: `guardians.insert` refusal (`EMAIL_IN_USE`) |
 | 11 views | pass | `testCoreIdentityServer.mjs` ("allowlists"): club/adult, club/minor, agency, unverified club, grassroots, blocked, guardian, player, Trust & Safety, shortlist after deletion — allowed and forbidden keys asserted on actual responses (a recorded key fixture was not written; the allowlists are asserted directly) |
-| 12 snapshot tools | pass | `testCoreSchema.mjs` (the coupled dispatcher: refusals, partial snapshot, explicit empty arrays, prune order), `testCoreIdentityServer.mjs` (`POST /admin/backup` restored into a fresh directory with every player, guardian, link, code and session hash) |
+| 12 snapshot tools | pass | `testCoreSchema.mjs` (the coupled dispatcher: refusals, partial snapshot, explicit empty arrays; since the review the write is a REWRITE from the validated candidate — a removed guardian's e-mail reused by its replacement, two retained guardians swapping e-mails, players moving to the replacement, co-guardian references, reversed input orders, a failure mid-rewrite and of the real COMMIT), `testCoreIdentityServer.mjs` (`POST /admin/backup` restored into a fresh directory with every player, guardian, link, code and session hash; a backup taken while a media removal is pending carries the queue and not the file), `testMediaDeletions.mjs` (the queue through the snapshot store, validated whole) |
 | 13 rollback | pass | `testCoreIdentityRollback.mjs` (round trip, exits 4/5/1/6/7), `testMediaDeletions.mjs` (exit 8); the real previous build at `c1d868e`: the copy boots there, sessions and the outstanding code valid, a write made there re-upgraded (handoff evidence `old-build-verification.log`) |
-| 14 media queue | pass | `testMediaDeletions.mjs`; `testCoreIdentityServer.mjs` (a stuck file keeps the entry across a restart, 404 while queued, the rollback refusal, the next boot clears it once the file is absent). A crash injected between COMMIT and the unlink is represented by the stuck-file case (same state: committed row, pending entry) |
+| 14 media queue | pass | `testMediaDeletions.mjs`; `testCoreIdentityServer.mjs` (a stuck file keeps the entry across a restart, 404 while queued, the rollback refusal, the next boot clears it once the file is absent; since the review: a backup taken with a pending entry and the file still present exports the entry and leaves the file out, the restored server imports the queue, serves nothing for the id, removes a file copied back by hand at boot and stays clean across a restart, an older backup without the queue restores, a tampered entry refuses the restore). A crash injected between COMMIT and the unlink is represented by the stuck-file case (same state: committed row, pending entry) |
 | 15 battery | pass with the stated baseline | 48 suites: 43 green as run; `m182E2E` two baseline client-source checks; `m23RecruitmentJourneyE2E`, `m23SigningE2E`, `m23SigningHardeningE2E` (the `under_contract` drift guards recognise the repository form), `m23RecruitmentJourneyHardeningE2E` (a fixture planting an unreadable date of birth through the snapshot now asserts the refusal) and `m23TemporalIntegrityE2E` (a probe sends `foot: 'right'`; the first battery run crashed before its own checks when `store.load()` returned null after the first boot, not reproduced in two re-runs) adapted and green on re-run; `m23BootContract` green |
 
 Two user-visible changes beyond the §6 privacy fixes, both consequences of the column
