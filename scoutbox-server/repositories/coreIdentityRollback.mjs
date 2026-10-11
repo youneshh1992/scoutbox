@@ -30,8 +30,12 @@
  * Refusals (no output): a copy carrying a schema step this tool does not know
  * (`LATER_SCHEMA` — a later step needs its own rollback; no partial downgrade
  * is guessed), a copy that never applied 0005 (`NOT_CUT_OVER`), an output
- * directory that is not empty (`OUTPUT_NOT_EMPTY`), and a recorded 0005 whose
- * tables are not the live definition (`UNEXPECTED_SCHEMA`). The completed copy
+ * directory that is not empty (`OUTPUT_NOT_EMPTY`), a recorded 0005 whose
+ * tables are not the live definition (`UNEXPECTED_SCHEMA`), a first
+ * installation whose initialisation has not completed (`INIT_PENDING`: the
+ * live domain holds no authoritative data yet, and a pre-S4 build could not
+ * tell that apart from an intentionally empty installation) and a malformed
+ * initialisation marker (`INIT_STATE_INVALID`). The completed copy
  * is revalidated before it is reported: integrity, foreign keys, the blobs
  * parse back to the row counts, the shadow tables are empty, the sessions are
  * exactly those of the source.
@@ -157,6 +161,18 @@ export function rollbackCoreIdentityCopy(sourceFile, outDir) {
       if (!hasTable(t) || !sqlite.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === 'facets_json')) throw refusal('UNEXPECTED_SCHEMA', `${CORE_IDENTITY_LIVE_MIGRATION} is recorded but the ${t} table is not the live definition (facets_json); refusing to guess`);
     }
     if (!hasTable('guardian_children')) throw refusal('UNEXPECTED_SCHEMA', `${CORE_IDENTITY_LIVE_MIGRATION} is recorded but guardian_children does not exist; refusing to guess`);
+    // The initialisation state (review of 64ef3aa). A pre-S4 build has no notion
+    // of "cut over but not yet initialised": a first installation whose import
+    // never committed holds no authoritative identity data, and exporting its
+    // empty tables as blobs would turn an unfinished setup into an intentionally
+    // empty, initialised domain on the next upgrade. So `pending` is refused
+    // with no output; `done` proceeds; an ABSENT marker reads as `done` — the
+    // repositories' documented compatibility for a cut-over file whose marker
+    // was never written — and any other value is malformed and refused, never
+    // erased or guessed.
+    const initRow = hasTable('meta') ? sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(CORE_IDENTITY_INIT_META) : null;
+    if (initRow && initRow.value === 'pending') throw refusal('INIT_PENDING', `the first installation's initialisation has not completed (meta.${CORE_IDENTITY_INIT_META} is pending): the live tables hold no authoritative data yet and a pre-S4 build could not tell this apart from an intentionally empty installation, so no rollback copy is produced. Boot the S4 build once so the initialisation completes (it retries on every boot until it commits), then roll back; or, if the installation is abandoned, start the pre-S4 build on a fresh data directory`);
+    if (initRow && initRow.value !== 'done') throw refusal('INIT_STATE_INVALID', `meta.${CORE_IDENTITY_INIT_META} holds ${JSON.stringify(initRow.value)}, which is neither "pending" nor "done"; refusing to guess the initialisation state (nothing is erased)`);
     const sessionsBefore = hasTable('sessions') ? sqlite.prepare(SESSION_ROWS).all() : null;
 
     sqlite.exec('PRAGMA foreign_keys = OFF;');

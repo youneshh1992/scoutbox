@@ -957,7 +957,10 @@ performance, existing tests, what this plan is not).
 > are restored empty (asserted equal to migration 0002's), the 0005 record and the two meta
 > keys removed, `saveSeq` advanced, foreign keys checked, the copy VACUUMed and revalidated;
 > refusals (later schema → exit 4, never cut over → exit 5, non-empty output → exit 1, a
-> recorded 0005 over shadow tables) and an injected failure leave no output and the source
+> recorded 0005 over shadow tables, an unfinished first installation whose `coreIdentityInit`
+> is still `pending` → exit 6 — independently reproduced on `64ef3aa`: the empty tables would
+> otherwise have come back as an initialised-empty domain — and a malformed marker → exit 7)
+> and an injected failure leave no output and the source
 > untouched — measured as: main-file bytes and logical content identical, the read-only open's
 > empty `-wal`/`-shm` housekeeping files removed by the next ordinary open-and-close
 > (`scripts/testCoreIdentityRollback.mjs`, round trip included). Verified against the **real

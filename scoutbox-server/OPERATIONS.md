@@ -519,8 +519,19 @@ and `scripts/testCoreIdentityMigration.mjs` proves all of that (production guard
   meta keys, advances `saveSeq`, checks foreign keys, VACUUMs and revalidates
   the copy. Exit codes: 0 done; 1 usage, no source, or an output directory
   that is not empty; 4 a later schema step this tool does not know (no partial
-  downgrade); 5 never cut over. A recorded 0005 over shadow-shaped tables is
-  refused rather than guessed. Every refusal or failure leaves **no output**.
+  downgrade); 5 never cut over; **6 the first installation's initialisation
+  has not completed** (`meta.coreIdentityInit` is `pending`: the live tables
+  hold no authoritative data yet and a pre-S4 build could not tell that apart
+  from an intentionally empty installation — boot the S4 build once so the
+  initialisation completes, it retries on every boot until it commits, then
+  roll back; or, if the installation is abandoned, start the pre-S4 build on
+  a fresh data directory); 7 a malformed initialisation marker (neither
+  `pending` nor `done`: refused, never erased or guessed). An absent marker
+  reads as `done`, the repositories' documented compatibility for a cut-over
+  file whose marker was never written. A saved, intentionally EMPTY domain is
+  `done` and rolls back normally (empty blobs). A recorded 0005 over
+  shadow-shaped tables is refused rather than guessed. Every refusal or
+  failure leaves **no output**.
   **What "the source is never modified" means, measured:** the main file's
   bytes and the logical content are identical; SQLite's read-only open of a
   WAL-mode file may leave an empty `-wal` and a `-shm` index next to the source

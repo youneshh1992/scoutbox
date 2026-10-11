@@ -24,7 +24,11 @@
 //
 // Usage: node scripts/coreIdentityRollback.mjs <data-dir> <out-dir> [--json]
 // Exit codes: 0 done, 1 usage error / no source / output directory not empty,
-//             4 the copy carries a later schema step, 5 the copy never cut over.
+//             4 the copy carries a later schema step, 5 the copy never cut over,
+//             6 the first installation's initialisation has not completed (boot
+//               the S4 build once so it completes, or start the pre-S4 build on
+//               a fresh directory — there is no identity data to roll back yet),
+//             7 the initialisation marker is malformed (refused, never guessed).
 import fs from 'node:fs';
 import path from 'node:path';
 import { rollbackCoreIdentityCopy } from '../repositories/coreIdentityRollback.mjs';
@@ -43,6 +47,8 @@ try {
 } catch (err) {
   if (err?.code === 'LATER_SCHEMA') { console.error(`refused: ${err.message}`); process.exit(4); }
   if (err?.code === 'NOT_CUT_OVER') { console.error(`refused: ${err.message}`); process.exit(5); }
+  if (err?.code === 'INIT_PENDING') { console.error(`refused: ${err.message}`); process.exit(6); }
+  if (err?.code === 'INIT_STATE_INVALID') { console.error(`refused: ${err.message}`); process.exit(7); }
   if (err?.code === 'OUTPUT_NOT_EMPTY' || err?.code === 'NO_SOURCE') { console.error(`refused: ${err.message}`); process.exit(1); }
   throw err;
 }

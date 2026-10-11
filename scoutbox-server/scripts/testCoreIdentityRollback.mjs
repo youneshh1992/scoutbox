@@ -20,7 +20,7 @@ import * as m0005 from '../repositories/migrations/0005_core_identity_live.mjs';
 import { openStore } from '../store.mjs';
 import {
   NOW, DAY, TTL, tempDir, sha256, adult, child, gSignup, FIXTURE, SESSIONS,
-  s3File, openRaw, migrate, applied, isLive, blob, blobText, meta, sessionRows, links, dump, identityDump, filesDigest,
+  s3File, freshFile, openRaw, migrate, applied, isLive, blob, blobText, meta, sessionRows, links, dump, identityDump, filesDigest,
 } from './coreIdentityTestFixtures.mjs';
 
 let passed = 0;
@@ -196,6 +196,51 @@ test('an active WAL is carried: a change still in the source\'s WAL (writer conn
   const o = openRaw(out);
   assert.equal(blob(o, 'players').find((p) => p.id === 'pl-seeded').name, 'In The WAL', 'the copy holds the uncheckpointed change');
   o.close(); writer.close(); rm(src, out);
+});
+
+test('review (64ef3aa): an interrupted first installation — 0005 applied, coreIdentityInit still pending — is refused explicitly (INIT_PENDING, exit 6, no output, source untouched) instead of becoming an initialised-empty domain; a malformed marker is refused (INIT_STATE_INVALID, exit 7), an absent marker keeps the documented done-compatibility, and a saved empty domain still rolls back and re-upgrades as done/empty', () => {
+  // Pending: a genuinely new database that applied 0005 and whose initialisation never committed.
+  const pending = tempDir('s4-rb-pending'); freshFile(pending);
+  let s = openRaw(pending); migrate(s, { now: NOW }); assert.equal(meta(s, CORE_IDENTITY_INIT_META), 'pending'); s.close();
+  const before = filesDigest(pending); const sIn = openRaw(pending); const logicalBefore = dump(sIn); sIn.close();
+  const out = tempDir('s4-rb-pending-out');
+  assert.throws(() => rollbackCoreIdentityCopy(dbFile(pending), out), (err) => err.code === 'INIT_PENDING' && /initialisation .*has not completed|pending/.test(err.message) && /boot|retry|fresh/.test(err.message), 'refused with an actionable explanation');
+  assert.deepEqual(fs.readdirSync(out), [], 'no output');
+  assertSourceUntouched(pending, before, logicalBefore, 'after the pending refusal');
+  const script = path.join(HERE, 'coreIdentityRollback.mjs');
+  const run = (...a) => { try { execFileSync(process.execPath, [script, ...a], { stdio: 'pipe' }); return 0; } catch (err) { return err.status; } };
+  assert.equal(run(pending, path.join(tempDir('s4-rb-pending-cli'), 'x')), 6, 'CLI exit 6: initialisation pending');
+  // The same database, once the initialisation completes (the first boot's import), rolls back normally.
+  s = openRaw(pending);
+  const identity = createIdentityRepositories({ sqlite: s, now: () => NOW });
+  identity.initialize({ players: [adult()], guardians: [gSignup()] }, { now: NOW }); s.close();
+  const out2 = tempDir('s4-rb-pending-out2');
+  const result = rollbackCoreIdentityCopy(dbFile(pending), out2);
+  assert.equal(result.players, 1); assert.equal(result.guardians, 1);
+  const o2 = openRaw(out2); migrate(o2, { now: NOW + DAY }); assert.equal(meta(o2, CORE_IDENTITY_INIT_META), 'done'); assert.equal(o2.prepare('SELECT COUNT(*) AS n FROM players').get().n, 1); o2.close();
+  // A malformed marker is refused, not erased or guessed.
+  const odd = tempDir('s4-rb-odd-init'); liveDatabaseWithHistory(odd);
+  const od = openRaw(odd); od.prepare("UPDATE meta SET value = 'maybe' WHERE key = ?").run(CORE_IDENTITY_INIT_META); od.close();
+  const out3 = tempDir('s4-rb-odd-out');
+  assert.throws(() => rollbackCoreIdentityCopy(dbFile(odd), out3), (err) => err.code === 'INIT_STATE_INVALID' && /"maybe"/.test(err.message));
+  assert.deepEqual(fs.readdirSync(out3), []);
+  assert.equal(run(odd, path.join(tempDir('s4-rb-odd-cli'), 'x')), 7, 'CLI exit 7: malformed initialisation marker');
+  // An absent marker reads as done (the repositories' documented compatibility for a cut-over file whose marker was never written): rolled back normally.
+  const absent = tempDir('s4-rb-absent-init'); liveDatabaseWithHistory(absent);
+  const ab = openRaw(absent); ab.prepare('DELETE FROM meta WHERE key = ?').run(CORE_IDENTITY_INIT_META); ab.close();
+  const out4 = tempDir('s4-rb-absent-out');
+  assert.equal(rollbackCoreIdentityCopy(dbFile(absent), out4).players, 6);
+  // Control: a legitimately saved EMPTY domain is done, rolls back and re-upgrades as done/empty.
+  const empty = tempDir('s4-rb-empty'); s3File(empty, { players: [], guardians: [], sessions: [] });
+  s = openRaw(empty); migrate(s, { now: NOW }); assert.equal(meta(s, CORE_IDENTITY_INIT_META), 'done'); s.close();
+  const out5 = tempDir('s4-rb-empty-out');
+  assert.deepEqual([rollbackCoreIdentityCopy(dbFile(empty), out5).players, rollbackCoreIdentityCopy.length], [0, 2]);
+  const o5 = openRaw(out5);
+  assert.deepEqual(blob(o5, 'players'), []); assert.deepEqual(blob(o5, 'guardians'), []);
+  migrate(o5, { now: NOW + DAY }); assert.equal(meta(o5, CORE_IDENTITY_INIT_META), 'done'); assert.equal(o5.prepare('SELECT COUNT(*) AS n FROM players').get().n, 0);
+  assert.throws(() => createIdentityRepositories({ sqlite: o5, now: () => NOW }).initialize({ players: [adult()], guardians: [] }, { now: NOW }), /already initialised/);
+  o5.close();
+  rm(pending, out, out2, odd, out3, absent, out4, empty, out5);
 });
 
 test('refusals and failures leave no output and never touch the source: a later schema step (exit 4), a file that never cut over (exit 5), a non-empty output directory (exit 1), a recorded 0005 over shadow tables, and an injected COMMIT failure inside the tool', () => {

@@ -527,7 +527,12 @@ with synthetic data, as S2 and S3 were.
 **Status: implemented and tested** (`repositories/coreIdentityRollback.mjs`,
 `scripts/coreIdentityRollback.mjs`, `scripts/testCoreIdentityRollback.mjs`). As built: the output
 directory must be empty (exit 1), a recorded 0005 over shadow-shaped tables is refused rather than
-guessed, the copy is revalidated (integrity, foreign keys, the blobs read back to the row counts,
+guessed, a first installation whose initialisation has not completed is refused (exit 6: the live
+domain holds no authoritative data yet and the pre-S4 build could not tell that apart from an
+intentionally empty installation — the operator boots the S4 build once so the import completes,
+or starts the pre-S4 build on a fresh directory; independently reproduced on `64ef3aa` and
+corrected), a malformed initialisation marker is refused rather than erased (exit 7), an absent
+marker keeps the repositories' documented `done` compatibility, the copy is revalidated (integrity, foreign keys, the blobs read back to the row counts,
 the shadow tables empty, the sessions exactly the source's) before it is reported, and any
 failure removes the partial copy. "The source is never modified" is measured, not assumed: the
 main file's bytes and the logical content are identical; SQLite's read-only open of a WAL-mode
