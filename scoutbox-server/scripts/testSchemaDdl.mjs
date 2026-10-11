@@ -73,4 +73,31 @@ test('migrations 0001–0003 match the identity section of 01_identity.sql colum
   }
 });
 
+// The intended S4a live schema (migration 0005, implemented but NOT registered)
+// is the documented identity DDL plus exactly one transitional column,
+// `facets_json`, on players and guardians — and the registered migrations still
+// leave the three tables as the S1 shadow (no facets_json). Both facts are
+// asserted so the documents, the registered state and the unregistered
+// migration cannot drift apart silently.
+test('migration 0005 (unregistered) matches the identity section of 01_identity.sql plus exactly facets_json on players and guardians; the registered migrations leave the S1 shadow', async () => {
+  const m0005 = await import('../repositories/migrations/0005_core_identity_live.mjs');
+  assert.equal(DATA_MIGRATIONS.includes(m0005), false, 'not registered');
+  const mig = new DatabaseSync(':memory:');
+  mig.exec('PRAGMA foreign_keys = ON;');
+  runDataMigrations(mig, DATA_MIGRATIONS, { log: () => {} });
+  for (const t of ['players', 'guardians']) assert.equal(mig.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === 'facets_json'), false, `${t}: the registered state is the S1 shadow`);
+  runDataMigrations(mig, [...DATA_MIGRATIONS, m0005], { now: Date.UTC(2026, 9, 11, 12), log: () => {} });
+  for (const t of ['guardians', 'players', 'guardian_children']) {
+    const cols = (d) => d.prepare(`PRAGMA table_info(${t})`).all().map((c) => `${c.name}:${c.type}:${c.notnull}:${c.pk}:${c.dflt_value ?? ''}`);
+    const extra = cols(mig).filter((c) => !cols(docs).includes(c));
+    assert.deepEqual(extra, t === 'guardian_children' ? [] : ['facets_json:TEXT:0:0:'], `${t}: the only column the live definition adds`);
+    assert.deepEqual(cols(docs).filter((c) => !cols(mig).includes(c)), [], `${t}: every documented column is present`);
+    const idx = (d) => d.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((r) => r.name);
+    assert.deepEqual(idx(mig), idx(docs), `${t} indexes`);
+  }
+  // The documents say so: the status header names the unregistered migration.
+  const header = fs.readFileSync(path.join(SQL_DIR, '01_identity.sql'), 'utf8').split('\n').slice(0, 20).join('\n');
+  assert.match(header, /Migration 0005[\s\S]{0,240}?implemented[\s\S]{0,120}?NOT registered/, 'the status header of 01_identity.sql states that 0005 is implemented but not registered');
+});
+
 console.log(`\n${passed} schema-DDL checks passed (${files.length} files, ${tables.length} tables)`);

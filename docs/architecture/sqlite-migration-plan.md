@@ -921,13 +921,63 @@ performance, existing tests, what this plan is not).
 > `initialize()` validates the snapshot as given through the preflight's shape contract (an
 > absent or malformed collection is refused and the state stays `pending`; an explicitly
 > empty array is valid). Covered by `review 1–3` in `scripts/testIdentityRepositories.mjs`
-> and `store.unit.join` in `scripts/testUnitOfWork.mjs`. **Not done, acceptance unchanged:** migration
-> `0005_core_identity_live`, the repositories and their writers, the boot snapshot-presence
-> signal (§7.2), atomic operations inside units of work (§7.4 per operation), the audience
-> allowlists (§6), the lossless rollback tool (§8), `facets_json` in `01_identity.sql`
-> (added with migration 0005 so the DDL test keeps matching 0002), the conversion of today's
-> writers to the repositories, per-route atomicity, snapshot backup/restore integration and
-> the media-deletion handling; O1 remains the Founder's decision.
+> and `store.unit.join` in `scripts/testUnitOfWork.mjs`.
+>
+> **S4a, third bounded part — the migration module and the rollback tool: IMPLEMENTED AND
+> TESTED, NOT REGISTERED (this commit). Live cutover: still NOT STARTED.**
+> `repositories/migrations/0005_core_identity_live.mjs` is the real migration (§7.1 of the
+> readiness review): inside the runner's one transaction with foreign keys off it decides the
+> kind of database from explicit state only (a genuinely new database — no collection row, no
+> save revision, no `savedAt` — cuts over empty with `coreIdentityInit = pending`; a saved
+> snapshot must carry both blobs as arrays, an absent, unparsable or non-array collection is a
+> refusal and never an empty import, and an explicitly empty saved snapshot is `done` and
+> stays empty), validates the blobs with the reviewed preflight (every record and link, the
+> Founder's legacy-minor rule, age at the run's injectable `now`), aborts with
+> `CORE_IDENTITY_CUTOVER_BLOCKED` listing ids and reasons (file byte-identical, same abort on
+> the next boot), replaces the three shadow definitions (their rows discarded unread, counted
+> in the record) with `CANDIDATE_DDL`, imports through `writeCandidate`, records
+> `meta.coreIdentityCutover` and `meta.coreIdentityInit`, retires the two blobs and leaves
+> sessions, staff, organisations and every other blob untouched; the runner's
+> `foreign_key_check` and `data_migrations` row close it. It refuses to run over an
+> initialised live domain. **It is not in `DATA_MIGRATIONS`**: `repositories/index.mjs`,
+> `TABLE_BACKED` and server boot are unchanged and `scripts/testCoreIdentityMigration.mjs`
+> proves it (production guard), while invoking the real module through the real runner on
+> temporary S3-shaped databases: every record shape, the three database kinds, seven
+> malformed-snapshot refusals, duplicate ids and e-mails, missing references, the two sides of
+> a link disagreeing, an invalid record, the legacy-minor refusal, age re-evaluated at the
+> migration instant, repair-and-retry, stale populated shadow rows discarded, a stale blob
+> ignored afterwards, four injected failures (after the destructive DDL, mid-insert, before
+> the final metadata, at COMMIT — each proven to have fired, each leaving the file in the
+> pre-migration state, each followed by a clean retry) and a child process killed at COMMIT.
+> `repositories/coreIdentityRollback.mjs` + `scripts/coreIdentityRollback.mjs` are the §8
+> tool: on a copy (`VACUUM INTO` from a read-only open, so an active WAL is carried; a fresh
+> empty output directory is required) the two blobs are rebuilt from the live rows through the
+> one mapping (post-S4 inserts, updates, link changes and removals included — a removed
+> player is not resurrected; the outstanding `emailCode` plain), the S1 shadow definitions
+> are restored empty (asserted equal to migration 0002's), the 0005 record and the two meta
+> keys removed, `saveSeq` advanced, foreign keys checked, the copy VACUUMed and revalidated;
+> refusals (later schema → exit 4, never cut over → exit 5, non-empty output → exit 1, a
+> recorded 0005 over shadow tables) and an injected failure leave no output and the source
+> untouched — measured as: main-file bytes and logical content identical, the read-only open's
+> empty `-wal`/`-shm` housekeeping files removed by the next ordinary open-and-close
+> (`scripts/testCoreIdentityRollback.mjs`, round trip included). Verified against the **real
+> pre-S4 build** (detached worktree at `cb1d22b`, scratch script, synthetic data, log in the
+> handoff): it boots an S3 file; the current build cuts it over and uses the repositories; the
+> CLI writes the copy; the pre-S4 build boots the copy, serves the post-S4 state, accepts the
+> pre- and post-cutover sessions, verifies both outstanding e-mail codes and persists a new
+> signup; the real migration re-upgrades the copy to the identical live state (apart from the
+> pre-S4 build's own `externalIds` backfill on the two players created after its first run,
+> and the verifications made on it). Also in this commit: `orgs.initialize()` refuses a
+> collection that is not an array (independently reproduced on `cb1d22b`; failing-first
+> regression in `scripts/testOrgs.mjs`). **Not done, acceptance unchanged:** registering
+> migration `0005_core_identity_live` and attaching the repositories at boot, the boot
+> snapshot-presence signal (§7.2), the conversion of today's writers to the repositories,
+> per-route atomicity inside units of work (§7.4 per operation), the audience allowlists (§6)
+> and the admin guardians view, `facets_json` in `01_identity.sql` (added with the
+> registration so the DDL test keeps matching the registered migrations; until then the test
+> compares 0005 against the file plus exactly that column), production backup/restore
+> integration (the snapshot dispatcher does not know the two tables), and the media-deletion
+> handling; O1 remains the Founder's decision; S4b and S5 are not started.
 
 - **Objective.** `guardians`, `players` (scalar columns) and `guardian_children` live. The
   player and guardian repositories expose typed reads: by id, by guardian, the paginated

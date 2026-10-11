@@ -437,7 +437,13 @@ export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {}, 
       if (readInitState() !== 'pending') throw new Error(`orgs: the organisations were already initialised (meta.${ORGS_INIT_META} is "done"); the table is authoritative and nothing is imported`);
       const stored = stmt.count.get().n;
       if (stored) throw new Error(`orgs: initialisation is pending but the table already holds ${stored} row(s) written outside the repository; refusing to initialise over them`);
-      const rows = Array.isArray(given) ? given : [];
+      // The collection is validated AS GIVEN (review of cb1d22b): a value that is
+      // not an array — an object, null, a string, a number, nothing — is refused
+      // and never read as an empty installation; an explicitly empty array is
+      // a valid, empty installation. Nothing is written and the state stays
+      // pending, so a corrected boot initialises later.
+      if (!Array.isArray(given)) throw new TypeError(`orgs: initialize() needs the first installation's organisations as an array (got ${given === undefined ? 'absent' : describe(given)}); nothing was written and initialisation stays pending`);
+      const rows = given;
       checkRecords(rows);
       sqlite.exec('BEGIN');
       try {

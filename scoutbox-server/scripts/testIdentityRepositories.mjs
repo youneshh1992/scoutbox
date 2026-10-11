@@ -470,14 +470,15 @@ test('unit of work: a process killed before COMMIT leaves the pre-operation data
   again.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('production stays unchanged: the identity repositories are not created by the data layer, players and guardians are not table-backed, migration 0005 is not registered, and the test schema helper is not a migration module', async () => {
+test('production stays unchanged: the identity repositories are not created by the data layer, players and guardians are not table-backed, migration 0005 exists but is not registered, and the test schema helper is not a migration module', async () => {
   assert.equal(TABLE_BACKED.includes('players') || TABLE_BACKED.includes('guardians'), false);
   assert.equal(DATA_MIGRATIONS.some((m) => /0005|core_identity_live/.test(m.id)), false);
   const indexSource = fs.readFileSync(path.join(HERE, '..', 'repositories', 'index.mjs'), 'utf8');
-  assert.equal(indexSource.includes('identity.mjs') || indexSource.includes('createIdentityRepositories'), false, 'repositories/index.mjs does not create them');
+  assert.equal(indexSource.includes('identity.mjs') || indexSource.includes('createIdentityRepositories') || indexSource.includes('0005'), false, 'repositories/index.mjs does not create them and does not register the migration');
   const serverSource = fs.readFileSync(path.join(HERE, '..', 'server.mjs'), 'utf8');
-  assert.equal(serverSource.includes('createIdentityRepositories') || serverSource.includes('identityLiveTestSchema'), false, 'server.mjs does not reach them');
-  assert.equal(fs.existsSync(path.join(HERE, '..', 'repositories', 'migrations', '0005_core_identity_live.mjs')), false);
+  assert.equal(serverSource.includes('createIdentityRepositories') || serverSource.includes('identityLiveTestSchema') || serverSource.includes('0005_core_identity_live'), false, 'server.mjs does not reach them');
+  // The real migration module exists (scripts/testCoreIdentityMigration.mjs exercises it through the runner) and is reached only by explicit tests.
+  assert.equal(fs.existsSync(path.join(HERE, '..', 'repositories', 'migrations', '0005_core_identity_live.mjs')), true);
   assert.equal(CORE_IDENTITY_INIT_META, 'coreIdentityInit'); assert.match(MINOR_WITHOUT_LINK_REASON, /Founder's decision/);
 });
 

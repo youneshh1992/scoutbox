@@ -474,6 +474,75 @@ the real store unit of work (`scripts/testIdentityRepositories.mjs`):
   `scripts/testIdentityRepositories.mjs` with the failure injected and
   asserted to have occurred.
 
+### S4a migration and rollback tooling (implemented and tested, NOT registered)
+
+The real cutover migration and its rollback exist and are exercised by `npm test`
+on temporary databases only; **production does not run either**. `DATA_MIGRATIONS`
+is still `0001`–`0004`, `TABLE_BACKED` is still `orgs`/`users`/`sessions`, a normal
+boot leaves `players`/`guardians` as the S1 shadow with the blobs authoritative,
+and `scripts/testCoreIdentityMigration.mjs` proves all of that (production guard).
+
+- **`repositories/migrations/0005_core_identity_live.mjs`.** Runs with foreign
+  keys off inside the runner's one transaction. It reads the `players` and
+  `guardians` blobs — never the shadow rows, which are discarded unread and
+  counted — and decides the kind of database from explicit state, never from
+  row counts: a genuinely new database (no collection row, no `saveSeq`, no
+  `savedAt`) cuts over with empty tables and `meta.coreIdentityInit = pending`
+  (the data layer will import the seed once, explicitly); a saved snapshot must
+  carry both blobs as arrays and cuts over with `done` — an explicitly empty
+  snapshot stays empty; an absent, unparsable or non-array collection is a
+  refusal, never an empty import and never a first installation. The reviewed
+  preflight validates everything (duplicates, e-mails, references, both sides
+  of every link, the Founder's legacy-minor rule, age at the run's instant);
+  any refusal aborts with `CORE_IDENTITY_CUTOVER_BLOCKED` naming ids and
+  reasons (never a record, an e-mail, a hash or a code), the runner rolls back,
+  the file is byte-identical and the next boot aborts the same way until the
+  data is resolved by hand on the current build. On success the three shadow
+  definitions are replaced by the live ones (`facets_json` included), every
+  row and link imported, `meta.coreIdentityCutover` (counts and findings only)
+  and `meta.coreIdentityInit` written, the two blobs deleted; sessions, staff,
+  organisations and every other blob are untouched. A failure anywhere — after
+  the destructive DDL, mid-insert, before the metadata, at COMMIT, a process
+  killed at COMMIT — leaves the pre-migration file (tested, each injection
+  proven to have fired) and the next run simply cuts over. The module refuses
+  to run over an initialised live domain, and a stale blob written back after
+  the cutover is ignored by the repositories.
+- **`node scripts/coreIdentityRollback.mjs <data-dir> <out-dir> [--json]`**
+  (server stopped; `repositories/coreIdentityRollback.mjs` is the tested
+  function). Opens the source read-only, copies it with `VACUUM INTO` (a
+  change still in an active WAL is carried), and on the copy rebuilds the two
+  blobs from the live rows through the one mapping — post-S4 inserts, updates,
+  link changes and removals included, a removed player NOT resurrected,
+  `childIds` in link order, the outstanding `emailCode` plain so it still
+  verifies on the pre-S4 build — restores the S1 shadow definitions empty
+  (asserted equal to migration 0002's), removes the 0005 record and the two
+  meta keys, advances `saveSeq`, checks foreign keys, VACUUMs and revalidates
+  the copy. Exit codes: 0 done; 1 usage, no source, or an output directory
+  that is not empty; 4 a later schema step this tool does not know (no partial
+  downgrade); 5 never cut over. A recorded 0005 over shadow-shaped tables is
+  refused rather than guessed. Every refusal or failure leaves **no output**.
+  **What "the source is never modified" means, measured:** the main file's
+  bytes and the logical content are identical; SQLite's read-only open of a
+  WAL-mode file may leave an empty `-wal` and a `-shm` index next to the source
+  when none existed — housekeeping, not content, removed by the next ordinary
+  open-and-close of the file. Verified against the real pre-S4 build
+  (detached worktree at `cb1d22b`, synthetic data): the copy boots there,
+  serves the post-S4 state, accepts the sessions minted before and after the
+  cutover, verifies the outstanding e-mail codes and persists new writes, and
+  the real migration re-upgrades it to the identical live state
+  (`scripts/testCoreIdentityRollback.mjs` covers the in-process round trip).
+- **Organisation initialisation input.** `orgs.initialize()` refuses a
+  collection that is not an array (an object, null, a string, a number,
+  nothing) with a `TypeError`, writing no row and keeping `meta.orgsInit`
+  pending; an explicitly empty array stays a valid, empty installation. The
+  data layer refuses the same way at boot. (Independently reproduced on the
+  previous commit; `scripts/testOrgs.mjs` "review (cb1d22b)".)
+- **Still open for S4a:** registering the migration and attaching the
+  repositories at boot, the boot snapshot-presence signal, the writers'
+  conversion, per-route units of work, the audience allowlists, production
+  backup/restore integration (the snapshot dispatcher does not know the two
+  tables), the media-deletion handling; O1 is undecided.
+
 The design and the cutover order are in `docs/architecture/sqlite-schema.md`
 and `docs/architecture/sqlite-migration-plan.md`.
 

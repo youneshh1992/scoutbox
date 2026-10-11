@@ -66,9 +66,12 @@ and design changes the Founder explicitly requests.
   and its memory bookkeeping only once they committed, joins an open unit
   through `store.unit.join` so a caught mid-operation failure still poisons
   the unit, and `initialize()` refuses an absent or malformed collection
-  instead of importing it as empty) are built and tested but **not attached**
-  — the cutover itself (migration 0005) is not started, server boot does not
-  create them, and a preflight report is never an approval. A legacy minor
+  instead of importing it as empty) are built and tested but **not attached**;
+  the real migration (`repositories/migrations/0005_core_identity_live.mjs`)
+  and the copy-only rollback tool (`scripts/coreIdentityRollback.mjs`) are
+  implemented and tested on temporary databases but the migration is **not
+  registered** — `DATA_MIGRATIONS` is still 0001–0004, server boot does not
+  create the repositories, and a preflight report is never an approval. A legacy minor
   with no guardian link refuses the cutover until resolved by hand (the
   Founder's decision). Never log,
   report or export a plain bearer token. `node:sqlite` with transaction state

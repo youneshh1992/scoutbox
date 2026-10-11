@@ -399,6 +399,17 @@ collection existed, `pending` only for a never-saved database); delete the two b
 Completion is decided only by the `data_migrations` row. `sessions`, `org_users`, `orgs` are
 not touched by any statement.
 
+**Status: implemented and tested, NOT registered** (`repositories/migrations/0005_core_identity_live.mjs`;
+`scripts/testCoreIdentityMigration.mjs` invokes it through the real runner on temporary S3-shaped
+databases; `DATA_MIGRATIONS` is unchanged and a production guard proves it). Two refinements over
+the paragraph above, settled while building it: the kind of database is decided from explicit
+state only — a genuinely new database (no collection row, no `saveSeq`, no `savedAt`) cuts over
+empty with `pending`; a saved snapshot must carry BOTH blobs as arrays, and an absent, unparsable
+or non-array collection is a refusal (`CORE_IDENTITY_CUTOVER_BLOCKED`), never an empty import and
+never a first installation; the shadow tables' rows are discarded unread and their counts recorded.
+The migration refuses to run over an initialised live domain. Registering it, and attaching the
+repositories at boot (§7.2), remain open.
+
 ### 7.2 Boot order and the snapshot-presence change
 
 `attachDataLayer` initialises or attaches `guardians` before `players` (the FK), both before
@@ -513,6 +524,24 @@ in again); delete the `0005` record and the two `meta` keys; advance `meta.saveS
 `foreign_key_check`; VACUUM; verify against the real pre-S4 build (worktree at the S3 commit)
 with synthetic data, as S2 and S3 were.
 
+**Status: implemented and tested** (`repositories/coreIdentityRollback.mjs`,
+`scripts/coreIdentityRollback.mjs`, `scripts/testCoreIdentityRollback.mjs`). As built: the output
+directory must be empty (exit 1), a recorded 0005 over shadow-shaped tables is refused rather than
+guessed, the copy is revalidated (integrity, foreign keys, the blobs read back to the row counts,
+the shadow tables empty, the sessions exactly the source's) before it is reported, and any
+failure removes the partial copy. "The source is never modified" is measured, not assumed: the
+main file's bytes and the logical content are identical; SQLite's read-only open of a WAL-mode
+file may leave an empty `-wal` and a `-shm` index next to the source when none existed — housekeeping,
+not content, removed by the next ordinary open-and-close — and a change still in an active WAL is
+carried into the copy. Verified against the real pre-S4 build (detached worktree at `cb1d22b`):
+the copy boots there, serves the post-S4 state, accepts the sessions minted before and after the
+cutover, verifies the outstanding e-mail codes (§8.2 holds: the code is plain) and persists new
+writes; the real migration re-upgrades it to the identical live state. One observation from that
+run: the pre-S4 build's own snapshot migrations backfill fields (m182's `externalIds ??= []`) on
+any snapshot they boot, so a round trip through a *running* pre-S4 build carries that backfill into
+the re-upgraded rows; it is that build's behaviour, not the rollback's, and the in-process round
+trip (no pre-S4 boot) is row-identical.
+
 ### 8.2 The e-mail verification dead end, resolved
 
 The first draft hashed the guardian e-mail code in S4a (as the S1 shadow does) and admitted that
@@ -623,7 +652,7 @@ child. Until then `removedAt`/`deletedAt` remain never-written.
 | Table | State at `0c038ef` | After S4a |
 |---|---|---|
 | `org_users`, `sessions`, `orgs` | live (S0, S2, S3) | unchanged |
-| `guardians`, `players`, `guardian_children` | shadow (S1) | **live**, with `facets_json` on `players` and `guardians`; `email_code_hash` column present but unused until S6 (the code rides in the facets) |
+| `guardians`, `players`, `guardian_children` | shadow (S1) | **live**, with `facets_json` on `players` and `guardians`; `email_code_hash` column present but unused until S6 (the code rides in the facets). *Current state: migration 0005 and the rollback tool are implemented and tested but the migration is not registered — the registered state is still the S1 shadow and the blobs are authoritative.* |
 | `players.deleted_at`, `guardians.deleted_at` | DDL only | still written by nothing (S4b) |
 | twelve `player_*` sub-record tables | proposed DDL | unchanged (S5) |
 | file 02 (recruitment) | proposed; `player_id` without FK pending O1/S8a | unchanged |

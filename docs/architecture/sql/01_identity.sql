@@ -2,8 +2,15 @@
 -- Organisations, staff accounts, guardians, players (with their owned sub-records) and sessions.
 -- Executed first; every other file references these tables. Conventions: docs/architecture/sqlite-schema.md §4.
 -- Status: org_users is LIVE (migration 0001). orgs, guardians, guardian_children, players (scalar part) and
--- sessions are created by migration 0002 as a verified SHADOW of the blob snapshot (plan step S1); the
--- player_* child tables and the remaining columns arrive with steps S4/S5.
+-- sessions are created by migration 0002 as a verified SHADOW of the blob snapshot (plan step S1); sessions is
+-- LIVE since migration 0003 (S2) and orgs since 0004 (S3). guardians, players and guardian_children: the
+-- REGISTERED state is still the S1 shadow (the blobs are authoritative). Migration 0005 (S4a,
+-- repositories/migrations/0005_core_identity_live.mjs) is implemented and tested but NOT registered; it replaces
+-- the three shadow definitions with the ones below plus one transitional column on players and guardians,
+-- `facets_json TEXT CHECK (json_valid)` (S3's pattern: every field not yet in a column, with the record's shape
+-- metadata). That column is added to this file together with the registration, so scripts/testSchemaDdl.mjs keeps
+-- matching the registered migrations; until then the test compares 0005 against this file plus exactly that column.
+-- The player_* child tables and the remaining columns arrive with step S5.
 
 -- source: db.orgs  (seed.mjs:15-88; registration server.mjs:1734; T&S org creation m14/review.mjs:382)
 -- owner/writer: server.mjs (core), m14 (verification fields), m13 (mfaRequiredForLeads), m24 (agencySettings → 06)

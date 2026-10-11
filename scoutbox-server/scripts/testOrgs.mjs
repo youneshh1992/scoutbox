@@ -482,6 +482,32 @@ test('correction 3: initialisation is explicit state, never a row count — an e
   s.close();
 });
 
+test('review (cb1d22b): initialise refuses a collection that is not an array — an object, null, a string, a number or nothing — writing no row, keeping the state pending and the input untouched; an explicitly empty array stays a valid, empty installation and a later valid retry initialises', () => {
+  const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
+  runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } });
+  const r = createOrgsRepository({ sqlite: s });
+  assert.equal(r.initState(), 'pending');
+  const cases = [[{ id: 'synthetic-not-an-array' }, /an object/], [null, /null/], ['orgs', /a string/], [7, /a number/], [undefined, /absent/]];
+  for (const [input, re] of cases) {
+    const before = JSON.stringify(input ?? null);
+    assert.throws(() => r.initialize(input), (err) => err instanceof TypeError && /initialize\(\) needs the first installation's organisations as an array/.test(err.message) && re.test(err.message) && /nothing was written/.test(err.message), `refused: ${re}`);
+    assert.equal(r.initState(), 'pending', 'still pending: the next boot retries'); assert.equal(s.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0); assert.equal(r.count(), 0);
+    assert.equal(JSON.stringify(input ?? null), before, 'the input is untouched'); assert.equal(s.isTransaction, false);
+  }
+  // The data layer refuses the same way at boot (a malformed seed is a fatal error, not an empty installation).
+  const dir = tempDir('s3-init-shape'); const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  assert.throws(() => attachDataLayer({ db: { orgs: { id: 'not-an-array' }, guardians: [], players: [], sessions: [], users: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL }), /organisations as an array/);
+  assert.equal(store.sqlite.prepare("SELECT value FROM meta WHERE key = 'orgsInit'").get().value, 'pending');
+  store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+  // A valid retry, and an explicitly empty installation, still work.
+  assert.deepEqual(r.initialize(ORGS()), { engine: 'sqlite', loaded: 3, imported: 3 }); assert.equal(r.initState(), 'done');
+  s.close();
+  const e = new DatabaseSync(':memory:'); e.exec('PRAGMA foreign_keys = ON;'); runDataMigrations(e, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } });
+  const re2 = createOrgsRepository({ sqlite: e });
+  assert.deepEqual(re2.initialize([]), { engine: 'sqlite', loaded: 0, imported: 0 }); assert.equal(re2.initState(), 'done');
+  e.close();
+});
+
 // ------------------------------------------------------------- snapshot tools
 test('snapshot mode: before the cutover record the orgs blob is authoritative; after it the table is read and written back, with shape and row validation rejecting the whole save', () => {
   const dir = tempDir('s3-snap'); s2File(dir);
