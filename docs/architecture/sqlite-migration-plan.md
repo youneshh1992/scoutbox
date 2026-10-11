@@ -7,7 +7,10 @@ Status of the steps: **S0 done** (commit `0f01df7`), **S1 done** (`ef71f28` + co
 `d0d96e6`, `22ce9ad`, `abc0f6a`; §S1 records the commands and results), **S2 done**
 (`6dca457` + corrections `8baafde`, `5a9e75d`; §S2 records the commands and results),
 **S3 done** (this branch, §S3 records the field ownership, the commands and the results),
-S4–S14 planned. The step after this commit is **S4**.
+S4–S14 planned. The step after this commit is **S4**, which is **prepared, not started**: the
+evidence-based implementation plan is [`s4-readiness-review.md`](./s4-readiness-review.md)
+and the open deletion decision (O1) is put to the Founder in
+[`s4-deletion-decision.md`](./s4-deletion-decision.md). S4 does not begin until O1 is answered.
 
 Sections: A principles that hold for every step · B the steps (S0–S14) · C cross-cutting
 work (repository pattern, source of truth and dual writes, backups and dry runs, legacy
@@ -808,8 +811,32 @@ performance, existing tests, what this plan is not).
   `SCOUTBOX_TEST_NODE_BINS` naming real binaries, the same probe runs on each (verified with the
   real 22.15.1, refused with nothing written, and the real 22.16.0, on which the full `npm
   test` also passes). The battery (`m23BootContract` included) is unchanged.
+  **Remaining metadata inconsistency (recorded, not fixed):** `engines.node >=22.16.0` admits
+  every Node 23.x release, while the documented supported lines are 22.16+ and 24.0+ and
+  `runtime.mjs` accepts a 23.x only on feature detection (`DatabaseSync.isTransaction`
+  present). The metadata therefore does **not** exclude Node 23; the runtime check prevents the
+  original failure on any 23.x that lacks the property, so this is not a data-integrity
+  blocker. Exact alignment needed, when the Founder wants it: `engines.node` becomes
+  `">=22.16.0 <23 || >=24.0.0"` (npm semver range syntax), the lock file's root entry mirrors
+  it, `runtime.mjs` refuses major 23 by version (today it defers to feature detection), and
+  `OPERATIONS.md` / `CLAUDE.md` state "22.16+ or 24+" — one commit, one regression in
+  `scripts/testRuntime.mjs` asserting the range string and that a 23.x version string is
+  refused. Until then the documents describe the supported lines and the metadata describes a
+  superset.
 
 ### S4 — Guardians and players (scalars) cut over; deletion becomes a tombstone; allowlisted views
+
+> **Prepared, not started** (11 October 2026). The evidence-based implementation plan —
+> every player and guardian field with its readers, writers and storage; what moves and what
+> stays nested; the relationship, minor, duplicate and inconsistency findings; the per-audience
+> allowlists; migration, restart, authority, session and failed-save behaviour; the rollback
+> design with its stated losses; the bounded sequence (**S4a** cutover with today's deletion
+> behaviour unchanged, **S4b** deletion after O1) and acceptance tests — is
+> [`s4-readiness-review.md`](./s4-readiness-review.md). The unresolved deletion decision O1 is
+> put to the Founder in [`s4-deletion-decision.md`](./s4-deletion-decision.md); S4b waits for
+> the answer, and S4a takes no deletion-policy decision implicitly. The text below is the
+> original step design and is read together with those two documents (where they differ, the
+> readiness review is the current evidence).
 
 - **Objective.** `guardians`, `players` (scalar columns) and `guardian_children` live. The
   player and guardian repositories expose typed reads: by id, by guardian, the paginated
