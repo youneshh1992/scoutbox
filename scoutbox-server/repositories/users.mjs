@@ -100,11 +100,20 @@ export const USERS_TABLE = {
   },
 };
 
-export function createUsersRepository({ sqlite, nextId, log = () => {}, warn = () => {} }) {
+export function createUsersRepository({ sqlite, nextId, log = () => {}, warn = () => {}, unit = null }) {
   if (!sqlite) throw new TypeError('the staff repository needs a SQLite connection (node:sqlite); the data layer has no in-memory fallback');
   const rows = [];                 // plain targets, insertion order
   const byIdMap = new Map();       // id → plain target
   const view = readonlyView(rows, 'a staff record');
+  // Writes commit on their own. This repository's in-memory rows are NOT yet
+  // integrated with the store's unit of work (no snapshotState/restoreState),
+  // so a write inside a unit — or inside any other open transaction — is
+  // refused rather than left half-tracked after a rollback.
+  const requireAutocommit = (what) => {
+    if (!sqlite.isTransaction) return;
+    if (unit?.active?.()) throw new Error(`org_users.${what} is not integrated with the unit of work yet (its in-memory rows would survive a rollback); perform staff changes outside the unit`);
+    throw new Error(`org_users.${what} writes in a transaction of its own and cannot run inside an open transaction`);
+  };
 
   const insertStmt = sqlite.prepare(`INSERT INTO org_users (id, org_id, name, role, email, sso_subject, created_at, removed_at, removed_by, provenance, mfa_json, delivery_prefs_json, extra_json)
     VALUES (@id, @org_id, @name, @role, @email, @sso_subject, @created_at, @removed_at, @removed_by, @provenance, @mfa_json, @delivery_prefs_json, @extra_json)`);
@@ -138,6 +147,7 @@ export function createUsersRepository({ sqlite, nextId, log = () => {}, warn = (
 
     /** Create a staff record; the id is assigned here, never by the caller. */
     insert(fields) {
+      requireAutocommit('insert');
       const target = { ...clone(fields) };
       delete target.id;
       target.createdAt ??= Date.now();
@@ -159,6 +169,7 @@ export function createUsersRepository({ sqlite, nextId, log = () => {}, warn = (
      * Returns the same view object callers already hold, now current.
      */
     update(id, patch) {
+      requireAutocommit('update');
       const target = byIdMap.get(id);
       if (!target) throw new Error(`staff record ${id} does not exist`);
       if (patch.id !== undefined && patch.id !== id) throw new TypeError('a staff record id never changes');

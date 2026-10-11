@@ -409,65 +409,73 @@ key; the migration never writes `sessions`; every token and `sid` stays valid (a
 and count). Facet changes are pending until the store reports the commit and are flushed again
 after a rollback (S3 correction 1). The runtime contract (`runtime.mjs`) covers S4 unchanged.
 
-### 7.4 Transaction boundaries for operations spanning several collections
+### 7.4 Transaction boundaries for operations spanning several collections — the implemented foundation
 
-**Today (verified by reading; the mechanism is the store's single save transaction):** every
-collection is in memory; a save writes them all in one SQLite transaction (`store.mjs write()`).
-`deletePlayerData` mutates eleven collections in memory and ends with `persistNow()` (S:4021),
-so either the whole deletion lands or none of it does; the same holds for child creation
-(saved by the next `persist`/`persistNow`), aging-up and the signing unit of work (`m29`
-restores memory on failure, S:613–620, and the next save persists either the completed or the
-restored state). **Existing limitation (since S2/S3, not new):** table-backed domains write
-immediately while blob collections wait for the save, so a crash between a staff/organisation
-row write and the save already leaves, for example, an organisation row without its ledger
-entry. **Existing limitation (media):** files are deleted first (S:3982); a crash before the
-save leaves a player row whose media ids point at deleted files.
+**Today's deletion is not entirely atomic (corrected).** `deletePlayerData` (S:3978–4023)
+mutates eleven blob collections in memory and ends with `persistNow()` (S:4021), so those
+eleven land together or not at all — but two steps happen **outside** that final save and
+before it: the media files are deleted from the filesystem first (S:3982), and the player's
+sessions are deleted from the live `sessions` table at once (S:3983, an autocommit statement
+since S2). A crash between S:3982 and the save therefore leaves a player row whose media ids
+point at deleted files and whose sessions are already gone, while every blob still names the
+player. Child creation (S:1386–1424) and aging-up (S:3132–3146) touch blobs only (plus the
+debounced save), so they are all-or-nothing today; the signing completion (`m29/index.mjs:613–620`)
+restores memory on failure and the next save persists either the completed or the restored
+state, but its session or organisation writes, if any, would be immediate. **Existing
+limitation (since S2/S3, not new):** table-backed domains write immediately while blob
+collections wait for the save, so a crash between a staff/organisation row write and the save
+leaves, for example, an organisation row without its ledger entry.
 
-**New inconsistency S4a would introduce if player rows were written immediately (design risk,
-not reproduced — nothing is implemented):** `players.remove(id)` as an autocommit `DELETE`
-followed by the blob cleanup in `persistNow()` makes the deletion **partially durable** on a
-crash between the two: the row is gone, the requests/trials still carry the name and id, the
-channels and messages still exist, the guardian still lists the child. The same shape applies to
-child creation (row inserted, link row inserted, ledger/saved-search/notifications not yet
-saved), aging-up (`guardian_id` nulled, link removed, timeline facet and ledger not yet saved)
-and the signing rollback (`restore` committed while `signings`/`ledger`/`invoices` truncation
-waits for the save).
+**The inconsistency S4a would have introduced** (design risk, now closed by implementation):
+player rows written immediately with the cross-collection cleanup waiting for the save would
+have made deletion, child creation, aging-up and the signing rollback **partially durable** on a
+crash or a failed save — and the first draft's recovery story ("repositories reload their rows,
+blob mutations stay in memory, the next save retries") was contradictory: a later ordinary save
+would have persisted the blob half of a failed operation while its row half had been rolled
+back. That is exactly the partial application the foundation below prevents.
 
-**Mechanism proposed for S4a: a unit of work on the store's save transaction.** `store.unitOfWork(fn)`
-opens the one save transaction, runs `fn`, in which repository row writes are allowed because
-the store owns the transaction (today's "refuse inside an open transaction" guard admits only
-the store's own unit of work), then writes every blob and commits. Repository bookkeeping
-(in-memory records, committed facets, derived `childIds`) is **staged** until `commit()` and
-discarded on `rollback()` — the S3 pending mechanism generalised from facets to rows: the
-repository re-reads the affected rows from the table on rollback, so its view never shows a
-state the database does not hold. In-memory blob mutations made inside `fn` are the caller's and
-stay in memory after a failure exactly as a failed `persistNow()` leaves them today; because the
-row writes are *also* undone, memory is then "intended state not yet durable" (as today for
-blobs), not "half durable". The next save retries the whole set. On a process crash inside the
-unit of work SQLite rolls back; the restart sees the pre-operation state in every collection:
-**not durable rather than partially durable**, which is today's guarantee. The four operations
-of §2.3 marked (UoW) run this way; single-field column writes (availability, Academy+, level,
-password rehash, consent, location, stats, prefs) keep the S3 immediate model unless they also
-write a blob in the same request, in which case they too run inside a unit of work. The route
-ends with `persistNow()` where today it does.
+**Implemented (commit after `f899577`): `store.unitOfWork(work, { snapshot })`** in
+`store.mjs`, with `repositories/memento.mjs` and the organisations repository as the first
+participant (`scripts/testUnitOfWork.mjs`, 11 checks). The contract, as built and tested:
 
-**Media files (filesystem, outside SQLite).** Order is reversed: the database transaction
-commits first; file deletion follows. To make the second step reliable, the transaction writes a
-`media_deletions` queue (the media ids), processed immediately after commit and again at boot
-and on a sweep; an entry is removed only after the file is gone (idempotent). A crash after
-commit leaves files that no row references and no route can serve (`/media/:id` resolves the
-owner, S:4265) until the sweep removes them; a crash before commit deletes nothing. The dangling
-`boxSessions.clipMediaId` references are nulled inside the same transaction.
+| Aspect | Explicit unit of work | Ordinary snapshot save (S3 contract, unchanged) |
+|---|---|---|
+| What commits together | every repository row write made inside `work`, every facet change, every in-memory blob mutation, the id counter and save revision — one `BEGIN … COMMIT` | the flush of pending facets and every blob |
+| On failure (inside `work`, in a flush, in a blob write, at `COMMIT`) | `ROLLBACK`, then **memory is restored to the state at the start of the unit**: every blob collection, record, nested array and object is put back in place by identity (`captureGraph`/`restoreGraph`), so references callers hold stay valid and show pre-operation values; each participant restores its own records, view order, id index and change tracking (`snapshotState`/`restoreState`); the error carries `unitOfWork = 'rolled_back'` | `ROLLBACK`; memory is left as it is (it is the intended state); facet tracking discards what the flush wrote |
+| Retry | **explicit**: the caller runs the whole operation again; a later ordinary save persists **no fragment** of a failed unit (tested: the save after a failed unit writes only the edits that were pending before it) | automatic: the next ordinary save retries every pending change |
+| Edits pending before the operation | part of the restored state: still in memory, still pending, persisted by the next ordinary save (tested) | — |
+| Process crash before `COMMIT` | SQLite rolls back; a restart sees the pre-operation database in every collection and table (tested with `SIGKILL` in a child process) | same |
+| Asynchrony | `work` must be synchronous; a thenable result is refused and rolled back (a SQLite transaction never spans an `await` or a network call) | — |
+| Nesting | a unit started inside a unit **joins** it (one transaction; an inner failure fails the whole); a unit cannot start inside a foreign open transaction | `save()` inside a unit is **absorbed** into the unit's commit (one save revision) |
+| Side effects | `store.afterCommit(fn)` defers a broadcast or a push until `COMMIT` returned; **nothing is published for a rolled-back unit**; a failing callback is counted and reported (`store.unitOfWorkState()`) and is **not** a rollback — the data is committed. `server.mjs` `broadcast()` and the push in `notify()` use it; outside a unit `afterCommit` runs the callback at once | — |
+| Participants | **organisations** (rows, facets, view, id index: full participation), **sessions** (stateless over the table: rows roll back with the SQL, nothing to restore, writes allowed), **staff (`org_users`)**: writes inside a unit are **refused** because its in-memory rows are not integrated (tested); integrating it is a later step. No atomicity is claimed for anything else | hooks' `flush/commit/rollback` |
+| Memento cost | one graph capture per unit: 1,000 players + 2,000 requests, about 12,000 objects, under 25 ms each way on the development machine (printed by the suite) | — |
 
-**Failure-injection tests (S4a acceptance 7 and 14):** for each of the four operations: (a)
-failure injected after the row statement, before the blob writes (an unrelated collection that
-cannot be serialised); (b) failure at `COMMIT` (injected); (c) process killed inside the unit of
-work (child process, `SIGKILL` after a marker). After each: the database holds the pre-operation
-state in **every** collection and table (row present/absent, links, blobs, sessions), the
-repository view equals the table, the next save (a, b) lands the whole operation, and a restart
-(c) shows the pre-operation state everywhere with no dangling id and no half-deleted thread.
-Media: a crash after commit leaves the queue entry and the file; the boot sweep removes both;
-`/media/:id` answers 404 throughout.
+**What S4a builds on this.** The four operations of §2.3 marked (UoW) run inside
+`store.unitOfWork`, with the player and guardian repositories implementing
+`snapshotState`/`restoreState` exactly as the organisations repository does. A route ends by
+returning; the unit's commit *is* the save (`persistNow()` inside it is absorbed). Single-field
+column writes (availability, Academy+, level, password rehash, consent, location, stats, prefs)
+keep the S3 immediate model unless the same request also writes a blob, in which case they too
+run inside a unit.
+
+**Media files (filesystem, outside SQLite) — not built in this step.** The design stands:
+the database transaction commits first; file deletion follows through a `media_deletions`
+queue written in the transaction, processed after commit, at boot and on a sweep, removed only
+once the file is gone; a crash after commit leaves orphan files no route can serve
+(`/media/:id` resolves the owner, S:4265) until the sweep; a crash before commit deletes
+nothing. Until it exists, S4a must keep today's order and today's limitation, stated as such.
+
+**Session revocation inside a unit.** `sessions.revokeFor` is a plain statement; inside a unit
+it rolls back with the unit, so S4a's deletion revokes sessions *inside* the unit and the
+revocation becomes part of the all-or-nothing (today it is not).
+
+**Failure-injection tests S4a adds per operation** (the foundation's suite already covers the
+mechanism with the organisations repository): failure after the row statement, failure at
+`COMMIT`, process killed inside the unit; after each the database holds the pre-operation
+state in every collection and table, the view equals the table, held references show the
+pre-operation values, an ordinary save persists no fragment, and an explicit retry lands the
+whole operation.
 
 ## 8. Rollback design
 

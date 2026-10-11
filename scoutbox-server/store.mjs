@@ -37,6 +37,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { readTableBacked, writeTableBacked, checkTableBackedShapes } from './repositories/index.mjs';
+import { captureGraph, restoreGraph } from './repositories/memento.mjs';
 import { requireRuntime, CONTRACT } from './runtime.mjs';
 
 let DatabaseSync = null;
@@ -132,40 +133,58 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
   const hooks = [];
   const report = (phase) => { for (const hook of hooks) hook[phase]?.(); };
 
+  // Server mode only: the unit of work (see `unitOfWork` below). While one is
+  // open, repository row writes are allowed inside the store's transaction,
+  // `save()` is absorbed into the unit's commit, and side effects registered
+  // with `afterCommit` wait until COMMIT returned.
+  let unit = null; // { afterCommit: [] } while a unit of work is open
+  let afterCommitFailures = 0;
+  let lastAfterCommitError = null;
+
+  /** Everything a save transaction writes between BEGIN and COMMIT (flush hooks, blobs, meta, optional projection). */
+  function writeBody(snapshot, { asSnapshot }) {
+    if (!asSnapshot) for (const hook of hooks) hook.flush();
+    const inTables = new Set(asSnapshot ? writeTableBacked(sqlite, snapshot.db) : []);
+    for (const [name, value] of Object.entries(snapshot.db)) {
+      if ((!asSnapshot && skip.has(name)) || inTables.has(name)) { deleteCollection.run(name); continue; }
+      upsertCollection.run(name, JSON.stringify(value));
+    }
+    upsertMeta.run('idCounter', String(snapshot.idCounter));
+    upsertMeta.run('savedAt', String(snapshot.savedAt ?? Date.now()));
+    // The save revision is what ties a shadow projection to the snapshot
+    // it was taken from: wall-clock savedAt can repeat, this cannot.
+    const saveSeq = (Number(readSaveSeq.get('saveSeq')?.value) || 0) + 1;
+    upsertMeta.run('saveSeq', String(saveSeq));
+    if (!asSnapshot && projection) {
+      sqlite.exec('SAVEPOINT shadow');
+      try {
+        projection({ ...snapshot, saveSeq });
+        sqlite.exec('RELEASE shadow');
+      } catch (err) {
+        sqlite.exec('ROLLBACK TO shadow');
+        sqlite.exec('RELEASE shadow');
+        projectionFailures += 1;
+        lastProjectionError = { at: Date.now(), message: String(err?.message ?? err).slice(0, 200) };
+      }
+    }
+  }
+
   /**
    * One save transaction. `asSnapshot` writes every collection the way snapshot
    * mode does — into its table when the domain has cut over, as a blob
    * otherwise — regardless of the mode the store was opened in. Server-mode
    * saves pass false and skip table-backed collections (their repositories
    * write their tables row by row).
+   *
+   * Contract of an ORDINARY save (unchanged since S3): memory is the intended
+   * state. A failed save leaves memory as it is, the hooks discard what they
+   * wrote, and the next save retries everything that is still different from
+   * the committed state. Nothing is undone in memory.
    */
   function write(snapshot, { asSnapshot }) {
     sqlite.exec('BEGIN');
     try {
-      if (!asSnapshot) for (const hook of hooks) hook.flush();
-      const inTables = new Set(asSnapshot ? writeTableBacked(sqlite, snapshot.db) : []);
-      for (const [name, value] of Object.entries(snapshot.db)) {
-        if ((!asSnapshot && skip.has(name)) || inTables.has(name)) { deleteCollection.run(name); continue; }
-        upsertCollection.run(name, JSON.stringify(value));
-      }
-      upsertMeta.run('idCounter', String(snapshot.idCounter));
-      upsertMeta.run('savedAt', String(snapshot.savedAt ?? Date.now()));
-      // The save revision is what ties a shadow projection to the snapshot
-      // it was taken from: wall-clock savedAt can repeat, this cannot.
-      const saveSeq = (Number(readSaveSeq.get('saveSeq')?.value) || 0) + 1;
-      upsertMeta.run('saveSeq', String(saveSeq));
-      if (!asSnapshot && projection) {
-        sqlite.exec('SAVEPOINT shadow');
-        try {
-          projection({ ...snapshot, saveSeq });
-          sqlite.exec('RELEASE shadow');
-        } catch (err) {
-          sqlite.exec('ROLLBACK TO shadow');
-          sqlite.exec('RELEASE shadow');
-          projectionFailures += 1;
-          lastProjectionError = { at: Date.now(), message: String(err?.message ?? err).slice(0, 200) };
-        }
-      }
+      writeBody(snapshot, { asSnapshot });
       sqlite.exec('COMMIT');
     } catch (err) {
       // A failure anywhere above — a flush, a blob write, COMMIT itself — ends
@@ -174,6 +193,80 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
       throw err;
     }
     if (!asSnapshot) report('commit');
+  }
+
+  /**
+   * An explicit UNIT OF WORK: run `work()` so that every repository row write
+   * it performs, every facet change, every in-memory blob mutation and the
+   * snapshot save commit or roll back TOGETHER, in one SQLite transaction.
+   *
+   * Contract (different from an ordinary save, on purpose):
+   *  - On any failure — inside `work`, in a flush, in a blob write, at COMMIT —
+   *    the transaction is rolled back AND memory is restored to the state it had
+   *    when the unit began: every blob collection, every record, every nested
+   *    array and object is put back IN PLACE (repositories/memento.mjs), so
+   *    references callers hold stay valid and show the pre-operation values;
+   *    each participating repository restores its own records, views and
+   *    change tracking. A later ordinary save therefore persists NO fragment of
+   *    the failed operation. Retrying means calling `unitOfWork` again with the
+   *    whole operation. The error carries `unitOfWork = 'rolled_back'`.
+   *  - Edits that were pending BEFORE the unit began (an unsaved facet change,
+   *    an unsaved blob edit) are part of the restored state: they stay in
+   *    memory, still pending, exactly as an ordinary save failure leaves them.
+   *  - `work` must be synchronous: a SQLite transaction never spans an await
+   *    or a network call. A thenable result is refused and rolled back.
+   *  - A unit started inside a unit JOINS it (one transaction; an inner failure
+   *    fails the whole). A unit cannot start inside a foreign open transaction.
+   *  - `save()` called inside a unit is absorbed: the unit's commit writes the
+   *    blobs once. `afterCommit(fn)` defers a side effect (a broadcast, a push)
+   *    until COMMIT returned; a failing callback is counted and reported and
+   *    is NOT a rollback — the data is committed. Outside a unit `afterCommit`
+   *    runs the callback immediately.
+   *  - Participants are the registered save hooks that implement
+   *    `snapshotState()` / `restoreState()`; a repository without them must
+   *    refuse writes while a unit is open (`store.unit.active()`), or its
+   *    bookkeeping would survive a rollback.
+   * `snapshot()` supplies `{ savedAt, idCounter, db }` for the blob write and
+   * `db` is the root of the memento (table-backed collections on it are views
+   * and are skipped; their repositories restore themselves).
+   */
+  function unitOfWork(work, { snapshot } = {}) {
+    if (!serverMode) throw new Error('unitOfWork is a server mode operation; a snapshot tool writes whole snapshots with save()');
+    if (typeof work !== 'function' || typeof snapshot !== 'function') throw new TypeError('unitOfWork(work, { snapshot }) needs a synchronous work function and a snapshot provider');
+    if (unit) return work(); // nested: join the enclosing unit
+    if (sqlite.isTransaction) throw new Error('a unit of work cannot start inside an open transaction');
+    const before = snapshot();
+    const memento = captureGraph([before.db]);
+    const states = hooks.map((hook) => (hook.snapshotState ? hook.snapshotState() : null));
+    unit = { afterCommit: [] };
+    let result;
+    sqlite.exec('BEGIN');
+    try {
+      result = work();
+      if (result && typeof result.then === 'function') throw new Error('a unit of work must be synchronous: a SQLite transaction never spans an await');
+      writeBody(snapshot(), { asSnapshot: false });
+      sqlite.exec('COMMIT');
+    } catch (err) {
+      try { if (sqlite.isTransaction) sqlite.exec('ROLLBACK'); } finally {
+        restoreGraph(memento);
+        hooks.forEach((hook, i) => { if (hook.restoreState) hook.restoreState(states[i]); });
+        report('rollback');
+        unit = null;
+      }
+      if (err && typeof err === 'object') err.unitOfWork = 'rolled_back';
+      throw err;
+    }
+    const deferred = unit.afterCommit;
+    unit = null;
+    report('commit');
+    for (const fn of deferred) {
+      try { fn(); } catch (err) {
+        afterCommitFailures += 1;
+        lastAfterCommitError = { at: Date.now(), message: String(err?.message ?? err).slice(0, 200) };
+        console.error(`unit of work: an after-commit side effect failed (the data is committed): ${lastAfterCommitError.message}`);
+      }
+    }
+    return result;
   }
 
   const store = {
@@ -224,7 +317,18 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
     },
     /** The persisted save revision: incremented by every save of the snapshot, in either mode. */
     revision() { return Number(readSaveSeq.get('saveSeq')?.value) || 0; },
-    save(snapshot) { write(snapshot, { asSnapshot: !serverMode }); },
+    /** An ordinary save. Inside an open unit of work it is absorbed: the unit's commit writes the blobs once. */
+    save(snapshot) { if (unit) return; write(snapshot, { asSnapshot: !serverMode }); },
+    unitOfWork,
+    /** For repositories: whether a unit of work is open on this store (their row writes are then allowed inside the transaction). */
+    unit: { active: () => unit !== null },
+    inUnitOfWork: () => unit !== null,
+    /** Defer a side effect until the open unit of work committed; outside a unit, run it now. */
+    afterCommit(fn) {
+      if (typeof fn !== 'function') throw new TypeError('afterCommit needs a function');
+      if (unit) unit.afterCommit.push(fn); else fn();
+    },
+    unitOfWorkState: () => ({ active: unit !== null, afterCommitFailures, lastAfterCommitError }),
   };
   return store;
 }

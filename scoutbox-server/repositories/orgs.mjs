@@ -48,7 +48,8 @@
  * (`rollback()`), which discards it, so a change flushed into a save that
  * later failed is flushed again by the next save.
  */
-import { readonlyView } from './readonly.mjs';
+import { readonlyView, markView } from './readonly.mjs';
+import { captureGraph, restoreGraph } from './memento.mjs';
 import { migrationApplied } from './database.mjs';
 import { requireRuntime } from '../runtime.mjs';
 
@@ -266,8 +267,11 @@ export const ORGS_TABLE = {
   },
 };
 
-export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {} }) {
+export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {}, unit = null }) {
   if (!sqlite) throw new TypeError('the organisations repository needs a SQLite connection (node:sqlite); the data layer has no in-memory fallback');
+  // `unit` is the store's `{ active() }`: while the store runs a unit of work,
+  // row writes join its transaction and the bookkeeping is staged (§ unit of work).
+  const inUnit = () => !!unit?.active?.();
   // The transaction-state guards below need `sqlite.isTransaction` (Node.js
   // 22.16 / 24.0); the store refused the runtime before opening the file, and
   // a connection handed in by a tool is checked the same way.
@@ -308,13 +312,13 @@ export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {} }
     if (value === null || typeof value !== 'object') return value;
     let g = guards.get(value);
     if (!g) {
-      g = new Proxy(value, {
+      g = markView(new Proxy(value, {
         get(t, prop, receiver) { return guard(Reflect.get(t, prop, receiver), key); },
         set() { return refuseNested(key); },
         deleteProperty() { return refuseNested(key); },
         defineProperty() { return refuseNested(key); },
         setPrototypeOf() { return refuseNested(key); },
-      });
+      }));
       guards.set(value, g);
     }
     return g;
@@ -326,7 +330,7 @@ export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {} }
    * assigning or deleting any other key is allowed and lands in the facets,
    * persisted by the next save's `flush`.
    */
-  const recordView = (target) => new Proxy(target, {
+  const recordView = (target) => markView(new Proxy(target, {
     get(t, key, receiver) {
       const value = Reflect.get(t, key, receiver);
       return key in COMPOSITES ? guard(value, key) : value;
@@ -344,17 +348,23 @@ export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {} }
       if (MIGRATED_KEYS.has(key)) return refuse(`an organisation (field "${String(key)}")`);
       return Reflect.defineProperty(t, key, desc);
     },
-  });
+  }));
+  /**
+   * Remember a record. Outside a unit of work its facets are committed (the
+   * statement that wrote them has autocommitted); inside one they are PENDING
+   * until the store reports the commit, so a rollback leaves nothing claimed.
+   */
   const remember = (rec, facetsJson) => {
-    records.push(rec); byIdMap.set(rec.id, rec); committedFacets.set(rec.id, facetsJson);
+    records.push(rec); byIdMap.set(rec.id, rec);
+    if (inUnit()) pendingFacets.set(rec.id, facetsJson); else committedFacets.set(rec.id, facetsJson);
     const view = recordView(rec); proxies.push(view); return view;
   };
   /** `db.orgs`: the records, read-only as an array (push/splice/assignment throw); each element is a record view. */
-  const view = new Proxy(proxies, {
+  const view = markView(new Proxy(proxies, {
     set(_t, key) { return refuse(`the organisations collection (index "${String(key)}")`); },
     deleteProperty(_t, key) { return refuse(`the organisations collection (index "${String(key)}")`); },
     defineProperty(_t, key) { return refuse(`the organisations collection (index "${String(key)}")`); },
-  });
+  }));
 
   const load = () => {
     records.length = 0; proxies.length = 0; byIdMap.clear(); committedFacets.clear(); pendingFacets.clear();
@@ -376,9 +386,14 @@ export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {} }
     });
     if (problems.length) throw new Error(`orgs: ${problems.length} organisation record(s) cannot be imported — ${problems.slice(0, 20).join('; ')}`);
   };
-  /** `insert`/`update` commit on their own; inside someone else's open transaction their bookkeeping could not follow a rollback. */
+  /**
+   * `insert`/`update` commit on their own, OR join the store's unit of work
+   * (whose rollback restores this repository's state through `restoreState`).
+   * Inside anyone else's open transaction their bookkeeping could not follow
+   * a rollback, so they refuse.
+   */
   const requireAutocommit = (what) => {
-    if (sqlite.isTransaction) throw new Error(`orgs.${what} writes in a transaction of its own and cannot run inside an open transaction (a save flushes facets only)`);
+    if (sqlite.isTransaction && !inUnit()) throw new Error(`orgs.${what} writes in a transaction of its own and cannot run inside an open transaction (a save flushes facets only; use the store's unit of work)`);
   };
 
   const repo = {
@@ -469,9 +484,10 @@ export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {} }
       stmt.update.run(row);
       for (const key of Object.keys(rec)) if (!(key in next)) delete rec[key];
       Object.assign(rec, next);
-      // The whole row (facets included) is committed by this statement.
-      committedFacets.set(id, row.facets_json);
-      pendingFacets.delete(id);
+      // The whole row (facets included) is committed by this statement — or,
+      // inside a unit of work, pending until the store reports the commit.
+      if (inUnit()) pendingFacets.set(id, row.facets_json);
+      else { committedFacets.set(id, row.facets_json); pendingFacets.delete(id); }
       return proxies[records.indexOf(rec)];
     },
 
@@ -488,6 +504,7 @@ export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {} }
       for (const rec of records) {
         const row = toRow(rec);
         if (row.facets_json === committedFacets.get(rec.id)) { pendingFacets.delete(rec.id); continue; }
+        if (pendingFacets.get(rec.id) === row.facets_json) continue; // already written in this transaction (an insert/update inside a unit of work)
         stmt.facets.run({ id: rec.id, facets_json: row.facets_json, verification_revoked_at: row.verification_revoked_at, verification_org_type: row.verification_org_type });
         pendingFacets.set(rec.id, row.facets_json);
         changed += 1;
@@ -503,8 +520,25 @@ export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {} }
     rollback() { pendingFacets.clear(); },
     /** Organisations whose facet changes have not been committed yet (for reports and tests; never ids in logs). */
     uncommitted: () => records.filter((rec) => toRow(rec).facets_json !== committedFacets.get(rec.id)).length,
-    /** What the store registers: the flush and its outcome callbacks. */
-    saveHook: () => ({ flush: () => repo.flush(), commit: () => repo.commit(), rollback: () => repo.rollback() }),
+    /**
+     * Unit-of-work participation. `snapshotState()` captures every record (by
+     * identity, so a held record is restored in place), the view order, the id
+     * index and the committed facets; `restoreState()` puts them all back after
+     * a rollback — records inserted during the unit disappear from the view,
+     * facet and column changes made during it are undone on the same objects,
+     * and nothing is claimed as committed that was not.
+     */
+    snapshotState: () => ({ graph: captureGraph([records]), proxies: proxies.slice(), byId: new Map(byIdMap), committed: new Map(committedFacets), pending: new Map(pendingFacets) }),
+    restoreState(state) {
+      if (!state) return;
+      restoreGraph(state.graph);
+      proxies.length = 0; for (const p of state.proxies) proxies.push(p);
+      byIdMap.clear(); for (const [id, rec] of state.byId) byIdMap.set(id, rec);
+      committedFacets.clear(); for (const [id, json] of state.committed) committedFacets.set(id, json);
+      pendingFacets.clear(); for (const [id, json] of state.pending) pendingFacets.set(id, json);
+    },
+    /** What the store registers: the flush, its outcome callbacks, and the unit-of-work state hooks. */
+    saveHook: () => ({ flush: () => repo.flush(), commit: () => repo.commit(), rollback: () => repo.rollback(), snapshotState: () => repo.snapshotState(), restoreState: (s) => repo.restoreState(s) }),
   };
   return repo;
 }

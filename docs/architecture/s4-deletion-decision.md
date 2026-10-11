@@ -47,8 +47,15 @@ decides.
   (S:4016), removes the id from every guardian's `childIds` (S:4018), turns `requests` and
   `trials` into id-only tombstones (S:3955–3976, 3902–3952), nulls `playerName` on cases,
   assessments and open-day registrations (S:3993–4002), and calls the m24–m29 hooks (names and
-  words removed, ids and states kept). It ends with `persistNow()` (S:4021), so all of this
-  lands in one snapshot save.
+  words removed, ids and states kept). It ends with `persistNow()` (S:4021). **Not all of this
+  is one atomic step**: the media files are unlinked from the filesystem (S:3982) and the
+  sessions are deleted from their live table (S:3983, the sessions repository writes at once)
+  *before* the final save, so a save that fails leaves the files and sessions gone while the
+  blob edits are only in memory. Only the blob mutations (S:3984–4018 and the module hooks)
+  land together in that one snapshot save. The transaction foundation for S4a
+  (`store.unitOfWork`, `s4-readiness-review.md` §7.4) is what makes the row, facet and blob
+  parts of a future deletion commit or roll back together; the file deletion stays outside
+  any transaction until a media queue exists, which this step did not build.
 - **The deletion itself is not recorded**: nothing logs who deleted the profile or when (two
   modules write their own history row, `m25/index.mjs:462`, `m26/index.mjs:1378`).
 - **The birth date is stored in one place: the player row (`dob`).** No other record copies it

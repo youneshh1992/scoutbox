@@ -849,6 +849,20 @@ performance, existing tests, what this plan is not).
 > Review-only reproduction: `scoutbox-server/scripts/review/reproShortlistAfterDeletion.mjs`
 > (verified: `GET /org/shortlist` answers 500 after a shortlisted player deletes their
 > account; fixed in S4a).
+>
+> **Transaction foundation — DONE (this commit, before the cutover).** The unit of work the
+> readiness review §7.4 specifies is implemented: `store.unitOfWork(work)` commits repository
+> rows, facet flushes and the blob write in one transaction, restores the in-memory graph in
+> place when anything fails (held references keep their identity; no fragment is left for a
+> later ordinary save; retry is an explicit rerun), refuses asynchronous work and a start
+> inside a foreign transaction, absorbs nested saves, and defers broadcasts and pushes to
+> `store.afterCommit`. Organisations participate fully, sessions may be written inside a
+> unit (stateless), `org_users` refuses writes inside a unit. Tests:
+> `scoutbox-server/scripts/testUnitOfWork.mjs`; contract: `scoutbox-server/OPERATIONS.md`,
+> "Units of work". **S4a (player/guardian cutover) and S4b (deletion rewrite) are NOT
+> implemented**; the media-deletion queue is not built; the legacy-minor guardian-link
+> import rule (readiness review §5.5, import-and-list vs refuse) is still the Founder's open
+> decision and nothing in this step chooses it.
 
 - **Objective.** `guardians`, `players` (scalar columns) and `guardian_children` live. The
   player and guardian repositories expose typed reads: by id, by guardian, the paginated

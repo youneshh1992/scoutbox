@@ -530,6 +530,10 @@ function broadcast(event, rawPayload = {}) {
     if ((process.env.NODE_ENV ?? 'development') !== 'production') throw new Error(msg);
     console.error(`EVENT ${msg} — stripped`);
   }
+  // Inside a unit of work the state change is not committed yet: the event is
+  // published only once COMMIT returned, and never for a rolled-back operation.
+  // (The registry check above still runs now, so a bad call site fails the unit.)
+  if (store.inUnitOfWork?.()) { store.afterCommit(() => broadcast(event, rawPayload)); return; }
   if (event !== 'typing') persist(); // every broadcast (bar ephemeral typing) follows a state change
   const row = { id: ++eventSeq, event, payload, ts: Date.now() };
   if (event !== 'typing') {
@@ -815,7 +819,10 @@ function notify(audience, type, text, refId = null) {
   db.notifications.push(n);
   // Push delivery honours quiet hours / school-hours mute; the in-app feed
   // above always keeps the record either way.
-  if (!n.deferredPush) void pushSender.send(audience, 'ScoutBox', text);
+  // The notification row above is part of the snapshot (rolled back with a
+  // failed unit of work); the push is an external delivery and goes out only
+  // once the state it announces is committed. Outside a unit, afterCommit runs it now.
+  if (!n.deferredPush) store.afterCommit(() => { void pushSender.send(audience, 'ScoutBox', text); });
   broadcast('notify', { audienceKind: audience.kind, audienceId: audience.id });
   return n;
 }

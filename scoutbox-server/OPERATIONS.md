@@ -284,6 +284,48 @@ organisation with staff cannot be deleted from the table.
   restoring it into an empty directory boots with every organisation, facet,
   staff row and session intact.
 
+### Units of work (transaction foundation for S4)
+
+An operation that touches a table-backed collection *and* the blob (today: an
+organisation row, its facets and any blob collection; in S4a: players,
+guardians and their links too) runs inside `store.unitOfWork(() => { … })`.
+This is a second contract next to the ordinary save, not a replacement:
+
+- **Commit scope.** One SQLite transaction holds the repository writes made
+  inside the callback, the facet flush and the blob write. It commits or rolls
+  back as a whole; no ordinary save happens inside it (a `save()` called in the
+  callback is absorbed into the unit's own write).
+- **Failure.** When the callback throws, or the write or COMMIT fails, the
+  database is unchanged and the in-memory graph is restored *in place* to its
+  pre-operation values: held references keep their identity, repository caches,
+  facet bookkeeping and derived views are coherent again, and the error is
+  re-thrown with `err.unitOfWork = 'rolled_back'`. Nothing is left pending: a
+  later ordinary save persists no fragment of the failed operation.
+- **Retry.** Explicit only — the caller reruns the whole operation. The
+  ordinary save keeps the S3 contract (facets not yet committed stay pending
+  and the next save retries them); a failed unit leaves nothing to retry.
+- **Unrelated pending edits** made before the unit (blob or facet) survive a
+  rollback and are persisted by the next ordinary save, as before.
+- **Crash before COMMIT.** The journal rolls back on the next open; a restart
+  sees the pre-operation database.
+- **Rules.** The callback is synchronous (a promise is refused and the unit
+  rolled back — no transaction spans an `await` or a network call); a unit
+  cannot start inside another open transaction; a nested `unitOfWork` joins the
+  outer one. Side effects (broadcasts, pushes) are deferred with
+  `store.afterCommit(fn)` and run only after COMMIT; `server.mjs` already does
+  this for `broadcast()` and the push half of `notify()`. A deferred side effect
+  that fails is counted in `store.unitOfWorkState()` and logged; the data stays
+  committed. Outside a unit, `afterCommit` runs the function at once.
+- **Participants.** Organisations join fully (rows, facets, bookkeeping, cache
+  restore). Sessions are stateless and may be written inside a unit (a revoked
+  session comes back on rollback). Staff (`org_users`) is **not** integrated:
+  its insert/update refuse inside a unit with a clear error — make staff changes
+  outside the unit. Snapshot mode has no units.
+- **Tests.** `scripts/testUnitOfWork.mjs` (part of `npm test`) covers failure
+  after row, facet and blob writes, failure at COMMIT, a crash before COMMIT
+  (child process killed), the no-fragment and explicit-retry rules, unrelated
+  pending edits and the S3 ordinary-save retry contract.
+
 The design and the cutover order are in `docs/architecture/sqlite-schema.md`
 and `docs/architecture/sqlite-migration-plan.md`.
 

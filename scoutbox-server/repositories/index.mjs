@@ -123,12 +123,15 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, shadowValidat
   // table as it is, empty or not; the array in memory is never imported.
   // Facet changes made on the records between saves are flushed inside every
   // save transaction and counted as persisted only once it committed.
-  const orgs = createOrgsRepository({ sqlite, log, warn });
+  // `unit` lets a repository tell whether the store's unit of work is open: the
+  // organisations repository then joins its transaction and stages its
+  // bookkeeping; the staff repository refuses (not integrated yet).
+  const orgs = createOrgsRepository({ sqlite, log, warn, unit: store.unit });
   const orgsBoot = orgs.initState() === 'pending' ? orgs.initialize(db.orgs) : orgs.attach(db.orgs);
   Object.defineProperty(db, 'orgs', { value: orgs.view, writable: false, configurable: false, enumerable: true });
   store.setSaveHook?.(orgs.saveHook());
 
-  const users = createUsersRepository({ sqlite, nextId, log, warn });
+  const users = createUsersRepository({ sqlite, nextId, log, warn, unit: store.unit });
   const usersBoot = users.attach(db.users);
   Object.defineProperty(db, 'users', { value: users.view, writable: false, configurable: false, enumerable: true });
 

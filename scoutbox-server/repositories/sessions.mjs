@@ -34,7 +34,7 @@
  * thing S2 removes).
  */
 import crypto from 'node:crypto';
-import { readonlyView } from './readonly.mjs';
+import { readonlyView, markView } from './readonly.mjs';
 import { migrationApplied } from './database.mjs';
 
 export const SESSION_KINDS = Object.freeze(['player', 'guardian', 'org', 'ts_reviewer']);
@@ -179,7 +179,12 @@ export function createSessionsRepository({ sqlite, sessionTtlMs = DEFAULT_SESSIO
     mirror.length = 0;
     for (const r of rows) mirror.push(toRow(r));
   };
-  const view = new Proxy(readonlyView(mirror, 'a session'), { get(target, prop, receiver) { refresh(); return Reflect.get(target, prop, receiver); } });
+  const view = markView(new Proxy(readonlyView(mirror, 'a session'), { get(target, prop, receiver) { refresh(); return Reflect.get(target, prop, receiver); } }));
+  // Unit-of-work participation: this repository keeps no in-memory state of its
+  // own (every read is a query, `mirror` is refreshed on access), so a row
+  // written inside the store's unit of work is simply undone by the SQL
+  // rollback and nothing here needs restoring. It therefore needs no
+  // snapshotState/restoreState and its writes are allowed inside a unit.
 
   const repo = {
     view,

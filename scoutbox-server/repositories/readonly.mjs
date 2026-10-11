@@ -12,6 +12,12 @@
  */
 
 const views = new WeakMap();
+// Every proxy a repository hands out (read-only views, record views, guards)
+// is registered here so the store's unit of work (repositories/memento.mjs) can
+// tell a view from the plain data it must capture and restore.
+const registry = new WeakSet();
+export const markView = (proxy) => { if (proxy !== null && typeof proxy === 'object') registry.add(proxy); return proxy; };
+export const isView = (value) => value !== null && typeof value === 'object' && registry.has(value);
 
 const refuse = (what) => {
   throw new TypeError(`${what} is written through its domain repository under scoutbox-server/repositories/, never directly on the in-memory view.`);
@@ -21,7 +27,7 @@ export function readonlyView(target, label = 'this record') {
   if (target === null || typeof target !== 'object') return target;
   const existing = views.get(target);
   if (existing) return existing;
-  const view = new Proxy(target, {
+  const view = markView(new Proxy(target, {
     get(t, key, receiver) {
       const value = Reflect.get(t, key, receiver);
       return value !== null && typeof value === 'object' ? readonlyView(value, label) : value;
@@ -30,7 +36,7 @@ export function readonlyView(target, label = 'this record') {
     deleteProperty(_t, key) { return refuse(`${label} (field "${String(key)}")`); },
     defineProperty(_t, key) { return refuse(`${label} (field "${String(key)}")`); },
     setPrototypeOf() { return refuse(label); },
-  });
+  }));
   views.set(target, view);
   return view;
 }
