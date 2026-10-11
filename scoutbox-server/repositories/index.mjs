@@ -30,7 +30,7 @@ import { createUsersRepository, USERS_TABLE } from './users.mjs';
 import { createSessionsRepository, SESSIONS_TABLE } from './sessions.mjs';
 import { createOrgsRepository, ORGS_TABLE } from './orgs.mjs';
 import { createIdentityRepositories, IDENTITY_SNAPSHOT, IDENTITY_COLLECTIONS } from './identity.mjs';
-import { createMediaDeletionsQueue, MEDIA_DELETIONS_TABLE, MEDIA_DELETIONS_MIGRATION } from './mediaDeletions.mjs';
+import { createMediaDeletionsQueue, MEDIA_DELETIONS_TABLE, MEDIA_DELETIONS_MIGRATION, assertMediaQueueConsistent } from './mediaDeletions.mjs';
 import * as m0001 from './migrations/0001_org_users.mjs';
 import * as m0002 from './migrations/0002_core_identity_shadow.mjs';
 import * as m0003 from './migrations/0003_sessions_live.mjs';
@@ -124,6 +124,12 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   for (const name of ['sessions', 'users', 'orgs']) {
     if (written.includes(name)) single(name).prune?.(sqlite, db[name]);
   }
+  // The ownership invariant on the FINAL combined state (review of 4ef9345):
+  // whichever side this snapshot wrote — the identity pair, the queue, or both —
+  // no queued removal may name a clip a live player still carries. A refusal
+  // throws inside the caller's transaction, so the whole save rolls back,
+  // unrelated changes included.
+  if (written.some((n) => IDENTITY_COLLECTIONS.includes(n) || n === MEDIA_DELETIONS_TABLE.name)) assertMediaQueueConsistent(sqlite, { label: 'the snapshot (players and mediaDeletions together)' });
   return written;
 }
 
@@ -180,7 +186,8 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
 
   // The media-deletion queue (migration 0006): rows are written inside the
   // deletion's unit of work; the server processes them after commit and at boot.
-  const mediaDeletions = createMediaDeletionsQueue({ sqlite, log, warn, now });
+  // The live records the server holds count as references too (an upload whose facet is not flushed yet).
+  const mediaDeletions = createMediaDeletionsQueue({ sqlite, log, warn, now, liveRecords: () => identity.players.view });
   // The queue is its table and nothing else. A `mediaDeletions` array the
   // caller holds in memory is either the blob migration 0006 just imported
   // from the file (a restored backup: the array is dropped, the table is the
@@ -214,7 +221,7 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
         sessions: { rows: sessions.count(), mode: 'live', lifetimeMs: sessions.ttlMs },
       },
       identity: { initState: identity.initState(), uncommittedFacets: identity.report().uncommittedFacets },
-      mediaDeletions: { queued: mediaDeletions.count() },
+      mediaDeletions: { queued: mediaDeletions.count(), conflicts: mediaDeletions.conflicts().length },
     }),
   };
 }

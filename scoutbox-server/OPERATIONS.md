@@ -429,7 +429,31 @@ the end of this section is the gate.
   is not a media id (`[a-z0-9-]+`, so never a path), an unknown field, a bad
   time, a duplicate — refuses the whole restore: the migration aborts, the
   blob stays, the next boot refuses the same way, and nothing is removed on
-  the strength of the file.
+  the strength of the file. **The ownership invariant: a file referenced by
+  ANY live player is never deleted by this queue.** A queue entry's own
+  `player_id` proves nothing; the authority is the identity records (every
+  `media[].id` a live player carries, read through the mapping) plus the
+  records the server holds in memory. The invariant is checked wherever queue
+  rows become authoritative and at every sweep: a restored `db.json` whose
+  queue names a live player's clip refuses the restore
+  (`MEDIA_QUEUE_OWNERSHIP_CONFLICT`, naming the media id and the owner ids —
+  the store had already imported the file as blobs and renamed it
+  `db.json.migrated`, as for every restore; the migration rolled back, the
+  blob stays, no file was touched, the next boot refuses again); a snapshot
+  tool's write whose FINAL state has such a conflict — the queue written
+  against the retained players, the players written against the retained
+  queue, or both — is rolled back whole, unrelated changes included; an entry
+  already stored in a live directory is retained at boot and at every sweep
+  with the diagnostic in `last_error`, the file and the live reference
+  survive, `/capabilities` → `dataLayer.mediaDeletions.conflicts` counts it,
+  `/media/:id` keeps answering 404 for the disputed id (quarantine, never
+  deletion), and `POST /admin/backup` answers `409 MEDIA_QUEUE_OWNERSHIP_CONFLICT`
+  instead of leaving the clip out as if it had been backed up. Resolution is by
+  hand: remove the queue entry if the clip is the player's, or remove the
+  player's reference if the clip really belongs to a removed owner; a
+  conflicting entry becomes a legitimate removal only once no live player
+  references it. Legitimate pending removals, already-absent files, failed
+  attempts and the rollback refusal are unchanged.
 - **Rollback to the previous build (S3).** Do not restore a pre-cutover backup
   (it would discard every later write). Run
   `node scripts/coreIdentityRollback.mjs <data-dir> <out-dir> [--json]`
@@ -588,7 +612,11 @@ media-removal queue as `mediaDeletions`; it is the shape the first boot of a
 restore imports and cuts over again. The manifest is written last: a backup
 that fails midway (a write or copy error) answers `500 BACKUP_FAILED`, its
 partial directory is removed, and an `ops` event records the failure — nothing
-half-made is ever listed as a usable backup.
+half-made is ever listed as a usable backup. A queue entry that names a clip a
+live player still references makes the backup answer
+`409 MEDIA_QUEUE_OWNERSHIP_CONFLICT` (media ids and owner ids, no directory
+created, an `ops` event): it can neither copy the file as the player's nor leave
+it out as removed, so the conflict is resolved first ("Media removal" above).
 
 ## Restore (never over a live directory)
 1. Copy the backup directory to a **new, empty** location.

@@ -77,8 +77,13 @@ and design changes the Founder explicitly requests.
   the media removals in `media_deletions` (migration `0006`) inside the same
   transaction and the files go after COMMIT; a backup exports that queue as
   `mediaDeletions` and never copies a queued file, and a restore imports it
-  (migration `0006`) and finishes the removal at boot; player and guardian
-  responses come from the
+  (migration `0006`) and finishes the removal at boot; the queue never deletes
+  a file a live player still references (the identity records' `media[].id`
+  through the mapping are the authority, never the entry's own `player_id`):
+  a conflicting restore or snapshot is refused whole with
+  `MEDIA_QUEUE_OWNERSHIP_CONFLICT`, a stored conflicting entry is retained with
+  a diagnostic at every sweep, and the backup answers 409 rather than omit the
+  clip; player and guardian responses come from the
   allowlists in `views/playerViews.mjs`; the copy-only rollback tool is
   `scripts/coreIdentityRollback.mjs` (refuses a pending initialisation and a
   non-empty media queue). **Registration in source is development work, not

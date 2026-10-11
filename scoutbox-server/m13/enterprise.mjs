@@ -429,13 +429,28 @@ export function registerEnterprise(ctx) {
   adminRouter.post('/backup', (req, res) => {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const dir = path.join(DATA_DIR, 'backups', stamp);
+    // 1. A consistent snapshot: the same shape store.load() imports on first
+    //    boot (db.json legacy path) — a restore is simply "point a fresh
+    //    DATA_DIR at a copy of this directory". Flushed first, so the queue is
+    //    judged against every live reference, pending facet edits included.
+    persistNow();
+    // The ownership invariant (review of 4ef9345): a queued removal that names a
+    // clip a live player still carries is a conflict to resolve, not a file to
+    // leave out of the backup as if it had been backed up. Refused before any
+    // directory exists; ids only, never a record.
+    const conflicts = mediaDeletions.conflicts();
+    if (conflicts.length) {
+      db.opsEvents.push({ id: nextId('ops'), at: Date.now(), kind: 'backup_refused', detail: { dir: stamp, error: 'MEDIA_QUEUE_OWNERSHIP_CONFLICT', conflicts: conflicts.map((c) => ({ mediaId: c.media_id, owners: c.owners })) } });
+      persistNow();
+      return res.status(409).json({
+        error: 'MEDIA_QUEUE_OWNERSHIP_CONFLICT',
+        message: `${conflicts.length} queued media removal(s) name a clip a live player still references; the backup was refused because it could neither copy the file as the player's nor leave it out as removed. Resolve the queue entry or the player's reference first.`,
+        conflicts: conflicts.map((c) => ({ mediaId: c.media_id, owners: c.owners })),
+      });
+    }
     let manifest;
     try {
       fs.mkdirSync(dir, { recursive: true });
-      // 1. A consistent snapshot: the same shape store.load() imports on first
-      //    boot (db.json legacy path) — a restore is simply "point a fresh
-      //    DATA_DIR at a copy of this directory".
-      persistNow();
       const snapshotPath = path.join(dir, 'db.json');
       // Sessions are exported in their stored form (token hashes, never tokens):
       // the in-memory `db.sessions` view is hash-free by design and could not be

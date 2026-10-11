@@ -12,7 +12,7 @@
  * the queue is empty — and refuses while it is not, so a pre-S4 build can
  * never serve media the S4 build had already decided to remove.
  */
-import { validateMediaDeletionRows, writeMediaDeletionRows } from '../mediaDeletions.mjs';
+import { validateMediaDeletionRows, writeMediaDeletionRows, assertMediaQueueConsistent } from '../mediaDeletions.mjs';
 
 export const id = '0006_media_deletions';
 export const note = 'crash-safe queue of media files to remove after a player deletion commits';
@@ -45,5 +45,10 @@ export function up(sqlite) {
   let rows;
   try { rows = JSON.parse(blobRow.value); } catch { throw Object.assign(new Error('MEDIA_QUEUE_IMPORT_BLOCKED: the mediaDeletions blob is not valid JSON; nothing was imported'), { code: 'MEDIA_QUEUE_IMPORT_BLOCKED' }); }
   writeMediaDeletionRows(sqlite, validateMediaDeletionRows(rows, { label: 'the mediaDeletions blob' }));
+  // The ownership invariant (review of 4ef9345): an imported entry that names a
+  // clip a live player still carries — judged on the authoritative identity
+  // records this same boot cut over, through the mapping — aborts the migration
+  // whole with MEDIA_QUEUE_OWNERSHIP_CONFLICT before any sweep could act on it.
+  assertMediaQueueConsistent(sqlite, { label: 'the restored mediaDeletions blob' });
   sqlite.prepare("DELETE FROM collections WHERE name = 'mediaDeletions'").run();
 }

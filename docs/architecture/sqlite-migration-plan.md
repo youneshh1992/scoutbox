@@ -1079,6 +1079,42 @@ performance, existing tests, what this plan is not).
 > 0 of 3 on this tree; the five earlier scripts still pass. **Review acceptance of S4a is the
 > reviewer's to give; O1, S4b, S6 and S5 stay open.**
 
+> **S4a, sixth part — the ownership guard of the media-removal queue (review of `4ef9345`,
+> one finding, corrected failing-first).** The three corrections of the fifth part are
+> accepted. Reproduced: a restored `db.json` whose `mediaDeletions` carried a structurally
+> valid entry naming a LIVE player's clip (attributed to an unrelated removed player) was
+> imported by migration 0006 and the boot sweep deleted the clip while the player and its
+> reference stayed. *The invariant:* a file referenced by any live player is never deleted by
+> the removed-owner cleanup queue; an entry's own `player_id` is metadata, the authority is the
+> identity records' `media[].id` read through the mapping (`liveMediaReferences`: the players
+> table once 0005 is recorded, the `players` blob before it, plus the records the server holds
+> in memory). *Checked wherever queue rows become authoritative and at the execution boundary:*
+> migration 0006 asserts it after importing a restored blob (`MEDIA_QUEUE_OWNERSHIP_CONFLICT`,
+> the migration rolls back whole, the blob stays, no file is touched, the next boot refuses
+> again — the store had already imported the file and renamed it `db.json.migrated`, the
+> established order); `MEDIA_DELETIONS_TABLE.replace` and `writeTableBacked` assert it on the
+> FINAL combined state of a snapshot (the queue written against the retained players, the
+> players written against the retained queue, or both), so a conflicting save rolls back whole,
+> unrelated changes included, while a consistent replacement that removes the owner and queues
+> the clip is accepted; the sweep (`process`) retains a conflicting entry with the diagnostic in
+> `last_error` (the attempt count untouched), never asks storage to remove it, completes the
+> legitimate entries of the same sweep, and reports `conflicts` — an entry becomes a legitimate
+> removal only once no live player references it; `/capabilities` → `dataLayer.mediaDeletions.conflicts`;
+> `/media/:id` keeps answering 404 for a disputed id (quarantine, never deletion);
+> `POST /admin/backup` answers `409 MEDIA_QUEUE_OWNERSHIP_CONFLICT` instead of leaving a
+> live-owned clip out as if it had been backed up (no directory created; an `ops` event). No
+> shape/path check, uniqueness rule, source immutability or rollback refusal was weakened; no
+> new migration; the exported backup format, the schema and the rollback contract are unchanged.
+> Proven in `scripts/testMediaDeletions.mjs` (the sweep with an unrelated, absent or owner
+> `player_id` and with a record held only in memory; queue-only, identity-only and whole-snapshot
+> writes; the real COMMIT failing with the check in the transaction; the migration import) and
+> `scripts/testCoreIdentityServer.mjs` (the real server: the refused restore with the backup it
+> came from unchanged and the next boot refusing again; a stored conflicting entry surviving boot,
+> sweep, restart and the backup refusal; the resolution by hand; a legitimate removal still
+> completing). The reviewer's `review-4ef9345-media-conflict.mjs` reports 0 findings with its
+> control passing; the six earlier scripts still pass. **Final review acceptance of S4a remains
+> the reviewer's to give; O1, S4b, S6 and S5 stay open.**
+
 - **Objective.** `guardians`, `players` (scalar columns) and `guardian_children` live. The
   player and guardian repositories expose typed reads: by id, by guardian, the paginated
   org directory query (`country, position, availability, created_at` indexes) and the

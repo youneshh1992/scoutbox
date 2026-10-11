@@ -220,7 +220,7 @@ test('attachDataLayer: db.users becomes the repository view and cannot be replac
   assert.deepEqual(layer.report().tables, ['guardian_children', 'guardians', 'media_deletions', 'org_users', 'orgs', 'players', 'sessions']);
   assert.equal('shadow' in layer.report(), false, 'the projection is retired');
   assert.deepEqual(layer.report().identity, { initState: 'done', uncommittedFacets: 0 });
-  assert.deepEqual(layer.report().mediaDeletions, { queued: 0 });
+  assert.deepEqual(layer.report().mediaDeletions, { queued: 0, conflicts: 0 });
   for (const name of ['players', 'guardians']) {
     assert.throws(() => { db[name] = []; }, TypeError, `${name} cannot be replaced`);
     assert.throws(() => { db[name].push({ id: 'x' }); }, /repositories/, `${name} is a read-only view`);

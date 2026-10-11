@@ -456,4 +456,58 @@ await test('backup/restore keeps the intent of a pending media removal: a commit
   rm(dir, restored, restored2, restored3, restored4);
 });
 
+// ------------------------------------------------------------- the ownership guard of the media queue (review of 4ef9345)
+await test('ownership guard (review of 4ef9345): a restored snapshot whose queue names a clip a live player still references refuses the restore before any file is touched (the backup it came from untouched, the next boot refusing again); a conflicting entry already stored in a live directory is retained with a diagnostic at boot and at every sweep — the file and the live reference survive, /capabilities counts it, the backup route refuses rather than omit a live-owned clip — and once resolved the backup and a legitimate pending removal work as before', async () => {
+  const dir = tempDir('s4srv-own');
+  let S = await boot(dir, nextPort());
+  const su = await S.j('POST', '/auth/player/signup', { name: 'Live Media Owner', dob: '2000-01-01', country: 'GB', password: 'owner-pass-1' }); assert.equal(su.status, 201);
+  const pid = su.body.playerId; const token = su.body.token;
+  const up = await S.j('POST', '/player/media', { title: 'Keep this clip', kind: 'video', dataUrl: 'data:video/webm;base64,AAAAAAAA' }, token); assert.equal(up.status, 201, JSON.stringify(up.body));
+  const mediaId = up.body.media.id;
+  const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, JSON.stringify(bk.body));
+  const backupDigest = () => JSON.stringify(fs.readdirSync(bk.body.dir).sort().map((f) => [f, fs.statSync(path.join(bk.body.dir, f)).size]));
+  const before = backupDigest();
+  await S.stop();
+  // 1. A restore copy whose queue names the live clip, attributed to an unrelated removed player.
+  const restored = tempDir('s4srv-own-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
+  { const legacy = JSON.parse(fs.readFileSync(path.join(restored, 'db.json'), 'utf8')); assert.ok(legacy.db.players.find((p) => p.id === pid).media.some((m) => m.id === mediaId));
+    legacy.db.mediaDeletions = [{ media_id: mediaId, player_id: 'pl-unrelated-removed', queued_at: Date.now(), attempts: 0, last_attempt_at: null, last_error: null }];
+    fs.writeFileSync(path.join(restored, 'db.json'), JSON.stringify(legacy)); }
+  const clip = path.join(restored, 'media', `${mediaId}.webm`); assert.ok(fs.existsSync(clip));
+  const refused = await bootRefuses(restored, nextPort());
+  assert.notEqual(refused.code, 0); assert.match(refused.log, /MEDIA_QUEUE_OWNERSHIP_CONFLICT/); assert.ok(refused.log.includes(mediaId) && refused.log.includes(pid), 'the diagnostic names the media id and the live owner');
+  assert.ok(fs.existsSync(clip), 'the live clip was not touched'); assert.equal(fs.readFileSync(clip).length > 0, true);
+  assert.equal(qAll(restored, "SELECT name FROM sqlite_master WHERE name = 'media_deletions'").length, 0, 'the migration rolled back whole: no queue table, no record');
+  assert.ok(fs.existsSync(path.join(restored, 'db.json.migrated')), 'the store imported the snapshot as blobs first (the established order); nothing is lost');
+  assert.equal(JSON.parse(q1(restored, "SELECT value FROM collections WHERE name = 'mediaDeletions'").value)[0].media_id, mediaId, 'the conflicting entry sits in the blob, imported by nothing');
+  assert.match((await bootRefuses(restored, nextPort())).log, /MEDIA_QUEUE_OWNERSHIP_CONFLICT/, 'the next boot refuses the same way'); assert.ok(fs.existsSync(clip));
+  assert.equal(backupDigest(), before, 'the backup the copy came from is unchanged');
+  // 2. A conflicting entry already stored in the live directory: the boot proceeds, the sweep retains it, nothing is unlinked.
+  { const s = openRaw(dir); s.prepare('INSERT INTO media_deletions (media_id, player_id, queued_at) VALUES (?, ?, ?)').run(mediaId, 'pl-unrelated-removed', Date.now()); s.close(); }
+  const liveClip = path.join(dir, 'media', `${mediaId}.webm`); assert.ok(fs.existsSync(liveClip));
+  S = await boot(dir, nextPort());
+  assert.ok(fs.existsSync(liveClip), 'the boot sweep did not unlink the live clip');
+  const me = (await S.j('GET', '/player/me', undefined, token)).body; assert.ok(me.media.some((m) => m.id === mediaId), 'the live reference survives');
+  const entry = q1(dir, 'SELECT attempts, last_error FROM media_deletions WHERE media_id = ?', mediaId); assert.equal(entry.attempts, 0); assert.match(entry.last_error, /OWNERSHIP_CONFLICT/);
+  assert.match(S.log(), /MEDIA_QUEUE_OWNERSHIP_CONFLICT/);
+  const cap = (await S.j('GET', '/capabilities')).body; assert.equal(cap.dataLayer.mediaDeletions.queued, 1); assert.equal(cap.dataLayer.mediaDeletions.conflicts, 1);
+  assert.equal((await S.j('GET', `/media/${mediaId}`, undefined, token)).status, 404, 'a disputed id is not served while the conflict stands (quarantine, never deletion)');
+  const bk2 = await S.j('POST', '/admin/backup', {}, null, A);
+  assert.equal(bk2.status, 409, JSON.stringify(bk2.body)); assert.equal(bk2.body.error, 'MEDIA_QUEUE_OWNERSHIP_CONFLICT');
+  assert.ok(JSON.stringify(bk2.body).includes(mediaId) && JSON.stringify(bk2.body).includes(pid));
+  assert.equal(fs.readdirSync(path.join(dir, 'backups')).length, 1, 'no backup directory was created for the refused backup');
+  await S.stop();
+  S = await boot(dir, nextPort());
+  assert.ok(fs.existsSync(liveClip), 'a restart does not unlink it either'); assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM media_deletions').n, 1);
+  await S.stop();
+  // 3. Resolved by hand (the operator removes the conflicting entry): the backup works, the clip is served, and a legitimate pending removal still completes.
+  { const s = openRaw(dir); s.prepare('DELETE FROM media_deletions WHERE media_id = ?').run(mediaId); s.prepare('INSERT INTO media_deletions (media_id, player_id, queued_at) VALUES (?, ?, ?)').run('media-nobody', 'pl-gone', Date.now()); s.close(); }
+  fs.writeFileSync(path.join(dir, 'media', 'media-nobody.webm'), 'synthetic removed media');
+  S = await boot(dir, nextPort());
+  assert.equal(fs.existsSync(path.join(dir, 'media', 'media-nobody.webm')), false, 'a legitimate pending removal still completes at boot'); assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM media_deletions').n, 0);
+  assert.ok(fs.existsSync(liveClip)); assert.equal((await S.j('GET', `/media/${mediaId}`, undefined, token)).status, 200);
+  assert.equal((await S.j('POST', '/admin/backup', {}, null, A)).status, 201);
+  await S.stop(); rm(dir, restored);
+});
+
 console.log(`\n${passed} core-identity server checks passed`);
