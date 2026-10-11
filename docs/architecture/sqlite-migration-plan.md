@@ -869,6 +869,26 @@ performance, existing tests, what this plan is not).
 > implemented**; the media-deletion queue is not built; the legacy-minor guardian-link
 > import rule (readiness review §5.5, import-and-list vs refuse) is still the Founder's open
 > decision and nothing in this step chooses it.
+>
+> **S4a, first bounded part — mapping and read-only preflight: DONE (this commit). Live
+> cutover: NOT STARTED.** The readiness review's single S4a commit is deliberately split into
+> reviewable pieces. This piece implements `repositories/identityMapping.mjs` (player and
+> guardian record ⇄ row mapping with `__meta` shape preservation and per-record validation
+> without coercion; today's signup, child-creation, co-guardian and seed shapes are the
+> compatibility contract; `emailCode` stays plain in the facets, `email_code_hash` NULL;
+> `childIds` → `guardian_children` rows with the primary/co rule), `repositories/identityPreflight.mjs`
+> (collection and relationship validation — duplicate ids, duplicate e-mails under
+> `lower(email)`, dangling references, primary-link disagreements, duplicate links, invalid
+> dates — a migration candidate only when nothing is refused and no decision is pending, the
+> intended live DDL for temporary test databases, `writeCandidate`), and
+> `scripts/preflightCoreIdentity.mjs` (read-only: copies the file, runs no migration, boots no
+> server; exit 0 complete / 2 invalid / 3 blocked on the §5.5 decision; never an approval).
+> Tests: `scripts/testCoreIdentityMapping.mjs`. **Not done, acceptance unchanged:** migration
+> `0005_core_identity_live`, the repositories and their writers, the boot snapshot-presence
+> signal (§7.2), atomic operations inside units of work (§7.4 per operation), the audience
+> allowlists (§6), the lossless rollback tool (§8), `facets_json` in `01_identity.sql`
+> (added with migration 0005 so the DDL test keeps matching 0002); the §5.5 rule and O1
+> remain the Founder's decisions.
 
 - **Objective.** `guardians`, `players` (scalar columns) and `guardian_children` live. The
   player and guardian repositories expose typed reads: by id, by guardian, the paginated

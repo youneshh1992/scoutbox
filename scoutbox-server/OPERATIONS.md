@@ -348,6 +348,43 @@ This is a second contract next to the ordinary save, not a replacement:
   survive), async work refused before invocation and an escaped thenable, and
   asynchronous after-commit failures.
 
+### S4a preparation: player/guardian mapping and the read-only preflight
+
+Before the players and guardians cut over (plan step S4a, **not started**), the
+mapping they will use and a read-only check of the data exist and are tested:
+
+- `repositories/identityMapping.mjs` — `playerToRow` / `playerFromRow`,
+  `guardianToRow` / `guardianFromRow`, `validatePlayerRecord`,
+  `validateGuardianRecord`: the S3 organisation pattern for the two domains.
+  Scalars and composites go to the columns of `docs/architecture/sql/01_identity.sql`;
+  the nested arrays that wait for S5, the remainders of the split composites
+  (`medical.records`, `programme.completed`), the guardian's `coGuardians` and
+  its outstanding `emailCode` (kept plain, once, not hashed — readiness review
+  §8.2), and any unknown field ride in the row's transitional `facets_json`
+  with the record's shape, so a record reads back byte-identical (absent stays
+  absent, null stays null). `childIds` becomes `guardian_children` rows. Nothing
+  is coerced or invented; a refused value is reported with the field and reason.
+- `node scripts/preflightCoreIdentity.mjs <data-dir | snapshot.json> [--json] [--now <ms>]`
+  (`npm run preflight:core-identity -- …`) — validates the two blob collections
+  and every relationship (duplicate ids, duplicate guardian e-mails compared
+  case-insensitively, dangling references, a `guardianId` the guardian's
+  `childIds` does not confirm, duplicate links, a self co-guardian, invalid
+  dates) and reports by id and reason; counts what the cutover would carry as
+  is (co links, adults still linked, co-guardian arrangements). A data
+  directory is copied read-only (`VACUUM INTO` from a read-only connection)
+  and only the copy is read; **no migration runs, nothing is written, no
+  server starts**. Status is one of `complete` (exit 0: the data fits the
+  intended schema — this is **not** an approval of the cutover), `invalid`
+  (exit 2) or `blocked_on_decision` (exit 3: a legacy minor with no guardian
+  link exists; the rule for such records is the Founder's open decision,
+  readiness review §5.5, and the report neither admits nor discards them).
+  The report never prints an e-mail address, a code, a hash or a record.
+- The intended live DDL (the documented tables plus `facets_json`) is
+  `CANDIDATE_DDL` in `repositories/identityPreflight.mjs`, used only to build
+  temporary databases in tests; migration 0005 is **not** registered and the
+  blob stays authoritative for players and guardians.
+- Tests: `scripts/testCoreIdentityMapping.mjs` (part of `npm test`).
+
 The design and the cutover order are in `docs/architecture/sqlite-schema.md`
 and `docs/architecture/sqlite-migration-plan.md`.
 

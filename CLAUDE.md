@@ -57,7 +57,12 @@ and design changes the Founder explicitly requests.
   exists and none is to be added before O2 is decided);
   `guardians`, `players` and `guardian_children` exist as a shadow (blob still
   authoritative; the projection that fills them is off unless
-  `SCOUTBOX_SHADOW_VALIDATION=1` and never touches live tables). Never log,
+  `SCOUTBOX_SHADOW_VALIDATION=1` and never touches live tables); their S4a
+  mapping (`repositories/identityMapping.mjs`) and the read-only preflight
+  (`scripts/preflightCoreIdentity.mjs`, `repositories/identityPreflight.mjs`)
+  are implemented and are the contract the live repositories must reuse —
+  the cutover itself (migration 0005) is not started, and a preflight report
+  is never an approval of it. Never log,
   report or export a plain bearer token. `node:sqlite` with transaction state
   is required (Node 22.16+ on the 22 line, or 24.0+; `runtime.mjs` is the one
   definition, checked before the data directory is touched and refused with
