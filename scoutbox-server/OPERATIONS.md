@@ -222,7 +222,26 @@ organisation with staff cannot be deleted from the table.
   second debounce window can lose a facet change while the column change made
   in the same request has already been written. Both live in the same database
   file and the same backup; this window closes as each facet moves to its own
-  table (plan S9–S11).
+  table (plan S9–S11). A facet change counts as persisted only once the save
+  that carried it **committed**: if a save fails after the facets were written
+  (another collection cannot be serialised, the disk is full at commit, any
+  error inside the transaction) the whole save rolls back and the facet change
+  is written again by the next save, so a failed save followed by a successful
+  one never loses an organisation change. The boot log line `snapshot save
+  failed:` therefore means "retry pending", not "data lost", as long as the
+  process stays up for the next save.
+- **First installation and the initialisation state.** `meta.orgsInit` records
+  whether the organisations were initialised: the cutover migration writes
+  `done` when it imported a blob (even an empty one) or found any saved
+  snapshot, and `pending` only for a database nothing was ever saved to. Only
+  while it is `pending` does the next boot import the in-memory records (the
+  seed on a demo boot) — once, inside one transaction with the change to
+  `done`, so a boot that dies during initialisation leaves it `pending` and
+  the next boot does it again. On every other boot the table is authoritative
+  **even when it is empty**: a seed array, a superseded blob copy or a stale
+  `orgs` blob somebody wrote back into `collections` is never imported (the
+  log says how many organisations were ignored, and the next save deletes a
+  stale blob). A file cut over before this state existed reads as `done`.
 - **Deletion.** There is still no route that deletes an organisation, and this
   step adds none: the policy for an organisation with open recruitment cases
   (schema open question O2) is undecided, so neither a tombstone nor a hard
@@ -235,8 +254,8 @@ organisation with staff cannot be deleted from the table.
   back into the legacy `orgs` blob in the previous representation, rebuilds
   `org_users` with the previous (S0) definition keeping every staff row,
   leaves `sessions` untouched (nobody signs in again, and no revoked session
-  comes back), removes the `0004_orgs_live` record and `meta.orgsCutover`, and
-  prints the counts. The source is never modified. The tool refuses (exit 4, no
+  comes back), removes the `0004_orgs_live` record, `meta.orgsCutover` and
+  `meta.orgsInit`, and prints the counts. The source is never modified. The tool refuses (exit 4, no
   output file) a database that carries a migration later than `0004`, refuses
   (exit 5) one that never cut over, and refuses an output directory that
   already holds a database. To go back further than S2, run

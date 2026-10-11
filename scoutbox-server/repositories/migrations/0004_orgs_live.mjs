@@ -25,11 +25,15 @@
  *      recreating its four indexes. `sessions.org_user_id` keeps referencing
  *      `org_users` by name, so after the rename every session still points at
  *      its staff row; the runner's foreign_key_check proves it;
- *   5. record `meta.orgsCutover`, delete the `orgs` blob.
+ *   5. record `meta.orgsCutover` and the initialisation state `meta.orgsInit`
+ *      (`done` when a blob was imported or the file already held a snapshot;
+ *      `pending` only when nothing was ever saved to this database — a first
+ *      installation, whose seed the data layer imports once, explicitly),
+ *      delete the `orgs` blob.
  * The runner then writes the `data_migrations` row and commits. Completion is
  * decided only by that row (repositories/orgs.mjs `attach` refuses without it).
  */
-import { validateOrgRecord, toRow, ORGS_CUTOVER_MIGRATION } from '../orgs.mjs';
+import { validateOrgRecord, toRow, ORGS_CUTOVER_MIGRATION, ORGS_INIT_META } from '../orgs.mjs';
 
 export const id = ORGS_CUTOVER_MIGRATION;
 export const note = 'organisations become table-backed (scalars in columns, other fields in facets_json); org_users rebuilt STRICT with the orgs foreign key and JSON checks';
@@ -149,5 +153,11 @@ export function up(sqlite, { now = Date.now() } = {}) {
   // 5. Record and retire the blob.
   const meta = sqlite.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
   meta.run('orgsCutover', JSON.stringify({ at: now, imported: legacy.length, staffRebuilt: copied, blobPresent: !!blobRow }));
+  // Initialisation state, explicit and never a row count: a blob (even an
+  // empty one) or any saved snapshot means the organisations ARE what the
+  // table now holds; only a database nothing was ever saved to is a first
+  // installation still waiting for its seed.
+  const everSaved = hasCollections && sqlite.prepare('SELECT COUNT(*) AS n FROM collections').get().n > 0;
+  meta.run(ORGS_INIT_META, blobRow || everSaved ? 'done' : 'pending');
   if (hasCollections) sqlite.prepare("DELETE FROM collections WHERE name = 'orgs'").run();
 }

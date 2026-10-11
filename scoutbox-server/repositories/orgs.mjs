@@ -32,11 +32,28 @@
  * Authority is decided by the cutover record `0004_orgs_live` in
  * `data_migrations`, never by the table existing (the S1 shadow created it)
  * or holding rows.
+ *
+ * Initialisation is explicit state, never a row count. The cutover migration
+ * records `meta.orgsInit`: `done` when it imported a blob (even an empty one)
+ * or found a snapshot that simply had no organisations, `pending` only when
+ * the database had never been saved to (a genuine first installation). The
+ * data layer then calls `initialize(records)` exactly once — the seed, inside
+ * one transaction with the state change, so an interruption leaves it pending
+ * and the next boot retries — and `attach()` never imports anything: an empty
+ * authoritative table stays empty whatever array or blob the caller holds.
+ *
+ * Change tracking reflects COMMITTED state only. `flush()` runs inside the
+ * store's save transaction and records what it wrote as pending; the store
+ * reports the commit (`commit()`), which promotes it, or the rollback
+ * (`rollback()`), which discards it, so a change flushed into a save that
+ * later failed is flushed again by the next save.
  */
 import { readonlyView } from './readonly.mjs';
 import { migrationApplied } from './database.mjs';
 
 export const ORGS_CUTOVER_MIGRATION = '0004_orgs_live';
+/** `meta` key holding the initialisation state (`pending` | `done`); absent on a file cut over before the state existed, which reads as `done`. */
+export const ORGS_INIT_META = 'orgsInit';
 export const ORG_TYPES = Object.freeze(['club', 'agency']);
 export const ORG_LEVELS = Object.freeze(['pro', 'academy', 'agency', 'grassroots']);
 export const ORG_PLANS = Object.freeze(['Pro', 'Academy', 'Agency', 'Grassroots']);
@@ -260,21 +277,54 @@ export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {} }
     facets: sqlite.prepare('UPDATE orgs SET facets_json = @facets_json, verification_revoked_at = @verification_revoked_at, verification_org_type = @verification_org_type WHERE id = @id'),
     count: sqlite.prepare('SELECT COUNT(*) AS n FROM orgs'),
     cutover: sqlite.prepare('SELECT 1 FROM data_migrations WHERE id = ?'),
+    meta: sqlite.prepare('SELECT value FROM meta WHERE key = ?'),
+    setMeta: sqlite.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
   };
 
   const records = [];                 // plain record objects (scalars + facets), insertion order
   const proxies = [];                 // the view records, same order
   const byIdMap = new Map();          // id → plain record
-  const lastFacets = new Map();       // id → facets_json last written, for change detection
+  const committedFacets = new Map();  // id → facets_json as last COMMITTED, for change detection
+  const pendingFacets = new Map();    // id → facets_json written by a flush whose transaction has not committed yet
 
   const refuse = (what) => { throw new TypeError(`${what} is written through the organisations repository (orgs.insert / orgs.update), never directly on the in-memory view.`); };
+  const refuseNested = (key) => refuse(`an organisation (field "${String(key)}", including its nested values)`);
 
   /**
-   * The view of one organisation: reading is the plain record; assigning a
-   * MIGRATED key throws (use `update`); assigning or deleting any other key is
-   * allowed and lands in the facets, persisted by the next save's `flush`.
+   * A composite (`location`, `federationRef`) is a column-backed value: its
+   * nested object is served through a guard that refuses assignment, deletion
+   * and property definition at any depth, so the view can never hold a value
+   * the table does not. Reads, spreads and JSON are unchanged; the guard for a
+   * given object is stable (same identity on every read).
+   */
+  const guards = new WeakMap();
+  const guard = (value, key) => {
+    if (value === null || typeof value !== 'object') return value;
+    let g = guards.get(value);
+    if (!g) {
+      g = new Proxy(value, {
+        get(t, prop, receiver) { return guard(Reflect.get(t, prop, receiver), key); },
+        set() { return refuseNested(key); },
+        deleteProperty() { return refuseNested(key); },
+        defineProperty() { return refuseNested(key); },
+        setPrototypeOf() { return refuseNested(key); },
+      });
+      guards.set(value, g);
+    }
+    return g;
+  };
+
+  /**
+   * The view of one organisation: reading is the plain record (composites
+   * through their guard); assigning a MIGRATED key throws (use `update`);
+   * assigning or deleting any other key is allowed and lands in the facets,
+   * persisted by the next save's `flush`.
    */
   const recordView = (target) => new Proxy(target, {
+    get(t, key, receiver) {
+      const value = Reflect.get(t, key, receiver);
+      return key in COMPOSITES ? guard(value, key) : value;
+    },
     set(t, key, value) {
       if (MIGRATED_KEYS.has(key)) return refuse(`an organisation (field "${String(key)}")`);
       if (key === '__meta' || key === '__rest') return refuse(`an organisation (reserved field "${String(key)}")`);
@@ -290,7 +340,7 @@ export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {} }
     },
   });
   const remember = (rec, facetsJson) => {
-    records.push(rec); byIdMap.set(rec.id, rec); lastFacets.set(rec.id, facetsJson);
+    records.push(rec); byIdMap.set(rec.id, rec); committedFacets.set(rec.id, facetsJson);
     const view = recordView(rec); proxies.push(view); return view;
   };
   /** `db.orgs`: the records, read-only as an array (push/splice/assignment throw); each element is a record view. */
@@ -301,8 +351,28 @@ export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {} }
   });
 
   const load = () => {
-    records.length = 0; proxies.length = 0; byIdMap.clear(); lastFacets.clear();
+    records.length = 0; proxies.length = 0; byIdMap.clear(); committedFacets.clear(); pendingFacets.clear();
     for (const r of stmt.all.all()) remember(fromRow(r), r.facets_json);
+  };
+  const readInitState = () => {
+    const row = stmt.meta.get(ORGS_INIT_META);
+    if (!row) return 'done'; // cut over before the state existed: the table is authoritative, nothing to initialise
+    if (row.value !== 'pending' && row.value !== 'done') throw new Error(`orgs: meta.${ORGS_INIT_META} holds ${JSON.stringify(row.value)}, which is neither "pending" nor "done"`);
+    return row.value;
+  };
+  const checkRecords = (rows) => {
+    const problems = [];
+    const seen = new Set();
+    rows.forEach((rec, i) => {
+      const v = validateOrgRecord(rec);
+      const label = isPlainObject(rec) && typeof rec.id === 'string' ? `id ${rec.id}` : `entry #${i}`;
+      if (!v.ok) problems.push(`${label}: ${v.reason}`); else if (seen.has(rec.id)) problems.push(`${label}: duplicate id`); else seen.add(rec.id);
+    });
+    if (problems.length) throw new Error(`orgs: ${problems.length} organisation record(s) cannot be imported — ${problems.slice(0, 20).join('; ')}`);
+  };
+  /** `insert`/`update` commit on their own; inside someone else's open transaction their bookkeeping could not follow a rollback. */
+  const requireAutocommit = (what) => {
+    if (sqlite.isTransaction) throw new Error(`orgs.${what} writes in a transaction of its own and cannot run inside an open transaction (a save flushes facets only)`);
   };
 
   const repo = {
@@ -310,43 +380,58 @@ export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {} }
     byId: (id) => (id && byIdMap.has(id) ? proxies[records.indexOf(byIdMap.get(id))] : null),
     count: () => records.length,
     cutOver: () => !!stmt.cutover.get(ORGS_CUTOVER_MIGRATION),
+    /** `pending` (a first installation that has not been initialised yet) or `done`. */
+    initState: () => readInitState(),
 
     /**
-     * Boot. Refuses to run without the cutover record. Loads the table. When
-     * the table is empty and the caller holds organisation records (a first
-     * installation booting from the seed, or demo fixtures) they are imported;
-     * when the table has rows, the caller's array is the superseded blob copy
-     * and only a row the table does not hold is reported as stale.
+     * Boot. Refuses to run without the cutover record. Loads the table and
+     * nothing else: whatever array the caller holds (the seed, a superseded
+     * blob copy, a stale blob) is never imported here — an organisation it
+     * names that the table does not hold is reported as ignored. A first
+     * installation is initialised by `initialize`, which the data layer calls
+     * only while the recorded state is `pending`.
      */
     attach(given) {
       if (!repo.cutOver()) throw new Error(`orgs: the cutover record ${ORGS_CUTOVER_MIGRATION} is missing from data_migrations; the table cannot be trusted as the source of truth`);
       const rows = Array.isArray(given) ? given : [];
-      const stored = stmt.count.get().n;
-      let imported = 0;
-      if (stored === 0 && rows.length) {
-        const problems = [];
-        const seen = new Set();
-        rows.forEach((rec, i) => {
-          const v = validateOrgRecord(rec);
-          const label = isPlainObject(rec) && typeof rec.id === 'string' ? `id ${rec.id}` : `entry #${i}`;
-          if (!v.ok) problems.push(`${label}: ${v.reason}`); else if (seen.has(rec.id)) problems.push(`${label}: duplicate id`); else seen.add(rec.id);
-        });
-        if (problems.length) throw new Error(`orgs: ${problems.length} organisation record(s) cannot be imported — ${problems.slice(0, 20).join('; ')}`);
-        sqlite.exec('BEGIN');
-        try { for (const rec of rows) stmt.insert.run(toRow(clone(rec))); sqlite.exec('COMMIT'); } catch (err) { sqlite.exec('ROLLBACK'); throw err; }
-        imported = rows.length;
-        log(`orgs: imported ${imported} organisation(s) from the in-memory records (first boot)`);
-      } else if (stored && rows.length) {
+      if (rows.length) {
         const ids = new Set(sqlite.prepare('SELECT id FROM orgs').all().map((r) => r.id));
         const unknown = rows.filter((o) => isPlainObject(o) && !ids.has(o.id)).length;
-        if (unknown) warn(`orgs: the table holds ${stored} row(s); an in-memory array with ${unknown} organisation(s) the table does not hold was ignored`);
+        if (unknown) warn(`orgs: the table holds ${ids.size} row(s) and is authoritative (initialisation ${readInitState()}); an in-memory array with ${unknown} organisation(s) the table does not hold was ignored`);
       }
       load();
-      return { engine: 'sqlite', loaded: records.length, imported };
+      return { engine: 'sqlite', loaded: records.length, imported: 0 };
+    },
+
+    /**
+     * First-installation initialisation: import the given records (the seed)
+     * and record `done`, in one transaction. Allowed only while the state is
+     * `pending`; refused when the table already holds rows (they were written
+     * outside the repository — a decision for a person, not a merge). Every
+     * record is validated first; an interruption leaves the state `pending`
+     * and nothing inserted, so the next boot does this again.
+     */
+    initialize(given) {
+      if (!repo.cutOver()) throw new Error(`orgs: the cutover record ${ORGS_CUTOVER_MIGRATION} is missing from data_migrations; the table cannot be trusted as the source of truth`);
+      if (readInitState() !== 'pending') throw new Error(`orgs: the organisations were already initialised (meta.${ORGS_INIT_META} is "done"); the table is authoritative and nothing is imported`);
+      const stored = stmt.count.get().n;
+      if (stored) throw new Error(`orgs: initialisation is pending but the table already holds ${stored} row(s) written outside the repository; refusing to initialise over them`);
+      const rows = Array.isArray(given) ? given : [];
+      checkRecords(rows);
+      sqlite.exec('BEGIN');
+      try {
+        for (const rec of rows) stmt.insert.run(toRow(clone(rec)));
+        stmt.setMeta.run(ORGS_INIT_META, 'done');
+        sqlite.exec('COMMIT');
+      } catch (err) { sqlite.exec('ROLLBACK'); throw err; }
+      log(`orgs: initialised ${rows.length} organisation(s) from the in-memory records (first installation)`);
+      load();
+      return { engine: 'sqlite', loaded: records.length, imported: rows.length };
     },
 
     /** Create an organisation. The caller supplies the id (ids are minted by the server's counter, as before). */
     insert(fields) {
+      requireAutocommit('insert');
       const rec = clone(fields);
       const v = validateOrgRecord(rec);
       if (!v.ok) throw new TypeError(`an organisation record was refused: ${v.reason}`);
@@ -362,6 +447,7 @@ export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {} }
      * whole. Facet keys cannot be set here: they are written on the record.
      */
     update(id, patch) {
+      requireAutocommit('update');
       const rec = byIdMap.get(id);
       if (!rec) throw new Error(`organisation ${id} does not exist`);
       if (patch.id !== undefined && patch.id !== id) throw new TypeError('an organisation id never changes');
@@ -377,26 +463,42 @@ export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {} }
       stmt.update.run(row);
       for (const key of Object.keys(rec)) if (!(key in next)) delete rec[key];
       Object.assign(rec, next);
-      lastFacets.set(id, row.facets_json);
+      // The whole row (facets included) is committed by this statement.
+      committedFacets.set(id, row.facets_json);
+      pendingFacets.delete(id);
       return proxies[records.indexOf(rec)];
     },
 
     /**
-     * Persist facet changes made on the records since the last flush: one
-     * UPDATE per changed organisation, inside the caller's transaction (the
-     * store calls this from every snapshot save). Returns how many rows changed.
+     * Persist facet changes made on the records since the last COMMITTED
+     * flush: one UPDATE per changed organisation, inside the caller's
+     * transaction (the store calls this from every snapshot save), recorded as
+     * pending until the caller reports `commit()` or `rollback()`. Returns how
+     * many rows were written.
      */
     flush() {
+      if (!sqlite.isTransaction) throw new Error('orgs.flush runs inside a save transaction; the store reports its commit or rollback afterwards');
       let changed = 0;
       for (const rec of records) {
         const row = toRow(rec);
-        if (row.facets_json === lastFacets.get(rec.id)) continue;
+        if (row.facets_json === committedFacets.get(rec.id)) { pendingFacets.delete(rec.id); continue; }
         stmt.facets.run({ id: rec.id, facets_json: row.facets_json, verification_revoked_at: row.verification_revoked_at, verification_org_type: row.verification_org_type });
-        lastFacets.set(rec.id, row.facets_json);
+        pendingFacets.set(rec.id, row.facets_json);
         changed += 1;
       }
       return changed;
     },
+    /** The save transaction that ran `flush` committed: what it wrote is now the committed state. */
+    commit() {
+      for (const [id, json] of pendingFacets) committedFacets.set(id, json);
+      pendingFacets.clear();
+    },
+    /** The save transaction that ran `flush` rolled back: nothing it wrote exists; the changes stay pending for the next save. */
+    rollback() { pendingFacets.clear(); },
+    /** Organisations whose facet changes have not been committed yet (for reports and tests; never ids in logs). */
+    uncommitted: () => records.filter((rec) => toRow(rec).facets_json !== committedFacets.get(rec.id)).length,
+    /** What the store registers: the flush and its outcome callbacks. */
+    saveHook: () => ({ flush: () => repo.flush(), commit: () => repo.commit(), rollback: () => repo.rollback() }),
   };
   return repo;
 }

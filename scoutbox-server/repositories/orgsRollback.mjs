@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { copyDatabaseReadOnly } from './shadowValidate.mjs';
-import { ORGS_CUTOVER_MIGRATION, fromRow } from './orgs.mjs';
+import { ORGS_CUTOVER_MIGRATION, ORGS_INIT_META, fromRow } from './orgs.mjs';
 
 /** The S1 shadow definition of `orgs` (migration 0002), which the pre-S3 build expects. */
 const S1_ORGS_DDL = `
@@ -124,6 +124,7 @@ export function rollbackOrgsCopy(sourceFile, outDir) {
       // 4. Records and bookkeeping.
       const recordRemoved = sqlite.prepare('DELETE FROM data_migrations WHERE id = ?').run(ORGS_CUTOVER_MIGRATION).changes > 0;
       sqlite.prepare("DELETE FROM meta WHERE key = 'orgsCutover'").run();
+      sqlite.prepare('DELETE FROM meta WHERE key = ?').run(ORGS_INIT_META);
       const seq = (Number(sqlite.prepare("SELECT value FROM meta WHERE key = 'saveSeq'").get()?.value) || 0) + 1;
       sqlite.prepare("INSERT INTO meta (key, value) VALUES ('saveSeq', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(seq));
       const broken = sqlite.prepare('PRAGMA foreign_key_check').all();

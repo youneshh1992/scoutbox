@@ -564,7 +564,7 @@ performance, existing tests, what this plan is not).
   children before parents; the repository attached before `users`; `domains.orgs` in the
   report; the store flush hook), `repositories/shadow.mjs` (`orgs` removed from the shadow),
   `repositories/orgsRollback.mjs` + `scripts/orgsRollback.mjs` (new), `store.mjs`
-  (`setFlush`: repository flushes run inside the server-mode save transaction), `server.mjs`
+  (`setSaveHook`: the repository save hook runs inside the server-mode save transaction and learns its outcome), `server.mjs`
   (registration, password upgrade, e-mail domain, suspension, credentials and verification
   toggles through the repository; `orgs` passed to `m13`/`m14`; the boot integrity report
   moved after `attachDataLayer`), `m13/enterprise.mjs` (`/org/security`), `m14/review.mjs`
@@ -599,11 +599,16 @@ performance, existing tests, what this plan is not).
   other tables on `RENAME`, so renaming the old table first would have pointed
   `sessions.org_user_id` at the temporary name; the migration then asserts that `sessions`
   still references `org_users` and that the copied count equals the staff count; write
-  `meta.orgsCutover` (`at`, `imported`, `staffRebuilt`, `blobPresent`); `DELETE FROM
-  collections WHERE name = 'orgs'`. The runner checks `PRAGMA foreign_key_check`, inserts the
-  `data_migrations` row `0004_orgs_live` and commits. Completion is decided **only** by that
-  row: `attach()` throws without it whatever the table holds; a stale populated in-memory
-  array never overwrites the table (warned, ignored). Sessions are **not** touched: no row
+  `meta.orgsCutover` (`at`, `imported`, `staffRebuilt`, `blobPresent`) and the initialisation
+  state `meta.orgsInit` (`done` when a blob was imported, even an empty one, or the file
+  already held any saved collection; `pending` only when nothing was ever saved to the
+  database — a first installation); `DELETE FROM collections WHERE name = 'orgs'`. The runner
+  checks `PRAGMA foreign_key_check`, inserts the `data_migrations` row `0004_orgs_live` and
+  commits. Completion is decided **only** by that row: `attach()` throws without it whatever
+  the table holds; the in-memory array is never imported by `attach()` (an organisation it
+  names that the table does not hold is warned about and ignored); a first installation is
+  initialised by `initialize()` once, while the recorded state is `pending`, inside one
+  transaction with the change to `done`. Sessions are **not** touched: no row
   deleted, no cascade (the rebuild drops the parent table only while foreign keys are off and
   the new parent holds every id), tested by hash and by count. A failure injected after the
   import but before the commit leaves no trace and the next boot cuts over cleanly.
@@ -618,12 +623,15 @@ performance, existing tests, what this plan is not).
   whole; a partial snapshot without `orgs` leaves the table alone); shadow validation, even
   enabled, never writes or deletes live organisations or sessions.
 - **Transitional transaction limits (documented, not hidden).** Column changes persist at
-  once in their own transaction. Facet changes persist with the next debounced snapshot save
-  (2 s), as every unmigrated collection does, through `orgs.flush()` inside that save's
-  transaction — so a crash inside the debounce window can lose a facet change made in the
-  same request whose column change already landed. The two live in one file and one backup;
-  the window closes as each facet moves to its own table (S9–S11). There is no cross-domain
-  transaction yet (C.2).
+  once in their own transaction (`insert`/`update` refuse to run inside an open transaction:
+  their bookkeeping could not follow a rollback they do not own). Facet changes persist with
+  the next debounced snapshot save (2 s), as every unmigrated collection does, through the
+  repository's save hook inside that save's transaction — so a crash inside the debounce
+  window can lose a facet change made in the same request whose column change already
+  landed. The two live in one file and one backup; the window closes as each facet moves to
+  its own table (S9–S11). There is no cross-domain transaction yet (C.2). Change tracking
+  reflects **committed** state only (correction 1 below): a facet change flushed into a save
+  that then fails is flushed again by the next save.
 - **Code changes.** Grassroots registration (`/auth/org/register-grassroots`) and T&S club
   creation (`m14`) → `orgs.insert`; password upgrade on login, admin credentials rotation →
   `orgs.update(id, { password })`; e-mail domain verification → `orgs.update(id, {
@@ -722,11 +730,62 @@ performance, existing tests, what this plan is not).
   the snapshot save as before. Every other collection saves as before.
 - **Known limitations.** Facet persistence keeps the debounce window (above); the derived
   mirror columns are write-only until S10; `orgs.update` accepts only migrated keys (facet
-  writers stay in place by design until their steps); the seed organisation set is written
-  through the repository on the first save of a fresh installation, which is the pre-S3
-  behaviour for a demo boot and unchanged (production init vs demo seeding stays C.6).
+  writers stay in place by design until their steps); the seed organisation set is imported
+  by the explicit first-installation initialisation of a fresh database, which is the pre-S3
+  behaviour for a demo boot and unchanged (production init vs demo seeding stays C.6); the
+  `users` repository (S0) still decides its one-time blob import from "table empty and rows
+  given" — its blob is retired by the S2 migration on every upgrade path, so the window is a
+  fresh installation only, and it is out of S3's scope.
 - **Commit boundary.** One commit for S3 (migration, repository, call sites, rollback tool,
-  tests, documentation, the integrity-report ordering fix).
+  tests, documentation, the integrity-report ordering fix), then one correction commit after
+  the independent review of `0851d38` (below).
+- **Review corrections after `0851d38`** (each reproduced by the reviewer, each with a
+  regression test in `scripts/testOrgs.mjs` that failed on the `0851d38` code first; the
+  suite has 14 checks):
+  1. *Failed saves marked facet changes as persisted.* `flush()` advanced its change-tracking
+     map inside the save transaction, before COMMIT; a save that failed afterwards (a
+     collection that cannot be serialised, a disk-full COMMIT) rolled the row back while the
+     map still said "written", so the next save skipped the change and the table kept the old
+     facets. **Fix:** the repository keeps `committedFacets` and `pendingFacets`; `flush()`
+     writes and records pending; the store's save path now registers a hook
+     `{ flush, commit, rollback }` (`store.setSaveHook`) and reports the outcome after the
+     transaction ends — `commit` once COMMIT returned (pending promoted), `rollback` once
+     ROLLBACK ran (pending discarded) — so a change flushed into a failed save is flushed
+     again by the next one; a failure inside the flush itself, in a later write or in COMMIT
+     all take the rollback path; `update()` records its own committed row; `insert`/`update`
+     refuse to run inside an open transaction. **Test:** three organisations; a squad and a
+     looking-for change; failure in a later write (a BigInt in an unrelated collection), at
+     COMMIT (injected), and inside the flush after the first organisation's row was written;
+     after each failure the table is unchanged and the retry persists every pending change;
+     a restart reads them.
+  2. *Nested migrated fields bypassed write protection.* The record view refused `location =`
+     and `federationRef =` but handed out the mutable nested objects, so `location.lat = 9`
+     or `federationRef.registrationId = 'NEW'` changed the view while the table kept the old
+     columns (`flush` writes facets and mirrors only). **Fix:** composites are served through a
+     guard that refuses assignment, deletion, property definition and prototype changes at any
+     depth, with a stable identity per object; reads, spreads and JSON are unchanged; column
+     changes go through `orgs.update(id, { location: {...} })`. The survey of the repository
+     found no writer that mutates an organisation's `location` or `federationRef` in place
+     (only reads, e.g. `haversineKm(org.location, …)`), so nothing needed converting. **Test:**
+     every forbidden mutation throws, the table equals the view after a save, a repository
+     update built from the guarded view persists immediately and survives a restart with the
+     sub-key order kept.
+  3. *An empty migrated table could re-import stale organisations.* `attach()` imported the
+     supplied array whenever the table was empty, even with `0004_orgs_live` recorded, so a
+     stale array or a blob written back into `collections` repopulated an intentionally empty
+     authoritative table. **Fix:** initialisation is explicit state, never a row count:
+     `meta.orgsInit` (above) is written by the migration; `attach()` never imports; the data
+     layer calls `initialize(records)` only while the state is `pending`, which inserts the
+     records and sets `done` in one transaction (an interruption leaves it `pending` and the
+     next boot retries; a refused batch imports nothing; initialising a table that already
+     holds rows is refused; initialising with no records is allowed and records the decision);
+     a file cut over before the state existed reads as `done`; `orgsRollback` removes the
+     key. **Test:** cut-over file emptied → a stale array and a stale blob are ignored, the
+     blob is deleted by the next save, the table stays empty; genuine first installation →
+     initialised once, a restart with the seed again imports nothing; interrupted
+     initialisation (COMMIT fails) → nothing inserted, still `pending`, the retry succeeds,
+     a second initialisation is refused; intentionally empty → `initialize([])` records
+     `done` and a later seed array is ignored.
 
 ### S4 — Guardians and players (scalars) cut over; deletion becomes a tombstone; allowlisted views
 

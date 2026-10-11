@@ -49,8 +49,12 @@ and design changes the Founder explicitly requests.
   `agencySettings`, the `verification` object and any unknown field live in
   the row's `facets_json` until their own steps and are still mutated in place
   on the record `db.orgs` serves, persisted by the repository's flush inside
-  every save; assigning a column-backed field on that record throws; no org
-  deletion route exists and none is to be added before O2 is decided);
+  every save and counted as persisted only once that save committed;
+  assigning a column-backed field on that record throws, nested values of
+  `location` / `federationRef` included; a first installation is initialised
+  once from explicit state (`meta.orgsInit`), never inferred from an empty
+  table, and `attach` never imports an in-memory array; no org deletion route
+  exists and none is to be added before O2 is decided);
   `guardians`, `players` and `guardian_children` exist as a shadow (blob still
   authoritative; the projection that fills them is off unless
   `SCOUTBOX_SHADOW_VALIDATION=1` and never touches live tables). Never log,

@@ -112,12 +112,17 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
   let projection = null;
   let projectionFailures = 0;
   let lastProjectionError = null;
-  // Server mode only: flush hooks the data layer registers. They run inside
+  // Server mode only: save hooks the data layer registers. `flush` runs inside
   // every save transaction, before the blob rows are written, so a repository
   // that keeps part of its records in memory between saves (the organisations'
   // transitional facets, S3) persists them atomically with the rest of the
-  // snapshot. A flush failure fails the save: nothing half-written.
-  const flushes = [];
+  // snapshot. A flush failure fails the save: nothing half-written. After the
+  // transaction ends the outcome is reported to every hook — `commit` once
+  // COMMIT returned, `rollback` once ROLLBACK ran (for a failure after the
+  // flush, in a later write or in COMMIT itself) — so a hook's change tracking
+  // reflects committed state only and a rolled-back change is flushed again.
+  const hooks = [];
+  const report = (phase) => { for (const hook of hooks) hook[phase]?.(); };
 
   /**
    * One save transaction. `asSnapshot` writes every collection the way snapshot
@@ -129,7 +134,7 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
   function write(snapshot, { asSnapshot }) {
     sqlite.exec('BEGIN');
     try {
-      if (!asSnapshot) for (const flush of flushes) flush();
+      if (!asSnapshot) for (const hook of hooks) hook.flush();
       const inTables = new Set(asSnapshot ? writeTableBacked(sqlite, snapshot.db) : []);
       for (const [name, value] of Object.entries(snapshot.db)) {
         if ((!asSnapshot && skip.has(name)) || inTables.has(name)) { deleteCollection.run(name); continue; }
@@ -155,17 +160,24 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
       }
       sqlite.exec('COMMIT');
     } catch (err) {
-      sqlite.exec('ROLLBACK');
+      // A failure anywhere above — a flush, a blob write, COMMIT itself — ends
+      // the transaction; the hooks learn that nothing they wrote exists.
+      try { if (sqlite.isTransaction) sqlite.exec('ROLLBACK'); } finally { if (!asSnapshot) report('rollback'); }
       throw err;
     }
+    if (!asSnapshot) report('commit');
   }
 
   const store = {
     engine: 'sqlite',
     sqlite,
     setProjection(fn) { projection = typeof fn === 'function' ? fn : null; },
-    /** Register a function to run inside every server-mode save transaction (see `flushes`). */
-    setFlush(fn) { if (typeof fn === 'function') flushes.push(fn); },
+    /** Register a save hook `{ flush, commit?, rollback? }` (or a bare flush function) for every server-mode save transaction (see `hooks`). */
+    setSaveHook(hook) {
+      if (typeof hook === 'function') hooks.push({ flush: hook });
+      else if (hook && typeof hook.flush === 'function') hooks.push(hook);
+      else throw new TypeError('a save hook is { flush, commit?, rollback? } or a flush function');
+    },
     projectionState: () => ({ enabled: projection !== null, failures: projectionFailures, lastError: lastProjectionError }),
     load() {
       const rows = sqlite.prepare('SELECT name, value FROM collections').all();

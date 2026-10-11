@@ -476,7 +476,15 @@ guardians ──< guardian_children >── players ──< player_* (12 sub-rec
   `verification_org_type` are **derived mirrors** of `verification.revokedAt` /
   `verification.orgType` written at every flush; nothing reads them until S10 moves the
   verification object out of the facets, when they become authoritative. Index
-  `orgs_type_level`.
+  `orgs_type_level`. Three guarantees the repository enforces (review corrections after
+  `0851d38`): a facet change is tracked as persisted only once the save that flushed it
+  **committed** (the store reports commit or rollback to the repository's save hook, so a
+  rolled-back flush is repeated by the next save); the column-backed composites are served
+  through a guard that refuses nested assignment, deletion and property definition, so the
+  view can never hold a `location` or `federationRef` the table does not; and the
+  first-installation import is explicit state, `meta.orgsInit` (`pending` only for a database
+  nothing was ever saved to, `done` otherwise), never a row count — an empty cut-over table
+  stays authoritative and `attach()` imports nothing.
 - **`org_users`** — staff accounts (live since S0; rebuilt STRICT at S3). Columns: `id, org_id,
   name, role, email, sso_subject, created_at, removed_at, removed_by, provenance, mfa_json,
   delivery_prefs_json, extra_json`; `org_id TEXT NOT NULL REFERENCES orgs(id)` (enforced:

@@ -25,8 +25,10 @@ import { buildSeed } from '../seed.mjs';
 import { pickPort } from './testPort.mjs';
 
 let passed = 0;
-function test(name, fn) { fn(); passed++; console.log(`  ✓ ${name}`); }
-async function atest(name, fn) { await fn(); passed++; console.log(`  ✓ ${name}`); }
+// TEST_ONLY=<substring> runs the matching checks alone (reproductions and reviews); unset, every check runs.
+const only = process.env.TEST_ONLY || '';
+function test(name, fn) { if (only && !name.includes(only)) return; fn(); passed++; console.log(`  ✓ ${name}`); }
+async function atest(name, fn) { if (only && !name.includes(only)) return; await fn(); passed++; console.log(`  ✓ ${name}`); }
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const DAY = 86_400_000;
 const TTL = 30 * DAY;
@@ -145,6 +147,7 @@ test('cutover: the orgs blob is imported with every field preserved, org_users i
   assert.match(s.prepare("SELECT sql FROM sqlite_master WHERE name = 'sessions'").get().sql, /REFERENCES org_users\(id\)/, 'sessions still references org_users, not a temporary name');
   assert.deepEqual(s.prepare('PRAGMA foreign_key_check').all(), [], 'every foreign key resolves');
   assert.equal(s.prepare("SELECT value FROM meta WHERE key = 'orgsCutover'").get().value.includes('"imported":3'), true);
+  assert.equal(s.prepare("SELECT value FROM meta WHERE key = 'orgsInit'").get().value, 'done', 'a cut-over blob is the initialisation: nothing is ever imported over it');
   // The foreign key is enforced from now on, and the live tables still accept writes.
   assert.throws(() => s.prepare("INSERT INTO org_users (id, org_id, name) VALUES ('usr-x', 'org-none', 'X')").run(), /FOREIGN KEY/);
   s.prepare("INSERT INTO org_users (id, org_id, name) VALUES ('usr-new', 'org-pro', 'New')").run();
@@ -247,6 +250,10 @@ test('repository: insert and update write migrated fields immediately; a migrate
   assert.throws(() => layer.orgs.update('org-pro', { level: 'agent' }), /refused: level/);
   assert.throws(() => layer.orgs.update('org-pro', { squad: [] }), /not a migrated organisation field/);
   assert.throws(() => layer.orgs.update('org-none', { suspended: true }), /does not exist/);
+  // insert/update commit on their own: inside someone else's transaction their bookkeeping could not follow a rollback.
+  assert.throws(() => transaction(store.sqlite, () => layer.orgs.update('org-pro', { suspended: false })), /cannot run inside an open transaction/);
+  assert.throws(() => transaction(store.sqlite, () => layer.orgs.insert({ id: 'org-tx', name: 'T', type: 'club', plan: 'Pro' })), /cannot run inside an open transaction/);
+  assert.equal(pro.suspended, true, 'the refused update changed nothing');
   // Facets: mutated in place (as the modules do), persisted by the next save.
   pro.squad.push({ id: 'sq-9', name: 'New', position: 'GK', playerId: null, source: 'manual', addedAt: 9 });
   pro.tactical = { formation: '4-3-3' };
@@ -279,21 +286,199 @@ test('repository: insert and update write migrated fields immediately; a migrate
   assert.equal(JSON.stringify(db2.orgs.find((o) => o.id === 'org-agency')), JSON.stringify(ORGS()[2]), 'an untouched record is byte-identical after the restart');
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
-test('repository: authority is the cutover record — attach refuses without it; a stale in-memory array never overwrites the table; a first-boot import refuses invalid records', () => {
+test('repository: authority is the cutover record — attach refuses without it; a stale in-memory array never overwrites the table; a first-installation import refuses invalid records and imports nothing from a refused batch', () => {
   const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
   runDataMigrations(s, [m0001, m0002, m0003]);
-  assert.throws(() => createOrgsRepository({ sqlite: s }).attach([]), /cutover record 0004_orgs_live is missing/);
+  assert.throws(() => createOrgsRepository({ sqlite: s }), /cutover record 0004_orgs_live is missing/);
   runDataMigrations(s, DATA_MIGRATIONS);
   const warnings = [];
   const repo = createOrgsRepository({ sqlite: s, warn: (m) => warnings.push(m) });
-  assert.throws(() => repo.attach([{ id: 'org-bad', name: 'B', type: 'club', level: 'agent', plan: 'Pro' }]), /cannot be imported — id org-bad: level/);
+  assert.equal(repo.initState(), 'pending', 'a database nothing was ever saved to is a first installation');
+  assert.throws(() => repo.initialize([{ id: 'org-bad', name: 'B', type: 'club', level: 'agent', plan: 'Pro' }]), /cannot be imported — id org-bad: level/);
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0, 'nothing imported from a refused batch');
-  repo.attach(ORGS());
-  assert.equal(repo.count(), 3);
+  assert.equal(repo.initState(), 'pending', 'and the initialisation is still owed');
+  repo.initialize(ORGS());
+  assert.equal(repo.count(), 3); assert.equal(repo.initState(), 'done');
   const again = createOrgsRepository({ sqlite: s, warn: (m) => warnings.push(m) });
   again.attach([ORGS()[0], { id: 'org-stale', name: 'S', type: 'club', plan: 'Pro' }]);
   assert.equal(again.count(), 3, 'the table wins; the stale array row is not imported');
   assert.match(warnings[0], /1 organisation\(s\) the table does not hold was ignored/);
+  s.close();
+});
+
+// ------------------------------------------------------------- review corrections after 0851d38
+test('correction 1: facet change tracking reflects committed state only — a save that fails after the flush, inside the flush or at commit leaves every pending change eligible for retry; the retry persists them and a restart reads them', () => {
+  const dir = tempDir('s3-c1');
+  let store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const db = { orgs: ORGS(), guardians: [], players: [{ id: 'pl-1', name: 'P' }], sessions: [], users: [] };
+  attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  store.save({ savedAt: 1, idCounter: 1000, db });
+  const facetsOf = (id) => JSON.parse(store.sqlite.prepare('SELECT facets_json FROM orgs WHERE id = ?').get(id).facets_json);
+  const pro = db.orgs.find((o) => o.id === 'org-pro');
+  const grass = db.orgs.find((o) => o.id === 'org-grass');
+  assert.deepEqual(facetsOf('org-pro').squad, []); assert.deepEqual(facetsOf('org-grass').lookingFor, ['ST', 'CB']);
+  // (a) The failure is in a LATER write of the same save: an unrelated collection that cannot be serialised.
+  pro.squad.push({ id: 'sq-1', name: 'A', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
+  grass.lookingFor = ['GK'];
+  db.players[0].big = 1n;
+  assert.throws(() => store.save({ savedAt: 2, idCounter: 1000, db }), /BigInt/);
+  assert.equal(store.sqlite.isTransaction, false, 'the transaction was rolled back');
+  assert.deepEqual(facetsOf('org-pro').squad, [], 'the flushed squad change was rolled back with the rest of the save');
+  assert.deepEqual(facetsOf('org-grass').lookingFor, ['ST', 'CB'], 'so was the second organisation');
+  delete db.players[0].big;
+  store.save({ savedAt: 3, idCounter: 1000, db });
+  assert.equal(facetsOf('org-pro').squad.length, 1, 'the retry persists the change the failed save had already flushed');
+  assert.deepEqual(facetsOf('org-grass').lookingFor, ['GK'], 'for every organisation that had a pending change');
+  // (b) The failure is at COMMIT.
+  pro.tactical = { formation: '4-4-2' };
+  const exec = store.sqlite.exec.bind(store.sqlite);
+  let explodeAtCommit = true;
+  store.sqlite.exec = (sql) => { if (explodeAtCommit && sql === 'COMMIT') { explodeAtCommit = false; throw new Error('disk full at commit'); } return exec(sql); };
+  assert.throws(() => store.save({ savedAt: 4, idCounter: 1000, db }), /disk full at commit/);
+  assert.equal(store.sqlite.isTransaction, false);
+  assert.equal(facetsOf('org-pro').tactical, null, 'nothing committed');
+  store.save({ savedAt: 5, idCounter: 1000, db });
+  assert.deepEqual(facetsOf('org-pro').tactical, { formation: '4-4-2' }, 'the retry persists the change');
+  // (c) The failure is INSIDE the flush, after the first organisation's row was already written in the transaction.
+  pro.squad.push({ id: 'sq-2', name: 'B', position: 'GK', playerId: null, source: 'manual', addedAt: 2 });
+  grass.agencySettings = { n: 1n };
+  assert.throws(() => store.save({ savedAt: 6, idCounter: 1000, db }), /BigInt/);
+  assert.equal(facetsOf('org-pro').squad.length, 1, 'the first organisation\'s UPDATE was rolled back');
+  grass.agencySettings = { n: 1 };
+  store.save({ savedAt: 7, idCounter: 1000, db });
+  assert.equal(facetsOf('org-pro').squad.length, 2); assert.deepEqual(facetsOf('org-grass').agencySettings, { n: 1 });
+  // A save with nothing pending writes no organisation row; a successful save is not re-flushed.
+  store.sqlite.exec = exec;
+  const seq = store.revision();
+  store.save({ savedAt: 8, idCounter: 1000, db });
+  assert.equal(store.revision(), seq + 1);
+  store.sqlite.close();
+  // Restart: everything the retries persisted is there.
+  store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const db2 = { orgs: [], guardians: [], players: [], sessions: [], users: [] };
+  attachDataLayer({ db: db2, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  const pro2 = db2.orgs.find((o) => o.id === 'org-pro'); const grass2 = db2.orgs.find((o) => o.id === 'org-grass');
+  assert.deepEqual(pro2.squad.map((m) => m.id), ['sq-1', 'sq-2']); assert.deepEqual(pro2.tactical, { formation: '4-4-2' });
+  assert.deepEqual(grass2.lookingFor, ['GK']); assert.deepEqual(grass2.agencySettings, { n: 1 });
+  store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+});
+test('correction 2: nested migrated fields are protected — assigning, deleting or defining a property inside location or federationRef throws, the view never diverges from the table, and a repository update of a composite persists across a restart', () => {
+  const dir = tempDir('s3-c2');
+  let store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const db = { orgs: ORGS(), guardians: [], players: [{ id: 'pl-1', name: 'P' }], sessions: [], users: [] };
+  let layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  const pro = db.orgs.find((o) => o.id === 'org-pro');
+  const grass = db.orgs.find((o) => o.id === 'org-grass');
+  assert.throws(() => { pro.location.lat = 9; }, /organisations repository/);
+  assert.throws(() => { grass.federationRef.registrationId = 'NEW'; }, /organisations repository/);
+  assert.throws(() => { delete pro.location.city; }, /organisations repository/);
+  assert.throws(() => { Object.defineProperty(pro.location, 'lat', { value: 9 }); }, /organisations repository/);
+  assert.throws(() => { Object.assign(grass.federationRef, { federation: 'X' }); }, /organisations repository/);
+  assert.equal(pro.location.lat, 51.889); assert.equal(pro.location.city, 'Eastport'); assert.equal(grass.federationRef.registrationId, 'LFA-1');
+  store.save({ savedAt: 1, idCounter: 1000, db });
+  assert.equal(store.sqlite.prepare("SELECT lat FROM orgs WHERE id = 'org-pro'").get().lat, 51.889);
+  assert.equal(store.sqlite.prepare("SELECT federation_registration_id FROM orgs WHERE id = 'org-grass'").get().federation_registration_id, 'LFA-1');
+  assert.equal(JSON.stringify(ORGS_TABLE.read(store.sqlite)), JSON.stringify(db.orgs), 'the view and the table agree record for record');
+  // Reading is unchanged: spread, JSON, stable identity, sub-key order.
+  assert.deepEqual({ ...pro.location }, { lat: 51.889, lng: 1.02, city: 'Eastport' });
+  assert.equal(pro.location, pro.location, 'the same guarded object every time');
+  assert.equal(JSON.stringify(pro.location), '{"lat":51.889,"lng":1.02,"city":"Eastport"}');
+  assert.equal(db.orgs.find((o) => o.id === 'org-agency').location, null, 'a null composite reads as null');
+  // Column-backed changes go through the repository, built from the guarded view if the caller likes.
+  layer.orgs.update('org-pro', { location: { ...pro.location, lat: 9 } });
+  layer.orgs.update('org-grass', { federationRef: { ...grass.federationRef, registrationId: 'NEW' } });
+  assert.equal(pro.location.lat, 9); assert.equal(grass.federationRef.registrationId, 'NEW');
+  assert.equal(store.sqlite.prepare("SELECT lat FROM orgs WHERE id = 'org-pro'").get().lat, 9, 'written immediately');
+  assert.throws(() => { pro.location.lat = 10; }, /organisations repository/, 'the replaced composite is guarded too');
+  store.sqlite.close();
+  store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const db2 = { orgs: [], guardians: [], players: [], sessions: [], users: [] };
+  layer = attachDataLayer({ db: db2, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  assert.equal(JSON.stringify(db2.orgs.find((o) => o.id === 'org-pro').location), '{"lat":9,"lng":1.02,"city":"Eastport"}', 'the update survived the restart with the sub-key order kept');
+  assert.deepEqual(db2.orgs.find((o) => o.id === 'org-grass').federationRef, { federation: 'London FA', registrationId: 'NEW' });
+  assert.equal(JSON.stringify(ORGS_TABLE.read(store.sqlite)), JSON.stringify(db2.orgs));
+  store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+});
+test('correction 3: initialisation is explicit state, never a row count — an empty cut-over table stays authoritative against stale arrays and blobs; a genuine first installation initialises once, atomically, and retries after an interruption; an intentionally empty table stays empty', () => {
+  // (a) A cut-over database whose table was emptied: a stale array is ignored, nothing is imported.
+  const dirA = tempDir('s3-c3a'); s2File(dirA);
+  let s = openRaw(dirA);
+  runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } });
+  s.exec('DELETE FROM sessions; DELETE FROM org_users; DELETE FROM orgs;');
+  let warnings = [];
+  const repo = createOrgsRepository({ sqlite: s, warn: (m) => warnings.push(m) });
+  const stale = [{ id: 'org-stale', name: 'Stale', type: 'club', plan: 'Pro' }];
+  assert.deepEqual(repo.attach(stale), { engine: 'sqlite', loaded: 0, imported: 0 }, 'an empty authoritative table imports nothing');
+  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0);
+  assert.match(warnings[0], /ignored/);
+  assert.equal(repo.initState(), 'done', 'the migration recorded that the organisations were initialised from the blob');
+  s.close();
+  // The same through the data layer with a seed-shaped array, as a server booting from the seed would pass.
+  let store = openStore(dirA, { tableBacked: TABLE_BACKED });
+  let db = { orgs: ORGS(), guardians: [], players: [], sessions: [], users: [] };
+  warnings = [];
+  let layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, warn: (m) => warnings.push(m) });
+  assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', loaded: 0, imported: 0 }); assert.equal(db.orgs.length, 0);
+  assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0);
+  assert.match(warnings.join('\n'), /3 organisation\(s\) the table does not hold was ignored/);
+  // A stale orgs blob written back into the file is ignored at attach and removed by the next save.
+  store.sqlite.prepare("INSERT INTO collections (name, value) VALUES ('orgs', ?)").run(JSON.stringify(ORGS()));
+  store.sqlite.close();
+  store = openStore(dirA, { tableBacked: TABLE_BACKED });
+  db = { ...store.load().db };
+  assert.equal(Array.isArray(db.orgs) && db.orgs.length, 3, 'fixture: the stale blob is what the server would load into memory');
+  layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, warn: () => {} });
+  assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', loaded: 0, imported: 0 }); assert.equal(db.orgs.length, 0);
+  store.save({ savedAt: 9, idCounter: 1000, db });
+  assert.equal(store.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'orgs'").get().n, 0, 'the stale blob is gone');
+  assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0, 'and the table is still empty');
+  store.sqlite.close(); fs.rmSync(dirA, { recursive: true, force: true });
+  // (b) A genuine first installation: nothing was ever saved, so the migration leaves initialisation pending and the seed is imported once.
+  const dirB = tempDir('s3-c3b');
+  store = openStore(dirB, { tableBacked: TABLE_BACKED });
+  db = { orgs: ORGS(), guardians: [], players: [], sessions: [], users: [] };
+  layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', loaded: 3, imported: 3 });
+  assert.equal(layer.orgs.initState(), 'done');
+  assert.equal(store.sqlite.prepare("SELECT value FROM meta WHERE key = 'orgsInit'").get().value, 'done');
+  store.sqlite.close();
+  store = openStore(dirB, { tableBacked: TABLE_BACKED });
+  db = { orgs: ORGS(), guardians: [], players: [], sessions: [], users: [] }; // the seed again: a restart before the first snapshot save
+  layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', loaded: 3, imported: 0 }, 'initialised once, then the table');
+  store.sqlite.close(); fs.rmSync(dirB, { recursive: true, force: true });
+  // (c) Interrupted initialisation: the rows and the state change are one transaction, so the next boot retries.
+  s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
+  runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } });
+  let r = createOrgsRepository({ sqlite: s });
+  assert.equal(r.initState(), 'pending');
+  assert.deepEqual(r.attach(ORGS()), { engine: 'sqlite', loaded: 0, imported: 0 }, 'attach never initialises; the state says pending and the records are reported, not imported');
+  const exec = s.exec.bind(s);
+  let explode = true;
+  s.exec = (sql) => { if (explode && sql === 'COMMIT') { explode = false; throw new Error('process died during initialisation'); } return exec(sql); };
+  assert.throws(() => r.initialize(ORGS()), /process died during initialisation/);
+  assert.equal(s.isTransaction, false);
+  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0, 'nothing of the failed attempt remains');
+  assert.equal(r.initState(), 'pending', 'still pending: the next boot retries');
+  assert.throws(() => r.initialize([{ id: 'org-bad', name: 'B', type: 'club', level: 'agent', plan: 'Pro' }]), /cannot be imported — id org-bad: level/);
+  assert.equal(r.initState(), 'pending');
+  assert.deepEqual(r.initialize(ORGS()), { engine: 'sqlite', loaded: 3, imported: 3 });
+  assert.equal(r.initState(), 'done');
+  assert.throws(() => r.initialize(ORGS()), /already initialised/);
+  r = createOrgsRepository({ sqlite: s });
+  assert.deepEqual(r.attach(ORGS()), { engine: 'sqlite', loaded: 3, imported: 0 });
+  s.close();
+  // (d) An intentionally empty installation: initialising with no records records the decision; a later seed array is ignored.
+  s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
+  runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } });
+  r = createOrgsRepository({ sqlite: s });
+  assert.deepEqual(r.initialize([]), { engine: 'sqlite', loaded: 0, imported: 0 });
+  assert.equal(r.initState(), 'done');
+  warnings = [];
+  r = createOrgsRepository({ sqlite: s, warn: (m) => warnings.push(m) });
+  assert.deepEqual(r.attach(ORGS()), { engine: 'sqlite', loaded: 0, imported: 0 });
+  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0, 'empty on purpose stays empty');
+  assert.match(warnings[0], /ignored/);
   s.close();
 });
 
@@ -400,6 +585,7 @@ test('rollback: the tool produces a pre-S3 copy — orgs back in the blob with e
   assert.equal(blob[0].suspended, true); assert.equal(blob[0].squad.at(-1).name, 'After S3'); assert.equal(JSON.stringify(blob[2]), JSON.stringify(ORGS()[2]), 'post-S3 changes are kept; an untouched record is identical');
   assert.equal(o.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0, 'the S1 shadow table is empty');
   assert.ok(!/facets_json/.test(o.prepare("SELECT sql FROM sqlite_master WHERE name = 'orgs'").get().sql), 'the S1 definition');
+  assert.equal(o.prepare("SELECT COUNT(*) AS n FROM meta WHERE key IN ('orgsCutover', 'orgsInit')").get().n, 0, 'the S3 bookkeeping is gone with the record');
   const staffSql = o.prepare("SELECT sql FROM sqlite_master WHERE name = 'org_users'").get().sql;
   assert.ok(!/STRICT/.test(staffSql) && !/REFERENCES/.test(staffSql), 'org_users is back to the S0 definition');
   assert.equal(o.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 3);

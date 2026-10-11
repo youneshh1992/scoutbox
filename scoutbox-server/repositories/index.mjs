@@ -115,13 +115,18 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, shadowValidat
   const migrations = runDataMigrations(sqlite, DATA_MIGRATIONS, { log, context: { sessionTtlMs } });
 
   // Organisations (S3) attach before staff: `org_users.org_id` references
-  // `orgs`, so a first boot that imports the seed must have its organisations
-  // in the table before a staff row can be inserted. Facet changes made on the
-  // records between saves are flushed inside every save transaction.
+  // `orgs`, so a first installation must have its organisations in the table
+  // before a staff row can be inserted. Initialisation is explicit state the
+  // cutover migration recorded: only while it is `pending` (a database that
+  // had never been saved to) are the in-memory records — the seed — imported,
+  // once, atomically with the state change. Every other boot attaches to the
+  // table as it is, empty or not; the array in memory is never imported.
+  // Facet changes made on the records between saves are flushed inside every
+  // save transaction and counted as persisted only once it committed.
   const orgs = createOrgsRepository({ sqlite, log, warn });
-  const orgsBoot = orgs.attach(db.orgs);
+  const orgsBoot = orgs.initState() === 'pending' ? orgs.initialize(db.orgs) : orgs.attach(db.orgs);
   Object.defineProperty(db, 'orgs', { value: orgs.view, writable: false, configurable: false, enumerable: true });
-  store.setFlush?.(() => orgs.flush());
+  store.setSaveHook?.(orgs.saveHook());
 
   const users = createUsersRepository({ sqlite, nextId, log, warn });
   const usersBoot = users.attach(db.users);
