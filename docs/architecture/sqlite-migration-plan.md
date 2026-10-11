@@ -465,7 +465,9 @@ performance, existing tests, what this plan is not).
      `SQLITE_REQUIRED` before touching the data directory (the process stops at startup),
      the repositories and `attachDataLayer` refuse a missing connection, `package.json`
      declares `engines.node >= 22.5.0`, and `OPERATIONS.md` says so. Tested by starting the
-     store and the server with `--no-experimental-sqlite`.
+     store and the server with `--no-experimental-sqlite`. (Raised to `>= 22.16.0` by the S3
+     compatibility correction, §S3 "Runtime contract": the S3 guards need
+     `DatabaseSync.isTransaction`, which arrived in 22.16.0 / 24.0.0.)
   Two consequences the strict saves surfaced in the battery, fixed in the same commit:
   `POST /admin/backup` exported the hash-free `db.sessions` view, so restoring a backup into an
   empty directory now aborted the cutover ("no token" on every row) where it used to lose the
@@ -786,6 +788,26 @@ performance, existing tests, what this plan is not).
      initialisation (COMMIT fails) → nothing inserted, still `pending`, the retry succeeds,
      a second initialisation is refused; intentionally empty → `initialize([])` records
      `done` and a later seed array is ignored.
+- **Runtime contract (correction after the `c542473` review).** The corrections above rely on
+  `DatabaseSync.isTransaction` (node:sqlite), which exists from Node.js 22.16.0 and 24.0.0,
+  while `package.json`, `OPERATIONS.md`, `CLAUDE.md` and the store still advertised 22.5+. On
+  an older runtime the store opened the database, the first save failed with "orgs.flush runs
+  inside a save transaction", the error handler skipped ROLLBACK (the guard read `undefined`)
+  and the next save failed with "cannot start a transaction within a transaction" — reproduced
+  on the real 22.15.1 binary and on the current runtime with the property masked. **Fix:**
+  `scoutbox-server/runtime.mjs` is the one definition of the contract (`MIN_NODE` = 22.16.0 on
+  the 22 line, 24.0.0 onwards; feature detection on an in-memory connection decides for any
+  other line); `openStore` calls `requireRuntime()` before the data directory is created or the
+  file opened, refusing with `NODE_UNSUPPORTED` and nothing touched; `createOrgsRepository`
+  checks the connection it is handed the same way; `engines.node` is `>=22.16.0` and the lock
+  file mirrors it. **Tests** (`scripts/testRuntime.mjs`, first in `npm test`): the support
+  check and the advertised range agree; on the current runtime a save, a failed-save rollback
+  and the retry work (real); with `scripts/runtime/maskIsTransaction.cjs` preloaded (a
+  declared simulation of the older API shape) the store and the server refuse before touching
+  the directory — an absent directory stays absent, an existing one is byte-identical; with
+  `SCOUTBOX_TEST_NODE_BINS` naming real binaries, the same probe runs on each (verified with the
+  real 22.15.1, refused with nothing written, and the real 22.16.0, on which the full `npm
+  test` also passes). The battery (`m23BootContract` included) is unchanged.
 
 ### S4 — Guardians and players (scalars) cut over; deletion becomes a tombstone; allowlisted views
 

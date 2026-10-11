@@ -50,6 +50,7 @@
  */
 import { readonlyView } from './readonly.mjs';
 import { migrationApplied } from './database.mjs';
+import { requireRuntime } from '../runtime.mjs';
 
 export const ORGS_CUTOVER_MIGRATION = '0004_orgs_live';
 /** `meta` key holding the initialisation state (`pending` | `done`); absent on a file cut over before the state existed, which reads as `done`. */
@@ -267,6 +268,11 @@ export const ORGS_TABLE = {
 
 export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {} }) {
   if (!sqlite) throw new TypeError('the organisations repository needs a SQLite connection (node:sqlite); the data layer has no in-memory fallback');
+  // The transaction-state guards below need `sqlite.isTransaction` (Node.js
+  // 22.16 / 24.0); the store refused the runtime before opening the file, and
+  // a connection handed in by a tool is checked the same way.
+  requireRuntime();
+  if (typeof sqlite.isTransaction !== 'boolean') throw new Error('NODE_UNSUPPORTED: this SQLite connection has no transaction state (isTransaction); the organisations repository cannot tell a save transaction from autocommit');
   // Checked before any statement is prepared: on a pre-S3 file the table is the
   // S1 shadow (no facets column) and the clear message must win over SQLite's.
   if (!migrationApplied(sqlite, ORGS_CUTOVER_MIGRATION)) throw new Error(`orgs: the cutover record ${ORGS_CUTOVER_MIGRATION} is missing from data_migrations; the table cannot be trusted as the source of truth`);

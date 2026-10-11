@@ -4,11 +4,13 @@
 // mid-write can never corrupt state the way a half-written JSON file could.
 // A legacy data/db.json snapshot is imported once and then set aside.
 //
-// node:sqlite is REQUIRED (Node.js 22.5 or later; it is on by default). There
-// is no JSON fallback: `openStore` throws a compatibility error before touching
-// the data directory, and server.mjs lets that error end the process. Sessions
-// (plan step S2) are stored only as token hashes in a table, which a JSON
-// snapshot could not hold without keeping plain tokens again.
+// node:sqlite is REQUIRED, with its transaction state (`isTransaction`):
+// Node.js 22.16 or later on the 22 line, or 24.0 or later (runtime.mjs is the
+// one definition of that contract). There is no JSON fallback: `openStore`
+// throws a compatibility error (SQLITE_REQUIRED / NODE_UNSUPPORTED) before
+// touching the data directory, and server.mjs lets that error end the process.
+// Sessions (plan step S2) are stored only as token hashes in a table, which a
+// JSON snapshot could not hold without keeping plain tokens again.
 //
 // The data layer under repositories/ moves collections out of this blob store
 // one domain at a time, into real tables in the same database file. The store
@@ -35,6 +37,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { readTableBacked, writeTableBacked, checkTableBackedShapes } from './repositories/index.mjs';
+import { requireRuntime, CONTRACT } from './runtime.mjs';
 
 let DatabaseSync = null;
 try {
@@ -81,10 +84,15 @@ function readLegacySnapshot(legacyFile) {
 
 export function openStore(dataDir, { tableBacked = null } = {}) {
   if (!DatabaseSync) {
-    const err = new Error(`SQLITE_REQUIRED: ScoutBox needs the node:sqlite module (Node.js 22.5 or later, enabled by default; this is ${process.version}${process.execArgv.some((a) => /no-experimental-sqlite/.test(a)) ? ', started with --no-experimental-sqlite' : ''}). There is no JSON fallback. The data directory was not touched.`);
+    const err = new Error(`SQLITE_REQUIRED: ScoutBox needs the node:sqlite module (${CONTRACT}, enabled by default; this is ${process.version}${process.execArgv.some((a) => /no-experimental-sqlite/.test(a)) ? ', started with --no-experimental-sqlite' : ''}). There is no JSON fallback. The data directory was not touched.`);
     err.code = 'SQLITE_REQUIRED';
     throw err;
   }
+  // The runtime contract (runtime.mjs) is checked before the directory is
+  // created or the file opened: an older Node.js has no transaction state
+  // (`isTransaction`), and on it every save would fail after the database was
+  // opened. Refused here with NODE_UNSUPPORTED and nothing touched.
+  requireRuntime();
   fs.mkdirSync(dataDir, { recursive: true });
   const legacyFile = path.join(dataDir, 'db.json');
   const serverMode = Array.isArray(tableBacked);

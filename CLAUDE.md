@@ -58,8 +58,11 @@ and design changes the Founder explicitly requests.
   `guardians`, `players` and `guardian_children` exist as a shadow (blob still
   authoritative; the projection that fills them is off unless
   `SCOUTBOX_SHADOW_VALIDATION=1` and never touches live tables). Never log,
-  report or export a plain bearer token. `node:sqlite` is required (Node 22.5+);
-  there is no JSON or in-memory fallback, and whether a table is authoritative
+  report or export a plain bearer token. `node:sqlite` with transaction state
+  is required (Node 22.16+ on the 22 line, or 24.0+; `runtime.mjs` is the one
+  definition, checked before the data directory is touched and refused with
+  `NODE_UNSUPPORTED`); there is no JSON or in-memory fallback, and whether a
+  table is authoritative
   is decided by its record in `data_migrations`, never by the table existing.
   Snapshot writes check every table-backed collection's shape, then every row,
   and reject the whole save on the first problem; an existing but invalid

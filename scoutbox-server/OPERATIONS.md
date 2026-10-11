@@ -19,13 +19,26 @@ only), `M13_QUIET_LOGS=1` (suppresses per-request log lines),
 fixture / simulates its outage — test environments only; production registers
 are `not_configured`), `ALLOW_DEV_LOGINS` / `NODE_ENV` (see M11).
 
-## Runtime requirement: node:sqlite
-The server needs Node.js 22.5 or later with the built-in `node:sqlite` module
-(on by default; `package.json` declares `engines.node >= 22.5.0`). There is
-**no JSON or in-memory fallback**: without the module the process stops at
-startup with `SQLITE_REQUIRED` before opening or writing anything in
-`DATA_DIR`. Sessions are stored only as token hashes in a table, which a JSON
-snapshot could not hold without keeping plain tokens again.
+## Runtime requirement: node:sqlite with transaction state
+The server needs **Node.js 22.16 or later on the 22 line, or 24.0 or later**,
+with the built-in `node:sqlite` module (on by default; `package.json`
+declares `engines.node >= 22.16.0`, and `runtime.mjs` is the one definition of
+the contract). The floor is set by `DatabaseSync.isTransaction`, which the data
+layer uses to tell a save transaction from autocommit; it arrived in 22.16.0
+and 24.0.0. There is **no JSON or in-memory fallback**: without the module the
+process stops at startup with `SQLITE_REQUIRED`, and on an older Node.js (or a
+build whose `node:sqlite` lacks the property, whatever its version says) with
+`NODE_UNSUPPORTED` — in both cases before `DATA_DIR` is created, opened or
+written, so an existing directory is byte-identical afterwards and an absent
+one is not created. On such a runtime a server that did open the database
+would fail every save and leave a transaction open, which is why the check
+is refused up front rather than reported later. `npm test` runs the contract
+check on the current Node.js and on a masked simulation of an older one;
+`SCOUTBOX_TEST_NODE_BINS=/path/to/node:/other/node npm test` additionally runs
+the same probe on real binaries (a supported one must save, roll a failed
+save back and retry; an unsupported one must be refused with nothing written).
+Sessions are stored only as token hashes in a table, which a JSON snapshot
+could not hold without keeping plain tokens again.
 
 ## Data layer
 `DATA_DIR/scoutbox.db` holds two kinds of data. Collections that have not yet
