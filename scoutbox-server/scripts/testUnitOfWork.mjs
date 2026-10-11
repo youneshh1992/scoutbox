@@ -466,4 +466,37 @@ await test('review 5: after-commit side effects that return a promise are observ
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
+await test('participant API: store.unit.join runs an operation inside the open unit through the poisoning boundary — a throw rethrows unchanged and poisons the unit even when caught, an asynchronous shape is refused before it runs, a result is returned, and it is refused outside a unit (no BEGIN of its own)', () => {
+  const dir = tempDir('uow-join'); const t = boot(dir);
+  assert.throws(() => t.store.unit.join(() => 1), /needs an open unit of work/);
+  assert.throws(() => t.store.unit.join('nope'), /synchronous work function/);
+  assert.equal(t.store.sqlite.isTransaction, false, 'a refused join opened nothing');
+  // Inside a unit: a thrown operation poisons the unit although the caller catches it.
+  const boom = new Error('statement failed after a write');
+  let caught = null; let outer = null; let published = 0; let result = null; let begins = 0;
+  const exec = t.store.sqlite.exec.bind(t.store.sqlite);
+  t.store.sqlite.exec = (sql) => { if (sql === 'BEGIN') begins += 1; return exec(sql); };
+  try {
+    t.unit(() => {
+      result = t.store.unit.join(() => { t.layer.orgs.update('org-pro', { suspended: true }); return 'joined'; });
+      try { t.store.unit.join(() => { t.db.requests[0].status = 'half'; throw boom; }); } catch (e) { caught = e; }
+      t.store.afterCommit(() => { published += 1; });
+    });
+  } catch (e) { outer = e; }
+  t.store.sqlite.exec = exec;
+  assert.equal(result, 'joined'); assert.equal(caught, boom, 'the error is rethrown unchanged');
+  assert.ok(outer && /cannot commit/.test(outer.message) && outer.cause === boom, 'the unit fails at its end with the joined failure as cause');
+  assert.equal(outer.unitOfWork, 'rolled_back'); assert.equal(published, 0); assert.equal(begins, 1, 'join opens no transaction of its own');
+  assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0); assert.equal(t.db.requests[0].status, 'pending'); assert.ok(!t.layer.orgs.byId('org-pro').suspended, 'the joined row update is restored in memory too');
+  assert.equal(t.store.unit.active(), false); assert.equal(t.store.sqlite.isTransaction, false);
+  // An asynchronous operation is refused before it is invoked, and that refusal poisons the unit too.
+  let invoked = 0; let refusal = null; outer = null;
+  try { t.unit(() => { try { t.store.unit.join(async () => { invoked += 1; }); } catch (e) { refusal = e; } }); } catch (e) { outer = e; }
+  assert.match(String(refusal?.message), /must be synchronous/); assert.equal(invoked, 0); assert.ok(outer && /cannot commit/.test(outer.message));
+  // A clean join commits with the unit.
+  t.unit(() => { t.store.unit.join(() => t.layer.orgs.update('org-pro', { suspended: true })); });
+  assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 1);
+  t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+});
+
 console.log(`\n${passed} unit-of-work checks passed`);

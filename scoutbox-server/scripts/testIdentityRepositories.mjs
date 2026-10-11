@@ -481,4 +481,163 @@ test('production stays unchanged: the identity repositories are not created by t
   assert.equal(CORE_IDENTITY_INIT_META, 'coreIdentityInit'); assert.match(MINOR_WITHOUT_LINK_REASON, /Founder's decision/);
 });
 
+// ------------------------------------------------------------------ review corrections (independent review of e4a7c53)
+/** Patch `exec` so the NEXT COMMIT fails once; returns a probe that says whether the failure really happened. */
+function failNextCommit(t) {
+  const exec = t.store.sqlite.exec.bind(t.store.sqlite);
+  const probe = { injected: false, restore: () => { t.store.sqlite.exec = exec; } };
+  t.store.sqlite.exec = (sql) => { if (sql === 'COMMIT' && !probe.injected) { probe.injected = true; throw new Error('injected COMMIT failure'); } return exec(sql); };
+  return probe;
+}
+/** Run a standalone operation whose COMMIT fails; assert the failure occurred and was reported. */
+function standaloneCommitFails(t, fn) {
+  const probe = failNextCommit(t);
+  let err = null;
+  try { fn(); } catch (e) { err = e; } finally { probe.restore(); }
+  assert.ok(probe.injected, 'the COMMIT failure must actually have been injected');
+  assert.match(String(err?.message), /injected COMMIT failure/, 'the operation reports the failure');
+  assert.equal(t.store.sqlite.isTransaction, false);
+}
+
+test('review 1: a standalone operation whose COMMIT fails restores repository memory as well as SQL — update, insert with link, remove, link, ageUp, guardians.insert and guardians.update leave held views, nested arrays, childIds, indexes, counts and facet tracking as before; a pending facet edit made earlier stays pending, a later ordinary save persists no fragment, an explicit retry succeeds and a reopen agrees', () => {
+  const dir = tempDir('idrepo-standalone-commit');
+  const t = boot(dir, { ...FIXTURE() });
+  const adultView = t.players.byId('pl-adult'); const seededView = t.players.byId('pl-seeded'); const primary = t.guardians.byId('gd-primary'); const kids = primary.childIds; const co = t.guardians.byId('gd-co'); const coKids = co.childIds;
+  adultView.badges.push('PendingBefore'); // an unrelated facet edit, pending before every failed operation
+  const records = seededView.medical.records;
+  const snapshotCounts = () => ({ players: t.players.count(), guardians: t.guardians.count(), rows: t.raw('SELECT COUNT(*) AS n FROM players').n + t.raw('SELECT COUNT(*) AS n FROM guardians').n + t.raw('SELECT COUNT(*) AS n FROM guardian_children').n, uncommitted: t.players.uncommitted() + t.guardians.uncommitted() });
+  const before = snapshotCounts();
+  assert.equal(before.uncommitted, 1);
+  // update (a scalar and a split composite)
+  standaloneCommitFails(t, () => t.players.update('pl-seeded', { name: 'After', medical: { shared: false } }));
+  assert.equal(seededView.name, 'Seeded Adult'); assert.equal(seededView.medical.shared, true); assert.equal(seededView.medical.records, records); assert.equal(t.raw("SELECT name FROM players WHERE id = 'pl-seeded'").name, 'Seeded Adult');
+  // insert with a primary link
+  standaloneCommitFails(t, () => t.players.insert(child('pl-new', 'gd-primary', '2015-05-05')));
+  assert.equal(t.players.byId('pl-new'), null); assert.equal(t.db.players.some((p) => p.id === 'pl-new'), false); assert.equal(primary.childIds, kids); assert.deepEqual([...kids], ['pl-child1', 'pl-child2']);
+  // remove
+  standaloneCommitFails(t, () => t.players.remove('pl-child1'));
+  assert.ok(t.players.byId('pl-child1')); assert.deepEqual([...kids], ['pl-child1', 'pl-child2']); assert.deepEqual([...coKids], ['pl-child1', 'pl-child2']); assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE player_id = 'pl-child1'").n, 2);
+  // link (co) and ageUp (primary unlink)
+  standaloneCommitFails(t, () => t.players.link('gd-signup', 'pl-child1', 'co'));
+  assert.deepEqual([...t.guardians.byId('gd-signup').childIds], []); assert.deepEqual(t.guardians.linksOf('pl-child1'), [{ guardianId: 'gd-primary', role: 'primary' }, { guardianId: 'gd-co', role: 'co' }]);
+  standaloneCommitFails(t, () => t.players.ageUp('pl-child2'));
+  assert.equal(t.players.byId('pl-child2').guardianId, 'gd-primary'); assert.deepEqual([...kids], ['pl-child1', 'pl-child2']); assert.equal(t.raw("SELECT guardian_id FROM players WHERE id = 'pl-child2'").guardian_id, 'gd-primary');
+  // guardians.insert (with co links) and guardians.update
+  standaloneCommitFails(t, () => t.guardians.insert({ id: 'gd-new', name: 'New', email: 'new@example.test', idVerified: false, disclaimerAccepted: false, childIds: ['pl-child1'], coGuardianOf: 'gd-primary' }));
+  assert.equal(t.guardians.byId('gd-new'), null); assert.equal(t.guardians.emailTaken('new@example.test'), false); assert.equal(t.db.guardians.length, 3);
+  standaloneCommitFails(t, () => t.guardians.update('gd-primary', { name: 'Renamed', idvReference: 'idv-9' }));
+  assert.equal(primary.name, 'Primary Parent'); assert.equal(primary.idvReference, 'idv-1'); assert.equal(t.raw("SELECT name FROM guardians WHERE id = 'gd-primary'").name, 'Primary Parent');
+  assert.deepEqual(snapshotCounts(), before, 'counts, rows and facet tracking are exactly as before every failed operation');
+  assert.equal(t.invariantBreaks(), 0);
+  // A later ordinary save persists the earlier pending edit and nothing else.
+  t.store.save(t.snapshot());
+  assert.deepEqual(t.facets('players', 'pl-adult').badges, ['PendingBefore']); assert.equal(t.raw("SELECT name FROM players WHERE id = 'pl-seeded'").name, 'Seeded Adult'); assert.equal(t.players.uncommitted() + t.guardians.uncommitted(), 0);
+  // Explicit retries succeed.
+  t.players.update('pl-seeded', { name: 'Retry' }); t.players.insert(child('pl-new', 'gd-primary', '2015-05-05')); t.guardians.update('gd-primary', { name: 'Renamed' });
+  assert.equal(seededView.name, 'Retry'); assert.deepEqual([...kids], ['pl-child1', 'pl-child2', 'pl-new']);
+  t.close();
+  const r = reopen(dir);
+  assert.equal(r.players.byId('pl-seeded').name, 'Retry'); assert.equal(r.players.byId('pl-new').guardianId, 'gd-primary'); assert.equal(r.guardians.byId('gd-primary').name, 'Renamed'); assert.equal(r.guardians.byId('gd-new'), null); assert.deepEqual([...r.players.byId('pl-adult').badges], ['PendingBefore']); assert.equal(r.invariantBreaks(), 0);
+  r.close(); fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('review 2: inside a real unit, a repository operation that fails after its first SQL write poisons the unit even when the caller catches the error — the outer unit fails, nothing of it commits, after-commit work never runs, memory is restored, earlier edits survive, a later ordinary save persists no fragment and a retry succeeds; a caught VALIDATION refusal (thrown before any SQL) does not poison the unit', () => {
+  const dir = tempDir('idrepo-unit-caught');
+  const t = boot(dir, { ...FIXTURE() });
+  const refs = prepare(t);
+  const primary = t.guardians.byId('gd-primary'); const kids = primary.childIds;
+  // The player row is written first, then the link row fails: a half-created child, caught by the caller.
+  t.store.sqlite.exec("CREATE TRIGGER review_fail_link BEFORE INSERT ON guardian_children BEGIN SELECT RAISE(ABORT, 'injected link failure'); END;");
+  let inner = null; let outer = null; let published = 0;
+  try {
+    t.unit(() => {
+      t.db.requests[0].status = 'in-unit';
+      try { t.players.insert(child('pl-half', 'gd-primary', '2015-01-01')); } catch (e) { inner = e; }
+      t.store.afterCommit(() => { published += 1; });
+    });
+  } catch (e) { outer = e; }
+  assert.match(String(inner?.message), /injected link failure/, 'the mid-operation failure must actually have occurred');
+  assert.ok(outer, 'the outer unit must fail'); assert.match(outer.message, /cannot commit/); assert.equal(outer.unitOfWork, 'rolled_back'); assert.equal(published, 0);
+  assert.equal(t.raw("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-half'").n, 0); assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE player_id = 'pl-half'").n, 0); assert.equal(t.blob('requests')[0].status, 'pending');
+  assert.equal(t.players.byId('pl-half'), null); assert.equal(primary.childIds, kids); assert.deepEqual([...kids], ['pl-child1', 'pl-child2']); assert.equal(t.db.requests[0].status, 'pending');
+  assertMemoryRestored(t, refs);
+  t.store.save(t.snapshot());
+  assert.equal(t.raw("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-half'").n, 0); assert.deepEqual(t.facets('players', 'pl-adult').badges, ['PreUnit']);
+  t.store.sqlite.exec('DROP TRIGGER review_fail_link');
+  t.unit(() => t.players.insert(child('pl-half', 'gd-primary', '2015-01-01')));
+  assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE player_id = 'pl-half'").n, 1); assert.deepEqual([...kids], ['pl-child1', 'pl-child2', 'pl-half']);
+  // The guardian side: a row update that fails inside the unit, caught.
+  t.store.sqlite.exec("CREATE TRIGGER review_fail_guardian BEFORE UPDATE ON guardians BEGIN SELECT RAISE(ABORT, 'injected guardian failure'); END;");
+  inner = null; outer = null; published = 0;
+  try { t.unit(() => { try { t.guardians.update('gd-primary', { name: 'Caught' }); } catch (e) { inner = e; } t.players.update('pl-adult', { academyPlus: true }); t.store.afterCommit(() => { published += 1; }); }); } catch (e) { outer = e; }
+  assert.match(String(inner?.message), /injected guardian failure/); assert.ok(outer && /cannot commit/.test(outer.message)); assert.equal(published, 0);
+  assert.equal(primary.name, 'Primary Parent'); assert.equal(t.players.byId('pl-adult').academyPlus, false); assert.equal(t.raw("SELECT academy_plus FROM players WHERE id = 'pl-adult'").academy_plus, 0);
+  t.store.sqlite.exec('DROP TRIGGER review_fail_guardian');
+  // After memory mutation: operations that succeeded earlier in the same unit (a child created, a guardian renamed — memory already changed) are undone when a later caught operation fails; and a relationship operation (unlink) is covered.
+  t.store.sqlite.exec("CREATE TRIGGER review_fail_one BEFORE INSERT ON guardian_children WHEN NEW.player_id = 'pl-fail' BEGIN SELECT RAISE(ABORT, 'injected link failure for pl-fail'); END;");
+  const coView = t.guardians.byId('gd-co'); const coKids = coView.childIds;
+  inner = null; outer = null; published = 0;
+  try {
+    t.unit(() => {
+      t.players.insert(child('pl-ok', 'gd-primary', '2016-02-02')); t.guardians.update('gd-co', { name: 'Mid-unit' }); t.players.link('gd-co', 'pl-ok', 'co');
+      assert.ok(t.players.byId('pl-ok')); assert.deepEqual([...kids], ['pl-child1', 'pl-child2', 'pl-half', 'pl-ok']); assert.equal(coView.name, 'Mid-unit');
+      try { t.players.insert(child('pl-fail', 'gd-primary', '2016-03-03')); } catch (e) { inner = e; }
+      t.store.afterCommit(() => { published += 1; });
+    });
+  } catch (e) { outer = e; }
+  assert.match(String(inner?.message), /injected link failure for pl-fail/); assert.ok(outer && /cannot commit/.test(outer.message)); assert.equal(published, 0);
+  assert.equal(t.players.byId('pl-ok'), null); assert.equal(t.players.byId('pl-fail'), null); assert.equal(t.players.count(), 5, 'the four fixture players and pl-half'); assert.equal(primary.childIds, kids); assert.deepEqual([...kids], ['pl-child1', 'pl-child2', 'pl-half']); assert.equal(coView.childIds, coKids); assert.deepEqual([...coKids], ['pl-child1', 'pl-child2']); assert.equal(coView.name, 'Co Parent');
+  assert.equal(t.raw("SELECT COUNT(*) AS n FROM players WHERE id IN ('pl-ok', 'pl-fail')").n, 0); assert.equal(t.raw("SELECT name FROM guardians WHERE id = 'gd-co'").name, 'Co Parent'); assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE guardian_id = 'gd-co'").n, 2);
+  t.store.sqlite.exec('DROP TRIGGER review_fail_one');
+  t.store.sqlite.exec("CREATE TRIGGER review_fail_unlink BEFORE DELETE ON guardian_children BEGIN SELECT RAISE(ABORT, 'injected unlink failure'); END;");
+  inner = null; outer = null; published = 0;
+  try { t.unit(() => { try { t.players.unlink('gd-co', 'pl-child1'); } catch (e) { inner = e; } t.store.afterCommit(() => { published += 1; }); }); } catch (e) { outer = e; }
+  assert.match(String(inner?.message), /injected unlink failure/); assert.ok(outer && /cannot commit/.test(outer.message)); assert.equal(published, 0);
+  assert.deepEqual([...coKids], ['pl-child1', 'pl-child2']); assert.deepEqual(t.guardians.linksOf('pl-child1'), [{ guardianId: 'gd-primary', role: 'primary' }, { guardianId: 'gd-co', role: 'co' }]); assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE player_id = 'pl-child1'").n, 2);
+  t.store.sqlite.exec('DROP TRIGGER review_fail_unlink');
+  t.unit(() => { t.players.insert(child('pl-ok', 'gd-primary', '2016-02-02')); t.players.link('gd-co', 'pl-ok', 'co'); });
+  assert.deepEqual([...coKids], ['pl-child1', 'pl-child2', 'pl-ok']); assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE player_id = 'pl-ok'").n, 2);
+  // A validation refusal is thrown BEFORE the transactional boundary: nothing of the refused operation happened, and a caller that catches it may complete the rest of its unit.
+  published = 0; let refusal = null;
+  t.unit(() => { try { t.players.insert(child('pl-orphan', null, '2015-01-01')); } catch (e) { refusal = e; } t.players.update('pl-adult', { academyPlus: true }); t.store.afterCommit(() => { published += 1; }); });
+  assert.match(String(refusal?.message), /a minor and has no guardianId/); assert.equal(published, 1); assert.equal(t.raw("SELECT academy_plus FROM players WHERE id = 'pl-adult'").academy_plus, 1); assert.equal(t.players.byId('pl-orphan'), null);
+  assert.equal(t.invariantBreaks(), 0);
+  t.close(); fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('review 3: initialisation validates the supplied collections as given — an object, null, a string, a number or a missing collection (either domain) is refused through the preflight contract, writes nothing, leaves the state pending and the input untouched, and a corrected explicit snapshot initialises afterwards; explicitly empty arrays stay valid', () => {
+  const s = freshShadowDb(); prepareLiveIdentitySchema(s, { initState: 'pending', now: NOW });
+  const identity = createIdentityRepositories({ sqlite: s, now: () => NOW });
+  const rows = () => s.prepare('SELECT COUNT(*) AS n FROM players').get().n + s.prepare('SELECT COUNT(*) AS n FROM guardians').get().n + s.prepare('SELECT COUNT(*) AS n FROM guardian_children').get().n;
+  const cases = [
+    [{ players: { id: 'not-an-array' }, guardians: [] }, /players collection is an object, not an array/],
+    [{ players: null, guardians: [] }, /players collection is null, not an array/],
+    [{ players: 'x', guardians: [] }, /players collection is a string, not an array/],
+    [{ players: 7, guardians: [] }, /players collection is a number, not an array/],
+    [{ guardians: [] }, /players collection is absent, not an array/],
+    [{ players: [] }, /guardians collection is absent, not an array/],
+    [{ players: [], guardians: {} }, /guardians collection is an object, not an array/],
+    [{ players: [adult()], guardians: null }, /guardians collection is null, not an array/],
+    [undefined, /snapshot is undefined, not an object/],
+    ['snapshot', /snapshot is string, not an object/],
+  ];
+  for (const [input, re] of cases) {
+    const before = JSON.stringify(input ?? null);
+    let err = null; try { identity.initialize(input, { now: NOW }); } catch (e) { err = e; }
+    assert.ok(err, `refused: ${re}`); assert.equal(err.code, 'CORE_IDENTITY_CUTOVER_BLOCKED', String(err?.message)); assert.match(err.message, re);
+    assert.equal(identity.initState(), 'pending'); assert.equal(rows(), 0); assert.equal(identity.players.count(), 0);
+    assert.equal(JSON.stringify(input ?? null), before, 'the input is untouched');
+  }
+  // The Founder's rule still holds at initialisation; explicitly empty arrays are valid; a corrected snapshot initialises.
+  assert.throws(() => identity.initialize({ players: [child('pl-legacy', null, '2013-04-04')], guardians: [] }, { now: NOW }), /players pl-legacy: a minor on the evaluation date with no guardian link/);
+  assert.equal(identity.initState(), 'pending'); assert.equal(rows(), 0);
+  const r = identity.initialize({ players: [adult()], guardians: [] }, { now: NOW });
+  assert.equal(r.players, 1); assert.equal(identity.initState(), 'done'); assert.equal(identity.players.count(), 1);
+  s.close();
+  const e = freshShadowDb(); prepareLiveIdentitySchema(e, { initState: 'pending', now: NOW });
+  const empty = createIdentityRepositories({ sqlite: e, now: () => NOW });
+  assert.equal(empty.initialize({ players: [], guardians: [] }, { now: NOW }).players, 0); assert.equal(empty.initState(), 'done');
+  e.close();
+});
+
 console.log(`\n${passed} identity repository checks passed`);

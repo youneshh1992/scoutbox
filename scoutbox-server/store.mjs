@@ -410,8 +410,25 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
     /** An ordinary save. Inside an open unit of work it is absorbed: the unit's commit writes the blobs once. */
     save(snapshot) { if (unit) return; write(snapshot, { asSnapshot: !serverMode }); },
     unitOfWork,
-    /** For repositories: whether a unit of work is open on this store (their row writes are then allowed inside the transaction). */
-    unit: { active: () => unit !== null },
+    /**
+     * The participant API for repositories. `active()`: whether a unit of work
+     * is open on this store (their row writes are then allowed inside the
+     * transaction). `join(work)`: run one repository operation INSIDE the open
+     * unit through the same boundary a nested unit uses — a throw (or a refused
+     * asynchronous shape) poisons the unit even when the operation's caller
+     * catches the error, so a statement that already ran cannot be committed
+     * by the enclosing unit; the error is rethrown unchanged. No BEGIN, no
+     * savepoint: the unit's one transaction and one rollback. Refused outside a
+     * unit (a standalone operation runs its own transaction instead).
+     */
+    unit: {
+      active: () => unit !== null,
+      join(work) {
+        if (typeof work !== 'function') throw new TypeError('unit.join needs a synchronous work function');
+        if (!unit) throw new Error('unit.join needs an open unit of work (outside a unit a repository operation runs a transaction of its own)');
+        return runJoined(work);
+      },
+    },
     inUnitOfWork: () => unit !== null,
     /**
      * Defer a side effect until the open unit of work committed; outside a unit,

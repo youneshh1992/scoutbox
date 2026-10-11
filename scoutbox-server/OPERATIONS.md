@@ -423,9 +423,15 @@ the real store unit of work (`scripts/testIdentityRepositories.mjs`):
   `attach()` loads and never imports (a stale array is reported and ignored;
   an intentionally empty domain stays empty).
 - **Writes.** `players.insert/update/restore/remove/ageUp`,
-  `guardians.insert/update`, `link/unlink` — each in a transaction of its own,
-  refused inside a foreign transaction, joined inside the store's unit of work.
-  A minor is created with its primary guardian and the link in the same
+  `guardians.insert/update`, `link/unlink` — each validated first (a refusal
+  throws before any statement and changes nothing), then run through ONE
+  boundary in two halves: the statements, and only after they committed the
+  memory bookkeeping (records, held references, link arrays, indexes, views,
+  facet tracking). Outside a unit of work the statements get a transaction of
+  their own (refused inside a foreign transaction); a failure anywhere up to
+  and including COMMIT leaves SQL **and** memory exactly as before, and the
+  caller simply retries. Inside a unit the operation joins it through
+  `store.unit.join` (below). A minor is created with its primary guardian and the link in the same
   transaction, never without. `guardian_id` and the `primary` link row always
   agree; a second primary, a dangling or duplicate link and a duplicate e-mail
   (case-insensitive) are refused. `ageUp` clears the primary link only
@@ -445,7 +451,28 @@ the real store unit of work (`scripts/testIdentityRepositories.mjs`):
   and facet tracking; failures after the row and link writes, during the
   flush, at COMMIT, nested-and-swallowed and a process killed before COMMIT all
   leave the tables and memory as before, with edits that predated the unit
-  still pending.
+  still pending. Inside a unit every operation runs through
+  `store.unit.join(work)` — the store's explicit participant API, the same
+  boundary a nested unit uses (no BEGIN, no savepoint) — so an operation that
+  fails after its first statement (a trigger, a constraint, anything) poisons
+  the unit **even when its caller catches the error**: the unit fails at its
+  end with that error as `cause`, nothing of it commits, no after-commit work
+  runs, and memory is restored. A validation refusal is thrown before the
+  boundary and does not poison: a caller that catches it may complete its
+  unit. `unit.join` outside a unit is refused.
+- **Initialisation input.** `initialize(snapshot)` validates the snapshot as
+  given, by the preflight's shape contract: a `players` or `guardians`
+  collection that is absent, null, an object, a string or a number is a
+  refusal (`CORE_IDENTITY_CUTOVER_BLOCKED`, nothing written, state still
+  `pending`, the caller's object untouched), never read as an empty import;
+  explicitly empty arrays are valid. A corrected snapshot initialises later.
+- **Review corrections.** An independent review of the first repository commit
+  reproduced three defects — a standalone operation whose COMMIT failed kept
+  its memory changes, a caught mid-operation failure inside a unit let the
+  unit commit a half-created child, and a malformed collection initialised as
+  empty — all three corrected as above and covered by `review 1–3` in
+  `scripts/testIdentityRepositories.mjs` with the failure injected and
+  asserted to have occurred.
 
 The design and the cutover order are in `docs/architecture/sqlite-schema.md`
 and `docs/architecture/sqlite-migration-plan.md`.

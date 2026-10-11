@@ -62,7 +62,11 @@ and design changes the Founder explicitly requests.
   (`scripts/preflightCoreIdentity.mjs`, `repositories/identityPreflight.mjs`)
   are implemented and are the contract the live repositories reuse; the live
   repositories themselves (`repositories/identity.mjs`: players, guardians,
-  links, unit-of-work participation) are built and tested but **not attached**
+  links, unit-of-work participation; every write runs its statements first
+  and its memory bookkeeping only once they committed, joins an open unit
+  through `store.unit.join` so a caught mid-operation failure still poisons
+  the unit, and `initialize()` refuses an absent or malformed collection
+  instead of importing it as empty) are built and tested but **not attached**
   — the cutover itself (migration 0005) is not started, server boot does not
   create them, and a preflight report is never an approval. A legacy minor
   with no guardian link refuses the cutover until resolved by hand (the

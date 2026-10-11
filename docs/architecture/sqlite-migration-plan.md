@@ -910,7 +910,18 @@ performance, existing tests, what this plan is not).
 > the test-only `scripts/identityLiveTestSchema.mjs`). **Not attached in production:**
 > `repositories/index.mjs`, `TABLE_BACKED`, server boot, routes, responses, sessions and media
 > are unchanged; migration 0005 is not registered and the blob stays authoritative.
-> Tests: `scripts/testCoreIdentityMapping.mjs`. **Not done, acceptance unchanged:** migration
+> Tests: `scripts/testCoreIdentityMapping.mjs`. **Corrected after an independent review of the
+> repository commit (three reproduced defects):** every write operation now runs through one
+> boundary in two halves — statements first, memory bookkeeping only once they committed —
+> so a standalone operation whose COMMIT fails leaves memory as well as SQL untouched (held
+> references, link arrays, indexes, facet tracking); inside a unit the operation joins through
+> the store's explicit participant API `store.unit.join`, so a failure after the first
+> statement poisons the unit even when the caller catches it (nothing commits, nothing is
+> published) while a validation refusal thrown before the boundary does not; and
+> `initialize()` validates the snapshot as given through the preflight's shape contract (an
+> absent or malformed collection is refused and the state stays `pending`; an explicitly
+> empty array is valid). Covered by `review 1–3` in `scripts/testIdentityRepositories.mjs`
+> and `store.unit.join` in `scripts/testUnitOfWork.mjs`. **Not done, acceptance unchanged:** migration
 > `0005_core_identity_live`, the repositories and their writers, the boot snapshot-presence
 > signal (§7.2), atomic operations inside units of work (§7.4 per operation), the audience
 > allowlists (§6), the lossless rollback tool (§8), `facets_json` in `01_identity.sql`

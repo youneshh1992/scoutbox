@@ -48,13 +48,20 @@
  * hard delete and `restore` is the signing rollback's whole-record write.
  * None of this is a deletion or retention policy (O1 stays open).
  *
- * Transactions. Outside the store's unit of work every operation runs in a
- * transaction of its own and refuses to start inside anyone else's (its
- * bookkeeping could not follow a foreign rollback); inside a unit it joins
- * and stages its bookkeeping, and the save hook's `snapshotState` /
- * `restoreState` put records, views, indexes, link arrays and facet tracking
- * back when the unit fails. Ordinary saves keep the S3 contract: a failed
- * flush leaves facet edits pending for the next save.
+ * Transactions. Every write operation is validated first (a refusal throws
+ * before any statement and changes nothing, in or out of a unit), then runs
+ * its statements and, only once they are committed, its memory bookkeeping
+ * (`atomically`). Outside the store's unit of work the statements get a
+ * transaction of their own (refused inside anyone else's: the bookkeeping
+ * could not follow a foreign rollback) and a failure anywhere up to and
+ * including COMMIT leaves SQL and memory — records, held references, link
+ * arrays, indexes, views, facet tracking — exactly as they were; the
+ * operation is simply retried. Inside a unit the operation joins it through
+ * the store's `unit.join`, so a failure after a statement poisons the whole
+ * unit even when the caller catches the error (the unit cannot commit the
+ * fragment), and the save hook's `snapshotState` / `restoreState` put the
+ * bookkeeping back when the unit rolls back. Ordinary saves keep the S3
+ * contract: a failed flush leaves facet edits pending for the next save.
  */
 import { readonlyView, markView } from './readonly.mjs';
 import { captureGraph, restoreGraph } from './memento.mjs';
@@ -97,6 +104,8 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
   }
   if (!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'guardian_children'").get()) throw new Error('core identity: the guardian_children table does not exist although the cutover record is present');
 
+  // The store's participant API: `active()` says whether a unit is open, `join(work)` runs an operation inside it through the poisoning boundary.
+  if (unit !== null && (typeof unit?.active !== 'function' || typeof unit?.join !== 'function')) throw new TypeError('the identity repositories need the store\'s participant API `unit` ({ active(), join(work) }) or null; a unit without join() could not report an operation\'s failure to the unit of work');
   const inUnit = () => !!unit?.active?.();
   const stmt = {
     allPlayers: sqlite.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players ORDER BY rowid`),
@@ -227,8 +236,24 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
   const requireAutocommit = (what) => {
     if (sqlite.isTransaction && !inUnit()) throw new Error(`${what} writes in a transaction of its own and cannot run inside an open transaction (use the store's unit of work)`);
   };
-  /** Inside a unit of work the statements join it; outside they get a transaction of their own. Memory is touched only after the SQL succeeded. */
-  const atomically = (fn) => (inUnit() ? fn() : transaction(sqlite, fn));
+  /**
+   * The ONE transactional boundary of every write operation (review of e4a7c53,
+   * findings 1 and 2). An operation is two halves: `sql`, the statements, and
+   * `apply`, the memory bookkeeping (records, link arrays, indexes, views,
+   * facet tracking), which never throws. Outside a unit of work the statements
+   * run in a transaction of their own and `apply` runs only once COMMIT has
+   * returned: a failure anywhere — a statement, a trigger, COMMIT itself —
+   * leaves memory exactly as it was, held references included. Inside a unit
+   * both halves run through `unit.join`, so a failure after the first statement
+   * poisons the unit even when the operation's caller catches the error (the
+   * unit cannot commit the fragment; its rollback restores memory through the
+   * save hook's `restoreState`). No nested BEGIN, no savepoint.
+   */
+  const atomically = (sql, apply) => {
+    if (inUnit()) return unit.join(() => { sql(); return apply(); });
+    transaction(sqlite, sql);
+    return apply();
+  };
   const childIdsOf = (g) => (Array.isArray(g.childIds) ? g.childIds : null);
   const ensureChildIds = (g) => { if (!Array.isArray(g.childIds)) setOwn(g, 'childIds', []); return g.childIds; };
   const emailKey = (email) => String(email).toLowerCase();
@@ -272,6 +297,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
     atomically(() => {
       stmt.insertLink.run(guardianId, playerId, role);
       if (row) stmt.setPlayerGuardian.run({ id: playerId, guardian_id: guardianId, facets_json: row.facets_json });
+    }, () => {
       ensureChildIds(g).push(playerId);
       if (row) { setOwn(p, 'guardianId', guardianId); noteRow(P, p.id, row.facets_json); }
     });
@@ -289,6 +315,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
     atomically(() => {
       if (stmt.deleteLink.run(guardianId, playerId).changes !== 1) throw new Error(`the link ${guardianId}/${playerId} is not in the table although the view lists it`);
       if (row) stmt.setPlayerGuardian.run({ id: playerId, guardian_id: null, facets_json: row.facets_json });
+    }, () => {
       ids.splice(ids.indexOf(playerId), 1);
       if (row) { setOwn(p, 'guardianId', null); noteRow(P, p.id, row.facets_json); }
     });
@@ -323,7 +350,9 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       const row = playerToRow(rec);
       return atomically(() => {
         stmt.insertPlayer.run(row);
-        if (guardian) { stmt.insertLink.run(guardian.id, rec.id, 'primary'); ensureChildIds(guardian).push(rec.id); }
+        if (guardian) stmt.insertLink.run(guardian.id, rec.id, 'primary');
+      }, () => {
+        if (guardian) ensureChildIds(guardian).push(rec.id);
         return remember(P, rec, row.facets_json);
       });
     },
@@ -353,11 +382,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       const v = validatePlayerRecord(next);
       if (!v.ok) throw new TypeError(`a player update was refused: ${v.problems.join('; ')}`);
       const row = playerToRow(next);
-      atomically(() => {
-        stmt.updatePlayer.run(row);
-        applyPatch(rec, patch, { split: PLAYER_SPLIT_COMPOSITES });
-        noteRow(P, id, row.facets_json);
-      });
+      atomically(() => stmt.updatePlayer.run(row), () => { applyPatch(rec, patch, { split: PLAYER_SPLIT_COMPOSITES }); noteRow(P, id, row.facets_json); });
       return viewOf(P, rec);
     },
 
@@ -372,7 +397,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       const v = validatePlayerRecord(next);
       if (!v.ok) throw new TypeError(`a player restore was refused: ${v.problems.join('; ')}`);
       const row = playerToRow(next);
-      atomically(() => { stmt.updatePlayer.run(row); replaceContent(rec, next); noteRow(P, id, row.facets_json); });
+      atomically(() => stmt.updatePlayer.run(row), () => { replaceContent(rec, next); noteRow(P, id, row.facets_json); });
       return viewOf(P, rec);
     },
 
@@ -394,6 +419,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       if (!p) throw new Error(`player ${id} does not exist`);
       return atomically(() => {
         if (stmt.deletePlayer.run(id).changes !== 1) throw new Error(`player ${id} is not in the table although the view lists it`);
+      }, () => {
         for (const g of G.records) { const ids = childIdsOf(g); if (ids) { const i = ids.indexOf(id); if (i >= 0) ids.splice(i, 1); } }
         forget(P, p);
         return true;
@@ -443,8 +469,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       return atomically(() => {
         stmt.insertGuardian.run(row);
         for (const childId of kids) stmt.insertLink.run(rec.id, childId, P.byId.get(childId).guardianId === rec.id ? 'primary' : 'co');
-        return remember(G, rec, row.facets_json);
-      });
+      }, () => remember(G, rec, row.facets_json));
     },
 
     /** Change column-backed fields (`childIds` only through link/unlink/ageUp; `notificationPrefs` replaced whole). */
@@ -465,7 +490,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       if (hasOwn(patch, 'email')) { const taken = emailTakenBy(next.email, id); if (taken) throw new Error(`EMAIL_IN_USE: another guardian (${taken}) already uses this e-mail (compared case-insensitively)`); }
       if (hasOwn(patch, 'coGuardianOf') && present(next.coGuardianOf)) { if (next.coGuardianOf === id) throw new Error('coGuardianOf cannot name the guardian itself'); if (!G.byId.has(next.coGuardianOf)) throw new Error(`coGuardianOf names guardian ${next.coGuardianOf}, which does not exist`); }
       const row = guardianToRow(next);
-      atomically(() => { stmt.updateGuardian.run(row); applyPatch(rec, patch); noteRow(G, id, row.facets_json); });
+      atomically(() => stmt.updateGuardian.run(row), () => { applyPatch(rec, patch); noteRow(G, id, row.facets_json); });
       return viewOf(G, rec);
     },
 
@@ -544,13 +569,19 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
      * Refused when the state is not `pending` or the tables already hold rows.
      * A refused snapshot writes nothing (the error lists ids and reasons, never a
      * record) and the state stays `pending`, so the next boot retries.
+     *
+     * The given snapshot is validated AS GIVEN, by the preflight's own shape
+     * contract (review of e4a7c53, finding 3): a collection that is absent,
+     * null, an object, a string or a number is a refusal like any other — never
+     * read as an empty import — while an explicitly empty array is a valid,
+     * empty collection. The caller's object is never modified.
      */
-    initialize({ players: givenPlayers, guardians: givenGuardians } = {}, { now: at = now() } = {}) {
+    initialize(given, { now: at = now() } = {}) {
       if (readInitState() !== 'pending') throw new Error(`core identity: already initialised (meta.${CORE_IDENTITY_INIT_META} is "done"); the tables are authoritative and nothing is imported`);
       const stored = stmt.countPlayers.get().n + stmt.countGuardians.get().n + stmt.countLinks.get().n;
       if (stored) throw new Error(`core identity: initialisation is pending but the tables already hold ${stored} row(s) written outside the repositories; refusing to initialise over them`);
       if (sqlite.isTransaction) throw new Error('core identity: initialize() runs in a transaction of its own and cannot start inside an open transaction');
-      const report = validateCoreIdentity({ players: Array.isArray(givenPlayers) ? givenPlayers : [], guardians: Array.isArray(givenGuardians) ? givenGuardians : [] }, { now: at });
+      const report = validateCoreIdentity(given, { now: at });
       if (report.status !== 'complete') {
         const err = new Error(`CORE_IDENTITY_CUTOVER_BLOCKED: ${report.refusals.length} refusal(s); nothing was written and initialisation stays pending — ${report.refusals.slice(0, 20).map((r) => `${r.collection} ${r.id ?? '(collection)'}: ${r.reason}`).join('; ')}${report.legacyMinorsWithoutLink.length ? `; legacy minors without any guardian link (resolve by hand before the cutover): ${report.legacyMinorsWithoutLink.join(', ')}` : ''}`);
         err.code = 'CORE_IDENTITY_CUTOVER_BLOCKED';

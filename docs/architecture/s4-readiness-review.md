@@ -449,7 +449,7 @@ back. That is exactly the partial application the foundation below prevents.
 
 **Implemented (commit after `f899577`): `store.unitOfWork(work, { snapshot })`** in
 `store.mjs`, with `repositories/memento.mjs` and the organisations repository as the first
-participant (`scripts/testUnitOfWork.mjs`, 16 checks). An independent review of the first
+participant (`scripts/testUnitOfWork.mjs`, 17 checks). An independent review of the first
 commit reproduced five defects — a failed `BEGIN` left a phantom unit active, a swallowed nested
 failure committed partial work, a facet changed back before `COMMIT` left the row update's
 intermediate value in the table, an async callback ran before its promise was refused, and a
@@ -470,6 +470,7 @@ tested:
 | Setup and teardown | exception-safe: a failed `BEGIN` opens no unit and runs no work; a failing cleanup step (ROLLBACK, memento, a participant's restore) is recorded (`restoreFailures`, `err.unitOfWorkCleanup`) and still closes the unit | — |
 | Facet flush inside a unit | the flush compares the intended facets against what the **transaction already wrote** (a row update's intermediate value), not against the committed value alone, so a facet changed inside a unit and changed back before `COMMIT` overwrites the intermediate row; view and table agree after commit, rollback, an ordinary save and a restart | compares against the committed value (nothing else was written) |
 | Participants | **organisations** (rows, facets, view, id index: full participation), **sessions** (stateless over the table: rows roll back with the SQL, nothing to restore, writes allowed), **staff (`org_users`)**: writes inside a unit are **refused** because its in-memory rows are not integrated (tested); integrating it is a later step. No atomicity is claimed for anything else | hooks' `flush/commit/rollback` |
+| Repository operations (players, guardians, links — corrected after an independent review of the repository commit) | every write runs through `store.unit.join(work)`, the store's explicit participant API and the same boundary a nested unit uses (no `BEGIN`, no savepoint): an operation that fails after its first statement poisons the unit **even when its caller catches the error** — nothing of the unit commits, nothing is published, memory is restored; a validation refusal is thrown before the boundary and does not poison (a caller that catches it may complete its unit) | outside a unit the operation's statements run in a transaction of their own and its memory bookkeeping (records, held references, link arrays, indexes, views, facet tracking) is applied **only once `COMMIT` returned**: a failure anywhere, `COMMIT` included, leaves SQL and memory as before and the caller simply retries |
 | Memento cost | one graph capture per unit: 1,000 players + 2,000 requests, about 12,000 objects, under 25 ms each way on the development machine (printed by the suite) | — |
 
 **What S4a builds on this.** The four operations of §2.3 marked (UoW) run inside
