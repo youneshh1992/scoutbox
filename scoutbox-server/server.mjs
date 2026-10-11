@@ -822,7 +822,9 @@ function notify(audience, type, text, refId = null) {
   // The notification row above is part of the snapshot (rolled back with a
   // failed unit of work); the push is an external delivery and goes out only
   // once the state it announces is committed. Outside a unit, afterCommit runs it now.
-  if (!n.deferredPush) store.afterCommit(() => { void pushSender.send(audience, 'ScoutBox', text); });
+  // The promise is RETURNED so the store observes it: a rejected delivery is
+  // counted and logged instead of becoming an unhandled rejection.
+  if (!n.deferredPush) store.afterCommit(() => pushSender.send(audience, 'ScoutBox', text));
   broadcast('notify', { audienceKind: audience.kind, audienceId: audience.id });
   return n;
 }

@@ -137,9 +137,49 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
   // open, repository row writes are allowed inside the store's transaction,
   // `save()` is absorbed into the unit's commit, and side effects registered
   // with `afterCommit` wait until COMMIT returned.
-  let unit = null; // { afterCommit: [] } while a unit of work is open
+  let unit = null; // { afterCommit: [], failure: null } while a unit of work is open
   let afterCommitFailures = 0;
+  let afterCommitDelivered = 0;
   let lastAfterCommitError = null;
+  let restoreFailures = 0;
+  let lastRestoreError = null;
+  // Thenables a unit's work returned although it must be synchronous: their
+  // continuations run later, OUTSIDE any unit, and nothing here can cancel them.
+  const strayAsyncWork = { escaped: 0, rejected: 0, lastError: null };
+  const brief = (err) => ({ at: Date.now(), message: String(err?.message ?? err).slice(0, 200) });
+  const isThenable = (v) => v !== null && (typeof v === 'object' || typeof v === 'function') && typeof v.then === 'function';
+  // An `async function` (or async generator) is identifiable BEFORE it runs:
+  // refusing it then means none of its body executes. A plain function that
+  // returns a promise can only be recognised afterwards (see `unitOfWork`).
+  const asyncKind = (fn) => { const k = Object.prototype.toString.call(fn); return k === '[object AsyncFunction]' || k === '[object AsyncGeneratorFunction]' ? k.slice(8, -1) : null; };
+
+  /**
+   * Run one side effect (an after-commit callback). It never throws into the
+   * caller: a synchronous failure is counted and logged, and a returned promise
+   * is observed so an asynchronous failure is counted and logged the same way
+   * instead of becoming an unhandled rejection. The data stays committed.
+   */
+  function runSideEffect(fn) {
+    const failed = (err) => {
+      afterCommitFailures += 1;
+      lastAfterCommitError = brief(err);
+      console.error(`unit of work: an after-commit side effect failed (the data is committed): ${lastAfterCommitError.message}`);
+    };
+    let result;
+    try { result = fn(); } catch (err) { failed(err); return; }
+    if (isThenable(result)) Promise.resolve(result).then(() => { afterCommitDelivered += 1; }, failed);
+    else afterCommitDelivered += 1;
+  }
+
+  /** The work of a unit returned a thenable: observe it (its rejection must never be unhandled) and count the escape. */
+  function observeStrayAsync(thenable) {
+    strayAsyncWork.escaped += 1;
+    Promise.resolve(thenable).then(undefined, (err) => {
+      strayAsyncWork.rejected += 1;
+      strayAsyncWork.lastError = brief(err);
+      console.error(`unit of work: asynchronous work that escaped a rolled-back unit rejected later (whatever it did ran outside any unit): ${strayAsyncWork.lastError.message}`);
+    });
+  }
 
   /** Everything a save transaction writes between BEGIN and COMMIT (flush hooks, blobs, meta, optional projection). */
   function writeBody(snapshot, { asSnapshot }) {
@@ -214,14 +254,31 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
    *    an unsaved blob edit) are part of the restored state: they stay in
    *    memory, still pending, exactly as an ordinary save failure leaves them.
    *  - `work` must be synchronous: a SQLite transaction never spans an await
-   *    or a network call. A thenable result is refused and rolled back.
-   *  - A unit started inside a unit JOINS it (one transaction; an inner failure
-   *    fails the whole). A unit cannot start inside a foreign open transaction.
+   *    or a network call. An `async function` is identifiable and is REFUSED
+   *    BEFORE IT IS INVOKED — none of its body runs (top-level or nested). A
+   *    plain function that returns a promise cannot be told apart beforehand:
+   *    its synchronous part has run and is rolled back with the unit, the unit
+   *    refuses, and the promise is observed (a rejection is counted, never
+   *    unhandled). Its continuation is NOT cancelled — nothing can cancel it —
+   *    and runs later OUTSIDE any unit; the escape is counted in
+   *    `unitOfWorkState().strayAsyncWork` so it is visible. Do not write
+   *    asynchronous work; the store cannot make it safe.
+   *  - A unit started inside a unit JOINS it (one transaction). An inner
+   *    failure marks the WHOLE unit unable to commit, even when the inner
+   *    caller catches the error: the outer unit then fails at its end with the
+   *    inner error as `cause`, and everything is rolled back and restored.
+   *    A unit cannot start inside a foreign open transaction.
    *  - `save()` called inside a unit is absorbed: the unit's commit writes the
    *    blobs once. `afterCommit(fn)` defers a side effect (a broadcast, a push)
-   *    until COMMIT returned; a failing callback is counted and reported and
-   *    is NOT a rollback — the data is committed. Outside a unit `afterCommit`
-   *    runs the callback immediately.
+   *    until COMMIT returned; a side effect never fails the operation: a
+   *    synchronous throw or a rejected returned promise is counted and
+   *    reported (`unitOfWorkState()`), and is NOT a rollback — the data is
+   *    committed. Later callbacks still run. Outside a unit `afterCommit`
+   *    runs the callback immediately, observed the same way.
+   *  - Setup and teardown are exception-safe: a failed BEGIN opens no unit and
+   *    runs no work; a failing cleanup step (ROLLBACK, the memento, a
+   *    participant's restore) is recorded (`restoreFailures`, attached to the
+   *    error as `unitOfWorkCleanup`) and still closes the unit.
    *  - Participants are the registered save hooks that implement
    *    `snapshotState()` / `restoreState()`; a repository without them must
    *    refuse writes while a unit is open (`store.unit.active()`), or its
@@ -230,42 +287,75 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
    * `db` is the root of the memento (table-backed collections on it are views
    * and are skipped; their repositories restore themselves).
    */
+  const asyncRefusal = (kind, nested) => new TypeError(`a unit of work must be synchronous: the ${nested ? 'nested ' : ''}work is an ${kind} and was not invoked (a SQLite transaction never spans an await; nothing of it ran)`);
+  const thenableRefusal = () => new Error('a unit of work must be synchronous: the work returned a promise/thenable, so the unit was rolled back; its continuation is not cancelled and whatever it does later happens outside any unit (counted in unitOfWorkState().strayAsyncWork)');
+
+  /** Run `work` inside the already-open unit. Any failure — thrown, or a refused asynchronous shape — poisons the unit. */
+  function runJoined(work) {
+    try {
+      const kind = asyncKind(work);
+      if (kind) throw asyncRefusal(kind, true);
+      const result = work();
+      if (isThenable(result)) { observeStrayAsync(result); throw thenableRefusal(); }
+      return result;
+    } catch (err) {
+      if (!unit.failure) unit.failure = err;
+      throw err;
+    }
+  }
+
+  /** Close a failed unit: ROLLBACK, restore memory and the participants, tell the hooks — each step attempted even when another fails, and the unit is closed whatever happens. */
+  function abort(memento, states, err) {
+    const cleanup = [];
+    const attempt = (label, fn) => { try { fn(); } catch (e) { cleanup.push(`${label}: ${String(e?.message ?? e).slice(0, 200)}`); } };
+    try {
+      attempt('ROLLBACK', () => { if (sqlite.isTransaction) sqlite.exec('ROLLBACK'); });
+      attempt('memento', () => restoreGraph(memento));
+      hooks.forEach((hook, i) => { if (hook.restoreState) attempt(`participant ${i} restoreState`, () => hook.restoreState(states[i])); });
+      attempt('hooks rollback', () => report('rollback'));
+    } finally {
+      unit = null;
+    }
+    if (cleanup.length) {
+      restoreFailures += cleanup.length;
+      lastRestoreError = { at: Date.now(), message: cleanup.join('; ').slice(0, 400) };
+      console.error(`unit of work: rollback cleanup failed in ${cleanup.length} step(s) (the unit is closed; memory may not match the database until the next restart): ${lastRestoreError.message}`);
+    }
+    if (err && typeof err === 'object') {
+      err.unitOfWork = 'rolled_back';
+      if (cleanup.length) err.unitOfWorkCleanup = cleanup;
+    }
+  }
+
   function unitOfWork(work, { snapshot } = {}) {
     if (!serverMode) throw new Error('unitOfWork is a server mode operation; a snapshot tool writes whole snapshots with save()');
     if (typeof work !== 'function' || typeof snapshot !== 'function') throw new TypeError('unitOfWork(work, { snapshot }) needs a synchronous work function and a snapshot provider');
-    if (unit) return work(); // nested: join the enclosing unit
+    if (unit) return runJoined(work); // nested: join the enclosing unit
     if (sqlite.isTransaction) throw new Error('a unit of work cannot start inside an open transaction');
+    const kind = asyncKind(work);
+    if (kind) throw asyncRefusal(kind, false); // before anything is captured or begun: nothing to undo
     const before = snapshot();
     const memento = captureGraph([before.db]);
     const states = hooks.map((hook) => (hook.snapshotState ? hook.snapshotState() : null));
-    unit = { afterCommit: [] };
-    let result;
+    // BEGIN first: if it fails, no unit was ever open, the work does not run and
+    // the error propagates as it is (nothing to roll back or restore).
     sqlite.exec('BEGIN');
+    unit = { afterCommit: [], failure: null };
+    let result;
     try {
       result = work();
-      if (result && typeof result.then === 'function') throw new Error('a unit of work must be synchronous: a SQLite transaction never spans an await');
+      if (isThenable(result)) { observeStrayAsync(result); throw thenableRefusal(); }
+      if (unit.failure) throw new Error(`the unit of work cannot commit: a nested (joined) unit failed inside it and its caller swallowed the error — ${String(unit.failure?.message ?? unit.failure).slice(0, 200)}`, { cause: unit.failure });
       writeBody(snapshot(), { asSnapshot: false });
       sqlite.exec('COMMIT');
     } catch (err) {
-      try { if (sqlite.isTransaction) sqlite.exec('ROLLBACK'); } finally {
-        restoreGraph(memento);
-        hooks.forEach((hook, i) => { if (hook.restoreState) hook.restoreState(states[i]); });
-        report('rollback');
-        unit = null;
-      }
-      if (err && typeof err === 'object') err.unitOfWork = 'rolled_back';
+      abort(memento, states, err);
       throw err;
     }
     const deferred = unit.afterCommit;
     unit = null;
     report('commit');
-    for (const fn of deferred) {
-      try { fn(); } catch (err) {
-        afterCommitFailures += 1;
-        lastAfterCommitError = { at: Date.now(), message: String(err?.message ?? err).slice(0, 200) };
-        console.error(`unit of work: an after-commit side effect failed (the data is committed): ${lastAfterCommitError.message}`);
-      }
-    }
+    for (const fn of deferred) runSideEffect(fn);
     return result;
   }
 
@@ -323,12 +413,21 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
     /** For repositories: whether a unit of work is open on this store (their row writes are then allowed inside the transaction). */
     unit: { active: () => unit !== null },
     inUnitOfWork: () => unit !== null,
-    /** Defer a side effect until the open unit of work committed; outside a unit, run it now. */
+    /**
+     * Defer a side effect until the open unit of work committed; outside a unit,
+     * run it now. Either way it never throws into the caller: a synchronous
+     * failure or a rejected returned promise is counted and logged.
+     */
     afterCommit(fn) {
       if (typeof fn !== 'function') throw new TypeError('afterCommit needs a function');
-      if (unit) unit.afterCommit.push(fn); else fn();
+      if (unit) unit.afterCommit.push(fn); else runSideEffect(fn);
     },
-    unitOfWorkState: () => ({ active: unit !== null, afterCommitFailures, lastAfterCommitError }),
+    unitOfWorkState: () => ({
+      active: unit !== null,
+      afterCommitFailures, afterCommitDelivered, lastAfterCommitError,
+      restoreFailures, lastRestoreError,
+      strayAsyncWork: { ...strayAsyncWork },
+    }),
   };
   return store;
 }

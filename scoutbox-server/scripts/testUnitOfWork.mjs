@@ -20,7 +20,7 @@ import { readonlyView } from '../repositories/readonly.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
-function test(name, fn) { if (only && !name.includes(only)) return; fn(); passed++; console.log(`  ✓ ${name}`); }
+async function test(name, fn) { if (only && !name.includes(only)) return; await fn(); passed++; console.log(`  ✓ ${name}`); }
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TTL = 30 * 86_400_000;
 let counter = 9000;
@@ -107,7 +107,7 @@ const prepare = (t) => {
 };
 
 // ------------------------------------------------------------- the memento itself
-test('memento: every reachable object and array is restored in place, by identity — added keys removed, removed keys back, nested arrays truncated, views and frozen leaves untouched', () => {
+await test('memento: every reachable object and array is restored in place, by identity — added keys removed, removed keys back, nested arrays truncated, views and frozen leaves untouched', () => {
   const inner = { n: 1, list: [1, 2] };
   const view = readonlyView({ v: 1 }, 'x');
   const frozen = Object.freeze({ f: 1 });
@@ -122,7 +122,7 @@ test('memento: every reachable object and array is restored in place, by identit
 });
 
 // ------------------------------------------------------------- success
-test('unit of work: a row insert, a row update, a facet change, blob edits and a session commit together in one transaction; after-commit callbacks run once, after COMMIT', () => {
+await test('unit of work: a row insert, a row update, a facet change, blob edits and a session commit together in one transaction; after-commit callbacks run once, after COMMIT', () => {
   const dir = tempDir('uow-ok'); const t = boot(dir);
   const refs = prepare(t);
   const calls = [];
@@ -136,7 +136,7 @@ test('unit of work: a row insert, a row update, a facet change, blob edits and a
 });
 
 // ------------------------------------------------------------- failure after the writes
-test('unit of work: a failure after the row writes and the facet/blob mutations rolls the database back AND restores memory (held records, nested arrays, views); unrelated pending edits survive; an ordinary save persists no fragment; an explicit retry persists everything', () => {
+await test('unit of work: a failure after the row writes and the facet/blob mutations rolls the database back AND restores memory (held records, nested arrays, views); unrelated pending edits survive; an ordinary save persists no fragment; an explicit retry persists everything', () => {
   const dir = tempDir('uow-fail'); const t = boot(dir);
   const refs = prepare(t);
   let err = null;
@@ -157,7 +157,7 @@ test('unit of work: a failure after the row writes and the facet/blob mutations 
 });
 
 // ------------------------------------------------------------- failure at COMMIT
-test('unit of work: a failure at COMMIT takes the same path — database untouched, memory restored, unrelated edits kept, retry lands everything', () => {
+await test('unit of work: a failure at COMMIT takes the same path — database untouched, memory restored, unrelated edits kept, retry lands everything', () => {
   const dir = tempDir('uow-commit'); const t = boot(dir);
   const refs = prepare(t);
   const exec = t.store.sqlite.exec.bind(t.store.sqlite);
@@ -175,7 +175,7 @@ test('unit of work: a failure at COMMIT takes the same path — database untouch
 });
 
 // ------------------------------------------------------------- crash before commit
-test('unit of work: a process killed before COMMIT leaves the pre-operation database — a restart sees no row, no facet, no blob change of the operation', () => {
+await test('unit of work: a process killed before COMMIT leaves the pre-operation database — a restart sees no row, no facet, no blob change of the operation', () => {
   const dir = tempDir('uow-crash'); const t = boot(dir);
   t.store.sqlite.close();
   const r = spawnSync(process.execPath, [path.join(HERE, 'unitOfWorkCrashChild.mjs'), dir], { encoding: 'utf8', timeout: 30_000 });
@@ -192,7 +192,7 @@ test('unit of work: a process killed before COMMIT leaves the pre-operation data
 });
 
 // ------------------------------------------------------------- the two contracts, side by side
-test('ordinary saves keep the S3 contract: a facet change in a FAILED ordinary save stays pending and the next ordinary save persists it (no explicit retry needed)', () => {
+await test('ordinary saves keep the S3 contract: a facet change in a FAILED ordinary save stays pending and the next ordinary save persists it (no explicit retry needed)', () => {
   const dir = tempDir('uow-s3'); const t = boot(dir);
   const pro = t.db.orgs.find((o) => o.id === 'org-pro');
   pro.squad.push({ id: 'sq-1', name: 'A', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
@@ -208,7 +208,7 @@ test('ordinary saves keep the S3 contract: a facet change in a FAILED ordinary s
 });
 
 // ------------------------------------------------------------- nesting, saves inside, async, participants
-test('unit of work: a nested unit joins the enclosing one (an inner failure rolls everything back); a save() inside a unit is absorbed into its commit; asynchronous work is refused and rolled back; a unit cannot start inside a foreign transaction', () => {
+await test('unit of work: a nested unit joins the enclosing one (an inner failure rolls everything back); a save() inside a unit is absorbed into its commit; asynchronous work is refused and rolled back; a unit cannot start inside a foreign transaction', () => {
   const dir = tempDir('uow-nest'); const t = boot(dir);
   const pro = t.db.orgs.find((o) => o.id === 'org-pro');
   // Nested join: the inner failure undoes the outer insert too.
@@ -238,7 +238,7 @@ test('unit of work: a nested unit joins the enclosing one (an inner failure roll
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('unit of work: participants — organisations and sessions take part; staff (org_users) writes are refused inside a unit because their bookkeeping is not integrated, and nothing of the attempt persists', () => {
+await test('unit of work: participants — organisations and sessions take part; staff (org_users) writes are refused inside a unit because their bookkeeping is not integrated, and nothing of the attempt persists', () => {
   const dir = tempDir('uow-parts'); const t = boot(dir);
   let err = null;
   try { t.unit(() => { t.layer.orgs.insert({ id: 'org-x', name: 'X', type: 'club', plan: 'Pro' }); t.layer.users.insert({ orgId: 'org-pro', name: 'New Staff', role: 'Scout' }); }); } catch (e) { err = e; }
@@ -251,7 +251,7 @@ test('unit of work: participants — organisations and sessions take part; staff
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('unit of work: an after-commit callback that fails does not undo the commit; it is counted and reported, never treated as a rollback; callbacks registered outside a unit run at once', () => {
+await test('unit of work: an after-commit callback that fails does not undo the commit; it is counted and reported, never treated as a rollback; callbacks registered outside a unit run at once', () => {
   const dir = tempDir('uow-after'); const t = boot(dir);
   let err = null;
   try { operation(t, { afterCommit: () => { throw new Error('push gateway down'); } }); } catch (e) { err = e; }
@@ -263,20 +263,207 @@ test('unit of work: an after-commit callback that fails does not undo the commit
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('unit of work: snapshot mode refuses it (a tool writes whole snapshots, it does not run operations)', () => {
+await test('unit of work: snapshot mode refuses it (a tool writes whole snapshots, it does not run operations)', () => {
   const dir = tempDir('uow-snap');
   const tool = openStore(dir);
   assert.throws(() => tool.unitOfWork(() => {}, { snapshot: () => ({ savedAt: 1, idCounter: 1, db: {} }) }), /server mode/);
   tool.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('unit of work: capturing the memento of a synthetic snapshot is bounded in time', () => {
+await test('unit of work: capturing the memento of a synthetic snapshot is bounded in time', () => {
   const players = Array.from({ length: 1000 }, (_, i) => ({ id: `pl-${i}`, name: `P${i}`, media: [{ id: `m-${i}`, tags: { pace: 1 } }], attendance: [{ id: `a-${i}`, gps: { lat: 1, lng: 2 } }], stats: { goals: i } }));
   const db = { players, requests: Array.from({ length: 2000 }, (_, i) => ({ id: `r-${i}`, history: ['a', 'b'] })) };
   const t0 = performance.now(); const m = captureGraph([db]); const captured = performance.now() - t0;
   const t1 = performance.now(); restoreGraph(m); const restored = performance.now() - t1;
   console.log(`    (memento of 1,000 players + 2,000 requests: capture ${captured.toFixed(1)} ms, restore ${restored.toFixed(1)} ms, ${m.size} objects)`);
   assert.ok(captured < 2000 && restored < 2000);
+});
+
+// ------------------------------------------------------------- review corrections (independent review of the first foundation commit)
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+/** Collect unhandled rejections while `fn` runs (plus two turns of the event loop), so an unobserved promise is a test failure rather than a process crash. */
+async function withUnhandled(fn) {
+  const seen = [];
+  const listener = (e) => seen.push(String(e?.message ?? e));
+  process.on('unhandledRejection', listener);
+  try { await fn(); await tick(); await tick(); } finally { process.off('unhandledRejection', listener); }
+  return seen;
+}
+
+await test('review 1: a failure at BEGIN leaves no unit open — the work never runs, no transaction is left behind, ordinary saves and later units work; a failing cleanup step (a participant whose restore throws) is reported and still clears the unit', () => {
+  const dir = tempDir('uow-begin'); const t = boot(dir);
+  const exec = t.store.sqlite.exec.bind(t.store.sqlite);
+  let failBegin = true; let invoked = 0;
+  t.store.sqlite.exec = (sql) => { if (sql === 'BEGIN' && failBegin) { failBegin = false; throw new Error('injected BEGIN failure'); } return exec(sql); };
+  assert.throws(() => t.unit(() => { invoked += 1; }), /injected BEGIN failure/);
+  assert.equal(invoked, 0, 'the work must not run when the transaction could not start');
+  assert.equal(t.store.inUnitOfWork(), false, 'no fictitious unit remains active');
+  assert.equal(t.store.unit.active(), false); assert.equal(t.store.sqlite.isTransaction, false);
+  t.db.requests[0].status = 'ordinary edit';
+  t.store.save(t.snapshot());
+  assert.equal(t.blob('requests')[0].status, 'ordinary edit', 'a later ordinary save is a real save, not absorbed by a phantom unit');
+  t.unit(() => { t.layer.orgs.insert({ id: 'org-after-begin', name: 'After', type: 'club', plan: 'Pro' }); });
+  assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-after-begin'").n, 1, 'a later unit works');
+  t.store.sqlite.exec = exec;
+  // Cleanup errors: a participant whose restoreState throws must not leave the flag stuck or the transaction open.
+  let restoreCalls = 0;
+  t.store.setSaveHook({ flush() {}, snapshotState: () => 'state', restoreState() { restoreCalls += 1; throw new Error('restore exploded'); } });
+  let err = null;
+  try { t.unit(() => { t.db.requests[0].status = 'doomed'; throw new Error('operation failed'); }); } catch (e) { err = e; }
+  assert.match(err.message, /operation failed/, 'the caller sees the operation failure');
+  assert.equal(err.unitOfWork, 'rolled_back'); assert.equal(restoreCalls, 1);
+  assert.ok(Array.isArray(err.unitOfWorkCleanup) && /restore exploded/.test(err.unitOfWorkCleanup.join(' ')), 'the cleanup failure is attached to the error');
+  assert.equal(t.store.inUnitOfWork(), false, 'the unit is closed even though cleanup failed');
+  assert.equal(t.store.sqlite.isTransaction, false);
+  assert.equal(t.db.requests[0].status, 'ordinary edit', 'the memento still restored the blob graph (the failing participant came after it)');
+  assert.ok(t.store.unitOfWorkState().restoreFailures >= 1);
+  t.store.save(t.snapshot());
+  assert.equal(t.blob('requests')[0].status, 'ordinary edit');
+  t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await test('review 2: a nested (joined) unit that fails poisons the whole unit even when its caller catches the error — nothing commits, nothing is published, memory is restored, a later ordinary save persists no fragment', () => {
+  const dir = tempDir('uow-swallow'); const t = boot(dir);
+  const req1 = t.db.requests[0];
+  let events = 0; let outer = null; let innerSeen = null; let continued = false;
+  try {
+    t.unit(() => {
+      t.layer.orgs.update('org-pro', { suspended: true });
+      try {
+        t.unit(() => {
+          t.layer.orgs.insert({ id: 'org-inner', name: 'Inner', type: 'club', plan: 'Pro' });
+          req1.status = 'failed inner operation';
+          t.store.afterCommit(() => { events += 1; });
+          throw new Error('inner failure');
+        });
+      } catch (e) { innerSeen = e.message; }
+      continued = true; // the caller carried on after swallowing the inner error
+      t.store.afterCommit(() => { events += 1; });
+    });
+  } catch (e) { outer = e; }
+  assert.equal(innerSeen, 'inner failure'); assert.equal(continued, true);
+  assert.ok(outer, 'the outer unit must fail: a joined unit failed inside it');
+  assert.match(outer.message, /cannot commit|joined|nested/i); assert.match(String(outer.cause?.message), /inner failure/);
+  assert.equal(outer.unitOfWork, 'rolled_back');
+  assert.equal(t.store.sqlite.isTransaction, false); assert.equal(t.store.inUnitOfWork(), false);
+  assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0, 'the outer row write did not commit');
+  assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-inner'").n, 0); assert.equal(t.blob('requests')[0].status, 'pending');
+  assert.equal(events, 0, 'no after-commit callback of a failed unit runs');
+  assert.equal(t.db.orgs.find((o) => o.id === 'org-pro').suspended, undefined); assert.equal(t.layer.orgs.byId('org-inner'), null); assert.equal(req1.status, 'pending');
+  t.store.save(t.snapshot());
+  assert.equal(t.blob('requests')[0].status, 'pending'); assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0);
+  // The same operation, retried without the failure, commits whole.
+  t.unit(() => { t.layer.orgs.update('org-pro', { suspended: true }); t.unit(() => { req1.status = 'inner ok'; }); t.store.afterCommit(() => { events += 1; }); });
+  assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 1); assert.equal(t.blob('requests')[0].status, 'inner ok'); assert.equal(events, 1);
+  t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await test('review 3: a facet value written by a row update inside a unit and then changed back before COMMIT is overwritten in the database — view and table agree after commit, after rollback, after an ordinary save and after a restart', () => {
+  const dir = tempDir('uow-revert'); const t = boot(dir);
+  const pro = t.db.orgs.find((o) => o.id === 'org-pro');
+  const squad = (id = 'org-pro') => JSON.parse(t.raw('SELECT facets_json FROM orgs WHERE id = ?', id).facets_json).squad.length;
+  // Commit: the intermediate value (one member) is written by the row update; the final value (none) must win.
+  t.unit(() => {
+    pro.squad.push({ id: 'sq-temp', name: 'T', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
+    t.layer.orgs.update('org-pro', { name: 'Eastport FC (renamed)' });
+    pro.squad = [];
+  });
+  assert.equal(pro.squad.length, 0); assert.equal(squad(), 0, 'the table holds the final value, not the intermediate one');
+  assert.equal(t.raw("SELECT name FROM orgs WHERE id = 'org-pro'").name, 'Eastport FC (renamed)'); assert.equal(t.layer.orgs.uncommitted(), 0);
+  // The mirror image: a third value after the update is written too.
+  t.unit(() => { pro.squad.push({ id: 'sq-a', name: 'A', position: 'ST', playerId: null, source: 'manual', addedAt: 1 }); t.layer.orgs.update('org-pro', { suspended: true }); pro.squad.push({ id: 'sq-b', name: 'B', position: 'GK', playerId: null, source: 'manual', addedAt: 2 }); });
+  assert.equal(squad(), 2); assert.equal(pro.squad.length, 2);
+  // Rollback: the same shape, then a failure — the database keeps the committed value and memory is restored.
+  assert.throws(() => t.unit(() => { pro.squad.push({ id: 'sq-x', name: 'X', position: 'ST', playerId: null, source: 'manual', addedAt: 3 }); t.layer.orgs.update('org-pro', { suspended: false }); pro.squad = []; throw new Error('late failure'); }), /late failure/);
+  assert.equal(squad(), 2); assert.equal(pro.squad.length, 2); assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 1); assert.equal(t.layer.orgs.uncommitted(), 0);
+  // Ordinary save: a facet changed back to its committed value after an uncommitted change is simply not written; one changed away from it is.
+  pro.squad.push({ id: 'sq-c', name: 'C', position: 'ST', playerId: null, source: 'manual', addedAt: 4 }); pro.squad.pop();
+  assert.equal(t.layer.orgs.uncommitted(), 0); t.store.save(t.snapshot()); assert.equal(squad(), 2);
+  pro.squad = []; t.store.save(t.snapshot()); assert.equal(squad(), 0);
+  // Restart: the table is what the next boot sees.
+  t.store.sqlite.close();
+  const again = openStore(dir, { tableBacked: TABLE_BACKED });
+  const db2 = { ...again.load().db };
+  attachDataLayer({ db: db2, store: again, nextId, persist: () => {}, sessionTtlMs: TTL });
+  const pro2 = db2.orgs.find((o) => o.id === 'org-pro');
+  assert.equal(pro2.name, 'Eastport FC (renamed)'); assert.equal(pro2.squad.length, 0); assert.equal(pro2.suspended, true);
+  again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await test('review 4: an async function is refused BEFORE it is invoked (top-level and nested), so nothing of it ever runs; an unexpected thenable from a plain function is rolled back, its rejection is observed and counted, and the fact that its continuation is NOT cancelled is recorded, not hidden', async () => {
+  const dir = tempDir('uow-async'); const t = boot(dir);
+  const pro = t.db.orgs.find((o) => o.id === 'org-pro');
+  let invoked = 0;
+  const unhandled = await withUnhandled(async () => {
+    // Top-level async work: refused before invocation.
+    let err = null;
+    try { t.unit(async () => { invoked += 1; await tick(); t.layer.orgs.update('org-pro', { suspended: true }); t.db.requests[0].status = 'escaped'; }); } catch (e) { err = e; }
+    assert.match(err.message, /async function|synchronous/); assert.equal(invoked, 0, 'an identifiable async function never runs');
+    assert.equal(t.store.inUnitOfWork(), false); assert.equal(t.store.sqlite.isTransaction, false);
+    // Nested async work: refused before invocation, and the enclosing unit cannot commit.
+    err = null;
+    try { t.unit(() => { t.layer.orgs.insert({ id: 'org-outer2', name: 'O', type: 'club', plan: 'Pro' }); try { t.unit(async () => { invoked += 1; }); } catch { /* swallowed */ } }); } catch (e) { err = e; }
+    assert.ok(err && err.unitOfWork === 'rolled_back'); assert.equal(invoked, 0); assert.equal(t.layer.orgs.byId('org-outer2'), null);
+    await tick(); await tick();
+    t.store.save(t.snapshot());
+    assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0); assert.equal(t.blob('requests')[0].status, 'pending');
+    assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-outer2'").n, 0);
+    // An UNEXPECTED thenable: a plain function that returns a promise cannot be told apart before it runs.
+    // Its synchronous part ran inside the unit and is rolled back; the unit refuses; the promise is observed
+    // (its rejection is counted, never unhandled). What its continuation does later happens OUTSIDE any unit —
+    // the store cannot cancel it and does not claim to; it counts the escape so the operator can see it.
+    let continuation = 0;
+    err = null;
+    try {
+      t.unit(() => {
+        pro.squad.push({ id: 'sq-sync', name: 'S', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
+        return (async () => { await tick(); continuation += 1; throw new Error('continuation rejected'); })();
+      });
+    } catch (e) { err = e; }
+    assert.match(err.message, /synchronous|thenable|promise/); assert.equal(err.unitOfWork, 'rolled_back');
+    assert.equal(pro.squad.length, 0, 'the synchronous part of the work is rolled back');
+    assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).squad.length, 0);
+    await tick(); await tick();
+    assert.equal(continuation, 1, 'the continuation still ran: refusing the promise does not cancel the work (documented limitation)');
+    const stray = t.store.unitOfWorkState().strayAsyncWork;
+    assert.equal(stray.escaped, 1); assert.equal(stray.rejected, 1); assert.match(stray.lastError.message, /continuation rejected/);
+    // A resolving thenable is observed the same way (counted as escaped, not as a failure).
+    try { t.unit(() => Promise.resolve('late')); } catch { /* refused */ }
+    await tick();
+    assert.equal(t.store.unitOfWorkState().strayAsyncWork.escaped, 2); assert.equal(t.store.unitOfWorkState().strayAsyncWork.rejected, 1);
+  });
+  assert.deepEqual(unhandled, [], 'no unhandled rejection escapes the store');
+  t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await test('review 5: after-commit side effects that return a promise are observed — an asynchronous failure is counted and logged (never an unhandled rejection, never a rollback), a success is not, and later callbacks still run; the same holds outside a unit', async () => {
+  const dir = tempDir('uow-async-after'); const t = boot(dir);
+  const order = [];
+  const unhandled = await withUnhandled(async () => {
+    t.unit(() => {
+      t.layer.orgs.update('org-pro', { suspended: true });
+      t.store.afterCommit(async () => { await tick(); order.push('async-fail'); throw new Error('async delivery failed'); });
+      t.store.afterCommit(() => { order.push('sync-fail'); throw new Error('sync delivery failed'); });
+      t.store.afterCommit(async () => { await tick(); order.push('async-ok'); return 'delivered'; });
+      t.store.afterCommit(() => { order.push('sync-ok'); });
+    });
+    assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 1, 'committed regardless of delivery');
+    assert.deepEqual(order, ['sync-fail', 'sync-ok'], 'every synchronous callback ran, in order, despite the failure');
+    await tick(); await tick(); await tick();
+    assert.deepEqual([...order].sort(), ['async-fail', 'async-ok', 'sync-fail', 'sync-ok']);
+    const state = t.store.unitOfWorkState();
+    assert.equal(state.afterCommitFailures, 2, 'one synchronous and one asynchronous failure counted');
+    assert.equal(state.afterCommitDelivered, 2, 'two deliveries succeeded');
+    assert.match(state.lastAfterCommitError.message, /async delivery failed/);
+    // Outside a unit: the callback runs now; a returned promise is observed the same way.
+    t.store.afterCommit(async () => { await tick(); throw new Error('immediate async failure'); });
+    await tick(); await tick();
+    assert.equal(t.store.unitOfWorkState().afterCommitFailures, 3);
+    assert.doesNotThrow(() => t.store.afterCommit(() => { throw new Error('immediate sync failure'); }), 'a side effect never fails the operation that registered it');
+    assert.equal(t.store.unitOfWorkState().afterCommitFailures, 4);
+  });
+  assert.deepEqual(unhandled, [], 'no unhandled rejection escapes the store');
+  t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
 console.log(`\n${passed} unit-of-work checks passed`);

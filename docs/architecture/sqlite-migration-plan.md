@@ -854,10 +854,16 @@ performance, existing tests, what this plan is not).
 > readiness review §7.4 specifies is implemented: `store.unitOfWork(work)` commits repository
 > rows, facet flushes and the blob write in one transaction, restores the in-memory graph in
 > place when anything fails (held references keep their identity; no fragment is left for a
-> later ordinary save; retry is an explicit rerun), refuses asynchronous work and a start
-> inside a foreign transaction, absorbs nested saves, and defers broadcasts and pushes to
-> `store.afterCommit`. Organisations participate fully, sessions may be written inside a
-> unit (stateless), `org_users` refuses writes inside a unit. Tests:
+> later ordinary save; retry is an explicit rerun), refuses an `async function` before it is
+> invoked (an unexpected thenable is rolled back and observed, but its continuation is not
+> cancelled — documented, counted), refuses a start inside a foreign transaction, absorbs
+> nested saves, fails the whole unit when a joined nested unit failed even if its caller caught
+> the error, survives a failed BEGIN or a failing cleanup step without leaving a unit open, and
+> defers broadcasts and pushes to `store.afterCommit` (returned promises observed; failures
+> counted, never a rollback). Organisations participate fully (a facet changed inside a unit
+> and changed back before COMMIT overwrites the intermediate row), sessions may be written
+> inside a unit (stateless), `org_users` refuses writes inside a unit. The five defects an
+> independent review reproduced on the first commit are regressions in the suite. Tests:
 > `scoutbox-server/scripts/testUnitOfWork.mjs`; contract: `scoutbox-server/OPERATIONS.md`,
 > "Units of work". **S4a (player/guardian cutover) and S4b (deletion rewrite) are NOT
 > implemented**; the media-deletion queue is not built; the legacy-minor guardian-link

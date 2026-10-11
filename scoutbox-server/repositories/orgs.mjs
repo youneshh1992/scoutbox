@@ -503,8 +503,14 @@ export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {}, 
       let changed = 0;
       for (const rec of records) {
         const row = toRow(rec);
-        if (row.facets_json === committedFacets.get(rec.id)) { pendingFacets.delete(rec.id); continue; }
-        if (pendingFacets.get(rec.id) === row.facets_json) continue; // already written in this transaction (an insert/update inside a unit of work)
+        // What the database holds for this row RIGHT NOW: the value this
+        // transaction already wrote (an insert or update inside a unit of work,
+        // pending until its commit), else the committed value. The intended
+        // value is compared against that — never against the committed value
+        // alone — so a facet changed inside a unit and changed BACK before the
+        // commit overwrites the intermediate row the update wrote.
+        const stored = pendingFacets.has(rec.id) ? pendingFacets.get(rec.id) : committedFacets.get(rec.id);
+        if (row.facets_json === stored) continue;
         stmt.facets.run({ id: rec.id, facets_json: row.facets_json, verification_revoked_at: row.verification_revoked_at, verification_org_type: row.verification_org_type });
         pendingFacets.set(rec.id, row.facets_json);
         changed += 1;

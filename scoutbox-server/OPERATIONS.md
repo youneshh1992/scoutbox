@@ -308,14 +308,31 @@ This is a second contract next to the ordinary save, not a replacement:
   rollback and are persisted by the next ordinary save, as before.
 - **Crash before COMMIT.** The journal rolls back on the next open; a restart
   sees the pre-operation database.
-- **Rules.** The callback is synchronous (a promise is refused and the unit
-  rolled back — no transaction spans an `await` or a network call); a unit
-  cannot start inside another open transaction; a nested `unitOfWork` joins the
-  outer one. Side effects (broadcasts, pushes) are deferred with
-  `store.afterCommit(fn)` and run only after COMMIT; `server.mjs` already does
-  this for `broadcast()` and the push half of `notify()`. A deferred side effect
-  that fails is counted in `store.unitOfWorkState()` and logged; the data stays
-  committed. Outside a unit, `afterCommit` runs the function at once.
+- **Rules.** The callback is synchronous: no transaction spans an `await` or a
+  network call. An `async function` is refused **before it is invoked**, so
+  nothing of it runs (top-level or nested). A plain function that returns a
+  promise cannot be recognised beforehand: its synchronous part is rolled back
+  with the unit, the unit refuses, and the promise is observed (a rejection is
+  counted and logged, never unhandled) — but **its continuation is not
+  cancelled** and runs later outside any unit; the escape is counted in
+  `store.unitOfWorkState().strayAsyncWork`. Do not schedule asynchronous work
+  inside a unit; the store cannot make it safe. A unit cannot start inside
+  another open transaction. A nested `unitOfWork` joins the outer one, and an
+  inner failure poisons the whole unit **even if the inner caller catches the
+  error**: the outer unit fails at its end (the inner error is its `cause`) and
+  everything rolls back. Side effects (broadcasts, pushes) are deferred with
+  `store.afterCommit(fn)` and run only after COMMIT; `server.mjs` does this for
+  `broadcast()` and the push half of `notify()` (which returns its promise). A
+  side effect never fails the operation: a synchronous throw or a rejected
+  returned promise is counted in `store.unitOfWorkState()` and logged, later
+  callbacks still run, and the data stays committed. Outside a unit,
+  `afterCommit` runs the function at once, observed the same way.
+- **Setup and teardown are exception-safe.** A failed BEGIN opens no unit and
+  runs no work (ordinary saves and later units are unaffected). A cleanup step
+  that fails during a rollback (ROLLBACK itself, the memento, a participant's
+  restore) is recorded in `unitOfWorkState().restoreFailures`, attached to the
+  error as `unitOfWorkCleanup`, logged, and still closes the unit; memory may
+  then differ from the database until the next restart, which the log says.
 - **Participants.** Organisations join fully (rows, facets, bookkeeping, cache
   restore). Sessions are stateless and may be written inside a unit (a revoked
   session comes back on rollback). Staff (`org_users`) is **not** integrated:
@@ -324,7 +341,12 @@ This is a second contract next to the ordinary save, not a replacement:
 - **Tests.** `scripts/testUnitOfWork.mjs` (part of `npm test`) covers failure
   after row, facet and blob writes, failure at COMMIT, a crash before COMMIT
   (child process killed), the no-fragment and explicit-retry rules, unrelated
-  pending edits and the S3 ordinary-save retry contract.
+  pending edits and the S3 ordinary-save retry contract, and — after an
+  independent review of the first commit — a failed BEGIN and a failing
+  cleanup step, a swallowed nested failure, a facet changed inside a unit and
+  changed back before COMMIT (the row update's intermediate value must not
+  survive), async work refused before invocation and an escaped thenable, and
+  asynchronous after-commit failures.
 
 The design and the cutover order are in `docs/architecture/sqlite-schema.md`
 and `docs/architecture/sqlite-migration-plan.md`.

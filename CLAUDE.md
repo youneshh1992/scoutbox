@@ -70,11 +70,15 @@ and design changes the Founder explicitly requests.
   whole-collection
   re-projection in the default save path. An operation that writes a
   table-backed collection and the blob together runs inside
-  `store.unitOfWork(() => …)`: synchronous work, one transaction, all-or-nothing
-  with the in-memory graph restored on failure; side effects (broadcasts,
-  pushes) go through `store.afterCommit` so a failed operation publishes
-  nothing; a repository that cannot roll its memory back (`org_users` today)
-  refuses writes inside a unit rather than joining half-way (contract:
+  `store.unitOfWork(() => …)`: synchronous work (an `async function` is
+  refused before it runs; never schedule asynchronous work inside a unit, the
+  store cannot cancel a continuation), one transaction, all-or-nothing with the
+  in-memory graph restored on failure; a nested unit joins and its failure
+  fails the whole even if caught; side effects (broadcasts, pushes) go through
+  `store.afterCommit` — return the promise, never `void` it — so a failed
+  operation publishes nothing and a failed delivery is counted, not a crash; a
+  repository that cannot roll its memory back (`org_users` today) refuses
+  writes inside a unit rather than joining half-way (contract:
   `scoutbox-server/OPERATIONS.md`, "Units of work"). The target schema and the step
   order are `docs/architecture/sqlite-schema.md` and
   `docs/architecture/sqlite-migration-plan.md`; a new table must appear in the

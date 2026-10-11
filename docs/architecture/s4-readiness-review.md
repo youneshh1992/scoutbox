@@ -436,7 +436,13 @@ back. That is exactly the partial application the foundation below prevents.
 
 **Implemented (commit after `f899577`): `store.unitOfWork(work, { snapshot })`** in
 `store.mjs`, with `repositories/memento.mjs` and the organisations repository as the first
-participant (`scripts/testUnitOfWork.mjs`, 11 checks). The contract, as built and tested:
+participant (`scripts/testUnitOfWork.mjs`, 16 checks). An independent review of the first
+commit reproduced five defects — a failed `BEGIN` left a phantom unit active, a swallowed nested
+failure committed partial work, a facet changed back before `COMMIT` left the row update's
+intermediate value in the table, an async callback ran before its promise was refused, and a
+rejected after-commit promise went unobserved — each was written as a failing regression and
+corrected; the rows marked below reflect the corrected behaviour. The contract, as built and
+tested:
 
 | Aspect | Explicit unit of work | Ordinary snapshot save (S3 contract, unchanged) |
 |---|---|---|
@@ -445,9 +451,11 @@ participant (`scripts/testUnitOfWork.mjs`, 11 checks). The contract, as built an
 | Retry | **explicit**: the caller runs the whole operation again; a later ordinary save persists **no fragment** of a failed unit (tested: the save after a failed unit writes only the edits that were pending before it) | automatic: the next ordinary save retries every pending change |
 | Edits pending before the operation | part of the restored state: still in memory, still pending, persisted by the next ordinary save (tested) | — |
 | Process crash before `COMMIT` | SQLite rolls back; a restart sees the pre-operation database in every collection and table (tested with `SIGKILL` in a child process) | same |
-| Asynchrony | `work` must be synchronous; a thenable result is refused and rolled back (a SQLite transaction never spans an `await` or a network call) | — |
-| Nesting | a unit started inside a unit **joins** it (one transaction; an inner failure fails the whole); a unit cannot start inside a foreign open transaction | `save()` inside a unit is **absorbed** into the unit's commit (one save revision) |
-| Side effects | `store.afterCommit(fn)` defers a broadcast or a push until `COMMIT` returned; **nothing is published for a rolled-back unit**; a failing callback is counted and reported (`store.unitOfWorkState()`) and is **not** a rollback — the data is committed. `server.mjs` `broadcast()` and the push in `notify()` use it; outside a unit `afterCommit` runs the callback at once | — |
+| Asynchrony | `work` must be synchronous (a SQLite transaction never spans an `await` or a network call). An `async function` is identifiable and is **refused before it is invoked** — nothing of it runs, top-level or nested. A plain function that returns a promise cannot be recognised beforehand: its synchronous part is rolled back with the unit, the unit refuses, the promise is observed (a rejection is counted and logged, never unhandled) — and **its continuation is not cancelled**: it runs later outside any unit, counted in `unitOfWorkState().strayAsyncWork`. The store cannot make asynchronous work safe and does not claim to | — |
+| Nesting | a unit started inside a unit **joins** it (one transaction); an inner failure poisons the whole unit **even when the inner caller catches the error** — the outer unit fails at its end with the inner error as `cause`, nothing commits, nothing is published; a unit cannot start inside a foreign open transaction | `save()` inside a unit is **absorbed** into the unit's commit (one save revision) |
+| Side effects | `store.afterCommit(fn)` defers a broadcast or a push until `COMMIT` returned; **nothing is published for a rolled-back unit**; a side effect never fails the operation — a synchronous throw **or a rejected returned promise** is counted and reported (`store.unitOfWorkState()`), later callbacks still run, and it is **not** a rollback — the data is committed. `server.mjs` `broadcast()` and the push in `notify()` (which returns its promise) use it; outside a unit `afterCommit` runs the callback at once, observed the same way | — |
+| Setup and teardown | exception-safe: a failed `BEGIN` opens no unit and runs no work; a failing cleanup step (ROLLBACK, memento, a participant's restore) is recorded (`restoreFailures`, `err.unitOfWorkCleanup`) and still closes the unit | — |
+| Facet flush inside a unit | the flush compares the intended facets against what the **transaction already wrote** (a row update's intermediate value), not against the committed value alone, so a facet changed inside a unit and changed back before `COMMIT` overwrites the intermediate row; view and table agree after commit, rollback, an ordinary save and a restart | compares against the committed value (nothing else was written) |
 | Participants | **organisations** (rows, facets, view, id index: full participation), **sessions** (stateless over the table: rows roll back with the SQL, nothing to restore, writes allowed), **staff (`org_users`)**: writes inside a unit are **refused** because its in-memory rows are not integrated (tested); integrating it is a later step. No atomicity is claimed for anything else | hooks' `flush/commit/rollback` |
 | Memento cost | one graph capture per unit: 1,000 players + 2,000 requests, about 12,000 objects, under 25 ms each way on the development machine (printed by the suite) | — |
 
