@@ -210,8 +210,21 @@ if (dataLayer.boot.identity.imported) console.log(`data layer: ${dataLayer.boot.
  * after COMMIT. `work` must be synchronous — prepare asynchronous things
  * before, publish after.
  */
+// Development-only failure seams inside units of work (the m182 fault layer's
+// `internal:<step>` rules; the layer is created further down and cannot exist in
+// production, so until then — and in production — no seam ever fires).
+const seams = { shouldFail: () => false };
 function unit(work) {
-  return store.unitOfWork(work, { snapshot: () => ({ savedAt: Date.now(), idCounter: currentIdCounter(), db }) });
+  return store.unitOfWork(() => {
+    const result = work();
+    // `internal:unit.sqlite_commit`: the REAL COMMIT of this unit fails (store.failCommitOfOpenTransaction).
+    if (seams.shouldFail('unit.sqlite_commit')) store.failCommitOfOpenTransaction();
+    return result;
+  }, { snapshot: () => ({ savedAt: Date.now(), idCounter: currentIdCounter(), db }) });
+}
+/** A named seam inside a unit: throws when a development fault rule names it, so the rollback path is proven with a real failure after a real write. */
+function seam(step) {
+  if (seams.shouldFail(step)) throw new Error(`simulated failure at ${step} (development fault layer)`);
 }
 // Sessions are table-backed (S2): rows carry hashed tokens and a sid; there is
 // nothing to backfill on the in-memory copy, which is a read-only view now.
@@ -373,6 +386,7 @@ app.use(express.json({ limit: '20mb' }));
 // there is a no-op middleware and no /__faults route.
 const faultLayer = createFaultLayer();
 faultLayer.install(app);
+seams.shouldFail = (step) => faultLayer.shouldFail(step); // always false in production (the layer is disabled there)
 // M13: correlation ids, structured request logs (redacted), request metrics,
 // and the exposure-capture hook. Installed before every route on purpose.
 app.use(requestInstrumentation());
@@ -1334,7 +1348,7 @@ app.use('/guardian', guardianAuth, guardianRouter);
 
 // Prototype ID verification: an attestation endpoint. Production integrates a
 // document + liveness IDV provider behind this same call.
-guardianRouter.post('/verify-id', async (req, res) => {
+guardianRouter.post('/verify-id', async (req, res, next) => {
   const { documentType, documentRef } = req.body || {};
   if (!documentType || !documentRef) {
     return res.status(400).json({ error: 'DOCUMENT_REQUIRED', message: 'ID verification needs a document type and reference.' });
@@ -1345,13 +1359,23 @@ guardianRouter.post('/verify-id', async (req, res) => {
   if (!result.approved) {
     return res.status(422).json({ error: 'IDV_REJECTED', message: 'Identity verification did not pass — check the document details.' });
   }
-  guardians.update(req.guardian.id, { idVerified: true, idvReference: result.reference });
-  // Every check lands in the admin IDV queue for audit — and can be revoked there.
-  db.idvQueue.push({
-    id: nextId('idv'), guardianId: req.guardian.id, guardianName: req.guardian.name,
-    documentType, documentRef: result.document.refLast4, provider: result.provider,
-    reference: result.reference, ts: Date.now(), status: 'approved',
-  });
+  // ONE unit of work, entered only after the provider answered (a transaction
+  // never spans the await): the column and the audit-queue entry (a blob)
+  // commit together before the response (review of 9656a4b).
+  try {
+    unit(() => {
+      guardians.update(req.guardian.id, { idVerified: true, idvReference: result.reference });
+      seam('guardian.verify_id.after_row');
+      // Every check lands in the admin IDV queue for audit — and can be revoked there.
+      db.idvQueue.push({
+        id: nextId('idv'), guardianId: req.guardian.id, guardianName: req.guardian.name,
+        documentType, documentRef: result.document.refLast4, provider: result.provider,
+        reference: result.reference, ts: Date.now(), status: 'approved',
+      });
+    });
+  } catch (e) {
+    return next(e); // an async handler: a failed unit reaches the error handler (500), never an unhandled rejection
+  }
   res.json({ idVerified: true, reference: result.reference });
 });
 
@@ -2852,29 +2876,35 @@ orgRouter.post('/squad/:entryId/release', (req, res) => {
   if (!entry) return res.status(404).json({ error: 'SQUAD_ENTRY_NOT_FOUND' });
   const { referenceText } = req.body || {};
   if (referenceText && !moderateOrRefuse(res, referenceText, { kind: 'release_reference', orgId: req.org.id })) return;
-  req.org.squad = req.org.squad.filter((e) => e !== entry);
-  const p = entry.playerId ? findPlayer(entry.playerId) : null;
-  if (p) {
-    // M23 P8 (§27): releasing a player from THIS club's squad does not speak
-    // for a contract another club completed in ScoutBox. The squad row goes;
-    // the canonical contract truth stays with its writer.
-    const other = canonicalContractFor(p.id, Date.now(), { exceptOrgId: req.org.id });
-    if (!other) players.update(p.id, { availability: 'available_now', contractStatus: 'free_agent' });
-    if (referenceText) {
-      db.vouches.push({
-        id: nextId('vch'), playerId: p.id, playerName: p.name,
-        coachName: req.orgUser.name, coachEmail: null, role: `${req.orgUser.role || 'Manager'}, ${req.org.name}`,
-        status: 'published', code: null, text: String(referenceText).trim().slice(0, 400),
-        seasons: null, ts: Date.now(), publishedAt: Date.now(),
-      });
+  // ONE unit of work (review of 9656a4b): the organisation's squad (a facet),
+  // the player's availability and contract columns, the published reference,
+  // the ledger row and the notifications commit together; the pushes and the
+  // broadcast go out after COMMIT.
+  unit(() => {
+    req.org.squad = req.org.squad.filter((e) => e !== entry);
+    const p = entry.playerId ? findPlayer(entry.playerId) : null;
+    if (p) {
+      // M23 P8 (§27): releasing a player from THIS club's squad does not speak
+      // for a contract another club completed in ScoutBox. The squad row goes;
+      // the canonical contract truth stays with its writer.
+      const other = canonicalContractFor(p.id, Date.now(), { exceptOrgId: req.org.id });
+      if (!other) players.update(p.id, { availability: 'available_now', contractStatus: 'free_agent' });
+      seam('squad.release.after_row');
+      if (referenceText) {
+        db.vouches.push({
+          id: nextId('vch'), playerId: p.id, playerName: p.name,
+          coachName: req.orgUser.name, coachEmail: null, role: `${req.orgUser.role || 'Manager'}, ${req.org.name}`,
+          status: 'published', code: null, text: String(referenceText).trim().slice(0, 400),
+          seasons: null, ts: Date.now(), publishedAt: Date.now(),
+        });
+      }
+      ledgerAppend({ type: 'released_by_club', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
+      notify({ kind: 'player', id: p.id }, 'released',
+        `${req.org.name} has released you${referenceText ? ' — with a reference now on your profile' : ''}. You're marked available to every local club; the First Team Seeker flag is yours to switch on.`, p.id);
+      if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'released', `${req.org.name} released ${p.name}${referenceText ? ' with a reference' : ''}. Their profile is marked available again.`, p.id);
+      broadcast('players', { playerId: p.id });
     }
-    ledgerAppend({ type: 'released_by_club', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
-    notify({ kind: 'player', id: p.id }, 'released',
-      `${req.org.name} has released you${referenceText ? ' — with a reference now on your profile' : ''}. You're marked available to every local club; the First Team Seeker flag is yours to switch on.`, p.id);
-    if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'released', `${req.org.name} released ${p.name}${referenceText ? ' with a reference' : ''}. Their profile is marked available again.`, p.id);
-    broadcast('players', { playerId: p.id });
-  }
-  persist();
+  });
   res.json(squadView(req.org));
 });
 
@@ -3376,10 +3406,14 @@ playerRouter.get('/reports', (req, res) => {
 // Academy+ is opt-in only and player-controlled (guardian-managed for minors).
 playerRouter.post('/academyplus', (req, res) => {
   if (guardianManagedOnly(req, res)) return;
-  players.update(req.player.id, { academyPlus: !!req.body?.enabled });
-  if (req.player.academyPlus && !req.player.badges.includes('Fresh Start')) req.player.badges.push('Fresh Start');
-  if (!req.player.academyPlus) req.player.badges = req.player.badges.filter((b) => b !== 'Fresh Start');
-  broadcast('players', { playerId: req.player.id });
+  // ONE unit of work: the column and the badge (a facet) commit together (review of 9656a4b).
+  unit(() => {
+    players.update(req.player.id, { academyPlus: !!req.body?.enabled });
+    seam('academyplus.after_row');
+    if (req.player.academyPlus && !req.player.badges.includes('Fresh Start')) req.player.badges.push('Fresh Start');
+    if (!req.player.academyPlus) req.player.badges = req.player.badges.filter((b) => b !== 'Fresh Start');
+    broadcast('players', { playerId: req.player.id });
+  });
   res.json({ academyPlus: req.player.academyPlus, badges: req.player.badges });
 });
 
@@ -3438,11 +3472,22 @@ playerRouter.post('/medical/records', (req, res) => {
   for (const [f, v, max] of [['type', type, 40], ['title', title, 160], ['conditionStatus', conditionStatus, 40]]) if (!optText(v, max)) return badField(res, f);
   if (layoffWeeks != null && !(typeof layoffWeeks === 'number' && Number.isFinite(layoffWeeks) && layoffWeeks >= 0 && layoffWeeks <= 520)) return badField(res, 'layoffWeeks');
   if (cleared != null && typeof cleared !== 'boolean') return badField(res, 'cleared');
-  if (conditionStatus) players.update(req.player.id, { medical: { conditionStatus } });
-  if (title) {
-    req.player.medical.records.push({ id: nextId('md'), type: type || 'note', title, date: date || new Date().toISOString().slice(0, 10), layoffWeeks: layoffWeeks ?? null, cleared: cleared ?? null });
+  // ONE unit of work (review of 9656a4b): the condition column and the record
+  // (a facet of the same player) commit together before the response, so a
+  // crash after the answer can never leave the column without its record.
+  try {
+    unit(() => {
+      if (conditionStatus) players.update(req.player.id, { medical: { conditionStatus } });
+      seam('medical.records.after_row');
+      if (title) {
+        req.player.medical.records.push({ id: nextId('md'), type: type || 'note', title, date: date || new Date().toISOString().slice(0, 10), layoffWeeks: layoffWeeks ?? null, cleared: cleared ?? null });
+      }
+      broadcast('players', { playerId: req.player.id });
+    });
+  } catch (e) {
+    if (/was refused/.test(String(e?.message))) return res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
+    throw e;
   }
-  broadcast('players', { playerId: req.player.id });
   res.status(201).json(req.player.medical);
 });
 
@@ -3531,17 +3576,23 @@ playerRouter.post('/stats', (req, res) => {
     }
   }
   const season = typeof req.body?.season === 'string' && req.body.season.trim() ? req.body.season.trim() : null;
-  if (season) {
-    req.player.seasonHistory ??= [];
-    const existing = req.player.seasonHistory.find((s) => s.season === season);
-    if (existing) Object.assign(existing, updates);
-    else req.player.seasonHistory.push({ season, appearances: 0, goals: 0, assists: 0, ...updates });
-    req.player.seasonHistory.sort((a, b) => (a.season < b.season ? 1 : -1));
-  } else {
-    players.update(req.player.id, { stats: { appearances: 0, goals: 0, assists: 0, ...JSON.parse(JSON.stringify(req.player.stats ?? {})), ...updates } });
-  }
-  recordActivity(req.player);
-  broadcast('players', { playerId: req.player.id });
+  // ONE unit of work: the stat columns (or the season facet) and the activity
+  // bookkeeping — the activity log, any badge it earns and its notification —
+  // commit together (review of 9656a4b).
+  unit(() => {
+    if (season) {
+      req.player.seasonHistory ??= [];
+      const existing = req.player.seasonHistory.find((s) => s.season === season);
+      if (existing) Object.assign(existing, updates);
+      else req.player.seasonHistory.push({ season, appearances: 0, goals: 0, assists: 0, ...updates });
+      req.player.seasonHistory.sort((a, b) => (a.season < b.season ? 1 : -1));
+    } else {
+      players.update(req.player.id, { stats: { appearances: 0, goals: 0, assists: 0, ...JSON.parse(JSON.stringify(req.player.stats ?? {})), ...updates } });
+    }
+    seam('stats.after_row');
+    recordActivity(req.player);
+    broadcast('players', { playerId: req.player.id });
+  });
   res.json({ stats: req.player.stats, seasonHistory: req.player.seasonHistory ?? [] });
 });
 
@@ -3615,11 +3666,15 @@ playerRouter.post('/programme', (req, res) => {
   if (grassrootsOnly(req, res)) return;
   const track = PROGRAMME_TRACKS[req.body?.track];
   if (!track) return res.status(400).json({ error: 'TRACK_NOT_FOUND' });
-  // track and startedAt are columns; `completed` stays a facet written on the record.
-  players.update(req.player.id, { programme: { track: track.key, startedAt: Date.now() } });
-  req.player.programme.completed = [];
-  persist();
-  broadcast('players', { playerId: req.player.id });
+  // track and startedAt are columns; `completed` stays a facet written on the
+  // record. ONE unit of work: the new track and the reset of the completed
+  // sessions commit together (review of 9656a4b).
+  unit(() => {
+    players.update(req.player.id, { programme: { track: track.key, startedAt: Date.now() } });
+    seam('programme.select.after_row');
+    req.player.programme.completed = [];
+    broadcast('players', { playerId: req.player.id });
+  });
   res.status(201).json({ current: programmeProgress(req.player) });
 });
 

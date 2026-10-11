@@ -175,7 +175,12 @@ function toRowWith(spec, rec) {
     if (!isPlainObject(v)) continue;
     const rest = {};
     for (const sub of Object.keys(v)) if (!hasOwn(subs, sub)) setOwn(rest, sub, v[sub]);
-    if (Object.keys(rest).length) { facets.__rest ??= {}; facets.__rest[key] = rest; }
+    // A composite's remainder (medical.records, programme.completed, an unknown
+    // stats sub-key) rides under the composite's OWN key in the facets —
+    // `facets_json.medical.records` is what the documents describe and what a
+    // reader of the file expects. (Rows written before this layout kept it
+    // under the reserved `__rest`; the reverse mapping still reads those.)
+    if (Object.keys(rest).length) setOwn(facets, key, rest);
   }
   facets.__meta = meta;
   p.facets_json = JSON.stringify(facets);
@@ -193,7 +198,8 @@ function toRowWith(spec, rec) {
 function fromRowWith(spec, r, { extra = {} } = {}) {
   const facets = r.facets_json ? JSON.parse(r.facets_json) : {};
   const meta = facets.__meta ?? null;
-  const rest = facets.__rest ?? {};
+  const legacyRest = facets.__rest ?? {}; // rows written before the remainders moved under their own key
+  const remainderOf = (key) => (hasOwn(facets, key) && isPlainObject(facets[key]) ? facets[key] : hasOwn(legacyRest, key) ? legacyRest[key] : null);
   const nulls = new Set(meta?.nulls ?? []);
   const order = meta?.order ?? null;
   const values = { id: r.id };
@@ -209,7 +215,7 @@ function fromRowWith(spec, r, { extra = {} } = {}) {
     if (order && !order.includes(key)) continue;
     const obj = {};
     const subOrder = meta?.sub?.[key] ?? null;
-    const restOf = hasOwn(rest, key) ? rest[key] : null;
+    const restOf = remainderOf(key);
     if (subOrder) {
       for (const sub of subOrder) {
         if (hasOwn(subs, sub)) {
@@ -231,7 +237,7 @@ function fromRowWith(spec, r, { extra = {} } = {}) {
     if (any) values[key] = obj;
   }
   for (const key of Object.keys(facets)) {
-    if (RESERVED_KEYS.includes(key)) continue;
+    if (RESERVED_KEYS.includes(key) || hasOwn(spec.composites, key)) continue; // a composite's key holds its remainder, merged above
     setOwn(values, key, facets[key]);
   }
   for (const key of Object.keys(extra)) if (extra[key] !== undefined) setOwn(values, key, extra[key]);

@@ -190,10 +190,10 @@ test('guards: the views refuse writes to the collections, to column-backed field
   p.badges.push('Captain'); p.unknownBag = { a: 1 }; p.constructor = 'changed';
   sg.emailCode = null; sg.someFutureField = true; g.coGuardians.push({ id: 'gd-x', name: 'X', email: 'x@example.test' });
   assert.equal(t.players.uncommitted() + t.guardians.uncommitted(), 3);
-  assert.equal(t.facets('players', 'pl-seeded').__rest.medical.records.length, 1, 'not yet flushed');
+  assert.equal(t.facets('players', 'pl-seeded').medical.records.length, 1, 'not yet flushed');
   t.store.save(t.snapshot());
   assert.equal(t.players.uncommitted() + t.guardians.uncommitted(), 0);
-  assert.equal(t.facets('players', 'pl-seeded').__rest.medical.records.length, 2); assert.equal(t.facets('players', 'pl-seeded').constructor, 'changed'); assert.equal(t.facets('guardians', 'gd-signup').emailCode, null);
+  assert.equal(t.facets('players', 'pl-seeded').medical.records.length, 2); assert.equal(t.facets('players', 'pl-seeded').constructor, 'changed'); assert.equal(t.facets('guardians', 'gd-signup').emailCode, null);
   assert.equal(t.raw("SELECT medical_shared FROM players WHERE id = 'pl-seeded'").medical_shared, 1, 'the column-backed sub-key is untouched by facet writes');
   t.close();
   const r = reopen(dir);
@@ -345,7 +345,7 @@ function assertOperationAbsent(t, { unrelatedSaved }) {
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardians WHERE id = 'gd-new'").n, 0); assert.equal(t.raw("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-new'").n, 0);
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE player_id = 'pl-new'").n, 0);
   assert.equal(t.raw("SELECT availability, medical_shared FROM players WHERE id = 'pl-adult'").availability, 'not_seeking'); assert.equal(t.raw("SELECT medical_shared FROM players WHERE id = 'pl-adult'").medical_shared, 0);
-  assert.equal(t.facets('players', 'pl-seeded').__rest.medical.records.length, 1);
+  assert.equal(t.facets('players', 'pl-seeded').medical.records.length, 1);
   assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).squad.length, 0);
   assert.equal(t.blob('requests')[0].status, 'pending'); assert.equal(t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'guardian'").n, 0);
   // Unrelated edits made BEFORE the unit: in the database only after an ordinary save.
@@ -366,7 +366,7 @@ function assertOperationPersisted(t, token) {
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardians WHERE id = 'gd-new'").n, 1); assert.equal(t.raw("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-new'").n, 1);
   assert.deepEqual(t.links().filter((l) => l.player_id === 'pl-new'), [{ guardian_id: 'gd-new', player_id: 'pl-new', role: 'primary' }, { guardian_id: 'gd-co', player_id: 'pl-new', role: 'co' }]);
   assert.equal(t.raw("SELECT availability FROM players WHERE id = 'pl-adult'").availability, 'available_now'); assert.equal(t.raw("SELECT medical_shared FROM players WHERE id = 'pl-adult'").medical_shared, 1);
-  assert.equal(t.facets('players', 'pl-seeded').__rest.medical.records.length, 2); assert.equal(t.facets('guardians', 'gd-new').emailCode, 'ABC123');
+  assert.equal(t.facets('players', 'pl-seeded').medical.records.length, 2); assert.equal(t.facets('guardians', 'gd-new').emailCode, 'ABC123');
   assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).squad.length, 1);
   assert.equal(t.blob('requests')[0].status, 'accepted'); assert.ok(t.layer.sessions.byToken(token), 'the session minted inside the unit is live');
   assert.equal(t.facets('players', 'pl-adult').badges.length, 1, 'the pre-unit edit landed with the unit');
@@ -438,7 +438,7 @@ test('unit of work: a facet changed inside a unit, written by a row update\'s in
     p.medical.records.push({ id: 'md-tmp', type: 'x', title: 'y' }); t.players.update('pl-adult', { medical: { conditionStatus: 'fit' } }); p.medical.records.pop();
     g.coGuardians.push({ id: 'gd-tmp', name: 'T', email: 't@example.test' }); t.guardians.update('gd-primary', { idvReference: 'idv-2' }); g.coGuardians.pop();
   });
-  assert.equal(p.medical.records.length, 0); assert.equal(t.facets('players', 'pl-adult').__rest.medical.records.length, 0, 'the final value, not the intermediate one');
+  assert.equal(p.medical.records.length, 0); assert.equal(t.facets('players', 'pl-adult').medical.records.length, 0, 'the final value, not the intermediate one');
   assert.equal(t.raw("SELECT medical_condition_status FROM players WHERE id = 'pl-adult'").medical_condition_status, 'fit');
   assert.equal(g.coGuardians.length, 1); assert.equal(t.facets('guardians', 'gd-primary').coGuardians.length, 1); assert.equal(t.raw("SELECT idv_reference FROM guardians WHERE id = 'gd-primary'").idv_reference, 'idv-2');
   assert.equal(t.players.uncommitted() + t.guardians.uncommitted(), 0);

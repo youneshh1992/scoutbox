@@ -134,7 +134,11 @@ test('round trip: a seeded adult with every S5 array, split composites (medical.
   assert.equal(row.medical_shared, 1); assert.equal(row.medical_condition_status, 'fully_fit'); assert.equal(row.programme_track, 'ST'); assert.equal(row.programme_started_at, T0);
   assert.equal(row.stats_pace_kmh, 34.1); assert.equal(row.contract_until_date, '2026-06-30'); assert.equal(row.first_team_seeker, 1); assert.equal(row.created_at, null);
   const facets = JSON.parse(row.facets_json);
-  assert.deepEqual(facets.__rest, { medical: { records: rec.medical.records }, programme: { completed: rec.programme.completed }, stats: { xg: 0.4 } }, 'composite remainders ride in __rest');
+  assert.deepEqual(facets.medical, { records: rec.medical.records }, 'a composite\'s remainder rides under the composite\'s own key (facets_json.medical.records, as the documents say)');
+  assert.deepEqual(facets.programme, { completed: rec.programme.completed }); assert.deepEqual(facets.stats, { xg: 0.4 });
+  assert.equal('__rest' in facets, false, 'no reserved remainder key is written');
+  // A row written before this layout (remainders under the reserved __rest) still reads back identically.
+  { const { medical, programme, stats, ...others } = facets; const legacy = { ...row, facets_json: JSON.stringify({ ...others, __rest: { medical, programme, stats } }) }; sameShape(rec, playerFromRow(legacy), 'legacy __rest layout'); }
   assert.deepEqual(facets.media, rec.media); assert.deepEqual(facets.attendance, rec.attendance); assert.deepEqual(facets.drillResults, rec.drillResults);
   assert.deepEqual(facets.futureField, rec.futureField); assert.equal('name' in facets, false, 'a column-backed field is not duplicated in the facets');
   assert.ok(facets.__meta.nulls.includes('createdAt'));
@@ -640,8 +644,8 @@ test('review 3: own JSON properties named constructor, toString, __proto__ and h
   const facets = JSON.parse(row.facets_json);
   assert.ok(Object.hasOwn(facets, 'constructor') && Object.hasOwn(facets, 'toString') && Object.hasOwn(facets, '__proto__') && Object.hasOwn(facets, 'hasOwnProperty'), 'unknown keys are facets');
   // (built from JSON: in an object literal `__proto__:` would set the prototype, not an own key)
-  assert.deepEqual(facets.__rest.stats, JSON.parse('{"constructor":"stats-constructor","__proto__":{"deep":1},"valueOf":null}'), 'composite remainders keep them');
-  assert.ok(Object.hasOwn(facets.__rest.stats, '__proto__'));
+  assert.deepEqual(facets.stats, JSON.parse('{"constructor":"stats-constructor","__proto__":{"deep":1},"valueOf":null}'), 'composite remainders keep them');
+  assert.ok(Object.hasOwn(facets.stats, '__proto__'));
   const back = playerFromRow(row);
   assertProtoKept(p, back, 'player direct');
   assert.ok(Object.hasOwn(back.stats, 'constructor') && Object.hasOwn(back.stats, '__proto__') && Object.hasOwn(back.stats, 'valueOf')); assert.equal(back.stats.valueOf, null);

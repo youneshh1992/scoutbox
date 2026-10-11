@@ -389,6 +389,21 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
     },
     /** The persisted save revision: incremented by every save of the snapshot, in either mode. */
     revision() { return Number(readSaveSeq.get('saveSeq')?.value) || 0; },
+    /**
+     * TEST SEAM (reached only through the development fault layer, see
+     * server.mjs `unit`): make the REAL COMMIT of the open transaction fail. A
+     * foreign key whose check SQLite defers to COMMIT is violated inside the
+     * transaction, so the COMMIT statement itself is refused with "FOREIGN KEY
+     * constraint failed" — the engine's genuine failure path, not a throw placed
+     * before the statement. The two helper tables are created inside the same
+     * transaction and vanish with its rollback. Refused when no transaction is open.
+     */
+    failCommitOfOpenTransaction() {
+      if (!sqlite.isTransaction) throw new Error('failCommitOfOpenTransaction: no transaction is open');
+      sqlite.exec('PRAGMA defer_foreign_keys = ON');
+      sqlite.exec('CREATE TABLE fault_commit_parent (id TEXT PRIMARY KEY); CREATE TABLE fault_commit_child (parent_id TEXT NOT NULL REFERENCES fault_commit_parent(id))');
+      sqlite.prepare('INSERT INTO fault_commit_child (parent_id) VALUES (?)').run('missing-on-purpose');
+    },
     /** An ordinary save. Inside an open unit of work it is absorbed: the unit's commit writes the blobs once. */
     save(snapshot) { if (unit) return; write(snapshot, { asSnapshot: !serverMode }); },
     unitOfWork,

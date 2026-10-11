@@ -198,7 +198,7 @@ await test('malformed input and the legacy-minor rule: a players blob that is no
 });
 
 // ------------------------------------------------------------- the converted writers, through their routes
-await test('writers: guardian sign-up, e-mail verification, ID verification, disclaimer and child creation write rows and the link; football category (m12), the audited level review (m13), medical sharing and aging-up write columns; every change is a committed row before the response and is there after a restart', async () => {
+await test('writers (the ones exercised here, not every writer): guardian sign-up, e-mail verification, ID verification, disclaimer and child creation write rows and the link; football category (m12), the audited level review (m13), medical sharing and aging-up write columns; each of these is a committed row before the response and is there after a restart — the coupled writers (a column together with a facet, a blob, an audit entry or another domain) are proven with SIGKILL and injected failures in scripts/testWriterAtomicity.mjs', async () => {
   const dir = tempDir('s4srv-writers'); s3File(dir); // FIXTURE: pl-grown is an adult still linked to gd-primary
   let S = await boot(dir, nextPort());
   const gs = await S.j('POST', '/auth/guardian/signup', { name: 'New Parent', email: 'newparent@example.test', password: 'parent-pass-1' });
