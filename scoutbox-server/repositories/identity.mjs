@@ -1,14 +1,12 @@
 /**
  * Players and guardians — the live repositories for the core identity tables
- * (migration plan step S4a; readiness review §1, §4, §5), delivered BEFORE the
- * cutover so they can be reviewed and tested against the intended schema.
+ * (migration plan step S4a; readiness review §1, §4, §5).
  *
- * NOT ATTACHED IN PRODUCTION YET. `repositories/index.mjs` does not create
- * these repositories, `TABLE_BACKED` does not list the two collections,
- * migration 0005 is not registered: the blob stays authoritative for players
- * and guardians and nothing in server boot reaches this module. Tests prepare
- * the intended live schema and the authority markers explicitly on temporary
- * databases (`scripts/identityLiveTestSchema.mjs`).
+ * LIVE since the S4a integration: `repositories/index.mjs` creates these
+ * repositories at boot behind the registered migration 0005, `TABLE_BACKED`
+ * lists both collections, and the blobs are never written again. The
+ * registration is development work on this branch; a real-data cutover is
+ * the operator's decision (OPERATIONS.md).
  *
  * Authority. A repository attaches only when the cutover record
  * `0005_core_identity_live` is in `data_migrations` — never because the
@@ -91,7 +89,6 @@ const sqlReason = (err) => String(err?.message ?? err).replace(/^SQLITE_\w+:\s*/
 
 const insertSql = (table, columns) => `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${columns.map((c) => `@${c}`).join(', ')})`;
 const updateSql = (table, columns) => `UPDATE ${table} SET ${columns.filter((c) => c !== 'id').map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id`;
-const upsertSql = (table, columns) => `${insertSql(table, columns)} ON CONFLICT(id) DO UPDATE SET ${columns.filter((c) => c !== 'id').map((c) => `${c} = excluded.${c}`).join(', ')}`;
 
 /**
  * Whole-snapshot access for the tools that read or write the database file as
@@ -106,15 +103,17 @@ const upsertSql = (table, columns) => `${insertSql(table, columns)} ON CONFLICT(
  * of every link, the Founder's legacy-minor rule, age at `now` — and any
  * refusal throws before a statement runs, so the caller's transaction rolls
  * back with nothing changed. An explicitly empty pair is intentional: it
- * empties the tables. Writes are upserts in id order of the snapshot
- * (guardians in two passes for `co_guardian_of`, then players), the link rows
- * are rewritten from the guardians' `childIds` in their order, and rows the
- * snapshot no longer lists are deleted afterwards — players before guardians,
- * so a guardian still named by a kept player can never be dropped (validation
- * already guarantees every `guardianId` names a listed guardian). Unknown JSON
- * keys, null/absent shape and the outstanding `emailCode` ride in the rows
- * through the one mapping. Before the cutover record exists both methods
- * decline (`null` / `false`) and the caller keeps the blobs.
+ * empties the tables. The write is a REWRITE: the three tables are emptied
+ * (links, players, guardians) and the validated candidate is inserted in the
+ * snapshot's order (guardians in two passes for `co_guardian_of`, then
+ * players, then the links derived from the guardians' `childIds` in their
+ * order), so the outcome never depends on obsolete rows or on input order —
+ * a replacement guardian may reuse the e-mail of the one it replaces, two
+ * retained guardians may swap e-mails, a co-guardian may be listed before its
+ * primary (review of 9656a4b). Unknown JSON keys, null/absent shape and the
+ * outstanding `emailCode` ride in the rows through the one mapping. Before
+ * the cutover record exists both methods decline (`null` / `false`) and the
+ * caller keeps the blobs.
  */
 export const IDENTITY_SNAPSHOT = {
   names: IDENTITY_COLLECTIONS,
@@ -143,26 +142,34 @@ export const IDENTITY_SNAPSHOT = {
       throw new Error(`identity snapshot: ${report.refusals.length} record(s) or relationship(s) were refused (${listed}${report.refusals.length > 20 ? '; …' : ''}); the save was rolled back and no player, guardian or link was changed`);
     }
     const { candidate } = report;
-    const upsertG = sqlite.prepare(upsertSql('guardians', GUARDIAN_COLUMNS));
-    const linkG = sqlite.prepare('UPDATE guardians SET co_guardian_of = ? WHERE id = ?');
-    const upsertP = sqlite.prepare(upsertSql('players', PLAYER_COLUMNS));
-    const insL = sqlite.prepare('INSERT INTO guardian_children (guardian_id, player_id, role) VALUES (@guardian_id, @player_id, @role)');
-    // Links are derived: rewritten from the snapshot after the rows, before the pruning.
+    // The three tables are REWRITTEN from the validated candidate (review of
+    // 9656a4b, finding 3): every existing row goes first — links, then players,
+    // then guardians, children before parents so no foreign key is ever left
+    // dangling — and the candidate is inserted in the snapshot's order
+    // (guardians in two passes for `co_guardian_of`, then players, then the
+    // links derived from the guardians' `childIds`). Nothing about the outcome
+    // depends on what the tables held before or on the order the collections
+    // list their records: a replacement guardian may carry the e-mail of the
+    // one it replaces, two retained guardians may swap e-mails, a co-guardian
+    // may be listed before its primary — the unique e-mail index and the
+    // foreign keys judge the FINAL state only, which the preflight already
+    // accepted. The caller's transaction makes the rewrite all-or-nothing.
     sqlite.exec('DELETE FROM guardian_children');
+    sqlite.exec('DELETE FROM players');
+    sqlite.exec('DELETE FROM guardians');
+    const insG = sqlite.prepare(insertSql('guardians', GUARDIAN_COLUMNS));
+    const linkG = sqlite.prepare('UPDATE guardians SET co_guardian_of = ? WHERE id = ?');
+    const insP = sqlite.prepare(insertSql('players', PLAYER_COLUMNS));
+    const insL = sqlite.prepare('INSERT INTO guardian_children (guardian_id, player_id, role) VALUES (@guardian_id, @player_id, @role)');
     const pending = [];
     for (const row of candidate.guardians) {
       const { co_guardian_of, ...rest } = row;
-      upsertG.run({ ...rest, co_guardian_of: null });
+      insG.run({ ...rest, co_guardian_of: null });
       if (co_guardian_of !== null && co_guardian_of !== undefined) pending.push([co_guardian_of, row.id]);
     }
     for (const [target, id] of pending) linkG.run(target, id);
-    for (const row of candidate.players) upsertP.run(row);
+    for (const row of candidate.players) insP.run(row);
     for (const row of candidate.links) insL.run(row);
-    // Rows the snapshot no longer lists: players first, then guardians.
-    const keepP = new Set(candidate.players.map((r) => r.id)); const keepG = new Set(candidate.guardians.map((r) => r.id));
-    const delP = sqlite.prepare('DELETE FROM players WHERE id = ?'); const delG = sqlite.prepare('DELETE FROM guardians WHERE id = ?');
-    for (const r of sqlite.prepare('SELECT id FROM players').all()) if (!keepP.has(r.id)) delP.run(r.id);
-    for (const r of sqlite.prepare('SELECT id FROM guardians').all()) if (!keepG.has(r.id)) delG.run(r.id);
     const broken = sqlite.prepare('PRAGMA foreign_key_check').all();
     if (broken.length) throw new Error(`identity snapshot: foreign_key_check found ${broken.length} broken reference(s) after the write; the save was rolled back`);
     return true;

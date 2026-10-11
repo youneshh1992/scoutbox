@@ -18,6 +18,7 @@ import { IDENTITY_SNAPSHOT } from '../repositories/identity.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
 import * as m0002 from '../repositories/migrations/0002_core_identity_shadow.mjs';
+import { failRunAt } from './coreIdentityTestFixtures.mjs';
 
 let passed = 0;
 function test(name, fn) { fn(); passed++; console.log(`  ✓ ${name}`); }
@@ -240,6 +241,84 @@ test('identity snapshot (tool mode): a malformed collection, a refused record, a
   const again = openStore(dir, { tableBacked: TABLE_BACKED });
   const layer = attachDataLayer({ db: { ...again.load().db, players: [PLAYER_ADULT()], guardians: [] }, store: again, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   assert.deepEqual(layer.boot.identity, { engine: 'sqlite', players: 0, guardians: 0, links: 0, imported: 0 }, 'an intentionally emptied domain stays empty: the array in memory is never imported');
+  again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('identity snapshot (tool mode, review of 9656a4b): a VALID full replacement is accepted whatever the obsolete rows or the input order — a removed guardian\'s e-mail reused by its replacement, two retained guardians swapping e-mails, retained players moving to the replacement, co-guardian references, each also with the collections in reversed order; actual duplicates, missing references and the legacy-minor rule stay refused; a failure in the middle of the rewrite and a failure of the REAL COMMIT leave every row, link, facet and other collection intact and a correct retry succeeds', () => {
+  const dir = tempDir('s4-snap-order');
+  const server = openStore(dir, { tableBacked: TABLE_BACKED });
+  const db = cleanSnapshot(); // gd-1 one@ (primary of pl-minor), gd-2 two@ (co of gd-1, co link to pl-minor), pl-adult, pl-minor
+  attachDataLayer({ db, store: server, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW });
+  server.save({ savedAt: 1, idCounter: 1000, db });
+  server.sqlite.close();
+  const tool = openStore(dir);
+  const otherState = () => JSON.stringify({ blobs: rows(tool.sqlite, 'SELECT name, value FROM collections ORDER BY name'), orgs: rows(tool.sqlite, 'SELECT id, name FROM orgs ORDER BY id'), staff: rows(tool.sqlite, 'SELECT id FROM org_users ORDER BY id') });
+  const links = () => rows(tool.sqlite, 'SELECT guardian_id, player_id, role FROM guardian_children ORDER BY guardian_id, player_id');
+  const apply = (mutate) => { const snap = tool.load(); mutate(snap.db); tool.save(snap); return tool.load().db; };
+  const byId = (arr, id) => arr.find((r) => r.id === id);
+  const others = otherState();
+  // 1. The reviewer's case, extended: gd-1 is replaced by gd-new with the SAME e-mail; the minor moves to the replacement; the co-guardian now references it.
+  let d = apply((x) => {
+    const old = byId(x.guardians, 'gd-1');
+    x.guardians = x.guardians.filter((g) => g.id !== 'gd-1');
+    x.guardians.push({ ...old, id: 'gd-new', childIds: ['pl-minor'] });
+    byId(x.guardians, 'gd-2').coGuardianOf = 'gd-new';
+    byId(x.players, 'pl-minor').guardianId = 'gd-new';
+  });
+  assert.deepEqual(d.guardians.map((g) => [g.id, g.email, g.coGuardianOf ?? null, [...g.childIds]]).sort(), [['gd-2', 'two@example.com', 'gd-new', ['pl-minor']], ['gd-new', 'one@example.com', null, ['pl-minor']]]);
+  assert.equal(byId(d.guardians, 'gd-new').emailCode, '123456', 'the replacement keeps the facet of the record it replaced (as given)');
+  assert.equal(byId(d.players, 'pl-minor').guardianId, 'gd-new'); assert.equal(byId(d.players, 'pl-minor').medical.records[0].id, 'md-1', 'the moved player keeps its facets');
+  assert.deepEqual([...byId(d.players, 'pl-adult').badges], ['Finisher']);
+  assert.deepEqual(links(), [{ guardian_id: 'gd-2', player_id: 'pl-minor', role: 'co' }, { guardian_id: 'gd-new', player_id: 'pl-minor', role: 'primary' }]);
+  assert.deepEqual(tool.sqlite.prepare('PRAGMA foreign_key_check').all(), []);
+  // 2. Two retained guardians swap e-mails — in the given order, then with both collections reversed.
+  d = apply((x) => { const a = byId(x.guardians, 'gd-new'); const b = byId(x.guardians, 'gd-2'); [a.email, b.email] = [b.email, a.email]; });
+  assert.deepEqual(d.guardians.map((g) => [g.id, g.email]).sort(), [['gd-2', 'one@example.com'], ['gd-new', 'two@example.com']]);
+  d = apply((x) => { x.guardians.reverse(); x.players.reverse(); const a = byId(x.guardians, 'gd-new'); const b = byId(x.guardians, 'gd-2'); [a.email, b.email] = [b.email, a.email]; });
+  assert.deepEqual(d.guardians.map((g) => [g.id, g.email]).sort(), [['gd-2', 'two@example.com'], ['gd-new', 'one@example.com']]);
+  assert.deepEqual(links(), [{ guardian_id: 'gd-2', player_id: 'pl-minor', role: 'co' }, { guardian_id: 'gd-new', player_id: 'pl-minor', role: 'primary' }], 'the links are the same whatever the input order');
+  // 3. A new co-guardian listed BEFORE the primary it references, the players reversed again, the adult renamed: all accepted in one write.
+  d = apply((x) => { x.players.reverse(); x.guardians.unshift({ id: 'gd-co2', name: 'Co Two', email: 'co2@example.com', coGuardianOf: 'gd-new', childIds: ['pl-minor'] }); byId(x.players, 'pl-adult').name = 'Adult Renamed'; });
+  assert.deepEqual(d.guardians.map((g) => g.id).sort(), ['gd-2', 'gd-co2', 'gd-new']); assert.equal(byId(d.guardians, 'gd-co2').coGuardianOf, 'gd-new'); assert.equal(byId(d.players, 'pl-adult').name, 'Adult Renamed');
+  assert.deepEqual(links(), [{ guardian_id: 'gd-2', player_id: 'pl-minor', role: 'co' }, { guardian_id: 'gd-co2', player_id: 'pl-minor', role: 'co' }, { guardian_id: 'gd-new', player_id: 'pl-minor', role: 'primary' }]);
+  // A round trip without changes keeps the order the tool read.
+  { const snap = tool.load(); const order = snap.db.guardians.map((g) => g.id); tool.save(snap); assert.deepEqual(tool.load().db.guardians.map((g) => g.id), order, 'an unchanged snapshot keeps its order'); }
+  assert.equal(otherState(), others, 'no other table or blob changed');
+  // 4. Real problems stay refused, whole: a duplicate final e-mail (case-insensitive) across a retained and a new guardian, a removed guardian still referenced, a legacy minor without a link.
+  const before = identityState(tool.sqlite); const seqBefore = tool.revision();
+  const refuse = (label, mutate, re) => {
+    const snap = tool.load(); mutate(snap.db);
+    assert.throws(() => tool.save(snap), re, label);
+    assert.equal(tool.sqlite.isTransaction, false, `${label}: the transaction is closed`);
+    assert.equal(identityState(tool.sqlite), before, `${label}: nothing changed`);
+    assert.equal(tool.revision(), seqBefore, `${label}: the save revision did not advance`);
+  };
+  refuse('a duplicate final e-mail (case-insensitive) between a retained and a new guardian', (x) => { x.guardians.push({ id: 'gd-dup', name: 'Dup', email: 'ONE@example.com', childIds: [] }); }, /shares its e-mail/);
+  refuse('a removed guardian still referenced by a retained player', (x) => { x.guardians = x.guardians.filter((g) => g.id !== 'gd-new'); x.players.reverse(); }, /guardianId names no record \(gd-new\)/);
+  refuse('a legacy minor without any guardian link (the Founder\'s decision)', (x) => { x.players.push({ id: 'pl-orphan', name: 'Orphan', dob: '2013-04-04', country: 'GB', guardianId: null, medical: { shared: false, records: [], conditionStatus: 'unknown' } }); }, /players pl-orphan: a minor on the evaluation date with no guardian link at all .*Founder's decision/);
+  // 5. A failure in the middle of the rewrite (the second player row) leaves everything as it was; the same write then succeeds.
+  const change = (x) => { byId(x.players, 'pl-adult').name = 'Adult Twice'; const a = byId(x.guardians, 'gd-new'); const b = byId(x.guardians, 'gd-2'); [a.email, b.email] = [b.email, a.email]; };
+  { const probe = failRunAt(tool.sqlite, (sql) => /^INSERT INTO players/.test(sql), 2, 'injected failure writing the second player row');
+    try { const snap = tool.load(); change(snap.db); assert.throws(() => tool.save(snap), /injected failure writing the second player row/); } finally { probe.restore(); }
+    assert.equal(probe.fired, 1, 'the injected failure happened');
+    assert.equal(tool.sqlite.isTransaction, false); assert.equal(identityState(tool.sqlite), before, 'mid-rewrite failure: every row, link and facet as before'); assert.equal(otherState(), others); assert.equal(tool.revision(), seqBefore); }
+  // 6. A failure of the REAL COMMIT: a deferred foreign-key violation planted inside the transaction makes SQLite refuse the COMMIT statement itself.
+  { const exec = tool.sqlite.exec.bind(tool.sqlite); let fired = 0;
+    tool.sqlite.exec = (sql) => { if (sql === 'COMMIT' && !fired) { fired += 1; exec('PRAGMA defer_foreign_keys = ON'); exec('CREATE TABLE fault_parent (id TEXT PRIMARY KEY); CREATE TABLE fault_child (parent_id TEXT NOT NULL REFERENCES fault_parent(id))'); tool.sqlite.prepare('INSERT INTO fault_child (parent_id) VALUES (?)').run('missing'); } return exec(sql); };
+    try { const snap = tool.load(); change(snap.db); assert.throws(() => tool.save(snap), /FOREIGN KEY constraint failed/); } finally { tool.sqlite.exec = exec; }
+    assert.equal(fired, 1, 'the COMMIT statement was the one that failed');
+    assert.equal(tool.sqlite.isTransaction, false); assert.equal(identityState(tool.sqlite), before, 'COMMIT failure: every row, link and facet as before'); assert.equal(otherState(), others); assert.equal(tool.revision(), seqBefore);
+    assert.equal(tool.sqlite.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name LIKE 'fault_%'").get().n, 0, 'the rollback took the planted tables with it'); }
+  d = apply(change);
+  assert.equal(byId(d.players, 'pl-adult').name, 'Adult Twice'); assert.deepEqual(d.guardians.map((g) => [g.id, g.email]).sort(), [['gd-2', 'one@example.com'], ['gd-co2', 'co2@example.com'], ['gd-new', 'two@example.com']], 'the retry lands the whole replacement');
+  assert.equal(tool.revision(), seqBefore + 1);
+  tool.sqlite.close();
+  // The server attaches to exactly that.
+  const again = openStore(dir, { tableBacked: TABLE_BACKED });
+  const db2 = { ...again.load().db, players: [], guardians: [] };
+  const layer = attachDataLayer({ db: db2, store: again, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  assert.deepEqual(layer.boot.identity, { engine: 'sqlite', players: 2, guardians: 3, links: 3, imported: 0 });
+  assert.equal(db2.players.find((p) => p.id === 'pl-minor').guardianId, 'gd-new'); assert.deepEqual([...db2.guardians.find((g) => g.id === 'gd-new').childIds], ['pl-minor']);
   again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
