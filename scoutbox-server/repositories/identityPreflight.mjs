@@ -8,28 +8,31 @@
  * future migration 0005 reuses the same functions).
  *
  * What this module never does: run a migration, write the source database,
- * boot a server, repair, coerce or drop a record, decide a policy. A report
- * says one of three things and claims nothing more:
- *   - `invalid`              — at least one record or relationship the target
- *                              refuses; every one is listed with its id and
- *                              reason; no candidate is emitted.
- *   - `blocked_on_decision`  — every record fits, but the data contains a case
- *                              whose treatment the Founder has not decided
- *                              (today: a legacy minor with no guardian link,
- *                              readiness review §5.5 / §11 item 2); those ids
- *                              are listed and NO candidate is emitted, because
- *                              a candidate would admit them by the proposed
- *                              rule, which is exactly what is undecided.
- *   - `complete`             — every record and relationship fits the target
- *                              constraints; the candidate is emitted. This is
- *                              a statement about the data, not an approval:
- *                              the cutover is a separate, later step with its
- *                              own decision.
+ * boot a server, repair, coerce or drop a record. A report says one of two
+ * things and claims nothing more:
+ *   - `invalid`   — at least one record or relationship the target refuses;
+ *                   every one is listed with its id and reason; no candidate.
+ *   - `complete`  — every record and relationship fits the target constraints;
+ *                   the candidate is emitted. This is a statement about the
+ *                   data, not an approval: the cutover is a separate, later
+ *                   step with its own decision.
  *
- * Findings that are counted but refuse nothing (as §5.2 specifies): a child
- * listed by a guardian that is not its primary (`role = 'co'`), an adult
- * still linked to a guardian, a minor whose only links are `co` links. Each
- * is listed by id so the operator can see what the cutover would carry.
+ * The Founder's decision on legacy minors (readiness review §5.5, answered
+ * 11 October 2026: "Stop until resolved"): an existing under-18 player with NO
+ * guardian link at all — `guardianId` null or absent and listed by no
+ * guardian's `childIds` — REFUSES the whole cutover until that record is
+ * resolved by hand. It is not imported unchanged, not omitted, not given an
+ * invented guardian or link, not re-dated and not deleted; its id is listed
+ * (`legacyMinorsWithoutLink`) and no candidate is emitted. Age is evaluated
+ * at the explicit instant `now` the caller supplies, and the future migration
+ * re-evaluates at its own run time. This decision concerns the migration only
+ * and is not a deletion or retention policy.
+ *
+ * Findings that are counted but refuse nothing (as §5.2 specifies, and
+ * deliberately NOT covered by that decision): a child listed by a guardian
+ * that is not its primary (`role = 'co'`), an adult still linked to a
+ * guardian, a minor whose only links are `co` links. Each is listed by id so
+ * the operator can see what the cutover would carry.
  *
  * Reports carry ids, field names, reasons and counts only: never an e-mail
  * address, a password hash, an e-mail code or a record. Output is
@@ -43,9 +46,9 @@ import {
 } from './identityMapping.mjs';
 
 export const CORE_IDENTITY_LIVE_MIGRATION = '0005_core_identity_live';
-export const PREFLIGHT_STATUS = Object.freeze({ COMPLETE: 'complete', INVALID: 'invalid', BLOCKED_ON_DECISION: 'blocked_on_decision' });
-/** The one undecided rule this preflight can meet (readiness review §5.5; §11 item 2). */
-export const DECISION_MINOR_WITHOUT_LINK = 'legacy_minor_without_guardian_link';
+export const PREFLIGHT_STATUS = Object.freeze({ COMPLETE: 'complete', INVALID: 'invalid' });
+/** The refusal reason for a legacy minor with no guardian link (the Founder's decision, readiness review §5.5). */
+export const MINOR_WITHOUT_LINK_REASON = 'a minor on the evaluation date with no guardian link at all (guardianId empty, listed by no guardian): by the Founder\'s decision the cutover stops until this record is resolved by hand — it is not imported, omitted, linked, re-dated or deleted here';
 export const AUTHORISES_NOTHING = 'This report validates data against the intended S4a schema. It does not approve, schedule or perform the cutover; migration 0005 is not registered and the blob stays authoritative.';
 
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -208,7 +211,7 @@ export function writeCandidate(sqlite, candidate) {
 export function validateCoreIdentity(db, { now = Date.now() } = {}) {
   const refusals = [];   // { collection, id, reason }  — the target refuses; no candidate
   const findings = [];   // { kind, id, detail }        — counted, carried as is
-  const decisions = [];  // { kind, id }                — undecided rule; no candidate
+  const legacyMinorsWithoutLink = []; // ids refused under the Founder's decision (also in `refusals`)
   const refuse = (collection, id, reason) => refusals.push({ collection, id, reason });
 
   const players = Array.isArray(db?.players) ? db.players : null;
@@ -292,7 +295,7 @@ export function validateCoreIdentity(db, { now = Date.now() } = {}) {
     if (why) { refuse('players', p.id, `guardianId names ${why} (${p.guardianId})`); continue; }
     if (!(listedBy.get(p.id) ?? []).includes(p.guardianId)) refuse('players', p.id, `guardianId names ${p.guardianId} but that guardian's childIds does not list the player (the two sides disagree; only the operator can say which is right)`);
   }
-  // Roles, counted findings and the undecided rule — on the valid, consistent records.
+  // Roles, counted findings and the Founder's rule for unlinked minors — on the valid, consistent records.
   let primaryLinks = 0; let coLinks = 0; let adultsStillLinked = 0; let coGuardianArrangements = 0; let minorsCoOnly = 0;
   for (const g of validGuardians.values()) {
     if (present(g.coGuardianOf) && validGuardians.has(g.coGuardianOf) && g.coGuardianOf !== g.id) { coGuardianArrangements += 1; findings.push({ kind: 'co_guardian_arrangement', id: g.id, detail: `co-guardian of ${g.coGuardianOf}` }); }
@@ -309,15 +312,15 @@ export function validateCoreIdentity(db, { now = Date.now() } = {}) {
     const linked = (listedBy.get(p.id) ?? []).length > 0 || hasPrimary;
     const adult = isAdult(p, onDate);
     if (adult && linked) { adultsStillLinked += 1; findings.push({ kind: 'adult_still_linked', id: p.id, detail: `an adult on the evaluation date, still linked to ${[...new Set([...(hasPrimary ? [p.guardianId] : []), ...(listedBy.get(p.id) ?? [])])].sort(byText).join(', ')}; imported unchanged, no policy implied` }); }
-    if (!adult && !linked) decisions.push({ kind: DECISION_MINOR_WITHOUT_LINK, id: p.id });
+    if (!adult && !linked) { legacyMinorsWithoutLink.push(p.id); refuse('players', p.id, MINOR_WITHOUT_LINK_REASON); }
     if (!adult && linked && !hasPrimary) { minorsCoOnly += 1; findings.push({ kind: 'minor_with_co_links_only', id: p.id, detail: `a minor with no primary guardian (guardianId null or absent) listed by ${(listedBy.get(p.id) ?? []).slice().sort(byText).join(', ')}` }); }
   }
 
   // 4. Status and candidate.
   refusals.sort((a, b) => byText(a.collection, b.collection) || byText(String(a.id), String(b.id)) || byText(a.reason, b.reason));
   findings.sort((a, b) => byText(a.kind, b.kind) || byText(a.id, b.id) || byText(a.detail, b.detail));
-  decisions.sort((a, b) => byText(a.kind, b.kind) || byText(a.id, b.id));
-  const status = refusals.length ? PREFLIGHT_STATUS.INVALID : decisions.length ? PREFLIGHT_STATUS.BLOCKED_ON_DECISION : PREFLIGHT_STATUS.COMPLETE;
+  legacyMinorsWithoutLink.sort(byText);
+  const status = refusals.length ? PREFLIGHT_STATUS.INVALID : PREFLIGHT_STATUS.COMPLETE;
   const candidate = status === PREFLIGHT_STATUS.COMPLETE
     ? { guardians: guardians.map(guardianToRow), players: players.map(playerToRow), links }
     : null;
@@ -328,11 +331,11 @@ export function validateCoreIdentity(db, { now = Date.now() } = {}) {
       players: players?.length ?? 0, guardians: guardians?.length ?? 0,
       validPlayers: validPlayers.size, validGuardians: validGuardians.size,
       links: links.length, primaryLinks, coLinks, adultsStillLinked, coGuardianArrangements, minorsWithCoLinksOnly: minorsCoOnly,
-      refusals: refusals.length, findings: findings.length, decisionsRequired: decisions.length,
+      refusals: refusals.length, findings: findings.length, legacyMinorsWithoutLink: legacyMinorsWithoutLink.length,
     },
     refusals,
     findings,
-    decisionsRequired: decisions,
+    legacyMinorsWithoutLink,
     candidate,
     authorises: AUTHORISES_NOTHING,
   };

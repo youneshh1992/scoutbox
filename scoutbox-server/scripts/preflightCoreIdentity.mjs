@@ -16,8 +16,9 @@
 //   --now    evaluation instant for adult/minor, integer milliseconds
 //            (default: now); pass it to make two runs comparable
 // Exit codes: 0 complete (the data fits; this is NOT an approval of the cutover),
-//             1 usage error, 2 invalid (refusals listed), 3 blocked on a policy
-//             decision (ids listed), 4 the source could not be read.
+//             1 usage error, 2 invalid (refusals listed — including a legacy minor
+//             with no guardian link, which by the Founder's decision stops the
+//             cutover until resolved by hand), 4 the source could not be read.
 // Never prints an e-mail address, a code, a hash or a record.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -100,9 +101,9 @@ if (json) {
   const c = out.counts;
   console.log(`  players ${c.players} (valid ${c.validPlayers})  guardians ${c.guardians} (valid ${c.validGuardians})  links ${c.links} (primary ${c.primaryLinks}, co ${c.coLinks})  adults still linked ${c.adultsStillLinked}  co-guardian arrangements ${c.coGuardianArrangements}`);
   for (const r of out.refusals) console.log(`  refused ${r.collection}${r.id ? ` ${r.id}` : ''}: ${r.reason}`);
-  for (const d of out.decisionsRequired) console.log(`  decision required ${d.id}: ${d.kind} (readiness review §5.5 — import unchanged and list, or refuse until resolved by hand; not chosen here)`);
+  if (out.legacyMinorsWithoutLink.length) console.log(`  legacy minors without any guardian link (the cutover stops until each is resolved by hand — Founder decision, readiness review §5.5): ${out.legacyMinorsWithoutLink.join(', ')}`);
   for (const f of out.findings) console.log(`  finding ${f.kind} ${f.id}: ${f.detail}`);
   console.log(`  candidate: ${out.candidate ? `${out.candidate.guardians} guardian row(s), ${out.candidate.players} player row(s), ${out.candidate.links} link row(s) — not written anywhere` : 'none'}`);
   console.log(`  ${out.authorises}`);
 }
-process.exit(out.status === PREFLIGHT_STATUS.COMPLETE ? 0 : out.status === PREFLIGHT_STATUS.INVALID ? 2 : 3);
+process.exit(out.status === PREFLIGHT_STATUS.COMPLETE ? 0 : 2);

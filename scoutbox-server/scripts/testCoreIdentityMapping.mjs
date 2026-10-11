@@ -18,7 +18,7 @@ import {
 } from '../repositories/identityMapping.mjs';
 import {
   validateCoreIdentity, publicReport, createCandidateSchema, writeCandidate, CANDIDATE_DDL,
-  PREFLIGHT_STATUS, DECISION_MINOR_WITHOUT_LINK, AUTHORISES_NOTHING,
+  PREFLIGHT_STATUS, MINOR_WITHOUT_LINK_REASON, AUTHORISES_NOTHING,
 } from '../repositories/identityPreflight.mjs';
 import { transaction } from '../repositories/database.mjs';
 import { openStore } from '../store.mjs';
@@ -282,7 +282,7 @@ test('relationships: a consistent snapshot is complete — roles are primary whe
   const r = validateCoreIdentity(snap, { now: NOW });
   assert.equal(r.status, PREFLIGHT_STATUS.COMPLETE, JSON.stringify(r.refusals));
   assert.equal(r.evaluatedAt, NOW);
-  assert.deepEqual(r.counts, { players: 4, guardians: 3, validPlayers: 4, validGuardians: 3, links: 4, primaryLinks: 2, coLinks: 2, adultsStillLinked: 0, coGuardianArrangements: 1, minorsWithCoLinksOnly: 0, refusals: 0, findings: 3, decisionsRequired: 0 });
+  assert.deepEqual(r.counts, { players: 4, guardians: 3, validPlayers: 4, validGuardians: 3, links: 4, primaryLinks: 2, coLinks: 2, adultsStillLinked: 0, coGuardianArrangements: 1, minorsWithCoLinksOnly: 0, refusals: 0, findings: 3, legacyMinorsWithoutLink: 0 });
   assert.deepEqual(r.candidate.links, [
     { guardian_id: 'gd-9003', player_id: 'pl-9002', role: 'primary' }, { guardian_id: 'gd-9003', player_id: 'pl-9004', role: 'primary' },
     { guardian_id: 'gd-9002', player_id: 'pl-9002', role: 'co' }, { guardian_id: 'gd-9002', player_id: 'pl-9004', role: 'co' },
@@ -351,18 +351,22 @@ test('relationships: duplicate ids, duplicate e-mails under lower(email), dangli
   assert.deepEqual(r, validateCoreIdentity(JSON.parse(before), { now: NOW }), 'a second run over the same input produces the same report');
 });
 
-test('relationships: a legacy minor with no guardian link blocks on the undecided rule — listed by id, not admitted, not deleted, no guardian invented, no candidate; the same data with the link resolved is complete', () => {
+test('relationships: a legacy minor with no guardian link REFUSES the cutover (the Founder\'s decision: stop until resolved) — attributable by id, no candidate, not imported, not omitted, no guardian invented, not re-dated, not deleted; the same data with the link resolved by hand is complete', () => {
   const snap = consistentSnapshot();
   snap.players.push({ ...childOf(null, 'pl-legacy-minor', '2013-04-04') });
+  const before = JSON.stringify(snap);
   const r = validateCoreIdentity(snap, { now: NOW });
-  assert.equal(r.status, PREFLIGHT_STATUS.BLOCKED_ON_DECISION);
-  assert.equal(r.candidate, null, 'no candidate while the rule is undecided (a candidate would admit the record)');
-  assert.deepEqual(r.decisionsRequired, [{ kind: DECISION_MINOR_WITHOUT_LINK, id: 'pl-legacy-minor' }]);
-  assert.equal(r.refusals.length, 0, 'not a refusal: the record itself is valid');
-  assert.equal(snap.players.length, 5, 'nothing deleted'); assert.equal(snap.guardians.length, 3, 'no guardian created');
-  // Unknown age is not adult: a minor is decided by isAdult (domain.mjs); on an evaluation date after the 18th birthday the same record is an adult without a link — complete, no finding.
+  assert.equal(r.status, PREFLIGHT_STATUS.INVALID);
+  assert.equal(r.candidate, null, 'no candidate: a candidate would import the record');
+  assert.deepEqual(r.legacyMinorsWithoutLink, ['pl-legacy-minor']);
+  assert.deepEqual(r.refusals, [{ collection: 'players', id: 'pl-legacy-minor', reason: MINOR_WITHOUT_LINK_REASON }], 'the only refusal, attributable to the record');
+  assert.match(MINOR_WITHOUT_LINK_REASON, /Founder's decision/); assert.match(MINOR_WITHOUT_LINK_REASON, /not imported, omitted, linked, re-dated or deleted/);
+  assert.equal(r.counts.legacyMinorsWithoutLink, 1); assert.equal(r.counts.refusals, 1);
+  assert.equal(JSON.stringify(snap), before, 'the input is untouched: nothing deleted, re-dated or linked, no guardian created');
+  assert.equal(JSON.stringify(publicReport(r)).includes('2013-04-04'), false, 'the report carries the id, not the record');
+  // Age is evaluated at the explicit instant: on an evaluation date after the 18th birthday the same record is an adult without a link — complete (the migration re-evaluates at its own run time).
   const later = validateCoreIdentity(snap, { now: Date.UTC(2031, 3, 5) });
-  assert.equal(later.status, PREFLIGHT_STATUS.COMPLETE); assert.equal(later.counts.decisionsRequired, 0);
+  assert.equal(later.status, PREFLIGHT_STATUS.COMPLETE); assert.equal(later.counts.legacyMinorsWithoutLink, 0);
   // Resolved by hand (a guardian lists the child and the child names it): complete.
   const resolved = consistentSnapshot();
   resolved.players.push({ ...childOf('gd-9003', 'pl-legacy-minor', '2013-04-04') });
@@ -483,12 +487,12 @@ test('preflight: run on a data directory it leaves the source byte-identical, ap
   ro.close();
   const text = run();
   assert.equal(text.status, 0); assert.match(text.stdout, /status: complete/); assert.match(text.stdout, /not written anywhere/); assert.match(text.stdout, /does not approve/);
-  // Invalid and blocked sources exit 2 and 3 and never print a candidate.
+  // Invalid sources (a malformed record, or a legacy minor without a link) exit 2 and never print a candidate.
   const blockedDir = tempDir('preflight-blocked');
   const s2 = openStore(blockedDir); const blocked = consistentSnapshot(); blocked.players.push(childOf(null, 'pl-legacy', '2013-01-01'));
   s2.save({ savedAt: NOW, idCounter: 1, db: { ...blocked, orgs: [], users: [], sessions: [] } }); s2.sqlite.close();
   const rb = spawnSync(process.execPath, [script, blockedDir, '--now', String(NOW)], { encoding: 'utf8' });
-  assert.equal(rb.status, 3, rb.stdout); assert.match(rb.stdout, /decision required pl-legacy: legacy_minor_without_guardian_link/); assert.match(rb.stdout, /candidate: none/);
+  assert.equal(rb.status, 2, rb.stdout); assert.match(rb.stdout, /refused players pl-legacy: a minor on the evaluation date with no guardian link/); assert.match(rb.stdout, /legacy minors without any guardian link .*: pl-legacy/); assert.match(rb.stdout, /status: invalid/); assert.match(rb.stdout, /candidate: none/);
   const invalidJson = path.join(tempDir('preflight-json'), 'snapshot.json');
   fs.writeFileSync(invalidJson, JSON.stringify({ db: { players: [{ ...adultSignup(), foot: 'both' }], guardians: [] } }));
   const ri = spawnSync(process.execPath, [script, invalidJson, '--now', String(NOW), '--json'], { encoding: 'utf8' });

@@ -373,12 +373,15 @@ mapping they will use and a read-only check of the data exist and are tested:
   is (co links, adults still linked, co-guardian arrangements). A data
   directory is copied read-only (`VACUUM INTO` from a read-only connection)
   and only the copy is read; **no migration runs, nothing is written, no
-  server starts**. Status is one of `complete` (exit 0: the data fits the
-  intended schema — this is **not** an approval of the cutover), `invalid`
-  (exit 2) or `blocked_on_decision` (exit 3: a legacy minor with no guardian
-  link exists; the rule for such records is the Founder's open decision,
-  readiness review §5.5, and the report neither admits nor discards them).
-  The report never prints an e-mail address, a code, a hash or a record.
+  server starts**. Status is `complete` (exit 0: the data fits the intended
+  schema — this is **not** an approval of the cutover) or `invalid` (exit 2).
+  **A legacy minor with no guardian link at all is `invalid`** (the Founder's
+  decision, readiness review §5.5: the cutover stops until the record is
+  resolved by hand on the pre-S4 build); the report lists those ids under
+  `legacyMinorsWithoutLink` and neither imports, omits, links, re-dates nor
+  deletes them. Adults still linked and minors with co links only remain
+  counted findings. The report never prints an e-mail address, a code, a hash
+  or a record.
 - The intended live DDL (the documented tables plus `facets_json`) is
   `CANDIDATE_DDL` in `repositories/identityPreflight.mjs`, used only to build
   temporary databases in tests; migration 0005 is **not** registered and the
@@ -399,6 +402,50 @@ mapping they will use and a read-only check of the data exist and are tested:
   level (record, composite remainder, nested items) without touching any
   prototype, while `__meta` / `__rest` remain the reserved metadata keys.
 - Tests: `scripts/testCoreIdentityMapping.mjs` (part of `npm test`).
+
+### S4a repository layer: players and guardians (built, not attached)
+
+`repositories/identity.mjs` (`createIdentityRepositories`) is the live
+repository pair for players, guardians and their link, delivered before the
+cutover. **Production does not use it yet**: `repositories/index.mjs` does not
+create it, `TABLE_BACKED` does not list the two collections, migration 0005 is
+not registered, and server boot, routes, responses, sessions and media are
+unchanged. What it guarantees, tested on temporary databases prepared with the
+intended schema (`scripts/identityLiveTestSchema.mjs`, test-only) and against
+the real store unit of work (`scripts/testIdentityRepositories.mjs`):
+
+- **Authority.** Attaches only behind the `0005_core_identity_live` record;
+  refuses the S1 shadow tables (no `facets_json`) even with the record;
+  construction loads nothing. `meta.coreIdentityInit`: `pending` →
+  `initialize()` validates with the preflight (the Founder's legacy-minor rule
+  included) and writes every row and link with the state change in one
+  transaction, or writes nothing and stays `pending` for a retry; `done` →
+  `attach()` loads and never imports (a stale array is reported and ignored;
+  an intentionally empty domain stays empty).
+- **Writes.** `players.insert/update/restore/remove/ageUp`,
+  `guardians.insert/update`, `link/unlink` — each in a transaction of its own,
+  refused inside a foreign transaction, joined inside the store's unit of work.
+  A minor is created with its primary guardian and the link in the same
+  transaction, never without. `guardian_id` and the `primary` link row always
+  agree; a second primary, a dangling or duplicate link and a duplicate e-mail
+  (case-insensitive) are refused. `ageUp` clears the primary link only
+  (co-guardians keep listing the child, as today); `remove` is today's hard
+  delete (links cascade, every `childIds` entry goes); `restore` is the signing
+  rollback's whole-record write and cannot change the link. None of this is a
+  deletion or retention policy.
+- **Views.** `db.players` / `db.guardians` shapes, read-only; a record view
+  refuses column-backed writes (nested `location`, `stats`, `notificationPrefs`,
+  `medical.shared`, `medical.conditionStatus`, `programme.track`,
+  `programme.startedAt`) and `childIds`; `medical.records`,
+  `programme.completed`, `emailCode`, unknown and prototype-named keys stay
+  mutable facets, flushed inside every save and counted as persisted only
+  once it committed (the intermediate-then-revert case is covered).
+- **Unit of work.** One participant for both domains: `flush/commit/rollback`
+  and `snapshotState/restoreState` over records, views, indexes, link arrays
+  and facet tracking; failures after the row and link writes, during the
+  flush, at COMMIT, nested-and-swallowed and a process killed before COMMIT all
+  leave the tables and memory as before, with edits that predated the unit
+  still pending.
 
 The design and the cutover order are in `docs/architecture/sqlite-schema.md`
 and `docs/architecture/sqlite-migration-plan.md`.

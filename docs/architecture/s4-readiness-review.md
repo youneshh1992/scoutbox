@@ -204,7 +204,7 @@ otherwise (`repositories/shadow.mjs:198`).
 | `G.childIds` lists a player whose `guardianId` is another guardian or null | imported as `role = 'co'`; counted |
 | an adult still linked to a guardian (the seed has one) | imported unchanged; counted; no policy implied |
 | a co-guardian without `password` / `emailVerified` | imported as is |
-| a minor with no guardian link at all | see §5.5 — a discrepancy with the plan, presented, not resolved here |
+| a minor with no guardian link at all | **refuses the cutover** until the record is resolved by hand — the Founder's decision (§5.5); implemented in the preflight and in `initialize()` |
 
 ### 5.3 Duplicate e-mails
 
@@ -232,11 +232,24 @@ guardian–club threads; request routing can target a null `guardianId` (S:2120�
 codes (S:3760–3778) can be minted by any guardian listing the child and `/auth/player/pair`
 has no rate limit.
 
-### 5.5 Discrepancy with the plan: legacy minors without a guardian link
+### 5.5 Legacy minors without a guardian link — decided: stop until resolved
 
-The plan's S4 acceptance says "a minor cannot exist without a `guardian_children` row". The
-first draft of this review silently turned that into "count and import". The two are not the
-same, so the discrepancy is stated and a treatment proposed; the Founder confirms it (§11).
+**The Founder's decision (11 October 2026): "Stop until resolved."** If an existing under-18
+player has NO linked parent or guardian — `guardianId` null or absent and listed by no
+guardian's `childIds` — the migration **refuses the entire cutover** until that record is
+explicitly resolved on the pre-S4 build. It is not imported unchanged, not silently omitted, not
+given an invented guardian or link, its birth date is not changed and the account is not
+deleted; the affected ids are listed (never credentials or records). Age is evaluated at an
+explicit instant and the migration re-evaluates at its own run time. The decision concerns the
+migration only; it creates no deletion or retention policy, and it does **not** extend to the
+separately documented cases of adults still linked or minors with valid `co` links only, which
+stay counted findings (§5.2). Implemented: `validateCoreIdentity` refuses such a record
+(`MINOR_WITHOUT_LINK_REASON`, `legacyMinorsWithoutLink` ids, no candidate, exit 2 from the
+command) and `identity.initialize()` writes nothing and leaves initialisation pending.
+
+The first draft of this review proposed "count and import unchanged" and presented the
+alternative "refuse until resolved"; the paragraphs below are kept as the record of that
+discussion, and the Founder chose the alternative.
 
 - **How such a record can exist today:** signup refuses minors (S:1137) and child creation
   always links (S:1392, 1420), so a minor without a link arises only through a mis-dated record
@@ -560,8 +573,10 @@ Acceptance (each a test that fails first where applicable):
    by hash, staff and organisation tables untouched, `emailCode` byte-identical.
 4. Abort cases (§5.2, §5.3, §5.6): file byte-identical, same abort on restart, repaired file cuts
    over; injected failure before commit leaves no trace.
-5. Counted findings (co roles, adults still linked, **minors without a link**): cut over, counts
-   in `meta.coreIdentityCutover`, no row changed; a dry run lists the ids.
+5. Counted findings (co roles, adults still linked, minors with co links only): cut over, counts
+   in `meta.coreIdentityCutover`, no row changed; a dry run lists the ids. **Minors without any
+   link are not a counted finding: they refuse the cutover (item 4; §5.5, the Founder's
+   decision) — implemented in the preflight and in `identity.initialize()`.**
 6. Boot: a cut-over file boots as a snapshot with no `players` blob; integrity sees the players;
    first installation initialises once; interrupted initialisation retries; empty authoritative
    tables ignore stale arrays and blobs.
@@ -626,9 +641,9 @@ withdrawn (`s4-deletion-decision.md` §4).
 
 1. **O1** — what birth information a deleted player's retained record may keep (and whether the
    country code may stay): `s4-deletion-decision.md` §9. Blocks S4b only.
-2. **Legacy minors without any guardian link** — import them unchanged and list them (proposed,
-   §5.5), or refuse the cutover until each is resolved by hand on the pre-S4 build. Blocks S4a's
-   migration rule, not its design.
+2. ~~**Legacy minors without any guardian link**~~ — **decided (11 October 2026): refuse the
+   cutover until each is resolved by hand on the pre-S4 build** (§5.5); implemented in the
+   preflight and the repositories' initialisation. No longer open.
 3. **`createdAt` in the club view** — keep it (proposed, for client compatibility) or drop it
    as the plan's leak list says. Blocks nothing; defaults to keep.
 4. **Two small response changes to confirm** — the child-creation response no longer carries a

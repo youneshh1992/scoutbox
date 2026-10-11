@@ -60,9 +60,13 @@ and design changes the Founder explicitly requests.
   `SCOUTBOX_SHADOW_VALIDATION=1` and never touches live tables); their S4a
   mapping (`repositories/identityMapping.mjs`) and the read-only preflight
   (`scripts/preflightCoreIdentity.mjs`, `repositories/identityPreflight.mjs`)
-  are implemented and are the contract the live repositories must reuse —
-  the cutover itself (migration 0005) is not started, and a preflight report
-  is never an approval of it. Never log,
+  are implemented and are the contract the live repositories reuse; the live
+  repositories themselves (`repositories/identity.mjs`: players, guardians,
+  links, unit-of-work participation) are built and tested but **not attached**
+  — the cutover itself (migration 0005) is not started, server boot does not
+  create them, and a preflight report is never an approval. A legacy minor
+  with no guardian link refuses the cutover until resolved by hand (the
+  Founder's decision). Never log,
   report or export a plain bearer token. `node:sqlite` with transaction state
   is required (Node 22.16+ on the 22 line, or 24.0+; `runtime.mjs` is the one
   definition, checked before the data directory is touched and refused with

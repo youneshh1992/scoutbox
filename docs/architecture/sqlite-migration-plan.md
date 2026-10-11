@@ -889,12 +889,34 @@ performance, existing tests, what this plan is not).
 > integers so a complete report really loads and round-trips through the intended schema (no
 > clamping, no business limits); own JSON keys named like `Object.prototype` members survive the
 > mapping as data at every level without touching prototypes.
+> **Founder decision recorded and implemented:** a legacy minor with no guardian link at all
+> REFUSES the cutover until resolved by hand (readiness review §5.5): the preflight reports it
+> as `invalid` by id with no candidate (exit 2) and `identity.initialize()` writes nothing; the
+> earlier "count and import" proposal is withdrawn. Adults still linked and minors with co links
+> only stay counted findings; O1 stays open.
+>
+> **S4a, second bounded part — the repository layer: DONE (this commit). Live cutover: still
+> NOT STARTED.** `repositories/identity.mjs` holds the players and guardians repositories with
+> their coordinated link operations (`insert`/`update`/`restore`, `link`/`unlink`/`ageUp`/
+> `remove`, lookups), explicit authority (the `0005_core_identity_live` record and
+> `meta.coreIdentityInit`; the S1 shadow tables are refused), atomic and retryable
+> initialisation through the preflight, guarded views (column-backed fields, nested composite
+> fields, `childIds`; `medical.records`/`programme.completed`/`emailCode` stay mutable facets),
+> relationship invariants (`guardian_id` = the primary row; second primary, dangling and
+> duplicate links, duplicate e-mails refused; a new minor needs its link in the same
+> transaction), and full unit-of-work participation (flush/commit/rollback,
+> snapshotState/restoreState). Tested against the intended schema on temporary databases and
+> the real store unit of work (`scripts/testIdentityRepositories.mjs`; the schema is prepared by
+> the test-only `scripts/identityLiveTestSchema.mjs`). **Not attached in production:**
+> `repositories/index.mjs`, `TABLE_BACKED`, server boot, routes, responses, sessions and media
+> are unchanged; migration 0005 is not registered and the blob stays authoritative.
 > Tests: `scripts/testCoreIdentityMapping.mjs`. **Not done, acceptance unchanged:** migration
 > `0005_core_identity_live`, the repositories and their writers, the boot snapshot-presence
 > signal (§7.2), atomic operations inside units of work (§7.4 per operation), the audience
 > allowlists (§6), the lossless rollback tool (§8), `facets_json` in `01_identity.sql`
-> (added with migration 0005 so the DDL test keeps matching 0002); the §5.5 rule and O1
-> remain the Founder's decisions.
+> (added with migration 0005 so the DDL test keeps matching 0002), the conversion of today's
+> writers to the repositories, per-route atomicity, snapshot backup/restore integration and
+> the media-deletion handling; O1 remains the Founder's decision.
 
 - **Objective.** `guardians`, `players` (scalar columns) and `guardian_children` live. The
   player and guardian repositories expose typed reads: by id, by guardian, the paginated

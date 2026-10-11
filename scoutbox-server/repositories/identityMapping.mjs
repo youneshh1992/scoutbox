@@ -131,6 +131,9 @@ const GUARDIAN_SPEC = Object.freeze({
 
 export const PLAYER_COLUMNS = PLAYER_SPEC.columns;
 export const GUARDIAN_COLUMNS = GUARDIAN_SPEC.columns;
+/** Composite record keys and their column-backed sub-keys (the repositories guard exactly these; other sub-keys are facets). */
+export const PLAYER_COMPOSITES = PLAYER_SPEC.composites;
+export const GUARDIAN_COMPOSITES = GUARDIAN_SPEC.composites;
 /** Record keys the player columns own (anything else on a record is a facet). */
 export const PLAYER_MIGRATED_KEYS = Object.freeze(new Set(['id', ...Object.keys(PLAYER_SPEC.scalars), ...Object.keys(PLAYER_SPEC.composites)]));
 export const GUARDIAN_MIGRATED_KEYS = Object.freeze(new Set(['id', ...Object.keys(GUARDIAN_SPEC.scalars), ...Object.keys(GUARDIAN_SPEC.composites)]));
