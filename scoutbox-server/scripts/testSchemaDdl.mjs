@@ -29,13 +29,11 @@ for (const f of files) {
 }
 
 const tables = docs.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((r) => r.name);
-// org_users was created by migration 0001 before the STRICT convention and is
-// documented exactly as it exists; step S3 rebuilds it STRICT (01_identity.sql).
-const PRE_STRICT = new Set(['org_users']);
+// Every table is STRICT: org_users was created non-STRICT by migration 0001 and
+// rebuilt STRICT (with the orgs foreign key and json_valid checks) at S3.
 test(`the target schema defines ${tables.length} tables, all STRICT`, () => {
   assert.ok(tables.length >= 100, `expected the full model, found ${tables.length}`);
   for (const t of tables) {
-    if (PRE_STRICT.has(t)) continue;
     const sql = docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql;
     assert.match(sql, /STRICT\s*$/i, `${t} is STRICT`);
   }

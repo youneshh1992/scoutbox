@@ -4,9 +4,10 @@ Companion to [`sqlite-schema.md`](./sqlite-schema.md) (the target schema) and th
 `docs/architecture/sql/`. Written 10 October 2026 on branch `feat/sqlite-schema`.
 
 Status of the steps: **S0 done** (commit `0f01df7`), **S1 done** (`ef71f28` + corrections
-`d0d96e6`, `22ce9ad`, `abc0f6a`; §S1 records the commands and results), **S2 done** (this
-branch, §S2 records the commands and results), S3–S14 planned. The step after this commit
-is **S3**.
+`d0d96e6`, `22ce9ad`, `abc0f6a`; §S1 records the commands and results), **S2 done**
+(`6dca457` + corrections `8baafde`, `5a9e75d`; §S2 records the commands and results),
+**S3 done** (this branch, §S3 records the field ownership, the commands and the results),
+S4–S14 planned. The step after this commit is **S4**.
 
 Sections: A principles that hold for every step · B the steps (S0–S14) · C cross-cutting
 work (repository pattern, source of truth and dual writes, backups and dry runs, legacy
@@ -511,28 +512,221 @@ performance, existing tests, what this plan is not).
      non-zero code and `LEGACY_IMPORT_FAILED` before `listening on`, with `db.json`
      preserved, nothing renamed and zero rows in `collections` (no seed save).
 
-### S3 — Organisations cut over (+ `org_users` rebuild with FK, org tombstone)
+### S3 — Organisations cut over (+ `org_users` rebuild with FK) — DONE
 
-- **Objective.** `orgs` live through `repositories/orgs.mjs`; `org_users` rebuilt STRICT
-  with `org_id REFERENCES orgs(id)` and `json_valid` CHECKs; sessions FK chain complete.
-  Nested org facets stay in the blob record's view until their own steps (S9 tactical/squad,
-  S10 verification domains, S11 agency settings) — the repository exposes the scalar
-  columns and merges the still-blob facets so readers see the same shape.
-- **Depends on.** S2.
-- **Files / tables.** `repositories/orgs.mjs`, migration `0004_orgs_live` (import + the
-  `org_users` table rebuild: create new, copy, drop, rename, inside the migration
-  transaction), `server.mjs` org routes (registration 1734, settings, admin 4052, directory
-  1683), `m14/review.mjs:382` (org creation), `seed.mjs` (writes through the repository on a
-  production-empty boot: C.6).
-- **Data transformation.** Import `orgs` scalars; refuse (abort boot with the list) any org
-  the CHECKs reject — on the demo snapshot the shadow report shows zero, which is the gate.
-- **API compatibility.** None changed; `playerViewForOrg` and org views keep their shapes.
-- **Tests and acceptance.** `testOrgs.mjs` (unit); FK from `org_users` and `sessions`
-  enforced; battery unchanged. Acceptance: `orgs` and `org_users` live, `org_users` STRICT,
-  shadow projects only `guardians`, `players`, `guardian_children`.
-- **Rollback.** Pre-S3 backup + S2 commit. Orgs created after S3 are lost on rollback.
-- **Commit boundary.** One commit (the rebuild and the cutover belong together because the
-  FK needs the parent table live).
+- **Objective (met).** `orgs` is live through `repositories/orgs.mjs`; `org_users` is
+  rebuilt STRICT with `org_id REFERENCES orgs(id)` and `json_valid` CHECKs, so the foreign
+  key chain `sessions → org_users → orgs` is complete and enforced; the `orgs` blob is
+  validated, imported and retired in the one transaction that records the cutover. The
+  nested facets stay in a transitional column of the same row until their own steps (S9
+  tactical/squad/lookingFor/federationCheck, S10 verification domains, S11 agency settings);
+  readers see exactly the record shape they saw before. **Not in scope, by decision:** no
+  org deletion route, no tombstone column and no hard delete (O2 is unresolved: the policy
+  for an organisation with open recruitment cases is a product decision; `suspended` stays
+  the only lifecycle flag and the repository exposes no delete). The earlier title's "org
+  tombstone" is therefore not built here; S4 introduces tombstones for players and guardians,
+  and the org policy follows O2.
+- **Depends on.** S2 as corrected (`5a9e75d`). Readiness gate for S3 itself: the cutover
+  migration is the validation — dry-run on a copy (`DATA_DIR=<copy> node server.mjs`); it
+  cuts the copy over or refuses with `ORGS_CUTOVER_BLOCKED` and the list of ids and
+  reasons; the real directory is not touched.
+- **Field ownership (one authoritative location per field).** Established by searching the
+  whole repository for every read, write and nested mutation of organisation records
+  (`db.orgs`, `org.<field> =`, `?.squad`, `verification.` and the `m13`/`m14` modules):
+
+  | Field(s) | Location after S3 | Written by |
+  |---|---|---|
+  | `id, name, type, level, plan, country, trustedPartner, verified, verifiedDomain, safeguardingContractSigned, suspended, emailDomain, emailDomainVerified, mfaRequiredForLeads, createdAt` | columns (`level` nullable: the T&S creation path writes `null`) | `orgs.insert` (registration, T&S creation), `orgs.update` (admin verification toggles, credentials, suspension, e-mail domain, `m13` security, password upgrade on login) |
+  | `password` | column `password_hash` (same scrypt string as before) | `orgs.insert` / `orgs.update` |
+  | `location {city, lat, lng}` | columns `city, lat, lng`; presence and sub-key order kept in `facets_json.__meta` | `orgs.insert` |
+  | `federationRef {federation, registrationId}` | columns `federation, federation_registration_id`; presence kept as above | `orgs.insert` |
+  | `tactical, squad, lookingFor, federationCheck, agencySettings`, the whole `verification` object, every unknown field | **transitional** `facets_json` on the same row, authoritative for these fields until S9–S11; mutated in place on the record the view serves (`org.squad.push`, `org.lookingFor = …`, `org.verification.revokedAt = …`) and persisted by `orgs.flush()` inside every snapshot save | the existing in-place writers, unchanged |
+  | `verification.revokedAt`, `verification.orgType` | derived mirror columns `verification_revoked_at`, `verification_org_type`, rewritten at every flush; **read by nothing** until S10 makes them authoritative | `orgs.flush()` |
+  | key order, explicit `null`s, absent-vs-present composites, unknown composite sub-keys | `facets_json.__meta` / `__rest` (never exported: snapshot tools and backups see the plain record) | the repository mapping (`toRow` / `fromRow`) |
+
+  No field has two writable homes: assigning a column-backed field on the record `db.orgs`
+  serves throws and names `orgs.update`; the facet keys remain plain mutable properties;
+  the array view throws on `push` / index assignment. The S1 shadow no longer projects
+  `orgs` (`CORE_SHADOW_TABLES = guardians, players, guardian_children`), so nothing
+  competes for the migrated fields. API shapes are unchanged: a record round-trips
+  byte-for-byte through the mapping (tested for every shape the application writes,
+  including `level: null`, `location: null`, absent composites, unknown fields and explicit
+  nulls), and `__meta` never appears in `/admin/clubs`, `/orgs/directory`, a snapshot export
+  or an admin backup.
+- **Files / tables.** `repositories/orgs.mjs` (new: validation without coercion, the
+  row mapping, `ORGS_TABLE` for snapshot tools, the repository with `view`, `byId`,
+  `insert`, `update`, `flush`, `attach`), `repositories/migrations/0004_orgs_live.mjs` (new:
+  the cutover and the `org_users` rebuild, `foreignKeysOff = true`), `repositories/database.mjs`
+  (runner support for a step that must run with `PRAGMA foreign_keys = OFF`: the pragma is
+  set before `BEGIN`, `PRAGMA foreign_key_check` must be empty before `COMMIT`, and the
+  pragma is restored in `finally`), `repositories/index.mjs` (`TABLES = orgs, users,
+  sessions`; `writeTableBacked` replaces then prunes in reverse order so a restore deletes
+  children before parents; the repository attached before `users`; `domains.orgs` in the
+  report; the store flush hook), `repositories/shadow.mjs` (`orgs` removed from the shadow),
+  `repositories/orgsRollback.mjs` + `scripts/orgsRollback.mjs` (new), `store.mjs`
+  (`setFlush`: repository flushes run inside the server-mode save transaction), `server.mjs`
+  (registration, password upgrade, e-mail domain, suspension, credentials and verification
+  toggles through the repository; `orgs` passed to `m13`/`m14`; the boot integrity report
+  moved after `attachDataLayer`), `m13/enterprise.mjs` (`/org/security`), `m14/review.mjs`
+  (T&S org creation, verify, revoke), `scripts/testOrgs.mjs` (new), `scripts/testSessions.mjs`,
+  `scripts/testDataLayer.mjs`, `scripts/testCoreSchema.mjs`, `scripts/testSchemaDdl.mjs`
+  (fixtures now create the organisations their staff rows reference, as the foreign key
+  requires), `package.json` (test chain), `docs/architecture/sql/01_identity.sql`,
+  `sqlite-schema.md`, `OPERATIONS.md`, `CLAUDE.md`.
+- **Validation and abort behaviour for unsupported records (as built).** A legacy record is
+  *supported* when it is a plain object with a non-empty string `id` and `name`, `type` in
+  `club | agency`, `level` absent, `null` or in `pro | academy | agency | grassroots`, `plan`
+  in `Pro | Academy | Agency | Grassroots`, every flag absent or boolean, every text field
+  absent, `null` or a string, `createdAt` absent, `null` or a non-negative integer, `location` absent,
+  `null` or an object whose `lat`/`lng` are both numbers or both absent/null, `federationRef`
+  absent, `null` or an object of strings, `verification` absent, `null` or an object, and no
+  reserved `__meta` / `__rest` key. Nothing is coerced. Duplicate ids and a staff row whose
+  `org_id` names no organisation in the blob are unsupported too. The migration validates
+  everything inside its transaction and, if anything is unsupported, **aborts**: rollback,
+  `ORGS_CUTOVER_BLOCKED: N unsupported record(s); repair them on the current build first — id
+  X: reason; staff usr-Y: names organisation Z, which the orgs blob does not hold`, file
+  byte-identical, blob still authoritative, same abort on the next boot. No flag drops rows,
+  no automated repair, and an invalid database is never treated as a new installation or
+  filled from demo data (`loadSnapshot` only seeds when there is genuinely no snapshot).
+- **Atomic cutover and completion record (as built).** `0004_orgs_live.up(sqlite)` inside
+  the runner's transaction, with foreign keys off for the rebuild: read the `orgs` blob
+  straight from `collections` (JSON and array checks; a missing blob is a first installation
+  and imports nothing); validate every record and every staff reference (abort as above);
+  `DROP TABLE IF EXISTS orgs` (the S1 shadow, never read by anything) and create the live
+  table; insert one row per record; `CREATE TABLE org_users_s3` (STRICT, FK, CHECKs), copy
+  every staff row, `DROP TABLE org_users`, `ALTER TABLE org_users_s3 RENAME TO org_users`,
+  recreate the four indexes — in that order because SQLite ≥ 3.26 rewrites `REFERENCES` in
+  other tables on `RENAME`, so renaming the old table first would have pointed
+  `sessions.org_user_id` at the temporary name; the migration then asserts that `sessions`
+  still references `org_users` and that the copied count equals the staff count; write
+  `meta.orgsCutover` (`at`, `imported`, `staffRebuilt`, `blobPresent`); `DELETE FROM
+  collections WHERE name = 'orgs'`. The runner checks `PRAGMA foreign_key_check`, inserts the
+  `data_migrations` row `0004_orgs_live` and commits. Completion is decided **only** by that
+  row: `attach()` throws without it whatever the table holds; a stale populated in-memory
+  array never overwrites the table (warned, ignored). Sessions are **not** touched: no row
+  deleted, no cascade (the rebuild drops the parent table only while foreign keys are off and
+  the new parent holds every id), tested by hash and by count. A failure injected after the
+  import but before the commit leaves no trace and the next boot cuts over cleanly.
+- **Startup and storage paths (all preserved, all tested).** S2 database (cuts over on first
+  boot); pre-S2 and pre-S0 files (`0003` imports the `users` blob first, then `0004` imports
+  the organisations, same boot); legacy `db.json` (imported by the store, then both
+  migrations); first installation with no snapshot (seed written through the repository on
+  the first save: 5 organisations live); restart (columns and facets come back together);
+  failure then retry; snapshot export/import and admin backup/restore (`db.orgs` is the
+  table's rows merged with their facets, written back as rows; a restore with an unsupported
+  record, a duplicate id or a staff row naming a missing organisation is rejected as a
+  whole; a partial snapshot without `orgs` leaves the table alone); shadow validation, even
+  enabled, never writes or deletes live organisations or sessions.
+- **Transitional transaction limits (documented, not hidden).** Column changes persist at
+  once in their own transaction. Facet changes persist with the next debounced snapshot save
+  (2 s), as every unmigrated collection does, through `orgs.flush()` inside that save's
+  transaction — so a crash inside the debounce window can lose a facet change made in the
+  same request whose column change already landed. The two live in one file and one backup;
+  the window closes as each facet moves to its own table (S9–S11). There is no cross-domain
+  transaction yet (C.2).
+- **Code changes.** Grassroots registration (`/auth/org/register-grassroots`) and T&S club
+  creation (`m14`) → `orgs.insert`; password upgrade on login, admin credentials rotation →
+  `orgs.update(id, { password })`; e-mail domain verification → `orgs.update(id, {
+  emailDomain, emailDomainVerified })`; `suspend_org` → `orgs.update(id, { suspended })`;
+  admin verification toggles → one `orgs.update` with only the supplied fields; `m13`
+  `/org/security` → `orgs.update(id, { mfaRequiredForLeads })`; `m14` verify / revoke →
+  `orgs.update(id, { verified })` plus the in-place `verification.revokedAt` facet write. Every
+  other reader keeps `db.orgs.find(...)` over the view.
+- **API compatibility.** No route, payload or behaviour change. Org ids, staff ids, roles,
+  MFA state, delivery preferences, unknown fields, session hashes and `sid`s are preserved
+  through the cutover and restarts (tested field by field and by hash).
+- **Tests and acceptance (all met, final code).**
+  - `node scripts/testOrgs.mjs` → **11 organisation checks passed**: mapping round trip for
+    every shape the application writes; validation refuses every unsupported shape with a
+    reason and coerces nothing; the cutover imports every field, rebuilds `org_users` STRICT
+    with the FK, keeps every staff row and session, recreates the indexes, passes
+    `foreign_key_check`, retires the blob, and afterwards the FK and CHECKs are enforced and
+    an organisation with staff cannot be deleted; an unsupported record, a duplicate id, a bad
+    plan and a staff row naming a missing organisation each abort with the file byte-identical
+    and the same abort on restart, and the repaired file cuts over; empty blob, missing blob
+    and a stale populated shadow all cut over complete, and an injected failure leaves no
+    trace; `insert`/`update` write at once, a migrated field on the view throws, facets are
+    mutable and flushed atomically with a save, everything survives a restart; authority is
+    the cutover record and a stale array never overwrites the table; snapshot mode before and
+    after the record with shape, row and FK rejections, a valid write and a partial snapshot;
+    the shadow never touches live organisations or sessions; the rollback tool produces a
+    pre-S3 copy, refuses a later schema (exit 4) and a never-cut-over file (exit 5) leaving
+    no output; and through the real server on an S2 fixture: legacy staff session valid after
+    the rebuild, four migrations reported, `domains.orgs.mode = 'live'`, the boot integrity
+    report clean with a Room owned by a live organisation (before and after a restart),
+    directory and admin views hash-free, grassroots registration is a table row at once with
+    the blob gone, login checks the stored hash, looking-for (facet) and security (column)
+    settings, admin verification writes the columns, credentials rotation kills the old
+    password, suspension → 403 with another organisation unaffected, restart brings columns
+    and facets back together with the earlier session still valid, `POST /admin/backup`
+    exports six organisations without `__meta`, and the restored directory boots with every
+    organisation, facet and session and a clean `foreign_key_check`.
+  - `node scripts/testSessions.mjs` → **25 sessions checks passed** (S3 adaptations: fixtures
+    create the organisations their staff reference; `.ran` lists include `0004_orgs_live`;
+    the S2 rollback test now chains `orgsRollback` → `sessionsRollback` and asserts the S2
+    tool refuses an S3 file).
+  - `node scripts/testCoreSchema.mjs` → **22 checks passed** (shadow projects three tables;
+    org-shadow expectations moved to guardians/players).
+  - `node scripts/testDataLayer.mjs` → **16 checks passed** (four migration ids pinned;
+    pre-boot blob list `orgs, players, users`).
+  - `node scripts/testSchemaDdl.mjs` → **13 checks passed** (migrations `0001–0004` applied
+    by the real runner match `01_identity.sql` column for column and index for index;
+    `org_users` is STRICT, so the pre-STRICT exemption is gone).
+  - `npm test` (full chain) → green: 23 trust/safeguarding, 20 identity, 16 data-layer,
+    22 core-schema, 25 sessions, 11 organisation, 13 schema-DDL checks (**130 in all**).
+  - Full server battery (48 suites, `battery.sh`, temporary `DATA_DIR`): 47 green;
+    `m182E2E` showed **4** failures on the first run — the 2 pre-existing client-source
+    failures recorded under S1 (identical on the `66c095c` baseline) plus **2 caused by
+    S3**: `integrityReport(db)` ran before `attachDataLayer()`, and after the cutover
+    `db.orgs` is a table-backed view the data layer defines, so every boot after the cutover
+    reported every Room as `ROOM_ORPHAN_ORG`. Fixed by taking the report after the data
+    layer attaches (same report, same never-repair policy); a regression check in
+    `testOrgs.mjs` fails with exactly `{"ROOM_ORPHAN_ORG":1}` on the old ordering (verified
+    by restoring it temporarily) and passes on the fix; `m182E2E` re-run → only the 2
+    baseline failures; `m23BootContract` re-run → green; `npm test` re-run → 130.
+  - Rollback verification against the **pre-S3 build** (detached worktree at `5a9e75d`,
+    scratch script, synthetic data only, 8 steps, log in the handoff): the S3 build cuts an
+    S2 fixture over (legacy staff session works, four migrations recorded); on the S3 build a
+    new organisation is registered, one is suspended, a facet (squad) is changed and a fresh
+    staff session is minted; `orgsRollback.mjs` writes the copy with the source digest
+    unchanged (6 organisations, 2 staff, 4 sessions accounted for); the copy has no cutover
+    record, an `orgs` blob holding every organisation **including the post-S3 changes**, an
+    empty S1 `orgs` table, the S0 `org_users` definition with every staff row, all 4 sessions
+    and a clean `foreign_key_check`; the pre-S3 build boots the copy, serves every
+    organisation with the post-S3 changes, accepts both sessions and a new registration, and
+    persists its own organisation as a blob; the S3 build re-upgrades the copy keeping that
+    organisation and every session; a copy carrying `0005_core_identity_live` is refused with
+    exit 4 and a never-cut-over S2 file with exit 5, no output either time.
+  - Performance (`node scripts/dataLayerPerf.mjs 1000 2000`, synthetic, throwaway database,
+    medians of 5): 50 orgs / 150 staff / 1,000 players / 2,000 sessions, 1.4 MB of JSON —
+    normal save 10.8 ms, save with shadow validation on 62.5 ms, projection alone 86 ms,
+    session lookup 30.9 µs (array) vs 10.3 µs (`byToken`), file 2.4 MB. The orgs flush is
+    inside the normal save and shows no measurable change against the S2 figure (13.2 ms).
+- **Rollback (as built and verified).** Restoring the pre-S3 backup is **not** the rollback:
+  it would discard every write made since (organisations registered, verifications, every
+  other collection). The rollback is `node scripts/orgsRollback.mjs <data-dir> <out-dir>` on
+  a copy (server stopped): opens the source read-only, copies it (`VACUUM INTO`), refuses
+  (exit 4, no output) if `data_migrations` holds any id later than `0004_orgs_live` and
+  (exit 5, no output) if that record is absent, then with foreign keys off: rebuilds the
+  `orgs` blob from the table in the previous representation (columns and facets merged,
+  `__meta` applied, mirrors dropped — every organisation created or changed after S3
+  included), recreates the S1 `orgs` shadow (empty) and the S0 `org_users` definition with
+  every staff row, leaves `sessions` untouched (nobody signs in again; no revoked session can
+  come back because no session row is written), deletes the `0004_orgs_live` row and
+  `meta.orgsCutover`, advances `meta.saveSeq`, checks `foreign_key_check`, VACUUMs and prints
+  the counts. The source is never modified; the tool is never run on the runtime directory.
+  To reach S1 run `sessionsRollback.mjs` on the result: each tool undoes exactly one step and
+  refuses a file that is not at its step.
+- **Runtime persistence changed?** Yes, for organisation columns only: one row written per
+  registration or settings change, no debounce; the `orgs` blob is gone; facets persist with
+  the snapshot save as before. Every other collection saves as before.
+- **Known limitations.** Facet persistence keeps the debounce window (above); the derived
+  mirror columns are write-only until S10; `orgs.update` accepts only migrated keys (facet
+  writers stay in place by design until their steps); the seed organisation set is written
+  through the repository on the first save of a fresh installation, which is the pre-S3
+  behaviour for a demo boot and unchanged (production init vs demo seeding stays C.6).
+- **Commit boundary.** One commit for S3 (migration, repository, call sites, rollback tool,
+  tests, documentation, the integrity-report ordering fix).
 
 ### S4 — Guardians and players (scalars) cut over; deletion becomes a tombstone; allowlisted views
 
@@ -659,9 +853,11 @@ performance, existing tests, what this plan is not).
     shipped and the file has been amended, the recruitment domain is **not ready to cut
     over**; the design is unresolved on this point, not finished.
   - *Org deletion policy (schema O2).* `org_id` columns in file 02 are `RESTRICT` on the
-    assumption that no org deletion route exists; S3 introduces one (`suspended` +
-    `deleted_at`), and the Founder's answer on open recruitment cases decides whether S8
-    keeps `RESTRICT` or adds a tombstone-aware rule.
+    assumption that no org deletion route exists. S3 shipped **without** one (no
+    `deleted_at`, no hard delete; `suspended` is the only lifecycle flag, and `org_users`
+    already enforces `RESTRICT` in practice), so the assumption still holds; the Founder's
+    answer on open recruitment cases decides whether S8 keeps `RESTRICT` or adds a
+    tombstone-aware rule.
 - **Files / tables.** `repositories/recruitment/*.mjs` (one module per aggregate), migration
   `0009_recruitment`; `server.mjs` requests/trials routes (2068–2371, 2612), `m12/scouting.mjs`
   cases, `m17/rooms.mjs`, `m23/*` (contacts, trials P4B, decisions, journey), `m27`–`m29`

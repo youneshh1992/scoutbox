@@ -112,6 +112,12 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
   let projection = null;
   let projectionFailures = 0;
   let lastProjectionError = null;
+  // Server mode only: flush hooks the data layer registers. They run inside
+  // every save transaction, before the blob rows are written, so a repository
+  // that keeps part of its records in memory between saves (the organisations'
+  // transitional facets, S3) persists them atomically with the rest of the
+  // snapshot. A flush failure fails the save: nothing half-written.
+  const flushes = [];
 
   /**
    * One save transaction. `asSnapshot` writes every collection the way snapshot
@@ -123,6 +129,7 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
   function write(snapshot, { asSnapshot }) {
     sqlite.exec('BEGIN');
     try {
+      if (!asSnapshot) for (const flush of flushes) flush();
       const inTables = new Set(asSnapshot ? writeTableBacked(sqlite, snapshot.db) : []);
       for (const [name, value] of Object.entries(snapshot.db)) {
         if ((!asSnapshot && skip.has(name)) || inTables.has(name)) { deleteCollection.run(name); continue; }
@@ -157,6 +164,8 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
     engine: 'sqlite',
     sqlite,
     setProjection(fn) { projection = typeof fn === 'function' ? fn : null; },
+    /** Register a function to run inside every server-mode save transaction (see `flushes`). */
+    setFlush(fn) { if (typeof fn === 'function') flushes.push(fn); },
     projectionState: () => ({ enabled: projection !== null, failures: projectionFailures, lastError: lastProjectionError }),
     load() {
       const rows = sqlite.prepare('SELECT name, value FROM collections').all();

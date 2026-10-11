@@ -37,10 +37,20 @@ and design changes the Founder explicitly requests.
   `db.<collection>` is that repository's read-only view (a direct write
   throws), which existing readers may keep using until the domain's readers
   move to repository queries. Unmigrated domains keep working as they are
-  until their turn. Migrated so far: `users` (staff accounts, `org_users`) and
-  `sessions` (`repositories/sessions.mjs`: tokens stored only as `token_hash`,
-  returned to the client once; every session read, creation and revocation
-  goes through the repository, never through `db.sessions`); `orgs`,
+  until their turn. Migrated so far: `users` (staff accounts, `org_users`,
+  STRICT with a real `org_id → orgs` foreign key since S3), `sessions`
+  (`repositories/sessions.mjs`: tokens stored only as `token_hash`, returned to
+  the client once; every session read, creation and revocation goes through
+  the repository, never through `db.sessions`) and `orgs`
+  (`repositories/orgs.mjs`: identity, plan, verification flags, suspension,
+  password hash, e-mail domain, MFA policy, location and federation reference
+  are columns and change only through `orgs.insert` / `orgs.update`; the
+  nested facets `tactical`, `squad`, `lookingFor`, `federationCheck`,
+  `agencySettings`, the `verification` object and any unknown field live in
+  the row's `facets_json` until their own steps and are still mutated in place
+  on the record `db.orgs` serves, persisted by the repository's flush inside
+  every save; assigning a column-backed field on that record throws; no org
+  deletion route exists and none is to be added before O2 is decided);
   `guardians`, `players` and `guardian_children` exist as a shadow (blob still
   authoritative; the projection that fills them is off unless
   `SCOUTBOX_SHADOW_VALIDATION=1` and never touches live tables). Never log,

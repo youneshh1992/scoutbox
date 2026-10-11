@@ -28,16 +28,19 @@
 import { runDataMigrations, dataSchemaReport } from './database.mjs';
 import { createUsersRepository, USERS_TABLE } from './users.mjs';
 import { createSessionsRepository, SESSIONS_TABLE } from './sessions.mjs';
+import { createOrgsRepository, ORGS_TABLE } from './orgs.mjs';
 import { createCoreIdentityShadow, CORE_SHADOW_TABLES } from './shadow.mjs';
 import * as m0001 from './migrations/0001_org_users.mjs';
 import * as m0002 from './migrations/0002_core_identity_shadow.mjs';
 import * as m0003 from './migrations/0003_sessions_live.mjs';
+import * as m0004 from './migrations/0004_orgs_live.mjs';
 
-export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003]);
+export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004]);
 
-// Order matters for snapshot writes: staff first (sessions reference them),
-// then sessions.
-const TABLES = Object.freeze([USERS_TABLE, SESSIONS_TABLE]);
+// Order matters for snapshot writes: organisations first (staff reference
+// them), then staff (sessions reference them), then sessions. Deletions of
+// rows a snapshot no longer lists (`prune`) run afterwards in reverse order.
+const TABLES = Object.freeze([ORGS_TABLE, USERS_TABLE, SESSIONS_TABLE]);
 
 /** Collections the data layer owns; the server's store never writes these blobs again. */
 export const TABLE_BACKED = Object.freeze(TABLES.map((t) => t.name));
@@ -88,12 +91,20 @@ export function checkTableBackedShapes(db) {
 
 export function writeTableBacked(sqlite, db) {
   const written = [];
-  for (const name of checkTableBackedShapes(db)) {
+  const present = checkTableBackedShapes(db);
+  for (const name of present) {
     const table = TABLES.find((t) => t.name === name);
     // `replace` is false before the domain's cutover record exists (the blob
     // is still authoritative, so the caller writes it) and THROWS on a row the
     // table refuses, which rolls the caller's whole transaction back.
     if (table.replace(sqlite, db[name])) written.push(name);
+  }
+  // Rows the snapshot no longer lists go last, children before parents, so a
+  // parent that is still referenced makes the foreign key refuse the save
+  // instead of the row disappearing under its dependants.
+  for (const name of [...present].reverse()) {
+    const table = TABLES.find((t) => t.name === name);
+    if (written.includes(name)) table.prune?.(sqlite, db[name]);
   }
   return written;
 }
@@ -102,6 +113,15 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, shadowValidat
   const sqlite = store?.sqlite ?? null;
   if (!sqlite) throw new TypeError('the data layer needs a store with a SQLite connection (node:sqlite); there is no in-memory or JSON fallback');
   const migrations = runDataMigrations(sqlite, DATA_MIGRATIONS, { log, context: { sessionTtlMs } });
+
+  // Organisations (S3) attach before staff: `org_users.org_id` references
+  // `orgs`, so a first boot that imports the seed must have its organisations
+  // in the table before a staff row can be inserted. Facet changes made on the
+  // records between saves are flushed inside every save transaction.
+  const orgs = createOrgsRepository({ sqlite, log, warn });
+  const orgsBoot = orgs.attach(db.orgs);
+  Object.defineProperty(db, 'orgs', { value: orgs.view, writable: false, configurable: false, enumerable: true });
+  store.setFlush?.(() => orgs.flush());
 
   const users = createUsersRepository({ sqlite, nextId, log, warn });
   const usersBoot = users.attach(db.users);
@@ -124,15 +144,17 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, shadowValidat
   }
 
   return {
+    orgs,
     users,
     sessions,
     shadow,
     migrations,
-    boot: { users: usersBoot, sessions: sessionsBoot },
+    boot: { orgs: orgsBoot, users: usersBoot, sessions: sessionsBoot },
     /** `details: true` adds row ids, refusal reasons and error text — admin and tooling only. */
     report: ({ details = false } = {}) => ({
       ...dataSchemaReport(sqlite, DATA_MIGRATIONS),
       domains: {
+        orgs: { rows: orgs.count(), mode: 'live', transitional: 'facets_json (tactical, squad, lookingFor, federationCheck, agencySettings, verification, unknown fields)' },
         users: { rows: users.count(), mode: 'live' },
         sessions: { rows: sessions.count(), mode: 'live', lifetimeMs: sessions.ttlMs },
       },

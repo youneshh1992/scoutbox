@@ -178,19 +178,6 @@ loadSnapshot();
 // fine: they are the same idempotent shape this registry now records.
 const migrationResult = runMigrations(db, { log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); } });
 if (migrationResult.ran.length) console.log(`schema ${migrationResult.from} → ${migrationResult.to}: applied ${migrationResult.ran.join(', ')}`);
-// M18.2 — integrity is reported at boot, never repaired. A violation is
-// logged as codes and ids (no names) and counted on /capabilities; the
-// process still starts, because a running server that says "two open Rooms
-// for one player" is more useful than a dead one that says nothing.
-const integrity = integrityReport(db);
-for (const v of integrity.violations) console.error(`INTEGRITY ${v.code} key=${v.key} ids=${v.ids.join(',')}`);
-if (integrity.violations.length) console.error(`INTEGRITY ${integrity.violations.length} violation(s) in the loaded snapshot — nothing was repaired.`);
-// M23-D2 — a required collection absent AFTER migrations means the registry
-// did not run or a step was removed. Reported loudly and never repaired here:
-// creating it at this point would mask which of those two happened.
-if (!integrity.stores.ok) {
-  console.error(`INTEGRITY STORE_MISSING ${integrity.stores.missing.join(', ')} — required collection(s) absent after migration; nothing was repaired.`);
-}
 // The relational data layer (repositories/): table migrations, then each migrated
 // domain's repository takes over its collection. From here on `db.users` is
 // the staff repository's read-only view; writes go through `users`. The id
@@ -204,10 +191,27 @@ const dataLayer = attachDataLayer({
   shadowValidation: process.env.SCOUTBOX_SHADOW_VALIDATION === '1',
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
-const { users, sessions } = dataLayer;
+const { users, sessions, orgs } = dataLayer;
 if (dataLayer.boot.users.imported) console.log(`data layer: ${dataLayer.boot.users.imported} staff record(s) moved into org_users`);
 // Sessions are table-backed (S2): rows carry hashed tokens and a sid; there is
 // nothing to backfill on the in-memory copy, which is a read-only view now.
+
+// M18.2 — integrity is reported at boot, never repaired. A violation is
+// logged as codes and ids (no names) and counted on /capabilities; the
+// process still starts, because a running server that says "two open Rooms
+// for one player" is more useful than a dead one that says nothing.
+// Runs AFTER the data layer attached (S3): `db.orgs` is a table-backed view
+// from here on, so a report taken earlier would see no organisations on any
+// boot after the cutover and call every Room an orphan.
+const integrity = integrityReport(db);
+for (const v of integrity.violations) console.error(`INTEGRITY ${v.code} key=${v.key} ids=${v.ids.join(',')}`);
+if (integrity.violations.length) console.error(`INTEGRITY ${integrity.violations.length} violation(s) in the loaded snapshot — nothing was repaired.`);
+// M23-D2 — a required collection absent AFTER migrations means the registry
+// did not run or a step was removed. Reported loudly and never repaired here:
+// creating it at this point would mask which of those two happened.
+if (!integrity.stores.ok) {
+  console.error(`INTEGRITY STORE_MISSING ${integrity.stores.missing.join(', ')} — required collection(s) absent after migration; nothing was repaired.`);
+}
 
 // Normalise media items (older shapes) + load the seeded sample clips.
 for (const p of db.players) {
@@ -1712,7 +1716,9 @@ app.post('/auth/org/register-grassroots', (req, res) => {
     return res.status(400).json({ error: 'LOCATION_REQUIRED', message: 'The 50km scouting radius is measured from your ground — a location is required.' });
   }
   if (!reqText(scoutName, 120)) return res.status(400).json({ error: 'SCOUT_NAME_REQUIRED' }); // PRE-M24 (PM-10)
-  const org = {
+  // S3: the organisation is a table row from the first byte; the repository
+  // returns the record the rest of this handler (and db.orgs) reads.
+  const org = orgs.insert({
     id: nextId('org'),
     name: name.trim(),
     type: 'club',
@@ -1726,8 +1732,7 @@ app.post('/auth/org/register-grassroots', (req, res) => {
     verifiedDomain: null,
     safeguardingContractSigned: false,
     ...(password ? { password: hashPassword(String(password)) } : {}),
-  };
-  db.orgs.push(org);
+  });
   const user = users.insert({ orgId: org.id, name: scoutName.trim(), role: (role || 'Manager').trim() });
   persist();
   broadcast('orgs');
@@ -1768,7 +1773,7 @@ app.post('/auth/org/login', (req, res) => {
   if (org.password) {
     const check = verifyPassword(req.body?.password ?? '', org.password);
     if (!check) { noteLoginFailure(`org:${orgId}`); return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This organisation is password-protected.' }); }
-    if (check === 'upgrade') org.password = hashPassword(req.body.password);
+    if (check === 'upgrade') orgs.update(org.id, { password: hashPassword(req.body.password) });
   } else if (!DEV_LOGINS) {
     return devLoginRefused(res);
   }
@@ -3038,8 +3043,7 @@ orgRouter.post('/verification/email/confirm', (req, res) => {
     return res.status(400).json({ error: 'CODE_INVALID', message: 'That code doesn\'t match — check the email.' });
   }
   db.emailChallenges = db.emailChallenges.filter((c) => c !== challenge);
-  req.org.emailDomain = challenge.email.split('@')[1];
-  req.org.emailDomainVerified = true;
+  orgs.update(req.org.id, { emailDomain: challenge.email.split('@')[1], emailDomainVerified: true });
   persist();
   broadcast('orgs');
   res.json({ emailDomainVerified: true, emailDomain: req.org.emailDomain });
@@ -4175,7 +4179,7 @@ adminRouter.post('/reports/:id/resolve', (req, res) => {
   report.outcome = String(outcome).trim();
   if (action === 'suspend_org' && report.targetOrgId) {
     const org = db.orgs.find((o) => o.id === report.targetOrgId);
-    if (org) org.suspended = true;
+    if (org) orgs.update(org.id, { suspended: true });
   }
   const audienceKind = report.by === 'org_user' ? 'org_user' : report.by;
   notify({ kind: audienceKind, id: report.byId }, 'report_resolved', `Your report was reviewed: ${report.outcome}`, report.id);
@@ -4197,7 +4201,7 @@ adminRouter.post('/clubs/:id/credentials', (req, res) => {
   if (!password || String(password).length < 8) {
     return res.status(400).json({ error: 'PASSWORD_TOO_SHORT', message: 'Club passwords need at least 8 characters.' });
   }
-  org.password = hashPassword(String(password));
+  orgs.update(org.id, { password: hashPassword(String(password)) });
   persistNow();
   res.json({ ok: true, note: 'Credentials provisioned — the organisation signs in with this password from now on.' });
 });
@@ -4206,10 +4210,12 @@ adminRouter.post('/clubs/:id/verification', (req, res) => {
   const org = db.orgs.find((o) => o.id === req.params.id);
   if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
   const { verified, safeguardingContractSigned, verifiedDomain, suspended } = req.body || {};
-  if (verified !== undefined) org.verified = !!verified;
-  if (safeguardingContractSigned !== undefined) org.safeguardingContractSigned = !!safeguardingContractSigned;
-  if (verifiedDomain !== undefined) org.verifiedDomain = verifiedDomain || null;
-  if (suspended !== undefined) org.suspended = !!suspended;
+  orgs.update(org.id, {
+    verified: verified !== undefined ? !!verified : undefined,
+    safeguardingContractSigned: safeguardingContractSigned !== undefined ? !!safeguardingContractSigned : undefined,
+    verifiedDomain: verifiedDomain !== undefined ? (verifiedDomain || null) : undefined,
+    suspended: suspended !== undefined ? !!suspended : undefined,
+  });
   // M14: the legacy toggle stays functional, but its changes now carry
   // claim-level provenance so the boolean and the claim engine never drift.
   m14Ctx?.syncLegacyOrgVerification?.(org, req.body);
@@ -4320,7 +4326,7 @@ registerM12({
 // Same module pattern under m13/. registerM13 returns the enriched context so
 // the login path above can reach the MFA rate-limit guards.
 const m13Ctx = registerM13({
-  db, users, sessions, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, users, sessions, orgs, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
@@ -4334,7 +4340,7 @@ const m13Ctx = registerM13({
 // under m14/. Returns its context so the legacy admin verification route can
 // keep claim provenance in sync.
 const m14Ctx = registerM14({
-  db, users, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, users, orgs, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,

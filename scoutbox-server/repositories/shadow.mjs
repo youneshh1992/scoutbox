@@ -38,10 +38,10 @@
  */
 import crypto from 'node:crypto';
 
-// `sessions` left this list at S2: it is a live table owned by
-// repositories/sessions.mjs and the projection never writes or deletes it,
-// whether or not validation is switched on.
-export const CORE_SHADOW_TABLES = Object.freeze(['orgs', 'guardians', 'players', 'guardian_children']);
+// `sessions` left this list at S2 and `orgs` at S3: they are live tables owned
+// by repositories/sessions.mjs and repositories/orgs.mjs, and the projection
+// never writes or deletes them, whether or not validation is switched on.
+export const CORE_SHADOW_TABLES = Object.freeze(['guardians', 'players', 'guardian_children']);
 
 /** Report statuses, from "nothing to say" to "the tables match the last save". */
 export const SHADOW_STATUS = Object.freeze({
@@ -65,12 +65,6 @@ export function createCoreIdentityShadow({ sqlite, now = Date.now }) {
   // restarted process (or a tool reading the file) can tell fresh from stale.
   sqlite.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);');
   const ins = {
-    orgs: sqlite.prepare(`INSERT INTO orgs (id, name, type, level, plan, country, city, lat, lng, federation, federation_registration_id,
-      trusted_partner, verified, verified_domain, safeguarding_contract_signed, suspended, password_hash, email_domain, email_domain_verified,
-      mfa_required_for_leads, verification_revoked_at, verification_org_type, created_at)
-      VALUES (@id, @name, @type, @level, @plan, @country, @city, @lat, @lng, @federation, @federation_registration_id,
-      @trusted_partner, @verified, @verified_domain, @safeguarding_contract_signed, @suspended, @password_hash, @email_domain, @email_domain_verified,
-      @mfa_required_for_leads, @verification_revoked_at, @verification_org_type, @created_at)`),
     guardians: sqlite.prepare(`INSERT INTO guardians (id, name, email, password_hash, email_verified, email_code_hash, id_verified, idv_reference,
       disclaimer_accepted, disclaimer_accepted_at, co_guardian_of, prefs_quiet_start, prefs_quiet_end, prefs_school_hours_mute, prefs_timezone, created_at)
       VALUES (@id, @name, @email, @password_hash, @email_verified, @email_code_hash, @id_verified, @idv_reference,
@@ -97,17 +91,6 @@ export function createCoreIdentityShadow({ sqlite, now = Date.now }) {
 
   const rows = (db, name) => (Array.isArray(db?.[name]) ? db[name] : []);
 
-  function orgParams(o) {
-    return {
-      id: text(o.id), name: text(o.name), type: text(o.type), level: text(o.level), plan: text(o.plan), country: text(o.country),
-      city: text(o.location?.city), lat: real(o.location?.lat), lng: real(o.location?.lng),
-      federation: text(o.federationRef?.federation), federation_registration_id: text(o.federationRef?.registrationId),
-      trusted_partner: bool(o.trustedPartner), verified: bool(o.verified), verified_domain: text(o.verifiedDomain),
-      safeguarding_contract_signed: bool(o.safeguardingContractSigned), suspended: bool(o.suspended), password_hash: text(o.password),
-      email_domain: text(o.emailDomain), email_domain_verified: bool(o.emailDomainVerified), mfa_required_for_leads: bool(o.mfaRequiredForLeads),
-      verification_revoked_at: int(o.verification?.revokedAt), verification_org_type: text(o.verification?.orgType), created_at: int(o.createdAt),
-    };
-  }
   function guardianParams(g) {
     return {
       id: text(g.id), name: text(g.name), email: text(g.email), password_hash: text(g.password), email_verified: bool(g.emailVerified),
@@ -163,14 +146,8 @@ export function createCoreIdentityShadow({ sqlite, now = Date.now }) {
     };
     try {
       // Children first, parents last: foreign keys are enforced on every statement.
-      // (`sessions` is live and is never touched here; see CORE_SHADOW_TABLES.)
-      for (const t of ['guardian_children', 'players', 'guardians', 'orgs']) del[t].run();
-
-      for (const o of rows(db, 'orgs')) {
-        table('orgs').source += 1;
-        if (!o || typeof o !== 'object') { table('orgs').skipped.push({ id: null, reason: 'not an object' }); continue; }
-        attempt('orgs', orgParams(o), o.id);
-      }
+      // (`sessions` and `orgs` are live and are never touched here; see CORE_SHADOW_TABLES.)
+      for (const t of ['guardian_children', 'players', 'guardians']) del[t].run();
 
       // Guardians in two passes so the result does not depend on array order:
       // every row is inserted without its co-guardian link, then each link is

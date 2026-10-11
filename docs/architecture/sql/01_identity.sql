@@ -19,11 +19,18 @@
 --   agencySettings→org_agency_settings (06)
 -- notes: orgs have no createdAt today (created_at nullable, recorded going forward). `level` also compares against
 --   'agent' at server.mjs:2598 but no row carries it; CHECK lists the written values. safeguardingCertified is derived.
+--   LIVE since migration 0004 (S3, repositories/orgs.mjs). `level` is nullable: the verification review creates
+--   non-grassroots organisations with level null (m14/review.mjs). `facets_json` is the S3 TRANSITIONAL storage for every
+--   record field that has not cut over yet (squad, tactical, lookingFor, federationCheck, verification, agencySettings,
+--   unknown fields) plus the record's shape metadata (`__meta`: key order, explicit nulls, present composites); it is
+--   owned by the repository, mutated in place by the owning modules and flushed inside every save, and shrinks as
+--   S9–S11 move those facets into the tables named above. verification_revoked_at / verification_org_type are a derived
+--   MIRROR of the verification facet, rewritten at every flush and read by nothing; the facet is authoritative until S10.
 CREATE TABLE orgs (
   id                           TEXT PRIMARY KEY,
   name                         TEXT NOT NULL,
   type                         TEXT NOT NULL CHECK (type IN ('club','agency')),
-  level                        TEXT NOT NULL CHECK (level IN ('pro','academy','agency','grassroots')),
+  level                        TEXT CHECK (level IS NULL OR level IN ('pro','academy','agency','grassroots')),
   plan                         TEXT NOT NULL CHECK (plan IN ('Pro','Academy','Agency','Grassroots')),
   country                      TEXT,
   city                         TEXT,
@@ -40,9 +47,10 @@ CREATE TABLE orgs (
   email_domain                 TEXT,
   email_domain_verified        INTEGER NOT NULL DEFAULT 0 CHECK (email_domain_verified IN (0,1)),
   mfa_required_for_leads       INTEGER NOT NULL DEFAULT 0 CHECK (mfa_required_for_leads IN (0,1)),
-  verification_revoked_at      INTEGER,
-  verification_org_type        TEXT,
+  verification_revoked_at      INTEGER,                    -- derived mirror of verification.revokedAt (see notes)
+  verification_org_type        TEXT,                       -- derived mirror of verification.orgType (see notes)
   created_at                   INTEGER,
+  facets_json                  TEXT CHECK (facets_json IS NULL OR json_valid(facets_json)), -- S3 transitional storage (see notes)
   CHECK ((lat IS NULL) = (lng IS NULL))
 ) STRICT;
 CREATE INDEX orgs_type_level ON orgs (type, level);        -- /orgs directory filters (server.mjs:1683-1696, 4052)
@@ -53,13 +61,15 @@ CREATE INDEX orgs_type_level ON orgs (type, level);        -- /orgs directory fi
 -- mapping: id→id, orgId→org_id, name→name, role→role, email→email, ssoSubject→sso_subject, createdAt→created_at,
 --   removedAt→removed_at, removedBy→removed_by, provenance→provenance, mfa→mfa_json (secretB32 is PLAIN today: open
 --   question §9), deliveryPrefs→delivery_prefs_json, unknown fields→extra_json
--- notes: org_id becomes a real FK when orgs cuts over (S3): ALTER needs a table rebuild in SQLite; step S3 does it.
---   This table is shown EXACTLY as migration 0001 created it (before the STRICT convention): not STRICT and without
---   json_valid CHECKs. The S3 rebuild recreates it STRICT with the FK and the CHECKs. scripts/testSchemaDdl.mjs
---   compares this definition with the migration and exempts only this table from the STRICT assertion.
+-- notes: created non-STRICT and without a foreign key by migration 0001 (S0); REBUILT by migration 0004 (S3) in the
+--   form below — STRICT, org_id REFERENCES orgs(id) (NO ACTION: an organisation with staff cannot be deleted; the
+--   deletion policy itself is open question O2 and is not implemented), json_valid CHECKs on the three JSON columns.
+--   The rebuild runs with foreign keys off (create new, copy, drop old, rename), so `sessions.org_user_id` keeps
+--   referencing this table by name and no staff session is cascaded away; the migration runner verifies
+--   PRAGMA foreign_key_check before committing. scripts/testSchemaDdl.mjs compares this definition with the migrations.
 CREATE TABLE org_users (
   id                  TEXT PRIMARY KEY,
-  org_id              TEXT NOT NULL,                      -- FK orgs(id) added at S3 (table rebuild)
+  org_id              TEXT NOT NULL REFERENCES orgs(id),  -- S3: real foreign key
   name                TEXT NOT NULL,
   role                TEXT,
   email               TEXT,                               -- personal data
@@ -68,10 +78,10 @@ CREATE TABLE org_users (
   removed_at          INTEGER,
   removed_by          TEXT,                               -- snapshot (name)
   provenance          TEXT,
-  mfa_json            TEXT,                               -- {secretB32, enabledAt, recoveryHashes[]}; json_valid CHECK at S3
-  delivery_prefs_json TEXT,                               -- json_valid CHECK at S3
-  extra_json          TEXT                                -- json_valid CHECK at S3
-);
+  mfa_json            TEXT CHECK (mfa_json IS NULL OR json_valid(mfa_json)),                       -- {secretB32, enabledAt, recoveryHashes[]}
+  delivery_prefs_json TEXT CHECK (delivery_prefs_json IS NULL OR json_valid(delivery_prefs_json)),
+  extra_json          TEXT CHECK (extra_json IS NULL OR json_valid(extra_json))
+) STRICT;
 CREATE INDEX org_users_org ON org_users (org_id);
 CREATE INDEX org_users_org_name ON org_users (org_id, lower(name));
 CREATE INDEX org_users_org_email ON org_users (org_id, email);

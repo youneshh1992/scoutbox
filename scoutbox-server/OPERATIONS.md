@@ -35,7 +35,8 @@ whole on a debounce. Collections that have moved to the relational data layer
 inside a transaction the moment a change happens, and recorded in
 `data_migrations`. `GET /capabilities` lists them under `dataLayer` (`tables`,
 `migrations`, `domains`). Moved so far: staff accounts (`users` → `org_users`,
-migration `0001`) and sessions (`sessions`, migration `0003`, see "Sessions"
+migration `0001`), sessions (`sessions`, migration `0003`, see "Sessions"
+below) and organisations (`orgs`, migration `0004`, see "Organisations"
 below). A first boot after a move imports the old blob into the table and
 retires the blob. Tools that read or write the file as one snapshot
 (`openStore(dir)` without options) see every collection in the shape the
@@ -182,6 +183,74 @@ and event-stream tickets) stay valid across the cutover and every restart.
   every session alive exactly as a copy of the database file would. Before S2
   the same file carried plain tokens; a backup still deserves the same care as
   the live directory, as its manifest says.
+
+### Organisations (live since migration `0004`)
+Organisations are rows of the `orgs` table, owned by `repositories/orgs.mjs`.
+The identity and policy fields (name, type, level, plan, country, trusted
+partner, verified, verified domain, safeguarding contract, suspended, the
+shared bootstrap password hash, e-mail domain and its verification, the MFA
+requirement for leads, creation time, location and federation reference) are
+columns, written the moment a route changes them. The nested facets that
+still belong to later steps (`tactical`, `squad`, `lookingFor`,
+`federationCheck`, `agencySettings`, the `verification` object and any field
+the schema does not know) travel in the row's `facets_json` and are saved
+together with the rest of the snapshot. `GET /capabilities` shows the domain
+under `dataLayer.domains.orgs` (`mode: 'live'`, the row count and the
+transitional column). Staff rows (`org_users`) now carry a real foreign key to
+`orgs`: a staff row cannot name an organisation that does not exist, and an
+organisation with staff cannot be deleted from the table.
+
+- **S3 cutover (first boot of this build on an older file).** The boot reads
+  the old `orgs` blob, validates every record, creates the `orgs` table, rebuilds
+  `org_users` as a STRICT table with the foreign key (new table, copy, drop,
+  rename — sessions keep pointing at `org_users` and no session row is touched),
+  records `0004_orgs_live` and retires the blob, all in one transaction. If any
+  record is unsupported (unknown type, level or plan, a non-boolean flag, a
+  malformed location or federation reference, a duplicate id, or a staff row
+  naming an organisation the blob does not hold) the boot **refuses** with
+  `ORGS_CUTOVER_BLOCKED` and lists each organisation id with its reason; the
+  file is unchanged and the previous build still runs it. Nothing is dropped,
+  coerced or repaired automatically, and demo data is never used to fill a gap.
+  Dry-run first exactly as for S2: copy the data directory, boot this build
+  with `DATA_DIR=<copy>`, read the log. If it refuses, correct the listed
+  records on the previous build with the server stopped, repeat the dry run,
+  then upgrade.
+- **What changed in how saves work.** Column-backed fields persist at once, in
+  their own transaction, like sessions. Facet changes (a squad edit, a
+  looking-for list, a verification domain) persist with the next debounced
+  snapshot save, as every unmigrated collection does, so a crash inside the two
+  second debounce window can lose a facet change while the column change made
+  in the same request has already been written. Both live in the same database
+  file and the same backup; this window closes as each facet moves to its own
+  table (plan S9–S11).
+- **Deletion.** There is still no route that deletes an organisation, and this
+  step adds none: the policy for an organisation with open recruitment cases
+  (schema open question O2) is undecided, so neither a tombstone nor a hard
+  delete exists. `suspended` remains the only lifecycle flag.
+- **Rollback to the previous build (S2).** Do not restore a pre-cutover backup
+  (it would discard every later write). Run
+  `node scripts/orgsRollback.mjs <data-dir> <out-dir>` (server stopped): it
+  copies the current file read-only into `<out-dir>`, writes every organisation
+  — including those created after the cutover, with every column and facet —
+  back into the legacy `orgs` blob in the previous representation, rebuilds
+  `org_users` with the previous (S0) definition keeping every staff row,
+  leaves `sessions` untouched (nobody signs in again, and no revoked session
+  comes back), removes the `0004_orgs_live` record and `meta.orgsCutover`, and
+  prints the counts. The source is never modified. The tool refuses (exit 4, no
+  output file) a database that carries a migration later than `0004`, refuses
+  (exit 5) one that never cut over, and refuses an output directory that
+  already holds a database. To go back further than S2, run
+  `scripts/sessionsRollback.mjs` on the result of this tool: each tool only
+  undoes its own step.
+- **Snapshot tools and backups.** In snapshot mode (`openStore(dir)` without
+  options) `db.orgs` is read from the table once the cutover record exists —
+  columns and facets merged back into the record shape the server sees — and
+  written back as rows; a save with an unsupported record, a duplicate id or a
+  staff row naming a missing organisation is rejected as a whole. Before the
+  record (an S2 file, or a rollback copy) the tool reads and writes the legacy
+  blob and leaves the table alone. `POST /admin/backup` exports the same shape;
+  restoring it into an empty directory boots with every organisation, facet,
+  staff row and session intact.
 
 The design and the cutover order are in `docs/architecture/sqlite-schema.md`
 and `docs/architecture/sqlite-migration-plan.md`.

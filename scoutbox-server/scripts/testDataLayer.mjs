@@ -21,8 +21,11 @@ function test(name, fn) {
 }
 const fresh = () => { const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;'); return s; };
 let counter = 1000;
+const ORG_O = { id: 'o', name: 'Org O', type: 'club', level: 'pro', plan: 'Pro' };
 const nextId = (p) => `${p}-${++counter}`;
-const repoOn = (sqlite, legacy = []) => { const r = createUsersRepository({ sqlite, nextId, persist: () => {} }); r.attach(legacy); return r; };
+// Since S3 `org_users.org_id` is a foreign key: the staff fixtures' organisations must exist first.
+const seedOrgs = (sqlite, ids = ['org-a', 'org-b', 'o']) => { for (const id of ids) sqlite.prepare("INSERT OR IGNORE INTO orgs (id, name, type, level, plan) VALUES (?, 'Org', 'club', 'pro', 'Pro')").run(id); };
+const repoOn = (sqlite, legacy = []) => { seedOrgs(sqlite); const r = createUsersRepository({ sqlite, nextId, persist: () => {} }); r.attach(legacy); return r; };
 
 // ------------------------------------------------------- migration runner
 test('migrations: each step runs once, in id order, and is recorded in the database', () => {
@@ -63,7 +66,7 @@ test('schema report: names tables and counts, never rows', () => {
   // core identity shadow tables); the report must list exactly what exists.
   assert.deepEqual(report, {
     engine: 'sqlite', migrationsApplied: DATA_MIGRATIONS.length, migrationsKnown: DATA_MIGRATIONS.length,
-    migrations: ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live'],
+    migrations: ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live'],
     tables: ['guardian_children', 'guardians', 'org_users', 'orgs', 'players', 'sessions'],
   });
   // There is no in-memory engine to report on: a missing connection is a programming error, not a mode.
@@ -147,7 +150,7 @@ test('repository: lookups by id, by organisation and by case-insensitive name', 
 test('repository: a table row survives a new process while the id counter is behind — ids are skipped, never reused', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-users-'));
   const file = path.join(dir, 'x.db');
-  let s = new DatabaseSync(file); runDataMigrations(s, DATA_MIGRATIONS);
+  let s = new DatabaseSync(file); runDataMigrations(s, DATA_MIGRATIONS); seedOrgs(s);
   let local = 1000; const ids = (p) => `${p}-${++local}`;
   let repo = createUsersRepository({ sqlite: s, nextId: ids, persist: () => {} }); repo.attach([]);
   const first = repo.insert({ orgId: 'o', name: 'One', role: 'Scout' });
@@ -164,7 +167,7 @@ test('repository: a table row survives a new process while the id counter is beh
   s.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 test('repository: the legacy blob array is imported once, with every field kept, and ignored once the table has rows', () => {
-  const s = fresh(); runDataMigrations(s, DATA_MIGRATIONS);
+  const s = fresh(); runDataMigrations(s, DATA_MIGRATIONS); seedOrgs(s);
   const legacy = [
     { id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 5, email: 'a@x', ssoSubject: 'idp-1', mfa: { secretB32: 'S', enabledAt: 7, recoveryHashes: [] }, deliveryPrefs: { quietStart: '22:00' }, removedAt: 9, removedBy: 'B', oddField: { kept: true } },
     { id: 'usr-2', orgId: 'o', name: 'B', role: 'Manager', createdAt: 6 },
@@ -205,7 +208,7 @@ test('repository: without sqlite there is no in-memory mode — construction ref
 test('attachDataLayer: db.users becomes the repository view and cannot be replaced', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-layer-'));
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { players: [], users: [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }] };
+  const db = { players: [], orgs: [ORG_O], users: [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }] };
   const layer = attachDataLayer({ db, store, nextId, persist: () => {} });
   assert.deepEqual(layer.boot.users, { engine: 'sqlite', loaded: 1, imported: 1 });
   assert.equal(db.users.length, 1);
@@ -237,7 +240,7 @@ test('store (snapshot mode): load merges table-backed collections in from their 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-snap-'));
   // A server boot: the table exists and holds one row; the blob is gone.
   const server = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { players: [{ id: 'p' }], users: [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }] };
+  const db = { players: [{ id: 'p' }], orgs: [ORG_O], users: [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }] };
   attachDataLayer({ db, store: server, nextId, persist: () => {} });
   server.save({ savedAt: 1, idCounter: 1000, db });
   server.sqlite.close();
@@ -266,8 +269,8 @@ test('store (snapshot mode): load merges table-backed collections in from their 
 test('store (snapshot mode): before any boot there is no table, so a fixture is written as a blob and imported by the first boot', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-fixture-'));
   const tool = openStore(dir);
-  tool.save({ savedAt: 1, idCounter: 1000, db: { players: [], users: [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }] } });
-  assert.deepEqual(tool.sqlite.prepare('SELECT name FROM collections ORDER BY name').all().map((r) => r.name), ['players', 'users']);
+  tool.save({ savedAt: 1, idCounter: 1000, db: { players: [], orgs: [ORG_O], users: [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }] } });
+  assert.deepEqual(tool.sqlite.prepare('SELECT name FROM collections ORDER BY name').all().map((r) => r.name), ['orgs', 'players', 'users']);
   tool.sqlite.close();
   const server = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = { ...server.load().db };

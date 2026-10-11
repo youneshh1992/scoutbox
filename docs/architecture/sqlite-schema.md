@@ -1,8 +1,9 @@
 # ScoutBox relational SQLite schema
 
 Status: design proposed, executable DDL in `docs/architecture/sql/`, implementation steps
-S0 (staff), S1 (core identity shadow, corrected after acceptance review) and S2 (sessions
-live, hashed tokens) done (§5.0 says exactly which parts are implemented, proposed, or
+S0 (staff), S1 (core identity shadow, corrected after acceptance review), S2 (sessions
+live, hashed tokens) and S3 (organisations live, `org_users` rebuilt STRICT with its
+foreign key) done (§5.0 says exactly which parts are implemented, proposed, or
 waiting on a decision). Companion
 document: [`sqlite-migration-plan.md`](./sqlite-migration-plan.md). Written 10 October
 2026 on branch `feat/sqlite-schema`.
@@ -61,8 +62,14 @@ other worktrees (`/home/user/scoutbox` on `claude/desktop-project-migration-wyk3
   (`server.mjs:581`) and broadcasting a chat message (`server.mjs:521` via `broadcast`).
 - Boot order (`server.mjs:115-235`): `buildSeed()` → `loadSnapshot()` replaces the seed when a
   snapshot exists → `runMigrations()` (`m182/migrations.mjs`, `SCHEMA_VERSION 2308`) →
-  `integrityReport()` → `attachDataLayer()` → `db.x ??= []` normalisation → module
-  registration → listen.
+  `attachDataLayer()` → `integrityReport()` → `db.x ??= []` normalisation → module
+  registration → listen. The integrity report moved after the data layer at S3: it reads
+  `db.orgs`, which is a table-backed view from the cutover on, so taken earlier it would
+  have called every Room an orphan on every boot after the cutover (found by the server
+  battery, regression test in `testOrgs.mjs`). The same ordering constraint holds for any
+  future `m182` blob migration that would read `users`, `sessions` or `orgs`: those
+  collections are empty placeholders until `attachDataLayer()` runs (the existing steps
+  that read them are recorded and never re-run).
 - Ids are `${prefix}-${++idCounter}` from one global counter persisted in `meta`
   (`server.mjs:579-583`); seed rows use natural ids (`org-eastport`, `pl-adeyemi`), migration
   backfills use `${prefix}-mig2305-<b36>-<seq>`.
@@ -113,7 +120,7 @@ them.
 | Collection | Class | File | Table(s) | Step |
 |---|---|---|---|---|
 | `users` | persistent | 01 | `org_users` (LIVE since migration 0001) | S0 done |
-| `orgs` | persistent | 01 (+04, 05) | `orgs`; nested `tactical` → `org_tactical_setups/roles/role_criteria/windows`, `squad[]` → `org_squad_members`, `lookingFor[]` → `org_looking_for`, `federationCheck` → `org_federation_checks` (04); `verification.domains[]` → `org_verified_domains` (05); `verification.revokedAt/orgType` → columns on `orgs`; `agencySettings` → 06 | S3 (scalars), S9/S10/S11 (nested) |
+| `orgs` | persistent | 01 (+04, 05) | `orgs`; nested `tactical` → `org_tactical_setups/roles/role_criteria/windows`, `squad[]` → `org_squad_members`, `lookingFor[]` → `org_looking_for`, `federationCheck` → `org_federation_checks` (04); `verification.domains[]` → `org_verified_domains` (05); `verification.revokedAt/orgType` → columns on `orgs`; `agencySettings` → 06 | **S3 done** (live; scalars and composites are columns, the nested facets ride in `orgs.facets_json` until S9/S10/S11; blob retired by migration `0004`) |
 | `guardians` | persistent | 01 | `guardians`; `childIds[]` → `guardian_children`; `coGuardians[]` derived from `co_guardian_of` | S4 (shadow since S1) |
 | `players` | persistent | 01 | `players` (scalars, `stats`, `medical.shared/conditionStatus`, `notificationPrefs`, `programme.track/startedAt`, `location`); `seasonHistory[]`, `badges[]`, `drills[]`, `attendance[]`, `timeline[]`, `media[]` (+`media[].tags` → `player_media_tags`), `medical.records[]`, `drillResults[]`, `activityLog[]`, `externalIds[]`, `programme.completed[]` → twelve `player_*` tables; `trialReports[]` derived (copy of `trials.report`) | S4 (scalars, shadow since S1), S5 (sub-records) |
 | `sessions` | temporary | 01 | `sessions` (token stored as `token_hash`) | **S2 done** (live; blob retired by migration `0003`) |
@@ -388,8 +395,8 @@ this branch: 13 checks passed.
 
 | State | Tables | Where |
 |---|---|---|
-| **Implemented, live** (a repository owns the rows; the blob is gone) | 2: `org_users`, `sessions` (`token_hash` only; the table was created by `0002` and became live, with the legacy blob imported and retired, in `0003`) | migrations `0001` (S0), `0003` (S2) |
-| **Implemented, shadow** (tables exist with their final constraints; filled only when validation is switched on; nothing reads them) | 4: `orgs`, `guardians`, `players`, `guardian_children` | migration `0002` (S1) |
+| **Implemented, live** (a repository owns the rows; the blob is gone) | 3: `org_users` (rebuilt STRICT with `org_id REFERENCES orgs(id)` and `json_valid` CHECKs in `0004`), `sessions` (`token_hash` only; the table was created by `0002` and became live, with the legacy blob imported and retired, in `0003`), `orgs` (created live by `0004` with the legacy blob imported and retired; scalars and the `location` / `federationRef` composites are columns, the nested facets ride in `facets_json` until S9–S11) | migrations `0001` (S0), `0003` (S2), `0004` (S3) |
+| **Implemented, shadow** (tables exist with their final constraints; filled only when validation is switched on; nothing reads them) | 3: `guardians`, `players`, `guardian_children` (the S1 `orgs` shadow was dropped and recreated live by `0004`) | migration `0002` (S1) |
 | **Proposed** (executable DDL, asserted to load, no migration, no repository) | 314 | files 01 (12 `player_*`), 02–08 |
 | Of the proposed, **blocked on an unresolved decision** | file 02 (55 tables): every `player_id` lacks a foreign key until the tombstone decision O1 is implemented at S4, and `org_id RESTRICT` depends on O2; `webhook_endpoints.secret` and `org_users.mfa_json` depend on O3; `exposure_events`, `webhook_deliveries`, `dispatches`, `outbox` retention depends on O4; `assessments` depends on O6; `second_look_items` key on O7; `representations` on O8; `agent_profile_facets.member_association` sentinel on O10 | §10, §12 |
 
@@ -448,16 +455,39 @@ guardians ──< guardian_children >── players ──< player_* (12 sub-rec
   └──< sessions (kind='guardian')                  └──< sessions (kind='player')
 ```
 
-- **`orgs`** — one row per club or agency. Owner: registration (`server.mjs:1734`), T&S org
-  creation (`m14/review.mjs:382`), org settings routes. Lifecycle: `suspended` flag,
-  `verification_revoked_at`; no deletion route exists today (OPEN §12). CHECKs: `type IN
-  (club, agency)`, `level IN (pro, academy, agency, grassroots)`, `plan IN (Pro, Academy,
-  Agency, Grassroots)`, `(lat IS NULL) = (lng IS NULL)`. `password_hash` is the org's shared
-  bootstrap password (still used for the one-time bootstrap path after `3fe242b`).
-- **`org_users`** — staff accounts (live since S0). Columns: `id, org_id, name, role, email,
-  sso_subject, created_at, removed_at, removed_by, provenance, mfa_json, delivery_prefs_json,
-  extra_json`; indexes on `org_id`, `(org_id, lower(name))`, `(org_id, email)`,
-  `sso_subject`. `org_id` gets its `REFERENCES orgs(id)` at S3 (orgs are not a table yet).
+- **`orgs`** — one row per club or agency (live since S3, `repositories/orgs.mjs`). Owner:
+  registration (`server.mjs`, `orgs.insert`), T&S org creation (`m14/review.mjs`,
+  `orgs.insert`), org settings routes, admin verification / credentials / suspension and
+  the `m13` security route (`orgs.update`). Lifecycle: `suspended` flag; no deletion route
+  exists today and S3 adds none (O2, below). CHECKs: `type IN (club, agency)`, `level IS
+  NULL OR level IN (pro, academy, agency, grassroots)` (nullable since S3: the T&S creation
+  path writes `level: null`, which the S1 shadow could not hold), `plan IN (Pro, Academy,
+  Agency, Grassroots)`, `(lat IS NULL) = (lng IS NULL)`, every flag `IN (0,1)`,
+  `json_valid(facets_json)`. Columns: identity (`id, name, type, level, plan, country`), the
+  `location` composite (`city, lat, lng`), the `federationRef` composite (`federation,
+  federation_registration_id`), flags (`trusted_partner, verified, verified_domain,
+  safeguarding_contract_signed, suspended, email_domain, email_domain_verified,
+  mfa_required_for_leads`), `password_hash` (the org's shared bootstrap password, still used
+  for the one-time bootstrap path after `3fe242b`), `created_at`, and `facets_json`
+  (**transitional**): the nested `tactical`, `squad`, `lookingFor`, `federationCheck`,
+  `agencySettings`, the whole `verification` object and any field the schema does not know,
+  plus the record's key order, explicit nulls and composite presence so the record the
+  server sees is byte-for-byte the record it wrote. `verification_revoked_at` and
+  `verification_org_type` are **derived mirrors** of `verification.revokedAt` /
+  `verification.orgType` written at every flush; nothing reads them until S10 moves the
+  verification object out of the facets, when they become authoritative. Index
+  `orgs_type_level`.
+- **`org_users`** — staff accounts (live since S0; rebuilt STRICT at S3). Columns: `id, org_id,
+  name, role, email, sso_subject, created_at, removed_at, removed_by, provenance, mfa_json,
+  delivery_prefs_json, extra_json`; `org_id TEXT NOT NULL REFERENCES orgs(id)` (enforced:
+  a staff row cannot name a missing organisation and an organisation with staff cannot be
+  deleted), `json_valid` CHECKs on the three JSON columns; indexes on `org_id`, `(org_id,
+  lower(name))`, `(org_id, email)`, `sso_subject`. The S3 rebuild creates `org_users_s3`,
+  copies every row, drops the old table and renames the new one — in that order, because
+  SQLite ≥ 3.26 rewrites `REFERENCES` in *other* tables on `RENAME`, so renaming the old
+  table first would have redirected `sessions.org_user_id` to the temporary name; the
+  migration asserts afterwards that `sessions` still references `org_users` and that every
+  staff row was copied, and `PRAGMA foreign_key_check` must be empty before the commit.
 - **`guardians`** — adults who manage minors. Unique e-mail, case-insensitive, by index
   (`guardians_email ON guardians (lower(email))`): the code enforces it only on signup and the
   co-guardian path bypasses it today (`server.mjs:1576-1590`), so the shadow report shows
@@ -858,11 +888,16 @@ catalogue; shadow-then-cutover per domain; no integer keys; no triggers or views
   is after S14.
 - A5. Node 22 `node:sqlite` stays available in the deployment image (Dockerfile pins Node 22).
 
-**Open questions** (for the Founder or a later step; none blocks S2):
+**Open questions** (for the Founder or a later step; none blocked S2 or S3):
 
 - O1. Deletion: keep `birth_date` on the player tombstone (needed for minor rules while audit
   rows exist) or erase it? Proposed: keep year only.
-- O2. Org deletion policy with open recruitment cases.
+- O2. Org deletion policy with open recruitment cases. **Deferred past S3 deliberately**: S3
+  cut organisations over without a tombstone column and without a hard-delete path, because
+  no route deletes an organisation today and the foreign key from `org_users` (and, from S8,
+  from every recruitment table) makes the choice between `RESTRICT`, a tombstone that keeps
+  open cases readable and a cascade a product decision, not a storage one. Until it is taken,
+  `suspended` is the only lifecycle flag and the repository exposes no delete.
 - O3. Encrypt `webhook_endpoints.secret` and `org_users.mfa_json` secrets at rest with an env
   key, or accept hashed-where-possible plus file permissions for beta?
 - O4. Retention windows for `webhook_deliveries`, `dispatches`, `outbox`, `exposure_events`.

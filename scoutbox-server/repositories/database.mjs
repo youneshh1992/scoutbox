@@ -24,16 +24,31 @@ export function runDataMigrations(sqlite, migrations, { now = Date.now(), log = 
   const sorted = [...migrations].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   for (const step of sorted) {
     if (applied.has(step.id)) continue;
-    sqlite.exec('BEGIN');
+    // A step that rebuilds a table other tables reference (`foreignKeysOff`)
+    // runs with foreign keys off: SQLite cannot change the setting inside a
+    // transaction, and dropping a referenced table with them on would cascade
+    // (sessions → org_users). Before such a step commits, foreign_key_check
+    // must report nothing, so no dangling reference can be committed.
+    const fkOff = step.foreignKeysOff === true;
+    if (fkOff) sqlite.exec('PRAGMA foreign_keys = OFF;');
     try {
-      // `context` carries runtime configuration a data migration needs (the
-      // session lifetime, the clock); a migration never reads env itself.
-      step.up(sqlite, { now, ...context });
-      sqlite.prepare('INSERT INTO data_migrations (id, applied_at) VALUES (?, ?)').run(step.id, now);
-      sqlite.exec('COMMIT');
-    } catch (err) {
-      sqlite.exec('ROLLBACK');
-      throw new Error(`data migration ${step.id} failed: ${err?.message ?? err}. Boot aborted; the database was not modified.`);
+      sqlite.exec('BEGIN');
+      try {
+        // `context` carries runtime configuration a data migration needs (the
+        // session lifetime, the clock); a migration never reads env itself.
+        step.up(sqlite, { now, ...context });
+        if (fkOff) {
+          const broken = sqlite.prepare('PRAGMA foreign_key_check').all();
+          if (broken.length) throw new Error(`foreign_key_check found ${broken.length} broken reference(s) after the rebuild (first: ${broken[0].table} rowid ${broken[0].rowid} → ${broken[0].parent})`);
+        }
+        sqlite.prepare('INSERT INTO data_migrations (id, applied_at) VALUES (?, ?)').run(step.id, now);
+        sqlite.exec('COMMIT');
+      } catch (err) {
+        sqlite.exec('ROLLBACK');
+        throw new Error(`data migration ${step.id} failed: ${err?.message ?? err}. Boot aborted; the database was not modified.`);
+      }
+    } finally {
+      if (fkOff) sqlite.exec('PRAGMA foreign_keys = ON;');
     }
     ran.push(step.id);
     log(`data migration applied: ${step.id} — ${step.note}`);

@@ -61,7 +61,7 @@ export function requestInstrumentation() {
 
 export function registerEnterprise(ctx) {
   const {
-    db, users, sessions, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
+    db, users, sessions, orgs, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
     mailer, requireLead, isLead, paginate, histAppend, timingSafeEq, signBody,
     storage, DATA_DIR,
   } = ctx;
@@ -193,7 +193,7 @@ export function registerEnterprise(ctx) {
 
   orgRouter.put('/security', (req, res) => {
     if (!requireLead(req, res)) return;
-    req.org.mfaRequiredForLeads = req.body?.mfaRequiredForLeads === true;
+    orgs.update(req.org.id, { mfaRequiredForLeads: req.body?.mfaRequiredForLeads === true });
     persistNow();
     res.json({ mfaRequiredForLeads: req.org.mfaRequiredForLeads, note: 'Enforced at login: leads without MFA are asked to set it up before privileged actions.' });
   });

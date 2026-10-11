@@ -12,6 +12,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations, transaction } from '../repositories/database.mjs';
 import { createSessionsRepository, validateSessionRow, SESSIONS_TABLE, SESSIONS_CUTOVER_MIGRATION } from '../repositories/sessions.mjs';
 import { rollbackSessionsCopy } from '../repositories/sessionsRollback.mjs';
+import { ORGS_CUTOVER_MIGRATION } from '../repositories/orgs.mjs';
+import { rollbackOrgsCopy } from '../repositories/orgsRollback.mjs';
 import { createCoreIdentityShadow } from '../repositories/shadow.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import * as m0001 from '../repositories/migrations/0001_org_users.mjs';
@@ -31,7 +33,10 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 let counter = 7000;
 const nextId = (p) => `${p}-${++counter}`;
 const tempDir = (tag) => fs.mkdtempSync(path.join(os.tmpdir(), `sb-${tag}-`));
-const seedUser = (s, id = 'usr-1', org = 'org-a') => s.prepare("INSERT INTO org_users (id, org_id, name, role, created_at) VALUES (?, ?, 'Staff', 'Scout', 1)").run(id, org);
+const ORG_A = { id: 'org-a', name: 'Org A', type: 'club', level: 'pro', plan: 'Pro', country: 'GB' };
+const ORG_B = { id: 'org-b', name: 'Org B', type: 'club', level: 'pro', plan: 'Pro', country: 'GB' };
+const seedOrg = (s, id = 'org-a') => s.prepare("INSERT OR IGNORE INTO orgs (id, name, type, level, plan) VALUES (?, 'Org', 'club', 'pro', 'Pro')").run(id);
+const seedUser = (s, id = 'usr-1', org = 'org-a') => { seedOrg(s, org); s.prepare("INSERT INTO org_users (id, org_id, name, role, created_at) VALUES (?, ?, 'Staff', 'Scout', 1)").run(id, org); };
 
 /** A legacy-shaped sessions blob (what the blob store held before S2). */
 const legacySessions = (now = Date.now()) => [
@@ -43,7 +48,7 @@ const legacySessions = (now = Date.now()) => [
 ];
 
 /** A pre-S2 database file: blob collections (including sessions) plus the S0 and S1 tables. */
-function preS2File(dir, { sessions = legacySessions(), users = [{ id: 'usr-1', orgId: 'org-a', name: 'Staff', role: 'Scout', createdAt: 1 }], extra = {} } = {}) {
+function preS2File(dir, { sessions = legacySessions(), users = [{ id: 'usr-1', orgId: 'org-a', name: 'Staff', role: 'Scout', createdAt: 1 }], orgs = [ORG_A, ORG_B], extra = {} } = {}) {
   const s = new DatabaseSync(path.join(dir, 'scoutbox.db'));
   s.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
   s.exec('CREATE TABLE IF NOT EXISTS collections (name TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);');
@@ -51,6 +56,7 @@ function preS2File(dir, { sessions = legacySessions(), users = [{ id: 'usr-1', o
   for (const u of users) s.prepare("INSERT INTO org_users (id, org_id, name, role, created_at) VALUES (?, ?, ?, ?, ?)").run(u.id, u.orgId, u.name, u.role, u.createdAt);
   const put = s.prepare('INSERT INTO collections (name, value) VALUES (?, ?)');
   put.run('sessions', JSON.stringify(sessions));
+  put.run('orgs', JSON.stringify(orgs)); // the staff rows above name these organisations (S3 foreign key)
   put.run('players', JSON.stringify([{ id: 'pl-1', name: 'P' }]));
   for (const [k, v] of Object.entries(extra)) put.run(k, JSON.stringify(v));
   s.prepare("INSERT INTO meta (key, value) VALUES ('idCounter', '1000'), ('savedAt', '1'), ('saveSeq', '1')").run();
@@ -89,7 +95,7 @@ test('cutover: a valid legacy blob is imported with hashed tokens, the blob is r
   const dir = tempDir('s2-valid'); preS2File(dir);
   const s = openRaw(dir);
   const r = runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } });
-  assert.deepEqual(r.ran, [SESSIONS_CUTOVER_MIGRATION]);
+  assert.deepEqual(r.ran, [SESSIONS_CUTOVER_MIGRATION, ORGS_CUTOVER_MIGRATION]);
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 5);
   assert.equal(s.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'sessions'").get().n, 0, 'the legacy blob is gone');
   assert.equal(s.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'players'").get().n, 1, 'other blobs are untouched');
@@ -174,6 +180,7 @@ await atest('cutover: a pre-S0 database (staff still in the users blob) cuts ove
     s.exec('CREATE TABLE collections (name TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);');
     const put = s.prepare('INSERT INTO collections (name, value) VALUES (?, ?)');
     put.run('users', JSON.stringify([{ id: 'usr-1', orgId: 'org-a', name: 'Staff', role: 'Scout', createdAt: 1 }, { id: 'bogus' }]));
+    put.run('orgs', JSON.stringify([ORG_A])); // the staff row names it (S3 foreign key)
     put.run('sessions', JSON.stringify(sessions));
     s.prepare("INSERT INTO meta (key, value) VALUES ('idCounter', '1000'), ('savedAt', '1')").run();
     s.close();
@@ -181,7 +188,7 @@ await atest('cutover: a pre-S0 database (staff still in the users blob) cuts ove
   };
   const dir = build(legacySessions());
   const s = openRaw(dir);
-  assert.deepEqual(runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, ['0001_org_users', '0002_core_identity_shadow', SESSIONS_CUTOVER_MIGRATION]);
+  assert.deepEqual(runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, ['0001_org_users', '0002_core_identity_shadow', SESSIONS_CUTOVER_MIGRATION, ORGS_CUTOVER_MIGRATION]);
   assert.deepEqual(s.prepare('SELECT id FROM org_users').all().map((r) => r.id), ['usr-1'], 'the staff row was imported by the same rule S0 uses; the non-staff entry was not');
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 5);
   assert.deepEqual(s.prepare("SELECT name FROM collections ORDER BY name").all().map((r) => r.name), [], 'both legacy blobs are retired');
@@ -213,7 +220,7 @@ test('cutover: a failure injected after the import but before commit leaves no t
   s.close();
   assert.equal(fileDigest(dir), before, 'nothing of the failed attempt reached the file');
   const again = openRaw(dir);
-  assert.deepEqual(runDataMigrations(again, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, [SESSIONS_CUTOVER_MIGRATION]);
+  assert.deepEqual(runDataMigrations(again, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, [SESSIONS_CUTOVER_MIGRATION, ORGS_CUTOVER_MIGRATION]);
   assert.equal(again.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 5);
   again.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -326,7 +333,7 @@ test('shadow validation, even when enabled, never writes or deletes live session
 test('snapshot mode: load exposes hashed rows, save writes them back unchanged, a fabricated plain-token row is hashed, and the server reads the round trip', () => {
   const dir = tempDir('s2-snap');
   let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { orgs: [], guardians: [], players: [], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'Staff', role: 'Scout', createdAt: 1 }] };
+  const db = { orgs: [ORG_A], guardians: [], players: [], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'Staff', role: 'Scout', createdAt: 1 }] };
   const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   const a = layer.sessions.create('player', 'pl-1'), b = layer.sessions.create('org', 'org-a', { userId: 'usr-1' });
   store.save({ savedAt: 1, idCounter: 1000, db }); store.sqlite.close();
@@ -354,7 +361,7 @@ test('snapshot mode: load exposes hashed rows, save writes them back unchanged, 
 test('snapshot mode (review correction 3): an invalid or conflicting session row rejects the whole save; sessions and unrelated data are untouched', () => {
   const dir = tempDir('s2-snap-reject');
   let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { orgs: [], guardians: [], players: [{ id: 'pl-1', name: 'Original' }], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'A', role: 'Scout', createdAt: 1 }, { id: 'usr-2', orgId: 'org-a', name: 'B', role: 'Scout', createdAt: 1 }] };
+  const db = { orgs: [ORG_A], guardians: [], players: [{ id: 'pl-1', name: 'Original' }], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'A', role: 'Scout', createdAt: 1 }, { id: 'usr-2', orgId: 'org-a', name: 'B', role: 'Scout', createdAt: 1 }] };
   const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   const a = layer.sessions.create('player', 'pl-1'), b = layer.sessions.create('org', 'org-a', { userId: 'usr-2' });
   store.save({ savedAt: 1, idCounter: 1000, db }); store.sqlite.close();
@@ -437,9 +444,14 @@ test('snapshot mode (review correction 1): before the cutover record exists the 
   tool.sqlite.close();
   // (e) Rollback output (record removed, empty blob) before re-upgrade: the blob is authoritative again, the table is left alone.
   const out = tempDir('s2-snap-rb');
-  rollbackSessionsCopy(path.join(dir, 'scoutbox.db'), out);
+  // The file is at S3 now: the S2 tool refuses it (a later schema step), and the rollback chain is S3 first, then S2.
+  assert.throws(() => rollbackSessionsCopy(path.join(dir, 'scoutbox.db'), tempDir('s2-snap-rb-refused')), (err) => err.code === 'LATER_SCHEMA' && /0004_orgs_live/.test(err.message));
+  const s2State = tempDir('s2-snap-rb-s2');
+  rollbackOrgsCopy(path.join(dir, 'scoutbox.db'), s2State);
+  rollbackSessionsCopy(path.join(s2State, 'scoutbox.db'), out);
   tool = openStore(out); snap = tool.load();
   assert.deepEqual(snap.db.sessions, [], 'the empty legacy blob, not the (empty) table, is what a tool reads');
+  assert.deepEqual(snap.db.orgs.map((o) => o.id), ['org-a', 'org-b'], 'the organisations came back as a blob through the S3 rollback');
   snap.db.sessions.push({ token: 'post-rollback-token', sid: 'sid-rb', kind: 'player', refId: 'pl-1', createdAt: Date.now() });
   tool.save(snap);
   assert.equal(JSON.parse(tool.sqlite.prepare("SELECT value FROM collections WHERE name = 'sessions'").get().value).length, 1, 'a pre-S2 build\'s session lands in the blob');
@@ -463,7 +475,7 @@ test('legacy db.json (review correction 2): sessions and staff in a pre-SQLite s
         { token: 'json-player-token', sid: 'sid-jp', kind: 'player', refId: 'pl-1', createdAt: Date.now() - DAY },
         { token: 'json-org-token', sid: 'sid-jo', kind: 'org', refId: 'org-a', userId: 'usr-legacy', createdAt: Date.now() - DAY },
       ],
-      orgs: [], guardians: [],
+      orgs: [ORG_A], guardians: [],
     },
   };
   fs.writeFileSync(path.join(dir, 'db.json'), JSON.stringify(legacy));
@@ -521,16 +533,16 @@ test('legacy db.json (review correction 2): an unsupported session in the JSON a
 test('snapshot mode: writing the users collection back does not cascade-delete valid sessions; a removed user still takes theirs', () => {
   const dir = tempDir('s2-cascade');
   let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { orgs: [], guardians: [], players: [], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'A', role: 'Scout', createdAt: 1 }, { id: 'usr-2', orgId: 'org-a', name: 'B', role: 'Scout', createdAt: 1 }] };
+  const db = { orgs: [ORG_A], guardians: [], players: [], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'A', role: 'Scout', createdAt: 1 }, { id: 'usr-2', orgId: 'org-a', name: 'B', role: 'Scout', createdAt: 1 }] };
   const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   const s1 = layer.sessions.create('org', 'org-a', { userId: 'usr-1' }), s2 = layer.sessions.create('org', 'org-a', { userId: 'usr-2' });
   store.save({ savedAt: 1, idCounter: 1000, db }); store.sqlite.close();
   // A tool writes a snapshot that carries users but no sessions key at all.
   const tool = openStore(dir);
-  tool.save({ savedAt: 2, idCounter: 1000, db: { orgs: [], players: [], users: [...db.users].map((u) => ({ ...u })) } });
+  tool.save({ savedAt: 2, idCounter: 1000, db: { orgs: [ORG_A], players: [], users: [...db.users].map((u) => ({ ...u })) } });
   assert.equal(tool.sqlite.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 2, 'both staff sessions survive a users write');
   // A snapshot in which usr-2 no longer exists: only usr-2's session goes.
-  tool.save({ savedAt: 3, idCounter: 1000, db: { orgs: [], players: [], users: [{ ...db.users[0] }] } });
+  tool.save({ savedAt: 3, idCounter: 1000, db: { orgs: [ORG_A], players: [], users: [{ ...db.users[0] }] } });
   assert.deepEqual(tool.sqlite.prepare('SELECT sid FROM sessions').all().map((r) => r.sid), [s1.session.sid]);
   tool.sqlite.close();
   store = openStore(dir, { tableBacked: TABLE_BACKED });
@@ -543,7 +555,7 @@ test('snapshot mode: writing the users collection back does not cascade-delete v
 await atest('busy timeout: a save waits for a concurrent writer in another process instead of failing; without the pragma the same situation fails at once', async () => {
   const dir = tempDir('s2-busy');
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  attachDataLayer({ db: { orgs: [], players: [], users: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  attachDataLayer({ db: { orgs: [ORG_A], players: [], users: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   store.save({ savedAt: 1, idCounter: 1000, db: { orgs: [], players: [] } });
   const holdMs = 1200;
   const holder = spawn(process.execPath, ['--input-type=module', '-e', `
@@ -573,7 +585,7 @@ await atest('busy timeout: a save waits for a concurrent writer in another proce
 test('rollback: the tool produces a copy with the cutover record removed, the table emptied, an empty legacy blob and every other collection intact; it refuses a later schema', () => {
   const dir = tempDir('s2-rb-src'); preS2File(dir, { extra: { notes: [{ id: 'n1' }] } });
   const s = openRaw(dir);
-  runDataMigrations(s, DATA_MIGRATIONS, { context: { sessionTtlMs: TTL } });
+  runDataMigrations(s, [m0001, m0002, m0003], { context: { sessionTtlMs: TTL } }); // the S2 state this tool rolls back; an S3 file must go through orgsRollback first (asserted below)
   const repo = createSessionsRepository({ sqlite: s, sessionTtlMs: TTL }); repo.attach();
   const fresh = repo.create('player', 'pl-1');
   s.close();
@@ -763,7 +775,7 @@ await atest('server (review correction 2): a legacy db.json with a staff member 
 test('snapshot mode (review correction 5): a table-backed collection that is not an array is refused whole, before and after the cutover; an omitted collection is a partial snapshot', () => {
   const dir = tempDir('s2-shape');
   let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { orgs: [], guardians: [], players: [{ id: 'pl-1', name: 'Original' }], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'A', role: 'Scout', createdAt: 1 }] };
+  const db = { orgs: [ORG_A], guardians: [], players: [{ id: 'pl-1', name: 'Original' }], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'A', role: 'Scout', createdAt: 1 }] };
   const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   const a = layer.sessions.create('player', 'pl-1');
   store.save({ savedAt: 1, idCounter: 1000, db }); store.sqlite.close();
