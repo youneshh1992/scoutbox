@@ -1226,7 +1226,14 @@ performance, existing tests, what this plan is not).
 > after the last production change (46 of 48 green as run: `m182E2E` keeps its two client-side
 > baseline failures; `m23TrialPersistence` planted a trial report the player's copy never had and
 > met the 0007 reconciliation refusal — fixture made consistent, 36/36; classification in the
-> handoff). S4a stays review-accepted at
+> handoff). **Correction round (review of `132eda2`):** three reproduced findings corrected
+> failing-first — a snapshot save no longer discards an unreconciled `trialReports` copy (every
+> copy written with a record is a claim judged against the final trials at snapshot replacement,
+> initialize, insert and restore; absent or null is no claim), the derived `trialReports` follows
+> the trials live for absent and null legacy shapes too (shape preserved), and a whole-null
+> `medical` / `programme` update is refused while child rows exist, with boot, backup and rollback
+> refusing an already inconsistent file (`INCONSISTENT_ROWS`); the reviewer's reproduction reports
+> 0 of 3 on the corrected tree (note §6). S4a stays review-accepted at
 > `480afdb`; S4b stays blocked by O1; S6 is not started.
 
 ### S6 — Safeguarding and audit (`blocks`, `reports`, `moderation_log`, `org_notes`, `ledger`, `ops_events`, `source_changes`, `idv_queue`, `email_challenges`, `pairing_codes`)

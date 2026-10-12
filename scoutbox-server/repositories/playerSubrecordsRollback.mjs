@@ -28,7 +28,11 @@
  * is guessed), a copy that never applied 0007 (`NOT_CUT_OVER`), an output
  * directory that is not empty (`OUTPUT_NOT_EMPTY`), a recorded 0007 whose
  * tables are missing (`UNEXPECTED_SCHEMA`), a `trials` collection that is not
- * a JSON array while a player has a `trialReports` key (`TRIALS_UNREADABLE`).
+ * a JSON array while a player has a `trialReports` key (`TRIALS_UNREADABLE`),
+ * a player row whose shape metadata says `medical` or `programme` is null or
+ * absent while its child rows exist (`INCONSISTENT_ROWS`, raised by the one
+ * decoder: a copy that hid those rows would not be the record — review of
+ * 132eda2, finding 3).
  * The completed copy is revalidated before it is reported: integrity, foreign
  * keys, every player's facets decode back to the record the rows held, the
  * tables are gone, the sessions are exactly those of the source.

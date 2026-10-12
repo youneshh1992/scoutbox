@@ -23,15 +23,18 @@
  *
  * Storage follows the S3 organisation pattern through the ONE mapping of
  * `identityMapping.mjs`: column-backed fields change only through
- * `insert`/`update`/`restore` and the link operations; everything else (the
- * S5 arrays, `medical.records`, `programme.completed`, `coGuardians`, the
- * guardian's outstanding `emailCode`, unknown fields) is a facet mutated in
- * place on the record the views serve and flushed inside every save,
- * counted as persisted only once that save committed. The record views
- * refuse a write to a column-backed field — nested values of `location`,
- * `stats`, `notificationPrefs`, `medical.shared`, `medical.conditionStatus`,
- * `programme.track`, `programme.startedAt` included — and to `childIds`;
- * `medical.records.push(...)` and `programme.completed.push(...)` work.
+ * `insert`/`update`/`restore` and the link operations; since S5 the player
+ * arrays (`media`, `attendance`, …, `medical.records`, `programme.completed`)
+ * are rows of the `player_*` tables written only through `addItem` /
+ * `setItems` / `patchItem` (and `insert` / `restore`), served read-only on the
+ * record; `trialReports` is derived from the trials collection and written
+ * nowhere; everything else (`coGuardians`, the guardian's outstanding
+ * `emailCode`, unknown fields) is a facet mutated in place on the record the
+ * views serve and flushed inside every save, counted as persisted only once
+ * that save committed. The record views refuse a write to a column-backed
+ * field — nested values of `location`, `stats`, `notificationPrefs`,
+ * `medical.shared`, `medical.conditionStatus`, `programme.track`,
+ * `programme.startedAt` included — to `childIds`, and to every array and item.
  *
  * Relationships. `players.guardian_id` and the `primary` row of
  * `guardian_children` are written together by every link change and can no
@@ -75,7 +78,7 @@ import { validateCoreIdentity, writeCandidate, publicReport, playerRowFor, CORE_
 import {
   PLAYER_SUBRECORDS_MIGRATION, subrecordsLive, SUBRECORD_KEYS, SUBRECORD_SPECS, SUBRECORD_TABLES, getSubrecords, validateSubrecordArray,
   validatePlayerRecordWithItems as validatePlayerRecord, prepareSubrecordStatements, writeChildRows, writeArrayRows, deleteChildRows,
-  readAllChildren, countChildRows, itemRows, trialReportsFor, readTrialsBlob, readPlayersWithChildren, emptyChildren,
+  readAllChildren, countChildRows, itemRows, trialReportsFor, readTrialsBlob, readPlayersWithChildren, emptyChildren, reconcileTrialReportCopy,
 } from './playerSubrecords.mjs';
 
 /** `meta` key holding the initialisation state (`pending` | `done`); absent reads as `done`. */
@@ -91,6 +94,7 @@ const setOwn = (o, k, v) => { Object.defineProperty(o, k, { value: v, writable: 
 /** A JSON clone that keeps own keys named like Object.prototype members as data. */
 const clone = (v) => (v === null || typeof v !== 'object' ? v : JSON.parse(JSON.stringify(v)));
 const present = (v) => v !== null && v !== undefined;
+const describeValue = (v) => (v === null ? 'null' : v === undefined ? 'absent' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`);
 const sqlReason = (err) => String(err?.message ?? err).replace(/^SQLITE_\w+:\s*/, '');
 
 const insertSql = (table, columns) => `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${columns.map((c) => `@${c}`).join(', ')})`;
@@ -120,6 +124,18 @@ const updateSql = (table, columns) => `UPDATE ${table} SET ${columns.filter((c) 
  * outstanding `emailCode` ride in the rows through the one mapping. Before
  * the cutover record exists both methods decline (`null` / `false`) and the
  * caller keeps the blobs.
+ *
+ * S5 (review of 132eda2, finding 1): once 0007 is recorded a `trialReports`
+ * ARRAY on a snapshot player is a claim about the trials collection — the FINAL
+ * one: `trials` supplied with the snapshot (written as a blob in the same
+ * transaction) when the snapshot carries it, the retained blob when it omits
+ * it. A claim that disagrees (an entry with no trial report of that id, a
+ * different content or order, a duplicate), or a claim no trials list can
+ * judge, refuses the whole save before a statement runs. An absent key or a
+ * null is no claim: the trials stand and the record reads back with whatever
+ * reports name it. A trials-only snapshot (no players) changes the derived view
+ * and needs no player at all. The copy is never stored, so the only honest
+ * outcomes are "equal" or "refused" — never a silent drop.
  */
 export const IDENTITY_SNAPSHOT = {
   names: IDENTITY_COLLECTIONS,
@@ -142,11 +158,11 @@ export const IDENTITY_SNAPSHOT = {
       players,
     };
   },
-  replace(sqlite, { players, guardians }, { now = Date.now() } = {}) {
+  replace(sqlite, { players, guardians }, { now = Date.now(), trials = undefined } = {}) {
     if (!this.cutOver(sqlite)) return false;
     if (!sqlite.isTransaction) throw new Error('identity snapshot: replace() runs inside the caller\'s transaction');
     for (const [name, value] of [['players', players], ['guardians', guardians]]) {
-      if (!Array.isArray(value)) throw new TypeError(`${name}: the snapshot collection must be an array of records (got ${value === null ? 'null' : Array.isArray(value) ? 'an array' : typeof value === 'object' ? 'an object' : `a ${typeof value}`}); the save was rolled back and nothing was written`);
+      if (!Array.isArray(value)) throw new TypeError(`${name}: the snapshot collection must be an array of records (got ${describeValue(value)}); the save was rolled back and nothing was written`);
     }
     const report = validateCoreIdentity({ players, guardians }, { now });
     if (report.status !== 'complete') {
@@ -154,6 +170,22 @@ export const IDENTITY_SNAPSHOT = {
       throw new Error(`identity snapshot: ${report.refusals.length} record(s) or relationship(s) were refused (${listed}${report.refusals.length > 20 ? '; …' : ''}); the save was rolled back and no player, guardian or link was changed`);
     }
     const { candidate } = report;
+    // The trialReports claims, judged against the FINAL trials (see above) before any statement runs.
+    if (subrecordsLive(sqlite)) {
+      const finalTrials = trials === undefined ? readTrialsBlob(sqlite) : trials;
+      const list = Array.isArray(finalTrials) ? finalTrials : null;
+      const problems = [];
+      for (const row of candidate.players) {
+        const copy = playerFromRow(row).trialReports; // the candidate row carries the record's value in its facets (the S4a layout)
+        if (copy === null || copy === undefined) continue;
+        if (!list) { problems.push(`players ${row.id}: the trials collection ${trials === undefined ? 'retained in the file' : 'supplied with the snapshot'} is ${describeValue(finalTrials)}, not an array, so its trialReports copy cannot be reconciled`); continue; }
+        problems.push(...reconcileTrialReportCopy(row.id, copy, trialReportsFor(list, row.id), { hint: 'resolve the snapshot before saving it' }));
+      }
+      if (problems.length) {
+        const ids = new Set(problems.map((p) => p.slice(0, p.indexOf(':'))));
+        throw Object.assign(new Error(`identity snapshot: the trialReports of ${ids.size} player(s) cannot be reconciled with the trials collection (${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}); the save was rolled back and nothing was written`), { code: 'TRIAL_REPORTS_UNRECONCILED', problems });
+      }
+    }
     // The three tables are REWRITTEN from the validated candidate (review of
     // 9656a4b, finding 3): every existing row goes first — links, then players,
     // then guardians, children before parents so no foreign key is ever left
@@ -302,7 +334,17 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
     const migrated = domain === 'players' ? PLAYER_MIGRATED_KEYS : GUARDIAN_MIGRATED_KEYS;
     const composites = domain === 'players' ? PLAYER_COMPOSITES : GUARDIAN_COMPOSITES;
     const protectedKey = (key) => migrated.has(key) || (domain === 'guardians' && key === 'childIds') || (domain === 'players' && (isSubKey(key) || isDerivedKey(key))) || RESERVED_KEYS.includes(key);
+    const hidden = (t, key) => domain === 'players' && hiddenDerived(t, key);
     return markView(new Proxy(target, {
+      // The derived key of a record that never had it: hidden while no report names the player (the record's shape), shown — enumerable — once one does. The target property is configurable, so the view may report both.
+      has(t, key) { return !hidden(t, key) && Reflect.has(t, key); },
+      ownKeys(t) { const keys = Reflect.ownKeys(t); return domain === 'players' ? keys.filter((k) => !hidden(t, k)) : keys; },
+      getOwnPropertyDescriptor(t, key) {
+        const d = Reflect.getOwnPropertyDescriptor(t, key);
+        if (!d || domain !== 'players' || !isDerivedKey(key)) return d;
+        if (hidden(t, key)) return undefined;
+        return d.enumerable ? d : { ...d, enumerable: true };
+      },
       get(t, key, receiver) {
         const value = Reflect.get(t, key, receiver);
         if (domain === 'guardians' && key === 'childIds') return Array.isArray(value) ? readonlyView(value, 'a guardian\'s childIds (use link / unlink / ageUp)') : value;
@@ -328,20 +370,44 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
   const playersView = collectionView(P);
   const guardiansView = collectionView(G);
 
-  // Players render in the S5 layout: the arrays are rows, the facets keep unknown fields and shape metadata only.
-  const toRowOf = (domain, rec) => (domain === P ? playerToRow(rec, { subrecords: 'tables' }) : guardianToRow(rec));
+  /** The empty-state shape of `trialReports` on a plain record (data, not the accessor): `absent`, `null` or `array`. */
+  const shapeOf = (rec) => (!hasOwn(rec, 'trialReports') ? 'absent' : rec.trialReports === null ? 'null' : 'array');
+  const trialShape = new Map(); // player id → the shape the record keeps while no report names it (repository state: captured and restored with the unit of work)
+  // Players render in the S5 layout: the arrays are rows, the facets keep unknown
+  // fields and shape metadata only. `trialReports` renders as its SHAPE (absent /
+  // null / []), never as content: the row records where the key was and whether
+  // it was null; the reports live on the trials. `shape` overrides the record's
+  // (a restore adopting the restored record's shape).
+  const toRowOf = (domain, rec, { shape = null } = {}) => {
+    if (domain !== P) return guardianToRow(rec);
+    const s = shape ?? trialShape.get(rec.id) ?? shapeOf(rec);
+    const forRow = { ...rec }; // a non-enumerable accessor (the absent shape) is not copied; an enumerable one is replaced below
+    if (s === 'absent') delete forRow.trialReports; else forRow.trialReports = s === 'null' ? null : [];
+    return playerToRow(forRow, { subrecords: 'tables' });
+  };
   /**
    * `trialReports` on an in-memory player record is an ACCESSOR over the trials
-   * collection (S5 decision 5): enumerable, so a spread or JSON.stringify of the
-   * view carries it where the record had it; defined only where the record has
-   * the key as an array (a record that never had it stays without it; a null
-   * stays null), replacing the data value `playerFromRow` placed at that position.
+   * collection (S5 decision 5; review of 132eda2, finding 2), installed on EVERY
+   * record so a report filed later is visible at once on every held view, spread
+   * and serialisation — whatever shape the record had. The empty-state shape is
+   * kept: an array stays an enumerable array (empty or not); a null reads null
+   * until a report names the player, then the list; an absent key stays hidden
+   * — a non-enumerable accessor the record view hides entirely — until a report
+   * exists, then shows the list. The row written for the record carries the
+   * shape (toRowOf), so a reopen restores it; the same decoder rule puts the
+   * reports back where the record had the key or appends them.
    */
-  const deriveTrialReports = (rec) => {
-    if (!hasOwn(rec, 'trialReports') || !Array.isArray(rec.trialReports)) return rec;
-    Object.defineProperty(rec, 'trialReports', { get: () => derivedTrialReports(rec.id), enumerable: true, configurable: true });
+  const deriveTrialReports = (rec, shape = shapeOf(rec)) => {
+    trialShape.set(rec.id, shape);
+    const id = rec.id;
+    Object.defineProperty(rec, 'trialReports', {
+      get() { const d = derivedTrialReports(id); return shape === 'array' || d.length ? d : shape === 'null' ? null : undefined; },
+      enumerable: shape !== 'absent', configurable: true,
+    });
     return rec;
   };
+  /** A derived key the record never had while no report names the player: hidden from the view (not `in`, not enumerable, no descriptor). */
+  const hiddenDerived = (t, key) => isDerivedKey(key) && trialShape.get(t.id) === 'absent' && Reflect.get(t, key) === undefined;
   /** Row written by this operation: committed when autocommit, pending while a unit of work is open. */
   const noteRow = (domain, id, facetsJson) => { if (inUnit()) domain.pending.set(id, facetsJson); else { domain.committed.set(id, facetsJson); domain.pending.delete(id); } };
   const remember = (domain, rec, facetsJson) => {
@@ -353,9 +419,10 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
     const i = domain.records.indexOf(rec);
     if (i >= 0) { domain.records.splice(i, 1); domain.proxies.splice(i, 1); }
     domain.byId.delete(rec.id); domain.committed.delete(rec.id); domain.pending.delete(rec.id);
+    if (domain === P) trialShape.delete(rec.id);
   };
   const viewOf = (domain, rec) => domain.proxies[domain.records.indexOf(rec)] ?? null;
-  const clear = (domain) => { domain.records.length = 0; domain.proxies.length = 0; domain.byId.clear(); domain.committed.clear(); domain.pending.clear(); };
+  const clear = (domain) => { domain.records.length = 0; domain.proxies.length = 0; domain.byId.clear(); domain.committed.clear(); domain.pending.clear(); if (domain === P) trialShape.clear(); };
 
   /** Read everything from the tables: guardians with their childIds from the link rows (rowid order), then players with their arrays from the child tables (position order). */
   const load = () => {
@@ -364,7 +431,8 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
     for (const l of stmt.allLinks.all()) { if (!links.has(l.guardian_id)) links.set(l.guardian_id, []); links.get(l.guardian_id).push(l.player_id); }
     for (const r of stmt.allGuardians.all()) remember(G, guardianFromRow(r, links.get(r.id) ?? []), r.facets_json);
     const children = readAllChildren(stmt.sub);
-    for (const r of stmt.allPlayers.all()) remember(P, deriveTrialReports(playerFromRow(r, { children: children.get(r.id) ?? emptyChildren(), trialReports: derivedTrialReports(r.id) })), r.facets_json);
+    // Decoded with an EMPTY derived list so the data value is exactly the record's empty-state shape (absent / null / []); the accessor then serves the live reports. A row whose shape hides existing child rows is refused by the decoder (INCONSISTENT_ROWS): the boot does not attach to it.
+    for (const r of stmt.allPlayers.all()) remember(P, deriveTrialReports(playerFromRow(r, { children: children.get(r.id) ?? emptyChildren(), trialReports: [] })), r.facets_json);
   };
   const readInitState = () => {
     const row = stmt.meta.get(CORE_IDENTITY_INIT_META);
@@ -409,14 +477,13 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       setOwn(rec, key, clone(v));
     }
   };
-  /** Replace a record's content IN PLACE (the signing rollback's Object.assign, made whole: removed keys go away). The derived accessor is kept, never overwritten with data. */
+  /** Replace a record's content IN PLACE (the signing rollback's Object.assign, made whole: removed keys go away). The derived accessor is re-installed with the restored record's shape, never overwritten with data. */
   const replaceContent = (rec, next) => {
+    const shape = shapeOf(next);
     for (const key of Object.keys(rec)) if (!hasOwn(next, key)) delete rec[key];
-    for (const key of Object.keys(next)) {
-      if (isDerivedKey(key) && hasOwn(rec, key) && typeof Object.getOwnPropertyDescriptor(rec, key)?.get === 'function') continue;
-      setOwn(rec, key, clone(next[key]));
-    }
-    deriveTrialReports(rec);
+    if (shape === 'absent') delete rec.trialReports; // a non-enumerable accessor is not listed above
+    for (const key of Object.keys(next)) setOwn(rec, key, isDerivedKey(key) ? (shape === 'null' ? null : []) : clone(next[key]));
+    deriveTrialReports(rec, shape);
   };
   const nextRecord = (rec, patch, { split = [] } = {}) => {
     const next = clone(rec);
@@ -519,6 +586,9 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       const v = validatePlayerRecord(rec);
       if (!v.ok) throw new TypeError(`a player record was refused: ${v.problems.join('; ')}`);
       if (P.byId.has(rec.id)) throw new Error(`player ${rec.id} already exists`);
+      // A trialReports array given with the record is a claim about the trials (review of 132eda2, finding 1): equal or refused, never dropped.
+      const claim = reconcileTrialReportCopy(rec.id, rec.trialReports, derivedTrialReports(rec.id), { hint: 'the record is not created' });
+      if (claim.length) throw new TypeError(`a player record was refused: ${claim.join('; ')}`);
       const guardian = present(rec.guardianId) ? G.byId.get(rec.guardianId) : null;
       if (present(rec.guardianId) && !guardian) throw new Error(`player ${rec.id} names guardian ${rec.guardianId}, which does not exist`);
       if (!present(rec.guardianId) && !isAdult(rec, new Date(now()))) throw new Error(`player ${rec.id} is a minor and has no guardianId: a child is created with its primary guardian and the link in the same transaction, never without`);
@@ -538,8 +608,10 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
      * Change column-backed fields. Composites `location`, `stats` and
      * `notificationPrefs` are replaced whole (as today's writers do); the split
      * composites `medical` and `programme` are merged sub-key by sub-key and only
-     * their column-backed sub-keys may appear (`records`/`completed` are facets
-     * written on the record). `guardianId` changes only through link/unlink/ageUp.
+     * their column-backed sub-keys may appear (`records`/`completed` are rows,
+     * written through addItem / setItems / patchItem); a whole-null `medical` or
+     * `programme` is refused while its rows exist (review of 132eda2, finding 3).
+     * `guardianId` changes only through link/unlink/ageUp.
      */
     update(id, patch) {
       requireAutocommit('players.update');
@@ -557,6 +629,13 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
           for (const sub of Object.keys(patch[key])) {
             if ((PLAYER_COMPOSITE_SUBRECORDS[key] ?? []).includes(sub)) throw new TypeError(`"${key}.${sub}" is a player sub-record (rows of ${SUBRECORD_SPECS[`${key}.${sub}`].table}); players.update does not change it — use players.addItem / setItems / patchItem`);
             if (!hasOwn(PLAYER_COMPOSITES[key], sub)) throw new TypeError(`"${key}.${sub}" is a facet (mutate it on the record); players.update changes only ${Object.keys(PLAYER_COMPOSITES[key]).join('/')}`);
+          }
+        }
+        // A whole-null split composite while its child rows exist would hide them from every view, export and rollback (review of 132eda2, finding 3): refused; clearing the rows is an explicit, separate operation.
+        if (PLAYER_SPLIT_COMPOSITES.includes(key) && patch[key] === null) {
+          for (const sub of PLAYER_COMPOSITE_SUBRECORDS[key] ?? []) {
+            const rows = getSubrecords(rec, `${key}.${sub}`);
+            if (Array.isArray(rows) && rows.length) throw new TypeError(`players.update: ${key} of player ${id} cannot be set to null while ${rows.length} ${key}.${sub} row(s) exist in ${SUBRECORD_SPECS[`${key}.${sub}`].table}; a whole-null ${key} would hide them — clear them first with players.setItems(id, '${key}.${sub}', []) (an explicit operation; no deletion policy is implied), then set ${key} to null`);
           }
         }
       }
@@ -578,7 +657,10 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       if ((next.guardianId ?? null) !== (rec.guardianId ?? null)) throw new TypeError('players.restore cannot change the guardian link; use link / unlink / ageUp');
       const v = validatePlayerRecord(next);
       if (!v.ok) throw new TypeError(`a player restore was refused: ${v.problems.join('; ')}`);
-      const row = toRowOf(P, next);
+      // A trialReports array on the restored record is a claim about the trials (review of 132eda2, finding 1): equal or refused; an absent key or a null adopts that shape and the trials stand.
+      const claim = reconcileTrialReportCopy(id, next.trialReports, derivedTrialReports(id), { hint: 'the restore is refused' });
+      if (claim.length) throw new TypeError(`a player restore was refused: ${claim.join('; ')}`);
+      const row = toRowOf(P, next, { shape: shapeOf(next) });
       atomically(() => { stmt.updatePlayer.run(row); deleteChildRows(stmt.sub, id); writeChildRows(stmt.sub, next); }, () => { replaceContent(rec, next); noteRow(P, id, row.facets_json); });
       return viewOf(P, rec);
     },
@@ -793,16 +875,20 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       graph: captureGraph([P.records, G.records]),
       P: { proxies: P.proxies.slice(), byId: new Map(P.byId), committed: new Map(P.committed), pending: new Map(P.pending) },
       G: { proxies: G.proxies.slice(), byId: new Map(G.byId), committed: new Map(G.committed), pending: new Map(G.pending) },
+      shapes: new Map(trialShape),
     }),
     restoreState(state) {
       if (!state) return;
-      restoreGraph(state.graph);
+      restoreGraph(state.graph); // data properties only: the derived accessors are not data the memento owns
       for (const [d, s] of [[P, state.P], [G, state.G]]) {
         d.proxies.length = 0; for (const p of s.proxies) d.proxies.push(p);
         d.byId.clear(); for (const [id, rec] of s.byId) d.byId.set(id, rec);
         d.committed.clear(); for (const [id, json] of s.committed) d.committed.set(id, json);
         d.pending.clear(); for (const [id, json] of s.pending) d.pending.set(id, json);
       }
+      // The empty-state shapes go back with the records (a restore inside the failed unit may have adopted another); the accessor is re-installed with the captured shape.
+      trialShape.clear(); for (const [id, shape] of state.shapes ?? []) trialShape.set(id, shape);
+      for (const rec of P.records) if (trialShape.has(rec.id)) deriveTrialReports(rec, trialShape.get(rec.id));
     },
   };
 
@@ -854,6 +940,14 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       const report = validateCoreIdentity(given, { now: at });
       if (report.status !== 'complete') {
         const err = new Error(`CORE_IDENTITY_CUTOVER_BLOCKED: ${report.refusals.length} refusal(s); nothing was written and initialisation stays pending — ${report.refusals.slice(0, 20).map((r) => `${r.collection} ${r.id ?? '(collection)'}: ${r.reason}`).join('; ')}${report.legacyMinorsWithoutLink.length ? `; legacy minors without any guardian link (resolve by hand before the cutover): ${report.legacyMinorsWithoutLink.join(', ')}` : ''}`);
+        err.code = 'CORE_IDENTITY_CUTOVER_BLOCKED';
+        err.report = publicReport(report);
+        throw err;
+      }
+      // The trialReports claims of the first installation's records, judged against the trials the data layer holds (review of 132eda2, finding 1): equal or refused, never dropped.
+      const claims = report.candidate.players.flatMap((row) => reconcileTrialReportCopy(row.id, playerFromRow(row).trialReports, derivedTrialReports(row.id), { hint: 'resolve the record before the first installation' }));
+      if (claims.length) {
+        const err = new Error(`CORE_IDENTITY_CUTOVER_BLOCKED: ${claims.length} trialReports claim(s) disagree with the trials collection; nothing was written and initialisation stays pending — ${claims.slice(0, 20).join('; ')}${claims.length > 20 ? '; …' : ''}`);
         err.code = 'CORE_IDENTITY_CUTOVER_BLOCKED';
         err.report = publicReport(report);
         throw err;

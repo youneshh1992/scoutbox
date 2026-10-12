@@ -24,7 +24,7 @@
  *     array violates it, never deduplicated.
  */
 import {
-  itemToRow, itemFromRow, playerFromRow, validatePlayerRecord, PLAYER_SUBRECORD_KEYS, PLAYER_COMPOSITE_SUBRECORDS, PLAYER_COLUMNS,
+  itemToRow, itemFromRow, playerFromRow, validatePlayerRecord, PLAYER_SUBRECORD_KEYS, PLAYER_COMPOSITE_SUBRECORDS, PLAYER_COMPOSITE_SUBRECORD_TABLES, PLAYER_COLUMNS,
 } from './identityMapping.mjs';
 import { migrationApplied } from './database.mjs';
 
@@ -278,6 +278,9 @@ export const SUBRECORD_SPECS = Object.freeze({
   activityLog: Object.freeze({ table: 'player_activity_log', primitive: 'int', column: 'occurred_at' }),
 });
 
+// The decoder names a composite sub-key's table in its one refusal; the names must be the specs' (checked once, at load).
+for (const [key, table] of Object.entries(PLAYER_COMPOSITE_SUBRECORD_TABLES)) if (SUBRECORD_SPECS[key]?.table !== table) throw new Error(`playerSubrecords: ${key} is stored in ${SUBRECORD_SPECS[key]?.table} here but identityMapping names ${table}`);
+
 /** Read an array off a record by its writer name (`medical.records` → `rec.medical?.records`). */
 export function getSubrecords(rec, key) {
   if (!key.includes('.')) return rec?.[key];
@@ -515,23 +518,38 @@ export function trialReportsFor(trials, playerId) {
  * entry whose content differs from the trial's report, a report the copy does
  * not carry, or the same entries in a different order. Nothing is repaired.
  */
-export function reconcileTrialReports(copy, derived) {
-  if (copy === null || copy === undefined) return derived.length ? [`trialReports is ${describe(copy)} on the player but ${derived.length} trial report(s) name the player (${derived.map((r) => r.id).join(', ')}); resolve the record on the current build before the cutover`] : [];
+export function reconcileTrialReports(copy, derived, { hint = 'resolve by hand before the cutover' } = {}) {
+  if (copy === null || copy === undefined) return derived.length ? [`trialReports is ${describe(copy)} on the player but ${derived.length} trial report(s) name the player (${derived.map((r) => r.id).join(', ')}); the player would gain a report — ${hint}`] : [];
   if (!Array.isArray(copy)) return [`trialReports is ${describe(copy)}, not an array`];
   const problems = [];
   const byId = new Map(derived.map((r) => [r.id, r]));
-  const copyIds = new Set();
+  const seen = new Map();
   copy.forEach((entry, i) => {
     const id = isPlainObject(entry) ? entry.id : undefined;
     if (typeof id !== 'string') { problems.push(`trialReports[${i}] has no report id`); return; }
-    copyIds.add(id);
+    if (seen.has(id)) { problems.push(`trialReports[${i}] (${id}) repeats the report listed at [${seen.get(id)}]; a report is filed once — ${hint}`); return; }
+    seen.set(id, i);
     const source = byId.get(id);
-    if (!source) { problems.push(`trialReports[${i}] (${id}) has no trial report with that id in the trials collection; the copy would be lost — resolve by hand before the cutover`); return; }
-    if (JSON.stringify(entry) !== JSON.stringify(source)) problems.push(`trialReports[${i}] (${id}) differs from the trial's report; the copy would be replaced — resolve by hand before the cutover`);
+    if (!source) { problems.push(`trialReports[${i}] (${id}) has no trial report with that id in the trials collection; the copy would be lost — ${hint}`); return; }
+    if (JSON.stringify(entry) !== JSON.stringify(source)) problems.push(`trialReports[${i}] (${id}) differs from the trial's report; the copy would be replaced — ${hint}`);
   });
-  for (const r of derived) if (!copyIds.has(r.id)) problems.push(`trial report ${r.id} names the player but the player's trialReports does not carry it; the player would gain a report — resolve by hand before the cutover`);
-  if (!problems.length && JSON.stringify(copy.map((r) => r.id)) !== JSON.stringify(derived.map((r) => r.id))) problems.push(`trialReports lists the same reports in a different order than their filing order (${copy.map((r) => r.id).join(', ')} vs ${derived.map((r) => r.id).join(', ')}); resolve by hand before the cutover`);
+  for (const r of derived) if (!seen.has(r.id)) problems.push(`trial report ${r.id} names the player but the player's trialReports does not carry it; the player would gain a report — ${hint}`);
+  if (!problems.length && JSON.stringify(copy.map((r) => r.id)) !== JSON.stringify(derived.map((r) => r.id))) problems.push(`trialReports lists the same reports in a different order than their filing order (${copy.map((r) => r.id).join(', ')} vs ${derived.map((r) => r.id).join(', ')}); ${hint}`);
   return problems;
+}
+/**
+ * The rule every write path applies to a `trialReports` value that arrives WITH
+ * a record (a snapshot replacement, initialize, insert, restore — review of
+ * 132eda2, finding 1): an ARRAY is a claim about the trials collection and must
+ * equal the derived list entry for entry (ids, content, order, no duplicate),
+ * else the whole write is refused — the copy is never stored (0007 derives it),
+ * so the only honest answers are "equal" or "refused", never a silent drop. An
+ * absent key or a null is NO claim: the trials stand, and the record reads back
+ * with whatever reports name it. Returns the problems, prefixed with the player.
+ */
+export function reconcileTrialReportCopy(playerId, copy, derived, { hint = 'resolve the record before writing it' } = {}) {
+  if (copy === null || copy === undefined) return [];
+  return reconcileTrialReports(copy, derived, { hint }).map((p) => `players ${playerId}: ${p}`);
 }
 
 /** Read the `trials` collection off a database file (a blob until its own step), for snapshot tools and the migration. */

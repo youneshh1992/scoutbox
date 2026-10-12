@@ -595,11 +595,25 @@ as rows in its transaction; `players.restore` rewrites them; `players.remove`
 cascades them (today's hard delete; the media FILES are queued in the same
 unit before the row goes). A fixture or venue the attendance table cannot hold
 (not text) is now answered `400 PLAYER_INVALID` instead of being stored.
+`players.update(id, { medical: null })` (or `programme: null`) is **refused
+while the player has medical records (programme completions)**: a whole-null
+composite would hide those rows from every view, the backup and the rollback
+copy; the error names the player, the rows, the table and the explicit clearing
+operation (`players.setItems(id, 'medical.records', [])`, then null). No route
+sends that patch; no deletion policy is implied.
 
 `trialReports` is **not stored**: it is a duplicate of `trials[].report` and
 the record serves it as a derived, read-only value in filing order (ascending
-`filedAt`); the trial-report route writes the trial only. `GET /capabilities`
-reports the rows per table under `dataLayer.domains.players.subrecords.tables`.
+`filedAt`) — for every record, whatever shape it was saved with (a legacy
+record without the key or with null shows a report the moment one is filed; the
+empty-state shape is kept until then); the trial-report route writes the trial
+only. A `trialReports` array written WITH a record (a backup restore, a
+persistence suite's snapshot, `players.insert`, `players.restore`, the first
+installation) is a claim about the trials and must equal them entry for entry
+(ids, content, order, no duplicate), else the whole write is refused with the
+player and report ids and nothing is written; an absent key or a null is no
+claim (the trials stand). `GET /capabilities` reports the rows per table under
+`dataLayer.domains.players.subrecords.tables`.
 
 - **S5 cutover (first boot of this build on an S4a file).** Migration
   `0007_player_subrecords` runs inside the runner's one transaction after
@@ -633,7 +647,15 @@ reports the rows per table under `dataLayer.domains.players.subrecords.tables`.
   arrays into their tables (0007), reconciling the copies against the `trials`
   blob the same file carries. A restored snapshot whose items the tables
   cannot hold is refused whole (`LEGACY_IMPORT_FAILED` or
-  `PLAYER_SUBRECORDS_CUTOVER_BLOCKED`, the file left in place). Media
+  `PLAYER_SUBRECORDS_CUTOVER_BLOCKED`, the file left in place); a whole
+  snapshot written into a live S5 file (a persistence tool, `store.save` in
+  snapshot mode) whose players carry `trialReports` copies that disagree with
+  the trials it carries — or, when it omits `trials`, with the retained ones —
+  is refused whole too (`TRIAL_REPORTS_UNRECONCILED`: nothing written, the
+  revision not advanced). A backup refuses (as the boot and the rollback do)
+  a file whose player row says `medical` or `programme` is null while its
+  child rows exist (`INCONSISTENT_ROWS`): resolve it by hand, the rows are
+  authoritative. Media
   ownership (the S4a invariant that the removal queue never deletes a file a
   live player references) is judged on `player_media` once 0007 is recorded,
   and on the facets before it, so the 0006 import of the same boot is judged
@@ -655,7 +677,11 @@ reports the rows per table under `dataLayer.domains.players.subrecords.tables`.
   rollback first); 5 the copy never applied 0007 (`NOT_CUT_OVER`); 9 the
   `trials` collection cannot be read while a player carries `trialReports`
   (`TRIALS_UNREADABLE`); 10 a recorded 0007 whose tables are missing
-  (`UNEXPECTED_SCHEMA`). A failure at any step removes the output. To reach
+  (`UNEXPECTED_SCHEMA`); 11 a player row whose shape says `medical` or
+  `programme` is null or absent while its child rows exist
+  (`INCONSISTENT_ROWS`: a copy that hid them would not be the record; the
+  boot and a backup refuse the same file). A failure at any step removes the
+  output. To reach
   the S3 build, run `scripts/coreIdentityRollback.mjs` on this tool's output
   (it refuses the S5 file itself with exit 4). Restoring a pre-S5 backup
   instead of rolling back discards every write made since it.

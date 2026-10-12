@@ -85,6 +85,25 @@ uploadedAt` (the boot loop adds `views/tags/verifiedClip/url`); the adult signup
    reason; nothing is dropped silently. A record that had the key keeps it (an empty array when
    there is no report, `null` when it was null); a record that never had the key gains it only
    when a report exists for it. S8 moves the reports into `trial_reports`; nothing of S8 is built.
+   **Corrected after the review of `132eda2`:**
+   - *Every shape follows the trials, live.* The in-memory accessor is installed on every
+     record, whatever its empty-state shape: a record whose key was absent shows the list the
+     moment a report names the player (hidden until then: not `in`, not enumerable), a null reads
+     null until a report exists, an array is always an array. Held views, spreads, JSON
+     serialisation (a backup's), the club view and the persisted decoder agree without a restart;
+     the row written for the record carries the shape (absent / null / `[]`), never content, so a
+     reopen, a backup and the rollback copy restore it.
+   - *A copy written WITH a record is a claim, judged everywhere a record is written.* An array
+     given to `IDENTITY_SNAPSHOT.replace` (a backup restore, a persistence suite), `initialize`
+     (the first installation), `players.insert` or `players.restore` must equal the derived list
+     entry for entry — ids, content, order, no duplicate — else the WHOLE write is refused with
+     the player and report ids (`players pl-x: trialReports[0] (rep-1) has no trial report with
+     that id …`); nothing is dropped and the save revision does not advance. The snapshot writer
+     judges against the FINAL trials: those supplied with the snapshot (written as a blob in the
+     same transaction) when it carries `trials`, the retained blob when it omits them; a trials
+     value no list can be read from is refused while a copy exists. **Omitted or null is no
+     claim**: the trials stand and the record reads back with whatever reports name it. A
+     trials-only snapshot (no players) legitimately changes the derived view and needs no player.
 6. **Snapshot replacement under child foreign keys.** `IDENTITY_SNAPSHOT.replace` keeps its
    rewrite strategy (links, players, guardians deleted, the validated candidate inserted in
    snapshot order) and now writes every child row of every player from the record's arrays in the
@@ -118,15 +137,29 @@ uploadedAt` (the boot loop adds `views/tags/verifiedClip/url`); the adult signup
    `store.unit.join` (the S4a boundary). Routes that change a child row together with a blob, an
    audit row or another record run in one unit of work. `players.insert` writes the record's
    arrays as rows in the same transaction; `players.restore` rewrites them to the given record's.
+   **Corrected after the review of `132eda2`:** `players.update(id, { medical: null })` (and
+   `programme: null`) is refused while the player has `medical.records` (`programme.completed`)
+   rows — a whole-null composite would hide authoritative rows from every view, the export and the
+   rollback; the error names the player, the rows, the table and the explicit clearing operation
+   (`players.setItems(id, 'medical.records', [])`, then null). A null composite without rows, the
+   scalar sub-key updates (`medical.shared`, `conditionStatus`, `programme.track`, `startedAt`) and
+   the key appearing again through `update` stay supported; no deletion policy is implied.
 10. **Rollback.** `scripts/playerSubrecordsRollback.mjs` (copy-only, `VACUUM INTO`) rebuilds the
     `480afdb` representation: every array back into `facets_json` under its own key (the layout
     that build reads), `trialReports` rebuilt from the `trials` blob in the derived order, the
     twelve tables dropped, the `0007` record and `meta.playerSubrecordsCutover` removed,
     `meta.saveSeq` advanced; the media queue and migration 0006 are untouched (both builds have
     them). Refusals (no output): `LATER_SCHEMA` (a step after 0007), `NOT_CUT_OVER` (no 0007),
-    `OUTPUT_NOT_EMPTY`, `UNEXPECTED_SCHEMA`. The S4a→S3 tool (`coreIdentityRollback.mjs`) refuses
-    a database carrying 0007 with `LATER_SCHEMA` (it already refuses every id it does not know);
-    a test pins it. Post-S5 writes survive the rollback (they are rows, rebuilt into facets).
+    `OUTPUT_NOT_EMPTY`, `UNEXPECTED_SCHEMA`, `TRIALS_UNREADABLE`, and — corrected after the
+    review of `132eda2` — `INCONSISTENT_ROWS` (exit 11): a player row whose shape metadata says
+    `medical` or `programme` is null or absent while its child rows exist. That refusal is the
+    one decoder's (`playerFromRow` with children), so the boot, a backup (`IDENTITY_SNAPSHOT.read`)
+    and the snapshot store refuse the same file the same way rather than certify a view or an
+    output that hides the rows; the source is untouched and no partial output remains. Rows of a
+    sub-key a present composite's shape never listed are appended, never hidden. The S4a→S3 tool
+    (`coreIdentityRollback.mjs`) refuses a database carrying 0007 with `LATER_SCHEMA` (it already
+    refuses every id it does not know); a test pins it. Post-S5 writes survive the rollback (they
+    are rows, rebuilt into facets).
 
 ## 3. The tables (as created by migration `0007_player_subrecords`)
 
@@ -183,6 +216,27 @@ private-view non-exposure; hard-delete cascade with the queued files; backup and
 rollback copy opened by the real `480afdb` build on synthetic data.
 
 ## 6. Status
+
+**Correction round (review of `132eda2`; implemented, pending review).** The reviewer's
+independent reproduction (`review-132eda2-reproductions.mjs`, run unchanged) reproduced three
+findings on `132eda2` and reports 0 of 3 on the corrected tree, controls passing. Finding 1 (P1): a
+whole-snapshot save accepted a `trialReports` copy with no trial and silently dropped it while the
+unrelated edit committed — corrected by judging every copy written with a record as a claim
+(decision 5 above: at `IDENTITY_SNAPSHOT.replace`, `initialize`, `insert`, `restore`), refusing the
+whole write with ids and rolling back the revision. Finding 2 (P2): the derived accessor was
+installed only where the record had an array, so a legacy record saved without the key or with
+null showed a new report only after a restart — corrected by installing it on every record with the
+empty-state shape preserved (decision 5). Finding 3 (P2): `players.update` accepted `medical: null`
+/ `programme: null` while child rows existed, hiding them from the export and losing them in the
+rollback copy — corrected by refusing the update while rows exist (decision 9) and by making the one
+decoder refuse an already inconsistent file (`INCONSISTENT_ROWS`, decision 10), so boot, backup and
+rollback refuse rather than certify. Failing-first regressions: three tests in
+`scripts/testPlayerSubrecords.mjs` (each confirmed failing on `132eda2`) and one real-route test in
+`scripts/testCoreIdentityServer.mjs` (a report filed for a legacy-shaped account appears at once;
+the sign-up control). Test fixtures that planted `rich()` with its report copies and no trials now
+supply the trials (`trialList: trials()`): the planted state is exactly the one the claim rule
+refuses. No table, facets layout, privacy rule or S4a correction changed. Verification of this
+round is listed in the handoff README.
 
 **Implemented, pending review** — one local commit on `feat/sqlite-schema` on top of the
 review-accepted S4a commit `480afdb` (its hash, branch and tree status are in the handoff

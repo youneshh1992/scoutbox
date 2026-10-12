@@ -629,4 +629,45 @@ await test('S5 sub-records through the real routes: clips (a file and a null url
   await S.stop(); rm(dir, restored);
 });
 
+// ------------------------------------------------------------- review of 132eda2, finding 2: a report filed for a legacy-shaped account appears at once
+await test('review of 132eda2 (finding 2): a trial report filed through the real route for an accepted LEGACY-shaped account — a record saved without any trialReports key, and one saved with null — appears on /player/me, in the CV and on the club\'s view at once, without a restart, exactly as for an ordinary sign-up (trialReports: []); a restart serves the same', async () => {
+  const dir = tempDir('s5srv-legacy-report');
+  // An S3-shaped file (blobs) whose adults were saved without the key and with null: the boot cuts them over (0005, 0007) as they are.
+  const noKey = { ...adult(), id: 'pl-legacy-absent', name: 'Legacy Absent', password: null }; delete noKey.trialReports;
+  const nullKey = { ...adult(), id: 'pl-legacy-null', name: 'Legacy Null', password: null, trialReports: null };
+  s3File(dir, { players: [noKey, nullKey], guardians: [], sessions: [] });
+  let S = await boot(dir, nextPort());
+  const pro = await orgLogin(S, 'org-pro', 'Maria');
+  const file = async (pid, password = undefined) => {
+    const login = await S.j('POST', '/auth/player/login', { playerId: pid, ...(password ? { password } : {}) }); assert.equal(login.status, 200, JSON.stringify(login.body));
+    const me0 = (await S.j('GET', '/player/me', undefined, login.body.token)).body;
+    const future = new Date(Date.now() + 21 * 86_400_000).toISOString().slice(0, 10);
+    const rq = await S.j('POST', `/org/players/${pid}/request`, { type: 'trial', message: 'Trial?', proposedDate: future, venue: 'Ground' }, pro); assert.equal(rq.status, 201, JSON.stringify(rq.body));
+    assert.equal((await S.j('POST', `/player/requests/${rq.body.requestId}/respond`, { accept: true }, login.body.token)).status, 200);
+    const trialsBody = (await S.j('GET', '/org/trials', undefined, pro)).body; const trial = (Array.isArray(trialsBody) ? trialsBody : trialsBody.items ?? []).find((t) => t.playerId === pid); assert.ok(trial);
+    const rep = await S.j('POST', `/org/trials/${trial.id}/report`, { acceleration: 8, sprintSpeedKmh: 33.4, distanceKm: 9.1, passCompletionPct: 81, duelSuccessPct: 63, coachRating: 8 }, pro); assert.equal(rep.status, 201, JSON.stringify(rep.body));
+    const me = (await S.j('GET', '/player/me', undefined, login.body.token)).body;
+    const cv = (await S.j('GET', '/player/cv', undefined, login.body.token)).body;
+    const club = (await S.j('GET', `/org/players/${pid}`, undefined, pro)).body;
+    return { token: login.body.token, before: me0.trialReports, reportId: rep.body.report.id, me: (me.trialReports ?? []).map((r) => r.id), cv: cv.trialReports.map((r) => r.orgName), club: (club.trialReports ?? []).map((r) => r.id), trust: me.trustScore };
+  };
+  const absent = await file('pl-legacy-absent');
+  assert.equal(absent.before, undefined, 'the legacy record had no trialReports key');
+  assert.deepEqual(absent.me, [absent.reportId], 'the report is on /player/me at once (no restart)'); assert.deepEqual(absent.cv, ['Eastport FC']); assert.deepEqual(absent.club, [absent.reportId]);
+  const nul = await file('pl-legacy-null');
+  assert.equal(nul.before, null, 'the legacy record had trialReports: null');
+  assert.deepEqual(nul.me, [nul.reportId]); assert.deepEqual(nul.cv, ['Eastport FC']); assert.deepEqual(nul.club, [nul.reportId]);
+  // The ordinary sign-up control.
+  const su = await S.j('POST', '/auth/player/signup', { name: 'Control Signup', dob: '2000-01-01', country: 'GB', password: 'control-pass-1' }); assert.equal(su.status, 201);
+  const ctl = await file(su.body.playerId, 'control-pass-1');
+  assert.deepEqual(ctl.before, []); assert.deepEqual(ctl.me, [ctl.reportId]);
+  await S.stop();
+  S = await boot(dir, nextPort());
+  for (const [pid, x] of [['pl-legacy-absent', absent], ['pl-legacy-null', nul]]) {
+    const me = (await S.j('GET', '/player/me', undefined, x.token)).body;
+    assert.deepEqual(me.trialReports.map((r) => r.id), [x.reportId], `${pid}: a restart serves the same report`);
+  }
+  await S.stop(); rm(dir);
+});
+
 console.log(`\n${passed} core-identity server checks passed`);

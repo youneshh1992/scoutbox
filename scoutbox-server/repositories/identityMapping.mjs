@@ -62,6 +62,8 @@ export const PLAYER_S5_ARRAYS = Object.freeze(['media', 'attendance', 'timeline'
 export const PLAYER_SUBRECORD_KEYS = Object.freeze(['media', 'attendance', 'timeline', 'badges', 'drills', 'drillResults', 'activityLog', 'externalIds', 'seasonHistory']);
 /** Split composites whose remainder sub-key becomes a table in S5 (`facets_json.medical.records` → `player_medical_records`, …). */
 export const PLAYER_COMPOSITE_SUBRECORDS = Object.freeze({ medical: Object.freeze(['records']), programme: Object.freeze(['completed']) });
+/** The table each composite sub-key's rows live in (named in the decoder's refusal of an inconsistent row; playerSubrecords.mjs checks it against its specs). */
+export const PLAYER_COMPOSITE_SUBRECORD_TABLES = Object.freeze({ 'medical.records': 'player_medical_records', 'programme.completed': 'player_programme_completions' });
 /** Record keys served as derived values since S5 (never stored; presence kept in `__meta`). */
 export const PLAYER_DERIVED_KEYS = Object.freeze(['trialReports']);
 export const RESERVED_KEYS = Object.freeze(['__meta', '__rest']);
@@ -232,7 +234,19 @@ function toRowWith(spec, rec, { tableKeys = new Set(), tableSubs = {} } = {}) {
  * (`{ medical: { records: [...] } }`).
  */
 const isEmptyValue = (v) => (Array.isArray(v) ? v.length === 0 : isPlainObject(v) ? Object.keys(v).length === 0 : false);
-function fromRowWith(spec, r, { extra = {}, compositeExtra = {} } = {}) {
+/**
+ * `compositeTables`: the table behind each composite sub-key supplied through
+ * `compositeExtra` (`medical.records` → `player_medical_records`), for the one
+ * refusal this decoder makes (review of 132eda2, finding 3): rows of a sub-key
+ * whose composite the row's shape metadata says is null or absent cannot be
+ * placed anywhere, so the row is NOT read as if they did not exist — an error
+ * with `code: 'INCONSISTENT_ROWS'` names the record, the sub-key, the count and
+ * the table, and every reader (the boot, a backup, the rollback tool) refuses
+ * rather than certifies a view that hides authoritative rows. Rows of a sub-key
+ * the composite's shape did not list are appended to the composite (never
+ * hidden).
+ */
+function fromRowWith(spec, r, { extra = {}, compositeExtra = {}, compositeTables = {} } = {}) {
   const facetsColumn = spec.facetsColumn ?? 'facets_json';
   const facets = r[facetsColumn] ? JSON.parse(r[facetsColumn]) : {};
   const meta = facets.__meta ?? null;
@@ -249,12 +263,20 @@ function fromRowWith(spec, r, { extra = {}, compositeExtra = {} } = {}) {
     values[key] = spec.booleans.has(key) ? v === 1 : spec.json?.has(key) ? JSON.parse(v) : v;
   }
   for (const [key, subs] of Object.entries(spec.composites)) {
+    const subExtra = compositeExtra[key] ?? null;
+    // Sub-keys whose rows exist (supplied by the caller from their tables), whatever the composite's shape says.
+    const held = subExtra ? Object.entries(subExtra).filter(([, v]) => v !== undefined && !isEmptyValue(v)) : [];
+    const compositeGone = nulls.has(key) || (order && !order.includes(key));
+    if (compositeGone && held.length) {
+      const [sub, v] = held[0];
+      const n = Array.isArray(v) ? v.length : Object.keys(v).length;
+      throw Object.assign(new Error(`${spec.table} ${r.id}: ${key} is ${nulls.has(key) ? 'null' : 'absent'} in the row's shape metadata but ${n} ${key}.${sub} row(s) exist in ${compositeTables[`${key}.${sub}`] ?? 'their table'}; the stored state is inconsistent and is not read as if the rows did not exist (resolve it by hand: the rows are authoritative)`), { code: 'INCONSISTENT_ROWS', id: r.id, key: `${key}.${sub}`, rows: n });
+    }
     if (nulls.has(key)) { values[key] = null; continue; }
     if (order && !order.includes(key)) continue;
     const obj = {};
     const subOrder = meta?.sub?.[key] ?? null;
     const restOf = remainderOf(key);
-    const subExtra = compositeExtra[key] ?? null;
     if (subOrder) {
       for (const sub of subOrder) {
         if (hasOwn(subs, sub)) {
@@ -267,6 +289,8 @@ function fromRowWith(spec, r, { extra = {}, compositeExtra = {} } = {}) {
           setOwn(obj, sub, restOf[sub]);
         }
       }
+      // Rows of a sub-key the composite's shape never listed: appended, never hidden (the rows are authoritative).
+      for (const [sub, v] of held) if (!subOrder.includes(sub)) setOwn(obj, sub, v);
       values[key] = obj;
       continue;
     }
@@ -322,7 +346,7 @@ export function playerFromRow(row, { children = null, trialReports = undefined }
   if (trialReports !== undefined) extra.trialReports = trialReports;
   const compositeExtra = {};
   if (children) for (const [key, subs] of Object.entries(PLAYER_COMPOSITE_SUBRECORDS)) { compositeExtra[key] = {}; for (const sub of subs) compositeExtra[key][sub] = children[key]?.[sub] ?? []; }
-  return fromRowWith(PLAYER_SPEC, row, { extra, compositeExtra });
+  return fromRowWith(PLAYER_SPEC, row, { extra, compositeExtra, compositeTables: PLAYER_COMPOSITE_SUBRECORD_TABLES });
 }
 /** Guardian record → row parameters; `childIds` is left out (it becomes link rows). */
 export function guardianToRow(rec) { return toRowWith(GUARDIAN_SPEC, rec); }

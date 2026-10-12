@@ -28,7 +28,9 @@
 // Exit codes: 0 done, 1 usage error / no source / output directory not empty,
 //             4 the copy carries a later schema step, 5 the copy never applied 0007,
 //             9 the trials collection cannot be read (the trialReports copies cannot be rebuilt),
-//             10 a recorded 0007 whose tables are missing or whose players table is not the live one.
+//             10 a recorded 0007 whose tables are missing or whose players table is not the live one,
+//             11 a player row whose shape says a composite (medical, programme) is null or absent while
+//                its child rows exist (an inconsistent file: the copy would hide them; resolve by hand).
 import fs from 'node:fs';
 import path from 'node:path';
 import { rollbackPlayerSubrecordsCopy } from '../repositories/playerSubrecordsRollback.mjs';
@@ -49,6 +51,7 @@ try {
   if (err?.code === 'NOT_CUT_OVER') { console.error(`refused: ${err.message}`); process.exit(5); }
   if (err?.code === 'TRIALS_UNREADABLE') { console.error(`refused: ${err.message}`); process.exit(9); }
   if (err?.code === 'UNEXPECTED_SCHEMA') { console.error(`refused: ${err.message}`); process.exit(10); }
+  if (err?.code === 'INCONSISTENT_ROWS') { console.error(`refused: ${err.message}`); process.exit(11); }
   if (err?.code === 'OUTPUT_NOT_EMPTY' || err?.code === 'NO_SOURCE') { console.error(`refused: ${err.message}`); process.exit(1); }
   throw err;
 }

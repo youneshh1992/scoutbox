@@ -77,8 +77,17 @@ and design changes the Founder explicitly requests.
   (and `insert` / `restore`, which write a record's arrays as rows) — a route
   that writes a child row together with a blob, an audit row or a column runs
   in one unit of work. `trialReports` is not stored: it is derived from
-  `trials[].report` in filing order and served read-only (the trial report
-  route writes the trial only). Migration 0007 decodes every S4a row through
+  `trials[].report` in filing order and served read-only on EVERY record,
+  whatever shape it was saved with (absent, null or an array; the empty-state
+  shape is kept until a report exists); the trial report route writes the
+  trial only. A `trialReports` array written WITH a record (snapshot
+  replacement, `initialize`, `insert`, `restore`) is a claim and must equal
+  the trials entry for entry, else the whole write is refused — never dropped;
+  absent or null is no claim. `players.update(id, { medical: null })` /
+  `programme: null` is refused while the composite's child rows exist (clear
+  them with `setItems(..., [])` first); a file whose row says a composite is
+  null over existing rows is refused by the boot, the backup and the rollback
+  (`INCONSISTENT_ROWS`). Migration 0007 decodes every S4a row through
   the one mapping, validates every item, reconciles every `trialReports` copy
   with the trials and blocks the whole step with
   `PLAYER_SUBRECORDS_CUTOVER_BLOCKED` (ids, fields, indexes, reasons) on any

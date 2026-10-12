@@ -412,7 +412,7 @@ test('repository: addItem / setItems / patchItem are the one write path — a ro
 
 test('repository: a standalone sub-record write whose COMMIT fails leaves SQL and memory as they were; inside a unit of work a caught failure after the row poisons the unit (nothing commits, memory restored); a real COMMIT failure of the unit takes the same path; retries land everything; players.insert writes a record\'s arrays as rows in its transaction and players.restore rewrites them; players.remove cascades every child row', () => {
   const dir = tempDir('s5-repo-fail');
-  const t = boot(dir, { players: [adult(), rich()], guardians: [] });
+  const t = boot(dir, { players: [adult(), rich()], guardians: [], trialList: trials() }); // rich() carries report copies: the trials must agree (review of 132eda2, finding 1)
   const p = t.players.byId('pl-rich'); const badges = p.badges; const before = JSON.stringify(p);
   // Standalone COMMIT failure.
   let probe = failNextCommit(t);
@@ -506,7 +506,7 @@ test('snapshot replacement under the child foreign keys: a whole-snapshot write 
 // ------------------------------------------------------------------ media ownership
 test('media ownership (the accepted S4a invariant) is judged on player_media once 0007 is recorded: every live clip row is a reference, the in-memory records count too, a queue entry naming a live clip is a conflict, the clip of a removed player is a legitimate removal; before 0007 the facets are read, so the same boot\'s 0006 import is judged correctly', () => {
   const dir = tempDir('s5-own');
-  const t = boot(dir, { players: [rich(), adult()], guardians: [] });
+  const t = boot(dir, { players: [rich(), adult()], guardians: [], trialList: trials() });
   const s = t.store.sqlite;
   const refs = liveMediaReferences(s);
   assert.deepEqual([...refs.keys()].sort(), ['med-r1', 'med-r2', 'med-r3']); assert.deepEqual(refs.get('med-r1'), ['pl-rich']);
@@ -619,6 +619,151 @@ test('rollback refusals leave no output and never touch the source: a later sche
   const json = JSON.parse(execFileSync(process.execPath, [script, src, cliOut, '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
   assert.equal(json.players, 3); assert.equal(json.recordRemoved, true); assert.ok(fs.existsSync(path.join(cliOut, 'scoutbox.db')));
   rm(src, later, s4a, odd, badTrials, out1, out2, out3, out4, out5, out6, path.dirname(cliOut));
+});
+
+// ------------------------------------------------------------------ review of 132eda2 (three findings, corrected failing-first)
+test('review of 132eda2, finding 1: a snapshot save never discards a trialReports copy — a copy with no trial report of that id, one whose content differs, one in a different order, a duplicated entry, each refuses the WHOLE save (player and report ids named; the unrelated edit and the save revision rolled back) whether the snapshot supplies the trials or omits them (the retained trials judge); a trials collection that is not an array is refused while a copy exists; a consistent whole replacement, a trials-only write (the derived view changes), a record without the key (no claim) and a null (no claim) are accepted; an injected COMMIT failure of an accepted save rolls everything back and the retry lands; the same rule at insert, restore and initialize', () => {
+  const dir = tempDir('s5-f1');
+  const t = boot(dir, { players: [adult(), rich()], guardians: [], trialList: trials() }); t.close();
+  const store = openStore(dir); const s = store.sqlite;
+  const base = store.load();
+  assert.deepEqual(base.db.players.map((p) => p.id), ['pl-adult', 'pl-rich']);
+  let before = dump(s, { except: ['meta'] }); let seq = meta(s, 'saveSeq');
+  const refused = (mutate, re, label) => {
+    const snap = clone(base); mutate(snap.db);
+    let err = null; try { store.save({ savedAt: NOW + DAY, idCounter: 1500, db: snap.db }); } catch (e) { err = e; }
+    assert.ok(err, `${label}: the save must be refused`); assert.match(err.message, re, label);
+    assert.equal(dump(s, { except: ['meta'] }), before, `${label}: nothing of the save was written (the unrelated edit included)`);
+    assert.equal(meta(s, 'saveSeq'), seq, `${label}: the save revision did not advance`); assert.equal(s.isTransaction, false);
+  };
+  refused((db) => { db.trials = []; db.players[0].trialReports = [report('rep-x', 'pl-adult', NOW)]; db.players[0].name = 'Unrelated snapshot edit'; }, /players pl-adult: trialReports\[0\] \(rep-x\) has no trial report with that id/, 'a copy with no trial (the reviewer\'s case)');
+  refused((db) => { db.players[1].trialReports[0].notes = 'edited copy'; }, /players pl-rich: trialReports\[0\] \(rep-1\) differs from the trial's report/, 'a copy whose content differs');
+  refused((db) => { db.players[1].trialReports.reverse(); }, /players pl-rich: trialReports lists the same reports in a different order/, 'a copy in a different order');
+  refused((db) => { db.players[1].trialReports.push(clone(db.players[1].trialReports[0])); }, /players pl-rich: trialReports\[2\] \(rep-1\) repeats/, 'a duplicated entry');
+  refused((db) => { delete db.trials; db.players[1].trialReports = [db.players[1].trialReports[0]]; }, /players pl-rich: trial report rep-2 names the player but the player's trialReports does not carry it/, 'the trials omitted: the retained trials judge');
+  refused((db) => { db.trials = { not: 'a list' }; }, /trials collection .* is an object, not an array/, 'a trials collection that is not an array while a copy exists');
+  // Accepted: a consistent whole replacement (the control), a trials-only write, a record without the key, a null.
+  const rep3 = report('rep-3', 'pl-adult', NOW);
+  { const snap = clone(base); snap.db.trials.push(trialOf(rep3)); snap.db.players[0].trialReports = [rep3]; snap.db.players[0].name = 'Renamed'; store.save({ savedAt: NOW + DAY, idCounter: 1500, db: snap.db }); }
+  let loaded = store.load(); assert.equal(loaded.db.players[0].name, 'Renamed'); assert.deepEqual(loaded.db.players[0].trialReports.map((r) => r.id), ['rep-3']);
+  const rep4 = report('rep-4', 'pl-adult', NOW + 1);
+  store.save({ savedAt: NOW + 2 * DAY, idCounter: 1500, db: { trials: [...loaded.db.trials, trialOf(rep4)] } });
+  loaded = store.load(); assert.deepEqual(loaded.db.players[0].trialReports.map((r) => r.id), ['rep-3', 'rep-4'], 'a trials-only write changes the derived view');
+  { const snap = clone(loaded); delete snap.db.players[0].trialReports; store.save({ savedAt: NOW + 3 * DAY, idCounter: 1500, db: snap.db }); assert.deepEqual(store.load().db.players[0].trialReports.map((r) => r.id), ['rep-3', 'rep-4'], 'no key: no claim, the trials stand'); }
+  { const snap = clone(loaded); snap.db.players[0].trialReports = null; store.save({ savedAt: NOW + 4 * DAY, idCounter: 1500, db: snap.db }); assert.deepEqual(store.load().db.players[0].trialReports.map((r) => r.id), ['rep-3', 'rep-4'], 'null: no claim; a derived list that exists is never hidden'); }
+  // An injected COMMIT failure of an accepted save rolls everything back; the retry lands.
+  before = dump(s, { except: ['meta'] }); seq = meta(s, 'saveSeq');
+  const rep5 = report('rep-5', 'pl-rich', NOW + 2); const snap5 = clone(store.load()); snap5.db.trials.push(trialOf(rep5)); snap5.db.players[1].trialReports.push(rep5);
+  const exec = s.exec.bind(s); let fired = 0; s.exec = (sql) => { if (sql === 'COMMIT' && !fired) { fired += 1; throw new Error('injected COMMIT failure'); } return exec(sql); };
+  try { assert.throws(() => store.save({ savedAt: NOW + 5 * DAY, idCounter: 1500, db: snap5.db }), /injected COMMIT failure/); } finally { s.exec = exec; }
+  assert.equal(fired, 1); assert.equal(dump(s, { except: ['meta'] }), before); assert.equal(meta(s, 'saveSeq'), seq);
+  store.save({ savedAt: NOW + 5 * DAY, idCounter: 1500, db: snap5.db }); assert.deepEqual(store.load().db.players[1].trialReports.map((r) => r.id), ['rep-1', 'rep-2', 'rep-5']);
+  s.close();
+  // The same rule at insert, restore and initialize.
+  const r = reopen(dir);
+  assert.throws(() => r.players.insert({ ...adult(), id: 'pl-ins', trialReports: [report('rep-z', 'pl-ins', NOW)] }), /pl-ins: trialReports\[0\] \(rep-z\) has no trial report/);
+  assert.equal(count(r.store.sqlite, 'players', "WHERE id = 'pl-ins'"), 0);
+  r.players.insert({ ...adult(), id: 'pl-ins' }); // trialReports: [] — the sign-up shape
+  const snapRich = clone(r.players.byId('pl-rich')); snapRich.trialReports = snapRich.trialReports.slice(0, 1);
+  assert.throws(() => r.players.restore('pl-rich', snapRich), /pl-rich: trial report rep-2 names the player/);
+  assert.deepEqual(r.players.byId('pl-rich').trialReports.map((x) => x.id), ['rep-1', 'rep-2', 'rep-5']);
+  r.players.restore('pl-rich', clone(r.players.byId('pl-rich'))); // an equal copy
+  const noClaim = clone(r.players.byId('pl-rich')); delete noClaim.trialReports; r.players.restore('pl-rich', noClaim);
+  assert.deepEqual(r.players.byId('pl-rich').trialReports.map((x) => x.id), ['rep-1', 'rep-2', 'rep-5'], 'no key on the restored record: the trials stand');
+  r.close();
+  const fresh = tempDir('s5-f1-init'); freshFile(fresh); const f = openRaw(fresh); migrate(f, { now: NOW });
+  const list = trials(); const identity = createIdentityRepositories({ sqlite: f, now: () => NOW, trialReports: (id) => trialReportsFor(list, id) });
+  assert.throws(() => identity.initialize({ players: [{ ...adult(), trialReports: [report('rep-q', 'pl-adult', NOW)] }], guardians: [] }, { now: NOW }), (e) => e.code === 'CORE_IDENTITY_CUTOVER_BLOCKED' && /pl-adult: trialReports\[0\] \(rep-q\) has no trial report/.test(e.message));
+  assert.equal(meta(f, 'coreIdentityInit'), 'pending'); assert.equal(count(f, 'players'), 0);
+  identity.initialize({ players: [adult(), rich()], guardians: [] }, { now: NOW }); assert.equal(count(f, 'players'), 2);
+  f.close(); rm(dir, fresh);
+});
+
+test('review of 132eda2, finding 2: the derived trialReports follows the trials for EVERY accepted shape — a record whose key was absent, null or an empty array shows a newly filed report at once on the held view, on a fresh lookup, in a spread, in JSON (the backup\'s serialisation) and in the club view (its own club only); the empty-state shape is preserved (absent stays absent, null stays null, [] stays []) in memory, in the row\'s shape metadata, after a reopen and in the rollback copy; a unit of work that fails restores the shape; players.restore adopts the restored record\'s shape', () => {
+  const dir = tempDir('s5-f2');
+  const t = boot(dir, { players: [noKeys(), { ...adult(), id: 'pl-null', trialReports: null }, { ...adult(), id: 'pl-empty' }], guardians: [] });
+  const ids = { absent: 'pl-nokeys', null: 'pl-null', empty: 'pl-empty' };
+  const held = Object.fromEntries(Object.entries(ids).map(([k, id]) => [k, t.players.byId(id)]));
+  assert.equal('trialReports' in held.absent, false); assert.equal(held.null.trialReports, null); assert.deepEqual([...held.empty.trialReports], []);
+  for (const [k, id] of Object.entries(ids)) t.db.trials.push(trialOf(report(`rep-${k}`, id, NOW)));
+  const helpers = { visibleToOrg: () => true, isBlocked: () => false, isAdult: () => true, ageOn: () => 26, computeTrustScore: () => 50, publishedVouchesFor: () => [], haversineKm: () => 1 };
+  const org = { id: 'org-pro', level: 'pro', location: null };
+  for (const [k, id] of Object.entries(ids)) {
+    const v = held[k];
+    assert.deepEqual(v.trialReports.map((r) => r.id), [`rep-${k}`], `${k}: the held view`);
+    assert.deepEqual(t.players.byId(id).trialReports.map((r) => r.id), [`rep-${k}`], `${k}: a fresh lookup`);
+    assert.equal('trialReports' in v, true, `${k}: the key is there once a report exists`);
+    assert.ok(Object.keys(v).includes('trialReports') && Object.keys({ ...v }).includes('trialReports'), `${k}: enumerable (a spread carries it)`);
+    assert.deepEqual(JSON.parse(JSON.stringify(v)).trialReports.map((r) => r.id), [`rep-${k}`], `${k}: the serialisation (a backup's)`);
+    assert.deepEqual(orgPlayerView(v, org, helpers).trialReports.map((r) => r.id), [`rep-${k}`], `${k}: the club view`);
+    assert.deepEqual(orgPlayerView(v, { id: 'org-other', level: 'pro', location: null }, helpers).trialReports, [], `${k}: another club sees none`);
+    assert.throws(() => { v.trialReports.push({}); }, /derived from the trials collection/, `${k}: read-only`);
+  }
+  assert.equal(t.players.uncommitted(), 0, 'a report is not a facet change: nothing to flush');
+  t.store.save(t.snapshot());
+  const m = (id) => t.facets(id).__meta;
+  assert.equal(m('pl-nokeys').order.includes('trialReports'), false, 'absent: the shape metadata still says absent'); assert.ok(m('pl-null').nulls.includes('trialReports'), 'null: still null'); assert.ok(m('pl-empty').order.includes('trialReports') && !m('pl-empty').nulls.includes('trialReports'), 'array: still an array');
+  const read = IDENTITY_SNAPSHOT.read(t.store.sqlite);
+  for (const [k, id] of Object.entries(ids)) assert.deepEqual(read.players.find((p) => p.id === id).trialReports.map((r) => r.id), [`rep-${k}`], `${k}: the backup read`);
+  t.close();
+  let r = reopen(dir);
+  for (const [k, id] of Object.entries(ids)) assert.deepEqual(r.players.byId(id).trialReports.map((x) => x.id), [`rep-${k}`], `${k}: after a reopen`);
+  r.db.trials.length = 0;
+  assert.equal('trialReports' in r.players.byId('pl-nokeys'), false, 'absent: hidden again without reports'); assert.equal(JSON.stringify(r.players.byId('pl-nokeys')).includes('trialReports'), false); assert.equal(Object.keys({ ...r.players.byId('pl-nokeys') }).includes('trialReports'), false);
+  assert.equal(r.players.byId('pl-null').trialReports, null); assert.ok(JSON.stringify(r.players.byId('pl-null')).includes('"trialReports":null'));
+  assert.deepEqual([...r.players.byId('pl-empty').trialReports], []);
+  r.store.save(r.snapshot()); r.close();
+  const out = tempDir('s5-f2-rb'); rollbackPlayerSubrecordsCopy(dbFile(dir), out); const o = openRaw(out);
+  const fac = (id) => JSON.parse(o.prepare('SELECT facets_json FROM players WHERE id = ?').get(id).facets_json);
+  assert.equal('trialReports' in fac('pl-nokeys'), false, 'the rollback copy: no key'); assert.ok('trialReports' in fac('pl-null') && fac('pl-null').trialReports === null, 'the rollback copy: null (the S4a layout keeps a null facet as null)'); assert.deepEqual(fac('pl-empty').trialReports, [], 'the rollback copy: []');
+  o.close();
+  r = reopen(dir);
+  let err = null; try { r.unit(() => { r.players.restore('pl-nokeys', { ...clone(r.players.byId('pl-nokeys')), trialReports: [] }); r.store.failCommitOfOpenTransaction(); }); } catch (e) { err = e; }
+  assert.equal(err?.unitOfWork, 'rolled_back'); assert.equal('trialReports' in r.players.byId('pl-nokeys'), false, 'the shape is restored with the record');
+  r.players.restore('pl-nokeys', { ...clone(r.players.byId('pl-nokeys')), trialReports: [] }); assert.deepEqual([...r.players.byId('pl-nokeys').trialReports], [], 'restore adopts the [] shape');
+  const noKey = clone(r.players.byId('pl-null')); delete noKey.trialReports; r.players.restore('pl-null', noKey); assert.equal('trialReports' in r.players.byId('pl-null'), false, 'restore adopts the absent shape');
+  r.db.trials.push(trialOf(report('rep-late', 'pl-null', NOW))); assert.deepEqual(r.players.byId('pl-null').trialReports.map((x) => x.id), ['rep-late'], 'the adopted shape follows the trials too');
+  r.close(); rm(dir, out);
+});
+
+test('review of 132eda2, finding 3: a whole-null medical or programme update is refused while the player has records or completions (rows of the child table) — everything unchanged, the error naming the player, the rows and the explicit clearing operation; a scalar sub-key update keeps the rows and the held references; a failure inside a unit after the mutation and a real COMMIT failure leave the rows; the explicit clear (setItems to []) then null, a null composite without rows and the key appearing again are supported; export, reopen and rollback agree with the rows; a deliberately inconsistent file (a null composite over child rows, written outside the repositories) is refused by the export, the boot and the rollback tool — the source untouched, no output, exit 11', () => {
+  const dir = tempDir('s5-f3');
+  const t = boot(dir, { players: [adult(), rich()], guardians: [], trialList: trials() });
+  t.players.addItem('pl-adult', 'medical.records', { id: 'md-a1', type: 'note', title: 'Synthetic note' });
+  t.players.update('pl-adult', { programme: { track: 'CM', startedAt: NOW } }); t.players.addItem('pl-adult', 'programme.completed', { sessionId: 's1', ts: NOW });
+  const p = t.players.byId('pl-adult'); const medical = p.medical; const records = p.medical.records;
+  const before = JSON.stringify(p); const rowsBefore = dump(t.store.sqlite, { except: ['meta'] });
+  assert.throws(() => t.players.update('pl-adult', { medical: null }), /medical of player pl-adult cannot be set to null while 1 medical\.records row\(s\) exist in player_medical_records.*setItems\(id, 'medical\.records', \[\]\)/);
+  assert.throws(() => t.players.update('pl-adult', { programme: null }), /programme of player pl-adult cannot be set to null while 1 programme\.completed row\(s\) exist in player_programme_completions/);
+  assert.equal(JSON.stringify(p), before); assert.equal(dump(t.store.sqlite, { except: ['meta'] }), rowsBefore); assert.equal(p.medical, medical); assert.equal(p.medical.records, records);
+  t.players.update('pl-adult', { medical: { shared: true, conditionStatus: 'fully_fit' } }); assert.equal(p.medical, medical); assert.equal(records.length, 1); assert.equal(count(t.store.sqlite, 'player_medical_records', "WHERE player_id = 'pl-adult'"), 1);
+  t.players.update('pl-adult', { programme: { track: 'ST' } }); assert.equal(p.programme.completed.length, 1); assert.equal(p.programme.startedAt, NOW);
+  let err = null; try { t.unit(() => { t.players.update('pl-adult', { medical: { shared: false } }); t.players.addItem('pl-adult', 'medical.records', { id: 'md-a2', type: 'note', title: 'Second' }); t.store.failCommitOfOpenTransaction(); }); } catch (e) { err = e; }
+  assert.equal(err?.unitOfWork, 'rolled_back'); assert.equal(p.medical.shared, true); assert.equal(records.length, 1); assert.equal(count(t.store.sqlite, 'player_medical_records', "WHERE player_id = 'pl-adult'"), 1);
+  t.unit(() => { t.players.update('pl-adult', { medical: { shared: false } }); t.players.addItem('pl-adult', 'medical.records', { id: 'md-a2', type: 'note', title: 'Second' }); }); assert.equal(records.length, 2); assert.equal(p.medical.shared, false);
+  t.players.setItems('pl-adult', 'medical.records', []); assert.equal(count(t.store.sqlite, 'player_medical_records', "WHERE player_id = 'pl-adult'"), 0);
+  t.players.update('pl-adult', { medical: null }); assert.equal(p.medical, null); assert.ok(t.facets('pl-adult').__meta.nulls.includes('medical'));
+  t.players.setItems('pl-adult', 'programme.completed', []); t.players.update('pl-adult', { programme: null }); assert.equal(p.programme, null);
+  assert.throws(() => t.players.addItem('pl-adult', 'medical.records', { id: 'md-a3', type: 'note', title: 'x' }), /medical is null/);
+  t.players.update('pl-adult', { medical: { shared: false, conditionStatus: 'unknown' } }); t.players.addItem('pl-adult', 'medical.records', { id: 'md-a3', type: 'note', title: 'Third' });
+  assert.equal(p.medical.records.length, 1);
+  t.store.save(t.snapshot());
+  const exported = IDENTITY_SNAPSHOT.read(t.store.sqlite).players.find((x) => x.id === 'pl-adult'); assert.equal(exported.medical.records.length, 1); assert.equal(exported.programme, null);
+  t.close();
+  const r = reopen(dir); assert.equal(r.players.byId('pl-adult').medical.records[0].id, 'md-a3'); assert.equal(r.players.byId('pl-adult').programme, null); r.close();
+  // A deliberately inconsistent file: pl-rich's row says medical is null while its two record rows stay.
+  const bad = tempDir('s5-f3-bad'); fs.copyFileSync(dbFile(dir), dbFile(bad));
+  { const b = openRaw(bad); const rec = IDENTITY_SNAPSHOT.read(b).players.find((x) => x.id === 'pl-rich'); const row = playerToRow({ ...rec, medical: null }, { subrecords: 'tables' });
+    b.prepare('UPDATE players SET facets_json = @facets_json, medical_shared = @medical_shared, medical_condition_status = @medical_condition_status WHERE id = @id').run({ id: 'pl-rich', facets_json: row.facets_json, medical_shared: row.medical_shared, medical_condition_status: row.medical_condition_status });
+    assert.equal(count(b, 'player_medical_records', "WHERE player_id = 'pl-rich'"), 2); b.close(); }
+  const digest = filesDigest(bad);
+  const inconsistent = (fn, label) => { let e = null; try { fn(); } catch (x) { e = x; } assert.ok(e, `${label}: must refuse`); assert.equal(e.code, 'INCONSISTENT_ROWS', `${label}: ${e.message}`); assert.match(e.message, /players pl-rich: medical is null .* 2 medical\.records row\(s\) .* player_medical_records/, label); };
+  { const st = openStore(bad); inconsistent(() => st.load(), 'the snapshot store (a backup)'); st.sqlite.close(); }
+  { const b = openRaw(bad); inconsistent(() => IDENTITY_SNAPSHOT.read(b), 'the identity snapshot read'); inconsistent(() => createIdentityRepositories({ sqlite: b, now: () => NOW }).attach(), 'the boot'); b.close(); }
+  const out = tempDir('s5-f3-rb'); inconsistent(() => rollbackPlayerSubrecordsCopy(dbFile(bad), out), 'the rollback tool'); assert.deepEqual(fs.readdirSync(out), [], 'no output');
+  assert.equal(filesDigest(bad)['scoutbox.db'], digest['scoutbox.db'], 'the source is untouched');
+  let status = 0; try { execFileSync(process.execPath, [path.join(HERE, 'playerSubrecordsRollback.mjs'), bad, path.join(tempDir('s5-f3-cli'), 'x')], { stdio: 'pipe' }); } catch (e) { status = e.status; } assert.equal(status, 11);
+  rm(dir, bad, out);
 });
 
 console.log(`\n${passed} player sub-record checks passed`);
