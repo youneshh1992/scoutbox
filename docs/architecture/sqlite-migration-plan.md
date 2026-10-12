@@ -10,13 +10,18 @@ results), **S3 done** (§S3 records the field ownership, the commands and the re
 implemented and review-accepted at `480afdb`** (the player/guardian storage cutover with today's
 deletion behaviour unchanged, its reviewed corrections and safeguards; §S4 records the six
 bounded parts; the acceptance is a bounded code-review conclusion, not production readiness),
-**S4b blocked by O1** (the deletion rewrite waits for the Founder's answer in
-[`s4-deletion-decision.md`](./s4-deletion-decision.md); nothing of it is built), **S5 is the
-authorised next step** — it depends on the storage work S4a completed (the `players` rows, the
-one mapping, the unit of work, the media-removal queue) and preserves today's deletion behaviour
-rather than implementing S4b; its evidence-based note is
-[`s5-player-subrecords.md`](./s5-player-subrecords.md) and its status line is in §S5 —
-S6–S14 planned. The evidence-based plan of S4 is [`s4-readiness-review.md`](./s4-readiness-review.md).
+**S4b not implemented** (the deletion rewrite; O1 is **partially resolved** on 12 October 2026 —
+the Founder chose the full birth date for the retained record, and kept the country-code and
+child-status-stamp questions open: [`s4-deletion-decision.md`](./s4-deletion-decision.md) §10;
+nothing of S4b is built and today's hard delete is unchanged), **S5 implemented and
+review-accepted at `2178c5b`** (the twelve `player_*` tables and `0007_player_subrecords`, one
+correction round; its evidence-based note is
+[`s5-player-subrecords.md`](./s5-player-subrecords.md) and its status block is in §S5; the
+acceptance is a bounded code-review conclusion, not a production-deployment authorization),
+**S6 not started** — its readiness review, grounded in the code at `2178c5b`, is
+[`s6-readiness-review.md`](./s6-readiness-review.md) (what can proceed, what waits for S4b,
+what waits for a decision) — S7–S14 planned. The evidence-based plan of S4 is
+[`s4-readiness-review.md`](./s4-readiness-review.md).
 Migration numbering: `0006` is `0006_media_deletions` (S4a); S5 takes the next unused
 identifier, **`0007_player_subrecords`**; the later steps' identifiers in §B are the next free
 numbers in step order and move again if a step before them needs more than one migration.
@@ -1234,9 +1239,30 @@ performance, existing tests, what this plan is not).
 > `medical` / `programme` update is refused while child rows exist, with boot, backup and rollback
 > refusing an already inconsistent file (`INCONSISTENT_ROWS`); the reviewer's reproduction reports
 > 0 of 3 on the corrected tree (note §6). S4a stays review-accepted at
-> `480afdb`; S4b stays blocked by O1; S6 is not started.
+> `480afdb`; S4b is not implemented; S6 is not started.
+>
+> **Status (S5): review-accepted at `2178c5b`** (12 October 2026). The independent reviewer
+> verified the handoff archive's SHA-256, re-ran the original `review-132eda2-reproductions.mjs`
+> unchanged (0 of 3), ran the full `npm test` on a real Node v24.19.0 (17 suites, 244 checks,
+> exit 0), the five historical review scripts (pass) and the two S5-adapted scripts (pass). The
+> battery, the Node 22 runs, the browser suites and the old-build proof were **not** independently
+> repeated by the reviewer; they stand as this work's own evidence in the handoff. The reviewer's
+> statement is recorded as given: this acceptance is not a production-deployment authorization.
 
 ### S6 — Safeguarding and audit (`blocks`, `reports`, `moderation_log`, `org_notes`, `ledger`, `ops_events`, `source_changes`, `idv_queue`, `email_challenges`, `pairing_codes`)
+
+> **Status (S6): not started.** The readiness review grounded in the code at `2178c5b` is
+> [`s6-readiness-review.md`](./s6-readiness-review.md); where the bullets below differ from it,
+> the review is current. In particular: the server line numbers below predate S4a and S5; the
+> ledger truncation at `m29/index.mjs:618` **no longer exists** (removed in `9656a4b` with the
+> signing unit of work — no path erases a committed ledger row today, so the "reversal row" item
+> is withdrawn as a requirement, review §2.5); `RESTRICT` references to `players(id)` cannot ship
+> before S4b because they would make today's hard delete fail (review §4.1); the `ops_events`
+> CHECK list in the DDL is missing two kinds written today (review §2.6); the rollback below, which
+> accepts losing post-S6 audit rows, is **not** the proposed path — a copy-only tool is (review
+> §7); the migration identifier `0008_safety_audit` is a placeholder assigned from the actual
+> order of approval (review §8). The smallest technically independent sub-step is the two code
+> tables (review §6); nothing of S6 is built, registered or authorised by the review.
 
 - **Objective.** Append-only audit tables live with `RESTRICT` references; one-time codes
   hashed with attempt limits; the ledger gets a reversal row instead of truncation on signing

@@ -1,12 +1,20 @@
 # Decision O1: what ScoutBox keeps about a player after their account is deleted
 
 Written 11 October 2026 on branch `feat/sqlite-schema` at commit `d4ca3f2`, corrected after
-review at `0c038ef`, from reading the code as it is today. **O1 is unresolved until the Founder
-answers the question in §9.** Nothing in this document is implemented, nothing in it is
-approved policy, and nothing in it is legal advice: §8 lists what needs a qualified privacy and
-legal review. Paths are relative to `scoutbox-server/`; `S:` is `server.mjs`. Where a statement
-was verified by running code on synthetic data it says so; everything else is read from the
-code or is a design proposal.
+review at `0c038ef`, from reading the code as it was then. **Status (12 October 2026, at
+`2178c5b`): PARTIALLY RESOLVED — see §10.** The Founder answered the birth-date question
+(§9): the full birth date is the chosen precision for the retained record. The two companion
+questions (the country code; a write-time child-status stamp on future safeguarding records)
+are open by the Founder's explicit choice. §§1–9 are kept as written on 11 October as the
+history and the reasoning behind the question; where they say "unresolved" or "recommended",
+§10 is current. Nothing in this document is implemented (today's deletion behaviour is
+unchanged, §2), nothing in it is approved retention policy beyond the one choice recorded in
+§10, and nothing in it is legal advice: §8 lists what needs a qualified privacy and legal
+review. Paths are relative to `scoutbox-server/`; `S:` is `server.mjs`; the line numbers in
+§§2–3 are those of `0c038ef` (the current ones for the deletion unit are in
+[`s6-readiness-review.md`](./s6-readiness-review.md) §3). Where a statement was verified by
+running code on synthetic data it says so; everything else is read from the code or is a design
+proposal.
 
 ---
 
@@ -269,7 +277,7 @@ fixed-18 rule applies instead (which is wrong for KR/TH/EG/SG players).
 - Not smaller: "date of majority" (`B + T years`) is B in another form; "age at deletion" is Y_B
   in another form.
 
-## 7. Recommendation and justification
+## 7. Recommendation and justification (historical — the recommendation as put to the Founder on 11 October; the Founder chose otherwise, §10)
 
 **Recommended: D2 as the durable mechanism (write-time status with rule and basis on safeguarding
 rows, from S6), and D1 (birth year and month) on the tombstone only if the privacy/legal review
@@ -329,7 +337,7 @@ a gap in the code.
 10. **Country on the tombstone.** Needed to apply the country threshold to any retained birth
     information; a retention decision of its own.
 
-## 9. The question for the Founder
+## 9. The question for the Founder (historical — answered on 12 October 2026, §10; the birth-date question is not to be asked again)
 
 > **After a player's account is deleted, which single piece of birth information may ScoutBox
 > keep on the minimal record it retains for that player — the full birth date, the birth month
@@ -347,6 +355,54 @@ The answer should also settle, in the same breath:
   threshold can be applied to whatever birth information is kept; the fixed-18 rule would apply
   instead, which is wrong for KR, TH, EG and SG players);
 - whether the write-time status stamp (D2) is wanted from S6.
+
+## 10. The Founder's answer (12 October 2026) — what is decided, what stays open, what depends on the open parts
+
+**Recorded verbatim.** The Founder answered the deletion question: **"Full birth date"**. The
+Founder answered the country-code and future child-status-note question: **"Keep both decisions
+open for now"**.
+
+**What this settles.** The full birth date (Option A, §6) is the chosen birth-information
+precision on the minimal retained player record after deletion, *when that deletion design
+(S4b) is implemented*. This is the Founder's product requirement. It differs from the
+recommendation in §7 (D2 as the durable mechanism, with D1 — year and month — or none on the
+retained record): the recommendation is kept above as history; the choice is Option A. The
+reasoning of §§3–6 is not withdrawn by the choice and is not the choice's justification; it is
+the analysis the Founder decided against on the birth-date axis.
+
+**What this does not settle, and must not be read as settling.**
+
+- Whether the two-letter **country code** may stay on the retained record: **open**. Not yes,
+  not no, not a permission.
+- Whether a future safeguarding record (`blocks`, `reports`, `moderationLog`, `orgNotes`) should
+  **record that the subject was treated as a child when the record was written** (D2): **open**.
+  Not yes, not no, not a permission; nothing is designed, stubbed or reserved for it.
+- It is **not** evidence that jurisdiction-specific retention requirements have been reviewed:
+  §8 stands in full. No retention duration is implied or invented.
+- It does **not** add a guardian deletion route (§8 item 5), decide who may delete a child
+  (item 8), decide whether the deletion event is recorded (item 9), or decide any other
+  retention question by implication — including by analogy: the retention of identifying text,
+  messages and commercial records is not inferred from the birth-date choice.
+
+**Today's deletion behaviour is unchanged.** `deletePlayerData` still hard-deletes the player row
+(`s6-readiness-review.md` §3 has the current lines); nothing of S4b is built; this record is a
+requirement for S4b, not an authorization to change account-deletion behaviour.
+
+**Implementation decisions in S4b that still depend on the open parts.**
+
+| S4b item | Depends on | Why |
+|---|---|---|
+| Applying a majority threshold to the retained birth date (`wasMinorOn(date)` on a deleted player's record, §7 implementation notes) | the **country code** decision | the threshold is 18 except for KR, TH, EG and SG (§6); without the country, only the fixed-18 rule can be applied, which is wrong for those four — the implementation must not choose silently between "fixed 18" and "retain country" |
+| Which columns `players.erase(id)` keeps: `birth_date` (decided: full) and `country` (open) | the **country code** decision | the erase method writes exactly the retained set; it cannot be finished with one column undecided |
+| The readiness tests at the age boundaries (§7 notes) | the **country code** decision | the expected answers at the boundary differ by threshold |
+| A write-time `subject_minor` (+ rule, basis) stamp on safeguarding rows, and the writes in `handleReport`, the block routes and `moderateOrRefuse` | the **child-status stamp** decision | a column written by S6 for every future row is a retention choice of its own |
+| Whether a reviewer of a pre-S6 safeguarding row about a deleted player relies on the retained birth date alone | both open decisions | with Option A the date is exact; whether the threshold can be applied depends on the country; whether future rows carry their own answer depends on the stamp |
+
+What S4b can design without either answer: the retained row itself (`deleted_at`, the name
+replacement, every other personal column nulled, the owned facets cleared, the media queue,
+the name snapshots on retained rows), the per-table lifecycle statements, the dangling-id
+treatment for players deleted before S4b (`s6-readiness-review.md` §4.1), and the erase
+method's shape with `country` as the one marked input. None of that is built either.
 
 Until the Founder answers, O1 stays open in `sqlite-schema.md` §12, S4b does not start, and S4a
 (the storage cutover in `s4-readiness-review.md`) keeps today's deletion behaviour unchanged.

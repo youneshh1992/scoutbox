@@ -217,6 +217,17 @@ rollback copy opened by the real `480afdb` build on synthetic data.
 
 ## 6. Status
 
+**Review-accepted at `2178c5b` (12 October 2026).** The independent reviewer verified the
+handoff archive's SHA-256; re-ran the original `review-132eda2-reproductions.mjs` unchanged
+(0 of 3); ran the full `npm test` on a real Node v24.19.0 (17 suites, 244 checks, exit 0); ran
+the five historical review scripts (pass) and both S5-adapted scripts (pass). Not independently
+repeated by the reviewer: the battery, the Node 22 runs, the browser suites and the old-build
+proof — those stand as this work's own evidence (below and in the handoff). Recorded as stated by
+the reviewer: this acceptance is not a production-deployment authorization. S4a stays accepted
+at `480afdb`; S4b is not implemented (O1 partially resolved, `s4-deletion-decision.md` §10); S6 is
+not started (`s6-readiness-review.md`). The paragraphs below are the status as written at the
+end of the correction round and are kept as the record of what was delivered.
+
 **Correction round (review of `132eda2`; implemented, pending review).** The reviewer's
 independent reproduction (`review-132eda2-reproductions.mjs`, run unchanged) reproduced three
 findings on `132eda2` and reports 0 of 3 on the corrected tree, controls passing. Finding 1 (P1): a

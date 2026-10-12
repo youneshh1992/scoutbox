@@ -397,7 +397,8 @@ the end of this section is the gate.
   failure anywhere rolls the whole completion back and issues no invoice —
   the success-fee invoice is issued after COMMIT) and account deletion (the
   row and its links, every session of the person, the media-removal entries
-  and the blob tombstones; today's hard delete — O1 is undecided). Nothing is
+  and the blob tombstones; today's hard delete — O1 is partially decided and
+  S4b is not implemented, `docs/architecture/s4-deletion-decision.md` §10). Nothing is
   broadcast or pushed for a rolled-back unit.
 - **Responses.** Every player and guardian response is built from an explicit
   allowlist (`views/playerViews.mjs`, readiness review §6): a club never

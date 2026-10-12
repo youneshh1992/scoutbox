@@ -780,9 +780,10 @@ DECISIONs:
 
 - **Personal-data deletion is a tombstone plus erasure, not a row delete.** `players` and
   `guardians` keep their row with `deleted_at` set and every personal column nulled or
-  replaced (`name` → `'Deleted player'`, `birth_date` kept only as year-less `'0000-01-01'`?
-  OPEN §12 — alternative: keep `birth_date` because minors' rules need it until the audit
-  retention ends). Owned sub-records (`player_*`, media files, evidence media, prefs,
+  replaced (`name` → `'Deleted player'`, `birth_date`: **the Founder chose the full birth date
+  on 12 October 2026** — `s4-deletion-decision.md` §10; whether `country` stays is OPEN, §12 O1;
+  the earlier text "kept only as year-less `'0000-01-01'`? OPEN §12 — alternative: keep
+  `birth_date`" is superseded). Owned sub-records (`player_*`, media files, evidence media, prefs,
   sessions, pairing codes, channels and messages, player-audience notifications) are deleted
   (`CASCADE` or explicit). Audit and safeguarding rows (`ledger`, `blocks`, `reports`,
   `moderation_log`, `org_notes`, `idv_queue`, `source_changes`, `ver_events`, room decisions
@@ -906,7 +907,11 @@ catalogue; shadow-then-cutover per domain; no integer keys; no triggers or views
 **Open questions** (for the Founder or a later step; none blocked S2 or S3):
 
 - O1. Deletion: keep `birth_date` on the player tombstone (needed for minor rules while audit
-  rows exist) or erase it? Proposed: keep year only.
+  rows exist) or erase it? Proposed: keep year only. **Partially resolved (12 October 2026):
+  the Founder chose the full birth date** (`s4-deletion-decision.md` §10; the "keep year only"
+  proposal is superseded). Still open by the Founder's choice: whether the country code stays on
+  the retained record, and whether future safeguarding rows record that the subject was treated
+  as a child when written. S4b remains unimplemented; today's deletion is unchanged.
 - O2. Org deletion policy with open recruitment cases. **Deferred past S3 deliberately**: S3
   cut organisations over without a tombstone column and without a hard-delete path, because
   no route deletes an organisation today and the foreign key from `org_users` (and, from S8,

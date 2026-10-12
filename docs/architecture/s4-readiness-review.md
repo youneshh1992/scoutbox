@@ -20,11 +20,13 @@ replacement is order-independent (the review reproduced a valid replacement refu
 the queue can never delete a file a live player still references (the review of `4ef9345`
 reproduced a restored queue entry deleting a live clip; §9 item 14) and the rollback tool covers
 the final schema; §9 lists every acceptance item with where it is proven. The three findings of
-the `9656a4b` review are accepted; S4a's final review acceptance is pending the reviewer's
-re-check of the ownership guard. The sections below keep the review's evidence and proposals as written;
-status notes mark what the implementation settled. Nothing here changes the UI or the deletion
-policy (O1 open; S4b not started). Registration in source is development work, not
-authorization for a real-data cutover: the operator procedure is in `OPERATIONS.md`.
+the `9656a4b` review are accepted; S4a is review-accepted at `480afdb`. The sections below keep
+the review's evidence and proposals as written; status notes mark what the implementation
+settled. Nothing here changes the UI or the deletion policy (O1 **partially resolved** on
+12 October 2026 — full birth date chosen, country code and child-status stamp open,
+[`s4-deletion-decision.md`](./s4-deletion-decision.md) §10; S4b not implemented). Registration
+in source is development work, not authorization for a real-data cutover: the operator procedure
+is in `OPERATIONS.md`.
 
 **One dependency statement.** S4 is two bounded steps. **S4a** (storage cutover, repositories,
 allowlisted views, rollback tool) does **not** depend on the deletion decision O1: it keeps
@@ -32,7 +34,10 @@ today's deletion behaviour unchanged behind a repository method and takes no del
 decision implicitly. **S4b** (tombstone, erasure, guardian lifecycle) depends on O1
 ([`s4-deletion-decision.md`](./s4-deletion-decision.md)) and does not start until the Founder
 has answered. Earlier wording that "S4 does not start until O1 is answered" is withdrawn; §9
-lists what each step may proceed with. Neither step has started.
+lists what each step may proceed with. *Status, 12 October 2026:* S4a is done and accepted;
+the Founder has answered the birth-date part of O1 (full birth date) and kept the country-code
+and child-status-stamp parts open; the decision record's §10 lists which S4b design items still
+wait on those. S4b has not started.
 
 Sections: 1 what S4 is and is not · 2 player fields · 3 guardian fields · 4 what moves, what
 stays nested · 5 relationships, minors, duplicates, inconsistencies, invalid records · 6 views
@@ -778,7 +783,10 @@ withdrawn (`s4-deletion-decision.md` §4).
 **Decisions still needed, in plain language:**
 
 1. **O1** — what birth information a deleted player's retained record may keep (and whether the
-   country code may stay): `s4-deletion-decision.md` §9. Blocks S4b only.
+   country code may stay): `s4-deletion-decision.md` §9. Blocks S4b only. **Partially resolved
+   (12 October 2026, §10 of that record):** full birth date chosen; the country code and the
+   write-time child-status stamp remain open by the Founder's explicit choice — the S4b items
+   that depend on them are listed there. Not to be re-asked on the birth-date axis.
 2. ~~**Legacy minors without any guardian link**~~ — **decided (11 October 2026): refuse the
    cutover until each is resolved by hand on the pre-S4 build** (§5.5); implemented in the
    preflight and the repositories' initialisation. No longer open.
