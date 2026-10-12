@@ -84,7 +84,9 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   dispatches: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   drillGuidance: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   dynamicWatchlists: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
-  emailChallenges: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
+  // emailChallenges: no longer a production db.* read since S6a — the rows live in email_challenges (migration 0008,
+  // repositories/oneTimeCodes.mjs) and the routes go through the repository; the data layer still defines a hash-free
+  // read-only view at db.emailChallenges, like the other table-backed collections. (mediaDeletions is the precedent.)
   evidence: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   evidenceSuggestions: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   exposureEvents: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
@@ -113,7 +115,9 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   orgs: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   outbox: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   outcomeReports: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
-  pairingCodes: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
+  // pairingCodes: no longer a production db.* read since S6a — the rows live in pairing_codes (migration 0008,
+  // repositories/oneTimeCodes.mjs) and the routes go through the repository; the data layer still defines a hash-free
+  // read-only view at db.pairingCodes, like the other table-backed collections. (mediaDeletions is the precedent.)
   passportAchievements: { guarantee: 'module', owner: 'm15', reason: 'M15 Passport collection, created at registration' },
   passportCareerEntries: { guarantee: 'module', owner: 'm15', reason: 'M15 Passport collection, created at registration' },
   passportCorrections: { guarantee: 'module', owner: 'm15', reason: 'M15 Passport collection, created at registration' },

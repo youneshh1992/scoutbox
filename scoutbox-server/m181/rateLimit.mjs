@@ -177,6 +177,16 @@ export const RATE_LIMIT_POLICY = {
   // guess is WRONG, and keyed by the identifier that was tried.
   login_failure: { max: 20, windowMs: 900_000, scope: 'actor', note: 'Failed sign-in attempts, per identifier tried. A successful sign-in costs nothing.' },
 
+  // S6a one-time codes (repositories/oneTimeCodes.mjs). The four are complements
+  // of the per-IP `/auth` limiter and of the row-level attempt count on an e-mail
+  // challenge: a request that mints or sends is bounded per owner; a guess is
+  // charged only when it is WRONG (a correct code costs nothing, as a correct
+  // password does above) and keyed by the organisation or by the client address.
+  email_challenge_request: { max: 5, windowMs: 3_600_000, scope: 'org', note: 'Club e-mail-domain verification codes requested (each one sends a mail).' },
+  email_challenge_confirm: { max: 20, windowMs: 900_000, scope: 'org', note: 'Wrong club e-mail verification codes presented. A correct code costs nothing.' },
+  pairing_code_mint: { max: 20, windowMs: 3_600_000, scope: 'actor', note: 'Child pairing codes minted, per guardian.' },
+  pairing_attempt: { max: 20, windowMs: 900_000, scope: 'ip', note: 'Wrong child pairing codes presented, per client address (the route is unauthenticated). A correct code costs nothing.' },
+
   // outbound to people
   evidence_request: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Evidence requests to players and guardians.' },
   org_invite: { max: 25, windowMs: 86_400_000, scope: 'org', note: 'Staff invitations.' },

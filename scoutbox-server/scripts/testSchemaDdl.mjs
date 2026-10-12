@@ -66,14 +66,14 @@ test('every index references an existing table', () => {
 // column (S4a); media_deletions (0006) is documented in 08; the twelve
 // player sub-record tables (0007, S5) are in 01 with their position and
 // extra_json columns.
-test('the registered migrations 0001–0007 match 01_identity.sql (identity, facets_json and the twelve player sub-record tables included) and 08 (media_deletions) column for column', () => {
+test('the registered migrations 0001–0008 match 01_identity.sql (identity, facets_json and the twelve player sub-record tables included), 08 (media_deletions) and 03 (email_challenges, pairing_codes) column for column', () => {
   const mig = new DatabaseSync(':memory:');
   mig.exec('PRAGMA foreign_keys = ON;');
   runDataMigrations(mig, DATA_MIGRATIONS, { now: Date.UTC(2026, 9, 11, 12), log: () => {} });
   assert.equal(mig.prepare('SELECT COUNT(*) AS n FROM data_migrations').get().n, DATA_MIGRATIONS.length);
-  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords']);
+  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes']);
   const S5_TABLES = ['player_season_history', 'player_badges', 'player_drills', 'player_attendance', 'player_timeline', 'player_media', 'player_media_tags', 'player_medical_records', 'player_drill_results', 'player_activity_log', 'player_external_ids', 'player_programme_completions'];
-  for (const t of ['orgs', 'guardians', 'players', 'guardian_children', 'sessions', 'org_users', 'media_deletions', ...S5_TABLES]) {
+  for (const t of ['orgs', 'guardians', 'players', 'guardian_children', 'sessions', 'org_users', 'media_deletions', 'email_challenges', 'pairing_codes', ...S5_TABLES]) {
     const cols = (d) => d.prepare(`PRAGMA table_info(${t})`).all().map((c) => `${c.name}:${c.type}:${c.notnull}:${c.pk}:${c.dflt_value ?? ''}`);
     assert.deepEqual(cols(mig), cols(docs), `${t} columns`);
     const idx = (d) => d.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND name NOT LIKE 'sqlite_%' ORDER BY name").all(t).map((r) => r.name);
@@ -86,6 +86,10 @@ test('the registered migrations 0001–0007 match 01_identity.sql (identity, fac
   assert.match(header, /migration 0005[\s\S]{0,160}?REGISTERED/, 'the status header of 01_identity.sql states that 0005 is registered');
   assert.match(header, /0007_player_subrecords[\s\S]{0,200}?REGISTERED/, 'the status header of 01_identity.sql states that 0007 is registered');
   assert.doesNotMatch(header, /NOT registered/);
+  // S6a: the status of the two one-time-code tables is stated in 03's scope header.
+  const header03 = fs.readFileSync(path.join(SQL_DIR, '03_messaging_safety_audit.sql'), 'utf8').split('\n').slice(0, 30).join('\n');
+  assert.match(header03, /email_challenges[^\n]*0008_one_time_codes[^\n]*REGISTERED/, 'the scope header of 03 states that email_challenges is live since 0008');
+  assert.match(header03, /pairing_codes[^\n]*0008_one_time_codes[^\n]*REGISTERED/, 'the scope header of 03 states that pairing_codes is live since 0008');
 });
 
 console.log(`\n${passed} schema-DDL checks passed (${files.length} files, ${tables.length} tables)`);

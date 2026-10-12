@@ -38,9 +38,11 @@ import * as m0004 from './migrations/0004_orgs_live.mjs';
 import * as m0005 from './migrations/0005_core_identity_live.mjs';
 import * as m0006 from './migrations/0006_media_deletions.mjs';
 import * as m0007 from './migrations/0007_player_subrecords.mjs';
+import * as m0008 from './migrations/0008_one_time_codes.mjs';
 import { trialReportsFor } from './playerSubrecords.mjs';
+import { createOneTimeCodesRepository, EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE, ONE_TIME_CODES_MIGRATION, ONE_TIME_CODES_CUTOVER_META, assertPairingCodesConsistent } from './oneTimeCodes.mjs';
 
-export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005, m0006, m0007]);
+export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008]);
 
 // Single-collection dispatchers, in snapshot-write order: organisations first
 // (staff reference them), then staff (sessions reference them), then
@@ -55,9 +57,13 @@ const TABLES = Object.freeze([ORGS_TABLE, USERS_TABLE, SESSIONS_TABLE]);
  * again. `mediaDeletions` is the media-removal queue: not a record collection
  * the server holds in memory, but part of every whole-database snapshot
  * (backups, restores) in its stored row form, so a restored server keeps the
- * intent to remove a file (review of 9656a4b, finding 2).
+ * intent to remove a file (review of 9656a4b, finding 2). `emailChallenges`
+ * and `pairingCodes` (S6a, migration 0008) are the one-time-code tables in
+ * their stored, hashed row form (repositories/oneTimeCodes.mjs).
  */
-export const TABLE_BACKED = Object.freeze(['orgs', ...IDENTITY_COLLECTIONS, 'users', 'sessions', MEDIA_DELETIONS_TABLE.name]);
+export const TABLE_BACKED = Object.freeze(['orgs', ...IDENTITY_COLLECTIONS, 'users', 'sessions', MEDIA_DELETIONS_TABLE.name, EMAIL_CHALLENGES_TABLE.name, PAIRING_CODES_TABLE.name]);
+/** The one-time-code tables, dispatched after the organisations are pruned (the challenge references its organisation) and after the identity pair (the final-state check reads the players). */
+const CODE_TABLES = Object.freeze([EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE]);
 
 /**
  * Whole-snapshot access for tools that read or write the database file as one
@@ -77,6 +83,10 @@ export function readTableBacked(sqlite) {
   if (identity) Object.assign(out, identity);
   const queue = MEDIA_DELETIONS_TABLE.read(sqlite);
   if (queue) out[MEDIA_DELETIONS_TABLE.name] = queue;
+  for (const table of CODE_TABLES) {
+    const rows = table.read(sqlite);
+    if (rows) out[table.name] = rows;
+  }
   return out;
 }
 const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`);
@@ -133,6 +143,14 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   // throws inside the caller's transaction, so the whole save rolls back,
   // unrelated changes included.
   if (written.some((n) => IDENTITY_COLLECTIONS.includes(n) || n === MEDIA_DELETIONS_TABLE.name)) assertMediaQueueConsistent(sqlite, { label: 'the snapshot (players and mediaDeletions together)' });
+  // S6a: the one-time codes go after the prunes (a challenge of an organisation
+  // the snapshot removed is refused by its foreign key, never cascaded away
+  // after being written) and after the identity pair (the players table is the
+  // snapshot's). A snapshot that rewrote the players but omitted the pairing
+  // codes keeps the retained codes, which must still name existing players —
+  // the FINAL combined state is checked whichever side was written.
+  for (const table of CODE_TABLES) if (present.includes(table.name) && table.replace(sqlite, db[table.name])) written.push(table.name);
+  if (written.some((n) => IDENTITY_COLLECTIONS.includes(n))) assertPairingCodesConsistent(sqlite, { label: 'the snapshot (players and pairingCodes together)' });
   return written;
 }
 
@@ -206,6 +224,31 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
     sqlite.prepare('DELETE FROM collections WHERE name = ?').run(MEDIA_DELETIONS_TABLE.name);
   }
 
+  // One-time codes (S6a, migration 0008): the two tables are the codes and
+  // nothing else. An `emailChallenges` / `pairingCodes` array the caller holds
+  // in memory is either the blob the migration just imported from the file (a
+  // restored backup, a pre-S6a file: the array is dropped, the table is the
+  // record) or a stale copy — the seed's empty containers, a server-side
+  // `??= []` — which is reported when it is not empty, dropped, and its blob
+  // row deleted so no save can bring it back. The repository never imports
+  // from memory. From here on `db.emailChallenges` / `db.pairingCodes` are
+  // hash-free read-only views.
+  const codes = createOneTimeCodesRepository({ sqlite, log, now });
+  const codesBoot = codes.attach({ at: now() });
+  if (migrations.ran.includes(ONE_TIME_CODES_MIGRATION)) {
+    const record = sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(ONE_TIME_CODES_CUTOVER_META)?.value;
+    if (record) { const c = JSON.parse(record); log(`one-time codes: cutover imported ${c.emailChallenges.imported} e-mail challenge(s) (${c.emailChallenges.droppedExpired} expired, not imported) and ${c.pairingCodes.imported} pairing code(s) (${c.pairingCodes.droppedExpired} expired, not imported)`); }
+  }
+  for (const [name, view] of [[EMAIL_CHALLENGES_TABLE.name, codes.emailChallengesView], [PAIRING_CODES_TABLE.name, codes.pairingCodesView]]) {
+    if (Object.hasOwn(db, name)) {
+      const given = db[name];
+      if (!migrations.ran.includes(ONE_TIME_CODES_MIGRATION) && Array.isArray(given) && given.length) warn(`one-time codes: an in-memory ${name} array with ${given.length} entr${given.length === 1 ? 'y' : 'ies'} was ignored; the ${name === 'pairingCodes' ? 'pairing_codes' : 'email_challenges'} table is authoritative`);
+      delete db[name];
+      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
+    }
+    Object.defineProperty(db, name, { value: view, writable: false, configurable: false, enumerable: true });
+  }
+
   return {
     orgs,
     identity,
@@ -214,8 +257,9 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
     users,
     sessions,
     mediaDeletions,
+    codes,
     migrations,
-    boot: { orgs: orgsBoot, identity: identityBoot, users: usersBoot, sessions: sessionsBoot },
+    boot: { orgs: orgsBoot, identity: identityBoot, users: usersBoot, sessions: sessionsBoot, codes: codesBoot },
     /** `details: true` is accepted for the admin report; the report carries counts and states, never rows. */
     report: () => ({
       ...dataSchemaReport(sqlite, DATA_MIGRATIONS),
@@ -225,6 +269,7 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
         guardians: { rows: identity.guardians.count(), mode: 'live', links: identity.report().links, transitional: 'facets_json (coGuardians, emailCode, unknown fields)' },
         users: { rows: users.count(), mode: 'live' },
         sessions: { rows: sessions.count(), mode: 'live', lifetimeMs: sessions.ttlMs },
+        oneTimeCodes: { mode: 'live', rows: codes.counts(), outstanding: codes.outstanding(), lifetimesMs: { emailChallenge: codes.emailChallengeTtlMs, pairingCode: codes.pairingCodeTtlMs }, maxEmailAttempts: codes.maxEmailAttempts },
       },
       identity: { initState: identity.initState(), uncommittedFacets: identity.report().uncommittedFacets },
       mediaDeletions: { queued: mediaDeletions.count(), conflicts: mediaDeletions.conflicts().length },

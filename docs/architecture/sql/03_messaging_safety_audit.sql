@@ -16,8 +16,8 @@
 --   ledger              → ledger
 --   opsEvents           → ops_events
 --   sourceChanges       → source_changes
---   emailChallenges     → email_challenges
---   pairingCodes        → pairing_codes
+--   emailChallenges     → email_challenges   (LIVE since migration 0008_one_time_codes, S6a, REGISTERED)
+--   pairingCodes        → pairing_codes      (LIVE since migration 0008_one_time_codes, S6a, REGISTERED)
 --   idvQueue            → idv_queue
 --
 -- Depends on 01_identity.sql: orgs(id), org_users(id), players(id), guardians(id)
@@ -767,52 +767,77 @@ CREATE INDEX source_changes_player_id_occurred_at ON source_changes(player_id, o
 
 
 -- -----------------------------------------------------------------------------
--- email_challenges
--- source: db.emailChallenges  created at server.mjs:3024-3025 (POST /org/verification/email);
---         container server.mjs:223, seed.mjs:489.
--- owner/writer: server.mjs (filter-then-push = one live challenge per org; deleted on
---         successful confirm 3044).
--- lifecycle: short-lived (30 min); replaced on re-request; removed on success;
---         expired rows linger until replaced.
+-- email_challenges — LIVE since migration 0008_one_time_codes (S6a, REGISTERED:
+--   repositories/migrations/0008_one_time_codes.mjs; repositories/oneTimeCodes.mjs).
+-- source: db.emailChallenges (the blob every build before S6a wrote; imported and retired by 0008)
+--         written at POST /org/verification/email, consumed at POST /org/verification/email/confirm.
+-- owner/writer: repositories/oneTimeCodes.mjs (issueEmailChallenge: INSERT OR REPLACE, one live
+--         challenge per organisation, durable before the mail is sent; noteFailedEmailAttempt:
+--         attempts + 1, the row deleted at EMAIL_CHALLENGE_MAX_ATTEMPTS = 10; consumeEmailChallenge:
+--         DELETE inside the confirmation unit of work, with orgs.update in the same transaction).
+-- lifecycle: 30-minute lifetime judged on every read (expires_at > now); expired rows swept at
+--         boot and before every issue; replaced on re-request; removed on success or after ten
+--         wrong codes. Never kept after use.
 -- mapping:
---   orgId     -> org_id (natural key; one row per org, enforced by code today → PK)
+--   orgId     -> org_id (one row per organisation; the foreign key cascades with a pruned organisation —
+--                organisations are upserted and pruned, never rewritten whole)
 --   email     -> email  -- personal data (work mailbox)
---   code      -> code_hash (sha256 hex; the plain 6-char code was stored before — a 31-char
---                alphabet gives ~30 bits, so the hash resists only casual disclosure, not brute force)
+--   code      -> code_hash (sha256 hex of the code trimmed and upper-cased — the comparison the route
+--                always made; the plain code exists in the mail only. A 31-character alphabet gives
+--                ~2^29.7 values, so the hash resists casual disclosure of a file or backup, not an
+--                offline search by someone holding it; the 30-minute lifetime bounds that exposure)
 --   expiresAt -> expires_at
--- notes: confirm compares upper-cased input to the stored code (3041) → hash the
---   upper-cased value. The same code is also emailed in clear via the outbox.
+--   (new)     -> attempts (wrong confirmations counted on the row; survives a restart, unlike the
+--                process-memory rate limiter that complements it)
+-- notes: backups export the rows in this stored form (codeHash); a backup from before S6a carries
+--   the legacy plain-code shape, which migration 0008 hashes on import. An entry carrying both or
+--   neither, an unknown field, a malformed hash or expiry, or a duplicate organisation refuses the
+--   whole import (ONE_TIME_CODES_IMPORT_BLOCKED).
 -- -----------------------------------------------------------------------------
 CREATE TABLE email_challenges (
   org_id     TEXT PRIMARY KEY REFERENCES orgs(id) ON DELETE CASCADE,
   email      TEXT NOT NULL,                                                -- personal data
   code_hash  TEXT NOT NULL CHECK (length(code_hash) = 64),
-  expires_at INTEGER NOT NULL
+  expires_at INTEGER NOT NULL,
+  attempts   INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0)
 ) STRICT;
+CREATE INDEX email_challenges_expires_at ON email_challenges (expires_at);
 
 
 -- -----------------------------------------------------------------------------
--- pairing_codes
--- source: db.pairingCodes  created at server.mjs:3766-3767 (POST /guardian/children/:id/pairing-code);
---         container server.mjs:217.
--- owner/writer: server.mjs (one live code per child: filter-then-push 3766; consumed
---         and removed at /auth/player/pair 3773-3775; removed on player deletion 4016).
--- lifecycle: 15-minute TTL; single use.
+-- pairing_codes — LIVE since migration 0008_one_time_codes (S6a, REGISTERED; repositories/oneTimeCodes.mjs).
+-- source: db.pairingCodes (the blob every build before S6a wrote — and did not persist at mint; imported
+--         and retired by 0008); written at POST /guardian/children/:id/pairing-code, consumed at
+--         POST /auth/player/pair, revoked by the deletion unit of work.
+-- owner/writer: repositories/oneTimeCodes.mjs (issuePairingCode: the child's previous row deleted and
+--         the new one inserted in one transaction, durable before the response; consumePairingCode:
+--         DELETE inside the pairing unit of work, with the session insert in the same transaction;
+--         revokePairingCodesFor: the deletion unit, before the player row goes).
+-- lifecycle: 15-minute lifetime judged on every read; expired rows swept at boot and before every
+--         issue; single use (consumed with the session it buys, so a crash between the two can no
+--         longer leave a committed session beside a live code).
 -- mapping:
---   code      -> code_hash (sha256 hex of the upper-cased 6-char code; plain value was stored before)
---   playerId  -> player_id
+--   code      -> code_hash (sha256 hex of the upper-cased code; same note as email_challenges — the
+--                plain code exists in the guardian's response only)
+--   playerId  -> player_id — NO foreign key, on purpose: the identity snapshot rewrite deletes and
+--                reinserts every player row, so a cascading reference would silently erase every
+--                pairing code on a whole-snapshot save that omits the collection. The deletion unit
+--                revokes the child's codes explicitly, every snapshot write checks the FINAL state
+--                (a code naming a player not in the table refuses the whole save,
+--                PAIRING_CODE_PLAYER_MISSING), and migration 0008 refuses an outstanding code of a
+--                player that does not exist.
 --   expiresAt -> expires_at
--- notes: lookup is by code (3773) → PK on code_hash. One per child enforced by
---   code today → UNIQUE player_id. Child = minor; the code is the minor's login
---   bootstrap, so the row is safeguarding-sensitive.
+-- notes: lookup is by code → PK on code_hash. One live code per child → UNIQUE player_id. Child =
+--   minor; the code is the minor's login bootstrap, so the row is safeguarding-sensitive. The
+--   guessing budget is the per-IP /auth limiter plus `pairing_attempt` (wrong codes only).
 -- -----------------------------------------------------------------------------
 CREATE TABLE pairing_codes (
   code_hash  TEXT PRIMARY KEY CHECK (length(code_hash) = 64),
-  player_id  TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  player_id  TEXT NOT NULL,
   expires_at INTEGER NOT NULL
 ) STRICT;
-
-CREATE UNIQUE INDEX pairing_codes_player_id ON pairing_codes(player_id);  -- enforced by code today
+CREATE UNIQUE INDEX pairing_codes_player_id ON pairing_codes (player_id);
+CREATE INDEX pairing_codes_expires_at ON pairing_codes (expires_at);
 
 
 -- -----------------------------------------------------------------------------

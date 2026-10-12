@@ -18,14 +18,16 @@ review-accepted at `2178c5b`** (the twelve `player_*` tables and `0007_player_su
 correction round; its evidence-based note is
 [`s5-player-subrecords.md`](./s5-player-subrecords.md) and its status block is in §S5; the
 acceptance is a bounded code-review conclusion, not a production-deployment authorization),
-**S6 not started** — its readiness review, grounded in the code at `2178c5b`, is
-[`s6-readiness-review.md`](./s6-readiness-review.md) (what can proceed, what waits for S4b,
-what waits for a decision) — S7–S14 planned. The evidence-based plan of S4 is
+**S6a implemented, pending independent review** (the one-time-code tables `email_challenges` and
+`pairing_codes`, migration `0008_one_time_codes`, its copy-only rollback; not production-approved;
+[`s6-readiness-review.md`](./s6-readiness-review.md) §10 records what was built and how it was
+verified), **the rest of S6 not started** (the eight audit tables; they wait for S4b, review §4.1)
+— S7–S14 planned. The evidence-based plan of S4 is
 [`s4-readiness-review.md`](./s4-readiness-review.md).
-Migration numbering: `0006` is `0006_media_deletions` (S4a); S5 takes the next unused
-identifier, **`0007_player_subrecords`**; the later steps' identifiers in §B are the next free
-numbers in step order and move again if a step before them needs more than one migration.
-Existing migration ids never change.
+Migration numbering: `0006` is `0006_media_deletions` (S4a); S5 took **`0007_player_subrecords`**;
+S6a took the next unused identifier, **`0008_one_time_codes`** (the plan's placeholder
+`0008_safety_audit` is withdrawn). The later steps' identifiers in §B are placeholders, assigned
+from the actual order in which steps are approved and built. Existing migration ids never change.
 
 Sections: A principles that hold for every step · B the steps (S0–S14) · C cross-cutting
 work (repository pattern, source of truth and dual writes, backups and dry runs, legacy
@@ -1239,7 +1241,7 @@ performance, existing tests, what this plan is not).
 > `medical` / `programme` update is refused while child rows exist, with boot, backup and rollback
 > refusing an already inconsistent file (`INCONSISTENT_ROWS`); the reviewer's reproduction reports
 > 0 of 3 on the corrected tree (note §6). S4a stays review-accepted at
-> `480afdb`; S4b is not implemented; S6 is not started.
+> `480afdb`; S4b is not implemented; S6 is not started (S6a has since been implemented, pending review; §S6).
 >
 > **Status (S5): review-accepted at `2178c5b`** (12 October 2026). The independent reviewer
 > verified the handoff archive's SHA-256, re-ran the original `review-132eda2-reproductions.mjs`
@@ -1251,7 +1253,18 @@ performance, existing tests, what this plan is not).
 
 ### S6 — Safeguarding and audit (`blocks`, `reports`, `moderation_log`, `org_notes`, `ledger`, `ops_events`, `source_changes`, `idv_queue`, `email_challenges`, `pairing_codes`)
 
-> **Status (S6): not started.** The readiness review grounded in the code at `2178c5b` is
+> **Status (S6a, the one-time codes): implemented, pending independent review** — one local
+> commit on `feat/sqlite-schema` on top of `7fbce74`; not pushed, merged, deployed or run on real
+> data; not production-approved. `email_challenges` and `pairing_codes` are live tables (migration
+> `0008_one_time_codes`, `repositories/oneTimeCodes.mjs`): codes stored as sha256 hashes of the
+> normalised value, expiry judged on every read and swept, attempt counting on the challenge, four
+> rate-limit policies, the e-mail confirmation and the pairing exchange each one unit of work,
+> durable issuance, deletion integration, backup/restore in both snapshot formats, and the copy-only
+> rollback `scripts/oneTimeCodesRollback.mjs` (outstanding codes invalidated and counted). What was
+> built, the decisions and the verification are in the readiness review §10. The guardian e-mail
+> code stays plain (review §5.3). **The eight audit tables remain not started** (they wait for S4b).
+>
+> **Status (S6, the rest): not started.** The readiness review grounded in the code at `2178c5b` is
 > [`s6-readiness-review.md`](./s6-readiness-review.md); where the bullets below differ from it,
 > the review is current. In particular: the server line numbers below predate S4a and S5; the
 > ledger truncation at `m29/index.mjs:618` **no longer exists** (removed in `9656a4b` with the
@@ -1261,8 +1274,9 @@ performance, existing tests, what this plan is not).
 > CHECK list in the DDL is missing two kinds written today (review §2.6); the rollback below, which
 > accepts losing post-S6 audit rows, is **not** the proposed path — a copy-only tool is (review
 > §7); the migration identifier `0008_safety_audit` is a placeholder assigned from the actual
-> order of approval (review §8). The smallest technically independent sub-step is the two code
-> tables (review §6); nothing of S6 is built, registered or authorised by the review.
+> order of approval (review §8; S6a took `0008_one_time_codes`). The smallest technically
+> independent sub-step was the two code tables (review §6), now implemented as S6a; nothing of the
+> audit tables is built or registered.
 
 - **Objective.** Append-only audit tables live with `RESTRICT` references; one-time codes
   hashed with attempt limits; the ledger gets a reversal row instead of truncation on signing

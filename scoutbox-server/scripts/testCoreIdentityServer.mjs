@@ -72,7 +72,7 @@ await test('new installation: the seed is initialised once (never again), served
   let S = await boot(dir, nextPort());
   assert.match(S.log(), /initialised from the first installation's records/);
   let cap = (await S.j('GET', '/capabilities')).body;
-  assert.deepEqual(cap.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords']);
+  assert.deepEqual(cap.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes']);
   assert.equal(cap.dataLayer.identity.initState, 'done'); assert.equal(cap.dataLayer.domains.players.mode, 'live');
   assert.equal(cap.dataLayer.domains.players.rows, seedCounts.players); assert.equal(cap.dataLayer.domains.guardians.rows, seedCounts.guardians);
   assert.equal(cap.core_identity_storage?.state ?? cap.dataLayer.domains.players.mode, 'live');
@@ -341,7 +341,10 @@ await test('deletion: the player row, the links, the sessions and the media-remo
   // The rollback tools: the S5 tool keeps the queue (both builds have it); the S4a tool refuses the S5 file outright (exit 4) and, on the S5 tool's output, refuses while the queue is not empty (exit 8).
   const out = tempDir('s4srv-delete-rb');
   try { execFileSync(process.execPath, [path.join(HERE, 'coreIdentityRollback.mjs'), dir, path.join(out, 'copy0')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (err) { assert.equal(err.status, 4); }
-  execFileSync(process.execPath, [path.join(HERE, 'playerSubrecordsRollback.mjs'), dir, path.join(out, 's4a')], { stdio: 'pipe' });
+  // S6a: the file carries 0008; the S5 tool refuses it (exit 4) and the chain starts with the S6a tool (copy-only; the queue kept).
+  try { execFileSync(process.execPath, [path.join(HERE, 'playerSubrecordsRollback.mjs'), dir, path.join(out, 'refused-s5')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (err) { assert.equal(err.status, 4); }
+  execFileSync(process.execPath, [path.join(HERE, 'oneTimeCodesRollback.mjs'), dir, path.join(out, 's5')], { stdio: 'pipe' });
+  execFileSync(process.execPath, [path.join(HERE, 'playerSubrecordsRollback.mjs'), path.join(out, 's5'), path.join(out, 's4a')], { stdio: 'pipe' });
   assert.equal(q1(path.join(out, 's4a'), 'SELECT COUNT(*) AS n FROM media_deletions').n, 1, 'the S5 rollback keeps the pending entry');
   try { execFileSync(process.execPath, [path.join(HERE, 'coreIdentityRollback.mjs'), path.join(out, 's4a'), path.join(out, 'copy')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (err) { assert.equal(err.status, 8); }
   // The next boot retries: still stuck → still queued (attempt 2); unstuck → absent → cleared.
@@ -354,7 +357,8 @@ await test('deletion: the player row, the links, the sessions and the media-remo
   assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM media_deletions').n, 0, 'cleared at boot once the file is absent');
   assert.equal((await S.j('GET', '/capabilities')).body.dataLayer.mediaDeletions.queued, 0);
   await S.stop();
-  execFileSync(process.execPath, [path.join(HERE, 'playerSubrecordsRollback.mjs'), dir, path.join(out, 's4a2')], { stdio: 'pipe' }); // S5 first, then the S4a tool on its output
+  execFileSync(process.execPath, [path.join(HERE, 'oneTimeCodesRollback.mjs'), dir, path.join(out, 's52')], { stdio: 'pipe' }); // S6a first,
+  execFileSync(process.execPath, [path.join(HERE, 'playerSubrecordsRollback.mjs'), path.join(out, 's52'), path.join(out, 's4a2')], { stdio: 'pipe' }); // then S5, then the S4a tool on its output
   assert.equal(execFileSync(process.execPath, [path.join(HERE, 'coreIdentityRollback.mjs'), path.join(out, 's4a2'), path.join(out, 'copy2'), '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).includes('"recordRemoved": true'), true, 'the rollback chain runs once the queue drained');
   rm(dir, out);
 });

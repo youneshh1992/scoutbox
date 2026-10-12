@@ -61,7 +61,7 @@ export function requestInstrumentation() {
 
 export function registerEnterprise(ctx) {
   const {
-    db, users, sessions, orgs, mediaDeletions, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
+    db, users, sessions, orgs, mediaDeletions, codes, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
     mailer, requireLead, isLead, paginate, histAppend, timingSafeEq, signBody,
     storage, DATA_DIR,
   } = ctx;
@@ -463,7 +463,11 @@ export function registerEnterprise(ctx) {
       // left out below (review of 9656a4b, finding 2).
       const queued = mediaDeletions.pending();
       const queuedIds = new Set(queued.map((r) => r.media_id));
-      fs.writeFileSync(snapshotPath, JSON.stringify({ savedAt: Date.now(), idCounter: ctx.currentIdCounter(), db: { ...db, sessions: sessions.exportRows(), mediaDeletions: queued } }));
+      // The one-time codes (S6a, migration 0008) live only in their tables and are
+      // exported the same way, in their stored row form (code hashes, never a
+      // code): a restored server imports them through migration 0008 and the
+      // outstanding ones keep working there until they expire.
+      fs.writeFileSync(snapshotPath, JSON.stringify({ savedAt: Date.now(), idCounter: ctx.currentIdCounter(), db: { ...db, sessions: sessions.exportRows(), mediaDeletions: queued, emailChallenges: codes.exportEmailChallenges(), pairingCodes: codes.exportPairingCodes() } }));
       // 2. Media files — except those whose removal is queued: a backup never
       //    carries a file without the intent to remove it. Their ids are in
       //    db.json; on a restored server the entry is cleared once the file is

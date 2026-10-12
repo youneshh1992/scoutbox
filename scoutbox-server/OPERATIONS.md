@@ -704,6 +704,116 @@ claim (the trials stand). `GET /capabilities` reports the rows per table under
 4. **Rollback, if needed.** `node scripts/playerSubrecordsRollback.mjs
    <data-dir> <fresh-empty-dir>`, then start the S4a build on the output.
 
+### One-time codes (live since migration `0008`, S6a — implemented, pending review)
+
+The club e-mail-domain challenge (`POST /org/verification/email` →
+`…/confirm`) and the child pairing code (`POST
+/guardian/children/:id/pairing-code` → `POST /auth/player/pair`) are rows of
+`email_challenges` and `pairing_codes` (`repositories/oneTimeCodes.mjs`;
+`docs/architecture/s6-readiness-review.md` §10). Request and response shapes
+are unchanged.
+
+- **Storage.** A row holds only `code_hash`: sha256 hex of the code trimmed and
+  upper-cased (the comparison the routes always made). The plain code exists in
+  the mail (challenge) or the guardian's mint response (pairing code) and
+  nowhere else — never in the database, a backup, a log or another response.
+  A six-character code from a 31-character alphabet has ≈ 2^29.7 values, so
+  the hash protects against casual disclosure of a file or a backup, **not**
+  against an offline search by someone who holds it; the lifetimes below bound
+  that exposure. The guardian sign-up e-mail code is **not** in this step: it
+  stays plain in `guardians.facets_json` (hashing it without a resend route
+  would strand guardians on a rollback).
+- **Lifetimes and replacement.** A challenge lives 30 minutes, a pairing code
+  15; expiry is judged on every read (`expires_at > now`), and expired rows
+  are swept at boot and before every issue. One live challenge per
+  organisation and one live pairing code per child: an issue replaces the
+  previous row (and resets the attempt count). A drawn pairing code equal to
+  another child's live code is redrawn, never shared.
+- **Durable issuance.** The row is committed before the mail is sent / the
+  response is written (before S6a a pairing code lived in memory until some
+  later save, so a crash lost it).
+- **Atomic consumption.** The confirmation consumes the challenge and writes
+  the organisation's `emailDomain` / `emailDomainVerified` in ONE unit of work;
+  the pairing exchange consumes the code and creates the child's session in
+  ONE unit of work. A failure anywhere, the real COMMIT included, keeps the
+  code live and changes nothing else; a crash can no longer leave a committed
+  session beside a still-live code (before S6a the same code could buy a
+  second session after a restart).
+- **Wrong codes.** A wrong confirmation is counted on the challenge
+  (`attempts`, which survives a restart); the tenth cancels it
+  (`400 CODE_INVALID` says so; the organisation requests a fresh code). Four
+  rate-limit policies (`m181/rateLimit.mjs`, per process like every limiter):
+  `email_challenge_request` 5 per organisation per hour (each request sends a
+  mail), `email_challenge_confirm` 20 wrong codes per organisation per 15
+  minutes, `pairing_code_mint` 20 per guardian per hour, `pairing_attempt` 20
+  wrong codes per client address per 15 minutes on top of the `/auth` limiter.
+  A correct code costs nothing; once a guessing budget is spent the next
+  attempt is refused **before** the code is judged (`429 RATE_LIMITED`), so a
+  correct guess after it is not rewarded.
+- **Deletion.** Deleting a player revokes the child's pairing code inside the
+  deletion's unit of work, before the player row goes. `pairing_codes` has no
+  foreign key to `players` on purpose (the identity snapshot rewrite deletes
+  and reinserts every player row, so a cascade would erase every code on a
+  save that omits the collection); instead every snapshot write refuses a code
+  whose player is not in the table (`PAIRING_CODE_PLAYER_MISSING`).
+- **S6a cutover (first boot of this build on an S5 file).** Migration
+  `0008_one_time_codes` creates the two tables and imports the
+  `emailChallenges` / `pairingCodes` blobs if the file holds them, in either
+  snapshot format: the **legacy** shape every earlier build wrote (`code`,
+  plain — hashed on the way in) or the **stored** shape a backup taken after
+  S6a holds (`codeHash`, `attempts`). An entry already expired is not imported
+  and is counted (`meta.oneTimeCodesCutover`, logged at boot). Anything else
+  the migration cannot represent exactly — both or neither of `code` /
+  `codeHash`, an unknown field, a malformed hash or expiry, negative attempts,
+  a missing owner, a second entry for one organisation or child, two pairing
+  entries with one code, a blob that is not a JSON array, a live entry whose
+  organisation or player does not exist — aborts the step whole with
+  `ONE_TIME_CODES_IMPORT_BLOCKED` (entry index and reason, never a code): the
+  file is unchanged, the previous build still runs it, the next boot refuses
+  the same way. Nothing is coerced or dropped silently. A file without the
+  blobs (a pairing code was rarely saved before S6a) imports nothing.
+- **Backups and restores.** `POST /admin/backup` exports `emailChallenges` and
+  `pairingCodes` in their stored form (hashes, attempts); a restore into a new
+  directory imports them through the same migration and the outstanding codes
+  keep working there until they expire. A backup taken before S6a (plain
+  codes) restores the same way, hashed on import. A whole snapshot written
+  into a live S6a file by a tool is validated entry by entry in either format
+  and refused whole on the first problem.
+- **Reporting.** `GET /capabilities` shows counts, outstanding counts and the
+  lifetimes under `dataLayer.domains.oneTimeCodes` — never a code or a hash.
+- **Rollback (copy-only, to the S5 build `2178c5b` / `7fbce74`).** Stop this
+  build; run `node scripts/oneTimeCodesRollback.mjs <data-dir>
+  <fresh-empty-dir>`: it opens the file read-only, copies it (`VACUUM INTO`),
+  writes the `emailChallenges` and `pairingCodes` blobs the S5 build reads
+  **empty**, drops the two tables, removes the 0008 record and its meta key,
+  advances `meta.saveSeq`, checks every foreign key, VACUUMs and revalidates
+  the copy (organisations, players, guardians and sessions exactly those of
+  the source). **Every outstanding code is invalidated** — a hash cannot be
+  turned back into the code the older build compares — and the tool prints how
+  many challenges and pairing codes that was; affected organisations request a
+  fresh challenge and affected guardians mint a fresh pairing code. Nothing
+  else is lost. Exit codes: 0 done; 1 usage, no source or a non-empty output
+  directory; 4 the copy carries a later schema step (`LATER_SCHEMA`); 5 the
+  copy never applied 0008 (`NOT_CUT_OVER`); 10 a recorded 0008 whose tables
+  are missing (`UNEXPECTED_SCHEMA`). A failure at any step removes the output.
+  To go further back, run `scripts/playerSubrecordsRollback.mjs` on this
+  tool's output (it refuses the S6a file itself with exit 4).
+
+#### Operator procedure for the S6a cutover (not run on real data by this work)
+
+1. **Dry run on a copy.** With the S5 build still serving, copy the data
+   directory and boot this build on it (`DATA_DIR=<copy>` on a spare port):
+   the log shows `data migration applied: 0008_one_time_codes` and the import
+   counts; an `ONE_TIME_CODES_IMPORT_BLOCKED` line lists what to resolve on the
+   S5 build. Codes are short-lived: an outstanding code can also simply be
+   left to expire before the cutover.
+2. **Backup.** `POST /admin/backup` on the S5 build, verify it, keep it.
+3. **Cutover.** Stop the S5 build, start this build on the real directory,
+   read the same log lines.
+4. **Rollback, if needed.** `node scripts/oneTimeCodesRollback.mjs
+   <data-dir> <fresh-empty-dir>`, note the invalidated counts, then start the
+   S5 build on the output.
+
 ## Reverse proxy and client addresses
 Per-IP controls (the `/auth` brute-force limiter, sharing-link limits, request
 logs) key on the client address. Behind a platform proxy (Fly, Render, a load
@@ -753,8 +863,9 @@ Backups contain no environment secrets, but they contain personal data —
 store them with the same care as the live data directory. Since S4a the
 `db.json` export carries the `players` and `guardians` collections rendered
 from their tables (`childIds` from the links), sessions as hashes and the
-media-removal queue as `mediaDeletions`; it is the shape the first boot of a
-restore imports and cuts over again. The manifest is written last: a backup
+media-removal queue as `mediaDeletions`; since S6a the one-time codes as
+`emailChallenges` / `pairingCodes` in their hashed row form; it is the shape
+the first boot of a restore imports and cuts over again. The manifest is written last: a backup
 that fails midway (a write or copy error) answers `500 BACKUP_FAILED`, its
 partial directory is removed, and an `ops` event records the failure — nothing
 half-made is ever listed as a usable backup. A queue entry that names a clip a

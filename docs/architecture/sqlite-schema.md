@@ -152,8 +152,8 @@ them.
 | `ledger` | audit | 03 | `ledger` | S6 |
 | `opsEvents` | audit | 03 | `ops_events` | S6 |
 | `sourceChanges` | audit | 03 | `source_changes` | S6 |
-| `emailChallenges` | temporary | 03 | `email_challenges` (`code_hash`) | S6 |
-| `pairingCodes` | temporary | 03 | `pairing_codes` (`code_hash`) | S6 |
+| `emailChallenges` | temporary | 03 | `email_challenges` (`code_hash`, `attempts`) — **LIVE since migration 0008 (S6a, pending review)** | S6a |
+| `pairingCodes` | temporary | 03 | `pairing_codes` (`code_hash`; `player_id` without a foreign key, see 03's header) — **LIVE since migration 0008 (S6a, pending review)** | S6a |
 | `idvQueue` | audit (verification provenance) | 03 | `idv_queue` | S6 |
 | `evidence` | persistent | 04 | `evidence`, `evidence_media`, `evidence_disputes`, `evidence_history` | S9 |
 | `coachAffiliations` | persistent | 04 | `coach_affiliations`, `coach_affiliations_history` | S9 |
@@ -557,7 +557,7 @@ client idempotency key. Notifications are addressed to `(audience_kind, audience
 Safeguarding rows (`blocks`, `reports`, `moderation_log`) and audit rows (`ledger`,
 `ops_events`, `source_changes`, `idv_queue`, `org_notes`) reference players with `ON DELETE
 RESTRICT`: they must outlive the subject, which is why §10 makes player deletion a tombstone.
-One-time codes (`email_challenges`, `pairing_codes`) are stored hashed.
+One-time codes (`email_challenges`, `pairing_codes`) are stored hashed (live since migration 0008, S6a: sha256 of the code trimmed and upper-cased; the guardian e-mail code stays plain in `guardians.facets_json` until a resend route exists, `s6-readiness-review.md` §5.3).
 
 ### 5.4 Scouting and assessment (file 04)
 

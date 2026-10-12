@@ -76,7 +76,19 @@ and design changes the Founder explicitly requests.
   ONLY writers are `players.addItem` / `players.setItems` / `players.patchItem`
   (and `insert` / `restore`, which write a record's arrays as rows) — a route
   that writes a child row together with a blob, an audit row or a column runs
-  in one unit of work. `trialReports` is not stored: it is derived from
+  in one unit of work. **One-time codes are live since S6a** (pending
+  review; `repositories/oneTimeCodes.mjs`, migration `0008_one_time_codes`):
+  the club e-mail challenge and the child pairing code are rows of
+  `email_challenges` / `pairing_codes` stored only as sha256 hashes of the
+  normalised code; `db.emailChallenges` / `db.pairingCodes` are hash-free
+  read-only views; issuance is durable before the code is sent; the
+  confirmation and the pairing exchange each consume the code in ONE unit of
+  work with the organisation's verification / the session; wrong codes are
+  counted (ten cancel a challenge) and rate-limited; a backup exports the
+  hashed rows and a legacy plain-code backup is hashed on import; the
+  copy-only rollback is `scripts/oneTimeCodesRollback.mjs` (outstanding codes
+  invalidated and counted) and the S5 tool refuses a file carrying 0008. The
+  guardian e-mail code stays plain. `trialReports` is not stored: it is derived from
   `trials[].report` in filing order and served read-only on EVERY record,
   whatever shape it was saved with (absent, null or an array; the empty-state
   shape is kept until a report exists); the trial report route writes the

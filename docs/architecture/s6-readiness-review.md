@@ -10,6 +10,12 @@ are those of `2178c5b`. The DDL this review reconciles against is
 accepted) and the plan is [`sqlite-migration-plan.md`](./sqlite-migration-plan.md) §S6, whose
 server line numbers predate S4a and S5 and are superseded by the ones here.
 
+> **Update (S6a implemented, pending independent review).** §§1–9 are the review as written at
+> `2178c5b` and are kept as the record of the analysis; their line numbers are those of that
+> commit. The one-time-code sub-step proposed in §6 has since been implemented on top of
+> `7fbce74` as migration `0008_one_time_codes`; **§10 records what was actually built**, where it
+> departs from §§5–7 and why, and how it was verified. The eight audit tables remain not started.
+
 Three kinds of statement are kept apart throughout: **code facts** (what runs today, cited),
 **proposed implementation** (a design for the next step; nothing is built), and **unresolved
 product choices** (listed in §8 and §9; nothing is decided by implication).
@@ -17,7 +23,7 @@ product choices** (listed in §8 and §9; nothing is decided by implication).
 Sections: 1 where S6 stands · 2 the ten domains, one by one · 3 deletion paths and
 dependencies · 4 append-only, `RESTRICT` and the current hard delete · 5 the one-time codes ·
 6 the smallest safe sub-step · 7 test and rollback design · 8 migration registry · 9 dependency
-table.
+table · 10 S6a as implemented (pending review).
 
 ---
 
@@ -640,3 +646,115 @@ Nothing is registered by this review. Existing identifiers never change.
 **Code facts / proposed implementation / unresolved product choices** — kept separate above:
 §2, §3 and §5's "code fact" columns are the first; §4.1's no-FK shape, §4.2's treatments, §6 and
 §7 are the second; §4.3, the two open O1 parts and the last two rows of this table are the third.
+
+---
+
+## 10. S6a as implemented (pending independent review; not production-approved)
+
+One local commit on `feat/sqlite-schema` on top of `7fbce74`. Nothing pushed, merged, deployed or
+run on real data. S4b stays unimplemented, today's account-deletion behaviour is unchanged apart
+from the pairing-code row now going inside the same deletion unit, the eight audit tables are not
+started, and the guardian sign-up e-mail code stays plain. The Founder's full-birth-date choice
+is untouched by this step; country retention and the child-status stamp stay open.
+
+### 10.1 What was built
+
+| Piece | Where |
+|---|---|
+| Migration `0008_one_time_codes` — the next unused id in the actual registry (`0007` was the last) | `repositories/migrations/0008_one_time_codes.mjs`, registered in `DATA_MIGRATIONS` |
+| Repository: hashing, issue/check/consume, attempts, sweep, hash-free views, snapshot read/replace, blob import, final-state checks | `repositories/oneTimeCodes.mjs` |
+| Data-layer wiring: `emailChallenges` / `pairingCodes` table-backed; the views replace `db.*`; stale in-memory arrays dropped and reported, never imported | `repositories/index.mjs` |
+| Routes converted (request/response shapes unchanged): challenge request and confirmation, pairing mint and exchange; deletion revokes the code in its unit | `server.mjs` |
+| Four rate-limit policies | `m181/rateLimit.mjs` |
+| Backup export of the stored rows | `m13/enterprise.mjs` |
+| Copy-only rollback tool (to the S5 build) and its CLI | `repositories/oneTimeCodesRollback.mjs`, `scripts/oneTimeCodesRollback.mjs` |
+| DDL amended to the implementation (attempts column, expiry indexes, no player FK) | `sql/03_messaging_safety_audit.sql` |
+| Tests | `scripts/testOneTimeCodes.mjs` (unit), `scripts/testOneTimeCodesServer.mjs` (real server); existing suites adapted to the registered step and the S6a-first rollback chain |
+
+### 10.2 Concrete parameters (chosen with the existing conventions)
+
+| Item | Value | Convention it follows |
+|---|---|---|
+| Stored form | sha256 hex of the code trimmed and upper-cased | the sessions repository hashes tokens with sha256; the routes always compared trimmed, upper-cased input |
+| Code | 6 characters from `ABCDEFGHJKMNPQRSTUVWXYZ23456789`, CSPRNG | unchanged (`adapters.mjs` `randomCode`, the pairing route's own alphabet) |
+| Lifetimes | challenge 30 min, pairing code 15 min | unchanged |
+| Expiry | judged on every read (`expires_at > now`); swept at boot and before every issue | — |
+| Challenge attempts | counted on the row; the 10th wrong code cancels the challenge | durable across restarts, unlike the process-memory limiter |
+| `email_challenge_request` | 5 per organisation per hour | each request sends a mail |
+| `email_challenge_confirm` | 20 wrong codes per organisation per 15 min | the `login_failure` pattern: wrong guesses only |
+| `pairing_code_mint` | 20 per guardian per hour | — |
+| `pairing_attempt` | 20 wrong codes per client address per 15 min | on top of the per-IP `/auth` limiter (40/min) |
+| Budget test | refused once `max` wrong codes were judged (`peek(...).remaining === 0`), **before** the code is judged | stricter than `login_failure`, which judges `max + 1` |
+
+Why these are enough for short codes: a pairing guesser must hit one of the live codes
+(≈ 9 × 10⁸ values) within 15 minutes at 20 wrong guesses per address per 15 minutes; a challenge
+guesser gets 10 attempts per issued challenge and 5 challenges per hour. These are per-process
+limits; behind a load balancer each instance counts separately (as for every limiter today,
+reported by `/capabilities`).
+
+### 10.3 The specification inconsistencies, resolved before coding
+
+1. **Legacy versus new-format backups.** A snapshot entry is either the legacy shape every earlier
+   build wrote (`code`, plain) or the stored shape a post-S6a backup holds (`codeHash`, and
+   `attempts` for a challenge). The two are told apart by the presence of exactly one of the two
+   fields; each format has its own allowed field list. A legacy entry goes through the validated
+   path and is hashed; a malformed stored entry — or one with both fields, neither, an unknown
+   field, a bad hash, expiry or attempt count — is refused with its index and reason, and the
+   whole write (migration or snapshot save) rolls back. Nothing is reinterpreted or dropped
+   silently; the migration's one deliberate drop (entries already expired) is counted and logged.
+2. **The pairing-code issuance response is preserved** (`{ code, expiresAt }`, 201). The privacy
+   tests treat that response and the challenge mail as the intended delivery and assert that no
+   other response — capabilities, the guardian's, the child's, the club's and the admin views, the
+   pairing response itself — carries either code or its hash; the backup carries no plain code.
+3. **Failure assertions are specific to each operation.** A failed confirmation (seam after the
+   consumption, real COMMIT fault) is asserted to keep the challenge row and leave the
+   organisation's `email_domain_verified` at 0; a failed pairing is asserted to keep the code row
+   and create no session; a failed deletion keeps both the child and the code. Each is read
+   through an independent connection, then the retry is shown to land.
+4. **The original pairing defects were demonstrated on the original implementation**, not
+   inferred: the scratch script `s6a/old-build-proof.mjs` (in the handoff) runs the SAME steps on
+   the real `7fbce74` build and on the S6a tree. On `7fbce74` a code minted just before a SIGKILL is
+   unknown after the restart (404), and a code exchanged just before a SIGKILL buys a SECOND session
+   after the restart (200, two sessions). On S6a the first pairs (200) and the second is refused
+   (404, one session). The new-schema acceptance tests are not claimed to run on the old build.
+
+### 10.4 Where the implementation departs from §§5–7, and why
+
+- **`pairing_codes.player_id` has no foreign key** (§3's table proposed `CASCADE`). The identity
+  snapshot rewrite (`IDENTITY_SNAPSHOT.replace`) deletes and reinserts every player row, so a
+  cascading reference would silently erase every pairing code on a whole-snapshot save that omits
+  the collection. Instead: the deletion unit revokes the child's code explicitly, every snapshot
+  write checks the final state (`PAIRING_CODE_PLAYER_MISSING`), the migration refuses a live code of
+  a player that does not exist, and the exchange route treats an orphan code as dead.
+  `email_challenges.org_id` keeps its `CASCADE` (organisations are upserted and pruned, never
+  rewritten whole).
+- **Two organisations may hold the same e-mail code** (a coincidence the random draw allows): the
+  duplicate-code refusal applies to pairing codes only, whose code is the lookup key. A minted
+  pairing code equal to another child's live code is **redrawn** (up to eight draws, then the
+  issue is refused with nothing written).
+- **Expiry sweep** runs at boot and before every issue, not "on the next request for the same
+  owner" (§6 criterion 7): simpler and covers every owner.
+- **Acceptance criterion 4's error shape**: a wrong confirmation answers `400 CODE_INVALID` with
+  `attemptsRemaining`; the tenth says the challenge is cancelled; the next attempt with any code
+  answers `404 CHALLENGE_NOT_FOUND`, the existing "request a fresh code" answer.
+- **Acceptance criterion 10**: the rollback writes the two blobs **empty**, as proposed, and also
+  counts the already-expired rows it drops; the S5 tool's refusal of an S6a file needed no change
+  (its known-migration list already refuses any later id).
+
+### 10.5 Verification
+
+All runs on synthetic data in temporary directories; no real database, backup or runtime data
+directory was read or written. Commands, versions and logs are in the handoff.
+
+| What | Command | Result |
+|---|---|---|
+| `npm test`, Node 22.22.2, real 22.15.1 / 22.16.0 probed by the runtime suite | `SCOUTBOX_TEST_NODE_BINS=<22.15.1>:<22.16.0> npm test` | 19 suites pass, exit 0 — runtime 6, trust 23, identity 20, data-layer 16, core-schema 10, sessions 24, organisations 14, unit-of-work 17, mapping 27, identity repositories 16, migration 7, rollback 6, media-deletion 7, player sub-record 17, **one-time-code 15**, schema-DDL 13, core-identity server 14, writer-atomicity 9, **one-time-code server 8** |
+| `npm test` on the real Node 22.16.0 binary | `PATH=<22.16.0 bin>:$PATH npm test` | the same 19 suites pass, exit 0 |
+| Original defects on the real `7fbce74` build, and the copy-only downgrade | scratch `s6a/old-build-proof.mjs` (detached worktree at `7fbce74`) | 25 of 25 steps: both pairing defects reproduced on `7fbce74` and closed on S6a; the rollback copy boots on `7fbce74`, which mints, pairs, issues and confirms; the S5 tool refuses the S6a file (exit 4); the S6a build re-upgrades the copy |
+| Battery (every E2E / persistence / contract suite), once | `battery-s6a.sh` | 46 of 48 green as run. `m182E2E`: the same two client-side baseline failures as every round since `66c095c`. `m23BootContract`: 3 failures — the contract still declared `emailChallenges` / `pairingCodes`, which production code no longer reads through `db.*`; fixed by removing the two entries from `storeContract.mjs` (the `mediaDeletions` precedent) |
+| After that fix | `m23BootContract`, `apiE2E`, `preM24SweepE2E`, `m181E2E`, and both `npm test` runs above | all green (57, 130, 40 checks; m181 all passed) |
+
+Not run or not claimed: the browser suites (no client changed); the other 42 battery suites were
+not re-run after the store-contract change (it removes two `module`-guarantee entries; the
+`migration`-guaranteed list that the migration registry and the integrity report read is
+unchanged); no independent review has happened; nothing here is production approval.

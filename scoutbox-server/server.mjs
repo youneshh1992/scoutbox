@@ -199,7 +199,7 @@ const dataLayer = attachDataLayer({
   sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
-const { users, sessions, orgs, players, guardians, identity, mediaDeletions } = dataLayer;
+const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes } = dataLayer;
 if (dataLayer.boot.users.imported) console.log(`data layer: ${dataLayer.boot.users.imported} staff record(s) moved into org_users`);
 if (dataLayer.boot.identity.imported) console.log(`data layer: ${dataLayer.boot.identity.players} player(s) and ${dataLayer.boot.identity.guardians} guardian(s) initialised from the first installation's records`);
 
@@ -273,13 +273,13 @@ for (const p of [...db.players]) {
 }
 db.savedSearches ??= [];
 db.signings ??= [];
-db.pairingCodes ??= [];
+// db.pairingCodes: the data layer's hash-free read-only view since S6a (rows of pairing_codes; repositories/oneTimeCodes.mjs) — never assigned here.
 db.sessions ??= [];        // bearer-token sessions (all roles): already the data layer's read-only view since S2, so this never assigns; kept as the store's inventory line
 db.outbox ??= [];          // mailer dev transport (+ delivery audit when live)
 db.pushLog ??= [];         // push dev transport (+ delivery audit when live)
 db.pushTokens ??= [];      // device push tokens, registered per user
 db.invoices ??= [];        // billing records (success fees)
-db.emailChallenges ??= []; // club email-domain verification codes
+// db.emailChallenges: the data layer's hash-free read-only view since S6a (rows of email_challenges) — never assigned here.
 db.openTrials ??= [];      // grassroots open trial days + registrations
 db.vouches ??= [];         // coach references (email-code verified)
 db.matchdays ??= [];       // grassroots match-day logs (squad-wide attendance)
@@ -3104,30 +3104,54 @@ orgRouter.post('/verification/email', async (req, res) => {
       message: 'Free email providers don\'t prove domain control. No club domain? Use federation verification instead — your federation registration is checked by Trust & Safety.',
     });
   }
-  const code = randomCode(6);
-  db.emailChallenges = db.emailChallenges.filter((c) => c.orgId !== req.org.id);
-  db.emailChallenges.push({ orgId: req.org.id, email, code, expiresAt: Date.now() + 30 * 60 * 1000 });
+  // S6a: every request sends a mail, so requests are bounded per organisation.
+  if (rateLimit.limited('email_challenge_request', req.org.id)) return res.status(429).json(rateLimitedBody('email_challenge_request'));
+  // S6a: the challenge is a row of email_challenges (stored as a hash; 30-minute
+  // lifetime; one live challenge per organisation, the previous one replaced),
+  // durable BEFORE the mail is sent. The plain code exists in the issue result
+  // and in the mail only. A mail that fails to send leaves the row (it expires;
+  // a re-request replaces it) — the same outcome as before S6a.
+  const { code } = codes.issueEmailChallenge(req.org.id, email);
   await mailer.send({
     to: email,
     subject: `Verify ${req.org.name} on ScoutBox`,
     text: `Your ScoutBox club verification code is ${code}.\n\nEntering it confirms ${req.org.name} controls this company mailbox — one of the safeguarding requirements before a club can see under-18 players.`,
   });
-  persist();
   res.status(201).json({ sent: true, note: 'Enter the code from the mailbox to confirm domain control.' });
 });
 
 orgRouter.post('/verification/email/confirm', (req, res) => {
   const { code } = req.body || {};
-  const challenge = db.emailChallenges.find((c) => c.orgId === req.org.id);
-  if (!challenge || challenge.expiresAt < Date.now()) {
+  // S6a: a wrong code is charged against the organisation's confirm budget (a
+  // correct one costs nothing) and counted on the challenge itself, which is
+  // cancelled after EMAIL_CHALLENGE_MAX_ATTEMPTS wrong codes; the budget is
+  // tested before the code is judged, so a correct guess after it is gone is
+  // refused rather than rewarded (the login-failure wiring, M23 P5.6F).
+  if (rateLimit.peek('email_challenge_confirm', req.org.id).remaining === 0) return res.status(429).json(rateLimitedBody('email_challenge_confirm')); // exactly `max` wrong codes are judged; the next attempt is refused
+  const check = codes.checkEmailChallenge(req.org.id, code);
+  if (check.status === 'none') {
+    rateLimit.limited('email_challenge_confirm', req.org.id);
     return res.status(404).json({ error: 'CHALLENGE_NOT_FOUND', message: 'Request a fresh code — none is active for this club.' });
   }
-  if (String(code ?? '').trim().toUpperCase() !== challenge.code) {
-    return res.status(400).json({ error: 'CODE_INVALID', message: 'That code doesn\'t match — check the email.' });
+  if (check.status === 'invalid') {
+    rateLimit.limited('email_challenge_confirm', req.org.id);
+    const { attemptsRemaining, invalidated } = codes.noteFailedEmailAttempt(req.org.id);
+    return res.status(400).json({
+      error: 'CODE_INVALID',
+      message: invalidated ? 'That code doesn\'t match, and this challenge is now cancelled after too many wrong codes — request a fresh one.' : 'That code doesn\'t match — check the email.',
+      attemptsRemaining,
+    });
   }
-  db.emailChallenges = db.emailChallenges.filter((c) => c !== challenge);
-  orgs.update(req.org.id, { emailDomain: challenge.email.split('@')[1], emailDomainVerified: true });
-  persist();
+  // ONE unit of work: the challenge is consumed (its row deleted) and the
+  // organisation's domain columns written together — a failure anywhere, the
+  // real COMMIT included, keeps the challenge live and the organisation
+  // unverified, and the retry lands both.
+  unit(() => {
+    const consumed = codes.consumeEmailChallenge(req.org.id, code);
+    if (!consumed) throw new Error('email challenge: the challenge changed between the check and the confirmation');
+    seam('email_challenge.confirm.after_consume');
+    orgs.update(req.org.id, { emailDomain: consumed.email.split('@')[1], emailDomainVerified: true });
+  });
   broadcast('orgs');
   res.json({ emailDomainVerified: true, emailDomain: req.org.emailDomain });
 });
@@ -3905,21 +3929,40 @@ playerRouter.post('/block', (req, res) => {
 guardianRouter.post('/children/:id/pairing-code', (req, res) => {
   const child = findPlayer(req.params.id);
   if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
-  // Random, not id-derived: pairing codes must never be guessable.
-  const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  const code = Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => ALPHABET[b % ALPHABET.length]).join('');
-  db.pairingCodes = db.pairingCodes.filter((c) => c.playerId !== child.id); // one live code per child
-  db.pairingCodes.push({ code, playerId: child.id, expiresAt: Date.now() + 15 * 60 * 1000 });
-  res.status(201).json({ code, expiresAt: Date.now() + 15 * 60 * 1000 });
+  if (rateLimit.limited('pairing_code_mint', req.guardian.id)) return res.status(429).json(rateLimitedBody('pairing_code_mint'));
+  // S6a: a row of pairing_codes — random (CSPRNG, never id-derived), stored as a
+  // hash, 15-minute lifetime, one live code per child (the previous one
+  // replaced) — durable BEFORE the response is sent. The plain code exists in
+  // this response only; the response shape is unchanged.
+  const { code, expiresAt } = codes.issuePairingCode(child.id);
+  res.status(201).json({ code, expiresAt });
 });
 
 app.post('/auth/player/pair', (req, res) => {
   const { code } = req.body || {};
-  const entry = db.pairingCodes.find((c) => c.code === String(code ?? '').toUpperCase());
-  if (!entry || entry.expiresAt < Date.now()) return res.status(404).json({ error: 'CODE_INVALID', message: 'That pairing code is wrong or expired — ask your parent/guardian for a fresh one.' });
-  db.pairingCodes = db.pairingCodes.filter((c) => c !== entry);
-  const p = findPlayer(entry.playerId);
-  res.json({ playerId: p.id, name: p.name, token: createSession('player', p.id) });
+  // S6a: a wrong code is charged per client address (a correct one costs
+  // nothing), on top of the per-IP /auth limiter; the budget is tested first.
+  const source = req.ip ?? req.socket?.remoteAddress ?? '?';
+  if (rateLimit.peek('pairing_attempt', source).remaining === 0) return res.status(429).json(rateLimitedBody('pairing_attempt')); // exactly `max` wrong codes are judged; the next attempt is refused
+  const live = codes.peekPairingCode(code);
+  const p = live ? findPlayer(live.playerId) : null;
+  if (!live || !p) {
+    if (live && !p) codes.revokePairingCodesFor(live.playerId); // a code whose player is gone (never written by this server) is dead
+    rateLimit.limited('pairing_attempt', source);
+    return res.status(404).json({ error: 'CODE_INVALID', message: 'That pairing code is wrong or expired — ask your parent/guardian for a fresh one.' });
+  }
+  // ONE unit of work: the code is consumed (its row deleted) and the child's
+  // session created together — a failure anywhere, the real COMMIT included,
+  // keeps the code live and creates no session; a crash between the two can
+  // no longer leave a committed session beside a still-live code.
+  let token = null;
+  unit(() => {
+    const consumed = codes.consumePairingCode(code);
+    if (!consumed || consumed.playerId !== p.id) throw new Error('pairing: the code changed between the check and the exchange');
+    seam('pairing.after_consume');
+    token = createSession('player', p.id);
+  });
+  res.json({ playerId: p.id, name: p.name, token });
 });
 
 // Device push-token registration (used when EXPO_ACCESS_TOKEN switches the
@@ -4137,6 +4180,7 @@ function deletePlayerData(playerId) {
   unit(() => {
   mediaDeletions.enqueue(mediaIds, { playerId, at });
   sessions.revokeFor('player', playerId);
+  codes.revokePairingCodesFor(playerId); // S6a: the child's pairing code row goes in this unit (an explicit act, before the player row)
   players.remove(playerId);
   // M23 P4A-D14: requests and trials become id-only tombstones rather than
   // vanishing. A recruitment case that reached a trial keeps the record that
@@ -4169,7 +4213,7 @@ function deletePlayerData(playerId) {
   m29Ctx?.onPlayerDeleted?.(playerId, at);
   db.channels = db.channels.filter((c) => c.playerId !== playerId);
   db.notifications = db.notifications.filter((n) => !(n.audience.kind === 'player' && n.audience.id === playerId));
-  db.pairingCodes = db.pairingCodes.filter((c) => c.playerId !== playerId);
+  // (The pairing code row was revoked above, inside this unit, before the player row went.)
   // (Every guardian's childIds followed the link rows when the player row went: players.remove cascades.)
   // Ledger rows stay (append-only audit + attribution) but carry only ids.
   broadcast('players'); // deferred until COMMIT inside the unit
@@ -4490,7 +4534,7 @@ registerM12({
 // Same module pattern under m13/. registerM13 returns the enriched context so
 // the login path above can reach the MFA rate-limit guards.
 const m13Ctx = registerM13({
-  db, users, sessions, orgs, players, guardians, mediaDeletions, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, users, sessions, orgs, players, guardians, mediaDeletions, codes, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
