@@ -42,7 +42,7 @@ export function registerImports(ctx) {
   const {
     db, orgRouter, adminRouter, app, nextId, persist, persistNow, notify,
     requireLead, isLead, orgCanSee, paginate, histAppend, webhookUrlProblem,
-    signBody, timingSafeEq, findPlayer,
+    signBody, timingSafeEq, findPlayer, players, unit,
   } = ctx;
 
   // ------------------------------------------------------------- templates
@@ -217,12 +217,15 @@ export function registerImports(ctx) {
       const p = findPlayer(r.candidatePlayerId);
       if (!p || !orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE', message: 'You can only link identities on players currently visible to your organisation.' });
       // Provenance is PRESERVED, never overwritten: external ids accumulate,
-      // and player-owned profile fields are untouched by the claim.
-      p.externalIds ??= [];
-      if (!p.externalIds.some((e) => e.provider === r.record.provider && e.externalId === r.record.externalId)) {
-        p.externalIds.push({ provider: r.record.provider, externalId: r.record.externalId, source: `import:${r.batchId}`, by: req.orgUser.name, at: Date.now(), claim: r.record });
-      }
-      r.resolution = 'linked';
+      // and player-owned profile fields are untouched by the claim. ONE unit of
+      // work (S5): the external-id row and the review's resolution (a blob)
+      // commit together.
+      unit(() => {
+        if (!(p.externalIds ?? []).some((e) => e.provider === r.record.provider && e.externalId === r.record.externalId)) {
+          players.addItem(p.id, 'externalIds', { provider: r.record.provider, externalId: r.record.externalId, source: `import:${r.batchId}`, by: req.orgUser.name, at: Date.now(), claim: r.record });
+        }
+        r.resolution = 'linked';
+      });
     } else if (action === 'separate') {
       const pr = {
         id: nextId('prs'), orgId: req.org.id, batchId: r.batchId,

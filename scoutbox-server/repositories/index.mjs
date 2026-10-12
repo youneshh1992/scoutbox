@@ -37,8 +37,10 @@ import * as m0003 from './migrations/0003_sessions_live.mjs';
 import * as m0004 from './migrations/0004_orgs_live.mjs';
 import * as m0005 from './migrations/0005_core_identity_live.mjs';
 import * as m0006 from './migrations/0006_media_deletions.mjs';
+import * as m0007 from './migrations/0007_player_subrecords.mjs';
+import { trialReportsFor } from './playerSubrecords.mjs';
 
-export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005, m0006]);
+export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005, m0006, m0007]);
 
 // Single-collection dispatchers, in snapshot-write order: organisations first
 // (staff reference them), then staff (sessions reference them), then
@@ -165,7 +167,10 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
   // as they are and never imports an array, so a stale blob or seed can never
   // replace live data. Guardians load before players (the foreign key) inside
   // the repositories.
-  const identity = createIdentityRepositories({ sqlite, log, warn, unit: store.unit, now });
+  // S5: the player arrays are rows of the `player_*` tables (migration 0007) and
+  // `trialReports` is derived from the trials collection, read live (`db.trials`
+  // is a blob collection the modules replace and mutate; it is read at access).
+  const identity = createIdentityRepositories({ sqlite, log, warn, unit: store.unit, now, trialReports: (playerId) => trialReportsFor(db.trials, playerId) });
   const identityBoot = identity.initState() === 'pending'
     ? identity.initialize({ players: db.players, guardians: db.guardians }, { now: now() })
     : identity.attach(db.players, db.guardians);
@@ -215,7 +220,7 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
       ...dataSchemaReport(sqlite, DATA_MIGRATIONS),
       domains: {
         orgs: { rows: orgs.count(), mode: 'live', transitional: 'facets_json (tactical, squad, lookingFor, federationCheck, agencySettings, verification, unknown fields)' },
-        players: { rows: identity.players.count(), mode: 'live', transitional: 'facets_json (the S5 arrays, medical.records, programme.completed, unknown fields)' },
+        players: { rows: identity.players.count(), mode: 'live', transitional: 'facets_json (unknown fields and shape metadata)', subrecords: { mode: 'live', tables: identity.players.subrecordRows(), trialReports: 'derived from trials' } },
         guardians: { rows: identity.guardians.count(), mode: 'live', links: identity.report().links, transitional: 'facets_json (coGuardians, emailCode, unknown fields)' },
         users: { rows: users.count(), mode: 'live' },
         sessions: { rows: sessions.count(), mode: 'live', lifetimeMs: sessions.ttlMs },

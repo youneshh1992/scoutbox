@@ -179,6 +179,11 @@ section('2 — a snapshot with P4B trial rows restores byte-faithfully through a
   const RESTORE_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-restore-'));
   const db = baseDb();
   db.trials.push(soundTrial(), legacyTrial());
+  // The legacy trial carries a filed report; before S5 the report route wrote the player's
+  // `trialReports` copy together with `trial.report`, so a sound snapshot carries both. Since S5
+  // (migration 0007) the copy is reconciled with the trials at the cut-over and a player who would
+  // GAIN a report is refused by design — the fixture is the consistent pre-S5 state.
+  db.players[0].trialReports = [legacyTrial().report];
   db.requests = [{ id: 'req-1', orgId: 'org-x', orgName: 'X FC', playerId: 'pl-x', userId: 'usr-owner', scoutName: 'Owner', type: 'trial', message: 'Come.', status: 'accepted', routedTo: 'player', createdAt: T0 - 1000, respondedAt: T0, respondedBy: 'player', caseId: 'case-x', trialId: 'trial-1', recipient: { type: 'player', playerId: 'pl-x', guardianId: null, minor: false }, keys: { invite: { key: 'ik-1', fp: 'fp-i' } }, trialDetails: { proposedDate: '2027-01-15', altSlots: [], venue: 'Dome, London', notes: '', slots: [{ id: 'tslot-1', day: '2027-01-15', kind: 'training', startsAt: T0 + 2 * H, endsAt: T0 + 4 * H, timezone: 'Europe/London', venue: { name: 'Dome', town: 'London' } }], private: { venueAddress: '1 Dome Road', instructions: null } } }];
   db.recruitmentCases[0].room.status = 'trial_scheduled';
   db.recruitmentCases[0].links.trialIds.push('trial-1');
@@ -186,6 +191,7 @@ section('2 — a snapshot with P4B trial rows restores byte-faithfully through a
   written.save({ db });
   const beforeSound = stableJson(db.trials[0]); const beforeLegacy = stableJson(db.trials[1]);
   const s = await bootOn(RESTORE_DIR, PORT);
+  if (!s.up) console.error(s.log().split('\n').slice(-12).join('\n'));
   ok(s.up, 'the server boots on the snapshot');
   const lead = (await s.j('POST', '/auth/org/login', { orgId: 'org-x', scoutName: 'Owner', role: 'Head of Recruitment' })).body;
   const list = await s.j('GET', '/org/rooms/case-x/trials', undefined, lead.token);

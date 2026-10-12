@@ -31,6 +31,7 @@
 import { migrationApplied } from './database.mjs';
 import { PLAYER_COLUMNS, playerFromRow } from './identityMapping.mjs';
 import { CORE_IDENTITY_LIVE_MIGRATION } from './identityPreflight.mjs';
+import { subrecordsLive } from './playerSubrecords.mjs';
 
 export const MEDIA_DELETIONS_MIGRATION = '0006_media_deletions';
 
@@ -66,7 +67,13 @@ export function liveMediaReferences(sqlite, { records = [] } = {}) {
       if (!refs.get(id).includes(p.id)) refs.get(id).push(p.id);
     }
   };
-  if (migrationApplied(sqlite, CORE_IDENTITY_LIVE_MIGRATION)) {
+  if (subrecordsLive(sqlite)) {
+    // S5: the clips are rows of player_media; every row is a live player's reference (the rows cascade with the player row).
+    for (const r of sqlite.prepare('SELECT player_id, id FROM player_media ORDER BY player_id, position').all()) {
+      if (!refs.has(r.id)) refs.set(r.id, []);
+      if (!refs.get(r.id).includes(r.player_id)) refs.get(r.id).push(r.player_id);
+    }
+  } else if (migrationApplied(sqlite, CORE_IDENTITY_LIVE_MIGRATION)) {
     for (const r of sqlite.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players`).all()) add(playerFromRow(r));
   } else if (tableExists(sqlite, 'collections')) {
     const b = sqlite.prepare("SELECT value FROM collections WHERE name = 'players'").get();

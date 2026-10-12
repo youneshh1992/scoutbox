@@ -762,7 +762,7 @@ child. Until then `removedAt`/`deletedAt` remain never-written.
 | `guardians`, `players`, `guardian_children` | shadow (S1) | **live** (done: migration 0005 registered, repositories attached at boot), with `facets_json` on `players` and `guardians`; `email_code_hash` column present but unused until S6 (the code rides in the facets) |
 | `media_deletions` | — | **live** (migration 0006, the crash-safe media-removal queue) |
 | `players.deleted_at`, `guardians.deleted_at` | DDL only | still written by nothing (S4b) |
-| twelve `player_*` sub-record tables | proposed DDL | unchanged (S5) |
+| twelve `player_*` sub-record tables | proposed DDL | **implemented in S5** (migration `0007_player_subrecords`; [`s5-player-subrecords.md`](./s5-player-subrecords.md)) |
 | file 02 (recruitment) | proposed; `player_id` without FK pending O1/S8a | unchanged |
 | everything else (files 03–08) | proposed | unchanged |
 

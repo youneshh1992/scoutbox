@@ -324,7 +324,7 @@ test('identity snapshot (tool mode, review of 9656a4b): a VALID full replacement
 
 test('identity snapshot: before the cutover record exists (a pre-S4 file read by a tool) the blobs are authoritative and the tables are ignored; the store contract lists every live collection', () => {
   const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
-  runDataMigrations(s, DATA_MIGRATIONS.filter((m) => !/^000[56]_/.test(m.id)));
+  runDataMigrations(s, DATA_MIGRATIONS.filter((m) => !/^000[567]_/.test(m.id)));
   assert.equal(IDENTITY_SNAPSHOT.read(s), null, 'nothing to read from the tables before the cutover');
   assert.equal(transaction(s, () => IDENTITY_SNAPSHOT.replace(s, { players: [PLAYER_ADULT()], guardians: [] }, { now: NOW })), false, 'nothing is written to the tables before the cutover (the caller writes the blob)');
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM players').get().n, 0);

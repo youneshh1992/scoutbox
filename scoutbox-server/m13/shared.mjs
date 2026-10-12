@@ -6,7 +6,8 @@ import { isAdult, ageOn, adultAgeFor, visibleToOrg, haversineKm } from '../domai
 import { isLeadUser } from '../roles.mjs';
 
 // ------------------------------------------------------------- migrations
-export function migrateM13(db) {
+/** `players` (S5): the identity repository, for the external-ids default (a row write). */
+export function migrateM13(db, players) {
   db.importBatches ??= [];        // F1 — CSV import batches (draft→validated→committed→reversed)
   db.prospects ??= [];            // F1 — org-PRIVATE imported records; never platform accounts
   db.identityReviews ??= [];      // F1 — ambiguous identity matches awaiting review
@@ -43,8 +44,12 @@ export function migrateM13(db) {
   // (repositories/users.mjs) and are read-only here: an unset `mfa` or
   // `deliveryPrefs` is simply absent, and every reader already treats
   // absent and null alike (`u.mfa?.enabledAt`, `u.deliveryPrefs?.channels`).
-  for (const p of db.players ?? []) {
-    p.externalIds ??= [];         // F1 — [{provider, externalId, source, at}] provenance kept
+  // F1 — [{provider, externalId, source, at}] provenance kept. Since S5 the
+  // external ids are rows of player_external_ids: a record that lacks the key
+  // (absent or null, as the in-place `??=` treated it) gains an empty list
+  // through the repository, once.
+  for (const p of [...(db.players ?? [])]) {
+    if (p.externalIds == null) players.setItems(p.id, 'externalIds', []);
   }
 }
 

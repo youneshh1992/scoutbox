@@ -17,6 +17,8 @@ import { ORGS_TABLE } from '../repositories/orgs.mjs';
 import { createIdentityRepositories, CORE_IDENTITY_INIT_META } from '../repositories/identity.mjs';
 import { CORE_IDENTITY_LIVE_MIGRATION } from '../repositories/identityPreflight.mjs';
 import { rollbackCoreIdentityCopy, KNOWN_MIGRATIONS, S1_IDENTITY_SHADOW_DDL } from '../repositories/coreIdentityRollback.mjs';
+import { rollbackPlayerSubrecordsCopy } from '../repositories/playerSubrecordsRollback.mjs';
+import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.mjs';
 import * as m0002 from '../repositories/migrations/0002_core_identity_shadow.mjs';
 import * as m0005 from '../repositories/migrations/0005_core_identity_live.mjs';
 import { openStore } from '../store.mjs';
@@ -31,6 +33,8 @@ function test(name, fn) { if (only && !name.includes(only)) return; fn(); passed
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const dbFile = (dir) => path.join(dir, 'scoutbox.db');
+/** S5: a live file carries 0007, which the S4a tool refuses outright; the chain is the S5 rollback (copy-only, keeps everything else) and then the S4a tool on ITS output. Returns the S4a-shaped copy's directory. */
+const s4aCopy = (dir) => { const out = tempDir('s5-to-s4a'); rollbackPlayerSubrecordsCopy(dbFile(dir), out); return out; };
 let counter = 7000;
 const nextId = (p) => `${p}-${++counter}`;
 /**
@@ -72,13 +76,13 @@ function liveDatabaseWithHistory(dir) {
   identity.players.unlink('gd-co', 'pl-child2');
   identity.players.ageUp('pl-grown');
   identity.players.remove('pl-adult');
-  db.players.find((p) => p.id === 'pl-seeded').badges.push('PostS4');
+  identity.players.addItem('pl-seeded', 'badges', 'PostS4'); // S5: a row of player_badges
   db.guardians.find((g) => g.id === 'gd-signup').coGuardians = [{ id: 'gd-new', name: 'New Parent', email: 'new@example.test' }];
   db.requests[0].status = 'post-s4';
   store.unitOfWork(() => { identity.players.insert({ ...child('pl-unit', 'gd-primary', '2018-02-02'), name: 'Unit Child' }); db.requests.push({ id: 'req-2', status: 'in-unit' }); }, { snapshot });
   const minted = layer.sessions.create('guardian', 'gd-new');
   store.save(snapshot());
-  const expected = { players: JSON.parse(JSON.stringify(db.players)), guardians: JSON.parse(JSON.stringify(db.guardians)), live: identityDump(store.sqlite), sessions: sessionRows(store.sqlite), minted: minted.token, others: dump(store.sqlite, { except: ['players', 'guardians', 'guardian_children', 'collections', 'meta', 'data_migrations', 'media_deletions'] }), blobs: Object.fromEntries(['users', 'sessions', 'orgs', 'requests', 'ledger'].map((n) => [n, blobText(store.sqlite, n)])), saveSeq: Number(meta(store.sqlite, 'saveSeq')) };
+  const expected = { players: JSON.parse(JSON.stringify(db.players)), guardians: JSON.parse(JSON.stringify(db.guardians)), live: identityDump(store.sqlite), sessions: sessionRows(store.sqlite), minted: minted.token, others: dump(store.sqlite, { except: ['players', 'guardians', 'guardian_children', 'collections', 'meta', 'data_migrations', 'media_deletions', ...SUBRECORD_TABLES] }), blobs: Object.fromEntries(['users', 'sessions', 'orgs', 'requests', 'ledger'].map((n) => [n, blobText(store.sqlite, n)])), saveSeq: Number(meta(store.sqlite, 'saveSeq')) };
   store.sqlite.close();
   return expected;
 }
@@ -102,15 +106,18 @@ test('rollback: the copy holds every post-S4 player, guardian and link in the tw
   const src = tempDir('s4-rb-src'); const expected = liveDatabaseWithHistory(src);
   const srcBefore = filesDigest(src); const sIn = openRaw(src); const logicalBefore = dump(sIn); sIn.close();
   const out = tempDir('s4-rb-out');
-  const result = rollbackCoreIdentityCopy(dbFile(src), out);
+  assert.throws(() => rollbackCoreIdentityCopy(dbFile(src), out), (err) => err.code === 'LATER_SCHEMA' && /0007_player_subrecords/.test(err.message), 'S5: the S4a tool never accepts a file carrying 0007 (it would lose the child rows)');
+  assert.deepEqual(fs.readdirSync(out), [], 'no output from the refusal');
+  const s4a = s4aCopy(src);
+  const result = rollbackCoreIdentityCopy(dbFile(s4a), out);
   assertSourceUntouched(src, srcBefore, logicalBefore, 'after a successful rollback');
   // The result.
   assert.equal(result.output, dbFile(out)); assert.equal(result.recordRemoved, true);
-  assert.equal(result.players, 6, 'five fixture players − the removed adult + the new child + the unit child'); assert.equal(result.guardians, 4); assert.equal(result.links, 6, 'five fixture links + the new child + the co link − the unlink − the ageUp + the unit child'); assert.equal(result.sessions, 4); assert.equal(result.saveSeq, expected.saveSeq + 1);
+  assert.equal(result.players, 6, 'five fixture players − the removed adult + the new child + the unit child'); assert.equal(result.guardians, 4); assert.equal(result.links, 6, 'five fixture links + the new child + the co link − the unlink − the ageUp + the unit child'); assert.equal(result.sessions, 4); assert.equal(result.saveSeq, expected.saveSeq + 2, 'the S5 tool advanced the revision once, this tool once more');
   assert.deepEqual(fs.readdirSync(out), ['scoutbox.db'], 'one file, no WAL leftovers after VACUUM');
   const o = openRaw(out);
   assert.deepEqual(applied(o), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live']);
-  assert.equal(meta(o, CORE_IDENTITY_INIT_META), undefined); assert.equal(meta(o, m0005.CORE_IDENTITY_CUTOVER_META), undefined); assert.equal(Number(meta(o, 'saveSeq')), expected.saveSeq + 1);
+  assert.equal(meta(o, CORE_IDENTITY_INIT_META), undefined); assert.equal(meta(o, m0005.CORE_IDENTITY_CUTOVER_META), undefined); assert.equal(Number(meta(o, 'saveSeq')), expected.saveSeq + 2);
   // The blobs: exactly what the repositories served after the history (byte-identical records, childIds in link order).
   const players = blob(o, 'players'); const guardians = blob(o, 'guardians');
   assert.equal(JSON.stringify(players), JSON.stringify(expected.players), 'the players blob equals the live view, record for record');
@@ -129,7 +136,7 @@ test('rollback: the copy holds every post-S4 player, guardian and link in the tw
   for (const t of ['players', 'guardians', 'guardian_children']) { assert.equal(o.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n, 0, `${t} empty`); assert.equal(isLive(o, t), false, `${t} is the shadow definition`); }
   // Untouched: sessions (the minted one included), staff, organisations, other blobs (the post-S4 blob edit kept).
   assert.deepEqual(sessionRows(o), expected.sessions); assert.ok(o.prepare('SELECT 1 FROM sessions WHERE token_hash = ?').get(sha256(expected.minted)));
-  assert.equal(dump(o, { except: ['players', 'guardians', 'guardian_children', 'collections', 'meta', 'data_migrations', 'media_deletions'] }), expected.others);
+  assert.equal(dump(o, { except: ['players', 'guardians', 'guardian_children', 'collections', 'meta', 'data_migrations', 'media_deletions', ...SUBRECORD_TABLES] }), expected.others);
   for (const [n, text] of Object.entries(expected.blobs)) assert.equal(blobText(o, n), text, `${n} blob untouched`);
   assert.equal(blob(o, 'requests')[0].status, 'post-s4'); assert.equal(blob(o, 'requests')[1].id, 'req-2');
   assert.deepEqual(o.prepare('PRAGMA foreign_key_check').all(), []); assert.equal(o.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
@@ -158,7 +165,7 @@ test('rollback: the copy holds every post-S4 player, guardian and link in the tw
 test('round trip: the real migration cuts the rollback copy over again and the live tables equal the pre-rollback live state row for row (facets included), the repositories attach and serve the same records; a record added on the pre-S4 build is imported with them', () => {
   const src = tempDir('s4-rt-src'); const expected = liveDatabaseWithHistory(src);
   const out = tempDir('s4-rt-out');
-  rollbackCoreIdentityCopy(dbFile(src), out);
+  rollbackCoreIdentityCopy(dbFile(s4aCopy(src)), out);
   const o = openRaw(out);
   migrate(o, { now: NOW + 3 * DAY });
   assert.equal(identityDump(o), expected.live, 'players, guardians and links are identical to the pre-rollback live state');
@@ -169,7 +176,7 @@ test('round trip: the real migration cuts the rollback copy over again and the l
   o.close();
   // A write on the pre-S4 build between rollback and re-upgrade (a new guardian with a child) is imported with everything else.
   const out2 = tempDir('s4-rt-out2');
-  rollbackCoreIdentityCopy(dbFile(src), out2);
+  rollbackCoreIdentityCopy(dbFile(s4aCopy(src)), out2);
   const store = openStore(out2); // the pre-S4 build's snapshot store: the blobs are authoritative on the copy
   const loaded = store.load(); const db = { ...loaded.db };
   db.guardians.push({ ...gSignup(), id: 'gd-pre', email: 'pre@example.test', emailCode: 'PRE123', childIds: ['pl-pre'] });
@@ -191,7 +198,7 @@ test('an active WAL is carried: a change still in the source\'s WAL (writer conn
   const before = filesDigest(src);
   assert.notEqual(before['scoutbox.db-wal'], 'absent'); assert.ok(!/^0 bytes/.test(before['scoutbox.db-wal']), 'the change sits in the WAL side file');
   const out = tempDir('s4-rb-wal-out');
-  const result = rollbackCoreIdentityCopy(dbFile(src), out);
+  const result = rollbackCoreIdentityCopy(dbFile(s4aCopy(src)), out);
   assert.equal(result.players, 6);
   const after = filesDigest(src);
   assert.equal(after['scoutbox.db'], before['scoutbox.db'], 'the main file is byte-identical: the read-only open did not checkpoint');
@@ -208,37 +215,39 @@ test('review (64ef3aa): an interrupted first installation — 0005 applied, core
   let s = openRaw(pending); migrate(s, { now: NOW }); assert.equal(meta(s, CORE_IDENTITY_INIT_META), 'pending'); s.close();
   const before = filesDigest(pending); const sIn = openRaw(pending); const logicalBefore = dump(sIn); sIn.close();
   const out = tempDir('s4-rb-pending-out');
-  assert.throws(() => rollbackCoreIdentityCopy(dbFile(pending), out), (err) => err.code === 'INIT_PENDING' && /initialisation .*has not completed|pending/.test(err.message) && /boot|retry|fresh/.test(err.message), 'refused with an actionable explanation');
+  const pendingS4a = s4aCopy(pending);
+  assert.throws(() => rollbackCoreIdentityCopy(dbFile(pendingS4a), out), (err) => err.code === 'INIT_PENDING' && /initialisation .*has not completed|pending/.test(err.message) && /boot|retry|fresh/.test(err.message), 'refused with an actionable explanation');
   assert.deepEqual(fs.readdirSync(out), [], 'no output');
   assertSourceUntouched(pending, before, logicalBefore, 'after the pending refusal');
   const script = path.join(HERE, 'coreIdentityRollback.mjs');
   const run = (...a) => { try { execFileSync(process.execPath, [script, ...a], { stdio: 'pipe' }); return 0; } catch (err) { return err.status; } };
-  assert.equal(run(pending, path.join(tempDir('s4-rb-pending-cli'), 'x')), 6, 'CLI exit 6: initialisation pending');
+  assert.equal(run(pendingS4a, path.join(tempDir('s4-rb-pending-cli'), 'x')), 6, 'CLI exit 6: initialisation pending');
   // The same database, once the initialisation completes (the first boot's import), rolls back normally.
   s = openRaw(pending);
   const identity = createIdentityRepositories({ sqlite: s, now: () => NOW });
   identity.initialize({ players: [adult()], guardians: [gSignup()] }, { now: NOW }); s.close();
   const out2 = tempDir('s4-rb-pending-out2');
-  const result = rollbackCoreIdentityCopy(dbFile(pending), out2);
+  const result = rollbackCoreIdentityCopy(dbFile(s4aCopy(pending)), out2);
   assert.equal(result.players, 1); assert.equal(result.guardians, 1);
   const o2 = openRaw(out2); migrate(o2, { now: NOW + DAY }); assert.equal(meta(o2, CORE_IDENTITY_INIT_META), 'done'); assert.equal(o2.prepare('SELECT COUNT(*) AS n FROM players').get().n, 1); o2.close();
   // A malformed marker is refused, not erased or guessed.
   const odd = tempDir('s4-rb-odd-init'); liveDatabaseWithHistory(odd);
   const od = openRaw(odd); od.prepare("UPDATE meta SET value = 'maybe' WHERE key = ?").run(CORE_IDENTITY_INIT_META); od.close();
   const out3 = tempDir('s4-rb-odd-out');
-  assert.throws(() => rollbackCoreIdentityCopy(dbFile(odd), out3), (err) => err.code === 'INIT_STATE_INVALID' && /"maybe"/.test(err.message));
+  const oddS4a = s4aCopy(odd);
+  assert.throws(() => rollbackCoreIdentityCopy(dbFile(oddS4a), out3), (err) => err.code === 'INIT_STATE_INVALID' && /"maybe"/.test(err.message));
   assert.deepEqual(fs.readdirSync(out3), []);
-  assert.equal(run(odd, path.join(tempDir('s4-rb-odd-cli'), 'x')), 7, 'CLI exit 7: malformed initialisation marker');
+  assert.equal(run(oddS4a, path.join(tempDir('s4-rb-odd-cli'), 'x')), 7, 'CLI exit 7: malformed initialisation marker');
   // An absent marker reads as done (the repositories' documented compatibility for a cut-over file whose marker was never written): rolled back normally.
   const absent = tempDir('s4-rb-absent-init'); liveDatabaseWithHistory(absent);
   const ab = openRaw(absent); ab.prepare('DELETE FROM meta WHERE key = ?').run(CORE_IDENTITY_INIT_META); ab.close();
   const out4 = tempDir('s4-rb-absent-out');
-  assert.equal(rollbackCoreIdentityCopy(dbFile(absent), out4).players, 6);
+  assert.equal(rollbackCoreIdentityCopy(dbFile(s4aCopy(absent)), out4).players, 6);
   // Control: a legitimately saved EMPTY domain is done, rolls back and re-upgrades as done/empty.
   const empty = tempDir('s4-rb-empty'); s3File(empty, { players: [], guardians: [], sessions: [] });
   s = openRaw(empty); migrate(s, { now: NOW }); assert.equal(meta(s, CORE_IDENTITY_INIT_META), 'done'); s.close();
   const out5 = tempDir('s4-rb-empty-out');
-  assert.deepEqual([rollbackCoreIdentityCopy(dbFile(empty), out5).players, rollbackCoreIdentityCopy.length], [0, 2]);
+  assert.deepEqual([rollbackCoreIdentityCopy(dbFile(s4aCopy(empty)), out5).players, rollbackCoreIdentityCopy.length], [0, 2]);
   const o5 = openRaw(out5);
   assert.deepEqual(blob(o5, 'players'), []); assert.deepEqual(blob(o5, 'guardians'), []);
   migrate(o5, { now: NOW + DAY }); assert.equal(meta(o5, CORE_IDENTITY_INIT_META), 'done'); assert.equal(o5.prepare('SELECT COUNT(*) AS n FROM players').get().n, 0);
@@ -251,10 +260,11 @@ test('refusals and failures leave no output and never touch the source: a later 
   const src = tempDir('s4-rb-refuse'); liveDatabaseWithHistory(src);
   const before = filesDigest(src); const sIn = openRaw(src); const logicalBefore = dump(sIn); sIn.close();
   // Later schema.
-  const later = tempDir('s4-rb-later'); fs.copyFileSync(dbFile(src), dbFile(later));
-  const l = openRaw(later); l.prepare("INSERT INTO data_migrations (id, applied_at) VALUES ('0007_future_step', 1)").run(); l.close();
+  const srcS4a = s4aCopy(src);
+  const later = tempDir('s4-rb-later'); fs.copyFileSync(dbFile(srcS4a), dbFile(later));
+  const l = openRaw(later); l.prepare("INSERT INTO data_migrations (id, applied_at) VALUES ('0008_future_step', 1)").run(); l.close();
   const out1 = tempDir('s4-rb-o1');
-  assert.throws(() => rollbackCoreIdentityCopy(dbFile(later), out1), (err) => err.code === 'LATER_SCHEMA' && /0007_future_step/.test(err.message));
+  assert.throws(() => rollbackCoreIdentityCopy(dbFile(later), out1), (err) => err.code === 'LATER_SCHEMA' && /0008_future_step/.test(err.message));
   assert.deepEqual(fs.readdirSync(out1), [], 'no output');
   // Never cut over (an S3 file).
   const s3 = tempDir('s4-rb-s3'); s3File(s3);
@@ -275,7 +285,7 @@ test('refusals and failures leave no output and never touch the source: a later 
   const proto = DatabaseSync.prototype; const exec = proto.exec; let fired = 0;
   proto.exec = function patched(sql) { if (sql === 'COMMIT' && !fired) { fired += 1; throw new Error('injected COMMIT failure in the rollback tool'); } return exec.call(this, sql); };
   const out5 = tempDir('s4-rb-o5');
-  try { assert.throws(() => rollbackCoreIdentityCopy(dbFile(src), out5), /injected COMMIT failure/); } finally { proto.exec = exec; }
+  try { assert.throws(() => rollbackCoreIdentityCopy(dbFile(srcS4a), out5), /injected COMMIT failure/); } finally { proto.exec = exec; }
   assert.equal(fired, 1, 'the failure must actually have been injected');
   assert.deepEqual(fs.readdirSync(out5), [], 'no usable partial output');
   // The source after every refusal and the failure: untouched.
@@ -287,11 +297,12 @@ test('refusals and failures leave no output and never touch the source: a later 
   assert.equal(run(s3, path.join(tempDir('s4-rb-cli2'), 'x')), 5);
   assert.equal(run(src, out3), 1);
   assert.equal(run(src), 1, 'usage');
+  assert.equal(run(src, path.join(tempDir('s4-rb-cli4'), 'x')), 4, 'CLI exit 4 on the S5 file itself: 0007 is a later step for this tool');
   const cliOut = path.join(tempDir('s4-rb-cli3'), 'copy');
-  const json = JSON.parse(execFileSync(process.execPath, [script, src, cliOut, '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
+  const json = JSON.parse(execFileSync(process.execPath, [script, srcS4a, cliOut, '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
   assert.equal(json.players, 6); assert.equal(json.recordRemoved, true); assert.ok(fs.existsSync(path.join(cliOut, 'scoutbox.db')));
   assertSourceUntouched(src, before, logicalBefore, 'after the CLI runs');
-  rm(src, later, s3, odd, out1, out2, out3, out4, out5, path.dirname(cliOut));
+  rm(src, srcS4a, later, s3, odd, out1, out2, out3, out4, out5, path.dirname(cliOut));
 });
 
 console.log(`\n${passed} core-identity rollback checks passed`);

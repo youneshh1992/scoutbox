@@ -41,9 +41,10 @@
  */
 import { isAdult } from '../domain.mjs';
 import {
-  playerToRow, guardianToRow, validatePlayerRecord, validateGuardianRecord,
+  playerToRow, playerFromRow, guardianToRow, validateGuardianRecord,
   PLAYER_COLUMNS, GUARDIAN_COLUMNS,
 } from './identityMapping.mjs';
+import { validatePlayerRecordWithItems as validatePlayerRecord, subrecordsLive, prepareSubrecordStatements, writeChildRows } from './playerSubrecords.mjs';
 
 export const CORE_IDENTITY_LIVE_MIGRATION = '0005_core_identity_live';
 export const PREFLIGHT_STATUS = Object.freeze({ COMPLETE: 'complete', INVALID: 'invalid' });
@@ -156,6 +157,15 @@ export function createCandidateSchema(sqlite) {
 }
 
 const insertSql = (table, columns) => `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${columns.map((c) => `@${c}`).join(', ')})`;
+/**
+ * A candidate row is rendered in the S4a layout (the arrays inside facets_json).
+ * On a connection where migration 0007 is recorded, the `players` row is
+ * re-rendered without them (`subrecords: 'tables'`); the arrays are written as
+ * child rows by the caller. Decoding and re-encoding go through the one mapping.
+ */
+export function playerRowFor(sqlite, candidateRow) {
+  return subrecordsLive(sqlite) ? playerToRow(playerFromRow(candidateRow), { subrecords: 'tables' }) : candidateRow;
+}
 
 /**
  * Load a candidate into the candidate tables, inside the caller's transaction:
@@ -195,7 +205,12 @@ export function writeCandidate(sqlite, candidate) {
   for (const [target, id] of pending) {
     if (linkG.run(target, id).changes !== 1) throw new Error(`writeCandidate: co_guardian_of of guardian ${id} was not written`);
   }
-  for (const row of candidate.players) insP.run(row);
+  for (const row of candidate.players) insP.run(playerRowFor(sqlite, row));
+  if (subrecordsLive(sqlite)) {
+    // S5: the arrays are rows of the child tables, written from the same record the candidate row renders.
+    const st = prepareSubrecordStatements(sqlite);
+    for (const row of candidate.players) writeChildRows(st, playerFromRow(row));
+  }
   for (const row of candidate.links) insL.run(row);
   const broken = sqlite.prepare('PRAGMA foreign_key_check').all();
   if (broken.length) throw new Error(`foreign_key_check found ${broken.length} broken reference(s) (first: ${broken[0].table} rowid ${broken[0].rowid} → ${broken[0].parent})`);

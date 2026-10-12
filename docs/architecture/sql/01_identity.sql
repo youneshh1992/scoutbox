@@ -10,8 +10,10 @@
 -- CHECK (json_valid)` (S3's pattern: every field not yet in a column — the S5 arrays, medical.records,
 -- programme.completed, coGuardians, the outstanding e-mail code, unknown fields — with the record's shape
 -- metadata), shown below and compared with the registered migrations by scripts/testSchemaDdl.mjs. The shadow
--- projection is retired. The player_* child tables and the remaining columns arrive with step S5, which also
--- empties facets_json. The media-deletion queue (migration 0006) is in 08_operations_integrations.sql.
+-- projection is retired. The twelve player_* child tables are LIVE since migration 0007_player_subrecords (S5,
+-- REGISTERED: the arrays move out of facets_json into their tables; see the sub-record section below), so facets_json on
+-- players now holds unknown fields and shape metadata only (medical.records and programme.completed are tables too).
+-- The media-deletion queue (migration 0006) is in 08_operations_integrations.sql.
 
 -- source: db.orgs  (seed.mjs:15-88; registration server.mjs:1734; T&S org creation m14/review.mjs:382)
 -- owner/writer: server.mjs (core), m14 (verification fields), m13 (mfaRequiredForLeads), m24 (agencySettings → 06)
@@ -140,13 +142,13 @@ CREATE INDEX guardians_co_guardian_of ON guardians (co_guardian_of);
 --   guardianId→guardian_id, createdAt→created_at, password→password_hash, level, location.lat/lng→lat/lng,
 --   firstTeamSeeker→first_team_seeker, footballCategory→football_category,
 --   stats.{appearances,goals,assists,paceKmh,passCompletionPct,duelSuccessPct,cleanSheets}→stats_* (stats=null → all NULL),
---   medical.shared→medical_shared, medical.conditionStatus→medical_condition_status, medical.records[]→player_medical_records,
+--   medical.shared→medical_shared, medical.conditionStatus→medical_condition_status, medical.records[]→player_medical_records (S5),
 --   notificationPrefs.*→prefs_*, programme.track/startedAt→programme_track/programme_started_at,
 --   programme.completed[]→player_programme_completions
 -- mapping (owned sub-records): seasonHistory[]→player_season_history, badges[]→player_badges, attendance[]→player_attendance,
 --   timeline[]→player_timeline, media[]→player_media (+player_media_tags), drills[]→player_drills,
 --   drillResults[]→player_drill_results, activityLog[]→player_activity_log, externalIds[]→player_external_ids,
---   trialReports[]→NOT migrated: byte-for-byte copy of trials.report (server.mjs:2570); readers join trial_reports (02)
+--   trialReports[]→NOT stored: a duplicate of trials.report, served as a DERIVED value from the trials since S5 (trial_reports at S8)
 -- notes: dob is never shown to orgs; medical rows are private unless medical_shared; location fails closed for grassroots
 --   visibility when NULL; password NULL = seeded/dev or guardian-created child (login only via pairing code).
 CREATE TABLE players (
@@ -191,7 +193,7 @@ CREATE TABLE players (
   password_hash            TEXT,
   created_at               INTEGER,
   deleted_at               INTEGER,                       -- new: tombstone set by account deletion (see §8 of the schema doc)
-  facets_json              TEXT CHECK (facets_json IS NULL OR json_valid(facets_json)), -- S4a transitional storage (the S5 arrays, medical.records, programme.completed, unknown fields, shape metadata)
+  facets_json              TEXT CHECK (facets_json IS NULL OR json_valid(facets_json)), -- transitional storage: unknown fields and shape metadata (S5 moved the arrays into the player_* tables)
   CHECK ((lat IS NULL) = (lng IS NULL))
 ) STRICT;
 CREATE INDEX players_guardian ON players (guardian_id);                      -- guardian child routes (server.mjs:474, 4259)
@@ -234,153 +236,189 @@ CREATE INDEX sessions_org_user ON sessions (org_user_id);                    -- 
 CREATE INDEX sessions_expires ON sessions (expires_at);                      -- prune (645-649)
 
 -- ---------------------------------------------------------------- player sub-records (step S5)
+-- LIVE since migration 0007 (S5, repositories/migrations/0007_player_subrecords.mjs, REGISTERED; the rows are owned by
+-- repositories/identity.mjs through repositories/playerSubrecords.mjs; docs/architecture/s5-player-subrecords.md is the
+-- implementation note). Conventions the twelve tables share:
+--   - player_id REFERENCES players(id) ON DELETE CASCADE (today's hard delete takes the rows with the player; the media
+--     FILES are queued in media_deletions inside the same unit of work, before the row goes);
+--   - position INTEGER: the array index on the record, so every array reads back in its order and a duplicate the code
+--     allows (a client-set badge twice, two activities in one millisecond, a session completed twice) survives; a row
+--     without a client-visible id is keyed by (player_id, position) — NO identifier is minted (the earlier prose that
+--     minted ids for badges, activity entries and timeline rows is withdrawn);
+--   - extra_json: an item's unknown keys and its shape metadata (key order, explicit nulls), so the record reads back
+--     byte for byte; nothing is coerced — a value a column cannot hold refuses the write with the field and the index;
+--   - natural keys the code enforces are UNIQUE (season per player, drill per player, provider+external id per player,
+--     tag per clip, every item id); a legacy array that violates one is refused by the migration, never deduplicated.
+-- Reconciled with the data the routes accept (each a change to the earlier proposal): player_media.uploaded_at is TEXT
+-- (the ISO string every writer stores), kind nullable, verified_clip_attendance_id has no foreign key (a snapshot rewrite
+-- of the attendance rows would have nulled it; the route checks the reference when the clip is created);
+-- player_medical_records.layoff_weeks is REAL (the route accepts any finite number in 0–520); player_attendance.match_date
+-- has no length CHECK (a trial check-in writes proposedDate as it is); player_season_history counts are REAL (the stats
+-- route files any non-negative number into a season). players[].trialReports is NOT a table: it is a duplicate of
+-- trials[].report and is served as a DERIVED value from the trials collection (filing order) until S8; migration 0007
+-- reconciles every copy with its source before dropping it and blocks on any discrepancy.
+-- mapping (record key → column): see repositories/playerSubrecords.mjs SUBRECORD_SPECS —
+--   seasonHistory[] → player_season_history (season, appearances, goals, assists, paceKmh→pace_kmh, passCompletionPct→
+--     pass_completion_pct, duelSuccessPct→duel_success_pct, cleanSheets→clean_sheets)
+--   badges[] → player_badges (badge); drills[] → player_drills (drill_id)
+--   attendance[] → player_attendance (id, fixture, venue, date→match_date, gps.lat/lng→lat/lng, deviceConfirmed→
+--     device_confirmed, verified, corroboratedBy→corroborated_by, trialId→trial_id)
+--   timeline[] → player_timeline (year, event)
+--   media[] → player_media (id, title, kind, uploadedAt→uploaded_at, url, views, verifiedClip→verified_clip_attendance_id,
+--     captions, sizeBytes→size_bytes, capturedBy→captured_by, boxSessionId→box_session_id); media[].tags{tag:count} →
+--     player_media_tags (media_id, tag, count, position = key order)
+--   medical.records[] → player_medical_records (id, type, title, date→record_date, layoffWeeks→layoff_weeks, cleared)
+--   drillResults[] → player_drill_results (id, drillId→drill_id, drillName→drill_name, metric, unit, value, verified,
+--     ts→recorded_at)
+--   activityLog[] → player_activity_log (occurred_at)
+--   externalIds[] → player_external_ids (provider, externalId→external_id, source, by→linked_by_name, at→linked_at,
+--     claim→claim_json)
+--   programme.completed[] → player_programme_completions (sessionId→session_id, ts→completed_at)
+-- notes: media bytes live in DATA_DIR/media (adapters.mjs), never in the database; medical rows are private unless
+--   players.medical_shared (views/playerViews.mjs leaves them out of the org view); attendance GPS is never served to an
+--   organisation; the activity log, external ids and drill results are player-private.
 
--- source: db.players[].seasonHistory[]  (server.mjs:3493-3498; boot backfill 213)
--- mapping: season→season, appearances/goals/assists/…→columns; unique by season per player (enforced by code)
 CREATE TABLE player_season_history (
   player_id           TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  season              TEXT NOT NULL,                      -- '2024/25'
-  appearances         INTEGER,
-  goals               INTEGER,
-  assists             INTEGER,
+  position            INTEGER NOT NULL,
+  season              TEXT NOT NULL,
+  appearances         REAL,
+  goals               REAL,
+  assists             REAL,
   pace_kmh            REAL,
   pass_completion_pct REAL,
   duel_success_pct    REAL,
-  clean_sheets        INTEGER,
+  clean_sheets        REAL,
+  extra_json TEXT CHECK (extra_json IS NULL OR json_valid(extra_json)),
   PRIMARY KEY (player_id, season)
 ) STRICT;
+CREATE UNIQUE INDEX player_season_history_position ON player_season_history (player_id, position);
 
--- source: db.players[].badges[] (server.mjs:3347, journey badges 954-958)  mapping: badges[i]→badge
 CREATE TABLE player_badges (
   player_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  position  INTEGER NOT NULL,
   badge     TEXT NOT NULL,
-  PRIMARY KEY (player_id, badge)
+  PRIMARY KEY (player_id, position)
 ) STRICT;
 
--- source: db.players[].drills[] (server.mjs:3535)  mapping: drills[i]→drill_id (code registry DRILLS, not a table)
 CREATE TABLE player_drills (
   player_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  position  INTEGER NOT NULL,
   drill_id  TEXT NOT NULL,
-  PRIMARY KEY (player_id, drill_id)
+  PRIMARY KEY (player_id, position)
 ) STRICT;
+CREATE UNIQUE INDEX player_drills_drill ON player_drills (player_id, drill_id);
 
--- source: db.players[].attendance[]  (server.mjs:3462, 2852-2856; m12/journeys.mjs:698 trial check-in; seed att-<hash>)
--- mapping: id→id, fixture, venue, date→match_date, gps.lat/lng→lat/lng, deviceConfirmed→device_confirmed,
---   verified→verified, corroboratedBy→corroborated_by (org name snapshot), trialId→trial_id (02, comment only)
--- notes: gps is exposed to orgs today (privacy review item §9)
 CREATE TABLE player_attendance (
   id               TEXT PRIMARY KEY,
   player_id        TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  position         INTEGER NOT NULL,
   fixture          TEXT NOT NULL,
   venue            TEXT,
-  match_date       TEXT NOT NULL CHECK (length(match_date) = 10),
+  match_date       TEXT NOT NULL,
   lat              REAL,
   lng              REAL,
-  device_confirmed INTEGER CHECK (device_confirmed IN (0,1)),
+  device_confirmed INTEGER CHECK (device_confirmed IS NULL OR device_confirmed IN (0,1)),
   verified         INTEGER NOT NULL DEFAULT 0 CHECK (verified IN (0,1)),
-  corroborated_by  TEXT,                                  -- snapshot (org name)
-  trial_id         TEXT,                                  -- trials.id (02), set by trial check-in
+  corroborated_by  TEXT,
+  trial_id         TEXT,
+  extra_json TEXT CHECK (extra_json IS NULL OR json_valid(extra_json)),
   CHECK ((lat IS NULL) = (lng IS NULL))
 ) STRICT;
-CREATE INDEX player_attendance_player ON player_attendance (player_id, match_date);
+CREATE UNIQUE INDEX player_attendance_player ON player_attendance (player_id, position);
 
--- source: db.players[].timeline[] (server.mjs:3474, 3141; m29/index.mjs:283-296)  mapping: year→year, event→event
--- notes: rows have no id today; the migration mints 'ptl-<n>'
 CREATE TABLE player_timeline (
-  id        TEXT PRIMARY KEY,
   player_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  position  INTEGER NOT NULL,
   year      TEXT NOT NULL,
   event     TEXT NOT NULL,
-  position  INTEGER NOT NULL                              -- array order
+  extra_json TEXT CHECK (extra_json IS NULL OR json_valid(extra_json)),
+  PRIMARY KEY (player_id, position)
 ) STRICT;
-CREATE INDEX player_timeline_player ON player_timeline (player_id, position);
 
--- source: db.players[].media[]  (server.mjs:3359; m12/operations.mjs:221-224; m16/sessions.mjs:458-459; backfills 205-211)
--- mapping: id→id, title, kind, uploadedAt (ISO string today)→uploaded_at (ms at import), url, views,
---   tags{tag:count}→player_media_tags, verifiedClip→verified_clip_attendance_id, captions→captions (≤200 KB inline VTT),
---   sizeBytes→size_bytes, capturedBy→captured_by, boxSessionId→box_session_id (07, comment only)
--- notes: media bytes live in DATA_DIR/media (adapters.mjs:190-222), never in the database; the cross-player media
---   lookup (server.mjs:4256) becomes a PK hit.
 CREATE TABLE player_media (
-  id                         TEXT PRIMARY KEY,
-  player_id                  TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  title                      TEXT NOT NULL,
-  kind                       TEXT NOT NULL,
-  uploaded_at                INTEGER,
-  url                        TEXT,
-  views                      INTEGER NOT NULL DEFAULT 0,
-  verified_clip_attendance_id TEXT REFERENCES player_attendance(id) ON DELETE SET NULL,
-  captions                   TEXT,
-  size_bytes                 INTEGER,
-  captured_by                TEXT CHECK (captured_by IS NULL OR captured_by IN ('box_cam')),
-  box_session_id             TEXT                          -- box_sessions.id (07)
+  id                          TEXT PRIMARY KEY,
+  player_id                   TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  position                    INTEGER NOT NULL,
+  title                       TEXT NOT NULL,
+  kind                        TEXT,
+  uploaded_at                 TEXT,
+  url                         TEXT,
+  views                       INTEGER NOT NULL DEFAULT 0,
+  verified_clip_attendance_id TEXT,
+  captions                    TEXT,
+  size_bytes                  INTEGER,
+  captured_by                 TEXT CHECK (captured_by IS NULL OR captured_by IN ('box_cam')),
+  box_session_id              TEXT,
+  extra_json TEXT CHECK (extra_json IS NULL OR json_valid(extra_json))
 ) STRICT;
-CREATE INDEX player_media_player ON player_media (player_id, uploaded_at);
+CREATE UNIQUE INDEX player_media_player ON player_media (player_id, position);
 
--- source: db.players[].media[].tags  (server.mjs:982-985 vocabulary)  mapping: tags[tag]→(media_id, tag, count)
 CREATE TABLE player_media_tags (
   media_id TEXT NOT NULL REFERENCES player_media(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
   tag      TEXT NOT NULL,
   count    INTEGER NOT NULL CHECK (count > 0),
   PRIMARY KEY (media_id, tag)
 ) STRICT;
+CREATE UNIQUE INDEX player_media_tags_position ON player_media_tags (media_id, position);
 
--- source: db.players[].medical.records[]  (server.mjs:3392-3405; seed md-1..md-5)
--- mapping: id→id, type, title, date→record_date, layoffWeeks→layoff_weeks, cleared→cleared (tri-state)
--- notes: medical privacy: never read by an org view unless players.medical_shared = 1; never affects the trust score
 CREATE TABLE player_medical_records (
   id           TEXT PRIMARY KEY,
   player_id    TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  position     INTEGER NOT NULL,
   type         TEXT NOT NULL,
   title        TEXT NOT NULL,
   record_date  TEXT CHECK (record_date IS NULL OR length(record_date) = 10),
-  layoff_weeks INTEGER,
-  cleared      INTEGER CHECK (cleared IS NULL OR cleared IN (0,1))
+  layoff_weeks REAL,
+  cleared      INTEGER CHECK (cleared IS NULL OR cleared IN (0,1)),
+  extra_json TEXT CHECK (extra_json IS NULL OR json_valid(extra_json))
 ) STRICT;
-CREATE INDEX player_medical_records_player ON player_medical_records (player_id);
+CREATE UNIQUE INDEX player_medical_records_player ON player_medical_records (player_id, position);
 
--- source: db.players[].drillResults[]  (server.mjs:3537-3546)
--- mapping: id→id, drillId→drill_id, drillName→drill_name (snapshot), metric, unit, value, verified, ts→recorded_at
 CREATE TABLE player_drill_results (
   id          TEXT PRIMARY KEY,
   player_id   TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  position    INTEGER NOT NULL,
   drill_id    TEXT NOT NULL,
-  drill_name  TEXT,                                       -- snapshot
+  drill_name  TEXT,
   metric      TEXT NOT NULL,
   unit        TEXT,
   value       REAL NOT NULL,
   verified    INTEGER NOT NULL DEFAULT 0 CHECK (verified IN (0,1)),
-  recorded_at INTEGER NOT NULL
+  recorded_at INTEGER NOT NULL,
+  extra_json TEXT CHECK (extra_json IS NULL OR json_valid(extra_json))
 ) STRICT;
-CREATE INDEX player_drill_results_player ON player_drill_results (player_id, recorded_at);
+CREATE UNIQUE INDEX player_drill_results_player ON player_drill_results (player_id, position);
 
--- source: db.players[].activityLog[] (server.mjs:943-947 recordActivity)  mapping: activityLog[i]→occurred_at
--- notes: player-private (never exposed to orgs); drives streaks only
 CREATE TABLE player_activity_log (
   player_id   TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  position    INTEGER NOT NULL,
   occurred_at INTEGER NOT NULL,
-  PRIMARY KEY (player_id, occurred_at)
+  PRIMARY KEY (player_id, position)
 ) STRICT;
 
--- source: db.players[].externalIds[]  (m13/shared.mjs:47; m13/imports.mjs:223)
--- mapping: provider, externalId→external_id, source, by→linked_by_name (snapshot), at→linked_at, claim→claim_json
 CREATE TABLE player_external_ids (
   player_id      TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  position       INTEGER NOT NULL,
   provider       TEXT NOT NULL,
   external_id    TEXT NOT NULL,
-  source         TEXT NOT NULL,                           -- 'import:<batchId>'
-  linked_by_name TEXT,                                    -- snapshot
+  source         TEXT NOT NULL,
+  linked_by_name TEXT,
   linked_at      INTEGER NOT NULL,
-  claim_json     TEXT CHECK (claim_json IS NULL OR json_valid(claim_json)),   -- the import record that was linked (free-form)
+  claim_json TEXT CHECK (claim_json IS NULL OR json_valid(claim_json)),
+  extra_json TEXT CHECK (extra_json IS NULL OR json_valid(extra_json)),
   PRIMARY KEY (player_id, provider, external_id)
 ) STRICT;
+CREATE UNIQUE INDEX player_external_ids_position ON player_external_ids (player_id, position);
 
--- source: db.players[].programme.completed[]  (server.mjs:3577, 3589)  mapping: sessionId→session_id, ts→completed_at
 CREATE TABLE player_programme_completions (
   player_id    TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  position     INTEGER NOT NULL,
   session_id   TEXT NOT NULL,
   completed_at INTEGER NOT NULL,
-  PRIMARY KEY (player_id, session_id)
+  extra_json TEXT CHECK (extra_json IS NULL OR json_valid(extra_json)),
+  PRIMARY KEY (player_id, position)
 ) STRICT;
 
 -- not tables: players[].trialReports (duplicate of trials.report → trial_reports in 02); derived profileSignal/trustScore,

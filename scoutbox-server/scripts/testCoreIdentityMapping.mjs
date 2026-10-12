@@ -623,7 +623,7 @@ test('review 2: every fixture shape that is reported complete really loads and r
 });
 
 /** A record built the way a snapshot arrives (JSON.parse), with own properties named like Object.prototype members. */
-const protoPlayer = () => JSON.parse('{"id":"pl-proto","name":"Proto","dob":"2001-01-01","country":"GB","constructor":"own-constructor","toString":"own-toString","__proto__":{"polluted":true},"hasOwnProperty":7,"stats":{"goals":1,"constructor":"stats-constructor","__proto__":{"deep":1},"valueOf":null},"medical":{"shared":false,"records":[{"id":"md-p","constructor":"rec-constructor"}],"conditionStatus":"unknown"},"media":[{"id":"m-p","__proto__":{"x":1},"toString":"item"}],"unknownBag":{"__proto__":{"y":2},"constructor":"bag"}}');
+const protoPlayer = () => JSON.parse('{"id":"pl-proto","name":"Proto","dob":"2001-01-01","country":"GB","constructor":"own-constructor","toString":"own-toString","__proto__":{"polluted":true},"hasOwnProperty":7,"stats":{"goals":1,"constructor":"stats-constructor","__proto__":{"deep":1},"valueOf":null},"medical":{"shared":false,"records":[{"id":"md-p","type":"note","title":"Proto record","constructor":"rec-constructor"}],"conditionStatus":"unknown"},"media":[{"id":"m-p","title":"Proto clip","__proto__":{"x":1},"toString":"item"}],"unknownBag":{"__proto__":{"y":2},"constructor":"bag"}}');
 const protoGuardian = () => JSON.parse('{"id":"gd-proto","name":"Proto G","email":"proto@example.com","constructor":"own","__proto__":{"polluted":true},"toString":"t","notificationPrefs":{"timezone":"UTC","constructor":"prefs-constructor","__proto__":{"z":3}},"coGuardians":[{"id":"x","__proto__":{"q":1}}],"childIds":[]}');
 const assertProtoKept = (orig, back, what) => {
   sameShape(orig, back, what);

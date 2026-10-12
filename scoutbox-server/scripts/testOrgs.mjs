@@ -15,6 +15,7 @@ import { runDataMigrations, transaction } from '../repositories/database.mjs';
 import { createOrgsRepository, validateOrgRecord, toRow, fromRow, ORGS_TABLE, ORGS_CUTOVER_MIGRATION, MIGRATED_KEYS } from '../repositories/orgs.mjs';
 import { rollbackOrgsCopy } from '../repositories/orgsRollback.mjs';
 import { rollbackCoreIdentityCopy } from '../repositories/coreIdentityRollback.mjs';
+import { rollbackPlayerSubrecordsCopy } from '../repositories/playerSubrecordsRollback.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import * as m0001 from '../repositories/migrations/0001_org_users.mjs';
 import * as m0002 from '../repositories/migrations/0002_core_identity_shadow.mjs';
@@ -592,8 +593,10 @@ test('rollback: the tool produces a pre-S3 copy — orgs back in the blob with e
   const out = tempDir('s3-rb-out');
   // The file is at S4a after the boot: the S3 tool refuses it until the S4a rollback produced the S3-shaped copy it works on.
   assert.throws(() => rollbackOrgsCopy(path.join(dir, 'scoutbox.db'), tempDir('s3-rb-refused')), (err) => err.code === 'LATER_SCHEMA' && /0005_core_identity_live, 0006_media_deletions/.test(err.message));
+  // S5: the file carries 0007 too; the chain is the S5 rollback, then the S4a rollback, then this tool.
+  const s4aState = tempDir('s3-rb-s4a'); rollbackPlayerSubrecordsCopy(path.join(dir, 'scoutbox.db'), s4aState);
   const s3State = tempDir('s3-rb-s3');
-  rollbackCoreIdentityCopy(path.join(dir, 'scoutbox.db'), s3State);
+  rollbackCoreIdentityCopy(path.join(s4aState, 'scoutbox.db'), s3State);
   const result = rollbackOrgsCopy(path.join(s3State, 'scoutbox.db'), out);
   assert.equal(fileDigest(dir), before, 'the source is untouched');
   assert.equal(result.organisations, 4); assert.equal(result.staff, 3); assert.equal(result.sessions, 4); assert.equal(result.recordRemoved, true);
@@ -666,7 +669,7 @@ await atest('server: an S2 database boots and cuts over; registration, settings,
     const maria = seed.sessions[0].token;
     assert.equal((await j('GET', '/org/notifications', undefined, maria)).status, 200, 'the staff session survived the org_users rebuild');
     const cap = await j('GET', '/capabilities');
-    assert.deepEqual(cap.body.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions']);
+    assert.deepEqual(cap.body.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords']);
     assert.equal(cap.body.dataLayer.domains.orgs.mode, 'live'); assert.equal(cap.body.dataLayer.domains.orgs.rows, 5);
     assert.equal(cap.body.integrity.ok, true, `the boot integrity report sees the live organisations: ${JSON.stringify(cap.body.integrity.byCode)}`);
     assert.ok(cap.body.integrity.checked >= 6, 'the report counted the organisations and the Room');

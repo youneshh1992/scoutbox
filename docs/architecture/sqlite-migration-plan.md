@@ -3,14 +3,24 @@
 Companion to [`sqlite-schema.md`](./sqlite-schema.md) (the target schema) and the DDL in
 `docs/architecture/sql/`. Written 10 October 2026 on branch `feat/sqlite-schema`.
 
-Status of the steps: **S0 done** (commit `0f01df7`), **S1 done** (`ef71f28` + corrections
-`d0d96e6`, `22ce9ad`, `abc0f6a`; §S1 records the commands and results), **S2 done**
-(`6dca457` + corrections `8baafde`, `5a9e75d`; §S2 records the commands and results),
-**S3 done** (this branch, §S3 records the field ownership, the commands and the results),
-S4–S14 planned. The step after this commit is **S4**, which is **prepared, not started**: the
-evidence-based implementation plan is [`s4-readiness-review.md`](./s4-readiness-review.md)
-and the open deletion decision (O1) is put to the Founder in
-[`s4-deletion-decision.md`](./s4-deletion-decision.md). S4 does not begin until O1 is answered.
+Status of the steps (corrected 12 October 2026): **S0 done** (commit `0f01df7`), **S1 done**
+(`ef71f28` + corrections `d0d96e6`, `22ce9ad`, `abc0f6a`; §S1 records the commands and results),
+**S2 done** (`6dca457` + corrections `8baafde`, `5a9e75d`; §S2 records the commands and
+results), **S3 done** (§S3 records the field ownership, the commands and the results), **S4a
+implemented and review-accepted at `480afdb`** (the player/guardian storage cutover with today's
+deletion behaviour unchanged, its reviewed corrections and safeguards; §S4 records the six
+bounded parts; the acceptance is a bounded code-review conclusion, not production readiness),
+**S4b blocked by O1** (the deletion rewrite waits for the Founder's answer in
+[`s4-deletion-decision.md`](./s4-deletion-decision.md); nothing of it is built), **S5 is the
+authorised next step** — it depends on the storage work S4a completed (the `players` rows, the
+one mapping, the unit of work, the media-removal queue) and preserves today's deletion behaviour
+rather than implementing S4b; its evidence-based note is
+[`s5-player-subrecords.md`](./s5-player-subrecords.md) and its status line is in §S5 —
+S6–S14 planned. The evidence-based plan of S4 is [`s4-readiness-review.md`](./s4-readiness-review.md).
+Migration numbering: `0006` is `0006_media_deletions` (S4a); S5 takes the next unused
+identifier, **`0007_player_subrecords`**; the later steps' identifiers in §B are the next free
+numbers in step order and move again if a step before them needs more than one migration.
+Existing migration ids never change.
 
 Sections: A principles that hold for every step · B the steps (S0–S14) · C cross-cutting
 work (repository pattern, source of truth and dual writes, backups and dry runs, legacy
@@ -1155,24 +1165,69 @@ performance, existing tests, what this plan is not).
 
 ### S5 — Player sub-records
 
+> **Status: see the status block at the end of this section.** The evidence-based implementation
+> note is [`s5-player-subrecords.md`](./s5-player-subrecords.md): every field with its writers,
+> readers, table, key, ordering and shape rules, the reconciliation of `trialReports`, the
+> snapshot-replacement strategy under the child foreign keys, the writer conversions, the tests
+> and the rollback. Where the text below differs from the note, the note is current. Two of the
+> bullets below are superseded by the note's decisions: no identifier is minted (rows without a
+> client-visible id are keyed by `(player_id, position)`), and the migration is
+> `0007_player_subrecords` (`0006` is the media-removal queue of S4a).
+
 - **Objective.** The twelve `player_*` tables live (season history, badges, drills,
   attendance, timeline, media and tags, medical records, drill results, activity log,
-  external ids, programme completions); `players[].trialReports` is dropped as a copy and
-  served from `trial_reports` (S8) — until S8 it is served from the `trials` blob.
-- **Depends on.** S4.
-- **Files / tables.** `repositories/players.mjs` (sub-record methods), migration
-  `0006_player_subrecords`, `server.mjs` 3347–3589 (profile sub-routes), `m12/operations.mjs`
-  (media), `m16/sessions.mjs` (Box Cam clips), `m13/shared.mjs`/`imports.mjs` (external ids).
-- **Data transformation.** Import each array with minted ids where the source has none
-  (`player_activity_log`, `player_badges`, `player_timeline`); `media[].tags{}` to rows.
-  Media files stay on disk; only metadata moves.
-- **API compatibility.** Player profile shape unchanged (the repository assembles it);
-  medical records join only when `medical_shared` or the viewer is the player/guardian.
-- **Tests and acceptance.** Unit: medical privacy (org view with `medical_shared = 0` has no
-  join; `=1` has it), cascade on erase, idempotent re-import. Battery: `m12*`, `m16*`,
-  `m22*`, `preM24SweepE2E`.
-- **Rollback.** Pre-S5 backup + S4 commit.
+  external ids, programme completions); `players[].trialReports` is dropped as a stored copy and
+  served as a derived value from the `trials` collection until S8 moves the reports into
+  `trial_reports`.
+- **Depends on.** S4a (`480afdb`): the `players` rows and `facets_json`, the one mapping, the
+  unit of work and the media-removal queue. Not on S4b or O1: today's hard delete is preserved
+  (the child rows cascade with the player row).
+- **Files / tables.** `repositories/playerSubrecords.mjs` (specs, validation, row mapping, the
+  derived `trialReports`), `repositories/identity.mjs` (`players.addItem` / `setItems` /
+  `patchItem`, child rows in `insert` / `restore` / `IDENTITY_SNAPSHOT`), migration
+  `0007_player_subrecords`, `repositories/mediaDeletions.mjs` (ownership through `player_media`),
+  `repositories/playerSubrecordsRollback.mjs` + `scripts/playerSubrecordsRollback.mjs`,
+  `server.mjs` (boot defaults, media views and tags, attendance, timeline, badges, Academy+,
+  stats and season history, drills, programme, medical records, aging-up, match day, trial report),
+  `m12/operations.mjs` (chunked upload, captions), `m12/journeys.mjs` (trial check-in),
+  `m12/shared.mjs` and `m13/shared.mjs` (boot defaults), `m13/imports.mjs` (external ids),
+  `m16/sessions.mjs` (Box Cam clip), `m29/index.mjs` (signing timeline).
+- **Data transformation.** Migration 0007 decodes every `players` row through the established
+  decoder (current and legacy facets layouts), validates every item, reconciles every
+  `trialReports` copy with `trials[].report`, writes the child rows, verifies the re-read record
+  against the decoded one byte for byte, then retires the arrays from `facets_json` — all in one
+  transaction; any refusal blocks the whole step with ids, fields, indexes and reasons. Media
+  files stay on disk; only metadata moves.
+- **API compatibility.** Player profile shape unchanged (the record keeps its arrays, served
+  read-only); `trialReports` is served from the trials; the audience allowlists are unchanged.
+- **Tests and acceptance.** `scripts/testPlayerSubrecords.mjs` (unit), extensions of
+  `testCoreIdentityServer.mjs`, `testWriterAtomicity.mjs`, `testMediaDeletions.mjs`,
+  `testCoreIdentityRollback.mjs`, `testSchemaDdl.mjs`; battery: `m12*`, `m16*`, `m22*`,
+  `preM24SweepE2E` and the suites of every converted writer.
+- **Rollback.** Copy-only: `node scripts/playerSubrecordsRollback.mjs <data-dir> <out-dir>`
+  rebuilds the `480afdb` representation (arrays and the derived `trialReports` back in
+  `facets_json`, the twelve tables dropped, the `0007` record removed) and keeps post-S5 writes;
+  the S4a→S3 tool refuses a database carrying 0007 (`LATER_SCHEMA`).
 - **Commit boundary.** One commit.
+
+> **Status (S5): implemented, pending review** — one local commit on `feat/sqlite-schema` on top of
+> `480afdb` (hash and tree status in the handoff README); nothing pushed, merged, deployed or run on
+> real data. Delivered as described in the note (`s5-player-subrecords.md`, whose §6 is the detailed
+> status): the twelve tables and `0007_player_subrecords` with its blocking refusal
+> (`PLAYER_SUBRECORDS_CUTOVER_BLOCKED`) and its re-read verification before retiring the facets; the
+> repository writers and the derived `trialReports`; every writer converted inside units of work;
+> media ownership from `player_media`; snapshot replacement under the child foreign keys; the
+> copy-only rollback to the `480afdb` build (proved by booting that real build on a rollback copy
+> of synthetic data, then re-upgrading it) and the S4a tool's refusal of an S5 file. One behaviour
+> change beyond storage: `GET /player/drills` no longer answers 500 for a player without a
+> completed drill (an unguarded read, present on `480afdb` too). Verified by `npm test` (17 suites)
+> on Node 22.22.2 and the real 22.16.0, the five review scripts that still apply verbatim, the two
+> stale ones through behaviour-level equivalents (explained in the note), and the battery once
+> after the last production change (46 of 48 green as run: `m182E2E` keeps its two client-side
+> baseline failures; `m23TrialPersistence` planted a trial report the player's copy never had and
+> met the 0007 reconciliation refusal — fixture made consistent, 36/36; classification in the
+> handoff). S4a stays review-accepted at
+> `480afdb`; S4b stays blocked by O1; S6 is not started.
 
 ### S6 — Safeguarding and audit (`blocks`, `reports`, `moderation_log`, `org_notes`, `ledger`, `ops_events`, `source_changes`, `idv_queue`, `email_challenges`, `pairing_codes`)
 
@@ -1181,7 +1236,7 @@ performance, existing tests, what this plan is not).
   rollback (`m29/index.mjs:618`); the IDV admin toggle updates by id.
 - **Depends on.** S4 (tombstone, so `RESTRICT` references can hold).
 - **Files / tables.** `repositories/safety.mjs`, `repositories/audit.mjs`, migration
-  `0007_safety_audit`; `server.mjs` `ledgerAppend` 595, `handleReport` 1647, blocks 1633/3751,
+  `0008_safety_audit`; `server.mjs` `ledgerAppend` 595, `handleReport` 1647, blocks 1633/3751,
   notes 1982, moderation 1028, email verification 3024, pairing 3766, IDV 1332/4226;
   `m181/sourceChanges.mjs`; `m29/index.mjs:618`.
 - **Data transformation.** `ledger.userId/scoutName` → `(actor_kind, actor_id,
@@ -1206,7 +1261,7 @@ performance, existing tests, what this plan is not).
   so staff pushes work (defect 10 in the schema document).
 - **Depends on.** S4.
 - **Files / tables.** `repositories/messaging.mjs`, `repositories/notifications.mjs`,
-  migration `0008_messaging`; `server.mjs` 809–915 (notify, openChannel, postMessage,
+  migration `0009_messaging`; `server.mjs` 809–915 (notify, openChannel, postMessage,
   broadcast 521), 3787 (push register); `adapters.mjs` (senders); `m13/delivery.mjs`;
   `m182/notificationPrefs.mjs`.
 - **Data transformation.** Messages out of the channel record with a unique client key;
@@ -1234,7 +1289,7 @@ performance, existing tests, what this plan is not).
     no foreign key on any `player_id` because `deletePlayerData` hard-deletes the player
     row. S4 replaces the hard delete with a tombstone row; S8a then amends
     `02_recruitment.sql` to add `REFERENCES players(id) ON DELETE RESTRICT` on every
-    `player_id` column and ships that DDL in migration `0009_recruitment`. Until S4 has
+    `player_id` column and ships that DDL in migration `0010_recruitment`. Until S4 has
     shipped and the file has been amended, the recruitment domain is **not ready to cut
     over**; the design is unresolved on this point, not finished.
   - *Org deletion policy (schema O2).* `org_id` columns in file 02 are `RESTRICT` on the
@@ -1244,7 +1299,7 @@ performance, existing tests, what this plan is not).
     answer on open recruitment cases decides whether S8 keeps `RESTRICT` or adds a
     tombstone-aware rule.
 - **Files / tables.** `repositories/recruitment/*.mjs` (one module per aggregate), migration
-  `0009_recruitment`; `server.mjs` requests/trials routes (2068–2371, 2612), `m12/scouting.mjs`
+  `0010_recruitment`; `server.mjs` requests/trials routes (2068–2371, 2612), `m12/scouting.mjs`
   cases, `m17/rooms.mjs`, `m23/*` (contacts, trials P4B, decisions, journey), `m27`–`m29`
   (handoffs, offers, packages, signings). Largest step; sub-steps S8a requests+trials, S8b
   cases+rooms+decisions, S8c contacts+offers, S8d packages+signings+follow-ups.
@@ -1271,7 +1326,7 @@ performance, existing tests, what this plan is not).
   playlists, vacancies, opportunities, applications, campaigns and submissions, player
   preferences (lazy insert moved into the repository read).
 - **Depends on.** S5, S8 (assessments reference trials/cases by id).
-- **Files / tables.** `repositories/scouting/*.mjs`, migration `0010_scouting`; `m12/passport.mjs`,
+- **Files / tables.** `repositories/scouting/*.mjs`, migration `0011_scouting`; `m12/passport.mjs`,
   `m12/scouting.mjs`, `m12/journeys.mjs`, `m13/suitability.mjs`, `server.mjs` 2705/2797/2913.
 - **Data transformation.** Template id reuse across versions becomes the composite key;
   tactical re-save diffs roles by id (so vacancies keep `role_id`); cross-org role id
@@ -1290,7 +1345,7 @@ performance, existing tests, what this plan is not).
   `orgs.verified` boolean becomes derived from claims.
 - **Depends on.** S4, S9 (passport reads evidence/assessments).
 - **Files / tables.** `repositories/verification/*.mjs`, `repositories/passport.mjs`,
-  migration `0011_verification_passport`; `m14/*`, `m15/*`, `m13/transitions.mjs`,
+  migration `0012_verification_passport`; `m14/*`, `m15/*`, `m13/transitions.mjs`,
   `server.mjs` vouches 3689/4073.
 - **Data transformation.** `verMigrated` object → `ver_migrations` rows; claim `metadata`
   promoted keys to columns; raw passport dates kept raw.
@@ -1308,7 +1363,7 @@ performance, existing tests, what this plan is not).
   `orgs.agencySettings` → `org_agency_settings`; the `req.org.settings.jurisdictions` defect
   fixed in the same step.
 - **Depends on.** S8 (handoffs, offers), S10 (verification evidence refs).
-- **Files / tables.** `repositories/agent/*.mjs`, migration `0012_agent_compliance`;
+- **Files / tables.** `repositories/agent/*.mjs`, migration `0013_agent_compliance`;
   `m24/*`–`m26/*`, `m27/*`.
 - **Tests and acceptance.** Unit: effective-status uniqueness in code with the partial
   indexes where stored; dual-control publication; consent revocation 1:1; minors refused on
@@ -1326,7 +1381,7 @@ performance, existing tests, what this plan is not).
   evidence suggestions) become explicit repository upserts.
 - **Depends on.** S5, S8, S9.
 - **Files / tables.** `repositories/development/*.mjs`, `repositories/boxcam/*.mjs`,
-  `repositories/discovery/*.mjs`, migration `0013_development_discovery`; `m12/journeys.mjs`,
+  `repositories/discovery/*.mjs`, migration `0014_development_discovery`; `m12/journeys.mjs`,
   `m13/insight.mjs`, `m13/planning.mjs`, `m16/*`, `m18/*`, `m19/*`, `m21/*`, `m22/*`.
 - **Data transformation.** `box_sessions.obs_json` retained (normalisation deferred to a
   later, separate step once the observation stream's reader is a repository); `nonce` hashed;
@@ -1347,7 +1402,7 @@ performance, existing tests, what this plan is not).
   Admin backup becomes `VACUUM INTO` of the file plus media; restore stays "new empty
   DATA_DIR". Production boot with an empty file creates **no demo rows** (C.6).
 - **Depends on.** S3 (orgs), S8 (invoices reference signings).
-- **Files / tables.** `repositories/operations/*.mjs`, migration `0014_operations`;
+- **Files / tables.** `repositories/operations/*.mjs`, migration `0015_operations`;
   `m13/imports.mjs`, `m13/enterprise.mjs` (backup 428–484), `m13/groups.mjs`,
   `m12/operations.mjs`, `adapters.mjs` (billing), `seed.mjs`, `catalogue.mjs`,
   `m181/capabilities.mjs`, `OPERATIONS.md`.

@@ -18,6 +18,7 @@ import { buildSeed } from '../seed.mjs';
 import { pickPort } from './testPort.mjs';
 import { NOW, tempDir, adult, child, gPrimary, gSignup, FIXTURE, s3File, freshFile, migrate, openRaw, S3_MIGRATIONS, TTL } from './coreIdentityTestFixtures.mjs';
 import { runDataMigrations } from '../repositories/database.mjs';
+import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -71,7 +72,7 @@ await test('new installation: the seed is initialised once (never again), served
   let S = await boot(dir, nextPort());
   assert.match(S.log(), /initialised from the first installation's records/);
   let cap = (await S.j('GET', '/capabilities')).body;
-  assert.deepEqual(cap.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions']);
+  assert.deepEqual(cap.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords']);
   assert.equal(cap.dataLayer.identity.initState, 'done'); assert.equal(cap.dataLayer.domains.players.mode, 'live');
   assert.equal(cap.dataLayer.domains.players.rows, seedCounts.players); assert.equal(cap.dataLayer.domains.guardians.rows, seedCounts.guardians);
   assert.equal(cap.core_identity_storage?.state ?? cap.dataLayer.domains.players.mode, 'live');
@@ -337,9 +338,12 @@ await test('deletion: the player row, the links, the sessions and the media-remo
   const shortlist = await S.j('GET', '/org/shortlist', undefined, pro);
   assert.equal(shortlist.status, 200); assert.deepEqual(shortlist.body.filter((p) => [a.id, b.id].includes(p.id)), [], 'deleted players are absent, the reader does not crash');
   await S.stop();
-  // The rollback tool refuses while the queue is not empty.
+  // The rollback tools: the S5 tool keeps the queue (both builds have it); the S4a tool refuses the S5 file outright (exit 4) and, on the S5 tool's output, refuses while the queue is not empty (exit 8).
   const out = tempDir('s4srv-delete-rb');
-  try { execFileSync(process.execPath, [path.join(HERE, 'coreIdentityRollback.mjs'), dir, path.join(out, 'copy')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (err) { assert.equal(err.status, 8); }
+  try { execFileSync(process.execPath, [path.join(HERE, 'coreIdentityRollback.mjs'), dir, path.join(out, 'copy0')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (err) { assert.equal(err.status, 4); }
+  execFileSync(process.execPath, [path.join(HERE, 'playerSubrecordsRollback.mjs'), dir, path.join(out, 's4a')], { stdio: 'pipe' });
+  assert.equal(q1(path.join(out, 's4a'), 'SELECT COUNT(*) AS n FROM media_deletions').n, 1, 'the S5 rollback keeps the pending entry');
+  try { execFileSync(process.execPath, [path.join(HERE, 'coreIdentityRollback.mjs'), path.join(out, 's4a'), path.join(out, 'copy')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (err) { assert.equal(err.status, 8); }
   // The next boot retries: still stuck → still queued (attempt 2); unstuck → absent → cleared.
   S = await boot(dir, nextPort());
   assert.equal(q1(dir, 'SELECT attempts FROM media_deletions WHERE media_id = ?', b.mediaId).attempts, 2);
@@ -350,7 +354,8 @@ await test('deletion: the player row, the links, the sessions and the media-remo
   assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM media_deletions').n, 0, 'cleared at boot once the file is absent');
   assert.equal((await S.j('GET', '/capabilities')).body.dataLayer.mediaDeletions.queued, 0);
   await S.stop();
-  assert.equal(execFileSync(process.execPath, [path.join(HERE, 'coreIdentityRollback.mjs'), dir, path.join(out, 'copy2'), '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).includes('"recordRemoved": true'), true, 'the rollback runs once the queue drained');
+  execFileSync(process.execPath, [path.join(HERE, 'playerSubrecordsRollback.mjs'), dir, path.join(out, 's4a2')], { stdio: 'pipe' }); // S5 first, then the S4a tool on its output
+  assert.equal(execFileSync(process.execPath, [path.join(HERE, 'coreIdentityRollback.mjs'), path.join(out, 's4a2'), path.join(out, 'copy2'), '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).includes('"recordRemoved": true'), true, 'the rollback chain runs once the queue drained');
   rm(dir, out);
 });
 
@@ -507,6 +512,120 @@ await test('ownership guard (review of 4ef9345): a restored snapshot whose queue
   assert.equal(fs.existsSync(path.join(dir, 'media', 'media-nobody.webm')), false, 'a legitimate pending removal still completes at boot'); assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM media_deletions').n, 0);
   assert.ok(fs.existsSync(liveClip)); assert.equal((await S.j('GET', `/media/${mediaId}`, undefined, token)).status, 200);
   assert.equal((await S.j('POST', '/admin/backup', {}, null, A)).status, 201);
+  await S.stop(); rm(dir, restored);
+});
+
+// ------------------------------------------------------------- S5: the player sub-record tables through the real routes
+const subCounts = (dir, pid) => Object.fromEntries(SUBRECORD_TABLES.map((t) => [t, t === 'player_media_tags'
+  ? q1(dir, 'SELECT COUNT(*) AS n FROM player_media_tags WHERE media_id IN (SELECT id FROM player_media WHERE player_id = ?)', pid).n
+  : q1(dir, `SELECT COUNT(*) AS n FROM ${t} WHERE player_id = ?`, pid).n]));
+const SUB_KEYS = ['media', 'timeline', 'badges', 'attendance', 'medical', 'drills', 'drillResults', 'seasonHistory', 'externalIds', 'programme', 'activityLog', 'trialReports'];
+/** The twelve sub-record fields of a served or exported record, comparable across boots: a clip's url is signed per request (the signature is stripped), and the boot default `captions: null` (m12's, written where the stored item lacks the field) is applied so a record read before and after a restart compares equal. */
+const pick = (rec) => Object.fromEntries(SUB_KEYS.map((k) => [k,
+  k === 'media' ? rec.media.map((m) => ({ ...m, captions: m.captions ?? null, url: typeof m.url === 'string' ? m.url.replace(/\?.*$/, '') : m.url }))
+    // /player/me projects the programme (progress per session); the record and the export hold the completions — compared as the ids of the completed sessions
+    : k === 'programme' ? (rec.programme?.completed ? rec.programme.completed.map((c) => c.sessionId) : (rec.programme?.sessions ?? []).filter((s) => s.done).map((s) => s.id))
+      : rec[k]]));
+await test('S5 sub-records through the real routes: clips (a file and a null url), a club\'s view count and tags, timeline, badges with a legal duplicate, a season in the history, a medical record, a drill with its result, a programme completion, a Box Cam clip, an import link, a trial check-in and the derived trial report are rows of the twelve tables with nothing left in the facets; the club view keeps the private ones private (activity, drill results, external ids, programme, attendance GPS, medical records until shared); a SIGKILL and a restart serve the same record; the admin backup carries every array inline and a restore into a new directory re-imports them with the same ids and order; the account deletion removes every child row in the same unit and the file after COMMIT', async () => {
+  const dir = tempDir('s5srv-sub');
+  let S = await boot(dir, nextPort(), { BOX_CAM_TEST_PROVIDER: '1' }); // the test-only Box Cam observation provider (simulated observations, labelled so; cannot exist in production)
+  const su = await S.j('POST', '/auth/player/signup', { name: 'Sub Records', dob: '2000-01-01', country: 'GB', position: 'ST', password: 'subrec-pass-1' }); assert.equal(su.status, 201, JSON.stringify(su.body));
+  const pid = su.body.playerId; const token = su.body.token;
+  const pro = await orgLogin(S, 'org-eastport');
+  const me = async (X = S, t = token) => { const r = await X.j('GET', '/player/me', undefined, t); assert.equal(r.status, 200, JSON.stringify(r.body)); return r.body; };
+  // Media: a clip with a file and one without (url null) — order and the null kept; the club's view count and tags are rows.
+  const m1 = await S.j('POST', '/player/media', { title: 'First clip', kind: 'video', dataUrl: 'data:video/webm;base64,AAAAAAAA' }, token); assert.equal(m1.status, 201, JSON.stringify(m1.body));
+  const m2 = await S.j('POST', '/player/media', { title: 'Second, no file', kind: 'video' }, token); assert.equal(m2.status, 201, JSON.stringify(m2.body));
+  const mediaId = m1.body.media.id;
+  assert.equal((await S.j('POST', `/org/players/${pid}/media/${mediaId}/view`, {}, pro)).body.views, 1);
+  assert.deepEqual((await S.j('POST', `/org/players/${pid}/media/${mediaId}/tags`, { tags: ['pace', 'first_touch'] }, pro)).body.tags, { pace: 1, first_touch: 1 });
+  assert.deepEqual(qAll(dir, 'SELECT tag, count, position FROM player_media_tags WHERE media_id = ? ORDER BY position', mediaId), [{ tag: 'pace', count: 1, position: 0 }, { tag: 'first_touch', count: 1, position: 1 }]);
+  assert.deepEqual(qAll(dir, 'SELECT title, url, views FROM player_media WHERE player_id = ? ORDER BY position', pid), [{ title: 'First clip', url: `/media/${mediaId}`, views: 1 }, { title: 'Second, no file', url: null, views: 0 }]);
+  // Timeline, badges (a legal duplicate and the order kept), a season, a medical record, a drill, a programme completion.
+  assert.equal((await S.j('POST', '/player/timeline', { year: 2024, event: 'Joined Test Town' }, token)).status, 201);
+  assert.equal((await S.j('POST', '/player/timeline', { year: 2023, event: 'First season' }, token)).status, 201);
+  assert.deepEqual(qAll(dir, 'SELECT year, event FROM player_timeline WHERE player_id = ? ORDER BY position', pid), [{ year: '2024', event: 'Joined Test Town' }, { year: '2023', event: 'First season' }]);
+  assert.deepEqual((await S.j('POST', '/player/badges', { badges: ['Grit', 'Leader', 'Grit'] }, token)).body.badges, ['Grit', 'Leader', 'Grit']);
+  assert.deepEqual(qAll(dir, 'SELECT badge FROM player_badges WHERE player_id = ? ORDER BY position', pid).map((b) => b.badge), ['Grit', 'Leader', 'Grit']);
+  const st = await S.j('POST', '/player/stats', { season: '2024/25', goals: 5, appearances: 12 }, token); assert.equal(st.status, 200, JSON.stringify(st.body));
+  assert.deepEqual(qAll(dir, 'SELECT season, goals, appearances, assists FROM player_season_history WHERE player_id = ?', pid), [{ season: '2024/25', goals: 5, appearances: 12, assists: 0 }]);
+  assert.equal((await S.j('POST', '/player/medical/records', { title: 'Synthetic knee note', type: 'note', date: '2026-09-01', conditionStatus: 'fully_fit' }, token)).status, 201);
+  assert.equal((await S.j('POST', '/player/drills/drill-passing-gates/complete', { value: 15 }, token)).status, 200);
+  assert.equal((await S.j('POST', '/player/programme', { track: 'attack' }, token)).status, 201);
+  assert.equal((await S.j('POST', '/player/programme/sessions/atk-sprint/complete', {}, token)).status, 200);
+  // Box Cam: a complete session, then its clip marks the media row (captured_by, box_session_id) in one unit with the session's reference.
+  const MIN = 60_000;
+  const bc = await S.j('POST', '/player/box-cam/sessions', { drillId: 'box-control', target: { type: 'duration', value: 20 * MIN }, provider: 'local_test' }, token); assert.equal(bc.status, 201, JSON.stringify(bc.body));
+  const { session: box, nonce, livenessChallenge } = bc.body;
+  assert.equal((await S.j('POST', `/player/box-cam/sessions/${box.id}/start`, { nonce, liveness: livenessChallenge }, token)).status, 200);
+  assert.equal((await S.j('POST', `/player/box-cam/sessions/${box.id}/events`, { nonce, batch: [{ seq: 1, type: 'presence_interval', fromMs: 0, toMs: 21 * MIN, quality: 'good' }, { seq: 2, type: 'ball_interval', fromMs: 0, toMs: 21 * MIN }, { seq: 3, type: 'active_interval', fromMs: 0, toMs: 18 * MIN, quality: 'good' }] }, token)).status, 200);
+  const done = await S.j('POST', `/player/box-cam/sessions/${box.id}/complete`, { nonce }, token); assert.equal(done.status, 200, JSON.stringify(done.body));
+  const clip = await S.j('POST', `/player/box-cam/sessions/${box.id}/clip`, { mediaId }, token); assert.equal(clip.status, 200, JSON.stringify(clip.body));
+  assert.deepEqual({ ...q1(dir, 'SELECT captured_by, box_session_id FROM player_media WHERE id = ?', mediaId) }, { captured_by: 'box_cam', box_session_id: box.id });
+  // An import whose row is ambiguous with this player: the lead links it — one external-id row, the claim kept whole.
+  const csv = ['name,dob,position,foot,heightCm,provider,externalId,notes', 'Sub Records,2000-01-01,ST,right,181,statsprovider,SP-S5,ambiguous with the platform player'].join('\n');
+  const imp = await S.j('POST', '/org/imports', { csv }, pro); assert.equal(imp.status, 201, JSON.stringify(imp.body)); assert.equal(imp.body.batch.summary.ambiguous, 1, JSON.stringify(imp.body.batch.summary));
+  assert.equal((await S.j('POST', `/org/imports/${imp.body.batch.id}/commit`, { confirm: true }, pro)).body.reviewsQueued, 1);
+  const review = (await S.j('GET', '/org/identity-reviews', undefined, pro)).body.items.find((r) => r.candidatePlayerId === pid); assert.ok(review, 'the review names this player');
+  assert.equal((await S.j('POST', `/org/identity-reviews/${review.id}/resolve`, { action: 'link' }, pro)).body.review.resolution, 'linked');
+  assert.deepEqual(qAll(dir, 'SELECT provider, external_id, source, linked_by_name FROM player_external_ids WHERE player_id = ?', pid), [{ provider: 'statsprovider', external_id: 'SP-S5', source: `import:${imp.body.batch.id}`, linked_by_name: 'Maria Keane' }]);
+  assert.equal(JSON.parse(q1(dir, 'SELECT claim_json FROM player_external_ids WHERE player_id = ?', pid).claim_json).externalId, 'SP-S5');
+  // A trial: the check-in writes the coach-signed attendance (no GPS) with the activity and the Turnstile badge; the report is served from the trial, never copied.
+  const future = new Date(Date.now() + 21 * 86_400_000).toISOString().slice(0, 10);
+  const rq = await S.j('POST', `/org/players/${pid}/request`, { type: 'trial', message: 'Trial with the U23s?', proposedDate: future, venue: 'Eastport Training Ground' }, pro); assert.equal(rq.status, 201, JSON.stringify(rq.body));
+  assert.equal((await S.j('POST', `/player/requests/${rq.body.requestId}/respond`, { accept: true }, token)).status, 200);
+  const trialsBody = (await S.j('GET', '/org/trials', undefined, pro)).body; const trial = (Array.isArray(trialsBody) ? trialsBody : trialsBody.items ?? []).find((t) => t.playerId === pid); assert.ok(trial, 'the trial exists');
+  assert.equal((await S.j('POST', `/org/trials/${trial.id}/staff`, { name: 'Priya Shah', role: 'Safeguarding Lead', check: { kind: 'DBS (England & Wales)', ref: 'DBS-4471', expiresAt: new Date(Date.now() + 300 * 86_400_000).toISOString() } }, pro)).status, 201);
+  const chk = (await S.j('GET', '/admin/staff-checks', undefined, null, A)).body.items.find((c) => c.trialId === trial.id); assert.ok(chk);
+  assert.equal((await S.j('POST', `/admin/staff-checks/${chk.trialId}/${chk.staffId}`, { status: 'reviewed' }, null, A)).status, 200);
+  assert.equal((await S.j('POST', `/player/trials/${trial.id}/consent`, {}, token)).status, 201);
+  const ci = await S.j('POST', `/org/trials/${trial.id}/checkin`, {}, pro); assert.equal(ci.status, 200, JSON.stringify(ci.body));
+  const att = qAll(dir, 'SELECT fixture, trial_id, lat, lng, verified, corroborated_by FROM player_attendance WHERE player_id = ?', pid);
+  assert.equal(att.length, 1); assert.match(att[0].fixture, /^Trial day · /); assert.equal(att[0].trial_id, trial.id); assert.equal(att[0].lat, null); assert.equal(att[0].lng, null); assert.equal(att[0].verified, 1); assert.equal(att[0].corroborated_by, trial.orgName);
+  assert.deepEqual(qAll(dir, 'SELECT badge FROM player_badges WHERE player_id = ? ORDER BY position', pid).map((b) => b.badge), ['Grit', 'Leader', 'Grit', 'Turnstile'], 'the badge earned by the attendance is appended after the client-set list');
+  const rep = await S.j('POST', `/org/trials/${trial.id}/report`, { acceleration: 8, sprintSpeedKmh: 33.4, distanceKm: 9.1, passCompletionPct: 81, duelSuccessPct: 63, coachRating: 8 }, pro); assert.equal(rep.status, 201, JSON.stringify(rep.body));
+  const live = await me();
+  assert.deepEqual(live.trialReports.map((r) => r.id), [rep.body.report.id], 'trialReports is derived from the trials collection');
+  const fac = JSON.parse(q1(dir, 'SELECT facets_json FROM players WHERE id = ?', pid).facets_json);
+  for (const k of ['media', 'timeline', 'badges', 'attendance', 'drills', 'drillResults', 'seasonHistory', 'externalIds', 'activityLog', 'trialReports']) assert.equal(k in fac, false, `${k} is not in the facets (no stale copy)`);
+  assert.equal(fac.medical?.records, undefined); assert.equal(fac.programme?.completed, undefined);
+  const counts = subCounts(dir, pid);
+  assert.deepEqual({ ...counts, player_activity_log: 'n' }, { player_season_history: 1, player_badges: 4, player_drills: 1, player_attendance: 1, player_timeline: 2, player_media: 2, player_media_tags: 2, player_medical_records: 1, player_drill_results: 1, player_activity_log: 'n', player_external_ids: 1, player_programme_completions: 1 });
+  assert.ok(counts.player_activity_log >= 4 && counts.player_activity_log === live.activityLog.length, 'every recorded activity is a row');
+  // The club's view: the private sub-records stay private; medical records appear only while shared; attendance carries no GPS.
+  const clubView = (await S.j('GET', `/org/players/${pid}`, undefined, pro)).body;
+  expectKeys(clubView, ['media', 'timeline', 'badges', 'attendance', 'medical', 'trialReports'], ['activityLog', 'drillResults', 'externalIds', 'importClaims', 'programme'], 'club view of the S5 arrays');
+  assert.ok(clubView.attendance.every((a) => !('gps' in a))); assert.deepEqual(clubView.medical.records, []); assert.equal(clubView.media[0].tags.pace, 1);
+  assert.equal((await S.j('POST', '/player/medical/share', { shared: true }, token)).status, 200);
+  assert.equal((await S.j('GET', `/org/players/${pid}`, undefined, pro)).body.medical.records.length, 1, 'shared: the record is served');
+  assert.equal((await S.j('POST', '/player/medical/share', { shared: false }, token)).status, 200);
+  assert.deepEqual((await S.j('GET', `/org/players/${pid}`, undefined, pro)).body.medical.records, [], 'unshared again: private');
+  // A SIGKILL and a restart: the same record, from the rows. (The report lives on the trial — a blob collection persisted by the ordinary, debounced save, as before S5 — so its save is awaited before the kill; every sub-record row above was committed before its response.)
+  const snapshotMe = pick(await me());
+  const reportSaved = () => (JSON.parse(q1(dir, "SELECT value FROM collections WHERE name = 'trials'")?.value ?? '[]')).some((t) => t.report?.id === rep.body.report.id);
+  for (let i = 0; i < 200 && !reportSaved(); i++) await new Promise((r) => setTimeout(r, 50));
+  assert.ok(reportSaved(), 'the trial report reached the database through the ordinary save');
+  await S.kill();
+  S = await boot(dir, nextPort());
+  assert.deepEqual(pick(await me()), snapshotMe, 'a restart serves every array from its rows: ids, order, the duplicate, the null url and the derived trialReports');
+  // The admin backup carries the arrays inline (the established format); a restore into a NEW directory re-imports them (0005 then 0007) with the same ids and order.
+  const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, JSON.stringify(bk.body));
+  const exported = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8')).db.players.find((p) => p.id === pid);
+  assert.deepEqual(pick(exported), snapshotMe, 'the backup carries every array inline, trialReports included');
+  await S.stop();
+  const restored = tempDir('s5srv-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
+  S = await boot(restored, nextPort());
+  assert.deepEqual(subCounts(restored, pid), counts, 'the restored directory holds the same rows');
+  const login = await S.j('POST', '/auth/player/login', { playerId: pid, password: 'subrec-pass-1' }); assert.equal(login.status, 200, JSON.stringify(login.body));
+  assert.deepEqual(pick(await me(S, login.body.token)), snapshotMe, 'the restored server serves the same record: same ids, same order');
+  assert.equal((await S.j('GET', `/media/${mediaId}`, undefined, login.body.token)).status, 200, 'the live clip travelled with the backup');
+  await S.stop();
+  // The hard delete: every child row goes with the player inside the unit; the file after COMMIT.
+  S = await boot(dir, nextPort());
+  assert.equal((await S.j('DELETE', '/player/account', undefined, token)).status, 200);
+  assert.deepEqual(subCounts(dir, pid), Object.fromEntries(SUBRECORD_TABLES.map((t) => [t, 0])), 'every child row went with the player');
+  assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM player_media_tags WHERE media_id = ?', mediaId).n, 0);
+  assert.equal(fs.existsSync(path.join(dir, 'media', `${mediaId}.webm`)), false, 'the file went after COMMIT'); assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM media_deletions').n, 0);
   await S.stop(); rm(dir, restored);
 });
 

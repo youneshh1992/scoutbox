@@ -20,7 +20,7 @@ export function registerOperations(ctx) {
     db, nextId, persist, persistNow, notify, ledgerAppend, broadcast, findPlayer,
     orgRouter, playerRouter, guardianRouter, adminRouter,
     paginate, guardianOwnsChild, orgCanSee, moderateOrRefuse,
-    storage, sessionFor, isBlocked, DATA_DIR, players,
+    storage, sessionFor, isBlocked, DATA_DIR, players, unit,
   } = ctx;
 
   const usersOf = (orgId) => db.users.filter((u) => u.orgId === orgId && !u.removedAt);
@@ -221,13 +221,16 @@ export function registerOperations(ctx) {
     const item = { id: nextId('media'), title: up.title, kind: up.mime.startsWith('video') ? 'video' : 'image', uploadedAt: new Date().toISOString(), url: null, views: 0, tags: {}, verifiedClip: null, captions: null, sizeBytes: up.size };
     storage.saveDataUrl(item.id, `data:${up.mime};base64,${buf.toString('base64')}`);
     item.url = `/media/${item.id}`;
-    req.player.media.push(item);
-    up.status = 'finalised';
-    up.finalisedMediaId = item.id;
+    // ONE unit of work (S5): the clip row, the upload session's state (a blob)
+    // and the activity commit together before the 201; the chunks go after.
+    unit(() => {
+      players.addItem(req.player.id, 'media', item);
+      up.status = 'finalised';
+      up.finalisedMediaId = item.id;
+      ctx.recordActivity(req.player);
+      broadcast('players', { playerId: req.player.id });
+    });
     fs.rmSync(chunkDir(up.id), { recursive: true, force: true });
-    ctx.recordActivity(req.player);
-    persistNow();
-    broadcast('players', { playerId: req.player.id });
     res.status(201).json({ upload: up, media: item });
   });
 
@@ -251,8 +254,7 @@ export function registerOperations(ctx) {
     const vtt = String(req.body?.vtt ?? '');
     if (!vtt.trim().startsWith('WEBVTT')) return res.status(400).json({ error: 'VTT_REQUIRED', message: 'Captions are a WebVTT track (starts with "WEBVTT").' });
     if (vtt.length > 200_000) return res.status(413).json({ error: 'CAPTIONS_TOO_LARGE' });
-    m.captions = vtt;
-    persistNow();
+    players.patchItem(req.player.id, 'media', { id: m.id }, { captions: vtt }); // S5: one row UPDATE, committed before the response
     broadcast('players', { playerId: req.player.id });
     res.json({ media: { id: m.id, captions: true } });
   });

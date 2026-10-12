@@ -50,8 +50,20 @@ export const PLAYER_FEET = Object.freeze(['left', 'right']);
 export const PLAYER_AVAILABILITY = Object.freeze(['available_now', 'end_of_season', 'loan_open', 'overseas_open', 'not_seeking']);
 export const PLAYER_CONTRACT_STATUS = Object.freeze(['under_contract', 'expiring_summer', 'scholarship_ending', 'release_approaching', 'free_agent', 'unknown']);
 export const PLAYER_LEVELS = Object.freeze(['amateur', 'semi_pro', 'pro']);
-/** Nested arrays that stay in the facets until step S5 (validated as arrays when present; never inspected item by item here). */
+/**
+ * The nested arrays (validated as arrays when present at this level; their
+ * items are validated by `playerSubrecords.mjs`). Until migration 0007 they
+ * ride in the facets (`subrecords: 'facets'`, the S4a layout); once it is
+ * recorded they are rows of the `player_*` tables (`subrecords: 'tables'`) and
+ * the mapping keeps only their presence and null/absent shape in `__meta`.
+ */
 export const PLAYER_S5_ARRAYS = Object.freeze(['media', 'attendance', 'timeline', 'badges', 'trialReports', 'drills', 'drillResults', 'activityLog', 'externalIds', 'seasonHistory']);
+/** The top-level arrays that become tables in S5 (`trialReports` is derived from the trials, not stored: PLAYER_DERIVED_KEYS). */
+export const PLAYER_SUBRECORD_KEYS = Object.freeze(['media', 'attendance', 'timeline', 'badges', 'drills', 'drillResults', 'activityLog', 'externalIds', 'seasonHistory']);
+/** Split composites whose remainder sub-key becomes a table in S5 (`facets_json.medical.records` → `player_medical_records`, …). */
+export const PLAYER_COMPOSITE_SUBRECORDS = Object.freeze({ medical: Object.freeze(['records']), programme: Object.freeze(['completed']) });
+/** Record keys served as derived values since S5 (never stored; presence kept in `__meta`). */
+export const PLAYER_DERIVED_KEYS = Object.freeze(['trialReports']);
 export const RESERVED_KEYS = Object.freeze(['__meta', '__rest']);
 
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -139,16 +151,25 @@ export const PLAYER_MIGRATED_KEYS = Object.freeze(new Set(['id', ...Object.keys(
 export const GUARDIAN_MIGRATED_KEYS = Object.freeze(new Set(['id', ...Object.keys(GUARDIAN_SPEC.scalars), ...Object.keys(GUARDIAN_SPEC.composites)]));
 
 // ---------------------------------------------------------- record → row
-function toRowWith(spec, rec) {
+/**
+ * `tableKeys` (S5): record keys that are stored as child rows rather than
+ * facets — their presence stays in `order`, a null in `nulls`, nothing of
+ * their content in the facets. `tableSubs` does the same for a composite's
+ * sub-keys (`medical.records`). `facetsColumn` names the JSON column (the
+ * records' `facets_json`; an item's `extra_json`).
+ */
+function toRowWith(spec, rec, { tableKeys = new Set(), tableSubs = {} } = {}) {
+  const facetsColumn = spec.facetsColumn ?? 'facets_json';
   const p = {};
   for (const c of spec.columns) p[c] = null;
-  p.id = rec.id;
+  if (spec.columns.includes('id')) p.id = rec.id;
   const meta = { order: Object.keys(rec), nulls: [], present: [], sub: {} };
   for (const [key, col] of Object.entries(spec.scalars)) {
     const v = rec[key];
     if (v === null) { meta.nulls.push(key); continue; }
     if (v === undefined) continue;
-    p[col] = spec.booleans.has(key) ? (v ? 1 : 0) : v;
+    // A JSON column (an item's free-form `claim`) stores the value as text, exactly as given.
+    p[col] = spec.booleans.has(key) ? (v ? 1 : 0) : spec.json?.has(key) ? JSON.stringify(v) : v;
   }
   for (const [key, subs] of Object.entries(spec.composites)) {
     const v = rec[key];
@@ -164,17 +185,24 @@ function toRowWith(spec, rec) {
   }
   // Required columns the record left implicit take the table default; their
   // absence is remembered through `order` and restored on the way back.
-  for (const [col, dflt] of Object.entries(spec.defaults)) if (p[col] === null) p[col] = dflt;
+  for (const [col, dflt] of Object.entries(spec.defaults ?? {})) if (p[col] === null) p[col] = dflt;
   const facets = {};
   for (const key of meta.order) {
     if (key === 'id' || hasOwn(spec.scalars, key) || hasOwn(spec.composites, key) || spec.excluded.has(key)) continue;
+    // A table-backed array (S5): its rows are written by the caller; the facets keep only whether it was null.
+    if (tableKeys.has(key)) { if (rec[key] === null) meta.nulls.push(key); continue; }
     setOwn(facets, key, rec[key]);
   }
   for (const [key, subs] of Object.entries(spec.composites)) {
     const v = rec[key];
     if (!isPlainObject(v)) continue;
     const rest = {};
-    for (const sub of Object.keys(v)) if (!hasOwn(subs, sub)) setOwn(rest, sub, v[sub]);
+    const subTables = tableSubs[key] ?? [];
+    for (const sub of Object.keys(v)) {
+      if (hasOwn(subs, sub)) continue;
+      if (subTables.includes(sub)) { if (v[sub] === null) meta.nulls.push(`${key}.${sub}`); continue; }
+      setOwn(rest, sub, v[sub]);
+    }
     // A composite's remainder (medical.records, programme.completed, an unknown
     // stats sub-key) rides under the composite's OWN key in the facets —
     // `facets_json.medical.records` is what the documents describe and what a
@@ -183,7 +211,7 @@ function toRowWith(spec, rec) {
     if (Object.keys(rest).length) setOwn(facets, key, rest);
   }
   facets.__meta = meta;
-  p.facets_json = JSON.stringify(facets);
+  p[facetsColumn] = JSON.stringify(facets);
   return p;
 }
 
@@ -195,20 +223,30 @@ function toRowWith(spec, rec) {
  * it had, in their order. A row without metadata (written by something other
  * than this mapping) yields every non-null column.
  */
-function fromRowWith(spec, r, { extra = {} } = {}) {
-  const facets = r.facets_json ? JSON.parse(r.facets_json) : {};
+/**
+ * `extra`: values the row does not hold (a guardian's `childIds`, the S5
+ * arrays read from their tables): emitted where the record had the key, null
+ * where it was null, omitted when the record never had it and the value is
+ * empty — unless `extraAlways` lists the key (a derived value that exists must
+ * never be hidden). `compositeExtra`: the same for a composite's sub-keys
+ * (`{ medical: { records: [...] } }`).
+ */
+const isEmptyValue = (v) => (Array.isArray(v) ? v.length === 0 : isPlainObject(v) ? Object.keys(v).length === 0 : false);
+function fromRowWith(spec, r, { extra = {}, compositeExtra = {} } = {}) {
+  const facetsColumn = spec.facetsColumn ?? 'facets_json';
+  const facets = r[facetsColumn] ? JSON.parse(r[facetsColumn]) : {};
   const meta = facets.__meta ?? null;
   const legacyRest = facets.__rest ?? {}; // rows written before the remainders moved under their own key
   const remainderOf = (key) => (hasOwn(facets, key) && isPlainObject(facets[key]) ? facets[key] : hasOwn(legacyRest, key) ? legacyRest[key] : null);
   const nulls = new Set(meta?.nulls ?? []);
   const order = meta?.order ?? null;
-  const values = { id: r.id };
+  const values = spec.columns.includes('id') ? { id: r.id } : {};
   for (const [key, col] of Object.entries(spec.scalars)) {
     if (nulls.has(key)) { values[key] = null; continue; }
     if (order && !order.includes(key)) continue;
     const v = r[col];
     if (v === null || v === undefined) continue;
-    values[key] = spec.booleans.has(key) ? v === 1 : v;
+    values[key] = spec.booleans.has(key) ? v === 1 : spec.json?.has(key) ? JSON.parse(v) : v;
   }
   for (const [key, subs] of Object.entries(spec.composites)) {
     if (nulls.has(key)) { values[key] = null; continue; }
@@ -216,12 +254,15 @@ function fromRowWith(spec, r, { extra = {} } = {}) {
     const obj = {};
     const subOrder = meta?.sub?.[key] ?? null;
     const restOf = remainderOf(key);
+    const subExtra = compositeExtra[key] ?? null;
     if (subOrder) {
       for (const sub of subOrder) {
         if (hasOwn(subs, sub)) {
           if (nulls.has(`${key}.${sub}`)) { setOwn(obj, sub, null); continue; }
           const v = r[subs[sub]];
           if (v !== null && v !== undefined) setOwn(obj, sub, spec.compositeBooleans.has(`${key}.${sub}`) ? v === 1 : v);
+        } else if (subExtra && hasOwn(subExtra, sub)) {
+          setOwn(obj, sub, nulls.has(`${key}.${sub}`) && isEmptyValue(subExtra[sub]) ? null : subExtra[sub]);
         } else if (restOf && hasOwn(restOf, sub)) {
           setOwn(obj, sub, restOf[sub]);
         }
@@ -234,23 +275,55 @@ function fromRowWith(spec, r, { extra = {} } = {}) {
       if (r[col] !== null && r[col] !== undefined) { setOwn(obj, sub, spec.compositeBooleans.has(`${key}.${sub}`) ? r[col] === 1 : r[col]); any = true; }
     }
     if (restOf) { for (const sub of Object.keys(restOf)) setOwn(obj, sub, restOf[sub]); any = true; }
+    if (subExtra) { for (const sub of Object.keys(subExtra)) if (subExtra[sub] !== undefined && !isEmptyValue(subExtra[sub])) { setOwn(obj, sub, subExtra[sub]); any = true; } }
     if (any) values[key] = obj;
   }
   for (const key of Object.keys(facets)) {
     if (RESERVED_KEYS.includes(key) || hasOwn(spec.composites, key)) continue; // a composite's key holds its remainder, merged above
     setOwn(values, key, facets[key]);
   }
-  for (const key of Object.keys(extra)) if (extra[key] !== undefined) setOwn(values, key, extra[key]);
+  for (const key of Object.keys(extra)) {
+    if (extra[key] === undefined) continue;
+    const empty = isEmptyValue(extra[key]);
+    // A null the record had stays null — unless the value exists (a derived list that is not empty is never hidden).
+    if (nulls.has(key) && empty) { setOwn(values, key, null); continue; }
+    const had = order ? order.includes(key) : true;
+    if (had || !empty) setOwn(values, key, extra[key]);
+  }
   const rec = {};
   if (order) for (const key of order) if (hasOwn(values, key)) setOwn(rec, key, values[key]);
   for (const key of Object.keys(values)) if (!hasOwn(rec, key)) setOwn(rec, key, values[key]);
   return rec;
 }
 
-/** Player record → row parameters for the live `players` table (facets_json included). */
-export function playerToRow(rec) { return toRowWith(PLAYER_SPEC, rec); }
-/** Row → player record, original key order and absent/null shape. */
-export function playerFromRow(row) { return fromRowWith(PLAYER_SPEC, row); }
+const TABLE_KEYS = new Set([...PLAYER_SUBRECORD_KEYS, ...PLAYER_DERIVED_KEYS]);
+/**
+ * Player record → row parameters for the live `players` table (facets_json
+ * included). `subrecords: 'facets'` (the default, the S4a layout) keeps the
+ * nested arrays in the facets; `'tables'` (S5, once migration 0007 is
+ * recorded) leaves them out — the caller writes their rows — and keeps only
+ * their presence and null/absent shape.
+ */
+export function playerToRow(rec, { subrecords = 'facets' } = {}) {
+  if (subrecords !== 'facets' && subrecords !== 'tables') throw new TypeError(`playerToRow: subrecords is 'facets' or 'tables', not ${JSON.stringify(subrecords)}`);
+  return subrecords === 'tables' ? toRowWith(PLAYER_SPEC, rec, { tableKeys: TABLE_KEYS, tableSubs: PLAYER_COMPOSITE_SUBRECORDS }) : toRowWith(PLAYER_SPEC, rec);
+}
+/**
+ * Row → player record, original key order and absent/null shape. With
+ * `children` (S5: `{ media: [...], …, medical: { records }, programme: { completed } }`,
+ * read from the child tables) the arrays are put back where the record had them;
+ * `trialReports` (derived) is put back where the record had it, or appended when
+ * reports exist for a record that never had the key.
+ */
+export function playerFromRow(row, { children = null, trialReports = undefined } = {}) {
+  if (!children && trialReports === undefined) return fromRowWith(PLAYER_SPEC, row);
+  const extra = {};
+  for (const key of PLAYER_SUBRECORD_KEYS) extra[key] = children ? (children[key] ?? []) : undefined;
+  if (trialReports !== undefined) extra.trialReports = trialReports;
+  const compositeExtra = {};
+  if (children) for (const [key, subs] of Object.entries(PLAYER_COMPOSITE_SUBRECORDS)) { compositeExtra[key] = {}; for (const sub of subs) compositeExtra[key][sub] = children[key]?.[sub] ?? []; }
+  return fromRowWith(PLAYER_SPEC, row, { extra, compositeExtra });
+}
 /** Guardian record → row parameters; `childIds` is left out (it becomes link rows). */
 export function guardianToRow(rec) { return toRowWith(GUARDIAN_SPEC, rec); }
 /**
@@ -263,6 +336,9 @@ export function guardianFromRow(row, childIds = []) {
   const had = facets.__meta?.order?.includes('childIds') ?? false;
   return fromRowWith(GUARDIAN_SPEC, row, { extra: { childIds: had || childIds.length ? childIds.slice() : undefined } });
 }
+/** The generic item mapping (S5): a sub-record item ⇄ its row, by a spec `{ scalars, booleans, json?, composites, compositeBooleans, defaults?, columns, excluded, facetsColumn }`; `tableKeys` are item keys stored as rows of their own (`media.tags`). */
+export function itemToRow(spec, item, { tableKeys = new Set() } = {}) { return toRowWith(spec, item, { tableKeys }); }
+export function itemFromRow(spec, row, { extra = {} } = {}) { return fromRowWith(spec, row, { extra }); }
 
 // --------------------------------------------------------------- validation
 // Every check lists the field and why; nothing is coerced. "Absent is not

@@ -15,6 +15,7 @@ import { rollbackSessionsCopy } from '../repositories/sessionsRollback.mjs';
 import { ORGS_CUTOVER_MIGRATION } from '../repositories/orgs.mjs';
 import { rollbackOrgsCopy } from '../repositories/orgsRollback.mjs';
 import { rollbackCoreIdentityCopy } from '../repositories/coreIdentityRollback.mjs';
+import { rollbackPlayerSubrecordsCopy } from '../repositories/playerSubrecordsRollback.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import * as m0001 from '../repositories/migrations/0001_org_users.mjs';
 import * as m0002 from '../repositories/migrations/0002_core_identity_shadow.mjs';
@@ -440,8 +441,9 @@ test('snapshot mode (review correction 1): before the cutover record exists the 
   // The file is at S4a now: the S2 and S3 tools refuse it (later schema steps), and the rollback chain is S4a first, then S3, then S2.
   assert.throws(() => rollbackSessionsCopy(path.join(dir, 'scoutbox.db'), tempDir('s2-snap-rb-refused')), (err) => err.code === 'LATER_SCHEMA' && /0004_orgs_live/.test(err.message) && /0005_core_identity_live/.test(err.message));
   assert.throws(() => rollbackOrgsCopy(path.join(dir, 'scoutbox.db'), tempDir('s2-snap-rb-refused3')), (err) => err.code === 'LATER_SCHEMA' && /0005_core_identity_live, 0006_media_deletions/.test(err.message));
-  const s3State = tempDir('s2-snap-rb-s3'); const s2State = tempDir('s2-snap-rb-s2');
-  rollbackCoreIdentityCopy(path.join(dir, 'scoutbox.db'), s3State);
+  const s4aState = tempDir('s2-snap-rb-s4a'); const s3State = tempDir('s2-snap-rb-s3'); const s2State = tempDir('s2-snap-rb-s2');
+  rollbackPlayerSubrecordsCopy(path.join(dir, 'scoutbox.db'), s4aState); // S5 first: the file carries 0007
+  rollbackCoreIdentityCopy(path.join(s4aState, 'scoutbox.db'), s3State);
   rollbackOrgsCopy(path.join(s3State, 'scoutbox.db'), s2State);
   rollbackSessionsCopy(path.join(s2State, 'scoutbox.db'), out);
   tool = openStore(out); snap = tool.load();

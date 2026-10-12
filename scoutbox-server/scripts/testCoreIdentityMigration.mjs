@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
+import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.mjs';
 import { runDataMigrations, migrationApplied } from '../repositories/database.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { createIdentityRepositories, CORE_IDENTITY_INIT_META } from '../repositories/identity.mjs';
@@ -42,11 +43,11 @@ function assertUntouched(s, { before, playersText, guardiansText }) {
 test('cutover: an S3 file with every record shape cuts over — three live tables, every field and link (roles per side), blobs retired, coreIdentityInit = done, sessions identical by hash, staff, organisations and other blobs untouched, emailCode byte-identical once, the repositories attach and serve every record byte-identical', () => {
   const dir = tempDir('s4-cutover'); s3File(dir);
   const s = openRaw(dir);
-  const sessionsBefore = sessionRows(s); const othersBefore = dump(s, { except: ['players', 'guardians', 'guardian_children', 'collections', 'meta', 'data_migrations', 'media_deletions'] });
+  const sessionsBefore = sessionRows(s); const othersBefore = dump(s, { except: ['players', 'guardians', 'guardian_children', 'collections', 'meta', 'data_migrations', 'media_deletions', ...SUBRECORD_TABLES] });
   const blobsBefore = Object.fromEntries(['users', 'sessions', 'orgs', 'requests', 'ledger'].map((n) => [n, blobText(s, n)]));
   const result = migrate(s, { now: NOW });
-  assert.deepEqual(result.ran, [...S4_MIGRATION_IDS]); assert.deepEqual([...S4_MIGRATION_IDS], [CORE_IDENTITY_LIVE_MIGRATION, '0006_media_deletions']); assert.equal(result.applied, 6);
-  assert.deepEqual(applied(s), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', CORE_IDENTITY_LIVE_MIGRATION, '0006_media_deletions']);
+  assert.deepEqual(result.ran, [...S4_MIGRATION_IDS]); assert.deepEqual([...S4_MIGRATION_IDS], [CORE_IDENTITY_LIVE_MIGRATION, '0006_media_deletions', '0007_player_subrecords']); assert.equal(result.applied, 7);
+  assert.deepEqual(applied(s), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', CORE_IDENTITY_LIVE_MIGRATION, '0006_media_deletions', '0007_player_subrecords']);
   for (const t of ['players', 'guardians']) assert.ok(isLive(s, t), `${t} has the live definition`);
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM players').get().n, 5); assert.equal(s.prepare('SELECT COUNT(*) AS n FROM guardians').get().n, 3);
   assert.deepEqual(links(s), [
@@ -62,7 +63,7 @@ test('cutover: an S3 file with every record shape cuts over — three live table
   assert.deepEqual(record.blobs, { players: true, guardians: true }); assert.deepEqual(record.shadowRowsDiscarded, { guardian_children: 0, players: 0, guardians: 0 });
   assert.ok(!/@|scrypt|K7Q2ZP/.test(meta(s, m0005.CORE_IDENTITY_CUTOVER_META)), 'the record carries counts, never data');
   // Untouched: sessions (by hash), staff, organisations, the other blobs.
-  assert.deepEqual(sessionRows(s), sessionsBefore); assert.equal(dump(s, { except: ['players', 'guardians', 'guardian_children', 'collections', 'meta', 'data_migrations', 'media_deletions'] }), othersBefore);
+  assert.deepEqual(sessionRows(s), sessionsBefore); assert.equal(dump(s, { except: ['players', 'guardians', 'guardian_children', 'collections', 'meta', 'data_migrations', 'media_deletions', ...SUBRECORD_TABLES] }), othersBefore);
   for (const [n, text] of Object.entries(blobsBefore)) assert.equal(blobText(s, n), text, `${n} blob untouched`);
   // The code: plain, once, in the facets; never in a column.
   assert.equal(s.prepare("SELECT facets_json FROM guardians WHERE id = 'gd-signup'").get().facets_json.split('K7Q2ZP').length - 1, 1);
@@ -247,7 +248,7 @@ test('a process killed at COMMIT (after the DROPs, the live DDL, every insert an
 
 // ------------------------------------------------------------- the integrated boot (the data layer as production runs it)
 test('integrated boot: 0005 and 0006 are registered, players and guardians are table-backed, a first installation initialises once from the seed (never again), a saved-empty domain stays empty, a stale array or blob never replaces live data, and no identity blob is written again', () => {
-  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', CORE_IDENTITY_LIVE_MIGRATION, '0006_media_deletions']);
+  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', CORE_IDENTITY_LIVE_MIGRATION, '0006_media_deletions', '0007_player_subrecords']);
   assert.deepEqual([...TABLE_BACKED], ['orgs', 'players', 'guardians', 'users', 'sessions', 'mediaDeletions']);
   assert.equal(m0005.id, CORE_IDENTITY_LIVE_MIGRATION); assert.equal(m0005.foreignKeysOff, true);
   // (a) A genuinely new database: the seed (the in-memory records) is imported once, atomically with the state change.

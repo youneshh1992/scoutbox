@@ -557,7 +557,125 @@ the end of this section is the gate.
    `node scripts/coreIdentityRollback.mjs <data-dir> <fresh-empty-dir>`; exit
    8 means the media queue is not empty (boot this build once more so it
    drains); start the previous build on the output directory; every session
-   stays valid and every write made on this build is in the blobs.
+   stays valid and every write made on this build is in the blobs. Since S5
+   the tool refuses a database carrying `0007_player_subrecords` (exit 4,
+   `LATER_SCHEMA`): run the S5 rollback first (next section) and point this
+   tool at its output.
+
+### Player sub-records (live since migration `0007`, S5)
+
+The eleven arrays a player record carries — `media` (with its `tags`),
+`attendance`, `timeline`, `badges`, `drills`, `drillResults`, `activityLog`,
+`externalIds`, `seasonHistory`, `medical.records`, `programme.completed` —
+are rows of the twelve `player_*` tables (`repositories/playerSubrecords.mjs`
+holds the mapping, the validator and the DDL; `repositories/identity.mjs`
+owns the rows; the implementation note is
+`docs/architecture/s5-player-subrecords.md`). Every table carries `position`
+(the array index), so each array reads back in its order and a duplicate the
+code allows (a client-set badge twice, two activities in one millisecond, a
+session completed twice) survives; a row without a client-visible id is keyed
+by `(player_id, position)` and **no identifier is minted**. Unknown item
+fields and an item's shape (key order, explicit nulls) ride in the row's
+`extra_json`, so a record reads back byte for byte. The record the server
+serves keeps every array in place, read-only, items included: a write that
+bypasses the repository throws. The writers are `players.addItem(id, key,
+item)`, `players.setItems(id, key, items)` and `players.patchItem(id, key,
+where, patch)` (`key` is the array's name, `medical.records` and
+`programme.completed` included); each validates the whole array first (types,
+required fields, the natural keys the code enforces: one season, one drill,
+one provider+external id per player, one tag per clip, every item id), runs
+its statements and only then its memory bookkeeping — outside a unit in a
+transaction of its own, inside a unit through the store's participant API —
+so a refusal changes nothing and a failed COMMIT leaves memory as it was.
+Routes that write a child row together with a blob, an audit row or a column
+run in one unit of work (the media upload, attendance, the trial check-in, the
+match day, drills, the programme, Academy+, stats, the import link, the Box
+Cam clip, clip tags, the signing). `players.insert` writes a record's arrays
+as rows in its transaction; `players.restore` rewrites them; `players.remove`
+cascades them (today's hard delete; the media FILES are queued in the same
+unit before the row goes). A fixture or venue the attendance table cannot hold
+(not text) is now answered `400 PLAYER_INVALID` instead of being stored.
+
+`trialReports` is **not stored**: it is a duplicate of `trials[].report` and
+the record serves it as a derived, read-only value in filing order (ascending
+`filedAt`); the trial-report route writes the trial only. `GET /capabilities`
+reports the rows per table under `dataLayer.domains.players.subrecords.tables`.
+
+- **S5 cutover (first boot of this build on an S4a file).** Migration
+  `0007_player_subrecords` runs inside the runner's one transaction after
+  0005 and 0006 (a legacy `db.json` or an S3 file goes through all three in
+  the same boot): it creates the twelve tables, decodes every `players` row
+  through the established decoder (the current facets layout and the older
+  `__rest` one), validates every item of every array, reconciles every
+  `trialReports` copy with the `trials` collection, writes the child rows,
+  re-reads each player through the new path and compares it with the decoded
+  record byte for byte, and only then rewrites `facets_json` without the
+  arrays, recording `meta.playerSubrecordsCutover` (counts only). **Any**
+  refusal aborts the whole step with `PLAYER_SUBRECORDS_CUTOVER_BLOCKED`
+  listing every player id, field, index and reason (never a record): an item a
+  column cannot hold (`players pl-x: media[2].title is absent`), a natural
+  key an array violates (`seasonHistory[1] repeats season "2024/25"`), a
+  `trialReports` entry with no trial report of that id, an entry whose content
+  differs from the trial's report, a report the copy does not carry, the same
+  reports in a different order, a `trials` collection that is not a JSON
+  array. The file is byte-identical, the previous build still runs it, the
+  next boot refuses the same way until the record is resolved by hand on the
+  previous build (the arrays sit in that row's `facets_json`; the trial
+  reports in the `trials` collection). Nothing is coerced, deduplicated,
+  dropped or repaired. A first installation creates the tables and imports
+  nothing (the seed is initialised afterwards, child rows included); an
+  intentionally empty domain stays empty.
+- **Backups and restores.** `POST /admin/backup` exports every player with
+  its arrays rendered from the child tables and its `trialReports` derived
+  from the trials — the same record shape as before S5 — so an older backup
+  and a new one restore the same way: the first boot imports `db.json`, cuts
+  the identity pair over (0005), imports the media queue (0006) and moves the
+  arrays into their tables (0007), reconciling the copies against the `trials`
+  blob the same file carries. A restored snapshot whose items the tables
+  cannot hold is refused whole (`LEGACY_IMPORT_FAILED` or
+  `PLAYER_SUBRECORDS_CUTOVER_BLOCKED`, the file left in place). Media
+  ownership (the S4a invariant that the removal queue never deletes a file a
+  live player references) is judged on `player_media` once 0007 is recorded,
+  and on the facets before it, so the 0006 import of the same boot is judged
+  correctly.
+- **Rollback (copy-only, to the S4a build `480afdb`).** Stop this build; run
+  `node scripts/playerSubrecordsRollback.mjs <data-dir> <fresh-empty-dir>`:
+  it opens the file read-only, copies it (`VACUUM INTO`), writes every array
+  back inside `facets_json` under its own key (the layout the S4a build
+  reads) from the rows in their order — post-S5 inserts, updates and
+  removals included — rebuilds the `trialReports` copies that build reads
+  from the `trials` collection, drops the twelve tables, removes the 0007
+  record and `meta.playerSubrecordsCutover`, advances `meta.saveSeq`, checks
+  every foreign key, VACUUMs and revalidates the copy (every player's facets
+  decode back to the record the rows held, the sessions untouched). Sessions,
+  staff, organisations, the media queue (both builds have it) and every other
+  collection are exactly as they were; nobody signs in again. Exit codes: 0
+  done; 1 usage, no source or a non-empty output directory; 4 the copy carries
+  a schema step after 0007 (`LATER_SCHEMA`: a later step needs its own
+  rollback first); 5 the copy never applied 0007 (`NOT_CUT_OVER`); 9 the
+  `trials` collection cannot be read while a player carries `trialReports`
+  (`TRIALS_UNREADABLE`); 10 a recorded 0007 whose tables are missing
+  (`UNEXPECTED_SCHEMA`). A failure at any step removes the output. To reach
+  the S3 build, run `scripts/coreIdentityRollback.mjs` on this tool's output
+  (it refuses the S5 file itself with exit 4). Restoring a pre-S5 backup
+  instead of rolling back discards every write made since it.
+
+#### Operator procedure for the S5 cutover (not run on real data by this work)
+
+1. **Dry run on a copy.** With the S4a build still serving, copy the data
+   directory and boot this build on it (`DATA_DIR=<copy>` on a spare port):
+   the log shows `data migration applied: 0007_player_subrecords` and
+   `/capabilities` the rows per table under
+   `dataLayer.domains.players.subrecords.tables`; a representative player
+   profile, film room and CV read as before. A
+   `PLAYER_SUBRECORDS_CUTOVER_BLOCKED` line lists what to resolve on the S4a
+   build; repeat until the copy cuts over.
+2. **Backup.** `POST /admin/backup` on the S4a build, verify it, keep it.
+3. **Cutover.** Stop the S4a build, start this build on the real directory,
+   read the same log lines, keep the S4a build's files until the next backup
+   has been taken on this build.
+4. **Rollback, if needed.** `node scripts/playerSubrecordsRollback.mjs
+   <data-dir> <fresh-empty-dir>`, then start the S4a build on the output.
 
 ## Reverse proxy and client addresses
 Per-IP controls (the `/auth` brute-force limiter, sharing-link limits, request

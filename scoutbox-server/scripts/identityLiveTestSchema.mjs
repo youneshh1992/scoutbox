@@ -17,8 +17,10 @@
  */
 import { CANDIDATE_DDL, CORE_IDENTITY_LIVE_MIGRATION } from '../repositories/identityPreflight.mjs';
 import { CORE_IDENTITY_INIT_META } from '../repositories/identity.mjs';
+import { SUBRECORDS_DDL, SUBRECORD_TABLES, PLAYER_SUBRECORDS_MIGRATION } from '../repositories/playerSubrecords.mjs';
 
-export function prepareLiveIdentitySchema(sqlite, { initState = 'done', now = Date.now() } = {}) {
+/** `subrecords: false` leaves the S5 tables and record out (an S4a-shaped database, for tests of the migration 0007 path). */
+export function prepareLiveIdentitySchema(sqlite, { initState = 'done', now = Date.now(), subrecords = true } = {}) {
   if (sqlite.isTransaction) throw new Error('prepareLiveIdentitySchema runs outside a transaction (it toggles foreign keys)');
   const hasTable = (t) => !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
   const isShadow = (t) => hasTable(t) && !sqlite.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === 'facets_json');
@@ -26,6 +28,7 @@ export function prepareLiveIdentitySchema(sqlite, { initState = 'done', now = Da
   if (!liveAlready) {
     sqlite.exec('PRAGMA foreign_keys = OFF;');
     try {
+      for (const t of [...SUBRECORD_TABLES].reverse()) if (hasTable(t)) sqlite.exec(`DROP TABLE ${t}`);
       for (const t of ['guardian_children', 'players', 'guardians']) if (hasTable(t)) sqlite.exec(`DROP TABLE ${t}`);
       sqlite.exec(CANDIDATE_DDL);
     } finally { sqlite.exec('PRAGMA foreign_keys = ON;'); }
@@ -34,4 +37,9 @@ export function prepareLiveIdentitySchema(sqlite, { initState = 'done', now = Da
   sqlite.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);');
   sqlite.prepare('INSERT OR IGNORE INTO data_migrations (id, applied_at) VALUES (?, ?)').run(CORE_IDENTITY_LIVE_MIGRATION, now);
   sqlite.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(CORE_IDENTITY_INIT_META, initState);
+  if (subrecords) {
+    // S5 (migration 0007): the twelve child tables and the record the repositories require.
+    if (!hasTable('player_media')) sqlite.exec(SUBRECORDS_DDL);
+    sqlite.prepare('INSERT OR IGNORE INTO data_migrations (id, applied_at) VALUES (?, ?)').run(PLAYER_SUBRECORDS_MIGRATION, now);
+  }
 }

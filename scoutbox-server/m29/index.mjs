@@ -292,14 +292,14 @@ export function registerSigning(rawCtx) {
     // A signing moves the player's level: grassroots signings make semi-pros, academy/pro signings make pros.
     const levelBefore = player.level ?? 'amateur';
     players.update(player.id, { level: playerLevelAfterSigning(org.level) });
-    player.timeline ??= [];
+    // S5: the timeline is rows of player_timeline, appended through the repository inside this unit.
     const year = String(new Date(ts).getFullYear());
     const levelLines = [];
     if (levelBefore === 'amateur' && player.level === 'semi_pro') {
-      player.timeline.push({ year, event: `Levelled up: amateur → semi-pro with ${org.name}` });
+      players.addItem(player.id, 'timeline', { year, event: `Levelled up: amateur → semi-pro with ${org.name}` });
       levelLines.push([`⬆️ You're semi-pro. ${org.name} signed you — one step up the ladder, recorded forever on your pathway.`, `${player.name} levelled up: amateur → semi-pro with ${org.name}.`]);
     } else if (levelBefore !== 'pro' && player.level === 'pro') {
-      player.timeline.push({ year, event: `Levelled up: ${levelBefore.replace('_', '-')} → pro with ${org.name}` });
+      players.addItem(player.id, 'timeline', { year, event: `Levelled up: ${levelBefore.replace('_', '-')} → pro with ${org.name}` });
       levelLines.push([`⬆️ Academy/pro level reached with ${org.name}. Your grassroots journey got you here.`, `${player.name} reached academy/pro level with ${org.name}.`]);
     }
     if (org.level === 'grassroots') {
@@ -308,7 +308,7 @@ export function registerSigning(rawCtx) {
     }
     // `under_contract` means a real contract was executed (M23_P7_CONTRACT_STATUS_SEMANTICS.md): written here and nowhere else for a recruitment signing.
     players.update(player.id, { contractStatus: 'under_contract', availability: 'not_seeking' });
-    player.timeline.push({ year, event: pkg ? `Signed with ${org.name} — signing completed in ScoutBox` : `Signed by ${org.name} — discovered on ScoutBox` });
+    players.addItem(player.id, 'timeline', { year, event: pkg ? `Signed with ${org.name} — signing completed in ScoutBox` : `Signed by ${org.name} — discovered on ScoutBox` });
     const effects = () => {
       safe('refreshJourneyBadges', () => refreshJourneyBadges?.(player));
       for (const [pText, gText] of levelLines) {

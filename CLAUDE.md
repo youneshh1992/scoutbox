@@ -60,12 +60,32 @@ and design changes the Founder explicitly requests.
   and attached at boot between the organisations and the staff): scalars and
   the split composites are columns changed only through `players.insert` /
   `players.update` / `players.ageUp` / `players.remove` and `guardians.insert`
-  / `guardians.update`; `childIds` derives from the link rows; the S5 arrays,
-  `medical.records`, `programme.completed`, `coGuardians`, the outstanding
-  guardian `emailCode` (plain, not hashed until S6) and unknown fields ride in
-  `facets_json` and are still mutated in place on the records `db.players` /
-  `db.guardians` serve; assigning a column-backed field or `childIds` on a
-  view throws. The cutover validates every record and relationship through
+  / `guardians.update`; `childIds` derives from the link rows; `coGuardians`,
+  the outstanding guardian `emailCode` (plain, not hashed until S6) and
+  unknown fields ride in `facets_json` and are still mutated in place on the
+  records `db.players` / `db.guardians` serve; assigning a column-backed field
+  or `childIds` on a view throws. **Player sub-records are live since S5**
+  (`repositories/playerSubrecords.mjs`, migration `0007_player_subrecords`,
+  note `docs/architecture/s5-player-subrecords.md`): `media` (+ tags),
+  `attendance`, `timeline`, `badges`, `drills`, `drillResults`, `activityLog`,
+  `externalIds`, `seasonHistory`, `medical.records` and `programme.completed`
+  are rows of the twelve `player_*` tables, keyed by `(player_id, position)`
+  where no client-visible id exists (nothing is minted; order and legal
+  duplicates are kept; unknown item fields ride in the row's `extra_json`);
+  the record keeps every array in place, read-only, items included, and the
+  ONLY writers are `players.addItem` / `players.setItems` / `players.patchItem`
+  (and `insert` / `restore`, which write a record's arrays as rows) — a route
+  that writes a child row together with a blob, an audit row or a column runs
+  in one unit of work. `trialReports` is not stored: it is derived from
+  `trials[].report` in filing order and served read-only (the trial report
+  route writes the trial only). Migration 0007 decodes every S4a row through
+  the one mapping, validates every item, reconciles every `trialReports` copy
+  with the trials and blocks the whole step with
+  `PLAYER_SUBRECORDS_CUTOVER_BLOCKED` (ids, fields, indexes, reasons) on any
+  discrepancy; nothing is coerced, deduplicated or dropped. Media ownership is
+  judged on `player_media` once 0007 is recorded. The copy-only rollback to the
+  S4a build is `scripts/playerSubrecordsRollback.mjs`; the S4a→S3 tool refuses
+  a file carrying 0007 (`LATER_SCHEMA`). The cutover validates every record and relationship through
   the reviewed preflight (`repositories/identityPreflight.mjs`) and a legacy
   minor with no guardian link refuses it until resolved by hand (the Founder's
   decision); a first installation initialises once from explicit state

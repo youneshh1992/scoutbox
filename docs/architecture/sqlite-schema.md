@@ -397,11 +397,12 @@ this branch: 13 checks passed.
 | State | Tables | Where |
 |---|---|---|
 | **Implemented, live** (a repository owns the rows; the blob is gone) | 3: `org_users` (rebuilt STRICT with `org_id REFERENCES orgs(id)` and `json_valid` CHECKs in `0004`), `sessions` (`token_hash` only; the table was created by `0002` and became live, with the legacy blob imported and retired, in `0003`), `orgs` (created live by `0004` with the legacy blob imported and retired; scalars and the `location` / `federationRef` composites are columns, the nested facets ride in `facets_json` until S9–S11) | migrations `0001` (S0), `0003` (S2), `0004` (S3) |
-| **Implemented, live** (S4a) | 3 + 1: `guardians`, `players` (scalars and the split composites as columns, the S5 arrays and the other nested facets in `facets_json`), `guardian_children` (derived from `childIds`, roles per side) — created live by `0005_core_identity_live` with the two blobs imported through the reviewed preflight and retired; `media_deletions` (the crash-safe media-removal queue, `0006`, file 08). The S1 shadow is retired | migrations `0005`, `0006` (S4a) |
-| **Proposed** (executable DDL, asserted to load, no migration, no repository) | 314 | files 01 (12 `player_*`), 02–08 |
+| **Implemented, live** (S4a) | 3 + 1: `guardians`, `players` (scalars and the split composites as columns; since S5 only unknown fields and shape metadata in `facets_json`), `guardian_children` (derived from `childIds`, roles per side) — created live by `0005_core_identity_live` with the two blobs imported through the reviewed preflight and retired; `media_deletions` (the crash-safe media-removal queue, `0006`, file 08). The S1 shadow is retired | migrations `0005`, `0006` (S4a) |
+| **Implemented, live** (S5) | 12: the `player_*` sub-record tables (`player_season_history`, `player_badges`, `player_drills`, `player_attendance`, `player_timeline`, `player_media`, `player_media_tags`, `player_medical_records`, `player_drill_results`, `player_activity_log`, `player_external_ids`, `player_programme_completions`), created by `0007_player_subrecords` from the S4a rows through the one mapping; `trialReports` is derived from the trials, not a table ([`s5-player-subrecords.md`](./s5-player-subrecords.md)) | migration `0007` (S5) |
+| **Proposed** (executable DDL, asserted to load, no migration, no repository) | 302 | files 02–08 |
 | Of the proposed, **blocked on an unresolved decision** | file 02 (55 tables): every `player_id` lacks a foreign key until the tombstone decision O1 is implemented at S4, and `org_id RESTRICT` depends on O2; `webhook_endpoints.secret` and `org_users.mfa_json` depend on O3; `exposure_events`, `webhook_deliveries`, `dispatches`, `outbox` retention depends on O4; `assessments` depends on O6; `second_look_items` key on O7; `representations` on O8; `agent_profile_facets.member_association` sentinel on O10 | §10, §12 |
 
-Counts: 7 implemented, 314 proposed, of which 55 (file 02) cannot be cut over until S4b
+Counts: 19 implemented, 302 proposed, of which 55 (file 02) cannot be cut over until S4b
 has shipped the tombstone (O1) and the file has been amended with the player foreign keys
 (plan S8 "Depends on"). The remaining open questions change columns or retention rules,
 not table boundaries.
@@ -519,12 +520,16 @@ guardians ──< guardian_children >── players ──< player_* (12 sub-rec
   `kind = 'org'`, by CHECK), `via IN ('sso')`, `created_at`, `expires_at` (materialised from
   the TTL so expiry is a comparison, not a computation). Indexes `(kind, ref_id)` (revoke all
   of an account), `org_user_id`, `expires_at` (prune).
-- **Player sub-records (S5)** — `player_season_history`, `player_badges`, `player_drills`,
-  `player_attendance` (with `gps_lat/gps_lng`, `verified`, `corroborated_by`),
-  `player_timeline`, `player_media` (+ `player_media_tags (media_id, tag, count)`),
-  `player_medical_records` (medical privacy §9.4), `player_drill_results`,
-  `player_activity_log`, `player_external_ids`, `player_programme_completions`. All
-  `CASCADE` from `players`.
+- **Player sub-records (S5, live since migration `0007`)** — `player_season_history`,
+  `player_badges`, `player_drills`, `player_attendance` (with `lat/lng`, `verified`,
+  `corroborated_by`), `player_timeline`, `player_media` (+ `player_media_tags (media_id, tag,
+  count, position)`), `player_medical_records` (medical privacy §9.4), `player_drill_results`,
+  `player_activity_log`, `player_external_ids`, `player_programme_completions`. All `CASCADE`
+  from `players`; every table carries `position` (the array index) and the item tables an
+  `extra_json` for unknown item fields and shape metadata; rows without a client-visible id are
+  keyed by `(player_id, position)` — nothing is minted. `trialReports` is derived from
+  `trials[].report`, not stored. Decisions and the reconciliation with the data the routes
+  accept: [`s5-player-subrecords.md`](./s5-player-subrecords.md).
 
 ### 5.2 Recruitment (file 02, 55 tables, 79 indexes)
 
@@ -699,7 +704,7 @@ DECISIONs, some already in force:
   export `{ id, note, up(sqlite) }`. Ids sort lexically; a migration runs once, in a
   transaction, and a failure aborts the boot without modifying the file. There is no `down`:
   rollback is restore-from-backup (§ plan, every step records its rollback).
-- **Applied today:** `0001_org_users` (S0), `0002_core_identity_shadow` (S1), `0003_sessions_live` (S2), `0004_orgs_live` (S3), `0005_core_identity_live` and `0006_media_deletions` (S4a).
+- **Applied today:** `0001_org_users` (S0), `0002_core_identity_shadow` (S1), `0003_sessions_live` (S2), `0004_orgs_live` (S3), `0005_core_identity_live` and `0006_media_deletions` (S4a), `0007_player_subrecords` (S5).
 - **Rule.** The DDL in `docs/architecture/sql/` is the design; the migration files are what
   runs. `testSchemaDdl.mjs` asserts the two agree for every table a migration has created, so
   the document cannot drift from the code without a failing test.
@@ -798,7 +803,7 @@ DECISIONs:
   implements the tombstone (`players.deleted_at`, erasure of personal columns, the
   per-table lifecycle statements); **S8a** amends `02_recruitment.sql` to add `REFERENCES
   players(id) ON DELETE RESTRICT` on every `player_id` and ships it in migration
-  `0009_recruitment`. Until S8a lands, the file 02 DDL is proposed, not accepted.
+  `0010_recruitment`. Until S8a lands, the file 02 DDL is proposed, not accepted.
 - **Guardian and org deletion.** New routes in S4 (guardian: only when no non-deleted child
   remains) and S3 (org: `suspended` plus `deleted_at`; staff and sessions cascade; recruitment
   rows keep the org tombstone). OPEN: the Founder's policy on org deletion with open

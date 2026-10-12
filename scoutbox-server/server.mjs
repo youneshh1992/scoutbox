@@ -246,19 +246,23 @@ if (!integrity.stores.ok) {
   console.error(`INTEGRITY STORE_MISSING ${integrity.stores.missing.join(', ')} — required collection(s) absent after migration; nothing was repaired.`);
 }
 
-// Normalise media items (older shapes) + load the seeded sample clips. Facets
-// (media items, seasonHistory) are written in place on the repository views
-// and flushed by the next save; the column-backed defaults (notificationPrefs,
-// firstTeamSeeker, programme) go through the repository, only where the stored
-// record lacks the field — an existing value, null included, is left alone.
-for (const p of db.players) {
-  for (const m of p.media) {
-    m.views ??= 0;
-    m.tags ??= {};       // tag → count (from scouts, aggregated anonymously)
-    m.verifiedClip ??= null; // attendance id when footage is provably from a confirmed fixture
-    m.url ??= null;
+// Normalise media items (older shapes) + load the seeded sample clips. Since
+// S5 the media items and the season history are rows of their tables: a
+// default is written through the repository only where the stored item lacks
+// the field (as the in-place `??=` did: absent or null), one row per item; the
+// column-backed defaults (notificationPrefs, firstTeamSeeker, programme) go
+// through the repository the same way, only where the stored record lacks the
+// field — an existing value, null included, is left alone.
+for (const p of [...db.players]) {
+  for (const m of [...(p.media ?? [])]) {
+    const patch = {};
+    if (m.views == null) patch.views = 0;
+    if (m.tags == null) patch.tags = {};          // tag → count (from scouts, aggregated anonymously)
+    if (m.verifiedClip == null) patch.verifiedClip = null; // attendance id when footage is provably from a confirmed fixture
+    if (m.url == null) patch.url = null;
+    if (Object.keys(patch).length) players.patchItem(p.id, 'media', { id: m.id }, patch);
   }
-  p.seasonHistory ??= [];
+  if (p.seasonHistory == null) players.setItems(p.id, 'seasonHistory', []);
 }
 for (const p of [...db.players]) {
   const patch = {};
@@ -317,8 +321,7 @@ if (!snapshotLoaded) {
       const media = player?.media.find((m) => m.title === sample.title);
       if (!media) continue;
       storage.saveDataUrl(media.id, `data:video/webm;base64,${data.toString('base64')}`);
-      media.url = `/media/${media.id}`;
-      if (sample.verify && player.attendance[0]) media.verifiedClip = player.attendance[0].id;
+      players.patchItem(player.id, 'media', { id: media.id }, { url: `/media/${media.id}`, ...(sample.verify && player.attendance[0] ? { verifiedClip: player.attendance[0].id } : {}) });
     } catch {
       // assets optional — Film Room just starts empty without them
     }
@@ -993,9 +996,9 @@ function channelViewFor(channel, viewer) {
 }
 
 // Football activity feeds the streak/weekly-goal habit loop.
+// (S5: the activity log and the badges are rows of their tables, appended through the repository — inside the caller's unit of work when there is one.)
 function recordActivity(player) {
-  player.activityLog ??= [];
-  player.activityLog.push(Date.now());
+  players.addItem(player.id, 'activityLog', Date.now());
   refreshJourneyBadges(player);
 }
 
@@ -1005,8 +1008,8 @@ function refreshJourneyBadges(player) {
   if (player.level === 'pro') return;
   const earned = earnedGrassrootsBadges(player, { streak: computeStreak(player.activityLog) });
   for (const badge of earned) {
-    if (!player.badges.includes(badge)) {
-      player.badges.push(badge);
+    if (!(player.badges ?? []).includes(badge)) {
+      players.addItem(player.id, 'badges', badge);
       notify({ kind: 'player', id: player.id }, 'badge', `🏅 Badge earned: ${badge}. It's on your profile — recognition that never depends on being scouted.`, player.id);
     }
   }
@@ -2381,9 +2384,10 @@ orgRouter.post('/players/:pid/media/:mid/view', (req, res) => {
   if (!p || !visibleToOrg(p, req.org) || isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'NOT_FOUND' });
   const m = p.media.find((x) => x.id === req.params.mid);
   if (!m) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });
-  m.views = (m.views ?? 0) + 1;
+  const views = (m.views ?? 0) + 1;
+  players.patchItem(p.id, 'media', { id: m.id }, { views }); // S5: one row UPDATE, committed before the response
   broadcast('players', { playerId: p.id });
-  res.json({ views: m.views });
+  res.json({ views });
 });
 
 // "What scouts noticed": structured tags, aggregated anonymously for the player.
@@ -2396,10 +2400,14 @@ orgRouter.post('/players/:pid/media/:mid/tags', (req, res) => {
   if (!Array.isArray(tags) || tags.length === 0) return res.status(400).json({ error: 'TAGS_REQUIRED', allowed: SCOUT_TAGS });
   const invalid = tags.filter((t) => !SCOUT_TAGS.includes(t));
   if (invalid.length) return res.status(400).json({ error: 'UNKNOWN_TAGS', invalid, allowed: SCOUT_TAGS });
-  m.tags ??= {};
-  for (const t of tags) m.tags[t] = (m.tags[t] ?? 0) + 1;
-  ledgerAppend({ type: 'clip_tagged', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
-  broadcast('players', { playerId: p.id });
+  const next = { ...(m.tags ?? {}) };
+  for (const t of tags) next[t] = (next[t] ?? 0) + 1;
+  // ONE unit of work (S5): the clip's tag rows and the ledger row commit together.
+  unit(() => {
+    players.patchItem(p.id, 'media', { id: m.id }, { tags: next });
+    ledgerAppend({ type: 'clip_tagged', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
+    broadcast('players', { playerId: p.id });
+  });
   res.json({ tags: m.tags });
 });
 
@@ -2625,10 +2633,11 @@ orgRouter.post('/trials/:trialId/report', (req, res) => {
   trial.status = 'reported';
   trial.report = report;
 
-  // Filed reports sync to the player profile and raise Trust Score
-  // (institutional corroboration).
+  // Filed reports raise Trust Score (institutional corroboration). Since S5 the
+  // player's `trialReports` is DERIVED from the trials: the report written on
+  // the trial above is what the profile serves, in filing order — no copy is
+  // pushed onto the player (docs/architecture/s5-player-subrecords.md §2.5).
   const p = findPlayer(trial.playerId);
-  p.trialReports.push(report);
   ledgerAppend({ type: 'trial_report', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
   // P4B (D-16): the mandatory report closes the club's obligation even while
   // the family has blocked the club, but the block stands — no notification
@@ -2916,26 +2925,30 @@ orgRouter.post('/matchday', (req, res) => {
   const ids = Array.isArray(playerIds) ? playerIds : [];
   const onSquad = new Set((req.org.squad ?? []).map((e) => e.playerId).filter(Boolean));
   const credited = [];
-  for (const pid of ids) {
-    if (!onSquad.has(pid)) continue; // only your own rostered players
-    const p = findPlayer(pid);
-    if (!p || !visibleToOrg(p, req.org)) continue;
-    p.attendance.push({
-      id: nextId('att'), fixture: String(fixture), venue: String(venue || req.org.location?.city || ''),
-      date: String(date), gps: req.org.location ? { lat: req.org.location.lat, lng: req.org.location.lng } : null,
-      verified: true, corroboratedBy: req.org.name, // coach counter-signature
+  // ONE unit of work (S5): every credited player's attendance row and activity,
+  // the match-day record (a blob) and the ledger row commit together.
+  unit(() => {
+    for (const pid of ids) {
+      if (!onSquad.has(pid)) continue; // only your own rostered players
+      const p = findPlayer(pid);
+      if (!p || !visibleToOrg(p, req.org)) continue;
+      players.addItem(p.id, 'attendance', {
+        id: nextId('att'), fixture: String(fixture), venue: String(venue || req.org.location?.city || ''),
+        date: String(date), gps: req.org.location ? { lat: req.org.location.lat, lng: req.org.location.lng } : null,
+        verified: true, corroboratedBy: req.org.name, // coach counter-signature
+      });
+      recordActivity(p);
+      notify({ kind: 'player', id: p.id }, 'matchday', `📍 ${req.org.name} logged your appearance in "${fixture}" — verified, coach-signed attendance on your profile.`, p.id);
+      credited.push(p.id);
+      broadcast('players', { playerId: p.id });
+    }
+    db.matchdays.push({
+      id: nextId('md'), orgId: req.org.id, fixture: String(fixture), venue: String(venue || ''),
+      date: String(date), result: result ? String(result).slice(0, 20) : null,
+      playerIds: credited, loggedByUserId: req.orgUser.id, ts: Date.now(),
     });
-    recordActivity(p);
-    notify({ kind: 'player', id: p.id }, 'matchday', `📍 ${req.org.name} logged your appearance in "${fixture}" — verified, coach-signed attendance on your profile.`, p.id);
-    credited.push(p.id);
-    broadcast('players', { playerId: p.id });
-  }
-  db.matchdays.push({
-    id: nextId('md'), orgId: req.org.id, fixture: String(fixture), venue: String(venue || ''),
-    date: String(date), result: result ? String(result).slice(0, 20) : null,
-    playerIds: credited, loggedByUserId: req.orgUser.id, ts: Date.now(),
+    ledgerAppend({ type: 'matchday_logged', playerId: null, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
   });
-  ledgerAppend({ type: 'matchday_logged', playerId: null, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
   persist();
   res.status(201).json({ credited: credited.length, matchdays: db.matchdays.filter((m) => m.orgId === req.org.id).length });
 });
@@ -3209,7 +3222,7 @@ playerRouter.post('/aging-up/complete', (req, res) => {
   unit(() => {
     players.ageUp(req.player.id);
     if (guardian) notify({ kind: 'guardian', id: guardian.id }, 'aging_up', `${req.player.name} is 18 — their account is now their own. Their history stays intact, and thank you for keeping it safe.`, req.player.id);
-    req.player.timeline.push({ year: String(new Date().getFullYear()), event: 'Turned 18 — took ownership of this ScoutBox account' });
+    players.addItem(req.player.id, 'timeline', { year: String(new Date().getFullYear()), event: 'Turned 18 — took ownership of this ScoutBox account' });
     ledgerAppend({ type: 'account_transitioned', playerId: req.player.id, orgId: null, orgName: 'ScoutBox', userId: null, scoutName: 'system' });
     notify({ kind: 'player', id: req.player.id }, 'aging_up', 'Your account is now fully yours. Availability, medical sharing and club contact are your calls from here.', req.player.id);
     broadcast('players', { playerId: req.player.id });
@@ -3406,12 +3419,12 @@ playerRouter.get('/reports', (req, res) => {
 // Academy+ is opt-in only and player-controlled (guardian-managed for minors).
 playerRouter.post('/academyplus', (req, res) => {
   if (guardianManagedOnly(req, res)) return;
-  // ONE unit of work: the column and the badge (a facet) commit together (review of 9656a4b).
+  // ONE unit of work: the column and the badge (a row of player_badges since S5) commit together (review of 9656a4b).
   unit(() => {
     players.update(req.player.id, { academyPlus: !!req.body?.enabled });
     seam('academyplus.after_row');
-    if (req.player.academyPlus && !req.player.badges.includes('Fresh Start')) req.player.badges.push('Fresh Start');
-    if (!req.player.academyPlus) req.player.badges = req.player.badges.filter((b) => b !== 'Fresh Start');
+    if (req.player.academyPlus && !(req.player.badges ?? []).includes('Fresh Start')) players.addItem(req.player.id, 'badges', 'Fresh Start');
+    if (!req.player.academyPlus && (req.player.badges ?? []).includes('Fresh Start')) players.setItems(req.player.id, 'badges', req.player.badges.filter((b) => b !== 'Fresh Start'));
     broadcast('players', { playerId: req.player.id });
   });
   res.json({ academyPlus: req.player.academyPlus, badges: req.player.badges });
@@ -3420,7 +3433,7 @@ playerRouter.post('/academyplus', (req, res) => {
 playerRouter.post('/badges', (req, res) => {
   const { badges } = req.body || {};
   if (!Array.isArray(badges)) return res.status(400).json({ error: 'BADGES_MUST_BE_ARRAY' });
-  req.player.badges = badges.slice(0, 6).map(String);
+  players.setItems(req.player.id, 'badges', badges.slice(0, 6).map(String)); // S5: the whole list rewritten as rows, duplicates kept as given
   broadcast('players', { playerId: req.player.id });
   res.json({ badges: req.player.badges });
 });
@@ -3450,9 +3463,19 @@ playerRouter.post('/media', (req, res) => {
     if (!item.url) return res.status(400).json({ error: 'FILE_REQUIRED_FOR_VERIFIED_CLIP', message: 'Attach the actual footage to claim the Verified Clip seal.' });
     item.verifiedClip = att.id;
   }
-  req.player.media.push(item);
-  recordActivity(req.player);
-  broadcast('players', { playerId: req.player.id });
+  // ONE unit of work (S5): the clip row and the activity it records (the log
+  // entry, any badge, its notification) commit together before the 201.
+  try {
+    unit(() => {
+      players.addItem(req.player.id, 'media', item);
+      seam('media.after_row');
+      recordActivity(req.player);
+      broadcast('players', { playerId: req.player.id });
+    });
+  } catch (e) {
+    if (/was refused/.test(String(e?.message))) return res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
+    throw e;
+  }
   res.status(201).json({ media: item, trustScore: computeTrustScore(req.player) });
 });
 
@@ -3480,7 +3503,7 @@ playerRouter.post('/medical/records', (req, res) => {
       if (conditionStatus) players.update(req.player.id, { medical: { conditionStatus } });
       seam('medical.records.after_row');
       if (title) {
-        req.player.medical.records.push({ id: nextId('md'), type: type || 'note', title, date: date || new Date().toISOString().slice(0, 10), layoffWeeks: layoffWeeks ?? null, cleared: cleared ?? null });
+        players.addItem(req.player.id, 'medical.records', { id: nextId('md'), type: type || 'note', title, date: date || new Date().toISOString().slice(0, 10), layoffWeeks: layoffWeeks ?? null, cleared: cleared ?? null });
       }
       broadcast('players', { playerId: req.player.id });
     });
@@ -3546,10 +3569,21 @@ playerRouter.post('/attendance', (req, res) => {
   }
   if (!dateOnlyOrRefuse(res, date, 'date')) return; // M23 P5.7: verified attendance on a day that exists
   const item = { id: nextId('att'), fixture, venue, date, gps, deviceConfirmed: true, verified: true };
-  req.player.attendance.push(item);
-  recordActivity(req.player);
-  ledgerAppend({ type: 'attendance_verified', playerId: req.player.id, orgId: null, orgName: 'ScoutBox', userId: null, scoutName: 'system' });
-  broadcast('players', { playerId: req.player.id });
+  // ONE unit of work (S5): the attendance row, the activity it records and the
+  // ledger row commit together before the 201. A fixture or venue the table
+  // cannot hold (not text) is refused by the repository and answered 400.
+  try {
+    unit(() => {
+      players.addItem(req.player.id, 'attendance', item);
+      seam('attendance.after_row');
+      recordActivity(req.player);
+      ledgerAppend({ type: 'attendance_verified', playerId: req.player.id, orgId: null, orgName: 'ScoutBox', userId: null, scoutName: 'system' });
+      broadcast('players', { playerId: req.player.id });
+    });
+  } catch (e) {
+    if (/was refused/.test(String(e?.message))) return res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
+    throw e;
+  }
   res.status(201).json({ attendance: item, trustScore: computeTrustScore(req.player) });
 });
 
@@ -3557,7 +3591,7 @@ playerRouter.post('/timeline', (req, res) => {
   const { year, event } = req.body || {};
   if (!year || !event) return res.status(400).json({ error: 'YEAR_AND_EVENT_REQUIRED' });
   if (!moderateOrRefuse(res, event, { kind: 'timeline_event', playerId: req.player.id })) return;
-  req.player.timeline.push({ year: String(year), event: String(event) });
+  players.addItem(req.player.id, 'timeline', { year: String(year), event: String(event) }); // S5: one row, committed before the response
   broadcast('players', { playerId: req.player.id });
   res.status(201).json({ timeline: req.player.timeline });
 });
@@ -3581,11 +3615,14 @@ playerRouter.post('/stats', (req, res) => {
   // commit together (review of 9656a4b).
   unit(() => {
     if (season) {
-      req.player.seasonHistory ??= [];
-      const existing = req.player.seasonHistory.find((s) => s.season === season);
+      // S5: the season history is rows of player_season_history; the whole
+      // (sorted) list is rewritten, as the in-place sort used to do.
+      const history = (req.player.seasonHistory ?? []).map((s) => ({ ...s }));
+      const existing = history.find((s) => s.season === season);
       if (existing) Object.assign(existing, updates);
-      else req.player.seasonHistory.push({ season, appearances: 0, goals: 0, assists: 0, ...updates });
-      req.player.seasonHistory.sort((a, b) => (a.season < b.season ? 1 : -1));
+      else history.push({ season, appearances: 0, goals: 0, assists: 0, ...updates });
+      history.sort((a, b) => (a.season < b.season ? 1 : -1));
+      players.setItems(req.player.id, 'seasonHistory', history);
     } else {
       players.update(req.player.id, { stats: { appearances: 0, goals: 0, assists: 0, ...JSON.parse(JSON.stringify(req.player.stats ?? {})), ...updates } });
     }
@@ -3610,8 +3647,11 @@ playerRouter.get('/drills', (req, res) => {
   res.json(
     DRILLS.map((d) => ({
       ...d,
-      completed: req.player.drills.includes(d.id),
-      best: req.player.drillResults
+      completed: (req.player.drills ?? []).includes(d.id),
+      // A player who has never completed a drill has no `drillResults` yet (a
+      // sign-up creates none; the first completion appends the array). Read as
+      // empty — before S5 this answered 500 for every new player.
+      best: (req.player.drillResults ?? [])
         .filter((r) => r.drillId === d.id)
         .sort((a, b) => (d.lowerIsBetter ? a.value - b.value : b.value - a.value))[0] ?? null,
     }))
@@ -3624,22 +3664,26 @@ playerRouter.post('/drills/:id/complete', (req, res) => {
   const { value, videoDataUrl } = req.body || {};
   const numeric = value !== undefined && value !== null && value !== '' ? Number(value) : null;
   if (numeric !== null && (Number.isNaN(numeric) || numeric < 0)) return res.status(400).json({ error: 'BAD_VALUE' });
-  if (!req.player.drills.includes(drill.id)) req.player.drills.push(drill.id);
-  if (numeric !== null) {
-    req.player.drillResults.push({
-      id: nextId('combine'),
-      drillId: drill.id,
-      drillName: drill.name,
-      metric: drill.metric,
-      unit: drill.unit,
-      value: numeric,
-      verified: !!videoDataUrl, // video-backed = combine-verified
-      ts: Date.now(),
-    });
-  }
-  recordActivity(req.player);
-  broadcast('players', { playerId: req.player.id });
-  res.json({ drills: req.player.drills, drillResults: req.player.drillResults });
+  // ONE unit of work (S5): the drill row, the result row and the activity commit together.
+  unit(() => {
+    if (!(req.player.drills ?? []).includes(drill.id)) players.addItem(req.player.id, 'drills', drill.id);
+    if (numeric !== null) {
+      players.addItem(req.player.id, 'drillResults', {
+        id: nextId('combine'),
+        drillId: drill.id,
+        drillName: drill.name,
+        metric: drill.metric,
+        unit: drill.unit,
+        value: numeric,
+        verified: !!videoDataUrl, // video-backed = combine-verified
+        ts: Date.now(),
+      });
+    }
+    seam('drills.complete.after_row');
+    recordActivity(req.player);
+    broadcast('players', { playerId: req.player.id });
+  });
+  res.json({ drills: req.player.drills, drillResults: req.player.drillResults ?? [] });
 });
 
 // ---------------------------------------------- the Grassroots journey
@@ -3666,13 +3710,13 @@ playerRouter.post('/programme', (req, res) => {
   if (grassrootsOnly(req, res)) return;
   const track = PROGRAMME_TRACKS[req.body?.track];
   if (!track) return res.status(400).json({ error: 'TRACK_NOT_FOUND' });
-  // track and startedAt are columns; `completed` stays a facet written on the
-  // record. ONE unit of work: the new track and the reset of the completed
-  // sessions commit together (review of 9656a4b).
+  // track and startedAt are columns; `completed` is rows of
+  // player_programme_completions (S5). ONE unit of work: the new track and the
+  // reset of the completed sessions commit together (review of 9656a4b).
   unit(() => {
     players.update(req.player.id, { programme: { track: track.key, startedAt: Date.now() } });
     seam('programme.select.after_row');
-    req.player.programme.completed = [];
+    players.setItems(req.player.id, 'programme.completed', []);
     broadcast('players', { playerId: req.player.id });
   });
   res.status(201).json({ current: programmeProgress(req.player) });
@@ -3684,9 +3728,12 @@ playerRouter.post('/programme/sessions/:id/complete', (req, res) => {
   const track = PROGRAMME_TRACKS[req.player.programme.track];
   const session = track?.sessions.find((x) => x.id === req.params.id);
   if (!session) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
-  req.player.programme.completed.push({ sessionId: session.id, ts: Date.now() });
-  recordActivity(req.player); // programme work feeds streaks + the weekly goal
-  broadcast('players', { playerId: req.player.id });
+  // ONE unit of work (S5): the completion row and the activity commit together.
+  unit(() => {
+    players.addItem(req.player.id, 'programme.completed', { sessionId: session.id, ts: Date.now() });
+    recordActivity(req.player); // programme work feeds streaks + the weekly goal
+    broadcast('players', { playerId: req.player.id });
+  });
   res.json({ current: programmeProgress(req.player) });
 });
 
@@ -4509,6 +4556,7 @@ const m16Ctx = registerM16({
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
   findPlayer, isBlocked, moderateOrRefuse,
+  players, unit, // S5: a Box Clip marks a media row through the repository, inside a unit with the session and the ledger
 });
 
 // M16.2 — ScoutBox Trust Score: a DERIVED evidence-confidence summary over
