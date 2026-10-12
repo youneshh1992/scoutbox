@@ -651,7 +651,8 @@ Nothing is registered by this review. Existing identifiers never change.
 
 ## 10. S6a as implemented (pending independent review; not production-approved)
 
-One local commit on `feat/sqlite-schema` on top of `7fbce74`. Nothing pushed, merged, deployed or
+One local implementation commit (`e020aba`) on `feat/sqlite-schema` on top of `7fbce74`, and one
+local correction commit for two review findings on top of it (§10.6). Nothing pushed, merged, deployed or
 run on real data. S4b stays unimplemented, today's account-deletion behaviour is unchanged apart
 from the pairing-code row now going inside the same deletion unit, the eight audit tables are not
 started, and the guardian sign-up e-mail code stays plain. The Founder's full-birth-date choice
@@ -705,7 +706,10 @@ reported by `/capabilities`).
 2. **The pairing-code issuance response is preserved** (`{ code, expiresAt }`, 201). The privacy
    tests treat that response and the challenge mail as the intended delivery and assert that no
    other response — capabilities, the guardian's, the child's, the club's and the admin views, the
-   pairing response itself — carries either code or its hash; the backup carries no plain code.
+   pairing response itself — carries either code or its hash. *(As committed in `e020aba` this
+   item also said "the backup carries no plain code"; that was proven only by a search for the
+   code as an exact quoted JSON value, and was false: the mail outbox record held the code inside
+   its text. Corrected in §10.6.)*
 3. **Failure assertions are specific to each operation.** A failed confirmation (seam after the
    consumption, real COMMIT fault) is asserted to keep the challenge row and leave the
    organisation's `email_domain_verified` at 0; a failed pairing is asserted to keep the code row
@@ -758,3 +762,88 @@ Not run or not claimed: the browser suites (no client changed); the other 42 bat
 not re-run after the store-contract change (it removes two `module`-guarantee entries; the
 `migration`-guaranteed list that the migration registry and the integrity report read is
 unchanged); no independent review has happened; nothing here is production approval.
+
+### 10.6 Review-and-correction round on `e020aba` (two findings)
+
+A bounded round on two review findings, starting from `e020aba`; one local correction commit.
+Status unchanged: **S6a implemented, pending independent review; not production-approved.**
+Addressing these two findings is not an independent review of the whole implementation. S4b
+remains unimplemented, the audit tables remain pending, and country retention and the
+child-status stamp remain undecided.
+
+**Finding 1 — the challenge code reached the database and every backup.** *Reproduced* on
+`e020aba` with the real server in both mail transports (dev outbox; and a live `SENDGRID_API_KEY`
+with every request to the provider answered by a local stub): the raw code was in the `outbox`
+collection blob of the database file and in the backup's `db.json`. *Cause:* the mailer records
+every mail in `db.outbox` with its full text in both transports; the outbox is saved like any
+collection and spread into every backup (`...db`). S6a hashed the challenge rows but left this
+copy. The `e020aba` test searched the backup for the code only as an exact quoted JSON value
+(`"CODE"`), which never matches a code embedded in a sentence, so it passed. *Impact:* every
+challenge code issued was readable in plain text from the database file and from every backup
+taken afterwards — the exposure the hashed storage was meant to remove, for the 30-minute life
+of the code. *Correction (smallest consistent with hashed storage, delivery preserved):*
+`mailer.send` takes `secrets`; the persisted outbox record keeps the mail with each secret
+replaced by `[code withheld — delivered to the recipient only]` in both transports. The provider
+still receives the full text. On the dev transport, where the outbox *is* the delivery, the full
+text is kept in the process's memory only (bounded to 500, never saved) and `GET /admin/outbox`
+shows it, so the dev flow and `apiE2E` still read the code there. The challenge route passes
+`secrets: [code]`, and its `persist()` after the mail (present in `7fbce74`, dropped in
+`e020aba`) is restored. *Contract change to note:* in production the admin outbox audit copy no
+longer shows the code. In dev the code is no longer visible after a restart. No other mail is
+changed, and no mail history is rewritten.
+
+**Finding 2 — stored challenge attempt counts.** Probed on `e020aba`: a stored-format entry
+*without* `attempts` was accepted as 0; `attempts` 10 and 15 (at or above the limit) were
+accepted; an unexpired row at 10 attempts still checked `ok` and could be consumed with the
+correct code. *Not* defective: null, negative, fractional, nonnumeric and unsafe counts were
+already refused; nine attempts followed by a tenth wrong code already cancelled the challenge;
+legacy entries (no count) were already accepted at 0. *Cause:* the validator treated `attempts` as
+optional in the stored format and had no upper bound; the runtime judged only expiry. *Impact:* a
+backup or a hand-edited snapshot could reset a challenge's guess budget by omitting the count, or
+import an exhausted challenge as redeemable. *Correction:* the stored format requires
+`attempts`, a safe integer from 0 to 9 (an exhausted challenge is cancelled, never imported). The
+legacy format is unchanged (no count, starts at 0). Every runtime read (check, failed-attempt
+note, consumption, including the `DELETE … AND attempts < 10` itself, outstanding counts, the
+rollback's invalidated/dropped counts) treats a row at the limit as dead, and the sweep removes it
+like an expired row. A refused import rolls back whole: unrelated data and `meta.saveSeq` are
+unchanged. Legitimate counts survive backup and restore (2 → 2 in the test). The limit is enforced
+in code, not as a DDL `CHECK`.
+
+**Regression tests** (each was shown to fail on `e020aba` for the intended reason; the scratch
+log is in the handoff):
+
+| Test | Suite | On `e020aba` |
+|---|---|---|
+| backup/restore — the whole serialized `db.json` and every table searched for both codes as substrings; the outbox mail kept, code withheld; count 2 survives; refused backups (no count; count 10) | `testOneTimeCodesServer.mjs` | fails: the raw code is in `db.json` |
+| club e-mail challenge — the database file carries no raw code after the flow | same | fails: the raw code is stored |
+| finding 1 — the challenge mail: delivered with the code (dev outbox view; live provider body through the stub), saved with it withheld, absent from the file in both transports | same | fails: the mail is not saved withheld |
+| finding 2 — an exhausted row planted at the limit is not redeemable through the real route | same | fails: 200 and the club verified |
+| finding 2 — stored attempts: missing, null, negative, fractional, nonnumeric, unsafe, 10, 15 refused; 9 accepted; legacy accepted at 0; a refused snapshot write leaves other data and `saveSeq` unchanged | `testOneTimeCodes.mjs` | fails: a missing count is accepted |
+| finding 2 — runtime: an exhausted row neither checks nor consumes, is not outstanding, is swept; 9 then a tenth wrong code cancels | same | fails: the row checks `ok` |
+| finding 1 — the mailer: withheld in the record in both transports, full text to the provider and to the dev view only | same | not runnable on `e020aba` (new export) |
+
+**What is now proven, and what is not.** Proven by test (substring search of every table of the
+database file and of the complete backup `db.json`, both transports): a challenge code issued by
+this build is in neither. Not claimed: outbox records written *before* this correction (by
+`e020aba` or a pre-S6a build) still hold the codes they were written with, and so do backups
+holding them, and a pre-S6a backup's own files. Those codes have long expired. Scrubbing that
+history would be a retention change, which this round does not make. The guardian sign-up code
+and other mails carrying a secret (organisation invitations) are outside S6a and unchanged.
+
+**Verification of the correction (new evidence from this round).** Synthetic data in temporary
+directories only. Node 22.22.2 (plus the real 22.15.1 and 22.16.0 binaries). Logs are in the
+handoff.
+
+| What | Command | Result |
+|---|---|---|
+| Reproduction of finding 1, real server, dev and live (stubbed) transports | scratch `repro-finding1-backup-plaintext.mjs <server dir>` | `e020aba`: reproduced in 2 of 2 modes (the code in the `outbox` blob and in the backup `db.json`; the exact-quoted search used by `e020aba` finds nothing). Corrected tree: not reproduced |
+| Reproduction of finding 2 (13 probes) | scratch `repro-finding2-attempts.mjs <server dir>` | `e020aba`: 5 defects (missing count accepted; 10 and 15 accepted; an exhausted row checks `ok` and is consumed). Corrected tree: 0 |
+| Failing-first: the new and strengthened tests on `e020aba` | scratch worktree at `e020aba`, test files copied in, `TEST_ONLY=…` | every regression fails for its intended reason (the mailer unit test cannot load there: new export) |
+| `npm test`, 22.22.2, runtime suite probing real 22.15.1 / 22.16.0 | `SCOUTBOX_TEST_NODE_BINS=<22.15.1>:<22.16.0> npm test` | 19 suites pass, exit 0. One-time-code unit 18 (was 15), one-time-code server 10 (was 8), writer atomicity 9, the rest unchanged |
+| `npm test` on the real 22.16.0 binary | `PATH=<22.16.0 bin>:$PATH npm test` | the same 19 suites pass, exit 0 |
+| Mail, persistence and backup consumers (the dev outbox as delivery, backups, store contract) | `apiE2E` against a fresh server; `connectedE2E`, `m12E2E`, `m13E2E`, `m141E2E`, `m14E2E`, `m15E2E`, `m23ContactE2E`, `m23DecisionE2E`, `m23P4AClosureE2E`, `m23TrialE2E`, `m23BootContract`, `preM24SweepE2E` | all 13 green (apiE2E 130 checks; it still reads the challenge code from `/admin/outbox`) |
+
+Not run in this round: the other battery suites, the browser suites (no client changed), and the
+`7fbce74` old-build proof (no rollback or migration behaviour it exercises changed, apart from
+the counts, which the unit suite covers). The results in §10.5 are the previous implementer's
+round and were not re-run here, except as part of `npm test`.

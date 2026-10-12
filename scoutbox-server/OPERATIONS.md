@@ -714,10 +714,28 @@ The club e-mail-domain challenge (`POST /org/verification/email` →
 are unchanged.
 
 - **Storage.** A row holds only `code_hash`: sha256 hex of the code trimmed and
-  upper-cased (the comparison the routes always made). The plain code exists in
-  the mail (challenge) or the guardian's mint response (pairing code) and
-  nowhere else — never in the database, a backup, a log or another response.
-  A six-character code from a 31-character alphabet has ≈ 2^29.7 values, so
+  upper-cased (the comparison the routes always made). The code is delivered
+  in the mail (challenge) or the guardian's mint response (pairing code). What
+  the tests prove (`testOneTimeCodesServer.mjs`, a substring search of every
+  table and of the whole backup `db.json`): a code issued by this build is not
+  in the database file or an admin backup, in either mail transport.
+- **The mail outbox withholds the challenge code.** Every mail is recorded in
+  `db.outbox`, which is saved and copied into every backup. Before the S6a
+  review correction that record held the full text, code included (in both
+  transports). The record now keeps the mail with the code replaced by
+  `[code withheld — delivered to the recipient only]`; delivery is unchanged:
+  with `SENDGRID_API_KEY` set the provider receives the full text; on the dev
+  transport (no key — the outbox *is* the delivery) the full text is kept in
+  the server process's memory only (the last 500 such mails, never saved) and
+  `GET /admin/outbox` shows it there. After a restart the dev outbox shows the
+  withheld text — request a fresh challenge. In production the admin outbox no
+  longer shows the code. **Outbox records written before this correction keep
+  the code they were written with** (the correction does not rewrite mail
+  history); such a code is long expired, but a backup holding those records
+  still contains it in plain text. Other mails that carry a secret (the
+  guardian sign-up code, organisation invitations) are outside S6a and
+  unchanged.
+- **Hash strength.** A six-character code from a 31-character alphabet has ≈ 2^29.7 values, so
   the hash protects against casual disclosure of a file or a backup, **not**
   against an offline search by someone who holds it; the lifetimes below bound
   that exposure. The guardian sign-up e-mail code is **not** in this step: it
@@ -741,7 +759,10 @@ are unchanged.
   second session after a restart).
 - **Wrong codes.** A wrong confirmation is counted on the challenge
   (`attempts`, which survives a restart); the tenth cancels it
-  (`400 CODE_INVALID` says so; the organisation requests a fresh code). Four
+  (`400 CODE_INVALID` says so; the organisation requests a fresh code). A row
+  at the limit is dead to every read — the check, the consumption, the
+  outstanding counts — and is swept like an expired row, so it can never be
+  redeemed even if one is present. Four
   rate-limit policies (`m181/rateLimit.mjs`, per process like every limiter):
   `email_challenge_request` 5 per organisation per hour (each request sends a
   mail), `email_challenge_confirm` 20 wrong codes per organisation per 15
@@ -764,19 +785,25 @@ are unchanged.
   S6a holds (`codeHash`, `attempts`). An entry already expired is not imported
   and is counted (`meta.oneTimeCodesCutover`, logged at boot). Anything else
   the migration cannot represent exactly — both or neither of `code` /
-  `codeHash`, an unknown field, a malformed hash or expiry, negative attempts,
+  `codeHash`, an unknown field, a malformed hash or expiry, a stored-format
+  challenge without `attempts` or with a count that is not an integer from 0
+  to 9 (10 is the limit: an exhausted challenge is cancelled, never imported),
   a missing owner, a second entry for one organisation or child, two pairing
   entries with one code, a blob that is not a JSON array, a live entry whose
   organisation or player does not exist — aborts the step whole with
   `ONE_TIME_CODES_IMPORT_BLOCKED` (entry index and reason, never a code): the
   file is unchanged, the previous build still runs it, the next boot refuses
   the same way. Nothing is coerced or dropped silently. A file without the
-  blobs (a pairing code was rarely saved before S6a) imports nothing.
+  blobs (a pairing code was rarely saved before S6a) imports nothing. A legacy
+  entry carries no count and starts at 0.
 - **Backups and restores.** `POST /admin/backup` exports `emailChallenges` and
   `pairingCodes` in their stored form (hashes, attempts); a restore into a new
   directory imports them through the same migration and the outstanding codes
   keep working there until they expire. A backup taken before S6a (plain
-  codes) restores the same way, hashed on import. A whole snapshot written
+  codes) restores the same way, hashed on import — but that backup's own
+  files (and the `db.json.migrated` the import leaves beside the new database) still
+  hold the plain codes they were taken with; handle them as before. A stored
+  challenge keeps its attempt count through backup and restore. A whole snapshot written
   into a live S6a file by a tool is validated entry by entry in either format
   and refused whole on the first problem.
 - **Reporting.** `GET /capabilities` shows counts, outstanding counts and the

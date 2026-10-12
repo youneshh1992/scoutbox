@@ -3109,14 +3109,18 @@ orgRouter.post('/verification/email', async (req, res) => {
   // S6a: the challenge is a row of email_challenges (stored as a hash; 30-minute
   // lifetime; one live challenge per organisation, the previous one replaced),
   // durable BEFORE the mail is sent. The plain code exists in the issue result
-  // and in the mail only. A mail that fails to send leaves the row (it expires;
-  // a re-request replaces it) — the same outcome as before S6a.
+  // and in the mail only: `secrets` makes the persisted outbox record withhold
+  // it (review of e020aba, finding 1) while the recipient's mail carries it. A
+  // mail that fails to send leaves the row (it expires; a re-request replaces
+  // it) — the same outcome as before S6a.
   const { code } = codes.issueEmailChallenge(req.org.id, email);
   await mailer.send({
     to: email,
     subject: `Verify ${req.org.name} on ScoutBox`,
     text: `Your ScoutBox club verification code is ${code}.\n\nEntering it confirms ${req.org.name} controls this company mailbox — one of the safeguarding requirements before a club can see under-18 players.`,
+    secrets: [code],
   });
+  persist(); // the outbox record (its code withheld) is saved with the next debounced save, as before S6a
   res.status(201).json({ sent: true, note: 'Enter the code from the mailbox to confirm domain control.' });
 });
 
@@ -4356,7 +4360,9 @@ adminRouter.get('/reports', (_req, res) => {
   res.json(db.reports.slice().sort((a, b) => rank(a) - rank(b) || (rank(a) < 2 ? a.ts - b.ts : b.ts - a.ts)));
 });
 
-adminRouter.get('/outbox', (_req, res) => res.json(db.outbox.slice().reverse()));
+// S6a: on the dev transport the outbox is the delivery, so a mail whose one-time code the persisted record withholds is shown
+// with its full text while this process holds it (mailer.devDeliveredText; never saved, never backed up).
+adminRouter.get('/outbox', (_req, res) => res.json(db.outbox.slice().reverse().map((m) => { const full = mailer.devDeliveredText(m.id); return full ? { ...m, text: full } : m; })));
 adminRouter.get('/push-log', (_req, res) => res.json(db.pushLog.slice(-200).reverse()));
 adminRouter.get('/invoices', (_req, res) => res.json(db.invoices.slice().reverse()));
 adminRouter.get('/vouches', (_req, res) => res.json(db.vouches.map(({ code, ...v }) => v).reverse()));

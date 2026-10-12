@@ -1254,7 +1254,9 @@ performance, existing tests, what this plan is not).
 ### S6 — Safeguarding and audit (`blocks`, `reports`, `moderation_log`, `org_notes`, `ledger`, `ops_events`, `source_changes`, `idv_queue`, `email_challenges`, `pairing_codes`)
 
 > **Status (S6a, the one-time codes): implemented, pending independent review** — one local
-> commit on `feat/sqlite-schema` on top of `7fbce74`; not pushed, merged, deployed or run on real
+> implementation commit on `feat/sqlite-schema` on top of `7fbce74`, plus one local correction
+> commit for two review findings (the challenge code's copy in the persisted mail outbox; stored
+> attempt-count validation — readiness review §10.6); not pushed, merged, deployed or run on real
 > data; not production-approved. `email_challenges` and `pairing_codes` are live tables (migration
 > `0008_one_time_codes`, `repositories/oneTimeCodes.mjs`): codes stored as sha256 hashes of the
 > normalised value, expiry judged on every read and swept, attempt counting on the challenge, four

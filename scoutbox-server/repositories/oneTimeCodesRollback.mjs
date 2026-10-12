@@ -32,7 +32,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { copyDatabaseReadOnly } from './database.mjs';
 import { KNOWN_MIGRATIONS as S5_KNOWN_MIGRATIONS } from './playerSubrecordsRollback.mjs';
-import { ONE_TIME_CODES_MIGRATION, ONE_TIME_CODES_CUTOVER_META, ONE_TIME_CODE_TABLES } from './oneTimeCodes.mjs';
+import { ONE_TIME_CODES_MIGRATION, ONE_TIME_CODES_CUTOVER_META, ONE_TIME_CODE_TABLES, EMAIL_CHALLENGE_MAX_ATTEMPTS } from './oneTimeCodes.mjs';
 
 /** The schema steps this tool understands; any other recorded id is a later step it must not touch. */
 export const KNOWN_MIGRATIONS = Object.freeze([...S5_KNOWN_MIGRATIONS, ONE_TIME_CODES_MIGRATION]);
@@ -68,11 +68,12 @@ export function rollbackOneTimeCodesCopy(sourceFile, outDir, { now = Date.now() 
 
     // What the rollback invalidates (counts only, never a hash or a code).
     const invalidated = {
-      emailChallenges: sqlite.prepare('SELECT COUNT(*) AS n FROM email_challenges WHERE expires_at > ?').get(now).n,
+      emailChallenges: sqlite.prepare('SELECT COUNT(*) AS n FROM email_challenges WHERE expires_at > ? AND attempts < ?').get(now, EMAIL_CHALLENGE_MAX_ATTEMPTS).n,
       pairingCodes: sqlite.prepare('SELECT COUNT(*) AS n FROM pairing_codes WHERE expires_at > ?').get(now).n,
     };
+    // Dead rows dropped with the tables: expired, or (a challenge) exhausted at the attempt limit.
     const expired = {
-      emailChallenges: sqlite.prepare('SELECT COUNT(*) AS n FROM email_challenges WHERE expires_at <= ?').get(now).n,
+      emailChallenges: sqlite.prepare('SELECT COUNT(*) AS n FROM email_challenges WHERE expires_at <= ? OR attempts >= ?').get(now, EMAIL_CHALLENGE_MAX_ATTEMPTS).n,
       pairingCodes: sqlite.prepare('SELECT COUNT(*) AS n FROM pairing_codes WHERE expires_at <= ?').get(now).n,
     };
 

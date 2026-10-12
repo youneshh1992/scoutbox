@@ -143,9 +143,15 @@ export function validateEmailChallengeRow(raw) {
   if (typeof raw.email !== 'string' || !raw.email) return { ok: false, reason: 'email must be a non-empty string' };
   const e = expiryOf(raw);
   if (e.reason) return { ok: false, reason: e.reason };
+  // Legacy entries never carried a count (every earlier build wrote none): a legacy challenge starts at 0.
+  // The stored format is this repository's own export, which always writes the count (review of e020aba,
+  // finding 2): it must be present, a safe integer, and below the limit — a challenge that reached the limit
+  // is cancelled (deleted), so an exhausted stored entry is refused, never imported as redeemable.
   let attempts = 0;
-  if (c.format === 'stored' && raw.attempts !== undefined) {
-    if (!Number.isSafeInteger(raw.attempts) || raw.attempts < 0) return { ok: false, reason: 'attempts must be a non-negative integer' };
+  if (c.format === 'stored') {
+    if (!Object.hasOwn(raw, 'attempts')) return { ok: false, reason: 'attempts is required in the stored format (an exported challenge always carries its count)' };
+    if (!Number.isSafeInteger(raw.attempts) || raw.attempts < 0) return { ok: false, reason: `attempts must be an integer from 0 to ${EMAIL_CHALLENGE_MAX_ATTEMPTS - 1} (got ${describe(raw.attempts)}${typeof raw.attempts === 'number' ? ` ${raw.attempts}` : ''})` };
+    if (raw.attempts >= EMAIL_CHALLENGE_MAX_ATTEMPTS) return { ok: false, reason: `attempts ${raw.attempts} reaches the limit of ${EMAIL_CHALLENGE_MAX_ATTEMPTS}: an exhausted challenge is cancelled, never stored or imported` };
     attempts = raw.attempts;
   }
   return { ok: true, format: c.format, row: { orgId: raw.orgId, email: raw.email, codeHash: c.codeHash, expiresAt: e.expiresAt, attempts } };
@@ -305,10 +311,11 @@ export function createOneTimeCodesRepository({ sqlite, now = Date.now, newCode =
     emailUpsert: sqlite.prepare('INSERT INTO email_challenges (org_id, email, code_hash, expires_at, attempts) VALUES (?, ?, ?, ?, 0) ON CONFLICT(org_id) DO UPDATE SET email = excluded.email, code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0'),
     emailFail: sqlite.prepare('UPDATE email_challenges SET attempts = attempts + 1 WHERE org_id = ? RETURNING attempts'),
     emailDelete: sqlite.prepare('DELETE FROM email_challenges WHERE org_id = ?'),
-    emailConsume: sqlite.prepare('DELETE FROM email_challenges WHERE org_id = ? AND code_hash = ? AND expires_at > ?'),
-    emailSweep: sqlite.prepare('DELETE FROM email_challenges WHERE expires_at <= ?'),
+    emailConsume: sqlite.prepare('DELETE FROM email_challenges WHERE org_id = ? AND code_hash = ? AND expires_at > ? AND attempts < ?'),
+    // An exhausted row (attempts at the limit) is as dead as an expired one: the sweep removes both.
+    emailSweep: sqlite.prepare('DELETE FROM email_challenges WHERE expires_at <= ? OR attempts >= ?'),
     emailCount: sqlite.prepare('SELECT COUNT(*) AS n FROM email_challenges'),
-    emailLive: sqlite.prepare('SELECT COUNT(*) AS n FROM email_challenges WHERE expires_at > ?'),
+    emailLive: sqlite.prepare('SELECT COUNT(*) AS n FROM email_challenges WHERE expires_at > ? AND attempts < ?'),
     pairByHash: sqlite.prepare(`${PAIRING_SELECT} WHERE code_hash = ?`),
     pairAll: sqlite.prepare(`${PAIRING_SELECT} ORDER BY player_id`),
     pairDeleteFor: sqlite.prepare('DELETE FROM pairing_codes WHERE player_id = ?'),
@@ -319,6 +326,8 @@ export function createOneTimeCodesRepository({ sqlite, now = Date.now, newCode =
     pairLive: sqlite.prepare('SELECT COUNT(*) AS n FROM pairing_codes WHERE expires_at > ?'),
   };
   const tx = (fn) => (sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  /** Redeemable: present, unexpired, and below the attempt limit (an exhausted row that somehow exists is never redeemed). */
+  const liveChallenge = (r, at) => !!r && r.expires_at > at && r.attempts < EMAIL_CHALLENGE_MAX_ATTEMPTS;
 
   // The hash-free views: rows read from the table on each access (a tool serialising after close keeps the last rows).
   const mkView = (all, project, label) => {
@@ -345,11 +354,11 @@ export function createOneTimeCodesRepository({ sqlite, now = Date.now, newCode =
     },
     /** Delete every expired row of both tables. Returns how many went. */
     sweepExpired(at = now()) {
-      return tx(() => ({ emailChallenges: stmt.emailSweep.run(at).changes, pairingCodes: stmt.pairSweep.run(at).changes }));
+      return tx(() => ({ emailChallenges: stmt.emailSweep.run(at, EMAIL_CHALLENGE_MAX_ATTEMPTS).changes, pairingCodes: stmt.pairSweep.run(at).changes }));
     },
     counts: () => ({ emailChallenges: stmt.emailCount.get().n, pairingCodes: stmt.pairCount.get().n }),
     /** Rows that are still live at `at` (what a rollback would invalidate). */
-    outstanding: (at = now()) => ({ emailChallenges: stmt.emailLive.get(at).n, pairingCodes: stmt.pairLive.get(at).n }),
+    outstanding: (at = now()) => ({ emailChallenges: stmt.emailLive.get(at, EMAIL_CHALLENGE_MAX_ATTEMPTS).n, pairingCodes: stmt.pairLive.get(at).n }),
 
     // ---------------------------------------------------------- e-mail challenges
     /** Issue (or replace) the organisation's challenge. Returns the plain code ONCE, with the expiry. Durable before it returns. */
@@ -358,7 +367,7 @@ export function createOneTimeCodesRepository({ sqlite, now = Date.now, newCode =
       if (typeof email !== 'string' || !email) throw new TypeError('an e-mail challenge needs the mailbox it was sent to');
       const code = newCode();
       const expiresAt = at + EMAIL_CHALLENGE_TTL_MS;
-      tx(() => { stmt.emailSweep.run(at); stmt.emailUpsert.run(orgId, email, hashCode(code), expiresAt); });
+      tx(() => { stmt.emailSweep.run(at, EMAIL_CHALLENGE_MAX_ATTEMPTS); stmt.emailUpsert.run(orgId, email, hashCode(code), expiresAt); });
       return { code, expiresAt };
     },
     /**
@@ -368,7 +377,7 @@ export function createOneTimeCodesRepository({ sqlite, now = Date.now, newCode =
      */
     checkEmailChallenge(orgId, code, { at = now() } = {}) {
       const r = stmt.emailByOrg.get(orgId);
-      if (!r || r.expires_at <= at) return { status: 'none' };
+      if (!liveChallenge(r, at)) return { status: 'none' };
       if (r.code_hash !== hashCode(code)) return { status: 'invalid', attemptsRemaining: Math.max(0, EMAIL_CHALLENGE_MAX_ATTEMPTS - r.attempts - 1) };
       return { status: 'ok', email: r.email };
     },
@@ -381,7 +390,7 @@ export function createOneTimeCodesRepository({ sqlite, now = Date.now, newCode =
     noteFailedEmailAttempt(orgId, { at = now() } = {}) {
       return tx(() => {
         const r = stmt.emailByOrg.get(orgId);
-        if (!r || r.expires_at <= at) return { attemptsRemaining: 0, invalidated: false };
+        if (!liveChallenge(r, at)) return { attemptsRemaining: 0, invalidated: false };
         const attempts = stmt.emailFail.get(orgId).attempts;
         if (attempts >= EMAIL_CHALLENGE_MAX_ATTEMPTS) { stmt.emailDelete.run(orgId); return { attemptsRemaining: 0, invalidated: true }; }
         return { attemptsRemaining: EMAIL_CHALLENGE_MAX_ATTEMPTS - attempts, invalidated: false };
@@ -395,8 +404,8 @@ export function createOneTimeCodesRepository({ sqlite, now = Date.now, newCode =
      */
     consumeEmailChallenge(orgId, code, { at = now() } = {}) {
       const r = stmt.emailByOrg.get(orgId);
-      if (!r || r.expires_at <= at || r.code_hash !== hashCode(code)) return null;
-      const { changes } = stmt.emailConsume.run(orgId, r.code_hash, at);
+      if (!liveChallenge(r, at) || r.code_hash !== hashCode(code)) return null;
+      const { changes } = stmt.emailConsume.run(orgId, r.code_hash, at, EMAIL_CHALLENGE_MAX_ATTEMPTS);
       if (changes !== 1) throw new Error(`email challenges: the challenge of organisation ${orgId} could not be consumed (${changes} row(s) deleted)`);
       return { email: r.email };
     },

@@ -68,12 +68,30 @@ export function makeRateLimiter({ windowMs = 60_000, max = 30, bucket = 'default
 }
 
 // -------------------------------------------------------------------- mailer
+/** What a withheld secret reads as in the persisted outbox record. */
+export const OUTBOX_SECRET_PLACEHOLDER = '[code withheld — delivered to the recipient only]';
+const DEV_DELIVERY_LIMIT = 500;
+
 export function createMailer(db, nextId) {
   const live = !!process.env.SENDGRID_API_KEY;
+  // S6a (review of e020aba, finding 1): `secrets` are one-time codes embedded in
+  // the mail. The outbox record is persisted with every save and copied into
+  // every backup, so the record keeps the mail with each secret replaced by
+  // OUTBOX_SECRET_PLACEHOLDER — in both transports. Delivery is unchanged: the
+  // provider receives the full text; on the dev transport, where the outbox IS
+  // the delivery, the full text is kept in this process's memory only (bounded,
+  // never saved, gone at restart) and served by the admin outbox view.
+  const devDeliveries = new Map();
   return {
     transport: live ? 'sendgrid' : 'dev-outbox',
-    async send({ to, subject, text }) {
-      const record = { id: nextId('mail'), ts: Date.now(), to, subject, text, transport: live ? 'sendgrid' : 'dev-outbox', delivered: !live };
+    async send({ to, subject, text, secrets = [] }) {
+      const withheld = secrets.filter((s) => typeof s === 'string' && s.length > 0);
+      const stored = withheld.reduce((t, s) => t.split(s).join(OUTBOX_SECRET_PLACEHOLDER), String(text));
+      const record = { id: nextId('mail'), ts: Date.now(), to, subject, text: stored, transport: live ? 'sendgrid' : 'dev-outbox', delivered: !live };
+      if (!live && withheld.length) {
+        devDeliveries.set(record.id, String(text));
+        if (devDeliveries.size > DEV_DELIVERY_LIMIT) devDeliveries.delete(devDeliveries.keys().next().value);
+      }
       db.outbox.push(record);
       if (live) {
         try {
@@ -94,6 +112,8 @@ export function createMailer(db, nextId) {
       }
       return record;
     },
+    /** Dev transport only: the full text of a mail whose secrets the persisted record withholds (this process's memory; null otherwise). */
+    devDeliveredText: (id) => (live ? null : devDeliveries.get(id) ?? null),
   };
 }
 

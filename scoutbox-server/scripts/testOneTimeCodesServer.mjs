@@ -28,10 +28,10 @@ const freePort = () => new Promise((resolve, reject) => { const s = net.createSe
 const children = new Set();
 process.on('exit', () => { for (const p of children) { try { p.kill('SIGKILL'); } catch { /* gone */ } } });
 
-async function boot(dir) {
+async function boot(dir, env = {}) {
   const port = await freePort();
   return new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
     children.add(proc); proc.on('exit', () => children.delete(proc));
     let log = '';
     const j = async (method, p, body, token, headers = {}) => {
@@ -178,7 +178,10 @@ await test('club e-mail challenge: the request stores only the hash and mails th
   // Request budget: 2 used above; 3 more pass, the 6th is limited.
   for (let i = 0; i < 3; i++) assert.equal((await request(`r${i}@eastportfc.test`)).status, 201);
   const lim = await request('r9@eastportfc.test'); assert.equal(lim.status, 429); assert.equal(lim.body.error, 'RATE_LIMITED');
-  await S.stop(); rm(dir);
+  await S.stop();
+  // Review of e020aba, finding 1: no raw challenge code anywhere in the database file (the saved outbox mails included).
+  for (const c of [code, code2]) assert.equal(fileText(dir).includes(c), false, 'a raw challenge code is stored in the database');
+  rm(dir);
 });
 
 // ------------------------------------------------------------- deletion
@@ -206,15 +209,22 @@ await test('backup/restore: the admin backup exports the codes in their stored f
   assert.equal((await S.j('POST', '/org/verification/email', { email: 'bk@eastportfc.test' }, pro)).status, 201);
   const mail = (await S.j('GET', '/admin/outbox', undefined, null, A)).body.find((m) => m.to === 'bk@eastportfc.test');
   const challengeCode = /code is ([A-Z0-9]{6})/.exec(mail.text)[1];
+  // Two wrong codes first: a legitimate attempt count must survive the backup and the restore.
+  for (let i = 0; i < 2; i++) assert.equal((await S.j('POST', '/org/verification/email/confirm', { code: challengeCode === 'WWWWWW' ? 'XXXXXX' : 'WWWWWW' }, pro)).status, 400);
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
   await S.stop();
   const jsonText = fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8'); const snapshot = JSON.parse(jsonText);
   assert.deepEqual(snapshot.db.pairingCodes, [{ codeHash: hash(code), playerId: childId, expiresAt: snapshot.db.pairingCodes[0].expiresAt }]);
-  assert.deepEqual(snapshot.db.emailChallenges.map((c) => [c.orgId, c.codeHash, c.attempts]), [['org-eastport', hash(challengeCode), 0]]);
-  assert.equal(jsonText.includes(`"${code}"`) || jsonText.includes(`"${challengeCode}"`), false, 'no plain code in the backup');
+  assert.deepEqual(snapshot.db.emailChallenges.map((c) => [c.orgId, c.codeHash, c.attempts]), [['org-eastport', hash(challengeCode), 2]]);
+  // Review of e020aba, finding 1: the WHOLE serialized snapshot, not one JSON value — a code embedded in a longer string (an outbox mail) counts.
+  assert.equal(jsonText.includes(code), false, 'the raw pairing code appears nowhere in db.json');
+  assert.equal(jsonText.includes(challengeCode), false, 'the raw challenge code appears nowhere in db.json (the outbox mail withholds it)');
+  assert.ok(snapshot.db.outbox.some((m) => m.to === 'bk@eastportfc.test' && /code withheld/.test(m.text)), 'the mail itself is kept, its code withheld');
+  assert.equal(fileText(dir).includes(challengeCode) || fileText(dir).includes(code), false, 'nor anywhere in the live database file');
   // New-format restore.
   const restored = tempDir('s6a-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored);
+  assert.equal(q1(restored, "SELECT attempts FROM email_challenges WHERE org_id = 'org-eastport'").attempts, 2, 'the attempt count survived the restore');
   assert.equal((await S.j('POST', '/auth/player/pair', { code })).status, 200, 'the restored pairing code works');
   assert.equal((await S.j('POST', '/org/verification/email/confirm', { code: challengeCode }, pro)).status, 200, 'the restored challenge works (the staff session travelled too)');
   await S.stop();
@@ -226,6 +236,7 @@ await test('backup/restore: the admin backup exports the codes in their stored f
   fs.writeFileSync(path.join(legacy, 'db.json'), JSON.stringify(leg));
   S = await boot(legacy);
   assert.equal(q1(legacy, 'SELECT code_hash FROM pairing_codes').code_hash, hash(code), 'hashed on import'); assert.equal(fileText(legacy).includes(code), false);
+  assert.equal(q1(legacy, "SELECT attempts FROM email_challenges WHERE org_id = 'org-eastport'").attempts, 0, 'a legacy challenge carries no count and starts at 0'); assert.equal(fileText(legacy).includes(challengeCode), false);
   assert.equal((await S.j('POST', '/auth/player/pair', { code })).status, 200);
   await S.stop();
   // Malformed new-format entry: refused, never reinterpreted or dropped.
@@ -235,7 +246,69 @@ await test('backup/restore: the admin backup exports the codes in their stored f
   assert.notEqual(r1.code, 0); assert.match(r1.log, /ONE_TIME_CODES_IMPORT_BLOCKED.*codeHash must be 64/);
   assert.equal(q1(bad, "SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'pairing_codes'").n, 0, 'no table created');
   const r2 = await bootRefuses(bad); assert.match(r2.log, /ONE_TIME_CODES_IMPORT_BLOCKED/, 'refused again on the next boot');
-  rm(dir, restored, legacy, bad);
+  // Review of e020aba, finding 2: a stored challenge without its count, or exhausted at the limit, is refused the same way.
+  const extra = [];
+  for (const [label, mutate, re] of [
+    ['a stored challenge without attempts', (c) => { delete c.attempts; }, /attempts is required in the stored format/],
+    ['an exhausted stored challenge', (c) => { c.attempts = 10; }, /attempts 10 reaches the limit of 10/],
+  ]) {
+    const d = tempDir('s6a-badattempts'); extra.push(d); fs.cpSync(bk.body.dir, d, { recursive: true });
+    const x = JSON.parse(jsonText); mutate(x.db.emailChallenges[0]); fs.writeFileSync(path.join(d, 'db.json'), JSON.stringify(x));
+    const r = await bootRefuses(d);
+    assert.notEqual(r.code, 0, label); assert.match(r.log, re, label);
+    assert.equal(q1(d, "SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'email_challenges'").n, 0, `${label}: no table created`);
+  }
+  rm(dir, restored, legacy, bad, ...extra);
+});
+
+// ------------------------------------------------------------- review of e020aba, finding 1: the mail's copy of the code
+await test('review of e020aba, finding 1 — the challenge mail: on the dev transport the admin outbox still delivers the full mail while the process runs, but the saved outbox record withholds the code (no raw code in the database file), and after a restart the outbox shows the withheld text; on the live transport (provider stubbed locally) the provider receives the code while the database, the backup and the admin outbox never hold it; the code is redeemable in both; an unrelated mail is kept unchanged', async () => {
+  // Dev transport.
+  const dir = tempDir('s6a-f1-dev'); let S = await boot(dir);
+  const pro = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment');
+  assert.equal((await S.j('POST', '/org/verification/email', { email: 'f1@eastportfc.test' }, pro)).status, 201);
+  const devMail = (await S.j('GET', '/admin/outbox', undefined, null, A)).body.find((m) => m.to === 'f1@eastportfc.test');
+  const code = /code is ([A-Z0-9]{6})/.exec(devMail.text)?.[1]; assert.ok(code, 'the dev outbox delivers the code while the process runs');
+  const saved = () => qAll(dir, "SELECT value FROM collections WHERE name = 'outbox'").map((r) => r.value).join('');
+  for (let i = 0; i < 120 && !saved().includes('f1@eastportfc.test'); i++) await new Promise((r) => setTimeout(r, 50));
+  assert.ok(saved().includes('f1@eastportfc.test') && saved().includes('code withheld'), 'the outbox record was saved (debounced save restored), its code withheld');
+  assert.equal(fileText(dir).includes(code), false, 'no raw code anywhere in the database file');
+  await S.kill();
+  S = await boot(dir);
+  const after = (await S.j('GET', '/admin/outbox', undefined, null, A)).body.find((m) => m.to === 'f1@eastportfc.test');
+  assert.ok(after && !after.text.includes(code) && /code withheld/.test(after.text), 'after a restart the dev outbox shows the withheld text (the full text lived only in that process)');
+  assert.equal((await S.j('POST', '/org/verification/email/confirm', { code }, pro)).status, 200, 'the code still confirms (it was delivered; the row holds its hash)');
+  await S.stop(); rm(dir);
+  // Live transport, provider stubbed locally (no external request).
+  const live = tempDir('s6a-f1-live'); const stubLog = path.join(live, '..', `${path.basename(live)}-sendgrid.log`);
+  S = await boot(live, { SENDGRID_API_KEY: 'synthetic-not-a-real-key', SENDGRID_STUB_LOG: stubLog, NODE_OPTIONS: `--import=${path.join(HERE, 'testSendgridStub.mjs')}` });
+  const pro2 = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment');
+  assert.equal((await S.j('POST', '/org/verification/email', { email: 'live@eastportfc.test' }, pro2)).status, 201);
+  const providerBody = fs.readFileSync(stubLog, 'utf8');
+  const liveCode = /code is ([A-Z0-9]{6})/.exec(providerBody)?.[1]; assert.ok(liveCode, 'the provider received the full mail');
+  const liveMail = (await S.j('GET', '/admin/outbox', undefined, null, A)).body.find((m) => m.to === 'live@eastportfc.test');
+  assert.equal(liveMail.transport, 'sendgrid'); assert.equal(liveMail.delivered, true); assert.equal(liveMail.text.includes(liveCode), false, 'the admin outbox (an audit copy here) withholds the code');
+  const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201);
+  assert.equal(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8').includes(liveCode), false, 'no raw code in the backup');
+  assert.equal(fileText(live).includes(liveCode), false, 'no raw code in the database file');
+  assert.equal((await S.j('POST', '/org/verification/email/confirm', { code: liveCode }, pro2)).status, 200, 'the delivered code confirms');
+  await S.stop(); rm(live); fs.rmSync(stubLog, { force: true });
+});
+
+// ------------------------------------------------------------- review of e020aba, finding 2: an exhausted row is never redeemed
+await test('review of e020aba, finding 2 — an exhausted challenge row (attempts at the limit, planted through a second connection as a hand-edited file could hold it) is refused at the real route even with the correct code (404, the organisation unverified), and the boot sweep removes it', async () => {
+  const dir = tempDir('s6a-f2'); let S = await boot(dir);
+  const pro = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment');
+  assert.equal((await S.j('POST', '/org/verification/email', { email: 'f2@eastportfc.test' }, pro)).status, 201);
+  const code = /code is ([A-Z0-9]{6})/.exec((await S.j('GET', '/admin/outbox', undefined, null, A)).body.find((m) => m.to === 'f2@eastportfc.test').text)[1];
+  { const w = new DatabaseSync(path.join(dir, 'scoutbox.db')); w.exec('PRAGMA busy_timeout = 5000;'); w.prepare("UPDATE email_challenges SET attempts = 10 WHERE org_id = 'org-eastport'").run(); w.close(); }
+  const r = await S.j('POST', '/org/verification/email/confirm', { code }, pro);
+  assert.equal(r.status, 404, `an exhausted challenge is not redeemable: ${r.text}`); assert.equal(r.body.error, 'CHALLENGE_NOT_FOUND');
+  assert.equal(q1(dir, "SELECT email_domain_verified AS v FROM orgs WHERE id = 'org-eastport'").v, 0, 'the organisation stays unverified');
+  await S.stop();
+  S = await boot(dir);
+  assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM email_challenges').n, 0, 'the boot sweep removed the exhausted row');
+  await S.stop(); rm(dir);
 });
 
 // ------------------------------------------------------------- response privacy

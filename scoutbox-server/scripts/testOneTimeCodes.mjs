@@ -17,17 +17,19 @@ import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations, transaction } from '../repositories/database.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import {
-  createOneTimeCodesRepository, hashCode, normaliseCode, validateCodeRows, EMAIL_CHALLENGE_MAX_ATTEMPTS, EMAIL_CHALLENGE_TTL_MS, PAIRING_CODE_TTL_MS,
+  createOneTimeCodesRepository, hashCode, normaliseCode, validateCodeRows, validateEmailChallengeRow, EMAIL_CHALLENGE_MAX_ATTEMPTS, EMAIL_CHALLENGE_TTL_MS, PAIRING_CODE_TTL_MS,
   ONE_TIME_CODES_MIGRATION, ONE_TIME_CODES_CUTOVER_META, CODE_ALPHABET, randomCode,
 } from '../repositories/oneTimeCodes.mjs';
 import { rollbackOneTimeCodesCopy } from '../repositories/oneTimeCodesRollback.mjs';
 import { rollbackPlayerSubrecordsCopy } from '../repositories/playerSubrecordsRollback.mjs';
 import { openStore } from '../store.mjs';
+import { createMailer, OUTBOX_SECRET_PLACEHOLDER } from '../adapters.mjs';
 import { NOW, TTL, tempDir, s3File, migrate, openRaw, applied, blob, meta, dump, filesDigest } from './coreIdentityTestFixtures.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
 function test(name, fn) { if (only && !name.includes(only)) return; fn(); passed++; console.log(`  ✓ ${name}`); }
+async function testAsync(name, fn) { if (only && !name.includes(only)) return; await fn(); passed++; console.log(`  ✓ ${name}`); }
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const dbFile = (dir) => path.join(dir, 'scoutbox.db');
@@ -108,7 +110,7 @@ test('migration 0008 refusals: an entry with both code and codeHash, with neithe
     ['an unknown field', { emailChallenges: [{ ...legacyChallenge(), attempts: 2 }] }, /unknown field\(s\) attempts for the legacy format/],
     ['a malformed hash', { pairingCodes: [{ codeHash: 'ZZ', playerId: 'pl-child1', expiresAt: NOW + MIN }] }, /codeHash must be 64 lower-case hex/],
     ['a non-integer expiry', { pairingCodes: [legacyPairing({ expiresAt: '2026-10-12' })] }, /expiresAt must be a positive integer/],
-    ['negative attempts', { emailChallenges: [{ orgId: 'org-pro', email: 'a@b.test', codeHash: hashCode('A'), expiresAt: NOW + MIN, attempts: -1 }] }, /attempts must be a non-negative integer/],
+    ['negative attempts', { emailChallenges: [{ orgId: 'org-pro', email: 'a@b.test', codeHash: hashCode('A'), expiresAt: NOW + MIN, attempts: -1 }] }, /attempts must be an integer from 0 to 9 \(got a number -1\)/],
     ['a missing owner', { pairingCodes: [legacyPairing({ playerId: '' })] }, /playerId must be a non-empty string/],
     ['a duplicate child', { pairingCodes: [legacyPairing(), legacyPairing({ code: 'OTHER2' })] }, /entry #1: a second entry for playerId pl-child1/],
     ['a duplicate organisation', { emailChallenges: [legacyChallenge(), legacyChallenge({ code: 'NEWONE' })] }, /entry #1: a second entry for orgId org-pro/],
@@ -404,6 +406,98 @@ test('validation is format-exact and never coerces: validateCodeRows reports the
   assert.throws(() => validateCodeRows('emailChallenges', [legacyChallenge({ email: null })]), /email must be a non-empty string/);
   assert.throws(() => validateCodeRows('emailChallenges', [null]), /entry #0: not an object/);
   assert.throws(() => validateCodeRows('pairingCodes', [legacyPairing({ expiresAt: 1.5 })]), /expiresAt must be a positive integer/);
+});
+
+// ============================================================= review of e020aba
+test('review of e020aba, finding 2 — stored attempts: a stored-format challenge must carry an explicit attempt count from 0 to 9 (missing, null, negative, fractional, nonnumeric, unsafe, at or above the limit are refused); a legacy challenge carries none and starts at 0; the migration and a snapshot save refuse such an entry whole (the blob kept, nothing written, the save revision not advanced, the unrelated edit not written); a legitimate count survives the snapshot round trip', () => {
+  const stored = (over = {}) => ({ orgId: 'org-pro', email: 'a@b.test', codeHash: hashCode('GOOD22'), expiresAt: NOW + MIN, attempts: 0, ...over });
+  const missing = stored(); delete missing.attempts;
+  for (const [label, entry, re] of [
+    ['missing', missing, /attempts is required in the stored format/],
+    ['null', stored({ attempts: null }), /attempts must be an integer from 0 to 9 \(got null\)/],
+    ['negative', stored({ attempts: -1 }), /attempts must be an integer from 0 to 9/],
+    ['fractional', stored({ attempts: 1.5 }), /attempts must be an integer from 0 to 9/],
+    ['nonnumeric', stored({ attempts: '3' }), /attempts must be an integer from 0 to 9 \(got a string\)/],
+    ['unsafe', stored({ attempts: 2 ** 53 }), /attempts must be an integer from 0 to 9/],
+    ['at the limit', stored({ attempts: EMAIL_CHALLENGE_MAX_ATTEMPTS }), /attempts 10 reaches the limit of 10/],
+    ['above the limit', stored({ attempts: 15 }), /attempts 15 reaches the limit of 10/],
+  ]) { const v = validateEmailChallengeRow(entry); assert.equal(v.ok, false, label); assert.match(v.reason, re, label); }
+  assert.equal(validateEmailChallengeRow(stored({ attempts: 9 })).row.attempts, 9, 'nine is a valid count');
+  assert.equal(validateEmailChallengeRow(legacyChallenge()).row.attempts, 0, 'a legacy entry starts at 0');
+  assert.match(validateEmailChallengeRow({ ...legacyChallenge(), attempts: 3 }).reason, /unknown field\(s\) attempts for the legacy format/, 'a legacy entry never carries a count');
+  // The migration refuses whole and keeps the blob.
+  for (const [label, entry] of [['missing', missing], ['exhausted', stored({ attempts: 10 })]]) {
+    const dir = tempDir('otc-f2-mig'); s5File(dir, { emailChallenges: [entry] });
+    const s = openRaw(dir); const text = s.prepare("SELECT value FROM collections WHERE name = 'emailChallenges'").get().value;
+    assert.throws(() => migrate(s, { now: NOW }), /ONE_TIME_CODES_IMPORT_BLOCKED.*attempts/, label);
+    assert.equal(tableExists(s, 'email_challenges'), false, `${label}: nothing created`);
+    assert.equal(s.prepare("SELECT value FROM collections WHERE name = 'emailChallenges'").get().value, text, `${label}: the blob is kept as it was`);
+    s.close(); rm(dir);
+  }
+  // A snapshot save refuses whole: nothing written, the revision unchanged, the unrelated edit not written.
+  const dir = tempDir('otc-f2-snap'); s5File(dir);
+  { const s = openRaw(dir); migrate(s, { now: NOW }); createOneTimeCodesRepository({ sqlite: s, now: () => NOW }).issueEmailChallenge('org-pro', 'x@eastport.test'); s.close(); }
+  const tool = openStore(dir);
+  const before = dump(tool.sqlite); const seq = tool.revision();
+  for (const [label, mutate] of [['missing', (c) => { delete c.attempts; }], ['exhausted', (c) => { c.attempts = 10; }], ['nonnumeric', (c) => { c.attempts = 'many'; }]]) {
+    const snap = tool.load(); mutate(snap.db.emailChallenges[0]); snap.db.notes = [{ id: 'unrelated-change' }];
+    assert.throws(() => tool.save(snap), /ONE_TIME_CODES_IMPORT_BLOCKED.*attempts/, label);
+    assert.equal(tool.sqlite.isTransaction, false); assert.equal(dump(tool.sqlite), before, `${label}: nothing changed, the unrelated edit included`); assert.equal(tool.revision(), seq, `${label}: the save revision did not advance`);
+  }
+  const snap = tool.load(); snap.db.emailChallenges[0].attempts = 9; tool.save(snap);
+  assert.equal(tool.load().db.emailChallenges[0].attempts, 9, 'a legitimate count round-trips through the snapshot');
+  tool.sqlite.close(); rm(dir);
+});
+
+test('review of e020aba, finding 2 — runtime: an exhausted row that somehow exists (planted directly) is never redeemed — check answers none, consumption returns nothing and deletes nothing, a wrong code counts nothing, it is not outstanding, the sweep removes it, and the rollback tool counts it as dead, not invalidated; at nine attempts the tenth wrong code cancels a valid challenge', () => {
+  const dir = tempDir('otc-f2-rt'); s5File(dir);
+  const s = openRaw(dir); migrate(s, { now: NOW });
+  const codes = createOneTimeCodesRepository({ sqlite: s, now: () => NOW });
+  s.prepare('INSERT INTO email_challenges (org_id, email, code_hash, expires_at, attempts) VALUES (?, ?, ?, ?, ?)').run('org-pro', 'x@eastport.test', hashCode('GOOD22'), NOW + MIN, EMAIL_CHALLENGE_MAX_ATTEMPTS);
+  assert.deepEqual(codes.checkEmailChallenge('org-pro', 'GOOD22'), { status: 'none' });
+  assert.equal(transaction(s, () => codes.consumeEmailChallenge('org-pro', 'GOOD22')), null);
+  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM email_challenges').get().n, 1, 'consumption deleted nothing');
+  assert.deepEqual(codes.noteFailedEmailAttempt('org-pro'), { attemptsRemaining: 0, invalidated: false });
+  assert.deepEqual(codes.outstanding(), { emailChallenges: 0, pairingCodes: 0 });
+  s.close();
+  const out = tempDir('otc-f2-rb'); const result = rollbackOneTimeCodesCopy(dbFile(dir), out, { now: NOW });
+  assert.deepEqual([result.invalidated.emailChallenges, result.expired.emailChallenges], [0, 1], 'the rollback counts the exhausted row as dead, not as an invalidated code');
+  const s2 = openRaw(dir); const codes2 = createOneTimeCodesRepository({ sqlite: s2, now: () => NOW });
+  assert.deepEqual(codes2.sweepExpired(), { emailChallenges: 1, pairingCodes: 0 }, 'the sweep removes the exhausted row');
+  const { code } = codes2.issueEmailChallenge('org-pro', 'x@eastport.test');
+  s2.prepare("UPDATE email_challenges SET attempts = ? WHERE org_id = 'org-pro'").run(EMAIL_CHALLENGE_MAX_ATTEMPTS - 1);
+  assert.deepEqual(codes2.checkEmailChallenge('org-pro', code).status, 'ok', 'nine attempts: still redeemable');
+  assert.deepEqual(codes2.noteFailedEmailAttempt('org-pro'), { attemptsRemaining: 0, invalidated: true }, 'the tenth wrong code cancels it');
+  assert.deepEqual(codes2.checkEmailChallenge('org-pro', code), { status: 'none' });
+  s2.close(); rm(dir, out);
+});
+
+await testAsync('review of e020aba, finding 1 — the mailer withholds the secrets it is given from the outbox record it keeps (the record is saved and backed up): on the dev transport the full text is kept in this process\'s memory only, for the admin outbox view; on the live transport the provider receives the full text and nothing keeps it; a mail without secrets is recorded unchanged', async () => {
+  const savedKey = process.env.SENDGRID_API_KEY; delete process.env.SENDGRID_API_KEY;
+  let n = 0; const nextIdLocal = (p) => `${p}-${++n}`;
+  const db = { outbox: [] };
+  const dev = createMailer(db, nextIdLocal);
+  const text = 'Your ScoutBox club verification code is QX7K2M.\n\nEntering it confirms Eastport FC controls this mailbox.';
+  const rec = await dev.send({ to: 'a@eastport.test', subject: 'Verify', text, secrets: ['QX7K2M'] });
+  assert.equal(rec.text.includes('QX7K2M'), false); assert.ok(rec.text.includes(OUTBOX_SECRET_PLACEHOLDER)); assert.ok(rec.text.includes('Eastport FC controls this mailbox'), 'the rest of the mail is kept');
+  assert.equal(dev.devDeliveredText(rec.id), text, 'the dev delivery keeps the full text in memory');
+  const plain = await dev.send({ to: 'b@eastport.test', subject: 'Hello', text: 'An unrelated mail.' });
+  assert.equal(plain.text, 'An unrelated mail.'); assert.equal(dev.devDeliveredText(plain.id), null, 'nothing is withheld, nothing held');
+  assert.equal(JSON.stringify(db).includes('QX7K2M'), false, 'the serialized outbox holds no secret');
+  // Live transport: fetch stubbed, no request leaves the process.
+  process.env.SENDGRID_API_KEY = 'synthetic-not-a-real-key';
+  const realFetch = globalThis.fetch; const sent = [];
+  globalThis.fetch = async (url, init) => { sent.push({ url: String(url), body: init.body }); return new Response('', { status: 202 }); };
+  try {
+    const liveDb = { outbox: [] }; const live = createMailer(liveDb, nextIdLocal);
+    const r = await live.send({ to: 'c@eastport.test', subject: 'Verify', text, secrets: ['QX7K2M'] });
+    assert.equal(sent.length, 1); assert.match(sent[0].url, /^https:\/\/api\.sendgrid\.com\//); assert.ok(sent[0].body.includes('QX7K2M'), 'the provider receives the full text');
+    assert.equal(r.delivered, true); assert.equal(r.text.includes('QX7K2M'), false); assert.equal(live.devDeliveredText(r.id), null);
+    assert.equal(JSON.stringify(liveDb).includes('QX7K2M'), false);
+  } finally {
+    globalThis.fetch = realFetch;
+    if (savedKey === undefined) delete process.env.SENDGRID_API_KEY; else process.env.SENDGRID_API_KEY = savedKey;
+  }
 });
 
 console.log(`\n${passed} one-time-code checks passed`);

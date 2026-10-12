@@ -84,7 +84,11 @@ and design changes the Founder explicitly requests.
   read-only views; issuance is durable before the code is sent; the
   confirmation and the pairing exchange each consume the code in ONE unit of
   work with the organisation's verification / the session; wrong codes are
-  counted (ten cancel a challenge) and rate-limited; a backup exports the
+  counted (ten cancel a challenge; a row at the limit is never redeemed, and
+  a stored-format entry must carry a count from 0 to 9) and rate-limited; the
+  challenge mail is sent with `secrets: [code]` so the persisted outbox record
+  withholds the code (dev transport: full text in process memory only, for
+  `/admin/outbox`); a backup exports the
   hashed rows and a legacy plain-code backup is hashed on import; the
   copy-only rollback is `scripts/oneTimeCodesRollback.mjs` (outstanding codes
   invalidated and counted) and the S5 tool refuses a file carrying 0008. The
