@@ -12,10 +12,12 @@ migration identifier is assigned, and nothing was run against real data. Paths a
 are those of `2d7ddeb`. The plan is [`sqlite-migration-plan.md`](./sqlite-migration-plan.md)
 §S7, whose assumptions this review corrects (§2, §6).
 
-**Status: S7a corrected, pending independent acceptance** (two local commits on
-`feat/sqlite-schema` on top of `812e13b`: the implementation `ba6956d` and the correction of the
-four findings its independent review raised; what was built, the four compatibility corrections it
-honours and the one deliberate reading it records are in §8.3, the corrections in §8.4).
+**Status: S7a corrected, pending independent acceptance** (three local commits on
+`feat/sqlite-schema` on top of `812e13b`: the implementation `ba6956d`, the correction `7655bae` of
+the four findings its first independent review raised, and the correction of the two participant-
+contract defects and the replay-coverage gap the second review raised; what was built, the four
+compatibility corrections it honours and the one deliberate reading it records are in §8.3, the
+corrections in §8.4 and §8.5).
 **S7b–S7d not started.** §§0–8.2
 are the review as written at `2d7ddeb`, kept as the record of the reasoning; where the
 implementation corrected a proposal (§3.2 coupled writes, §8.2 "transaction of its own"), the
@@ -936,7 +938,9 @@ joins a unit, which the correction below requires.
    push; quiet hours, audience isolation (`shouldDeliver`) and the public payload are unchanged.
    A development-only save seam, `internal:save.sqlite_commit`, fails the real COMMIT of the next
    ordinary save after every data-layer hook flushed, so the route-level regression proves it on
-   the real server (a message posted, the save failing at COMMIT, no row / push / frame / replay,
+   the real server (a message posted, the save failing at COMMIT, no row / push / frame, no
+   replay-log entry on a reconnect with a real `Last-Event-ID` cursor — the first version of this
+   test reconnected without a cursor and so never entered the replay branch; corrected in §8.5 —
    the feed showing the pending row, the next `persistNow()` committing it with exactly one push
    and one frame, a repeat coalescing with a second frame and no second push). This is a
    durability boundary, not exactly-once delivery: a crash between COMMIT and the effect loses the
@@ -968,6 +972,46 @@ joins a unit, which the correction below requires.
    data, credentials, environment files or `node_modules` are tracked), extracts the final ZIP to
    a fresh directory with no link back into the checkout, installs dependencies there and runs
    both mandatory gates from the copy, recording their exit codes in the package.
+
+### 8.5 The second correction round — review of `7655bae` (two participant-contract defects, one coverage gap), **corrected, pending independent acceptance**
+
+The second independent review confirmed the four §8.4 corrections (its unchanged first script:
+exit 0, three CORRECT; the Player gate ran from the package) and supplied a second script,
+`review-7655bae-reproductions.mjs`, run unchanged: exit 1 with three REPRODUCED assertions on
+`7655bae`, exit 0 with three CORRECT after this round; the first script stays exit 0. Failing-first
+regressions (two tests in `testNotifications.mjs`) were recorded failing on unchanged `7655bae`
+before any source change; no existing assertion was weakened.
+
+1. **The default immediate participant ran effects before COMMIT (MEDIUM).** With the factory
+   default `runEffect` (a tool's runner), `store.unit` given and the save hook registered, an
+   effect registered inside a unit of work ran at once — before the unit's COMMIT, and once even
+   when the unit then rolled back. Now an effect registered while a unit is open is queued, in
+   either mode and whatever runner the instance was given, and runs only when the registered save
+   hook reports the unit's COMMIT; a rolled-back unit discards it (`restoreState`). A standalone
+   immediate write still runs its effect at once after its own commit; staged effects still wait
+   for the carrying save; a caller-owned raw transaction is still refused. Tested with the real
+   default constructor: nothing while the unit is active, nothing after a thrown abort, a caught
+   operation failure or a real COMMIT failure, exactly once after the commit and never on a later
+   save, a throwing and a rejecting effect reported through `warn` with the data still committed.
+2. **A caught precondition refusal bypassed the unit (MEDIUM).** The save-hook registration guard
+   ran before `unit.join`, so a caller that caught the refusal could still commit the unit's other
+   edits around the notification that never happened. While a unit is open, every precondition —
+   the hook taken for registration, the argument shape — is now checked inside `unit.join`, for
+   writes and for effects, in both modes: a caught refusal poisons the unit (the store's
+   "cannot commit: a nested (joined) unit failed" at its end), the unrelated edit is restored,
+   SQLite, the revision and the mirror are unchanged, no transaction stays open; uncaught it fails
+   the same way; after `store.setSaveHook(repo.saveHook())` the same unit commits the coupled
+   edit and the writes in one revision. The standalone staged refusal and the immediate own
+   transaction outside a unit are unchanged. Taking the hook is still the registration the
+   repository can see; it does not prove the store registered it.
+3. **The replay assertion never entered the replay branch (coverage).** The route-level test's
+   "replay" reconnect sent no `Last-Event-ID`, so the server replayed nothing and the zero
+   notify frames proved nothing. The helper now takes a real cursor, records each frame's event
+   id, and waits for the server's `caught_up`; the test anchors on a committed notify event
+   first (positive control: a reconnect from the id before it replays exactly that event), then
+   proves that a reconnect from that id replays no entry for the notification whose save failed,
+   then that the same reconnect replays exactly the committed notification after the retry. No
+   replay runtime defect was found; this is a coverage and reporting correction.
 
 ---
 

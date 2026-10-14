@@ -331,27 +331,51 @@ await test('backup/restore: the admin backup exports the notifications and prefe
 });
 
 // ------------------------------------------------------------- review of ba6956d, finding 1: effects after the durable save, through the real server
-/** An SSE stream for one session: the frames it received, and a close. */
-async function openSse(S, token) {
+/**
+ * An SSE stream for one session: the frames it received (each with the `id:` the
+ * server stamped on it, when it stamped one), and a close. With `lastEventId` the
+ * connection carries a real `Last-Event-ID` cursor, so the server's catch-up
+ * branch runs (server.mjs GET /events: replay for lastId > 0, then `caught_up`);
+ * the helper then WAITS for the `caught_up` (or `resync`) frame before it returns,
+ * so what the caller reads is the replay's actual result. Without a cursor the
+ * server replays nothing — a fresh connection proves nothing about the replay log.
+ */
+async function openSse(S, token, { lastEventId = null } = {}) {
   const t = await S.j('POST', '/events/ticket', {}, token); assert.equal(t.status, 200, t.text);
   const ctl = new AbortController();
   const frames = [];
-  const res = await fetch(`http://127.0.0.1:${S.port}/events?ticket=${t.body.ticket}`, { signal: ctl.signal });
+  const headers = lastEventId !== null ? { 'Last-Event-ID': String(lastEventId) } : {};
+  const res = await fetch(`http://127.0.0.1:${S.port}/events?ticket=${t.body.ticket}`, { signal: ctl.signal, headers });
   const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '';
-  (async () => { try { for (;;) { const { value, done } = await reader.read(); if (done) break; buf += dec.decode(value, { stream: true }); let i; while ((i = buf.indexOf('\n\n')) >= 0) { const chunk = buf.slice(0, i); buf = buf.slice(i + 2); const line = chunk.split('\n').find((l) => l.startsWith('data: ')); if (line) { try { frames.push(JSON.parse(line.slice(6))); } catch { /* ping */ } } } } } catch { /* closed */ } })();
-  for (let i = 0; i < 100 && !frames.some((f) => f.event === 'connected'); i++) await new Promise((r) => setTimeout(r, 20));
-  return { frames, notifyFrames: () => frames.filter((f) => f.event === 'notify'), close: () => ctl.abort() };
+  (async () => { try { for (;;) { const { value, done } = await reader.read(); if (done) break; buf += dec.decode(value, { stream: true }); let i; while ((i = buf.indexOf('\n\n')) >= 0) { const chunk = buf.slice(0, i); buf = buf.slice(i + 2); const lines = chunk.split('\n'); const data = lines.find((l) => l.startsWith('data: ')); const idLine = lines.find((l) => l.startsWith('id: ')); if (data) { try { frames.push({ ...JSON.parse(data.slice(6)), sseId: idLine ? Number(idLine.slice(4)) : null }); } catch { /* ping */ } } } } } catch { /* closed */ } })();
+  const settled = (f) => f.event === (lastEventId !== null ? 'caught_up' : 'connected') || f.event === 'resync';
+  for (let i = 0; i < 150 && !frames.some(settled); i++) await new Promise((r) => setTimeout(r, 20));
+  assert.ok(frames.some(settled), lastEventId !== null ? `the catch-up for Last-Event-ID ${lastEventId} must end with caught_up (or resync); got ${JSON.stringify(frames.map((f) => f.event))}` : 'the stream must open');
+  const notifyFrames = () => frames.filter((f) => f.event === 'notify');
+  return { frames, notifyFrames, lastId: () => Math.max(0, ...frames.map((f) => f.sseId ?? 0)), caughtUp: () => frames.some((f) => f.event === 'caught_up'), resync: () => frames.some((f) => f.event === 'resync'), close: () => ctl.abort() };
 }
 
-await test('review of ba6956d, finding 1 — through the real server: a message whose snapshot save fails at the REAL COMMIT (development seam internal:save.sqlite_commit) delivers NO push (admin push log), NO notify SSE frame and NO replay entry, and leaves no notification row; the next successful save (a second write) commits the pending notification and delivers its push and its SSE frame exactly once; a coalescing repeat delivers one SSE frame and no second push', async () => {
+await test('review of ba6956d, finding 1 — through the real server: a message whose snapshot save fails at the REAL COMMIT (development seam internal:save.sqlite_commit) delivers NO push (admin push log), NO notify SSE frame and NO replay-log entry (a reconnect with a real Last-Event-ID cursor catches up to nothing new, while the same cursor mechanism does replay an earlier committed notify event — the positive control), and leaves no notification row; the next successful save (a second write) commits the pending notification and delivers its push and its SSE frame exactly once, and a cursor reconnect now replays exactly that event; a coalescing repeat delivers one SSE frame and no second push', async () => {
   const dir = tempDir('s7a-rv-effects'); const S = await boot(dir);
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const kola = await playerLogin(S, 'pl-adeyemi');
   const { channelId } = await openThread(S, maria, kola);
   const sse = await openSse(S, kola);
   const pushes = async () => (await S.j('GET', '/admin/push-log', undefined, null, A)).body.filter((p) => p.audience?.kind === 'player' && p.audience.id === 'pl-adeyemi' && /sent a message/.test(p.body ?? ''));
   const rows = () => q1(dir, 'SELECT COUNT(*) AS n FROM notifications WHERE audience_id = ? AND type = ?', 'pl-adeyemi', 'message').n;
+  const settle = async (ok) => { for (let i = 0; i < 150 && !(await ok()); i++) await new Promise((r) => setTimeout(r, 20)); };
   assert.equal((await pushes()).length, 0); assert.equal(sse.notifyFrames().length, 0);
-  // The save that carries the message and its notification fails at COMMIT.
+  // 1. A committed notification first (no fault): the positive control for the replay log.
+  //    Its notify frame carries the event id the catch-up checks are anchored on.
+  assert.equal((await S.j('POST', `/org/channels/${channelId}/messages`, { text: 'Zero — a committed message before the fault.' }, maria)).status, 201);
+  await settle(async () => sse.notifyFrames().length === 1 && rows() === 1 && (await pushes()).length === 1);
+  assert.equal(rows(), 1); assert.equal((await pushes()).length, 1); assert.equal(sse.notifyFrames().length, 1);
+  const n0 = sse.notifyFrames()[0].sseId; assert.ok(Number.isInteger(n0) && n0 >= 2, `the committed notify frame carries a replayable event id (got ${n0})`);
+  const control = await openSse(S, kola, { lastEventId: n0 - 1 });
+  assert.ok(control.caughtUp(), 'the cursor branch ran'); assert.deepEqual(control.notifyFrames().map((f) => f.sseId), [n0], 'positive control: a committed notify event the client missed IS replayed from the log'); control.close();
+  // The recipient reads the feed, so the next identical sentence is a NEW row (and a new push), not a coalesce.
+  assert.equal((await S.j('POST', '/player/notifications/read', {}, kola)).status, 200);
+  await settle(async () => q1(dir, 'SELECT read AS r FROM notifications WHERE audience_id = ? AND type = ?', 'pl-adeyemi', 'message')?.r === 1);
+  // 2. The save that carries the next message and its notification fails at COMMIT.
   assert.equal((await S.j('POST', '/__faults', { rules: 'internal:save.sqlite_commit:1' })).status, 200);
   const logBefore = S.log().length;
   const first = await S.j('POST', `/org/channels/${channelId}/messages`, { text: 'First, under a failing save.' }, maria);
@@ -359,22 +383,25 @@ await test('review of ba6956d, finding 1 — through the real server: a message 
   for (let i = 0; i < 100 && !/snapshot save failed/.test(S.log().slice(logBefore)); i++) await new Promise((r) => setTimeout(r, 20));
   assert.match(S.log().slice(logBefore), /snapshot save failed: FOREIGN KEY constraint failed/, 'the save really failed at COMMIT');
   await new Promise((r) => setTimeout(r, 200));
-  assert.equal(rows(), 0, 'no notification row (the save rolled back)');
-  assert.equal((await pushes()).length, 0, 'no push before the durable save'); assert.equal(sse.notifyFrames().length, 0, 'no SSE notify frame before the durable save');
-  const replay = await openSse(S, kola); // a fresh stream with a catch-up: nothing to replay
-  assert.equal(replay.notifyFrames().length, 0, 'no replay entry either'); replay.close();
-  const feed = await feedOf(S, '/player/notifications', kola); assert.equal(feed.filter((n) => n.type === 'message').length, 1, 'the feed (memory) shows the pending notification, as every unsaved blob edit shows');
-  // A second write saves successfully: the pending notification commits and its effects run once.
+  assert.equal(rows(), 1, 'no second notification row (the save rolled back)');
+  assert.equal((await pushes()).length, 1, 'no push before the durable save'); assert.equal(sse.notifyFrames().length, 1, 'no SSE notify frame before the durable save');
+  const replay = await openSse(S, kola, { lastEventId: n0 }); // a real catch-up from the committed frame: the replay log holds no notify entry after it
+  assert.ok(replay.caughtUp(), 'the cursor branch ran (caught_up received)'); assert.equal(replay.notifyFrames().length, 0, 'no replay-log entry for the uncommitted notification'); replay.close();
+  const feed = await feedOf(S, '/player/notifications', kola); assert.equal(feed.filter((n) => n.type === 'message').length, 2, 'the feed (memory) shows the pending notification, as every unsaved blob edit shows');
+  // 3. A second write saves successfully: the pending notification commits and its effects run once.
   assert.equal((await S.j('POST', `/org/channels/${channelId}/read`, {}, maria)).status, 200);
-  for (let i = 0; i < 100 && rows() === 0; i++) await new Promise((r) => setTimeout(r, 20));
-  assert.equal(rows(), 1, 'the retry committed the notification with the read receipt');
-  for (let i = 0; i < 100 && sse.notifyFrames().length === 0; i++) await new Promise((r) => setTimeout(r, 20));
-  assert.equal((await pushes()).length, 1, 'exactly one push, after the commit'); assert.equal(sse.notifyFrames().length, 1, 'exactly one SSE notify frame, after the commit');
-  // A coalescing repeat: one more SSE frame, no second push.
+  await settle(async () => rows() === 2);
+  assert.equal(rows(), 2, 'the retry committed the notification with the read receipt');
+  await settle(async () => sse.notifyFrames().length === 2);
+  assert.equal((await pushes()).length, 2, 'exactly one more push, after the commit'); assert.equal(sse.notifyFrames().length, 2, 'exactly one more SSE notify frame, after the commit');
+  const n1 = sse.notifyFrames()[1].sseId; assert.ok(n1 > n0);
+  const after = await openSse(S, kola, { lastEventId: n0 });
+  assert.ok(after.caughtUp()); assert.deepEqual(after.notifyFrames().map((f) => f.sseId), [n1], 'the committed notification now replays from the log — exactly once, with the id the live stream saw'); after.close();
+  // 4. A coalescing repeat: one more SSE frame, no second push.
   assert.equal((await S.j('POST', `/org/channels/${channelId}/messages`, { text: 'Second — the same sentence for the recipient.' }, maria)).status, 201);
-  for (let i = 0; i < 100 && sse.notifyFrames().length < 2; i++) await new Promise((r) => setTimeout(r, 20));
-  assert.equal(sse.notifyFrames().length, 2); assert.equal((await pushes()).length, 1, 'no second push for a coalesced notification'); assert.equal(rows(), 1);
-  assert.equal(q1(dir, 'SELECT repeat_count AS n FROM notifications WHERE audience_id = ? AND type = ?', 'pl-adeyemi', 'message').n, 2);
+  await settle(async () => sse.notifyFrames().length >= 3);
+  assert.equal(sse.notifyFrames().length, 3); assert.equal((await pushes()).length, 2, 'no second push for a coalesced notification'); assert.equal(rows(), 2);
+  assert.equal(q1(dir, 'SELECT repeat_count AS n FROM notifications WHERE audience_id = ? AND type = ? AND read = 0', 'pl-adeyemi', 'message').n, 2);
   sse.close();
   await S.stop(); rm(dir);
 });

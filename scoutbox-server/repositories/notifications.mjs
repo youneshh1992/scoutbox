@@ -76,12 +76,21 @@
  * database rollback, and never a replay of the batch). An effect never
  * schedules a save of its own. This is a durability boundary, not an
  * exactly-once guarantee: a crash between COMMIT and the effect loses the
- * push/event, exactly as it did before S7a. In immediate mode a write is
- * durable when the operation returns (own transaction) or when the enclosing
- * unit commits, so `afterDurable` hands the effect to `runEffect` at once —
- * the store defers it to the unit's commit; a tool without a store runs it
- * now — and refuses inside a caller-owned raw transaction (the repository
- * could not see its outcome).
+ * push/event, exactly as it did before S7a. In immediate mode a standalone
+ * write is durable when the operation returns (its own transaction), so
+ * `afterDurable` hands the effect to `runEffect` at once; inside an open unit
+ * of work — in EITHER mode, whatever `runEffect` is (review of 7655bae,
+ * finding 1) — the effect is queued through the joined boundary and run only
+ * when the registered save hook reports the unit's COMMIT, discarded with its
+ * rollback; a caller-owned raw transaction is refused (the repository could
+ * not see its outcome).
+ *
+ * PARTICIPANT PRECONDITIONS ARE PARTICIPANT FAILURES (review of 7655bae,
+ * finding 2). While a unit of work is open, every precondition this
+ * repository checks before a write or an effect — the save hook taken for
+ * registration, the argument shape — is checked INSIDE `unit.join`, so a
+ * refusal poisons the unit even when the caller catches it: the unit's other
+ * edits can never commit around a notification that was refused.
  *
  * OWNED TRANSACTION FAILURE RESTORES MEMORY (finding 2). An immediate-mode
  * operation that runs in a transaction of its own takes a snapshot of the
@@ -466,19 +475,28 @@ export function createNotificationsRepository({ sqlite, now = Date.now, nextId =
   /**
    * The one boundary of every mutation. `fn(exec)` validates, then mutates the
    * mirror and hands each SQL statement to `exec` — run at once in immediate
-   * mode, queued in staged mode. Joined inside an open unit in both modes
-   * (refused until the save hook was taken). An owned immediate transaction
-   * that fails — a statement, or COMMIT itself — restores the mirror in place.
+   * mode, queued in staged mode. Joined inside an open unit in both modes,
+   * its preconditions included (refused — as a participant failure — until
+   * the save hook was taken). An owned immediate transaction that fails — a
+   * statement, or COMMIT itself — restores the mirror in place.
    */
   const operation = (fn) => {
+    if (inUnit()) {
+      // Every participant precondition runs INSIDE the joined failure boundary
+      // (review of 7655bae, finding 2): a refusal here is a participant failure
+      // the store records, so a caller that catches it still cannot commit the
+      // unit's other edits around the write that never happened.
+      return unit.join(() => {
+        if (!hookTaken) throw hookRefusal(staged ? 'a staged write inside a unit of work' : 'joining a unit of work');
+        return staged ? fn((op) => { pending.push(op); }) : fn((op) => op());
+      });
+    }
     if (staged) {
       if (!hookTaken) throw hookRefusal('a staged write');
-      if (!inUnit() && sqlite.isTransaction) throw new Error('notifications: the staged repository cannot take part in a transaction it did not open (the server\'s transactions are units of work or snapshot saves)');
-      const body = () => fn((op) => { pending.push(op); });
-      return inUnit() ? unit.join(body) : body();
+      if (sqlite.isTransaction) throw new Error('notifications: the staged repository cannot take part in a transaction it did not open (the server\'s transactions are units of work or snapshot saves)');
+      return fn((op) => { pending.push(op); });
     }
     const body = () => fn((op) => op());
-    if (inUnit()) { if (!hookTaken) throw hookRefusal('joining a unit of work'); return unit.join(body); }
     if (sqlite.isTransaction) return body(); // caller-owned: see reload()
     const state = repo.snapshotState();
     try { return transaction(sqlite, body); } catch (err) { repo.restoreState(state); throw err; }
@@ -516,25 +534,35 @@ export function createNotificationsRepository({ sqlite, now = Date.now, nextId =
     counts: () => ({ notifications: rows.length, notificationPrefs: prefs.length }),
     /** Staged writes not yet in a committed save (0 in immediate mode). */
     pending: () => pending.length,
-    /** Effects waiting for the save that carries their writes (0 in immediate mode). */
+    /** Effects waiting for the save or unit commit that carries their writes (0 outside a unit in immediate mode). */
     pendingEffects: () => effects.length,
     /**
      * Register an external effect of the writes made so far (a push, a live
-     * event): see EFFECTS WAIT FOR THE DURABLE WRITE in the header. Staged
-     * mode queues it until the store reports the carrying save's commit; a
-     * failed save keeps it; a rolled-back unit discards what the unit
-     * registered. Immediate mode hands it to `runEffect` now (a unit defers it
-     * through the store); refused inside a caller-owned raw transaction.
+     * event): see EFFECTS WAIT FOR THE DURABLE WRITE in the header. Inside an
+     * open unit of work (either mode) it is queued, through the joined
+     * boundary, until the store reports the unit's COMMIT — never run while
+     * the unit is active, discarded with its rollback. Staged mode outside a
+     * unit queues it until the store reports the carrying save's commit; a
+     * failed save keeps it. Immediate mode outside a unit hands it to
+     * `runEffect` now (the owned write already committed); refused inside a
+     * caller-owned raw transaction.
      */
     afterDurable(fn) {
+      if (inUnit()) {
+        return unit.join(() => {
+          if (typeof fn !== 'function') throw new TypeError('afterDurable needs a function');
+          if (!hookTaken) throw hookRefusal('registering an effect inside a unit of work');
+          effects.push({ fn, at: pending.length });
+        });
+      }
       if (typeof fn !== 'function') throw new TypeError('afterDurable needs a function');
       if (staged) {
         if (!hookTaken) throw hookRefusal('registering an effect');
-        if (!inUnit() && sqlite.isTransaction) throw new Error('notifications: an effect cannot be bound to a transaction the repository did not open');
+        if (sqlite.isTransaction) throw new Error('notifications: an effect cannot be bound to a transaction the repository did not open');
         effects.push({ fn, at: pending.length });
         return;
       }
-      if (!inUnit() && sqlite.isTransaction) throw new Error('notifications: an effect inside a caller-owned transaction has no commit to wait for that the repository could see; register it after the caller\'s COMMIT');
+      if (sqlite.isTransaction) throw new Error('notifications: an effect inside a caller-owned transaction has no commit to wait for that the repository could see; register it after the caller\'s COMMIT');
       runEffect(fn);
     },
 

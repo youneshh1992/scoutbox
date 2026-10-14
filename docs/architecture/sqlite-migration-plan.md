@@ -1317,7 +1317,7 @@ performance, existing tests, what this plan is not).
 
 ### S7 — Messaging, notifications, delivery and push
 
-> **Status (S7a): corrected, pending independent acceptance** (14 October 2026; two local
+> **Status (S7a): corrected, pending independent acceptance** (14 October 2026; three local
 > commits on `feat/sqlite-schema` on top of `812e13b`): `notifications`, `notification_prefs` and
 > `notification_pref_categories` are live tables since migration **`0009_notifications`**, with
 > the feed's insertion order as a durable key (`seq`), the pre-S7a coalescing scan kept verbatim,
@@ -1326,7 +1326,10 @@ performance, existing tests, what this plan is not).
 > carries the blobs they announce — their push and live event delivered only once that save
 > committed — and a copy-only rollback proven on the actual `812e13b` build — review §8.3; the
 > first independent review's four findings (effects before commit, owned-transaction memory,
-> own `"__proto__"` keys and audience extras, the incomplete package) are corrected in §8.4. The
+> own `"__proto__"` keys and audience extras, the incomplete package) are corrected in §8.4, the
+> second review's two participant-contract defects (an effect registered inside a unit by the
+> default immediate participant, a caught precondition refusal bypassing the unit) and its
+> replay-coverage gap in §8.5. The
 > acceptance to come is a bounded code-review conclusion on the packaged source, not production
 > or deployment approval.
 > **Status (S7b–S7d): not started.** The evidence-based review is

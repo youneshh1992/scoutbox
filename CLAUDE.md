@@ -117,9 +117,13 @@ and design changes the Founder explicitly requests.
   (`notifications.afterDurable`) and run only once the save that carried the
   row COMMITTED — never before, never after a failed save (they wait for the
   retry), never for a rolled-back unit; `notify()` requests the save, no
-  effect ever does. In immediate mode (tools, tests) an owned transaction that
-  fails restores the repository's memory in place, and an instance given the
-  participant API joins a unit only once its save hook is registered. Unknown
+  effect ever does. Inside an open unit of work an effect is queued in EITHER
+  mode, whatever runner the instance was given, and runs only on the unit's
+  commit report (discarded with its rollback). In immediate mode (tools,
+  tests) an owned transaction that fails restores the repository's memory in
+  place, and an instance given the participant API joins a unit only once its
+  save hook is registered — that precondition, like every other, is checked
+  inside `unit.join`, so a caught refusal still poisons the unit. Unknown
   fields are copied as own properties (an own `"__proto__"` key is data, never
   assigned), and an audience, acknowledgment contract or category map with an
   unknown field refuses the whole migration or snapshot write;
