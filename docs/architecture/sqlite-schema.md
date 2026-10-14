@@ -139,8 +139,8 @@ them.
 | `followUps` | persistent | 02 | `follow_ups` (UNIQUE signing + milestone) | S8 |
 | `outcomeReports` | persistent | 02 | `outcome_reports`, `outcome_report_confirmations` (UNIQUE follow_up_id) | S8 |
 | `channels` | persistent | 03 | `channels`; `messages[]` → `messages`, `attachment` → `message_attachments`; `readBy` → columns; `orgUserIdForNotify` dead | S7 |
-| `notifications` | persistent | 03 | `notifications` (`actionRequired` → flag + columns) | S7 |
-| `notificationPrefs` | persistent | 03 | `notification_prefs`, `notification_pref_categories` | S7 |
+| `notifications` | persistent | 03 | `notifications` (`seq` insertion-order key; `actionRequired` → flag + columns; unknown fields → `extra_json`) — **LIVE since migration 0009 (S7a, implemented, pending independent acceptance)** | S7a |
+| `notificationPrefs` | persistent | 03 | `notification_prefs`, `notification_pref_categories` (no mandatory-false CHECK, no category-list CHECK: the vocabulary lives in code) — **LIVE since migration 0009 (S7a, implemented, pending independent acceptance)** | S7a |
 | `dispatches` | persistent | 03 | `dispatches`, `dispatch_attempts` | S7 |
 | `outbox` | audit | 03 | `outbox` (two writer shapes unified) | S7 |
 | `pushLog` | audit | 03 | `push_log` | S7 |

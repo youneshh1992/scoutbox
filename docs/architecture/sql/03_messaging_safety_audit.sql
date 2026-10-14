@@ -3,8 +3,8 @@
 --
 -- Scope (source collections → tables):
 --   channels            → channels, messages, message_attachments
---   notifications       → notifications
---   notificationPrefs   → notification_prefs, notification_pref_categories
+--   notifications       → notifications                                     (LIVE since migration 0009_notifications, S7a, REGISTERED)
+--   notificationPrefs   → notification_prefs, notification_pref_categories  (LIVE since migration 0009_notifications, S7a, REGISTERED)
 --   dispatches          → dispatches, dispatch_attempts
 --   outbox              → outbox
 --   pushLog             → push_log
@@ -159,42 +159,57 @@ CREATE TABLE message_attachments (
 
 
 -- -----------------------------------------------------------------------------
--- notifications
--- source: db.notifications  created at server.mjs:809-815 (notify); container
---         seeded seed.mjs:491. repeatCount backfilled by m182_005 (migrations.mjs:129).
--- owner/writer: server.mjs notify() (single creation path, ~160 call sites);
---         m13/delivery.mjs notifyAction (142) adds actionRequired; ackHandler (154-156).
--- lifecycle: read=false → true via markNotificationsRead (831); coalesced
---         (ts refreshed, repeatCount++) while unread and identical within 6h
---         (NOTIFY_COALESCE_MS, 767). Player rows hard-deleted on player deletion (4015).
+-- notifications — LIVE since migration 0009_notifications (S7a, REGISTERED:
+--   repositories/migrations/0009_notifications.mjs; repositories/notifications.mjs).
+-- source: db.notifications (the blob every build before S7a wrote; imported and retired by 0009,
+--         array position → seq). repeatCount was backfilled by the snapshot migration m182_005;
+--         the import applies the same normalisation to a pre-M18.2 row (counted, never silent).
+-- owner/writer: repositories/notifications.mjs through server.mjs notify() (single creation path,
+--         ~170 call sites; create / coalesce), markNotificationsRead (markRead), deletePlayerData
+--         (deleteForAudience, inside the deletion unit), m13/delivery.mjs notifyAction (the
+--         acknowledgment contract in the same write) and ackHandler (ack, inside a unit with the
+--         dispatch blob). Readers: notificationsFor, m13 sweep, m24 inbox/unread count, enterprise backup.
+-- lifecycle: read=0 → 1 via markRead; coalesced (occurred_at refreshed, repeat_count++) while
+--         unread and identical within 6h — the pre-S7a reverse scan, unchanged: newest first by
+--         INSERTION, a stop at the first row older than the cutoff, exactly six hours included.
+--         The person's rows are deleted inside the account-deletion unit (preferences retained).
 -- mapping:
---   id            -> id (ntf-*)
---   ts            -> occurred_at (source field is literally `ts`; NOT immutable — refreshed on coalesce at 799)
---   audience.kind -> audience_kind ('player' | 'guardian' | 'org_user')
+--   (position)    -> seq (NEW: the durable ordering key; the feed is ORDER BY seq DESC — reverse
+--                    insertion order, NEVER occurred_at, which a coalesce refreshes in place)
+--   id            -> id (ntf-*; UNIQUE)
+--   ts            -> occurred_at (source field is literally `ts`; NOT immutable — refreshed on coalesce)
+--   audience.kind -> audience_kind (no CHECK: polymorphic and open — the reports path writes a
+--                    'system' audience today, and a stored row must keep importing)
 --   audience.id   -> audience_id (polymorphic: players.id / guardians.id / org_users.id; no FK)
---   type          -> type (open set, ~60 values registered in m182/notificationPrefs.mjs TYPE_CATEGORY;
---                    unknown types are delivered by design (229) → no CHECK)
+--   type          -> type (open set registered in m182/notificationPrefs.mjs TYPE_CATEGORY;
+--                    unknown types are delivered by design → no CHECK)
 --   text          -> text
---   refId         -> ref_id (polymorphic, kind implied by type: channel, request, trial, case, player id…; no FK)
+--   refId         -> ref_id (polymorphic, kind implied by type; no FK)
 --   read          -> read
---   repeatCount   -> repeat_count
---   groupKey      -> group_key (= "type:refId" or NULL)
---   category      -> category (what the preference gate matched; NULL when the type is unclassified)
---   deferredPush  -> deferred_push (quiet-hours / school-hours decision at creation, pushDeferred 739)
+--   repeatCount   -> repeat_count (absent on a pre-M18.2 row → 1, as m182_005 did)
+--   groupKey      -> group_key (= "type:refId" or NULL; absent → NULL)
+--   category      -> category (validated in code against CATEGORY_NAMES — the vocabulary lives in
+--                    m182/notificationPrefs.mjs and must not need a schema change to grow; NULL when
+--                    the type is unclassified; absent → NULL)
+--   deferredPush  -> deferred_push (absent → 0)
 --   actionRequired          -> action_required (1 when the object exists)
 --   actionRequired.deadline -> action_deadline_at
 --   actionRequired.ackedAt  -> action_acked_at
 --   actionRequired.ackedBy  -> action_acked_by (the audience_id that acked; same kind as audience_kind)
---   target        -> derived, not stored: resolved at read time (notificationsFor 826-828)
--- notes: a type in a category the person turned off is never created
---   (notificationAllows 781). Reads: by (audience_kind, audience_id) newest
---   first (827, m24:208/696 unread count), coalesce scan newest-first by
---   occurred_at (793), awaiting-ack scan (delivery.mjs:236), by id+audience (delivery.mjs:151).
+--   (unknown fields)        -> extra_json (NEW: kept as given, spread back onto the row on read)
+--   target        -> derived, not stored: resolved at read time (notificationsFor)
+-- notes: writes are STAGED in the running server: visible in memory at once, durable inside the
+--   next snapshot save together with the blob edits made alongside (a message, a request), or
+--   inside the enclosing unit of work's commit — never ahead of the action announced. Backups
+--   export the rows in the legacy collection shape in seq order; a backup from any build restores
+--   through migration 0009. An entry the validators refuse (no coercion) refuses the whole import
+--   (NOTIFICATIONS_IMPORT_BLOCKED, entry index and reason, never the text).
 -- -----------------------------------------------------------------------------
 CREATE TABLE notifications (
-  id                 TEXT PRIMARY KEY,
+  seq                INTEGER PRIMARY KEY,
+  id                 TEXT NOT NULL UNIQUE,
   occurred_at        INTEGER NOT NULL,
-  audience_kind      TEXT NOT NULL CHECK (audience_kind IN ('player','guardian','org_user')),
+  audience_kind      TEXT NOT NULL,
   audience_id        TEXT NOT NULL,
   type               TEXT NOT NULL,
   text               TEXT NOT NULL,
@@ -202,42 +217,38 @@ CREATE TABLE notifications (
   read               INTEGER NOT NULL DEFAULT 0 CHECK (read IN (0,1)),
   repeat_count       INTEGER NOT NULL DEFAULT 1 CHECK (repeat_count >= 1),
   group_key          TEXT,
-  category           TEXT CHECK (category IS NULL OR category IN (
-                       'mentions','assignments','room_changes','evidence_requests','combine',
-                       'trial_updates','second_look','brief_updates','messages','activity',
-                       'discovery_nudges','watchlist_changes','development_updates','representation',
-                       'compliance','transaction_updates','offer_updates','signing_updates','security_account')),
+  category           TEXT,
   deferred_push      INTEGER NOT NULL DEFAULT 0 CHECK (deferred_push IN (0,1)),
   action_required    INTEGER NOT NULL DEFAULT 0 CHECK (action_required IN (0,1)),
   action_deadline_at INTEGER,
   action_acked_at    INTEGER,
   action_acked_by    TEXT,
+  extra_json         TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
   CHECK (action_required = 1 OR (action_deadline_at IS NULL AND action_acked_at IS NULL AND action_acked_by IS NULL))
 ) STRICT;
-
-CREATE INDEX notifications_audience_read_occurred_at
-  ON notifications(audience_kind, audience_id, read, occurred_at);
-CREATE INDEX notifications_occurred_at ON notifications(occurred_at);
+CREATE INDEX notifications_audience_seq ON notifications (audience_kind, audience_id, seq);
 
 
 -- -----------------------------------------------------------------------------
--- notification_prefs
--- source: db.notificationPrefs (M18.2)  created at m182/notificationPrefs.mjs:262 (update);
---         container by migration m182_004 (migrations.mjs:119) and ??= at 202.
--- owner/writer: m182/notificationPrefs.mjs only (PUT /notification-preferences per router).
--- lifecycle: upsert on write; never deleted (kept after player deletion).
+-- notification_prefs — LIVE since migration 0009_notifications (S7a, REGISTERED; repositories/notifications.mjs).
+-- source: db.notificationPrefs (M18.2; the blob every build before S7a wrote; imported and retired by 0009).
+-- owner/writer: repositories/notifications.mjs updatePrefs, called by m182/notificationPrefs.mjs
+--         (PUT /notification-preferences per router), which keeps the vocabulary, the validation,
+--         the effective view and the gate.
+-- lifecycle: upsert on write; never deleted (retained after a person's notifications are deleted —
+--         no cascade, by decision).
 -- mapping:
---   audienceKind -> audience_kind ('player' | 'guardian' | 'org_user')
+--   audienceKind -> audience_kind (no CHECK: polymorphic, as notifications.audience_kind)
 --   audienceId   -> audience_id (polymorphic; no FK)
 --   categories{} -> notification_pref_categories table (one row per category the person set)
---   emailIntent  -> email_intent
---   updatedAt    -> updated_at (NULL on the initial empty row before the first write completes)
--- notes: natural key (audienceKind, audienceId) — UNIQUE enforced by code today
---   (find-then-push at 261-262), here the PRIMARY KEY. Effective prefs are
---   DERIVED (stored over defaults, mandatory always on; effective() 207).
+--   emailIntent  -> email_intent (absent → 0)
+--   updatedAt    -> updated_at (NULL until the first write; absent → NULL)
+-- notes: natural key (audienceKind, audienceId) is the PRIMARY KEY (one record per person; a
+--   duplicate in a backup refuses the import). Effective prefs are DERIVED (stored over defaults,
+--   mandatory always on; effective() in m182/notificationPrefs.mjs).
 -- -----------------------------------------------------------------------------
 CREATE TABLE notification_prefs (
-  audience_kind TEXT NOT NULL CHECK (audience_kind IN ('player','guardian','org_user')),
+  audience_kind TEXT NOT NULL,
   audience_id   TEXT NOT NULL,
   email_intent  INTEGER NOT NULL DEFAULT 0 CHECK (email_intent IN (0,1)),
   updated_at    INTEGER,
@@ -246,29 +257,25 @@ CREATE TABLE notification_prefs (
 
 
 -- -----------------------------------------------------------------------------
--- notification_pref_categories
--- source: db.notificationPrefs[].categories (object category → boolean), written at
---         m182/notificationPrefs.mjs:263; keys validated against CATEGORIES (256).
--- owner/writer: m182/notificationPrefs.mjs.
+-- notification_pref_categories — LIVE since migration 0009_notifications (S7a, REGISTERED).
+-- source: db.notificationPrefs[].categories (object category → boolean).
+-- owner/writer: repositories/notifications.mjs (updatePrefs; keys validated in code against
+--         CATEGORY_NAMES, values must be booleans — the route coerces with `!!v` before it calls).
 -- lifecycle: a key is set once written and never removed; absent key = default applies.
 -- mapping:
 --   categories.<name> -> (category, enabled) one row per stored key
--- notes: a mandatory category ('compliance', 'security_account') can never be
---   stored as false (257-259) → CHECK. Unknown category names are refused (256) → CHECK list.
+-- notes: NO CHECK on the category list (the vocabulary lives in code) and NO CHECK forbidding a
+--   mandatory category stored false: the route accepts numeric zero, coerces it and stores false
+--   (observed on 812e13b, S7a review correction 3), and a legacy row may hold it; the effective
+--   view and the notification gate force a mandatory category ON. A stored row is never rewritten.
 -- -----------------------------------------------------------------------------
 CREATE TABLE notification_pref_categories (
   audience_kind TEXT NOT NULL,
   audience_id   TEXT NOT NULL,
-  category      TEXT NOT NULL CHECK (category IN (
-                  'mentions','assignments','room_changes','evidence_requests','combine',
-                  'trial_updates','second_look','brief_updates','messages','activity',
-                  'discovery_nudges','watchlist_changes','development_updates','representation',
-                  'compliance','transaction_updates','offer_updates','signing_updates','security_account')),
+  category      TEXT NOT NULL,
   enabled       INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
   PRIMARY KEY (audience_kind, audience_id, category),
-  FOREIGN KEY (audience_kind, audience_id)
-    REFERENCES notification_prefs(audience_kind, audience_id) ON DELETE CASCADE,
-  CHECK (NOT (category IN ('compliance','security_account') AND enabled = 0))
+  FOREIGN KEY (audience_kind, audience_id) REFERENCES notification_prefs(audience_kind, audience_id) ON DELETE CASCADE
 ) STRICT;
 
 

@@ -199,7 +199,7 @@ const dataLayer = attachDataLayer({
   sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
-const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes } = dataLayer;
+const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications } = dataLayer;
 if (dataLayer.boot.users.imported) console.log(`data layer: ${dataLayer.boot.users.imported} staff record(s) moved into org_users`);
 if (dataLayer.boot.identity.imported) console.log(`data layer: ${dataLayer.boot.identity.players} player(s) and ${dataLayer.boot.identity.guardians} guardian(s) initialised from the first installation's records`);
 
@@ -274,6 +274,7 @@ for (const p of [...db.players]) {
 db.savedSearches ??= [];
 db.signings ??= [];
 // db.pairingCodes: the data layer's hash-free read-only view since S6a (rows of pairing_codes; repositories/oneTimeCodes.mjs) — never assigned here.
+// db.notifications, db.notificationPrefs: the data layer's read-only views since S7a (rows of notifications / notification_prefs; repositories/notifications.mjs) — never assigned here; writes go through `notifications`.
 db.sessions ??= [];        // bearer-token sessions (all roles): already the data layer's read-only view since S2, so this never assigns; kept as the store's inventory line
 db.outbox ??= [];          // mailer dev transport (+ delivery audit when live)
 db.pushLog ??= [];         // push dev transport (+ delivery audit when live)
@@ -814,8 +815,9 @@ function pushDeferred(audience, now = new Date()) {
   return false;
 }
 
-// M18.1 — how long an identical UNREAD notification stays coalescible.
-const NOTIFY_COALESCE_MS = 6 * 60 * 60 * 1000;
+// M18.1 — how long an identical UNREAD notification stays coalescible: six
+// hours, now the repository's `coalesceMs` (repositories/notifications.mjs,
+// S7a), which also owns the scan that decides what coalesces.
 
 // M18.2 — the preference gate. Assigned once the preference module has
 // registered (below); until then everything is allowed, which is the safe
@@ -825,7 +827,17 @@ let m182Ctx = null; // assigned when the M18.2 modules register, below
 let m24Ctx = null; // M23 P5.6B — assigned when the Agent module registers, below
 const notificationsSuppressed = { count: 0 };
 
-function notify(audience, type, text, refId = null) {
+/**
+ * Create (or coalesce) one notification. S7a: the row is a row of the
+ * `notifications` table, written through the repository in its staged mode —
+ * visible in memory at once, durable inside the next snapshot save together
+ * with the blob edits the caller made alongside it (the message, the request,
+ * the case), or inside the enclosing unit of work's commit. It is never
+ * durable ahead of the action it announces. `actionRequired: { deadline }`
+ * attaches an acknowledgment contract in the same write (M13 notifyAction).
+ * Returns the row (read-only) or null when the person's preferences mute it.
+ */
+function notify(audience, type, text, refId = null, { actionRequired = null } = {}) {
   // M18.2: a category the person has turned off is never CREATED — not
   // created and hidden, not created and un-pushed. The mandatory
   // security_account category cannot be turned off, so it never lands here.
@@ -839,16 +851,14 @@ function notify(audience, type, text, refId = null) {
   // unread row is refreshed and counted rather than duplicated — and crucially
   // no second push is sent. Once the recipient has READ it, a new occurrence is
   // genuinely new and gets its own row; coalescing a notification someone has
-  // already dealt with would hide the fact that it happened again.
-  const cutoff = Date.now() - NOTIFY_COALESCE_MS;
-  for (let i = db.notifications.length - 1; i >= 0; i--) {
-    const c = db.notifications[i];
-    if (c.ts < cutoff) break; // the array is append-ordered by time
-    if (c.read) continue;
-    if (c.audience.kind !== audience.kind || c.audience.id !== audience.id) continue;
-    if (c.type !== type || c.text !== text || (c.refId ?? null) !== (refId ?? null)) continue;
-    c.ts = Date.now();
-    c.repeatCount = (c.repeatCount ?? 1) + 1;
+  // already dealt with would hide the fact that it happened again. The scan
+  // (newest first, six hours, a stop at the first older row) is the
+  // repository's and is unchanged from M18.1; the refreshed row keeps its
+  // position in the feed.
+  const at = Date.now();
+  const existing = notifications.findCoalescible({ audience, type, text, refId, at });
+  if (existing) {
+    const c = notifications.coalesce(existing.id, { at, actionRequired });
     broadcast('notify', { audienceKind: audience.kind, audienceId: audience.id });
     return c;
   }
@@ -857,16 +867,14 @@ function notify(audience, type, text, refId = null) {
   // same record ("status moved", "task assigned", "decision recorded" on one
   // Room) into "3 changes in …" rather than three rows, without the server
   // deciding presentation. `category` is what the preference gate matched.
-  const n = {
-    id: nextId('ntf'), ts: Date.now(), audience, type, text, refId, read: false, repeatCount: 1,
-    groupKey: refId ? `${type}:${refId}` : null,
+  const n = notifications.create({
+    audience, type, text, refId, at, actionRequired,
     category: m182Ctx?.notificationCategoryOf?.(type, text) ?? null,
     deferredPush: pushDeferred(audience),
-  };
-  db.notifications.push(n);
+  });
   // Push delivery honours quiet hours / school-hours mute; the in-app feed
   // above always keeps the record either way.
-  // The notification row above is part of the snapshot (rolled back with a
+  // The notification row above lands with the snapshot (rolled back with a
   // failed unit of work); the push is an external delivery and goes out only
   // once the state it announces is committed. Outside a unit, afterCommit runs it now.
   // The promise is RETURNED so the store observes it: a rejected delivery is
@@ -879,15 +887,14 @@ function notify(audience, type, text, refId = null) {
 function notificationsFor(kind, id) {
   // M23 P8 §30 — each row is decorated at READ time with the current,
   // authorized resource its refId points to (or null). Nothing is stored.
+  // S7a: the feed is the repository's (newest insertion first).
   const resolve = journeyCtx?.notificationTargetFor;
-  return db.notifications.filter((n) => n.audience.kind === kind && n.audience.id === id).slice().reverse()
+  return notifications.forAudience(kind, id)
     .map((n) => (resolve ? { ...n, target: resolve(n, { kind, id }) } : n));
 }
 
 function markNotificationsRead(kind, id) {
-  for (const n of db.notifications) {
-    if (n.audience.kind === kind && n.audience.id === id) n.read = true;
-  }
+  notifications.markRead(kind, id);
 }
 
 // ---------------------------------------------------------------- channels
@@ -4216,7 +4223,7 @@ function deletePlayerData(playerId) {
   m28Ctx?.onPlayerDeleted?.(playerId, at);
   m29Ctx?.onPlayerDeleted?.(playerId, at);
   db.channels = db.channels.filter((c) => c.playerId !== playerId);
-  db.notifications = db.notifications.filter((n) => !(n.audience.kind === 'player' && n.audience.id === playerId));
+  notifications.deleteForAudience('player', playerId); // S7a: the person's rows go in this unit; their preferences are retained (no cascade, by decision)
   // (The pairing code row was revoked above, inside this unit, before the player row went.)
   // (Every guardian's childIds followed the link rows when the player row went: players.remove cascades.)
   // Ledger rows stay (append-only audit + attribution) but carry only ids.
@@ -4540,7 +4547,7 @@ registerM12({
 // Same module pattern under m13/. registerM13 returns the enriched context so
 // the login path above can reach the MFA rate-limit guards.
 const m13Ctx = registerM13({
-  db, users, sessions, orgs, players, guardians, mediaDeletions, codes, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
@@ -4573,7 +4580,7 @@ registerSourceChanges(srcCtx);
 // routers exist and before the milestone modules that emit notifications, so
 // the preference gate is in place for every notify() call that follows.
 m182Ctx = {
-  db, orgRouter, playerRouter, guardianRouter, persist, findPlayer,
+  db, notifications, orgRouter, playerRouter, guardianRouter, persist, findPlayer,
   // The same standing-gate composition M12's shared helpers use.
   orgCanSee: (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id),
   requireLead: (req, res) => {
@@ -4689,6 +4696,7 @@ const m18Ctx = registerM18({
 const m19Ctx = {
   ...m18Ctx,
   users,
+  notifications, // S7a: the Agent module's inbox and unread count read the repository
   combineProtocolIds: () => COMBINE_PROTOCOLS.map((p) => p.id),
 };
 registerMatching(m19Ctx);

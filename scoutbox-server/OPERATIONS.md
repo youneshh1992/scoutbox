@@ -856,6 +856,86 @@ are unchanged.
    <data-dir> <fresh-empty-dir>`, note the invalidated counts, then start the
    S5 build on the output.
 
+### Notifications and category notification preferences (live since migration `0009`, S7a — implemented, pending independent acceptance; not production-approved)
+
+The in-app notification feed (`GET /{player,guardian,org}/notifications`,
+`POST …/notifications/read`, `POST …/notifications/:id/ack`) and the category
+preferences (`GET`/`PUT …/notification-preferences`) are rows of
+`notifications`, `notification_prefs` and `notification_pref_categories`
+(`repositories/notifications.mjs`; `docs/architecture/s7-readiness-review.md`
+§8.3). Request and response shapes are unchanged.
+
+- **Order.** The feed is reverse insertion order, as it always was: `seq` is
+  the durable key. A repeated identical unread notification within six hours
+  refreshes the row's clock and repeat count where it is — it does not move.
+  Backups, restores and the rollback keep that order.
+- **Writes.** In the running server a notification write is visible at once
+  and becomes durable inside the next snapshot save — the one that also
+  carries the message, request or case it announces (`persistNow()` on a
+  message send; the 2-second debounced save otherwise) — or inside the unit
+  of work that encloses it. It is never durable ahead of the action it
+  announces, and a failed save keeps it queued for the retry. The
+  acknowledgment of an action notice updates the notification row and the
+  dispatch statuses (still a blob until S7b) in one unit of work.
+- **Preferences.** The route still refuses an unknown category and a literal
+  `false` on a mandatory category (`compliance`, `security_account`), and still
+  coerces other values (`0` is stored `false`); the effective view and the
+  notification gate force a mandatory category on whatever is stored. A
+  person's preferences are kept when their account and notifications are
+  deleted.
+- **Boot.** The data layer attaches to the tables as they are; an in-memory
+  `notifications` / `notificationPrefs` array (the seed's empty container,
+  the snapshot migrations' defaults, a stale copy) is never imported — the
+  blob the migration just imported is dropped silently, anything else is
+  logged as a count and dropped. `GET /capabilities` →
+  `persistence.dataLayer.domains.notifications` reports row counts and the
+  number of staged writes not yet in a committed save.
+- **S7a cutover (first boot of this build on an S6a file).** Migration
+  `0009_notifications` creates the three tables and imports the
+  `notifications` and `notificationPrefs` blobs: every entry validated and
+  nothing coerced; a row written before M18.2 is normalised exactly as the
+  snapshot migration `m182_005` normalised it (`repeatCount` 1) and its other
+  absent fields default (`read` false, `groupKey`/`category` null,
+  `deferredPush` false) — each normalisation is counted in
+  `meta.notificationsCutover`; unknown fields are kept (`extra_json`); a stored
+  mandatory preference `false` is imported as it is. An entry that is not an
+  object, lacks an id, duplicates an id, has a malformed timestamp, audience,
+  type, text, flag, count, category or acknowledgment contract, or a
+  preference with an unknown field, an unknown category, a non-boolean value
+  or a duplicate audience, refuses the WHOLE step
+  (`NOTIFICATIONS_IMPORT_BLOCKED`: entry indexes and reasons, never a text),
+  the file is untouched, and the next boot refuses the same way until the
+  blob is resolved on the previous build. A file without the blobs imports
+  nothing. A backup from any build restores through the same migration with
+  the feed order intact.
+- **Rollback (copy-only).** `npm run rollback:notifications -- <data-dir>
+  <fresh-empty-dir>` (`scripts/notificationsRollback.mjs`) opens the file
+  read-only, copies it (`VACUUM INTO`), writes every notification and every
+  preference record back into the two blobs in insertion order — **nothing
+  written after the cutover is lost** — drops the three tables, removes the
+  0009 record and its meta key, advances the save revision, checks every
+  foreign key, VACUUMs and revalidates the copy. Refusals, no output: a later
+  schema step (exit 4), a file that never applied 0009 (exit 5), a non-empty
+  output directory (exit 1), a recorded 0009 whose tables are missing (exit
+  10). Proven by booting the copy on the actual pre-S7a build (`812e13b`): the
+  same feeds and preferences, and that build keeps writing. To go further
+  back, run `scripts/oneTimeCodesRollback.mjs` on this tool's output (it
+  refuses the S7a file itself with exit 4).
+
+#### Operator procedure for the S7a cutover (not run on real data by this work)
+
+1. **Dry run on a copy.** With the S6a build still serving, copy the data
+   directory and boot this build on it (`DATA_DIR=<copy>` on a spare port):
+   the log shows `data migration applied: 0009_notifications` and the import
+   counts; a `NOTIFICATIONS_IMPORT_BLOCKED` line lists what to resolve on the
+   S6a build.
+2. **Backup.** `POST /admin/backup` on the S6a build, verify it, keep it.
+3. **Cutover.** Stop the S6a build, start this build on the real directory,
+   read the same log lines.
+4. **Rollback, if needed.** `node scripts/notificationsRollback.mjs
+   <data-dir> <fresh-empty-dir>`, then start the S6a build on the output —
+   every notification written since the cutover is in it.
+
 ## Reverse proxy and client addresses
 Per-IP controls (the `/auth` brute-force limiter, sharing-link limits, request
 logs) key on the client address. Behind a platform proxy (Fly, Render, a load
@@ -906,7 +986,9 @@ store them with the same care as the live data directory. Since S4a the
 `db.json` export carries the `players` and `guardians` collections rendered
 from their tables (`childIds` from the links), sessions as hashes and the
 media-removal queue as `mediaDeletions`; since S6a the one-time codes as
-`emailChallenges` / `pairingCodes` in their hashed row form; it is the shape
+`emailChallenges` / `pairingCodes` in their hashed row form; since S7a the
+notifications and preferences as `notifications` / `notificationPrefs` in the
+legacy collection shape, in feed order; it is the shape
 the first boot of a restore imports and cuts over again. The manifest is written last: a backup
 that fails midway (a write or copy error) answers `500 BACKUP_FAILED`, its
 partial directory is removed, and an `ops` event records the failure — nothing

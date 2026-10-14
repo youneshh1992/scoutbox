@@ -21,6 +21,7 @@ import {
   ONE_TIME_CODES_MIGRATION, ONE_TIME_CODES_CUTOVER_META, CODE_ALPHABET, randomCode,
 } from '../repositories/oneTimeCodes.mjs';
 import { rollbackOneTimeCodesCopy } from '../repositories/oneTimeCodesRollback.mjs';
+import { rollbackNotificationsCopy } from '../repositories/notificationsRollback.mjs';
 import { rollbackPlayerSubrecordsCopy } from '../repositories/playerSubrecordsRollback.mjs';
 import { openStore } from '../store.mjs';
 import { createMailer, OUTBOX_SECRET_PLACEHOLDER } from '../adapters.mjs';
@@ -54,6 +55,8 @@ function s5File(dir, { emailChallenges, pairingCodes } = {}) {
   runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id < ONE_TIME_CODES_MIGRATION), { now: NOW, context: { sessionTtlMs: TTL } });
   s.close();
 }
+/** S7a: a live file carries 0009, which the S6a tool refuses outright (LATER_SCHEMA); the S7a rollback (copy-only, nothing lost) goes first and the S6a tool runs on ITS output. */
+const s6aCopy = (dir) => { const out = tempDir('s7a-to-s6a'); rollbackNotificationsCopy(dbFile(dir), out); return out; };
 /** A live server-mode store with the data layer attached at `now`. */
 function live(dir, { now = () => NOW } = {}) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
@@ -68,7 +71,7 @@ test('migration 0008 (legacy blobs): every live entry is imported as a hash — 
   const dir = tempDir('otc-mig');
   s5File(dir, { emailChallenges: [legacyChallenge(), legacyChallenge({ orgId: 'org-gone-but-expired', expiresAt: NOW - MIN })], pairingCodes: [legacyPairing(), legacyPairing({ code: 'OLD999', playerId: 'pl-child2', expiresAt: NOW - 1 })] });
   const s = openRaw(dir);
-  assert.deepEqual(migrate(s, { now: NOW }).ran, [ONE_TIME_CODES_MIGRATION]);
+  assert.deepEqual(migrate(s, { now: NOW }).ran, [ONE_TIME_CODES_MIGRATION, '0009_notifications'], '0008, then 0009 (S7a) on the same run');
   const challenge = s.prepare('SELECT * FROM email_challenges').all().map((r) => ({ ...r }));
   assert.deepEqual(challenge, [{ org_id: 'org-pro', email: 'recruitment@eastport.test', code_hash: hashCode('CHAL22'), expires_at: NOW + 20 * MIN, attempts: 0 }]);
   const pairing = s.prepare('SELECT * FROM pairing_codes').all().map((r) => ({ ...r }));
@@ -446,7 +449,7 @@ test('rollback: the copy-only tool writes the empty code blobs the S5 build read
     s.prepare('INSERT INTO pairing_codes (code_hash, player_id, expires_at) VALUES (?, ?, ?)').run(hashCode('DEAD22'), 'pl-child2', NOW - MIN); s.close(); }
   const digest = filesDigest(src); const content = (() => { const s = openRaw(src); try { return dump(s); } finally { s.close(); } })();
   const out = tempDir('otc-rb-out');
-  const result = rollbackOneTimeCodesCopy(dbFile(src), out, { now: NOW });
+  const result = rollbackOneTimeCodesCopy(dbFile(s6aCopy(src)), out, { now: NOW });
   assert.deepEqual(result.invalidated, { emailChallenges: 1, pairingCodes: 1 }); assert.deepEqual(result.expired, { emailChallenges: 0, pairingCodes: 1 }); assert.equal(result.recordRemoved, true);
   assert.equal(filesDigest(src)['scoutbox.db'], digest['scoutbox.db'], 'the source main file is byte-identical');
   { const s = openRaw(src); assert.equal(dump(s), content, 'the source content is unchanged'); s.close(); }
@@ -455,11 +458,11 @@ test('rollback: the copy-only tool writes the empty code blobs the S5 build read
   assert.equal(applied(o).includes(ONE_TIME_CODES_MIGRATION), false); assert.equal(meta(o, ONE_TIME_CODES_CUTOVER_META), undefined);
   assert.deepEqual([blob(o, 'pairingCodes'), blob(o, 'emailChallenges')], [[], []]);
   for (const t of ['players', 'guardians', 'orgs', 'sessions', 'org_users', 'guardian_children']) assert.equal(JSON.stringify(o.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()), (() => { const s = openRaw(src); try { return JSON.stringify(s.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()); } finally { s.close(); } })(), `${t} untouched`);
-  assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [ONE_TIME_CODES_MIGRATION], 're-upgrade: 0008 runs again on the empty blobs'); assert.equal(o.prepare('SELECT COUNT(*) AS n FROM pairing_codes').get().n, 0);
+  assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [ONE_TIME_CODES_MIGRATION, '0009_notifications'], 're-upgrade: 0008 runs again on the empty blobs (0009 follows, as the S7a copy had removed it)'); assert.equal(o.prepare('SELECT COUNT(*) AS n FROM pairing_codes').get().n, 0);
   o.close();
   const s5out = tempDir('otc-rb-s5'); const s5out2 = tempDir('otc-rb-s5b');
   assert.throws(() => rollbackPlayerSubrecordsCopy(dbFile(src), s5out), (err) => err.code === 'LATER_SCHEMA' && /0008_one_time_codes/.test(err.message)); assert.deepEqual(fs.readdirSync(s5out), []);
-  const out2 = tempDir('otc-rb-out2'); rollbackOneTimeCodesCopy(dbFile(src), out2, { now: NOW });
+  const out2 = tempDir('otc-rb-out2'); rollbackOneTimeCodesCopy(dbFile(s6aCopy(src)), out2, { now: NOW });
   assert.equal(rollbackPlayerSubrecordsCopy(dbFile(out2), s5out2).recordRemoved, true, 'the S5 tool accepts the S6a copy');
   rm(src, out, out2, s5out, s5out2);
 });
@@ -467,6 +470,7 @@ test('rollback: the copy-only tool writes the empty code blobs the S5 build read
 test('rollback refusals leave no output and never touch the source: a later schema step (exit 4), a file that never applied 0008 (exit 5), a non-empty output directory (exit 1), a recorded 0008 whose tables are missing (exit 10), an injected COMMIT failure inside the tool; the CLI reports the invalidated counts', () => {
   const src = tempDir('otc-rf-src'); s5File(src); { const s = openRaw(src); migrate(s, { now: NOW }); s.close(); }
   const digest = filesDigest(src);
+  const srcS6a = s6aCopy(src); // S7a: what this tool works on (the live file carries 0009 and is refused as a later schema)
   const script = path.join(HERE, 'oneTimeCodesRollback.mjs');
   const run = (...a) => { try { return { status: 0, out: execFileSync(process.execPath, [script, ...a], { stdio: 'pipe', encoding: 'utf8' }) }; } catch (err) { return { status: err.status }; } };
   const later = tempDir('otc-rf-later'); fs.copyFileSync(dbFile(src), dbFile(later)); { const l = openRaw(later); l.prepare("INSERT INTO data_migrations (id, applied_at) VALUES ('0009_future_step', 1)").run(); l.close(); }
@@ -475,14 +479,14 @@ test('rollback refusals leave no output and never touch the source: a later sche
   const s5 = tempDir('otc-rf-s5'); s5File(s5);
   const o2 = tempDir('otc-rf-o2'); assert.throws(() => rollbackOneTimeCodesCopy(dbFile(s5), o2), (e) => e.code === 'NOT_CUT_OVER'); assert.equal(run(s5, path.join(tempDir('otc-rf-c2'), 'x')).status, 5);
   const o3 = tempDir('otc-rf-o3'); fs.writeFileSync(path.join(o3, 'keep.txt'), 'x'); assert.throws(() => rollbackOneTimeCodesCopy(dbFile(src), o3), (e) => e.code === 'OUTPUT_NOT_EMPTY'); assert.deepEqual(fs.readdirSync(o3), ['keep.txt']); assert.equal(run(src, o3).status, 1);
-  const odd = tempDir('otc-rf-odd'); fs.copyFileSync(dbFile(src), dbFile(odd)); { const d = openRaw(odd); d.exec('DROP TABLE pairing_codes'); d.close(); }
+  const odd = tempDir('otc-rf-odd'); fs.copyFileSync(dbFile(srcS6a), dbFile(odd)); { const d = openRaw(odd); d.exec('DROP TABLE pairing_codes'); d.close(); }
   const o4 = tempDir('otc-rf-o4'); assert.throws(() => rollbackOneTimeCodesCopy(dbFile(odd), o4), (e) => e.code === 'UNEXPECTED_SCHEMA' && /pairing_codes/.test(e.message)); assert.equal(run(odd, path.join(tempDir('otc-rf-c4'), 'x')).status, 10);
   const proto = DatabaseSync.prototype; const exec = proto.exec; let fired = 0;
   proto.exec = function patched(sql) { if (sql === 'COMMIT' && !fired) { fired += 1; throw new Error('injected COMMIT failure in the S6a rollback tool'); } return exec.call(this, sql); };
   const o5 = tempDir('otc-rf-o5');
-  try { assert.throws(() => rollbackOneTimeCodesCopy(dbFile(src), o5), /injected COMMIT failure/); } finally { proto.exec = exec; }
+  try { assert.throws(() => rollbackOneTimeCodesCopy(dbFile(srcS6a), o5), /injected COMMIT failure/); } finally { proto.exec = exec; }
   assert.equal(fired, 1); assert.deepEqual(fs.readdirSync(o5), [], 'no usable partial output');
-  const ok = run(src, path.join(tempDir('otc-rf-ok'), 'copy'));
+  const ok = run(srcS6a, path.join(tempDir('otc-rf-ok'), 'copy'));
   assert.equal(ok.status, 0); assert.match(ok.out, /INVALIDATED by this rollback .*0 outstanding club e-mail challenge\(s\), 0 outstanding child pairing code\(s\)/);
   assert.equal(filesDigest(src)['scoutbox.db'], digest['scoutbox.db'], 'the source was never touched');
   rm(src, later, s5, odd, o1, o2, o3, o4, o5);
@@ -567,7 +571,7 @@ test('review of e020aba, finding 2 — runtime: an exhausted row that somehow ex
   assert.deepEqual(codes.noteFailedEmailAttempt('org-pro'), { attemptsRemaining: 0, invalidated: false });
   assert.deepEqual(codes.outstanding(), { emailChallenges: 0, pairingCodes: 0 });
   s.close();
-  const out = tempDir('otc-f2-rb'); const result = rollbackOneTimeCodesCopy(dbFile(dir), out, { now: NOW });
+  const out = tempDir('otc-f2-rb'); const result = rollbackOneTimeCodesCopy(dbFile(s6aCopy(dir)), out, { now: NOW });
   assert.deepEqual([result.invalidated.emailChallenges, result.expired.emailChallenges], [0, 1], 'the rollback counts the exhausted row as dead, not as an invalidated code');
   const s2 = openRaw(dir); const codes2 = createOneTimeCodesRepository({ sqlite: s2, now: () => NOW });
   assert.deepEqual(codes2.sweepExpired(), { emailChallenges: 1, pairingCodes: 0 }, 'the sweep removes the exhausted row');

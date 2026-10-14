@@ -25,14 +25,17 @@ bounded code-review conclusion on the packaged server source — not production 
 approval, and the Player app was not part of it;
 [`s6-readiness-review.md`](./s6-readiness-review.md) §10 records what was built, verified and
 accepted), **the rest of S6 not started** (the eight audit tables; they wait for S4b, review §4.1),
-**S7 readiness reviewed/prepared, implementation not started**
-([`s7-readiness-review.md`](./s7-readiness-review.md); its blockers are stated there and in §S7)
+**S7a implemented, pending independent acceptance** (the notification tables, migration
+`0009_notifications`, its copy-only rollback; [`s7-readiness-review.md`](./s7-readiness-review.md)
+§8.3 records what was built and the one deliberate reading it makes; the Player app was not
+touched), **S7b–S7d not started** (their blockers are stated in the review and in §S7)
 — S8–S14 planned. The evidence-based plan of S4 is
 [`s4-readiness-review.md`](./s4-readiness-review.md).
 Migration numbering: `0006` is `0006_media_deletions` (S4a); S5 took **`0007_player_subrecords`**;
 S6a took the next unused identifier, **`0008_one_time_codes`** (the plan's placeholder
-`0008_safety_audit` is withdrawn). The later steps' identifiers in §B are placeholders, assigned
-from the actual order in which steps are approved and built. Existing migration ids never change.
+`0008_safety_audit` is withdrawn); S7a took **`0009_notifications`**. The later steps' identifiers
+in §B are placeholders, assigned from the actual order in which steps are approved and built.
+Existing migration ids never change.
 
 Sections: A principles that hold for every step · B the steps (S0–S14) · C cross-cutting
 work (repository pattern, source of truth and dual writes, backups and dry runs, legacy
@@ -1313,10 +1316,19 @@ performance, existing tests, what this plan is not).
 
 ### S7 — Messaging, notifications, delivery and push
 
-> **Status: readiness reviewed/prepared (14 October 2026, at `2d7ddeb`); implementation not
-> started.** The evidence-based review is [`s7-readiness-review.md`](./s7-readiness-review.md);
+> **Status (S7a): implemented, pending independent acceptance** (14 October 2026; one local
+> commit on `feat/sqlite-schema` on top of `812e13b`): `notifications`, `notification_prefs` and
+> `notification_pref_categories` are live tables since migration **`0009_notifications`**, with
+> the feed's insertion order as a durable key (`seq`), the pre-S7a coalescing scan kept verbatim,
+> the stored mandatory-false preference accepted at storage and forced on by the effective view,
+> the acknowledgment atomic with the dispatch blob, writes staged into the snapshot save that
+> carries the blobs they announce, and a copy-only rollback proven on the actual `812e13b`
+> build — review §8.3. The acceptance to come is a bounded code-review conclusion on the
+> packaged server source, not production or deployment approval.
+> **Status (S7b–S7d): not started.** The evidence-based review is
+> [`s7-readiness-review.md`](./s7-readiness-review.md);
 > the text below is the sequence it derived and replaces the earlier assumptions of this
-> section (recorded there, §0). No migration identifier is assigned until a sub-step is
+> section (recorded there, §0). No further migration identifier is assigned until a sub-step is
 > authorised. **Blockers, exactly:** (1) the proposed `channels.request_id` references
 > `recruitment_requests`, an S8 table that itself references S8's `recruitment_cases`, `trials`
 > and `org_users`, while S8 lists S7 as a dependency — a transitional validated reference is

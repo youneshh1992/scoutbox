@@ -61,7 +61,7 @@ export function requestInstrumentation() {
 
 export function registerEnterprise(ctx) {
   const {
-    db, users, sessions, orgs, mediaDeletions, codes, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
+    db, users, sessions, orgs, mediaDeletions, codes, notifications, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
     mailer, requireLead, isLead, paginate, histAppend, timingSafeEq, signBody,
     storage, DATA_DIR,
   } = ctx;
@@ -467,7 +467,12 @@ export function registerEnterprise(ctx) {
       // exported the same way, in their stored row form (code hashes, never a
       // code): a restored server imports them through migration 0008 and the
       // outstanding ones keep working there until they expire.
-      fs.writeFileSync(snapshotPath, JSON.stringify({ savedAt: Date.now(), idCounter: ctx.currentIdCounter(), db: { ...db, sessions: sessions.exportRows(), mediaDeletions: queued, emailChallenges: codes.exportEmailChallenges(), pairingCodes: codes.exportPairingCodes() } }));
+      // The notifications and preferences (S7a, migration 0009) are exported
+      // explicitly in the legacy collection shape, in insertion order — the
+      // state in memory, like every blob collection — so a backup restores on
+      // any build: a pre-S7a build reads the blobs, this build imports them
+      // through migration 0009 with the feed order intact.
+      fs.writeFileSync(snapshotPath, JSON.stringify({ savedAt: Date.now(), idCounter: ctx.currentIdCounter(), db: { ...db, sessions: sessions.exportRows(), mediaDeletions: queued, emailChallenges: codes.exportEmailChallenges(), pairingCodes: codes.exportPairingCodes(), notifications: notifications.exportRows(), notificationPrefs: notifications.exportPrefs() } }));
       // 2. Media files — except those whose removal is queued: a backup never
       //    carries a file without the intent to remove it. Their ids are in
       //    db.json; on a restored server the entry is cleared once the file is
@@ -488,7 +493,7 @@ export function registerEnterprise(ctx) {
       files.unshift({ path: 'db.json', sha256: fileSha256(snapshotPath), bytes: fs.statSync(snapshotPath).size });
       manifest = {
         contract: 'backup.2026-09.v1', createdAt: Date.now(), engine: 'json-snapshot + media files',
-        counts: { players: db.players.length, orgs: db.orgs.length, notifications: db.notifications.length, mediaFiles: files.length - 1 },
+        counts: { players: db.players.length, orgs: db.orgs.length, notifications: notifications.count(), mediaFiles: files.length - 1 },
         media: {
           copied: files.length - 1, queuedForRemoval: leftOut,
           note: 'Files whose removal was committed but not yet completed are left out on purpose: their queue entries are in db.json, and the restored server serves nothing for them and finishes the removal at boot.',

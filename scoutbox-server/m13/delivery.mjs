@@ -1,8 +1,10 @@
 // F11 — Delivery and response centre.
-// Transactional-outbox architecture: db.notifications is the single canonical
-// in-app record (the business action happens exactly once). The dispatcher
-// creates per-channel dispatch rows AFTER the fact and retries only the
-// SENDING — a retry can therefore never duplicate the business action.
+// Transactional-outbox architecture: the notifications table (S7a,
+// repositories/notifications.mjs, read here through the `notifications`
+// repository) is the single canonical in-app record (the business action
+// happens exactly once). The dispatcher creates per-channel dispatch rows
+// AFTER the fact and retries only the SENDING — a retry can therefore never
+// duplicate the business action.
 // Status ladder (forward-only): queued → accepted → delivered → opened → actioned.
 // "delivered"/"opened" are set ONLY from confirmed provider callbacks — email
 // acceptance is never reported as read.
@@ -12,10 +14,11 @@ const RANK = { queued: 0, held_quiet_hours: 0, accepted: 1, delivered: 2, opened
 
 export function registerDelivery(ctx) {
   const {
-    db, users, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+    db, users, notifications, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
     nextId, persist, persistNow, notify, findPlayer, isAdult,
     signBody, timingSafeEq, paginate,
   } = ctx;
+  if (!notifications) throw new TypeError('registerDelivery needs the notifications repository (ctx.notifications)');
 
   db.deliveryFailInject ??= { email: 0, push: 0 }; // admin-injected provider failures (tests/monitoring)
   db.deliveryCentreSince ??= Date.now(); // notifications older than this get an in-app record only — no retroactive email blast on upgrade
@@ -77,7 +80,7 @@ export function registerDelivery(ctx) {
     let changed = 0;
     // 1. Create dispatch rows for notifications that have none yet.
     const seen = new Set(db.dispatches.map((d) => d.notificationId));
-    for (const n of db.notifications) {
+    for (const n of notifications.view) {
       if (seen.has(n.id)) continue;
       const historical = n.ts < db.deliveryCentreSince;
       for (const dest of destinationsFor(n)) {
@@ -101,11 +104,11 @@ export function registerDelivery(ctx) {
     for (const d of db.dispatches) {
       if (!['queued', 'retrying', 'held_quiet_hours'].includes(d.status) || d.nextAt > Date.now()) continue;
       if (d.status === 'held_quiet_hours') {
-        const n = db.notifications.find((x) => x.id === d.notificationId);
+        const n = notifications.byId(d.notificationId);
         const stillQuiet = n?.deferredPush && quietHoldUntil(n); // conservative single re-check window
         if (stillQuiet && d.attempts.length === 0) { d.attempts.push({ at: Date.now(), note: 'quiet hours re-check' }); d.nextAt = stillQuiet; changed++; continue; }
       }
-      const n = db.notifications.find((x) => x.id === d.notificationId);
+      const n = notifications.byId(d.notificationId);
       const result = fakeSend(d.channel, d.to, n?.text ?? '');
       d.attempts.push({ at: Date.now(), ok: result.ok, error: result.error ?? null });
       if (result.ok) {
@@ -126,7 +129,7 @@ export function registerDelivery(ctx) {
     // 3. Mirror in-app reads → opened (meaningfully measured for in_app only).
     for (const d of db.dispatches) {
       if (d.channel === 'in_app' && !d.openedAt) {
-        const n = db.notifications.find((x) => x.id === d.notificationId);
+        const n = notifications.byId(d.notificationId);
         if (n?.read) { d.openedAt = Date.now(); if (RANK[d.status] < RANK.opened) d.status = 'opened'; changed++; }
       }
     }
@@ -136,10 +139,14 @@ export function registerDelivery(ctx) {
   ctx.dispatchSweep = dispatchSweep;
 
   // ------------------------------------------------ action-required notices
-  // notifyAction: same canonical notification + an acknowledgement contract.
+  // notifyAction: same canonical notification + an acknowledgement contract,
+  // written in ONE repository operation (S7a: `notify` passes the contract
+  // through to the create or the coalesce, so the row and its contract are
+  // never two writes). A notification the person's preferences mute is null
+  // here as it is from notify(); the caller gets null, never a crash.
   function notifyAction(audience, type, text, refId, deadlineMs) {
-    const n = notify(audience, type, text, refId);
-    n.actionRequired = { deadline: deadlineMs ?? null, ackedAt: null, ackedBy: null };
+    const n = notify(audience, type, text, refId, { actionRequired: { deadline: deadlineMs ?? null } });
+    if (!n) return null;
     persist();
     return n;
   }
@@ -148,17 +155,22 @@ export function registerDelivery(ctx) {
   function ackHandler(kind) {
     return (req, res) => {
       const id = kind === 'player' ? req.player.id : kind === 'guardian' ? req.guardian.id : req.orgUser.id;
-      const n = db.notifications.find((x) => x.id === req.params.id && x.audience.kind === (kind === 'org_user' ? 'org_user' : kind) && x.audience.id === id);
-      if (!n) return res.status(404).json({ error: 'NOTIFICATION_NOT_FOUND' });
+      const audience = { kind: kind === 'org_user' ? 'org_user' : kind, id };
+      const n = notifications.byId(req.params.id);
+      if (!n || n.audience.kind !== audience.kind || n.audience.id !== audience.id) return res.status(404).json({ error: 'NOTIFICATION_NOT_FOUND' });
       if (!n.actionRequired) return res.status(400).json({ error: 'NO_ACTION_REQUIRED' });
       if (!n.actionRequired.ackedAt) {
-        n.actionRequired.ackedAt = Date.now();
-        n.actionRequired.ackedBy = id;
-        for (const d of db.dispatches.filter((x) => x.notificationId === n.id)) {
-          d.actionedAt = Date.now();
-          if (RANK[d.status] < RANK.actioned) d.status = 'actioned';
-        }
-        persistNow();
+        // S7a: the acknowledgment on the notification row and the dispatch
+        // statuses (still a blob, S7b) commit together or not at all.
+        unit(() => {
+          const at = Date.now();
+          const acked = notifications.ack(n.id, audience, { at });
+          if (acked.status !== 'ok') throw new Error(`notifications: acknowledgment of ${n.id} answered ${acked.status} inside the unit`);
+          for (const d of db.dispatches.filter((x) => x.notificationId === n.id)) {
+            d.actionedAt = at;
+            if (RANK[d.status] < RANK.actioned) d.status = 'actioned';
+          }
+        });
       }
       res.json({ ok: true, ackedAt: n.actionRequired.ackedAt });
     };
@@ -233,7 +245,7 @@ export function registerDelivery(ctx) {
       provider: PROVIDER,
       providerNote: 'Local fake provider only — real email/SMS/push transport is not configured; no message leaves this machine.',
       counts,
-      awaitingAck: db.notifications.filter((n) => n.actionRequired && !n.actionRequired.ackedAt).length,
+      awaitingAck: notifications.awaitingAckCount(),
       recent: db.dispatches.slice(-100).reverse(),
     });
   });

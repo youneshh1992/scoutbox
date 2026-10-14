@@ -39,10 +39,11 @@ import {
 export function registerAgent(rawCtx) {
   const ctx = { ...rawCtx, ...buildShared(rawCtx) };
   const {
-    db, users, orgRouter, playerRouter, adminRouter, nextId, persistNow, notify, broadcast,
+    db, users, notifications, orgRouter, playerRouter, adminRouter, nextId, persistNow, notify, broadcast,
     findPlayer, isBlocked, playerViewForOrg, orgSafe, revokeOrgUserAccess, rateLimit, isAdult,
     orgCanSee, checkEligibility, distanceBand, moderateOrRefuse, verificationProvider,
   } = ctx;
+  if (!notifications) throw new TypeError('registerAgent needs the notifications repository (ctx.notifications)');
 
   const testProviderEnabled = process.env.AGENT_VERIFICATION_TEST_PROVIDER === '1';
   // P5.6C seams the Compliance Engine fills after it registers: a facet that
@@ -205,7 +206,7 @@ export function registerAgent(rawCtx) {
       const gap = verificationGap(p, ma, t);
       if (gap) alerts.push({ kind: 'jurisdiction', memberAssociation: ma, facet: gap.facet, state: gap.state });
     }
-    const unread = (db.notifications ?? []).filter((n) => n.audience?.kind === 'org_user' && n.audience.id === me && !n.read).length;
+    const unread = notifications.unreadCount('org_user', me); // S7a: the repository's count
     res.json({
       profileState: fifa, hasProfile: !!p, tiers: req.tiers, counts, alerts, unreadNotifications: unread,
       regulatoryNotice: 'ScoutBox is infrastructure. It performs no football-agent services, adjudicates no conflicts and confirms no regulatory status. Relationship records here are confirmed by the client, not by ScoutBox.',
@@ -693,10 +694,10 @@ export function registerAgent(rawCtx) {
     if (!resolveMembership(req, res)) return;
     if (!requireCap(req, res, 'inbox.read')) return;
     const me = req.orgUser.id;
-    const notifications = (db.notifications ?? []).filter((n) => n.audience?.kind === 'org_user' && n.audience.id === me).slice().reverse().slice(0, 100);
+    const inbox = notifications.forAudience('org_user', me).slice(0, 100); // S7a: newest insertion first, as before
     const pending = agreementsOfAgency(req.org.id).filter((a) => a.agentUserId === me && effectiveAgreementStatus(a, now()) === 'proposed')
       .map((a) => ({ ...agreementForAgent(a, now()), client: clientIdentity(a, req) }));
-    res.json({ notifications, pending, note: 'Operational messages only. Negotiation and offers are not part of this workspace.' });
+    res.json({ notifications: inbox, pending, note: 'Operational messages only. Negotiation and offers are not part of this workspace.' });
   });
 
   // ============================================================ PLAYER: My Agent

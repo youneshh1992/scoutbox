@@ -12,9 +12,14 @@ migration identifier is assigned, and nothing was run against real data. Paths a
 are those of `2d7ddeb`. The plan is [`sqlite-migration-plan.md`](./sqlite-migration-plan.md)
 §S7, whose assumptions this review corrects (§2, §6).
 
-**Status: S7 readiness reviewed/prepared; implementation not started.** The exact blockers are in
-§8. Nothing here decides a retention period, a deletion policy, the country-code or
-child-status questions, or the org-deletion question; those stay with the Founder.
+**Status: S7a implemented, pending independent acceptance** (one local commit on
+`feat/sqlite-schema` on top of `812e13b`; what was built, the four compatibility corrections it
+honours and the one deliberate reading it records are in §8.3). **S7b–S7d not started.** §§0–8.2
+are the review as written at `2d7ddeb`, kept as the record of the reasoning; where the
+implementation corrected a proposal (§3.2 coupled writes, §8.2 "transaction of its own"), the
+correction is marked in place. The exact blockers of the remaining sub-steps are in §8. Nothing
+here decides a retention period, a deletion policy, the country-code or child-status questions, or
+the org-deletion question; those stay with the Founder.
 
 Sections: 0 summary · 1 ownership and data mapping · 2 the dependency graph · 3 transaction and
 delivery boundaries · 4 privacy, permissions and deletion · 5 preflight and cutover · 6 backup and
@@ -404,10 +409,15 @@ S:3377–3391, S:1531–1552). Read receipts: one field write + `persistNow` + b
 
 - **One unit of work per request, joined by every repository it touches.** A send becomes:
   `unit(() => { messages.insert(channel, msg); channels.markActivity?; ledgerAppend (blob until
-  S6); notifications.create(...) (table after S7a) })`, with `pushSender.send`, `broadcast(...)`
-  and `persist()` of the remaining blobs registered through `store.afterCommit` so **nothing
-  observable leaves before COMMIT** — today the ledger SSE frame and the push leave first (steps
-  5–6). The store contract requires it: inside a unit a repository mutation runs through
+  S6); notifications.create(...) (table after S7a) })`, with `pushSender.send` and
+  `broadcast(...)` registered through `store.afterCommit` so **nothing observable leaves before
+  COMMIT** — today the ledger SSE frame and the push leave first (steps 5–6). **Correction (S7a
+  review, accepted):** the coupled blob writes — the `channels`, `ledger` and every other blob
+  the request edits — belong INSIDE the same unit-of-work commit as the new table writes (the
+  unit's commit already writes every blob, ST:329); only external side effects (the push, the SSE
+  frame, a provider call) belong after COMMIT. The earlier wording that put `persist()` of the
+  remaining blobs after COMMIT would have let a notification commit ahead of the message it
+  announces, and is withdrawn. The store contract requires it: inside a unit a repository mutation runs through
   `unit.join` so a failure after a statement poisons the unit even when caught (S6a review
   correction, oneTimeCodes.mjs `operation`); a real COMMIT failure (`failCommitOfOpenTransaction`,
   ST:401–406) rolls back every row and restores memory; an explicit retry runs the whole
@@ -427,6 +437,13 @@ S:3377–3391, S:1531–1552). Read receipts: one field write + `persistNow` + b
   read = 0 AND group/text match AND occurred_at > now − 6 h` with the 6-hour window kept
   (`NOTIFY_COALESCE_MS`, S:818); `markNotificationsRead` becomes one `UPDATE … SET read = 1`
   inside whatever unit the route opens (today it persists with the next save of any kind, S:887–891).
+  **Correction (S7a review, accepted; implemented):** the coalescing `UPDATE … WHERE occurred_at >
+  now − 6 h` sketched here is NOT the existing behaviour and was not implemented. The existing
+  scan (S:843–854) walks the array newest-first by *position*, stops at the first row older than
+  the cutoff (a matching row behind it is never examined, even when its own clock was refreshed),
+  coalesces only the row it selects, and includes a row exactly six hours old. S7a keeps that scan
+  verbatim over the in-memory mirror (§8.3), and the single `UPDATE` it produces targets the
+  selected row by id.
 - **Network calls never inside a SQLite transaction.** Today none is (the push runs after COMMIT
   inside a unit and `testUnitOfWork.mjs:126–133` asserts `isTransaction === false` in the
   callback; the store refuses async work inside a unit, ST:236–245, 315–316; the mailer's `fetch`
@@ -787,6 +804,103 @@ next unused migration identifier only then.
 If S7a is not wanted first, there is **no** channel/message sub-step that is independent under
 current decisions: S7d is blocked by the `recruitment_requests` reference until the §2.3
 transitional design is approved or S8a ships, and by the message-retention question.
+
+### 8.3 S7a as implemented — **implemented, pending independent acceptance**
+
+Built on `812e13b` after the S7a review accepted the §8.2 recommendation subject to four
+compatibility corrections, which an unchanged probe script (`s7a-compatibility-probes.mjs`, exit
+0 on the starting server) had established. Migration **`0009_notifications`** (the next unused
+identifier). Files: `repositories/notifications.mjs`, `repositories/migrations/0009_notifications.mjs`,
+`repositories/notificationsRollback.mjs`, `scripts/notificationsRollback.mjs`,
+`scripts/testNotifications.mjs`, `scripts/testNotificationsServer.mjs`,
+`scripts/notificationsPersistenceBench.mjs`; converted callers in `server.mjs` (`notify`,
+`notificationsFor`, `markNotificationsRead`, the deletion unit, the module contexts),
+`m13/delivery.mjs` (sweep reads, `notifyAction`, `ackHandler`, the admin count),
+`m182/notificationPrefs.mjs` (stored preferences through the repository; vocabulary, validation,
+effective view and gate unchanged), `m24/index.mjs` (inbox and unread count), `m13/enterprise.mjs`
+(explicit backup export), `repositories/index.mjs`, `storeContract.mjs`, `sql/03` and
+`scripts/testSchemaDdl.mjs`; the Player app untouched.
+
+**The four corrections, as honoured.**
+
+1. *Ordering.* `notifications.seq INTEGER PRIMARY KEY` is the durable insertion-order key: the
+   migration assigns it from the array position, a backup exports the rows in `seq` order and a
+   restore or snapshot write reassigns it from the array position, the rollback writes the blob
+   in `seq` order. The feed is `ORDER BY seq DESC` (in practice the mirror walked backwards);
+   `occurred_at` is never an ordering key, so a coalesce refreshes the clock without moving the
+   row, and tied clocks keep their positions. Tested at repository level (ties, refreshed clocks,
+   a reopen), through the real routes (a later notification stays above a refreshed one, across a
+   SIGKILL) and across backup → restore → rollback → re-upgrade.
+2. *Coalescing.* `findCoalescible` is the pre-S7a reverse scan over the in-memory mirror,
+   statement for statement; a differential test runs 300 random feeds against the verbatim
+   `812e13b` loop, and focused tests cover the single selected row, the read-row skip, audience /
+   type / text / refId isolation, exactly six hours included, one millisecond older excluded, and
+   the stop at the first older row hiding a matching row behind it — at repository level and
+   through the real routes with planted rows.
+3. *Mandatory category stored false.* The proposed storage `CHECK` forbidding it is removed from
+   `sql/03` and the migration (as is the `category` list `CHECK` on both tables and the
+   `audience_kind` list `CHECK`: the vocabulary lives in `CATEGORIES`, must not need a schema
+   change to grow, and the reports path writes a `system` audience that a stored row must keep
+   importing). The route still refuses a literal `false` on a mandatory category and an unknown
+   category, still coerces with `!!v` (numeric zero is stored false), the repository stores what
+   it is given (booleans and known categories only, refusing the rest without coercion), and the
+   effective view and the gate force a mandatory category on. A legacy stored false is imported
+   as it is and never rewritten. Tested at repository, module and route level, and on the pre-S7a
+   build over a rollback copy.
+4. *Coupled writes.* §3.2 corrected above. The acknowledgment updates the notification row and
+   the still-blob-backed dispatch statuses in one unit of work (a real COMMIT failure leaves both
+   unchanged; the retry lands both; a SIGKILL right after keeps both). `notifyAction` creates or
+   coalesces the row and its contract in ONE repository operation and returns null for a muted
+   notification instead of crashing. The deletion unit removes the person's rows with the player
+   row and keeps their preferences.
+
+**One deliberate reading, recorded because the instruction said both "own transaction when
+standalone" and "a new durable notification must not commit ahead of the action it announces".**
+~170 `notify()` call sites edit blob collections that are saved later (a message pushed into its
+channel, a request, a case), and wrapping each in a unit of work would be the cross-project
+refactor the instruction forbids — and would multiply whole-snapshot writes. The repository
+therefore has two write modes. *Immediate* (tools, tests, the migration): one boundary, joined
+inside an open unit through `unit.join` (a caught failure still poisons the unit), part of a raw
+transaction a tool opened (no `BEGIN` of its own; after the tool's own `ROLLBACK` the tool calls
+`reload()`), a transaction of its own otherwise — the S6a contract. *Staged* (the running
+server): a mutation updates the mirror at once and queues its SQL; the queue runs inside the
+next snapshot save transaction — an ordinary debounced save, a `persistNow()`, or a unit of
+work's commit — before the blob rows, so a notification is durable together with the blob edits
+made alongside it and never ahead of them; inside an open unit the mutation still joins the unit
+(a refused argument poisons it) and its SQL runs in the unit's commit; on a rollback the mirror
+and the queue return to the unit's start, writes queued before the unit stay queued; a failed
+save keeps the queue for the retry; the queue is FIFO and drained whole, so the file's order is
+memory's order; a foreign transaction is refused in this mode. In other words the "own
+transaction" of a standalone server write is the save that carries the blobs it belongs to —
+exactly the durability window the blob had before S7a (the next save, at most the 2 s debounce),
+with the coupled state landing in the same transaction. SSE and push outside a unit are unchanged
+(immediate, as every other broadcast after a blob edit); inside a unit both wait for COMMIT.
+
+**What else was decided.** Normalisations on import are the ones the pre-S7a snapshot
+migrations applied or the literal always set (`repeatCount` absent → 1 as `m182_005`; `read`
+absent → false; `groupKey`/`category` absent → null; `deferredPush` absent → false), each counted
+in `meta.notificationsCutover`; unknown notification fields are kept in `extra_json` and spread
+back on read; a preference record with an unknown field, an unknown or prototype-named category,
+a non-boolean value or a duplicate audience is refused; the audience kind is open. `notify()`
+gained an optional fifth argument `{ actionRequired }` for the M13 contract; no other public
+payload changed (`refId`, `groupKey`, `category` absent on a pre-M18.2 row now read `null`;
+`deferredPush` reads `false`). `storeContract.mjs` keeps the two entries because the snapshot
+migrations `m182_002/004/005` still name the containers; the data layer replaces each container
+with its read-only view at attach and no production reader or writer touches `db.notifications`
+or `db.notificationPrefs` directly. `scripts/m182E2E.mjs` §9 now constructs a real repository on a
+temporary in-memory database instead of an array. Benchmark (§7.3, phase S7a, synthetic, 3000
+notifications, 100 notify-then-save rounds, 14 October 2026): the blob bytes rewritten by each
+save fell from 1,511,974 (four blob rows, the notifications blob 866,961 of them) to 645,013
+(three rows), mean save time from 14.1 ms to 6.0 ms. Every other blob is still rewritten by every
+save: the whole-database-write objective is narrowed, not met.
+
+**Rollback.** `scripts/notificationsRollback.mjs` (copy-only, `VACUUM INTO`, refusals
+`LATER_SCHEMA` 4 / `NOT_CUT_OVER` 5 / `UNEXPECTED_SCHEMA` 10 / `OUTPUT_NOT_EMPTY` 1, revalidated
+before it is reported) writes every row back into the `notifications` / `notificationPrefs`
+blobs in `seq` order; nothing after the cutover is lost. Proven by booting the copy on the actual
+`812e13b` server (`SCOUTBOX_PRE_S7A_SERVER` in `testNotificationsServer.mjs`): same feeds, same
+preferences (the stored mandatory false forced on there too), and that build still writes to it;
+the S6a tool refuses a 0009 file; the real migration re-upgrades the copy to the same rows.
 
 ---
 

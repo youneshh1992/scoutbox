@@ -105,8 +105,13 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   mediaBlobs: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   moderationLog: { guarantee: 'migration', owner: 'core', reason: 'moderation hits, counted on the T&S dashboard (D2)' },
   nobodyMissedReviews: { guarantee: 'migration', owner: 'm18', reason: 'Second Look / Nobody Missed collection, guaranteed by the migration registry' },
-  notificationPrefs: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
-  notifications: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
+  // notificationPrefs / notifications: since S7a the rows live in notification_prefs / notification_pref_categories and
+  // notifications (migration 0009, repositories/notifications.mjs) and every production reader and writer goes through the
+  // repository. The entries stay because the snapshot migrations m182_002 / m182_004 / m182_005 still name the containers
+  // (they run before the data layer attaches and must keep upgrading a pre-S7a file); at attach the data layer replaces the
+  // container with its read-only view, so the guarantee the registry gives is "the name exists", and the record is the table.
+  notificationPrefs: { guarantee: 'migration', owner: 'core', reason: 'container guaranteed by the migration registry (m182_004); since S7a a read-only view over notification_prefs, written only through the notifications repository' },
+  notifications: { guarantee: 'migration', owner: 'core', reason: 'container guaranteed by the migration registry (m182_002); since S7a a read-only view over the notifications table, written only through the notifications repository' },
   openTrials: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   opportunities: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   opsEvents: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },

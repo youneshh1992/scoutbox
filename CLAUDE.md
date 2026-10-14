@@ -99,7 +99,23 @@ and design changes the Founder explicitly requests.
   hashed rows and a legacy plain-code backup is hashed on import; the
   copy-only rollback is `scripts/oneTimeCodesRollback.mjs` (outstanding codes
   invalidated and counted) and the S5 tool refuses a file carrying 0008. The
-  guardian e-mail code stays plain. `trialReports` is not stored: it is derived from
+  guardian e-mail code stays plain. **Notifications and category notification
+  preferences are live since S7a** (implemented, pending independent
+  acceptance; `repositories/notifications.mjs`, migration `0009_notifications`):
+  `db.notifications` / `db.notificationPrefs` are read-only views over the
+  repository's in-memory mirror of the three tables; the ONLY writers are
+  `notifications.create` / `coalesce` / `markRead` / `ack` / `deleteForAudience`
+  / `updatePrefs` (server.mjs `notify`, m13 delivery, m182 preferences, the
+  deletion unit); the feed is reverse INSERTION order (`seq`), never timestamp
+  order; coalescing is the pre-S7a reverse scan kept verbatim; a mandatory
+  category stored false is kept as stored and forced on by the effective view;
+  in the running server a write is STAGED — visible at once, durable inside the
+  next snapshot save together with the blob edits made alongside it, or inside
+  the enclosing unit of work's commit, never ahead of the action it announces;
+  the acknowledgment and the dispatch blob commit in one unit; the copy-only
+  rollback is `scripts/notificationsRollback.mjs` (every row written back in
+  order; nothing lost) and the S6a tool refuses a file carrying 0009.
+  `trialReports` is not stored: it is derived from
   `trials[].report` in filing order and served read-only on EVERY record,
   whatever shape it was saved with (absent, null or an array; the empty-state
   shape is kept until a report exists); the trial report route writes the
