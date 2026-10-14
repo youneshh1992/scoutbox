@@ -232,8 +232,11 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
   // `??= []` — which is reported when it is not empty, dropped, and its blob
   // row deleted so no save can bring it back. The repository never imports
   // from memory. From here on `db.emailChallenges` / `db.pairingCodes` are
-  // hash-free read-only views.
-  const codes = createOneTimeCodesRepository({ sqlite, log, now });
+  // hash-free read-only views. The repository takes part in the store's unit
+  // of work through the participant API: inside a unit its mutations join the
+  // unit (a failure poisons it even when caught); outside one they run in a
+  // transaction of their own.
+  const codes = createOneTimeCodesRepository({ sqlite, log, now, unit: store.unit });
   const codesBoot = codes.attach({ at: now() });
   if (migrations.ran.includes(ONE_TIME_CODES_MIGRATION)) {
     const record = sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(ONE_TIME_CODES_CUTOVER_META)?.value;

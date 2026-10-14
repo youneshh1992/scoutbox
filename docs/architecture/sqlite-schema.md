@@ -152,8 +152,8 @@ them.
 | `ledger` | audit | 03 | `ledger` | S6 |
 | `opsEvents` | audit | 03 | `ops_events` | S6 |
 | `sourceChanges` | audit | 03 | `source_changes` | S6 |
-| `emailChallenges` | temporary | 03 | `email_challenges` (`code_hash`, `attempts`) — **LIVE since migration 0008 (S6a, pending review)** | S6a |
-| `pairingCodes` | temporary | 03 | `pairing_codes` (`code_hash`; `player_id` without a foreign key, see 03's header) — **LIVE since migration 0008 (S6a, pending review)** | S6a |
+| `emailChallenges` | temporary | 03 | `email_challenges` (`code_hash`, `attempts`) — **LIVE since migration 0008 (S6a, pending independent acceptance)** | S6a |
+| `pairingCodes` | temporary | 03 | `pairing_codes` (`code_hash`; `player_id` without a foreign key, see 03's header) — **LIVE since migration 0008 (S6a, pending independent acceptance)** | S6a |
 | `idvQueue` | audit (verification provenance) | 03 | `idv_queue` | S6 |
 | `evidence` | persistent | 04 | `evidence`, `evidence_media`, `evidence_disputes`, `evidence_history` | S9 |
 | `coachAffiliations` | persistent | 04 | `coach_affiliations`, `coach_affiliations_history` | S9 |

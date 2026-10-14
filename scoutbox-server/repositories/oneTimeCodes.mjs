@@ -44,6 +44,15 @@
  * Whether the tables are authoritative is decided by the cutover record
  * `0008_one_time_codes` in `data_migrations`, never by the tables existing.
  *
+ * Transactions. The repository is a participant in the store's unit of work:
+ * every mutation runs through one boundary (`operation`, documented at the
+ * factory) that joins an open unit through the store's participant API, runs
+ * in a transaction of its own outside a unit, and runs as part of a raw
+ * transaction a tool or test opened without a BEGIN of its own. A failure
+ * after a statement already ran therefore poisons the enclosing unit even when
+ * the caller catches it; the unit refuses to commit and its rollback undoes the
+ * statements (review of b2a237e).
+ *
  * Snapshot formats (backups, restores, the persistence suites). An entry of
  * the `emailChallenges` / `pairingCodes` collection is ONE of:
  *   legacy  { orgId, email, code, expiresAt }       / { code, playerId, expiresAt }
@@ -295,15 +304,29 @@ export function importCodeBlobs(sqlite, { now }) {
 // ------------------------------------------------------------------ the repository
 /**
  * `newCode()` mints a plain code (injectable for tests; the default draws from
- * CODE_ALPHABET with the platform CSPRNG). Every statement here is a single
- * autocommit statement or runs inside `tx` (a transaction of its own outside a
- * unit of work, the open unit's transaction inside one), so a row written
- * inside the store's unit of work is undone by the SQL rollback; the
+ * CODE_ALPHABET with the platform CSPRNG).
+ *
+ * `unit` is the store's participant API ({ active(), join(work) }) or null (a
+ * tool, a test, the migration). Every mutation — issue, consumption, the
+ * failed-attempt count, revocation, the sweep — runs through ONE boundary,
+ * `operation` (review of b2a237e): inside an open unit of work it joins the
+ * unit through `unit.join`, so a failure after a statement already ran (the
+ * reissue's delete before a failed insert, the tenth attempt's increment
+ * before a failed cancellation) poisons the unit even when the caller catches
+ * the error — the unit cannot commit the fragment, and its one rollback undoes
+ * the statements and restores memory. Outside a unit a mutation runs in a
+ * transaction of its own; and inside a raw SQLite transaction that a tool or a
+ * test opened on the connection (no unit active) it runs as part of that
+ * transaction, with no BEGIN of its own — an open transaction is never taken
+ * for a unit. Validation is part of the operation (a refused argument inside a
+ * unit poisons it like any other failure); expected negative results (no live
+ * row, no match, nothing to delete) are return values, never failures. The
  * repository keeps no memory state (the views are read from the table on each
  * access) and needs no snapshotState/restoreState.
  */
-export function createOneTimeCodesRepository({ sqlite, now = Date.now, newCode = randomCode, log = () => {} }) {
+export function createOneTimeCodesRepository({ sqlite, now = Date.now, newCode = randomCode, log = () => {}, unit = null }) {
   if (!sqlite) throw new TypeError('the one-time-code repository needs a SQLite connection (node:sqlite); codes have no in-memory or JSON fallback');
+  if (unit !== null && (typeof unit?.active !== 'function' || typeof unit?.join !== 'function')) throw new TypeError('the one-time-code repository needs the store\'s participant API `unit` ({ active(), join(work) }) or null; a unit without join() could not report an operation\'s failure to the unit of work');
   const stmt = {
     cutover: sqlite.prepare('SELECT 1 FROM data_migrations WHERE id = ?'),
     emailByOrg: sqlite.prepare(`${EMAIL_SELECT} WHERE org_id = ?`),
@@ -325,7 +348,13 @@ export function createOneTimeCodesRepository({ sqlite, now = Date.now, newCode =
     pairCount: sqlite.prepare('SELECT COUNT(*) AS n FROM pairing_codes'),
     pairLive: sqlite.prepare('SELECT COUNT(*) AS n FROM pairing_codes WHERE expires_at > ?'),
   };
-  const tx = (fn) => (sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const inUnit = () => !!unit?.active?.();
+  /** The one transactional boundary of every mutation (see the header): joined inside a unit; the caller's own transaction when a tool opened one; a transaction of its own otherwise. */
+  const operation = (fn) => {
+    if (inUnit()) return unit.join(fn);
+    if (sqlite.isTransaction) return fn();
+    return transaction(sqlite, fn);
+  };
   /** Redeemable: present, unexpired, and below the attempt limit (an exhausted row that somehow exists is never redeemed). */
   const liveChallenge = (r, at) => !!r && r.expires_at > at && r.attempts < EMAIL_CHALLENGE_MAX_ATTEMPTS;
 
@@ -354,7 +383,7 @@ export function createOneTimeCodesRepository({ sqlite, now = Date.now, newCode =
     },
     /** Delete every expired row of both tables. Returns how many went. */
     sweepExpired(at = now()) {
-      return tx(() => ({ emailChallenges: stmt.emailSweep.run(at, EMAIL_CHALLENGE_MAX_ATTEMPTS).changes, pairingCodes: stmt.pairSweep.run(at).changes }));
+      return operation(() => ({ emailChallenges: stmt.emailSweep.run(at, EMAIL_CHALLENGE_MAX_ATTEMPTS).changes, pairingCodes: stmt.pairSweep.run(at).changes }));
     },
     counts: () => ({ emailChallenges: stmt.emailCount.get().n, pairingCodes: stmt.pairCount.get().n }),
     /** Rows that are still live at `at` (what a rollback would invalidate). */
@@ -363,12 +392,14 @@ export function createOneTimeCodesRepository({ sqlite, now = Date.now, newCode =
     // ---------------------------------------------------------- e-mail challenges
     /** Issue (or replace) the organisation's challenge. Returns the plain code ONCE, with the expiry. Durable before it returns. */
     issueEmailChallenge(orgId, email, { at = now() } = {}) {
-      if (typeof orgId !== 'string' || !orgId) throw new TypeError('an e-mail challenge needs an organisation id');
-      if (typeof email !== 'string' || !email) throw new TypeError('an e-mail challenge needs the mailbox it was sent to');
-      const code = newCode();
-      const expiresAt = at + EMAIL_CHALLENGE_TTL_MS;
-      tx(() => { stmt.emailSweep.run(at, EMAIL_CHALLENGE_MAX_ATTEMPTS); stmt.emailUpsert.run(orgId, email, hashCode(code), expiresAt); });
-      return { code, expiresAt };
+      return operation(() => {
+        if (typeof orgId !== 'string' || !orgId) throw new TypeError('an e-mail challenge needs an organisation id');
+        if (typeof email !== 'string' || !email) throw new TypeError('an e-mail challenge needs the mailbox it was sent to');
+        const code = newCode();
+        const expiresAt = at + EMAIL_CHALLENGE_TTL_MS;
+        stmt.emailSweep.run(at, EMAIL_CHALLENGE_MAX_ATTEMPTS); stmt.emailUpsert.run(orgId, email, hashCode(code), expiresAt);
+        return { code, expiresAt };
+      });
     },
     /**
      * Judge a presented code WITHOUT consuming it or counting it:
@@ -388,7 +419,7 @@ export function createOneTimeCodesRepository({ sqlite, now = Date.now, newCode =
      * `{ attemptsRemaining, invalidated }`; a missing or expired challenge counts nothing.
      */
     noteFailedEmailAttempt(orgId, { at = now() } = {}) {
-      return tx(() => {
+      return operation(() => {
         const r = stmt.emailByOrg.get(orgId);
         if (!liveChallenge(r, at)) return { attemptsRemaining: 0, invalidated: false };
         const attempts = stmt.emailFail.get(orgId).attempts;
@@ -403,22 +434,24 @@ export function createOneTimeCodesRepository({ sqlite, now = Date.now, newCode =
      * organisation's verification or not at all.
      */
     consumeEmailChallenge(orgId, code, { at = now() } = {}) {
-      const r = stmt.emailByOrg.get(orgId);
-      if (!liveChallenge(r, at) || r.code_hash !== hashCode(code)) return null;
-      const { changes } = stmt.emailConsume.run(orgId, r.code_hash, at, EMAIL_CHALLENGE_MAX_ATTEMPTS);
-      if (changes !== 1) throw new Error(`email challenges: the challenge of organisation ${orgId} could not be consumed (${changes} row(s) deleted)`);
-      return { email: r.email };
+      return operation(() => {
+        const r = stmt.emailByOrg.get(orgId);
+        if (!liveChallenge(r, at) || r.code_hash !== hashCode(code)) return null;
+        const { changes } = stmt.emailConsume.run(orgId, r.code_hash, at, EMAIL_CHALLENGE_MAX_ATTEMPTS);
+        if (changes !== 1) throw new Error(`email challenges: the challenge of organisation ${orgId} could not be consumed (${changes} row(s) deleted)`);
+        return { email: r.email };
+      });
     },
     /** Remove the organisation's challenge, live or not (an explicit act). Returns how many rows went. */
-    revokeEmailChallenge: (orgId) => stmt.emailDelete.run(orgId).changes,
+    revokeEmailChallenge: (orgId) => operation(() => stmt.emailDelete.run(orgId).changes),
 
     // ---------------------------------------------------------- pairing codes
     /** Mint (or replace) the child's pairing code. Returns the plain code ONCE, with the expiry. Durable before it returns. */
     issuePairingCode(playerId, { at = now() } = {}) {
-      if (typeof playerId !== 'string' || !playerId) throw new TypeError('a pairing code needs a player id');
-      const expiresAt = at + PAIRING_CODE_TTL_MS;
       // The code is the lookup key: a fresh draw that equals another child's live code (≈ live codes / 31^6) is redrawn, never shared.
-      return tx(() => {
+      return operation(() => {
+        if (typeof playerId !== 'string' || !playerId) throw new TypeError('a pairing code needs a player id');
+        const expiresAt = at + PAIRING_CODE_TTL_MS;
         stmt.pairSweep.run(at); stmt.pairDeleteFor.run(playerId);
         for (let draw = 0; draw < 8; draw++) {
           const code = newCode();
@@ -440,15 +473,17 @@ export function createOneTimeCodesRepository({ sqlite, now = Date.now, newCode =
      * the code goes exactly when the session it buys is committed.
      */
     consumePairingCode(code, { at = now() } = {}) {
-      const hash = hashCode(code);
-      const r = stmt.pairByHash.get(hash);
-      if (!r || r.expires_at <= at) return null;
-      const { changes } = stmt.pairConsume.run(hash, at);
-      if (changes !== 1) throw new Error(`pairing codes: the code of player ${r.player_id} could not be consumed (${changes} row(s) deleted)`);
-      return { playerId: r.player_id };
+      return operation(() => {
+        const hash = hashCode(code);
+        const r = stmt.pairByHash.get(hash);
+        if (!r || r.expires_at <= at) return null;
+        const { changes } = stmt.pairConsume.run(hash, at);
+        if (changes !== 1) throw new Error(`pairing codes: the code of player ${r.player_id} could not be consumed (${changes} row(s) deleted)`);
+        return { playerId: r.player_id };
+      });
     },
     /** Remove the child's codes, live or not (the deletion unit calls this before the player row goes). Returns how many rows went. */
-    revokePairingCodesFor: (playerId) => stmt.pairDeleteFor.run(playerId).changes,
+    revokePairingCodesFor: (playerId) => operation(() => stmt.pairDeleteFor.run(playerId).changes),
 
     /** Every stored row in its stored form (`codeHash`, never a code), for the admin backup; the views cannot round-trip and must not be exported. */
     exportEmailChallenges: () => EMAIL_CHALLENGES_TABLE.read(sqlite) ?? [],

@@ -39,6 +39,8 @@ const MIN = 60_000;
 /** A second, independent connection: what it reads is what is committed. */
 const second = (dir) => new DatabaseSync(dbFile(dir), { readOnly: true });
 const rowsOf = (dir, table) => { const s = second(dir); try { return s.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all().map((r) => ({ ...r })); } finally { s.close(); } };
+const blobOf = (dir, name) => { const s = second(dir); try { return s.prepare('SELECT value FROM collections WHERE name = ?').get(name)?.value ?? null; } finally { s.close(); } };
+const seqOf = (dir) => { const s = second(dir); try { return Number(s.prepare("SELECT value FROM meta WHERE key = 'saveSeq'").get()?.value) || 0; } finally { s.close(); } };
 const tableExists = (s, t) => !!s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
 const legacyChallenge = (over = {}) => ({ orgId: 'org-pro', email: 'recruitment@eastport.test', code: 'CHAL22', expiresAt: NOW + 20 * MIN, ...over });
 const legacyPairing = (over = {}) => ({ code: 'PAIR22', playerId: 'pl-child1', expiresAt: NOW + 10 * MIN, ...over });
@@ -233,6 +235,111 @@ test('pairing as one unit of work: a failure after the consumption and a failure
   const token = pair(null);
   assert.ok(token); assert.equal(rowsOf(dir, 'pairing_codes').length, 0); assert.equal(sessionsOf(), before + 1);
   assert.equal(L.codes.consumePairingCode(code), null, 'single use');
+  L.close(); rm(dir);
+});
+
+// ============================================================= review of b2a237e: the repository joins the store's unit of work
+/** Durable state read through an independent connection: the pairing rows, the `requests` blob and the save revision. */
+const durable = (dir) => ({ codes: rowsOf(dir, 'pairing_codes').map((r) => r.code_hash), challenges: rowsOf(dir, 'email_challenges').map((r) => [r.org_id, r.attempts]), requests: blobOf(dir, 'requests'), seq: seqOf(dir) });
+/** Run `work` in a unit of work whose caller swallows the repository error; returns what the caller caught and what the unit threw. */
+const swallowing = (L, work) => {
+  let caught = null; let outer = null;
+  try { L.store.unitOfWork(() => { L.db.requests.push({ id: 'unrelated-edit', status: 'pending' }); try { work(); } catch (e) { caught = e; } }, { snapshot: L.snapshot }); } catch (e) { outer = e; }
+  return { caught, outer };
+};
+
+test('review of b2a237e — a caught repository failure cannot commit partial work: the pairing reissue deletes the old row, then the replacement insert fails (temporary trigger) and the caller catches the error; the enclosing unit refuses to commit — the old code is kept (independent connection), the unrelated in-memory edit is restored, saveSeq is unchanged, no transaction is left open; the standalone control still rolls back on its own; an explicit retry lands', () => {
+  const dir = tempDir('otc-joined-pair'); s5File(dir);
+  const L = live(dir);
+  const first = L.codes.issuePairingCode('pl-child1');
+  L.store.save(L.snapshot());
+  const before = durable(dir); const memoryBefore = JSON.stringify(L.db.requests);
+  assert.equal(before.codes.length, 1);
+  L.store.sqlite.exec("CREATE TEMP TRIGGER t_pair_insert BEFORE INSERT ON pairing_codes BEGIN SELECT RAISE(ABORT, 'injected pairing insert failure'); END");
+  // Standalone: the repository's own transaction rolls the deletion back with the failed insert.
+  assert.throws(() => L.codes.issuePairingCode('pl-child1'), /injected pairing insert failure/);
+  assert.deepEqual(durable(dir), before, 'standalone: the old code and the revision are kept');
+  assert.equal(L.store.sqlite.isTransaction, false, 'standalone: no transaction left open');
+  // Joined, and the error swallowed by the caller.
+  const { caught, outer } = swallowing(L, () => L.codes.issuePairingCode('pl-child1'));
+  assert.match(caught?.message ?? '', /injected pairing insert failure/, 'the operation threw into its caller');
+  assert.ok(outer, 'the enclosing unit refused to commit although its work swallowed the error');
+  assert.match(outer.message, /cannot commit.*injected pairing insert failure/s);
+  assert.equal(outer.cause, caught, 'the unit names the swallowed error as its cause');
+  assert.equal(outer.unitOfWork, 'rolled_back');
+  assert.deepEqual(durable(dir), before, 'nothing durable changed: the old code, the requests blob and saveSeq');
+  assert.equal(JSON.stringify(L.db.requests), memoryBefore, 'the unrelated in-memory edit was restored');
+  assert.equal(L.store.sqlite.isTransaction, false, 'no transaction left open'); assert.equal(L.store.unitOfWorkState().active, false, 'the unit is closed');
+  assert.deepEqual(L.codes.peekPairingCode(first.code), { playerId: 'pl-child1' }, 'the old code still works');
+  // Retry, explicitly, once the fault is gone.
+  L.store.sqlite.exec('DROP TRIGGER t_pair_insert');
+  const retry = L.store.unitOfWork(() => L.codes.issuePairingCode('pl-child1'), { snapshot: L.snapshot });
+  assert.equal(rowsOf(dir, 'pairing_codes').length, 1); assert.equal(L.codes.peekPairingCode(first.code), null, 'replaced'); assert.deepEqual(L.codes.peekPairingCode(retry.code), { playerId: 'pl-child1' });
+  assert.equal(seqOf(dir), before.seq + 1, 'the retry advanced the revision exactly once');
+  L.close(); rm(dir);
+});
+
+test('review of b2a237e — e-mail side, a multi-statement operation that already wrote: the tenth wrong attempt increments the count, then the cancellation fails (temporary trigger on the delete); standalone the count stays at nine; inside a unit whose caller catches the error the whole unit rolls back — nine in the file, the unrelated edit restored, saveSeq unchanged, no transaction open; the retry cancels the challenge', () => {
+  const dir = tempDir('otc-joined-mail'); s5File(dir);
+  const L = live(dir);
+  const { code } = L.codes.issueEmailChallenge('org-pro', 'x@eastport.test');
+  for (let i = 1; i < EMAIL_CHALLENGE_MAX_ATTEMPTS; i++) L.codes.noteFailedEmailAttempt('org-pro');
+  L.store.save(L.snapshot());
+  const before = durable(dir); const memoryBefore = JSON.stringify(L.db.requests);
+  assert.deepEqual(before.challenges, [['org-pro', EMAIL_CHALLENGE_MAX_ATTEMPTS - 1]]);
+  L.store.sqlite.exec("CREATE TEMP TRIGGER t_mail_delete BEFORE DELETE ON email_challenges BEGIN SELECT RAISE(ABORT, 'injected challenge delete failure'); END");
+  assert.throws(() => L.codes.noteFailedEmailAttempt('org-pro'), /injected challenge delete failure/);
+  assert.deepEqual(durable(dir), before, 'standalone: the increment went back with the failed cancellation');
+  assert.equal(L.store.sqlite.isTransaction, false);
+  const { caught, outer } = swallowing(L, () => L.codes.noteFailedEmailAttempt('org-pro'));
+  assert.match(caught?.message ?? '', /injected challenge delete failure/);
+  assert.ok(outer, 'the enclosing unit refused to commit'); assert.match(outer.message, /cannot commit.*injected challenge delete failure/s); assert.equal(outer.unitOfWork, 'rolled_back');
+  assert.deepEqual(durable(dir), before, 'the count is still nine, the blob and saveSeq unchanged');
+  assert.equal(JSON.stringify(L.db.requests), memoryBefore, 'memory restored');
+  assert.equal(L.store.sqlite.isTransaction, false); assert.equal(L.store.unitOfWorkState().active, false);
+  assert.deepEqual(L.codes.checkEmailChallenge('org-pro', code), { status: 'ok', email: 'x@eastport.test' }, 'the challenge is still live at nine');
+  L.store.sqlite.exec('DROP TRIGGER t_mail_delete');
+  assert.deepEqual(L.store.unitOfWork(() => L.codes.noteFailedEmailAttempt('org-pro'), { snapshot: L.snapshot }), { attemptsRemaining: 0, invalidated: true }, 'the retry cancels the challenge');
+  assert.deepEqual(rowsOf(dir, 'email_challenges'), []); assert.deepEqual(L.codes.checkEmailChallenge('org-pro', code), { status: 'none' }); assert.equal(seqOf(dir), before.seq + 1);
+  L.close(); rm(dir);
+});
+
+test('review of b2a237e — the boundary itself: joined successes commit with the unit (issue, consume and an unrelated edit, one revision); an uncaught failure rolls back as before; expected negative results stay return values and never poison a unit; a validation failure is part of the operation (caught inside a unit, it still poisons the unit); a raw SQLite transaction a tool opened is honoured without a nested BEGIN and is not mistaken for a unit (its ROLLBACK undoes the operation); a malformed participant API is refused at construction', () => {
+  const dir = tempDir('otc-joined-edge'); s5File(dir);
+  const L = live(dir);
+  L.store.save(L.snapshot());
+  // Joined successes.
+  const seq0 = seqOf(dir);
+  const issued = L.store.unitOfWork(() => { const p = L.codes.issuePairingCode('pl-child1'); L.db.requests.push({ id: 'edit-ok' }); assert.deepEqual(L.codes.consumePairingCode(p.code), { playerId: 'pl-child1' }); return p; }, { snapshot: L.snapshot });
+  assert.ok(issued.code); assert.deepEqual(rowsOf(dir, 'pairing_codes'), []); assert.match(blobOf(dir, 'requests'), /edit-ok/); assert.equal(seqOf(dir), seq0 + 1, 'one commit, one revision');
+  // An uncaught failure.
+  assert.throws(() => L.store.unitOfWork(() => { L.codes.issuePairingCode('pl-child1'); throw new Error('ordinary failure'); }, { snapshot: L.snapshot }), /ordinary failure/);
+  assert.deepEqual(rowsOf(dir, 'pairing_codes'), []); assert.equal(seqOf(dir), seq0 + 1);
+  // Expected negatives inside a unit are results, not failures: the unit commits.
+  L.store.unitOfWork(() => {
+    assert.equal(L.codes.consumePairingCode('NOPE22'), null); assert.equal(L.codes.consumeEmailChallenge('org-pro', 'NOPE22'), null);
+    assert.deepEqual(L.codes.checkEmailChallenge('org-pro', 'NOPE22'), { status: 'none' }); assert.deepEqual(L.codes.noteFailedEmailAttempt('org-pro'), { attemptsRemaining: 0, invalidated: false });
+    assert.equal(L.codes.revokePairingCodesFor('pl-nobody'), 0); assert.equal(L.codes.revokeEmailChallenge('org-pro'), 0); assert.deepEqual(L.codes.sweepExpired(), { emailChallenges: 0, pairingCodes: 0 });
+    L.db.requests.push({ id: 'edit-after-negatives' });
+  }, { snapshot: L.snapshot });
+  assert.match(blobOf(dir, 'requests'), /edit-after-negatives/); assert.equal(seqOf(dir), seq0 + 2);
+  // Validation is inside the boundary.
+  const v = swallowing(L, () => L.codes.issuePairingCode(''));
+  assert.match(v.caught?.message ?? '', /player id/); assert.ok(v.outer, 'a caught validation failure still poisons the unit'); assert.match(v.outer.message, /cannot commit.*player id/s);
+  assert.equal(seqOf(dir), seq0 + 2); assert.doesNotMatch(blobOf(dir, 'requests'), /unrelated-edit/);
+  // A raw transaction on the store's connection, outside any unit (a tool, a test): honoured, no BEGIN of its own, no unit inferred.
+  L.store.sqlite.exec('BEGIN');
+  const raw = L.codes.issuePairingCode('pl-child1');
+  assert.equal(L.store.sqlite.isTransaction, true, 'the caller still owns the transaction'); assert.equal(L.store.unitOfWorkState().active, false, 'not a unit');
+  assert.deepEqual(L.codes.peekPairingCode(raw.code), { playerId: 'pl-child1' }, 'visible inside the transaction');
+  L.store.sqlite.exec('ROLLBACK');
+  assert.deepEqual(rowsOf(dir, 'pairing_codes'), [], "the tool's ROLLBACK undid the operation"); assert.equal(L.codes.peekPairingCode(raw.code), null);
+  // The same on a bare connection with no store at all.
+  const bare = openRaw(dir); const codes = createOneTimeCodesRepository({ sqlite: bare, now: () => NOW });
+  bare.exec('BEGIN'); const b = codes.issuePairingCode('pl-child1'); assert.equal(bare.isTransaction, true); bare.exec('ROLLBACK'); assert.equal(codes.peekPairingCode(b.code), null);
+  assert.throws(() => createOneTimeCodesRepository({ sqlite: bare, unit: { active: () => false } }), /participant API/, 'a unit without join() is refused');
+  assert.throws(() => createOneTimeCodesRepository({ sqlite: bare, unit: 'yes' }), /participant API/);
+  bare.close();
   L.close(); rm(dir);
 });
 

@@ -18,7 +18,7 @@ review-accepted at `2178c5b`** (the twelve `player_*` tables and `0007_player_su
 correction round; its evidence-based note is
 [`s5-player-subrecords.md`](./s5-player-subrecords.md) and its status block is in §S5; the
 acceptance is a bounded code-review conclusion, not a production-deployment authorization),
-**S6a implemented, pending independent review** (the one-time-code tables `email_challenges` and
+**S6a implemented, pending independent acceptance** (the one-time-code tables `email_challenges` and
 `pairing_codes`, migration `0008_one_time_codes`, its copy-only rollback; not production-approved;
 [`s6-readiness-review.md`](./s6-readiness-review.md) §10 records what was built and how it was
 verified), **the rest of S6 not started** (the eight audit tables; they wait for S4b, review §4.1)
@@ -1241,7 +1241,7 @@ performance, existing tests, what this plan is not).
 > `medical` / `programme` update is refused while child rows exist, with boot, backup and rollback
 > refusing an already inconsistent file (`INCONSISTENT_ROWS`); the reviewer's reproduction reports
 > 0 of 3 on the corrected tree (note §6). S4a stays review-accepted at
-> `480afdb`; S4b is not implemented; S6 is not started (S6a has since been implemented, pending review; §S6).
+> `480afdb`; S4b is not implemented; S6 is not started (S6a has since been implemented, pending independent acceptance; §S6).
 >
 > **Status (S5): review-accepted at `2178c5b`** (12 October 2026). The independent reviewer
 > verified the handoff archive's SHA-256, re-ran the original `review-132eda2-reproductions.mjs`
@@ -1253,10 +1253,12 @@ performance, existing tests, what this plan is not).
 
 ### S6 — Safeguarding and audit (`blocks`, `reports`, `moderation_log`, `org_notes`, `ledger`, `ops_events`, `source_changes`, `idv_queue`, `email_challenges`, `pairing_codes`)
 
-> **Status (S6a, the one-time codes): implemented, pending independent review** — one local
-> implementation commit on `feat/sqlite-schema` on top of `7fbce74`, plus one local correction
-> commit for two review findings (the challenge code's copy in the persisted mail outbox; stored
-> attempt-count validation — readiness review §10.6); not pushed, merged, deployed or run on real
+> **Status (S6a, the one-time codes): implemented, pending independent acceptance** — one local
+> implementation commit on `feat/sqlite-schema` on top of `7fbce74`, plus two local correction
+> commits for review findings (the challenge code's copy in the persisted mail outbox and stored
+> attempt-count validation — readiness review §10.6; the repository's participation in the
+> store's unit of work, so a caught operation failure can no longer commit partial work — §10.7);
+> not pushed, merged, deployed or run on real
 > data; not production-approved. `email_challenges` and `pairing_codes` are live tables (migration
 > `0008_one_time_codes`, `repositories/oneTimeCodes.mjs`): codes stored as sha256 hashes of the
 > normalised value, expiry judged on every read and swept, attempt counting on the challenge, four

@@ -10,7 +10,7 @@ are those of `2178c5b`. The DDL this review reconciles against is
 accepted) and the plan is [`sqlite-migration-plan.md`](./sqlite-migration-plan.md) §S6, whose
 server line numbers predate S4a and S5 and are superseded by the ones here.
 
-> **Update (S6a implemented, pending independent review).** §§1–9 are the review as written at
+> **Update (S6a implemented, pending independent acceptance; not production-approved).** §§1–9 are the review as written at
 > `2178c5b` and are kept as the record of the analysis; their line numbers are those of that
 > commit. The one-time-code sub-step proposed in §6 has since been implemented on top of
 > `7fbce74` as migration `0008_one_time_codes`; **§10 records what was actually built**, where it
@@ -23,7 +23,8 @@ product choices** (listed in §8 and §9; nothing is decided by implication).
 Sections: 1 where S6 stands · 2 the ten domains, one by one · 3 deletion paths and
 dependencies · 4 append-only, `RESTRICT` and the current hard delete · 5 the one-time codes ·
 6 the smallest safe sub-step · 7 test and rollback design · 8 migration registry · 9 dependency
-table · 10 S6a as implemented (pending review).
+table · 10 S6a as implemented (pending independent acceptance; §10.6 and §10.7 are the two
+review-correction rounds).
 
 ---
 
@@ -649,10 +650,12 @@ Nothing is registered by this review. Existing identifiers never change.
 
 ---
 
-## 10. S6a as implemented (pending independent review; not production-approved)
+## 10. S6a as implemented (pending independent acceptance; not production-approved)
 
-One local implementation commit (`e020aba`) on `feat/sqlite-schema` on top of `7fbce74`, and one
-local correction commit for two review findings on top of it (§10.6). Nothing pushed, merged, deployed or
+One local implementation commit (`e020aba`) on `feat/sqlite-schema` on top of `7fbce74`, one
+local correction commit for two review findings on top of it (`b2a237e`, §10.6), and one local
+correction commit for the independent review's transaction-participation finding on top of that
+(§10.7). Nothing pushed, merged, deployed or
 run on real data. S4b stays unimplemented, today's account-deletion behaviour is unchanged apart
 from the pairing-code row now going inside the same deletion unit, the eight audit tables are not
 started, and the guardian sign-up e-mail code stays plain. The Founder's full-birth-date choice
@@ -766,7 +769,8 @@ unchanged); no independent review has happened; nothing here is production appro
 ### 10.6 Review-and-correction round on `e020aba` (two findings)
 
 A bounded round on two review findings, starting from `e020aba`; one local correction commit.
-Status unchanged: **S6a implemented, pending independent review; not production-approved.**
+Status after this round: **S6a implemented, pending independent review; not production-approved**
+(the independent review that followed found one further defect, corrected in §10.7).
 Addressing these two findings is not an independent review of the whole implementation. S4b
 remains unimplemented, the audit tables remain pending, and country retention and the
 child-status stamp remain undecided.
@@ -847,3 +851,89 @@ Not run in this round: the other battery suites, the browser suites (no client c
 `7fbce74` old-build proof (no rollback or migration behaviour it exercises changed, apart from
 the counts, which the unit suite covers). The results in §10.5 are the previous implementer's
 round and were not re-run here, except as part of `npm test`.
+
+### 10.7 Independent review of `b2a237e`: the repository did not take part in the unit of work
+
+The independent review of the `b2a237e` package accepted the two §10.6 corrections and found one
+further defect, reproduced by its own script (`review-b2a237e-joined-failure.mjs`, synthetic
+temporary database, independent read connection). One local correction commit on top of
+`b2a237e`. Status: **S6a implemented, pending independent acceptance; not production-approved.**
+
+**Finding — a caught one-time-code repository failure could commit partial work.** The
+repository's transactional helper was `sqlite.isTransaction ? fn() : transaction(sqlite, fn)`,
+and `attachDataLayer` constructed it without the store's participant API. Inside an open unit of
+work `isTransaction` is true, so an operation simply ran its statements in the unit's
+transaction without going through `unit.join`: a failure after a statement had already run did
+not poison the unit. *Reproduced* on `b2a237e`: a pairing reissue deletes the child's old row and
+then fails at the replacement insert (a temporary `BEFORE INSERT` trigger raising `ABORT`, which
+cancels only the failing statement). Standalone, the repository's own transaction rolled back and
+the old code survived. Inside `store.unitOfWork`, with the work catching the exception, the unit
+reported success: the old code was permanently gone, an unrelated `requests` edit committed, and
+`saveSeq` advanced. *Qualification:* this is a repository/unit-of-work contract defect. The HTTP
+mint route does not catch this exception inside a unit, so no observed API or phone failure is
+claimed, and normal successful redemption was never broken. Four mutations
+(`consumeEmailChallenge`, `consumePairingCode`, `revokeEmailChallenge`, `revokePairingCodesFor`)
+had no boundary at all (bare statements), and the argument validation of the two issue methods
+ran before the boundary.
+
+**Correction.** `createOneTimeCodesRepository` takes `unit` (the store's participant API, or
+null for a tool, a test or the migration; a malformed value is refused at construction) and
+`attachDataLayer` passes `store.unit`. Every mutation — issue, consumption, the failed-attempt
+count, revocation, the sweep — runs through one boundary, `operation`:
+
+| State of the connection | What `operation(fn)` does |
+|---|---|
+| a store unit of work is open (`unit.active()`) | `unit.join(fn)`: the operation runs inside the unit's transaction through the poisoning boundary; a throw is rethrown unchanged and the unit can no longer commit, even if the caller catches it |
+| no unit, but a raw SQLite transaction is open (a tool, a test, the migration) | `fn()` as part of that transaction: no BEGIN of its own; the caller owns the transaction, and it is never taken for a unit |
+| nothing open | `transaction(sqlite, fn)`: BEGIN, the statements, COMMIT, or ROLLBACK and rethrow |
+
+No nested BEGIN, no savepoint; the store contract (`store.mjs`) is unchanged. Argument
+validation now runs inside the boundary (a refused argument inside a unit poisons it like any
+other failure). Expected negative results — no live code, no match, nothing to delete — stay
+return values (`null`, `{ status: 'none' }`, `{ attemptsRemaining: 0, invalidated: false }`, a
+zero count) and never poison a unit. The routes are unchanged.
+
+**Regression tests** (`scripts/testOneTimeCodes.mjs`, three new checks; each shown to fail on
+unchanged `b2a237e` for its intended reason, the log in the handoff):
+
+1. *The reviewer's case*: real store, attached data layer, independent read connection. The
+   standalone control still rolls back. With the work catching the error, the enclosing unit now
+   throws (`cannot commit … injected pairing insert failure`, `cause` the swallowed error,
+   `unitOfWork: 'rolled_back'`), the old code, the `requests` blob and `saveSeq` are unchanged in
+   the file, the in-memory edit is restored, no transaction is left open, and an explicit retry
+   lands with the revision advanced once.
+2. *The e-mail side, a multi-statement operation that already wrote*: at nine attempts the tenth
+   wrong code increments the count and then its cancellation fails (temporary `BEFORE DELETE`
+   trigger). Standalone the count stays at nine; joined and caught, the whole unit rolls back
+   (nine in the file, memory restored, `saveSeq` unchanged); the retry cancels the challenge.
+3. *The boundary itself*: joined successes commit with the unit (one revision); an uncaught
+   failure rolls back as before; every expected negative inside a unit is a result and the unit
+   commits; a caught validation failure poisons the unit; a raw transaction on the store's
+   connection outside a unit, and on a bare connection without a store, is honoured without a
+   nested BEGIN and undone by the caller's ROLLBACK; a participant API without `join()` is
+   refused.
+
+The existing checks that remain in force: the confirmation and pairing units under an injected
+failure after the consumption and under a real COMMIT failure (§10.3 item 3), the concurrent
+redemption race, the server suite's SIGKILL and COMMIT-fault cases, and `testUnitOfWork.mjs`.
+
+**Verification of this round** (synthetic data in temporary directories; new evidence, not a
+re-labelling of earlier rounds; logs in the handoff). The source under test was identical to the
+committed source; only documentation was edited after the runs started.
+
+| What | Runtime | Command | Result |
+|---|---|---|---|
+| The reviewer's script, unchanged, before the correction | 22.22.2 | `node review-b2a237e-joined-failure.mjs <server>` | **exit 1, REPRODUCED** (the standalone control passes; the unit committed the fragment) |
+| The three new regressions on unchanged `b2a237e` | 22.22.2 | `TEST_ONLY=… node scripts/testOneTimeCodes.mjs` | each exit 1 for its intended reason |
+| The reviewer's script, unchanged, after the correction | 22.22.2 and real 22.16.0 | same | **exit 0, CORRECTED**: SQL and memory preserved after the caught error, retry permitted |
+| `scripts/testOneTimeCodes.mjs` | 22.22.2 and real 22.16.0 | `node scripts/testOneTimeCodes.mjs` | 21 checks (18 + 3), exit 0 |
+| `scripts/testUnitOfWork.mjs` | 22.22.2 and real 22.16.0 | `node scripts/testUnitOfWork.mjs` | 17 checks, exit 0 |
+| `scripts/testOneTimeCodesServer.mjs` | 22.22.2 and real 22.16.0 | `node scripts/testOneTimeCodesServer.mjs` | 10 checks, exit 0 |
+| The two §10.6 reproductions, unchanged, SendGrid stubbed locally | 22.22.2 and real 22.16.0 | `node repro-finding1-backup-plaintext.mjs <server>`, `node repro-finding2-attempts.mjs <server>` | both NOT REPRODUCED, exit 0 |
+| `npm test` (19 suites; the runtime suite probing the real 22.15.1 and 22.16.0 binaries) | 22.22.2 | `SCOUTBOX_TEST_NODE_BINS=<22.15.1>:<22.16.0> npm test` | 19 suites pass, exit 0 (22.15.1 refused as below the contract, 22.16.0 supported — both real probes, not skipped) |
+| `apiE2E` against a fresh server | 22.22.2 | `node server.mjs` + `node scripts/apiE2E.mjs` | 130 checks, exit 0 |
+
+Not run in this round: the full `npm test` chain on the real 22.16.0 binary (the focused checks
+above were run there; the chain was run on 22.22.2 with the real binaries probed), the wider E2E
+battery and the browser suites (no route, client, mail, backup or migration behaviour changed),
+and the `7fbce74` old-build proof. Nothing here is production approval.

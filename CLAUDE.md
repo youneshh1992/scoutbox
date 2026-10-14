@@ -77,13 +77,19 @@ and design changes the Founder explicitly requests.
   (and `insert` / `restore`, which write a record's arrays as rows) — a route
   that writes a child row together with a blob, an audit row or a column runs
   in one unit of work. **One-time codes are live since S6a** (pending
-  review; `repositories/oneTimeCodes.mjs`, migration `0008_one_time_codes`):
+  independent acceptance, not production-approved;
+  `repositories/oneTimeCodes.mjs`, migration `0008_one_time_codes`):
   the club e-mail challenge and the child pairing code are rows of
   `email_challenges` / `pairing_codes` stored only as sha256 hashes of the
   normalised code; `db.emailChallenges` / `db.pairingCodes` are hash-free
   read-only views; issuance is durable before the code is sent; the
   confirmation and the pairing exchange each consume the code in ONE unit of
-  work with the organisation's verification / the session; wrong codes are
+  work with the organisation's verification / the session; every mutation of
+  the repository joins an open unit of work through the store's participant
+  API (`unit.join`), so a failure after a statement poisons the unit even when
+  its caller catches the error, runs in a transaction of its own outside a
+  unit, and runs inside a raw transaction a tool opened without a BEGIN of
+  its own (an open transaction is never taken for a unit); wrong codes are
   counted (ten cancel a challenge; a row at the limit is never redeemed, and
   a stored-format entry must carry a count from 0 to 9) and rate-limited; the
   challenge mail is sent with `secrets: [code]` so the persisted outbox record

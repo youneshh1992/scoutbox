@@ -704,7 +704,7 @@ claim (the trials stand). `GET /capabilities` reports the rows per table under
 4. **Rollback, if needed.** `node scripts/playerSubrecordsRollback.mjs
    <data-dir> <fresh-empty-dir>`, then start the S4a build on the output.
 
-### One-time codes (live since migration `0008`, S6a — implemented, pending review)
+### One-time codes (live since migration `0008`, S6a — implemented, pending independent acceptance; not production-approved)
 
 The club e-mail-domain challenge (`POST /org/verification/email` →
 `…/confirm`) and the child pairing code (`POST
@@ -757,6 +757,21 @@ are unchanged.
   code live and changes nothing else; a crash can no longer leave a committed
   session beside a still-live code (before S6a the same code could buy a
   second session after a restart).
+- **The repository takes part in the unit of work.** Every one-time-code
+  mutation (issue, consumption, the failed-attempt count, revocation, the
+  sweep) runs through one boundary: inside an open unit of work it joins the
+  unit through the store's participant API, so a failure after a statement
+  already ran — a reissue that deleted the old code before its insert failed,
+  a tenth wrong attempt counted before its cancellation failed — poisons the
+  unit even when the calling code catches the error; the unit refuses to
+  commit, its one rollback undoes the statements and restores memory, and an
+  explicit retry runs the whole operation again. (Until the review correction
+  of `b2a237e` such a caught failure let the enclosing unit commit the
+  fragment.) Outside a unit a mutation runs in a transaction of its own; inside
+  a raw SQLite transaction a tool or test opened on the connection it runs as
+  part of that transaction with no BEGIN of its own, and an open transaction
+  is never taken for a unit. Expected negative results — no live code, no
+  match, nothing to delete — are return values and never poison a unit.
 - **Wrong codes.** A wrong confirmation is counted on the challenge
   (`attempts`, which survives a restart); the tenth cancels it
   (`400 CODE_INVALID` says so; the organisation requests a fresh code). A row
