@@ -330,4 +330,53 @@ await test('backup/restore: the admin backup exports the notifications and prefe
   rm(dir, restored, bad);
 });
 
+// ------------------------------------------------------------- review of ba6956d, finding 1: effects after the durable save, through the real server
+/** An SSE stream for one session: the frames it received, and a close. */
+async function openSse(S, token) {
+  const t = await S.j('POST', '/events/ticket', {}, token); assert.equal(t.status, 200, t.text);
+  const ctl = new AbortController();
+  const frames = [];
+  const res = await fetch(`http://127.0.0.1:${S.port}/events?ticket=${t.body.ticket}`, { signal: ctl.signal });
+  const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '';
+  (async () => { try { for (;;) { const { value, done } = await reader.read(); if (done) break; buf += dec.decode(value, { stream: true }); let i; while ((i = buf.indexOf('\n\n')) >= 0) { const chunk = buf.slice(0, i); buf = buf.slice(i + 2); const line = chunk.split('\n').find((l) => l.startsWith('data: ')); if (line) { try { frames.push(JSON.parse(line.slice(6))); } catch { /* ping */ } } } } } catch { /* closed */ } })();
+  for (let i = 0; i < 100 && !frames.some((f) => f.event === 'connected'); i++) await new Promise((r) => setTimeout(r, 20));
+  return { frames, notifyFrames: () => frames.filter((f) => f.event === 'notify'), close: () => ctl.abort() };
+}
+
+await test('review of ba6956d, finding 1 — through the real server: a message whose snapshot save fails at the REAL COMMIT (development seam internal:save.sqlite_commit) delivers NO push (admin push log), NO notify SSE frame and NO replay entry, and leaves no notification row; the next successful save (a second write) commits the pending notification and delivers its push and its SSE frame exactly once; a coalescing repeat delivers one SSE frame and no second push', async () => {
+  const dir = tempDir('s7a-rv-effects'); const S = await boot(dir);
+  const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const kola = await playerLogin(S, 'pl-adeyemi');
+  const { channelId } = await openThread(S, maria, kola);
+  const sse = await openSse(S, kola);
+  const pushes = async () => (await S.j('GET', '/admin/push-log', undefined, null, A)).body.filter((p) => p.audience?.kind === 'player' && p.audience.id === 'pl-adeyemi' && /sent a message/.test(p.body ?? ''));
+  const rows = () => q1(dir, 'SELECT COUNT(*) AS n FROM notifications WHERE audience_id = ? AND type = ?', 'pl-adeyemi', 'message').n;
+  assert.equal((await pushes()).length, 0); assert.equal(sse.notifyFrames().length, 0);
+  // The save that carries the message and its notification fails at COMMIT.
+  assert.equal((await S.j('POST', '/__faults', { rules: 'internal:save.sqlite_commit:1' })).status, 200);
+  const logBefore = S.log().length;
+  const first = await S.j('POST', `/org/channels/${channelId}/messages`, { text: 'First, under a failing save.' }, maria);
+  assert.equal(first.status, 201, first.text);
+  for (let i = 0; i < 100 && !/snapshot save failed/.test(S.log().slice(logBefore)); i++) await new Promise((r) => setTimeout(r, 20));
+  assert.match(S.log().slice(logBefore), /snapshot save failed: FOREIGN KEY constraint failed/, 'the save really failed at COMMIT');
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(rows(), 0, 'no notification row (the save rolled back)');
+  assert.equal((await pushes()).length, 0, 'no push before the durable save'); assert.equal(sse.notifyFrames().length, 0, 'no SSE notify frame before the durable save');
+  const replay = await openSse(S, kola); // a fresh stream with a catch-up: nothing to replay
+  assert.equal(replay.notifyFrames().length, 0, 'no replay entry either'); replay.close();
+  const feed = await feedOf(S, '/player/notifications', kola); assert.equal(feed.filter((n) => n.type === 'message').length, 1, 'the feed (memory) shows the pending notification, as every unsaved blob edit shows');
+  // A second write saves successfully: the pending notification commits and its effects run once.
+  assert.equal((await S.j('POST', `/org/channels/${channelId}/read`, {}, maria)).status, 200);
+  for (let i = 0; i < 100 && rows() === 0; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(rows(), 1, 'the retry committed the notification with the read receipt');
+  for (let i = 0; i < 100 && sse.notifyFrames().length === 0; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal((await pushes()).length, 1, 'exactly one push, after the commit'); assert.equal(sse.notifyFrames().length, 1, 'exactly one SSE notify frame, after the commit');
+  // A coalescing repeat: one more SSE frame, no second push.
+  assert.equal((await S.j('POST', `/org/channels/${channelId}/messages`, { text: 'Second — the same sentence for the recipient.' }, maria)).status, 201);
+  for (let i = 0; i < 100 && sse.notifyFrames().length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(sse.notifyFrames().length, 2); assert.equal((await pushes()).length, 1, 'no second push for a coalesced notification'); assert.equal(rows(), 1);
+  assert.equal(q1(dir, 'SELECT repeat_count AS n FROM notifications WHERE audience_id = ? AND type = ?', 'pl-adeyemi', 'message').n, 2);
+  sse.close();
+  await S.stop(); rm(dir);
+});
+
 console.log(`\n${passed} notification server checks passed`);

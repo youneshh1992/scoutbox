@@ -181,6 +181,8 @@ CREATE TABLE message_attachments (
 --   audience.kind -> audience_kind (no CHECK: polymorphic and open — the reports path writes a
 --                    'system' audience today, and a stored row must keep importing)
 --   audience.id   -> audience_id (polymorphic: players.id / guardians.id / org_users.id; no FK)
+--                    An audience is these two fields only: an entry whose audience carries any
+--                    other field refuses the whole import or snapshot write (nothing is dropped).
 --   type          -> type (open set registered in m182/notificationPrefs.mjs TYPE_CATEGORY;
 --                    unknown types are delivered by design → no CHECK)
 --   text          -> text
@@ -196,11 +198,14 @@ CREATE TABLE message_attachments (
 --   actionRequired.deadline -> action_deadline_at
 --   actionRequired.ackedAt  -> action_acked_at
 --   actionRequired.ackedBy  -> action_acked_by (the audience_id that acked; same kind as audience_kind)
---   (unknown fields)        -> extra_json (NEW: kept as given, spread back onto the row on read)
+--   (unknown fields)        -> extra_json (NEW: kept as given — every own key of the entry, an own
+--                              "__proto__" key included — and spread back onto the row on read)
 --   target        -> derived, not stored: resolved at read time (notificationsFor)
 -- notes: writes are STAGED in the running server: visible in memory at once, durable inside the
 --   next snapshot save together with the blob edits made alongside (a message, a request), or
---   inside the enclosing unit of work's commit — never ahead of the action announced. Backups
+--   inside the enclosing unit of work's commit — never ahead of the action announced; the push
+--   and the live `notify` event are effects of the write and go out only once that save
+--   committed (review of ba6956d, finding 1). Backups
 --   export the rows in the legacy collection shape in seq order; a backup from any build restores
 --   through migration 0009. An entry the validators refuse (no coercion) refuses the whole import
 --   (NOTIFICATIONS_IMPORT_BLOCKED, entry index and reason, never the text).

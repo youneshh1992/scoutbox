@@ -493,7 +493,9 @@ test('immediate mode (tools, tests, the migration): a mutation runs in a transac
   const dir = tempDir('ntf-immediate'); s6File(dir);
   const L = live(dir); L.save();
   // A second, immediate-mode instance on the store's connection (a tool sharing the connection with the running process is not a server scenario; this proves the boundary).
+  // Since the review of ba6956d (finding 2) an instance given the participant API joins a unit only once its save hook is registered: the hook is how the unit's rollback restores its memory.
   const tool = createNotificationsRepository({ sqlite: L.store.sqlite, now: () => NOW, nextId, unit: L.store.unit });
+  L.store.setSaveHook(tool.saveHook());
   L.store.sqlite.exec("CREATE TEMP TRIGGER t_cat_ins BEFORE INSERT ON notification_pref_categories BEGIN SELECT RAISE(ABORT, 'injected category insert failure'); END");
   assert.throws(() => tool.updatePrefs('org_user', 'usr-9', { categories: { mentions: false }, emailIntent: true }), /injected category insert failure/);
   assert.equal(rowsOf(dir, 'notification_prefs').length, 0, 'standalone: the parent row went back with the failed category row'); assert.equal(L.store.sqlite.isTransaction, false);
@@ -587,6 +589,160 @@ test('snapshot dispatcher: after the cutover a tool reads both collections in th
   assert.deepEqual(blob(t2.sqlite, 'notifications').map((n) => n.id), ['ntf-pre'], 'written as a blob'); t2.sqlite.close();
   { const s = openRaw(pre); migrate(s); assert.deepEqual(s.prepare('SELECT id FROM notifications').all().map((r) => r.id), ['ntf-pre']); s.close(); }
   rm(dir, pre);
+});
+
+// ============================================================= review of ba6956d: the three corrected findings
+/** Make the REAL COMMIT of the next transaction on `s` fail: a deferred foreign key violated by a trigger on the notifications insert/update. */
+function armCommitFailure(s, on = 'INSERT') {
+  s.exec('CREATE TEMP TABLE IF NOT EXISTS rv_parent (id TEXT PRIMARY KEY); CREATE TEMP TABLE IF NOT EXISTS rv_child (parent_id TEXT NOT NULL REFERENCES rv_parent(id) DEFERRABLE INITIALLY DEFERRED)');
+  s.exec(`CREATE TEMP TRIGGER rv_commit_fail AFTER ${on} ON notifications BEGIN INSERT INTO rv_child (parent_id) VALUES ('missing-on-purpose'); END`);
+  return () => s.exec('DROP TRIGGER rv_commit_fail');
+}
+
+test('review of ba6956d, finding 2 — an owned immediate transaction that fails restores the repository\'s memory, not only the rows: a failing INSERT (statement failure), a failing category insert after the parent upsert (multi-statement), a failing UPDATE under a coalesce (in-place mutation) and a REAL COMMIT failure each leave the mirror, the id index, the counts, the preferences and previously held read-only views exactly as before; the retry with the same id and with different preference values lands without any reload', () => {
+  const dir = tempDir('ntf-rv-owned'); s6File(dir);
+  const s = openRaw(dir); migrate(s);
+  const repo = bare(s);
+  const first = repo.create({ audience: ORG_USER, type: 'message', text: 'first', refId: 'chan-1', category: 'messages', deferredPush: false, at: NOW - MIN });
+  repo.updatePrefs('org_user', 'usr-1', { categories: { mentions: false }, emailIntent: false });
+  const prefView = repo.prefsFor('org_user', 'usr-1');
+  const snapshot = () => ({ rows: plain(repo.exportRows()), prefs: plain(repo.exportPrefs()), counts: repo.counts(), unread: repo.unreadCount('org_user', 'usr-1'), feed: repo.forAudience('org_user', 'usr-1').map((n) => n.id), first: plain(first), pref: plain(prefView), byId: !!repo.byId(first.id), sql: s.prepare('SELECT COUNT(*) AS n FROM notifications').get().n + s.prepare('SELECT COUNT(*) AS n FROM notification_pref_categories').get().n });
+  const before = snapshot();
+  // 1. A failing INSERT.
+  s.exec("CREATE TEMP TRIGGER rv_ins BEFORE INSERT ON notifications BEGIN SELECT RAISE(ABORT, 'synthetic insert failure'); END");
+  assert.throws(() => repo.create({ id: 'ntf-review-one', audience: PLAYER, type: 'message', text: 'Synthetic', refId: null, category: null, deferredPush: false }), /synthetic insert failure/);
+  assert.deepEqual(snapshot(), before, 'after a failed insert: nothing in memory either'); assert.equal(repo.byId('ntf-review-one'), null); assert.equal(s.isTransaction, false);
+  s.exec('DROP TRIGGER rv_ins');
+  const retried = repo.create({ id: 'ntf-review-one', audience: PLAYER, type: 'message', text: 'Synthetic', refId: null, category: null, deferredPush: false });
+  assert.equal(retried.id, 'ntf-review-one', 'the same id is accepted on the retry'); assert.equal(repo.count(), 2); assert.equal(s.prepare('SELECT COUNT(*) AS n FROM notifications').get().n, 2);
+  const after1 = snapshot();
+  // 2. A multi-statement preference write whose second statement fails.
+  s.exec("CREATE TEMP TRIGGER rv_cat BEFORE INSERT ON notification_pref_categories BEGIN SELECT RAISE(ABORT, 'synthetic category failure'); END");
+  assert.throws(() => repo.updatePrefs('org_user', 'usr-1', { categories: { mentions: true, combine: false }, emailIntent: true }), /synthetic category failure/);
+  assert.deepEqual(snapshot(), after1, 'the preference record is exactly as before (emailIntent, categories, the held view)');
+  assert.throws(() => repo.updatePrefs('org_user', 'usr-new', { categories: { combine: false } }), /synthetic category failure/);
+  assert.equal(repo.prefsFor('org_user', 'usr-new'), null, 'a record the failed write would have created is gone from memory'); assert.equal(repo.prefsCount(), 1);
+  s.exec('DROP TRIGGER rv_cat');
+  repo.updatePrefs('org_user', 'usr-1', { categories: { mentions: true, combine: false }, emailIntent: true });
+  assert.deepEqual(plain(prefView.categories), { mentions: true, combine: false }); assert.equal(prefView.emailIntent, true, 'the retry with different values lands on the held view');
+  const after2 = snapshot();
+  // 3. An in-place mutation (coalesce) whose UPDATE fails.
+  s.exec("CREATE TEMP TRIGGER rv_upd BEFORE UPDATE ON notifications BEGIN SELECT RAISE(ABORT, 'synthetic update failure'); END");
+  assert.throws(() => repo.coalesce(first.id, { at: NOW, actionRequired: { deadline: NOW + HOUR } }), /synthetic update failure/);
+  assert.deepEqual(snapshot(), after2, 'the row object the caller holds shows the old clock, count and no contract');
+  assert.equal(first.repeatCount, 1); assert.equal(first.ts, NOW - MIN); assert.equal(first.actionRequired, undefined);
+  assert.throws(() => repo.markRead('org_user', 'usr-1'), /synthetic update failure/); assert.equal(first.read, false); assert.equal(repo.unreadCount('org_user', 'usr-1'), 1);
+  s.exec('DROP TRIGGER rv_upd');
+  repo.coalesce(first.id, { at: NOW }); assert.equal(first.repeatCount, 2);
+  const after3 = snapshot();
+  // 4. A REAL COMMIT failure (deferred foreign key refused by the engine at COMMIT).
+  const disarm = armCommitFailure(s, 'INSERT');
+  assert.throws(() => repo.create({ id: 'ntf-review-two', audience: PLAYER, type: 'x', text: 'y', refId: null, category: null, deferredPush: false }), /FOREIGN KEY constraint failed/);
+  assert.deepEqual(snapshot(), after3, 'after a failed COMMIT: nothing in memory'); assert.equal(repo.byId('ntf-review-two'), null); assert.equal(s.isTransaction, false);
+  disarm();
+  assert.equal(repo.create({ id: 'ntf-review-two', audience: PLAYER, type: 'x', text: 'y', refId: null, category: null, deferredPush: false }).id, 'ntf-review-two');
+  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM notifications').get().n, 3); assert.equal(repo.count(), 3);
+  // The caller-owned raw transaction keeps its explicit contract (the repository cannot see that ROLLBACK): distinguished from the owned case above.
+  s.exec('BEGIN'); const raw = repo.create({ audience: PLAYER, type: 'raw', text: 'raw', refId: null, category: null, deferredPush: false }); s.exec('ROLLBACK');
+  assert.equal(repo.byId(raw.id)?.id, raw.id, 'a transaction the caller owns: the mirror cannot follow the caller\'s ROLLBACK'); repo.reload(); assert.equal(repo.byId(raw.id), null);
+  s.close(); rm(dir);
+});
+
+test('review of ba6956d, finding 2 — joined units in immediate mode: a repository given the participant API refuses to join a unit until its save hook is registered with the store (the hook is how a rollback restores its memory); once registered, a failure the caller catches still poisons the unit and the rollback restores the mirror, the held views and the counts', () => {
+  const dir = tempDir('ntf-rv-joined'); s6File(dir);
+  const L = live(dir); L.save();
+  const tool = createNotificationsRepository({ sqlite: L.store.sqlite, now: () => NOW, nextId, unit: L.store.unit });
+  assert.throws(() => L.store.unitOfWork(() => tool.create({ audience: ORG_USER, type: 'x', text: 'y', refId: null, category: null, deferredPush: false }), { snapshot: L.snapshot }), /save hook/);
+  assert.equal(tool.count(), 0, 'nothing staged or written by the refused join'); assert.equal(L.store.unitOfWorkState().active, false);
+  L.store.setSaveHook(tool.saveHook());
+  const held = tool.create({ audience: ORG_USER, type: 'message', text: 'held', refId: 'c', category: 'messages', deferredPush: false, at: NOW - MIN });
+  L.store.sqlite.exec("CREATE TEMP TRIGGER rv_j BEFORE UPDATE ON notifications BEGIN SELECT RAISE(ABORT, 'synthetic joined failure'); END");
+  const before = { rows: plain(tool.exportRows()), held: plain(held), counts: tool.counts() };
+  const { caught, outer } = swallowing(L, () => { tool.create({ audience: PLAYER, type: 'x', text: 'y', refId: null, category: null, deferredPush: false }); tool.coalesce(held.id, { at: NOW }); });
+  assert.match(caught?.message ?? '', /synthetic joined failure/); assert.ok(outer, 'the unit refused to commit'); assert.equal(outer.unitOfWork, 'rolled_back');
+  assert.deepEqual({ rows: plain(tool.exportRows()), held: plain(held), counts: tool.counts() }, before, 'the mirror, the held row view and the counts are restored');
+  assert.equal(rowsOf(dir, 'notifications').length, 1); assert.equal(L.store.sqlite.isTransaction, false);
+  L.store.sqlite.exec('DROP TRIGGER rv_j');
+  L.close(); rm(dir);
+});
+
+test('review of ba6956d, finding 1 — effects wait for the durable write: in staged mode an effect registered with a pending write (the push, the SSE frame) runs only once the save that carries the write COMMITTED — never before the save, never after a failed save (statement or real COMMIT failure; the write and its effect stay pending for the retry), exactly once on the successful retry; an effect registered inside a unit of work is discarded with the unit\'s rollback while effects of writes pending BEFORE the unit survive and run when the next save or unit commits them; an effect that throws or rejects is counted and never fails the save; no effect schedules another save', () => {
+  const dir = tempDir('ntf-rv-effects'); s6File(dir);
+  const L = live(dir); L.save();
+  const ran = []; const effect = (label) => () => { ran.push(label); };
+  const seq0 = seqOf(dir);
+  // A standalone write with its effect.
+  const a = L.notifications.create({ audience: ORG_USER, type: 'message', text: 'a', refId: 'c', category: 'messages', deferredPush: false });
+  L.notifications.afterDurable(effect('a:push')); L.notifications.afterDurable(effect('a:sse'));
+  assert.deepEqual(ran, [], 'nothing before the save'); assert.equal(L.notifications.pendingEffects(), 2);
+  // A failed save (statement failure) keeps the write and its effects pending.
+  L.store.sqlite.exec("CREATE TEMP TRIGGER rv_fx BEFORE INSERT ON notifications BEGIN SELECT RAISE(ABORT, 'synthetic flush failure'); END");
+  assert.throws(() => L.save(), /synthetic flush failure/);
+  assert.deepEqual(ran, [], 'nothing after a failed flush'); assert.equal(L.notifications.pending(), 1); assert.equal(L.notifications.pendingEffects(), 2); assert.equal(seqOf(dir), seq0);
+  L.store.sqlite.exec('DROP TRIGGER rv_fx');
+  // A failed save (real COMMIT failure) keeps them too.
+  const disarm = armCommitFailure(L.store.sqlite, 'INSERT');
+  assert.throws(() => L.save(), /FOREIGN KEY constraint failed/);
+  assert.deepEqual(ran, [], 'nothing after a failed COMMIT'); assert.equal(L.notifications.pendingEffects(), 2); assert.equal(idsOf(dir).length, 0);
+  disarm();
+  // The retry: once.
+  L.save();
+  assert.deepEqual(ran, ['a:push', 'a:sse'], 'exactly once, after the commit'); assert.equal(L.notifications.pendingEffects(), 0); assert.deepEqual(idsOf(dir), [a.id]);
+  L.save(); assert.deepEqual(ran, ['a:push', 'a:sse'], 'a later save does not replay them');
+  // Inside a unit: discarded with the rollback; a pre-unit pending effect survives and runs with the unit that commits it.
+  const b = L.notifications.create({ audience: ORG_USER, type: 'message', text: 'b', refId: 'c', category: 'messages', deferredPush: false });
+  L.notifications.afterDurable(effect('b:sse'));
+  assert.throws(() => L.store.unitOfWork(() => { L.notifications.create({ audience: PLAYER, type: 'x', text: 'u', refId: null, category: null, deferredPush: false }); L.notifications.afterDurable(effect('u:sse')); throw new Error('unit failure'); }, { snapshot: L.snapshot }), /unit failure/);
+  assert.deepEqual(ran, ['a:push', 'a:sse'], 'neither the unit\'s effect nor the pre-unit effect ran'); assert.equal(L.notifications.pendingEffects(), 1, 'the pre-unit effect is still pending'); assert.equal(L.notifications.pending(), 1); assert.ok(L.notifications.byId(b.id));
+  L.store.unitOfWork(() => { L.notifications.create({ audience: PLAYER, type: 'x', text: 'v', refId: null, category: null, deferredPush: false }); L.notifications.afterDurable(effect('v:sse')); }, { snapshot: L.snapshot });
+  assert.deepEqual(ran, ['a:push', 'a:sse', 'b:sse', 'v:sse'], 'the unit\'s commit carried the pre-unit write and delivered both effects, in order'); assert.equal(L.notifications.pendingEffects(), 0);
+  // A throwing / rejecting effect never fails the save and is counted; no effect triggers another save.
+  const flushes = []; L.store.setSaveHook({ flush: () => { flushes.push(1); } });
+  const c = L.notifications.create({ audience: ORG_USER, type: 'message', text: 'c', refId: 'c', category: 'messages', deferredPush: false });
+  L.notifications.afterDurable(() => { throw new Error('provider down'); }); L.notifications.afterDurable(() => Promise.reject(new Error('provider rejected'))); L.notifications.afterDurable(effect('c:ok'));
+  const failuresBefore = L.store.unitOfWorkState().afterCommitFailures;
+  L.save();
+  assert.deepEqual(idsOf(dir).slice(-1), [c.id], 'the save committed'); assert.deepEqual(ran.slice(-1), ['c:ok'], 'the later effect still ran');
+  assert.equal(flushes.length, 1, 'one save: an effect never schedules another'); assert.equal(seqOf(dir), seq0 + 4);
+  return new Promise((resolve) => setTimeout(resolve, 10)).then(() => { assert.equal(L.store.unitOfWorkState().afterCommitFailures, failuresBefore + 2, 'both failures counted, neither a rollback'); L.close(); rm(dir); });
+});
+
+test('review of ba6956d, finding 3 — unknown data is never lost silently: an own "__proto__" key and nested unknown fields on a legacy notification survive the migration, the mirror, a unit rollback that restores the row in place, the export, a snapshot round trip and the copy-only rollback blob; an audience that carries a field this schema has no column for refuses the whole migration and the whole snapshot write before anything is written or retired (blob and saveSeq unchanged, diagnostic text-free)', () => {
+  const SECRET = 'SECRET-TEXT-RV3';
+  const special = JSON.parse('{"id":"ntf-proto","ts":1,"audience":{"kind":"player","id":"pl-adult"},"type":"message","text":"Synthetic","read":false,"__proto__":{"legacyMarker":"keep-me"},"nested":{"a":[1,{"b":null}]}}');
+  const dir = tempDir('ntf-rv-extra'); s6File(dir, { notifications: [special, ntf({ id: 'ntf-plain' })] });
+  const s = openRaw(dir); assert.deepEqual(migrate(s).ran, [NOTIFICATIONS_MIGRATION]);
+  const repo = bare(s);
+  const exported = repo.exportRows()[0];
+  assert.ok(Object.hasOwn(exported, '__proto__') && exported.__proto__.legacyMarker === 'keep-me', 'the own __proto__ key is an own key of the export'); assert.deepEqual(exported.nested, { a: [1, { b: null }] });
+  assert.ok(Object.hasOwn(repo.byId('ntf-proto'), '__proto__'), 'and of the mirror row'); assert.equal(Object.getPrototypeOf(repo.exportRows()[0]), Object.prototype, 'the prototype itself was never touched');
+  assert.equal(JSON.parse(s.prepare('SELECT extra_json FROM notifications WHERE id = ?').get('ntf-proto').extra_json).__proto__.legacyMarker, 'keep-me');
+  s.close();
+  // A unit rollback restores the row in place, the special key included.
+  const L = live(dir); L.save();
+  const row = L.notifications.byId('ntf-proto');
+  assert.throws(() => L.store.unitOfWork(() => { L.notifications.coalesce('ntf-proto', { at: NOW }); throw new Error('rolled back'); }, { snapshot: L.snapshot }), /rolled back/);
+  assert.ok(Object.hasOwn(row, '__proto__') && row.__proto__.legacyMarker === 'keep-me'); assert.equal(row.repeatCount, 1); assert.deepEqual(plain(row.nested), { a: [1, { b: null }] });
+  L.close();
+  // Snapshot round trip and the copy-only rollback blob.
+  const tool = openStore(dir); const snap = tool.load(); assert.ok(Object.hasOwn(snap.db.notifications[0], '__proto__')); tool.save(snap);
+  assert.ok(Object.hasOwn(tool.load().db.notifications[0], '__proto__'), 'round-tripped through replace'); tool.sqlite.close();
+  const out = tempDir('ntf-rv-extra-rb'); rollbackNotificationsCopy(dbFile(dir), out, { now: NOW });
+  const o = openRaw(out); const blobRow = JSON.parse(o.prepare("SELECT value FROM collections WHERE name = 'notifications'").get().value)[0]; o.close();
+  assert.ok(Object.hasOwn(blobRow, '__proto__') && blobRow.__proto__.legacyMarker === 'keep-me', 'the pre-S7a build reads the key back');
+  // An audience with an unknown field: refused whole, nothing written or retired.
+  const bad = tempDir('ntf-rv-aud'); s6File(bad, { notifications: [ntf({ id: 'ntf-aud', text: SECRET, audience: { kind: 'org_user', id: 'usr-1', name: 'Maria' } })] });
+  const b = openRaw(bad); const blobBefore = b.prepare("SELECT value FROM collections WHERE name = 'notifications'").get().value; const seqBefore = meta(b, 'saveSeq');
+  let err = null; try { migrate(b); } catch (e) { err = e; }
+  assert.match(err?.message ?? '', /NOTIFICATIONS_IMPORT_BLOCKED.*entry #0: audience carries unknown field\(s\) name/); assert.equal(err.message.includes(SECRET), false);
+  assert.equal(tableExists(b, 'notifications'), false); assert.equal(b.prepare("SELECT value FROM collections WHERE name = 'notifications'").get().value, blobBefore); assert.equal(meta(b, 'saveSeq'), seqBefore);
+  b.close();
+  const snapDir = tempDir('ntf-rv-aud-snap'); s6File(snapDir); { const x = openRaw(snapDir); migrate(x); x.close(); }
+  const t2 = openStore(snapDir); const before = dump(t2.sqlite); const seq = t2.revision();
+  const s2 = t2.load(); s2.db.notifications = [ntf({ id: 'n', audience: { kind: 'player', id: 'pl-adult', extra: 1 } })]; s2.db.notes = [{ id: 'unrelated' }];
+  assert.throws(() => t2.save(s2), /audience carries unknown field\(s\) extra/); assert.equal(dump(t2.sqlite), before); assert.equal(t2.revision(), seq); t2.sqlite.close();
+  assert.throws(() => validateNotificationRows([ntf({ actionRequired: { deadline: null, ackedAt: null, ackedBy: null, extra: true } })]), /actionRequired carries unknown field\(s\) extra/);
+  rm(dir, out, bad, snapDir);
 });
 
 // ============================================================= rollback (copy-only, to the pre-S7a build 812e13b)

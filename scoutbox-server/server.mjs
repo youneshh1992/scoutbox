@@ -391,6 +391,13 @@ app.use(express.json({ limit: '20mb' }));
 const faultLayer = createFaultLayer();
 faultLayer.install(app);
 seams.shouldFail = (step) => faultLayer.shouldFail(step); // always false in production (the layer is disabled there)
+// `internal:save.sqlite_commit`: the REAL COMMIT of the next ordinary snapshot
+// save fails (store.failCommitOfOpenTransaction), after every data-layer hook
+// flushed — the way a notification's save fails after its row was written and
+// before it is durable. A development seam like the unit's; registered after
+// the data layer's hooks so it runs last inside the save transaction. In
+// production the rule can never be set, so the hook is a no-op.
+store.setSaveHook({ flush() { if (seams.shouldFail('save.sqlite_commit')) store.failCommitOfOpenTransaction(); } });
 // M13: correlation ids, structured request logs (redacted), request metrics,
 // and the exposure-capture hook. Installed before every route on purpose.
 app.use(requestInstrumentation());
@@ -583,6 +590,20 @@ function broadcast(event, rawPayload = {}) {
   // (The registry check above still runs now, so a bad call site fails the unit.)
   if (store.inUnitOfWork?.()) { store.afterCommit(() => broadcast(event, rawPayload)); return; }
   if (event !== 'typing') persist(); // every broadcast (bar ephemeral typing) follows a state change
+  publishEvent(event, payload);
+}
+
+/**
+ * Write one already-minimised event to the replay log and the live streams —
+ * the transport half of broadcast(), with no registry check and no save of
+ * its own. notify() hands this to the notifications repository as an effect
+ * of the row it wrote (S7a, corrected): the repository runs it only once the
+ * snapshot save that carried the row committed, so a `notify` frame is never
+ * on a stream or in the replay log for a row the file does not hold. The
+ * payload must already have passed minimizePayload (broadcast does that at the
+ * call site, before the effect is registered).
+ */
+function publishEvent(event, payload) {
   const row = { id: ++eventSeq, event, payload, ts: Date.now() };
   if (event !== 'typing') {
     // typing is transient by design — never buffered, never replayed
@@ -836,6 +857,15 @@ const notificationsSuppressed = { count: 0 };
  * durable ahead of the action it announces. `actionRequired: { deadline }`
  * attaches an acknowledgment contract in the same write (M13 notifyAction).
  * Returns the row (read-only) or null when the person's preferences mute it.
+ *
+ * Its external effects — the push and the `notify` event on the live streams
+ * and in the replay log — are registered with the repository as effects of
+ * that write (notifications.afterDurable) and run only once the save that
+ * carries the row COMMITTED: never before it, never after a save that failed
+ * (the row and its effects wait for the retry and go out exactly once with
+ * it), never for a unit of work that rolled back. A save is requested here
+ * (persist), never from inside an effect. A provider error after COMMIT is a
+ * delivery failure, counted by the store, never a rollback.
  */
 function notify(audience, type, text, refId = null, { actionRequired = null } = {}) {
   // M18.2: a category the person has turned off is never CREATED — not
@@ -856,10 +886,20 @@ function notify(audience, type, text, refId = null, { actionRequired = null } = 
   // repository's and is unchanged from M18.1; the refreshed row keeps its
   // position in the feed.
   const at = Date.now();
+  // The event the feed listeners get; minimised through the registry NOW (a
+  // bad call site fails here, inside the unit if there is one), delivered by
+  // the repository once the row's save committed. No second push: a coalesce
+  // refreshes news the recipient's phone already carried.
+  const announce = () => {
+    const { payload, dropped, unregistered } = minimizePayload('notify', { audienceKind: audience.kind, audienceId: audience.id });
+    if (unregistered || dropped.length) { eventPayloadDrops.count += 1; eventPayloadDrops.lastEvent = 'notify'; throw new Error(`notify: the 'notify' event ${unregistered ? 'is not in the event registry' : `carried unregistered payload keys: ${dropped.join(', ')}`}`); }
+    notifications.afterDurable(() => publishEvent('notify', payload));
+  };
   const existing = notifications.findCoalescible({ audience, type, text, refId, at });
   if (existing) {
     const c = notifications.coalesce(existing.id, { at, actionRequired });
-    broadcast('notify', { audienceKind: audience.kind, audienceId: audience.id });
+    announce();
+    persist();
     return c;
   }
 
@@ -873,14 +913,15 @@ function notify(audience, type, text, refId = null, { actionRequired = null } = 
     deferredPush: pushDeferred(audience),
   });
   // Push delivery honours quiet hours / school-hours mute; the in-app feed
-  // above always keeps the record either way.
-  // The notification row above lands with the snapshot (rolled back with a
-  // failed unit of work); the push is an external delivery and goes out only
-  // once the state it announces is committed. Outside a unit, afterCommit runs it now.
-  // The promise is RETURNED so the store observes it: a rejected delivery is
-  // counted and logged instead of becoming an unhandled rejection.
-  if (!n.deferredPush) store.afterCommit(() => pushSender.send(audience, 'ScoutBox', text));
-  broadcast('notify', { audienceKind: audience.kind, audienceId: audience.id });
+  // above always keeps the record either way. The push is an external
+  // delivery and goes out only once the row it announces is committed — an
+  // effect of the write, run by the repository after the carrying save's
+  // COMMIT (standalone or unit of work alike). The promise is RETURNED so the
+  // store observes it: a rejected delivery is counted and logged instead of
+  // becoming an unhandled rejection, and is never mistaken for a rollback.
+  if (!n.deferredPush) notifications.afterDurable(() => pushSender.send(audience, 'ScoutBox', text));
+  announce();
+  persist();
   return n;
 }
 

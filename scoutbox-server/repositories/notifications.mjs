@@ -60,6 +60,50 @@
  *     later: the transaction a standalone notification belongs to is the save
  *     that carries those blobs (S7a review, §3.2 as corrected).
  *
+ * EFFECTS WAIT FOR THE DURABLE WRITE (review of ba6956d, finding 1). A write
+ * usually has external effects — the push, the `notify` event on the live
+ * streams and in the replay log — and those must not happen before the state
+ * they announce is committed. `afterDurable(fn)` registers an effect for the
+ * writes queued so far; in staged mode it is held in a second FIFO queue,
+ * bounded by the same save that carries the writes, and is run only when the
+ * store reports that save's COMMIT: never before the save, never after a
+ * failed flush or a failed COMMIT (the write and its effects stay queued for
+ * the retry, which delivers them exactly once), discarded with a rolled-back
+ * unit of work (effects of writes queued BEFORE the unit survive and run when
+ * the next save or unit commits them, in order). Each effect is run through
+ * `runEffect` (the store's `afterCommit`: counted, logged, never thrown into
+ * the save — a provider error after COMMIT is a delivery failure, never a
+ * database rollback, and never a replay of the batch). An effect never
+ * schedules a save of its own. This is a durability boundary, not an
+ * exactly-once guarantee: a crash between COMMIT and the effect loses the
+ * push/event, exactly as it did before S7a. In immediate mode a write is
+ * durable when the operation returns (own transaction) or when the enclosing
+ * unit commits, so `afterDurable` hands the effect to `runEffect` at once —
+ * the store defers it to the unit's commit; a tool without a store runs it
+ * now — and refuses inside a caller-owned raw transaction (the repository
+ * could not see its outcome).
+ *
+ * OWNED TRANSACTION FAILURE RESTORES MEMORY (finding 2). An immediate-mode
+ * operation that runs in a transaction of its own takes a snapshot of the
+ * mirror first and restores it in place — rows, the id index, preference
+ * records, every read-only view a caller holds — when the transaction fails,
+ * at a statement or at COMMIT itself, so memory never shows a row the file
+ * refused and the same id can be retried. A joined unit restores through the
+ * store's rollback, which is why a repository given the participant API
+ * refuses to join a unit until its `saveHook()` was taken for registration
+ * (without the hook the unit's rollback could not reach the mirror). Only a
+ * caller-owned raw transaction keeps the explicit `reload()` contract.
+ *
+ * UNKNOWN DATA IS NEVER LOST SILENTLY (finding 3). Fields this repository does
+ * not know are copied as own data properties (`Object.defineProperty`, never
+ * assignment: an own "__proto__" key of legacy JSON is data, and assignment
+ * would rewrite the prototype and drop it) at validation, storage, read,
+ * export, snapshot and rollback. Nested objects whose shape the schema maps
+ * to columns (the audience, the acknowledgment contract, a category map)
+ * refuse unknown fields — the whole migration or snapshot write, before any
+ * row is written or any blob retired — because a field dropped there would be
+ * lost without a trace.
+ *
  * Whether the tables are authoritative is decided by the cutover record
  * `0009_notifications` in `data_migrations`, never by the tables existing or
  * by row counts. Preferences are retained when a person's notifications are
@@ -140,13 +184,18 @@ const nonEmpty = (v) => typeof v === 'string' && v.length > 0;
 const isCategory = (k) => Object.hasOwn(CATEGORIES_SET, k);
 const CATEGORIES_SET = Object.freeze(Object.fromEntries(CATEGORY_NAMES.map((k) => [k, true])));
 const tableExists = (sqlite, name) => !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
+/** Set an own data property — never `obj[k] = v`, which for an own "__proto__" key of parsed JSON would rewrite the prototype and lose the field. */
+const setOwn = (obj, k, v) => Object.defineProperty(obj, k, { value: v, enumerable: true, writable: true, configurable: true });
 
 // ------------------------------------------------------------------ validation (no coercion; every refusal names the reason, never the text)
 const KNOWN_KEYS = Object.freeze(['id', 'ts', 'audience', 'type', 'text', 'refId', 'read', 'repeatCount', 'groupKey', 'category', 'deferredPush', 'actionRequired']);
 const ACTION_KEYS = Object.freeze(['deadline', 'ackedAt', 'ackedBy']);
-/** Validate one audience ({ kind, id }, both non-empty strings; the kind is open — polymorphic, no foreign key). */
+const AUDIENCE_KEYS = Object.freeze(['kind', 'id']);
+/** Validate one audience ({ kind, id }, both non-empty strings, nothing else: the two columns are all the schema keeps; the kind is open — polymorphic, no foreign key). */
 function audienceOf(raw, field = 'audience') {
   if (!isPlainObject(raw)) return { reason: `${field} must be an object { kind, id } (got ${describe(raw)})` };
+  const unknown = Object.keys(raw).filter((k) => !AUDIENCE_KEYS.includes(k));
+  if (unknown.length) return { reason: `${field} carries unknown field(s) ${unknown.join(', ')} (the schema keeps an audience as kind and id only; a field dropped here would be lost)` };
   if (!nonEmpty(raw.kind)) return { reason: `${field}.kind must be a non-empty string` };
   if (!nonEmpty(raw.id)) return { reason: `${field}.id must be a non-empty string` };
   return { audience: { kind: raw.kind, id: raw.id } };
@@ -182,7 +231,7 @@ export function validateNotificationRow(raw) {
   let deferredPush = raw.deferredPush; if (deferredPush === undefined) { deferredPush = false; normalised.push('deferredPush'); } else if (typeof deferredPush !== 'boolean') return { ok: false, reason: 'deferredPush must be a boolean' };
   const act = actionOf(raw.actionRequired); if (act.reason) return { ok: false, reason: act.reason };
   const extra = {};
-  for (const k of Object.keys(raw)) if (!KNOWN_KEYS.includes(k)) extra[k] = raw[k];
+  for (const k of Object.keys(raw)) if (!KNOWN_KEYS.includes(k)) setOwn(extra, k, raw[k]);
   try { JSON.stringify(extra); } catch { return { ok: false, reason: 'an unknown field cannot be serialised' }; }
   const row = { ...extra, id: raw.id, ts: raw.ts, audience: a.audience, type: raw.type, text: raw.text, refId, read, repeatCount, groupKey, category, deferredPush };
   if (act.action) row.actionRequired = act.action;
@@ -257,7 +306,7 @@ function rowFromDb(r) {
 }
 /** The insert parameters for a mirror row. */
 function rowParams(row) {
-  const extra = {}; for (const k of Object.keys(row)) if (!KNOWN_KEYS.includes(k)) extra[k] = row[k];
+  const extra = {}; for (const k of Object.keys(row)) if (!KNOWN_KEYS.includes(k)) setOwn(extra, k, row[k]);
   const a = row.actionRequired ?? null;
   return {
     id: row.id, occurred_at: row.ts, audience_kind: row.audience.kind, audience_id: row.audience.id, type: row.type, text: row.text, ref_id: row.refId, read: row.read ? 1 : 0, repeat_count: row.repeatCount,
@@ -359,18 +408,28 @@ export function importNotificationBlobs(sqlite) {
 // ------------------------------------------------------------------ the repository
 const defaultNextId = (prefix) => `${prefix}-${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`;
 
+/** Run one effect without a store: it never throws into the caller; a failure (thrown or rejected) is reported through `warn`. */
+const bareEffectRunner = (warn) => (fn) => {
+  const failed = (err) => warn(`notifications: an effect failed after the write was durable (the write stands): ${String(err?.message ?? err).slice(0, 200)}`);
+  let result; try { result = fn(); } catch (err) { failed(err); return; }
+  if (result !== null && (typeof result === 'object' || typeof result === 'function') && typeof result.then === 'function') Promise.resolve(result).then(undefined, failed);
+};
+
 /**
  * `unit` is the store's participant API ({ active(), join(work) }) or null (a
  * tool, a test, the migration). `staged` selects the server's write mode (see
- * the header); it needs `unit`, and the store must register `saveHook()`.
- * `nextId(prefix)` mints notification ids (the server's generator; a tool may
- * leave the default).
+ * the header); it needs `unit`, and the store must register `saveHook()` —
+ * with `unit` given, no operation joins a unit until `saveHook()` was taken.
+ * `runEffect(fn)` runs one durable effect (the store's `afterCommit`: counted,
+ * logged, never thrown; a tool without a store gets a runner that reports
+ * through `warn`). `nextId(prefix)` mints notification ids (the server's
+ * generator; a tool may leave the default).
  */
-export function createNotificationsRepository({ sqlite, now = Date.now, nextId = defaultNextId, log = () => {}, warn = () => {}, unit = null, staged = false } = {}) {
+export function createNotificationsRepository({ sqlite, now = Date.now, nextId = defaultNextId, log = () => {}, warn = () => {}, unit = null, staged = false, runEffect = bareEffectRunner(warn) } = {}) {
   if (!sqlite) throw new TypeError('the notifications repository needs a SQLite connection (node:sqlite); notifications have no in-memory or JSON fallback');
   if (unit !== null && (typeof unit?.active !== 'function' || typeof unit?.join !== 'function')) throw new TypeError('the notifications repository needs the store\'s participant API `unit` ({ active(), join(work) }) or null; a unit without join() could not report an operation\'s failure to the unit of work');
   if (staged && !unit) throw new TypeError('the notifications repository in staged mode needs the store\'s participant API `unit` and the store must register its saveHook()');
-  void warn;
+  if (typeof runEffect !== 'function') throw new TypeError('runEffect must be a function (the store\'s afterCommit)');
   const stmt = {
     cutover: sqlite.prepare('SELECT 1 FROM data_migrations WHERE id = ?'),
     insert: sqlite.prepare(INSERT),
@@ -396,31 +455,40 @@ export function createNotificationsRepository({ sqlite, now = Date.now, nextId =
   };
   load();
 
-  // Staged mode: the SQL queue, FIFO, drained whole inside every save transaction.
+  // Staged mode: the SQL queue, FIFO, drained whole inside every save
+  // transaction; and the effects queue, each entry bound to the writes queued
+  // before it (`at` = how many), run when the save that carried them commits.
   const pending = []; let inFlight = 0;
+  const effects = [];
+  let hookTaken = false; // saveHook() was taken for registration with the store
   const inUnit = () => !!unit?.active?.();
+  const hookRefusal = (what) => new Error(`notifications: ${what} needs the repository's save hook registered with the store first (store.setSaveHook(repo.saveHook())): the hook is how a save writes the queued statements and how a unit of work's rollback restores this repository's memory`);
   /**
    * The one boundary of every mutation. `fn(exec)` validates, then mutates the
    * mirror and hands each SQL statement to `exec` — run at once in immediate
-   * mode, queued in staged mode. Joined inside an open unit in both modes.
+   * mode, queued in staged mode. Joined inside an open unit in both modes
+   * (refused until the save hook was taken). An owned immediate transaction
+   * that fails — a statement, or COMMIT itself — restores the mirror in place.
    */
   const operation = (fn) => {
     if (staged) {
+      if (!hookTaken) throw hookRefusal('a staged write');
       if (!inUnit() && sqlite.isTransaction) throw new Error('notifications: the staged repository cannot take part in a transaction it did not open (the server\'s transactions are units of work or snapshot saves)');
       const body = () => fn((op) => { pending.push(op); });
       return inUnit() ? unit.join(body) : body();
     }
     const body = () => fn((op) => op());
-    if (inUnit()) return unit.join(body);
-    if (sqlite.isTransaction) return body();
-    return transaction(sqlite, body);
+    if (inUnit()) { if (!hookTaken) throw hookRefusal('joining a unit of work'); return unit.join(body); }
+    if (sqlite.isTransaction) return body(); // caller-owned: see reload()
+    const state = repo.snapshotState();
+    try { return transaction(sqlite, body); } catch (err) { repo.restoreState(state); throw err; }
   };
   const restoreInto = (obj, copy) => {
     for (const k of Object.keys(obj)) if (!Object.hasOwn(copy, k)) delete obj[k];
     for (const [k, v] of Object.entries(copy)) {
       if (k === 'actionRequired' && obj.actionRequired && v) { Object.assign(obj.actionRequired, v); continue; }
       if (k === 'categories' && obj.categories && v) { for (const c of Object.keys(obj.categories)) delete obj.categories[c]; Object.assign(obj.categories, v); continue; }
-      obj[k] = v;
+      setOwn(obj, k, v);
     }
   };
 
@@ -448,6 +516,27 @@ export function createNotificationsRepository({ sqlite, now = Date.now, nextId =
     counts: () => ({ notifications: rows.length, notificationPrefs: prefs.length }),
     /** Staged writes not yet in a committed save (0 in immediate mode). */
     pending: () => pending.length,
+    /** Effects waiting for the save that carries their writes (0 in immediate mode). */
+    pendingEffects: () => effects.length,
+    /**
+     * Register an external effect of the writes made so far (a push, a live
+     * event): see EFFECTS WAIT FOR THE DURABLE WRITE in the header. Staged
+     * mode queues it until the store reports the carrying save's commit; a
+     * failed save keeps it; a rolled-back unit discards what the unit
+     * registered. Immediate mode hands it to `runEffect` now (a unit defers it
+     * through the store); refused inside a caller-owned raw transaction.
+     */
+    afterDurable(fn) {
+      if (typeof fn !== 'function') throw new TypeError('afterDurable needs a function');
+      if (staged) {
+        if (!hookTaken) throw hookRefusal('registering an effect');
+        if (!inUnit() && sqlite.isTransaction) throw new Error('notifications: an effect cannot be bound to a transaction the repository did not open');
+        effects.push({ fn, at: pending.length });
+        return;
+      }
+      if (!inUnit() && sqlite.isTransaction) throw new Error('notifications: an effect inside a caller-owned transaction has no commit to wait for that the repository could see; register it after the caller\'s COMMIT');
+      runEffect(fn);
+    },
 
     // ---------------------------------------------------------- reads (the mirror)
     byId: (id) => { const r = byId.get(id); return r ? readonlyView(r, 'a notification') : null; },
@@ -590,20 +679,38 @@ export function createNotificationsRepository({ sqlite, now = Date.now, nextId =
       inFlight = pending.length;
       return inFlight;
     },
-    commit() { pending.splice(0, inFlight); inFlight = 0; },
+    /**
+     * The store reports COMMIT: the flushed statements leave the queue, and the
+     * effects bound to them — those registered after no more than the flushed
+     * writes — run now, in order, each through `runEffect` (never thrown into
+     * the store; a failure is a delivery failure, the data is committed).
+     * Effects bound to writes that were not part of this save stay queued.
+     * They are taken off the queue before any runs, so an effect that
+     * registers another binds it to the writes of the NEXT save.
+     */
+    commit() {
+      pending.splice(0, inFlight);
+      const due = [];
+      let i = 0; while (i < effects.length && effects[i].at <= inFlight) i += 1;
+      due.push(...effects.splice(0, i));
+      for (const e of effects) e.at -= inFlight;
+      inFlight = 0;
+      for (const e of due) runEffect(e.fn);
+    },
+    /** The store reports a failed save (flush, blob write or COMMIT): nothing the flush ran exists; the writes and their effects stay queued for the retry. */
     rollback() { inFlight = 0; },
-    /** Unit-of-work participation: the mirror rows (by identity, restored in place) and the queue length when the unit began. */
-    snapshotState: () => ({ pendingLength: pending.length, rows: rows.map((r) => [r, copyRow(r)]), prefs: prefs.map((p) => [p, copyPref(p)]) }),
+    /** Unit-of-work participation: the mirror rows (by identity, restored in place) and both queue lengths when the unit began. */
+    snapshotState: () => ({ pendingLength: pending.length, effectsLength: effects.length, rows: rows.map((r) => [r, copyRow(r)]), prefs: prefs.map((p) => [p, copyPref(p)]) }),
     restoreState(state) {
       if (!state) return;
-      pending.length = state.pendingLength; inFlight = 0;
+      pending.length = state.pendingLength; effects.length = state.effectsLength; inFlight = 0;
       rows.length = 0; byId.clear();
       for (const [obj, copy] of state.rows) { restoreInto(obj, copy); rows.push(obj); byId.set(obj.id, obj); }
       prefs.length = 0; prefsBy.clear();
       for (const [obj, copy] of state.prefs) { restoreInto(obj, copy); prefs.push(obj); prefsBy.set(prefKey(obj.audienceKind, obj.audienceId), obj); }
     },
-    /** What the store registers in staged mode. */
-    saveHook: () => ({ flush: () => repo.flush(), commit: () => repo.commit(), rollback: () => repo.rollback(), snapshotState: () => repo.snapshotState(), restoreState: (s) => repo.restoreState(s) }),
+    /** What the store registers (staged mode; and immediate mode with a `unit`, before any operation may join one). Taking it is the registration this repository can see. */
+    saveHook: () => { hookTaken = true; return { flush: () => repo.flush(), commit: () => repo.commit(), rollback: () => repo.rollback(), snapshotState: () => repo.snapshotState(), restoreState: (s) => repo.restoreState(s) }; },
   };
   return repo;
 }

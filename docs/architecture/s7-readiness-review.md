@@ -12,9 +12,11 @@ migration identifier is assigned, and nothing was run against real data. Paths a
 are those of `2d7ddeb`. The plan is [`sqlite-migration-plan.md`](./sqlite-migration-plan.md)
 §S7, whose assumptions this review corrects (§2, §6).
 
-**Status: S7a implemented, pending independent acceptance** (one local commit on
-`feat/sqlite-schema` on top of `812e13b`; what was built, the four compatibility corrections it
-honours and the one deliberate reading it records are in §8.3). **S7b–S7d not started.** §§0–8.2
+**Status: S7a corrected, pending independent acceptance** (two local commits on
+`feat/sqlite-schema` on top of `812e13b`: the implementation `ba6956d` and the correction of the
+four findings its independent review raised; what was built, the four compatibility corrections it
+honours and the one deliberate reading it records are in §8.3, the corrections in §8.4).
+**S7b–S7d not started.** §§0–8.2
 are the review as written at `2d7ddeb`, kept as the record of the reasoning; where the
 implementation corrected a proposal (§3.2 coupled writes, §8.2 "transaction of its own"), the
 correction is marked in place. The exact blockers of the remaining sub-steps are in §8. Nothing
@@ -805,7 +807,7 @@ If S7a is not wanted first, there is **no** channel/message sub-step that is ind
 current decisions: S7d is blocked by the `recruitment_requests` reference until the §2.3
 transitional design is approved or S8a ships, and by the message-retention question.
 
-### 8.3 S7a as implemented — **implemented, pending independent acceptance**
+### 8.3 S7a as implemented — **corrected (§8.4), pending independent acceptance**
 
 Built on `812e13b` after the S7a review accepted the §8.2 recommendation subject to four
 compatibility corrections, which an unchanged probe script (`s7a-compatibility-probes.mjs`, exit
@@ -873,8 +875,10 @@ save keeps the queue for the retry; the queue is FIFO and drained whole, so the 
 memory's order; a foreign transaction is refused in this mode. In other words the "own
 transaction" of a standalone server write is the save that carries the blobs it belongs to —
 exactly the durability window the blob had before S7a (the next save, at most the 2 s debounce),
-with the coupled state landing in the same transaction. SSE and push outside a unit are unchanged
-(immediate, as every other broadcast after a blob edit); inside a unit both wait for COMMIT.
+with the coupled state landing in the same transaction. The push and the SSE `notify` event are
+effects of that write and go out only once the save that carries it committed — standalone or
+inside a unit alike (§8.4, finding 1; the first implementation let them out at once outside a
+unit, which the independent review rejected: that interpretation is withdrawn).
 
 **What else was decided.** Normalisations on import are the ones the pre-S7a snapshot
 migrations applied or the literal always set (`repeatCount` absent → 1 as `m182_005`; `read`
@@ -901,6 +905,69 @@ blobs in `seq` order; nothing after the cutover is lost. Proven by booting the c
 `812e13b` server (`SCOUTBOX_PRE_S7A_SERVER` in `testNotificationsServer.mjs`): same feeds, same
 preferences (the stored mandatory false forced on there too), and that build still writes to it;
 the S6a tool refuses a 0009 file; the real migration re-upgrades the copy to the same rows.
+
+### 8.4 The correction round — review of `ba6956d` (four findings), **corrected, pending independent acceptance**
+
+The independent review of `ba6956d` did not accept S7a and supplied a reproduction script
+(`review-ba6956d-reproductions.mjs`, run unchanged: exit 1 with three REPRODUCED on the starting
+source, exit 0 with three CORRECT after the corrections; kept outside application source in the
+handoff package). Failing-first regressions were written before any source change
+(`testNotifications.mjs`, four tests; `testNotificationsServer.mjs`, one route-level test) and
+their failure on unchanged `ba6956d` is recorded in the handoff logs. No existing assertion was
+weakened; one existing immediate-mode test now registers the tool instance's save hook before it
+joins a unit, which the correction below requires.
+
+1. **Effects wait for the durable write (HIGH).** As built, `notify()` outside a unit pushed and
+   wrote the SSE frame and replay entry at once (through `store.afterCommit`, which runs
+   immediately outside a unit, and `broadcast`), while the row was only queued for the next save:
+   a failed save delivered news about a row the file never held. The staged coupling is kept and
+   completed: the repository has a second FIFO, `afterDurable(fn)`, each entry bound to the writes
+   queued before it; the store's `commit()` report runs the effects bound to the flushed writes,
+   in order, each through the store's `afterCommit` (counted, logged, never thrown into the save —
+   a provider error after COMMIT is a delivery failure, not a rollback, and never replays the
+   batch); a failed flush or a failed COMMIT keeps the writes and their effects queued, and the
+   successful retry delivers them exactly once; a rolled-back unit discards the effects it
+   registered while effects of writes queued before the unit survive and run with the next save or
+   unit that commits them. `notify()` registers the push and the `notify` event through
+   `afterDurable`, minimises the event payload through the registry at the call site (a bad call
+   site still fails inside the unit), calls `persist()` itself and never from an effect, so no
+   effect schedules a save; `broadcast()` keeps its registry check and immediate transport for
+   every other event, its transport half is now `publishEvent()`. Coalescing still sends no second
+   push; quiet hours, audience isolation (`shouldDeliver`) and the public payload are unchanged.
+   A development-only save seam, `internal:save.sqlite_commit`, fails the real COMMIT of the next
+   ordinary save after every data-layer hook flushed, so the route-level regression proves it on
+   the real server (a message posted, the save failing at COMMIT, no row / push / frame / replay,
+   the feed showing the pending row, the next `persistNow()` committing it with exactly one push
+   and one frame, a repeat coalescing with a second frame and no second push). This is a
+   durability boundary, not exactly-once delivery: a crash between COMMIT and the effect loses the
+   push or frame, exactly as before S7a.
+2. **Owned immediate transactions restore memory (HIGH).** `create()` and the other operations
+   mutate the mirror before their statements run; in a transaction of its own a statement or
+   COMMIT failure left the ghost row, index entry, preference record or in-place edit in memory
+   (a retry with the same id was refused as a duplicate). The owned branch of `operation()` now
+   takes the repository's `snapshotState()` first and restores it in place on any failure —
+   rows, the id index, counts, preferences and every read-only row, preference or feed view a
+   caller holds. Joined units already restored through the store's rollback; that path is now
+   enforced: a repository given the participant API refuses to join a unit (and, in staged mode,
+   to write or register an effect at all) until its `saveHook()` was taken for registration — the
+   hook is how the rollback reaches the mirror. A caller-owned raw transaction keeps the explicit
+   `reload()` contract and is distinguished in the tests.
+3. **Unknown data is never lost silently (MEDIUM).** `extra[k] = raw[k]` dropped an own
+   `"__proto__"` key of legacy JSON (assignment rewrites the prototype); the audience mapping
+   silently dropped any field beyond `kind` and `id`. Every copy of an unknown field — validation,
+   insert parameters, read, export, in-place restoration — is an own data property
+   (`Object.defineProperty`), so such a key round-trips through the migration, the mirror, a unit
+   rollback, a snapshot save and the copy-only rollback blob; the audience, the acknowledgment
+   contract and a category map refuse an unknown field, the whole migration or snapshot write,
+   before any row is written or any blob retired (blob and `saveSeq` unchanged, the diagnostic
+   names the entry and the field, never the text). No new normalisation of a meaningful null or
+   absent value was introduced.
+4. **The handoff package (MEDIUM).** The first package carried only the Player test files, so
+   the Player gate could not run from it. The package builder now archives the complete tracked
+   `scoutbox-server/` and `scoutbox-player/` trees (git archive of the committed tree: no runtime
+   data, credentials, environment files or `node_modules` are tracked), extracts the final ZIP to
+   a fresh directory with no link back into the checkout, installs dependencies there and runs
+   both mandatory gates from the copy, recording their exit codes in the package.
 
 ---
 

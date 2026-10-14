@@ -278,7 +278,10 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
   // The repository never imports from memory and never infers initialisation
   // from row counts. From here on `db.notifications` / `db.notificationPrefs`
   // are read-only views over the mirror the repository keeps current.
-  const notifications = createNotificationsRepository({ sqlite, log, warn, now, nextId, unit: store.unit, staged: true });
+  // `runEffect` is the store's afterCommit: at the moment the repository runs an
+  // effect no unit is open (the store closes the unit before it reports the
+  // commit), so the effect runs at once, counted and logged, never thrown.
+  const notifications = createNotificationsRepository({ sqlite, log, warn, now, nextId, unit: store.unit, staged: true, runEffect: (fn) => store.afterCommit(fn) });
   const notificationsBoot = notifications.attach();
   store.setSaveHook?.(notifications.saveHook());
   if (migrations.ran.includes(NOTIFICATIONS_MIGRATION)) {
@@ -317,7 +320,7 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
         users: { rows: users.count(), mode: 'live' },
         sessions: { rows: sessions.count(), mode: 'live', lifetimeMs: sessions.ttlMs },
         oneTimeCodes: { mode: 'live', rows: codes.counts(), outstanding: codes.outstanding(), lifetimesMs: { emailChallenge: codes.emailChallengeTtlMs, pairingCode: codes.pairingCodeTtlMs }, maxEmailAttempts: codes.maxEmailAttempts },
-        notifications: { mode: 'live', rows: notifications.counts(), pendingWrites: notifications.pending(), coalesceMs: notifications.coalesceMs, writeMode: 'staged: a standalone write lands in the next snapshot save with the blobs it announces; a write inside a unit of work lands in its commit' },
+        notifications: { mode: 'live', rows: notifications.counts(), pendingWrites: notifications.pending(), pendingEffects: notifications.pendingEffects(), coalesceMs: notifications.coalesceMs, writeMode: 'staged: a standalone write lands in the next snapshot save with the blobs it announces; a write inside a unit of work lands in its commit; its push and live event run only once that save committed' },
       },
       identity: { initState: identity.initState(), uncommittedFacets: identity.report().uncommittedFacets },
       mediaDeletions: { queued: mediaDeletions.count(), conflicts: mediaDeletions.conflicts().length },

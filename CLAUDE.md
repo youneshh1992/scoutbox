@@ -100,8 +100,9 @@ and design changes the Founder explicitly requests.
   copy-only rollback is `scripts/oneTimeCodesRollback.mjs` (outstanding codes
   invalidated and counted) and the S5 tool refuses a file carrying 0008. The
   guardian e-mail code stays plain. **Notifications and category notification
-  preferences are live since S7a** (implemented, pending independent
-  acceptance; `repositories/notifications.mjs`, migration `0009_notifications`):
+  preferences are live since S7a** (corrected after its first independent
+  review, pending independent acceptance; `repositories/notifications.mjs`,
+  migration `0009_notifications`):
   `db.notifications` / `db.notificationPrefs` are read-only views over the
   repository's in-memory mirror of the three tables; the ONLY writers are
   `notifications.create` / `coalesce` / `markRead` / `ack` / `deleteForAudience`
@@ -112,6 +113,16 @@ and design changes the Founder explicitly requests.
   in the running server a write is STAGED — visible at once, durable inside the
   next snapshot save together with the blob edits made alongside it, or inside
   the enclosing unit of work's commit, never ahead of the action it announces;
+  its push and its `notify` live event are effects of that write
+  (`notifications.afterDurable`) and run only once the save that carried the
+  row COMMITTED — never before, never after a failed save (they wait for the
+  retry), never for a rolled-back unit; `notify()` requests the save, no
+  effect ever does. In immediate mode (tools, tests) an owned transaction that
+  fails restores the repository's memory in place, and an instance given the
+  participant API joins a unit only once its save hook is registered. Unknown
+  fields are copied as own properties (an own `"__proto__"` key is data, never
+  assigned), and an audience, acknowledgment contract or category map with an
+  unknown field refuses the whole migration or snapshot write;
   the acknowledgment and the dispatch blob commit in one unit; the copy-only
   rollback is `scripts/notificationsRollback.mjs` (every row written back in
   order; nothing lost) and the S6a tool refuses a file carrying 0009.

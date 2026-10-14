@@ -292,11 +292,15 @@ This is a second contract next to the ordinary save, not a replacement:
   error**: the outer unit fails at its end (the inner error is its `cause`) and
   everything rolls back. Side effects (broadcasts, pushes) are deferred with
   `store.afterCommit(fn)` and run only after COMMIT; `server.mjs` does this for
-  `broadcast()` and the push half of `notify()` (which returns its promise). A
-  side effect never fails the operation: a synchronous throw or a rejected
-  returned promise is counted in `store.unitOfWorkState()` and logged, later
-  callbacks still run, and the data stays committed. Outside a unit,
-  `afterCommit` runs the function at once, observed the same way.
+  `broadcast()`. The push and the `notify` live event of a notification are
+  effects of the notification's own write (`notifications.afterDurable`): the
+  repository runs them, through `afterCommit`, only once the save that carried
+  the row committed — a unit's commit, a `persistNow()` or the debounced save —
+  and keeps them queued through a failed save for the retry. A side effect
+  never fails the operation: a synchronous throw or a rejected returned promise
+  is counted in `store.unitOfWorkState()` and logged, later callbacks still
+  run, and the data stays committed. Outside a unit, `afterCommit` runs the
+  function at once, observed the same way.
 - **Setup and teardown are exception-safe.** A failed BEGIN opens no unit and
   runs no work (ordinary saves and later units are unaffected). A cleanup step
   that fails during a rollback (ROLLBACK itself, the memento, a participant's
@@ -856,7 +860,7 @@ are unchanged.
    <data-dir> <fresh-empty-dir>`, note the invalidated counts, then start the
    S5 build on the output.
 
-### Notifications and category notification preferences (live since migration `0009`, S7a — implemented, pending independent acceptance; not production-approved)
+### Notifications and category notification preferences (live since migration `0009`, S7a — corrected, pending independent acceptance; not production-approved)
 
 The in-app notification feed (`GET /{player,guardian,org}/notifications`,
 `POST …/notifications/read`, `POST …/notifications/:id/ack`) and the category
@@ -874,9 +878,16 @@ preferences (`GET`/`PUT …/notification-preferences`) are rows of
   carries the message, request or case it announces (`persistNow()` on a
   message send; the 2-second debounced save otherwise) — or inside the unit
   of work that encloses it. It is never durable ahead of the action it
-  announces, and a failed save keeps it queued for the retry. The
-  acknowledgment of an action notice updates the notification row and the
-  dispatch statuses (still a blob until S7b) in one unit of work.
+  announces, and a failed save keeps it queued for the retry. Its push and its
+  `notify` event on the live streams and in the replay log are effects of that
+  write: they go out only once the save that carried the row committed, never
+  after a save that failed (they wait for the retry and go out once with it),
+  never for a rolled-back unit. A push provider error after the commit is a
+  delivery failure (counted in `store.unitOfWorkState()`), never a rollback.
+  A crash between the commit and the effect loses the push or event, as it
+  did before S7a. The acknowledgment of an action notice updates the
+  notification row and the dispatch statuses (still a blob until S7b) in one
+  unit of work.
 - **Preferences.** The route still refuses an unknown category and a literal
   `false` on a mandatory category (`compliance`, `security_account`), and still
   coerces other values (`0` is stored `false`); the effective view and the
@@ -888,8 +899,9 @@ preferences (`GET`/`PUT …/notification-preferences`) are rows of
   the snapshot migrations' defaults, a stale copy) is never imported — the
   blob the migration just imported is dropped silently, anything else is
   logged as a count and dropped. `GET /capabilities` →
-  `persistence.dataLayer.domains.notifications` reports row counts and the
-  number of staged writes not yet in a committed save.
+  `persistence.dataLayer.domains.notifications` reports row counts, the
+  number of staged writes not yet in a committed save and the number of
+  effects (pushes, live events) waiting for that save.
 - **S7a cutover (first boot of this build on an S6a file).** Migration
   `0009_notifications` creates the three tables and imports the
   `notifications` and `notificationPrefs` blobs: every entry validated and
