@@ -63,7 +63,7 @@ Development 3 / 3; Clubs › History 4 / 5; Profile › Evidence 5 / 5.
 | Pro, Grassroots · watchlist error | "Choose whether this watchlist…" | **Rewritten** to state the condition | the generic opener |
 | Pro, Grassroots · empty states (Film Room, Shortlist, Messages, Trials, Squad, Friendlies, Invoices, bell) | "No trials yet. Trials begin when a player accepts a trial request." … | **Kept** | an empty state is the one line the screen has |
 | Trust & Safety · section intros (Representation, Workspaces, Support tickets, Backups, Verification, Mail, Billing, Communications, Disputes, Affiliations, References, Outcomes, Content) | one `.notice` per section | **Kept** (one section-level line each) | policy facts a reviewer must know; none is per-row |
-| Grassroots · Home | — | **Recomposed** (`M24F2_GRASSROOTS_LIGHT_SYSTEM.md`): one quiet sentence under the primary action, no row notes | |
+| Grassroots · Home | — | **Recomposed** (the M24F.2 light workspace, since superseded by `GRASSROOTS_CLUBHOUSE.md`): one quiet sentence under the primary action, no row notes | |
 | Grassroots · entry | three bullet points + demo notice | **Removed**; "Demo environment" as a small indicator | restrained copy |
 | Agent, Trust & Safety · rows | `.dim` meta under list rows | **Kept** | values (dates, roles, counts), not notes |
 

@@ -704,7 +704,7 @@ claim (the trials stand). `GET /capabilities` reports the rows per table under
 4. **Rollback, if needed.** `node scripts/playerSubrecordsRollback.mjs
    <data-dir> <fresh-empty-dir>`, then start the S4a build on the output.
 
-### One-time codes (live since migration `0008`, S6a — implemented, pending independent acceptance; not production-approved)
+### One-time codes (live since migration `0008`, S6a — accepted at `2d7ddeb` within the reviewed backend development scope; not production-approved)
 
 The club e-mail-domain challenge (`POST /org/verification/email` →
 `…/confirm`) and the child pairing code (`POST

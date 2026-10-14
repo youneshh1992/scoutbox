@@ -18,11 +18,16 @@ review-accepted at `2178c5b`** (the twelve `player_*` tables and `0007_player_su
 correction round; its evidence-based note is
 [`s5-player-subrecords.md`](./s5-player-subrecords.md) and its status block is in §S5; the
 acceptance is a bounded code-review conclusion, not a production-deployment authorization),
-**S6a implemented, pending independent acceptance** (the one-time-code tables `email_challenges` and
-`pairing_codes`, migration `0008_one_time_codes`, its copy-only rollback; not production-approved;
-[`s6-readiness-review.md`](./s6-readiness-review.md) §10 records what was built and how it was
-verified), **the rest of S6 not started** (the eight audit tables; they wait for S4b, review §4.1)
-— S7–S14 planned. The evidence-based plan of S4 is
+**S6a implemented and independently accepted at `2d7ddeb` within the reviewed backend development
+scope** (the one-time-code tables `email_challenges` and `pairing_codes`, migration
+`0008_one_time_codes`, its copy-only rollback, after three review rounds; the acceptance is a
+bounded code-review conclusion on the packaged server source — not production or deployment
+approval, and the Player app was not part of it;
+[`s6-readiness-review.md`](./s6-readiness-review.md) §10 records what was built, verified and
+accepted), **the rest of S6 not started** (the eight audit tables; they wait for S4b, review §4.1),
+**S7 readiness reviewed/prepared, implementation not started**
+([`s7-readiness-review.md`](./s7-readiness-review.md); its blockers are stated there and in §S7)
+— S8–S14 planned. The evidence-based plan of S4 is
 [`s4-readiness-review.md`](./s4-readiness-review.md).
 Migration numbering: `0006` is `0006_media_deletions` (S4a); S5 took **`0007_player_subrecords`**;
 S6a took the next unused identifier, **`0008_one_time_codes`** (the plan's placeholder
@@ -1253,12 +1258,15 @@ performance, existing tests, what this plan is not).
 
 ### S6 — Safeguarding and audit (`blocks`, `reports`, `moderation_log`, `org_notes`, `ledger`, `ops_events`, `source_changes`, `idv_queue`, `email_challenges`, `pairing_codes`)
 
-> **Status (S6a, the one-time codes): implemented, pending independent acceptance** — one local
-> implementation commit on `feat/sqlite-schema` on top of `7fbce74`, plus two local correction
-> commits for review findings (the challenge code's copy in the persisted mail outbox and stored
-> attempt-count validation — readiness review §10.6; the repository's participation in the
-> store's unit of work, so a caught operation failure can no longer commit partial work — §10.7);
-> not pushed, merged, deployed or run on real
+> **Status (S6a, the one-time codes): implemented and independently accepted at `2d7ddeb`
+> within the reviewed backend development scope** (14 October 2026; readiness review §10,
+> acceptance note) — one local implementation commit on `feat/sqlite-schema` on top of
+> `7fbce74`, plus two local correction commits for review findings (the challenge code's copy in
+> the persisted mail outbox and stored attempt-count validation — readiness review §10.6; the
+> repository's participation in the store's unit of work, so a caught operation failure can no
+> longer commit partial work — §10.7). The acceptance is a bounded code-review conclusion on the
+> packaged server source (the Player app was not part of it), not production or deployment
+> approval; not pushed, merged, deployed or run on real
 > data; not production-approved. `email_challenges` and `pairing_codes` are live tables (migration
 > `0008_one_time_codes`, `repositories/oneTimeCodes.mjs`): codes stored as sha256 hashes of the
 > normalised value, expiry judged on every read and swept, attempt counting on the challenge, four
@@ -1305,27 +1313,54 @@ performance, existing tests, what this plan is not).
 
 ### S7 — Messaging, notifications, delivery and push
 
-- **Objective.** `channels`, `messages`, `message_attachments`, `notifications`,
-  `notification_prefs(+categories)`, `dispatches(+attempts)`, `outbox`, `push_log`,
-  `push_tokens` live; `postMessage` no longer triggers a whole-database write (the
-  measurable goal of this step); push tokens registered by `(audience_kind, audience_id)`
-  so staff pushes work (defect 10 in the schema document).
-- **Depends on.** S4.
-- **Files / tables.** `repositories/messaging.mjs`, `repositories/notifications.mjs`,
-  migration `0009_messaging`; `server.mjs` 809–915 (notify, openChannel, postMessage,
-  broadcast 521), 3787 (push register); `adapters.mjs` (senders); `m13/delivery.mjs`;
-  `m182/notificationPrefs.mjs`.
-- **Data transformation.** Messages out of the channel record with a unique client key;
-  coalescing keeps its 6 h window via `(audience, group_key, read, occurred_at)`.
-- **API compatibility.** Channel and notification payloads unchanged; messages stay
-  oldest-first (the Player app relies on `last = latest`).
-- **Tests and acceptance.** Unit: idempotent send by client key, read receipts, coalescing,
-  prefs mandatory categories; perf harness extended with "send 1k messages" showing no blob
-  write in the path. Battery: `apiE2E` messaging, `m13Delivery*`, `m182*`, `m24F3` inbox
-  live suites.
-- **Rollback.** Pre-S7 backup + S6 commit (messages after S7 lost).
-- **Commit boundary.** Two commits allowed: (a) channels/messages/notifications,
-  (b) delivery/push/prefs.
+> **Status: readiness reviewed/prepared (14 October 2026, at `2d7ddeb`); implementation not
+> started.** The evidence-based review is [`s7-readiness-review.md`](./s7-readiness-review.md);
+> the text below is the sequence it derived and replaces the earlier assumptions of this
+> section (recorded there, §0). No migration identifier is assigned until a sub-step is
+> authorised. **Blockers, exactly:** (1) the proposed `channels.request_id` references
+> `recruitment_requests`, an S8 table that itself references S8's `recruitment_cases`, `trials`
+> and `org_users`, while S8 lists S7 as a dependency — a transitional validated reference is
+> proposed in the review §2.3 and needs approval, or S8a ships first; (2) message retention after
+> a player deletion is an open policy question (`s4-deletion-decision.md` §4 "messages — review"),
+> so no `players(id)` CASCADE/RESTRICT may be encoded for channels; (3) the ledger row every send
+> writes stays a blob until the S6 `ledger` table, which waits for S4b, so the "no whole-database
+> write on send" objective cannot be met by S7 alone (review §7.3).
+
+- **Objective.** The nine S7 collections become tables in four sub-steps, each independently
+  testable and rolled back copy-only without loss: **S7a** `notifications`,
+  `notification_prefs`, `notification_pref_categories`; **S7b** `dispatches`,
+  `dispatch_attempts` (after S7a); **S7c** `outbox` (two writer shapes unified), `push_log`,
+  `push_tokens` (storage move only — the staff-push re-keying, defect 10 of the schema
+  document, is a behaviour change needing its own decision); **S7d** `channels`, `messages`,
+  `message_attachments` (after the request-reference decision and the retention answer). The
+  whole-database-write objective is met in phases measured by a synthetic benchmark (review
+  §7.3), not claimed by any single sub-step.
+- **Depends on.** S4a (live identity tables) for every sub-step; **S4b** for any `players(id)`
+  reference and for the S6 ledger; **S8a** (or the approved transitional design) for
+  `channels.request_id`; nothing else for S7a–S7c. "Depends on S4" in the earlier text did not
+  establish that S4a alone suffices; it does not.
+- **Files / tables.** Per sub-step, in the review §8.2 (S7a) and §2.3; `server.mjs` 828–877
+  (`notify`), 897–917 (`openChannel`), 940–971 (`postMessage`), 3979–3981 (push register);
+  `adapters.mjs` (mailer with the S6a withholding, push sender); `m13/delivery.mjs`;
+  `m182/notificationPrefs.mjs`; `m23/contactRoutes.mjs:516–551` (`emailCopy.outboxId`, the
+  reference S8c wants).
+- **Data transformation.** Lossless, one-to-one mappings (review §1); accepted legacy shapes
+  and concrete refusal conditions in review §5; nothing coerced or dropped silently; orphan
+  dispatches and unknown fields are preflight findings resolved by record, not by the migration.
+- **API compatibility.** Channel, notification and delivery payloads unchanged; messages stay
+  oldest-first with insertion order preserved for equal timestamps (an ordering column to add to
+  SQL03); the S6a outbox withholding and the development-only in-memory delivery unchanged.
+- **Tests and acceptance.** Review §7.1–7.2: migration shapes and refusals, joined and caught
+  failures, real COMMIT failures, two-connection reads, duplicate send/concurrency, ordering,
+  permissions, backup/restore/rollback; existing `connectedE2E`, `apiE2E`, `m13E2E` (the delivery
+  centre — there is no `m13Delivery*` suite), `m182E2E`, `m23P4AClosureE2E`, `m23ContactE2E`;
+  browser suites `e2e/liveIntegration` and `e2e/m24f3InboxLive` are client checks outside
+  `npm test`.
+- **Rollback.** Copy-only per sub-step, rewriting every row into the blob shape the previous
+  build reads (review §6.2) — **no post-cutover message, notification or delivery record is
+  lost**; the earlier "pre-S7 backup + S6 commit (messages after S7 lost)" is withdrawn.
+- **Commit boundary.** One commit per sub-step (S7a–S7d), each with its own rollback tool and
+  tests.
 
 ### S8 — Recruitment core (file 02: 55 tables)
 
@@ -1333,9 +1368,13 @@ performance, existing tests, what this plan is not).
   offers, signing packages, signings, follow-ups and outcome reports live; the shared
   `idempotency_keys` table replaces every `keys{}` structure; `players[].trialReports`
   retired (served from `trial_reports`).
-- **Depends on.** S5, S6 (ledger rows for signings), S7 (contacts' outbox copies), and
+- **Depends on.** S5, S6 (ledger rows for signings), S7c (the `outbox` rows that
+  `recruitmentContacts[].emailCopy.outboxId` references — "contacts' outbox copies"), and
   the two unresolved relational-integrity decisions below, which must be closed **before
-  S8a's migration is written**, not during it:
+  S8a's migration is written**, not during it. Note the cross-reference with S7: the proposed
+  `channels.request_id → recruitment_requests` means S7d needs S8a (or the transitional design
+  in the S7 review §2.3), while S8c needs S7c — the sequence is S7a → S7b → S7c → S8a → S7d or
+  S8c, decided when each is authorised:
   - *Player tombstone (schema O1, implemented at S4).* `02_recruitment.sql` today declares
     no foreign key on any `player_id` because `deletePlayerData` hard-deletes the player
     row. S4 replaces the hard delete with a tombstone row; S8a then amends

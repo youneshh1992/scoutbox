@@ -9,7 +9,7 @@ Six pieces, one live dataset:
 | `scoutbox-club/`   | **ScoutBox Pro** — the club & agent recruitment portal (React, landscape). | `npm install && npm run dev` (port 5173) |
 | `scoutbox-admin/`  | The internal Trust & Safety console (reports, verification, IDV, suspensions, audit). | `npm install && npm run dev` (port 5174, key: `scoutbox-admin`) |
 | `scoutbox-grassroots/` | **ScoutBox Grassroots** — the separate club platform for federation-registered semi-pro & amateur clubs. | `npm install && npm run dev` (port 5175) |
-| `scoutbox-agent/` | **ScoutBox Agent** — the workspace for licensed football agents and their agencies (M23 P5.6B): client relationships confirmed by the player, verification facets, agency roles. No transactions, offers or negotiation. | shares `scoutbox-club/node_modules`; `npm run dev` (port 5176) |
+| `scoutbox-agent/` | **ScoutBox Agent** — the workspace for licensed football agents and their agencies (M23 P5.6B–D): client relationships confirmed by the player, verification facets, agency roles, compliance (conflicts, consents) and transactions with their documents. Offers and signings stay club-side; the agent is routed copies and never answers for the client. | shares `scoutbox-club/node_modules`; `npm run dev` (port 5176) |
 
 ## Local development — the connected system (Milestone 11)
 
@@ -27,7 +27,7 @@ Claude cloud sessions cannot expose ports to your browser at all.
 
 ```bash
 # from the repository root, on YOUR machine:
-npm run setup    # 1. once after cloning — installs every app from its lockfile, checks Node ≥ 22
+npm run setup    # 1. once after cloning — installs every app from its lockfile; the server needs Node ≥ 22.16 (node:sqlite; no JSON fallback — see CLAUDE.md)
 npm run dev      # 2. every time — backend + Player + Pro + Grassroots + Agent (npm run dev:all adds the T&S console)
 ```
 
@@ -43,9 +43,16 @@ URLs (printed by the launcher once the backend is healthy):
 - API: http://localhost:4000 (`/health`), T&S console (optional): http://localhost:5174
 
 **Database**: created automatically at `scoutbox-server/data/scoutbox.db` on
-first boot (a legacy `db.json` is imported once — that is the only migration).
-Messages, requests and read state are persisted synchronously; the rest is
-snapshotted with a short debounce.
+first boot (a legacy `db.json` is imported once). The data layer is being
+rebuilt domain by domain from JSON blob collections into real tables with
+versioned migrations (`scoutbox-server/repositories/migrations/`, `0001`–`0008`
+so far: staff users, sessions, organisations, players and guardians, the
+media-removal queue, player sub-records, one-time codes); the rules and the
+current state are in `CLAUDE.md` ("Server structure") and the plan in
+`docs/architecture/sqlite-migration-plan.md`; operations in
+`scoutbox-server/OPERATIONS.md`. Collections not yet migrated are still saved
+as blobs: messages, requests and read state with an immediate save, the rest
+with a short debounce.
 
 **Fresh demo seed**: stop the backend and run `npm run reseed` — it archives
 the current database + media to `scoutbox-server/data.bak-<timestamp>/`
@@ -87,6 +94,37 @@ Messaging is symmetric and observable: messages flow both ways with read receipt
 count next to Messages (club sidebar) and on the Inbox tab (player app). The static
 demo builds sync across same-browser tabs too (BroadcastChannel bus), so the club
 tab and player tab hold one real conversation.
+
+## Verification commands and the milestone gates
+
+The two gates every milestone must pass (documentation housekeeping and the
+backend AND Player unit tests) are defined once, in `CLAUDE.md` → "Milestone
+gates — documentation housekeeping and unit tests". The commands:
+
+```bash
+# The two unit-test gates (run against the final tree of the milestone)
+cd scoutbox-server && npm test                       # the full backend chain (19 suites)
+cd scoutbox-player && npm test                       # Jest + jest-expo, src/__tests__/
+
+# Backend end-to-end suites (each starts its own server on a temporary DATA_DIR unless noted)
+cd scoutbox-server && node scripts/apiE2E.mjs        # needs `node server.mjs` on :4000 first
+cd scoutbox-server && node scripts/connectedE2E.mjs  # also run by `npm run test:server` at the root
+cd scoutbox-server && node scripts/m13E2E.mjs        # any scripts/*E2E.mjs runs the same way
+
+# Five-app type-check / build gate
+for a in club grassroots agent admin player; do (cd scoutbox-$a && npx tsc --noEmit -p .); done
+for a in club grassroots agent admin; do (cd scoutbox-$a && npx vite build); done
+(cd scoutbox-player && npx expo export --platform web --output-dir dist-gate)
+(cd scoutbox-player && npx expo lint)
+
+# Self-contained demo bundles (git-ignored output: e2e/dist/*.html) and the browser suites
+cd e2e && node buildDemos.mjs && node buildConnectedDemo.mjs && node demoFreshness.test.mjs
+cd e2e && node liveIntegration.test.mjs              # any e2e/*.test.mjs; live suites start their own server/builds
+CHROMIUM_PATH=/opt/pw-browsers/chromium node e2e/tools/captureScreens.mjs <outdir> <prefix> all   # screenshots
+```
+
+Browser and API suites complement the unit-test gates; they do not replace
+them.
 
 ## Milestone 10: the grassroots club toolkit
 The club side of Grassroots grows the tools a real Sunday-league club runs on —
@@ -191,9 +229,11 @@ unchanged — one player pool, two windows onto it.
   passwordless for the demo logins.
 - **Guardian email verification** — a mailed code is the first of three gates
   (email → ID → disclaimer) before any child profile can exist.
-- **SQLite persistence** — atomic transactional snapshots in `data/scoutbox.db`
-  (node:sqlite, zero native deps); a legacy `db.json` is imported once. Media
-  files live on object storage (local disk in dev), outside the database.
+- **SQLite persistence** — `data/scoutbox.db` (node:sqlite, zero native deps);
+  a legacy `db.json` is imported once; since the data-layer rebuild (see the
+  Database note above) migrated domains are rows written per transaction and
+  the rest are blob snapshots. Media files live on object storage (local disk
+  in dev), outside the database.
 - **Adapter seams with working dev transports** — email (`SENDGRID_API_KEY`),
   push (`EXPO_ACCESS_TOKEN`), IDV (`ONFIDO_API_TOKEN`), billing
   (`STRIPE_SECRET_KEY`), object storage (`S3_BUCKET`). Until a key is set, mail

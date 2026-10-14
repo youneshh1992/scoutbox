@@ -10,7 +10,7 @@ are those of `2178c5b`. The DDL this review reconciles against is
 accepted) and the plan is [`sqlite-migration-plan.md`](./sqlite-migration-plan.md) §S6, whose
 server line numbers predate S4a and S5 and are superseded by the ones here.
 
-> **Update (S6a implemented, pending independent acceptance; not production-approved).** §§1–9 are the review as written at
+> **Update (S6a implemented and independently accepted at `2d7ddeb` within the reviewed backend development scope; not production-approved).** §§1–9 are the review as written at
 > `2178c5b` and are kept as the record of the analysis; their line numbers are those of that
 > commit. The one-time-code sub-step proposed in §6 has since been implemented on top of
 > `7fbce74` as migration `0008_one_time_codes`; **§10 records what was actually built**, where it
@@ -23,7 +23,7 @@ product choices** (listed in §8 and §9; nothing is decided by implication).
 Sections: 1 where S6 stands · 2 the ten domains, one by one · 3 deletion paths and
 dependencies · 4 append-only, `RESTRICT` and the current hard delete · 5 the one-time codes ·
 6 the smallest safe sub-step · 7 test and rollback design · 8 migration registry · 9 dependency
-table · 10 S6a as implemented (pending independent acceptance; §10.6 and §10.7 are the two
+table · 10 S6a as implemented (independently accepted at `2d7ddeb`; §10.6 and §10.7 are the two
 review-correction rounds).
 
 ---
@@ -650,12 +650,24 @@ Nothing is registered by this review. Existing identifiers never change.
 
 ---
 
-## 10. S6a as implemented (pending independent acceptance; not production-approved)
+## 10. S6a as implemented (independently accepted at `2d7ddeb`; not production-approved)
 
 One local implementation commit (`e020aba`) on `feat/sqlite-schema` on top of `7fbce74`, one
 local correction commit for two review findings on top of it (`b2a237e`, §10.6), and one local
 correction commit for the independent review's transaction-participation finding on top of that
-(§10.7). Nothing pushed, merged, deployed or
+(`2d7ddeb`, §10.7).
+
+> **Acceptance (14 October 2026).** The independent reviewer (Codex) examined the `2d7ddeb`
+> package: the unchanged joined-failure reproduction passes, both earlier reproductions pass, the
+> full 19-suite `npm test` chain passes on real Node 24.19.0 (275 reported checks), the eight
+> changed files match the stated correction scope, and all 304 packaged source entries match the
+> supplied blob manifest. **S6a is accepted within that reviewed backend development scope.** This
+> is a bounded code-review conclusion on the packaged server source, not production or deployment
+> approval; the reviewer did not inspect a live Git working tree, did not re-run the wider battery,
+> browser suites, old-build proof or Node 22 binaries (those results remain producer-supplied,
+> §10.5–§10.7), and the Player app was not part of the package — its unit tests were **not run**
+> by the reviewer. S4a and S5 remain accepted; S4b and the eight remaining S6 audit tables remain
+> unimplemented. Nothing pushed, merged, deployed or
 run on real data. S4b stays unimplemented, today's account-deletion behaviour is unchanged apart
 from the pairing-code row now going inside the same deletion unit, the eight audit tables are not
 started, and the guardian sign-up e-mail code stays plain. The Founder's full-birth-date choice

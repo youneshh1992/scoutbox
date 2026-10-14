@@ -76,9 +76,10 @@ and design changes the Founder explicitly requests.
   ONLY writers are `players.addItem` / `players.setItems` / `players.patchItem`
   (and `insert` / `restore`, which write a record's arrays as rows) — a route
   that writes a child row together with a blob, an audit row or a column runs
-  in one unit of work. **One-time codes are live since S6a** (pending
-  independent acceptance, not production-approved;
-  `repositories/oneTimeCodes.mjs`, migration `0008_one_time_codes`):
+  in one unit of work. **One-time codes are live since S6a** (independently
+  accepted at `2d7ddeb` within the reviewed backend development scope; not
+  production-approved; `repositories/oneTimeCodes.mjs`, migration
+  `0008_one_time_codes`):
   the club e-mail challenge and the child pairing code are rows of
   `email_challenges` / `pairing_codes` stored only as sha256 hashes of the
   normalised code; `db.emailChallenges` / `db.pairingCodes` are hash-free
@@ -206,6 +207,60 @@ and design changes the Founder explicitly requests.
 - CI must be green on `main`. A red step is a defect to fix, not a step to
   skip.
 
+### Milestone gates — documentation housekeeping and unit tests (Founder requirement, 14 October 2026)
+
+These two gates apply **after every milestone for the rest of the project**,
+documentation-only milestones included. They override any earlier suggestion
+that a documentation change needs no test run. Every handoff and every
+next-step prompt restates them and reports their result; they are not a
+one-round instruction. This section is the single authoritative statement of
+the policy; `AGENTS.md` points here and no other rules document restates it.
+
+**A. Keep the Markdown current; remove what is obsolete.**
+
+- At every milestone, inspect the relevant Markdown files for outdated
+  duplicates, abandoned plans, superseded drafts and conflicting guidance.
+- Remove files that are genuinely no longer needed. Before removing a
+  superseded file, move any still-relevant decision, requirement or
+  operational guidance into the current authoritative document and repair
+  every link and reference to the removed file.
+- Preserve active architecture, schema and migration documents, unresolved
+  decision records, required project instructions, current runbooks, and the
+  evidence needed to understand or reproduce accepted work. Age alone does not
+  make a file obsolete. Do not blanket-delete Markdown, and do not move
+  everything into an ever-growing archive instead of cleaning up.
+- The milestone handoff lists every deleted or consolidated file with the
+  reason; if the review found none, it says so explicitly. The repository must
+  end each milestone free of conflicting active instructions.
+
+**B. Run the backend server AND the Player app unit tests.**
+
+- Discover and record the actual commands and working directories from the
+  current packages: the backend is `cd scoutbox-server && npm test` (the full
+  chain in `scoutbox-server/package.json`); the Player app is
+  `cd scoutbox-player && npm test` (Jest with the `jest-expo` preset, tests
+  under `scoutbox-player/src/__tests__/`). Do not guess a path or invent a
+  passing command. The Agent, Pro and Grassroots apps are not substitutes for
+  testing Player.
+- Run both suites against the **final** changed tree of the milestone. If code
+  or configuration changes after a run, repeat the affected checks and record
+  the tested commit or file state accurately.
+- If the Player unit-test setup is ever missing or unrunnable, establish the
+  smallest suitable setup with the app's existing stack and meaningful tests
+  of real behaviour — never an empty suite or tautological tests — and report
+  that supporting change separately. If required source or dependencies are
+  unavailable, report the precise blocker and mark Player testing **NOT RUN**;
+  never "passed" or "complete".
+- Fix failures the milestone introduced and rerun. Identify independently
+  established pre-existing failures as such; never hide them, silently skip
+  tests, or call a failing gate green.
+- Record commands, runtime and tool versions, exit codes and totals for both
+  gates. Unit tests are required even when browser or API checks also ran; a
+  successful build, lint, screenshot or smoke test is not a substitute.
+- A milestone is not "fully verified" while either gate is missing or failing.
+  Preserve the evidence and report any blocker plainly. Synthetic fixtures
+  only; never real user data or live external delivery services.
+
 ## Latest approval — Agent, 6 October 2026
 
 The Founder approved the finished ScoutBox Agent UI at `7ee9ecb` on
@@ -300,8 +355,11 @@ from unrelated feature or bug-fix work.
 Keep existing authentication, tenant isolation, safeguarding, guardian-managed
 minor contact, consent acknowledgements, state transitions and action handlers.
 Never expose internal club notes. Offer acceptance is not signing; Box Cam is
-not assessment; evidence confidence is not a talent score. Do not invent data,
-presence or verification. Preserve five-category navigation and no authored emoji.
+not assessment; evidence confidence is not a talent score; Nobody Missed is
+evaluation coverage, never a ranking. Do not invent data, presence or
+verification. Preserve five-category navigation and no authored emoji. The
+self-contained demo bundles make no runtime external requests (fonts and
+assets are bundled).
 
 For changes, run relevant checks and inspect affected screens in dark mode
 and narrow layouts, including a previously saved light preference. Do not use superseded minimalism tests as a reason to

@@ -52,6 +52,8 @@ The authenticated Grassroots workspace owns this presentation. Its stylesheets a
 
 Sign-in and sign-up are explicitly excluded. Keep `Login`, `AuthShell` and auth styles unchanged. The existing appearance hook remains for entry-page compatibility; the signed-in workspace uses a single forest palette independent of saved light/dark preferences. There is no workspace theme switch.
 
+The entry (sign-in) left panel as it stands: the M24E green introduction (the soft green `--auth-promo` with its blade-and-band texture, as at `e5fe716`), restored at the Founder's direction after the M24F.2 pass, with the restrained copy — the headline "Your club. Your community. Your next player.", one sentence, no bullet points at any width; the demo build shows "DEMO ENVIRONMENT" as a small uppercase line. **Open item, not approved (carried from the 4 October handoff):** the Founder asked (M24F.5.1) for a *real* grass photograph on this left panel only, colour-graded toward ScoutBox green, one subtle centre-circle / halfway-line, no diagonals, nowhere else. No photograph is in the tree; the only candidate in history is `design-system/assets/grassroots-auth-grass.jpg` (CC0, present at `5d94a8d`, removed in `f221c90`), which has **not** been approved, and the Founder's intended photograph was never supplied. Next step when the Founder decides: approve the historical CC0 photo or supply the intended one, then implement with a scope test, a live test at 390/430/768/1024/1440, a crawl and screenshots.
+
 This request supersedes old M24F Grassroots requirements for flat surfaces, no gradients and the old light workspace. It does not supersede permissions, safeguarding, privacy or recruitment state rules.
 
 ## Visual direction
