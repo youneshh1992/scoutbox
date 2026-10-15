@@ -8,17 +8,31 @@
 // Status ladder (forward-only): queued → accepted → delivered → opened → actioned.
 // "delivered"/"opened" are set ONLY from confirmed provider callbacks — email
 // acceptance is never reported as read.
+//
+// S7b: the dispatch rows and their attempts live in the `dispatches` /
+// `dispatch_attempts` tables (repositories/dispatches.mjs, migration 0010),
+// read here through `db.dispatches` (the repository's read-only view, in
+// insertion order) and written through the `dispatches` repository in its
+// staged mode: a sweep pass's rows, attempts and status changes land in the
+// same snapshot save as the outbox row the fake provider wrote, the
+// failure-injection counter it decremented and the ops event / webhook
+// delivery intent of an exhausted retry (`persistNow()` below); an
+// acknowledgment's status changes land in the unit's commit with the
+// notification's contract; a callback's changes land with the
+// `deliveryCallbacksSeen` bookkeeping. The ladder's RANK, the retry schedule,
+// the destination rules and the callback contract are unchanged.
 import crypto from 'node:crypto';
 
 const RANK = { queued: 0, held_quiet_hours: 0, accepted: 1, delivered: 2, opened: 3, actioned: 4 };
 
 export function registerDelivery(ctx) {
   const {
-    db, users, notifications, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+    db, users, notifications, dispatches, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
     nextId, persist, persistNow, notify, findPlayer, isAdult,
     signBody, timingSafeEq, paginate,
   } = ctx;
   if (!notifications) throw new TypeError('registerDelivery needs the notifications repository (ctx.notifications)');
+  if (!dispatches) throw new TypeError('registerDelivery needs the dispatches repository (ctx.dispatches)');
 
   db.deliveryFailInject ??= { email: 0, push: 0 }; // admin-injected provider failures (tests/monitoring)
   db.deliveryCentreSince ??= Date.now(); // notifications older than this get an in-app record only — no retroactive email blast on upgrade
@@ -78,16 +92,18 @@ export function registerDelivery(ctx) {
   // --------------------------------------------------------------- sweeper
   function dispatchSweep() {
     let changed = 0;
-    // 1. Create dispatch rows for notifications that have none yet.
-    const seen = new Set(db.dispatches.map((d) => d.notificationId));
+    // 1. Create dispatch rows for notifications that have none yet. The row is
+    //    the same eighteen-key literal every build since M13 wrote (the
+    //    repository validates it and refuses anything else).
+    const seen = dispatches.notificationIdsWithRows();
     for (const n of notifications.view) {
       if (seen.has(n.id)) continue;
       const historical = n.ts < db.deliveryCentreSince;
       for (const dest of destinationsFor(n)) {
         if (historical && dest.channel !== 'in_app') { dest.skip = 'predates delivery centre — no retroactive external send'; }
         const hold = dest.channel !== 'in_app' ? quietHoldUntil(n) : null;
-        db.dispatches.push({
-          id: nextId('dsp'), notificationId: n.id, audience: n.audience,
+        dispatches.create({
+          id: nextId('dsp'), notificationId: n.id, audience: { kind: n.audience.kind, id: n.audience.id },
           channel: dest.channel, to: dest.to ?? null, provider: dest.channel === 'in_app' ? 'in_app' : PROVIDER,
           status: dest.skip ? 'skipped' : dest.channel === 'in_app' ? 'delivered' : hold ? 'held_quiet_hours' : 'queued',
           skipReason: dest.skip ?? null, providerMessageId: null,
@@ -100,29 +116,28 @@ export function registerDelivery(ctx) {
       }
       seen.add(n.id);
     }
-    // 2. Attempt queued/retrying/held external sends that are due.
+    // 2. Attempt queued/retrying/held external sends that are due. `d` is the
+    //    repository's view of the row, so `d.attempts` shows the attempt just
+    //    recorded, exactly as the array did before S7b.
     for (const d of db.dispatches) {
       if (!['queued', 'retrying', 'held_quiet_hours'].includes(d.status) || d.nextAt > Date.now()) continue;
       if (d.status === 'held_quiet_hours') {
         const n = notifications.byId(d.notificationId);
         const stillQuiet = n?.deferredPush && quietHoldUntil(n); // conservative single re-check window
-        if (stillQuiet && d.attempts.length === 0) { d.attempts.push({ at: Date.now(), note: 'quiet hours re-check' }); d.nextAt = stillQuiet; changed++; continue; }
+        if (stillQuiet && d.attempts.length === 0) { dispatches.recordAttempt(d.id, { at: Date.now(), note: 'quiet hours re-check' }); dispatches.patch(d.id, { nextAt: stillQuiet }); changed++; continue; }
       }
       const n = notifications.byId(d.notificationId);
       const result = fakeSend(d.channel, d.to, n?.text ?? '');
-      d.attempts.push({ at: Date.now(), ok: result.ok, error: result.error ?? null });
+      dispatches.recordAttempt(d.id, { at: Date.now(), ok: result.ok, error: result.error ?? null });
+      const sends = d.attempts.filter((a) => !a.note).length; // a quiet re-check note never counts as a send
       if (result.ok) {
-        d.status = 'accepted'; // provider accepted ≠ delivered ≠ read
-        d.providerMessageId = result.providerMessageId;
-      } else if (d.attempts.filter((a) => !a.note).length >= MAX_ATTEMPTS) {
-        d.status = 'failed';
-        d.failedAt = Date.now();
-        d.failReason = result.error;
+        dispatches.patch(d.id, { status: 'accepted', providerMessageId: result.providerMessageId }); // provider accepted ≠ delivered ≠ read
+      } else if (sends >= MAX_ATTEMPTS) {
+        dispatches.patch(d.id, { status: 'failed', failedAt: Date.now(), failReason: result.error });
         db.opsEvents.push({ id: nextId('ops'), at: Date.now(), kind: 'delivery_failed', detail: { dispatchId: d.id, channel: d.channel } });
         ctx.emitWebhook?.(d.audience.kind === 'org_user' ? (db.users.find((u) => u.id === d.audience.id)?.orgId ?? null) : null, 'delivery.failed', { dispatchId: d.id });
       } else {
-        d.status = 'retrying';
-        d.nextAt = Date.now() + RETRY_MS[d.attempts.filter((a) => !a.note).length];
+        dispatches.patch(d.id, { status: 'retrying', nextAt: Date.now() + RETRY_MS[sends] });
       }
       changed++;
     }
@@ -130,7 +145,7 @@ export function registerDelivery(ctx) {
     for (const d of db.dispatches) {
       if (d.channel === 'in_app' && !d.openedAt) {
         const n = notifications.byId(d.notificationId);
-        if (n?.read) { d.openedAt = Date.now(); if (RANK[d.status] < RANK.opened) d.status = 'opened'; changed++; }
+        if (n?.read) { dispatches.patch(d.id, RANK[d.status] < RANK.opened ? { openedAt: Date.now(), status: 'opened' } : { openedAt: Date.now() }); changed++; }
       }
     }
     if (changed) persistNow();
@@ -160,15 +175,16 @@ export function registerDelivery(ctx) {
       if (!n || n.audience.kind !== audience.kind || n.audience.id !== audience.id) return res.status(404).json({ error: 'NOTIFICATION_NOT_FOUND' });
       if (!n.actionRequired) return res.status(400).json({ error: 'NO_ACTION_REQUIRED' });
       if (!n.actionRequired.ackedAt) {
-        // S7a: the acknowledgment on the notification row and the dispatch
-        // statuses (still a blob, S7b) commit together or not at all.
+        // S7a/S7b: the acknowledgment on the notification row and the dispatch
+        // rows' status changes (every row of the notice, a terminal skipped row
+        // included — it keeps its status and gains actionedAt) commit together
+        // or not at all: both repositories join this unit.
         unit(() => {
           const at = Date.now();
           const acked = notifications.ack(n.id, audience, { at });
           if (acked.status !== 'ok') throw new Error(`notifications: acknowledgment of ${n.id} answered ${acked.status} inside the unit`);
-          for (const d of db.dispatches.filter((x) => x.notificationId === n.id)) {
-            d.actionedAt = at;
-            if (RANK[d.status] < RANK.actioned) d.status = 'actioned';
+          for (const d of dispatches.forNotification(n.id)) {
+            dispatches.patch(d.id, RANK[d.status] < RANK.actioned ? { actionedAt: at, status: 'actioned' } : { actionedAt: at });
           }
         });
       }
@@ -196,21 +212,34 @@ export function registerDelivery(ctx) {
       if (db.deliveryCallbacksSeen.includes(cbId)) { duplicates++; continue; } // idempotent
       db.deliveryCallbacksSeen.push(cbId);
       if (db.deliveryCallbacksSeen.length > 5000) db.deliveryCallbacksSeen.splice(0, 1000);
-      const d = db.dispatches.find((x) => x.providerMessageId === ev.providerMessageId);
+      // The lookup every build since M13 made: the FIRST row in insertion order
+      // whose providerMessageId strictly equals the event's (an explicit null
+      // matches the first null row; an omitted id matches nothing — but the
+      // callbackId was still remembered above).
+      const d = dispatches.byProviderMessageId(ev.providerMessageId);
       if (!d) continue;
+      // The clock a callback carries, as every build since M13 read it:
+      // `Number(ev.at) || Date.now()` — a finite value, fractional or not, is
+      // kept EXACTLY (the table column is the writer's double); a non-finite
+      // value (Infinity from a string such as "Infinity") is recorded as null,
+      // which is what the JSON save of the previous build persisted for it.
+      // The callback API is unchanged.
+      const clock = () => { const at = Number(ev.at) || Date.now(); return Number.isFinite(at) ? at : null; };
+      const patch = {};
       if (ev.status === 'delivered') {
-        d.deliveredAt ??= Number(ev.at) || Date.now();
-        if (RANK[d.status] < RANK.delivered) d.status = 'delivered'; // forward-only: never regresses opened/actioned
+        if (d.deliveredAt == null) patch.deliveredAt = clock(); // nullish assignment: an existing clock is kept
+        if (RANK[d.status] < RANK.delivered) patch.status = 'delivered'; // forward-only: never regresses opened/actioned
       } else if (ev.status === 'opened') {
-        d.openedAt ??= Number(ev.at) || Date.now();
-        d.deliveredAt ??= d.openedAt; // out-of-order: opened implies delivered
-        if (RANK[d.status] < RANK.opened) d.status = 'opened';
+        if (d.openedAt == null) patch.openedAt = clock();
+        if (d.deliveredAt == null) patch.deliveredAt = Object.hasOwn(patch, 'openedAt') ? patch.openedAt : d.openedAt; // out-of-order: opened implies delivered
+        if (RANK[d.status] < RANK.opened) patch.status = 'opened';
       } else if (ev.status === 'bounced' || ev.status === 'failed') {
         // A failure report never un-delivers: recorded alongside, status only
         // moves to failed if nothing better was ever confirmed.
-        d.failReason = String(ev.reason ?? ev.status).slice(0, 120);
-        if (RANK[d.status] <= RANK.accepted) { d.status = 'failed'; d.failedAt = Date.now(); }
+        patch.failReason = String(ev.reason ?? ev.status).slice(0, 120);
+        if (RANK[d.status] <= RANK.accepted) { patch.status = 'failed'; patch.failedAt = Date.now(); }
       }
+      if (Object.keys(patch).length) dispatches.patch(d.id, patch);
       applied++;
     }
     persistNow();
@@ -239,12 +268,10 @@ export function registerDelivery(ctx) {
   });
 
   adminRouter.get('/delivery', (req, res) => {
-    const counts = {};
-    for (const d of db.dispatches) counts[d.status] = (counts[d.status] ?? 0) + 1;
     res.json({
       provider: PROVIDER,
       providerNote: 'Local fake provider only — real email/SMS/push transport is not configured; no message leaves this machine.',
-      counts,
+      counts: dispatches.countsByStatus(),
       awaitingAck: notifications.awaitingAckCount(),
       recent: db.dispatches.slice(-100).reverse(),
     });

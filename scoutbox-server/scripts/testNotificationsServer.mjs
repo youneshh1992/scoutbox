@@ -183,7 +183,10 @@ await test('acknowledgment: a withdrawal notice (notifyAction) lands with its co
   assert.ok(live(dir), 'this proof reads the notifications table'); // fails on the pre-S7a build: the table does not exist
   assert.deepEqual(q1(dir, 'SELECT action_required AS a, action_acked_at AS at FROM notifications WHERE id = ?', notice.id), { a: 1, at: null });
   assert.ok((await S.j('POST', '/admin/delivery/sweep', {}, null, A)).status === 200);
-  const dispatches = () => blobRows(dir, 'dispatches').filter((d) => d.notificationId === notice.id);
+  // S7b: the dispatch rows live in the dispatches table (the blob before the 0010 cutover); the ack coupling is what this test checks either way.
+  const dispatches = () => (q1(dir, "SELECT 1 AS one FROM data_migrations WHERE id = '0010_dispatches'")
+    ? qAll(dir, 'SELECT id, status, actioned_at AS actionedAt, channel FROM dispatches WHERE notification_id = ? ORDER BY seq', notice.id)
+    : blobRows(dir, 'dispatches').filter((d) => d.notificationId === notice.id));
   assert.ok(dispatches().length >= 1, 'the sweep created dispatch rows for the notice'); assert.ok(dispatches().every((d) => d.status !== 'actioned' && !d.actionedAt));
   const statusesBefore = dispatches().map((d) => [d.id, d.status]);
   const ack = () => S.j('POST', `/org/notifications/${notice.id}/ack`, {}, maria);
@@ -310,8 +313,9 @@ await test('backup/restore: the admin backup exports the notifications and prefe
   // The old build on the rollback copy (when its server.mjs is given).
   const OLD = process.env.SCOUTBOX_PRE_S7A_SERVER;
   if (OLD && fs.existsSync(OLD)) {
-    const copy = path.join(tempDir('s7a-rb'), 'copy');
-    const out = execFileSync(process.execPath, [path.join(HERE, 'notificationsRollback.mjs'), dir, copy], { encoding: 'utf8' });
+    const copy = path.join(tempDir('s7a-rb'), 'copy'); const s7aCopy = path.join(tempDir('s7a-rb-s7b'), 'copy');
+    execFileSync(process.execPath, [path.join(HERE, 'dispatchesRollback.mjs'), dir, s7aCopy], { encoding: 'utf8' }); // S7b: the file carries 0010; its rollback goes first
+    const out = execFileSync(process.execPath, [path.join(HERE, 'notificationsRollback.mjs'), s7aCopy, copy], { encoding: 'utf8' });
     assert.match(out, /written back as blobs/);
     const old = await boot(copy, {}, OLD);
     assert.ok(!/0009_notifications/.test(old.log()), 'the pre-S7a build knows nothing of 0009');

@@ -25,7 +25,7 @@ export function migrateM13(db, players) {
   db.coverageAssignments ??= [];  // F7 — scout↔fixture assignments → observations
   db.groups ??= [];               // F8 — parent organisations / federations
   db.groupGrants ??= [];          // F8 — explicit, expiring, revocable sharing grants
-  db.dispatches ??= [];           // F11 — per-channel delivery records for notifications
+  db.dispatches ??= [];           // F11 — per-channel delivery records for notifications (S7b: a table; attachDataLayer replaces this container with the repository's read-only view before m13 registers)
   db.deliveryCallbacksSeen ??= [];// F11 — processed provider callback ids (idempotency)
   db.orgInvites ??= [];           // F12 — staff invitations
   db.ssoConfigs ??= [];           // F12 — per-org identity-provider configuration

@@ -56,7 +56,23 @@ async function boot(dir) {
 }
 const q = (dir, sql, ...p) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare(sql).all(...p).map((r) => ({ ...r })); } finally { s.close(); } };
 const blob = (dir, name) => { const r = q(dir, 'SELECT value FROM collections WHERE name = ?', name)[0]; return r ? JSON.parse(r.value) : null; };
-const dispatchesOf = (dir) => blob(dir, 'dispatches') ?? [];
+/**
+ * The dispatch records as the DATABASE holds them, in insertion order, attempts re-nested. Written against the
+ * dc4b559 build (the `dispatches` blob). ADAPTED for S7b: after the 0010_dispatches cutover the rows are in the
+ * dispatches / dispatch_attempts tables and the probe reads them there in the same legacy shape; before the cutover
+ * (an older build) it still reads the blob. The adapter is the only change to this probe; every observation it
+ * reports is computed on the same shape as before.
+ */
+const dispatchesOf = (dir) => {
+  if (!q(dir, "SELECT 1 AS one FROM data_migrations WHERE id = '0010_dispatches'").length) return blob(dir, 'dispatches') ?? [];
+  const attempts = q(dir, 'SELECT dispatch_seq, seq, kind, attempted_at, ok, error, note FROM dispatch_attempts ORDER BY dispatch_seq, seq');
+  return q(dir, 'SELECT seq, id, notification_id, audience_kind, audience_id, channel, to_address, provider, status, skip_reason, provider_message_id, next_at, action_deadline_at, created_at, delivered_at, opened_at, actioned_at, failed_at, fail_reason, extra_json FROM dispatches ORDER BY seq').map((r) => ({
+    ...(r.extra_json ? JSON.parse(r.extra_json) : {}),
+    id: r.id, notificationId: r.notification_id, audience: { kind: r.audience_kind, id: r.audience_id }, channel: r.channel, to: r.to_address, provider: r.provider, status: r.status, skipReason: r.skip_reason, providerMessageId: r.provider_message_id,
+    attempts: attempts.filter((a) => a.dispatch_seq === r.seq).map((a) => (a.kind === 'quiet_recheck' ? { at: a.attempted_at, note: a.note } : { at: a.attempted_at, ok: a.ok === 1, error: a.error })),
+    nextAt: r.next_at, actionDeadline: r.action_deadline_at, createdAt: r.created_at, deliveredAt: r.delivered_at, openedAt: r.opened_at, actionedAt: r.actioned_at, failedAt: r.failed_at, failReason: r.fail_reason,
+  }));
+};
 const notificationIds = (dir) => new Set(q(dir, 'SELECT id FROM notifications').map((r) => r.id));
 /** A dispatch row with every private value removed: ids, statuses, shapes and timestamps only. */
 const shape = (d) => ({ id: d.id, notificationId: d.notificationId, audienceKind: d.audience?.kind, channel: d.channel, provider: d.provider, status: d.status, skipReason: d.skipReason, hasTo: d.to !== null && d.to !== undefined, providerMessageId: d.providerMessageId ? 'set' : d.providerMessageId, attempts: (d.attempts ?? []).map((a) => (Object.hasOwn(a, 'note') ? { kind: 'quiet_recheck', keys: Object.keys(a).sort() } : { kind: 'send', ok: a.ok, error: a.error, keys: Object.keys(a).sort() })), nulls: Object.keys(d).filter((k) => d[k] === null).sort(), keys: Object.keys(d).sort() });

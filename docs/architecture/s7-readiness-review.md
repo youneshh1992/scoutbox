@@ -20,8 +20,9 @@ implementation `ba6956d`, the correction `7655bae` of the four findings its firs
 raised (§8.4), and `0641b2c`, the correction of the two participant-contract defects and the
 replay-coverage gap the second review raised (§8.5); §8.4 and §8.5 are kept as the dated history of
 those rounds, not as current status. What was built, the four compatibility corrections it honours
-and the one deliberate reading it records are in §8.3. **S7b: design amendment prepared (§9), not
-implemented, not authorised for cutover. S7c–S7d not started.** §§0–8.2
+and the one deliberate reading it records are in §8.3. **S7b: IMPLEMENTED on top of `dc4b559` (15 October
+2026; §9 as corrected in place by the review of `dc4b559`, §9.7 the implementation record) — PENDING
+INDEPENDENT ACCEPTANCE, not accepted, not authorised for deployment. S7c–S7d not started.** §§0–8.2
 are the review as written at `2d7ddeb`, kept as the record of the reasoning; where the
 implementation corrected a proposal (§3.2 coupled writes, §8.2 "transaction of its own"), the
 correction is marked in place. The exact blockers of the remaining sub-steps are in §8. Nothing
@@ -757,7 +758,7 @@ with the ledger and notification sizes stated. The harness is not changed by thi
 | Work | Class | Blocker or need |
 |---|---|---|
 | **S7a** `notifications` + `notification_prefs` + `notification_pref_categories` | **ready technical work** | none under current decisions (no FK, one writer, no S4b/S6/S8 dependency); the `category` CHECK must equal `CATEGORIES`; orphan-dispatch findings are listed, not resolved, by S7a |
-| **S7b** `dispatches` + `dispatch_attempts` | ready after S7a; **design amended in §9 (15 October 2026)** | as first written: `notification_id → notifications`; orphan rows need a resolution record before cutover (§5.3); whether dispatches cascade with notifications is a policy question (§4.3 a). **Superseded by §9:** `notification_id` is a plain reference (no FK, no cascade), orphan rows are imported and counted, today's deletion is unchanged; the cascade question stays open as policy (§9.6) and does not block S7b |
+| **S7b** `dispatches` + `dispatch_attempts` | **implemented on top of `dc4b559` (15 October 2026; §9 as corrected, §9.7) — pending independent acceptance** | as first written: `notification_id → notifications`; orphan rows need a resolution record before cutover (§5.3); whether dispatches cascade with notifications is a policy question (§4.3 a). **Superseded by §9:** `notification_id` is a plain reference (no FK, no cascade), orphan rows are imported and counted, today's deletion is unchanged; the cascade question stays open as policy (§9.6) and does not block S7b |
 | **S7c** `outbox`, `push_log` | ready technical work | the two-shape unification (§1.6); the six plain-text code call sites are an **owner decision** (cleanse, mask like S6a, or carry as is) — S7c carries rows as they are unless told otherwise |
 | **S7c** `push_tokens` storage move | ready technical work | — |
 | **S7c** push-token audience re-keying (staff pushes) | needs a **product/behaviour decision** | which identity a staff push targets; what to do with existing `org`-kind rows; keep it out of the storage move (§6.2) |
@@ -1063,9 +1064,12 @@ no retention rule, deletion clean-up, foreign-key behaviour change or storage cu
 
 ---
 
-## 9. S7b design amendment — `dispatches` and `dispatch_attempts` (prepared 15 October 2026 on `0641b2c`; **not implemented, cutover not authorised**)
+## 9. S7b design amendment — `dispatches` and `dispatch_attempts` (prepared 15 October 2026 on `0641b2c`; corrected by the independent review of `dc4b559`; **implemented 15 October 2026 on top of `dc4b559` — pending independent acceptance, not accepted**)
 
-This section is the implementation-ready amendment for S7b. It reads the code as it is at
+This section is the implementation-ready amendment for S7b, **corrected in place** where the
+independent review of `dc4b559` found it wrong (the attempt-shape CHECK, the timestamp contract, the
+callback lookup — each correction is marked "corrected" below) and followed by the implementation
+record (§9.7). It reads the code as it is at
 `0641b2c` (functions named, not historical line numbers), rests on a synthetic probe whose results
 are recorded in §9.5 (`scoutbox-server/scripts/probeS7bDispatches.mjs`, outside `npm test` and
 outside every runtime path), and **supersedes** the following earlier text where they conflict:
@@ -1075,7 +1079,9 @@ SQL03's `dispatches` DDL (`notification_id … REFERENCES notifications(id) ON D
 `provider_message_id`), §5.3's "orphan references … resolved before the cutover" for dispatches,
 §5.4's "every `dispatch.notification_id` resolves", and §4.3(a)/§8 table row "S7b … orphan rows
 need a resolution record before cutover". Everything else in §§1–8 about dispatches stands. The
-SQL03 file itself is rewritten only when S7b is implemented (the S7a precedent: §8.3 correction 3).
+SQL03 file was rewritten with the implementation (§9.7; `scripts/testSchemaDdl.mjs` compares it with
+migration `0010_dispatches` column for column, checks the total attempt CHECK and the absence of a
+foreign key on `dispatches`).
 
 ### 9.1 The lifecycle today, reproduced, and the storage designs compared
 
@@ -1138,7 +1144,9 @@ no retention policy, adds no cascade, blocks no deletion and cleanses no row.
   becomes `dispatches.markActioned(notificationId, at)` joined inside the same unit: the
   notification contract and the dispatch rows commit together or not at all (already proven for the
   blob by `testNotificationsServer.mjs` "acknowledgment"; the probe confirms the terminal `skipped`
-  row keeps its status and gains `actionedAt`).
+  row keeps its status and gains `actionedAt`). As implemented the loop stays in the handler
+  (`dispatches.forNotification(id)` then `dispatches.patch(…)` per row, joined inside the same unit);
+  the RANK rule stays in m13/delivery.mjs.
 - **`POST /callbacks/delivery`** — HMAC and 5-minute window; ≤ 100 events; a `callbackId` already in
   **`db.deliveryCallbacksSeen`** counts as a duplicate (the array is capped at 5 000 by splicing
   1 000); an unknown `providerMessageId` is still remembered as seen and applies nothing (probe:
@@ -1146,8 +1154,13 @@ no retention policy, adds no cascade, blocks no deletion and cleanses no row.
   to `delivered`; `opened` sets `openedAt ??=`, `deliveredAt ??= openedAt` and raises to `opened`;
   `bounced`/`failed` records `failReason` (sliced to 120) and moves to `failed` only from
   `RANK ≤ accepted`; ends with `persistNow()`. Lookup is `find` by `providerMessageId` — the FIRST
-  matching row in insertion order. Under S7b: `dispatches.applyCallback()` staged, with
-  `deliveryCallbacksSeen` staying a blob in the same save; the lookup `ORDER BY seq LIMIT 1`.
+  matching row in insertion order. Under S7b (**corrected by the review of `dc4b559`**, implemented
+  as such): the lookup is `dispatches.byProviderMessageId(value)` over the in-memory mirror with
+  strict equality (`===`) — the first row in insertion order whose stored id equals the value, an
+  explicit `null` matching the first row whose id is null, an omitted (`undefined`) id matching
+  nothing while the `callbackId` is still remembered, duplicates legal, no string coercion and no SQL
+  `= NULL`; the handler keeps its RANK logic and writes through `dispatches.patch`, with
+  `deliveryCallbacksSeen` staying a blob in the same `persistNow()` save.
 - **Views** — `GET /org/delivery` (rows whose `audience` is an `org_user` of the org, newest first,
   paginated), `GET /admin/delivery` (counts by status, `awaitingAck` from the notifications
   repository, the last 100 rows reversed), `GET /admin/metrics` in m13/enterprise.mjs
@@ -1191,10 +1204,11 @@ send rows (`attempts.filter(a => !a.note)`), so note rows must never count.
 | `to` | `to_address TEXT` | nullable; personal data (an e-mail address, or `"kind:id"`) | never in a diagnostic |
 | `status` | `status TEXT NOT NULL` | **no CHECK**: the nine values are code vocabulary; a stored value outside `RANK` is inert today and must stay so | |
 | `skipReason`, `providerMessageId`, `failReason` | `TEXT` nullable | **no length CHECK** on `fail_reason` (the sweep does not truncate) | `providerMessageId`: ordinary index, **no UNIQUE** (random, not guaranteed by code) |
-| `nextAt`, `createdAt` | `INTEGER NOT NULL` | | |
-| `actionDeadline`, `deliveredAt`, `openedAt`, `actionedAt`, `failedAt` | `INTEGER` nullable | | `actionDeadline` is a copy of the notification's deadline at creation (probe) |
+| `nextAt`, `createdAt` | `INTEGER NOT NULL` | written by the server itself (`Date.now()` or a sum of it): integers; a fraction is refused by the repository and by STRICT | |
+| `actionDeadline`, `actionedAt`, `failedAt` | `INTEGER` nullable | server-written clocks (the ack's and the sweep's `Date.now()`, the notification's deadline) | `actionDeadline` is a copy of the notification's deadline at creation (probe) |
+| `deliveredAt`, `openedAt` | `REAL` nullable (**corrected by the review of `dc4b559`, finding 2**: the first draft said `INTEGER`) | written by the provider callback route as `Number(ev.at) \|\| Date.now()`: a finite JavaScript number that MAY be fractional (1700000000000.5 is a value the `0641b2c` build stores and its JSON blob preserves). The repository accepts a finite number (integer-valued or not) or `null`, refuses anything else, and stores it as the writer's double — node:sqlite binds every JavaScript number as a double, so a REAL column states exactly what is stored; an INTEGER column would refuse the fraction and an `ANY` column would store a whole number as REAL anyway. A non-finite callback `at` (`Infinity` from a string) is written as `null`, which is what the previous build's JSON save persisted for it; the callback API is unchanged. Proven through the real route, migration, export, restart, backup and rollback (`testDispatchesServer.mjs` test 3; `testDispatches.mjs`) | `??=` semantics kept: an existing clock is never replaced |
 | unknown top-level field | `extra_json` (object CHECK) | own-property copy, round-trips (S7a finding 3) | |
-| `attempts[i]` | `dispatch_attempts (dispatch_seq INTEGER NOT NULL REFERENCES dispatches(seq) ON DELETE CASCADE, seq INTEGER NOT NULL, kind TEXT NOT NULL, attempted_at INTEGER NOT NULL, ok INTEGER, error TEXT, note TEXT, PRIMARY KEY (dispatch_seq, seq))` | `seq` = array index; `kind` = `'quiet_recheck'` iff the row has `note`, else `'send'`; **no minted id** (the SQL03 `dat-<n>` would consume the global counter); `ok` **nullable**: NULL on a note row, 0/1 on a send row; `CHECK ((kind='send' AND ok IN (0,1) AND note IS NULL) OR (kind='quiet_recheck' AND ok IS NULL AND error IS NULL AND note IS NOT NULL))` | written back as `{at, note}` or `{at, ok, error}` exactly (probe: 8 attempt rows round-trip byte-for-byte) |
+| `attempts[i]` | `dispatch_attempts (dispatch_seq INTEGER NOT NULL REFERENCES dispatches(seq) ON DELETE CASCADE, seq INTEGER NOT NULL, kind TEXT NOT NULL, attempted_at INTEGER NOT NULL, ok INTEGER, error TEXT, note TEXT, PRIMARY KEY (dispatch_seq, seq))` | `seq` = array index; `kind` = `'quiet_recheck'` iff the row has `note`, else `'send'`; **no minted id** (the SQL03 `dat-<n>` would consume the global counter); `ok` **nullable**: NULL on a note row, 0/1 on a send row; **total CHECK (corrected by the review of `dc4b559`, finding 1** — SQLite treats a NULL CHECK result as a pass, so the first draft's `ok IN (0,1)` admitted a send row with `ok` NULL): `CHECK ((kind='send' AND ok IS NOT NULL AND ok IN (0,1) AND note IS NULL) OR (kind='quiet_recheck' AND ok IS NULL AND error IS NULL AND note IS NOT NULL))`, proven through direct SQL on the real DDL (`testDispatches.mjs` "the actual schema") | written back as `{at, note}` or `{at, ok, error}` exactly (probe: 8 attempt rows round-trip byte-for-byte); a note row is never counted as a send; no attempt id is minted and no global counter is consumed |
 
 The child FK on `dispatch_seq` is internal to the pair of tables (an attempt is a part of its
 dispatch, never shared) and is the only foreign key S7b adds. **Constraints the proposal had that
@@ -1203,7 +1217,9 @@ current code does not guarantee — therefore not added:** UNIQUE `provider_mess
 the four CHECK lists; `fail_reason ≤ 120`; `ok NOT NULL`. **Refusals (whole write, text-free, entry
 index + field):** a non-object entry, a missing/empty `id`, a duplicate `id`, a non-string
 `notificationId`, a malformed audience, a non-string `channel`/`provider`/`status`, a non-integer
-`nextAt`/`createdAt`, a non-integer non-null timestamp, a non-string non-null `to`/`skipReason`/
+`nextAt`/`createdAt`, a non-integer non-null `actionDeadline`/`actionedAt`/`failedAt`, a non-finite or
+non-numeric non-null `deliveredAt`/`openedAt` (corrected: a finite fraction is accepted, see the table),
+a non-string non-null `to`/`skipReason`/
 `providerMessageId`/`failReason`, `attempts` not an array, an attempt row that is not an object,
 has neither or both of `note`/`ok`, a non-integer `at`, a non-boolean `ok`, a non-string non-null
 `error`/`note`, or **any unknown key on an attempt row** (attempt rows have no `extra_json`; the
@@ -1216,7 +1232,7 @@ delivery centre`) and the `accepted` / `delivered` / `opened` distinctions are v
 
 - **Identifier:** the next unused is **`0010`** → `0010_dispatches`. The plan's `0010_recruitment`
   (S8a) is a placeholder and moves to the next free number when S8a is approved, as `0008_safety_audit`
-  did (plan §Migration numbering). Not registered, not implemented by this amendment.
+  did (plan §Migration numbering). **Registered and implemented** (§9.7).
 - **Atomic import** (one transaction, the 0009 pattern): create the two tables and indexes; read the
   `dispatches` blob; **absent** blob → import nothing, record the cutover; **empty** array → same;
   **non-array / non-JSON** → refuse; validate every entry (§9.3) collecting problems, refuse the
@@ -1241,8 +1257,8 @@ delivery centre`) and the `accepted` / `delivered` / `opened` distinctions are v
   `{at, ok, error}`, extras spread back), drop the two tables, remove the `0010` record and its meta
   key, advance `saveSeq`, foreign-key check, VACUUM, revalidate; **every post-cutover dispatch,
   attempt and unrelated record is retained**. Refusals, no output: `LATER_SCHEMA` (any
-  `data_migrations` id the tool does not know — the S7a tool already refuses a `0010_*` file this way,
-  `testNotifications.mjs` proves it with `0010_future_step`), `NOT_CUT_OVER`, `OUTPUT_NOT_EMPTY`,
+  `data_migrations` id the tool does not know — the S7a tool refuses a real `0010_dispatches` file this
+  way (`testDispatches.mjs`), the S7b tool a `0011_future_step` one), `NOT_CUT_OVER`, `OUTPUT_NOT_EMPTY`,
   `UNEXPECTED_SCHEMA`. **Old-build proof:** `SCOUTBOX_PRE_S7B_SERVER` pointing at an `0641b2c`
   checkout boots the copy (its log carries no `0010_dispatches`), `GET /admin/delivery` and the org
   view return the same rows, statuses and attempt arrays, and its sweep keeps writing to the blob;
@@ -1260,9 +1276,9 @@ delivery centre`) and the `accepted` / `delivered` / `opened` distinctions are v
 | Mapping round trip | 18 dispatch rows, 8 attempt rows: blob → proposed rows → blob **byte-identical**; one dispatch key set; attempt key sets `{at,note}` and `{at,ok,error}`; no unknown keys | the §9.3 mapping is lossless on observed data |
 | Proposed constraints vs observed data | FK NOT NULL to notifications: **4 orphan rows → unsatisfiable** on this ordinary file; UNIQUE `provider_message_id`: satisfied here, not guaranteed by code; one row per (notification, channel): satisfied here, not guaranteed; `audience_kind` CHECK: satisfied here, refused for the `system` audience path; status/fail_reason/attempt-shape CHECKs: satisfied here | the FK and the CHECKs are dropped by this amendment; the shape rule on attempt rows is kept |
 
-### 9.6 Implementation checklist, files, tests, acceptance
+### 9.6 Implementation checklist, files, tests, acceptance (as planned; what was built is §9.7)
 
-**Files (expected):** new `repositories/dispatches.mjs` (the three concerns of S7a's repository:
+**Files (expected; the names as built are in §9.7):** new `repositories/dispatches.mjs` (the three concerns of S7a's repository:
 validators, table access `DISPATCHES_TABLE` for the snapshot dispatcher, the staged/immediate
 repository with mirror, views `db.dispatches`, methods `createForNotification`, `recordAttempt`,
 `transition`, `markActioned(notificationId, at)`, `applyCallback`, `byProviderMessageId`, `due(now)`,
@@ -1312,7 +1328,130 @@ message was delivered. Consequence of deciding "delete": a new explicit act in t
 (dispatches, and separately the S7c outbox rows), a behaviour change with its own tests — not a
 schema cascade. **Recommendation:** keep today's behaviour for S7b and decide the question together
 with the §4.4 retention items (S4b), where the outbox and push log raise the same question.
-S7b remains **prepared, not implemented**, until this design is reviewed.
+The design was reviewed (review of `dc4b559`: "sufficient to proceed … with the corrections") and
+implemented as §9.7 records; the question stays open and is unchanged by the implementation.
+
+### 9.7 S7b as implemented (15 October 2026, one local commit on `feat/sqlite-schema` on top of `dc4b559`; **pending independent acceptance — not accepted**)
+
+**Authorisation and boundary.** The independent review of `dc4b559` found the preparation
+"sufficient to proceed to a bounded S7b implementation with the corrections" and the next-step
+instruction authorised local implementation, synthetic tests and a local commit only — no push, no
+deployment, no retention-policy change, no S7c/S7d, S4b, S6 audit tables or S8, no staff-push
+re-keying, no real external delivery. This section records what was built against that instruction;
+acceptance is the reviewer's, not this record's. The commit hash is in the handoff note that carries
+this tree (it cannot be written into a file that is part of the commit).
+
+**The three corrections, honoured as instructed.**
+
+1. *Attempt-shape CHECK (finding 1).* `dispatch_attempts` carries the total predicate
+   `(kind='send' AND ok IS NOT NULL AND ok IN (0,1) AND note IS NULL) OR (kind='quiet_recheck' AND
+   ok IS NULL AND error IS NULL AND note IS NOT NULL)`, proven through direct SQL on the real DDL
+   (`scripts/testDispatches.mjs` "the actual schema": a send row with `ok` NULL, a send row with a
+   note, a note row with `ok` or `error`, a note row without its note and an unknown kind are each
+   refused; both send outcomes and a note are accepted; the key is `(dispatch_seq, seq)` with no
+   minted id). A note row is never counted as a send (the sweep's `sends` counter and the real-route
+   ladder test: `[note, send:fail, send:fail, send:ok]` → `accepted`; four send rows → `failed`).
+2. *Timestamp contract (finding 2).* Each timestamp's writer was inspected: `createdAt`, `nextAt`,
+   `actionDeadline`, `actionedAt`, `failedAt` and an attempt's `at` are the server's own
+   `Date.now()` (or a sum of it, or the notification's deadline) — integers, INTEGER columns, a
+   fraction refused by the repository and by STRICT. `deliveredAt` and `openedAt` are written only by
+   `POST /callbacks/delivery` as `Number(ev.at) || Date.now()`: a finite number, fractional or not.
+   The repository accepts exactly that shape (a finite JavaScript number or `null`; `NaN`,
+   `±Infinity`, a string, an object are refused by name) and the two columns are **REAL**: a
+   JavaScript number is a 64-bit double and so is the column, so 1700000000000.5 is stored and read
+   back exactly, as is an integer-valued clock (node:sqlite binds every JavaScript number as a double;
+   an `ANY` column would store a whole number as REAL anyway, so REAL states what is stored). The
+   non-finite case is distinguished from the finite fraction: the route keeps `Number(ev.at) ||
+   Date.now()` and writes `null` when that is not finite — what the previous build's JSON save
+   persisted for `Infinity`. No value is rounded, no API changed. Proven through the real route
+   (`testDispatchesServer.mjs` test 3: fractional exact and `typeof` REAL on a second connection, the
+   admin view showing the same value; `null` and `0` fall back to the server clock; an existing clock
+   is kept; `"Infinity"` → `null` while the status still rises), through the migration import, the
+   export, a restart, the backup/restore and the rollback blob (`testDispatches.mjs`,
+   `testDispatchesServer.mjs` test 8).
+3. *Callback lookup (finding 3 and the compatibility edge).* `dispatches.byProviderMessageId(v)` is
+   `Array.find` over the mirror with `===`: the first row in insertion order whose stored id equals
+   the value; an explicit `null` matches the first null row; `undefined` matches nothing (the
+   `callbackId` is still remembered first, as before); duplicates are legal (no UNIQUE, an ordinary
+   index); no string coercion, no SQL `= NULL`. The dedup-before-lookup order, the unknown-provider
+   bookkeeping, the late bounce, the unknown status (`applied` counted, nothing changed) and the RANK
+   semantics are unchanged and proven through the real route.
+
+**What was built (files).** `repositories/dispatches.mjs` (validators for the eighteen-key literal and
+the two attempt shapes; `DISPATCHES_TABLE` for the snapshot dispatcher; `importDispatchesBlob`; the
+staged/immediate repository with the mirror behind `db.dispatches`, methods `create(row)`,
+`recordAttempt(id, attempt)`, `patch(id, fields)` — the eight fields the sweep and the callback
+route change, each validated per column — reads `byId`, `list`, `forNotification`,
+`notificationIdsWithRows`, `byProviderMessageId`, `countsByStatus`, `backlogCount`, `exportRows`,
+and the S7a save-hook contract `flush/commit/rollback/snapshotState/restoreState`; **no effects
+queue** — the next-step instruction forbade an after-durable queue for persisted blob state, and a
+dispatch has no push or live event); `repositories/migrations/0010_dispatches.mjs` (registered;
+requires `0009_notifications`; refuses pre-existing tables; atomic import with the cutover record
+`meta.dispatchesCutover` = `{ imported, attempts, withExtraFields, orphanReferences, byStatus }`,
+text-free); `repositories/index.mjs` (`DATA_MIGRATIONS`, `TABLE_BACKED`, the snapshot dispatch after
+the notification tables, the staged attach with the save hook, the stale-array rule, the report
+domain); `repositories/dispatchesRollback.mjs` + `scripts/dispatchesRollback.mjs`
+(`npm run rollback:dispatches`); `m13/delivery.mjs` (sweep, acknowledgment, callbacks and the admin
+counts through the repository; RANK, retry schedule, destination rules and the callback contract
+unchanged); `m13/enterprise.mjs` (`dispatches: dispatches.exportRows()` in the backup;
+`dispatchBacklog` from the repository, same definition); `server.mjs` (the repository in the m13
+context); `storeContract.mjs`; `m13/shared.mjs` (comment); `sql/03` rewritten for both tables and its
+scope header; `scripts/testSchemaDdl.mjs` (column-for-column comparison, the total CHECK, the absence
+of a foreign key on `dispatches`); `scripts/probeS7bDispatches.mjs` (one explicit, labelled change:
+its storage reader reads the tables after the cutover and the blob before it); `package.json`
+(`npm test` chain of 23 suites; `rollback:dispatches`); the older suites' expected migration lists and
+rollback chains (the S7b tool first, then S7a, S6a, S5, S4a); `testNotifications.mjs` keeps its files
+at the S7a level and gives the delivery context a dispatches repository; `testNotificationsServer.mjs`
+reads the dispatch rows from the table after the cutover and runs the S7b tool before the S7a tool in
+its old-build proof. Documents: this section, the plan, the schema document, `OPERATIONS.md`
+(operator section and cutover procedure), `CLAUDE.md`, `README.md`.
+
+**Deliberate readings, recorded.** (i) REAL columns for the two callback clocks (above). (ii) The
+export convention of S7a is kept: unknown own fields come first, then the eighteen keys in the
+literal's order; a legacy row with an unknown field elsewhere exports byte-identical up to that
+reordering (the tests state the convention explicitly). (iii) A sweep pass whose `persistNow()` save
+fails at COMMIT leaves memory as the intended state and its rows, attempts and status changes queued;
+the failure schedules no save of its own and a pass that changes nothing requests none, so the retry
+lands with the next save that does change something (the store's contract since S3, unchanged for
+every blob collection; proven in `testDispatchesServer.mjs` test 1 with a real COMMIT failure and a
+second connection). (iv) The non-finite callback clock is stored `null` at write time; the previous
+build held `Infinity` in memory until its JSON save turned it into `null` — the durable outcome is the
+same, the in-memory interval differs. (v) `fail_reason` is stored untruncated; the callback route's
+own 120-character truncation of its input is unchanged. (vi) The orphan count in the cutover record is
+information only; nothing acts on it.
+
+**Failing-first.** Both new suites were written first and run on the unchanged `dc4b559` tree (logs
+in the handoff package, `logs/failing-first-*`): `testDispatches.mjs` fails at import (the module does
+not exist — scaffolding evidence only); `testDispatchesServer.mjs` run one test at a time fails tests
+1, 2, 3 and 8 on concrete bad-state assertions (no `0010_dispatches` record, `no such table:
+dispatch_attempts`, no typed column to read the fractional clock from, no explicit backup export and
+no rollback tool) and **passes tests 4, 5, 6 and 7 as differential proofs of unchanged behaviour**
+(the acknowledgment unit under a real COMMIT failure, the orphans after an ordinary deletion, the
+coupled webhook row with a configured synthetic endpoint, the SIGKILL mid-retry) — the same tests pass
+on the S7b tree reading the tables. Two test defects were found and corrected in that step (the admin
+view lists newest first; the boot sweep may append an attempt before a read after a restart).
+
+**Verification on the final tree (Node v22.22.2; every command and exit code is in the handoff
+package's logs and `REVIEW-START-HERE.md`).** `testDispatches.mjs` 8 checks; `testDispatchesServer.mjs`
+8 checks, run twice — without `SCOUTBOX_PRE_S7B_SERVER` (the old-build boot reported SKIPPED) and with
+it pointing at a detached `0641b2c` worktree (the pre-S7b build booted the rollback copy, listed the
+same rows, statuses and attempt arrays, and kept writing); `testNotificationsServer.mjs` with
+`SCOUTBOX_PRE_S7A_SERVER` (the S7b tool, then the S7a tool, then the `812e13b` boot); the design probe
+of the review run unchanged on `dc4b559` (exit 0, baseline evidence) and on this tree (its SQL
+sections reproduce and verify; its third section cannot run because it builds the dc4b559 handler
+context without the dispatches repository — reported, not relabelled; a separately labelled
+adaptation in the package's evidence directory feeds the real repository and reads the real table:
+exit 0); both S7a reviewer scripts unchanged (exit 0, 3 CORRECT each); `probeS7bDispatches.mjs` on this
+tree with its table-reading adapter (the same observations as §9.5); `m13E2E.mjs` 212 checks; the
+backend gate (`npm test`, 23 suites) and the Player gate (`npm test -- --runInBand`) on the final tree
+and again from the fresh extraction of the handoff ZIP. Skipped honestly: the real older-Node checks
+(`SCOUTBOX_TEST_NODE_BINS` unset); the old-build boots inside the fresh extraction (the old builds are
+outside the package; they ran in the checkout).
+
+**Limits.** No real data, no deployment, no retention decision. The `0641b2c` boot proof used the
+synthetic seed on temporary directories. A crash between a sweep's COMMIT and nothing else loses
+nothing (the sweep has no external effect); a provider that were asynchronous would need the §3.3
+structure, which this code does not yet have. The Founder's question in §9.6 stays open.
 
 ---
 

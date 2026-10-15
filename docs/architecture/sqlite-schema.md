@@ -141,7 +141,7 @@ them.
 | `channels` | persistent | 03 | `channels`; `messages[]` → `messages`, `attachment` → `message_attachments`; `readBy` → columns; `orgUserIdForNotify` dead | S7 |
 | `notifications` | persistent | 03 | `notifications` (`seq` insertion-order key; `actionRequired` → flag + columns; unknown fields → `extra_json`, own keys preserved; an audience is `kind` and `id` only, anything more refused) — **LIVE since migration 0009 (S7a, independently accepted at `0641b2c`)** | S7a |
 | `notificationPrefs` | persistent | 03 | `notification_prefs`, `notification_pref_categories` (no mandatory-false CHECK, no category-list CHECK: the vocabulary lives in code) — **LIVE since migration 0009 (S7a, independently accepted at `0641b2c`)** | S7a |
-| `dispatches` | persistent | 03 | `dispatches`, `dispatch_attempts` | S7 |
+| `dispatches` | persistent | 03 | `dispatches` (`seq` insertion-order key; `notification_id` an indexed reference, **no foreign key, no cascade** — orphans after an ordinary deletion are kept and counted; `delivered_at` / `opened_at` REAL: the callback route's finite number, fractional or not, stored exactly; unknown fields → `extra_json`), `dispatch_attempts` (keyed by dispatch and position, no minted id; total shape CHECK: a send row's `ok IS NOT NULL`) — **LIVE since migration 0010 (S7b, implemented, pending independent acceptance)** | S7b |
 | `outbox` | audit | 03 | `outbox` (two writer shapes unified) | S7 |
 | `pushLog` | audit | 03 | `push_log` | S7 |
 | `pushTokens` | persistent | 03 | `push_tokens` (token kept plain: it is the delivery address) | S7 |

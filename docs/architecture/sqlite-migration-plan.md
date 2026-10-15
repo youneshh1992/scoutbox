@@ -32,13 +32,18 @@ production or deployment approval; the notification tables, migration `0009_noti
 copy-only rollback; [`s7-readiness-review.md`](./s7-readiness-review.md) §8.3 records what was
 built, §8.4–§8.5 the two correction rounds as dated history, §8.6 the acceptance and its limits:
 no exactly-once external delivery, the explicit raw-transaction `reload()`, hook registration as the
-caller's responsibility; the Player app was not touched), **S7b design amendment prepared, not
-implemented** (review §9; no cutover authorised), **S7c–S7d not started** (their blockers are stated in the review and in §S7)
+caller's responsibility; the Player app was not touched), **S7b implemented, pending independent
+acceptance — not accepted** (15 October 2026, on top of `dc4b559`: `dispatches` and `dispatch_attempts`
+as tables, migration **`0010_dispatches`**, its copy-only rollback; review §9 as corrected by the
+independent review of `dc4b559` and §9.7 the implementation record; no deployment authorised),
+**S7c–S7d not started** (their blockers are stated in the review and in §S7)
 — S8–S14 planned. The evidence-based plan of S4 is
 [`s4-readiness-review.md`](./s4-readiness-review.md).
 Migration numbering: `0006` is `0006_media_deletions` (S4a); S5 took **`0007_player_subrecords`**;
 S6a took the next unused identifier, **`0008_one_time_codes`** (the plan's placeholder
-`0008_safety_audit` is withdrawn); S7a took **`0009_notifications`**. The later steps' identifiers
+`0008_safety_audit` is withdrawn); S7a took **`0009_notifications`**; S7b took **`0010_dispatches`**
+(the plan's `0010_recruitment` placeholder for S8a moves to the next free number when S8a is
+approved). The later steps' identifiers
 in §B are placeholders, assigned from the actual order in which steps are approved and built.
 Existing migration ids never change.
 
@@ -1337,10 +1342,19 @@ performance, existing tests, what this plan is not).
 > default immediate participant, a caught precondition refusal bypassing the unit) and its
 > replay-coverage gap in §8.5; both rounds are dated history, the acceptance in §8.6 is the current
 > status.
-> **Status (S7b): design amendment prepared, not implemented** (review §9: the deletion-retention
-> reconciliation, the field mapping, the next migration identifier, the synthetic compatibility
-> probe and the implementation checklist; the cutover is not authorised until the design is
-> reviewed). **Status (S7c–S7d): not started.** The evidence-based review is
+> **Status (S7b): IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE — not accepted** (15 October 2026,
+> one local commit on `feat/sqlite-schema` on top of `dc4b559`; review §9 as corrected by the
+> independent review of `dc4b559` — the total attempt-shape CHECK, the callback timestamp contract
+> with REAL columns, the first-match strict-equality lookup — and §9.7 the implementation record):
+> `dispatches` and `dispatch_attempts` are tables since migration **`0010_dispatches`**, with the
+> insertion order as a durable key (`seq`), the attempt position as the attempt key (no minted id),
+> `notification_id` an indexed reference with no foreign key and no cascade (option A: an ordinary
+> deletion keeps its dispatch rows exactly as before; orphans imported and counted, never refused),
+> the sweep's rows, attempts and status changes staged into the same save as the outbox row, the
+> injection counter and the ops/webhook rows it writes, the acknowledgment joined in the
+> notification's unit, and a copy-only rollback proven on the actual `0641b2c` build. Not
+> production or deployment approval; retention stays an open decision.
+> **Status (S7c–S7d): not started.** The evidence-based review is
 > [`s7-readiness-review.md`](./s7-readiness-review.md);
 > the text below is the sequence it derived and replaces the earlier assumptions of this
 > section (recorded there, §0). No further migration identifier is assigned until a sub-step is
@@ -1356,10 +1370,11 @@ performance, existing tests, what this plan is not).
 - **Objective.** The nine S7 collections become tables in four sub-steps, each independently
   testable and rolled back copy-only without loss: **S7a** `notifications`,
   `notification_prefs`, `notification_pref_categories` (accepted at `0641b2c`); **S7b** `dispatches`,
-  `dispatch_attempts` (after S7a; design amendment prepared in the review §9: `notification_id` as a
-  plain reference — no foreign key, no cascade, today's deletion and its retained dispatch rows
-  preserved, orphan references counted not refused; the next identifier is `0010`, so the
-  `0010_recruitment` placeholder below moves when S8a is approved); **S7c** `outbox` (two writer shapes unified), `push_log`,
+  `dispatch_attempts` (implemented on top of `dc4b559`, pending independent acceptance; review §9:
+  `notification_id` as a plain reference — no foreign key, no cascade, today's deletion and its
+  retained dispatch rows preserved, orphan references counted not refused; migration
+  `0010_dispatches`, so the `0010_recruitment` placeholder below moves when S8a is approved);
+  **S7c** `outbox` (two writer shapes unified), `push_log`,
   `push_tokens` (storage move only — the staff-push re-keying, defect 10 of the schema
   document, is a behaviour change needing its own decision); **S7d** `channels`, `messages`,
   `message_attachments` (after the request-reference decision and the retention answer). The

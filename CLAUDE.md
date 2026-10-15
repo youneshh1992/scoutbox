@@ -129,9 +129,32 @@ and design changes the Founder explicitly requests.
   fields are copied as own properties (an own `"__proto__"` key is data, never
   assigned), and an audience, acknowledgment contract or category map with an
   unknown field refuses the whole migration or snapshot write;
-  the acknowledgment and the dispatch blob commit in one unit; the copy-only
+  the acknowledgment and the dispatch rows commit in one unit; the copy-only
   rollback is `scripts/notificationsRollback.mjs` (every row written back in
   order; nothing lost) and the S6a tool refuses a file carrying 0009.
+  **Delivery dispatch records and their attempts are tables since S7b**
+  (IMPLEMENTED on top of `dc4b559`, PENDING INDEPENDENT ACCEPTANCE — not
+  accepted, not production approval; `repositories/dispatches.mjs`, migration
+  `0010_dispatches`; `docs/architecture/s7-readiness-review.md` §9 as corrected
+  by the review of `dc4b559`, §9.7): `db.dispatches` is a read-only view over
+  the repository's mirror (insertion order, attempts nested); the ONLY writers
+  are `dispatches.create` / `recordAttempt` / `patch` (m13/delivery.mjs sweep,
+  acknowledgment and callback); the eighteen-key literal is required whole and
+  never normalised; `notification_id` is an indexed reference with NO foreign
+  key and NO cascade (an ordinary deletion keeps its dispatch rows; orphans are
+  imported and counted, never refused, pruned or re-parented; retention stays
+  OPEN); the attempt-shape CHECK is total (`ok IS NOT NULL` on a send row); a
+  note row never counts as a send; `delivered_at` / `opened_at` are REAL
+  columns holding the callback route's finite number exactly, fractional or
+  not (a non-finite clock is stored null), every server-written clock an
+  INTEGER; the callback lookup is the FIRST row in insertion order whose
+  providerMessageId strictly equals the event's (explicit null matches the
+  first null row, an omitted id matches nothing); writes are STAGED into the
+  same save as the outbox row, the injection counter and the ops/webhook rows
+  of the pass, the acknowledgment joined in the notification's unit; there is
+  NO effects queue (a dispatch has no push and no live event); the copy-only
+  rollback is `scripts/dispatchesRollback.mjs` (every row and attempt written
+  back; nothing lost) and the S7a tool refuses a file carrying 0010.
   `trialReports` is not stored: it is derived from
   `trials[].report` in filing order and served read-only on EVERY record,
   whatever shape it was saved with (absent, null or an array; the empty-state

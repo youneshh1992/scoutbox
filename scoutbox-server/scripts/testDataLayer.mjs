@@ -68,8 +68,8 @@ test('schema report: names tables and counts, never rows', () => {
   // exactly what exists.
   assert.deepEqual(report, {
     engine: 'sqlite', migrationsApplied: DATA_MIGRATIONS.length, migrationsKnown: DATA_MIGRATIONS.length,
-    migrations: ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications'],
-    tables: ['email_challenges', 'guardian_children', 'guardians', 'media_deletions', 'org_users', 'orgs', 'player_activity_log', 'player_attendance', 'player_badges', 'player_drill_results', 'player_drills', 'player_external_ids', 'player_media', 'player_media_tags', 'player_medical_records', 'player_programme_completions', 'player_season_history', 'player_timeline', 'players', 'sessions', 'pairing_codes', 'notifications', 'notification_prefs', 'notification_pref_categories'].sort(),
+    migrations: ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches'],
+    tables: ['dispatch_attempts', 'dispatches', 'email_challenges', 'guardian_children', 'guardians', 'media_deletions', 'org_users', 'orgs', 'player_activity_log', 'player_attendance', 'player_badges', 'player_drill_results', 'player_drills', 'player_external_ids', 'player_media', 'player_media_tags', 'player_medical_records', 'player_programme_completions', 'player_season_history', 'player_timeline', 'players', 'sessions', 'pairing_codes', 'notifications', 'notification_prefs', 'notification_pref_categories'].sort(),
   });
   // There is no in-memory engine to report on: a missing connection is a programming error, not a mode.
   assert.throws(() => dataSchemaReport(null, DATA_MIGRATIONS), /needs a SQLite connection/);
@@ -218,7 +218,7 @@ test('attachDataLayer: db.users becomes the repository view and cannot be replac
   assert.throws(() => { db.users.push({}); }, /repositories/);
   assert.equal(layer.report().domains.users.rows, 1);
   // Every core identity table is live (S0–S4a) and the media-deletion queue exists; there is no shadow to report.
-  assert.deepEqual(layer.report().tables, ['email_challenges', 'guardian_children', 'guardians', 'media_deletions', 'notification_pref_categories', 'notification_prefs', 'notifications', 'org_users', 'orgs', 'pairing_codes', 'player_activity_log', 'player_attendance', 'player_badges', 'player_drill_results', 'player_drills', 'player_external_ids', 'player_media', 'player_media_tags', 'player_medical_records', 'player_programme_completions', 'player_season_history', 'player_timeline', 'players', 'sessions']);
+  assert.deepEqual(layer.report().tables, ['dispatch_attempts', 'dispatches', 'email_challenges', 'guardian_children', 'guardians', 'media_deletions', 'notification_pref_categories', 'notification_prefs', 'notifications', 'org_users', 'orgs', 'pairing_codes', 'player_activity_log', 'player_attendance', 'player_badges', 'player_drill_results', 'player_drills', 'player_external_ids', 'player_media', 'player_media_tags', 'player_medical_records', 'player_programme_completions', 'player_season_history', 'player_timeline', 'players', 'sessions']);
   assert.equal('shadow' in layer.report(), false, 'the projection is retired');
   assert.deepEqual(layer.report().identity, { initState: 'done', uncommittedFacets: 0 });
   assert.deepEqual(layer.report().mediaDeletions, { queued: 0, conflicts: 0 });

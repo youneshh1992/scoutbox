@@ -5,7 +5,7 @@
 --   channels            → channels, messages, message_attachments
 --   notifications       → notifications                                     (LIVE since migration 0009_notifications, S7a, REGISTERED)
 --   notificationPrefs   → notification_prefs, notification_pref_categories  (LIVE since migration 0009_notifications, S7a, REGISTERED)
---   dispatches          → dispatches, dispatch_attempts
+--   dispatches          → dispatches, dispatch_attempts                  (LIVE since migration 0010_dispatches, S7b, REGISTERED — implemented, pending independent acceptance)
 --   outbox              → outbox
 --   pushLog             → push_log
 --   pushTokens          → push_tokens
@@ -285,101 +285,126 @@ CREATE TABLE notification_pref_categories (
 
 
 -- -----------------------------------------------------------------------------
--- dispatches
--- source: db.dispatches  created at m13/delivery.mjs:86-95 (dispatchSweep step 1);
---         container m13/shared.mjs:27.
--- owner/writer: m13/delivery.mjs (sweep 101-132, ack 157-160, provider callback 187-201).
+-- dispatches  (LIVE: migration 0010_dispatches, S7b — repositories/dispatches.mjs;
+--              implemented, pending independent acceptance)
+-- source: db.dispatches — the eighteen-key literal every build since M13 wrote
+--         (m13/delivery.mjs dispatchSweep step 1); container m13/shared.mjs
+--         (`??= []`, replaced by the repository's read-only view at boot).
+-- owner/writer: repositories/dispatches.mjs (staged mode in the server:
+--         m13/delivery.mjs sweep / ack / provider callback write through it).
 -- lifecycle: status ladder forward-only queued/held_quiet_hours → accepted →
 --         delivered → opened → actioned; terminal side states skipped, failed;
---         transient retrying. NEVER pruned today (orphans remain after the
---         notification is deleted) → here CASCADE with the owning notification.
--- mapping:
---   id                 -> id (dsp-*; prefix SHARED with m16 disputes — ids are globally unique via the counter)
---   notificationId     -> notification_id
---   audience.kind      -> audience_kind (copied from the notification — snapshot)
+--         transient retrying. NEVER pruned: a dispatch whose notification was
+--         deleted stays (option A of docs/architecture/s7-readiness-review.md
+--         §9.1, as instructed by the review of dc4b559) — `notification_id` is
+--         an indexed reference with NO foreign key and NO cascade; the
+--         migration counts such orphans (`orphanReferences`) and imports them
+--         unchanged. Retention is an open decision, not decided here.
+-- ordering: `seq` is the insertion order every reader depends on (the admin
+--         view reverses it, the callback lookup takes the FIRST match, the
+--         sweep processes rows in it); the migration assigns it from the array
+--         position, backup/restore and the rollback preserve it.
+-- mapping (the legacy row ↔ the columns; the export reproduces the literal):
+--   id                 -> id (dsp-*; UNIQUE — the prefix is shared with m16 disputes, ids are globally unique via the counter)
+--   notificationId     -> notification_id (indexed; no FK, no cascade — see lifecycle)
+--   audience.kind      -> audience_kind (copied from the notification — snapshot; open vocabulary, no CHECK)
 --   audience.id        -> audience_id (snapshot; polymorphic, no FK)
---   channel            -> channel ('in_app' | 'email')
+--   channel            -> channel ('in_app' | 'email' today; open vocabulary)
 --   to                 -> to_address (email address or "kind:id" for in_app; NULL when skipped)  -- personal data
---   provider           -> provider ('in_app' | 'local-fake')
---   status             -> status
+--   provider           -> provider ('in_app' | 'local-fake' today; open vocabulary)
+--   status             -> status (open vocabulary: the ladder's RANK lives in m13/delivery.mjs)
 --   skipReason         -> skip_reason
---   providerMessageId  -> provider_message_id (fm_<16hex>; set on provider accept)
---   attempts[]         -> dispatch_attempts table (child)
---   nextAt             -> next_at
---   actionDeadline     -> action_deadline_at (copied from notification.actionRequired.deadline)
---   createdAt          -> created_at
---   deliveredAt        -> delivered_at
---   openedAt           -> opened_at
---   actionedAt         -> actioned_at
---   failedAt           -> failed_at
---   failReason         -> fail_reason (≤120 chars from callbacks, 199)
+--   providerMessageId  -> provider_message_id (fm_<16hex>; set on provider accept; NOT unique — duplicates are legal,
+--                         the callback lookup is the FIRST row in `seq` order whose value strictly equals the event's;
+--                         an explicit null matches the first NULL row; an omitted id matches nothing)
+--   attempts[]         -> dispatch_attempts (child; position = seq)
+--   nextAt             -> next_at (INTEGER: Date.now() or a sum of it)
+--   actionDeadline     -> action_deadline_at (copied from notification.actionRequired.deadline; INTEGER or NULL)
+--   createdAt          -> created_at (INTEGER)
+--   deliveredAt        -> delivered_at (REAL or NULL: written by the callback route as `Number(ev.at) || Date.now()`,
+--                         a finite JavaScript number that MAY be fractional; stored as the writer's double, exactly)
+--   openedAt           -> opened_at (REAL or NULL: same writer, same contract)
+--   actionedAt         -> actioned_at (INTEGER or NULL: the ack's Date.now())
+--   failedAt           -> failed_at (INTEGER or NULL: the sweep's / callback's Date.now())
+--   failReason         -> fail_reason (UNTRUNCATED at storage: the sweep writes the provider error as it is;
+--                         only the callback route truncates its own input to 120 characters before writing)
+--   (unknown own keys) -> extra_json (JSON object; spread back first on export; an own "__proto__" key is data)
+-- timestamp contract (review of dc4b559, finding 2): every clock this server
+--   writes itself is an integer in an INTEGER column (a fraction is refused by
+--   the repository and by STRICT); delivered_at / opened_at are the callback
+--   route's doubles in REAL columns — node:sqlite binds every JavaScript number
+--   as a double, and a REAL column states exactly what is stored, integer-valued
+--   or fractional; a non-finite callback `at` is written as NULL (what the JSON
+--   save of the previous build persisted for it). No value is rounded.
 -- notes: one row per (notification, destination); a notification gets exactly
---   one in_app row plus one external row per audience rule (destinationsFor 38).
---   Reads: notificationId set-scan (79), by notificationId (157), by
---   providerMessageId (187 — unique lookup, enforced by code today), due rows
---   by status+nextAt (102), org view by audience (210), status counts (231),
---   backlog by status (enterprise.mjs:510), recent 100 (237). Minors: external
---   channels for under-18 players are skipped ('guardian_routed', 47).
+--   one in_app row plus one external row per audience rule (destinationsFor).
+--   No uniqueness of (notification_id, channel) is declared (none existed).
+--   Reads go through the repository's in-memory mirror (insertion order);
+--   the indexes below serve tools and the future SQL readers.
 -- -----------------------------------------------------------------------------
 CREATE TABLE dispatches (
-  id                  TEXT PRIMARY KEY,
-  notification_id     TEXT NOT NULL REFERENCES notifications(id) ON DELETE CASCADE,
-  audience_kind       TEXT NOT NULL CHECK (audience_kind IN ('player','guardian','org_user')), -- snapshot
-  audience_id         TEXT NOT NULL,                                                           -- snapshot
-  channel             TEXT NOT NULL CHECK (channel IN ('in_app','email')),
-  to_address          TEXT,                                                                    -- personal data
-  provider            TEXT NOT NULL CHECK (provider IN ('in_app','local-fake')),
-  status              TEXT NOT NULL CHECK (status IN (
-                        'queued','held_quiet_hours','retrying','accepted','delivered','opened','actioned','skipped','failed')),
+  seq                 INTEGER PRIMARY KEY,
+  id                  TEXT NOT NULL UNIQUE,
+  notification_id     TEXT NOT NULL,
+  audience_kind       TEXT NOT NULL,
+  audience_id         TEXT NOT NULL,
+  channel             TEXT NOT NULL,
+  to_address          TEXT,
+  provider            TEXT NOT NULL,
+  status              TEXT NOT NULL,
   skip_reason         TEXT,
   provider_message_id TEXT,
   next_at             INTEGER NOT NULL,
   action_deadline_at  INTEGER,
   created_at          INTEGER NOT NULL,
-  delivered_at        INTEGER,
-  opened_at           INTEGER,
+  delivered_at        REAL,
+  opened_at           REAL,
   actioned_at         INTEGER,
   failed_at           INTEGER,
-  fail_reason         TEXT CHECK (fail_reason IS NULL OR length(fail_reason) <= 120)
+  fail_reason         TEXT,
+  extra_json          TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
 ) STRICT;
-
-CREATE INDEX dispatches_notification_id ON dispatches(notification_id);
-CREATE UNIQUE INDEX dispatches_provider_message_id ON dispatches(provider_message_id)
-  WHERE provider_message_id IS NOT NULL;                                   -- enforced by code today (random id)
-CREATE INDEX dispatches_status_next_at ON dispatches(status, next_at);
-CREATE INDEX dispatches_audience ON dispatches(audience_kind, audience_id);
+CREATE INDEX dispatches_notification ON dispatches (notification_id);
+CREATE INDEX dispatches_provider_message ON dispatches (provider_message_id);
+CREATE INDEX dispatches_status_next ON dispatches (status, next_at);
+CREATE INDEX dispatches_audience_seq ON dispatches (audience_kind, audience_id, seq);
 
 
 -- -----------------------------------------------------------------------------
--- dispatch_attempts
--- source: db.dispatches[].attempts[]  pushed at m13/delivery.mjs:106 (quiet re-check note)
---         and :110 (send attempt).
--- owner/writer: m13/delivery.mjs dispatchSweep.
--- lifecycle: append-only; removed with the dispatch.
+-- dispatch_attempts  (LIVE: migration 0010_dispatches, S7b)
+-- source: db.dispatches[].attempts[] — two shapes: a send {at, ok, error}
+--         (m13/delivery.mjs dispatchSweep step 2) and a quiet-hours re-check
+--         note {at, note} (at most one per dispatch, never counted as a send).
+-- owner/writer: repositories/dispatches.mjs recordAttempt (append-only; removed
+--         with the dispatch through the internal cascade — the only cascade here).
 -- mapping:
---   (no id today) -> id minted by the migration as 'dat-<n>' from the global counter
---   (parent)      -> dispatch_id
---   (array index) -> seq (0-based position; preserves order for the MAX_ATTEMPTS count)
---   at            -> attempted_at (source field is literally `at`)
---   ok            -> ok (absent on note rows → stored 0 with kind='quiet_recheck')
---   error         -> error
---   note          -> note ('quiet hours re-check'); presence of `note` ⇔ kind = 'quiet_recheck'
---                    (the retry counter at 114/122 skips note rows)
--- notes: send rows per dispatch ≤ MAX_ATTEMPTS (4); at most one quiet_recheck row (106).
+--   (parent)      -> dispatch_seq (the parent's seq; internal FK, ON DELETE CASCADE)
+--   (array index) -> seq (0-based position; the key is the pair — NO minted id, no global counter consumed)
+--   at            -> attempted_at (INTEGER)
+--   ok            -> ok (send rows: 0/1 and NEVER NULL; note rows: NULL)
+--   error         -> error (send rows: the provider error or NULL; note rows: NULL)
+--   note          -> note (note rows: the text; send rows: NULL)
+--   (shape)       -> kind ('send' | 'quiet_recheck')
+-- the total shape CHECK (review of dc4b559, finding 1): SQLite treats a NULL
+--   CHECK result as a pass, so `ok IN (0,1)` alone admitted a send row with
+--   ok NULL; the predicate below names `ok IS NOT NULL` for a send row and
+--   `ok IS NULL AND error IS NULL AND note IS NOT NULL` for a note row, so it
+--   is total. scripts/testDispatches.mjs proves it through direct SQL.
+-- notes: send rows per dispatch ≤ MAX_ATTEMPTS (4) by the sweep's rule, not by
+--   a constraint (a legacy row is imported as it is).
 -- -----------------------------------------------------------------------------
 CREATE TABLE dispatch_attempts (
-  id           TEXT PRIMARY KEY,
-  dispatch_id  TEXT NOT NULL REFERENCES dispatches(id) ON DELETE CASCADE,
-  seq          INTEGER NOT NULL CHECK (seq >= 0),
-  kind         TEXT NOT NULL CHECK (kind IN ('send','quiet_recheck')),
+  dispatch_seq INTEGER NOT NULL REFERENCES dispatches(seq) ON DELETE CASCADE,
+  seq          INTEGER NOT NULL,
+  kind         TEXT NOT NULL CHECK (kind IN ('send', 'quiet_recheck')),
   attempted_at INTEGER NOT NULL,
-  ok           INTEGER NOT NULL DEFAULT 0 CHECK (ok IN (0,1)),
+  ok           INTEGER,
   error        TEXT,
   note         TEXT,
-  CHECK ((kind = 'quiet_recheck' AND note IS NOT NULL) OR (kind = 'send' AND note IS NULL))
+  PRIMARY KEY (dispatch_seq, seq),
+  CHECK ((kind = 'send' AND ok IS NOT NULL AND ok IN (0, 1) AND note IS NULL)
+      OR (kind = 'quiet_recheck' AND ok IS NULL AND error IS NULL AND note IS NOT NULL))
 ) STRICT;
-
-CREATE UNIQUE INDEX dispatch_attempts_dispatch_id_seq ON dispatch_attempts(dispatch_id, seq); -- new
 
 
 -- -----------------------------------------------------------------------------

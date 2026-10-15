@@ -9,12 +9,13 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "test": "node scripts/testRuntime.mjs && node scripts/testTrust.mjs && node scripts/testIdentity.mjs && node scripts/testDataLayer.mjs && node scripts/testCoreSchema.mjs && node scripts/testSessions.mjs && node scripts/testOrgs.mjs && node scripts/testUnitOfWork.mjs && node scripts/testCoreIdentityMapping.mjs && node scripts/testIdentityRepositories.mjs && node scripts/testCoreIdentityMigration.mjs && node scripts/testCoreIdentityRollback.mjs && node scripts/testMediaDeletions.mjs && node scripts/testPlayerSubrecords.mjs && node scripts/testOneTimeCodes.mjs && node scripts/testNotifications.mjs && node scripts/testSchemaDdl.mjs && node scripts/testCoreIdentityServer.mjs && node scripts/testWriterAtomicity.mjs && node scripts/testOneTimeCodesServer.mjs && node scripts/testNotificationsServer.mjs",
+    "test": "node scripts/testRuntime.mjs && node scripts/testTrust.mjs && node scripts/testIdentity.mjs && node scripts/testDataLayer.mjs && node scripts/testCoreSchema.mjs && node scripts/testSessions.mjs && node scripts/testOrgs.mjs && node scripts/testUnitOfWork.mjs && node scripts/testCoreIdentityMapping.mjs && node scripts/testIdentityRepositories.mjs && node scripts/testCoreIdentityMigration.mjs && node scripts/testCoreIdentityRollback.mjs && node scripts/testMediaDeletions.mjs && node scripts/testPlayerSubrecords.mjs && node scripts/testOneTimeCodes.mjs && node scripts/testNotifications.mjs && node scripts/testDispatches.mjs && node scripts/testSchemaDdl.mjs && node scripts/testCoreIdentityServer.mjs && node scripts/testWriterAtomicity.mjs && node scripts/testOneTimeCodesServer.mjs && node scripts/testNotificationsServer.mjs && node scripts/testDispatchesServer.mjs",
     "preflight:core-identity": "node scripts/preflightCoreIdentity.mjs",
     "perf:data-layer": "node scripts/dataLayerPerf.mjs",
     "rollback:core-identity": "node scripts/coreIdentityRollback.mjs",
     "rollback:one-time-codes": "node scripts/oneTimeCodesRollback.mjs",
     "rollback:notifications": "node scripts/notificationsRollback.mjs",
+    "rollback:dispatches": "node scripts/dispatchesRollback.mjs",
     "e2e": "node scripts/apiE2E.mjs"
   },
   "dependencies": {

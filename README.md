@@ -103,7 +103,7 @@ gates — documentation housekeeping and unit tests". The commands:
 
 ```bash
 # The two unit-test gates (run against the final tree of the milestone)
-cd scoutbox-server && npm test                       # the full backend chain (21 suites)
+cd scoutbox-server && npm test                       # the full backend chain (23 suites)
 cd scoutbox-player && npm test                       # Jest + jest-expo, src/__tests__/
 
 # Backend end-to-end suites (each starts its own server on a temporary DATA_DIR unless noted)

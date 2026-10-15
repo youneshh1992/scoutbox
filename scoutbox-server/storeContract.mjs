@@ -81,7 +81,10 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   developmentGoals: { guarantee: 'migration', owner: 'm21', reason: 'Development Plan collection, guaranteed by the migration registry' },
   developmentPlans: { guarantee: 'migration', owner: 'm21', reason: 'Development Plan collection, guaranteed by the migration registry' },
   developmentReviews: { guarantee: 'migration', owner: 'm21', reason: 'Development Plan collection, guaranteed by the migration registry' },
-  dispatches: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
+  // dispatches: no longer a blob collection since S7b — the rows live in dispatches / dispatch_attempts (migration 0010,
+  // repositories/dispatches.mjs); the data layer defines a read-only view at db.dispatches (insertion order, attempts
+  // nested) and m13/delivery.mjs writes through the repository. (notifications is the precedent.)
+  dispatches: { guarantee: 'migration', owner: 'core', reason: 'container guaranteed by migrateM13 (??= []) before the data layer attaches; since S7b a read-only view over the dispatches table, written only through the dispatches repository' },
   drillGuidance: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   dynamicWatchlists: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   // emailChallenges: no longer a production db.* read since S6a — the rows live in email_challenges (migration 0008,

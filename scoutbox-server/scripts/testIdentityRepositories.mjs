@@ -467,7 +467,7 @@ test('unit of work: a process killed before COMMIT leaves the pre-operation data
 });
 
 test('integration: the data layer creates the identity repositories behind the registered migration 0005, players and guardians are table-backed, the test schema helper matches what 0005 leaves behind, and server.mjs reaches the repositories only through the data layer', () => {
-  assert.deepEqual([...TABLE_BACKED], ['orgs', 'players', 'guardians', 'users', 'sessions', 'mediaDeletions', 'emailChallenges', 'pairingCodes', 'notifications', 'notificationPrefs']);
+  assert.deepEqual([...TABLE_BACKED], ['orgs', 'players', 'guardians', 'users', 'sessions', 'mediaDeletions', 'emailChallenges', 'pairingCodes', 'notifications', 'notificationPrefs', 'dispatches']);
   assert.equal(DATA_MIGRATIONS.filter((m) => m.id === CORE_IDENTITY_LIVE_MIGRATION).length, 1);
   const indexSource = fs.readFileSync(path.join(HERE, '..', 'repositories', 'index.mjs'), 'utf8');
   assert.ok(indexSource.includes('createIdentityRepositories') && indexSource.includes('0005_core_identity_live'), 'repositories/index.mjs creates them and registers the migration');

@@ -61,7 +61,7 @@ export function requestInstrumentation() {
 
 export function registerEnterprise(ctx) {
   const {
-    db, users, sessions, orgs, mediaDeletions, codes, notifications, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
+    db, users, sessions, orgs, mediaDeletions, codes, notifications, dispatches, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
     mailer, requireLead, isLead, paginate, histAppend, timingSafeEq, signBody,
     storage, DATA_DIR,
   } = ctx;
@@ -472,7 +472,7 @@ export function registerEnterprise(ctx) {
       // state in memory, like every blob collection — so a backup restores on
       // any build: a pre-S7a build reads the blobs, this build imports them
       // through migration 0009 with the feed order intact.
-      fs.writeFileSync(snapshotPath, JSON.stringify({ savedAt: Date.now(), idCounter: ctx.currentIdCounter(), db: { ...db, sessions: sessions.exportRows(), mediaDeletions: queued, emailChallenges: codes.exportEmailChallenges(), pairingCodes: codes.exportPairingCodes(), notifications: notifications.exportRows(), notificationPrefs: notifications.exportPrefs() } }));
+      fs.writeFileSync(snapshotPath, JSON.stringify({ savedAt: Date.now(), idCounter: ctx.currentIdCounter(), db: { ...db, sessions: sessions.exportRows(), mediaDeletions: queued, emailChallenges: codes.exportEmailChallenges(), pairingCodes: codes.exportPairingCodes(), notifications: notifications.exportRows(), notificationPrefs: notifications.exportPrefs(), dispatches: dispatches.exportRows() } }));
       // 2. Media files — except those whose removal is queued: a backup never
       //    carries a file without the intent to remove it. Their ids are in
       //    db.json; on a restored server the entry is cleared once the file is
@@ -566,7 +566,7 @@ export function registerEnterprise(ctx) {
       ...metrics,
       deliveryFailures: db.opsEvents.filter((e) => e.kind === 'delivery_failed').length,
       webhookFailures: db.opsEvents.filter((e) => e.kind === 'webhook_failed').length,
-      dispatchBacklog: db.dispatches.filter((d) => ['queued', 'retrying'].includes(d.status)).length,
+      dispatchBacklog: dispatches.backlogCount(), // S7b: queued or retrying, the same definition as before, counted on the repository's mirror
       webhookBacklog: db.webhookDeliveries.filter((d) => ['queued', 'retrying'].includes(d.status)).length,
       opsEvents: db.opsEvents.slice(-50).reverse(),
       note: 'Counters cover this process since boot. Local development metrics — not a production SLA measurement.',

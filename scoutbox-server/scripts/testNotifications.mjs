@@ -25,6 +25,8 @@ import {
   NOTIFICATIONS_MIGRATION, NOTIFICATIONS_CUTOVER_META, NOTIFICATION_TABLES, NOTIFY_COALESCE_MS,
 } from '../repositories/notifications.mjs';
 import { rollbackNotificationsCopy } from '../repositories/notificationsRollback.mjs';
+import { rollbackDispatchesCopy } from '../repositories/dispatchesRollback.mjs';
+import { createDispatchesRepository } from '../repositories/dispatches.mjs';
 import { rollbackOneTimeCodesCopy } from '../repositories/oneTimeCodesRollback.mjs';
 import { registerNotificationPrefs, CATEGORY_NAMES } from '../m182/notificationPrefs.mjs';
 import { registerDelivery } from '../m13/delivery.mjs';
@@ -65,7 +67,8 @@ function s6File(dir, { notifications, notificationPrefs } = {}) {
   runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id < NOTIFICATIONS_MIGRATION), { now: NOW, context: { sessionTtlMs: TTL } });
   s.close();
 }
-const migrate = (s, { now = NOW } = {}) => runDataMigrations(s, DATA_MIGRATIONS, { now, context: { sessionTtlMs: TTL } });
+/** S7b: this suite exercises the S7a step on files at the S7a level (0010 excluded, so the S7a tool's contract is tested on the file shape it was accepted on); a live boot (`live()`) applies 0010 as the server does, and the chain through 0010 is tested in testDispatches.mjs. */
+const migrate = (s, { now = NOW } = {}) => runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id <= NOTIFICATIONS_MIGRATION), { now, context: { sessionTtlMs: TTL } });
 /** A live server-mode store with the data layer attached: the repository in its STAGED mode, as the server runs it. */
 function live(dir, { now = () => NOW, db: given } = {}) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
@@ -374,12 +377,12 @@ test('preferences through the real M18.2 module over the repository: defaults ar
 
 test('m13 notifyAction: a muted notification (the gate returned null) yields null instead of crashing, and an allowed one carries the acknowledgment contract', () => {
   const dir = tempDir('ntf-action'); s6File(dir);
-  const s = openRaw(dir); migrate(s);
-  const repo = bare(s);
+  const s = openRaw(dir); runDataMigrations(s, DATA_MIGRATIONS, { now: NOW, context: { sessionTtlMs: TTL } }); // 0010 too: registerDelivery needs the dispatches repository (S7b)
+  const repo = bare(s); const dispatches = createDispatchesRepository({ sqlite: s, now: () => NOW });
   const router = { post() {}, get() {}, put() {} };
   let muted = false;
   const notify = (audience, type, text, refId = null, { actionRequired = null } = {}) => (muted ? null : repo.create({ audience, type, text, refId, category: 'security_account', deferredPush: false, actionRequired }));
-  const ctx = { db: { dispatches: [], notifications: repo.view, users: [], guardians: [], outbox: [] }, notifications: repo, users: [], app: { post() {} }, orgRouter: router, playerRouter: router, guardianRouter: router, adminRouter: router, nextId, persist() {}, persistNow() {}, notify, findPlayer: () => null, isAdult: () => true, signBody: () => '', timingSafeEq: () => false, paginate: (_r, x) => x, unit: (w) => w() };
+  const ctx = { db: { dispatches: dispatches.view, notifications: repo.view, users: [], guardians: [], outbox: [] }, notifications: repo, dispatches, users: [], app: { post() {} }, orgRouter: router, playerRouter: router, guardianRouter: router, adminRouter: router, nextId, persist() {}, persistNow() {}, notify, findPlayer: () => null, isAdult: () => true, signBody: () => '', timingSafeEq: () => false, paginate: (_r, x) => x, unit: (w) => w() };
   const saveInterval = globalThis.setInterval; globalThis.setInterval = () => ({ unref() {} });
   try { registerDelivery(ctx); } finally { globalThis.setInterval = saveInterval; }
   const n = ctx.notifyAction(ORG_USER, 'transition', 'Withdrawn.', 'trn-1', NOW + HOUR);
@@ -790,7 +793,8 @@ test('review of ba6956d, finding 3 — unknown data is never lost silently: an o
   // Snapshot round trip and the copy-only rollback blob.
   const tool = openStore(dir); const snap = tool.load(); assert.ok(Object.hasOwn(snap.db.notifications[0], '__proto__')); tool.save(snap);
   assert.ok(Object.hasOwn(tool.load().db.notifications[0], '__proto__'), 'round-tripped through replace'); tool.sqlite.close();
-  const out = tempDir('ntf-rv-extra-rb'); rollbackNotificationsCopy(dbFile(dir), out, { now: NOW });
+  const s7a = tempDir('ntf-rv-extra-s7a'); rollbackDispatchesCopy(dbFile(dir), s7a, { now: NOW }); // the live boot above applied 0010: the S7b rollback goes first
+  const out = tempDir('ntf-rv-extra-rb'); rollbackNotificationsCopy(dbFile(s7a), out, { now: NOW });
   const o = openRaw(out); const blobRow = JSON.parse(o.prepare("SELECT value FROM collections WHERE name = 'notifications'").get().value)[0]; o.close();
   assert.ok(Object.hasOwn(blobRow, '__proto__') && blobRow.__proto__.legacyMarker === 'keep-me', 'the pre-S7a build reads the key back');
   // An audience with an unknown field: refused whole, nothing written or retired.

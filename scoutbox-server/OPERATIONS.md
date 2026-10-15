@@ -886,8 +886,8 @@ preferences (`GET`/`PUT …/notification-preferences`) are rows of
   delivery failure (counted in `store.unitOfWorkState()`), never a rollback.
   A crash between the commit and the effect loses the push or event, as it
   did before S7a. The acknowledgment of an action notice updates the
-  notification row and the dispatch statuses (still a blob until S7b) in one
-  unit of work.
+  notification row and the dispatch rows (their own tables since S7b, below) in
+  one unit of work.
 - **Preferences.** The route still refuses an unknown category and a literal
   `false` on a mandatory category (`compliance`, `security_account`), and still
   coerces other values (`0` is stored `false`); the effective view and the
@@ -948,6 +948,102 @@ preferences (`GET`/`PUT …/notification-preferences`) are rows of
    <data-dir> <fresh-empty-dir>`, then start the S6a build on the output —
    every notification written since the cutover is in it.
 
+### Delivery dispatch records and their attempts (live since migration `0010`, S7b — implemented, PENDING INDEPENDENT ACCEPTANCE; not accepted, not production-approved)
+
+The delivery centre's dispatch records (`GET /org/delivery`, `GET /admin/delivery`,
+`GET /admin/metrics` → `dispatchBacklog`, `POST /admin/delivery/sweep`,
+`POST /callbacks/delivery`, the acknowledgment routes) are rows of `dispatches`
+and `dispatch_attempts` (`repositories/dispatches.mjs`;
+`docs/architecture/s7-readiness-review.md` §9). Request and response shapes
+are unchanged: a dispatch is still the eighteen-key record every build since
+M13 wrote, with its attempts nested, and the admin and org views list the same
+rows in the same order.
+
+- **Order and keys.** `seq` is the insertion order every reader depends on
+  (the admin view lists the newest first; a provider callback matches the
+  FIRST row in insertion order whose `providerMessageId` strictly equals the
+  event's — an explicit `null` matches the first row without one, an omitted id
+  matches nothing but is still remembered as seen; duplicates are legal, no
+  uniqueness is declared). An attempt is keyed by its dispatch and its position
+  (no id is minted, no counter consumed); a send row is `{at, ok, error}`, a
+  quiet-hours re-check note is `{at, note}` and is never counted as a send — in
+  SQL a send row's `ok` can never be NULL (the shape CHECK is total).
+- **The notification reference.** `notification_id` is an indexed reference
+  with **no foreign key and no cascade**: an ordinary account deletion removes a
+  person's notification rows and leaves their dispatch rows exactly as every
+  build since M13 did; the migration imports such orphans unchanged and counts
+  them (`orphanReferences` in `meta.dispatchesCutover`). Nothing prunes,
+  re-parents or blocks on them. Retention remains an open decision.
+- **Timestamps.** Every clock the server writes itself (`createdAt`, `nextAt`,
+  `actionDeadline`, `actionedAt`, `failedAt`, an attempt's `at`) is an integer
+  in an INTEGER column. `deliveredAt` and `openedAt` come from the provider
+  callback (`Number(ev.at) || Date.now()`, a finite number that may be
+  fractional) and are REAL columns: the value is stored exactly as the route
+  wrote it, integer-valued or fractional, never rounded; a non-finite callback
+  clock is stored as `null` (what the JSON save of the previous build persisted
+  for it). The callback API is unchanged.
+- **Writes.** In the running server a sweep pass's new rows, attempts and
+  status changes are visible at once and durable inside the same snapshot save
+  (`persistNow()`) as the outbox row the local fake provider accepted, the
+  failure-injection counter it decremented and — on exhausted retries — the
+  `delivery_failed` ops event and the webhook delivery row; a save that fails
+  at its COMMIT leaves none of them durable and keeps them queued for the next
+  save, which lands them once (memory is the intended state, as for every blob
+  collection; a pass that changes nothing requests no save). An
+  acknowledgment's status changes land in the same unit of work as the
+  notification's contract — both or neither (a terminal `skipped` row keeps its
+  status and gains `actionedAt`). Callback changes land with the
+  `deliveryCallbacksSeen` bookkeeping. `failReason` is stored untruncated at
+  storage (the callback route still truncates its own input to 120 characters).
+- **Boot.** The data layer attaches to the tables as they are; an in-memory
+  `dispatches` array (`migrateM13`'s empty container, a stale copy) is never
+  imported — the blob the migration just imported is dropped silently, anything
+  else is logged as a count and dropped. `GET /capabilities` →
+  `persistence.dataLayer.domains.dispatches` reports row counts by status, the
+  backlog and the number of staged writes not yet in a committed save.
+- **S7b cutover (first boot of this build on an S7a file).** Migration
+  `0010_dispatches` creates the two tables and imports the `dispatches` blob:
+  every entry validated and nothing coerced or normalised — all eighteen keys
+  must be present (every build wrote them), timestamps of the right kind, both
+  attempt shapes exactly, unknown top-level fields kept (`extra_json`), unknown
+  attempt fields refused; a finite fractional callback clock is imported
+  exactly; orphan references are imported and counted. An entry that fails any
+  check refuses the WHOLE step (`DISPATCHES_IMPORT_BLOCKED`: entry indexes and
+  reasons, never an address or a provider text), the blob and `saveSeq` are
+  untouched, and the next boot refuses the same way until the blob is resolved
+  on the previous build. A file without the blob imports nothing. A backup from
+  any build restores through the same migration with the order intact; a
+  snapshot that omits the collection leaves the tables alone, an explicit empty
+  array clears them, a malformed collection rolls the whole write back.
+- **Rollback (copy-only).** `npm run rollback:dispatches -- <data-dir>
+  <fresh-empty-dir>` (`scripts/dispatchesRollback.mjs`) opens the file
+  read-only, copies it (`VACUUM INTO`), writes every dispatch back into the
+  `dispatches` blob in insertion order with its attempts nested in their
+  positions and shapes — **nothing written after the cutover is lost** — drops
+  the two tables, removes the 0010 record and its meta key, advances the save
+  revision, checks every foreign key, VACUUMs and revalidates the copy (the
+  S7a tables are untouched). Refusals, no output: a later schema step (exit 4),
+  a file that never applied 0010 (exit 5), a non-empty output directory (exit
+  1), a recorded 0010 whose tables are missing (exit 10). Proven by booting the
+  copy on the actual pre-S7b build (`0641b2c`): the same rows, statuses and
+  attempt arrays in the admin view, and that build keeps writing. To go further
+  back, run `scripts/notificationsRollback.mjs` on this tool's output (it
+  refuses the S7b file itself with exit 4).
+
+#### Operator procedure for the S7b cutover (not run on real data by this work)
+
+1. **Dry run on a copy.** With the S7a build still serving, copy the data
+   directory and boot this build on it (`DATA_DIR=<copy>` on a spare port):
+   the log shows `data migration applied: 0010_dispatches` and the import
+   counts (dispatch records, attempts, unknown-field rows, orphan references);
+   a `DISPATCHES_IMPORT_BLOCKED` line lists what to resolve on the S7a build.
+2. **Backup.** `POST /admin/backup` on the S7a build, verify it, keep it.
+3. **Cutover.** Stop the S7a build, start this build on the real directory,
+   read the same log lines.
+4. **Rollback, if needed.** `node scripts/dispatchesRollback.mjs
+   <data-dir> <fresh-empty-dir>`, then start the S7a build (`0641b2c`) on the
+   output — every dispatch and attempt written since the cutover is in it.
+
 ## Reverse proxy and client addresses
 Per-IP controls (the `/auth` brute-force limiter, sharing-link limits, request
 logs) key on the client address. Behind a platform proxy (Fly, Render, a load
@@ -1000,7 +1096,9 @@ from their tables (`childIds` from the links), sessions as hashes and the
 media-removal queue as `mediaDeletions`; since S6a the one-time codes as
 `emailChallenges` / `pairingCodes` in their hashed row form; since S7a the
 notifications and preferences as `notifications` / `notificationPrefs` in the
-legacy collection shape, in feed order; it is the shape
+legacy collection shape, in feed order; since S7b the delivery dispatch records
+as `dispatches` in the eighteen-key shape with their attempts nested, in
+insertion order; it is the shape
 the first boot of a restore imports and cuts over again. The manifest is written last: a backup
 that fails midway (a write or copy error) answers `500 BACKUP_FAILED`, its
 partial directory is removed, and an `ops` event records the failure — nothing
