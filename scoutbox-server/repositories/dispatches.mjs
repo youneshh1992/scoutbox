@@ -19,6 +19,14 @@
  * Unknown OWN keys (a legacy row an older tool annotated) are kept in
  * `extra_json` and spread back first on export, as the S7a repository does
  * (an own "__proto__" key is data: `Object.defineProperty`, never assignment).
+ * UNKNOWN NESTED DATA IS DETACHED (review of 26d492b, finding 2): an unknown
+ * field is copied as a prototype-safe JSON clone at ingress (create, import,
+ * snapshot replace), on export and in every transaction snapshot, so a caller
+ * that mutates its input after `create`, or a returned export, never changes
+ * the mirror; a value JSON cannot carry (undefined, a function, a symbol, a
+ * bigint, a non-finite number, a class instance) refuses the whole write by
+ * name — nothing is dropped or nulled silently. The read-only views refuse a
+ * nested write as they refuse a top-level one.
  * The audience refuses unknown fields (its two columns are all the schema
  * keeps). Vocabularies are OPEN: any non-empty status, channel or provider is
  * stored as written (the ladder's RANK lives in m13/delivery.mjs, not here);
@@ -62,9 +70,20 @@
  * double, the column is the same double, so the value comes back exactly
  * (integer-valued timestamps included; node:sqlite binds every number as a
  * double, and a REAL column states what is actually stored instead of
- * converting it). Non-finite values (NaN, ±Infinity, a string) are refused
- * here; the callback route maps a non-finite `at` to null before the write
- * (what `JSON.stringify` wrote for it) and its API is unchanged.
+ * converting it). A string, an object, NaN or ±Infinity in a legacy blob or a
+ * snapshot is refused at import and at create (JSON never carries them). The
+ * ONE exception is the live callback path (review of 26d492b, finding 3): the
+ * previous build held `Number('Infinity') || Date.now()` — Infinity — in
+ * memory, where its nullish-assignment rule treated the clock as SET for every
+ * later event in the process, while its JSON save wrote `null`. `patch` accepts
+ * that non-finite number for `deliveredAt` / `openedAt` exactly so: the MIRROR
+ * keeps the number (a later event cannot replace it; a view or an HTTP response
+ * serialises it as null, as before), the COLUMN stores NULL, the export and the
+ * backup shape carry null, a transaction snapshot keeps the in-memory number
+ * (a rolled-back unit restores it; a committed one keeps it), and a restart —
+ * which reloads the file — shows null, as a restart of that build did. The
+ * bookkeeping is the mirror row itself: nothing else is kept, nothing leaks
+ * into a stored shape, nothing survives a restart.
  *
  * THE CALLBACK LOOKUP (finding 3). `byProviderMessageId(v)` is today's
  * `Array.find(x => x.providerMessageId === v)` over the in-memory mirror: the
@@ -84,7 +103,9 @@
  * made alongside it: the outbox row the fake provider wrote, the
  * failure-injection counter it decremented, the ops event and the webhook
  * delivery intent of an exhausted retry). Inside a unit a mutation joins it
- * (a refused argument or a missing hook poisons the unit even when caught);
+ * (a refused argument, a missing row, a missing hook poisons the unit even
+ * when caught — every refusal of create, recordAttempt and patch is raised
+ * inside the joined boundary; review of 26d492b, finding 1);
  * on rollback the mirror and the queue return to the state they had when the
  * unit began. An owned immediate transaction that fails — at a statement or at
  * COMMIT — restores the mirror in place, attempts arrays and held views
@@ -158,6 +179,28 @@ const nonEmpty = (v) => typeof v === 'string' && v.length > 0;
 const tableExists = (sqlite, name) => !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
 /** Set an own data property — never `obj[k] = v`, which for an own "__proto__" key of parsed JSON would rewrite the prototype and lose the field. */
 const setOwn = (obj, k, v) => Object.defineProperty(obj, k, { value: v, enumerable: true, writable: true, configurable: true });
+/**
+ * A DETACHED, prototype-safe copy of a JSON value (review of 26d492b, finding
+ * 2): null, booleans, strings, finite numbers, arrays and plain objects, every
+ * own key copied with `setOwn` at every depth (an own "__proto__", "constructor"
+ * or "toString" key is data). Anything JSON cannot carry — undefined, a
+ * function, a symbol, a bigint, a non-finite number, a class instance — is
+ * refused by name, never dropped or coerced (`JSON.stringify` would drop or
+ * null it silently). Returns `{ value }` or `{ reason }`.
+ */
+function cloneJson(v, at) {
+  if (v === null || typeof v === 'string' || typeof v === 'boolean') return { value: v };
+  if (typeof v === 'number') return Number.isFinite(v) ? { value: v } : { reason: `${at} is a non-finite number and cannot be stored as JSON` };
+  if (Array.isArray(v)) { const out = []; for (let i = 0; i < v.length; i++) { const r = cloneJson(v[i], `${at}[${i}]`); if (r.reason) return r; out.push(r.value); } return { value: out }; }
+  if (typeof v === 'object') {
+    const proto = Object.getPrototypeOf(v);
+    if (proto !== Object.prototype && proto !== null) return { reason: `${at} is not a plain object and cannot be stored as JSON` };
+    const out = {}; for (const k of Object.keys(v)) { const r = cloneJson(v[k], `${at}.${k}`); if (r.reason) return r; setOwn(out, k, r.value); } return { value: out };
+  }
+  return { reason: `${at} (${typeof v}) cannot be stored as JSON` };
+}
+/** The unknown own fields of a mirror row, each a detached copy (the mirror only ever holds values `cloneJson` accepted). */
+function cloneExtras(row) { const extra = {}; for (const k of Object.keys(row)) if (!DISPATCH_KEYS.includes(k)) setOwn(extra, k, cloneJson(row[k], k).value); return extra; }
 
 // ------------------------------------------------------------------ validation (no coercion; every refusal names the reason, never an address or a text)
 /** The eighteen keys of the literal every build since M13 wrote, in its order. */
@@ -223,8 +266,7 @@ export function validateDispatchRow(raw) {
   if (!intOrNull(raw.failedAt)) return { ok: false, reason: 'failedAt must be an integer timestamp or null' };
   if (!stringOrNull(raw.failReason)) return { ok: false, reason: 'failReason must be a string or null' };
   const extra = {};
-  for (const k of Object.keys(raw)) if (!DISPATCH_KEYS.includes(k)) setOwn(extra, k, raw[k]);
-  try { JSON.stringify(extra); } catch { return { ok: false, reason: 'an unknown field cannot be serialised' }; }
+  for (const k of Object.keys(raw)) if (!DISPATCH_KEYS.includes(k)) { const c = cloneJson(raw[k], k); if (c.reason) return { ok: false, reason: c.reason }; setOwn(extra, k, c.value); }
   const row = { ...extra, id: raw.id, notificationId: raw.notificationId, audience: a.audience, channel: raw.channel, to: raw.to, provider: raw.provider, status: raw.status, skipReason: raw.skipReason, providerMessageId: raw.providerMessageId, attempts, nextAt: raw.nextAt, actionDeadline: raw.actionDeadline, createdAt: raw.createdAt, deliveredAt: raw.deliveredAt, openedAt: raw.openedAt, actionedAt: raw.actionedAt, failedAt: raw.failedAt, failReason: raw.failReason };
   return { ok: true, row, hasExtra: Object.keys(extra).length > 0 };
 }
@@ -259,17 +301,26 @@ function rowFromDb(r, attempts) {
   // `{ ...extra }` copies an own "__proto__" key as an own key (spread uses CreateDataProperty); nothing else is needed.
   return row;
 }
+/**
+ * What the file holds for a callback clock: the number itself when finite, NULL
+ * for the non-finite in-memory state (review of 26d492b, finding 3): the
+ * previous build's JSON save wrote `null` for `Infinity`, and so does this
+ * column, while the mirror keeps the number (see THE TIMESTAMP CONTRACT).
+ */
+const storedClock = (v) => (typeof v === 'number' && !Number.isFinite(v) ? null : v);
 function rowParams(row) {
-  const extra = {}; for (const k of Object.keys(row)) if (!DISPATCH_KEYS.includes(k)) setOwn(extra, k, row[k]);
+  const extra = cloneExtras(row);
   return {
     id: row.id, notification_id: row.notificationId, audience_kind: row.audience.kind, audience_id: row.audience.id, channel: row.channel, to_address: row.to, provider: row.provider, status: row.status,
-    skip_reason: row.skipReason, provider_message_id: row.providerMessageId, next_at: row.nextAt, action_deadline_at: row.actionDeadline, created_at: row.createdAt, delivered_at: row.deliveredAt, opened_at: row.openedAt,
+    skip_reason: row.skipReason, provider_message_id: row.providerMessageId, next_at: row.nextAt, action_deadline_at: row.actionDeadline, created_at: row.createdAt, delivered_at: storedClock(row.deliveredAt), opened_at: storedClock(row.openedAt),
     actioned_at: row.actionedAt, failed_at: row.failedAt, fail_reason: row.failReason, extra_json: Object.keys(extra).length ? JSON.stringify(extra) : null,
   };
 }
 const copyAttempt = (a) => ({ ...a });
-/** A plain copy of a mirror row (the export / snapshot shape; nothing shared with the mirror). */
-const copyRow = (row) => ({ ...row, audience: { ...row.audience }, attempts: row.attempts.map(copyAttempt) });
+/** A DETACHED copy of a mirror row (the transaction snapshot shape: nothing shared with the mirror, unknown nested data cloned, the in-memory clocks as they are). */
+const copyRow = (row) => { const c = { ...row, audience: { ...row.audience }, attempts: row.attempts.map(copyAttempt) }; for (const k of Object.keys(row)) if (!DISPATCH_KEYS.includes(k)) setOwn(c, k, cloneJson(row[k], k).value); return c; };
+/** The export / snapshot-file shape: a detached copy whose callback clocks are what JSON carries (a non-finite in-memory clock → null, as the previous build's save wrote it). */
+const exportRow = (row) => { const c = copyRow(row); c.deliveredAt = storedClock(row.deliveredAt); c.openedAt = storedClock(row.openedAt); return c; };
 
 function readRows(sqlite) {
   const bySeq = new Map();
@@ -297,7 +348,7 @@ function writeRows(sqlite, rows) {
  */
 export const DISPATCHES_TABLE = {
   name: 'dispatches',
-  read(sqlite) { if (!dispatchesLive(sqlite)) return null; return readRows(sqlite); },
+  read(sqlite) { if (!dispatchesLive(sqlite)) return null; return readRows(sqlite); }, // fresh objects from the file: nothing shared with any mirror
   replace(sqlite, rows) {
     if (!dispatchesLive(sqlite)) return false;
     if (!sqlite.isTransaction) throw new Error('dispatches: replace() runs inside the caller\'s transaction');
@@ -390,16 +441,19 @@ export function createDispatchesRepository({ sqlite, now = Date.now, log = () =>
     for (const [k, v] of Object.entries(copy)) {
       if (k === 'audience' && obj.audience) { for (const c of Object.keys(obj.audience)) delete obj.audience[c]; Object.assign(obj.audience, v); continue; }
       if (k === 'attempts' && Array.isArray(obj.attempts)) { obj.attempts.length = 0; for (const a of v) obj.attempts.push(copyAttempt(a)); continue; }
-      setOwn(obj, k, v);
+      setOwn(obj, k, DISPATCH_KEYS.includes(k) ? v : cloneJson(v, k).value); // unknown nested data: a fresh detached copy, never the snapshot's object
     }
   };
+  // deliveredAt / openedAt accept ANY number: a finite clock as the route
+  // produces it, or the non-finite legacy in-memory state (`Number('Infinity')
+  // || Date.now()`), kept in the mirror and stored NULL (finding 3).
   const patchValue = (k, v) => {
     switch (k) {
       case 'status': if (!nonEmpty(v)) throw new TypeError('status must be a non-empty string'); return v;
       case 'providerMessageId': if (!stringOrNull(v)) throw new TypeError('providerMessageId must be a string or null'); return v;
       case 'nextAt': if (!isInt(v)) throw new TypeError('nextAt must be an integer timestamp'); return v;
-      case 'deliveredAt': if (!finiteOrNull(v)) throw new TypeError('deliveredAt must be a finite number (integer or fractional) or null'); return v;
-      case 'openedAt': if (!finiteOrNull(v)) throw new TypeError('openedAt must be a finite number (integer or fractional) or null'); return v;
+      case 'deliveredAt': if (v !== null && typeof v !== 'number') throw new TypeError('deliveredAt must be a number (the callback clock, finite or the legacy non-finite in-memory state) or null'); return v;
+      case 'openedAt': if (v !== null && typeof v !== 'number') throw new TypeError('openedAt must be a number (the callback clock, finite or the legacy non-finite in-memory state) or null'); return v;
       case 'actionedAt': if (!intOrNull(v)) throw new TypeError('actionedAt must be an integer timestamp or null'); return v;
       case 'failedAt': if (!intOrNull(v)) throw new TypeError('failedAt must be an integer timestamp or null'); return v;
       case 'failReason': if (!stringOrNull(v)) throw new TypeError('failReason must be a string or null'); return v;
@@ -465,25 +519,33 @@ export function createDispatchesRepository({ sqlite, now = Date.now, log = () =>
         return readonlyView(row, 'a delivery dispatch');
       });
     },
-    /** Change the fields the sweep and the callback route change (PATCH_KEYS), each validated per column; an empty patch is a no-op. Returns the row (read-only). */
-    patch(id, fields = {}) {
-      if (!isPlainObject(fields)) throw new TypeError('patch needs an object of fields');
-      const keys = Object.keys(fields);
-      const row0 = byId.get(id); if (!row0) throw new Error(`dispatches: no dispatch ${id} to patch`);
-      if (!keys.length) return readonlyView(row0, 'a delivery dispatch');
+    /**
+     * Change the fields the sweep and the callback route change (PATCH_KEYS),
+     * each validated per column. EVERY refusal — a patch that is not an object,
+     * a row that does not exist, an unknown field, an invalid value — is raised
+     * INSIDE the participant boundary (review of 26d492b, finding 1), so inside
+     * a unit of work it is a participant failure the store records even when the
+     * caller catches it. Only a VALID empty patch on an existing row is a no-op
+     * that touches nothing. Returns the row (read-only).
+     */
+    patch(id, fields) {
+      if (isPlainObject(fields) && Object.keys(fields).length === 0 && byId.has(id)) return readonlyView(byId.get(id), 'a delivery dispatch');
       return operation((exec) => {
-        const row = byId.get(id);
+        if (!isPlainObject(fields)) throw new TypeError('patch needs an object of fields');
+        const row = byId.get(id); if (!row) throw new Error(`dispatches: no dispatch ${id} to patch`);
+        const keys = Object.keys(fields);
         const unknown = keys.filter((k) => !PATCH_KEYS.includes(k)); if (unknown.length) throw new TypeError(`patch carries field(s) a dispatch does not change: ${unknown.join(', ')}`);
         const values = keys.map((k) => patchValue(k, fields[k]));
+        const stored = keys.map((k, i) => (k === 'deliveredAt' || k === 'openedAt' ? storedClock(values[i]) : values[i]));
         keys.forEach((k, i) => { row[k] = values[i]; });
         const update = updateFor(keys);
-        exec(() => update.run(...values, id));
+        exec(() => update.run(...stored, id));
         return readonlyView(row, 'a delivery dispatch');
       });
     },
 
-    /** Every row in the legacy export shape (attempts nested), in insertion order (the admin backup; the mirror is the intended state, like every blob collection). */
-    exportRows: () => rows.map(copyRow),
+    /** Every row in the legacy export shape (attempts nested, unknown nested data detached, callback clocks as JSON carries them), in insertion order (the admin backup; the mirror is the intended state, like every blob collection). */
+    exportRows: () => rows.map(exportRow),
 
     // ---------------------------------------------------------- the save hook (staged mode)
     flush() {

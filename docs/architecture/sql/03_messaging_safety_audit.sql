@@ -334,8 +334,11 @@ CREATE TABLE notification_pref_categories (
 --   the repository and by STRICT); delivered_at / opened_at are the callback
 --   route's doubles in REAL columns — node:sqlite binds every JavaScript number
 --   as a double, and a REAL column states exactly what is stored, integer-valued
---   or fractional; a non-finite callback `at` is written as NULL (what the JSON
---   save of the previous build persisted for it). No value is rounded.
+--   or fractional; a non-finite callback `at` (the legacy in-memory state
+--   `Number('Infinity') || Date.now()`) is kept in the process's memory exactly
+--   as the previous build kept it — no later event replaces it — and stored as
+--   NULL (what that build's JSON save persisted; review of 26d492b, finding 3).
+--   No value is rounded.
 -- notes: one row per (notification, destination); a notification gets exactly
 --   one in_app row plus one external row per audience rule (destinationsFor).
 --   No uniqueness of (notification_id, channel) is declared (none existed).

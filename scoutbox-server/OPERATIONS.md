@@ -979,9 +979,11 @@ rows in the same order.
   in an INTEGER column. `deliveredAt` and `openedAt` come from the provider
   callback (`Number(ev.at) || Date.now()`, a finite number that may be
   fractional) and are REAL columns: the value is stored exactly as the route
-  wrote it, integer-valued or fractional, never rounded; a non-finite callback
-  clock is stored as `null` (what the JSON save of the previous build persisted
-  for it). The callback API is unchanged.
+  wrote it, integer-valued or fractional, never rounded. A non-finite callback
+  clock (`"Infinity"` in the event) behaves exactly as before S7b: it is kept in
+  memory for the life of the process, so no later event can replace it, while
+  the column stores `null` (what the JSON save of the previous build persisted)
+  and a restart reads `null`. The callback API is unchanged.
 - **Writes.** In the running server a sweep pass's new rows, attempts and
   status changes are visible at once and durable inside the same snapshot save
   (`persistNow()`) as the outbox row the local fake provider accepted, the
@@ -995,6 +997,11 @@ rows in the same order.
   status and gains `actionedAt`). Callback changes land with the
   `deliveryCallbacksSeen` bookkeeping. `failReason` is stored untruncated at
   storage (the callback route still truncates its own input to 120 characters).
+  Every refusal of a repository write — an invalid argument, a missing row — is
+  a participant failure: inside a unit of work it rolls the whole unit back even
+  when the caller catches it. Unknown fields a legacy row carries are kept and
+  detached: nothing a caller does to its input or to an export changes the
+  records; a value JSON cannot carry refuses the write by name.
 - **Boot.** The data layer attaches to the tables as they are; an in-memory
   `dispatches` array (`migrateM13`'s empty container, a stale copy) is never
   imported — the blob the migration just imported is dropped silently, anything

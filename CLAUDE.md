@@ -146,8 +146,13 @@ and design changes the Founder explicitly requests.
   OPEN); the attempt-shape CHECK is total (`ok IS NOT NULL` on a send row); a
   note row never counts as a send; `delivered_at` / `opened_at` are REAL
   columns holding the callback route's finite number exactly, fractional or
-  not (a non-finite clock is stored null), every server-written clock an
-  INTEGER; the callback lookup is the FIRST row in insertion order whose
+  not (a non-finite callback clock is kept in memory for the process as the
+  previous build did — no later event replaces it — and stored null), every
+  server-written clock an INTEGER; EVERY refusal of create / recordAttempt /
+  patch is a participant failure raised inside the joined boundary (a caught
+  refusal still poisons the unit); unknown nested data is a detached
+  prototype-safe JSON clone at ingress, export and snapshot (a value JSON
+  cannot carry refuses the write); the callback lookup is the FIRST row in insertion order whose
   providerMessageId strictly equals the event's (explicit null matches the
   first null row, an omitted id matches nothing); writes are STAGED into the
   same save as the outbox row, the injection counter and the ops/webhook rows

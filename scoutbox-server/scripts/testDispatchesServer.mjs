@@ -339,4 +339,47 @@ await test('backup/restore and the old-build rollback proof: the admin backup ex
   rm(dir, restored, bad, copy);
 });
 
+
+// ------------------------------------------------------------- review of 26d492b, finding 3: callback precedence through the real route
+await test('review of 26d492b, finding 3 (real route) — the pre-S7b nullish precedence survives a non-finite clock: one signed batch with delivered at "Infinity" then at 1234 for the same provider id persists deliveredAt NULL (the in-memory clock is set, the second event cannot replace it, the save stores what JSON stored); a later request in the same process cannot set it either; the admin view and the backup export carry null; an opened sequence behaves the same; after a RESTART the table\'s null lets a finite callback set the clock, and an existing finite clock is then kept; a failed save (real COMMIT) keeps the callback\'s changes queued and the next save lands them', async () => {
+  const dir = tempDir('s7b-rv3'); let S = await boot(dir);
+  const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const amara = await guardianLogin(S, 'gd-amara');
+  const n1 = await guardianNotice(S, maria, amara); const r1 = await emailRowOf(S, dir, n1); assert.equal(r1.status, 'accepted');
+  const n2 = await guardianNotice(S, maria, amara, 'trial'); const r2 = await emailRowOf(S, dir, n2); assert.equal(r2.status, 'accepted');
+  // One batch: Infinity, then 1234.
+  let c = await callback(S, [{ callbackId: 'rv-inf', providerMessageId: r1.providerMessageId, status: 'delivered', at: 'Infinity' }, { callbackId: 'rv-1234', providerMessageId: r1.providerMessageId, status: 'delivered', at: 1234 }]);
+  assert.deepEqual(c.body, { applied: 2, duplicates: 0 });
+  await until(async () => storedRow(dir, r1.id).status === 'delivered');
+  let s1 = storedRow(dir, r1.id); assert.equal(s1.deliveredAt, null, 'the second event could not replace the non-finite clock; NULL is stored (what the JSON save of the previous build persisted)'); assert.equal(s1.deliveredType, 'null');
+  // A later request in the same process: still set in memory, still null durable.
+  c = await callback(S, [{ callbackId: 'rv-later', providerMessageId: r1.providerMessageId, status: 'delivered', at: 4321 }]); assert.equal(c.body.applied, 1); await sleep(150);
+  assert.equal(storedRow(dir, r1.id).deliveredAt, null, 'a later finite event in the same process does not set it either (the in-memory clock is set)');
+  const adminRow = (await admin(S)).recent.find((d) => d.id === r1.id); assert.equal(adminRow.deliveredAt, null, 'the admin view (JSON) carries null, as the previous build did');
+  const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
+  const exported = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8')).db.dispatches.find((d) => d.id === r1.id); assert.equal(exported.deliveredAt, null, 'the backup export carries null');
+  // An opened sequence: opened at Infinity, then delivered 999, then opened 5 — openedAt and deliveredAt stay null durable, the status is opened.
+  c = await callback(S, [{ callbackId: 'rv-o1', providerMessageId: r2.providerMessageId, status: 'opened', at: 'Infinity' }]); assert.equal(c.body.applied, 1);
+  await until(async () => storedRow(dir, r2.id).status === 'opened');
+  c = await callback(S, [{ callbackId: 'rv-o2', providerMessageId: r2.providerMessageId, status: 'delivered', at: 999 }, { callbackId: 'rv-o3', providerMessageId: r2.providerMessageId, status: 'opened', at: 5 }]); assert.equal(c.body.applied, 2); await sleep(150);
+  let s2 = storedRow(dir, r2.id); assert.equal(s2.status, 'opened'); assert.equal(s2.openedAt, null); assert.equal(s2.deliveredAt, null, 'opened implied delivered with the same in-memory clock; both null durable');
+  // Restart: the table's null is the state (as the old build's reload of its JSON); a finite callback now sets the clock, and a later one keeps it.
+  await S.stop(); S = await boot(dir);
+  assert.equal(storedRow(dir, r1.id).deliveredAt, null);
+  c = await callback(S, [{ callbackId: 'rv-r1', providerMessageId: r1.providerMessageId, status: 'delivered', at: 4321 }]); assert.equal(c.body.applied, 1);
+  await until(async () => storedRow(dir, r1.id).deliveredAt === 4321); assert.equal(storedRow(dir, r1.id).deliveredAt, 4321, 'after a restart the clock can be set');
+  c = await callback(S, [{ callbackId: 'rv-r2', providerMessageId: r1.providerMessageId, status: 'delivered', at: 8765 }]); assert.equal(c.body.applied, 1); await sleep(150); assert.equal(storedRow(dir, r1.id).deliveredAt, 4321, 'an existing finite clock is kept');
+  // A failed save at the real COMMIT keeps the callback's changes queued; the next save lands them once.
+  const seqBefore = seqOf(dir); const logBefore = S.log().length;
+  assert.equal((await S.j('POST', '/__faults', { rules: 'internal:save.sqlite_commit:1' })).status, 200);
+  c = await callback(S, [{ callbackId: 'rv-f1', providerMessageId: r2.providerMessageId, status: 'delivered', at: 777 }]); assert.equal(c.body.applied, 1);
+  await until(async () => /snapshot save failed: FOREIGN KEY constraint failed/.test(S.log().slice(logBefore)), 8000);
+  assert.equal(storedRow(dir, r2.id).deliveredAt, null, 'not durable after the failed save'); assert.equal(seqOf(dir), seqBefore);
+  assert.equal((await S.j('POST', '/__faults', { rules: '' })).status, 200);
+  c = await callback(S, [{ callbackId: 'rv-f2', providerMessageId: r2.providerMessageId, status: 'opened', at: 888 }]); assert.equal(c.body.applied, 1);
+  await until(async () => storedRow(dir, r2.id).deliveredAt === 777);
+  s2 = storedRow(dir, r2.id); assert.equal(s2.deliveredAt, 777, 'the retried change landed'); assert.equal(s2.openedAt, 888); assert.ok(seqOf(dir) > seqBefore);
+  assert.ok((blobRows(dir, 'deliveryCallbacksSeen') ?? []).includes('rv-f1') && (blobRows(dir, 'deliveryCallbacksSeen') ?? []).includes('rv-f2'), 'the callback bookkeeping landed in the same save');
+  await S.stop(); rm(dir);
+});
+
 console.log(`\n${passed} dispatch server checks passed`);

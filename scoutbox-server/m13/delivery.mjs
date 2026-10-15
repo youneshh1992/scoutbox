@@ -220,11 +220,15 @@ export function registerDelivery(ctx) {
       if (!d) continue;
       // The clock a callback carries, as every build since M13 read it:
       // `Number(ev.at) || Date.now()` — a finite value, fractional or not, is
-      // kept EXACTLY (the table column is the writer's double); a non-finite
-      // value (Infinity from a string such as "Infinity") is recorded as null,
-      // which is what the JSON save of the previous build persisted for it.
+      // kept EXACTLY (the table column is the writer's double). A non-finite
+      // value (Infinity from a string such as "Infinity") is written to the
+      // mirror AS IT IS, exactly as the previous build held it in memory, so
+      // the nullish rule below treats the clock as set for every later event in
+      // this process (the same batch, a later request) — the repository stores
+      // NULL for it, which is what that build's JSON save persisted, and a
+      // restart therefore reads null, as it did (review of 26d492b, finding 3).
       // The callback API is unchanged.
-      const clock = () => { const at = Number(ev.at) || Date.now(); return Number.isFinite(at) ? at : null; };
+      const clock = () => Number(ev.at) || Date.now();
       const patch = {};
       if (ev.status === 'delivered') {
         if (d.deliveredAt == null) patch.deliveredAt = clock(); // nullish assignment: an existing clock is kept

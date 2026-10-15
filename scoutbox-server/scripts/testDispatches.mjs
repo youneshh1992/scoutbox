@@ -206,7 +206,7 @@ test('the actual schema (direct SQL, review of dc4b559 finding 1 and 2): dispatc
 });
 
 // ============================================================= the repository: immediate mode (tools, tests)
-test('repository (immediate mode): create / recordAttempt / patch validate like the import (unknown patch keys, non-finite callback timestamps and malformed attempts refused), insertion order is seq order, byProviderMessageId is the FIRST row in insertion order whose id strictly equals the value — duplicates legal, an explicit null matches the first null row, an omitted/undefined value matches nothing — counts by status and the backlog count, a finite fractional timestamp is durable exactly (second connection); an owned transaction that fails at a statement or at COMMIT restores the mirror in place (rows, attempts arrays, held views) and the retry lands; a caller-owned raw transaction keeps the explicit reload() contract', () => {
+test('repository (immediate mode): create / recordAttempt / patch validate like the import (unknown patch keys, non-numeric callback timestamps and malformed attempts refused), insertion order is seq order, byProviderMessageId is the FIRST row in insertion order whose id strictly equals the value — duplicates legal, an explicit null matches the first null row, an omitted/undefined value matches nothing — counts by status and the backlog count, a finite fractional timestamp is durable exactly (second connection); an owned transaction that fails at a statement or at COMMIT restores the mirror in place (rows, attempts arrays, held views) and the retry lands; a caller-owned raw transaction keeps the explicit reload() contract', () => {
   const dir = tempDir('dsp-imm'); s7aFile(dir, { dispatches: [] });
   const s = openRaw(dir); migrate(s);
   const repo = bare(s);
@@ -227,7 +227,7 @@ test('repository (immediate mode): create / recordAttempt / patch validate like 
   repo.patch('dsp-1', { deliveredAt: FRACTIONAL, status: 'delivered' });
   assert.equal(a.deliveredAt, FRACTIONAL); { const r = second(dir); try { assert.deepEqual({ ...r.prepare("SELECT delivered_at AS v, typeof(delivered_at) AS t FROM dispatches WHERE id = 'dsp-1'").get() }, { v: FRACTIONAL, t: 'real' }, 'durable exactly, second connection'); } finally { r.close(); } }
   repo.patch('dsp-1', { openedAt: 1700000000000 }); assert.equal(rowsOf(dir, 'dispatches', 'seq')[0].opened_at, 1700000000000);
-  assert.throws(() => repo.patch('dsp-1', { deliveredAt: Number.POSITIVE_INFINITY }), /deliveredAt must be a finite number/); assert.throws(() => repo.patch('dsp-1', { deliveredAt: '1' }), /deliveredAt must be a finite number/);
+  assert.throws(() => repo.patch('dsp-1', { deliveredAt: '1' }), /deliveredAt must be a number/); assert.throws(() => repo.patch('dsp-1', { openedAt: {} }), /openedAt must be a number/); // a non-finite NUMBER is the legacy in-memory state the live route produces (review of 26d492b, finding 3; its test below)
   assert.throws(() => repo.patch('dsp-1', { nextAt: 1.5 }), /nextAt must be an integer/); assert.throws(() => repo.patch('dsp-1', { failReason: 7 }), /failReason must be a string or null/); assert.throws(() => repo.patch('dsp-1', { status: '' }), /status must be a non-empty string/);
   assert.throws(() => repo.patch('dsp-1', { audience: { kind: 'x', id: 'y' } }), /patch carries field\(s\) a dispatch does not change: audience/); assert.throws(() => repo.patch('dsp-1', { id: 'other' }), /patch carries field\(s\)/);
   repo.patch('dsp-1', {}); // a no-op patch
@@ -375,6 +375,119 @@ test('rollback (copy-only): every dispatch and every attempt is written back int
   assert.deepEqual(fs.readdirSync(o5), [], 'a failure inside the tool leaves no output');
   const cli = run([src, tempDir('dsp-rb-cli'), '--json']); assert.equal(cli.code, 0); assert.deepEqual(JSON.parse(cli.out).counts, { dispatches: 4, attempts: 4 });
   rm(src, out, s7aOut, later, o1, notCut, o2, o3, odd, o4, o5);
+});
+
+
+// ============================================================= review of 26d492b (three independently reproduced findings)
+test('review of 26d492b, finding 1 — EVERY patch refusal is a participant failure: a null or non-object patch, a missing row, an unknown field and an invalid value each refuse INSIDE the joined boundary, so a unit that catches the refusal still rolls back — the earlier patch of the same unit, the blob row it appended, the status in the table (second connection) and saveSeq are all as before, the held view shows the restored row — caught and uncaught, for the staged repository and for an immediate one participating in the same store unit, and for a repository whose hook is not registered; a write pending BEFORE the refused unit stays pending and lands with the successful retry; a valid empty patch stays a no-op', () => {
+  const dir = tempDir('dsp-rv1'); s7aFile(dir, { dispatches: [] });
+  const L = live(dir); L.dispatches.create(dsp({ id: 'dsp-1', attempts: [] })); L.save();
+  const seq0 = seqOf(dir); const held = L.dispatches.byId('dsp-1');
+  const durable = () => ({ status: rowsOf(dir, 'dispatches', 'seq')[0].status, seq: seqOf(dir), requests: JSON.parse(blobOf(dir, 'requests')).map((r) => r.id), attempts: attemptsOf(dir).length });
+  const before = durable();
+  const bad = {
+    'null patch': () => L.dispatches.patch('dsp-1', null),
+    'non-object patch': () => L.dispatches.patch('dsp-1', 'delivered'),
+    'missing row': () => L.dispatches.patch('absent', { status: 'opened' }),
+    'unknown field': () => L.dispatches.patch('dsp-1', { audience: { kind: 'x', id: 'y' } }),
+    'invalid value': () => L.dispatches.patch('dsp-1', { nextAt: 1.5 }),
+    'missing row, empty patch': () => L.dispatches.patch('absent', {}),
+  };
+  for (const [label, refuse] of Object.entries(bad)) {
+    let caught = null; let outer = null;
+    try { L.store.unitOfWork(() => { L.db.requests.push({ id: `req-${label}` }); L.dispatches.patch('dsp-1', { status: 'delivered' }); assert.equal(held.status, 'delivered'); try { refuse(); } catch (e) { caught = e; } }, { snapshot: L.snapshot }); } catch (e) { outer = e; }
+    assert.ok(caught, `${label}: the invalid call fails`); assert.ok(outer, `${label}: the unit is refused although the caller caught the failure`); assert.equal(outer.unitOfWork, 'rolled_back', label);
+    assert.deepEqual(durable(), before, `${label}: nothing of the unit is durable`); assert.equal(held.status, 'accepted', `${label}: the held view shows the restored row`); assert.equal(L.dispatches.pending(), 0, `${label}: nothing stays queued from the rolled-back unit`); assert.equal(L.store.sqlite.isTransaction, false);
+    assert.throws(() => L.store.unitOfWork(() => { L.db.requests.push({ id: `req-${label}-u` }); L.dispatches.patch('dsp-1', { status: 'delivered' }); refuse(); }, { snapshot: L.snapshot }), `${label}: uncaught`);
+    assert.deepEqual(durable(), before, `${label}: uncaught — nothing durable`); assert.equal(held.status, 'accepted'); assert.equal(L.dispatches.pending(), 0);
+  }
+  // A write pending BEFORE the refused unit survives it and lands with the retry.
+  L.dispatches.recordAttempt('dsp-1', { at: NOW, ok: true, error: null }); assert.equal(L.dispatches.pending(), 1);
+  let outer = null; try { L.store.unitOfWork(() => { L.db.requests.push({ id: 'req-x' }); try { L.dispatches.patch('dsp-1', null); } catch { /* caught */ } }, { snapshot: L.snapshot }); } catch (e) { outer = e; }
+  assert.ok(outer); assert.equal(L.dispatches.pending(), 1, 'the pre-unit write is still pending'); assert.equal(attemptsOf(dir).length, 0); assert.equal(held.attempts.length, 1, 'and still in memory');
+  L.store.unitOfWork(() => { L.db.requests.push({ id: 'req-ok' }); L.dispatches.patch('dsp-1', { status: 'delivered' }); }, { snapshot: L.snapshot });
+  assert.deepEqual(durable(), { status: 'delivered', seq: seq0 + 1, requests: ['req-ok'], attempts: 1 }, 'the retry lands the unit and the pre-unit write in one revision'); assert.equal(L.dispatches.pending(), 0);
+  // A valid empty patch is a no-op (nothing queued, nothing written), inside and outside a unit.
+  L.dispatches.patch('dsp-1', {}); assert.equal(L.dispatches.pending(), 0); L.save(); assert.equal(seqOf(dir), seq0 + 2);
+  L.store.unitOfWork(() => { L.dispatches.patch('dsp-1', {}); }, { snapshot: L.snapshot }); assert.equal(L.dispatches.pending(), 0);
+  // An immediate repository participating in the same store unit (hook registered): the same boundary.
+  const imm = createDispatchesRepository({ sqlite: L.store.sqlite, now: () => NOW, unit: L.store.unit }); L.store.setSaveHook(imm.saveHook());
+  const before2 = durable();
+  for (const [label, refuse] of [['null', () => imm.patch('dsp-1', null)], ['missing', () => imm.patch('absent', { status: 'opened' })], ['value', () => imm.patch('dsp-1', { failReason: 7 })]]) {
+    let c = null; let o = null;
+    try { L.store.unitOfWork(() => { L.db.requests.push({ id: `req-imm-${label}` }); imm.patch('dsp-1', { status: 'opened' }); try { refuse(); } catch (e) { c = e; } }, { snapshot: L.snapshot }); } catch (e) { o = e; }
+    assert.ok(c, label); assert.ok(o, `immediate ${label}: the unit is refused`); assert.deepEqual(durable(), before2, `immediate ${label}: nothing durable`); assert.equal(imm.byId('dsp-1').status, 'delivered', `immediate ${label}: its mirror restored`); assert.equal(L.store.sqlite.isTransaction, false);
+  }
+  // A repository given the participant API but whose hook was never registered: the caught refusal is still a participant failure.
+  const noHook = createDispatchesRepository({ sqlite: L.store.sqlite, now: () => NOW, unit: L.store.unit, staged: true });
+  { let c = null; let o = null; try { L.store.unitOfWork(() => { L.db.requests.push({ id: 'req-nohook' }); try { noHook.patch('dsp-1', null); } catch (e) { c = e; } }, { snapshot: L.snapshot }); } catch (e) { o = e; } assert.match(c?.message ?? '', /save hook/); assert.ok(o); assert.deepEqual(durable(), before2); }
+  L.close(); rm(dir);
+});
+
+test('review of 26d492b, finding 2 — nested unknown data is DETACHED at ingress, export and transaction snapshots: mutating the input after create, or a returned export, never changes the mirror or a later export; own prototype-like keys ("__proto__", "constructor", "toString") survive at every depth with arrays, nulls and booleans; a rolled-back unit and a real COMMIT failure leave the held view on the restored row; a reload (restart) and the snapshot dispatcher reproduce the stored JSON; unsupported non-JSON values are refused whole (nothing written, nothing queued); attempt order is unchanged', () => {
+  const dir = tempDir('dsp-rv2'); s7aFile(dir, { dispatches: [] });
+  const L = live(dir);
+  const special = JSON.parse('{"__proto__":{"legacyMarker":"keep-me","inner":{"__proto__":["deep"],"toString":null}},"constructor":{"toString":[1,{"__proto__":{"x":false}}]},"futureField":{"labels":["original"],"n":null,"b":true,"list":[[1,2],{"k":"v"}]}}');
+  const input = dsp({ id: 'dsp-1', attempts: [{ at: 1, note: 'quiet hours re-check' }, { at: 2, ok: false, error: 'e' }, { at: 3, ok: true, error: null }], ...special });
+  Object.defineProperty(input, '__proto__', { value: special.__proto__, enumerable: true, writable: true, configurable: true });
+  const expectedExtras = plain(special); // a JSON round-trip: an object literal's `__proto__` key would set the prototype, the parsed one is an own key
+  const extrasOf = (row) => { const o = {}; for (const k of Object.keys(row)) if (!DISPATCH_KEYS.includes(k)) Object.defineProperty(o, k, { value: row[k], enumerable: true, writable: true, configurable: true }); return plain(o); };
+  const createdView = L.dispatches.create(input); L.save();
+  assert.deepEqual(extrasOf(createdView), expectedExtras, 'the mirror carries every nested extra'); assert.ok(Object.hasOwn(L.dispatches.exportRows()[0], '__proto__') && Object.hasOwn(L.dispatches.exportRows()[0].__proto__.inner, '__proto__'));
+  // Input aliasing.
+  input.futureField.labels.push('input-alias'); input.constructor.toString.push('input-alias'); special.__proto__.inner.__proto__.push('input-alias');
+  assert.deepEqual(extrasOf(L.dispatches.byId('dsp-1')), expectedExtras, 'the mirror is detached from the input');
+  // Export aliasing.
+  const exported = L.dispatches.exportRows()[0]; exported.futureField.labels.push('export-alias'); exported.__proto__.inner.__proto__.push('export-alias'); exported.futureField.list[0].push(3);
+  assert.deepEqual(extrasOf(L.dispatches.byId('dsp-1')), expectedExtras, 'the mirror is detached from an export'); assert.deepEqual(extrasOf(L.dispatches.exportRows()[0]), expectedExtras, 'a later export is detached from an earlier one');
+  assert.throws(() => { L.dispatches.byId('dsp-1').futureField.labels.push('view'); }, /written through its domain repository/, 'the view refuses a nested write');
+  // A rolled-back unit: an export edit inside it changes nothing; a repository write inside it is restored, the held view included.
+  const held = L.dispatches.byId('dsp-1');
+  assert.throws(() => L.store.unitOfWork(() => { L.dispatches.exportRows()[0].futureField.labels.push('aborted-unit'); L.dispatches.patch('dsp-1', { status: 'delivered', failReason: 'x' }); assert.equal(held.status, 'delivered'); throw new Error('synthetic abort'); }, { snapshot: L.snapshot }), /synthetic abort/);
+  assert.deepEqual(extrasOf(held), expectedExtras); assert.equal(held.status, 'accepted'); assert.equal(held.failReason, null); assert.equal(L.dispatches.pending(), 0);
+  // A real COMMIT failure of a unit that creates a row with nested extras: no row in memory afterwards; the retry lands it.
+  L.store.sqlite.exec('CREATE TEMP TABLE rv_parent (id TEXT PRIMARY KEY); CREATE TEMP TABLE rv_child (parent_id TEXT NOT NULL REFERENCES rv_parent(id) DEFERRABLE INITIALLY DEFERRED); CREATE TEMP TRIGGER rv_commit AFTER INSERT ON dispatches BEGIN INSERT INTO rv_child (parent_id) VALUES (\'missing-on-purpose\'); END');
+  assert.throws(() => L.store.unitOfWork(() => { L.dispatches.create(dsp({ id: 'dsp-2', attempts: [], futureField: { labels: ['two'] } })); }, { snapshot: L.snapshot }), /FOREIGN KEY constraint failed/);
+  assert.equal(L.dispatches.byId('dsp-2'), null); assert.equal(L.dispatches.count(), 1); L.store.sqlite.exec('DROP TRIGGER rv_commit');
+  L.store.unitOfWork(() => { L.dispatches.create(dsp({ id: 'dsp-2', attempts: [], futureField: { labels: ['two'] } })); }, { snapshot: L.snapshot }); assert.deepEqual(plain(L.dispatches.byId('dsp-2').futureField), { labels: ['two'] });
+  // Stored, reloaded (a restart) and round-tripped through the snapshot dispatcher: the same JSON; attempt order unchanged.
+  const storedExtra = JSON.parse(rowsOf(dir, 'dispatches', 'seq')[0].extra_json); assert.deepEqual(storedExtra, expectedExtras); assert.ok(Object.hasOwn(storedExtra, '__proto__'));
+  L.dispatches.reload(); assert.deepEqual(extrasOf(L.dispatches.byId('dsp-1')), expectedExtras, 'after a reload'); assert.deepEqual(plain(L.dispatches.byId('dsp-1').attempts), [{ at: 1, note: 'quiet hours re-check' }, { at: 2, ok: false, error: 'e' }, { at: 3, ok: true, error: null }], 'attempt order unchanged');
+  L.close();
+  { const tool = openStore(dir); const snap = tool.load(); assert.deepEqual(extrasOf(snap.db.dispatches[0]), expectedExtras); tool.save(snap); assert.deepEqual(extrasOf(tool.load().db.dispatches[0]), expectedExtras, 'round-tripped through replace'); tool.sqlite.close(); }
+  // Unsupported non-JSON values are refused whole: nothing written, nothing queued, the count unchanged.
+  const L2 = live(dir); const count = L2.dispatches.count();
+  for (const [label, value] of [['a function', () => 1], ['an undefined inside an object', { x: undefined }], ['a bigint', 1n], ['a non-finite number', Number.POSITIVE_INFINITY], ['a NaN in an array', [1, Number.NaN]], ['a class instance', new Date(0)], ['a symbol', Symbol('s')]]) {
+    assert.throws(() => L2.dispatches.create(dsp({ id: 'dsp-bad', attempts: [], futureField: value })), /futureField.*cannot be stored as JSON|unknown field.*cannot be/, label);
+    assert.equal(L2.dispatches.byId('dsp-bad'), null, label); assert.equal(L2.dispatches.count(), count, label); assert.equal(L2.dispatches.pending(), 0, label);
+  }
+  assert.throws(() => validateDispatchRows([dsp({ attempts: [], futureField: { f: () => 1 } })]), /DISPATCHES_IMPORT_BLOCKED.*cannot be stored as JSON/);
+  L2.close(); rm(dir);
+});
+
+test('review of 26d492b, finding 3 (the repository) — a non-finite callback clock is the legacy in-memory state the live route produces (`Number(ev.at) || Date.now()`): patch accepts it for deliveredAt / openedAt, the MIRROR keeps the number (a later nullish assignment sees the clock as set, as before S7b), the COLUMN stores NULL, the export and the snapshot shape carry null (what the JSON save persisted), a unit rollback restores the in-memory value, a reload (restart) shows null; create and the import still refuse a non-finite value (JSON never carries one); finite clocks are unchanged', () => {
+  const dir = tempDir('dsp-rv3'); s7aFile(dir, { dispatches: [] });
+  const L = live(dir); L.dispatches.create(dsp({ id: 'dsp-1', attempts: [] })); L.dispatches.create(dsp({ id: 'dsp-2', attempts: [], providerMessageId: 'fm_2' })); L.save();
+  const held = L.dispatches.byId('dsp-1');
+  L.dispatches.patch('dsp-1', { deliveredAt: Number.POSITIVE_INFINITY, status: 'delivered' }); L.save();
+  assert.equal(held.deliveredAt, Number.POSITIVE_INFINITY, 'the mirror keeps the non-finite clock'); assert.equal(held.deliveredAt == null, false, 'a nullish check sees it as set');
+  { const r = second(dir); try { assert.deepEqual({ ...r.prepare("SELECT delivered_at AS v, typeof(delivered_at) AS t, status FROM dispatches WHERE id = 'dsp-1'").get() }, { v: null, t: 'null', status: 'delivered' }, 'the column stores NULL'); } finally { r.close(); } }
+  assert.equal(L.dispatches.exportRows()[0].deliveredAt, null, 'the export carries null'); assert.equal(JSON.parse(JSON.stringify(L.db.dispatches[0])).deliveredAt, null, 'a JSON view carries null');
+  // A unit that changes the row and rolls back restores the in-memory non-finite value; one that commits keeps it.
+  assert.throws(() => L.store.unitOfWork(() => { L.dispatches.patch('dsp-1', { deliveredAt: 5, openedAt: Number.NEGATIVE_INFINITY }); throw new Error('abort'); }, { snapshot: L.snapshot }), /abort/);
+  assert.equal(held.deliveredAt, Number.POSITIVE_INFINITY); assert.equal(held.openedAt, null);
+  L.store.unitOfWork(() => { L.dispatches.patch('dsp-1', { openedAt: Number.NEGATIVE_INFINITY, status: 'opened' }); }, { snapshot: L.snapshot });
+  assert.equal(held.openedAt, Number.NEGATIVE_INFINITY); assert.equal(rowsOf(dir, 'dispatches', 'seq')[0].opened_at, null);
+  // Finite clocks are unchanged: exact, fractional included.
+  L.dispatches.patch('dsp-2', { deliveredAt: FRACTIONAL, openedAt: 1700000000000 }); L.save();
+  assert.deepEqual(rowsOf(dir, 'dispatches', 'seq')[1].delivered_at, FRACTIONAL); assert.equal(L.dispatches.exportRows()[1].deliveredAt, FRACTIONAL);
+  // A restart: the table's NULL is what the old build's JSON save left — the clock can be set again.
+  L.dispatches.reload(); assert.equal(L.dispatches.byId('dsp-1').deliveredAt, null); assert.equal(L.dispatches.byId('dsp-1').openedAt, null);
+  // Creation and import never accept a non-finite value (JSON cannot carry one; nothing is normalised there).
+  assert.throws(() => L.dispatches.create(dsp({ id: 'dsp-3', attempts: [], deliveredAt: Number.POSITIVE_INFINITY })), /deliveredAt must be a finite number/);
+  assert.throws(() => validateDispatchRows([dsp({ openedAt: Number.NaN })]), /openedAt must be a finite number/);
+  assert.throws(() => L.dispatches.patch('dsp-1', { deliveredAt: '1' }), /deliveredAt must be a number/); assert.throws(() => L.dispatches.patch('dsp-1', { actionedAt: Number.POSITIVE_INFINITY }), /actionedAt must be an integer/);
+  L.close(); rm(dir);
 });
 
 console.log(`\n${passed} dispatch checks passed`);

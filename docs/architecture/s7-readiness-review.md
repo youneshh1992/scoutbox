@@ -21,7 +21,8 @@ raised (§8.4), and `0641b2c`, the correction of the two participant-contract de
 replay-coverage gap the second review raised (§8.5); §8.4 and §8.5 are kept as the dated history of
 those rounds, not as current status. What was built, the four compatibility corrections it honours
 and the one deliberate reading it records are in §8.3. **S7b: IMPLEMENTED on top of `dc4b559` (15 October
-2026; §9 as corrected in place by the review of `dc4b559`, §9.7 the implementation record) — PENDING
+2026; §9 as corrected in place by the review of `dc4b559`, §9.7 the implementation record) and
+CORRECTED for the three findings of the independent review of `26d492b` (§9.8) — PENDING
 INDEPENDENT ACCEPTANCE, not accepted, not authorised for deployment. S7c–S7d not started.** §§0–8.2
 are the review as written at `2d7ddeb`, kept as the record of the reasoning; where the
 implementation corrected a proposal (§3.2 coupled writes, §8.2 "transaction of its own"), the
@@ -1206,7 +1207,7 @@ send rows (`attempts.filter(a => !a.note)`), so note rows must never count.
 | `skipReason`, `providerMessageId`, `failReason` | `TEXT` nullable | **no length CHECK** on `fail_reason` (the sweep does not truncate) | `providerMessageId`: ordinary index, **no UNIQUE** (random, not guaranteed by code) |
 | `nextAt`, `createdAt` | `INTEGER NOT NULL` | written by the server itself (`Date.now()` or a sum of it): integers; a fraction is refused by the repository and by STRICT | |
 | `actionDeadline`, `actionedAt`, `failedAt` | `INTEGER` nullable | server-written clocks (the ack's and the sweep's `Date.now()`, the notification's deadline) | `actionDeadline` is a copy of the notification's deadline at creation (probe) |
-| `deliveredAt`, `openedAt` | `REAL` nullable (**corrected by the review of `dc4b559`, finding 2**: the first draft said `INTEGER`) | written by the provider callback route as `Number(ev.at) \|\| Date.now()`: a finite JavaScript number that MAY be fractional (1700000000000.5 is a value the `0641b2c` build stores and its JSON blob preserves). The repository accepts a finite number (integer-valued or not) or `null`, refuses anything else, and stores it as the writer's double — node:sqlite binds every JavaScript number as a double, so a REAL column states exactly what is stored; an INTEGER column would refuse the fraction and an `ANY` column would store a whole number as REAL anyway. A non-finite callback `at` (`Infinity` from a string) is written as `null`, which is what the previous build's JSON save persisted for it; the callback API is unchanged. Proven through the real route, migration, export, restart, backup and rollback (`testDispatchesServer.mjs` test 3; `testDispatches.mjs`) | `??=` semantics kept: an existing clock is never replaced |
+| `deliveredAt`, `openedAt` | `REAL` nullable (**corrected by the review of `dc4b559`, finding 2**: the first draft said `INTEGER`) | written by the provider callback route as `Number(ev.at) \|\| Date.now()`: a finite JavaScript number that MAY be fractional (1700000000000.5 is a value the `0641b2c` build stores and its JSON blob preserves). The repository accepts a finite number (integer-valued or not) or `null`, refuses anything else, and stores it as the writer's double — node:sqlite binds every JavaScript number as a double, so a REAL column states exactly what is stored; an INTEGER column would refuse the fraction and an `ANY` column would store a whole number as REAL anyway. A non-finite callback `at` (`Infinity` from a string) is the one legacy in-memory state: the previous build held it in memory, where its nullish rule treated the clock as set for every later event in the process, and its JSON save wrote `null` — the repository keeps the number in the mirror, stores NULL, exports null, and a restart reads null, exactly so (**corrected by the review of `26d492b`, finding 3**, §9.8: the first implementation nulled it at write time and let a later event replace it); the callback API is unchanged. Proven through the real route, migration, export, restart, backup and rollback (`testDispatchesServer.mjs` test 3; `testDispatches.mjs`) | `??=` semantics kept: an existing clock is never replaced |
 | unknown top-level field | `extra_json` (object CHECK) | own-property copy, round-trips (S7a finding 3) | |
 | `attempts[i]` | `dispatch_attempts (dispatch_seq INTEGER NOT NULL REFERENCES dispatches(seq) ON DELETE CASCADE, seq INTEGER NOT NULL, kind TEXT NOT NULL, attempted_at INTEGER NOT NULL, ok INTEGER, error TEXT, note TEXT, PRIMARY KEY (dispatch_seq, seq))` | `seq` = array index; `kind` = `'quiet_recheck'` iff the row has `note`, else `'send'`; **no minted id** (the SQL03 `dat-<n>` would consume the global counter); `ok` **nullable**: NULL on a note row, 0/1 on a send row; **total CHECK (corrected by the review of `dc4b559`, finding 1** — SQLite treats a NULL CHECK result as a pass, so the first draft's `ok IN (0,1)` admitted a send row with `ok` NULL): `CHECK ((kind='send' AND ok IS NOT NULL AND ok IN (0,1) AND note IS NULL) OR (kind='quiet_recheck' AND ok IS NULL AND error IS NULL AND note IS NOT NULL))`, proven through direct SQL on the real DDL (`testDispatches.mjs` "the actual schema") | written back as `{at, note}` or `{at, ok, error}` exactly (probe: 8 attempt rows round-trip byte-for-byte); a note row is never counted as a send; no attempt id is minted and no global counter is consumed |
 
@@ -1414,9 +1415,9 @@ fails at COMMIT leaves memory as the intended state and its rows, attempts and s
 the failure schedules no save of its own and a pass that changes nothing requests none, so the retry
 lands with the next save that does change something (the store's contract since S3, unchanged for
 every blob collection; proven in `testDispatchesServer.mjs` test 1 with a real COMMIT failure and a
-second connection). (iv) The non-finite callback clock is stored `null` at write time; the previous
-build held `Infinity` in memory until its JSON save turned it into `null` — the durable outcome is the
-same, the in-memory interval differs. (v) `fail_reason` is stored untruncated; the callback route's
+second connection). (iv) *Superseded by §9.8 (finding 3):* the first implementation stored a non-finite callback clock
+as `null` at write time, which let a later event in the same process replace it — a precedence change
+the independent review reproduced; the corrected build keeps the previous build's in-memory state. (v) `fail_reason` is stored untruncated; the callback route's
 own 120-character truncation of its input is unchanged. (vi) The orphan count in the cutover record is
 information only; nothing acts on it.
 
@@ -1452,6 +1453,61 @@ outside the package; they ran in the checkout).
 synthetic seed on temporary directories. A crash between a sweep's COMMIT and nothing else loses
 nothing (the sweep has no external effect); a provider that were asynchronous would need the §3.3
 structure, which this code does not yet have. The Founder's question in §9.6 stays open.
+
+### 9.8 Correction round — independent review of `26d492b` (15 October 2026; three findings, each reproduced by the reviewer's script and corrected; **still pending independent acceptance**)
+
+The review of `26d492b` kept S7b IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE and reproduced three
+findings with `review-26d492b-reproductions.mjs` (four checks; the first two are one finding). The
+script, run unchanged on `26d492b`, reproduced all four; run unchanged on the corrected tree it
+reports none (the handoff carries both outputs). Failing-first regressions were added to the two S7b
+suites and recorded failing on `26d492b` before any source change (`testDispatches.mjs` "review of
+26d492b, finding 1/2/3"; `testDispatchesServer.mjs` "review of 26d492b, finding 3 (real route)").
+
+1. **Every patch refusal is a participant failure** (`repositories/dispatches.mjs` `patch`). The first
+   implementation validated the patch object and looked the row up before entering the participant
+   boundary, so a caught `patch(id, null)` or `patch(missingId, …)` never reached `unit.join` and the
+   enclosing unit could commit its earlier work. Now only a VALID empty patch on an existing row is a
+   no-op outside the boundary; every other refusal — not an object, a missing row, an unknown field,
+   an invalid value — is raised inside `operation()`, so inside a unit of work it poisons the unit
+   even when caught. `create` and `recordAttempt` already raised every refusal inside the boundary
+   (audited, unchanged). Proven for the staged repository and for an immediate one participating in
+   the same store unit, caught and uncaught, with a hook-less repository, a write pending before the
+   refused unit (it stays pending and lands with the retry), held views and a second connection.
+2. **Unknown nested data is detached** (`cloneJson`, `cloneExtras`, `copyRow`, `exportRow`,
+   `restoreInto`). The first implementation copied unknown top-level fields by reference and cloned
+   only the known `audience` and `attempts` on export and in transaction snapshots, so a caller
+   mutating its input after `create`, or a returned export, changed the mirror without a repository
+   write, and a nested edit through an export inside an aborted unit survived the rollback. Now every
+   unknown field is a prototype-safe JSON clone at ingress (create, import, snapshot replace), on
+   export and in every transaction snapshot (own `"__proto__"`, `"constructor"` and `"toString"`
+   keys kept at every depth, arrays, nulls and booleans included); a value JSON cannot carry
+   (undefined, a function, a symbol, a bigint, a non-finite number, a class instance) refuses the
+   whole write by name instead of being dropped or nulled silently by `JSON.stringify`. The read-only
+   views refuse nested writes. Attempt order and the export convention are unchanged.
+   *Observed, not changed (outside this bounded round):* the accepted S7a notifications repository
+   copies its unknown fields the same shallow way; it is reported here for the reviewer, not
+   refactored.
+3. **The legacy non-finite callback clock keeps its precedence** (`m13/delivery.mjs` callback
+   route; `patch`, `storedClock`, `exportRow`). The first implementation mapped a non-finite
+   `Number(ev.at) || Date.now()` to `null` before writing, so a later event — in the same batch or a
+   later request of the same process — could set the clock, where the previous build's in-memory
+   `Infinity` had blocked it (its JSON save wrote `null`; a restart therefore read null). Now the
+   route writes the number as it is; `patch` accepts any number for `deliveredAt` / `openedAt`; the
+   mirror keeps it (the nullish rule sees the clock as set; a view or an HTTP response serialises it
+   as null, as before); the column stores NULL; the export and the backup shape carry null; a
+   transaction snapshot keeps the in-memory number (a rolled-back unit restores it); a restart reads
+   null. Nothing else is kept, nothing leaks into a stored shape, nothing survives a restart. Create
+   and the import still refuse a non-finite value (JSON never carries one); finite clocks, the
+   `0`/`null` fallback and the existing-clock rule are unchanged. Proven through the real route
+   (one batch, a later request, an opened sequence, the admin view and the backup export, a
+   restart, an existing finite clock, a failed save followed by a retry) and at the repository.
+
+Everything §9.7 lists as accepted work is kept: the total attempt CHECK, exact finite fractional
+clocks, the first-match lookup, no minted attempt ids, open vocabularies, partial-snapshot
+semantics, no shadow blob, the coupled saves, the acknowledgment unit, the read-only views, the
+copy-only rollback to `0641b2c`, option A without cascade or cleanup, and the documented
+pending-save retry limitation (not redesigned). Verification of the corrected tree is in the handoff
+note and its logs.
 
 ---
 

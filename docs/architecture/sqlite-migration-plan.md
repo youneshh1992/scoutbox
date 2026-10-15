@@ -1352,7 +1352,10 @@ performance, existing tests, what this plan is not).
 > deletion keeps its dispatch rows exactly as before; orphans imported and counted, never refused),
 > the sweep's rows, attempts and status changes staged into the same save as the outbox row, the
 > injection counter and the ops/webhook rows it writes, the acknowledgment joined in the
-> notification's unit, and a copy-only rollback proven on the actual `0641b2c` build. Not
+> notification's unit, and a copy-only rollback proven on the actual `0641b2c` build; the three
+> findings of the independent review of `26d492b` (patch refusals outside the participant boundary,
+> nested unknown data shared by reference, the legacy non-finite callback clock's precedence) are
+> corrected in a correction commit, review §9.8. Not
 > production or deployment approval; retention stays an open decision.
 > **Status (S7c–S7d): not started.** The evidence-based review is
 > [`s7-readiness-review.md`](./s7-readiness-review.md);
