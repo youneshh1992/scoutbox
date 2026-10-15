@@ -100,9 +100,11 @@ and design changes the Founder explicitly requests.
   copy-only rollback is `scripts/oneTimeCodesRollback.mjs` (outstanding codes
   invalidated and counted) and the S5 tool refuses a file carrying 0008. The
   guardian e-mail code stays plain. **Notifications and category notification
-  preferences are live since S7a** (corrected after its first independent
-  review, pending independent acceptance; `repositories/notifications.mjs`,
-  migration `0009_notifications`):
+  preferences are live since S7a** (independently accepted at commit
+  `0641b2c600cd1f082436b4b24dbb052b98ee00d7` for the bounded migration
+  milestone — not production approval; `repositories/notifications.mjs`,
+  migration `0009_notifications`; `docs/architecture/s7-readiness-review.md`
+  §8.6):
   `db.notifications` / `db.notificationPrefs` are read-only views over the
   repository's in-memory mirror of the three tables; the ONLY writers are
   `notifications.create` / `coalesce` / `markRead` / `ack` / `deleteForAudience`

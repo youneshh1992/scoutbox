@@ -12,13 +12,16 @@ migration identifier is assigned, and nothing was run against real data. Paths a
 are those of `2d7ddeb`. The plan is [`sqlite-migration-plan.md`](./sqlite-migration-plan.md)
 §S7, whose assumptions this review corrects (§2, §6).
 
-**Status: S7a corrected, pending independent acceptance** (three local commits on
-`feat/sqlite-schema` on top of `812e13b`: the implementation `ba6956d`, the correction `7655bae` of
-the four findings its first independent review raised, and the correction of the two participant-
-contract defects and the replay-coverage gap the second review raised; what was built, the four
-compatibility corrections it honours and the one deliberate reading it records are in §8.3, the
-corrections in §8.4 and §8.5).
-**S7b–S7d not started.** §§0–8.2
+**Status: S7a independently ACCEPTED for the bounded migration milestone at commit
+`0641b2c600cd1f082436b4b24dbb052b98ee00d7`** (15 October 2026; the acceptance record, its validation
+and its limits are in §8.6; it is not production or deployment approval and not acceptance of any
+later stage). Three local commits on `feat/sqlite-schema` on top of `812e13b` make up S7a: the
+implementation `ba6956d`, the correction `7655bae` of the four findings its first independent review
+raised (§8.4), and `0641b2c`, the correction of the two participant-contract defects and the
+replay-coverage gap the second review raised (§8.5); §8.4 and §8.5 are kept as the dated history of
+those rounds, not as current status. What was built, the four compatibility corrections it honours
+and the one deliberate reading it records are in §8.3. **S7b: design amendment prepared (§9), not
+implemented, not authorised for cutover. S7c–S7d not started.** §§0–8.2
 are the review as written at `2d7ddeb`, kept as the record of the reasoning; where the
 implementation corrected a proposal (§3.2 coupled writes, §8.2 "transaction of its own"), the
 correction is marked in place. The exact blockers of the remaining sub-steps are in §8. Nothing
@@ -580,7 +583,9 @@ and nothing it would have to reinterpret:
   `(clientMsgId, sender.kind, sender.id)`; two dispatches with one `providerMessageId`.
 - **Orphan references**: a `dispatch.notificationId` naming no notification (orphans exist
   today, §1.5 — the dry run lists them; the resolution is a data fix with a written record, or an
-  approved rule to drop them, decided before the cutover, not by the migration); a channel
+  approved rule to drop them, decided before the cutover, not by the migration) — **superseded for
+  dispatches by §9 (15 October 2026): ordinary deletion creates these rows legitimately, so the
+  S7b import counts them and never refuses them**; a channel
   whose `requestId` names no request in the file (S7d), whose `playerId` names no player row, or
   whose `guardianId` names no guardian row while `counterparty === 'guardian'`.
 - **Invalid audiences / identities**: an `audience.kind` or `sender.kind` outside
@@ -607,8 +612,9 @@ it; the next boot refuses the same way until the data is fixed. Nothing is coerc
 
 Every snapshot write (restore, persistence suites, a tool) validates the collection entry by
 entry in the accepted shapes, then checks the **final state** of the write (S6a precedent): every
-`dispatch.notification_id` resolves, every S7d `channel.request_id` resolves to a request in the
-same snapshot, every `message.channel_id` resolves. A failure rolls the whole save back with
+`dispatch_attempt` belongs to its dispatch (the `dispatch.notification_id` check first written here
+is withdrawn by §9: no foreign key, orphans are legitimate), every S7d `channel.request_id`
+resolves to a request in the same snapshot, every `message.channel_id` resolves. A failure rolls the whole save back with
 `saveSeq` unchanged. Boot after a crash mid-migration finds either the pre-cutover file (no
 record, blobs intact) or the post-cutover file (record, tables, blob rows gone) — never a mixture,
 because the import is one transaction; the restart-safety tests of 0007/0008 (SIGKILL between
@@ -751,7 +757,7 @@ with the ledger and notification sizes stated. The harness is not changed by thi
 | Work | Class | Blocker or need |
 |---|---|---|
 | **S7a** `notifications` + `notification_prefs` + `notification_pref_categories` | **ready technical work** | none under current decisions (no FK, one writer, no S4b/S6/S8 dependency); the `category` CHECK must equal `CATEGORIES`; orphan-dispatch findings are listed, not resolved, by S7a |
-| **S7b** `dispatches` + `dispatch_attempts` | ready after S7a | `notification_id → notifications`; orphan rows need a resolution record before cutover (§5.3); whether dispatches cascade with notifications is a policy question (§4.3 a) |
+| **S7b** `dispatches` + `dispatch_attempts` | ready after S7a; **design amended in §9 (15 October 2026)** | as first written: `notification_id → notifications`; orphan rows need a resolution record before cutover (§5.3); whether dispatches cascade with notifications is a policy question (§4.3 a). **Superseded by §9:** `notification_id` is a plain reference (no FK, no cascade), orphan rows are imported and counted, today's deletion is unchanged; the cascade question stays open as policy (§9.6) and does not block S7b |
 | **S7c** `outbox`, `push_log` | ready technical work | the two-shape unification (§1.6); the six plain-text code call sites are an **owner decision** (cleanse, mask like S6a, or carry as is) — S7c carries rows as they are unless told otherwise |
 | **S7c** `push_tokens` storage move | ready technical work | — |
 | **S7c** push-token audience re-keying (staff pushes) | needs a **product/behaviour decision** | which identity a staff push targets; what to do with existing `org`-kind rows; keep it out of the storage move (§6.2) |
@@ -809,7 +815,7 @@ If S7a is not wanted first, there is **no** channel/message sub-step that is ind
 current decisions: S7d is blocked by the `recruitment_requests` reference until the §2.3
 transitional design is approved or S8a ships, and by the message-retention question.
 
-### 8.3 S7a as implemented — **corrected (§8.4), pending independent acceptance**
+### 8.3 S7a as implemented (`ba6956d`, 14 October 2026; corrected in §8.4–§8.5; **accepted at `0641b2c`, §8.6**)
 
 Built on `812e13b` after the S7a review accepted the §8.2 recommendation subject to four
 compatibility corrections, which an unchanged probe script (`s7a-compatibility-probes.mjs`, exit
@@ -908,7 +914,7 @@ blobs in `seq` order; nothing after the cutover is lost. Proven by booting the c
 preferences (the stored mandatory false forced on there too), and that build still writes to it;
 the S6a tool refuses a 0009 file; the real migration re-upgrades the copy to the same rows.
 
-### 8.4 The correction round — review of `ba6956d` (four findings), **corrected, pending independent acceptance**
+### 8.4 The first correction round — review of `ba6956d` (four findings), corrected in `7655bae` (14 October 2026; history — the current status is §8.6)
 
 The independent review of `ba6956d` did not accept S7a and supplied a reproduction script
 (`review-ba6956d-reproductions.mjs`, run unchanged: exit 1 with three REPRODUCED on the starting
@@ -973,7 +979,7 @@ joins a unit, which the correction below requires.
    a fresh directory with no link back into the checkout, installs dependencies there and runs
    both mandatory gates from the copy, recording their exit codes in the package.
 
-### 8.5 The second correction round — review of `7655bae` (two participant-contract defects, one coverage gap), **corrected, pending independent acceptance**
+### 8.5 The second correction round — review of `7655bae` (two participant-contract defects, one coverage gap), corrected in `0641b2c` (14 October 2026; history — the current status is §8.6)
 
 The second independent review confirmed the four §8.4 corrections (its unchanged first script:
 exit 0, three CORRECT; the Player gate ran from the package) and supplied a second script,
@@ -1012,6 +1018,301 @@ before any source change; no existing assertion was weakened.
    proves that a reconnect from that id replays no entry for the notification whose save failed,
    then that the same reconnect replays exactly the committed notification after the retry. No
    replay runtime defect was found; this is a coverage and reporting correction.
+
+### 8.6 Independent acceptance of S7a — `0641b2c600cd1f082436b4b24dbb052b98ee00d7` (15 October 2026)
+
+**Decision of the independent review:** *accepted for the bounded S7a migration milestone at
+`0641b2c`; no remaining blocking finding.* Not production or deployment approval; not acceptance of
+later stages. The reviewed package was `scoutbox-s7a-handoff-0641b2c.zip`, SHA-256
+`dad5275e1ad4d9d361ea67a4677a41ab1e0330ab68fbeeefd1787c807490b9d4` (archive integrity passed, all
+510 manifest entries matched, both packaged reviewer scripts byte-identical to the reviewer's
+originals, exactly the six declared files changed from `7655bae`, no Player source changed). The
+archive does not independently establish the checkout's Git ancestry or clean status; those are
+reported provenance.
+
+**What the review verified** (its own runs, real Node v24.19.0, dependencies installed offline from
+the supplied lockfiles with lifecycle scripts disabled, from the extracted package):
+
+- `review-ba6956d-reproductions.mjs` and `review-7655bae-reproductions.mjs`, both unchanged: exit 0,
+  three CORRECT each (owned-transaction mirror rollback and retry; server effects waiting for the
+  carrying save; own unknown JSON keys preserved; the default joined effect delivered only after a
+  successful unit and never after a rollback; a caught registration refusal aborting its unit).
+- Backend `npm test`: a first attempt exited 1 at `testWriterAtomicity` server start-up with
+  `EADDRINUSE` on a local port — a bind failure before that suite's assertions, retained as an
+  unsuccessful attempt, not counted; the complete unchanged-source rerun exited 0, 21 suites,
+  304 reported checks/tests. `SCOUTBOX_PRE_S7A_SERVER` pointed at the accepted `2d7ddeb` server
+  (the `812e13b` handoff identifies its server source as unchanged from that commit): the rollback
+  copy booted, feeds and preferences matched, and the old build accepted new writes.
+- Player `npm test -- --runInBand`: exit 0, 4 suites, 41 tests.
+- The real older-Node runtime probes were explicitly skipped (`SCOUTBOX_TEST_NODE_BINS` unset);
+  browser tests, the demo rebuild and the wider E2E battery were not independently rerun.
+
+**Limits the acceptance carries forward** (current contract, not history): the effects queue is
+process memory — a crash between COMMIT and delivery can lose a push or frame, and exactly-once
+external delivery is not claimed; a caller-owned raw transaction's rollback still requires the
+explicit `reload()`; registering the save hook with the store is the caller's responsibility, and
+taking a hook alone cannot prove the store registered it (the repository refuses, inside the joined
+boundary, until the hook was taken).
+
+**Boundary the review set for the next stage:** S7b (dispatch records and their attempts). The
+existing proposal (SQL03 `dispatches.notification_id … ON DELETE CASCADE`, §5.3 "orphan dispatches
+must be resolved before migration") conflicts with the ordinary deletion behaviour of the current
+build, which removes a player's notifications and retains their dispatch rows; that inconsistency
+is reconciled by the design amendment in §9 before any implementation. The amendment authorises
+no retention rule, deletion clean-up, foreign-key behaviour change or storage cutover.
+
+---
+
+## 9. S7b design amendment — `dispatches` and `dispatch_attempts` (prepared 15 October 2026 on `0641b2c`; **not implemented, cutover not authorised**)
+
+This section is the implementation-ready amendment for S7b. It reads the code as it is at
+`0641b2c` (functions named, not historical line numbers), rests on a synthetic probe whose results
+are recorded in §9.5 (`scoutbox-server/scripts/probeS7bDispatches.mjs`, outside `npm test` and
+outside every runtime path), and **supersedes** the following earlier text where they conflict:
+SQL03's `dispatches` DDL (`notification_id … REFERENCES notifications(id) ON DELETE CASCADE`, the
+`audience_kind` / `channel` / `provider` / `status` / `fail_reason` CHECKs, the minted
+`dispatch_attempts.id`, the `ok NOT NULL DEFAULT 0` on note rows, the partial UNIQUE on
+`provider_message_id`), §5.3's "orphan references … resolved before the cutover" for dispatches,
+§5.4's "every `dispatch.notification_id` resolves", and §4.3(a)/§8 table row "S7b … orphan rows
+need a resolution record before cutover". Everything else in §§1–8 about dispatches stands. The
+SQL03 file itself is rewritten only when S7b is implemented (the S7a precedent: §8.3 correction 3).
+
+### 9.1 The lifecycle today, reproduced, and the storage designs compared
+
+**Reproduced on synthetic fixtures through the real routes** (probe §9.5, section "deletion"):
+Maria (Eastport) opens a contact thread with the adult seed player and posts a message; the sweep
+creates two dispatch rows per player-audience notification — `in_app` `delivered` (`to` =
+`"player:<id>"`) and `email` `skipped` (`skipReason` "no email on record", `to` null). The player
+deletes the account (`DELETE /player/account` → `deletePlayerData`, one unit of work). Result: the
+2 player-audience notification rows are gone from the table; **all 4 dispatch rows that referenced
+them remain**, statuses unchanged (18 dispatch rows before, 18 after); the next sweep processes 0
+rows and leaves them byte-identical; `GET /admin/delivery` still lists them. Guardian-audience
+notifications about the minor and their rows are untouched. This is the ordinary behaviour of the
+current build (`deletePlayerData` never touches `db.dispatches`; §4.2), and every reader of a
+dispatch's notification is already null-safe (`notifications.byId(d.notificationId)?.…` in the sweep's
+quiet re-check, send and read-mirroring steps; `ackHandler` starts from a notification).
+
+| | (A) behaviour-preserving reference — **recommended** | (B) the SQL03 proposal: `REFERENCES … ON DELETE CASCADE` | (C) `REFERENCES … ON DELETE RESTRICT` |
+|---|---|---|---|
+| `notification_id` | `TEXT NOT NULL`, the id as stored, **no foreign key**; an ordinary index | enforced parent | enforced parent |
+| today's account deletion | unchanged: notification rows go, dispatch rows stay (as the probe shows) | **changes behaviour**: the dispatch rows go with the notification — a retention/deletion decision (§4.3(a), §4.4) the storage move must not take | **blocks** today's deletion: `notifications.deleteForAudience` would fail on a referenced row until dispatches are deleted first — a behaviour change in the other direction |
+| import of an existing file | orphan references are **counted** in the cutover record and the dry run, never a refusal | orphan references **refuse** the whole migration until each is deleted, re-parented or rewritten — a data decision per row, before any cutover, for rows the application created legitimately | same refusal |
+| copy-only rollback | writes every row back; nothing lost | rows cascaded away since the cutover cannot be written back — the old build would show fewer delivery records than before the upgrade | writes every row back |
+| S4b interaction | none (no FK) | a `players(id)` decision later could make the cascade chain inert or surprising | none |
+| what it decides | nothing: a technical reference, polymorphic like the notification's audience | a retention rule by schema | a deletion-order rule by schema |
+
+**Recommendation: (A).** It is the smallest design that stores exactly what the application writes
+and reads, keeps today's deletion and rollback intact, and leaves the retention question where §4.4
+left it. **No approval is needed before implementing (A)** beyond the review of this design: it
+encodes no policy. The one product question remains open and is stated for the Founder in §9.6; if
+it is ever decided as "delete delivery records with the person", the implementation is an explicit
+act inside the deletion unit (`dispatches.deleteForNotifications(ids)` next to
+`notifications.deleteForAudience`, the S6a/S7a pattern), never a CASCADE. This preparation chooses
+no retention policy, adds no cascade, blocks no deletion and cleanses no row.
+
+### 9.2 Writers, readers and the coupled work (current code; m13/delivery.mjs unless named)
+
+- **`dispatchSweep()`** — the only creator. Step 1 reads `notifications.view` (the S7a mirror),
+  `db.deliveryCentreSince` (a notification older than it gets external rows `skipped` "predates
+  delivery centre"), `destinationsFor()` (reads `findPlayer`/`isAdult`, `db.guardians`, `db.users`
+  with `deliveryPrefs.channels.email`), `quietHoldUntil()` (the notification's `deferredPush`), and
+  pushes one row per destination. Step 2, for due `queued`/`retrying`/`held_quiet_hours` rows:
+  a `held` row with no attempts yet records the quiet re-check **note** row and a new `nextAt`; then
+  `fakeSend()` — which decrements **`db.deliveryFailInject[channel]`** and on success pushes an
+  **`db.outbox`** row — a **send** attempt row, then `accepted` + `providerMessageId`, or after
+  `MAX_ATTEMPTS` (4) send rows `failed` + `failedAt` + `failReason` + an **`db.opsEvents`**
+  `delivery_failed` row + `ctx.emitWebhook('delivery.failed')` (which pushes **`db.webhookDeliveries`**
+  rows for the org's active endpoints and calls `persist()`), or `retrying` with `nextAt` from
+  `RETRY_MS[sendCount]`. Step 3 mirrors an in-app read to `openedAt`/`opened`. The pass ends with
+  **`persistNow()`** when anything changed; it runs at registration (boot) and on the 60 s interval
+  (400 ms under `M13_FAST_RETRY`) together with `webhookSweep()`. **Under S7b every dispatch and
+  attempt write of a pass must commit in the same transaction as the outbox row, the fail-inject
+  decrement, the ops event and the webhook delivery row of that pass** — they are coupled state, not
+  effects. The staged write mode of S7a gives exactly that: the repository's queued statements run
+  inside the `persistNow()` save that carries those blobs. The sweep is synchronous and the provider
+  is in-process; a real asynchronous provider would have to be called outside any transaction and its
+  answer recorded inside the next write (§3.3), which the current structure already respects.
+- **`notifyAction()`** — writes through `notify()` (S7a); no dispatch write.
+- **`ackHandler()`** — `unit(() => { notifications.ack(…); for each dispatch of the notification:
+  actionedAt = at; status → 'actioned' only if RANK[status] < RANK.actioned })`. Under S7b the loop
+  becomes `dispatches.markActioned(notificationId, at)` joined inside the same unit: the
+  notification contract and the dispatch rows commit together or not at all (already proven for the
+  blob by `testNotificationsServer.mjs` "acknowledgment"; the probe confirms the terminal `skipped`
+  row keeps its status and gains `actionedAt`).
+- **`POST /callbacks/delivery`** — HMAC and 5-minute window; ≤ 100 events; a `callbackId` already in
+  **`db.deliveryCallbacksSeen`** counts as a duplicate (the array is capped at 5 000 by splicing
+  1 000); an unknown `providerMessageId` is still remembered as seen and applies nothing (probe:
+  seen grew by 4 for 5 posts, one of them a duplicate); `delivered` sets `deliveredAt ??=` and raises
+  to `delivered`; `opened` sets `openedAt ??=`, `deliveredAt ??= openedAt` and raises to `opened`;
+  `bounced`/`failed` records `failReason` (sliced to 120) and moves to `failed` only from
+  `RANK ≤ accepted`; ends with `persistNow()`. Lookup is `find` by `providerMessageId` — the FIRST
+  matching row in insertion order. Under S7b: `dispatches.applyCallback()` staged, with
+  `deliveryCallbacksSeen` staying a blob in the same save; the lookup `ORDER BY seq LIMIT 1`.
+- **Views** — `GET /org/delivery` (rows whose `audience` is an `org_user` of the org, newest first,
+  paginated), `GET /admin/delivery` (counts by status, `awaitingAck` from the notifications
+  repository, the last 100 rows reversed), `GET /admin/metrics` in m13/enterprise.mjs
+  (`dispatchBacklog` = rows `queued`/`retrying`). `POST /admin/delivery/inject-failure` writes the
+  blob counter only; `POST /admin/delivery/sweep` runs a pass.
+- **Exports, backup, restore** — the enterprise backup spreads `db` and names the table-backed
+  collections explicitly (`notifications: notifications.exportRows()` …); S7b adds
+  `dispatches: dispatches.exportRows()` (attempts re-nested, insertion order). A restore and the
+  persistence tools write the collection through the snapshot dispatcher (`writeTableBacked`), as
+  S7a does; the `storeContract.mjs` entry stays because `migrateM13` still names the container
+  (the data layer replaces it with the read-only view at attach, the S7a pattern).
+- **Deletion** — `deletePlayerData` does not touch dispatches; under (A) unchanged.
+- **Start-up** — `registerDelivery` creates `db.deliveryFailInject` and `db.deliveryCentreSince` if
+  absent (both stay blobs), then runs the first sweep; the repository attaches before m13 registers,
+  so the boot sweep writes through it.
+- **Observed, not changed by S7b (pre-existing behaviour to label, not to fix here):** (i) a
+  `queued`/`retrying` external row whose notification was deleted would be sent with an empty text
+  (`n?.text ?? ''`) — not observed in the probe (the deleted adult had no address), visible by
+  reading the send step; (ii) the sweep stores a provider error in `failReason` untruncated while
+  the callback path slices to 120; (iii) a notification with the `system` audience (the moderation
+  report path) gets an `in_app` dispatch whose `audience.kind` is `system`.
+
+### 9.3 The accepted shape and the exact mapping
+
+The dispatch literal has had **one shape since M13** (`git log -S` on the literal: created in
+`e865531`, unchanged since): always all 18 keys, with `null` — never absent — for `to`,
+`skipReason`, `providerMessageId`, `actionDeadline`, `deliveredAt`, `openedAt`, `actionedAt`,
+`failedAt`, `failReason` when unset (probe: one key set over 18 rows). Attempt rows have **two
+shapes**, also unchanged: a **send** row `{at, ok, error}` (`error` null when `ok`) and a **quiet
+re-check note** row `{at, note}` (no `ok`, no `error`; at most one, always before the first send row
+when present — probe: `[note, send:fail, send:fail, send:ok]`). The retry counter is the number of
+send rows (`attempts.filter(a => !a.note)`), so note rows must never count.
+
+| Blob field | Column | Type / rule | Notes |
+|---|---|---|---|
+| (array position) | `seq INTEGER PRIMARY KEY` | assigned at insert, kept by backup/restore/rollback | insertion order is what `recent`, the org view and the callback `find` depend on; `createdAt` is not an ordering key (same millisecond rows) |
+| `id` | `id TEXT NOT NULL UNIQUE` | `dsp-*` (the prefix is shared with m16 disputes; ids are globally unique via the counter) | |
+| `notificationId` | `notification_id TEXT NOT NULL` | **no FK** (§9.1); index | orphans kept and counted |
+| `audience.kind`, `audience.id` | `audience_kind`, `audience_id TEXT NOT NULL` | **no CHECK** (a `system` audience exists, §9.2) | an audience with any other field refuses the entry (S7a rule) |
+| `channel`, `provider` | `TEXT NOT NULL` | **no CHECK**: non-empty strings; vocabulary (`in_app`/`email`, `in_app`/`local-fake`) lives in code | |
+| `to` | `to_address TEXT` | nullable; personal data (an e-mail address, or `"kind:id"`) | never in a diagnostic |
+| `status` | `status TEXT NOT NULL` | **no CHECK**: the nine values are code vocabulary; a stored value outside `RANK` is inert today and must stay so | |
+| `skipReason`, `providerMessageId`, `failReason` | `TEXT` nullable | **no length CHECK** on `fail_reason` (the sweep does not truncate) | `providerMessageId`: ordinary index, **no UNIQUE** (random, not guaranteed by code) |
+| `nextAt`, `createdAt` | `INTEGER NOT NULL` | | |
+| `actionDeadline`, `deliveredAt`, `openedAt`, `actionedAt`, `failedAt` | `INTEGER` nullable | | `actionDeadline` is a copy of the notification's deadline at creation (probe) |
+| unknown top-level field | `extra_json` (object CHECK) | own-property copy, round-trips (S7a finding 3) | |
+| `attempts[i]` | `dispatch_attempts (dispatch_seq INTEGER NOT NULL REFERENCES dispatches(seq) ON DELETE CASCADE, seq INTEGER NOT NULL, kind TEXT NOT NULL, attempted_at INTEGER NOT NULL, ok INTEGER, error TEXT, note TEXT, PRIMARY KEY (dispatch_seq, seq))` | `seq` = array index; `kind` = `'quiet_recheck'` iff the row has `note`, else `'send'`; **no minted id** (the SQL03 `dat-<n>` would consume the global counter); `ok` **nullable**: NULL on a note row, 0/1 on a send row; `CHECK ((kind='send' AND ok IN (0,1) AND note IS NULL) OR (kind='quiet_recheck' AND ok IS NULL AND error IS NULL AND note IS NOT NULL))` | written back as `{at, note}` or `{at, ok, error}` exactly (probe: 8 attempt rows round-trip byte-for-byte) |
+
+The child FK on `dispatch_seq` is internal to the pair of tables (an attempt is a part of its
+dispatch, never shared) and is the only foreign key S7b adds. **Constraints the proposal had that
+current code does not guarantee — therefore not added:** UNIQUE `provider_message_id`; one row per
+`(notification_id, channel)` (a restored snapshot may hold duplicates; current code tolerates them);
+the four CHECK lists; `fail_reason ≤ 120`; `ok NOT NULL`. **Refusals (whole write, text-free, entry
+index + field):** a non-object entry, a missing/empty `id`, a duplicate `id`, a non-string
+`notificationId`, a malformed audience, a non-string `channel`/`provider`/`status`, a non-integer
+`nextAt`/`createdAt`, a non-integer non-null timestamp, a non-string non-null `to`/`skipReason`/
+`providerMessageId`/`failReason`, `attempts` not an array, an attempt row that is not an object,
+has neither or both of `note`/`ok`, a non-integer `at`, a non-boolean `ok`, a non-string non-null
+`error`/`note`, or **any unknown key on an attempt row** (attempt rows have no `extra_json`; the
+only writer is the sweep). Nothing is coerced; no absent-to-null normalisation exists because the
+literal never writes an absent key — an entry missing one of the 18 keys is refused as a shape this
+build never wrote. Minor routing (`guardian_routed` skip), historical suppression (`predates
+delivery centre`) and the `accepted` / `delivered` / `opened` distinctions are values stored as given.
+
+### 9.4 Migration, authority, snapshot outcomes, rollback
+
+- **Identifier:** the next unused is **`0010`** → `0010_dispatches`. The plan's `0010_recruitment`
+  (S8a) is a placeholder and moves to the next free number when S8a is approved, as `0008_safety_audit`
+  did (plan §Migration numbering). Not registered, not implemented by this amendment.
+- **Atomic import** (one transaction, the 0009 pattern): create the two tables and indexes; read the
+  `dispatches` blob; **absent** blob → import nothing, record the cutover; **empty** array → same;
+  **non-array / non-JSON** → refuse; validate every entry (§9.3) collecting problems, refuse the
+  whole step on the first list (`DISPATCHES_IMPORT_BLOCKED`, codes/ids/counts only); insert rows in
+  array order (`seq`) and attempts by index; write `meta.dispatchesCutover` = counts
+  (`imported`, `attempts`, per-status counts, `orphanReferences` — rows whose `notification_id` is
+  absent from `notifications` at import time, information only); delete the blob row. A refusal
+  leaves the blob, the file and `saveSeq` untouched and the previous build still boots it.
+- **Authority:** `0010_dispatches` in `data_migrations` — never the tables' existence or row counts.
+  A stale in-memory `db.dispatches` array at attach (the seed's container, `migrateM13`'s `??= []`,
+  a restored pre-S7b backup's blob just imported) is dropped and its blob row deleted; a non-empty
+  array not just imported is reported as a count (the S7a rule).
+- **Snapshot writes** (restore, tools, the persistence suites): the dispatcher validates entries,
+  rewrites both tables in array order inside the caller's transaction, and refuses the whole write on
+  the first problem; **final-state validation** checks only what the schema enforces — every attempt
+  belongs to its dispatch (trivially, nested) — and does **not** require `notification_id` to resolve
+  (§9.1 (A)). A backup from any build restores through 0010 with orders intact.
+- **Copy-only rollback to the accepted `0641b2c` build:** `repositories/dispatchesRollback.mjs` +
+  `scripts/dispatchesRollback.mjs` (`npm run rollback:dispatches -- <data-dir> <fresh-empty-dir>`):
+  open read-only, `VACUUM INTO` a copy, write every dispatch back into the `dispatches` blob in `seq`
+  order with `attempts` re-nested in `seq` order (note rows as `{at, note}`, send rows as
+  `{at, ok, error}`, extras spread back), drop the two tables, remove the `0010` record and its meta
+  key, advance `saveSeq`, foreign-key check, VACUUM, revalidate; **every post-cutover dispatch,
+  attempt and unrelated record is retained**. Refusals, no output: `LATER_SCHEMA` (any
+  `data_migrations` id the tool does not know — the S7a tool already refuses a `0010_*` file this way,
+  `testNotifications.mjs` proves it with `0010_future_step`), `NOT_CUT_OVER`, `OUTPUT_NOT_EMPTY`,
+  `UNEXPECTED_SCHEMA`. **Old-build proof:** `SCOUTBOX_PRE_S7B_SERVER` pointing at an `0641b2c`
+  checkout boots the copy (its log carries no `0010_dispatches`), `GET /admin/delivery` and the org
+  view return the same rows, statuses and attempt arrays, and its sweep keeps writing to the blob;
+  the S7a tool then rolls the copy further back to `812e13b` if needed.
+
+### 9.5 Synthetic compatibility probe — results (`scripts/probeS7bDispatches.mjs`, 15 October 2026, Node v22.22.2; the JSON is in the handoff package)
+
+| Observation | Result on `0641b2c` | Classification |
+|---|---|---|
+| Ordinary deletion | 2 player-audience notifications removed, their 4 dispatch rows (2 `in_app` `delivered` with `to` `"player:<id>"`, 2 `email` `skipped`) retained unchanged; next sweep processes 0 and alters nothing; `/admin/delivery` lists them; guardian rows untouched | current behaviour, **preserved by (A)**; the retention question is policy (§9.6) |
+| Retry and note ordering | a deferred-push guardian notice: `held_quiet_hours` → attempts `[note, send:fail, send:fail, send:ok]`, status `accepted`; 3 send attempts counted for 4 rows | current behaviour, mapped exactly (`kind`, `seq`) |
+| Exhausted retries | 4 send rows → `failed`, `failedAt` set, `failReason` 25 chars untruncated, one `opsEvents` `delivery_failed`, 0 webhook rows (no endpoint) | current behaviour; the untruncated `failReason` is a pre-existing inconsistency, stored as is |
+| Callbacks | `opened` first → `deliveredAt = openedAt`; duplicate `callbackId` → `duplicates: 1`, nothing applied; late `bounced` → `failReason` recorded, status stays `opened`, `failedAt` null; later `delivered` → no regression; unknown provider id → applied 0 but remembered as seen (seen +4 for 5 posts) | current behaviour, preserved (RANK semantics, `??=` timestamps, seen-before-lookup) |
+| Acknowledgment coupling | before `[in_app delivered, email skipped]` → after `[in_app actioned, email skipped]`, both `actionedAt` = the notification's `ackedAt`; `actionDeadline` equals the notification's deadline | current behaviour; S7b joins `markActioned` in the same unit |
+| Mapping round trip | 18 dispatch rows, 8 attempt rows: blob → proposed rows → blob **byte-identical**; one dispatch key set; attempt key sets `{at,note}` and `{at,ok,error}`; no unknown keys | the §9.3 mapping is lossless on observed data |
+| Proposed constraints vs observed data | FK NOT NULL to notifications: **4 orphan rows → unsatisfiable** on this ordinary file; UNIQUE `provider_message_id`: satisfied here, not guaranteed by code; one row per (notification, channel): satisfied here, not guaranteed; `audience_kind` CHECK: satisfied here, refused for the `system` audience path; status/fail_reason/attempt-shape CHECKs: satisfied here | the FK and the CHECKs are dropped by this amendment; the shape rule on attempt rows is kept |
+
+### 9.6 Implementation checklist, files, tests, acceptance
+
+**Files (expected):** new `repositories/dispatches.mjs` (the three concerns of S7a's repository:
+validators, table access `DISPATCHES_TABLE` for the snapshot dispatcher, the staged/immediate
+repository with mirror, views `db.dispatches`, methods `createForNotification`, `recordAttempt`,
+`transition`, `markActioned(notificationId, at)`, `applyCallback`, `byProviderMessageId`, `due(now)`,
+`forAudiences`, `countsByStatus`, `recent(n)`, `backlogCount`, `exportRows`, `saveHook`,
+`afterDurable` is **not** needed — the sweep's external effects today are blob rows, not deliveries);
+new `repositories/migrations/0010_dispatches.mjs` (REGISTERED at implementation);
+new `repositories/dispatchesRollback.mjs` + `scripts/dispatchesRollback.mjs`; `repositories/index.mjs`
+(`DATA_MIGRATIONS`, `TABLE_BACKED`, snapshot dispatch, attach, `runEffect`, report domain);
+`m13/delivery.mjs` (sweep, ack, callbacks, views through the repository; `RANK` semantics
+unchanged); `m13/enterprise.mjs` (explicit backup export, metrics backlog); `storeContract.mjs`
+(reason); `sql/03` (rewritten per §9.3) and `scripts/testSchemaDdl.mjs`; `package.json` (`npm test`
+chain, `rollback:dispatches`); docs (`sqlite-schema.md`, `sqlite-migration-plan.md`, `OPERATIONS.md`
+operator section + cutover procedure, `CLAUDE.md`); older suites' expected lists for `0010` and
+rollback chains starting with the S7b tool (as S7a did for `0009`).
+
+**Failing-first tests** (written and recorded failing on unchanged `0641b2c` before any source change):
+`scripts/testDispatches.mjs` — migration shapes and refusals (the 18-key literal, both attempt shapes,
+an own `"__proto__"` key round-trip, an unknown attempt key refused, orphan references imported and
+counted, absent/empty/non-array blob outcomes, `saveSeq` and blob unchanged on refusal); repository
+operations in immediate and staged mode (owned-transaction failure restores memory, joined unit
+caught failure poisons the unit, hook registration inside the join, real COMMIT failure, retry);
+snapshot replace/final-state; copy-only rollback (every row back, `LATER_SCHEMA` for a `0011_*`
+id, the S7a tool's `LATER_SCHEMA` on a 0010 file, exit codes, injected COMMIT failure leaves no
+output). `scripts/testDispatchesServer.mjs` — through the real routes: a sweep pass commits its
+dispatch rows, attempts, outbox row, fail-inject decrement and ops event in ONE revision (second
+connection); the retry ladder with the note row and the counter (fixture: probe §9.5 "retry");
+callbacks ordering, duplicates, unknown ids (fixture: probe "callbacks"); the acknowledgment unit
+under `internal:unit.sqlite_commit` (both unchanged, retry lands both, SIGKILL keeps both — the
+existing S7a test extended to the table); **ordinary deletion leaving the orphans exactly as today**
+(fixture: probe "deletion"); a SIGKILL mid-retry and the restart resuming the schedule; backup →
+restore → rollback → re-upgrade with orders intact; the `0641b2c` build booting the rollback copy.
+Both reviewer scripts (`review-ba6956d`, `review-7655bae`) stay unchanged and green; `m13E2E`
+unchanged and green.
+
+**Acceptance criteria:** every behaviour in §9.5 reproduced on the table-backed build with the same
+observable results; no CASCADE, no FK to `notifications`, no new CHECK on vocabulary; orphans
+imported and counted, never refused or rewritten; attempts round-trip byte-for-byte; the sweep's
+coupled blob writes in the same transaction as its rows; the ack unit atomic; copy-only rollback
+proven on the actual `0641b2c` build; both mandatory gates green on the final tree and from a fresh
+extraction; no diagnostic carries a text, an address or a token.
+
+**For the Founder — one open product question, not blocking (A):** today a deleted person's
+delivery records stay (the `in_app` rows carry `"player:<id>"`, the e-mail rows the address of a
+guardian or staff member, the outbox rows the mail text). Keeping them means the delivery audit
+survives the person; deleting them with the notification means the audit loses the record that a
+message was delivered. Consequence of deciding "delete": a new explicit act in the deletion unit
+(dispatches, and separately the S7c outbox rows), a behaviour change with its own tests — not a
+schema cascade. **Recommendation:** keep today's behaviour for S7b and decide the question together
+with the §4.4 retention items (S4b), where the outbox and push log raise the same question.
+S7b remains **prepared, not implemented**, until this design is reviewed.
 
 ---
 

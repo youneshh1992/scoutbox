@@ -25,11 +25,15 @@ bounded code-review conclusion on the packaged server source — not production 
 approval, and the Player app was not part of it;
 [`s6-readiness-review.md`](./s6-readiness-review.md) §10 records what was built, verified and
 accepted), **the rest of S6 not started** (the eight audit tables; they wait for S4b, review §4.1),
-**S7a corrected, pending independent acceptance** (the notification tables, migration
-`0009_notifications`, its copy-only rollback; [`s7-readiness-review.md`](./s7-readiness-review.md)
-§8.3 records what was built and the one deliberate reading it makes, §8.4 the correction of the
-four findings its first independent review raised; the Player app was not touched),
-**S7b–S7d not started** (their blockers are stated in the review and in §S7)
+**S7a independently accepted at `0641b2c600cd1f082436b4b24dbb052b98ee00d7`** (15 October 2026; a
+bounded code-review conclusion on the packaged source — both reviewer scripts, the backend and
+Player gates and the pre-S7a rollback boot verified by the reviewer on real Node v24.19.0 — not
+production or deployment approval; the notification tables, migration `0009_notifications`, its
+copy-only rollback; [`s7-readiness-review.md`](./s7-readiness-review.md) §8.3 records what was
+built, §8.4–§8.5 the two correction rounds as dated history, §8.6 the acceptance and its limits:
+no exactly-once external delivery, the explicit raw-transaction `reload()`, hook registration as the
+caller's responsibility; the Player app was not touched), **S7b design amendment prepared, not
+implemented** (review §9; no cutover authorised), **S7c–S7d not started** (their blockers are stated in the review and in §S7)
 — S8–S14 planned. The evidence-based plan of S4 is
 [`s4-readiness-review.md`](./s4-readiness-review.md).
 Migration numbering: `0006` is `0006_media_deletions` (S4a); S5 took **`0007_player_subrecords`**;
@@ -1250,7 +1254,7 @@ performance, existing tests, what this plan is not).
 > `medical` / `programme` update is refused while child rows exist, with boot, backup and rollback
 > refusing an already inconsistent file (`INCONSISTENT_ROWS`); the reviewer's reproduction reports
 > 0 of 3 on the corrected tree (note §6). S4a stays review-accepted at
-> `480afdb`; S4b is not implemented; S6 is not started (S6a has since been implemented, pending independent acceptance; §S6).
+> `480afdb`; S4b is not implemented; S6 is not started (S6a has since been implemented and independently accepted; §S6).
 >
 > **Status (S5): review-accepted at `2178c5b`** (12 October 2026). The independent reviewer
 > verified the handoff archive's SHA-256, re-ran the original `review-132eda2-reproductions.mjs`
@@ -1317,8 +1321,10 @@ performance, existing tests, what this plan is not).
 
 ### S7 — Messaging, notifications, delivery and push
 
-> **Status (S7a): corrected, pending independent acceptance** (14 October 2026; three local
-> commits on `feat/sqlite-schema` on top of `812e13b`): `notifications`, `notification_prefs` and
+> **Status (S7a): independently ACCEPTED at `0641b2c600cd1f082436b4b24dbb052b98ee00d7`** (15 October
+> 2026; three local commits on `feat/sqlite-schema` on top of `812e13b`, the last being the accepted
+> one; review §8.6 holds the acceptance record, its verification on real Node v24.19.0 and its
+> limits — not production or deployment approval): `notifications`, `notification_prefs` and
 > `notification_pref_categories` are live tables since migration **`0009_notifications`**, with
 > the feed's insertion order as a durable key (`seq`), the pre-S7a coalescing scan kept verbatim,
 > the stored mandatory-false preference accepted at storage and forced on by the effective view,
@@ -1329,10 +1335,12 @@ performance, existing tests, what this plan is not).
 > own `"__proto__"` keys and audience extras, the incomplete package) are corrected in §8.4, the
 > second review's two participant-contract defects (an effect registered inside a unit by the
 > default immediate participant, a caught precondition refusal bypassing the unit) and its
-> replay-coverage gap in §8.5. The
-> acceptance to come is a bounded code-review conclusion on the packaged source, not production
-> or deployment approval.
-> **Status (S7b–S7d): not started.** The evidence-based review is
+> replay-coverage gap in §8.5; both rounds are dated history, the acceptance in §8.6 is the current
+> status.
+> **Status (S7b): design amendment prepared, not implemented** (review §9: the deletion-retention
+> reconciliation, the field mapping, the next migration identifier, the synthetic compatibility
+> probe and the implementation checklist; the cutover is not authorised until the design is
+> reviewed). **Status (S7c–S7d): not started.** The evidence-based review is
 > [`s7-readiness-review.md`](./s7-readiness-review.md);
 > the text below is the sequence it derived and replaces the earlier assumptions of this
 > section (recorded there, §0). No further migration identifier is assigned until a sub-step is
@@ -1347,8 +1355,11 @@ performance, existing tests, what this plan is not).
 
 - **Objective.** The nine S7 collections become tables in four sub-steps, each independently
   testable and rolled back copy-only without loss: **S7a** `notifications`,
-  `notification_prefs`, `notification_pref_categories`; **S7b** `dispatches`,
-  `dispatch_attempts` (after S7a); **S7c** `outbox` (two writer shapes unified), `push_log`,
+  `notification_prefs`, `notification_pref_categories` (accepted at `0641b2c`); **S7b** `dispatches`,
+  `dispatch_attempts` (after S7a; design amendment prepared in the review §9: `notification_id` as a
+  plain reference — no foreign key, no cascade, today's deletion and its retained dispatch rows
+  preserved, orphan references counted not refused; the next identifier is `0010`, so the
+  `0010_recruitment` placeholder below moves when S8a is approved); **S7c** `outbox` (two writer shapes unified), `push_log`,
   `push_tokens` (storage move only — the staff-push re-keying, defect 10 of the schema
   document, is a behaviour change needing its own decision); **S7d** `channels`, `messages`,
   `message_attachments` (after the request-reference decision and the retention answer). The

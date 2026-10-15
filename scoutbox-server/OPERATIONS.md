@@ -860,7 +860,7 @@ are unchanged.
    <data-dir> <fresh-empty-dir>`, note the invalidated counts, then start the
    S5 build on the output.
 
-### Notifications and category notification preferences (live since migration `0009`, S7a — corrected, pending independent acceptance; not production-approved)
+### Notifications and category notification preferences (live since migration `0009`, S7a — independently accepted at `0641b2c` for the bounded migration milestone; not production-approved)
 
 The in-app notification feed (`GET /{player,guardian,org}/notifications`,
 `POST …/notifications/read`, `POST …/notifications/:id/ack`) and the category
